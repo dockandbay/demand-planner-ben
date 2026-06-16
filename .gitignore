@@ -1,0 +1,8 @@
+.env
+node_modules
+*.bak
+.vercel
+
+# Raw production-data dump — local re-seed convenience only; never commit business data.
+planner_seed.sql
+*_seed.sql
