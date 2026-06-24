@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dock &amp; Bay — Supplier Portal</title>
+<style>
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#0f172a;background:#f1f5f9;font-size:13px}
+  header.pv-top{background:#0f172a;color:#fff;padding:10px 16px;display:flex;align-items:center;gap:12px}
+  header.pv-top h1{font-size:13px;letter-spacing:.16em;text-transform:uppercase;color:#cbd5e1;margin:0;font-weight:700}
+  header.pv-top .sup{font-size:15px;font-weight:700}
+  header.pv-top .sp{flex:1}
+  .pv-btn{border:0;border-radius:8px;padding:7px 13px;font-weight:600;cursor:pointer;font-size:13px;background:#2563eb;color:#fff}
+  .pv-btn.ghost{background:transparent;color:#cbd5e1;border:1px solid #475569}
+  #pv-wrap{padding:14px 16px;max-width:1100px;margin:0 auto}
+  .pv-login{min-height:100vh;display:flex;align-items:center;justify-content:center}
+  .pv-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 8px 30px rgba(15,23,42,.06);padding:34px 36px;width:380px;max-width:92vw;text-align:center}
+  .pv-card h1{font-size:13px;letter-spacing:.18em;text-transform:uppercase;color:#64748b;margin:0 0 2px}
+  .pv-card h2{font-size:21px;margin:0 0 6px}
+  .pv-card p{color:#64748b;margin:0 0 18px}
+  .pv-card input{width:100%;padding:11px 13px;border:1px solid #e5e7eb;border-radius:9px;font-size:15px;margin-bottom:12px}
+  .pv-card .pv-btn{width:100%}
+  .pv-msg{margin-top:14px;font-size:13px;padding:10px 12px;border-radius:8px}
+  .pv-msg.ok{background:#ecfdf5;color:#15803d;border:1px solid #bbf7d0}
+  .pv-empty{padding:30px;text-align:center;color:#64748b}
+</style>
+</head>
+<body>
+<div id="root"><div class="pv-empty">Loading…</div></div>
+<script>
+(function(){
+  var root=document.getElementById('root');
+  function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  function api(p,b){ return fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(function(r){return r.json();}); }
+  function get(p){ return fetch(p).then(function(r){ if(r.status===401) throw {auth:true}; return r.json(); }); }
+
+  function showLogin(){
+    var expired=/[?&]e=expired/.test(location.search);
+    root.innerHTML='<div class="pv-login"><form class="pv-card" id="lf">'
+      +'<h1>Dock &amp; Bay</h1><h2>Supplier Portal</h2>'
+      +'<p>Enter your email and we\'ll send you a secure sign-in link.</p>'
+      +'<input id="email" type="email" placeholder="you@supplier.com" autocomplete="email" autofocus required>'
+      +'<button class="pv-btn" type="submit">Email me a link</button>'
+      +(expired?'<div class="pv-msg ok">That link expired — request a new one above.</div>':'')
+      +'<div id="lmsg"></div></form></div>';
+    document.getElementById('lf').addEventListener('submit',function(e){ e.preventDefault();
+      var email=document.getElementById('email').value.trim(), btn=e.target.querySelector('button'), m=document.getElementById('lmsg');
+      if(!email)return; btn.disabled=true; btn.textContent='Sending…';
+      api('/api/portal/request-link',{email:email}).then(function(){
+        m.className='pv-msg ok'; m.innerHTML='If <b>'+esc(email)+'</b> is registered, a sign-in link is on its way. Check your inbox (valid 7 days).'; btn.textContent='Link sent';
+      }).catch(function(){ m.className='pv-msg ok'; m.textContent='If that email is registered, a link is on its way.'; btn.disabled=false; btn.textContent='Email me a link'; });
+    });
+  }
+
+  var EP={ lineCost:'/api/portal/line-cost', lineRemove:'/api/portal/line-remove', crossdockQty:'/api/portal/crossdock-qty',
+    addlCost:'/api/portal/additional-cost', addlCostRemove:'/api/portal/additional-cost-remove', note:'/api/portal/note',
+    notesBase:'/api/portal/notes/', noteReadBase:'/api/portal/note-read/', submit:'/api/portal/submit', upload:'/api/portal/upload',
+    labelData:'/api/portal/label-data' };
+
+  function showPortal(me){
+    var sup=(me.suppliers||[]).join(', ')||'Supplier';
+    root.innerHTML='<header class="pv-top"><h1>Dock &amp; Bay</h1><span class="sup">'+esc(sup)+'</span><span class="sp"></span>'
+      +'<button class="pv-btn ghost" id="logout">Sign out</button></header><div id="pv-wrap"><div id="pv"></div></div>';
+    document.getElementById('logout').onclick=function(){ api('/api/portal/logout',{}).then(showLogin); };
+    var s=document.createElement('script'); s.src='/portal-view.js';
+    s.onload=function(){
+      window.DBPortalView.mount({
+        root: document.getElementById('pv'),
+        ep: EP, by: me.email, sid: null, supplierName: sup,
+        getData: function(){ return fetch('/api/portal/bootstrap').then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); return j; }); }
+      });
+    };
+    s.onerror=function(){ document.getElementById('pv').innerHTML='<div class="pv-empty">Could not load the portal view.</div>'; };
+    document.body.appendChild(s);
+  }
+
+  get('/api/portal/me').then(showPortal).catch(function(){ showLogin(); });
+})();
+</script>
+</body>
+</html>

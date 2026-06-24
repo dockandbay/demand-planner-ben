@@ -1,0 +1,2104 @@
+# CHANGES
+
+Version log for the demand planner (bump on every change so we can revert).
+Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
+**Consolidated go-live checklist: see `HANDOVER.md`.**
+
+## v20.301 - DEMAND: version + "last updated" note on the nav-2 row (all pages)
+
+- The **last-updated/version** label (`#ver` — "Data extract last updated … vX") now sits on the
+  DEMAND nav-2 row, right-aligned, alongside the existing "Inputs loaded live…" note (`#st`) — on
+  **all** DEMAND pages (Plan/Targets/Actions/Calendar). Both nodes are parked/restored around the
+  nav rebuild (same pattern as the AI tools) and survive navigating away and back.
+- `#statusbar` (the old separate status line under the filters) is now hidden throughout DEMAND since
+  its contents live on nav-2; restored when leaving DEMAND. Removed the per-view show/hide added in v20.300.
+- Files: `artifact_v16.7.html`. No schema/env changes.
+
+## v20.300 - DEMAND nav-3 matches SUPPLY (full-width, tight) + SUPPLY Actions Type filter
+
+- **DEMAND level-3 nav** now matches SUPPLY's `#config-subs`/`#rep-subnav` exactly: `.d3nav` is
+  full-width (`display:flex`, was `inline-flex`) with a tight top margin. Applies to Targets ▸
+  (Sell Through Scorecard / Set targets) and Actions ▸ (Actions / Insights / Weather).
+  - Targets: removed the "Sell-through & cover" heading; renamed **Scorecard → Sell Through Scorecard**.
+  - Tightened the nav2→nav3 whitespace by hiding the `#statusbar` ("Data extract…" line) on DEMAND
+    sub-views (still shown on Plan, above the grid).
+- **SUPPLY ▸ Actions**: restored the action **Type** filter as a **multi-select dropdown** (default
+  "All types"). Checklist of every action type; composes with the existing Status + Severity filters.
+- Files: `artifact_v16.7.html`, `supply/inject.html`. No schema/env changes.
+
+## v20.299 - SUPPLY ▸ Purchase Orders grid: column reorder + ERP cell tidy
+
+- **Column order**: ERP moved to position 3 (right after the sticky PO column); Shipment moved to right
+  after Status; Deposit ref now follows Shipment. (Header + body rows reordered together; sticky
+  PLAN/PO columns and the 21-col expand-row colspan unchanged.)
+- **ERP cell**: the **⚠ Update ERP** button is softer (amber `#d97706`, was bright red `#dc2626`) and
+  smaller (`font-size:10px;padding:2px 7px`); the **✗ not in ERP** and **⚠ Date ≠ ERP** buttons match
+  the smaller size.
+- **"✓ in sync" now only shows when nothing is off** — it is never rendered alongside a drift button.
+  A date-only mismatch shows just **⚠ Date ≠ ERP** (no "in sync"); qty + date show both buttons.
+- **Removed the ERP-id text** (e.g. "FF-10001") that trailed the badge — it was clutter from the
+  `erp_po_id`/`erp_po` field; dropped from the cell.
+- Files: `supply/inject.html`. No schema/env changes.
+
+## v20.298 - DEMAND ▸ Calendar: typable search-list pickers for Category + SKU list
+
+- Replaced the Calendar's plain Category input (native `<datalist>`) and free-text SKU-list input with
+  **type-to-search popups** modelled on the SUPPLY supplier picker (`.cal-pick` + floating `.calpop`
+  searchable list).
+  - **Category** — single-select: button shows the current value; click → searchable list of `ALL` +
+    the category list; pick saves `category`.
+  - **SKU list** — multi-add **chips**: each SKU is a removable chip (✕); **+ SKU** opens a type-to-search
+    over the SKU master (matches code *or* product name, from `SKUM`); picking appends; the field stays a
+    comma-separated `sku_list`. Already-added SKUs are filtered out of the picker.
+  - Saves on every pick/remove via the existing `/api/trading-calendar/:id` POST; verified add, remove,
+    category change all persist. CSV up/download unchanged (still a comma list).
+- Files: `artifact_v16.7.html`. No schema/env changes.
+- Note: weather table check — there is **no weather table** in the sandbox DB (only `planner` + Supabase
+  system schemas; no `public`/`china`). The WEATHER tab still needs its source located (likely prod or a
+  separate project). See HANDOVER / memory.
+
+## v20.297 - DEMAND: status note moved to nav-2 (right-aligned) + light-blue level-3 nav
+
+- Moved the **"Inputs loaded live from Supabase (forecast_inputs)"** note (`#st`) up onto the DEMAND
+  sub-nav row (nav-2), **right-aligned** — mirroring SUPPLY's right-aligned version label. The status
+  bar below now carries only the data-extract/version line (`#ver`). `#st` is parked back into its
+  `#statusbar` whenever the sub-nav is rebuilt or torn down (the same park/restore the AI tools use),
+  so the live `st()` updates and other views are unaffected; `st()` is null-guarded.
+- **Level-3 navs now use SUPPLY's light-blue style** (new `.d3nav` container + `.d3tab` tabs, mirroring
+  SUPPLY's `#rep-subnav`/`.rtab`: `#f0f6ff` bg, `#dbeafe` border, blue-active). Applied to Targets ▸
+  **Scorecard / Set targets** (was `.dsub`) and Actions ▸ **Actions / Insights / Weather** (was the grey
+  `.dnav` strip). This gives the clean 3-level hierarchy: dark top (1) → grey uppercase strip (2) →
+  light-blue pill bar (3), matching SUPPLY.
+- Files: `artifact_v16.7.html`. No schema/env changes.
+
+## v20.296 - DEMAND sub-nav now matches SUPPLY exactly (uppercase strip)
+
+- The earlier v20.287 `.dnav` restyle used slate Title-case (matching REPORTS' `.view-toggle`), which
+  still didn't read like SUPPLY's section nav. Aligned `.dnav` to SUPPLY's `.stab` precisely:
+  **UPPERCASE** labels (`text-transform`), grey `#888` → black `#1a1a1a` active + underline, weight
+  500/600, padding `6px 13px`. Also matched the `#demand-tabs` container to `#supply-subnav`
+  (`gap:2px`, border `#e0e0e0`, dropped the extra `padding-bottom`).
+- Applies to the DEMAND top sub-nav (PLAN/TARGETS/ACTIONS/CALENDAR) and the level-3 ACTIONS ▸
+  ACTIONS/INSIGHTS/WEATHER nav (same class). The in-content `.dsub` toggles are unchanged.
+- Files: `artifact_v16.7.html`. No schema/env changes.
+
+## v20.295 - Docs: consolidated Diviyaj handover-to-live document
+
+- Added **`HANDOVER.md`** — a single running checklist of everything outstanding to take the build to
+  production (DB migrations, env vars, n8n inbound/outbound pipelines, data prerequisites, infra),
+  consolidating the per-version "Deploy (Diviyaj)" notes that were scattered through this log. The ERP
+  misalignment + inert-upload notes (v20.293–v20.294) are included front-and-centre under §3.
+- Docs only — no app/schema/env changes.
+
+
+## v20.294 - SUPPLY: ERP date-misalignment (completion vs ERP final delivery) + inert upload
+
+- **New ERP mirror table** `planner.erp_purchase_orders` (migration `062_*.sql`): `po`, `erp_po_id`,
+  `final_delivery_date`, `status`, `raw jsonb`, `synced_at`. Populated by n8n from Fulfil/Cin7
+  (header-level). No FK so the sync isn't blocked by missing planner POs. **Diviyaj: run 062 on prod.**
+- **Date misalignment detection**: the PO calc now LEFT JOINs the mirror and exposes `erp_final_delivery`,
+  `erp_po_id`, `erp_present`, and `erp_date_pending` (= our calculated *completed-at-warehouse* date
+  `eff_checkin` differs from the ERP `final_delivery_date`).
+- **PO tab UI**: the **⬆ NEEDS ERP** filter now also catches date drift (`poErpMisaligned` ORs in
+  `erp_date_pending`); each row shows a **⚠ Date ≠ ERP** badge (tooltip: our date vs ERP date); the ERP
+  recon summary adds a "N ⚠ date ≠ ERP" count. Together these are the on-tab notification.
+- **Upload is now inert** (awaiting Diviyaj's n8n webhook): every upload affordance — the PO-grid ERP
+  buttons, the Order-Plan ⬆ Upload, and the SUPPLY ▸ Actions ⬆ Upload to ERP — now shows
+  *"Upload feature not yet banked. To be integrated to Fulfil or Cin7."* and does **nothing else**.
+  Critically it no longer fake-marks lines/dates as synced, so misalignment stays visible until a real
+  ERP sync-back. (The `/api/supply/po/:po/upload` endpoint is left in place for when n8n is wired.)
+- **Deferred (flagged, not silently skipped)**: a matching date card in the SUPPLY ▸ Actions list. It
+  needs the multi-step completion-date calc, which currently only lives in the PO query; duplicating it
+  into the Actions SQL risks the two diverging. Best added once that calc is shared (or once n8n lets us
+  compare stored dates). The PO-tab filter/badge/recon is the date notification for now.
+- Files: `server.mjs` (PO query join + fields), `supply/inject.html` (filter/badge/recon + inert upload),
+  `migrations/062_erp_purchase_orders.sql`. Sandbox table created + 2 test rows seeded for validation
+  (Ben can clear `planner.erp_purchase_orders` test rows any time).
+
+## v20.293 - SUPPLY ▸ Purchase Orders: "NEEDS ERP" misalignment filter
+
+- Added a **⬆ NEEDS ERP (N)** filter pill to the Purchase Orders action bar — isolates POs misaligned
+  with Fulfil/Cin7: either **never pushed** (lines exist but none mirrored from ERP → upload the whole PO)
+  or with **pending qty/cost changes** (planned ≠ `erp_qty`/`erp_cost` → update). Excludes complete POs.
+  `poErpMisaligned(r) = erp_total>0 && progress!=='complete' && (erp_in==0 || erp_pending>0)`.
+  - Spans all statuses (like ACTION ITEMS) and is mutually exclusive with it; ANDs with the
+    country/supplier/type pills. The count on the pill doubles as the on-tab notification.
+- No new write path: the existing per-row **✗ not in ERP / ⚠ Update ERP** buttons and the Order-Plan
+  **Upload** already create-or-update via `/api/supply/po/:po/upload`, which stages to `etl_runs`
+  (`status='pending'`) for n8n to push — no direct Fulfil/Cin7 write from the app. SUPPLY ▸ Actions
+  continues to raise the matching "PO not in ERP" / "Order-plan change pending ERP push" cards.
+- Files: `supply/inject.html` (read-only filter over existing PO list data). No schema/env changes.
+
+## v20.292 - ACTIONS: A-player stock-out detector (completes the Actions revamp)
+
+- New **A-player stock-out** detector (`daAplayer`, flag `DA_DETECTORS.aplayer`) under DEMAND ▸
+  Actions ▸ **Actions**. Flags a **Tier-A SKU × market** that is both:
+  1. running out of 3PL cover — `compute3plWeeksRemaining(sku,co) < 20wk` (the buy plan's OWN cover
+     walk: on-hand + on-order consumed against the SKU's monthly demand — fully reconciled), and
+  2. **selling above forecast** — trailing-3-complete-month run-rate (real SKU actuals, DTC+B2B via
+     `skuSales`) annualised > the buy-plan SKU forecast (`compute3plMonthlyDemand`, fwd 12mo) × 1.10.
+  - `£ = min(annualisedRR − forecast, forecast) × subcat ASP` (under-forecast units/yr, capped at 100%).
+    Severity ≥£50k high / ≥£10k amber / else info. RR floor 20/mo to ignore tiny SKUs.
+  - **Open in Plan ↗** jumps to DEMAND ▸ Plan, sets country + DTC channel, and scrolls to / flashes the
+    SKU's sub-category row. (The buy-plan SKU popover only exists in the BUY view — `#ov` isn't in the
+    DOM under DEMAND — so the jump lands on the plan grid row, consistent with the anomaly jump.)
+  - On live data: 3 precise hits (Picnic Blanket ×2 + Towel-Home, all US, 12–14wk cover, +31–163% over
+    forecast). Note: the estate is well-stocked (min A-tier cover 12wk, median ~52), but 143 A-player×market
+    combos run above forecast — the <20wk bar isolates the genuinely at-risk ones. COVER_WK/OVER are tunable.
+- This completes the DEMAND ▸ Actions revamp: ACTIONS (sell-through, events, anomalies, A-player) ·
+  INSIGHTS (trading-vs-LY, forecast-vs-trend) · WEATHER (stub).
+- Files: `artifact_v16.7.html`. No schema/env changes.
+
+## v20.291 - ACTIONS: Anomalies-to-review detector + structured Open-in-Plan jump
+
+- New **Anomalies to review** detector (`daAnomalies`, flag `DA_DETECTORS.anomalies`) under DEMAND ▸
+  Actions ▸ **Actions**. Reuses the existing `scanBIPatterns()` one-off spike/dip engine, filtered to
+  the **last ~12 months** (recent = actionable). Dips (possible stockout / lost sales) → amber; spikes
+  (promo / one-off to sanity-check) → info. No £ (review items). Resolve via Done + Open in Plan ↗.
+- Generalised **`daJumpToPlan`**: a SKU string still pops the SKU panel; an object `{sub,co,ch}` now
+  switches to Plan, sets the country/channel, clears the category filter, and scrolls to + flashes the
+  matching `data-rowkey` row. Cards render the jump link from either `sku` or a `jump` payload.
+- Card list now re-sorts after merging server + client items (severity then £) — fixes high-severity
+  client items sinking below amber server items.
+- Files: `artifact_v16.7.html`. No schema/env changes.
+
+## v20.290 - INSIGHTS: Forecast-vs-trend detector (live)
+
+- Reframed the staged divergent-growth detector into **Forecast vs trend** (`daForecastTrend`, flag
+  `DA_DETECTORS.fcTrend=true`) per Ben's call. Per top-level category, compares this FY's forecast
+  growth to the category's OWN recent actual YoY trend (last complete FY vs prior). Self-referential —
+  no cross-category mixing — so it's robust to the CORE/SEASONAL split structure that broke the peer model.
+  - Flags when |forecast − trend| > 15pts. Ahead of trend → "forecast optimistic, overstock risk";
+    behind trend → "forecast conservative, possible upside".
+  - `£ = min(|divergence|,100%) × last-FY revenue` (bounded both ways). Severity ≥£80k high / ≥£20k amber / else info.
+  - `FLOOR=1000` units in BOTH prior and last FY kills launch-sparse YoY noise (the £9M artefact).
+  - Lands under DEMAND ▸ Actions ▸ **Insights** with the same filters + Done/Snooze/Dismiss lifecycle.
+- Files: `artifact_v16.7.html`. No schema/env changes.
+
+## v20.289 - Client-detector plumbing + divergent-growth (staged off pending grouping design)
+
+- New read endpoint `GET /api/demand-actions/state` → `{today, state}` so client-computed actions can
+  carry their own done/snooze/dismiss lifecycle (writes still go to the existing POST). Snoozes past
+  their date read back as open.
+- DEMAND ▸ Actions `load()` now merges server actions with client-side detector items and applies the
+  saved state map. Detector framework: `daClientDetectors(stateMap)` + per-detector feature flags
+  (`DA_DETECTORS`); `daRowFu` caches `calc().fu` per subcat×co×ch.
+- Built **divergent-growth** detector (`daDivergentGrowth`) — but **gated OFF** (`DA_DETECTORS.divergent=false`).
+  Testing on live data showed the spec's "sub-cats within a parent" peer model breaks here: a "parent"
+  groups CORE/SEASONAL decompositions of one line (not comparable peers), and prior-FY launch-sparse data
+  inflates YoY → absurd £ (e.g. £9.1M "at risk"). Parent-vs-parent comparison is saner but mixes wildly
+  different category sizes/maturities. Needs a design decision (likely reframe to self-referential
+  forecast-vs-trend divergence). Code kept for when the grouping is settled.
+- No schema changes. Files: `server.mjs` (+state GET), `artifact_v16.7.html`.
+
+## v20.288 - DEMAND ▸ Actions split into ACTIONS · INSIGHTS · WEATHER (level-3 sub-nav)
+
+- Added a level-3 sub-nav inside DEMAND ▸ Actions (same `.dnav` style as the other menus):
+  **Actions · Insights · Weather**.
+- Existing items now route by type: sell-through (behind/ahead) + event-approaching + future
+  stock/anomaly items → **Actions**; trading-vs-last-year (behind/ahead) → **Insights**
+  (`DA_INSIGHT_TYPES` map + `daSection()` helper). Each section keeps the same worked-process
+  model — Status/Market/Category filters, £-at-risk total, Done/Snooze/Dismiss against
+  `demand_action_state` — scoped to that section.
+- **Weather** is a "coming soon" stub (needs a weather feed + product→sensitivity map at go-live).
+- Groundwork for new client-side detectors: cards can carry a `sku` and show an **Open in Plan ↗**
+  link (`daJumpToPlan` switches to Plan and pops the SKU detail panel). Detectors land next.
+- No schema/env changes. Files: `artifact_v16.7.html`, version bump only.
+
+## v20.287 - Tidy: DEMAND sub-nav matches SUPPLY/REPORTS + removed dead portal-preview code
+
+- DEMAND's main sub-nav (Plan/Targets/Actions/Calendar) was a washed-out lighter style (`.dsub`,
+  muted grey). Gave it a dedicated `.dnav` class matching the SUPPLY (`.stab`) / REPORTS
+  (`.view-toggle`) dark-active + underline look; container border/spacing aligned too. The secondary
+  in-view `.dsub` filter toggles (Targets/Actions/Calendar) are left as-is.
+- Removed the 131-line dead portal-preview block (`ppCard/ppExpand/ppPOs/ppDeposits/ppPay/subFmt`)
+  from `inject.html` — superseded by the shared `portal-view.js` when CONFIG started delegating to it.
+  Confirmed zero remaining references; inject syntax clean.
+
+## v20.286 - Live portal label/barcode PDFs (full parity) + portal-view.js is now canonical
+
+Ported the in-browser label/barcode PDF subsystem (EAN bars, SVG label builders, A4 print-moulds,
+manual PDF + zip) into `portal-view.js`, so the live `/portal` ⤓ label buttons generate real PDFs —
+identical to the admin. The module's default `bc` uses session-scoped endpoints:
+- **`GET /api/portal/label-data`** — barcode rows, intersected with the supplier's *own* PO SKUs (can't
+  pull arbitrary SKUs); `GET /api/portal/asset/:name` (fonts/logos); `GET /api/portal/img` (swatch
+  proxy, session-gated).
+
+**Validated:** clicking ⤓ PO in the live portal fetched scoped label-data (3 rows) → loaded fonts →
+rendered → downloaded `PO-1619178_barcodes.zip`, button reset, zero exceptions.
+
+`portal-view.js` is now the **single source of truth** for the renderer (the inline copy was removed
+from inject.html when CONFIG started delegating to it), so it's hand-maintained, not regenerated. Header
+comment updated to say so.
+
+That closes the "exact same portal" thread: live `/portal` and CONFIG ▸ Portal are one renderer; data is
+scoped + figures match; writes are ownership-checked; labels work on both. Outstanding go-live: email
+provider (`RESEND_API_KEY`) for magic links, and an optional tidy of the dead inline `pp*` helpers left
+in inject.html.
+
+## v20.285 - CONFIG ▸ Portal is now a view into the real portal (single shared renderer)
+
+The admin CONFIG ▸ Portal preview no longer has its own inline copy of the renderer — it mounts the
+same `DBPortalView` (portal-view.js) the live `/portal` uses. So there is **one running copy**, and the
+two are guaranteed identical:
+- `inject.html` now loads `/portal-view.js` and the CONFIG ▸ Portal branch (was ~21KB of inline
+  renderer) is replaced by a `DBPortalView.mount(...)` call with the admin adapter: data via the
+  existing client-side fetch+filter (`loadPortalData`), writes to `/api/supply/*` "acting as" the
+  chosen supplier, and **its existing barcode functions passed as `opts.bc`** so admin label downloads
+  keep working unchanged.
+- `mount()` only claims `id="supply-root"` when not already inside one, so the admin (which already has
+  a `#supply-root`) gets no duplicate id; the live portal still gets the styling.
+
+**Validated both surfaces (CDP):** live `/portal` (Lixin) and admin CONFIG ▸ Portal both render the
+identical grid + TIMELINE/ORDER PLAN/INVOICE/SHIPMENT tabs from the shared module; `dupRoots:1`.
+
+**Remaining:** live-portal label/barcode PDFs still show the "coming shortly" placeholder (admin labels
+work). Porting the in-browser PDF/barcode subsystem to the live portal is the last open item. Dead
+inline `pp*` helpers left in inject.html (harmless) can be removed in a later tidy. Email provider
+(Resend env) still Diviyaj's go-live wiring.
+
+## v20.284 - Live supplier portal now renders the EXACT CONFIG ▸ Portal UI (shared renderer)
+
+The live `/portal` no longer uses a bespoke layout — it renders the **same** UI as the admin
+CONFIG ▸ Portal preview, from the **same code**:
+- **`supply/portal-view.js`** is generated from `inject.html` (build: `/tmp/build-pv.mjs`) — the exact
+  `ppPOs/ppExpand/ppDeposits/wireDetail` renderer + CSS, wrapped in `DBPortalView.mount(opts)` and
+  parameterised by endpoint-set + identity. Regenerate it whenever the preview changes in inject.html.
+- The live portal mounts it with the **scoped** adapter: data from `/api/portal/bootstrap`, writes to
+  `/api/portal/*` (session-derived supplier, ownership-checked). Served gate-exempt.
+- Added scoped helper endpoints the renderer needs: `/api/portal/notes/:sid`, `/api/portal/note-read/:id`,
+  `/api/portal/attachment/:id` (all ownership-checked).
+
+**Validated end-to-end:** Lixin login → identical grid (status pills, MANAGE rows, TIMELINE/ORDER
+PLAN/INVOICE/SHIPMENT tabs, real costs/line-totals/completion dates), and a cost edit in the rendered
+UI persisted to `portal_line_costs` scoped to the session (`submitted_by=factory@lixin.test`).
+
+**Notes:** label/barcode downloads show a "coming shortly" placeholder in the live portal for now (the
+buttons are identical; the in-browser PDF subsystem isn't yet ported) — fast-follow. The CONFIG preview
+still runs its own inline copy; since `portal-view.js` is generated from it they're identical, but a
+later tidy can point CONFIG at `portal-view.js` so there's literally one running copy (as discussed).
+Email provider still pending (Resend env) per v20.282.
+
+## v20.283 - Portal: scoped data feed for the shared (exact-parity) portal view [in progress]
+
+Stage 1 of making `/portal` render the *exact* CONFIG ▸ Portal preview UI: a `/api/portal/bootstrap`
+endpoint that returns the precise `_ppData` shape the preview renderer consumes, scoped server-side to
+the session's supplier. The PO rows reuse the admin purchase-orders **date/payment calc verbatim**
+(`POS_SQL_PORTAL`) so the figures are identical — just filtered + trimmed of the landed-cost fields the
+portal doesn't show. Validated: Lixin → 50 POs with correct computed dates/payments, lines, SKUs,
+costs, crossdock, notes, submissions.
+
+Remaining (Stage 2): port the shared renderer (`ppPOs/ppExpand/ppDeposits/wireDetail` + barcode utils)
+into a `portal-view.js` used by BOTH the live `/portal` and CONFIG ▸ Portal (so config becomes a view
+into the real portal view); match the Deposits-tab shape; validate both surfaces. The simpler v20.282
+portal page stays live until the shared view is validated.
+
+## v20.282 - Real supplier portal (magic-link login + single-page supplier view)
+
+Built the actual supplier-facing portal that was previously only scaffolded (the admin CONFIG ▸
+Portal *preview* existed; the real `/portal` page a supplier logs into did not).
+
+**Two surfaces, one route `/portal`:**
+1. **Login** — supplier enters their email → `POST /api/portal/request-link` issues a magic-link token
+   and emails it. (Always returns ok — never reveals whether an email is registered.)
+2. **Portal** — clicking the link verifies the token, sets an httpOnly session cookie, and serves the
+   single-page view of all their POs: order-plan (confirm cost / amend qty / add / remove SKUs),
+   **crossdock SKU quantities**, additional costs, completion date + invoice upload + carrier/tracking
+   submit, and the messages thread.
+
+**Security (all tested live):**
+- Every read + write is scoped **server-side** to the session's supplier — a supplier can only ever
+  see/touch their own POs. Verified: writing to another supplier's PO → `403`; no cookie → `401`;
+  unregistered email → ok with nothing sent (no account enumeration).
+- The portal is exempt from the planner-key gate (it has its own session auth).
+- Reuses the existing portal tables + mirrors the admin write logic, with `submitted_by` = the
+  session email. No new migrations.
+
+**Deploy (Diviyaj):**
+- **Email:** set `RESEND_API_KEY` (+ optional `PORTAL_FROM`) to send magic links via Resend. Until
+  then, links are logged to the server console (dev fallback) — the flow works, it just doesn't email.
+  Swap in any provider by editing `sendMagicEmail()` if not using Resend.
+- New file `supply/portal.html`; new routes `GET /portal` + `/api/portal/*` in `server.mjs`.
+- Session cookie is `Secure` automatically behind HTTPS (`x-forwarded-proto`).
+
+## v20.281 - Harness crash guards + migrations consolidated to one baseline
+
+**Crash guards (`server.mjs`).** Added the resilience handlers that were missing — the cause of the
+repeated dev crashes:
+- `pool.on('error', …)` — a dropped idle Postgres connection (`EADDRNOTAVAIL`) no longer kills the
+  process; the pool just recycles the client.
+- `process.on('unhandledRejection' / 'uncaughtException', …)` — a single malformed request (e.g. the
+  one-off `ERR_OUT_OF_RANGE`) is logged instead of taking the whole server down. The harness holds no
+  critical in-memory state (stateless proxy to Postgres), so staying up beats crashing.
+
+**Migrations simplified (61 → 1 baseline).** `migrations/` previously held 61 incremental files
+(001–061). Replaced with a single consolidated **`migrations/schema.sql`** (generated via
+`pg_dump --schema=planner --schema-only`, psql meta-commands stripped, `CREATE SCHEMA IF NOT EXISTS`).
+The 61 originals are preserved under `migrations/_archive/`. **Validated** by rebuilding the baseline
+into a throwaway schema — recreates all 63 objects cleanly. See `migrations/README.md`.
+
+**Deploy (Diviyaj):**
+- Fresh DB → run `migrations/schema.sql` once (not the 61 files). Existing DBs are already migrated —
+  don't run the baseline against them; catch up with any unapplied `_archive/` files instead.
+- The crash guards are harness-only; pull `server.mjs`.
+
+## v20.280 - Collapsible fiscal-year columns (show/hide pills)
+
+Each FY total column header is now a **show/hide pill** (replacing the plain FY label): "▾ hide FY27/28"
+when its months are shown, "▸ show FY24/25" when hidden. Clicking toggles all of that fiscal year's
+Mar–Feb monthly columns. **FY24/25 and FY25/26 are collapsed by default** (just their totals show), so
+the planner opens on a tidy current-year-forward view; history expands on demand. State **persists
+across sessions** (`localStorage: db_fy_collapsed_v1`).
+
+This is the collapse capability the old CSS `visibility:collapse` approach couldn't deliver — now trivial
+on the data-driven `TIME_COLS`: a collapsed FY simply omits its month entries (keeps the total), and the
+toggle rebuilds the column spec + re-renders. Because every row type iterates `TIME_COLS`, colgroup,
+headers and all rows stay aligned automatically (verified consistent at 50 cells/row in the default view,
+growing to 74 with all FYs expanded).
+
+**Bonus — this is also the render perf fix.** The default view drops from ~66 time-columns to ~42
+(~36% fewer cells), which is where render time actually goes (DOM construction, per the v20.278 finding).
+So hiding history by default makes the common view faster, for free.
+
+## v20.279 - Deep-link URLs for DEMAND / REPORTS / SCENARIO sub-tabs
+
+Extended the existing hash router (in the harness) so every view + sub-tab has a shareable,
+bookmarkable URL with working back/forward:
+- **DEMAND** → `#/demand/plan`, `#/demand/targets`, `#/demand/actions`, `#/demand/calendar`
+- **REPORTS** → `#/reports/ex` (exec), `#/reports/slow`, `#/reports/af`, `#/reports/ka`, `#/reports/me`, `#/reports/otb`
+- **SCENARIO** → `#/scenario/prime`, `#/scenario/b2b`, `#/scenario/finmodel`
+- **BUY/FBA** → `#/buy`, `#/fba` (already existed; now friendly-named alongside the above)
+
+Hash-based (not path) — consistent with the existing `#/supply/...` deep-links, so it's fully
+client-side: **no server rewrites / infra for Diviyaj to wire**. Clicking a tab updates the URL;
+loading/visiting a URL restores the view (verified both directions + a cold load at `#/reports/slow`).
+
+Mechanics: harness exposes `window.writeHash`; the artifact's DEMAND/REPORTS sub-tab clicks call it;
+`applyRoute()` maps friendly names (`demand`↔planning, `reports`↔exec) and restores sub-tab state;
+on-load deep-linking broadened beyond `#/supply`. Files touched: `supply/inject.html` (router),
+`artifact_v16.7.html` (sub-tab click handlers).
+
+## v20.278 - Perf investigation (lazy-hydration tried & reverted) + live FY-total fix
+
+Investigated SKU/forecast render cost. Measured on a 50-row table: `calc()` for all rows is only
+**~12 ms**; a full render is **~120–160 ms**, i.e. the cost is almost entirely **DOM construction of
+the ~2,240 cells**, not input listeners and not the forecast maths. Prototyped lazy-hydration of the
+forecast inputs (stub → real `<input>` on focus/click) — it worked mechanically but, as the numbers
+predicted, **did not change render time** (swapping an `<input>` for a `<div>` is the same DOM cost),
+so it was **reverted**. The real lever for render speed is fewer *cells* — i.e. the collapsible-FY
+feature (hide history by default), which is the next change.
+
+**Kept (genuine bug fix):** after the v20.277 fiscal rework, editing a forecast cell updated the
+month values but left the **FY total columns stale** until a full re-render (the totals had lost the
+data-attributes `refreshRow` keys off). `refreshRow` now recomputes the fiscal totals (and all
+displayed forecast months, incl. 2029) in place — edit a month, its FY total moves immediately.
+
+## v20.277 - Monthly strip restructured to fiscal years, Mar 2024 → Feb 2029 (core artifact)
+
+The core planner's monthly columns now run as a **continuous month-by-month strip from March 2024**,
+grouped into **fiscal (Mar–Feb) blocks** — not calendar Jan–Dec. Five fiscal years on screen:
+
+- **FY24/25, FY25/26** — monthly actuals (2 full years of history, month by month)
+- **FY26/27** — current FY: actuals to Jun 26, then forecast
+- **FY27/28, FY28/29** — monthly forecast
+
+Each block ends with its fiscal total. Actuals→forecast flips automatically at the current month
+(`isActualMonth` = month ≤ current). First columns stay sticky; scroll across time (no collapse).
+The left-hand annual summary columns (FY24/25, FY25/26, YTD FY26/27) are kept as a quick-glance.
+
+**Engineering:** the time axis is now **data-driven** — a single ordered `TIME_COLS` spec
+(`{month | current-fc | fy-total}`) that every row type iterates: colgroup, both header rows,
+subcategory rows, SKU drill-downs + subtotal, category totals, grand total. This **replaces the old
+hardcoded SKU column-index scheme** (`COL_FM_START`/`COL_F26_TOT`/… ), which couldn't scale past 3
+fixed blocks and was the source of past alignment bugs. New helpers: `fyMonths`, `fyTot`, `fyBg`,
+`fyTotCls`, `isActualMonth`, `buildTimeCols`, `DISP_MONTHS`/`TIME_COLS`. The cascade engine spills to
+Feb 2029 (`FM_CALC`) so FY28/29 is complete. Historical blocks are neutral grey, current FY blue,
+future purple/teal.
+
+Validated via CDP: every row type renders a consistent **74 cells** (8 leading + 66 time), strip =
+Mar 24→Feb 29, actual/forecast boundary correct at Jun/Jul 26, fiscal totals tie (Tea Towel UK:
+FY24/25 10,720 · FY25/26 27,346 actuals · FY26/27 28,187 · FY27/28 = FY28/29 29,849).
+
+**Deploy (Diviyaj):** artifact-only, no migrations/env. Wider table (~74 cols) — horizontal scroll,
+heavier render. Forecast-save payload unchanged (calendar 2026–2028 forecast keys; 2029 spill not saved).
+
+## v20.276 - Fiscal year (Mar–Feb) summary & total columns (core artifact)
+
+Dock & Bay's financial year runs **March → February**. Every year *summary/total* column in the
+planner now aggregates on that basis (months stay Jan–Dec; only the aggregations changed). Naming
+convention: **FYxx/yy** (e.g. Mar 2025–Feb 2026 = `FY25/26`).
+
+- **Lookback columns** (left): `2024 → FY24/25`, `2025 → FY25/26`, `YTD 26 → YTD FY26/27`. YoY bases
+  shifted to the prior fiscal year. YTD now uses the **last complete month** (excludes the partial
+  current month) for like-for-like YoY — matches the old subcat behaviour, applied consistently to
+  all row types (SKU rows previously included the partial month).
+- **Forward FY totals** are now fiscal and span two calendar month-blocks: `FY26/27` (Mar26–Feb27),
+  `FY27/28`, `FY28/29`. So e.g. the total after Dec 2026 sums Mar26–Dec26 + Jan27–Feb27 — deliberately
+  *not* a clean sum of the visible 2026 columns.
+- **Engine spill to Feb 2029** — `FM_CALC` cascades two extra months (Jan/Feb 2029, calc-only, no new
+  columns) so `FY28/29` is a complete fiscal year. Display window (`FM`) unchanged at F26+F27+F28.
+- New fiscal helpers: `fyMonths`, `fyLabel`, `fyU/fyR`, `fyToDateU/R`, `fyFC`, `fyStartOf`,
+  `prevMonthKey`; globals `CUR_FY_START`, `CUR_YTD_END`. Applied across header, subcategory rows, SKU
+  drill-downs + FY totals, category totals and grand total.
+
+Validated via CDP: all six row types still render **48 cells** (aligned); labels = FY24/25, FY25/26,
+YTD FY26/27, FY26/27, FY27/28, FY28/29; numeric check (Tea Towel UK) FY24/25=10,720 · FY25/26=27,346
+(actuals) · FY26/27=28,187 · FY27/28=FY28/29=29,849 (flat cascade) · 2029 spill present.
+
+**Deploy (Diviyaj):** artifact-only, no migrations/env. Note the forecast-save payload still saves
+calendar `2026_*…2028_*` month keys (2029 spill is display-only and not saved). The monthly column
+*layout* is unchanged; only summary/total aggregation logic moved to Mar–Feb.
+
+## v20.275 - Extend the forecast window to 2028 (core artifact)
+
+The core demand planner now forecasts **three full years** — 2026, 2027 **and 2028** — so Ben always
+sees at least two full years ahead. (Built without the column-collapse feature, per Ben's call.)
+
+- **Engine** — `F28` array added; `FM = F26+F27+F28`. `calc()`/`calcBaseline()` cascade 2028 off the
+  **2027 forecast** (`base = fu[2027_mo]`), LY-anchored and flat by default — so a row growth % or a
+  per-cell override compounds through 2026→2027→2028 exactly like 2027 does off 2026.
+- **Table** — 2028 added to every row type: colgroup, both header rows, subcategory rows, SKU drill-down
+  rows + subtotal, category totals, and the grand-total row. 12 monthly cols + an **FY 2028** total,
+  in a teal palette to distinguish from 2027 (purple) and 2026 (blue). Column widths unchanged; the
+  first columns stay sticky and you scroll across time as before.
+- 2028 cells are editable (% or literal overrides) and feed the same save path as 2026/27.
+
+Validated via CDP DOM inspection: all six row types render a consistent **48 cells** and align; a
+numeric check confirms 2028 anchors on 2027 (flat baseline, e.g. Tea Towel UK DTC FY27=FY28=29,849).
+
+**Deploy (Diviyaj):** no migrations, no new env vars — artifact-only change. Forecast-save payloads
+now include `2028_*` month keys (sandbox); confirm the prod save target accepts them before shipping.
+
+## v20.274 - Revert the CSS column-collapse (kept layout persistence)
+
+The `visibility:collapse`-on-`<col>` approach (v20.272/273) didn't collapse reliably on the real
+50+ column sticky `table-layout:fixed` table — only the current-month column toggled. Reverted the
+column-collapse cleanly (chevrons/`fcm-*`/`FC_COLLAPSED` removed); table back to its working state.
+**Kept** the SKU-expansion layout persistence (`db_layout_expanded_v1`). Column collapse will be
+rebuilt via the robust re-render/visible-months approach when the time-window work resumes.
+
+## v20.273 - Demand planner: collapsible forecast-year columns + layout persistence (core artifact)
+
+Phase 1–2 of the wider-time-window rework:
+- **Layout persistence** — the table's expand/collapse state persists across sessions
+  (`localStorage`: `db_layout_expanded_v1` SKU drill-downs, `db_layout_fccollapse_v1` column groups).
+- **Excel-style column-group collapse** — click the underlined **▾ 2026 Forecast** / **2026 FY**
+  (or 2027) header to collapse that year's month columns to its FY-total; ▸ to expand. Pure CSS
+  (`visibility:collapse` on classed `<col>`s) — no re-render, no cell-count change; fixed widths +
+  sticky columns + horizontal scroll intact; totals can't shift.
+
+Remaining: (3) monthly 2-yr history; (4) engine+window → 2028.
+
+## v20.270 - SCENARIO Financial Forecast Model = exec-summary layout (channel→country, quarterly)
+
+Rebuilt the scenario financial forecast to the exact exec-summary look (year cards, channel rows
+DTC/FBA/B2B expandable to countries, YoY badges) with QUARTERLY columns (FY27 Q1–Q4 + FY28),
+reusing `buildExecData()`. Growth %/Price % overlay per channel × country, forecast months only,
+persisted (`scenario_fin_overlay`, migration `061`). New `/api/scenario/fin-overlay` GET/POST.
+
+## v20.269 - B2B allocation: date-aware availability + default required-by date
+
+Availability is now computed AT the required-by date: on-hand − expected own-channel sales between
+now and the date + inbound landing by then. "Keep" column shows a "{N}wk cover" sub-label. Default
+required-by date = today.
+
+## v20.268 - SCENARIO ▸ Financial Forecast Model rebuilt in the exec-summary look
+
+Re-skinned the financial forecast model to match REPORTS ▸ Exec Summary, reusing the artifact's
+global exec CSS (year cards + exec table cells + YoY badges):
+- **Year cards** on top: LY (Actual) vs the scenario FY (growth + price overlay) with a YoY
+  revenue/units growth badge.
+- **Exec-style table**: category rows × quarter columns, each cell stacked units / £revenue with
+  ▲/▼ YoY badges vs LY, a dark FY-TOTAL column, and a TOTAL row.
+- Overlay unchanged in mechanism: **growth %** + **price change %** per category × quarter
+  (forecast only), persisted live via `/api/scenario/fin-model`. Annotation updated.
+
+Built entirely in the scenario planner (`inject.html`), not the core artifact.
+
+## v20.267 - Scenario: colour the recommendation/verdict badges
+
+`.tool-badge` + `.bg-green/amber/red/neutral/blue/purple` were scoped to `#supply-root` only,
+so in the scenario planner (`#scenario-root`) the B2B recommendation/verdict badges (e.g.
+"Give ✓ — 17wk left") rendered unstyled. Extended those rules to `#scenario-root` too.
+
+## v20.266 - B2B allocation: smarter fulfilment (reserve cover + inbound-aware)
+
+Was giving away ALL available stock (fulfil = min(qty, available)). Now:
+- **Keep cover** input (default 6 wks) reserves `velocity × weeks` of own-channel stock before
+  allocating to B2B — never gives into a stockout.
+- **Required-by date** feeds the calc: inbound landing in that market on/before the date counts
+  toward fulfilment (`/api/scenario/b2b` returns `inbound_by_date`, `next_inbound_*`).
+- Fulfil = stock (after reserve) + inbound-by-date; only the remainder is a true shortfall to
+  air-freight. New Keep / Inbound columns; KPIs add From stock / From inbound; verdicts updated.
+
+## v20.265 - B2B allocation margin now uses market COGS (not avg PO cost)
+
+- Added `products.cogs_{uk,us,eu,au,ca}_3pl_final` (**migration `060_products_cogs.sql`**) and
+  loaded them from SKU_CHILD (1,068 SKUs in sandbox; refreshed `size_short` + `variant_type`
+  from the same file). Diviyaj: feed these via n8n on prod.
+- SCENARIO ▸ B2B allocation margin analysis now costs at the **selected market's COGS**
+  (`/api/scenario/b2b` returns `cogs`), falling back to avg PO cost only where COGS is unset.
+
+## v20.264 - REPORTS ▸ Slow Moving: category filter, release column, sort, CSV
+
+- Added a **Category** filter (dropdown of the categories present).
+- Left-aligned the **Category** column; added a **Release** (release window) column
+  (`release_window` now returned by `/api/scenario/slow-moving`).
+- Added a **Sort** control — **£ tied up** (default) · SKU · Cover wk.
+- Added **⬇ CSV** download — exports the full filtered set (not just the 400 shown).
+
+## v20.263 - Portal order plan: Additional costs section → total invoice cost
+
+Supplier portal ORDER PLAN tab now has an **Additional costs** section — add multiple lines
+(description · qty · price → line total), with an additional total that sums with the order-plan
+line items into a **Total invoice cost**. Add/edit/remove save in place (no reload). These also
+show on PURCHASE ORDERS ▸ PLAN ▸ ORDER PLAN with the same total-invoice rollup.
+
+New table `portal_additional_costs (id, po, description, qty, price)` (**migration
+`059_portal_additional_costs.sql`**); endpoints `GET /additional-costs`,
+`POST /additional-cost` (add/update), `POST /additional-cost-remove`; po-detail returns
+`additional_costs`.
+
+## v20.262 - Order plan: live refresh of supplier changes (incl. new SKUs)
+
+While the ORDER PLAN view is open it now polls supplier changes (~12s) and re-renders when the
+set changes — new added SKUs and amendments appear live without re-opening. Skips a tick if a
+qty cell is focused (never clobbers an in-progress edit); the poll self-stops on navigating away.
+
+## v20.261 - Order plan: include supplier-submitted SKUs + reflect submissions without a refresh
+
+- The **Ordered** scope now also includes SKUs the supplier submitted a quantity for (amended
+  qty or an added SKU) on the POs in view — so supplier changes appear as rows even before
+  they're accepted (the inline ✓ confirm shows on the cell).
+- Portal qty/cost/add/remove + crossdock submits now invalidate the order-plan + purchase-orders
+  caches, so re-opening ORDER PLAN reflects them immediately (no browser refresh needed).
+
+## v20.260 - Order-plan polish: confirm column, PO filter, inline supplier-change confirm
+
+PO PLAN ▸ ORDER PLAN: widened the table so the **Confirm** button no longer clips. Timeline
+"mark unread" is now a subtle text link (the "Mark read" button is unchanged).
+
+SUPPLY ▸ ORDER PLAN (main pivot):
+- PO filter box **moved to the Status row** (after the pills), styled **pale blue**, and now
+  takes **multiple POs** (space / comma / line-break). A PO filter **overrides** the status +
+  country pill filters.
+- Supplier changes are now **inline in the grid cells** — an amber **"100 ✓"** confirm button
+  in the (PO × SKU) cell (shows the proposed qty), **prioritised over** the partial-carton
+  approve button when a cell has both. The top banner is now a slim count + Accept-all.
+- PO column header is a **link** → opens that PO in PURCHASE ORDERS with its ORDER PLAN tab
+  expanded (`gotoPO(po,'oplan')`).
+
+## v20.259 - Crossdock shipped quantities (portal → PO → master shipment)
+
+- **Portal SHIPMENT tab:** the "Crossdock SKUs on this order" section moved here from ORDER PLAN
+  and is now a **qty-shipped input table**. Once the PO is SHIPPING (or past est. completion),
+  filling these becomes an **open action** (SHIPMENT tab + MANAGE badges) until every crossdock
+  SKU has a quantity. Saves in place (no reload). No D&B approval — reflects immediately.
+- **PO PLAN ▸ CLIENT:** shows the supplier-entered "Crossdock shipped" quantities.
+- **Master shipment:** new **Crossdock** sub-tab — table of every crossdock SKU across the POs on
+  the shipment with qty shipped · source PO · supplier · client · client sales order.
+
+New table `crossdock_shipments (po, sku, qty)` (**migration `058_crossdock_shipments.sql`**);
+endpoints `GET /crossdock-shipments`, `POST /crossdock-qty`, `GET /shipment-crossdock/:ref`;
+po-detail returns `crossdock_shipped`.
+
+## v20.258 - Accept order-plan change → writes to the line + flags ERP push (qty + price)
+
+Accepting a supplier change now **writes through** to the order plan, not just a confirm flag:
+- amended qty → `purchase_order_lines.qty`; accepted cost (final ▸ supplier) → `cost_price`;
+- supplier-**added** SKUs are inserted as new order-plan lines (erp_qty 0 = new to ERP);
+- the line then differs from the ERP mirror → the PO shows **⚠ Update ERP**. ERP push now
+  tracks **cost as well as qty** (`erp_cost` mirror, migration `057_line_erp_cost.sql`);
+  `/upload` stages qty + cost. The real Cin7/Fulfil API write remains Diviyaj's gated job.
+
+Still open: pushing **ship date** to the ERP (header-level, separate from line qty/cost) — to
+spec with the ERP integration.
+
+## v20.257 - ORDER PLAN: centre quantity columns + footer totals
+
+Centred the qty cells (input text + cells), the per-SKU TOTAL column, and the footer
+PO TOTALS summary row (was right-aligned).
+
+## v20.256 - SUPPLY ▸ ORDER PLAN: "All SKUs" scope pill + supplier-changes-to-approve panel
+
+- New **All SKUs** scope pill (after Ordered, before All in category) — shows every master SKU
+  as rows, not just ordered ones (respects category/release/SKU filters).
+- A **"⚠ N supplier changes awaiting approval"** panel above the grid lists each unconfirmed
+  portal change (PO · SKU · qty 720→800 / cost / added) with per-line **Accept** and **Accept
+  all** — the same confirm workflow as the PO PLAN order-plan tab, surfaced here too.
+  (`portal-line-costs` GET now returns the `unconfirmed` flag.)
+
+## v20.255 - PO PLAN order plan: accept-changes workflow + notification + link to full order plan
+
+- **Accept workflow** — each supplier change (cost / amended qty / added SKU) shows an
+  **Accept** button on the ORDER PLAN tab; an **Accept all changes** banner confirms them in
+  one click. Accepting sets `confirmed_at` and adopts the supplier cost as the final price if
+  none is set. Confirmed lines show ✓. (`POST /api/supply/po-line-accept` {po, sku | all}.)
+- **Notification** — unconfirmed order-plan changes now flag the PO grid badge, the red
+  ACTION ITEMS filter, and the ORDER PLAN sub-tab badge (`poExceptions.oplan`; grid count
+  `orderplan_unconfirmed`; po-detail line `unconfirmed`/`confirmed` flags).
+- **Link to full order plan** — "↗ open in full order plan" on the ORDER PLAN tab jumps to
+  SUPPLY ▸ ORDER PLAN with this PO pre-filled in the PO filter (`gotoOrderPlan` → `_pendingOP`).
+
+Migration `056_line_confirm.sql` (adds `portal_line_costs.confirmed_at`).
+
+## v20.254 - Portal timeline: post a note without a full-page refresh
+
+Posting a note in the supplier-portal timeline no longer calls `loadPreview()` (which
+collapsed MANAGE). It now re-fetches the supplier's notes, updates them in memory, and
+re-renders just that PO's expanded panel — staying open on the TIMELINE tab. `rerenderRow`
+now preserves whichever sub-tab was active (or an explicit one).
+
+## v20.253 - Portal add-SKU: searchable picker + no full-page refresh
+
+- The order-plan "add SKU" control is now a **searchable typeahead** (datalist input — type to
+  filter the supplier's SKUs by code, product name shown as the hint) instead of a long select.
+- **Add / remove no longer reload the whole portal.** Refactored the portal's per-detail
+  wiring into `wireDetail(scope)`; adding or removing a SKU updates `_ppData` in memory and
+  re-renders just that PO's expanded panel (`rerenderRow`), keeping MANAGE open and staying on
+  the ORDER PLAN tab. (Amend qty / cost already saved without reload.)
+
+## v20.252 - Crossdock label: bigger text, box fills the white space
+
+Enlarged the crossdock-label text (CROSS DOCK SHIPMENT 20→23, SKU 15→18, DELIVER TO 18→21,
+address 22→27, PO/Dispatch/Client 18→21) with more line spacing, and floored the DELIVER TO
+box (≥ H−190) so the frame extends down toward the barcode with the carton/pallet line
+anchored at its bottom — filling the previously empty middle of the label.
+
+## v20.251 - Portal order plan: amend quantity + add SKUs
+
+Supplier portal ORDER PLAN tab is now editable beyond cost price:
+- **Amend quantity** per line (editable Qty input; defaults to the order qty).
+- **Add SKUs** — a picker of the SKUs assigned to that supplier (`products.supplier_multiple_all`)
+  not already on the order, plus qty + price; added rows show an "added" tag and can be removed.
+- Line totals + order TOTAL recompute from the effective qty × cost.
+
+These flow to **PURCHASE ORDERS ▸ PLAN ▸ ORDER PLAN**: amended quantities show as
+`→ N ⚠` next to the order qty, and added SKUs appear as extra rows tagged "added".
+
+New: `portal_line_costs.amended_qty` + `is_added` (**migration `055_portal_amend_qty.sql`**);
+`GET /api/supply/supplier-skus/:supplier`; `POST /api/supply/portal-line-remove`;
+`portal-line-cost` now also accepts amended_qty / is_added.
+
+## v20.250 - Crossdock label rework + Final delivery address field
+
+- New **Final delivery address** field in PURCHASE ORDERS ▸ PLAN ▸ CLIENT (multiline).
+  **Migration: `054_final_delivery_address.sql`**.
+- **Crossdock label (portal + PO button):** "CROSS DOCK SHIPMENT" nudged down below the
+  logo; the DELIVER TO block is now a larger framed box filling the space between the SKU and
+  the barcode — it shows the **final delivery address** (large), PO, **Dispatch order**
+  (was "Sales order"), Client, and the carton count. `bcDownloadCrossdock` now takes the
+  dispatch-order ref + delivery address; both call sites updated.
+
+## v20.249 - PO PLAN CLIENT: Crossdock + Ships-with-supplier label downloads
+
+Added a "Labels (A4 print mould)" row in PURCHASE ORDERS ▸ PLAN ▸ CLIENT with two buttons:
+- **⤓ Crossdock** — the PO's crossdock box labels (PO / sales order / client overlaid),
+  identical to the supplier-portal download.
+- **⤓ Ships with supplier** — a new carton-sized "SHIPS WITH SUPPLIER" master label
+  (PRODUCTION-MASTER artwork): source supplier + production ref (this PO), ships-with
+  supplier + PO (the master shipment's supplier + ref), destination branch/country, client
+  name + sales-order ref, and a blank carton/pallet count. Renders to an A4 4-up mould PDF.
+
+New endpoint `GET /api/supply/ships-with/:po` resolves the label fields (master shipment
+supplier via `shipments.master_po`). New client builder `buildShipsWithSVG` + `dlShipsWith`.
+
+## v20.248 - PO PLAN CLIENT: add Client purchase order ref + Dispatch order ref
+
+Two new editable text fields in PURCHASE ORDERS ▸ PLAN ▸ CLIENT, directly under Sales order
+ref: **Client purchase order ref** and **Dispatch order ref**. **Migration:
+`053_client_order_refs.sql`** (adds `purchase_orders.client_po_ref`, `dispatch_order_ref`).
+
+## v20.247 - PO PLAN DATES: widen Source column, show "supplier portal" once approved
+
+- Source column widened (min 250px, table max 760px) + nowrap so the Approve → production end
+  button fits without wrapping.
+- Once a supplier completion date is approved, the row's Source shows **supplier portal**
+  (rejected shows "supplier portal · <date>").
+
+## v20.246 - Portal: trim the Completion date column width
+
+Reduced the date input (190px→128px) and cell min-width (210px→140px) so the column fits
+the date + picker without hogging grid width.
+
+## v20.245 - Fix: completion/invoice submission picked the wrong row; dedupe submissions
+
+- **Bug:** in po-detail the `to_char(submitted_at,…) submitted_at` alias shadowed the
+  timestamp column in `ORDER BY submitted_at`, so same-day submissions tied and the pick was
+  arbitrary (showed corrupt test data). Now orders by `id DESC` (latest insert) for both the
+  completion-date and invoice queries; grid subqueries likewise use `id DESC`.
+- **Dedupe:** a new portal submission of a given kind now supersedes any earlier still-pending
+  one for that PO (status `superseded`), so the passive completion-date auto-save can't pile
+  up pending rows. Cleaned existing corrupt/duplicate test rows in the sandbox.
+
+## v20.244 - Supplier completion date → action on PURCHASE ORDERS + DATES tab
+
+A completion date submitted in the portal now surfaces on the D&B side:
+- **Action/notification** on PURCHASE ORDERS — a pending completion date flags the PO grid
+  badge, counts toward the red ACTION ITEMS filter, and lights the DATES sub-tab badge
+  (`poExceptions` dates bucket; new grid field `sup_completion_pending`).
+- **DATES sub-tab (PLAN)** — a "Supplier completion date" row shows the submitted date with
+  **Approve → production end / Reject** buttons. Approve applies it to the production-end
+  date (`end_production_overide` via the existing `/submission/:id/apply`); Reject dismisses.
+  po-detail now returns `sup_completion` (id/value/status).
+
+## v20.243 - Portal grid: stop the Completion date column clipping the input
+
+`#supply-root table{width:100%}` made the portal grid distribute column widths and ignore
+the date cell's min-width, squeezing/clipping the (now wide) date input. Added
+`table.pp-tbl{width:max-content;min-width:100%}` so the grid sizes to its content and the
+column holds its width (same fix already used on the expand-row and products tables).
+
+## v20.242 - Portal: Mark read no longer reloads / closes MANAGE
+
+Clicking Mark read called `loadPreview()`, which re-rendered the whole portal and collapsed
+the open MANAGE panel. Now it updates in place — toggles the button, the note's "new" badge
++ highlight, and decrements the TIMELINE tab + MANAGE action badges — with no reload.
+
+## v20.241 - Portal completion date: force-open picker + wider column
+
+The native calendar wouldn't open in the webview (the picker icon is clipped/unreliable) and
+the column was too narrow. Now clicking the field calls `inp.showPicker()` to force the
+calendar open regardless of the icon, and the input is widened (190px, cell min 210px).
+
+## v20.240 - Portal/PO-PLAN timeline sync, invoice persistence, passive completion date
+
+- **Timeline now syncs both ways.** Notes posted from PO PLAN ▸ Timeline (author_kind
+  `internal`) were saved with no `supplier_id`, so the portal query (`WHERE supplier_id=$1`)
+  never returned them. `portal-note` now resolves the PO's supplier and stamps it.
+- **Portal shows Dock & Bay notes as an action.** Internal notes appear in the supplier's
+  TIMELINE with a **new** badge + amber highlight until the supplier clicks **Mark read**
+  (reuses `/note-read/:id`). Unread D&B notes count toward the TIMELINE tab badge and the
+  MANAGE action badge. (`portal-notes` now returns `read` + `author_email`.)
+- **Invoice value persists in the portal.** The submitted invoice now shows in the INVOICE
+  tab — value, date, and approval status (awaiting / approved / rejected) — and the input
+  pre-fills with the last submitted value; button reads "Resubmit invoice".
+- **Completion date is now passive.** Was submitting mid-keystroke then disabling the field
+  + firing an alert (felt broken / "can't select"). Now: pick or type a full date, it
+  debounces ~1s and saves quietly (amber → green border), no alert, no disable. Column
+  widened (input 165px, cell min 175px).
+
+## v20.239 - PURCHASE ORDERS: red "ACTION ITEMS (n)" filter
+
+Added a red **ACTION ITEMS (n)** toggle at the front of the action-items filter row in
+SUPPLY ▸ PURCHASE ORDERS. The count = POs carrying one or more open action items (the same
+red badges shown next to each PO ref via `poExceptions`). Clicking it filters the grid to
+just those POs, across all statuses. The existing per-type pills are relabelled "By type".
+
+Also de-noised `poExceptions`: **completed POs no longer raise payment-overdue / no-freight
+actions** (not actionable once done) — invoice-awaiting-approval and unread-supplier-notes
+still flag on any PO. This affects both the new filter count and the per-row badges.
+
+## v20.238 - Fix: Portal preview "Preview as supplier" dropdown was unselectable
+
+The supplier select sat inside the `pill-lbl` span inside a flex `.sect-h`; the webview's
+flex-shrink quirk collapsed that nested item to ~0 width, so the selected option text showed
+but the control couldn't be opened. Pulled the `<select>` out as its own flex item
+(`flex:0 0 auto`, explicit 240px width, styled border). Now selectable.
+
+## v20.237 - PO PLAN: invoice approve/reject action, Order Plan cost prices, Timeline tab
+
+PURCHASE ORDERS ▸ PLAN now closes the loop on supplier-portal submissions:
+- **PAYMENTS** — a supplier-submitted invoice now shows as an **action** (red badge on the
+  PAYMENTS tab + a flag on the PO grid row) with **Approve → final / Reject** buttons.
+  Approving applies the submitted value to the **Final Invoice Amount** (writes
+  `supplier_invoice_total`); Reject dismisses it. Uses the existing
+  `/submission/:id/apply` + `/dismiss` endpoints.
+- **ORDER PLAN** tab rebuilt as a cost table: SKU · Qty · Est. cost · **Supplier submitted**
+  (⚠ tag when it differs from the estimate) · **Final price** (editable per line) ·
+  **Line item total cost** (qty × cost) · with **order TOTAL** (qty + final cost). Final
+  price defaults to the supplier-submitted price (else estimate); saved on change. These
+  are the agreed prices for the (still-to-build, gated) Cin7/Fulfil push.
+- **TIMELINE** tab (new) — shared note thread with the supplier, mirroring the portal.
+  D&B can **post a note** (notifies the supplier portal) and **Mark read/unread** supplier
+  notes. **Unread supplier notes** show as an action (TIMELINE badge + PO grid flag).
+
+New endpoints: `POST /api/supply/po-line-final` (final cost per line),
+`POST /api/supply/note-read/:id` (read/unread toggle). po-detail now returns `line_costs`
+and note `id`/`read`; the purchase-orders grid query returns `sup_invoice_pending` and
+`unread_notes`. **Migration: `052_line_final_cost.sql`** (adds
+`planner.portal_line_costs.final_cost`).
+
+## v20.236 - Portal: "Preview as supplier" dropdown moved left of the "Portal preview" header
+
+## v20.235 - Portal ORDER PLAN cost prices (item 8)
+- Portal ORDER PLAN tab now shows per line: SKU, Qty, Est. cost (purchase_order_lines.cost_price), Actual cost
+  (supplier input, blank = use estimate), and Line total (qty × cost). A TOTAL row sums QTY and FINAL price
+  (all line totals), recomputing live as the supplier types. Saved on change.
+- Migration 050: planner.portal_line_costs (po, sku, actual_cost, …). New GET /api/supply/portal-line-costs +
+  POST /api/supply/portal-line-cost. server.mjs + inject.html.
+- (Part c — flow these to SUPPLY ▸ Purchase Orders ▸ Order Plan with a discrepancy tag + accept → ERP push — is
+  still roadmap.) Item 7 (Timeline tab on PO PLAN + note read/unread) still pending.
+
+## v20.234 - Supplier portal grid/tab refinements (1-6 of Ben's batch)
+- (1) Timeline note textarea left-aligned. (2) SHIPMENT tab: tracking/carrier form hidden when a Flexport ref is
+  assigned (shows "handled via Flexport"). (3) Completion-date moved out of SHIPMENT into a main-grid column
+  immediately right of "Est. completion" (inline date input, submits on change). (4) Crossdock label download
+  now a "⤓ Crossdock" button in the grid Barcodes cell (removed the button from ORDER PLAN; SKU list still shown).
+  (5) Removed the "Shipment" column from the grid. (6) Grid headers now wrap to 2 lines, vertically centred (pp-tbl).
+- STILL TODO (need schema + endpoints): (7) Timeline tab on PURCHASE ORDERS ▸ PLAN with note read/unread + unread
+  action badge; (8) portal ORDER PLAN cost prices — estimated + actual (input) + line total + QTY/FINAL totals.
+- inject.html only.
+
+## v20.233 - Label filename prefixes, Client requirements left-align, portal dropdown placement
+- PO ▸ PLAN ▸ Client: "Client requirements" textarea now left-aligned (was inheriting .fci right-align).
+- Barcode download filenames now prefixed by kind: PROD- (product), BOX- (carton), INNER- (inner), XDOCK-
+  (crossdock) — across single PNG, single A4, and all the zipped/portal downloads.
+- Portal preview: moved the "Preview as supplier" dropdown up to the "Portal preview" heading row, right-aligned
+  (was overlapping the label). inject.html only.
+- (Portal PO/production downloads already produce A4 moulds since v20.232 — hard-refresh if you still see PNGs.)
+
+## v20.232 - Portal downloads = A4 print moulds; portal PO view redesigned into tabs
+- BUG FIX: portal PO/production barcode downloads were producing individual PNGs; now they produce A4 print-mould
+  PDFs (product 36-up, carton 4-up) per SKU, zipped (new bcDownloadSheets). Barcodes-tab "A4 Print Mold" already
+  worked; this aligns the portal to it.
+- Portal PO grid: expand control is now a "MANAGE" button (with a red action badge when invoice/shipment info is
+  outstanding); the date "Completion" column renamed "Est. completion".
+- Portal PO expand redesigned into a tabbed view (like PURCHASE ORDERS ▸ PLAN): TIMELINE (status + notes),
+  ORDER PLAN (SKUs + crossdock download), INVOICE (submit invoice value + doc), SHIPMENT (flexport details/dates,
+  or submit completion date + tracking + carrier). Tab action badges flag outstanding items. Expand content is
+  left-aligned (was inheriting right-align). inject.html only.
+
+## v20.231 - Crossdock labels (portal) + SKU_CHILD reload with crossdock barcodes
+- Reloaded the new SKU_CHILD export into sku_labels (1068, incl. inserting missing crossdock SKUs) + products
+  (110 text cols). 20 CROSSDOCK SKUs now carry carton_barcode. (PREORDER SKUs still have no barcode in the data.)
+- buildCrossdockSVG: crossdock/preorder box label matching the _CROSS DOCK TEMPLATES artwork (DO NOT UNPACK box,
+  D&B logo, CROSS DOCK SHIPMENT / CROSSDOCK ONLY, SKU, barcode, Reg footer) with PO# / sales-order# / client name
+  overlaid in the DELIVER TO white space. Verified vs CROSSDOCK-1 (barcode 0650966963767 matches the template).
+- Portal: a PO with crossdock SKUs now shows "Crossdock SKUs on this order" + a "⤓ Download crossdock labels"
+  button → A4 4-up PDFs (one per crossdock SKU) with the overlay, zipped. label-data gains a ?skus= mode.
+- Saved roadmap memory: portal cost-price submission feature (a/b/c) for later.
+- server.mjs + inject.html. DEPLOY: this used a sandbox data reload; prod gets it via n8n from SKU_CHILD.
+
+## v20.230 - Supplier portal: per-PO and per-production barcode downloads
+- Portal PO grid gets two buttons per row: "⤓ PO" (product + carton barcodes for the SKUs on that PO) and
+  "⤓ {prod_no}" (all the supplier's SKUs across that production, scoped via products.supplier_multiple_all).
+  Each downloads a ZIP of individual PNG labels (reuses the label engine; flat folders, no batch warning).
+- New server endpoint /api/supply/label-data?po= | ?prod=&supplier= → label rows (MASTER only, barcode present),
+  registered before the generic :section route. server.mjs + inject.html.
+- Note: crossdock/preorder SKUs are skipped here until their carton barcodes are loaded (currently null in the
+  data — awaiting a SKU_CHILD export that includes them). Crossdock overlay labels are the next step after that.
+
+## v20.229 - BARCODES: content-size the table so thin columns (GRS) stop stretching
+- Root cause of the wide GRS column: the barcode table was width:100%, so auto-layout spread the slack across
+  columns. Gave it class bc-tbl with width:max-content (like po-tbl) so columns size to content and the table
+  scrolls if wide. GRS/size now tight. inject.html only.
+
+## v20.228 - BARCODES: narrower GRS + size columns
+- GRS approved header shortened to "GRS" (cell still Yes/—) → column shrinks to content. Size column capped at
+  90px inline-block with ellipsis + hover-title for the full code (one line, no ugly mid-word wrapping). inject only.
+
+## v20.227 - BARCODES: force SKU column width via inline-block span (webview ignored td min-width)
+- The webview ignores min-width on table cells, so the SKU column stayed narrow. Wrapped the SKU in an
+  inline-block span (min-width 250px + nowrap), which reliably forces the column width. inject.html only.
+
+## v20.226 - BARCODES: widen SKU column (fits ~35 chars, no wrap)
+- SKU column header + cells set to min-width 280px, white-space:nowrap. inject.html only.
+
+## v20.225 - BARCODES: File Download dropdown + split Download-all (products / cartons+inners)
+- Replaced the "Individual PNG" checkbox (which mis-fired when unticked) with a "File Download" dropdown:
+  "A4 Print Mold" (default) or "Individual PNG". Drives the per-row P/C/I buttons.
+- Download-all is now two buttons: "⤓ All Products" (product labels) and "⤓ All Cartons (+inners)" (carton AND
+  inner labels per SKU). Both export individual PNGs zipped + foldered by supplier (multi-supplier SKUs → each
+  folder). bcDownloadAll now takes a list of kinds. inject.html only.
+
+## v20.224 - BARCODES: RRP market is a dropdown (was multi-select pills)
+- Replaced the UK/US/EU market pills with a single "Market" dropdown (All / UK / US / EU). RRP on + a market
+  shows that market's RRP column; "All" shows all three. inject.html only.
+
+## v20.223 - BARCODES: right-align Download all over the "labels" column
+- Floated the ⤓ Download all button to the top-right of the Settings bar so it sits above the grid's "labels"
+  column (Ben's intent). Settings bar is display:flow-root so it still contains the float / grows — no overlap
+  with the grid. inject.html only.
+
+## v20.222 - BARCODES: rename "Label settings" heading to "Settings"
+
+## v20.221 - Label settings bar: switch to inline-block flow (fix Download-all overlapping the grid)
+- The wrapped second line (Download all) overlapped the grid below — the webview wasn't growing the flex
+  container's height on wrap. Switched the label-settings bar (#bc-settings) from flex to normal inline-block
+  flow, so the block container always grows to fit wrapped rows and pushes the grid down. Verified. inject only.
+
+## v20.220 - Label settings: stop controls clipping ("only Individual showed")
+- Bar items were shrinking (default flex-shrink) in the webview, so the longer "Individual (PNG) vs A4 PDF"
+  label collapsed and clipped. Set .bar children to flex:0 0 auto (no shrink → wrap instead), and shortened the
+  labels to "Individual PNG" and "⤓ Download all" (full text in tooltips). Verified under shrink pressure. inject only.
+
+## v20.219 - Fix overlapping controls on the Label settings (and all .bar) rows
+- Root cause: the .bar rows relied on flex `gap` for spacing; some webviews don't honour flex row-gap, so when
+  the bar wrapped the rows stacked on top of each other. Switched .bar / .bar-grp from `gap` to explicit child
+  margins (works everywhere). Verified no overlap even with gap forced off at a narrow width. inject.html only.
+
+## v20.218 - products.size_short + label size circle uses it
+- Migration 049 adds products.size_short; loaded from SKU_CHILD CSV (9) (S/M/L/XL/XS/XXL/One Size). The barcodes
+  query now sources the label size circle from coalesce(products.size_short, sku_labels.size_short). Real data:
+  "One Size" (e.g. eyemask) correctly shows NO circle per the rule. DEPLOY: run migration 049 + populate via n8n.
+
+## v20.217 - products expanded with all SKU_CHILD fields + real variant_type
+- Loaded the full SKU_CHILD export (138 fields × 1048 rows) into the products table. Migration 048 adds every
+  SKU_CHILD field not already on products (~104 new columns, as text): variant_type, size, product_name_final,
+  product_ean, carton/inner barcodes, barcode_*_name, GRS_material_product/carton, grs_approved, pallet_qty,
+  release_window, status, launch/discontinue dates, target_cover_*, inventory_* set, etc. Sandbox upserted by SKU
+  (1876 → 2029 rows; products now 147 cols). Existing typed columns (uk_rt, lead times, available_*) left intact.
+- BARCODES MASTER/set filter now uses the REAL variant_type (from SKU_CHILD), replacing the heuristic seed:
+  745 MASTER-only barcode SKUs, no SET leaking.
+- DEPLOY (Diviyaj): run migration 048 on prod AND wire n8n to populate these from SKU_CHILD (ideally typed, not
+  all-text). NOTE: SKU_CHILD has no "size_short" field — the label size circle still relies on the derivation.
+
+## v20.216 - BARCODES: only show MASTER products (hide "set" variants)
+- Barcodes grid now excludes set/multipack variants: query filters coalesce(variant_type,'') NOT ILIKE 'set'.
+- variant_type is a source-PIM field not previously extracted — migration 047 adds sku_labels.variant_type.
+  POPULATE from the SKU_CHILD/Airtable source in prod (Diviyaj/n8n). Sandbox seeded heuristically for now:
+  unambiguous multipacks (SKU ~ [0-9]SET, or PP- prefix) = 'set', else 'MASTER' → 928 barcode SKUs down to 786.
+- OPEN: gift boxes (GIFT-BOX-*) left as MASTER pending Ben's confirmation of whether they're 'set'.
+- server.mjs (filter) + migration 047.
+
+## v20.215 - BARCODES: label-settings bar tidy + empty-batch download warning
+- Label settings bar: dropped the divider crowding the heading (now "Label settings" with margin) and the
+  margin-left:auto on Download-all; dividers sit only between control groups.
+- Any label download (single PNG, A4 PDF, or Download-all) with no Batch selected now shows a proceed/cancel
+  warning that BATCH / DATE OF PRODUCTION will be blank. inject.html only.
+
+## v20.214 - BARCODES: Supplier filter on supplier_multiple_all + "Download all (by supplier)" ZIP
+- Supplier filter now matches the supplier_multiple_all field (was the PO-derived supplier list).
+- New "⤓ Download all (by supplier)" button: renders every product barcode in the current view to a PNG and
+  packs them into a ZIP foldered by supplier. Multi-supplier SKUs (e.g. "Lixin,XR Textile") get the same label
+  copied into each supplier folder; SKUs with no supplier go in "_no supplier". Hand-written STORE-method ZIP +
+  CRC-32 (no lib, CSP-safe). Button shows render progress; respects the selected Batch + Show-RRP settings.
+- inject.html only. (Heads-up: rendering a large view is sequential and can take a minute — filter first.)
+
+## v20.213 - BARCODES: download mode toggle, name wraps, supplier (multiple) column
+- Label settings now has an "Individual (PNG) vs A4 PDF" checkbox: unticked (default) = A4 merge sheet PDF,
+  ticked = single-label PNG. (Alt-click still forces single PNG.)
+- "name" column now wraps to show the full text (was a single nowrap line).
+- New "supplier (multiple)" column from products.supplier_multiple_all. server.mjs query + inject.html.
+
+## v20.212 - Carton/inner: two-line header + fix squished A4 labels
+- Carton/inner header is now two lines: line 1 "BOX OF n  x" (or "INNER  x"), line 2 the SKU (was one wrapping line).
+- Fixed the squished labels on the A4 sheet: the carton/inner label is now a fixed 600×841 (matching the mould
+  cell aspect 1178:1652) with the address anchored to the bottom; product is padded to 575×377 (cell 564:370).
+  Plus pdfA4 now places each label fit-preserving-aspect & centred (no independent x/y stretch). inject.html only.
+
+## v20.211 - Barcode labels now render in the Gotham brand font
+- Labels (product + carton/inner, single PNG and A4 PDF) now use Gotham instead of Arial. The Gotham Book/Bold
+  TTFs are committed to supply/assets/, served via /api/supply/asset/gotham-book|bold, fetched as data URIs at
+  label-generation time and embedded as an @font-face inside the label SVG (fonts also pre-decoded via the
+  FontFace API so they're ready when the SVG rasterises). Verified the embedded font renders (not Arial fallback).
+- New committed assets: supply/assets/gotham-book.ttf, gotham-bold.ttf (licensed font — Ben OK'd committing).
+- server.mjs (asset route serves fonts) + inject.html (fontCss + preloadFonts + svgText family).
+
+## v20.210 - A4 merge sheet PDF download + D&B logo on carton/inner
+- BARCODES P/C/I buttons now download the **A4 merge sheet as a PDF**: product = 36-up (4×9), carton/inner = 4-up
+  (2×2), using the exact cell rectangles read from the PSD molds (_A4-Mold-36/4-labels.psd; 2480×3505 @ 300 DPI).
+  Built with a small hand-written PDF writer (one A4 page, the rendered label rasterised to a JPEG image XObject
+  placed into each cell — no external lib, CSP-safe). Alt-click still gives the single-label PNG.
+- Carton/inner now use the real D&B logo (deck-chair + wordmark) at the top, served same-origin from
+  supply/assets/db-logo.png via /api/supply/asset/:name.
+- New committed asset: supply/assets/db-logo.png. server.mjs + inject.html.
+- REMAINING: Gotham brand font (files received — awaiting OK to commit the font binary to the repo, then I'll
+  embed it). Minor: product label aspect vs mold cell stretches ~6% on fill.
+
+## v20.209 - Carton & inner labels match the BOX_/BOX_INNER artwork
+- Built the portrait carton/inner label: DOCK & BAY wordmark, "BOX OF n  x  SKU" header, swatch + size circle +
+  box SKU (BOX-/INNER- prefix) + size name + BATCH, the Global Recycled Standard logo, GRS material text, the
+  barcode, and the fixed UK/EU compliance address. GRS logo served same-origin from supply/assets/grs-logo.png
+  (new /api/supply/asset/grs route) and embedded into the PNG. P/C/I downloads now fetch swatch + GRS as needed.
+- Carton barcodes that are 12-digit (UPC-A) render correctly (padded to EAN-13).
+- KNOWN GAPS: the deck-chair logo mark above DOCK & BAY (need the asset); Gotham brand font (files received,
+  embedding next); the A4 merge sheets (product 4×9=36, carton/inner 2×2=4) — need the label-stock dimensions.
+- New committed asset: supply/assets/grs-logo.png. server.mjs + inject.html.
+
+## v20.208 - Barcode label size circle uses size_short (+ "One Size" = no circle)
+- Added migration 046 (sku_labels.size_short — short size code for the label circle, populate from PIM).
+- The product label circle now uses size_short verbatim (e.g. eyemask = "M"); when size_short is "One Size" or
+  blank, no circle is shown. Falls back to deriving S/M/L/XL/XS from the size name until size_short is populated.
+- server.mjs barcodes query returns size_short. inject.html lblCircle reworked.
+- DEPLOY (Diviyaj): run migration 046 on prod AND populate size_short from the SKU_CHILD source.
+
+## v20.207 - Barcode label v2: matches the Dock & Bay OUTPUT artwork (product)
+- Rebuilt the product label SVG to match the real artwork: "DOCK & BAY" header, descriptor (barcode_sku_name),
+  friendly size (last segment of products.product_name), SKU, optional RRP (UK, shown when "Show RRP" is on,
+  no symbol), a black size circle (S/M/L/XL/XS derived from the size name), the colour swatch top-right, and a
+  BATCH / DATE OF PRODUCTION block fed by the selected Batch label-setting + batch_date. Barcode is full EAN-13
+  with extended guard bars and large human-readable digits (first digit + two groups of 6).
+- The label download now uses the selected batch + Show-RRP setting. server.mjs barcodes query adds product_name.
+- Carton/inner share the new layout (carton keeps the GRS material text). KNOWN GAPS for v3 (need from Ben/PSD):
+  size-circle letter for one-size items (e.g. eyemask = "M" can't be derived); the geometric brand font (CSP
+  blocks web fonts in the artifact — Diviyaj's hosted build can embed it); the carton GRS icon artwork + exact
+  carton/inner layout. inject.html + server.mjs.
+
+## v20.206 - BARCODES labels download as PNG (was HTML)
+- The P / C / I label buttons now download a PNG instead of an HTML file. The label is built as pure SVG
+  (barcode rects + SVG text) and rasterised to PNG via canvas at 2× for crispness. The product swatch is
+  fetched through a new same-origin image proxy (/api/supply/img?url=) and embedded as a data URI so the
+  canvas isn't cross-origin tainted (which would block PNG export). server.mjs (img proxy, before the generic
+  :section route) + inject.html (SVG builder + rasteriser, replaces the HTML builder). No schema change.
+
+## v20.205 - BARCODES: v1 label template + per-row downloads; column width tweaks
+- Column widths: swatch column narrowed to the image (~30px, blank header); GRS carton material widened
+  (min 380 / max 560px, wraps).
+- v1 label template + download: new "labels" column with P / C / I buttons (shown only when that EAN exists).
+  Each downloads a self-contained, printable HTML label (Product / Carton / Inner) for that SKU. The EAN-13 is
+  rendered as an inline SVG by a CSP-safe encoder built in (no external lib; 12-digit codes treated as UPC-A).
+  Product label shows swatch + name + SKU + size + RRP; carton shows carton name + qty + dims; all show the GRS
+  material text. Marked "v1 prototype" — needs aligning to Ben's PSD label artwork (dimensions/layout) for v2.
+- server.mjs barcodes query adds barcode_carton_name/inner_name, carton_qty, uk_carton dims. inject.html for the
+  encoder/template/buttons. No schema change.
+
+## v20.204 - BARCODES: divider after "Label settings:" so Batch label doesn't blend
+- Added a .bar-sep between the "Label settings:" heading and the Batch group. inject.html only.
+
+## v20.203 - BARCODES grid: drop batch column, add GRS approved + GRS carton material
+- Removed the per-row "batch" column (it just repeated the one selected batch on every row). The batch selector
+  stays in Label settings as a print-run setting (feeds the future label generator).
+- Added "GRS carton material" (sku_labels.grs_material) and "GRS approved" columns. There is no grs_approved
+  field in the schema, so GRS approved is DERIVED: Yes when the carton material text contains "GRS" (all current
+  materials are "…GRS certified…"), else —. inject.html only.
+
+## v20.202 - BARCODES label settings: group spacing fix
+- The label-settings controls read as one run ("Label settingsBatch", "Show RRPMarkets"). Wrapped each control
+  in a .bar-grp (tight label↔control gap) with vertical .bar-sep dividers between groups, and a colon after the
+  "Label settings:" heading. inject.html only.
+
+## v20.201 - BARCODES tab: label settings (batch, RRP toggle, markets) + PROD# cleanup
+- Added a "Label settings" row (config, distinct from the filters): Batch dropdown (stamps the chosen batch's
+  number/date/release onto the labels — shows a Batch column), a "Show RRP" checkbox, and UK/US/EU market pills
+  for which RRP to present. RRP comes from products (uk/us/eu only). Columns appear/disappear with the settings.
+- PROD# filter now lists only real production numbers (po.prod_no matching ^P[0-9]); the junk "AU" value (which
+  was also in the prod_numbers reference table) no longer appears, per Ben.
+- server.mjs (barcodes returns {rows, batches}; rows add uk_rt/us_rt/eu_rt; prod# regex filter) + inject.html.
+
+## v20.200 - BARCODES tab: filters (PROD#, supplier, category, release, SKU list)
+- Added a filter bar to the BARCODES tab: PROD# (dropdown), Supplier (dropdown), Category (dropdown), Release
+  (seasonal, dropdown), and a SKU/name text filter that accepts a comma/space-separated list. PROD# and Supplier
+  are aggregated server-side from the POs each SKU appears on (purchase_order_lines → purchase_orders), so a SKU
+  shows under every prod number / supplier it was ordered on. server.mjs (barcodes query adds release_window +
+  prod_nos + suppliers) + inject.html (filter bar).
+- Note: PROD# options reflect raw purchase_orders.prod_no values, so a mis-entered prod_no (e.g. "AU" on some POs)
+  appears as an option — a data-cleanup item, not a tool bug.
+
+## v20.199 - PAYMENTS tab: Order value labels no longer clipped
+- The "Order value" block (Estimate / Final invoice / Supplier submitted / Value used / Total amount due) was a
+  fixed 520px-wide scrolling table whose wide value cells pushed an internal horizontal scroll that clipped
+  content. Reworked it into the same clean label/value flex layout as the Client tab — each label sits in its
+  own column, the value flexes beside it, nothing scrolls or clips. inject.html only.
+
+## v20.198 - Server no longer computes due dates for 0% milestones
+- start_due / completion_due are now null when the milestone calc is 0 (CASE WHEN start_calc/completion_calc > 0).
+  The due date doesn't exist at the source, not just hidden in the UI. Verified PO-1596957 returns null for both;
+  POs with a real start/completion % still get their due dates. server.mjs only. Complements v20.197.
+
+## v20.197 - 0% payment milestones no longer show a due date / overdue warning
+- A start deposit or completion payment with a 0% / $0.00 calc now shows "—" in the Due column (no date),
+  no overdue ⚠, a neutral status badge, and no "likely pay date" input — there's nothing to pay, so it can't
+  be due or overdue (e.g. PO-1596957: 0% start with a stale 19-Dec-25 due date + warning). The PLAN tab and
+  grid exception flags also stop counting $0 milestones as overdue. Balance behaviour unchanged (already gated
+  on amount owing). inject.html only (dueCell owed-gate + poExceptions guard).
+
+## v20.196 - FOB rule finalised: no import-warehouse destination + no shipment = FOB pickup
+- Per Ben: FOB = the goods don't land into one of our import warehouses (UK/US/EU/AU/CA) AND no shipment is
+  assigned. DIRECT / "Direct to Client" / blank destinations are pickup → $0 freight, no import duty/tax, no
+  "no freight rate" action. Once a shipment is assigned it takes priority (it carries the real destination +
+  mode, including fob=$0). New shared isFOBdest(r) helper drives the PLAN LANDED COSTS view + the exception flags.
+- Server: cash flow now skips freight/duty/tax for FOB POs (was defaulting blank-country POs to UK rates and
+  charging freight) — keeps cash flow consistent with the PLAN view. Only the goods value flows for FOB orders.
+- Supersedes the v20.194/195 interim DIRECT handling. server.mjs + inject.html.
+
+## v20.195 - Correct DIRECT≠FOB; remove Production dropdown from PO grid
+- Corrected v20.194's wrong assumption that DIRECT = FOB. DIRECT is a destination that may ship to the US/UK
+  (freight + import, set on its shipment) OR be FOB pickup (no cost) — we can't tell until a shipment is assigned.
+  So a DIRECT PO with no shipment now shows freight/import as "pending shipment" (not "$0 FOB"), the landed total
+  is labelled "excl. freight/import — pending", and the "no freight rate" action no longer fires for DIRECT.
+  A DIRECT PO with a shipment routes freight/import to that shipment as before. FOB ($0) is still honoured at the
+  shipment level (mode='fob'). Non-DIRECT POs with a genuinely missing rate (and no shipment) still flag.
+- Removed the "Production" (supplier production-confidence) dropdown column from the PURCHASE ORDERS grid — it
+  duplicated the Status column visually and can still be set from the Actions tab. The production_status field
+  and its Pipeline / What's Next uses are unchanged. inject.html only.
+
+## v20.194 - DIRECT (direct-to-client) POs are FOB: no freight/tax, no false exception
+- A PO whose destination is DIRECT (direct-to-client, no warehouse location) is now treated as FOB pickup:
+  freight = $0, no import duty/tax. The PLAN ▸ LANDED COSTS tab shows "FOB" in those rows with an explanatory
+  note, and the "no freight rate" exception/action flag no longer fires for DIRECT POs (it was a false positive
+  — e.g. PO-1596960). Non-DIRECT POs with a genuinely missing freight rate still flag.
+- Cash flow already excludes $0 lines server-side, so DIRECT POs correctly contribute only their goods value.
+- inject.html only (poExceptions + payPanel landed section). No server or schema change.
+
+## v20.193 - PO grid: exception/action flag next to the PO reference
+- Added a shared poExceptions(r,d) helper (the single source of truth for PO exceptions/actions) and used it
+  for both the PLAN tab badges and a new red count flag shown right of the PO reference on the main PO grid.
+  Hovering the flag lists the actions. Today's signals: overdue start/completion/balance payments, supplier-vs-
+  final invoice discrepancy (only once the PLAN panel is opened), and "no freight rate for destination" (can't
+  estimate sea freight). inject.html only.
+- Note: the PO PLAN landed-cost action "(1)" on a DIRECT PO (e.g. PO-1596960) means it has no freight rate for
+  the destination so sea freight can't be estimated. For direct-to-client POs that may be expected — flagged
+  for review (see deploy notes / Ben).
+
+## v20.192 - PO PLAN: new LINKED RECORDS tab
+- Added a 6th PLAN sub-tab "LINKED RECORDS" holding the cross-table reference blocks (Deposit, Payments,
+  Flexport). ORDER PLAN now shows just the SKU/qty lines. inject.html only.
+
+## v20.191 - PO PLAN: keep the open sub-tab after a save (was snapping back to PAYMENTS)
+- Adding/removing a crossdock SKU (or any save that re-renders the panel) re-pulled the PO and rebuilt the
+  expand panel, which reset the active sub-tab to the first one (PAYMENTS). Now poRefetchPanel remembers the
+  open tab and loadPoDetail re-activates it after the re-render, so you stay on CLIENT (or whichever tab you
+  were on). inject.html only.
+
+## v20.190 - PO PLAN expand reworked into tabs + exception badges; Client UI fixes
+- The PURCHASE ORDERS ▸ PLAN expand panel is now a light-blue tabbed view (same .rtab styling as the other
+  level-3 navs): PAYMENTS (order value + payment plan + linked deposit/payment records), DATES, CLIENT,
+  LANDED COSTS, ORDER PLAN (SKU/qty lines). Only the active tab's panel shows; all are rendered so inline
+  saves keep working regardless of which tab is open.
+- Each tab shows a red circle exception/action counter when something needs attention:
+  - PAYMENTS: each overdue-unpaid milestone (start/completion/balance) + a supplier-vs-final invoice discrepancy.
+  - LANDED COSTS: no freight rate found for the destination.
+  (DATES / CLIENT have none today — wired so we can add more signals later.)
+- Client section UI fixes: column-1 labels now always visible (fixed-width label column, no overflow table);
+  crossdock SKU picker is a free-flowing wrapping row so the "add SKU" box stays visible no matter how many
+  chips are added (was clipped by the old fixed table cell).
+- inject.html only (payPanel now returns per-tab chunks + exception counts; poDetailHTML builds the tab bar;
+  bindPay wires tab switching). No server or schema change.
+
+## v20.189 - New per-PO "Client" section (name, requirements, sales order ref, crossdock SKUs)
+- In PURCHASE ORDERS ▸ PLAN, each PO now opens with a "Client" section: client name, client requirements
+  (textarea), sales order reference, and a Crossdock SKUs multi-picker. Eligible crossdock SKUs are any whose
+  code starts with CROSSDOCK or PREORDER (union of products + sku_labels); picked SKUs render as removable chips
+  and save as a comma list to purchase_orders.crossdock_skus. This sets up a future supplier-portal "download
+  crossdock labels" feature.
+- server.mjs: /api/supply/lookups now also returns `crossdock` (eligible SKU list); PO query returns the 4 client
+  fields; PO patch whitelist accepts client, client_requirements, sales_order_ref, crossdock_skus.
+- inject.html: txtIn() free-text saver (no comma-stripping), crossdockPicker() chips + add input, Client section
+  in payPanel, bindPay wiring for .txtin / .xd-add / .xd-rm, .chip CSS.
+- MIGRATION (for Diviyaj on prod): 045_po_client.sql — adds client_requirements, sales_order_ref, crossdock_skus
+  to planner.purchase_orders (client column already existed). Applied to sandbox.
+
+## v20.188 - PO PLAN Order value: show supplier-submitted invoice + docs + discrepancy
+- In PURCHASE ORDERS ▸ PLAN ▸ "Order value", added rows for the supplier-submitted invoice value (from the
+  portal, with status pending/applied) and links to the uploaded invoice document(s). If the submitted value
+  differs from the internal Final invoice amount, it's highlighted amber with the delta (⚠ differs (Δ $X));
+  if they match, shows a "matches" badge. po-detail now returns sup_invoice + sup_docs. server.mjs + inject.html.
+
+## v20.187 - PO PLAN Landed cost reworked (auto sea freight, due dates, no container picker)
+- PURCHASE ORDERS ▸ PLAN "Landed cost — estimated" table: added column titles (Cost / Amount / Est. due) +
+  a description of what it is. Removed the container-size picker — freight now AUTO-estimates from the
+  order-plan pallets as the cheapest SEA container combo (LCL/20ft/40ft) ▸ Flexport quote. Added an Est.-due
+  column: freight = delivery + 14, import duty/tax = landing (USA +7) — these feed CASH FLOW. If a shipment is
+  assigned, freight/tax show "→ shipment" (link) and are driven by the SHIPMENTS page instead. Landed total
+  recomputed client-side. PO query now returns pallets/sea_tiers/flex_quote.
+- Cash flow per-PO freight now uses the same sea-combo-from-pallets estimate (was the container-rate lookup),
+  so a PO with no container_size still prices (e.g. 0.1 pallets → 1×LCL $600). server.mjs + inject.html.
+
+## v20.186 - Shipment destination = shipment-level override, inherits from master PO
+- REPLACES v20.185's approach. The shipment's Ship-to/Branch now INHERIT from the MASTER PO (calculated:
+  country_code ▸ branch country; branch) and can be OVERRIDDEN at the shipment level — the override is stored
+  on planner.shipments (MIGRATION 044: branch, country_code) and never written to the POs aboard, so an FBA /
+  direct-to-client PO can be crossdocked via e.g. UK ILG without changing the PO. Displayed in the shipment
+  plan like the dates: bold final (with src — 'calc' inherited / 'S' override) and the override control below.
+  Grid Ship-to/Branch columns + the sea-rate market now use this master-PO-based value (was aggregated from all
+  POs). Diviyaj: run migration 044. server.mjs + inject.html.
+
+## v20.185 - Shipment plan: editable Destination (ship-to + branch) → POs aboard
+- The shipment grid's Ship-to/Branch are derived from the POs aboard (read-only), so they're blank when the
+  PO has no branch/country. Added a "Destination" editor in the shipment plan: Ship to + Branch selects that
+  write to ALL POs aboard at once, then refresh — so you can fix a blank destination from the shipment view
+  (the grid columns + freight estimate then inherit it). e.g. PO-55UKJM2 → set branch UK ILG → shows UK /
+  UK ILG and sea rates resolve. inject.html only.
+
+## v20.184 - Shipments grid: Ship-to country + Branch columns & filters
+- SHIPMENTS grid now shows Ship to (country) and Branch columns, with filter dropdowns for each (alongside
+  the existing status pills + search). Server adds branch to the shipments feed (market was already there).
+  server.mjs + inject.html.
+
+## v20.183 - Fix: shipment sea-freight $0 when PO destination blank
+- Shipment freight showed $0 because the shipment's "market" (for the per-country sea rate) was read from
+  po.country_code only, which is often blank. Now: market falls back to the PO's BRANCH country; and if the
+  shipment still has no resolvable destination, the sea-rate lookup defaults to UK rates so the estimate still
+  computes (rates are currently uniform across countries). Fixed in both the shipments feed and the cash-flow
+  freight calc. e.g. PO-55UKJM2 (4.9 pallets) now estimates $3,000 instead of $0. DIRECT-to-client shipments
+  still have no sea rate (freight is FOB/$0 there). server.mjs only.
+- NOTE: PO-55UKJM2 has neither branch nor country_code set — worth filling its destination in PURCHASE ORDERS
+  for an accurate per-country rate once sea rates differ by market.
+
+## v20.181 - Deep-link straight to an expanded PO / shipment
+- URLs can now target a specific row: #/supply/purchase-orders/<PO> opens that PO's PLAN, and
+  #/supply/shipments/<ref> opens that shipment's detail. Reverse too: expanding a PO/shipment row updates the
+  hash to include the ref (collapsing reverts), so the open item is shareable/bookmarkable. inject.html only.
+  (Caveat: a deep-linked PO must be in the current grid filter to auto-expand — complete POs are hidden by the
+  default in-progress filter.)
+
+## v20.180 - Shipments: date field layout (final date prominent, above the override)
+- Reworked each shipment date field (Departure/Landing/Arrival/Completion): LABEL → the final effective date
+  shown bigger/bold (with its src badge, e.g. 16-Feb-26 calc) → then the "override" input below. Previously the
+  final date was a small line under the override. inject.html only.
+
+## v20.179 - PO search overrides filters + shipment dates calc from master PO
+- PURCHASE ORDERS: a text search now overrides the status/action/country filters — it searches across ALL
+  POs (count note says "search — all statuses"). Previously an in-progress filter hid search hits. CSV export
+  follows the same logic. inject.html.
+- SHIPMENTS: when a shipment has no override and no Flexport dates, departure/landing/arrival/completion now
+  CALCULATE from the linked master PO (prod-end +7 = departure; + branch transit lead, air/sea by the
+  shipment's mode = landing/arrival; +7 = completion) instead of showing blank. Tagged 'calc'. server.mjs.
+
+## v20.178 - Shipment plan: PO refs link to Purchase Orders (PLAN)
+- In a shipment's expanded detail, the "POs aboard" references are now links that open PURCHASE ORDERS with
+  that PO's PLAN expanded (reuses gotoPO). inject.html only.
+
+## v20.177 - Shipments: Delivery → Completion (arrival +7) + ERP-receipt exception
+- SHIPMENTS: the "Delivery" date is renamed "Completion" and now computes as arrival + 7 days (warehouse
+  received) when there's no manual override — previously it was blank unless overridden. Server returns
+  `completion` + `completion_src` (S override / calc) on the shipments feed.
+- ACTIONS: new "Awaiting ERP receipt" card — a PO sitting in DELIVERED past its completion (arrival +7) but
+  not yet Received in Cin7/Fulfil → chase the receipt to complete the PO (informational, opens the PO).
+  server.mjs + inject.html.
+
+## v20.176 - Fix: deep-link refresh lost the level-3 sub-nav
+- Refreshing on a deep link like #/supply/productions/deposits showed the content but not the level-3
+  sub-nav (prod-subtabs/rep-subnav/config-subs). Cause: applyRoute ran showSupply() (auto-loads Actions)
+  AND the routed section — the two async renders raced and Actions clobbered the layout. Now applyRoute
+  calls showSupply(true) (show chrome, don't auto-select) so only the routed section renders. Same race
+  fixed in gotoSupplySection. inject.html only.
+
+## v20.175 - Payments Report: Deposit lines link to Deposits (not PO)
+- In PRODUCTIONS ▸ Payments Report, Deposit-type lines' reference now opens PRODUCTIONS ▸ Deposits (was
+  wrongly routed as a PO). Reference/deposit-ref links filter the register by the deposit CODE only (first
+  comma token, e.g. "P55-UK-WK2" from "P55-UK-WK2, Weierken…") so the register actually matches. inject.html.
+
+## v20.174 - OTHER PAYMENTS: lock paid rows + status/supplier filters
+- Paid Other-payments now grey out and lock (read-only) with an Edit→Save toggle (like the Deposits
+  register). Added filters: Status pills (All / Paid / Overdue / Unpaid) + a Supplier dropdown, with a count.
+  inject.html only.
+
+## v20.173 - Payments Report references are links
+- In PRODUCTIONS ▸ Payments Report, the expanded sub-payment lines now link: the reference opens the PO's
+  PLAN (Deposit/Completion/Balance lines) or Other Payments (Other lines), and the Deposit ref opens
+  PRODUCTIONS ▸ Deposits filtered to that ref. New gotoOther() helper. inject.html only.
+
+## v20.172 - Cash Flow deposit references link to Productions ▸ Deposits
+- Deposit-pool (register-basis) references in the Cash Flow report are now links too: they open
+  PRODUCTIONS ▸ Deposits with the register filtered (All) to that deposit reference. New gotoDeposit() +
+  _pendingDep prefilters the deposit search on arrival. inject.html only.
+
+## v20.171 - Cash Flow reference → opens the PO (PLAN) or shipment
+- The Reference in the Cash Flow report is now a link: PO-basis lines open PURCHASE ORDERS with that PO's
+  PLAN expanded; shipment-basis lines (freight / duty / tax on an assigned shipment) open SHIPMENTS with that
+  shipment expanded — so you can review estimates/actuals and edit likely-paid dates on the source item.
+  Deposit-pool (register) references have no single PO/shipment, so they stay plain text. Reuses the existing
+  gotoPO/gotoShipment helpers. inject.html only.
+
+## v20.170 - Hash deep-links for tabs (#/supply/reports/pipeline)
+- Tabs and sub-tabs now have shareable/bookmarkable URLs via the hash, e.g. #/supply,
+  #/supply/purchase-orders, #/supply/reports/pipeline, #/supply/productions/payreport, #/supply/config/freight.
+  Navigating writes the hash; opening a link, refreshing, or browser back/forward restores the exact tab.
+  Hash-based = pure client-side, works everywhere with no hosting change. inject.html only.
+- Clean paths (/supply/reports/pipeline, no #) would need a Vercel rewrite + History API — deferred to
+  Diviyaj (hosting) if wanted later.
+
+## v20.169 - Cash Flow all dates + likely pay date editable in PO PLAN
+- Cash Flow report split the single date column into Due · Likely pay date · Paid so all dates stay visible
+  (esp. when filtering overdue). Columns: Due, Likely pay date, Paid, Status, Type, Reference, Amount, Month,
+  Supplier, Mkt.
+- PURCHASE ORDERS ▸ PLAN payment table: new editable "Likely pay date" column (next to Due) for each unpaid
+  milestone (Start/Completion/Balance/Balance 2), wired to the same likely-date store as the Cash Flow report
+  (set in either place, shows in both). PO query now returns likely_start/completion/balance_1/balance_2.
+  server.mjs + inject.html.
+
+## v20.168 - Cash Flow report column reorder + labelled date input
+- Reordered Cash Flow columns and gave the likely-date input its own labelled column (was an unlabelled
+  input crammed in the Status cell). inject.html.
+
+## v20.167 - Pallet rebalance (smoothing) between POs + >20 signals
+- PURCHASE ORDERS: new Pallets column (Σ line qty ÷ sku pallet_qty); a PO over 20 pallets is shown in red.
+- ACTIONS: "Over 20 pallets" card for any PO over one container — but only BEFORE it ships (FUTURE /
+  PRODUCTION / READY TO SHIP; excluded once SHIPPING/DELIVERED/COMPLETE) and excluding Direct-to-Client.
+- Rebalance engine (the smoothing feature): the card's "⇄ Rebalance pallets" opens a preview that moves the
+  EXCESS off any >20 PO into the under-20 POs of the SAME supplier + production + branch (same destination —
+  never across markets), moving whole or partial SKUs, minimal-move (not a full repack). Preview shows the
+  per-PO before→after pallets + line deltas; Apply writes the new line quantities as proposed (not pushed to
+  ERP until Upload). Direct-to-Client and shipped POs are never touched. Endpoints /api/supply/rebalance/:po
+  (preview) and /rebalance-apply/:po. Verified end-to-end (e.g. 21.1+12 pallets → 20+13.1 via one 1,320-unit
+  move); live test reverted. server.mjs + inject.html.
+
+## v20.166 - Portal: rename Start dep header + payment columns show only paid
+- Portal PO table: renamed the "Start dep" column header to "Start deposit assigned".
+- The three payment columns (Start deposit assigned, Completion, Balance) now only show a value once the
+  payment has actually been MADE — i.e. when its paid date exists — and show that date underneath; unpaid
+  milestones show "—" instead of the due/term amount. Amount due / Due columns are unchanged. inject.html.
+
+## v20.165 - Deposits: lock paid+FX / closed rows (edit/save to change)
+- A deposit row now LOCKS (greyed, read-only) once it's CLOSED, or once it's PAID + FX applied (date_paid
+  set AND xero_fx set). Locked paid rows show a "paid" badge + an Edit button → unlocks the row inline
+  (Save relocks + refreshes; edits save inline as before). Closed rows show only Reopen — you must reopen
+  before they can be edited. Assign/edit controls are hidden while locked. Unlocked rows stay inline-editable.
+  UI-only (deposit save endpoint unchanged). inject.html.
+
+## v20.164 - PRODUCTIONS becomes a 4-tab section; Other Payments due dates loaded
+- Moved OTHER PAYMENTS and PAYMENTS REPORT out of REPORTS ▸ Payments and into SUPPLY ▸ PRODUCTIONS as
+  sub-tabs. PRODUCTIONS now has a light-blue (.rtab) sub-nav: Productions · Deposits · Other Payments ·
+  Payments Report. Removed PAYMENTS from the REPORTS sub-nav (REPORTS = What's Next · Pipeline · Cash Flow ·
+  Flexport). renderOtherPayments()/renderPaymentsReport() extracted as reusable container renderers; the old
+  renderPayments/paySub + REPORTS 'payments' route removed.
+- DATA LOAD (sandbox): populated Other Payments from WORKING_-_Sheet297_with_PO.csv — set the PO reference
+  (was null) and refreshed due/paid dates on 121 matched rows (matched by description), inserted 2 new; the
+  40 existing rows not in the file were left intact. All 161 Other Payments now have a due date. Data only,
+  no migration. Diviyaj: this load is sandbox-only; reconcile Other-payment references into prod separately.
+
+## v20.163 - REPORTS ▸ Payments: date filter + Other Payments due date/status
+- Payments register: From / To date filter using plain text boxes (not a date picker) — accepts a full or
+  partial date (2026 / 2026-06 / 2026-06-15) and filters the runs (TOTAL recomputes). Clear button resets.
+- Other Payments: added an editable Due date column + a derived Status badge — Paid (date paid set),
+  Overdue (due date past & unpaid), else Unpaid. Server: deposits feed now returns date_due and the
+  /deposit/:id save endpoint whitelists date_due (was missing). server.mjs + inject.html.
+
+## v20.162 - Supplier portal — Phase 4: internal one-click apply
+- Pending supplier submissions now surface in SUPPLY ▸ Actions as cards: "Supplier completion date" (DATES
+  group) and "Supplier invoice" (PAYMENTS group), each with one-click ✓ Apply + Dismiss (and a "view doc"
+  link when an invoice attachment is present). These cards carry their own apply/dismiss — the generic
+  snooze/dismiss lifecycle is suppressed for them.
+- Apply writes to the live PO (the internal click is the confirmation): completion_date →
+  end_production_overide, invoice_value → supplier_invoice_total; the submission flips to 'applied'
+  (re-apply refused). Dismiss flips it to 'dismissed'. Endpoints: /api/supply/submission/:id/apply and
+  /dismiss; server submissionActions() feeds the cards (like expediteActions). Verified end-to-end; live
+  test PO reverted. server.mjs + inject.html.
+- Supplier portal feature is now functional end-to-end in the sandbox (admin list → preview → write-backs →
+  internal apply). Remaining: the real authenticated /portal page (token→session→same view) with Diviyaj's
+  email + secure sessions; optional move of portal_attachments to Storage.
+
+## v20.161 - Supplier portal — Phase 3: write-backs (functional in preview, acting-as)
+- The portal preview is now write-enabled (you submit AS the chosen supplier to test). Per PO expand:
+  notes thread + post; "Submit to Dock & Bay" forms for completion date, tracking code + carrier, and
+  invoice value + document upload. Pending/applied submissions show inline.
+- Mixed apply-flow (as agreed): tracking + carrier APPLY DIRECTLY to the PO's shipment (shipments.carrier_ref
+  / carrier); completion date + invoice value are STAGED (supplier_submissions, pending) for internal
+  one-click apply (Phase 4); notes post immediately. Invoice docs upload to portal_attachments (bytea) and
+  serve via /api/supply/portal-attachment/:id.
+- Endpoints: portal-note, portal-upload, portal-submit, portal-notes/:sid, portal-submissions/:sid,
+  portal-attachment/:id. JSON body limit raised 4mb→12mb for uploads. supplier_id is trusted in the preview
+  (acting-as); the real /portal will derive it from the session. Verified end-to-end + cleaned up test rows.
+- Next: Phase 4 (staged submissions surface in SUPPLY for one-click apply) + the real authenticated /portal.
+
+## v20.160 - Portal preview: PO status filter pills
+- Purchase Orders tab in the portal preview now has status filter pills (one per status present), defaulting
+  to show PRODUCTION + SHIPPING. Toggle to show/hide others; a count line shows "N of M". inject.html only.
+
+## v20.159 - Supplier portal — Phase 2: CONFIG ▸ Portal preview
+- New CONFIG ▸ Portal sub-tab: pick any supplier from a dropdown and see exactly what they'd see in the
+  portal (their data only). Two inner tabs:
+  - Purchase Orders — PO ref, status, start/completion/ship dates, shipment, Flexport ref, start-deposit,
+    completion (+date), balance (+date), amount due (+due date), deposit ref; expand a row for its SKUs+qty.
+  - Deposits — paid / drawn-down / remaining summary cards + per-deposit table.
+  Deliberately shows ONLY supplier-facing fields — no cost prices, landed cost, duty/tax/freight. The render
+  (ppPOs/ppDeposits) is the same view the real /portal will use; here it's fed by filtering the internal
+  endpoints client-side. Read-only for now; write-backs are Phase 3. inject.html only.
+
+## v20.158 - Supplier portal — Phase 1: schema + CONFIG ▸ Portal Users
+- MIGRATION 043_supplier_portal.sql (applied to sandbox): supplier_portal_users (approved email↔supplier
+  list), portal_magic_tokens (one-time, 7-day), portal_sessions, supplier_notes, supplier_submissions
+  (staged write-backs), portal_attachments (bytea). Diviyaj: run 043 on prod.
+- New CONFIG ▸ Portal Users sub-tab: add/edit/remove approved supplier logins (email mapped to one
+  supplier, case-insensitive unique email), activate/deactivate, and "Magic link" (DEV STUB — returns the
+  login URL valid 7 days + copies to clipboard; real email is Diviyaj's for prod). Endpoints:
+  /api/supply/portal-users (GET), portal-user-create, portal-user/:id (patch + {_delete}), portal-magic/:id.
+- Phases next: 2 = /portal page + scoped read (their POs + deposits); 3 = write-backs (notes, staged
+  completion-date/invoice-value, direct tracking+carrier, file upload); 4 = internal one-click apply.
+  inject.html + server.mjs.
+
+## v20.157 - CONFIG ▸ Productions: widen Xero account input further
+- The Xero account edit box wasn't wide enough for longer values (e.g. "Stock Deposits and Payments for
+  P60"); widened it 260→380px (table cap 1080→1200). inject.html only.
+
+## v20.156 - CONFIG ▸ Productions: status dropdown + wider Xero inputs
+- Production Status is now a dropdown (blank / ACTIVE / CLOSED) instead of a free-text box. The editTbl
+  select matches the current value case-insensitively (existing 'active'/'Closed' map onto ACTIVE/CLOSED;
+  blank stays blank) and preserves any out-of-list value rather than coercing it. Saving normalises to the
+  chosen value (status field already whitelisted on /prod-number/:id — no server change).
+- Edit-row text inputs now honour each column's width, so the Xero code / Xero account boxes are wide
+  enough to show their text (were cropped at a fixed 118px). Widened those columns + the Productions table.
+  inject.html only.
+
+## v20.155 - CONFIG sub-nav restyled to match REPORTS
+- CONFIG's sub-menu (import tax / freight / duty / branches / suppliers / batches / productions / products)
+  was using the .pill chip style and read like a filter. Switched it to the same light-blue .rtab underline
+  tabs as the REPORTS sub-nav (generalised the level-3 sub-nav CSS to cover #config-subs). inject.html only.
+
+## v20.154 - REPORTS: Flexport moved in + sub-nav restyled
+- Moved FLEXPORT under REPORTS (sub-tabs are now What's Next, Pipeline, Payments, Cash Flow, Flexport);
+  removed from the top-level SUPPLY nav.
+- Restyled the REPORTS sub-nav: it was reusing the .pill chip style and read like a filter. New .rtab
+  class — underline tabs matching the level-1/2 menus, in light blue (active text #2563eb, blue underline,
+  light-blue tinted bar) — so it clearly reads as a tab level, not a filter. inject.html only.
+
+## v20.153 - SUPPLY: new REPORTS parent tab
+- Added a REPORTS sub-tab (right after ACTIONS) that groups the four read-across views as sub-tabs:
+  WHAT'S NEXT, PIPELINE, PAYMENTS, CASH FLOW (removed from the top-level SUPPLY nav). REPORTS renders a
+  pill sub-nav + a #rep-body; the four reports now render into #rep-body so the sub-nav persists.
+  New selectReport(); selectSection() routes the four report keys (and 'reports') through it, so existing
+  cross-nav and internal refreshes (e.g. cashflow likely-date save, payments create) stay inside REPORTS.
+  Context help resolves to the active report. inject.html only.
+
+## v20.152 - CASH FLOW Copy/CSV + clipboard copies no longer pop up an overlay
+- CASH FLOW report: added **Copy** (tab-separated, paste into Sheets/Excel) and **CSV** (download)
+  buttons in the toolbar. Both export the currently-filtered lines (month + all filters), columns:
+  Date, Month, Type, Reference, Supplier, Market, Amount_USD, Status, Kind, Basis, Class, Due,
+  Paid_date, Likely.
+- **Copy to clipboard is now direct** — no more "Copy & Paste" overlay/popup. Clicking Copy writes
+  straight to the clipboard and shows a short "copied ✓" alert. Applied to the BUY report Copy buttons
+  too (downloadReport now uses the same copyText helper instead of showCsvOverlay). The overlay function
+  is retained only as the FBA-transfer download fallback. inject.html + artifact_v16.7.html.
+
+## v20.151 - CASH FLOW: flat list, filter by month (not grouped)
+- Cash flow is now one flat itemised list (added a Month column), no longer grouped into collapsible
+  month sections. New Month + year dropdown filters the list to a single month; defaults to the current
+  month (falls back to All if no current-month lines). The summary strip remains a forward 6-month
+  overview and reflects all filters except the month picker; clicking a strip card sets the month filter.
+  TOTAL footer + count reflect the active filter. inject.html only.
+
+## v20.150 - CASH FLOW sub-tab (UI)
+- New SUPPLY ▸ CASH FLOW sub-tab (after PAYMENTS). Itemised payment lines grouped by month, each row:
+  date (+ paid/due/likely tag), type (colour badge), reference, supplier, market, amount (USD), status
+  (paid ✓ / overdue / due) and an estimate badge showing the basis (shpmt / pool / po).
+  - Summary strip: next 6 months, committed vs estimate totals.
+  - Month groups collapse (past months collapse by default; current + future open); an "Undated" group
+    flags lines with no computable date.
+  - Filters: type chips (all 6), status (All/Unpaid/Paid/Overdue), basis (All/Committed/Estimate),
+    market dropdown, PO/supplier search. Totals reflect the filter.
+  - Overdue, unpaid lines get an inline "likely payment date" picker → saves to /api/supply/likely-date
+    and re-buckets the line into that month.
+- inject.html only (no server change beyond v20.149). Help content added for the sub-tab.
+
+## v20.149 - CASH FLOW backend: itemised payment line items + likely-date override
+- New `/api/supply/cashflow` endpoint re-shapes the PURCHASE ORDERS calc (reused, not duplicated — the
+  'cashflow' section shares the PO-calc case block) into a flat list of dated payment lines, each with
+  {type, ref, supplier, country, amount, paid, estimate, basis, due, paid_date, date, date_kind, month,
+  overdue, likely_date}. Four sources:
+  - Supplier goods milestones — Deposit / Completion / Balance (per PO). $0 lines dropped.
+  - Referenced-deposit pools — when a PO's start deposit carries a deposit_ref, the PO's own deposit line
+    is suppressed and ONE line per reference (from the deposits register, paid=T/F) stands in its place.
+  - Freight — due = delivery + 14d. Sized on the assigned SHIPMENT (Flexport ▸ manual ▸ sea cheapest-combo
+    ▸ air), else the individual PO's est_freight.
+  - Import duty + tax — due = landing (USA = landing + 7d). Σ across the shipment's POs, else per PO.
+  - Freight/duty/tax (estimates) are emitted for non-complete POs only; goods milestones include paid history.
+- New "likely payment date" (manual) for overdue, unpaid lines: `POST /api/supply/likely-date {line_key,
+  likely_date}` (empty clears). When set, the line moves into that month (date_kind='likely'); the original
+  due date is retained.
+- MIGRATION 042_payment_likely_dates.sql (new table planner.payment_likely_dates). Applied to sandbox.
+  Diviyaj: run 042 on prod.
+
+## v20.148 - fix: $0 payments no longer flagged overdue
+- The PURCHASE ORDERS payment_overdue flag only checked whether a milestone amount was *unassigned*
+  (IS NULL), never whether anything was actually due. So a PO with a 0% deposit term (start_calc=$0),
+  or a balance that nets to $0 after deposit+completion, tripped a false "overdue" exception (and a due
+  date) in SUPPLY ▸ Actions. Each of the three overdue conditions now also requires its amount > 0
+  (start_calc>0 / completion_calc>0 / balance owing >0.01). No migration; server.mjs only — Diviyaj: restart.
+
+## v20.62 - shipment dates override PO everywhere + shipments in WHAT'S NEXT
+- Date precedence is now uniform: a linked shipment's dates (delivery/arrival/landing/departure) 100%
+  override the PO's ship/landing/delivery overrides; PO overrides only apply when the shipment has no such
+  date. Fixed in the PURCHASE ORDERS date chain (eff_delivery now ranks all shipment dates above PO
+  overrides; added sh.arrival_date) and the PIPELINE endpoint (was PO-first). This ripples correctly into
+  balance-due / check-in dates (payments).
+- WHAT'S NEXT: Shipping & Arriving sections now group by 🚢 shipment (units summed across its POs, click to
+  open the shipment); Completing stays per-PO. Closes "we need shipments in the whats next report".
+
+## v20.61 - SUPPLY section order
+- Moved WHAT'S NEXT and PIPELINE directly under ACTIONS: ACTIONS, WHAT'S NEXT, PIPELINE, PRODUCTIONS,
+  PURCHASE ORDERS, ... (the three "overview" views now lead the SUPPLY nav).
+
+## v20.60 - top menu order + labels
+- Top menu is now DEMAND · SUPPLY · BUY · FBA · REPORTS (SUPPLY moved to position 2). Renamed PLAN->DEMAND
+  and REPORT->REPORTS (data-view keys unchanged). SCENARIO now trails after REPORTS.
+
+## v20.59 - cross-view navigation, WHAT'S NEXT briefing, live re-render, pipeline default
+- PURCHASE ORDERS: the assigned shipment is now a link that opens SHIPMENTS with that shipment expanded
+  (a small ▾ still reassigns). PIPELINE cards open PURCHASE ORDERS with that PO expanded. Target view
+  switches to "All" filter so the row is always found.
+- New SUPPLY > WHAT'S NEXT (position 2): a forward calendar by date - which POs are completing / shipping
+  / arriving soon, with window (2/4/8wk/all) + market filters; click a row to open the PO. (Reuses the
+  pipeline milestone data via GET /api/supply/upcoming.)
+- Edits on the PO tab (dates etc.) now invalidate the derived-view caches (pipeline/upcoming/actions/...),
+  so those re-render fresh on next visit instead of showing stale data.
+- PIPELINE now hides checked-in POs whose arrival is >4 weeks old by default (toggle in the bar).
+
+## v20.58 - PURCHASE ORDERS: PLAN expand panel column-1 labels no longer cut off
+- The expand panel's first column (Production start, Production end, Start deposit, Completion, etc.) was
+  being squeezed/clipped because only the payment table had a min-width. Added min-width + nowrap to the
+  first column of every panel table (order value / payment plan / dates / landed cost); payment-plan col1
+  widened to 300px (it carries the label + % input + note). Labels now fully visible.
+
+## v20.57 - PIPELINE: PO lifecycle as a grouped timeline (new SUPPLY view)
+- New SUPPLY > PIPELINE (position 3). Every open PO is placed in one stage of its journey
+  (Awaiting production -> In production -> Production complete -> In transit -> Arriving <=2wk ->
+  Checked in), derived from the date chain + supplier-confirmed production status. Stages are columns;
+  cards are ordered by the next milestone and coloured by health (late / due <=7d / on track). Column
+  headers total PO count + units + value; market filter pills; click a card to open Purchase Orders.
+- Endpoint GET /api/supply/pipeline (stages + per-PO stage/next-milestone/health).
+
+## v20.56 - B2B Allocation scenario: re-analyse on country, verdict, AIR COST
+- Switching market now re-analyses (re-fetches stock, recent sales and retail/wholesale price - all
+  market-specific); previously the country pill changed nothing after the first run.
+- New order-level verdict banner: take it? / take with air-freight (worth it) / decline-renegotiate
+  (air cost too high or stock-out risk) / take but watch cover - with net-after-air economics and a
+  stock-impact summary (how many SKUs stock out / need rushing / left thin / comfortably covered).
+- Renamed "Rush $" to "Air cost" (the airfreight cost to rush in the shortfall) + a "Net after air" KPI.
+- SKU column no longer truncates and drops the product name (SKU only).
+
+## v20.55 - Supplier production-confidence layer (migration 028)
+- New per-PO production status (Not started / In production / Nearing completion / Complete / Shipped) +
+  last-confirmed timestamp (planner.purchase_orders.production_status + production_confirmed_at). Editable
+  inline in PURCHASE ORDERS (new Production column) and in ACTIONS; writing stamps the confirmation time
+  via /api/supply/po/:po/prod-status.
+- New ACTION "Production unconfirmed": completion date <= today+10 (approaching or overdue), status not
+  complete/shipped, and no confirmation in 14 days -> chase the supplier. (90 open POs hit this today as
+  nothing is confirmed yet + all completion dates are historical; drains as statuses are set.)
+- MIGRATION for Diviyaj: 028_production_status.sql (2 columns on purchase_orders).
+
+## v20.54 - Shipment-date ACTIONS
+- Two new ACTIONS enforcing "shipments must have dates": "Shipment missing dates" (assigned to live POs
+  but no departure/ETA date - inline date fix writes arrival_date) and "Shipment ETA passed" (ETA in the
+  past, not marked arrived - inline "Mark arrived" button sets status). Both per-shipment, posting to the
+  existing /api/supply/shipment/:ref. Note: 77 linked shipments currently have no own dates (they lean on
+  the PO landing override) - surfaces a shipment-date sync gap for Diviyaj's pipeline.
+
+## v20.53 - Slow Moving + Key Arrivals UI tweaks
+- Both: removed the product-name subtext under SKU; SKU column explicitly left-aligned.
+- Key Arrivals: SHOW pills are now Critical / Tight / All (default Critical, was at-risk/all);
+  "tight" risk now renders orange (#ea580c). Summary counts are stable across the risk filter.
+
+## v20.52 - ERP-match hardening (PURCHASE ORDERS + ACTIONS)
+- Per-PO ERP match is now 3-state: "✓ in sync" / "⚠ Update ERP (n)" drift / "✗ not in ERP (n)" (lines
+  exist but none mirrored from the ERP - never pushed). Previously a never-mirrored PO looked like drift.
+- PURCHASE ORDERS shows an ERP-match reconciliation summary across the visible POs (n in sync / drift /
+  not in ERP). PO query returns erp_in + erp_total alongside erp_pending.
+- New ACTION "PO not in ERP" (high), partitioned from "Order-plan change pending ERP push" so the two
+  don't double-list. Note for Diviyaj: erp_po (the ERP PO reference) is null on all POs in the mirror -
+  a pipeline gap, not flagged per-PO to avoid 102 false alarms.
+
+## v20.51 - Key Stock Arrivals report (REPORTS sub-tab)
+- New REPORTS > Key Arrivals: what is landing soon and how desperately it's needed. Groups upcoming
+  arrivals by shipment (or PO if unlinked), each showing the SKUs+quantities on it scored by stockout
+  risk: gap = days-to-stockout - days-to-arrival; gap<0 = CRITICAL (out of stock before it lands),
+  0-14d = tight. Window pills (1/2/4wk/all), market pills, all-lines vs at-risk-only. Sorted by ETA,
+  SKUs by gap. Seasonal forecast demand at destination market (AWD pooled into US); arrival = linked
+  shipment date else PO landing. Endpoint GET /api/scenario/key-arrivals. ARTIFACT change - flag for Diviyaj.
+
+## v20.50 - ACTIONS triage: severity sort/pills + inline supplier fix
+- Fixed action ordering: High-severity actions now lead (was sorting "amber" above "high" alphabetically,
+  burying the 122 high items below 31 amber). Added a severity summary line + High/Amber filter pills
+  (with counts) above the type pills; type pills now recount within the selected severity.
+- "PO missing supplier" (the largest bucket) is now inline-fixable: pick a supplier from the datalist and
+  Apply -> POSTs /api/supply/po/:po/supplier (sets name + resolves supplier_id so terms apply). No more dead-end.
+
+## v20.49 - Slow Moving seasonal velocity + Auto Forecast tunable cover/freight
+- Slow Moving: new VELOCITY basis toggle - Trailing actual (last 13wk sales) vs Forecast (seasonal),
+  the latter using the saved SKU forecast over the next 3 months so off-season lines aren't mis-flagged.
+  Velocity, cover weeks and the cover filter all follow the selected basis.
+- Auto Forecast: cover target (months, 1-12) and freight+duty (%) are now editable inputs that re-run
+  the plan, instead of fixed 2-month / 15% constants.
+
+## v20.48 - Slow Moving: pool US AWD into FBA stock
+- AWD (Amazon Warehousing & Distribution, US-only upstream) is now pooled into the us_fba line - it
+  feeds FBA and is the same stock pool. On-hand = us_fba available + products.awd_us, with an "incl AWD"
+  note on the row; cover/value reflect the combined pool. AWD-only SKUs (FBA=0) stay visible.
+
+## v20.47 - Slow Moving report (REPORTS sub-tab)
+- New REPORTS > Slow Moving: per SKU x warehouse stock health - on-hand, trailing 13-week velocity,
+  weeks of cover, days since last sale, cash tied up. Adjustable "slow if" thresholds (cover wks /
+  days-since-sale / velocity / min units, blank=ignore, no-recent-sales counts as slowest) and
+  Market (UK/US/EU/AU/CA) + Warehouse (3PL/FBA) pills; live client-side filtering. Sorted by cash
+  tied up. Endpoint GET /api/scenario/slow-moving. AWD omitted (no AWD stock location in inventory).
+  ARTIFACT change - flag for Diviyaj.
+
+## v20.46 - Auto Forecast report (REPORTS sub-tab)
+- New REPORTS > Auto Forecast: a 12-month buy plan by subcategory x primary supplier (forward-cover
+  netting on the saved SKU forecast, net of on-hand stock; order month = arrival - lead time) plus the
+  resulting Payments plan (starting/completion/balance deposits + freight+duty est, cash out by month).
+  Market pills (All/UK/US/EU/AU). Endpoint GET /api/scenario/auto-forecast. Freight is a flat 15% uplift
+  (precise landed cost stays on the PO view); cover target 2 months. ARTIFACT change - flag for Diviyaj.
+
+## v20.45 - payments report: actual paid currency + amount input (alt currency)
+- The Payments report now lets you record the actual paid currency (GBP/EUR/AUD/USD) + amount per
+  payment (date x supplier), stored in planner.payment_fx (migration 027) and shown next to the USD total.
+
+## v20.44 - create a deposit inline from a production
+- In a production's deposit section: "+ create deposit" auto-creates + assigns a deposit. Reference =
+  {prod_no}-{supplier code}-{n} (e.g. P54-XR-1); amount defaults to 30% of production value LESS deposits
+  already assigned; date = today. All editable afterwards in the Deposits register. New endpoint
+  production-deposit-create. ("assign existing" still picks an existing deposit.)
+
+## v20.43 - deposits: newest-first, close status, to-assign/closed/all pills
+- Deposits sorted newest->oldest (new deposit, no date yet, lands on top). Per-row Close/Reopen
+  (manual status); To assign / Closed / All pills (default To assign = not closed). Migration 026
+  adds deposits.status. Productions list already has Active/Completed/All pills.
+
+## v20.42 - DEPOSITS under PRODUCTIONS; production detail grouped + EAN + CSV
+- DEPOSITS is now a sub-tab under PRODUCTIONS (Productions | Deposits); removed from the top subnav.
+  PRODUCTIONS moved to position 2 (after ACTIONS). In the Deposits sub-tab each deposit can be
+  assigned to a production inline (production picker) + shows assigned production(s).
+- Production detail: SKUs sorted by SKU and grouped under category sub-headings, with an EAN column
+  and an "export CSV" button (SKU, quantity, EAN, category) per production.
+
+## v20.41 - Payments report (grouped by date + supplier; makeup + alt-currency)
+- The PAYMENTS > Payments tab is now a read-only report: each payment grouped by DATE + SUPPLIER with
+  its makeup (Deposit / Completion / Balance / Other) + USD total + the actual paid currency/amount
+  (GBP/EUR/AUD where recorded). Starting deposits excluded (they're allocations, not cash).
+  New /api/supply/payments-report.
+
+## v20.40 - tab reorg: DEPOSITS standalone, Other Payments under PAYMENTS, drop DEPOSITS & OTHER
+- DEPOSITS is now its own tab showing only the deposit register (is_deposit). PAYMENTS has two sub-tabs:
+  Payments (the deposit/completion/balance register, grouped by run) and Other Payments (sundry costs,
+  is_deposit=false, editable + add). Removed the combined "DEPOSITS & OTHER" tab.
+
+## v20.39 - PRODUCTIONS per-supplier + deposit assignment
+- A production is now per supplier (prod_no x supplier): P54 with 4 suppliers = 4 productions.
+- Assign deposits to a production in the PRODUCTIONS expand (deposit picker) -> planner.production_deposits
+  (migration 025). Expand shows assigned deposits (with unassign) + SKU rollup + POs.
+- Migration 025 also adds payment_transactions.paid_currency/paid_amount (alt-currency, for the payments
+  report). Run on live: migrations/025_productions_payments.sql.
+
+## v20.38 - DEMAND SKU planner: red flag for forecast with no stock [artifact edit]
+- In the SKU-level planner, a forecast month is shaded light red when there's demand but no stock to
+  cover it: projects on-hand (per channel's warehouse) + timed inbound (ETAs) forward; a month whose
+  running balance is <= 0 with a forecast > 0 is flagged. Colours the override input + final forecast
+  cell. Visibility only - does not change/remove the forecast.
+
+## v20.37 - SCENARIO: B2B Allocation planner
+- New B2B Allocation tool: enter client/date/market + SKU,qty lines -> per line shows available stock,
+  fulfil now / shortfall, cover weeks after fulfilling, recommendation (Give / Caution / Don't give /
+  Short+rush), airfreight rush cost (shortfall x unit weight x $10|£7 per kg toggle), wholesale (50% of
+  ex-VAT retail), order revenue and gross margin (vs avg PO cost). KPI summary on top. New /api/scenario/b2b.
+
+## v20.36 - Financial Forecast Model refinements
+- Inputs are now grey inline (dashed underline, default 0%) instead of blue boxes; growth & price
+  change are their own labelled rows per category ("growth" / "price change" in column 1).
+- Summary totals (revenue/units/YoY) moved to a KPI bar on top of the table; revenue shown as integers.
+- New "Import growth from demand plan" button: sets each category x quarter growth % from the demand-plan
+  category forecast (actuals + forecast_outputs vs last-year actuals), persisted. New POST fin-model-import.
+
+## v20.35 - availability fix: explicit SKU_CHILD flags + corrected view (bug 1) [DB + data]
+- Authoritative availability now = the 12 explicit available_<co>_<ch> flags (from SKU_CHILD) AND
+  launch/discontinue dates. Recreated v_product_availability to read the flags with a case-insensitive
+  country join (the old uppercase-vs-lowercase join made is_available false for ALL 722 SKUs -> the
+  planner never gated -> unavailable SKUs showed). Added 12 boolean flag columns + au_rt/ca_rt; AWD
+  (awd_us) sourced from inventory_us_awd. Sandbox loaded from SKU_CHILD (959 rows). Migration:
+  024_availability_flags.sql. Now is_available true = 2823 (was 0); e.g. TOWLB-CAB-LG-BLUE-SS24 is
+  UK-FBA only (not UK-DTC), so it drops out of the UK/DTC plan.
+
+## v20.34 - SUPPLY: PRODUCTIONS view (POs aggregated by PROD#)
+- New PRODUCTIONS sub-tab: lists each production (POs grouped by prod_no) with supplier(s), PO count,
+  total units/value, deposits, status; Active/Completed/All filter + search. Expand a production to
+  see SKU x total qty aggregated across all its POs and the POs in it. Read-only (Phase 1 of the
+  larger productions/deposits/payments rework). New /api/supply/productions + production-detail.
+
+## v20.33 - fix BUY/FBA core-seasonal filter (+ retail-price migration prep) [artifact edit]
+- BUY & FBA core/seasonal/non-core pills did nothing because the filter compared against the
+  collapsed C/S code. Server now sends the full classification (_SKU_RAW.p[sku].csf = Core/Seasonal/
+  Non-Core) and the filters use it, matching the pill values. Migration 023 (retail prices uk/us/eu_rt,
+  B2B prep) added.
+
+## v20.32 - SCENARIO: Financial Forecast Model (quarterly FY, persisted)
+- New Financial Forecast Model: per category x market x FY (Mar-Feb), quarterly columns. Shows last
+  year's actual units/revenue, editable % growth + % price change per quarter -> projected units/rev,
+  FY rollup + YoY in PS and units. Persists to planner.financial_model (migration 022). FY26/FY27,
+  market pills. Also added products.prod_weight_uk (B2B prep). Migration: 022_financial_model.sql.
+
+## v20.31 - AWD wired into Prime Day (products.awd_us)
+- Added products.awd_us (migration 021; from SKU_CHILD). Prime Day now shows real AWD (US-only)
+  inventory in the AWD column + KPI for the US / All-markets views (n/a for other markets).
+  Migration to run on live: migrations/021_awd_us.sql.
+
+## v20.30 - SCENARIO tab scaffold + Prime Day inventory
+- New SCENARIO top-nav tab (injected, parallel to SUPPLY) with sub-tabs Prime Day / B2B Allocation /
+  Financial Forecast Model. Prime Day: filter by SKU list / category / market -> available inventory
+  split by FBA / 3PL (AWD not yet loaded into product_inventory) + KPI totals. New /api/scenario/prime-day.
+  B2B Allocation + Financial Forecast Model are placeholders (next).
+
+## v20.29 - Exec Summary on Mar-Feb financial year [artifact edit]
+- Exec Summary cards now show FY26 (Mar25-Feb26, actual) vs FY27 (Mar26-Feb27, actual+forecast)
+  with YoY; the monthly table reorders to FY months (FY27 Mar26->Feb27 + FY28 partial to Dec27)
+  with FY totals. FY26 derived from prior-year values carried on FY27 months. Artifact edit.
+
+## v20.28 - REPORTS sub-tabs (Exec Summary / Slow Moving / Auto Forecast) [artifact edit]
+- REPORT view now has a sub-tab bar; Exec Summary is the default (unchanged behaviour). Slow Moving
+  and Auto Forecast are added as tabs with placeholders (full reports next). EDITS THE ARTIFACT
+  (renderReportView + REPORT_VIEW state) - flag for Diviyaj.
+
+## v20.27 - PLAN payment column fits labels
+- The payment-plan first column (Start deposit / Completion / Balance) no longer wraps/clips:
+  min-width 235px + no-wrap, table widened so full labels and descriptors show.
+
+## v20.26 - final invoice input sizing
+- Final invoice amount field is now a compact, left-aligned 120px input (fits up to 10000000.00).
+
+## v20.25 - deposit ref as searchable popover (like the shipment picker)
+- Deposit ref on the PO grid and in the PLAN panel is now a searchable popover (search reference /
+  supplier, shows remaining; "No deposit" option) instead of a plain combo. Light-red when a deposit
+  is required but unassigned.
+
+## v20.24 - final invoice amount overrides the estimate
+- New "Final invoice amount" input in the PLAN panel (saves to supplier_invoice_total). When set it
+  trumps the order-plan estimate for every payment milestone and the landed-cost goods value.
+- The PO grid value cell shows a green "final" badge when the final invoice is in use.
+
+## v20.23 - deposit-ref colour/no-deposit + left-aligned Status
+- Deposit ref shows light red when a deposit is required (supplier start% > 0) but none is assigned.
+- "NO DEPOSIT" is a selectable choice; when supplier terms require no deposit (start% = 0) the field
+  defaults to "no deposit" and is not flagged.
+- Status dropdown is left-aligned.
+
+## v20.22 - PO grid: sticky PLAN+PO columns; ERP read-only sync status
+- Column 1 (PLAN) and column 2 (PO) are now frozen on horizontal scroll.
+- ERP column is read-only: shows "in sync" when planned quantities match the ERP, or an
+  "Update ERP (n)" button when order-plan lines differ (pushes via the existing upload).
+
+## v20.21 - bulk PO upload (paste CSV/TSV)
+- New "Upload POs" button on PURCHASE ORDERS opens a paste-import modal (CSV or tab; optional
+  header). Recognised columns: PO, Supplier, Ship to, Branch, Status, Start. Creates new POs
+  (resolving supplier_id), skips existing PO numbers, and reports created/skipped/errors.
+
+## v20.20 - PO->shipment assign popover (create master + search)
+- The PO Shipment cell opens a popover: make this PO a master shipment, join an existing shipment,
+  or pick another PO that becomes the master. Searchable across shipments and POs; unassign too.
+
+## v20.19 — Shipments tab: PLAN button, clearer alerts, editable carrier/ref
+- Column 1 is now a **PLAN** button (was a bare arrow).
+- The alert now says why (unlinked / overdue) with a full-reason tooltip.
+- **Carrier** and **Carrier ref** are editable on the main grid (carrier ref keeps a Flexport link).
+
+## v20.18 — dates displayed as dd-mmm-yy across SUPPLY
+- All read-only date displays now render as dd-mmm-yy (e.g. 18-Jun-26): PO grid, PLAN panel
+  (payment due dates + date chain), Shipments, Flexport, Payments run headers, Order Plan column
+  headers, and all generic tables (linked records / suppliers / batches). Editable date pickers
+  keep the native control (browser locale).
+
+## v20.17 — Ship-to calculated from branch (override in PLAN) + country filter pills
+- **Ship to** is now derived from the PO's branch country, read-only on the grid (M tag if
+  overridden). The override moved to the **PLAN** panel (blank = use branch). Effective country
+  drives the landed-cost duty/tax/freight lookups.
+- New **Ship to** country filter pills (UK/US/AU/EU/CA/Direct, with counts) — OR within, AND with
+  the progress + action-item filters.
+
+## v20.16 — PO grid: read-only final dates + Delivery/Completion; editable in PLAN; create new PO
+- Main grid dates (Start / End / Ship / Delivery / Completion) are now **read-only "final" dates**
+  with source tags (M/FLEX/S/calc). **Landing replaced by Delivery**; **Completion = Delivery + 7d**
+  (stock check-in — the date for Fulfil/Cin7 as their delivery date).
+- Date **overrides moved into the PLAN panel** (production start/end, ship, delivery — editable;
+  completion auto). Saving ripples the chain.
+- **Supplier is editable** inline (resolves supplier_id so terms/lead apply).
+- **+ New PO** button creates a purchase order (PO number, optional supplier); fill the rest inline.
+
+## v20.15 — PO Branch + lead-time date chain; Branches in Settings
+- New editable **Branch** column on the PO (picker from the branches table).
+- **Auto date chain** (each step falls back to better info): production end = start + supplier
+  production_days; ship = production end + 7d (unless shipments/Flexport departure); landing =
+  ship + branch sea-lead (unless shipments/override/Flexport). Source tags: M / FLEX / S / calc.
+  Balance-due and the action-item flags now follow the effective ship/landing dates.
+- **Branches** table surfaced in SETTINGS (country + sea/air lead days + notes), editable.
+- No migration — branches table + suppliers.production_days already existed.
+
+## v20.14 — PURCHASE ORDERS: editable "Ship to" country
+- New **Ship to** column on the PO row: a dropdown of UK / US / AU / EU / CA / Direct to Client,
+  saving to country_code. Setting it drives the landed-cost freight/duty/tax (and tax/duty cards).
+
+## v20.13 — Order Plan grid: labels in column 1, smaller PO text, wider SKU column
+- Prod / Ship / Arrive labels now appear once in the column-1 header (aligned to those rows) instead
+  of repeating on every PO column — PO columns just show the dates.
+- PO number text reduced to 12px.
+- SKU column widened (min 240px) and set to no-wrap so SKU names always fit.
+
+## v20.12 — "to proceed" prompts in bright green
+- The needs-input cues in the PLAN landed-cost panel (set country / duty % / freight) are now
+  bright green (was muted grey) so the actions required to complete a calc stand out.
+
+## v20.11 — import-duty rate card (category x destination)
+- New editable **Import duty card** in Settings (product category x destination country), seeded
+  with dummy textile defaults (UK/EU 12%, US 9%, AU 5%, CA 18% — flagged "verify").
+- Landed-cost duty now falls back to this card when a product has no explicit duty %; a product-
+  specific duty % still overrides. So duty (and the landed total) populate as soon as a PO has a
+  country + lines.
+- **Migration to run on live: migrations/020_duty_rates.sql**
+
+## v20.10 — landed-cost estimate in the PLAN panel
+- PLAN panel now shows a **Landed cost (est)** block: container-size selector + goods, freight
+  (Flexport quote where linked, else the rate card — source tagged), import duty (Σ line value ×
+  product duty% for the PO country), import tax (country rate on the landed/goods base), and the
+  landed total. Changing container size ripples freight & tax.
+- PO query computes these from the v20.9 rate cards + product duty% + PO country_code/container_size.
+
+## v20.9 — SETTINGS tab: landed-cost rate cards (foundation)
+- New **SETTINGS** sub-tab: editable **Import tax** rates by destination country (rate + base) and a
+  **Freight** rate card by destination × container size (+ Row to add). All save inline.
+- Schema (migration 019): planner.import_tax_rates, planner.freight_rates; product_countries.duty_pct
+  (per-product per-country import duty); purchase_orders.container_size. Seeded tax (UK/EU/US/AU/CA)
+  + a blank freight grid to fill in.
+- Sets up the landed-cost calc (goods + freight + duty + tax) wired into the PLAN panel next (v20.10).
+- **Migration to run on live: migrations/019_landed_cost_settings.sql**
+
+## v20.8 — PURCHASE ORDERS action-item pills
+- New toggle quick-filters: **Payment overdue**, **Late**, **Unassigned shipment**, **Production**
+  (each shows a count; they AND together and with the progress filter). Flags computed server-side
+  vs current_date: late = landing past & not complete; overdue = any milestone past-due & unpaid;
+  unassigned = no shipment & not complete; production = status contains "production".
+
+## v20.7 — PURCHASE ORDERS: PLAN button + editable payment plan
+- Column 1 is now a compact **PLAN** button (was a wide arrow); PO table sizes to its content so
+  columns no longer squish. Added a **Ship** column (date + source tag) and a **master** badge on
+  the shipment cell.
+- **PLAN panel** = editable payment plan per PO: Start deposit / Completion / Balance (+ Balance 2
+  auto when balance 1 is partial). Each milestone shows the calc/est, an override **amount**, a
+  **date**, and (start) a **deposit-ref** picker with remaining-availability. **% terms** for start
+  & completion are editable per PO (override blank = supplier terms). Due dates auto from PO/ship
+  dates + supplier credit. Saving re-pulls the PO so catch-up & owing ripple.
+- Status badges: a start deposit drawn on a deposit ref shows as covered (not a cash due).
+- New per-PO override columns (migration 018): start/completion %-override + balance-2 amount/date.
+- **Migration to run on live: migrations/018_po_payment_overrides.sql**
+
+## v20.6 — Order Plan header tidy
+- Status/Country filter pills now have breathing room (gap between them).
+- PO number in the column headers is larger; PROD / SHIP / ARRIVE dates split onto 3 lines.
+
+## v20.5 — partial-carton icon ½ → p
+- Order Plan: the half-carton partial markers now read **p** / **p ✓** (was ½). Annotation updated.
+
+## v20.4 — Deposits & Other reload + editable; ACTIONS apply-before-clear
+- **Deposits keyed by surrogate id** (migration 017): `reference` is no longer unique — handles the
+  159 "Other" sundry payments (no ref) and the 12 deposit refs with installments/credit-notes/
+  write-offs. Added xero_account_code. Sandbox reloaded from the full working list (322 rows).
+- **DEPOSITS tab**: supplier is now a selectable combobox; reference/description/prod#/amount/date
+  all editable; **+ Deposit** / **+ Other payment** create rows. "Other" payments show no FX /
+  Used / Remaining / POs (no pool concept). Deposit Used/Remaining are pooled across rows sharing a
+  ref (so credit-notes net correctly); PO-assigned is calculated from the POs pointing at the ref.
+- **ACTIONS**: entering a fix value no longer auto-commits and vanishes — an explicit **Apply**
+  button commits, the card stays marked ✓ for verification, and **↻ Refresh** clears resolved ones.
+  "Deposit not paid" now only fires for real deposits (not Other); over-assigned check is pooled.
+- Removed the bottom-right floating SUPPLY button (top-nav tab is the single entry point).
+- **Migrations to run on live: migrations/017_deposits_surrogate_key.sql** (deposits data on live
+  comes from the ERP/n8n, not this CSV).
+
+## v20.3 — interactive Shipments (real planner.shipments table, dates override the PO)
+- New `planner.shipments` table (migration 016): shipment_ref, master_po, carrier, carrier_ref,
+  departure/landing/delivery/arrival overrides, status, notes. Seeded from existing shipment_refs.
+- SHIPMENTS tab is now fully editable: per-shipment carrier/ref/status/notes + four date OVERRIDES
+  (a shipment date wins over the PO's landing/delivery — precedence Shipment ▸ PO override ▸ Flexport).
+- Expand a shipment to edit it, see POs aboard, mark a **master** PO, or **unassign** a PO.
+- **+ New shipment** and assign **Unassigned POs** (combobox) create/wire shipments live.
+- PO list landing now shows source tag **S** (shipment) ▸ M ▸ FLEX; balance-due uses shipment departure.
+- New endpoints: POST /shipment/:ref (upsert), /shipment-create, /shipment/:ref/assign. lookups feed
+  shipment refs from the new table. **Migration to run on live: migrations/016_shipments.sql**
+
+## v20.2 — ACTIONS pills + inline fixes; PO Batch/PROD#/Shipment selectors
+- ACTIONS grouped with **type pill filters**; each card has an **inline fix** (date picker, shipment
+  combobox, Upload-to-ERP, or Open-in-Order-Plan) wired to the existing endpoints; list refreshes after.
+- PURCHASE ORDERS: **Batch** column (combobox from batches), **PROD#** now a combobox (from prod_numbers),
+  **Shipment** now a combobox (from existing shipments). New /api/supply/lookups feed.
+
+## v20.1 — FBA: exact Amazon upload format, split clear buttons, multi-SKU filter
+- **FBA Transfer Upload** now outputs Amazon's EXACT send-to-Amazon template (tab-separated): US/CA
+  template (Expiration/Lot, in/lb) vs UK/EU/AU template (Prep/Labeling owner + Default…Seller rows,
+  cm/kg). Rows = SKU, qty, blanks, units/box, #boxes, box L/W/H/weight. Carton dims from
+  sku_labels (migrations 015) injected as window.FBA_DIMS.
+- **Clear buttons split**: Override "Clear all" clears only override numbers; new **Clear** under the
+  Ship header clears only the tick boxes (alongside Select all).
+- **SKU filter accepts a list** (paste many SKUs, space/comma separated) and the box is widened.
+
+## v20.0 — FBA tab: Create-FBA-Shipment button + per-category select-all
+- **Create FBA Shipment** button in the FBA toolbar — popup "Feature to build - Direct created
+  shipment in Amazon FBA" (placeholder, no function yet).
+- Each category header row in the FBA transfer table has a **[ select all ]** link that ticks every
+  row in that category (within the current filter). (Artefact edits.)
+
+## v19.9 — FBA tab tweaks (⚠ edits the artefact, not just the harness)
+- FBA view **defaults to Transfer FBA** (was All).
+- "Selected: N units · N cartons" summary **moved left** beside the FBA Transfer Upload button
+  (removed margin-left:auto).
+- **Select all** button added under the **Ship** column header (ticks every visible transfer row).
+- NOTE: these are 4 small direct edits to artifact_v16.7.html (FBA logic lives there) — first time the
+  artefact itself is modified; flag to Diviyaj. Next: FBA upload sheet → downloadable text in correct format.
+
+## v19.8 — Order Plan: clearer empty cells + working partial-carton approval
+- 0-qty cells now render **blank/faint** (no blue box) — populated cells stand out; cells stay
+  click-to-edit (border appears on hover/focus).
+- Partial cartons: the cell is **highlighted amber** when unapproved with a clear **"½ ✓" approve
+  button**; once approved the cell turns **green (½✓)**. (ACTIONS + Unapproved-partials filter unchanged.)
+
+## v19.7 — PO tab polish: deposit-ref combobox, date pickers, 2dp currency
+- Deposit ref is now a **type-ahead combobox** (datalist of deposit references — type to filter or pick).
+- Date cells use a **native date picker** and remain typeable (input type=date).
+- **All currency values show 2 decimal places**; unit/pallet counts stay whole.
+
+## v19.6 — Order Plan: category grouping, SKU scope, release window, partial-carton approval
+- SKU rows **grouped by category** (sub-headers). **SKU scope**: Ordered vs **All in category**
+  (pulls the SKU master so you can add any SKU in a category to a PO). **Release-window filter**.
+- **Partial cartons**: amber ½ on partial-qty cells with a green **✓ approve** tick → sets
+  partial_carton_approved (shows ½✓). **Unapproved partials** filter pill; pending approvals already
+  surface in ACTIONS. New: /api/supply/skus, po-line/:po_sku/approve; sku_labels.release_window (mig 014).
+
+## v19.5 — Order Plan UX: editable blanks, PO filter, pallet exception, smarter Upload
+- **Every cell is editable** (blank cells start at 0; editing creates the line via upsert — add a SKU
+  to a PO). **SKU column widened & always visible** (sticky, min-width). **Filter by PO number**.
+  **>20 pallets flagged red ⚠** in PO + totals. **Upload button shows only when that PO has pending
+  changes** (qty ≠ ERP). po-line endpoint is now an upsert.
+
+## v19.4 — Order Plan proposed-change persistence + Flexport active/completed + links
+- Order Plan now records **source of truth (erp_qty) vs proposed (qty)** with **proposed_at/by** stamps
+  (migration 013); a proposed change persists until Upload pushes it and erp_qty aligns. Pending
+  changes surface in **ACTIONS** ("Order-plan change pending ERP push") so they aren't forgotten.
+  (ERP re-sync must update erp_qty but preserve a still-pending proposed qty — documented for the ETL.)
+- **FLEXPORT** split into **Active / Completed** (by arrival date) with filter pills; the **Flexport
+  reference is now a clickable link** to app.flexport.com/shipments/<id>.
+- Migration to run on live: 013_orderplan_proposed.
+
+## v19.3 — Order Plan: production default, pills, dates/pallets, editable qty + ERP upload
+- Default view = **Production status**; **Status & Country as multi-select pills** (+ All); PROD#/Category dropdowns + SKU search.
+- PO column headers now show **production start→end, ship, delivery dates, units and pallets**
+  (pallets = Σ qty/pallet_qty; `pallet_qty` added to sku_labels, migration 011/012).
+- **Editable qty cells**: a cell turns **red when it differs from the ERP value** (`erp_qty`, mirrored
+  from Cin7); per-PO **⬆ Upload** button pushes planned qtys to the ERP (sets erp_qty:=qty, logs to
+  etl_runs). Endpoints: POST /api/supply/po-line/:po_sku, POST /api/supply/po/:po/upload.
+  NOTE: the real ERP API write is the gated Diviyaj integration; this stages + clears the mismatch.
+- Migrations to run on live: 011_sku_pallet_qty, 012_orderplan_erp_sync.
+
+## v19.2 — Order Plan side-by-side grid (filter + group)
+- ORDER PLAN rebuilt as the spec's side-by-side view: **SKU rows × PO columns**, qty in cells,
+  per-SKU total column and a **PO TOTALS** (units / value) row. Filters by **PROD# / Country /
+  Status / Category + SKU search** (defaults to the busiest PROD# to keep the grid readable).
+  Partial-carton cells flagged ½. Endpoint enriched with po/country/category metadata.
+
+## v19.1 — Live USD recompute on payment runs
+- Editing a run's bank amount / FX now recomputes the **USD equivalent** and the **matches-legs**
+  badge instantly (was on reload). Saves still persist on change via run-meta.
+
+## v19.0 — Shipments master-shipment model (Flexport-fed)
+- SHIPMENTS rebuilt: POs grouped by `shipment_ref` (master PO), with PO count / suppliers / units /
+  value, **Flexport-fed dates** (departure / landing / arrival; landing precedence M ▸ FLEX), Flexport
+  ref + freight. Filters Active / Completed / Exceptions / All. Expand a shipment → **POs aboard**
+  (`GET /api/supply/shipment-detail/:ref`, master first).
+- **Unassigned POs** section with an inline "assign to shipment" field (writes `shipment_ref` via the
+  PO endpoint) — turning the "unassigned shipment" exception into a one-field fix.
+
+## v18.9 — ACTIONS enriched (over-assigned deposits, partial cartons)
+- ACTIONS now also surfaces **Deposit over-assigned** (assigned start deposits exceed the pool) and
+  **Partial cartons need approval** (in-progress PO lines that aren't a full carton multiple and
+  aren't yet approved), alongside date conflicts / unassigned shipments / missing supplier / unpaid deposits.
+
+## v18.8 — Full order plan mirrored from Cin7
+- `purchase_order_lines` now loaded from the **Cin7 OrdersExport** (migration 010): 4,481 lines
+  across 236 of 256 POs. Rows with no SKU/QTY (landed costs) excluded; qty summed per (po,sku).
+- **value-est now lights up for 236 POs** (was 1) → milestones/catch-up/balance compute across the book.
+- carton size sourced from `sku_labels` via the view (Cin7 has none); `partial_carton_approved` kept as our overlay.
+- Migration to run on live: `010_cin7_order_lines.sql`. NOTE: production should **sync from Cin7/Fulfil
+  via n8n**, not a static seed. Future: **bidirectional** — pull from ERP + **push planned-PO updates
+  (dates/price/sku/qty) back to the ERP when the supplier invoice deltas** (Diviyaj-wired; live writes gated).
+
+## v18.7 — Payment catch-up + credit-type balance dates
+- **Catch-up calc:** completion = (start% + completion%) × value − **actual start-deposit assigned**,
+  so completion tops up to the cumulative target when the assigned deposit differed from straight
+  start%. `catch_up` surfaced in the PO payment schedule.
+- **Balance due by credit type:** `on shipment` → ship/Flexport departure + credit days;
+  `on clearance` → landing + credit days.
+- **Guard:** when a PO's value is unknown (no order-plan lines and no stored estimate), completion /
+  balance / catch-up are shown as blank rather than misleading negatives.
+
+## v18.5 — FIX: SUPPLY never rendered (string-replace `$'` corruption)
+- Root cause of the tab not appearing at all: the inject was spliced via
+  `html.replace('</body>', … + SUPPLY_INJECT + …)`. The injected JS contains `$'` (e.g.
+  `legs $'+money(total)`), and in `String.replace` the replacement string treats `$'` as
+  "everything after the match" — so `$'` was rewritten to the document tail (`</html>`),
+  producing invalid JS → `Uncaught SyntaxError` → the whole inject aborted (no nav button, no
+  floating button). Fixed by using a **function replacement** (`() => tail`), which disables all
+  `$` substitution. Verified the *served* script now passes `node --check`.
+
+## v18.4 — Bulletproof SUPPLY entry point
+- Decoupled builders: `ensureRoot` / `ensureNavButton` / `ensureFloat`. SUPPLY now works even if the
+  nav can't be augmented — a fixed **floating "SUPPLY ▸" button** (bottom-right, z-index 99999) is
+  always added to `document.body` and opens the panel. Root is built on demand.
+- Console beacon `[SUPPLY] inject vX executing` to confirm the script runs in the browser.
+- All builders wrapped in try/catch; multi-trigger boot retained.
+
+## v18.3 — Fix: SUPPLY tab sometimes didn't appear
+- Bootstrap was gated solely on `DOMContentLoaded`; if that had already fired (or fired oddly with
+  the 5 MB artefact) `init()` never ran. Now idempotent (guards on `#supply-btn`) and triggered on
+  immediate call + DOMContentLoaded + load + timed retries. Verified headlessly (jsdom).
+- `GET /` now sends `Cache-Control: no-store` so the browser never serves a stale page.
+
+## v18.2 — Fix deposit drawdown basis
+- Drawdown `used` now sums **assigned** start deposits (`pay_start_deposit_assigned`) per spec B8.6
+  ("pool depletes by start-deposit assignments only"), not the start%×value estimate across all
+  linked POs (which over-counted and produced negative remaining).
+
+## v18.1 — Deposit drawdown + estimated payment dates now CALCULATED
+- **Deposit drawdown** is computed, not stored: `used` = Σ start-deposit (start% × PO value) of the
+  POs assigned to each reference; `remaining` = amount − used (spec B8.6).
+- **Estimated payment dates** computed per PO: start due = prod start, completion due = prod end,
+  **balance due = landing + supplier credit days** (credit type shown).
+- PO expand now shows a **calculated payment schedule** (milestone · est amount · due · source —
+  start deposit shows which deposit reference it draws on).
+
+## v18.0 — Payments engine + DEPOSITS & OTHER split
+- **Payments engine:** transactions roll into **date-grouped runs**. Each run header is editable
+  (bank / paid currency / bank amount / FX) and computes the **USD equivalent** (bank amount × FX)
+  with a **matches-legs ✓** check vs the run's leg total. Leg amount/date editable. Export for Xero
+  (CSV) carries run bank/ccy/FX. New table `migrations/009_payment_run_meta.sql`; upsert via
+  `POST /api/supply/run-meta/:date`.
+- **DEPOSITS tab → "DEPOSITS & OTHER"** with sub-pills (Deposits / Other / All) driven by the CSV's
+  `is_deposit` flag (20 deposits, 25 other); Type badge + Description column added.
+- Migration to run on live: `009_payment_run_meta.sql`.
+
+## v17.2 — SUPPLY restyled to native artifact look + PO refinements
+- **Restyle:** SUPPLY now uses the native palette (system font, `.pill` filters, `.tw` tables,
+  `tool-badge`, `.fci` editable cells, `.src` FLEX/M badges, `.annot` banners), scoped under
+  `#supply-root` so it matches the other tabs and can't clash with the artefact.
+- **Status colour-coded** everywhere (PO status is a colour-tinted dropdown; status columns render
+  as coloured badges).
+- **Deposit ref is now a lookup** (dropdown of `deposits.reference`), not free text.
+- **Value est = Σ(qty × cost_price) from the order-plan lines** (falls back to the stored estimate
+  where a PO has no lines yet; ∑ vs est marker shown). Milestone splits derive from it.
+- **Flexport linking** — migration `008_po_flexport_link.sql` adds `purchase_orders.flexport_reference`
+  (60 POs; 39 match a Flexport row). **Landing date imports from Flexport** (`FLEX` badge) unless
+  manually overridden (`M`).
+- Migrations to run on live: `008_po_flexport_link.sql`.
+- NOTE: a real **payments engine** (runs/batches, catch-up, FX → Xero) is still to build — next.
+
+## v17.1 — PURCHASE ORDERS management engine (inline edit + linked tables)
+- PURCHASE ORDERS is now **inline-editable**: status (dropdown), prod start/end, landing, value est,
+  deposit ref, shipment, ERP — each cell saves on change via `POST /api/supply/po/:po`
+  (whitelisted/parameterised; targets the configured DB = sandbox).
+- **Default filter = In progress** (everything not COMPLETE/FUTURE; 45 POs); pills In progress /
+  Future / Complete / All.
+- **Tables now linked**: expand a PO to load its related records via `GET /api/supply/po-detail/:po`
+  — lines, deposit, payments (matched on po_completion/po_balance), and Flexport (by shipment name).
+- CSV export respects the active filter.
+
+## v17.0 — SUPPLY built out to the mockups (PO list, FLEXPORT, ACTIONS, editable Payments/Deposits)
+- **PURCHASE ORDERS** rebuilt to mockup spec: status-badge column, Prod start/end, Landing, Value est,
+  and **computed payment milestones** (Start dep / Completion / Balance from supplier terms × value),
+  Deposit ref / Shipment / ERP / PROD# columns, status filter pills, search, **expandable payment
+  schedule** per PO, and a **CSV for Fulfil** export.
+- **ACTIONS** = the exceptions list (date conflicts, unassigned shipment, missing supplier, deposit
+  not paid), grouped by type with severity.
+- **FLEXPORT** new sub-tab + table — `migrations/007_flexport.sql` (`planner.flexport_shipments`, 121
+  rows; `shipment_name` links to `purchase_orders.po`).
+- **PAYMENTS & DEPOSITS** now have **editable input fields** (txn actual amount/date; deposit
+  amount/FX/date paid) that **save to the DB** via `POST /api/supply/deposit/:reference` and
+  `/api/supply/payment-txn/:id` (whitelisted fields, parameterised). Writes target the configured
+  DB — currently Ben's sandbox.
+- New migration to run on live: `007_flexport.sql`.
+
+## v16.9 — SUPPLY polish + PLAN→DEMAND rename
+- SUPPLY tab now hides the demand/buy filter row (Country, Channel, Category, SKU, sort, dates)
+  and the plan/buy tool-bar — they belong to DEMAND/BUY only. Kept intact on those tabs.
+- Top-nav **PLAN renamed to DEMAND** (spec B3.1), relabelled at serve time (artefact untouched).
+
+## v16.8 — SUPPLY tab (Production Planner), Phase 2 data layer
+- **New: SUPPLY top-nav tab** (Production Planner) on the current Express stack, with sub-tabs
+  ACTIONS · PURCHASE ORDERS · ORDER PLAN · SHIPMENTS · PAYMENTS · DEPOSITS · SUPPLIERS · BATCHES · BARCODES.
+  Implemented as a self-contained overlay injected by the harness — the artefact HTML is untouched.
+- **New files:** `supply/inject.html` (the SUPPLY UI: style + nav button + panel + JS).
+- **server.mjs:** loads `supply/inject.html`, splices it before `</body>`, single-sources `APP_VERSION`
+  (replaces `__APP_VERSION__`), and adds read-only API `GET /api/supply/:section`
+  (suppliers, purchase-orders, order-plan, shipments, deposits, batches, barcodes, payments, actions).
+  All read-only — no writes yet (writes are a later, gated step).
+- **New migrations (run on live in order):** `migrations/001_suppliers.sql` … `006_payments.sql`
+  — suppliers, purchase_orders, purchase_order_lines (+v_purchase_order_lines), batches/branches/prod_numbers,
+  sku_labels, deposits/payment_runs/payment_transactions. All in the `planner` schema. DDL+seed in each file.
+- **No new env vars.**
+- **⚠️ Vercel deploy note:** `vercel.json` `functions.includeFiles` currently bundles only
+  `artifact_v16.7.html`. Add `supply/inject.html` (and the `migrations/` are not needed at runtime) so the
+  SUPPLY UI isn't empty in production. Locally it's read from disk and works.
+- **Status:** built + tested against Ben's sandbox Supabase; not pushed; live writes pending.

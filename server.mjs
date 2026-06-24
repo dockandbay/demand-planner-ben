@@ -21,7 +21,18 @@ const pool = new pg.Pool({
   allowExitOnIdle: true,
   idleTimeoutMillis: 10000,
 });
+// ── Resilience guards ─────────────────────────────────────────────────────────
+// A dropped idle DB connection makes the pool emit 'error'; with no listener Node treats it as
+// fatal and exits (the repeated EADDRNOTAVAIL crashes in dev). Log it and let the pool recycle the
+// client — the next query opens a fresh connection.
+pool.on('error', (err) => { console.error('[pg pool] idle client error (ignored):', err && err.message); });
+// Last-resort process guards so a single malformed request or stray async rejection can't take the
+// whole server down (we saw an ERR_OUT_OF_RANGE kill it once). This harness holds no critical
+// in-memory state — it's a stateless proxy to Postgres — so logging and staying up beats crashing.
+process.on('unhandledRejection', (reason) => { console.error('[unhandledRejection]', reason && (reason.stack || reason.message || reason)); });
+process.on('uncaughtException', (err) => { console.error('[uncaughtException]', err && (err.stack || err.message || err)); });
 import path from 'path';
+import crypto from 'node:crypto';
 function loadHTML() {
   const candidates = [
     new URL('./artifact_v16.7.html', import.meta.url),
@@ -32,6 +43,15 @@ function loadHTML() {
   throw new Error('artifact_v16.7.html not found');
 }
 const HTML = loadHTML();
+// SUPPLY tab (Production Planner) UI — injected before </body>. Optional; empty if file absent.
+function loadInject() { try { return readFileSync(new URL('./supply/inject.html', import.meta.url), 'utf8'); } catch { return ''; } }
+const SUPPLY_INJECT = loadInject();
+// Dev convenience: re-read the artefact + supply inject on each page load so edits show on a refresh WITHOUT
+// restarting the server (the boot-time consts above are kept for server-side global parsing + prod speed).
+// Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
+const DEV = process.env.NODE_ENV !== 'production';
+// App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
+const APP_VERSION = 'v20.301';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -136,9 +156,25 @@ async function buildSKURAW() {
                                   '' ORDER BY CASE channel WHEN 'DTC' THEN 1 WHEN 'FBA' THEN 2 ELSE 3 END)
                          FILTER (WHERE is_available) av
                 FROM planner.v_product_availability GROUP BY sku, country`),
-    pool.query(`SELECT sku, destination_warehouse wh, sum(quantity - coalesce(received_quantity,0))::int oo
-                FROM planner.inbound_shipments WHERE coalesce(received_quantity,0) < quantity
-                GROUP BY sku, destination_warehouse`),
+    // On-order = confirmed inbound (inbound_shipments) + open/planning POs not yet in that feed, deduped by PO
+    // reference so a PO isn't double-counted once it syncs through to inbound. PO → warehouse: country_code (or
+    // the branch's country) + fba/3pl from the branch name.
+    pool.query(`SELECT sku, wh, sum(oo)::int oo FROM (
+                  SELECT sku, destination_warehouse wh, (quantity - coalesce(received_quantity,0)) oo
+                    FROM planner.inbound_shipments WHERE coalesce(received_quantity,0) < quantity
+                  UNION ALL
+                  SELECT l.sku,
+                    lower(coalesce(nullif(po.country_code,''), b.country_code)) || '_' ||
+                      (CASE WHEN po.branch ILIKE '%fba%' THEN 'fba' ELSE '3pl' END) wh,
+                    l.qty oo
+                    FROM planner.purchase_order_lines l
+                    JOIN planner.purchase_orders po ON po.po = l.po
+                    LEFT JOIN planner.branches b ON b.name = po.branch
+                    WHERE coalesce(l.qty,0) > 0
+                      AND coalesce(po.status,'') NOT ILIKE '%complete%'
+                      AND coalesce(nullif(po.country_code,''), b.country_code) IN ('UK','US','EU','AU','CA')
+                      AND NOT EXISTS (SELECT 1 FROM planner.inbound_shipments i WHERE i.reference = po.po)
+                ) z WHERE wh IS NOT NULL GROUP BY sku, wh`),
     pool.query(`SELECT sku, country co, channel ch, to_char(month,'YYYY_MM') ym, units::int u
                 FROM planner.sales_actuals`),
     pool.query(`SELECT sku, destination_warehouse wh, reference ref, quantity::int qty,
@@ -149,6 +185,7 @@ async function buildSKURAW() {
   const p = {};
   for (const r of prods.rows)
     p[r.sku] = { n: r.n, s: r.s, c: r.c, ti: r.ti, cs: r.cs === 'Seasonal' ? 'S' : 'C',
+                 csf: r.cs || '', // full core/seasonal classification (Core | Seasonal | Non-Core) for the BUY filter
                  av: {}, disc: {}, lch: {}, inv: {}, oo: {} };
   for (const r of avail.rows) if (p[r.sku] && r.av) p[r.sku].av[r.co] = r.av;
   for (const r of pcs.rows) if (p[r.sku]) { if (r.lch) p[r.sku].lch[r.co] = r.lch; if (r.disc) p[r.sku].disc[r.co] = r.disc; }
@@ -259,8 +296,20 @@ async function buildPROD_CONST() {
   return out;
 }
 
+// FBA carton dims for the FBA Transfer Upload (box L/W/H/weight per region) + units-per-box.
+async function buildFBADIMS() {
+  const { rows } = await pool.query(`SELECT sku, carton_qty cp,
+    uk_carton_l,uk_carton_w,uk_carton_h,uk_carton_wt, us_carton_l,us_carton_w,us_carton_h,us_carton_wt
+    FROM planner.sku_labels WHERE coalesce(uk_carton_l, us_carton_l) IS NOT NULL`);
+  const o = {};
+  for (const r of rows) o[r.sku] = { cp: r.cp,
+    u: [r.uk_carton_l, r.uk_carton_w, r.uk_carton_h, r.uk_carton_wt],
+    s: [r.us_carton_l, r.us_carton_w, r.us_carton_h, r.us_carton_wt] };
+  return o;
+}
+
 const app = express();
-app.use(express.json({ limit: '4mb' }));
+app.use(express.json({ limit: '12mb' }));   // 12mb: portal invoice uploads arrive as base64 JSON
 
 // Access gate — only active when PLANNER_KEY is set (production). Localhost (no env var)
 // stays open and identical to what you see now. Key accepted via ?key= (stored in a cookie)
@@ -271,6 +320,8 @@ function cookieVal(req, name) {
   return m ? decodeURIComponent(m[1]) : null;
 }
 app.use((req, res, next) => {
+  // Supplier portal has its own magic-link/session auth — it must NOT require the planner key.
+  if (req.path === '/portal' || req.path === '/portal-view.js' || req.path.startsWith('/api/portal/')) return next();
   if (!GATE) return next();                       // open locally
   if (req.path.startsWith('/api/')) {             // APIs: header or cookie
     if (req.get('x-planner-key') === GATE || cookieVal(req, 'pk') === GATE) return next();
@@ -287,11 +338,11 @@ app.use((req, res, next) => {
 app.get('/', async (_req, res) => {
   try {
     // Fetch every live global in parallel, then splice sequentially (string ops on one buffer).
-    const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts] = await Promise.all([
+    const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts, FBADIMS] = await Promise.all([
       buildDATA(), buildFC_CURRENT(), buildFC_OUTPUTS(), buildSKURAW(),
-      buildCATS_META(), buildSUBS_META(), buildBI_RULES(), buildPROD_CONST(), freshness(),
+      buildCATS_META(), buildSUBS_META(), buildBI_RULES(), buildPROD_CONST(), freshness(), buildFBADIMS(),
     ]);
-    let html = HTML;
+    let html = DEV ? loadHTML() : HTML;
     html = replaceGlobal(html, 'DATA', JSON.stringify(DATA));
     html = replaceGlobal(html, 'FC_CURRENT', JSON.stringify(FC_CURRENT));
     html = replaceGlobal(html, 'FC_OUTPUTS', JSON.stringify(FC_OUTPUTS));
@@ -304,18 +355,27 @@ app.get('/', async (_req, res) => {
     // (FC_SEED already seeds IV from live FC_CURRENT.)
     html = replaceGlobal(html, 'SAVED_INPUTS', '{}');
     if (ts) html = html.replace(/EXTRACT_TS\s*=\s*'[^']*'/, `EXTRACT_TS='${ts}'`);
+    // Show the real app version (the artefact bakes its filename version 'v16.7'); only the VERSION const, not data.
+    html = html.replace(/const VERSION\s*=\s*'[^']*'/, `const VERSION='${APP_VERSION}'`);
     // Route the artefact's Claude calls through our key-attached proxy (same-origin, no CORS).
     html = html.split('https://api.anthropic.com/v1/messages').join('/api/ai');
     // The artefact hardcodes a retired Sonnet model (claude-sonnet-4-20250514) -> 404.
     // Swap to the current Sonnet so the AI features (insights, narrative, BI rules) work.
     html = html.split('claude-sonnet-4-20250514').join('claude-sonnet-4-6');
+    // Rename top-nav PLAN -> DEMAND (spec B3.1). Artefact untouched; relabelled at serve time.
+    html = html.replace('data-view="planning">PLAN</button>', 'data-view="planning">DEMAND</button>');
     // UI fit (our deployment only — artefact HTML untouched): the baked `.tw` table uses a
     // fixed `max-height: calc(100vh - 184px)`, which leaves a gap on big screens and hides the
     // bottom scrollbar on small ones. Size it dynamically so its bottom sits just off the
     // window bottom on any size, and re-fit on resize / view switch.
     const FIT = `<script>(function(){var GAP=10;function fit(){document.querySelectorAll('.tw').forEach(function(tw){if(tw.offsetParent===null)return;var top=tw.getBoundingClientRect().top;var h=window.innerHeight-top-GAP;if(h>200)tw.style.maxHeight=h+'px';});}window.addEventListener('resize',fit);setTimeout(fit,300);setTimeout(fit,1200);document.addEventListener('click',function(){setTimeout(fit,60);});})();</script>`;
-    html = html.replace('</body>', FIT + '</body>');
-    res.set('content-type', 'text/html').send(html);
+    // IMPORTANT: use a function replacement — the injected code contains `$'` sequences which
+    // String.replace would otherwise interpret as special patterns ("text after the match"),
+    // corrupting the script. A replacer function disables all `$` substitution.
+    const FBADIMS_JS = '<script>window.FBA_DIMS=' + JSON.stringify(FBADIMS) + ';</script>';
+    const injectTail = FBADIMS_JS + FIT + (DEV ? loadInject() : SUPPLY_INJECT).split('__APP_VERSION__').join(APP_VERSION) + '</body>';
+    html = html.replace('</body>', () => injectTail);
+    res.set('content-type', 'text/html').set('Cache-Control', 'no-store').send(html);
   } catch (e) {
     res.status(500).send('inject failed: ' + e.message);
   }
@@ -400,6 +460,249 @@ app.post('/api/save-sku-forecasts', async (req, res) => {
   }
 });
 
+// ── CASH FLOW: re-shape the PO calc rows (+ shipments, deposit register, likely-date overrides) into a flat
+// list of dated payment line items. Four sources: supplier-goods milestones (deposit/completion/balance),
+// referenced-deposit pools (replace the PO deposit when a start deposit carries a deposit_ref), freight
+// (delivery +14d), and import duty/tax (landing; USA landing +7d). Freight & duty/tax are sized on the
+// assigned SHIPMENT when there is one, else the individual PO. See CHANGES v20.149.
+const num = (x) => { const n = Number(x); return Number.isFinite(n) ? n : 0; };
+const addDays = (ds, n) => { if (!ds) return null; const d = new Date(ds + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const isUSA = (c) => (c || '').toUpperCase().startsWith('US');
+
+// cheapest combination of sea containers to cover `pallets` (rounds up — e.g. 19 pallets → one 40ft if that
+// beats 19×LCL). Mirrors the client seaEst DP. tiers = [{cap,cost,sz}]. Returns rounded USD or null.
+function seaEstSrv(tiers, pallets) {
+  if (!Array.isArray(tiers) || !tiers.length || !(pallets > 0)) return null;
+  const ts = tiers.filter(t => num(t.cap) > 0 && t.cost != null);
+  if (!ts.length) return null;
+  const N = Math.ceil(pallets), INF = Infinity, dp = new Array(N + 1).fill(INF);
+  dp[0] = 0;
+  for (let i = 1; i <= N; i++) for (const t of ts) {
+    const prev = Math.max(0, i - num(t.cap));
+    if (dp[prev] + num(t.cost) < dp[i]) dp[i] = dp[prev] + num(t.cost);
+  }
+  let best = dp[N];
+  for (const t of ts) if (num(t.cap) >= N) best = Math.min(best, num(t.cost));  // one oversized box
+  return best === INF ? null : Math.round(best);
+}
+
+// freight cost for a shipment row: Flexport quote ▸ manual ▸ FOB $0 ▸ air (weight×rate) ▸ sea (cheapest combo).
+function shipFreightSrv(s) {
+  if (s.flex_cost != null) return { cost: Math.round(num(s.flex_cost)), src: 'Flexport' };
+  if (s.cost_manual != null) return { cost: Math.round(num(s.cost_manual)), src: 'manual' };
+  if (s.mode_eff === 'fob') return { cost: 0, src: 'FOB' };
+  if (s.mode_eff === 'air') return { cost: Math.round(num(s.weight_kg) * (num(s.air_rate) || 15)), src: 'air est' };
+  const est = seaEstSrv(s.sea_tiers, num(s.pallets));
+  return est == null ? { cost: null, src: 'no rate' } : { cost: est, src: 'sea est' };
+}
+
+async function cashflowResponse(pos, q) {
+  const today = (await pool.query(`SELECT to_char(current_date,'YYYY-MM-DD') d`)).rows[0].d;
+  // likely-payment-date overrides (manual; may not exist before migration 042)
+  const likely = {};
+  try { (await pool.query(`SELECT line_key, to_char(likely_date,'YYYY-MM-DD') d FROM planner.payment_likely_dates`))
+    .rows.forEach(r => { likely[r.line_key] = r.d; }); } catch (e) { /* table not yet created */ }
+  // referenced-deposit pools (one cash line per reference; replaces the PO's own deposit line)
+  const depPools = await q(`
+    SELECT reference, round(sum(coalesce(amount,0)),2) amount, max(supplier_name) supplier, max(country) country,
+      to_char(max(date_paid),'YYYY-MM-DD') date_paid, bool_and(date_paid IS NOT NULL) all_paid
+    FROM planner.deposits WHERE is_deposit AND coalesce(reference,'') <> '' GROUP BY reference`);
+  // shipment freight inputs (cost only; dates come from the member POs' eff_delivery which is the shipment date)
+  const shipRows = await q(`
+    WITH agg AS (
+      SELECT po.shipment_ref,
+        round(sum(coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0))
+           FROM planner.purchase_order_lines l LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=po.po),0))::numeric,1) pallets,
+        round(sum(coalesce((SELECT sum(l.qty*p.prod_weight_uk)
+           FROM planner.purchase_order_lines l JOIN planner.products p ON p.sku=l.sku WHERE l.po=po.po),0))::numeric) weight_kg,
+        max(upper(coalesce(nullif(po.country_code,''), pb.country_code, ''))) market
+      FROM planner.purchase_orders po LEFT JOIN planner.branches pb ON pb.name=po.branch
+      WHERE po.shipment_ref IS NOT NULL GROUP BY po.shipment_ref
+    )
+    SELECT sh.shipment_ref,
+      coalesce(lower(sh.mode), CASE WHEN fx.mode ILIKE 'air%' THEN 'air' ELSE 'sea' END) mode_eff,
+      coalesce(a.pallets,0) pallets, coalesce(a.weight_kg,0) weight_kg, a.market,
+      fx.total_freight_cost flex_cost, sh.cost_manual cost_manual,
+      (SELECT json_agg(json_build_object('cap', fr.pallets, 'cost', fr.cost, 'sz', fr.container_size)) FROM planner.freight_rates fr
+        WHERE upper(fr.destination)=coalesce(nullif(a.market,''),'UK') AND coalesce(fr.pallets,0)>0 AND fr.cost IS NOT NULL) sea_tiers,
+      (SELECT ar.rate_per_kg FROM planner.air_freight_rates ar WHERE coalesce(a.weight_kg,0) >= ar.min_kg AND coalesce(a.weight_kg,0) < ar.max_kg ORDER BY ar.min_kg LIMIT 1) air_rate
+    FROM planner.shipments sh
+    LEFT JOIN agg a ON a.shipment_ref=sh.shipment_ref
+    LEFT JOIN LATERAL (SELECT f.* FROM planner.flexport_shipments f
+      WHERE f.flex_id=sh.carrier_ref OR f.shipment_name=sh.shipment_ref
+      ORDER BY (f.flex_id=sh.carrier_ref) DESC NULLS LAST LIMIT 1) fx ON true`);
+  const shipFreight = {};
+  shipRows.forEach(s => { shipFreight[s.shipment_ref] = shipFreightSrv(s); });
+
+  const lines = [];
+  const add = (o) => {
+    if (!(num(o.amount) > 0.009)) return;                       // never emit a $0 (or negative) line
+    const due = o.due || null;
+    const lk = likely[o.key] || null;
+    let date = o.paid_date || due, kind = o.paid_date ? 'paid' : 'due';
+    const overdue = !o.paid_date && due && due < today;
+    if (overdue && lk) { date = lk; kind = 'likely'; }
+    lines.push({
+      key: o.key, type: o.type, ref: o.ref, supplier: o.supplier || '', country: o.country || '',
+      amount: Math.round(num(o.amount)), paid: !!o.paid_date, estimate: !!o.estimate, basis: o.basis || 'po',
+      src: o.src || '', due, paid_date: o.paid_date || null, date, date_kind: kind,
+      month: date ? date.slice(0, 7) : '—', overdue, likely_date: lk,
+    });
+  };
+
+  const complete = (p) => (p.progress === 'complete');
+  // group shipment-assigned POs for freight/duty/tax sizing
+  const byShip = {};
+  pos.forEach(p => { if (p.shipment) (byShip[p.shipment] = byShip[p.shipment] || []).push(p); });
+
+  for (const p of pos) {
+    const hasRef = (p.deposit_ref || '') !== '';
+    // 1. start deposit — ONLY when no deposit_ref (the referenced pool covers it instead)
+    if (!hasRef) add({ key: 'dep:' + p.po, type: 'Deposit', ref: p.po, supplier: p.supplier_name, country: p.country,
+      amount: p.start_assigned != null ? p.start_assigned : p.start_calc, due: p.start_due, paid_date: p.start_date });
+    // 2. completion
+    add({ key: 'comp:' + p.po, type: 'Completion', ref: p.po, supplier: p.supplier_name, country: p.country,
+      amount: p.completion, due: p.completion_due, paid_date: p.completion_date });
+    // 3. balance (and optional 2nd balance)
+    add({ key: 'bal:' + p.po, type: 'Balance', ref: p.po, supplier: p.supplier_name, country: p.country,
+      amount: p.balance_1_amount != null ? p.balance_1_amount : p.balance_owing, due: p.balance_due, paid_date: p.balance_1_date });
+    if (p.balance_2_amount != null) add({ key: 'bal2:' + p.po, type: 'Balance', ref: p.po, supplier: p.supplier_name,
+      country: p.country, amount: p.balance_2_amount, due: p.balance_due, paid_date: p.balance_2_date });
+  }
+  // 4. referenced-deposit pools — one line per reference
+  for (const d of depPools) {
+    const linked = pos.filter(p => p.deposit_ref === d.reference);
+    const earliest = linked.map(p => p.start_due).filter(Boolean).sort()[0] || null;
+    add({ key: 'deppool:' + d.reference, type: 'Deposit', ref: d.reference, supplier: d.supplier, country: d.country,
+      amount: d.amount, due: earliest, paid_date: d.all_paid ? d.date_paid : null, basis: 'register' });
+  }
+  // 5. freight + duty + tax — by shipment where assigned, else per PO. Skip complete POs (settled).
+  const seenShip = {};
+  for (const p of pos) {
+    if (complete(p)) continue;
+    const land = p.delivery;                                    // eff_delivery = the goods-land date
+    if (p.shipment) {
+      if (seenShip[p.shipment]) continue;                       // one set of lines per shipment
+      seenShip[p.shipment] = true;
+      const members = byShip[p.shipment] || [p];
+      const fr = shipFreight[p.shipment] || { cost: null, src: '' };
+      const duty = members.reduce((s, m) => s + num(m.est_duty), 0);
+      const tax = members.reduce((s, m) => s + num(m.est_tax), 0);
+      const dutyDue = isUSA(p.country) ? addDays(land, 7) : land;
+      add({ key: 'freight:ship:' + p.shipment, type: 'Freight', ref: p.shipment, supplier: '', country: p.country,
+        amount: fr.cost, due: addDays(land, 14), estimate: true, basis: 'shipment', src: fr.src });
+      add({ key: 'duty:ship:' + p.shipment, type: 'Import duty', ref: p.shipment, country: p.country,
+        amount: duty, due: dutyDue, estimate: true, basis: 'shipment' });
+      add({ key: 'tax:ship:' + p.shipment, type: 'Import tax', ref: p.shipment, country: p.country,
+        amount: tax, due: dutyDue, estimate: true, basis: 'shipment' });
+    } else {
+      // FOB pickup: no import-warehouse destination + no shipment → no freight/import posts to cash flow (goods
+      // value still flows via the payment-plan lines above). Mirrors the PLAN landed-cost view (isFOBdest).
+      if (!/^(UK|US|EU|AU|CA)/i.test(p.country || '')) continue;
+      const dutyDue = isUSA(p.country) ? addDays(land, 7) : land;
+      // freight = Flexport quote ▸ cheapest sea container combo for the PO's pallets (assume sea), same as the PLAN
+      const poFr = p.flex_quote != null ? Math.round(num(p.flex_quote)) : seaEstSrv(p.sea_tiers, num(p.pallets));
+      add({ key: 'freight:po:' + p.po, type: 'Freight', ref: p.po, supplier: p.supplier_name, country: p.country,
+        amount: poFr, due: addDays(land, 14), estimate: true, basis: 'po', src: p.flex_quote != null ? 'Flexport' : 'sea est' });
+      add({ key: 'duty:po:' + p.po, type: 'Import duty', ref: p.po, supplier: p.supplier_name, country: p.country,
+        amount: p.est_duty, due: dutyDue, estimate: true, basis: 'po' });
+      add({ key: 'tax:po:' + p.po, type: 'Import tax', ref: p.po, supplier: p.supplier_name, country: p.country,
+        amount: p.est_tax, due: dutyDue, estimate: true, basis: 'po' });
+    }
+  }
+  lines.sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999') || a.type.localeCompare(b.type));
+  return { today, lines };
+}
+
+// Expedite recommendations for SUPPLY ▸ Actions: when a SKU on an open, not-yet-shipped PO will stock out
+// before the PO lands (by sea), recommend the fastest fix — switch to AIR if air would land before the stockout,
+// else EXPEDITE PRODUCTION (completion is the bottleneck). One action per PO, citing its worst-at-risk SKU.
+// Pending supplier-portal submissions (completion_date / invoice_value) become SUPPLY ▸ Actions cards with
+// one-click apply. Tracking/carrier already auto-applied in Phase 3, so they're not here.
+async function submissionActions() {
+  const rows = (await pool.query(`
+    SELECT ss.id, ss.po, ss.kind, ss.value, ss.attachment_id, coalesce(s.name,'') supplier
+    FROM planner.supplier_submissions ss LEFT JOIN planner.suppliers s ON s.id=ss.supplier_id
+    WHERE ss.status='pending' AND ss.kind IN ('completion_date','invoice_value')`)).rows;
+  return rows.map(r => ({
+    severity: 'amber',
+    type: r.kind === 'completion_date' ? 'Supplier completion date' : 'Supplier invoice',
+    ref: r.po,
+    detail: (r.supplier ? r.supplier + ' ' : 'Supplier ') + (r.kind === 'completion_date'
+      ? 'proposed completion date ' + r.value + ' — apply to the PO’s production-end override?'
+      : 'submitted invoice value $' + r.value + ' — apply as the PO invoice total?'),
+    fix: 'applysub', target: 'po',
+    field: r.kind === 'completion_date' ? 'end_production_overide' : 'supplier_invoice_total',
+    target_key: String(r.id), attachment_id: r.attachment_id,
+  }));
+}
+async function expediteActions() {
+  const rows = (await pool.query(`
+    WITH pod AS (
+      SELECT po.po, coalesce(po.supplier_name,'') supplier,
+        upper(coalesce(nullif(po.country_code,''), b.country_code, '')) market,
+        coalesce(po.production_status,'') ps,
+        coalesce(po.end_production_overide, po.start_production + (coalesce(sup.production_days,0)||' days')::interval)::date prod_end,
+        coalesce(sh.departure_date,
+          (coalesce(po.end_production_overide, po.start_production + (coalesce(sup.production_days,0)||' days')::interval)::date + interval '7 days')::date) ship_d,
+        b.sea_lead_time_days sea_lead, b.air_lead_time_days air_lead,
+        coalesce(sh.arrival_date, sh.delivery_date, sh.landing_date, po.landing_date_overide) known_arr
+      FROM planner.purchase_orders po
+      LEFT JOIN planner.suppliers sup ON sup.id=po.supplier_id
+      LEFT JOIN planner.branches  b   ON b.name=po.branch
+      LEFT JOIN planner.shipments sh  ON sh.shipment_ref=po.shipment_ref
+      WHERE coalesce(po.status,'') NOT ILIKE '%complete%'
+        AND coalesce(po.production_status,'') <> 'shipped')          -- not yet shipped → mode/timing still changeable
+    SELECT pod.po, pod.supplier, pod.market, pod.ps, pod.sea_lead, pod.air_lead,
+      to_char(pod.prod_end,'YYYY-MM-DD') prod_end, to_char(pod.ship_d,'YYYY-MM-DD') ship_d,
+      to_char(pod.known_arr,'YYYY-MM-DD') known_arr,
+      l.sku, l.qty::int qty,
+      coalesce(oh.oh,0)::numeric on_hand, coalesce(fc.fwk,0)::numeric fc_wk, coalesce(c.c,0)::numeric cost
+    FROM pod
+    JOIN planner.purchase_order_lines l ON l.po=pod.po AND l.qty>0
+    LEFT JOIN (SELECT sku, upper(split_part(warehouse,'_',1)) mk, sum(available)::numeric oh
+               FROM planner.product_inventory GROUP BY 1,2) oh ON oh.sku=l.sku AND oh.mk=pod.market
+    LEFT JOIN (SELECT sku, upper(split_part(warehouse,'_',1)) mk, sum(units)::numeric/13.0 fwk
+               FROM planner.forecast_outputs WHERE month>=date_trunc('month',CURRENT_DATE)
+                 AND month<date_trunc('month',CURRENT_DATE)+interval '3 months' GROUP BY 1,2) fc ON fc.sku=l.sku AND fc.mk=pod.market
+    LEFT JOIN (SELECT sku, avg(cost_price) c FROM planner.purchase_order_lines WHERE cost_price>0 GROUP BY 1) c ON c.sku=l.sku
+    WHERE pod.market IN ('UK','US','EU','AU','CA')`)).rows;
+  const today = (await pool.query(`SELECT current_date d`)).rows[0].d;
+  const T = new Date(today).getTime(), DAY = 86400000;
+  const byPo = {};
+  for (const r of rows) {
+    const wk = Number(r.fc_wk); if (wk <= 0.01) continue;                 // no forward demand → not at risk
+    const stockoutT = T + (Number(r.on_hand) / wk) * 7 * DAY;
+    // forward-looking arrivals: earliest realistic ship is no earlier than today
+    const effShip = Math.max(T, r.ship_d ? new Date(r.ship_d).getTime() : T);
+    const seaT = r.known_arr ? new Date(r.known_arr).getTime() : effShip + (Number(r.sea_lead) || 0) * DAY;
+    const airT = effShip + (Number(r.air_lead) || 7) * DAY;
+    if (seaT <= stockoutT) continue;                                      // sea lands in time → fine
+    const gapDays = Math.round((seaT - stockoutT) / DAY);                 // days short by sea
+    const airHelps = airT < seaT && airT <= stockoutT + 3 * DAY;
+    const cand = { sku: r.sku, gapDays, units: r.qty, value: Math.round(r.qty * (Number(r.cost) || 0)),
+      stockout: new Date(stockoutT).toISOString().slice(0, 10), sea_arr: new Date(seaT).toISOString().slice(0, 10), air_arr: new Date(airT).toISOString().slice(0, 10), prod_end: r.prod_end,
+      on_hand: Math.round(Number(r.on_hand)), wk: Math.round(wk * 10) / 10, ps: r.ps, airHelps, supplier: r.supplier, market: r.market };
+    const g = byPo[r.po] || (byPo[r.po] = { po: r.po, worst: cand, units: 0, value: 0 });
+    g.units += r.qty; g.value += cand.value;
+    if (cand.gapDays > g.worst.gapDays) g.worst = cand;                   // biggest shortfall = representative
+  }
+  const out = [];
+  for (const po of Object.keys(byPo)) {
+    const g = byPo[po], w = g.worst, sev = (w.value >= 5000 || w.gapDays >= 21) ? 'high' : 'amber';
+    if (w.airHelps) {
+      out.push({ severity: sev, type: 'Consider air freight', ref: po,
+        detail: w.sku + ' (' + w.market + ') stocks out ~' + w.stockout + ' · sea arrives ' + w.sea_arr + ' (' + w.gapDays + 'd short) — air would land ~' + w.air_arr + '. ' + w.units.toLocaleString() + 'u · £' + w.value.toLocaleString() + ' at risk.',
+        fix: 'gotopo', target: 'po', field: '', target_key: po });
+    } else if (w.prod_end && new Date(w.prod_end).getTime() > T) {        // production still ahead → can pull it forward (air won't bridge)
+      out.push({ severity: sev, type: 'Expedite production', ref: po,
+        detail: w.sku + ' (' + w.market + ') stocks out ~' + w.stockout + ' · completes ' + w.prod_end + ', lands ' + w.sea_arr + ' (' + w.gapDays + 'd short, air won\'t bridge it) — pull production forward. ' + w.units.toLocaleString() + 'u · £' + w.value.toLocaleString() + ' at risk.',
+        fix: 'gotopo', target: 'po', field: '', target_key: po });
+    }   // else: production already done/overdue & air won't help — left to the Production/Ship check-ins
+  }
+  return out;
+}
+
 app.get('/api/health', async (_req, res) => {
   try {
     const [DATA, FC, FO, SKU, CATS, SUBS, BI, PC] = await Promise.all([
@@ -416,6 +719,2685 @@ app.get('/api/health', async (_req, res) => {
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// Same-origin image proxy — lets the barcode-label PNG export embed a remote swatch without tainting the
+// canvas. Read-only fetch of a public image URL; must be registered before the generic :section route.
+app.get('/api/supply/img', async (req, res) => {
+  try {
+    const u = String(req.query.url || '');
+    if (!/^https?:\/\//i.test(u)) return res.status(400).end();
+    const r = await fetch(u);
+    if (!r.ok) return res.status(502).end();
+    res.setHeader('content-type', r.headers.get('content-type') || 'image/jpeg');
+    res.setHeader('cache-control', 'public, max-age=86400');
+    res.end(Buffer.from(await r.arrayBuffer()));
+  } catch (e) { res.status(500).end(); }
+});
+
+// Static brand asset for the carton/inner labels — the Global Recycled Standard logo (same-origin so it can be
+// embedded into the rasterised label PNG without tainting the canvas).
+app.get('/api/supply/asset/:name', (req, res) => {
+  const files = { grs: ['grs-logo.png', 'image/png'], db: ['db-logo.png', 'image/png'],
+    'gotham-book': ['gotham-book.ttf', 'font/ttf'], 'gotham-bold': ['gotham-bold.ttf', 'font/ttf'] };
+  const a = files[req.params.name]; if (!a) return res.status(404).end();
+  try { res.setHeader('content-type', a[1]); res.setHeader('cache-control', 'public, max-age=86400');
+    res.end(readFileSync(new URL('./supply/assets/' + a[0], import.meta.url))); }
+  catch (e) { res.status(404).end(); }
+});
+
+// Label rows for the supplier-portal barcode downloads — for one PO's SKUs (?po=) or a whole production's SKUs
+// scoped to a supplier via supplier_multiple_all (?prod=&supplier=). MASTER variants only, barcode present.
+app.get('/api/supply/label-data', async (req, res) => {
+  try {
+    const { po, prod, supplier, skus } = req.query;
+    let where, params;
+    if (skus) { where = 'sl.sku = ANY($1)'; params = [String(skus).split(',').map(s => s.trim()).filter(Boolean)]; }
+    else if (po) { where = 'sl.sku IN (SELECT sku FROM planner.purchase_order_lines WHERE po=$1)'; params = [po]; }
+    else if (prod) {
+      where = "sl.sku IN (SELECT DISTINCT l.sku FROM planner.purchase_order_lines l JOIN planner.purchase_orders po ON po.po=l.po WHERE po.prod_no=$1)";
+      params = [prod];
+      if (supplier) { where += " AND coalesce(p.supplier_multiple_all,'') ILIKE '%'||$2||'%'"; params.push(supplier); }
+    } else return res.status(400).json({ error: 'po or prod required' });
+    const rows = (await pool.query(`
+      SELECT sl.sku, sl.barcode_sku_name, sl.barcode_carton_name, sl.barcode_inner_name,
+        sl.size, coalesce(p.size_short, sl.size_short, '') size_short, sl.category, sl.carton_qty,
+        sl.product_barcode, sl.carton_barcode, sl.inner_barcode, sl.grs_material, sl.swatch_url,
+        sl.uk_carton_l, sl.uk_carton_w, sl.uk_carton_h, sl.uk_carton_wt,
+        coalesce(p.supplier_multiple_all,'') supplier_multiple, p.uk_rt, p.us_rt, p.eu_rt, coalesce(p.product_name,'') product_name
+      FROM planner.sku_labels sl LEFT JOIN planner.products p ON p.sku=sl.sku
+      WHERE ${where}
+        AND coalesce(sl.variant_type,'') NOT ILIKE 'set'
+        AND coalesce(sl.product_barcode, sl.carton_barcode, sl.inner_barcode) IS NOT NULL
+      ORDER BY sl.sku`, params)).rows;
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Supplier-submitted actual cost prices (portal order plan). Read all (small table); filtered client-side by PO.
+app.get('/api/supply/portal-line-costs', async (req, res) => {
+  try { res.json((await pool.query(`SELECT po, sku, actual_cost, amended_qty, coalesce(is_added,false) is_added, final_cost,
+    (actual_cost IS NOT NULL OR amended_qty IS NOT NULL OR is_added=true) AND (confirmed_at IS NULL OR confirmed_at < submitted_at) unconfirmed
+    FROM planner.portal_line_costs`)).rows); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Crossdock shipped quantities (supplier-entered, per PO × crossdock SKU). Reflects on the PO + master shipment.
+app.get('/api/supply/crossdock-shipments', async (req, res) => {
+  try { res.json((await pool.query('SELECT po, sku, qty FROM planner.crossdock_shipments')).rows); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/crossdock-qty', async (req, res) => {
+  const b = req.body || {};
+  if (!b.po || !b.sku) return res.status(400).json({ error: 'po and sku required' });
+  try {
+    const qty = (b.qty === '' || b.qty == null) ? null : Number(b.qty);
+    await pool.query(`INSERT INTO planner.crossdock_shipments (po, sku, qty, submitted_by, submitted_at)
+      VALUES ($1,$2,$3,$4, now()) ON CONFLICT (po, sku) DO UPDATE SET qty=excluded.qty, submitted_by=excluded.submitted_by, submitted_at=now()`,
+      [b.po, b.sku, qty, b.submitted_by || null]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Supplier-entered additional cost lines (description / qty / price) per PO — sum into the total invoice cost.
+app.get('/api/supply/additional-costs', async (req, res) => {
+  try { res.json((await pool.query(`SELECT id, po, coalesce(description,'') description, qty, price FROM planner.portal_additional_costs ORDER BY id`)).rows); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/additional-cost', async (req, res) => {
+  const b = req.body || {};
+  const num = v => (v === '' || v == null) ? null : Number(v);
+  try {
+    if (b.id) {
+      await pool.query(`UPDATE planner.portal_additional_costs SET description=$2, qty=$3, price=$4, submitted_by=$5, submitted_at=now() WHERE id=$1`,
+        [b.id, b.description || '', num(b.qty), num(b.price), b.submitted_by || null]);
+      res.json({ ok: true, id: b.id });
+    } else {
+      if (!b.po) return res.status(400).json({ error: 'po required' });
+      const r = await pool.query(`INSERT INTO planner.portal_additional_costs (po, description, qty, price, submitted_by) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+        [b.po, b.description || '', num(b.qty), num(b.price), b.submitted_by || null]);
+      res.json({ ok: true, id: r.rows[0].id });
+    }
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/additional-cost-remove', async (req, res) => {
+  if (!req.body || !req.body.id) return res.status(400).json({ error: 'id required' });
+  try { await pool.query('DELETE FROM planner.portal_additional_costs WHERE id=$1', [req.body.id]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Crossdock rollup for one shipment: every crossdock SKU across the POs on the shipment, with qty + source PO/supplier/client.
+app.get('/api/supply/shipment-crossdock/:ref', async (req, res) => {
+  try { res.json(await qp(`
+    SELECT po.po, trim(s.sku) sku, cs.qty,
+           coalesce(po.supplier_name,'') supplier_name, coalesce(po.client,'') client,
+           coalesce(po.sales_order_ref,'') sales_order_ref, coalesce(po.dispatch_order_ref,'') dispatch_order_ref
+    FROM planner.purchase_orders po
+    CROSS JOIN LATERAL unnest(string_to_array(coalesce(po.crossdock_skus,''), ',')) AS s(sku)
+    LEFT JOIN planner.crossdock_shipments cs ON cs.po=po.po AND cs.sku=trim(s.sku)
+    WHERE po.shipment_ref=$1 AND trim(s.sku)<>'' ORDER BY po.po, sku`, [req.params.ref])); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── SUPPLY tab (Production Planner) read APIs — one route, section in the path.
+// Read-only JSON from the Phase-2 planner tables. No writes (writes are a later, gated step).
+app.get('/api/supply/:section', async (req, res) => {
+  const q = (sql) => pool.query(sql).then(r => r.rows);
+  try {
+    switch (req.params.section) {
+      case 'suppliers':
+        return res.json(await q(`SELECT id,code,name,kind,default_currency,
+          start_deposit_pct,completion_pct,balance_pct,credit_days,credit_type,
+          credit_fee_on_balance_pct,production_days,country,contact_name,email
+          FROM planner.suppliers ORDER BY kind,name`));
+      case 'purchase-orders':
+      case 'cashflow': {
+        // value est = Σ(qty×cost) from order-plan lines (fallback to stored estimate).
+        // Catch-up: completion = (start%+completion%)×value − actual start-deposit assigned, so
+        // completion tops up to the cumulative target when the assigned deposit differed from start%.
+        // Balance due: on-shipment → ship/departure + credit days; on-clearance → landing + credit days.
+        // Landing imports from linked Flexport (FLEX) unless manually overridden (M).
+        // 'cashflow' reuses this exact PO calc, then re-shapes the rows into dated payment line items.
+        const _pos = await q(`
+          WITH base AS (
+            SELECT po.*, s.credit_days, s.credit_type,
+              -- effective %s: per-PO override wins over the supplier's standard terms
+              coalesce(po.start_deposit_pct_override, s.start_deposit_pct, 0) sp,
+              coalesce(po.completion_pct_override, s.completion_pct, 0) cp,
+              coalesce(lv.line_value, po.order_value_estimation) value_est,
+              (lv.line_value IS NOT NULL) value_from_lines,
+              -- final supplier invoice amount trumps the estimate for every payment / landed calc
+              coalesce(po.supplier_invoice_total, lv.line_value, po.order_value_estimation, 0) val,
+              fx.flex_id, fx.landing_date flex_landing, fx.departure_date flex_departure,
+              sh.landing_date sh_landing, sh.delivery_date sh_delivery, sh.departure_date sh_departure, sh.arrival_date sh_arrival,
+              sh.mode sh_mode, fx.mode flex_mode,
+              (sh.master_po = po.po) is_master,
+              da.avail deposit_avail,
+              -- landed-cost inputs: flexport quote, freight rate-card, import-tax rate, per-line duty
+              coalesce(fx.total_quoted_amount, fx.total_freight_cost) flex_quote,
+              fr.cost freight_rate, tr.tax_pct tax_pct, coalesce(tr.base,'landed') tax_base_kind,
+              dty.duty duty,
+              -- lead-time inputs: production from supplier; transit from the branch, picked by the
+              -- shipment's mode (air → air_lead, else sea_lead; sea assumed when no shipment/mode)
+              s.production_days, b.sea_lead_time_days sea_lead, b.air_lead_time_days air_lead,
+              (CASE WHEN lower(coalesce(sh.mode, CASE WHEN fx.mode ILIKE 'air%' THEN 'air' END, 'sea'))='air'
+                    THEN b.air_lead_time_days ELSE b.sea_lead_time_days END) transit_lead,
+              -- ship-to: explicit override ▸ the branch's country
+              b.country_code branch_country,
+              -- ERP (Fulfil/Cin7) mirror: final delivery date + id, for date-misalignment detection
+              erp.final_delivery_date erp_final_delivery_date, erp.erp_po_id erp_po_id_src, (erp.po IS NOT NULL) erp_present
+            FROM planner.purchase_orders po
+            LEFT JOIN planner.suppliers s ON s.id=po.supplier_id
+            LEFT JOIN planner.branches b ON b.name=po.branch
+            LEFT JOIN planner.erp_purchase_orders erp ON erp.po=po.po
+            LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
+            LEFT JOIN planner.import_tax_rates tr ON tr.country=coalesce(nullif(po.country_code,''), b.country_code)
+            LEFT JOIN LATERAL (SELECT sum(l.qty*l.cost_price) line_value
+              FROM planner.purchase_order_lines l WHERE l.po=po.po) lv ON true
+            LEFT JOIN LATERAL (SELECT f.* FROM planner.flexport_shipments f
+              WHERE f.flex_id=po.flexport_reference OR f.shipment_name=po.po OR f.shipment_name=po.shipment_ref
+              ORDER BY (f.flex_id=po.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true
+            LEFT JOIN LATERAL (  -- remaining on the deposit ref this PO draws on (pool − assigned)
+              SELECT coalesce((SELECT sum(amount) FROM planner.deposits d
+                               WHERE d.is_deposit AND d.reference=po.deposit_ref),0)
+                   - coalesce((SELECT sum(coalesce(p2.pay_start_deposit_assigned,0)) FROM planner.purchase_orders p2
+                               WHERE p2.deposit_ref=po.deposit_ref),0) avail
+              WHERE coalesce(po.deposit_ref,'') <> '') da ON true
+            LEFT JOIN LATERAL (SELECT cost FROM planner.freight_rates
+              WHERE destination=coalesce(nullif(po.country_code,''), b.country_code) AND container_size=po.container_size LIMIT 1) fr ON true
+            LEFT JOIN LATERAL (  -- import duty = Σ line value × duty% (product override ▸ category card)
+              SELECT sum(l.qty*l.cost_price*coalesce(pc.duty_pct, dr.duty_pct, 0)/100) duty
+              FROM planner.purchase_order_lines l
+              JOIN planner.products p2 ON p2.sku=l.sku
+              LEFT JOIN planner.product_countries pc ON pc.sku=l.sku AND pc.country=lower(coalesce(nullif(po.country_code,''), b.country_code))
+              LEFT JOIN planner.duty_rates dr ON dr.category=p2.category AND dr.country=coalesce(nullif(po.country_code,''), b.country_code)
+              WHERE l.po=po.po) dty ON true
+          ), calc AS (
+            SELECT *,
+              round(val*sp/100,2) start_calc,                                  -- start deposit (term)
+              coalesce(pay_start_deposit_assigned, round(val*sp/100,2)) start_paid,  -- assigned or term
+              round((sp+cp)/100*val - coalesce(pay_start_deposit_assigned, val*sp/100),2) completion_calc, -- tops up to cumulative target (catch-up)
+              round(val*sp/100 - coalesce(pay_start_deposit_assigned, val*sp/100),2) catch_up,  -- start term − start paid
+              -- production end: manual override ▸ start production + supplier lead (production_days)
+              coalesce(end_production_overide,
+                CASE WHEN start_production IS NOT NULL AND production_days IS NOT NULL
+                     THEN (start_production + (production_days||' days')::interval)::date END) eff_prod_end,
+              (end_production_overide IS NULL AND start_production IS NOT NULL AND production_days IS NOT NULL) prod_end_calc
+            FROM base
+          ), calc2 AS (
+            SELECT *,
+              -- ship: shipment departure (if assigned) ▸ flexport ▸ production end + 7 days. No PO override.
+              coalesce(sh_departure, flex_departure,
+                CASE WHEN eff_prod_end IS NOT NULL THEN (eff_prod_end + interval '7 days')::date END) eff_ship,
+              CASE WHEN sh_departure IS NOT NULL THEN 'S' WHEN flex_departure IS NOT NULL THEN 'FLEX'
+                   WHEN eff_prod_end IS NOT NULL THEN 'calc' END ship_src
+            FROM calc
+          ), calc3 AS (
+            SELECT *,
+              -- delivery: shipment delivery/arrival/landing (if assigned) ▸ flexport ▸ ship + branch transit
+              -- lead (sea/air by shipment mode). No PO override.
+              coalesce(sh_delivery, sh_arrival, sh_landing, flex_landing,
+                CASE WHEN eff_ship IS NOT NULL AND transit_lead IS NOT NULL
+                     THEN (eff_ship + (transit_lead||' days')::interval)::date END) eff_delivery,
+              CASE WHEN sh_delivery IS NOT NULL OR sh_arrival IS NOT NULL OR sh_landing IS NOT NULL THEN 'S'
+                   WHEN flex_landing IS NOT NULL THEN 'FLEX'
+                   WHEN eff_ship IS NOT NULL AND transit_lead IS NOT NULL THEN 'calc' END delivery_src
+            FROM calc2
+          ), calc4 AS (
+            SELECT *,
+              -- completion = delivery + 7d warehouse check-in — EXCEPT direct-to-client is FOB (no warehouse
+              -- leg) → completion = delivery, UNLESS the PO is a child of a consolidated shipment (then we
+              -- crossdock via the warehouse, so the +7 applies). A self-master/no shipment stays FOB.
+              CASE WHEN eff_delivery IS NOT NULL THEN (eff_delivery
+                + (CASE WHEN upper(coalesce(nullif(country_code,''), branch_country, ''))='DIRECT'
+                          AND coalesce(nullif(shipment_ref,''), po)=po
+                        THEN 0 ELSE 7 END||' days')::interval)::date END eff_checkin,
+              -- balance due: (on-shipment → ship; on-clearance → delivery) + supplier credit days
+              ((CASE WHEN credit_type='on_shipment' THEN eff_ship ELSE eff_delivery END)
+               + (coalesce(credit_days,0)||' days')::interval)::date bal_due_date
+            FROM calc3
+          )
+          SELECT po, supplier_name, status,
+            CASE WHEN coalesce(status,'') ILIKE '%complete%' THEN 'complete'
+                 WHEN coalesce(status,'') ILIKE '%future%' THEN 'future' ELSE 'in_progress' END progress,
+            to_char(start_production,'YYYY-MM-DD') prod_start,
+            to_char(eff_prod_end,'YYYY-MM-DD') prod_end,
+            CASE WHEN end_production_overide IS NOT NULL THEN 'M' WHEN prod_end_calc THEN 'calc' END prod_end_src,
+            to_char(eff_ship,'YYYY-MM-DD') ship, ship_src,
+            to_char(eff_delivery,'YYYY-MM-DD') delivery, delivery_src,
+            to_char(eff_checkin,'YYYY-MM-DD') checkin,
+            -- raw overrides for the PLAN date editors (blank = use the calculated value)
+            to_char(end_production_overide,'YYYY-MM-DD') end_override,
+            to_char(supplier_ship_date,'YYYY-MM-DD') ship_override,
+            to_char(delivery_date_overide,'YYYY-MM-DD') delivery_override,
+            coalesce(is_master,false) is_master,
+            flexport_reference, flex_id, value_est, value_from_lines,
+            round(supplier_invoice_total,2) final_invoice, (supplier_invoice_total IS NOT NULL) is_final, round(val,2) value_used,
+            sp start_pct, cp completion_pct, greatest(100-sp-cp,0) balance_pct,
+            -- main-row figures: assigned amount if set, else the term calc
+            start_paid start_dep,
+            CASE WHEN val>0 THEN coalesce(pay_completion_assigned, completion_calc) END completion,
+            CASE WHEN val>0 THEN round(val - start_paid - coalesce(pay_completion_assigned, completion_calc),2) END balance_owing,
+            -- PLAN-panel detail: per-milestone calc, override amount, override date
+            start_calc, round(pay_start_deposit_assigned,2) start_assigned, to_char(pay_start_deposit_date,'YYYY-MM-DD') start_date,
+            completion_calc, round(pay_completion_assigned,2) completion_assigned, to_char(pay_completion_date,'YYYY-MM-DD') completion_date,
+            round(pay_balance_1_amount,2) balance_1_amount, to_char(pay_balance_1_date,'YYYY-MM-DD') balance_1_date,
+            round(pay_balance_2_amount,2) balance_2_amount, to_char(pay_balance_2_date,'YYYY-MM-DD') balance_2_date,
+            round(catch_up,2) catch_up, round(deposit_avail,2) deposit_avail,
+            CASE WHEN start_calc > 0 THEN to_char(start_production,'YYYY-MM-DD') END start_due,        -- no due date for a 0% milestone
+            CASE WHEN completion_calc > 0 THEN to_char(eff_prod_end,'YYYY-MM-DD') END completion_due,
+            to_char(bal_due_date,'YYYY-MM-DD') balance_due,
+            credit_days, credit_type,
+            coalesce(deposit_ref,'') deposit_ref, coalesce(shipment_ref,'') shipment,
+            coalesce(client,'') client, coalesce(client_requirements,'') client_requirements,
+            coalesce(sales_order_ref,'') sales_order_ref, coalesce(client_po_ref,'') client_po_ref,
+            coalesce(dispatch_order_ref,'') dispatch_order_ref, coalesce(final_delivery_address,'') final_delivery_address,
+            coalesce(crossdock_skus,'') crossdock_skus,
+            coalesce(nullif(country_code,''), branch_country, '') country,
+            CASE WHEN nullif(country_code,'') IS NOT NULL THEN 'M' WHEN branch_country IS NOT NULL THEN 'branch' END country_src,
+            coalesce(country_code,'') country_override, coalesce(branch,'') branch,
+            coalesce(erp_po,'') erp, coalesce(prod_no,'') prod_no, coalesce(batch_id,'') batch_id,
+            -- ERP sync: drift = planned qty differs from ERP value; erp_in/erp_total drive the 3-state
+            -- match badge (✓ match / ⚠ drift / ✗ not in ERP = lines exist but none mirrored from the ERP).
+            (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=calc4.po AND (l.qty IS DISTINCT FROM l.erp_qty OR l.cost_price IS DISTINCT FROM l.erp_cost))::int erp_pending,
+            (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=calc4.po AND coalesce(l.erp_qty,0)>0)::int erp_in,
+            (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=calc4.po)::int erp_total,
+            -- ERP date misalignment: our calculated "completed at warehouse" date (eff_checkin) vs the
+            -- ERP's final delivery date. 1 = differs (needs a date update in the ERP). Only when mirrored.
+            to_char(erp_final_delivery_date,'YYYY-MM-DD') erp_final_delivery, coalesce(erp_po_id_src,'') erp_po_id, erp_present,
+            (CASE WHEN erp_final_delivery_date IS NOT NULL AND eff_checkin IS NOT NULL
+                  AND eff_checkin IS DISTINCT FROM erp_final_delivery_date THEN 1 ELSE 0 END)::int erp_date_pending,
+            -- supplier production-confidence: confirmed status + days since last confirmation
+            coalesce(production_status,'') production_status,
+            (CURRENT_DATE - production_confirmed_at::date)::int prod_confirmed_age,
+            -- action-item flags (vs current_date), only for POs not complete
+            (coalesce(status,'') NOT ILIKE '%complete%' AND eff_delivery < current_date) is_late,
+            (coalesce(status,'') NOT ILIKE '%complete%' AND coalesce(shipment_ref,'')='') unassigned_shipment,
+            (coalesce(status,'') NOT ILIKE '%complete%' AND (
+               (start_production < current_date AND pay_start_deposit_assigned IS NULL AND coalesce(deposit_ref,'')='' AND start_calc > 0)
+               OR (eff_prod_end < current_date AND pay_completion_assigned IS NULL AND completion_calc > 0)
+               OR (bal_due_date < current_date AND pay_balance_1_amount IS NULL
+                   AND round(val - start_paid - coalesce(pay_completion_assigned, completion_calc),2) > 0.01))) payment_overdue,
+            (coalesce(status,'') ILIKE '%production%') is_production,
+            -- pallet estimate (Σ line qty ÷ sku pallet_qty); 20 pallets = one container
+            (SELECT round(sum(l.qty::numeric/NULLIF(sl.pallet_qty,0)),1) FROM planner.purchase_order_lines l
+               LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=calc4.po) pallets,
+            -- manual "likely payment date" per milestone (cash flow report) — keyed dep|comp|bal|bal2:PO
+            (SELECT to_char(likely_date,'YYYY-MM-DD') FROM planner.payment_likely_dates WHERE line_key='dep:'||calc4.po) likely_start,
+            (SELECT to_char(likely_date,'YYYY-MM-DD') FROM planner.payment_likely_dates WHERE line_key='comp:'||calc4.po) likely_completion,
+            (SELECT to_char(likely_date,'YYYY-MM-DD') FROM planner.payment_likely_dates WHERE line_key='bal:'||calc4.po) likely_balance_1,
+            (SELECT to_char(likely_date,'YYYY-MM-DD') FROM planner.payment_likely_dates WHERE line_key='bal2:'||calc4.po) likely_balance_2,
+            -- supplier-portal: latest PENDING invoice value awaiting approve/reject, and unread supplier notes (Timeline action)
+            (SELECT round(value::numeric,2) FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='invoice_value' AND ss.status='pending'
+               ORDER BY ss.id DESC LIMIT 1) sup_invoice_pending,
+            (SELECT value FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='completion_date' AND ss.status='pending'
+               ORDER BY ss.id DESC LIMIT 1) sup_completion_pending,
+            (SELECT count(*) FROM planner.supplier_notes sn WHERE sn.po=calc4.po AND sn.author_kind='supplier' AND sn.read_at IS NULL)::int unread_notes,
+            (SELECT count(*) FROM planner.portal_line_costs plc WHERE plc.po=calc4.po
+               AND (plc.actual_cost IS NOT NULL OR plc.amended_qty IS NOT NULL OR plc.is_added=true)
+               AND (plc.confirmed_at IS NULL OR plc.confirmed_at < plc.submitted_at))::int orderplan_unconfirmed,
+            -- landed cost (est): goods + freight (Flexport quote ▸ rate card) + duty + import tax
+            coalesce(container_size,'') container_size,
+            round(coalesce(flex_quote, freight_rate),2) est_freight,
+            CASE WHEN flex_quote IS NOT NULL THEN 'FLEX' WHEN freight_rate IS NOT NULL THEN 'rate' END freight_src,
+            round(flex_quote,2) flex_quote,
+            -- sea rates for this PO's destination, so the PLAN can auto-estimate freight from pallets (cheapest combo, assume sea)
+            (SELECT json_agg(json_build_object('cap', fr.pallets, 'cost', fr.cost, 'sz', fr.container_size)) FROM planner.freight_rates fr
+              WHERE upper(fr.destination)=coalesce(nullif(upper(coalesce(nullif(country_code,''), branch_country)),''),'UK') AND coalesce(fr.pallets,0)>0 AND fr.cost IS NOT NULL) sea_tiers,
+            round(coalesce(duty,0),2) est_duty,
+            round((CASE WHEN tax_base_kind='goods' THEN val
+                        ELSE val + coalesce(duty,0) + coalesce(flex_quote, freight_rate, 0) END)
+                  * coalesce(tax_pct,0)/100,2) est_tax,
+            tax_pct,
+            round(val + coalesce(flex_quote, freight_rate, 0) + coalesce(duty,0)
+                  + (CASE WHEN tax_base_kind='goods' THEN val
+                          ELSE val + coalesce(duty,0) + coalesce(flex_quote, freight_rate, 0) END)
+                    * coalesce(tax_pct,0)/100, 2) landed_total
+          FROM calc4 ORDER BY po`);
+        if (req.params.section === 'cashflow') return res.json(await cashflowResponse(_pos, q));
+        return res.json(_pos);
+      }
+      case 'lookups': {  // dropdown sources for PO editing: deposit refs, batches, prod#s, shipments
+        const [dep, bat, pr, sh, su, br, xd] = await Promise.all([
+          q(`SELECT reference FROM planner.deposits ORDER BY reference`),
+          q(`SELECT batch FROM planner.batches ORDER BY batch DESC`),
+          q(`SELECT prod_no FROM planner.prod_numbers WHERE prod_no IS NOT NULL ORDER BY prod_no`),
+          q(`SELECT shipment_ref FROM planner.shipments ORDER BY shipment_ref`),
+          q(`SELECT name FROM planner.suppliers WHERE name IS NOT NULL ORDER BY name`),
+          q(`SELECT name FROM planner.branches ORDER BY name`),
+          // eligible crossdock SKUs (code starts with CROSSDOCK or PREORDER), union of products + sku_labels
+          q(`SELECT sku FROM (
+               SELECT sku FROM planner.products WHERE sku ILIKE 'CROSSDOCK%' OR sku ILIKE 'PREORDER%'
+               UNION SELECT sku FROM planner.sku_labels WHERE sku ILIKE 'CROSSDOCK%' OR sku ILIKE 'PREORDER%'
+             ) z ORDER BY sku`),
+        ]).catch(() => [[], [], [], [], [], [], []]);
+        return res.json({
+          deposits: dep.map(x => x.reference),
+          batches: bat.map(x => x.batch),
+          prods: pr.map(x => x.prod_no),
+          shipments: sh.map(x => x.shipment_ref),
+          suppliers: su.map(x => x.name),
+          branches: br.map(x => x.name),
+          crossdock: xd.map(x => x.sku),
+        });
+      }
+      case 'skus':  // SKU master for Order Plan "all in category" scope + release-window filtering
+        return res.json(await q(`SELECT sku, coalesce(category,'') category, coalesce(release_window,'') release_window,
+          coalesce(barcode_sku_name,'') name FROM planner.sku_labels
+          WHERE coalesce(status,'') NOT ILIKE '%discontinued%' ORDER BY category, sku`));
+      case 'flexport':
+        return res.json(await q(`SELECT flex_id, shipment_name, mode, status_description status, incoterm,
+          CASE WHEN arrival_date < current_date THEN 'Completed' ELSE 'Active' END status_group,
+          to_char(packing_date,'YYYY-MM-DD') packing, to_char(departure_date,'YYYY-MM-DD') departure,
+          to_char(landing_date,'YYYY-MM-DD') landing, to_char(arrival_date,'YYYY-MM-DD') arrival,
+          container_numbers, mbl_number, total_freight_cost, total_invoiced_amount, customs_duty_cost
+          FROM planner.flexport_shipments ORDER BY arrival_date DESC NULLS LAST`));
+      case 'order-plan':  // enriched lines for the side-by-side grid (filter/group/pivot client-side)
+        return res.json(await q(`SELECT l.po, l.sku, l.qty, pol.erp_qty,
+          (pol.qty IS DISTINCT FROM pol.erp_qty) pending, to_char(pol.proposed_at,'YYYY-MM-DD') proposed_at,
+          l.cost_price, l.carton_qty, l.partial_carton_approved, l.full_carton_check,
+          coalesce(p.prod_no,'') prod_no, coalesce(p.status,'') status,
+          coalesce(p.supplier_name,'') supplier_name, coalesce(p.shipment_ref,'') shipment_ref,
+          coalesce(nullif(p.country_code,''), b.country_code, '') country,
+          coalesce(sl.category,'') category, coalesce(sl.release_window,'') release_window, sl.pallet_qty,
+          to_char(p.start_production,'YYYY-MM-DD') prod_start,
+          to_char(p.end_production_overide,'YYYY-MM-DD') prod_end,
+          to_char(coalesce(fx.departure_date, p.supplier_ship_date),'YYYY-MM-DD') ship_date,
+          coalesce(to_char(p.delivery_date_overide,'YYYY-MM-DD'), to_char(p.landing_date_overide,'YYYY-MM-DD'),
+                   to_char(fx.landing_date,'YYYY-MM-DD')) delivery
+          FROM planner.v_purchase_order_lines l
+          JOIN planner.purchase_order_lines pol ON pol.po_sku=l.po_sku
+          JOIN planner.purchase_orders p ON p.po=l.po
+          LEFT JOIN planner.branches b ON b.name=p.branch
+          LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku
+          LEFT JOIN LATERAL (SELECT f.departure_date, f.landing_date FROM planner.flexport_shipments f
+            WHERE f.flex_id=p.flexport_reference OR f.shipment_name=p.po OR f.shipment_name=p.shipment_ref
+            ORDER BY (f.flex_id=p.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true
+          ORDER BY l.po, l.sku`));
+      case 'shipments': {
+        // Editable shipment records (planner.shipments) joined to the POs aboard them. A shipment's
+        // own date columns OVERRIDE the POs; where blank they fall back to Flexport. Effective
+        // landing precedence: shipment (S) ▸ master-PO override (M) ▸ Flexport (FLEX). Drives off the
+        // shipments table so empty (PO-less) shipments still show; LEFT JOINs the PO aggregate.
+        const shipments = await q(`
+          WITH agg AS (
+            SELECT po.shipment_ref,
+              count(*)::int po_count, string_agg(po.po,', ' ORDER BY po.po) pos,
+              count(DISTINCT po.supplier_name)::int suppliers,
+              bool_and(coalesce(po.status,'') ILIKE '%complete%') all_complete,
+              sum(coalesce((SELECT sum(l.qty) FROM planner.purchase_order_lines l WHERE l.po=po.po),0))::int units,
+              round(sum(coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0))
+                 FROM planner.purchase_order_lines l LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=po.po),0))::numeric,1) pallets,
+              round(sum(coalesce((SELECT sum(l.qty*p.prod_weight_uk)
+                 FROM planner.purchase_order_lines l JOIN planner.products p ON p.sku=l.sku WHERE l.po=po.po),0))::numeric) weight_kg,
+              max(upper(coalesce(nullif(po.country_code,''), pb.country_code, ''))) market,   -- fall back to the branch country (PO country_code is often blank)
+              string_agg(DISTINCT nullif(po.branch,''), ', ') branch,
+              sum(coalesce((SELECT sum(l.qty*l.cost_price) FROM planner.purchase_order_lines l WHERE l.po=po.po),0)) value
+            FROM planner.purchase_orders po LEFT JOIN planner.branches pb ON pb.name=po.branch
+            WHERE po.shipment_ref IS NOT NULL
+            GROUP BY po.shipment_ref
+          )
+          SELECT sh.shipment_ref, coalesce(sh.master_po, sh.shipment_ref) master_po,
+            coalesce(NULLIF(sh.status,''),
+              CASE WHEN a.all_complete OR coalesce(sh.arrival_date, fx.arrival_date, sh.landing_date, fx.landing_date) < current_date THEN 'Complete'
+                   WHEN coalesce(sh.departure_date, fx.departure_date) <= current_date THEN 'Active'
+                   ELSE 'Planned' END) status,
+            (sh.status IS NULL OR sh.status='') status_auto,
+            coalesce(a.po_count,0) po_count, coalesce(a.pos,'') pos, coalesce(a.suppliers,0) suppliers,
+            coalesce(a.units,0) units, coalesce(a.pallets,0) pallets, round(coalesce(a.value,0)) value,
+            coalesce(sh.carrier, CASE WHEN sh.carrier_ref ILIKE 'FLEX%' THEN 'Flexport' END) carrier,
+            coalesce(sh.carrier_ref,'') carrier_ref, coalesce(sh.notes,'') notes,
+            fx.flex_id, fx.mode, fx.container_numbers, fx.total_freight_cost,
+            coalesce(lower(sh.mode), CASE WHEN fx.mode ILIKE 'air%' THEN 'air' ELSE 'sea' END) mode_eff,
+            coalesce(a.weight_kg,0) weight_kg,
+            -- destination: shipment override ▸ master PO (calculated). Never read from the non-master POs.
+            coalesce(nullif(upper(sh.country_code),''), nullif(mp.mp_country,''), '') market,
+            CASE WHEN nullif(sh.country_code,'') IS NOT NULL THEN 'S' WHEN nullif(mp.mp_country,'') IS NOT NULL THEN 'calc' END market_src,
+            coalesce(nullif(sh.branch,''), nullif(mp.mp_branch,''), '') branch,
+            CASE WHEN nullif(sh.branch,'') IS NOT NULL THEN 'S' WHEN nullif(mp.mp_branch,'') IS NOT NULL THEN 'calc' END branch_src,
+            coalesce(sh.country_code,'') ov_country, coalesce(sh.branch,'') ov_branch,
+            fx.total_freight_cost flex_cost, sh.cost_manual cost_manual,
+            (SELECT json_agg(json_build_object('cap', fr.pallets, 'cost', fr.cost, 'sz', fr.container_size)) FROM planner.freight_rates fr
+              WHERE upper(fr.destination)=coalesce(nullif(coalesce(nullif(upper(sh.country_code),''), nullif(mp.mp_country,'')),''),'UK') AND coalesce(fr.pallets,0)>0 AND fr.cost IS NOT NULL) sea_tiers,
+            (SELECT ar.rate_per_kg FROM planner.air_freight_rates ar WHERE coalesce(a.weight_kg,0) >= ar.min_kg AND coalesce(a.weight_kg,0) < ar.max_kg ORDER BY ar.min_kg LIMIT 1) air_rate,
+            to_char(sh.tracked_delivery_date,'YYYY-MM-DD') tracked_delivery_date, coalesce(sh.tracked_source,'') tracked_source,
+            -- effective dates (override ▸ flexport) and the raw override the UI edits
+            -- effective dates: shipment override ▸ Flexport ▸ CALCULATED from the master PO (prod-end +7 = departure;
+            -- + branch transit lead by mode = landing/arrival) so an unlinked shipment still shows dates.
+            coalesce(to_char(sh.departure_date,'YYYY-MM-DD'), to_char(fx.departure_date,'YYYY-MM-DD'), to_char(mp.ship_calc,'YYYY-MM-DD')) departure,
+            coalesce(to_char(sh.landing_date,'YYYY-MM-DD'), to_char(fx.landing_date,'YYYY-MM-DD'), to_char(mp.delivery_calc,'YYYY-MM-DD')) landing,
+            CASE WHEN sh.landing_date IS NOT NULL THEN 'S' WHEN fx.landing_date IS NOT NULL THEN 'FLEX' WHEN mp.delivery_calc IS NOT NULL THEN 'calc' END landing_src,
+            CASE WHEN sh.departure_date IS NOT NULL THEN 'S' WHEN fx.departure_date IS NOT NULL THEN 'FLEX' WHEN mp.ship_calc IS NOT NULL THEN 'calc' END departure_src,
+            CASE WHEN sh.arrival_date IS NOT NULL THEN 'S' WHEN fx.arrival_date IS NOT NULL THEN 'FLEX' WHEN mp.delivery_calc IS NOT NULL THEN 'calc' END arrival_src,
+            (fx.flex_id IS NOT NULL) flex_matched,
+            coalesce(to_char(sh.arrival_date,'YYYY-MM-DD'), to_char(fx.arrival_date,'YYYY-MM-DD'), to_char(mp.delivery_calc,'YYYY-MM-DD')) arrival,
+            to_char(sh.departure_date,'YYYY-MM-DD') ov_departure,
+            to_char(sh.landing_date,'YYYY-MM-DD')   ov_landing,
+            to_char(sh.delivery_date,'YYYY-MM-DD')  ov_delivery,
+            to_char(sh.arrival_date,'YYYY-MM-DD')   ov_arrival,
+            -- completion = warehouse-received date = override (sh.delivery_date) ▸ arrival + 7 days
+            coalesce(to_char(sh.delivery_date,'YYYY-MM-DD'),
+              to_char((coalesce(sh.arrival_date, fx.arrival_date, sh.landing_date, fx.landing_date, mp.delivery_calc) + interval '7 days')::date,'YYYY-MM-DD')) completion,
+            CASE WHEN sh.delivery_date IS NOT NULL THEN 'S'
+                 WHEN coalesce(sh.arrival_date, fx.arrival_date, sh.landing_date, fx.landing_date, mp.delivery_calc) IS NOT NULL THEN 'calc' END completion_src,
+            -- exception only when NOT complete and genuinely unlinked (no carrier ref + no Flexport match);
+            -- a complete/landed shipment is never an exception.
+            (coalesce(NULLIF(sh.status,''),
+               CASE WHEN a.all_complete OR coalesce(sh.arrival_date, fx.arrival_date, sh.landing_date, fx.landing_date) < current_date THEN 'Complete'
+                    WHEN coalesce(sh.departure_date, fx.departure_date) <= current_date THEN 'Active' ELSE 'Planned' END) <> 'Complete'
+             AND sh.carrier_ref IS NULL AND fx.flex_id IS NULL) is_exception
+          FROM planner.shipments sh
+          LEFT JOIN agg a ON a.shipment_ref=sh.shipment_ref
+          LEFT JOIN LATERAL (SELECT f.* FROM planner.flexport_shipments f
+            WHERE f.flex_id=sh.carrier_ref OR f.shipment_name=sh.shipment_ref
+            ORDER BY (f.flex_id=sh.carrier_ref) DESC NULLS LAST LIMIT 1) fx ON true
+          -- master-PO date calc: prod-end +7 = departure; + branch transit (air/sea by shipment mode) = landing/arrival
+          LEFT JOIN LATERAL (
+            SELECT CASE WHEN pe IS NOT NULL THEN (pe + interval '7 days')::date END ship_calc,
+                   CASE WHEN pe IS NOT NULL THEN (pe + interval '7 days'
+                      + ((CASE WHEN coalesce(lower(sh.mode), CASE WHEN fx.mode ILIKE 'air%' THEN 'air' ELSE 'sea' END)='air'
+                               THEN coalesce(mb.air_lead_time_days,0) ELSE coalesce(mb.sea_lead_time_days,0) END)||' days')::interval)::date END delivery_calc,
+                   coalesce(m.branch,'') mp_branch,
+                   upper(coalesce(nullif(m.country_code,''), mb.country_code, '')) mp_country
+            FROM planner.purchase_orders m
+            LEFT JOIN planner.suppliers ms ON ms.id=m.supplier_id
+            LEFT JOIN planner.branches mb ON mb.name=m.branch
+            CROSS JOIN LATERAL (SELECT coalesce(m.end_production_overide,
+                (m.start_production + (coalesce(ms.production_days,0)||' days')::interval)::date) pe) pec
+            WHERE m.po = coalesce(NULLIF(sh.master_po,''), sh.shipment_ref)
+            LIMIT 1) mp ON true
+          ORDER BY landing DESC NULLS LAST`);
+        const unassigned = await q(`SELECT po, supplier_name, coalesce(status,'') status, coalesce(prod_no,'') prod_no
+          FROM planner.purchase_orders
+          WHERE coalesce(shipment_ref,'')='' AND coalesce(status,'') NOT ILIKE '%complete%' ORDER BY po`);
+        return res.json({ shipments, unassigned });
+      }
+      case 'shipment-detail':  // not used directly (param route below); kept for switch completeness
+        return res.status(400).json({ error: 'use /api/supply/shipment-detail/:ref' });
+      case 'deposits':
+        // Keyed by surrogate id (reference is not unique). Drawdown CALCULATED, not stored:
+        //   used      = Σ start-deposit assigned on the POs pointing at this reference (spec B8.6)
+        //   remaining = pool amount for the reference − used   (pool = Σ amounts of rows sharing the
+        //               ref, so installments/credit-notes/write-offs net correctly)
+        //   linked_pos= the POs actually assigned to the reference.
+        // All three are NULL for "Other" sundry payments (is_deposit=false) — no pool concept there.
+        return res.json(await q(`
+          WITH draw AS (
+            SELECT po.deposit_ref, sum(coalesce(po.pay_start_deposit_assigned,0)) used
+            FROM planner.purchase_orders po WHERE po.deposit_ref IS NOT NULL
+            GROUP BY po.deposit_ref
+          ), pool AS (
+            SELECT reference, sum(coalesce(amount,0)) pool_amount
+            FROM planner.deposits WHERE is_deposit AND reference IS NOT NULL GROUP BY reference
+          )
+          SELECT d.id,d.reference,d.is_deposit,d.supplier_name,d.prod_no,d.country,d.description,
+            d.amount,d.xero_fx,d.xero_account_code, coalesce(d.status,'') status, to_char(d.date_paid,'YYYY-MM-DD') date_paid,
+            to_char(d.date_due,'YYYY-MM-DD') date_due,
+            CASE WHEN d.is_deposit THEN coalesce(dr.used,0) END deposit_used,
+            CASE WHEN d.is_deposit THEN coalesce(p.pool_amount, coalesce(d.amount,0))-coalesce(dr.used,0) END deposit_remaining,
+            CASE WHEN d.is_deposit THEN
+              (SELECT string_agg(po.po,', ' ORDER BY po.po) FROM planner.purchase_orders po WHERE po.deposit_ref=d.reference)
+            END linked_pos,
+            (d.reference IS NOT NULL AND EXISTS (SELECT 1 FROM planner.deposits d2 WHERE d2.reference=d.reference AND d2.id<>d.id)) shared_ref,
+            (SELECT string_agg(pd.prod_no||CASE WHEN coalesce(pd.supplier_name,'')<>'' THEN ' · '||pd.supplier_name ELSE '' END, ', ' ORDER BY pd.prod_no)
+             FROM planner.production_deposits pd WHERE pd.deposit_ref=d.reference) assigned_prods
+          FROM planner.deposits d
+          LEFT JOIN draw dr ON dr.deposit_ref=d.reference
+          LEFT JOIN pool p ON p.reference=d.reference
+          ORDER BY d.is_deposit DESC, d.date_paid DESC NULLS FIRST, d.id DESC`));
+      case 'productions': {
+        // A PRODUCTION = one supplier within a prod_no (the bulk factory run for that supplier).
+        // So prod_no P54 with 4 suppliers = 4 productions. Aggregates units/value across the
+        // supplier's POs in that prod_no. Deposits assign at this (prod_no × supplier) level.
+        const prods = await q(`
+          SELECT po.prod_no, coalesce(po.supplier_name,'(no supplier)') supplier,
+            count(*)::int po_count,
+            bool_and(coalesce(po.status,'') ILIKE '%complete%') all_complete,
+            string_agg(DISTINCT nullif(po.deposit_ref,''), ', ') po_deposits,
+            (SELECT string_agg(DISTINCT pd.deposit_ref, ', ') FROM planner.production_deposits pd
+              WHERE pd.prod_no=po.prod_no AND pd.supplier_name=po.supplier_name) prod_deposits,
+            coalesce((SELECT sum(l.qty) FROM planner.purchase_order_lines l
+                      JOIN planner.purchase_orders p2 ON p2.po=l.po
+                      WHERE p2.prod_no=po.prod_no AND coalesce(p2.supplier_name,'')=coalesce(po.supplier_name,'')),0)::int units,
+            round(coalesce((SELECT sum(l.qty*l.cost_price) FROM planner.purchase_order_lines l
+                      JOIN planner.purchase_orders p2 ON p2.po=l.po
+                      WHERE p2.prod_no=po.prod_no AND coalesce(p2.supplier_name,'')=coalesce(po.supplier_name,'')),0)) value
+          FROM planner.purchase_orders po WHERE coalesce(po.prod_no,'') <> ''
+          GROUP BY po.prod_no, po.supplier_name ORDER BY po.prod_no DESC, supplier`);
+        return res.json(prods.map(p => ({ ...p, status: p.all_complete ? 'Completed' : 'Active',
+          deposits: p.prod_deposits || p.po_deposits || '' })));
+      }
+      case 'batches':
+        return res.json(await q(`SELECT batch,to_char(batch_date,'YYYY-MM-DD') batch_date,
+          first_release_window,notes FROM planner.batches ORDER BY batch_date DESC NULLS LAST`));
+      case 'prod-numbers':   // CONFIG ▸ Productions: raw prod_numbers master + PO/supplier counts (editable via /prod-number/:id)
+        return res.json(await q(`
+          SELECT pn.id, pn.prod_no, coalesce(pn.status,'') status, coalesce(pn.xero_account_code,'') xero_account_code,
+            coalesce(pn.xero_account_name,'') xero_account_name,
+            (SELECT count(*) FROM planner.purchase_orders po WHERE po.prod_no=pn.prod_no)::int po_count,
+            (SELECT count(DISTINCT po.supplier_name) FROM planner.purchase_orders po WHERE po.prod_no=pn.prod_no)::int suppliers
+          FROM planner.prod_numbers pn ORDER BY pn.prod_no DESC NULLS LAST`));
+      case 'portal-users':   // CONFIG ▸ Portal Users: approved supplier-portal logins (email ↔ supplier)
+        return res.json(await q(`
+          SELECT u.id, u.email, u.supplier_id, coalesce(u.supplier_name, s.name, '') supplier_name,
+            coalesce(u.contact_name,'') contact_name, u.active,
+            to_char(u.created_at,'YYYY-MM-DD') created_at,
+            (SELECT count(*) FROM planner.portal_sessions ps WHERE ps.email=lower(u.email) AND ps.expires_at>now())::int live_sessions
+          FROM planner.supplier_portal_users u LEFT JOIN planner.suppliers s ON s.id=u.supplier_id
+          ORDER BY coalesce(u.supplier_name, s.name, ''), u.email`));
+      case 'products-all': { // CONFIG ▸ Products: full products master + release window, read-only (columns dynamic)
+        const pr = await pool.query(`SELECT p.*, sl.release_window FROM planner.products p
+          LEFT JOIN planner.sku_labels sl ON sl.sku=p.sku ORDER BY p.sku`);
+        return res.json({ columns: pr.fields.map(f => f.name).filter(c => c !== 'loaded_at'), rows: pr.rows });
+      }
+      case 'barcodes': {
+        // release_window for the seasonal filter; prod_nos / suppliers aggregated from the POs each SKU appears on
+        // (prod_nos restricted to the canonical prod_numbers list so junk values like 'AU' don't appear);
+        // per-market RRP from products (uk/us/eu only — migration 023) for the optional RRP columns.
+        const rows = await q(`WITH sku_po AS (
+            SELECT l.sku,
+              string_agg(DISTINCT po.prod_no, ', ') FILTER (WHERE po.prod_no ~ '^P[0-9]') prod_nos,   -- real prod numbers only (P54…); excludes junk like 'AU'
+              string_agg(DISTINCT po.supplier_name, ', ') FILTER (WHERE coalesce(po.supplier_name,'')<>'') suppliers
+            FROM planner.purchase_order_lines l JOIN planner.purchase_orders po ON po.po=l.po
+            GROUP BY l.sku)
+          SELECT sl.sku, sl.barcode_sku_name, sl.barcode_carton_name, sl.barcode_inner_name,
+            sl.size, coalesce(p.size_short, sl.size_short, '') size_short, sl.category, coalesce(sl.release_window,'') release_window, sl.carton_qty,
+            sl.product_barcode, sl.carton_barcode, sl.inner_barcode, sl.grs_material, sl.swatch_url,
+            sl.uk_carton_l, sl.uk_carton_w, sl.uk_carton_h, sl.uk_carton_wt,
+            coalesce(sp.prod_nos,'') prod_nos, coalesce(sp.suppliers,'') suppliers,
+            coalesce(p.supplier_multiple_all,'') supplier_multiple,
+            p.uk_rt, p.us_rt, p.eu_rt, coalesce(p.product_name,'') product_name
+          FROM planner.sku_labels sl
+          LEFT JOIN sku_po sp ON sp.sku=sl.sku
+          LEFT JOIN planner.products p ON p.sku=sl.sku
+          WHERE coalesce(sl.product_barcode,sl.carton_barcode,sl.inner_barcode) IS NOT NULL
+            AND coalesce(sl.variant_type,'') NOT ILIKE 'set'   -- MASTER products only (hide multipack/set variants)
+          ORDER BY sl.sku`);
+        // batches carry the data a barcode label can be stamped with (batch no + date + release window)
+        const batches = await q(`SELECT batch, to_char(batch_date,'YYYY-MM-DD') batch_date,
+          coalesce(first_release_window,'') first_release_window FROM planner.batches ORDER BY batch`).catch(() => []);
+        return res.json({ rows, batches });
+      }
+      case 'payments': {
+        // Engine model: a "run" = all txns sharing a date (grouped client-side). Run-level
+        // bank/currency/bank-amount/FX live in payment_run_meta (→ USD equivalent for Xero).
+        const txns = await q(`SELECT id, to_char(payment_date,'YYYY-MM-DD') run_date, transaction_type,
+          transaction_reference, transaction_supplier, transaction_amount, deposit_ref
+          FROM planner.payment_transactions ORDER BY payment_date DESC NULLS LAST, id`);
+        const meta = await q(`SELECT to_char(run_date,'YYYY-MM-DD') run_date, bank, paid_currency,
+          bank_amount, fx_rate FROM planner.payment_run_meta`);
+        return res.json({ txns, meta });
+      }
+      case 'payments-report': {
+        // A "payment" = one bank payment to a supplier on a date. Master row carries the base-currency
+        // (USD) total + the actual bank-currency amount/currency (planner.payment_fx); expand to see the
+        // sub-payments — each typed transaction (deposit/completion/balance) + any sundry "other" payment,
+        // with its reference + deposit ref. transaction_supplier/reference can be comma-joined (one bank
+        // payment covering several POs) → supplier is de-duped for grouping.
+        const lines = (await pool.query(`
+          SELECT to_char(payment_date,'YYYY-MM-DD') dt, coalesce(transaction_supplier,'(none)') supplier,
+            coalesce(transaction_reference,'') reference, round(transaction_amount)::int amount,
+            transaction_type type, coalesce(deposit_ref,'') deposit_ref
+          FROM planner.payment_transactions WHERE payment_date IS NOT NULL
+          UNION ALL
+          SELECT to_char(date_paid,'YYYY-MM-DD') dt, coalesce(supplier_name,'(none)') supplier,
+            coalesce(nullif(reference,''), description, '') reference, round(coalesce(amount,0))::int amount,
+            'Other' type, '' deposit_ref
+          FROM planner.deposits WHERE is_deposit=false AND date_paid IS NOT NULL`)).rows;
+        const fx = (await pool.query(`SELECT to_char(run_date,'YYYY-MM-DD') dt, supplier, paid_amount, coalesce(paid_currency,'') ccy FROM planner.payment_fx`)).rows;
+        const normSup = s => { const p = (s || '').split(',').map(x => x.trim()).filter(Boolean); return Array.from(new Set(p)).join(', ') || '(none)'; };
+        const fxMap = {}; fx.forEach(f => fxMap[f.dt + '|' + normSup(f.supplier)] = f);
+        const groups = {};
+        for (const l of lines) { const sup = normSup(l.supplier); const k = l.dt + '|' + sup;
+          const g = groups[k] || (groups[k] = { dt: l.dt, supplier: sup, total: 0, lines: [] });
+          g.total += Number(l.amount);
+          g.lines.push({ reference: l.reference, amount: Number(l.amount), type: l.type, deposit_ref: l.deposit_ref }); }
+        const TYPE_ORD = { Deposit: 0, Completion: 1, Balance: 2, Other: 3 };
+        const out = Object.values(groups).map(g => { const f = fxMap[g.dt + '|' + g.supplier];
+          g.lines.sort((a, b) => (TYPE_ORD[a.type] ?? 9) - (TYPE_ORD[b.type] ?? 9));
+          return { dt: g.dt, supplier: g.supplier, total: Math.round(g.total), base_ccy: 'USD',
+            other_amount: f && f.paid_amount != null ? Number(f.paid_amount) : null, bank_ccy: f ? f.ccy : '',
+            lines: g.lines }; })
+          .sort((a, b) => a.dt < b.dt ? 1 : a.dt > b.dt ? -1 : (a.supplier < b.supplier ? -1 : 1));
+        return res.json(out);
+      }
+      case 'actions': {  // derived exceptions (spec B3.2). Each carries an inline-fix descriptor
+        // (fix/target/field) plus target_key — the key the fix endpoint addresses (po number, or
+        // the deposit row id now that deposits are id-keyed). Lifecycle state (dismiss/snooze/done)
+        // attached below against a stable key = type|target_key, mirroring DEMAND ▸ Actions.
+        const arows = await q(`
+          SELECT * FROM (
+          SELECT 'high' severity,'Date conflict' type, po ref,
+            'Landing '||landing_date_overide::text||' is in the past (status '||coalesce(status,'?')||')' detail,
+            'date' fix, 'po' target, 'landing_date_overide' field, po target_key
+            FROM planner.purchase_orders
+            WHERE landing_date_overide < current_date AND coalesce(status,'') NOT ILIKE '%complete%'
+          UNION ALL
+          SELECT 'amber','Unassigned shipment', po, 'Past production with no shipment assigned',
+            'shipment','po','shipment_ref', po
+            FROM planner.purchase_orders
+            WHERE shipment_ref IS NULL AND coalesce(status,'') NOT ILIKE '%complete%'
+          UNION ALL
+          SELECT 'high','PO missing supplier', po, 'No supplier set on this PO', 'supplier','po','supplier_name', po
+            FROM planner.purchase_orders WHERE supplier_name IS NULL
+          UNION ALL
+          SELECT 'amber','Deposit not paid', coalesce(reference, description, 'deposit #'||id),
+            'Deposit '||coalesce(round(amount)::text,'?')||' '||coalesce(country,'')||' has no paid date',
+            'date','deposit','date_paid', id::text
+            FROM planner.deposits WHERE is_deposit AND date_paid IS NULL AND coalesce(amount,0) > 0
+          UNION ALL
+          SELECT 'high','Deposit over-assigned', d.reference,
+            'Assigned start deposits '||round(dr.used)||' exceed pool '||round(d.pool)
+            ||' (remaining '||round(d.pool-dr.used)||')', '','','', d.reference
+            FROM (SELECT reference, sum(coalesce(amount,0)) pool FROM planner.deposits
+                  WHERE is_deposit AND reference IS NOT NULL GROUP BY reference) d
+            JOIN (SELECT deposit_ref, sum(coalesce(pay_start_deposit_assigned,0)) used
+                  FROM planner.purchase_orders WHERE deposit_ref IS NOT NULL GROUP BY deposit_ref
+            ) dr ON dr.deposit_ref=d.reference WHERE dr.used > d.pool
+          UNION ALL
+          SELECT 'amber','Partial cartons need approval', l.po,
+            count(*)||' line(s) not a full carton multiple and not yet approved', 'orderplan','','', l.po
+            FROM planner.v_purchase_order_lines l
+            JOIN planner.purchase_orders p ON p.po=l.po
+            WHERE l.full_carton_check LIKE '⚠%' AND coalesce(p.status,'') NOT ILIKE '%complete%'
+            GROUP BY l.po
+          UNION ALL
+          SELECT 'amber','Order-plan change pending ERP push', l.po,
+            count(*)||' line(s) edited, not yet uploaded to the ERP', 'upload','po','', l.po
+            FROM planner.purchase_order_lines l WHERE l.qty IS DISTINCT FROM l.erp_qty
+            GROUP BY l.po HAVING count(*) FILTER (WHERE coalesce(l.erp_qty,0)>0)>0  -- exclude never-in-ERP POs (below)
+          UNION ALL
+          SELECT 'high','PO not in ERP', l.po,
+            count(*)||' line(s) exist but none are mirrored from the ERP (never pushed)', 'upload','po','', l.po
+            FROM planner.purchase_order_lines l
+            JOIN planner.purchase_orders p ON p.po=l.po
+            WHERE coalesce(p.status,'') NOT ILIKE '%complete%'
+            GROUP BY l.po HAVING count(*) FILTER (WHERE coalesce(l.erp_qty,0)>0)=0
+          UNION ALL
+          SELECT CASE WHEN x.comp < current_date THEN 'high' ELSE 'amber' END,'Production check-in', x.po,
+            CASE WHEN x.comp < current_date
+              THEN 'Completion was due '||x.comp||' ('||(current_date-x.comp)||'d ago) · status '||coalesce(nullif(x.ps,''),'not set')||' — chase the supplier'
+              ELSE 'Completes '||x.comp||' (in '||(x.comp-current_date)||'d) · status '||coalesce(nullif(x.ps,''),'not set')||' — confirm on track' END,
+            'prodstatus','po','production_status', x.po
+            FROM (SELECT po.po,
+                    coalesce(po.end_production_overide,
+                             po.start_production + (coalesce(s.production_days,0)||' days')::interval)::date comp,
+                    coalesce(po.production_status,'') ps, po.production_confirmed_at conf
+                  FROM planner.purchase_orders po LEFT JOIN planner.suppliers s ON s.id=po.supplier_id
+                  WHERE coalesce(po.status,'') NOT ILIKE '%complete%') x
+            WHERE x.comp IS NOT NULL AND x.comp <= current_date + 10 AND x.ps NOT IN ('complete','shipped')
+              AND (x.conf IS NULL OR x.conf < now() - interval '14 days')
+          UNION ALL
+          SELECT CASE WHEN y.shipd < current_date THEN 'high' ELSE 'amber' END,'Ship check-in', y.po,
+            CASE WHEN y.shipd < current_date
+              THEN 'Production complete; planned ship '||y.shipd||' passed ('||(current_date-y.shipd)||'d ago) — confirm it shipped'
+              ELSE 'Production complete; ships ~'||y.shipd||' (in '||(y.shipd-current_date)||'d) — confirm it''s on the water' END,
+            'prodstatus','po','production_status', y.po
+            FROM (SELECT po.po,
+                    coalesce(sh.departure_date,
+                      (coalesce(po.end_production_overide,
+                                po.start_production + (coalesce(s.production_days,0)||' days')::interval)::date + 7))::date shipd,
+                    coalesce(po.production_status,'') ps
+                  FROM planner.purchase_orders po
+                  LEFT JOIN planner.suppliers s ON s.id=po.supplier_id
+                  LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
+                  WHERE coalesce(po.status,'') NOT ILIKE '%complete%') y
+            WHERE y.shipd IS NOT NULL AND y.shipd <= current_date + 7 AND y.ps='complete'
+          UNION ALL
+          SELECT 'amber','Shipment missing dates', s.shipment_ref,
+            'Assigned to live PO(s) but has no departure/ETA date set', 'date','shipment','arrival_date', s.shipment_ref
+            FROM planner.shipments s
+            WHERE s.departure_date IS NULL AND s.arrival_date IS NULL AND s.landing_date IS NULL AND s.delivery_date IS NULL
+              AND EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.shipment_ref=s.shipment_ref
+                          AND coalesce(p.status,'') NOT ILIKE '%complete%')
+          UNION ALL
+          SELECT 'amber','Shipment ETA passed', s.shipment_ref,
+            'ETA '||coalesce(s.arrival_date,s.delivery_date,s.landing_date)::text||' has passed but not marked arrived',
+            'arrived','shipment','status', s.shipment_ref
+            FROM planner.shipments s
+            WHERE coalesce(s.arrival_date,s.delivery_date,s.landing_date) < current_date
+              AND coalesce(s.status,'') NOT ILIKE '%arriv%' AND coalesce(s.status,'') NOT ILIKE '%complete%'
+              AND coalesce(s.status,'') NOT ILIKE '%deliver%'
+              AND EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.shipment_ref=s.shipment_ref
+                          AND coalesce(p.status,'') NOT ILIKE '%complete%')
+          UNION ALL
+          SELECT 'amber','Shipment delivered — update PO', po.po,
+            'Shipment '||po.shipment_ref||' has landed/completed but this PO is still '''||coalesce(nullif(po.status,''),'?')||''' — mark it delivered',
+            'podeliver','po','status', po.po
+            FROM planner.purchase_orders po
+            JOIN planner.shipments s2 ON s2.shipment_ref=po.shipment_ref
+            LEFT JOIN LATERAL (SELECT f.arrival_date, f.landing_date FROM planner.flexport_shipments f
+              WHERE f.flex_id=s2.carrier_ref OR f.shipment_name=s2.shipment_ref LIMIT 1) fx2 ON true
+            WHERE coalesce(po.status,'') NOT ILIKE '%complete%' AND coalesce(po.status,'') NOT ILIKE '%deliver%'
+              AND (lower(coalesce(s2.status,'')) LIKE 'complet%' OR coalesce(s2.arrival_date, fx2.arrival_date, s2.landing_date, fx2.landing_date) < current_date)
+              AND NOT (upper(coalesce(po.country_code,''))='DIRECT' AND po.branch IN ('UK ILG','US Geneva','EU iFulfillment','AU Coghlans'))
+          UNION ALL
+          -- PO sat in DELIVERED past its completion (arrival + 7) but not yet Received in Cin7/Fulfil → chase the receipt
+          SELECT 'amber','Awaiting ERP receipt', po.po,
+            'Delivered & completion ('||to_char((coalesce(s2.arrival_date, fx2.arrival_date, s2.landing_date, fx2.landing_date) + interval '7 days')::date,'YYYY-MM-DD')
+              ||') has passed — receive it in Cin7/Fulfil to complete the PO',
+            'gotopo','po','', po.po
+            FROM planner.purchase_orders po
+            JOIN planner.shipments s2 ON s2.shipment_ref=po.shipment_ref
+            LEFT JOIN LATERAL (SELECT f.arrival_date, f.landing_date FROM planner.flexport_shipments f
+              WHERE f.flex_id=s2.carrier_ref OR f.shipment_name=s2.shipment_ref LIMIT 1) fx2 ON true
+            WHERE coalesce(po.status,'') ILIKE '%deliver%' AND coalesce(po.status,'') NOT ILIKE '%complete%'
+              AND (coalesce(s2.arrival_date, fx2.arrival_date, s2.landing_date, fx2.landing_date) + interval '7 days')::date < current_date
+          UNION ALL
+          SELECT 'high','Payment invalid', po,
+            'A payment amount is set with no payment date — add the date in the PO''s PLAN', 'gotopo','po','', po
+            FROM planner.purchase_orders
+            WHERE coalesce(status,'') NOT ILIKE '%complete%' AND (
+              (coalesce(pay_start_deposit_assigned,0)>0 AND pay_start_deposit_date IS NULL) OR
+              (coalesce(pay_completion_assigned,0)>0 AND pay_completion_date IS NULL) OR
+              (coalesce(pay_balance_1_amount,0)>0 AND pay_balance_1_date IS NULL) OR
+              (coalesce(pay_balance_2_amount,0)>0 AND pay_balance_2_date IS NULL) )
+          UNION ALL
+          SELECT 'amber','Over 20 pallets', z.po,
+            'Estimated '||round(z.pal,1)||' pallets (>20 = over one container) — rebalance across this production''s POs',
+            'rebalance','po','', z.po
+            FROM (SELECT po.po, upper(coalesce(nullif(po.country_code,''), b.country_code, '')) ctry,
+                    (SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0)) FROM planner.purchase_order_lines l
+                       LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=po.po) pal
+                  FROM planner.purchase_orders po LEFT JOIN planner.branches b ON b.name=po.branch
+                  -- only BEFORE it ships (FUTURE / PRODUCTION / READY TO SHIP) — once shipped it's too late to rebalance
+                  WHERE coalesce(po.status,'') NOT ILIKE '%complete%' AND coalesce(po.status,'') NOT ILIKE 'ship%'
+                    AND coalesce(po.status,'') NOT ILIKE '%deliver%') z
+            WHERE z.pal > 20 AND z.ctry <> 'DIRECT'
+          ) _a ORDER BY CASE severity WHEN 'high' THEN 0 WHEN 'amber' THEN 1 ELSE 2 END, type LIMIT 400`);
+        try { (await expediteActions()).forEach(a => arows.push(a)); } catch (e) { /* recommendation layer is best-effort */ }
+        try { (await submissionActions()).forEach(a => arows.push(a)); } catch (e) { /* portal-submission layer is best-effort */ }
+        const dtoday = (await pool.query(`SELECT to_char(current_date,'YYYY-MM-DD') d`)).rows[0].d;
+        let astate = {};
+        try { (await pool.query(`SELECT action_key, status, to_char(snooze_until,'YYYY-MM-DD') snooze_until FROM planner.supply_action_state`))
+          .rows.forEach(s => { astate[s.action_key] = s; }); } catch (e) { /* table not yet created (migration 037) */ }
+        arows.forEach(r => {
+          // portal-submission cards carry their own apply/dismiss (no generic snooze/dismiss lifecycle)
+          if (r.fix === 'applysub') { r.status = 'open'; return; }
+          r.key = r.type + '|' + (r.target_key || r.ref || ''); const s = astate[r.key]; r.status = 'open'; r.snooze_until = null;
+          if (s) { if (s.status === 'snoozed' && s.snooze_until && s.snooze_until >= dtoday) { r.status = 'snoozed'; r.snooze_until = s.snooze_until; }
+            else if (s.status !== 'snoozed') r.status = s.status; } });
+        return res.json(arows);
+      }
+      case 'upcoming':    // "What's next" briefing reuses the same per-PO milestone data as the pipeline
+      case 'pipeline': {  // PO lifecycle — bucket every open PO into one stage of its journey, from the
+        // date chain + supplier-confirmed production status. Each PO carries its next milestone date and a
+        // health (late / due-soon / on-track) so the board reads as a grouped timeline.
+        const today = (await pool.query(`SELECT to_char(CURRENT_DATE,'YYYY-MM-DD') d`)).rows[0].d;
+        const rows = (await pool.query(`
+          WITH s AS (
+            SELECT po.po, coalesce(po.supplier_name,'') supplier,
+              upper(coalesce(nullif(po.country_code,''), b.country_code,'')) market,
+              coalesce(po.production_status,'') production_status,
+              (CURRENT_DATE - po.production_confirmed_at::date)::int prod_conf_age,
+              coalesce(po.shipment_ref,'') shipment_ref,
+              po.start_production prod_start,
+              coalesce(po.end_production_overide, po.start_production + (coalesce(sup.production_days,0)||' days')::interval)::date prod_end,
+              coalesce(sh.departure_date, po.supplier_ship_date,
+                       coalesce(po.end_production_overide, po.start_production + (coalesce(sup.production_days,0)||' days')::interval) + interval '7 days')::date ship_date,
+              coalesce(sh.delivery_date, sh.arrival_date, sh.landing_date, po.delivery_date_overide, po.landing_date_overide)::date arr_known,
+              po.supplier_ship_date sup_ship, sh.departure_date sh_dep, coalesce(sh.status,'') sh_status,
+              b.sea_lead_time_days sea_lead,
+              coalesce(po.supplier_invoice_total,
+                       (SELECT sum(l.qty*coalesce(l.cost_price,0)) FROM planner.purchase_order_lines l WHERE l.po=po.po),
+                       po.order_value_estimation, 0)::numeric val,
+              (SELECT coalesce(sum(l.qty),0) FROM planner.purchase_order_lines l WHERE l.po=po.po)::int units,
+              coalesce(fxs.flex_id, po.flexport_reference, '') flex
+            FROM planner.purchase_orders po
+            LEFT JOIN planner.suppliers sup ON sup.id=po.supplier_id
+            LEFT JOIN planner.branches b ON b.name=po.branch
+            LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
+            LEFT JOIN LATERAL (SELECT f.flex_id FROM planner.flexport_shipments f
+              WHERE f.flex_id=po.flexport_reference OR f.shipment_name=po.po OR f.shipment_name=po.shipment_ref
+              ORDER BY (f.flex_id=po.flexport_reference) DESC NULLS LAST LIMIT 1) fxs ON true
+            WHERE coalesce(po.status,'') NOT ILIKE '%complete%')
+          SELECT po, supplier, market, production_status, prod_conf_age, shipment_ref,
+            to_char(prod_start,'YYYY-MM-DD') prod_start,
+            to_char(prod_end,'YYYY-MM-DD') prod_end,
+            to_char(ship_date,'YYYY-MM-DD') ship_date,
+            to_char(coalesce(arr_known, ship_date + (coalesce(sea_lead,0)||' days')::interval),'YYYY-MM-DD') arrival,
+            (arr_known IS NOT NULL) arrival_known, units, round(val)::int val, flex,
+            -- planned-vs-confirmed inputs for the OVERDUE check (a passed planned date with no confirmation)
+            to_char(coalesce(sup_ship, prod_end + interval '7 days'),'YYYY-MM-DD') planned_ship,
+            (sh_dep IS NOT NULL) departed,
+            (sh_status ~* 'arriv|deliver|complete|receiv') arrived,
+            to_char(coalesce(arr_known, coalesce(sup_ship, prod_end + interval '7 days') + (coalesce(sea_lead,0)||' days')::interval),'YYYY-MM-DD') eta
+          FROM s`)).rows;
+        const STAGES = [['awaiting','Awaiting production'],['in_production','In production'],
+          ['prod_complete','Production complete'],['in_transit','In transit'],['arriving','Arriving ≤2wk'],['checked_in','Checked in']];
+        const order = STAGES.map(s => s[0]);
+        const dleft = iso => iso ? Math.round((Date.parse(iso) - Date.parse(today)) / 86400000) : null;
+        const pos = rows.map(r => {
+          let st;
+          const arrIn = dleft(r.arrival);
+          if (r.arrival && r.arrival <= today) st = 'checked_in';
+          else if (r.ship_date && r.ship_date <= today) st = (arrIn != null && arrIn <= 14) ? 'arriving' : 'in_transit';
+          else if (r.prod_end && r.prod_end <= today) st = 'prod_complete';
+          else if (r.prod_start && r.prod_start <= today) st = 'in_production';
+          else st = 'awaiting';
+          const atLeast = m => { if (order.indexOf(st) < order.indexOf(m)) st = m; };          // trust confirmed status
+          if (r.production_status === 'in_production' || r.production_status === 'nearing_completion') atLeast('in_production');
+          if (r.production_status === 'complete') atLeast('prod_complete');
+          if (r.production_status === 'shipped') atLeast('in_transit');
+          const nextDate = { awaiting: r.prod_start, in_production: r.prod_end, prod_complete: r.ship_date,
+            in_transit: r.arrival, arriving: r.arrival, checked_in: null }[st];
+          const d = dleft(nextDate);
+          const health = nextDate == null ? (st === 'checked_in' ? 'done' : 'unknown') : (d < 0 ? 'late' : (d <= 7 ? 'soon' : 'ok'));
+          // OVERDUE = earliest planned milestone whose date has passed without confirmation that it happened.
+          // (The stage above advances optimistically off dates; this instead checks planned-vs-confirmed.)
+          const prodDone = r.production_status === 'complete' || r.production_status === 'shipped';
+          const departed = r.departed || r.production_status === 'shipped';
+          let overdue = null;
+          if (r.prod_end && r.prod_end < today && !prodDone && !departed && !r.arrived) overdue = { type: 'Completing', date: r.prod_end };
+          else if (r.planned_ship && r.planned_ship < today && !departed && !r.arrived) overdue = { type: 'Shipping', date: r.planned_ship };
+          else if (r.eta && r.eta < today && !r.arrived) overdue = { type: 'Arriving', date: r.eta };
+          if (overdue) overdue.days = -dleft(overdue.date);
+          return { po: r.po, supplier: r.supplier, market: r.market, units: r.units, val: r.val,
+            shipment_ref: r.shipment_ref, flex: r.flex || '', production_status: r.production_status, prod_conf_age: r.prod_conf_age,
+            stage: st, next_date: nextDate, next_days: d, health, overdue,
+            prod_start: r.prod_start, prod_end: r.prod_end, ship_date: r.ship_date, arrival: r.arrival, arrival_known: r.arrival_known };
+        });
+        return res.json({ today, stages: STAGES, pos });
+      }
+      case 'config':      // CONFIG view (rate-card sub-tabs); suppliers/batches fetched separately
+      case 'settings': {  // editable cards: import tax, freight, duty, branches (lead times)
+        const [tax, freight, duty, branches] = await Promise.all([
+          q(`SELECT country, tax_pct, coalesce(base,'landed') base, coalesce(notes,'') notes
+             FROM planner.import_tax_rates ORDER BY country`),
+          q(`SELECT id, coalesce(destination,'') destination, coalesce(container_size,'') container_size,
+             cost, pallets, coalesce(currency,'USD') currency, coalesce(notes,'') notes
+             FROM planner.freight_rates ORDER BY pallets DESC NULLS LAST, destination`),
+          q(`SELECT id, coalesce(category,'') category, coalesce(country,'') country, duty_pct, coalesce(notes,'') notes
+             FROM planner.duty_rates ORDER BY category, country`),
+          q(`SELECT name, coalesce(country_code,'') country_code, sea_lead_time_days, air_lead_time_days,
+             coalesce(shipping_notes,'') shipping_notes FROM planner.branches ORDER BY name`),
+        ]);
+        const air = await q(`SELECT id, min_kg, max_kg, rate_per_kg FROM planner.air_freight_rates ORDER BY min_kg`).catch(() => []);
+        return res.json({ tax, freight, duty, branches, air, sizes: ['20ft','40ft','LCL'] });
+      }
+      default:
+        return res.status(404).json({ error: 'unknown section: ' + req.params.section });
+    }
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── SUPPLY writes — editable cells in PAYMENTS/DEPOSITS save here. Targets the configured DB
+// (Ben's sandbox). Whitelisted fields only, parameterised. Production writes stay Diviyaj's/gated.
+async function patch(res, table, keyCol, keyVal, allowed, body, keyType) {
+  const sets = [], vals = []; let i = 1;
+  for (const k of Object.keys(body || {})) {
+    if (!allowed[k]) continue;
+    sets.push(`${k}=$${i++}::${allowed[k]}`);
+    vals.push(body[k] === '' ? null : body[k]);
+  }
+  if (!sets.length) return res.status(400).json({ error: 'no editable fields' });
+  vals.push(keyVal);
+  try {
+    const r = await pool.query(`UPDATE ${table} SET ${sets.join(',')} WHERE ${keyCol}=$${i}${keyType ? '::' + keyType : ''}`, vals);
+    res.json({ updated: r.rowCount });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+}
+app.post('/api/supply/deposit/:id', (req, res) =>
+  patch(res, 'planner.deposits', 'id', req.params.id,
+    { amount: 'numeric', xero_fx: 'numeric', date_paid: 'date', date_due: 'date', reference: 'text',
+      supplier_name: 'text', description: 'text', prod_no: 'text', country: 'text',
+      xero_account_code: 'text', status: 'text' }, req.body, 'bigint'));
+// CASH FLOW — manual "likely payment date" for an overdue line. Empty date clears the override.
+app.post('/api/supply/likely-date', async (req, res) => {
+  const { line_key, likely_date } = req.body || {};
+  if (!line_key) return res.status(400).json({ error: 'line_key required' });
+  try {
+    if (!likely_date) { await pool.query(`DELETE FROM planner.payment_likely_dates WHERE line_key=$1`, [line_key]); return res.json({ cleared: true }); }
+    await pool.query(`INSERT INTO planner.payment_likely_dates (line_key, likely_date, updated_at) VALUES ($1,$2::date,now())
+      ON CONFLICT (line_key) DO UPDATE SET likely_date=excluded.likely_date, updated_at=now()`, [line_key, likely_date]);
+    res.json({ saved: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Settings — landed-cost rate cards. Import tax keyed by country (upsert); freight rates by id.
+app.post('/api/supply/tax-rate/:country', async (req, res) => {
+  const b = req.body || {}, allowed = { tax_pct: 'numeric', base: 'text', notes: 'text' };
+  const cols = ['country'], vals = [req.params.country], ph = ['$1::text']; let i = 2;
+  for (const k of Object.keys(b)) { if (!allowed[k]) continue; cols.push(k); vals.push(b[k] === '' ? null : b[k]); ph.push(`$${i++}::${allowed[k]}`); }
+  const upd = cols.slice(1).map(c => `${c}=excluded.${c}`).join(',') || 'updated_at=now()';
+  try {
+    await pool.query(`INSERT INTO planner.import_tax_rates (${cols.join(',')}) VALUES (${ph.join(',')})
+      ON CONFLICT (country) DO UPDATE SET ${upd}, updated_at=now()`, vals);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/freight-rate/:id', (req, res) =>
+  patch(res, 'planner.freight_rates', 'id', req.params.id,
+    { destination: 'text', container_size: 'text', cost: 'numeric', currency: 'text', notes: 'text' },
+    req.body, 'bigint'));
+app.post('/api/supply/freight-rate-create', async (req, res) => {
+  const b = req.body || {};
+  try {
+    const r = await pool.query(`INSERT INTO planner.freight_rates (destination, container_size, cost, currency)
+      VALUES ($1,$2,$3,coalesce($4,'USD')) RETURNING id`,
+      [b.destination || null, b.container_size || null, b.cost === '' || b.cost == null ? null : b.cost, b.currency || null]);
+    res.json({ ok: true, id: r.rows[0].id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/duty-rate/:id', (req, res) =>
+  patch(res, 'planner.duty_rates', 'id', req.params.id,
+    { category: 'text', country: 'text', duty_pct: 'numeric', notes: 'text' }, req.body, 'bigint'));
+app.post('/api/supply/duty-rate-create', async (req, res) => {
+  const b = req.body || {};
+  try {
+    const r = await pool.query(`INSERT INTO planner.duty_rates (category, country, duty_pct) VALUES ($1,$2,$3) RETURNING id`,
+      [b.category || null, b.country || null, b.duty_pct === '' || b.duty_pct == null ? null : b.duty_pct]);
+    res.json({ ok: true, id: r.rows[0].id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Branches (lead-time table) — edit by name (upsert), and create. Drives PO ship/landing dates.
+app.post('/api/supply/branch/:name', async (req, res) => {
+  const b = req.body || {}, allowed = { country_code: 'text', sea_lead_time_days: 'int', air_lead_time_days: 'int', shipping_notes: 'text' };
+  const cols = ['name'], vals = [req.params.name], ph = ['$1::text']; let i = 2;
+  for (const k of Object.keys(b)) { if (!allowed[k]) continue; cols.push(k); vals.push(b[k] === '' ? null : b[k]); ph.push(`$${i++}::${allowed[k]}`); }
+  const upd = cols.slice(1).map(c => `${c}=excluded.${c}`).join(',') || 'name=excluded.name';
+  try {
+    await pool.query(`INSERT INTO planner.branches (${cols.join(',')}) VALUES (${ph.join(',')})
+      ON CONFLICT (name) DO UPDATE SET ${upd}`, vals);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Suppliers — editable terms table (CONFIG). Edit by id; create a new supplier (name required).
+app.post('/api/supply/supplier/:id', (req, res) =>
+  patch(res, 'planner.suppliers', 'id', req.params.id,
+    { code: 'text', name: 'text', kind: 'text', default_currency: 'text',
+      start_deposit_pct: 'numeric', completion_pct: 'numeric', balance_pct: 'numeric',
+      credit_days: 'int', credit_type: 'text', credit_fee_on_balance_pct: 'numeric',
+      production_days: 'int', country: 'text', contact_name: 'text', email: 'text' }, req.body, 'bigint'));
+app.post('/api/supply/supplier-create', async (req, res) => {
+  const b = req.body || {}, name = (b.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'supplier name required' });
+  try {
+    const r = await pool.query(`INSERT INTO planner.suppliers (name, code, kind) VALUES ($1,$2,coalesce($3,'factory')) RETURNING id`,
+      [name, (b.code || '').trim() || null, b.kind || null]);
+    res.json({ ok: true, id: r.rows[0].id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Batches — editable buying-batch table (CONFIG). Edit by batch name; create a new batch.
+app.post('/api/supply/batch/:batch', (req, res) =>
+  patch(res, 'planner.batches', 'batch', req.params.batch,
+    { batch_date: 'date', first_release_window: 'text', notes: 'text' }, req.body, 'text'));
+app.post('/api/supply/batch-create', async (req, res) => {
+  const b = req.body || {}, batch = (b.batch || '').trim();
+  if (!batch) return res.status(400).json({ error: 'batch name required' });
+  try {
+    const dup = await pool.query(`SELECT 1 FROM planner.batches WHERE batch=$1`, [batch]);
+    if (dup.rowCount) return res.status(409).json({ error: 'batch ' + batch + ' already exists' });
+    await pool.query(`INSERT INTO planner.batches (batch, batch_date) VALUES ($1,$2)`, [batch, b.batch_date || null]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Create a production number (registers it in prod_numbers so it's pickable; a PO joins a production by
+// setting its prod_no). A production row appears in PRODUCTIONS once a PO carries the prod_no.
+app.post('/api/supply/production-create', async (req, res) => {
+  const prod = (req.body && req.body.prod_no || '').trim();
+  if (!prod) return res.status(400).json({ error: 'production number required' });
+  try {
+    const dup = await pool.query(`SELECT 1 FROM planner.prod_numbers WHERE prod_no=$1`, [prod]);
+    if (dup.rowCount) return res.status(409).json({ error: 'production ' + prod + ' already exists' });
+    await pool.query(`INSERT INTO planner.prod_numbers (prod_no, status) VALUES ($1,'active')`, [prod]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Edit a production row (CONFIG ▸ Productions). Edit/Save sends all fields at once.
+app.post('/api/supply/prod-number/:id', (req, res) =>
+  patch(res, 'planner.prod_numbers', 'id', req.params.id,
+    { prod_no: 'text', status: 'text', xero_account_code: 'text', xero_account_name: 'text', xero_account_id: 'text' },
+    req.body, 'bigint'));
+
+// ── Supplier portal admin (CONFIG ▸ Portal Users). The approved email↔supplier list + magic-link issue.
+app.post('/api/supply/portal-user-create', async (req, res) => {
+  const b = req.body || {}; const email = String(b.email || '').trim().toLowerCase();
+  if (!email || !/.+@.+\..+/.test(email)) return res.status(400).json({ error: 'valid email required' });
+  try {
+    // resolve supplier_id from the supplier name when given (mirrors the rest of the app: map by name)
+    let sid = b.supplier_id || null, sname = b.supplier_name || null;
+    if (!sid && sname) { const r = await pool.query(`SELECT id FROM planner.suppliers WHERE name=$1`, [sname]); sid = r.rows[0] ? r.rows[0].id : null; }
+    const r = await pool.query(`INSERT INTO planner.supplier_portal_users (email, supplier_id, supplier_name, contact_name)
+      VALUES ($1,$2,$3,$4) RETURNING id`, [email, sid, sname, b.contact_name || null]);
+    res.json({ id: r.rows[0].id });
+  } catch (e) { res.status(500).json({ error: /unique/i.test(e.message) ? 'that email is already on the list' : e.message }); }
+});
+app.post('/api/supply/portal-user/:id', async (req, res) => {
+  const b = req.body || {};
+  if (b._delete) { try { await pool.query(`DELETE FROM planner.supplier_portal_users WHERE id=$1`, [req.params.id]); return res.json({ deleted: true }); } catch (e) { return res.status(500).json({ error: e.message }); } }
+  // if supplier_name changes, re-resolve supplier_id
+  if (b.supplier_name !== undefined && b.supplier_id === undefined) {
+    const r = await pool.query(`SELECT id FROM planner.suppliers WHERE name=$1`, [b.supplier_name]);
+    b.supplier_id = r.rows[0] ? String(r.rows[0].id) : '';
+  }
+  if (b.email) b.email = String(b.email).trim().toLowerCase();
+  return patch(res, 'planner.supplier_portal_users', 'id', req.params.id,
+    { email: 'text', supplier_id: 'bigint', supplier_name: 'text', contact_name: 'text', active: 'boolean' }, b, 'bigint');
+});
+// Issue a magic link (dev stub: returns the URL instead of emailing it — Diviyaj wires real email for prod).
+app.post('/api/supply/portal-magic/:id', async (req, res) => {
+  try {
+    const u = (await pool.query(`SELECT email, active FROM planner.supplier_portal_users WHERE id=$1`, [req.params.id])).rows[0];
+    if (!u) return res.status(404).json({ error: 'no such portal user' });
+    if (!u.active) return res.status(400).json({ error: 'user is inactive — activate before issuing a link' });
+    const token = crypto.randomBytes(24).toString('hex');
+    await pool.query(`INSERT INTO planner.portal_magic_tokens (token, email, expires_at) VALUES ($1,$2, now() + interval '7 days')`, [token, u.email]);
+    const base = (req.headers['x-forwarded-proto'] ? req.headers['x-forwarded-proto'] + '://' : 'http://') + (req.headers['x-forwarded-host'] || req.headers.host);
+    res.json({ email: u.email, url: base + '/portal?token=' + token, expires_days: 7 });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+const qp = (sql, vals) => pool.query(sql, vals).then(r => r.rows);   // rows helper for the standalone portal routes
+// ── Supplier portal write-backs. supplier_id is trusted here (internal preview = acting-as); the real
+// /portal will derive it from the session and call the same logic. Mixed apply-flow:
+//   completion_date / invoice_value → STAGED (supplier_submissions, pending) for internal one-click apply
+//   tracking / carrier              → applied DIRECTLY to the PO's shipment (+ logged as applied)
+//   notes                           → posted immediately (supplier_notes)
+// supplier submits an actual cost price AND/OR an amended quantity for one PO line (upsert; blank clears each).
+// is_added marks a SKU the supplier added to the order (one not on the original order plan).
+app.post('/api/supply/portal-line-cost', async (req, res) => {
+  const b = req.body || {};
+  if (!b.po || !b.sku) return res.status(400).json({ error: 'po and sku required' });
+  try {
+    const num = v => (v === '' || v == null) ? null : Number(v);
+    const cost = num(b.actual_cost), qty = num(b.amended_qty), added = !!b.is_added;
+    await pool.query(`INSERT INTO planner.portal_line_costs (po, sku, actual_cost, amended_qty, is_added, submitted_by, submitted_at)
+      VALUES ($1,$2,$3,$4,$5,$6, now())
+      ON CONFLICT (po, sku) DO UPDATE SET actual_cost=excluded.actual_cost, amended_qty=excluded.amended_qty,
+        is_added=planner.portal_line_costs.is_added OR excluded.is_added, submitted_by=excluded.submitted_by, submitted_at=now()`,
+      [b.po, b.sku, cost, qty, added, b.submitted_by || null]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// supplier removes a SKU they had added to the order (only removes supplier-added rows)
+app.post('/api/supply/portal-line-remove', async (req, res) => {
+  const b = req.body || {};
+  if (!b.po || !b.sku) return res.status(400).json({ error: 'po and sku required' });
+  try { await pool.query(`DELETE FROM planner.portal_line_costs WHERE po=$1 AND sku=$2 AND is_added=true`, [b.po, b.sku]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// SKUs assignable by a supplier (from products.supplier_multiple_all) — for the portal "add SKU" picker
+app.get('/api/supply/supplier-skus/:supplier', async (req, res) => {
+  try { res.json(await qp(`SELECT sku, coalesce(product_name,'') product_name
+    FROM planner.products WHERE coalesce(supplier_multiple_all,'') ILIKE '%'||$1||'%' AND coalesce(sku,'')<>'' ORDER BY sku`, [req.params.supplier])); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Internal (PO PLAN) sets the FINAL agreed cost price per line (the value that would push to ERP). Upserts onto
+// the same portal_line_costs row so supplier-submitted (actual_cost) and D&B-final (final_cost) sit side by side.
+app.post('/api/supply/po-line-final', async (req, res) => {
+  const b = req.body || {};
+  if (!b.po || !b.sku) return res.status(400).json({ error: 'po and sku required' });
+  try {
+    const cost = (b.final_cost === '' || b.final_cost == null) ? null : Number(b.final_cost);
+    await pool.query(`INSERT INTO planner.portal_line_costs (po, sku, final_cost, submitted_at)
+      VALUES ($1,$2,$3, now()) ON CONFLICT (po, sku) DO UPDATE SET final_cost=excluded.final_cost`,
+      [b.po, b.sku, cost]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// PO PLAN order plan: D&B accepts a supplier-submitted change (cost / amended qty / added SKU). Confirms the line
+// and, if no final price set yet, adopts the supplier's cost as the final. `all:true` accepts every unconfirmed line on the PO.
+app.post('/api/supply/po-line-accept', async (req, res) => {
+  const b = req.body || {};
+  if (!b.po) return res.status(400).json({ error: 'po required' });
+  if (!b.all && !b.sku) return res.status(400).json({ error: 'sku or all required' });
+  // which portal_line_costs rows are we accepting? a single sku, or all unconfirmed on the PO.
+  const scope = b.all
+    ? `plc.po=$1 AND (plc.actual_cost IS NOT NULL OR plc.amended_qty IS NOT NULL OR plc.is_added=true) AND (plc.confirmed_at IS NULL OR plc.confirmed_at < plc.submitted_at)`
+    : `plc.po=$1 AND plc.sku=$2`;
+  const params = b.all ? [b.po] : [b.po, b.sku];
+  try {
+    // 1) write accepted qty + cost onto EXISTING order-plan lines (qty<>erp_qty / cost<>erp_cost → flags ERP push)
+    await pool.query(`UPDATE planner.purchase_order_lines pol SET
+        qty = coalesce(round(plc.amended_qty)::int, pol.qty),
+        cost_price = coalesce(plc.final_cost, plc.actual_cost, pol.cost_price),
+        proposed_at = now(), proposed_by = 'order-plan accept'
+      FROM planner.portal_line_costs plc
+      WHERE pol.po=plc.po AND pol.sku=plc.sku AND ${scope}`, params);
+    // 2) insert supplier-ADDED SKUs that aren't yet order-plan lines (erp_qty=0 → new to ERP)
+    await pool.query(`INSERT INTO planner.purchase_order_lines (po_sku, po, sku, qty, erp_qty, cost_price, proposed_at, proposed_by)
+      SELECT plc.po||'|'||plc.sku, plc.po, plc.sku, coalesce(round(plc.amended_qty)::int,0), 0,
+             coalesce(plc.final_cost, plc.actual_cost), now(), 'order-plan accept'
+      FROM planner.portal_line_costs plc
+      WHERE ${scope} AND plc.is_added=true
+        AND NOT EXISTS (SELECT 1 FROM planner.purchase_order_lines x WHERE x.po=plc.po AND x.sku=plc.sku)`, params);
+    // 3) mark the portal lines confirmed; adopt supplier cost as final if none set
+    await pool.query(`UPDATE planner.portal_line_costs plc SET confirmed_at=now(), final_cost=coalesce(plc.final_cost, plc.actual_cost) WHERE ${scope}`, params);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// PO PLAN Timeline: mark a supplier note read / unread (toggle).
+app.post('/api/supply/note-read/:id', async (req, res) => {
+  try {
+    const read = !(req.body && req.body.read === false);
+    await pool.query(`UPDATE planner.supplier_notes SET read_at=${read ? 'now()' : 'NULL'} WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true, read });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/portal-note', async (req, res) => {
+  const b = req.body || {};
+  if (!b.po || !String(b.body || '').trim()) return res.status(400).json({ error: 'po and body required' });
+  try {
+    // stamp the PO's supplier so the note shows in that supplier's portal thread (internal/PO-PLAN posts don't pass one)
+    let sid = b.supplier_id || null;
+    if (!sid) { const r = await pool.query(`SELECT s.id FROM planner.purchase_orders po JOIN planner.suppliers s ON s.name=po.supplier_name WHERE po.po=$1`, [b.po]); sid = (r.rows[0] && r.rows[0].id) || null; }
+    await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body) VALUES ($1,$2,$3,$4,$5)`,
+      [b.po, sid, b.author_email || null, b.author_kind || 'supplier', String(b.body).trim()]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/portal-upload', async (req, res) => {
+  const b = req.body || {};
+  if (!b.po || !b.data_base64) return res.status(400).json({ error: 'po and data_base64 required' });
+  try {
+    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, supplier_id, filename, mime, byte_size, data, uploaded_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`, [b.po, b.supplier_id || null, b.filename || 'invoice', b.mime || 'application/octet-stream', buf.length, buf, b.uploaded_by || null]);
+    res.json({ id: r.rows[0].id, byte_size: buf.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/portal-submit', async (req, res) => {
+  const b = req.body || {}; const sid = b.supplier_id || null, by = b.submitted_by || 'portal';
+  if (!b.po) return res.status(400).json({ error: 'po required' });
+  const out = { staged: [], applied: [] };
+  try {
+    const stage = async (kind, value, attId) => {
+      if (value == null || value === '') return;
+      // supersede any earlier still-pending submission of the same kind for this PO so only the latest is actionable
+      await pool.query(`UPDATE planner.supplier_submissions SET status='superseded'
+        WHERE po=$1 AND kind=$2 AND status='pending'`, [b.po, kind]);
+      await pool.query(`INSERT INTO planner.supplier_submissions (supplier_id, po, kind, value, attachment_id, status, submitted_by)
+        VALUES ($1,$2,$3,$4,$5,'pending',$6)`, [sid, b.po, kind, String(value), attId || null, by]);
+      out.staged.push(kind);
+    };
+    await stage('completion_date', b.completion_date);
+    await stage('invoice_value', b.invoice_value, b.invoice_attachment_id);
+    // tracking / carrier → apply directly to the PO's shipment
+    if (b.tracking != null && b.tracking !== '' || b.carrier != null && b.carrier !== '') {
+      const sh = (await pool.query(`SELECT shipment_ref FROM planner.purchase_orders WHERE po=$1`, [b.po])).rows[0];
+      const ref = b.shipment_ref || (sh && sh.shipment_ref);
+      if (ref) {
+        const sets = [], vals = []; let i = 1;
+        if (b.tracking != null && b.tracking !== '') { sets.push(`carrier_ref=$${i++}`); vals.push(b.tracking); }
+        if (b.carrier != null && b.carrier !== '') { sets.push(`carrier=$${i++}`); vals.push(b.carrier); }
+        vals.push(ref);
+        await pool.query(`UPDATE planner.shipments SET ${sets.join(',')}, updated_at=now() WHERE shipment_ref=$${i}`, vals);
+        await pool.query(`INSERT INTO planner.supplier_submissions (supplier_id, po, shipment_ref, kind, value, status, submitted_by, applied_by, applied_at)
+          VALUES ($1,$2,$3,'tracking',$4,'applied',$5,$5,now())`, [sid, b.po, ref, JSON.stringify({ tracking: b.tracking || null, carrier: b.carrier || null }), by]);
+        out.applied.push('tracking/carrier → ' + ref);
+      } else {
+        await pool.query(`INSERT INTO planner.supplier_submissions (supplier_id, po, kind, value, status, submitted_by, note)
+          VALUES ($1,$2,'tracking',$3,'pending',$4,'no shipment assigned yet')`, [sid, b.po, JSON.stringify({ tracking: b.tracking || null, carrier: b.carrier || null }), by]);
+        out.staged.push('tracking (no shipment yet)');
+      }
+    }
+    res.json(out);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Portal data for the preview/portal: notes + submissions for a supplier (scoped by supplier_id).
+app.get('/api/supply/portal-notes/:sid', async (req, res) => {
+  try { res.json(await qp(`SELECT id, po, author_kind, coalesce(author_email,'') author_email, body,
+      to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read
+    FROM planner.supplier_notes WHERE supplier_id=$1 ORDER BY created_at`, [req.params.sid])); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/portal-submissions/:sid', async (req, res) => {
+  try { res.json(await qp(`SELECT id, po, kind, value, status, attachment_id, to_char(submitted_at,'YYYY-MM-DD') submitted_at, to_char(applied_at,'YYYY-MM-DD') applied_at, note
+    FROM planner.supplier_submissions WHERE supplier_id=$1 ORDER BY submitted_at DESC`, [req.params.sid])); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Internal one-click apply / dismiss of a staged supplier submission (Phase 4). Apply writes to the live PO
+// (the internal click is the confirmation); completion_date → end_production_overide, invoice_value → supplier_invoice_total.
+app.post('/api/supply/submission/:id/apply', async (req, res) => {
+  try {
+    const s = (await pool.query(`SELECT * FROM planner.supplier_submissions WHERE id=$1`, [req.params.id])).rows[0];
+    if (!s) return res.status(404).json({ error: 'no such submission' });
+    if (s.status !== 'pending') return res.status(400).json({ error: 'already ' + s.status });
+    let applied;
+    if (s.kind === 'completion_date') { await pool.query(`UPDATE planner.purchase_orders SET end_production_overide=$1::date, updated_at=now() WHERE po=$2`, [s.value, s.po]); applied = 'production-end → ' + s.value; }
+    else if (s.kind === 'invoice_value') { await pool.query(`UPDATE planner.purchase_orders SET supplier_invoice_total=$1::numeric, updated_at=now() WHERE po=$2`, [s.value, s.po]); applied = 'invoice total → $' + s.value; }
+    else return res.status(400).json({ error: 'kind ' + s.kind + ' is not applyable here' });
+    await pool.query(`UPDATE planner.supplier_submissions SET status='applied', applied_at=now(), applied_by=$1 WHERE id=$2`, [(req.body && req.body.by) || 'internal', req.params.id]);
+    res.json({ applied });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/submission/:id/dismiss', async (req, res) => {
+  try { await pool.query(`UPDATE planner.supplier_submissions SET status='dismissed' WHERE id=$1`, [req.params.id]); res.json({ dismissed: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/portal-attachment/:id', async (req, res) => {
+  try { const r = (await pool.query(`SELECT filename, mime, data FROM planner.portal_attachments WHERE id=$1`, [req.params.id])).rows[0];
+    if (!r) return res.status(404).send('not found');
+    res.setHeader('Content-Type', r.mime || 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'inline; filename="' + (r.filename || 'file').replace(/"/g, '') + '"');
+    res.send(r.data);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Lifecycle for SUPPLY ▸ Actions (dismiss / snooze / done) by stable key. Absent row = open; restore deletes.
+app.post('/api/supply/actions/state', async (req, res) => {
+  const b = req.body || {}, key = (b.key || '').trim();
+  if (!key) return res.status(400).json({ error: 'key required' });
+  try {
+    if (b.status === 'open' || b.restore) { await pool.query(`DELETE FROM planner.supply_action_state WHERE action_key=$1`, [key]); return res.json({ ok: true }); }
+    const days = String(parseInt(b.snooze_days, 10) || 7);
+    await pool.query(`INSERT INTO planner.supply_action_state (action_key, status, snooze_until, note)
+      VALUES ($1,$2, CASE WHEN $2='snoozed' THEN current_date + ($3||' days')::interval ELSE NULL END, $4)
+      ON CONFLICT (action_key) DO UPDATE SET status=excluded.status, snooze_until=excluded.snooze_until, note=excluded.note, updated_at=now()`,
+      [key, b.status || 'dismissed', days, b.note || null]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Import-duty pivot (CONFIG ▸ Import duty): set duty % for a category × country. Upserts the duty_rates row.
+app.post('/api/supply/duty-upsert', async (req, res) => {
+  const b = req.body || {}, cat = (b.category || '').trim(), country = (b.country || '').trim();
+  if (!cat || !country) return res.status(400).json({ error: 'category + country required' });
+  const dv = (b.duty_pct === '' || b.duty_pct == null) ? null : Number(b.duty_pct);
+  try {
+    const ex = await pool.query(`SELECT id FROM planner.duty_rates WHERE category=$1 AND country=$2 LIMIT 1`, [cat, country]);
+    if (ex.rowCount) await pool.query(`UPDATE planner.duty_rates SET duty_pct=$1 WHERE id=$2`, [dv, ex.rows[0].id]);
+    else await pool.query(`INSERT INTO planner.duty_rates (category, country, duty_pct) VALUES ($1,$2,$3)`, [cat, country, dv]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Air-freight tier rate edit (CONFIG ▸ Freight rates ▸ Air): rate per kg by weight band.
+app.post('/api/supply/air-rate/:id', (req, res) =>
+  patch(res, 'planner.air_freight_rates', 'id', req.params.id,
+    { rate_per_kg: 'numeric', min_kg: 'numeric', max_kg: 'numeric' }, req.body, 'bigint'));
+// Set the pallet capacity for a sea container size (applies to all its destination rows).
+app.post('/api/supply/freight-pallets', async (req, res) => {
+  const b = req.body || {}, sz = (b.container_size || '').trim();
+  if (!sz) return res.status(400).json({ error: 'container_size required' });
+  const p = (b.pallets === '' || b.pallets == null) ? null : parseInt(b.pallets, 10);
+  try { await pool.query(`UPDATE planner.freight_rates SET pallets=$1 WHERE container_size=$2`, [p, sz]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Freight-rate pivot (CONFIG ▸ Freight rates): set the USD rate for a container size × destination. Upserts.
+app.post('/api/supply/freight-upsert', async (req, res) => {
+  const b = req.body || {}, dest = (b.destination || '').trim(), sz = (b.container_size || '').trim();
+  if (!dest || !sz) return res.status(400).json({ error: 'destination + container_size required' });
+  const cost = (b.cost === '' || b.cost == null) ? null : Number(b.cost);
+  try {
+    const ex = await pool.query(`SELECT id FROM planner.freight_rates WHERE upper(destination)=upper($1) AND container_size=$2 LIMIT 1`, [dest, sz]);
+    if (ex.rowCount) await pool.query(`UPDATE planner.freight_rates SET cost=$1 WHERE id=$2`, [cost, ex.rows[0].id]);
+    else await pool.query(`INSERT INTO planner.freight_rates (destination, container_size, cost, currency) VALUES ($1,$2,$3,'USD')`, [dest, sz, cost]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Create a deposit ("Deposit") or a sundry payment ("Other", is_deposit=false). Fields then edit
+// inline. reference is optional (Other payments often have none) and need not be unique.
+app.post('/api/supply/deposit-create', async (req, res) => {
+  const b = req.body || {};
+  try {
+    const r = await pool.query(`INSERT INTO planner.deposits (reference, is_deposit, supplier_name, description, amount)
+      VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+      [(b.reference || '').trim() || null, b.is_deposit !== false, b.supplier_name || null,
+       b.description || null, b.amount === '' || b.amount == null ? null : b.amount]);
+    res.json({ ok: true, id: r.rows[0].id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/payment-txn/:id', (req, res) =>
+  patch(res, 'planner.payment_transactions', 'id', req.params.id,
+    { transaction_amount: 'numeric', payment_date: 'date' }, req.body));
+// Payment run header — bank / currency / bank amount / FX for a date-grouped run (upsert).
+app.post('/api/supply/run-meta/:date', async (req, res) => {
+  const allowed = { bank: 'text', paid_currency: 'text', bank_amount: 'numeric', fx_rate: 'numeric' };
+  const cols = ['run_date'], vals = [req.params.date], ph = ['$1::date']; let i = 2;
+  for (const k of Object.keys(req.body || {})) {
+    if (!allowed[k]) continue;
+    cols.push(k); vals.push(req.body[k] === '' ? null : req.body[k]); ph.push(`$${i++}::${allowed[k]}`);
+  }
+  if (cols.length === 1) return res.status(400).json({ error: 'no fields' });
+  const upd = cols.slice(1).map(c => `${c}=excluded.${c}`).join(',');
+  try {
+    await pool.query(`INSERT INTO planner.payment_run_meta (${cols.join(',')}) VALUES (${ph.join(',')})
+      ON CONFLICT (run_date) DO UPDATE SET ${upd}, updated_at=now()`, vals);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Order-plan line qty edit — sets our planned qty and stamps proposed_at/by while it differs from
+// the ERP source of truth (erp_qty). Clears the stamp if the edit returns it to the ERP value.
+app.post('/api/supply/po-line/:po_sku', async (req, res) => {
+  const b = req.body || {};
+  if (b.qty === undefined) return res.status(400).json({ error: 'qty required' });
+  const key = req.params.po_sku;
+  const po = b.po || key.split('|')[0];
+  const sku = b.sku || key.slice(key.indexOf('|') + 1);
+  try {
+    // upsert: editing a blank cell (no existing line) creates a proposed line (erp_qty=0 → pending).
+    const r = await pool.query(
+      `INSERT INTO planner.purchase_order_lines (po_sku, po, sku, qty, erp_qty, proposed_at, proposed_by)
+       VALUES ($1,$2,$3,$4::int, 0, CASE WHEN $4::int<>0 THEN now() END, CASE WHEN $4::int<>0 THEN $5 END)
+       ON CONFLICT (po_sku) DO UPDATE SET qty=excluded.qty,
+         proposed_at = CASE WHEN excluded.qty IS DISTINCT FROM planner.purchase_order_lines.erp_qty THEN now() ELSE NULL END,
+         proposed_by = CASE WHEN excluded.qty IS DISTINCT FROM planner.purchase_order_lines.erp_qty THEN $5 ELSE NULL END`,
+      [key, po, sku, b.qty, b.who || 'review_ui']);
+    res.json({ updated: r.rowCount });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// ── Pallet rebalance: even a production's open POs toward 20 pallets each (one container). Pools all line
+// qty across the same supplier+production's open, UNSHIPPED, non-Direct POs and first-fit packs into the
+// same POs at ≤20 pallets, moving whole SKUs and splitting a SKU's qty across POs when needed. Returns a
+// preview (bins + per-line deltas); apply writes the new line quantities as proposed (not-in-ERP until Upload).
+async function rebalancePlan(rootPo) {
+  const REBAL_MAX = 20;
+  const head = (await pool.query(`SELECT coalesce(supplier_name,'') supplier_name, coalesce(prod_no,'') prod_no, coalesce(branch,'') branch FROM planner.purchase_orders WHERE po=$1`, [rootPo])).rows[0];
+  if (!head) throw new Error('PO not found');
+  if (!head.prod_no) throw new Error('this PO has no production (PROD#) — rebalance works within a production');
+  if (!head.branch) throw new Error('this PO has no branch (destination) — rebalance needs a destination');
+  // Same supplier + production + BRANCH (same destination — you can't move stock between markets), open &
+  // unshipped, not Direct-to-Client. Branch is the exact destination, so a container's POs all share one.
+  const group = (await pool.query(`
+    SELECT po.po, upper(coalesce(nullif(po.country_code,''), b.country_code, '')) ctry
+    FROM planner.purchase_orders po LEFT JOIN planner.branches b ON b.name=po.branch
+    WHERE coalesce(po.supplier_name,'')=$1 AND coalesce(po.prod_no,'')=$2 AND coalesce(po.branch,'')=$3
+      AND coalesce(po.status,'') NOT ILIKE '%complete%' AND coalesce(po.status,'') NOT ILIKE 'ship%'
+      AND coalesce(po.status,'') NOT ILIKE '%deliver%'
+    ORDER BY po.po`, [head.supplier_name, head.prod_no, head.branch])).rows.filter(r => r.ctry !== 'DIRECT');
+  if (group.length < 2) throw new Error('need 2+ open, unshipped, non-Direct POs in this production + destination to rebalance');
+  const pos = group.map(g => g.po);
+  const lines = (await pool.query(`
+    SELECT l.po, l.sku, coalesce(l.qty,0) qty, coalesce(sl.pallet_qty,0) pallet_qty
+    FROM planner.purchase_order_lines l LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku
+    WHERE l.po = ANY($1)`, [pos])).rows;
+  const cur = {}; pos.forEach(p => cur[p] = {});
+  const palq = {};
+  lines.forEach(l => { cur[l.po][l.sku] = (cur[l.po][l.sku] || 0) + Number(l.qty); palq[l.sku] = Number(l.pallet_qty) || 0; });
+  // MINIMAL-MOVE smoothing: start from the current layout and move only the EXCESS off any >20 PO into the
+  // POs with spare capacity (whole or partial SKUs) — least disruption, not a full repack.
+  const next = {}; pos.forEach(p => { next[p] = {}; for (const s in cur[p]) next[p][s] = cur[p][s]; });
+  const EPS = 1e-6;
+  const pal = (po) => { let t = 0; for (const s in next[po]) if (palq[s] > 0) t += next[po][s] / palq[s]; return t; };
+  let guard = 0;
+  pos.filter(p => pal(p) > REBAL_MAX + EPS).forEach(d => {
+    while (pal(d) > REBAL_MAX + EPS && guard++ < 20000) {
+      let r = null, best = EPS; pos.forEach(p => { if (p !== d) { const f = REBAL_MAX - pal(p); if (f > best) { best = f; r = p; } } });
+      if (!r) break;                                   // no spare capacity anywhere → leave the overflow (flagged)
+      const moveP = Math.min(pal(d) - REBAL_MAX, REBAL_MAX - pal(r));
+      if (moveP <= EPS) break;
+      let s = null, bq = 0; for (const k in next[d]) { if (next[d][k] > 0 && palq[k] > 0 && next[d][k] > bq) { bq = next[d][k]; s = k; } }
+      if (!s) break;                                   // nothing measurable to move
+      let mv = Math.min(Math.round(moveP * palq[s]), next[d][s]);
+      if (mv <= 0) mv = Math.min(1, next[d][s]);        // rounding floor → nudge 1 unit to make progress
+      next[d][s] -= mv; next[r][s] = (next[r][s] || 0) + mv;
+    }
+  });
+  const palOf = (m) => { let t = 0; for (const s in m) if (palq[s] > 0) t += m[s] / palq[s]; return Math.round(t * 10) / 10; };
+  const bins = pos.map(p => ({ po: p, was_pallets: palOf(cur[p]), pallets: palOf(next[p]),
+    lines: Array.from(new Set([...Object.keys(cur[p]), ...Object.keys(next[p])])).map(s => ({ sku: s, old: cur[p][s] || 0, new: next[p][s] || 0 })).filter(x => x.old || x.new) }));
+  const moves = []; bins.forEach(bn => bn.lines.forEach(l => { if (l.old !== l.new) moves.push({ po: bn.po, sku: l.sku, old: l.old, new: l.new }); }));
+  return { supplier: head.supplier_name, prod_no: head.prod_no, target: REBAL_MAX, bins, moves, overflow: bins.some(bn => bn.pallets > REBAL_MAX + 1e-9) };
+}
+app.get('/api/supply/rebalance/:po', async (req, res) => {
+  try { res.json(await rebalancePlan(req.params.po)); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/supply/rebalance-apply/:po', async (req, res) => {
+  try {
+    const plan = await rebalancePlan(req.params.po);
+    for (const m of plan.moves) {
+      await pool.query(
+        `INSERT INTO planner.purchase_order_lines (po_sku, po, sku, qty, erp_qty, proposed_at, proposed_by)
+         VALUES ($1,$2,$3,$4::int, 0, CASE WHEN $4::int<>0 THEN now() END, CASE WHEN $4::int<>0 THEN 'rebalance' END)
+         ON CONFLICT (po_sku) DO UPDATE SET qty=excluded.qty,
+           proposed_at = CASE WHEN excluded.qty IS DISTINCT FROM planner.purchase_order_lines.erp_qty THEN now() ELSE NULL END,
+           proposed_by = CASE WHEN excluded.qty IS DISTINCT FROM planner.purchase_order_lines.erp_qty THEN 'rebalance' ELSE NULL END`,
+        [m.po + '|' + m.sku, m.po, m.sku, m.new]);
+    }
+    res.json({ applied: plan.moves.length, bins: plan.bins.map(b => ({ po: b.po, pallets: b.pallets })) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Per-SKU supplier resolution for BUY→PO: main supplier (default) + all options (multi-supplier) + pallet_qty.
+// Supplier name→code via suppliers.name (exact, case-insensitive) then first-word fallback (handles "MQ Print
+// (Sherry)" → MQ etc.). main_supplier_final is the default; supplier_multiple_all lists every option.
+async function buyplanSkuMeta(skus) {
+  const sups = (await pool.query(`SELECT code, name FROM planner.suppliers WHERE code IS NOT NULL`)).rows;
+  const byName = {}, byFirst = {};
+  sups.forEach(s => { const n = String(s.name || '').trim().toLowerCase(); if (!n) return; byName[n] = s.code;
+    const f = n.split(/\s+/)[0]; if (!(f in byFirst)) byFirst[f] = s.code; });
+  const codeOf = (name) => { if (!name) return null; const n = String(name).trim().toLowerCase(); return byName[n] || byFirst[n.split(/\s+/)[0]] || null; };
+  const rows = (await pool.query(`SELECT upper(p.sku) sku, coalesce(p.main_supplier_final, p.supplier) main_name,
+      p.supplier_multiple_all multi, coalesce(p.category,'') category, sl.pallet_qty
+    FROM planner.products p LEFT JOIN planner.sku_labels sl ON upper(sl.sku)=upper(p.sku)
+    WHERE upper(p.sku) = ANY($1)`, [skus])).rows;
+  const map = {};
+  rows.forEach(r => {
+    const names = (r.multi ? String(r.multi).split(',') : []).map(x => x.trim()).filter(Boolean);
+    if (r.main_name && !names.some(x => x.toLowerCase() === String(r.main_name).trim().toLowerCase())) names.unshift(r.main_name);
+    const seen = {}, options = [];
+    names.forEach(nm => { const c = codeOf(nm); const k = c || nm.toLowerCase(); if (!seen[k]) { seen[k] = 1; options.push({ code: c, name: nm }); } });
+    map[r.sku] = { pallet_qty: Number(r.pallet_qty) || 0, category: r.category || '', main_code: codeOf(r.main_name), main_name: r.main_name || '', options };
+  });
+  return map;
+}
+// BUY PLAN → PURCHASE ORDERS. Take buy-plan items (each may carry an explicit supplier_code chosen in the UI,
+// else the SKU's main supplier), group by supplier and split into proposed POs of ≤20 pallets each (pallets =
+// qty ÷ sku_labels.pallet_qty — 20 ≈ a container). Reference = PO-{prod#}{COUNTRY}{supplier-code}{counter}.
+// Dry-run by default (returns the split + any SKUs that can't be placed); commit:true inserts proposed lines
+// (erp_qty=0, flagged 'not in ERP' until Diviyaj's Upload). Assigns prod_no + start_production + country.
+app.post('/api/supply/buyplan-pos', async (req, res) => {
+  const b = req.body || {}, MAXPAL = 20;
+  const prod = (b.prod_no || '').trim(), country = (b.country || '').trim().toUpperCase();
+  const startDate = (b.start_date || '').trim() || null;
+  const codes = (Array.isArray(b.supplier_codes) ? b.supplier_codes : []).map(c => String(c).toUpperCase()).filter(Boolean);
+  const items = (Array.isArray(b.items) ? b.items : []).filter(it => it && it.sku && Number(it.qty) > 0);
+  const commit = !!b.commit;
+  const mode = b.mode === 'fba' ? 'fba' : '3pl';   // FBA-direct vs 3PL — drives the default branch
+  // default branch by channel × destination (must match planner.branches.name)
+  const FBA_BR = { UK: 'UK FBA', US: 'US FBA', CA: 'CA FBA', AU: 'AU FBA', EU: 'DE FBA' };   // EU FBA → DE FBA
+  const TPL_BR = { UK: 'UK ILG', US: 'US Geneva', EU: 'EU iFulfillment', AU: 'AU Coghlans', CA: 'CA FBA' };   // CA always → CA FBA (no CA 3PL)
+  const branch = (mode === 'fba' ? FBA_BR : TPL_BR)[country] || null;
+  if (mode === 'fba' && country === 'EU') return res.status(400).json({ error: 'FBA-direct PO creation is not available for EU yet (no DE FBA branch).' });
+  if (!prod || !country || !items.length) return res.status(400).json({ error: 'prod_no, country and items required' });
+  const num = (prod.match(/\d+/) || [prod])[0];   // 'P54' -> '54'
+  try {
+    const skus = items.map(it => String(it.sku).toUpperCase());
+    const mmap = await buyplanSkuMeta(skus);
+    const warn = [], bySup = {};
+    for (const it of items) { const sku = String(it.sku).toUpperCase(), m = mmap[sku] || { options: [] };
+      // chosen supplier: explicit per-item supplier_code from the UI, else the SKU's main supplier
+      const code = (it.supplier_code ? String(it.supplier_code).toUpperCase() : (m.main_code || '')).toUpperCase();
+      if (!code) { warn.push({ sku, issue: 'no supplier code (supplier "' + (m.main_name || '?') + '")' }); continue; }
+      if (codes.length && !codes.includes(code)) continue;     // supplier not ticked in scope (when codes given)
+      const pq = Number(m.pallet_qty) || 0;   // no pallet_qty → still included, just counts as 0 pallets in the split
+      const opt = (m.options || []).find(o => o.code === code);
+      const supName = opt ? opt.name : (m.main_name || '');
+      (bySup[code] = bySup[code] || []).push({ sku, qty: Math.round(Number(it.qty)), pallet_qty: pq, sup_name: supName }); }
+    const pos = [];
+    for (const code of Object.keys(bySup).sort()) {
+      const prefix = 'PO-' + num + country + code;
+      const ex = (await pool.query(`SELECT po FROM planner.purchase_orders WHERE po LIKE $1`, [prefix + '%'])).rows;
+      let maxc = 0; ex.forEach(r => { const m = r.po.slice(prefix.length).match(/^(\d+)/); if (m) maxc = Math.max(maxc, parseInt(m[1], 10)); });
+      const bins = [];   // first-fit-decreasing; split a single SKU only if it alone exceeds 20 pallets
+      const place = (sku, qty, pq) => {
+        if (pq <= 0) { let bin = bins[0] || (bins[0] = { pallets: 0, lines: [] }); bin.lines.push({ sku, qty, pallets: 0 }); return; }  // no pallet_qty → ride along, 0 pallets
+        let rem = qty;
+        while (rem / pq > MAXPAL + 1e-9) { const take = MAXPAL * pq; bins.push({ pallets: MAXPAL, lines: [{ sku, qty: take, pallets: MAXPAL }] }); rem -= take; }
+        if (rem <= 0) return;
+        const lp = rem / pq; let bin = bins.find(bn => bn.pallets + lp <= MAXPAL + 1e-9);
+        if (!bin) { bin = { pallets: 0, lines: [] }; bins.push(bin); }
+        bin.lines.push({ sku, qty: rem, pallets: lp }); bin.pallets += lp; };
+      const palOf = l => l.pallet_qty > 0 ? l.qty / l.pallet_qty : 0;
+      bySup[code].slice().sort((a, b) => palOf(b) - palOf(a)).forEach(l => place(l.sku, l.qty, l.pallet_qty));
+      const supName = bySup[code][0].sup_name;
+      bins.forEach((bin, i) => pos.push({ po: prefix + (maxc + i + 1), supplier_code: code, supplier_name: supName,
+        country, branch, prod_no: prod, start_production: startDate, pallets: Math.round(bin.pallets * 10) / 10,
+        lines: bin.lines.map(x => ({ sku: x.sku, qty: x.qty, pallets: Math.round(x.pallets * 10) / 10 })) }));
+    }
+    if (!commit) return res.json({ preview: true, mode, branch, target_pallets: MAXPAL, pos, warnings: warn });
+    let created = 0;
+    for (const p of pos) {
+      await pool.query(`INSERT INTO planner.purchase_orders (po, supplier_name, prod_no, country_code, branch, start_production, status)
+        VALUES ($1,$2,$3,$4,$5,$6,'FUTURE') ON CONFLICT (po) DO NOTHING`, [p.po, p.supplier_name, prod, country, branch, startDate]);
+      for (const l of p.lines)
+        await pool.query(`INSERT INTO planner.purchase_order_lines (po_sku, po, sku, qty, erp_qty, proposed_at, proposed_by)
+          VALUES ($1,$2,$3,$4::int,0,now(),'buyplan') ON CONFLICT (po_sku) DO UPDATE SET qty=excluded.qty, proposed_at=now(), proposed_by='buyplan'`,
+          [p.po + '|' + l.sku, p.po, l.sku, l.qty]);
+      created++;
+    }
+    res.json({ committed: true, created, pos, warnings: warn });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Per-SKU supplier options for the BUY→PO dialog: each SKU's qty, pallet_qty, main supplier (default) and the
+// full option list (multi-supplier). The UI shows a tick + supplier picker per SKU.
+app.post('/api/supply/buyplan-skus', async (req, res) => {
+  const items = (Array.isArray(req.body && req.body.items) ? req.body.items : []).filter(it => it && it.sku && Number(it.qty) > 0);
+  if (!items.length) return res.json({ skus: [] });
+  try {
+    const map = await buyplanSkuMeta(items.map(it => String(it.sku).toUpperCase()));
+    res.json({ skus: items.map(it => { const sku = String(it.sku).toUpperCase(), m = map[sku] || { options: [] };
+      return { sku, qty: Math.round(Number(it.qty)), pallet_qty: m.pallet_qty || 0, category: m.category || '', main_code: m.main_code || null,
+        main_name: m.main_name || '', options: (m.options || []).map(o => ({ code: o.code, name: o.name })) }; }) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Approve a partial-carton line (sets partial_carton_approved → full_carton_check shows "OK Partial").
+app.post('/api/supply/po-line/:po_sku/approve', (req, res) =>
+  patch(res, 'planner.purchase_order_lines', 'po_sku', req.params.po_sku,
+    { partial_carton_approved: 'boolean' }, { partial_carton_approved: req.body && req.body.approved }));
+// "Upload changes" — push a PO's planned qtys to the ERP (Cin7/Fulfil). The actual ERP API write
+// is a gated Diviyaj integration; here we record the push (erp_qty := qty) and log it, clearing the
+// mismatch. Returns how many lines changed.
+app.post('/api/supply/po/:po/upload', async (req, res) => {
+  try {
+    const r = await pool.query(
+      `UPDATE planner.purchase_order_lines SET erp_qty=qty, erp_cost=cost_price, proposed_at=NULL, proposed_by=NULL
+       WHERE po=$1 AND (erp_qty IS DISTINCT FROM qty OR cost_price IS DISTINCT FROM erp_cost)`,
+      [req.params.po]);
+    await pool.query(`INSERT INTO planner.etl_runs (job, status, rows_affected, message)
+       VALUES ('supply_erp_push','pending',$1,$2)`,
+      [r.rowCount, `${r.rowCount} line(s) staged to push to ERP (qty + cost) for ${req.params.po}`]);
+    res.json({ uploaded: r.rowCount });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// PO management engine — inline edits on the purchase_orders inputs/overrides.
+app.post('/api/supply/po/:po', (req, res) =>
+  patch(res, 'planner.purchase_orders', 'po', req.params.po, {
+    status: 'text', ship_type: 'text', deposit_ref: 'text', shipment_ref: 'text', prod_no: 'text',
+    batch_id: 'text', branch: 'text', erp_po: 'text', notes: 'text', container_size: 'text',
+    country_code: 'text', client: 'text', client_requirements: 'text', sales_order_ref: 'text',
+    client_po_ref: 'text', dispatch_order_ref: 'text', final_delivery_address: 'text', crossdock_skus: 'text',
+    order_value_estimation: 'numeric', supplier_invoice_total: 'numeric',
+    start_production: 'date', end_production_overide: 'date', landing_date_overide: 'date',
+    delivery_date_overide: 'date', balance_due_date_overide: 'date', supplier_ship_date: 'date',
+    // payment-plan overrides (PLAN panel): % terms, assigned amounts, payment dates
+    start_deposit_pct_override: 'numeric', completion_pct_override: 'numeric',
+    pay_start_deposit_assigned: 'numeric', pay_start_deposit_date: 'date',
+    pay_completion_assigned: 'numeric', pay_completion_date: 'date',
+    pay_balance_1_amount: 'numeric', pay_balance_1_date: 'date',
+    pay_balance_2_amount: 'numeric', pay_balance_2_date: 'date',
+  }, req.body));
+// Supplier edit — sets the name AND resolves supplier_id so payment terms / production lead apply.
+app.post('/api/supply/po/:po/supplier', async (req, res) => {
+  const name = (req.body && req.body.supplier_name || '').trim() || null;
+  try {
+    await pool.query(`UPDATE planner.purchase_orders
+      SET supplier_name=$2, supplier_id=(SELECT id FROM planner.suppliers WHERE name=$2 LIMIT 1)
+      WHERE po=$1`, [req.params.po, name]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Supplier production-confidence: set the confirmed production status and stamp the confirmation time
+// (now). Clearing the status clears the stamp. Drives the "Production unconfirmed" action.
+const PROD_STATUSES = ['not_started','in_production','nearing_completion','complete','shipped'];
+app.post('/api/supply/po/:po/prod-status', async (req, res) => {
+  const st = (req.body && req.body.production_status || '').trim();
+  if (st && !PROD_STATUSES.includes(st)) return res.status(400).json({ error: 'bad status' });
+  try {
+    await pool.query(`UPDATE planner.purchase_orders
+      SET production_status=$2, production_confirmed_at=CASE WHEN $2='' THEN NULL ELSE now() END WHERE po=$1`,
+      [req.params.po, st]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Create / input a new purchase order. Minimal header; the rest is filled inline + in the PLAN panel.
+// supplier_id is resolved from the supplier name so payment terms / production lead apply immediately.
+app.post('/api/supply/po-create', async (req, res) => {
+  const b = req.body || {}, po = (b.po || '').trim();
+  if (!po) return res.status(400).json({ error: 'PO number required' });
+  try {
+    const dup = await pool.query(`SELECT 1 FROM planner.purchase_orders WHERE po=$1`, [po]);
+    if (dup.rowCount) return res.status(409).json({ error: 'PO ' + po + ' already exists' });
+    let supId = null;
+    if (b.supplier_name) {
+      const s = await pool.query(`SELECT id FROM planner.suppliers WHERE name=$1 LIMIT 1`, [b.supplier_name]);
+      supId = s.rows[0] ? s.rows[0].id : null;
+    }
+    await pool.query(`INSERT INTO planner.purchase_orders
+      (po, supplier_name, supplier_id, country_code, branch, status, start_production)
+      VALUES ($1,$2,$3,$4,$5,coalesce($6,'FUTURE'),$7)`,
+      [po, b.supplier_name || null, supId, b.country_code || null, b.branch || null,
+       b.status || null, b.start_production || null]);
+    res.json({ ok: true, po });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Bulk-create POs from a pasted/uploaded list. Skips existing PO numbers; resolves supplier_id.
+app.post('/api/supply/po-bulk', async (req, res) => {
+  const rows = (req.body && req.body.rows) || [];
+  if (!Array.isArray(rows) || !rows.length) return res.status(400).json({ error: 'no rows' });
+  let created = 0; const skipped = [], errors = [];
+  for (const r of rows) {
+    const po = (r.po || '').trim();
+    if (!po) continue;
+    try {
+      const dup = await pool.query(`SELECT 1 FROM planner.purchase_orders WHERE po=$1`, [po]);
+      if (dup.rowCount) { skipped.push(po); continue; }
+      let supId = null;
+      if (r.supplier_name) {
+        const s = await pool.query(`SELECT id FROM planner.suppliers WHERE name=$1 LIMIT 1`, [r.supplier_name]);
+        supId = s.rows[0] ? s.rows[0].id : null;
+      }
+      await pool.query(`INSERT INTO planner.purchase_orders
+        (po, supplier_name, supplier_id, country_code, branch, status, start_production)
+        VALUES ($1,$2,$3,$4,$5,coalesce($6,'FUTURE'),$7)`,
+        [po, r.supplier_name || null, supId, r.country_code || null, r.branch || null,
+         r.status || null, r.start_production || null]);
+      created++;
+    } catch (e) { errors.push(po + ': ' + e.message); }
+  }
+  res.json({ created, skipped, errors });
+});
+// PO detail — the linked records across tables (lines, deposit, payments, flexport) for one PO.
+app.get('/api/supply/po-detail/:po', async (req, res) => {
+  const po = req.params.po;
+  try {
+    const [lines, deposit, payments, flexport, supInv, supDocs, notes, subs, lineCosts, supComp, xdShip, addCosts] = await Promise.all([
+      pool.query(`SELECT sku,qty,carton_qty,full_carton_check,cost_price
+                  FROM planner.v_purchase_order_lines WHERE po=$1 ORDER BY sku`, [po]),
+      pool.query(`SELECT d.reference,d.supplier_name,d.amount,d.xero_fx,
+                    to_char(d.date_paid,'YYYY-MM-DD') date_paid,d.deposit_used,d.deposit_remaining
+                  FROM planner.deposits d JOIN planner.purchase_orders p ON p.deposit_ref=d.reference
+                  WHERE p.po=$1`, [po]),
+      pool.query(`SELECT to_char(payment_date,'YYYY-MM-DD') payment_date,transaction_type,
+                    transaction_amount,transaction_supplier
+                  FROM planner.payment_transactions
+                  WHERE po_completion=$1 OR po_balance_1=$1 OR po_balance_2=$1 OR po_balance_3=$1
+                  ORDER BY payment_date`, [po]),
+      pool.query(`SELECT flex_id,mode,status_description status,
+                    to_char(departure_date,'YYYY-MM-DD') departure,
+                    to_char(landing_date,'YYYY-MM-DD') landing,
+                    to_char(arrival_date,'YYYY-MM-DD') arrival,container_numbers,total_freight_cost
+                  FROM planner.flexport_shipments
+                  WHERE shipment_name=$1
+                     OR shipment_name=(SELECT shipment_ref FROM planner.purchase_orders WHERE po=$1)`, [po]),
+      // supplier-portal: latest submitted invoice value (+ id, status, doc) and all uploaded invoice docs
+      pool.query(`SELECT id, value, status, submitted_by, to_char(submitted_at,'YYYY-MM-DD') submitted_at, attachment_id
+                  FROM planner.supplier_submissions WHERE po=$1 AND kind='invoice_value' ORDER BY id DESC LIMIT 1`, [po]).catch(() => ({ rows: [] })),
+      pool.query(`SELECT id, filename FROM planner.portal_attachments WHERE po=$1 ORDER BY uploaded_at DESC`, [po]).catch(() => ({ rows: [] })),
+      // PO PLAN Timeline: notes (supplier + internal) + submission status
+      pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
+                    to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read
+                  FROM planner.supplier_notes WHERE po=$1 ORDER BY created_at`, [po]).catch(() => ({ rows: [] })),
+      pool.query(`SELECT kind, value, status, coalesce(submitted_by,'') submitted_by, to_char(submitted_at,'YYYY-MM-DD') submitted_at, attachment_id
+                  FROM planner.supplier_submissions WHERE po=$1 ORDER BY submitted_at`, [po]).catch(() => ({ rows: [] })),
+      // PO PLAN order plan: supplier-submitted actual cost + amended qty + added SKUs + D&B final cost per line
+      pool.query(`SELECT plc.sku, plc.actual_cost, plc.final_cost, plc.amended_qty, coalesce(plc.is_added,false) is_added,
+                    coalesce(pr.product_name,'') product_name,
+                    coalesce(plc.submitted_by,'') submitted_by, to_char(plc.submitted_at,'YYYY-MM-DD') submitted_at,
+                    plc.confirmed_at IS NOT NULL AND plc.confirmed_at >= plc.submitted_at confirmed,
+                    (plc.actual_cost IS NOT NULL OR plc.amended_qty IS NOT NULL OR plc.is_added=true)
+                      AND (plc.confirmed_at IS NULL OR plc.confirmed_at < plc.submitted_at) unconfirmed
+                  FROM planner.portal_line_costs plc LEFT JOIN planner.products pr ON pr.sku=plc.sku WHERE plc.po=$1`, [po]).catch(() => ({ rows: [] })),
+      // PO PLAN DATES: latest supplier-submitted completion date (+ id/status for approve/reject)
+      pool.query(`SELECT id, value, status, coalesce(submitted_by,'') submitted_by, to_char(submitted_at,'YYYY-MM-DD') submitted_at
+                  FROM planner.supplier_submissions WHERE po=$1 AND kind='completion_date' ORDER BY id DESC LIMIT 1`, [po]).catch(() => ({ rows: [] })),
+      // CLIENT tab: supplier-entered crossdock shipped quantities for this PO
+      pool.query(`SELECT sku, qty FROM planner.crossdock_shipments WHERE po=$1`, [po]).catch(() => ({ rows: [] })),
+      // ORDER PLAN: supplier-entered additional cost lines for this PO
+      pool.query(`SELECT id, coalesce(description,'') description, qty, price FROM planner.portal_additional_costs WHERE po=$1 ORDER BY id`, [po]).catch(() => ({ rows: [] })),
+    ]);
+    const lc = {}; lineCosts.rows.forEach(r => { lc[r.sku] = r; });
+    res.json({ lines: lines.rows, deposit: deposit.rows, payments: payments.rows, flexport: flexport.rows,
+      sup_invoice: supInv.rows[0] || null, sup_docs: supDocs.rows, notes: notes.rows, subs: subs.rows, line_costs: lc,
+      sup_completion: supComp.rows[0] || null, crossdock_shipped: xdShip.rows, additional_costs: addCosts.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// SHIPS-WITH master label fields for one PO. source supplier + production ref = this PO; ships-with supplier + PO
+// = the supplier/ref of the master shipment this PO rides on (sh.master_po, fallback shipment_ref); plus dest + client.
+app.get('/api/supply/ships-with/:po', async (req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT po.po production_ref, coalesce(po.supplier_name,'') source_supplier,
+             coalesce(po.shipment_ref,'') ships_with_po,
+             coalesce(po.branch,'') dest_branch,
+             coalesce(nullif(po.country_code,''), b.country_code, '') dest_country,
+             coalesce(po.client,'') client, coalesce(po.sales_order_ref,'') sales_order_ref,
+             coalesce(mpo.supplier_name,'') ships_with_supplier
+      FROM planner.purchase_orders po
+      LEFT JOIN planner.branches b ON b.name=po.branch
+      LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
+      LEFT JOIN planner.purchase_orders mpo ON mpo.po = coalesce(nullif(sh.master_po,''), sh.shipment_ref)
+      WHERE po.po=$1`, [req.params.po]);
+    res.json(r.rows[0] || {});
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Production detail (a prod_no × supplier): SKU × total qty, the POs, and assigned deposits.
+app.get('/api/supply/production-detail/:prod', async (req, res) => {
+  const prod = req.params.prod;
+  const supplier = (req.query.supplier === '(no supplier)' ? '' : (req.query.supplier || ''));
+  const supMatch = `coalesce(po.supplier_name,'')=$2`;
+  try {
+    const [skus, pos, deps] = await Promise.all([
+      pool.query(`SELECT l.sku, coalesce(pr.product_name,'') name, coalesce(pr.category,'(uncategorised)') category,
+          coalesce(sl.product_barcode,'') ean, sum(l.qty)::int qty, round(sum(l.qty*l.cost_price)) value
+        FROM planner.purchase_order_lines l
+        JOIN planner.purchase_orders po ON po.po=l.po
+        LEFT JOIN planner.products pr ON pr.sku=l.sku
+        LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku
+        WHERE po.prod_no=$1 AND ${supMatch} GROUP BY l.sku, pr.product_name, pr.category, sl.product_barcode
+        HAVING sum(l.qty) <> 0 ORDER BY category, l.sku`, [prod, supplier]),
+      pool.query(`SELECT po.po, coalesce(po.supplier_name,'') supplier_name, coalesce(po.status,'') status,
+          coalesce(po.country_code,'') country, coalesce(po.deposit_ref,'') deposit_ref,
+          coalesce((SELECT sum(l.qty) FROM planner.purchase_order_lines l WHERE l.po=po.po),0)::int units
+        FROM planner.purchase_orders po WHERE po.prod_no=$1 AND ${supMatch} ORDER BY po.po`, [prod, supplier]),
+      pool.query(`SELECT pd.deposit_ref, coalesce(d.amount,0) amount, to_char(d.date_paid,'YYYY-MM-DD') date_paid,
+          coalesce(d.supplier_name,'') dep_supplier
+        FROM planner.production_deposits pd LEFT JOIN planner.deposits d ON d.reference=pd.deposit_ref
+        WHERE pd.prod_no=$1 AND coalesce(pd.supplier_name,'')=$2 ORDER BY pd.deposit_ref`, [prod, supplier]),
+    ]);
+    res.json({ skus: skus.rows, pos: pos.rows, deposits: deps.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Assign / unassign a deposit to a production (prod_no × supplier).
+app.post('/api/supply/production-deposit', async (req, res) => {
+  const b = req.body || {}; const sup = (b.supplier_name === '(no supplier)' ? '' : (b.supplier_name || ''));
+  if (!b.prod_no || !b.deposit_ref) return res.status(400).json({ error: 'prod_no + deposit_ref required' });
+  try {
+    if (b.assign === false) {
+      await pool.query(`DELETE FROM planner.production_deposits WHERE prod_no=$1 AND coalesce(supplier_name,'')=$2 AND deposit_ref=$3`, [b.prod_no, sup, b.deposit_ref]);
+    } else {
+      await pool.query(`INSERT INTO planner.production_deposits (prod_no, supplier_name, deposit_ref)
+        VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [b.prod_no, sup, b.deposit_ref]);
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Create a deposit FOR a production (prod_no × supplier) and assign it. Reference auto-formats as
+// {prod_no}-{supplier 2-digit code}-{n}; amount defaults to 30% of the production value LESS deposits
+// already assigned to it; date defaults to today. All editable afterwards in the deposits table.
+app.post('/api/supply/production-deposit-create', async (req, res) => {
+  const b = req.body || {}; const prod = b.prod_no;
+  const sup = (b.supplier_name === '(no supplier)' ? '' : (b.supplier_name || ''));
+  if (!prod) return res.status(400).json({ error: 'prod_no required' });
+  try {
+    const codeRow = (await pool.query(`SELECT coalesce(nullif(code,''), upper(left(name,2))) c FROM planner.suppliers WHERE name=$1 LIMIT 1`, [sup])).rows[0];
+    const sc = (codeRow && codeRow.c) || (sup ? sup.replace(/[^A-Za-z]/g, '').slice(0, 2).toUpperCase() : 'NA');
+    const val = Number((await pool.query(`SELECT coalesce(sum(l.qty*l.cost_price),0) v
+      FROM planner.purchase_order_lines l JOIN planner.purchase_orders po ON po.po=l.po
+      WHERE po.prod_no=$1 AND coalesce(po.supplier_name,'')=$2`, [prod, sup])).rows[0].v);
+    const assigned = Number((await pool.query(`SELECT coalesce(sum(d.amount),0) a
+      FROM planner.production_deposits pd JOIN planner.deposits d ON d.reference=pd.deposit_ref
+      WHERE pd.prod_no=$1 AND coalesce(pd.supplier_name,'')=$2`, [prod, sup])).rows[0].a);
+    const amount = Math.max(0, Math.round(0.30 * val - assigned));
+    let n = 1 + Number((await pool.query(`SELECT count(*) c FROM planner.production_deposits WHERE prod_no=$1 AND coalesce(supplier_name,'')=$2`, [prod, sup])).rows[0].c);
+    let ref;
+    for (;;) { ref = `${prod}-${sc}-${n}`;
+      const exists = await pool.query(`SELECT 1 FROM planner.deposits WHERE reference=$1`, [ref]);
+      if (!exists.rowCount) break; n++; }
+    await pool.query(`INSERT INTO planner.deposits (reference, is_deposit, supplier_name, prod_no, amount, date_paid)
+      VALUES ($1,true,$2,$3,$4,CURRENT_DATE)`, [ref, sup || null, prod, amount]);
+    await pool.query(`INSERT INTO planner.production_deposits (prod_no, supplier_name, deposit_ref)
+      VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [prod, sup, ref]);
+    res.json({ ok: true, reference: ref, amount });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Record the actual paid currency + amount for a payment (date × supplier) — alt to the USD legs.
+app.post('/api/supply/payment-fx', async (req, res) => {
+  const b = req.body || {};
+  if (!b.run_date || !b.supplier) return res.status(400).json({ error: 'run_date + supplier required' });
+  try {
+    await pool.query(`INSERT INTO planner.payment_fx (run_date, supplier, paid_currency, paid_amount)
+      VALUES ($1,$2,$3,$4) ON CONFLICT (run_date, supplier) DO UPDATE
+      SET paid_currency=excluded.paid_currency, paid_amount=excluded.paid_amount, updated_at=now()`,
+      [b.run_date, b.supplier, b.paid_currency || null, (b.paid_amount === '' || b.paid_amount == null) ? null : b.paid_amount]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Shipment detail — the POs aboard a shipment (master first).
+app.get('/api/supply/shipment-detail/:ref', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT po.po, po.supplier_name, coalesce(po.status,'') status,
+        (po.po = coalesce((SELECT master_po FROM planner.shipments WHERE shipment_ref=$1), $1)) is_master,
+        coalesce((SELECT sum(l.qty) FROM planner.purchase_order_lines l WHERE l.po=po.po),0)::int units,
+        round(coalesce((SELECT sum(l.qty*l.cost_price) FROM planner.purchase_order_lines l WHERE l.po=po.po),0)) value
+      FROM planner.purchase_orders po WHERE po.shipment_ref=$1
+      ORDER BY is_master DESC, po.po`, [req.params.ref]);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Shipment edit (upsert) — carrier/ref/master/status/notes + the date OVERRIDES that win over the
+// POs aboard. Row may not exist yet (a shipment_ref freshly typed onto a PO), so insert-on-conflict.
+const SHIP_FIELDS = {
+  master_po: 'text', carrier: 'text', carrier_ref: 'text', status: 'text', notes: 'text', mode: 'text',
+  cost_manual: 'numeric', tracked_delivery_date: 'date', tracked_source: 'text',
+  departure_date: 'date', landing_date: 'date', delivery_date: 'date', arrival_date: 'date',
+  branch: 'text', country_code: 'text',   // shipment-level destination override (inherits from master PO)
+};
+app.post('/api/supply/shipment/:ref', async (req, res) => {
+  const ref = req.params.ref;
+  const cols = ['shipment_ref'], vals = [ref], ph = ['$1::text']; let i = 2;
+  for (const k of Object.keys(req.body || {})) {
+    if (!SHIP_FIELDS[k]) continue;
+    cols.push(k); vals.push(req.body[k] === '' ? null : req.body[k]); ph.push(`$${i++}::${SHIP_FIELDS[k]}`);
+  }
+  const upd = cols.slice(1).map(c => `${c}=excluded.${c}`).join(',') || 'updated_at=now()';
+  try {
+    await pool.query(`INSERT INTO planner.shipments (${cols.join(',')}) VALUES (${ph.join(',')})
+      ON CONFLICT (shipment_ref) DO UPDATE SET ${upd}, updated_at=now()`, vals);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Create a new shipment (header only; POs are assigned separately). master_po defaults to the ref.
+app.post('/api/supply/shipment-create', async (req, res) => {
+  const ref = (req.body && req.body.shipment_ref || '').trim();
+  if (!ref) return res.status(400).json({ error: 'shipment_ref required' });
+  try {
+    await pool.query(`INSERT INTO planner.shipments (shipment_ref, master_po, carrier, carrier_ref)
+      VALUES ($1,$2,$3,$4) ON CONFLICT (shipment_ref) DO NOTHING`,
+      [ref, (req.body.master_po || ref), req.body.carrier || null, req.body.carrier_ref || null]);
+    res.json({ ok: true, shipment_ref: ref });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Assign / unassign a PO to a shipment, and optionally mark it the master (consolidation) PO.
+// body: { po, assign:true|false, master:true }. Unassign clears purchase_orders.shipment_ref.
+app.post('/api/supply/shipment/:ref/assign', async (req, res) => {
+  const ref = req.params.ref, b = req.body || {};
+  if (!b.po) return res.status(400).json({ error: 'po required' });
+  try {
+    if (b.assign === false) {
+      await pool.query(`UPDATE planner.purchase_orders SET shipment_ref=NULL WHERE po=$1`, [b.po]);
+      await pool.query(`UPDATE planner.shipments SET master_po=NULL, updated_at=now()
+        WHERE shipment_ref=$1 AND master_po=$2`, [ref, b.po]);
+    } else {
+      await pool.query(`INSERT INTO planner.shipments (shipment_ref, master_po) VALUES ($1,$1)
+        ON CONFLICT (shipment_ref) DO NOTHING`, [ref]);
+      await pool.query(`UPDATE planner.purchase_orders SET shipment_ref=$2 WHERE po=$1`, [b.po, ref]);
+      if (b.master) await pool.query(`UPDATE planner.shipments SET master_po=$2, updated_at=now()
+        WHERE shipment_ref=$1`, [ref, b.po]);
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── SCENARIO PLANNER ───────────────────────────────────────────────────────
+// Prime Day: inventory by SKU split into FBA / 3PL / AWD per the selected market(s).
+// product_inventory warehouses are '{country}_{type}' (uk_3pl, us_fba, …). AWD is not yet loaded
+// into product_inventory (only an external CSV exists) → returned as null and flagged.
+app.post('/api/scenario/prime-day', async (req, res) => {
+  const b = req.body || {};
+  const skus = Array.isArray(b.skus) ? b.skus.filter(Boolean).map(s => s.trim().toUpperCase()) : [];
+  const country = (b.country || '').toLowerCase(); // '' = all markets
+  const category = b.category || '';
+  const where = [], vals = []; let i = 1;
+  if (skus.length) { where.push(`upper(p.sku) = ANY($${i++})`); vals.push(skus); }
+  if (category) { where.push(`p.category = $${i++}`); vals.push(category); }
+  if (country) { where.push(`pi.warehouse LIKE $${i++}`); vals.push(country + '\\_%'); }
+  const wsql = where.length ? 'WHERE ' + where.join(' AND ') : '';
+  const awdApplies = (country === '' || country === 'us'); // AWD is a US warehouse
+  const pAwd = i++, pSkuFlag = i; // param indexes for awdApplies + "skus listed" flag
+  try {
+    const { rows } = await pool.query(`
+      SELECT p.sku, coalesce(p.product_name,'') name, coalesce(p.category,'') category,
+        coalesce(sum(pi.available) FILTER (WHERE pi.warehouse LIKE '%\\_fba'),0)::int fba,
+        coalesce(sum(pi.available) FILTER (WHERE pi.warehouse LIKE '%\\_3pl'),0)::int three_pl,
+        (CASE WHEN $${pAwd} THEN coalesce(p.awd_us,0) ELSE 0 END)::int awd,
+        (coalesce(sum(pi.available),0) + CASE WHEN $${pAwd} THEN coalesce(p.awd_us,0) ELSE 0 END)::int total
+      FROM planner.products p
+      JOIN planner.product_inventory pi ON pi.sku=p.sku
+      ${wsql}
+      GROUP BY p.sku, p.product_name, p.category, p.awd_us
+      HAVING coalesce(sum(pi.available),0) > 0 OR coalesce(p.awd_us,0) > 0 OR $${pSkuFlag} = true
+      ORDER BY total DESC`, [...vals, awdApplies, skus.length > 0]);
+    const tot = rows.reduce((a, r) => { a.fba += r.fba; a.three_pl += r.three_pl; a.awd += r.awd; a.total += r.total; return a; }, { fba: 0, three_pl: 0, awd: 0, total: 0 });
+    res.json({ rows, totals: tot, sku_count: rows.length, awd_available: awdApplies });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Buy-plan extra stock pools per SKU: AWD (US upstream, awd_us) + NonGRS on-hand (UK/US). The buy plan pools
+// AWD into FBA cover and shows it in its own column; NonGRS is shown as a sub-line under SOH 3PL (display only).
+// Defensive on the NonGRS columns so it works before migration 036 is applied (returns 0 until then).
+app.get('/api/buy-extra-stock', async (req, res) => {
+  try {
+    const cols = (await pool.query(`SELECT column_name FROM information_schema.columns
+      WHERE table_schema='planner' AND table_name='products'
+        AND column_name IN ('inventory_uk_nongrs','inventory_us_nongrs')`)).rows.map(r => r.column_name);
+    const ukn = cols.includes('inventory_uk_nongrs') ? 'coalesce(inventory_uk_nongrs,0)' : '0';
+    const usn = cols.includes('inventory_us_nongrs') ? 'coalesce(inventory_us_nongrs,0)' : '0';
+    const rows = (await pool.query(`SELECT sku, coalesce(awd_us,0)::int awd, ${ukn}::int nuk, ${usn}::int nus
+      FROM planner.products WHERE in_planning_scope`)).rows;
+    const stock = {};
+    rows.forEach(r => { if (r.awd || r.nuk || r.nus) stock[r.sku] = { awd: r.awd, nuk: r.nuk, nus: r.nus }; });
+    res.json({ stock, has_nongrs: cols.length === 2 });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// B2B Allocation — per requested SKU: available stock in the market, recent velocity (cover),
+// per-unit weight (airfreight rush), wholesale price (50% of ex-VAT retail) and avg cost (margin).
+app.post('/api/scenario/b2b', async (req, res) => {
+  const b = req.body || {};
+  const skus = (Array.isArray(b.skus) ? b.skus : []).filter(Boolean).map(s => s.trim().toUpperCase());
+  const market = (b.market || 'UK').toLowerCase();
+  const date = (b.date && /^\d{4}-\d{2}-\d{2}$/.test(b.date)) ? b.date : null;   // required-by date for the B2B order
+  if (!skus.length) return res.json({ rows: [] });
+  try {
+    const { rows } = await pool.query(`
+      SELECT p.sku, coalesce(p.product_name,'') name, coalesce(p.category,'') category,
+        (coalesce((SELECT sum(available) FROM planner.product_inventory pi WHERE pi.sku=p.sku AND pi.warehouse LIKE $2||'\\_%'),0)
+         + CASE WHEN $2='us' THEN coalesce(p.awd_us,0) ELSE 0 END)::int available,
+        coalesce((SELECT sum(units) FROM planner.sales_actuals sa WHERE sa.sku=p.sku AND lower(sa.country)=$2
+                  AND sa.month > (SELECT max(month) FROM planner.sales_actuals) - interval '3 months'),0)::int recent_units,
+        p.prod_weight_uk weight,
+        (CASE $2 WHEN 'uk' THEN p.uk_rt WHEN 'us' THEN p.us_rt WHEN 'eu' THEN p.eu_rt
+                 WHEN 'au' THEN p.au_rt WHEN 'ca' THEN p.ca_rt END) retail,
+        (CASE $2 WHEN 'uk' THEN p.cogs_uk_3pl_final WHEN 'us' THEN p.cogs_us_3pl_final WHEN 'eu' THEN p.cogs_eu_3pl_final
+                 WHEN 'au' THEN p.cogs_au_3pl_final WHEN 'ca' THEN p.cogs_ca_3pl_final END) cogs,
+        (SELECT round(avg(cost_price),2) FROM planner.purchase_order_lines l WHERE l.sku=p.sku AND coalesce(cost_price,0) > 0) avg_cost,
+        -- inbound for this market: landing on/before the order date (only when a date is given), plus the next inbound
+        coalesce((SELECT sum(ib.quantity - coalesce(ib.received_quantity,0)) FROM planner.inbound_shipments ib
+           WHERE ib.sku=p.sku AND ib.destination_warehouse LIKE $2||'\\_%' AND ib.quantity > coalesce(ib.received_quantity,0)
+             AND $3::date IS NOT NULL AND ib.estimated_delivery_date <= $3::date),0)::int inbound_by_date,
+        coalesce((SELECT sum(ib.quantity - coalesce(ib.received_quantity,0)) FROM planner.inbound_shipments ib
+           WHERE ib.sku=p.sku AND ib.destination_warehouse LIKE $2||'\\_%' AND ib.quantity > coalesce(ib.received_quantity,0)),0)::int inbound_total,
+        to_char((SELECT min(ib.estimated_delivery_date) FROM planner.inbound_shipments ib
+           WHERE ib.sku=p.sku AND ib.destination_warehouse LIKE $2||'\\_%' AND ib.quantity > coalesce(ib.received_quantity,0)
+             AND ib.estimated_delivery_date >= CURRENT_DATE),'YYYY-MM-DD') next_inbound_date,
+        coalesce((SELECT sum(ib.quantity - coalesce(ib.received_quantity,0)) FROM planner.inbound_shipments ib
+           WHERE ib.sku=p.sku AND ib.destination_warehouse LIKE $2||'\\_%' AND ib.quantity > coalesce(ib.received_quantity,0)
+             AND ib.estimated_delivery_date = (SELECT min(ib2.estimated_delivery_date) FROM planner.inbound_shipments ib2
+                WHERE ib2.sku=p.sku AND ib2.destination_warehouse LIKE $2||'\\_%' AND ib2.quantity > coalesce(ib2.received_quantity,0) AND ib2.estimated_delivery_date >= CURRENT_DATE)),0)::int next_inbound_qty
+      FROM planner.products p WHERE upper(p.sku) = ANY($1)`, [skus, market, date]);
+    res.json({ market: market.toUpperCase(), date, rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Financial Forecast Model — quarterly (FY Mar–Feb) per category × market. Returns last-year actual
+// units/revenue per quarter (from category_sales_summary) joined with saved growth/price overrides.
+// FY27 models on FY26 actuals (Mar25–Feb26); FY26 models on FY25 actuals (Mar24–Feb25).
+app.get('/api/scenario/fin-model', async (req, res) => {
+  const fy = (req.query.fy || 'FY27').toUpperCase();
+  const country = (req.query.country || 'UK').toUpperCase();
+  const endYr = 2000 + parseInt(fy.replace('FY', ''), 10);     // FY27 → 2027
+  if (isNaN(endYr)) return res.status(400).json({ error: 'bad fy' });
+  const lyStart = (endYr - 2) + '-03-01';                       // LY = prior FY: Mar (endYr-2)
+  const lyEnd = (endYr - 1) + '-02-01';                         // … through Feb (endYr-1)
+  try {
+    // quarter from month within a Mar-start FY: Mar→Q1 … Dec/Jan/Feb→Q4
+    const ly = await pool.query(`
+      SELECT category,
+        (floor((((extract(month from month)::int + 9) % 12))/3)+1)::int quarter,
+        sum(units)::bigint u, sum(revenue)::numeric r
+      FROM planner.category_sales_summary
+      WHERE upper(country)=$1 AND month >= $2::date AND month <= $3::date AND category IS NOT NULL
+      GROUP BY category, quarter`, [country, lyStart, lyEnd]);
+    const ovr = await pool.query(`SELECT category, quarter, growth_pct, price_change_pct, coalesce(notes,'') notes
+      FROM planner.financial_model WHERE fy=$1 AND country=$2`, [fy, country]);
+    const cats = {};
+    const blank = () => ({ ly: [{u:0,r:0},{u:0,r:0},{u:0,r:0},{u:0,r:0}], ovr: [{growth:null,price:null,notes:''},{growth:null,price:null,notes:''},{growth:null,price:null,notes:''},{growth:null,price:null,notes:''}] });
+    for (const x of ly.rows) { (cats[x.category] || (cats[x.category] = blank())).ly[x.quarter - 1] = { u: Number(x.u), r: Number(x.r) }; }
+    for (const o of ovr.rows) { const c = cats[o.category] || (cats[o.category] = blank()); c.ovr[o.quarter - 1] = { growth: o.growth_pct == null ? null : Number(o.growth_pct), price: o.price_change_pct == null ? null : Number(o.price_change_pct), notes: o.notes }; }
+    const rows = Object.keys(cats).sort().map(cat => ({ category: cat, ly: cats[cat].ly, ovr: cats[cat].ovr }));
+    res.json({ fy, country, ly_label: 'FY' + (endYr - 1).toString().slice(2), rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/scenario/fin-model', async (req, res) => {
+  const b = req.body || {};
+  if (!b.fy || !b.category || !b.country || !b.quarter) return res.status(400).json({ error: 'fy, category, country, quarter required' });
+  const num = v => (v === '' || v == null ? null : v);
+  try {
+    await pool.query(`INSERT INTO planner.financial_model (fy,category,country,quarter,growth_pct,price_change_pct,notes)
+      VALUES ($1,$2,$3,$4,$5,$6,$7)
+      ON CONFLICT (fy,category,country,quarter) DO UPDATE SET
+        growth_pct=excluded.growth_pct, price_change_pct=excluded.price_change_pct, notes=excluded.notes, updated_at=now()`,
+      [b.fy, b.category, b.country, b.quarter, num(b.growth_pct), num(b.price_change_pct), b.notes || null]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Import growth % from the demand-plan category forecast: per category × quarter, growth =
+// (this-FY units / last-FY actual units − 1)×100, where this-FY units = actuals where the month has
+// passed, else the saved SKU forecast (forecast_outputs aggregated to category × country × quarter).
+app.post('/api/scenario/fin-model-import', async (req, res) => {
+  const b = req.body || {};
+  const fy = (b.fy || 'FY27').toUpperCase();
+  const country = (b.country || 'UK').toUpperCase();
+  const endYr = 2000 + parseInt(fy.replace('FY', ''), 10);
+  if (isNaN(endYr)) return res.status(400).json({ error: 'bad fy' });
+  const fyStart = (endYr - 1) + '-03-01', fyEnd = endYr + '-02-01';
+  const lyStart = (endYr - 2) + '-03-01', lyEnd = (endYr - 1) + '-02-01';
+  const QEXP = `(floor((((extract(month from month)::int + 9) % 12))/3)+1)::int`;
+  try {
+    const lastAct = (await pool.query(`SELECT max(month) m FROM planner.sales_actuals`)).rows[0].m;
+    const [actThis, fcThis, lyR] = await Promise.all([
+      pool.query(`SELECT category, ${QEXP} quarter, sum(units)::numeric u FROM planner.category_sales_summary
+        WHERE upper(country)=$1 AND month >= $2::date AND month <= $3::date GROUP BY category, quarter`,
+        [country, fyStart, lastAct]),
+      pool.query(`SELECT p.category, (floor((((extract(month from fo.month)::int + 9) % 12))/3)+1)::int quarter, sum(fo.units)::numeric u
+        FROM planner.forecast_outputs fo JOIN planner.products p ON p.sku=fo.sku
+        WHERE upper(split_part(fo.warehouse,'_',1))=$1 AND fo.month > $2::date AND fo.month <= $3::date
+        GROUP BY p.category, quarter`, [country, lastAct, fyEnd]),
+      pool.query(`SELECT category, ${QEXP} quarter, sum(units)::numeric u FROM planner.category_sales_summary
+        WHERE upper(country)=$1 AND month >= $2::date AND month <= $3::date GROUP BY category, quarter`,
+        [country, lyStart, lyEnd]),
+    ]);
+    const thisFY = {}, ly = {};
+    const add = (o, cat, q, u) => { (o[cat] || (o[cat] = [0, 0, 0, 0]))[q - 1] += Number(u); };
+    actThis.rows.forEach(r => add(thisFY, r.category, r.quarter, r.u));
+    fcThis.rows.forEach(r => add(thisFY, r.category, r.quarter, r.u));
+    lyR.rows.forEach(r => add(ly, r.category, r.quarter, r.u));
+    let updated = 0;
+    for (const cat of Object.keys(ly)) {
+      for (let q = 0; q < 4; q++) {
+        const l = ly[cat][q]; if (!(l > 0)) continue;
+        const g = Math.round(((thisFY[cat] || [0,0,0,0])[q] / l - 1) * 100);
+        await pool.query(`INSERT INTO planner.financial_model (fy,category,country,quarter,growth_pct)
+          VALUES ($1,$2,$3,$4,$5) ON CONFLICT (fy,category,country,quarter)
+          DO UPDATE SET growth_pct=excluded.growth_pct, updated_at=now()`, [fy, cat, country, q + 1, g]);
+        updated++;
+      }
+    }
+    res.json({ ok: true, updated });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Financial Forecast scenario overlays (exec-summary-style view): growth % + price % per channel × country.
+app.get('/api/scenario/fin-overlay', async (req, res) => {
+  try { res.json((await pool.query('SELECT channel, country, growth_pct, price_pct FROM planner.scenario_fin_overlay')).rows); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/scenario/fin-overlay', async (req, res) => {
+  const b = req.body || {};
+  if (!b.channel || !b.country) return res.status(400).json({ error: 'channel and country required' });
+  const num = v => (v === '' || v == null) ? null : Number(v);
+  try {
+    await pool.query(`INSERT INTO planner.scenario_fin_overlay (channel, country, growth_pct, price_pct, updated_at)
+      VALUES ($1,$2,$3,$4, now()) ON CONFLICT (channel, country) DO UPDATE SET growth_pct=excluded.growth_pct, price_pct=excluded.price_pct, updated_at=now()`,
+      [b.channel, b.country, num(b.growth_pct), num(b.price_pct)]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Auto Forecast — a 12-month buy plan by subcategory × primary supplier, and the resulting
+// cash-flow (deposit / completion / balance / freight+duty). Model (all transparent, v1):
+//   demand[subcat,month] from saved SKU forecast (forecast_outputs) aggregated to subcategory × market.
+//   forward-cover netting by ARRIVAL month: arrive[m] = max(0, cover_target + demand[m] − stock_before),
+//     where cover_target = next COVER_MONTHS of demand; stock_before[0] = current on-hand.
+//   order month = arrival − lead (lead = production_lead_time_weeks + china_to_<market>_lead_time_weeks).
+//   value = units × avg PO cost_price for the subcat. Payments phased off the primary supplier's terms:
+//     deposit (start%) at order month · completion% at order+production_days · balance% at arrival+credit_days.
+//   freight+duty estimated as FREIGHT_PCT of value at arrival month (flagged as an estimate — the precise
+//     landed-cost engine lives on the PO view; this report uses a flat uplift for the cash-flow).
+const AF_COVER_MONTHS = 2, AF_FREIGHT_PCT = 0.15;
+function afAddMonths(ym, n){ let [y,m]=ym.split('-').map(Number); let t=(y*12+(m-1))+n; return Math.floor(t/12)+'-'+String(t%12+1).padStart(2,'0'); }
+app.get('/api/scenario/auto-forecast', async (req, res) => {
+  const markets = (req.query.market||'all').toLowerCase()==='all' ? ['uk','us','eu','au'] : [(req.query.market||'uk').toLowerCase()];
+  const COVER = Math.max(1, Math.min(12, parseInt(req.query.cover,10) || AF_COVER_MONTHS));   // cover-target months (1–12)
+  const FREIGHT = (req.query.freight!=null && req.query.freight!=='' && isFinite(+req.query.freight)) ? Math.max(0, +req.query.freight/100) : AF_FREIGHT_PCT;
+  try {
+    const dataMin='2026-06', dataMax='2027-12';
+    // display window = 12 months from the earliest forecast month
+    const win=[]; for(let i=0;i<12;i++) win.push(afAddMonths(dataMin,i));
+    const allMonths=[]; { let m=dataMin; while(m<=dataMax){ allMonths.push(m); m=afAddMonths(m,1); } }
+    const leadCol={uk:'china_to_uk_lead_time_weeks',us:'china_to_us_lead_time_weeks',eu:'china_to_eu_lead_time_weeks',au:'china_to_au_lead_time_weeks'};
+    // one combined pass per market then aggregate the output tables
+    const unitsBy={}, supplierBy={};                       // subcat -> {month->units, total}, subcat->supplier
+    const pay={deposit:{},completion:{},balance:{},freight:{}}; // bucket -> month -> amount
+    const addPay=(b,mo,v)=>{ if(win.indexOf(mo)<0||!(v>0))return; (pay[b][mo]=(pay[b][mo]||0)+v); };
+    let truncated=false;
+    for(const mk of markets){
+      const lc=leadCol[mk];
+      const [dem,stk,lead,cost]=await Promise.all([
+        pool.query(`SELECT p.subcategory s, to_char(fo.month,'YYYY-MM') m, sum(fo.units)::numeric u
+          FROM planner.forecast_outputs fo JOIN planner.products p ON p.sku=fo.sku
+          WHERE split_part(fo.warehouse,'_',1)=$1 AND p.subcategory IS NOT NULL GROUP BY 1,2`,[mk]),
+        pool.query(`SELECT p.subcategory s, sum(i.available)::numeric u FROM planner.product_inventory i
+          JOIN planner.products p ON p.sku=i.sku WHERE split_part(i.warehouse,'_',1)=$1 AND p.subcategory IS NOT NULL GROUP BY 1`,[mk]),
+        pool.query(`SELECT subcategory s, avg(coalesce(production_lead_time_weeks,0)+coalesce(${lc},0)) wk
+          FROM planner.products WHERE subcategory IS NOT NULL GROUP BY 1`),
+        pool.query(`SELECT pr.subcategory s, avg(l.cost_price) c FROM planner.purchase_order_lines l
+          JOIN planner.products pr ON pr.sku=l.sku WHERE pr.subcategory IS NOT NULL AND l.cost_price>0 GROUP BY 1`),
+      ]);
+      const demand={}, stock={}, leadM={}, unitCost={};
+      dem.rows.forEach(r=>{ (demand[r.s]||(demand[r.s]={}))[r.m]=Number(r.u); });
+      stk.rows.forEach(r=> stock[r.s]=Number(r.u));
+      lead.rows.forEach(r=> leadM[r.s]=Math.max(1,Math.round(Number(r.wk)/4.345)));   // weeks→months
+      cost.rows.forEach(r=> unitCost[r.s]=Number(r.c));
+      // primary supplier per subcat = volume-dominant supplier on its PO history
+      const supName={};
+      (await pool.query(`SELECT s, nm FROM (
+          SELECT pr.subcategory s, po.supplier_name nm,
+            row_number() OVER (PARTITION BY pr.subcategory ORDER BY sum(l.qty) DESC) rn
+          FROM planner.purchase_order_lines l JOIN planner.purchase_orders po ON po.po=l.po
+          JOIN planner.products pr ON pr.sku=l.sku
+          WHERE pr.subcategory IS NOT NULL AND coalesce(po.supplier_name,'')<>'' GROUP BY 1,2) q WHERE rn=1`)).rows
+        .forEach(r=> supName[r.s]=r.nm);
+      const terms=(await pool.query(`SELECT name,start_deposit_pct,completion_pct,balance_pct,production_days,credit_days FROM planner.suppliers`)).rows
+        .reduce((a,t)=>{a[t.name]=t;return a;},{});
+      for(const s of Object.keys(demand)){
+        const lm=leadM[s]||2, c=unitCost[s]||0, nm=supName[s]||'—';
+        const t=terms[nm]||{start_deposit_pct:30,completion_pct:0,balance_pct:70,production_days:60,credit_days:0};
+        let sb=stock[s]||0;
+        for(let i=0;i<allMonths.length;i++){
+          const m=allMonths[i], d=demand[s][m]||0;
+          let cover=0; for(let k=1;k<=COVER;k++) cover+=(demand[s][allMonths[i+k]]||0);
+          const arrive=Math.max(0, cover+d-sb);
+          sb=sb+arrive-d;
+          if(arrive<=0) continue;
+          const om=afAddMonths(m,-lm);                       // order month
+          if(win.indexOf(om)>=0){
+            const u=unitsBy[s]||(unitsBy[s]={t:0}); u[om]=(u[om]||0)+arrive; u.t+=arrive; supplierBy[s]=nm;
+          } else if(om<win[0]) { /* ordered already / in past — skip display */ }
+          else truncated=true;
+          const val=arrive*c;
+          addPay('deposit', om, val*Number(t.start_deposit_pct||0)/100);
+          addPay('completion', afAddMonths(om, Math.round((t.production_days||0)/30)), val*Number(t.completion_pct||0)/100);
+          addPay('balance', afAddMonths(m, Math.round((t.credit_days||0)/30)), val*Number(t.balance_pct||0)/100);
+          addPay('freight', m, val*FREIGHT);
+        }
+      }
+    }
+    const unitRows=Object.keys(unitsBy).filter(s=>unitsBy[s].t>0).sort().map(s=>({
+      subcat:s, supplier:supplierBy[s]||'—', months:win.map(m=>Math.round(unitsBy[s][m]||0)), total:Math.round(unitsBy[s].t) }));
+    const payRow=b=>win.map(m=>Math.round(pay[b][m]||0));
+    const dep=payRow('deposit'),comp=payRow('completion'),bal=payRow('balance'),frt=payRow('freight');
+    const total=win.map((m,i)=>dep[i]+comp[i]+bal[i]+frt[i]);
+    res.json({ months:win, units:unitRows,
+      payments:{deposit:dep,completion:comp,balance:bal,freight:frt,total},
+      assumptions:{cover_months:COVER,freight_pct:FREIGHT,truncated} });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Slow Moving — per SKU × warehouse stock health. Returns the raw metrics (on-hand, trailing velocity,
+// weeks of cover, days since last sale, cash tied up) for every stocked SKU×warehouse; the client filters
+// against adjustable thresholds (cover wks · days-since-sale · velocity · min units) + market/warehouse pills.
+// Warehouse↔sales mapping: <co>_fba ← FBA channel; <co>_3pl ← DTC+B2B. Velocity = units sold over the last
+// VEL_WEEKS, /VEL_WEEKS. (No AWD stock location exists in inventory, so AWD is omitted.)
+app.get('/api/scenario/slow-moving', async (req, res) => {
+  const VEL_WEEKS = 13;                                  // trailing window ≈ 3 months
+  try {
+    const rows = (await pool.query(`
+      WITH maxm AS (SELECT max(month) m FROM planner.sales_actuals),
+      sw AS (   -- sales mapped to a warehouse code
+        SELECT sku, lower(country)||'_'||CASE WHEN channel='FBA' THEN 'fba' ELSE '3pl' END wh, month, units
+        FROM planner.sales_actuals),
+      vel AS (
+        SELECT sku, wh, sum(units)::numeric sold FROM sw, maxm
+        WHERE month > maxm.m - interval '3 months' AND month <= maxm.m GROUP BY 1,2),
+      last AS (
+        SELECT sku, wh, max(month) last_m FROM sw WHERE units>0 GROUP BY 1,2),
+      cost AS (
+        SELECT sku, avg(cost_price) c FROM planner.purchase_order_lines WHERE cost_price>0 GROUP BY 1),
+      fc AS (   -- forward (seasonal) demand: saved SKU forecast over the next 3 months, by sku × warehouse
+        SELECT sku, warehouse wh, sum(units)::numeric fsold FROM planner.forecast_outputs
+        WHERE month >= date_trunc('month',CURRENT_DATE) AND month < date_trunc('month',CURRENT_DATE)+interval '3 months'
+        GROUP BY 1,2),
+      inv AS (  -- AWD (US-only, upstream) is pooled into us_fba: it feeds FBA and is the same stock pool
+        SELECT i.sku, i.warehouse wh,
+          (i.available + CASE WHEN i.warehouse='us_fba' THEN coalesce(p.awd_us,0) ELSE 0 END)::int on_hand,
+          (CASE WHEN i.warehouse='us_fba' THEN coalesce(p.awd_us,0) ELSE 0 END)::int awd
+        FROM planner.product_inventory i JOIN planner.products p ON p.sku=i.sku WHERE p.in_planning_scope)
+      SELECT inv.sku, p.product_name, p.category, p.subcategory, p.release_window, inv.wh,
+        inv.on_hand, inv.awd,
+        coalesce(v.sold,0)::numeric sold_win,
+        coalesce(f.fsold,0)::numeric fc_win,
+        l.last_m,
+        (CURRENT_DATE - l.last_m)::int days_since,
+        coalesce(c.c,0)::numeric unit_cost
+      FROM inv
+      JOIN planner.products p ON p.sku=inv.sku
+      LEFT JOIN vel  v ON v.sku=inv.sku AND v.wh=inv.wh
+      LEFT JOIN fc   f ON f.sku=inv.sku AND f.wh=inv.wh
+      LEFT JOIN last l ON l.sku=inv.sku AND l.wh=inv.wh
+      LEFT JOIN cost c ON c.sku=inv.sku
+      WHERE inv.on_hand>0`)).rows;
+    const out = rows.map(r => {
+      const vel = Number(r.sold_win) / VEL_WEEKS;          // trailing actual units/week
+      const fvel = Number(r.fc_win) / VEL_WEEKS;           // forward (seasonal) forecast units/week
+      const cover = v => v > 0 ? Math.round(r.on_hand / v) : null;  // weeks of cover; null = no demand on that basis
+      return { sku: r.sku, name: r.product_name, category: r.category, subcat: r.subcategory,
+        release_window: r.release_window || '',
+        wh: r.wh, market: r.wh.split('_')[0], whtype: r.wh.split('_')[1],
+        on_hand: r.on_hand, awd: Number(r.awd) || 0,
+        vel_wk: Math.round(vel * 10) / 10, cover_wks: cover(vel),
+        fc_vel_wk: Math.round(fvel * 10) / 10, cover_fc: cover(fvel),
+        days_since: r.days_since == null ? null : Number(r.days_since),
+        value: Math.round(r.on_hand * Number(r.unit_cost)) };
+    });
+    res.json({ rows: out, vel_weeks: VEL_WEEKS });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Markdown & EOS plan — at end of season, which stock won't clear, and what to do with it. Per SKU × market:
+// project sales to the season-end date (default basis = the saved SEASONAL FORECAST, which encodes the summer
+// peak; ?basis=trail uses the trailing 13wk run rate instead). residual = on-hand that won't sell by then.
+// Recommendation: CLEARS (≥95% gone) · CARRYOVER (still live, hold to next season — towels are non-perishable)
+// · MARKDOWN (discontinued so can't carry, OR no demand anywhere, OR >1.5yr of trailing-annual demand left
+// over — carryover won't fix it). Markdown depth (15/25/35/50%) scales with how stuck it is; £ shows capital
+// at risk (residual × cost) and the markdown give-away (residual × net retail × depth). Tunables:
+// ?end=YYYY-MM-DD season end (default 31 Aug), ?market=all|uk|us|eu|au|ca, ?basis=fc|trail.
+app.get('/api/scenario/markdown-eos', async (req, res) => {
+  const VEL_WEEKS = 13;
+  try {
+    // season end: query param, else next 31 Aug (summer EOS for beach product)
+    const today = new Date();
+    let end = (req.query.end && /^\d{4}-\d{2}-\d{2}$/.test(req.query.end)) ? new Date(req.query.end + 'T00:00:00Z')
+      : (() => { const y = today.getUTCFullYear(); let e = new Date(Date.UTC(y, 7, 31)); if (e < today) e = new Date(Date.UTC(y + 1, 7, 31)); return e; })();
+    const endISO = end.toISOString().slice(0, 10);
+    const wksToEos = Math.max(0.1, (end - today) / (7 * 86400000));
+    const mkt = (req.query.market || 'all').toLowerCase();
+    const basis = req.query.basis === 'trail' ? 'trail' : 'fc';   // default: seasonal forecast (correct for an EOS projection)
+    const mfilter = (mkt !== 'all') ? ` AND inv.market = '${mkt.replace(/[^a-z]/g, '')}'` : '';
+    const rows = (await pool.query(`
+      WITH maxm AS (SELECT max(month) m FROM planner.sales_actuals),
+      vel AS (SELECT sku, lower(country) market, sum(units)::numeric sold       -- trailing 13wk (display run rate)
+        FROM planner.sales_actuals, maxm WHERE month > maxm.m - interval '3 months' AND month <= maxm.m GROUP BY 1,2),
+      ann AS (SELECT sku, lower(country) market, sum(units)::numeric sold        -- trailing 12mo (seasonally-neutral annual demand)
+        FROM planner.sales_actuals, maxm WHERE month > maxm.m - interval '12 months' AND month <= maxm.m GROUP BY 1,2),
+      fc AS (SELECT sku, split_part(warehouse,'_',1) market, sum(units)::numeric fsold  -- saved seasonal forecast, now → season end
+        FROM planner.forecast_outputs
+        WHERE month >= date_trunc('month',CURRENT_DATE) AND month <= date_trunc('month',$1::date) GROUP BY 1,2),
+      cost AS (SELECT sku, avg(cost_price) c FROM planner.purchase_order_lines WHERE cost_price>0 GROUP BY 1),
+      inv AS (SELECT i.sku, split_part(i.warehouse,'_',1) market,
+          sum(i.available + CASE WHEN i.warehouse='us_fba' THEN coalesce(p.awd_us,0) ELSE 0 END)::int on_hand
+        FROM planner.product_inventory i JOIN planner.products p ON p.sku=i.sku
+        WHERE p.in_planning_scope GROUP BY 1,2),
+      avail AS (SELECT sku, lower(country) market, bool_or(is_available) live
+        FROM planner.v_product_availability GROUP BY 1,2)
+      SELECT inv.sku, p.product_name, p.category, p.subcategory, inv.market, inv.on_hand,
+        coalesce(v.sold,0)::numeric sold_win, coalesce(an.sold,0)::numeric ann_sold,
+        coalesce(f.fsold,0)::numeric fc_units, coalesce(c.c,0)::numeric unit_cost,
+        (CASE inv.market WHEN 'uk' THEN p.uk_rt WHEN 'us' THEN p.us_rt WHEN 'eu' THEN p.eu_rt
+              WHEN 'au' THEN p.au_rt WHEN 'ca' THEN p.ca_rt END)::numeric retail,
+        coalesce(a.live,false) live
+      FROM inv JOIN planner.products p ON p.sku=inv.sku
+      LEFT JOIN vel  v  ON v.sku=inv.sku  AND v.market=inv.market
+      LEFT JOIN ann  an ON an.sku=inv.sku AND an.market=inv.market
+      LEFT JOIN fc   f  ON f.sku=inv.sku  AND f.market=inv.market
+      LEFT JOIN cost c  ON c.sku=inv.sku
+      LEFT JOIN avail a ON a.sku=inv.sku  AND a.market=inv.market
+      WHERE inv.on_hand>0${mfilter}`, [endISO])).rows;
+    const depthFor = (ratio, dead) => { let d = ratio < 0.3 ? 0.15 : ratio < 0.6 ? 0.25 : ratio < 0.85 ? 0.35 : 0.5; if (dead) d = Math.max(d, 0.35); return d; };
+    const out = rows.map(r => {
+      const oh = Number(r.on_hand), vel = Number(r.sold_win) / VEL_WEEKS, fcU = Number(r.fc_units), ann = Number(r.ann_sold), cost = Number(r.unit_cost) || 0;
+      const projClear = Math.min(oh, Math.round(basis === 'trail' ? vel * wksToEos : fcU)), residual = Math.max(0, oh - projClear);
+      const ratio = oh > 0 ? residual / oh : 0, live = r.live === true, dead = vel <= 0.001 && fcU <= 0 && ann <= 0;
+      const net = r.retail == null ? 0 : (['uk', 'eu'].includes(r.market) ? Number(r.retail) / 1.2 : Number(r.retail));
+      let status, depth = 0;
+      if (ratio <= 0.05) status = 'clear';
+      else if (!live) { status = 'markdown'; depth = depthFor(ratio, dead); }            // discontinued → can't carry
+      else if (dead) { status = 'markdown'; depth = depthFor(ratio, true); }              // no demand anywhere
+      else if (ann > 0 && residual > ann * 1.5) { status = 'markdown'; depth = depthFor(ratio, false); }  // >1.5yr real annual demand left over
+      else status = 'carryover';                                                           // still live → holds to next season
+      return { sku: r.sku, name: r.product_name, category: r.category, subcat: r.subcategory, market: r.market,
+        on_hand: oh, vel_wk: Math.round((basis === 'trail' ? vel : fcU / wksToEos) * 10) / 10, proj_clear: projClear, residual,
+        st_eos: oh > 0 ? Math.round((oh - residual) / oh * 100) : null,
+        live, status, depth, residual_cost: Math.round(residual * cost),
+        markdown_give: status === 'markdown' ? Math.round(residual * net * depth) : 0,
+        recover: status === 'markdown' ? Math.round(residual * net * (1 - depth)) : 0 };
+    }).filter(r => r.residual > 0 || r.status === 'clear');
+    out.sort((a, b) => (b.residual_cost - a.residual_cost) || (b.residual - a.residual));
+    res.json({ rows: out, season_end: endISO, wks_to_eos: Math.round(wksToEos), vel_weeks: VEL_WEEKS, basis });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Open-To-Buy (OTB) — per category × market, how much is left to buy (or how over-committed you are) to hit
+// the cover target over a forward horizon. Rolls stock forward: projected closing = on-hand + on-order (open
+// PO receipts landing in the horizon) − forecast demand. Target closing = cover-weeks target × weekly forward
+// demand. OTB units = target closing − projected closing (positive = buy; negative = already over-bought).
+// £ at cost. Tunables: ?market=all|uk|… ?months=6 horizon ?defcover=8 fallback cover when no target set.
+app.get('/api/scenario/otb', async (req, res) => {
+  try {
+    const months = Math.max(1, Math.min(12, parseInt(req.query.months, 10) || 6));
+    const defCover = Math.max(1, Number(req.query.defcover) || 8);
+    const mkt = (req.query.market || 'all').toLowerCase();
+    const weeks = months * 4.345;
+    const rows = (await pool.query(`
+      WITH fc AS (SELECT p.category, split_part(fo.warehouse,'_',1) market, sum(fo.units)::numeric demand
+          FROM planner.forecast_outputs fo JOIN planner.products p ON p.sku=fo.sku
+          WHERE fo.month >= date_trunc('month',CURRENT_DATE)
+            AND fo.month < date_trunc('month',CURRENT_DATE) + ($1||' months')::interval
+          GROUP BY 1,2),
+      oo AS (SELECT p.category, lower(coalesce(nullif(po.country_code,''), b.country_code,'')) market, sum(l.qty)::numeric qty
+          FROM planner.purchase_orders po
+          JOIN planner.purchase_order_lines l ON l.po=po.po
+          JOIN planner.products p ON p.sku=l.sku
+          LEFT JOIN planner.shipments s ON s.shipment_ref=po.shipment_ref
+          LEFT JOIN planner.branches  b ON b.name=po.branch
+          WHERE coalesce(po.status,'') NOT ILIKE '%complete%'
+            AND coalesce(s.arrival_date,s.delivery_date,s.landing_date,po.landing_date_overide) >= CURRENT_DATE
+            AND coalesce(s.arrival_date,s.delivery_date,s.landing_date,po.landing_date_overide) < CURRENT_DATE + ($1||' months')::interval
+          GROUP BY 1,2),
+      oh AS (SELECT p.category, split_part(i.warehouse,'_',1) market,
+            sum(i.available + CASE WHEN i.warehouse='us_fba' THEN coalesce(p.awd_us,0) ELSE 0 END)::numeric onhand
+          FROM planner.product_inventory i JOIN planner.products p ON p.sku=i.sku
+          WHERE p.in_planning_scope GROUP BY 1,2),
+      cost AS (SELECT pr.category, avg(l.cost_price) c FROM planner.purchase_order_lines l
+          JOIN planner.products pr ON pr.sku=l.sku WHERE l.cost_price>0 AND pr.category IS NOT NULL GROUP BY 1),
+      tgt AS (SELECT category, market, cover_weeks_target FROM planner.sell_through_targets WHERE cover_weeks_target IS NOT NULL),
+      keys AS (SELECT category, market FROM fc UNION SELECT category, market FROM oh UNION SELECT category, market FROM oo)
+      SELECT k.category, k.market,
+        coalesce(oh.onhand,0) onhand, coalesce(oo.qty,0) onorder, coalesce(fc.demand,0) demand,
+        coalesce(c.c,0) unit_cost, t.cover_weeks_target
+      FROM keys k
+      LEFT JOIN fc   ON fc.category=k.category AND fc.market=k.market
+      LEFT JOIN oo   ON oo.category=k.category AND oo.market=k.market
+      LEFT JOIN oh   ON oh.category=k.category AND oh.market=k.market
+      LEFT JOIN cost c ON c.category=k.category
+      LEFT JOIN tgt  t ON t.category=k.category AND t.market=upper(k.market)
+      WHERE k.category IS NOT NULL AND k.market <> ''`, [String(months)])).rows;
+    // OTB is only meaningful where there's forward demand; zero-demand stock is a markdown/slow-moving signal, not a buy decision
+    const out = rows.filter(r => TARGET_MARKETS.includes((r.market || '').toUpperCase()) && Number(r.demand) > 0)
+      .map(r => {
+        const onhand = Number(r.onhand), onorder = Number(r.onorder), demand = Number(r.demand), cost = Number(r.unit_cost) || 0;
+        const wkDemand = demand / weeks, projClose = onhand + onorder - demand;
+        const coverT = r.cover_weeks_target != null ? Number(r.cover_weeks_target) : defCover;
+        const targetClose = coverT * wkDemand;
+        const otb = Math.round(targetClose - projClose);
+        return { category: r.category, market: r.market.toUpperCase(), onhand: Math.round(onhand), onorder: Math.round(onorder),
+          demand: Math.round(demand), proj_close: Math.round(projClose),
+          cover_now: wkDemand > 0 ? Math.round(onhand / wkDemand) : null,
+          proj_cover: wkDemand > 0 ? Math.round(projClose / wkDemand) : null,
+          cover_target: coverT, has_target: r.cover_weeks_target != null,
+          otb_units: otb, otb_cost: Math.round(otb * cost),
+          status: otb > Math.max(50, demand * 0.05) ? 'buy' : (otb < -Math.max(50, demand * 0.05) ? 'over' : 'ok') };
+      });
+    out.sort((a, b) => Math.abs(b.otb_cost) - Math.abs(a.otb_cost));
+    const f = mkt === 'all' ? out : out.filter(r => r.market.toLowerCase() === mkt);
+    res.json({ rows: f, months, weeks: Math.round(weeks), def_cover: defCover });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Key Stock Arrivals — what is landing soon and how desperately it's needed. For every open PO with an
+// upcoming arrival date (shipment arrival/delivery/landing date if linked, else the PO landing override),
+// list the SKUs + quantities on it and score each by stockout risk:
+//   stockout date = today + on-hand ÷ weekly (seasonal) demand;  gap = stockout date − arrival date.
+//   gap < 0  → CRITICAL (out of stock before it lands);  0–14d → tight;  else comfortable;  no demand → n/a.
+// On-hand/demand are taken at the destination market (AWD pooled into US). Grouped by shipment (or the PO
+// when unlinked), shipments sorted by arrival, SKUs by gap (most urgent first). No writes, no schema.
+app.get('/api/scenario/key-arrivals', async (req, res) => {
+  const FC_WEEKS = 13;
+  try {
+    const rows = (await pool.query(`
+      WITH arr AS (
+        SELECT po.po, po.shipment_ref,
+          coalesce(po.supplier_name,'') supplier,
+          lower(coalesce(nullif(po.country_code,''), b.country_code, '')) market,
+          coalesce(s.arrival_date, s.delivery_date, s.landing_date, po.landing_date_overide) arrival,
+          coalesce(nullif(s.status,''), nullif(po.status,''), '') status
+        FROM planner.purchase_orders po
+        LEFT JOIN planner.shipments s ON s.shipment_ref = po.shipment_ref
+        LEFT JOIN planner.branches  b ON b.name = po.branch
+        WHERE coalesce(po.status,'') NOT ILIKE '%complete%'
+          AND coalesce(s.arrival_date, s.delivery_date, s.landing_date, po.landing_date_overide) >= CURRENT_DATE),
+      osku AS (SELECT sku, split_part(warehouse,'_',1) market, sum(available)::numeric oh
+        FROM planner.product_inventory GROUP BY 1,2),
+      fc AS (SELECT sku, split_part(warehouse,'_',1) market, sum(units)::numeric fsold
+        FROM planner.forecast_outputs
+        WHERE month >= date_trunc('month',CURRENT_DATE) AND month < date_trunc('month',CURRENT_DATE)+interval '3 months'
+        GROUP BY 1,2)
+      SELECT arr.po, arr.shipment_ref, arr.supplier, arr.market, arr.status,
+        to_char(arr.arrival,'YYYY-MM-DD') arrival, (arr.arrival - CURRENT_DATE)::int days_to_arrival,
+        l.sku, l.qty::int qty, coalesce(p.product_name,'') name, coalesce(p.subcategory,'') subcat,
+        (coalesce(oh.oh,0) + CASE WHEN arr.market='us' THEN coalesce(p.awd_us,0) ELSE 0 END)::numeric on_hand,
+        coalesce(fc.fsold,0)::numeric fc_win
+      FROM arr
+      JOIN planner.purchase_order_lines l ON l.po=arr.po AND l.qty>0
+      JOIN planner.products p ON p.sku=l.sku
+      LEFT JOIN osku oh ON oh.sku=l.sku AND oh.market=arr.market
+      LEFT JOIN fc      ON fc.sku=l.sku AND fc.market=arr.market`)).rows;
+    // assemble: group by shipment (or PO when unlinked), score each line
+    const groups = {};
+    for (const r of rows) {
+      const key = r.shipment_ref ? 'S:' + r.shipment_ref : 'P:' + r.po;
+      const g = groups[key] || (groups[key] = { kind: r.shipment_ref ? 'shipment' : 'po',
+        ref: r.shipment_ref || r.po, supplier: r.supplier, market: r.market, status: r.status,
+        arrival: r.arrival, days_to_arrival: Number(r.days_to_arrival), pos: new Set(), lines: [] });
+      g.pos.add(r.po);
+      const vel = Number(r.fc_win) / FC_WEEKS;                       // seasonal units/week at this market
+      const oh = Number(r.on_hand);
+      const daysToStockout = vel > 0 ? Math.round(oh / vel * 7) : null;
+      const gap = daysToStockout == null ? null : daysToStockout - Number(r.days_to_arrival);
+      const urgency = gap == null ? 'none' : (gap < 0 ? 'critical' : (gap <= 14 ? 'tight' : 'ok'));
+      g.lines.push({ sku: r.sku, name: r.name, subcat: r.subcat, qty: Number(r.qty),
+        on_hand: Math.round(oh), vel_wk: Math.round(vel * 10) / 10,
+        cover_wks: vel > 0 ? Math.round(oh / vel) : null,
+        days_to_stockout: daysToStockout, gap_days: gap, urgency });
+    }
+    const rank = { critical: 0, tight: 1, ok: 2, none: 3 };
+    const arrivals = Object.values(groups).map(g => {
+      g.lines.sort((a, b) => (a.gap_days == null ? 1e9 : a.gap_days) - (b.gap_days == null ? 1e9 : b.gap_days));
+      return { kind: g.kind, ref: g.ref, supplier: g.supplier, market: g.market, status: g.status,
+        arrival: g.arrival, days_to_arrival: g.days_to_arrival, po_count: g.pos.size,
+        units: g.lines.reduce((s, l) => s + l.qty, 0),
+        crit: g.lines.filter(l => l.urgency === 'critical').length,
+        tight: g.lines.filter(l => l.urgency === 'tight').length,
+        lines: g.lines };
+    }).sort((a, b) => a.arrival < b.arrival ? -1 : a.arrival > b.arrival ? 1 : 0);
+    res.json({ arrivals, fc_weeks: FC_WEEKS });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Sell-through targets (DEMAND ▸ Targets) — target % by category × market. GET returns the in-scope
+// category list + markets + the saved targets; POST upserts one cell.
+const TARGET_MARKETS = ['UK', 'US', 'EU', 'AU'];
+app.get('/api/targets', async (req, res) => {
+  try {
+    const cats = (await pool.query(`SELECT DISTINCT category FROM planner.products
+      WHERE in_planning_scope AND category IS NOT NULL ORDER BY category`)).rows.map(r => r.category);
+    const rows = (await pool.query(`SELECT category, market, target_pct, cover_weeks_target FROM planner.sell_through_targets`)).rows;
+    const targets = {}, covers = {};
+    rows.forEach(r => { var k = r.category + '|' + r.market;
+      targets[k] = r.target_pct == null ? null : Number(r.target_pct);
+      covers[k] = r.cover_weeks_target == null ? null : Number(r.cover_weeks_target); });
+    const full = await stActuals(); const actuals = {}, actualsCover = {};
+    for (const k of Object.keys(full)) { actuals[k] = full[k].st; actualsCover[k] = full[k].cover; }
+    // avg PO cost per category → £ exposure
+    const cost = {};
+    (await pool.query(`SELECT pr.category, avg(l.cost_price) c FROM planner.purchase_order_lines l
+      JOIN planner.products pr ON pr.sku=l.sku WHERE l.cost_price>0 AND pr.category IS NOT NULL GROUP BY 1`))
+      .rows.forEach(r => { cost[r.category] = Number(r.c) || 0; });
+    // LY seasonal pace: % of the prior season's full-year demand that had sold by this point last year — a
+    // data-driven "expected sell-through to date" used to suggest a target where none is set.
+    const pace = {};
+    (await pool.query(`
+      WITH ss AS (SELECT make_date(extract(year from current_date)::int - CASE WHEN extract(month from current_date)<3 THEN 1 ELSE 0 END, 3, 1) d),
+      sly AS (SELECT (SELECT d FROM ss) - interval '1 year' d)
+      SELECT p.category, upper(sa.country) market,
+        sum(CASE WHEN sa.month >= (SELECT d FROM sly) AND sa.month < (date_trunc('month',current_date) - interval '1 year') THEN sa.units ELSE 0 END)::numeric todate,
+        sum(CASE WHEN sa.month >= (SELECT d FROM sly) AND sa.month < (SELECT d FROM sly) + interval '12 months' THEN sa.units ELSE 0 END)::numeric fullseason
+      FROM planner.sales_actuals sa JOIN planner.products p ON p.sku=sa.sku
+      WHERE p.category IS NOT NULL GROUP BY 1,2`))
+      .rows.forEach(r => { const t = Number(r.todate), f = Number(r.fullseason);
+        if (f > 0) pace[r.category + '|' + r.market] = Math.round(t / f * 100); });
+    // scorecard: status + plain-English recommendation per category × market (ST gap × cover position)
+    const score = [];
+    for (const k of Object.keys(full)) {
+      const [cat, market] = k.split('|'); const a = full[k];
+      const stT = targets[k], cvT = covers[k], cst = cost[cat] || 0, value = Math.round(a.onhand * cst), sug = pace[k] != null ? pace[k] : null;
+      let status, rec;
+      if (stT == null && cvT == null) {
+        status = 'none';
+        rec = sug != null ? 'No target set — LY pace suggests ~' + sug + '% by now. Set a target to monitor & alert.' : 'No target set — set one to monitor sell-through.';
+      } else if (stT != null && a.st < stT - 5) {
+        status = 'behind';
+        const healthy = (cvT != null ? a.cover != null && a.cover >= cvT : a.cover != null && a.cover >= 12);
+        rec = healthy
+          ? a.st + '% vs ' + stT + '% target with ' + (a.cover != null ? a.cover + 'wk' : 'high') + ' cover — under-selling on healthy stock. Promote / markdown to shift ' + a.onhand.toLocaleString() + ' units (£' + value.toLocaleString() + ').'
+          : a.st + '% vs ' + stT + '% target but cover ' + (a.cover != null ? a.cover + 'wk' : 'thin') + ' — selling slow yet stock is tight; monitor, don\'t over-discount.';
+      } else if (stT != null && a.st > stT + 10) {
+        status = 'ahead';
+        const thin = cvT != null ? (a.cover != null && a.cover < cvT) : (a.cover != null && a.cover < 6);
+        rec = thin
+          ? a.st + '% vs ' + stT + '% target, cover only ' + (a.cover != null ? a.cover + 'wk' : 'thin') + ' — selling ahead of plan with thin cover. Buy / expedite (see Open-to-Buy).'
+          : a.st + '% vs ' + stT + '% — strong sell-through, cover healthy. On track.';
+      } else {
+        status = 'on';
+        rec = stT != null ? 'On track — ' + a.st + '% vs ' + stT + '% target' + (cvT != null && a.cover != null ? ' · cover ' + a.cover + 'wk vs ' + cvT + 'wk' : '') + '.'
+          : 'Cover ' + (a.cover != null ? a.cover + 'wk' : '–') + ' vs ' + cvT + 'wk target.';
+      }
+      score.push({ cat, market, st: a.st, st_target: stT == null ? null : stT, cover: a.cover, cover_target: cvT == null ? null : cvT,
+        onhand: a.onhand, run: a.run, value, suggest: sug, status, rec });
+    }
+    const rk = { behind: 0, ahead: 1, none: 2, on: 3 };
+    score.sort((x, y) => (rk[x.status] - rk[y.status]) || (y.value - x.value) || (x.cat < y.cat ? -1 : 1));
+    res.json({ categories: cats, markets: TARGET_MARKETS, targets, covers, actuals, actualsCover, score });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Season-to-date sell-through per category × market = sold ÷ (sold + on-hand). Season starts 1 Mar
+// (FY Mar–Feb); on-hand pools AWD into US. A monthly-data proxy (no opening/intake history). Shared by
+// the Targets view and Demand Actions.
+async function stActuals() {
+  const act = (await pool.query(`
+    WITH ss AS (SELECT make_date(extract(year from current_date)::int - CASE WHEN extract(month from current_date)<3 THEN 1 ELSE 0 END, 3, 1) d),
+    sold AS (SELECT p.category, upper(sa.country) market, sum(sa.units)::numeric u
+      FROM planner.sales_actuals sa JOIN planner.products p ON p.sku=sa.sku, ss
+      WHERE sa.month >= ss.d AND p.category IS NOT NULL GROUP BY 1,2),
+    oh AS (SELECT p.category, upper(split_part(i.warehouse,'_',1)) market,
+             sum(i.available + CASE WHEN i.warehouse='us_fba' THEN coalesce(p.awd_us,0) ELSE 0 END)::numeric u
+      FROM planner.product_inventory i JOIN planner.products p ON p.sku=i.sku WHERE p.category IS NOT NULL GROUP BY 1,2)
+    SELECT coalesce(sold.category,oh.category) category, coalesce(sold.market,oh.market) market,
+      coalesce(sold.u,0) sold, coalesce(oh.u,0) onhand
+    FROM sold FULL OUTER JOIN oh ON sold.category=oh.category AND sold.market=oh.market`)).rows;
+  // last full month units per category × market = the run rate for cover
+  const runMap = {};
+  (await pool.query(`
+    WITH lc AS (SELECT (date_trunc('month',current_date) - interval '1 month')::date m)
+    SELECT p.category, upper(sa.country) market, sum(sa.units)::numeric u
+    FROM planner.sales_actuals sa JOIN planner.products p ON p.sku=sa.sku, lc
+    WHERE sa.month=lc.m AND p.category IS NOT NULL GROUP BY 1,2`)).rows
+    .forEach(r => { runMap[r.category + '|' + r.market] = Number(r.u) || 0; });
+  const actuals = {};
+  act.forEach(r => { const s = Number(r.sold), o = Number(r.onhand); if (s + o > 0 && TARGET_MARKETS.includes(r.market)) {
+    const key = r.category + '|' + r.market, run = runMap[key] || 0;
+    actuals[key] = { st: Math.round(s / (s + o) * 100), sold: Math.round(s), onhand: Math.round(o),
+      run: Math.round(run), cover: run > 0 ? Math.round(o / (run / 4.345)) : null }; } });
+  return actuals;
+}
+app.post('/api/targets', async (req, res) => {
+  const b = req.body || {}, cat = (b.category || '').trim(), mkt = (b.market || '').trim().toUpperCase();
+  if (!cat || !mkt) return res.status(400).json({ error: 'category + market required' });
+  // edit one metric at a time: 'st' → target_pct, 'cover' → cover_weeks_target (back-compat: target_pct in body)
+  const col = b.metric === 'cover' ? 'cover_weeks_target' : 'target_pct';
+  const raw = b.metric ? b.value : b.target_pct;
+  const val = (raw === '' || raw == null) ? null : Number(raw);
+  try {
+    await pool.query(`INSERT INTO planner.sell_through_targets (category, market, ${col})
+      VALUES ($1,$2,$3) ON CONFLICT (category, market) DO UPDATE SET ${col}=excluded.${col}, updated_at=now()`,
+      [cat, mkt, val]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// DEMAND ▸ Actions — demand-side exceptions (category × market): sell-through vs target (markdown / stock
+// signals) and trading vs last year. Monthly data; season-to-date ST + last complete month YoY.
+app.get('/api/demand-actions', async (req, res) => {
+  try {
+    const tmap = {}, ctmap = {};
+    (await pool.query(`SELECT category, market, target_pct, cover_weeks_target FROM planner.sell_through_targets`))
+      .rows.forEach(t => { var k = t.category + '|' + t.market;
+        if (t.target_pct != null) tmap[k] = Number(t.target_pct);
+        if (t.cover_weeks_target != null) ctmap[k] = Number(t.cover_weeks_target); });
+    const st = await stActuals();
+    const cost = {};  // avg PO cost per category → £ impact
+    (await pool.query(`SELECT pr.category, avg(l.cost_price) c FROM planner.purchase_order_lines l
+      JOIN planner.products pr ON pr.sku=l.sku WHERE l.cost_price>0 AND pr.category IS NOT NULL GROUP BY 1`))
+      .rows.forEach(r => { cost[r.category] = Number(r.c) || 0; });
+    // concrete cover position for the guidance: "X on hand · ~Y wks cover at NN/mo [— below the Zwk target]"
+    const coverPhrase = (k) => { const a = st[k]; if (!a || !a.onhand) return '';
+      if (a.run > 0 && a.cover != null) { let s = a.onhand.toLocaleString() + ' on hand · ~' + a.cover + 'wk cover at ' + a.run.toLocaleString() + '/mo';
+        const ct = ctmap[k]; if (ct) s += (a.cover < ct ? ' — below the ' + ct + 'wk target' : ' — at/above the ' + ct + 'wk target'); return s; }
+      return a.onhand.toLocaleString() + ' units on hand'; };
+    const out = [];
+    const push = (severity, type, cat, market, detail, impact) =>
+      out.push({ key: type + '|' + cat + '|' + market, severity, type, cat, market, detail, impact: Math.round(impact || 0) });
+    // calendar events carry an id in the key so multiple events on the same cat×market stay distinct
+    const pushCal = (severity, cat, market, id, detail, impact) =>
+      out.push({ key: 'Event approaching|' + cat + '|' + market + '|' + id, severity, type: 'Event approaching', cat, market, detail, impact: Math.round(impact || 0) });
+    for (const k of Object.keys(tmap)) {
+      const a = st[k]; if (!a) continue; const tgt = tmap[k], gap = a.st - tgt, [cat, mkt] = k.split('|'); const c = cost[cat] || 0; const cp = coverPhrase(k);
+      if (gap <= -10) push('high', 'Behind sell-through target', cat, mkt, a.st + '% sold vs ' + tgt + '% target (' + gap + 'pts) — markdown / promo risk · ' + cp, a.onhand * c);
+      else if (gap <= -5) push('amber', 'Behind sell-through target', cat, mkt, a.st + '% vs ' + tgt + '% target (' + gap + 'pts behind) · ' + cp, a.onhand * c);
+      else if (gap >= 15 && a.onhand > 0) push('amber', 'Ahead of target — check availability', cat, mkt, a.st + '% sold vs ' + tgt + '% — selling faster than planned · ' + cp, 0);
+    }
+    const ly = (await pool.query(`
+      WITH lc AS (SELECT (date_trunc('month',current_date) - interval '1 month')::date m)
+      SELECT p.category, upper(sa.country) market,
+        sum(CASE WHEN sa.month=lc.m THEN sa.units ELSE 0 END)::numeric ty,
+        sum(CASE WHEN sa.month=(lc.m - interval '1 year')::date THEN sa.units ELSE 0 END)::numeric ly
+      FROM planner.sales_actuals sa JOIN planner.products p ON p.sku=sa.sku, lc
+      WHERE p.category IS NOT NULL AND sa.month IN (lc.m, (lc.m - interval '1 year')::date)
+      GROUP BY 1,2`)).rows;
+    ly.forEach(r => { if (!TARGET_MARKETS.includes(r.market)) return; const ty = Number(r.ty), lyv = Number(r.ly), c = cost[r.category] || 0;
+      if (lyv < 20 && ty < 20) return; const ch = lyv > 0 ? (ty / lyv - 1) : (ty > 0 ? 1 : 0);
+      var cpl = coverPhrase(r.category + '|' + r.market);
+      if (ch <= -0.3) push('amber', 'Trading behind last year', r.category, r.market, 'last month ' + Math.round(ty).toLocaleString() + 'u vs ' + Math.round(lyv).toLocaleString() + 'u LY (' + Math.round(ch * 100) + '%)' + (cpl ? ' · ' + cpl : ''), Math.max(0, lyv - ty) * c);
+      else if (ch >= 0.4) push('info', 'Trading ahead of last year', r.category, r.market, 'last month ' + Math.round(ty).toLocaleString() + 'u vs ' + Math.round(lyv).toLocaleString() + 'u LY (+' + Math.round(ch * 100) + '%)' + (cpl ? ' — ' + cpl : ' — check cover'), 0);
+    });
+    // Upcoming trading-calendar events (next 6 weeks): is there cover for the planned spike?
+    const calEv = (await pool.query(`
+      SELECT id, to_char(event_date,'DD Mon') d, (event_date - current_date) days_until,
+             upper(coalesce(market,'')) market, coalesce(category,'') category,
+             coalesce(nullif(title,''), nullif(event_type,''), 'Event') title,
+             coalesce(uplift_pct,0) uplift, coalesce(sku_list,'') sku_list
+      FROM planner.trading_calendar
+      WHERE event_date IS NOT NULL AND event_date >= current_date
+        AND event_date <= current_date + interval '42 days'
+      ORDER BY event_date`)).rows;
+    calEv.forEach(e => {
+      const mkt = e.market, cat = e.category, u = Number(e.uplift) || 0;
+      const du = Number(e.days_until), wk = Math.max(0, Math.round(du / 7));
+      const when = e.d + (wk <= 1 ? ' (this week)' : ' (in ' + wk + ' wks)');
+      const upTxt = u > 0 ? ' · +' + u + '% planned' : '';
+      if (mkt && mkt !== 'ALL' && cat && cat !== 'ALL' && TARGET_MARKETS.includes(mkt)) {
+        const a = st[cat + '|' + mkt], ct = ctmap[cat + '|' + mkt], c = cost[cat] || 0;
+        if (a && a.run > 0) {
+          const upRun = a.run * (1 + u / 100), covUp = Math.round(a.onhand / (upRun / 4.345)), extra = Math.max(0, a.run * (u / 100));
+          const base = e.title + ' ' + when + upTxt + ' · ' + a.onhand.toLocaleString() + ' on hand · ~' + covUp + 'wk cover at uplifted ' + Math.round(upRun).toLocaleString() + '/mo';
+          if (covUp < wk) pushCal('high', cat, mkt, e.id, base + " — won't cover to the event, build stock now", extra * c);
+          else if (ct && covUp < ct) pushCal('amber', cat, mkt, e.id, base + ' — below the ' + ct + 'wk target for the spike', extra * c);
+          else pushCal('info', cat, mkt, e.id, base + ' — cover looks adequate', 0);
+        } else {
+          pushCal('info', cat, mkt, e.id, e.title + ' ' + when + upTxt + ' — review cover (no recent run rate)', 0);
+        }
+      } else {
+        const tail = e.sku_list ? ' · SKUs: ' + e.sku_list : (cat && cat !== 'ALL' ? ' · ' + cat : '');
+        pushCal('info', cat || 'ALL', mkt || 'ALL', e.id, e.title + ' ' + when + upTxt + tail + ' — review cover', 0);
+      }
+    });
+    // attach lifecycle state (dismissed / snoozed / done); snooze expires back to open
+    const today = (await pool.query(`SELECT to_char(current_date,'YYYY-MM-DD') d`)).rows[0].d;
+    const state = {};
+    (await pool.query(`SELECT action_key, status, to_char(snooze_until,'YYYY-MM-DD') snooze_until FROM planner.demand_action_state`))
+      .rows.forEach(s => { state[s.action_key] = s; });
+    out.forEach(o => { const s = state[o.key]; o.status = 'open'; o.snooze_until = null;
+      if (s) { if (s.status === 'snoozed' && s.snooze_until && s.snooze_until >= today) { o.status = 'snoozed'; o.snooze_until = s.snooze_until; }
+        else if (s.status !== 'snoozed') o.status = s.status; } });
+    const rank = { high: 0, amber: 1, info: 2 };
+    out.sort((a, b) => (rank[a.severity] - rank[b.severity]) || (b.impact - a.impact) || (a.cat < b.cat ? -1 : 1));
+    res.json(out);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Lifecycle: dismiss / snooze / done a demand action (by stable key); restore (status:'open') deletes it.
+app.post('/api/demand-actions/state', async (req, res) => {
+  const b = req.body || {}, key = (b.key || '').trim();
+  if (!key) return res.status(400).json({ error: 'key required' });
+  try {
+    if (b.status === 'open' || b.restore) { await pool.query(`DELETE FROM planner.demand_action_state WHERE action_key=$1`, [key]); return res.json({ ok: true }); }
+    const days = String(parseInt(b.snooze_days, 10) || 7);
+    await pool.query(`INSERT INTO planner.demand_action_state (action_key, status, snooze_until, note)
+      VALUES ($1,$2, CASE WHEN $2='snoozed' THEN current_date + ($3||' days')::interval ELSE NULL END, $4)
+      ON CONFLICT (action_key) DO UPDATE SET status=excluded.status, snooze_until=excluded.snooze_until, note=excluded.note, updated_at=now()`,
+      [key, b.status || 'dismissed', days, b.note || null]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Read the lifecycle state map (for client-side-computed demand actions to apply their own
+// done/snooze/dismiss status). Snoozes past their date read back as 'open'.
+app.get('/api/demand-actions/state', async (req, res) => {
+  try {
+    const today = (await pool.query(`SELECT to_char(current_date,'YYYY-MM-DD') d`)).rows[0].d;
+    const state = {};
+    (await pool.query(`SELECT action_key, status, to_char(snooze_until,'YYYY-MM-DD') snooze_until FROM planner.demand_action_state`))
+      .rows.forEach(s => {
+        let status = s.status, snooze_until = null;
+        if (s.status === 'snoozed') { if (s.snooze_until && s.snooze_until >= today) { snooze_until = s.snooze_until; } else status = 'open'; }
+        if (status !== 'open') state[s.action_key] = { status, snooze_until };
+      });
+    res.json({ today, state });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Trading calendar (DEMAND ▸ Calendar) — events by date × market; editable + CSV up/down.
+const CAL_FIELDS = { event_date: 'date', market: 'text', category: 'text', sku_list: 'text', event_type: 'text', title: 'text', uplift_pct: 'numeric', notes: 'text' };
+app.get('/api/trading-calendar', async (req, res) => {
+  try {
+    const r = await pool.query(`SELECT id, to_char(event_date,'YYYY-MM-DD') event_date, coalesce(market,'') market,
+      coalesce(category,'ALL') category, coalesce(sku_list,'') sku_list, coalesce(event_type,'') event_type, coalesce(title,'') title,
+      uplift_pct, coalesce(notes,'') notes
+      FROM planner.trading_calendar ORDER BY event_date NULLS LAST, id`);
+    const cats = (await pool.query(`SELECT DISTINCT category FROM planner.products WHERE in_planning_scope AND category IS NOT NULL ORDER BY category`)).rows.map(c => c.category);
+    res.json({ events: r.rows, categories: cats });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/trading-calendar', async (req, res) => {     // create a row (blank or with fields)
+  const b = req.body || {};
+  try { const r = await pool.query(`INSERT INTO planner.trading_calendar (event_date, market, category, sku_list, event_type, title, uplift_pct, notes)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+    [b.event_date || null, b.market || 'ALL', b.category || 'ALL', b.sku_list || null, b.event_type || null, b.title || null,
+     (b.uplift_pct === '' || b.uplift_pct == null ? null : b.uplift_pct), b.notes || null]);
+    res.json({ ok: true, id: r.rows[0].id }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/trading-calendar/import', async (req, res) => {   // declared before /:id so it isn't caught by it
+  const rows = Array.isArray(req.body && req.body.rows) ? req.body.rows : [];
+  const replace = !!(req.body && req.body.replace);
+  try {
+    if (replace) await pool.query(`DELETE FROM planner.trading_calendar`);
+    let n = 0;
+    for (const r of rows) {
+      if (!(r.event_date || r.title || r.event_type)) continue;
+      await pool.query(`INSERT INTO planner.trading_calendar (event_date, market, category, sku_list, event_type, title, uplift_pct, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [r.event_date || null, r.market || 'ALL', r.category || 'ALL', r.sku_list || null, r.event_type || null, r.title || null,
+         (r.uplift_pct === '' || r.uplift_pct == null ? null : r.uplift_pct), r.notes || null]); n++;
+    }
+    res.json({ ok: true, imported: n });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/trading-calendar/:id/delete', async (req, res) => {
+  try { await pool.query(`DELETE FROM planner.trading_calendar WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/trading-calendar/:id', (req, res) =>
+  patch(res, 'planner.trading_calendar', 'id', req.params.id, CAL_FIELDS, req.body, 'bigint'));
 
 // AI proxy — the artefact's Claude calls hit api.anthropic.com keyless (only works inside
 // Claude). We rewrite those calls to /api/ai (see GET /), and this endpoint forwards them to
@@ -437,6 +3419,415 @@ app.post('/api/ai', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: { message: 'AI proxy error: ' + e.message } });
   }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// SUPPLIER PORTAL — real magic-link login + single-page supplier view.
+// Two surfaces: GET /portal (login page, or the portal app once authed). Auth is a
+// magic-link token → httpOnly session cookie (psid). All data + writes are scoped
+// SERVER-SIDE to the session's supplier(s); a supplier can never see or touch
+// another supplier's POs. Exempt from the planner-key gate (see middleware above).
+// ════════════════════════════════════════════════════════════════════════════
+// Scoped PO calc for the portal — same date/payment logic as the admin purchase-orders endpoint
+// (so the figures match exactly), filtered to the supplier ($1 = supplier names[]). Landed-cost /
+// duty / freight / ERP fields the portal renderer doesn't use are omitted.
+const POS_SQL_PORTAL = `
+  WITH base AS (
+    SELECT po.*, s.credit_days, s.credit_type,
+      coalesce(po.start_deposit_pct_override, s.start_deposit_pct, 0) sp,
+      coalesce(po.completion_pct_override, s.completion_pct, 0) cp,
+      coalesce(lv.line_value, po.order_value_estimation) value_est,
+      coalesce(po.supplier_invoice_total, lv.line_value, po.order_value_estimation, 0) val,
+      fx.flex_id, fx.landing_date flex_landing, fx.departure_date flex_departure,
+      sh.landing_date sh_landing, sh.delivery_date sh_delivery, sh.departure_date sh_departure, sh.arrival_date sh_arrival,
+      sh.mode sh_mode, fx.mode flex_mode,
+      s.production_days, b.sea_lead_time_days sea_lead, b.air_lead_time_days air_lead,
+      (CASE WHEN lower(coalesce(sh.mode, CASE WHEN fx.mode ILIKE 'air%' THEN 'air' END, 'sea'))='air'
+            THEN b.air_lead_time_days ELSE b.sea_lead_time_days END) transit_lead,
+      b.country_code branch_country
+    FROM planner.purchase_orders po
+    LEFT JOIN planner.suppliers s ON s.id=po.supplier_id
+    LEFT JOIN planner.branches b ON b.name=po.branch
+    LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
+    LEFT JOIN LATERAL (SELECT sum(l.qty*l.cost_price) line_value FROM planner.purchase_order_lines l WHERE l.po=po.po) lv ON true
+    LEFT JOIN LATERAL (SELECT f.* FROM planner.flexport_shipments f
+      WHERE f.flex_id=po.flexport_reference OR f.shipment_name=po.po OR f.shipment_name=po.shipment_ref
+      ORDER BY (f.flex_id=po.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true
+    WHERE po.supplier_name = ANY($1)
+  ), calc AS (
+    SELECT *,
+      round(val*sp/100,2) start_calc,
+      coalesce(pay_start_deposit_assigned, round(val*sp/100,2)) start_paid,
+      round((sp+cp)/100*val - coalesce(pay_start_deposit_assigned, val*sp/100),2) completion_calc,
+      coalesce(end_production_overide, CASE WHEN start_production IS NOT NULL AND production_days IS NOT NULL
+        THEN (start_production + (production_days||' days')::interval)::date END) eff_prod_end
+    FROM base
+  ), calc2 AS (
+    SELECT *, coalesce(sh_departure, flex_departure,
+      CASE WHEN eff_prod_end IS NOT NULL THEN (eff_prod_end + interval '7 days')::date END) eff_ship FROM calc
+  ), calc3 AS (
+    SELECT *, coalesce(sh_delivery, sh_arrival, sh_landing, flex_landing,
+      CASE WHEN eff_ship IS NOT NULL AND transit_lead IS NOT NULL THEN (eff_ship + (transit_lead||' days')::interval)::date END) eff_delivery FROM calc2
+  ), calc4 AS (
+    SELECT *, ((CASE WHEN credit_type='on_shipment' THEN eff_ship ELSE eff_delivery END)
+      + (coalesce(credit_days,0)||' days')::interval)::date bal_due_date FROM calc3
+  )
+  SELECT po, supplier_name, status,
+    to_char(start_production,'YYYY-MM-DD') prod_start,
+    to_char(eff_prod_end,'YYYY-MM-DD') prod_end,
+    to_char(eff_ship,'YYYY-MM-DD') ship,
+    flexport_reference, flex_id, value_est,
+    round(supplier_invoice_total,2) final_invoice, round(val,2) value_used,
+    sp start_pct, cp completion_pct, greatest(100-sp-cp,0) balance_pct,
+    start_paid start_dep,
+    CASE WHEN val>0 THEN coalesce(pay_completion_assigned, completion_calc) END completion,
+    CASE WHEN val>0 THEN round(val - start_paid - coalesce(pay_completion_assigned, completion_calc),2) END balance_owing,
+    start_calc, round(pay_start_deposit_assigned,2) start_assigned, to_char(pay_start_deposit_date,'YYYY-MM-DD') start_date,
+    completion_calc, round(pay_completion_assigned,2) completion_assigned, to_char(pay_completion_date,'YYYY-MM-DD') completion_date,
+    round(pay_balance_1_amount,2) balance_1_amount, to_char(pay_balance_1_date,'YYYY-MM-DD') balance_1_date,
+    to_char(bal_due_date,'YYYY-MM-DD') balance_due,
+    coalesce(deposit_ref,'') deposit_ref, coalesce(shipment_ref,'') shipment,
+    coalesce(client,'') client, coalesce(dispatch_order_ref,'') dispatch_order_ref,
+    coalesce(final_delivery_address,'') final_delivery_address, coalesce(crossdock_skus,'') crossdock_skus,
+    coalesce(prod_no,'') prod_no, coalesce(batch_id,'') batch_id
+  FROM calc4 ORDER BY po`;
+function loadPortalPage() { try { return readFileSync(new URL('./supply/portal.html', import.meta.url), 'utf8'); } catch { return '<!doctype html><meta charset=utf8>portal page missing'; } }
+const PORTAL_PAGE = DEV ? null : loadPortalPage();
+const portalToken = () => crypto.randomBytes(24).toString('hex');
+// active supplier rows (id+name) for an email — an email may map to >1 supplier
+const portalSuppliers = (email) => pool.query(
+  `SELECT supplier_id, supplier_name FROM planner.supplier_portal_users WHERE lower(email)=lower($1) AND active=true AND coalesce(supplier_name,'')<>''`,
+  [email]).then(r => r.rows);
+async function sendMagicEmail(email, url) {
+  if (process.env.RESEND_API_KEY) {
+    try {
+      await fetch('https://api.resend.com/emails', {
+        method: 'POST', headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', to: [email],
+          subject: 'Your Dock & Bay supplier portal link',
+          html: `<p>Hi,</p><p>Here's your link to the Dock &amp; Bay supplier portal (valid 7 days):</p><p><a href="${url}">${url}</a></p><p>If you didn't request this, you can ignore this email.</p>` }) });
+      return;
+    } catch (e) { console.error('[portal email] Resend failed:', e.message); }
+  }
+  console.log('[portal email] (no RESEND_API_KEY) magic link for ' + email + ':\n  ' + url);   // dev fallback
+}
+// Session middleware for /api/portal/* (except request-link). Sets req.portal = {email, suppliers:[names], supplierIds:[ids]}.
+async function portalAuth(req, res, next) {
+  try {
+    const psid = cookieVal(req, 'psid');
+    if (!psid) return res.status(401).json({ error: 'not signed in' });
+    const s = (await pool.query(`SELECT email FROM planner.portal_sessions WHERE token=$1 AND expires_at>now()`, [psid])).rows[0];
+    if (!s) return res.status(401).json({ error: 'session expired' });
+    const sups = await portalSuppliers(s.email);
+    if (!sups.length) return res.status(403).json({ error: 'no supplier linked to this account' });
+    req.portal = { email: s.email, suppliers: sups.map(x => x.supplier_name), supplierIds: sups.map(x => x.supplier_id).filter(v => v != null) };
+    next();
+  } catch (e) { res.status(500).json({ error: e.message }); }
+}
+// Ownership guard: the PO must belong to one of the session's suppliers.
+async function portalOwnsPO(req, po) {
+  if (!po) return false;
+  const r = (await pool.query(`SELECT supplier_name FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0];
+  return !!(r && req.portal.suppliers.includes(r.supplier_name));
+}
+
+app.get('/portal', async (req, res) => {
+  try {
+    if (req.query.token) {
+      const t = (await pool.query(`SELECT email FROM planner.portal_magic_tokens WHERE token=$1 AND expires_at>now() AND used_at IS NULL`, [String(req.query.token)])).rows[0];
+      if (t) {
+        await pool.query(`UPDATE planner.portal_magic_tokens SET used_at=now() WHERE token=$1`, [String(req.query.token)]);
+        const sups = await portalSuppliers(t.email);
+        const psid = portalToken();
+        await pool.query(`INSERT INTO planner.portal_sessions (token,email,supplier_id,expires_at) VALUES ($1,$2,$3, now()+interval '7 days')`,
+          [psid, t.email, sups[0] ? sups[0].supplier_id : null]);
+        const secure = req.headers['x-forwarded-proto'] === 'https';
+        res.setHeader('Set-Cookie', `psid=${psid}; HttpOnly; Path=/; Max-Age=604800; SameSite=Lax${secure ? '; Secure' : ''}`);
+        return res.redirect('/portal');   // strip the token from the URL
+      }
+      return res.redirect('/portal?e=expired');
+    }
+    res.set('content-type', 'text/html').send(DEV ? loadPortalPage() : PORTAL_PAGE);
+  } catch (e) { res.status(500).send('portal error'); }
+});
+
+app.post('/api/portal/request-link', async (req, res) => {
+  const email = String((req.body && req.body.email) || '').trim().toLowerCase();
+  try {
+    if (email) {
+      const sups = await portalSuppliers(email);
+      if (sups.length) {
+        const tok = portalToken();
+        await pool.query(`INSERT INTO planner.portal_magic_tokens (token,email,expires_at) VALUES ($1,$2, now()+interval '7 days')`, [tok, email]);
+        const base = (req.headers['x-forwarded-proto'] ? req.headers['x-forwarded-proto'] + '://' : 'http://') + (req.headers['x-forwarded-host'] || req.headers.host);
+        await sendMagicEmail(email, base + '/portal?token=' + tok);
+      }
+    }
+    res.json({ ok: true });   // always ok — never reveal whether an email is registered
+  } catch (e) { res.json({ ok: true }); }
+});
+
+app.post('/api/portal/logout', portalAuth, async (req, res) => {
+  try { const psid = cookieVal(req, 'psid'); if (psid) await pool.query(`DELETE FROM planner.portal_sessions WHERE token=$1`, [psid]); } catch {}
+  res.setHeader('Set-Cookie', 'psid=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax');
+  res.json({ ok: true });
+});
+
+app.get('/api/portal/me', portalAuth, (req, res) => res.json({ email: req.portal.email, suppliers: req.portal.suppliers }));
+
+// Shared portal renderer (generated from inject.html). Served to the supplier portal page.
+let PORTAL_VIEW_JS = DEV ? null : (() => { try { return readFileSync(new URL('./supply/portal-view.js', import.meta.url), 'utf8'); } catch { return '/* portal-view.js missing */'; } })();
+app.get('/portal-view.js', (req, res) => {
+  res.set('content-type', 'application/javascript; charset=utf-8');
+  res.send(DEV ? (() => { try { return readFileSync(new URL('./supply/portal-view.js', import.meta.url), 'utf8'); } catch { return '/* missing */'; } })() : PORTAL_VIEW_JS);
+});
+// Notes for the renderer's post-note refetch (path sid ignored — scoped to the session's supplier).
+app.get('/api/portal/notes/:sid', portalAuth, async (req, res) => {
+  try {
+    if (!req.portal.supplierIds.length) return res.json([]);
+    res.json((await pool.query(`SELECT id, po, author_kind, coalesce(author_email,'') author_email, body,
+      to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read
+      FROM planner.supplier_notes WHERE supplier_id = ANY($1) ORDER BY created_at`, [req.portal.supplierIds])).rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Mark a note read/unread — only notes belonging to the session's supplier.
+app.post('/api/portal/note-read/:id', portalAuth, async (req, res) => {
+  try {
+    const n = (await pool.query(`SELECT supplier_id FROM planner.supplier_notes WHERE id=$1`, [req.params.id])).rows[0];
+    if (!n || req.portal.supplierIds.indexOf(n.supplier_id) < 0) return res.status(403).json({ error: 'not your note' });
+    const read = !(req.body && req.body.read === false);
+    await pool.query(`UPDATE planner.supplier_notes SET read_at=${read ? 'now()' : 'NULL'} WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true, read });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Serve an uploaded invoice/doc — only if its PO belongs to the session's supplier.
+app.get('/api/portal/attachment/:id', portalAuth, async (req, res) => {
+  try {
+    const r = (await pool.query(`SELECT po, filename, mime, data FROM planner.portal_attachments WHERE id=$1`, [req.params.id])).rows[0];
+    if (!r || !await portalOwnsPO(req, r.po)) return res.status(403).send('forbidden');
+    res.setHeader('Content-Type', r.mime || 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'inline; filename="' + (r.filename || 'file').replace(/"/g, '') + '"');
+    res.send(r.data);
+  } catch (e) { res.status(500).send('error'); }
+});
+
+// Full _ppData payload in the EXACT shape the shared portal renderer expects, scoped to the session's
+// supplier(s). The PO rows reuse the admin purchase-orders calc verbatim (so figures are identical),
+// with a supplier filter; everything else is filtered to those POs / supplier ids.
+app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
+  const names = req.portal.suppliers, ids = req.portal.supplierIds;
+  const q = (sql, p) => pool.query(sql, p).then(r => r.rows);
+  try {
+    const pos = await q(POS_SQL_PORTAL, [names]);   // same calc as admin /api/supply/purchase-orders, filtered
+    const poList = pos.map(p => p.po);
+    const grab = (sql) => poList.length ? q(sql, [poList]) : Promise.resolve([]);
+    const [lines, deps, lc, xd, ac, notes, subs, supSkus] = await Promise.all([
+      grab(`SELECT l.po, l.sku, l.qty, l.cost_price, l.carton_qty
+            FROM planner.purchase_order_lines l WHERE l.po = ANY($1) ORDER BY l.po, l.sku`),
+      names.length ? q(`SELECT reference, amount, is_deposit, to_char(date_paid,'YYYY-MM-DD') date_paid,
+            deposit_used, deposit_remaining FROM planner.deposits WHERE supplier_name = ANY($1) ORDER BY reference`, [names]).catch(() => []) : Promise.resolve([]),
+      grab(`SELECT po, sku, actual_cost, amended_qty, is_added, final_cost, confirmed_at FROM planner.portal_line_costs WHERE po = ANY($1)`),
+      grab(`SELECT po, sku, qty FROM planner.crossdock_shipments WHERE po = ANY($1)`),
+      grab(`SELECT id, po, coalesce(description,'') description, qty, price FROM planner.portal_additional_costs WHERE po = ANY($1) ORDER BY id`),
+      ids.length ? q(`SELECT id, po, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read FROM planner.supplier_notes WHERE supplier_id = ANY($1) ORDER BY created_at`, [ids]) : Promise.resolve([]),
+      ids.length ? q(`SELECT id, po, kind, value, status, attachment_id, to_char(submitted_at,'YYYY-MM-DD') submitted_at, to_char(applied_at,'YYYY-MM-DD') applied_at, note FROM planner.supplier_submissions WHERE supplier_id = ANY($1) ORDER BY submitted_at DESC`, [ids]) : Promise.resolve([]),
+      q(`SELECT sku, coalesce(product_name,'') product_name FROM planner.products WHERE coalesce(sku,'')<>'' AND (${names.map((_, i) => `coalesce(supplier_multiple_all,'') ILIKE '%'||$${i + 1}||'%'`).join(' OR ') || 'false'}) ORDER BY sku`, names).catch(() => []),
+    ]);
+    const byPo = (rows) => rows.reduce((m, r) => { (m[r.po] = m[r.po] || []).push(r); return m; }, {});
+    const lb = byPo(lines), notesByPo = byPo(notes), subsByPo = byPo(subs), addByPo = byPo(ac);
+    const costsByPo = {}; lc.forEach(x => { (costsByPo[x.po] = costsByPo[x.po] || {})[x.sku] = x; });
+    const xdByPo = {}; xd.forEach(x => { (xdByPo[x.po] = xdByPo[x.po] || {})[x.sku] = x.qty; });
+    res.json({ pos, lb, sdep: deps, sid: ids[0] || null, supplierName: names.join(', '),
+      notesByPo, subsByPo, costsByPo, supSkus, xdByPo, addByPo });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Everything the supplier sees — scoped server-side to their supplier(s).
+app.get('/api/portal/data', portalAuth, async (req, res) => {
+  try {
+    const names = req.portal.suppliers, ids = req.portal.supplierIds;
+    const pos = (await pool.query(
+      `SELECT po, coalesce(status,'') status, coalesce(client,'') client, shipment_ref,
+              supplier_ship_date, end_production_overide, supplier_invoice_total,
+              coalesce(crossdock_skus,'') crossdock_skus
+       FROM planner.purchase_orders WHERE supplier_name = ANY($1) ORDER BY po`, [names])).rows;
+    const poList = pos.map(p => p.po);
+    const grab = (sql) => poList.length ? pool.query(sql, [poList]).then(r => r.rows) : Promise.resolve([]);
+    const [lines, lcs, xds, adds, notes, subs, supSkus] = await Promise.all([
+      grab(`SELECT pol.po, pol.sku, pol.qty, pol.cost_price, coalesce(p.product_name_final,p.product_name,'') product_name
+            FROM planner.purchase_order_lines pol LEFT JOIN planner.products p ON p.sku=pol.sku WHERE pol.po = ANY($1) ORDER BY pol.po, pol.sku`),
+      grab(`SELECT po, sku, actual_cost, amended_qty, is_added, final_cost, confirmed_at FROM planner.portal_line_costs WHERE po = ANY($1)`),
+      grab(`SELECT po, sku, qty FROM planner.crossdock_shipments WHERE po = ANY($1)`),
+      grab(`SELECT id, po, coalesce(description,'') description, qty, price FROM planner.portal_additional_costs WHERE po = ANY($1) ORDER BY id`),
+      ids.length ? pool.query(`SELECT id, po, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at FROM planner.supplier_notes WHERE supplier_id = ANY($1) ORDER BY created_at`, [ids]).then(r => r.rows) : Promise.resolve([]),
+      ids.length ? pool.query(`SELECT id, po, kind, value, status, attachment_id, to_char(submitted_at,'YYYY-MM-DD') submitted_at FROM planner.supplier_submissions WHERE supplier_id = ANY($1) ORDER BY submitted_at DESC`, [ids]).then(r => r.rows) : Promise.resolve([]),
+      pool.query(`SELECT sku, coalesce(product_name,'') product_name FROM planner.products WHERE coalesce(sku,'')<>'' AND (${names.map((_, i) => `coalesce(supplier_multiple_all,'') ILIKE '%'||$${i + 1}||'%'`).join(' OR ') || 'false'}) ORDER BY sku`, names).then(r => r.rows).catch(() => []),
+    ]);
+    const by = (rows, k) => rows.reduce((m, r) => { (m[r[k]] = m[r[k]] || []).push(r); return m; }, {});
+    const lcByPo = {}; lcs.forEach(x => { (lcByPo[x.po] = lcByPo[x.po] || {})[x.sku] = x; });
+    const xdByPo = {}; xds.forEach(x => { (xdByPo[x.po] = xdByPo[x.po] || {})[x.sku] = x.qty; });
+    res.json({ suppliers: names, pos, lines: by(lines, 'po'), lineCosts: lcByPo, crossdock: xdByPo,
+      additionalCosts: by(adds, 'po'), notes: by(notes, 'po'), submissions: by(subs, 'po'), supplierSkus: supSkus });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Label/barcode assets for the portal (static fonts/logos — same files as the admin asset route).
+app.get('/api/portal/asset/:name', (req, res) => {
+  const files = { grs: ['grs-logo.png', 'image/png'], db: ['db-logo.png', 'image/png'],
+    'gotham-book': ['gotham-book.ttf', 'font/ttf'], 'gotham-bold': ['gotham-bold.ttf', 'font/ttf'] };
+  const a = files[req.params.name]; if (!a) return res.status(404).end();
+  try { res.setHeader('content-type', a[1]); res.setHeader('cache-control', 'public, max-age=86400');
+    res.end(readFileSync(new URL('./supply/assets/' + a[0], import.meta.url))); }
+  catch (e) { res.status(404).end(); }
+});
+// Swatch image proxy — session-gated so it isn't an open proxy.
+app.get('/api/portal/img', portalAuth, async (req, res) => {
+  try {
+    const u = String(req.query.url || ''); if (!/^https?:\/\//i.test(u)) return res.status(400).end();
+    const r = await fetch(u); if (!r.ok) return res.status(502).end();
+    res.setHeader('content-type', r.headers.get('content-type') || 'image/jpeg');
+    res.setHeader('cache-control', 'public, max-age=86400');
+    res.end(Buffer.from(await r.arrayBuffer()));
+  } catch (e) { res.status(500).end(); }
+});
+// Barcode label rows — only for SKUs that appear on THIS supplier's POs (intersect with owned SKUs).
+app.get('/api/portal/label-data', portalAuth, async (req, res) => {
+  try {
+    const { po, prod, skus } = req.query, names = req.portal.suppliers;
+    let requested = [];
+    if (skus) requested = String(skus).split(',').map(s => s.trim()).filter(Boolean);
+    else if (po) { if (!await portalOwnsPO(req, po)) return res.status(403).json({ error: 'not your PO' });
+      requested = (await pool.query(`SELECT sku FROM planner.purchase_order_lines WHERE po=$1`, [po])).rows.map(r => r.sku); }
+    else if (prod) requested = (await pool.query(`SELECT DISTINCT l.sku FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po WHERE p.prod_no=$1 AND p.supplier_name = ANY($2)`, [prod, names])).rows.map(r => r.sku);
+    else return res.status(400).json({ error: 'po/prod/skus required' });
+    if (!requested.length) return res.json([]);
+    const owned = new Set((await pool.query(`SELECT DISTINCT l.sku FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po WHERE p.supplier_name = ANY($1)`, [names])).rows.map(r => r.sku));
+    const finalSkus = requested.filter(s => owned.has(s));
+    if (!finalSkus.length) return res.json([]);
+    const rows = (await pool.query(`
+      SELECT sl.sku, sl.barcode_sku_name, sl.barcode_carton_name, sl.barcode_inner_name,
+        sl.size, coalesce(p.size_short, sl.size_short, '') size_short, sl.category, sl.carton_qty,
+        sl.product_barcode, sl.carton_barcode, sl.inner_barcode, sl.grs_material, sl.swatch_url,
+        sl.uk_carton_l, sl.uk_carton_w, sl.uk_carton_h, sl.uk_carton_wt,
+        coalesce(p.supplier_multiple_all,'') supplier_multiple, p.uk_rt, p.us_rt, p.eu_rt, coalesce(p.product_name,'') product_name
+      FROM planner.sku_labels sl LEFT JOIN planner.products p ON p.sku=sl.sku
+      WHERE sl.sku = ANY($1) AND coalesce(sl.variant_type,'') NOT ILIKE 'set'
+        AND coalesce(sl.product_barcode, sl.carton_barcode, sl.inner_barcode) IS NOT NULL
+      ORDER BY sl.sku`, [finalSkus])).rows;
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Session-scoped write-backs (mirror the admin /api/supply/* logic, ownership-checked, submitted_by = session email)
+const portalDeny = (res) => res.status(403).json({ error: 'that PO is not on your account' });
+app.post('/api/portal/crossdock-qty', portalAuth, async (req, res) => {
+  const b = req.body || {}; if (!b.po || !b.sku) return res.status(400).json({ error: 'po and sku required' });
+  if (!await portalOwnsPO(req, b.po)) return portalDeny(res);
+  try {
+    const qty = (b.qty === '' || b.qty == null) ? null : Number(b.qty);
+    await pool.query(`INSERT INTO planner.crossdock_shipments (po,sku,qty,submitted_by,submitted_at) VALUES ($1,$2,$3,$4,now())
+      ON CONFLICT (po,sku) DO UPDATE SET qty=excluded.qty, submitted_by=excluded.submitted_by, submitted_at=now()`, [b.po, b.sku, qty, req.portal.email]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/portal/line-cost', portalAuth, async (req, res) => {
+  const b = req.body || {}; if (!b.po || !b.sku) return res.status(400).json({ error: 'po and sku required' });
+  if (!await portalOwnsPO(req, b.po)) return portalDeny(res);
+  try {
+    const num = v => (v === '' || v == null) ? null : Number(v);
+    await pool.query(`INSERT INTO planner.portal_line_costs (po,sku,actual_cost,amended_qty,is_added,submitted_by,submitted_at) VALUES ($1,$2,$3,$4,$5,$6,now())
+      ON CONFLICT (po,sku) DO UPDATE SET actual_cost=excluded.actual_cost, amended_qty=excluded.amended_qty,
+        is_added=planner.portal_line_costs.is_added OR excluded.is_added, submitted_by=excluded.submitted_by, submitted_at=now()`,
+      [b.po, b.sku, num(b.actual_cost), num(b.amended_qty), !!b.is_added, req.portal.email]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/portal/line-remove', portalAuth, async (req, res) => {
+  const b = req.body || {}; if (!b.po || !b.sku) return res.status(400).json({ error: 'po and sku required' });
+  if (!await portalOwnsPO(req, b.po)) return portalDeny(res);
+  try { await pool.query(`DELETE FROM planner.portal_line_costs WHERE po=$1 AND sku=$2 AND is_added=true`, [b.po, b.sku]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/portal/additional-cost', portalAuth, async (req, res) => {
+  const b = req.body || {}; const num = v => (v === '' || v == null) ? null : Number(v);
+  try {
+    if (b.id) {
+      const r = (await pool.query(`SELECT po FROM planner.portal_additional_costs WHERE id=$1`, [b.id])).rows[0];
+      if (!r || !await portalOwnsPO(req, r.po)) return portalDeny(res);
+      await pool.query(`UPDATE planner.portal_additional_costs SET description=$2, qty=$3, price=$4, submitted_by=$5, submitted_at=now() WHERE id=$1`,
+        [b.id, b.description || '', num(b.qty), num(b.price), req.portal.email]);
+      return res.json({ ok: true, id: b.id });
+    }
+    if (!b.po) return res.status(400).json({ error: 'po required' });
+    if (!await portalOwnsPO(req, b.po)) return portalDeny(res);
+    const r = await pool.query(`INSERT INTO planner.portal_additional_costs (po,description,qty,price,submitted_by) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+      [b.po, b.description || '', num(b.qty), num(b.price), req.portal.email]);
+    res.json({ ok: true, id: r.rows[0].id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/portal/additional-cost-remove', portalAuth, async (req, res) => {
+  const id = req.body && req.body.id; if (!id) return res.status(400).json({ error: 'id required' });
+  try {
+    const r = (await pool.query(`SELECT po FROM planner.portal_additional_costs WHERE id=$1`, [id])).rows[0];
+    if (!r || !await portalOwnsPO(req, r.po)) return portalDeny(res);
+    await pool.query(`DELETE FROM planner.portal_additional_costs WHERE id=$1`, [id]); res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/portal/note', portalAuth, async (req, res) => {
+  const b = req.body || {}; if (!b.po || !String(b.body || '').trim()) return res.status(400).json({ error: 'po and body required' });
+  if (!await portalOwnsPO(req, b.po)) return portalDeny(res);
+  try {
+    const sid = req.portal.supplierIds[0] || null;
+    await pool.query(`INSERT INTO planner.supplier_notes (po,supplier_id,author_email,author_kind,body) VALUES ($1,$2,$3,'supplier',$4)`,
+      [b.po, sid, req.portal.email, String(b.body).trim()]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/portal/upload', portalAuth, async (req, res) => {
+  const b = req.body || {}; if (!b.po || !b.data_base64) return res.status(400).json({ error: 'po and data_base64 required' });
+  if (!await portalOwnsPO(req, b.po)) return portalDeny(res);
+  try {
+    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    const sid = req.portal.supplierIds[0] || null;
+    const r = await pool.query(`INSERT INTO planner.portal_attachments (po,supplier_id,filename,mime,byte_size,data,uploaded_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+      [b.po, sid, b.filename || 'invoice', b.mime || 'application/octet-stream', buf.length, buf, req.portal.email]);
+    res.json({ id: r.rows[0].id, byte_size: buf.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/portal/submit', portalAuth, async (req, res) => {
+  const b = req.body || {}; if (!b.po) return res.status(400).json({ error: 'po required' });
+  if (!await portalOwnsPO(req, b.po)) return portalDeny(res);
+  const sid = req.portal.supplierIds[0] || null, by = req.portal.email, out = { staged: [], applied: [] };
+  try {
+    const stage = async (kind, value, attId) => {
+      if (value == null || value === '') return;
+      await pool.query(`UPDATE planner.supplier_submissions SET status='superseded' WHERE po=$1 AND kind=$2 AND status='pending'`, [b.po, kind]);
+      await pool.query(`INSERT INTO planner.supplier_submissions (supplier_id,po,kind,value,attachment_id,status,submitted_by) VALUES ($1,$2,$3,$4,$5,'pending',$6)`,
+        [sid, b.po, kind, String(value), attId || null, by]);
+      out.staged.push(kind);
+    };
+    await stage('completion_date', b.completion_date);
+    await stage('invoice_value', b.invoice_value, b.invoice_attachment_id);
+    if ((b.tracking != null && b.tracking !== '') || (b.carrier != null && b.carrier !== '')) {
+      const sh = (await pool.query(`SELECT shipment_ref FROM planner.purchase_orders WHERE po=$1`, [b.po])).rows[0];
+      const ref = b.shipment_ref || (sh && sh.shipment_ref);
+      if (ref) {
+        const sets = [], vals = []; let i = 1;
+        if (b.tracking != null && b.tracking !== '') { sets.push(`carrier_ref=$${i++}`); vals.push(b.tracking); }
+        if (b.carrier != null && b.carrier !== '') { sets.push(`carrier=$${i++}`); vals.push(b.carrier); }
+        vals.push(ref);
+        await pool.query(`UPDATE planner.shipments SET ${sets.join(',')}, updated_at=now() WHERE shipment_ref=$${i}`, vals);
+        await pool.query(`INSERT INTO planner.supplier_submissions (supplier_id,po,shipment_ref,kind,value,status,submitted_by,applied_by,applied_at) VALUES ($1,$2,$3,'tracking',$4,'applied',$5,$5,now())`,
+          [sid, b.po, ref, JSON.stringify({ tracking: b.tracking || null, carrier: b.carrier || null }), by]);
+        out.applied.push('tracking → ' + ref);
+      } else {
+        await pool.query(`INSERT INTO planner.supplier_submissions (supplier_id,po,kind,value,status,submitted_by,note) VALUES ($1,$2,'tracking',$3,'pending',$4,'no shipment assigned yet')`,
+          [sid, b.po, JSON.stringify({ tracking: b.tracking || null, carrier: b.carrier || null }), by]);
+        out.staged.push('tracking');
+      }
+    }
+    res.json(out);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Local dev: listen. On Vercel (serverless) the platform imports `app` instead.

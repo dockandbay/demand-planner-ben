@@ -6,3 +6,10 @@ node_modules
 # Raw production-data dump — local re-seed convenience only; never commit business data.
 planner_seed.sql
 *_seed.sql
+
+# Handoff data package (deliverable for Diviyaj — contains a full data dump; not repo content)
+handoff/
+handoff.zip
+.claude/
+server.log
+/log
