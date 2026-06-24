@@ -522,24 +522,6 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
   <div id="insights-list" style="padding:8px"></div>
 </div>
 
-<!-- BI Suggestions Panel -->
-<div id="bi-panel" style="position:fixed;top:0;right:-560px;width:540px;height:100vh;background:#fff;box-shadow:-4px 0 16px rgba(0,0,0,0.15);transition:right 0.25s ease;z-index:1000;overflow-y:auto;font-family:-apple-system,sans-serif">
-  <div style="position:sticky;top:0;background:#fff;padding:12px 16px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:8px;z-index:10">
-    <div style="font-size:14px;font-weight:700">🔍 BI Rule Suggestions</div>
-    <div id="bi-status" style="font-size:10px;color:#888;flex:1"></div>
-    <button id="bi-close" style="background:none;border:none;font-size:18px;cursor:pointer;color:#888">✕</button>
-  </div>
-  <div style="padding:6px 16px;border-bottom:1px solid #f3f4f6;display:flex;gap:4px;align-items:center">
-    <button class="bi-tab pill catpill active" data-tab="open">Open <span id="bi-ct-open" style="opacity:0.6">0</span></button>
-    <button class="bi-tab pill catpill" data-tab="added">Added <span id="bi-ct-added" style="opacity:0.6">0</span></button>
-    <button class="bi-tab pill catpill" data-tab="dismissed">Dismissed <span id="bi-ct-dismissed" style="opacity:0.6">0</span></button>
-    <button id="bi-rescan" style="margin-left:auto;font-size:9px;padding:3px 8px;background:#fef3c7;color:#92400e;border:1px solid #fbbf24;border-radius:3px;cursor:pointer;white-space:nowrap">↻ Re-scan patterns</button>
-  </div>
-  <div style="padding:8px 16px;border-bottom:1px solid #f3f4f6;font-size:10px;color:#666;line-height:1.5">
-    These are <strong>non-standard patterns</strong> I detected in your historical data — one-off spikes (likely promos / campaigns) and one-off dips (likely stockouts or supply issues). Recurring seasonal peaks aren't included because the forecast model already captures them via the LY-anchor. Review each, then click <strong>Add to Airtable</strong> to save it to your <code style="background:#f3f4f6;padding:1px 3px;border-radius:2px">business_intelligence</code> table.
-  </div>
-  <div id="bi-list" style="padding:8px"></div>
-</div>
 
 <!-- Forecast Narrative Panel -->
 <div id="narrative-panel" style="position:fixed;top:0;right:-560px;width:520px;height:100vh;background:#fff;box-shadow:-4px 0 16px rgba(0,0,0,0.15);transition:right 0.25s ease;z-index:1001;overflow-y:auto;font-family:-apple-system,sans-serif">
@@ -553,46 +535,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
   <div id="narrative-body" style="padding:14px 16px;font-size:12px;line-height:1.6;color:#1a1a1a"></div>
 </div>
 
-<!-- Anomaly Alerts Panel -->
-<div id="alerts-panel" style="position:fixed;top:0;right:-560px;width:540px;height:100vh;background:#fff;box-shadow:-4px 0 16px rgba(0,0,0,0.15);transition:right 0.25s ease;z-index:1000;overflow-y:auto;font-family:-apple-system,sans-serif">
-  <div style="position:sticky;top:0;background:#fff;padding:12px 16px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:8px;z-index:10">
-    <div style="font-size:14px;font-weight:700">🚨 Anomaly Alerts</div>
-    <div id="alerts-status" style="font-size:10px;color:#888;flex:1"></div>
-    <button id="alerts-rescan" style="font-size:9px;padding:3px 8px;background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;border-radius:3px;cursor:pointer">↻ Re-scan</button>
-    <button id="alerts-close" style="background:none;border:none;font-size:18px;cursor:pointer;color:#888">✕</button>
-  </div>
-  <div style="padding:6px 16px;border-bottom:1px solid #f3f4f6;display:flex;gap:4px;align-items:center;flex-wrap:wrap">
-    <button class="alert-sev pill catpill active" data-sev="all">All <span id="al-ct-all" style="opacity:0.6">0</span></button>
-    <button class="alert-sev pill catpill" data-sev="high" style="background:#fee2e2">🔴 High <span id="al-ct-high" style="opacity:0.6">0</span></button>
-    <button class="alert-sev pill catpill" data-sev="medium" style="background:#ffedd5">🟠 Medium <span id="al-ct-medium" style="opacity:0.6">0</span></button>
-    <button class="alert-sev pill catpill" data-sev="low" style="background:#fef3c7">🟡 Low <span id="al-ct-low" style="opacity:0.6">0</span></button>
-    <button class="alert-sev pill catpill" data-sev="dismissed">Dismissed <span id="al-ct-dismissed" style="opacity:0.6">0</span></button>
-  </div>
-  <div style="padding:8px 16px;border-bottom:1px solid #f3f4f6;font-size:10px;color:#666;line-height:1.5">
-    These alerts flag <strong>data integrity issues</strong> (e.g., unexpected zeros, frozen values), <strong>unusual recent behaviour</strong>, and <strong>trend signals</strong> worth investigating. Dismiss after reviewing.
-  </div>
-  <div id="alerts-list" style="padding:8px"></div>
-</div>
 
-<!-- Weather Outlook Panel -->
-<div id="weather-panel" style="position:fixed;top:0;right:-660px;width:640px;height:100vh;background:#fff;box-shadow:-4px 0 16px rgba(0,0,0,0.15);transition:right 0.25s ease;z-index:1000;overflow-y:auto;font-family:-apple-system,sans-serif">
-  <div style="position:sticky;top:0;background:#fff;padding:12px 16px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:8px;z-index:10">
-    <div style="font-size:14px;font-weight:700">🌤 Weather Outlook</div>
-    <div id="weather-status" style="font-size:10px;color:#888;flex:1"></div>
-    <button id="weather-refresh" style="font-size:9px;padding:3px 8px;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:3px;cursor:pointer">↻ Refresh</button>
-    <button id="weather-close" style="background:none;border:none;font-size:18px;cursor:pointer;color:#888">✕</button>
-  </div>
-  <div style="padding:6px 16px;border-bottom:1px solid #f3f4f6;display:flex;gap:4px;align-items:center;flex-wrap:wrap">
-    <button class="weather-tab pill catpill active" data-market="UK">🇬🇧 UK</button>
-    <button class="weather-tab pill catpill" data-market="US">🇺🇸 US</button>
-    <button class="weather-tab pill catpill" data-market="EU">🇪🇺 EU</button>
-    <button class="weather-tab pill catpill" data-market="AU">🇦🇺 AU</button>
-  </div>
-  <div style="padding:8px 16px;border-bottom:1px solid #f3f4f6;font-size:10px;color:#666;line-height:1.5">
-    Long-range outlook for population-weighted cities per market. Powered by <a href="https://open-meteo.com" target="_blank" style="color:#1e40af">Open-Meteo</a>. Data cached locally and refreshed daily.
-  </div>
-  <div id="weather-body" style="padding:8px"></div>
-</div>
 
 <div class="wrap" id="app">
 <div style="display:flex;flex-direction:column;gap:4px;padding-bottom:8px;border-bottom:1px solid #e8e8e8;margin-bottom:6px">
@@ -605,9 +548,6 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
     <button id="ctx-help-btn" title="Help for this page" onclick="openCtxHelp(event)" style="margin-right:2px;width:24px;height:24px;border-radius:50%;border:1px solid #6b7280;background:#4b5563;color:#fff;cursor:pointer;font-weight:700;font-size:13px;line-height:1;flex:0 0 auto">?</button>
     <div class="tool-bar" id="plan-tools" role="group" aria-label="AI tools">
       <button class="tool-btn" id="insights-btn" title="Get AI insights"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 1 4 12.7c-.7.5-1 1.3-1 2.1V18H9v-1.2c0-.8-.3-1.6-1-2.1A7 7 0 0 1 12 2z"/></svg>AI Insights</button>
-      <button class="tool-btn" id="bi-btn" title="BI suggestions auto-discovered from data"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>Suggestions<span class="tool-badge bg-amber" id="bi-badge" style="display:none">0</span></button>
-      <button class="tool-btn" id="alerts-btn" title="Anomaly alerts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.86 1.82 18a2 2 0 0 0 1.7 3h16.96a2 2 0 0 0 1.7-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>Alerts<span class="tool-badge bg-red" id="alerts-badge" style="display:none">0</span></button>
-      <button class="tool-btn" id="weather-btn" title="Weather outlook + correlated sales impact"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 1 0-1.6-8.7A7 7 0 1 0 4 16.5"/></svg>Weather</button>
       <span class="tool-divider"></span>
       <button class="tool-btn" id="rf" title="Refresh data"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>Refresh</button>
       <button class="tool-btn primary" id="sv" title="Save forecasts to Airtable"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Save Forecasts</button>
@@ -6702,12 +6642,24 @@ function daAplayer(){
   return out;
 }
 // Run all client detectors, applying saved lifecycle state from the supplied map.
-var DA_DETECTORS={fcTrend:true,anomalies:true,aplayer:true}; // feature flags for client-side detectors
+// Data-integrity / anomaly ALERTS (merged in from the old top toolbar). Reuses scanAnomalyAlerts()
+// (negative values, zero gaps, frozen values, extreme spikes). Land in ACTIONS; resolve via Done/Dismiss.
+function daAlerts(){
+  var scan; try{ scan=scanAnomalyAlerts(); }catch(e){ return []; }
+  return scan.map(function(a){
+    var sev=a.sev==='high'?'high':a.sev==='medium'?'amber':'info';
+    return { key:'Alert|'+a.id, type:(a.title||'Data alert'), cat:a.subcat, market:a.country,
+      severity:sev, detail:(a.text||'')+(a.action?' — '+a.action:''), impact:0, status:'open', snooze_until:null,
+      jump:{sub:a.subcat,co:a.country,ch:a.channel} };
+  });
+}
+var DA_DETECTORS={fcTrend:true,anomalies:true,aplayer:true,alerts:true}; // feature flags for client-side detectors
 function daClientDetectors(stateMap){
   var items=[];
   if(DA_DETECTORS.fcTrend){ try{ items=items.concat(daForecastTrend()); }catch(e){ if(window.console)console.warn('forecast-vs-trend detector failed',e); } }
   if(DA_DETECTORS.anomalies){ try{ items=items.concat(daAnomalies()); }catch(e){ if(window.console)console.warn('anomalies detector failed',e); } }
   if(DA_DETECTORS.aplayer){ try{ items=items.concat(daAplayer()); }catch(e){ if(window.console)console.warn('a-player detector failed',e); } }
+  if(DA_DETECTORS.alerts){ try{ items=items.concat(daAlerts()); }catch(e){ if(window.console)console.warn('alerts detector failed',e); } }
   items.forEach(function(x){ var s=stateMap&&stateMap[x.key]; if(s){ x.status=s.status; x.snooze_until=s.snooze_until||null; } else { x.status='open'; x.snooze_until=null; } });
   return items;
 }
@@ -6732,12 +6684,21 @@ function renderDemandActionsView(body){
   function draw(all){
     window._daAll=all;
     if(_da.sec==='weather'){
+      // Weather Outlook (moved here from the old top toolbar). Open-Meteo data, cached in Airtable
+      // weather_cache; renderWeatherPanel() targets #weather-body / #weather-status (now rendered here).
+      if(typeof WEATHER_TAB==='undefined'||!WEATHER_TAB)WEATHER_TAB='UK';
       body.innerHTML=secNav()
-        +'<div style="border:1px dashed #cbd5e1;border-radius:10px;padding:28px 22px;text-align:center;color:#475569;background:#f8fafc">'
-        +'<div style="font-size:30px;margin-bottom:6px">⛅</div>'
-        +'<div style="font-weight:700;font-size:14px;margin-bottom:4px">Weather insights — coming soon</div>'
-        +'<div style="font-size:12px;color:#64748b;max-width:520px;margin:0 auto;line-height:1.55">Will flag demand swings tied to weather events — heat waves lifting cooling/beach lines, long wet spells dampening outdoor categories — per market. Needs a weather feed and a product→weather-sensitivity map (wired by Diviyaj at go-live).</div></div>';
-      wireSecNav(); return;
+        +'<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'
+        +[['UK','🇬🇧 UK'],['US','🇺🇸 US'],['EU','🇪🇺 EU'],['AU','🇦🇺 AU']].map(function(m){return '<button class="weather-tab pill catpill'+(WEATHER_TAB===m[0]?' active':'')+'" data-market="'+m[0]+'">'+m[1]+'</button>';}).join('')
+        +'<span id="weather-status" style="font-size:10px;color:#888;margin-left:8px"></span>'
+        +'<button id="weather-refresh" class="pill catpill" style="margin-left:auto;font-size:10px;cursor:pointer">↻ Refresh</button></div>'
+        +'<div style="font-size:11px;color:#888;margin-bottom:8px;line-height:1.5">Long-range outlook for population-weighted cities per market. Powered by Open-Meteo, cached in Airtable (refreshed daily).</div>'
+        +'<div id="weather-body" style="min-height:120px"></div>';
+      wireSecNav();
+      body.querySelectorAll('.weather-tab').forEach(function(b){ b.onclick=function(){ WEATHER_TAB=b.dataset.market; body.querySelectorAll('.weather-tab').forEach(function(x){x.classList.remove('active');}); b.classList.add('active'); renderWeatherPanel(); }; });
+      var _wr=document.getElementById('weather-refresh'); if(_wr)_wr.onclick=function(){ WX_RAW=null; WEATHER_DATA={}; renderWeatherPanel(); };
+      try{ renderWeatherPanel(); }catch(e){ var wb=document.getElementById('weather-body'); if(wb)wb.innerHTML='<div style="padding:18px;color:#b91c1c;font-size:12px">Weather data unavailable: '+tHesc(String(e&&e.message||e))+'</div>'; }
+      return;
     }
     var MK=[['all','All'],['UK','UK'],['US','US'],['EU','EU'],['AU','AU']];
     // restrict to the active section first; everything below (cats, counts, cards) works within it
@@ -8352,240 +8313,6 @@ function scanBIPatterns(){
   return sugs;
 }
 
-async function loadBIState(){
-  try{
-    var added=await window.storage.get('bi_added');
-    var dismissed=await window.storage.get('bi_dismissed');
-    return {
-      added:added?JSON.parse(added.value):{},
-      dismissed:dismissed?JSON.parse(dismissed.value):{}
-    };
-  }catch(e){return {added:{},dismissed:{}};}
-}
-
-async function saveBIState(state){
-  try{
-    await window.storage.set('bi_added',JSON.stringify(state.added),false);
-    await window.storage.set('bi_dismissed',JSON.stringify(state.dismissed),false);
-  }catch(e){}
-}
-
-async function renderBIPanel(){
-  var state=await loadBIState();
-  var listEl=document.getElementById('bi-list');
-  var statusEl=document.getElementById('bi-status');
-  if(!BI_SUGGESTIONS.length){
-    listEl.innerHTML='<div style="padding:24px 12px;text-align:center;color:#888;font-size:11px">Click "Re-scan patterns" to find candidates.</div>';
-    statusEl.textContent='';
-    return;
-  }
-  var open=BI_SUGGESTIONS.filter(function(s){return !state.added[s.id]&&!state.dismissed[s.id];});
-  var added=BI_SUGGESTIONS.filter(function(s){return state.added[s.id];});
-  var dismissed=BI_SUGGESTIONS.filter(function(s){return state.dismissed[s.id];});
-  document.getElementById('bi-ct-open').textContent=open.length;
-  document.getElementById('bi-ct-added').textContent=added.length;
-  document.getElementById('bi-ct-dismissed').textContent=dismissed.length;
-  statusEl.textContent=BI_SUGGESTIONS.length+' patterns found';
-  var view=BI_FILTER.tab==='open'?open:BI_FILTER.tab==='added'?added:dismissed;
-  // Prune selection to currently-visible open IDs
-  if(BI_FILTER.tab==='open'){
-    var visibleIds=new Set(open.map(function(s){return s.id;}));
-    var pruned=new Set();
-    BI_SELECTED.forEach(function(id){if(visibleIds.has(id))pruned.add(id);});
-    BI_SELECTED=pruned;
-  } else {
-    BI_SELECTED=new Set();
-  }
-  if(!view.length){
-    listEl.innerHTML='<div style="padding:24px 12px;text-align:center;color:#888;font-size:11px">No suggestions in this tab.</div>';
-    return;
-  }
-  var typeColors={one_off_spike:'#fef3c7',one_off_dip:'#fee2e2'};
-  var typeLabels={one_off_spike:'One-off Spike',one_off_dip:'One-off Dip'};
-  var typeBorders={one_off_spike:'#f59e0b',one_off_dip:'#ef4444'};
-  // Bulk controls only on Open tab
-  var allSelected=BI_FILTER.tab==='open'&&open.length>0&&BI_SELECTED.size===open.length;
-  var anySelected=BI_SELECTED.size>0;
-  var bulkBar=BI_FILTER.tab==='open'?
-    '<div id="bi-bulk" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;margin-bottom:8px;font-size:11px">'
-      +'<label style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none">'
-        +'<input type="checkbox" id="bi-select-all"'+(allSelected?' checked':'')+(BI_APPLYING?' disabled':'')+' style="margin:0;cursor:pointer">'
-        +'<span style="color:#374151;font-weight:600">Select all</span>'
-      +'</label>'
-      +'<span style="color:#888">\u2022</span>'
-      +'<span style="color:#666">'+BI_SELECTED.size+' of '+open.length+' selected</span>'
-      +'<button id="bi-apply-selected" '+(anySelected&&!BI_APPLYING?'':'disabled')+' style="margin-left:auto;font-size:10px;padding:5px 12px;background:'+(anySelected&&!BI_APPLYING?'#fbbf24':'#e5e7eb')+';color:'+(anySelected&&!BI_APPLYING?'#1a1a1a':'#9ca3af')+';border:none;border-radius:3px;cursor:'+(anySelected&&!BI_APPLYING?'pointer':'not-allowed')+';font-weight:600">'+(BI_APPLYING?'Applying\u2026':'+ Apply '+BI_SELECTED.size+' selected')+'</button>'
-    +'</div>':'';
-  listEl.innerHTML=bulkBar+view.map(function(s){
-    var addedFlag=state.added[s.id]?'<span style="font-size:9px;color:#15803d;background:#dcfce7;padding:1px 4px;border-radius:2px;margin-left:4px">\u2713 Added</span>':'';
-    var dismissedFlag=state.dismissed[s.id]?'<span style="font-size:9px;color:#666;background:#f3f4f6;padding:1px 4px;border-radius:2px;margin-left:4px">Dismissed</span>':'';
-    var locScope=(s.countries.join('/'))+' \u00b7 '+(s.channels.join('/'));
-    var monthYear=s.month?(monthName(s.month)+(s.year?' '+s.year:'')):'';
-    var actionBtns=BI_FILTER.tab==='open'?
-      ('<button class="bi-add" data-id="'+s.id+'" '+(BI_APPLYING?'disabled':'')+' style="font-size:9px;padding:4px 8px;background:#fbbf24;color:#1a1a1a;border:none;border-radius:3px;cursor:'+(BI_APPLYING?'not-allowed':'pointer')+';font-weight:600;opacity:'+(BI_APPLYING?'0.5':'1')+'">+ Add to Airtable</button>'
-      +'<button class="bi-dismiss" data-id="'+s.id+'" '+(BI_APPLYING?'disabled':'')+' style="font-size:9px;padding:4px 8px;background:#f3f4f6;color:#666;border:1px solid #d1d5db;border-radius:3px;cursor:'+(BI_APPLYING?'not-allowed':'pointer')+';opacity:'+(BI_APPLYING?'0.5':'1')+'">Dismiss</button>'):
-      BI_FILTER.tab==='dismissed'?
-      ('<button class="bi-undismiss" data-id="'+s.id+'" style="font-size:9px;padding:4px 8px;background:#f3f4f6;color:#666;border:1px solid #d1d5db;border-radius:3px;cursor:pointer">Undismiss</button>'):
-      '';
-    var checkboxHtml=BI_FILTER.tab==='open'?
-      '<input type="checkbox" class="bi-check" data-id="'+s.id+'"'+(BI_SELECTED.has(s.id)?' checked':'')+(BI_APPLYING?' disabled':'')+' style="margin:0;flex-shrink:0;cursor:'+(BI_APPLYING?'not-allowed':'pointer')+'">':'';
-    return '<div style="background:'+typeColors[s.type]+';border-left:3px solid '+typeBorders[s.type]+';padding:10px;border-radius:4px;margin-bottom:8px;font-size:11px;display:flex;gap:8px">'
-      +(checkboxHtml?'<div style="display:flex;align-items:flex-start;padding-top:2px">'+checkboxHtml+'</div>':'')
-      +'<div style="flex:1;min-width:0">'
-        +'<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap">'
-          +'<span style="font-size:9px;font-weight:700;color:#1a1a1a;background:'+typeBorders[s.type]+'40;padding:1px 5px;border-radius:2px">'+typeLabels[s.type]+'</span>'
-          +'<span style="font-size:9px;color:#666">'+locScope+(monthYear?' \u00b7 '+monthYear:'')+'</span>'
-          +addedFlag+dismissedFlag
-          +'<span style="margin-left:auto;font-size:9px;color:#888">Conf: '+Math.round(s.confidence*100)+'%</span>'
-        +'</div>'
-        +'<div style="font-weight:600;font-size:11px;margin-bottom:2px">'+s.subcat+'</div>'
-        +'<div style="color:#374151;font-size:11px;margin-bottom:6px;line-height:1.4">'+s.text+'</div>'
-        +'<div style="display:flex;gap:4px;justify-content:flex-end">'+actionBtns+'</div>'
-      +'</div>'
-    +'</div>';
-  }).join('');
-
-  // Wire checkbox handlers
-  listEl.querySelectorAll('.bi-check').forEach(function(cb){
-    cb.onchange=function(){
-      var id=cb.dataset.id;
-      if(cb.checked)BI_SELECTED.add(id);
-      else BI_SELECTED.delete(id);
-      renderBIPanel(); // re-render to update select-all + button states
-    };
-  });
-  // Select all toggle
-  var selAll=document.getElementById('bi-select-all');
-  if(selAll)selAll.onchange=function(){
-    if(selAll.checked)open.forEach(function(s){BI_SELECTED.add(s.id);});
-    else BI_SELECTED.clear();
-    renderBIPanel();
-  };
-  // Bulk apply button
-  var bulkBtn=document.getElementById('bi-apply-selected');
-  if(bulkBtn&&!BI_APPLYING)bulkBtn.onclick=async function(){
-    if(!BI_SELECTED.size)return;
-    BI_APPLYING=true;
-    var ids=Array.from(BI_SELECTED);
-    var statusBar=document.getElementById('bi-status');
-    var failed=[];
-    for(var i=0;i<ids.length;i++){
-      var id=ids[i];
-      var sug=BI_SUGGESTIONS.find(function(x){return x.id===id;});
-      if(!sug)continue;
-      statusBar.textContent='Applying '+(i+1)+' of '+ids.length+'\u2026';
-      var ok=await addBIRuleToAirtable(sug);
-      if(ok){
-        var st=await loadBIState();
-        st.added[id]=Date.now();
-        await saveBIState(st);
-        BI_SELECTED.delete(id);
-      } else {
-        failed.push(id);
-      }
-    }
-    BI_APPLYING=false;
-    statusBar.textContent=BI_SUGGESTIONS.length+' patterns found'+(failed.length?'  \u2014  '+failed.length+' failed':'');
-    renderBIPanel();
-  };
-  // Wire button handlers
-  listEl.querySelectorAll('.bi-add').forEach(function(b){
-    b.onclick=async function(){
-      if(BI_APPLYING)return;
-      var id=b.dataset.id;
-      var sug=BI_SUGGESTIONS.find(function(x){return x.id===id;});
-      if(!sug)return;
-      b.disabled=true;b.textContent='\u2026 saving';
-      var ok=await addBIRuleToAirtable(sug);
-      if(ok){
-        var st=await loadBIState();
-        st.added[id]=Date.now();
-        await saveBIState(st);
-        renderBIPanel();
-      } else {
-        b.disabled=false;b.textContent='+ Add to Airtable';
-        b.style.background='#ef4444';b.style.color='#fff';
-        b.textContent='Failed \u2014 retry';
-      }
-    };
-  });
-  listEl.querySelectorAll('.bi-dismiss').forEach(function(b){
-    b.onclick=async function(){
-      if(BI_APPLYING)return;
-      var st=await loadBIState();st.dismissed[b.dataset.id]=Date.now();
-      await saveBIState(st);renderBIPanel();
-    };
-  });
-  listEl.querySelectorAll('.bi-undismiss').forEach(function(b){
-    b.onclick=async function(){
-      var st=await loadBIState();delete st.dismissed[b.dataset.id];
-      await saveBIState(st);renderBIPanel();
-    };
-  });
-}
-
-// Call Anthropic API with Airtable MCP to create a record in business_intelligence
-async function addBIRuleToAirtable(sug){
-  try{
-    var prompt='Create a new record in the Airtable business_intelligence table.\n\n'
-      +'Base ID: appT5GoPc8M3iEDdh\n'
-      +'Steps:\n'
-      +'1. Use list_tables_for_base to find the business_intelligence table ID and the subcategories table ID.\n'
-      +'2. Check the business_intelligence table schema for a field named "added_by". If it does NOT exist, create it using create_field with type singleLineText and name "added_by". If it already exists, note its field ID.\n'
-      +'3. Use list_records_for_table on subcategories to find the record ID for subcategory named "'+sug.subcat+'".\n'
-      +'4. Create a new record in business_intelligence with these fields:\n'
-      +'   - subcategory (fldJtLBv6W2nGl9wL): linked record array using the ID found in step 3\n'
-      +'   - country (fldahrB7APw4T4A5e): multiselect '+JSON.stringify(sug.countries)+'\n'
-      +'   - channel (fldVaugUHNFTQvE2q): multiselect '+JSON.stringify(sug.channels)+'\n'
-      +(sug.month?'   - month (flddbEbKUBmEFdznJ): '+sug.month+'\n':'')
-      +(sug.year?'   - year (fldd6TQCMDJM5NySD): '+sug.year+'\n':'')
-      +'   - text (fldnp1AdprXMcZoB3): "'+sug.text.replace(/"/g,'\\"')+'"\n'
-      +'   - active (fld1Wz9udH3oBVwMe): true\n'
-      +'   - added_by (field from step 2): "claude"\n\n'
-      +'Use typecast:true so multiselect names work as plain strings. After the create call returns, reply with exactly "DONE recXXXXXXXXXXXXX" where recXXX is the new record ID, or "ERROR <message>" if it failed.';
-    var resp=await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        model:'claude-sonnet-4-20250514',max_tokens:3000,
-        messages:[{role:'user',content:prompt}],
-        mcp_servers:[{type:'url',url:'https://mcp.airtable.com/mcp',name:'airtable-mcp'}]
-      })
-    });
-    var data=await resp.json();
-    var blocks=data.content||[];
-    var createdId=null;
-    blocks.forEach(function(b){
-      if(b.type==='mcp_tool_result'){
-        var raw=(b.content||[]).map(function(x){return x.text||'';}).join(' ');
-        var m=raw.match(/"id"\s*:\s*"(rec[A-Za-z0-9]{14,})"/);
-        if(m&&!createdId)createdId=m[1];
-      }
-    });
-    var text=blocks.filter(function(c){return c.type==='text';}).map(function(c){return c.text;}).join(' ');
-    var doneMatch=text.match(/DONE\s+(rec[A-Za-z0-9]{14,})/);
-    if(doneMatch&&!createdId)createdId=doneMatch[1];
-    var isError=text.indexOf('ERROR')>=0;
-    console.log('Airtable add: response="'+text.slice(0,200)+'" createdId='+createdId);
-    return !!createdId&&!isError;
-  }catch(e){console.error('Add to Airtable failed:',e);return false;}
-}
-
-function openBIPanel(){
-  document.getElementById('bi-panel').style.right='0';
-  if(!BI_SUGGESTIONS.length){
-    document.getElementById('bi-status').textContent='Scanning...';
-    setTimeout(function(){
-      BI_SUGGESTIONS=scanBIPatterns();
-      renderBIPanel();
-    },50);
-  } else {
-    renderBIPanel();
-  }
-}
-function closeBIPanel(){document.getElementById('bi-panel').style.right='-560px';}
-
-document.getElementById('bi-btn').onclick=function(){openBIPanel();};
-document.getElementById('bi-close').onclick=function(){closeBIPanel();};
 
 // ─── Toolbar badge counts (refresh on load + manual rescan) ───
 function refreshToolbarBadges(){
@@ -8627,22 +8354,6 @@ function refreshToolbarBadges(){
 // Refresh badges after initial render
 setTimeout(refreshToolbarBadges,500);
 
-document.getElementById('bi-rescan').onclick=function(){
-  document.getElementById('bi-status').textContent='Scanning...';
-  setTimeout(function(){
-    BI_SUGGESTIONS=scanBIPatterns();
-    renderBIPanel();
-    refreshToolbarBadges();
-  },50);
-};
-document.querySelectorAll('.bi-tab').forEach(function(b){
-  b.onclick=function(){
-    BI_FILTER.tab=b.dataset.tab;
-    document.querySelectorAll('.bi-tab').forEach(function(x){x.classList.remove('active');});
-    b.classList.add('active');
-    renderBIPanel();
-  };
-});
 
 // ─── Forecast Narrative ───
 var NARRATIVE_CURRENT=null; // {s,co,ch,fym} of active cell
@@ -8992,93 +8703,6 @@ async function saveAlertState(st){
   try{await window.storage.set('alerts_dismissed',JSON.stringify(st.dismissed),false);}catch(e){}
 }
 
-async function renderAlertsPanel(){
-  var state=await loadAlertState();
-  var listEl=document.getElementById('alerts-list');
-  var statusEl=document.getElementById('alerts-status');
-  if(!ALERTS.length){
-    listEl.innerHTML='<div style="padding:24px 12px;text-align:center;color:#888;font-size:11px">Click "Re-scan" to detect anomalies.</div>';
-    statusEl.textContent='';
-    return;
-  }
-  var open=ALERTS.filter(function(a){return !state.dismissed[a.id];});
-  var dismissed=ALERTS.filter(function(a){return state.dismissed[a.id];});
-  var high=open.filter(function(a){return a.sev==='high';});
-  var med=open.filter(function(a){return a.sev==='medium';});
-  var low=open.filter(function(a){return a.sev==='low';});
-  document.getElementById('al-ct-all').textContent=open.length;
-  document.getElementById('al-ct-high').textContent=high.length;
-  document.getElementById('al-ct-medium').textContent=med.length;
-  document.getElementById('al-ct-low').textContent=low.length;
-  document.getElementById('al-ct-dismissed').textContent=dismissed.length;
-  statusEl.textContent=ALERTS.length+' alerts found';
-  var view;
-  if(ALERT_FILTER.sev==='all')view=open;
-  else if(ALERT_FILTER.sev==='dismissed')view=dismissed;
-  else view=open.filter(function(a){return a.sev===ALERT_FILTER.sev;});
-  if(!view.length){
-    listEl.innerHTML='<div style="padding:24px 12px;text-align:center;color:#888;font-size:11px">No alerts in this category.</div>';
-    return;
-  }
-  var sevColors={high:{bg:'#fee2e2',border:'#ef4444',label:'HIGH',badge:'\ud83d\udd34'},
-    medium:{bg:'#ffedd5',border:'#f59e0b',label:'MEDIUM',badge:'\ud83d\udfe0'},
-    low:{bg:'#fef3c7',border:'#eab308',label:'LOW',badge:'\ud83d\udfe1'}};
-  listEl.innerHTML=view.map(function(a){
-    var c=sevColors[a.sev];
-    var isDismissed=state.dismissed[a.id];
-    var actionBtns=isDismissed?
-      ('<button class="al-undismiss" data-id="'+a.id+'" style="font-size:9px;padding:4px 8px;background:#f3f4f6;color:#666;border:1px solid #d1d5db;border-radius:3px;cursor:pointer">Undismiss</button>'):
-      ('<button class="al-dismiss" data-id="'+a.id+'" style="font-size:9px;padding:4px 8px;background:#f3f4f6;color:#666;border:1px solid #d1d5db;border-radius:3px;cursor:pointer">Acknowledge</button>');
-    return '<div style="background:'+c.bg+';border-left:3px solid '+c.border+';padding:10px;border-radius:4px;margin-bottom:8px;font-size:11px">'
-      +'<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap">'
-        +'<span style="font-size:9px;font-weight:700;color:#1a1a1a;background:'+c.border+'40;padding:1px 5px;border-radius:2px">'+c.badge+' '+c.label+'</span>'
-        +'<span style="font-size:9px;color:#666">'+a.country+' \u00b7 '+a.channel+(a.fym?' \u00b7 '+a.fym:'')+'</span>'
-        +(isDismissed?'<span style="font-size:9px;color:#666;background:#f3f4f6;padding:1px 4px;border-radius:2px;margin-left:4px">Acknowledged</span>':'')
-      +'</div>'
-      +'<div style="font-weight:600;font-size:11px;margin-bottom:2px">'+a.subcat+' \u2014 '+a.title+'</div>'
-      +'<div style="color:#374151;font-size:11px;margin-bottom:4px;line-height:1.4">'+a.text+'</div>'
-      +(a.action?'<div style="color:#78350f;font-size:10px;font-style:italic;margin-bottom:6px;line-height:1.4"><strong>Suggested action:</strong> '+a.action+'</div>':'')
-      +'<div style="display:flex;gap:4px;justify-content:flex-end">'+actionBtns+'</div>'
-    +'</div>';
-  }).join('');
-
-  listEl.querySelectorAll('.al-dismiss').forEach(function(b){
-    b.onclick=async function(){
-      var st=await loadAlertState();st.dismissed[b.dataset.id]=Date.now();
-      await saveAlertState(st);renderAlertsPanel();
-    };
-  });
-  listEl.querySelectorAll('.al-undismiss').forEach(function(b){
-    b.onclick=async function(){
-      var st=await loadAlertState();delete st.dismissed[b.dataset.id];
-      await saveAlertState(st);renderAlertsPanel();
-    };
-  });
-}
-
-function openAlertsPanel(){
-  document.getElementById('alerts-panel').style.right='0';
-  if(!ALERTS.length){
-    document.getElementById('alerts-status').textContent='Scanning\u2026';
-    setTimeout(function(){ALERTS=scanAnomalyAlerts();renderAlertsPanel();},50);
-  } else renderAlertsPanel();
-}
-function closeAlertsPanel(){document.getElementById('alerts-panel').style.right='-560px';}
-
-document.getElementById('alerts-btn').onclick=function(){openAlertsPanel();};
-document.getElementById('alerts-close').onclick=function(){closeAlertsPanel();};
-document.getElementById('alerts-rescan').onclick=function(){
-  document.getElementById('alerts-status').textContent='Scanning\u2026';
-  setTimeout(function(){ALERTS=scanAnomalyAlerts();renderAlertsPanel();refreshToolbarBadges();},50);
-};
-document.querySelectorAll('.alert-sev').forEach(function(b){
-  b.onclick=function(){
-    ALERT_FILTER.sev=b.dataset.sev;
-    document.querySelectorAll('.alert-sev').forEach(function(x){x.classList.remove('active');});
-    b.classList.add('active');
-    renderAlertsPanel();
-  };
-});
 
 // ─── Weather Outlook (runtime fetch via Anthropic API + Airtable MCP) ───
 // City definitions are the source of truth — weather_cache table is populated by
@@ -9422,9 +9046,6 @@ async function renderWeatherPanel(){
         +'</div>'
         +'<div style="font-size:10px;color:#374151;margin-bottom:4px">'+ev.description+'</div>'
         +'<div style="margin-bottom:6px">'+impactBadges+'</div>'
-        +'<div style="display:flex;gap:4px;justify-content:flex-end">'
-          +'<button class="wx-add-bi" data-evid="'+ev.id+'" style="font-size:9px;padding:4px 8px;background:#fbbf24;color:#1a1a1a;border:none;border-radius:3px;cursor:pointer;font-weight:600">+ Add as BI rule</button>'
-        +'</div>'
       +'</div>';
     });
   }
@@ -9493,29 +9114,6 @@ async function renderWeatherPanel(){
   body.innerHTML=html;
 
   // Wire "Add as BI rule" buttons
-  body.querySelectorAll('.wx-add-bi').forEach(function(b){
-    b.onclick=async function(){
-      var evid=b.dataset.evid;
-      var ev=(WEATHER_DATA[WEATHER_TAB].historicalEvents||[]).find(function(x){return x.id===evid;});
-      if(!ev)return;
-      b.disabled=true;b.textContent='\u2026 saving';
-      // Construct BI suggestion + push to Airtable using same flow
-      var bestImpact=ev.impacts[0]; // strongest impacted subcat
-      var ruleText=ev.year+' '+ev.monthName+' \u2014 '+ev.description+' Correlated sales impact: '
-        +ev.impacts.slice(0,3).map(function(im){return im.subcat+' '+(im.pct>=0?'+':'')+Math.round(im.pct*100)+'%';}).join(', ')+'.';
-      var sug={
-        subcat:bestImpact.subcat,
-        countries:[WEATHER_TAB],
-        channels:['ALL'],
-        month:ev.month,
-        year:ev.year,
-        text:ruleText
-      };
-      var ok=await addBIRuleToAirtable(sug);
-      if(ok){b.textContent='\u2713 Added';b.style.background='#dcfce7';b.style.color='#15803d';}
-      else{b.disabled=false;b.textContent='Failed \u2014 retry';b.style.background='#ef4444';b.style.color='#fff';}
-    };
-  });
 }
 
 // Pearson correlation
@@ -9696,30 +9294,6 @@ function detectHistoricalWeatherEvents(market){
   return events;
 }
 
-function openWeatherPanel(){
-  document.getElementById('weather-panel').style.right='0';
-  renderWeatherPanel();
-}
-function closeWeatherPanel(){document.getElementById('weather-panel').style.right='-660px';}
-
-document.getElementById('weather-btn').onclick=function(){openWeatherPanel();};
-document.getElementById('weather-close').onclick=function(){closeWeatherPanel();};
-document.getElementById('weather-refresh').onclick=function(){
-  // Re-pull weather_cache via MCP (clears the per-session cache and re-fetches).
-  // For truly fresh data in weather_cache itself, the fetchWeatherCache.gs Apps Script
-  // runs on a 12-hour schedule.
-  WX_RAW=null;
-  WEATHER_DATA={};
-  renderWeatherPanel();
-};
-document.querySelectorAll('.weather-tab').forEach(function(b){
-  b.onclick=function(){
-    WEATHER_TAB=b.dataset.market;
-    document.querySelectorAll('.weather-tab').forEach(function(x){x.classList.remove('active');});
-    b.classList.add('active');
-    renderWeatherPanel();
-  };
-});
 
 
 document.getElementById('ins-refresh').onclick=function(){getInsights();};

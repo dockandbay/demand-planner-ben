@@ -4,6 +4,29 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.303 - Consolidate toolbar into nav: Weather→Actions▸Weather, Alerts→Actions, remove BI Suggestions
+
+- **Weather** moved out of the top toolbar into **DEMAND ▸ Actions ▸ Weather** (was a stub). Renders the
+  Open-Meteo outlook inline (market tabs UK/US/EU/AU + `#weather-body` via the kept `renderWeatherPanel`,
+  `loadWeatherForMarket`, `fetchWeatherCacheViaMCP`). **Prod needs the Airtable MCP connector + the
+  `weather_cache` table populated** (fetchWeatherCache.gs); without it the tab shows a "data not loaded" card.
+  Removed the standalone `#weather-panel` + `weather-btn`.
+- **Alerts** (data-integrity anomalies: negative values, zero gaps, frozen values, extreme spikes) merged
+  into **Actions ▸ Actions** as cards via a new `daAlerts()` detector (reuses `scanAnomalyAlerts`); resolve
+  via Done/Snooze/Dismiss like any action. Removed the standalone `#alerts-panel` + `alerts-btn`.
+  ⚠ On the sandbox this surfaces **~111 alerts** (mostly medium "extreme spike") — see note below.
+- **BI Suggestions removed completely**: `bi-btn` + badge, `#bi-panel`, and the panel functions
+  (`renderBIPanel`/`openBIPanel`/`loadBIState`/`saveBIState`/`addBIRuleToAirtable` + the bi-rescan/.bi-tab
+  bindings + the weather panel's "Add as BI rule" button). **Kept `scanBIPatterns`** — it's reused by the
+  Actions ▸ Anomalies-to-review detector. `refreshToolbarBadges` left in place (null-guarded; harmless).
+- Toolbar is now **AI Insights · Refresh · Save Forecasts · Help**.
+- Verified: no JS errors at load, Plan grid renders, toolbar trimmed, alerts/weather relocated.
+- Files: `artifact_v16.7.html`. No schema/env changes.
+
+> **Note on alerts volume:** all alerts merge in (faithful to "merge ALERTS"), severity-sorted (high first)
+> and filterable/dismissable. If 111 is too noisy, capping `daAlerts()` to high-severity (the genuine
+> data-integrity issues) is a one-line change — say the word.
+
 ## v20.302 - Fix: restore the DEMAND AI-tools toolbar (regression — Save Forecasts was unreachable)
 
 - The nav rework had relocated the AI-tools toolbar (`#plan-tools`: **AI Insights, Suggestions, Alerts,
