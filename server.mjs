@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.303';
+const APP_VERSION = 'v20.304';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -973,7 +973,9 @@ app.get('/api/supply/:section', async (req, res) => {
             -- main-row figures: assigned amount if set, else the term calc
             start_paid start_dep,
             CASE WHEN val>0 THEN coalesce(pay_completion_assigned, completion_calc) END completion,
-            CASE WHEN val>0 THEN round(val - start_paid - coalesce(pay_completion_assigned, completion_calc),2) END balance_owing,
+            -- balance includes any credit_amount (a charge added to the invoice, settled in the balance)
+            CASE WHEN val>0 THEN round(val + coalesce(credit_amount,0) - start_paid - coalesce(pay_completion_assigned, completion_calc),2) END balance_owing,
+            round(coalesce(credit_amount,0),2) credit_amount,
             -- PLAN-panel detail: per-milestone calc, override amount, override date
             start_calc, round(pay_start_deposit_assigned,2) start_assigned, to_char(pay_start_deposit_date,'YYYY-MM-DD') start_date,
             completion_calc, round(pay_completion_assigned,2) completion_assigned, to_char(pay_completion_date,'YYYY-MM-DD') completion_date,
@@ -1013,7 +1015,7 @@ app.get('/api/supply/:section', async (req, res) => {
                (start_production < current_date AND pay_start_deposit_assigned IS NULL AND coalesce(deposit_ref,'')='' AND start_calc > 0)
                OR (eff_prod_end < current_date AND pay_completion_assigned IS NULL AND completion_calc > 0)
                OR (bal_due_date < current_date AND pay_balance_1_amount IS NULL
-                   AND round(val - start_paid - coalesce(pay_completion_assigned, completion_calc),2) > 0.01))) payment_overdue,
+                   AND round(val + coalesce(credit_amount,0) - start_paid - coalesce(pay_completion_assigned, completion_calc),2) > 0.01))) payment_overdue,
             (coalesce(status,'') ILIKE '%production%') is_production,
             -- pallet estimate (Σ line qty ÷ sku pallet_qty); 20 pallets = one container
             (SELECT round(sum(l.qty::numeric/NULLIF(sl.pallet_qty,0)),1) FROM planner.purchase_order_lines l
@@ -2279,6 +2281,7 @@ app.post('/api/supply/po/:po', (req, res) =>
     pay_completion_assigned: 'numeric', pay_completion_date: 'date',
     pay_balance_1_amount: 'numeric', pay_balance_1_date: 'date',
     pay_balance_2_amount: 'numeric', pay_balance_2_date: 'date',
+    credit_amount: 'numeric',
   }, req.body));
 // Supplier edit — sets the name AND resolves supplier_id so payment terms / production lead apply.
 app.post('/api/supply/po/:po/supplier', async (req, res) => {

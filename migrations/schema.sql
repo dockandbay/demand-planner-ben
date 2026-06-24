@@ -1198,7 +1198,8 @@ CREATE TABLE planner.purchase_orders (
     crossdock_skus text,
     client_po_ref text,
     dispatch_order_ref text,
-    final_delivery_address text
+    final_delivery_address text,
+    credit_amount numeric(14,2)
 );
 
 

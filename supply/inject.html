@@ -816,7 +816,7 @@
     var n=function(v){return Number(v)||0;};
     var today=new Date().toISOString().slice(0,10);
     var paid=n(r.start_assigned)+n(r.completion_assigned)+n(r.balance_1_amount)+n(r.balance_2_amount);
-    var totalDue=Math.round((n(r.value_used)-paid)*100)/100;
+    var totalDue=Math.round((n(r.value_used)+n(r.credit_amount)-paid)*100)/100;
     var startUnpaid=(r.start_assigned==null && !r.deposit_ref), compUnpaid=(r.completion_assigned==null);
     var open=(r.progress!=='complete');   // completed POs don't raise payment/freight actions (not actionable noise)
     var pay=[];
@@ -850,7 +850,7 @@
     // total still owed = value − everything paid so far (lets you pay the remainder however you like)
     var n=function(v){return Number(v)||0;};
     var paid=n(r.start_assigned)+n(r.completion_assigned)+n(r.balance_1_amount)+n(r.balance_2_amount);
-    var totalDue=Math.round((n(r.value_used)-paid)*100)/100;
+    var totalDue=Math.round((n(r.value_used)+n(r.credit_amount)-paid)*100)/100;
     var today=new Date().toISOString().slice(0,10);
     // a due milestone is OVERDUE when its date has passed and it hasn't been paid/covered.
     // owed===false means there's nothing to pay for this milestone (e.g. 0% deposit) → no due date, no warning.
@@ -908,9 +908,15 @@
       +'<td class="l">'+payIn(ep,'pay_completion_date',r.completion_date,true,!(n(r.completion_assigned)>0))+'</td>'
       +'<td class="l"><span class="mut tiny">— direct cash</span></td>'
       +dueCell(r.completion_due,compUnpaid,'',compOwed)+likelyCell('comp:'+r.po,compUnpaid&&compOwed,r.likely_completion)+'<td class="l">'+(compOwed?payBadge(cStat[0],cStat[1]):payBadge('—','bg-neutral'))+'</td>');
+    // Credit amount — a charge added to the invoice, settled within the balance (editable here)
+    h+=tr('<td class="l"><b>Credit amount</b> <span class="mut tiny">added to invoice · paid in the balance</span></td>'
+      +'<td>'+money(r.credit_amount)+'</td>'
+      +'<td class="l">'+payIn(ep,'credit_amount',r.credit_amount)+'</td>'
+      +'<td class="l"><span class="mut">—</span></td><td class="l"><span class="mut">—</span></td>'
+      +'<td class="l"><span class="mut">—</span></td><td class="l"><span class="mut">—</span></td><td class="l"><span class="mut">—</span></td>');
     var balnote = r.credit_days!=null?'<span class="mut tiny">'+(r.credit_type==='on_shipment'?'ship':'clearance')+' +'+r.credit_days+'cr</span>':'';
     h+=tr('<td class="l"><b>Balance'+(partial?' 1':'')+'</b> <span class="mut tiny">'+esc(r.balance_pct)+'% · remainder</span></td>'
-      +'<td>'+money(r.balance_owing)+' <span class="mut tiny">owing</span></td>'
+      +'<td>'+money(r.balance_owing)+' <span class="mut tiny">owing'+(n(r.credit_amount)>0?' · incl. '+money(r.credit_amount)+' credit':'')+'</span></td>'
       +'<td class="l">'+payIn(ep,'pay_balance_1_amount',r.balance_1_amount)+'</td>'
       +'<td class="l">'+payIn(ep,'pay_balance_1_date',r.balance_1_date,true,!(n(r.balance_1_amount)>0))+'</td>'
       +'<td class="l"><span class="mut">—</span></td>'

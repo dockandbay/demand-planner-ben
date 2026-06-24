@@ -4,6 +4,25 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.304 - SUPPLY: credit_amount on POs + refreshed CSV import templates
+
+- **New `purchase_orders.credit_amount`** (migration `063` + baseline `schema.sql`): a decimal credit /
+  charge **added to the supplier invoice** that we must pay, **settled in the balance**. The PO calc now does
+  `balance_owing = value + credit_amount − start_deposit − completion`; it flows into "total amount due" and
+  the cash-flow balance line. Editable in **PO ▸ PLAN ▸ payment plan** (new **Credit amount** row); the
+  Balance row shows "incl. £X credit". Added to the PO-edit allowlist. (Distinct from the supplier
+  `credit_fee` financing %.)
+- **CSV import templates refreshed** for fields added since they were first made:
+  - `purchase_orders.csv` → + `client, client_po_ref, sales_order_ref, dispatch_order_ref,
+    final_delivery_address, client_requirements, crossdock_skus, batch_date, supplier_ship_date,
+    credit_fee_assigned, credit_amount`.
+  - `purchase_order_lines.csv` → + `erp_cost`.
+  - `README.md` column docs updated.
+- **Diviyaj:** run migration `063_po_credit_amount.sql` on prod; use the refreshed templates in
+  `supply_import_templates/` for the migration.
+- Files: `server.mjs`, `supply/inject.html`, `migrations/063_po_credit_amount.sql`, `migrations/schema.sql`,
+  `supply_import_templates/*`. Verified: setting a credit raised the balance by exactly that amount.
+
 ## v20.303 - Consolidate toolbar into nav: Weather→Actions▸Weather, Alerts→Actions, remove BI Suggestions
 
 - **Weather** moved out of the top toolbar into **DEMAND ▸ Actions ▸ Weather** (was a stub). Renders the

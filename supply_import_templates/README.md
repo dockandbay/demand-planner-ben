@@ -61,10 +61,21 @@ The PO header. **Key = `po`** (unique, your PO reference, e.g. `PO-56UKLX1`).
 | erp_po |  | The Cin7/Fulfil PO number. |
 | flexport_reference |  | The Flexport `flex_id` if linked directly. |
 | deposit_ref |  | Links to `deposits.reference` (the deposit pool this PO draws on). |
+| client |  | Client name (client / B2B orders). |
+| client_po_ref |  | The client's PO reference. |
+| sales_order_ref |  | The client's sales-order reference. |
+| dispatch_order_ref |  | Dispatch / delivery-order reference. |
+| final_delivery_address |  | Final delivery address (client / direct orders). |
+| client_requirements |  | Free-text client requirements / instructions. |
+| crossdock_skus |  | Comma-separated SKUs to crossdock for this PO (optional). |
+| batch_date |  | Date for the buying batch (optional). |
 | start_production | ✔* | The production start date — the anchor for all calculated dates. |
 | end_production_overide |  | Manual production-end date; blank = start + supplier production days. |
+| supplier_ship_date |  | Actual / agreed supplier ship date (overrides the calculated ship date). |
 | order_value_estimation |  | Estimated PO value (USD) if there are no order-plan lines yet. Lines override this. |
 | supplier_invoice_total |  | Final supplier invoice (USD). Trumps the estimate for every payment / landed-cost calc. |
+| credit_amount |  | Decimal credit / charge **added to the invoice** that we must pay; settled in the **balance** (balance = value + credit − deposit − completion). |
+| credit_fee_assigned |  | Supplier credit / financing fee (USD), if any. |
 | start_deposit_pct_override |  | Override supplier's start-deposit %. Blank = use supplier term. |
 | completion_pct_override |  | Override supplier's completion %. Blank = use supplier term. |
 | pay_start_deposit_assigned |  | Actual start-deposit paid (USD). |
@@ -91,6 +102,7 @@ One row per PO × SKU. **Key = (`po`, `sku`)**; `id`/`po_sku` auto-generate.
 | cost_price |  | Unit cost (USD). PO value = Σ(qty × cost_price) across lines. |
 | carton_qty |  | Units per carton (for the full-carton check). |
 | erp_qty |  | Qty as it stands in the ERP. Lets the tool flag drift (planned vs ERP). Set = qty if already in ERP. |
+| erp_cost |  | Unit cost as it stands in the ERP. Lets the tool flag cost drift (planned vs ERP). Set = cost_price if already in ERP. |
 | po_status |  | Optional per-line status mirror. |
 
 ## shipments.csv
