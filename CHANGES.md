@@ -4,6 +4,21 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.302 - Fix: restore the DEMAND AI-tools toolbar (regression — Save Forecasts was unreachable)
+
+- The nav rework had relocated the AI-tools toolbar (`#plan-tools`: **AI Insights, Suggestions, Alerts,
+  Weather, Refresh, Save Forecasts**) + **Help** into the DEMAND sub-nav row. But `renderDemandTabs`
+  rebuilds that row with `innerHTML = …` on every render, which **destroyed** the relocated toolbar after
+  the first re-render (the post-load CAL_EVENTS render) — so the whole toolbar, **including Save
+  Forecasts**, vanished from the DOM.
+- Fix: **park `#plan-tools`/`#help-btn` back to the main tab row before the innerHTML wipe, then
+  re-append** — the same park/restore already protecting the status note/version. The toolbar now
+  survives re-renders and tab switches (verified 7/7 buttons after the re-render and a tab round-trip).
+- This is **Phase 1** (regression fix). Phase 2 (roll the toolbar into the navigation: Weather →
+  Actions ▸ Weather using the existing Open-Meteo / Airtable `weather_cache` source; Alerts + BI
+  Suggestions → Actions/Insights; Save/Refresh/Help as persistent nav buttons) is still to scope.
+- Files: `artifact_v16.7.html`. No schema/env changes.
+
 ## v20.301 - DEMAND: version + "last updated" note on the nav-2 row (all pages)
 
 - The **last-updated/version** label (`#ver` — "Data extract last updated … vX") now sits on the
