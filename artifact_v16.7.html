@@ -6379,10 +6379,11 @@ function render(){
   document.querySelectorAll('.view-toggle').forEach(function(b){
     b.classList.toggle('active',b.dataset.view===VIEW_MODE);
   });
-  // Swap the top-right tool-bar: demand-planner tools on PLAN/REPORT, buy actions on BUY/FBA.
+  // Swap the top-right tool-bar: demand-planner tools (AI insights / Save Forecasts) on PLAN only,
+  // buy actions on BUY/FBA. REPORTS (exec) gets neither — the AI toolbar belongs to planning.
   var _isBuyLike=(VIEW_MODE==='buy'||VIEW_MODE==='fba');
   var _pt=document.getElementById('plan-tools'),_bt=document.getElementById('buy-tools');
-  if(_pt)_pt.style.display=_isBuyLike?'none':'';
+  if(_pt)_pt.style.display=(VIEW_MODE==='planning')?'':'none';
   if(_bt)_bt.style.display=_isBuyLike?'':'none';  // BP.render() then hides it on the FBA view specifically
   // leaving DEMAND — return the relocated tools to the main bar, then tear down the sub-tab bar + body
   if(VIEW_MODE!=='planning'){

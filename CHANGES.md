@@ -4,6 +4,28 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.305 - Bugs/quick improvements: REPORTS toolbar, unpaid-payments filter, Payments Due view
+
+Three UI changes — no migrations, no new env vars, no server data-shape changes.
+
+1. **REPORTS toolbar removed.** The top-right AI toolbar (AI Insights / Save Forecasts, `#plan-tools`)
+   now shows only on the DEMAND ▸ **planning** view. It previously also showed on REPORTS (`exec`),
+   where it doesn't belong. Single-line change in `artifact_v16.7.html` `render()`.
+2. **SUPPLY ▸ Purchase Orders — "⚠ Unpaid payments" filter pill.** Broader than the existing
+   "Payment overdue" (which is date-past only): fires when a payment is *owed now* regardless of due date —
+   either the supplier invoice total is confirmed and a balance is still owing, or a starting deposit is due
+   (term deposit not assigned and not covered by a deposit pool). Excludes complete POs.
+   Added to `PO_ACTCOND` + `ACTP` in `supply/inject.html` (client-side; reuses existing PO row fields).
+3. **SUPPLY ▸ Productions ▸ "Payments Due" view.** New sub-tab: one worklist of every payment owed —
+   PO completion + balance milestones (from the PO calc) and the deposit register + other payments —
+   **grouped by supplier, ordered by due date**. Each row shows amount + due date with inline
+   assigned-amount and payment-date fields, so payments can be seen *and recorded* in one place.
+   **Excludes the per-PO starting deposit** (funded via the deposit register, which appears as "Deposit").
+   Overdue rows (due date past, unpaid) highlighted red. Status/supplier filters. Fully client-side:
+   reads `/api/supply/purchase-orders` + `/api/supply/deposits`, writes via the existing
+   `/api/supply/po/:po` (pay_completion_assigned/date, pay_balance_1_amount/date) and
+   `/api/supply/deposit/:id` (amount, date_paid) endpoints — no new server code.
+
 ## v20.304 - SUPPLY: credit_amount on POs + refreshed CSV import templates
 
 - **New `purchase_orders.credit_amount`** (migration `063` + baseline `schema.sql`): a decimal credit /

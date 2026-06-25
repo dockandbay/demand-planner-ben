@@ -618,12 +618,20 @@
     });
   }
   // PO action-item quick filters (toggle, AND together and with the progress filter)
-  var PO_ACTCOND={payment_overdue:function(r){return r.payment_overdue;},late:function(r){return r.is_late;},
+  var PO_ACTCOND={payment_overdue:function(r){return r.payment_overdue;},
+    // unpaid payments: broader than "overdue" (which is date-past only) — a payment is OWED now, regardless
+    // of due date: either the invoice total is confirmed and a balance is still owing, or a starting deposit
+    // is due (term deposit not yet assigned and not covered by a deposit pool). Excludes complete POs.
+    unpaid_payment:function(r){ if(r.progress==='complete')return false;
+      var startDepDue=Number(r.start_calc)>0.009 && r.start_assigned==null && !r.deposit_ref;
+      var invoiceUnpaid=r.is_final && Number(r.balance_owing)>0.01;
+      return startDepDue || invoiceUnpaid; },
+    late:function(r){return r.is_late;},
     unassigned_shipment:function(r){return r.unassigned_shipment;},production:function(r){return r.is_production;}};
   var _poState=null;   // PURCHASE ORDERS filter state — persisted across edit-triggered reloads so the filter survives
   function poInner(rows,c){
     var FILTERS=[['in_progress','In progress'],['future','Future'],['complete','Complete'],['all','All']];
-    var ACTP=[['payment_overdue','⚠ Payment overdue'],['late','⚠ Late'],['unassigned_shipment','⚠ Unassigned shipment'],['production','Production']];
+    var ACTP=[['payment_overdue','⚠ Payment overdue'],['unpaid_payment','⚠ Unpaid payments'],['late','⚠ Late'],['unassigned_shipment','⚠ Unassigned shipment'],['production','Production']];
     var CTRYP=[['UK','UK'],['US','US'],['AU','AU'],['EU','EU'],['CA','CA'],['DIRECT','Direct']];
     var GRP=[['none','None'],['production','Production'],['shipment','Master shipment']];
     // persist filters across edit reloads; reset to a clean view only when navigating to a specific PO
@@ -1299,7 +1307,7 @@
 
   // ---- PRODUCTIONS (POs grouped by PROD#; aggregated SKU view) ----
   var prodTab='list', _prodList=[];
-  var PROD_SUBS=[['list','Productions'],['deposits','Deposits'],['other','Other Payments'],['payreport','Payments Report']];
+  var PROD_SUBS=[['list','Productions'],['deposits','Deposits'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report']];
   function renderProductions(rows){ var c=document.getElementById('supply-content');
     c.innerHTML=annot('productions')
       +'<div id="prod-subtabs">'+PROD_SUBS.map(function(t){return '<span class="rtab'+(prodTab===t[0]?' active':'')+'" data-pt="'+t[0]+'">'+t[1]+'</span>';}).join('')+'</div>'
@@ -1312,6 +1320,7 @@
         .then(function(res){ renderDepRegister(b, (res[0]||[]).filter(function(d){return d.is_deposit;}), res[1]||[]); })
         .catch(function(e){b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>';}); return; }
     if(prodTab==='other'){ renderOtherPayments(b); return; }
+    if(prodTab==='paydue'){ renderPaymentsDue(b); return; }
     if(prodTab==='payreport'){ renderPaymentsReport(b); return; }
     prodListView(b, rows); }
   function prodListView(b, rows){
@@ -1886,6 +1895,7 @@
   var payTab='pay'; // 'pay' (register) | 'other' (sundry)
   var PAY_FROM='', PAY_TO='';   // Payments report date filter (typed YYYY / YYYY-MM / YYYY-MM-DD)
   var OTH_STATE={status:'all',supplier:''};   // Other Payments filters (persist across re-renders)
+  var PDUE_STATE={status:'outstanding',supplier:''};   // Payments Due filters (persist across re-renders)
   // ---- CASH FLOW: itemised payment lines, flat list, filterable by month ----
   var CF_TYPES=['Deposit','Completion','Balance','Freight','Import duty','Import tax'];
   var CF_BG={Deposit:'bg-blue',Completion:'bg-amber',Balance:'bg-green',Freight:'bg-neutral','Import duty':'bg-red','Import tax':'bg-red'};
@@ -2028,6 +2038,63 @@
       document.getElementById('oth-new').onclick=function(){ shipPost('/api/supply/deposit-create',{is_deposit:false},function(){ renderOtherPayments(b); }); };
       draw(); })
       .catch(function(e){b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>';}); }
+  // ---- PAYMENTS DUE — one worklist of every payment owed, grouped by supplier, ordered by due date.
+  // Sources: PO completion + balance milestones (from the PO calc) and the deposit register + other payments.
+  // EXCLUDES the per-PO starting deposit (that is funded via the deposit register, shown here as "Deposit").
+  // Each row shows the amount + due date and has inline assigned-amount + payment-date fields, so payments
+  // can be seen AND recorded in one place. Overdue (due date past, not yet paid) is highlighted red.
+  var PDUE_BG={Completion:'bg-amber',Balance:'bg-green',Deposit:'bg-blue',Other:'bg-neutral'};
+  function renderPaymentsDue(b){ b.innerHTML='<div class="count">Loading…</div>';
+    Promise.all([fetch('/api/supply/purchase-orders').then(function(r){return r.json();}),
+                 fetch('/api/supply/deposits').then(function(r){return r.json();})])
+      .then(function(res){ buildPaymentsDue(b, res[0]||[], res[1]||[]); })
+      .catch(function(e){b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>';}); }
+  function buildPaymentsDue(b, pos, deps){
+    var today=new Date().toISOString().slice(0,10);
+    var rows=[];
+    (pos||[]).forEach(function(p){ if(p.progress==='complete')return; var ep='/api/supply/po/'+encodeURIComponent(p.po);
+      if(Number(p.completion_calc)>0.009) rows.push({sup:p.supplier_name||'',type:'Completion',ref:p.po,due_amt:Number(p.completion_calc),due:p.completion_due||'',ep:ep,amt_field:'pay_completion_assigned',amt_val:p.completion_assigned,dt_field:'pay_completion_date',dt_val:p.completion_date,po:true});
+      if(Number(p.balance_owing)>0.009) rows.push({sup:p.supplier_name||'',type:'Balance',ref:p.po,due_amt:Number(p.balance_owing),due:p.balance_due||'',ep:ep,amt_field:'pay_balance_1_amount',amt_val:p.balance_1_amount,dt_field:'pay_balance_1_date',dt_val:p.balance_1_date,po:true}); });
+    (deps||[]).forEach(function(d){ if(d.status==='closed')return;
+      if(!(Number(d.amount)>0.009) && !d.date_paid && !d.date_due) return;   // skip empty stubs
+      rows.push({sup:d.supplier_name||'',type:d.is_deposit?'Deposit':'Other',ref:d.reference||d.description||('#'+d.id),due_amt:Number(d.amount)||0,due:d.date_due||'',ep:'/api/supply/deposit/'+encodeURIComponent(d.id),amt_field:'amount',amt_val:d.amount,dt_field:'date_paid',dt_val:d.date_paid,po:false}); });
+    rows.forEach(function(r){ r.paid=!!r.dt_val; r.overdue=!r.paid && !!r.due && r.due<today; });
+    var sups=Array.from(new Set(rows.map(function(r){return r.sup;}))).filter(Boolean).sort();
+    function pass(r){ if(PDUE_STATE.status==='outstanding'&&r.paid)return false;
+      if(PDUE_STATE.status==='overdue'&&!r.overdue)return false;
+      if(PDUE_STATE.status==='paid'&&!r.paid)return false;
+      if(PDUE_STATE.supplier&&r.sup!==PDUE_STATE.supplier)return false; return true; }
+    b.innerHTML=lookupDatalists()+'<div class="bar" id="pdue-bar"></div><div id="pdue-wrap"></div>';
+    function draw(){ var f=rows.filter(pass);
+      // group by supplier; order groups by earliest due date, rows within a group by due date
+      var groups={}; f.forEach(function(r){ (groups[r.sup||'—']=groups[r.sup||'—']||[]).push(r); });
+      var order=Object.keys(groups).sort(function(a,c){ var ea=groups[a].map(function(r){return r.due||'9999';}).sort()[0], ec=groups[c].map(function(r){return r.due||'9999';}).sort()[0]; return ea.localeCompare(ec)||a.localeCompare(c); });
+      var grand=0;
+      var stP=[['outstanding','Outstanding'],['overdue','Overdue'],['paid','Paid'],['all','All']].map(function(o){return '<span class="pill'+(PDUE_STATE.status===o[0]?' active':'')+'" data-ps="'+o[0]+'">'+o[1]+'</span>';}).join('');
+      var supOpts='<option value="">All suppliers</option>'+sups.map(function(s){return '<option value="'+esc(s)+'"'+(PDUE_STATE.supplier===s?' selected':'')+'>'+esc(s)+'</option>';}).join('');
+      document.getElementById('pdue-bar').innerHTML='<span class="pill-lbl">Status</span>'+stP
+        +' <span class="pill-lbl" style="margin-left:8px">Supplier</span><select class="flt" id="pdue-sup" style="width:auto">'+supOpts+'</select>'
+        +'<span class="count" style="margin-left:auto">'+f.length+' payments · '+order.length+' suppliers</span>';
+      var h='<div class="tw"><table><thead><tr><th class="l">Type</th><th class="l">Reference</th><th>Amount due</th><th class="l">Due date</th><th>Assigned £</th><th class="l">Payment date</th></tr></thead><tbody>';
+      if(!f.length) h+='<tr><td colspan="6" class="l mut">No payments match this filter.</td></tr>';
+      order.forEach(function(s){ var gr=groups[s].slice().sort(function(a,c){return (a.due||'9999').localeCompare(c.due||'9999')||a.type.localeCompare(c.type);});
+        var sub=gr.reduce(function(t,r){return t+(r.due_amt||0);},0); grand+=sub;
+        h+='<tr class="batchrow"><td class="l" colspan="3"><b>'+esc(s)+'</b> <span class="tiny mut">'+gr.length+' payment(s)</span></td><td class="l" colspan="3"><span class="tiny mut">subtotal due $'+money(sub)+'</span></td></tr>';
+        gr.forEach(function(r){
+          var dueCell=r.due?(r.overdue?'<span style="color:#dc2626;font-weight:700">'+esc(fd(r.due))+'</span>':esc(fd(r.due))):'<span class="mut">—</span>';
+          h+='<tr'+(r.overdue?' style="background:#fef2f2"':(r.paid?' style="opacity:.6"':''))+'>'
+            +'<td class="l"><span class="tool-badge '+(PDUE_BG[r.type]||'bg-neutral')+'">'+esc(r.type)+'</span></td>'
+            +'<td class="l">'+esc(r.ref)+'</td>'
+            +'<td>'+money(r.due_amt)+'</td>'
+            +'<td class="l">'+dueCell+'</td>'
+            +'<td>'+editCell(r.ep,r.amt_field,r.amt_val)+'</td>'
+            +'<td class="l">'+editCell(r.ep,r.dt_field,r.dt_val,'date')+'</td></tr>'; }); });
+      h+='<tr class="batchrow"><td class="l" colspan="2"><b>TOTAL DUE</b></td><td><b>'+money(grand)+'</b></td><td colspan="3"></td></tr>';
+      document.getElementById('pdue-wrap').innerHTML=h+'</tbody></table></div>';
+      bindEdits();
+      document.querySelectorAll('#pdue-bar .pill[data-ps]').forEach(function(p){p.onclick=function(){PDUE_STATE.status=p.dataset.ps;draw();};});
+      document.getElementById('pdue-sup').onchange=function(){PDUE_STATE.supplier=this.value;draw();}; }
+    draw(); }
   function renderPaymentsReport(b){ b.innerHTML='<div class="count">Loading…</div>';
     fetch('/api/supply/payments-report').then(function(r){return r.json();}).then(function(rows){
       // date filter: type a date (or partial, e.g. 2026-06) into From / To — no date picker
