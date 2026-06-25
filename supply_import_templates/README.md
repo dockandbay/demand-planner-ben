@@ -231,8 +231,8 @@ snapshot via CSV so the drift detection (`planner.v_erp_po_drift`) has something
 | po | ✔ | PO reference — matches `purchase_orders.po`. |
 | erp_po_id |  | The ERP's internal PO id / number (Fulfil/Cin7). |
 | supplier_name |  | Supplier as held in the ERP. |
-| status |  | ERP PO status. |
-| order_date |  | When the PO was raised in the ERP. |
+| status |  | **`open` or `complete`** only (Cin7's two states; `complete` = fully received). The planner's management lifecycle (PRODUCTION/SHIPPING/…) is NOT compared — *except* the completed state must agree: ERP `complete` while the plan isn't (or vice-versa) → `completion_mismatch` drift. |
+| order_date |  | When the PO was raised in the ERP (informational — not compared). |
 | final_delivery_date |  | The ERP's final delivery date (compared to our calculated completion date → date drift). |
 | total_value |  | ERP PO total (USD). |
 | currency |  | ERP currency (e.g. USD). |
@@ -247,4 +247,5 @@ snapshot via CSV so the drift detection (`planner.v_erp_po_drift`) has something
 | line_ref |  | The ERP's internal line id, if any. |
 
 **Drift = the diff** (`planner.v_erp_po_drift`): `po_not_in_erp` (planner PO to create in the ERP),
-`po_not_in_planner` (mirror it in), `qty_change`, `cost_change`, `line_not_in_erp`, `line_not_in_planner`.
+`po_not_in_planner` (mirror it in), `qty_change`, `cost_change`, `line_not_in_erp`, `line_not_in_planner`,
+`completion_mismatch` (ERP `complete` vs plan-complete disagree).

@@ -32,7 +32,9 @@ COMMENT ON TABLE planner.erp_purchase_order_lines IS
   'ERP (Cin7/Fulfil) PO line mirror — n8n-written, planner read-only. The ERP source of truth for lines; the planner''s plan lives in purchase_order_lines.';
 
 -- 3) DRIFT view — planner (plan) vs ERP mirror. One row per difference.
---    drift_type: po_not_in_erp | po_not_in_planner | qty_change | cost_change | line_not_in_erp | line_not_in_planner
+--    drift_type: po_not_in_erp | po_not_in_planner | qty_change | cost_change | line_not_in_erp | line_not_in_planner | completion_mismatch
+--    ERP status is open/complete (Cin7) only; the planner's PRODUCTION/SHIPPING/… lifecycle is NOT compared,
+--    except the completed state must agree (completion_mismatch).
 CREATE OR REPLACE VIEW planner.v_erp_po_drift AS
   SELECT p.po, NULL::text sku, 'po_not_in_erp'::text drift_type,
          NULL::numeric planner_qty, NULL::numeric erp_qty, NULL::numeric planner_cost, NULL::numeric erp_cost,
@@ -63,6 +65,16 @@ CREATE OR REPLACE VIEW planner.v_erp_po_drift AS
   SELECT el.po, el.sku, 'line_not_in_planner', NULL, el.qty::numeric, NULL, el.cost,
          'Line in the ERP but not in the planner — mirror it in'
     FROM planner.erp_purchase_order_lines el LEFT JOIN planner.purchase_order_lines l ON l.po = el.po AND l.sku = el.sku
-   WHERE l.po IS NULL;
+   WHERE l.po IS NULL
+  UNION ALL
+  -- completion-status mismatch. The ERP status is just open/complete (Cin7); the planner's status is a
+  -- management lifecycle (PRODUCTION/SHIPPING/…) — NOT comparable, EXCEPT the completed state must agree.
+  -- Flag when the ERP says complete (received) but the plan isn't, or vice-versa.
+  SELECT p.po, NULL, 'completion_mismatch', NULL, NULL, NULL, NULL,
+         CASE WHEN coalesce(e.status,'') ILIKE 'complete%'
+              THEN 'ERP marks this PO complete (received) but the plan does not — close it in the plan'
+              ELSE 'Plan marks this PO complete but the ERP has not received it (still open)' END
+    FROM planner.purchase_orders p JOIN planner.erp_purchase_orders e ON e.po = p.po
+   WHERE (coalesce(p.status,'') ILIKE '%complete%') <> (coalesce(e.status,'') ILIKE 'complete%');
 COMMENT ON VIEW planner.v_erp_po_drift IS
   'Every difference between the planner (plan) and the ERP mirror — drives exceptions/actions and the outbound push payload. Date drift (completion vs ERP final_delivery_date) is computed in the app for now.';

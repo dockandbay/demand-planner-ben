@@ -85,7 +85,9 @@ Separates the ERP truth from the plan so drift is explicit:
   (`supply_import_templates/erp_purchase_orders.csv`, `erp_purchase_order_lines.csv`).
 - **Drift view** `planner.v_erp_po_drift` = the diff between the plan and the mirror
   (`po_not_in_erp` / `po_not_in_planner` / `qty_change` / `cost_change` / `line_not_in_erp` /
-  `line_not_in_planner`). Drives the exceptions/actions list **and** the outbound push payload.
+  `line_not_in_planner` / `completion_mismatch`). Drives the exceptions/actions list **and** the outbound
+  push payload. ERP status is **open/complete** only (Cin7); the planner's management lifecycle isn't
+  compared except the completed state must agree (`completion_mismatch`).
 - This **supersedes** the embedded `purchase_order_lines.erp_qty/erp_cost` columns. The app still reads
   those today; rewiring the NEEDS-ERP filter / drift UI to read `v_erp_po_drift` is a follow-on patch once
   the mirror is being fed. n8n can populate both during transition.

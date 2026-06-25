@@ -1,2 +1,2 @@
 po,erp_po_id,supplier_name,status,order_date,final_delivery_date,total_value,currency
-PO-56UKLX1,FUL-1056,Lixin,Confirmed,2026-02-20,2026-05-25,48250.00,USD
+PO-56UKLX1,FUL-1056,Lixin,open,2026-02-20,2026-05-25,48250.00,USD
