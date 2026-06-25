@@ -4,6 +4,32 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.307 - Payments Report fully derived from source tables (no ledger duplication)
+
+Restructures the Payments Report so every line is **derived from its source-of-truth table** instead of a
+separate `payment_transactions` ledger that could drift. Replaces the v20.306 additive-union approach.
+
+- **Report lines now derive from:** PO **Completion** + **Balance** milestones (`purchase_orders` pay_*),
+  the **deposit register** (`deposits` is_deposit=true — the actual deposit cash payments, incl. negative
+  credit-notes/write-offs), and **Other** payments (`deposits` is_deposit=false). Grouped by date+supplier
+  as before; FX overlay still from `payment_fx`.
+- **Starting deposits are EXCLUDED.** A PO's start-deposit milestone is a drawdown/allocation against a
+  register deposit, not a separate cash payment — so it no longer appears in the report. (Fixes v20.306,
+  which let no-deposit-ref start deposits through.) The register entry is the single representation of a
+  deposit payment.
+- **Stops reading `payment_transactions`** in the report. All completion/balance legs reproduce exactly
+  from the plan (verified: 87/87 completion, 138/138 balance, £0 amount drift); deposits come from the
+  register (the true ~£8M historical ledger back to 2017); Other from is_deposit=false. Removed the
+  v20.306 "plan" badge.
+- **Scope note:** the report now spans the full deposit history (the register goes back to 2017), newest
+  first. The From/To date filter handles windowing. No default window imposed — say the word if you want
+  one (e.g. default to last 12–18 months, clearable).
+
+**Follow-on (NOT in this patch — needs Diviyaj + a migration):** the Payments **register** view and the
+**Xero export** still read `payment_transactions`; repoint them to the derived lines, consolidate the two
+FX overlays (`payment_fx` + `payment_run_meta`) into one per-run overlay (supplier, date, amount, currency),
+then drop `payment_transactions`. See HANDOVER.md §6.
+
 ## v20.306 - Payments Report shows planner-recorded payments + payment-plan UX
 
 Three changes. **No migration, no new env vars. The report change is read-only and additive — no

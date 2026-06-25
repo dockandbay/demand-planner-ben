@@ -2136,9 +2136,8 @@
             : '<button class="lnk-btn pr-ref" data-go="po" data-k="'+esc(l.reference)+'" title="open this PO’s payment plan">'+esc(l.reference)+'</button>') : '—';
         var drKey=(l.deposit_ref||'').split(',')[0].trim();
         var drCell = l.deposit_ref ? '<button class="lnk-btn pr-ref" data-go="dep" data-k="'+esc(drKey)+'" title="open this deposit (Productions ▸ Deposits)">'+esc(l.deposit_ref)+'</button>' : '—';
-        var planTag = l.source==='plan' ? ' <span class="src" style="background:#fef3c7;color:#92400e" title="recorded in the planner (PO payment plan) — not yet a bank-ledger row">plan</span>' : '';
         return '<tr><td class="l">'+refCell+'</td><td>'+money(l.amount)+'</td>'
-          +'<td class="l"><span class="tool-badge '+(PTYPE_BG[l.type]||'bg-neutral')+'">'+esc(l.type)+'</span>'+planTag+'</td>'
+          +'<td class="l"><span class="tool-badge '+(PTYPE_BG[l.type]||'bg-neutral')+'">'+esc(l.type)+'</span></td>'
           +'<td class="l">'+drCell+'</td></tr>'; }).join('');
       var det='<tr class="exp-row" id="payexp-'+i+'" style="display:none"><td colspan="7"><div style="padding:2px">'
         +'<div class="sect-h" style="margin-top:2px">Payments in this run ('+(r.lines||[]).length+')</div>'
