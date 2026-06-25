@@ -117,4 +117,36 @@ Separates the ERP truth from the plan so drift is explicit:
 
 ---
 
+## 6. Payments: planner-recorded vs ledger (`payment_transactions`)  ⬅ NEW (v20.306)
+
+**Current state.** Two parallel representations of a PO-milestone payment exist:
+- **The plan** — `purchase_orders.pay_start_deposit_*`, `pay_completion_*`, `pay_balance_1_*`,
+  `pay_balance_2_*`. This is where the app records payments (PO plan panel, Payments Due, the new
+  "pay »" quick-fill). The server **writes only here**.
+- **The ledger** — `planner.payment_transactions` (240 rows today from a one-time historical import).
+  This is what the **Payments Report**, the **Payments register**, **FX reconciliation** and the
+  **Xero export** read. The server **never writes** to it.
+
+As of v20.306 the **Payments Report** reads *both* (additive union: ledger + Other payments + plan-derived
+milestones not already in the ledger, badged "plan"). So recorded payments are now **visible in the
+report** — but they still do **not** reach the **register / FX / Xero export**, which remain
+ledger-only.
+
+**The follow-on decision (NOT built — needs Ben + Diviyaj to agree before building).**
+If recorded payments must flow end-to-end (into the register + Xero), the planner should **write a
+`payment_transactions` row** when a milestone payment is recorded. To do that cleanly:
+- **Migration:** add a stable key so balance-1 vs balance-2 don't collide and re-saves upsert rather than
+  duplicate — e.g. `source_po text`, `source_milestone text` (`dep|comp|bal1|bal2`), `UNIQUE(source_po, source_milestone)`.
+  Rows written by the planner are tagged (e.g. `origin='planner'`); imported rows stay `origin='import'`.
+- **Write path:** the PO save endpoint upserts/deletes the matching `payment_transactions` row when a
+  `pay_*` amount+date is set/cleared.
+- **Ownership decision (the crux):** in production **n8n is meant to feed actual bank payments into
+  `payment_transactions`**. If the planner also writes there, two systems own one table. Decide who wins
+  per row (suggest: planner owns `origin='planner'` rows; n8n owns/updates `origin='import'`; the report
+  prefers an `import` row over a `planner` row for the same PO+milestone once the real payment lands).
+- Until that's agreed, the read-only union (v20.306) is the safe interim — no writes, no migration,
+  reversible.
+
+---
+
 _Last updated: v20.294 (24 Jun 2026)._

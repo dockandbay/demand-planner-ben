@@ -804,6 +804,10 @@
   // can be overridden inline (saves on blur). Saving re-pulls the PO so catch-up / owing ripple.
   function payIn(ep,field,val,dt,dis){ return '<input class="fci payin'+(dt?' dt':'')+(dis?' pdis':'')+'"'+(dt?' type="date"':'')+(dis?' disabled title="set an amount first"':'')+' data-ep="'+esc(ep)+'" data-field="'+field+'" value="'+esc(val==null?'':val)+'">'; }
   function payBadge(label,cls){ return '<span class="tool-badge '+cls+'">'+label+'</span>'; }
+  // "pay »" quick-fill: when a milestone is owed + unpaid, one click fills its Amount box with the calc figure
+  // and its Date paid with today, then saves both. (af/df = the amount + date field names on the PO.)
+  function payFillBtn(af,df,calc){ if(!(n(calc)>0.009)) return '';
+    return ' <button class="pbtn pay-fill" data-af="'+af+'" data-df="'+df+'" data-calc="'+esc(calc)+'" title="record this payment — fill the amount with the calc figure and the date with today">pay &raquo;</button>'; }
   // free-text PO field saver (no comma-stripping, unlike .payin) — saves on blur via .txtin
   function txtIn(ep,field,val,wide,area){ var w=wide||280; return area
     ? '<textarea class="fci txtin" rows="2" data-ep="'+esc(ep)+'" data-field="'+field+'" style="width:'+w+'px;resize:vertical;text-align:left">'+esc(val==null?'':val)+'</textarea>'
@@ -866,7 +870,11 @@
       var o=(date&&date<today&&unpaid);
       return '<td class="l"'+(o?' style="background:#fee2e2;color:#991b1b;font-weight:700"':'')+'>'+(date?fd(date):'—')+(extra||'')+(o?' <span title="overdue">⚠</span>':'')+'</td>'; }
     var startOwed=(n(r.start_calc)>0.009), compOwed=(n(r.completion_calc)>0.009);   // is there actually an amount for this milestone?
-    var startUnpaid=(r.start_assigned==null && !r.deposit_ref), compUnpaid=(r.completion_assigned==null), bal1Unpaid=(totalDue>0.01);   // balance overdue while anything is still owed
+    // PAID = a payment DATE has been recorded for this milestone (start also counts as paid when drawn from a
+    // deposit pool ref). Once paid, the "likely pay date" input + overdue highlight drop away — they only apply
+    // to milestones still awaiting payment.
+    var startPaid=(!!r.start_date || !!r.deposit_ref), compPaid=(!!r.completion_date), bal1Paid=(!!r.balance_1_date), bal2Paid=(!!r.balance_2_date);
+    var startUnpaid=!startPaid, compUnpaid=!compPaid, bal1Unpaid=(totalDue>0.01 && !bal1Paid);   // balance unpaid while owed AND no payment date yet
     var xdList=(r.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
     // ---- CLIENT chunk (label/field rows, not an overflow table; crossdock picker grows freely) ----
     function cliRow(lbl,field){ return '<div class="cli-row"><div class="cli-lbl">'+lbl+'</div><div class="cli-val">'+field+'</div></div>'; }
@@ -905,13 +913,13 @@
       +'<div class="sect-h" style="margin-top:12px">Payment plan — terms from supplier; amount / date / % override inline (saves on blur)</div>'
       +'<div class="tw pay-tbl" style="max-width:1320px"><table><thead><tr><th class="l">Payment</th><th>Calc / est</th><th class="l">Amount</th><th class="l">Date paid</th><th class="l">Deposit ref</th><th class="l">Due</th><th class="l">Likely pay date</th><th class="l">Status</th></tr></thead><tbody>';
     h+=tr('<td class="l"><b>Start deposit</b> <input class="fci pctin payin" data-ep="'+ep+'" data-field="start_deposit_pct_override" value="'+esc(r.start_pct)+'"><span class="mut tiny">% · capped at ref avail</span></td>'
-      +'<td>'+money(r.start_calc)+'</td>'
+      +'<td>'+money(r.start_calc)+((startOwed && startUnpaid && !r.deposit_ref)?payFillBtn('pay_start_deposit_assigned','pay_start_deposit_date',r.start_calc):'')+'</td>'
       +'<td class="l">'+payIn(ep,'pay_start_deposit_assigned',r.start_assigned)+'</td>'
       +'<td class="l">'+payIn(ep,'pay_start_deposit_date',r.start_date,true,!(n(r.start_assigned)>0))+'</td>'
       +'<td class="l">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0)+(r.deposit_avail!=null?' <span class="mut tiny">'+money(r.deposit_avail)+' avail</span>':'')+'</td>'
       +dueCell(r.start_due,startUnpaid,'',startOwed)+likelyCell('dep:'+r.po,startUnpaid&&startOwed,r.likely_start)+'<td class="l">'+(startOwed?payBadge(sStat[0],sStat[1]):payBadge('—','bg-neutral'))+'</td>');
     h+=tr('<td class="l"><b>Completion</b> <input class="fci pctin payin" data-ep="'+ep+'" data-field="completion_pct_override" value="'+esc(r.completion_pct)+'"><span class="mut tiny">% + catch-up'+(Number(r.catch_up)?' '+(Number(r.catch_up)>0?'+':'')+money(r.catch_up):'')+'</span></td>'
-      +'<td>'+money(r.completion_calc)+'</td>'
+      +'<td>'+money(r.completion_calc)+((compOwed && compUnpaid)?payFillBtn('pay_completion_assigned','pay_completion_date',r.completion_calc):'')+'</td>'
       +'<td class="l">'+payIn(ep,'pay_completion_assigned',r.completion_assigned)+'</td>'
       +'<td class="l">'+payIn(ep,'pay_completion_date',r.completion_date,true,!(n(r.completion_assigned)>0))+'</td>'
       +'<td class="l"><span class="mut tiny">— direct cash</span></td>'
@@ -924,18 +932,18 @@
       +'<td class="l"><span class="mut">—</span></td><td class="l"><span class="mut">—</span></td><td class="l"><span class="mut">—</span></td>');
     var balnote = r.credit_days!=null?'<span class="mut tiny">'+(r.credit_type==='on_shipment'?'ship':'clearance')+' +'+r.credit_days+'cr</span>':'';
     h+=tr('<td class="l"><b>Balance'+(partial?' 1':'')+'</b> <span class="mut tiny">'+esc(r.balance_pct)+'% · remainder</span></td>'
-      +'<td>'+money(r.balance_owing)+' <span class="mut tiny">owing'+(n(r.credit_amount)>0?' · incl. '+money(r.credit_amount)+' credit':'')+'</span></td>'
+      +'<td>'+money(r.balance_owing)+' <span class="mut tiny">owing'+(n(r.credit_amount)>0?' · incl. '+money(r.credit_amount)+' credit':'')+'</span>'+(bal1Unpaid?payFillBtn('pay_balance_1_amount','pay_balance_1_date',r.balance_owing):'')+'</td>'
       +'<td class="l">'+payIn(ep,'pay_balance_1_amount',r.balance_1_amount)+'</td>'
       +'<td class="l">'+payIn(ep,'pay_balance_1_date',r.balance_1_date,true,!(n(r.balance_1_amount)>0))+'</td>'
       +'<td class="l"><span class="mut">—</span></td>'
       +dueCell(r.balance_due,bal1Unpaid,' '+balnote)+likelyCell('bal:'+r.po,bal1Unpaid,r.likely_balance_1)+'<td class="l">'+payBadge(b1Stat[0],b1Stat[1])+'</td>');
     if(partial){ var rem2=Math.round((owe-bal1)*100)/100;
       h+=tr('<td class="l"><b>Balance 2</b> <span class="mut tiny">remainder</span></td>'
-        +'<td>'+money(rem2)+' <span class="mut tiny">owing</span></td>'
+        +'<td>'+money(rem2)+' <span class="mut tiny">owing</span>'+((totalDue>0.01 && !bal2Paid)?payFillBtn('pay_balance_2_amount','pay_balance_2_date',rem2):'')+'</td>'
         +'<td class="l">'+payIn(ep,'pay_balance_2_amount',r.balance_2_amount)+'</td>'
         +'<td class="l">'+payIn(ep,'pay_balance_2_date',r.balance_2_date,true,!(n(r.balance_2_amount)>0))+'</td>'
         +'<td class="l"><span class="mut">—</span></td>'
-        +dueCell(r.balance_due,totalDue>0.01)+likelyCell('bal2:'+r.po,totalDue>0.01,r.likely_balance_2)+'<td class="l">'+payBadge(r.balance_2_amount!=null?'paid':'est',r.balance_2_amount!=null?'bg-green':'bg-amber')+'</td>'); }
+        +dueCell(r.balance_due,totalDue>0.01 && !bal2Paid)+likelyCell('bal2:'+r.po,totalDue>0.01 && !bal2Paid,r.likely_balance_2)+'<td class="l">'+payBadge(r.balance_2_amount!=null?'paid':'est',r.balance_2_amount!=null?'bg-green':'bg-amber')+'</td>'); }
     h+='</tbody></table></div>'
       +'<div class="mut tiny" style="margin:2px 2px 8px">Balance 2 appears automatically when balance 1 is partial · clear a % to revert to the supplier&rsquo;s terms · a start deposit drawn on a deposit ref is no longer a cash due · saving recalcs catch-up &amp; owing.</div>';
     var payH=h;
@@ -1062,6 +1070,12 @@
           var pfx=inp.dataset.key.split(':')[0], f={dep:'likely_start',comp:'likely_completion',bal:'likely_balance_1',bal2:'likely_balance_2'}[pfx];
           if(f&&poBy[po])poBy[po][f]=inp.value||null; delete cache['cashflow']; })
         .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; });
+    // "pay »" quick-fill — record the calc amount + today's date for this milestone in one save, then refresh
+    document.querySelectorAll('#podet-'+i+' .pay-fill').forEach(function(b){ b.onclick=function(){ b.disabled=true; b.textContent='…';
+      var today=new Date().toISOString().slice(0,10); var body={}; body[b.dataset.af]=b.dataset.calc; body[b.dataset.df]=today;
+      fetch('/api/supply/po/'+encodeURIComponent(po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
+        .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); })
+        .catch(function(e){ b.disabled=false; b.textContent='pay »'; alert('Failed: '+(e.message||e)); }); }; });
     document.querySelectorAll('#podet-'+i+' .dep-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openDepPick(b.dataset.po,b,function(){ poRefetchPanel(po,i); }); }; });
     document.querySelectorAll('#podet-'+i+' .po-go-ship').forEach(function(b){ b.onclick=function(){ if(b.dataset.ref)gotoShipment(b.dataset.ref); }; });
     // free-text client fields — save verbatim (commas allowed) on blur
@@ -2122,8 +2136,9 @@
             : '<button class="lnk-btn pr-ref" data-go="po" data-k="'+esc(l.reference)+'" title="open this PO’s payment plan">'+esc(l.reference)+'</button>') : '—';
         var drKey=(l.deposit_ref||'').split(',')[0].trim();
         var drCell = l.deposit_ref ? '<button class="lnk-btn pr-ref" data-go="dep" data-k="'+esc(drKey)+'" title="open this deposit (Productions ▸ Deposits)">'+esc(l.deposit_ref)+'</button>' : '—';
+        var planTag = l.source==='plan' ? ' <span class="src" style="background:#fef3c7;color:#92400e" title="recorded in the planner (PO payment plan) — not yet a bank-ledger row">plan</span>' : '';
         return '<tr><td class="l">'+refCell+'</td><td>'+money(l.amount)+'</td>'
-          +'<td class="l"><span class="tool-badge '+(PTYPE_BG[l.type]||'bg-neutral')+'">'+esc(l.type)+'</span></td>'
+          +'<td class="l"><span class="tool-badge '+(PTYPE_BG[l.type]||'bg-neutral')+'">'+esc(l.type)+'</span>'+planTag+'</td>'
           +'<td class="l">'+drCell+'</td></tr>'; }).join('');
       var det='<tr class="exp-row" id="payexp-'+i+'" style="display:none"><td colspan="7"><div style="padding:2px">'
         +'<div class="sect-h" style="margin-top:2px">Payments in this run ('+(r.lines||[]).length+')</div>'

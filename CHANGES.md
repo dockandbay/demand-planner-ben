@@ -4,6 +4,34 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.306 - Payments Report shows planner-recorded payments + payment-plan UX
+
+Three changes. **No migration, no new env vars. The report change is read-only and additive — no
+data is written, hidden, or replaced.**
+
+1. **Payments Report now includes payments recorded in the planner.** Previously the report read only
+   `payment_transactions` (the historical/bank-import ledger) + "Other" payments, so a PO-milestone
+   payment recorded in the planner (PO plan panel / Payments Due) never appeared. The `payments-report`
+   query now also reads PO-milestone payments straight from the plan fields
+   (`pay_start_deposit_*`, `pay_completion_*`, `pay_balance_1_*`, `pay_balance_2_*`) where an amount + a
+   payment date are set. **Additive/non-destructive:** a plan-derived line is shown only when the ledger
+   has no row for that PO+milestone (so nothing double-counts and no existing ledger figure disappears);
+   pooled start deposits (carrying a `deposit_ref`) are excluded as they pay via the register. Plan-derived
+   lines carry a small **"plan"** badge to distinguish them from bank-confirmed ledger rows. When n8n later
+   imports the real bank payment, the ledger row supersedes the plan line automatically.
+   - *Follow-on for Diviyaj (NOT built):* the Payments **register**, FX reconciliation and **Xero export**
+     still key off `payment_transactions`, so plan-recorded payments show in the *report* but don't yet
+     flow to Xero. Making recording a payment write a `payment_transactions` row (so it flows end-to-end)
+     is a deliberate next step that needs a migration + a decision on who owns that table in production
+     (planner vs n8n). See HANDOVER.md §6.
+2. **"Likely pay date" hides once a payment is recorded.** The likely-pay-date input (and the overdue
+   highlight) on the PO Payments panel now key off whether a *payment date* has been recorded for that
+   milestone (start also counts as paid when drawn from a deposit pool). Previously the balance row keyed
+   off "is anything still owing overall," so the input lingered after payment.
+3. **"pay »" quick-fill button.** On the PO Payments panel, when a milestone is owed + unpaid, a small
+   `pay »` button next to the calc figure fills the Amount box with the calc amount **and** the Date paid
+   with today, saves both, and refreshes the row — one click instead of two manual fields.
+
 ## v20.305 - Bugs/quick improvements: REPORTS toolbar, unpaid-payments filter, Payments Due view
 
 Three UI changes — no migrations, no new env vars, no server data-shape changes.

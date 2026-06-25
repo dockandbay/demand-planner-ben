@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.305';
+const APP_VERSION = 'v20.306';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1335,13 +1335,43 @@ app.get('/api/supply/:section', async (req, res) => {
         const lines = (await pool.query(`
           SELECT to_char(payment_date,'YYYY-MM-DD') dt, coalesce(transaction_supplier,'(none)') supplier,
             coalesce(transaction_reference,'') reference, round(transaction_amount)::int amount,
-            transaction_type type, coalesce(deposit_ref,'') deposit_ref
+            transaction_type type, coalesce(deposit_ref,'') deposit_ref, 'ledger' source
           FROM planner.payment_transactions WHERE payment_date IS NOT NULL
           UNION ALL
           SELECT to_char(date_paid,'YYYY-MM-DD') dt, coalesce(supplier_name,'(none)') supplier,
             coalesce(nullif(reference,''), description, '') reference, round(coalesce(amount,0))::int amount,
-            'Other' type, '' deposit_ref
-          FROM planner.deposits WHERE is_deposit=false AND date_paid IS NOT NULL`)).rows;
+            'Other' type, '' deposit_ref, 'other' source
+          FROM planner.deposits WHERE is_deposit=false AND date_paid IS NOT NULL
+          UNION ALL
+          -- PO-milestone payments recorded in the plan (amount + payment date set). ADDITIVE: only shown when
+          -- the ledger has no row for that PO+milestone (so nothing is hidden and nothing double-counts). When
+          -- n8n later imports the real bank payment into payment_transactions, that ledger row supersedes this.
+          SELECT dt, supplier, reference, amount, type, '' deposit_ref, 'plan' source FROM (
+            SELECT to_char(p.pay_start_deposit_date,'YYYY-MM-DD') dt, coalesce(p.supplier_name,'(none)') supplier,
+              p.po reference, round(coalesce(p.pay_start_deposit_assigned,0))::int amount, 'Deposit' type
+            FROM planner.purchase_orders p
+            WHERE p.pay_start_deposit_date IS NOT NULL AND coalesce(p.pay_start_deposit_assigned,0)>0
+              AND coalesce(p.deposit_ref,'')=''   -- pooled deposits are paid via the register, not as direct cash
+              AND NOT EXISTS (SELECT 1 FROM planner.payment_transactions t WHERE t.transaction_reference=p.po AND t.transaction_type='Deposit')
+            UNION ALL
+            SELECT to_char(p.pay_completion_date,'YYYY-MM-DD'), coalesce(p.supplier_name,'(none)'),
+              p.po, round(coalesce(p.pay_completion_assigned,0))::int, 'Completion'
+            FROM planner.purchase_orders p
+            WHERE p.pay_completion_date IS NOT NULL AND coalesce(p.pay_completion_assigned,0)>0
+              AND NOT EXISTS (SELECT 1 FROM planner.payment_transactions t WHERE t.transaction_reference=p.po AND t.transaction_type='Completion')
+            UNION ALL
+            SELECT to_char(p.pay_balance_1_date,'YYYY-MM-DD'), coalesce(p.supplier_name,'(none)'),
+              p.po, round(coalesce(p.pay_balance_1_amount,0))::int, 'Balance'
+            FROM planner.purchase_orders p
+            WHERE p.pay_balance_1_date IS NOT NULL AND coalesce(p.pay_balance_1_amount,0)>0
+              AND NOT EXISTS (SELECT 1 FROM planner.payment_transactions t WHERE t.transaction_reference=p.po AND t.transaction_type='Balance')
+            UNION ALL
+            SELECT to_char(p.pay_balance_2_date,'YYYY-MM-DD'), coalesce(p.supplier_name,'(none)'),
+              p.po, round(coalesce(p.pay_balance_2_amount,0))::int, 'Balance'
+            FROM planner.purchase_orders p
+            WHERE p.pay_balance_2_date IS NOT NULL AND coalesce(p.pay_balance_2_amount,0)>0
+              AND NOT EXISTS (SELECT 1 FROM planner.payment_transactions t WHERE t.transaction_reference=p.po AND t.transaction_type='Balance')
+          ) plan_pay`)).rows;
         const fx = (await pool.query(`SELECT to_char(run_date,'YYYY-MM-DD') dt, supplier, paid_amount, coalesce(paid_currency,'') ccy FROM planner.payment_fx`)).rows;
         const normSup = s => { const p = (s || '').split(',').map(x => x.trim()).filter(Boolean); return Array.from(new Set(p)).join(', ') || '(none)'; };
         const fxMap = {}; fx.forEach(f => fxMap[f.dt + '|' + normSup(f.supplier)] = f);
@@ -1349,7 +1379,7 @@ app.get('/api/supply/:section', async (req, res) => {
         for (const l of lines) { const sup = normSup(l.supplier); const k = l.dt + '|' + sup;
           const g = groups[k] || (groups[k] = { dt: l.dt, supplier: sup, total: 0, lines: [] });
           g.total += Number(l.amount);
-          g.lines.push({ reference: l.reference, amount: Number(l.amount), type: l.type, deposit_ref: l.deposit_ref }); }
+          g.lines.push({ reference: l.reference, amount: Number(l.amount), type: l.type, deposit_ref: l.deposit_ref, source: l.source }); }
         const TYPE_ORD = { Deposit: 0, Completion: 1, Balance: 2, Other: 3 };
         const out = Object.values(groups).map(g => { const f = fxMap[g.dt + '|' + g.supplier];
           g.lines.sort((a, b) => (TYPE_ORD[a.type] ?? 9) - (TYPE_ORD[b.type] ?? 9));
