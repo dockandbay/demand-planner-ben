@@ -2098,9 +2098,15 @@
         h+='<tr class="batchrow"><td class="l" colspan="3"><b>'+esc(s)+'</b> <span class="tiny mut">'+gr.length+' payment(s)</span></td><td class="l" colspan="3"><span class="tiny mut">subtotal due $'+money(sub)+'</span></td></tr>';
         gr.forEach(function(r){
           var dueCell=r.due?(r.overdue?'<span style="color:#dc2626;font-weight:700">'+esc(fd(r.due))+'</span>':esc(fd(r.due))):'<span class="mut">—</span>';
+          // reference → its source: PO opens the PO with the PLAN expanded on the PAYMENTS tab; deposit/other open their register
+          var refCell = r.po
+            ? '<button class="lnk-btn pdue-ref" data-go="po" data-k="'+esc(r.ref)+'" title="open this PO — payment plan (PAYMENTS tab)">'+esc(r.ref)+'</button>'
+            : r.type==='Deposit'
+            ? '<button class="lnk-btn pdue-ref" data-go="dep" data-k="'+esc(r.ref)+'" title="open this deposit (Productions ▸ Deposits)">'+esc(r.ref)+'</button>'
+            : '<button class="lnk-btn pdue-ref" data-go="other" title="open Other Payments">'+esc(r.ref)+'</button>';
           h+='<tr'+(r.overdue?' style="background:#fef2f2"':(r.paid?' style="opacity:.6"':''))+'>'
             +'<td class="l"><span class="tool-badge '+(PDUE_BG[r.type]||'bg-neutral')+'">'+esc(r.type)+'</span></td>'
-            +'<td class="l">'+esc(r.ref)+'</td>'
+            +'<td class="l">'+refCell+'</td>'
             +'<td>'+money(r.due_amt)+'</td>'
             +'<td class="l">'+dueCell+'</td>'
             +'<td>'+editCell(r.ep,r.amt_field,r.amt_val)+'</td>'
@@ -2108,6 +2114,8 @@
       h+='<tr class="batchrow"><td class="l" colspan="2"><b>TOTAL DUE</b></td><td><b>'+money(grand)+'</b></td><td colspan="3"></td></tr>';
       document.getElementById('pdue-wrap').innerHTML=h+'</tbody></table></div>';
       bindEdits();
+      document.querySelectorAll('#pdue-wrap .pdue-ref').forEach(function(x){ x.onclick=function(){ var g=x.dataset.go;
+        if(g==='po')gotoPO(x.dataset.k,'pay'); else if(g==='dep')gotoDeposit(x.dataset.k); else gotoOther(); }; });
       document.querySelectorAll('#pdue-bar .pill[data-ps]').forEach(function(p){p.onclick=function(){PDUE_STATE.status=p.dataset.ps;draw();};});
       document.getElementById('pdue-sup').onchange=function(){PDUE_STATE.supplier=this.value;draw();}; }
     draw(); }

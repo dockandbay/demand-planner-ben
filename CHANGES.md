@@ -4,6 +4,14 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.309 - Payments Due: reference hyperlinks
+
+In SUPPLY ▸ Productions ▸ **Payments Due**, the Reference column is now clickable:
+- **PO rows (Completion/Balance)** → open that PO in Purchase Orders with the plan expanded on the
+  **PAYMENTS** tab (`gotoPO(po,'pay')`).
+- **Deposit rows** → Productions ▸ Deposits filtered to that reference; **Other** → Other Payments.
+Client-only change in `supply/inject.html` (reuses existing `gotoPO`/`gotoDeposit`/`gotoOther`).
+
 ## v20.308 - Payments Report defaults to last 60 days
 
 The Payments Report now defaults its From date filter to **today − 60 days**, so it opens on recent
