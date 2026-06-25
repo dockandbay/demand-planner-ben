@@ -15,8 +15,13 @@ The `planner` schema is a consolidated baseline (`migrations/schema.sql`, curren
 plus new numbered migrations on top. See `migrations/README.md`.
 
 - **Existing prod DB** (already migrated through 061): run **only the new numbered migrations**:
-  - **`062_erp_purchase_orders.sql`** — new ERP mirror table (see §3). ⬅ *latest, not yet on prod.*
-- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062_*.sql`. Do **not** run
+  - **`062_erp_purchase_orders.sql`** — ERP mirror table (see §3).
+  - **`063_po_credit_amount.sql`** — `credit_amount` on POs.
+  - **`064_erp_sync_model.sql`** — ERP line mirror + drift view (see §3).
+  - **`065_supplier_link_fix.sql`** — repair PO↔supplier links broken by inconsistent supplier-name
+    spelling (e.g. `Jinma (Merry)` vs `Jinma (merry)`); normalises spelling + re-resolves `supplier_id`
+    case-insensitively. ⬅ *latest, not yet on prod. Idempotent.*
+- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`065` in order. Do **not** run
   `schema.sql` against an already-migrated DB (the table creates aren't idempotent).
 
 ---
