@@ -188,3 +188,38 @@ The actual payments ledger (what was paid, grouped into runs). **Key = `id` (aut
 | deposit_ref |  | Deposit pool reference if drawn from one. |
 | paid_currency |  | Currency actually paid (e.g. CNY, GBP). |
 | paid_amount |  | Amount in `paid_currency`. |
+
+---
+
+## ERP mirror — `erp_purchase_orders.csv` + `erp_purchase_order_lines.csv`
+
+The **ERP's own view** of each PO (header + lines) — "what the ERP says", separate from the planner's plan.
+Eventually **n8n keeps these in sync** from Cin7/Fulfil on a schedule; for now you can load a one-time
+snapshot via CSV so the drift detection (`planner.v_erp_po_drift`) has something to compare against.
+
+> These are READ-ONLY to the planner — never edited in the app. The planner's plan stays in
+> `purchase_orders` / `purchase_order_lines`; the **difference** between the two is the exceptions/push list.
+
+### erp_purchase_orders.csv  →  `planner.erp_purchase_orders`  (key = `po`)
+| column | req | notes |
+|---|---|---|
+| po | ✔ | PO reference — matches `purchase_orders.po`. |
+| erp_po_id |  | The ERP's internal PO id / number (Fulfil/Cin7). |
+| supplier_name |  | Supplier as held in the ERP. |
+| status |  | ERP PO status. |
+| order_date |  | When the PO was raised in the ERP. |
+| final_delivery_date |  | The ERP's final delivery date (compared to our calculated completion date → date drift). |
+| total_value |  | ERP PO total (USD). |
+| currency |  | ERP currency (e.g. USD). |
+
+### erp_purchase_order_lines.csv  →  `planner.erp_purchase_order_lines`  (key = `po` + `sku`)
+| column | req | notes |
+|---|---|---|
+| po | ✔ | Matches `erp_purchase_orders.po` / `purchase_orders.po`. |
+| sku | ✔ | Matches `products.sku`. |
+| qty | ✔ | Qty as it stands in the ERP. |
+| cost |  | Unit cost as it stands in the ERP (USD). |
+| line_ref |  | The ERP's internal line id, if any. |
+
+**Drift = the diff** (`planner.v_erp_po_drift`): `po_not_in_erp` (planner PO to create in the ERP),
+`po_not_in_planner` (mirror it in), `qty_change`, `cost_change`, `line_not_in_erp`, `line_not_in_planner`.

@@ -77,6 +77,20 @@ The planner detects when a PO is misaligned with the ERP and surfaces it on **SU
 - **Deferred (not built):** a matching date card in SUPPLY ▸ Actions — needs the completion-date calc
   shared between the PO query and the Actions query first (avoid two calcs diverging).
 
+### Cleaner ERP-sync model (migration `064_erp_sync_model.sql`)  ⬅ NEW — target architecture
+Separates the ERP truth from the plan so drift is explicit:
+- **ERP mirror** (n8n-written, planner read-only): `planner.erp_purchase_orders` (header, extended) +
+  **`planner.erp_purchase_order_lines`** (lines, NEW). This is the n8n **inbound** write target — upsert
+  both keyed on `po` (+ `sku` for lines). One-time CSV snapshot can be loaded now via the two new templates
+  (`supply_import_templates/erp_purchase_orders.csv`, `erp_purchase_order_lines.csv`).
+- **Drift view** `planner.v_erp_po_drift` = the diff between the plan and the mirror
+  (`po_not_in_erp` / `po_not_in_planner` / `qty_change` / `cost_change` / `line_not_in_erp` /
+  `line_not_in_planner`). Drives the exceptions/actions list **and** the outbound push payload.
+- This **supersedes** the embedded `purchase_order_lines.erp_qty/erp_cost` columns. The app still reads
+  those today; rewiring the NEEDS-ERP filter / drift UI to read `v_erp_po_drift` is a follow-on patch once
+  the mirror is being fed. n8n can populate both during transition.
+- **Run migration `064` on prod** (creates the lines mirror + view + extra header columns).
+
 ---
 
 ## 4. n8n data population (ETL)
