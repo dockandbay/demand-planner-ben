@@ -29,7 +29,8 @@ Then load in this order:
 3. `flexport_shipments.csv`  *(independent — can load anytime)*
 4. `purchase_orders.csv`
 5. `purchase_order_lines.csv`
-6. `payment_transactions.csv`
+6. `inbound_shipments.csv`  *(supplier inbound + branch transfers; references POs / SKUs)*
+7. `payment_transactions.csv`
 
 ## Do NOT load (app-managed or calculated — leave to the system)
 
@@ -188,6 +189,30 @@ The actual payments ledger (what was paid, grouped into runs). **Key = `id` (aut
 | deposit_ref |  | Deposit pool reference if drawn from one. |
 | paid_currency |  | Currency actually paid (e.g. CNY, GBP). |
 | paid_amount |  | Amount in `paid_currency`. |
+
+---
+
+## inbound_shipments.csv
+
+In-transit / on-order stock arriving at a warehouse — **both supplier inbound and branch transfers**
+(the planner reads this as on-order for cover). **Key = `id` (auto).** This is what feeds "what's coming in"
+to each 3PL / FBA. Today loaded from the ERP; n8n keeps it fresh in prod.
+
+| column | req | notes |
+|---|---|---|
+| reference | ✔ | The PO number (supplier inbound) or a transfer ref (branch transfer). |
+| sku | ✔ | Must match `products.sku`. |
+| source_type | ✔ | `supplier_china` (a supplier PO landing) or **`branch_transfer`** (3PL↔3PL or 3PL/AWD → FBA). |
+| source_location |  | Where it's coming from — supplier name, or origin warehouse (e.g. `UK ILG`, `US AWD`). |
+| destination_warehouse | ✔ | Where it lands: `uk_3pl` / `us_3pl` / `eu_3pl` / `au_3pl` / `uk_fba` / `us_fba` / `eu_fba` / `au_fba` / `ca_fba`. |
+| quantity | ✔ | Units inbound. |
+| received_quantity |  | Units already received (0 = fully in transit). On-order = quantity − received. |
+| estimated_delivery_date |  | ETA into the destination warehouse. |
+| status |  | e.g. `in_transit` / `received`. |
+| notes |  | Free text. |
+
+> **Branch transfers** are inbound-only here (they add on-order at the *destination*). The *source* warehouse's
+> reduction comes from its live on-hand snapshot (`product_inventory`), not from this row.
 
 ---
 

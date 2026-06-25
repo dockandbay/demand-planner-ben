@@ -100,6 +100,10 @@ Separates the ERP truth from the plan so drift is explicit:
   - `size_short`, `variant_type` (used by the supplier portal / barcode labels).
 - **Sales actuals:** confirm **≥ 2 years of monthly actuals** history is present — the DEMAND ▸ Actions
   detectors (forecast-vs-trend, anomalies, A-player) rely on it.
+- **Inbound stock (`planner.inbound_shipments`):** sync both `source_type='supplier_china'` (supplier PO
+  landings) **and `source_type='branch_transfer'`** (3PL↔3PL and 3PL/AWD → FBA replenishments) — these feed
+  on-order/cover at each destination warehouse. CSV template: `supply_import_templates/inbound_shipments.csv`.
+  Branch transfers are inbound-only here; the source warehouse's reduction comes from its live `product_inventory`.
 
 ---
 
