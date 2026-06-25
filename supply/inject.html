@@ -1907,7 +1907,9 @@
 
   // PAYMENTS ENGINE — txns grouped into date-runs; run header carries bank/ccy/bank-amount/FX → USD-equiv vs legs.
   var payTab='pay'; // 'pay' (register) | 'other' (sundry)
-  var PAY_FROM='', PAY_TO='';   // Payments report date filter (typed YYYY / YYYY-MM / YYYY-MM-DD)
+  // Payments report date filter (typed YYYY / YYYY-MM / YYYY-MM-DD). Defaults to the last 60 days so the
+  // report opens on recent activity (the register holds full history back to 2017); Clear to see everything.
+  var PAY_FROM=(function(){ var d=new Date(); d.setDate(d.getDate()-60); return d.toISOString().slice(0,10); })(), PAY_TO='';
   var OTH_STATE={status:'all',supplier:''};   // Other Payments filters (persist across re-renders)
   var PDUE_STATE={status:'outstanding',supplier:''};   // Payments Due filters (persist across re-renders)
   // ---- CASH FLOW: itemised payment lines, flat list, filterable by month ----
@@ -2112,7 +2114,7 @@
   function renderPaymentsReport(b){ b.innerHTML='<div class="count">Loading…</div>';
     fetch('/api/supply/payments-report').then(function(r){return r.json();}).then(function(rows){
       // date filter: type a date (or partial, e.g. 2026-06) into From / To — no date picker
-      b.innerHTML='<div class="bar"><span class="pill-lbl">Date</span><span class="tiny mut">from</span> <input class="flt" id="pay-from" placeholder="YYYY-MM-DD" value="'+esc(PAY_FROM)+'" style="width:118px"> <span class="tiny mut">to</span> <input class="flt" id="pay-to" placeholder="YYYY-MM-DD" value="'+esc(PAY_TO)+'" style="width:118px"> <button class="save-btn light" id="pay-clear">Clear</button> <span class="tiny mut">paste a full or partial date (e.g. 2026-06)</span></div><div id="pay-rep"></div>';
+      b.innerHTML='<div class="bar"><span class="pill-lbl">Date</span><span class="tiny mut">from</span> <input class="flt" id="pay-from" placeholder="YYYY-MM-DD" value="'+esc(PAY_FROM)+'" style="width:118px"> <span class="tiny mut">to</span> <input class="flt" id="pay-to" placeholder="YYYY-MM-DD" value="'+esc(PAY_TO)+'" style="width:118px"> <button class="save-btn light" id="pay-clear">Clear</button> <span class="tiny mut">default: last 60 days · Clear to see all history · or type a full/partial date (e.g. 2026-06)</span></div><div id="pay-rep"></div>';
       function draw(){ var f=rows.filter(function(r){ var d=r.dt||''; return (!PAY_FROM || d>=PAY_FROM) && (!PAY_TO || d.slice(0,PAY_TO.length)<=PAY_TO); });
         var rep=document.getElementById('pay-rep'); rep.innerHTML=payReportHTML(f); bindPayFx(rep); }
       document.getElementById('pay-from').oninput=function(){ PAY_FROM=this.value.trim(); draw(); };

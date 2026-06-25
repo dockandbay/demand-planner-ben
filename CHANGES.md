@@ -4,6 +4,13 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.308 - Payments Report defaults to last 60 days
+
+The Payments Report now defaults its From date filter to **today − 60 days**, so it opens on recent
+activity instead of the full history (the deposit register goes back to 2017, ~£30M of payments).
+The From/To inputs and **Clear** button remain — Clear (or edit the dates) to see all history or any
+window. Hint text updated. One-line default in `supply/inject.html` (`PAY_FROM`).
+
 ## v20.307 - Payments Report fully derived from source tables (no ledger duplication)
 
 Restructures the Payments Report so every line is **derived from its source-of-truth table** instead of a
