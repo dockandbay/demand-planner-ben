@@ -23,7 +23,8 @@ plus new numbered migrations on top. See `migrations/README.md`.
     case-insensitively. Idempotent.
   - **`066_fin_overlay_subcategory.sql`** — financial-model scenario overlay keyed by channel × country ×
     **sub-category** (was channel × country). ⬅ *latest, not yet on prod.*
-- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`066` in order. Do **not** run
+  - **`067_fin_overlay_period.sql`** — financial-model overlay also keyed by **period** (quarter), for per-cell growth/price. ⬅ *latest.*
+- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`067` in order. Do **not** run
   `schema.sql` against an already-migrated DB (the table creates aren't idempotent).
 
 ---

@@ -152,6 +152,9 @@
 #scenario-root .kpi .l{font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;color:#888}
 #scenario-root .kpi .v{font-size:18px;font-weight:700;color:#1a1a1a}
 #scenario-root .fm-in{width:42px;text-align:right;border:none;border-bottom:1px dashed #cbd5e1;background:transparent;color:#555;font:inherit;font-size:11px;padding:1px 2px}
+#scenario-root .fm-ov{display:flex;gap:1px;align-items:center;justify-content:flex-end;margin-top:3px}
+#scenario-root .fm-ov .fm-ovl{font-size:8px;color:#9aa3af;font-weight:700;margin:0 1px}
+#scenario-root .fm-ov .fm-in{width:28px;min-width:28px}
 #scenario-root .fm-in:focus{outline:none;border-bottom-color:#1d4ed8;color:#1d4ed8;background:#f8fafc}
 #scenario-root .fm-in::placeholder{color:#cbd5e1}
 #scenario-root tr.fm-catrow td{border-top:1px solid #e2e8f0;background:#fafafa}
@@ -2882,7 +2885,7 @@
     prime:'<b>SCENARIO ▸ Prime Day.</b> Enter a SKU list or filter by category / market to see available inventory split by FBA, AWD and 3PL.',
     b2b:'<b>SCENARIO ▸ B2B Allocation.</b> Should we take this order? Models stock impact, whether it\'s worth it after the air cost to rush in any shortfall, and a take/decline verdict. Switch market to re-analyse (stock + price are market-specific). Air rate $10/kg · £7/kg.',
     finmodel:'<b>SCENARIO ▸ Financial Forecast Model.</b> FY (Mar–Feb) units &amp; revenue by category × market in the exec-summary style — overlay a <b>growth %</b> and <b>price change %</b> per category × quarter to model the year vs last-year actuals; YoY badges + FY total. Forecast only; saves live to the database.',
-    postock:'<b>SCENARIO ▸ PO Stock Priority.</b> Pick a PO to see, per SKU, how much of its ordered quantity is actually needed — comparing <b>stock on hand</b> + <b>OTHER inbound</b> (this PO removed) against <b>forecast demand</b> to the cover window. Flags each line <b>HIGH / MEDIUM / LOW / NOT REQUIRED</b> so over-ordered lines can be trimmed. Sort by SKU or priority; export the full analysis to CSV.'};
+    postock:'<b>SCENARIO ▸ PO Stock Priority.</b> Pick a <b>production</b> PO (not yet shipped) to see, per SKU, how much of its ordered quantity is actually needed — comparing <b>stock on hand</b> + <b>OTHER inbound</b> (this PO removed) against <b>forecast demand</b> to the cover window. Flags each line <b>HIGH / MEDIUM / LOW / NOT REQUIRED</b> so over-ordered lines can be trimmed. Sort by SKU or priority; export the full analysis to CSV.'};
   function scenAnnot(k){return SCEN_ANNOT[k]?'<div class="annot">'+SCEN_ANNOT[k]+'</div>':'';}
   function scenSelect(key){ scenCurrent=key; writeHash(['scenario',key]);
     document.querySelectorAll('#scenario-subnav .stab').forEach(function(b){b.classList.toggle('active',b.dataset.k===key);});
@@ -2901,11 +2904,14 @@
       +'<div class="bar"><span class="pill-lbl">PO</span><input class="flt" id="ps-po" list="ps-polist" placeholder="search / pick a PO…" value="'+esc(POSTOCK_STATE.po||'')+'" style="width:260px">'
       +'<button class="pill" id="ps-load">Analyse</button>'
       +'<span class="pill-lbl" style="margin-left:14px">Sort</span><span class="pill'+(POSTOCK_STATE.sort==='priority'?' active':'')+'" data-sort="priority">Priority</span><span class="pill'+(POSTOCK_STATE.sort==='sku'?' active':'')+'" data-sort="sku">SKU A–Z</span>'
+      +'<span class="count" id="ps-pocount" style="margin-left:10px"></span>'
       +'<button class="pill" id="ps-csv" style="margin-left:auto">⬇ Export CSV</button></div>'
       +'<datalist id="ps-polist"></datalist><div id="ps-meta" class="count" style="margin-bottom:8px"></div><div id="ps-grid"></div>';
-    // PO list for the search box
+    // PO list for the search box — PRODUCTION POs only (not shipped / complete; once shipped the stock is committed)
     fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(rows){
-      document.getElementById('ps-polist').innerHTML=(rows||[]).map(function(p){return '<option value="'+esc(p.po)+'">'+esc(p.po)+' · '+esc(p.supplier_name||'')+'</option>';}).join('');
+      var prod=(rows||[]).filter(function(p){return /production/i.test(p.status||'');});
+      document.getElementById('ps-polist').innerHTML=prod.map(function(p){return '<option value="'+esc(p.po)+'">'+esc(p.po)+' · '+esc(p.supplier_name||'')+'</option>';}).join('');
+      var pc=document.getElementById('ps-pocount'); if(pc)pc.textContent=prod.length+' production PO(s)';
     }).catch(function(){});
     var data=null;
     function load(){ var po=document.getElementById('ps-po').value.trim(); if(!po){document.getElementById('ps-grid').innerHTML='<div class="count">Enter a PO above and click Analyse.</div>';return;}
@@ -2915,6 +2921,8 @@
     function sorted(){ var r=(data.rows||[]).slice(); if(POSTOCK_STATE.sort==='sku')r.sort(function(a,b){return (a.sku||'').localeCompare(b.sku||'');});
       else r.sort(function(a,b){return (POSTOCK_PRI[a.priority]-POSTOCK_PRI[b.priority])||(b.required-a.required)||(a.sku||'').localeCompare(b.sku||'');}); return r; }
     function draw(){ if(!data)return;
+      if(!data.rows.length){ document.getElementById('ps-meta').innerHTML='Destination <b>'+esc(data.warehouse||'?')+'</b> · status '+esc(data.status||'')+' · no SKU lines on this PO';
+        document.getElementById('ps-grid').innerHTML='<div class="count">This PO has no SKU lines yet — add quantities in <b>ORDER PLAN</b> (type per SKU) or import PO lines. Nothing to analyse.</div>'; return; }
       var mix={}; data.rows.forEach(function(r){mix[r.priority]=(mix[r.priority]||0)+1;});
       var rem=data.rows.reduce(function(s,r){return s+r.removable;},0);
       document.getElementById('ps-meta').innerHTML='Destination <b>'+esc(data.warehouse||'?')+'</b> · lands '+(data.landing?esc(fd(data.landing)):'—')+' · cover window '+data.cover_weeks+'wk · '+data.rows.length+' SKUs · '
@@ -2986,15 +2994,22 @@
       return ' <span class="exec-yoy '+cls+'">'+ar+(Math.abs(pct)>999?(sg+'999+'):(sg+pct))+'%</span>'; }
     function cell(s){ return '<div class="exec-units">'+units(Math.round(s.u))+yoyBadge(s.u,s.lyU)+'</div><div class="exec-rev">£'+fmInt(s.r)+yoyBadge(s.r,s.lyR)+'</div>'; }
     function actual(fym){ return typeof ACTUAL_MONTHS!=='undefined' && ACTUAL_MONTHS.indexOf(fym)>=0; }
-    // overlay is keyed channel|country|subcategory
-    function ovOf(ch,co,s){ var o=ov[ch+'|'+co+'|'+s]||{}; return {g:(o.growth_pct==null||o.growth_pct==='')?0:Number(o.growth_pct), p:(o.price_pct==null||o.price_pct==='')?0:Number(o.price_pct)}; }
-    // apply a sub-category's overlay to a monthly cell — forecast months only; actuals untouched. The price %
-    // lifts ASP for every forecast month (a permanent uplift inherited across future periods).
+    // per-PERIOD overlay keyed channel|country|subcategory|period (e.g. FY27Q2). Growth % applies to that
+    // period's units; price % lifts ASP and COMPOUNDS forward — a rise in one quarter carries into every
+    // later quarter (so future periods inherit earlier price increases).
+    var PERIODS=[], M2P={}; FY27.forEach(function(q){var p='FY27'+q[0];PERIODS.push(p);q[1].forEach(function(m){M2P[m]=p;});});
+    FY28.forEach(function(q){var p='FY28'+q[0];PERIODS.push(p);q[1].forEach(function(m){M2P[m]=p;});});
+    var PIDX={}; PERIODS.forEach(function(p,i){PIDX[p]=i;});
+    function ovP(ch,co,s,pd){ var o=ov[ch+'|'+co+'|'+s+'|'+pd]||{}; return {g:(o.growth_pct==null||o.growth_pct==='')?0:Number(o.growth_pct), p:(o.price_pct==null||o.price_pct==='')?0:Number(o.price_pct)}; }
+    function cumPrice(ch,co,s,pd){ var m=1, idx=PIDX[pd]; if(idx==null)return 1; for(var i=0;i<=idx;i++){ m*=(1+ovP(ch,co,s,PERIODS[i]).p/100); } return m; }
+    // apply the per-period overlay to a monthly cell — forecast months only; actuals untouched.
     function adj(ch,co,s,fym,v){ v=v||{u:0,r:0,lyU:0,lyR:0}; if(actual(fym))return {u:v.u,r:v.r,lyU:v.lyU||0,lyR:v.lyR||0};
-      var o=ovOf(ch,co,s); return {u:v.u*(1+o.g/100), r:v.r*(1+o.g/100)*(1+o.p/100), lyU:v.lyU||0, lyR:v.lyR||0}; }
+      var pd=M2P[fym]; if(!pd)return {u:v.u,r:v.r,lyU:v.lyU||0,lyR:v.lyR||0};
+      var g=ovP(ch,co,s,pd).g, pm=cumPrice(ch,co,s,pd);
+      return {u:v.u*(1+g/100), r:v.r*(1+g/100)*pm, lyU:v.lyU||0, lyR:v.lyR||0}; }
     function qsum(map,months){ var s={u:0,r:0,lyU:0,lyR:0}; months.forEach(function(m){ var v=map&&map[m]; if(v){s.u+=v.u;s.r+=v.r;s.lyU+=v.lyU||0;s.lyR+=v.lyR||0;} }); return s; }
     function load(){ document.getElementById('fm-grid').innerHTML='<div class="count">Loading…</div>';
-      fetch('/api/scenario/fin-overlay').then(function(r){return r.json();}).then(function(rows){ ov={}; (rows||[]).forEach(function(o){ if((o.subcategory||'')!=='') ov[o.channel+'|'+o.country+'|'+o.subcategory]=o; }); render(); })
+      fetch('/api/scenario/fin-overlay').then(function(r){return r.json();}).then(function(rows){ ov={}; (rows||[]).forEach(function(o){ if((o.subcategory||'')!==''&&(o.period||'')!=='') ov[o.channel+'|'+o.country+'|'+o.subcategory+'|'+o.period]=o; }); render(); })
         .catch(function(){ ov={}; render(); }); }
     function render(){
       if(!document.getElementById('fm-grid')||!document.getElementById('fm-meta'))return;   // view switched away before a fetch resolved
@@ -3018,16 +3033,15 @@
         return '<div class="yr-card '+(emph||'')+'"><div class="yr-card-hdr">'+esc(label)+'</div><div class="yr-card-sub">'+esc(sub)+'</div>'
           +'<div class="yr-card-u">'+fmInt(u)+'</div><div class="yr-card-u-lbl">units</div>'
           +'<div class="yr-card-r">£'+fmInt(r)+'</div><div class="yr-card-r-lbl">revenue</div>'+g+'</div>'; }
-      document.getElementById('fm-meta').textContent='All channels × markets × sub-category · FY Mar–Feb (quarterly) · growth/price overlay per channel × country × sub-category · price % lifts ASP across all forecast periods · saves live';
+      document.getElementById('fm-meta').textContent='Channel → country → sub-category · quarterly FY Mar–Feb · g/p override in each quarter cell (per sub-cat) · price % compounds forward · saves live';
       document.getElementById('fm-kpis').innerHTML='<div class="yr-summary">'
         +yc('FY26','Mar 25–Feb 26 · Actual',f26.u,f26.r,'actual')
         +yc('FY27','Mar 26–Feb 27 · Scenario',f27.u,f27.r,'mixed',{u:gyU,r:gyR},'FY26')+'</div>';
       // ---- table ----
       var h='<div class="exec-tw"><table><thead>'
         +'<tr><th class="lbl-col grp-th" rowspan="2">Channel</th><th class="grp-th year-26" colspan="4">FY27 · Mar 26–Feb 27</th><th class="grp-th yr-total-th yr-26-total" rowspan="2">FY27 TOTAL</th>'
-        +'<th class="grp-th year-27" colspan="4">FY28 · Mar 27–Feb 28</th><th class="grp-th yr-total-th yr-27-total" rowspan="2">FY28 TOTAL</th>'
-        +'<th class="grp-th" colspan="2">Scenario overlay</th></tr>'
-        +'<tr>'+FY27.map(function(q){return '<th>'+q[0]+'</th>';}).join('')+FY28.map(function(q){return '<th class="fc-27">'+q[0]+'</th>';}).join('')+'<th>Growth %</th><th>Price %</th></tr>'
+        +'<th class="grp-th year-27" colspan="4">FY28 · Mar 27–Feb 28</th><th class="grp-th yr-total-th yr-27-total" rowspan="2">FY28 TOTAL</th></tr>'
+        +'<tr>'+FY27.map(function(q){return '<th>'+q[0]+'</th>';}).join('')+'<th></th>'+FY28.map(function(q){return '<th class="fc-27">'+q[0]+'</th>';}).join('')+'<th></th></tr>'
         +'</thead><tbody>';
       function rowCells(map,cc){ var s='';
         FY27.forEach(function(q){ s+='<td'+(cc?' class="country-cell"':'')+'>'+cell(qsum(map,q[1]))+'</td>'; });
@@ -3035,25 +3049,33 @@
         FY28.forEach(function(q){ s+='<td class="fc-27'+(cc?' country-cell':'')+'">'+cell(qsum(map,q[1]))+'</td>'; });
         s+='<td class="yr-total yr-27-total'+(cc?' country-cell':'')+'">'+cell(qsum(map,FY28M))+'</td>';
         return s; }
+      function qFc(months){ return months.some(function(m){return !actual(m);}); }   // quarter has ≥1 forecast month
+      function qIn(ch,co,s,pd){ var o=ovP(ch,co,s,pd);
+        return '<div class="fm-ov"><span class="fm-ovl" title="growth % override">g</span><input class="fm-in fm-g" data-ch="'+ch+'" data-co="'+esc(co)+'" data-s="'+esc(s)+'" data-pd="'+pd+'" value="'+(o.g||'')+'" placeholder="0">'
+          +'<span class="fm-ovl" title="price % override">p</span><input class="fm-in fm-p" data-ch="'+ch+'" data-co="'+esc(co)+'" data-s="'+esc(s)+'" data-pd="'+pd+'" value="'+(o.p||'')+'" placeholder="0"></div>'; }
+      function rowCellsSub(ch,co,s,map){ var out='';
+        FY27.forEach(function(q){ out+='<td class="country-cell">'+cell(qsum(map,q[1]))+(qFc(q[1])?qIn(ch,co,s,'FY27'+q[0]):'')+'</td>'; });
+        out+='<td class="yr-total yr-26-total country-cell">'+cell(qsum(map,FY27M))+'</td>';
+        FY28.forEach(function(q){ out+='<td class="fc-27 country-cell">'+cell(qsum(map,q[1]))+(qFc(q[1])?qIn(ch,co,s,'FY28'+q[0]):'')+'</td>'; });
+        out+='<td class="yr-total yr-27-total country-cell">'+cell(qsum(map,FY28M))+'</td>';
+        return out; }
       CHS.forEach(function(ch){ var exp=scenExp.has(ch);
-        h+='<tr class="channel-row"><td class="lbl-col channel-lbl" data-ch="'+ch+'"><span class="ch-chev">'+(exp?'▾':'▸')+'</span> '+ch+'</td>'+rowCells(CHm[ch],false)+'<td></td><td></td></tr>';
+        h+='<tr class="channel-row"><td class="lbl-col channel-lbl" data-ch="'+ch+'"><span class="ch-chev">'+(exp?'▾':'▸')+'</span> '+ch+'</td>'+rowCells(CHm[ch],false)+'</tr>';
         if(exp){ Object.keys(COC[ch]).sort().forEach(function(co){ var coExp=scenExpCo.has(ch+'|'+co);
-          h+='<tr class="country-row"><td class="lbl-col country-lbl coc-lbl" data-ch="'+ch+'" data-co="'+esc(co)+'" style="cursor:pointer">&nbsp;&nbsp;<span class="ch-chev">'+(coExp?'▾':'▸')+'</span> '+((typeof FLAGS!=='undefined'&&FLAGS[co])||'')+' '+esc(co)+'</td>'+rowCells(COC[ch][co],true)+'<td></td><td></td></tr>';
-          if(coExp){ (subsByCoc[ch+'|'+co]||[]).forEach(function(s){ var o=ovOf(ch,co,s);
-            h+='<tr class="subcat-row"><td class="lbl-col" style="padding-left:34px;color:#555">'+esc(s)+'</td>'+rowCells(COCS[ch][co][s],true)
-              +'<td class="country-cell"><input class="fm-in fm-g" data-ch="'+ch+'" data-co="'+esc(co)+'" data-s="'+esc(s)+'" value="'+(o.g||'')+'" placeholder="0">%</td>'
-              +'<td class="country-cell"><input class="fm-in fm-p" data-ch="'+ch+'" data-co="'+esc(co)+'" data-s="'+esc(s)+'" value="'+(o.p||'')+'" placeholder="0">%</td></tr>'; }); }
+          h+='<tr class="country-row"><td class="lbl-col country-lbl coc-lbl" data-ch="'+ch+'" data-co="'+esc(co)+'" style="cursor:pointer">&nbsp;&nbsp;<span class="ch-chev">'+(coExp?'▾':'▸')+'</span> '+((typeof FLAGS!=='undefined'&&FLAGS[co])||'')+' '+esc(co)+'</td>'+rowCells(COC[ch][co],true)+'</tr>';
+          if(coExp){ (subsByCoc[ch+'|'+co]||[]).forEach(function(s){
+            h+='<tr class="subcat-row"><td class="lbl-col" style="padding-left:34px;color:#555">'+esc(s)+'</td>'+rowCellsSub(ch,co,s,COCS[ch][co][s])+'</tr>'; }); }
         }); }
       });
-      h+='<tr class="total-row"><td class="lbl-col">TOTAL</td>'+rowCells(TOT,false)+'<td></td><td></td></tr>';
+      h+='<tr class="total-row"><td class="lbl-col">TOTAL</td>'+rowCells(TOT,false)+'</tr>';
       document.getElementById('fm-grid').innerHTML=h+'</tbody></table></div>';
       document.querySelectorAll('#fm-grid .channel-lbl').forEach(function(el){ el.onclick=function(){ var ch=el.dataset.ch; if(scenExp.has(ch))scenExp.delete(ch); else scenExp.add(ch); render(); }; });
       document.querySelectorAll('#fm-grid .coc-lbl').forEach(function(el){ el.onclick=function(){ var k=el.dataset.ch+'|'+el.dataset.co; if(scenExpCo.has(k))scenExpCo.delete(k); else scenExpCo.add(k); render(); }; });
-      document.querySelectorAll('#fm-grid .fm-g, #fm-grid .fm-p').forEach(function(el){ el.onchange=function(){ var ch=el.dataset.ch, co=el.dataset.co, s=el.dataset.s;
-        var sel='[data-ch="'+cssEsc(ch)+'"][data-co="'+cssEsc(co)+'"][data-s="'+cssEsc(s)+'"]';
+      document.querySelectorAll('#fm-grid .fm-g, #fm-grid .fm-p').forEach(function(el){ el.onchange=function(){ var ch=el.dataset.ch, co=el.dataset.co, s=el.dataset.s, pd=el.dataset.pd;
+        var sel='[data-ch="'+cssEsc(ch)+'"][data-co="'+cssEsc(co)+'"][data-s="'+cssEsc(s)+'"][data-pd="'+cssEsc(pd)+'"]';
         var g=document.querySelector('#fm-grid .fm-g'+sel), p=document.querySelector('#fm-grid .fm-p'+sel);
-        fetch('/api/scenario/fin-overlay',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({channel:ch,country:co,subcategory:s,growth_pct:g?g.value:'',price_pct:p?p.value:''})})
-          .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); ov[ch+'|'+co+'|'+s]={channel:ch,country:co,subcategory:s,growth_pct:g?g.value:'',price_pct:p?p.value:''}; render(); })
+        fetch('/api/scenario/fin-overlay',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({channel:ch,country:co,subcategory:s,period:pd,growth_pct:g?g.value:'',price_pct:p?p.value:''})})
+          .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); ov[ch+'|'+co+'|'+s+'|'+pd]={channel:ch,country:co,subcategory:s,period:pd,growth_pct:g?g.value:'',price_pct:p?p.value:''}; render(); })
           .catch(function(e){ alert('Save failed: '+(e.message||e)); }); }; });
     }
     load(); }

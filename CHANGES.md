@@ -4,6 +4,15 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.332 - Financial model per-quarter overrides + PO Stock Priority = production-only
+
+- **Financial model:** growth %/price % overrides now sit IN EACH QUARTER CELL (little g/p inputs with
+  tooltips), per sub-category × channel × country — not one value per row. Price % COMPOUNDS forward (a rise
+  in a quarter carries into all later quarters; verified Q2 +10% lifts Q3 & Q4). Migration 067 adds a period
+  key to the overlay. Removed the trailing Growth/Price columns.
+- **PO Stock Priority:** PO picker restricted to **production** POs only (not shipped/complete); shows a
+  count, and a clear "no SKU lines — add in Order Plan / import" message for empty POs (e.g. PO-56UKXR2).
+
 ## v20.331 - Financial model: sticky left-aligned label column
 
 The Channel/Country/Sub-category label column in the financial model now stays left-aligned and frozen
