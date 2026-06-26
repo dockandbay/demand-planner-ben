@@ -4,6 +4,14 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.345 - Data fix: correct PO-55UKXR2 order-plan lines
+
+PO-55UKXR2's order-plan lines were wrong — 96 lines, carrying 48 extra SKUs not on the actual Cin7 PO (the real
+PO has 48 lines). Corrected against the Cin7 export of 26-06-2026; sandbox verified 96 → 48, matching the ERP
+mirror exactly. **Migration `071_fix_po55ukxr2_lines.sql`** makes prod match regardless of current state
+(upserts the 48 correct lines + deletes the rest; idempotent). The PO/ERP data-seed CSV
+(`purchase_order_lines.csv`) was also corrected for fresh loads. No app code change.
+
 ## v20.344 - Order Plan: keep COMPLETE POs out of the pivot (fixes all-SKUs crash)
 
 Including the 1000+ completed POs (from the ERP history load) in an all-SKUs / all-category pivot exploded it

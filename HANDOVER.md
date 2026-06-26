@@ -29,8 +29,11 @@ plus new numbered migrations on top. See `migrations/README.md`.
     master (Forming Reality, Kangxun (Doris), Foamie, Chilly Bottles). Run **before** loading the PO/ERP data
     seed (see §7). Idempotent.
   - **`070_oplan_exception_approvals.sql`** — `supplier_risk_approved` + `discontinue_approved` on
-    purchase_order_lines (Order Plan exception sign-off, like partial_carton_approved). Idempotent. ⬅ *latest.*
-- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`070` in order. Do **not** run
+    purchase_order_lines (Order Plan exception sign-off, like partial_carton_approved). Idempotent.
+  - **`071_fix_po55ukxr2_lines.sql`** — data fix: PO-55UKXR2's order-plan lines were wrong (extra SKUs not on
+    the real Cin7 PO). Upserts the correct 48 lines + deletes the rest. Idempotent. Run **after** the PO/ERP
+    data seed (§7). ⬅ *latest.*
+- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`071` in order. Do **not** run
   `schema.sql` against an already-migrated DB (the table creates aren't idempotent).
 
 ---
