@@ -4,6 +4,11 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.329 - Financial model: full FY28 (Mar 27–Feb 28)
+
+FY28 in the financial forecast model now runs the full year — Q4 extended to include Jan & Feb 2028 (was
+Dec-only/partial). Quarterly columns scroll horizontally; header updated to "Mar 27–Feb 28".
+
 ## v20.328 - Financial model: sub-category breakdown + per-sub-cat growth/price overrides
 
 SCENARIO ▸ Financial Forecast Model now drills channel → country → **sub-category**. Growth % and price-

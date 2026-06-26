@@ -2929,7 +2929,7 @@
   // but QUARTERLY columns, with a growth % + price % overlay per channel × country (forecast months only).
   function renderFinModel(c){
     var FY27=[['Q1',['2026_03','2026_04','2026_05']],['Q2',['2026_06','2026_07','2026_08']],['Q3',['2026_09','2026_10','2026_11']],['Q4',['2026_12','2027_01','2027_02']]];
-    var FY28=[['Q1',['2027_03','2027_04','2027_05']],['Q2',['2027_06','2027_07','2027_08']],['Q3',['2027_09','2027_10','2027_11']],['Q4',['2027_12']]];
+    var FY28=[['Q1',['2027_03','2027_04','2027_05']],['Q2',['2027_06','2027_07','2027_08']],['Q3',['2027_09','2027_10','2027_11']],['Q4',['2027_12','2028_01','2028_02']]];
     var concat=function(a){return [].concat.apply([],a);};
     var FY27M=concat(FY27.map(function(q){return q[1];})), FY28M=concat(FY28.map(function(q){return q[1];})), ALLM=FY27M.concat(FY28M);
     var CHS=['DTC','FBA','B2B'], ov={};
@@ -2980,7 +2980,7 @@
       // ---- table ----
       var h='<div class="exec-tw"><table><thead>'
         +'<tr><th class="lbl-col grp-th" rowspan="2">Channel</th><th class="grp-th year-26" colspan="4">FY27 · Mar 26–Feb 27</th><th class="grp-th yr-total-th yr-26-total" rowspan="2">FY27 TOTAL</th>'
-        +'<th class="grp-th year-27" colspan="4">FY28 · Mar 27–Dec 27 (partial)</th><th class="grp-th yr-total-th yr-27-total" rowspan="2">FY28 TOTAL</th>'
+        +'<th class="grp-th year-27" colspan="4">FY28 · Mar 27–Feb 28</th><th class="grp-th yr-total-th yr-27-total" rowspan="2">FY28 TOTAL</th>'
         +'<th class="grp-th" colspan="2">Scenario overlay</th></tr>'
         +'<tr>'+FY27.map(function(q){return '<th>'+q[0]+'</th>';}).join('')+FY28.map(function(q){return '<th class="fc-27">'+q[0]+'</th>';}).join('')+'<th>Growth %</th><th>Price %</th></tr>'
         +'</thead><tbody>';
