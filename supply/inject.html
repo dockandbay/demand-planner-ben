@@ -2136,8 +2136,10 @@
       b.innerHTML='<div class="bar"><span class="pill-lbl">Date</span><span class="tiny mut">from</span> <input class="flt" id="pay-from" placeholder="YYYY-MM-DD" value="'+esc(PAY_FROM)+'" style="width:118px"> <span class="tiny mut">to</span> <input class="flt" id="pay-to" placeholder="YYYY-MM-DD" value="'+esc(PAY_TO)+'" style="width:118px"> <button class="save-btn light" id="pay-clear">Clear</button> <span class="tiny mut">default: last 60 days · Clear to see all history · or type a full/partial date (e.g. 2026-06)</span></div><div id="pay-rep"></div>';
       function draw(){ var f=rows.filter(function(r){ var d=r.dt||''; return (!PAY_FROM || d>=PAY_FROM) && (!PAY_TO || d.slice(0,PAY_TO.length)<=PAY_TO); });
         var rep=document.getElementById('pay-rep'); rep.innerHTML=payReportHTML(f); bindPayFx(rep);
-        rep.querySelectorAll('.pay-xero-dl').forEach(function(btn){ btn.onclick=function(){ xbDownload(f[+btn.dataset.i]); }; });
-        rep.querySelectorAll('.pay-xero-copy').forEach(function(btn){ btn.onclick=function(){ xbCopy(f[+btn.dataset.i],btn); }; }); }
+        // read the LIVE bank ccy/amount from the row inputs so a just-typed currency applies without refresh
+        function liveFx(btn){ var tr=btn.closest('tr'); var a=tr.querySelector('.pfx-amt'), c=tr.querySelector('.pfx-ccy'); return {ccy:c?c.value:'', amt:a?a.value:''}; }
+        rep.querySelectorAll('.pay-xero-dl').forEach(function(btn){ btn.onclick=function(){ var fx=liveFx(btn); xbDownload(f[+btn.dataset.i],fx.ccy,fx.amt); }; });
+        rep.querySelectorAll('.pay-xero-copy').forEach(function(btn){ btn.onclick=function(){ var fx=liveFx(btn); xbCopy(f[+btn.dataset.i],fx.ccy,fx.amt,btn); }; }); }
       document.getElementById('pay-from').oninput=function(){ PAY_FROM=this.value.trim(); draw(); };
       document.getElementById('pay-to').oninput=function(){ PAY_TO=this.value.trim(); draw(); };
       document.getElementById('pay-clear').onclick=function(){ PAY_FROM=''; PAY_TO=''; document.getElementById('pay-from').value=''; document.getElementById('pay-to').value=''; draw(); };
@@ -2150,29 +2152,35 @@
   function xbCell(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
   function fmtAmt(v){ if(v==null||v==='')return ''; var n=Number(String(v).replace(/,/g,'')); return isNaN(n)?String(v):n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
   var XB_HEAD='*ContactName,EmailAddress,POAddressLine1,POAddressLine2,POAddressLine3,POAddressLine4,POCity,PORegion,POPostalCode,POCountry,*InvoiceNumber,*InvoiceDate,*DueDate,Total,InventoryItemCode,Description,*Quantity,*UnitAmount,*AccountCode,*TaxType,TaxAmount,TrackingName1,TrackingOption1,TrackingName2,TrackingOption2,Currency,*OriginalAmount';
-  // One Xero bill per payment run. Rows = the run's PO payment lines (completion/balance) only — deposits +
-  // other payments are excluded. If the run was paid in a non-USD currency (bank amount + ccy entered),
-  // *UnitAmount is converted at rate = bankAmount / USD-total while *OriginalAmount keeps the USD figure.
-  function xeroBillCsv(run){
-    var po=(run.lines||[]).filter(function(l){return l.source==='po';});
-    if(!po.length) return null;
-    var alt = run.bank_ccy && run.bank_ccy!=='USD' && Number(run.other_amount)>0;
-    var ccy = alt?run.bank_ccy:'USD';
-    var usdTotal = po.reduce(function(s,l){return s+Number(l.amount);},0);
-    var rate = (alt && usdTotal>0) ? Number(run.other_amount)/usdTotal : 1;
-    var inv = 'SUPPLIER-PAYMENT-'+(run.supplier_code?run.supplier_code+'-':'')+run.dt;   // e.g. SUPPLIER-PAYMENT-JM-2026-06-25
+  // One Xero bill per payment run. The download EXCLUDES "other" payments but INCLUDES them in the total used
+  // to derive the FX rate: rate = bankAmount / run.total (the full payment incl. other). That rate is applied
+  // to every exported line (PO completion/balance + deposit); "other" lines are then dropped from the file.
+  // USD runs (no non-USD bank ccy) export at face value. liveCcy/liveAmt come from the row inputs at click
+  // time, so a freshly-typed currency works without a page refresh. *OriginalAmount always keeps USD.
+  function xeroBillMatrix(run, liveCcy, liveAmt){
+    var out=(run.lines||[]).filter(function(l){return l.source!=='other';});   // drop "other" from the file only
+    if(!out.length) return null;
+    var ccy=(liveCcy && liveCcy!=='USD') ? liveCcy : 'USD';
+    var altAmt=Number(String(liveAmt==null?'':liveAmt).replace(/,/g,''));
+    var alt = ccy!=='USD' && altAmt>0;
+    var fullTotal = Number(run.total) || (run.lines||[]).reduce(function(s,l){return s+Number(l.amount);},0);  // incl. other
+    var rate = (alt && fullTotal>0) ? altAmt/fullTotal : 1;
+    var inv = 'SUPPLIER-PAYMENT-'+(run.supplier_code?run.supplier_code+'-':'')+run.dt;
     var dmy = xbDmy(run.dt);
-    var rows=po.map(function(l){ var usd=Number(l.amount); var unit=alt?(usd*rate):usd;
+    var header=XB_HEAD.split(',');
+    var rows=out.map(function(l){ var usd=Number(l.amount); var unit=alt?(usd*rate):usd;
       var desc=l.reference+' - '+l.type+(alt?' ('+Math.round(usd)+' USD)':'');
-      return [run.supplier,'','','','','','','','','',inv,dmy,dmy,'','',desc,'1',unit.toFixed(2),l.account_code||'','No VAT','','','','','',ccy,usd.toFixed(2)].map(xbCell).join(',');
-    });
-    return XB_HEAD+'\n'+rows.join('\n')+'\n';
+      return [run.supplier,'','','','','','','','','',inv,dmy,dmy,'','',desc,'1',unit.toFixed(2),l.account_code||'','No VAT','','','','','',ccy,usd.toFixed(2)]; });
+    return { header: header, rows: rows };
   }
+  function xbToCsv(m){ return [m.header].concat(m.rows).map(function(r){return r.map(xbCell).join(',');}).join('\n')+'\n'; }
+  function xbToTsv(m){ return [m.header].concat(m.rows).map(function(r){return r.map(function(c){return String(c==null?'':c).replace(/[\t\n\r]/g,' ');}).join('\t');}).join('\n'); }
   function xbFilename(run){ return 'XERO_BILL_'+(run.supplier_code||run.supplier||'').replace(/[^A-Za-z0-9]+/g,'_')+'_'+run.dt+'.csv'; }
-  function xbDownload(run){ var t=xeroBillCsv(run); if(!t){alert('No PO payments in this run to export.');return;}
-    var bl=new Blob([t],{type:'text/csv'}); var u=URL.createObjectURL(bl); var a=document.createElement('a'); a.href=u; a.download=xbFilename(run); document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); }
-  function xbCopy(run,btn){ var t=xeroBillCsv(run); if(!t){alert('No PO payments in this run to export.');return;}
-    navigator.clipboard.writeText(t).then(function(){ if(btn){var o=btn.textContent; btn.textContent='✓'; setTimeout(function(){btn.textContent=o;},1200);} }).catch(function(){ alert('Copy failed — your browser blocked clipboard access.'); }); }
+  function xbDownload(run, ccy, amt){ var m=xeroBillMatrix(run,ccy,amt); if(!m){alert('No payments in this run to export (other payments are excluded).');return;}
+    var bl=new Blob([xbToCsv(m)],{type:'text/csv'}); var u=URL.createObjectURL(bl); var a=document.createElement('a'); a.href=u; a.download=xbFilename(run); document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); }
+  function xbCopy(run, ccy, amt, btn){ var m=xeroBillMatrix(run,ccy,amt); if(!m){alert('No payments in this run to export (other payments are excluded).');return;}
+    var tsv=xbToTsv(m);   // TAB-separated so it pastes into separate Google Sheets columns
+    navigator.clipboard.writeText(tsv).then(function(){ if(btn){var o=btn.textContent; btn.textContent='✓'; setTimeout(function(){btn.textContent=o;},1200);} }).catch(function(){ alert('Copy failed — your browser blocked clipboard access.'); }); }
   // master row = one bank payment (date + supplier): base (USD) total + actual bank amount/currency.
   // expand to see the sub-payments (reference · amount · type · deposit ref).
   function payReportHTML(rows){ if(!rows||!rows.length)return '<div class="count">No payments.</div>';
@@ -2193,8 +2201,8 @@
       var det='<tr class="exp-row" id="payexp-'+i+'" style="display:none"><td colspan="7"><div style="padding:2px">'
         +'<div class="sect-h" style="margin-top:2px">Payments in this run ('+(r.lines||[]).length+')</div>'
         +'<table style="font-size:11px"><thead><tr><th class="l">Reference</th><th>Amount (USD)</th><th class="l">Type</th><th class="l">Deposit ref</th></tr></thead><tbody>'+lines+'</tbody></table></div></td></tr>';
-      var hasPO=(r.lines||[]).some(function(l){return l.source==='po';});
-      var xbBtns=hasPO?' <button class="lnk-btn pay-xero-dl" data-i="'+i+'" title="Download Xero bill details">⬇</button> <button class="lnk-btn pay-xero-copy" data-i="'+i+'" title="Download Xero bill details (copy to clipboard)">⧉</button>':'';
+      var hasBill=(r.lines||[]).some(function(l){return l.source!=='other';});   // bill = everything except "other"
+      var xbBtns=hasBill?' <button class="lnk-btn pay-xero-dl" data-i="'+i+'" title="Download Xero bill details">⬇</button> <button class="lnk-btn pay-xero-copy" data-i="'+i+'" title="Download Xero bill details (copy to clipboard)">⧉</button>':'';
       return '<tr><td class="l" style="white-space:nowrap"><button class="planbtn pay-exp" data-i="'+i+'">▸</button>'+xbBtns+'</td>'
         +'<td class="l">'+esc(fd(r.dt))+'</td><td class="l">'+esc(r.supplier)+'</td>'
         +'<td><b>'+money(r.total)+'</b></td><td class="l">'+r.base_ccy+'</td>'

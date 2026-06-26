@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.311';
+const APP_VERSION = 'v20.312';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1365,7 +1365,8 @@ app.get('/api/supply/:section', async (req, res) => {
           FROM planner.purchase_orders o WHERE o.pay_balance_2_date IS NOT NULL AND coalesce(o.pay_balance_2_amount,0)>0
           UNION ALL
           SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(supplier_name,'(none)'),
-            coalesce(nullif(reference,''), description, ''), round(amount)::int, 'Deposit', '', 'deposit', NULL, ${SUPC('supplier_name')}
+            coalesce(nullif(reference,''), description, ''), round(amount)::int, 'Deposit', '', 'deposit',
+            CASE WHEN upper(coalesce(country,''))='AU' THEN '620.00 AU' ELSE xero_account_code END, ${SUPC('supplier_name')}
           FROM planner.deposits WHERE is_deposit=true AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0
           UNION ALL
           SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(supplier_name,'(none)'),

@@ -4,6 +4,20 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.312 - Xero bill fixes: live FX, rate from total, TSV copy
+
+Fixes to the Payments Report Xero bill export (v20.310):
+1. **Currency/conversion now apply without a page refresh.** The export reads the bank ccy + amount **live
+   from the row inputs** at click time (previously it used the value loaded with the page, so a just-typed
+   GBP/EUR amount was ignored until refresh — currency stayed USD and amounts unconverted).
+2. **FX rate is derived from the full payment total (incl. "other" payments).** `rate = bankAmount /
+   run.total`; the rate is applied to every exported line, then **"other" payments are dropped from the
+   file** (they're billed separately). USD runs export at face value. `*OriginalAmount` always keeps USD.
+   Export now includes deposit lines too (account code = the deposit's own `xero_account_code`, AU →
+   `620.00 AU`); only "other" is excluded.
+3. **Copy-to-clipboard is now TAB-separated** so it pastes into separate Google Sheets columns (the file
+   download remains comma-CSV for Xero import).
+
 ## v20.311 - Delete deposits / other payments
 
 New `POST /api/supply/deposit/:id/delete`:
