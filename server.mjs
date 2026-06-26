@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.309';
+const APP_VERSION = 'v20.310';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1340,25 +1340,36 @@ app.get('/api/supply/:section', async (req, res) => {
         //   • OTHER payments (planner.deposits is_deposit=false)
         // NOTE: PO *starting deposits* are deliberately EXCLUDED — they are a drawdown/allocation against a
         // register deposit, not a separate cash payment. The register entry is the real payment.
+        // Xero AccountCode per PO line: AU delivery → always '620.00 AU'; else the deposit the PO is
+        // assigned to (deposits.xero_account_code by deposit_ref); else the production's code
+        // (prod_numbers.xero_account_code by prod_no). supplier_code = suppliers.code (the 2-letter code).
+        const ACCT = `CASE
+            WHEN upper(coalesce(nullif(o.country_code,''),(SELECT br.country_code FROM planner.branches br WHERE br.name=o.branch),''))='AU' THEN '620.00 AU'
+            WHEN coalesce(o.deposit_ref,'')<>'' THEN (SELECT d.xero_account_code FROM planner.deposits d WHERE d.reference=o.deposit_ref AND coalesce(d.xero_account_code,'')<>'' ORDER BY d.id LIMIT 1)
+            ELSE (SELECT pn.xero_account_code FROM planner.prod_numbers pn
+                   WHERE regexp_replace(upper(coalesce(pn.prod_no,'')),'^P','')=regexp_replace(upper(coalesce(o.prod_no,'')),'^P','')
+                     AND coalesce(pn.xero_account_code,'')<>'' LIMIT 1) END`;
+        const SUPC = nm => `(SELECT s.code FROM planner.suppliers s WHERE lower(trim(s.name))=lower(trim(${nm})) LIMIT 1)`;
         const lines = (await pool.query(`
-          SELECT to_char(pay_completion_date,'YYYY-MM-DD') dt, coalesce(supplier_name,'(none)') supplier,
-            po reference, round(pay_completion_assigned)::int amount, 'Completion' type, '' deposit_ref, 'po' source
-          FROM planner.purchase_orders WHERE pay_completion_date IS NOT NULL AND coalesce(pay_completion_assigned,0)>0
+          SELECT to_char(o.pay_completion_date,'YYYY-MM-DD') dt, coalesce(o.supplier_name,'(none)') supplier,
+            o.po reference, round(o.pay_completion_assigned)::int amount, 'Completion' type, '' deposit_ref, 'po' source,
+            ${ACCT} account_code, ${SUPC('o.supplier_name')} supplier_code
+          FROM planner.purchase_orders o WHERE o.pay_completion_date IS NOT NULL AND coalesce(o.pay_completion_assigned,0)>0
           UNION ALL
-          SELECT to_char(pay_balance_1_date,'YYYY-MM-DD'), coalesce(supplier_name,'(none)'),
-            po, round(pay_balance_1_amount)::int, 'Balance', '', 'po'
-          FROM planner.purchase_orders WHERE pay_balance_1_date IS NOT NULL AND coalesce(pay_balance_1_amount,0)>0
+          SELECT to_char(o.pay_balance_1_date,'YYYY-MM-DD'), coalesce(o.supplier_name,'(none)'),
+            o.po, round(o.pay_balance_1_amount)::int, 'Balance', '', 'po', ${ACCT}, ${SUPC('o.supplier_name')}
+          FROM planner.purchase_orders o WHERE o.pay_balance_1_date IS NOT NULL AND coalesce(o.pay_balance_1_amount,0)>0
           UNION ALL
-          SELECT to_char(pay_balance_2_date,'YYYY-MM-DD'), coalesce(supplier_name,'(none)'),
-            po, round(pay_balance_2_amount)::int, 'Balance', '', 'po'
-          FROM planner.purchase_orders WHERE pay_balance_2_date IS NOT NULL AND coalesce(pay_balance_2_amount,0)>0
+          SELECT to_char(o.pay_balance_2_date,'YYYY-MM-DD'), coalesce(o.supplier_name,'(none)'),
+            o.po, round(o.pay_balance_2_amount)::int, 'Balance', '', 'po', ${ACCT}, ${SUPC('o.supplier_name')}
+          FROM planner.purchase_orders o WHERE o.pay_balance_2_date IS NOT NULL AND coalesce(o.pay_balance_2_amount,0)>0
           UNION ALL
           SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(supplier_name,'(none)'),
-            coalesce(nullif(reference,''), description, ''), round(amount)::int, 'Deposit', '', 'deposit'
+            coalesce(nullif(reference,''), description, ''), round(amount)::int, 'Deposit', '', 'deposit', NULL, ${SUPC('supplier_name')}
           FROM planner.deposits WHERE is_deposit=true AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0
           UNION ALL
           SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(supplier_name,'(none)'),
-            coalesce(nullif(reference,''), description, ''), round(amount)::int, 'Other', '', 'other'
+            coalesce(nullif(reference,''), description, ''), round(amount)::int, 'Other', '', 'other', NULL, ${SUPC('supplier_name')}
           FROM planner.deposits WHERE is_deposit=false AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0`)).rows;
         const fx = (await pool.query(`SELECT to_char(run_date,'YYYY-MM-DD') dt, supplier, paid_amount, coalesce(paid_currency,'') ccy FROM planner.payment_fx`)).rows;
         const normSup = s => { const p = (s || '').split(',').map(x => x.trim()).filter(Boolean); return Array.from(new Set(p)).join(', ') || '(none)'; };
@@ -1367,11 +1378,12 @@ app.get('/api/supply/:section', async (req, res) => {
         for (const l of lines) { const sup = normSup(l.supplier); const k = l.dt + '|' + sup;
           const g = groups[k] || (groups[k] = { dt: l.dt, supplier: sup, total: 0, lines: [] });
           g.total += Number(l.amount);
-          g.lines.push({ reference: l.reference, amount: Number(l.amount), type: l.type, deposit_ref: l.deposit_ref, source: l.source }); }
+          if (l.supplier_code && !g.supplier_code) g.supplier_code = l.supplier_code;
+          g.lines.push({ reference: l.reference, amount: Number(l.amount), type: l.type, deposit_ref: l.deposit_ref, source: l.source, account_code: l.account_code || '' }); }
         const TYPE_ORD = { Deposit: 0, Completion: 1, Balance: 2, Other: 3 };
         const out = Object.values(groups).map(g => { const f = fxMap[g.dt + '|' + g.supplier];
           g.lines.sort((a, b) => (TYPE_ORD[a.type] ?? 9) - (TYPE_ORD[b.type] ?? 9));
-          return { dt: g.dt, supplier: g.supplier, total: Math.round(g.total), base_ccy: 'USD',
+          return { dt: g.dt, supplier: g.supplier, supplier_code: g.supplier_code || '', total: Math.round(g.total), base_ccy: 'USD',
             other_amount: f && f.paid_amount != null ? Number(f.paid_amount) : null, bank_ccy: f ? f.ccy : '',
             lines: g.lines }; })
           .sort((a, b) => a.dt < b.dt ? 1 : a.dt > b.dt ? -1 : (a.supplier < b.supplier ? -1 : 1));

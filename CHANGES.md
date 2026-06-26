@@ -4,6 +4,27 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.310 - Xero bill export from Payments Report + deposits Xero code
+
+**Payments Report — per-run Xero bill CSV.** Each payment run gets two buttons (⬇ download, ⧉ copy to
+clipboard; tooltip "Download Xero bill details"). The CSV is in Xero's bill-import format, one row per **PO
+payment line** (completion/balance) in the run — deposits and other payments are excluded.
+- `*ContactName` = supplier; `*InvoiceNumber` = `SUPPLIER-PAYMENT-<code>-<YYYY-MM-DD>` (`<code>` =
+  `suppliers.code`, e.g. JM); `*InvoiceDate`/`*DueDate` = run date (DD/MM/YYYY); `Description` =
+  `<PO> - <Type>`; `*Quantity` = 1; `*TaxType` = `No VAT`.
+- **`*AccountCode`** resolves per PO: **AU delivery → `620.00 AU`** (always); else the **deposit** the PO is
+  assigned to (`deposits.xero_account_code` by `deposit_ref`); else the **production** code
+  (`prod_numbers.xero_account_code` by `prod_no`, `P`-prefix-insensitive).
+- **Currency:** if the run was paid in a non-USD currency (bank amount + ccy entered on the run), `*UnitAmount`
+  is converted at `rate = bankAmount / USD-total` (so the lines sum to the entered amount) while
+  `*OriginalAmount` keeps the USD figure and `Description` appends `(<usd> USD)`. Otherwise USD throughout.
+- The bank-amount input now displays with thousands separators (e.g. `100,000.00`).
+
+**Deposits view** (`Productions ▸ Deposits`) now shows the **Xero code** column after PROD#, inline-editable
+(saves `xero_account_code` via the existing deposit endpoint).
+
+Server: `payments-report` now returns `account_code` + `supplier_code` per line. Client-only CSV build.
+
 ## v20.309 - Payments Due: reference hyperlinks
 
 In SUPPLY ▸ Productions ▸ **Payments Due**, the Reference column is now clickable:

@@ -1357,7 +1357,7 @@
     b.innerHTML=lookupDatalists()+'<div class="bar">'+FILT.map(function(f){return '<span class="pill'+(f[0]==='open'?' active':'')+'" data-f="'+f[0]+'">'+f[1]+'</span>';}).join('')
       +'<button class="tool-badge bg-blue" id="dep-new" style="cursor:pointer;border:none">+ Deposit</button>'
       +'<input class="flt" id="dep-q" placeholder="Filter reference / supplier…"><span class="count" id="dep-cnt"></span></div>'
-      +'<div class="tw"><table><thead><tr><th class="l">Reference</th><th class="l">Supplier</th><th class="l">PROD#</th><th>Amount</th><th>FX</th><th class="l">Date paid</th><th>Remaining</th><th class="l">Assigned production(s)</th><th class="l"></th></tr></thead><tbody id="dep-rows"></tbody></table></div>';
+      +'<div class="tw"><table><thead><tr><th class="l">Reference</th><th class="l">Supplier</th><th class="l">PROD#</th><th class="l">Xero code</th><th>Amount</th><th>FX</th><th class="l">Date paid</th><th>Remaining</th><th class="l">Assigned production(s)</th><th class="l"></th></tr></thead><tbody id="dep-rows"></tbody></table></div>';
     // A deposit row LOCKS (greyed, read-only) once it's CLOSED, or once it's PAID + FX applied. A locked
     // pay row can be edited via Edit→Save; a closed row must be reopened first. Unlocked rows stay inline.
     function rowHTML(d){ var ep='/api/supply/deposit/'+encodeURIComponent(d.id);
@@ -1369,6 +1369,7 @@
       var c_ref = locked?'<td class="l">'+txt(d.reference)+'</td>':'<td class="l">'+editCell(ep,'reference',d.reference,'txt')+'</td>';
       var c_sup = locked?'<td class="l">'+txt(d.supplier_name)+'</td>':'<td class="l">'+supSel(ep,d.supplier_name)+'</td>';
       var c_prod= locked?'<td class="l">'+txt(d.prod_no)+'</td>':'<td class="l">'+editCell(ep,'prod_no',d.prod_no,'txt')+'</td>';
+      var c_xero= locked?'<td class="l">'+txt(d.xero_account_code)+'</td>':'<td class="l">'+editCell(ep,'xero_account_code',d.xero_account_code,'txt')+'</td>';
       var c_amt = locked?'<td>'+txt(d.amount)+'</td>':'<td>'+editCell(ep,'amount',d.amount)+'</td>';
       var c_fx  = locked?'<td>'+txt(d.xero_fx)+'</td>':'<td>'+editCell(ep,'xero_fx',d.xero_fx)+'</td>';
       var c_paid= locked?'<td class="l">'+txt(d.date_paid,true)+'</td>':'<td class="l">'+editCell(ep,'date_paid',d.date_paid,'date')+'</td>';
@@ -1378,7 +1379,7 @@
       if(closed) act='<span class="tool-badge bg-neutral" style="margin-right:5px">closed</span><button class="lnk-btn dep-close" data-id="'+d.id+'" data-st="">reopen</button>';
       else { var eb = lockedPay ? (editing?'<button class="lnk-btn dep-save" data-id="'+d.id+'">✓ save</button> ':'<span class="tool-badge bg-green" style="margin-right:5px" title="paid &amp; FX applied — locked">paid</span><button class="lnk-btn dep-edit" data-id="'+d.id+'">edit</button> ') : '';
         act = eb+'<button class="lnk-btn dep-close" data-id="'+d.id+'" data-st="closed">close</button>'; }
-      return '<tr'+(locked?' style="opacity:.55"':(editing?' style="background:#f0f6ff"':''))+'>'+c_ref+c_sup+c_prod+c_amt+c_fx+c_paid+c_rem+c_asg+'<td class="l" style="white-space:nowrap">'+act+'</td></tr>'; }
+      return '<tr'+(locked?' style="opacity:.55"':(editing?' style="background:#f0f6ff"':''))+'>'+c_ref+c_sup+c_prod+c_xero+c_amt+c_fx+c_paid+c_rem+c_asg+'<td class="l" style="white-space:nowrap">'+act+'</td></tr>'; }
     function cur(){ return deps.filter(function(d){ if(st.f==='all')return true; if(st.f==='closed')return d.status==='closed'; return d.status!=='closed'; }); }
     function draw(){ var f=cur().filter(function(d){return !st.q||((d.reference||'')+' '+(d.supplier_name||'')).toLowerCase().indexOf(st.q)>=0;});
       document.getElementById('dep-cnt').textContent=f.length+' / '+deps.length+' deposits';
@@ -2124,7 +2125,9 @@
       // date filter: type a date (or partial, e.g. 2026-06) into From / To — no date picker
       b.innerHTML='<div class="bar"><span class="pill-lbl">Date</span><span class="tiny mut">from</span> <input class="flt" id="pay-from" placeholder="YYYY-MM-DD" value="'+esc(PAY_FROM)+'" style="width:118px"> <span class="tiny mut">to</span> <input class="flt" id="pay-to" placeholder="YYYY-MM-DD" value="'+esc(PAY_TO)+'" style="width:118px"> <button class="save-btn light" id="pay-clear">Clear</button> <span class="tiny mut">default: last 60 days · Clear to see all history · or type a full/partial date (e.g. 2026-06)</span></div><div id="pay-rep"></div>';
       function draw(){ var f=rows.filter(function(r){ var d=r.dt||''; return (!PAY_FROM || d>=PAY_FROM) && (!PAY_TO || d.slice(0,PAY_TO.length)<=PAY_TO); });
-        var rep=document.getElementById('pay-rep'); rep.innerHTML=payReportHTML(f); bindPayFx(rep); }
+        var rep=document.getElementById('pay-rep'); rep.innerHTML=payReportHTML(f); bindPayFx(rep);
+        rep.querySelectorAll('.pay-xero-dl').forEach(function(btn){ btn.onclick=function(){ xbDownload(f[+btn.dataset.i]); }; });
+        rep.querySelectorAll('.pay-xero-copy').forEach(function(btn){ btn.onclick=function(){ xbCopy(f[+btn.dataset.i],btn); }; }); }
       document.getElementById('pay-from').oninput=function(){ PAY_FROM=this.value.trim(); draw(); };
       document.getElementById('pay-to').oninput=function(){ PAY_TO=this.value.trim(); draw(); };
       document.getElementById('pay-clear').onclick=function(){ PAY_FROM=''; PAY_TO=''; document.getElementById('pay-from').value=''; document.getElementById('pay-to').value=''; draw(); };
@@ -2132,6 +2135,34 @@
       .catch(function(e){b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>';}); }
   var PAY_CCY=['','GBP','EUR','AUD','USD'];
   var PTYPE_BG={Deposit:'bg-blue',Completion:'bg-amber',Balance:'bg-green',Other:'bg-neutral'};
+  // ---- Xero bill export (Payments Report) ----
+  function xbDmy(iso){ var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(iso||''); return m?(m[3]+'/'+m[2]+'/'+m[1]):(iso||''); }   // YYYY-MM-DD → DD/MM/YYYY
+  function xbCell(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+  function fmtAmt(v){ if(v==null||v==='')return ''; var n=Number(String(v).replace(/,/g,'')); return isNaN(n)?String(v):n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  var XB_HEAD='*ContactName,EmailAddress,POAddressLine1,POAddressLine2,POAddressLine3,POAddressLine4,POCity,PORegion,POPostalCode,POCountry,*InvoiceNumber,*InvoiceDate,*DueDate,Total,InventoryItemCode,Description,*Quantity,*UnitAmount,*AccountCode,*TaxType,TaxAmount,TrackingName1,TrackingOption1,TrackingName2,TrackingOption2,Currency,*OriginalAmount';
+  // One Xero bill per payment run. Rows = the run's PO payment lines (completion/balance) only — deposits +
+  // other payments are excluded. If the run was paid in a non-USD currency (bank amount + ccy entered),
+  // *UnitAmount is converted at rate = bankAmount / USD-total while *OriginalAmount keeps the USD figure.
+  function xeroBillCsv(run){
+    var po=(run.lines||[]).filter(function(l){return l.source==='po';});
+    if(!po.length) return null;
+    var alt = run.bank_ccy && run.bank_ccy!=='USD' && Number(run.other_amount)>0;
+    var ccy = alt?run.bank_ccy:'USD';
+    var usdTotal = po.reduce(function(s,l){return s+Number(l.amount);},0);
+    var rate = (alt && usdTotal>0) ? Number(run.other_amount)/usdTotal : 1;
+    var inv = 'SUPPLIER-PAYMENT-'+(run.supplier_code?run.supplier_code+'-':'')+run.dt;   // e.g. SUPPLIER-PAYMENT-JM-2026-06-25
+    var dmy = xbDmy(run.dt);
+    var rows=po.map(function(l){ var usd=Number(l.amount); var unit=alt?(usd*rate):usd;
+      var desc=l.reference+' - '+l.type+(alt?' ('+Math.round(usd)+' USD)':'');
+      return [run.supplier,'','','','','','','','','',inv,dmy,dmy,'','',desc,'1',unit.toFixed(2),l.account_code||'','No VAT','','','','','',ccy,usd.toFixed(2)].map(xbCell).join(',');
+    });
+    return XB_HEAD+'\n'+rows.join('\n')+'\n';
+  }
+  function xbFilename(run){ return 'XERO_BILL_'+(run.supplier_code||run.supplier||'').replace(/[^A-Za-z0-9]+/g,'_')+'_'+run.dt+'.csv'; }
+  function xbDownload(run){ var t=xeroBillCsv(run); if(!t){alert('No PO payments in this run to export.');return;}
+    var bl=new Blob([t],{type:'text/csv'}); var u=URL.createObjectURL(bl); var a=document.createElement('a'); a.href=u; a.download=xbFilename(run); document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); }
+  function xbCopy(run,btn){ var t=xeroBillCsv(run); if(!t){alert('No PO payments in this run to export.');return;}
+    navigator.clipboard.writeText(t).then(function(){ if(btn){var o=btn.textContent; btn.textContent='✓'; setTimeout(function(){btn.textContent=o;},1200);} }).catch(function(){ alert('Copy failed — your browser blocked clipboard access.'); }); }
   // master row = one bank payment (date + supplier): base (USD) total + actual bank amount/currency.
   // expand to see the sub-payments (reference · amount · type · deposit ref).
   function payReportHTML(rows){ if(!rows||!rows.length)return '<div class="count">No payments.</div>';
@@ -2152,10 +2183,12 @@
       var det='<tr class="exp-row" id="payexp-'+i+'" style="display:none"><td colspan="7"><div style="padding:2px">'
         +'<div class="sect-h" style="margin-top:2px">Payments in this run ('+(r.lines||[]).length+')</div>'
         +'<table style="font-size:11px"><thead><tr><th class="l">Reference</th><th>Amount (USD)</th><th class="l">Type</th><th class="l">Deposit ref</th></tr></thead><tbody>'+lines+'</tbody></table></div></td></tr>';
-      return '<tr><td class="l"><button class="planbtn pay-exp" data-i="'+i+'">▸</button></td>'
+      var hasPO=(r.lines||[]).some(function(l){return l.source==='po';});
+      var xbBtns=hasPO?' <button class="lnk-btn pay-xero-dl" data-i="'+i+'" title="Download Xero bill details">⬇</button> <button class="lnk-btn pay-xero-copy" data-i="'+i+'" title="Download Xero bill details (copy to clipboard)">⧉</button>':'';
+      return '<tr><td class="l" style="white-space:nowrap"><button class="planbtn pay-exp" data-i="'+i+'">▸</button>'+xbBtns+'</td>'
         +'<td class="l">'+esc(fd(r.dt))+'</td><td class="l">'+esc(r.supplier)+'</td>'
         +'<td><b>'+money(r.total)+'</b></td><td class="l">'+r.base_ccy+'</td>'
-        +'<td class="l"><input class="fci pfx-amt" '+dk+' style="width:96px;text-align:right" placeholder="bank amount" value="'+(r.other_amount==null?'':r.other_amount)+'"></td>'
+        +'<td class="l"><input class="fci pfx-amt" '+dk+' style="width:104px;text-align:right" placeholder="bank amount" value="'+(r.other_amount==null?'':fmtAmt(r.other_amount))+'"></td>'
         +'<td class="l"><select class="fci pfx-ccy" '+dk+'>'+PAY_CCY.map(function(cc){return '<option'+(cc===(r.bank_ccy||'')?' selected':'')+'>'+cc+'</option>';}).join('')+'</select></td></tr>'+det; }).join('');
     return '<div class="bar"><span class="count">'+rows.length+' payments · grouped by date + supplier · expand a row to see the individual payments</span></div>'
       +'<div class="tw"><table><thead><tr><th class="l"></th><th class="l">Date</th><th class="l">Supplier</th><th>Total (base)</th><th class="l">Base ccy</th><th class="l">Bank amount</th><th class="l">Bank ccy</th></tr></thead><tbody>'
@@ -2165,9 +2198,12 @@
   function bindPayFx(b){
     b.querySelectorAll('.pay-exp').forEach(function(btn){ btn.onclick=function(){ var ex=document.getElementById('payexp-'+btn.dataset.i); if(!ex)return; var open=ex.style.display!=='none'; ex.style.display=open?'none':''; btn.textContent=open?'▸':'▾'; }; });
     b.querySelectorAll('.pr-ref').forEach(function(x){ x.onclick=function(){ var g=x.dataset.go; if(g==='po')gotoPO(x.dataset.k); else if(g==='dep')gotoDeposit(x.dataset.k); else if(g==='other')gotoOther(); }; });
+    // bank-amount box: show with thousands separators; reformat on blur, strip commas before saving
+    b.querySelectorAll('.pfx-amt').forEach(function(el){ el.onblur=function(){ if(el.value.trim()!=='') el.value=fmtAmt(el.value); }; });
     b.querySelectorAll('.pfx-ccy, .pfx-amt').forEach(function(el){ el.onchange=function(){
       var tr=el.closest('tr'); var dt=el.dataset.dt, sup=el.dataset.sup;
-      var ccy=tr.querySelector('.pfx-ccy').value, amt=tr.querySelector('.pfx-amt').value;
+      var ccy=tr.querySelector('.pfx-ccy').value, amt=tr.querySelector('.pfx-amt').value.replace(/,/g,'');
+      if(el.classList.contains('pfx-amt') && amt!=='') el.value=fmtAmt(amt);
       el.classList.add('saved');
       fetch('/api/supply/payment-fx',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({run_date:dt,supplier:sup,paid_currency:ccy,paid_amount:amt})})
         .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); setTimeout(function(){el.classList.remove('saved');},1000); }).catch(function(){el.classList.remove('saved');el.classList.add('err');}); }; }); }
