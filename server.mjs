@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.342';
+const APP_VERSION = 'v20.343';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1481,11 +1481,45 @@ app.get('/api/supply/:section', async (req, res) => {
             WHERE x.rem > 0.01 AND x.est = 0 AND x.open_po > 0
           UNION ALL
           SELECT 'amber','Partial cartons need approval', l.po,
-            count(*)||' line(s) not a full carton multiple and not yet approved', 'orderplan','','', l.po
+            count(*)||' line(s) not a full carton multiple and not yet approved', 'orderplan','','partials', l.po
             FROM planner.v_purchase_order_lines l
             JOIN planner.purchase_orders p ON p.po=l.po
             WHERE l.full_carton_check LIKE '⚠%' AND coalesce(p.status,'') NOT ILIKE '%complete%'
             GROUP BY l.po
+          UNION ALL
+          -- supplier risk: line ordered against a supplier not in the SKU's allowed multi-supplier list (until approved)
+          SELECT 'amber','Supplier risk needs approval', l.po,
+            count(*)||' line(s) ordered against a supplier not in the SKU''s allowed list', 'orderplan','','suprisk', l.po
+            FROM planner.purchase_order_lines l
+            JOIN planner.purchase_orders p ON p.po=l.po
+            JOIN planner.products pr ON pr.sku=l.sku
+            WHERE coalesce(l.supplier_risk_approved,false)=false AND coalesce(l.qty,0)>0
+              AND coalesce(p.status,'') NOT ILIKE '%complete%'
+              AND coalesce(pr.supplier_multiple_all,'')<>'' AND coalesce(p.supplier_name,'')<>''
+              AND NOT (lower(trim(p.supplier_name)) = ANY(SELECT lower(trim(x)) FROM unnest(string_to_array(pr.supplier_multiple_all, ',')) x))
+            GROUP BY l.po
+          UNION ALL
+          -- discontinued: line forecast to arrive after the product's discontinue date, per-destination (until approved)
+          SELECT 'amber','Discontinued arrival needs approval', dd.po,
+            dd.cnt||' line(s) forecast to arrive after the product discontinue date', 'orderplan','','disc', dd.po
+            FROM (
+              SELECT l.po, count(*) cnt
+              FROM planner.purchase_order_lines l
+              JOIN planner.purchase_orders p ON p.po=l.po
+              LEFT JOIN planner.branches b ON b.name=p.branch
+              JOIN planner.products pr ON pr.sku=l.sku
+              LEFT JOIN LATERAL (SELECT f.landing_date FROM planner.flexport_shipments f
+                WHERE f.flex_id=p.flexport_reference OR f.shipment_name=p.po OR f.shipment_name=p.shipment_ref
+                ORDER BY (f.flex_id=p.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true
+              CROSS JOIN LATERAL (SELECT CASE upper(coalesce(nullif(p.country_code,''), b.country_code, ''))
+                  WHEN 'AU' THEN pr.discontinue_date_au_final WHEN 'CA' THEN pr.discontinue_date_ca
+                  ELSE pr.discontinue_date_final END disc) dsel
+              WHERE coalesce(l.discontinue_approved,false)=false AND coalesce(l.qty,0)>0
+                AND coalesce(p.status,'') NOT ILIKE '%complete%'
+                AND dsel.disc ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+                AND coalesce(to_char(p.delivery_date_overide,'YYYY-MM-DD'), to_char(p.landing_date_overide,'YYYY-MM-DD'), to_char(fx.landing_date,'YYYY-MM-DD')) > dsel.disc
+              GROUP BY l.po
+            ) dd
           UNION ALL
           SELECT 'amber','Order-plan change pending ERP push', l.po,
             count(*)||' line(s) edited, not yet uploaded to the ERP', 'upload','po','', l.po

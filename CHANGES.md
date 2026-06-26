@@ -4,6 +4,17 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.343 - Surface supplier-risk + discontinued exceptions in SUPPLY ▸ Actions; Order Plan filter row
+
+- The two new Order Plan exceptions now also appear in **SUPPLY ▸ Actions** (grouped per PO) until approved:
+  "Supplier risk needs approval" and "Discontinued arrival needs approval", each with an "Open …" button that
+  jumps to the Order Plan pre-filtered to that exception + PO. Mirrors the existing partial-carton action.
+  (Discontinue uses the same per-destination date + arrive-date logic as the grid.)
+- Order Plan: moved the four ⚠ action-item filters (Unapproved partials / Update ERP / Supplier risk /
+  Discontinued) onto their own labelled "Action items" row, below the SKUs row.
+- Fixed a regex bug where the discontinue check used `\d` inside a JS template literal (collapsed to `d`); now
+  `[0-9]`. No DB change (uses migration 070).
+
 ## v20.342 - Order Plan: supplier-risk + discontinued exception flags (approve like partials)
 
 Stage 2 of the Order Plan exceptions work. Two new per-cell exceptions, each approvable like a partial carton:

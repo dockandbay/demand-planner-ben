@@ -337,7 +337,7 @@
     else if(r.fix==='applysub'){ fix='<button class="save-btn act-applysub" data-id="'+r._id+'">✓ Apply</button> <button class="save-btn light act-dismisssub" data-id="'+r._id+'">Dismiss</button>'+(r.attachment_id?' <a class="lnk-btn" href="/api/supply/portal-attachment/'+r.attachment_id+'" target="_blank">view doc</a>':''); }
     else if(r.fix==='rebalance'){ fix='<button class="save-btn act-rebal" data-po="'+esc(r.target_key||r.ref)+'">⇄ Rebalance pallets</button>'; }
     else if(r.fix==='gotopo'){ fix='<button class="save-btn light act-gotopo" data-po="'+esc(r.target_key||r.ref)+'">Open PO ▸ PLAN</button>'; }
-    else if(r.fix==='orderplan'){ fix='<button class="save-btn light act-open-op" data-k="'+esc(r.target_key||r.ref)+'">Open unapproved partials</button>'; }
+    else if(r.fix==='orderplan'){ var olbl=r.field==='suprisk'?'Open supplier-risk lines':r.field==='disc'?'Open discontinued lines':'Open unapproved partials'; fix='<button class="save-btn light act-open-op" data-k="'+esc(r.target_key||r.ref)+'" data-flt="'+esc(r.field||'partials')+'">'+olbl+'</button>'; }
     // Date conflict has TWO valid fixes: correct the date (above), OR advance the PO status (own line below).
     if(r.type==='Date conflict'){ fix2='<span class="tiny mut">or set status</span> <select class="fci act-postatus" data-po="'+esc(r.target_key||r.ref)+'" data-id="'+r._id+'"><option value="">—</option>'+PO_STATUSES.map(function(stx){return '<option>'+esc(stx)+'</option>';}).join('')+'</select>'; }
     // clickable ref → open the PO (expanded) or the shipment, based on the action's target
@@ -400,7 +400,7 @@
     document.querySelectorAll('#act-grid [data-goto]').forEach(function(b){b.onclick=function(){selectSection(b.dataset.goto);};});
     document.querySelectorAll('#act-grid .act-gotopo').forEach(function(b){b.onclick=function(){gotoPO(b.dataset.po);};});
     document.querySelectorAll('#act-grid .act-go').forEach(function(b){b.onclick=function(){ if(b.dataset.go==='po')gotoPO(b.dataset.k); else gotoShipment(b.dataset.k); };});
-    document.querySelectorAll('#act-grid .act-open-op').forEach(function(b){b.onclick=function(){ _pendingOP={partials:true,po:b.dataset.k}; selectSection('order-plan'); };}); }
+    document.querySelectorAll('#act-grid .act-open-op').forEach(function(b){b.onclick=function(){ var f=b.dataset.flt||'partials'; var op={po:b.dataset.k}; op[f==='suprisk'?'suprisk':f==='disc'?'disc':'partials']=true; _pendingOP=op; selectSection('order-plan'); };}); }
 
   // ---- PIPELINE: PO lifecycle as a grouped timeline (stages = groups; cards ordered by next milestone) ----
   var PIPE_HC={late:'#b91c1c',soon:'#d97706',ok:'#15803d',done:'#6b7280',unknown:'#9ca3af'};
@@ -1237,8 +1237,8 @@
     function discMismatch(l){ var dd=pickDisc(l.country,skuAttr[l.sku]||{}); return !!(dd && l.delivery && String(l.delivery)>String(dd)); }
     function lineSupRisk(l){ return !/complete/i.test(l.status||'') && Number(l.qty)>0 && supMismatch(l) && !l.supplier_risk_approved; }
     function lineDisc(l){ return !/complete/i.test(l.status||'') && Number(l.qty)>0 && discMismatch(l) && !l.discontinue_approved; }
-    if(_pendingOP){ st.partials=!!_pendingOP.partials; if(_pendingOP.po)st.poq=String(_pendingOP.po).toLowerCase();
-      st.statuses=new Set(statuses);   // show all statuses so the flagged partials aren't hidden by the status filter
+    if(_pendingOP){ st.partials=!!_pendingOP.partials; st.suprisk=!!_pendingOP.suprisk; st.disc=!!_pendingOP.disc; if(_pendingOP.po)st.poq=String(_pendingOP.po).toLowerCase();
+      st.statuses=new Set(statuses);   // show all statuses so the flagged lines aren't hidden by the status filter
       _pendingOP=null; }
     function pillsHTML(opts,setv){ return opts.map(function(o){return '<span class="pill'+(setv.has(o)?' active':'')+'" data-v="'+esc(o)+'">'+esc(o)+'</span>';}).join('')+'<span class="pill" data-all="1">All</span>'; }
     function sel(id,label,opts,val){return '<span class="pill-lbl">'+label+'</span><select class="flt" id="'+id+'" style="width:auto;padding:3px 6px"><option>All</option>'+opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>';}
@@ -1247,12 +1247,13 @@
         +'<span class="pill-lbl" style="margin-left:12px">PO(s)</span><input class="flt" id="op-po" placeholder="PO number(s) — space / comma…" title="one or more PO numbers, separated by space, comma or line break — overrides the status &amp; country filters" style="width:240px;background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8" value="'+esc(st.poq||'')+'"></div>'
       +'<div class="bar"><span class="pill-lbl">Country</span><span id="op-country">'+pillsHTML(countries,st.countries)+'</span></div>'
       +'<div class="bar"><span class="pill-lbl">SKUs</span><span class="pill active" data-sc="ordered">Ordered</span><span class="pill" data-sc="allskus">All SKUs</span><span class="pill" data-sc="all">All in category</span>'
-        +sel('op-cat','Category',cats,st.cat)+sel('op-rw','Release',rws,st.rw)
+        +sel('op-cat','Category',cats,st.cat)+sel('op-rw','Release',rws,st.rw)+sel('op-prod','PROD#',prods,st.prod)
+        +'<input class="flt" id="op-q" placeholder="filter SKU…" style="width:120px"><span class="count" id="op-count" style="margin-left:auto"></span></div>'
+      +'<div class="bar"><span class="pill-lbl">Action items</span>'
         +'<span class="pill'+(st.partials?' active':'')+'" id="op-partials">⚠ Unapproved partials <span id="op-partials-n" style="color:#dc2626;font-weight:700"></span></span>'
         +'<span class="pill'+(st.erpdiff?' active':'')+'" id="op-erp">⚠ Update ERP <span id="op-erp-n" style="color:#dc2626;font-weight:700"></span></span>'
         +'<span class="pill'+(st.suprisk?' active':'')+'" id="op-suprisk" title="lines ordered against a supplier not in the SKU\'s allowed multi-supplier list">⚠ Supplier risk <span id="op-suprisk-n" style="color:#dc2626;font-weight:700"></span></span>'
-        +'<span class="pill'+(st.disc?' active':'')+'" id="op-disc" title="lines forecast to arrive after the product\'s discontinue date">⚠ Discontinued <span id="op-disc-n" style="color:#dc2626;font-weight:700"></span></span>'+sel('op-prod','PROD#',prods,st.prod)
-        +'<input class="flt" id="op-q" placeholder="filter SKU…" style="width:120px"><span class="count" id="op-count" style="margin-left:auto"></span></div>'
+        +'<span class="pill'+(st.disc?' active':'')+'" id="op-disc" title="lines forecast to arrive after the product\'s discontinue date">⚠ Discontinued <span id="op-disc-n" style="color:#dc2626;font-weight:700"></span></span></div>'
       +'<div id="op-changes"></div>'
       +'<div id="op-grid"></div>';
     // parse the PO box into tokens (space / comma / newline). When present it OVERRIDES the status + country filters.
