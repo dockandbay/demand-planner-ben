@@ -140,6 +140,9 @@
 #scenario-root thead th{background:#f3f3f1;padding:5px 8px;font-weight:600;font-size:9.5px;color:#444;border-bottom:1px solid #d5d5d5;text-align:right;text-transform:uppercase;white-space:nowrap;position:sticky;top:0}
 #scenario-root thead th.l{text-align:left}
 #scenario-root tbody td{padding:4px 8px;border-bottom:1px solid #f0f0f0;text-align:right;white-space:nowrap}#scenario-root tbody td.l{text-align:left}
+/* financial model: keep the label (channel/country/sub-cat) column left-aligned + frozen while scrolling */
+#scenario-root .exec-tw td.lbl-col,#scenario-root .exec-tw th.lbl-col{position:sticky;left:0;text-align:left!important;z-index:3}
+#scenario-root .exec-tw tbody td.lbl-col{background:#fff}#scenario-root .exec-tw thead th.lbl-col{background:#f3f3f1;z-index:6}
 #scenario-root tr.total-row td{background:#1a1a1a;color:#fff;font-weight:700}
 #scenario-root .count{color:#999;font-size:11px}
 #scenario-root .mut{color:#888}#scenario-root .tiny{font-size:9.5px}

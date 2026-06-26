@@ -4,6 +4,12 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.331 - Financial model: sticky left-aligned label column
+
+The Channel/Country/Sub-category label column in the financial model now stays left-aligned and frozen
+(sticky) while scrolling the quarterly columns horizontally (an #scenario-root id rule was overriding the
+exec-table sticky/left styling).
+
 ## v20.330 - Scenario: new "PO Stock Priority" tab
 
 New SCENARIO tab. Pick a PO (search box) → per-SKU analysis of how much of the ordered quantity is actually
