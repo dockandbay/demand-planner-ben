@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.332';
+const APP_VERSION = 'v20.333';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -995,10 +995,11 @@ app.get('/api/supply/:section', async (req, res) => {
             CASE WHEN nullif(country_code,'') IS NOT NULL THEN 'M' WHEN branch_country IS NOT NULL THEN 'branch' END country_src,
             coalesce(country_code,'') country_override, coalesce(branch,'') branch,
             coalesce(erp_po,'') erp, coalesce(prod_no,'') prod_no, coalesce(batch_id,'') batch_id,
-            -- ERP sync: drift = planned qty differs from ERP value; erp_in/erp_total drive the 3-state
-            -- match badge (✓ match / ⚠ drift / ✗ not in ERP = lines exist but none mirrored from the ERP).
-            (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=calc4.po AND (l.qty IS DISTINCT FROM l.erp_qty OR l.cost_price IS DISTINCT FROM l.erp_cost))::int erp_pending,
-            (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=calc4.po AND coalesce(l.erp_qty,0)>0)::int erp_in,
+            -- ERP sync: drift = planned qty/cost differs from the ERP MIRROR (planner.erp_purchase_order_lines,
+            -- fed by n8n). erp_in/erp_total drive the 3-state badge (✓ match / ⚠ drift / ✗ not in ERP).
+            (SELECT count(*) FROM planner.purchase_order_lines l LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
+               WHERE l.po=calc4.po AND (l.qty IS DISTINCT FROM el.qty OR l.cost_price IS DISTINCT FROM el.cost))::int erp_pending,
+            (SELECT count(*) FROM planner.purchase_order_lines l JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku WHERE l.po=calc4.po)::int erp_in,
             (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=calc4.po)::int erp_total,
             -- ERP date misalignment: our calculated "completed at warehouse" date (eff_checkin) vs the
             -- ERP's final delivery date. 1 = differs (needs a date update in the ERP). Only when mirrored.
@@ -1091,8 +1092,8 @@ app.get('/api/supply/:section', async (req, res) => {
           container_numbers, mbl_number, total_freight_cost, total_invoiced_amount, customs_duty_cost
           FROM planner.flexport_shipments ORDER BY arrival_date DESC NULLS LAST`));
       case 'order-plan':  // enriched lines for the side-by-side grid (filter/group/pivot client-side)
-        return res.json(await q(`SELECT l.po, l.sku, l.qty, pol.erp_qty,
-          (pol.qty IS DISTINCT FROM pol.erp_qty) pending, to_char(pol.proposed_at,'YYYY-MM-DD') proposed_at,
+        return res.json(await q(`SELECT l.po, l.sku, l.qty, el.qty erp_qty,
+          (l.qty IS DISTINCT FROM el.qty) pending, to_char(pol.proposed_at,'YYYY-MM-DD') proposed_at,
           l.cost_price, l.carton_qty, l.partial_carton_approved, l.full_carton_check,
           coalesce(p.prod_no,'') prod_no, coalesce(p.status,'') status,
           coalesce(p.supplier_name,'') supplier_name, coalesce(p.shipment_ref,'') shipment_ref,
@@ -1105,6 +1106,7 @@ app.get('/api/supply/:section', async (req, res) => {
                    to_char(fx.landing_date,'YYYY-MM-DD')) delivery
           FROM planner.v_purchase_order_lines l
           JOIN planner.purchase_order_lines pol ON pol.po_sku=l.po_sku
+          LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
           JOIN planner.purchase_orders p ON p.po=l.po
           LEFT JOIN planner.branches b ON b.name=p.branch
           LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku
@@ -1482,15 +1484,17 @@ app.get('/api/supply/:section', async (req, res) => {
           UNION ALL
           SELECT 'amber','Order-plan change pending ERP push', l.po,
             count(*)||' line(s) edited, not yet uploaded to the ERP', 'upload','po','', l.po
-            FROM planner.purchase_order_lines l WHERE l.qty IS DISTINCT FROM l.erp_qty
-            GROUP BY l.po HAVING count(*) FILTER (WHERE coalesce(l.erp_qty,0)>0)>0  -- exclude never-in-ERP POs (below)
+            FROM planner.purchase_order_lines l LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
+            WHERE l.qty IS DISTINCT FROM el.qty
+            GROUP BY l.po HAVING count(*) FILTER (WHERE el.qty IS NOT NULL)>0  -- has ≥1 line in the ERP mirror (else "not in ERP" below)
           UNION ALL
           SELECT 'high','PO not in ERP', l.po,
             count(*)||' line(s) exist but none are mirrored from the ERP (never pushed)', 'upload','po','', l.po
             FROM planner.purchase_order_lines l
             JOIN planner.purchase_orders p ON p.po=l.po
+            LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
             WHERE coalesce(p.status,'') NOT ILIKE '%complete%'
-            GROUP BY l.po HAVING count(*) FILTER (WHERE coalesce(l.erp_qty,0)>0)=0
+            GROUP BY l.po HAVING count(*) FILTER (WHERE el.qty IS NOT NULL)=0
           UNION ALL
           SELECT CASE WHEN x.comp < current_date THEN 'high' ELSE 'amber' END,'Production check-in', x.po,
             CASE WHEN x.comp < current_date
@@ -2167,11 +2171,11 @@ app.post('/api/supply/po-line/:po_sku', async (req, res) => {
   try {
     // upsert: editing a blank cell (no existing line) creates a proposed line (erp_qty=0 → pending).
     const r = await pool.query(
-      `INSERT INTO planner.purchase_order_lines (po_sku, po, sku, qty, erp_qty, proposed_at, proposed_by)
-       VALUES ($1,$2,$3,$4::int, 0, CASE WHEN $4::int<>0 THEN now() END, CASE WHEN $4::int<>0 THEN $5 END)
+      `INSERT INTO planner.purchase_order_lines (po_sku, po, sku, qty, proposed_at, proposed_by)
+       VALUES ($1,$2,$3,$4::int, CASE WHEN $4::int<>0 THEN now() END, CASE WHEN $4::int<>0 THEN $5 END)
        ON CONFLICT (po_sku) DO UPDATE SET qty=excluded.qty,
-         proposed_at = CASE WHEN excluded.qty IS DISTINCT FROM planner.purchase_order_lines.erp_qty THEN now() ELSE NULL END,
-         proposed_by = CASE WHEN excluded.qty IS DISTINCT FROM planner.purchase_order_lines.erp_qty THEN $5 ELSE NULL END`,
+         proposed_at = CASE WHEN excluded.qty IS DISTINCT FROM coalesce((SELECT el.qty FROM planner.erp_purchase_order_lines el WHERE el.po=planner.purchase_order_lines.po AND el.sku=planner.purchase_order_lines.sku),0) THEN now() ELSE NULL END,
+         proposed_by = CASE WHEN excluded.qty IS DISTINCT FROM coalesce((SELECT el.qty FROM planner.erp_purchase_order_lines el WHERE el.po=planner.purchase_order_lines.po AND el.sku=planner.purchase_order_lines.sku),0) THEN $5 ELSE NULL END`,
       [key, po, sku, b.qty, b.who || 'review_ui']);
     res.json({ updated: r.rowCount });
   } catch (e) { res.status(500).json({ error: e.message }); }

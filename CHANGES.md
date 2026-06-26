@@ -4,6 +4,15 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.333 - ERP drift now reads the dedicated mirror table (not embedded columns)
+
+The app sourced ERP qty/cost from embedded purchase_order_lines.erp_qty/erp_cost; it now reads them from the
+dedicated **planner.erp_purchase_order_lines** mirror (v064) for ALL drift detection — PO grid "NEEDS ERP",
+Order-Plan "Update ERP", and the Actions push items — plus the proposed-edit comparison. Migration 068
+backfills the mirror from the embedded columns (behaviour unchanged on day one). The PO-lines CSV template is
+now plan-only (erp_qty/erp_cost removed); ERP data loads via erp_purchase_order_lines.csv / n8n. Embedded
+columns left in place but deprecated.
+
 ## v20.332 - Financial model per-quarter overrides + PO Stock Priority = production-only
 
 - **Financial model:** growth %/price % overrides now sit IN EACH QUARTER CELL (little g/p inputs with

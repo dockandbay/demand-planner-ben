@@ -102,9 +102,12 @@ One row per PO × SKU. **Key = (`po`, `sku`)**; `id`/`po_sku` auto-generate.
 | qty | ✔ | Ordered units (planned). |
 | cost_price |  | Unit cost (USD). PO value = Σ(qty × cost_price) across lines. |
 | carton_qty |  | Units per carton (for the full-carton check). |
-| erp_qty |  | Qty as it stands in the ERP. Lets the tool flag drift (planned vs ERP). Set = qty if already in ERP. |
-| erp_cost |  | Unit cost as it stands in the ERP. Lets the tool flag cost drift (planned vs ERP). Set = cost_price if already in ERP. |
 | po_status |  | Optional per-line status mirror. |
+
+> **This file is the PLAN only — ERP qty/cost are NOT loaded here.** The ERP's view of each line lives in its
+> own mirror table; load it via **`erp_purchase_order_lines.csv`** (or n8n inbound). The planner compares the
+> plan (this file) to the ERP mirror to flag drift / "needs ERP". The old embedded `erp_qty`/`erp_cost`
+> columns on `purchase_order_lines` are **deprecated** (no longer read).
 
 ## shipments.csv
 

@@ -24,7 +24,8 @@ plus new numbered migrations on top. See `migrations/README.md`.
   - **`066_fin_overlay_subcategory.sql`** — financial-model scenario overlay keyed by channel × country ×
     **sub-category** (was channel × country). ⬅ *latest, not yet on prod.*
   - **`067_fin_overlay_period.sql`** — financial-model overlay also keyed by **period** (quarter), for per-cell growth/price. ⬅ *latest.*
-- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`067` in order. Do **not** run
+  - **`068_erp_lines_backfill.sql`** — backfill the ERP line mirror from the (now-deprecated) embedded erp_qty/erp_cost; the app reads drift from `erp_purchase_order_lines` going forward. ⬅ *latest.*
+- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`068` in order. Do **not** run
   `schema.sql` against an already-migrated DB (the table creates aren't idempotent).
 
 ---
@@ -96,9 +97,10 @@ Separates the ERP truth from the plan so drift is explicit:
   `line_not_in_planner` / `completion_mismatch`). Drives the exceptions/actions list **and** the outbound
   push payload. ERP status is **open/complete** only (Cin7); the planner's management lifecycle isn't
   compared except the completed state must agree (`completion_mismatch`).
-- This **supersedes** the embedded `purchase_order_lines.erp_qty/erp_cost` columns. The app still reads
-  those today; rewiring the NEEDS-ERP filter / drift UI to read `v_erp_po_drift` is a follow-on patch once
-  the mirror is being fed. n8n can populate both during transition.
+- This **supersedes** the embedded `purchase_order_lines.erp_qty/erp_cost` columns. **DONE (v20.333):** the
+  app now reads all ERP drift (PO grid NEEDS-ERP, Order-Plan Update-ERP, Actions) from
+  `planner.erp_purchase_order_lines`; the embedded columns are deprecated (no longer read). n8n inbound must
+  now feed `erp_purchase_order_lines` (not the embedded columns); ERP CSV load = `erp_purchase_order_lines.csv`.
 - **Run migration `064` on prod** (creates the lines mirror + view + extra header columns).
 
 ---
