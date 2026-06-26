@@ -781,9 +781,11 @@
       var tsv='Code\tQty\n'+rows.map(function(r){return String(r.code)+'\t'+r.qty;}).join('\n');   // TAB-separated → pastes into columns
       navigator.clipboard.writeText(tsv).then(function(){msg.textContent=rows.length+' line(s) copied (Code + Qty).';}).catch(function(){msg.textContent='Copy failed — clipboard blocked.';}); }); };
   }
+  // a COMPLETE PO's dates are settled — don't flag an ERP date discrepancy on it (the date no longer needs pushing)
+  function poComplete(r){ return r.progress==='complete' || r.status==='COMPLETE'; }
   function poErpRecon(rows){ // ERP reconciliation summary across the visible POs
     var absent=0,drift=0,match=0,nolines=0,datedrift=0;
-    rows.forEach(function(r){ if(r.erp_date_pending>0)datedrift++; if(!(r.erp_total>0))nolines++; else if(!(r.erp_in>0))absent++; else if(r.erp_pending>0)drift++; else match++; });
+    rows.forEach(function(r){ if(r.erp_date_pending>0&&!poComplete(r))datedrift++; if(!(r.erp_total>0))nolines++; else if(!(r.erp_in>0))absent++; else if(r.erp_pending>0)drift++; else match++; });
     return '<div class="count" style="margin-bottom:6px">ERP match: <b style="color:#15803d">'+match+' ✓ in sync</b>'
       +(drift?' · <b style="color:#b45309">'+drift+' ⚠ qty/cost drift</b>':'')
       +(datedrift?' · <b style="color:#b45309">'+datedrift+' ⚠ date ≠ ERP</b>':'')
@@ -804,7 +806,7 @@
     var erpParts=[];
     if(r.erp_total>0&&!(r.erp_in>0)) erpParts.push('<button class="save-btn erp-up" data-up="'+esc(r.po)+'" style="background:#b91c1c;color:#fff;'+erpBtn+'" title="'+r.erp_total+' line(s) exist but none are mirrored from the ERP — never pushed">✗ not in ERP ('+r.erp_total+')</button>');
     else if(r.erp_pending>0) erpParts.push('<button class="save-btn erp-up" data-up="'+esc(r.po)+'" style="background:#d97706;color:#fff;border-color:#d97706;'+erpBtn+'" title="'+r.erp_pending+' order-plan line(s) differ from the ERP">⚠ Update ERP ('+r.erp_pending+')</button>');
-    if(r.erp_date_pending>0) erpParts.push('<button class="save-btn erp-up" data-up="'+esc(r.po)+'" style="background:#b45309;color:#fff;border-color:#b45309;'+erpBtn+'" title="completed-at-warehouse '+esc(r.checkin||'?')+' ≠ ERP final delivery '+esc(r.erp_final_delivery||'?')+' — update the date in the ERP">⚠ Date ≠ ERP</button>');
+    if(r.erp_date_pending>0 && !poComplete(r)) erpParts.push('<button class="save-btn erp-up" data-up="'+esc(r.po)+'" style="background:#b45309;color:#fff;border-color:#b45309;'+erpBtn+'" title="completed-at-warehouse '+esc(r.checkin||'?')+' ≠ ERP final delivery '+esc(r.erp_final_delivery||'?')+' — update the date in the ERP">⚠ Date ≠ ERP</button>');
     var erpCell=erpParts.length?erpParts.join(' '):'<span class="tool-badge bg-green" title="planned quantities match the ERP">✓ in sync</span>';
     return '<tr'+ga+'><td class="l"><button class="planbtn po-exp" data-po="'+esc(r.po)+'" data-i="'+i+'">PLAN</button></td>'+pocell
       +'<td class="l">'+erpCell+'</td>'

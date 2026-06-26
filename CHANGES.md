@@ -4,6 +4,12 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.339 - Don't flag ERP date drift on COMPLETE POs
+
+A COMPLETE PO's dates are settled, so the "⚠ Date ≠ ERP" row badge and the ERP-recon date-drift count no longer
+fire on it (`erp_date_pending` is now gated by a `poComplete` check). Matches the NEEDS-ERP filter, which
+already excluded complete POs. Qty/cost ERP flags are unchanged.
+
 ## v20.338 - Purchase Orders: Production/Batch filters + clearer ACTION/ERP active state
 
 - Added **Production** and **Batch** dropdown filters to the attribute bar (alongside Ship-to / Supplier),
