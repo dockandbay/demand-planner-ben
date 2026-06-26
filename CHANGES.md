@@ -4,6 +4,14 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.314 - Payments Report: keep pence (no integer rounding)
+
+Bug: the `payments-report` query rounded every line amount to a whole number (`round(x)::int`), so e.g. a
+deposit of **11,709.76** displayed/exported as **11,710.00**. The database was always correct — only the
+report query was truncating. Now rounds to 2 dp (`round(x,2)`), run totals to 2 dp, and the Xero
+description's USD label shows the exact figure. Affects display, Xero CSV (`*UnitAmount`/`*OriginalAmount`),
+the summary copy and totals — all now to the penny.
+
 ## v20.313 - Payments Report: Production column, payment-summary copy, exact FX rounding
 
 - **Production column** added to the expanded payment line table, after Type (also surfaces `deposit_ref`

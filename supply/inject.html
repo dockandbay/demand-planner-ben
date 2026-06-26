@@ -2178,7 +2178,7 @@
       if(resid!==0 && prelim.length){ var bi=0; for(var i=1;i<prelim.length;i++){ if(Math.abs(prelim[i].unit)>Math.abs(prelim[bi].unit)) bi=i; }
         prelim[bi].unit=Math.round((prelim[bi].unit+resid)*100)/100; } }
     var rows=prelim.map(function(p){ var l=p.l; var usd=p.usd;
-      var desc=l.reference+' - '+l.type+(alt?' ('+Math.round(usd)+' USD)':'');
+      var desc=l.reference+' - '+l.type+(alt?' ('+(usd%1===0?usd:usd.toFixed(2))+' USD)':'');
       return [run.supplier,'','','','','','','','','',inv,dmy,dmy,'','',desc,'1',p.unit.toFixed(2),l.account_code||'','No VAT','','','','','',ccy,usd.toFixed(2)]; });
     return { header: header, rows: rows };
   }

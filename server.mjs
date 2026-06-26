@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.313';
+const APP_VERSION = 'v20.314';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1352,25 +1352,25 @@ app.get('/api/supply/:section', async (req, res) => {
         const SUPC = nm => `(SELECT s.code FROM planner.suppliers s WHERE lower(trim(s.name))=lower(trim(${nm})) LIMIT 1)`;
         const lines = (await pool.query(`
           SELECT to_char(o.pay_completion_date,'YYYY-MM-DD') dt, coalesce(o.supplier_name,'(none)') supplier,
-            o.po reference, round(o.pay_completion_assigned)::int amount, 'Completion' type, coalesce(o.deposit_ref,'') deposit_ref, 'po' source,
+            o.po reference, round(o.pay_completion_assigned,2) amount, 'Completion' type, coalesce(o.deposit_ref,'') deposit_ref, 'po' source,
             ${ACCT} account_code, ${SUPC('o.supplier_name')} supplier_code, coalesce(o.prod_no,'') prod_no
           FROM planner.purchase_orders o WHERE o.pay_completion_date IS NOT NULL AND coalesce(o.pay_completion_assigned,0)>0
           UNION ALL
           SELECT to_char(o.pay_balance_1_date,'YYYY-MM-DD'), coalesce(o.supplier_name,'(none)'),
-            o.po, round(o.pay_balance_1_amount)::int, 'Balance', coalesce(o.deposit_ref,''), 'po', ${ACCT}, ${SUPC('o.supplier_name')}, coalesce(o.prod_no,'')
+            o.po, round(o.pay_balance_1_amount,2), 'Balance', coalesce(o.deposit_ref,''), 'po', ${ACCT}, ${SUPC('o.supplier_name')}, coalesce(o.prod_no,'')
           FROM planner.purchase_orders o WHERE o.pay_balance_1_date IS NOT NULL AND coalesce(o.pay_balance_1_amount,0)>0
           UNION ALL
           SELECT to_char(o.pay_balance_2_date,'YYYY-MM-DD'), coalesce(o.supplier_name,'(none)'),
-            o.po, round(o.pay_balance_2_amount)::int, 'Balance', coalesce(o.deposit_ref,''), 'po', ${ACCT}, ${SUPC('o.supplier_name')}, coalesce(o.prod_no,'')
+            o.po, round(o.pay_balance_2_amount,2), 'Balance', coalesce(o.deposit_ref,''), 'po', ${ACCT}, ${SUPC('o.supplier_name')}, coalesce(o.prod_no,'')
           FROM planner.purchase_orders o WHERE o.pay_balance_2_date IS NOT NULL AND coalesce(o.pay_balance_2_amount,0)>0
           UNION ALL
           SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(supplier_name,'(none)'),
-            coalesce(nullif(reference,''), description, ''), round(amount)::int, 'Deposit', '', 'deposit',
+            coalesce(nullif(reference,''), description, ''), round(amount,2), 'Deposit', '', 'deposit',
             CASE WHEN upper(coalesce(country,''))='AU' THEN '620.00 AU' ELSE xero_account_code END, ${SUPC('supplier_name')}, coalesce(prod_no,'')
           FROM planner.deposits WHERE is_deposit=true AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0
           UNION ALL
           SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(supplier_name,'(none)'),
-            coalesce(nullif(reference,''), description, ''), round(amount)::int, 'Other', '', 'other', NULL, ${SUPC('supplier_name')}, coalesce(prod_no,'')
+            coalesce(nullif(reference,''), description, ''), round(amount,2), 'Other', '', 'other', NULL, ${SUPC('supplier_name')}, coalesce(prod_no,'')
           FROM planner.deposits WHERE is_deposit=false AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0`)).rows;
         const fx = (await pool.query(`SELECT to_char(run_date,'YYYY-MM-DD') dt, supplier, paid_amount, coalesce(paid_currency,'') ccy FROM planner.payment_fx`)).rows;
         const normSup = s => { const p = (s || '').split(',').map(x => x.trim()).filter(Boolean); return Array.from(new Set(p)).join(', ') || '(none)'; };
@@ -1384,7 +1384,7 @@ app.get('/api/supply/:section', async (req, res) => {
         const TYPE_ORD = { Deposit: 0, Completion: 1, Balance: 2, Other: 3 };
         const out = Object.values(groups).map(g => { const f = fxMap[g.dt + '|' + g.supplier];
           g.lines.sort((a, b) => (TYPE_ORD[a.type] ?? 9) - (TYPE_ORD[b.type] ?? 9));
-          return { dt: g.dt, supplier: g.supplier, supplier_code: g.supplier_code || '', total: Math.round(g.total), base_ccy: 'USD',
+          return { dt: g.dt, supplier: g.supplier, supplier_code: g.supplier_code || '', total: Math.round(g.total * 100) / 100, base_ccy: 'USD',
             other_amount: f && f.paid_amount != null ? Number(f.paid_amount) : null, bank_ccy: f ? f.ccy : '',
             lines: g.lines }; })
           .sort((a, b) => a.dt < b.dt ? 1 : a.dt > b.dt ? -1 : (a.supplier < b.supplier ? -1 : 1));
