@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.320';
+const APP_VERSION = 'v20.321';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1227,12 +1227,29 @@ app.get('/api/supply/:section', async (req, res) => {
           ), pool AS (
             SELECT reference, sum(coalesce(amount,0)) pool_amount
             FROM planner.deposits WHERE is_deposit AND reference IS NOT NULL GROUP BY reference
+          ), est AS (
+            -- estimated allocation per deposit ref = Σ calculated start deposit (value × start%) of the OPEN,
+            -- not-yet-allocated POs on that ref. Mirrors the main calc: val × sp/100.
+            SELECT po.deposit_ref,
+              sum(round(coalesce(po.supplier_invoice_total, lv.line_value, po.order_value_estimation, 0)
+                        * coalesce(po.start_deposit_pct_override, s.start_deposit_pct, 0)/100, 2)) est_alloc,
+              count(*) open_unalloc
+            FROM planner.purchase_orders po
+            LEFT JOIN planner.suppliers s ON s.id=po.supplier_id
+            LEFT JOIN LATERAL (SELECT sum(l.qty*l.cost_price) line_value FROM planner.purchase_order_lines l WHERE l.po=po.po) lv ON true
+            WHERE po.deposit_ref IS NOT NULL
+              AND coalesce(po.status,'') NOT ILIKE '%complete%'
+              AND po.pay_start_deposit_assigned IS NULL
+              AND round(coalesce(po.supplier_invoice_total, lv.line_value, po.order_value_estimation, 0)
+                        * coalesce(po.start_deposit_pct_override, s.start_deposit_pct, 0)/100, 2) > 0
+            GROUP BY po.deposit_ref
           )
           SELECT d.id,d.reference,d.is_deposit,d.supplier_name,d.prod_no,d.country,d.description,
             d.amount,d.xero_fx,d.xero_account_code, coalesce(d.status,'') status, to_char(d.date_paid,'YYYY-MM-DD') date_paid,
             to_char(d.date_due,'YYYY-MM-DD') date_due,
             CASE WHEN d.is_deposit THEN coalesce(dr.used,0) END deposit_used,
             CASE WHEN d.is_deposit THEN coalesce(p.pool_amount, coalesce(d.amount,0))-coalesce(dr.used,0) END deposit_remaining,
+            CASE WHEN d.is_deposit THEN round(coalesce(ea.est_alloc,0),2) END est_alloc,
             CASE WHEN d.is_deposit THEN
               (SELECT string_agg(po.po,', ' ORDER BY po.po) FROM planner.purchase_orders po WHERE po.deposit_ref=d.reference)
             END linked_pos,
@@ -1246,6 +1263,7 @@ app.get('/api/supply/:section', async (req, res) => {
           FROM planner.deposits d
           LEFT JOIN draw dr ON dr.deposit_ref=d.reference
           LEFT JOIN pool p ON p.reference=d.reference
+          LEFT JOIN est ea ON ea.deposit_ref=d.reference
           ORDER BY d.is_deposit DESC, d.date_paid DESC NULLS FIRST, d.id DESC`));
       case 'productions': {
         // A PRODUCTION = one supplier within a prod_no (the bulk factory run for that supplier).
@@ -1427,6 +1445,24 @@ app.get('/api/supply/:section', async (req, res) => {
             JOIN (SELECT deposit_ref, sum(coalesce(pay_start_deposit_assigned,0)) used
                   FROM planner.purchase_orders WHERE deposit_ref IS NOT NULL GROUP BY deposit_ref
             ) dr ON dr.deposit_ref=d.reference WHERE dr.used > d.pool
+          UNION ALL
+          -- deposit still has money left, but its open POs have no start deposit left to allocate → review
+          SELECT 'amber','Deposit remaining', x.reference,
+            'Deposit remaining '||round(x.rem,2)||', none left to be allocated', '','deposit','', x.reference
+            FROM (
+              SELECT dref.reference,
+                (SELECT sum(coalesce(amount,0)) FROM planner.deposits d2 WHERE d2.reference=dref.reference)
+                  - coalesce((SELECT sum(coalesce(po.pay_start_deposit_assigned,0)) FROM planner.purchase_orders po WHERE po.deposit_ref=dref.reference),0) rem,
+                coalesce((SELECT sum(round(coalesce(po.supplier_invoice_total,
+                           (SELECT sum(l.qty*l.cost_price) FROM planner.purchase_order_lines l WHERE l.po=po.po),
+                           po.order_value_estimation,0)*coalesce(po.start_deposit_pct_override,s.start_deposit_pct,0)/100,2))
+                   FROM planner.purchase_orders po LEFT JOIN planner.suppliers s ON s.id=po.supplier_id
+                   WHERE po.deposit_ref=dref.reference AND coalesce(po.status,'') NOT ILIKE '%complete%'
+                     AND po.pay_start_deposit_assigned IS NULL),0) est,
+                (SELECT count(*) FROM planner.purchase_orders po WHERE po.deposit_ref=dref.reference AND coalesce(po.status,'') NOT ILIKE '%complete%') open_po
+              FROM (SELECT DISTINCT reference FROM planner.deposits WHERE is_deposit AND coalesce(status,'')<>'closed' AND coalesce(reference,'')<>'') dref
+            ) x
+            WHERE x.rem > 0.01 AND x.est = 0 AND x.open_po > 0
           UNION ALL
           SELECT 'amber','Partial cartons need approval', l.po,
             count(*)||' line(s) not a full carton multiple and not yet approved', 'orderplan','','', l.po

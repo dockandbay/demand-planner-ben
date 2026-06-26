@@ -1359,7 +1359,7 @@
       +'<button class="tool-badge bg-blue" id="dep-new" style="cursor:pointer;border:none">+ Deposit</button>'
       +'<button class="tool-badge bg-neutral" id="dep-prodtoggle" style="cursor:pointer;border:none;margin-left:4px" title="Linked purchase orders: show only OPEN (non-complete) POs, or all">POs: open only</button>'
       +'<input class="flt" id="dep-q" placeholder="Filter reference / supplier…"><span class="count" id="dep-cnt"></span></div>'
-      +'<div class="tw"><table><thead><tr><th class="l">Reference</th><th class="l">Supplier</th><th class="l">PROD#</th><th class="l">Xero code</th><th>Amount</th><th>FX</th><th class="l">Date paid</th><th>Remaining</th><th class="l">Linked purchase orders</th><th class="l"></th></tr></thead><tbody id="dep-rows"></tbody></table></div>';
+      +'<div class="tw"><table><thead><tr><th class="l">Reference</th><th class="l">Supplier</th><th class="l">PROD#</th><th class="l">Xero code</th><th>Amount</th><th>FX</th><th class="l">Date paid</th><th>Remaining</th><th title="Σ calculated start deposits of OPEN, not-yet-allocated POs on this reference">Est. allocation</th><th class="l">Linked purchase orders</th><th class="l"></th></tr></thead><tbody id="dep-rows"></tbody></table></div>';
     // Every deposit row is read-only by default; click Edit to unlock it, Save to relock. (A closed row must
     // be reopened first.) Edit state (DEP_EDIT) holds while you edit; saving relocks all rows.
     function rowHTML(d){ var ep='/api/supply/deposit/'+encodeURIComponent(d.id);
@@ -1375,7 +1375,12 @@
       var c_amt = locked?'<td>'+txt(d.amount)+'</td>':'<td>'+editCell(ep,'amount',d.amount)+'</td>';
       var c_fx  = locked?'<td>'+txt(d.xero_fx)+'</td>':'<td>'+editCell(ep,'xero_fx',d.xero_fx)+'</td>';
       var c_paid= locked?'<td class="l" style="width:120px">'+txt(d.date_paid,true)+'</td>':'<td class="l" style="width:120px">'+editCell(ep,'date_paid',d.date_paid,'date','style="width:118px"')+'</td>';
-      var c_rem = '<td style="width:64px;white-space:nowrap'+((Number(d.deposit_remaining)||0)<0?';color:#dc2626;font-weight:700':'')+'">'+money(d.deposit_remaining)+(d.shared_ref?' <span class="src fx">pool</span>':'')+'</td>';
+      // Remaining + Estimated allocation (Σ start deposits of open, not-yet-allocated POs on this ref).
+      var rem=Number(d.deposit_remaining)||0, est=Number(d.est_alloc)||0, hasOpenPO=(d.pos_open||'').trim()!=='';
+      var estOver = d.is_deposit && est>rem;                       // est allocation exceeds what's left → red est
+      var remStranded = d.is_deposit && hasOpenPO && est===0 && rem>0.01;   // open POs but nothing left to allocate → red remaining (matches the action)
+      var c_rem = '<td style="width:64px;white-space:nowrap'+((rem<0||remStranded)?';color:#dc2626;font-weight:700':'')+'"'+(remStranded?' title="Deposit remaining, none left to be allocated">':'>')+money(d.deposit_remaining)+(d.shared_ref?' <span class="src fx">pool</span>':'')+'</td>';
+      var c_est = '<td style="width:84px;white-space:nowrap'+(estOver?';color:#dc2626;font-weight:700':'')+'"'+(estOver?' title="Estimated allocation exceeds the remaining deposit">':'>')+(d.is_deposit?money(d.est_alloc):'')+'</td>';
       // purchase orders linked to this deposit (open-only by default; toggle shows all) — each links to the
       // PO opened on its PAYMENTS tab; the cell wraps so long lists flow onto multiple lines.
       var ap=(depProdAll ? d.linked_pos : d.pos_open)||'';
@@ -1391,7 +1396,7 @@
       act += hasPOs
         ? ' <span class="mut tiny" title="Can’t delete — purchase order(s) are assigned to this deposit ('+esc(d.linked_pos)+'). Unassign them first.">🔒 in use</span>'
         : ' <button class="lnk-btn dep-del" data-id="'+d.id+'" data-ref="'+esc(d.reference||('#'+d.id))+'" title="delete this deposit" style="color:#dc2626">delete</button>';
-      return '<tr'+(editing?' style="background:#f0f6ff"':(closed?' style="opacity:.55"':''))+'>'+c_ref+c_sup+c_prod+c_xero+c_amt+c_fx+c_paid+c_rem+c_asg+'<td class="l" style="white-space:nowrap">'+act+'</td></tr>'; }
+      return '<tr'+(editing?' style="background:#f0f6ff"':(closed?' style="opacity:.55"':''))+'>'+c_ref+c_sup+c_prod+c_xero+c_amt+c_fx+c_paid+c_rem+c_est+c_asg+'<td class="l" style="white-space:nowrap">'+act+'</td></tr>'; }
     function cur(){ return deps.filter(function(d){ if(st.f==='all')return true; if(st.f==='closed')return d.status==='closed'; return d.status!=='closed'; }); }
     function draw(){ var f=cur().filter(function(d){return !st.q||((d.reference||'')+' '+(d.supplier_name||'')).toLowerCase().indexOf(st.q)>=0;});
       document.getElementById('dep-cnt').textContent=f.length+' / '+deps.length+' deposits';

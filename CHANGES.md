@@ -4,6 +4,14 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.321 - Deposits: Estimated allocation column + stranded-deposit action
+
+New "Est. allocation" column (next to Remaining) = sum of the calculated start deposits (value × start%) of
+the OPEN, not-yet-allocated POs on that deposit reference. Highlights: est allocation > remaining → est cell
+red; open POs but est allocation = 0 while remaining > 0 → remaining cell red AND a SUPPLY ▸ Actions item
+"Deposit remaining, none left to be allocated". Server: deposits payload returns est_alloc; actions query gains
+the stranded-deposit branch.
+
 ## v20.320 - Deposits: uniform edit-on-click (rows read-only by default)
 
 Every deposit row is now read-only by default with an Edit button — previously only paid/closed rows locked
