@@ -4,6 +4,13 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.316 - Deposits: assigned productions derived from POs (open-first + toggle)
+
+The deposit register’s "Assigned production(s)" column was empty (it read the manual production_deposits
+table). It now derives from the POs that reference the deposit (prod_no × supplier). By default it shows only
+productions with OPEN (non-complete) POs; a "Productions: open only / all" toggle in the bar reveals the rest.
+Server: deposits payload now returns prods_open + prods_all.
+
 ## v20.315 - Xero bill copy: keep DD/MM/YYYY as text in Google Sheets
 
 The clipboard copy already emitted correctly zero-padded dates (25/06/2026), but Google Sheets re-parsed them

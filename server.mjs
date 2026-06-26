@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.315';
+const APP_VERSION = 'v20.316';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1238,7 +1238,16 @@ app.get('/api/supply/:section', async (req, res) => {
             END linked_pos,
             (d.reference IS NOT NULL AND EXISTS (SELECT 1 FROM planner.deposits d2 WHERE d2.reference=d.reference AND d2.id<>d.id)) shared_ref,
             (SELECT string_agg(pd.prod_no||CASE WHEN coalesce(pd.supplier_name,'')<>'' THEN ' · '||pd.supplier_name ELSE '' END, ', ' ORDER BY pd.prod_no)
-             FROM planner.production_deposits pd WHERE pd.deposit_ref=d.reference) assigned_prods
+             FROM planner.production_deposits pd WHERE pd.deposit_ref=d.reference) assigned_prods,
+            -- productions funded by this deposit, DERIVED from the POs that reference it (prod_no × supplier).
+            -- prods_open = only POs not yet complete; prods_all = every linked PO.
+            (SELECT string_agg(x.lbl, ', ' ORDER BY x.lbl) FROM (SELECT DISTINCT
+               po.prod_no||CASE WHEN coalesce(po.supplier_name,'')<>'' THEN ' · '||po.supplier_name ELSE '' END lbl
+               FROM planner.purchase_orders po WHERE po.deposit_ref=d.reference AND coalesce(po.prod_no,'')<>''
+                 AND coalesce(po.status,'') NOT ILIKE '%complete%') x) prods_open,
+            (SELECT string_agg(x.lbl, ', ' ORDER BY x.lbl) FROM (SELECT DISTINCT
+               po.prod_no||CASE WHEN coalesce(po.supplier_name,'')<>'' THEN ' · '||po.supplier_name ELSE '' END lbl
+               FROM planner.purchase_orders po WHERE po.deposit_ref=d.reference AND coalesce(po.prod_no,'')<>'') x) prods_all
           FROM planner.deposits d
           LEFT JOIN draw dr ON dr.deposit_ref=d.reference
           LEFT JOIN pool p ON p.reference=d.reference

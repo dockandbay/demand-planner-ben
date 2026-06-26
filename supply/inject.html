@@ -1353,9 +1353,11 @@
   // Deposit register (under PRODUCTIONS) — editable + assign each deposit to a production inline.
   function renderDepRegister(b, deps, prods){ _prodList=prods; var pend=_pendingDep; _pendingDep=null;   // arriving from a cash-flow deposit link → filter to that ref
     var st={f:pend?'all':'open',q:pend?String(pend).toLowerCase():''}; var DEP_EDIT={};   // row ids currently unlocked for editing
+    var depProdAll=false;   // Assigned productions column: false = only productions with OPEN POs; true = all
     var FILT=[['open','To assign'],['closed','Closed'],['all','All']];
     b.innerHTML=lookupDatalists()+'<div class="bar">'+FILT.map(function(f){return '<span class="pill'+(f[0]==='open'?' active':'')+'" data-f="'+f[0]+'">'+f[1]+'</span>';}).join('')
       +'<button class="tool-badge bg-blue" id="dep-new" style="cursor:pointer;border:none">+ Deposit</button>'
+      +'<button class="tool-badge bg-neutral" id="dep-prodtoggle" style="cursor:pointer;border:none;margin-left:4px" title="Assigned productions: show only productions with OPEN purchase orders, or all">Productions: open only</button>'
       +'<input class="flt" id="dep-q" placeholder="Filter reference / supplier…"><span class="count" id="dep-cnt"></span></div>'
       +'<div class="tw"><table><thead><tr><th class="l">Reference</th><th class="l">Supplier</th><th class="l">PROD#</th><th class="l">Xero code</th><th>Amount</th><th>FX</th><th class="l">Date paid</th><th>Remaining</th><th class="l">Assigned production(s)</th><th class="l"></th></tr></thead><tbody id="dep-rows"></tbody></table></div>';
     // A deposit row LOCKS (greyed, read-only) once it's CLOSED, or once it's PAID + FX applied. A locked
@@ -1374,7 +1376,9 @@
       var c_fx  = locked?'<td>'+txt(d.xero_fx)+'</td>':'<td>'+editCell(ep,'xero_fx',d.xero_fx)+'</td>';
       var c_paid= locked?'<td class="l">'+txt(d.date_paid,true)+'</td>':'<td class="l">'+editCell(ep,'date_paid',d.date_paid,'date')+'</td>';
       var c_rem = '<td'+((Number(d.deposit_remaining)||0)<0?' style="color:#dc2626;font-weight:700"':'')+'>'+money(d.deposit_remaining)+(d.shared_ref?' <span class="src fx">pool</span>':'')+'</td>';
-      var c_asg = '<td class="l">'+(d.assigned_prods?'<span class="tiny">'+esc(d.assigned_prods)+'</span> ':'<span class="mut tiny">— </span>')+(locked?'':'<button class="lnk-btn dep-assign" data-ref="'+esc(d.reference||'')+'">assign</button>')+'</td>';
+      // productions funded by this deposit, derived from its POs (open-only by default; toggle shows all)
+      var ap=(depProdAll ? d.prods_all : d.prods_open)||'';
+      var c_asg = '<td class="l">'+(ap?'<span class="tiny">'+esc(ap)+'</span> ':'<span class="mut tiny">— </span>')+(locked?'':'<button class="lnk-btn dep-assign" data-ref="'+esc(d.reference||'')+'">assign</button>')+'</td>';
       var act;
       if(closed) act='<span class="tool-badge bg-neutral" style="margin-right:5px">closed</span><button class="lnk-btn dep-close" data-id="'+d.id+'" data-st="">reopen</button>';
       else { var eb = lockedPay ? (editing?'<button class="lnk-btn dep-save" data-id="'+d.id+'">✓ save</button> ':'<span class="tool-badge bg-green" style="margin-right:5px" title="paid &amp; FX applied — locked">paid</span><button class="lnk-btn dep-edit" data-id="'+d.id+'">edit</button> ') : '';
@@ -1398,6 +1402,7 @@
     b.querySelectorAll('.bar .pill').forEach(function(p){p.onclick=function(){b.querySelectorAll('.bar .pill').forEach(function(x){x.classList.remove('active');});p.classList.add('active');st.f=p.dataset.f;draw();};});
     document.getElementById('dep-q').oninput=function(){st.q=this.value.toLowerCase();draw();};
     document.getElementById('dep-new').onclick=function(){ shipPost('/api/supply/deposit-create',{is_deposit:true},function(){ prodTab='deposits'; delete cache['productions']; selectSection('productions'); }); };
+    document.getElementById('dep-prodtoggle').onclick=function(){ depProdAll=!depProdAll; this.textContent=depProdAll?'Productions: all':'Productions: open only'; draw(); };
     if(pend){ var pqi=document.getElementById('dep-q'); if(pqi)pqi.value=pend; b.querySelectorAll('.bar .pill').forEach(function(x){x.classList.toggle('active',x.dataset.f==='all');}); }
     draw(); }
   // Pallet rebalance preview/apply modal (from the "Over 20 pallets" action). Shows the proposed per-PO
