@@ -1394,10 +1394,10 @@
       else { var paidTag = lockedPay ? '<span class="tool-badge bg-green" style="margin-right:5px" title="paid &amp; FX applied">paid</span>' : '';
         act = paidTag + (editing?'<button class="lnk-btn dep-save" data-id="'+d.id+'">✓ save</button> ':'<button class="lnk-btn dep-edit" data-id="'+d.id+'">edit</button> ')
             + '<button class="lnk-btn dep-close" data-id="'+d.id+'" data-st="closed">close</button>'; }
-      // delete allowed only when NO purchase orders are assigned to this deposit; else a locked note
+      // delete allowed only when NO purchase orders are assigned AND not paid (a payment date locks deletion)
       var hasPOs=(d.linked_pos||'').trim()!=='';
-      act += hasPOs
-        ? ' <span class="mut tiny" title="Can’t delete — purchase order(s) are assigned to this deposit ('+esc(d.linked_pos)+'). Unassign them first.">🔒 in use</span>'
+      act += (hasPOs || d.date_paid)
+        ? ' <span class="mut tiny" title="Can’t delete — '+(d.date_paid?'this deposit has a payment date':'purchase order(s) are assigned to this deposit ('+esc(d.linked_pos)+')')+'.">🔒 locked</span>'
         : ' <button class="lnk-btn dep-del" data-id="'+d.id+'" data-ref="'+esc(d.reference||('#'+d.id))+'" title="delete this deposit" style="color:#dc2626">delete</button>';
       return '<tr'+(editing?' style="background:#f0f6ff"':(closed?' style="opacity:.55"':''))+'>'+c_ref+c_sup+c_prod+c_xero+c_amt+c_fx+c_paid+c_rem+c_est+c_asg+'<td class="l" style="white-space:nowrap">'+act+'</td></tr>'; }
     function cur(){ return deps.filter(function(d){ if(st.f==='all')return true; if(st.f==='closed')return d.status==='closed'; return d.status!=='closed'; }); }
@@ -1934,7 +1934,7 @@
   // Payments report date filter (typed YYYY / YYYY-MM / YYYY-MM-DD). Defaults to the last 60 days so the
   // report opens on recent activity (the register holds full history back to 2017); Clear to see everything.
   var PAY_FROM=(function(){ var d=new Date(); d.setDate(d.getDate()-60); return d.toISOString().slice(0,10); })(), PAY_TO='';
-  var OTH_STATE={status:'all',supplier:''};   // Other Payments filters (persist across re-renders)
+  var OTH_STATE={status:'unpaid',supplier:''};   // Other Payments filters (persist across re-renders); default to unpaid
   var PDUE_STATE={status:'outstanding',supplier:''};   // Payments Due filters (persist across re-renders)
   // ---- CASH FLOW: itemised payment lines, flat list, filterable by month ----
   var CF_TYPES=['Deposit','Completion','Balance','Freight','Import duty','Import tax'];
@@ -2045,6 +2045,7 @@
   // OTHER PAYMENTS + PAYMENTS REPORT now live as sub-tabs under PRODUCTIONS (renderProductions). Both render
   // into a passed container so they're reusable.
   function renderOtherPayments(b){ b.innerHTML='<div class="count">Loading…</div>';
+    fetchLookups(function(){   // ensure supplierList is loaded so the Supplier field is a real search dropdown
     fetch('/api/supply/deposits').then(function(r){return r.json();}).then(function(rows){ var oth=(rows||[]).filter(function(r){return !r.is_deposit;});
       var today=new Date().toISOString().slice(0,10); var OEDIT={};   // paid rows unlocked for editing (per render)
       var sups=Array.from(new Set(oth.map(function(d){return d.supplier_name;}).filter(Boolean))).sort();
@@ -2057,10 +2058,14 @@
           ? '<td class="l">'+txt(d.reference)+'</td><td class="l">'+txt(d.supplier_name)+'</td><td class="l">'+txt(d.description)+'</td><td>'+txt(d.amount)+'</td><td class="l">'+txt(d.date_due,true)+'</td><td class="l">'+txt(d.date_paid,true)+'</td>'
           : '<td class="l">'+editCell(ep,'reference',d.reference,'txt')+'</td><td class="l">'+supSel(ep,d.supplier_name)+'</td><td class="l">'+editCell(ep,'description',d.description,'txt')+'</td><td>'+editCell(ep,'amount',d.amount)+'</td><td class="l">'+editCell(ep,'date_due',d.date_due,'date')+'</td><td class="l">'+editCell(ep,'date_paid',d.date_paid,'date')+'</td>';
         var act = paid ? (editing?'<button class="lnk-btn oth-save" data-id="'+d.id+'">✓ save</button>':'<button class="lnk-btn oth-edit" data-id="'+d.id+'">edit</button>') : '';
-        act += ' <button class="lnk-btn oth-del" data-id="'+d.id+'" data-ref="'+esc(d.reference||d.description||('#'+d.id))+'" title="delete this payment" style="color:#dc2626">delete</button>';
+        // paid items can't be deleted (a payment date locks deletion) — only unpaid rows get the delete link
+        if(!paid) act += ' <button class="lnk-btn oth-del" data-id="'+d.id+'" data-ref="'+esc(d.reference||d.description||('#'+d.id))+'" title="delete this payment" style="color:#dc2626">delete</button>';
         return '<tr'+(locked?' style="opacity:.55"':(editing?' style="background:#f0f6ff"':''))+'>'+cells+'<td class="l">'+badge+'</td><td class="l" style="white-space:nowrap">'+act+'</td></tr>'; }
+      // status filter is inclusive: "unpaid" = anything not paid (incl. overdue); "overdue" = not paid & past due
+      function matchStatus(d){ var s=OTH_STATE.status; if(s==='all')return true; var paid=!!d.date_paid;
+        if(s==='paid')return paid; if(s==='unpaid')return !paid; if(s==='overdue')return !paid && d.date_due && d.date_due<today; return true; }
       function filtered(){ return oth.filter(function(d){
-        if(OTH_STATE.status!=='all' && statusOf(d)!==OTH_STATE.status)return false;
+        if(!matchStatus(d))return false;
         if(OTH_STATE.supplier && (d.supplier_name||'')!==OTH_STATE.supplier)return false; return true; }); }
       function draw(){ var f=filtered();
         var stPills=[['all','All'],['paid','Paid'],['overdue','Overdue'],['unpaid','Unpaid']].map(function(o){return '<span class="pill'+(OTH_STATE.status===o[0]?' active':'')+'" data-os="'+o[0]+'">'+o[1]+'</span>';}).join('');
@@ -2080,7 +2085,7 @@
       b.innerHTML=lookupDatalists()+'<div class="bar"><button class="tool-badge bg-neutral" id="oth-new" style="cursor:pointer;border:none">+ Other payment</button><span class="count">sundry costs (freight, fees, write-offs) — paid rows lock; Edit to change</span></div><div id="oth-wrap"></div>';
       document.getElementById('oth-new').onclick=function(){ shipPost('/api/supply/deposit-create',{is_deposit:false},function(){ renderOtherPayments(b); }); };
       draw(); })
-      .catch(function(e){b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>';}); }
+      .catch(function(e){b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>';}); }); }
   // ---- PAYMENTS DUE — one worklist of every payment owed, grouped by supplier, ordered by due date.
   // Sources: PO completion + balance milestones (from the PO calc) and the deposit register + other payments.
   // EXCLUDES the per-PO starting deposit (that is funded via the deposit register, shown here as "Deposit").

@@ -4,6 +4,16 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.323 - Deposits/Other Payments: FX action, unpaid filter, supplier dropdown, paid-delete lock
+
+- Paid deposit with no Xero FX rate → new medium (amber) SUPPLY ▸ Actions item "Deposit FX missing".
+- Other Payments now defaults to the **Unpaid** filter, and the status filters are inclusive: Unpaid =
+  anything not paid (incl. overdue), Overdue = not paid & past due (fixes "nothing shows as unpaid").
+- Other Payments **Supplier** is a search dropdown (datalist) populated from the suppliers master; typing a
+  new supplier adds it to the suppliers table (server upsert on save).
+- **Delete locked on paid items**: any deposit/other-payment with a payment date cannot be deleted — the
+  delete link is hidden (shows a 🔒 locked note) and the server blocks it (like the deposit-in-use lock).
+
 ## v20.322 - Deposits table: intelligent column widths
 
 Deposit register now uses fixed table layout with a colgroup: data columns get sensible fixed widths

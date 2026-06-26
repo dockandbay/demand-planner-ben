@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.322';
+const APP_VERSION = 'v20.323';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1437,6 +1437,13 @@ app.get('/api/supply/:section', async (req, res) => {
             'date','deposit','date_paid', id::text
             FROM planner.deposits WHERE is_deposit AND date_paid IS NULL AND coalesce(amount,0) > 0
           UNION ALL
+          -- paid deposit with no Xero FX rate captured → medium-priority review
+          SELECT 'amber','Deposit FX missing', coalesce(reference, description, 'deposit #'||id),
+            'Deposit '||coalesce(reference, description, '')||' is paid but has no Xero FX rate',
+            '','deposit','xero_fx', id::text
+            FROM planner.deposits WHERE is_deposit AND date_paid IS NOT NULL
+              AND (xero_fx IS NULL OR xero_fx::text='') AND coalesce(status,'')<>'closed'
+          UNION ALL
           SELECT 'high','Deposit over-assigned', d.reference,
             'Assigned start deposits '||round(dr.used)||' exceed pool '||round(d.pool)
             ||' (remaining '||round(d.pool-dr.used)||')', '','','', d.reference
@@ -1706,18 +1713,26 @@ async function patch(res, table, keyCol, keyVal, allowed, body, keyType) {
     res.json({ updated: r.rowCount });
   } catch (e) { res.status(500).json({ error: e.message }); }
 }
-app.post('/api/supply/deposit/:id', (req, res) =>
+app.post('/api/supply/deposit/:id', async (req, res) => {
+  // a typed supplier that isn't in the master gets added (so the picker stays a real dropdown)
+  try { const nm = req.body && req.body.supplier_name;
+    if (nm && nm.trim()) await pool.query(
+      `INSERT INTO planner.suppliers(name,kind) SELECT $1,'supplier'
+         WHERE NOT EXISTS (SELECT 1 FROM planner.suppliers WHERE lower(trim(name))=lower(trim($1)))`, [nm.trim()]);
+  } catch (e) { /* non-fatal */ }
   patch(res, 'planner.deposits', 'id', req.params.id,
     { amount: 'numeric', xero_fx: 'numeric', date_paid: 'date', date_due: 'date', reference: 'text',
       supplier_name: 'text', description: 'text', prod_no: 'text', country: 'text',
-      xero_account_code: 'text', status: 'text' }, req.body, 'bigint'));
+      xero_account_code: 'text', status: 'text' }, req.body, 'bigint');
+});
 // Delete a deposit / other-payment row. Other payments (is_deposit=false) delete freely. A deposit
 // (is_deposit=true) can only be deleted when NO purchase order is assigned to its reference; any
 // production-assignment rows for the reference are cleaned up alongside.
 app.post('/api/supply/deposit/:id/delete', async (req, res) => {
   try {
-    const d = (await pool.query(`SELECT id, is_deposit, coalesce(reference,'') reference FROM planner.deposits WHERE id=$1`, [req.params.id])).rows[0];
+    const d = (await pool.query(`SELECT id, is_deposit, coalesce(reference,'') reference, date_paid FROM planner.deposits WHERE id=$1`, [req.params.id])).rows[0];
     if (!d) return res.status(404).json({ error: 'deposit not found' });
+    if (d.date_paid) return res.status(400).json({ error: 'Cannot delete — this item has a payment date. Clear the paid date first if it was entered in error.' });
     if (d.is_deposit && d.reference) {
       const n = Number((await pool.query(`SELECT count(*) n FROM planner.purchase_orders WHERE deposit_ref=$1`, [d.reference])).rows[0].n);
       if (n > 0) return res.status(400).json({ error: `Cannot delete — ${n} purchase order(s) are assigned to this deposit. Unassign them first.` });
