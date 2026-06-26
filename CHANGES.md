@@ -4,6 +4,15 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.330 - Scenario: new "PO Stock Priority" tab
+
+New SCENARIO tab. Pick a PO (search box) → per-SKU analysis of how much of the ordered quantity is actually
+needed: stock on hand + OTHER inbound (this PO removed) vs forecast demand to the PO landing + cover window.
+Flags each line HIGH / MEDIUM / LOW / NOT REQUIRED, shows required-from-PO + removable units + a recommendation,
+sortable by priority or SKU, with full CSV export. New endpoint /api/scenario/po-stock-priority/:po. Cover
+window default 13 weeks (server constant PO_STOCK_COVER_WEEKS, tunable); other inbound counted regardless of
+ETA timing (v1). No migration.
+
 ## v20.329 - Financial model: full FY28 (Mar 27–Feb 28)
 
 FY28 in the financial forecast model now runs the full year — Q4 extended to include Jan & Feb 2028 (was

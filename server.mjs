@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.329';
+const APP_VERSION = 'v20.330';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2874,6 +2874,53 @@ app.post('/api/scenario/fin-overlay', async (req, res) => {
       VALUES ($1,$2,$3,$4,$5, now()) ON CONFLICT (channel, country, subcategory) DO UPDATE SET growth_pct=excluded.growth_pct, price_pct=excluded.price_pct, updated_at=now()`,
       [b.channel, b.country, sub, num(b.growth_pct), num(b.price_pct)]);
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PO STOCK PRIORITY — for a given PO, how critical is each SKU's quantity, vs stock-on-hand + OTHER inbound
+// (this PO removed) against forecast demand to the PO's cover window. Determines how much of each line is
+// actually needed (HIGH/MEDIUM/LOW/NOT REQUIRED) so over-ordered lines can be trimmed.
+const PO_STOCK_COVER_WEEKS = 13;   // demand window after the PO lands that it is assumed to cover (tunable)
+app.get('/api/scenario/po-stock-priority/:po', async (req, res) => {
+  const po = req.params.po;
+  try {
+    const meta = (await pool.query(`
+      SELECT p.po,
+        lower(coalesce(nullif(p.country_code,''), (SELECT b.country_code FROM planner.branches b WHERE b.name=p.branch), ''))
+          ||'_'|| (CASE WHEN coalesce(p.branch,'') ILIKE '%fba%' THEN 'fba' ELSE '3pl' END) wh,
+        coalesce(p.supplier_name,'') supplier_name, coalesce(p.status,'') status,
+        to_char((SELECT max(estimated_delivery_date) FROM planner.inbound_shipments i WHERE i.reference=p.po),'YYYY-MM-DD') landing
+      FROM planner.purchase_orders p WHERE p.po=$1`, [po])).rows[0];
+    if (!meta) return res.status(404).json({ error: 'PO not found' });
+    const rows = (await pool.query(`
+      WITH base AS (
+        SELECT $2::text wh, (coalesce($3::date, current_date) + ($4||' weeks')::interval)::date horizon_end )
+      SELECT l.sku, sum(l.qty)::int qty, b.wh,
+        coalesce((SELECT available FROM planner.product_inventory pi WHERE pi.sku=l.sku AND pi.warehouse=b.wh),0)::int on_hand,
+        coalesce((SELECT sum(i.quantity-coalesce(i.received_quantity,0)) FROM planner.inbound_shipments i
+                   WHERE i.sku=l.sku AND i.destination_warehouse=b.wh AND i.reference<>$1 AND coalesce(i.received_quantity,0)<i.quantity),0)::int other_inbound,
+        coalesce((SELECT sum(f.units) FROM planner.forecast_outputs f
+                   WHERE f.sku=l.sku AND f.warehouse=b.wh AND f.month>=date_trunc('month',current_date) AND f.month<=b.horizon_end),0)::int demand
+      FROM planner.purchase_order_lines l CROSS JOIN base b
+      WHERE l.po=$1 GROUP BY l.sku, b.wh, b.horizon_end
+      ORDER BY l.sku`, [po, meta.wh, meta.landing, String(PO_STOCK_COVER_WEEKS)])).rows;
+    const out = rows.map(r => {
+      const supply = r.on_hand + r.other_inbound;
+      const need = Math.max(0, r.demand - supply);
+      const required = Math.min(r.qty, need);
+      const removable = r.qty - required;
+      const ratio = r.qty > 0 ? required / r.qty : 0;
+      const priority = ratio === 0 ? 'NOT REQUIRED' : ratio <= 0.33 ? 'LOW' : ratio <= 0.66 ? 'MEDIUM' : 'HIGH';
+      const rec = priority === 'NOT REQUIRED'
+          ? `Covered without this PO — all ${r.qty} units removable.`
+        : priority === 'HIGH'
+          ? `Critical — ${required} of ${r.qty} needed to avoid stock-out; keep.`
+        : `Partly needed — ${required} of ${r.qty} needed; ~${removable} removable.`;
+      return { sku: r.sku, qty: r.qty, on_hand: r.on_hand, other_inbound: r.other_inbound, demand: r.demand,
+        required, removable, priority, recommendation: rec };
+    });
+    res.json({ po: meta.po, warehouse: meta.wh, supplier_name: meta.supplier_name, status: meta.status,
+      landing: meta.landing, cover_weeks: PO_STOCK_COVER_WEEKS, rows: out });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

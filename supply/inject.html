@@ -2871,14 +2871,15 @@
   // (Removed the bottom-right floating "SUPPLY" button at Ben's request — the top-nav SUPPLY tab is
   // the single entry point now.)
   // ── SCENARIO planner (parallel top tab) ──────────────────────────────────
-  var SCEN_SECTIONS=[['prime','PRIME DAY'],['b2b','B2B ALLOCATION'],['finmodel','FINANCIAL FORECAST MODEL']];
+  var SCEN_SECTIONS=[['prime','PRIME DAY'],['b2b','B2B ALLOCATION'],['finmodel','FINANCIAL FORECAST MODEL'],['postock','PO STOCK PRIORITY']];
   var scenCurrent='prime', CATS_CACHE=null;
   var scenExp=new Set();   // Financial Forecast: which channel rows are expanded to countries
   var scenExpCo=new Set();  // Financial Forecast: which channel|country rows are expanded to sub-categories
   var SCEN_ANNOT={
     prime:'<b>SCENARIO ▸ Prime Day.</b> Enter a SKU list or filter by category / market to see available inventory split by FBA, AWD and 3PL.',
     b2b:'<b>SCENARIO ▸ B2B Allocation.</b> Should we take this order? Models stock impact, whether it\'s worth it after the air cost to rush in any shortfall, and a take/decline verdict. Switch market to re-analyse (stock + price are market-specific). Air rate $10/kg · £7/kg.',
-    finmodel:'<b>SCENARIO ▸ Financial Forecast Model.</b> FY (Mar–Feb) units &amp; revenue by category × market in the exec-summary style — overlay a <b>growth %</b> and <b>price change %</b> per category × quarter to model the year vs last-year actuals; YoY badges + FY total. Forecast only; saves live to the database.'};
+    finmodel:'<b>SCENARIO ▸ Financial Forecast Model.</b> FY (Mar–Feb) units &amp; revenue by category × market in the exec-summary style — overlay a <b>growth %</b> and <b>price change %</b> per category × quarter to model the year vs last-year actuals; YoY badges + FY total. Forecast only; saves live to the database.',
+    postock:'<b>SCENARIO ▸ PO Stock Priority.</b> Pick a PO to see, per SKU, how much of its ordered quantity is actually needed — comparing <b>stock on hand</b> + <b>OTHER inbound</b> (this PO removed) against <b>forecast demand</b> to the cover window. Flags each line <b>HIGH / MEDIUM / LOW / NOT REQUIRED</b> so over-ordered lines can be trimmed. Sort by SKU or priority; export the full analysis to CSV.'};
   function scenAnnot(k){return SCEN_ANNOT[k]?'<div class="annot">'+SCEN_ANNOT[k]+'</div>':'';}
   function scenSelect(key){ scenCurrent=key; writeHash(['scenario',key]);
     document.querySelectorAll('#scenario-subnav .stab').forEach(function(b){b.classList.toggle('active',b.dataset.k===key);});
@@ -2886,7 +2887,48 @@
     if(key==='prime')return renderPrimeDay(c);
     if(key==='finmodel')return renderFinModel(c);
     if(key==='b2b')return renderB2B(c);
+    if(key==='postock')return renderPoStock(c);
     c.innerHTML=scenAnnot(key); }
+  // ---- PO STOCK PRIORITY ----
+  var POSTOCK_STATE={po:'',sort:'priority'};
+  var POSTOCK_PRI={'HIGH':0,'MEDIUM':1,'LOW':2,'NOT REQUIRED':3};
+  var POSTOCK_BG={'HIGH':'bg-red','MEDIUM':'bg-amber','LOW':'bg-blue','NOT REQUIRED':'bg-green'};
+  function renderPoStock(c){
+    c.innerHTML=scenAnnot('postock')
+      +'<div class="bar"><span class="pill-lbl">PO</span><input class="flt" id="ps-po" list="ps-polist" placeholder="search / pick a PO…" value="'+esc(POSTOCK_STATE.po||'')+'" style="width:260px">'
+      +'<button class="pill" id="ps-load">Analyse</button>'
+      +'<span class="pill-lbl" style="margin-left:14px">Sort</span><span class="pill'+(POSTOCK_STATE.sort==='priority'?' active':'')+'" data-sort="priority">Priority</span><span class="pill'+(POSTOCK_STATE.sort==='sku'?' active':'')+'" data-sort="sku">SKU A–Z</span>'
+      +'<button class="pill" id="ps-csv" style="margin-left:auto">⬇ Export CSV</button></div>'
+      +'<datalist id="ps-polist"></datalist><div id="ps-meta" class="count" style="margin-bottom:8px"></div><div id="ps-grid"></div>';
+    // PO list for the search box
+    fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(rows){
+      document.getElementById('ps-polist').innerHTML=(rows||[]).map(function(p){return '<option value="'+esc(p.po)+'">'+esc(p.po)+' · '+esc(p.supplier_name||'')+'</option>';}).join('');
+    }).catch(function(){});
+    var data=null;
+    function load(){ var po=document.getElementById('ps-po').value.trim(); if(!po){document.getElementById('ps-grid').innerHTML='<div class="count">Enter a PO above and click Analyse.</div>';return;}
+      POSTOCK_STATE.po=po; document.getElementById('ps-grid').innerHTML='<div class="count">Analysing…</div>';
+      fetch('/api/scenario/po-stock-priority/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(j){ if(j.error)throw new Error(j.error); data=j; draw(); })
+        .catch(function(e){ document.getElementById('ps-grid').innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>'; document.getElementById('ps-meta').textContent=''; }); }
+    function sorted(){ var r=(data.rows||[]).slice(); if(POSTOCK_STATE.sort==='sku')r.sort(function(a,b){return (a.sku||'').localeCompare(b.sku||'');});
+      else r.sort(function(a,b){return (POSTOCK_PRI[a.priority]-POSTOCK_PRI[b.priority])||(b.required-a.required)||(a.sku||'').localeCompare(b.sku||'');}); return r; }
+    function draw(){ if(!data)return;
+      var mix={}; data.rows.forEach(function(r){mix[r.priority]=(mix[r.priority]||0)+1;});
+      var rem=data.rows.reduce(function(s,r){return s+r.removable;},0);
+      document.getElementById('ps-meta').innerHTML='Destination <b>'+esc(data.warehouse||'?')+'</b> · lands '+(data.landing?esc(fd(data.landing)):'—')+' · cover window '+data.cover_weeks+'wk · '+data.rows.length+' SKUs · '
+        +Object.keys(POSTOCK_PRI).filter(function(k){return mix[k];}).map(function(k){return '<span class="tool-badge '+POSTOCK_BG[k]+'">'+k+' '+mix[k]+'</span>';}).join(' ')+' · <b>'+units(rem)+'</b> units potentially removable';
+      var h='<div class="tw"><table><thead><tr><th class="l">SKU</th><th>Ordered</th><th>On hand</th><th>Fcst demand</th><th>Other inbound</th><th>Req. from PO</th><th>Removable</th><th class="l">Priority</th><th class="l">Recommendation</th></tr></thead><tbody>';
+      sorted().forEach(function(r){ h+='<tr><td class="l">'+esc(r.sku)+'</td><td>'+units(r.qty)+'</td><td>'+units(r.on_hand)+'</td><td>'+units(r.demand)+'</td><td>'+units(r.other_inbound)+'</td><td>'+units(r.required)+'</td><td'+(r.removable>0?' style="color:#166534;font-weight:600"':'')+'>'+units(r.removable)+'</td>'
+        +'<td class="l"><span class="tool-badge '+(POSTOCK_BG[r.priority]||'bg-neutral')+'">'+esc(r.priority)+'</span></td><td class="l tiny">'+esc(r.recommendation)+'</td></tr>'; });
+      document.getElementById('ps-grid').innerHTML=h+'</tbody></table></div>'; }
+    document.getElementById('ps-load').onclick=load;
+    document.getElementById('ps-po').onchange=load;
+    c.querySelectorAll('.pill[data-sort]').forEach(function(p){p.onclick=function(){POSTOCK_STATE.sort=p.dataset.sort;c.querySelectorAll('.pill[data-sort]').forEach(function(x){x.classList.toggle('active',x===p);});if(data)draw();};});
+    document.getElementById('ps-csv').onclick=function(){ if(!data||!data.rows.length){alert('Analyse a PO first.');return;}
+      var head=['SKU','Ordered','On hand','Forecast demand','Other inbound','Required from PO','Removable','Priority','Recommendation'];
+      var esc2=function(v){v=String(v==null?'':v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
+      var csv=head.join(',')+'\n'+sorted().map(function(r){return [r.sku,r.qty,r.on_hand,r.demand,r.other_inbound,r.required,r.removable,r.priority,r.recommendation].map(esc2).join(',');}).join('\n')+'\n';
+      var bl=new Blob([csv],{type:'text/csv'}),u=URL.createObjectURL(bl),a=document.createElement('a');a.href=u;a.download='PO_STOCK_PRIORITY_'+(data.po||'').replace(/[^A-Za-z0-9]+/g,'_')+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u);},1000); };
+    if(POSTOCK_STATE.po)load(); }
   function renderPrimeDay(c){
     c.innerHTML=scenAnnot('prime')
      +'<div class="bar"><span class="pill-lbl">Market</span>'
