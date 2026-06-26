@@ -4,6 +4,18 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.313 - Payments Report: Production column, payment-summary copy, exact FX rounding
+
+- **Production column** added to the expanded payment line table, after Type (also surfaces `deposit_ref`
+  per line). Server: `payments-report` lines now carry `prod_no` + the PO's `deposit_ref`.
+- **New payment-summary copy button** (purple ⎘) per run — copies, tab-separated for Google Sheets:
+  (1) SUPPLIER, (2) payment amount (the live bank amount + ccy if entered, else USD total),
+  (3) payment reference (`SUPPLIER-PAYMENT-…`), then the full line table (REFERENCE, AMOUNT, TYPE,
+  PRODUCTION REF, DEPOSIT REF — all lines incl. "other"). Distinct from the Xero bill buttons (⬇/⧉).
+- **Exact FX rounding** on the Xero bill: per-line converted amounts are rounded then the residual is
+  pushed onto the largest line, so the exported total ties **exactly** to the converted target
+  (no more 100,000.01).
+
 ## v20.312 - Xero bill fixes: live FX, rate from total, TSV copy
 
 Fixes to the Payments Report Xero bill export (v20.310):
