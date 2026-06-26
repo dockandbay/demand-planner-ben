@@ -4,6 +4,19 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.311 - Delete deposits / other payments
+
+New `POST /api/supply/deposit/:id/delete`:
+- **Other payments** (`is_deposit=false`) delete freely.
+- **Deposits** (`is_deposit=true`) delete only when **no purchase order is assigned** to the deposit's
+  reference (server-enforced — returns 400 with a count if POs are assigned); any `production_deposits`
+  assignment rows for the reference are cleaned up on delete.
+
+UI:
+- **Productions ▸ Other Payments** — a red **delete** link on every row (confirm prompt).
+- **Productions ▸ Deposits** — a red **delete** link only on deposits with no POs assigned; deposits in use
+  show a muted **🔒 in use** note instead (tooltip lists the assigned POs).
+
 ## v20.310 - Xero bill export from Payments Report + deposits Xero code
 
 **Payments Report — per-run Xero bill CSV.** Each payment run gets two buttons (⬇ download, ⧉ copy to

@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.310';
+const APP_VERSION = 'v20.311';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1670,6 +1670,22 @@ app.post('/api/supply/deposit/:id', (req, res) =>
     { amount: 'numeric', xero_fx: 'numeric', date_paid: 'date', date_due: 'date', reference: 'text',
       supplier_name: 'text', description: 'text', prod_no: 'text', country: 'text',
       xero_account_code: 'text', status: 'text' }, req.body, 'bigint'));
+// Delete a deposit / other-payment row. Other payments (is_deposit=false) delete freely. A deposit
+// (is_deposit=true) can only be deleted when NO purchase order is assigned to its reference; any
+// production-assignment rows for the reference are cleaned up alongside.
+app.post('/api/supply/deposit/:id/delete', async (req, res) => {
+  try {
+    const d = (await pool.query(`SELECT id, is_deposit, coalesce(reference,'') reference FROM planner.deposits WHERE id=$1`, [req.params.id])).rows[0];
+    if (!d) return res.status(404).json({ error: 'deposit not found' });
+    if (d.is_deposit && d.reference) {
+      const n = Number((await pool.query(`SELECT count(*) n FROM planner.purchase_orders WHERE deposit_ref=$1`, [d.reference])).rows[0].n);
+      if (n > 0) return res.status(400).json({ error: `Cannot delete — ${n} purchase order(s) are assigned to this deposit. Unassign them first.` });
+      await pool.query(`DELETE FROM planner.production_deposits WHERE deposit_ref=$1`, [d.reference]);
+    }
+    await pool.query(`DELETE FROM planner.deposits WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // CASH FLOW — manual "likely payment date" for an overdue line. Empty date clears the override.
 app.post('/api/supply/likely-date', async (req, res) => {
   const { line_key, likely_date } = req.body || {};
