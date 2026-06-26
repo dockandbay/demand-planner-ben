@@ -4,6 +4,12 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.322 - Deposits table: intelligent column widths
+
+Deposit register now uses fixed table layout with a colgroup: data columns get sensible fixed widths
+(Reference/Supplier/PROD#/Xero/Amount/FX/Date/Remaining/Est. alloc/actions) and "Linked purchase orders"
+absorbs the remaining width (≈670px on a wide screen) so PO lists have room to wrap. Inputs fill their cell.
+
 ## v20.321 - Deposits: Estimated allocation column + stranded-deposit action
 
 New "Est. allocation" column (next to Remaining) = sum of the calculated start deposits (value × start%) of
