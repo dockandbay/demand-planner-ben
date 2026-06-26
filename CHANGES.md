@@ -4,6 +4,15 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.344 - Order Plan: keep COMPLETE POs out of the pivot (fixes all-SKUs crash)
+
+Including the 1000+ completed POs (from the ERP history load) in an all-SKUs / all-category pivot exploded it
+to 1M+ cells and crashed the page. Now:
+- COMPLETE is removed from the Status pills and the "All" toggle (pills: FUTURE / PRODUCTION / SHIPPING / …).
+- Completed POs surface **only** via a PO search in the PO box, which requires **≥5 characters** to activate
+  (a short entry no longer overrides the status filter). The PO-search override still shows any status incl.
+  COMPLETE. Added a hint by the Status label.
+
 ## v20.343 - Surface supplier-risk + discontinued exceptions in SUPPLY ▸ Actions; Order Plan filter row
 
 - The two new Order Plan exceptions now also appear in **SUPPLY ▸ Actions** (grouped per PO) until approved:

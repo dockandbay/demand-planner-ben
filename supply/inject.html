@@ -1221,6 +1221,10 @@
     var plcMap={}; plc.forEach(function(x){ plcMap[x.po+'|'+x.sku]=x; });   // (po|sku) → supplier change (for inline confirm in cells)
     function uniq(k){var s={};lines.forEach(function(l){if(l[k])s[l[k]]=1;});return Object.keys(s).sort();}
     var statuses=uniq('status'), countries=uniq('country'), prods=uniq('prod_no');
+    // COMPLETE POs (1000+ from the ERP history) are excluded from the status pills + "All" — including them
+    // in an all-SKUs pivot explodes it (crashes). They surface only via a PO search in the PO box (≥5 chars),
+    // which overrides the status filter.
+    var pillStatuses=statuses.filter(function(s){return !/complete/i.test(s);});
     var cats=Array.from(new Set(skuMaster.map(function(s){return s.category;}).concat(lines.map(function(l){return l.category;})).filter(Boolean))).sort();
     var rws=Array.from(new Set(skuMaster.map(function(s){return s.release_window;}).filter(Boolean))).sort();
     var skuCat={},skuRW={},skuAttr={}; skuMaster.forEach(function(s){skuCat[s.sku]=s.category;skuRW[s.sku]=s.release_window;
@@ -1238,12 +1242,12 @@
     function lineSupRisk(l){ return !/complete/i.test(l.status||'') && Number(l.qty)>0 && supMismatch(l) && !l.supplier_risk_approved; }
     function lineDisc(l){ return !/complete/i.test(l.status||'') && Number(l.qty)>0 && discMismatch(l) && !l.discontinue_approved; }
     if(_pendingOP){ st.partials=!!_pendingOP.partials; st.suprisk=!!_pendingOP.suprisk; st.disc=!!_pendingOP.disc; if(_pendingOP.po)st.poq=String(_pendingOP.po).toLowerCase();
-      st.statuses=new Set(statuses);   // show all statuses so the flagged lines aren't hidden by the status filter
+      st.statuses=new Set(pillStatuses);   // show all (non-complete) statuses so the flagged lines aren't hidden by the status filter
       _pendingOP=null; }
     function pillsHTML(opts,setv){ return opts.map(function(o){return '<span class="pill'+(setv.has(o)?' active':'')+'" data-v="'+esc(o)+'">'+esc(o)+'</span>';}).join('')+'<span class="pill" data-all="1">All</span>'; }
     function sel(id,label,opts,val){return '<span class="pill-lbl">'+label+'</span><select class="flt" id="'+id+'" style="width:auto;padding:3px 6px"><option>All</option>'+opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>';}
     c.innerHTML=annot('order-plan')
-      +'<div class="bar"><span class="pill-lbl">Status</span><span id="op-status">'+pillsHTML(statuses,st.statuses)+'</span>'
+      +'<div class="bar"><span class="pill-lbl">Status</span><span id="op-status">'+pillsHTML(pillStatuses,st.statuses)+'</span><span class="mut tiny" style="margin-left:6px">completed POs: search a PO number below</span>'
         +'<span class="pill-lbl" style="margin-left:12px">PO(s)</span><input class="flt" id="op-po" placeholder="PO number(s) — space / comma…" title="one or more PO numbers, separated by space, comma or line break — overrides the status &amp; country filters" style="width:240px;background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8" value="'+esc(st.poq||'')+'"></div>'
       +'<div class="bar"><span class="pill-lbl">Country</span><span id="op-country">'+pillsHTML(countries,st.countries)+'</span></div>'
       +'<div class="bar"><span class="pill-lbl">SKUs</span><span class="pill active" data-sc="ordered">Ordered</span><span class="pill" data-sc="allskus">All SKUs</span><span class="pill" data-sc="all">All in category</span>'
@@ -1257,7 +1261,9 @@
       +'<div id="op-changes"></div>'
       +'<div id="op-grid"></div>';
     // parse the PO box into tokens (space / comma / newline). When present it OVERRIDES the status + country filters.
-    function poToks(){ return String(st.poq||'').toLowerCase().split(/[\s,]+/).filter(Boolean); }
+    // PO-search tokens — require ≥5 chars so a short/partial entry doesn't accidentally override the status
+    // filter (and pull in the 1000+ completed POs). Below 5 chars the PO box is inert.
+    function poToks(){ return String(st.poq||'').toLowerCase().split(/[\s,]+/).filter(function(t){return t.length>=5;}); }
     function curLines(){ var allC=st.countries.size===countries.length, pt=poToks(); return lines.filter(function(l){
       if(pt.length){ if(!pt.some(function(t){return (l.po||'').toLowerCase().indexOf(t)>=0;}))return false; }
       else { if(!st.statuses.has(l.status))return false; if(!(allC||st.countries.has(l.country)))return false; }
@@ -1311,7 +1317,7 @@
       approveExc('opapprove-sup','supplier',function(l){l.supplier_risk_approved=true;});
       approveExc('opapprove-disc','discontinue',function(l){l.discontinue_approved=true;}); }
     function togglebar(id,opts,setv){ document.getElementById(id).onclick=function(e){var t=e.target; if(t.dataset.all)setv=new Set(opts); else if(t.dataset.v!=null){if(setv.has(t.dataset.v))setv.delete(t.dataset.v);else setv.add(t.dataset.v);} else return; if(id==='op-status')st.statuses=setv; else st.countries=setv; document.getElementById(id).innerHTML=pillsHTML(opts,setv); view(); }; }
-    togglebar('op-status',statuses,st.statuses); togglebar('op-country',countries,st.countries);
+    togglebar('op-status',pillStatuses,st.statuses); togglebar('op-country',countries,st.countries);
     c.querySelectorAll('[data-sc]').forEach(function(p){p.onclick=function(){st.scope=p.dataset.sc; c.querySelectorAll('[data-sc]').forEach(function(x){x.classList.toggle('active',x===p);}); view();};});
     document.getElementById('op-partials').onclick=function(){st.partials=!st.partials; this.classList.toggle('active',st.partials); view();};
     document.getElementById('op-erp').onclick=function(){st.erpdiff=!st.erpdiff; this.classList.toggle('active',st.erpdiff); view();};
