@@ -4,6 +4,12 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.317 - Deposits: column shows linked PURCHASE ORDERS (not productions)
+
+Correction to v20.316: the thing linked to a deposit is its purchase orders (po.deposit_ref), not productions.
+The column (now "Linked purchase orders") lists the PO refs, defaulting to OPEN (non-complete) POs with the
+"POs: open only / all" toggle. Server deposits payload returns pos_open (open POs); linked_pos is the full list.
+
 ## v20.316 - Deposits: assigned productions derived from POs (open-first + toggle)
 
 The deposit register’s "Assigned production(s)" column was empty (it read the manual production_deposits
