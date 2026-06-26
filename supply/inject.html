@@ -2226,8 +2226,33 @@
     (run.lines||[]).forEach(function(l){ out.push([l.reference,l.amount,l.type,l.prod_no||'',l.deposit_ref||''].map(clean).join('\t')); });
     return out.join('\n');
   }
+  // HTML version of the summary — a basic inline-styled table that pastes neatly into Gmail (and Sheets).
+  function xbSummaryHtml(run, ccy, amt){
+    var altAmt=Number(String(amt==null?'':amt).replace(/,/g,''));
+    var payAmt=(ccy && ccy!=='USD' && altAmt>0) ? (fmtAmt(altAmt)+' '+ccy) : (fmtAmt(run.total)+' USD');
+    var inv='SUPPLIER-PAYMENT-'+(run.supplier_code?run.supplier_code+'-':'')+run.dt;
+    var cell='border:1px solid #cccccc;padding:4px 8px', hcell=cell+';background:#f2f2f2;text-align:left;font-weight:bold';
+    var rows=(run.lines||[]).map(function(l){
+      return '<tr><td style="'+cell+'">'+esc(l.reference||'')+'</td>'
+        +'<td style="'+cell+';text-align:right">'+money(l.amount)+'</td>'
+        +'<td style="'+cell+'">'+esc(l.type||'')+'</td>'
+        +'<td style="'+cell+'">'+esc(l.prod_no||'')+'</td>'
+        +'<td style="'+cell+'">'+esc(l.deposit_ref||'')+'</td></tr>'; }).join('');
+    return '<div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#111">'
+      +'<p style="margin:0 0 10px"><b>Supplier:</b> '+esc(run.supplier)+'<br><b>Payment amount:</b> '+esc(payAmt)+'<br><b>Payment reference:</b> '+esc(inv)+'</p>'
+      +'<table style="border-collapse:collapse;font-size:13px"><thead><tr>'
+      +'<th style="'+hcell+'">Reference</th><th style="'+hcell+';text-align:right">Amount</th><th style="'+hcell+'">Type</th><th style="'+hcell+'">Production ref</th><th style="'+hcell+'">Deposit ref</th>'
+      +'</tr></thead><tbody>'+rows+'</tbody></table></div>';
+  }
   function xbCopySummary(run, ccy, amt, btn){ if(!(run.lines||[]).length){alert('No payments in this run.');return;}
-    navigator.clipboard.writeText(xbSummaryTsv(run,ccy,amt)).then(function(){ if(btn){var o=btn.textContent; btn.textContent='✓'; setTimeout(function(){btn.textContent=o;},1200);} }).catch(function(){ alert('Copy failed — your browser blocked clipboard access.'); }); }
+    function done(){ if(btn){var o=btn.textContent; btn.textContent='✓'; setTimeout(function(){btn.textContent=o;},1200);} }
+    function fail(){ alert('Copy failed — your browser blocked clipboard access.'); }
+    var html=xbSummaryHtml(run,ccy,amt), text=xbSummaryTsv(run,ccy,amt);
+    // write rich (text/html → Gmail / Sheets) + plain (TSV fallback); fall back to plain-text write if needed
+    if(window.ClipboardItem && navigator.clipboard && navigator.clipboard.write){
+      navigator.clipboard.write([new ClipboardItem({'text/html':new Blob([html],{type:'text/html'}),'text/plain':new Blob([text],{type:'text/plain'})})])
+        .then(done).catch(function(){ navigator.clipboard.writeText(text).then(done).catch(fail); });
+    } else { navigator.clipboard.writeText(text).then(done).catch(fail); } }
   // master row = one bank payment (date + supplier): base (USD) total + actual bank amount/currency.
   // expand to see the sub-payments (reference · amount · type · deposit ref).
   function payReportHTML(rows){ if(!rows||!rows.length)return '<div class="count">No payments.</div>';

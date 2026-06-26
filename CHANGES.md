@@ -4,6 +4,13 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.324 - Payment summary copy → HTML table (Gmail-friendly)
+
+The purple ⎘ "copy payment summary" button now writes a basic inline-styled HTML table to the clipboard
+(text/html) alongside the TSV (text/plain fallback), so it pastes as a neat table into Gmail — and still
+into Google Sheets as cells. Header shows Supplier / Payment amount / Payment reference; table columns
+Reference, Amount, Type, Production ref, Deposit ref. The Xero ⧉ copy stays TSV.
+
 ## v20.323 - Deposits/Other Payments: FX action, unpaid filter, supplier dropdown, paid-delete lock
 
 - Paid deposit with no Xero FX rate → new medium (amber) SUPPLY ▸ Actions item "Deposit FX missing".
