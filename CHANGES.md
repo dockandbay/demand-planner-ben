@@ -4,6 +4,12 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.326 - Order Plan: red action counts (unapproved partials + Update ERP filter)
+
+The "⚠ Unapproved partials" pill now shows a red action count (open/non-complete partial-carton lines), and a
+new "⚠ Update ERP" filter pill shows a red count of lines whose planned qty differs from the ERP and filters
+the grid to them. Both exclude complete POs.
+
 ## v20.325 - Payments Report: supplier-kind filter
 
 The Payments Report now only includes payments whose supplier has master kind = "supplier" — freight,
