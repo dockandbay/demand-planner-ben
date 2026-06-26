@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.327';
+const APP_VERSION = 'v20.328';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2861,17 +2861,18 @@ app.post('/api/scenario/fin-model-import', async (req, res) => {
 
 // Financial Forecast scenario overlays (exec-summary-style view): growth % + price % per channel × country.
 app.get('/api/scenario/fin-overlay', async (req, res) => {
-  try { res.json((await pool.query('SELECT channel, country, growth_pct, price_pct FROM planner.scenario_fin_overlay')).rows); }
+  try { res.json((await pool.query(`SELECT channel, country, coalesce(subcategory,'') subcategory, growth_pct, price_pct FROM planner.scenario_fin_overlay`)).rows); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/scenario/fin-overlay', async (req, res) => {
   const b = req.body || {};
   if (!b.channel || !b.country) return res.status(400).json({ error: 'channel and country required' });
+  const sub = (b.subcategory == null ? '' : String(b.subcategory));
   const num = v => (v === '' || v == null) ? null : Number(v);
   try {
-    await pool.query(`INSERT INTO planner.scenario_fin_overlay (channel, country, growth_pct, price_pct, updated_at)
-      VALUES ($1,$2,$3,$4, now()) ON CONFLICT (channel, country) DO UPDATE SET growth_pct=excluded.growth_pct, price_pct=excluded.price_pct, updated_at=now()`,
-      [b.channel, b.country, num(b.growth_pct), num(b.price_pct)]);
+    await pool.query(`INSERT INTO planner.scenario_fin_overlay (channel, country, subcategory, growth_pct, price_pct, updated_at)
+      VALUES ($1,$2,$3,$4,$5, now()) ON CONFLICT (channel, country, subcategory) DO UPDATE SET growth_pct=excluded.growth_pct, price_pct=excluded.price_pct, updated_at=now()`,
+      [b.channel, b.country, sub, num(b.growth_pct), num(b.price_pct)]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

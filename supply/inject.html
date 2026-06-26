@@ -2874,6 +2874,7 @@
   var SCEN_SECTIONS=[['prime','PRIME DAY'],['b2b','B2B ALLOCATION'],['finmodel','FINANCIAL FORECAST MODEL']];
   var scenCurrent='prime', CATS_CACHE=null;
   var scenExp=new Set();   // Financial Forecast: which channel rows are expanded to countries
+  var scenExpCo=new Set();  // Financial Forecast: which channel|country rows are expanded to sub-categories
   var SCEN_ANNOT={
     prime:'<b>SCENARIO ▸ Prime Day.</b> Enter a SKU list or filter by category / market to see available inventory split by FBA, AWD and 3PL.',
     b2b:'<b>SCENARIO ▸ B2B Allocation.</b> Should we take this order? Models stock impact, whether it\'s worth it after the air cost to rush in any shortfall, and a take/decline verdict. Switch market to re-analyse (stock + price are market-specific). Air rate $10/kg · £7/kg.',
@@ -2901,10 +2902,11 @@
     function run(){ var skus=(document.getElementById('pd-skus').value||'').split(/[\s,]+/).map(function(x){return x.trim();}).filter(Boolean);
       var cat=document.getElementById('pd-cat').value||'';
       fetch('/api/scenario/prime-day',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({skus:skus,category:cat,country:st.co})})
-        .then(function(r){return r.json();}).then(pdRender).catch(function(e){document.getElementById('pd-grid').innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>';}); }
+        .then(function(r){return r.json();}).then(pdRender).catch(function(e){var g=document.getElementById('pd-grid'); if(g)g.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>';}); }
     document.getElementById('pd-run').onclick=run;
     document.getElementById('pd-cat').onchange=run;
-    function pdRender(d){ var t=d.totals||{fba:0,three_pl:0,awd:0,total:0}; var awdOn=d.awd_available;
+    function pdRender(d){ if(!document.getElementById('pd-grid'))return;   // view switched away before fetch resolved
+      var t=d.totals||{fba:0,three_pl:0,awd:0,total:0}; var awdOn=d.awd_available;
       var awdCell=function(v){return awdOn?units(v):'<span class="mut">n/a</span>';};
       document.getElementById('pd-kpis').innerHTML='<div class="kpibar">'
         +'<div class="kpi"><div class="l">SKUs</div><div class="v">'+units(d.sku_count)+'</div></div>'
@@ -2939,23 +2941,29 @@
       return ' <span class="exec-yoy '+cls+'">'+ar+(Math.abs(pct)>999?(sg+'999+'):(sg+pct))+'%</span>'; }
     function cell(s){ return '<div class="exec-units">'+units(Math.round(s.u))+yoyBadge(s.u,s.lyU)+'</div><div class="exec-rev">£'+fmInt(s.r)+yoyBadge(s.r,s.lyR)+'</div>'; }
     function actual(fym){ return typeof ACTUAL_MONTHS!=='undefined' && ACTUAL_MONTHS.indexOf(fym)>=0; }
-    function ovOf(ch,co){ var o=ov[ch+'|'+co]||{}; return {g:(o.growth_pct==null||o.growth_pct==='')?0:Number(o.growth_pct), p:(o.price_pct==null||o.price_pct==='')?0:Number(o.price_pct)}; }
-    // apply the overlay to a monthly cell — forecast months only; actuals untouched
-    function adj(ch,co,fym,v){ v=v||{u:0,r:0,lyU:0,lyR:0}; if(actual(fym))return {u:v.u,r:v.r,lyU:v.lyU||0,lyR:v.lyR||0};
-      var o=ovOf(ch,co); return {u:v.u*(1+o.g/100), r:v.r*(1+o.g/100)*(1+o.p/100), lyU:v.lyU||0, lyR:v.lyR||0}; }
+    // overlay is keyed channel|country|subcategory
+    function ovOf(ch,co,s){ var o=ov[ch+'|'+co+'|'+s]||{}; return {g:(o.growth_pct==null||o.growth_pct==='')?0:Number(o.growth_pct), p:(o.price_pct==null||o.price_pct==='')?0:Number(o.price_pct)}; }
+    // apply a sub-category's overlay to a monthly cell — forecast months only; actuals untouched. The price %
+    // lifts ASP for every forecast month (a permanent uplift inherited across future periods).
+    function adj(ch,co,s,fym,v){ v=v||{u:0,r:0,lyU:0,lyR:0}; if(actual(fym))return {u:v.u,r:v.r,lyU:v.lyU||0,lyR:v.lyR||0};
+      var o=ovOf(ch,co,s); return {u:v.u*(1+o.g/100), r:v.r*(1+o.g/100)*(1+o.p/100), lyU:v.lyU||0, lyR:v.lyR||0}; }
     function qsum(map,months){ var s={u:0,r:0,lyU:0,lyR:0}; months.forEach(function(m){ var v=map&&map[m]; if(v){s.u+=v.u;s.r+=v.r;s.lyU+=v.lyU||0;s.lyR+=v.lyR||0;} }); return s; }
     function load(){ document.getElementById('fm-grid').innerHTML='<div class="count">Loading…</div>';
-      fetch('/api/scenario/fin-overlay').then(function(r){return r.json();}).then(function(rows){ ov={}; (rows||[]).forEach(function(o){ov[o.channel+'|'+o.country]=o;}); render(); })
+      fetch('/api/scenario/fin-overlay').then(function(r){return r.json();}).then(function(rows){ ov={}; (rows||[]).forEach(function(o){ if((o.subcategory||'')!=='') ov[o.channel+'|'+o.country+'|'+o.subcategory]=o; }); render(); })
         .catch(function(){ ov={}; render(); }); }
     function render(){
+      if(!document.getElementById('fm-grid')||!document.getElementById('fm-meta'))return;   // view switched away before a fetch resolved
       if(typeof buildExecData!=='function'){ document.getElementById('fm-grid').innerHTML='<div class="count">Open the planner (DEMAND) first so the forecast data is loaded.</div>'; return; }
       var base=buildExecData();
-      // build overlay-adjusted country maps, and re-aggregate channel + total from them
-      var COC={}, CHm={}, TOT={};
-      CHS.forEach(function(ch){ COC[ch]={}; CHm[ch]={}; Object.keys((base.coc&&base.coc[ch])||{}).sort().forEach(function(co){ COC[ch][co]={};
-        ALLM.forEach(function(fym){ var a=adj(ch,co,fym,(base.coc[ch][co]||{})[fym]); COC[ch][co][fym]=a;
-          (CHm[ch][fym]=CHm[ch][fym]||{u:0,r:0,lyU:0,lyR:0}); CHm[ch][fym].u+=a.u;CHm[ch][fym].r+=a.r;CHm[ch][fym].lyU+=a.lyU;CHm[ch][fym].lyR+=a.lyR;
-          (TOT[fym]=TOT[fym]||{u:0,r:0,lyU:0,lyR:0}); TOT[fym].u+=a.u;TOT[fym].r+=a.r;TOT[fym].lyU+=a.lyU;TOT[fym].lyR+=a.lyR; }); }); });
+      // build overlay-adjusted SUB-CATEGORY maps, and roll up → country → channel → total from them
+      var COCS={}, COC={}, CHm={}, TOT={}, subsByCoc={};
+      CHS.forEach(function(ch){ COCS[ch]={}; COC[ch]={}; CHm[ch]={}; var byCo=(base.cocs&&base.cocs[ch])||{};
+        Object.keys(byCo).sort().forEach(function(co){ COCS[ch][co]={}; COC[ch][co]={}; subsByCoc[ch+'|'+co]=Object.keys(byCo[co]||{}).sort();
+          subsByCoc[ch+'|'+co].forEach(function(s){ COCS[ch][co][s]={};
+            ALLM.forEach(function(fym){ var a=adj(ch,co,s,fym,(byCo[co][s]||{})[fym]); COCS[ch][co][s][fym]=a;
+              (COC[ch][co][fym]=COC[ch][co][fym]||{u:0,r:0,lyU:0,lyR:0}); COC[ch][co][fym].u+=a.u;COC[ch][co][fym].r+=a.r;COC[ch][co][fym].lyU+=a.lyU;COC[ch][co][fym].lyR+=a.lyR;
+              (CHm[ch][fym]=CHm[ch][fym]||{u:0,r:0,lyU:0,lyR:0}); CHm[ch][fym].u+=a.u;CHm[ch][fym].r+=a.r;CHm[ch][fym].lyU+=a.lyU;CHm[ch][fym].lyR+=a.lyR;
+              (TOT[fym]=TOT[fym]||{u:0,r:0,lyU:0,lyR:0}); TOT[fym].u+=a.u;TOT[fym].r+=a.r;TOT[fym].lyU+=a.lyU;TOT[fym].lyR+=a.lyR; }); }); }); });
       // ---- year cards: FY26 (actual = LY of FY27) vs FY27 (scenario) ----
       var f27=qsum(TOT,FY27M), f26={u:f27.lyU,r:f27.lyR};
       var gyU=f26.u>0?Math.round((f27.u-f26.u)/f26.u*100):0, gyR=f26.r>0?Math.round((f27.r-f26.r)/f26.r*100):0;
@@ -2965,7 +2973,7 @@
         return '<div class="yr-card '+(emph||'')+'"><div class="yr-card-hdr">'+esc(label)+'</div><div class="yr-card-sub">'+esc(sub)+'</div>'
           +'<div class="yr-card-u">'+fmInt(u)+'</div><div class="yr-card-u-lbl">units</div>'
           +'<div class="yr-card-r">£'+fmInt(r)+'</div><div class="yr-card-r-lbl">revenue</div>'+g+'</div>'; }
-      document.getElementById('fm-meta').textContent='All channels × markets · FY Mar–Feb (quarterly) · growth/price overlay per channel × country · saves live';
+      document.getElementById('fm-meta').textContent='All channels × markets × sub-category · FY Mar–Feb (quarterly) · growth/price overlay per channel × country × sub-category · price % lifts ASP across all forecast periods · saves live';
       document.getElementById('fm-kpis').innerHTML='<div class="yr-summary">'
         +yc('FY26','Mar 25–Feb 26 · Actual',f26.u,f26.r,'actual')
         +yc('FY27','Mar 26–Feb 27 · Scenario',f27.u,f27.r,'mixed',{u:gyU,r:gyR},'FY26')+'</div>';
@@ -2984,18 +2992,23 @@
         return s; }
       CHS.forEach(function(ch){ var exp=scenExp.has(ch);
         h+='<tr class="channel-row"><td class="lbl-col channel-lbl" data-ch="'+ch+'"><span class="ch-chev">'+(exp?'▾':'▸')+'</span> '+ch+'</td>'+rowCells(CHm[ch],false)+'<td></td><td></td></tr>';
-        if(exp){ Object.keys(COC[ch]).sort().forEach(function(co){ var o=ovOf(ch,co);
-          h+='<tr class="country-row"><td class="lbl-col country-lbl">&nbsp;&nbsp;&nbsp;&nbsp;'+((typeof FLAGS!=='undefined'&&FLAGS[co])||'')+' '+esc(co)+'</td>'+rowCells(COC[ch][co],true)
-            +'<td class="country-cell"><input class="fm-in fm-g" data-ch="'+ch+'" data-co="'+esc(co)+'" value="'+(o.g||'')+'" placeholder="0">%</td>'
-            +'<td class="country-cell"><input class="fm-in fm-p" data-ch="'+ch+'" data-co="'+esc(co)+'" value="'+(o.p||'')+'" placeholder="0">%</td></tr>'; }); }
+        if(exp){ Object.keys(COC[ch]).sort().forEach(function(co){ var coExp=scenExpCo.has(ch+'|'+co);
+          h+='<tr class="country-row"><td class="lbl-col country-lbl coc-lbl" data-ch="'+ch+'" data-co="'+esc(co)+'" style="cursor:pointer">&nbsp;&nbsp;<span class="ch-chev">'+(coExp?'▾':'▸')+'</span> '+((typeof FLAGS!=='undefined'&&FLAGS[co])||'')+' '+esc(co)+'</td>'+rowCells(COC[ch][co],true)+'<td></td><td></td></tr>';
+          if(coExp){ (subsByCoc[ch+'|'+co]||[]).forEach(function(s){ var o=ovOf(ch,co,s);
+            h+='<tr class="subcat-row"><td class="lbl-col" style="padding-left:34px;color:#555">'+esc(s)+'</td>'+rowCells(COCS[ch][co][s],true)
+              +'<td class="country-cell"><input class="fm-in fm-g" data-ch="'+ch+'" data-co="'+esc(co)+'" data-s="'+esc(s)+'" value="'+(o.g||'')+'" placeholder="0">%</td>'
+              +'<td class="country-cell"><input class="fm-in fm-p" data-ch="'+ch+'" data-co="'+esc(co)+'" data-s="'+esc(s)+'" value="'+(o.p||'')+'" placeholder="0">%</td></tr>'; }); }
+        }); }
       });
       h+='<tr class="total-row"><td class="lbl-col">TOTAL</td>'+rowCells(TOT,false)+'<td></td><td></td></tr>';
       document.getElementById('fm-grid').innerHTML=h+'</tbody></table></div>';
       document.querySelectorAll('#fm-grid .channel-lbl').forEach(function(el){ el.onclick=function(){ var ch=el.dataset.ch; if(scenExp.has(ch))scenExp.delete(ch); else scenExp.add(ch); render(); }; });
-      document.querySelectorAll('#fm-grid .fm-g, #fm-grid .fm-p').forEach(function(el){ el.onchange=function(){ var ch=el.dataset.ch, co=el.dataset.co;
-        var g=document.querySelector('#fm-grid .fm-g[data-ch="'+cssEsc(ch)+'"][data-co="'+cssEsc(co)+'"]'); var p=document.querySelector('#fm-grid .fm-p[data-ch="'+cssEsc(ch)+'"][data-co="'+cssEsc(co)+'"]');
-        fetch('/api/scenario/fin-overlay',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({channel:ch,country:co,growth_pct:g?g.value:'',price_pct:p?p.value:''})})
-          .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); ov[ch+'|'+co]={channel:ch,country:co,growth_pct:g?g.value:'',price_pct:p?p.value:''}; render(); })
+      document.querySelectorAll('#fm-grid .coc-lbl').forEach(function(el){ el.onclick=function(){ var k=el.dataset.ch+'|'+el.dataset.co; if(scenExpCo.has(k))scenExpCo.delete(k); else scenExpCo.add(k); render(); }; });
+      document.querySelectorAll('#fm-grid .fm-g, #fm-grid .fm-p').forEach(function(el){ el.onchange=function(){ var ch=el.dataset.ch, co=el.dataset.co, s=el.dataset.s;
+        var sel='[data-ch="'+cssEsc(ch)+'"][data-co="'+cssEsc(co)+'"][data-s="'+cssEsc(s)+'"]';
+        var g=document.querySelector('#fm-grid .fm-g'+sel), p=document.querySelector('#fm-grid .fm-p'+sel);
+        fetch('/api/scenario/fin-overlay',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({channel:ch,country:co,subcategory:s,growth_pct:g?g.value:'',price_pct:p?p.value:''})})
+          .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); ov[ch+'|'+co+'|'+s]={channel:ch,country:co,subcategory:s,growth_pct:g?g.value:'',price_pct:p?p.value:''}; render(); })
           .catch(function(e){ alert('Save failed: '+(e.message||e)); }); }; });
     }
     load(); }

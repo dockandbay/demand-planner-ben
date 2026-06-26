@@ -6883,7 +6883,7 @@ function renderCalendarView(body){
 //   coc: {channelKey: {country: {ym: {u,r}}}}  per-country breakdown
 //   tot: {ym: {u,r}}  grand total across everything
 function buildExecData(){
-  var ch={DTC:{},FBA:{},B2B:{}},coc={DTC:{},FBA:{},B2B:{}},tot={};
+  var ch={DTC:{},FBA:{},B2B:{}},coc={DTC:{},FBA:{},B2B:{}},cocs={DTC:{},FBA:{},B2B:{}},tot={};
   function ensure(o,m){if(!o[m])o[m]={u:0,r:0,lyU:0,lyR:0};}
   DATA.forEach(function(row){
     if(['DTC','FBA','B2B'].indexOf(row.ch)<0)return;
@@ -6916,10 +6916,14 @@ function buildExecData(){
       ensure(ch[row.ch],fym);ch[row.ch][fym].u+=u;ch[row.ch][fym].r+=r;ch[row.ch][fym].lyU+=lyU;ch[row.ch][fym].lyR+=lyR;
       if(!coc[row.ch][row.co])coc[row.ch][row.co]={};
       ensure(coc[row.ch][row.co],fym);coc[row.ch][row.co][fym].u+=u;coc[row.ch][row.co][fym].r+=r;coc[row.ch][row.co][fym].lyU+=lyU;coc[row.ch][row.co][fym].lyR+=lyR;
+      // sub-category level (channel → country → subcategory → month) for the financial model overlay
+      if(!cocs[row.ch][row.co])cocs[row.ch][row.co]={};
+      if(!cocs[row.ch][row.co][row.s])cocs[row.ch][row.co][row.s]={};
+      ensure(cocs[row.ch][row.co][row.s],fym);cocs[row.ch][row.co][row.s][fym].u+=u;cocs[row.ch][row.co][row.s][fym].r+=r;cocs[row.ch][row.co][row.s][fym].lyU+=lyU;cocs[row.ch][row.co][row.s][fym].lyR+=lyR;
       ensure(tot,fym);tot[fym].u+=u;tot[fym].r+=r;tot[fym].lyU+=lyU;tot[fym].lyR+=lyR;
     });
   });
-  return {ch:ch,coc:coc,tot:tot};
+  return {ch:ch,coc:coc,cocs:cocs,tot:tot};
 }
 
 var EXPANDED_CHANNELS=new Set(); // which channel rows are expanded

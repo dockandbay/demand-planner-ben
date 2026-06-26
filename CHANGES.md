@@ -4,6 +4,14 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.328 - Financial model: sub-category breakdown + per-sub-cat growth/price overrides
+
+SCENARIO ▸ Financial Forecast Model now drills channel → country → **sub-category**. Growth % and price-
+increase % overrides live at the **sub-category × channel × country** level (was channel × country); country,
+channel and total rows roll up from them. Price % lifts ASP across all forecast periods (a permanent uplift
+inherited forward); growth % lifts units. Forecast months only; actuals untouched. Migration 066 extends the
+overlay table with a subcategory key; buildExecData() now also returns a sub-category map.
+
 ## v20.327 - Upload to ERP popup: export revised order plan (Code/Qty)
 
 The inert "Upload to ERP" popup (PO grid, Order Plan, Actions) now keeps its "does not update Fulfil/Cin7
