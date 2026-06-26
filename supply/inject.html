@@ -318,7 +318,7 @@
     if(r.fix==='date'){ fix='<span class="tiny mut">fix date</span> <input class="fci dt act-in" type="date" data-id="'+r._id+'"> '+applyBtn(r._id); }
     else if(r.fix==='shipment'){ fix='<span class="tiny mut">assign shipment</span> <input class="fci txt act-in" list="shiplist" placeholder="pick / type…" data-id="'+r._id+'"> '+applyBtn(r._id); }
     else if(r.fix==='supplier'){ fix='<span class="tiny mut">set supplier</span> <input class="fci txt act-in" list="supplierlist" placeholder="pick supplier…" data-id="'+r._id+'"> '+applyBtn(r._id); }
-    else if(r.fix==='upload'){ fix='<button class="save-btn act-up" data-id="'+r._id+'">⬆ Upload to ERP</button>'; }
+    else if(r.fix==='upload'){ fix='<button class="save-btn act-up" data-id="'+r._id+'" data-po="'+esc(r.ref||r.target_key||'')+'">⬆ Upload to ERP</button>'; }
     else if(r.fix==='arrived'){ fix='<button class="save-btn act-arrived" data-id="'+r._id+'">✓ Mark arrived</button>'; }
     else if(r.fix==='podeliver'){ fix='<button class="save-btn act-podeliver" data-id="'+r._id+'">✓ Mark PO delivered</button>'; }
     else if(r.fix==='prodstatus'){ fix='<span class="tiny mut">supplier status</span> <select class="fci act-in" data-id="'+r._id+'"><option value="">—</option>'+prodStatusOpts('')+'</select> '+applyBtn(r._id); }
@@ -373,7 +373,7 @@
       fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(x){return x.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error); actResolve(id,val); })
         .catch(function(e){ b.disabled=false; b.textContent='Apply'; alert('Failed: '+(e.message||e)); }); }; });
-    document.querySelectorAll('#act-grid .act-up').forEach(function(b){ b.onclick=function(){ erpUploadInert(); }; });
+    document.querySelectorAll('#act-grid .act-up').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po); }; });
     document.querySelectorAll('#act-grid .act-arrived').forEach(function(b){ b.onclick=function(){ var id=b.dataset.id, r=actRows[id]; b.disabled=true; b.textContent='…';
       fetch('/api/supply/shipment/'+encodeURIComponent(r.target_key||r.ref),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({status:'ARRIVED'})}).then(function(x){return x.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); actResolve(id,'arrived'); }).catch(function(e){ b.disabled=false; b.textContent='✓ Mark arrived'; alert('Failed: '+(e.message||e)); }); }; });
     document.querySelectorAll('#act-grid .act-postatus').forEach(function(sel){ sel.onchange=function(){ var v=sel.value; if(!v)return; var id=sel.dataset.id; sel.disabled=true;
@@ -673,7 +673,7 @@
       document.getElementById('sup-grid').innerHTML=poTable(f,state.grp); bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick();
       bindDepPick(function(){ delete cache['purchase-orders']; selectSection('purchase-orders'); });
       if(_pendingPO){ var want=_pendingPO; _pendingPO=null; setTimeout(function(){ expandPending('#sup-grid .po-exp[data-po]',want); },30); }
-      document.querySelectorAll('#sup-grid .erp-up').forEach(function(b){ b.onclick=function(){ erpUploadInert(); }; }); }
+      document.querySelectorAll('#sup-grid .erp-up').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.up); }; }); }
     c.querySelectorAll('#po-prog .pill').forEach(function(p){p.onclick=function(){c.querySelectorAll('#po-prog .pill').forEach(function(x){x.classList.remove('active');});p.classList.add('active');state.f=p.dataset.f;view();};});
     var _actPill=c.querySelector('#po-act .po-actall'), _erpPill=c.querySelector('#po-act .po-erp');
     function syncActErp(){ if(_actPill)_actPill.style.boxShadow=state.hasact?'0 0 0 2px #7f1d1d inset':''; if(_erpPill)_erpPill.style.boxShadow=state.erp?'0 0 0 2px #7c2d12 inset':''; }
@@ -726,9 +726,30 @@
         alert('Imported '+j.created+' PO(s)'+(j.skipped&&j.skipped.length?'; skipped '+j.skipped.length+' existing':'')+(j.errors&&j.errors.length?'; '+j.errors.length+' error(s)':'')+'.');
         delete cache['purchase-orders']; selectSection('purchase-orders'); }); };
     ta.focus(); }
-  // Upload to Fulfil/Cin7 is not yet wired (awaiting Diviyaj's n8n webhook). Every upload affordance
-  // calls this — it neither pushes nor fakes a local sync, so misalignment stays visible.
-  function erpUploadInert(){ alert('Upload feature not yet banked. To be integrated to Fulfil or Cin7.'); }
+  // Upload to Fulfil/Cin7 is not yet wired (awaiting Diviyaj's n8n webhook). The popup says so, but offers a
+  // manual export of the revised order plan (SKU → qty) as a CSV download or clipboard copy with Code/Qty headers.
+  function erpUploadInert(po){ closeShPop&&closeShPop();
+    var bg=document.createElement('div'); bg.id='erp-bg'; bg.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100000;display:flex;align-items:flex-start;justify-content:center;padding:60px 12px';
+    bg.innerHTML='<div style="background:#fff;border-radius:10px;max-width:460px;width:100%;padding:18px;font-family:Arial,Helvetica,sans-serif">'
+      +'<div style="font-weight:700;font-size:15px;margin-bottom:6px">Upload to ERP'+(po?(' — '+esc(po)):'')+'</div>'
+      +'<div class="mut" style="margin-bottom:12px;font-size:13px">This does <b>not</b> update Fulfil/Cin7 yet (integration pending). Until then, export the revised order plan (Code &amp; Qty) and enter it into the ERP manually:</div>'
+      +'<div style="display:flex;gap:8px;align-items:center"><button class="save-btn" id="erp-dl" style="background:#2563eb;color:#fff;border-color:#2563eb">⬇ Download CSV</button><button class="save-btn" id="erp-cp">⧉ Copy to clipboard</button><button class="save-btn light" id="erp-x" style="margin-left:auto">Close</button></div>'
+      +'<div class="mut tiny" id="erp-msg" style="margin-top:10px"></div></div>';
+    document.body.appendChild(bg); bg.onclick=function(e){ if(e.target===bg)bg.remove(); };
+    var msg=bg.querySelector('#erp-msg'); bg.querySelector('#erp-x').onclick=function(){bg.remove();};
+    if(!po){ msg.textContent='No PO context for this upload.'; return; }
+    function build(cb){ msg.textContent='Loading order plan…';
+      fetch('/api/supply/order-plan').then(function(r){return r.json();}).then(function(all){
+        cb((all||[]).filter(function(l){return l.po===po && Number(l.qty)>0;}).map(function(l){return {code:l.sku, qty:Math.round(Number(l.qty))};}));
+      }).catch(function(){ cb(null); }); }
+    bg.querySelector('#erp-dl').onclick=function(){ build(function(rows){ if(!rows){msg.textContent='Failed to load order plan.';return;} if(!rows.length){msg.textContent='No order-plan lines with qty for '+po+'.';return;}
+      var csv='Code,Qty\n'+rows.map(function(r){var c=String(r.code); if(/[",\n]/.test(c))c='"'+c.replace(/"/g,'""')+'"'; return c+','+r.qty;}).join('\n')+'\n';
+      var bl=new Blob([csv],{type:'text/csv'}),u=URL.createObjectURL(bl),a=document.createElement('a'); a.href=u; a.download='ERP_'+po.replace(/[^A-Za-z0-9]+/g,'_')+'.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000);
+      msg.textContent=rows.length+' line(s) downloaded.'; }); };
+    bg.querySelector('#erp-cp').onclick=function(){ build(function(rows){ if(!rows){msg.textContent='Failed to load order plan.';return;} if(!rows.length){msg.textContent='No order-plan lines with qty for '+po+'.';return;}
+      var tsv='Code\tQty\n'+rows.map(function(r){return String(r.code)+'\t'+r.qty;}).join('\n');   // TAB-separated → pastes into columns
+      navigator.clipboard.writeText(tsv).then(function(){msg.textContent=rows.length+' line(s) copied (Code + Qty).';}).catch(function(){msg.textContent='Copy failed — clipboard blocked.';}); }); };
+  }
   function poErpRecon(rows){ // ERP reconciliation summary across the visible POs
     var absent=0,drift=0,match=0,nolines=0,datedrift=0;
     rows.forEach(function(r){ if(r.erp_date_pending>0)datedrift++; if(!(r.erp_total>0))nolines++; else if(!(r.erp_in>0))absent++; else if(r.erp_pending>0)drift++; else match++; });
@@ -1236,7 +1257,7 @@
     function bindUploads(){ document.querySelectorAll('#op-grid .opup').forEach(function(b){ var po=b.dataset.up;
       var pend=lines.some(function(x){return x.po===po&&Number(x.qty)!==Number(x.erp_qty==null?x.qty:x.erp_qty);});
       b.style.display=pend?'inline-block':'none'; b.classList.toggle('has',pend);
-      b.onclick=function(){ erpUploadInert(); }; }); }
+      b.onclick=function(){ erpUploadInert(po); }; }); }
     function bindApprove(){ document.querySelectorAll('#op-grid .opapprove').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var psku=b.dataset.ap;
       fetch('/api/supply/po-line/'+encodeURIComponent(psku)+'/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({approved:true})}).then(function(r){return r.json();}).then(function(){var l=lines.find(function(x){return (x.po+'|'+x.sku)===psku;}); if(l)l.full_carton_check='OK Partial'; view();}); }; }); }
     function togglebar(id,opts,setv){ document.getElementById(id).onclick=function(e){var t=e.target; if(t.dataset.all)setv=new Set(opts); else if(t.dataset.v!=null){if(setv.has(t.dataset.v))setv.delete(t.dataset.v);else setv.add(t.dataset.v);} else return; if(id==='op-status')st.statuses=setv; else st.countries=setv; document.getElementById(id).innerHTML=pillsHTML(opts,setv); view(); }; }

@@ -4,6 +4,12 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.327 - Upload to ERP popup: export revised order plan (Code/Qty)
+
+The inert "Upload to ERP" popup (PO grid, Order Plan, Actions) now keeps its "does not update Fulfil/Cin7
+yet" message but offers two manual-export options for the PO’s revised order plan: Download CSV and Copy to
+clipboard, with headings Code (SKU) and Qty. Download = comma CSV; copy = tab-separated (pastes into columns).
+
 ## v20.326 - Order Plan: red action counts (unapproved partials + Update ERP filter)
 
 The "⚠ Unapproved partials" pill now shows a red action count (open/non-complete partial-carton lines), and a
