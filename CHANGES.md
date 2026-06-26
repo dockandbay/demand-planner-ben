@@ -4,6 +4,13 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.318 - Deposits table: PO links, no assign, wrapping, narrow date
+
+- Removed the "assign" link from the deposit register (deposit↔PO link lives on the PO, not here).
+- "Linked purchase orders" cell: each PO is now a clickable link that opens the PO in Purchase Orders on the
+  PAYMENTS tab, and the cell wraps onto multiple lines for long lists.
+- "Date paid" column narrowed to fit just the date entry box.
+
 ## v20.317 - Deposits: column shows linked PURCHASE ORDERS (not productions)
 
 Correction to v20.316: the thing linked to a deposit is its purchase orders (po.deposit_ref), not productions.

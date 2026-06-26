@@ -1374,11 +1374,13 @@
       var c_xero= locked?'<td class="l">'+txt(d.xero_account_code)+'</td>':'<td class="l">'+editCell(ep,'xero_account_code',d.xero_account_code,'txt')+'</td>';
       var c_amt = locked?'<td>'+txt(d.amount)+'</td>':'<td>'+editCell(ep,'amount',d.amount)+'</td>';
       var c_fx  = locked?'<td>'+txt(d.xero_fx)+'</td>':'<td>'+editCell(ep,'xero_fx',d.xero_fx)+'</td>';
-      var c_paid= locked?'<td class="l">'+txt(d.date_paid,true)+'</td>':'<td class="l">'+editCell(ep,'date_paid',d.date_paid,'date')+'</td>';
+      var c_paid= locked?'<td class="l" style="width:120px">'+txt(d.date_paid,true)+'</td>':'<td class="l" style="width:120px">'+editCell(ep,'date_paid',d.date_paid,'date','style="width:118px"')+'</td>';
       var c_rem = '<td'+((Number(d.deposit_remaining)||0)<0?' style="color:#dc2626;font-weight:700"':'')+'>'+money(d.deposit_remaining)+(d.shared_ref?' <span class="src fx">pool</span>':'')+'</td>';
-      // purchase orders linked to this deposit (open-only by default; toggle shows all)
+      // purchase orders linked to this deposit (open-only by default; toggle shows all) — each links to the
+      // PO opened on its PAYMENTS tab; the cell wraps so long lists flow onto multiple lines.
       var ap=(depProdAll ? d.linked_pos : d.pos_open)||'';
-      var c_asg = '<td class="l">'+(ap?'<span class="tiny">'+esc(ap)+'</span> ':'<span class="mut tiny">— </span>')+(locked?'':'<button class="lnk-btn dep-assign" data-ref="'+esc(d.reference||'')+'">assign</button>')+'</td>';
+      var poLinks = ap ? ap.split(',').map(function(p){ p=p.trim(); return p?'<button class="lnk-btn dep-po-link" data-po="'+esc(p)+'" title="open this PO — payments tab">'+esc(p)+'</button>':''; }).filter(Boolean).join(' ') : '<span class="mut tiny">—</span>';
+      var c_asg = '<td class="l" style="white-space:normal;max-width:340px;line-height:1.8">'+poLinks+'</td>';
       var act;
       if(closed) act='<span class="tool-badge bg-neutral" style="margin-right:5px">closed</span><button class="lnk-btn dep-close" data-id="'+d.id+'" data-st="">reopen</button>';
       else { var eb = lockedPay ? (editing?'<button class="lnk-btn dep-save" data-id="'+d.id+'">✓ save</button> ':'<span class="tool-badge bg-green" style="margin-right:5px" title="paid &amp; FX applied — locked">paid</span><button class="lnk-btn dep-edit" data-id="'+d.id+'">edit</button> ') : '';
@@ -1393,7 +1395,7 @@
     function draw(){ var f=cur().filter(function(d){return !st.q||((d.reference||'')+' '+(d.supplier_name||'')).toLowerCase().indexOf(st.q)>=0;});
       document.getElementById('dep-cnt').textContent=f.length+' / '+deps.length+' deposits';
       document.getElementById('dep-rows').innerHTML=f.map(rowHTML).join(''); bindEdits();
-      b.querySelectorAll('.dep-assign').forEach(function(btn){ btn.onclick=function(e){ e.stopPropagation(); openDepProdPick(btn.dataset.ref, btn); }; });
+      b.querySelectorAll('.dep-po-link').forEach(function(btn){ btn.onclick=function(){ gotoPO(btn.dataset.po,'pay'); }; });
       b.querySelectorAll('.dep-edit').forEach(function(btn){ btn.onclick=function(){ DEP_EDIT[btn.dataset.id]=true; draw(); }; });   // unlock this row in place
       b.querySelectorAll('.dep-save').forEach(function(btn){ btn.onclick=function(){ delete DEP_EDIT[btn.dataset.id]; prodTab='deposits'; delete cache['productions']; selectSection('productions'); }; });   // relock + refresh (edits auto-saved inline)
       b.querySelectorAll('.dep-close').forEach(function(btn){ btn.onclick=function(){ shipPost('/api/supply/deposit/'+btn.dataset.id,{status:btn.dataset.st},function(){ prodTab='deposits'; delete cache['productions']; selectSection('productions'); }); }; });
