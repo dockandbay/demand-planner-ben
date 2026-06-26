@@ -715,7 +715,7 @@
     var pprod=document.getElementById('po-prod'); if(pprod)pprod.onchange=function(){state.prod=this.value;view();};
     var pbatch=document.getElementById('po-batch'); if(pbatch)pbatch.onchange=function(){state.batch=this.value;view();};
     document.getElementById('sup-search').oninput=function(){state.q=this.value;view();};
-    document.getElementById('po-csv').onclick=function(){csv(state.q?filt(rows,state.q):cur(),'purchase_orders.csv');};
+    document.getElementById('po-csv').onclick=function(){csv(state.q?filt(rows,state.q):cur(),'purchase_orders.csv',PO_CSV_LABELS);};
     document.getElementById('po-new').onclick=function(){ var po=prompt('New PO number:'); if(!po||!po.trim())return;
       var sup=prompt('Supplier (optional — exact name; set later in the row otherwise):')||'';
       shipPost('/api/supply/po-create',{po:po.trim(),supplier_name:sup.trim()||null,status:'FUTURE'},function(){ delete cache['purchase-orders']; selectSection('purchase-orders'); }); };
@@ -1223,13 +1223,20 @@
     var statuses=uniq('status'), countries=uniq('country'), prods=uniq('prod_no');
     var cats=Array.from(new Set(skuMaster.map(function(s){return s.category;}).concat(lines.map(function(l){return l.category;})).filter(Boolean))).sort();
     var rws=Array.from(new Set(skuMaster.map(function(s){return s.release_window;}).filter(Boolean))).sort();
-    var skuCat={},skuRW={}; skuMaster.forEach(function(s){skuCat[s.sku]=s.category;skuRW[s.sku]=s.release_window;});
+    var skuCat={},skuRW={},skuAttr={}; skuMaster.forEach(function(s){skuCat[s.sku]=s.category;skuRW[s.sku]=s.release_window;
+      skuAttr[s.sku]={sup:s.supplier||'',cq:s.carton_qty||'',dis:s.discontinue||'',disAu:s.discontinue_au||'',disCa:s.discontinue_ca||'',sm:s.supplier_multiple_all||''};});
     lines.forEach(function(l){if(l.category)skuCat[l.sku]=l.category; if(l.release_window)skuRW[l.sku]=l.release_window;});
     var defS=statuses.filter(function(s){return /production/i.test(s);}); if(!defS.length)defS=statuses.slice(0,1);
-    var st={statuses:new Set(defS),countries:new Set(countries),prod:'All',cat:'All',q:'',poq:'',scope:'ordered',rw:'All',partials:false,erpdiff:false};
+    var st={statuses:new Set(defS),countries:new Set(countries),prod:'All',cat:'All',q:'',poq:'',scope:'ordered',rw:'All',partials:false,erpdiff:false,suprisk:false,disc:false};
     // action sets (exclude complete POs): unapproved partial cartons, and lines whose planned qty differs from the ERP
     function isUnapprovedPartial(l){ return !/complete/i.test(l.status||'') && (l.full_carton_check||'').indexOf('⚠')>=0; }
     function erpDiff(l){ return !/complete/i.test(l.status||'') && Number(l.qty)!==Number(l.erp_qty==null?l.qty:l.erp_qty); }
+    // supplier risk: line ordered against a PO whose supplier isn't in the SKU's allowed multi-supplier list.
+    function supMismatch(l){ var a=skuAttr[l.sku]||{}; var allowed=(a.sm||'').split(',').map(function(s){return s.trim().toLowerCase();}).filter(Boolean); var ps=(l.supplier_name||'').trim().toLowerCase(); return allowed.length>0 && !!ps && allowed.indexOf(ps)<0; }
+    // discontinued: line's arrive (delivery) date is after the SKU's discontinue date (per-destination).
+    function discMismatch(l){ var dd=pickDisc(l.country,skuAttr[l.sku]||{}); return !!(dd && l.delivery && String(l.delivery)>String(dd)); }
+    function lineSupRisk(l){ return !/complete/i.test(l.status||'') && Number(l.qty)>0 && supMismatch(l) && !l.supplier_risk_approved; }
+    function lineDisc(l){ return !/complete/i.test(l.status||'') && Number(l.qty)>0 && discMismatch(l) && !l.discontinue_approved; }
     if(_pendingOP){ st.partials=!!_pendingOP.partials; if(_pendingOP.po)st.poq=String(_pendingOP.po).toLowerCase();
       st.statuses=new Set(statuses);   // show all statuses so the flagged partials aren't hidden by the status filter
       _pendingOP=null; }
@@ -1242,7 +1249,9 @@
       +'<div class="bar"><span class="pill-lbl">SKUs</span><span class="pill active" data-sc="ordered">Ordered</span><span class="pill" data-sc="allskus">All SKUs</span><span class="pill" data-sc="all">All in category</span>'
         +sel('op-cat','Category',cats,st.cat)+sel('op-rw','Release',rws,st.rw)
         +'<span class="pill'+(st.partials?' active':'')+'" id="op-partials">⚠ Unapproved partials <span id="op-partials-n" style="color:#dc2626;font-weight:700"></span></span>'
-        +'<span class="pill'+(st.erpdiff?' active':'')+'" id="op-erp">⚠ Update ERP <span id="op-erp-n" style="color:#dc2626;font-weight:700"></span></span>'+sel('op-prod','PROD#',prods,st.prod)
+        +'<span class="pill'+(st.erpdiff?' active':'')+'" id="op-erp">⚠ Update ERP <span id="op-erp-n" style="color:#dc2626;font-weight:700"></span></span>'
+        +'<span class="pill'+(st.suprisk?' active':'')+'" id="op-suprisk" title="lines ordered against a supplier not in the SKU\'s allowed multi-supplier list">⚠ Supplier risk <span id="op-suprisk-n" style="color:#dc2626;font-weight:700"></span></span>'
+        +'<span class="pill'+(st.disc?' active':'')+'" id="op-disc" title="lines forecast to arrive after the product\'s discontinue date">⚠ Discontinued <span id="op-disc-n" style="color:#dc2626;font-weight:700"></span></span>'+sel('op-prod','PROD#',prods,st.prod)
         +'<input class="flt" id="op-q" placeholder="filter SKU…" style="width:120px"><span class="count" id="op-count" style="margin-left:auto"></span></div>'
       +'<div id="op-changes"></div>'
       +'<div id="op-grid"></div>';
@@ -1251,7 +1260,7 @@
     function curLines(){ var allC=st.countries.size===countries.length, pt=poToks(); return lines.filter(function(l){
       if(pt.length){ if(!pt.some(function(t){return (l.po||'').toLowerCase().indexOf(t)>=0;}))return false; }
       else { if(!st.statuses.has(l.status))return false; if(!(allC||st.countries.has(l.country)))return false; }
-      return (st.prod==='All'||l.prod_no===st.prod)&&(st.cat==='All'||l.category===st.cat)&&(st.rw==='All'||skuRW[l.sku]===st.rw)&&(!st.partials||isUnapprovedPartial(l))&&(!st.erpdiff||erpDiff(l))&&(!st.q||(l.sku||'').toLowerCase().indexOf(st.q.toLowerCase())>=0); }); }
+      return (st.prod==='All'||l.prod_no===st.prod)&&(st.cat==='All'||l.category===st.cat)&&(st.rw==='All'||skuRW[l.sku]===st.rw)&&(!st.partials||isUnapprovedPartial(l))&&(!st.erpdiff||erpDiff(l))&&(!st.suprisk||lineSupRisk(l))&&(!st.disc||lineDisc(l))&&(!st.q||(l.sku||'').toLowerCase().indexOf(st.q.toLowerCase())>=0); }); }
     function rowsFor(cl){ var set={},list=[]; cl.forEach(function(l){if(!set[l.sku]){set[l.sku]=1;list.push(l.sku);}});
       function addMaster(reqCat){ skuMaster.forEach(function(s){ if(set[s.sku])return;
         if(reqCat&&s.category!==st.cat)return; if(st.cat!=='All'&&s.category!==st.cat)return;
@@ -1268,8 +1277,11 @@
       return list; }
     function updateActionCounts(){ var pc=lines.filter(isUnapprovedPartial).length, ec=lines.filter(erpDiff).length;
       var pn=document.getElementById('op-partials-n'); if(pn)pn.textContent=pc?('('+pc+')'):'';
-      var en=document.getElementById('op-erp-n'); if(en)en.textContent=ec?('('+ec+')'):''; }
-    function view(){ var cl=curLines(); document.getElementById('op-grid').innerHTML=pivot(cl,rowsFor(cl),skuCat,plcMap); bindQty(); bindUploads(); bindApprove(); bindConfirm(); bindPoLinks(); updateActionCounts(); }
+      var en=document.getElementById('op-erp-n'); if(en)en.textContent=ec?('('+ec+')'):'';
+      var sc=lines.filter(lineSupRisk).length, dc=lines.filter(lineDisc).length;
+      var sn=document.getElementById('op-suprisk-n'); if(sn)sn.textContent=sc?('('+sc+')'):'';
+      var dn=document.getElementById('op-disc-n'); if(dn)dn.textContent=dc?('('+dc+')'):''; }
+    function view(){ var cl=curLines(); document.getElementById('op-grid').innerHTML=pivot(cl,rowsFor(cl),skuCat,plcMap,skuAttr,skuRW); bindQty(); bindUploads(); bindApprove(); bindConfirm(); bindPoLinks(); updateActionCounts(); }
     // PO column header → open that PO in PURCHASE ORDERS with its ORDER PLAN tab expanded
     function bindPoLinks(){ document.querySelectorAll('#op-grid .op-po-link').forEach(function(b){ b.onclick=function(){ gotoPO(b.dataset.po,'oplan'); }; }); }
     // inline confirm of a supplier change in a pivot cell (priority over partial-approve)
@@ -1292,12 +1304,18 @@
       b.style.display=pend?'inline-block':'none'; b.classList.toggle('has',pend);
       b.onclick=function(){ erpUploadInert(po); }; }); }
     function bindApprove(){ document.querySelectorAll('#op-grid .opapprove').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var psku=b.dataset.ap;
-      fetch('/api/supply/po-line/'+encodeURIComponent(psku)+'/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({approved:true})}).then(function(r){return r.json();}).then(function(){var l=lines.find(function(x){return (x.po+'|'+x.sku)===psku;}); if(l)l.full_carton_check='OK Partial'; view();}); }; }); }
+      fetch('/api/supply/po-line/'+encodeURIComponent(psku)+'/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({approved:true})}).then(function(r){return r.json();}).then(function(){var l=lines.find(function(x){return (x.po+'|'+x.sku)===psku;}); if(l)l.full_carton_check='OK Partial'; view();}); }; });
+      function approveExc(cls,field,set){ document.querySelectorAll('#op-grid .'+cls).forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var psku=b.dataset.ap;
+        fetch('/api/supply/po-line/'+encodeURIComponent(psku)+'/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({approved:true,field:field})}).then(function(r){return r.json();}).then(function(){var l=lines.find(function(x){return (x.po+'|'+x.sku)===psku;}); if(l)set(l); view();}); }; }); }
+      approveExc('opapprove-sup','supplier',function(l){l.supplier_risk_approved=true;});
+      approveExc('opapprove-disc','discontinue',function(l){l.discontinue_approved=true;}); }
     function togglebar(id,opts,setv){ document.getElementById(id).onclick=function(e){var t=e.target; if(t.dataset.all)setv=new Set(opts); else if(t.dataset.v!=null){if(setv.has(t.dataset.v))setv.delete(t.dataset.v);else setv.add(t.dataset.v);} else return; if(id==='op-status')st.statuses=setv; else st.countries=setv; document.getElementById(id).innerHTML=pillsHTML(opts,setv); view(); }; }
     togglebar('op-status',statuses,st.statuses); togglebar('op-country',countries,st.countries);
     c.querySelectorAll('[data-sc]').forEach(function(p){p.onclick=function(){st.scope=p.dataset.sc; c.querySelectorAll('[data-sc]').forEach(function(x){x.classList.toggle('active',x===p);}); view();};});
     document.getElementById('op-partials').onclick=function(){st.partials=!st.partials; this.classList.toggle('active',st.partials); view();};
     document.getElementById('op-erp').onclick=function(){st.erpdiff=!st.erpdiff; this.classList.toggle('active',st.erpdiff); view();};
+    document.getElementById('op-suprisk').onclick=function(){st.suprisk=!st.suprisk; this.classList.toggle('active',st.suprisk); view();};
+    document.getElementById('op-disc').onclick=function(){st.disc=!st.disc; this.classList.toggle('active',st.disc); view();};
     document.getElementById('op-cat').onchange=function(){st.cat=this.value;view();};
     document.getElementById('op-rw').onchange=function(){st.rw=this.value;view();};
     document.getElementById('op-prod').onchange=function(){st.prod=this.value;view();};
@@ -1334,25 +1352,34 @@
         delete cache['order-plan']; renderChanges(); view(); }).catch(function(){});
     }, 12000); }
   function plt(pl){ return pl>20 ? '<span style="color:#dc2626;font-weight:700">'+pl.toFixed(1)+' plt ⚠</span>' : pl.toFixed(1)+' plt'; }
-  function pivot(rows, skuList, skuCat, plcMap){ plcMap=plcMap||{}; var cn=document.getElementById('op-count');
+  // pick the discontinue date for a destination: AU/CA have their own, else the global final.
+  function pickDisc(co,a){ co=(co||'').toUpperCase(); a=a||{}; if(co==='AU'&&a.disAu)return a.disAu; if(co==='CA'&&a.disCa)return a.disCa; return a.dis||''; }
+  function pivot(rows, skuList, skuCat, plcMap, skuAttr, skuRW){ plcMap=plcMap||{}; skuAttr=skuAttr||{}; skuRW=skuRW||{}; var cn=document.getElementById('op-count');
     if(!skuList.length){ if(cn)cn.textContent='0 SKUs'; return '<div class="count">No SKUs for this filter (pick a Category for \"All in category\").</div>'; }
     var pos=[],psn={},cell={},meta={};
-    rows.forEach(function(l){ if(!psn[l.po]){psn[l.po]=1;pos.push(l.po);meta[l.po]={s:l.supplier_name,ps:l.prod_start,pe:l.prod_end,sd:l.ship_date,dl:l.delivery};}
-      cell[l.po+'|'+l.sku]={q:l.qty,eq:(l.erp_qty==null?l.qty:l.erp_qty),c:Number(l.cost_price)||0,pq:Number(l.pallet_qty)||0,fcc:(l.full_carton_check||'')}; });
+    rows.forEach(function(l){ if(!psn[l.po]){psn[l.po]=1;pos.push(l.po);meta[l.po]={s:l.supplier_name,co:l.country,ps:l.prod_start,pe:l.prod_end,sd:l.ship_date,dl:l.delivery};}
+      cell[l.po+'|'+l.sku]={q:l.qty,eq:(l.erp_qty==null?l.qty:l.erp_qty),c:Number(l.cost_price)||0,pq:Number(l.pallet_qty)||0,fcc:(l.full_carton_check||''),sra:!!l.supplier_risk_approved,dca:!!l.discontinue_approved}; });
     pos.sort();
     if(cn)cn.textContent=skuList.length+' SKUs × '+pos.length+' POs'+(pos.length>25?' · narrow with filters':'');
     var pstat={}; pos.forEach(function(po){var u=0,pl=0; skuList.forEach(function(sku){var cc=cell[po+'|'+sku]; if(cc){u+=cc.q; if(cc.pq>0)pl+=cc.q/cc.pq;}}); pstat[po]={u:u,pl:pl};});
-    var SKUW='280px', POW='112px';   // wider sticky SKU column; uniform PO ("order") column width
-    var stk='style="position:sticky;left:0;background:#fff;z-index:1;min-width:'+SKUW+';white-space:nowrap"', stkh='style="position:sticky;left:0;background:#f3f3f1;z-index:3;min-width:'+SKUW+';white-space:nowrap"';
+    var POW='112px';
+    // frozen label columns after SKU (cumulative left offsets): SKU · Release · Carton · Supplier · Discontinue
+    var FW={sku:200,rw:40,cq:34,sup:86,dis:70}, FL={sku:0,rw:200,cq:240,sup:274,dis:360}, FROZEN=430;
+    function fzc(col,bg,z){ return 'position:sticky;left:'+FL[col]+'px;background:'+bg+';z-index:'+z+';min-width:'+FW[col]+'px;width:'+FW[col]+'px;white-space:nowrap'; }
+    var fzh='white-space:normal;line-height:1.05;vertical-align:bottom;padding:4px 4px';   // attribute header: let the label wrap so the column can be narrow
     // column-1 header mirrors the PO-column line structure so the Prod/Ship/Arrive labels sit once
     // here (rows), instead of repeating on every PO column.
     var lbl='font-weight:600;text-transform:none', sp='text-transform:none;font-weight:400';
-    var h='<div class="tw"><table style="border-collapse:separate;border-spacing:0;width:max-content"><thead><tr><th class="l" '+stkh+'><b>SKU</b>'
+    var h='<div class="tw"><table style="border-collapse:separate;border-spacing:0;width:max-content"><thead><tr><th class="l" style="'+fzc('sku','#f3f3f1',5)+'"><b>SKU</b>'
       +'<br><span class="tiny mut" style="'+sp+'">&nbsp;</span>'
       +'<br><span class="tiny mut" style="'+lbl+'">Prod</span>'
       +'<br><span class="tiny mut" style="'+lbl+'">Ship</span>'
       +'<br><span class="tiny mut" style="'+lbl+'">Arrive</span>'
-      +'<br><span class="tiny mut" style="'+sp+'">&nbsp;</span></th>';
+      +'<br><span class="tiny mut" style="'+sp+'">&nbsp;</span></th>'
+      +'<th class="l" style="'+fzc('rw','#f3f3f1',5)+';'+fzh+'">Release</th>'
+      +'<th class="l" style="'+fzc('cq','#f3f3f1',5)+';'+fzh+';text-align:right">Carton</th>'
+      +'<th class="l" style="'+fzc('sup','#f3f3f1',5)+';'+fzh+'">Supplier</th>'
+      +'<th class="l" style="'+fzc('dis','#f3f3f1',5)+';'+fzh+'">Discontinue</th>';
     pos.forEach(function(po){var m=meta[po],ps=pstat[po];
       h+='<th style="min-width:'+POW+';width:'+POW+'"><button class="lnk-btn op-po-link" data-po="'+esc(po)+'" title="open this PO’s order plan in PURCHASE ORDERS"><b style="font-size:12px">'+esc(po)+'</b></button><br><span class="tiny mut" style="'+sp+'">'+esc(m?m.s:'')+'</span>'
         +'<br><span class="tiny mut" style="'+sp+'">'+(m&&m.ps?fd(m.ps):'?')+'→'+(m&&m.pe?fd(m.pe):'?')+'</span>'
@@ -1362,10 +1389,10 @@
         +'<br><button class="opup" data-up="'+esc(po)+'" style="display:none">⬆ Upload</button></th>';});
     h+='<th>SKU TOTAL</th></tr></thead><tbody>';
     var sorted=skuList.slice().sort(function(a,b){var ca=skuCat[a]||'~~',cb=skuCat[b]||'~~'; return ca<cb?-1:ca>cb?1:(a<b?-1:1);});
-    var ncol=pos.length+2, curCat=null;
+    var ncol=pos.length+6, curCat=null;   // 5 frozen label cols + PO cols + SKU TOTAL
     sorted.forEach(function(sku){ var cat=skuCat[sku]||'(uncategorised)';
-      if(cat!==curCat){ curCat=cat; h+='<tr class="cat-hdr"><td style="position:sticky;left:0;z-index:2;min-width:'+SKUW+';background:#e8e8e6">'+esc(cat)+'</td><td colspan="'+(ncol-1)+'"></td></tr>'; }
-      var tot=0,tds='';
+      if(cat!==curCat){ curCat=cat; h+='<tr class="cat-hdr"><td colspan="5" style="position:sticky;left:0;z-index:4;min-width:'+FROZEN+'px;background:#e8e8e6">'+esc(cat)+'</td><td colspan="'+(ncol-5)+'"></td></tr>'; }
+      var a=skuAttr[sku]||{}, tot=0,tds='';
       pos.forEach(function(po){var cc=cell[po+'|'+sku],q=cc?cc.q:0,eq=cc?cc.eq:0,fcc=cc?cc.fcc:''; tot+=q;
         var ch=plcMap[po+'|'+sku];
         var badge='', tdc='';
@@ -1375,10 +1402,24 @@
           tdc=' class="chgcell"'; badge=' <button class="opconfirm" data-ps="'+esc(po+'|'+sku)+'" title="supplier change — '+esc(ttl)+' · click to confirm" style="cursor:pointer;border:1px solid #f59e0b;background:#fef3c7;color:#92400e;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;white-space:nowrap">'+pq+' ✓</button>'; }
         else if(fcc.indexOf('⚠')>=0){ tdc=' class="pcell"'; badge=' <button class="pbtn opapprove" data-ap="'+esc(po+'|'+sku)+'" title="approve partial carton qty">p ✓</button>'; }
         else if(fcc.indexOf('OK Partial')>=0){ tdc=' class="pcellok"'; badge=' <span class="tool-badge bg-green" title="partial approved">p✓</span>'; }
+        if(cc && q>0){   // exception flags: supplier risk + discontinued (approve like partials)
+          var allowed=(a.sm||'').split(',').map(function(s){return s.trim().toLowerCase();}).filter(Boolean), psup=(meta[po].s||'').trim().toLowerCase();
+          if(allowed.length && psup && allowed.indexOf(psup)<0){
+            if(cc.sra) badge+=' <span class="tool-badge bg-green" title="supplier risk approved">s✓</span>';
+            else { if(!tdc)tdc=' class="pcell"'; badge+=' <button class="pbtn opapprove-sup" data-ap="'+esc(po+'|'+sku)+'" title="supplier '+esc(meta[po].s||'')+' not in allowed list ['+esc(a.sm||'')+'] — review &amp; approve" style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;white-space:nowrap">s ⚠</button>'; } }
+          var dd=pickDisc(meta[po].co,a), arr=meta[po].dl;
+          if(dd && arr && String(arr)>String(dd)){
+            if(cc.dca) badge+=' <span class="tool-badge bg-green" title="discontinue approved">d✓</span>';
+            else { if(!tdc)tdc=' class="pcell"'; badge+=' <button class="pbtn opapprove-disc" data-ap="'+esc(po+'|'+sku)+'" title="arrives '+fd(arr)+' after discontinue '+fd(dd)+' — review &amp; approve" style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;white-space:nowrap">d ⚠</button>'; } } }
         tds+='<td'+tdc+' style="min-width:'+POW+';width:'+POW+';text-align:center"><input class="qtycell'+(q?'':' z')+'" data-po="'+esc(po)+'" data-sku="'+esc(sku)+'" data-erp="'+eq+'" value="'+(q||'')+'">'+badge+'</td>';});
-      h+='<tr><td class="l" '+stk+'>'+esc(sku)+'</td>'+tds+'<td style="text-align:center"><b>'+units(tot)+'</b></td></tr>'; });
+      h+='<tr><td class="l" style="'+fzc('sku','#fff',2)+'">'+esc(sku)+'</td>'
+        +'<td class="l" style="'+fzc('rw','#fff',2)+'"><span class="tiny">'+esc(skuRW[sku]||'')+'</span></td>'
+        +'<td style="'+fzc('cq','#fff',2)+';text-align:right"><span class="tiny">'+(a.cq?esc(a.cq):'')+'</span></td>'
+        +'<td class="l" style="'+fzc('sup','#fff',2)+';overflow:hidden;text-overflow:ellipsis" title="'+esc(a.sup||'')+(a.sm?' · allowed: '+esc(a.sm):'')+'"><span class="tiny">'+esc(a.sup||'')+'</span></td>'
+        +'<td class="l" style="'+fzc('dis','#fff',2)+'"><span class="tiny mut">'+(a.dis?fd(a.dis):'')+'</span></td>'
+        +tds+'<td style="text-align:center"><b>'+units(tot)+'</b></td></tr>'; });
     var gu=0,gv=0,gpl=0,ptd=''; pos.forEach(function(po){var u=pstat[po].u,pl=pstat[po].pl,v=0; skuList.forEach(function(sku){var cc=cell[po+'|'+sku]; if(cc)v+=cc.q*cc.c;}); gu+=u;gv+=v;gpl+=pl; ptd+='<td style="text-align:center"><b>'+units(u)+'</b><br><span class="tiny mut">$'+money(v)+' · '+plt(pl)+'</span></td>';});
-    h+='<tr class="batchrow"><td class="l" style="position:sticky;left:0;background:#eef2ff;z-index:1;min-width:'+SKUW+';white-space:nowrap">PO TOTALS · units / value / pallets</td>'+ptd+'<td style="text-align:center"><b>'+units(gu)+'</b><br><span class="tiny mut">$'+money(gv)+' · '+plt(gpl)+'</span></td></tr>';
+    h+='<tr class="batchrow"><td class="l" colspan="5" style="position:sticky;left:0;background:#eef2ff;z-index:2;min-width:'+FROZEN+'px;white-space:nowrap">PO TOTALS · units / value / pallets</td>'+ptd+'<td style="text-align:center"><b>'+units(gu)+'</b><br><span class="tiny mut">$'+money(gv)+' · '+plt(gpl)+'</span></td></tr>';
     return h+'</tbody></table></div>'; }
 
   // ---- PRODUCTIONS (POs grouped by PROD#; aggregated SKU view) ----
@@ -2796,8 +2837,15 @@
     }).join('');
     return head+body+'</tbody></table></div>'; }
 
-  function csv(rows,name){ if(!rows.length)return; var cols=Object.keys(rows[0]);
-    var lines=[cols.join(',')].concat(rows.map(function(r){return cols.map(function(c){var v=r[c]==null?'':String(r[c]);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',');}));
+  // friendly headers for the Purchase Orders CSV (raw field names → human labels). Unmapped keys keep their name.
+  var PO_CSV_LABELS={po:'PO',supplier_name:'Supplier',country:'Ship to',branch:'Branch',status:'Status',
+    prod_start:'Start date',prod_end:'End date',ship:'Ship date',delivery:'Delivery date',checkin:'Completion date',
+    value_used:'Value',value_est:'Value (est)',pallets:'Pallets',prod_no:'Production #',batch_id:'Batch',
+    deposit_ref:'Deposit ref',start_date:'Deposit paid date',completion_date:'Completion payment date'};
+  function csv(rows,name,labels){ if(!rows.length)return; var cols=Object.keys(rows[0]);
+    var esc1=function(v){v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
+    var hdr=cols.map(function(c){return esc1((labels&&labels[c])||c);});
+    var lines=[hdr.join(',')].concat(rows.map(function(r){return cols.map(function(c){return esc1(r[c]);}).join(',');}));
     var blob=new Blob([lines.join('\n')],{type:'text/csv'}); var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); }
   // Copy straight to clipboard (no overlay) + a short confirmation alert. Fallback to hidden textarea.
   function legacyCopy(text){ var ta=document.createElement('textarea'); ta.value=text; ta.style.cssText='position:fixed;left:-9999px;top:0'; document.body.appendChild(ta); ta.focus(); ta.select(); try{document.execCommand('copy');}catch(e){} ta.remove(); }

@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.339';
+const APP_VERSION = 'v20.342';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1080,10 +1080,14 @@ app.get('/api/supply/:section', async (req, res) => {
           crossdock: xd.map(x => x.sku),
         });
       }
-      case 'skus':  // SKU master for Order Plan "all in category" scope + release-window filtering
-        return res.json(await q(`SELECT sku, coalesce(category,'') category, coalesce(release_window,'') release_window,
-          coalesce(barcode_sku_name,'') name FROM planner.sku_labels
-          WHERE coalesce(status,'') NOT ILIKE '%discontinued%' ORDER BY category, sku`));
+      case 'skus':  // SKU master for Order Plan "all in category" scope + release-window filtering + sticky attribute columns
+        return res.json(await q(`SELECT s.sku, coalesce(s.category,'') category, coalesce(s.release_window,'') release_window,
+          coalesce(s.barcode_sku_name,'') name,
+          p.main_supplier_final supplier, p.supplier_multiple_all,
+          nullif(p.carton_qty,'') carton_qty,
+          nullif(p.discontinue_date_final,'') discontinue, nullif(p.discontinue_date_au_final,'') discontinue_au, nullif(p.discontinue_date_ca,'') discontinue_ca
+          FROM planner.sku_labels s LEFT JOIN planner.products p ON p.sku = s.sku
+          WHERE coalesce(s.status,'') NOT ILIKE '%discontinued%' ORDER BY s.category, s.sku`));
       case 'flexport':
         return res.json(await q(`SELECT flex_id, shipment_name, mode, status_description status, incoterm,
           CASE WHEN arrival_date < current_date THEN 'Completed' ELSE 'Active' END status_group,
@@ -1095,6 +1099,7 @@ app.get('/api/supply/:section', async (req, res) => {
         return res.json(await q(`SELECT l.po, l.sku, l.qty, el.qty erp_qty,
           (l.qty IS DISTINCT FROM el.qty) pending, to_char(pol.proposed_at,'YYYY-MM-DD') proposed_at,
           l.cost_price, l.carton_qty, l.partial_carton_approved, l.full_carton_check,
+          pol.supplier_risk_approved, pol.discontinue_approved,
           coalesce(p.prod_no,'') prod_no, coalesce(p.status,'') status,
           coalesce(p.supplier_name,'') supplier_name, coalesce(p.shipment_ref,'') shipment_ref,
           coalesce(nullif(p.country_code,''), b.country_code, '') country,
@@ -2354,10 +2359,15 @@ app.post('/api/supply/buyplan-skus', async (req, res) => {
         main_name: m.main_name || '', options: (m.options || []).map(o => ({ code: o.code, name: o.name })) }; }) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-// Approve a partial-carton line (sets partial_carton_approved → full_carton_check shows "OK Partial").
-app.post('/api/supply/po-line/:po_sku/approve', (req, res) =>
-  patch(res, 'planner.purchase_order_lines', 'po_sku', req.params.po_sku,
-    { partial_carton_approved: 'boolean' }, { partial_carton_approved: req.body && req.body.approved }));
+// Approve an order-plan exception on a line. field selects which: partial (default) → partial_carton_approved,
+// supplier → supplier_risk_approved, discontinue → discontinue_approved.
+app.post('/api/supply/po-line/:po_sku/approve', (req, res) => {
+  const field = (req.body && req.body.field) || 'partial';
+  const col = { partial: 'partial_carton_approved', supplier: 'supplier_risk_approved', discontinue: 'discontinue_approved' }[field];
+  if (!col) return res.status(400).json({ error: 'unknown approve field' });
+  const val = req.body && req.body.approved;
+  return patch(res, 'planner.purchase_order_lines', 'po_sku', req.params.po_sku, { [col]: 'boolean' }, { [col]: val });
+});
 // "Upload changes" — push a PO's planned qtys to the ERP (Cin7/Fulfil). The actual ERP API write
 // is a gated Diviyaj integration; here we record the push (erp_qty := qty) and log it, clearing the
 // mismatch. Returns how many lines changed.

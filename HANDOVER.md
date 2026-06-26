@@ -27,8 +27,10 @@ plus new numbered migrations on top. See `migrations/README.md`.
   - **`068_erp_lines_backfill.sql`** — backfill the ERP line mirror from the (now-deprecated) embedded erp_qty/erp_cost; the app reads drift from `erp_purchase_order_lines` going forward.
   - **`069_add_cin7_suppliers.sql`** — add 4 product suppliers found in the Cin7 export but missing from the
     master (Forming Reality, Kangxun (Doris), Foamie, Chilly Bottles). Run **before** loading the PO/ERP data
-    seed (see §7). Idempotent. ⬅ *latest.*
-- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`069` in order. Do **not** run
+    seed (see §7). Idempotent.
+  - **`070_oplan_exception_approvals.sql`** — `supplier_risk_approved` + `discontinue_approved` on
+    purchase_order_lines (Order Plan exception sign-off, like partial_carton_approved). Idempotent. ⬅ *latest.*
+- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`070` in order. Do **not** run
   `schema.sql` against an already-migrated DB (the table creates aren't idempotent).
 
 ---

@@ -4,6 +4,34 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.342 - Order Plan: supplier-risk + discontinued exception flags (approve like partials)
+
+Stage 2 of the Order Plan exceptions work. Two new per-cell exceptions, each approvable like a partial carton:
+- **Supplier risk** (`s ⚠`) — the PO's supplier isn't in the SKU's allowed multi-supplier list
+  (`products.supplier_multiple_all`).
+- **Discontinued** (`d ⚠`) — the line's arrive (delivery) date is after the SKU's discontinue date, chosen
+  per-destination (AU/CA specific, else final).
+Both add a red approve button in the cell + a green tick once approved, two new filter pills with red counts
+("⚠ Supplier risk", "⚠ Discontinued"), and persist via **migration 070** (`supplier_risk_approved`,
+`discontinue_approved` on purchase_order_lines). The approve endpoint now takes a `field` param
+(partial | supplier | discontinue). Requires migration 070.
+
+## v20.341 - Order Plan: sticky attribute columns (Release / Carton / Supplier / Discontinue)
+
+Stage 1 of the Order Plan exceptions work. Added four frozen label columns after SKU in the pivot — Release
+window, Carton qty, Supplier (main_supplier_final) and Discontinue date — sticky on horizontal scroll with
+cumulative left offsets. The `skus` endpoint now joins `planner.products` to carry supplier, carton_qty,
+discontinue dates (final + AU/CA) and `supplier_multiple_all` (the latter two feed Stage 2's exception flags).
+Supplier cell tooltip shows the allowed multi-supplier list. No DB change.
+
+## v20.340 - Friendly headers on the Purchase Orders CSV (incl. Completion date)
+
+The PO "CSV for Fulfil" export dumped raw field names as headers, so the grid's **Completion** date appeared as
+the unlabelled `checkin` column. `csv()` now takes an optional header-label map; the PO export passes one that
+renames the key columns to human labels — **Start date / End date / Ship date / Delivery date / Completion date**
+(= warehouse check-in) — and distinguishes it from **Completion payment date** (the milestone). Other CSV
+exports are unchanged.
+
 ## v20.339 - Don't flag ERP date drift on COMPLETE POs
 
 A COMPLETE PO's dates are settled, so the "⚠ Date ≠ ERP" row badge and the ERP-recon date-drift count no longer
