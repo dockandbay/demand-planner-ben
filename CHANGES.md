@@ -4,6 +4,12 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.320 - Deposits: uniform edit-on-click (rows read-only by default)
+
+Every deposit row is now read-only by default with an Edit button — previously only paid/closed rows locked
+while unpaid ones were always editable inline (inconsistent). Click Edit to unlock a single row (state holds
+while editing), Save to relock. Closed rows still reopen first; a small "paid" badge marks paid+FX deposits.
+
 ## v20.319 - Deposits table layout: narrower Remaining, wider Linked POs, smaller PO text
 
 Deposit register: "Remaining" column narrowed (~64px), "Linked purchase orders" column widened

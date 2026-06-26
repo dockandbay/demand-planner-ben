@@ -1360,13 +1360,13 @@
       +'<button class="tool-badge bg-neutral" id="dep-prodtoggle" style="cursor:pointer;border:none;margin-left:4px" title="Linked purchase orders: show only OPEN (non-complete) POs, or all">POs: open only</button>'
       +'<input class="flt" id="dep-q" placeholder="Filter reference / supplier…"><span class="count" id="dep-cnt"></span></div>'
       +'<div class="tw"><table><thead><tr><th class="l">Reference</th><th class="l">Supplier</th><th class="l">PROD#</th><th class="l">Xero code</th><th>Amount</th><th>FX</th><th class="l">Date paid</th><th>Remaining</th><th class="l">Linked purchase orders</th><th class="l"></th></tr></thead><tbody id="dep-rows"></tbody></table></div>';
-    // A deposit row LOCKS (greyed, read-only) once it's CLOSED, or once it's PAID + FX applied. A locked
-    // pay row can be edited via Edit→Save; a closed row must be reopened first. Unlocked rows stay inline.
+    // Every deposit row is read-only by default; click Edit to unlock it, Save to relock. (A closed row must
+    // be reopened first.) Edit state (DEP_EDIT) holds while you edit; saving relocks all rows.
     function rowHTML(d){ var ep='/api/supply/deposit/'+encodeURIComponent(d.id);
       var closed=d.status==='closed';
-      var lockedPay=!!(d.date_paid && d.xero_fx!=null && String(d.xero_fx)!=='');
+      var lockedPay=!!(d.date_paid && d.xero_fx!=null && String(d.xero_fx)!=='');   // paid + FX applied (info badge only)
       var editing=!!DEP_EDIT[d.id];
-      var locked=(closed||lockedPay)&&!editing;
+      var locked=!editing;   // uniform: nothing editable until its Edit button is clicked
       function txt(v,isd){ return (v==null||v==='')?'<span class="mut">—</span>':esc(isd?fd(v):v); }
       var c_ref = locked?'<td class="l">'+txt(d.reference)+'</td>':'<td class="l">'+editCell(ep,'reference',d.reference,'txt')+'</td>';
       var c_sup = locked?'<td class="l">'+txt(d.supplier_name)+'</td>':'<td class="l">'+supSel(ep,d.supplier_name)+'</td>';
@@ -1383,14 +1383,15 @@
       var c_asg = '<td class="l" style="white-space:normal;min-width:480px;max-width:640px;line-height:1.7">'+poLinks+'</td>';
       var act;
       if(closed) act='<span class="tool-badge bg-neutral" style="margin-right:5px">closed</span><button class="lnk-btn dep-close" data-id="'+d.id+'" data-st="">reopen</button>';
-      else { var eb = lockedPay ? (editing?'<button class="lnk-btn dep-save" data-id="'+d.id+'">✓ save</button> ':'<span class="tool-badge bg-green" style="margin-right:5px" title="paid &amp; FX applied — locked">paid</span><button class="lnk-btn dep-edit" data-id="'+d.id+'">edit</button> ') : '';
-        act = eb+'<button class="lnk-btn dep-close" data-id="'+d.id+'" data-st="closed">close</button>'; }
+      else { var paidTag = lockedPay ? '<span class="tool-badge bg-green" style="margin-right:5px" title="paid &amp; FX applied">paid</span>' : '';
+        act = paidTag + (editing?'<button class="lnk-btn dep-save" data-id="'+d.id+'">✓ save</button> ':'<button class="lnk-btn dep-edit" data-id="'+d.id+'">edit</button> ')
+            + '<button class="lnk-btn dep-close" data-id="'+d.id+'" data-st="closed">close</button>'; }
       // delete allowed only when NO purchase orders are assigned to this deposit; else a locked note
       var hasPOs=(d.linked_pos||'').trim()!=='';
       act += hasPOs
         ? ' <span class="mut tiny" title="Can’t delete — purchase order(s) are assigned to this deposit ('+esc(d.linked_pos)+'). Unassign them first.">🔒 in use</span>'
         : ' <button class="lnk-btn dep-del" data-id="'+d.id+'" data-ref="'+esc(d.reference||('#'+d.id))+'" title="delete this deposit" style="color:#dc2626">delete</button>';
-      return '<tr'+(locked?' style="opacity:.55"':(editing?' style="background:#f0f6ff"':''))+'>'+c_ref+c_sup+c_prod+c_xero+c_amt+c_fx+c_paid+c_rem+c_asg+'<td class="l" style="white-space:nowrap">'+act+'</td></tr>'; }
+      return '<tr'+(editing?' style="background:#f0f6ff"':(closed?' style="opacity:.55"':''))+'>'+c_ref+c_sup+c_prod+c_xero+c_amt+c_fx+c_paid+c_rem+c_asg+'<td class="l" style="white-space:nowrap">'+act+'</td></tr>'; }
     function cur(){ return deps.filter(function(d){ if(st.f==='all')return true; if(st.f==='closed')return d.status==='closed'; return d.status!=='closed'; }); }
     function draw(){ var f=cur().filter(function(d){return !st.q||((d.reference||'')+' '+(d.supplier_name||'')).toLowerCase().indexOf(st.q)>=0;});
       document.getElementById('dep-cnt').textContent=f.length+' / '+deps.length+' deposits';
