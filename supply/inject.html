@@ -2183,7 +2183,10 @@
     return { header: header, rows: rows };
   }
   function xbToCsv(m){ return [m.header].concat(m.rows).map(function(r){return r.map(xbCell).join(',');}).join('\n')+'\n'; }
-  function xbToTsv(m){ return [m.header].concat(m.rows).map(function(r){return r.map(function(c){return String(c==null?'':c).replace(/[\t\n\r]/g,' ');}).join('\t');}).join('\n'); }
+  // TAB-separated for Google Sheets. DD/MM/YYYY cells are prefixed with a leading apostrophe so Sheets keeps
+  // them as literal text instead of re-parsing them to its locale date format (e.g. 25/06/2026 → 25/6/2026).
+  // (The downloaded CSV is NOT apostrophe-prefixed — Xero needs the raw date.)
+  function xbToTsv(m){ return [m.header].concat(m.rows).map(function(r){return r.map(function(c){ c=String(c==null?'':c).replace(/[\t\n\r]/g,' '); return /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(c)?("'"+c):c; }).join('\t');}).join('\n'); }
   function xbFilename(run){ return 'XERO_BILL_'+(run.supplier_code||run.supplier||'').replace(/[^A-Za-z0-9]+/g,'_')+'_'+run.dt+'.csv'; }
   function xbDownload(run, ccy, amt){ var m=xeroBillMatrix(run,ccy,amt); if(!m){alert('No payments in this run to export (other payments are excluded).');return;}
     var bl=new Blob([xbToCsv(m)],{type:'text/csv'}); var u=URL.createObjectURL(bl); var a=document.createElement('a'); a.href=u; a.download=xbFilename(run); document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); }

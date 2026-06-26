@@ -4,6 +4,13 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.315 - Xero bill copy: keep DD/MM/YYYY as text in Google Sheets
+
+The clipboard copy already emitted correctly zero-padded dates (25/06/2026), but Google Sheets re-parsed them
+as dates and re-formatted to its locale (25/6/2026). The TSV copy now prefixes DD/MM/YYYY cells with a
+leading apostrophe so Sheets keeps them as literal text. The downloaded CSV is unchanged (Xero needs the raw
+date).
+
 ## v20.314 - Payments Report: keep pence (no integer rounding)
 
 Bug: the `payments-report` query rounded every line amount to a whole number (`round(x)::int`), so e.g. a
