@@ -24,8 +24,11 @@ plus new numbered migrations on top. See `migrations/README.md`.
   - **`066_fin_overlay_subcategory.sql`** — financial-model scenario overlay keyed by channel × country ×
     **sub-category** (was channel × country). ⬅ *latest, not yet on prod.*
   - **`067_fin_overlay_period.sql`** — financial-model overlay also keyed by **period** (quarter), for per-cell growth/price. ⬅ *latest.*
-  - **`068_erp_lines_backfill.sql`** — backfill the ERP line mirror from the (now-deprecated) embedded erp_qty/erp_cost; the app reads drift from `erp_purchase_order_lines` going forward. ⬅ *latest.*
-- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`068` in order. Do **not** run
+  - **`068_erp_lines_backfill.sql`** — backfill the ERP line mirror from the (now-deprecated) embedded erp_qty/erp_cost; the app reads drift from `erp_purchase_order_lines` going forward.
+  - **`069_add_cin7_suppliers.sql`** — add 4 product suppliers found in the Cin7 export but missing from the
+    master (Forming Reality, Kangxun (Doris), Foamie, Chilly Bottles). Run **before** loading the PO/ERP data
+    seed (see §7). Idempotent. ⬅ *latest.*
+- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`069` in order. Do **not** run
   `schema.sql` against an already-migrated DB (the table creates aren't idempotent).
 
 ---
@@ -156,4 +159,20 @@ plan (£0 drift); deposits come from the register; Other from is_deposit=false.
 
 ---
 
-_Last updated: v20.307 (25 Jun 2026)._
+---
+
+## 7. PO + ERP data seed (one-time load)  ⬅ NEW
+
+Seeds the planner's PO tables from Ben's PRODUCTION-MASTER (plan side) + a Cin7 OrdersExport (ERP mirror).
+Delivered as a separate package: **`po-erp-migration-for-diviyaj.zip`** — contains the 3 cleaned CSVs, the
+`suppliers_add.sql` (= migration `069`), and a `MIGRATION_INSTRUCTIONS.md` with the full load order, supplier
+normalisation map, status rules, and post-load sanity checks. Ben has already run this against his sandbox and
+verified it. Load order: migration `069` → `erp_purchase_orders.csv` (upsert on `po`) →
+`erp_purchase_order_lines.csv` (upsert on `po,sku`) → `purchase_order_lines.csv` (upsert on `po_sku`, plan
+columns only — do **not** clobber `erp_qty`/`erp_cost`/`proposed_at`). Two prod checks called out there:
+confirm `erp_purchase_orders` has a unique index on `po` (else delete-then-insert), and that the drift view
+tolerates the `shipping` status.
+
+---
+
+_Last updated: v20.338 (26 Jun 2026)._

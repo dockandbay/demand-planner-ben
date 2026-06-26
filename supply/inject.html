@@ -110,6 +110,7 @@
 #supply-root .dep-pick{background:none;border:none;color:#1d4ed8;cursor:pointer;font:inherit;font-size:11px;padding:1px 4px;white-space:nowrap;border-radius:3px}#supply-root .dep-pick:hover{text-decoration:underline}
 #supply-root .cell-pick{background:none;border:1px solid transparent;color:#1a1a1a;cursor:pointer;font:inherit;font-size:11px;padding:2px 5px;white-space:nowrap;border-radius:4px;text-align:left;max-width:150px;overflow:hidden;text-overflow:ellipsis}#supply-root .cell-pick:hover{border-color:#cbd5e1;background:#f8fafc}
 #supply-root .dep-pick.needdep{background:#fee2e2;color:#991b1b;font-weight:600;text-decoration:none}
+#supply-root .dep-pick.nodep{color:#9ca3af}#supply-root .dep-pick.nodep:hover{text-decoration:none}
 .shpop{background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.18);font:12px system-ui;width:300px;max-height:340px;overflow:auto;color:#1a1a1a}
 .shpop-h{padding:8px 10px;border-bottom:1px solid #eee;font-size:11px;color:#444}
 .shpop input.shpop-q{width:calc(100% - 16px);margin:6px 8px;padding:4px 6px;border:1px solid #d0d0d0;border-radius:4px;font:inherit}
@@ -214,6 +215,11 @@
   function fd(s){ if(!s)return ''; var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(s)); return m?(m[3]+'-'+MON[+m[2]-1]+'-'+m[1].slice(2)):String(s); }  // YYYY-MM-DD -> dd-mmm-yy
   function isISODate(v){ return typeof v==='string' && /^\d{4}-\d{2}-\d{2}$/.test(v); }
   function dcell(v){return v?esc(fd(v)):'<span class="mut tiny">—</span>';}  // read-only date cell
+  // a date is "past" when it's strictly before today (YYYY-MM-DD compare)
+  function datePast(v){ if(!v)return false; var m=/^(\d{4}-\d{2}-\d{2})/.exec(String(v)); return m?m[1]<new Date().toISOString().slice(0,10):false; }
+  // date cell with an optional background highlight (overdue milestone vs PO status)
+  function dTd(v,src,hot){ return '<td class="l"'+(hot?' style="'+hot+'"':'')+'>'+dcell(v)+(src||'')+'</td>'; }
+  var DTD_LRED='background:#fee2e2', DTD_RED='background:#fca5a5;color:#7f1d1d;font-weight:700';
   function srctag(s){return s?'<span class="src '+(s==='FLEX'||s==='calc'?'fx':'m')+'">'+esc(s)+'</span>':'';}
   function annot(k){return '';}   // section description boxes removed (Ben) — ANNOT kept for reference only
   function cellFor(c,v){ if(v==null||v==='')return '<td></td>';
@@ -566,7 +572,7 @@
       }
       render(''); pop.querySelector('.shpop-q').oninput=function(){render(this.value);}; pop.querySelector('.shpop-q').focus();
     }); }
-  function depPickBtn(po,val,needed){ var empty=!val; var cls='dep-pick'+(needed&&empty?' needdep':'');
+  function depPickBtn(po,val,needed){ var empty=!val; var cls='dep-pick'+(needed&&empty?' needdep':(empty?' nodep':''));
     return '<button class="'+cls+'" data-po="'+esc(po)+'">'+(val?esc(val):(needed?'— assign':'no deposit'))+' ▾</button>'; }
   function bindDepPick(done){ document.querySelectorAll('#supply-root .dep-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openDepPick(b.dataset.po,b,done); }; }); }
   // Generic searchable cell picker (same UX as the shipment/deposit popovers) — used for Supplier & Branch.
@@ -641,8 +647,9 @@
     var CTRYP=[['UK','UK'],['US','US'],['AU','AU'],['EU','EU'],['CA','CA'],['DIRECT','Direct']];
     var GRP=[['none','None'],['production','Production'],['shipment','Master shipment']];
     // persist filters across edit reloads; reset to a clean view only when navigating to a specific PO
-    if(_pendingPO){ _poState={f:'all',q:'',act:{},ctry:{},grp:'shipment',sup:''}; }
-    else if(!_poState){ _poState={f:'in_progress',q:'',act:{},ctry:{},grp:'shipment',sup:''}; }
+    if(_pendingPO){ _poState={f:'all',q:'',act:{},ctry:{},grp:'shipment',sup:'',prod:'',batch:''}; }
+    else if(!_poState){ _poState={f:'in_progress',q:'',act:{},ctry:{},grp:'shipment',sup:'',prod:'',batch:''}; }
+    if(_poState.prod==null)_poState.prod=''; if(_poState.batch==null)_poState.batch='';
     var state=_poState;
     function actCount(k){ return rows.filter(PO_ACTCOND[k]).length; }
     function ctryCount(c){ return rows.filter(function(r){return r.country===c;}).length; }
@@ -653,14 +660,20 @@
     // OR has lines whose planned qty/cost differ from the ERP (pending → "update"). Excludes complete POs.
     function poErpMisaligned(r){ return r.progress!=='complete' && ((r.erp_total>0 && (!(r.erp_in>0) || r.erp_pending>0)) || r.erp_date_pending>0); }
     function erpCount(){ return rows.filter(poErpMisaligned).length; }
+    // distinct non-empty values for a column (for the Production # / Batch filter dropdowns)
+    function distinct(key){ var s={}; rows.forEach(function(r){ var v=r[key]; if(v!=null&&String(v).trim()!=='')s[String(v)]=true; }); return Object.keys(s).sort(function(a,b){return a.localeCompare(b,undefined,{numeric:true});}); }
+    var _prods=distinct('prod_no'), _batches=distinct('batch_id');
+    function optList(arr,sel){ return arr.map(function(v){return '<option'+(String(v)===String(sel)?' selected':'')+'>'+esc(v)+'</option>';}).join(''); }
     c.innerHTML=annot('purchase-orders')
       +'<div class="bar" id="po-prog">'+FILTERS.map(function(f){return '<span class="pill'+(f[0]===state.f?' active':'')+'" data-f="'+f[0]+'">'+f[1]+'</span>';}).join('')
       +'<input class="flt" id="sup-search" placeholder="Filter PO / supplier…" value="'+esc(state.q||'')+'"><span class="count" id="sup-count"></span>'
       +'<span style="margin-left:auto"><button class="tool-badge bg-blue" id="po-new" style="cursor:pointer;border:none;margin-right:8px">+ New PO</button><button class="tool-badge bg-neutral" id="po-upload" style="cursor:pointer;border:none;margin-right:8px">⬆ Upload POs</button><button class="save-btn dark" id="po-csv">⬇ CSV for Fulfil</button></span></div>'
       +'<div class="bar" id="po-ctry"><span class="pill-lbl">Ship to</span>'+CTRYP.map(function(a){return '<span class="pill'+(state.ctry[a[0]]?' active':'')+'" data-c="'+a[0]+'">'+a[1]+' ('+ctryCount(a[0])+')</span>';}).join('')
-      +'<span class="pill-lbl" style="margin-left:14px">Supplier</span><select class="flt" id="po-sup" style="min-width:150px;cursor:pointer"><option value="">All suppliers</option>'+(supplierList||[]).slice().sort().map(function(s){return '<option'+(s===state.sup?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></div>'
-      +'<div class="bar" id="po-act"><span class="pill po-actall" data-aa="1" style="background:#dc2626;color:#fff;border:1px solid #dc2626;font-weight:700'+(state.hasact?';box-shadow:0 0 0 2px #7f1d1d inset':'')+'" title="show only POs that have one or more open action items (the red badges)">ACTION ITEMS ('+actItemsCount()+')</span>'
-      +'<span class="pill po-erp" data-erp="1" style="background:#b45309;color:#fff;border:1px solid #b45309;font-weight:700;margin-left:6px'+(state.erp?';box-shadow:0 0 0 2px #7c2d12 inset':'')+'" title="show only POs misaligned with Fulfil/Cin7 — never pushed (upload the whole PO) or with pending qty/cost changes (update). Use the ERP button on the row, or Upload on the Order Plan, to push.">⬆ NEEDS ERP ('+erpCount()+')</span>'
+      +'<span class="pill-lbl" style="margin-left:14px">Supplier</span><select class="flt" id="po-sup" style="min-width:150px;cursor:pointer"><option value="">All suppliers</option>'+(supplierList||[]).slice().sort().map(function(s){return '<option'+(s===state.sup?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select>'
+      +'<span class="pill-lbl" style="margin-left:14px">Production</span><select class="flt" id="po-prod" style="min-width:110px;cursor:pointer"><option value="">All</option>'+optList(_prods,state.prod)+'</select>'
+      +'<span class="pill-lbl" style="margin-left:10px">Batch</span><select class="flt" id="po-batch" style="min-width:110px;cursor:pointer"><option value="">All</option>'+optList(_batches,state.batch)+'</select></div>'
+      +'<div class="bar" id="po-act"><span class="pill po-actall" data-aa="1" style="background:#dc2626;color:#fff;border:1px solid #991b1b;font-weight:700" title="show only POs that have one or more open action items (the red badges)">ACTION ITEMS ('+actItemsCount()+')</span>'
+      +'<span class="pill po-erp" data-erp="1" style="background:#b45309;color:#fff;border:1px solid #7c2d12;font-weight:700;margin-left:6px" title="show only POs misaligned with Fulfil/Cin7 — never pushed (upload the whole PO) or with pending qty/cost changes (update). Use the ERP button on the row, or Upload on the Order Plan, to push.">⬆ NEEDS ERP ('+erpCount()+')</span>'
       +'<span class="pill-lbl" style="margin-left:14px">By type</span>'+ACTP.map(function(a){return '<span class="pill'+(state.act[a[0]]?' active':'')+'" data-a="'+a[0]+'">'+a[1]+' ('+actCount(a[0])+')</span>';}).join('')
       +'<span class="pill-lbl" style="margin-left:14px">Group</span>'+GRP.map(function(g){return '<span class="pill gpill'+(g[0]===state.grp?' active':'')+'" data-g="'+g[0]+'">'+g[1]+'</span>';}).join('')+'</div>'
       +'<div id="sup-grid"></div>';
@@ -672,6 +685,8 @@
       for(var k in state.act){ if(state.act[k] && !PO_ACTCOND[k](r))return false; }
       if(anyCtry() && !state.ctry[r.country])return false;   // country pills: OR within, AND with the rest
       if(state.sup && r.supplier_name!==state.sup)return false;
+      if(state.prod && String(r.prod_no)!==state.prod)return false;
+      if(state.batch && String(r.batch_id)!==state.batch)return false;
       return true; }); }
     // a text search overrides the status/action/country filters — search across ALL POs
     function view(){ var f=state.q ? filt(rows,state.q) : cur();
@@ -682,13 +697,23 @@
       document.querySelectorAll('#sup-grid .erp-up').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.up); }; }); }
     c.querySelectorAll('#po-prog .pill').forEach(function(p){p.onclick=function(){c.querySelectorAll('#po-prog .pill').forEach(function(x){x.classList.remove('active');});p.classList.add('active');state.f=p.dataset.f;view();};});
     var _actPill=c.querySelector('#po-act .po-actall'), _erpPill=c.querySelector('#po-act .po-erp');
-    function syncActErp(){ if(_actPill)_actPill.style.boxShadow=state.hasact?'0 0 0 2px #7f1d1d inset':''; if(_erpPill)_erpPill.style.boxShadow=state.erp?'0 0 0 2px #7c2d12 inset':''; }
+    // active = halo ring + ✓ prefix; when one is on, the other dims so the selected filter is unmistakable
+    function pillToggle(el,on,anyOn,halo,base){ if(!el)return;
+      el.style.opacity=(on||!anyOn)?'1':'.4';
+      el.style.boxShadow=on?('0 0 0 3px '+halo+',0 1px 3px rgba(0,0,0,.35)'):'none';
+      el.textContent=(on?'✓ ':'')+base; }
+    function syncActErp(){ var anyOn=state.hasact||state.erp;
+      pillToggle(_actPill,!!state.hasact,anyOn,'#fecaca','ACTION ITEMS ('+actItemsCount()+')');
+      pillToggle(_erpPill,!!state.erp,anyOn,'#fed7aa','⬆ NEEDS ERP ('+erpCount()+')'); }
+    syncActErp();
     c.querySelectorAll('#po-act .po-actall').forEach(function(p){p.onclick=function(){state.hasact=!state.hasact;if(state.hasact)state.erp=false;syncActErp();view();};});
     c.querySelectorAll('#po-act .po-erp').forEach(function(p){p.onclick=function(){state.erp=!state.erp;if(state.erp)state.hasact=false;syncActErp();view();};});
     c.querySelectorAll('#po-act .pill:not(.gpill):not(.po-actall):not(.po-erp)').forEach(function(p){p.onclick=function(){var k=p.dataset.a;state.act[k]=!state.act[k];p.classList.toggle('active',state.act[k]);view();};});
     c.querySelectorAll('#po-act .gpill').forEach(function(p){p.onclick=function(){c.querySelectorAll('#po-act .gpill').forEach(function(x){x.classList.remove('active');});p.classList.add('active');state.grp=p.dataset.g;view();};});
     c.querySelectorAll('#po-ctry .pill').forEach(function(p){p.onclick=function(){var k=p.dataset.c;state.ctry[k]=!state.ctry[k];p.classList.toggle('active',state.ctry[k]);view();};});
     var psup=document.getElementById('po-sup'); if(psup)psup.onchange=function(){state.sup=this.value;view();};
+    var pprod=document.getElementById('po-prod'); if(pprod)pprod.onchange=function(){state.prod=this.value;view();};
+    var pbatch=document.getElementById('po-batch'); if(pbatch)pbatch.onchange=function(){state.batch=this.value;view();};
     document.getElementById('sup-search').oninput=function(){state.q=this.value;view();};
     document.getElementById('po-csv').onclick=function(){csv(state.q?filt(rows,state.q):cur(),'purchase_orders.csv');};
     document.getElementById('po-new').onclick=function(){ var po=prompt('New PO number:'); if(!po||!po.trim())return;
@@ -789,11 +814,11 @@
       +'<td class="l">'+statusSel(ep,r.status)+'</td>'
       +'<td class="l">'+shipcell+'</td>'
       +'<td class="l">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0)+'</td>'
-      +'<td class="l">'+dcell(r.prod_start)+'</td>'
-      +'<td class="l">'+dcell(r.prod_end)+srctag(r.prod_end_src)+'</td>'
+      +dTd(r.prod_start,'',(r.status==='FUTURE'&&datePast(r.prod_start))?DTD_LRED:'')
+      +dTd(r.prod_end,srctag(r.prod_end_src),(r.status==='PRODUCTION'&&datePast(r.prod_end))?DTD_LRED:'')
       +'<td class="l">'+dcell(r.ship)+srctag(r.ship_src)+'</td>'
       +'<td class="l">'+dcell(r.delivery)+srctag(r.delivery_src)+'</td>'
-      +'<td class="l">'+dcell(r.checkin)+'</td>'
+      +dTd(r.checkin,'',((r.status==='PRODUCTION'||r.status==='SHIPPING')&&datePast(r.checkin))?DTD_RED:'')
       +'<td>'+(r.is_final?money(r.value_used)+' <span class="tool-badge bg-green" title="final supplier invoice amount (overrides estimate)">final</span>':money(r.value_est)+' '+valnote)+'</td>'
       +'<td'+(Number(r.pallets)>20?' style="color:#dc2626;font-weight:700" title="over 20 pallets — more than one container; rebalance the production POs"':'')+'>'+(r.pallets!=null&&r.pallets!==''?r.pallets:'<span class="mut tiny">—</span>')+'</td>'
       +'<td>'+money(r.start_dep)+'</td><td>'+money(r.completion)+'</td><td>'+money(r.balance_owing)+'</td>'
@@ -833,7 +858,7 @@
   function payBadge(label,cls){ return '<span class="tool-badge '+cls+'">'+label+'</span>'; }
   // "pay »" quick-fill: when a milestone is owed + unpaid, one click fills its Amount box with the calc figure
   // and its Date paid with today, then saves both. (af/df = the amount + date field names on the PO.)
-  function payFillBtn(af,df,calc){ if(!(n(calc)>0.009)) return '';
+  function payFillBtn(af,df,calc){ if(!(Number(calc)>0.009)) return '';
     return ' <button class="pbtn pay-fill" data-af="'+af+'" data-df="'+df+'" data-calc="'+esc(calc)+'" title="record this payment — fill the amount with the calc figure and the date with today">pay &raquo;</button>'; }
   // free-text PO field saver (no comma-stripping, unlike .payin) — saves on blur via .txtin
   function txtIn(ep,field,val,wide,area){ var w=wide||280; return area
@@ -2896,13 +2921,13 @@
     if(key==='postock')return renderPoStock(c);
     c.innerHTML=scenAnnot(key); }
   // ---- PO STOCK PRIORITY ----
-  var POSTOCK_STATE={po:'',sort:'priority'};
+  var POSTOCK_STATE={po:'',sort:'priority',hide:{}};
   var POSTOCK_PRI={'HIGH':0,'MEDIUM':1,'LOW':2,'NOT REQUIRED':3};
   var POSTOCK_BG={'HIGH':'bg-red','MEDIUM':'bg-amber','LOW':'bg-blue','NOT REQUIRED':'bg-green'};
   function renderPoStock(c){
     c.innerHTML=scenAnnot('postock')
       +'<div class="bar"><span class="pill-lbl">PO</span><input class="flt" id="ps-po" list="ps-polist" placeholder="search / pick a PO…" value="'+esc(POSTOCK_STATE.po||'')+'" style="width:260px">'
-      +'<button class="pill" id="ps-load">Analyse</button>'
+      +'<button class="pill" id="ps-load" style="background:#1d4ed8;color:#fff;font-weight:700;border-color:#1d4ed8;font-size:11px;padding:4px 14px">Analyse</button>'
       +'<span class="pill-lbl" style="margin-left:14px">Sort</span><span class="pill'+(POSTOCK_STATE.sort==='priority'?' active':'')+'" data-sort="priority">Priority</span><span class="pill'+(POSTOCK_STATE.sort==='sku'?' active':'')+'" data-sort="sku">SKU A–Z</span>'
       +'<span class="count" id="ps-pocount" style="margin-left:10px"></span>'
       +'<button class="pill" id="ps-csv" style="margin-left:auto">⬇ Export CSV</button></div>'
@@ -2920,25 +2945,30 @@
         .catch(function(e){ document.getElementById('ps-grid').innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>'; document.getElementById('ps-meta').textContent=''; }); }
     function sorted(){ var r=(data.rows||[]).slice(); if(POSTOCK_STATE.sort==='sku')r.sort(function(a,b){return (a.sku||'').localeCompare(b.sku||'');});
       else r.sort(function(a,b){return (POSTOCK_PRI[a.priority]-POSTOCK_PRI[b.priority])||(b.required-a.required)||(a.sku||'').localeCompare(b.sku||'');}); return r; }
+    function visible(){ return sorted().filter(function(r){return !POSTOCK_STATE.hide[r.priority];}); }
     function draw(){ if(!data)return;
       if(!data.rows.length){ document.getElementById('ps-meta').innerHTML='Destination <b>'+esc(data.warehouse||'?')+'</b> · status '+esc(data.status||'')+' · no SKU lines on this PO';
         document.getElementById('ps-grid').innerHTML='<div class="count">This PO has no SKU lines yet — add quantities in <b>ORDER PLAN</b> (type per SKU) or import PO lines. Nothing to analyse.</div>'; return; }
       var mix={}; data.rows.forEach(function(r){mix[r.priority]=(mix[r.priority]||0)+1;});
       var rem=data.rows.reduce(function(s,r){return s+r.removable;},0);
       document.getElementById('ps-meta').innerHTML='Destination <b>'+esc(data.warehouse||'?')+'</b> · lands '+(data.landing?esc(fd(data.landing)):'—')+' · cover window '+data.cover_weeks+'wk · '+data.rows.length+' SKUs · '
-        +Object.keys(POSTOCK_PRI).filter(function(k){return mix[k];}).map(function(k){return '<span class="tool-badge '+POSTOCK_BG[k]+'">'+k+' '+mix[k]+'</span>';}).join(' ')+' · <b>'+units(rem)+'</b> units potentially removable';
-      var h='<div class="tw"><table><thead><tr><th class="l">SKU</th><th>Ordered</th><th>On hand</th><th>Fcst demand</th><th>Other inbound</th><th>Req. from PO</th><th>Removable</th><th class="l">Priority</th><th class="l">Recommendation</th></tr></thead><tbody>';
-      sorted().forEach(function(r){ h+='<tr><td class="l">'+esc(r.sku)+'</td><td>'+units(r.qty)+'</td><td>'+units(r.on_hand)+'</td><td>'+units(r.demand)+'</td><td>'+units(r.other_inbound)+'</td><td>'+units(r.required)+'</td><td'+(r.removable>0?' style="color:#166534;font-weight:600"':'')+'>'+units(r.removable)+'</td>'
-        +'<td class="l"><span class="tool-badge '+(POSTOCK_BG[r.priority]||'bg-neutral')+'">'+esc(r.priority)+'</span></td><td class="l tiny">'+esc(r.recommendation)+'</td></tr>'; });
-      document.getElementById('ps-grid').innerHTML=h+'</tbody></table></div>'; }
+        +Object.keys(POSTOCK_PRI).filter(function(k){return mix[k];}).map(function(k){return '<span class="tool-badge '+POSTOCK_BG[k]+' ps-fbadge" data-pri="'+k+'" title="click to show / hide '+k+' lines" style="cursor:pointer'+(POSTOCK_STATE.hide[k]?';opacity:.35;text-decoration:line-through':'')+'">'+k+' '+mix[k]+'</span>';}).join(' ')+' <span class="mut tiny">(click a pill to filter)</span> · <b>'+units(rem)+'</b> units potentially removable';
+      var vis=visible();
+      var h='<div class="tw"><table style="width:100%;table-layout:fixed"><colgroup><col style="width:200px"><col style="width:70px"><col style="width:72px"><col style="width:88px"><col style="width:92px"><col style="width:82px"><col style="width:84px"><col style="width:108px"><col></colgroup>'
+        +'<thead><tr><th class="l">SKU</th><th>Ordered</th><th>On hand</th><th>Fcst demand</th><th>Other inbound</th><th>Req. from PO</th><th>Removable</th><th class="l">Priority</th><th class="l">Recommendation</th></tr></thead><tbody>';
+      if(!vis.length){ h+='<tr><td class="l" colspan="9"><span class="mut">All lines hidden by the priority filter.</span></td></tr>'; }
+      vis.forEach(function(r){ h+='<tr><td class="l" style="white-space:normal;word-break:break-word">'+esc(r.sku)+'</td><td>'+units(r.qty)+'</td><td>'+units(r.on_hand)+'</td><td>'+units(r.demand)+'</td><td>'+units(r.other_inbound)+'</td><td>'+units(r.required)+'</td><td'+(r.removable>0?' style="color:#166534;font-weight:600"':'')+'>'+units(r.removable)+'</td>'
+        +'<td class="l"><span class="tool-badge '+(POSTOCK_BG[r.priority]||'bg-neutral')+'">'+esc(r.priority)+'</span></td><td class="l tiny" style="white-space:normal">'+esc(r.recommendation)+'</td></tr>'; });
+      document.getElementById('ps-grid').innerHTML=h+'</tbody></table></div>';
+      c.querySelectorAll('.ps-fbadge').forEach(function(b){b.onclick=function(){var p=b.dataset.pri;POSTOCK_STATE.hide[p]=!POSTOCK_STATE.hide[p];draw();};}); }
     document.getElementById('ps-load').onclick=load;
     document.getElementById('ps-po').onchange=load;
     c.querySelectorAll('.pill[data-sort]').forEach(function(p){p.onclick=function(){POSTOCK_STATE.sort=p.dataset.sort;c.querySelectorAll('.pill[data-sort]').forEach(function(x){x.classList.toggle('active',x===p);});if(data)draw();};});
     document.getElementById('ps-csv').onclick=function(){ if(!data||!data.rows.length){alert('Analyse a PO first.');return;}
       var head=['SKU','Ordered','On hand','Forecast demand','Other inbound','Required from PO','Removable','Priority','Recommendation'];
-      var esc2=function(v){v=String(v==null?'':v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
-      var csv=head.join(',')+'\n'+sorted().map(function(r){return [r.sku,r.qty,r.on_hand,r.demand,r.other_inbound,r.required,r.removable,r.priority,r.recommendation].map(esc2).join(',');}).join('\n')+'\n';
-      var bl=new Blob([csv],{type:'text/csv'}),u=URL.createObjectURL(bl),a=document.createElement('a');a.href=u;a.download='PO_STOCK_PRIORITY_'+(data.po||'').replace(/[^A-Za-z0-9]+/g,'_')+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u);},1000); };
+      var esc2=function(v){v=String(v==null?'':v).replace(/[‒-―]/g,'-').replace(/[‘’]/g,"'").replace(/[“”]/g,'"'); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
+      var csv='﻿'+head.join(',')+'\n'+visible().map(function(r){return [r.sku,r.qty,r.on_hand,r.demand,r.other_inbound,r.required,r.removable,r.priority,r.recommendation].map(esc2).join(',');}).join('\n')+'\n';
+      var bl=new Blob([csv],{type:'text/csv;charset=utf-8'}),u=URL.createObjectURL(bl),a=document.createElement('a');a.href=u;a.download='PO_STOCK_PRIORITY_'+(data.po||'').replace(/[^A-Za-z0-9]+/g,'_')+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u);},1000); };
     if(POSTOCK_STATE.po)load(); }
   function renderPrimeDay(c){
     c.innerHTML=scenAnnot('prime')

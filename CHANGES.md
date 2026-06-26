@@ -4,6 +4,47 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.338 - Purchase Orders: Production/Batch filters + clearer ACTION/ERP active state
+
+- Added **Production** and **Batch** dropdown filters to the attribute bar (alongside Ship-to / Supplier),
+  populated from the distinct `prod_no` / `batch_id` values across the visible POs. AND-combined with the
+  other filters; reset to "All" clears them.
+- The **ACTION ITEMS** and **NEEDS ERP** toggles had a hard-to-see inset shadow when selected. Now an active
+  toggle gets a clear outer halo ring + a ✓ prefix, and the other toggle dims — so the selected filter is
+  unmistakable. (They remain mutually exclusive.)
+
+## v20.337 - PO Stock Priority: wider columns, filter pills, bolder Analyse, CSV encoding fix
+
+Scenario ▸ PO Stock Priority polish:
+- Fixed table layout with a colgroup so the **Recommendation** column gets the remaining width and **wraps**
+  (was cropped by the `nowrap` scroll container).
+- **Analyse** button is now bold blue (filled), to stand out from the sort/export pills.
+- The **HIGH / MEDIUM / LOW / NOT REQUIRED** summary pills are now **clickable filters** — click to hide/show
+  that priority in the list; hidden pills dim + strike through. CSV export follows the visible (filtered) set.
+- **CSV encoding fix**: added a UTF-8 BOM + `charset=utf-8` and normalised em/en dashes + smart quotes to ASCII,
+  so recommendations no longer show mojibake (e.g. "Partly needed ‚Äî …") in Excel/Sheets.
+
+## v20.336 - Colour-code overdue date cells on Purchase Orders
+
+The PO grid date columns now flag overdue milestones against the PO status:
+- status = PRODUCTION and **End** date is past → End cell **light red**.
+- status = PRODUCTION or SHIPPING and **Completion** date is past → Completion cell **red** (bold).
+- status = FUTURE and **Start** date is past → Start cell **light red**.
+Ship / Delivery cells are unchanged. Style-only (`dTd` helper + `datePast`).
+
+## v20.335 - "no deposit" deposit cell shown in light grey
+
+In SUPPLY ▸ Purchase Orders, the deposit column now renders the "no deposit" state (supplier start-deposit % = 0)
+in muted grey, to visually distinguish it from "— assign" (a deposit is owed but not yet assigned) and from an
+assigned deposit ref. Style-only (`.dep-pick.nodep`).
+
+## v20.334 - Fix "n is not defined" when expanding a PO plan
+
+Clicking PLAN on a PO whose start deposit is owed, unpaid, and has no deposit ref (e.g. PO-1700649) threw
+`n is not defined`. The `payFillBtn` helper referenced `n()` (the `Number(v)||0` shorthand) which only exists
+as a local inside `poExceptions`/`payPanel`, not in `payFillBtn`'s own scope — so the "pay »" quick-fill button
+crashed the panel render the moment that branch was hit. Replaced with `Number(calc)`. No DB/schema change.
+
 ## v20.333 - ERP drift now reads the dedicated mirror table (not embedded columns)
 
 The app sourced ERP qty/cost from embedded purchase_order_lines.erp_qty/erp_cost; it now reads them from the

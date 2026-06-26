@@ -10,6 +10,8 @@ planner_seed.sql
 # Handoff data package (deliverable for Diviyaj — contains a full data dump; not repo content)
 handoff/
 handoff.zip
+final po migration files/
+po-erp-migration-for-diviyaj.zip
 .claude/
 server.log
 /log
