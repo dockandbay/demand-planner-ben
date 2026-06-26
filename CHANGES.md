@@ -4,6 +4,12 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.325 - Payments Report: supplier-kind filter
+
+The Payments Report now only includes payments whose supplier has master kind = "supplier" — freight,
+internal/transfer, and any payee not in the suppliers master are excluded (across PO completion/balance,
+deposits and other payments).
+
 ## v20.324 - Payment summary copy → HTML table (Gmail-friendly)
 
 The purple ⎘ "copy payment summary" button now writes a basic inline-styled HTML table to the clipboard
