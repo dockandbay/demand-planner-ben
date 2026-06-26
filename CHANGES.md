@@ -4,6 +4,11 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.319 - Deposits table layout: narrower Remaining, wider Linked POs, smaller PO text
+
+Deposit register: "Remaining" column narrowed (~64px), "Linked purchase orders" column widened
+(min 480px), and the PO reference links dropped 2px (11→9px) so long lists are more compact.
+
 ## v20.318 - Deposits table: PO links, no assign, wrapping, narrow date
 
 - Removed the "assign" link from the deposit register (deposit↔PO link lives on the PO, not here).
