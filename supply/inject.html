@@ -2166,8 +2166,8 @@
       var dlOver=r.client_deadline && r.client_deadline<today;
       h+='<tr><td class="l"><button class="lnk-btn dc-po" data-po="'+esc(r.po)+'" title="open this PO’s Client/FBA tab"><b>'+esc(r.po)+'</b></button></td>'
         +'<td class="l">'+esc(r.branch||'')+'</td><td class="l">'+esc(r.supplier_name||'')+'</td>'
-        +'<td class="l">'+esc(r.sales_order_ref||'<span class="mut">—</span>')+'</td>'
-        +'<td class="l">'+esc(r.dispatch_order_ref||'<span class="mut">—</span>')+'</td>'
+        +'<td class="l">'+(r.sales_order_ref?esc(r.sales_order_ref):'<span class="mut">—</span>')+'</td>'
+        +'<td class="l">'+(r.dispatch_order_ref?esc(r.dispatch_order_ref):'<span class="mut">—</span>')+'</td>'
         +'<td class="l"'+((late||dlOver)?' style="color:#dc2626;font-weight:600"':'')+'>'+(r.client_deadline?fd(r.client_deadline):'<span class="mut">—</span>')+((late||dlOver)?' ⚠':'')+'</td>'
         +'<td class="l">'+(r.delivery?fd(r.delivery):'<span class="mut">—</span>')+'</td>'
         +'<td class="l">'+(/manufactur/i.test(r.branch||'')?'FOB':(r.shipment?esc(r.shipment):'<span class="mut">— none</span>'))+'</td>'

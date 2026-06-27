@@ -4,6 +4,11 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.359 - Fix: Direct-to-Client report showed literal span markup for null values
+
+The report wrapped the "—" fallback span inside esc() for the Sales ref / Dispatch order cells, so when those
+were null it printed the escaped `<span ...>` HTML as visible text. Now renders a proper muted dash.
+
 ## v20.358 - Cin7 line push: create the PO in Cin7 if it doesn't exist yet
 
 (#14b cont.) The "Update / Create Cin7 PO" button now **creates a new Cin7 PO** when the planner PO isn't in
