@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.349';
+const APP_VERSION = 'v20.350';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -948,9 +948,11 @@ app.get('/api/supply/:section', async (req, res) => {
                 + (CASE WHEN upper(coalesce(nullif(country_code,''), branch_country, ''))='DIRECT'
                           AND coalesce(nullif(shipment_ref,''), po)=po
                         THEN 0 ELSE 7 END||' days')::interval)::date END eff_checkin,
-              -- balance due: (on-shipment → ship; on-clearance → delivery) + supplier credit days
-              ((CASE WHEN credit_type='on_shipment' THEN eff_ship ELSE eff_delivery END)
-               + (coalesce(credit_days,0)||' days')::interval)::date bal_due_date
+              -- balance due: the PO's "final payment due" override (balance_due_date_overide) takes priority;
+              -- else (on-shipment → ship; on-clearance → delivery) + supplier credit days
+              coalesce(balance_due_date_overide,
+                ((CASE WHEN credit_type='on_shipment' THEN eff_ship ELSE eff_delivery END)
+               + (coalesce(credit_days,0)||' days')::interval)::date) bal_due_date
             FROM calc3
           )
           SELECT po, supplier_name, status,
@@ -985,6 +987,7 @@ app.get('/api/supply/:section', async (req, res) => {
             CASE WHEN start_calc > 0 THEN to_char(start_production,'YYYY-MM-DD') END start_due,        -- no due date for a 0% milestone
             CASE WHEN completion_calc > 0 THEN to_char(eff_prod_end,'YYYY-MM-DD') END completion_due,
             to_char(bal_due_date,'YYYY-MM-DD') balance_due,
+            to_char(balance_due_date_overide,'YYYY-MM-DD') final_payment_due,   -- the "final payment due" override (priority for balance due)
             credit_days, credit_type,
             coalesce(deposit_ref,'') deposit_ref, coalesce(shipment_ref,'') shipment,
             coalesce(client,'') client, coalesce(client_requirements,'') client_requirements,
@@ -3681,8 +3684,8 @@ const POS_SQL_PORTAL = `
     SELECT *, coalesce(sh_delivery, sh_arrival, sh_landing, flex_landing,
       CASE WHEN eff_ship IS NOT NULL AND transit_lead IS NOT NULL THEN (eff_ship + (transit_lead||' days')::interval)::date END) eff_delivery FROM calc2
   ), calc4 AS (
-    SELECT *, ((CASE WHEN credit_type='on_shipment' THEN eff_ship ELSE eff_delivery END)
-      + (coalesce(credit_days,0)||' days')::interval)::date bal_due_date FROM calc3
+    SELECT *, coalesce(balance_due_date_overide, ((CASE WHEN credit_type='on_shipment' THEN eff_ship ELSE eff_delivery END)
+      + (coalesce(credit_days,0)||' days')::interval)::date) bal_due_date FROM calc3
   )
   SELECT po, supplier_name, status,
     to_char(start_production,'YYYY-MM-DD') prod_start,

@@ -4,6 +4,14 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.350 - Payments: "Final payment due" override drives balance due + cash flow
+
+(#9) Added a **Final payment due** date field on the PO PLAN ▸ Payments panel (under Final invoice amount),
+saving to `balance_due_date_overide`. The calculated **balance due date** now prioritises it when set, else
+falls back to the existing calc (ship/delivery + supplier credit days). Both the PO balance-due and the
+**Cash Flow** report's due dates use it (both `bal_due_date` definitions updated). Editing it re-computes the
+panel + invalidates the cash-flow cache.
+
 ## v20.349 - Shipments: >20-pallet exception
 
 (#8) A shipment whose estimated cargo exceeds **20 pallets** (one container) now flags as an exception — red

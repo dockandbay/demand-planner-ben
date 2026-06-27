@@ -976,6 +976,7 @@
       +'<div class="cli-form" style="max-width:560px">'
       +cliRow('Estimate <span class="mut tiny">(order plan)</span>', money(r.value_est))
       +cliRow('<b>Final invoice amount</b>', '<input class="fci payin" style="width:120px;text-align:left" inputmode="decimal" data-ep="'+ep+'" data-field="supplier_invoice_total" value="'+esc(r.final_invoice==null?'':r.final_invoice)+'"> <span class="mut tiny">blank = use estimate</span>')
+      +cliRow('<b>Final payment due</b>', '<input type="date" class="fci txtin" style="width:150px;text-align:left" data-ep="'+ep+'" data-field="balance_due_date_overide" value="'+esc(r.final_payment_due||'')+'"> <span class="mut tiny">blank = calculated balance due date</span>')
       +(function(){ var si=d&&d.sup_invoice, docs=(d&&d.sup_docs)||[]; var out='';
         if(si){ var sv=Number(si.value), fv=(r.final_invoice!=null?Number(r.final_invoice):null), disc=(si.status==='applied'&&fv!=null&&Math.abs(sv-fv)>0.01), pend=(si.status==='pending');
           out+=cliRow('Supplier submitted <span class="mut tiny">'+esc(si.submitted_at||'')+' · '+(si.status==='applied'?'applied':si.status==='dismissed'?'dismissed':'pending')+'</span>',
@@ -1159,7 +1160,8 @@
     // free-text client fields — save verbatim (commas allowed) on blur
     document.querySelectorAll('#podet-'+i+' .txtin').forEach(function(inp){ inp.onchange=function(){ var body={}; body[inp.dataset.field]=inp.value; inp.classList.add('saved');
       fetch(inp.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
-        .then(function(j){ if(j&&j.error)throw new Error(j.error); if(poBy[po])poBy[po][inp.dataset.field]=inp.value; })
+        .then(function(j){ if(j&&j.error)throw new Error(j.error); if(poBy[po])poBy[po][inp.dataset.field]=inp.value;
+          if(inp.dataset.field==='balance_due_date_overide'){ invalidateDerived(); poRefetchPanel(po,i); } })   // recompute balance due + cash flow
         .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; });
     // crossdock SKU chips — add (validated against the eligible list) / remove, save comma list
     function saveXd(skus){ fetch('/api/supply/po/'+encodeURIComponent(po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({crossdock_skus:skus.join(', ')})})
