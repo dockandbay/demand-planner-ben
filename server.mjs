@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.351';
+const APP_VERSION = 'v20.352';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2428,6 +2428,49 @@ app.post('/api/supply/po/:po/upload', async (req, res) => {
       [r.rowCount, `${r.rowCount} line(s) staged to push to ERP (qty + cost) for ${req.params.po}`]);
     res.json({ uploaded: r.rowCount });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Delete a Purchase Order and its owned children (Master Data tab). Gated/confirmed in the UI.
+app.post('/api/supply/po/:po/delete', async (req, res) => {
+  const po = req.params.po;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM planner.purchase_order_lines WHERE po=$1', [po]);
+    await client.query('DELETE FROM planner.erp_purchase_order_lines WHERE po=$1', [po]);
+    await client.query('DELETE FROM planner.erp_purchase_orders WHERE po=$1', [po]);
+    await client.query('DELETE FROM planner.portal_attachments WHERE po=$1', [po]);
+    await client.query('DELETE FROM planner.supplier_submissions WHERE po=$1', [po]);
+    await client.query('DELETE FROM planner.supplier_notes WHERE po=$1', [po]);
+    const r = await client.query('DELETE FROM planner.purchase_orders WHERE po=$1', [po]);
+    await client.query('COMMIT');
+    res.json({ deleted: r.rowCount });
+  } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
+// Rename a PO (Master Data tab) — cascades the key across all owned tables + shipment pointers.
+app.post('/api/supply/po/:po/rename', async (req, res) => {
+  const oldpo = req.params.po, newpo = ((req.body && req.body.new_po) || '').trim();
+  if (!newpo) return res.status(400).json({ error: 'new_po required' });
+  if (newpo === oldpo) return res.json({ ok: true });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const ex = await client.query('SELECT 1 FROM planner.purchase_orders WHERE po=$1', [newpo]);
+    if (ex.rowCount) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'PO ' + newpo + ' already exists' }); }
+    await client.query('UPDATE planner.purchase_orders SET po=$1 WHERE po=$2', [newpo, oldpo]);
+    await client.query("UPDATE planner.purchase_order_lines SET po=$1, po_sku=$1||'|'||sku WHERE po=$2", [newpo, oldpo]);
+    await client.query('UPDATE planner.erp_purchase_order_lines SET po=$1 WHERE po=$2', [newpo, oldpo]);
+    await client.query('UPDATE planner.erp_purchase_orders SET po=$1 WHERE po=$2', [newpo, oldpo]);
+    await client.query('UPDATE planner.portal_attachments SET po=$1 WHERE po=$2', [newpo, oldpo]);
+    await client.query('UPDATE planner.supplier_submissions SET po=$1 WHERE po=$2', [newpo, oldpo]);
+    await client.query('UPDATE planner.supplier_notes SET po=$1 WHERE po=$2', [newpo, oldpo]);
+    await client.query('UPDATE planner.purchase_orders SET shipment_ref=$1 WHERE shipment_ref=$2', [newpo, oldpo]);
+    await client.query('UPDATE planner.shipments SET shipment_ref=$1 WHERE shipment_ref=$2', [newpo, oldpo]).catch(() => {});
+    await client.query('UPDATE planner.shipments SET master_po=$1 WHERE master_po=$2', [newpo, oldpo]).catch(() => {});
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
 });
 // PO management engine — inline edits on the purchase_orders inputs/overrides.
 app.post('/api/supply/po/:po', (req, res) =>

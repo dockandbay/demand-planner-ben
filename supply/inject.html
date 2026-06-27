@@ -534,7 +534,43 @@
       c.querySelectorAll('.up-shiprow').forEach(function(b){b.onclick=function(ev){if(ev.target.closest('a')||ev.target.closest('button'))return;gotoShipment(b.dataset.ref);};});
     };
     view(); }
-  function renderPO(rows){ var c=document.getElementById('supply-content'); fetchLookups(function(){ poInner(rows,c); }); }
+  var PO_SUBS=[['orders','Purchase Orders'],['master','Master Data'],['shipments','Shipments']];
+  var poSubTab='orders';
+  function renderPO(rows){ var c=document.getElementById('supply-content');
+    c.innerHTML='<div id="po-subtabs">'+PO_SUBS.map(function(t){return '<span class="rtab'+(poSubTab===t[0]?' active':'')+'" data-pt="'+t[0]+'">'+t[1]+'</span>';}).join('')+'</div><div id="po-body"><div class="count">Loading…</div></div>';
+    c.querySelectorAll('#po-subtabs .rtab').forEach(function(p){p.onclick=function(){poSubTab=p.dataset.pt;c.querySelectorAll('#po-subtabs .rtab').forEach(function(x){x.classList.toggle('active',x===p);});poRenderSub(rows);};});
+    poRenderSub(rows); }
+  function poRenderSub(rows){ var b=document.getElementById('po-body');
+    if(poSubTab==='master'){ fetchLookups(function(){ renderPOMaster(rows,b); }); return; }
+    if(poSubTab==='shipments'){ fetchLookups(function(){ renderPOShipSub(rows,b); }); return; }
+    fetchLookups(function(){ poInner(rows,b); }); }
+  // MASTER DATA sub-tab (#2): edit PO Number / Branch / Supplier / Production / Batch / Shipment inline; delete a PO.
+  function renderPOMaster(rows,b){ rows.forEach(function(r){ poBy[r.po]=r; });
+    function refreshMaster(){ invalidateDerived(); delete cache['purchase-orders'];
+      fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(fresh){ if(Array.isArray(fresh)){rows.length=0;Array.prototype.push.apply(rows,fresh);} renderPOMaster(rows,b); }).catch(function(){ selectSection('purchase-orders'); }); }
+    _poRefresh=refreshMaster;
+    var sorted=rows.slice().sort(function(a,z){return (a.po||'').localeCompare(z.po||'');});
+    b.innerHTML=annot('purchase-orders')+'<div class="bar"><span class="count">'+rows.length+' POs · edit master fields inline; Delete removes the PO and its lines</span><input class="flt" id="pom-q" placeholder="filter PO / supplier…" style="margin-left:auto;width:220px"></div>'
+      +lookupDatalists()+'<div class="tw"><table class="po-tbl"><thead><tr><th class="l">PO Number</th><th class="l">Branch</th><th class="l">Supplier</th><th class="l">Production</th><th class="l">Batch ID</th><th class="l">Shipment</th><th></th></tr></thead><tbody id="pom-body"></tbody></table></div>';
+    function rowHtml(r){ var ep='/api/supply/po/'+encodeURIComponent(r.po);
+      var ship=/manufactur/i.test(r.branch||'')?'<span class="tool-badge bg-neutral" title="MANUFACTURING = FOB">FOB</span>'
+        :(r.shipment?'<button class="ship-open" data-ref="'+esc(r.shipment)+'">'+esc(r.shipment)+'</button> <button class="ship-pick" data-po="'+esc(r.po)+'">▾</button>':'<button class="ship-pick" data-po="'+esc(r.po)+'">— assign ▾</button>');
+      return '<tr><td class="l"><input class="fci pom-po" data-po="'+esc(r.po)+'" value="'+esc(r.po)+'" style="width:150px"></td>'
+        +'<td class="l">'+cellPickBtn(r.po,ep,'branch',r.branch,'branch')+'</td>'
+        +'<td class="l">'+cellPickBtn(r.po,'/api/supply/po/'+encodeURIComponent(r.po)+'/supplier','supplier_name',r.supplier_name,'supplier')+'</td>'
+        +'<td class="l">'+cellPickBtn(r.po,ep,'prod_no',r.prod_no,'prod')+'</td>'
+        +'<td class="l">'+cellPickBtn(r.po,ep,'batch_id',r.batch_id,'batch')+'</td>'
+        +'<td class="l">'+ship+'</td>'
+        +'<td class="l"><button class="save-btn light pom-del" data-po="'+esc(r.po)+'" title="delete this PO + its lines" style="color:#dc2626;border-color:#fca5a5">🗑 Delete</button></td></tr>'; }
+    function draw(q){ q=(q||'').toLowerCase(); var list=sorted.filter(function(r){return !q||((r.po||'')+' '+(r.supplier_name||'')).toLowerCase().indexOf(q)>=0;});
+      document.getElementById('pom-body').innerHTML=list.map(rowHtml).join('');
+      bindCellPick(); bindShipPick(); bindShipOpen();
+      document.querySelectorAll('#pom-body .pom-del').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po; if(!confirm('Delete PO '+po+' and all its lines? This cannot be undone.'))return;
+        shipPost('/api/supply/po/'+encodeURIComponent(po)+'/delete',{},function(){ refreshMaster(); }); }; });
+      document.querySelectorAll('#pom-body .pom-po').forEach(function(inp){ inp.onchange=function(){ var oldpo=inp.dataset.po, np=inp.value.trim(); if(!np||np===oldpo){inp.value=oldpo;return;} if(!confirm('Rename PO '+oldpo+' → '+np+'? Updates all its lines and references.')){inp.value=oldpo;return;}
+        shipPost('/api/supply/po/'+encodeURIComponent(oldpo)+'/rename',{new_po:np},function(){ refreshMaster(); }); }; }); }
+    draw(''); var qb=document.getElementById('pom-q'); if(qb)qb.oninput=function(){draw(this.value);}; }
+  function renderPOShipSub(rows,b){ b.innerHTML='<div class="count">Shipments sub-tab — coming in this build.</div>'; }
   // PO → shipment assign popover (mockup): make this PO a master, join an existing shipment, or pick
   // another PO that becomes the master. Searchable across shipments + POs.
   var shipFull=null;
@@ -554,7 +590,7 @@
   function bindShipPick(){ document.querySelectorAll('#supply-root .ship-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openShipAssign(b.dataset.po,b); }; }); }
   // open a shipment from elsewhere: jump to SHIPMENTS and expand that shipment's row
   function gotoShipment(ref){ _pendingShip=ref; selectSection('shipments'); }
-  function gotoPO(po,tab){ _pendingPO=po; _pendingPOTab=tab||null; selectSection('purchase-orders'); }
+  function gotoPO(po,tab){ _pendingPO=po; _pendingPOTab=tab||null; poSubTab='orders'; selectSection('purchase-orders'); }
   function gotoOrderPlan(po){ _pendingOP={po:po}; selectSection('order-plan'); }   // → full ORDER PLAN, PO pre-filtered
   function gotoDeposit(ref){ _pendingDep=ref; prodTab='deposits'; selectSection('productions'); }   // → PRODUCTIONS ▸ Deposits, filtered to this ref
   function gotoOther(){ prodTab='other'; selectSection('productions'); }   // → PRODUCTIONS ▸ Other Payments

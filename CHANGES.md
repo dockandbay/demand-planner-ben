@@ -4,6 +4,14 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.352 - Purchase Orders: sub-tabs + Master Data view (edit + delete)
+
+(#2) PURCHASE ORDERS is now a sub-tabbed section: **Purchase Orders** (the existing grid) · **Master Data** ·
+**Shipments** (built next). Master Data is an editable table — PO Number (rename, cascades to all lines/refs),
+Branch, Supplier, Production, Batch ID, Shipment — plus a **Delete** button per PO (confirms, then removes the
+PO and its lines / ERP mirror / attachments / submissions / notes in a transaction). New endpoints:
+`POST /api/supply/po/:po/delete` and `/rename`.
+
 ## v20.351 - PO Client tab → Client/FBA: deadline date, attachments, Amazon ref label
 
 (#12) Renamed the PO PLAN **CLIENT** tab to **CLIENT/FBA**; relabelled "Sales order ref" → "Sales Ref / Amazon
