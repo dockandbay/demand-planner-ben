@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.354';
+const APP_VERSION = 'v20.355';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3909,10 +3909,14 @@ app.get('/api/portal/data', portalAuth, async (req, res) => {
   try {
     const names = req.portal.suppliers, ids = req.portal.supplierIds;
     const pos = (await pool.query(
-      `SELECT po, coalesce(status,'') status, coalesce(client,'') client, shipment_ref,
-              supplier_ship_date, end_production_overide, supplier_invoice_total,
-              coalesce(crossdock_skus,'') crossdock_skus
-       FROM planner.purchase_orders WHERE supplier_name = ANY($1) ORDER BY po`, [names])).rows;
+      `SELECT po.po, coalesce(po.status,'') status, coalesce(po.client,'') client, po.shipment_ref,
+              po.supplier_ship_date, po.end_production_overide, po.supplier_invoice_total,
+              coalesce(po.crossdock_skus,'') crossdock_skus, coalesce(po.supplier_name,'') supplier_name,
+              -- the assigned shipment is consolidated under ANOTHER supplier's master PO → supplier needs shipment labels
+              (coalesce(po.shipment_ref,'')<>'' AND coalesce((SELECT m.supplier_name FROM planner.purchase_orders m
+                 WHERE m.po = coalesce((SELECT s.master_po FROM planner.shipments s WHERE s.shipment_ref=po.shipment_ref), po.shipment_ref)),'')
+                 NOT IN ('', coalesce(po.supplier_name,''))) ship_other_supplier
+       FROM planner.purchase_orders po WHERE po.supplier_name = ANY($1) ORDER BY po.po`, [names])).rows;
     const poList = pos.map(p => p.po);
     const grab = (sql) => poList.length ? pool.query(sql, [poList]).then(r => r.rows) : Promise.resolve([]);
     const [lines, lcs, xds, adds, notes, subs, supSkus] = await Promise.all([

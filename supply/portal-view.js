@@ -466,6 +466,7 @@
         +'<label class="tiny">Invoice doc<br><input type="file" class="pp-inv-file" data-po="'+po+'" style="font-size:11px;width:200px"></label><button class="save-btn pp-inv-go" data-po="'+po+'">'+(invSub&&invSub.status!=='dismissed'?'Resubmit invoice':'Submit invoice')+'</button></div>'
         +(invSub?'<div class="tiny" style="margin-top:8px;padding:6px 9px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px">Submitted: <b>$'+esc(invSub.value)+'</b> · '+esc(invSub.submitted_at||'')+' · '+invStatus+(invSub.attachment_id?' · <a href="/api/portal/attachment/'+invSub.attachment_id+'" target="_blank">doc</a>':'')+'</div>':'<div class="tiny mut" style="margin-top:6px">No invoice submitted yet.</div>');
       // ---- SHIPMENT: flexport details, else submit tracking/carrier + completion ----
+      var shipLabelBtn=(p.ship_other_supplier?'<div style="margin:6px 0"><button class="save-btn pp-shiplabel" data-po="'+po+'" title="this shipment consolidates under another supplier’s master — download the SHIPS WITH labels for your cartons">⤓ Shipment Labels</button> <span class="mut tiny">consolidated under another supplier — label your cartons</span></div>':'');
       var shipment=(p.shipment||p.flexport_reference
           ? '<div style="font-size:12px;margin-bottom:8px"><b>Shipment</b><br>'
             +'Shipment ref: '+(p.shipment?esc(p.shipment):'<span class="mut">—</span>')+'<br>'
@@ -477,6 +478,7 @@
           : '<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end">'
             +'<label class="tiny">Tracking code<br><input class="fci pp-trk" data-po="'+po+'" placeholder="e.g. MAEU…" style="width:130px"></label>'
             +'<label class="tiny">Carrier<br><input class="fci pp-car" data-po="'+po+'" placeholder="Flexport / DHL…" style="width:120px"></label><button class="save-btn pp-trk-go" data-po="'+po+'">Submit tracking</button></div>');
+      shipment = shipLabelBtn + shipment;
       if(cdSkus.length){ var xrows=cdSkus.map(function(s){ var q=xd[s];
           return '<tr><td class="l">'+esc(s)+'</td><td style="text-align:right"><input class="fci pp-xqty" data-po="'+po+'" data-sku="'+esc(s)+'" value="'+(q!=null&&q!==''?esc(q):'')+'" placeholder="qty shipped" style="width:96px;text-align:right" inputmode="numeric"></td></tr>'; }).join('');
         shipment += '<div class="sect-h" style="margin-top:14px">Crossdock SKUs on this shipment'+(xdAction?' <span class="ex-badge" title="enter the quantity shipped for each crossdock SKU">'+xdMissing+'</span>':'')+'</div>'
@@ -554,6 +556,7 @@
 scope.querySelectorAll('.pp-dl-po').forEach(function(btn){ btn.onclick=function(){ ppDl(EP.labelData+'?po='+encodeURIComponent(btn.dataset.po), btn.dataset.po+'_barcodes.zip', btn); }; });
 scope.querySelectorAll('.pp-dl-prod').forEach(function(btn){ btn.onclick=function(){ ppDl(EP.labelData+'?prod='+encodeURIComponent(btn.dataset.prod)+'&supplier='+encodeURIComponent(STATE.supplierName), btn.dataset.prod+'_barcodes.zip', btn); }; });
 scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(){ if(BC.placeholder){BC.note();return;} btn.disabled=true; fetch(EP.labelData+'?skus='+encodeURIComponent(btn.dataset.skus)).then(function(r){return r.json();}).then(function(rows){ btn.disabled=false; if(!rows||!rows.length||rows.error){alert('No crossdock barcodes found');return;} BC.crossdock(rows,btn.dataset.po,btn.dataset.do,btn.dataset.client,btn.dataset.address,btn,btn.dataset.po+'_crossdock_labels.zip'); }).catch(function(){alert('Could not load crossdock labels');btn.disabled=false;}); }; });
+              scope.querySelectorAll('.pp-shiplabel').forEach(function(btn){ btn.onclick=function(){ dlShipsWith(btn.dataset.po, btn); }; });   // #11 — SHIPS WITH labels when consolidated under another supplier
               // post a note → refresh just this PO's timeline in place (re-fetch the supplier's notes, stay on TIMELINE)
               scope.querySelectorAll('.pp-note-post').forEach(function(btn){ btn.onclick=function(){ var ta=pick('pp-note-body',btn.dataset.po); var v=(ta.value||'').trim(); if(!v)return; var po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); btn.disabled=true;
                 postJSON(EP.note,{po:po,supplier_id:sid,body:v,author_kind:'supplier',author_email:by},function(){

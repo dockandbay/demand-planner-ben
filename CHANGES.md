@@ -4,6 +4,14 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.355 - Supplier portal: Shipment Labels when consolidated under another supplier
+
+(#11) On the supplier portal (Config ▸ Portal preview) SHIPMENT tab, when a PO's assigned shipment is
+consolidated under **another supplier's** master PO, a **⤓ Shipment Labels** button appears (server flag
+`ship_other_supplier` on the portal data). It downloads the SHIPS-WITH label so the supplier can label their
+cartons for the consolidation. NOTE: reused the existing SHIPS-WITH label as the "shipment label" — confirm the
+exact artwork with Ben; live-portal routing of `/api/supply/ships-with` to be confirmed by Diviyaj.
+
 ## v20.354 - Reports: Direct to Client report
 
 (#3) New **SUPPLY ▸ Reports ▸ Direct to Client** report — in-progress orders on the **Direct to Client**,
