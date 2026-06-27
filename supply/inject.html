@@ -1945,7 +1945,10 @@
       var heads='<tr>'+cols.map(function(c){return '<th class="l"'+(c.w?' style="min-width:'+c.w+'px"':'')+'>'+esc(c.h)+'</th>';}).join('')+'<th class="l" style="min-width:104px"></th></tr>';
       var body=(rows||[]).map(function(r){ var k=String(r[opts.key||'id']); var ed=(editK===k);
         var cells=cols.map(function(c){ var v=r[c.f];
+          if(c.t==='bool'&&(c.ro||!ed)) return '<td class="l">'+(v===true||String(v)==='true'?'<span class="tool-badge bg-green">Yes</span>':'<span class="mut">No</span>')+'</td>';
           if(c.ro||!ed) return '<td class="l">'+(v==null||v===''?'<span class="mut">—</span>':esc(v))+'</td>';
+          if(c.t==='bool'){ var bv=(v===true||String(v)==='true');
+            return '<td class="l"><select class="et-in" data-f="'+esc(c.f)+'"><option value="false"'+(bv?'':' selected')+'>No</option><option value="true"'+(bv?' selected':'')+'>Yes</option></select></td>'; }
           if(c.t==='select'){ var ov=String(v==null?'':v), opts=c.opts||[];
             var matched=opts.some(function(o){return ov.toLowerCase()===String(o).toLowerCase();});  // case-insensitive (e.g. 'active' → ACTIVE)
             var oh=(ov&&!matched?'<option selected>'+esc(ov)+'</option>':'')  // preserve a current value not in the list
@@ -2019,6 +2022,7 @@
       return '<div class="sect-h">Suppliers — payment terms drive every payment calc <span class="mut tiny">(<b>Prod d</b> = production lead time; a PO\'s production-end date = start + this, unless overridden)</span> <button class="tool-badge bg-blue" id="sup-new" style="cursor:pointer;border:none;margin-left:8px">+ Supplier</button></div>'
         +editTbl('suppliers', rows, SUP_COLS, {key:'id'}); }
     var PROD_COLS=[{f:'prod_no',h:'Production #',w:96},{f:'status',h:'Status',t:'select',opts:['','ACTIVE','CLOSED']},
+      {f:'require_supplier_confirmation',h:'Require supplier confirmation',t:'bool',w:120},
       {f:'po_count',h:'POs',ro:true},{f:'suppliers',h:'Suppliers',ro:true},
       {f:'xero_account_code',h:'Xero code',w:140},{f:'xero_account_name',h:'Xero account',w:380}];
     function prodNumTbl(rows){

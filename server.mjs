@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.366';
+const APP_VERSION = 'v20.367';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1000,6 +1000,7 @@ app.get('/api/supply/:section', async (req, res) => {
             CASE WHEN nullif(country_code,'') IS NOT NULL THEN 'M' WHEN branch_country IS NOT NULL THEN 'branch' END country_src,
             coalesce(country_code,'') country_override, coalesce(branch,'') branch,
             coalesce(erp_po,'') erp, coalesce(prod_no,'') prod_no, coalesce(batch_id,'') batch_id,
+            coalesce((SELECT pn.require_supplier_confirmation FROM planner.prod_numbers pn WHERE pn.prod_no=calc4.prod_no),false) require_confirmation,
             -- ERP sync: drift = planned qty/cost differs from the ERP MIRROR (planner.erp_purchase_order_lines,
             -- fed by n8n). erp_in/erp_total drive the 3-state badge (✓ match / ⚠ drift / ✗ not in ERP).
             (SELECT count(*) FROM planner.purchase_order_lines l LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
@@ -1367,7 +1368,7 @@ app.get('/api/supply/:section', async (req, res) => {
       case 'prod-numbers':   // CONFIG ▸ Productions: raw prod_numbers master + PO/supplier counts (editable via /prod-number/:id)
         return res.json(await q(`
           SELECT pn.id, pn.prod_no, coalesce(pn.status,'') status, coalesce(pn.xero_account_code,'') xero_account_code,
-            coalesce(pn.xero_account_name,'') xero_account_name,
+            coalesce(pn.xero_account_name,'') xero_account_name, coalesce(pn.require_supplier_confirmation,false) require_supplier_confirmation,
             (SELECT count(*) FROM planner.purchase_orders po WHERE po.prod_no=pn.prod_no)::int po_count,
             (SELECT count(DISTINCT po.supplier_name) FROM planner.purchase_orders po WHERE po.prod_no=pn.prod_no)::int suppliers
           FROM planner.prod_numbers pn ORDER BY pn.prod_no DESC NULLS LAST`));
@@ -1560,6 +1561,7 @@ app.get('/api/supply/:section', async (req, res) => {
             FROM planner.purchase_orders
             WHERE supplier_confirmed_at IS NULL AND coalesce(supplier_name,'')<>''
               AND coalesce(status,'') NOT ILIKE '%complete%' AND coalesce(status,'') NOT ILIKE '%future%'
+              AND coalesce((SELECT pn.require_supplier_confirmation FROM planner.prod_numbers pn WHERE pn.prod_no=purchase_orders.prod_no),false)
               AND EXISTS (SELECT 1 FROM planner.purchase_order_lines l WHERE l.po=purchase_orders.po AND coalesce(l.qty,0)>0)
           UNION ALL
           -- supplier risk: line ordered against a supplier not in the SKU's allowed multi-supplier list (until approved)
@@ -1997,7 +1999,8 @@ app.post('/api/supply/production-create', async (req, res) => {
 // Edit a production row (CONFIG ▸ Productions). Edit/Save sends all fields at once.
 app.post('/api/supply/prod-number/:id', (req, res) =>
   patch(res, 'planner.prod_numbers', 'id', req.params.id,
-    { prod_no: 'text', status: 'text', xero_account_code: 'text', xero_account_name: 'text', xero_account_id: 'text' },
+    { prod_no: 'text', status: 'text', xero_account_code: 'text', xero_account_name: 'text', xero_account_id: 'text',
+      require_supplier_confirmation: 'boolean' },
     req.body, 'bigint'));
 
 // ── Supplier portal admin (CONFIG ▸ Portal Users). The approved email↔supplier list + magic-link issue.

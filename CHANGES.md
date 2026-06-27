@@ -4,6 +4,21 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.367 - Per-production "require supplier confirmation" setting
+
+- New per-production flag **`require_supplier_confirmation`** (migration **077**, on `planner.prod_numbers`,
+  default **FALSE** — so all current productions start with the confirmation workflow OFF).
+- Editable in **CONFIG ▸ Productions** as a **Require supplier confirmation** Yes/No column (new generic `bool`
+  column type in the editable-table helper).
+- When a production is set to **Yes**, the supplier-confirmation workflow turns on for its POs: the portal shows
+  the "Please confirm this order" banner (in the TIMELINE tab) and an unconfirmed order raises an action
+  (MANAGE + TIMELINE badge) and the admin **"Awaiting supplier confirmation"** action. When **No** (default),
+  none of that shows.
+- `purchase-orders` endpoint now returns `require_confirmation` per PO (derived from its production); the admin
+  Actions query gates "Awaiting supplier confirmation" on the same flag.
+- **Diviyaj:** run migration 077; the LIVE portal bootstrap must also surface `require_confirmation` per PO
+  (same derivation: `prod_numbers.require_supplier_confirmation` by `prod_no`).
+
 ## v20.366 - Portal grid (Ships With), confirm→Timeline, Shipment Plan filters + escalation fixes
 
 Supplier portal (`supply/portal-view.js`) + admin preview data (`supply/inject.html`):
