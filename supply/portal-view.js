@@ -485,9 +485,20 @@
           +(xdReq?'<div class="tiny" style="color:#92400e;margin-bottom:4px">⚠ This order is shipping — enter the quantity shipped for each crossdock SKU.</div>':'<div class="tiny mut" style="margin-bottom:4px">Enter the quantity shipped for each crossdock SKU (required once the order is shipping).</div>')
           +'<table style="font-size:11px;width:auto"><thead><tr><th class="l">Crossdock SKU</th><th style="text-align:right">Qty shipped</th></tr></thead><tbody>'+xrows+'</tbody></table>'
           +'<div class="tiny mut" style="margin-top:3px">Download the crossdock box labels from the grid (⤓ Crossdock).</div>'; }
+      // ---- BARCODES & LABELS tab: PO + production barcodes (always); Ship-To pallet labels (only when this PO
+      //      ships under another supplier's PO); Direct-to-Client / FBA attachments (only when there are any) ----
+      var clientDocs=p.client_docs||[];
+      function blRow(lbl,val){ return '<div style="display:flex;gap:14px;align-items:baseline;padding:7px 0;border-bottom:1px solid #f1f1f1"><div style="flex:0 0 220px;color:#555">'+lbl+'</div><div>'+val+'</div></div>'; }
+      var barcodesLabels='<div class="sect-h">Barcodes &amp; Labels</div><div style="max-width:640px;font-size:12px">'
+        +blRow('Barcodes for this PO','<button class="save-btn pp-dl-po" data-po="'+po+'">⤓ Download barcodes for PO</button>')
+        +(p.prod_no?blRow('Barcodes for production '+esc(p.prod_no),'<button class="save-btn pp-dl-prod" data-prod="'+esc(p.prod_no)+'">⤓ Download barcodes for '+esc(p.prod_no)+'</button>'):'')
+        +(p.ship_other_supplier?blRow('Ship To pallet labels','<button class="save-btn pp-shiplabel" data-po="'+po+'">⤓ Download Ship To Pallet Labels</button> <span class="mut tiny">this PO ships under another supplier’s PO</span>'):'')
+        +(clientDocs.length?blRow('Direct to Client / FBA attachments',clientDocs.map(function(x){return '<a href="/api/portal/attachment/'+x.id+'" target="_blank" rel="noopener">'+esc(x.filename||'file')+'</a>';}).join(' &nbsp;·&nbsp; ')):'')
+        +'</div>';
       // ---- tabs + action badges ----
       var tabs=[['timeline','TIMELINE',timeline,unreadInt],['orderplan','ORDER PLAN',skus,0],
-        ['invoice','INVOICE',invoice, has('invoice_value')?0:1],['shipment','SHIPMENT',shipment, ((p.shipment||p.flexport_reference||has('tracking'))?0:1)+xdAction]];
+        ['invoice','INVOICE',invoice, has('invoice_value')?0:1],['shipment','SHIPMENT',shipment, ((p.shipment||p.flexport_reference||has('tracking'))?0:1)+xdAction],
+        ['barcodes','BARCODES & LABELS',barcodesLabels,0]];
       function badge(n){ return n>0?' <span class="ex-badge">'+n+'</span>':''; }
       var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab pptab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'">'+t[1]+badge(t[3])+'</button>';}).join('')+'</div>';
       var panels=tabs.map(function(t,ti){return '<div class="pptab-panel" data-pt="'+t[0]+'"'+(ti===0?'':' style="display:none"')+'>'+t[2]+'</div>';}).join('');

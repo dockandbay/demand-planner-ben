@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.360';
+const APP_VERSION = 'v20.361';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1092,6 +1092,8 @@ app.get('/api/supply/:section', async (req, res) => {
           nullif(p.discontinue_date_final,'') discontinue, nullif(p.discontinue_date_au_final,'') discontinue_au, nullif(p.discontinue_date_ca,'') discontinue_ca
           FROM planner.sku_labels s LEFT JOIN planner.products p ON p.sku = s.sku
           WHERE coalesce(s.status,'') NOT ILIKE '%discontinued%' ORDER BY s.category, s.sku`));
+      case 'client-attachments':   // Client/FBA docs across all POs (category='client') — portal Barcodes & Labels tab
+        return res.json(await q(`SELECT po, id, filename FROM planner.portal_attachments WHERE coalesce(category,'')='client' ORDER BY uploaded_at DESC`));
       case 'flexport':
         return res.json(await q(`SELECT flex_id, shipment_name, mode, status_description status, incoterm,
           CASE WHEN arrival_date < current_date THEN 'Completed' ELSE 'Active' END status_group,

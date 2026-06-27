@@ -2086,9 +2086,13 @@
           function loadPortalData(name){ var sid=supById[name];
             var nf=sid?fetch('/api/supply/portal-notes/'+sid).then(function(r){return r.json();}):Promise.resolve([]);
             var sf=sid?fetch('/api/supply/portal-submissions/'+sid).then(function(r){return r.json();}):Promise.resolve([]);
-            return Promise.all([fetch('/api/supply/purchase-orders').then(function(r){return r.json();}), fetch('/api/supply/order-plan').then(function(r){return r.json();}), fetch('/api/supply/deposits').then(function(r){return r.json();}), nf, sf, fetch('/api/supply/portal-line-costs').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/supplier-skus/'+encodeURIComponent(name)).then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/crossdock-shipments').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/additional-costs').then(function(r){return r.json();}).catch(function(){return [];})])
-              .then(function(res){ var allpos=res[0],lines=res[1],deps=res[2],notes=res[3]||[],subs=res[4]||[],lc=res[5]||[],supSkus=res[6]||[],xd=res[7]||[],ac=res[8]||[];
+            return Promise.all([fetch('/api/supply/purchase-orders').then(function(r){return r.json();}), fetch('/api/supply/order-plan').then(function(r){return r.json();}), fetch('/api/supply/deposits').then(function(r){return r.json();}), nf, sf, fetch('/api/supply/portal-line-costs').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/supplier-skus/'+encodeURIComponent(name)).then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/crossdock-shipments').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/additional-costs').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/client-attachments').then(function(r){return r.json();}).catch(function(){return [];})])
+              .then(function(res){ var allpos=res[0],lines=res[1],deps=res[2],notes=res[3]||[],subs=res[4]||[],lc=res[5]||[],supSkus=res[6]||[],xd=res[7]||[],ac=res[8]||[],cdocs=res[9]||[];
                 var pos=allpos.filter(function(p){return (p.supplier_name||'')===name;});
+                // per-PO flags for the Barcodes & Labels tab: shipment consolidated under another supplier, + client/FBA docs
+                var supByPoAll={}; allpos.forEach(function(x){ supByPoAll[x.po]=x.supplier_name||''; });
+                var cdByPo={}; cdocs.forEach(function(x){ (cdByPo[x.po]=cdByPo[x.po]||[]).push(x); });
+                pos.forEach(function(p){ var mref=p.shipment||''; p.ship_other_supplier=!!(mref && supByPoAll[mref]!==undefined && supByPoAll[mref]!==(p.supplier_name||'')); p.client_docs=cdByPo[p.po]||[]; });
                 var poset={}; pos.forEach(function(p){poset[p.po]=1;}); var lb={};
                 lines.forEach(function(l){ if(poset[l.po]){ (lb[l.po]=lb[l.po]||[]).push(l); } });
                 var sdep=deps.filter(function(d){return (d.supplier_name||'')===name;});

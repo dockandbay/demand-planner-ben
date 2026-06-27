@@ -4,6 +4,14 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.361 - Supplier portal: "Barcodes & Labels" tab
+
+New per-PO portal tab consolidating downloads: (1) Barcodes for PO, (2) Barcodes for Production (always shown);
+(3) Ship-To Pallet Labels — only when this PO ships under another supplier's PO (ship_other_supplier);
+(4) Direct-to-Client / FBA attachments — only when there are client docs (category='client'). The preview
+computes ship_other_supplier client-side from the PO data and fetches client attachments via a new
+`client-attachments` endpoint. (Live portal /api/portal/bootstrap needs the same two fields wired by Diviyaj.)
+
 ## v20.360 - Master Data + Shipments moved into the PO PLAN panel (per-PO)
 
 Corrected #2 / #10: MASTER DATA and SHIPMENTS are now tabs **inside a PO's PLAN panel** (alongside PAYMENTS /
