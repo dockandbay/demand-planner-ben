@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.367';
+const APP_VERSION = 'v20.368';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1152,7 +1152,7 @@ app.get('/api/supply/:section', async (req, res) => {
           .sort((a, b) => (a.departure || '9999').localeCompare(b.departure || '9999') || a.shipment_ref.localeCompare(b.shipment_ref)));
       }
       case 'shipment-notes':   // ?ref=… → timeline notes for a master shipment
-        return res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at
+        return res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read
           FROM planner.shipment_notes WHERE shipment_ref=$1 ORDER BY created_at`, [req.query.ref || ''])).rows);
       case 'flexport':
         return res.json(await q(`SELECT flex_id, shipment_name, mode, status_description status, incoterm,
@@ -1258,7 +1258,8 @@ app.get('/api/supply/:section', async (req, res) => {
                     WHEN coalesce(sh.departure_date, fx.departure_date) <= current_date THEN 'Active' ELSE 'Planned' END) <> 'Complete'
              AND sh.carrier_ref IS NULL AND fx.flex_id IS NULL) is_exception,
             (coalesce(a.pallets,0) > 20) over_pallets,   -- est. cargo over one 20-pallet container → exception
-            coalesce(sh.escalated,false) escalated
+            coalesce(sh.escalated,false) escalated,
+            (SELECT count(*) FROM planner.shipment_notes sn WHERE sn.shipment_ref=sh.shipment_ref AND sn.author_kind='supplier' AND sn.read_at IS NULL)::int unread_notes
           FROM planner.shipments sh
           LEFT JOIN agg a ON a.shipment_ref=sh.shipment_ref
           LEFT JOIN LATERAL (SELECT f.* FROM planner.flexport_shipments f
@@ -1619,7 +1620,7 @@ app.get('/api/supply/:section', async (req, res) => {
           UNION ALL
           -- escalated shipment (set in the supplier portal / Shipments grid) → review while escalated
           SELECT 'high','Shipment escalated', shipment_ref,
-            'Shipment '||shipment_ref||' has been escalated — review', 'shipmentplan','','', shipment_ref
+            'Shipment '||shipment_ref||' has been escalated — review', '','shipment','', shipment_ref
             FROM planner.shipments WHERE escalated=true
           UNION ALL
           SELECT 'amber','Order-plan change pending ERP push', l.po,
@@ -2211,6 +2212,14 @@ app.post('/api/supply/shipment-note', async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.shipment_notes (shipment_ref, author_kind, author_email, body)
       VALUES ($1,$2,$3,$4) RETURNING id`, [b.shipment_ref, b.author_kind || 'internal', b.author_email || null, String(b.body)]);
     res.json({ id: r.rows[0].id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Shipment Plan timeline: mark a supplier note read / unread (toggle) — admin side, mirrors note-read for POs.
+app.post('/api/supply/shipment-note-read/:id', async (req, res) => {
+  try {
+    const read = !(req.body && req.body.read === false);
+    await pool.query(`UPDATE planner.shipment_notes SET read_at=${read ? 'now()' : 'NULL'} WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true, read });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Portal data for the preview/portal: notes + submissions for a supplier (scoped by supplier_id).

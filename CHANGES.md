@@ -4,6 +4,18 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.368 - SUPPLY ▸ Shipments: timeline read/unread + counter, search overrides status, escalated action links
+
+- **Timeline read/unread** on the Shipments grid (mirrors the PO timeline): supplier-authored timeline notes show
+  as **"new"** until an internal user marks them read; an **unread counter** badge shows on the shipment's PLAN
+  row, and the shipment-row Timeline tab gets **Mark read / mark unread** toggles. Migration **078** adds
+  `shipment_notes.read_at`; new endpoint `POST /api/supply/shipment-note-read/:id`; the shipments grid query now
+  returns `unread_notes` per shipment; `shipment-notes` returns a `read` flag.
+- **Shipment / PO search now overrides the status filter** — typing in the Filter box finds a shipment whatever
+  its status (Active/Completed/etc.), instead of being constrained by the active pill.
+- **Escalated shipment action now hyperlinks to the shipment** — the "Shipment escalated" action's ref opens the
+  Shipments grid on that shipment (was a dead `shipmentplan` target, which is portal-only).
+
 ## v20.367 - Per-production "require supplier confirmation" setting
 
 - New per-production flag **`require_supplier_confirmation`** (migration **077**, on `planner.prod_numbers`,
