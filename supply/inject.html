@@ -204,6 +204,7 @@
   var STBG={'bg-neutral':['#f3f4f6','#4b5563'],'bg-amber':['#fef3c7','#92400e'],'bg-red':['#fee2e2','#991b1b'],'bg-green':['#dcfce7','#166534'],'bg-blue':['#dbeafe','#1e40af']};
   var cache={},current=null,depRefs=null,poBy={},shipBy={},batchList=[],prodList=[],shipList=[],supplierList=[],branchList=[],crossdockList=[];
   var _pendingPO=null,_pendingPOTab=null,_pendingShip=null,_pendingOP=null,_pendingDep=null;   // cross-view navigation: expand this PO / shipment, pre-filter order plan / deposit register, after the target view renders
+  var _poRefresh=null;   // set by the PO grid to refresh itself in place (no full section reload) after an assign
   // a write to a PO / shipment / deposit changes the derived views — drop their caches so they re-fetch fresh
   function invalidateDerived(){ ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments'].forEach(function(k){delete cache[k];}); }
 
@@ -540,6 +541,15 @@
   function fetchShipmentsFull(cb){ if(shipFull)return cb(shipFull);
     fetch('/api/supply/shipments').then(function(r){return r.json();}).then(function(d){ shipFull=d.shipments||[]; cb(shipFull); }).catch(function(){cb([]);}); }
   function closeShPop(){ var p=document.getElementById('shpop'); if(p)p.parentNode.removeChild(p); document.removeEventListener('mousedown',shPopOutside,true); }
+  // append a popover near its anchor, flipping it ABOVE the anchor when it would overflow the bottom of the
+  // viewport (so a row near the bottom of the screen still gets a usable, fully-visible popup).
+  function placePop(pop, rc){ document.body.appendChild(pop);
+    var ph=pop.offsetHeight||340, pw=pop.offsetWidth||300;
+    var top=rc.bottom+4;
+    if(top+ph > window.innerHeight-8) top=rc.top-ph-4;                 // flip above
+    if(top < 8) top=Math.max(8, window.innerHeight-ph-8);             // still off-screen → clamp into view
+    var left=Math.max(8, Math.min(rc.left, window.innerWidth-pw-8));
+    pop.style.cssText='position:fixed;z-index:100000;top:'+top+'px;left:'+left+'px'; }
   function shPopOutside(e){ var p=document.getElementById('shpop'); if(p&&!p.contains(e.target)&&!(e.target.closest&&e.target.closest('.ship-pick,.dep-pick,.cell-pick')))closeShPop(); }
   function bindShipPick(){ document.querySelectorAll('#supply-root .ship-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openShipAssign(b.dataset.po,b); }; }); }
   // open a shipment from elsewhere: jump to SHIPMENTS and expand that shipment's row
@@ -559,9 +569,8 @@
     fetch('/api/supply/deposits').then(function(r){return r.json();}).then(function(d){ depFull=(d||[]).filter(function(x){return x.is_deposit&&x.reference;}); cb(depFull); }).catch(function(){cb([]);}); }
   function openDepPick(po,anchor,done){ closeShPop();
     var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop';
-    var rc=anchor.getBoundingClientRect(); pop.style.cssText='position:fixed;z-index:100000;top:'+(rc.bottom+4)+'px;left:'+Math.max(8,Math.min(rc.left,window.innerWidth-312))+'px';
     pop.innerHTML='<div class="shpop-h">Deposit for <b>'+esc(po)+'</b></div><input class="shpop-q" placeholder="search reference / supplier…"><div id="shpop-list"><div class="count" style="padding:8px">Loading…</div></div>';
-    document.body.appendChild(pop);
+    placePop(pop, anchor.getBoundingClientRect());
     setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
     function set(ref){ fetch('/api/supply/po/'+encodeURIComponent(po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({deposit_ref:ref})}).then(function(r){return r.json();}).then(function(){ closeShPop(); done&&done(); }).catch(function(e){alert('Failed: '+(e.message||e));}); }
     fetchDepositsFull(function(deps){
@@ -589,12 +598,11 @@
     var src={supplier:supplierList,branch:branchList,prod:prodList,batch:batchList}[kind]||[];
     var list=src.slice().sort();
     var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop';
-    var rc=btn.getBoundingClientRect(); pop.style.cssText='position:fixed;z-index:100000;top:'+(rc.bottom+4)+'px;left:'+Math.max(8,Math.min(rc.left,window.innerWidth-312))+'px';
     pop.innerHTML='<div class="shpop-h">Set '+lbl+' for <b>'+esc(btn.dataset.po)+'</b></div><input class="shpop-q" placeholder="search '+lbl+'…"><div id="shpop-list"></div>';
-    document.body.appendChild(pop); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
+    placePop(pop, btn.getBoundingClientRect()); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
     function set(val){ var body={}; body[btn.dataset.field]=val;
       fetch(btn.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
-        .then(function(j){ if(j&&j.error)throw new Error(j.error); closeShPop(); invalidateDerived(); delete cache['purchase-orders']; selectSection('purchase-orders'); })
+        .then(function(j){ if(j&&j.error)throw new Error(j.error); closeShPop(); if(_poRefresh){ _poRefresh(); } else { invalidateDerived(); delete cache['purchase-orders']; selectSection('purchase-orders'); } })
         .catch(function(e){ alert('Failed: '+(e.message||e)); }); }
     function render(q){ q=(q||'').toLowerCase(); var html='<div class="shpop-opt unassign" data-clear="1">— Clear</div>';
       var ms=list.filter(function(n){return !q||String(n).toLowerCase().indexOf(q)>=0;});
@@ -603,13 +611,14 @@
       var l=document.getElementById('shpop-list'); l.innerHTML=html;
       l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ set(o.dataset.clear?'':o.dataset.v); }; }); }
     render(''); pop.querySelector('.shpop-q').oninput=function(){render(this.value);}; pop.querySelector('.shpop-q').focus(); }
-  function openShipAssign(po,anchor){ closeShPop(); var cur=(poBy[po]||{}).shipment||'';
+  function openShipAssign(po,anchor){ closeShPop();
+    if(/manufactur/i.test((poBy[po]||{}).branch||'')){ alert('PO '+po+' is on the MANUFACTURING branch (FOB) — collected at the factory, so no shipment is assigned.'); return; }
+    var cur=(poBy[po]||{}).shipment||'';
     var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop';
-    var rc=anchor.getBoundingClientRect(); pop.style.cssText='position:fixed;z-index:100000;top:'+(rc.bottom+4)+'px;left:'+Math.max(8,Math.min(rc.left,window.innerWidth-312))+'px';
     pop.innerHTML='<div class="shpop-h">Assign <b>'+esc(po)+'</b> to shipment</div><input class="shpop-q" placeholder="search PO / shipment…"><div id="shpop-list"><div class="count" style="padding:8px">Loading…</div></div>';
-    document.body.appendChild(pop);
+    placePop(pop, anchor.getBoundingClientRect());
     setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
-    function reloadPO(){ closeShPop(); shipFull=null; delete cache['purchase-orders']; selectSection('purchase-orders'); }
+    function reloadPO(){ closeShPop(); shipFull=null; if(_poRefresh){ invalidateDerived(); _poRefresh(); } else { delete cache['purchase-orders']; selectSection('purchase-orders'); } }
     function go(ref,body){ shipPost('/api/supply/shipment/'+encodeURIComponent(ref)+'/assign',body,reloadPO); }
     fetchShipmentsFull(function(ships){
       var refs={}; ships.forEach(function(s){refs[s.shipment_ref]=1;});
@@ -695,9 +704,17 @@
     function view(){ var f=state.q ? filt(rows,state.q) : cur();
       document.getElementById('sup-count').textContent=f.length+' / '+rows.length+' POs'+(state.q?' (search — all statuses)':'');
       document.getElementById('sup-grid').innerHTML=poTable(f,state.grp); bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick();
-      bindDepPick(function(){ delete cache['purchase-orders']; selectSection('purchase-orders'); });
+      bindDepPick(refreshGrid);
       if(_pendingPO){ var want=_pendingPO; _pendingPO=null; setTimeout(function(){ expandPending('#sup-grid .po-exp[data-po]',want); },30); }
       document.querySelectorAll('#sup-grid .erp-up').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.up); }; }); }
+    // refresh the grid IN PLACE after an assign (deposit / shipment / supplier / branch / …) — re-fetch the PO
+    // rows and re-render only #sup-grid, so filters + scroll position are kept (no full section reload / jump).
+    function refreshGrid(){ invalidateDerived(); delete cache['purchase-orders'];
+      fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(fresh){
+        if(Array.isArray(fresh)){ rows.length=0; Array.prototype.push.apply(rows, fresh); }
+        view();
+      }).catch(function(){ selectSection('purchase-orders'); }); }
+    _poRefresh=refreshGrid;
     c.querySelectorAll('#po-prog .pill').forEach(function(p){p.onclick=function(){c.querySelectorAll('#po-prog .pill').forEach(function(x){x.classList.remove('active');});p.classList.add('active');state.f=p.dataset.f;view();};});
     var _actPill=c.querySelector('#po-act .po-actall'), _erpPill=c.querySelector('#po-act .po-erp');
     // active = halo ring + ✓ prefix; when one is on, the other dims so the selected filter is unmistakable
@@ -797,7 +814,11 @@
   function poRowHtml(r,i,indent,g){ var ep='/api/supply/po/'+encodeURIComponent(r.po); poBy[r.po]=r;
     var ga=(g!=null?' data-g="'+g+'"':'');
     var valnote=r.value_from_lines?'<span class="src fx" title="Σ qty×cost from order plan">∑</span>':'<span class="mut tiny" title="stored estimate (no lines yet)">est</span>';
-    var shipcell=(r.shipment
+    // MANUFACTURING branch = FOB (goods collected at the factory) → no shipment can be assigned.
+    var isMfg=/manufactur/i.test(r.branch||'');
+    var shipcell=isMfg
+      ? '<span class="tool-badge bg-neutral" title="MANUFACTURING branch = FOB — collected at factory, no shipment assigned">FOB</span>'
+      : (r.shipment
         ? '<button class="ship-open" data-ref="'+esc(r.shipment)+'" title="open this shipment">'+esc(r.shipment)+'</button> <button class="ship-pick" data-po="'+esc(r.po)+'" title="reassign">▾</button>'
         : '<button class="ship-pick" data-po="'+esc(r.po)+'">— assign ▾</button>')
       +(r.is_master?' <span class="tool-badge bg-blue" title="master / consolidation PO for this shipment">master</span>':'');
@@ -878,7 +899,7 @@
   // FOB pickup = the goods don't land into one of our import warehouses (UK/US/EU/AU/CA) AND no shipment is
   // assigned yet. DIRECT / "Direct to Client" / blank destinations are pickup → no freight or import.
   // Once a shipment is assigned it takes priority (it carries the real destination + mode, incl. fob $0).
-  function isFOBdest(r){ if(r.shipment)return false; return !/^(UK|US|EU|AU|CA)/i.test((r.country||'').trim()); }
+  function isFOBdest(r){ if(r.shipment)return false; if(/manufactur/i.test(r.branch||''))return true; return !/^(UK|US|EU|AU|CA)/i.test((r.country||'').trim()); }
   // shared exceptions/actions for a PO — drives both the PLAN tab badges and the grid PO-ref flag.
   // d (po-detail) is optional; the supplier-invoice discrepancy only resolves once it's loaded.
   function poExceptions(r,d){ if(!r)return {pay:[],dates:[],client:[],landed:[],timeline:[],oplan:[],all:[]};

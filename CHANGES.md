@@ -4,6 +4,15 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.348 - Purchase Orders: in-place assign refresh, popup placement, MANUFACTURING=FOB
+
+- (#6) Assigning a deposit / shipment / supplier / branch now refreshes the grid **in place** (re-fetch PO rows
+  + re-render only #sup-grid) instead of reloading the whole section — keeps filters and scroll position.
+- (#7) The deposit / shipment / cell picker popovers now **flip above** the anchor when they'd overflow the
+  bottom of the screen (shared `placePop` helper), so a row near the bottom still gets a usable popup.
+- (#13) A PO on the **MANUFACTURING** branch is FOB (collected at factory): its shipment cell shows "FOB" with
+  no assign button, and the shipment picker is blocked. `isFOBdest` now treats MANUFACTURING as FOB too.
+
 ## v20.347 - Purchase Orders: status dropdown colours + descending PROD#/Batch filters
 
 - Status dropdown now uses an explicit palette: FUTURE #D3D3FF, PRODUCTION #F2B949, READY TO SHIP #8FD9FB,
