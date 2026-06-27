@@ -241,8 +241,11 @@
   function lookupDatalists(){ return depDatalist()+dl('batchlist',batchList)+dl('prodlist',prodList)+dl('shiplist',shipList)+dl('supplierlist',supplierList)+dl('branchlist',branchList)+dl('crossdocklist',crossdockList); }
   function combo(ep,field,val,list){ return '<input class="fci txt" list="'+list+'" data-ep="'+esc(ep)+'" data-field="'+esc(field)+'" value="'+esc(val==null?'':val)+'">'; }
   function fetchLookups(cb){ fetch('/api/supply/lookups').then(function(r){return r.json();}).then(function(d){ depRefs=d.deposits||[]; batchList=d.batches||[]; prodList=d.prods||[]; shipList=d.shipments||[]; supplierList=d.suppliers||[]; branchList=d.branches||[]; crossdockList=d.crossdock||[]; cb(); }).catch(cb); }
+  // explicit per-status colours for the PO grid Status dropdown (Ben's palette). [background, text]
+  var PO_STATUS_BG={'FUTURE':['#D3D3FF','#2a2a55'],'PRODUCTION':['#F2B949','#5a3a00'],'READY TO SHIP':['#8FD9FB','#0a3a4a'],
+    'SHIPPING':['#50C878','#0f3d22'],'DELIVERED':['#2E8B57','#ffffff'],'COMPLETE':['#305CDE','#ffffff']};
   function statusSel(ep,val){ var opts=PO_STATUSES.slice(); if(val&&opts.indexOf(val)<0)opts.unshift(val);
-    var bg=STBG[statusBg(val)]||STBG['bg-blue'];
+    var bg=PO_STATUS_BG[String(val||'').toUpperCase()]||STBG[statusBg(val)]||STBG['bg-blue'];
     return '<select class="fci" style="background:'+bg[0]+';color:'+bg[1]+';border-color:'+bg[0]+'" data-ep="'+esc(ep)+'" data-field="status">'+opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>'; }
   // needed = supplier terms require a start deposit; empty + needed → light red; not needed → "no deposit" default
   function depSel(ep,val,needed){ var empty=!val; var cls='fci txt'+(needed&&empty?' needdep':'');
@@ -661,7 +664,7 @@
     function poErpMisaligned(r){ return r.progress!=='complete' && ((r.erp_total>0 && (!(r.erp_in>0) || r.erp_pending>0)) || r.erp_date_pending>0); }
     function erpCount(){ return rows.filter(poErpMisaligned).length; }
     // distinct non-empty values for a column (for the Production # / Batch filter dropdowns)
-    function distinct(key){ var s={}; rows.forEach(function(r){ var v=r[key]; if(v!=null&&String(v).trim()!=='')s[String(v)]=true; }); return Object.keys(s).sort(function(a,b){return a.localeCompare(b,undefined,{numeric:true});}); }
+    function distinct(key){ var s={}; rows.forEach(function(r){ var v=r[key]; if(v!=null&&String(v).trim()!=='')s[String(v)]=true; }); return Object.keys(s).sort(function(a,b){return b.localeCompare(a,undefined,{numeric:true});}); }   // descending (newest PROD#/Batch first)
     var _prods=distinct('prod_no'), _batches=distinct('batch_id');
     function optList(arr,sel){ return arr.map(function(v){return '<option'+(String(v)===String(sel)?' selected':'')+'>'+esc(v)+'</option>';}).join(''); }
     c.innerHTML=annot('purchase-orders')

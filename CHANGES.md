@@ -4,6 +4,12 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.347 - Purchase Orders: status dropdown colours + descending PROD#/Batch filters
+
+- Status dropdown now uses an explicit palette: FUTURE #D3D3FF, PRODUCTION #F2B949, READY TO SHIP #8FD9FB,
+  SHIPPING #50C878, DELIVERED #2E8B57, COMPLETE #305CDE (with readable text colours).
+- The Production and Batch filter dropdowns are now sorted descending (newest first).
+
 ## v20.346 - What's Next: don't flag completion/ship overdue once the PO is past that stage by status
 
 The "What's Next" overdue check derived "production done / departed / arrived" only from `production_status`
