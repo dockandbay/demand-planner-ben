@@ -4,6 +4,13 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.351 - PO Client tab → Client/FBA: deadline date, attachments, Amazon ref label
+
+(#12) Renamed the PO PLAN **CLIENT** tab to **CLIENT/FBA**; relabelled "Sales order ref" → "Sales Ref / Amazon
+Ref"; added a **Client deadline date** field (`client_deadline_date`); and added **file attachments** (upload +
+list) stored in `portal_attachments` with `category='client'`, kept separate from supplier invoice docs.
+Migration 072.
+
 ## v20.350 - Payments: "Final payment due" override drives balance due + cash flow
 
 (#9) Added a **Final payment due** date field on the PO PLAN ▸ Payments panel (under Final invoice amount),

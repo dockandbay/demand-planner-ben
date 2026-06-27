@@ -32,8 +32,10 @@ plus new numbered migrations on top. See `migrations/README.md`.
     purchase_order_lines (Order Plan exception sign-off, like partial_carton_approved). Idempotent.
   - **`071_fix_po55ukxr2_lines.sql`** — data fix: PO-55UKXR2's order-plan lines were wrong (extra SKUs not on
     the real Cin7 PO). Upserts the correct 48 lines + deletes the rest. Idempotent. Run **after** the PO/ERP
-    data seed (§7). ⬅ *latest.*
-- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`071` in order. Do **not** run
+    data seed (§7).
+  - **`072_client_fba_tab.sql`** — `purchase_orders.client_deadline_date` + `portal_attachments.category`
+    (separates Client/FBA docs from supplier invoice docs). Idempotent. ⬅ *latest.*
+- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`072` in order. Do **not** run
   `schema.sql` against an already-migrated DB (the table creates aren't idempotent).
 
 ---

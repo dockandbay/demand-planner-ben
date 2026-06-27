@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.350';
+const APP_VERSION = 'v20.351';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -992,6 +992,7 @@ app.get('/api/supply/:section', async (req, res) => {
             coalesce(deposit_ref,'') deposit_ref, coalesce(shipment_ref,'') shipment,
             coalesce(client,'') client, coalesce(client_requirements,'') client_requirements,
             coalesce(sales_order_ref,'') sales_order_ref, coalesce(client_po_ref,'') client_po_ref,
+            to_char(client_deadline_date,'YYYY-MM-DD') client_deadline,
             coalesce(dispatch_order_ref,'') dispatch_order_ref, coalesce(final_delivery_address,'') final_delivery_address,
             coalesce(crossdock_skus,'') crossdock_skus,
             coalesce(nullif(country_code,''), branch_country, '') country,
@@ -2047,8 +2048,8 @@ app.post('/api/supply/portal-upload', async (req, res) => {
   if (!b.po || !b.data_base64) return res.status(400).json({ error: 'po and data_base64 required' });
   try {
     const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
-    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, supplier_id, filename, mime, byte_size, data, uploaded_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`, [b.po, b.supplier_id || null, b.filename || 'invoice', b.mime || 'application/octet-stream', buf.length, buf, b.uploaded_by || null]);
+    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, supplier_id, filename, mime, byte_size, data, uploaded_by, category)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, [b.po, b.supplier_id || null, b.filename || 'invoice', b.mime || 'application/octet-stream', buf.length, buf, b.uploaded_by || null, b.category || 'invoice']);
     res.json({ id: r.rows[0].id, byte_size: buf.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -2433,7 +2434,7 @@ app.post('/api/supply/po/:po', (req, res) =>
   patch(res, 'planner.purchase_orders', 'po', req.params.po, {
     status: 'text', ship_type: 'text', deposit_ref: 'text', shipment_ref: 'text', prod_no: 'text',
     batch_id: 'text', branch: 'text', erp_po: 'text', notes: 'text', container_size: 'text',
-    country_code: 'text', client: 'text', client_requirements: 'text', sales_order_ref: 'text',
+    country_code: 'text', client: 'text', client_requirements: 'text', sales_order_ref: 'text', client_deadline_date: 'date',
     client_po_ref: 'text', dispatch_order_ref: 'text', final_delivery_address: 'text', crossdock_skus: 'text',
     order_value_estimation: 'numeric', supplier_invoice_total: 'numeric',
     start_production: 'date', end_production_overide: 'date', landing_date_overide: 'date',
@@ -2542,7 +2543,7 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
       // supplier-portal: latest submitted invoice value (+ id, status, doc) and all uploaded invoice docs
       pool.query(`SELECT id, value, status, submitted_by, to_char(submitted_at,'YYYY-MM-DD') submitted_at, attachment_id
                   FROM planner.supplier_submissions WHERE po=$1 AND kind='invoice_value' ORDER BY id DESC LIMIT 1`, [po]).catch(() => ({ rows: [] })),
-      pool.query(`SELECT id, filename FROM planner.portal_attachments WHERE po=$1 ORDER BY uploaded_at DESC`, [po]).catch(() => ({ rows: [] })),
+      pool.query(`SELECT id, filename, coalesce(category,'invoice') category FROM planner.portal_attachments WHERE po=$1 ORDER BY uploaded_at DESC`, [po]).catch(() => ({ rows: [] })),
       // PO PLAN Timeline: notes (supplier + internal) + submission status
       pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
                     to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read
@@ -2567,7 +2568,10 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
     ]);
     const lc = {}; lineCosts.rows.forEach(r => { lc[r.sku] = r; });
     res.json({ lines: lines.rows, deposit: deposit.rows, payments: payments.rows, flexport: flexport.rows,
-      sup_invoice: supInv.rows[0] || null, sup_docs: supDocs.rows, notes: notes.rows, subs: subs.rows, line_costs: lc,
+      sup_invoice: supInv.rows[0] || null,
+      sup_docs: supDocs.rows.filter(x => x.category !== 'client'),
+      client_docs: supDocs.rows.filter(x => x.category === 'client'),
+      notes: notes.rows, subs: subs.rows, line_costs: lc,
       sup_completion: supComp.rows[0] || null, crossdock_shipped: xdShip.rows, additional_costs: addCosts.rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

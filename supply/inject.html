@@ -956,11 +956,12 @@
     var xdList=(r.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
     // ---- CLIENT chunk (label/field rows, not an overflow table; crossdock picker grows freely) ----
     function cliRow(lbl,field){ return '<div class="cli-row"><div class="cli-lbl">'+lbl+'</div><div class="cli-val">'+field+'</div></div>'; }
-    var clientH='<div class="sect-h">Client <span class="mut tiny">— who this PO is for; crossdock SKUs feed the supplier-portal label download</span></div>'
+    var clientH='<div class="sect-h">Client / FBA <span class="mut tiny">— who this PO is for; crossdock SKUs feed the supplier-portal label download</span></div>'
       +'<div class="cli-form">'
       +cliRow('Client name',txtIn(ep,'client',r.client,360))
       +cliRow('Client requirements',txtIn(ep,'client_requirements',r.client_requirements,440,true))
-      +cliRow('Sales order ref',txtIn(ep,'sales_order_ref',r.sales_order_ref,220))
+      +cliRow('Sales Ref / Amazon Ref',txtIn(ep,'sales_order_ref',r.sales_order_ref,220))
+      +cliRow('Client deadline date','<input type="date" class="fci txtin" style="width:150px;text-align:left" data-ep="'+ep+'" data-field="client_deadline_date" value="'+esc(r.client_deadline||'')+'"> <span class="mut tiny">(date the client needs it by)</span>')
       +cliRow('Client purchase order ref',txtIn(ep,'client_po_ref',r.client_po_ref,220))
       +cliRow('Dispatch order ref',txtIn(ep,'dispatch_order_ref',r.dispatch_order_ref,220))
       +cliRow('Final delivery address <span class="mut tiny">(shown on crossdock labels)</span>',txtIn(ep,'final_delivery_address',r.final_delivery_address,440,true))
@@ -970,6 +971,9 @@
       +cliRow('Labels <span class="mut tiny">(A4 print mould)</span>',
           '<button class="save-btn po-dl-xd" data-po="'+esc(r.po)+'" title="crossdock box labels for this PO\'s crossdock SKUs (PO / sales order / client overlaid) — same as the supplier portal">⤓ Crossdock</button> '
         +'<button class="save-btn po-dl-sw" data-po="'+esc(r.po)+'" title="SHIPS WITH SUPPLIER master label (carton size)">⤓ Ships with supplier</button>')
+      +cliRow('Attachments <span class="mut tiny">(client / FBA docs)</span>',
+          (function(){ var cd=(d&&d.client_docs)||[]; return (cd.length?cd.map(function(x){return '<a href="/api/supply/portal-attachment/'+x.id+'" target="_blank" rel="noopener">'+esc(x.filename||'view')+'</a>';}).join(' · ')+' &nbsp; ':'<span class="mut tiny">none yet — </span>')
+            +'<input type="file" class="cli-attach" data-po="'+esc(r.po)+'" style="font-size:11px">'; })())
       +'</div>';
     // ---- PAYMENTS chunk (order value + payment plan) ----
     var h='<div class="sect-h">Order value — final invoice overrides the estimate for all payment &amp; landed calcs</div>'
@@ -1156,6 +1160,13 @@
         .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); })
         .catch(function(e){ b.disabled=false; b.textContent='pay »'; alert('Failed: '+(e.message||e)); }); }; });
     document.querySelectorAll('#podet-'+i+' .dep-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openDepPick(b.dataset.po,b,function(){ poRefetchPanel(po,i); }); }; });
+    // Client/FBA file attachment upload (#12) — base64 into portal_attachments with category='client'
+    document.querySelectorAll('#podet-'+i+' .cli-attach').forEach(function(inp){ inp.onchange=function(){ var f=inp.files&&inp.files[0]; if(!f)return;
+      var rd=new FileReader(); rd.onload=function(){ inp.disabled=true;
+        fetch('/api/supply/portal-upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:inp.dataset.po,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),category:'client',uploaded_by:'client-tab'})})
+          .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); poRefetchPanel(po,i); })
+          .catch(function(e){ inp.disabled=false; alert('Upload failed: '+(e.message||e)); }); };
+      rd.readAsDataURL(f); }; });
     document.querySelectorAll('#podet-'+i+' .po-go-ship').forEach(function(b){ b.onclick=function(){ if(b.dataset.ref)gotoShipment(b.dataset.ref); }; });
     // free-text client fields — save verbatim (commas allowed) on blur
     document.querySelectorAll('#podet-'+i+' .txtin').forEach(function(inp){ inp.onchange=function(){ var body={}; body[inp.dataset.field]=inp.value; inp.classList.add('saved');
@@ -1232,7 +1243,7 @@
     var oplanH=orderPlanPanel(po,d.lines,d.line_costs,d.additional_costs);
     var timelineH=timelinePanel(po,d);
     var linkedH='<div class="sect-h">Linked records across tables</div>'+blk('Deposit',d.deposit)+blk('Payments',d.payments)+blk('Flexport',d.flexport);
-    var tabs=[['pay','PAYMENTS',p.pay,p.ex.pay],['dates','DATES',p.dates,p.ex.dates],['client','CLIENT',p.client,p.ex.client],['oplan','ORDER PLAN',oplanH,p.ex.oplan],['landed','LANDED COSTS',p.landed,p.ex.landed],['timeline','TIMELINE',timelineH,p.ex.timeline],['linked','LINKED RECORDS',linkedH,0]];
+    var tabs=[['pay','PAYMENTS',p.pay,p.ex.pay],['dates','DATES',p.dates,p.ex.dates],['client','CLIENT/FBA',p.client,p.ex.client],['oplan','ORDER PLAN',oplanH,p.ex.oplan],['landed','LANDED COSTS',p.landed,p.ex.landed],['timeline','TIMELINE',timelineH,p.ex.timeline],['linked','LINKED RECORDS',linkedH,0]];
     function badge(n){ return n>0?' <span class="ex-badge" title="'+n+' exception'+(n>1?'s':'')+' / action'+(n>1?'s':'')+'">'+n+'</span>':''; }
     var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab potab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'">'+t[1]+badge(t[3])+'</button>';}).join('')+'</div>';
     var panels=tabs.map(function(t,ti){return '<div class="potab-panel" data-pt="'+t[0]+'"'+(ti===0?'':' style="display:none"')+'>'+t[2]+'</div>';}).join('');
