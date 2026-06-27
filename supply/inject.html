@@ -1782,7 +1782,7 @@
     function cur(){ return ships.filter(function(s){
       if(state.ctry && (s.market||'')!==state.ctry)return false;
       if(state.br && (s.branch||'').indexOf(state.br)<0)return false;
-      if(state.f==='all')return true; if(state.f==='escalated')return !!s.escalated; if(state.f==='exceptions')return shipIsExc(s); if(state.f==='completed')return s.status==='Complete'||s.status==='Completed'; return s.status!=='Complete'&&s.status!=='Completed'; }); }
+      if(state.f==='all')return true; if(state.f==='escalated')return !!s.escalated; if(state.f==='exceptions')return shipIsExc(s); if(state.f==='completed')return s.status==='Complete'||s.status==='Completed'; return (s.status!=='Complete'&&s.status!=='Completed')||!!s.escalated; }); }
     function view(){ var f=filt(cur(),state.q); document.getElementById('sup-count').textContent=f.length+' / '+ships.length+' shipments';
       document.getElementById('sup-grid').innerHTML=shipTable(f); bindShipExpand(); bindEdits();
       if(_pendingShip){ var want=_pendingShip; _pendingShip=null; setTimeout(function(){ expandPending('#sup-grid .po-exp[data-ref]',want); },30); } }
@@ -2118,7 +2118,8 @@
                 // per-PO flags for the Barcodes & Labels tab: shipment consolidated under another supplier, + client/FBA docs
                 var supByPoAll={}; allpos.forEach(function(x){ supByPoAll[x.po]=x.supplier_name||''; });
                 var cdByPo={}; cdocs.forEach(function(x){ (cdByPo[x.po]=cdByPo[x.po]||[]).push(x); });
-                pos.forEach(function(p){ var mref=p.shipment||''; p.ship_other_supplier=!!(mref && supByPoAll[mref]!==undefined && supByPoAll[mref]!==(p.supplier_name||'')); p.client_docs=cdByPo[p.po]||[]; });
+                pos.forEach(function(p){ var mref=p.shipment||''; p.ship_other_supplier=!!(mref && supByPoAll[mref]!==undefined && supByPoAll[mref]!==(p.supplier_name||'')); p.client_docs=cdByPo[p.po]||[];
+                  p.ships_with=mref; p.ships_with_supplier=(mref&&supByPoAll[mref]!==undefined)?supByPoAll[mref]:''; });
                 var poset={}; pos.forEach(function(p){poset[p.po]=1;}); var lb={};
                 lines.forEach(function(l){ if(poset[l.po]){ (lb[l.po]=lb[l.po]||[]).push(l); } });
                 var sdep=deps.filter(function(d){return (d.supplier_name||'')===name;});
@@ -2128,7 +2129,7 @@
                 var xdByPo={}; xd.forEach(function(x){ (xdByPo[x.po]=xdByPo[x.po]||{})[x.sku]=x.qty; });
                 var addByPo={}; ac.forEach(function(x){ (addByPo[x.po]=addByPo[x.po]||[]).push(x); });
                 return {pos:pos,lb:lb,sdep:sdep,sid:sid,notesByPo:notesByPo,subsByPo:subsByPo,costsByPo:costsByPo,supSkus:supSkus,xdByPo:xdByPo,addByPo:addByPo,
-                  shipmentPlan:(res[10]||[]).filter(function(s){return (s.suppliers||[]).indexOf(name)>=0;})}; }); }
+                  shipmentPlan:(res[10]||[]).filter(function(s){return (s.master_supplier||'')===name;})}; }); }
           function mountFor(name){ var ban=document.getElementById('pp-banner'), mt=document.getElementById('pp-mount');
             if(!name){ ban.innerHTML=''; mt.innerHTML='<div class="count">Choose a supplier to preview their portal.</div>'; return; }
             ban.innerHTML='<div style="background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:6px 11px;margin:4px 0 10px;font-size:12px">👁 Previewing the portal as <b>'+esc(name)+'</b> — exactly what they see, and any submit acts AS this supplier.</div>';

@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.365';
+const APP_VERSION = 'v20.366';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1119,10 +1119,10 @@ app.get('/api/supply/:section', async (req, res) => {
           ORDER BY p.shipment_ref, (p.po = coalesce(sh.master_po, p.shipment_ref)) DESC, p.po`);
         const byRef = {};
         rows.forEach(r => { let s = byRef[r.shipment_ref];
-          if (!s) s = byRef[r.shipment_ref] = { shipment_ref: r.shipment_ref, master_po: r.master_po, mode: r.mode, carrier: r.carrier, carrier_ref: r.carrier_ref, flex_id: r.flex_id, departure: r.departure, landing: r.landing, arrival: r.arrival, escalated: !!r.escalated, master_client: '', master_deadline: '', total_pallets: 0, suppliers: [], members: [] };
+          if (!s) s = byRef[r.shipment_ref] = { shipment_ref: r.shipment_ref, master_po: r.master_po, mode: r.mode, carrier: r.carrier, carrier_ref: r.carrier_ref, flex_id: r.flex_id, departure: r.departure, landing: r.landing, arrival: r.arrival, escalated: !!r.escalated, master_client: '', master_deadline: '', master_supplier: '', total_pallets: 0, suppliers: [], members: [] };
           s.total_pallets += Number(r.pallets) || 0;
           if (s.suppliers.indexOf(r.supplier_name) < 0 && r.supplier_name) s.suppliers.push(r.supplier_name);
-          if (r.is_master) { s.master_client = r.client; s.master_deadline = r.client_deadline; }
+          if (r.is_master) { s.master_client = r.client; s.master_deadline = r.client_deadline; s.master_supplier = r.supplier_name; }
           // include EVERY PO on the shipment (incl. the master) so the summary's pallets sum to the total
           s.members.push({ po: r.po, supplier: r.supplier_name, pallets: Number(r.pallets) || 0, client: r.client, is_master: !!r.is_master });
         });
@@ -1144,6 +1144,7 @@ app.get('/api/supply/:section', async (req, res) => {
             }
             if (!s.master_client) s.master_client = m.client;
             if (!s.master_deadline) s.master_deadline = m.client_deadline;
+            if (!s.master_supplier) s.master_supplier = m.supplier_name;
           });
         }
         return res.json(Object.keys(byRef).map(k => { const s = byRef[k]; s.total_pallets = Math.round(s.total_pallets * 10) / 10; return s; })

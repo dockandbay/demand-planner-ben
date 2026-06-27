@@ -4,6 +4,30 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.366 - Portal grid (Ships With), confirm→Timeline, Shipment Plan filters + escalation fixes
+
+Supplier portal (`supply/portal-view.js`) + admin preview data (`supply/inject.html`):
+
+- **Main grid:** removed the per-row barcode download buttons (⤓ PO / ⤓ prod / ⤓ Crossdock); added two
+  columns **Ships With** (the shipment/master ref this PO ships under) and **Ships With Supplier** (the
+  supplier who owns that master). Data added in `loadPortalData` (`p.ships_with` = shipment ref,
+  `p.ships_with_supplier` = master-PO supplier).
+- **SHIPMENT sub-tab:** now shows **Ships with supplier** under the shipment ref.
+- **BARCODES & LABELS sub-tab:** added a **Download crossdock labels** button (only when the PO has crossdock
+  SKUs) — reuses the existing crossdock-label handler (PO / dispatch order / client / delivery address overlaid).
+- **PO confirmation** ("Please confirm this order") moved out of the top banner into the **TIMELINE** tab; an
+  **unconfirmed order now counts as an open action** (badge on MANAGE + the TIMELINE tab).
+- **Shipment Plan tab:** now only lists shipments where the **current supplier owns the master PO** (was: any
+  PO aboard). New server field `master_supplier` on the shipment-plan payload. Added filters: **PO search box**,
+  **Still to ship** / **Shipped** toggles (a shipment is "shipped" once its departure date has passed), and an
+  **⚑ Escalated only** toggle.
+
+Admin SUPPLY ▸ Shipments (`supply/inject.html`):
+
+- **Fix:** an **escalated** shipment whose master PO is COMPLETE (e.g. PO-53AUXR1) was hidden by the default
+  **Active** filter. The Active filter now always includes escalated shipments, so escalations surface
+  regardless of status. (Escalation write itself was already correct.)
+
 ## v20.365 - Shipment Plan adjustments: admin tidy-up + timeline in expand + master in pallets
 
 - Removed the admin **Shipment Plan sub-tab** (Shipment Plan is supplier-portal only) and the **escalate button**

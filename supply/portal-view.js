@@ -387,6 +387,7 @@
     var by=STATE.by, sid=STATE.sid;
     var BC=opts.bc||(typeof bcDownloadSheets==='function'?{sheets:bcDownloadSheets,crossdock:bcDownloadCrossdock}:{placeholder:true,note:function(){alert('Labels unavailable.');}});
     var _ppData=null, PORTAL_TAB='pos', PORTAL_PO_ST=null;
+    var PORTAL_SP_ESC=false, PORTAL_SP_PO='', PORTAL_SP_ACTIVE=true, PORTAL_SP_SHIPPED=false;   // Shipment Plan filters
     var rootEl=opts.root; if(!rootEl.closest('#supply-root')){rootEl.id='supply-root';} rootEl.style.display='block';
     rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders</span><span class="rtab" data-pt="shipmentplan">Shipment Plan</span><span class="rtab" data-pt="deposits">Deposits</span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
     var tabsEl=document.getElementById('pp-tabs'), body=document.getElementById('pp-body');
@@ -449,9 +450,18 @@
       var xdReq = cdSkus.length>0 && (/shipping/i.test(p.status||'') || (p.prod_end && p.prod_end<today));
       var xdMissing = cdSkus.filter(function(s){ var q=xd[s]; return q==null||q===''; }).length;
       var xdAction = (xdReq && xdMissing>0) ? 1 : 0;
+      // ---- PO confirmation banner — supplier reviews SKUs / quantities (ORDER PLAN) + dates and formally confirms.
+      //      Lives at the top of the TIMELINE tab; an unconfirmed order is an open action item. ----
+      var confirmed=!!p.supplier_confirmed;
+      var confirmBar='<div style="margin:0 0 10px;padding:8px 11px;border-radius:6px;font-size:12px;'+(confirmed?'background:#dcfce7;border:1px solid #86efac':'background:#fef3c7;border:1px solid #fcd34d')+'">'
+        +(confirmed
+          ? '✓ <b>Order confirmed</b> on '+esc(p.supplier_confirmed)+(p.supplier_confirmed_by?' · '+esc(p.supplier_confirmed_by):'')+' &nbsp; <button class="save-btn light pp-confirm" data-po="'+po+'" data-v="0">Withdraw confirmation</button>'
+          : '⏳ <b>Please confirm this order.</b> Review the SKUs &amp; quantities (ORDER PLAN tab) and the dates, amend anything that\'s wrong, then confirm. &nbsp; <button class="save-btn pp-confirm" data-po="'+po+'" data-v="1" style="background:#16a34a;color:#fff;border-color:#16a34a">✓ Confirm order</button>')
+        +'</div>';
       // ---- TIMELINE: status + notes (Dock & Bay notes show as 'new' until you mark them read) ----
       var unreadInt=notes.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
-      var timeline=(pend.length?'<div class="tiny" style="color:#92400e;margin-bottom:3px">⏳ Submitted, awaiting approval: '+pend.map(function(s){return esc(subFmt(s));}).join(' · ')+'</div>':'')
+      var timeline=confirmBar
+        +(pend.length?'<div class="tiny" style="color:#92400e;margin-bottom:3px">⏳ Submitted, awaiting approval: '+pend.map(function(s){return esc(subFmt(s));}).join(' · ')+'</div>':'')
         +(appl.length?'<div class="tiny" style="color:#166534;margin-bottom:6px">✓ Applied: '+appl.map(function(s){return esc(subFmt(s))+(s.attachment_id?' <a href="/api/portal/attachment/'+s.attachment_id+'" target="_blank">doc</a>':'');}).join(' · ')+'</div>':'')
         +(notes.length?notes.map(function(n){ var internal=(n.author_kind==='internal');
           return '<div style="font-size:11px;margin:3px 0;padding:5px 8px;background:'+(internal?(n.read?'#eef2ff':'#fff7ed'):'#f1f5f9')+';border:1px solid '+(internal&&!n.read?'#fdba74':'#e5e7eb')+';border-radius:5px;display:flex;justify-content:space-between;gap:10px;align-items:flex-start">'
@@ -470,6 +480,7 @@
       var shipment=(p.shipment||p.flexport_reference
           ? '<div style="font-size:12px;margin-bottom:8px"><b>Shipment</b><br>'
             +'Shipment ref: '+(p.shipment?esc(p.shipment):'<span class="mut">—</span>')+'<br>'
+            +'Ships with supplier: '+(p.ships_with_supplier?esc(p.ships_with_supplier):'<span class="mut">—</span>')+'<br>'
             +'Flexport: '+(p.flexport_reference?esc(p.flexport_reference):'<span class="mut">—</span>')+'<br>'
             +'Ship date: '+(p.ship?esc(fd(p.ship)):'<span class="mut">—</span>')+' · Est. completion: '+(p.prod_end?esc(fd(p.prod_end)):'<span class="mut">—</span>')+'</div>'
           : '<div class="tiny mut" style="margin-bottom:8px">No shipment assigned yet — submit your tracking below.</div>')
@@ -493,33 +504,27 @@
         +blRow('Barcodes for this PO','<button class="save-btn pp-dl-po" data-po="'+po+'">⤓ Download barcodes for PO</button>')
         +(p.prod_no?blRow('Barcodes for production '+esc(p.prod_no),'<button class="save-btn pp-dl-prod" data-prod="'+esc(p.prod_no)+'">⤓ Download barcodes for '+esc(p.prod_no)+'</button>'):'')
         +(p.ship_other_supplier?blRow('Ship To pallet labels','<button class="save-btn pp-shiplabel" data-po="'+po+'">⤓ Download Ship To Pallet Labels</button> <span class="mut tiny">this PO ships under another supplier’s PO</span>'):'')
+        +(cdSkus.length?blRow('Crossdock box labels','<button class="save-btn pp-dl-cd" data-skus="'+esc(cdSkus.join(','))+'" data-po="'+po+'" data-do="'+esc(p.dispatch_order_ref||'')+'" data-client="'+esc(p.client||'')+'" data-address="'+esc(p.final_delivery_address||'')+'">⤓ Download crossdock labels</button> <span class="mut tiny">PO / dispatch order / client / delivery address overlaid</span>'):'')
         +(clientDocs.length?blRow('Direct to Client / FBA attachments',clientDocs.map(function(x){return '<a href="/api/portal/attachment/'+x.id+'" target="_blank" rel="noopener">'+esc(x.filename||'file')+'</a>';}).join(' &nbsp;·&nbsp; ')):'')
         +'</div>';
       // ---- tabs + action badges ----
-      var tabs=[['timeline','TIMELINE',timeline,unreadInt],['orderplan','ORDER PLAN',skus,0],
+      var tabs=[['timeline','TIMELINE',timeline,unreadInt+(confirmed?0:1)],['orderplan','ORDER PLAN',skus,0],
         ['invoice','INVOICE',invoice, has('invoice_value')?0:1],['shipment','SHIPMENT',shipment, ((p.shipment||p.flexport_reference||has('tracking'))?0:1)+xdAction],
         ['barcodes','BARCODES & LABELS',barcodesLabels,0]];
       function badge(n){ return n>0?' <span class="ex-badge">'+n+'</span>':''; }
       var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab pptab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'">'+t[1]+badge(t[3])+'</button>';}).join('')+'</div>';
       var panels=tabs.map(function(t,ti){return '<div class="pptab-panel" data-pt="'+t[0]+'"'+(ti===0?'':' style="display:none"')+'>'+t[2]+'</div>';}).join('');
-      // PO confirmation banner — the supplier reviews SKUs / quantities (ORDER PLAN) + dates and formally confirms the order
-      var confirmed=!!p.supplier_confirmed;
-      var confirmBar='<div style="margin:0 0 10px;padding:8px 11px;border-radius:6px;font-size:12px;'+(confirmed?'background:#dcfce7;border:1px solid #86efac':'background:#fef3c7;border:1px solid #fcd34d')+'">'
-        +(confirmed
-          ? '✓ <b>Order confirmed</b> on '+esc(p.supplier_confirmed)+(p.supplier_confirmed_by?' · '+esc(p.supplier_confirmed_by):'')+' &nbsp; <button class="save-btn light pp-confirm" data-po="'+po+'" data-v="0">Withdraw confirmation</button>'
-          : '⏳ <b>Please confirm this order.</b> Review the SKUs &amp; quantities (ORDER PLAN tab) and the dates, amend anything that\'s wrong, then confirm. &nbsp; <button class="save-btn pp-confirm" data-po="'+po+'" data-v="1" style="background:#16a34a;color:#fff;border-color:#16a34a">✓ Confirm order</button>')
-        +'</div>';
-      return '<div class="ppx" style="padding:4px 2px;max-width:820px;text-align:left">'+confirmBar+bar+panels+'</div>'; }
+      return '<div class="ppx" style="padding:4px 2px;max-width:820px;text-align:left">'+bar+panels+'</div>'; }
     function ppPOs(pos, data){ var lb=data.lb||{}, notesByPo=data.notesByPo||{}, subsByPo=data.subsByPo||{}, costsByPo=data.costsByPo||{}, supSkus=data.supSkus||[], xdByPo=data.xdByPo||{}, addByPo=data.addByPo||{};
       if(!pos.length)return '<div class="count">No purchase orders for this supplier.</div>';
       var today=new Date().toISOString().slice(0,10);
-      return '<div class="tw"><table class="pp-tbl"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l">Status</th><th class="l">Start</th><th class="l">Est. completion</th><th class="l">Completion date</th><th class="l">Ship</th><th class="l">Flexport</th><th style="text-align:right">Start deposit assigned</th><th style="text-align:right">Completion</th><th style="text-align:right">Balance</th><th style="text-align:right">Amount due</th><th class="l">Due</th><th class="l">Deposit ref</th><th class="l">Barcodes</th></tr></thead><tbody>'
+      return '<div class="tw"><table class="pp-tbl"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l">Status</th><th class="l">Start</th><th class="l">Est. completion</th><th class="l">Completion date</th><th class="l">Ship</th><th class="l">Flexport</th><th style="text-align:right">Start deposit assigned</th><th style="text-align:right">Completion</th><th style="text-align:right">Balance</th><th style="text-align:right">Amount due</th><th class="l">Due</th><th class="l">Deposit ref</th><th class="l">Ships With</th><th class="l">Ships With Supplier</th></tr></thead><tbody>'
         +pos.map(function(p,i){
-          var det='<tr id="pp-'+i+'" style="display:none"><td></td><td colspan="14">'+ppExpand(p, lb[p.po]||[], notesByPo[p.po]||[], subsByPo[p.po]||[], i, costsByPo[p.po]||{}, supSkus, xdByPo[p.po]||{}, addByPo[p.po]||[])+'</td></tr>';
+          var det='<tr id="pp-'+i+'" style="display:none"><td></td><td colspan="15">'+ppExpand(p, lb[p.po]||[], notesByPo[p.po]||[], subsByPo[p.po]||[], i, costsByPo[p.po]||{}, supSkus, xdByPo[p.po]||{}, addByPo[p.po]||[])+'</td></tr>';
           var sb=subsByPo[p.po]||[]; var nts=notesByPo[p.po]||[]; var unreadInt=nts.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
           var cdS=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean), xdm=xdByPo[p.po]||{};
           var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
-          var act=(sb.some(function(s){return s.kind==='invoice_value';})?0:1)+((p.shipment||p.flexport_reference||sb.some(function(s){return s.kind==='tracking';}))?0:1)+unreadInt+((xdReq&&xdMiss>0)?1:0);
+          var act=(sb.some(function(s){return s.kind==='invoice_value';})?0:1)+((p.shipment||p.flexport_reference||sb.some(function(s){return s.kind==='tracking';}))?0:1)+unreadInt+((xdReq&&xdMiss>0)?1:0)+(p.supplier_confirmed?0:1);
           var cdq=sb.filter(function(s){return s.kind==='completion_date';}); var cdVal=cdq.length?cdq[cdq.length-1].value:'';
           var cdGrid=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
           return '<tr><td class="l"><button class="save-btn pp-exp" data-i="'+i+'">MANAGE'+(act>0?' <span class="ex-badge" title="'+act+' action'+(act>1?'s':'')+' needed">'+act+'</span>':'')+'</button></td>'
@@ -532,9 +537,8 @@
             +'<td style="text-align:right">'+ppPay(p.balance_1_amount, p.balance_1_date)+'</td>'
             +'<td style="text-align:right">'+(p.balance_owing!=null?'$'+units(p.balance_owing):'<span class="mut">—</span>')+'</td>'
             +'<td class="l">'+dcell(p.balance_due)+'</td><td class="l">'+(p.deposit_ref?esc(p.deposit_ref):'<span class="mut">—</span>')+'</td>'
-            +'<td class="l" style="white-space:nowrap"><button class="save-btn pp-dl-po" data-po="'+esc(p.po)+'" title="download barcodes (product + carton) for the SKUs on this PO">⤓ PO</button>'
-              +(p.prod_no?' <button class="save-btn pp-dl-prod" data-prod="'+esc(p.prod_no)+'" title="download all your barcodes across production '+esc(p.prod_no)+'">⤓ '+esc(p.prod_no)+'</button>':'')
-              +(cdGrid.length?' <button class="save-btn pp-dl-cd" data-skus="'+esc(cdGrid.join(','))+'" data-po="'+esc(p.po)+'" data-do="'+esc(p.dispatch_order_ref||'')+'" data-client="'+esc(p.client||'')+'" data-address="'+esc(p.final_delivery_address||'')+'" title="download crossdock box labels with PO / dispatch order / client / delivery address overlaid">⤓ Crossdock</button>':'')+'</td></tr>'+det; }).join('')
+            +'<td class="l">'+(p.ships_with?esc(p.ships_with):'<span class="mut">—</span>')+'</td>'
+            +'<td class="l">'+(p.ships_with_supplier?esc(p.ships_with_supplier):'<span class="mut">—</span>')+'</td></tr>'+det; }).join('')
         +'</tbody></table></div>'; }
     function ppDeposits(deps){ var paid=0,used=0,rem=0; deps.forEach(function(d){ if(d.is_deposit){ paid+=Number(d.amount)||0; used+=Number(d.deposit_used)||0; rem+=Number(d.deposit_remaining)||0; } });
       var cards='<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">'+ppCard('Total deposits','$'+units(paid))+ppCard('Drawn down','$'+units(used))+ppCard('Remaining','$'+units(rem))+'</div>';
@@ -567,9 +571,29 @@
                 postJSON(EP.shipmentNote,{shipment_ref:ref,author_kind:'supplier',author_email:STATE.by,body:v},function(){ ppShipTimeline(ref); }); }; }).catch(function(){}); }
           function renderPP(){ if(!_ppData)return; var body=document.getElementById('pp-body');
             tabsEl.querySelectorAll('.rtab').forEach(function(t){t.classList.toggle('active',t.dataset.pt===PORTAL_TAB);});
-            if(PORTAL_TAB==='shipmentplan'){ body.innerHTML=ppShipmentPlan(_ppData.shipmentPlan);
+            if(PORTAL_TAB==='shipmentplan'){
+              var today=new Date().toISOString().slice(0,10);
+              var allSp=_ppData.shipmentPlan||[];
+              // a shipment has "shipped" once it has a departure date that has passed
+              function spShipped(s){ return !!(s.departure && s.departure<=today); }
+              var poq=(PORTAL_SP_PO||'').trim().toLowerCase();
+              var shownSp=allSp.filter(function(s){
+                if(PORTAL_SP_ESC && !s.escalated)return false;
+                var shipped=spShipped(s); if(shipped?!PORTAL_SP_SHIPPED:!PORTAL_SP_ACTIVE)return false;
+                if(poq){ var hit=(s.master_po||'').toLowerCase().indexOf(poq)>=0 || (s.members||[]).some(function(m){return (m.po||'').toLowerCase().indexOf(poq)>=0;}); if(!hit)return false; }
+                return true; });
+              var fbar='<div class="bar" style="gap:8px;flex-wrap:wrap;align-items:center">'
+                +'<input class="fci sp-po-q" placeholder="search PO…" value="'+esc(PORTAL_SP_PO)+'" style="width:150px;text-align:left">'
+                +'<span class="pill'+(PORTAL_SP_ACTIVE?' active':'')+'" data-spf="active">Still to ship</span>'
+                +'<span class="pill'+(PORTAL_SP_SHIPPED?' active':'')+'" data-spf="shipped">Shipped</span>'
+                +'<span class="pill'+(PORTAL_SP_ESC?' active':'')+'" data-spf="esc" style="'+(PORTAL_SP_ESC?'background:#dc2626;color:#fff;border-color:#dc2626':'color:#dc2626')+'">⚑ Escalated only</span>'
+                +'<span class="mut tiny" style="margin-left:auto">'+shownSp.length+' of '+allSp.length+' shipments</span></div>';
+              body.innerHTML=fbar+ppShipmentPlan(shownSp);
               body.querySelectorAll('.pp-esc').forEach(function(b){ b.onclick=function(){ var on=b.dataset.on!=='1'; postJSON(EP.shipmentEscalate+encodeURIComponent(b.dataset.ref)+'/escalate',{escalated:on},function(){ reload(); }); }; });
-              (_ppData.shipmentPlan||[]).forEach(function(s){ ppShipTimeline(s.shipment_ref); }); return; }
+              body.querySelectorAll('.pill[data-spf]').forEach(function(p){ p.onclick=function(){ var f=p.dataset.spf;
+                if(f==='active')PORTAL_SP_ACTIVE=!PORTAL_SP_ACTIVE; else if(f==='shipped')PORTAL_SP_SHIPPED=!PORTAL_SP_SHIPPED; else if(f==='esc')PORTAL_SP_ESC=!PORTAL_SP_ESC; renderPP(); }; });
+              var sq=body.querySelector('.sp-po-q'); if(sq)sq.oninput=function(){ PORTAL_SP_PO=sq.value; var f=document.activeElement===sq; renderPP(); if(f){ var n=body.querySelector('.sp-po-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } } };
+              shownSp.forEach(function(s){ ppShipTimeline(s.shipment_ref); }); return; }
             if(PORTAL_TAB==='deposits'){ body.innerHTML=ppDeposits(_ppData.sdep); return; }
             // POs tab — status pill filters; default to PRODUCTION + SHIPPING
             var seen={}, present=[]; _ppData.pos.forEach(function(p){ var s=(p.status||'').toUpperCase(); if(s&&!seen[s]){seen[s]=1;present.push(s);} });
