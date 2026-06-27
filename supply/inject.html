@@ -1727,17 +1727,9 @@
   function shipPost(ep,body,cb){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
     .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); cb&&cb(j); })
     .catch(function(e){ alert('Failed: '+(e.message||e)); }); }
-  var SHIP_SUBS=[['grid','Shipments'],['plan','Shipment Plan']];
-  var shipSubTab='grid';
-  function renderShipments(data){ var c=document.getElementById('supply-content');
-    c.innerHTML='<div id="ship-subtabs">'+SHIP_SUBS.map(function(t){return '<span class="rtab'+(shipSubTab===t[0]?' active':'')+'" data-st="'+t[0]+'">'+t[1]+'</span>';}).join('')+'</div><div id="ship-body"><div class="count">Loading…</div></div>';
-    c.querySelectorAll('#ship-subtabs .rtab').forEach(function(p){p.onclick=function(){shipSubTab=p.dataset.st;c.querySelectorAll('#ship-subtabs .rtab').forEach(function(x){x.classList.toggle('active',x===p);});shipRenderSub(data);};});
-    shipRenderSub(data); }
-  function shipRenderSub(data){ var b=document.getElementById('ship-body');
-    if(shipSubTab==='plan'){ renderShipmentPlan(b); return; }
-    fetchLookups(function(){ shipInner(data,b); }); }
-  // SHIPMENT PLAN (admin sub-tab): all master shipments + the POs aboard, with escalate toggle + per-shipment timeline.
-  function renderShipmentPlan(b){ b.innerHTML='<div class="count">Loading…</div>';
+  function renderShipments(data){ var c=document.getElementById('supply-content'); fetchLookups(function(){ shipInner(data,c); }); }
+  // (admin Shipment Plan sub-tab removed — that's portal-only; the per-shipment timeline lives in the shipment-row expand)
+  function _unusedShipmentPlan(b){ b.innerHTML='<div class="count">Loading…</div>';
     fetch('/api/supply/shipment-plan').then(function(r){return r.json();}).then(function(rows){
       if(!rows.length){ b.innerHTML='<div class="count">No active master shipments.</div>'; return; }
       b.innerHTML='<div class="bar"><span class="count">'+rows.length+' master shipments</span><input class="flt" id="spq" placeholder="filter shipment / client / supplier…" style="margin-left:auto;width:260px"></div><div id="sp-list"></div>';
@@ -1793,8 +1785,6 @@
       if(state.f==='all')return true; if(state.f==='escalated')return !!s.escalated; if(state.f==='exceptions')return shipIsExc(s); if(state.f==='completed')return s.status==='Complete'||s.status==='Completed'; return s.status!=='Complete'&&s.status!=='Completed'; }); }
     function view(){ var f=filt(cur(),state.q); document.getElementById('sup-count').textContent=f.length+' / '+ships.length+' shipments';
       document.getElementById('sup-grid').innerHTML=shipTable(f); bindShipExpand(); bindEdits();
-      document.querySelectorAll('#sup-grid .ship-esc').forEach(function(b){ b.onclick=function(){ var on=b.dataset.on!=='1';
-        shipPost('/api/supply/shipment/'+encodeURIComponent(b.dataset.ref)+'/escalate',{escalated:on},function(){ var s=shipBy[b.dataset.ref]; if(s)s.escalated=on; invalidateDerived(); view(); }); }; });
       if(_pendingShip){ var want=_pendingShip; _pendingShip=null; setTimeout(function(){ expandPending('#sup-grid .po-exp[data-ref]',want); },30); } }
     c.querySelectorAll('.bar .pill[data-f]').forEach(function(p){p.onclick=function(){c.querySelectorAll('.bar .pill[data-f]').forEach(function(x){x.classList.remove('active');});p.classList.add('active');state.f=p.dataset.f;view();};});
     document.getElementById('sup-search').oninput=function(){state.q=this.value;view();};
@@ -1838,7 +1828,7 @@
       var fxl=s.flex_id?(' <a href="https://app.flexport.com/shipments/'+((String(s.carrier_ref||s.flex_id).match(/\d+/)||[''])[0])+'" target="_blank" rel="noopener" class="mut" title="open in Flexport" style="text-decoration:none">↗</a>'):'';
       h+='<tr><td class="l"><button class="planbtn po-exp" data-ref="'+esc(s.shipment_ref)+'" data-i="'+i+'">PLAN</button></td>'
         +'<td class="l"><b>'+esc(s.shipment_ref)+'</b>'+mast+alert+'</td>'
-        +'<td class="l"><button class="save-btn ship-esc" data-ref="'+esc(s.shipment_ref)+'" data-on="'+(s.escalated?'1':'0')+'"'+(s.escalated?' style="background:#dc2626;color:#fff;border-color:#dc2626"':' style="color:#dc2626"')+'>'+(s.escalated?'⚑ ESCALATED':'⚑ escalate')+'</button></td>'
+        +'<td class="l">'+(s.escalated?'<span class="tool-badge bg-red" title="escalated by the supplier in the portal">⚑ ESCALATED</span>':'<span class="mut">—</span>')+'</td>'
         +'<td class="l">'+shipStatusSel(ep,s.status)+'</td>'
         +'<td class="l">'+modeSel(ep,s.mode_eff)+'</td>'
         +'<td class="l">'+(s.market?esc(s.market):'<span class="mut">—</span>')+'</td>'
@@ -1913,10 +1903,12 @@
         var xdPanel='<div class="sect-h">Crossdock SKUs on this shipment ('+xd.length+')</div>'
           +(xd.length?'<div class="tw"><table><thead><tr><th class="l">Crossdock SKU</th><th style="text-align:right">Qty shipped</th><th class="l">Source PO</th><th class="l">Supplier</th><th class="l">Client</th><th class="l">Client sales order</th></tr></thead><tbody>'+xdRows+'</tbody></table></div>'
             :'<div class="count">No crossdock SKUs on the POs in this shipment.</div>');
-        var tabbar='<div class="po-subnav" style="margin-bottom:8px"><button class="rtab shtab active" data-st="pos">POs aboard</button><button class="rtab shtab" data-st="xd">Crossdock'+(xd.length?' ('+xd.length+')':'')+'</button></div>';
+        var tabbar='<div class="po-subnav" style="margin-bottom:8px"><button class="rtab shtab active" data-st="pos">POs aboard</button><button class="rtab shtab" data-st="xd">Crossdock'+(xd.length?' ('+xd.length+')':'')+'</button><button class="rtab shtab" data-st="timeline">Timeline</button></div>';
         var box=document.getElementById('shipdet-'+i);
-        box.innerHTML=head+tabbar+'<div class="shtab-panel" data-st="pos">'+t+'</div><div class="shtab-panel" data-st="xd" style="display:none">'+xdPanel+'</div>';
+        box.innerHTML=head+tabbar+'<div class="shtab-panel" data-st="pos">'+t+'</div><div class="shtab-panel" data-st="xd" style="display:none">'+xdPanel+'</div>'
+          +'<div class="shtab-panel" data-st="timeline" style="display:none"><div class="sp-timeline" data-ref="'+esc(ref)+'"></div></div>';
         box.classList.remove('count'); bindEdits();
+        loadShipTimeline(ref,'internal','/api/supply/shipment-notes?ref=','/api/supply/shipment-note');
         box.querySelectorAll('.shtab').forEach(function(tb){ tb.onclick=function(){ box.querySelectorAll('.shtab').forEach(function(x){x.classList.toggle('active',x===tb);}); box.querySelectorAll('.shtab-panel').forEach(function(pl){pl.style.display=(pl.dataset.st===tb.dataset.st)?'':'none';}); }; });
         box.querySelectorAll('button[data-act]').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po;
           if(btn.dataset.act==='unassign'){ if(confirm('Unassign '+po+' from '+ref+'?'))shipPost('/api/supply/shipment/'+encodeURIComponent(ref)+'/assign',{po:po,assign:false},shipReload); }

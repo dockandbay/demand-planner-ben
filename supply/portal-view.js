@@ -546,7 +546,8 @@
             return rows.map(function(s){
               var fxd=[s.departure&&('dep '+fd(s.departure)),s.landing&&('land '+fd(s.landing)),s.arrival&&('arr '+fd(s.arrival))].filter(Boolean).join(' · ')||'—';
               var members=s.members.length?'<table style="font-size:11px;width:auto;margin-top:4px"><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th>Est. pallets</th><th class="l">Client</th></tr></thead><tbody>'
-                +s.members.map(function(m){return '<tr><td class="l">'+esc(m.po)+'</td><td class="l">'+esc(m.supplier||'')+'</td><td style="text-align:right">'+esc(m.pallets)+'</td><td class="l">'+(m.client?esc(m.client):'<span class="mut">—</span>')+'</td></tr>';}).join('')+'</tbody></table>':'<span class="mut tiny">no other POs on this shipment</span>';
+                +s.members.map(function(m){return '<tr><td class="l">'+esc(m.po)+(m.is_master?' <span class="tool-badge bg-green" style="font-size:9px">★ master</span>':'')+'</td><td class="l">'+esc(m.supplier||'')+'</td><td style="text-align:right">'+esc(m.pallets)+'</td><td class="l">'+(m.client?esc(m.client):'<span class="mut">—</span>')+'</td></tr>';}).join('')
+                +'<tr style="font-weight:700;border-top:1px solid #ccc"><td class="l">Total</td><td></td><td style="text-align:right">'+esc(s.total_pallets)+'</td><td></td></tr></tbody></table>':'<span class="mut tiny">no POs on this shipment</span>';
               return '<div style="border:1px solid '+(s.escalated?'#fca5a5':'#e0e0e0')+';border-radius:8px;padding:10px 12px;margin-bottom:10px;background:'+(s.escalated?'#fef2f2':'#fff')+'">'
                 +'<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:baseline">'
                 +'<div style="font-weight:700;font-size:13px">'+esc(s.master_po)+'</div>'

@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.364';
+const APP_VERSION = 'v20.365';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1123,14 +1123,35 @@ app.get('/api/supply/:section', async (req, res) => {
           s.total_pallets += Number(r.pallets) || 0;
           if (s.suppliers.indexOf(r.supplier_name) < 0 && r.supplier_name) s.suppliers.push(r.supplier_name);
           if (r.is_master) { s.master_client = r.client; s.master_deadline = r.client_deadline; }
-          else s.members.push({ po: r.po, supplier: r.supplier_name, pallets: Number(r.pallets) || 0, client: r.client });
+          // include EVERY PO on the shipment (incl. the master) so the summary's pallets sum to the total
+          s.members.push({ po: r.po, supplier: r.supplier_name, pallets: Number(r.pallets) || 0, client: r.client, is_master: !!r.is_master });
         });
+        // ensure each shipment's MASTER PO appears in members (+ its pallets/client) even if it doesn't
+        // reference its own shipment_ref — so the summary's pallets sum to the true total.
+        const masterPos = Object.keys(byRef).map(k => byRef[k].master_po).filter(Boolean);
+        if (masterPos.length) {
+          const masters = (await pool.query(`SELECT p.po, coalesce(p.supplier_name,'') supplier_name, coalesce(p.client,'') client,
+              to_char(p.client_deadline_date,'YYYY-MM-DD') client_deadline,
+              round(coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0)) FROM planner.purchase_order_lines l
+                LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=p.po),0)::numeric,1) pallets
+            FROM planner.purchase_orders p WHERE p.po = ANY($1)`, [masterPos])).rows;
+          const mById = {}; masters.forEach(m => mById[m.po] = m);
+          Object.keys(byRef).forEach(k => { const s = byRef[k]; const m = mById[s.master_po]; if (!m) return;
+            if (!s.members.some(x => x.po === s.master_po)) {   // master not already aboard → add it
+              s.members.unshift({ po: m.po, supplier: m.supplier_name, pallets: Number(m.pallets) || 0, client: m.client, is_master: true });
+              s.total_pallets += Number(m.pallets) || 0;
+              if (s.suppliers.indexOf(m.supplier_name) < 0 && m.supplier_name) s.suppliers.push(m.supplier_name);
+            }
+            if (!s.master_client) s.master_client = m.client;
+            if (!s.master_deadline) s.master_deadline = m.client_deadline;
+          });
+        }
         return res.json(Object.keys(byRef).map(k => { const s = byRef[k]; s.total_pallets = Math.round(s.total_pallets * 10) / 10; return s; })
           .sort((a, b) => (a.departure || '9999').localeCompare(b.departure || '9999') || a.shipment_ref.localeCompare(b.shipment_ref)));
       }
       case 'shipment-notes':   // ?ref=… → timeline notes for a master shipment
-        return res.json(await q(`SELECT id, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at
-          FROM planner.shipment_notes WHERE shipment_ref=$1 ORDER BY created_at`, [req.query.ref || '']));
+        return res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at
+          FROM planner.shipment_notes WHERE shipment_ref=$1 ORDER BY created_at`, [req.query.ref || ''])).rows);
       case 'flexport':
         return res.json(await q(`SELECT flex_id, shipment_name, mode, status_description status, incoterm,
           CASE WHEN arrival_date < current_date THEN 'Completed' ELSE 'Active' END status_group,

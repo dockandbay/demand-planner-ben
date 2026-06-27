@@ -4,6 +4,17 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.365 - Shipment Plan adjustments: admin tidy-up + timeline in expand + master in pallets
+
+- Removed the admin **Shipment Plan sub-tab** (Shipment Plan is supplier-portal only) and the **escalate button**
+  from the SUPPLY ▸ Shipments grid — the grid now shows a read-only **ESCALATED** badge in the column right
+  after "Shipment (master)" (escalation is set in the portal); the Escalated filter stays.
+- Added a **Timeline** tab inside the shipment-row expand, next to "POs aboard" and "Crossdock".
+- Portal Shipment Plan: the **master PO is now included** in the "POs on this shipment" summary (marked ★) with
+  a Total row, so the pallets sum to the true total.
+- Fixed a bug where the shipment-plan / shipment-notes endpoints ignored their query params (wrong q helper) —
+  was silently breaking the timeline load + master merge.
+
 ## v20.364 - Shipment Plan (admin sub-tab + portal tab) + shipment ESCALATED status
 
 - **Shipment Plan** — master shipments and the POs aboard each, on both **SUPPLY ▸ Shipments ▸ Shipment Plan**
