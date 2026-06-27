@@ -4,6 +4,15 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.358 - Cin7 line push: create the PO in Cin7 if it doesn't exist yet
+
+(#14b cont.) The "Update / Create Cin7 PO" button now **creates a new Cin7 PO** when the planner PO isn't in
+Cin7 yet (no `erp_po_id`) — POSTs `{reference: PO, company: supplier, isApproved, estimatedDeliveryDate,
+lineItems}`, captures the returned Cin7 id and mirrors it into `erp_purchase_orders` so future pushes update
+instead of re-creating. When the PO already exists in Cin7 it updates as before. The result message says
+"created" vs "updated". Still gated on CIN7_AUTH (safe no-op). ⚠ Confirm Cin7's create schema (esp. how the
+supplier/company is identified) on a test PO before production use.
+
 ## v20.357 - "Update Cin7 SKUs / Qty / Price" button (push line items to Cin7)
 
 (#14b) Second Cin7 button in the PO ▸ Update-ERP popup: pushes the PO's **line items** (SKU + qty + price) to
