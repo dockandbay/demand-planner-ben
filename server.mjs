@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.352';
+const APP_VERSION = 'v20.353';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -992,7 +992,7 @@ app.get('/api/supply/:section', async (req, res) => {
             coalesce(deposit_ref,'') deposit_ref, coalesce(shipment_ref,'') shipment,
             coalesce(client,'') client, coalesce(client_requirements,'') client_requirements,
             coalesce(sales_order_ref,'') sales_order_ref, coalesce(client_po_ref,'') client_po_ref,
-            to_char(client_deadline_date,'YYYY-MM-DD') client_deadline,
+            to_char(client_deadline_date,'YYYY-MM-DD') client_deadline, coalesce(asn_numbers,'') asn_numbers,
             coalesce(dispatch_order_ref,'') dispatch_order_ref, coalesce(final_delivery_address,'') final_delivery_address,
             coalesce(crossdock_skus,'') crossdock_skus,
             coalesce(nullif(country_code,''), branch_country, '') country,
@@ -2477,7 +2477,7 @@ app.post('/api/supply/po/:po', (req, res) =>
   patch(res, 'planner.purchase_orders', 'po', req.params.po, {
     status: 'text', ship_type: 'text', deposit_ref: 'text', shipment_ref: 'text', prod_no: 'text',
     batch_id: 'text', branch: 'text', erp_po: 'text', notes: 'text', container_size: 'text',
-    country_code: 'text', client: 'text', client_requirements: 'text', sales_order_ref: 'text', client_deadline_date: 'date',
+    country_code: 'text', client: 'text', client_requirements: 'text', sales_order_ref: 'text', client_deadline_date: 'date', asn_numbers: 'text',
     client_po_ref: 'text', dispatch_order_ref: 'text', final_delivery_address: 'text', crossdock_skus: 'text',
     order_value_estimation: 'numeric', supplier_invoice_total: 'numeric',
     start_production: 'date', end_production_overide: 'date', landing_date_overide: 'date',

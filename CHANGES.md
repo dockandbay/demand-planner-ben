@@ -4,6 +4,13 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.353 - Purchase Orders ▸ Shipments sub-tab (assign/FOB, ASN numbers, pallet labels)
+
+(#10) New **Shipments** sub-tab listing in-progress POs: assign a shipment or mark FOB (reuses the picker +
+MANUFACTURING-FOB rule), enter **ASN numbers** (comma-separated → `asn_numbers`, migration 073), and download
+**iFulfillment pallet labels** (printable A4 sheet, one label per pallet with PO / supplier / shipment / ASN /
+pallet n-of-N). NOTE: the exact pallet-label artwork for iFulfillment is a clean draft — confirm layout with Ben.
+
 ## v20.352 - Purchase Orders: sub-tabs + Master Data view (edit + delete)
 
 (#2) PURCHASE ORDERS is now a sub-tabbed section: **Purchase Orders** (the existing grid) · **Master Data** ·

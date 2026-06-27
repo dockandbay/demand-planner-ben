@@ -570,7 +570,42 @@
       document.querySelectorAll('#pom-body .pom-po').forEach(function(inp){ inp.onchange=function(){ var oldpo=inp.dataset.po, np=inp.value.trim(); if(!np||np===oldpo){inp.value=oldpo;return;} if(!confirm('Rename PO '+oldpo+' → '+np+'? Updates all its lines and references.')){inp.value=oldpo;return;}
         shipPost('/api/supply/po/'+encodeURIComponent(oldpo)+'/rename',{new_po:np},function(){ refreshMaster(); }); }; }); }
     draw(''); var qb=document.getElementById('pom-q'); if(qb)qb.oninput=function(){draw(this.value);}; }
-  function renderPOShipSub(rows,b){ b.innerHTML='<div class="count">Shipments sub-tab — coming in this build.</div>'; }
+  // SHIPMENTS sub-tab (#10): assign shipment / FOB per PO, enter ASN numbers (comma-sep), pallet labels for iFulfillment.
+  function renderPOShipSub(rows,b){ rows.forEach(function(r){ poBy[r.po]=r; });
+    function refreshShip(){ invalidateDerived(); delete cache['purchase-orders'];
+      fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(fresh){ if(Array.isArray(fresh)){rows.length=0;Array.prototype.push.apply(rows,fresh);} renderPOShipSub(rows,b); }).catch(function(){ selectSection('purchase-orders'); }); }
+    _poRefresh=refreshShip;
+    // in-progress POs only (not complete) — shipment management is for live orders
+    var live=rows.filter(function(r){return !/complete/i.test(r.status||'');}).sort(function(a,z){return (a.po||'').localeCompare(z.po||'');});
+    b.innerHTML=annot('purchase-orders')+'<div class="bar"><span class="count">'+live.length+' in-progress POs · assign a shipment or mark FOB, enter ASN numbers, download iFulfillment pallet labels</span><input class="flt" id="pos-q" placeholder="filter PO / supplier…" style="margin-left:auto;width:220px"></div>'
+      +lookupDatalists()+'<div class="tw"><table class="po-tbl" style="width:max-content"><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th class="l">Branch</th><th class="l">Shipment / FOB</th><th class="l">ASN numbers <span class="mut tiny">(comma-separated)</span></th><th class="l">Pallet labels</th></tr></thead><tbody id="pos-body"></tbody></table></div>';
+    function rowHtml(r){ var ep='/api/supply/po/'+encodeURIComponent(r.po);
+      var ship=/manufactur/i.test(r.branch||'')?'<span class="tool-badge bg-neutral" title="MANUFACTURING = FOB">FOB</span>'
+        :(r.shipment?'<button class="ship-open" data-ref="'+esc(r.shipment)+'">'+esc(r.shipment)+'</button> <button class="ship-pick" data-po="'+esc(r.po)+'">▾</button>':'<button class="ship-pick" data-po="'+esc(r.po)+'">— assign ▾</button>');
+      return '<tr><td class="l"><b>'+esc(r.po)+'</b></td><td class="l">'+esc(r.supplier_name||'')+'</td><td class="l">'+esc(r.branch||'')+'</td>'
+        +'<td class="l">'+ship+'</td>'
+        +'<td class="l"><input class="fci txtin" data-ep="'+ep+'" data-field="asn_numbers" value="'+esc(r.asn_numbers||'')+'" placeholder="ASN1, ASN2…" style="width:240px;text-align:left"></td>'
+        +'<td class="l"><button class="save-btn pos-pallet" data-po="'+esc(r.po)+'" title="download pallet labels for iFulfillment">⤓ Pallet labels</button></td></tr>'; }
+    function draw(q){ q=(q||'').toLowerCase(); var list=live.filter(function(r){return !q||((r.po||'')+' '+(r.supplier_name||'')).toLowerCase().indexOf(q)>=0;});
+      document.getElementById('pos-body').innerHTML=list.map(rowHtml).join('');
+      bindShipPick(); bindShipOpen();
+      document.querySelectorAll('#pos-body .txtin').forEach(function(inp){ inp.onchange=function(){ var body={}; body[inp.dataset.field]=inp.value; inp.classList.add('saved');
+        fetch(inp.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); if(poBy[inp.dataset.po])poBy[inp.dataset.po].asn_numbers=inp.value; }).catch(function(){inp.classList.add('err');}); }; });
+      document.querySelectorAll('#pos-body .pos-pallet').forEach(function(btn){ btn.onclick=function(){ palletLabels(btn.dataset.po); }; }); }
+    draw(''); var qb=document.getElementById('pos-q'); if(qb)qb.oninput=function(){draw(this.value);}; }
+  // iFulfillment pallet labels — opens a printable A4 sheet of one label per pallet (PO / shipment / ASN / pallet n of N).
+  // NOTE: exact label artwork/layout for iFulfillment is to be confirmed with Ben; this is a clean print-ready draft.
+  function palletLabels(po){ var r=poBy[po]||{}; var pallets=Math.max(1,Math.ceil(Number(r.pallets)||1));
+    var asn=(r.asn_numbers||'').trim();
+    var cells=''; for(var n=1;n<=pallets;n++){ cells+='<div class="plbl"><div class="big">'+esc(po)+'</div>'
+      +'<div>Supplier: <b>'+esc(r.supplier_name||'')+'</b></div><div>Ship to: <b>'+esc(r.branch||r.country||'')+'</b></div>'
+      +'<div>Shipment: <b>'+esc(r.shipment||'FOB')+'</b></div>'+(asn?'<div>ASN: <b>'+esc(asn)+'</b></div>':'')
+      +'<div class="pn">PALLET '+n+' of '+pallets+'</div></div>'; }
+    var w=window.open('','_blank'); if(!w){alert('Allow pop-ups to print pallet labels.');return;}
+    w.document.write('<html><head><title>Pallet labels '+esc(po)+'</title><style>@page{size:A4;margin:10mm}body{font:14px system-ui;margin:0}'
+      +'.plbl{border:2px solid #000;border-radius:6px;padding:14px;margin:0 0 10mm;height:80mm;box-sizing:border-box;page-break-inside:avoid}'
+      +'.big{font-size:30px;font-weight:800;margin-bottom:8px}.pn{margin-top:12px;font-size:22px;font-weight:700}.plbl div{margin:3px 0;font-size:16px}</style></head><body>'+cells+'</body></html>');
+    w.document.close(); setTimeout(function(){try{w.print();}catch(e){}},300); }
   // PO → shipment assign popover (mockup): make this PO a master, join an existing shipment, or pick
   // another PO that becomes the master. Searchable across shipments + POs.
   var shipFull=null;

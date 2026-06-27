@@ -34,8 +34,10 @@ plus new numbered migrations on top. See `migrations/README.md`.
     the real Cin7 PO). Upserts the correct 48 lines + deletes the rest. Idempotent. Run **after** the PO/ERP
     data seed (§7).
   - **`072_client_fba_tab.sql`** — `purchase_orders.client_deadline_date` + `portal_attachments.category`
-    (separates Client/FBA docs from supplier invoice docs). Idempotent. ⬅ *latest.*
-- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`072` in order. Do **not** run
+    (separates Client/FBA docs from supplier invoice docs). Idempotent.
+  - **`073_po_asn_numbers.sql`** — `purchase_orders.asn_numbers` (comma-separated ASN numbers; PO Shipments
+    sub-tab / iFulfillment). Idempotent. ⬅ *latest.*
+- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`073` in order. Do **not** run
   `schema.sql` against an already-migrated DB (the table creates aren't idempotent).
 
 ---
