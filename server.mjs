@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.356';
+const APP_VERSION = 'v20.357';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2466,6 +2466,38 @@ app.post('/api/supply/po/:po/cin7-date', async (req, res) => {
     const txt = await r.text();
     if (!r.ok) return res.status(502).json({ error: 'Cin7 API error ' + r.status + ': ' + txt.slice(0, 300) });
     res.json({ ok: true, cin7_id: cin7Id, estimatedDeliveryDate: edd,
+      link: 'https://go.cin7.com/Cloud/TransactionEntry/TransactionEntry.aspx?idCustomerAppsLink=951111&OrderId=' + encodeURIComponent(cin7Id) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Push a PO's line items (SKU / qty / price) to Cin7 (#14b). Price = the approved supplier final cost where
+// there is one (portal_line_costs.final_cost, confirmed), else the standard plan cost (cost_price).
+// LIVE write to Cin7 — gated on CIN7_AUTH; safe no-op (501) when absent.
+app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
+  const po = req.params.po;
+  try {
+    const row = (await pool.query('SELECT erp_po_id FROM planner.erp_purchase_orders WHERE po=$1', [po])).rows[0];
+    const cin7Id = row && row.erp_po_id;
+    if (!cin7Id) return res.status(404).json({ error: 'No Cin7 PO id (erp_po_id) found for ' + po + ' — sync the ERP mirror first.' });
+    const lines = (await pool.query(
+      `SELECT l.sku, l.qty,
+              coalesce(
+                (SELECT plc.final_cost FROM planner.portal_line_costs plc
+                 WHERE plc.po=l.po AND plc.sku=l.sku AND plc.confirmed_at IS NOT NULL AND plc.final_cost IS NOT NULL),
+                l.cost_price) price,
+              ((SELECT plc.final_cost FROM planner.portal_line_costs plc
+                 WHERE plc.po=l.po AND plc.sku=l.sku AND plc.confirmed_at IS NOT NULL AND plc.final_cost IS NOT NULL) IS NOT NULL) approved_price
+       FROM planner.purchase_order_lines l WHERE l.po=$1 AND coalesce(l.qty,0)>0 ORDER BY l.sku`, [po])).rows;
+    if (!lines.length) return res.status(400).json({ error: 'No order-plan lines with qty for ' + po + '.' });
+    const auth = process.env.CIN7_AUTH;
+    if (!auth) return res.status(501).json({ error: 'Cin7 API credentials not configured (set CIN7_AUTH). No write performed.', lines: lines.length });
+    // Cin7 v1 PO line fields: code (SKU), qty, unitCost. (Confirm field names against your Cin7 account.)
+    const lineItems = lines.map(l => ({ code: l.sku, qty: Number(l.qty), unitCost: Number(l.price) || 0 }));
+    const body = [{ id: Number(cin7Id) || cin7Id, isApproved: true, lineItems }];
+    const r = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
+      { method: 'PUT', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const txt = await r.text();
+    if (!r.ok) return res.status(502).json({ error: 'Cin7 API error ' + r.status + ': ' + txt.slice(0, 300) });
+    res.json({ ok: true, cin7_id: cin7Id, lines: lines.length, approved: lines.filter(l => l.approved_price).length,
       link: 'https://go.cin7.com/Cloud/TransactionEntry/TransactionEntry.aspx?idCustomerAppsLink=951111&OrderId=' + encodeURIComponent(cin7Id) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

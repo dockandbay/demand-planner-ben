@@ -857,7 +857,10 @@
       +'<div style="font-weight:700;font-size:15px;margin-bottom:6px">Upload to ERP'+(po?(' — '+esc(po)):'')+'</div>'
       +'<div class="mut" style="margin-bottom:12px;font-size:13px">This does <b>not</b> update Fulfil/Cin7 yet (integration pending). Until then, export the revised order plan (Code &amp; Qty) and enter it into the ERP manually:</div>'
       +'<div style="display:flex;gap:8px;align-items:center"><button class="save-btn" id="erp-dl" style="background:#2563eb;color:#fff;border-color:#2563eb">⬇ Download CSV</button><button class="save-btn" id="erp-cp">⧉ Copy to clipboard</button><button class="save-btn light" id="erp-x" style="margin-left:auto">Close</button></div>'
-      +'<div style="margin-top:12px;border-top:1px solid #eee;padding-top:12px"><button class="save-btn" id="erp-cin7" style="background:#0b6;color:#fff;border-color:#0b6">📅 Update Cin7 Date</button> <span class="mut tiny">sets the Cin7 PO EstimatedDeliveryDate to this PO\'s Completion date (live write)</span></div>'
+      +'<div style="margin-top:12px;border-top:1px solid #eee;padding-top:12px;display:flex;flex-direction:column;gap:8px">'
+        +'<div><button class="save-btn" id="erp-cin7" style="background:#0b6;color:#fff;border-color:#0b6">📅 Update Cin7 Date</button> <span class="mut tiny">sets the Cin7 PO EstimatedDeliveryDate to this PO\'s Completion date (live write)</span></div>'
+        +'<div><button class="save-btn" id="erp-cin7-lines" style="background:#0a8;color:#fff;border-color:#0a8">📦 Update Cin7 SKUs / Qty / Price</button> <span class="mut tiny">pushes line items — price = approved supplier final cost, else standard (live write)</span></div>'
+      +'</div>'
       +'<div class="mut tiny" id="erp-msg" style="margin-top:10px"></div></div>';
     document.body.appendChild(bg); bg.onclick=function(e){ if(e.target===bg)bg.remove(); };
     var msg=bg.querySelector('#erp-msg'); bg.querySelector('#erp-x').onclick=function(){bg.remove();};
@@ -881,6 +884,14 @@
       fetch('/api/supply/po/'+encodeURIComponent(po)+'/cin7-date',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({completion_date:comp})}).then(function(r){return r.json();}).then(function(j){
         if(j&&j.error){ msg.innerHTML='<span style="color:#dc2626">'+esc(j.error)+'</span>'; return; }
         msg.innerHTML='<span style="color:#166534;font-weight:700">✓ Cin7 successfully updated</span> ('+esc(j.estimatedDeliveryDate||comp)+') — <a href="'+esc(j.link)+'" target="_blank" rel="noopener">open Cin7 PO ↗</a>';
+      }).catch(function(e){ msg.innerHTML='<span style="color:#dc2626">Failed: '+esc(e.message||e)+'</span>'; }); };
+    // #14b — push SKU / qty / price line items to Cin7 (price = approved supplier final, else standard)
+    bg.querySelector('#erp-cin7-lines').onclick=function(){
+      if(!confirm('Push this PO\'s SKUs, quantities and prices to the Cin7 PO?\n\nPrice = the approved supplier final cost where there is one, otherwise the standard cost. This writes to the LIVE Cin7 ERP.'))return;
+      msg.textContent='Updating Cin7 line items…';
+      fetch('/api/supply/po/'+encodeURIComponent(po)+'/cin7-lines',{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(function(r){return r.json();}).then(function(j){
+        if(j&&j.error){ msg.innerHTML='<span style="color:#dc2626">'+esc(j.error)+'</span>'; return; }
+        msg.innerHTML='<span style="color:#166534;font-weight:700">✓ Cin7 successfully updated</span> — '+esc(j.lines)+' line(s)'+(j.approved?' ('+esc(j.approved)+' at approved supplier price)':'')+' — <a href="'+esc(j.link)+'" target="_blank" rel="noopener">open Cin7 PO ↗</a>';
       }).catch(function(e){ msg.innerHTML='<span style="color:#dc2626">Failed: '+esc(e.message||e)+'</span>'; }); };
   }
   // a COMPLETE PO's dates are settled — don't flag an ERP date discrepancy on it (the date no longer needs pushing)

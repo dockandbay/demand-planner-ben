@@ -4,6 +4,15 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.357 - "Update Cin7 SKUs / Qty / Price" button (push line items to Cin7)
+
+(#14b) Second Cin7 button in the PO ▸ Update-ERP popup: pushes the PO's **line items** (SKU + qty + price) to
+the Cin7 PO. **Price = the approved supplier final cost** (`portal_line_costs.final_cost` where confirmed),
+**else the standard cost** (`cost_price`). New endpoint `POST /api/supply/po/:po/cin7-lines` (PUT lineItems as
+`{code, qty, unitCost}`). Same gating as the date button (CIN7_AUTH, confirm, safe no-op). Reports how many
+lines / how many at the approved price, with a link to the Cin7 PO. ⚠ Confirm Cin7 lineItems field names before
+production use.
+
 ## v20.356 - "Update Cin7 Date" button (push Completion date to Cin7)
 
 (#14) Added an **📅 Update Cin7 Date** button to the PO ▸ Update-ERP popup. It pushes the PO's **Completion
