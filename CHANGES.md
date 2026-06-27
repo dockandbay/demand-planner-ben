@@ -4,6 +4,15 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.349 - Shipments: >20-pallet exception
+
+(#8) A shipment whose estimated cargo exceeds **20 pallets** (one container) now flags as an exception — red
+"⚠ >20 pallets" badge, red Pallets cell, included in the Exceptions filter and the per-shipment exception
+reason ("split the shipment"). The POs / Suppliers / Pallets columns already aggregate from the assigned POs.
+NOTE for Diviyaj: pallet totals depend on `sku_labels.pallet_qty` (units per pallet), which is missing for
+many SKUs — 164 shipments with POs currently show 0 pallets. n8n should populate pallet_qty for accurate
+totals; the exception is correct wherever the data exists.
+
 ## v20.348 - Purchase Orders: in-place assign refresh, popup placement, MANUFACTURING=FOB
 
 - (#6) Assigning a deposit / shipment / supplier / branch now refreshes the grid **in place** (re-fetch PO rows

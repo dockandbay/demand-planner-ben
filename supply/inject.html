@@ -1674,7 +1674,7 @@
     function cur(){ return ships.filter(function(s){
       if(state.ctry && (s.market||'')!==state.ctry)return false;
       if(state.br && (s.branch||'').indexOf(state.br)<0)return false;
-      if(state.f==='all')return true; if(state.f==='exceptions')return s.is_exception; if(state.f==='completed')return s.status==='Complete'||s.status==='Completed'; return s.status!=='Complete'&&s.status!=='Completed'; }); }
+      if(state.f==='all')return true; if(state.f==='exceptions')return shipIsExc(s); if(state.f==='completed')return s.status==='Complete'||s.status==='Completed'; return s.status!=='Complete'&&s.status!=='Completed'; }); }
     function view(){ var f=filt(cur(),state.q); document.getElementById('sup-count').textContent=f.length+' / '+ships.length+' shipments';
       document.getElementById('sup-grid').innerHTML=shipTable(f); bindShipExpand(); bindEdits();
       if(_pendingShip){ var want=_pendingShip; _pendingShip=null; setTimeout(function(){ expandPending('#sup-grid .po-exp[data-ref]',want); },30); } }
@@ -1684,8 +1684,9 @@
     document.getElementById('ship-br').onchange=function(){state.br=this.value;view();};
     document.getElementById('ship-new').onclick=function(){ var ref=prompt('New shipment reference (usually the master PO number):'); if(ref&&ref.trim())shipPost('/api/supply/shipment-create',{shipment_ref:ref.trim()},shipReload); };
     view(); }   // Unassigned-POs moved to the PURCHASE ORDERS "Unassigned shipment" exception filter
-  function shipExReason(s){ return 'No carrier reference — not linked to Flexport / DHL / etc.'; }
-  function shipExShort(s){ return 'unlinked'; }
+  function shipIsExc(s){ return s.is_exception || s.over_pallets; }
+  function shipExReason(s){ var r=[]; if(s.over_pallets)r.push('Estimated cargo '+(s.pallets||0)+' pallets — over one 20-pallet container; split the shipment'); if(s.is_exception)r.push('No carrier reference — not linked to Flexport / DHL / etc.'); return r.join(' · '); }
+  function shipExShort(s){ return s.over_pallets?'>20 pallets':'unlinked'; }
   function carrierSel(ep,val,dis){ var O=['Flexport','DHL','Fedex','FOB','Other'], v=val||'', has=O.indexOf(v)>=0;
     return '<select class="fci" data-ep="'+ep+'" data-field="carrier"'+(dis?' disabled title="FOB — carrier handled by the client\'s forwarder"':'')+' style="min-width:96px'+(dis?';opacity:.45;background:#f1f1f1':'')+'"><option value=""'+(v?'':' selected')+'>—</option>'
       +(v&&!has?'<option selected>'+esc(v)+'</option>':'')+O.map(function(o){return '<option'+(o===v?' selected':'')+'>'+o+'</option>';}).join('')+'</select>'; }
@@ -1715,7 +1716,7 @@
     var h='<div class="tw"><table style="width:max-content"><thead><tr><th class="l"></th><th class="l">Shipment (master)</th><th class="l">Status</th><th class="l">Mode</th><th class="l">Ship to</th><th class="l">Branch</th><th>POs</th><th>Suppliers</th><th>Pallets</th><th class="l">Carrier</th><th class="l">Carrier ref</th><th class="l">Departure</th><th class="l">Landing</th><th class="l">Arrival</th><th>Freight</th></tr></thead><tbody>';
     rows.forEach(function(s,i){ shipBy[s.shipment_ref]=s; var ep='/api/supply/shipment/'+encodeURIComponent(s.shipment_ref);
       var mast=(s.master_po&&s.master_po!==s.shipment_ref)?(' <span class="mut tiny">★'+esc(s.master_po)+'</span>'):'';
-      var alert=s.is_exception?' <span class="tool-badge bg-red" title="'+esc(shipExReason(s))+'">⚠ '+esc(shipExShort(s))+'</span>':'';
+      var alert=shipIsExc(s)?' <span class="tool-badge bg-red" title="'+esc(shipExReason(s))+'">⚠ '+esc(shipExShort(s))+'</span>':'';
       var fxl=s.flex_id?(' <a href="https://app.flexport.com/shipments/'+((String(s.carrier_ref||s.flex_id).match(/\d+/)||[''])[0])+'" target="_blank" rel="noopener" class="mut" title="open in Flexport" style="text-decoration:none">↗</a>'):'';
       h+='<tr><td class="l"><button class="planbtn po-exp" data-ref="'+esc(s.shipment_ref)+'" data-i="'+i+'">PLAN</button></td>'
         +'<td class="l"><b>'+esc(s.shipment_ref)+'</b>'+mast+alert+'</td>'
@@ -1723,7 +1724,7 @@
         +'<td class="l">'+modeSel(ep,s.mode_eff)+'</td>'
         +'<td class="l">'+(s.market?esc(s.market):'<span class="mut">—</span>')+'</td>'
         +'<td class="l">'+(s.branch?esc(s.branch):'<span class="mut">—</span>')+'</td>'
-        +'<td>'+esc(s.po_count)+'</td><td>'+esc(s.suppliers)+'</td><td>'+esc(s.pallets||0)+'</td>'
+        +'<td>'+esc(s.po_count)+'</td><td>'+esc(s.suppliers)+'</td><td'+(s.over_pallets?' style="color:#dc2626;font-weight:700" title="over one 20-pallet container — split the shipment"':'')+'>'+esc(s.pallets||0)+'</td>'
         +'<td class="l">'+carrierSel(ep,s.carrier,s.mode_eff==='fob')+'</td>'
         +'<td class="l">'+carrierRefInput(ep,s.carrier_ref,s.mode_eff==='fob')+fxl+'</td>'
         +'<td class="l">'+shipDate(s.departure,s.departure_src)+'</td><td class="l">'+shipDate(s.landing,s.landing_src)+'</td><td class="l">'+shipDate(s.arrival,s.arrival_src)+'</td>'

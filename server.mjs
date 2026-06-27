@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.348';
+const APP_VERSION = 'v20.349';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1190,7 +1190,8 @@ app.get('/api/supply/:section', async (req, res) => {
             (coalesce(NULLIF(sh.status,''),
                CASE WHEN a.all_complete OR coalesce(sh.arrival_date, fx.arrival_date, sh.landing_date, fx.landing_date) < current_date THEN 'Complete'
                     WHEN coalesce(sh.departure_date, fx.departure_date) <= current_date THEN 'Active' ELSE 'Planned' END) <> 'Complete'
-             AND sh.carrier_ref IS NULL AND fx.flex_id IS NULL) is_exception
+             AND sh.carrier_ref IS NULL AND fx.flex_id IS NULL) is_exception,
+            (coalesce(a.pallets,0) > 20) over_pallets   -- est. cargo over one 20-pallet container → exception
           FROM planner.shipments sh
           LEFT JOIN agg a ON a.shipment_ref=sh.shipment_ref
           LEFT JOIN LATERAL (SELECT f.* FROM planner.flexport_shipments f
