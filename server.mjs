@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.345';
+const APP_VERSION = 'v20.346';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1647,7 +1647,7 @@ app.get('/api/supply/:section', async (req, res) => {
         const today = (await pool.query(`SELECT to_char(CURRENT_DATE,'YYYY-MM-DD') d`)).rows[0].d;
         const rows = (await pool.query(`
           WITH s AS (
-            SELECT po.po, coalesce(po.supplier_name,'') supplier,
+            SELECT po.po, coalesce(po.status,'') status, coalesce(po.supplier_name,'') supplier,
               upper(coalesce(nullif(po.country_code,''), b.country_code,'')) market,
               coalesce(po.production_status,'') production_status,
               (CURRENT_DATE - po.production_confirmed_at::date)::int prod_conf_age,
@@ -1672,7 +1672,7 @@ app.get('/api/supply/:section', async (req, res) => {
               WHERE f.flex_id=po.flexport_reference OR f.shipment_name=po.po OR f.shipment_name=po.shipment_ref
               ORDER BY (f.flex_id=po.flexport_reference) DESC NULLS LAST LIMIT 1) fxs ON true
             WHERE coalesce(po.status,'') NOT ILIKE '%complete%')
-          SELECT po, supplier, market, production_status, prod_conf_age, shipment_ref,
+          SELECT po, status, supplier, market, production_status, prod_conf_age, shipment_ref,
             to_char(prod_start,'YYYY-MM-DD') prod_start,
             to_char(prod_end,'YYYY-MM-DD') prod_end,
             to_char(ship_date,'YYYY-MM-DD') ship_date,
@@ -1706,12 +1706,19 @@ app.get('/api/supply/:section', async (req, res) => {
           const health = nextDate == null ? (st === 'checked_in' ? 'done' : 'unknown') : (d < 0 ? 'late' : (d <= 7 ? 'soon' : 'ok'));
           // OVERDUE = earliest planned milestone whose date has passed without confirmation that it happened.
           // (The stage above advances optimistically off dates; this instead checks planned-vs-confirmed.)
-          const prodDone = r.production_status === 'complete' || r.production_status === 'shipped';
-          const departed = r.departed || r.production_status === 'shipped';
+          // The PO's management status is also authoritative: SHIPPING/READY TO SHIP/DELIVERED are past the
+          // completion milestone (so "Completing" can't be overdue); SHIPPING/DELIVERED are past the ship
+          // milestone; DELIVERED is arrived. Use it alongside production_status (which is often unset).
+          const mstatus = (r.status || '').toUpperCase();
+          const mPastCompletion = /SHIPPING|READY TO SHIP|DELIVERED/.test(mstatus);
+          const mDelivered = /DELIVERED/.test(mstatus);
+          const prodDone = r.production_status === 'complete' || r.production_status === 'shipped' || mPastCompletion;
+          const departed = r.departed || r.production_status === 'shipped' || /SHIPPING|DELIVERED/.test(mstatus);
+          const arrived = r.arrived || mDelivered;
           let overdue = null;
-          if (r.prod_end && r.prod_end < today && !prodDone && !departed && !r.arrived) overdue = { type: 'Completing', date: r.prod_end };
-          else if (r.planned_ship && r.planned_ship < today && !departed && !r.arrived) overdue = { type: 'Shipping', date: r.planned_ship };
-          else if (r.eta && r.eta < today && !r.arrived) overdue = { type: 'Arriving', date: r.eta };
+          if (r.prod_end && r.prod_end < today && !prodDone && !departed && !arrived) overdue = { type: 'Completing', date: r.prod_end };
+          else if (r.planned_ship && r.planned_ship < today && !departed && !arrived) overdue = { type: 'Shipping', date: r.planned_ship };
+          else if (r.eta && r.eta < today && !arrived) overdue = { type: 'Arriving', date: r.eta };
           if (overdue) overdue.days = -dleft(overdue.date);
           return { po: r.po, supplier: r.supplier, market: r.market, units: r.units, val: r.val,
             shipment_ref: r.shipment_ref, flex: r.flex || '', production_status: r.production_status, prod_conf_age: r.prod_conf_age,

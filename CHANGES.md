@@ -4,6 +4,16 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.346 - What's Next: don't flag completion/ship overdue once the PO is past that stage by status
+
+The "What's Next" overdue check derived "production done / departed / arrived" only from `production_status`
+(supplier-confirmed, frequently unset) and shipment dates — it ignored the PO's management `status`. So a PO in
+**SHIPPING** with no `production_status` and no shipment departure date threw a false **"Completing overdue"**
+(e.g. PO-55USJM1), even though SHIPPING is by definition past completion. Now the management status feeds the
+done signals: SHIPPING / READY TO SHIP / DELIVERED ⇒ past completion (no "Completing"); SHIPPING / DELIVERED ⇒
+departed (no "Shipping"); DELIVERED ⇒ arrived (no overdue). Cleared 47 false flags (46 SHIPPING + 1 DELIVERED);
+genuine in-transit POs still flag "Arriving" correctly. Server-only; no DB change.
+
 ## v20.345 - Data fix: correct PO-55UKXR2 order-plan lines
 
 PO-55UKXR2's order-plan lines were wrong — 96 lines, carrying 48 extra SKUs not on the actual Cin7 PO (the real
