@@ -36,8 +36,10 @@ plus new numbered migrations on top. See `migrations/README.md`.
   - **`072_client_fba_tab.sql`** — `purchase_orders.client_deadline_date` + `portal_attachments.category`
     (separates Client/FBA docs from supplier invoice docs). Idempotent.
   - **`073_po_asn_numbers.sql`** — `purchase_orders.asn_numbers` (comma-separated ASN numbers; PO Shipments
-    sub-tab / iFulfillment). Idempotent. ⬅ *latest.*
-- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`073` in order. Do **not** run
+    sub-tab / iFulfillment). Idempotent.
+  - **`074_supplier_po_confirmation.sql`** — `supplier_confirmed_at` / `supplier_confirmed_by` on
+    purchase_orders (supplier PO confirmation workflow). Idempotent. ⬅ *latest.*
+- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`074` in order. Do **not** run
   `schema.sql` against an already-migrated DB (the table creates aren't idempotent).
 
 ---

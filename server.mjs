@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.361';
+const APP_VERSION = 'v20.363';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -993,6 +993,7 @@ app.get('/api/supply/:section', async (req, res) => {
             coalesce(client,'') client, coalesce(client_requirements,'') client_requirements,
             coalesce(sales_order_ref,'') sales_order_ref, coalesce(client_po_ref,'') client_po_ref,
             to_char(client_deadline_date,'YYYY-MM-DD') client_deadline, coalesce(asn_numbers,'') asn_numbers,
+            to_char(supplier_confirmed_at,'YYYY-MM-DD') supplier_confirmed, coalesce(supplier_confirmed_by,'') supplier_confirmed_by,
             coalesce(dispatch_order_ref,'') dispatch_order_ref, coalesce(final_delivery_address,'') final_delivery_address,
             coalesce(crossdock_skus,'') crossdock_skus,
             coalesce(nullif(country_code,''), branch_country, '') country,
@@ -1494,6 +1495,14 @@ app.get('/api/supply/:section', async (req, res) => {
             WHERE l.full_carton_check LIKE '⚠%' AND coalesce(p.status,'') NOT ILIKE '%complete%'
             GROUP BY l.po
           UNION ALL
+          -- supplier hasn't confirmed the order (SKUs / qty / dates) yet — chase confirmation
+          SELECT 'amber','Awaiting supplier confirmation', po,
+            'Supplier has not yet confirmed this order (SKUs / qty / dates)', '','po','', po
+            FROM planner.purchase_orders
+            WHERE supplier_confirmed_at IS NULL AND coalesce(supplier_name,'')<>''
+              AND coalesce(status,'') NOT ILIKE '%complete%' AND coalesce(status,'') NOT ILIKE '%future%'
+              AND EXISTS (SELECT 1 FROM planner.purchase_order_lines l WHERE l.po=purchase_orders.po AND coalesce(l.qty,0)>0)
+          UNION ALL
           -- supplier risk: line ordered against a supplier not in the SKU's allowed multi-supplier list (until approved)
           SELECT 'amber','Supplier risk needs approval', l.po,
             count(*)||' line(s) ordered against a supplier not in the SKU''s allowed list', 'orderplan','','suprisk', l.po
@@ -1527,6 +1536,25 @@ app.get('/api/supply/:section', async (req, res) => {
                 AND coalesce(to_char(p.delivery_date_overide,'YYYY-MM-DD'), to_char(p.landing_date_overide,'YYYY-MM-DD'), to_char(fx.landing_date,'YYYY-MM-DD')) > dsel.disc
               GROUP BY l.po
             ) dd
+          UNION ALL
+          -- client deadline at risk: forecast completion (arrival + warehouse leg) is after the PO's client deadline
+          SELECT 'high','Client deadline at risk', cd.po,
+            'Completion '||cd.completion||' is after the client deadline '||cd.cdl, '','po','', cd.po
+            FROM (
+              SELECT p.po, p.client_deadline_date::text cdl,
+                -- mirror the grid's completion: effective delivery (shipment dates ▸ flexport ▸ PO overrides) + warehouse leg
+                (coalesce(sh.delivery_date, sh.arrival_date, sh.landing_date, fx.landing_date, p.delivery_date_overide, p.landing_date_overide)
+                  + (CASE WHEN upper(coalesce(nullif(p.country_code,''), b.country_code, ''))='DIRECT'
+                            AND coalesce(nullif(p.shipment_ref,''), p.po)=p.po THEN 0 ELSE 7 END))::text completion
+              FROM planner.purchase_orders p
+              LEFT JOIN planner.branches b ON b.name=p.branch
+              LEFT JOIN planner.shipments sh ON sh.shipment_ref=p.shipment_ref
+              LEFT JOIN LATERAL (SELECT f.landing_date FROM planner.flexport_shipments f
+                WHERE f.flex_id=p.flexport_reference OR f.shipment_name=p.po OR f.shipment_name=p.shipment_ref
+                ORDER BY (f.flex_id=p.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true
+              WHERE p.client_deadline_date IS NOT NULL AND coalesce(p.status,'') NOT ILIKE '%complete%'
+            ) cd
+            WHERE cd.completion IS NOT NULL AND cd.completion > cd.cdl
           UNION ALL
           SELECT 'amber','Order-plan change pending ERP push', l.po,
             count(*)||' line(s) edited, not yet uploaded to the ERP', 'upload','po','', l.po
@@ -2089,6 +2117,11 @@ app.post('/api/supply/portal-submit', async (req, res) => {
           VALUES ($1,$2,'tracking',$3,'pending',$4,'no shipment assigned yet')`, [sid, b.po, JSON.stringify({ tracking: b.tracking || null, carrier: b.carrier || null }), by]);
         out.staged.push('tracking (no shipment yet)');
       }
+    }
+    // PO confirmation (#supplier confirms SKUs / qty / dates). po_confirmed:true → confirm; false → clear (re-request).
+    if (b.po_confirmed != null) {
+      if (b.po_confirmed) { await pool.query(`UPDATE planner.purchase_orders SET supplier_confirmed_at=now(), supplier_confirmed_by=$2 WHERE po=$1`, [b.po, by]); out.applied.push('PO confirmed'); }
+      else { await pool.query(`UPDATE planner.purchase_orders SET supplier_confirmed_at=NULL, supplier_confirmed_by=NULL WHERE po=$1`, [b.po]); out.applied.push('PO confirmation cleared'); }
     }
     res.json(out);
   } catch (e) { res.status(500).json({ error: e.message }); }

@@ -4,6 +4,23 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.363 - "Client deadline at risk" action (completion after the client deadline)
+
+PO-55EUBL1 had a client deadline (1 Jul) with completion forecast after it (6 Jul) but wasn't flagged. Added a
+**high-severity SUPPLY ▸ Actions** item "Client deadline at risk" when a PO's forecast **completion** (effective
+delivery + warehouse leg, mirroring the grid's Completion date) is after its **client deadline**. The
+Direct-to-Client report now also flags the deadline red on completion (not just arrival).
+
+## v20.362 - Supplier PO confirmation workflow + label-tab tidy-up
+
+- **Supplier PO confirmation (#workflow):** suppliers confirm a PO (SKUs / quantities / dates) from the portal —
+  a confirmation banner on the PO detail (✓ Confirm order / Withdraw). Stored on the PO (`supplier_confirmed_at`
+  /`_by`, migration 074), shown in the admin Master Data tab (✓ confirmed · date / ⏳ awaiting, with Reset), and
+  surfaced as a SUPPLY ▸ Actions item "Awaiting supplier confirmation" for in-progress POs.
+- Removed the **Shipment** field from the Master Data PLAN tab (it lives on the Shipments tab).
+- The Shipments tab's pallet-label button is now **Ships With Supplier labels** (the SHIPS-WITH master label);
+  removed that button from the Client/FBA tab.
+
 ## v20.361 - Supplier portal: "Barcodes & Labels" tab
 
 New per-PO portal tab consolidating downloads: (1) Barcodes for PO, (2) Barcodes for Production (always shown);

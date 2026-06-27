@@ -539,8 +539,6 @@
   // PLAN-panel MASTER DATA tab (#2): edit this PO's key fields (PO Number rename / Branch / Supplier / Production
   // / Batch / Shipment) + delete the PO. Rendered inside a single PO's PLAN panel.
   function poMasterPanel(po){ var r=poBy[po]||{}; var ep='/api/supply/po/'+encodeURIComponent(po);
-    var ship=/manufactur/i.test(r.branch||'')?'<span class="tool-badge bg-neutral" title="MANUFACTURING = FOB">FOB</span>'
-      :(r.shipment?'<button class="ship-open" data-ref="'+esc(r.shipment)+'">'+esc(r.shipment)+'</button> <button class="ship-pick" data-po="'+esc(po)+'">▾</button>':'<button class="ship-pick" data-po="'+esc(po)+'">— assign ▾</button>');
     function row(lbl,f){ return '<div class="cli-row"><div class="cli-lbl">'+lbl+'</div><div class="cli-val">'+f+'</div></div>'; }
     return '<div class="sect-h">Master Data <span class="mut tiny">— edit this PO\'s key fields; Delete removes the PO and its lines</span></div>'
       +lookupDatalists()+'<div class="cli-form" style="max-width:560px">'
@@ -549,32 +547,21 @@
       +row('Supplier',cellPickBtn(po,'/api/supply/po/'+encodeURIComponent(po)+'/supplier','supplier_name',r.supplier_name,'supplier'))
       +row('Production',cellPickBtn(po,ep,'prod_no',r.prod_no,'prod'))
       +row('Batch ID',cellPickBtn(po,ep,'batch_id',r.batch_id,'batch'))
-      +row('Shipment',ship)
+      +row('Supplier confirmation',(r.supplier_confirmed?'<span class="tool-badge bg-green">✓ confirmed '+esc(r.supplier_confirmed)+(r.supplier_confirmed_by?' · '+esc(r.supplier_confirmed_by):'')+'</span> <button class="save-btn light pom-unconfirm" data-po="'+esc(po)+'" title="reset so the supplier must re-confirm">reset</button>':'<span class="tool-badge bg-amber">⏳ awaiting supplier confirmation</span>'))
       +'</div><div style="margin-top:14px"><button class="save-btn light pom-del" data-po="'+esc(po)+'" title="delete this PO + its lines" style="color:#dc2626;border-color:#fca5a5">🗑 Delete this PO</button></div>'; }
   // PLAN-panel SHIPMENTS tab (#10): assign a shipment / FOB, ASN numbers, iFulfillment pallet labels — this PO.
   function poShipPanel(po){ var r=poBy[po]||{}; var ep='/api/supply/po/'+encodeURIComponent(po);
     var ship=/manufactur/i.test(r.branch||'')?'<span class="tool-badge bg-neutral" title="MANUFACTURING = FOB">FOB</span>'
       :(r.shipment?'<button class="ship-open" data-ref="'+esc(r.shipment)+'">'+esc(r.shipment)+'</button> <button class="ship-pick" data-po="'+esc(po)+'">▾</button>':'<button class="ship-pick" data-po="'+esc(po)+'">— assign ▾</button>');
     function row(lbl,f){ return '<div class="cli-row"><div class="cli-lbl">'+lbl+'</div><div class="cli-val">'+f+'</div></div>'; }
-    return '<div class="sect-h">Shipments <span class="mut tiny">— assign a shipment or mark FOB, ASN numbers, iFulfillment pallet labels</span></div>'
+    return '<div class="sect-h">Shipments <span class="mut tiny">— assign a shipment or mark FOB, ASN numbers, Ships With Supplier pallet labels</span></div>'
       +lookupDatalists()+'<div class="cli-form" style="max-width:620px">'
       +row('Shipment / FOB',ship)
       +row('ASN numbers <span class="mut tiny">(comma-separated)</span>','<input class="fci txtin" data-ep="'+ep+'" data-field="asn_numbers" value="'+esc(r.asn_numbers||'')+'" placeholder="ASN1, ASN2…" style="width:280px;text-align:left">')
-      +row('Pallet labels','<button class="save-btn pos-pallet" data-po="'+esc(po)+'" title="download pallet labels for iFulfillment">⤓ Pallet labels (iFulfillment)</button>')
+      +row('Ships With Supplier labels','<button class="save-btn po-dl-sw" data-po="'+esc(po)+'" title="SHIPS WITH SUPPLIER master pallet label (carton size)">⤓ Ships With Supplier labels</button>')
       +'</div>'; }
   // iFulfillment pallet labels — opens a printable A4 sheet of one label per pallet (PO / shipment / ASN / pallet n of N).
   // NOTE: exact label artwork/layout for iFulfillment is to be confirmed with Ben; this is a clean print-ready draft.
-  function palletLabels(po){ var r=poBy[po]||{}; var pallets=Math.max(1,Math.ceil(Number(r.pallets)||1));
-    var asn=(r.asn_numbers||'').trim();
-    var cells=''; for(var n=1;n<=pallets;n++){ cells+='<div class="plbl"><div class="big">'+esc(po)+'</div>'
-      +'<div>Supplier: <b>'+esc(r.supplier_name||'')+'</b></div><div>Ship to: <b>'+esc(r.branch||r.country||'')+'</b></div>'
-      +'<div>Shipment: <b>'+esc(r.shipment||'FOB')+'</b></div>'+(asn?'<div>ASN: <b>'+esc(asn)+'</b></div>':'')
-      +'<div class="pn">PALLET '+n+' of '+pallets+'</div></div>'; }
-    var w=window.open('','_blank'); if(!w){alert('Allow pop-ups to print pallet labels.');return;}
-    w.document.write('<html><head><title>Pallet labels '+esc(po)+'</title><style>@page{size:A4;margin:10mm}body{font:14px system-ui;margin:0}'
-      +'.plbl{border:2px solid #000;border-radius:6px;padding:14px;margin:0 0 10mm;height:80mm;box-sizing:border-box;page-break-inside:avoid}'
-      +'.big{font-size:30px;font-weight:800;margin-bottom:8px}.pn{margin-top:12px;font-size:22px;font-weight:700}.plbl div{margin:3px 0;font-size:16px}</style></head><body>'+cells+'</body></html>');
-    w.document.close(); setTimeout(function(){try{w.print();}catch(e){}},300); }
   // PO → shipment assign popover (mockup): make this PO a master, join an existing shipment, or pick
   // another PO that becomes the master. Searchable across shipments + POs.
   var shipFull=null;
@@ -1031,8 +1018,7 @@
       +(function(){ var xs=(d&&d.crossdock_shipped)||[]; if(!xs.length)return '';
         return cliRow('Crossdock shipped <span class="mut tiny">(qty entered by supplier in portal)</span>', xs.map(function(x){return esc(x.sku)+': <b>'+(x.qty!=null&&x.qty!==''?units(x.qty):'—')+'</b>';}).join(' &nbsp;·&nbsp; ')); })()
       +cliRow('Labels <span class="mut tiny">(A4 print mould)</span>',
-          '<button class="save-btn po-dl-xd" data-po="'+esc(r.po)+'" title="crossdock box labels for this PO\'s crossdock SKUs (PO / sales order / client overlaid) — same as the supplier portal">⤓ Crossdock</button> '
-        +'<button class="save-btn po-dl-sw" data-po="'+esc(r.po)+'" title="SHIPS WITH SUPPLIER master label (carton size)">⤓ Ships with supplier</button>')
+          '<button class="save-btn po-dl-xd" data-po="'+esc(r.po)+'" title="crossdock box labels for this PO\'s crossdock SKUs (PO / sales order / client overlaid) — same as the supplier portal">⤓ Crossdock</button> <span class="mut tiny">(Ships With Supplier labels are on the SHIPMENTS tab)</span>')
       +cliRow('Attachments <span class="mut tiny">(client / FBA docs)</span>',
           (function(){ var cd=(d&&d.client_docs)||[]; return (cd.length?cd.map(function(x){return '<a href="/api/supply/portal-attachment/'+x.id+'" target="_blank" rel="noopener">'+esc(x.filename||'view')+'</a>';}).join(' · ')+' &nbsp; ':'<span class="mut tiny">none yet — </span>')
             +'<input type="file" class="cli-attach" data-po="'+esc(r.po)+'" style="font-size:11px">'; })())
@@ -1208,9 +1194,10 @@
     // MASTER DATA + SHIPMENTS PLAN-panel controls (#2 / #10) — pickers + rename / delete / pallet labels for this PO
     bindCellPick(); bindShipPick(); bindShipOpen();
     function poGone(){ invalidateDerived(); delete cache['purchase-orders']; if(_poRefresh)_poRefresh(); else selectSection('purchase-orders'); }
-    document.querySelectorAll('#podet-'+i+' .pos-pallet').forEach(function(b){ b.onclick=function(){ palletLabels(b.dataset.po); }; });
     document.querySelectorAll('#podet-'+i+' .pom-del').forEach(function(b){ b.onclick=function(){ var p=b.dataset.po; if(!confirm('Delete PO '+p+' and all its lines? This cannot be undone.'))return;
       shipPost('/api/supply/po/'+encodeURIComponent(p)+'/delete',{},function(){ poGone(); }); }; });
+    document.querySelectorAll('#podet-'+i+' .pom-unconfirm').forEach(function(b){ b.onclick=function(){ var p=b.dataset.po; if(!confirm('Reset supplier confirmation for '+p+'? They will need to re-confirm in the portal.'))return;
+      shipPost('/api/supply/portal-submit',{po:p,po_confirmed:false,submitted_by:'admin'},function(){ if(poBy[p]){poBy[p].supplier_confirmed=null;poBy[p].supplier_confirmed_by='';} invalidateDerived(); poRefetchPanel(p,i); }); }; });
     document.querySelectorAll('#podet-'+i+' .pom-po').forEach(function(inp){ inp.onchange=function(){ var oldpo=inp.dataset.po, np=inp.value.trim(); if(!np||np===oldpo){inp.value=oldpo;return;} if(!confirm('Rename PO '+oldpo+' → '+np+'? Updates all its lines and references.')){inp.value=oldpo;return;}
       shipPost('/api/supply/po/'+encodeURIComponent(oldpo)+'/rename',{new_po:np},function(){ poGone(); }); }; });
     document.querySelectorAll('#podet-'+i+' .payin').forEach(function(inp){ inp.onchange=function(){
@@ -2144,7 +2131,7 @@
     var today=new Date().toISOString().slice(0,10);
     h+='<div class="tw"><table style="width:max-content"><thead><tr><th class="l">PO</th><th class="l">Branch</th><th class="l">Supplier</th><th class="l">Client sales ref</th><th class="l">Dispatch order</th><th class="l">Deadline</th><th class="l">Likely arrival</th><th class="l">Shipment</th><th class="l">Crossdock refs</th></tr></thead><tbody>';
     list.forEach(function(r){
-      var late=r.client_deadline && r.delivery && r.delivery>r.client_deadline;   // forecast to arrive after the client deadline
+      var late=r.client_deadline && ((r.checkin && r.checkin>r.client_deadline) || (r.delivery && r.delivery>r.client_deadline));   // completion or arrival after the client deadline
       var dlOver=r.client_deadline && r.client_deadline<today;
       h+='<tr><td class="l"><button class="lnk-btn dc-po" data-po="'+esc(r.po)+'" title="open this PO’s Client/FBA tab"><b>'+esc(r.po)+'</b></button></td>'
         +'<td class="l">'+esc(r.branch||'')+'</td><td class="l">'+esc(r.supplier_name||'')+'</td>'

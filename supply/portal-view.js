@@ -502,7 +502,14 @@
       function badge(n){ return n>0?' <span class="ex-badge">'+n+'</span>':''; }
       var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab pptab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'">'+t[1]+badge(t[3])+'</button>';}).join('')+'</div>';
       var panels=tabs.map(function(t,ti){return '<div class="pptab-panel" data-pt="'+t[0]+'"'+(ti===0?'':' style="display:none"')+'>'+t[2]+'</div>';}).join('');
-      return '<div class="ppx" style="padding:4px 2px;max-width:820px;text-align:left">'+bar+panels+'</div>'; }
+      // PO confirmation banner — the supplier reviews SKUs / quantities (ORDER PLAN) + dates and formally confirms the order
+      var confirmed=!!p.supplier_confirmed;
+      var confirmBar='<div style="margin:0 0 10px;padding:8px 11px;border-radius:6px;font-size:12px;'+(confirmed?'background:#dcfce7;border:1px solid #86efac':'background:#fef3c7;border:1px solid #fcd34d')+'">'
+        +(confirmed
+          ? '✓ <b>Order confirmed</b> on '+esc(p.supplier_confirmed)+(p.supplier_confirmed_by?' · '+esc(p.supplier_confirmed_by):'')+' &nbsp; <button class="save-btn light pp-confirm" data-po="'+po+'" data-v="0">Withdraw confirmation</button>'
+          : '⏳ <b>Please confirm this order.</b> Review the SKUs &amp; quantities (ORDER PLAN tab) and the dates, amend anything that\'s wrong, then confirm. &nbsp; <button class="save-btn pp-confirm" data-po="'+po+'" data-v="1" style="background:#16a34a;color:#fff;border-color:#16a34a">✓ Confirm order</button>')
+        +'</div>';
+      return '<div class="ppx" style="padding:4px 2px;max-width:820px;text-align:left">'+confirmBar+bar+panels+'</div>'; }
     function ppPOs(pos, data){ var lb=data.lb||{}, notesByPo=data.notesByPo||{}, subsByPo=data.subsByPo||{}, costsByPo=data.costsByPo||{}, supSkus=data.supSkus||[], xdByPo=data.xdByPo||{}, addByPo=data.addByPo||{};
       if(!pos.length)return '<div class="count">No purchase orders for this supplier.</div>';
       var today=new Date().toISOString().slice(0,10);
@@ -568,6 +575,11 @@ scope.querySelectorAll('.pp-dl-po').forEach(function(btn){ btn.onclick=function(
 scope.querySelectorAll('.pp-dl-prod').forEach(function(btn){ btn.onclick=function(){ ppDl(EP.labelData+'?prod='+encodeURIComponent(btn.dataset.prod)+'&supplier='+encodeURIComponent(STATE.supplierName), btn.dataset.prod+'_barcodes.zip', btn); }; });
 scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(){ if(BC.placeholder){BC.note();return;} btn.disabled=true; fetch(EP.labelData+'?skus='+encodeURIComponent(btn.dataset.skus)).then(function(r){return r.json();}).then(function(rows){ btn.disabled=false; if(!rows||!rows.length||rows.error){alert('No crossdock barcodes found');return;} BC.crossdock(rows,btn.dataset.po,btn.dataset.do,btn.dataset.client,btn.dataset.address,btn,btn.dataset.po+'_crossdock_labels.zip'); }).catch(function(){alert('Could not load crossdock labels');btn.disabled=false;}); }; });
               scope.querySelectorAll('.pp-shiplabel').forEach(function(btn){ btn.onclick=function(){ dlShipsWith(btn.dataset.po, btn); }; });   // #11 — SHIPS WITH labels when consolidated under another supplier
+              // PO confirmation: supplier confirms (or withdraws) acceptance of the order's SKUs / qty / dates
+              scope.querySelectorAll('.pp-confirm').forEach(function(btn){ btn.onclick=function(){ var v=btn.dataset.v==='1';
+                if(v && !confirm('Confirm this order? You’re accepting the SKUs, quantities and dates as shown.'))return;
+                if(!v && !confirm('Withdraw your confirmation of this order?'))return;
+                btn.disabled=true; postJSON(EP.submit,{po:btn.dataset.po,supplier_id:sid,submitted_by:by,po_confirmed:v},function(){ reload(); }); }; });
               // post a note → refresh just this PO's timeline in place (re-fetch the supplier's notes, stay on TIMELINE)
               scope.querySelectorAll('.pp-note-post').forEach(function(btn){ btn.onclick=function(){ var ta=pick('pp-note-body',btn.dataset.po); var v=(ta.value||'').trim(); if(!v)return; var po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); btn.disabled=true;
                 postJSON(EP.note,{po:po,supplier_id:sid,body:v,author_kind:'supplier',author_email:by},function(){
