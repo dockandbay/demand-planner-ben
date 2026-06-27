@@ -388,7 +388,7 @@
     var BC=opts.bc||(typeof bcDownloadSheets==='function'?{sheets:bcDownloadSheets,crossdock:bcDownloadCrossdock}:{placeholder:true,note:function(){alert('Labels unavailable.');}});
     var _ppData=null, PORTAL_TAB='pos', PORTAL_PO_ST=null;
     var rootEl=opts.root; if(!rootEl.closest('#supply-root')){rootEl.id='supply-root';} rootEl.style.display='block';
-    rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders</span><span class="rtab" data-pt="deposits">Deposits</span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
+    rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders</span><span class="rtab" data-pt="shipmentplan">Shipment Plan</span><span class="rtab" data-pt="deposits">Deposits</span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
     var tabsEl=document.getElementById('pp-tabs'), body=document.getElementById('pp-body');
     function postJSON(ep,b2,cb){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b2)}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} cb&&cb(j); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); }); }
     function ppCard(l,v){ return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px 14px;min-width:120px"><div class="tiny mut">'+l+'</div><div style="font-weight:700;font-size:16px">'+v+'</div></div>'; }
@@ -541,8 +541,34 @@
       var rows=deps.filter(function(d){return d.is_deposit;}).map(function(d){
         return '<tr><td class="l">'+esc(d.reference||'—')+'</td><td style="text-align:right">$'+units(d.amount)+'</td><td class="l">'+(d.date_paid?esc(fd(d.date_paid)):'<span class="mut">unpaid</span>')+'</td><td style="text-align:right">$'+units(d.deposit_used||0)+'</td><td style="text-align:right">$'+units(d.deposit_remaining||0)+'</td></tr>'; }).join('');
       return cards+'<div class="tw"><table><thead><tr><th class="l">Deposit reference</th><th style="text-align:right">Amount</th><th class="l">Paid</th><th style="text-align:right">Drawn down</th><th style="text-align:right">Remaining</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5" class="l mut">No deposits for this supplier.</td></tr>')+'</tbody></table></div>'; }
+          function ppShipmentPlan(rows){ rows=rows||[];
+            if(!rows.length)return '<div class="count">No shipments for your orders yet.</div>';
+            return rows.map(function(s){
+              var fxd=[s.departure&&('dep '+fd(s.departure)),s.landing&&('land '+fd(s.landing)),s.arrival&&('arr '+fd(s.arrival))].filter(Boolean).join(' · ')||'—';
+              var members=s.members.length?'<table style="font-size:11px;width:auto;margin-top:4px"><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th>Est. pallets</th><th class="l">Client</th></tr></thead><tbody>'
+                +s.members.map(function(m){return '<tr><td class="l">'+esc(m.po)+'</td><td class="l">'+esc(m.supplier||'')+'</td><td style="text-align:right">'+esc(m.pallets)+'</td><td class="l">'+(m.client?esc(m.client):'<span class="mut">—</span>')+'</td></tr>';}).join('')+'</tbody></table>':'<span class="mut tiny">no other POs on this shipment</span>';
+              return '<div style="border:1px solid '+(s.escalated?'#fca5a5':'#e0e0e0')+';border-radius:8px;padding:10px 12px;margin-bottom:10px;background:'+(s.escalated?'#fef2f2':'#fff')+'">'
+                +'<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:baseline">'
+                +'<div style="font-weight:700;font-size:13px">'+esc(s.master_po)+'</div>'
+                +'<div class="tiny mut">'+esc(s.mode||'')+(s.carrier?' · '+esc(s.carrier):'')+(s.flex_id?' · '+esc(s.flex_id):'')+'</div>'
+                +'<div class="tiny mut">'+fxd+'</div>'
+                +(s.master_client?'<div class="tiny">Client: <b>'+esc(s.master_client)+'</b></div>':'')
+                +(s.master_deadline?'<div class="tiny">Deadline: <b>'+fd(s.master_deadline)+'</b></div>':'')
+                +'<button class="save-btn pp-esc" data-ref="'+esc(s.shipment_ref)+'" data-on="'+(s.escalated?'1':'0')+'" style="margin-left:auto'+(s.escalated?';background:#dc2626;color:#fff;border-color:#dc2626':';color:#dc2626')+'">'+(s.escalated?'⚑ ESCALATED':'⚑ Escalate')+'</button>'
+                +'</div><div style="margin-top:6px">'+members+'</div>'
+                +'<div class="sp-timeline" data-ref="'+esc(s.shipment_ref)+'" style="margin-top:8px;border-top:1px solid #f1f1f1;padding-top:6px"></div></div>'; }).join(''); }
+          function ppShipTimeline(ref){ var box=rootEl.querySelector('.sp-timeline[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(!box)return;
+            fetch(EP.shipmentNotesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){
+              box.innerHTML='<div class="tiny" style="font-weight:600;margin-bottom:3px">Timeline</div>'
+                +((notes&&notes.length)?notes.map(function(n){return '<div class="tiny" style="margin:2px 0"><span class="mut">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span> — '+esc(n.body)+'</div>';}).join(''):'<div class="mut tiny">No timeline entries yet.</div>')
+                +'<div style="display:flex;gap:5px;margin-top:5px"><input class="fci sp-note-in" placeholder="Add a timeline note…" style="flex:1;max-width:380px;text-align:left"><button class="save-btn sp-note-post">Post</button></div>';
+              box.querySelector('.sp-note-post').onclick=function(){ var inp=box.querySelector('.sp-note-in'); var v=(inp.value||'').trim(); if(!v)return;
+                postJSON(EP.shipmentNote,{shipment_ref:ref,author_kind:'supplier',author_email:STATE.by,body:v},function(){ ppShipTimeline(ref); }); }; }).catch(function(){}); }
           function renderPP(){ if(!_ppData)return; var body=document.getElementById('pp-body');
             tabsEl.querySelectorAll('.rtab').forEach(function(t){t.classList.toggle('active',t.dataset.pt===PORTAL_TAB);});
+            if(PORTAL_TAB==='shipmentplan'){ body.innerHTML=ppShipmentPlan(_ppData.shipmentPlan);
+              body.querySelectorAll('.pp-esc').forEach(function(b){ b.onclick=function(){ var on=b.dataset.on!=='1'; postJSON(EP.shipmentEscalate+encodeURIComponent(b.dataset.ref)+'/escalate',{escalated:on},function(){ reload(); }); }; });
+              (_ppData.shipmentPlan||[]).forEach(function(s){ ppShipTimeline(s.shipment_ref); }); return; }
             if(PORTAL_TAB==='deposits'){ body.innerHTML=ppDeposits(_ppData.sdep); return; }
             // POs tab — status pill filters; default to PRODUCTION + SHIPPING
             var seen={}, present=[]; _ppData.pos.forEach(function(p){ var s=(p.status||'').toUpperCase(); if(s&&!seen[s]){seen[s]=1;present.push(s);} });

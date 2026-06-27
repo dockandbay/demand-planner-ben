@@ -38,8 +38,10 @@ plus new numbered migrations on top. See `migrations/README.md`.
   - **`073_po_asn_numbers.sql`** — `purchase_orders.asn_numbers` (comma-separated ASN numbers; PO Shipments
     sub-tab / iFulfillment). Idempotent.
   - **`074_supplier_po_confirmation.sql`** — `supplier_confirmed_at` / `supplier_confirmed_by` on
-    purchase_orders (supplier PO confirmation workflow). Idempotent. ⬅ *latest.*
-- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`074` in order. Do **not** run
+    purchase_orders (supplier PO confirmation workflow). Idempotent.
+  - **`075_shipment_notes.sql`** — `planner.shipment_notes` (per-shipment timeline; admin + portal).
+  - **`076_shipment_escalated.sql`** — `shipments.escalated` / `escalated_at` (ESCALATED toggle + filter + Action). ⬅ *latest.*
+- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`076` in order. Do **not** run
   `schema.sql` against an already-migrated DB (the table creates aren't idempotent).
 
 ---

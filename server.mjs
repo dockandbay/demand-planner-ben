@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.363';
+const APP_VERSION = 'v20.364';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1095,6 +1095,42 @@ app.get('/api/supply/:section', async (req, res) => {
           WHERE coalesce(s.status,'') NOT ILIKE '%discontinued%' ORDER BY s.category, s.sku`));
       case 'client-attachments':   // Client/FBA docs across all POs (category='client') — portal Barcodes & Labels tab
         return res.json(await q(`SELECT po, id, filename FROM planner.portal_attachments WHERE coalesce(category,'')='client' ORDER BY uploaded_at DESC`));
+      case 'shipment-plan': {   // master shipments + the POs aboard each (Shipment Plan — admin sub-tab + supplier portal tab)
+        const rows = await q(`
+          SELECT p.shipment_ref,
+            coalesce(sh.master_po, p.shipment_ref) master_po,
+            coalesce(lower(sh.mode), CASE WHEN fx.mode ILIKE 'air%' THEN 'air' ELSE 'sea' END) mode,
+            coalesce(sh.carrier, CASE WHEN sh.carrier_ref ILIKE 'FLEX%' THEN 'Flexport' END, '') carrier,
+            coalesce(sh.carrier_ref,'') carrier_ref, coalesce(fx.flex_id,'') flex_id,
+            to_char(coalesce(sh.departure_date, fx.departure_date),'YYYY-MM-DD') departure,
+            to_char(coalesce(sh.landing_date, fx.landing_date),'YYYY-MM-DD') landing,
+            to_char(coalesce(sh.arrival_date, fx.arrival_date),'YYYY-MM-DD') arrival,
+            p.po, coalesce(p.supplier_name,'') supplier_name, coalesce(p.client,'') client,
+            to_char(p.client_deadline_date,'YYYY-MM-DD') client_deadline,
+            (p.po = coalesce(sh.master_po, p.shipment_ref)) is_master, coalesce(sh.escalated,false) escalated,
+            round(coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0))
+              FROM planner.purchase_order_lines l LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=p.po),0)::numeric,1) pallets
+          FROM planner.purchase_orders p
+          LEFT JOIN planner.shipments sh ON sh.shipment_ref=p.shipment_ref
+          LEFT JOIN LATERAL (SELECT f.flex_id, f.mode, f.departure_date, f.landing_date, f.arrival_date FROM planner.flexport_shipments f
+            WHERE f.flex_id=sh.carrier_ref OR f.shipment_name=p.shipment_ref OR f.flex_id=p.flexport_reference
+            ORDER BY (f.flex_id=p.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true
+          WHERE coalesce(p.shipment_ref,'')<>'' AND coalesce(p.status,'') NOT ILIKE '%complete%'
+          ORDER BY p.shipment_ref, (p.po = coalesce(sh.master_po, p.shipment_ref)) DESC, p.po`);
+        const byRef = {};
+        rows.forEach(r => { let s = byRef[r.shipment_ref];
+          if (!s) s = byRef[r.shipment_ref] = { shipment_ref: r.shipment_ref, master_po: r.master_po, mode: r.mode, carrier: r.carrier, carrier_ref: r.carrier_ref, flex_id: r.flex_id, departure: r.departure, landing: r.landing, arrival: r.arrival, escalated: !!r.escalated, master_client: '', master_deadline: '', total_pallets: 0, suppliers: [], members: [] };
+          s.total_pallets += Number(r.pallets) || 0;
+          if (s.suppliers.indexOf(r.supplier_name) < 0 && r.supplier_name) s.suppliers.push(r.supplier_name);
+          if (r.is_master) { s.master_client = r.client; s.master_deadline = r.client_deadline; }
+          else s.members.push({ po: r.po, supplier: r.supplier_name, pallets: Number(r.pallets) || 0, client: r.client });
+        });
+        return res.json(Object.keys(byRef).map(k => { const s = byRef[k]; s.total_pallets = Math.round(s.total_pallets * 10) / 10; return s; })
+          .sort((a, b) => (a.departure || '9999').localeCompare(b.departure || '9999') || a.shipment_ref.localeCompare(b.shipment_ref)));
+      }
+      case 'shipment-notes':   // ?ref=… → timeline notes for a master shipment
+        return res.json(await q(`SELECT id, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at
+          FROM planner.shipment_notes WHERE shipment_ref=$1 ORDER BY created_at`, [req.query.ref || '']));
       case 'flexport':
         return res.json(await q(`SELECT flex_id, shipment_name, mode, status_description status, incoterm,
           CASE WHEN arrival_date < current_date THEN 'Completed' ELSE 'Active' END status_group,
@@ -1198,7 +1234,8 @@ app.get('/api/supply/:section', async (req, res) => {
                CASE WHEN a.all_complete OR coalesce(sh.arrival_date, fx.arrival_date, sh.landing_date, fx.landing_date) < current_date THEN 'Complete'
                     WHEN coalesce(sh.departure_date, fx.departure_date) <= current_date THEN 'Active' ELSE 'Planned' END) <> 'Complete'
              AND sh.carrier_ref IS NULL AND fx.flex_id IS NULL) is_exception,
-            (coalesce(a.pallets,0) > 20) over_pallets   -- est. cargo over one 20-pallet container → exception
+            (coalesce(a.pallets,0) > 20) over_pallets,   -- est. cargo over one 20-pallet container → exception
+            coalesce(sh.escalated,false) escalated
           FROM planner.shipments sh
           LEFT JOIN agg a ON a.shipment_ref=sh.shipment_ref
           LEFT JOIN LATERAL (SELECT f.* FROM planner.flexport_shipments f
@@ -1555,6 +1592,11 @@ app.get('/api/supply/:section', async (req, res) => {
               WHERE p.client_deadline_date IS NOT NULL AND coalesce(p.status,'') NOT ILIKE '%complete%'
             ) cd
             WHERE cd.completion IS NOT NULL AND cd.completion > cd.cdl
+          UNION ALL
+          -- escalated shipment (set in the supplier portal / Shipments grid) → review while escalated
+          SELECT 'high','Shipment escalated', shipment_ref,
+            'Shipment '||shipment_ref||' has been escalated — review', 'shipmentplan','','', shipment_ref
+            FROM planner.shipments WHERE escalated=true
           UNION ALL
           SELECT 'amber','Order-plan change pending ERP push', l.po,
             count(*)||' line(s) edited, not yet uploaded to the ERP', 'upload','po','', l.po
@@ -2124,6 +2166,26 @@ app.post('/api/supply/portal-submit', async (req, res) => {
       else { await pool.query(`UPDATE planner.purchase_orders SET supplier_confirmed_at=NULL, supplier_confirmed_by=NULL WHERE po=$1`, [b.po]); out.applied.push('PO confirmation cleared'); }
     }
     res.json(out);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Toggle a shipment's ESCALATED status (supplier portal or admin grid). Upserts the shipment row if needed.
+app.post('/api/supply/shipment/:ref/escalate', async (req, res) => {
+  const ref = req.params.ref; const on = !!(req.body && req.body.escalated);
+  try {
+    await pool.query(`INSERT INTO planner.shipments (shipment_ref, escalated, escalated_at)
+      VALUES ($1,$2, CASE WHEN $2 THEN now() END)
+      ON CONFLICT (shipment_ref) DO UPDATE SET escalated=$2, escalated_at=CASE WHEN $2 THEN now() ELSE NULL END, updated_at=now()`, [ref, on]);
+    res.json({ ok: true, escalated: on });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Shipment Plan timeline — post a note against a master shipment (admin or supplier).
+app.post('/api/supply/shipment-note', async (req, res) => {
+  const b = req.body || {};
+  if (!b.shipment_ref || !b.body) return res.status(400).json({ error: 'shipment_ref and body required' });
+  try {
+    const r = await pool.query(`INSERT INTO planner.shipment_notes (shipment_ref, author_kind, author_email, body)
+      VALUES ($1,$2,$3,$4) RETURNING id`, [b.shipment_ref, b.author_kind || 'internal', b.author_email || null, String(b.body)]);
+    res.json({ id: r.rows[0].id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Portal data for the preview/portal: notes + submissions for a supplier (scoped by supplier_id).

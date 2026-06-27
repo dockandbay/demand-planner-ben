@@ -4,6 +4,17 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.364 - Shipment Plan (admin sub-tab + portal tab) + shipment ESCALATED status
+
+- **Shipment Plan** — master shipments and the POs aboard each, on both **SUPPLY ▸ Shipments ▸ Shipment Plan**
+  (new sub-tab) and a new **SHIPMENT PLAN** tab in the supplier portal. Shows Shipment PO, ship method, carrier,
+  Flexport ID + dates, master client + client deadline, and the other POs on the shipment (PO / supplier / est.
+  pallets / client). Each shipment has a **timeline** (notes) editable from both surfaces (migration 075,
+  `shipment_notes`; endpoints `/api/supply/shipment-plan`, `/shipment-notes`, `/shipment-note`).
+- **ESCALATED status** — toggle on the supplier portal Shipment Plan and the SUPPLY ▸ Shipments grid (new
+  column right after "Shipment (master)" + an Escalated filter). Stored on the shipment (migration 076,
+  `shipments.escalated`); an escalated shipment raises a high-severity SUPPLY ▸ Actions item.
+
 ## v20.363 - "Client deadline at risk" action (completion after the client deadline)
 
 PO-55EUBL1 had a client deadline (1 Jul) with completion forecast after it (6 Jul) but wasn't flagged. Added a

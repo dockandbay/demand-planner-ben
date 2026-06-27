@@ -1727,11 +1727,55 @@
   function shipPost(ep,body,cb){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
     .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); cb&&cb(j); })
     .catch(function(e){ alert('Failed: '+(e.message||e)); }); }
+  var SHIP_SUBS=[['grid','Shipments'],['plan','Shipment Plan']];
+  var shipSubTab='grid';
   function renderShipments(data){ var c=document.getElementById('supply-content');
-    fetchLookups(function(){ shipInner(data,c); }); }
+    c.innerHTML='<div id="ship-subtabs">'+SHIP_SUBS.map(function(t){return '<span class="rtab'+(shipSubTab===t[0]?' active':'')+'" data-st="'+t[0]+'">'+t[1]+'</span>';}).join('')+'</div><div id="ship-body"><div class="count">Loading…</div></div>';
+    c.querySelectorAll('#ship-subtabs .rtab').forEach(function(p){p.onclick=function(){shipSubTab=p.dataset.st;c.querySelectorAll('#ship-subtabs .rtab').forEach(function(x){x.classList.toggle('active',x===p);});shipRenderSub(data);};});
+    shipRenderSub(data); }
+  function shipRenderSub(data){ var b=document.getElementById('ship-body');
+    if(shipSubTab==='plan'){ renderShipmentPlan(b); return; }
+    fetchLookups(function(){ shipInner(data,b); }); }
+  // SHIPMENT PLAN (admin sub-tab): all master shipments + the POs aboard, with escalate toggle + per-shipment timeline.
+  function renderShipmentPlan(b){ b.innerHTML='<div class="count">Loading…</div>';
+    fetch('/api/supply/shipment-plan').then(function(r){return r.json();}).then(function(rows){
+      if(!rows.length){ b.innerHTML='<div class="count">No active master shipments.</div>'; return; }
+      b.innerHTML='<div class="bar"><span class="count">'+rows.length+' master shipments</span><input class="flt" id="spq" placeholder="filter shipment / client / supplier…" style="margin-left:auto;width:260px"></div><div id="sp-list"></div>';
+      function card(s){
+        var fxd=[s.departure&&('dep '+fd(s.departure)),s.landing&&('land '+fd(s.landing)),s.arrival&&('arr '+fd(s.arrival))].filter(Boolean).join(' · ')||'—';
+        var members=s.members.length?'<table style="font-size:11px;width:auto;margin-top:4px"><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th>Est. pallets</th><th class="l">Client</th></tr></thead><tbody>'
+          +s.members.map(function(m){return '<tr><td class="l"><button class="lnk-btn sp-po" data-po="'+esc(m.po)+'">'+esc(m.po)+'</button></td><td class="l">'+esc(m.supplier||'')+'</td><td style="text-align:right">'+esc(m.pallets)+'</td><td class="l">'+(m.client?esc(m.client):'<span class="mut">—</span>')+'</td></tr>';}).join('')+'</tbody></table>':'<span class="mut tiny">no other POs on this shipment</span>';
+        return '<div class="sp-card" style="border:1px solid '+(s.escalated?'#fca5a5':'#e0e0e0')+';border-radius:8px;padding:10px 12px;margin-bottom:10px;background:'+(s.escalated?'#fef2f2':'#fff')+'">'
+          +'<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:baseline">'
+          +'<div style="font-weight:700;font-size:13px"><button class="lnk-btn sp-po" data-po="'+esc(s.master_po)+'">'+esc(s.master_po)+'</button></div>'
+          +'<div class="tiny mut">'+esc(s.mode||'')+(s.carrier?' · '+esc(s.carrier):'')+(s.flex_id?' · '+esc(s.flex_id):'')+'</div>'
+          +'<div class="tiny mut">'+fxd+'</div>'
+          +(s.master_client?'<div class="tiny">Client: <b>'+esc(s.master_client)+'</b></div>':'')
+          +(s.master_deadline?'<div class="tiny">Deadline: <b>'+fd(s.master_deadline)+'</b></div>':'')
+          +'<div class="tiny mut">'+s.total_pallets+' pallets · '+s.members.length+' other PO(s)</div>'
+          +'<button class="save-btn sp-esc" data-ref="'+esc(s.shipment_ref)+'" data-on="'+(s.escalated?'1':'0')+'" style="margin-left:auto'+(s.escalated?';background:#dc2626;color:#fff;border-color:#dc2626':';color:#dc2626')+'">'+(s.escalated?'⚑ ESCALATED':'⚑ escalate')+'</button>'
+          +'</div><div style="margin-top:6px">'+members+'</div>'
+          +'<div class="sp-timeline" data-ref="'+esc(s.shipment_ref)+'" style="margin-top:8px;border-top:1px solid #f1f1f1;padding-top:6px"></div></div>'; }
+      function draw(q){ q=(q||'').toLowerCase();
+        var list=rows.filter(function(s){return !q||((s.master_po||'')+' '+(s.master_client||'')+' '+(s.suppliers||[]).join(' ')).toLowerCase().indexOf(q)>=0;});
+        document.getElementById('sp-list').innerHTML=list.map(card).join('');
+        document.querySelectorAll('#sp-list .sp-po').forEach(function(x){ x.onclick=function(){ gotoPO(x.dataset.po); }; });
+        document.querySelectorAll('#sp-list .sp-esc').forEach(function(x){ x.onclick=function(){ var on=x.dataset.on!=='1'; shipPost('/api/supply/shipment/'+encodeURIComponent(x.dataset.ref)+'/escalate',{escalated:on},function(){ invalidateDerived(); renderShipmentPlan(b); }); }; });
+        list.forEach(function(s){ loadShipTimeline(s.shipment_ref,'internal','/api/supply/shipment-notes?ref=','/api/supply/shipment-note'); }); }
+      draw(''); var qb=document.getElementById('spq'); if(qb)qb.oninput=function(){draw(this.value);};
+    }).catch(function(){ b.innerHTML='<div style="color:#dc2626">Failed to load shipment plan.</div>'; }); }
+  // shared per-shipment timeline (used by admin + portal): render notes + a post box into .sp-timeline[data-ref]
+  function loadShipTimeline(ref, authorKind, getBase, postEp){ var box=document.querySelector('.sp-timeline[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(!box)return;
+    fetch(getBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){
+      var h='<div class="tiny" style="font-weight:600;margin-bottom:3px">Timeline</div>'
+        +((notes&&notes.length)?notes.map(function(n){return '<div class="tiny" style="margin:2px 0"><span class="mut">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'Supplier':'D&amp;B')+'</span> — '+esc(n.body)+'</div>';}).join(''):'<div class="mut tiny">No timeline entries yet.</div>')
+        +'<div style="display:flex;gap:5px;margin-top:5px"><input class="fci sp-note-in" placeholder="Add a timeline note…" style="flex:1;max-width:380px;text-align:left"><button class="save-btn sp-note-post">Post</button></div>';
+      box.innerHTML=h;
+      box.querySelector('.sp-note-post').onclick=function(){ var inp=box.querySelector('.sp-note-in'); var v=(inp.value||'').trim(); if(!v)return;
+        shipPost(postEp,{shipment_ref:ref,author_kind:authorKind||'internal',body:v},function(){ loadShipTimeline(ref,authorKind,getBase,postEp); }); }; }).catch(function(){}); }
   function shipInner(data,c){
     var ships=data.shipments||[], un=data.unassigned||[];
-    var FILTERS=[['active','Active'],['completed','Completed'],['exceptions','Exceptions'],['all','All']];
+    var FILTERS=[['active','Active'],['completed','Completed'],['exceptions','Exceptions'],['escalated','Escalated'],['all','All']];
     var state={f:_pendingShip?'all':'active',q:'',ctry:'',br:''};   // show all when navigating to a specific shipment
     var ctrys=Array.from(new Set(ships.map(function(s){return s.market;}).filter(Boolean))).sort();
     var brs={}; ships.forEach(function(s){ (s.branch||'').split(',').forEach(function(b){ b=b.trim(); if(b)brs[b]=1; }); });
@@ -1746,11 +1790,13 @@
     function cur(){ return ships.filter(function(s){
       if(state.ctry && (s.market||'')!==state.ctry)return false;
       if(state.br && (s.branch||'').indexOf(state.br)<0)return false;
-      if(state.f==='all')return true; if(state.f==='exceptions')return shipIsExc(s); if(state.f==='completed')return s.status==='Complete'||s.status==='Completed'; return s.status!=='Complete'&&s.status!=='Completed'; }); }
+      if(state.f==='all')return true; if(state.f==='escalated')return !!s.escalated; if(state.f==='exceptions')return shipIsExc(s); if(state.f==='completed')return s.status==='Complete'||s.status==='Completed'; return s.status!=='Complete'&&s.status!=='Completed'; }); }
     function view(){ var f=filt(cur(),state.q); document.getElementById('sup-count').textContent=f.length+' / '+ships.length+' shipments';
       document.getElementById('sup-grid').innerHTML=shipTable(f); bindShipExpand(); bindEdits();
+      document.querySelectorAll('#sup-grid .ship-esc').forEach(function(b){ b.onclick=function(){ var on=b.dataset.on!=='1';
+        shipPost('/api/supply/shipment/'+encodeURIComponent(b.dataset.ref)+'/escalate',{escalated:on},function(){ var s=shipBy[b.dataset.ref]; if(s)s.escalated=on; invalidateDerived(); view(); }); }; });
       if(_pendingShip){ var want=_pendingShip; _pendingShip=null; setTimeout(function(){ expandPending('#sup-grid .po-exp[data-ref]',want); },30); } }
-    c.querySelectorAll('#supply-content > .bar .pill').forEach(function(p){p.onclick=function(){c.querySelectorAll('#supply-content > .bar .pill').forEach(function(x){x.classList.remove('active');});p.classList.add('active');state.f=p.dataset.f;view();};});
+    c.querySelectorAll('.bar .pill[data-f]').forEach(function(p){p.onclick=function(){c.querySelectorAll('.bar .pill[data-f]').forEach(function(x){x.classList.remove('active');});p.classList.add('active');state.f=p.dataset.f;view();};});
     document.getElementById('sup-search').oninput=function(){state.q=this.value;view();};
     document.getElementById('ship-ctry').onchange=function(){state.ctry=this.value;view();};
     document.getElementById('ship-br').onchange=function(){state.br=this.value;view();};
@@ -1785,13 +1831,14 @@
     if(m==='air')return {c:Math.round((Number(s.weight_kg)||0)*(Number(s.air_rate)||15)),src:'~air'};
     var se=seaEst(s.sea_tiers, s.pallets); return se?{c:se.cost,src:'~sea'}:{c:null,src:''}; }
   function shipTable(rows){ if(!rows.length)return '<div class="count">No shipments in this filter.</div>';
-    var h='<div class="tw"><table style="width:max-content"><thead><tr><th class="l"></th><th class="l">Shipment (master)</th><th class="l">Status</th><th class="l">Mode</th><th class="l">Ship to</th><th class="l">Branch</th><th>POs</th><th>Suppliers</th><th>Pallets</th><th class="l">Carrier</th><th class="l">Carrier ref</th><th class="l">Departure</th><th class="l">Landing</th><th class="l">Arrival</th><th>Freight</th></tr></thead><tbody>';
+    var h='<div class="tw"><table style="width:max-content"><thead><tr><th class="l"></th><th class="l">Shipment (master)</th><th class="l">Escalated</th><th class="l">Status</th><th class="l">Mode</th><th class="l">Ship to</th><th class="l">Branch</th><th>POs</th><th>Suppliers</th><th>Pallets</th><th class="l">Carrier</th><th class="l">Carrier ref</th><th class="l">Departure</th><th class="l">Landing</th><th class="l">Arrival</th><th>Freight</th></tr></thead><tbody>';
     rows.forEach(function(s,i){ shipBy[s.shipment_ref]=s; var ep='/api/supply/shipment/'+encodeURIComponent(s.shipment_ref);
       var mast=(s.master_po&&s.master_po!==s.shipment_ref)?(' <span class="mut tiny">★'+esc(s.master_po)+'</span>'):'';
       var alert=shipIsExc(s)?' <span class="tool-badge bg-red" title="'+esc(shipExReason(s))+'">⚠ '+esc(shipExShort(s))+'</span>':'';
       var fxl=s.flex_id?(' <a href="https://app.flexport.com/shipments/'+((String(s.carrier_ref||s.flex_id).match(/\d+/)||[''])[0])+'" target="_blank" rel="noopener" class="mut" title="open in Flexport" style="text-decoration:none">↗</a>'):'';
       h+='<tr><td class="l"><button class="planbtn po-exp" data-ref="'+esc(s.shipment_ref)+'" data-i="'+i+'">PLAN</button></td>'
         +'<td class="l"><b>'+esc(s.shipment_ref)+'</b>'+mast+alert+'</td>'
+        +'<td class="l"><button class="save-btn ship-esc" data-ref="'+esc(s.shipment_ref)+'" data-on="'+(s.escalated?'1':'0')+'"'+(s.escalated?' style="background:#dc2626;color:#fff;border-color:#dc2626"':' style="color:#dc2626"')+'>'+(s.escalated?'⚑ ESCALATED':'⚑ escalate')+'</button></td>'
         +'<td class="l">'+shipStatusSel(ep,s.status)+'</td>'
         +'<td class="l">'+modeSel(ep,s.mode_eff)+'</td>'
         +'<td class="l">'+(s.market?esc(s.market):'<span class="mut">—</span>')+'</td>'
@@ -1801,7 +1848,7 @@
         +'<td class="l">'+carrierRefInput(ep,s.carrier_ref,s.mode_eff==='fob')+fxl+'</td>'
         +'<td class="l">'+shipDate(s.departure,s.departure_src)+'</td><td class="l">'+shipDate(s.landing,s.landing_src)+'</td><td class="l">'+shipDate(s.arrival,s.arrival_src)+'</td>'
         +(function(){var fr=shipFreight(s);return '<td>'+(fr.c==null?'<span class="mut">—</span>':money(fr.c))+(fr.src?'<span class="src '+(fr.src==='FLEX'?'fx':'m')+'">'+fr.src+'</span>':'')+'</td>';})()+'</tr>';
-      h+='<tr class="exp-row" id="shipexp-'+i+'" style="display:none"><td colspan="15"><div id="shipdet-'+i+'" class="count">Loading…</div></td></tr>'; });
+      h+='<tr class="exp-row" id="shipexp-'+i+'" style="display:none"><td colspan="16"><div id="shipdet-'+i+'" class="count">Loading…</div></td></tr>'; });
     return h+'</tbody></table></div>'; }
   function bindShipExpand(){ document.querySelectorAll('#supply-root .po-exp[data-ref]').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(){
     var i=b.dataset.i, ex=document.getElementById('shipexp-'+i), open=ex.style.display!=='none';
@@ -2073,7 +2120,7 @@
           function loadPortalData(name){ var sid=supById[name];
             var nf=sid?fetch('/api/supply/portal-notes/'+sid).then(function(r){return r.json();}):Promise.resolve([]);
             var sf=sid?fetch('/api/supply/portal-submissions/'+sid).then(function(r){return r.json();}):Promise.resolve([]);
-            return Promise.all([fetch('/api/supply/purchase-orders').then(function(r){return r.json();}), fetch('/api/supply/order-plan').then(function(r){return r.json();}), fetch('/api/supply/deposits').then(function(r){return r.json();}), nf, sf, fetch('/api/supply/portal-line-costs').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/supplier-skus/'+encodeURIComponent(name)).then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/crossdock-shipments').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/additional-costs').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/client-attachments').then(function(r){return r.json();}).catch(function(){return [];})])
+            return Promise.all([fetch('/api/supply/purchase-orders').then(function(r){return r.json();}), fetch('/api/supply/order-plan').then(function(r){return r.json();}), fetch('/api/supply/deposits').then(function(r){return r.json();}), nf, sf, fetch('/api/supply/portal-line-costs').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/supplier-skus/'+encodeURIComponent(name)).then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/crossdock-shipments').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/additional-costs').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/client-attachments').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/shipment-plan').then(function(r){return r.json();}).catch(function(){return [];})])
               .then(function(res){ var allpos=res[0],lines=res[1],deps=res[2],notes=res[3]||[],subs=res[4]||[],lc=res[5]||[],supSkus=res[6]||[],xd=res[7]||[],ac=res[8]||[],cdocs=res[9]||[];
                 var pos=allpos.filter(function(p){return (p.supplier_name||'')===name;});
                 // per-PO flags for the Barcodes & Labels tab: shipment consolidated under another supplier, + client/FBA docs
@@ -2088,13 +2135,14 @@
                 var costsByPo={}; lc.forEach(function(x){ (costsByPo[x.po]=costsByPo[x.po]||{})[x.sku]=x; });
                 var xdByPo={}; xd.forEach(function(x){ (xdByPo[x.po]=xdByPo[x.po]||{})[x.sku]=x.qty; });
                 var addByPo={}; ac.forEach(function(x){ (addByPo[x.po]=addByPo[x.po]||[]).push(x); });
-                return {pos:pos,lb:lb,sdep:sdep,sid:sid,notesByPo:notesByPo,subsByPo:subsByPo,costsByPo:costsByPo,supSkus:supSkus,xdByPo:xdByPo,addByPo:addByPo}; }); }
+                return {pos:pos,lb:lb,sdep:sdep,sid:sid,notesByPo:notesByPo,subsByPo:subsByPo,costsByPo:costsByPo,supSkus:supSkus,xdByPo:xdByPo,addByPo:addByPo,
+                  shipmentPlan:(res[10]||[]).filter(function(s){return (s.suppliers||[]).indexOf(name)>=0;})}; }); }
           function mountFor(name){ var ban=document.getElementById('pp-banner'), mt=document.getElementById('pp-mount');
             if(!name){ ban.innerHTML=''; mt.innerHTML='<div class="count">Choose a supplier to preview their portal.</div>'; return; }
             ban.innerHTML='<div style="background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:6px 11px;margin:4px 0 10px;font-size:12px">👁 Previewing the portal as <b>'+esc(name)+'</b> — exactly what they see, and any submit acts AS this supplier.</div>';
             if(!window.DBPortalView){ mt.innerHTML='<div class="count" style="color:#dc2626">portal view not loaded</div>'; return; }
             window.DBPortalView.mount({ root:mt, supplierName:name, by:'preview (acting as '+name+')', sid:supById[name],
-              ep:{ lineCost:'/api/supply/portal-line-cost', lineRemove:'/api/supply/portal-line-remove', crossdockQty:'/api/supply/crossdock-qty', addlCost:'/api/supply/additional-cost', addlCostRemove:'/api/supply/additional-cost-remove', note:'/api/supply/portal-note', notesBase:'/api/supply/portal-notes/', noteReadBase:'/api/supply/note-read/', submit:'/api/supply/portal-submit', upload:'/api/supply/portal-upload', labelData:'/api/supply/label-data' },
+              ep:{ lineCost:'/api/supply/portal-line-cost', lineRemove:'/api/supply/portal-line-remove', crossdockQty:'/api/supply/crossdock-qty', addlCost:'/api/supply/additional-cost', addlCostRemove:'/api/supply/additional-cost-remove', note:'/api/supply/portal-note', notesBase:'/api/supply/portal-notes/', noteReadBase:'/api/supply/note-read/', submit:'/api/supply/portal-submit', upload:'/api/supply/portal-upload', labelData:'/api/supply/label-data', shipmentEscalate:'/api/supply/shipment/', shipmentNotesBase:'/api/supply/shipment-notes?ref=', shipmentNote:'/api/supply/shipment-note' },
               bc:{ sheets:bcDownloadSheets, crossdock:bcDownloadCrossdock, placeholder:false },
               getData:function(){ return loadPortalData(name); } }); }
           document.getElementById('pp-sup').onchange=function(){ PORTAL_SUP=this.value; mountFor(this.value); };
