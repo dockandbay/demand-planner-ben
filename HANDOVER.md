@@ -40,8 +40,20 @@ plus new numbered migrations on top. See `migrations/README.md`.
   - **`074_supplier_po_confirmation.sql`** — `supplier_confirmed_at` / `supplier_confirmed_by` on
     purchase_orders (supplier PO confirmation workflow). Idempotent.
   - **`075_shipment_notes.sql`** — `planner.shipment_notes` (per-shipment timeline; admin + portal).
-  - **`076_shipment_escalated.sql`** — `shipments.escalated` / `escalated_at` (ESCALATED toggle + filter + Action). ⬅ *latest.*
-- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`076` in order. Do **not** run
+  - **`076_shipment_escalated.sql`** — `shipments.escalated` / `escalated_at` (ESCALATED toggle + filter + Action).
+  - **`077_prod_require_confirmation.sql`** — `prod_numbers.require_supplier_confirmation` (bool, default FALSE):
+    per-production switch that turns the supplier-confirmation workflow on/off. **Live portal bootstrap must also
+    surface `require_confirmation` per PO** (derive from `prod_numbers.require_supplier_confirmation` by `prod_no`,
+    same as the `purchase-orders` endpoint) so the portal only asks for confirmation when the production requires it.
+  - **`078_shipment_notes_read.sql`** — `shipment_notes.read_at` (read/unread on the shipment timeline; admin grid
+    unread counter). ⬅ *latest.*
+
+  **Live portal bootstrap (POS_SQL_PORTAL) — per-PO fields the admin preview computes client-side and the live
+  portal must also provide:** `ship_other_supplier`, `client_docs`, **`ships_with`** (= the PO's shipment ref),
+  **`ships_with_supplier`** (= supplier owning that shipment's master PO), and **`require_confirmation`**. The
+  portal **Shipment Plan** tab also filters on the shipment payload's **`master_supplier`** (only shows shipments
+  whose master PO belongs to the logged-in supplier).
+- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`078` in order. Do **not** run
   `schema.sql` against an already-migrated DB (the table creates aren't idempotent).
 
 ---
