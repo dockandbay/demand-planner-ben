@@ -4,6 +4,14 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.354 - Reports: Direct to Client report
+
+(#3) New **SUPPLY ▸ Reports ▸ Direct to Client** report — in-progress orders on the **Direct to Client**,
+**UK B2B JLEW** or **UK B2B NEXT** branches, showing PO, supplier, client sales ref, dispatch order, client
+deadline, likely arrival, shipment and crossdock refs (sorted by deadline). Deadline turns red when the order
+is forecast to arrive after it (or it's already passed). The PO links to its Client/FBA tab. Reuses the
+purchase-orders data (no new endpoint).
+
 ## v20.353 - Purchase Orders ▸ Shipments sub-tab (assign/FOB, ASN numbers, pallet labels)
 
 (#10) New **Shipments** sub-tab listing in-progress POs: assign a shipment or mark FOB (reuses the picker +

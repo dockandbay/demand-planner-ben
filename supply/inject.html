@@ -175,8 +175,8 @@
     ['shipments','SHIPMENTS'],
     ['barcodes','BARCODES'],['config','CONFIG']];
   // REPORTS is a parent tab; these are its sub-tabs (the read-across views).
-  var REPORT_SECTIONS=[['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['cashflow','CASH FLOW'],['flexport','FLEXPORT']];
-  var REPORT_KEYS=['upcoming','pipeline','cashflow','flexport'];
+  var REPORT_SECTIONS=[['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['cashflow','CASH FLOW'],['directclient','DIRECT TO CLIENT'],['flexport','FLEXPORT']];
+  var REPORT_KEYS=['upcoming','pipeline','cashflow','directclient','flexport'];
   var reportTab='upcoming';
   var ANNOT={
     actions:'<b>SUPPLY ▸ Actions.</b> Exceptions surfaced from the supply picture — date conflicts, unassigned shipments, missing supplier, unpaid deposits. Grouped by type.',
@@ -190,6 +190,7 @@
     flexport:'<b>SUPPLY ▸ Flexport.</b> Shipment data pulled from Flexport (milestone dates, container/BOL, costs). Links to POs by shipment name / reference.',
     payments:'<b>SUPPLY ▸ Payments.</b> Two tabs: <b>Payments</b> (the register of deposit / completion / balance payments, grouped by run) and <b>Other Payments</b> (sundry costs — freight, fees, write-offs).',
     cashflow:'<b>SUPPLY ▸ Cash Flow.</b> Every payment that makes up each month\'s outflow, itemised. Four sources: <b>supplier goods</b> (deposit / completion / balance per PO — a deposit carrying a reference shows once as its pool line instead), <b>freight</b> (due delivery + 14 days), and <b>import duty &amp; tax</b> (due on landing; USA landing + 7 days). Freight and duty/tax are <b>estimates</b> (badged), sized on the assigned shipment where there is one, else the individual PO. For an overdue, unpaid line set a <b>likely payment date</b> to move it into the month you expect to pay it. Filter by type, status, basis and market.',
+    directclient:'<b>SUPPLY ▸ Reports ▸ Direct to Client.</b> In-progress orders whose branch is <b>Direct to Client</b>, <b>UK B2B JLEW</b> or <b>UK B2B NEXT</b> — with client sales ref, dispatch order, client deadline, likely arrival, shipment and crossdock refs. A red deadline = forecast to arrive after it (or already passed). Click a PO to open its <b>Client/FBA</b> tab.',
     deposits:'<b>SUPPLY ▸ Deposits.</b> The deposit register — amount, Xero FX, date paid, supplier, PROD#. Assign a deposit to a production in <b>PRODUCTIONS</b>; pool used/remaining draws down from the POs.',
     suppliers:'<b>SUPPLY ▸ Suppliers.</b> Terms drive every payment calc.',
     batches:'<b>SUPPLY ▸ Batches.</b> Buying batches (distinct from payment runs).',
@@ -2129,6 +2130,28 @@
   }
 
   // ---- FLEXPORT (read-only; Active/Completed; ref links to Flexport) ----
+  // DIRECT TO CLIENT report (#3): in-progress orders whose branch is Direct to Client / UK B2B JLEW / UK B2B NEXT.
+  function renderDirectClient(rows){ var c=document.getElementById('rep-body')||document.getElementById('supply-content');
+    var isDC=function(b){ b=(b||'').toLowerCase(); return b.indexOf('direct to client')>=0 || b.indexOf('b2b jlew')>=0 || b.indexOf('b2b next')>=0; };
+    var list=(rows||[]).filter(function(r){ return isDC(r.branch) && !/complete/i.test(r.status||''); })
+      .sort(function(a,z){ return (a.client_deadline||'9999').localeCompare(z.client_deadline||'9999') || (a.delivery||'9999').localeCompare(z.delivery||'9999'); });
+    var h=annot('directclient')+'<div class="bar"><span class="count">'+list.length+' in-progress direct-to-client / B2B orders</span></div>';
+    if(!list.length){ c.innerHTML=h+'<div class="count">No in-progress direct-to-client orders.</div>'; return; }
+    var today=new Date().toISOString().slice(0,10);
+    h+='<div class="tw"><table style="width:max-content"><thead><tr><th class="l">PO</th><th class="l">Branch</th><th class="l">Supplier</th><th class="l">Client sales ref</th><th class="l">Dispatch order</th><th class="l">Deadline</th><th class="l">Likely arrival</th><th class="l">Shipment</th><th class="l">Crossdock refs</th></tr></thead><tbody>';
+    list.forEach(function(r){
+      var late=r.client_deadline && r.delivery && r.delivery>r.client_deadline;   // forecast to arrive after the client deadline
+      var dlOver=r.client_deadline && r.client_deadline<today;
+      h+='<tr><td class="l"><button class="lnk-btn dc-po" data-po="'+esc(r.po)+'" title="open this PO’s Client/FBA tab"><b>'+esc(r.po)+'</b></button></td>'
+        +'<td class="l">'+esc(r.branch||'')+'</td><td class="l">'+esc(r.supplier_name||'')+'</td>'
+        +'<td class="l">'+esc(r.sales_order_ref||'<span class="mut">—</span>')+'</td>'
+        +'<td class="l">'+esc(r.dispatch_order_ref||'<span class="mut">—</span>')+'</td>'
+        +'<td class="l"'+((late||dlOver)?' style="color:#dc2626;font-weight:600"':'')+'>'+(r.client_deadline?fd(r.client_deadline):'<span class="mut">—</span>')+((late||dlOver)?' ⚠':'')+'</td>'
+        +'<td class="l">'+(r.delivery?fd(r.delivery):'<span class="mut">—</span>')+'</td>'
+        +'<td class="l">'+(/manufactur/i.test(r.branch||'')?'FOB':(r.shipment?esc(r.shipment):'<span class="mut">— none</span>'))+'</td>'
+        +'<td class="l tiny">'+esc(r.crossdock_skus||'')+'</td></tr>'; });
+    c.innerHTML=h+'</tbody></table></div>';
+    c.querySelectorAll('.dc-po').forEach(function(b){ b.onclick=function(){ gotoPO(b.dataset.po,'client'); }; }); }
   function renderFlexport(rows){ var c=document.getElementById('rep-body')||document.getElementById('supply-content');
     var FILTERS=[['Active','Active'],['Completed','Completed'],['All','All']]; var st={f:'Active',q:''};
     c.innerHTML=annot('flexport')+'<div class="bar">'+FILTERS.map(function(f){return '<span class="pill'+(f[0]==='Active'?' active':'')+'" data-f="'+f[0]+'">'+f[1]+'</span>';}).join('')
@@ -3011,9 +3034,11 @@
       if(rk==='upcoming')return renderUpcoming(d);
       if(rk==='pipeline')return renderPipeline(d);
       if(rk==='cashflow')return renderCashflow(d);
+      if(rk==='directclient')return renderDirectClient(d);
       if(rk==='flexport')return renderFlexport(d); };
     if(cache[rk])return done(cache[rk]);
-    fetch('/api/supply/'+rk).then(function(r){return r.json();}).then(done).catch(function(e){var b=document.getElementById('rep-body');if(b)b.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); }
+    var url='/api/supply/'+(rk==='directclient'?'purchase-orders':rk);
+    fetch(url).then(function(r){return r.json();}).then(done).catch(function(e){var b=document.getElementById('rep-body');if(b)b.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); }
 
   function selectSection(key){
     if(key==='reports')return selectReport(reportTab||'upcoming');
