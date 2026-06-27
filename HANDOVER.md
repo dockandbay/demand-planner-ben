@@ -46,6 +46,10 @@ plus new numbered migrations on top. See `migrations/README.md`.
 
 - **`DATABASE_URL`** — production Supabase, **session-pooler** connection string.
 - **`ANTHROPIC_API_KEY`** — for the server-side AI calls (use a current model id, e.g. `claude-sonnet-4-6`).
+- **`CIN7_AUTH`** — full HTTP Authorization header value for the Cin7 API (e.g. `Basic <base64 user:key>`),
+  used by the **"Update Cin7 Date"** button (PO ▸ Update-ERP popup) which PUTs the planner Completion date to
+  the Cin7 PO `EstimatedDeliveryDate`. **Until set, the endpoint safely no-ops** (returns "not configured", no
+  write) — so this is the only thing needed to enable the live Cin7 write. Gated/confirmed in the UI.
 - **`RESEND_API_KEY`** (+ optional **`PORTAL_FROM`**) — supplier-portal **magic-link email**. Until set,
   `sendMagicEmail()` just logs the link to the server console (no email sent). Swap providers by editing
   `sendMagicEmail()` if not using Resend.

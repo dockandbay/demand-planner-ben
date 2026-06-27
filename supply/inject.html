@@ -857,6 +857,7 @@
       +'<div style="font-weight:700;font-size:15px;margin-bottom:6px">Upload to ERP'+(po?(' — '+esc(po)):'')+'</div>'
       +'<div class="mut" style="margin-bottom:12px;font-size:13px">This does <b>not</b> update Fulfil/Cin7 yet (integration pending). Until then, export the revised order plan (Code &amp; Qty) and enter it into the ERP manually:</div>'
       +'<div style="display:flex;gap:8px;align-items:center"><button class="save-btn" id="erp-dl" style="background:#2563eb;color:#fff;border-color:#2563eb">⬇ Download CSV</button><button class="save-btn" id="erp-cp">⧉ Copy to clipboard</button><button class="save-btn light" id="erp-x" style="margin-left:auto">Close</button></div>'
+      +'<div style="margin-top:12px;border-top:1px solid #eee;padding-top:12px"><button class="save-btn" id="erp-cin7" style="background:#0b6;color:#fff;border-color:#0b6">📅 Update Cin7 Date</button> <span class="mut tiny">sets the Cin7 PO EstimatedDeliveryDate to this PO\'s Completion date (live write)</span></div>'
       +'<div class="mut tiny" id="erp-msg" style="margin-top:10px"></div></div>';
     document.body.appendChild(bg); bg.onclick=function(e){ if(e.target===bg)bg.remove(); };
     var msg=bg.querySelector('#erp-msg'); bg.querySelector('#erp-x').onclick=function(){bg.remove();};
@@ -872,6 +873,15 @@
     bg.querySelector('#erp-cp').onclick=function(){ build(function(rows){ if(!rows){msg.textContent='Failed to load order plan.';return;} if(!rows.length){msg.textContent='No order-plan lines with qty for '+po+'.';return;}
       var tsv='Code\tQty\n'+rows.map(function(r){return String(r.code)+'\t'+r.qty;}).join('\n');   // TAB-separated → pastes into columns
       navigator.clipboard.writeText(tsv).then(function(){msg.textContent=rows.length+' line(s) copied (Code + Qty).';}).catch(function(){msg.textContent='Copy failed — clipboard blocked.';}); }); };
+    // #14 — push this PO's Completion date to Cin7 as EstimatedDeliveryDate (live write, gated server-side on CIN7_AUTH)
+    bg.querySelector('#erp-cin7').onclick=function(){ var r=poBy[po]||{}; var comp=r.checkin;
+      if(!comp){ msg.textContent='No Completion date on this PO to send to Cin7.'; return; }
+      if(!confirm('Update the Cin7 PO EstimatedDeliveryDate to this PO\'s Completion date ('+comp+')?\n\nThis writes to the LIVE Cin7 ERP.'))return;
+      msg.textContent='Updating Cin7…';
+      fetch('/api/supply/po/'+encodeURIComponent(po)+'/cin7-date',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({completion_date:comp})}).then(function(r){return r.json();}).then(function(j){
+        if(j&&j.error){ msg.innerHTML='<span style="color:#dc2626">'+esc(j.error)+'</span>'; return; }
+        msg.innerHTML='<span style="color:#166534;font-weight:700">✓ Cin7 successfully updated</span> ('+esc(j.estimatedDeliveryDate||comp)+') — <a href="'+esc(j.link)+'" target="_blank" rel="noopener">open Cin7 PO ↗</a>';
+      }).catch(function(e){ msg.innerHTML='<span style="color:#dc2626">Failed: '+esc(e.message||e)+'</span>'; }); };
   }
   // a COMPLETE PO's dates are settled — don't flag an ERP date discrepancy on it (the date no longer needs pushing)
   function poComplete(r){ return r.progress==='complete' || r.status==='COMPLETE'; }

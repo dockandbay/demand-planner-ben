@@ -4,6 +4,15 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.356 - "Update Cin7 Date" button (push Completion date to Cin7)
+
+(#14) Added an **📅 Update Cin7 Date** button to the PO ▸ Update-ERP popup. It pushes the PO's **Completion
+date** to the Cin7 PO's `EstimatedDeliveryDate` via `PUT /api/v1/PurchaseOrders?loadboms=0`
+(`[{id, isApproved:true, estimatedDeliveryDate}]`), then shows "✓ Cin7 successfully updated" with a link to the
+Cin7 PO. New endpoint `POST /api/supply/po/:po/cin7-date` resolves the Cin7 id from `erp_purchase_orders.erp_po_id`
+and reads Basic-auth from the **`CIN7_AUTH`** env var. **Live write — gated**: confirms in the UI, and safely
+no-ops (HTTP 501, no write) until `CIN7_AUTH` is set (Diviyaj). No secrets in git.
+
 ## v20.355 - Supplier portal: Shipment Labels when consolidated under another supplier
 
 (#11) On the supplier portal (Config ▸ Portal preview) SHIPMENT tab, when a PO's assigned shipment is

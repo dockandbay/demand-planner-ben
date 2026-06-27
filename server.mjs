@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.355';
+const APP_VERSION = 'v20.356';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2446,6 +2446,28 @@ app.post('/api/supply/po/:po/delete', async (req, res) => {
     res.json({ deleted: r.rowCount });
   } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
+});
+// Update the Cin7 PO's EstimatedDeliveryDate to the planner's Completion date (#14). LIVE write to Cin7 —
+// gated: requires CIN7_AUTH env (full "Basic <base64>" header). Safe no-op (501) when the credential is absent.
+app.post('/api/supply/po/:po/cin7-date', async (req, res) => {
+  const po = req.params.po;
+  const completion = ((req.body && req.body.completion_date) || '').trim();
+  if (!completion) return res.status(400).json({ error: 'completion_date required' });
+  try {
+    const row = (await pool.query('SELECT erp_po_id FROM planner.erp_purchase_orders WHERE po=$1', [po])).rows[0];
+    const cin7Id = row && row.erp_po_id;
+    if (!cin7Id) return res.status(404).json({ error: 'No Cin7 PO id (erp_po_id) found for ' + po + ' — sync the ERP mirror first.' });
+    const auth = process.env.CIN7_AUTH;   // full Authorization header value, e.g. "Basic <base64 user:key>"
+    if (!auth) return res.status(501).json({ error: 'Cin7 API credentials not configured (set CIN7_AUTH). No write performed.' });
+    const edd = /T/.test(completion) ? completion : (completion + 'T00:00:00Z');
+    const body = [{ id: Number(cin7Id) || cin7Id, isApproved: true, estimatedDeliveryDate: edd }];
+    const r = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
+      { method: 'PUT', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const txt = await r.text();
+    if (!r.ok) return res.status(502).json({ error: 'Cin7 API error ' + r.status + ': ' + txt.slice(0, 300) });
+    res.json({ ok: true, cin7_id: cin7Id, estimatedDeliveryDate: edd,
+      link: 'https://go.cin7.com/Cloud/TransactionEntry/TransactionEntry.aspx?idCustomerAppsLink=951111&OrderId=' + encodeURIComponent(cin7Id) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Rename a PO (Master Data tab) — cascades the key across all owned tables + shipment pointers.
 app.post('/api/supply/po/:po/rename', async (req, res) => {
