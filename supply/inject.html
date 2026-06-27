@@ -535,65 +535,33 @@
       c.querySelectorAll('.up-shiprow').forEach(function(b){b.onclick=function(ev){if(ev.target.closest('a')||ev.target.closest('button'))return;gotoShipment(b.dataset.ref);};});
     };
     view(); }
-  var PO_SUBS=[['orders','Purchase Orders'],['master','Master Data'],['shipments','Shipments']];
-  var poSubTab='orders';
-  function renderPO(rows){ var c=document.getElementById('supply-content');
-    c.innerHTML='<div id="po-subtabs">'+PO_SUBS.map(function(t){return '<span class="rtab'+(poSubTab===t[0]?' active':'')+'" data-pt="'+t[0]+'">'+t[1]+'</span>';}).join('')+'</div><div id="po-body"><div class="count">Loading…</div></div>';
-    c.querySelectorAll('#po-subtabs .rtab').forEach(function(p){p.onclick=function(){poSubTab=p.dataset.pt;c.querySelectorAll('#po-subtabs .rtab').forEach(function(x){x.classList.toggle('active',x===p);});poRenderSub(rows);};});
-    poRenderSub(rows); }
-  function poRenderSub(rows){ var b=document.getElementById('po-body');
-    if(poSubTab==='master'){ fetchLookups(function(){ renderPOMaster(rows,b); }); return; }
-    if(poSubTab==='shipments'){ fetchLookups(function(){ renderPOShipSub(rows,b); }); return; }
-    fetchLookups(function(){ poInner(rows,b); }); }
-  // MASTER DATA sub-tab (#2): edit PO Number / Branch / Supplier / Production / Batch / Shipment inline; delete a PO.
-  function renderPOMaster(rows,b){ rows.forEach(function(r){ poBy[r.po]=r; });
-    function refreshMaster(){ invalidateDerived(); delete cache['purchase-orders'];
-      fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(fresh){ if(Array.isArray(fresh)){rows.length=0;Array.prototype.push.apply(rows,fresh);} renderPOMaster(rows,b); }).catch(function(){ selectSection('purchase-orders'); }); }
-    _poRefresh=refreshMaster;
-    var sorted=rows.slice().sort(function(a,z){return (a.po||'').localeCompare(z.po||'');});
-    b.innerHTML=annot('purchase-orders')+'<div class="bar"><span class="count">'+rows.length+' POs · edit master fields inline; Delete removes the PO and its lines</span><input class="flt" id="pom-q" placeholder="filter PO / supplier…" style="margin-left:auto;width:220px"></div>'
-      +lookupDatalists()+'<div class="tw"><table class="po-tbl"><thead><tr><th class="l">PO Number</th><th class="l">Branch</th><th class="l">Supplier</th><th class="l">Production</th><th class="l">Batch ID</th><th class="l">Shipment</th><th></th></tr></thead><tbody id="pom-body"></tbody></table></div>';
-    function rowHtml(r){ var ep='/api/supply/po/'+encodeURIComponent(r.po);
-      var ship=/manufactur/i.test(r.branch||'')?'<span class="tool-badge bg-neutral" title="MANUFACTURING = FOB">FOB</span>'
-        :(r.shipment?'<button class="ship-open" data-ref="'+esc(r.shipment)+'">'+esc(r.shipment)+'</button> <button class="ship-pick" data-po="'+esc(r.po)+'">▾</button>':'<button class="ship-pick" data-po="'+esc(r.po)+'">— assign ▾</button>');
-      return '<tr><td class="l"><input class="fci pom-po" data-po="'+esc(r.po)+'" value="'+esc(r.po)+'" style="width:150px"></td>'
-        +'<td class="l">'+cellPickBtn(r.po,ep,'branch',r.branch,'branch')+'</td>'
-        +'<td class="l">'+cellPickBtn(r.po,'/api/supply/po/'+encodeURIComponent(r.po)+'/supplier','supplier_name',r.supplier_name,'supplier')+'</td>'
-        +'<td class="l">'+cellPickBtn(r.po,ep,'prod_no',r.prod_no,'prod')+'</td>'
-        +'<td class="l">'+cellPickBtn(r.po,ep,'batch_id',r.batch_id,'batch')+'</td>'
-        +'<td class="l">'+ship+'</td>'
-        +'<td class="l"><button class="save-btn light pom-del" data-po="'+esc(r.po)+'" title="delete this PO + its lines" style="color:#dc2626;border-color:#fca5a5">🗑 Delete</button></td></tr>'; }
-    function draw(q){ q=(q||'').toLowerCase(); var list=sorted.filter(function(r){return !q||((r.po||'')+' '+(r.supplier_name||'')).toLowerCase().indexOf(q)>=0;});
-      document.getElementById('pom-body').innerHTML=list.map(rowHtml).join('');
-      bindCellPick(); bindShipPick(); bindShipOpen();
-      document.querySelectorAll('#pom-body .pom-del').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po; if(!confirm('Delete PO '+po+' and all its lines? This cannot be undone.'))return;
-        shipPost('/api/supply/po/'+encodeURIComponent(po)+'/delete',{},function(){ refreshMaster(); }); }; });
-      document.querySelectorAll('#pom-body .pom-po').forEach(function(inp){ inp.onchange=function(){ var oldpo=inp.dataset.po, np=inp.value.trim(); if(!np||np===oldpo){inp.value=oldpo;return;} if(!confirm('Rename PO '+oldpo+' → '+np+'? Updates all its lines and references.')){inp.value=oldpo;return;}
-        shipPost('/api/supply/po/'+encodeURIComponent(oldpo)+'/rename',{new_po:np},function(){ refreshMaster(); }); }; }); }
-    draw(''); var qb=document.getElementById('pom-q'); if(qb)qb.oninput=function(){draw(this.value);}; }
-  // SHIPMENTS sub-tab (#10): assign shipment / FOB per PO, enter ASN numbers (comma-sep), pallet labels for iFulfillment.
-  function renderPOShipSub(rows,b){ rows.forEach(function(r){ poBy[r.po]=r; });
-    function refreshShip(){ invalidateDerived(); delete cache['purchase-orders'];
-      fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(fresh){ if(Array.isArray(fresh)){rows.length=0;Array.prototype.push.apply(rows,fresh);} renderPOShipSub(rows,b); }).catch(function(){ selectSection('purchase-orders'); }); }
-    _poRefresh=refreshShip;
-    // in-progress POs only (not complete) — shipment management is for live orders
-    var live=rows.filter(function(r){return !/complete/i.test(r.status||'');}).sort(function(a,z){return (a.po||'').localeCompare(z.po||'');});
-    b.innerHTML=annot('purchase-orders')+'<div class="bar"><span class="count">'+live.length+' in-progress POs · assign a shipment or mark FOB, enter ASN numbers, download iFulfillment pallet labels</span><input class="flt" id="pos-q" placeholder="filter PO / supplier…" style="margin-left:auto;width:220px"></div>'
-      +lookupDatalists()+'<div class="tw"><table class="po-tbl" style="width:max-content"><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th class="l">Branch</th><th class="l">Shipment / FOB</th><th class="l">ASN numbers <span class="mut tiny">(comma-separated)</span></th><th class="l">Pallet labels</th></tr></thead><tbody id="pos-body"></tbody></table></div>';
-    function rowHtml(r){ var ep='/api/supply/po/'+encodeURIComponent(r.po);
-      var ship=/manufactur/i.test(r.branch||'')?'<span class="tool-badge bg-neutral" title="MANUFACTURING = FOB">FOB</span>'
-        :(r.shipment?'<button class="ship-open" data-ref="'+esc(r.shipment)+'">'+esc(r.shipment)+'</button> <button class="ship-pick" data-po="'+esc(r.po)+'">▾</button>':'<button class="ship-pick" data-po="'+esc(r.po)+'">— assign ▾</button>');
-      return '<tr><td class="l"><b>'+esc(r.po)+'</b></td><td class="l">'+esc(r.supplier_name||'')+'</td><td class="l">'+esc(r.branch||'')+'</td>'
-        +'<td class="l">'+ship+'</td>'
-        +'<td class="l"><input class="fci txtin" data-ep="'+ep+'" data-field="asn_numbers" value="'+esc(r.asn_numbers||'')+'" placeholder="ASN1, ASN2…" style="width:240px;text-align:left"></td>'
-        +'<td class="l"><button class="save-btn pos-pallet" data-po="'+esc(r.po)+'" title="download pallet labels for iFulfillment">⤓ Pallet labels</button></td></tr>'; }
-    function draw(q){ q=(q||'').toLowerCase(); var list=live.filter(function(r){return !q||((r.po||'')+' '+(r.supplier_name||'')).toLowerCase().indexOf(q)>=0;});
-      document.getElementById('pos-body').innerHTML=list.map(rowHtml).join('');
-      bindShipPick(); bindShipOpen();
-      document.querySelectorAll('#pos-body .txtin').forEach(function(inp){ inp.onchange=function(){ var body={}; body[inp.dataset.field]=inp.value; inp.classList.add('saved');
-        fetch(inp.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); if(poBy[inp.dataset.po])poBy[inp.dataset.po].asn_numbers=inp.value; }).catch(function(){inp.classList.add('err');}); }; });
-      document.querySelectorAll('#pos-body .pos-pallet').forEach(function(btn){ btn.onclick=function(){ palletLabels(btn.dataset.po); }; }); }
-    draw(''); var qb=document.getElementById('pos-q'); if(qb)qb.oninput=function(){draw(this.value);}; }
+  function renderPO(rows){ var c=document.getElementById('supply-content'); fetchLookups(function(){ poInner(rows,c); }); }
+  // PLAN-panel MASTER DATA tab (#2): edit this PO's key fields (PO Number rename / Branch / Supplier / Production
+  // / Batch / Shipment) + delete the PO. Rendered inside a single PO's PLAN panel.
+  function poMasterPanel(po){ var r=poBy[po]||{}; var ep='/api/supply/po/'+encodeURIComponent(po);
+    var ship=/manufactur/i.test(r.branch||'')?'<span class="tool-badge bg-neutral" title="MANUFACTURING = FOB">FOB</span>'
+      :(r.shipment?'<button class="ship-open" data-ref="'+esc(r.shipment)+'">'+esc(r.shipment)+'</button> <button class="ship-pick" data-po="'+esc(po)+'">▾</button>':'<button class="ship-pick" data-po="'+esc(po)+'">— assign ▾</button>');
+    function row(lbl,f){ return '<div class="cli-row"><div class="cli-lbl">'+lbl+'</div><div class="cli-val">'+f+'</div></div>'; }
+    return '<div class="sect-h">Master Data <span class="mut tiny">— edit this PO\'s key fields; Delete removes the PO and its lines</span></div>'
+      +lookupDatalists()+'<div class="cli-form" style="max-width:560px">'
+      +row('PO Number','<input class="fci pom-po" data-po="'+esc(po)+'" value="'+esc(po)+'" style="width:200px;text-align:left">')
+      +row('Branch',cellPickBtn(po,ep,'branch',r.branch,'branch'))
+      +row('Supplier',cellPickBtn(po,'/api/supply/po/'+encodeURIComponent(po)+'/supplier','supplier_name',r.supplier_name,'supplier'))
+      +row('Production',cellPickBtn(po,ep,'prod_no',r.prod_no,'prod'))
+      +row('Batch ID',cellPickBtn(po,ep,'batch_id',r.batch_id,'batch'))
+      +row('Shipment',ship)
+      +'</div><div style="margin-top:14px"><button class="save-btn light pom-del" data-po="'+esc(po)+'" title="delete this PO + its lines" style="color:#dc2626;border-color:#fca5a5">🗑 Delete this PO</button></div>'; }
+  // PLAN-panel SHIPMENTS tab (#10): assign a shipment / FOB, ASN numbers, iFulfillment pallet labels — this PO.
+  function poShipPanel(po){ var r=poBy[po]||{}; var ep='/api/supply/po/'+encodeURIComponent(po);
+    var ship=/manufactur/i.test(r.branch||'')?'<span class="tool-badge bg-neutral" title="MANUFACTURING = FOB">FOB</span>'
+      :(r.shipment?'<button class="ship-open" data-ref="'+esc(r.shipment)+'">'+esc(r.shipment)+'</button> <button class="ship-pick" data-po="'+esc(po)+'">▾</button>':'<button class="ship-pick" data-po="'+esc(po)+'">— assign ▾</button>');
+    function row(lbl,f){ return '<div class="cli-row"><div class="cli-lbl">'+lbl+'</div><div class="cli-val">'+f+'</div></div>'; }
+    return '<div class="sect-h">Shipments <span class="mut tiny">— assign a shipment or mark FOB, ASN numbers, iFulfillment pallet labels</span></div>'
+      +lookupDatalists()+'<div class="cli-form" style="max-width:620px">'
+      +row('Shipment / FOB',ship)
+      +row('ASN numbers <span class="mut tiny">(comma-separated)</span>','<input class="fci txtin" data-ep="'+ep+'" data-field="asn_numbers" value="'+esc(r.asn_numbers||'')+'" placeholder="ASN1, ASN2…" style="width:280px;text-align:left">')
+      +row('Pallet labels','<button class="save-btn pos-pallet" data-po="'+esc(po)+'" title="download pallet labels for iFulfillment">⤓ Pallet labels (iFulfillment)</button>')
+      +'</div>'; }
   // iFulfillment pallet labels — opens a printable A4 sheet of one label per pallet (PO / shipment / ASN / pallet n of N).
   // NOTE: exact label artwork/layout for iFulfillment is to be confirmed with Ben; this is a clean print-ready draft.
   function palletLabels(po){ var r=poBy[po]||{}; var pallets=Math.max(1,Math.ceil(Number(r.pallets)||1));
@@ -626,7 +594,7 @@
   function bindShipPick(){ document.querySelectorAll('#supply-root .ship-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openShipAssign(b.dataset.po,b); }; }); }
   // open a shipment from elsewhere: jump to SHIPMENTS and expand that shipment's row
   function gotoShipment(ref){ _pendingShip=ref; selectSection('shipments'); }
-  function gotoPO(po,tab){ _pendingPO=po; _pendingPOTab=tab||null; poSubTab='orders'; selectSection('purchase-orders'); }
+  function gotoPO(po,tab){ _pendingPO=po; _pendingPOTab=tab||null; selectSection('purchase-orders'); }
   function gotoOrderPlan(po){ _pendingOP={po:po}; selectSection('order-plan'); }   // → full ORDER PLAN, PO pre-filtered
   function gotoDeposit(ref){ _pendingDep=ref; prodTab='deposits'; selectSection('productions'); }   // → PRODUCTIONS ▸ Deposits, filtered to this ref
   function gotoOther(){ prodTab='other'; selectSection('productions'); }   // → PRODUCTIONS ▸ Other Payments
@@ -1236,7 +1204,16 @@
     return '<div class="sect-h">Timeline <span class="mut tiny">— shared message thread with the supplier (their portal shows the same)</span></div>'+head+list+compose; }
   function poRefetchPanel(po,i){ var at=document.querySelector('#podet-'+i+' .potab.active'); var wantTab=at?at.dataset.pt:null;   // keep the open sub-tab after a save re-render
     fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(rows){ rows.forEach(function(x){poBy[x.po]=x;}); cache['purchase-orders']=rows; loadPoDetail(po,i,wantTab); }); }
-  function bindPay(po,i){ document.querySelectorAll('#podet-'+i+' .payin').forEach(function(inp){ inp.onchange=function(){
+  function bindPay(po,i){
+    // MASTER DATA + SHIPMENTS PLAN-panel controls (#2 / #10) — pickers + rename / delete / pallet labels for this PO
+    bindCellPick(); bindShipPick(); bindShipOpen();
+    function poGone(){ invalidateDerived(); delete cache['purchase-orders']; if(_poRefresh)_poRefresh(); else selectSection('purchase-orders'); }
+    document.querySelectorAll('#podet-'+i+' .pos-pallet').forEach(function(b){ b.onclick=function(){ palletLabels(b.dataset.po); }; });
+    document.querySelectorAll('#podet-'+i+' .pom-del').forEach(function(b){ b.onclick=function(){ var p=b.dataset.po; if(!confirm('Delete PO '+p+' and all its lines? This cannot be undone.'))return;
+      shipPost('/api/supply/po/'+encodeURIComponent(p)+'/delete',{},function(){ poGone(); }); }; });
+    document.querySelectorAll('#podet-'+i+' .pom-po').forEach(function(inp){ inp.onchange=function(){ var oldpo=inp.dataset.po, np=inp.value.trim(); if(!np||np===oldpo){inp.value=oldpo;return;} if(!confirm('Rename PO '+oldpo+' → '+np+'? Updates all its lines and references.')){inp.value=oldpo;return;}
+      shipPost('/api/supply/po/'+encodeURIComponent(oldpo)+'/rename',{new_po:np},function(){ poGone(); }); }; });
+    document.querySelectorAll('#podet-'+i+' .payin').forEach(function(inp){ inp.onchange=function(){
     var body={}; body[inp.dataset.field]=String(inp.value).replace(/,/g,'').trim(); inp.classList.add('saved');   // accept pasted "1,350.91"
     fetch(inp.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
       .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); })
@@ -1337,7 +1314,8 @@
     var oplanH=orderPlanPanel(po,d.lines,d.line_costs,d.additional_costs);
     var timelineH=timelinePanel(po,d);
     var linkedH='<div class="sect-h">Linked records across tables</div>'+blk('Deposit',d.deposit)+blk('Payments',d.payments)+blk('Flexport',d.flexport);
-    var tabs=[['pay','PAYMENTS',p.pay,p.ex.pay],['dates','DATES',p.dates,p.ex.dates],['client','CLIENT/FBA',p.client,p.ex.client],['oplan','ORDER PLAN',oplanH,p.ex.oplan],['landed','LANDED COSTS',p.landed,p.ex.landed],['timeline','TIMELINE',timelineH,p.ex.timeline],['linked','LINKED RECORDS',linkedH,0]];
+    var masterH=poMasterPanel(po), shipH=poShipPanel(po);
+    var tabs=[['pay','PAYMENTS',p.pay,p.ex.pay],['dates','DATES',p.dates,p.ex.dates],['client','CLIENT/FBA',p.client,p.ex.client],['oplan','ORDER PLAN',oplanH,p.ex.oplan],['shipments','SHIPMENTS',shipH,0],['masterdata','MASTER DATA',masterH,0],['landed','LANDED COSTS',p.landed,p.ex.landed],['timeline','TIMELINE',timelineH,p.ex.timeline],['linked','LINKED RECORDS',linkedH,0]];
     function badge(n){ return n>0?' <span class="ex-badge" title="'+n+' exception'+(n>1?'s':'')+' / action'+(n>1?'s':'')+'">'+n+'</span>':''; }
     var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab potab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'">'+t[1]+badge(t[3])+'</button>';}).join('')+'</div>';
     var panels=tabs.map(function(t,ti){return '<div class="potab-panel" data-pt="'+t[0]+'"'+(ti===0?'':' style="display:none"')+'>'+t[2]+'</div>';}).join('');

@@ -4,6 +4,15 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.360 - Master Data + Shipments moved into the PO PLAN panel (per-PO)
+
+Corrected #2 / #10: MASTER DATA and SHIPMENTS are now tabs **inside a PO's PLAN panel** (alongside PAYMENTS /
+DATES / CLIENT-FBA / ORDER PLAN / …), acting on that one PO — not section-level sub-tabs with a grid of all POs.
+- MASTER DATA tab: edit this PO's PO Number (rename, cascades), Branch, Supplier, Production, Batch, Shipment +
+  Delete this PO.
+- SHIPMENTS tab: assign shipment / mark FOB, ASN numbers, iFulfillment pallet labels.
+The PURCHASE ORDERS section is back to the single management grid (no section sub-tabs). Endpoints unchanged.
+
 ## v20.359 - Fix: Direct-to-Client report showed literal span markup for null values
 
 The report wrapped the "—" fallback span inside esc() for the Sales ref / Dispatch order cells, so when those
