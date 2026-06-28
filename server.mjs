@@ -52,7 +52,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.3';
+const APP_VERSION = 'v25.4';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -4491,6 +4491,87 @@ app.post('/api/supply/bi/apply-reallocation', async (req, res) => {
       [key, 'reallocated ' + qty + ' ' + sku + ' ' + fromPo + '→' + toPo]);
     await client.query('COMMIT');
     res.json({ ok: true, moved: qty, from_po: fromPo, to_po: toPo, sku });
+  } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
+
+// ── BI ▸ CONTAINER FILL (Phase 2) — shipments with spare pallet capacity (<20) that could carry urgent/near-term
+// buys for the SAME destination, made by a supplier already ON that shipment. Bounded by need (no over-fill) and
+// by the spare pallets. Rush flag when the supplier's production lead time exceeds days-to-departure.
+async function biContainerFill() {
+  const proj = await biProjection();
+  const skuMeta = {};
+  (await pool.query(`SELECT p.sku, coalesce(p.supplier,'') supplier, coalesce(sl.pallet_qty::numeric,0) pallet_qty
+     FROM planner.products p LEFT JOIN planner.sku_labels sl ON sl.sku=p.sku`)).rows
+    .forEach(r => { skuMeta[r.sku] = { supplier: r.supplier, pq: Number(r.pallet_qty) || 0 }; });
+  const supDays = {};
+  (await pool.query(`SELECT name, coalesce(production_days,0) d FROM planner.suppliers`)).rows
+    .forEach(r => { supDays[(r.name || '').toLowerCase()] = Number(r.d) || 0; });
+  const ships = (await pool.query(`
+    SELECT s.shipment_ref, to_char(s.departure_date,'YYYY-MM-DD') departure,
+      upper(coalesce(nullif(mp.country_code,''), b.country_code, '')) country,
+      coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty::numeric,0))
+        FROM planner.purchase_orders po JOIN planner.purchase_order_lines l ON l.po=po.po
+        LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE po.shipment_ref=s.shipment_ref),0) pallets
+    FROM planner.shipments s
+    LEFT JOIN planner.purchase_orders mp ON mp.po=coalesce(s.master_po,s.shipment_ref)
+    LEFT JOIN planner.branches b ON b.name=mp.branch
+    WHERE coalesce(s.status,'') NOT ILIKE '%complete%'`)).rows;   // departure often blank until Flexport sync — optional
+  const shipSupPO = {};
+  (await pool.query(`SELECT po.shipment_ref, lower(coalesce(po.supplier_name,'')) sup, po.po
+     FROM planner.purchase_orders po WHERE coalesce(po.shipment_ref,'')<>''`)).rows
+    .forEach(r => { (shipSupPO[r.shipment_ref] = shipSupPO[r.shipment_ref] || {})[r.sup] = shipSupPO[r.shipment_ref][r.sup] || r.po; });
+  const today = kpiToday(), recs = [];
+  for (const s of ships) {
+    let spare = Math.floor(20 - (Number(s.pallets) || 0));
+    if (spare <= 0 || !s.country) continue;
+    const supPO = shipSupPO[s.shipment_ref] || {};
+    const daysToDep = s.departure ? Math.round((new Date(s.departure) - new Date(today)) / 86400000) : null;
+    const cands = proj.filter(r => r.country === s.country && (r.urgency === 'critical' || r.urgency === 'soon') && r.need_qty > 0
+        && skuMeta[r.sku] && skuMeta[r.sku].pq > 0 && supPO[(skuMeta[r.sku].supplier || '').toLowerCase()])
+      .sort((a, b) => (a.urgency === 'critical' ? 0 : 1) - (b.urgency === 'critical' ? 0 : 1) || b.need_qty - a.need_qty);
+    for (const r of cands) {
+      if (spare <= 0) break;
+      const pq = skuMeta[r.sku].pq, fit = Math.floor(spare * pq), add = Math.min(r.need_qty, fit);
+      if (add <= 0) continue;
+      const used = Math.round((add / pq) * 10) / 10; spare = Math.max(0, Math.round((spare - used) * 10) / 10);
+      const sup = skuMeta[r.sku].supplier, avgM = r.demand_12m / 12;
+      recs.push({ key: 'bi-fill|' + s.shipment_ref + '|' + r.sku, shipment_ref: s.shipment_ref, country: s.country,
+        departure: s.departure, days_to_departure: daysToDep, sku: r.sku, supplier: sup,
+        to_po: supPO[(sup || '').toLowerCase()], add_qty: add, pallets_used: used,
+        rush: daysToDep != null && daysToDep < (supDays[(sup || '').toLowerCase()] || 0), urgency: r.urgency,
+        cover: r.cover_with_inbound, cover_after: avgM > 0 ? Math.round(((r.on_hand + r.inbound + add) / avgM) * 10) / 10 : null, need: r.need_qty });
+    }
+  }
+  return recs;
+}
+app.get('/api/supply/bi/container-fill', async (req, res) => {
+  try {
+    const recs = await biContainerFill();
+    const st = {}; (await pool.query(`SELECT action_key, status, to_char(snooze_until,'YYYY-MM-DD') snooze_until FROM planner.supply_action_state`)).rows
+      .forEach(s => { st[s.action_key] = s; });
+    const today = kpiToday();
+    const open = recs.filter(rc => { const s = st[rc.key]; if (!s) return true;
+      if (s.status === 'dismissed' || s.status === 'applied') return false;
+      if (s.status === 'snoozed' && s.snooze_until && s.snooze_until >= today) return false; return true; });
+    res.json({ ok: true, target_months: BI_TARGET_MONTHS, count: open.length, recs: open });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Apply a container-fill: ADD add_qty of sku to the on-board PO (increases the supplier order), then mark applied.
+app.post('/api/supply/bi/apply-fill', async (req, res) => {
+  const b = req.body || {};
+  const toPo = String(b.to_po || ''), sku = String(b.sku || ''), qty = parseInt(b.qty, 10) || 0, key = String(b.key || '');
+  if (!toPo || !sku || qty <= 0) return res.status(400).json({ error: 'to_po, sku and qty>0 required' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`INSERT INTO planner.purchase_order_lines (po_sku, po, sku, qty) VALUES ($1||'|'||$2,$1,$2,$3)
+      ON CONFLICT (po_sku) DO UPDATE SET qty=coalesce(planner.purchase_order_lines.qty,0)+$3`, [toPo, sku, qty]);
+    if (key) await client.query(`INSERT INTO planner.supply_action_state (action_key, status, note)
+      VALUES ($1,'applied',$2) ON CONFLICT (action_key) DO UPDATE SET status='applied', note=excluded.note, snooze_until=NULL`,
+      [key, 'container-fill +' + qty + ' ' + sku + ' → ' + toPo]);
+    await client.query('COMMIT');
+    res.json({ ok: true, added: qty, to_po: toPo, sku });
   } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });

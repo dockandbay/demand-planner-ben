@@ -191,7 +191,7 @@
   var REPORT_SECTIONS=[['metrics','METRICS'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['container-fill','CONTAINER FILL'],
     ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['cashflow','CASH FLOW'],['directclient','DIRECT TO CLIENT'],['flexport','FLEXPORT']];
   var REPORT_KEYS=['metrics','reallocate','urgent-buy','container-fill','upcoming','pipeline','cashflow','directclient','flexport'];
-  var BI_TABS={'metrics':'/api/supply/bi','urgent-buy':'/api/supply/bi/projection','reallocate':'/api/supply/bi/reallocations'};   // fluid: always re-fetch
+  var BI_TABS={'metrics':'/api/supply/bi','urgent-buy':'/api/supply/bi/projection','reallocate':'/api/supply/bi/reallocations','container-fill':'/api/supply/bi/container-fill'};   // fluid: always re-fetch
   var reportTab='metrics';   // BI & REPORTS opens on METRICS by default
   var ANNOT={
     actions:'<b>SUPPLY ▸ Actions.</b> Exceptions surfaced from the supply picture — date conflicts, unassigned shipments, missing supplier, unpaid deposits. Grouped by type.',
@@ -3210,7 +3210,6 @@
       if(rk==='cashflow')return renderCashflow(d);
       if(rk==='directclient')return renderDirectClient(d);
       if(rk==='flexport')return renderFlexport(d); };
-    if(rk==='container-fill')return done({});   // placeholder, no fetch
     if(!BI_TABS[rk] && cache[rk])return done(cache[rk]);
     var url=BI_TABS[rk]||('/api/supply/'+(rk==='directclient'?'purchase-orders':rk));
     fetch(url).then(function(r){return r.json();}).then(done).catch(function(e){var b=document.getElementById('rep-body');if(b)b.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); }
@@ -3260,8 +3259,30 @@
         +chip('OK',cc.ok,'#dcfce7','#166534')+chip('Surplus',cc.surplus,'#dbeafe','#1e40af')
         +'<span class="mut tiny" style="margin-left:6px">per SKU × market · target '+(pj.target_months||3)+' mo cover · on-hand + inbound vs forecast</span></div>'
       +(shown.length?tbl+(risk.length>CAP?'<div class="count" style="margin-top:6px">Showing top '+CAP+' of '+risk.length+' (by 12-month demand).</div>':''):'<div class="count">No stock-out risks 🎉</div>'); }
-  // CONTAINER FILL — placeholder until its phase
-  function renderContainerFill(){ biBody().innerHTML='<div style="padding:14px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;color:#64748b;font-size:13px"><b>Container fill</b> — recommendations to fill spare container space with urgent / near-term buys (near-zero marginal freight). Coming next.</div>'; }
+  // CONTAINER FILL — spare capacity matched to urgent buys from an on-board supplier. Add / Snooze / Dismiss.
+  function renderContainerFill(d){ var b=biBody(); d=d||{}; var recs=d.recs||[];
+    if(!recs.length){ b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 6px">Container fill</div><div class="count">No fill opportunities — no shipment with spare capacity matches an urgent buy from a supplier already on board.</div>'; return; }
+    function card(r){ var crit=r.urgency==='critical';
+      return '<div class="cf-card" data-key="'+esc(r.key)+'" style="border:1px solid #e5e7eb;border-left:4px solid '+(crit?'#dc2626':'#d97706')+';border-radius:8px;padding:11px 13px;margin-bottom:9px;background:#fff">'
+        +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="tool-badge" style="background:'+(crit?'#fee2e2':'#fef3c7')+';color:'+(crit?'#991b1b':'#92400e')+'">'+esc(r.urgency)+'</span><b style="font-size:13px">'+esc(r.sku)+'</b><span class="mut tiny">'+esc(r.supplier)+' → '+esc(r.country)+'</span>'+(r.rush?' <span class="tool-badge bg-red">⚠ rush</span>':'')+'</div>'
+        +'<div style="margin:7px 0;font-size:13px">Add <b>'+units(r.add_qty)+'</b> units to ride <span style="color:#1e40af;font-weight:600">🚢 '+esc(r.shipment_ref)+'</span>'+(r.departure?' <span class="mut tiny">dep '+esc(r.departure)+(r.days_to_departure!=null?' · in '+r.days_to_departure+'d':'')+'</span>':' <span class="mut tiny">(no departure date yet)</span>')+'</div>'
+        +'<div class="mut tiny" style="margin-bottom:9px">'+esc(r.country)+' cover <b style="color:#dc2626">'+r.cover+'</b>→<b style="color:#166534">'+r.cover_after+'</b> mo · ~'+r.pallets_used+' pallet'+(r.pallets_used===1?'':'s')+' · adds to '+esc(r.to_po)+' (increases the order)</div>'
+        +'<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="save-btn cf-apply" style="background:#16a34a;color:#fff;border-color:#16a34a">✓ Add to PO</button><button class="save-btn light cf-snooze" data-days="7">Snooze 1wk</button><button class="save-btn light cf-snooze" data-days="30">Snooze 1mo</button><button class="save-btn light cf-dismiss">Dismiss</button></div></div>'; }
+    b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 3px">Container fill</div>'
+      +'<div class="mut tiny" style="margin-bottom:10px">Spare container capacity matched to urgent buys from a supplier already on the shipment — ride it for near-zero extra freight. '+recs.length+' opportunit'+(recs.length===1?'y':'ies')+'. <b>Adding increases the supplier order</b> (a real buy). <span style="color:#b45309">Departure dates arrive with Flexport sync — until then the rush check is approximate.</span></div>'
+      +'<div id="cf-list">'+recs.map(card).join('')+'</div>';
+    var byKey={}; recs.forEach(function(r){byKey[r.key]=r;});
+    function lifecycle(key,status,days){ return fetch('/api/supply/actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:key,status:status,snooze_days:days||7})}); }
+    function removeCard(cd){ cd.style.transition='opacity .2s'; cd.style.opacity='.35'; setTimeout(function(){ cd.remove(); var l=document.getElementById('cf-list'); if(l&&!l.querySelector('.cf-card'))l.innerHTML='<div class="count">All fill opportunities actioned. 🎉</div>'; },200); }
+    b.querySelectorAll('.cf-card').forEach(function(cd){ var key=cd.dataset.key, r=byKey[key];
+      cd.querySelector('.cf-apply').onclick=function(){ var btn=this;
+        if(!confirm('Add '+r.add_qty+' × '+r.sku+' to '+r.to_po+'?\n\nThis INCREASES the supplier order (a real buy) so the stock rides shipment '+r.shipment_ref+'.'))return;
+        btn.disabled=true; btn.textContent='Adding…';
+        fetch('/api/supply/bi/apply-fill',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:key,to_po:r.to_po,sku:r.sku,qty:r.add_qty})})
+          .then(function(x){return x.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); try{invalidateDerived();}catch(e){} delete cache['purchase-orders']; delete cache['order-plan']; removeCard(cd); })
+          .catch(function(e){ btn.disabled=false; btn.textContent='✓ Add to PO'; alert('Add failed: '+(e.message||e)); }); };
+      cd.querySelectorAll('.cf-snooze').forEach(function(sb){ sb.onclick=function(){ this.disabled=true; lifecycle(key,'snoozed',sb.dataset.days).then(function(){removeCard(cd);}); }; });
+      cd.querySelector('.cf-dismiss').onclick=function(){ this.disabled=true; lifecycle(key,'dismissed').then(function(){removeCard(cd);}); }; }); }
   // REALLOCATE — zero-sum order-plan moves (surplus market → short market, same production). Apply / Snooze / Dismiss.
   function renderReallocate(d){ var b=biBody(); d=d||{}; var recs=d.recs||[];
     if(!recs.length){ b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 6px">Reallocate — order-plan adjustments</div><div class="count">No reallocation opportunities right now — every editable production’s split matches demand. 🎉</div>'; return; }

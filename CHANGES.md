@@ -4,6 +4,17 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v25.4 - BI Phase 2: CONTAINER FILL recommendations
+
+`GET /api/supply/bi/container-fill` finds shipments with **spare pallet capacity** (<20) and matches them to
+**urgent/near-term buys** (critical/soon from the cover projection) for the **same destination**, made by a
+supplier **already on that shipment** — so the stock rides for near-zero extra freight. Bounded by need
+(no over-fill) and by spare pallets; **rush** flag when the supplier's lead time exceeds days-to-departure
+(approximate until Flexport departure dates sync — currently blank in sandbox). Cards show add-qty, pallets
+used, cover before→after, with **Add to PO / Snooze / Dismiss** (reuses `supply_action_state`).
+`POST /api/supply/bi/apply-fill` adds the qty to the on-board PO (increases the supplier order — a real buy,
+strong confirm) and marks applied. No migration.
+
 ## v25.3 - Merge BI into "BI & REPORTS" + Phase 1 REALLOCATE recommendations
 
 **Merged** the standalone BI tab into REPORTS → renamed **"BI & REPORTS"** with sub-tabs in order:
