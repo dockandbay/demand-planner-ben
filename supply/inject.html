@@ -184,13 +184,15 @@
 <script src="/portal-view.js"></script>
 <script>
 (function(){
-  var SECTIONS=[['actions','ACTIONS'],['reports','REPORTS'],['productions','PRODUCTIONS'],['purchase-orders','PURCHASE ORDERS'],['order-plan','ORDER PLAN'],
-    ['shipments','SHIPMENTS'],['bi','BI'],
+  var SECTIONS=[['actions','ACTIONS'],['reports','BI & REPORTS'],['productions','PRODUCTIONS'],['purchase-orders','PURCHASE ORDERS'],['order-plan','ORDER PLAN'],
+    ['shipments','SHIPMENTS'],
     ['barcodes','BARCODES'],['config','CONFIG']];
   // REPORTS is a parent tab; these are its sub-tabs (the read-across views).
-  var REPORT_SECTIONS=[['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['cashflow','CASH FLOW'],['directclient','DIRECT TO CLIENT'],['flexport','FLEXPORT']];
-  var REPORT_KEYS=['upcoming','pipeline','cashflow','directclient','flexport'];
-  var reportTab='upcoming';
+  var REPORT_SECTIONS=[['metrics','METRICS'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['container-fill','CONTAINER FILL'],
+    ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['cashflow','CASH FLOW'],['directclient','DIRECT TO CLIENT'],['flexport','FLEXPORT']];
+  var REPORT_KEYS=['metrics','reallocate','urgent-buy','container-fill','upcoming','pipeline','cashflow','directclient','flexport'];
+  var BI_TABS={'metrics':'/api/supply/bi','urgent-buy':'/api/supply/bi/projection','reallocate':'/api/supply/bi/reallocations'};   // fluid: always re-fetch
+  var reportTab='metrics';   // BI & REPORTS opens on METRICS by default
   var ANNOT={
     actions:'<b>SUPPLY ▸ Actions.</b> Exceptions surfaced from the supply picture — date conflicts, unassigned shipments, missing supplier, unpaid deposits. Grouped by type.',
     reports:'<b>SUPPLY ▸ Reports.</b> The read-across views, pick one from the sub-tabs: <b>What\'s Next</b> (forward calendar), <b>Pipeline</b> (every PO by stage), <b>Payments</b> (the run register), <b>Cash Flow</b> (itemised monthly payments) and <b>Flexport</b> (the Flexport shipment feed).',
@@ -3180,7 +3182,7 @@
     else if(current) writeHash(['supply',current]); }
   function applyRoute(){ var seg=(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean); _expectedHash=location.hash;
     if(seg[0]==='supply'){ showSupply(true); var sec=seg[1]||'actions';   // (true) = show chrome but don't auto-select Actions; we select the routed section next
-      if(sec==='reports') selectReport(seg[2]||reportTab||'upcoming');
+      if(sec==='reports') selectReport(seg[2]||reportTab||'metrics');
       else if(sec==='productions'){ if(seg[2])prodTab=seg[2]; selectSection('productions'); }
       else if(sec==='config'){ if(seg[2])CONFIG_SUB=seg[2]; selectSection('config'); }
       else if(sec==='purchase-orders'){ if(seg[2])_pendingPO=decodeURIComponent(seg[2]); selectSection('purchase-orders'); }
@@ -3197,67 +3199,97 @@
     var c=document.getElementById('supply-content');
     c.innerHTML='<div id="rep-subnav">'+REPORT_SECTIONS.map(function(s){return '<span class="rtab'+(s[0]===rk?' active':'')+'" data-rk="'+s[0]+'">'+s[1]+'</span>';}).join('')+'</div><div id="rep-body"><div class="count">Loading…</div></div>';
     c.querySelectorAll('#rep-subnav .rtab').forEach(function(p){p.onclick=function(){selectReport(p.dataset.rk);};});
-    var done=function(d){ cache[rk]=d;
+    var done=function(d){
+      if(rk==='metrics')return renderBIMetrics(d);
+      if(rk==='urgent-buy')return renderUrgentBuy(d);
+      if(rk==='reallocate')return renderReallocate(d);
+      if(rk==='container-fill')return renderContainerFill(d);
+      cache[rk]=d;   // reports cache; BI tabs stay fluid (re-fetched each visit)
       if(rk==='upcoming')return renderUpcoming(d);
       if(rk==='pipeline')return renderPipeline(d);
       if(rk==='cashflow')return renderCashflow(d);
       if(rk==='directclient')return renderDirectClient(d);
       if(rk==='flexport')return renderFlexport(d); };
-    if(cache[rk])return done(cache[rk]);
-    var url='/api/supply/'+(rk==='directclient'?'purchase-orders':rk);
+    if(rk==='container-fill')return done({});   // placeholder, no fetch
+    if(!BI_TABS[rk] && cache[rk])return done(cache[rk]);
+    var url=BI_TABS[rk]||('/api/supply/'+(rk==='directclient'?'purchase-orders':rk));
     fetch(url).then(function(r){return r.json();}).then(done).catch(function(e){var b=document.getElementById('rep-body');if(b)b.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); }
 
-  // ---- SUPPLY ▸ BI (Phase 0a: Metrics Summary). Recommendation modules land in later phases. ----
-  function renderBI(d){ var c=document.getElementById('supply-content'); d=d||{}; var op=d.open_pos||{};
-    function tile(label,val,sub,accent){ return '<div style="flex:1 1 160px;min-width:160px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px">'
-      +'<div style="font-size:23px;font-weight:800;line-height:1.1;color:'+(accent||'#0f172a')+'">'+val+'</div>'
-      +'<div style="font-size:10.5px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-top:4px">'+esc(label)+'</div>'
-      +(sub?'<div style="font-size:11px;color:#94a3b8;margin-top:4px">'+esc(sub)+'</div>':'')+'</div>'; }
+  // ============ SUPPLY ▸ BI & REPORTS — BI sub-tabs (render into #rep-body) ============
+  function biBody(){ return document.getElementById('rep-body')||document.getElementById('supply-content'); }
+  function biTile(label,val,sub,accent){ return '<div style="flex:1 1 160px;min-width:160px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px">'
+    +'<div style="font-size:23px;font-weight:800;line-height:1.1;color:'+(accent||'#0f172a')+'">'+val+'</div>'
+    +'<div style="font-size:10.5px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-top:4px">'+esc(label)+'</div>'
+    +(sub?'<div style="font-size:11px;color:#94a3b8;margin-top:4px">'+esc(sub)+'</div>':'')+'</div>'; }
+  // METRICS — live operational counts
+  function renderBIMetrics(d){ var b=biBody(); d=d||{}; var op=d.open_pos||{};
     var cont=Math.round(((Number(d.containers_shipping)||0)+(Number(d.containers_in_production)||0))*10)/10;
-    c.innerHTML=annot('bi')
-      +'<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:#0f172a">Metrics summary</div>'
+    b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:#0f172a">Metrics summary</div>'
       +'<div class="mut tiny" style="margin-bottom:12px">Live operational snapshot · counts derived from POs + shipments</div>'
       +'<div style="display:flex;flex-wrap:wrap;gap:10px">'
-        +tile('Open POs', op.total||0, 'future '+(op.future||0)+' · production '+(op.production||0)+' · shipping '+(op.shipping||0))
-        +tile('Units in production', units(d.units_in_production||0))
-        +tile('Active shipments', d.active_shipments||0)
-        +tile('40ft containers', cont, 'shipping '+(d.containers_shipping||0)+' · in production '+(d.containers_in_production||0))
-        +tile('Units inbound', units(d.units_inbound||0))
-        +tile('Value in production', '$'+units(d.value_in_production||0))
-        +tile('Value in transit', '$'+units(d.value_in_transit||0))
-        +tile('POs awaiting confirmation', d.awaiting_confirmation||0, '', (Number(d.awaiting_confirmation)>0?'#b45309':null))
-        +tile('Deposits outstanding', '$'+units(d.deposits_outstanding||0), (d.deposit_pools||0)+' active pool'+(Number(d.deposit_pools)===1?'':'s'))
-      +'</div>'
-      +'<div id="bi-cover" style="margin-top:18px"><div class="count">Computing stock cover…</div></div>'
-      +'<div style="margin-top:16px;padding:10px 12px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;color:#64748b;font-size:12px">'
-        +'<b>Coming next:</b> Reallocate · Fill-the-container · Consolidate recommendations (with Apply / Snooze / Dismiss).</div>';
-    fetch('/api/supply/bi/projection').then(function(r){return r.json();}).then(renderBICover).catch(function(e){ var b=document.getElementById('bi-cover'); if(b)b.innerHTML='<div style="color:#dc2626">Cover failed: '+esc(e.message||e)+'</div>'; }); }
-  // Phase 0b — stock cover & stock-out risk from the live projection engine
-  function renderBICover(pj){ var b=document.getElementById('bi-cover'); if(!b)return; pj=pj||{}; var rows=pj.rows||[], cc=pj.counts||{};
+        +biTile('Open POs', op.total||0, 'future '+(op.future||0)+' · production '+(op.production||0)+' · shipping '+(op.shipping||0))
+        +biTile('Units in production', units(d.units_in_production||0))
+        +biTile('Active shipments', d.active_shipments||0)
+        +biTile('40ft containers', cont, 'shipping '+(d.containers_shipping||0)+' · in production '+(d.containers_in_production||0))
+        +biTile('Units inbound', units(d.units_inbound||0))
+        +biTile('Value in production', '$'+units(d.value_in_production||0))
+        +biTile('Value in transit', '$'+units(d.value_in_transit||0))
+        +biTile('POs awaiting confirmation', d.awaiting_confirmation||0, '', (Number(d.awaiting_confirmation)>0?'#b45309':null))
+        +biTile('Deposits outstanding', '$'+units(d.deposits_outstanding||0), (d.deposit_pools||0)+' active pool'+(Number(d.deposit_pools)===1?'':'s'))
+      +'</div>'; }
+  // URGENT BUY — SKU × market at stock-out risk (critical/soon) from the live cover projection
+  function renderUrgentBuy(pj){ var b=biBody(); pj=pj||{}; var rows=pj.rows||[], cc=pj.counts||{};
     function chip(label,n,bg,fg){ return '<span class="tool-badge" style="background:'+bg+';color:'+fg+';font-size:11px;padding:3px 9px">'+label+' '+(n||0)+'</span>'; }
-    // top stock-out risks: critical first, then soon, ranked by annual demand (biggest exposure first)
     var ord={critical:0,soon:1};
     var risk=rows.filter(function(r){return r.urgency==='critical'||r.urgency==='soon';})
       .sort(function(a,b){ return (ord[a.urgency]-ord[b.urgency]) || (b.demand_12m-a.demand_12m); });
-    var CAP=25, shown=risk.slice(0,CAP);
-    var tbl='<div class="tw" style="max-width:940px"><table style="width:100%"><thead><tr><th class="l">SKU</th><th class="l">Ship to</th><th class="l">Cat</th><th>On hand</th><th>Inbound</th><th>Cover now</th><th>+ inbound</th><th>12m demand</th><th>Urgency</th></tr></thead><tbody>'
+    var CAP=50, shown=risk.slice(0,CAP);
+    var tbl='<div class="tw" style="max-width:1000px"><table style="width:100%"><thead><tr><th class="l">SKU</th><th class="l">Ship to</th><th class="l">Cat</th><th>On hand</th><th>Inbound</th><th>Cover now</th><th>+ inbound</th><th>12m demand</th><th>Buy to target</th><th>Urgency</th></tr></thead><tbody>'
       +shown.map(function(r){ var u=r.urgency==='critical'?['#fee2e2','#991b1b']:['#fef3c7','#92400e'];
         return '<tr><td class="l"><b>'+esc(r.sku)+'</b></td><td class="l">'+esc(r.country)+'</td><td class="l"><span class="mut tiny">'+esc(r.category||'')+'</span></td>'
           +'<td>'+units(r.on_hand)+'</td><td>'+(r.inbound>0?units(r.inbound):'<span class="mut">—</span>')+'</td>'
           +'<td'+(r.cover_now!=null&&r.cover_now<1?' style="color:#dc2626;font-weight:700"':'')+'>'+(r.cover_now==null?'<span class="mut">∞</span>':r.cover_now+' mo')+'</td>'
           +'<td'+(r.cover_with_inbound!=null&&r.cover_with_inbound<1?' style="color:#dc2626;font-weight:700"':'')+'>'+(r.cover_with_inbound==null?'<span class="mut">∞</span>':r.cover_with_inbound+' mo')+'</td>'
           +'<td>'+units(r.demand_12m)+'</td>'
+          +'<td'+(r.need_qty>0?' style="font-weight:700"':'')+'>'+(r.need_qty>0?units(r.need_qty):'<span class="mut">—</span>')+'</td>'
           +'<td><span class="tool-badge" style="background:'+u[0]+';color:'+u[1]+'">'+esc(r.urgency)+'</span></td></tr>'; }).join('')
       +'</tbody></table></div>';
-    b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 6px;color:#0f172a">Stock cover &amp; stock-out risk</div>'
+    b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 6px;color:#0f172a">Urgent buy — stock-out risk</div>'
       +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:center">'
         +chip('⚠ Critical',cc.critical,'#fee2e2','#991b1b')+chip('Soon',cc.soon,'#fef3c7','#92400e')
         +chip('OK',cc.ok,'#dcfce7','#166534')+chip('Surplus',cc.surplus,'#dbeafe','#1e40af')
         +'<span class="mut tiny" style="margin-left:6px">per SKU × market · target '+(pj.target_months||3)+' mo cover · on-hand + inbound vs forecast</span></div>'
-      +(shown.length?tbl+(risk.length>CAP?'<div class="count" style="margin-top:6px">Showing top '+CAP+' of '+risk.length+' at-risk SKU×markets (by 12-month demand). Reallocate/Fill recs will action these.</div>':''):'<div class="count">No stock-out risks 🎉</div>'); }
+      +(shown.length?tbl+(risk.length>CAP?'<div class="count" style="margin-top:6px">Showing top '+CAP+' of '+risk.length+' (by 12-month demand).</div>':''):'<div class="count">No stock-out risks 🎉</div>'); }
+  // CONTAINER FILL — placeholder until its phase
+  function renderContainerFill(){ biBody().innerHTML='<div style="padding:14px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;color:#64748b;font-size:13px"><b>Container fill</b> — recommendations to fill spare container space with urgent / near-term buys (near-zero marginal freight). Coming next.</div>'; }
+  // REALLOCATE — zero-sum order-plan moves (surplus market → short market, same production). Apply / Snooze / Dismiss.
+  function renderReallocate(d){ var b=biBody(); d=d||{}; var recs=d.recs||[];
+    if(!recs.length){ b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 6px">Reallocate — order-plan adjustments</div><div class="count">No reallocation opportunities right now — every editable production’s split matches demand. 🎉</div>'; return; }
+    var tgt=d.target_months||3;
+    function card(r){ var crit=r.to_urgency==='critical';
+      return '<div class="rl-card" data-key="'+esc(r.key)+'" style="border:1px solid #e5e7eb;border-left:4px solid '+(crit?'#dc2626':'#d97706')+';border-radius:8px;padding:11px 13px;margin-bottom:9px;background:#fff">'
+        +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="tool-badge" style="background:'+(crit?'#fee2e2':'#fef3c7')+';color:'+(crit?'#991b1b':'#92400e')+'">'+esc(r.to_urgency)+'</span><b style="font-size:13px">'+esc(r.sku)+'</b><span class="mut tiny">prod '+esc(r.prod_no)+' · '+esc(r.supplier)+'</span></div>'
+        +'<div style="margin:7px 0;font-size:13px">Move <b>'+units(r.qty)+'</b> units &nbsp;<span style="color:#1e40af;font-weight:600">'+esc(r.from_po)+' ('+esc(r.from_country)+')</span> &rarr; <span style="color:#166534;font-weight:600">'+esc(r.to_po)+' ('+esc(r.to_country)+')</span></div>'
+        +'<div class="mut tiny" style="margin-bottom:9px">'+esc(r.from_country)+' cover '+r.from_cover+'→'+r.from_cover_after+' mo (stays covered) · '+esc(r.to_country)+' cover <b style="color:#dc2626">'+r.to_cover+'</b>→<b style="color:#166534">'+r.to_cover_after+'</b> mo'+(r.to_cover_after>=tgt?' (clears stock-out)':'')+' · supplier total unchanged</div>'
+        +'<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="save-btn rl-apply" style="background:#16a34a;color:#fff;border-color:#16a34a">✓ Apply</button><button class="save-btn light rl-snooze" data-days="7">Snooze 1wk</button><button class="save-btn light rl-snooze" data-days="30">Snooze 1mo</button><button class="save-btn light rl-dismiss">Dismiss</button></div></div>'; }
+    b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 3px">Reallocate — order-plan adjustments</div>'
+      +'<div class="mut tiny" style="margin-bottom:10px">Zero-cost moves within an editable production (Future / Production): shift qty from a surplus market to one at stock-out risk. Supplier total unchanged. '+recs.length+' opportunit'+(recs.length===1?'y':'ies')+'.</div>'
+      +'<div id="rl-list">'+recs.map(card).join('')+'</div>';
+    var byKey={}; recs.forEach(function(r){byKey[r.key]=r;});
+    function lifecycle(key,status,days){ return fetch('/api/supply/actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:key,status:status,snooze_days:days||7})}); }
+    function removeCard(cd){ cd.style.transition='opacity .2s'; cd.style.opacity='.35'; setTimeout(function(){ cd.remove(); var l=document.getElementById('rl-list'); if(l&&!l.querySelector('.rl-card'))l.innerHTML='<div class="count">All reallocations actioned. 🎉</div>'; },200); }
+    b.querySelectorAll('.rl-card').forEach(function(cd){ var key=cd.dataset.key, r=byKey[key];
+      cd.querySelector('.rl-apply').onclick=function(){ var btn=this;
+        if(!confirm('Move '+r.qty+' × '+r.sku+'\n'+r.from_po+' ('+r.from_country+') → '+r.to_po+' ('+r.to_country+')?\n\nThis edits the order-plan quantities (supplier total unchanged).'))return;
+        btn.disabled=true; btn.textContent='Applying…';
+        fetch('/api/supply/bi/apply-reallocation',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:key,from_po:r.from_po,to_po:r.to_po,sku:r.sku,qty:r.qty})})
+          .then(function(x){return x.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); try{invalidateDerived();}catch(e){} delete cache['purchase-orders']; delete cache['order-plan']; removeCard(cd); })
+          .catch(function(e){ btn.disabled=false; btn.textContent='✓ Apply'; alert('Apply failed: '+(e.message||e)); }); };
+      cd.querySelectorAll('.rl-snooze').forEach(function(sb){ sb.onclick=function(){ this.disabled=true; lifecycle(key,'snoozed',sb.dataset.days).then(function(){removeCard(cd);}); }; });
+      cd.querySelector('.rl-dismiss').onclick=function(){ this.disabled=true; lifecycle(key,'dismissed').then(function(){removeCard(cd);}); }; }); }
 
   function selectSection(key){
-    if(key==='reports')return selectReport(reportTab||'upcoming');
+    if(key==='reports')return selectReport(reportTab||'metrics');
     if(REPORT_KEYS.indexOf(key)>=0)return selectReport(key);
     current=key; syncHash();
     document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k===key);});
@@ -3270,7 +3302,6 @@
       if(key==='order-plan')return renderOrderPlan(d);
       if(key==='productions')return renderProductions(d);
       if(key==='shipments')return renderShipments(d);
-      if(key==='bi')return renderBI(d);
       if(key==='flexport')return renderFlexport(d);
       if(key==='cashflow')return renderCashflow(d);
       if(key==='deposits')return renderDeposits(d);

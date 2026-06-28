@@ -52,7 +52,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.2';
+const APP_VERSION = 'v25.3';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -4411,6 +4411,88 @@ app.get('/api/supply/bi/projection', async (req, res) => {
     rows.forEach(r => { counts[r.urgency] = (counts[r.urgency] || 0) + 1; });
     res.json({ ok: true, target_months: BI_TARGET_MONTHS, counts, rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── BI ▸ REALLOCATE (Phase 1) — within an EDITABLE production (Future/Production), move order-plan qty for a
+// SKU from a destination with SURPLUS cover to one that's SHORT, so the same run covers demand. Zero-sum
+// (supplier total unchanged). Capped by the donor's line qty and by keeping the donor at/above target.
+async function biReallocations() {
+  const proj = await biProjection();
+  const pj = {}; proj.forEach(r => { pj[r.sku + '|' + r.country] = r; });
+  const lines = (await pool.query(`
+    SELECT p.prod_no, p.po, upper(coalesce(nullif(p.country_code,''), b.country_code, '')) country,
+           l.sku, l.qty::int qty, coalesce(p.supplier_name,'') supplier
+    FROM planner.purchase_orders p
+    JOIN planner.purchase_order_lines l ON l.po=p.po
+    LEFT JOIN planner.branches b ON b.name=p.branch
+    WHERE coalesce(p.prod_no,'')<>'' AND (p.status ILIKE 'future%' OR p.status ILIKE 'production%') AND coalesce(l.qty,0)>0`)).rows;
+  const coPO = {}, qByCoSku = {};   // prod→country→{po,supplier} ; prod→sku→country→qty
+  lines.forEach(r => { if (!r.country) return;
+    (coPO[r.prod_no] = coPO[r.prod_no] || {})[r.country] = coPO[r.prod_no][r.country] || { po: r.po, supplier: r.supplier };
+    (((qByCoSku[r.prod_no] = qByCoSku[r.prod_no] || {})[r.sku] = qByCoSku[r.prod_no][r.sku] || {})[r.country] = (qByCoSku[r.prod_no][r.sku][r.country] || 0) + r.qty); });
+  const TM = BI_TARGET_MONTHS, recs = [];
+  for (const prod of Object.keys(qByCoSku)) {
+    const cos = Object.keys(coPO[prod] || {});
+    for (const sku of Object.keys(qByCoSku[prod])) {
+      const qByCo = qByCoSku[prod][sku];
+      const donors = [];
+      for (const co of cos) { const r = pj[sku + '|' + co], lq = qByCo[co] || 0;
+        if (!r || lq <= 0 || r.urgency !== 'surplus') continue;
+        const avgM = r.demand_12m / 12;
+        const spare = Math.floor(avgM > 0 ? (r.on_hand + r.inbound) - TM * avgM : (r.on_hand + r.inbound));
+        if (spare > 0) donors.push({ co, po: coPO[prod][co].po, spare: Math.min(spare, lq), cover: r.cover_with_inbound, avgM, sup: coPO[prod][co].supplier }); }
+      if (!donors.length) continue;
+      donors.sort((a, b) => b.spare - a.spare);
+      for (const co of cos) { const r = pj[sku + '|' + co];
+        if (!r || (r.urgency !== 'critical' && r.urgency !== 'soon')) continue;
+        const need = r.need_qty || 0; if (need <= 0) continue;
+        const donor = donors.find(d => d.co !== co && d.spare > 0); if (!donor) continue;
+        const move = Math.min(need, donor.spare); if (move <= 0) continue;
+        const avgR = r.demand_12m / 12, dr = pj[sku + '|' + donor.co];
+        donor.spare -= move;
+        recs.push({ key: 'bi-realloc|' + sku + '|' + donor.po + '|' + coPO[prod][co].po,
+          prod_no: prod, sku, supplier: coPO[prod][co].supplier || donor.sup || '',
+          from_po: donor.po, from_country: donor.co, to_po: coPO[prod][co].po, to_country: co, qty: move,
+          from_cover: donor.cover, from_cover_after: donor.avgM > 0 ? Math.round((((dr.on_hand + dr.inbound) - move) / donor.avgM) * 10) / 10 : null,
+          to_cover: r.cover_with_inbound, to_cover_after: avgR > 0 ? Math.round(((r.on_hand + r.inbound + move) / avgR) * 10) / 10 : null,
+          to_urgency: r.urgency, to_need: need }); }
+    }
+  }
+  return recs;
+}
+app.get('/api/supply/bi/reallocations', async (req, res) => {
+  try {
+    const recs = await biReallocations();
+    const st = {}; (await pool.query(`SELECT action_key, status, to_char(snooze_until,'YYYY-MM-DD') snooze_until FROM planner.supply_action_state`)).rows
+      .forEach(s => { st[s.action_key] = s; });
+    const today = kpiToday();
+    const open = recs.filter(rc => { const s = st[rc.key]; if (!s) return true;
+      if (s.status === 'dismissed' || s.status === 'applied') return false;
+      if (s.status === 'snoozed' && s.snooze_until && s.snooze_until >= today) return false; return true; });
+    open.sort((a, b) => (a.to_urgency === 'critical' ? 0 : 1) - (b.to_urgency === 'critical' ? 0 : 1) || b.qty - a.qty);
+    res.json({ ok: true, target_months: BI_TARGET_MONTHS, count: open.length, recs: open });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Apply a reallocation: zero-sum move of `qty` of `sku` from from_po → to_po (transactional), then mark applied.
+app.post('/api/supply/bi/apply-reallocation', async (req, res) => {
+  const b = req.body || {};
+  const fromPo = String(b.from_po || ''), toPo = String(b.to_po || ''), sku = String(b.sku || ''), qty = parseInt(b.qty, 10) || 0, key = String(b.key || '');
+  if (!fromPo || !toPo || !sku || qty <= 0) return res.status(400).json({ error: 'from_po, to_po, sku and qty>0 required' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const fq = (await client.query(`SELECT qty FROM planner.purchase_order_lines WHERE po=$1 AND sku=$2 FOR UPDATE`, [fromPo, sku])).rows[0];
+    if (!fq || Number(fq.qty) < qty) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'Donor line no longer has ' + qty + ' units (now ' + (fq ? fq.qty : 0) + ') — recompute.' }); }
+    await client.query(`UPDATE planner.purchase_order_lines SET qty=qty-$3 WHERE po=$1 AND sku=$2`, [fromPo, sku, qty]);
+    await client.query(`INSERT INTO planner.purchase_order_lines (po_sku, po, sku, qty) VALUES ($1||'|'||$2,$1,$2,$3)
+      ON CONFLICT (po_sku) DO UPDATE SET qty=coalesce(planner.purchase_order_lines.qty,0)+$3`, [toPo, sku, qty]);
+    if (key) await client.query(`INSERT INTO planner.supply_action_state (action_key, status, note)
+      VALUES ($1,'applied',$2) ON CONFLICT (action_key) DO UPDATE SET status='applied', note=excluded.note, snooze_until=NULL`,
+      [key, 'reallocated ' + qty + ' ' + sku + ' ' + fromPo + '→' + toPo]);
+    await client.query('COMMIT');
+    res.json({ ok: true, moved: qty, from_po: fromPo, to_po: toPo, sku });
+  } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
 });
 const kpiGroup = q => (['Core', 'Seasonal', 'Non-Core'].includes(q) ? q : '');
 const kpiTotals = (rows, keys) => { const out = { TOTAL3: { channel: 'Total 3PL', type: 'TOTAL' }, TOTALF: { channel: 'Total FBA', type: 'TOTAL' } };

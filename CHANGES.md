@@ -4,6 +4,22 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v25.3 - Merge BI into "BI & REPORTS" + Phase 1 REALLOCATE recommendations
+
+**Merged** the standalone BI tab into REPORTS → renamed **"BI & REPORTS"** with sub-tabs in order:
+**METRICS · REALLOCATE · URGENT BUY · CONTAINER FILL**, then the existing reports (What's Next, Pipeline,
+Cash Flow, Direct to Client, Flexport). METRICS = the operational tiles; URGENT BUY = the stock-out-risk list
+(now shows "buy to target" qty); CONTAINER FILL = placeholder. BI sub-tabs are **fluid** (re-fetched each
+visit, never cached). Default sub-tab = METRICS.
+
+**Phase 1 — REALLOCATE** (the zero-cost flow fix): `GET /api/supply/bi/reallocations` finds, within each
+**editable production** (Future/Production), SKUs where one destination has **surplus** cover and another is
+at **stock-out risk**, and recommends a **zero-sum** qty move (supplier total unchanged), capped by the donor's
+line qty and keeping the donor at/above target. Cards show the move + cover before→after, with **Apply / Snooze
+(1wk/1mo) / Dismiss** (reuses `supply_action_state` + a stable key, adds `applied`). `POST
+/api/supply/bi/apply-reallocation` does the move transactionally (decrement donor line, upsert receiver line)
+and marks it applied. Verified end-to-end (move + restore). No migration.
+
 ## v25.2 - Small UI fixes: What's-Next PO links + PO grouping dropdown + tighter bars
 
 - **What's Next report** — PO references are now **blue hyperlinks** that open the **actual PO on its DATES
