@@ -2784,7 +2784,7 @@ var FC_INITIAL={}; // populated at end of init() after all IV overlays — diff 
 let SKU_VIEW=null;
 let VIEW_MODE='planning'; // 'planning' | 'exec'
 let REPORT_VIEW='ex'; // REPORTS sub-tab: 'ex' (Exec Summary) | 'slow' (Slow Moving) | 'af' (Auto Forecast)
-let KPI_SUB='instock', KPI_T3PL=5, KPI_TFBA=5, KPI_GRP=''; // DEMAND ▸ KPIs state (sub-view + thresholds + core/seasonal split)
+let KPI_SUB='instock', KPI_T3PL=5, KPI_TFBA=5, KPI_GRP='', KPI_COVER=6, KPI_WITHIN=3, KPI_ACCM=3; // DEMAND ▸ KPIs state
 let DEMAND_VIEW='plan'; // DEMAND sub-tab: 'plan' (the demand plan) | 'targets' (sell-through targets) | 'actions'
 var TGT_CACHE=null;
 var _da={sec:'actions',mkt:'all',cat:'all',status:'open'}; // DEMAND ▸ Actions filters (sec: actions|insights|weather; status: open|snoozed|dismissed|done|all)
@@ -6429,50 +6429,70 @@ function render(){
 // DEMAND ▸ KPIs — level-3 sub-nav (In Stock | Slow moving | Inventory). In Stock = % of active SKUs per
 // market×channel with on-hand stock above a (per-channel toggleable) threshold; plus the A-player subset.
 function renderKpisView(body){
-  var subTabs=[['instock','In Stock'],['slowmoving','Slow moving'],['inventory','Inventory']];
+  var subTabs=[['instock','In Stock'],['slowmoving','Slow moving'],['inventory','Inventory cover'],['stockout','Stockout risk'],['discontinued','Discontinued'],['accuracy','Forecast accuracy']];
   var nav='<div style="display:flex;gap:2px;margin:2px 0 12px;border-bottom:1px solid #e0e0e0;flex-wrap:wrap">'
-    +subTabs.map(function(t){return '<button class="dnav'+(t[0]===KPI_SUB?' active':'')+'" data-k="'+t[0]+'"'+(t[0]==='instock'?'':' title="coming soon"')+'>'+t[1]+'</button>';}).join('')+'</div>';
+    +subTabs.map(function(t){return '<button class="dnav'+(t[0]===KPI_SUB?' active':'')+'" data-k="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div>';
   body.innerHTML=nav+'<div id="kpi-body"></div>';
   body.querySelectorAll('.dnav[data-k]').forEach(function(b){ b.onclick=function(){ KPI_SUB=b.dataset.k; renderKpisView(body); }; });
   var kb=body.querySelector('#kpi-body');
-  if(KPI_SUB!=='instock'){ kb.innerHTML='<div style="padding:18px;color:#64748b;font-size:13px">&#128202; '+(KPI_SUB==='slowmoving'?'Slow moving':'Inventory')+' KPI &mdash; coming soon.</div>'; return; }
-  var grps=[['','All'],['Core','Core'],['Seasonal','Seasonal'],['Non-Core','Non-Core']];
-  kb.innerHTML='<div style="display:flex;gap:18px;align-items:center;margin-bottom:10px;flex-wrap:wrap">'
-    +'<div style="font-size:13px;font-weight:700">In-stock rate</div>'
-    +'<label style="font-size:12px;color:#475569">3PL in stock when units &gt; <input type="number" id="kpi-t3pl" value="'+KPI_T3PL+'" min="0" style="width:60px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px"></label>'
-    +'<label style="font-size:12px;color:#475569">FBA in stock when units &gt; <input type="number" id="kpi-tfba" value="'+KPI_TFBA+'" min="0" style="width:60px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px"></label>'
-    +'<span style="font-size:12px;color:#475569;margin-left:6px">Split:</span>'
-    +'<span style="display:flex;gap:4px">'+grps.map(function(g){return '<button class="kpi-grp" data-g="'+g[0]+'" style="font-size:11px;padding:3px 10px;border-radius:5px;cursor:pointer;border:1px solid #cbd5e1;'+(g[0]===KPI_GRP?'background:#0f172a;color:#fff;border-color:#0f172a':'background:#fff;color:#334155')+'">'+g[1]+'</button>';}).join('')+'</span>'
+  function numIn(id,v){ return '<input type="number" id="'+id+'" value="'+v+'" min="0" style="width:56px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px">'; }
+  function grpPills(){ var grps=[['','All'],['Core','Core'],['Seasonal','Seasonal'],['Non-Core','Non-Core']];
+    return '<span style="font-size:12px;color:#475569">Split:</span><span style="display:flex;gap:4px">'+grps.map(function(g){return '<button class="kpi-grp" data-g="'+g[0]+'" style="font-size:11px;padding:3px 10px;border-radius:5px;cursor:pointer;border:1px solid #cbd5e1;'+(g[0]===KPI_GRP?'background:#0f172a;color:#fff;border-color:#0f172a':'background:#fff;color:#334155')+'">'+g[1]+'</button>';}).join('')+'</span>'; }
+  var CFG={
+    instock:{ title:'In-stock rate', note:'Active products available in each channel, with on-hand stock above the threshold. A = A-tier (market_tier).',
+      controls:'<label style="font-size:12px;color:#475569">3PL units &gt; '+numIn('kpi-t3pl',KPI_T3PL)+'</label><label style="font-size:12px;color:#475569">FBA units &gt; '+numIn('kpi-tfba',KPI_TFBA)+'</label>'+grpPills(),
+      wire:function(rl){ document.getElementById('kpi-t3pl').onchange=function(){KPI_T3PL=Number(this.value)||0;rl();}; document.getElementById('kpi-tfba').onchange=function(){KPI_TFBA=Number(this.value)||0;rl();}; },
+      url:function(){ return '/api/kpi/in-stock?t3pl='+KPI_T3PL+'&tfba='+KPI_TFBA+'&group='+encodeURIComponent(KPI_GRP); }, file:function(j){return 'in_stock_'+(j.group||'All');},
+      cols:[{h:'Market / Channel',k:'channel',t:'text'},{h:'SKUs',k:'skus',t:'num'},{h:'In stock',k:'instock',t:'num'},{h:'%',k:'pct',t:'pct'},{h:'A SKUs',k:'a_skus',t:'num'},{h:'A in stock',k:'a_instock',t:'num'},{h:'A %',k:'a_pct',t:'pct'}] },
+    slowmoving:{ title:'Slow moving / overstock', note:'Active SKUs whose on-hand cover exceeds the threshold (months); units & value tied up.',
+      controls:'<label style="font-size:12px;color:#475569">Cover &gt; '+numIn('kpi-cover',KPI_COVER)+' mo</label>'+grpPills(),
+      wire:function(rl){ document.getElementById('kpi-cover').onchange=function(){KPI_COVER=Number(this.value)||0;rl();}; },
+      url:function(){ return '/api/kpi/slow-moving?cover='+KPI_COVER+'&group='+encodeURIComponent(KPI_GRP); }, file:function(j){return 'slow_moving_'+(j.group||'All')+'_gt'+j.cover+'mo';},
+      cols:[{h:'Market / Channel',k:'channel',t:'text'},{h:'Slow SKUs',k:'slow_skus',t:'num'},{h:'Units',k:'slow_units',t:'num'},{h:'Value',k:'slow_value',t:'money'},{h:'Stocked SKUs',k:'stocked_skus',t:'num'}] },
+    inventory:{ title:'Inventory months of cover', note:'On-hand units & value per channel, with weighted months of cover vs 12-month demand.',
+      controls:grpPills(), url:function(){ return '/api/kpi/inventory-cover?group='+encodeURIComponent(KPI_GRP); }, file:function(j){return 'inventory_cover_'+(j.group||'All');},
+      cols:[{h:'Market / Channel',k:'channel',t:'text'},{h:'On-hand units',k:'units',t:'num'},{h:'Value',k:'value',t:'money'},{h:'Monthly demand',k:'monthly_demand',t:'num'},{h:'Months cover',k:'months_cover',t:'num'}] },
+    stockout:{ title:'Stockout risk', note:'Active SKUs whose forecast demand over the next N months exceeds on-hand stock (inbound POs not yet included).',
+      controls:'<label style="font-size:12px;color:#475569">Within '+numIn('kpi-within',KPI_WITHIN)+' mo</label>'+grpPills(),
+      wire:function(rl){ document.getElementById('kpi-within').onchange=function(){KPI_WITHIN=Number(this.value)||0;rl();}; },
+      url:function(){ return '/api/kpi/stockout-risk?within='+KPI_WITHIN+'&group='+encodeURIComponent(KPI_GRP); }, file:function(j){return 'stockout_risk_'+(j.group||'All')+'_within'+j.within+'mo';},
+      cols:[{h:'Market / Channel',k:'channel',t:'text'},{h:'At risk',k:'at_risk_skus',t:'num'},{h:'With demand',k:'with_demand',t:'num'},{h:'%',k:'pct',t:'pct',inv:true},{h:'Units short',k:'units_short',t:'num'}] },
+    discontinued:{ title:'Discontinued holding stock', note:'SKUs past their discontinue date that still carry on-hand stock.',
+      url:function(){ return '/api/kpi/discontinued-stock'; }, file:function(){return 'discontinued_stock';},
+      cols:[{h:'Market / Channel',k:'channel',t:'text'},{h:'SKUs',k:'skus',t:'num'},{h:'Units',k:'units',t:'num'},{h:'Value',k:'value',t:'money'}] },
+    accuracy:{ title:'Forecast vs recent run-rate', note:'',
+      controls:'<label style="font-size:12px;color:#475569">Trailing '+numIn('kpi-accm',KPI_ACCM)+' mo</label>',
+      wire:function(rl){ document.getElementById('kpi-accm').onchange=function(){KPI_ACCM=Number(this.value)||0;rl();}; },
+      url:function(){ return '/api/kpi/forecast-accuracy?months='+KPI_ACCM; }, file:function(){return 'forecast_vs_runrate';},
+      cols:[{h:'Country',k:'country',t:'text'},{h:'Channel',k:'channel',t:'text'},{h:'Actual / mo',k:'actual_avg',t:'num'},{h:'Forecast / mo',k:'forecast_avg',t:'num'},{h:'Variance',k:'variance_pct',t:'pct'}] }
+  };
+  var cfg=CFG[KPI_SUB]||CFG.instock;
+  kb.innerHTML='<div style="display:flex;gap:14px;align-items:center;margin-bottom:10px;flex-wrap:wrap">'
+    +'<div style="font-size:13px;font-weight:700">'+cfg.title+'</div>'+(cfg.controls||'')
     +'<span style="margin-left:auto;display:flex;gap:6px"><button id="kpi-csv" style="font-size:11px;padding:3px 10px;border-radius:5px;cursor:pointer;border:1px solid #cbd5e1;background:#fff">&#8595; CSV</button><button id="kpi-copy" style="font-size:11px;padding:3px 10px;border-radius:5px;cursor:pointer;border:1px solid #cbd5e1;background:#fff">&#9106; Copy</button></span>'
     +'</div><div id="kpi-tbl"><div style="color:#94a3b8;font-size:12px">Loading…</div></div>';
   kb.querySelectorAll('.kpi-grp').forEach(function(b){ b.onclick=function(){ KPI_GRP=b.dataset.g; renderKpisView(body); }; });
-  function load(){ var t3=document.getElementById('kpi-t3pl').value, tf=document.getElementById('kpi-tfba').value;
-    fetch('/api/kpi/in-stock?t3pl='+encodeURIComponent(t3)+'&tfba='+encodeURIComponent(tf)+'&group='+encodeURIComponent(KPI_GRP)).then(function(r){return r.json();}).then(function(j){
+  function fmt(v,t){ if(v==null||v==='')return '—'; if(t==='money')return '£'+Number(v).toLocaleString(); if(t==='pct')return v+'%'; if(t==='num')return Number(v).toLocaleString(); return v; }
+  function load(){
+    fetch(cfg.url()).then(function(r){return r.json();}).then(function(j){
       var tbl=document.getElementById('kpi-tbl'); if(!tbl)return;
       if(!j||!j.ok){ tbl.innerHTML='<div style="color:#dc2626;font-size:12px">Failed to load.</div>'; return; }
       var th='padding:5px 12px;text-align:right', thl='padding:5px 12px;text-align:left';
-      var head='<tr style="background:#e9eef5;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:#475569">'
-        +'<th style="'+thl+'">Market / Channel</th><th style="'+th+'">SKUs</th><th style="'+th+'">In stock</th><th style="'+th+'">%</th>'
-        +'<th style="'+th+'">A SKUs</th><th style="'+th+'">A in stock</th><th style="'+th+'">A %</th></tr>';
-      var rowsH=j.rows.map(function(r){ var tot=r.type==='TOTAL';
-        return '<tr style="border-bottom:1px solid #eef2f7;'+(tot?'font-weight:700;background:#f8fafc':'')+'">'
-          +'<td style="padding:4px 12px">'+r.channel+'</td>'
-          +'<td style="padding:4px 12px;text-align:right">'+r.skus+'</td><td style="padding:4px 12px;text-align:right">'+r.instock+'</td>'
-          +'<td style="padding:4px 12px;text-align:right;font-weight:600;color:'+(r.pct>=80?'#15803d':r.pct>=50?'#b45309':'#b91c1c')+'">'+r.pct+'%</td>'
-          +'<td style="padding:4px 12px;text-align:right">'+r.a_skus+'</td><td style="padding:4px 12px;text-align:right">'+r.a_instock+'</td>'
-          +'<td style="padding:4px 12px;text-align:right;font-weight:600;color:'+(r.a_pct>=80?'#15803d':r.a_pct>=50?'#b45309':'#b91c1c')+'">'+r.a_pct+'%</td></tr>'; }).join('');
-      tbl.innerHTML='<table style="border-collapse:collapse;font-size:12px;max-width:760px;width:100%"><thead>'+head+'</thead><tbody>'+rowsH+'</tbody></table>'
-        +'<div style="font-size:11px;color:#94a3b8;margin-top:6px">Active products available in each channel, with on-hand stock above the threshold. A = A-tier (market_tier).</div>';
-      // CSV / clipboard exports for this KPI
-      var matrix=[['Market/Channel','SKUs','In Stock','%','A SKUs','A In Stock','A %']].concat(j.rows.map(function(r){return [r.channel,r.skus,r.instock,r.pct+'%',r.a_skus,r.a_instock,r.a_pct+'%'];}));
-      var fname='in_stock_rate_'+(j.group||'All')+'_3plgt'+j.t3pl+'_fbagt'+j.tfba+'.csv';
-      var cb=document.getElementById('kpi-csv'), cp=document.getElementById('kpi-copy');
-      if(cb)cb.onclick=function(){ var c=matrix.map(function(r){return r.map(function(x){x=String(x);return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;}).join(',');}).join('\n')+'\n';
+      var head='<tr style="background:#e9eef5;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:#475569">'+cfg.cols.map(function(c,i){return '<th style="'+(i===0?thl:th)+'">'+c.h+'</th>';}).join('')+'</tr>';
+      var bodyH=j.rows.map(function(r){ var tot=r.type==='TOTAL';
+        return '<tr style="border-bottom:1px solid #eef2f7;'+(tot?'font-weight:700;background:#f8fafc':'')+'">'+cfg.cols.map(function(c,i){
+          var col=''; if(c.t==='pct'&&r[c.k]!=null){ var v=r[c.k]; col=';font-weight:600;color:'+(c.inv?(v<=20?'#15803d':v<=50?'#b45309':'#b91c1c'):(v>=80?'#15803d':v>=50?'#b45309':'#b91c1c')); }
+          return '<td style="padding:4px 12px;text-align:'+(i===0?'left':'right')+col+'">'+fmt(r[c.k],c.t)+'</td>'; }).join('')+'</tr>'; }).join('');
+      tbl.innerHTML='<table style="border-collapse:collapse;font-size:12px;max-width:860px;width:100%"><thead>'+head+'</thead><tbody>'+bodyH+'</tbody></table>'
+        +((cfg.note||j.note)?'<div style="font-size:11px;color:#94a3b8;margin-top:6px">'+(j.note?j.note+'. ':'')+(cfg.note||'')+'</div>':'');
+      var matrix=[cfg.cols.map(function(c){return c.h;})].concat(j.rows.map(function(r){return cfg.cols.map(function(c){return r[c.k]==null?'':r[c.k];});}));
+      var fname=cfg.file(j)+'.csv';
+      var cbn=document.getElementById('kpi-csv'), cpn=document.getElementById('kpi-copy');
+      if(cbn)cbn.onclick=function(){ var c=matrix.map(function(rr){return rr.map(function(x){x=String(x);return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;}).join(',');}).join('\n')+'\n';
         var bl=new Blob([c],{type:'text/csv'}),u=URL.createObjectURL(bl),a=document.createElement('a');a.href=u;a.download=fname;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u);},1000); };
-      if(cp)cp.onclick=function(){ var tsv=matrix.map(function(r){return r.join('\t');}).join('\n'); navigator.clipboard.writeText(tsv).then(function(){var o=cp.textContent;cp.textContent='✓ Copied';setTimeout(function(){cp.textContent=o;},1400);}).catch(function(){alert('Copy blocked by the browser.');}); };
+      if(cpn)cpn.onclick=function(){ var tsv=matrix.map(function(rr){return rr.join('\t');}).join('\n'); navigator.clipboard.writeText(tsv).then(function(){var o=cpn.textContent;cpn.textContent='✓ Copied';setTimeout(function(){cpn.textContent=o;},1400);}).catch(function(){alert('Copy blocked by the browser.');}); };
     }); }
-  document.getElementById('kpi-t3pl').onchange=function(){ KPI_T3PL=Number(this.value)||0; load(); };
-  document.getElementById('kpi-tfba').onchange=function(){ KPI_TFBA=Number(this.value)||0; load(); };
+  if(cfg.wire)cfg.wire(load);
   load();
 }
 // ─── DEMAND sub-tabs (PLAN / KPIs / TARGETS / ACTIONS / CALENDAR) ───────────────────────────
