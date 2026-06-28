@@ -784,9 +784,10 @@
       fetch('/api/supply/cin7-dates-sync',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({pos:cand})})
         .then(function(r){return r.json();}).then(function(j){ btn.disabled=false; btn.textContent=orig;
           if(j&&j.error){ alert('Cin7 sync failed: '+j.error); return; }
-          var msg='✓ Cin7 dates synced: '+(j.updated||0)+' updated'+(j.skipped?', '+j.skipped+' skipped':'')+'.';
+          var msg='✓ Cin7 dates synced: '+(j.updated||0)+' updated'+(j.erp_mirror_updated!=null?' · '+j.erp_mirror_updated+' ERP mirror row(s) synced':'')+(j.skipped?', '+j.skipped+' skipped':'')+'.';
           if(j.skippedDetail&&j.skippedDetail.length) msg+='\n\nSkipped:\n'+j.skippedDetail.map(function(s){return '• '+s.po+' — '+s.reason;}).join('\n');
-          msg+='\n\nNote: the ERP mirror refreshes on the next n8n sync, so the “Date ≠ ERP” flags clear after that.';
+          // refresh so the "Date ≠ ERP" flags clear in real time (the mirror was updated server-side)
+          invalidateDerived(); delete cache['purchase-orders']; selectSection('purchase-orders');
           alert(msg); })
         .catch(function(e){ btn.disabled=false; btn.textContent=orig; alert('Cin7 sync failed: '+(e.message||e)); }); };
     view(); }
@@ -860,7 +861,8 @@
       msg.textContent='Updating Cin7…';
       fetch('/api/supply/po/'+encodeURIComponent(po)+'/cin7-date',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({completion_date:comp})}).then(function(r){return r.json();}).then(function(j){
         if(j&&j.error){ msg.innerHTML='<span style="color:#dc2626">'+esc(j.error)+'</span>'; return; }
-        msg.innerHTML='<span style="color:#166534;font-weight:700">✓ Cin7 successfully updated</span> ('+esc(j.estimatedDeliveryDate||comp)+') — <a href="'+esc(j.link)+'" target="_blank" rel="noopener">open Cin7 PO ↗</a>';
+        msg.innerHTML='<span style="color:#166534;font-weight:700">✓ Cin7 successfully updated</span> ('+esc(j.estimatedDeliveryDate||comp)+')'+(j.erp_mirror_updated?' · ERP mirror synced':'')+' — <a href="'+esc(j.link)+'" target="_blank" rel="noopener">open Cin7 PO ↗</a>';
+        invalidateDerived(); delete cache['purchase-orders']; selectSection('purchase-orders');   // clear the "Date ≠ ERP" flag in real time
       }).catch(function(e){ msg.innerHTML='<span style="color:#dc2626">Failed: '+esc(e.message||e)+'</span>'; }); };
     // #14b — push SKU / qty / price line items to Cin7 (price = approved supplier final, else standard)
     bg.querySelector('#erp-cin7-lines').onclick=function(){
@@ -869,7 +871,8 @@
       msg.textContent='Sending to Cin7…';
       fetch('/api/supply/po/'+encodeURIComponent(po)+'/cin7-lines',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({completion_date:comp})}).then(function(r){return r.json();}).then(function(j){
         if(j&&j.error){ msg.innerHTML='<span style="color:#dc2626">'+esc(j.error)+'</span>'; return; }
-        msg.innerHTML='<span style="color:#166534;font-weight:700">✓ Cin7 PO '+(j.mode==='created'?'created':'updated')+'</span> — '+esc(j.lines)+' line(s)'+(j.approved?' ('+esc(j.approved)+' at approved supplier price)':'')+(j.link?' — <a href="'+esc(j.link)+'" target="_blank" rel="noopener">open Cin7 PO ↗</a>':'');
+        msg.innerHTML='<span style="color:#166534;font-weight:700">✓ Cin7 PO '+(j.mode==='created'?'created':'updated')+'</span> — '+esc(j.lines)+' line(s)'+(j.approved?' ('+esc(j.approved)+' at approved supplier price)':'')+(j.erp_mirror_updated?' · ERP mirror synced':'')+(j.link?' — <a href="'+esc(j.link)+'" target="_blank" rel="noopener">open Cin7 PO ↗</a>':'');
+        invalidateDerived(); delete cache['purchase-orders']; selectSection('purchase-orders');   // clear the ERP drift flags in real time
       }).catch(function(e){ msg.innerHTML='<span style="color:#dc2626">Failed: '+esc(e.message||e)+'</span>'; }); };
   }
   // a COMPLETE PO's dates are settled — don't flag an ERP date discrepancy on it (the date no longer needs pushing)

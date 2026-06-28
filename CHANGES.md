@@ -4,6 +4,20 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.383 - Successful Cin7 writes sync the local ERP mirror in real time
+
+- After a successful Cin7 write, the local **ERP mirror is updated optimistically** so the drift flags clear
+  immediately (instead of waiting for the next n8n sync — which later re-confirms):
+  - **Update Cin7 Date** + **Sync Cin7 dates (bulk)** → set `erp_purchase_orders.final_delivery_date` to the pushed
+    completion date (+ `synced_at`), so "⚠ Date ≠ ERP" clears.
+  - **Update / Create Cin7 PO (lines)** → upsert `erp_purchase_order_lines` (qty, cost) to the pushed values and the
+    delivery date, so the "Update ERP" line-drift clears.
+- The UI **refetches** the Purchase Orders grid after a successful push so the flags visibly disappear in real time.
+- Mirror writes are non-fatal (a mirror failure still reports the Cin7 write as succeeded). Responses include
+  `erp_mirror_updated`.
+
+## v20.382 - "+ New PO" / "Upload POs" match the save-btn button format (PO toolbar consistency)
+
 ## v20.381 - Bulk "Sync Cin7 dates" button on SUPPLY ▸ Purchase Orders
 
 - New **📅 Sync Cin7 dates** button (PO toolbar) pushes the planner completion date to Cin7 `EstimatedDeliveryDate`

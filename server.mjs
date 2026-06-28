@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.382';
+const APP_VERSION = 'v20.383';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2635,7 +2635,10 @@ app.post('/api/supply/po/:po/cin7-date', async (req, res) => {
       { method: 'PUT', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify(body) });
     const txt = await r.text();
     if (!r.ok) return res.status(502).json({ error: 'Cin7 API error ' + r.status + ': ' + txt.slice(0, 300) });
-    res.json({ ok: true, cin7_id: cin7Id, estimatedDeliveryDate: edd,
+    // optimistically sync the local ERP mirror so the "Date ≠ ERP" flag clears immediately (n8n re-confirms later)
+    let mirrored = false;
+    try { const u = await pool.query(`UPDATE planner.erp_purchase_orders SET final_delivery_date=$2::date, synced_at=now() WHERE po=$1`, [po, completion]); mirrored = u.rowCount > 0; } catch (e) { /* non-fatal — Cin7 write already succeeded */ }
+    res.json({ ok: true, cin7_id: cin7Id, estimatedDeliveryDate: edd, erp_mirror_updated: mirrored,
       approval_preserved: curApproved === undefined ? 'unchanged' : (curApproved ? 'approved' : 'draft'),
       link: 'https://go.cin7.com/Cloud/TransactionEntry/TransactionEntry.aspx?idCustomerAppsLink=951111&OrderId=' + encodeURIComponent(cin7Id) });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -2700,7 +2703,19 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
           [po, String(newId), poRow.supplier_name || null, 'open']);
       }
     }
-    res.json({ ok: true, mode, cin7_id: newId, lines: lines.length, approved: lines.filter(l => l.approved_price).length,
+    // optimistically sync the local ERP mirror (lines + delivery date) so the "Update ERP" drift flags clear
+    // immediately — reflects what Cin7 now holds; n8n re-confirms on its next sync. Non-fatal if it fails.
+    let mirrored = false;
+    try {
+      for (const l of lines) {
+        await pool.query(`INSERT INTO planner.erp_purchase_order_lines (po, sku, qty, cost, synced_at)
+          VALUES ($1,$2,$3,$4,now()) ON CONFLICT (po,sku) DO UPDATE SET qty=excluded.qty, cost=excluded.cost, synced_at=now()`,
+          [po, l.sku, Number(l.qty), Number(l.price) || 0]);
+      }
+      if (edd) await pool.query(`UPDATE planner.erp_purchase_orders SET final_delivery_date=$2::date, synced_at=now() WHERE po=$1`, [po, completion]);
+      mirrored = true;
+    } catch (e) { /* non-fatal — Cin7 write already succeeded */ }
+    res.json({ ok: true, mode, cin7_id: newId, lines: lines.length, approved: lines.filter(l => l.approved_price).length, erp_mirror_updated: mirrored,
       link: newId ? 'https://go.cin7.com/Cloud/TransactionEntry/TransactionEntry.aspx?idCustomerAppsLink=951111&OrderId=' + encodeURIComponent(newId) : null });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -2727,7 +2742,7 @@ app.post('/api/supply/cin7-dates-sync', async (req, res) => {
       if (/complete/i.test(m.status)) { skipped.push({ po: it.po, reason: 'complete — skipped' }); continue; }
       const c = (it.completion_date || '').trim();
       if (!c) { skipped.push({ po: it.po, reason: 'no completion date' }); continue; }
-      todo.push({ id: Number(m.erp_po_id) || m.erp_po_id, edd: /T/.test(c) ? c : (c + 'T00:00:00Z') });
+      todo.push({ po: it.po, id: Number(m.erp_po_id) || m.erp_po_id, date: c, edd: /T/.test(c) ? c : (c + 'T00:00:00Z') });
     }
     if (!todo.length) return res.json({ ok: true, updated: 0, skipped: skipped.length, skippedDetail: skipped });
     // 2) read current approval state for all ids in chunks (id IN (...)) so the update preserves draft/approved
@@ -2747,7 +2762,10 @@ app.post('/api/supply/cin7-dates-sync', async (req, res) => {
       { method: 'PUT', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify(batch) });
     const txt = await r.text();
     if (!r.ok) return res.status(502).json({ error: 'Cin7 API error ' + r.status + ': ' + txt.slice(0, 300) });
-    res.json({ ok: true, updated: batch.length, skipped: skipped.length, skippedDetail: skipped });
+    // optimistically sync the local ERP mirror so the "Date ≠ ERP" flags clear immediately (n8n re-confirms later)
+    let mirrored = 0;
+    for (const t of todo) { try { const u = await pool.query(`UPDATE planner.erp_purchase_orders SET final_delivery_date=$2::date, synced_at=now() WHERE po=$1`, [t.po, t.date]); mirrored += u.rowCount; } catch (e) { /* non-fatal */ } }
+    res.json({ ok: true, updated: batch.length, erp_mirror_updated: mirrored, skipped: skipped.length, skippedDetail: skipped });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Rename a PO (Master Data tab) — cascades the key across all owned tables + shipment pointers.
