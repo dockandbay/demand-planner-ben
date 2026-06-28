@@ -48,7 +48,20 @@ plus new numbered migrations on top. See `migrations/README.md`.
   - **`078_shipment_notes_read.sql`** — `shipment_notes.read_at` (read/unread on the shipment timeline; admin grid
     unread counter).
   - **`079_shipment_supplier_created.sql`** — `shipments.supplier_created_at` / `supplier_created_by` (flags a
-    shipment a supplier created from the portal → raises the "Supplier created new shipment" action). ⬅ *latest.*
+    shipment a supplier created from the portal → raises the "Supplier created new shipment" action).
+  - **`080_forecast_export_settings.sql`** — `planner.forecast_export_settings` (per-country email for the forecast
+    CSV export). ⬅ *latest.*
+
+  **Invoice-upload feature (supplier portal) — live `/api/portal/*` to add (preview wired to `/api/supply/*`):**
+  - `/api/portal/parse-invoice` + `/api/portal/invoice-apply` (parse a supplier `.xlsx` invoice → preview vs the
+    order plan → apply qty/cost as `portal_line_costs` overrides; pure-Node parser, no dependency).
+  - `/api/portal/docs` (list a PO's supplier documents) + `/api/portal/attachment-remove`; `portal-upload` takes a
+    `category` (Commercial Invoice / Packing List / CI & PL / Transaction Certificate / Certificate of Origin /
+    Photos / Other); bootstrap should include `docsByPo` per PO.
+
+  **Forecast export by country (demand side) — endpoints, no live-portal wiring needed:**
+  - `/api/forecast/country-csv/:country` (Forecast Analysis CSV layout), `/api/forecast/export-settings(/:country)`,
+    `/api/forecast/email(/:country|-all)` (Resend), `/api/forecast/drivehq(/:country|-all)` (DriveHQ **WebDAV PUT**).
 
   **Live portal bootstrap (POS_SQL_PORTAL) — per-PO fields the admin preview computes client-side and the live
   portal must also provide:**
@@ -67,7 +80,7 @@ plus new numbered migrations on top. See `migrations/README.md`.
   - The shipment payload for the **Shipment Plan** tab needs **`master_supplier`** (filters to the logged-in supplier)
     and **`carrier_ref`** (tracking shown on the card).
 
-- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`079` in order. Do **not** run
+- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`080` in order. Do **not** run
   `schema.sql` against an already-migrated DB (the table creates aren't idempotent).
 
 ---
@@ -76,16 +89,18 @@ plus new numbered migrations on top. See `migrations/README.md`.
 
 - **`DATABASE_URL`** — production Supabase, **session-pooler** connection string.
 - **`ANTHROPIC_API_KEY`** — for the server-side AI calls (use a current model id, e.g. `claude-sonnet-4-6`).
-- **`CIN7_AUTH`** — full HTTP Authorization header value for the Cin7 API (e.g. `Basic <base64 user:key>`),
-  used by the two Cin7 buttons in the PO ▸ Update-ERP popup: **"Update Cin7 Date"** (PUTs the planner
-  Completion date → Cin7 `EstimatedDeliveryDate`) and **"Update Cin7 SKUs / Qty / Price"** (PUTs the PO's line
-  items — price = approved supplier final cost where confirmed, else standard `cost_price`). Both PUT to
-  `/api/v1/PurchaseOrders?loadboms=0`. **Until set, both endpoints safely no-op** (HTTP 501, no write).
-  Gated/confirmed in the UI. ⚠ Confirm the Cin7 lineItems field names (`code`/`qty`/`unitCost`) against your
-  Cin7 account before relying on the line push — test on one PO first.
-- **`RESEND_API_KEY`** (+ optional **`PORTAL_FROM`**) — supplier-portal **magic-link email**. Until set,
-  `sendMagicEmail()` just logs the link to the server console (no email sent). Swap providers by editing
-  `sendMagicEmail()` if not using Resend.
+- **`CIN7_AUTH`** — Cin7 API auth. Accepts **either** the full header (`Basic <base64 user:key>`) **or** a bare
+  `<base64>` (code adds `Basic `); or set **`CIN7_USERNAME`** + **`CIN7_KEY`** and the code base64-encodes them.
+  Used by the Cin7 buttons in the PO ▸ Update-ERP popup — **"Update Cin7 Date"**, **"Update Cin7 SKUs/Qty/Price"** —
+  and the bulk **"Sync Cin7 dates"** button (PUTs the planner completion date for every active date-mismatched PO).
+  Cin7 writes **preserve the PO's current approval status** (read isApproved, echo it; new POs created as **draft**).
+  On a successful write the local **ERP mirror is updated** so drift flags clear in real time. **Until set, all Cin7
+  endpoints safely no-op (HTTP 501).** ⚠ Confirm the lineItems field names (`code`/`qty`/`unitCost`) against your account.
+- **`RESEND_API_KEY`** (+ optional **`PORTAL_FROM`**) — email provider for the supplier-portal **magic-link** AND the
+  **forecast "Email country" / "Email all"** feature. Until set, both log/stub instead of sending.
+- **`WEBDAV_BASE`**, **`DRIVEHQ_USER`**, **`DRIVEHQ_PASS`**, **`TARGET_FOLDER`** — DriveHQ **WebDAV** upload for the
+  forecast CSVs (HTTP PUT + Basic auth → `WEBDAV_BASE/TARGET_FOLDER/forecast_<CO>_12mo.csv`, fixed filename overwrites).
+  Tested live (HTTP 204). Until set, the DriveHQ buttons no-op with a clear message.
 
 No secrets in git — reference by env-var name only.
 
