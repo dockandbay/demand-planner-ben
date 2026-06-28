@@ -199,16 +199,13 @@ table, so it's feasible) or live only in the BI tab.
 - Prod Supabase writes, n8n schedules, hosting/secrets.
 - Any automatic write to supplier portal / Cin7 / Xero stays gated/confirmed.
 
-## 9. Open questions / dependencies (answers needed before Phase 0/1)
-1. **Shared demand logic** — to guarantee BI == buy plan == KPIs, the buy-plan demand calc (tiers, sub-category
-   seeding, target cover, horizon) should be the *same* code the projection uses. It lives in the BUY **artifact**
-   (client-side). Recommend porting it to a shared server calc — OK? And point me at / confirm the parameters.
-2. **Target cover** per market (weeks) and **forecast horizon** — the values the buy plan uses.
-3. **Editable window** for reallocation — which statuses count as "still changeable" (FUTURE / PRODUCTION /
-   READY-TO-SHIP?).
-4. **Metrics Summary list** — confirm the tiles in §3e (open POs, units in production, shipments, 40ft containers,
-   …) — add/remove any.
-5. **Containers** — pallets per 40ft container for the count (≈20? we use a 20-pallet container in the freight model).
-6. **BI cards in the Actions tab too?** — surface BI recs only in the BI tab, or also feed SUPPLY ▸ Actions
-   (they share `supply_action_state`).
-7. **Auto-apply risk band** *(Phase 4, can wait)* — thresholds where hands-off is acceptable.
+## 9. Decisions (locked with Ben 2026-06-28)
+1. **Shared demand logic** → **Port the buy-plan calc to a shared server engine** (single source of truth: BI = buy plan = KPIs).
+2. **Target cover** → **Read the exact targets from the BUY artifact** (can differ per product / category / market). Default **12 weeks** where unknown.
+3. **Editable window for reallocation** → **FUTURE + PRODUCTION only** (Ready-to-ship is treated as locked for packing; never touch shipped).
+4. **Metrics Summary** → **all proposed tiles** (open POs by status · units in production · active shipments · 40ft containers shipping/in-prod · units inbound · $ value in production & transit · POs awaiting confirmation · deposits outstanding).
+5. **Container size** → **20 pallets = one 40ft** (matches the freight model's 20-pallet container).
+6. **Where recs show** → **Hybrid**: the BI tab holds all recs; only **high-urgency** ones (e.g. stockout-rescue reallocations) also raise a SUPPLY ▸ Action.
+
+### Still open (Phase 4 only)
+- **Auto-apply risk band** — thresholds where hands-off auto-apply is acceptable. Deferred until we build automation.
