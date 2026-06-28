@@ -4,6 +4,11 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.376 - Portal SHIPMENT tab: left-align the read-only carrier / tracking / Flexport ref values
+
+- The read-only carrier / tracking ref / Flexport ref shown on a linked shipment are now explicitly **left-aligned**
+  (the cells were picking up centred alignment from global table CSS).
+
 ## v20.375 - Supplier production status: removed nag action, surfaced as an editable field + logic exception
 
 - **Removed** the time-based **"Production check-in"** action ("…confirm on track") — it nagged for a production

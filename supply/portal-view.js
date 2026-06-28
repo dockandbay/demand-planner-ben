@@ -511,10 +511,10 @@
       var shipment=hasShip
         // shipment already linked → carrier / tracking / Flexport ref are READ-ONLY (managed on the shipment centrally)
         ? shipHead
-          +'<table style="font-size:12px;border-collapse:collapse"><tbody>'
-          +'<tr><td class="mut" style="padding:2px 14px 2px 0">Carrier</td><td>'+(carVal?'<b>'+esc(carVal)+'</b>':'<span class="mut">—</span>')+'</td></tr>'
-          +'<tr><td class="mut" style="padding:2px 14px 2px 0">Tracking ref</td><td>'+(trkVal?'<b>'+esc(trkVal)+'</b>':'<span class="mut">—</span>')+'</td></tr>'
-          +'<tr><td class="mut" style="padding:2px 14px 2px 0">Flexport ref</td><td>'+(flexRef?'<b>'+esc(flexRef)+'</b>':'<span class="mut">—</span>')+'</td></tr>'
+          +'<table style="font-size:12px;border-collapse:collapse;text-align:left"><tbody>'
+          +'<tr><td class="mut" style="padding:2px 14px 2px 0;text-align:left">Carrier</td><td style="text-align:left">'+(carVal?'<b>'+esc(carVal)+'</b>':'<span class="mut">—</span>')+'</td></tr>'
+          +'<tr><td class="mut" style="padding:2px 14px 2px 0;text-align:left">Tracking ref</td><td style="text-align:left">'+(trkVal?'<b>'+esc(trkVal)+'</b>':'<span class="mut">—</span>')+'</td></tr>'
+          +'<tr><td class="mut" style="padding:2px 14px 2px 0;text-align:left">Flexport ref</td><td style="text-align:left">'+(flexRef?'<b>'+esc(flexRef)+'</b>':'<span class="mut">—</span>')+'</td></tr>'
           +'</tbody></table>'
           +'<div class="tiny mut" style="margin-top:5px">Carrier &amp; tracking are managed on the shipment — to change them, contact Dock &amp; Bay.</div>'
         // no shipment yet → editable: pick carrier + tracking; submitting creates the shipment for this PO
