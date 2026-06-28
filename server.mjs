@@ -52,7 +52,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.4';
+const APP_VERSION = 'v25.5';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -4365,6 +4365,16 @@ const BI_TARGET_MONTHS = 3;
 async function biProjection() {
   const { prods, onhand, dem } = await kpiBase();
   const whCo = wh => String(wh || '').split('_')[0].toUpperCase();   // 'us_3pl' -> 'US'
+  // cover targets (WEEKS) — same source as the buy plan: SKU override ▸ category, per warehouse. Default 12wk.
+  const catCover = {}, skuOvr = {}, skuCat = {};
+  (await pool.query(`SELECT category, warehouse, target_cover_weeks::float w FROM planner.category_target_cover`)).rows
+    .forEach(r => { (catCover[r.category] = catCover[r.category] || {})[r.warehouse] = r.w; });
+  (await pool.query(`SELECT sku, warehouse, target_cover_weeks::float w FROM planner.product_target_cover_override`)).rows
+    .forEach(r => { (skuOvr[r.sku] = skuOvr[r.sku] || {})[r.warehouse] = r.w; });
+  (await pool.query(`SELECT sku, coalesce(category,'') category FROM planner.products`)).rows
+    .forEach(r => { skuCat[r.sku] = r.category; });
+  const twFor = (sku, wh) => { const o = skuOvr[sku] && skuOvr[sku][wh]; if (o != null) return o;
+    const c = catCover[skuCat[sku]] && catCover[skuCat[sku]][wh]; return c != null ? c : null; };
   const inb = {};   // inbound open-PO units per sku|country
   (await pool.query(`SELECT l.sku, upper(coalesce(nullif(p.country_code,''), b.country_code, '')) country, sum(l.qty)::numeric qty
       FROM planner.purchase_orders p JOIN planner.purchase_order_lines l ON l.po=p.po
@@ -4372,16 +4382,20 @@ async function biProjection() {
       WHERE coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(l.qty,0)>0
       GROUP BY l.sku, country`)).rows
     .forEach(r => { if (!r.country) return; (inb[r.sku] = inb[r.sku] || {})[r.country] = Number(r.qty) || 0; });
+  const WK_PER_MO = 4.345, DEF_WK = 12;
   const rows = [];
   for (const sku of Object.keys(prods)) {
     const p = prods[sku]; if (!p.act) continue;
-    const oh = {}, dm = {};
+    const oh = {}, dm = {}, twNum = {}, twDen = {};   // twNum/twDen → demand-weighted target weeks per country
     for (const wh of Object.keys(onhand[sku] || {})) { const co = whCo(wh); oh[co] = (oh[co] || 0) + onhand[sku][wh]; }
-    for (const wh of Object.keys(dem[sku] || {})) { const co = whCo(wh); dm[co] = (dm[co] || 0) + dem[sku][wh]; }
+    for (const wh of Object.keys(dem[sku] || {})) { const co = whCo(wh); dm[co] = (dm[co] || 0) + dem[sku][wh];
+      const tw = twFor(sku, wh); if (tw != null) { twNum[co] = (twNum[co] || 0) + tw * dem[sku][wh]; twDen[co] = (twDen[co] || 0) + dem[sku][wh]; } }
     for (const co of BI_COUNTRIES) {
       if (kpiDisc(p, co)) continue;
       const d12 = dm[co] || 0, onh = oh[co] || 0, inbound = (inb[sku] || {})[co] || 0;
       if (d12 <= 0 && onh <= 0 && inbound <= 0) continue;
+      const tgtWk = (twDen[co] > 0) ? (twNum[co] / twDen[co]) : DEF_WK;   // weeks → months
+      const TM = tgtWk / WK_PER_MO;
       const avgM = d12 / 12;
       const coverNow = avgM > 0 ? onh / avgM : (onh > 0 ? 999 : 0);
       const coverInb = avgM > 0 ? (onh + inbound) / avgM : (onh + inbound > 0 ? 999 : 0);
@@ -4391,14 +4405,15 @@ async function biProjection() {
       let urgency;
       if (avgM <= 0) urgency = (onh + inbound > 0 ? 'surplus' : 'none');
       else if (coverInb < 1) urgency = 'critical';
-      else if (coverInb < BI_TARGET_MONTHS) urgency = 'soon';
-      else if (coverInb > BI_TARGET_MONTHS * 2) urgency = 'surplus';
+      else if (coverInb < TM) urgency = 'soon';
+      else if (coverInb > TM * 2) urgency = 'surplus';
       else urgency = 'ok';
       rows.push({ sku, country: co, category: p.cs || '', tier: p.tier || '',
         on_hand: Math.round(onh), inbound: Math.round(inbound), demand_12m: Math.round(d12),
         cover_now: avgM > 0 ? Math.round(coverNow * 10) / 10 : null,
         cover_with_inbound: avgM > 0 ? Math.round(coverInb * 10) / 10 : null,
-        need_qty: Math.max(0, Math.round(avgM * BI_TARGET_MONTHS - (onh + inbound))),
+        target_months: Math.round(TM * 10) / 10, target_weeks: Math.round(tgtWk),
+        need_qty: Math.max(0, Math.round(avgM * TM - (onh + inbound))),
         urgency });
     }
   }
@@ -4430,7 +4445,7 @@ async function biReallocations() {
   lines.forEach(r => { if (!r.country) return;
     (coPO[r.prod_no] = coPO[r.prod_no] || {})[r.country] = coPO[r.prod_no][r.country] || { po: r.po, supplier: r.supplier };
     (((qByCoSku[r.prod_no] = qByCoSku[r.prod_no] || {})[r.sku] = qByCoSku[r.prod_no][r.sku] || {})[r.country] = (qByCoSku[r.prod_no][r.sku][r.country] || 0) + r.qty); });
-  const TM = BI_TARGET_MONTHS, recs = [];
+  const recs = [];
   for (const prod of Object.keys(qByCoSku)) {
     const cos = Object.keys(coPO[prod] || {});
     for (const sku of Object.keys(qByCoSku[prod])) {
@@ -4439,7 +4454,7 @@ async function biReallocations() {
       for (const co of cos) { const r = pj[sku + '|' + co], lq = qByCo[co] || 0;
         if (!r || lq <= 0 || r.urgency !== 'surplus') continue;
         const avgM = r.demand_12m / 12;
-        const spare = Math.floor(avgM > 0 ? (r.on_hand + r.inbound) - TM * avgM : (r.on_hand + r.inbound));
+        const spare = Math.floor(avgM > 0 ? (r.on_hand + r.inbound) - (r.target_months || 3) * avgM : (r.on_hand + r.inbound));
         if (spare > 0) donors.push({ co, po: coPO[prod][co].po, spare: Math.min(spare, lq), cover: r.cover_with_inbound, avgM, sup: coPO[prod][co].supplier }); }
       if (!donors.length) continue;
       donors.sort((a, b) => b.spare - a.spare);
@@ -4507,8 +4522,13 @@ async function biContainerFill() {
   const supDays = {};
   (await pool.query(`SELECT name, coalesce(production_days,0) d FROM planner.suppliers`)).rows
     .forEach(r => { supDays[(r.name || '').toLowerCase()] = Number(r.d) || 0; });
+  // departure: shipment date ▸ (Flexport) ▸ ESTIMATE = master-PO production-end + 4 days (Ben's rule) when blank.
   const ships = (await pool.query(`
-    SELECT s.shipment_ref, to_char(s.departure_date,'YYYY-MM-DD') departure,
+    SELECT s.shipment_ref,
+      to_char(coalesce(s.departure_date,
+        (coalesce(mp.end_production_overide, mp.start_production + (coalesce(sup.production_days,0)||' days')::interval) + interval '4 days')::date
+      ),'YYYY-MM-DD') departure,
+      (s.departure_date IS NULL) departure_estimated,
       upper(coalesce(nullif(mp.country_code,''), b.country_code, '')) country,
       coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty::numeric,0))
         FROM planner.purchase_orders po JOIN planner.purchase_order_lines l ON l.po=po.po
@@ -4516,7 +4536,8 @@ async function biContainerFill() {
     FROM planner.shipments s
     LEFT JOIN planner.purchase_orders mp ON mp.po=coalesce(s.master_po,s.shipment_ref)
     LEFT JOIN planner.branches b ON b.name=mp.branch
-    WHERE coalesce(s.status,'') NOT ILIKE '%complete%'`)).rows;   // departure often blank until Flexport sync — optional
+    LEFT JOIN planner.suppliers sup ON lower(sup.name)=lower(mp.supplier_name)
+    WHERE coalesce(s.status,'') NOT ILIKE '%complete%'`)).rows;
   const shipSupPO = {};
   (await pool.query(`SELECT po.shipment_ref, lower(coalesce(po.supplier_name,'')) sup, po.po
      FROM planner.purchase_orders po WHERE coalesce(po.shipment_ref,'')<>''`)).rows
@@ -4537,7 +4558,7 @@ async function biContainerFill() {
       const used = Math.round((add / pq) * 10) / 10; spare = Math.max(0, Math.round((spare - used) * 10) / 10);
       const sup = skuMeta[r.sku].supplier, avgM = r.demand_12m / 12;
       recs.push({ key: 'bi-fill|' + s.shipment_ref + '|' + r.sku, shipment_ref: s.shipment_ref, country: s.country,
-        departure: s.departure, days_to_departure: daysToDep, sku: r.sku, supplier: sup,
+        departure: s.departure, departure_estimated: s.departure_estimated, days_to_departure: daysToDep, sku: r.sku, supplier: sup,
         to_po: supPO[(sup || '').toLowerCase()], add_qty: add, pallets_used: used,
         rush: daysToDep != null && daysToDep < (supDays[(sup || '').toLowerCase()] || 0), urgency: r.urgency,
         cover: r.cover_with_inbound, cover_after: avgM > 0 ? Math.round(((r.on_hand + r.inbound + add) / avgM) * 10) / 10 : null, need: r.need_qty });

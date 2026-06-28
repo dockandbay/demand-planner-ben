@@ -2,7 +2,20 @@
 
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
+
+## v25.5 - BI cover targets ported from the buy plan + container-fill departure estimate
+
+- **Real cover targets** — the BI projection now uses the **same per-SKU/category × warehouse cover targets as
+  the buy plan** (`product_target_cover_override` ▸ `category_target_cover`, in weeks; 12wk default), instead of
+  a flat 3-month assumption. Per country, the target is **demand-weighted** across its 3PL/FBA warehouses and
+  converted weeks→months; it drives urgency, need-to-target, and the donor "spare" in Reallocate. Urgent Buy now
+  shows each SKU's **Target (wk)**. So BI, Urgent Buy, Reallocate and Container Fill all match the buy plan's targets.
+- **Container-fill departure estimate** (Ben's rule) — when a shipment has no departure date (Flexport not synced),
+  departure is estimated as **production-end + 4 days**, so the rush check works; flagged "est. (prod end +4d)".
+
+No migration.
 
 ## v25.4 - BI Phase 2: CONTAINER FILL recommendations
 

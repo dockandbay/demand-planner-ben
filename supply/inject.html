@@ -3243,12 +3243,13 @@
     var risk=rows.filter(function(r){return r.urgency==='critical'||r.urgency==='soon';})
       .sort(function(a,b){ return (ord[a.urgency]-ord[b.urgency]) || (b.demand_12m-a.demand_12m); });
     var CAP=50, shown=risk.slice(0,CAP);
-    var tbl='<div class="tw" style="max-width:1000px"><table style="width:100%"><thead><tr><th class="l">SKU</th><th class="l">Ship to</th><th class="l">Cat</th><th>On hand</th><th>Inbound</th><th>Cover now</th><th>+ inbound</th><th>12m demand</th><th>Buy to target</th><th>Urgency</th></tr></thead><tbody>'
+    var tbl='<div class="tw" style="max-width:1040px"><table style="width:100%"><thead><tr><th class="l">SKU</th><th class="l">Ship to</th><th class="l">Cat</th><th>On hand</th><th>Inbound</th><th>Cover now</th><th>+ inbound</th><th>Target</th><th>12m demand</th><th>Buy to target</th><th>Urgency</th></tr></thead><tbody>'
       +shown.map(function(r){ var u=r.urgency==='critical'?['#fee2e2','#991b1b']:['#fef3c7','#92400e'];
         return '<tr><td class="l"><b>'+esc(r.sku)+'</b></td><td class="l">'+esc(r.country)+'</td><td class="l"><span class="mut tiny">'+esc(r.category||'')+'</span></td>'
           +'<td>'+units(r.on_hand)+'</td><td>'+(r.inbound>0?units(r.inbound):'<span class="mut">—</span>')+'</td>'
           +'<td'+(r.cover_now!=null&&r.cover_now<1?' style="color:#dc2626;font-weight:700"':'')+'>'+(r.cover_now==null?'<span class="mut">∞</span>':r.cover_now+' mo')+'</td>'
           +'<td'+(r.cover_with_inbound!=null&&r.cover_with_inbound<1?' style="color:#dc2626;font-weight:700"':'')+'>'+(r.cover_with_inbound==null?'<span class="mut">∞</span>':r.cover_with_inbound+' mo')+'</td>'
+          +'<td class="mut">'+(r.target_weeks!=null?r.target_weeks+'wk':'—')+'</td>'
           +'<td>'+units(r.demand_12m)+'</td>'
           +'<td'+(r.need_qty>0?' style="font-weight:700"':'')+'>'+(r.need_qty>0?units(r.need_qty):'<span class="mut">—</span>')+'</td>'
           +'<td><span class="tool-badge" style="background:'+u[0]+';color:'+u[1]+'">'+esc(r.urgency)+'</span></td></tr>'; }).join('')
@@ -3257,7 +3258,7 @@
       +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:center">'
         +chip('⚠ Critical',cc.critical,'#fee2e2','#991b1b')+chip('Soon',cc.soon,'#fef3c7','#92400e')
         +chip('OK',cc.ok,'#dcfce7','#166534')+chip('Surplus',cc.surplus,'#dbeafe','#1e40af')
-        +'<span class="mut tiny" style="margin-left:6px">per SKU × market · target '+(pj.target_months||3)+' mo cover · on-hand + inbound vs forecast</span></div>'
+        +'<span class="mut tiny" style="margin-left:6px">per SKU × market · target = per category/SKU (12wk default) · on-hand + inbound vs forecast</span></div>'
       +(shown.length?tbl+(risk.length>CAP?'<div class="count" style="margin-top:6px">Showing top '+CAP+' of '+risk.length+' (by 12-month demand).</div>':''):'<div class="count">No stock-out risks 🎉</div>'); }
   // CONTAINER FILL — spare capacity matched to urgent buys from an on-board supplier. Add / Snooze / Dismiss.
   function renderContainerFill(d){ var b=biBody(); d=d||{}; var recs=d.recs||[];
@@ -3265,11 +3266,11 @@
     function card(r){ var crit=r.urgency==='critical';
       return '<div class="cf-card" data-key="'+esc(r.key)+'" style="border:1px solid #e5e7eb;border-left:4px solid '+(crit?'#dc2626':'#d97706')+';border-radius:8px;padding:11px 13px;margin-bottom:9px;background:#fff">'
         +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="tool-badge" style="background:'+(crit?'#fee2e2':'#fef3c7')+';color:'+(crit?'#991b1b':'#92400e')+'">'+esc(r.urgency)+'</span><b style="font-size:13px">'+esc(r.sku)+'</b><span class="mut tiny">'+esc(r.supplier)+' → '+esc(r.country)+'</span>'+(r.rush?' <span class="tool-badge bg-red">⚠ rush</span>':'')+'</div>'
-        +'<div style="margin:7px 0;font-size:13px">Add <b>'+units(r.add_qty)+'</b> units to ride <span style="color:#1e40af;font-weight:600">🚢 '+esc(r.shipment_ref)+'</span>'+(r.departure?' <span class="mut tiny">dep '+esc(r.departure)+(r.days_to_departure!=null?' · in '+r.days_to_departure+'d':'')+'</span>':' <span class="mut tiny">(no departure date yet)</span>')+'</div>'
+        +'<div style="margin:7px 0;font-size:13px">Add <b>'+units(r.add_qty)+'</b> units to ride <span style="color:#1e40af;font-weight:600">🚢 '+esc(r.shipment_ref)+'</span>'+(r.departure?' <span class="mut tiny">dep '+esc(r.departure)+(r.days_to_departure!=null?' · in '+r.days_to_departure+'d':'')+(r.departure_estimated?' · est. (prod end +4d)':'')+'</span>':' <span class="mut tiny">(no departure date)</span>')+'</div>'
         +'<div class="mut tiny" style="margin-bottom:9px">'+esc(r.country)+' cover <b style="color:#dc2626">'+r.cover+'</b>→<b style="color:#166534">'+r.cover_after+'</b> mo · ~'+r.pallets_used+' pallet'+(r.pallets_used===1?'':'s')+' · adds to '+esc(r.to_po)+' (increases the order)</div>'
         +'<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="save-btn cf-apply" style="background:#16a34a;color:#fff;border-color:#16a34a">✓ Add to PO</button><button class="save-btn light cf-snooze" data-days="7">Snooze 1wk</button><button class="save-btn light cf-snooze" data-days="30">Snooze 1mo</button><button class="save-btn light cf-dismiss">Dismiss</button></div></div>'; }
     b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 3px">Container fill</div>'
-      +'<div class="mut tiny" style="margin-bottom:10px">Spare container capacity matched to urgent buys from a supplier already on the shipment — ride it for near-zero extra freight. '+recs.length+' opportunit'+(recs.length===1?'y':'ies')+'. <b>Adding increases the supplier order</b> (a real buy). <span style="color:#b45309">Departure dates arrive with Flexport sync — until then the rush check is approximate.</span></div>'
+      +'<div class="mut tiny" style="margin-bottom:10px">Spare container capacity matched to urgent buys from a supplier already on the shipment — ride it for near-zero extra freight. '+recs.length+' opportunit'+(recs.length===1?'y':'ies')+'. <b>Adding increases the supplier order</b> (a real buy). <span style="color:#b45309">Departure estimated as production-end + 4 days where no shipment/Flexport date is set.</span></div>'
       +'<div id="cf-list">'+recs.map(card).join('')+'</div>';
     var byKey={}; recs.forEach(function(r){byKey[r.key]=r;});
     function lifecycle(key,status,days){ return fetch('/api/supply/actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:key,status:status,snooze_days:days||7})}); }
