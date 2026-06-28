@@ -188,10 +188,10 @@
     ['shipments','SHIPMENTS'],
     ['barcodes','BARCODES'],['config','CONFIG']];
   // REPORTS is a parent tab; these are its sub-tabs (the read-across views).
-  var REPORT_SECTIONS=[['metrics','METRICS'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['container-fill','CONTAINER FILL'],
+  var REPORT_SECTIONS=[['metrics','METRICS'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
     ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['cashflow','CASH FLOW'],['directclient','DIRECT TO CLIENT'],['flexport','FLEXPORT']];
-  var REPORT_KEYS=['metrics','reallocate','urgent-buy','container-fill','upcoming','pipeline','cashflow','directclient','flexport'];
-  var BI_TABS={'metrics':'/api/supply/bi','urgent-buy':'/api/supply/bi/projection','reallocate':'/api/supply/bi/reallocations','container-fill':'/api/supply/bi/container-fill'};   // fluid: always re-fetch
+  var REPORT_KEYS=['metrics','reallocate','urgent-buy','container-fill','consolidate','upcoming','pipeline','cashflow','directclient','flexport'];
+  var BI_TABS={'metrics':'/api/supply/bi','urgent-buy':'/api/supply/bi/projection','reallocate':'/api/supply/bi/reallocations','container-fill':'/api/supply/bi/container-fill','consolidate':'/api/supply/bi/consolidations'};   // fluid: always re-fetch
   var reportTab='metrics';   // BI & REPORTS opens on METRICS by default
   var ANNOT={
     actions:'<b>SUPPLY ▸ Actions.</b> Exceptions surfaced from the supply picture — date conflicts, unassigned shipments, missing supplier, unpaid deposits. Grouped by type.',
@@ -3204,6 +3204,7 @@
       if(rk==='urgent-buy')return renderUrgentBuy(d);
       if(rk==='reallocate')return renderReallocate(d);
       if(rk==='container-fill')return renderContainerFill(d);
+      if(rk==='consolidate')return renderConsolidate(d);
       cache[rk]=d;   // reports cache; BI tabs stay fluid (re-fetched each visit)
       if(rk==='upcoming')return renderUpcoming(d);
       if(rk==='pipeline')return renderPipeline(d);
@@ -3284,6 +3285,30 @@
           .catch(function(e){ btn.disabled=false; btn.textContent='✓ Add to PO'; alert('Add failed: '+(e.message||e)); }); };
       cd.querySelectorAll('.cf-snooze').forEach(function(sb){ sb.onclick=function(){ this.disabled=true; lifecycle(key,'snoozed',sb.dataset.days).then(function(){removeCard(cd);}); }; });
       cd.querySelector('.cf-dismiss').onclick=function(){ this.disabled=true; lifecycle(key,'dismissed').then(function(){removeCard(cd);}); }; }); }
+  // CONSOLIDATE — merge under-filled shipments to the same destination into one container. Apply / Snooze / Dismiss.
+  function renderConsolidate(d){ var b=biBody(); d=d||{}; var recs=d.recs||[];
+    if(!recs.length){ b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 6px">Consolidate</div><div class="count">No consolidation opportunities — no under-filled shipments to the same market are close enough to merge into one container.</div>'; return; }
+    function card(r){
+      return '<div class="cs-card" data-key="'+esc(r.key)+'" style="border:1px solid #e5e7eb;border-left:4px solid #1e40af;border-radius:8px;padding:11px 13px;margin-bottom:9px;background:#fff">'
+        +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="tool-badge bg-blue">'+esc(r.country)+'</span><b style="font-size:13px">Combine → one 40ft container</b><span class="mut tiny">'+r.combined+' / 20 pallets</span></div>'
+        +'<div style="margin:7px 0;font-size:13px">Merge <span style="color:#b45309;font-weight:600">🚢 '+esc(r.merge)+'</span> ('+r.merge_pallets+' plt) into <span style="color:#166534;font-weight:600">🚢 '+esc(r.keep)+'</span> ('+r.keep_pallets+' plt)</div>'
+        +'<div class="mut tiny" style="margin-bottom:9px">departures '+esc(r.merge_departure)+' / '+esc(r.keep_departure)+(r.dep_est?' (est. prod end +4d)':'')+' · combined '+r.combined+' pallets fits one container · saves ~1 container of freight</div>'
+        +'<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="save-btn cs-apply" style="background:#16a34a;color:#fff;border-color:#16a34a">✓ Merge</button><button class="save-btn light cs-snooze" data-days="7">Snooze 1wk</button><button class="save-btn light cs-snooze" data-days="30">Snooze 1mo</button><button class="save-btn light cs-dismiss">Dismiss</button></div></div>'; }
+    b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 3px">Consolidate</div>'
+      +'<div class="mut tiny" style="margin-bottom:10px">Under-filled shipments to the same market, departing within ~2 weeks, whose combined load fits one 20-pallet (40ft) container. Merging re-points the smaller shipment’s POs onto the larger — one fewer container of freight. '+recs.length+' opportunit'+(recs.length===1?'y':'ies')+'.</div>'
+      +'<div id="cs-list">'+recs.map(card).join('')+'</div>';
+    var byKey={}; recs.forEach(function(r){byKey[r.key]=r;});
+    function lifecycle(key,status,days){ return fetch('/api/supply/actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:key,status:status,snooze_days:days||7})}); }
+    function removeCard(cd){ cd.style.transition='opacity .2s'; cd.style.opacity='.35'; setTimeout(function(){ cd.remove(); var l=document.getElementById('cs-list'); if(l&&!l.querySelector('.cs-card'))l.innerHTML='<div class="count">All consolidations actioned. 🎉</div>'; },200); }
+    b.querySelectorAll('.cs-card').forEach(function(cd){ var key=cd.dataset.key, r=byKey[key];
+      cd.querySelector('.cs-apply').onclick=function(){ var btn=this;
+        if(!confirm('Merge shipment '+r.merge+' into '+r.keep+'?\n\nThis re-points '+r.merge+'’s POs onto '+r.keep+' (combined '+r.combined+' pallets).'))return;
+        btn.disabled=true; btn.textContent='Merging…';
+        fetch('/api/supply/bi/apply-consolidate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:key,keep:r.keep,merge:r.merge})})
+          .then(function(x){return x.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); try{invalidateDerived();}catch(e){} delete cache['purchase-orders']; delete cache['shipments']; removeCard(cd); })
+          .catch(function(e){ btn.disabled=false; btn.textContent='✓ Merge'; alert('Merge failed: '+(e.message||e)); }); };
+      cd.querySelectorAll('.cs-snooze').forEach(function(sb){ sb.onclick=function(){ this.disabled=true; lifecycle(key,'snoozed',sb.dataset.days).then(function(){removeCard(cd);}); }; });
+      cd.querySelector('.cs-dismiss').onclick=function(){ this.disabled=true; lifecycle(key,'dismissed').then(function(){removeCard(cd);}); }; }); }
   // REALLOCATE — zero-sum order-plan moves (surplus market → short market, same production). Apply / Snooze / Dismiss.
   function renderReallocate(d){ var b=biBody(); d=d||{}; var recs=d.recs||[];
     if(!recs.length){ b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 6px">Reallocate — order-plan adjustments</div><div class="count">No reallocation opportunities right now — every editable production’s split matches demand. 🎉</div>'; return; }

@@ -52,7 +52,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.5';
+const APP_VERSION = 'v25.6';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -4593,6 +4593,82 @@ app.post('/api/supply/bi/apply-fill', async (req, res) => {
       [key, 'container-fill +' + qty + ' ' + sku + ' → ' + toPo]);
     await client.query('COMMIT');
     res.json({ ok: true, added: qty, to_po: toPo, sku });
+  } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
+
+// ── BI ▸ CONSOLIDATE (Phase 3) — under-filled shipments (0<pallets<20) to the SAME destination whose departures
+// fall within a window and whose combined load fits one 20-pallet container → merge into the largest. One fewer
+// container of freight. Departure = shipment date ▸ estimate (prod-end+4d). Greedy bin-pack per country.
+async function biConsolidations() {
+  const WINDOW = 14, CAP = 20;
+  const ships = (await pool.query(`
+    SELECT s.shipment_ref,
+      to_char(coalesce(s.departure_date,(coalesce(mp.end_production_overide, mp.start_production + (coalesce(sup.production_days,0)||' days')::interval) + interval '4 days')::date),'YYYY-MM-DD') departure,
+      (s.departure_date IS NULL) dep_est,
+      upper(coalesce(nullif(mp.country_code,''), b.country_code, '')) country,
+      round(coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty::numeric,0))
+        FROM planner.purchase_orders po JOIN planner.purchase_order_lines l ON l.po=po.po
+        LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE po.shipment_ref=s.shipment_ref),0)::numeric,1) pallets
+    FROM planner.shipments s
+    LEFT JOIN planner.purchase_orders mp ON mp.po=coalesce(s.master_po,s.shipment_ref)
+    LEFT JOIN planner.branches b ON b.name=mp.branch
+    LEFT JOIN planner.suppliers sup ON lower(sup.name)=lower(mp.supplier_name)
+    WHERE coalesce(s.status,'') NOT ILIKE '%complete%'`)).rows
+    .filter(s => s.country && Number(s.pallets) > 0 && Number(s.pallets) < CAP && s.departure);
+  const byCo = {}; ships.forEach(s => { (byCo[s.country] = byCo[s.country] || []).push(s); });
+  const recs = [];
+  for (const co of Object.keys(byCo)) {
+    const list = byCo[co].slice().sort((a, b) => new Date(a.departure) - new Date(b.departure) || Number(b.pallets) - Number(a.pallets));
+    const bins = [];
+    for (const s of list) {
+      let placed = false;
+      for (const bin of bins) {
+        if (bin.pallets + Number(s.pallets) <= CAP && Math.abs(new Date(s.departure) - new Date(bin.anchor.departure)) / 86400000 <= WINDOW) {
+          bin.members.push(s); bin.pallets = Math.round((bin.pallets + Number(s.pallets)) * 10) / 10; placed = true; break; }
+      }
+      if (!placed) bins.push({ anchor: s, members: [s], pallets: Number(s.pallets) });
+    }
+    for (const bin of bins) {
+      if (bin.members.length < 2) continue;
+      const sorted = bin.members.slice().sort((a, b) => Number(b.pallets) - Number(a.pallets));
+      const keep = sorted[0];
+      for (let i = 1; i < sorted.length; i++) { const m = sorted[i];
+        recs.push({ key: 'bi-consol|' + keep.shipment_ref + '|' + m.shipment_ref, country: co,
+          keep: keep.shipment_ref, keep_pallets: Number(keep.pallets), keep_departure: keep.departure,
+          merge: m.shipment_ref, merge_pallets: Number(m.pallets), merge_departure: m.departure,
+          combined: Math.round((Number(keep.pallets) + Number(m.pallets)) * 10) / 10, dep_est: !!(keep.dep_est || m.dep_est) }); }
+    }
+  }
+  return recs;
+}
+app.get('/api/supply/bi/consolidations', async (req, res) => {
+  try {
+    const recs = await biConsolidations();
+    const st = {}; (await pool.query(`SELECT action_key, status, to_char(snooze_until,'YYYY-MM-DD') snooze_until FROM planner.supply_action_state`)).rows
+      .forEach(s => { st[s.action_key] = s; });
+    const today = kpiToday();
+    const open = recs.filter(rc => { const s = st[rc.key]; if (!s) return true;
+      if (s.status === 'dismissed' || s.status === 'applied') return false;
+      if (s.status === 'snoozed' && s.snooze_until && s.snooze_until >= today) return false; return true; });
+    open.sort((a, b) => b.combined - a.combined);
+    res.json({ ok: true, count: open.length, recs: open });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Apply a consolidation: re-point the merge shipment's POs onto the keep shipment, then mark applied.
+app.post('/api/supply/bi/apply-consolidate', async (req, res) => {
+  const b = req.body || {};
+  const keep = String(b.keep || ''), merge = String(b.merge || ''), key = String(b.key || '');
+  if (!keep || !merge || keep === merge) return res.status(400).json({ error: 'distinct keep + merge shipment refs required' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const r = await client.query(`UPDATE planner.purchase_orders SET shipment_ref=$1 WHERE shipment_ref=$2`, [keep, merge]);
+    if (key) await client.query(`INSERT INTO planner.supply_action_state (action_key, status, note)
+      VALUES ($1,'applied',$2) ON CONFLICT (action_key) DO UPDATE SET status='applied', note=excluded.note, snooze_until=NULL`,
+      [key, 'consolidated ' + merge + ' → ' + keep + ' (' + r.rowCount + ' PO)']);
+    await client.query('COMMIT');
+    res.json({ ok: true, repointed: r.rowCount, keep, merge });
   } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });

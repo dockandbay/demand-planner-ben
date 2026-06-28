@@ -5,6 +5,18 @@ Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v25.6 - BI Phase 3: CONSOLIDATE recommendations
+
+New **CONSOLIDATE** sub-tab (after Container Fill). `GET /api/supply/bi/consolidations` greedily bin-packs
+**under-filled shipments (0 < pallets < 20) to the same market** whose departures fall within ~14 days and
+whose combined load fits one 20-pallet (40ft) container, recommending a merge into the larger. Departure =
+shipment date ▸ estimate (prod-end + 4 days). Cards show the pallets + combined load with **Merge / Snooze /
+Dismiss** (reuses `supply_action_state`). `POST /api/supply/bi/apply-consolidate` re-points the smaller
+shipment's POs onto the larger one and marks applied — one fewer container of freight. No migration. (Sparse
+until shipment pallet loads / Flexport departures are richer; 5 opportunities in the current sandbox.)
+
+This completes the recommendation trio — Reallocate · Container Fill · Consolidate — plus Metrics + Urgent Buy.
+
 ## v25.5 - BI cover targets ported from the buy plan + container-fill departure estimate
 
 - **Real cover targets** — the BI projection now uses the **same per-SKU/category × warehouse cover targets as
