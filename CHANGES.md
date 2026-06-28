@@ -4,6 +4,15 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.369 - SUPPLY ▸ Shipments: Dates & Tracking sub-tab + timeline read/unread moved left
+
+- New **Dates & tracking** sub-tab on the shipment expand (now the **first** tab, before POs aboard / Crossdock /
+  Timeline). It holds the existing editable shipment details — carrier, carrier ref, status, departure / landing /
+  arrival / completion dates, ship-to / branch, mode, freight + estimate, notes — which previously sat above the
+  sub-nav.
+- **Timeline:** the **Mark read / mark unread** control now sits on the **left** of each note (was far right of the
+  screen).
+
 ## v20.368 - SUPPLY ▸ Shipments: timeline read/unread + counter, search overrides status, escalated action links
 
 - **Timeline read/unread** on the Shipments grid (mirrors the PO timeline): supplier-authored timeline notes show

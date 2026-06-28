@@ -1767,9 +1767,10 @@
     fetch(getBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){
       var unread=0;
       var list=(notes&&notes.length)?notes.map(function(n){ var sup=(n.author_kind==='supplier'); var nu=sup&&!n.read; if(nu)unread++;
-        return '<div class="tiny" style="margin:2px 0;display:flex;justify-content:space-between;gap:10px;align-items:flex-start'+(nu?';background:#fff7ed;border:1px solid #fdba74;border-radius:5px;padding:3px 6px':'')+'">'
+        var ctrl=(admin&&sup)?(n.read?'<a class="sp-note-read" data-id="'+n.id+'" data-read="1" style="flex:0 0 auto;font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline;white-space:nowrap">mark unread</a>':'<button class="save-btn light sp-note-read" data-id="'+n.id+'" data-read="0" style="flex:0 0 auto">Mark read</button>'):'';
+        return '<div class="tiny" style="margin:2px 0;display:flex;gap:10px;align-items:flex-start'+(nu?';background:#fff7ed;border:1px solid #fdba74;border-radius:5px;padding:3px 6px':'')+'">'
+          +(ctrl?'<div style="flex:0 0 auto;min-width:70px">'+ctrl+'</div>':'')
           +'<div><span class="mut">'+esc(n.created_at)+' · '+(sup?'Supplier':'D&amp;B')+'</span>'+(nu?' <span class="ex-badge">new</span>':'')+' — '+esc(n.body)+'</div>'
-          +((admin&&sup)?(n.read?'<a class="sp-note-read" data-id="'+n.id+'" data-read="1" style="flex:0 0 auto;font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline;white-space:nowrap">mark unread</a>':'<button class="save-btn light sp-note-read" data-id="'+n.id+'" data-read="0" style="flex:0 0 auto">Mark read</button>'):'')
           +'</div>'; }).join(''):'<div class="mut tiny">No timeline entries yet.</div>';
       box.innerHTML='<div class="tiny" style="font-weight:600;margin-bottom:3px">Timeline</div>'+list
         +'<div style="display:flex;gap:5px;margin-top:5px"><input class="fci sp-note-in" placeholder="Add a timeline note…" style="flex:1;max-width:380px;text-align:left"><button class="save-btn sp-note-post">Post</button></div>';
@@ -1919,9 +1920,9 @@
         var xdPanel='<div class="sect-h">Crossdock SKUs on this shipment ('+xd.length+')</div>'
           +(xd.length?'<div class="tw"><table><thead><tr><th class="l">Crossdock SKU</th><th style="text-align:right">Qty shipped</th><th class="l">Source PO</th><th class="l">Supplier</th><th class="l">Client</th><th class="l">Client sales order</th></tr></thead><tbody>'+xdRows+'</tbody></table></div>'
             :'<div class="count">No crossdock SKUs on the POs in this shipment.</div>');
-        var tabbar='<div class="po-subnav" style="margin-bottom:8px"><button class="rtab shtab active" data-st="pos">POs aboard</button><button class="rtab shtab" data-st="xd">Crossdock'+(xd.length?' ('+xd.length+')':'')+'</button><button class="rtab shtab" data-st="timeline">Timeline</button></div>';
+        var tabbar='<div class="po-subnav" style="margin-bottom:8px"><button class="rtab shtab active" data-st="dates">Dates &amp; tracking</button><button class="rtab shtab" data-st="pos">POs aboard</button><button class="rtab shtab" data-st="xd">Crossdock'+(xd.length?' ('+xd.length+')':'')+'</button><button class="rtab shtab" data-st="timeline">Timeline</button></div>';
         var box=document.getElementById('shipdet-'+i);
-        box.innerHTML=head+tabbar+'<div class="shtab-panel" data-st="pos">'+t+'</div><div class="shtab-panel" data-st="xd" style="display:none">'+xdPanel+'</div>'
+        box.innerHTML=tabbar+'<div class="shtab-panel" data-st="dates">'+head+'</div><div class="shtab-panel" data-st="pos" style="display:none">'+t+'</div><div class="shtab-panel" data-st="xd" style="display:none">'+xdPanel+'</div>'
           +'<div class="shtab-panel" data-st="timeline" style="display:none"><div class="sp-timeline" data-ref="'+esc(ref)+'"></div></div>';
         box.classList.remove('count'); bindEdits();
         loadShipTimeline(ref,'internal','/api/supply/shipment-notes?ref=','/api/supply/shipment-note');
