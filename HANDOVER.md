@@ -50,7 +50,14 @@ plus new numbered migrations on top. See `migrations/README.md`.
   - **`079_shipment_supplier_created.sql`** — `shipments.supplier_created_at` / `supplier_created_by` (flags a
     shipment a supplier created from the portal → raises the "Supplier created new shipment" action).
   - **`080_forecast_export_settings.sql`** — `planner.forecast_export_settings` (per-country email for the forecast
-    CSV export). ⬅ *latest.*
+    CSV export).
+  - **`081_prod_no_p53_to_53.sql`** — **data consolidation, HANDLE CAREFULLY.** Renames the `prod_no` key
+    `P53 → 53` in `prod_numbers`, `deposits`, `production_deposits` so the config + deposit rollup match the 140 POs
+    already on `53`. Collision-guarded; runs in a transaction with verification SELECTs. **Does NOT touch
+    `purchase_orders.prod_no`** — `prod_no` on POs is **n8n Airtable→Supabase sync-fed**, so: (a) confirm Airtable
+    isn't still emitting `P53` before/after, or it reappears on the next sync; (b) Ben manually fixes the 2–3
+    remaining `P53` POs. Deposit *money* is unaffected (it links by `deposit_ref`, not `prod_no`). Idempotent
+    (`WHERE prod_no='P53'`). ⬅ *latest.*
 
   **Invoice-upload feature (supplier portal) — live `/api/portal/*` to add (preview wired to `/api/supply/*`):**
   - `/api/portal/parse-invoice` + `/api/portal/invoice-apply` (parse a supplier `.xlsx` invoice → preview vs the
@@ -80,7 +87,7 @@ plus new numbered migrations on top. See `migrations/README.md`.
   - The shipment payload for the **Shipment Plan** tab needs **`master_supplier`** (filters to the logged-in supplier)
     and **`carrier_ref`** (tracking shown on the card).
 
-- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`080` in order. Do **not** run
+- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`081` in order. Do **not** run
   `schema.sql` against an already-migrated DB (the table creates aren't idempotent).
 
 ---
