@@ -4,6 +4,13 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.388 - Forecast export by country: settings UI (CONFIG ▸ Forecast export)
+
+- New **CONFIG ▸ Forecast export** sub-tab: a per-country row (UK/US/EU/AU/CA) with an editable **email** (saved on
+  change) + **⬇ CSV** / **✉ Email** / **⬆ DriveHQ** actions, plus **Email all countries** and **Upload all to
+  DriveHQ** buttons. Result messages report sent/stub status per country.
+- (Placed under SUPPLY ▸ CONFIG for now since that's where settings live — easy to move to a demand-side home if preferred.)
+
 ## v20.387 - Forecast export by country: server foundation (CSV · email · DriveHQ)
 
 Wiring up the "forecast by country" export (UI to follow). Starting CSV format: **SKU, Month, DTC, FBA, B2B** —

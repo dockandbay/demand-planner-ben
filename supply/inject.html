@@ -1962,7 +1962,7 @@
   var PORTAL_SUP='', PORTAL_TAB='pos', PORTAL_PO_ST=null;   // CONFIG ▸ Portal preview: chosen supplier + inner tab + PO status filter
   var ROW_EDIT={};   // per-sub-tab: which row key is currently in Edit mode (Edit/Save rows for suppliers + productions)
   function renderConfig(d){ var c=document.getElementById('supply-content'); var sizes=d.sizes||[];
-    var SUBS=[['tax','Import tax'],['freight','Freight rates'],['duty','Import duty'],['branches','Branches'],['suppliers','Suppliers'],['batches','Batches'],['productions','Productions'],['products','Products'],['portalusers','Portal users'],['portal','Portal']];
+    var SUBS=[['tax','Import tax'],['freight','Freight rates'],['duty','Import duty'],['branches','Branches'],['suppliers','Suppliers'],['batches','Batches'],['productions','Productions'],['products','Products'],['portalusers','Portal users'],['portal','Portal'],['forecast-export','Forecast export']];
     function reload(){ delete cache['config']; selectSection('config'); }   // refresh after a rate add (keeps sub-tab)
     // Generic Edit/Save row table: read-only cells + an Edit button per row; Edit swaps that row's cells to inputs
     // and shows Save/Cancel; Save POSTs all editable fields at once. cols: [{f,h,t:'text|num|select',ro,opts,w}].
@@ -2172,6 +2172,32 @@
             }); }
           document.getElementById('pp-sup').onchange=function(){ PORTAL_SUP=this.value; mountFor(this.value); };
           if(PORTAL_SUP)mountFor(PORTAL_SUP);
+        }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); }
+      else if(CONFIG_SUB==='forecast-export'){ b.innerHTML='<div class="count">Loading…</div>';
+        fetch('/api/forecast/export-settings').then(function(r){return r.json();}).then(function(rows){
+          var head='<div class="sect-h">Forecast export by country <span class="mut tiny">— per-country CSV (all SKUs × month · DTC / FBA / B2B) for the next 12 months. Email it to the country contact and/or upload to DriveHQ.</span></div>';
+          var bulk='<div class="bar" style="gap:8px;margin-bottom:10px"><button class="save-btn" id="fx-email-all" style="background:#2563eb;color:#fff;border-color:#2563eb">✉ Email all countries</button><button class="save-btn" id="fx-drive-all" style="background:#0b6;color:#fff;border-color:#0b6">⬆ Upload all to DriveHQ</button></div>';
+          var tbl='<div class="tw" style="max-width:860px"><table><thead><tr><th class="l">Country</th><th class="l">Forecast email</th><th class="l">Actions</th></tr></thead><tbody>'
+            +(rows||[]).map(function(r){ var c=esc(r.country);
+              return '<tr><td class="l"><b>'+c+'</b></td>'
+                +'<td class="l"><input class="fci txt fx-email" data-c="'+c+'" value="'+esc(r.email||'')+'" placeholder="email for '+c+'…" style="width:250px"></td>'
+                +'<td class="l" style="white-space:nowrap"><a class="save-btn light" href="/api/forecast/country-csv/'+c+'" download>⬇ CSV</a> '
+                +'<button class="save-btn fx-email-btn" data-c="'+c+'">✉ Email</button> '
+                +'<button class="save-btn fx-drive-btn" data-c="'+c+'">⬆ DriveHQ</button></td></tr>'; }).join('')
+            +'</tbody></table></div>';
+          b.innerHTML=head+bulk+tbl+'<div class="mut tiny" id="fx-msg" style="margin-top:10px"></div>';
+          var msg=document.getElementById('fx-msg');
+          b.querySelectorAll('.fx-email').forEach(function(inp){ inp.onchange=function(){ inp.style.borderColor='#f59e0b';
+            fetch('/api/forecast/export-settings/'+inp.dataset.c,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:inp.value.trim()})})
+              .then(function(r){return r.json();}).then(function(){ inp.style.borderColor='#16a34a'; }).catch(function(){ inp.style.borderColor='#dc2626'; }); }; });
+          function post(url,btn){ var o=btn?btn.textContent:''; if(btn){btn.disabled=true;btn.textContent='…';}
+            return fetch(url,{method:'POST'}).then(function(r){return r.json();}).then(function(j){ if(btn){btn.disabled=false;btn.textContent=o;} return j; }).catch(function(e){ if(btn){btn.disabled=false;btn.textContent=o;} throw e; }); }
+          function fmtE(r){ return (r.ok?'✓ ':'• ')+r.country+': '+(r.ok?('sent to '+r.sent_to+' ('+r.rows+' rows)'):(r.reason||'failed')+(r.would_send_to?' → '+r.would_send_to:'')); }
+          function fmtD(r){ return (r.ok?'✓ ':'• ')+r.country+': '+(r.ok?'uploaded':(r.reason||'failed')+(r.would_upload?' ('+r.would_upload.bytes+' bytes → '+r.would_upload.dir+')':'')); }
+          b.querySelectorAll('.fx-email-btn').forEach(function(btn){ btn.onclick=function(){ msg.textContent='Emailing '+btn.dataset.c+'…'; post('/api/forecast/email/'+btn.dataset.c,btn).then(function(j){ msg.innerHTML=fmtE(j); }); }; });
+          b.querySelectorAll('.fx-drive-btn').forEach(function(btn){ btn.onclick=function(){ msg.textContent='Uploading '+btn.dataset.c+'…'; post('/api/forecast/drivehq/'+btn.dataset.c,btn).then(function(j){ msg.innerHTML=fmtD(j); }); }; });
+          document.getElementById('fx-email-all').onclick=function(){ if(!confirm('Email the 12-month forecast CSV to every country that has an email set?'))return; msg.textContent='Emailing all countries…'; post('/api/forecast/email-all',this).then(function(j){ msg.innerHTML=(j.results||[]).map(fmtE).join('<br>'); }); };
+          document.getElementById('fx-drive-all').onclick=function(){ if(!confirm('Upload the 12-month forecast CSV for all countries to DriveHQ?'))return; msg.textContent='Uploading all countries…'; post('/api/forecast/drivehq-all',this).then(function(j){ msg.innerHTML=(j.results||[]).map(fmtD).join('<br>'); }); };
         }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); }
       else if(CONFIG_SUB==='products'){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/products-all').then(function(r){return r.json();}).then(function(d){ if(d&&d.error){b.innerHTML='<div class="count">'+esc(d.error)+'</div>';return;}
