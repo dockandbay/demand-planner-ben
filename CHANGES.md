@@ -4,6 +4,20 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.370 - Timeline & Notes (note box on top, multi-line) + portal prominence + portal search overrides pills
+
+Admin SUPPLY ▸ Shipments:
+- The **Timeline** sub-tab is renamed **Timeline & notes**; the **note box moved to the top** and is now a
+  **multi-line textarea** (resizable, 3 rows) so long notes are easy to write. Notes list below it.
+
+Supplier portal:
+- **Shipment Plan:** the note box is now **above the timeline** entries and is a multi-line textarea; the
+  **shipment dates + Flexport** details are shown as a prominent labelled strip (Mode/Carrier, Flexport ↗,
+  Departure, Landing, Arrival, Client, Client deadline) instead of small grey text.
+- **Search overrides the filter pills** on both portal tabs: the **Purchase Orders** tab gains a
+  **search PO / client** box that overrides the status pills, and the **Shipment Plan** PO search now overrides
+  the Still-to-ship / Shipped / Escalated toggles (find it whatever its status).
+
 ## v20.369 - SUPPLY ▸ Shipments: Dates & Tracking sub-tab + timeline read/unread moved left
 
 - New **Dates & tracking** sub-tab on the shipment expand (now the **first** tab, before POs aboard / Crossdock /

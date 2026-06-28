@@ -388,6 +388,7 @@
     var BC=opts.bc||(typeof bcDownloadSheets==='function'?{sheets:bcDownloadSheets,crossdock:bcDownloadCrossdock}:{placeholder:true,note:function(){alert('Labels unavailable.');}});
     var _ppData=null, PORTAL_TAB='pos', PORTAL_PO_ST=null;
     var PORTAL_SP_ESC=false, PORTAL_SP_PO='', PORTAL_SP_ACTIVE=true, PORTAL_SP_SHIPPED=false;   // Shipment Plan filters
+    var PORTAL_PO_Q='';   // Purchase Orders search (overrides the status pills)
     var rootEl=opts.root; if(!rootEl.closest('#supply-root')){rootEl.id='supply-root';} rootEl.style.display='block';
     rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders</span><span class="rtab" data-pt="shipmentplan">Shipment Plan</span><span class="rtab" data-pt="deposits">Deposits</span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
     var tabsEl=document.getElementById('pp-tabs'), body=document.getElementById('pp-body');
@@ -549,26 +550,35 @@
       return cards+'<div class="tw"><table><thead><tr><th class="l">Deposit reference</th><th style="text-align:right">Amount</th><th class="l">Paid</th><th style="text-align:right">Drawn down</th><th style="text-align:right">Remaining</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5" class="l mut">No deposits for this supplier.</td></tr>')+'</tbody></table></div>'; }
           function ppShipmentPlan(rows){ rows=rows||[];
             if(!rows.length)return '<div class="count">No shipments for your orders yet.</div>';
+            // a prominent "label / big value" cell for the dates & Flexport strip
+            function spCell(lbl,val,strong){ return '<div style="min-width:96px"><div class="mut" style="font-size:10px;text-transform:uppercase;letter-spacing:.04em">'+lbl+'</div><div style="font-weight:700;font-size:15px;margin-top:1px">'+(val?val:'<span class="mut" style="font-weight:400">—</span>')+'</div></div>'; }
             return rows.map(function(s){
-              var fxd=[s.departure&&('dep '+fd(s.departure)),s.landing&&('land '+fd(s.landing)),s.arrival&&('arr '+fd(s.arrival))].filter(Boolean).join(' · ')||'—';
               var members=s.members.length?'<table style="font-size:11px;width:auto;margin-top:4px"><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th>Est. pallets</th><th class="l">Client</th></tr></thead><tbody>'
                 +s.members.map(function(m){return '<tr><td class="l">'+esc(m.po)+(m.is_master?' <span class="tool-badge bg-green" style="font-size:9px">★ master</span>':'')+'</td><td class="l">'+esc(m.supplier||'')+'</td><td style="text-align:right">'+esc(m.pallets)+'</td><td class="l">'+(m.client?esc(m.client):'<span class="mut">—</span>')+'</td></tr>';}).join('')
                 +'<tr style="font-weight:700;border-top:1px solid #ccc"><td class="l">Total</td><td></td><td style="text-align:right">'+esc(s.total_pallets)+'</td><td></td></tr></tbody></table>':'<span class="mut tiny">no POs on this shipment</span>';
+              // prominent shipment dates + Flexport details
+              var flex=s.flex_id?('<a href="https://app.flexport.com/shipments/'+((String(s.carrier_ref||s.flex_id).match(/\d+/)||[''])[0])+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline">'+esc(s.flex_id)+' ↗</a>'):'';
+              var datesStrip='<div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:8px;padding:9px 12px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:7px">'
+                +spCell('Mode / Carrier', esc((s.mode||'—')+(s.carrier?' · '+s.carrier:'')))
+                +spCell('Flexport', flex)
+                +spCell('Departure', s.departure?esc(fd(s.departure)):'')
+                +spCell('Landing', s.landing?esc(fd(s.landing)):'')
+                +spCell('Arrival', s.arrival?esc(fd(s.arrival)):'')
+                +(s.master_client?spCell('Client', esc(s.master_client)):'')
+                +(s.master_deadline?spCell('Client deadline', esc(fd(s.master_deadline))):'')
+                +'</div>';
               return '<div style="border:1px solid '+(s.escalated?'#fca5a5':'#e0e0e0')+';border-radius:8px;padding:10px 12px;margin-bottom:10px;background:'+(s.escalated?'#fef2f2':'#fff')+'">'
-                +'<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:baseline">'
-                +'<div style="font-weight:700;font-size:13px">'+esc(s.master_po)+'</div>'
-                +'<div class="tiny mut">'+esc(s.mode||'')+(s.carrier?' · '+esc(s.carrier):'')+(s.flex_id?' · '+esc(s.flex_id):'')+'</div>'
-                +'<div class="tiny mut">'+fxd+'</div>'
-                +(s.master_client?'<div class="tiny">Client: <b>'+esc(s.master_client)+'</b></div>':'')
-                +(s.master_deadline?'<div class="tiny">Deadline: <b>'+fd(s.master_deadline)+'</b></div>':'')
+                +'<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center">'
+                +'<div style="font-weight:700;font-size:15px">'+esc(s.master_po)+'</div>'
                 +'<button class="save-btn pp-esc" data-ref="'+esc(s.shipment_ref)+'" data-on="'+(s.escalated?'1':'0')+'" style="margin-left:auto'+(s.escalated?';background:#dc2626;color:#fff;border-color:#dc2626':';color:#dc2626')+'">'+(s.escalated?'⚑ ESCALATED':'⚑ Escalate')+'</button>'
-                +'</div><div style="margin-top:6px">'+members+'</div>'
+                +'</div>'+datesStrip+'<div style="margin-top:8px">'+members+'</div>'
                 +'<div class="sp-timeline" data-ref="'+esc(s.shipment_ref)+'" style="margin-top:8px;border-top:1px solid #f1f1f1;padding-top:6px"></div></div>'; }).join(''); }
           function ppShipTimeline(ref){ var box=rootEl.querySelector('.sp-timeline[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(!box)return;
             fetch(EP.shipmentNotesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){
-              box.innerHTML='<div class="tiny" style="font-weight:600;margin-bottom:3px">Timeline</div>'
-                +((notes&&notes.length)?notes.map(function(n){return '<div class="tiny" style="margin:2px 0"><span class="mut">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span> — '+esc(n.body)+'</div>';}).join(''):'<div class="mut tiny">No timeline entries yet.</div>')
-                +'<div style="display:flex;gap:5px;margin-top:5px"><input class="fci sp-note-in" placeholder="Add a timeline note…" style="flex:1;max-width:380px;text-align:left"><button class="save-btn sp-note-post">Post</button></div>';
+              box.innerHTML='<div style="font-weight:600;font-size:12px;margin-bottom:4px">Add a note</div>'
+                +'<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:10px"><textarea class="fci sp-note-in" rows="3" placeholder="Add a note to the timeline… (multiple lines OK)" style="flex:1;max-width:560px;min-height:58px;text-align:left;resize:vertical;line-height:1.4"></textarea><button class="save-btn sp-note-post" style="flex:0 0 auto">Post</button></div>'
+                +'<div class="tiny" style="font-weight:600;margin-bottom:3px">Timeline</div>'
+                +((notes&&notes.length)?notes.map(function(n){return '<div class="tiny" style="margin:2px 0"><span class="mut">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span> — '+esc(n.body)+'</div>';}).join(''):'<div class="mut tiny">No timeline entries yet.</div>');
               box.querySelector('.sp-note-post').onclick=function(){ var inp=box.querySelector('.sp-note-in'); var v=(inp.value||'').trim(); if(!v)return;
                 postJSON(EP.shipmentNote,{shipment_ref:ref,author_kind:'supplier',author_email:STATE.by,body:v},function(){ ppShipTimeline(ref); }); }; }).catch(function(){}); }
           function renderPP(){ if(!_ppData)return; var body=document.getElementById('pp-body');
@@ -580,9 +590,10 @@
               function spShipped(s){ return !!(s.departure && s.departure<=today); }
               var poq=(PORTAL_SP_PO||'').trim().toLowerCase();
               var shownSp=allSp.filter(function(s){
+                // a PO/shipment search OVERRIDES the filter pills — find it whatever its status / escalation
+                if(poq) return (s.master_po||'').toLowerCase().indexOf(poq)>=0 || (s.shipment_ref||'').toLowerCase().indexOf(poq)>=0 || (s.members||[]).some(function(m){return (m.po||'').toLowerCase().indexOf(poq)>=0;});
                 if(PORTAL_SP_ESC && !s.escalated)return false;
                 var shipped=spShipped(s); if(shipped?!PORTAL_SP_SHIPPED:!PORTAL_SP_ACTIVE)return false;
-                if(poq){ var hit=(s.master_po||'').toLowerCase().indexOf(poq)>=0 || (s.members||[]).some(function(m){return (m.po||'').toLowerCase().indexOf(poq)>=0;}); if(!hit)return false; }
                 return true; });
               var fbar='<div class="bar" style="gap:8px;flex-wrap:wrap;align-items:center">'
                 +'<input class="fci sp-po-q" placeholder="search PO…" value="'+esc(PORTAL_SP_PO)+'" style="width:150px;text-align:left">'
@@ -602,11 +613,18 @@
             var ordered=PO_STATUSES.filter(function(s){return seen[s];}).concat(present.filter(function(s){return PO_STATUSES.indexOf(s)<0;}));
             if(PORTAL_PO_ST===null)PORTAL_PO_ST={};
             ordered.forEach(function(s){ if(PORTAL_PO_ST[s]===undefined)PORTAL_PO_ST[s]=(s==='PRODUCTION'||s==='SHIPPING'); });
-            var pillBar='<div class="bar" style="gap:5px"><span class="pill-lbl">Status</span>'
-              +(ordered.length?ordered.map(function(s){return '<span class="pill'+(PORTAL_PO_ST[s]?' active':'')+'" data-st="'+esc(s)+'">'+esc(s)+'</span>';}).join(''):'<span class="mut tiny">no orders</span>')+'</div>';
-            var shown=_ppData.pos.filter(function(p){ return PORTAL_PO_ST[(p.status||'').toUpperCase()]; });
+            var pq=(PORTAL_PO_Q||'').trim().toLowerCase();
+            var pillBar='<div class="bar" style="gap:5px;flex-wrap:wrap;align-items:center">'
+              +'<input class="fci pp-po-q" placeholder="search PO / client…" value="'+esc(PORTAL_PO_Q)+'" style="width:170px;text-align:left">'
+              +'<span class="pill-lbl">Status</span>'
+              +(ordered.length?ordered.map(function(s){return '<span class="pill'+(PORTAL_PO_ST[s]?' active':'')+(pq?' ':'')+'" data-st="'+esc(s)+'"'+(pq?' style="opacity:.4"':'')+'>'+esc(s)+'</span>';}).join(''):'<span class="mut tiny">no orders</span>')
+              +(pq?'<span class="mut tiny">search overrides status</span>':'')+'</div>';
+            // a PO/client search OVERRIDES the status pills — find it whatever its status
+            var shown=_ppData.pos.filter(function(p){ if(pq) return (p.po||'').toLowerCase().indexOf(pq)>=0 || (p.client||'').toLowerCase().indexOf(pq)>=0 || (p.shipment||'').toLowerCase().indexOf(pq)>=0 || (p.prod_no||'').toLowerCase().indexOf(pq)>=0;
+              return PORTAL_PO_ST[(p.status||'').toUpperCase()]; });
             body.innerHTML=pillBar+'<div class="count" style="margin:2px 0 8px">'+shown.length+' of '+_ppData.pos.length+' purchase orders</div>'+ppPOs(shown,_ppData);
             body.querySelectorAll('.pill[data-st]').forEach(function(p){ p.onclick=function(){ var s=p.dataset.st; PORTAL_PO_ST[s]=!PORTAL_PO_ST[s]; renderPP(); }; });
+            var pqi=body.querySelector('.pp-po-q'); if(pqi)pqi.oninput=function(){ PORTAL_PO_Q=pqi.value; var foc=document.activeElement===pqi; renderPP(); if(foc){ var n=body.querySelector('.pp-po-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } } };
             body.querySelectorAll('.pp-exp').forEach(function(btn){ btn.onclick=function(){ var ex=document.getElementById('pp-'+btn.dataset.i); if(!ex)return; ex.style.display=(ex.style.display!=='none')?'none':''; }; });
             // re-render ONE PO's expanded detail in place (no full reload, so MANAGE + the open tab stay put)
             function rerenderRow(row,po,keepPt){ if(!row)return; var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; if(!p)return;
