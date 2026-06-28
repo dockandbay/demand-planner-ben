@@ -4,6 +4,27 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.400 - Migration 081: consolidate production "P53" → "53"
+
+**Migration only — no app code change.** `migrations/081_prod_no_p53_to_53.sql`.
+
+Renames the `prod_no` key from `P53` to `53` in three tables so the config + deposit rollup match
+the 140 POs that already use `53`: `prod_numbers`, `deposits`, `production_deposits`. Collision-guarded
+(no `53` row exists today). Does **not** touch deposit reference strings, the Xero account-code label
+(`620.33 P53`), or PO rows.
+
+**Deposit/Xero impact: none** — deposit money links by `deposit_ref`, not `prod_no`; the Xero account-code
+join is already P-insensitive. This change only fixes the exact-match links (requires-confirmation, CONFIG
+PO counts, production-level deposit rollup).
+
+**For Diviyaj (handle carefully on prod):**
+- `purchase_orders.prod_no` is fed by the n8n Airtable→Supabase sync. Confirm whether Airtable still carries
+  `P53` for any PO before/after applying — it could reappear on the next sync. Root-cause the source value.
+- Run inside the migration's transaction; check the verification SELECTs before COMMIT.
+- **Ben updates the 2 (~3) leftover `P53` POs manually** — they are not in this migration.
+- Consider (future) making `prod_no` joins P-insensitive everywhere (like the Xero join) so `53`/`P53` are
+  always treated as one production — that would remove this class of mismatch without data migrations.
+
 ## v20.399 - "Last 12m" toggle pills coloured forest green
 
 The 📅 Last 12m toggle (Purchase Orders + Shipments grids) is now forest green — light green
