@@ -52,7 +52,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.6';
+const APP_VERSION = 'v25.7';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -4371,8 +4371,10 @@ async function biProjection() {
     .forEach(r => { (catCover[r.category] = catCover[r.category] || {})[r.warehouse] = r.w; });
   (await pool.query(`SELECT sku, warehouse, target_cover_weeks::float w FROM planner.product_target_cover_override`)).rows
     .forEach(r => { (skuOvr[r.sku] = skuOvr[r.sku] || {})[r.warehouse] = r.w; });
-  (await pool.query(`SELECT sku, coalesce(category,'') category FROM planner.products`)).rows
-    .forEach(r => { skuCat[r.sku] = r.category; });
+  const skuCq = {};
+  (await pool.query(`SELECT p.sku, coalesce(p.category,'') category, coalesce(sl.carton_qty,0) cq
+     FROM planner.products p LEFT JOIN planner.sku_labels sl ON sl.sku=p.sku`)).rows
+    .forEach(r => { skuCat[r.sku] = r.category; skuCq[r.sku] = Number(r.cq) || 0; });
   const twFor = (sku, wh) => { const o = skuOvr[sku] && skuOvr[sku][wh]; if (o != null) return o;
     const c = catCover[skuCat[sku]] && catCover[skuCat[sku]][wh]; return c != null ? c : null; };
   const inb = {};   // inbound open-PO units per sku|country
@@ -4414,7 +4416,7 @@ async function biProjection() {
         cover_with_inbound: avgM > 0 ? Math.round(coverInb * 10) / 10 : null,
         target_months: Math.round(TM * 10) / 10, target_weeks: Math.round(tgtWk),
         need_qty: Math.max(0, Math.round(avgM * TM - (onh + inbound))),
-        urgency });
+        carton_qty: skuCq[sku] || 0, urgency });
     }
   }
   return rows;
@@ -4462,7 +4464,10 @@ async function biReallocations() {
         if (!r || (r.urgency !== 'critical' && r.urgency !== 'soon')) continue;
         const need = r.need_qty || 0; if (need <= 0) continue;
         const donor = donors.find(d => d.co !== co && d.spare > 0); if (!donor) continue;
-        const move = Math.min(need, donor.spare); if (move <= 0) continue;
+        let move = Math.min(need, donor.spare); if (move <= 0) continue;
+        // round to whole cartons, minimum 1 carton — capped by what the donor can spare (skip if <1 carton fits)
+        const cq = r.carton_qty || 0;
+        if (cq > 0) { let cartons = Math.max(1, Math.round(move / cq)); if (cartons * cq > donor.spare) cartons = Math.floor(donor.spare / cq); if (cartons < 1) continue; move = cartons * cq; }
         const avgR = r.demand_12m / 12, dr = pj[sku + '|' + donor.co];
         donor.spare -= move;
         recs.push({ key: 'bi-realloc|' + sku + '|' + donor.po + '|' + coPO[prod][co].po,
@@ -4553,8 +4558,11 @@ async function biContainerFill() {
       .sort((a, b) => (a.urgency === 'critical' ? 0 : 1) - (b.urgency === 'critical' ? 0 : 1) || b.need_qty - a.need_qty);
     for (const r of cands) {
       if (spare <= 0) break;
-      const pq = skuMeta[r.sku].pq, fit = Math.floor(spare * pq), add = Math.min(r.need_qty, fit);
-      if (add <= 0) continue;
+      const pq = skuMeta[r.sku].pq, fit = Math.floor(spare * pq);
+      let add = Math.min(r.need_qty, fit); if (add <= 0) continue;
+      // round to whole cartons, minimum 1 carton — capped by what fits in the spare pallets (skip if <1 fits)
+      const cq = r.carton_qty || 0;
+      if (cq > 0) { const fitC = Math.floor(fit / cq); if (fitC < 1) continue; let cartons = Math.max(1, Math.round(add / cq)); if (cartons > fitC) cartons = fitC; add = cartons * cq; }
       const used = Math.round((add / pq) * 10) / 10; spare = Math.max(0, Math.round((spare - used) * 10) / 10);
       const sup = skuMeta[r.sku].supplier, avgM = r.demand_12m / 12;
       recs.push({ key: 'bi-fill|' + s.shipment_ref + '|' + r.sku, shipment_ref: s.shipment_ref, country: s.country,

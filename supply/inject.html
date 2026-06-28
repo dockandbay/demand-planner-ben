@@ -3241,26 +3241,28 @@
   function renderUrgentBuy(pj){ var b=biBody(); pj=pj||{}; var rows=pj.rows||[], cc=pj.counts||{};
     function chip(label,n,bg,fg){ return '<span class="tool-badge" style="background:'+bg+';color:'+fg+';font-size:11px;padding:3px 9px">'+label+' '+(n||0)+'</span>'; }
     var ord={critical:0,soon:1};
-    var risk=rows.filter(function(r){return r.urgency==='critical'||r.urgency==='soon';})
-      .sort(function(a,b){ return (ord[a.urgency]-ord[b.urgency]) || (b.demand_12m-a.demand_12m); });
-    var CAP=50, shown=risk.slice(0,CAP);
-    var tbl='<div class="tw" style="max-width:1040px"><table style="width:100%"><thead><tr><th class="l">SKU</th><th class="l">Ship to</th><th class="l">Cat</th><th>On hand</th><th>Inbound</th><th>Cover now</th><th>+ inbound</th><th>Target</th><th>12m demand</th><th>Buy to target</th><th>Urgency</th></tr></thead><tbody>'
-      +shown.map(function(r){ var u=r.urgency==='critical'?['#fee2e2','#991b1b']:['#fef3c7','#92400e'];
-        return '<tr><td class="l"><b>'+esc(r.sku)+'</b></td><td class="l">'+esc(r.country)+'</td><td class="l"><span class="mut tiny">'+esc(r.category||'')+'</span></td>'
-          +'<td>'+units(r.on_hand)+'</td><td>'+(r.inbound>0?units(r.inbound):'<span class="mut">—</span>')+'</td>'
-          +'<td'+(r.cover_now!=null&&r.cover_now<1?' style="color:#dc2626;font-weight:700"':'')+'>'+(r.cover_now==null?'<span class="mut">∞</span>':r.cover_now+' mo')+'</td>'
-          +'<td'+(r.cover_with_inbound!=null&&r.cover_with_inbound<1?' style="color:#dc2626;font-weight:700"':'')+'>'+(r.cover_with_inbound==null?'<span class="mut">∞</span>':r.cover_with_inbound+' mo')+'</td>'
-          +'<td class="mut">'+(r.target_weeks!=null?r.target_weeks+'wk':'—')+'</td>'
-          +'<td>'+units(r.demand_12m)+'</td>'
-          +'<td'+(r.need_qty>0?' style="font-weight:700"':'')+'>'+(r.need_qty>0?units(r.need_qty):'<span class="mut">—</span>')+'</td>'
-          +'<td><span class="tool-badge" style="background:'+u[0]+';color:'+u[1]+'">'+esc(r.urgency)+'</span></td></tr>'; }).join('')
-      +'</tbody></table></div>';
+    var risk=rows.filter(function(r){return r.urgency==='critical'||r.urgency==='soon';});
+    var byCo={}; risk.forEach(function(r){ (byCo[r.country]=byCo[r.country]||[]).push(r); });
+    var countries=Object.keys(byCo).sort(function(a,b){ return byCo[b].length-byCo[a].length || (a<b?-1:1); });
+    function rowH(r){ var u=r.urgency==='critical'?['#fee2e2','#991b1b']:['#fef3c7','#92400e'];
+      return '<tr><td class="l" style="min-width:250px"><b>'+esc(r.sku)+'</b></td><td class="l"><span class="mut tiny">'+esc(r.category||'')+'</span></td>'
+        +'<td>'+units(r.on_hand)+'</td><td>'+(r.inbound>0?units(r.inbound):'<span class="mut">—</span>')+'</td>'
+        +'<td'+(r.cover_now!=null&&r.cover_now<1?' style="color:#dc2626;font-weight:700"':'')+'>'+(r.cover_now==null?'<span class="mut">∞</span>':r.cover_now+' mo')+'</td>'
+        +'<td'+(r.cover_with_inbound!=null&&r.cover_with_inbound<1?' style="color:#dc2626;font-weight:700"':'')+'>'+(r.cover_with_inbound==null?'<span class="mut">∞</span>':r.cover_with_inbound+' mo')+'</td>'
+        +'<td class="mut">'+(r.target_weeks!=null?r.target_weeks+'wk':'—')+'</td>'
+        +'<td>'+units(r.demand_12m)+'</td>'
+        +'<td'+(r.need_qty>0?' style="font-weight:700"':'')+'>'+(r.need_qty>0?units(r.need_qty):'<span class="mut">—</span>')+'</td>'
+        +'<td><span class="tool-badge" style="background:'+u[0]+';color:'+u[1]+'">'+esc(r.urgency)+'</span></td></tr>'; }
+    function tbl(list){ list.sort(function(a,b){ return (ord[a.urgency]-ord[b.urgency]) || (b.demand_12m-a.demand_12m); });
+      return '<div class="tw" style="max-width:1020px"><table style="width:100%"><thead><tr><th class="l" style="min-width:250px">SKU</th><th class="l">Cat</th><th>On hand</th><th>Inbound</th><th>Cover now</th><th>+ inbound</th><th>Target</th><th>12m demand</th><th>Buy to target</th><th>Urgency</th></tr></thead><tbody>'+list.map(rowH).join('')+'</tbody></table></div>'; }
+    var body=countries.map(function(co){ var crit=byCo[co].filter(function(r){return r.urgency==='critical';}).length;
+      return '<div style="margin-top:14px;font-weight:700;font-size:13px;color:#0f172a">'+esc(co)+' <span class="mut tiny" style="font-weight:400">· '+byCo[co].length+' at risk'+(crit?' ('+crit+' critical)':'')+'</span></div>'+tbl(byCo[co]); }).join('');
     b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 6px;color:#0f172a">Urgent buy — stock-out risk</div>'
-      +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:center">'
+      +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px;align-items:center">'
         +chip('⚠ Critical',cc.critical,'#fee2e2','#991b1b')+chip('Soon',cc.soon,'#fef3c7','#92400e')
         +chip('OK',cc.ok,'#dcfce7','#166534')+chip('Surplus',cc.surplus,'#dbeafe','#1e40af')
-        +'<span class="mut tiny" style="margin-left:6px">per SKU × market · target = per category/SKU (12wk default) · on-hand + inbound vs forecast</span></div>'
-      +(shown.length?tbl+(risk.length>CAP?'<div class="count" style="margin-top:6px">Showing top '+CAP+' of '+risk.length+' (by 12-month demand).</div>':''):'<div class="count">No stock-out risks 🎉</div>'); }
+        +'<span class="mut tiny" style="margin-left:6px">grouped by market · target = per category/SKU (12wk default) · on-hand + inbound vs forecast</span></div>'
+      +(risk.length?body:'<div class="count">No stock-out risks 🎉</div>'); }
   // CONTAINER FILL — spare capacity matched to urgent buys from an on-board supplier. Add / Snooze / Dismiss.
   function renderContainerFill(d){ var b=biBody(); d=d||{}; var recs=d.recs||[];
     if(!recs.length){ b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 6px">Container fill</div><div class="count">No fill opportunities — no shipment with spare capacity matches an urgent buy from a supplier already on board.</div>'; return; }

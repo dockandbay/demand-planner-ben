@@ -5,6 +5,17 @@ Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v25.7 - BI: carton-rounded rec quantities + Urgent Buy grouped by market
+
+- **Whole-carton quantities** — Reallocate and Container Fill now round their move/add to **whole cartons,
+  minimum 1 carton** (using each SKU's `sku_labels.carton_qty`, carried on the projection). Reallocate is still
+  capped by what the donor can spare (skips if <1 carton fits); Container Fill is capped by what fits the spare
+  pallets. SKUs with no carton size fall back to raw units.
+- **Urgent Buy grouped by market** — the at-risk list is now grouped by destination (UK/US/EU/AU/CA) with a
+  per-market count, and the **SKU column widened** so refs are fully visible.
+
+No migration. (Phase 4 automation cancelled — recommendations are human-Apply only.)
+
 ## v25.6 - BI Phase 3: CONSOLIDATE recommendations
 
 New **CONSOLIDATE** sub-tab (after Container Fill). `GET /api/supply/bi/consolidations` greedily bin-packs
