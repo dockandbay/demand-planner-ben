@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.380';
+const APP_VERSION = 'v20.381';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2702,6 +2702,52 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
     }
     res.json({ ok: true, mode, cin7_id: newId, lines: lines.length, approved: lines.filter(l => l.approved_price).length,
       link: newId ? 'https://go.cin7.com/Cloud/TransactionEntry/TransactionEntry.aspx?idCustomerAppsLink=951111&OrderId=' + encodeURIComponent(newId) : null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// BULK "Update Cin7 Date" — push the planner completion date to Cin7 EstimatedDeliveryDate for every supplied PO.
+// body: { pos: [{ po, completion_date }] }. Server RE-VALIDATES: only ACTIVE (non-complete) POs that exist in Cin7
+// are touched (a complete PO is skipped — its date no longer needs pushing). Each PO's CURRENT approval state is
+// read and echoed so the bulk update never flips a draft to approved. One batched PUT. LIVE write — gated on creds.
+app.post('/api/supply/cin7-dates-sync', async (req, res) => {
+  const auth = cin7Auth();
+  if (!auth) return res.status(501).json({ error: 'Cin7 API credentials not configured (set CIN7_AUTH). No write performed.' });
+  const items = Array.isArray(req.body && req.body.pos) ? req.body.pos.filter(x => x && x.po) : [];
+  if (!items.length) return res.json({ ok: true, updated: 0, skipped: 0, message: 'no POs supplied' });
+  try {
+    // authoritative guard: status + Cin7 id straight from the DB (don't trust the client on complete-vs-active)
+    const meta = {};
+    (await pool.query(`SELECT p.po, coalesce(p.status,'') status, e.erp_po_id
+      FROM planner.purchase_orders p JOIN planner.erp_purchase_orders e ON e.po=p.po
+      WHERE p.po = ANY($1)`, [items.map(x => x.po)])).rows.forEach(r => { meta[r.po] = r; });
+    // 1) validate (active-only, in-Cin7, has date) → build the to-do list
+    const todo = [], skipped = [];
+    for (const it of items) {
+      const m = meta[it.po];
+      if (!m || !m.erp_po_id) { skipped.push({ po: it.po, reason: 'not in Cin7' }); continue; }
+      if (/complete/i.test(m.status)) { skipped.push({ po: it.po, reason: 'complete — skipped' }); continue; }
+      const c = (it.completion_date || '').trim();
+      if (!c) { skipped.push({ po: it.po, reason: 'no completion date' }); continue; }
+      todo.push({ id: Number(m.erp_po_id) || m.erp_po_id, edd: /T/.test(c) ? c : (c + 'T00:00:00Z') });
+    }
+    if (!todo.length) return res.json({ ok: true, updated: 0, skipped: skipped.length, skippedDetail: skipped });
+    // 2) read current approval state for all ids in chunks (id IN (...)) so the update preserves draft/approved
+    const approvedById = {}; const ids = todo.map(t => t.id);
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100);
+      try {
+        const g = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=250&fields=id,isApproved&where=' + encodeURIComponent('id IN (' + chunk.join(',') + ')'),
+          { headers: { Authorization: auth, 'content-type': 'application/json' } });
+        if (g.ok) { const arr = await g.json(); if (Array.isArray(arr)) arr.forEach(o => { if (o && typeof o.isApproved === 'boolean') approvedById[o.id] = o.isApproved; }); }
+      } catch (e) { /* unread → isApproved omitted, Cin7 leaves it unchanged */ }
+    }
+    // 3) one batched PUT, echoing each PO's current approval state
+    const batch = todo.map(t => { const upd = { id: t.id, estimatedDeliveryDate: t.edd };
+      if (approvedById[t.id] !== undefined) upd.isApproved = approvedById[t.id]; return upd; });
+    const r = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
+      { method: 'PUT', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify(batch) });
+    const txt = await r.text();
+    if (!r.ok) return res.status(502).json({ error: 'Cin7 API error ' + r.status + ': ' + txt.slice(0, 300) });
+    res.json({ ok: true, updated: batch.length, skipped: skipped.length, skippedDetail: skipped });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Rename a PO (Master Data tab) — cascades the key across all owned tables + shipment pointers.

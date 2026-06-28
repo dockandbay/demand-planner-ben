@@ -711,7 +711,7 @@
     c.innerHTML=annot('purchase-orders')
       +'<div class="bar" id="po-prog">'+FILTERS.map(function(f){return '<span class="pill'+(f[0]===state.f?' active':'')+'" data-f="'+f[0]+'">'+f[1]+'</span>';}).join('')
       +'<input class="flt" id="sup-search" placeholder="Filter PO / supplier…" value="'+esc(state.q||'')+'"><span class="count" id="sup-count"></span>'
-      +'<span style="margin-left:auto"><button class="tool-badge bg-blue" id="po-new" style="cursor:pointer;border:none;margin-right:8px">+ New PO</button><button class="tool-badge bg-neutral" id="po-upload" style="cursor:pointer;border:none;margin-right:8px">⬆ Upload POs</button><button class="save-btn dark" id="po-csv">⬇ CSV for Fulfil</button></span></div>'
+      +'<span style="margin-left:auto"><button class="save-btn" id="po-cin7-dates" style="background:#0b6;color:#fff;border-color:#0b6;margin-right:8px" title="push the planner completion date to Cin7 EstimatedDeliveryDate for every ACTIVE PO whose date differs from Cin7 — complete POs are skipped (live write)">📅 Sync Cin7 dates</button><button class="tool-badge bg-blue" id="po-new" style="cursor:pointer;border:none;margin-right:8px">+ New PO</button><button class="tool-badge bg-neutral" id="po-upload" style="cursor:pointer;border:none;margin-right:8px">⬆ Upload POs</button><button class="save-btn dark" id="po-csv">⬇ CSV for Fulfil</button></span></div>'
       +'<div class="bar" id="po-ctry"><span class="pill-lbl">Ship to</span>'+CTRYP.map(function(a){return '<span class="pill'+(state.ctry[a[0]]?' active':'')+'" data-c="'+a[0]+'">'+a[1]+' ('+ctryCount(a[0])+')</span>';}).join('')
       +'<span class="pill-lbl" style="margin-left:14px">Supplier</span><select class="flt" id="po-sup" style="min-width:150px;cursor:pointer"><option value="">All suppliers</option>'+(supplierList||[]).slice().sort().map(function(s){return '<option'+(s===state.sup?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select>'
       +'<span class="pill-lbl" style="margin-left:14px">Production</span><select class="flt" id="po-prod" style="min-width:110px;cursor:pointer"><option value="">All</option>'+optList(_prods,state.prod)+'</select>'
@@ -772,6 +772,23 @@
       var sup=prompt('Supplier (optional — exact name; set later in the row otherwise):')||'';
       shipPost('/api/supply/po-create',{po:po.trim(),supplier_name:sup.trim()||null,status:'FUTURE'},function(){ delete cache['purchase-orders']; selectSection('purchase-orders'); }); };
     document.getElementById('po-upload').onclick=openPoUpload;
+    // BULK Cin7 date sync — every ACTIVE PO whose completed-at-warehouse date differs from Cin7 (same condition as
+    // the row "⚠ Date ≠ ERP" button); complete POs are excluded (poComplete). Live write → strong confirm.
+    document.getElementById('po-cin7-dates').onclick=function(){ var btn=this;
+      var cand=Object.keys(poBy).map(function(k){return poBy[k];})
+        .filter(function(r){ return r && r.erp_date_pending>0 && !poComplete(r) && r.erp_po_id && r.checkin; })
+        .map(function(r){ return {po:r.po, completion_date:r.checkin}; });
+      if(!cand.length){ alert('No active POs have a Cin7 date mismatch — nothing to sync.'); return; }
+      if(!confirm('Update '+cand.length+' Cin7 PO date'+(cand.length>1?'s':'')+' to match the planner completion date?\n\n• ACTIVE POs only — complete POs are skipped\n• Each PO keeps its current Cin7 approval status (draft stays draft)\n\nThis is a LIVE write to Cin7.'))return;
+      btn.disabled=true; var orig=btn.textContent; btn.textContent='Syncing… ('+cand.length+')';
+      fetch('/api/supply/cin7-dates-sync',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({pos:cand})})
+        .then(function(r){return r.json();}).then(function(j){ btn.disabled=false; btn.textContent=orig;
+          if(j&&j.error){ alert('Cin7 sync failed: '+j.error); return; }
+          var msg='✓ Cin7 dates synced: '+(j.updated||0)+' updated'+(j.skipped?', '+j.skipped+' skipped':'')+'.';
+          if(j.skippedDetail&&j.skippedDetail.length) msg+='\n\nSkipped:\n'+j.skippedDetail.map(function(s){return '• '+s.po+' — '+s.reason;}).join('\n');
+          msg+='\n\nNote: the ERP mirror refreshes on the next n8n sync, so the “Date ≠ ERP” flags clear after that.';
+          alert(msg); })
+        .catch(function(e){ btn.disabled=false; btn.textContent=orig; alert('Cin7 sync failed: '+(e.message||e)); }); };
     view(); }
   // Bulk PO upload — paste CSV/TSV (optional header). Recognised cols: PO, Supplier, Ship to, Branch, Status, Start.
   function poUploadParse(text){ var lines=text.split(/\r?\n/).map(function(x){return x.trim();}).filter(Boolean); if(!lines.length)return [];

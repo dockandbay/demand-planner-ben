@@ -4,6 +4,18 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.381 - Bulk "Sync Cin7 dates" button on SUPPLY ▸ Purchase Orders
+
+- New **📅 Sync Cin7 dates** button (PO toolbar) pushes the planner completion date to Cin7 `EstimatedDeliveryDate`
+  for **every ACTIVE PO whose date differs from Cin7 in one go** — same condition as the per-row "⚠ Date ≠ ERP"
+  button. Strong confirm showing the count before the live write.
+- **Complete POs are excluded** (they don't register as ERP-date-different and are never pushed) — enforced
+  **client-side** (`poComplete`) *and* re-validated **server-side** in the endpoint, so a complete PO can't be
+  updated even if sent. In the current sandbox that's 138 active candidates vs **1,066 complete POs correctly skipped**.
+- Each PO keeps its **current Cin7 approval status** (draft stays draft) — approval states are read in batches
+  via `id IN (...)` (≈2 calls for 138 POs, rate-limit friendly) and echoed into a single batched PUT.
+- New endpoint `POST /api/supply/cin7-dates-sync` (gated on Cin7 creds; safe 501 no-op when absent).
+
 ## v20.380 - Cin7 writes preserve the PO's approval status (no longer force draft → approved)
 
 - **Bug fix:** "Update Cin7 Date" (and the lines push, on update) sent `isApproved: true`, which flipped a **draft**
