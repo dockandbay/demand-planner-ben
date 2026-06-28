@@ -4,6 +4,19 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.396 - Grid performance trio across SUPPLY + Supplier Portal
+
+Applied three performance improvements to every grid on the SUPPLY plan and the supplier portal:
+1. **"📅 Last 12m" default** on Completed items — Purchase Orders (by completion check-in date) and
+   SUPPLY ▸ Shipments (by arrival/landing/departure). Toggle pill, on by default; off shows all-time.
+2. **Render cap + "Show all"** — PO/Shipments grids cap at 250 rows, portal grids at 200; a "Show all N"
+   button reveals the rest. Counts show "X of Y" when capped.
+3. **Debounced search (220ms)** on all grid search boxes, with a **minimum 2 characters** and the
+   universal **"PO"/"PO-" prefix ignored** (it would match every PO and filter nothing).
+
+Shared helpers `debounce()` + `effQ()` added to `inject.html` and `portal-view.js`. No new env vars or
+migrations. Pure client-side; no backend changes.
+
 ## v20.390 - Forecast CSV: MonthsStock + P + Country Category computed; Sync-Cin7 button restyled
 
 - **MonthsStock** now computed = whole months of cover the current **3PL on-hand** (`product_inventory {co}_3pl`)

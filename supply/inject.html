@@ -234,6 +234,10 @@
     return '<div class="tw"><table><thead><tr>'+cols.map(function(c){return isNum(rows[0][c])&&rows[0][c]!==''?'<th>'+esc(c)+'</th>':'<th class="l">'+esc(c)+'</th>';}).join('')+'</tr></thead><tbody>'
       +rows.map(function(r){return '<tr>'+cols.map(function(c){return cellFor(c,r[c]);}).join('')+'</tr>';}).join('')+'</tbody></table></div>'; }
   function filt(rows,q){ if(!q)return rows; q=q.toLowerCase(); return rows.filter(function(r){return Object.keys(r).some(function(k){return String(r[k]==null?'':r[k]).toLowerCase().indexOf(q)>=0;});}); }
+  // debounce: coalesce rapid keystrokes into one call after `ms` of quiet
+  function debounce(fn,ms){ var t; return function(){ var a=arguments, c=this; clearTimeout(t); t=setTimeout(function(){ fn.apply(c,a); }, ms||220); }; }
+  // effective search query: ignore <2 chars and the universal "PO"/"PO-" prefix (matches every PO → no useful filter)
+  function effQ(q){ q=(q||'').trim(); if(q.length<2)return ''; if(/^po-?$/i.test(q))return ''; return q; }
 
   function editCell(ep,field,val,kind,extra){ var cls='fci'+(kind==='date'?' dt':(kind==='txt'?' txt':''));
     var ty=kind==='date'?' type="date"':'';
@@ -694,7 +698,10 @@
     if(_pendingPO){ _poState={f:'all',q:'',act:{},ctry:{},grp:'shipment',sup:'',prod:'',batch:''}; }
     else if(!_poState){ _poState={f:'in_progress',q:'',act:{},ctry:{},grp:'shipment',sup:'',prod:'',batch:''}; }
     if(_poState.prod==null)_poState.prod=''; if(_poState.batch==null)_poState.batch='';
+    if(_poState.recent==null)_poState.recent=true;   // completed POs default to last 12 months only (perf)
     var state=_poState;
+    var PO_CAP=250, _poShowAll=false;   // cap rendered rows; "show all" reveals the rest
+    var RECENT_CUT=(function(){var x=new Date();x.setMonth(x.getMonth()-12);return x.toISOString().slice(0,10);})();
     function actCount(k){ return rows.filter(PO_ACTCOND[k]).length; }
     function ctryCount(c){ return rows.filter(function(r){return r.country===c;}).length; }
     // unified "has any open action item" — same as the red badge next to each PO ref (poExceptions)
@@ -710,6 +717,7 @@
     function optList(arr,sel){ return arr.map(function(v){return '<option'+(String(v)===String(sel)?' selected':'')+'>'+esc(v)+'</option>';}).join(''); }
     c.innerHTML=annot('purchase-orders')
       +'<div class="bar" id="po-prog">'+FILTERS.map(function(f){return '<span class="pill'+(f[0]===state.f?' active':'')+'" data-f="'+f[0]+'">'+f[1]+'</span>';}).join('')
+      +'<span class="pill po-recent'+(state.recent?' active':'')+'" data-recent title="when on, Completed shows only POs completed in the last 12 months (faster)">📅 Last 12m</span>'
       +'<input class="flt" id="sup-search" placeholder="Filter PO / supplier…" value="'+esc(state.q||'')+'"><span class="count" id="sup-count"></span>'
       +'<span style="margin-left:auto"><button class="save-btn" id="po-new" style="margin-right:8px">+ New PO</button><button class="save-btn" id="po-upload" style="margin-right:8px">⬆ Upload POs</button><button class="save-btn dark" id="po-csv" style="margin-right:8px">⬇ CSV for Fulfil</button><button class="save-btn dark" id="po-cin7-dates" title="push the planner completion date to Cin7 EstimatedDeliveryDate for every ACTIVE PO whose date differs from Cin7 — complete POs are skipped (live write)">📅 Sync Cin7 dates</button></span></div>'
       +'<div class="bar" id="po-ctry"><span class="pill-lbl">Ship to</span>'+CTRYP.map(function(a){return '<span class="pill'+(state.ctry[a[0]]?' active':'')+'" data-c="'+a[0]+'">'+a[1]+' ('+ctryCount(a[0])+')</span>';}).join('')
@@ -726,6 +734,8 @@
       if(state.erp){ if(!poErpMisaligned(r))return false; }               // NEEDS ERP spans all statuses (like ACTION ITEMS)
       else if(state.hasact){ if(!hasActions(r))return false; }            // ACTION ITEMS filter spans all statuses
       else if(!(state.f==='all'||r.progress===state.f))return false;
+      // completed POs: default to those completed in the last 12 months (toggle off for all-time)
+      if(state.recent && r.progress==='complete' && !((r.checkin||'')>=RECENT_CUT))return false;
       for(var k in state.act){ if(state.act[k] && !PO_ACTCOND[k](r))return false; }
       if(anyCtry() && !state.ctry[r.country])return false;   // country pills: OR within, AND with the rest
       if(state.sup && r.supplier_name!==state.sup)return false;
@@ -733,9 +743,13 @@
       if(state.batch && String(r.batch_id)!==state.batch)return false;
       return true; }); }
     // a text search overrides the status/action/country filters — search across ALL POs
-    function view(){ var f=state.q ? filt(rows,state.q) : cur();
-      document.getElementById('sup-count').textContent=f.length+' / '+rows.length+' POs'+(state.q?' (search — all statuses)':'');
-      document.getElementById('sup-grid').innerHTML=poTable(f,state.grp); bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick();
+    function view(){ var q=effQ(state.q); var f=q ? filt(rows,q) : cur();
+      var shown=(_poShowAll||f.length<=PO_CAP)?f:f.slice(0,PO_CAP);
+      document.getElementById('sup-count').textContent=(shown.length<f.length?shown.length+' of ':'')+f.length+' / '+rows.length+' POs'+(q?' (search — all statuses)':'');
+      document.getElementById('sup-grid').innerHTML=poTable(shown,state.grp)
+        +(shown.length<f.length?'<div style="margin:8px 0;text-align:center"><button class="save-btn light" id="po-showall">Show all '+f.length+' &darr;</button></div>':'');
+      var sa=document.getElementById('po-showall'); if(sa)sa.onclick=function(){ _poShowAll=true; view(); };
+      bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick();
       bindDepPick(refreshGrid);
       if(_pendingPO){ var want=_pendingPO; _pendingPO=null; setTimeout(function(){ expandPending('#sup-grid .po-exp[data-po]',want); },30); }
       document.querySelectorAll('#sup-grid .erp-up').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.up); }; }); }
@@ -747,7 +761,8 @@
         view();
       }).catch(function(){ selectSection('purchase-orders'); }); }
     _poRefresh=refreshGrid;
-    c.querySelectorAll('#po-prog .pill').forEach(function(p){p.onclick=function(){c.querySelectorAll('#po-prog .pill').forEach(function(x){x.classList.remove('active');});p.classList.add('active');state.f=p.dataset.f;view();};});
+    c.querySelectorAll('#po-prog .pill:not(.po-recent)').forEach(function(p){p.onclick=function(){c.querySelectorAll('#po-prog .pill:not(.po-recent)').forEach(function(x){x.classList.remove('active');});p.classList.add('active');state.f=p.dataset.f;_poShowAll=false;view();};});
+    var _rp=c.querySelector('#po-prog .po-recent'); if(_rp)_rp.onclick=function(){ state.recent=!state.recent; _rp.classList.toggle('active',state.recent); _poShowAll=false; view(); };
     var _actPill=c.querySelector('#po-act .po-actall'), _erpPill=c.querySelector('#po-act .po-erp');
     // active = halo ring + ✓ prefix; when one is on, the other dims so the selected filter is unmistakable
     function pillToggle(el,on,anyOn,halo,base){ if(!el)return;
@@ -766,8 +781,8 @@
     var psup=document.getElementById('po-sup'); if(psup)psup.onchange=function(){state.sup=this.value;view();};
     var pprod=document.getElementById('po-prod'); if(pprod)pprod.onchange=function(){state.prod=this.value;view();};
     var pbatch=document.getElementById('po-batch'); if(pbatch)pbatch.onchange=function(){state.batch=this.value;view();};
-    document.getElementById('sup-search').oninput=function(){state.q=this.value;view();};
-    document.getElementById('po-csv').onclick=function(){csv(state.q?filt(rows,state.q):cur(),'purchase_orders.csv',PO_CSV_LABELS);};
+    document.getElementById('sup-search').oninput=debounce(function(){state.q=this.value;_poShowAll=false;view();},220);
+    document.getElementById('po-csv').onclick=function(){var q=effQ(state.q);csv(q?filt(rows,q):cur(),'purchase_orders.csv',PO_CSV_LABELS);};
     document.getElementById('po-new').onclick=function(){ var po=prompt('New PO number:'); if(!po||!po.trim())return;
       var sup=prompt('Supplier (optional — exact name; set later in the row otherwise):')||'';
       shipPost('/api/supply/po-create',{po:po.trim(),supplier_name:sup.trim()||null,status:'FUTURE'},function(){ delete cache['purchase-orders']; selectSection('purchase-orders'); }); };
@@ -1415,7 +1430,10 @@
       var sc=lines.filter(lineSupRisk).length, dc=lines.filter(lineDisc).length;
       var sn=document.getElementById('op-suprisk-n'); if(sn)sn.textContent=sc?('('+sc+')'):'';
       var dn=document.getElementById('op-disc-n'); if(dn)dn.textContent=dc?('('+dc+')'):''; }
-    function view(){ var cl=curLines(); document.getElementById('op-grid').innerHTML=pivot(cl,rowsFor(cl),skuCat,plcMap,skuAttr,skuRW); bindQty(); bindUploads(); bindApprove(); bindConfirm(); bindPoLinks(); updateActionCounts(); }
+    var _opShowAllPos=false;
+    function viewReset(){ _opShowAllPos=false; view(); }   // any filter/search change re-caps the PO columns
+    function view(){ var cl=curLines(); document.getElementById('op-grid').innerHTML=pivot(cl,rowsFor(cl),skuCat,plcMap,skuAttr,skuRW,_opShowAllPos); bindQty(); bindUploads(); bindApprove(); bindConfirm(); bindPoLinks(); updateActionCounts();
+      var spa=document.querySelector('#op-grid .op-showall-pos'); if(spa)spa.onclick=function(){ _opShowAllPos=true; view(); }; }
     // PO column header → open that PO in PURCHASE ORDERS with its ORDER PLAN tab expanded
     function bindPoLinks(){ document.querySelectorAll('#op-grid .op-po-link').forEach(function(b){ b.onclick=function(){ gotoPO(b.dataset.po,'oplan'); }; }); }
     // inline confirm of a supplier change in a pivot cell (priority over partial-approve)
@@ -1443,18 +1461,18 @@
         fetch('/api/supply/po-line/'+encodeURIComponent(psku)+'/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({approved:true,field:field})}).then(function(r){return r.json();}).then(function(){var l=lines.find(function(x){return (x.po+'|'+x.sku)===psku;}); if(l)set(l); view();}); }; }); }
       approveExc('opapprove-sup','supplier',function(l){l.supplier_risk_approved=true;});
       approveExc('opapprove-disc','discontinue',function(l){l.discontinue_approved=true;}); }
-    function togglebar(id,opts,setv){ document.getElementById(id).onclick=function(e){var t=e.target; if(t.dataset.all)setv=new Set(opts); else if(t.dataset.v!=null){if(setv.has(t.dataset.v))setv.delete(t.dataset.v);else setv.add(t.dataset.v);} else return; if(id==='op-status')st.statuses=setv; else st.countries=setv; document.getElementById(id).innerHTML=pillsHTML(opts,setv); view(); }; }
+    function togglebar(id,opts,setv){ document.getElementById(id).onclick=function(e){var t=e.target; if(t.dataset.all)setv=new Set(opts); else if(t.dataset.v!=null){if(setv.has(t.dataset.v))setv.delete(t.dataset.v);else setv.add(t.dataset.v);} else return; if(id==='op-status')st.statuses=setv; else st.countries=setv; document.getElementById(id).innerHTML=pillsHTML(opts,setv); viewReset(); }; }
     togglebar('op-status',pillStatuses,st.statuses); togglebar('op-country',countries,st.countries);
-    c.querySelectorAll('[data-sc]').forEach(function(p){p.onclick=function(){st.scope=p.dataset.sc; c.querySelectorAll('[data-sc]').forEach(function(x){x.classList.toggle('active',x===p);}); view();};});
-    document.getElementById('op-partials').onclick=function(){st.partials=!st.partials; this.classList.toggle('active',st.partials); view();};
-    document.getElementById('op-erp').onclick=function(){st.erpdiff=!st.erpdiff; this.classList.toggle('active',st.erpdiff); view();};
-    document.getElementById('op-suprisk').onclick=function(){st.suprisk=!st.suprisk; this.classList.toggle('active',st.suprisk); view();};
-    document.getElementById('op-disc').onclick=function(){st.disc=!st.disc; this.classList.toggle('active',st.disc); view();};
-    document.getElementById('op-cat').onchange=function(){st.cat=this.value;view();};
-    document.getElementById('op-rw').onchange=function(){st.rw=this.value;view();};
-    document.getElementById('op-prod').onchange=function(){st.prod=this.value;view();};
-    document.getElementById('op-po').oninput=function(){st.poq=this.value.toLowerCase();view();};
-    document.getElementById('op-q').oninput=function(){st.q=this.value;view();};
+    c.querySelectorAll('[data-sc]').forEach(function(p){p.onclick=function(){st.scope=p.dataset.sc; c.querySelectorAll('[data-sc]').forEach(function(x){x.classList.toggle('active',x===p);}); viewReset();};});
+    document.getElementById('op-partials').onclick=function(){st.partials=!st.partials; this.classList.toggle('active',st.partials); viewReset();};
+    document.getElementById('op-erp').onclick=function(){st.erpdiff=!st.erpdiff; this.classList.toggle('active',st.erpdiff); viewReset();};
+    document.getElementById('op-suprisk').onclick=function(){st.suprisk=!st.suprisk; this.classList.toggle('active',st.suprisk); viewReset();};
+    document.getElementById('op-disc').onclick=function(){st.disc=!st.disc; this.classList.toggle('active',st.disc); viewReset();};
+    document.getElementById('op-cat').onchange=function(){st.cat=this.value;viewReset();};
+    document.getElementById('op-rw').onchange=function(){st.rw=this.value;viewReset();};
+    document.getElementById('op-prod').onchange=function(){st.prod=this.value;viewReset();};
+    document.getElementById('op-po').oninput=debounce(function(){st.poq=this.value.toLowerCase();viewReset();},220);
+    document.getElementById('op-q').oninput=debounce(function(){st.q=this.value;viewReset();},220);
     // ---- supplier changes awaiting approval (from the portal) — accept here too, not just on PO PLAN ----
     var lineQty={}; lines.forEach(function(l){ lineQty[l.po+'|'+l.sku]=l.qty; });
     function renderChanges(){ var box=document.getElementById('op-changes'); if(!box)return;
@@ -1488,13 +1506,16 @@
   function plt(pl){ return pl>20 ? '<span style="color:#dc2626;font-weight:700">'+pl.toFixed(1)+' plt ⚠</span>' : pl.toFixed(1)+' plt'; }
   // pick the discontinue date for a destination: AU/CA have their own, else the global final.
   function pickDisc(co,a){ co=(co||'').toUpperCase(); a=a||{}; if(co==='AU'&&a.disAu)return a.disAu; if(co==='CA'&&a.disCa)return a.disCa; return a.dis||''; }
-  function pivot(rows, skuList, skuCat, plcMap, skuAttr, skuRW){ plcMap=plcMap||{}; skuAttr=skuAttr||{}; skuRW=skuRW||{}; var cn=document.getElementById('op-count');
+  var OP_POCAP=40;   // cap rendered PO columns (wide pivots are the main slowdown); "show all" reveals the rest
+  function pivot(rows, skuList, skuCat, plcMap, skuAttr, skuRW, showAllPos){ plcMap=plcMap||{}; skuAttr=skuAttr||{}; skuRW=skuRW||{}; var cn=document.getElementById('op-count');
     if(!skuList.length){ if(cn)cn.textContent='0 SKUs'; return '<div class="count">No SKUs for this filter (pick a Category for \"All in category\").</div>'; }
     var pos=[],psn={},cell={},meta={};
     rows.forEach(function(l){ if(!psn[l.po]){psn[l.po]=1;pos.push(l.po);meta[l.po]={s:l.supplier_name,co:l.country,ps:l.prod_start,pe:l.prod_end,sd:l.ship_date,dl:l.delivery};}
       cell[l.po+'|'+l.sku]={q:l.qty,eq:(l.erp_qty==null?l.qty:l.erp_qty),c:Number(l.cost_price)||0,pq:Number(l.pallet_qty)||0,fcc:(l.full_carton_check||''),sra:!!l.supplier_risk_approved,dca:!!l.discontinue_approved}; });
     pos.sort();
-    if(cn)cn.textContent=skuList.length+' SKUs × '+pos.length+' POs'+(pos.length>25?' · narrow with filters':'');
+    var poTotal=pos.length, poCapped=(!showAllPos && poTotal>OP_POCAP);
+    if(poCapped)pos=pos.slice(0,OP_POCAP);   // render only the first N PO columns until "show all"
+    if(cn)cn.textContent=skuList.length+' SKUs × '+(poCapped?OP_POCAP+' of ':'')+poTotal+' POs'+(poCapped?' · capped for speed':(poTotal>25?' · narrow with filters':''));
     var pstat={}; pos.forEach(function(po){var u=0,pl=0; skuList.forEach(function(sku){var cc=cell[po+'|'+sku]; if(cc){u+=cc.q; if(cc.pq>0)pl+=cc.q/cc.pq;}}); pstat[po]={u:u,pl:pl};});
     var POW='112px';
     // frozen label columns after SKU (cumulative left offsets): SKU · Release · Carton · Supplier · Discontinue
@@ -1553,8 +1574,9 @@
         +'<td class="l" style="'+fzc('dis','#fff',2)+'"><span class="tiny mut">'+(a.dis?fd(a.dis):'')+'</span></td>'
         +tds+'<td style="text-align:center"><b>'+units(tot)+'</b></td></tr>'; });
     var gu=0,gv=0,gpl=0,ptd=''; pos.forEach(function(po){var u=pstat[po].u,pl=pstat[po].pl,v=0; skuList.forEach(function(sku){var cc=cell[po+'|'+sku]; if(cc)v+=cc.q*cc.c;}); gu+=u;gv+=v;gpl+=pl; ptd+='<td style="text-align:center"><b>'+units(u)+'</b><br><span class="tiny mut">$'+money(v)+' · '+plt(pl)+'</span></td>';});
-    h+='<tr class="batchrow"><td class="l" colspan="5" style="position:sticky;left:0;background:#eef2ff;z-index:2;min-width:'+FROZEN+'px;white-space:nowrap">PO TOTALS · units / value / pallets</td>'+ptd+'<td style="text-align:center"><b>'+units(gu)+'</b><br><span class="tiny mut">$'+money(gv)+' · '+plt(gpl)+'</span></td></tr>';
-    return h+'</tbody></table></div>'; }
+    h+='<tr class="batchrow"><td class="l" colspan="5" style="position:sticky;left:0;background:#eef2ff;z-index:2;min-width:'+FROZEN+'px;white-space:nowrap">PO TOTALS · units / value / pallets'+(poCapped?' (first '+OP_POCAP+' POs)':'')+'</td>'+ptd+'<td style="text-align:center"><b>'+units(gu)+'</b><br><span class="tiny mut">$'+money(gv)+' · '+plt(gpl)+'</span></td></tr>';
+    return h+'</tbody></table></div>'
+      +(poCapped?'<div style="margin:8px 0;text-align:center"><button class="save-btn light op-showall-pos">Show all '+poTotal+' POs &rarr;</button> <span class="mut tiny">showing first '+OP_POCAP+' — narrowing with filters is faster</span></div>':''); }
 
   // ---- PRODUCTIONS (POs grouped by PROD#; aggregated SKU view) ----
   var prodTab='list', _prodList=[];
@@ -1790,29 +1812,41 @@
   function shipInner(data,c){
     var ships=data.shipments||[], un=data.unassigned||[];
     var FILTERS=[['active','Active'],['completed','Completed'],['exceptions','Exceptions'],['escalated','Escalated'],['all','All']];
-    var state={f:_pendingShip?'all':'active',q:'',ctry:'',br:''};   // show all when navigating to a specific shipment
+    var state={f:_pendingShip?'all':'active',q:'',ctry:'',br:'',recent:true};   // show all when navigating to a specific shipment
+    var SHIP_CAP=250, _shipShowAll=false;   // cap rendered rows; "show all" reveals the rest
+    var RECENT_CUT=(function(){var x=new Date();x.setMonth(x.getMonth()-12);return x.toISOString().slice(0,10);})();
+    function shipRecentDate(s){ return s.arrival||s.landing||s.departure||''; }   // most-recent milestone for the 12m cut
     var ctrys=Array.from(new Set(ships.map(function(s){return s.market;}).filter(Boolean))).sort();
     var brs={}; ships.forEach(function(s){ (s.branch||'').split(',').forEach(function(b){ b=b.trim(); if(b)brs[b]=1; }); });
     var brList=Object.keys(brs).sort();
     c.innerHTML=annot('shipments')+lookupDatalists()+dl('carrierlist',CARRIERS)
       +'<div class="bar" style="flex-wrap:wrap;gap:6px">'+FILTERS.map(function(f){return '<span class="pill'+(f[0]===state.f?' active':'')+'" data-f="'+f[0]+'">'+f[1]+'</span>';}).join('')
+      +'<span class="pill ship-recent'+(state.recent?' active':'')+'" data-recent title="when on, Completed shows only shipments that arrived in the last 12 months (faster)">📅 Last 12m</span>'
       +'<select class="flt" id="ship-ctry" style="width:auto"><option value="">All countries</option>'+ctrys.map(function(c){return '<option>'+esc(c)+'</option>';}).join('')+'</select>'
       +'<select class="flt" id="ship-br" style="width:auto"><option value="">All branches</option>'+brList.map(function(b){return '<option>'+esc(b)+'</option>';}).join('')+'</select>'
       +'<input class="flt" id="sup-search" placeholder="Filter shipment / PO…">'
       +'<button class="tool-badge bg-blue" id="ship-new" style="cursor:pointer;border:none">+ New shipment</button>'
       +'<span class="count" id="sup-count"></span></div><div id="sup-grid"></div>';
-    function cur(){ var searching=!!(state.q&&state.q.trim()); return ships.filter(function(s){
+    function cur(){ var q=effQ(state.q), searching=!!q; return ships.filter(function(s){
       if(state.ctry && (s.market||'')!==state.ctry)return false;
       if(state.br && (s.branch||'').indexOf(state.br)<0)return false;
       if(searching)return true;   // a shipment / PO search overrides the status filter (find it whatever its status)
-      if(state.f==='all')return true; if(state.f==='escalated')return !!s.escalated; if(state.f==='exceptions')return shipIsExc(s); if(state.f==='completed')return s.status==='Complete'||s.status==='Completed'; return (s.status!=='Complete'&&s.status!=='Completed')||!!s.escalated; }); }
-    function view(){ var f=filt(cur(),state.q); document.getElementById('sup-count').textContent=f.length+' / '+ships.length+' shipments';
-      document.getElementById('sup-grid').innerHTML=shipTable(f); bindShipExpand(); bindEdits();
+      var complete=(s.status==='Complete'||s.status==='Completed');
+      if(state.recent && complete && !(shipRecentDate(s)>=RECENT_CUT))return false;   // completed default: last 12 months
+      if(state.f==='all')return true; if(state.f==='escalated')return !!s.escalated; if(state.f==='exceptions')return shipIsExc(s); if(state.f==='completed')return complete; return !complete||!!s.escalated; }); }
+    function view(){ var q=effQ(state.q); var f=filt(cur(),q);
+      var shown=(_shipShowAll||f.length<=SHIP_CAP)?f:f.slice(0,SHIP_CAP);
+      document.getElementById('sup-count').textContent=(shown.length<f.length?shown.length+' of ':'')+f.length+' / '+ships.length+' shipments';
+      document.getElementById('sup-grid').innerHTML=shipTable(shown)
+        +(shown.length<f.length?'<div style="margin:8px 0;text-align:center"><button class="save-btn light" id="ship-showall">Show all '+f.length+' &darr;</button></div>':'');
+      var sa=document.getElementById('ship-showall'); if(sa)sa.onclick=function(){ _shipShowAll=true; view(); };
+      bindShipExpand(); bindEdits();
       if(_pendingShip){ var want=_pendingShip; _pendingShip=null; setTimeout(function(){ expandPending('#sup-grid .po-exp[data-ref]',want); },30); } }
-    c.querySelectorAll('.bar .pill[data-f]').forEach(function(p){p.onclick=function(){c.querySelectorAll('.bar .pill[data-f]').forEach(function(x){x.classList.remove('active');});p.classList.add('active');state.f=p.dataset.f;view();};});
-    document.getElementById('sup-search').oninput=function(){state.q=this.value;view();};
-    document.getElementById('ship-ctry').onchange=function(){state.ctry=this.value;view();};
-    document.getElementById('ship-br').onchange=function(){state.br=this.value;view();};
+    c.querySelectorAll('.bar .pill[data-f]').forEach(function(p){p.onclick=function(){c.querySelectorAll('.bar .pill[data-f]').forEach(function(x){x.classList.remove('active');});p.classList.add('active');state.f=p.dataset.f;_shipShowAll=false;view();};});
+    var _srp=c.querySelector('.bar .ship-recent'); if(_srp)_srp.onclick=function(){ state.recent=!state.recent; _srp.classList.toggle('active',state.recent); _shipShowAll=false; view(); };
+    document.getElementById('sup-search').oninput=debounce(function(){state.q=this.value;_shipShowAll=false;view();},220);
+    document.getElementById('ship-ctry').onchange=function(){state.ctry=this.value;_shipShowAll=false;view();};
+    document.getElementById('ship-br').onchange=function(){state.br=this.value;_shipShowAll=false;view();};
     document.getElementById('ship-new').onclick=function(){ var ref=prompt('New shipment reference (usually the master PO number):'); if(ref&&ref.trim())shipPost('/api/supply/shipment-create',{shipment_ref:ref.trim()},shipReload); };
     view(); }   // Unassigned-POs moved to the PURCHASE ORDERS "Unassigned shipment" exception filter
   function shipIsExc(s){ return s.is_exception || s.over_pallets; }

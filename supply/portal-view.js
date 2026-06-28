@@ -10,6 +10,11 @@
   var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   function fd(s){ if(!s)return ''; var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(s)); return m?(m[3]+'-'+MON[+m[2]-1]+'-'+m[1].slice(2)):String(s); }
   function dcell(v){return v?esc(fd(v)):'<span class="mut tiny">—</span>';}
+  // debounce: coalesce rapid keystrokes into one call after `ms` quiet
+  function debounce(fn,ms){ var t; return function(){ var a=arguments, c=this; clearTimeout(t); t=setTimeout(function(){ fn.apply(c,a); }, ms||220); }; }
+  // effective search query: ignore <2 chars and the universal "PO"/"PO-" prefix (matches every PO → no useful filter)
+  function effQ(q){ q=(q||'').trim(); if(q.length<2)return ''; if(/^po-?$/i.test(q))return ''; return q; }
+  var PP_CAP=200;   // cap rendered PO/shipment rows in the portal; "show all" reveals the rest
   var PO_STATUSES=['FUTURE','PRODUCTION','READY TO SHIP','SHIPPING','DELIVERED','COMPLETE'];
   // document types a supplier can attach (Documents section on the INVOICE tab)
   var DOC_TYPES=['Commercial Invoice','Packing List','CI & PL','Transaction Certificate','Certificate of Origin','Photos','Other'];
@@ -402,6 +407,7 @@
     var _ppData=null, PORTAL_TAB='pos', PORTAL_PO_ST=null;
     var PORTAL_SP_ESC=false, PORTAL_SP_PO='', PORTAL_SP_ACTIVE=true, PORTAL_SP_SHIPPED=false;   // Shipment Plan filters
     var PORTAL_PO_Q='';   // Purchase Orders search (overrides the status pills)
+    var _ppShowAllPO=false, _ppShowAllSP=false;   // "show all" toggles for the capped PO / shipment grids
     var _invFiles={};     // base64 of the last parsed invoice file, per PO (for the Apply step)
     var rootEl=opts.root; if(!rootEl.closest('#supply-root')){rootEl.id='supply-root';} rootEl.style.display='block';
     rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders</span><span class="rtab" data-pt="shipmentplan">Shipment Plan</span><span class="rtab" data-pt="deposits">Deposits</span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
@@ -645,32 +651,35 @@
               var allSp=_ppData.shipmentPlan||[];
               // a shipment has "shipped" once it has a departure date that has passed
               function spShipped(s){ return !!(s.departure && s.departure<=today); }
-              var poq=(PORTAL_SP_PO||'').trim().toLowerCase();
+              var poq=effQ(PORTAL_SP_PO).toLowerCase();
               var shownSp=allSp.filter(function(s){
                 // a PO/shipment search OVERRIDES the filter pills — find it whatever its status / escalation
                 if(poq) return (s.master_po||'').toLowerCase().indexOf(poq)>=0 || (s.shipment_ref||'').toLowerCase().indexOf(poq)>=0 || (s.members||[]).some(function(m){return (m.po||'').toLowerCase().indexOf(poq)>=0;});
                 if(PORTAL_SP_ESC && !s.escalated)return false;
                 var shipped=spShipped(s); if(shipped?!PORTAL_SP_SHIPPED:!PORTAL_SP_ACTIVE)return false;
                 return true; });
+              var spCapped=(!_ppShowAllSP && shownSp.length>PP_CAP), spRender=spCapped?shownSp.slice(0,PP_CAP):shownSp;
               var fbar='<div class="bar" style="gap:8px;flex-wrap:wrap;align-items:center">'
                 +'<input class="fci sp-po-q" placeholder="search PO…" value="'+esc(PORTAL_SP_PO)+'" style="width:150px;text-align:left">'
                 +'<span class="pill'+(PORTAL_SP_ACTIVE?' active':'')+'" data-spf="active">Still to ship</span>'
                 +'<span class="pill'+(PORTAL_SP_SHIPPED?' active':'')+'" data-spf="shipped">Shipped</span>'
                 +'<span class="pill'+(PORTAL_SP_ESC?' active':'')+'" data-spf="esc" style="'+(PORTAL_SP_ESC?'background:#dc2626;color:#fff;border-color:#dc2626':'color:#dc2626')+'">⚑ Escalated only</span>'
-                +'<span class="mut tiny" style="margin-left:auto">'+shownSp.length+' of '+allSp.length+' shipments</span></div>';
-              body.innerHTML=fbar+ppShipmentPlan(shownSp);
+                +'<span class="mut tiny" style="margin-left:auto">'+(spCapped?spRender.length+' of ':'')+shownSp.length+' of '+allSp.length+' shipments</span></div>';
+              body.innerHTML=fbar+ppShipmentPlan(spRender)
+                +(spCapped?'<div style="margin:8px 0;text-align:center"><button class="save-btn sp-showall">Show all '+shownSp.length+' &darr;</button></div>':'');
+              var spsa=body.querySelector('.sp-showall'); if(spsa)spsa.onclick=function(){ _ppShowAllSP=true; renderPP(); };
               body.querySelectorAll('.pp-esc').forEach(function(b){ b.onclick=function(){ var on=b.dataset.on!=='1'; postJSON(EP.shipmentEscalate+encodeURIComponent(b.dataset.ref)+'/escalate',{escalated:on},function(){ reload(); }); }; });
               body.querySelectorAll('.pill[data-spf]').forEach(function(p){ p.onclick=function(){ var f=p.dataset.spf;
-                if(f==='active')PORTAL_SP_ACTIVE=!PORTAL_SP_ACTIVE; else if(f==='shipped')PORTAL_SP_SHIPPED=!PORTAL_SP_SHIPPED; else if(f==='esc')PORTAL_SP_ESC=!PORTAL_SP_ESC; renderPP(); }; });
-              var sq=body.querySelector('.sp-po-q'); if(sq)sq.oninput=function(){ PORTAL_SP_PO=sq.value; var f=document.activeElement===sq; renderPP(); if(f){ var n=body.querySelector('.sp-po-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } } };
-              shownSp.forEach(function(s){ ppShipTimeline(s.shipment_ref); }); return; }
+                if(f==='active')PORTAL_SP_ACTIVE=!PORTAL_SP_ACTIVE; else if(f==='shipped')PORTAL_SP_SHIPPED=!PORTAL_SP_SHIPPED; else if(f==='esc')PORTAL_SP_ESC=!PORTAL_SP_ESC; _ppShowAllSP=false; renderPP(); }; });
+              var sq=body.querySelector('.sp-po-q'); if(sq)sq.oninput=debounce(function(){ PORTAL_SP_PO=sq.value; _ppShowAllSP=false; var f=document.activeElement===sq; renderPP(); if(f){ var n=body.querySelector('.sp-po-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } } },220);
+              spRender.forEach(function(s){ ppShipTimeline(s.shipment_ref); }); return; }
             if(PORTAL_TAB==='deposits'){ body.innerHTML=ppDeposits(_ppData.sdep); return; }
             // POs tab — status pill filters; default to PRODUCTION + SHIPPING
             var seen={}, present=[]; _ppData.pos.forEach(function(p){ var s=(p.status||'').toUpperCase(); if(s&&!seen[s]){seen[s]=1;present.push(s);} });
             var ordered=PO_STATUSES.filter(function(s){return seen[s];}).concat(present.filter(function(s){return PO_STATUSES.indexOf(s)<0;}));
             if(PORTAL_PO_ST===null)PORTAL_PO_ST={};
             ordered.forEach(function(s){ if(PORTAL_PO_ST[s]===undefined)PORTAL_PO_ST[s]=(s==='PRODUCTION'||s==='SHIPPING'); });
-            var pq=(PORTAL_PO_Q||'').trim().toLowerCase();
+            var pq=effQ(PORTAL_PO_Q).toLowerCase();
             var pillBar='<div class="bar" style="gap:5px;flex-wrap:wrap;align-items:center">'
               +'<input class="fci pp-po-q" placeholder="search PO / client…" value="'+esc(PORTAL_PO_Q)+'" style="width:170px;text-align:left">'
               +'<span class="pill-lbl">Status</span>'
@@ -679,9 +688,12 @@
             // a PO/client search OVERRIDES the status pills — find it whatever its status
             var shown=_ppData.pos.filter(function(p){ if(pq) return (p.po||'').toLowerCase().indexOf(pq)>=0 || (p.client||'').toLowerCase().indexOf(pq)>=0 || (p.shipment||'').toLowerCase().indexOf(pq)>=0 || (p.prod_no||'').toLowerCase().indexOf(pq)>=0;
               return PORTAL_PO_ST[(p.status||'').toUpperCase()]; });
-            body.innerHTML=pillBar+'<div class="count" style="margin:2px 0 8px">'+shown.length+' of '+_ppData.pos.length+' purchase orders</div>'+ppPOs(shown,_ppData);
-            body.querySelectorAll('.pill[data-st]').forEach(function(p){ p.onclick=function(){ var s=p.dataset.st; PORTAL_PO_ST[s]=!PORTAL_PO_ST[s]; renderPP(); }; });
-            var pqi=body.querySelector('.pp-po-q'); if(pqi)pqi.oninput=function(){ PORTAL_PO_Q=pqi.value; var foc=document.activeElement===pqi; renderPP(); if(foc){ var n=body.querySelector('.pp-po-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } } };
+            var poCapped=(!_ppShowAllPO && shown.length>PP_CAP), poRender=poCapped?shown.slice(0,PP_CAP):shown;
+            body.innerHTML=pillBar+'<div class="count" style="margin:2px 0 8px">'+(poCapped?poRender.length+' of ':'')+shown.length+' of '+_ppData.pos.length+' purchase orders</div>'+ppPOs(poRender,_ppData)
+              +(poCapped?'<div style="margin:8px 0;text-align:center"><button class="save-btn pp-showall">Show all '+shown.length+' &darr;</button></div>':'');
+            var ppsa=body.querySelector('.pp-showall'); if(ppsa)ppsa.onclick=function(){ _ppShowAllPO=true; renderPP(); };
+            body.querySelectorAll('.pill[data-st]').forEach(function(p){ p.onclick=function(){ var s=p.dataset.st; PORTAL_PO_ST[s]=!PORTAL_PO_ST[s]; _ppShowAllPO=false; renderPP(); }; });
+            var pqi=body.querySelector('.pp-po-q'); if(pqi)pqi.oninput=debounce(function(){ PORTAL_PO_Q=pqi.value; _ppShowAllPO=false; var foc=document.activeElement===pqi; renderPP(); if(foc){ var n=body.querySelector('.pp-po-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } } },220);
             body.querySelectorAll('.pp-exp').forEach(function(btn){ btn.onclick=function(){ var ex=document.getElementById('pp-'+btn.dataset.i); if(!ex)return; ex.style.display=(ex.style.display!=='none')?'none':''; }; });
             // re-render ONE PO's expanded detail in place (no full reload, so MANAGE + the open tab stay put)
             function rerenderRow(row,po,keepPt){ if(!row)return; var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; if(!p)return;
