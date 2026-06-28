@@ -1402,7 +1402,7 @@
       skuAttr[s.sku]={sup:s.supplier||'',cq:s.carton_qty||'',dis:s.discontinue||'',disAu:s.discontinue_au||'',disCa:s.discontinue_ca||'',sm:s.supplier_multiple_all||''};});
     lines.forEach(function(l){if(l.category)skuCat[l.sku]=l.category; if(l.release_window)skuRW[l.sku]=l.release_window;});
     var defS=statuses.filter(function(s){return /production/i.test(s);}); if(!defS.length)defS=statuses.slice(0,1);
-    var st={statuses:new Set(defS),countries:new Set(countries),prod:'All',cat:'All',q:'',poq:'',scope:'ordered',rw:'All',partials:false,erpdiff:false,suprisk:false,disc:false};
+    var st={statuses:new Set(defS),countries:new Set(countries),prod:'All',cat:'All',q:'',poq:'',scope:'ordered',rw:'All',partials:false,erpdiff:false,suprisk:false,disc:false,focus:false};
     // action sets (exclude complete POs): unapproved partial cartons, and lines whose planned qty differs from the ERP
     function isUnapprovedPartial(l){ return !/complete/i.test(l.status||'') && (l.full_carton_check||'').indexOf('⚠')>=0; }
     function erpDiff(l){ return !/complete/i.test(l.status||'') && Number(l.qty)!==Number(l.erp_qty==null?l.qty:l.erp_qty); }
@@ -1428,7 +1428,8 @@
         +'<span class="pill'+(st.partials?' active':'')+'" id="op-partials">⚠ Unapproved partials <span id="op-partials-n" style="color:#dc2626;font-weight:700"></span></span>'
         +'<span class="pill'+(st.erpdiff?' active':'')+'" id="op-erp">⚠ Update ERP <span id="op-erp-n" style="color:#dc2626;font-weight:700"></span></span>'
         +'<span class="pill'+(st.suprisk?' active':'')+'" id="op-suprisk" title="lines ordered against a supplier not in the SKU\'s allowed multi-supplier list">⚠ Supplier risk <span id="op-suprisk-n" style="color:#dc2626;font-weight:700"></span></span>'
-        +'<span class="pill'+(st.disc?' active':'')+'" id="op-disc" title="lines forecast to arrive after the product\'s discontinue date">⚠ Discontinued <span id="op-disc-n" style="color:#dc2626;font-weight:700"></span></span></div>'
+        +'<span class="pill'+(st.disc?' active':'')+'" id="op-disc" title="lines forecast to arrive after the product\'s discontinue date">⚠ Discontinued <span id="op-disc-n" style="color:#dc2626;font-weight:700"></span></span>'
+        +'<span class="pill po-focus'+(st.focus?' active':'')+'" id="op-focus" style="margin-left:14px" title="show only starred (Focus) POs that are still active / in progress">★ Focus</span></div>'
       +'<div id="op-changes"></div>'
       +'<div id="op-grid"></div>';
     // parse the PO box into tokens (space / comma / newline). When present it OVERRIDES the status + country filters.
@@ -1436,7 +1437,8 @@
     // filter (and pull in the 1000+ completed POs). Below 5 chars the PO box is inert.
     function poToks(){ return String(st.poq||'').split(/[\s,]+/).map(nrm).filter(function(t){return t.length>=5;}); }
     function curLines(){ var allC=st.countries.size===countries.length, pt=poToks(); return lines.filter(function(l){
-      if(pt.length){ if(!pt.some(function(t){return nrm(l.po).indexOf(t)>=0;}))return false; }
+      if(st.focus){ if(!l.starred || /complete/i.test(l.status||''))return false; }   // Focus = starred + active only (overrides status / PO box)
+      else if(pt.length){ if(!pt.some(function(t){return nrm(l.po).indexOf(t)>=0;}))return false; }
       else { if(!st.statuses.has(l.status))return false; if(!(allC||st.countries.has(l.country)))return false; }
       return (st.prod==='All'||l.prod_no===st.prod)&&(st.cat==='All'||l.category===st.cat)&&(st.rw==='All'||skuRW[l.sku]===st.rw)&&(!st.partials||isUnapprovedPartial(l))&&(!st.erpdiff||erpDiff(l))&&(!st.suprisk||lineSupRisk(l))&&(!st.disc||lineDisc(l))&&(!nrm(st.q)||nrm(l.sku).indexOf(nrm(st.q))>=0); }); }
     function rowsFor(cl){ var set={},list=[]; cl.forEach(function(l){if(!set[l.sku]){set[l.sku]=1;list.push(l.sku);}});
@@ -1497,6 +1499,7 @@
     document.getElementById('op-erp').onclick=function(){st.erpdiff=!st.erpdiff; this.classList.toggle('active',st.erpdiff); viewReset();};
     document.getElementById('op-suprisk').onclick=function(){st.suprisk=!st.suprisk; this.classList.toggle('active',st.suprisk); viewReset();};
     document.getElementById('op-disc').onclick=function(){st.disc=!st.disc; this.classList.toggle('active',st.disc); viewReset();};
+    document.getElementById('op-focus').onclick=function(){st.focus=!st.focus; this.classList.toggle('active',st.focus); viewReset();};
     document.getElementById('op-cat').onchange=function(){st.cat=this.value;viewReset();};
     document.getElementById('op-rw').onchange=function(){st.rw=this.value;viewReset();};
     document.getElementById('op-prod').onchange=function(){st.prod=this.value;viewReset();};

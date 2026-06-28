@@ -4,6 +4,13 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.403 - ★ Focus filter on Order Plan
+
+Added a **★ Focus** pill to the SUPPLY ▸ Order Plan action-items bar. When on, the pivot shows only
+**starred (Focus) POs that are still active / in progress** (completed are excluded) — it overrides the
+status pills + PO box, same as the star Focus filter on the Purchase Orders and Shipments grids. The
+order-plan line query now selects `starred` from the PO (no migration — column exists from 082).
+
 ## v20.402 - PO grid polish + slower search debounce + prod_no streamline migration
 
 - **Focus star now visible** — the sticky first column was locked to 54px and clipped the star; widened to
