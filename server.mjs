@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.373';
+const APP_VERSION = 'v20.374';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1624,6 +1624,12 @@ app.get('/api/supply/:section', async (req, res) => {
             'Shipment '||shipment_ref||' has been escalated — review', '','shipment','', shipment_ref
             FROM planner.shipments WHERE escalated=true
           UNION ALL
+          -- supplier created a new shipment from the portal (entered carrier/tracking on a PO with no shipment) → review
+          SELECT 'amber','Supplier created new shipment', shipment_ref,
+            'A supplier created shipment '||shipment_ref||' from the portal'||coalesce(' ('||supplier_created_by||')','')||' — review the carrier / tracking & dates',
+            '','shipment','', shipment_ref
+            FROM planner.shipments WHERE supplier_created_at IS NOT NULL
+          UNION ALL
           SELECT 'amber','Order-plan change pending ERP push', l.po,
             count(*)||' line(s) edited, not yet uploaded to the ERP', 'upload','po','', l.po
             FROM planner.purchase_order_lines l LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
@@ -2176,7 +2182,8 @@ app.post('/api/supply/portal-submit', async (req, res) => {
       let ref = b.shipment_ref || (sh && sh.shipment_ref);
       if (!ref) {
         ref = b.po;   // master shipment ref = the PO number
-        await pool.query(`INSERT INTO planner.shipments (shipment_ref, master_po) VALUES ($1,$1) ON CONFLICT (shipment_ref) DO NOTHING`, [ref]);
+        await pool.query(`INSERT INTO planner.shipments (shipment_ref, master_po, supplier_created_at, supplier_created_by)
+          VALUES ($1,$1,now(),$2) ON CONFLICT (shipment_ref) DO UPDATE SET supplier_created_at=now(), supplier_created_by=$2`, [ref, by]);
         await pool.query(`UPDATE planner.purchase_orders SET shipment_ref=$1 WHERE po=$1`, [b.po]);
         out.applied.push('shipment created + assigned → ' + ref);
       }

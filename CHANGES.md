@@ -4,6 +4,16 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.374 - "Supplier created new shipment" action, left-align carrier/tracking, rename timeline heading
+
+- **New action: "Supplier created new shipment"** — when a supplier submits carrier/tracking on a PO with no
+  shipment (creating one), it now raises an Action linking to that shipment in SUPPLY ▸ Shipments. Migration
+  **079** adds `shipments.supplier_created_at` / `supplier_created_by`; the portal-submit create-path stamps them;
+  the Actions query emits the action (dismissable via the normal action lifecycle).
+- **Portal SHIPMENT sub-tab:** carrier dropdown + tracking ref are now **left-aligned**.
+- **Shipment timeline:** renamed the compose heading **"Add a note" → "Add timeline note"** (admin SUPPLY ▸
+  Shipments and the supplier portal). The multi-line note field is the notes input.
+
 ## v20.373 - Portal SHIPMENT read-only when linked, combined "Ships With" column, Shipment Plan tracking, cache fix
 
 Supplier portal:

@@ -1772,7 +1772,7 @@
           +(ctrl?'<div style="flex:0 0 auto;min-width:70px">'+ctrl+'</div>':'')
           +'<div><span class="mut">'+esc(n.created_at)+' · '+(sup?'Supplier':'D&amp;B')+'</span>'+(nu?' <span class="ex-badge">new</span>':'')+' — '+esc(n.body)+'</div>'
           +'</div>'; }).join(''):'<div class="mut tiny">No timeline entries yet.</div>';
-      var compose='<div style="font-weight:600;font-size:12px;margin-bottom:4px">Add a note</div>'
+      var compose='<div style="font-weight:600;font-size:12px;margin-bottom:4px">Add timeline note</div>'
         +'<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:10px"><textarea class="fci sp-note-in" rows="3" placeholder="Add a note to the timeline… (multiple lines OK)" style="flex:1;max-width:560px;min-height:58px;text-align:left;resize:vertical;line-height:1.4"></textarea><button class="save-btn sp-note-post" style="flex:0 0 auto">Post</button></div>';
       box.innerHTML=compose+'<div class="tiny" style="font-weight:600;margin-bottom:3px">Timeline</div>'+list;
       if(admin)shSetUnread(ref,unread);
