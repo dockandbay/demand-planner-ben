@@ -4,6 +4,17 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.384 - Supplier invoice/packing .xlsx parser + order-plan preview (Phase 1 of invoice upload)
+
+- **Pure-Node `.xlsx` parser** (no new dependency — unzips via Node `zlib` + reads the sheet XML). Scans the
+  workbook for the invoice sheet (header row with SKU / Q’TY (PCS) / Unit Price) and extracts the PO number +
+  `{sku, qty, price}` line items.
+- New endpoint `POST /api/supply/portal-parse-invoice {po, data_base64}` → previews the parsed lines **against the
+  PO's current order plan** (no DB write): each line tagged `match` / `changed` / `new`, plus totals
+  (count, qty, value, matched/changed/new). Verified on a real supplier invoice (PO-56AUXR1 → 46 lines, $48,179.40,
+  44 match / 2 changed).
+- Phase 2 (apply parsed lines as portal order-plan overrides) and Phase 3 (typed multi-document uploads) follow.
+
 ## v20.383 - Successful Cin7 writes sync the local ERP mirror in real time
 
 - After a successful Cin7 write, the local **ERP mirror is updated optimistically** so the drift flags clear

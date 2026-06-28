@@ -33,6 +33,7 @@ process.on('unhandledRejection', (reason) => { console.error('[unhandledRejectio
 process.on('uncaughtException', (err) => { console.error('[uncaughtException]', err && (err.stack || err.message || err)); });
 import path from 'path';
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 function loadHTML() {
   const candidates = [
     new URL('./artifact_v16.7.html', import.meta.url),
@@ -51,7 +52,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.383';
+const APP_VERSION = 'v20.384';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2210,6 +2211,84 @@ app.post('/api/supply/portal-submit', async (req, res) => {
     res.json(out);
   } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
+});
+// ── Supplier invoice/packing .xlsx parsing (pure Node — no external dependency) ──────────────────────────
+// Unzip an .xlsx via the ZIP central directory (handles stored + deflate; robust to data descriptors).
+function unzipXlsx(buf) {
+  const files = {};
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= 0; i--) { if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; } }
+  if (eocd < 0) throw new Error('not a valid .xlsx (no zip directory)');
+  const cdOff = buf.readUInt32LE(eocd + 16), cdCount = buf.readUInt16LE(eocd + 10);
+  let p = cdOff;
+  for (let n = 0; n < cdCount && p + 46 <= buf.length; n++) {
+    if (buf.readUInt32LE(p) !== 0x02014b50) break;
+    const method = buf.readUInt16LE(p + 10), compSize = buf.readUInt32LE(p + 20);
+    const nameLen = buf.readUInt16LE(p + 28), extraLen = buf.readUInt16LE(p + 30), commentLen = buf.readUInt16LE(p + 32);
+    const lho = buf.readUInt32LE(p + 42), name = buf.toString('utf8', p + 46, p + 46 + nameLen);
+    const lNameLen = buf.readUInt16LE(lho + 26), lExtraLen = buf.readUInt16LE(lho + 28);
+    const dataStart = lho + 30 + lNameLen + lExtraLen, raw = buf.subarray(dataStart, dataStart + compSize);
+    try { files[name] = method === 0 ? raw : zlib.inflateRawSync(raw); } catch (e) { /* skip unreadable entry */ }
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return files;
+}
+// Parse a supplier invoice workbook → { po, lines:[{sku, qty, price}] }. Scans every worksheet for a header row
+// with SKU + a Q'TY (PCS) column + a Unit Price column, then reads the line items below it.
+function parseInvoiceXlsx(buf) {
+  const f = unzipXlsx(buf);
+  const dec = s => String(s).replace(/&amp;/g, '&').replace(/&#10;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+  const ss = [];
+  const ssXml = f['xl/sharedStrings.xml'] ? f['xl/sharedStrings.xml'].toString('utf8') : '';
+  for (const m of ssXml.matchAll(/<si>([\s\S]*?)<\/si>/g)) { ss.push(dec([...m[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map(x => x[1]).join('')).trim()); }
+  const colNum = ref => { const c = ref.match(/^[A-Z]+/)[0]; let n = 0; for (const ch of c) n = n * 26 + (ch.charCodeAt(0) - 64); return n; };
+  const sheetRows = xml => { const rows = {};
+    for (const rm of xml.matchAll(/<row[^>]*r="(\d+)"[^>]*>([\s\S]*?)<\/row>/g)) { const rn = +rm[1], cells = {};
+      for (const cm of rm[2].matchAll(/<c r="([A-Z]+\d+)"(?:[^>]*t="([^"]*)")?[^>]*>(?:<v>([\s\S]*?)<\/v>|<is><t[^>]*>([\s\S]*?)<\/t><\/is>)?<\/c>/g)) {
+        const t = cm[2], v = cm[3], inl = cm[4]; let val = ''; if (inl != null) val = dec(inl); else if (v != null) val = t === 's' ? (ss[+v] || '') : v;
+        cells[colNum(cm[1])] = String(val).trim(); }
+      rows[rn] = cells; }
+    return rows; };
+  const sheetNames = Object.keys(f).filter(k => /^xl\/worksheets\/sheet\d+\.xml$/.test(k)).sort();
+  for (const sn of sheetNames) {
+    const rows = sheetRows(f[sn].toString('utf8'));
+    const rns = Object.keys(rows).map(Number).sort((a, b) => a - b);
+    let hr, sc, qc, pc;
+    for (const rn of rns) { const e = Object.entries(rows[rn]);
+      const sk = e.find(([k, v]) => /^sku$/i.test(v)); if (!sk) continue;
+      const qt = e.find(([k, v]) => /q'?ty/i.test(v) && /pcs/i.test(v));
+      const pr = e.find(([k, v]) => /unit\s*price/i.test(v));
+      if (sk && qt && pr) { hr = rn; sc = +sk[0]; qc = +qt[0]; pc = +pr[0]; break; } }
+    if (!hr) continue;   // not the invoice sheet
+    let po = ''; for (const rn of rns) { const c = rows[rn]; for (const k in c) { if (/invoice\s*no/i.test(c[k])) po = (c[+k + 1] || '').trim(); } if (po) break; }
+    const lines = [];
+    for (const rn of rns) { if (rn <= hr) continue; const c = rows[rn];
+      const sku = (c[sc] || '').trim(), qty = Number(c[qc]), price = Number(c[pc]);
+      if (sku && /^[A-Za-z0-9][\w\-\.]*$/.test(sku) && qty > 0) lines.push({ sku, qty, price: isFinite(price) && price > 0 ? price : null }); }
+    return { po, lines };
+  }
+  return { po: '', lines: [] };
+}
+// Parse an uploaded supplier invoice and PREVIEW it against the PO's current order plan (no DB write).
+app.post('/api/supply/portal-parse-invoice', async (req, res) => {
+  const b = req.body || {};
+  if (!b.data_base64) return res.status(400).json({ error: 'data_base64 required' });
+  try {
+    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^,]*,/, ''), 'base64');
+    const parsed = parseInvoiceXlsx(buf);
+    if (!parsed.lines.length) return res.json({ ok: false, error: 'No invoice line items found — need a sheet with SKU / Q’TY (PCS) / Unit Price columns.' });
+    const po = b.po || parsed.po;
+    const plan = po ? (await pool.query(`SELECT sku, qty, cost_price FROM planner.purchase_order_lines WHERE po=$1`, [po])).rows : [];
+    const planBy = {}; plan.forEach(l => { planBy[String(l.sku).toUpperCase()] = l; });
+    const lines = parsed.lines.map(l => { const cur = planBy[l.sku.toUpperCase()];
+      const cq = cur ? Number(cur.qty) : null, cc = cur ? Number(cur.cost_price) : null;
+      const status = !cur ? 'new' : ((cq !== l.qty || (l.price != null && cc !== l.price)) ? 'changed' : 'match');
+      return { sku: l.sku, inv_qty: l.qty, inv_price: l.price, cur_qty: cq, cur_cost: cc, status }; });
+    res.json({ ok: true, po_detected: parsed.po,
+      totals: { count: lines.length, qty: lines.reduce((s, r) => s + r.inv_qty, 0), value: Math.round(lines.reduce((s, r) => s + r.inv_qty * (r.inv_price || 0), 0) * 100) / 100,
+        matched: lines.filter(r => r.status !== 'new').length, changed: lines.filter(r => r.status === 'changed').length, neu: lines.filter(r => r.status === 'new').length },
+      lines });
+  } catch (e) { res.status(400).json({ error: 'Could not parse the file: ' + e.message }); }
 });
 // Toggle a shipment's ESCALATED status (supplier portal or admin grid). Upserts the shipment row if needed.
 app.post('/api/supply/shipment/:ref/escalate', async (req, res) => {
