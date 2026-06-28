@@ -945,8 +945,8 @@
     var linesPending=(r.erp_total>0&&!(r.erp_in>0))||r.erp_pending>0;
     var datePending=r.erp_date_pending>0 && !poComplete(r);
     var erpCell;
-    if(linesPending && datePending) erpCell='<button class="erp-up tool-badge bg-amber" data-up="'+esc(r.po)+'" style="'+erpStyle+'" title="order-plan lines AND the completion date differ from the ERP">Update both</button>';
-    else if(linesPending) erpCell='<button class="erp-up tool-badge bg-amber" data-up="'+esc(r.po)+'" style="'+erpStyle+'" title="'+((r.erp_total>0&&!(r.erp_in>0))?r.erp_total+' line(s) not yet in the ERP (never pushed)':r.erp_pending+' order-plan line(s) differ from the ERP')+'">Update lines</button>';
+    if(linesPending && datePending) erpCell='<button class="erp-up tool-badge bg-purple" data-up="'+esc(r.po)+'" style="'+erpStyle+'" title="order-plan lines AND the completion date differ from the ERP">Update both</button>';
+    else if(linesPending) erpCell='<button class="erp-up tool-badge bg-blue" data-up="'+esc(r.po)+'" style="'+erpStyle+'" title="'+((r.erp_total>0&&!(r.erp_in>0))?r.erp_total+' line(s) not yet in the ERP (never pushed)':r.erp_pending+' order-plan line(s) differ from the ERP')+'">Update lines</button>';
     else if(datePending) erpCell='<button class="erp-up tool-badge bg-amber" data-up="'+esc(r.po)+'" style="'+erpStyle+'" title="completed-at-warehouse '+esc(r.checkin||'?')+' ≠ ERP final delivery '+esc(r.erp_final_delivery||'?')+'">Update date</button>';
     else erpCell='<span class="tool-badge bg-green" title="planned quantities match the ERP">✓ in sync</span>';
     return '<tr'+ga+'><td class="l"><button class="planbtn po-exp" data-po="'+esc(r.po)+'" data-i="'+i+'">PLAN</button><button class="fav-star'+(r.starred?' on':'')+'" data-star-po="'+esc(r.po)+'" title="Focus / favourite">'+(r.starred?'★':'☆')+'</button></td>'+pocell

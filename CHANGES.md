@@ -4,6 +4,11 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.405 - ERP badge colours per action
+
+The PO-grid ERP badges now use distinct colours: **Update both** = purple, **Update lines** = blue,
+**Update date** = amber (was all amber). "✓ in sync" stays green. CSS-only (existing badge classes).
+
 ## v20.404 - Fix: Cin7 "Create PO" was mis-filed as a sales order (missing supplier + branch link)
 
 Creating a PO in Cin7 (Update/Create Cin7 PO) sent only free-text `company` — no `memberId` (supplier
