@@ -4,6 +4,16 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.380 - Cin7 writes preserve the PO's approval status (no longer force draft → approved)
+
+- **Bug fix:** "Update Cin7 Date" (and the lines push, on update) sent `isApproved: true`, which flipped a **draft**
+  Cin7 PO to **approved**. Both now **read the PO's current `isApproved` first and echo it**, so a date / line
+  update never changes the approval status. If the read fails, `isApproved` is omitted (Cin7 leaves it unchanged).
+- The date endpoint's response includes `approval_preserved` (draft / approved / unchanged) for clarity.
+- Verified the read query (`where=id=…&fields=id,isApproved`) returns the value (HTTP 200).
+- **New Cin7 POs are created as DRAFT** (`isApproved:false`) so they're reviewed/approved by a person in Cin7,
+  never auto-approved by the push.
+
 ## v20.379 - Cin7 auth accepts either a full header, a bare base64, or a username/key pair
 
 - New `cin7Auth()` resolver used by both Cin7 endpoints. `CIN7_AUTH` may now be set as **either** the full

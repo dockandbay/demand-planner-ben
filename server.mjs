@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.379';
+const APP_VERSION = 'v20.380';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2620,12 +2620,23 @@ app.post('/api/supply/po/:po/cin7-date', async (req, res) => {
     const auth = cin7Auth();
     if (!auth) return res.status(501).json({ error: 'Cin7 API credentials not configured (set CIN7_AUTH). No write performed.' });
     const edd = /T/.test(completion) ? completion : (completion + 'T00:00:00Z');
-    const body = [{ id: Number(cin7Id) || cin7Id, isApproved: true, estimatedDeliveryDate: edd }];
+    // preserve the PO's CURRENT approval state — read isApproved first and echo it, so a date update never
+    // flips a draft to approved. If we can't read it, omit isApproved entirely (Cin7 leaves it unchanged on PUT).
+    let curApproved;
+    try {
+      const g = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=1&fields=id,isApproved&where=' + encodeURIComponent('id=' + cin7Id),
+        { headers: { Authorization: auth, 'content-type': 'application/json' } });
+      if (g.ok) { const arr = await g.json(); if (Array.isArray(arr) && arr[0] && typeof arr[0].isApproved === 'boolean') curApproved = arr[0].isApproved; }
+    } catch (e) { /* fall through — omit isApproved */ }
+    const upd = { id: Number(cin7Id) || cin7Id, estimatedDeliveryDate: edd };
+    if (curApproved !== undefined) upd.isApproved = curApproved;
+    const body = [upd];
     const r = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
       { method: 'PUT', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify(body) });
     const txt = await r.text();
     if (!r.ok) return res.status(502).json({ error: 'Cin7 API error ' + r.status + ': ' + txt.slice(0, 300) });
     res.json({ ok: true, cin7_id: cin7Id, estimatedDeliveryDate: edd,
+      approval_preserved: curApproved === undefined ? 'unchanged' : (curApproved ? 'approved' : 'draft'),
       link: 'https://go.cin7.com/Cloud/TransactionEntry/TransactionEntry.aspx?idCustomerAppsLink=951111&OrderId=' + encodeURIComponent(cin7Id) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -2658,15 +2669,24 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
     const edd = completion ? (/T/.test(completion) ? completion : completion + 'T00:00:00Z') : undefined;
     let newId = cin7Id, r, txt;
     if (cin7Id) {
-      // UPDATE existing Cin7 PO
-      const body = [{ id: Number(cin7Id) || cin7Id, isApproved: true, lineItems }];
+      // UPDATE existing Cin7 PO — preserve its current approval state (don't flip a draft to approved)
+      let curApproved;
+      try {
+        const g = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=1&fields=id,isApproved&where=' + encodeURIComponent('id=' + cin7Id),
+          { headers: { Authorization: auth, 'content-type': 'application/json' } });
+        if (g.ok) { const arr = await g.json(); if (Array.isArray(arr) && arr[0] && typeof arr[0].isApproved === 'boolean') curApproved = arr[0].isApproved; }
+      } catch (e) { /* fall through — omit isApproved */ }
+      const upd = { id: Number(cin7Id) || cin7Id, lineItems };
+      if (curApproved !== undefined) upd.isApproved = curApproved;
+      const body = [upd];
       r = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
         { method: 'PUT', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify(body) });
       txt = await r.text();
       if (!r.ok) return res.status(502).json({ error: 'Cin7 API error ' + r.status + ': ' + txt.slice(0, 300) });
     } else {
       // CREATE a new Cin7 PO (the planner PO isn't in Cin7 yet). reference=PO, company=supplier, lines, est. delivery.
-      const create = { reference: po, company: poRow.supplier_name || '', isApproved: true, lineItems };
+      // Created as DRAFT (isApproved:false) so a person reviews/approves it in Cin7 — never auto-approved.
+      const create = { reference: po, company: poRow.supplier_name || '', isApproved: false, lineItems };
       if (edd) create.estimatedDeliveryDate = edd;
       r = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
         { method: 'POST', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify([create]) });
