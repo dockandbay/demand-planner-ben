@@ -46,14 +46,28 @@ plus new numbered migrations on top. See `migrations/README.md`.
     surface `require_confirmation` per PO** (derive from `prod_numbers.require_supplier_confirmation` by `prod_no`,
     same as the `purchase-orders` endpoint) so the portal only asks for confirmation when the production requires it.
   - **`078_shipment_notes_read.sql`** — `shipment_notes.read_at` (read/unread on the shipment timeline; admin grid
-    unread counter). ⬅ *latest.*
+    unread counter).
+  - **`079_shipment_supplier_created.sql`** — `shipments.supplier_created_at` / `supplier_created_by` (flags a
+    shipment a supplier created from the portal → raises the "Supplier created new shipment" action). ⬅ *latest.*
 
   **Live portal bootstrap (POS_SQL_PORTAL) — per-PO fields the admin preview computes client-side and the live
-  portal must also provide:** `ship_other_supplier`, `client_docs`, **`ships_with`** (= the PO's shipment ref),
-  **`ships_with_supplier`** (= supplier owning that shipment's master PO), and **`require_confirmation`**. The
-  portal **Shipment Plan** tab also filters on the shipment payload's **`master_supplier`** (only shows shipments
-  whose master PO belongs to the logged-in supplier).
-- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`078` in order. Do **not** run
+  portal must also provide:**
+  - `ship_other_supplier`, `client_docs`
+  - **`ships_with`** (= the PO's shipment ref) and **`ships_with_supplier`** (supplier owning that shipment's master PO)
+  - **`require_confirmation`** (from `prod_numbers.require_supplier_confirmation` by `prod_no`)
+  - **`ship_carrier`** / **`ship_carrier_ref`** (the linked shipment's `carrier` / `carrier_ref`) and **`flex_id`**
+    (matched Flexport id) — drive the SHIPMENT sub-tab (read-only when a shipment is linked) and the grid Flexport col
+  - **`production_status`** + **`prod_confirmed_age`** (supplier production status field + its confirmation age)
+
+  **Live portal write paths Diviyaj must mirror (currently wired to `/api/supply/portal-submit` in the preview):**
+  - **tracking/carrier** → applies to the PO's shipment; if the PO has **no** shipment, it must **create a master
+    shipment** (ref = PO, master_po = PO), **assign the PO**, and stamp `supplier_created_at`/`_by` (raises the action).
+  - **`production_status`** → set on the PO (validate against not_started/in_production/nearing_completion/complete/shipped;
+    stamp `production_confirmed_at`).
+  - The shipment payload for the **Shipment Plan** tab needs **`master_supplier`** (filters to the logged-in supplier)
+    and **`carrier_ref`** (tracking shown on the card).
+
+- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`079` in order. Do **not** run
   `schema.sql` against an already-migrated DB (the table creates aren't idempotent).
 
 ---

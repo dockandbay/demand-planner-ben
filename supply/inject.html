@@ -1740,33 +1740,7 @@
     .catch(function(e){ alert('Failed: '+(e.message||e)); }); }
   function renderShipments(data){ var c=document.getElementById('supply-content'); fetchLookups(function(){ shipInner(data,c); }); }
   // (admin Shipment Plan sub-tab removed — that's portal-only; the per-shipment timeline lives in the shipment-row expand)
-  function _unusedShipmentPlan(b){ b.innerHTML='<div class="count">Loading…</div>';
-    fetch('/api/supply/shipment-plan').then(function(r){return r.json();}).then(function(rows){
-      if(!rows.length){ b.innerHTML='<div class="count">No active master shipments.</div>'; return; }
-      b.innerHTML='<div class="bar"><span class="count">'+rows.length+' master shipments</span><input class="flt" id="spq" placeholder="filter shipment / client / supplier…" style="margin-left:auto;width:260px"></div><div id="sp-list"></div>';
-      function card(s){
-        var fxd=[s.departure&&('dep '+fd(s.departure)),s.landing&&('land '+fd(s.landing)),s.arrival&&('arr '+fd(s.arrival))].filter(Boolean).join(' · ')||'—';
-        var members=s.members.length?'<table style="font-size:11px;width:auto;margin-top:4px"><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th>Est. pallets</th><th class="l">Client</th></tr></thead><tbody>'
-          +s.members.map(function(m){return '<tr><td class="l"><button class="lnk-btn sp-po" data-po="'+esc(m.po)+'">'+esc(m.po)+'</button></td><td class="l">'+esc(m.supplier||'')+'</td><td style="text-align:right">'+esc(m.pallets)+'</td><td class="l">'+(m.client?esc(m.client):'<span class="mut">—</span>')+'</td></tr>';}).join('')+'</tbody></table>':'<span class="mut tiny">no other POs on this shipment</span>';
-        return '<div class="sp-card" style="border:1px solid '+(s.escalated?'#fca5a5':'#e0e0e0')+';border-radius:8px;padding:10px 12px;margin-bottom:10px;background:'+(s.escalated?'#fef2f2':'#fff')+'">'
-          +'<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:baseline">'
-          +'<div style="font-weight:700;font-size:13px"><button class="lnk-btn sp-po" data-po="'+esc(s.master_po)+'">'+esc(s.master_po)+'</button></div>'
-          +'<div class="tiny mut">'+esc(s.mode||'')+(s.carrier?' · '+esc(s.carrier):'')+(s.flex_id?' · '+esc(s.flex_id):'')+'</div>'
-          +'<div class="tiny mut">'+fxd+'</div>'
-          +(s.master_client?'<div class="tiny">Client: <b>'+esc(s.master_client)+'</b></div>':'')
-          +(s.master_deadline?'<div class="tiny">Deadline: <b>'+fd(s.master_deadline)+'</b></div>':'')
-          +'<div class="tiny mut">'+s.total_pallets+' pallets · '+s.members.length+' other PO(s)</div>'
-          +'<button class="save-btn sp-esc" data-ref="'+esc(s.shipment_ref)+'" data-on="'+(s.escalated?'1':'0')+'" style="margin-left:auto'+(s.escalated?';background:#dc2626;color:#fff;border-color:#dc2626':';color:#dc2626')+'">'+(s.escalated?'⚑ ESCALATED':'⚑ escalate')+'</button>'
-          +'</div><div style="margin-top:6px">'+members+'</div>'
-          +'<div class="sp-timeline" data-ref="'+esc(s.shipment_ref)+'" style="margin-top:8px;border-top:1px solid #f1f1f1;padding-top:6px"></div></div>'; }
-      function draw(q){ q=(q||'').toLowerCase();
-        var list=rows.filter(function(s){return !q||((s.master_po||'')+' '+(s.master_client||'')+' '+(s.suppliers||[]).join(' ')).toLowerCase().indexOf(q)>=0;});
-        document.getElementById('sp-list').innerHTML=list.map(card).join('');
-        document.querySelectorAll('#sp-list .sp-po').forEach(function(x){ x.onclick=function(){ gotoPO(x.dataset.po); }; });
-        document.querySelectorAll('#sp-list .sp-esc').forEach(function(x){ x.onclick=function(){ var on=x.dataset.on!=='1'; shipPost('/api/supply/shipment/'+encodeURIComponent(x.dataset.ref)+'/escalate',{escalated:on},function(){ invalidateDerived(); renderShipmentPlan(b); }); }; });
-        list.forEach(function(s){ loadShipTimeline(s.shipment_ref,'internal','/api/supply/shipment-notes?ref=','/api/supply/shipment-note'); }); }
-      draw(''); var qb=document.getElementById('spq'); if(qb)qb.oninput=function(){draw(this.value);};
-    }).catch(function(){ b.innerHTML='<div style="color:#dc2626">Failed to load shipment plan.</div>'; }); }
+  // (the old admin Shipment Plan view was removed in v20.365 — Shipment Plan is supplier-portal only now)
   // unread-supplier-notes badge for the Shipments grid (empty string when none)
   function shUnreadBadge(n){ n=Number(n)||0; return n>0?'<span class="ex-badge" title="'+n+' unread supplier note'+(n>1?'s':'')+' on the timeline">'+n+'</span>':''; }
   // refresh the grid's unread counter for one shipment in place

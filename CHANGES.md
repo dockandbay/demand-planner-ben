@@ -4,6 +4,28 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.378 - Pre-handoff review fixes (hardening, no behaviour change for valid input)
+
+Code/DB review before the Diviyaj handoff. Findings addressed:
+
+- **`portal-submit` is now transactional** (BEGIN/COMMIT/ROLLBACK on a single client). Previously the
+  create-shipment → assign-PO → set-carrier → record-submission sequence ran as independent statements, so a
+  mid-way DB error could leave a half-created shipment / orphaned PO.
+- **Invalid `production_status` is now rejected with 400** (was silently dropped while returning success).
+- **"Shipment escalated" and "Supplier created new shipment" actions** now require a **live (non-complete) PO**
+  aboard the shipment — so they auto-clear once the order completes (and an escalated/created-but-completed
+  shipment no longer lingers as an open action). Also fixed an alias ambiguity in the new WHERE clauses.
+- **Removed dead code** — the old admin Shipment Plan view (`_unusedShipmentPlan`, removed from the UI in
+  v20.365) still contained a broken `renderShipmentPlan()` reference; deleted the whole unused function.
+- **HANDOVER.md** updated: added migration **079**, corrected the fresh-DB range to **062–079**, and expanded the
+  live-portal bootstrap field list (`ship_carrier`, `ship_carrier_ref`, `production_status`, `prod_confirmed_age`,
+  `flex_id`, `master_supplier`) + the live write paths Diviyaj must mirror (tracking create-and-assign +
+  `supplier_created_at`; `production_status`).
+
+Review also confirmed (no change needed): all migrations 062–079 are idempotent; every `/api/supply/*` endpoint
+returns 200; no secrets/keys in committed code; no XSS gaps (all interpolated values pass through `esc()`); the
+portal grid colspans reconcile; CTE alias references (`calc4`, `sh_carrier`) are correct.
+
 ## v20.377 - Portal production status: shorter dropdown + unset counts as a Timeline action
 
 - The production-status dropdown (Timeline tab + grid) is now a **compact fixed-width** field (was auto-sizing to

@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.377';
+const APP_VERSION = 'v20.378';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1619,16 +1619,18 @@ app.get('/api/supply/:section', async (req, res) => {
             ) cd
             WHERE cd.completion IS NOT NULL AND cd.completion > cd.cdl
           UNION ALL
-          -- escalated shipment (set in the supplier portal / Shipments grid) → review while escalated
-          SELECT 'high','Shipment escalated', shipment_ref,
-            'Shipment '||shipment_ref||' has been escalated — review', '','shipment','', shipment_ref
-            FROM planner.shipments WHERE escalated=true
+          -- escalated shipment (set in the supplier portal / Shipments grid) → review while escalated AND still live
+          SELECT 'high','Shipment escalated', sh.shipment_ref,
+            'Shipment '||sh.shipment_ref||' has been escalated — review', '','shipment','', sh.shipment_ref
+            FROM planner.shipments sh WHERE sh.escalated=true
+              AND EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.shipment_ref=sh.shipment_ref AND coalesce(p.status,'') NOT ILIKE '%complete%')
           UNION ALL
-          -- supplier created a new shipment from the portal (entered carrier/tracking on a PO with no shipment) → review
-          SELECT 'amber','Supplier created new shipment', shipment_ref,
-            'A supplier created shipment '||shipment_ref||' from the portal'||coalesce(' ('||supplier_created_by||')','')||' — review the carrier / tracking & dates',
-            '','shipment','', shipment_ref
-            FROM planner.shipments WHERE supplier_created_at IS NOT NULL
+          -- supplier created a new shipment from the portal (carrier/tracking on a PO with no shipment) → review while live
+          SELECT 'amber','Supplier created new shipment', sh.shipment_ref,
+            'A supplier created shipment '||sh.shipment_ref||' from the portal'||coalesce(' ('||sh.supplier_created_by||')','')||' — review the carrier / tracking & dates',
+            '','shipment','', sh.shipment_ref
+            FROM planner.shipments sh WHERE sh.supplier_created_at IS NOT NULL
+              AND EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.shipment_ref=sh.shipment_ref AND coalesce(p.status,'') NOT ILIKE '%complete%')
           UNION ALL
           SELECT 'amber','Order-plan change pending ERP push', l.po,
             count(*)||' line(s) edited, not yet uploaded to the ERP', 'upload','po','', l.po
@@ -2149,14 +2151,22 @@ app.post('/api/supply/portal-upload', async (req, res) => {
 app.post('/api/supply/portal-submit', async (req, res) => {
   const b = req.body || {}; const sid = b.supplier_id || null, by = b.submitted_by || 'portal';
   if (!b.po) return res.status(400).json({ error: 'po required' });
+  // validate up front (before opening a transaction) — a bad status must fail loudly, not be silently dropped
+  if (b.production_status != null) {
+    const st = String(b.production_status).trim();
+    if (st !== '' && !PROD_STATUSES.includes(st)) return res.status(400).json({ error: 'bad production_status' });
+  }
   const out = { staged: [], applied: [] };
+  // one transaction for the whole submit so a mid-way failure can't leave a half-created shipment / orphan PO
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
     const stage = async (kind, value, attId) => {
       if (value == null || value === '') return;
       // supersede any earlier still-pending submission of the same kind for this PO so only the latest is actionable
-      await pool.query(`UPDATE planner.supplier_submissions SET status='superseded'
+      await client.query(`UPDATE planner.supplier_submissions SET status='superseded'
         WHERE po=$1 AND kind=$2 AND status='pending'`, [b.po, kind]);
-      await pool.query(`INSERT INTO planner.supplier_submissions (supplier_id, po, kind, value, attachment_id, status, submitted_by)
+      await client.query(`INSERT INTO planner.supplier_submissions (supplier_id, po, kind, value, attachment_id, status, submitted_by)
         VALUES ($1,$2,$3,$4,$5,'pending',$6)`, [sid, b.po, kind, String(value), attId || null, by]);
       out.staged.push(kind);
     };
@@ -2166,40 +2176,40 @@ app.post('/api/supply/portal-submit', async (req, res) => {
     // supplier's submission CREATES a master shipment named after the PO and assigns this PO to it, so the
     // carrier/tracking flows straight onto that new shipment (and it shows up in the portal Shipment Plan).
     if (b.tracking != null && b.tracking !== '' || b.carrier != null && b.carrier !== '') {
-      const sh = (await pool.query(`SELECT shipment_ref FROM planner.purchase_orders WHERE po=$1`, [b.po])).rows[0];
+      const sh = (await client.query(`SELECT shipment_ref FROM planner.purchase_orders WHERE po=$1`, [b.po])).rows[0];
       let ref = b.shipment_ref || (sh && sh.shipment_ref);
       if (!ref) {
         ref = b.po;   // master shipment ref = the PO number
-        await pool.query(`INSERT INTO planner.shipments (shipment_ref, master_po, supplier_created_at, supplier_created_by)
+        await client.query(`INSERT INTO planner.shipments (shipment_ref, master_po, supplier_created_at, supplier_created_by)
           VALUES ($1,$1,now(),$2) ON CONFLICT (shipment_ref) DO UPDATE SET supplier_created_at=now(), supplier_created_by=$2`, [ref, by]);
-        await pool.query(`UPDATE planner.purchase_orders SET shipment_ref=$1 WHERE po=$1`, [b.po]);
+        await client.query(`UPDATE planner.purchase_orders SET shipment_ref=$1 WHERE po=$1`, [b.po]);
         out.applied.push('shipment created + assigned → ' + ref);
       }
       const sets = [], vals = []; let i = 1;
       if (b.tracking != null && b.tracking !== '') { sets.push(`carrier_ref=$${i++}`); vals.push(b.tracking); }
       if (b.carrier != null && b.carrier !== '') { sets.push(`carrier=$${i++}`); vals.push(b.carrier); }
       if (sets.length) { vals.push(ref);
-        await pool.query(`UPDATE planner.shipments SET ${sets.join(',')}, updated_at=now() WHERE shipment_ref=$${i}`, vals); }
-      await pool.query(`INSERT INTO planner.supplier_submissions (supplier_id, po, shipment_ref, kind, value, status, submitted_by, applied_by, applied_at)
+        await client.query(`UPDATE planner.shipments SET ${sets.join(',')}, updated_at=now() WHERE shipment_ref=$${i}`, vals); }
+      await client.query(`INSERT INTO planner.supplier_submissions (supplier_id, po, shipment_ref, kind, value, status, submitted_by, applied_by, applied_at)
         VALUES ($1,$2,$3,'tracking',$4,'applied',$5,$5,now())`, [sid, b.po, ref, JSON.stringify({ tracking: b.tracking || null, carrier: b.carrier || null }), by]);
       out.applied.push('tracking/carrier → ' + ref);
     }
-    // supplier production status (not_started / in_production / nearing_completion / complete / shipped)
+    // supplier production status (validated above) — '' clears it
     if (b.production_status != null) {
       const st = String(b.production_status).trim();
-      if (st === '' || PROD_STATUSES.includes(st)) {
-        await pool.query(`UPDATE planner.purchase_orders SET production_status=$2,
-          production_confirmed_at=CASE WHEN $2='' THEN NULL ELSE now() END WHERE po=$1`, [b.po, st]);
-        out.applied.push('production status → ' + (st || 'cleared'));
-      }
+      await client.query(`UPDATE planner.purchase_orders SET production_status=$2,
+        production_confirmed_at=CASE WHEN $2='' THEN NULL ELSE now() END WHERE po=$1`, [b.po, st]);
+      out.applied.push('production status → ' + (st || 'cleared'));
     }
     // PO confirmation (#supplier confirms SKUs / qty / dates). po_confirmed:true → confirm; false → clear (re-request).
     if (b.po_confirmed != null) {
-      if (b.po_confirmed) { await pool.query(`UPDATE planner.purchase_orders SET supplier_confirmed_at=now(), supplier_confirmed_by=$2 WHERE po=$1`, [b.po, by]); out.applied.push('PO confirmed'); }
-      else { await pool.query(`UPDATE planner.purchase_orders SET supplier_confirmed_at=NULL, supplier_confirmed_by=NULL WHERE po=$1`, [b.po]); out.applied.push('PO confirmation cleared'); }
+      if (b.po_confirmed) { await client.query(`UPDATE planner.purchase_orders SET supplier_confirmed_at=now(), supplier_confirmed_by=$2 WHERE po=$1`, [b.po, by]); out.applied.push('PO confirmed'); }
+      else { await client.query(`UPDATE planner.purchase_orders SET supplier_confirmed_at=NULL, supplier_confirmed_by=NULL WHERE po=$1`, [b.po]); out.applied.push('PO confirmation cleared'); }
     }
+    await client.query('COMMIT');
     res.json(out);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
 });
 // Toggle a shipment's ESCALATED status (supplier portal or admin grid). Upserts the shipment row if needed.
 app.post('/api/supply/shipment/:ref/escalate', async (req, res) => {
