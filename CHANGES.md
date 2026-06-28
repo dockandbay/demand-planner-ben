@@ -4,6 +4,18 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.385 - Supplier portal: upload invoice → preview → apply order-plan overrides (Phase 2)
+
+- Supplier portal **ORDER PLAN** tab now has an **"Upload invoice / packing list (Excel)"** control: the supplier
+  picks the file → **Parse** shows a preview (totals + only the changed/new lines, plan qty/price → invoice
+  qty/price) → **Apply** writes the qty/cost as portal overrides (`portal_line_costs`), which the supplier then
+  confirms and Dock & Bay approves (existing order-plan approval flow).
+- New endpoint `POST /api/supply/portal-invoice-apply` — re-parses the file server-side (single source of truth)
+  and writes only **changed + new** lines (new SKUs flagged `is_added`), in a transaction. Matching lines are left
+  alone. Verified end-to-end: PO-56AUXR1 → applied 2 changed, 44 unchanged (sandbox restored after the test).
+- EP wiring added to the admin preview; **Diviyaj:** add `/api/portal/parse-invoice` + `/api/portal/invoice-apply`
+  for the live portal (same handlers, portal-auth scoped).
+
 ## v20.384 - Supplier invoice/packing .xlsx parser + order-plan preview (Phase 1 of invoice upload)
 
 - **Pure-Node `.xlsx` parser** (no new dependency — unzips via Node `zlib` + reads the sheet XML). Scans the

@@ -400,6 +400,7 @@
     var _ppData=null, PORTAL_TAB='pos', PORTAL_PO_ST=null;
     var PORTAL_SP_ESC=false, PORTAL_SP_PO='', PORTAL_SP_ACTIVE=true, PORTAL_SP_SHIPPED=false;   // Shipment Plan filters
     var PORTAL_PO_Q='';   // Purchase Orders search (overrides the status pills)
+    var _invFiles={};     // base64 of the last parsed invoice file, per PO (for the Apply step)
     var rootEl=opts.root; if(!rootEl.closest('#supply-root')){rootEl.id='supply-root';} rootEl.style.display='block';
     rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders</span><span class="rtab" data-pt="shipmentplan">Shipment Plan</span><span class="rtab" data-pt="deposits">Deposits</span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
     var tabsEl=document.getElementById('pp-tabs'), body=document.getElementById('pp-body');
@@ -432,7 +433,13 @@
       if(!rws) rws='<tr><td colspan="6" class="mut">no lines</td></tr>';
       var dlId='ppsku-'+i;
       var addOpts=supSkus.filter(function(s){ return !lineSkus[s.sku] && !(costs[s.sku]&&costs[s.sku].is_added); }).map(function(s){ return '<option value="'+esc(s.sku)+'">'+esc(s.product_name||'')+'</option>'; }).join('');
-      var skus='<table style="font-size:11px;margin:3px 0 6px;width:auto"><thead><tr><th class="l">SKU</th><th style="text-align:right">Qty</th><th style="text-align:right">Est. cost</th><th style="text-align:right">Your cost</th><th style="text-align:right">Line total</th><th></th></tr></thead><tbody>'
+      // upload a commercial invoice / packing (.xlsx) to auto-fill qty + price overrides from the file
+      var invUpload='<div style="margin:0 0 10px;padding:8px 11px;border:1px solid #cdd9ea;border-radius:7px;background:#f8fafc">'
+        +'<div style="font-weight:600;font-size:12px;margin-bottom:4px">📄 Upload invoice / packing list (Excel) to auto-fill qty &amp; price</div>'
+        +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><input type="file" class="pp-inv-parse-file" data-po="'+po+'" accept=".xlsx" style="font-size:11px;max-width:280px"><button class="save-btn pp-inv-parse-go" data-po="'+po+'">Parse file</button></div>'
+        +'<div class="pp-inv-parse-out" data-po="'+po+'" style="margin-top:6px"></div>'
+        +'<div class="tiny mut" style="margin-top:3px">Reads the SKU / Q’TY (PCS) / Unit Price columns and proposes qty + price overrides. You review, then apply — it then goes to Dock &amp; Bay to approve.</div></div>';
+      var skus=invUpload+'<table style="font-size:11px;margin:3px 0 6px;width:auto"><thead><tr><th class="l">SKU</th><th style="text-align:right">Qty</th><th style="text-align:right">Est. cost</th><th style="text-align:right">Your cost</th><th style="text-align:right">Line total</th><th></th></tr></thead><tbody>'
         +rws
         +'<tr style="font-weight:700;border-top:2px solid #999"><td class="l">TOTAL</td><td style="text-align:right" class="pp-totq">'+units(totQ)+'</td><td></td><td style="text-align:right">FINAL</td><td style="text-align:right" class="pp-totp">$'+money(totP)+'</td><td></td></tr>'
         +'</tbody></table>'
@@ -732,8 +739,31 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                 if(!q){ alert('Enter a quantity for the added SKU.'); return; } btn.disabled=true;
                 var row=btn.closest('tr[id^="pp-"]');
                 postJSON(EP.lineCost,{po:po,sku:sku,amended_qty:q,actual_cost:pr||null,is_added:true,submitted_by:by},function(){
-                   
+
                   (_ppData.costsByPo[po]=_ppData.costsByPo[po]||{})[sku]={actual_cost:pr||null,amended_qty:q,is_added:true}; rerenderRow(row,po); }); }; });
+              // parse an uploaded invoice / packing .xlsx → preview proposed qty + price overrides; then Apply
+              scope.querySelectorAll('.pp-inv-parse-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po;
+                var fin=pick('pp-inv-parse-file',po), f=fin&&fin.files&&fin.files[0], out=pick('pp-inv-parse-out',po), row=btn.closest('tr[id^="pp-"]');
+                if(!f){ out.innerHTML='<span class="mut tiny">Choose an Excel (.xlsx) file first.</span>'; return; }
+                btn.disabled=true; out.innerHTML='<span class="mut tiny">Parsing…</span>';
+                var rd=new FileReader(); rd.onload=function(){ var b64=rd.result;
+                  postJSON(EP.parseInvoice,{po:po,data_base64:b64},function(j){ btn.disabled=false;
+                    if(!j||j.error||j.ok===false){ out.innerHTML='<span style="color:#b91c1c;font-size:11px">'+esc((j&&j.error)||'Could not parse the file.')+'</span>'; return; }
+                    _invFiles[po]=b64; var t=j.totals, diff=j.lines.filter(function(l){return l.status!=='match';});
+                    var rows=diff.map(function(l){ return '<tr><td class="l">'+esc(l.sku)+'</td><td class="l">'+(l.status==='new'?'<span class="tool-badge bg-amber" style="font-size:9px">NEW</span>':'<span class="mut tiny">changed</span>')+'</td>'
+                      +'<td style="text-align:right">'+(l.cur_qty==null?'—':units(l.cur_qty))+' → <b>'+units(l.inv_qty)+'</b></td>'
+                      +'<td style="text-align:right">'+(l.cur_cost==null?'—':'$'+money(l.cur_cost))+' → <b>'+(l.inv_price==null?'—':'$'+money(l.inv_price))+'</b></td></tr>'; }).join('');
+                    out.innerHTML='<div class="tiny" style="margin-bottom:4px">'+(j.po_detected?'<b>'+esc(j.po_detected)+'</b> · ':'')+t.count+' lines · $'+money(t.value)+' — <b>'+t.changed+'</b> changed, <b>'+t.neu+'</b> new, '+(t.matched-t.changed)+' already match.</div>'
+                      +(diff.length?'<div class="tw" style="max-height:240px;overflow:auto"><table style="font-size:11px;width:auto"><thead><tr><th class="l">SKU</th><th class="l"></th><th style="text-align:right">Qty</th><th style="text-align:right">Price</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+                        +'<button class="save-btn pp-inv-apply" data-po="'+esc(po)+'" style="margin-top:6px">Apply '+(t.changed+t.neu)+' change(s) to my order plan</button>'
+                        :'<span class="mut tiny">Everything matches your order plan — nothing to change.</span>');
+                    var ab=out.querySelector('.pp-inv-apply'); if(ab)ab.onclick=function(){ ab.disabled=true; ab.textContent='Applying…';
+                      postJSON(EP.invoiceApply,{po:po,data_base64:_invFiles[po],submitted_by:by},function(r){
+                        if(!r||r.error){ alert('Apply failed: '+((r&&r.error)||'')); ab.disabled=false; ab.textContent='Apply'; return; }
+                        diff.forEach(function(l){ (_ppData.costsByPo[po]=_ppData.costsByPo[po]||{})[l.sku]={amended_qty:l.inv_qty,actual_cost:l.inv_price,is_added:(l.status==='new')}; });
+                        alert('Applied to your order plan: '+r.applied+' line(s)'+(r.added?' ('+r.added+' new)':'')+'. Review the qty & cost below, then confirm the order — Dock & Bay will approve the change.');
+                        rerenderRow(row,po,'orderplan'); }); }; }); };
+                rd.readAsDataURL(f); }; });
               scope.querySelectorAll('.pp-rm').forEach(function(b){ b.onclick=function(){ if(!confirm('Remove '+b.dataset.sku+' from this order?'))return; var po=b.dataset.po, sku=b.dataset.sku, row=b.closest('tr[id^="pp-"]');
                 postJSON(EP.lineRemove,{po:po,sku:sku},function(){  if(_ppData.costsByPo[po])delete _ppData.costsByPo[po][sku]; rerenderRow(row,po); }); }; });
               // crossdock shipped quantity per SKU → save + re-render (updates the open-action badge), no full reload

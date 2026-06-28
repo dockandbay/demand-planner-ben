@@ -52,7 +52,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.384';
+const APP_VERSION = 'v20.385';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2289,6 +2289,41 @@ app.post('/api/supply/portal-parse-invoice', async (req, res) => {
         matched: lines.filter(r => r.status !== 'new').length, changed: lines.filter(r => r.status === 'changed').length, neu: lines.filter(r => r.status === 'new').length },
       lines });
   } catch (e) { res.status(400).json({ error: 'Could not parse the file: ' + e.message }); }
+});
+// Apply a parsed supplier invoice to the PO's order plan as portal overrides (amended_qty / actual_cost). Re-parses
+// the file server-side (single source of truth), writes only CHANGED + NEW lines (new SKUs flagged is_added), in a
+// transaction. The supplier then reviews/confirms in the portal; the planner approves the order-plan change (existing flow).
+app.post('/api/supply/portal-invoice-apply', async (req, res) => {
+  const b = req.body || {}; const by = b.submitted_by || 'portal';
+  if (!b.data_base64) return res.status(400).json({ error: 'data_base64 required' });
+  let parsed;
+  try { parsed = parseInvoiceXlsx(Buffer.from(String(b.data_base64).replace(/^data:[^,]*,/, ''), 'base64')); }
+  catch (e) { return res.status(400).json({ error: 'Could not parse the file: ' + e.message }); }
+  const po = b.po || parsed.po;
+  if (!po) return res.status(400).json({ error: 'no PO (none supplied and none detected in the file)' });
+  if (!parsed.lines.length) return res.status(400).json({ error: 'No invoice line items found in the file.' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const plan = (await client.query(`SELECT sku, qty, cost_price FROM planner.purchase_order_lines WHERE po=$1`, [po])).rows;
+    const planBy = {}; plan.forEach(l => { planBy[String(l.sku).toUpperCase()] = l; });
+    let applied = 0, added = 0, unchanged = 0;
+    for (const l of parsed.lines) {
+      const cur = planBy[l.sku.toUpperCase()];
+      const cq = cur ? Number(cur.qty) : null, cc = cur ? Number(cur.cost_price) : null;
+      const isNew = !cur, changed = isNew || cq !== l.qty || (l.price != null && cc !== l.price);
+      if (!changed) { unchanged++; continue; }
+      await client.query(`INSERT INTO planner.portal_line_costs (po, sku, actual_cost, amended_qty, is_added, submitted_by, submitted_at)
+        VALUES ($1,$2,$3,$4,$5,$6, now())
+        ON CONFLICT (po, sku) DO UPDATE SET actual_cost=excluded.actual_cost, amended_qty=excluded.amended_qty,
+          is_added=planner.portal_line_costs.is_added OR excluded.is_added, submitted_by=excluded.submitted_by, submitted_at=now()`,
+        [po, l.sku, l.price, l.qty, isNew, by]);
+      applied++; if (isNew) added++;
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true, po, applied, added, unchanged, total: parsed.lines.length });
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
 });
 // Toggle a shipment's ESCALATED status (supplier portal or admin grid). Upserts the shipment row if needed.
 app.post('/api/supply/shipment/:ref/escalate', async (req, res) => {
