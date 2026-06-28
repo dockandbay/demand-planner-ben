@@ -4,6 +4,20 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.402 - PO grid polish + slower search debounce + prod_no streamline migration
+
+- **Focus star now visible** — the sticky first column was locked to 54px and clipped the star; widened to
+  78px so the ☆/★ sits next to PLAN (slightly bolder idle colour too).
+- **ERP column compacted** — the row buttons are now small badges (same look as "✓ in sync") with simple
+  labels: **Update lines / Update date / Update both** (was the oversized "⚠ Update ERP" / "Date ≠ ERP").
+- **Narrower filter dropdowns** — Supplier 180px (~25 chars), Production 62px (~4), Batch 94px (~8).
+- **Search debounce 220ms → 350ms** on every grid search (PO, Shipments, Order Plan, Portal) — was correct
+  but felt instant.
+- **Migration `083_streamline_prod_no.sql`** (supersedes 081): strips the leading `P` from `prod_no` across
+  `purchase_orders`, `deposits`, `production_deposits`, and backfills `prod_numbers.prod_no` from the Xero
+  account code. Authored + dry-run validated (one manual item: the duplicate `P66`). **Not yet applied** — see
+  HANDOVER. n8n Airtable source must be fixed too for the PO change to stick.
+
 ## v20.401 - ⭐ Focus / favourite star on Purchase Orders + Shipments
 
 A small star icon next to the **PLAN** button on every PO and shipment row toggles a

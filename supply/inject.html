@@ -33,7 +33,7 @@
 #supply-root .pill.po-recent.active,#supply-root .pill.ship-recent.active{background:#166534;color:#fff;border-color:#14532d}
 #supply-root .pill.po-recent.active:hover,#supply-root .pill.ship-recent.active:hover{background:#15803d;color:#fff}
 /* ⭐ Focus / favourite — star icon next to PLAN + the amber Focus filter pill */
-#supply-root .fav-star{background:none;border:none;cursor:pointer;font-size:14px;line-height:1;padding:0 1px;margin-left:3px;color:#cbd5e1;vertical-align:middle}
+#supply-root .fav-star{background:none;border:none;cursor:pointer;font-size:15px;line-height:1;padding:0 1px;margin-left:4px;color:#94a3b8;vertical-align:middle}
 #supply-root .fav-star:hover{color:#f59e0b}
 #supply-root .fav-star.on{color:#f59e0b}
 #supply-root .pill.po-focus,#supply-root .pill.ship-focus{background:#fffbeb;color:#b45309;border-color:#fcd34d}
@@ -101,9 +101,9 @@
 #supply-root table.po-tbl .fci.dt{width:84px}#supply-root table.po-tbl .fci.txt{width:96px}
 /* freeze column 1 (PLAN) + column 2 (PO) on horizontal scroll (exclude expand + group-header rows) */
 #supply-root table.po-tbl thead th:first-child,
-#supply-root table.po-tbl tbody tr:not(.exp-row):not(.grp-row) td:first-child{position:sticky;left:0;z-index:2;background:#fff;box-sizing:border-box;width:54px;min-width:54px;max-width:54px}
+#supply-root table.po-tbl tbody tr:not(.exp-row):not(.grp-row) td:first-child{position:sticky;left:0;z-index:2;background:#fff;box-sizing:border-box;width:78px;min-width:78px;max-width:78px;white-space:nowrap}
 #supply-root table.po-tbl thead th:nth-child(2),
-#supply-root table.po-tbl tbody tr:not(.exp-row):not(.grp-row) td:nth-child(2){position:sticky;left:54px;z-index:2;background:#fff;box-shadow:1px 0 0 #e0e0e0}
+#supply-root table.po-tbl tbody tr:not(.exp-row):not(.grp-row) td:nth-child(2){position:sticky;left:78px;z-index:2;background:#fff;box-shadow:1px 0 0 #e0e0e0}
 #supply-root table.po-tbl td.po-child b{font-weight:600}
 #supply-root table.po-tbl td.po-child .ind{color:#9ca3af}
 #supply-root table.po-tbl thead th:first-child,#supply-root table.po-tbl thead th:nth-child(2){z-index:3;background:#f3f3f1}
@@ -738,9 +738,9 @@
       +'<input class="flt" id="sup-search" placeholder="Filter PO / supplier…" value="'+esc(state.q||'')+'"><span class="count" id="sup-count"></span>'
       +'<span style="margin-left:auto"><button class="save-btn" id="po-new" style="margin-right:8px">+ New PO</button><button class="save-btn" id="po-upload" style="margin-right:8px">⬆ Upload POs</button><button class="save-btn dark" id="po-csv" style="margin-right:8px">⬇ CSV for Fulfil</button><button class="save-btn dark" id="po-cin7-dates" title="push the planner completion date to Cin7 EstimatedDeliveryDate for every ACTIVE PO whose date differs from Cin7 — complete POs are skipped (live write)">📅 Sync Cin7 dates</button></span></div>'
       +'<div class="bar" id="po-ctry"><span class="pill-lbl">Ship to</span>'+CTRYP.map(function(a){return '<span class="pill'+(state.ctry[a[0]]?' active':'')+'" data-c="'+a[0]+'">'+a[1]+' ('+ctryCount(a[0])+')</span>';}).join('')
-      +'<span class="pill-lbl" style="margin-left:14px">Supplier</span><select class="flt" id="po-sup" style="min-width:150px;cursor:pointer"><option value="">All suppliers</option>'+(supplierList||[]).slice().sort().map(function(s){return '<option'+(s===state.sup?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select>'
-      +'<span class="pill-lbl" style="margin-left:14px">Production</span><select class="flt" id="po-prod" style="min-width:110px;cursor:pointer"><option value="">All</option>'+optList(_prods,state.prod)+'</select>'
-      +'<span class="pill-lbl" style="margin-left:10px">Batch</span><select class="flt" id="po-batch" style="min-width:110px;cursor:pointer"><option value="">All</option>'+optList(_batches,state.batch)+'</select></div>'
+      +'<span class="pill-lbl" style="margin-left:14px">Supplier</span><select class="flt" id="po-sup" style="width:180px;max-width:180px;cursor:pointer;text-overflow:ellipsis"><option value="">All suppliers</option>'+(supplierList||[]).slice().sort().map(function(s){return '<option'+(s===state.sup?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select>'
+      +'<span class="pill-lbl" style="margin-left:14px">Production</span><select class="flt" id="po-prod" style="width:62px;cursor:pointer;text-overflow:ellipsis"><option value="">All</option>'+optList(_prods,state.prod)+'</select>'
+      +'<span class="pill-lbl" style="margin-left:10px">Batch</span><select class="flt" id="po-batch" style="width:94px;cursor:pointer;text-overflow:ellipsis"><option value="">All</option>'+optList(_batches,state.batch)+'</select></div>'
       +'<div class="bar" id="po-act"><span class="pill po-actall" data-aa="1" style="background:#dc2626;color:#fff;border:1px solid #991b1b;font-weight:700" title="show only POs that have one or more open action items (the red badges)">ACTION ITEMS ('+actItemsCount()+')</span>'
       +'<span class="pill po-erp" data-erp="1" style="background:#b45309;color:#fff;border:1px solid #7c2d12;font-weight:700;margin-left:6px" title="show only POs misaligned with Fulfil/Cin7 — never pushed (upload the whole PO) or with pending qty/cost changes (update). Use the ERP button on the row, or Upload on the Order Plan, to push.">⬆ NEEDS ERP ('+erpCount()+')</span>'
       +'<span class="pill-lbl" style="margin-left:14px">By type</span>'+ACTP.map(function(a){return '<span class="pill'+(state.act[a[0]]?' active':'')+'" data-a="'+a[0]+'">'+a[1]+' ('+actCount(a[0])+')</span>';}).join('')
@@ -806,7 +806,7 @@
     var psup=document.getElementById('po-sup'); if(psup)psup.onchange=function(){state.sup=this.value;view();};
     var pprod=document.getElementById('po-prod'); if(pprod)pprod.onchange=function(){state.prod=this.value;view();};
     var pbatch=document.getElementById('po-batch'); if(pbatch)pbatch.onchange=function(){state.batch=this.value;view();};
-    document.getElementById('sup-search').oninput=debounce(function(){state.q=this.value;_poShowAll=false;view();},220);
+    document.getElementById('sup-search').oninput=debounce(function(){state.q=this.value;_poShowAll=false;view();},350);
     document.getElementById('po-csv').onclick=function(){var q=effQ(state.q);csv(q?filt(rows,q):cur(),'purchase_orders.csv',PO_CSV_LABELS);};
     document.getElementById('po-new').onclick=function(){ var po=prompt('New PO number:'); if(!po||!po.trim())return;
       var sup=prompt('Supplier (optional — exact name; set later in the row otherwise):')||'';
@@ -939,13 +939,16 @@
     var _ex=poExceptions(r,null);   // grid badge (invoice discrepancy resolves only once the PLAN panel is opened)
     var exFlag=_ex.all.length?' <span class="ex-badge" title="'+esc(_ex.all.length+' action'+(_ex.all.length>1?'s':'')+': '+_ex.all.join(' · '))+'">'+_ex.all.length+'</span>':'';
     var pocell=indent?'<td class="l po-child"><span class="ind">└ </span><b>'+esc(r.po)+'</b>'+exFlag+'</td>':'<td class="l"><b>'+esc(r.po)+'</b>'+exFlag+'</td>';
-    // ERP cell — smaller, softer buttons; "✓ in sync" only when nothing is off (never shown alongside a drift button)
-    var erpBtn='font-size:10px;padding:2px 7px';
-    var erpParts=[];
-    if(r.erp_total>0&&!(r.erp_in>0)) erpParts.push('<button class="save-btn erp-up" data-up="'+esc(r.po)+'" style="background:#b91c1c;color:#fff;'+erpBtn+'" title="'+r.erp_total+' line(s) exist but none are mirrored from the ERP — never pushed">✗ not in ERP ('+r.erp_total+')</button>');
-    else if(r.erp_pending>0) erpParts.push('<button class="save-btn erp-up" data-up="'+esc(r.po)+'" style="background:#d97706;color:#fff;border-color:#d97706;'+erpBtn+'" title="'+r.erp_pending+' order-plan line(s) differ from the ERP">⚠ Update ERP ('+r.erp_pending+')</button>');
-    if(r.erp_date_pending>0 && !poComplete(r)) erpParts.push('<button class="save-btn erp-up" data-up="'+esc(r.po)+'" style="background:#b45309;color:#fff;border-color:#b45309;'+erpBtn+'" title="completed-at-warehouse '+esc(r.checkin||'?')+' ≠ ERP final delivery '+esc(r.erp_final_delivery||'?')+' — update the date in the ERP">⚠ Date ≠ ERP</button>');
-    var erpCell=erpParts.length?erpParts.join(' '):'<span class="tool-badge bg-green" title="planned quantities match the ERP">✓ in sync</span>';
+    // ERP cell — compact badge-style buttons (same look as the "✓ in sync" badge) → keeps the column narrow.
+    // Labels collapse to a single action: Update lines / Update date / Update both. All open the same ERP modal.
+    var erpStyle='cursor:pointer;border:none';
+    var linesPending=(r.erp_total>0&&!(r.erp_in>0))||r.erp_pending>0;
+    var datePending=r.erp_date_pending>0 && !poComplete(r);
+    var erpCell;
+    if(linesPending && datePending) erpCell='<button class="erp-up tool-badge bg-amber" data-up="'+esc(r.po)+'" style="'+erpStyle+'" title="order-plan lines AND the completion date differ from the ERP">Update both</button>';
+    else if(linesPending) erpCell='<button class="erp-up tool-badge bg-amber" data-up="'+esc(r.po)+'" style="'+erpStyle+'" title="'+((r.erp_total>0&&!(r.erp_in>0))?r.erp_total+' line(s) not yet in the ERP (never pushed)':r.erp_pending+' order-plan line(s) differ from the ERP')+'">Update lines</button>';
+    else if(datePending) erpCell='<button class="erp-up tool-badge bg-amber" data-up="'+esc(r.po)+'" style="'+erpStyle+'" title="completed-at-warehouse '+esc(r.checkin||'?')+' ≠ ERP final delivery '+esc(r.erp_final_delivery||'?')+'">Update date</button>';
+    else erpCell='<span class="tool-badge bg-green" title="planned quantities match the ERP">✓ in sync</span>';
     return '<tr'+ga+'><td class="l"><button class="planbtn po-exp" data-po="'+esc(r.po)+'" data-i="'+i+'">PLAN</button><button class="fav-star'+(r.starred?' on':'')+'" data-star-po="'+esc(r.po)+'" title="Focus / favourite">'+(r.starred?'★':'☆')+'</button></td>'+pocell
       +'<td class="l">'+erpCell+'</td>'
       +'<td class="l">'+cellPickBtn(r.po,'/api/supply/po/'+encodeURIComponent(r.po)+'/supplier','supplier_name',r.supplier_name,'supplier')+'</td>'
@@ -1497,8 +1500,8 @@
     document.getElementById('op-cat').onchange=function(){st.cat=this.value;viewReset();};
     document.getElementById('op-rw').onchange=function(){st.rw=this.value;viewReset();};
     document.getElementById('op-prod').onchange=function(){st.prod=this.value;viewReset();};
-    document.getElementById('op-po').oninput=debounce(function(){st.poq=this.value.toLowerCase();viewReset();},220);
-    document.getElementById('op-q').oninput=debounce(function(){st.q=this.value;viewReset();},220);
+    document.getElementById('op-po').oninput=debounce(function(){st.poq=this.value.toLowerCase();viewReset();},350);
+    document.getElementById('op-q').oninput=debounce(function(){st.q=this.value;viewReset();},350);
     // ---- supplier changes awaiting approval (from the portal) — accept here too, not just on PO PLAN ----
     var lineQty={}; lines.forEach(function(l){ lineQty[l.po+'|'+l.sku]=l.qty; });
     function renderChanges(){ var box=document.getElementById('op-changes'); if(!box)return;
@@ -1879,7 +1882,7 @@
       b.classList.toggle('on',nv); b.textContent=nv?'★':'☆';
       fetch('/api/supply/shipment/'+encodeURIComponent(ref),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({starred:nv})}).then(function(r){return r.json();}).catch(function(){});
       if(state.focus)view(); }; }); }
-    document.getElementById('sup-search').oninput=debounce(function(){state.q=this.value;_shipShowAll=false;view();},220);
+    document.getElementById('sup-search').oninput=debounce(function(){state.q=this.value;_shipShowAll=false;view();},350);
     document.getElementById('ship-ctry').onchange=function(){state.ctry=this.value;_shipShowAll=false;view();};
     document.getElementById('ship-br').onchange=function(){state.br=this.value;_shipShowAll=false;view();};
     document.getElementById('ship-new').onclick=function(){ var ref=prompt('New shipment reference (usually the master PO number):'); if(ref&&ref.trim())shipPost('/api/supply/shipment-create',{shipment_ref:ref.trim()},shipReload); };

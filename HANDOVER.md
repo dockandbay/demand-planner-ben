@@ -51,13 +51,17 @@ plus new numbered migrations on top. See `migrations/README.md`.
     shipment a supplier created from the portal → raises the "Supplier created new shipment" action).
   - **`080_forecast_export_settings.sql`** — `planner.forecast_export_settings` (per-country email for the forecast
     CSV export).
-  - **`081_prod_no_p53_to_53.sql`** — **data consolidation, HANDLE CAREFULLY.** Renames the `prod_no` key
-    `P53 → 53` in `prod_numbers`, `deposits`, `production_deposits` so the config + deposit rollup match the 140 POs
-    already on `53`. Collision-guarded; runs in a transaction with verification SELECTs. **Does NOT touch
-    `purchase_orders.prod_no`** — `prod_no` on POs is **n8n Airtable→Supabase sync-fed**, so: (a) confirm Airtable
-    isn't still emitting `P53` before/after, or it reappears on the next sync; (b) Ben manually fixes the 2–3
-    remaining `P53` POs. Deposit *money* is unaffected (it links by `deposit_ref`, not `prod_no`). Idempotent
-    (`WHERE prod_no='P53'`).
+  - ~~**`081_prod_no_p53_to_53.sql`**~~ — **SUPERSEDED by 083. Do NOT run 081 — run 083 instead** (083 covers
+    P53 *and* every other Pnn). Left in the repo for history only.
+  - **`083_streamline_prod_no.sql`** — **data streamline, HANDLE CAREFULLY (financial / Xero).** Strips the
+    leading `P` from `prod_no` everywhere (→ canonical numeric form) and backfills the missing `prod_numbers`
+    reference from the Xero account code. Fixes: deposits stuck on `P53/P54…`; productions split into `P54`+`54`;
+    CONFIG showing `P48`; and productions (e.g. `46` = 141 POs) that never linked to their Xero account because
+    `prod_numbers.prod_no` was NULL. Runs in a transaction with verification SELECTs; collision-guarded.
+    Dry-run result: 0 P-prefixed left in purchase_orders/deposits, all NULL prod_numbers backfilled, **one
+    manual item — `P66` exists twice (active row + closed row w/ Xero `620.46`); merge by hand.** Xero
+    account-code strings are left unchanged (real GL labels). **`purchase_orders.prod_no` is n8n-sync-fed — fix
+    the Airtable source too or the P-prefixed POs return on the next sync.** Idempotent.
   - **`082_po_shipment_starred.sql`** — adds `starred boolean NOT NULL DEFAULT false` to `purchase_orders`
     and `shipments` (⭐ Focus / favourite toggle on both grids). The PO/shipments read queries now select
     `starred`, so **apply this before deploying v20.401 or the grids will error**. Idempotent. ⬅ *latest.*
@@ -90,7 +94,7 @@ plus new numbered migrations on top. See `migrations/README.md`.
   - The shipment payload for the **Shipment Plan** tab needs **`master_supplier`** (filters to the logged-in supplier)
     and **`carrier_ref`** (tracking shown on the card).
 
-- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`082` in order. Do **not** run
+- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`083` in order (**skip 081 — superseded by 083**). Do **not** run
   `schema.sql` against an already-migrated DB (the table creates aren't idempotent).
 
 ---
