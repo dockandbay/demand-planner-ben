@@ -4,6 +4,18 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.398 - Production-status warning only when supplier confirmation is required
+
+The "⚠ Past production start but status is not set" warning / action item now only fires for
+POs whose production **requires supplier confirmation** (`prod_numbers.require_supplier_confirmation`).
+If a production is set to NO in CONFIG ▸ Productions, the production-status nag no longer shows as:
+- a DATES action item / red badge on the PO grid (admin),
+- the ⚠ highlight on the PO ▸ PLAN ▸ DATES "Supplier production status" row (admin),
+- the supplier-portal TIMELINE warning, or the "check status" flag + action count on the portal grid.
+
+The production-status dropdown itself still shows everywhere — only the warning/action is gated.
+No new env vars or migrations.
+
 ## v20.397 - Search ignores spaces and the "└" tree character
 
 All filter/search boxes across SUPPLY (Purchase Orders, Shipments, Order Plan) and the

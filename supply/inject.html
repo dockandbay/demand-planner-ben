@@ -1014,7 +1014,8 @@
     var frEst; if(r.flex_quote!=null) frEst=Number(r.flex_quote); else { var se=seaEst(r.sea_tiers,r.pallets); frEst=se?se.cost:null; }
     var landed=[]; if(open && frEst==null && !isFOB && !r.shipment) landed.push('No freight rate for destination'+(r.country?' ('+r.country+')':'')+' — can’t estimate sea freight');
     var dates=[]; if(r.sup_completion_pending) dates.push('Supplier completion date '+fd(r.sup_completion_pending)+' awaiting approve/reject');
-    var _pse=prodStatusException(r.production_status, r.prod_start, r.prod_end, today); if(_pse) dates.push('Production status: '+_pse);
+    // only flag a missing/late production status when this production actually requires supplier confirmation
+    var _pse=r.require_confirmation?prodStatusException(r.production_status, r.prod_start, r.prod_end, today):''; if(_pse) dates.push('Production status: '+_pse);
     var timeline=[]; if(Number(r.unread_notes)>0) timeline.push(r.unread_notes+' unread supplier note'+(r.unread_notes>1?'s':''));
     var oplan=[]; if(Number(r.orderplan_unconfirmed)>0) oplan.push(r.orderplan_unconfirmed+' unconfirmed order-plan change'+(r.orderplan_unconfirmed>1?'s':''));
     return { pay:pay, dates:dates, client:[], landed:landed, timeline:timeline, oplan:oplan, all:pay.concat(dates).concat(landed).concat(timeline).concat(oplan) }; }
@@ -1129,7 +1130,7 @@
       +'<tr><td class="l">Ship to <span class="mut tiny">(blank = branch country)</span></td><td class="l">'+countrySel(ep,r.country_override,true)+'</td><td class="l mut tiny">'+(r.country_src==='M'?'override':'branch')+'</td></tr>'
       +'<tr><td class="l"><b>Production start</b></td><td class="l">'+payIn(ep,'start_production',r.prod_start,true)+'</td><td class="l mut tiny">manual</td></tr>'
       +'<tr><td class="l"><b>Production end</b></td><td class="l">'+payIn(ep,'end_production_overide',r.end_override,true)+'</td><td class="l mut tiny">'+(r.end_override?'override':'start + supplier days')+'</td></tr>'
-      +(function(){ var pse=prodStatusException(r.production_status,r.prod_start,r.prod_end);
+      +(function(){ var pse=r.require_confirmation?prodStatusException(r.production_status,r.prod_start,r.prod_end):'';
         return '<tr'+(pse?' style="background:#fff7ed"':'')+'><td class="l"><b>Supplier production status</b> <span class="mut tiny">(set by supplier / here)</span></td>'
           +'<td class="l">'+prodStatusSel(ep+'/prod-status', r.production_status)+'</td>'
           +'<td class="l mut tiny">'+(r.production_status?(r.prod_confirmed_age!=null?'confirmed '+r.prod_confirmed_age+'d ago':'supplier-set'):'not set')
