@@ -4,6 +4,17 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.372 - Shipments: fix boot error (broke timeline posting), drop duplicate Notes field, add Delete shipment
+
+- **Fix:** a boot error (`supb is not defined` in `ensureScenarioButton`, present since the v20.301 baseline)
+  aborted part of the SUPPLY boot wiring — which is what stopped you adding timeline notes. Now resolved
+  (binds the actual `supply-btn`).
+- **Dates & tracking** tab: removed the small single-line **Notes** field — it's superseded by the multi-line
+  note box in the **Timeline & notes** tab.
+- **Timeline & notes** tab: added a **🗑 Delete this shipment** button (with confirm). It unassigns the POs
+  aboard (the POs are kept) and removes the shipment + its timeline. New endpoint
+  `POST /api/supply/shipment/:ref/delete`.
+
 ## v20.371 - Portal: carrier & tracking move to the SHIPMENT (creates the shipment if none) + Shipment Plan link
 
 Supplier portal — PO ▸ PLAN ▸ SHIPMENT sub-tab:

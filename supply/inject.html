@@ -1905,8 +1905,7 @@
           +fld('Freight (manual £/$)', editCell(ep,'cost_manual',s.cost_manual==null?'':s.cost_manual,''))
           +'<div style="margin-right:16px"><div class="mut tiny">Freight used</div><div style="padding:4px 0;font-weight:600">'+(fr.c==null?'—':money(fr.c))+' <span class="src '+(fr.src==='FLEX'?'fx':'m')+'">'+esc(fr.src)+'</span></div></div>'
           +'<div style="margin-right:16px"><div class="mut tiny">Estimate ('+esc(m)+')</div><div class="tiny" style="padding:5px 0;color:#475569">'+estTxt+'</div></div>'
-          +'</div>'; })()
-      +'<div style="margin-bottom:10px">'+fld('Notes', editCell(ep,'notes',s.notes||'','txt'))+'</div>';
+          +'</div>'; })();   // shipment notes now live in the Timeline & notes tab (multi-line)
     Promise.all([fetch('/api/supply/shipment-detail/'+encodeURIComponent(ref)).then(function(r){return r.json();}),
       fetch('/api/supply/shipment-crossdock/'+encodeURIComponent(ref)).then(function(r){return r.json();}).catch(function(){return [];})])
       .then(function(R){ var rows=R[0]||[], xd=R[1]||[]; var t='<div class="sect-h">POs aboard ('+rows.length+') — ★ marks the master (consolidation) PO</div>';
@@ -1924,9 +1923,12 @@
         var tabbar='<div class="po-subnav" style="margin-bottom:8px"><button class="rtab shtab active" data-st="dates">Dates &amp; tracking</button><button class="rtab shtab" data-st="pos">POs aboard</button><button class="rtab shtab" data-st="xd">Crossdock'+(xd.length?' ('+xd.length+')':'')+'</button><button class="rtab shtab" data-st="timeline">Timeline &amp; notes</button></div>';
         var box=document.getElementById('shipdet-'+i);
         box.innerHTML=tabbar+'<div class="shtab-panel" data-st="dates">'+head+'</div><div class="shtab-panel" data-st="pos" style="display:none">'+t+'</div><div class="shtab-panel" data-st="xd" style="display:none">'+xdPanel+'</div>'
-          +'<div class="shtab-panel" data-st="timeline" style="display:none"><div class="sp-timeline" data-ref="'+esc(ref)+'"></div></div>';
+          +'<div class="shtab-panel" data-st="timeline" style="display:none"><div class="sp-timeline" data-ref="'+esc(ref)+'"></div>'
+            +'<div style="margin-top:14px;padding-top:10px;border-top:1px solid #f1f1f1"><button class="save-btn ship-del" data-ref="'+esc(ref)+'" style="background:#fff5f5;border:1px solid #fecaca;color:#b91c1c">🗑 Delete this shipment</button> <span class="mut tiny">unassigns the POs aboard (they’re kept) and removes this shipment.</span></div></div>';
         box.classList.remove('count'); bindEdits();
         loadShipTimeline(ref,'internal','/api/supply/shipment-notes?ref=','/api/supply/shipment-note');
+        box.querySelectorAll('.ship-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete shipment '+ref+'?\n\nThe POs aboard will be unassigned (not deleted), and this shipment + its timeline will be removed.'))return;
+          b.disabled=true; shipPost('/api/supply/shipment/'+encodeURIComponent(ref)+'/delete',{},function(j){ invalidateDerived(); shipReload(); }); }; });
         box.querySelectorAll('.shtab').forEach(function(tb){ tb.onclick=function(){ box.querySelectorAll('.shtab').forEach(function(x){x.classList.toggle('active',x===tb);}); box.querySelectorAll('.shtab-panel').forEach(function(pl){pl.style.display=(pl.dataset.st===tb.dataset.st)?'':'none';}); }; });
         box.querySelectorAll('button[data-act]').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po;
           if(btn.dataset.act==='unassign'){ if(confirm('Unassign '+po+' from '+ref+'?'))shipPost('/api/supply/shipment/'+encodeURIComponent(ref)+'/assign',{po:po,assign:false},shipReload); }
@@ -3483,7 +3485,7 @@
     var spacer=row.querySelector('div[style*="flex:1"]'); if(spacer)row.insertBefore(btn,spacer); else row.appendChild(btn);
     btn.onclick=showScenario;
     row.querySelectorAll('.view-toggle:not(.scenario-toggle):not(.supply-toggle)').forEach(function(b){b.addEventListener('click',hideScenario);});
-    if(supb)supb.addEventListener('click',hideScenario); }
+    var supb=document.getElementById('supply-btn'); if(supb)supb.addEventListener('click',hideScenario); }
   // ---- BUY PLAN → PURCHASE ORDERS modal (opened from the BUY tab via window.openBuyplanModal) ----
   function buyplanModal(country, items, mode){
     country=String(country||'').toUpperCase(); items=items||[]; mode=(mode==='fba'?'fba':'3pl');

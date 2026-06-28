@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.371';
+const APP_VERSION = 'v20.372';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2995,6 +2995,21 @@ app.post('/api/supply/shipment/:ref/assign', async (req, res) => {
     }
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Delete a shipment. Unassigns every PO aboard (clears their shipment_ref), removes its timeline notes,
+// then deletes the shipment row. POs themselves are left intact.
+app.post('/api/supply/shipment/:ref/delete', async (req, res) => {
+  const ref = req.params.ref;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const unassigned = await client.query(`UPDATE planner.purchase_orders SET shipment_ref=NULL WHERE shipment_ref=$1`, [ref]);
+    await client.query(`DELETE FROM planner.shipment_notes WHERE shipment_ref=$1`, [ref]);
+    const r = await client.query(`DELETE FROM planner.shipments WHERE shipment_ref=$1`, [ref]);
+    await client.query('COMMIT');
+    res.json({ deleted: r.rowCount, unassigned_pos: unassigned.rowCount });
+  } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
 });
 
 // ── SCENARIO PLANNER ───────────────────────────────────────────────────────
