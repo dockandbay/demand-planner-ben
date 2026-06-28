@@ -15,7 +15,7 @@
 #supply-root .annot{background:#0f172a;color:#cbd5e1;font-size:11px;border-radius:6px;padding:8px 12px;margin:0 0 10px;line-height:1.5}
 #supply-root .annot b{color:#7dd3fc}
 #supply-root .bar{display:flex;align-items:center;margin-bottom:8px;flex-wrap:wrap}
-#supply-root .bar>*{margin:2px 8px 2px 0;flex:0 0 auto}   /* explicit spacing + no shrink (some webviews drop flex gap → overlap, or shrink items → clip); wrap instead */
+#supply-root .bar>*{margin:2px 5px 2px 0;flex:0 0 auto}   /* explicit spacing + no shrink (some webviews drop flex gap → overlap, or shrink items → clip); wrap instead */
 #supply-root .bar-grp{display:inline-flex;align-items:center}
 #supply-root .bar-grp>*{margin-right:5px}
 #supply-root .bar-grp>*:last-child{margin-right:0}
@@ -500,10 +500,11 @@
           if(type==='shipping'&&p.production_status==='shipped')return;
           out.push({po:p.po,supplier:p.supplier,market:p.market,units:p.units,val:p.val,date:date,ship:p.shipment_ref||'',flex:p.flex||''}); });
         return out; }
+      function poLink(po){ return '<a class="po-jump" data-po="'+esc(po)+'" style="color:#1d4ed8;font-weight:600;text-decoration:none;cursor:pointer" title="open this PO on its Dates tab">'+esc(po)+'</a>'; }
       function poRow(e,cls){ var b=bd(e.date); return '<tr class="'+(cls||'up-row')+'" data-po="'+esc(e.po)+'" style="cursor:pointer">'
         +'<td class="l" style="white-space:nowrap;font-weight:600;color:'+b.c+'">'+fd(e.date)+'</td>'
         +'<td class="l" style="color:'+b.m+';white-space:nowrap">in '+b.dd+'d</td>'
-        +'<td class="l">'+esc(e.po)+'</td><td class="l">'+esc(e.supplier||'—')+'</td>'
+        +'<td class="l">'+poLink(e.po)+'</td><td class="l">'+esc(e.supplier||'—')+'</td>'
         +'<td class="l">'+esc(e.market||'')+'</td><td>'+units(e.units)+'</td><td>'+csymFor(e.market)+fmInt(e.val)+'</td>'
         +'<td class="l">'+flexLink(e.flex)+'</td></tr>'; }
       function shipRow(g,id){ var b=bd(g.date), s=Object.keys(g.sup);
@@ -516,7 +517,7 @@
           +'<td class="l">'+flexLink(g.flex)+'</td></tr>'
           +'<tr class="exp-row" id="upexp-'+id+'" style="display:none"><td colspan="8"><div style="padding:2px 2px 2px 24px">'
           +'<table style="font-size:11px;width:auto"><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th>Units</th><th>Value</th><th class="l">Flexport</th></tr></thead><tbody>'
-          +g.items.map(function(e){ return '<tr class="up-detpo" data-po="'+esc(e.po)+'" style="cursor:pointer"><td class="l">'+esc(e.po)+'</td><td class="l">'+esc(e.supplier||'—')+'</td><td>'+units(e.units)+'</td><td>'+csymFor(e.market)+fmInt(e.val)+'</td><td class="l">'+flexLink(e.flex)+'</td></tr>'; }).join('')
+          +g.items.map(function(e){ return '<tr class="up-detpo" data-po="'+esc(e.po)+'" style="cursor:pointer"><td class="l">'+poLink(e.po)+'</td><td class="l">'+esc(e.supplier||'—')+'</td><td>'+units(e.units)+'</td><td>'+csymFor(e.market)+fmInt(e.val)+'</td><td class="l">'+flexLink(e.flex)+'</td></tr>'; }).join('')
           +'</tbody></table></div></td></tr>'; }
       // shipping & arriving group by master shipment (a shipment moves as one); completing stays per-PO
       function buildRows(type,list,secKey){ if(type==='completing'){ list.sort(byDate); return {n:list.length,html:list.map(function(e){return poRow(e);}).join('')}; }
@@ -533,7 +534,7 @@
         return '<tr class="up-row" data-po="'+esc(p.po)+'" style="cursor:pointer">'
           +'<td class="l" style="white-space:nowrap;font-weight:600;color:#b91c1c">'+fd(o.date)+'</td>'
           +'<td class="l" style="color:#b91c1c;white-space:nowrap;font-weight:700">'+o.days+'d late</td>'
-          +'<td class="l">'+esc(p.po)+(p.shipment_ref&&p.shipment_ref!==p.po?' <span class="mut tiny">🚢 '+esc(p.shipment_ref)+'</span>':'')+'</td>'
+          +'<td class="l">'+poLink(p.po)+(p.shipment_ref&&p.shipment_ref!==p.po?' <span class="mut tiny">🚢 '+esc(p.shipment_ref)+'</span>':'')+'</td>'
           +'<td class="l"><span class="tool-badge bg-red">'+esc(o.type)+'</span></td>'
           +'<td class="l">'+esc(p.supplier||'—')+'</td><td class="l">'+esc(p.market||'')+'</td>'
           +'<td>'+units(p.units)+'</td><td>'+csymFor(p.market)+fmInt(p.val)+'</td>'
@@ -555,7 +556,8 @@
       c.querySelectorAll('.bar .pill[data-m]').forEach(function(b){b.onclick=function(){_up.mkt=b.dataset.m;view();};});
       c.querySelectorAll('.bar .pill[data-w]').forEach(function(b){b.onclick=function(){_up.wk=b.dataset.w;view();};});
       c.querySelectorAll('.up-exp').forEach(function(b){b.onclick=function(ev){ev.stopPropagation();var ex=document.getElementById('upexp-'+b.dataset.id);if(!ex)return;var open=ex.style.display!=='none';ex.style.display=open?'none':'';b.textContent=open?'▸':'▾';};});
-      c.querySelectorAll('.up-row, .up-detpo').forEach(function(b){b.onclick=function(ev){if(ev.target.closest('a'))return;gotoPO(b.dataset.po);};});
+      c.querySelectorAll('.up-row, .up-detpo').forEach(function(b){b.onclick=function(ev){if(ev.target.closest('a'))return;gotoPO(b.dataset.po,'dates');};});
+      c.querySelectorAll('.po-jump').forEach(function(a){a.onclick=function(ev){ev.stopPropagation();gotoPO(a.dataset.po,'dates');};});
       c.querySelectorAll('.up-shiprow').forEach(function(b){b.onclick=function(ev){if(ev.target.closest('a')||ev.target.closest('button'))return;gotoShipment(b.dataset.ref);};});
     };
     view(); }
@@ -744,7 +746,7 @@
       +'<div class="bar" id="po-act"><span class="pill po-actall" data-aa="1" style="background:#dc2626;color:#fff;border:1px solid #991b1b;font-weight:700" title="show only POs that have one or more open action items (the red badges)">ACTION ITEMS ('+actItemsCount()+')</span>'
       +'<span class="pill po-erp" data-erp="1" style="background:#b45309;color:#fff;border:1px solid #7c2d12;font-weight:700;margin-left:6px" title="show only POs misaligned with Fulfil/Cin7 — never pushed (upload the whole PO) or with pending qty/cost changes (update). Use the ERP button on the row, or Upload on the Order Plan, to push.">⬆ NEEDS ERP ('+erpCount()+')</span>'
       +'<span class="pill-lbl" style="margin-left:14px">By type</span>'+ACTP.map(function(a){return '<span class="pill'+(state.act[a[0]]?' active':'')+'" data-a="'+a[0]+'">'+a[1]+' ('+actCount(a[0])+')</span>';}).join('')
-      +'<span class="pill-lbl" style="margin-left:14px">Group</span>'+GRP.map(function(g){return '<span class="pill gpill'+(g[0]===state.grp?' active':'')+'" data-g="'+g[0]+'">'+g[1]+'</span>';}).join('')+'</div>'
+      +'<span class="pill-lbl" style="margin-left:14px">Group</span><select class="flt" id="po-grp" style="width:auto;cursor:pointer">'+GRP.map(function(g){return '<option value="'+g[0]+'"'+(g[0]===state.grp?' selected':'')+'>'+esc(g[1])+'</option>';}).join('')+'</select></div>'
       +'<div id="sup-grid"></div>';
     function anyCtry(){ for(var k in state.ctry){ if(state.ctry[k])return true; } return false; }
     function cur(){ return rows.filter(function(r){
@@ -801,7 +803,7 @@
     c.querySelectorAll('#po-act .po-actall').forEach(function(p){p.onclick=function(){state.hasact=!state.hasact;if(state.hasact)state.erp=false;syncActErp();view();};});
     c.querySelectorAll('#po-act .po-erp').forEach(function(p){p.onclick=function(){state.erp=!state.erp;if(state.erp)state.hasact=false;syncActErp();view();};});
     c.querySelectorAll('#po-act .pill:not(.gpill):not(.po-actall):not(.po-erp)').forEach(function(p){p.onclick=function(){var k=p.dataset.a;state.act[k]=!state.act[k];p.classList.toggle('active',state.act[k]);view();};});
-    c.querySelectorAll('#po-act .gpill').forEach(function(p){p.onclick=function(){c.querySelectorAll('#po-act .gpill').forEach(function(x){x.classList.remove('active');});p.classList.add('active');state.grp=p.dataset.g;view();};});
+    var pgrp=document.getElementById('po-grp'); if(pgrp)pgrp.onchange=function(){state.grp=this.value;view();};
     c.querySelectorAll('#po-ctry .pill').forEach(function(p){p.onclick=function(){var k=p.dataset.c;state.ctry[k]=!state.ctry[k];p.classList.toggle('active',state.ctry[k]);view();};});
     var psup=document.getElementById('po-sup'); if(psup)psup.onchange=function(){state.sup=this.value;view();};
     var pprod=document.getElementById('po-prod'); if(pprod)pprod.onchange=function(){state.prod=this.value;view();};

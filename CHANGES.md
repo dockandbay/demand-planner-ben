@@ -4,6 +4,16 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v25.2 - Small UI fixes: What's-Next PO links + PO grouping dropdown + tighter bars
+
+- **What's Next report** — PO references are now **blue hyperlinks** that open the **actual PO on its DATES
+  tab** (was plain text; rows opened the PO grid generically). Applies to upcoming, overdue, and the
+  expanded shipment-member rows.
+- **Purchase Orders tab** — the **Group** control (None / Production / Master shipment) is now a **dropdown**
+  instead of pills (stops it wrapping).
+- **Tighter filter bars** — reduced inter-item spacing across all SUPPLY bars (8px → 5px) so pills/buttons
+  sit closer while still spaced.
+
 ## v25.1 - SUPPLY ▸ BI Phase 0b: fluid cover & stock-out-risk engine
 
 `GET /api/supply/bi/projection` computes, per **SKU × country**, the net position from **on-hand + inbound
