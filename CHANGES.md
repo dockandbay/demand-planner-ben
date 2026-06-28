@@ -4,6 +4,18 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.404 - Fix: Cin7 "Create PO" was mis-filed as a sales order (missing supplier + branch link)
+
+Creating a PO in Cin7 (Update/Create Cin7 PO) sent only free-text `company` — no `memberId` (supplier
+contact) and no `branchId` — so Cin7 mis-filed it (PO-57AULX4 surfaced as a **sales order**, no branch).
+Fix: the create now resolves the supplier's Cin7 contact id (`memberId`) and the `branchId` from the Cin7
+Branches endpoint by exact name match, sets `stage:'New'`, and includes both in the payload. If either can't
+be resolved it **errors without writing** (so a malformed order can't be created again). Resolved ids are
+returned in the response. Read-only Cin7 lookups; the create stays gated/confirmed. UPDATE path unchanged.
+
+Manual cleanup for the already-created bad order (PO-57AULX4): void Cin7 sales order **1760707**, and clear
+the planner ERP-mirror row for PO-57AULX4 so the next push creates fresh.
+
 ## v20.403 - ★ Focus filter on Order Plan
 
 Added a **★ Focus** pill to the SUPPLY ▸ Order Plan action-items bar. When on, the pivot shows only

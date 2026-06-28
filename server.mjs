@@ -52,7 +52,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.403';
+const APP_VERSION = 'v20.404';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2778,7 +2778,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
   try {
     const erpRow = (await pool.query('SELECT erp_po_id FROM planner.erp_purchase_orders WHERE po=$1', [po])).rows[0];
     const cin7Id = erpRow && erpRow.erp_po_id;          // present → update; absent → create a new Cin7 PO
-    const poRow = (await pool.query('SELECT coalesce(supplier_name,$2) supplier_name FROM planner.purchase_orders WHERE po=$1', [po, ''])).rows[0];
+    const poRow = (await pool.query('SELECT coalesce(supplier_name,$2) supplier_name, coalesce(branch,$2) branch FROM planner.purchase_orders WHERE po=$1', [po, ''])).rows[0];
     if (!poRow) return res.status(404).json({ error: 'PO ' + po + ' not found in the planner.' });
     const lines = (await pool.query(
       `SELECT l.sku, l.qty,
@@ -2796,7 +2796,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
     // Cin7 v1 PO line fields: code (SKU), qty, unitCost. (Confirm field names against your Cin7 account.)
     const lineItems = lines.map(l => ({ code: l.sku, qty: Number(l.qty), unitCost: Number(l.price) || 0 }));
     const edd = completion ? (/T/.test(completion) ? completion : completion + 'T00:00:00Z') : undefined;
-    let newId = cin7Id, r, txt;
+    let newId = cin7Id, r, txt, memberId, branchId;
     if (cin7Id) {
       // UPDATE existing Cin7 PO — preserve its current approval state (don't flip a draft to approved)
       let curApproved;
@@ -2813,9 +2813,26 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
       txt = await r.text();
       if (!r.ok) return res.status(502).json({ error: 'Cin7 API error ' + r.status + ': ' + txt.slice(0, 300) });
     } else {
-      // CREATE a new Cin7 PO (the planner PO isn't in Cin7 yet). reference=PO, company=supplier, lines, est. delivery.
-      // Created as DRAFT (isApproved:false) so a person reviews/approves it in Cin7 — never auto-approved.
-      const create = { reference: po, company: poRow.supplier_name || '', isApproved: false, lineItems };
+      // CREATE a new Cin7 PO (the planner PO isn't in Cin7 yet).
+      // A Cin7 PurchaseOrder MUST be linked to the supplier via memberId and to a branchId — sending only
+      // free-text `company` makes Cin7 mis-file the order (it surfaced as a SALES ORDER). Resolve both from
+      // Cin7 by exact name match (branch name = planner branch; supplier = Cin7 contact company) and FAIL the
+      // create (no write) if either can't be resolved, so we never silently create a malformed order again.
+      async function cin7IdByCompany(resource, company) {
+        if (!company) return null;
+        const g = await fetch('https://api.cin7.com/api/v1/' + resource + "?rows=1&fields=id,company&where=" +
+          encodeURIComponent("company='" + String(company).replace(/'/g, "''") + "'"),
+          { headers: { Authorization: auth, 'content-type': 'application/json' } });
+        if (!g.ok) return null;
+        const arr = await g.json(); return (Array.isArray(arr) && arr[0] && arr[0].id) ? arr[0].id : null;
+      }
+      memberId = await cin7IdByCompany('Contacts', poRow.supplier_name);
+      if (!memberId) return res.status(422).json({ error: 'Supplier "' + (poRow.supplier_name || '(none)') + '" was not found as a Cin7 contact — cannot create the PO. (Creating without a supplier link is what made the previous order a sales order.) Add/spell-match the supplier in Cin7, then retry.', lines: lines.length, mode });
+      branchId = poRow.branch ? await cin7IdByCompany('Branches', poRow.branch) : null;
+      if (poRow.branch && !branchId) return res.status(422).json({ error: 'Branch "' + poRow.branch + '" was not found in Cin7 Branches — cannot create the PO. Make the planner branch name match the Cin7 branch exactly, then retry.', lines: lines.length, mode });
+      // DRAFT (isApproved:false) so a person reviews/approves in Cin7; stage New = standard new PO.
+      const create = { reference: po, memberId: Number(memberId), company: poRow.supplier_name || '', isApproved: false, stage: 'New', lineItems };
+      if (branchId) create.branchId = Number(branchId);
       if (edd) create.estimatedDeliveryDate = edd;
       r = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
         { method: 'POST', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify([create]) });
@@ -2841,7 +2858,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
       if (edd) await pool.query(`UPDATE planner.erp_purchase_orders SET final_delivery_date=$2::date, synced_at=now() WHERE po=$1`, [po, completion]);
       mirrored = true;
     } catch (e) { /* non-fatal — Cin7 write already succeeded */ }
-    res.json({ ok: true, mode, cin7_id: newId, lines: lines.length, approved: lines.filter(l => l.approved_price).length, erp_mirror_updated: mirrored,
+    res.json({ ok: true, mode, cin7_id: newId, cin7_member_id: memberId || null, cin7_branch_id: branchId || null, lines: lines.length, approved: lines.filter(l => l.approved_price).length, erp_mirror_updated: mirrored,
       link: newId ? 'https://go.cin7.com/Cloud/TransactionEntry/TransactionEntry.aspx?idCustomerAppsLink=951111&OrderId=' + encodeURIComponent(newId) : null });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
