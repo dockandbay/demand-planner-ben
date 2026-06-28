@@ -52,7 +52,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.386';
+const APP_VERSION = 'v20.387';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -4233,6 +4233,78 @@ async function sendMagicEmail(email, url) {
   }
   console.log('[portal email] (no RESEND_API_KEY) magic link for ' + email + ':\n  ' + url);   // dev fallback
 }
+// ── Forecast export by country (CSV download · email · DriveHQ upload) ───────────────────────────────────
+const FC_EXPORT_COUNTRIES = ['UK', 'US', 'EU', 'AU', 'CA'];
+// Per-country forecast CSV: one row per SKU × month for the next 12 months; DTC / FBA / B2B as columns.
+// Source = planner.forecast_outputs (the editable SKU plan); country = the warehouse prefix (uk_/us_/eu_/au_/ca_).
+async function forecastCountryCsv(country) {
+  const co = String(country || '').toUpperCase();
+  const rows = (await pool.query(`
+    SELECT sku, to_char(month,'YYYY-MM') ym,
+      coalesce(sum(units) FILTER (WHERE channel='DTC'),0) dtc,
+      coalesce(sum(units) FILTER (WHERE channel='FBA'),0) fba,
+      coalesce(sum(units) FILTER (WHERE channel='B2B'),0) b2b
+    FROM planner.forecast_outputs
+    WHERE lower(split_part(warehouse,'_',1)) = lower($1)
+      AND month >= date_trunc('month', current_date)
+      AND month <  date_trunc('month', current_date) + interval '12 months'
+    GROUP BY sku, month
+    HAVING coalesce(sum(units),0) <> 0
+    ORDER BY sku, month`, [co])).rows;
+  const esc = v => { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  const csv = 'SKU,Month,DTC,FBA,B2B\n' + rows.map(r => [esc(r.sku), r.ym, r.dtc, r.fba, r.b2b].join(',')).join('\n') + '\n';
+  return { csv, rowCount: rows.length };
+}
+app.get('/api/forecast/country-csv/:country', async (req, res) => {
+  try { const { csv } = await forecastCountryCsv(req.params.country);
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="forecast_${String(req.params.country).toUpperCase()}_12mo.csv"`);
+    res.send(csv);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/forecast/export-settings', async (req, res) => {
+  try { res.json((await pool.query(`SELECT country, coalesce(email,'') email FROM planner.forecast_export_settings ORDER BY country`)).rows); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/forecast/export-settings/:country', async (req, res) => {
+  const co = String(req.params.country || '').toUpperCase(), email = (req.body && req.body.email || '').trim();
+  try { await pool.query(`INSERT INTO planner.forecast_export_settings (country,email,updated_at) VALUES ($1,$2,now())
+    ON CONFLICT (country) DO UPDATE SET email=$2, updated_at=now()`, [co, email || null]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+function drivehqConfigured() { return !!(process.env.DRIVEHQ_FTP_HOST && process.env.DRIVEHQ_FTP_USER && process.env.DRIVEHQ_FTP_PASS); }
+// email one country's CSV to its stored address (gated on RESEND_API_KEY; stubbed when absent)
+async function emailForecastCountry(country) {
+  const co = String(country).toUpperCase();
+  const s = (await pool.query(`SELECT email FROM planner.forecast_export_settings WHERE country=$1`, [co])).rows[0];
+  const email = s && s.email;
+  if (!email) return { country: co, ok: false, reason: 'no email set' };
+  const { csv, rowCount } = await forecastCountryCsv(co);
+  if (!rowCount) return { country: co, ok: false, reason: 'no forecast rows for this country' };
+  if (!process.env.RESEND_API_KEY) return { country: co, ok: false, reason: 'RESEND_API_KEY not set (email stubbed)', would_send_to: email, rows: rowCount };
+  const r = await fetch('https://api.resend.com/emails', { method: 'POST',
+    headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', to: [email],
+      subject: 'Dock & Bay forecast — ' + co + ' (next 12 months)',
+      html: '<p>Attached is the latest 12-month forecast for <b>' + co + '</b> (DTC / FBA / B2B by SKU).</p>',
+      attachments: [{ filename: 'forecast_' + co + '_12mo.csv', content: Buffer.from(csv).toString('base64') }] }) });
+  if (!r.ok) return { country: co, ok: false, reason: 'Resend error ' + r.status + ': ' + (await r.text()).slice(0, 200) };
+  return { country: co, ok: true, sent_to: email, rows: rowCount };
+}
+app.post('/api/forecast/email/:country', async (req, res) => { try { res.json(await emailForecastCountry(req.params.country)); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/forecast/email-all', async (req, res) => { try { const out = []; for (const c of FC_EXPORT_COUNTRIES) out.push(await emailForecastCountry(c)); res.json({ ok: true, results: out }); } catch (e) { res.status(500).json({ error: e.message }); } });
+// upload one country's CSV to DriveHQ FTP (gated on DRIVEHQ_* env). Real FTP transfer pending live creds — stubbed for now.
+async function drivehqForecastCountry(country) {
+  const co = String(country).toUpperCase();
+  const { csv, rowCount } = await forecastCountryCsv(co);
+  if (!rowCount) return { country: co, ok: false, reason: 'no forecast rows for this country' };
+  if (!drivehqConfigured()) return { country: co, ok: false, reason: 'DriveHQ FTP not configured (set DRIVEHQ_* env)' };
+  // TODO: real FTP STOR of `csv` to DRIVEHQ_FTP_DIR (pending live DriveHQ credentials; dummy creds in env for now)
+  return { country: co, ok: false, stub: true, reason: 'DriveHQ configured — FTP upload pending real credentials',
+    would_upload: { host: process.env.DRIVEHQ_FTP_HOST, dir: process.env.DRIVEHQ_FTP_DIR, filename: 'forecast_' + co + '_12mo.csv', bytes: Buffer.byteLength(csv), rows: rowCount } };
+}
+app.post('/api/forecast/drivehq/:country', async (req, res) => { try { res.json(await drivehqForecastCountry(req.params.country)); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/forecast/drivehq-all', async (req, res) => { try { const out = []; for (const c of FC_EXPORT_COUNTRIES) out.push(await drivehqForecastCountry(c)); res.json({ ok: true, results: out }); } catch (e) { res.status(500).json({ error: e.message }); } });
 // Session middleware for /api/portal/* (except request-link). Sets req.portal = {email, suppliers:[names], supplierIds:[ids]}.
 async function portalAuth(req, res, next) {
   try {

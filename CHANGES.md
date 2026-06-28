@@ -4,6 +4,25 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.387 - Forecast export by country: server foundation (CSV · email · DriveHQ)
+
+Wiring up the "forecast by country" export (UI to follow). Starting CSV format: **SKU, Month, DTC, FBA, B2B** —
+one row per SKU × month for the next 12 months, from `planner.forecast_outputs` (the editable SKU plan; country =
+warehouse prefix uk_/us_/eu_/au_/ca_).
+
+- `GET /api/forecast/country-csv/:country` — downloads the per-country CSV (verified: UK = 4,139 rows).
+- Migration **080**: `planner.forecast_export_settings` (per-country email address); `GET/POST
+  /api/forecast/export-settings(/:country)` to read/save.
+- `POST /api/forecast/email/:country` + `/email-all` — emails the CSV via Resend (gated on `RESEND_API_KEY`;
+  honest stub reporting `would_send_to` when absent).
+- `POST /api/forecast/drivehq/:country` + `/drivehq-all` — uploads to DriveHQ FTP (gated on `DRIVEHQ_*` env;
+  **stubbed** — real FTP STOR pending live creds; reports `would_upload` host/dir/filename/bytes).
+- Env: **`DRIVEHQ_FTP_HOST/USER/PASS/DIR`** added with **dummy** values (`.env`) + documented in `.env.example`.
+
+**Pending your specifics:** exact CSV layout; confirm the source should be `forecast_outputs` (editable SKU plan)
+vs the planner's displayed/computed numbers; where the settings UI + buttons should live; real DriveHQ FTP creds +
+the email provider. Next increment: the settings UI (per-country email + Download/Email/Upload + all-countries buttons).
+
 ## v20.386 - Supplier portal: typed multi-document uploads (Phase 3)
 
 - New **Documents** section on the portal **INVOICE** tab: the supplier picks a **type** (Commercial Invoice,
