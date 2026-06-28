@@ -52,7 +52,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.392';
+const APP_VERSION = 'v20.394';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -4240,8 +4240,9 @@ async function sendMagicEmail(email, url) {
 app.get('/api/kpi/in-stock', async (req, res) => {
   const t3pl = Number(req.query.t3pl); const tfba = Number(req.query.tfba);
   const T3 = isFinite(t3pl) ? t3pl : 5, TF = isFinite(tfba) ? tfba : 5;
+  const grp = ['Core', 'Seasonal', 'Non-Core'].includes(req.query.group) ? req.query.group : '';   // core/seasonal split
   try {
-    const prods = (await pool.query(`SELECT sku, coalesce(in_planning_scope,false) act, coalesce(market_tier,'') tier,
+    const prods = (await pool.query(`SELECT sku, coalesce(in_planning_scope,false) act, coalesce(market_tier,'') tier, coalesce(core_seasonal,'') cs,
         coalesce(available_uk_dtc,false) OR coalesce(available_uk_b2b,false) uk3, coalesce(available_uk_fba,false) ukf,
         coalesce(available_us_dtc,false) OR coalesce(available_us_b2b,false) us3, coalesce(available_us_fba,false) usf,
         coalesce(available_eu_dtc,false) OR coalesce(available_eu_b2b,false) eu3, coalesce(available_eu_fba,false) euf,
@@ -4259,13 +4260,13 @@ app.get('/api/kpi/in-stock', async (req, res) => {
     ];
     const rows = combos.map(([label, fld, wh, thr, ct, mk]) => {
       let skus = 0, instock = 0, aSkus = 0, aInstock = 0;
-      for (const p of prods) { if (!p.act || !p[fld] || discontinued(p, mk)) continue; const ok = ((inv[p.sku] || {})[wh] || 0) > thr;
+      for (const p of prods) { if (!p.act || !p[fld] || discontinued(p, mk)) continue; if (grp && p.cs !== grp) continue; const ok = ((inv[p.sku] || {})[wh] || 0) > thr;
         skus++; if (ok) instock++; if (p.tier === 'A') { aSkus++; if (ok) aInstock++; } }
       return { channel: label, type: ct, skus, instock, pct: skus ? Math.round(instock / skus * 100) : 0, a_skus: aSkus, a_instock: aInstock, a_pct: aSkus ? Math.round(aInstock / aSkus * 100) : 0 };
     });
     const tot = type => { const r = rows.filter(x => x.type === type); const s = k => r.reduce((a, x) => a + x[k], 0);
       return { channel: 'Total ' + type, type: 'TOTAL', skus: s('skus'), instock: s('instock'), pct: s('skus') ? Math.round(s('instock') / s('skus') * 100) : 0, a_skus: s('a_skus'), a_instock: s('a_instock'), a_pct: s('a_skus') ? Math.round(s('a_instock') / s('a_skus') * 100) : 0 }; };
-    res.json({ ok: true, t3pl: T3, tfba: TF, rows: rows.filter(r => r.type === '3PL').concat([tot('3PL')], rows.filter(r => r.type === 'FBA'), [tot('FBA')]) });
+    res.json({ ok: true, t3pl: T3, tfba: TF, group: grp || 'All', rows: rows.filter(r => r.type === '3PL').concat([tot('3PL')], rows.filter(r => r.type === 'FBA'), [tot('FBA')]) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // ── Forecast export by country (CSV download · email · DriveHQ upload) ───────────────────────────────────

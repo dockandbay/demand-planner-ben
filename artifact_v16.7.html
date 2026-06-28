@@ -2784,7 +2784,7 @@ var FC_INITIAL={}; // populated at end of init() after all IV overlays — diff 
 let SKU_VIEW=null;
 let VIEW_MODE='planning'; // 'planning' | 'exec'
 let REPORT_VIEW='ex'; // REPORTS sub-tab: 'ex' (Exec Summary) | 'slow' (Slow Moving) | 'af' (Auto Forecast)
-let KPI_SUB='instock', KPI_T3PL=5, KPI_TFBA=5; // DEMAND ▸ KPIs state (sub-view + in-stock thresholds per channel)
+let KPI_SUB='instock', KPI_T3PL=5, KPI_TFBA=5, KPI_GRP=''; // DEMAND ▸ KPIs state (sub-view + thresholds + core/seasonal split)
 let DEMAND_VIEW='plan'; // DEMAND sub-tab: 'plan' (the demand plan) | 'targets' (sell-through targets) | 'actions'
 var TGT_CACHE=null;
 var _da={sec:'actions',mkt:'all',cat:'all',status:'open'}; // DEMAND ▸ Actions filters (sec: actions|insights|weather; status: open|snoozed|dismissed|done|all)
@@ -6436,13 +6436,18 @@ function renderKpisView(body){
   body.querySelectorAll('.dnav[data-k]').forEach(function(b){ b.onclick=function(){ KPI_SUB=b.dataset.k; renderKpisView(body); }; });
   var kb=body.querySelector('#kpi-body');
   if(KPI_SUB!=='instock'){ kb.innerHTML='<div style="padding:18px;color:#64748b;font-size:13px">&#128202; '+(KPI_SUB==='slowmoving'?'Slow moving':'Inventory')+' KPI &mdash; coming soon.</div>'; return; }
+  var grps=[['','All'],['Core','Core'],['Seasonal','Seasonal'],['Non-Core','Non-Core']];
   kb.innerHTML='<div style="display:flex;gap:18px;align-items:center;margin-bottom:10px;flex-wrap:wrap">'
     +'<div style="font-size:13px;font-weight:700">In-stock rate</div>'
     +'<label style="font-size:12px;color:#475569">3PL in stock when units &gt; <input type="number" id="kpi-t3pl" value="'+KPI_T3PL+'" min="0" style="width:60px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px"></label>'
     +'<label style="font-size:12px;color:#475569">FBA in stock when units &gt; <input type="number" id="kpi-tfba" value="'+KPI_TFBA+'" min="0" style="width:60px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px"></label>'
+    +'<span style="font-size:12px;color:#475569;margin-left:6px">Split:</span>'
+    +'<span style="display:flex;gap:4px">'+grps.map(function(g){return '<button class="kpi-grp" data-g="'+g[0]+'" style="font-size:11px;padding:3px 10px;border-radius:5px;cursor:pointer;border:1px solid #cbd5e1;'+(g[0]===KPI_GRP?'background:#0f172a;color:#fff;border-color:#0f172a':'background:#fff;color:#334155')+'">'+g[1]+'</button>';}).join('')+'</span>'
+    +'<span style="margin-left:auto;display:flex;gap:6px"><button id="kpi-csv" style="font-size:11px;padding:3px 10px;border-radius:5px;cursor:pointer;border:1px solid #cbd5e1;background:#fff">&#8595; CSV</button><button id="kpi-copy" style="font-size:11px;padding:3px 10px;border-radius:5px;cursor:pointer;border:1px solid #cbd5e1;background:#fff">&#9106; Copy</button></span>'
     +'</div><div id="kpi-tbl"><div style="color:#94a3b8;font-size:12px">Loading…</div></div>';
+  kb.querySelectorAll('.kpi-grp').forEach(function(b){ b.onclick=function(){ KPI_GRP=b.dataset.g; renderKpisView(body); }; });
   function load(){ var t3=document.getElementById('kpi-t3pl').value, tf=document.getElementById('kpi-tfba').value;
-    fetch('/api/kpi/in-stock?t3pl='+encodeURIComponent(t3)+'&tfba='+encodeURIComponent(tf)).then(function(r){return r.json();}).then(function(j){
+    fetch('/api/kpi/in-stock?t3pl='+encodeURIComponent(t3)+'&tfba='+encodeURIComponent(tf)+'&group='+encodeURIComponent(KPI_GRP)).then(function(r){return r.json();}).then(function(j){
       var tbl=document.getElementById('kpi-tbl'); if(!tbl)return;
       if(!j||!j.ok){ tbl.innerHTML='<div style="color:#dc2626;font-size:12px">Failed to load.</div>'; return; }
       var th='padding:5px 12px;text-align:right', thl='padding:5px 12px;text-align:left';
@@ -6457,7 +6462,15 @@ function renderKpisView(body){
           +'<td style="padding:4px 12px;text-align:right">'+r.a_skus+'</td><td style="padding:4px 12px;text-align:right">'+r.a_instock+'</td>'
           +'<td style="padding:4px 12px;text-align:right;font-weight:600;color:'+(r.a_pct>=80?'#15803d':r.a_pct>=50?'#b45309':'#b91c1c')+'">'+r.a_pct+'%</td></tr>'; }).join('');
       tbl.innerHTML='<table style="border-collapse:collapse;font-size:12px;max-width:760px;width:100%"><thead>'+head+'</thead><tbody>'+rowsH+'</tbody></table>'
-        +'<div style="font-size:11px;color:#94a3b8;margin-top:6px">Active products available in each channel, with on-hand stock above the threshold. A = A-tier (market_tier).</div>'; }); }
+        +'<div style="font-size:11px;color:#94a3b8;margin-top:6px">Active products available in each channel, with on-hand stock above the threshold. A = A-tier (market_tier).</div>';
+      // CSV / clipboard exports for this KPI
+      var matrix=[['Market/Channel','SKUs','In Stock','%','A SKUs','A In Stock','A %']].concat(j.rows.map(function(r){return [r.channel,r.skus,r.instock,r.pct+'%',r.a_skus,r.a_instock,r.a_pct+'%'];}));
+      var fname='in_stock_rate_'+(j.group||'All')+'_3plgt'+j.t3pl+'_fbagt'+j.tfba+'.csv';
+      var cb=document.getElementById('kpi-csv'), cp=document.getElementById('kpi-copy');
+      if(cb)cb.onclick=function(){ var c=matrix.map(function(r){return r.map(function(x){x=String(x);return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;}).join(',');}).join('\n')+'\n';
+        var bl=new Blob([c],{type:'text/csv'}),u=URL.createObjectURL(bl),a=document.createElement('a');a.href=u;a.download=fname;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u);},1000); };
+      if(cp)cp.onclick=function(){ var tsv=matrix.map(function(r){return r.join('\t');}).join('\n'); navigator.clipboard.writeText(tsv).then(function(){var o=cp.textContent;cp.textContent='✓ Copied';setTimeout(function(){cp.textContent=o;},1400);}).catch(function(){alert('Copy blocked by the browser.');}); };
+    }); }
   document.getElementById('kpi-t3pl').onchange=function(){ KPI_T3PL=Number(this.value)||0; load(); };
   document.getElementById('kpi-tfba').onchange=function(){ KPI_TFBA=Number(this.value)||0; load(); };
   load();
