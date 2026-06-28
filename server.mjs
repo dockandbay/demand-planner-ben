@@ -52,7 +52,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.385';
+const APP_VERSION = 'v20.386';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1098,6 +1098,9 @@ app.get('/api/supply/:section', async (req, res) => {
           WHERE coalesce(s.status,'') NOT ILIKE '%discontinued%' ORDER BY s.category, s.sku`));
       case 'client-attachments':   // Client/FBA docs across all POs (category='client') — portal Barcodes & Labels tab
         return res.json(await q(`SELECT po, id, filename FROM planner.portal_attachments WHERE coalesce(category,'')='client' ORDER BY uploaded_at DESC`));
+      case 'portal-docs':   // supplier-uploaded documents across all POs (every category except 'client') — portal Documents section
+        return res.json(await q(`SELECT po, id, filename, coalesce(category,'Other') category, to_char(uploaded_at,'YYYY-MM-DD') uploaded_at
+          FROM planner.portal_attachments WHERE coalesce(category,'') NOT IN ('client') ORDER BY uploaded_at DESC`));
       case 'shipment-plan': {   // master shipments + the POs aboard each (Shipment Plan — admin sub-tab + supplier portal tab)
         const rows = await q(`
           SELECT p.shipment_ref,
@@ -2148,6 +2151,13 @@ app.post('/api/supply/portal-upload', async (req, res) => {
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, [b.po, b.supplier_id || null, b.filename || 'invoice', b.mime || 'application/octet-stream', buf.length, buf, b.uploaded_by || null, b.category || 'invoice']);
     res.json({ id: r.rows[0].id, byte_size: buf.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Remove a supplier-uploaded document. (Won't remove Client/FBA docs — those are managed admin-side.)
+app.post('/api/supply/portal-attachment-remove', async (req, res) => {
+  const id = req.body && req.body.id;
+  if (!id) return res.status(400).json({ error: 'id required' });
+  try { const r = await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1 AND coalesce(category,'')<>'client'`, [id]); res.json({ ok: true, deleted: r.rowCount }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/portal-submit', async (req, res) => {
   const b = req.body || {}; const sid = b.supplier_id || null, by = b.submitted_by || 'portal';

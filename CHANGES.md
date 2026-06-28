@@ -4,6 +4,18 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.386 - Supplier portal: typed multi-document uploads (Phase 3)
+
+- New **Documents** section on the portal **INVOICE** tab: the supplier picks a **type** (Commercial Invoice,
+  Packing List, CI & PL, Transaction Certificate, Certificate of Origin, Photos, Other) and uploads a file; the
+  list shows type · file · date with a remove action. Stored in `portal_attachments.category`.
+- Server: `case 'portal-docs'` (list all supplier docs by PO, excludes Client/FBA) + `POST
+  /api/supply/portal-attachment-remove`; `portal-upload` already accepted `category`. EP wiring added
+  (`docRemove`, `attachmentBase`). Verified upload→list→remove round-trip.
+- **Diviyaj (live portal):** add `/api/portal/docs` (list), `/api/portal/attachment-remove`,
+  `/api/portal/parse-invoice`, `/api/portal/invoice-apply`; bootstrap should include `docsByPo` per PO; the
+  portal `attachmentBase` is `/api/portal/attachment/`. (Phases 1–3 of the invoice-upload feature are now complete.)
+
 ## v20.385 - Supplier portal: upload invoice → preview → apply order-plan overrides (Phase 2)
 
 - Supplier portal **ORDER PLAN** tab now has an **"Upload invoice / packing list (Excel)"** control: the supplier

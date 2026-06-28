@@ -11,6 +11,8 @@
   function fd(s){ if(!s)return ''; var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(s)); return m?(m[3]+'-'+MON[+m[2]-1]+'-'+m[1].slice(2)):String(s); }
   function dcell(v){return v?esc(fd(v)):'<span class="mut tiny">—</span>';}
   var PO_STATUSES=['FUTURE','PRODUCTION','READY TO SHIP','SHIPPING','DELIVERED','COMPLETE'];
+  // document types a supplier can attach (Documents section on the INVOICE tab)
+  var DOC_TYPES=['Commercial Invoice','Packing List','CI & PL','Transaction Certificate','Certificate of Origin','Photos','Other'];
   // supplier production status — the supplier maintains this; an exception flags a status that conflicts with the dates
   var PROD_STATUS=[['not_started','Not started'],['in_production','In production'],['nearing_completion','Nearing completion'],['complete','Complete'],['shipped','Shipped']];
   function prodStatusLabel(v){ var m=PROD_STATUS.filter(function(o){return o[0]===v;}); return m.length?m[0][1]:''; }
@@ -500,6 +502,17 @@
         +'<label class="tiny">Invoice value (USD)<br><input class="fci pp-inv" data-po="'+po+'" placeholder="0.00" value="'+(invSub&&invSub.status!=='dismissed'?esc(invSub.value):'')+'" style="width:110px"></label>'
         +'<label class="tiny">Invoice doc<br><input type="file" class="pp-inv-file" data-po="'+po+'" style="font-size:11px;width:200px"></label><button class="save-btn pp-inv-go" data-po="'+po+'">'+(invSub&&invSub.status!=='dismissed'?'Resubmit invoice':'Submit invoice')+'</button></div>'
         +(invSub?'<div class="tiny" style="margin-top:8px;padding:6px 9px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px">Submitted: <b>$'+esc(invSub.value)+'</b> · '+esc(invSub.submitted_at||'')+' · '+invStatus+(invSub.attachment_id?' · <a href="/api/portal/attachment/'+invSub.attachment_id+'" target="_blank">doc</a>':'')+'</div>':'<div class="tiny mut" style="margin-top:6px">No invoice submitted yet.</div>');
+      // ---- DOCUMENTS: upload multiple files, each tagged with a type (Commercial Invoice, Packing List, …) ----
+      var pdocs=(_ppData&&_ppData.docsByPo&&_ppData.docsByPo[po])||[];
+      var attBase=(EP.attachmentBase||'/api/portal/attachment/');
+      var docRows=pdocs.length?pdocs.map(function(d){ return '<tr><td class="l">'+esc(d.category||'Other')+'</td><td class="l"><a href="'+attBase+d.id+'" target="_blank" rel="noopener">'+esc(d.filename||'file')+'</a></td><td class="l mut tiny">'+esc(d.uploaded_at||'')+'</td><td class="l"><button class="lnk-btn pp-doc-rm" data-id="'+d.id+'" data-po="'+po+'" style="color:#b91c1c">remove</button></td></tr>'; }).join('')
+        :'<tr><td colspan="4" class="mut tiny">No documents uploaded yet.</td></tr>';
+      invoice+='<div class="sect-h" style="margin-top:14px">Documents <span class="mut tiny">— attach your commercial invoice, packing list, certificates, photos…</span></div>'
+        +'<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:6px">'
+        +'<label class="tiny">Type<br><select class="fci pp-doc-type" data-po="'+po+'" style="text-align:left;min-width:160px">'+DOC_TYPES.map(function(t){return '<option>'+esc(t)+'</option>';}).join('')+'</select></label>'
+        +'<label class="tiny">File<br><input type="file" class="pp-doc-file" data-po="'+po+'" style="font-size:11px;width:210px"></label>'
+        +'<button class="save-btn pp-doc-go" data-po="'+po+'">Upload document</button></div>'
+        +'<table style="font-size:11px;width:auto"><thead><tr><th class="l">Type</th><th class="l">File</th><th class="l">Uploaded</th><th></th></tr></thead><tbody>'+docRows+'</tbody></table>';
       // ---- SHIPMENT: flexport details, else submit tracking/carrier + completion ----
       var shipLabelBtn=(p.ship_other_supplier?'<div style="margin:6px 0"><button class="save-btn pp-shiplabel" data-po="'+po+'" title="this shipment consolidates under another supplier’s master — download the SHIPS WITH labels for your cartons">⤓ Shipment Labels</button> <span class="mut tiny">consolidated under another supplier — label your cartons</span></div>':'');
       // carrier + tracking live on the SHIPMENT (same carrier list as the planner). If this PO isn't on a
@@ -794,6 +807,16 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
               scope.querySelectorAll('.pp-inv-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po; var val=pick('pp-inv',po).value; var fin=pick('pp-inv-file',po); var f=fin&&fin.files[0]; if(!val&&!f)return; btn.disabled=true;
                 var go=function(attId){ postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,invoice_value:val||null,invoice_attachment_id:attId||null},function(){ alert('Invoice submitted — awaiting Dock & Bay approval.'); reload(); }); };
                 if(f){ var rd=new FileReader(); rd.onload=function(){ postJSON(EP.upload,{po:po,supplier_id:sid,filename:f.name,mime:f.type,data_base64:rd.result,uploaded_by:by},function(j){ go(j.id); }); }; rd.readAsDataURL(f); } else go(null); }; });
+              // upload a typed document (Commercial Invoice / Packing List / …) → store + show in the Documents list
+              scope.querySelectorAll('.pp-doc-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po;
+                var typeEl=pick('pp-doc-type',po), fin=pick('pp-doc-file',po), f=fin&&fin.files&&fin.files[0];
+                if(!f){ alert('Choose a file to upload.'); return; } var cat=typeEl?typeEl.value:'Other'; var row=btn.closest('tr[id^="pp-"]'); btn.disabled=true;
+                var rd=new FileReader(); rd.onload=function(){ postJSON(EP.upload,{po:po,supplier_id:sid,filename:f.name,mime:f.type,data_base64:rd.result,uploaded_by:by,category:cat},function(j){
+                  (_ppData.docsByPo=_ppData.docsByPo||{}); (_ppData.docsByPo[po]=_ppData.docsByPo[po]||[]).unshift({id:j.id,filename:f.name,category:cat,uploaded_at:''});
+                  rerenderRow(row,po,'invoice'); }); }; rd.readAsDataURL(f); }; });
+              // remove a supplier document
+              scope.querySelectorAll('.pp-doc-rm').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Remove this document?'))return; var id=btn.dataset.id, po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]');
+                postJSON(EP.docRemove,{id:id},function(){ if(po&&_ppData.docsByPo&&_ppData.docsByPo[po])_ppData.docsByPo[po]=_ppData.docsByPo[po].filter(function(d){return String(d.id)!==String(id);}); rerenderRow(row,po,'invoice'); }); }; });
             } }
     function loadPreview(){ tabsEl.style.display=''; body.innerHTML='<div class="count">Loading…</div>';
       opts.getData().then(function(d){ _ppData=d; renderPP(); }).catch(function(e){ body.innerHTML='<div class="count" style="color:#dc2626">'+esc(e&&e.message||e)+'</div>'; }); }
