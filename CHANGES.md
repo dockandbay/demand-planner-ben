@@ -4,6 +4,13 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.379 - Cin7 auth accepts either a full header, a bare base64, or a username/key pair
+
+- New `cin7Auth()` resolver used by both Cin7 endpoints. `CIN7_AUTH` may now be set as **either** the full
+  `Basic <base64>` header **or** just the bare `<base64>` (the code adds the `Basic ` prefix). Alternatively set
+  `CIN7_USERNAME` + `CIN7_KEY` and the code base64-encodes them. Still a safe 501 no-op when nothing is configured.
+- `.env.example` documents all three forms.
+
 ## v20.378 - Pre-handoff review fixes (hardening, no behaviour change for valid input)
 
 Code/DB review before the Diviyaj handoff. Findings addressed:

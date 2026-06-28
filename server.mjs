@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.378';
+const APP_VERSION = 'v20.379';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2595,8 +2595,20 @@ app.post('/api/supply/po/:po/delete', async (req, res) => {
   } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
+// Resolve the Cin7 Authorization header from env — accepts EITHER form, so it's flexible:
+//   • CIN7_AUTH = full header   → "Basic <base64>"      (used as-is)
+//   • CIN7_AUTH = bare base64   → "<base64 of user:key>" (we prepend "Basic ")
+//   • CIN7_USERNAME + CIN7_KEY  → we base64-encode "user:key" ourselves
+// Returns null when nothing is configured (endpoints then no-op with 501).
+function cin7Auth() {
+  const a = (process.env.CIN7_AUTH || '').trim();
+  if (a) return /^basic\s/i.test(a) ? a : ('Basic ' + a);
+  const u = process.env.CIN7_USERNAME, k = process.env.CIN7_KEY;
+  if (u && k) return 'Basic ' + Buffer.from(u + ':' + k).toString('base64');
+  return null;
+}
 // Update the Cin7 PO's EstimatedDeliveryDate to the planner's Completion date (#14). LIVE write to Cin7 —
-// gated: requires CIN7_AUTH env (full "Basic <base64>" header). Safe no-op (501) when the credential is absent.
+// gated: requires Cin7 creds (see cin7Auth). Safe no-op (501) when the credential is absent.
 app.post('/api/supply/po/:po/cin7-date', async (req, res) => {
   const po = req.params.po;
   const completion = ((req.body && req.body.completion_date) || '').trim();
@@ -2605,7 +2617,7 @@ app.post('/api/supply/po/:po/cin7-date', async (req, res) => {
     const row = (await pool.query('SELECT erp_po_id FROM planner.erp_purchase_orders WHERE po=$1', [po])).rows[0];
     const cin7Id = row && row.erp_po_id;
     if (!cin7Id) return res.status(404).json({ error: 'No Cin7 PO id (erp_po_id) found for ' + po + ' — sync the ERP mirror first.' });
-    const auth = process.env.CIN7_AUTH;   // full Authorization header value, e.g. "Basic <base64 user:key>"
+    const auth = cin7Auth();
     if (!auth) return res.status(501).json({ error: 'Cin7 API credentials not configured (set CIN7_AUTH). No write performed.' });
     const edd = /T/.test(completion) ? completion : (completion + 'T00:00:00Z');
     const body = [{ id: Number(cin7Id) || cin7Id, isApproved: true, estimatedDeliveryDate: edd }];
@@ -2639,7 +2651,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
        FROM planner.purchase_order_lines l WHERE l.po=$1 AND coalesce(l.qty,0)>0 ORDER BY l.sku`, [po])).rows;
     if (!lines.length) return res.status(400).json({ error: 'No order-plan lines with qty for ' + po + '.' });
     const mode = cin7Id ? 'updated' : 'created';
-    const auth = process.env.CIN7_AUTH;
+    const auth = cin7Auth();
     if (!auth) return res.status(501).json({ error: 'Cin7 API credentials not configured (set CIN7_AUTH). No write performed.', lines: lines.length, mode });
     // Cin7 v1 PO line fields: code (SKU), qty, unitCost. (Confirm field names against your Cin7 account.)
     const lineItems = lines.map(l => ({ code: l.sku, qty: Number(l.qty), unitCost: Number(l.price) || 0 }));
