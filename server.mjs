@@ -52,7 +52,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.389';
+const APP_VERSION = 'v20.390';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -4240,6 +4240,8 @@ const FC_EXPORT_COUNTRIES = ['UK', 'US', 'EU', 'AU', 'CA'];
 //   G-M1..12 (left blank), FBA-M1..12, B2B-M1..12. Row 2 carries the actual month dates for each block.
 // Source = planner.forecast_outputs (the editable SKU plan); country = warehouse prefix (uk_/us_/eu_/au_/ca_).
 const FC_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// the 3PL label per country (the "Country Category" prefix) — adjust if a country's 3PL changes
+const FC_3PL = { UK: 'UK ILG', US: 'US Geneva', EU: 'EU iFulfillment', AU: 'AU Coghlans', CA: 'CA Propack' };
 async function forecastCountryCsv(country) {
   const co = String(country || '').toUpperCase();
   // 12 months starting this month
@@ -4253,7 +4255,14 @@ async function forecastCountryCsv(country) {
       AND month >= date_trunc('month', current_date) AND month < date_trunc('month', current_date) + interval '12 months'
     GROUP BY sku, month, channel`, [co])).rows;
   if (!rows.length) return { csv: '', rowCount: 0 };
-  const subs = {}; (await pool.query(`SELECT sku, coalesce(subcategory,'') s FROM planner.products`)).rows.forEach(r => { subs[r.sku] = r.s; });
+  // SKU → category (for the Country Category label)
+  const cat = {}; (await pool.query(`SELECT sku, coalesce(category,'') c FROM planner.products`)).rows.forEach(r => { cat[r.sku] = r.c; });
+  // current 3PL stock on hand for this country (warehouse {co}_3pl)
+  const onhand = {}; (await pool.query(`SELECT sku, coalesce(available,0) a FROM planner.product_inventory WHERE lower(warehouse)=lower($1)`, [co + '_3pl'])).rows.forEach(r => { onhand[r.sku] = Number(r.a) || 0; });
+  // P = purchase quantity per month from the buy plan (order_quantity by order_month for this country) — blank when none
+  const buy = {}; (await pool.query(`SELECT sku, to_char(order_month,'YYYY-MM') ym, sum(order_quantity) q
+    FROM planner.buy_plan WHERE lower(split_part(warehouse,'_',1)) = lower($1) AND order_month IS NOT NULL
+    GROUP BY sku, order_month`, [co])).rows.forEach(r => { (buy[r.sku] = buy[r.sku] || {})[r.ym] = Number(r.q) || 0; });
   const map = {}, skus = [];
   rows.forEach(r => { if (!map[r.sku]) { map[r.sku] = {}; skus.push(r.sku); } const c = (map[r.sku][r.ym] = map[r.sku][r.ym] || { DTC: 0, FBA: 0, B2B: 0 }); c[r.channel] = Number(r.u) || 0; });
   skus.sort();
@@ -4263,11 +4272,16 @@ async function forecastCountryCsv(country) {
   const dates = months.map(dateLbl);
   const labelRow = ['SKU Header', 'Country Category', 'MonthsStock'].concat(dates, dates, dates, dates, dates);
   const dataRows = skus.map(sku => {
-    const cc = co + ' ' + (subs[sku] || '');
     const get = (ym, ch) => { const c = map[sku][ym]; return c ? (c[ch] || 0) : 0; };
     const fc = ymList.map(ym => get(ym, 'DTC')), fba = ymList.map(ym => get(ym, 'FBA')), b2b = ymList.map(ym => get(ym, 'B2B'));
-    const blank12 = ymList.map(() => '');   // P + G left blank (kept in the format)
-    return [esc(sku), esc(cc.trim()), ''].concat(fc, blank12, blank12, fba, b2b);
+    // MonthsStock = whole months of cover the current 3PL on-hand gives against total monthly demand (DTC+FBA+B2B)
+    let stock = onhand[sku] || 0, cover = 0;
+    for (let i = 0; i < 12; i++) { const dem = fc[i] + fba[i] + b2b[i]; if (stock >= dem) { stock -= dem; cover++; } else break; }
+    // P = buy-plan order qty per month (blank when no buy plan for that month)
+    const p = ymList.map(ym => { const b = buy[sku] && buy[sku][ym]; return b ? b : ''; });
+    const blank12 = ymList.map(() => '');   // G left blank (kept in the format)
+    const cc = (FC_3PL[co] || co) + ' ' + (cat[sku] || '');
+    return [esc(sku), esc(cc.trim()), cover].concat(fc, p, blank12, fba, b2b);
   });
   const csv = [codeRow, labelRow].concat(dataRows).map(r => r.join(',')).join('\n') + '\n';
   return { csv, rowCount: skus.length };

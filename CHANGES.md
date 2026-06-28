@@ -4,6 +4,18 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.390 - Forecast CSV: MonthsStock + P + Country Category computed; Sync-Cin7 button restyled
+
+- **MonthsStock** now computed = whole months of cover the current **3PL on-hand** (`product_inventory {co}_3pl`)
+  gives against total monthly demand (DTC+FBA+B2B).
+- **P-M1..12** now sourced from the **buy plan** (`buy_plan.order_quantity` by `order_month`, per country) — blank
+  where there's no buy-plan row (the table is currently empty). **G** stays blank.
+- **Country Category** = the country's **3PL label + category** (e.g. `UK ILG Bag - Beach`); 3PL map UK=ILG,
+  US=Geneva, EU=iFulfillment, AU=Coghlans, CA=Propack (adjustable).
+- **DriveHQ WebDAV upload tested live — HTTP 204, file received.**
+- SUPPLY ▸ Purchase Orders: **Sync Cin7 dates** restyled to the black `CSV for Fulfil` format and moved to the
+  right of it.
+
 ## v20.389 - Forecast export: real CSV format (Forecast Analysis layout) + real DriveHQ WebDAV upload
 
 - **CSV now matches the "Forecast Analysis" layout** — 63 columns, two header rows (field codes `FC-M1…` + the
