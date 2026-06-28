@@ -52,7 +52,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.400';
+const APP_VERSION = 'v20.401';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1003,6 +1003,7 @@ app.get('/api/supply/:section', async (req, res) => {
             coalesce(country_code,'') country_override, coalesce(branch,'') branch,
             coalesce(erp_po,'') erp, coalesce(prod_no,'') prod_no, coalesce(batch_id,'') batch_id,
             coalesce((SELECT pn.require_supplier_confirmation FROM planner.prod_numbers pn WHERE pn.prod_no=calc4.prod_no),false) require_confirmation,
+            coalesce(starred,false) starred,   -- ⭐ Focus / favourite toggle (migration 082)
             -- ERP sync: drift = planned qty/cost differs from the ERP MIRROR (planner.erp_purchase_order_lines,
             -- fed by n8n). erp_in/erp_total drive the 3-state badge (✓ match / ⚠ drift / ✗ not in ERP).
             (SELECT count(*) FROM planner.purchase_order_lines l LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
@@ -1264,6 +1265,7 @@ app.get('/api/supply/:section', async (req, res) => {
              AND sh.carrier_ref IS NULL AND fx.flex_id IS NULL) is_exception,
             (coalesce(a.pallets,0) > 20) over_pallets,   -- est. cargo over one 20-pallet container → exception
             coalesce(sh.escalated,false) escalated,
+            coalesce(sh.starred,false) starred,   -- ⭐ Focus / favourite toggle (migration 082)
             (SELECT count(*) FROM planner.shipment_notes sn WHERE sn.shipment_ref=sh.shipment_ref AND sn.author_kind='supplier' AND sn.read_at IS NULL)::int unread_notes
           FROM planner.shipments sh
           LEFT JOIN agg a ON a.shipment_ref=sh.shipment_ref
@@ -2921,6 +2923,7 @@ app.post('/api/supply/po/:po/rename', async (req, res) => {
 app.post('/api/supply/po/:po', (req, res) =>
   patch(res, 'planner.purchase_orders', 'po', req.params.po, {
     status: 'text', ship_type: 'text', deposit_ref: 'text', shipment_ref: 'text', prod_no: 'text',
+    starred: 'boolean',   // ⭐ Focus / favourite toggle (migration 082)
     batch_id: 'text', branch: 'text', erp_po: 'text', notes: 'text', container_size: 'text',
     country_code: 'text', client: 'text', client_requirements: 'text', sales_order_ref: 'text', client_deadline_date: 'date', asn_numbers: 'text',
     client_po_ref: 'text', dispatch_order_ref: 'text', final_delivery_address: 'text', crossdock_skus: 'text',
@@ -3181,6 +3184,7 @@ app.get('/api/supply/shipment-detail/:ref', async (req, res) => {
 // POs aboard. Row may not exist yet (a shipment_ref freshly typed onto a PO), so insert-on-conflict.
 const SHIP_FIELDS = {
   master_po: 'text', carrier: 'text', carrier_ref: 'text', status: 'text', notes: 'text', mode: 'text',
+  starred: 'boolean',   // ⭐ Focus / favourite toggle (migration 082)
   cost_manual: 'numeric', tracked_delivery_date: 'date', tracked_source: 'text',
   departure_date: 'date', landing_date: 'date', delivery_date: 'date', arrival_date: 'date',
   branch: 'text', country_code: 'text',   // shipment-level destination override (inherits from master PO)

@@ -57,7 +57,10 @@ plus new numbered migrations on top. See `migrations/README.md`.
     `purchase_orders.prod_no`** — `prod_no` on POs is **n8n Airtable→Supabase sync-fed**, so: (a) confirm Airtable
     isn't still emitting `P53` before/after, or it reappears on the next sync; (b) Ben manually fixes the 2–3
     remaining `P53` POs. Deposit *money* is unaffected (it links by `deposit_ref`, not `prod_no`). Idempotent
-    (`WHERE prod_no='P53'`). ⬅ *latest.*
+    (`WHERE prod_no='P53'`).
+  - **`082_po_shipment_starred.sql`** — adds `starred boolean NOT NULL DEFAULT false` to `purchase_orders`
+    and `shipments` (⭐ Focus / favourite toggle on both grids). The PO/shipments read queries now select
+    `starred`, so **apply this before deploying v20.401 or the grids will error**. Idempotent. ⬅ *latest.*
 
   **Invoice-upload feature (supplier portal) — live `/api/portal/*` to add (preview wired to `/api/supply/*`):**
   - `/api/portal/parse-invoice` + `/api/portal/invoice-apply` (parse a supplier `.xlsx` invoice → preview vs the
@@ -87,7 +90,7 @@ plus new numbered migrations on top. See `migrations/README.md`.
   - The shipment payload for the **Shipment Plan** tab needs **`master_supplier`** (filters to the logged-in supplier)
     and **`carrier_ref`** (tracking shown on the card).
 
-- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`081` in order. Do **not** run
+- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`082` in order. Do **not** run
   `schema.sql` against an already-migrated DB (the table creates aren't idempotent).
 
 ---

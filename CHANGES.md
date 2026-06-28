@@ -4,6 +4,17 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.401 - ⭐ Focus / favourite star on Purchase Orders + Shipments
+
+A small star icon next to the **PLAN** button on every PO and shipment row toggles a
+**shared, persistent "favourite"** (DB-backed — shared across the team + all devices).
+A new **★ Focus** filter pill (amber) shows **only starred items, active only** (completed
+are hidden). The star persists via the existing PO / shipment patch endpoints.
+
+**Requires migration `082_po_shipment_starred.sql`** (adds `starred boolean default false`
+to `planner.purchase_orders` and `planner.shipments`). The server PO/shipments queries now
+select `starred`, so **the grids error until 082 is applied.** Idempotent.
+
 ## v20.400 - Migration 081: consolidate production "P53" → "53"
 
 **Migration only — no app code change.** `migrations/081_prod_no_p53_to_53.sql`.
