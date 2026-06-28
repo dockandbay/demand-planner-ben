@@ -686,6 +686,7 @@ function closeHelp(){var e=document.getElementById('help-ov');if(e)e.style.displ
 // Context help — one icon in the top nav; content matches the current tab / sub-tab.
 var CTX_HELP={
   'planning|plan':{t:'DEMAND ▸ Plan',h:'The monthly demand plan, category → SKU × market. Edit a forecast input (growth % like 0.3, an absolute like &gt;=4, or a literal) and the cascade rebuilds the SKU-level forecast. In a month cell, <b>i</b> = a BI rule applies, <b>C</b> = a trading-calendar event for that category × market × month.'},
+  'planning|kpis':{t:'DEMAND ▸ KPIs',h:'Headline demand-planning KPIs (forecast vs actuals, units / value by country &amp; channel, growth, stock cover). Metric set to be confirmed.'},
   'planning|targets':{t:'DEMAND ▸ Targets',h:'A sell-through scorecard by category × market. Set ST% and cover-week targets; the table shows actual vs target with a RAG status and a plain-English recommendation. Where no target is set, “apply ~X%” adopts last year’s seasonal pace.'},
   'planning|actions':{t:'DEMAND ▸ Actions',h:'Demand exceptions: behind / ahead of sell-through target, trading vs last year, and upcoming trading-calendar events (with cover-at-uplift). Filter by market / category / status; dismiss, snooze or mark done — handled items stay viewable under the status pills.'},
   'planning|calendar':{t:'DEMAND ▸ Calendar',h:'Trading calendar of promo / campaign events by date × market × category (optional SKU list + uplift %). Upload / download CSV; the timeline focuses on the next 6 months. Events surface as “C” markers in Plan and as Demand Actions.'},
@@ -6415,6 +6416,7 @@ function render(){
     if(!body){ body=document.createElement('div'); body.id='demand-body'; document.querySelector('.wrap').appendChild(body); }
     if(DEMAND_VIEW==='targets') renderTargetsView(body);
     else if(DEMAND_VIEW==='calendar') renderCalendarView(body);
+    else if(DEMAND_VIEW==='kpis') renderKpisView(body);
     else renderDemandActionsView(body);
     return;
   }
@@ -6423,8 +6425,16 @@ function render(){
   var db=document.getElementById('demand-body'); if(db)db.remove();
   if(SKU_VIEW){renderSkuView();}else{renderMain();}
 }
-// ─── DEMAND sub-tabs (PLAN / TARGETS / ACTIONS) ───────────────────────────
-var DEMAND_TABS=[['plan','Plan'],['targets','Targets'],['actions','Actions'],['calendar','Calendar']];
+// DEMAND ▸ KPIs — placeholder view (metric set TBC). Lives as the second sub-tab, right after Plan.
+function renderKpisView(body){
+  body.innerHTML='<div style="padding:24px 8px;max-width:780px">'
+    +'<div style="font-size:15px;font-weight:700;margin-bottom:6px">DEMAND &#9656; KPIs</div>'
+    +'<div style="color:#475569;font-size:13px;line-height:1.5">The KPIs view will show the headline demand-planning metrics &mdash; forecast vs actuals, units / value by country &amp; channel, growth, and stock cover &mdash; once the metric set is confirmed.</div>'
+    +'<div style="margin-top:14px;padding:12px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;color:#64748b;font-size:12px">&#128202; KPIs coming soon &mdash; tell us which metrics to show and how to break them down.</div>'
+    +'</div>';
+}
+// ─── DEMAND sub-tabs (PLAN / KPIs / TARGETS / ACTIONS / CALENDAR) ───────────────────────────
+var DEMAND_TABS=[['plan','Plan'],['kpis','KPIs'],['targets','Targets'],['actions','Actions'],['calendar','Calendar']];
 function renderDemandTabs(){
   var bar=document.getElementById('demand-tabs');
   var _sb=document.getElementById('statusbar');
