@@ -3226,8 +3226,33 @@
         +tile('POs awaiting confirmation', d.awaiting_confirmation||0, '', (Number(d.awaiting_confirmation)>0?'#b45309':null))
         +tile('Deposits outstanding', '$'+units(d.deposits_outstanding||0), (d.deposit_pools||0)+' active pool'+(Number(d.deposit_pools)===1?'':'s'))
       +'</div>'
+      +'<div id="bi-cover" style="margin-top:18px"><div class="count">Computing stock cover…</div></div>'
       +'<div style="margin-top:16px;padding:10px 12px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;color:#64748b;font-size:12px">'
-        +'<b>Coming next:</b> Reallocate · Fill-the-container · Consolidate recommendations (with Apply / Snooze / Dismiss).</div>'; }
+        +'<b>Coming next:</b> Reallocate · Fill-the-container · Consolidate recommendations (with Apply / Snooze / Dismiss).</div>';
+    fetch('/api/supply/bi/projection').then(function(r){return r.json();}).then(renderBICover).catch(function(e){ var b=document.getElementById('bi-cover'); if(b)b.innerHTML='<div style="color:#dc2626">Cover failed: '+esc(e.message||e)+'</div>'; }); }
+  // Phase 0b — stock cover & stock-out risk from the live projection engine
+  function renderBICover(pj){ var b=document.getElementById('bi-cover'); if(!b)return; pj=pj||{}; var rows=pj.rows||[], cc=pj.counts||{};
+    function chip(label,n,bg,fg){ return '<span class="tool-badge" style="background:'+bg+';color:'+fg+';font-size:11px;padding:3px 9px">'+label+' '+(n||0)+'</span>'; }
+    // top stock-out risks: critical first, then soon, ranked by annual demand (biggest exposure first)
+    var ord={critical:0,soon:1};
+    var risk=rows.filter(function(r){return r.urgency==='critical'||r.urgency==='soon';})
+      .sort(function(a,b){ return (ord[a.urgency]-ord[b.urgency]) || (b.demand_12m-a.demand_12m); });
+    var CAP=25, shown=risk.slice(0,CAP);
+    var tbl='<div class="tw" style="max-width:940px"><table style="width:100%"><thead><tr><th class="l">SKU</th><th class="l">Ship to</th><th class="l">Cat</th><th>On hand</th><th>Inbound</th><th>Cover now</th><th>+ inbound</th><th>12m demand</th><th>Urgency</th></tr></thead><tbody>'
+      +shown.map(function(r){ var u=r.urgency==='critical'?['#fee2e2','#991b1b']:['#fef3c7','#92400e'];
+        return '<tr><td class="l"><b>'+esc(r.sku)+'</b></td><td class="l">'+esc(r.country)+'</td><td class="l"><span class="mut tiny">'+esc(r.category||'')+'</span></td>'
+          +'<td>'+units(r.on_hand)+'</td><td>'+(r.inbound>0?units(r.inbound):'<span class="mut">—</span>')+'</td>'
+          +'<td'+(r.cover_now!=null&&r.cover_now<1?' style="color:#dc2626;font-weight:700"':'')+'>'+(r.cover_now==null?'<span class="mut">∞</span>':r.cover_now+' mo')+'</td>'
+          +'<td'+(r.cover_with_inbound!=null&&r.cover_with_inbound<1?' style="color:#dc2626;font-weight:700"':'')+'>'+(r.cover_with_inbound==null?'<span class="mut">∞</span>':r.cover_with_inbound+' mo')+'</td>'
+          +'<td>'+units(r.demand_12m)+'</td>'
+          +'<td><span class="tool-badge" style="background:'+u[0]+';color:'+u[1]+'">'+esc(r.urgency)+'</span></td></tr>'; }).join('')
+      +'</tbody></table></div>';
+    b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 6px;color:#0f172a">Stock cover &amp; stock-out risk</div>'
+      +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:center">'
+        +chip('⚠ Critical',cc.critical,'#fee2e2','#991b1b')+chip('Soon',cc.soon,'#fef3c7','#92400e')
+        +chip('OK',cc.ok,'#dcfce7','#166534')+chip('Surplus',cc.surplus,'#dbeafe','#1e40af')
+        +'<span class="mut tiny" style="margin-left:6px">per SKU × market · target '+(pj.target_months||3)+' mo cover · on-hand + inbound vs forecast</span></div>'
+      +(shown.length?tbl+(risk.length>CAP?'<div class="count" style="margin-top:6px">Showing top '+CAP+' of '+risk.length+' at-risk SKU×markets (by 12-month demand). Reallocate/Fill recs will action these.</div>':''):'<div class="count">No stock-out risks 🎉</div>'); }
 
   function selectSection(key){
     if(key==='reports')return selectReport(reportTab||'upcoming');

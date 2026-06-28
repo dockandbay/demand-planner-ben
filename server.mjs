@@ -52,7 +52,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.0';
+const APP_VERSION = 'v25.1';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -4355,6 +4355,63 @@ async function kpiBase() {
 const kpiToday = () => new Date().toISOString().slice(0, 10);
 const kpiDpast = s => { const m = /^(\d{4}-\d{2}-\d{2})/.exec(s || ''); return !!(m && m[1] < kpiToday()); };
 const kpiDisc = (p, co) => kpiDpast(co === 'AU' ? (p.disc_au || p.disc) : co === 'CA' ? (p.disc_ca || p.disc) : p.disc);
+
+// ── SUPPLY ▸ BI core engine — fluid net-position projection (Phase 0b). Per SKU × country:
+//    cover = (on_hand + inbound) / avg monthly demand; urgency band; need-to-target qty.
+//    Reuses kpiBase() (same on-hand + 12-mo demand as the KPIs) so BI == KPIs == buy plan inputs.
+//    TARGET_MONTHS default ≈12 weeks; exact per-SKU/category/market targets get ported from the BUY artifact next.
+const BI_COUNTRIES = ['UK', 'US', 'EU', 'AU', 'CA'];
+const BI_TARGET_MONTHS = 3;
+async function biProjection() {
+  const { prods, onhand, dem } = await kpiBase();
+  const whCo = wh => String(wh || '').split('_')[0].toUpperCase();   // 'us_3pl' -> 'US'
+  const inb = {};   // inbound open-PO units per sku|country
+  (await pool.query(`SELECT l.sku, upper(coalesce(nullif(p.country_code,''), b.country_code, '')) country, sum(l.qty)::numeric qty
+      FROM planner.purchase_orders p JOIN planner.purchase_order_lines l ON l.po=p.po
+      LEFT JOIN planner.branches b ON b.name=p.branch
+      WHERE coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(l.qty,0)>0
+      GROUP BY l.sku, country`)).rows
+    .forEach(r => { if (!r.country) return; (inb[r.sku] = inb[r.sku] || {})[r.country] = Number(r.qty) || 0; });
+  const rows = [];
+  for (const sku of Object.keys(prods)) {
+    const p = prods[sku]; if (!p.act) continue;
+    const oh = {}, dm = {};
+    for (const wh of Object.keys(onhand[sku] || {})) { const co = whCo(wh); oh[co] = (oh[co] || 0) + onhand[sku][wh]; }
+    for (const wh of Object.keys(dem[sku] || {})) { const co = whCo(wh); dm[co] = (dm[co] || 0) + dem[sku][wh]; }
+    for (const co of BI_COUNTRIES) {
+      if (kpiDisc(p, co)) continue;
+      const d12 = dm[co] || 0, onh = oh[co] || 0, inbound = (inb[sku] || {})[co] || 0;
+      if (d12 <= 0 && onh <= 0 && inbound <= 0) continue;
+      const avgM = d12 / 12;
+      const coverNow = avgM > 0 ? onh / avgM : (onh > 0 ? 999 : 0);
+      const coverInb = avgM > 0 ? (onh + inbound) / avgM : (onh + inbound > 0 ? 999 : 0);
+      // urgency keys off cover INCLUDING inbound (what's on the way counts) — so a SKU with stock arriving
+      // isn't flagged critical. (Timing-aware: does inbound land before stockout? = refinement once we
+      // carry PO arrival dates into the projection.)
+      let urgency;
+      if (avgM <= 0) urgency = (onh + inbound > 0 ? 'surplus' : 'none');
+      else if (coverInb < 1) urgency = 'critical';
+      else if (coverInb < BI_TARGET_MONTHS) urgency = 'soon';
+      else if (coverInb > BI_TARGET_MONTHS * 2) urgency = 'surplus';
+      else urgency = 'ok';
+      rows.push({ sku, country: co, category: p.cs || '', tier: p.tier || '',
+        on_hand: Math.round(onh), inbound: Math.round(inbound), demand_12m: Math.round(d12),
+        cover_now: avgM > 0 ? Math.round(coverNow * 10) / 10 : null,
+        cover_with_inbound: avgM > 0 ? Math.round(coverInb * 10) / 10 : null,
+        need_qty: Math.max(0, Math.round(avgM * BI_TARGET_MONTHS - (onh + inbound))),
+        urgency });
+    }
+  }
+  return rows;
+}
+app.get('/api/supply/bi/projection', async (req, res) => {
+  try {
+    const rows = await biProjection();
+    const counts = { critical: 0, soon: 0, ok: 0, surplus: 0, none: 0 };
+    rows.forEach(r => { counts[r.urgency] = (counts[r.urgency] || 0) + 1; });
+    res.json({ ok: true, target_months: BI_TARGET_MONTHS, counts, rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 const kpiGroup = q => (['Core', 'Seasonal', 'Non-Core'].includes(q) ? q : '');
 const kpiTotals = (rows, keys) => { const out = { TOTAL3: { channel: 'Total 3PL', type: 'TOTAL' }, TOTALF: { channel: 'Total FBA', type: 'TOTAL' } };
   rows.forEach(r => { const t = r.type === '3PL' ? out.TOTAL3 : out.TOTALF; keys.forEach(k => { t[k] = (t[k] || 0) + (Number(r[k]) || 0); }); });

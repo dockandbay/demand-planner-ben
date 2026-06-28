@@ -4,6 +4,15 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v25.1 - SUPPLY ▸ BI Phase 0b: fluid cover & stock-out-risk engine
+
+`GET /api/supply/bi/projection` computes, per **SKU × country**, the net position from **on-hand + inbound
+vs 12-month forecast** (reuses `kpiBase()` so it matches the KPIs), giving **cover now**, **cover + inbound**,
+an **urgency band** (critical / soon / ok / surplus — keyed off cover *including* inbound, so stock on the way
+isn't falsely flagged) and a **need-to-target** qty. Surfaced in the BI tab under the metrics: an urgency
+summary + a top stock-out-risk table (ranked by 12-month demand). Target = 3 mo default; exact per-SKU/
+category/market targets get ported from the BUY artifact next. No migration. Foundation for Phase 1 Reallocate.
+
 ## v25.0 - SUPPLY ▸ BI tab (Phase 0a): Metrics Summary  ⬅ major milestone (was v20.405)
 
 New **BI** tab in the SUPPLY nav (after Shipments) with a live **Metrics Summary** dashboard — open POs
