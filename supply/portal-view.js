@@ -494,12 +494,23 @@
             +'<br>Ship date: '+(p.ship?esc(fd(p.ship)):'<span class="mut">—</span>')+' · Est. completion: '+(p.prod_end?esc(fd(p.prod_end)):'<span class="mut">—</span>')
             +' &nbsp; <button class="lnk-btn pp-go-shipplan" data-ref="'+esc(p.shipment)+'" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;background:none;border:none;padding:0;font:inherit">View in Shipment Plan →</button></div>'
         : '<div class="tiny mut" style="margin-bottom:8px">No shipment assigned yet — enter the carrier &amp; tracking below and we’ll create the shipment for this PO.</div>';
-      var shipment=shipHead
-        +'<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end">'
-        +'<label class="tiny">Carrier<br><select class="fci pp-car" data-po="'+po+'" style="min-width:120px">'+carOpts+'</select></label>'
-        +'<label class="tiny">Tracking ref<br><input class="fci pp-trk" data-po="'+po+'" value="'+esc(trkVal)+'" placeholder="e.g. MAEU… / Flexport ID" style="width:170px"></label>'
-        +'<button class="save-btn pp-trk-go" data-po="'+po+'">'+(hasShip?'Save carrier &amp; tracking':'Create shipment &amp; save')+'</button></div>'
-        +'<div class="tiny mut" style="margin-top:4px">Carrier &amp; tracking apply to the shipment'+(hasShip?'':' — submitting creates the shipment for this PO')+'.</div>';
+      var flexRef=p.flexport_reference||p.flex_id||((carVal==='Flexport')?trkVal:'');
+      var shipment=hasShip
+        // shipment already linked → carrier / tracking / Flexport ref are READ-ONLY (managed on the shipment centrally)
+        ? shipHead
+          +'<table style="font-size:12px;border-collapse:collapse"><tbody>'
+          +'<tr><td class="mut" style="padding:2px 14px 2px 0">Carrier</td><td>'+(carVal?'<b>'+esc(carVal)+'</b>':'<span class="mut">—</span>')+'</td></tr>'
+          +'<tr><td class="mut" style="padding:2px 14px 2px 0">Tracking ref</td><td>'+(trkVal?'<b>'+esc(trkVal)+'</b>':'<span class="mut">—</span>')+'</td></tr>'
+          +'<tr><td class="mut" style="padding:2px 14px 2px 0">Flexport ref</td><td>'+(flexRef?'<b>'+esc(flexRef)+'</b>':'<span class="mut">—</span>')+'</td></tr>'
+          +'</tbody></table>'
+          +'<div class="tiny mut" style="margin-top:5px">Carrier &amp; tracking are managed on the shipment — to change them, contact Dock &amp; Bay.</div>'
+        // no shipment yet → editable: pick carrier + tracking; submitting creates the shipment for this PO
+        : shipHead
+          +'<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end">'
+          +'<label class="tiny">Carrier<br><select class="fci pp-car" data-po="'+po+'" style="min-width:120px">'+carOpts+'</select></label>'
+          +'<label class="tiny">Tracking ref<br><input class="fci pp-trk" data-po="'+po+'" value="'+esc(trkVal)+'" placeholder="e.g. MAEU… / Flexport ID" style="width:170px"></label>'
+          +'<button class="save-btn pp-trk-go" data-po="'+po+'">Create shipment &amp; save</button></div>'
+          +'<div class="tiny mut" style="margin-top:4px">Submitting creates the shipment for this PO and saves the carrier &amp; tracking.</div>';
       shipment = shipLabelBtn + shipment;
       if(cdSkus.length){ var xrows=cdSkus.map(function(s){ var q=xd[s];
           return '<tr><td class="l">'+esc(s)+'</td><td style="text-align:right"><input class="fci pp-xqty" data-po="'+po+'" data-sku="'+esc(s)+'" value="'+(q!=null&&q!==''?esc(q):'')+'" placeholder="qty shipped" style="width:96px;text-align:right" inputmode="numeric"></td></tr>'; }).join('');
@@ -529,9 +540,9 @@
     function ppPOs(pos, data){ var lb=data.lb||{}, notesByPo=data.notesByPo||{}, subsByPo=data.subsByPo||{}, costsByPo=data.costsByPo||{}, supSkus=data.supSkus||[], xdByPo=data.xdByPo||{}, addByPo=data.addByPo||{};
       if(!pos.length)return '<div class="count">No purchase orders for this supplier.</div>';
       var today=new Date().toISOString().slice(0,10);
-      return '<div class="tw"><table class="pp-tbl"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l">Status</th><th class="l">Start</th><th class="l">Est. completion</th><th class="l">Completion date</th><th class="l">Ship</th><th class="l">Flexport</th><th style="text-align:right">Start deposit assigned</th><th style="text-align:right">Completion</th><th style="text-align:right">Balance</th><th style="text-align:right">Amount due</th><th class="l">Due</th><th class="l">Deposit ref</th><th class="l">Ships With</th><th class="l">Ships With Supplier</th></tr></thead><tbody>'
+      return '<div class="tw"><table class="pp-tbl"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l">Status</th><th class="l">Start</th><th class="l">Est. completion</th><th class="l">Completion date</th><th class="l">Ship</th><th class="l">Flexport</th><th class="l">Ships With</th><th style="text-align:right">Start deposit assigned</th><th style="text-align:right">Completion</th><th style="text-align:right">Balance</th><th style="text-align:right">Amount due</th><th class="l">Due</th><th class="l">Deposit ref</th></tr></thead><tbody>'
         +pos.map(function(p,i){
-          var det='<tr id="pp-'+i+'" style="display:none"><td></td><td colspan="15">'+ppExpand(p, lb[p.po]||[], notesByPo[p.po]||[], subsByPo[p.po]||[], i, costsByPo[p.po]||{}, supSkus, xdByPo[p.po]||{}, addByPo[p.po]||[])+'</td></tr>';
+          var det='<tr id="pp-'+i+'" style="display:none"><td></td><td colspan="14">'+ppExpand(p, lb[p.po]||[], notesByPo[p.po]||[], subsByPo[p.po]||[], i, costsByPo[p.po]||{}, supSkus, xdByPo[p.po]||{}, addByPo[p.po]||[])+'</td></tr>';
           var sb=subsByPo[p.po]||[]; var nts=notesByPo[p.po]||[]; var unreadInt=nts.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
           var cdS=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean), xdm=xdByPo[p.po]||{};
           var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
@@ -542,14 +553,14 @@
             +'<td class="l"><b>'+esc(p.po)+'</b></td><td class="l"><span class="tool-badge '+statusBg(p.status)+'">'+esc(p.status||'')+'</span></td>'
             +'<td class="l">'+dcell(p.prod_start)+'</td><td class="l">'+dcell(p.prod_end)+'</td>'
             +'<td class="l" style="min-width:140px"><input type="date" class="pp-cd-grid" data-po="'+esc(p.po)+'" value="'+esc(cdVal)+'" title="click to pick your completion date — it saves automatically" style="width:128px;cursor:pointer;text-align:left;font:inherit;font-size:12px;padding:4px 6px;border:1px solid #93c5fd;border-radius:4px;background:#eff6ff;color:#1d4ed8;box-sizing:content-box"></td>'
-            +'<td class="l">'+dcell(p.ship)+'</td><td class="l">'+(p.flexport_reference?esc(p.flexport_reference):'<span class="mut">—</span>')+'</td>'
+            +'<td class="l">'+dcell(p.ship)+'</td>'
+            +'<td class="l">'+((p.flexport_reference||p.flex_id)?esc(p.flexport_reference||p.flex_id):'<span class="mut">—</span>')+'</td>'
+            +'<td class="l">'+(p.ships_with?esc(p.ships_with)+(p.ships_with_supplier?' <span class="mut">('+esc(p.ships_with_supplier)+')</span>':''):'<span class="mut">—</span>')+'</td>'
             +'<td style="text-align:right">'+ppPay(p.start_assigned!=null?p.start_assigned:p.start_dep, p.start_date)+'</td>'
             +'<td style="text-align:right">'+ppPay(p.completion_assigned!=null?p.completion_assigned:p.completion, p.completion_date)+'</td>'
             +'<td style="text-align:right">'+ppPay(p.balance_1_amount, p.balance_1_date)+'</td>'
             +'<td style="text-align:right">'+(p.balance_owing!=null?'$'+units(p.balance_owing):'<span class="mut">—</span>')+'</td>'
-            +'<td class="l">'+dcell(p.balance_due)+'</td><td class="l">'+(p.deposit_ref?esc(p.deposit_ref):'<span class="mut">—</span>')+'</td>'
-            +'<td class="l">'+(p.ships_with?esc(p.ships_with):'<span class="mut">—</span>')+'</td>'
-            +'<td class="l">'+(p.ships_with_supplier?esc(p.ships_with_supplier):'<span class="mut">—</span>')+'</td></tr>'+det; }).join('')
+            +'<td class="l">'+dcell(p.balance_due)+'</td><td class="l">'+(p.deposit_ref?esc(p.deposit_ref):'<span class="mut">—</span>')+'</td></tr>'+det; }).join('')
         +'</tbody></table></div>'; }
     function ppDeposits(deps){ var paid=0,used=0,rem=0; deps.forEach(function(d){ if(d.is_deposit){ paid+=Number(d.amount)||0; used+=Number(d.deposit_used)||0; rem+=Number(d.deposit_remaining)||0; } });
       var cards='<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">'+ppCard('Total deposits','$'+units(paid))+ppCard('Drawn down','$'+units(used))+ppCard('Remaining','$'+units(rem))+'</div>';
@@ -568,6 +579,7 @@
               var flex=s.flex_id?('<a href="https://app.flexport.com/shipments/'+((String(s.carrier_ref||s.flex_id).match(/\d+/)||[''])[0])+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline">'+esc(s.flex_id)+' ↗</a>'):'';
               var datesStrip='<div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:8px;padding:9px 12px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:7px">'
                 +spCell('Mode / Carrier', esc((s.mode||'—')+(s.carrier?' · '+s.carrier:'')))
+                +spCell('Tracking', s.carrier_ref?esc(s.carrier_ref):'')
                 +spCell('Flexport', flex)
                 +spCell('Departure', s.departure?esc(fd(s.departure)):'')
                 +spCell('Landing', s.landing?esc(fd(s.landing)):'')
@@ -735,7 +747,7 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
             } }
     function loadPreview(){ tabsEl.style.display=''; body.innerHTML='<div class="count">Loading…</div>';
       opts.getData().then(function(d){ _ppData=d; renderPP(); }).catch(function(e){ body.innerHTML='<div class="count" style="color:#dc2626">'+esc(e&&e.message||e)+'</div>'; }); }
-    function reload(){ loadPreview(); }
+    function reload(){ if(typeof opts.onChange==='function')try{opts.onChange();}catch(e){} loadPreview(); }
     tabsEl.querySelectorAll('.rtab').forEach(function(t){ t.onclick=function(){ PORTAL_TAB=t.dataset.pt; renderPP(); }; });
     loadPreview();
   }

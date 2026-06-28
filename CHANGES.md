@@ -4,6 +4,23 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.373 - Portal SHIPMENT read-only when linked, combined "Ships With" column, Shipment Plan tracking, cache fix
+
+Supplier portal:
+- **SHIPMENT sub-tab:** when a shipment is already linked, carrier / tracking / **Flexport ref are read-only**
+  (managed centrally — the Flexport ref inherits from the shipment). The editable carrier+tracking form only
+  shows when the PO has **no** shipment yet (where submitting still creates + assigns one).
+- **Main grid:** merged Ships With + Ships With Supplier into **one "Ships With" column** (e.g.
+  `PO-54UKXR1-FEB (XR Textile)`), placed **next to the Flexport** column. The **Flexport** column now **inherits
+  from the linked shipment** (shows `flexport_reference` ▸ the shipment's matched Flexport id).
+- **Shipment Plan:** the card now shows a **Tracking** value (the shipment's `carrier_ref`) — previously a
+  DHL/other tracking code entered by the supplier wasn't displayed.
+
+Admin:
+- **Fix:** creating a shipment from the Config ▸ Portal preview now **invalidates the admin grids' cache**
+  (`onChange` → `invalidateDerived`), so a portal-created shipment shows up immediately in SUPPLY ▸ Shipments
+  (it was being hidden behind stale cached data — the endpoint already returned it correctly).
+
 ## v20.372 - Shipments: fix boot error (broke timeline posting), drop duplicate Notes field, add Delete shipment
 
 - **Fix:** a boot error (`supb is not defined` in `ensureScenarioButton`, present since the v20.301 baseline)
