@@ -15,3 +15,6 @@ po-erp-migration-for-diviyaj.zip
 .claude/
 server.log
 /log
+
+# ad-hoc data files / sample exports
+UK - Forecast Analysis*.csv
