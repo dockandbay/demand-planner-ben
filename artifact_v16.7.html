@@ -2784,6 +2784,7 @@ var FC_INITIAL={}; // populated at end of init() after all IV overlays — diff 
 let SKU_VIEW=null;
 let VIEW_MODE='planning'; // 'planning' | 'exec'
 let REPORT_VIEW='ex'; // REPORTS sub-tab: 'ex' (Exec Summary) | 'slow' (Slow Moving) | 'af' (Auto Forecast)
+let KPI_SUB='instock', KPI_T3PL=5, KPI_TFBA=5; // DEMAND ▸ KPIs state (sub-view + in-stock thresholds per channel)
 let DEMAND_VIEW='plan'; // DEMAND sub-tab: 'plan' (the demand plan) | 'targets' (sell-through targets) | 'actions'
 var TGT_CACHE=null;
 var _da={sec:'actions',mkt:'all',cat:'all',status:'open'}; // DEMAND ▸ Actions filters (sec: actions|insights|weather; status: open|snoozed|dismissed|done|all)
@@ -6425,13 +6426,41 @@ function render(){
   var db=document.getElementById('demand-body'); if(db)db.remove();
   if(SKU_VIEW){renderSkuView();}else{renderMain();}
 }
-// DEMAND ▸ KPIs — placeholder view (metric set TBC). Lives as the second sub-tab, right after Plan.
+// DEMAND ▸ KPIs — level-3 sub-nav (In Stock | Slow moving | Inventory). In Stock = % of active SKUs per
+// market×channel with on-hand stock above a (per-channel toggleable) threshold; plus the A-player subset.
 function renderKpisView(body){
-  body.innerHTML='<div style="padding:24px 8px;max-width:780px">'
-    +'<div style="font-size:15px;font-weight:700;margin-bottom:6px">DEMAND &#9656; KPIs</div>'
-    +'<div style="color:#475569;font-size:13px;line-height:1.5">The KPIs view will show the headline demand-planning metrics &mdash; forecast vs actuals, units / value by country &amp; channel, growth, and stock cover &mdash; once the metric set is confirmed.</div>'
-    +'<div style="margin-top:14px;padding:12px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;color:#64748b;font-size:12px">&#128202; KPIs coming soon &mdash; tell us which metrics to show and how to break them down.</div>'
-    +'</div>';
+  var subTabs=[['instock','In Stock'],['slowmoving','Slow moving'],['inventory','Inventory']];
+  var nav='<div style="display:flex;gap:2px;margin:2px 0 12px;border-bottom:1px solid #e0e0e0;flex-wrap:wrap">'
+    +subTabs.map(function(t){return '<button class="dnav'+(t[0]===KPI_SUB?' active':'')+'" data-k="'+t[0]+'"'+(t[0]==='instock'?'':' title="coming soon"')+'>'+t[1]+'</button>';}).join('')+'</div>';
+  body.innerHTML=nav+'<div id="kpi-body"></div>';
+  body.querySelectorAll('.dnav[data-k]').forEach(function(b){ b.onclick=function(){ KPI_SUB=b.dataset.k; renderKpisView(body); }; });
+  var kb=body.querySelector('#kpi-body');
+  if(KPI_SUB!=='instock'){ kb.innerHTML='<div style="padding:18px;color:#64748b;font-size:13px">&#128202; '+(KPI_SUB==='slowmoving'?'Slow moving':'Inventory')+' KPI &mdash; coming soon.</div>'; return; }
+  kb.innerHTML='<div style="display:flex;gap:18px;align-items:center;margin-bottom:10px;flex-wrap:wrap">'
+    +'<div style="font-size:13px;font-weight:700">In-stock rate</div>'
+    +'<label style="font-size:12px;color:#475569">3PL in stock when units &gt; <input type="number" id="kpi-t3pl" value="'+KPI_T3PL+'" min="0" style="width:60px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px"></label>'
+    +'<label style="font-size:12px;color:#475569">FBA in stock when units &gt; <input type="number" id="kpi-tfba" value="'+KPI_TFBA+'" min="0" style="width:60px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px"></label>'
+    +'</div><div id="kpi-tbl"><div style="color:#94a3b8;font-size:12px">Loading…</div></div>';
+  function load(){ var t3=document.getElementById('kpi-t3pl').value, tf=document.getElementById('kpi-tfba').value;
+    fetch('/api/kpi/in-stock?t3pl='+encodeURIComponent(t3)+'&tfba='+encodeURIComponent(tf)).then(function(r){return r.json();}).then(function(j){
+      var tbl=document.getElementById('kpi-tbl'); if(!tbl)return;
+      if(!j||!j.ok){ tbl.innerHTML='<div style="color:#dc2626;font-size:12px">Failed to load.</div>'; return; }
+      var th='padding:5px 12px;text-align:right', thl='padding:5px 12px;text-align:left';
+      var head='<tr style="background:#e9eef5;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:#475569">'
+        +'<th style="'+thl+'">Market / Channel</th><th style="'+th+'">SKUs</th><th style="'+th+'">In stock</th><th style="'+th+'">%</th>'
+        +'<th style="'+th+'">A SKUs</th><th style="'+th+'">A in stock</th><th style="'+th+'">A %</th></tr>';
+      var rowsH=j.rows.map(function(r){ var tot=r.type==='TOTAL';
+        return '<tr style="border-bottom:1px solid #eef2f7;'+(tot?'font-weight:700;background:#f8fafc':'')+'">'
+          +'<td style="padding:4px 12px">'+r.channel+'</td>'
+          +'<td style="padding:4px 12px;text-align:right">'+r.skus+'</td><td style="padding:4px 12px;text-align:right">'+r.instock+'</td>'
+          +'<td style="padding:4px 12px;text-align:right;font-weight:600;color:'+(r.pct>=80?'#15803d':r.pct>=50?'#b45309':'#b91c1c')+'">'+r.pct+'%</td>'
+          +'<td style="padding:4px 12px;text-align:right">'+r.a_skus+'</td><td style="padding:4px 12px;text-align:right">'+r.a_instock+'</td>'
+          +'<td style="padding:4px 12px;text-align:right;font-weight:600;color:'+(r.a_pct>=80?'#15803d':r.a_pct>=50?'#b45309':'#b91c1c')+'">'+r.a_pct+'%</td></tr>'; }).join('');
+      tbl.innerHTML='<table style="border-collapse:collapse;font-size:12px;max-width:760px;width:100%"><thead>'+head+'</thead><tbody>'+rowsH+'</tbody></table>'
+        +'<div style="font-size:11px;color:#94a3b8;margin-top:6px">Active products available in each channel, with on-hand stock above the threshold. A = A-tier (market_tier).</div>'; }); }
+  document.getElementById('kpi-t3pl').onchange=function(){ KPI_T3PL=Number(this.value)||0; load(); };
+  document.getElementById('kpi-tfba').onchange=function(){ KPI_TFBA=Number(this.value)||0; load(); };
+  load();
 }
 // ─── DEMAND sub-tabs (PLAN / KPIs / TARGETS / ACTIONS / CALENDAR) ───────────────────────────
 var DEMAND_TABS=[['plan','Plan'],['kpis','KPIs'],['targets','Targets'],['actions','Actions'],['calendar','Calendar']];

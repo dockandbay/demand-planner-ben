@@ -52,7 +52,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.391';
+const APP_VERSION = 'v20.392';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -4233,6 +4233,41 @@ async function sendMagicEmail(email, url) {
   }
   console.log('[portal email] (no RESEND_API_KEY) magic link for ' + email + ':\n  ' + url);   // dev fallback
 }
+// ── DEMAND ▸ KPIs ▸ In Stock rate ────────────────────────────────────────────────────────────────────────
+// For each market × channel: of the ACTIVE products available in that channel, how many have > threshold units
+// on hand (3PL stock for the 3PL channel, FBA stock for FBA). Threshold toggleable per channel-type (3PL/FBA).
+// "A players" = market_tier 'A'. Active = in_planning_scope.
+app.get('/api/kpi/in-stock', async (req, res) => {
+  const t3pl = Number(req.query.t3pl); const tfba = Number(req.query.tfba);
+  const T3 = isFinite(t3pl) ? t3pl : 5, TF = isFinite(tfba) ? tfba : 5;
+  try {
+    const prods = (await pool.query(`SELECT sku, coalesce(in_planning_scope,false) act, coalesce(market_tier,'') tier,
+        coalesce(available_uk_dtc,false) OR coalesce(available_uk_b2b,false) uk3, coalesce(available_uk_fba,false) ukf,
+        coalesce(available_us_dtc,false) OR coalesce(available_us_b2b,false) us3, coalesce(available_us_fba,false) usf,
+        coalesce(available_eu_dtc,false) OR coalesce(available_eu_b2b,false) eu3, coalesce(available_eu_fba,false) euf,
+        coalesce(available_au_dtc,false) au3, coalesce(available_au_fba,false) auf, coalesce(available_ca_fba,false) caf,
+        coalesce(discontinue_date_final,'') disc, coalesce(discontinue_date_au_final,'') disc_au, coalesce(discontinue_date_ca,'') disc_ca
+      FROM planner.products`)).rows;
+    const inv = {}; (await pool.query(`SELECT sku, warehouse, coalesce(available,0) a FROM planner.product_inventory`)).rows
+      .forEach(r => { (inv[r.sku] = inv[r.sku] || {})[r.warehouse] = Number(r.a) || 0; });
+    const today = new Date().toISOString().slice(0, 10);
+    const dpast = s => { const m = /^(\d{4}-\d{2}-\d{2})/.exec(s || ''); return !!(m && m[1] < today); };   // discontinued = a past date
+    const discontinued = (p, mk) => dpast(mk === 'AU' ? (p.disc_au || p.disc) : mk === 'CA' ? (p.disc_ca || p.disc) : p.disc);
+    const combos = [
+      ['US 3PL', 'us3', 'us_3pl', T3, '3PL', 'US'], ['UK 3PL', 'uk3', 'uk_3pl', T3, '3PL', 'UK'], ['EU 3PL', 'eu3', 'eu_3pl', T3, '3PL', 'EU'], ['AU 3PL', 'au3', 'au_3pl', T3, '3PL', 'AU'],
+      ['US FBA', 'usf', 'us_fba', TF, 'FBA', 'US'], ['UK FBA', 'ukf', 'uk_fba', TF, 'FBA', 'UK'], ['EU FBA', 'euf', 'eu_fba', TF, 'FBA', 'EU'], ['AU FBA', 'auf', 'au_fba', TF, 'FBA', 'AU'], ['CA FBA', 'caf', 'ca_fba', TF, 'FBA', 'CA'],
+    ];
+    const rows = combos.map(([label, fld, wh, thr, ct, mk]) => {
+      let skus = 0, instock = 0, aSkus = 0, aInstock = 0;
+      for (const p of prods) { if (!p.act || !p[fld] || discontinued(p, mk)) continue; const ok = ((inv[p.sku] || {})[wh] || 0) > thr;
+        skus++; if (ok) instock++; if (p.tier === 'A') { aSkus++; if (ok) aInstock++; } }
+      return { channel: label, type: ct, skus, instock, pct: skus ? Math.round(instock / skus * 100) : 0, a_skus: aSkus, a_instock: aInstock, a_pct: aSkus ? Math.round(aInstock / aSkus * 100) : 0 };
+    });
+    const tot = type => { const r = rows.filter(x => x.type === type); const s = k => r.reduce((a, x) => a + x[k], 0);
+      return { channel: 'Total ' + type, type: 'TOTAL', skus: s('skus'), instock: s('instock'), pct: s('skus') ? Math.round(s('instock') / s('skus') * 100) : 0, a_skus: s('a_skus'), a_instock: s('a_instock'), a_pct: s('a_skus') ? Math.round(s('a_instock') / s('a_skus') * 100) : 0 }; };
+    res.json({ ok: true, t3pl: T3, tfba: TF, rows: rows.filter(r => r.type === '3PL').concat([tot('3PL')], rows.filter(r => r.type === 'FBA'), [tot('FBA')]) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // ── Forecast export by country (CSV download · email · DriveHQ upload) ───────────────────────────────────
 const FC_EXPORT_COUNTRIES = ['UK', 'US', 'EU', 'AU', 'CA'];
 // Per-country forecast CSV in the "Forecast Analysis" layout (63 cols, two header rows):
