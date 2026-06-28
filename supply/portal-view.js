@@ -480,18 +480,26 @@
         +(invSub?'<div class="tiny" style="margin-top:8px;padding:6px 9px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px">Submitted: <b>$'+esc(invSub.value)+'</b> · '+esc(invSub.submitted_at||'')+' · '+invStatus+(invSub.attachment_id?' · <a href="/api/portal/attachment/'+invSub.attachment_id+'" target="_blank">doc</a>':'')+'</div>':'<div class="tiny mut" style="margin-top:6px">No invoice submitted yet.</div>');
       // ---- SHIPMENT: flexport details, else submit tracking/carrier + completion ----
       var shipLabelBtn=(p.ship_other_supplier?'<div style="margin:6px 0"><button class="save-btn pp-shiplabel" data-po="'+po+'" title="this shipment consolidates under another supplier’s master — download the SHIPS WITH labels for your cartons">⤓ Shipment Labels</button> <span class="mut tiny">consolidated under another supplier — label your cartons</span></div>':'');
-      var shipment=(p.shipment||p.flexport_reference
-          ? '<div style="font-size:12px;margin-bottom:8px"><b>Shipment</b><br>'
-            +'Shipment ref: '+(p.shipment?esc(p.shipment):'<span class="mut">—</span>')+'<br>'
-            +'Ships with supplier: '+(p.ships_with_supplier?esc(p.ships_with_supplier):'<span class="mut">—</span>')+'<br>'
-            +'Flexport: '+(p.flexport_reference?esc(p.flexport_reference):'<span class="mut">—</span>')+'<br>'
-            +'Ship date: '+(p.ship?esc(fd(p.ship)):'<span class="mut">—</span>')+' · Est. completion: '+(p.prod_end?esc(fd(p.prod_end)):'<span class="mut">—</span>')+'</div>'
-          : '<div class="tiny mut" style="margin-bottom:8px">No shipment assigned yet — submit your tracking below.</div>')
-        +(p.flexport_reference
-          ? '<div class="tiny mut">Tracking is handled via Flexport for this order — no tracking needed.</div>'
-          : '<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end">'
-            +'<label class="tiny">Tracking code<br><input class="fci pp-trk" data-po="'+po+'" placeholder="e.g. MAEU…" style="width:130px"></label>'
-            +'<label class="tiny">Carrier<br><input class="fci pp-car" data-po="'+po+'" placeholder="Flexport / DHL…" style="width:120px"></label><button class="save-btn pp-trk-go" data-po="'+po+'">Submit tracking</button></div>');
+      // carrier + tracking live on the SHIPMENT (same carrier list as the planner). If this PO isn't on a
+      // shipment yet, submitting creates a master shipment for it and assigns this PO.
+      var hasShip=!!p.shipment;
+      var CARS_PP=['Flexport','DHL','Fedex','FOB','Other'];
+      var carVal=p.ship_carrier||(p.flexport_reference?'Flexport':'');
+      var trkVal=p.ship_carrier_ref||p.flexport_reference||'';
+      var carOpts='<option value="">—</option>'+((carVal&&CARS_PP.indexOf(carVal)<0)?'<option selected>'+esc(carVal)+'</option>':'')
+        +CARS_PP.map(function(o){return '<option'+(o===carVal?' selected':'')+'>'+o+'</option>';}).join('');
+      var shipHead=hasShip
+        ? '<div style="font-size:12px;margin-bottom:8px"><b>Shipment '+esc(p.shipment)+'</b>'
+            +(p.ships_with_supplier?' &nbsp;·&nbsp; ships with supplier: <b>'+esc(p.ships_with_supplier)+'</b>':'')
+            +'<br>Ship date: '+(p.ship?esc(fd(p.ship)):'<span class="mut">—</span>')+' · Est. completion: '+(p.prod_end?esc(fd(p.prod_end)):'<span class="mut">—</span>')
+            +' &nbsp; <button class="lnk-btn pp-go-shipplan" data-ref="'+esc(p.shipment)+'" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;background:none;border:none;padding:0;font:inherit">View in Shipment Plan →</button></div>'
+        : '<div class="tiny mut" style="margin-bottom:8px">No shipment assigned yet — enter the carrier &amp; tracking below and we’ll create the shipment for this PO.</div>';
+      var shipment=shipHead
+        +'<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end">'
+        +'<label class="tiny">Carrier<br><select class="fci pp-car" data-po="'+po+'" style="min-width:120px">'+carOpts+'</select></label>'
+        +'<label class="tiny">Tracking ref<br><input class="fci pp-trk" data-po="'+po+'" value="'+esc(trkVal)+'" placeholder="e.g. MAEU… / Flexport ID" style="width:170px"></label>'
+        +'<button class="save-btn pp-trk-go" data-po="'+po+'">'+(hasShip?'Save carrier &amp; tracking':'Create shipment &amp; save')+'</button></div>'
+        +'<div class="tiny mut" style="margin-top:4px">Carrier &amp; tracking apply to the shipment'+(hasShip?'':' — submitting creates the shipment for this PO')+'.</div>';
       shipment = shipLabelBtn + shipment;
       if(cdSkus.length){ var xrows=cdSkus.map(function(s){ var q=xd[s];
           return '<tr><td class="l">'+esc(s)+'</td><td style="text-align:right"><input class="fci pp-xqty" data-po="'+po+'" data-sku="'+esc(s)+'" value="'+(q!=null&&q!==''?esc(q):'')+'" placeholder="qty shipped" style="width:96px;text-align:right" inputmode="numeric"></td></tr>'; }).join('');
@@ -717,8 +725,10 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                   (_ppData.addByPo[po]=_ppData.addByPo[po]||[]).push({id:j.id,description:desc,qty:q===''?null:Number(q),price:pr===''?null:Number(pr)}); rerenderRow(row,po,'orderplan'); }); }; });
               scope.querySelectorAll('.pp-ac-rm').forEach(function(b){ b.onclick=function(){ var box=b.closest('.ppx'), po=(box.querySelector('.pp-ac-add')||{}).dataset.po, row=b.closest('tr[id^="pp-"]'), id=b.dataset.id;
                 postJSON(EP.addlCostRemove,{id:id},function(){  if(_ppData.addByPo[po])_ppData.addByPo[po]=_ppData.addByPo[po].filter(function(x){return String(x.id)!==String(id);}); rerenderRow(row,po,'orderplan'); }); }; });
-              scope.querySelectorAll('.pp-trk-go').forEach(function(btn){ btn.onclick=function(){ var t=pick('pp-trk',btn.dataset.po).value, cc=pick('pp-car',btn.dataset.po).value; if(!t&&!cc)return; btn.disabled=true;
-                postJSON(EP.submit,{po:btn.dataset.po,supplier_id:sid,submitted_by:by,tracking:t,carrier:cc},function(j){ alert((j.applied&&j.applied.length)?'Tracking applied to the shipment.':'Tracking recorded (this PO has no shipment assigned yet).'); reload(); }); }; });
+              scope.querySelectorAll('.pp-trk-go').forEach(function(btn){ btn.onclick=function(){ var t=pick('pp-trk',btn.dataset.po).value, cc=pick('pp-car',btn.dataset.po).value; if(!t&&!cc){ alert('Pick a carrier and/or enter a tracking ref.'); return; } btn.disabled=true;
+                postJSON(EP.submit,{po:btn.dataset.po,supplier_id:sid,submitted_by:by,tracking:t,carrier:cc},function(j){ var made=(j.applied||[]).some(function(x){return /shipment created/.test(x);}); alert(made?'Shipment created for this PO — carrier & tracking saved.':'Carrier & tracking saved to the shipment.'); reload(); }); }; });
+              // jump to this PO's shipment in the Shipment Plan tab (search overrides the pills so it shows whatever its status)
+              scope.querySelectorAll('.pp-go-shipplan').forEach(function(btn){ btn.onclick=function(){ PORTAL_TAB='shipmentplan'; PORTAL_SP_PO=btn.dataset.ref||''; renderPP(); }; });
               scope.querySelectorAll('.pp-inv-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po; var val=pick('pp-inv',po).value; var fin=pick('pp-inv-file',po); var f=fin&&fin.files[0]; if(!val&&!f)return; btn.disabled=true;
                 var go=function(attId){ postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,invoice_value:val||null,invoice_attachment_id:attId||null},function(){ alert('Invoice submitted — awaiting Dock & Bay approval.'); reload(); }); };
                 if(f){ var rd=new FileReader(); rd.onload=function(){ postJSON(EP.upload,{po:po,supplier_id:sid,filename:f.name,mime:f.type,data_base64:rd.result,uploaded_by:by},function(j){ go(j.id); }); }; rd.readAsDataURL(f); } else go(null); }; });

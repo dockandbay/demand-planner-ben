@@ -4,6 +4,22 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.371 - Portal: carrier & tracking move to the SHIPMENT (creates the shipment if none) + Shipment Plan link
+
+Supplier portal — PO ▸ PLAN ▸ SHIPMENT sub-tab:
+- **Carrier & tracking now belong to the shipment, not the PO.** Carrier is the **same dropdown as SUPPLY ▸
+  Shipments** (Flexport / DHL / Fedex / FOB / Other); tracking ref sits beside it. Both pre-fill from the
+  assigned shipment's `carrier` / `carrier_ref`.
+- **If the PO has no shipment yet,** submitting carrier/tracking **creates a master shipment** named after the PO,
+  **assigns the PO to it**, and writes the carrier/tracking onto it (so it appears in the portal Shipment Plan).
+- **If a shipment exists,** a **"View in Shipment Plan →"** link jumps to that shipment in the portal's
+  Shipment Plan tab (pre-filters the search to it).
+- Server: `portal-submit` tracking handler now create-and-assigns a shipment when none exists (was: staged a
+  pending submission); the `purchase-orders` endpoint returns `ship_carrier` / `ship_carrier_ref` per PO.
+- **Diviyaj:** the live portal's tracking write + bootstrap must mirror this — surface `ship_carrier` /
+  `ship_carrier_ref` per PO, and have the portal tracking endpoint create+assign a master shipment (ref = PO,
+  master_po = PO) when the PO has none.
+
 ## v20.370 - Timeline & Notes (note box on top, multi-line) + portal prominence + portal search overrides pills
 
 Admin SUPPLY ▸ Shipments:

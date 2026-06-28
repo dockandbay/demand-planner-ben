@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.370';
+const APP_VERSION = 'v20.371';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -866,7 +866,7 @@ app.get('/api/supply/:section', async (req, res) => {
               coalesce(po.supplier_invoice_total, lv.line_value, po.order_value_estimation, 0) val,
               fx.flex_id, fx.landing_date flex_landing, fx.departure_date flex_departure,
               sh.landing_date sh_landing, sh.delivery_date sh_delivery, sh.departure_date sh_departure, sh.arrival_date sh_arrival,
-              sh.mode sh_mode, fx.mode flex_mode,
+              sh.mode sh_mode, sh.carrier sh_carrier, sh.carrier_ref sh_carrier_ref, fx.mode flex_mode,
               (sh.master_po = po.po) is_master,
               da.avail deposit_avail,
               -- landed-cost inputs: flexport quote, freight rate-card, import-tax rate, per-line duty
@@ -990,6 +990,7 @@ app.get('/api/supply/:section', async (req, res) => {
             to_char(balance_due_date_overide,'YYYY-MM-DD') final_payment_due,   -- the "final payment due" override (priority for balance due)
             credit_days, credit_type,
             coalesce(deposit_ref,'') deposit_ref, coalesce(shipment_ref,'') shipment,
+            coalesce(sh_carrier,'') ship_carrier, coalesce(sh_carrier_ref,'') ship_carrier_ref,
             coalesce(client,'') client, coalesce(client_requirements,'') client_requirements,
             coalesce(sales_order_ref,'') sales_order_ref, coalesce(client_po_ref,'') client_po_ref,
             to_char(client_deadline_date,'YYYY-MM-DD') client_deadline, coalesce(asn_numbers,'') asn_numbers,
@@ -2167,24 +2168,26 @@ app.post('/api/supply/portal-submit', async (req, res) => {
     };
     await stage('completion_date', b.completion_date);
     await stage('invoice_value', b.invoice_value, b.invoice_attachment_id);
-    // tracking / carrier → apply directly to the PO's shipment
+    // tracking / carrier → applies to the PO's SHIPMENT (not the PO). If the PO has no shipment yet, the
+    // supplier's submission CREATES a master shipment named after the PO and assigns this PO to it, so the
+    // carrier/tracking flows straight onto that new shipment (and it shows up in the portal Shipment Plan).
     if (b.tracking != null && b.tracking !== '' || b.carrier != null && b.carrier !== '') {
       const sh = (await pool.query(`SELECT shipment_ref FROM planner.purchase_orders WHERE po=$1`, [b.po])).rows[0];
-      const ref = b.shipment_ref || (sh && sh.shipment_ref);
-      if (ref) {
-        const sets = [], vals = []; let i = 1;
-        if (b.tracking != null && b.tracking !== '') { sets.push(`carrier_ref=$${i++}`); vals.push(b.tracking); }
-        if (b.carrier != null && b.carrier !== '') { sets.push(`carrier=$${i++}`); vals.push(b.carrier); }
-        vals.push(ref);
-        await pool.query(`UPDATE planner.shipments SET ${sets.join(',')}, updated_at=now() WHERE shipment_ref=$${i}`, vals);
-        await pool.query(`INSERT INTO planner.supplier_submissions (supplier_id, po, shipment_ref, kind, value, status, submitted_by, applied_by, applied_at)
-          VALUES ($1,$2,$3,'tracking',$4,'applied',$5,$5,now())`, [sid, b.po, ref, JSON.stringify({ tracking: b.tracking || null, carrier: b.carrier || null }), by]);
-        out.applied.push('tracking/carrier → ' + ref);
-      } else {
-        await pool.query(`INSERT INTO planner.supplier_submissions (supplier_id, po, kind, value, status, submitted_by, note)
-          VALUES ($1,$2,'tracking',$3,'pending',$4,'no shipment assigned yet')`, [sid, b.po, JSON.stringify({ tracking: b.tracking || null, carrier: b.carrier || null }), by]);
-        out.staged.push('tracking (no shipment yet)');
+      let ref = b.shipment_ref || (sh && sh.shipment_ref);
+      if (!ref) {
+        ref = b.po;   // master shipment ref = the PO number
+        await pool.query(`INSERT INTO planner.shipments (shipment_ref, master_po) VALUES ($1,$1) ON CONFLICT (shipment_ref) DO NOTHING`, [ref]);
+        await pool.query(`UPDATE planner.purchase_orders SET shipment_ref=$1 WHERE po=$1`, [b.po]);
+        out.applied.push('shipment created + assigned → ' + ref);
       }
+      const sets = [], vals = []; let i = 1;
+      if (b.tracking != null && b.tracking !== '') { sets.push(`carrier_ref=$${i++}`); vals.push(b.tracking); }
+      if (b.carrier != null && b.carrier !== '') { sets.push(`carrier=$${i++}`); vals.push(b.carrier); }
+      if (sets.length) { vals.push(ref);
+        await pool.query(`UPDATE planner.shipments SET ${sets.join(',')}, updated_at=now() WHERE shipment_ref=$${i}`, vals); }
+      await pool.query(`INSERT INTO planner.supplier_submissions (supplier_id, po, shipment_ref, kind, value, status, submitted_by, applied_by, applied_at)
+        VALUES ($1,$2,$3,'tracking',$4,'applied',$5,$5,now())`, [sid, b.po, ref, JSON.stringify({ tracking: b.tracking || null, carrier: b.carrier || null }), by]);
+      out.applied.push('tracking/carrier → ' + ref);
     }
     // PO confirmation (#supplier confirms SKUs / qty / dates). po_confirmed:true → confirm; false → clear (re-request).
     if (b.po_confirmed != null) {
