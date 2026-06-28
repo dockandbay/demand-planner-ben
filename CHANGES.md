@@ -4,6 +4,12 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.399 - "Last 12m" toggle pills coloured forest green
+
+The 📅 Last 12m toggle (Purchase Orders + Shipments grids) is now forest green — light green
+when off, solid forest green (#166534) when on — so the default-on filter stands out from the
+other pills. CSS-only.
+
 ## v20.398 - Production-status warning only when supplier confirmation is required
 
 The "⚠ Past production start but status is not set" warning / action item now only fires for

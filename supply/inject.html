@@ -27,6 +27,11 @@
 #supply-root .pill{padding:3px 9px;font-size:10px;cursor:pointer;border:1px solid #d0d0d0;background:#fff;color:#666;border-radius:4px;white-space:nowrap;font-weight:600}
 #supply-root .pill:hover{background:#f5f5f5;color:#333}
 #supply-root .pill.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
+/* "Last 12m" toggle pills — forest green so the default-on filter is easy to spot */
+#supply-root .pill.po-recent,#supply-root .pill.ship-recent{background:#f0fdf4;color:#166534;border-color:#86efac}
+#supply-root .pill.po-recent:hover,#supply-root .pill.ship-recent:hover{background:#dcfce7;color:#166534}
+#supply-root .pill.po-recent.active,#supply-root .pill.ship-recent.active{background:#166534;color:#fff;border-color:#14532d}
+#supply-root .pill.po-recent.active:hover,#supply-root .pill.ship-recent.active:hover{background:#15803d;color:#fff}
 #supply-root .pill-lbl{font-size:11px;color:#444;font-weight:600}
 /* level-3 sub-navs (REPORTS, CONFIG): underline tabs like the level-1/2 menus, in light blue */
 #supply-root #rep-subnav,#supply-root #config-subs,#supply-root #prod-subtabs,#supply-root .po-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 12px}
