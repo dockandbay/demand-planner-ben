@@ -106,14 +106,22 @@ shared with / ported alongside this so the numbers match the artifact exactly. O
   supplier portal, Cin7) stay Diviyaj-gated / confirmed. "Auto" defaults to **auto-recommend + one-click apply**;
   true hands-off only for the low-risk, pre-authorised band.
 
-### 3e. Supporting analytics (slices 5+)
-- **Supplier scorecard** — on-time production (promised vs actual), portal confirmation responsiveness,
-  cost-price accuracy (quoted vs final invoice), escalation rate, lead-time reliability → ranked.
-- **Freight & landed cost** — $/unit by lane/mode/supplier, freight as % of COGS, consolidation savings realised.
-- **Cash-flow BI** — deposit/balance/freight outflows by week, peak periods, deposit-pool utilisation, FX.
-- **OTIF / lead-time slippage** — actual vs planned across prod→ship→land→deliver; where time is lost.
+### 3e. Metrics Summary — operational "state of supply" at a glance (slice 0, with the shell)
+A simple counts dashboard at the top of the BI tab (pure aggregation from POs + shipments, no engine):
+- **Open POs** (count, split by status: future / production / shipping)
+- **Units in production** (Σ qty on POs in PRODUCTION)
+- **Shipments** (active / in-transit count)
+- **40ft containers shipping or in production** (derived: Σ pallets ÷ ~20 pallets-per-40ft, or the
+  container combo from the freight `seaEst`) — confirm pallets-per-container in Q.
+- Supporting tiles: units inbound (in transit), $ value in production / in transit, POs awaiting supplier
+  confirmation, deposits outstanding.
+Fast, low-risk, high-visibility — ships alongside the tab shell.
 
-### 3f. AI layer (slices, on top)
+### 3f. Supporting analytics — ⏸ PAUSED (Ben: focus on the rest first)
+Deferred until the recommendation + metrics modules are proven. Captured for later:
+supplier scorecard · freight & landed cost · cash-flow BI · OTIF / lead-time slippage.
+
+### 3g. AI layer (slices, on top)
 - **Ask-your-data** — NL over the projection + POs/shipments ("which POs can I consolidate to AU this month?").
 - **Narrated recommendations** — AI writes each rec's plain-English rationale + $ impact (maths stays deterministic).
 - **Weekly "state of supply" digest** — emailed: shipped, late, cash out, top risks, consolidation/realloc wins.
@@ -122,24 +130,40 @@ shared with / ported alongside this so the numbers match the artifact exactly. O
 
 ---
 
-## 4. Recommendation lifecycle (shared by 3a–3c)
+## 4. Recommendation lifecycle — Apply / Snooze / Dismiss (like Actions)
 
-`detect (engine) → score/rank (impact $, urgency) → surface (BI tab card) → review →
- apply: manual one-click  |  auto (rule-gated) → write-back (existing po-line / portal / Cin7 paths) →
- audit (who/what/when, before→after) → undo`
+BI recommendations behave **exactly like SUPPLY ▸ Actions**: each card can be **Applied**, **Snoozed**
+(1wk / 1mo), or **Dismissed**, with Open / Snoozed / Dismissed / Applied filter pills and a **Restore**.
 
-Recommendations are **derived live**, not stored — but every **applied action** is written to an audit table.
+**Reuse the existing mechanism** — `planner.supply_action_state` (`action_key, status, snooze_until, note`)
++ the `POST /api/supply/actions/state` endpoint already do this for Actions. BI recs get a **stable
+deterministic key** so snooze/dismiss survive the live recompute, e.g.:
+- reallocate → `bi-realloc|{sku}|{from_po}|{to_po}`
+- fill → `bi-fill|{shipment_ref}|{sku}`
+- consolidate → `bi-consol|{shipment_a}|{shipment_b}`
+
+Add an **`applied`** status to the lifecycle (Actions today use open/snoozed/dismissed/done). On each
+recompute: derive recs live → join to `supply_action_state` by key → hide dismissed, hide snoozed-not-due,
+mark applied. A rec that's been actioned won't nag again.
+
+Full flow:
+`detect (engine) → score/rank ($ impact, urgency) → surface (BI card) → Apply / Snooze / Dismiss →
+ on Apply: write-back via existing po-line / po-line-accept / portal-note paths → set status=applied + audit (before→after) → undo`
+
+Open question Q5: whether these cards **also appear in the SUPPLY ▸ Actions tab** (they share the state
+table, so it's feasible) or live only in the BI tab.
 
 ---
 
 ## 5. New data / migrations
 
-- `planner.bi_action_log` — audit of applied recommendations (type, sku, from_po, to_po, qty_before/after,
+- **Reuse `planner.supply_action_state`** for the Apply/Snooze/Dismiss lifecycle (add `applied` to the
+  allowed statuses) — no new state table needed; same `/api/supply/actions/state` endpoint.
+- `planner.bi_action_log` — audit of *applied* recommendations (type, sku, from_po, to_po, qty_before/after,
   actor, auto/manual, rule_id, ts). For undo + accountability.
-- `planner.bi_automation_rules` — opt-in auto-apply rules (type, thresholds, scope, enabled).
-- *(Optional)* `planner.buy_plan` extension or a `buy_plan_projection` cache — only if we later want history /
-  performance; **not required** for the fluid engine.
-- No schema change needed for the projection itself (reads existing tables).
+- `planner.bi_automation_rules` — opt-in auto-apply rules (type, thresholds, scope, enabled). *(Phase 4.)*
+- Metrics Summary + the projection need **no schema change** (pure reads of existing tables).
+- *(Optional, later)* `buy_plan` cache — only if we want history/perf; **not required** for the fluid engine.
 
 ---
 
@@ -159,15 +183,15 @@ Recommendations are **derived live**, not stored — but every **applied action*
 
 | Phase | Slice | Ships value |
 |------|-------|-------------|
-| 0 | **Core engine** `/bi/projection` + BI tab shell + nav | foundation; a live cover/urgency view |
-| 1 | **Reallocate** recommendations (manual one-click apply) | zero-cost flow fix — biggest win |
+| 0 | **BI tab shell + nav + Metrics Summary** (counts) + core engine `/bi/projection` | live "state of supply" + the foundation |
+| 1 | **Reallocate** recs with Apply/Snooze/Dismiss lifecycle | zero-cost flow fix — biggest win |
 | 2 | **Fill-the-container** | pull buys forward for free freight |
 | 3 | **Consolidate** shipments | merge under-filled containers |
 | 4 | **Automation** (rules + supplier timeline auto-update) | hands-off the safe band |
-| 5 | **Analytics** (supplier scorecard, freight, cash, OTIF) | reporting depth |
-| 6 | **AI layer** (ask-your-data, digest, anomaly) | conversational + proactive |
+| — | ~~Analytics~~ (supplier scorecard, freight, cash, OTIF) | ⏸ PAUSED — deferred |
+| 5 | **AI layer** (ask-your-data, digest, anomaly) | conversational + proactive |
 
-**Recommended start: Phase 0 + Phase 1.**
+**Recommended start: Phase 0** (Metrics Summary is a quick, visible win) **then Phase 1.**
 
 ---
 
@@ -175,11 +199,16 @@ Recommendations are **derived live**, not stored — but every **applied action*
 - Prod Supabase writes, n8n schedules, hosting/secrets.
 - Any automatic write to supplier portal / Cin7 / Xero stays gated/confirmed.
 
-## 9. Open questions / dependencies
+## 9. Open questions / dependencies (answers needed before Phase 0/1)
 1. **Shared demand logic** — to guarantee BI == buy plan == KPIs, the buy-plan demand calc (tiers, sub-category
-   seeding, target cover, horizon) should be the *same* code the projection uses. It currently lives in the BUY
-   **artifact** (client-side). Decision: **port it to a shared server calc** (recommended, so the server-injected
-   BI tab matches the artifact) — confirm the exact parameters with Ben.
-2. **Target cover** per market (weeks) and **horizon** — confirm the values the buy plan uses.
-3. **Editable window** for reallocation — confirm statuses treated as "still changeable" (FUTURE/PRODUCTION/READY-TO-SHIP?).
-4. **Auto-apply risk band** — Ben defines the thresholds where hands-off is acceptable.
+   seeding, target cover, horizon) should be the *same* code the projection uses. It lives in the BUY **artifact**
+   (client-side). Recommend porting it to a shared server calc — OK? And point me at / confirm the parameters.
+2. **Target cover** per market (weeks) and **forecast horizon** — the values the buy plan uses.
+3. **Editable window** for reallocation — which statuses count as "still changeable" (FUTURE / PRODUCTION /
+   READY-TO-SHIP?).
+4. **Metrics Summary list** — confirm the tiles in §3e (open POs, units in production, shipments, 40ft containers,
+   …) — add/remove any.
+5. **Containers** — pallets per 40ft container for the count (≈20? we use a 20-pallet container in the freight model).
+6. **BI cards in the Actions tab too?** — surface BI recs only in the BI tab, or also feed SUPPLY ▸ Actions
+   (they share `supply_action_state`).
+7. **Auto-apply risk band** *(Phase 4, can wait)* — thresholds where hands-off is acceptable.
