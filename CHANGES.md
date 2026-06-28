@@ -4,6 +4,14 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.377 - Portal production status: shorter dropdown + unset counts as a Timeline action
+
+- The production-status dropdown (Timeline tab + grid) is now a **compact fixed-width** field (was auto-sizing to
+  the long "— set status —" placeholder / option text).
+- **Unset status now counts as an exception** in the portal (alongside the date-logic mismatch): it raises the
+  **(1) counter on the TIMELINE sub-tab** (and the grid ⚠ + MANAGE count) so the supplier reviews/sets it.
+  (Admin DATES stays logic-only — it doesn't flag every unset status.)
+
 ## v20.376 - Portal SHIPMENT tab: left-align the read-only carrier / tracking / Flexport ref values
 
 - The read-only carrier / tracking ref / Flexport ref shown on a linked shipment are now explicitly **left-aligned**
