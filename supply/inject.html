@@ -233,11 +233,13 @@
     var cols=Object.keys(rows[0]);
     return '<div class="tw"><table><thead><tr>'+cols.map(function(c){return isNum(rows[0][c])&&rows[0][c]!==''?'<th>'+esc(c)+'</th>':'<th class="l">'+esc(c)+'</th>';}).join('')+'</tr></thead><tbody>'
       +rows.map(function(r){return '<tr>'+cols.map(function(c){return cellFor(c,r[c]);}).join('')+'</tr>';}).join('')+'</tbody></table></div>'; }
-  function filt(rows,q){ if(!q)return rows; q=q.toLowerCase(); return rows.filter(function(r){return Object.keys(r).some(function(k){return String(r[k]==null?'':r[k]).toLowerCase().indexOf(q)>=0;});}); }
+  // normalise for matching: lowercase + drop spaces and the "└" tree char, so a search matches regardless of them
+  function nrm(s){ return String(s==null?'':s).toLowerCase().replace(/[\s└]+/g,''); }
+  function filt(rows,q){ q=nrm(q); if(!q)return rows; return rows.filter(function(r){return Object.keys(r).some(function(k){return nrm(r[k]).indexOf(q)>=0;});}); }
   // debounce: coalesce rapid keystrokes into one call after `ms` of quiet
   function debounce(fn,ms){ var t; return function(){ var a=arguments, c=this; clearTimeout(t); t=setTimeout(function(){ fn.apply(c,a); }, ms||220); }; }
-  // effective search query: ignore <2 chars and the universal "PO"/"PO-" prefix (matches every PO → no useful filter)
-  function effQ(q){ q=(q||'').trim(); if(q.length<2)return ''; if(/^po-?$/i.test(q))return ''; return q; }
+  // effective search query: normalise, then ignore <2 chars and the universal "PO"/"PO-" prefix (matches every PO)
+  function effQ(q){ q=nrm(q); if(q.length<2)return ''; if(/^po-?$/.test(q))return ''; return q; }
 
   function editCell(ep,field,val,kind,extra){ var cls='fci'+(kind==='date'?' dt':(kind==='txt'?' txt':''));
     var ty=kind==='date'?' type="date"':'';
@@ -1405,15 +1407,15 @@
     // parse the PO box into tokens (space / comma / newline). When present it OVERRIDES the status + country filters.
     // PO-search tokens — require ≥5 chars so a short/partial entry doesn't accidentally override the status
     // filter (and pull in the 1000+ completed POs). Below 5 chars the PO box is inert.
-    function poToks(){ return String(st.poq||'').toLowerCase().split(/[\s,]+/).filter(function(t){return t.length>=5;}); }
+    function poToks(){ return String(st.poq||'').split(/[\s,]+/).map(nrm).filter(function(t){return t.length>=5;}); }
     function curLines(){ var allC=st.countries.size===countries.length, pt=poToks(); return lines.filter(function(l){
-      if(pt.length){ if(!pt.some(function(t){return (l.po||'').toLowerCase().indexOf(t)>=0;}))return false; }
+      if(pt.length){ if(!pt.some(function(t){return nrm(l.po).indexOf(t)>=0;}))return false; }
       else { if(!st.statuses.has(l.status))return false; if(!(allC||st.countries.has(l.country)))return false; }
-      return (st.prod==='All'||l.prod_no===st.prod)&&(st.cat==='All'||l.category===st.cat)&&(st.rw==='All'||skuRW[l.sku]===st.rw)&&(!st.partials||isUnapprovedPartial(l))&&(!st.erpdiff||erpDiff(l))&&(!st.suprisk||lineSupRisk(l))&&(!st.disc||lineDisc(l))&&(!st.q||(l.sku||'').toLowerCase().indexOf(st.q.toLowerCase())>=0); }); }
+      return (st.prod==='All'||l.prod_no===st.prod)&&(st.cat==='All'||l.category===st.cat)&&(st.rw==='All'||skuRW[l.sku]===st.rw)&&(!st.partials||isUnapprovedPartial(l))&&(!st.erpdiff||erpDiff(l))&&(!st.suprisk||lineSupRisk(l))&&(!st.disc||lineDisc(l))&&(!nrm(st.q)||nrm(l.sku).indexOf(nrm(st.q))>=0); }); }
     function rowsFor(cl){ var set={},list=[]; cl.forEach(function(l){if(!set[l.sku]){set[l.sku]=1;list.push(l.sku);}});
       function addMaster(reqCat){ skuMaster.forEach(function(s){ if(set[s.sku])return;
         if(reqCat&&s.category!==st.cat)return; if(st.cat!=='All'&&s.category!==st.cat)return;
-        if(st.rw!=='All'&&s.release_window!==st.rw)return; if(st.q&&(s.sku||'').toLowerCase().indexOf(st.q.toLowerCase())<0)return;
+        if(st.rw!=='All'&&s.release_window!==st.rw)return; if(nrm(st.q)&&nrm(s.sku).indexOf(nrm(st.q))<0)return;
         set[s.sku]=1;list.push(s.sku); }); }
       if(!st.partials){ if(st.scope==='allskus') addMaster(false); else if(st.scope==='all'&&st.cat!=='All') addMaster(true); }
       // ALSO include SKUs the supplier submitted a quantity for (amended qty or an added SKU) on the POs in view —
@@ -1421,7 +1423,7 @@
       var clPos={}; cl.forEach(function(l){clPos[l.po]=1;});
       plc.forEach(function(x){ if(set[x.sku]||!clPos[x.po])return;
         if(!((x.amended_qty!=null&&x.amended_qty!=='')||x.is_added))return;
-        if(st.q&&(x.sku||'').toLowerCase().indexOf(st.q.toLowerCase())<0)return;
+        if(nrm(st.q)&&nrm(x.sku).indexOf(nrm(st.q))<0)return;
         set[x.sku]=1; list.push(x.sku); });
       return list; }
     function updateActionCounts(){ var pc=lines.filter(isUnapprovedPartial).length, ec=lines.filter(erpDiff).length;

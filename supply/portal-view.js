@@ -12,8 +12,10 @@
   function dcell(v){return v?esc(fd(v)):'<span class="mut tiny">—</span>';}
   // debounce: coalesce rapid keystrokes into one call after `ms` quiet
   function debounce(fn,ms){ var t; return function(){ var a=arguments, c=this; clearTimeout(t); t=setTimeout(function(){ fn.apply(c,a); }, ms||220); }; }
-  // effective search query: ignore <2 chars and the universal "PO"/"PO-" prefix (matches every PO → no useful filter)
-  function effQ(q){ q=(q||'').trim(); if(q.length<2)return ''; if(/^po-?$/i.test(q))return ''; return q; }
+  // normalise for matching: lowercase + drop spaces and the "└" tree char, so a search matches regardless of them
+  function nrm(s){ return String(s==null?'':s).toLowerCase().replace(/[\s└]+/g,''); }
+  // effective search query: normalise, then ignore <2 chars and the universal "PO"/"PO-" prefix (matches every PO)
+  function effQ(q){ q=nrm(q); if(q.length<2)return ''; if(/^po-?$/.test(q))return ''; return q; }
   var PP_CAP=200;   // cap rendered PO/shipment rows in the portal; "show all" reveals the rest
   var PO_STATUSES=['FUTURE','PRODUCTION','READY TO SHIP','SHIPPING','DELIVERED','COMPLETE'];
   // document types a supplier can attach (Documents section on the INVOICE tab)
@@ -651,10 +653,10 @@
               var allSp=_ppData.shipmentPlan||[];
               // a shipment has "shipped" once it has a departure date that has passed
               function spShipped(s){ return !!(s.departure && s.departure<=today); }
-              var poq=effQ(PORTAL_SP_PO).toLowerCase();
+              var poq=effQ(PORTAL_SP_PO);
               var shownSp=allSp.filter(function(s){
                 // a PO/shipment search OVERRIDES the filter pills — find it whatever its status / escalation
-                if(poq) return (s.master_po||'').toLowerCase().indexOf(poq)>=0 || (s.shipment_ref||'').toLowerCase().indexOf(poq)>=0 || (s.members||[]).some(function(m){return (m.po||'').toLowerCase().indexOf(poq)>=0;});
+                if(poq) return nrm(s.master_po).indexOf(poq)>=0 || nrm(s.shipment_ref).indexOf(poq)>=0 || (s.members||[]).some(function(m){return nrm(m.po).indexOf(poq)>=0;});
                 if(PORTAL_SP_ESC && !s.escalated)return false;
                 var shipped=spShipped(s); if(shipped?!PORTAL_SP_SHIPPED:!PORTAL_SP_ACTIVE)return false;
                 return true; });
@@ -679,14 +681,14 @@
             var ordered=PO_STATUSES.filter(function(s){return seen[s];}).concat(present.filter(function(s){return PO_STATUSES.indexOf(s)<0;}));
             if(PORTAL_PO_ST===null)PORTAL_PO_ST={};
             ordered.forEach(function(s){ if(PORTAL_PO_ST[s]===undefined)PORTAL_PO_ST[s]=(s==='PRODUCTION'||s==='SHIPPING'); });
-            var pq=effQ(PORTAL_PO_Q).toLowerCase();
+            var pq=effQ(PORTAL_PO_Q);
             var pillBar='<div class="bar" style="gap:5px;flex-wrap:wrap;align-items:center">'
               +'<input class="fci pp-po-q" placeholder="search PO / client…" value="'+esc(PORTAL_PO_Q)+'" style="width:170px;text-align:left">'
               +'<span class="pill-lbl">Status</span>'
               +(ordered.length?ordered.map(function(s){return '<span class="pill'+(PORTAL_PO_ST[s]?' active':'')+(pq?' ':'')+'" data-st="'+esc(s)+'"'+(pq?' style="opacity:.4"':'')+'>'+esc(s)+'</span>';}).join(''):'<span class="mut tiny">no orders</span>')
               +(pq?'<span class="mut tiny">search overrides status</span>':'')+'</div>';
             // a PO/client search OVERRIDES the status pills — find it whatever its status
-            var shown=_ppData.pos.filter(function(p){ if(pq) return (p.po||'').toLowerCase().indexOf(pq)>=0 || (p.client||'').toLowerCase().indexOf(pq)>=0 || (p.shipment||'').toLowerCase().indexOf(pq)>=0 || (p.prod_no||'').toLowerCase().indexOf(pq)>=0;
+            var shown=_ppData.pos.filter(function(p){ if(pq) return nrm(p.po).indexOf(pq)>=0 || nrm(p.client).indexOf(pq)>=0 || nrm(p.shipment).indexOf(pq)>=0 || nrm(p.prod_no).indexOf(pq)>=0;
               return PORTAL_PO_ST[(p.status||'').toUpperCase()]; });
             var poCapped=(!_ppShowAllPO && shown.length>PP_CAP), poRender=poCapped?shown.slice(0,PP_CAP):shown;
             body.innerHTML=pillBar+'<div class="count" style="margin:2px 0 8px">'+(poCapped?poRender.length+' of ':'')+shown.length+' of '+_ppData.pos.length+' purchase orders</div>'+ppPOs(poRender,_ppData)

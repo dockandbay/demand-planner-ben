@@ -4,6 +4,15 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.397 - Search ignores spaces and the "└" tree character
+
+All filter/search boxes across SUPPLY (Purchase Orders, Shipments, Order Plan) and the
+Supplier Portal now **normalise the query and the data**: lowercase, and strip spaces and
+the `└` box-drawing character. So a PO shown as `└─ PO-53UKXR1` matches a search for
+`PO-53UKXR1` or `53ukxr1`, regardless of spacing. Shared `nrm()` helper added to both
+`inject.html` and `portal-view.js`; `filt()` and `effQ()` route through it. No new env vars
+or migrations.
+
 ## v20.396 - Grid performance trio across SUPPLY + Supplier Portal
 
 Applied three performance improvements to every grid on the SUPPLY plan and the supplier portal:
