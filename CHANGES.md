@@ -4,6 +4,19 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.389 - Forecast export: real CSV format (Forecast Analysis layout) + real DriveHQ WebDAV upload
+
+- **CSV now matches the "Forecast Analysis" layout** — 63 columns, two header rows (field codes `FC-M1…` + the
+  actual month dates): `SKU, Country Category, MonthsStock, FC-M1..12 (DTC), P-M1..12, G-M1..12, FBA-M1..12,
+  B2B-M1..12`. FC/FBA/B2B come from `forecast_outputs` (live). **P, G, MonthsStock kept in the format but left
+  blank** for now (per "skip calculating, keep the columns"). Same format for every country; SKUs per that country.
+- **DriveHQ upload is now a real WebDAV PUT** (HTTP PUT + Basic auth, fixed filename → overwrites), mirroring the
+  Apps Script routine — no longer a stub. Verified the path reaches DriveHQ (HTTP 401 with the dummy creds).
+- **Env vars changed to WebDAV:** `WEBDAV_BASE`, `DRIVEHQ_USER`, `DRIVEHQ_PASS`, `TARGET_FOLDER` (replacing the
+  earlier `DRIVEHQ_FTP_*`); dummy values in `.env`, documented in `.env.example`.
+- **Open:** `Country Category` is built as `{COUNTRY} {subcategory}` (e.g. "UK Bag - Beach"); the sample has a 3PL
+  prefix ("UK ILGBag - Beach") — tell me if you want the per-country 3PL label. P / G / MonthsStock population TBC.
+
 ## v20.388 - Forecast export by country: settings UI (CONFIG ▸ Forecast export)
 
 - New **CONFIG ▸ Forecast export** sub-tab: a per-country row (UK/US/EU/AU/CA) with an editable **email** (saved on

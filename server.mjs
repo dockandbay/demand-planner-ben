@@ -52,7 +52,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.388';
+const APP_VERSION = 'v20.389';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -4235,25 +4235,42 @@ async function sendMagicEmail(email, url) {
 }
 // ── Forecast export by country (CSV download · email · DriveHQ upload) ───────────────────────────────────
 const FC_EXPORT_COUNTRIES = ['UK', 'US', 'EU', 'AU', 'CA'];
-// Per-country forecast CSV: one row per SKU × month for the next 12 months; DTC / FBA / B2B as columns.
-// Source = planner.forecast_outputs (the editable SKU plan); country = the warehouse prefix (uk_/us_/eu_/au_/ca_).
+// Per-country forecast CSV in the "Forecast Analysis" layout (63 cols, two header rows):
+//   SKU, Country Category, MonthsStock, FC-M1..12 (DTC), P-M1..12 (purchase — left blank for now),
+//   G-M1..12 (left blank), FBA-M1..12, B2B-M1..12. Row 2 carries the actual month dates for each block.
+// Source = planner.forecast_outputs (the editable SKU plan); country = warehouse prefix (uk_/us_/eu_/au_/ca_).
+const FC_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 async function forecastCountryCsv(country) {
   const co = String(country || '').toUpperCase();
-  const rows = (await pool.query(`
-    SELECT sku, to_char(month,'YYYY-MM') ym,
-      coalesce(sum(units) FILTER (WHERE channel='DTC'),0) dtc,
-      coalesce(sum(units) FILTER (WHERE channel='FBA'),0) fba,
-      coalesce(sum(units) FILTER (WHERE channel='B2B'),0) b2b
-    FROM planner.forecast_outputs
-    WHERE lower(split_part(warehouse,'_',1)) = lower($1)
-      AND month >= date_trunc('month', current_date)
-      AND month <  date_trunc('month', current_date) + interval '12 months'
-    GROUP BY sku, month
-    HAVING coalesce(sum(units),0) <> 0
-    ORDER BY sku, month`, [co])).rows;
+  // 12 months starting this month
+  const now = new Date(); const months = [];
+  for (let i = 0; i < 12; i++) months.push(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + i, 1)));
+  const ymKey = d => d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dateLbl = d => '01-' + FC_MON[d.getUTCMonth()] + '-' + String(d.getUTCFullYear()).slice(2);
+  const ymList = months.map(ymKey);
+  const rows = (await pool.query(`SELECT sku, to_char(month,'YYYY-MM') ym, channel, sum(units) u
+    FROM planner.forecast_outputs WHERE lower(split_part(warehouse,'_',1)) = lower($1)
+      AND month >= date_trunc('month', current_date) AND month < date_trunc('month', current_date) + interval '12 months'
+    GROUP BY sku, month, channel`, [co])).rows;
+  if (!rows.length) return { csv: '', rowCount: 0 };
+  const subs = {}; (await pool.query(`SELECT sku, coalesce(subcategory,'') s FROM planner.products`)).rows.forEach(r => { subs[r.sku] = r.s; });
+  const map = {}, skus = [];
+  rows.forEach(r => { if (!map[r.sku]) { map[r.sku] = {}; skus.push(r.sku); } const c = (map[r.sku][r.ym] = map[r.sku][r.ym] || { DTC: 0, FBA: 0, B2B: 0 }); c[r.channel] = Number(r.u) || 0; });
+  skus.sort();
   const esc = v => { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
-  const csv = 'SKU,Month,DTC,FBA,B2B\n' + rows.map(r => [esc(r.sku), r.ym, r.dtc, r.fba, r.b2b].join(',')).join('\n') + '\n';
-  return { csv, rowCount: rows.length };
+  const span = pfx => ymList.map((_, i) => pfx + '-M' + (i + 1));   // FC-M1..FC-M12
+  const codeRow = ['SKU', 'Country Category', 'MonthsStock'].concat(span('FC'), span('P'), span('G'), span('FBA'), span('B2B'));
+  const dates = months.map(dateLbl);
+  const labelRow = ['SKU Header', 'Country Category', 'MonthsStock'].concat(dates, dates, dates, dates, dates);
+  const dataRows = skus.map(sku => {
+    const cc = co + ' ' + (subs[sku] || '');
+    const get = (ym, ch) => { const c = map[sku][ym]; return c ? (c[ch] || 0) : 0; };
+    const fc = ymList.map(ym => get(ym, 'DTC')), fba = ymList.map(ym => get(ym, 'FBA')), b2b = ymList.map(ym => get(ym, 'B2B'));
+    const blank12 = ymList.map(() => '');   // P + G left blank (kept in the format)
+    return [esc(sku), esc(cc.trim()), ''].concat(fc, blank12, blank12, fba, b2b);
+  });
+  const csv = [codeRow, labelRow].concat(dataRows).map(r => r.join(',')).join('\n') + '\n';
+  return { csv, rowCount: skus.length };
 }
 app.get('/api/forecast/country-csv/:country', async (req, res) => {
   try { const { csv } = await forecastCountryCsv(req.params.country);
@@ -4272,7 +4289,7 @@ app.post('/api/forecast/export-settings/:country', async (req, res) => {
     ON CONFLICT (country) DO UPDATE SET email=$2, updated_at=now()`, [co, email || null]); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
-function drivehqConfigured() { return !!(process.env.DRIVEHQ_FTP_HOST && process.env.DRIVEHQ_FTP_USER && process.env.DRIVEHQ_FTP_PASS); }
+function drivehqConfigured() { return !!(process.env.WEBDAV_BASE && process.env.DRIVEHQ_USER && process.env.DRIVEHQ_PASS); }
 // email one country's CSV to its stored address (gated on RESEND_API_KEY; stubbed when absent)
 async function emailForecastCountry(country) {
   const co = String(country).toUpperCase();
@@ -4293,15 +4310,23 @@ async function emailForecastCountry(country) {
 }
 app.post('/api/forecast/email/:country', async (req, res) => { try { res.json(await emailForecastCountry(req.params.country)); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/forecast/email-all', async (req, res) => { try { const out = []; for (const c of FC_EXPORT_COUNTRIES) out.push(await emailForecastCountry(c)); res.json({ ok: true, results: out }); } catch (e) { res.status(500).json({ error: e.message }); } });
-// upload one country's CSV to DriveHQ FTP (gated on DRIVEHQ_* env). Real FTP transfer pending live creds — stubbed for now.
+// upload one country's CSV to DriveHQ over WebDAV (HTTP PUT, Basic auth) — gated on WEBDAV_BASE/DRIVEHQ_USER/PASS.
+// Mirrors the Apps Script routine: PUT {base}/{TARGET_FOLDER}/{filename}. Fixed filename → overwrites in place.
 async function drivehqForecastCountry(country) {
   const co = String(country).toUpperCase();
   const { csv, rowCount } = await forecastCountryCsv(co);
   if (!rowCount) return { country: co, ok: false, reason: 'no forecast rows for this country' };
-  if (!drivehqConfigured()) return { country: co, ok: false, reason: 'DriveHQ FTP not configured (set DRIVEHQ_* env)' };
-  // TODO: real FTP STOR of `csv` to DRIVEHQ_FTP_DIR (pending live DriveHQ credentials; dummy creds in env for now)
-  return { country: co, ok: false, stub: true, reason: 'DriveHQ configured — FTP upload pending real credentials',
-    would_upload: { host: process.env.DRIVEHQ_FTP_HOST, dir: process.env.DRIVEHQ_FTP_DIR, filename: 'forecast_' + co + '_12mo.csv', bytes: Buffer.byteLength(csv), rows: rowCount } };
+  if (!drivehqConfigured()) return { country: co, ok: false, reason: 'DriveHQ not configured (set WEBDAV_BASE / DRIVEHQ_USER / DRIVEHQ_PASS)' };
+  const base = String(process.env.WEBDAV_BASE).replace(/\/+$/, '');
+  const folder = String(process.env.TARGET_FOLDER || 'UPLOADED').replace(/^\/+|\/+$/g, '');
+  const filename = 'forecast_' + co + '_12mo.csv';
+  const url = [base, encodeURIComponent(folder), encodeURIComponent(filename)].join('/');
+  const auth = Buffer.from(process.env.DRIVEHQ_USER + ':' + process.env.DRIVEHQ_PASS).toString('base64');
+  try {
+    const r = await fetch(url, { method: 'PUT', headers: { Authorization: 'Basic ' + auth, 'Content-Type': 'text/csv' }, body: csv, redirect: 'follow' });
+    if (r.status < 200 || r.status >= 300) return { country: co, ok: false, reason: 'DriveHQ HTTP ' + r.status + ': ' + (await r.text()).slice(0, 200) };
+    return { country: co, ok: true, url, rows: rowCount, bytes: Buffer.byteLength(csv) };
+  } catch (e) { return { country: co, ok: false, reason: 'DriveHQ upload error: ' + e.message }; }
 }
 app.post('/api/forecast/drivehq/:country', async (req, res) => { try { res.json(await drivehqForecastCountry(req.params.country)); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/forecast/drivehq-all', async (req, res) => { try { const out = []; for (const c of FC_EXPORT_COUNTRIES) out.push(await drivehqForecastCountry(c)); res.json({ ok: true, results: out }); } catch (e) { res.status(500).json({ error: e.message }); } });
