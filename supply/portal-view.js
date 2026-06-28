@@ -11,6 +11,15 @@
   function fd(s){ if(!s)return ''; var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(s)); return m?(m[3]+'-'+MON[+m[2]-1]+'-'+m[1].slice(2)):String(s); }
   function dcell(v){return v?esc(fd(v)):'<span class="mut tiny">—</span>';}
   var PO_STATUSES=['FUTURE','PRODUCTION','READY TO SHIP','SHIPPING','DELIVERED','COMPLETE'];
+  // supplier production status — the supplier maintains this; an exception flags a status that conflicts with the dates
+  var PROD_STATUS=[['not_started','Not started'],['in_production','In production'],['nearing_completion','Nearing completion'],['complete','Complete'],['shipped','Shipped']];
+  function prodStatusLabel(v){ var m=PROD_STATUS.filter(function(o){return o[0]===v;}); return m.length?m[0][1]:''; }
+  function prodStatusSel(po,val){ return '<select class="fci pp-prod" data-po="'+esc(po)+'" style="font-size:12px;text-align:left"><option value=""'+(val?'':' selected')+'>— set status —</option>'
+    +PROD_STATUS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'; }
+  function prodStatusException(ps, prodStart, prodEnd){ ps=ps||''; var today=new Date().toISOString().slice(0,10);
+    if((ps===''||ps==='not_started') && prodStart && prodStart<today) return 'Past production start ('+fd(prodStart)+') but status is '+(ps?prodStatusLabel(ps):'not set');
+    if(ps!=='complete' && ps!=='shipped' && prodEnd && prodEnd<today) return 'Past production completion ('+fd(prodEnd)+') but status is '+(ps?prodStatusLabel(ps):'not set');
+    return ''; }
   function statusBg(s){ var u=String(s||'').toUpperCase();
     if(u.indexOf('FUTURE')>=0)return 'bg-neutral'; if(u.indexOf('PRODUCTION')>=0)return 'bg-amber';
     if(u.indexOf('SHIP')>=0||u.indexOf('READY')>=0)return 'bg-red';
@@ -461,9 +470,13 @@
           ? '✓ <b>Order confirmed</b> on '+esc(p.supplier_confirmed)+(p.supplier_confirmed_by?' · '+esc(p.supplier_confirmed_by):'')+' &nbsp; <button class="save-btn light pp-confirm" data-po="'+po+'" data-v="0">Withdraw confirmation</button>'
           : '⏳ <b>Please confirm this order.</b> Review the SKUs &amp; quantities (ORDER PLAN tab) and the dates, amend anything that\'s wrong, then confirm. &nbsp; <button class="save-btn pp-confirm" data-po="'+po+'" data-v="1" style="background:#16a34a;color:#fff;border-color:#16a34a">✓ Confirm order</button>')
         +'</div>'):'';
-      // ---- TIMELINE: status + notes (Dock & Bay notes show as 'new' until you mark them read) ----
+      // ---- TIMELINE: production status + status + notes (Dock & Bay notes show as 'new' until you mark them read) ----
       var unreadInt=notes.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
-      var timeline=confirmBar
+      var prodExc=prodStatusException(p.production_status, p.prod_start, p.prod_end);
+      var prodBlock='<div style="margin-bottom:10px;padding:8px 11px;border-radius:6px;font-size:12px;'+(prodExc?'background:#fef3c7;border:1px solid #fcd34d':'background:#f1f5f9;border:1px solid #e5e7eb')+'">'
+        +'<b>Production status</b> &nbsp; '+prodStatusSel(p.po, p.production_status||'')
+        +(prodExc?'<div class="tiny" style="color:#b45309;margin-top:4px">⚠ '+esc(prodExc)+'</div>':'')+'</div>';
+      var timeline=confirmBar+prodBlock
         +(pend.length?'<div class="tiny" style="color:#92400e;margin-bottom:3px">⏳ Submitted, awaiting approval: '+pend.map(function(s){return esc(subFmt(s));}).join(' · ')+'</div>':'')
         +(appl.length?'<div class="tiny" style="color:#166534;margin-bottom:6px">✓ Applied: '+appl.map(function(s){return esc(subFmt(s))+(s.attachment_id?' <a href="/api/portal/attachment/'+s.attachment_id+'" target="_blank">doc</a>':'');}).join(' · ')+'</div>':'')
         +(notes.length?notes.map(function(n){ var internal=(n.author_kind==='internal');
@@ -530,7 +543,7 @@
         +(clientDocs.length?blRow('Direct to Client / FBA attachments',clientDocs.map(function(x){return '<a href="/api/portal/attachment/'+x.id+'" target="_blank" rel="noopener">'+esc(x.filename||'file')+'</a>';}).join(' &nbsp;·&nbsp; ')):'')
         +'</div>';
       // ---- tabs + action badges ----
-      var tabs=[['timeline','TIMELINE',timeline,unreadInt+((needConfirm&&!confirmed)?1:0)],['orderplan','ORDER PLAN',skus,0],
+      var tabs=[['timeline','TIMELINE',timeline,unreadInt+((needConfirm&&!confirmed)?1:0)+(prodExc?1:0)],['orderplan','ORDER PLAN',skus,0],
         ['invoice','INVOICE',invoice, has('invoice_value')?0:1],['shipment','SHIPMENT',shipment, ((p.shipment||p.flexport_reference||has('tracking'))?0:1)+xdAction],
         ['barcodes','BARCODES & LABELS',barcodesLabels,0]];
       function badge(n){ return n>0?' <span class="ex-badge">'+n+'</span>':''; }
@@ -540,17 +553,19 @@
     function ppPOs(pos, data){ var lb=data.lb||{}, notesByPo=data.notesByPo||{}, subsByPo=data.subsByPo||{}, costsByPo=data.costsByPo||{}, supSkus=data.supSkus||[], xdByPo=data.xdByPo||{}, addByPo=data.addByPo||{};
       if(!pos.length)return '<div class="count">No purchase orders for this supplier.</div>';
       var today=new Date().toISOString().slice(0,10);
-      return '<div class="tw"><table class="pp-tbl"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l">Status</th><th class="l">Start</th><th class="l">Est. completion</th><th class="l">Completion date</th><th class="l">Ship</th><th class="l">Flexport</th><th class="l">Ships With</th><th style="text-align:right">Start deposit assigned</th><th style="text-align:right">Completion</th><th style="text-align:right">Balance</th><th style="text-align:right">Amount due</th><th class="l">Due</th><th class="l">Deposit ref</th></tr></thead><tbody>'
+      return '<div class="tw"><table class="pp-tbl"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l">Status</th><th class="l">Production status</th><th class="l">Start</th><th class="l">Est. completion</th><th class="l">Completion date</th><th class="l">Ship</th><th class="l">Flexport</th><th class="l">Ships With</th><th style="text-align:right">Start deposit assigned</th><th style="text-align:right">Completion</th><th style="text-align:right">Balance</th><th style="text-align:right">Amount due</th><th class="l">Due</th><th class="l">Deposit ref</th></tr></thead><tbody>'
         +pos.map(function(p,i){
-          var det='<tr id="pp-'+i+'" style="display:none"><td></td><td colspan="14">'+ppExpand(p, lb[p.po]||[], notesByPo[p.po]||[], subsByPo[p.po]||[], i, costsByPo[p.po]||{}, supSkus, xdByPo[p.po]||{}, addByPo[p.po]||[])+'</td></tr>';
+          var det='<tr id="pp-'+i+'" style="display:none"><td></td><td colspan="15">'+ppExpand(p, lb[p.po]||[], notesByPo[p.po]||[], subsByPo[p.po]||[], i, costsByPo[p.po]||{}, supSkus, xdByPo[p.po]||{}, addByPo[p.po]||[])+'</td></tr>';
           var sb=subsByPo[p.po]||[]; var nts=notesByPo[p.po]||[]; var unreadInt=nts.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
           var cdS=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean), xdm=xdByPo[p.po]||{};
           var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
-          var act=(sb.some(function(s){return s.kind==='invoice_value';})?0:1)+((p.shipment||p.flexport_reference||sb.some(function(s){return s.kind==='tracking';}))?0:1)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0);
+          var prodExc=prodStatusException(p.production_status, p.prod_start, p.prod_end);
+          var act=(sb.some(function(s){return s.kind==='invoice_value';})?0:1)+((p.shipment||p.flexport_reference||sb.some(function(s){return s.kind==='tracking';}))?0:1)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0);
           var cdq=sb.filter(function(s){return s.kind==='completion_date';}); var cdVal=cdq.length?cdq[cdq.length-1].value:'';
           var cdGrid=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
           return '<tr><td class="l"><button class="save-btn pp-exp" data-i="'+i+'">MANAGE'+(act>0?' <span class="ex-badge" title="'+act+' action'+(act>1?'s':'')+' needed">'+act+'</span>':'')+'</button></td>'
             +'<td class="l"><b>'+esc(p.po)+'</b></td><td class="l"><span class="tool-badge '+statusBg(p.status)+'">'+esc(p.status||'')+'</span></td>'
+            +'<td class="l" style="min-width:150px">'+prodStatusSel(p.po, p.production_status||'')+(prodExc?'<div class="tiny" style="color:#b91c1c;font-weight:600;margin-top:2px" title="'+esc(prodExc)+'">⚠ check status</div>':'')+'</td>'
             +'<td class="l">'+dcell(p.prod_start)+'</td><td class="l">'+dcell(p.prod_end)+'</td>'
             +'<td class="l" style="min-width:140px"><input type="date" class="pp-cd-grid" data-po="'+esc(p.po)+'" value="'+esc(cdVal)+'" title="click to pick your completion date — it saves automatically" style="width:128px;cursor:pointer;text-align:left;font:inherit;font-size:12px;padding:4px 6px;border:1px solid #93c5fd;border-radius:4px;background:#eff6ff;color:#1d4ed8;box-sizing:content-box"></td>'
             +'<td class="l">'+dcell(p.ship)+'</td>'
@@ -737,6 +752,9 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                   (_ppData.addByPo[po]=_ppData.addByPo[po]||[]).push({id:j.id,description:desc,qty:q===''?null:Number(q),price:pr===''?null:Number(pr)}); rerenderRow(row,po,'orderplan'); }); }; });
               scope.querySelectorAll('.pp-ac-rm').forEach(function(b){ b.onclick=function(){ var box=b.closest('.ppx'), po=(box.querySelector('.pp-ac-add')||{}).dataset.po, row=b.closest('tr[id^="pp-"]'), id=b.dataset.id;
                 postJSON(EP.addlCostRemove,{id:id},function(){  if(_ppData.addByPo[po])_ppData.addByPo[po]=_ppData.addByPo[po].filter(function(x){return String(x.id)!==String(id);}); rerenderRow(row,po,'orderplan'); }); }; });
+              // supplier production status dropdown (grid + timeline) → saves + re-renders so the exception flag updates
+              scope.querySelectorAll('.pp-prod').forEach(function(sel){ sel.onchange=function(){ sel.disabled=true;
+                postJSON(EP.submit,{po:sel.dataset.po,supplier_id:sid,submitted_by:by,production_status:sel.value},function(){ reload(); }); }; });
               scope.querySelectorAll('.pp-trk-go').forEach(function(btn){ btn.onclick=function(){ var t=pick('pp-trk',btn.dataset.po).value, cc=pick('pp-car',btn.dataset.po).value; if(!t&&!cc){ alert('Pick a carrier and/or enter a tracking ref.'); return; } btn.disabled=true;
                 postJSON(EP.submit,{po:btn.dataset.po,supplier_id:sid,submitted_by:by,tracking:t,carrier:cc},function(j){ var made=(j.applied||[]).some(function(x){return /shipment created/.test(x);}); alert(made?'Shipment created for this PO — carrier & tracking saved.':'Carrier & tracking saved to the shipment.'); reload(); }); }; });
               // jump to this PO's shipment in the Shipment Plan tab (search overrides the pills so it shows whatever its status)

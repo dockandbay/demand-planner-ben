@@ -4,6 +4,22 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v20.375 - Supplier production status: removed nag action, surfaced as an editable field + logic exception
+
+- **Removed** the time-based **"Production check-in"** action ("…confirm on track") — it nagged for a production
+  status that had no UI to set. (The "Ship check-in" action is unchanged — see note.)
+- **Supplier production status is now an editable field** (Not started / In production / Nearing completion /
+  Complete / Shipped):
+  - **Admin PO ▸ PLAN ▸ DATES** — a "Supplier production status" row (dropdown). Saves via the existing
+    `/prod-status` endpoint (stamps the confirmation time).
+  - **Supplier portal main grid** — a "Production status" column the supplier updates inline.
+  - **Supplier portal TIMELINE tab** — the status dropdown sits at the top.
+- **Logic-based exception** (instead of a time nag): flags a status that conflicts with the dates — e.g. *past
+  production start but status is "not set"/"Not started"*, or *past production completion but not Complete/Shipped*.
+  Shown in the DATES tab (counts toward its exception badge), the portal grid (⚠ + MANAGE count), and the portal
+  TIMELINE tab badge.
+- `portal-submit` now accepts `production_status`; the field is set directly (validated against the status list).
+
 ## v20.374 - "Supplier created new shipment" action, left-align carrier/tracking, rename timeline heading
 
 - **New action: "Supplier created new shipment"** — when a supplier submits carrier/tracking on a PO with no

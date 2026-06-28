@@ -51,7 +51,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.374';
+const APP_VERSION = 'v20.375';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1643,20 +1643,8 @@ app.get('/api/supply/:section', async (req, res) => {
             LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
             WHERE coalesce(p.status,'') NOT ILIKE '%complete%'
             GROUP BY l.po HAVING count(*) FILTER (WHERE el.qty IS NOT NULL)=0
-          UNION ALL
-          SELECT CASE WHEN x.comp < current_date THEN 'high' ELSE 'amber' END,'Production check-in', x.po,
-            CASE WHEN x.comp < current_date
-              THEN 'Completion was due '||x.comp||' ('||(current_date-x.comp)||'d ago) · status '||coalesce(nullif(x.ps,''),'not set')||' — chase the supplier'
-              ELSE 'Completes '||x.comp||' (in '||(x.comp-current_date)||'d) · status '||coalesce(nullif(x.ps,''),'not set')||' — confirm on track' END,
-            'prodstatus','po','production_status', x.po
-            FROM (SELECT po.po,
-                    coalesce(po.end_production_overide,
-                             po.start_production + (coalesce(s.production_days,0)||' days')::interval)::date comp,
-                    coalesce(po.production_status,'') ps, po.production_confirmed_at conf
-                  FROM planner.purchase_orders po LEFT JOIN planner.suppliers s ON s.id=po.supplier_id
-                  WHERE coalesce(po.status,'') NOT ILIKE '%complete%') x
-            WHERE x.comp IS NOT NULL AND x.comp <= current_date + 10 AND x.ps NOT IN ('complete','shipped')
-              AND (x.conf IS NULL OR x.conf < now() - interval '14 days')
+          -- (removed) "Production check-in" time-based nag — supplier production status is now a field on
+          -- PO ▸ PLAN ▸ DATES + the supplier portal, with a logic-based exception flagged there (not here).
           UNION ALL
           SELECT CASE WHEN y.shipd < current_date THEN 'high' ELSE 'amber' END,'Ship check-in', y.po,
             CASE WHEN y.shipd < current_date
@@ -2195,6 +2183,15 @@ app.post('/api/supply/portal-submit', async (req, res) => {
       await pool.query(`INSERT INTO planner.supplier_submissions (supplier_id, po, shipment_ref, kind, value, status, submitted_by, applied_by, applied_at)
         VALUES ($1,$2,$3,'tracking',$4,'applied',$5,$5,now())`, [sid, b.po, ref, JSON.stringify({ tracking: b.tracking || null, carrier: b.carrier || null }), by]);
       out.applied.push('tracking/carrier → ' + ref);
+    }
+    // supplier production status (not_started / in_production / nearing_completion / complete / shipped)
+    if (b.production_status != null) {
+      const st = String(b.production_status).trim();
+      if (st === '' || PROD_STATUSES.includes(st)) {
+        await pool.query(`UPDATE planner.purchase_orders SET production_status=$2,
+          production_confirmed_at=CASE WHEN $2='' THEN NULL ELSE now() END WHERE po=$1`, [b.po, st]);
+        out.applied.push('production status → ' + (st || 'cleared'));
+      }
     }
     // PO confirmation (#supplier confirms SKUs / qty / dates). po_confirmed:true → confirm; false → clear (re-request).
     if (b.po_confirmed != null) {

@@ -278,6 +278,11 @@
   var PROD_STATUS=[['not_started','Not started'],['in_production','In production'],['nearing_completion','Nearing completion'],['complete','Complete'],['shipped','Shipped']];
   function prodStatusOpts(sel){ return PROD_STATUS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===sel?' selected':'')+'>'+o[1]+'</option>';}).join(''); }
   function prodStatusLabel(v){ var m=PROD_STATUS.filter(function(o){return o[0]===v;}); return m.length?m[0][1]:''; }
+  // logic-based exception on the supplier production status vs the production dates (returns '' when fine)
+  function prodStatusException(ps, prodStart, prodEnd, today){ ps=ps||''; today=today||new Date().toISOString().slice(0,10);
+    if((ps===''||ps==='not_started') && prodStart && prodStart<today) return 'Past production start ('+fd(prodStart)+') but status is '+(ps?prodStatusLabel(ps):'not set');
+    if(ps!=='complete' && ps!=='shipped' && prodEnd && prodEnd<today) return 'Past production completion ('+fd(prodEnd)+') but status is '+(ps?prodStatusLabel(ps):'not set');
+    return ''; }
   function renderActions(rows){ var c=document.getElementById('supply-content'); fetchLookups(function(){ actBuild(rows,c); }); }
   var ACT_GROUP={ 'Deposit not paid':'PAYMENTS','Deposit over-assigned':'PAYMENTS','Payment invalid':'PAYMENTS','Payment overdue':'PAYMENTS','Supplier invoice':'PAYMENTS',
     'Date conflict':'DATES','Production check-in':'DATES','Ship check-in':'DATES','Shipment missing dates':'DATES','Shipment ETA passed':'DATES','Shipment delivered — update PO':'DATES','Awaiting ERP receipt':'DATES','Consider air freight':'DATES','Expedite production':'DATES','Supplier completion date':'DATES' };
@@ -972,6 +977,7 @@
     var frEst; if(r.flex_quote!=null) frEst=Number(r.flex_quote); else { var se=seaEst(r.sea_tiers,r.pallets); frEst=se?se.cost:null; }
     var landed=[]; if(open && frEst==null && !isFOB && !r.shipment) landed.push('No freight rate for destination'+(r.country?' ('+r.country+')':'')+' — can’t estimate sea freight');
     var dates=[]; if(r.sup_completion_pending) dates.push('Supplier completion date '+fd(r.sup_completion_pending)+' awaiting approve/reject');
+    var _pse=prodStatusException(r.production_status, r.prod_start, r.prod_end, today); if(_pse) dates.push('Production status: '+_pse);
     var timeline=[]; if(Number(r.unread_notes)>0) timeline.push(r.unread_notes+' unread supplier note'+(r.unread_notes>1?'s':''));
     var oplan=[]; if(Number(r.orderplan_unconfirmed)>0) oplan.push(r.orderplan_unconfirmed+' unconfirmed order-plan change'+(r.orderplan_unconfirmed>1?'s':''));
     return { pay:pay, dates:dates, client:[], landed:landed, timeline:timeline, oplan:oplan, all:pay.concat(dates).concat(landed).concat(timeline).concat(oplan) }; }
@@ -1086,6 +1092,11 @@
       +'<tr><td class="l">Ship to <span class="mut tiny">(blank = branch country)</span></td><td class="l">'+countrySel(ep,r.country_override,true)+'</td><td class="l mut tiny">'+(r.country_src==='M'?'override':'branch')+'</td></tr>'
       +'<tr><td class="l"><b>Production start</b></td><td class="l">'+payIn(ep,'start_production',r.prod_start,true)+'</td><td class="l mut tiny">manual</td></tr>'
       +'<tr><td class="l"><b>Production end</b></td><td class="l">'+payIn(ep,'end_production_overide',r.end_override,true)+'</td><td class="l mut tiny">'+(r.end_override?'override':'start + supplier days')+'</td></tr>'
+      +(function(){ var pse=prodStatusException(r.production_status,r.prod_start,r.prod_end);
+        return '<tr'+(pse?' style="background:#fff7ed"':'')+'><td class="l"><b>Supplier production status</b> <span class="mut tiny">(set by supplier / here)</span></td>'
+          +'<td class="l">'+prodStatusSel(ep+'/prod-status', r.production_status)+'</td>'
+          +'<td class="l mut tiny">'+(r.production_status?(r.prod_confirmed_age!=null?'confirmed '+r.prod_confirmed_age+'d ago':'supplier-set'):'not set')
+          +(pse?' <span style="color:#b91c1c;font-weight:600">⚠ '+esc(pse)+'</span>':'')+'</td></tr>'; })()
       +(function(){ var sc=d&&d.sup_completion; if(!sc)return ''; var pend=(sc.status==='pending');
         return '<tr'+(pend?' style="background:#fff7ed"':'')+'><td class="l">Supplier completion date <span class="mut tiny">(submitted in portal)</span></td>'
           +'<td class="l">'+(sc.value?'<b>'+fd(sc.value)+'</b>':'—')+' '+(pend?'<span class="tool-badge bg-amber">awaiting approval</span>':sc.status==='applied'?'<span class="tool-badge bg-green">applied to production end</span>':'<span class="tool-badge bg-neutral">rejected</span>')+'</td>'
