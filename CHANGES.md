@@ -4,6 +4,16 @@ Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v25.0 - SUPPLY ▸ BI tab (Phase 0a): Metrics Summary  ⬅ major milestone (was v20.405)
+
+New **BI** tab in the SUPPLY nav (after Shipments) with a live **Metrics Summary** dashboard — open POs
+(by status), units in production, active shipments, 40ft containers (shipping + in production, 20 pallets =
+1×40ft), units inbound, value in production / in transit, POs awaiting confirmation, deposits outstanding
+(scoped to deposits still drawn on by open POs). Server endpoint `GET /api/supply/bi` aggregates live from
+`purchase_orders` + lines + `shipments` + `deposits`. No migration. Foundation for the recommendation modules
+(Reallocate / Fill-the-container / Consolidate) — see `SUPPLY_BI_SPEC.md`. Version jumped to **v25.0** to mark
+the BI build milestone.
+
 ## v20.405 - ERP badge colours per action
 
 The PO-grid ERP badges now use distinct colours: **Update both** = purple, **Update lines** = blue,

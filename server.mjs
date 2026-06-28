@@ -52,7 +52,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v20.405';
+const APP_VERSION = 'v25.0';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -847,6 +847,51 @@ app.get('/api/supply/:section', async (req, res) => {
           start_deposit_pct,completion_pct,balance_pct,credit_days,credit_type,
           credit_fee_on_balance_pct,production_days,country,contact_name,email
           FROM planner.suppliers ORDER BY kind,name`));
+      case 'bi': {   // SUPPLY ▸ BI — Metrics Summary (Phase 0a). Live operational counts; no engine yet.
+        const UNITS = `coalesce((SELECT sum(l.qty) FROM planner.purchase_order_lines l WHERE l.po=p.po),0)`;
+        const VAL   = `coalesce((SELECT sum(l.qty*coalesce(l.cost_price,0)) FROM planner.purchase_order_lines l WHERE l.po=p.po),0)`;
+        const PAL   = `coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0)) FROM planner.purchase_order_lines l LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=p.po),0)`;
+        const poAgg = (await q(`SELECT
+            count(*) FILTER (WHERE status NOT ILIKE '%complete%')::int open_total,
+            count(*) FILTER (WHERE status ILIKE 'future%')::int future,
+            count(*) FILTER (WHERE status ILIKE 'production%')::int production,
+            count(*) FILTER (WHERE status ILIKE 'shipping%')::int shipping,
+            coalesce(sum(${UNITS}) FILTER (WHERE status ILIKE 'production%'),0)::bigint units_in_production,
+            round(coalesce(sum(${PAL}) FILTER (WHERE status ILIKE 'production%'),0)::numeric,1) pallets_in_production,
+            round(coalesce(sum(${VAL}) FILTER (WHERE status ILIKE 'production%'),0)::numeric) value_in_production,
+            coalesce(sum(${UNITS}) FILTER (WHERE status ILIKE 'shipping%'),0)::bigint units_inbound,
+            round(coalesce(sum(${VAL}) FILTER (WHERE status ILIKE 'shipping%'),0)::numeric) value_in_transit,
+            count(*) FILTER (WHERE status NOT ILIKE '%complete%'
+              AND coalesce((SELECT pn.require_supplier_confirmation FROM planner.prod_numbers pn WHERE pn.prod_no=p.prod_no),false)
+              AND p.supplier_confirmed_at IS NULL)::int awaiting_confirmation
+          FROM planner.purchase_orders p`))[0];
+        const shipAgg = (await q(`SELECT count(*)::int active_shipments,
+            round(coalesce(sum(pal),0)/20.0,1) containers_shipping
+          FROM (SELECT coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0))
+                  FROM planner.purchase_orders po JOIN planner.purchase_order_lines l ON l.po=po.po
+                  LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE po.shipment_ref=s.shipment_ref),0) pal
+                FROM planner.shipments s WHERE coalesce(s.status,'') NOT ILIKE '%complete%') z`))[0];
+        // "outstanding" = deposit capital tied to deposits still drawn on by at least one OPEN (non-complete) PO.
+        // (Avoids summing all-time historical deposits; the exact drawn-down balance arrives with the BI engine.)
+        const dep = (await q(`SELECT round(coalesce(sum(d.amount),0)::numeric) outstanding, count(*)::int pools
+          FROM planner.deposits d WHERE d.is_deposit AND EXISTS (
+            SELECT 1 FROM planner.purchase_orders p
+            WHERE p.deposit_ref=d.reference AND coalesce(p.status,'') NOT ILIKE '%complete%')`))[0];
+        const pip = Math.round((Number(poAgg.pallets_in_production) / 20) * 10) / 10;
+        return res.json({
+          open_pos: { total: poAgg.open_total, future: poAgg.future, production: poAgg.production, shipping: poAgg.shipping },
+          units_in_production: Number(poAgg.units_in_production),
+          active_shipments: shipAgg.active_shipments,
+          containers_shipping: Number(shipAgg.containers_shipping),
+          containers_in_production: pip,
+          units_inbound: Number(poAgg.units_inbound),
+          value_in_production: Number(poAgg.value_in_production),
+          value_in_transit: Number(poAgg.value_in_transit),
+          awaiting_confirmation: poAgg.awaiting_confirmation,
+          deposits_outstanding: Number(dep.outstanding),
+          deposit_pools: dep.pools,
+        });
+      }
       case 'purchase-orders':
       case 'cashflow': {
         // value est = Σ(qty×cost) from order-plan lines (fallback to stored estimate).

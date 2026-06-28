@@ -185,7 +185,7 @@
 <script>
 (function(){
   var SECTIONS=[['actions','ACTIONS'],['reports','REPORTS'],['productions','PRODUCTIONS'],['purchase-orders','PURCHASE ORDERS'],['order-plan','ORDER PLAN'],
-    ['shipments','SHIPMENTS'],
+    ['shipments','SHIPMENTS'],['bi','BI'],
     ['barcodes','BARCODES'],['config','CONFIG']];
   // REPORTS is a parent tab; these are its sub-tabs (the read-across views).
   var REPORT_SECTIONS=[['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['cashflow','CASH FLOW'],['directclient','DIRECT TO CLIENT'],['flexport','FLEXPORT']];
@@ -3205,6 +3205,30 @@
     var url='/api/supply/'+(rk==='directclient'?'purchase-orders':rk);
     fetch(url).then(function(r){return r.json();}).then(done).catch(function(e){var b=document.getElementById('rep-body');if(b)b.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); }
 
+  // ---- SUPPLY ▸ BI (Phase 0a: Metrics Summary). Recommendation modules land in later phases. ----
+  function renderBI(d){ var c=document.getElementById('supply-content'); d=d||{}; var op=d.open_pos||{};
+    function tile(label,val,sub,accent){ return '<div style="flex:1 1 160px;min-width:160px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px">'
+      +'<div style="font-size:23px;font-weight:800;line-height:1.1;color:'+(accent||'#0f172a')+'">'+val+'</div>'
+      +'<div style="font-size:10.5px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-top:4px">'+esc(label)+'</div>'
+      +(sub?'<div style="font-size:11px;color:#94a3b8;margin-top:4px">'+esc(sub)+'</div>':'')+'</div>'; }
+    var cont=Math.round(((Number(d.containers_shipping)||0)+(Number(d.containers_in_production)||0))*10)/10;
+    c.innerHTML=annot('bi')
+      +'<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:#0f172a">Metrics summary</div>'
+      +'<div class="mut tiny" style="margin-bottom:12px">Live operational snapshot · counts derived from POs + shipments</div>'
+      +'<div style="display:flex;flex-wrap:wrap;gap:10px">'
+        +tile('Open POs', op.total||0, 'future '+(op.future||0)+' · production '+(op.production||0)+' · shipping '+(op.shipping||0))
+        +tile('Units in production', units(d.units_in_production||0))
+        +tile('Active shipments', d.active_shipments||0)
+        +tile('40ft containers', cont, 'shipping '+(d.containers_shipping||0)+' · in production '+(d.containers_in_production||0))
+        +tile('Units inbound', units(d.units_inbound||0))
+        +tile('Value in production', '$'+units(d.value_in_production||0))
+        +tile('Value in transit', '$'+units(d.value_in_transit||0))
+        +tile('POs awaiting confirmation', d.awaiting_confirmation||0, '', (Number(d.awaiting_confirmation)>0?'#b45309':null))
+        +tile('Deposits outstanding', '$'+units(d.deposits_outstanding||0), (d.deposit_pools||0)+' active pool'+(Number(d.deposit_pools)===1?'':'s'))
+      +'</div>'
+      +'<div style="margin-top:16px;padding:10px 12px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;color:#64748b;font-size:12px">'
+        +'<b>Coming next:</b> Reallocate · Fill-the-container · Consolidate recommendations (with Apply / Snooze / Dismiss).</div>'; }
+
   function selectSection(key){
     if(key==='reports')return selectReport(reportTab||'upcoming');
     if(REPORT_KEYS.indexOf(key)>=0)return selectReport(key);
@@ -3219,6 +3243,7 @@
       if(key==='order-plan')return renderOrderPlan(d);
       if(key==='productions')return renderProductions(d);
       if(key==='shipments')return renderShipments(d);
+      if(key==='bi')return renderBI(d);
       if(key==='flexport')return renderFlexport(d);
       if(key==='cashflow')return renderCashflow(d);
       if(key==='deposits')return renderDeposits(d);
