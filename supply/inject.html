@@ -188,7 +188,7 @@
 <script>
 (function(){
   var SECTIONS=[['actions','ACTIONS'],['reports','BI & REPORTS'],['productions','PRODUCTIONS'],['purchase-orders','PURCHASE ORDERS'],['order-plan','ORDER PLAN'],
-    ['shipments','SHIPMENTS'],
+    ['shipments','SHIPMENTS'],['samples','SAMPLES'],
     ['barcodes','BARCODES'],['config','CONFIG']];
   // REPORTS is a parent tab; these are its sub-tabs (the read-across views).
   var REPORT_SECTIONS=[['metrics','METRICS'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
@@ -225,6 +225,7 @@
   var _pendingPO=null,_pendingPOTab=null,_pendingShip=null,_pendingOP=null,_pendingDep=null;   // cross-view navigation: expand this PO / shipment, pre-filter order plan / deposit register, after the target view renders
   var _poRefresh=null;   // set by the PO grid to refresh itself in place (no full section reload) after an assign
   var _poPatchRow=null;  // set by the PO grid to patch a SINGLE row in place (no grid re-render) after an assign
+  var _sampleReload=null;  // set by the Samples grid so detail-panel actions can refresh it
   // a write to a PO / shipment / deposit changes the derived views — drop their caches so they re-fetch fresh
   function invalidateDerived(){ ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments'].forEach(function(k){delete cache[k];}); }
 
@@ -3437,6 +3438,131 @@
       cd.querySelectorAll('.rl-snooze').forEach(function(sb){ sb.onclick=function(){ this.disabled=true; lifecycle(key,'snoozed',sb.dataset.days).then(function(){removeCard(cd);}); }; });
       cd.querySelector('.rl-dismiss').onclick=function(){ this.disabled=true; lifecycle(key,'dismissed').then(function(){removeCard(cd);}); }; }); }
 
+  // ── SUPPLY ▸ SAMPLES ────────────────────────────────────────────────────────────
+  var SAMPLE_PURPOSES=['sales','product','photography','marketing','operations'];
+  function sampleStatusChip(s){ var m={'Awaiting supplier':['#fef3c7','#92710a'],'In production':['#dbeafe','#1d4ed8'],'Charge to review':['#fee2e2','#b91c1c'],'Shipped':['#dcfce7','#166534'],'Complete':['#e2e8f0','#475569'],'Cancelled':['#f1f5f9','#94a3b8']};
+    var col=m[s]||['#e2e8f0','#475569']; return '<span class="tool-badge" style="background:'+col[0]+';color:'+col[1]+';font-weight:700;white-space:nowrap">'+esc(s||'')+'</span>'; }
+  function sampleChargeChip(s){ var m={pending:['#fef3c7','#92710a'],accepted:['#dcfce7','#166534'],rejected:['#f1f5f9','#94a3b8']}; var c=m[s]||['#e2e8f0','#475569']; return '<span class="tool-badge" style="background:'+c[0]+';color:'+c[1]+'">'+esc(s)+'</span>'; }
+  function renderSamples(data){ var c=document.getElementById('supply-content'); fetchLookups(function(){ samplesInner(data,c); }); }
+  function samplesInner(rows,c){
+    var st={f:'open',q:''};
+    function cur(){ return rows.filter(function(r){ if(st.q){ var hay=((r.ref||'')+' '+(r.supplier_name||'')+' '+(r.recipient_company||'')+' '+(r.recipient_name||'')).toLowerCase(); if(hay.indexOf(st.q)<0)return false; } if(st.f==='all')return true; return st.f==='open'?r.is_open:!r.is_open; }); }
+    var FILT=[['open','Open'],['closed','Closed'],['all','All']];
+    function rowHTML(r,i){
+      var od=r.overdue?' <span title="overdue / supplier expected later than required" style="color:#dc2626;font-weight:700">⚠</span>':'';
+      var tr=r.tracking_code?(esc(r.tracking_code)+(r.carrier?' <span class="mut tiny">'+esc(r.carrier)+'</span>':'')):'<span class="mut">—</span>';
+      var ch=r.pending_charges>0?'<span class="ex-badge" title="'+r.pending_charges+' charge(s) to review">'+r.pending_charges+'</span>':'';
+      var un=r.unread_notes>0?' <span class="ex-badge" title="'+r.unread_notes+' unread supplier note(s)">'+r.unread_notes+'</span>':'';
+      return '<tr><td class="l"><button class="planbtn samp-exp" data-id="'+r.id+'" data-i="'+i+'">PLAN</button></td>'
+        +'<td class="l"><b>'+esc(r.ref||'')+'</b>'+un+'</td>'
+        +'<td class="l">'+sampleStatusChip(r.status_calc)+'</td>'
+        +'<td class="l">'+esc(r.supplier_name||'—')+'</td>'
+        +'<td class="l">'+esc(r.recipient_company||'')+(r.recipient_name?' <span class="mut tiny">'+esc(r.recipient_name)+'</span>':'')+'</td>'
+        +'<td class="l">'+esc([r.city,r.country].filter(Boolean).join(', ')||'—')+'</td>'
+        +'<td class="l">'+(r.completion_required?fd(r.completion_required):'<span class="mut">—</span>')+od+'</td>'
+        +'<td class="l">'+(r.supplier_expected?fd(r.supplier_expected):'<span class="mut">—</span>')+'</td>'
+        +'<td>'+(r.units||0)+' <span class="mut tiny">/ '+(r.line_count||0)+'</span></td>'
+        +'<td class="l">'+tr+'</td><td class="l">'+ch+'</td></tr>'
+        +'<tr class="exp-row" id="sampexp-'+i+'" style="display:none"><td colspan="11"><div id="sampdet-'+i+'" class="count">Loading…</div></td></tr>'; }
+    function reload(){ delete cache['samples']; fetch('/api/supply/samples').then(function(r){return r.json();}).then(function(d){ rows=Array.isArray(d)?d:[]; cache['samples']=rows; view(); }); }
+    _sampleReload=reload;
+    function openSampleForm(){
+      var box=document.getElementById('samp-form'); if(box.dataset.open==='1'){ box.dataset.open=''; box.innerHTML=''; return; } box.dataset.open='1';
+      var purp=SAMPLE_PURPOSES.map(function(p){return '<label style="margin-right:10px;font-size:11px"><input type="checkbox" class="sf-purpose" value="'+p+'"> '+p+'</label>';}).join('');
+      function R(l,v){ return '<div class="cli-row"><div class="cli-lbl">'+l+'</div><div class="cli-val">'+v+'</div></div>'; }
+      box.innerHTML='<div class="sect-h">New sample request</div><div class="cli-form" style="max-width:740px">'
+        +R('Supplier','<input class="fci txt sf-supplier" list="supplierlist" placeholder="supplier…" style="width:240px">')
+        +R('Find past address','<input class="fci txt sf-addrsearch" placeholder="search recipient / company…" style="width:240px"><div class="sf-addrmatches"></div>')
+        +R('Recipient company','<input class="fci txt sf-recipient_company" style="width:240px">')
+        +R('Name','<input class="fci txt sf-first_name" placeholder="first" style="width:115px"> <input class="fci txt sf-last_name" placeholder="last" style="width:115px">')
+        +R('Address','<input class="fci txt sf-address_line1" placeholder="line 1" style="width:300px"><br><input class="fci txt sf-address_line2" placeholder="line 2" style="width:300px;margin-top:3px">')
+        +R('City / Region','<input class="fci txt sf-city" placeholder="city" style="width:145px"> <input class="fci txt sf-region" placeholder="region" style="width:145px">')
+        +R('Postcode / Country','<input class="fci txt sf-postcode" placeholder="postcode" style="width:115px"> <input class="fci txt sf-country" placeholder="country" style="width:90px">')
+        +R('Phone','<input class="fci txt sf-phone" style="width:180px">')
+        +R('Completion required','<input type="date" class="fci txt sf-completion" style="width:150px">')
+        +R('Purpose',purp)
+        +R('SKUs','<div class="sf-lines"></div><button class="save-btn light sf-addline" style="margin-top:4px">+ line</button>'
+          +'<div class="mut tiny" style="margin-top:6px">or paste <b>sku, qty</b> per line:</div><textarea class="fci sf-paste" rows="3" style="width:320px;text-align:left" placeholder="TOWLB-..., 2"></textarea> <button class="save-btn light sf-parsepaste">Add pasted</button>')
+        +R('Notes','<textarea class="fci sf-notes" rows="2" style="width:320px;text-align:left"></textarea>')
+        +'<div style="margin-top:8px"><button class="save-btn sf-save" style="background:#16a34a;border-color:#15803d;color:#fff;font-weight:700">Create sample request</button> <button class="save-btn light sf-cancel">Cancel</button></div></div>';
+      var lines=[{sku:'',qty:''}];
+      function renderLines(){ var w=box.querySelector('.sf-lines'); w.innerHTML=lines.map(function(l,i){return '<div style="margin-bottom:3px"><input class="fci txt sf-lsku" data-i="'+i+'" placeholder="SKU" value="'+esc(l.sku)+'" style="width:200px"> <input class="fci sf-lqty" data-i="'+i+'" placeholder="qty" value="'+esc(l.qty)+'" style="width:60px;text-align:right"> <a class="sf-lrm" data-i="'+i+'" style="color:#dc2626;cursor:pointer">×</a></div>';}).join('');
+        w.querySelectorAll('.sf-lsku').forEach(function(x){x.onchange=function(){lines[x.dataset.i].sku=x.value;};});
+        w.querySelectorAll('.sf-lqty').forEach(function(x){x.onchange=function(){lines[x.dataset.i].qty=x.value;};});
+        w.querySelectorAll('.sf-lrm').forEach(function(x){x.onclick=function(){lines.splice(x.dataset.i,1);if(!lines.length)lines.push({sku:'',qty:''});renderLines();};}); }
+      renderLines();
+      box.querySelector('.sf-addline').onclick=function(){ lines.push({sku:'',qty:''}); renderLines(); };
+      box.querySelector('.sf-parsepaste').onclick=function(){ var t=box.querySelector('.sf-paste').value; t.split(/\n/).forEach(function(ln){ var p=ln.split(/[,\t]/); var sku=(p[0]||'').trim(), qty=(p[1]||'').trim(); if(sku){ if(lines.length===1&&!lines[0].sku)lines=[]; lines.push({sku:sku,qty:qty}); } }); box.querySelector('.sf-paste').value=''; renderLines(); };
+      box.querySelector('.sf-cancel').onclick=function(){ box.dataset.open=''; box.innerHTML=''; };
+      var as=box.querySelector('.sf-addrsearch'); as.oninput=debounce(function(){ var q=as.value.trim(); var mb=box.querySelector('.sf-addrmatches'); if(q.length<2){mb.innerHTML='';return;}
+        fetch('/api/supply/sample-addresses?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(ms){ if(!ms||!ms.length){mb.innerHTML='<div class="mut tiny">no matches</div>';return;}
+          mb.innerHTML='<div style="border:1px solid #cbd5e1;border-radius:6px;max-height:150px;overflow:auto;background:#fff;margin-top:3px">'+ms.map(function(a,i){return '<div class="sf-addrpick" data-i="'+i+'" style="padding:4px 8px;cursor:pointer;font-size:11px;border-bottom:1px solid #f1f5f9">'+esc(a.recipient_company||'')+' · '+esc(((a.first_name||'')+' '+(a.last_name||'')).trim())+' <span class="mut">'+esc([a.city,a.country].filter(Boolean).join(', '))+'</span></div>';}).join('')+'</div>';
+          mb.querySelectorAll('.sf-addrpick').forEach(function(el){ el.onclick=function(){ var a=ms[el.dataset.i]; ['recipient_company','first_name','last_name','address_line1','address_line2','city','region','postcode','country','phone'].forEach(function(k){ var f=box.querySelector('.sf-'+k); if(f)f.value=a[k]||''; }); mb.innerHTML=''; }; }); }); },250);
+      box.querySelector('.sf-save').onclick=function(){ var btn=this; var sup=box.querySelector('.sf-supplier').value.trim();
+        if(!sup){ alert('Pick a supplier for the sample request.'); return; }
+        var purpose=Array.prototype.map.call(box.querySelectorAll('.sf-purpose:checked'),function(x){return x.value;});
+        function V(k){ var f=box.querySelector('.sf-'+k); return f?f.value.trim():''; }
+        var body={supplier_name:sup, created_by:'planner', purpose:purpose,
+          recipient_company:V('recipient_company')||null, first_name:V('first_name')||null, last_name:V('last_name')||null,
+          address_line1:V('address_line1')||null, address_line2:V('address_line2')||null, city:V('city')||null, region:V('region')||null,
+          postcode:V('postcode')||null, country:(V('country')||'').toUpperCase()||null, phone:V('phone')||null,
+          completion_date_required:V('completion')||null, notes:V('notes')||null,
+          lines:lines.filter(function(l){return l.sku&&l.sku.trim();}).map(function(l){return {sku:l.sku.trim(),qty:Number(l.qty)||0};}) };
+        btn.disabled=true; shipPost('/api/supply/sample-create',body,function(j){ if(j&&j.error){alert('Failed: '+j.error);btn.disabled=false;return;} box.dataset.open=''; box.innerHTML=''; reload(); }); };
+    }
+    function view(){ var f=cur();
+      var bar='<div class="bar">'+FILT.map(function(x){return '<span class="pill'+(x[0]===st.f?' active':'')+'" data-f="'+x[0]+'">'+x[1]+'</span>';}).join('')
+        +'<button class="save-btn" id="samp-new" style="margin-left:6px">+ New sample</button>'
+        +'<input class="flt" id="samp-q" placeholder="Filter ref / supplier / recipient…" value="'+esc(st.q)+'"><span class="count">'+f.length+' / '+rows.length+'</span></div>';
+      var tbl='<div class="tw"><table><thead><tr><th class="l"></th><th class="l">Ref</th><th class="l">Status</th><th class="l">Supplier</th><th class="l">Recipient</th><th class="l">Ship to</th><th class="l">Required</th><th class="l">Supplier exp.</th><th>Units</th><th class="l">Tracking</th><th class="l">Charges</th></tr></thead><tbody>'
+        +(f.length?f.map(rowHTML).join(''):'<tr><td colspan="11" class="count">No '+st.f+' samples.</td></tr>')+'</tbody></table></div>';
+      c.innerHTML=lookupDatalists()+'<div id="samp-form"></div>'+bar+tbl;
+      c.querySelectorAll('.bar .pill').forEach(function(p){p.onclick=function(){st.f=p.dataset.f;view();};});
+      var sq=document.getElementById('samp-q'); sq.oninput=debounce(function(){st.q=sq.value.toLowerCase();view();},200);
+      document.getElementById('samp-new').onclick=openSampleForm;
+      c.querySelectorAll('.samp-exp').forEach(function(b){ b.onclick=function(){ var i=b.dataset.i, ex=document.getElementById('sampexp-'+i), open=ex.style.display!=='none';
+        ex.style.display=open?'none':''; b.classList.toggle('open',!open);
+        if(!open && !ex.dataset.loaded){ ex.dataset.loaded='1'; loadSampleDetail(b.dataset.id,i); } }; });
+    }
+    view();
+  }
+  function loadSampleDetail(id,i){ var box=document.getElementById('sampdet-'+i);
+    fetch('/api/supply/sample-detail/'+id).then(function(r){return r.json();}).then(function(d){ if(!d||d.error){box.innerHTML='<div style="color:#dc2626">'+esc((d&&d.error)||'load failed')+'</div>';return;}
+      var s=d.sample, ep='/api/supply/sample/'+id;
+      var lines=(d.lines||[]).map(function(l){return '<tr><td class="l">'+esc(l.sku)+'</td><td style="text-align:right">'+units(l.qty)+'</td></tr>';}).join('')||'<tr><td colspan="2" class="mut">no SKUs</td></tr>';
+      var addr=[s.address_line1,s.address_line2,[s.city,s.region].filter(Boolean).join(' '),[s.postcode,s.country].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+      var charges=(d.charges||[]).map(function(ch){ var tot=(Number(ch.freight_cost)||0)+(Number(ch.product_cost)||0);
+        return '<tr><td class="l">'+sampleChargeChip(ch.status)+'</td><td>'+money(ch.freight_cost)+'</td><td>'+money(ch.product_cost)+'</td><td><b>'+money(tot)+'</b></td><td class="l">'+esc(ch.description||'')+'</td><td class="l">'+(ch.status==='pending'?'<button class="save-btn samp-charge-acc" data-id="'+ch.id+'" style="background:#bbf7d0;border:1px solid #16a34a;color:#166534;font-weight:700">Accept → Other Payments</button> <button class="save-btn light samp-charge-rej" data-id="'+ch.id+'">Reject</button>':'')+'</td></tr>'; }).join('')||'<tr><td colspan="6" class="mut">no charges</td></tr>';
+      box.innerHTML='<div style="display:flex;gap:24px;flex-wrap:wrap">'
+        +'<div style="min-width:240px"><div class="sect-h">Recipient</div><div class="tiny"><b>'+esc(s.recipient_company||'')+'</b><br>'+esc(((s.first_name||'')+' '+(s.last_name||'')).trim())+'<br>'+esc(addr)+(s.phone?'<br>'+esc(s.phone):'')+'</div>'
+          +'<div class="mut tiny" style="margin-top:6px">Purpose: '+esc((s.purpose||[]).join(', ')||'—')+'</div>'+(s.notes?'<div class="mut tiny">Notes: '+esc(s.notes)+'</div>':'')+'</div>'
+        +'<div style="min-width:200px"><div class="sect-h">SKUs</div><div class="tw"><table style="width:auto"><thead><tr><th class="l">SKU</th><th>Qty</th></tr></thead><tbody>'+lines+'</tbody></table></div></div>'
+        +'<div style="min-width:240px"><div class="sect-h">Fulfilment</div>'
+          +'<div class="cli-row"><div class="cli-lbl">Completion req.</div><div class="cli-val"><input type="date" class="fci txt samp-fld" data-field="completion_date_required" value="'+esc(s.completion_required||'')+'" style="width:140px"></div></div>'
+          +'<div class="tiny mut">Supplier accepted: '+(s.accepted_at?fd(s.accepted_at):'—')+'</div>'
+          +'<div class="tiny mut">Supplier expected: '+(s.supplier_expected?fd(s.supplier_expected):'—')+'</div>'
+          +'<div class="tiny mut">Tracking: '+(s.tracking_code?esc(s.tracking_code)+' '+esc(s.carrier||''):'—')+'</div>'
+          +'<div style="margin-top:6px"><select class="fci samp-fld" data-field="status"><option value="open"'+(s.status==='open'?' selected':'')+'>open</option><option value="complete"'+(s.status==='complete'?' selected':'')+'>complete</option><option value="cancelled"'+(s.status==='cancelled'?' selected':'')+'>cancelled</option></select> <button class="save-btn light samp-del" data-id="'+id+'" style="color:#dc2626">Delete</button></div></div>'
+        +'</div>'
+        +'<div class="sect-h" style="margin-top:10px">Charges</div><div class="tw"><table><thead><tr><th class="l">Status</th><th>Freight</th><th>Product</th><th>Total</th><th class="l">Description</th><th class="l"></th></tr></thead><tbody>'+charges+'</tbody></table></div>'
+        +'<div class="sect-h" style="margin-top:10px">Timeline</div><div class="sp-timeline" data-ref="'+esc(s.ref)+'"></div>';
+      box.querySelectorAll('.samp-fld').forEach(function(inp){ inp.onchange=function(){ var b={}; b[inp.dataset.field]=inp.value; shipPost(ep,b,function(){ if(_sampleReload)_sampleReload(); }); }; });
+      box.querySelectorAll('.samp-charge-acc').forEach(function(b){ b.onclick=function(){ b.disabled=true; shipPost('/api/supply/charge/'+b.dataset.id+'/accept',{},function(j){ if(j&&j.error){alert(j.error);b.disabled=false;return;} alert('Charge accepted — posted to Other Payments.'); if(_sampleReload)_sampleReload(); }); }; });
+      box.querySelectorAll('.samp-charge-rej').forEach(function(b){ b.onclick=function(){ if(!confirm('Reject this charge?'))return; shipPost('/api/supply/charge/'+b.dataset.id+'/reject',{},function(){ if(_sampleReload)_sampleReload(); }); }; });
+      box.querySelectorAll('.samp-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete this sample request?'))return; shipPost('/api/supply/sample/'+b.dataset.id+'/delete',{},function(){ if(_sampleReload)_sampleReload(); }); }; });
+      loadSampleTimeline(s.ref, id, 'internal');
+    }).catch(function(e){ box.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>'; }); }
+  function loadSampleTimeline(ref, sampleId, authorKind){ var box=document.querySelector('.sp-timeline[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(!box)return;
+    var admin=(authorKind||'internal')==='internal';
+    fetch('/api/supply/sample-notes?id='+sampleId).then(function(r){return r.json();}).then(function(notes){
+      var list=(notes&&notes.length)?notes.map(function(n){ var sup=(n.author_kind==='supplier'), nu=sup&&!n.read;
+        var ctrl=(admin&&sup)?(n.read?'<a class="ssp-read" data-id="'+n.id+'" data-read="1" style="font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline">mark unread</a>':'<button class="save-btn light ssp-read" data-id="'+n.id+'" data-read="0">Mark read</button>'):'';
+        return '<div class="tiny" style="margin:2px 0;display:flex;gap:10px;align-items:flex-start'+(nu?';background:#fff7ed;border:1px solid #fdba74;border-radius:5px;padding:3px 6px':'')+'">'+(ctrl?'<div style="flex:0 0 auto;min-width:70px">'+ctrl+'</div>':'')+'<div><span class="mut">'+esc(n.created_at)+' · '+(sup?'Supplier':'D&amp;B')+'</span>'+(nu?' <span class="ex-badge">new</span>':'')+' — '+esc(n.body)+'</div></div>'; }).join(''):'<div class="mut tiny">No timeline entries yet.</div>';
+      box.innerHTML='<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:8px"><textarea class="fci ssp-in" rows="2" placeholder="Add a note…" style="flex:1;max-width:520px;text-align:left"></textarea><button class="save-btn ssp-post">Post</button></div>'+list;
+      box.querySelector('.ssp-post').onclick=function(){ var inp=box.querySelector('.ssp-in'); var v=(inp.value||'').trim(); if(!v)return; shipPost('/api/supply/sample-note',{sample_id:sampleId,author_kind:authorKind||'internal',body:v},function(){ loadSampleTimeline(ref,sampleId,authorKind); }); };
+      box.querySelectorAll('.ssp-read').forEach(function(b){ b.onclick=function(){ shipPost('/api/supply/sample-note-read/'+b.dataset.id,{read:b.dataset.read==='0'},function(){ loadSampleTimeline(ref,sampleId,authorKind); }); }; });
+    }).catch(function(){}); }
+
   function selectSection(key){
     if(key==='reports')return selectReport(reportTab||'metrics');
     if(REPORT_KEYS.indexOf(key)>=0)return selectReport(key);
@@ -3451,6 +3577,7 @@
       if(key==='order-plan')return renderOrderPlan(d);
       if(key==='productions')return renderProductions(d);
       if(key==='shipments')return renderShipments(d);
+      if(key==='samples')return renderSamples(d);
       if(key==='flexport')return renderFlexport(d);
       if(key==='cashflow')return renderCashflow(d);
       if(key==='deposits')return renderDeposits(d);

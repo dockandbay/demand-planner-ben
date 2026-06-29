@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.31';
+const APP_VERSION = 'v25.32';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -911,7 +911,15 @@ app.get('/api/supply/:section', async (req, res) => {
              (SELECT 1 FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending'))) is_open,
           (s.completion_date_required IS NOT NULL AND s.status NOT IN ('cancelled','complete')
              AND (current_date > s.completion_date_required
-                  OR (s.supplier_expected_completion IS NOT NULL AND s.supplier_expected_completion > s.completion_date_required))) overdue
+                  OR (s.supplier_expected_completion IS NOT NULL AND s.supplier_expected_completion > s.completion_date_required))) overdue,
+          CASE
+            WHEN s.status='cancelled' THEN 'Cancelled'
+            WHEN s.status='complete' THEN 'Complete'
+            WHEN (SELECT count(*) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending')>0 THEN 'Charge to review'
+            WHEN coalesce(s.tracking_code,'')<>'' THEN 'Shipped'
+            WHEN s.accepted_at IS NOT NULL THEN 'In production'
+            ELSE 'Awaiting supplier'
+          END status_calc
           FROM planner.sample_requests s ORDER BY s.created_at DESC`));
       case 'suppliers':
         return res.json(await q(`SELECT id,code,name,kind,default_currency,

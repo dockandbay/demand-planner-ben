@@ -213,6 +213,21 @@ Backend for Samples (no UI yet — that's Phase 3/4). Smoke-tested end-to-end ag
   Other Payment with freight+product breakdown and, for shipments, the linked POs in the description),
   `…/charge/:id/reject`.
 
+## v25.32 - Samples feature — Phase 3: admin SUPPLY ▸ Samples UI
+
+New **SAMPLES** top-menu section under SUPPLY:
+- **Grid** with a **calculated status** (Awaiting supplier / In production / Charge to review / Shipped /
+  Complete / Cancelled) shown as a coloured chip, **Open/Closed/All filter defaulting to Open**, overdue ⚠
+  icon, unread-note + pending-charge badges, tracking, units.
+- **+ New sample** create form — supplier picker, **find-past-address autocomplete** (populates all address
+  fields), recipient/address/phone, completion date, **multi-select purpose**, SKU rows **and paste** (sku, qty),
+  notes.
+- **Expand panel** — recipient/address, SKUs, fulfilment (editable completion/status, supplier accepted/
+  expected/tracking read-out), **charges** with Accept→Other Payments / Reject, and the shared **timeline**.
+
+(Server-side: also adds `status_calc` to the samples list endpoint.) Phases 4 (supplier portal) + 5 (shipment
+charges) still to come.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
