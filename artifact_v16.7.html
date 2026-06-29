@@ -2107,7 +2107,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
   // buyOverdue[pi]= true if placement is already overdue
   // buyFromLbl[i] = "from Jun 26 order" label for inbound tooltip at ARRIVAL month i
   const assumedArr={},tA1={},transferOut={};
-  const buyDisplay={},buyUrgent={},buyUrgentLead={},buyUrgentMonth={},buyOverdue={},buyFromLbl={};
+  const buyDisplay={},buyUrgent={},buyUrgentLead={},buyUrgentMonth={},buyUrgentArr={},buyOverdue={},buyFromLbl={};
   const MAY_OFFSET=2; // legacy alias, retained for backward-compat; semantically the
                       // offset past PROJ[0]=Actuals + PROJ[1]=Remaining to the first
                       // future month, NOT a May-specific value
@@ -2295,33 +2295,41 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
   // Find first danger month
   const dangerStart=stockTrace.findIndex(t=>t.weekly>0&&t.closing/t.weekly<URGENT_THRESHOLD_WKS);
   if(dangerStart>=0){
-    // Walk forward from danger start, accumulating the minimum qty needed
-    // Stop when a month has assumed inbound (normal buy arriving) — that fixes the rest
-    let urgentQtyNeeded=0;
-    let firstDangerIdx=stockTrace[dangerStart].i;
-    let simStock=dangerStart>0?stockTrace[dangerStart-1].closing:ts3;
+    const firstDangerIdx=stockTrace[dangerStart].i;
+    // A rush order can't arrive instantly — the fastest realistic rush lead is ~RUSH_LEAD_WKS (4–5 weeks).
+    // Half-way through a month that lands in late next / early following month, so we (a) place the urgent
+    // ARRIVAL at the earliest month a rush could physically land, and (b) size it against the deficit FROM
+    // that arrival forward. Demand before arrival is an unavoidable stockout the rush can't rescue; and by the
+    // time it lands the spike may have subsided — in which case little or no rush is actually needed.
+    const RUSH_LEAD_WKS=5;
+    const rushArr=new Date(TODAY); rushArr.setDate(rushArr.getDate()+RUSH_LEAD_WKS*7);
+    const rushKey=rushArr.getFullYear()+'_'+String(rushArr.getMonth()+1).padStart(2,'0');
+    const rushProjIdx=PROJ.findIndex(p=>p.key===rushKey);
+    let injPos=stockTrace.findIndex(t=>t.i>=rushProjIdx);
+    if(rushProjIdx<0||injPos<0)injPos=stockTrace.length-1;
+    if(injPos<dangerStart)injPos=dangerStart;   // rush would arrive before the stockout → inject at the danger month
+    const injIdx=stockTrace[injPos].i;
 
+    // Accumulate the qty needed to keep stock non-negative FROM the rush arrival forward, until a normal
+    // (assumed) buy lands and handles the rest. Pre-arrival deficits deplete to 0 (lost sales) and aren't
+    // bought for — a rush can't reach them.
+    let urgentQtyNeeded=0;
+    let simStock=dangerStart>0?stockTrace[dangerStart-1].closing:ts3;
     for(let ti=dangerStart;ti<stockTrace.length;ti++){
       const t=stockTrace[ti];
-      // If a normal (assumed) buy arrives this month, recovery is handled — stop
-      if(ti>dangerStart&&t.assumedInb3>0)break;
-      // How much stock would we have this month if we add urgentQtyNeeded at the start?
-      // (urgent stock arrives at the first danger month)
-      const stockWithUrgent=simStock+(ti===dangerStart?urgentQtyNeeded:0)+t.confInb3-t.d3;
-      if(stockWithUrgent<0){
-        // Need to add more urgent qty to cover this deficit
-        urgentQtyNeeded+=Math.abs(stockWithUrgent);
-      }
-      simStock=Math.max(stockWithUrgent,0);
+      if(ti>injPos&&t.assumedInb3>0)break;
+      const stockAfter=simStock+t.confInb3-t.d3;
+      if(ti>=injPos&&stockAfter<0)urgentQtyNeeded+=Math.abs(stockAfter);
+      simStock=Math.max(stockAfter,0);
     }
 
     if(urgentQtyNeeded>0){
       // Round up to case pack
       urgentQtyNeeded=Math.max(Math.ceil(urgentQtyNeeded/cp)*cp,moq);
-      const wksToDanger=Math.max((firstDangerIdx-MAY_OFFSET)*4.33,1);
       buyUrgent[1]=urgentQtyNeeded;
-      buyUrgentLead[1]=Math.round(wksToDanger);
-      buyUrgentMonth[1]=PROJ[firstDangerIdx].lbl;
+      buyUrgentLead[1]=RUSH_LEAD_WKS;                       // rush lead (4–5 wk minimum)
+      buyUrgentMonth[1]=PROJ[firstDangerIdx].lbl;           // when the stockout first bites
+      buyUrgentArr[1]=PROJ[injIdx]?PROJ[injIdx].lbl:'';     // earliest a rush could land
     }
   }
 
@@ -2378,7 +2386,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
         dtc:mtdDTC,b2b:mtdB2B,fba:mtdFBA,tot:mtdDTC+mtdB2B+mtdFBA,pka:(md.pka&&md.pka[key])||0,
         a3:0,aF:0,confQty3:0,confQtyF:0,assumedQty3:0,assumedLabel:'',trfIn:0,
         fTx:0,fSh:0,tot3pl:0,c3:s3,cF:sF,tg3:0,tgF:0,cv3:999,cvF:999,isDisc:false,
-        bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],bPM:buyDisplay[i]?`arrives ${PROJ[Math.min(i+lm,PROJ.length-1)].lbl}`:'',
+        bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],bPM:buyDisplay[i]?`arrives ${PROJ[Math.min(i+lm,PROJ.length-1)].lbl}`:'',
         fdQ:fbaBuyDisp[i]||0,tx:transferOut[i]||0,overdue:buyOverdue[i]||false,inbLines3:[],inbLinesF:[]};
     }
     if(isForecast){
@@ -2401,7 +2409,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
         confQty3:remInb3.reduce((s,x)=>s+(x.qty||0),0),confQtyF:remInbF.reduce((s,x)=>s+(x.qty||0),0),
         assumedQty3:0,assumedLabel:'',trfIn:0,fTx:0,fSh:0,tot3pl:dtc+b2b,c3:rc3,cF:rcF,
         tg3:t3*wA2,tgF:tf*wF2,cv3:wA2>0?rc3/wA2:999,cvF:wF2>0?rcF/wF2:999,isDisc:false,
-        bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],bPM:buyDisplay[i]?`arrives ${PROJ[Math.min(i+lm,PROJ.length-1)].lbl}`:'',
+        bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],bPM:buyDisplay[i]?`arrives ${PROJ[Math.min(i+lm,PROJ.length-1)].lbl}`:'',
         fdQ:fbaBuyDisp[i]||0,tx:transferOut[i]||0,overdue:buyOverdue[i]||false,
         inbLines3:remInb3.map(s=>`${s.ref} \u00b7 ${fmt(s.qty)} units \u00b7 ${s.eta} \u00b7 ${((s.type||'').startsWith('supplier'))?'supplier':((s.type||'').includes('transfer'))?'transfer':(s.type||'')}`),
         inbLinesF:remInbF.map(s=>`${s.ref} \u00b7 ${fmt(s.qty)} units \u00b7 ${s.eta} \u00b7 ${((s.type||'').startsWith('supplier'))?'supplier':((s.type||'').includes('transfer'))?'transfer':(s.type||'')}`)};
@@ -2519,7 +2527,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
       fTx,trfIn,fSh,c3,cF,tg3,tgF,tot3pl:dtc+b2b+fTx,
       cv3:isFinite(cv3)?cv3:999,cvF:isFinite(cvF)?cvF:999,
       isDisc:!!(discCutoff&&key>=discCutoff),
-      bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],bPM,
+      bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],bPM,
       fdQ:fbaBuyDisp[i]||0,tx:transferOut[i]||0,overdue:buyOverdue[i]||false,
       inbLines3,inbLinesF};
     // Advance s3 including assumed inbound so future months see the benefit (matches pass 1)
@@ -2634,9 +2642,10 @@ function buildTable(proj,md,pd,is3,hasFBA){
     if(p.isActual)return c('\u2014','cv0');
     if(p.isDisc)return discCell;
     if(!p.bQu)return c('\u2014','cv0');
-    const lead=p.urgentLead?`${p.urgentLead}wk lead`:'';
+    const lead=p.urgentLead?`${p.urgentLead}wk rush lead`:'';
     const danger=p.urgentMonth?`stockout in ${p.urgentMonth}`:'stockout risk';
-    return `<td style="background:#fee2e2;color:#dc2626;font-weight:700;border-left:2px solid #dc2626" title="URGENT — ${danger} — needs ${lead}">${fmt(p.bQu)}</td>`;
+    const arr=p.urgentArr?` · earliest rush lands ${p.urgentArr}`:'';
+    return `<td style="background:#fee2e2;color:#dc2626;font-weight:700;border-left:2px solid #dc2626" title="URGENT — ${danger} — needs ${lead}${arr}">${fmt(p.bQu)}</td>`;
   }));
   if(hasFBA){
     rows.push(dr('Buy FBA',proj,p=>{

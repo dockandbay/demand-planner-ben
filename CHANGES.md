@@ -80,6 +80,20 @@ Three changes:
    **action item** "Deposit remaining, no open PO". New default filter **"Remaining · open"** — open (not
    closed) deposits that still hold money — is now the landing filter on the Deposits tab.
 
+## v25.16 - Buy 3PL Urgent: model the rush lead; Deposits: close/reopen without a full refresh
+
+1. **Buy 3PL Urgent now respects a 4–5 week minimum rush lead.** Previously the urgent qty assumed rush stock
+   could arrive the instant a stockout began. Now it places the urgent **arrival** at the earliest a rush could
+   physically land (~5 weeks from today — mid-month that's late next / early following month) and **sizes the
+   rush against the deficit from that arrival forward**. Demand before arrival is treated as an unavoidable
+   stockout the rush can't rescue, and if the spike has subsided by the time it lands, little or no rush is
+   recommended. Tooltip now shows the stockout month, the rush lead, and the earliest the rush could land.
+
+2. **Deposits close/reopen in place.** Closing or reopening a deposit in Productions ▸ Deposits no longer
+   triggers a full section re-render — the row updates locally and the register redraws (closed rows drop out
+   of the open filters). Derived views (Productions / Actions / cash flow) are still invalidated so they're
+   fresh on next visit.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

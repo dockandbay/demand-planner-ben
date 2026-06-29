@@ -1745,7 +1745,11 @@
       b.querySelectorAll('.dep-po-link').forEach(function(btn){ btn.onclick=function(){ gotoPO(btn.dataset.po,'pay'); }; });
       b.querySelectorAll('.dep-edit').forEach(function(btn){ btn.onclick=function(){ DEP_EDIT[btn.dataset.id]=true; draw(); }; });   // unlock this row in place
       b.querySelectorAll('.dep-save').forEach(function(btn){ btn.onclick=function(){ delete DEP_EDIT[btn.dataset.id]; prodTab='deposits'; delete cache['productions']; selectSection('productions'); }; });   // relock + refresh (edits auto-saved inline)
-      b.querySelectorAll('.dep-close').forEach(function(btn){ btn.onclick=function(){ shipPost('/api/supply/deposit/'+btn.dataset.id,{status:btn.dataset.st},function(){ prodTab='deposits'; delete cache['productions']; selectSection('productions'); }); }; });
+      b.querySelectorAll('.dep-close').forEach(function(btn){ btn.onclick=function(){ btn.disabled=true;
+        shipPost('/api/supply/deposit/'+btn.dataset.id,{status:btn.dataset.st},function(){
+          var d=deps.filter(function(x){return String(x.id)===String(btn.dataset.id);})[0]; if(d)d.status=btn.dataset.st;   // update the row in place
+          delete cache['productions']; invalidateDerived();   // keep Productions / Actions / cash flow fresh next visit — no full re-render
+          draw(); }); }; });   // redraw just the register (closed rows drop out of the open filters)
       b.querySelectorAll('.dep-del').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Delete deposit "'+btn.dataset.ref+'"? This cannot be undone.'))return;
         shipPost('/api/supply/deposit/'+btn.dataset.id+'/delete',{},function(){ prodTab='deposits'; delete cache['productions']; selectSection('productions'); }); }; }); }
     b.querySelectorAll('.bar .pill').forEach(function(p){p.onclick=function(){b.querySelectorAll('.bar .pill').forEach(function(x){x.classList.remove('active');});p.classList.add('active');st.f=p.dataset.f;draw();};});
