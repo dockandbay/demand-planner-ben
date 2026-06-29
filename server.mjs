@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.51';
+const APP_VERSION = 'v25.52';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -866,7 +866,9 @@ app.get('/api/supply/sample-detail/:id', async (req, res) => {
     const charges = (await pool.query(`SELECT id, coalesce(supplier_name,'') supplier_name, freight_cost, product_cost,
       coalesce(description,'') description, status, to_char(created_at,'YYYY-MM-DD') created_at, other_payment_id
       FROM planner.supplier_charges WHERE source_type='sample' AND source_ref=$1 ORDER BY created_at`, [s.ref])).rows;
-    res.json({ sample: s, lines, notes, charges });
+    const attachments = (await pool.query(`SELECT id, filename, coalesce(uploaded_by,'') uploaded_by, to_char(uploaded_at,'YYYY-MM-DD') uploaded_at
+      FROM planner.portal_attachments WHERE category='sample' AND po=$1 ORDER BY uploaded_at`, [s.ref])).rows;
+    res.json({ sample: s, lines, notes, charges, attachments });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/supply/sample-addresses', async (req, res) => {
@@ -4379,6 +4381,17 @@ app.post('/api/supply/sample-charge', async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.supplier_charges (source_type, source_ref, supplier_name, freight_cost, product_cost, description, created_by)
       VALUES ('sample',$1,$2,$3,$4,$5,$6) RETURNING id`, [s.ref, s.supplier_name, Number(b.freight_cost)||0, Number(b.product_cost)||0, b.description||null, b.created_by||'preview']); res.json({ ok:true, id: r.rows[0].id }); }
   catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/supply/sample-attachment', async (req, res) => {   // admin/preview upload to a sample (body {id})
+  const b = req.body || {}; if(!b.id || !b.data_base64) return res.status(400).json({ error: 'id and data_base64 required' });
+  try { const s = (await pool.query(`SELECT ref FROM planner.sample_requests WHERE id=$1::bigint`, [b.id])).rows[0]; if(!s) return res.status(404).json({ error: 'sample not found' });
+    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, uploaded_by, category) VALUES ($1,$2,$3,$4,$5,$6,'sample') RETURNING id`,
+      [s.ref, b.filename||'attachment', b.mime||'application/octet-stream', buf.length, buf, b.uploaded_by||'PO PLAN']); res.json({ ok:true, id: r.rows[0].id }); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/supply/sample-attachment-remove', async (req, res) => {
+  const id = req.body && req.body.att_id;
+  try { await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1 AND category='sample'`, [id]); res.json({ ok:true }); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/supply/sample-note-read/:id', async (req, res) => {
   try { const read = !(req.body && req.body.read === false);
     await pool.query(`UPDATE planner.sample_notes SET read_at=${read?'now()':'NULL'} WHERE id=$1::bigint`, [req.params.id]);
@@ -5212,7 +5225,7 @@ app.post('/api/portal/note-read/:id', portalAuth, async (req, res) => {
 app.get('/api/portal/attachment/:id', portalAuth, async (req, res) => {
   try {
     const r = (await pool.query(`SELECT po, filename, mime, data FROM planner.portal_attachments WHERE id=$1`, [req.params.id])).rows[0];
-    if (!r || !await portalOwnsPO(req, r.po)) return res.status(403).send('forbidden');
+    if (!r || !(await portalOwnsPO(req, r.po) || await portalOwnsSampleRef(req, r.po))) return res.status(403).send('forbidden');
     res.setHeader('Content-Type', r.mime || 'application/octet-stream');
     res.setHeader('Content-Disposition', 'inline; filename="' + (r.filename || 'file').replace(/"/g, '') + '"');
     res.send(r.data);
@@ -5256,7 +5269,8 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
            (SELECT 1 FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending'))) is_open,
         coalesce((SELECT json_agg(json_build_object('sku',l.sku,'qty',l.qty) ORDER BY l.id) FROM planner.sample_request_lines l WHERE l.sample_id=s.id),'[]') lines,
         coalesce((SELECT json_agg(json_build_object('id',c.id,'freight_cost',c.freight_cost,'product_cost',c.product_cost,'status',c.status,'description',coalesce(c.description,'')) ORDER BY c.created_at) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref),'[]') charges,
-        (SELECT count(*) FROM planner.sample_notes n WHERE n.sample_id=s.id AND n.author_kind='internal' AND n.read_at IS NULL)::int unread_dnb
+        (SELECT count(*) FROM planner.sample_notes n WHERE n.sample_id=s.id AND n.author_kind='internal' AND n.read_at IS NULL)::int unread_dnb,
+        coalesce((SELECT json_agg(json_build_object('id',a.id,'filename',a.filename) ORDER BY a.uploaded_at) FROM planner.portal_attachments a WHERE a.category='sample' AND a.po=s.ref),'[]') attachments
         FROM planner.sample_requests s
         WHERE coalesce(s.supplier_name,'')=ANY($1) OR coalesce(s.supplier_id,-1)=ANY($2)
         ORDER BY s.created_at DESC`, [names, ids.length ? ids : [-1]]) : [];
@@ -5272,6 +5286,24 @@ async function portalOwnsSample(req, id){ if(!id)return null;
   const names = req.portal.suppliers||[], ids = (req.portal.supplierIds||[]).map(Number);
   if ((s.supplier_name && names.indexOf(s.supplier_name)>=0) || (s.supplier_id!=null && ids.indexOf(Number(s.supplier_id))>=0)) return s;
   return null; }
+async function portalOwnsSampleRef(req, ref){ if(!ref) return false;
+  const r = await pool.query(`SELECT supplier_name, supplier_id FROM planner.sample_requests WHERE ref=$1`, [ref]); const s = r.rows[0]; if(!s) return false;
+  const names = req.portal.suppliers||[], ids = (req.portal.supplierIds||[]).map(Number);
+  return (s.supplier_name && names.indexOf(s.supplier_name)>=0) || (s.supplier_id!=null && ids.indexOf(Number(s.supplier_id))>=0); }
+app.post('/api/portal/sample-attachment', portalAuth, async (req, res) => {   // supplier uploads an attachment to a sample
+  const b = req.body || {};
+  try { const s = await portalOwnsSample(req, b.id); if(!s) return res.status(403).json({ error: 'not your sample' }); if(!b.data_base64) return res.status(400).json({ error: 'data_base64 required' });
+    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, supplier_id, filename, mime, byte_size, data, uploaded_by, category)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,'sample') RETURNING id`, [s.ref, (req.portal.supplierIds||[])[0]||null, b.filename||'attachment', b.mime||'application/octet-stream', buf.length, buf, req.portal.email||'supplier']);
+    res.json({ ok:true, id: r.rows[0].id }); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/portal/sample-attachment-remove', portalAuth, async (req, res) => {
+  const id = req.body && req.body.att_id;
+  try { const a = (await pool.query(`SELECT po, category FROM planner.portal_attachments WHERE id=$1`, [id])).rows[0];
+    if(!a || a.category!=='sample' || !await portalOwnsSampleRef(req, a.po)) return res.status(403).json({ error: 'not allowed' });
+    await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1`, [id]); res.json({ ok:true }); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
 app.get('/api/portal/sample-notes/:id', portalAuth, async (req, res) => {
   try { const s = await portalOwnsSample(req, req.params.id); if(!s) return res.status(403).json({ error: 'not your sample' });
     res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read FROM planner.sample_notes WHERE sample_id=$1::bigint ORDER BY created_at`, [s.id])).rows); }

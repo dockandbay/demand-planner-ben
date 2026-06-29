@@ -369,6 +369,14 @@ across samples (was a count of samples). The per-row Manage/View badge already s
 count. (Confirmed: a supplier's own notes never show "Mark read" in the portal, and a supplier-posted note
 shows as unread on the admin side — both already correct since v25.50.)
 
+## v25.52 - Samples: attachments (supplier + supply-plan user)
+
+Both the supplier portal and the admin SUPPLY ▸ Samples detail can now **upload, view and remove attachments**
+on a sample, shown in the expanded view. Reuses `planner.portal_attachments` (keyed by the sample ref,
+`category='sample'`) — no migration. New endpoints: portal `/api/portal/sample-attachment(-remove)` +
+extended portal attachment-view to allow sample refs; admin `/api/supply/sample-attachment(-remove)` (and the
+admin detail also uses the existing `portal-upload`). Attachments listed in the bootstrap + sample-detail.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

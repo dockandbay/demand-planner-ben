@@ -670,6 +670,9 @@
                 +'<button class="save-btn samp-save">Save</button></div>'
               +'<div style="margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px">'+lbl('Charges')+charges
                 +'<div style="display:flex;gap:8px;align-items:flex-end;margin-top:6px;flex-wrap:wrap"><div><div class="mut tiny">Freight</div><input class="fci samp-cf" style="width:80px" placeholder="0.00"></div><div><div class="mut tiny">Product</div><input class="fci samp-cp" style="width:80px" placeholder="0.00"></div><div><div class="mut tiny">Note</div><input class="fci txt samp-cd" style="width:180px" placeholder="optional"></div><button class="save-btn samp-charge">Create charge</button></div></div>'
+              +'<div style="margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px">'+lbl('Attachments')
+                +'<div style="font-size:12px;margin-bottom:4px">'+((s.attachments||[]).map(function(a){return '<span style="display:inline-block;margin:0 12px 4px 0"><a href="'+EP.attachmentBase+a.id+'" target="_blank" rel="noopener">'+esc(a.filename||'file')+'</a> <a class="ps-att-rm" data-aid="'+a.id+'" title="remove" style="color:#dc2626;cursor:pointer">×</a></span>';}).join('')||'<span class="mut">none</span>')+'</div>'
+                +'<input type="file" class="ps-att-file" style="font-size:11px"> <button class="save-btn ps-att-up">Upload attachment</button></div>'
               +'<div style="margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px">'+lbl('Timeline')
                 +'<div style="display:flex;gap:6px;align-items:flex-start;margin:4px 0 6px"><textarea class="fci samp-note-in" rows="2" placeholder="Add a note…" style="flex:1;max-width:480px;text-align:left"></textarea><button class="save-btn samp-note-post">Post</button></div>'
                 +'<div class="samp-tl" data-id="'+s.id+'"></div></div>'
@@ -706,6 +709,9 @@
             var save=scope.querySelector('.samp-save'); if(save)save.onclick=function(){ postJSON(EP.sampleUpdate,{id:id,supplier_expected_completion:scope.querySelector('.samp-exp').value||null,tracking_code:scope.querySelector('.samp-trk').value||null,carrier:scope.querySelector('.samp-car').value||null},function(){ reload(); }); };
             var ch=scope.querySelector('.samp-charge'); if(ch)ch.onclick=function(){ var f=scope.querySelector('.samp-cf').value,p=scope.querySelector('.samp-cp').value,d=scope.querySelector('.samp-cd').value; if(!f&&!p){alert('Enter a freight and/or product cost.');return;} ch.disabled=true; postJSON(EP.sampleCharge,{id:id,freight_cost:Number(f)||0,product_cost:Number(p)||0,description:d||null},function(){ reload(); }); };
             var np=scope.querySelector('.samp-note-post'); if(np)np.onclick=function(){ var inp=scope.querySelector('.samp-note-in'); var v=(inp.value||'').trim(); if(!v)return; postJSON(EP.sampleNote,{id:id,body:v},function(){ inp.value=''; ppSampleTimeline(id); }); };
+            var af=scope.querySelector('.ps-att-file'), au=scope.querySelector('.ps-att-up');
+            if(au)au.onclick=function(){ var f=af&&af.files&&af.files[0]; if(!f){alert('Choose a file to upload.');return;} au.disabled=true; var rd=new FileReader(); rd.onload=function(){ postJSON(EP.sampleAttachment,{id:id,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result)},function(){ reload(); }); }; rd.readAsDataURL(f); };
+            scope.querySelectorAll('.ps-att-rm').forEach(function(b){ b.onclick=function(){ if(!confirm('Remove this attachment?'))return; postJSON(EP.sampleAttachmentRemove,{att_id:b.dataset.aid},function(){ reload(); }); }; });
             ppSampleTimeline(id); }
           function ppSampleTimeline(id){ var box=body.querySelector('.samp-tl[data-id="'+id+'"]'); if(!box)return;
             fetch(EP.sampleNotesBase+id).then(function(r){return r.json();}).then(function(notes){
