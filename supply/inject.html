@@ -3467,8 +3467,9 @@
   function renderSamples(data){ var c=document.getElementById('supply-content'); fetchLookups(function(){ samplesInner(data,c); }); }
   function samplesInner(rows,c){
     var st={f:'open',q:''};
-    function cur(){ return rows.filter(function(r){ if(st.q){ var hay=((r.ref||'')+' '+(r.supplier_name||'')+' '+(r.recipient_company||'')+' '+(r.recipient_name||'')).toLowerCase(); if(hay.indexOf(st.q)<0)return false; } if(st.f==='all')return true; return st.f==='open'?r.is_open:!r.is_open; }); }
-    var FILT=[['open','Open'],['closed','Closed'],['all','All']];
+    function cur(){ return rows.filter(function(r){ if(st.q){ var hay=((r.ref||'')+' '+(r.supplier_name||'')+' '+(r.recipient_company||'')+' '+(r.recipient_name||'')).toLowerCase(); if(hay.indexOf(st.q)<0)return false; }
+      if(st.f==='all')return true; if(st.f==='unaccepted')return r.status_calc==='Awaiting supplier'; if(st.f==='closed')return !r.is_open; return r.is_open; }); }
+    var FILT=[['open','Open'],['unaccepted','Not Accepted'],['closed','Closed'],['all','All']];
     function rowHTML(r,i){
       var od=r.overdue?' <span title="overdue / supplier expected later than required" style="color:#dc2626;font-weight:700">⚠</span>':'';
       var tr=r.tracking_code?(esc(r.tracking_code)+(r.carrier?' <span class="mut tiny">'+esc(r.carrier)+'</span>':'')):'<span class="mut">—</span>';

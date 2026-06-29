@@ -331,6 +331,11 @@ When a supplier posts a sample timeline note (or a charge is pending), the admin
   notes or pending charges; fetched on SUPPLY load so it shows without opening the tab, and refreshed when the
   grid renders.
 
+## v25.47 - Admin Samples: "Not Accepted" filter pill
+
+Added a **Not Accepted** filter pill to the SUPPLY ▸ Samples grid (status = "Awaiting supplier"), alongside
+Open / Closed / All.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
