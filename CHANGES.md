@@ -252,6 +252,12 @@ New **Samples** tab in the supplier portal (scoped to the logged-in supplier):
   `/api/portal/sample-{accept,update,note,charge,create}` + `/api/portal/sample-notes/:id` (each verifies the
   sample belongs to the supplier). portal.html EP map extended.
 
+## v25.36 - Samples (admin): editable recipient/address/notes/SKUs + tracking & carrier
+
+The admin SUPPLY ▸ Samples detail panel is now editable: **recipient & address fields, notes, and SKUs**
+(add/remove/edit lines + Save SKUs), plus **tracking code & carrier** inputs. Saves via the existing
+sample patch / lines endpoints.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

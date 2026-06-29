@@ -3533,23 +3533,39 @@
   function loadSampleDetail(id,i){ var box=document.getElementById('sampdet-'+i);
     fetch('/api/supply/sample-detail/'+id).then(function(r){return r.json();}).then(function(d){ if(!d||d.error){box.innerHTML='<div style="color:#dc2626">'+esc((d&&d.error)||'load failed')+'</div>';return;}
       var s=d.sample, ep='/api/supply/sample/'+id;
-      var lines=(d.lines||[]).map(function(l){return '<tr><td class="l">'+esc(l.sku)+'</td><td style="text-align:right">'+units(l.qty)+'</td></tr>';}).join('')||'<tr><td colspan="2" class="mut">no SKUs</td></tr>';
-      var addr=[s.address_line1,s.address_line2,[s.city,s.region].filter(Boolean).join(' '),[s.postcode,s.country].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+      var slines=(d.lines||[]).map(function(l){return {sku:l.sku,qty:l.qty};});
+      function fld(f,val,w,ph){ return '<input class="fci txt samp-fld" data-field="'+f+'" value="'+esc(val||'')+'" style="width:'+(w||150)+'px"'+(ph?' placeholder="'+ph+'"':'')+'>'; }
       var charges=(d.charges||[]).map(function(ch){ var tot=(Number(ch.freight_cost)||0)+(Number(ch.product_cost)||0);
         return '<tr><td class="l">'+sampleChargeChip(ch.status)+'</td><td>'+money(ch.freight_cost)+'</td><td>'+money(ch.product_cost)+'</td><td><b>'+money(tot)+'</b></td><td class="l">'+esc(ch.description||'')+'</td><td class="l">'+(ch.status==='pending'?'<button class="save-btn samp-charge-acc" data-id="'+ch.id+'" style="background:#bbf7d0;border:1px solid #16a34a;color:#166534;font-weight:700">Accept → Other Payments</button> <button class="save-btn light samp-charge-rej" data-id="'+ch.id+'">Reject</button>':'')+'</td></tr>'; }).join('')||'<tr><td colspan="6" class="mut">no charges</td></tr>';
       box.innerHTML='<div style="display:flex;gap:24px;flex-wrap:wrap">'
-        +'<div style="min-width:240px"><div class="sect-h">Recipient</div><div class="tiny"><b>'+esc(s.recipient_company||'')+'</b><br>'+esc(((s.first_name||'')+' '+(s.last_name||'')).trim())+'<br>'+esc(addr)+(s.phone?'<br>'+esc(s.phone):'')+'</div>'
-          +'<div class="mut tiny" style="margin-top:6px">Purpose: '+esc((s.purpose||[]).join(', ')||'—')+'</div>'+(s.notes?'<div class="mut tiny">Notes: '+esc(s.notes)+'</div>':'')+'</div>'
-        +'<div style="min-width:200px"><div class="sect-h">SKUs</div><div class="tw"><table style="width:auto"><thead><tr><th class="l">SKU</th><th>Qty</th></tr></thead><tbody>'+lines+'</tbody></table></div></div>'
+        +'<div style="min-width:260px"><div class="sect-h">Recipient &amp; address <span class="mut tiny">(editable)</span></div>'
+          +'<div style="margin-bottom:3px">'+fld('recipient_company',s.recipient_company,210,'company')+'</div>'
+          +'<div style="margin-bottom:3px">'+fld('first_name',s.first_name,100,'first')+' '+fld('last_name',s.last_name,100,'last')+'</div>'
+          +'<div style="margin-bottom:3px">'+fld('address_line1',s.address_line1,240,'line 1')+'</div>'
+          +'<div style="margin-bottom:3px">'+fld('address_line2',s.address_line2,240,'line 2')+'</div>'
+          +'<div style="margin-bottom:3px">'+fld('city',s.city,120,'city')+' '+fld('region',s.region,90,'region')+'</div>'
+          +'<div style="margin-bottom:3px">'+fld('postcode',s.postcode,90,'postcode')+' '+fld('country',s.country,70,'country')+'</div>'
+          +'<div style="margin-bottom:3px">'+fld('phone',s.phone,150,'phone')+'</div>'
+          +'<div class="mut tiny" style="margin-top:4px">Purpose: '+esc((s.purpose||[]).join(', ')||'—')+'</div>'
+          +'<div class="mut tiny" style="margin-top:4px">Notes</div><textarea class="fci samp-fld" data-field="notes" rows="2" style="width:240px;text-align:left">'+esc(s.notes||'')+'</textarea></div>'
+        +'<div style="min-width:240px"><div class="sect-h">SKUs <span class="mut tiny">(editable)</span></div><div class="samp-lines"></div><button class="save-btn light samp-addline" style="margin-top:4px">+ line</button> <button class="save-btn samp-saveskus">Save SKUs</button></div>'
         +'<div style="min-width:240px"><div class="sect-h">Fulfilment</div>'
           +'<div class="cli-row"><div class="cli-lbl">Completion req.</div><div class="cli-val"><input type="date" class="fci txt samp-fld" data-field="completion_date_required" value="'+esc(s.completion_required||'')+'" style="width:140px"></div></div>'
-          +'<div class="tiny mut">Supplier accepted: '+(s.accepted_at?fd(s.accepted_at):'—')+'</div>'
+          +'<div class="cli-row"><div class="cli-lbl">Tracking</div><div class="cli-val">'+fld('tracking_code',s.tracking_code,150,'tracking')+'</div></div>'
+          +'<div class="cli-row"><div class="cli-lbl">Carrier</div><div class="cli-val">'+fld('carrier',s.carrier,120,'carrier')+'</div></div>'
+          +'<div class="tiny mut" style="margin-top:4px">Supplier accepted: '+(s.accepted_at?fd(s.accepted_at):'—')+'</div>'
           +'<div class="tiny mut">Supplier expected: '+(s.supplier_expected?fd(s.supplier_expected):'—')+'</div>'
-          +'<div class="tiny mut">Tracking: '+(s.tracking_code?esc(s.tracking_code)+' '+esc(s.carrier||''):'—')+'</div>'
           +'<div style="margin-top:6px"><select class="fci samp-fld" data-field="status"><option value="open"'+(s.status==='open'?' selected':'')+'>open</option><option value="complete"'+(s.status==='complete'?' selected':'')+'>complete</option><option value="cancelled"'+(s.status==='cancelled'?' selected':'')+'>cancelled</option></select> <button class="save-btn light samp-del" data-id="'+id+'" style="color:#dc2626">Delete</button></div></div>'
         +'</div>'
         +'<div class="sect-h" style="margin-top:10px">Charges</div><div class="tw"><table><thead><tr><th class="l">Status</th><th>Freight</th><th>Product</th><th>Total</th><th class="l">Description</th><th class="l"></th></tr></thead><tbody>'+charges+'</tbody></table></div>'
         +'<div class="sect-h" style="margin-top:10px">Timeline</div><div class="sp-timeline" data-ref="'+esc(s.ref)+'"></div>';
+      function renderSlines(){ var w=box.querySelector('.samp-lines'); w.innerHTML=(slines.length?slines:[]).map(function(l,k){return '<div style="margin-bottom:3px"><input class="fci txt sl-sku" data-k="'+k+'" value="'+esc(l.sku)+'" placeholder="SKU" style="width:170px"> <input class="fci sl-qty" data-k="'+k+'" value="'+esc(l.qty)+'" style="width:55px;text-align:right"> <a class="sl-rm" data-k="'+k+'" style="color:#dc2626;cursor:pointer">×</a></div>';}).join('')||'<div class="mut tiny">no SKUs — add a line</div>';
+        w.querySelectorAll('.sl-sku').forEach(function(x){x.onchange=function(){slines[x.dataset.k].sku=x.value;};});
+        w.querySelectorAll('.sl-qty').forEach(function(x){x.onchange=function(){slines[x.dataset.k].qty=x.value;};});
+        w.querySelectorAll('.sl-rm').forEach(function(x){x.onclick=function(){slines.splice(x.dataset.k,1);renderSlines();};}); }
+      renderSlines();
+      box.querySelector('.samp-addline').onclick=function(){ slines.push({sku:'',qty:''}); renderSlines(); };
+      box.querySelector('.samp-saveskus').onclick=function(){ var btn=this; btn.disabled=true; shipPost('/api/supply/sample/'+id+'/lines',{lines:slines.filter(function(l){return l.sku&&String(l.sku).trim();}).map(function(l){return {sku:String(l.sku).trim(),qty:Number(l.qty)||0};})},function(){ if(_sampleReload)_sampleReload(); }); };
       box.querySelectorAll('.samp-fld').forEach(function(inp){ inp.onchange=function(){ var b={}; b[inp.dataset.field]=inp.value; shipPost(ep,b,function(){ if(_sampleReload)_sampleReload(); }); }; });
       box.querySelectorAll('.samp-charge-acc').forEach(function(b){ b.onclick=function(){ b.disabled=true; shipPost('/api/supply/charge/'+b.dataset.id+'/accept',{},function(j){ if(j&&j.error){alert(j.error);b.disabled=false;return;} alert('Charge accepted — posted to Other Payments.'); if(_sampleReload)_sampleReload(); }); }; });
       box.querySelectorAll('.samp-charge-rej').forEach(function(b){ b.onclick=function(){ if(!confirm('Reject this charge?'))return; shipPost('/api/supply/charge/'+b.dataset.id+'/reject',{},function(){ if(_sampleReload)_sampleReload(); }); }; });
