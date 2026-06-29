@@ -284,6 +284,14 @@ real portal's Shipment Plan tab is fed data — a separate follow-up).
 Portal sample card SKUs now display as a left-aligned **"23 × TOWLB-CAB-LG"** list (qty × SKU) instead of a
 table.
 
+## v25.41 - Fix: sample actions work in the admin "preview as supplier"
+
+The admin "preview as supplier" Samples tab couldn't accept/charge/note (its EP map lacked sample endpoints,
+so the buttons did `fetch(undefined)` → "The string did not match the expected pattern"). Added admin-gated
+`/api/supply/sample-{accept,update,charge}` (body `{id}`, matching the portal-view shapes; the real portal
+uses the `/api/portal/sample-*` equivalents), wired them into the preview EP, and the "new sample" form now
+sends the previewed supplier name. (`sample-note` also accepts `id` or `sample_id`.)
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

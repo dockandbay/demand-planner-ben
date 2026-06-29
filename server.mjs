@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.40';
+const APP_VERSION = 'v25.41';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -4353,12 +4353,28 @@ app.post('/api/supply/sample/:id/delete', async (req, res) => {
 app.post('/api/supply/sample/:id', (req, res) =>     // patch fields (admin edits + supplier expected/tracking/carrier)
   patch(res, 'planner.sample_requests', 'id', req.params.id, SAMPLE_FIELDS, req.body, 'bigint'));
 app.post('/api/supply/sample-note', async (req, res) => {
-  const b = req.body || {};
-  if (!b.sample_id || !b.body) return res.status(400).json({ error: 'sample_id and body required' });
+  const b = req.body || {}; const sid = b.sample_id || b.id;   // accept either key (admin grid vs portal preview)
+  if (!sid || !b.body) return res.status(400).json({ error: 'sample_id and body required' });
   try { const r = await pool.query(`INSERT INTO planner.sample_notes (sample_id, author_kind, author_email, body)
-    VALUES ($1::bigint,$2,$3,$4) RETURNING id`, [b.sample_id, b.author_kind||'internal', b.author_email||null, String(b.body)]);
+    VALUES ($1::bigint,$2,$3,$4) RETURNING id`, [sid, b.author_kind||'internal', b.author_email||null, String(b.body)]);
     res.json({ id: r.rows[0].id }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Admin-gated sample actions matching the portal-view body shapes ({id} in body) — used by the
+// admin "preview as supplier" (the real portal uses the /api/portal/sample-* equivalents).
+app.post('/api/supply/sample-accept', async (req, res) => {
+  const id = req.body && req.body.id; if(!id) return res.status(400).json({ error: 'id required' });
+  try { await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), updated_at=now() WHERE id=$1::bigint`, [id]); res.json({ ok:true }); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/supply/sample-update', async (req, res) => {
+  const b = req.body || {}; if(!b.id) return res.status(400).json({ error: 'id required' });
+  patch(res, 'planner.sample_requests', 'id', b.id, { supplier_expected_completion:'date', tracking_code:'text', carrier:'text' }, b, 'bigint'); });
+app.post('/api/supply/sample-charge', async (req, res) => {
+  const b = req.body || {}; if(!b.id) return res.status(400).json({ error: 'id required' });
+  try { const s = (await pool.query(`SELECT ref, supplier_name FROM planner.sample_requests WHERE id=$1::bigint`, [b.id])).rows[0];
+    if(!s) return res.status(404).json({ error: 'sample not found' });
+    const r = await pool.query(`INSERT INTO planner.supplier_charges (source_type, source_ref, supplier_name, freight_cost, product_cost, description, created_by)
+      VALUES ('sample',$1,$2,$3,$4,$5,$6) RETURNING id`, [s.ref, s.supplier_name, Number(b.freight_cost)||0, Number(b.product_cost)||0, b.description||null, b.created_by||'preview']); res.json({ ok:true, id: r.rows[0].id }); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/supply/sample-note-read/:id', async (req, res) => {
   try { const read = !(req.body && req.body.read === false);
     await pool.query(`UPDATE planner.sample_notes SET read_at=${read?'now()':'NULL'} WHERE id=$1::bigint`, [req.params.id]);
