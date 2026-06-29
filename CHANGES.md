@@ -27,6 +27,13 @@ carton/MOQ-rounded, never past the discontinue. Those direct-to-FBA arrivals fee
 so the 3PL pass sees FBA already covered and **transfers/buys less → Buy-3PL drops** wherever it was previously
 topping FBA up. (Near-term FBA gaps the direct lead can't reach still fall to the 3PL→FBA transfer as before.)
 
+## v25.12 - Buy plan: cover weeks counts post-discontinue demand
+
+The cover-weeks calc was zeroing demand past the discontinue cutoff, so a discontinued SKU's cover looked
+infinite. Now the **displayed cover** counts **real future demand including post-discontinue**, so it runs down
+realistically alongside the demand + SOH rows (display only — buy decisions keep their own post-disc-zeroed
+forward demand). Completes the discontinued-row cleanup.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

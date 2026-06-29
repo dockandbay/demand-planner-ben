@@ -2492,16 +2492,17 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     const nextFbaNeed=Math.max(tgF-cF,0);
     const tg3=fwdDemand(t3,i,d3DemFn)+nextFbaNeed;
     // Cover: forward-looking — count how many weeks of future demand SOH covers
+    // cover-weeks (display): count REAL future demand including post-discontinue, so cover runs down
+    // realistically rather than looking infinite once the disc cutoff zeroes demand. (Buy decisions keep
+    // their own post-disc-zeroed forward demand — this is display only.)
     const cv3=fwdCover(c3,i,fi=>{
       if(fi<0||fi>=PROJ.length)return 0;
       const k=PROJ[fi].key;
-      if(discCutoff&&k>=discCutoff)return 0;
       return ((dem.DTC&&dem.DTC[k])||0)+((dem.B2B&&dem.B2B[k])||0);
     });
     const cvF=fwdCover(cF,i,fi=>{
       if(fi<0||fi>=PROJ.length)return 0;
       const k=PROJ[fi].key;
-      if(discCutoff&&k>=discCutoff)return 0;
       return (dem.FBA&&dem.FBA[k])||0;
     });
 
