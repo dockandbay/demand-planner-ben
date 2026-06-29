@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.48';
+const APP_VERSION = 'v25.49';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -918,7 +918,8 @@ app.get('/api/supply/:section', async (req, res) => {
           (SELECT coalesce(sum(l.qty),0) FROM planner.sample_request_lines l WHERE l.sample_id=s.id)::int units,
           (SELECT count(*) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending')::int pending_charges,
           (SELECT count(*) FROM planner.sample_notes n WHERE n.sample_id=s.id AND n.author_kind='supplier' AND n.read_at IS NULL)::int unread_notes,
-          (s.status NOT IN ('cancelled','complete') AND (coalesce(s.tracking_code,'')='' OR EXISTS
+          coalesce(s.change_requested,false) change_requested,
+          (s.status NOT IN ('cancelled','complete') AND (coalesce(s.tracking_code,'')='' OR coalesce(s.change_requested,false) OR EXISTS
              (SELECT 1 FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending'))) is_open,
           (s.completion_date_required IS NOT NULL AND s.status NOT IN ('cancelled','complete')
              AND (current_date > s.completion_date_required
@@ -926,6 +927,7 @@ app.get('/api/supply/:section', async (req, res) => {
           CASE
             WHEN s.status='cancelled' THEN 'Cancelled'
             WHEN s.status='complete' THEN 'Complete'
+            WHEN coalesce(s.change_requested,false) THEN 'Change requested'
             WHEN (SELECT count(*) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending')>0 THEN 'Charge to review'
             WHEN coalesce(s.tracking_code,'')<>'' THEN 'Shipped'
             WHEN s.accepted_at IS NOT NULL THEN 'In production'
@@ -4338,12 +4340,14 @@ app.post('/api/supply/sample/:id/lines', async (req, res) => {   // replace all 
     for (const l of lines) { if (!l || !l.sku) continue;
       await client.query(`INSERT INTO planner.sample_request_lines (sample_id, sku, qty) VALUES ($1::bigint,$2,$3)`,
         [req.params.id, String(l.sku).trim(), Math.round(Number(l.qty)||0)]); }
+    // SKUs/qty changed after acceptance → flag for re-acceptance (treated like not-yet-accepted)
+    await client.query(`UPDATE planner.sample_requests SET change_requested=true, updated_at=now() WHERE id=$1::bigint AND accepted_at IS NOT NULL`, [req.params.id]);
     await client.query('COMMIT'); res.json({ ok:true, count: lines.length });
   } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 app.post('/api/supply/sample/:id/accept', async (req, res) => {   // supplier accepts the request
-  try { await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), updated_at=now() WHERE id=$1::bigint`, [req.params.id]);
+  try { await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), change_requested=false, updated_at=now() WHERE id=$1::bigint`, [req.params.id]);
     res.json({ ok:true }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/sample/:id/delete', async (req, res) => {
@@ -4363,7 +4367,7 @@ app.post('/api/supply/sample-note', async (req, res) => {
 // admin "preview as supplier" (the real portal uses the /api/portal/sample-* equivalents).
 app.post('/api/supply/sample-accept', async (req, res) => {
   const id = req.body && req.body.id; if(!id) return res.status(400).json({ error: 'id required' });
-  try { await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), updated_at=now() WHERE id=$1::bigint`, [id]); res.json({ ok:true }); }
+  try { await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), change_requested=false, updated_at=now() WHERE id=$1::bigint`, [id]); res.json({ ok:true }); }
   catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/supply/sample-update', async (req, res) => {
   const b = req.body || {}; if(!b.id) return res.status(400).json({ error: 'id required' });
@@ -5246,9 +5250,9 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
         coalesce(s.address_line1,'') address_line1, coalesce(s.address_line2,'') address_line2, coalesce(s.city,'') city,
         coalesce(s.region,'') region, coalesce(s.postcode,'') postcode, coalesce(s.country,'') country, coalesce(s.phone,'') phone,
         to_char(s.completion_date_required,'YYYY-MM-DD') completion_required, coalesce(s.purpose,'{}') purpose, coalesce(s.notes,'') notes,
-        s.status, (s.accepted_at IS NOT NULL) accepted, to_char(s.supplier_expected_completion,'YYYY-MM-DD') supplier_expected,
+        s.status, (s.accepted_at IS NOT NULL) accepted, coalesce(s.change_requested,false) change_requested, to_char(s.supplier_expected_completion,'YYYY-MM-DD') supplier_expected,
         coalesce(s.tracking_code,'') tracking_code, coalesce(s.carrier,'') carrier,
-        (s.status NOT IN ('cancelled','complete') AND (coalesce(s.tracking_code,'')='' OR EXISTS
+        (s.status NOT IN ('cancelled','complete') AND (coalesce(s.tracking_code,'')='' OR coalesce(s.change_requested,false) OR EXISTS
            (SELECT 1 FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending'))) is_open,
         coalesce((SELECT json_agg(json_build_object('sku',l.sku,'qty',l.qty) ORDER BY l.id) FROM planner.sample_request_lines l WHERE l.sample_id=s.id),'[]') lines,
         coalesce((SELECT json_agg(json_build_object('id',c.id,'freight_cost',c.freight_cost,'product_cost',c.product_cost,'status',c.status,'description',coalesce(c.description,'')) ORDER BY c.created_at) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref),'[]') charges
@@ -5273,7 +5277,7 @@ app.get('/api/portal/sample-notes/:id', portalAuth, async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample-accept', portalAuth, async (req, res) => {
   try { const s = await portalOwnsSample(req, req.body && req.body.id); if(!s) return res.status(403).json({ error: 'not your sample' });
-    await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), updated_at=now() WHERE id=$1::bigint`, [s.id]); res.json({ ok: true }); }
+    await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), change_requested=false, updated_at=now() WHERE id=$1::bigint`, [s.id]); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample-update', portalAuth, async (req, res) => {   // supplier: expected completion / tracking / carrier
   const b = req.body || {};

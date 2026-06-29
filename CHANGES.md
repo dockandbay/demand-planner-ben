@@ -342,6 +342,17 @@ When the **DIRECT** ship-to pill is active, the PO grid now shows two extra colu
 sales ref** — between Branch and Status (hidden otherwise; the columns already exist in the data as
 `client` / `sales_order_ref`). Expand-row colspan adjusts accordingly.
 
+## v25.49 - Samples: "Change requested" workflow (migration 085)
+
+If a sample's **SKUs/quantities change after the supplier accepted it**, the request flips to **"Change
+requested"** — treated like not-yet-accepted: it stays open, shows as needing attention, and the supplier
+must **re-accept** (which clears it). Adds migration **`085_sample_change_requested.sql`** (a
+`change_requested` flag). Admin grid shows a red "Change requested" chip and the **Not Accepted** filter
+includes it; the supplier portal shows **"Not accepted" / "Change requested" in bold red** and offers a
+**Re-accept** button.
+
+**DIVIYAJ — NEW MIGRATION:** `085_sample_change_requested.sql` (idempotent, no backfill).
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

@@ -3464,14 +3464,14 @@
 
   // ── SUPPLY ▸ SAMPLES ────────────────────────────────────────────────────────────
   var SAMPLE_PURPOSES=['sales','product','photography','marketing','operations'];
-  function sampleStatusChip(s){ var m={'Awaiting supplier':['#fef3c7','#92710a'],'In production':['#dbeafe','#1d4ed8'],'Charge to review':['#fee2e2','#b91c1c'],'Shipped':['#dcfce7','#166534'],'Complete':['#e2e8f0','#475569'],'Cancelled':['#f1f5f9','#94a3b8']};
+  function sampleStatusChip(s){ var m={'Awaiting supplier':['#fef3c7','#92710a'],'Change requested':['#fee2e2','#b91c1c'],'In production':['#dbeafe','#1d4ed8'],'Charge to review':['#fee2e2','#b91c1c'],'Shipped':['#dcfce7','#166534'],'Complete':['#e2e8f0','#475569'],'Cancelled':['#f1f5f9','#94a3b8']};
     var col=m[s]||['#e2e8f0','#475569']; return '<span class="tool-badge" style="background:'+col[0]+';color:'+col[1]+';font-weight:700;white-space:nowrap">'+esc(s||'')+'</span>'; }
   function sampleChargeChip(s){ var m={pending:['#fef3c7','#92710a'],accepted:['#dcfce7','#166534'],rejected:['#f1f5f9','#94a3b8']}; var c=m[s]||['#e2e8f0','#475569']; return '<span class="tool-badge" style="background:'+c[0]+';color:'+c[1]+'">'+esc(s)+'</span>'; }
   function renderSamples(data){ var c=document.getElementById('supply-content'); fetchLookups(function(){ samplesInner(data,c); }); }
   function samplesInner(rows,c){
     var st={f:'open',q:''};
     function cur(){ return rows.filter(function(r){ if(st.q){ var hay=((r.ref||'')+' '+(r.supplier_name||'')+' '+(r.recipient_company||'')+' '+(r.recipient_name||'')).toLowerCase(); if(hay.indexOf(st.q)<0)return false; }
-      if(st.f==='all')return true; if(st.f==='unaccepted')return r.status_calc==='Awaiting supplier'; if(st.f==='closed')return !r.is_open; return r.is_open; }); }
+      if(st.f==='all')return true; if(st.f==='unaccepted')return r.status_calc==='Awaiting supplier'||r.status_calc==='Change requested'; if(st.f==='closed')return !r.is_open; return r.is_open; }); }
     var FILT=[['open','Open'],['unaccepted','Not Accepted'],['closed','Closed'],['all','All']];
     function rowHTML(r,i){
       var od=r.overdue?' <span title="overdue / supplier expected later than required" style="color:#dc2626;font-weight:700">⚠</span>':'';

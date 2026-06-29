@@ -656,7 +656,7 @@
             var charges=(s.charges||[]).map(function(c){ var t=(Number(c.freight_cost)||0)+(Number(c.product_cost)||0); return '<div class="tiny" style="margin:2px 0">'+chgChip(c.status)+' &nbsp;freight '+money(c.freight_cost)+' + product '+money(c.product_cost)+' = <b>'+money(t)+'</b>'+(c.description?' · '+esc(c.description):'')+'</div>'; }).join('')||'<div class="mut tiny">none yet</div>';
             return '<div class="samp-card" data-id="'+s.id+'" data-ref="'+esc(s.ref)+'" style="border:1px solid #e5e7eb;border-radius:10px;padding:14px;margin-bottom:12px;background:#fff">'
               +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px"><b style="font-size:15px">'+esc(s.ref)+'</b>'+sampChip(s.status)
-                +(s.accepted?'<span style="background:#dcfce7;color:#166534;border-radius:4px;font-size:10px;font-weight:700;padding:2px 7px">✓ accepted</span>':'<button class="save-btn samp-accept" data-id="'+s.id+'" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Accept request</button>')
+                +(sampNeedsAccept(s)?'<button class="save-btn samp-accept" data-id="'+s.id+'" style="background:'+(s.change_requested?'#b91c1c':'#2563eb')+';color:#fff;border-color:'+(s.change_requested?'#991b1b':'#1d4ed8')+'">'+(s.change_requested?'Re-accept (change requested)':'Accept request')+'</button>':'<span style="background:#dcfce7;color:#166534;border-radius:4px;font-size:10px;font-weight:700;padding:2px 7px">✓ accepted</span>')
                 +'<span class="mut tiny" style="margin-left:auto">Completion required: <b>'+(s.completion_required?fd(s.completion_required):'—')+'</b></span></div>'
               +'<div style="display:flex;gap:32px;flex-wrap:wrap">'
                 +'<div style="min-width:190px">'+lbl('Ship to')+'<div class="tiny" style="line-height:1.65"><b>'+esc(s.recipient_company||'—')+'</b>'+(s.recipient_name?'<br>'+esc(s.recipient_name):'')+(addr.length?'<br>'+addr.map(esc).join('<br>'):'')+(s.phone?'<br>☏ '+esc(s.phone):'')+'</div></div>'
@@ -674,15 +674,16 @@
                 +'<div style="display:flex;gap:6px;align-items:flex-start;margin:4px 0 6px"><textarea class="fci samp-note-in" rows="2" placeholder="Add a note…" style="flex:1;max-width:480px;text-align:left"></textarea><button class="save-btn samp-note-post">Post</button></div>'
                 +'<div class="samp-tl" data-id="'+s.id+'"></div></div>'
               +'</div>'; }
-          function sampInFilt(s,f){ if(f==='all')return true; if(f==='closed')return !s.is_open; if(f==='unaccepted')return !s.accepted&&s.status!=='cancelled'&&s.status!=='complete'; return s.is_open; }
-          function sampActions(s){ return ((!s.accepted&&s.status!=='cancelled'&&s.status!=='complete')?1:0); }   // supplier action: needs accepting
+          function sampNeedsAccept(s){ return (!s.accepted||s.change_requested)&&s.status!=='cancelled'&&s.status!=='complete'; }
+          function sampInFilt(s,f){ if(f==='all')return true; if(f==='closed')return !s.is_open; if(f==='unaccepted')return sampNeedsAccept(s); return s.is_open; }
+          function sampActions(s){ return sampNeedsAccept(s)?1:0; }   // supplier action: needs (re-)accepting
           function ppSampleRow(s,i){
             var act=sampActions(s)?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;margin-left:4px" title="needs your attention">'+sampActions(s)+'</span>':'';
             var nu=s.unread_dnb?'<span style="background:#f59e0b;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;margin-left:3px" title="new note from Dock & Bay">'+s.unread_dnb+'</span>':'';
             var units=(s.lines||[]).reduce(function(a,l){return a+(Number(l.qty)||0);},0), nsku=(s.lines||[]).length;
             return '<tr><td class="l"><button class="planbtn ps-manage" data-id="'+s.id+'" data-i="'+i+'">Manage</button>'+act+nu+'</td>'
               +'<td class="l"><b>'+esc(s.ref)+'</b></td>'
-              +'<td class="l">'+sampChip(s.status)+(s.accepted?'':' <span class="mut tiny">not accepted</span>')+'</td>'
+              +'<td class="l">'+(s.change_requested?'<span style="color:#b91c1c;font-weight:700">Change requested</span>':(sampNeedsAccept(s)?'<span style="color:#b91c1c;font-weight:700">Not accepted</span>':sampChip(s.status)))+'</td>'
               +'<td class="l">'+esc(s.recipient_company||'')+(s.recipient_name?' <span class="mut tiny">'+esc(s.recipient_name)+'</span>':'')+'</td>'
               +'<td class="l">'+(s.completion_required?fd(s.completion_required):'<span class="mut">—</span>')+'</td>'
               +'<td class="l"><b>'+units+'</b> <span class="mut tiny">· '+nsku+' SKU'+(nsku===1?'':'s')+'</span></td>'
