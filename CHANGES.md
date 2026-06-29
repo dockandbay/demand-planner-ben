@@ -199,6 +199,20 @@ First slice of the new **Samples** feature. Adds migration **`084_samples.sql`**
 **DIVIYAJ — NEW MIGRATION:** `084_samples.sql` must be run on prod (first new migration since
 `diviyaj_deploy_2026-06-28.sql`). Idempotent. No data backfill. Later phases (endpoints + UI) build on it.
 
+## v25.31 - Samples feature — Phase 2: server endpoints
+
+Backend for Samples (no UI yet — that's Phase 3/4). Smoke-tested end-to-end against the sandbox.
+- `GET /api/supply/samples` — grid list with line/units counts, `is_open` (open until tracking set AND no
+  pending charge), `overdue` (today > required, or supplier-expected > required), pending-charge + unread-note counts.
+- `GET /api/supply/sample-detail/:id` — full record + lines + timeline + charges.
+- `GET /api/supply/sample-addresses?q=` — autocomplete from previously sent recipients/addresses.
+- `GET /api/supply/sample-notes?id=` + `POST /api/supply/sample-note` + `…/sample-note-read/:id` — timeline.
+- `POST /api/supply/sample-create` (request + SKU lines, assigns ref `SR-<id>`), `…/sample/:id` (patch),
+  `…/sample/:id/lines` (replace — used for paste), `…/sample/:id/accept`, `…/sample/:id/delete`.
+- Charges (samples + shipments): `POST /api/supply/charge-create`, `…/charge/:id/accept` (posts the
+  Other Payment with freight+product breakdown and, for shipments, the linked POs in the description),
+  `…/charge/:id/reject`.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.30';
+const APP_VERSION = 'v25.31';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -846,12 +846,73 @@ app.get('/api/supply/shipment-crossdock/:ref', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── SAMPLES — detail / address autocomplete / timeline (specific routes BEFORE the :section catch-all)
+app.get('/api/supply/sample-detail/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const s = (await pool.query(`SELECT id, ref, supplier_id, coalesce(supplier_name,'') supplier_name,
+      coalesce(recipient_company,'') recipient_company, coalesce(first_name,'') first_name, coalesce(last_name,'') last_name,
+      coalesce(address_line1,'') address_line1, coalesce(address_line2,'') address_line2, coalesce(city,'') city,
+      coalesce(region,'') region, coalesce(postcode,'') postcode, coalesce(country,'') country, coalesce(phone,'') phone,
+      to_char(completion_date_required,'YYYY-MM-DD') completion_required, coalesce(purpose,'{}') purpose, coalesce(notes,'') notes,
+      status, to_char(accepted_at,'YYYY-MM-DD') accepted_at, to_char(supplier_expected_completion,'YYYY-MM-DD') supplier_expected,
+      coalesce(tracking_code,'') tracking_code, coalesce(carrier,'') carrier, coalesce(created_by,'') created_by,
+      to_char(created_at,'YYYY-MM-DD') created_at
+      FROM planner.sample_requests WHERE id=$1::bigint`, [id])).rows[0];
+    if (!s) return res.status(404).json({ error: 'sample not found' });
+    const lines = (await pool.query(`SELECT id, sku, qty FROM planner.sample_request_lines WHERE sample_id=$1::bigint ORDER BY id`, [id])).rows;
+    const notes = (await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
+      to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read FROM planner.sample_notes WHERE sample_id=$1::bigint ORDER BY created_at`, [id])).rows;
+    const charges = (await pool.query(`SELECT id, coalesce(supplier_name,'') supplier_name, freight_cost, product_cost,
+      coalesce(description,'') description, status, to_char(created_at,'YYYY-MM-DD') created_at, other_payment_id
+      FROM planner.supplier_charges WHERE source_type='sample' AND source_ref=$1 ORDER BY created_at`, [s.ref])).rows;
+    res.json({ sample: s, lines, notes, charges });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/sample-addresses', async (req, res) => {
+  const ql = '%' + String(req.query.q || '').toLowerCase() + '%';
+  try { res.json((await pool.query(`SELECT DISTINCT coalesce(recipient_company,'') recipient_company,
+      coalesce(first_name,'') first_name, coalesce(last_name,'') last_name, coalesce(address_line1,'') address_line1,
+      coalesce(address_line2,'') address_line2, coalesce(city,'') city, coalesce(region,'') region,
+      coalesce(postcode,'') postcode, coalesce(country,'') country, coalesce(phone,'') phone
+      FROM planner.sample_requests
+      WHERE coalesce(recipient_company,'')<>'' AND (lower(coalesce(recipient_company,'')) LIKE $1
+        OR lower(coalesce(first_name,'')||' '||coalesce(last_name,'')) LIKE $1)
+      ORDER BY recipient_company LIMIT 20`, [ql])).rows); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/sample-notes', async (req, res) => {
+  try { res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
+    to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read
+    FROM planner.sample_notes WHERE sample_id=$1::bigint ORDER BY created_at`, [req.query.id || '0'])).rows); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── SUPPLY tab (Production Planner) read APIs — one route, section in the path.
 // Read-only JSON from the Phase-2 planner tables. No writes (writes are a later, gated step).
 app.get('/api/supply/:section', async (req, res) => {
   const q = (sql) => pool.query(sql).then(r => r.rows);
   try {
     switch (req.params.section) {
+      case 'samples':   // SUPPLY ▸ Samples grid — all sample requests + open/overdue/charge flags
+        return res.json(await q(`SELECT s.id, s.ref, coalesce(s.supplier_name,'') supplier_name,
+          coalesce(s.recipient_company,'') recipient_company,
+          trim(coalesce(s.first_name,'')||' '||coalesce(s.last_name,'')) recipient_name,
+          coalesce(s.city,'') city, coalesce(s.country,'') country,
+          to_char(s.completion_date_required,'YYYY-MM-DD') completion_required,
+          to_char(s.supplier_expected_completion,'YYYY-MM-DD') supplier_expected,
+          s.status, coalesce(s.tracking_code,'') tracking_code, coalesce(s.carrier,'') carrier,
+          (s.accepted_at IS NOT NULL) accepted, coalesce(s.purpose,'{}') purpose,
+          (SELECT count(*) FROM planner.sample_request_lines l WHERE l.sample_id=s.id)::int line_count,
+          (SELECT coalesce(sum(l.qty),0) FROM planner.sample_request_lines l WHERE l.sample_id=s.id)::int units,
+          (SELECT count(*) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending')::int pending_charges,
+          (SELECT count(*) FROM planner.sample_notes n WHERE n.sample_id=s.id AND n.author_kind='supplier' AND n.read_at IS NULL)::int unread_notes,
+          (s.status NOT IN ('cancelled','complete') AND (coalesce(s.tracking_code,'')='' OR EXISTS
+             (SELECT 1 FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending'))) is_open,
+          (s.completion_date_required IS NOT NULL AND s.status NOT IN ('cancelled','complete')
+             AND (current_date > s.completion_date_required
+                  OR (s.supplier_expected_completion IS NOT NULL AND s.supplier_expected_completion > s.completion_date_required))) overdue
+          FROM planner.sample_requests s ORDER BY s.created_at DESC`));
       case 'suppliers':
         return res.json(await q(`SELECT id,code,name,kind,default_currency,
           start_deposit_pct,completion_pct,balance_pct,credit_days,credit_type,
@@ -4221,6 +4282,105 @@ app.post('/api/trading-calendar/:id/delete', async (req, res) => {
 });
 app.post('/api/trading-calendar/:id', (req, res) =>
   patch(res, 'planner.trading_calendar', 'id', req.params.id, CAL_FIELDS, req.body, 'bigint'));
+
+// ── SAMPLES — writes ─────────────────────────────────────────────────────────────
+const SAMPLE_FIELDS = { supplier_id:'bigint', supplier_name:'text', recipient_company:'text', first_name:'text',
+  last_name:'text', address_line1:'text', address_line2:'text', city:'text', region:'text', postcode:'text',
+  country:'text', phone:'text', completion_date_required:'date', purpose:'text[]', notes:'text', status:'text',
+  supplier_expected_completion:'date', tracking_code:'text', carrier:'text' };
+app.post('/api/supply/sample-create', async (req, res) => {
+  const b = req.body || {};
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    if (b.supplier_name && b.supplier_name.trim()) await client.query(   // keep the supplier picker a real dropdown
+      `INSERT INTO planner.suppliers(name,kind) SELECT $1,'supplier' WHERE NOT EXISTS (SELECT 1 FROM planner.suppliers WHERE lower(trim(name))=lower(trim($1)))`, [b.supplier_name.trim()]);
+    const ins = await client.query(`INSERT INTO planner.sample_requests
+      (supplier_id, supplier_name, recipient_company, first_name, last_name, address_line1, address_line2, city, region, postcode, country, phone, completion_date_required, purpose, notes, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
+      [b.supplier_id||null, b.supplier_name||null, b.recipient_company||null, b.first_name||null, b.last_name||null,
+       b.address_line1||null, b.address_line2||null, b.city||null, b.region||null, b.postcode||null, b.country||null, b.phone||null,
+       b.completion_date_required||null, Array.isArray(b.purpose)?b.purpose:null, b.notes||null, b.created_by||'planner']);
+    const id = ins.rows[0].id, ref = 'SR-' + id;
+    await client.query(`UPDATE planner.sample_requests SET ref=$1 WHERE id=$2`, [ref, id]);
+    for (const l of (Array.isArray(b.lines)?b.lines:[])) { if (!l || !l.sku) continue;
+      await client.query(`INSERT INTO planner.sample_request_lines (sample_id, sku, qty) VALUES ($1,$2,$3)`,
+        [id, String(l.sku).trim(), Math.round(Number(l.qty)||0)]); }
+    await client.query('COMMIT');
+    res.json({ ok:true, id, ref });
+  } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
+app.post('/api/supply/sample/:id/lines', async (req, res) => {   // replace all lines (paste + inline edits)
+  const lines = Array.isArray(req.body && req.body.lines) ? req.body.lines : [];
+  const client = await pool.connect();
+  try { await client.query('BEGIN');
+    await client.query(`DELETE FROM planner.sample_request_lines WHERE sample_id=$1::bigint`, [req.params.id]);
+    for (const l of lines) { if (!l || !l.sku) continue;
+      await client.query(`INSERT INTO planner.sample_request_lines (sample_id, sku, qty) VALUES ($1::bigint,$2,$3)`,
+        [req.params.id, String(l.sku).trim(), Math.round(Number(l.qty)||0)]); }
+    await client.query('COMMIT'); res.json({ ok:true, count: lines.length });
+  } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
+app.post('/api/supply/sample/:id/accept', async (req, res) => {   // supplier accepts the request
+  try { await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), updated_at=now() WHERE id=$1::bigint`, [req.params.id]);
+    res.json({ ok:true }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/sample/:id/delete', async (req, res) => {
+  try { await pool.query(`DELETE FROM planner.sample_requests WHERE id=$1::bigint`, [req.params.id]); res.json({ ok:true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/sample/:id', (req, res) =>     // patch fields (admin edits + supplier expected/tracking/carrier)
+  patch(res, 'planner.sample_requests', 'id', req.params.id, SAMPLE_FIELDS, req.body, 'bigint'));
+app.post('/api/supply/sample-note', async (req, res) => {
+  const b = req.body || {};
+  if (!b.sample_id || !b.body) return res.status(400).json({ error: 'sample_id and body required' });
+  try { const r = await pool.query(`INSERT INTO planner.sample_notes (sample_id, author_kind, author_email, body)
+    VALUES ($1::bigint,$2,$3,$4) RETURNING id`, [b.sample_id, b.author_kind||'internal', b.author_email||null, String(b.body)]);
+    res.json({ id: r.rows[0].id }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/sample-note-read/:id', async (req, res) => {
+  try { const read = !(req.body && req.body.read === false);
+    await pool.query(`UPDATE planner.sample_notes SET read_at=${read?'now()':'NULL'} WHERE id=$1::bigint`, [req.params.id]);
+    res.json({ ok:true, read }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── SUPPLIER CHARGES (samples + shipments) → Other Payment on accept ─────────────
+app.post('/api/supply/charge-create', async (req, res) => {
+  const b = req.body || {};
+  if (!b.source_type || !b.source_ref) return res.status(400).json({ error: 'source_type and source_ref required' });
+  try { const r = await pool.query(`INSERT INTO planner.supplier_charges
+    (source_type, source_ref, supplier_name, freight_cost, product_cost, description, created_by)
+    VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+    [b.source_type, b.source_ref, b.supplier_name||null, Number(b.freight_cost)||0, Number(b.product_cost)||0, b.description||null, b.created_by||null]);
+    res.json({ ok:true, id: r.rows[0].id }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/charge/:id/reject', async (req, res) => {
+  try { await pool.query(`UPDATE planner.supplier_charges SET status='rejected' WHERE id=$1::bigint AND status='pending'`, [req.params.id]);
+    res.json({ ok:true }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/charge/:id/accept', async (req, res) => {   // accept → Other Payment (deposits, is_deposit=false)
+  const client = await pool.connect();
+  try { await client.query('BEGIN');
+    const c = (await client.query(`SELECT * FROM planner.supplier_charges WHERE id=$1::bigint FOR UPDATE`, [req.params.id])).rows[0];
+    if (!c) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'charge not found' }); }
+    if (c.status === 'accepted') { await client.query('ROLLBACK'); return res.json({ ok:true, already:true, other_payment_id:c.other_payment_id }); }
+    const fr = Math.round(Number(c.freight_cost)||0), pr = Math.round(Number(c.product_cost)||0), amount = (Number(c.freight_cost)||0)+(Number(c.product_cost)||0);
+    let label;
+    if (c.source_type === 'shipment') {   // put the shipment's linked POs in the Other Payment description
+      const pos = (await client.query(`SELECT string_agg(po,', ' ORDER BY po) pos FROM planner.purchase_orders WHERE shipment_ref=$1`, [c.source_ref])).rows[0].pos || '';
+      label = `Shipment ${c.source_ref}${pos?` (POs: ${pos})`:''}`;
+    } else label = `Sample ${c.source_ref}`;
+    const desc = `${label} — freight $${fr} + product $${pr}${c.description?` · ${c.description}`:''}`;
+    const op = await client.query(`INSERT INTO planner.deposits (is_deposit, supplier_name, amount, description)
+      VALUES (false, $1, $2, $3) RETURNING id`, [c.supplier_name||null, amount, desc]);
+    await client.query(`UPDATE planner.supplier_charges SET status='accepted', accepted_at=now(), other_payment_id=$1 WHERE id=$2::bigint`, [op.rows[0].id, req.params.id]);
+    await client.query('COMMIT');
+    res.json({ ok:true, other_payment_id: op.rows[0].id, amount });
+  } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
 
 // AI proxy — the artefact's Claude calls hit api.anthropic.com keyless (only works inside
 // Claude). We rewrite those calls to /api/ai (see GET /), and this endpoint forwards them to
