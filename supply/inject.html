@@ -2369,7 +2369,7 @@
             ban.innerHTML='<div style="background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:6px 11px;margin:4px 0 10px;font-size:12px">👁 Previewing the portal as <b>'+esc(name)+'</b> — exactly what they see, and any submit acts AS this supplier.</div>';
             if(!window.DBPortalView){ mt.innerHTML='<div class="count" style="color:#dc2626">portal view not loaded</div>'; return; }
             window.DBPortalView.mount({ root:mt, supplierName:name, by:'preview (acting as '+name+')', sid:supById[name],
-              ep:{ lineCost:'/api/supply/portal-line-cost', lineRemove:'/api/supply/portal-line-remove', crossdockQty:'/api/supply/crossdock-qty', addlCost:'/api/supply/additional-cost', addlCostRemove:'/api/supply/additional-cost-remove', note:'/api/supply/portal-note', notesBase:'/api/supply/portal-notes/', noteReadBase:'/api/supply/note-read/', submit:'/api/supply/portal-submit', upload:'/api/supply/portal-upload', labelData:'/api/supply/label-data', parseInvoice:'/api/supply/portal-parse-invoice', invoiceApply:'/api/supply/portal-invoice-apply', docRemove:'/api/supply/portal-attachment-remove', attachmentBase:'/api/supply/portal-attachment/', shipmentEscalate:'/api/supply/shipment/', shipmentNotesBase:'/api/supply/shipment-notes?ref=', shipmentNote:'/api/supply/shipment-note', sampleAccept:'/api/supply/sample-accept', sampleUpdate:'/api/supply/sample-update', sampleNote:'/api/supply/sample-note', sampleNotesBase:'/api/supply/sample-notes?id=', sampleNoteReadBase:'/api/supply/sample-note-read/', sampleCharge:'/api/supply/sample-charge', sampleCreate:'/api/supply/sample-create', sampleAttachment:'/api/supply/sample-attachment', sampleAttachmentRemove:'/api/supply/sample-attachment-remove' },
+              ep:{ lineCost:'/api/supply/portal-line-cost', lineRemove:'/api/supply/portal-line-remove', crossdockQty:'/api/supply/crossdock-qty', addlCost:'/api/supply/additional-cost', addlCostRemove:'/api/supply/additional-cost-remove', note:'/api/supply/portal-note', notesBase:'/api/supply/portal-notes/', noteReadBase:'/api/supply/note-read/', submit:'/api/supply/portal-submit', upload:'/api/supply/portal-upload', labelData:'/api/supply/label-data', parseInvoice:'/api/supply/portal-parse-invoice', invoiceApply:'/api/supply/portal-invoice-apply', docRemove:'/api/supply/portal-attachment-remove', attachmentBase:'/api/supply/portal-attachment/', shipmentEscalate:'/api/supply/shipment/', shipmentNotesBase:'/api/supply/shipment-notes?ref=', shipmentNote:'/api/supply/shipment-note', sampleAccept:'/api/supply/sample-accept', sampleUpdate:'/api/supply/sample-update', sampleNote:'/api/supply/sample-note', sampleNoteAuthorKind:'supplier', sampleNoteAuthorEmail:'D&B', sampleNotesBase:'/api/supply/sample-notes?id=', sampleNoteReadBase:'/api/supply/sample-note-read/', sampleCharge:'/api/supply/sample-charge', sampleCreate:'/api/supply/sample-create', sampleAttachment:'/api/supply/sample-attachment', sampleAttachmentRemove:'/api/supply/sample-attachment-remove' },
               bc:{ sheets:bcDownloadSheets, crossdock:bcDownloadCrossdock, placeholder:false },
               getData:function(){ return loadPortalData(name); },
               onChange:function(){ invalidateDerived(); }   // a portal write (e.g. creating a shipment) must refresh the admin grids
@@ -2592,7 +2592,7 @@
         var badge=stt==='paid'?'<span class="tool-badge bg-green">Paid</span>':stt==='overdue'?'<span class="tool-badge bg-red">Overdue</span>':'<span class="tool-badge bg-amber">Unpaid</span>';
         var cells = locked
           ? '<td class="l">'+txt(d.reference)+'</td><td class="l">'+txt(d.supplier_name)+'</td><td class="l">'+txt(d.description)+'</td><td>'+txt(d.amount)+'</td><td class="l">'+txt(d.date_due,true)+'</td><td class="l">'+txt(d.date_paid,true)+'</td>'
-          : '<td class="l">'+editCell(ep,'reference',d.reference,'txt')+'</td><td class="l">'+supSel(ep,d.supplier_name)+'</td><td class="l">'+editCell(ep,'description',d.description,'txt')+'</td><td>'+editCell(ep,'amount',d.amount)+'</td><td class="l">'+editCell(ep,'date_due',d.date_due,'date')+'</td><td class="l">'+editCell(ep,'date_paid',d.date_paid,'date')+'</td>';
+          : '<td class="l">'+editCell(ep,'reference',d.reference,'txt')+'</td><td class="l">'+supSel(ep,d.supplier_name)+'</td><td class="l">'+editCell(ep,'description',d.description,'txt','style="width:100%;min-width:240px;box-sizing:border-box"')+'</td><td>'+editCell(ep,'amount',d.amount,'','style="width:70px"')+'</td><td class="l">'+editCell(ep,'date_due',d.date_due,'date')+'</td><td class="l">'+editCell(ep,'date_paid',d.date_paid,'date')+'</td>';
         var act = paid ? (editing?'<button class="lnk-btn oth-save" data-id="'+d.id+'">✓ save</button>':'<button class="lnk-btn oth-edit" data-id="'+d.id+'">edit</button>') : '';
         // paid items can't be deleted (a payment date locks deletion) — only unpaid rows get the delete link
         if(!paid) act += ' <button class="lnk-btn oth-del" data-id="'+d.id+'" data-ref="'+esc(d.reference||d.description||('#'+d.id))+'" title="delete this payment" style="color:#dc2626">delete</button>';
@@ -2636,9 +2636,10 @@
   function buildPaymentsDue(b, pos, deps){
     var today=new Date().toISOString().slice(0,10);
     var rows=[];
-    (pos||[]).forEach(function(p){ if(p.progress==='complete')return; var ep='/api/supply/po/'+encodeURIComponent(p.po);
-      if(Number(p.completion_calc)>0.009) rows.push({sup:p.supplier_name||'',type:'Completion',ref:p.po,due_amt:Number(p.completion_calc),due:p.completion_due||'',ep:ep,amt_field:'pay_completion_assigned',amt_val:p.completion_assigned,dt_field:'pay_completion_date',dt_val:p.completion_date,po:true});
-      if(Number(p.balance_owing)>0.009) rows.push({sup:p.supplier_name||'',type:'Balance',ref:p.po,due_amt:Number(p.balance_owing),due:p.balance_due||'',ep:ep,amt_field:'pay_balance_1_amount',amt_val:p.balance_1_amount,dt_field:'pay_balance_1_date',dt_val:p.balance_1_date,po:true}); });
+    // PO payments only surface once the FINAL INVOICE AMOUNT is confirmed (is_final) AND the milestone has a due date.
+    (pos||[]).forEach(function(p){ if(p.progress==='complete')return; if(!p.is_final)return; var ep='/api/supply/po/'+encodeURIComponent(p.po);
+      if(Number(p.completion_calc)>0.009 && p.completion_due) rows.push({sup:p.supplier_name||'',type:'Completion',ref:p.po,due_amt:Number(p.completion_calc),due:p.completion_due,ep:ep,amt_field:'pay_completion_assigned',amt_val:p.completion_assigned,dt_field:'pay_completion_date',dt_val:p.completion_date,po:true});
+      if(Number(p.balance_owing)>0.009 && p.balance_due) rows.push({sup:p.supplier_name||'',type:'Balance',ref:p.po,due_amt:Number(p.balance_owing),due:p.balance_due,ep:ep,amt_field:'pay_balance_1_amount',amt_val:p.balance_1_amount,dt_field:'pay_balance_1_date',dt_val:p.balance_1_date,po:true}); });
     (deps||[]).forEach(function(d){ if(d.status==='closed')return;
       if(!(Number(d.amount)>0.009) && !d.date_paid && !d.date_due) return;   // skip empty stubs
       rows.push({sup:d.supplier_name||'',type:d.is_deposit?'Deposit':'Other',ref:d.reference||d.description||('#'+d.id),due_amt:Number(d.amount)||0,due:d.date_due||'',ep:'/api/supply/deposit/'+encodeURIComponent(d.id),amt_field:'amount',amt_val:d.amount,dt_field:'date_paid',dt_val:d.date_paid,po:false}); });
@@ -3477,6 +3478,8 @@
       var od=r.overdue?' <span title="overdue / supplier expected later than required" style="color:#dc2626;font-weight:700">⚠</span>':'';
       var tr=r.tracking_code?(esc(r.tracking_code)+(r.carrier?' <span class="mut tiny">'+esc(r.carrier)+'</span>':'')):'<span class="mut">—</span>';
       var ch=r.pending_charges>0?'<span class="ex-badge" title="'+r.pending_charges+' charge(s) to review">'+r.pending_charges+'</span>':'';
+      var acc=Number(r.accepted_charge)>0?'<span style="color:#166534;font-weight:600">'+money(r.accepted_charge)+' accepted</span>':'';
+      var chCell=[ch,acc].filter(Boolean).join(' ')||'<span class="mut">—</span>';
       var un=r.unread_notes>0?' <span class="ex-badge" style="background:#f59e0b" title="'+r.unread_notes+' new supplier note(s) on the timeline">'+r.unread_notes+'</span>':'';
       var reqDate=r.completion_required?('<span'+(r.overdue?' style="color:#dc2626;font-weight:700"':'')+'>'+fd(r.completion_required)+'</span>'):'<span class="mut">—</span>';
       return '<tr><td class="l"><button class="planbtn samp-exp" data-id="'+r.id+'" data-i="'+i+'">View</button>'+un+'</td>'
@@ -3488,7 +3491,7 @@
         +'<td class="l">'+reqDate+od+'</td>'
         +'<td class="l">'+(r.supplier_expected?fd(r.supplier_expected):'<span class="mut">—</span>')+'</td>'
         +'<td class="l"><b>'+(r.units||0)+'</b> <span class="mut tiny">· '+(r.line_count||0)+' SKU'+((r.line_count||0)===1?'':'s')+'</span></td>'
-        +'<td class="l">'+tr+'</td><td class="l">'+ch+'</td></tr>'
+        +'<td class="l">'+tr+'</td><td class="l">'+chCell+'</td></tr>'
         +'<tr class="exp-row" id="sampexp-'+i+'" style="display:none"><td colspan="11"><div id="sampdet-'+i+'" class="count">Loading…</div></td></tr>'; }
     function reload(){ delete cache['samples']; fetch('/api/supply/samples').then(function(r){return r.json();}).then(function(d){ rows=Array.isArray(d)?d:[]; cache['samples']=rows; view(); }); }
     _sampleReload=reload;
@@ -3646,19 +3649,20 @@
           box.querySelector('.samp-addline').onclick=function(){ slines.push({sku:'',qty:''}); renderSlines(); };
           box.querySelector('.samp-saveskus').onclick=function(){ var btn=this; btn.disabled=true; shipPost('/api/supply/sample/'+id+'/lines',{lines:slines.filter(function(l){return l.sku&&String(l.sku).trim();}).map(function(l){return {sku:String(l.sku).trim(),qty:Number(l.qty)||0};})},function(){ d.lines=slines.map(function(l){return {sku:String(l.sku).trim(),qty:Number(l.qty)||0};}); btn.textContent='Saved ✓'; btn.disabled=false; }); };
         }
-        loadSampleTimeline(s.ref, id, 'internal');
+        loadSampleTimeline(s.ref, id, 'internal', s.supplier_name);
       }
       paint();
     }).catch(function(e){ box.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>'; }); }
-  function loadSampleTimeline(ref, sampleId, authorKind){ var box=document.querySelector('.sp-timeline[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(!box)return;
+  function loadSampleTimeline(ref, sampleId, authorKind, supName){ var box=document.querySelector('.sp-timeline[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(!box)return;
     var admin=(authorKind||'internal')==='internal';
     fetch('/api/supply/sample-notes?id='+sampleId).then(function(r){return r.json();}).then(function(notes){
-      var list=(notes&&notes.length)?notes.map(function(n){ var sup=(n.author_kind==='supplier'), nu=sup&&!n.read;
-        var ctrl=(admin&&sup)?(n.read?'<a class="ssp-read" data-id="'+n.id+'" data-read="1" style="font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline">mark unread</a>':'<button class="save-btn light ssp-read" data-id="'+n.id+'" data-read="0">Mark read</button>'):'';
-        return '<div style="font-size:13px;line-height:1.5;text-align:left;margin:4px 0;display:flex;gap:10px;align-items:flex-start'+(nu?';background:#fff7ed;border:1px solid #fdba74;border-radius:6px;padding:6px 9px':'')+'">'+(ctrl?'<div style="flex:0 0 auto;min-width:70px">'+ctrl+'</div>':'')+'<div><span class="mut" style="font-size:11px">'+esc(n.created_at)+' · '+(sup?'Supplier':'D&amp;B')+'</span>'+(nu?' <span class="ex-badge">new</span>':'')+'<br>'+esc(n.body)+'</div></div>'; }).join(''):'<div class="mut" style="font-size:12px">No timeline entries yet.</div>';
+      var list=(notes&&notes.length)?notes.map(function(n){ var supSide=(n.author_kind==='supplier'); var onBehalf=(supSide&&n.author_email==='D&B'); var nu=supSide&&!n.read;
+        var who=onBehalf?('D&amp;B as '+esc(supName||'supplier')):(supSide?'Supplier':'D&amp;B');
+        var ctrl=(admin&&supSide)?(n.read?'<a class="ssp-read" data-id="'+n.id+'" data-read="1" style="font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline">mark unread</a>':'<button class="save-btn light ssp-read" data-id="'+n.id+'" data-read="0">Mark read</button>'):'';
+        return '<div style="font-size:13px;line-height:1.5;text-align:left;margin:4px 0;display:flex;gap:10px;align-items:flex-start'+(nu?';background:#fff7ed;border:1px solid #fdba74;border-radius:6px;padding:6px 9px':'')+'">'+(ctrl?'<div style="flex:0 0 auto;min-width:70px">'+ctrl+'</div>':'')+'<div><span class="mut" style="font-size:11px">'+esc(n.created_at)+' · '+who+'</span>'+(nu?' <span class="ex-badge">new</span>':'')+'<br>'+esc(n.body)+'</div></div>'; }).join(''):'<div class="mut" style="font-size:12px">No timeline entries yet.</div>';
       box.innerHTML='<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:8px"><textarea class="fci ssp-in" rows="2" placeholder="Add a note…" style="flex:1;max-width:520px;text-align:left"></textarea><button class="save-btn ssp-post">Post</button></div>'+list;
-      box.querySelector('.ssp-post').onclick=function(){ var inp=box.querySelector('.ssp-in'); var v=(inp.value||'').trim(); if(!v)return; shipPost('/api/supply/sample-note',{sample_id:sampleId,author_kind:authorKind||'internal',body:v},function(){ loadSampleTimeline(ref,sampleId,authorKind); }); };
-      box.querySelectorAll('.ssp-read').forEach(function(b){ b.onclick=function(){ shipPost('/api/supply/sample-note-read/'+b.dataset.id,{read:b.dataset.read==='0'},function(){ loadSampleTimeline(ref,sampleId,authorKind); }); }; });
+      box.querySelector('.ssp-post').onclick=function(){ var inp=box.querySelector('.ssp-in'); var v=(inp.value||'').trim(); if(!v)return; shipPost('/api/supply/sample-note',{sample_id:sampleId,author_kind:authorKind||'internal',body:v},function(){ loadSampleTimeline(ref,sampleId,authorKind,supName); }); };
+      box.querySelectorAll('.ssp-read').forEach(function(b){ b.onclick=function(){ shipPost('/api/supply/sample-note-read/'+b.dataset.id,{read:b.dataset.read==='0'},function(){ loadSampleTimeline(ref,sampleId,authorKind,supName); }); }; });
     }).catch(function(){}); }
 
   function selectSection(key){

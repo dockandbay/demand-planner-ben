@@ -64,7 +64,12 @@ plus new numbered migrations on top. See `migrations/README.md`.
     the Airtable source too or the P-prefixed POs return on the next sync.** Idempotent.
   - **`082_po_shipment_starred.sql`** — adds `starred boolean NOT NULL DEFAULT false` to `purchase_orders`
     and `shipments` (⭐ Focus / favourite toggle on both grids). The PO/shipments read queries now select
-    `starred`, so **apply this before deploying v20.401 or the grids will error**. Idempotent. ⬅ *latest.*
+    `starred`, so **apply this before deploying v20.401 or the grids will error**. Idempotent.
+  - **`084_samples.sql`** — the **Samples** feature: `planner.sample_requests`, `sample_request_lines`,
+    `sample_notes` (timeline, with `read_at` for bidirectional read/unread), and `supplier_charges`
+    (sample/shipment charges → Other Payment on accept). Required for SUPPLY▸Samples + the portal Samples tab.
+  - **`085_sample_change_requested.sql`** — adds `sample_requests.change_requested boolean NOT NULL DEFAULT false`
+    (the "change requested after accept" re-accept workflow). Idempotent. ⬅ *latest.*
 
   **Invoice-upload feature (supplier portal) — live `/api/portal/*` to add (preview wired to `/api/supply/*`):**
   - `/api/portal/parse-invoice` + `/api/portal/invoice-apply` (parse a supplier `.xlsx` invoice → preview vs the
@@ -94,7 +99,17 @@ plus new numbered migrations on top. See `migrations/README.md`.
   - The shipment payload for the **Shipment Plan** tab needs **`master_supplier`** (filters to the logged-in supplier)
     and **`carrier_ref`** (tracking shown on the card).
 
-- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`083` in order (**skip 081 — superseded by 083**). Do **not** run
+  **Samples feature (SUPPLY▸Samples + portal Samples tab) — live `/api/portal/*` to add (preview wired to `/api/supply/*`):**
+  - Portal: `sample-accept`, `sample-update`, `sample-note`, `sample-notes/:id`, `sample-note-read/:id`,
+    `sample-charge`, `sample-create`, `sample-attachment`, `sample-attachment-remove`. Bootstrap must return a
+    `samples` array per supplier (lines, charges, attachments, `unread_dnb`, `is_open`, `status_calc`).
+  - Charges accept (`/api/supply/charge/:id/accept`) posts an **Other Payment** (`planner.deposits`, `is_deposit=false`)
+    with `reference` = sample/shipment ref and `date_due` = today.
+  - Attachments reuse `planner.portal_attachments` (`category='sample'`, `po` = sample ref) — no new table.
+  - On-behalf notes (D&B posting as the supplier in the preview pane) are stored `author_kind='supplier'`,
+    `author_email='D&B'` and labelled "D&B as <supplier>"; they still notify the supply/samples page.
+
+- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`085` in order (**skip 081 — superseded by 083**). Do **not** run
   `schema.sql` against an already-migrated DB (the table creates aren't idempotent).
 
 ---

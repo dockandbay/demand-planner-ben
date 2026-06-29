@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.52';
+const APP_VERSION = 'v25.56';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -919,10 +919,13 @@ app.get('/api/supply/:section', async (req, res) => {
           (SELECT count(*) FROM planner.sample_request_lines l WHERE l.sample_id=s.id)::int line_count,
           (SELECT coalesce(sum(l.qty),0) FROM planner.sample_request_lines l WHERE l.sample_id=s.id)::int units,
           (SELECT count(*) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending')::int pending_charges,
+          (SELECT coalesce(sum(c.freight_cost+c.product_cost),0) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='accepted') accepted_charge,
           (SELECT count(*) FROM planner.sample_notes n WHERE n.sample_id=s.id AND n.author_kind='supplier' AND n.read_at IS NULL)::int unread_notes,
           coalesce(s.change_requested,false) change_requested,
-          (s.status NOT IN ('cancelled','complete') AND (coalesce(s.tracking_code,'')='' OR coalesce(s.change_requested,false) OR EXISTS
-             (SELECT 1 FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending'))) is_open,
+          (s.status NOT IN ('cancelled','complete') AND (coalesce(s.tracking_code,'')='' OR coalesce(s.change_requested,false)
+             OR EXISTS (SELECT 1 FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending')
+             OR EXISTS (SELECT 1 FROM planner.sample_notes n WHERE n.sample_id=s.id AND n.author_kind='supplier' AND n.read_at IS NULL)
+             OR EXISTS (SELECT 1 FROM planner.sample_notes n2 WHERE n2.sample_id=s.id AND n2.body LIKE 'Order shipped%' AND n2.created_at >= now() - interval '30 days'))) is_open,
           (s.completion_date_required IS NOT NULL AND s.status NOT IN ('cancelled','complete')
              AND (current_date > s.completion_date_required
                   OR (s.supplier_expected_completion IS NOT NULL AND s.supplier_expected_completion > s.completion_date_required))) overdue,
@@ -4311,6 +4314,17 @@ const SAMPLE_FIELDS = { supplier_id:'bigint', supplier_name:'text', recipient_co
   last_name:'text', address_line1:'text', address_line2:'text', city:'text', region:'text', postcode:'text',
   country:'text', phone:'text', completion_date_required:'date', purpose:'text[]', notes:'text', status:'text',
   supplier_expected_completion:'date', tracking_code:'text', carrier:'text' };
+// When tracking is newly set on a sample, drop a timeline note announcing the shipment (an unread
+// notification for the other side). Posted as the supplier (the shipment event).
+async function maybeShippedNote(sampleId, body, authorKind, email){
+  if(!body || body.tracking_code===undefined) return;
+  const trk = String(body.tracking_code||'').trim(); if(!trk) return;
+  const cur = (await pool.query(`SELECT coalesce(tracking_code,'') tc FROM planner.sample_requests WHERE id=$1::bigint`, [sampleId])).rows[0];
+  if(cur && cur.tc===trk) return;   // unchanged → no note
+  const car = String(body.carrier||'').trim();
+  try { await pool.query(`INSERT INTO planner.sample_notes (sample_id, author_kind, author_email, body) VALUES ($1::bigint,$2,$3,$4)`,
+    [sampleId, authorKind||'supplier', email||null, 'Order shipped — tracking '+trk+(car?' ('+car+')':'')]); } catch(e){}
+}
 app.post('/api/supply/sample-create', async (req, res) => {
   const b = req.body || {};
   const client = await pool.connect();
@@ -4373,6 +4387,7 @@ app.post('/api/supply/sample-accept', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/supply/sample-update', async (req, res) => {
   const b = req.body || {}; if(!b.id) return res.status(400).json({ error: 'id required' });
+  await maybeShippedNote(b.id, b, 'supplier', 'D&B');   // preview/admin acting as supplier → "D&B as <supplier>"
   patch(res, 'planner.sample_requests', 'id', b.id, { supplier_expected_completion:'date', tracking_code:'text', carrier:'text' }, b, 'bigint'); });
 app.post('/api/supply/sample-charge', async (req, res) => {
   const b = req.body || {}; if(!b.id) return res.status(400).json({ error: 'id required' });
@@ -4425,8 +4440,8 @@ app.post('/api/supply/charge/:id/accept', async (req, res) => {   // accept → 
       label = `Shipment ${c.source_ref}${pos?` (POs: ${pos})`:''}`;
     } else label = `Sample ${c.source_ref}`;
     const desc = `${label} — freight $${fr} + product $${pr}${c.description?` · ${c.description}`:''}`;
-    const op = await client.query(`INSERT INTO planner.deposits (is_deposit, supplier_name, amount, description)
-      VALUES (false, $1, $2, $3) RETURNING id`, [c.supplier_name||null, amount, desc]);
+    const op = await client.query(`INSERT INTO planner.deposits (is_deposit, supplier_name, amount, description, reference, date_due)
+      VALUES (false, $1, $2, $3, $4, current_date) RETURNING id`, [c.supplier_name||null, amount, desc, c.source_ref]);
     await client.query(`UPDATE planner.supplier_charges SET status='accepted', accepted_at=now(), other_payment_id=$1 WHERE id=$2::bigint`, [op.rows[0].id, req.params.id]);
     await client.query('COMMIT');
     res.json({ ok:true, other_payment_id: op.rows[0].id, amount });
@@ -5265,8 +5280,19 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
         to_char(s.completion_date_required,'YYYY-MM-DD') completion_required, coalesce(s.purpose,'{}') purpose, coalesce(s.notes,'') notes,
         s.status, (s.accepted_at IS NOT NULL) accepted, coalesce(s.change_requested,false) change_requested, to_char(s.supplier_expected_completion,'YYYY-MM-DD') supplier_expected,
         coalesce(s.tracking_code,'') tracking_code, coalesce(s.carrier,'') carrier,
-        (s.status NOT IN ('cancelled','complete') AND (coalesce(s.tracking_code,'')='' OR coalesce(s.change_requested,false) OR EXISTS
-           (SELECT 1 FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending'))) is_open,
+        (s.status NOT IN ('cancelled','complete') AND (coalesce(s.tracking_code,'')='' OR coalesce(s.change_requested,false)
+           OR EXISTS (SELECT 1 FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending')
+           OR EXISTS (SELECT 1 FROM planner.sample_notes n WHERE n.sample_id=s.id AND n.author_kind='internal' AND n.read_at IS NULL)
+           OR EXISTS (SELECT 1 FROM planner.sample_notes n2 WHERE n2.sample_id=s.id AND n2.body LIKE 'Order shipped%' AND n2.created_at >= now() - interval '30 days'))) is_open,
+        CASE
+          WHEN s.status='cancelled' THEN 'Cancelled'
+          WHEN s.status='complete' THEN 'Complete'
+          WHEN coalesce(s.change_requested,false) THEN 'Change requested'
+          WHEN (SELECT count(*) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending')>0 THEN 'Charge to review'
+          WHEN coalesce(s.tracking_code,'')<>'' THEN 'Shipped'
+          WHEN s.accepted_at IS NOT NULL THEN 'In production'
+          ELSE 'Awaiting supplier'
+        END status_calc,
         coalesce((SELECT json_agg(json_build_object('sku',l.sku,'qty',l.qty) ORDER BY l.id) FROM planner.sample_request_lines l WHERE l.sample_id=s.id),'[]') lines,
         coalesce((SELECT json_agg(json_build_object('id',c.id,'freight_cost',c.freight_cost,'product_cost',c.product_cost,'status',c.status,'description',coalesce(c.description,'')) ORDER BY c.created_at) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref),'[]') charges,
         (SELECT count(*) FROM planner.sample_notes n WHERE n.sample_id=s.id AND n.author_kind='internal' AND n.read_at IS NULL)::int unread_dnb,
@@ -5324,6 +5350,7 @@ app.post('/api/portal/sample-accept', portalAuth, async (req, res) => {
 app.post('/api/portal/sample-update', portalAuth, async (req, res) => {   // supplier: expected completion / tracking / carrier
   const b = req.body || {};
   try { const s = await portalOwnsSample(req, b.id); if(!s) return res.status(403).json({ error: 'not your sample' });
+    await maybeShippedNote(s.id, b, 'supplier', req.portal.email);
     patch(res, 'planner.sample_requests', 'id', s.id, { supplier_expected_completion:'date', tracking_code:'text', carrier:'text' }, b, 'bigint'); }
   catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample-note', portalAuth, async (req, res) => {

@@ -377,6 +377,49 @@ on a sample, shown in the expanded view. Reuses `planner.portal_attachments` (ke
 extended portal attachment-view to allow sample refs; admin `/api/supply/sample-attachment(-remove)` (and the
 admin detail also uses the existing `portal-upload`). Attachments listed in the bootstrap + sample-detail.
 
+## v25.53 - Samples & Other Payments polish
+
+- **Other Payments grid:** description input widened (2×) and the Amount input narrowed, so descriptions are
+  readable without crowding the figure.
+- **Charge → Other Payment** (samples & shipments): the posted Other Payment now uses the **sample/shipment
+  reference** (e.g. `SR-8`) as its Reference and a **due date of today**.
+- **Sample shipped with tracking:** when a sample is saved with a tracking code (supplier portal or supply view),
+  an unread timeline note "Order shipped — tracking …" is auto-added, so the other side gets a mark-as-read
+  notification.
+- **Open filter** (admin samples + portal): now also includes any sample with an **unread note**, so items
+  needing attention stay in the default Open view.
+- **Samples grid Charges column:** shows accepted charges as e.g. **`550.00 accepted`** alongside the
+  pending-review badge (was blank).
+- **Portal sample attachments:** the upload row is now left-aligned.
+
+## v25.54 - Samples: on-behalf attribution, status parity, recently-shipped stays open
+
+- **Timeline attribution "D&B as <supplier>":** when D&B posts on the supplier's timeline while acting *as* the
+  supplier (the "Preview as supplier" pane, or the auto "Order shipped" note triggered from supply view), the
+  entry is now labelled **"D&B as Ballast"** (example) instead of plain "Dock & Bay" / "Supplier". These on-behalf
+  notes no longer count as unread supplier notes for D&B (no false action badge).
+- **Status parity:** the sample status shown in the supplier portal is now the **same calculated status** as
+  SUPPLY▸Samples (Awaiting supplier / In production / Shipped / Charge to review / Change requested / Complete /
+  Cancelled), using the identical colour chips. The portal bootstrap now returns `status_calc`.
+- **OPEN filter keeps recently-shipped samples:** a sample that has shipped stays in the **Open** view for
+  **30 days** after dispatch (keyed off the "Order shipped" timeline note), in both SUPPLY▸Samples and the portal,
+  rather than dropping out of Open the moment tracking is added.
+
+## v25.55 - Other Payments description fills column; Payments Due gated on confirmed invoice
+
+- **Other Payments:** the Description input now fills the full column width (was a fixed 240px narrower than the
+  column).
+- **Payments Due report:** PO completion/balance payments now appear **only once the PO's final invoice amount
+  is confirmed** (`supplier_invoice_total` set) **and** the milestone has a due date — so the report shows real,
+  payable amounts rather than estimates. Deposits due and Other Payments due continue to show, grouped by supplier.
+
+## v25.56 - On-behalf sample notes now notify the supply/samples page
+
+- Fix: a note left from the **Preview as supplier** pane (labelled "D&B as &lt;supplier&gt;") was not raising an
+  unread notification on SUPPLY▸Samples. On-behalf notes are supplier-side entries, so they now count toward the
+  sample's unread badge and the SAMPLES(n) nav count — and the supply timeline shows a **Mark read** control for
+  them so the notification can be cleared. (Reverts the v25.54 exclusion that suppressed them.)
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
