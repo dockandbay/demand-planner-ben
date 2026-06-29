@@ -18,6 +18,15 @@ After a product's discontinue date the buy plan now: (a) **removes the standalon
 (c) **keeps showing the real demand forecast + stock-on-hand run-down** in the month cells (display pass uses
 real demand even past disc, while buys stay suppressed) so you can see the tail run down.
 
+## v25.11 - Buy plan: real Buy-FBA calc (direct-to-FBA), reduces Buy-3PL
+
+The **Buy FBA** column was always 0 (`fdQ` hardcoded). Now there's a real, **independent** Buy-FBA calc: a
+standalone FBA cover projection (FBA on-hand + FBA inbound vs FBA demand) that, when future FBA demand isn't
+covered, recommends buying **direct to FBA** to hold the FBA cover target (tf weeks), placed at the China lead,
+carton/MOQ-rounded, never past the discontinue. Those direct-to-FBA arrivals feed FBA inbound (`assumedArrF`),
+so the 3PL pass sees FBA already covered and **transfers/buys less → Buy-3PL drops** wherever it was previously
+topping FBA up. (Near-term FBA gaps the direct lead can't reach still fall to the 3PL→FBA transfer as before.)
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
