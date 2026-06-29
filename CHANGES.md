@@ -309,6 +309,13 @@ Design pass on the admin Samples surface:
 - **Detail panel** inputs now carry **persistent micro-labels** (so a filled "London" still shows it's *City*,
   etc.) across recipient/address and tracking/carrier.
 
+## v25.44 - Samples detail: read-only by default with Edit/Done toggle
+
+The SUPPLY ▸ Samples detail panel now opens **read-only** (clean display of recipient/address, SKUs as
+"qty × SKU", purpose, notes, fulfilment). An **Edit** button (next to Delete) switches to edit mode where
+recipient/address, SKUs, notes, tracking/carrier, status **and Purpose** (checkboxes) are all editable;
+**Done** returns to read-only. Field label **"Completion req." → "Requested Completion Date"**.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
