@@ -106,6 +106,17 @@ payments form was widened to give it room. In the Qty and Price columns an **unc
 **`600 ✓`** (green tick) instead of `600 → 600`; only genuinely **changed** values show the `cur → new`
 arrow, and new SKUs show just the invoice value.
 
+## v25.19 - PO Payments: deposit-cap message fix, auto-date the start deposit, invoice populates final amount
+
+Three fixes:
+1. **Special characters in the deposit-cap alert** — the `&rsquo;` HTML entity showed literally in the popup;
+   replaced with a real apostrophe.
+2. **Start deposit auto-dates.** Entering a starting-deposit amount now auto-stamps **today's date** in the
+   Date paid field (only when it's empty), saved in the same write.
+3. **Parse populates Final invoice amount.** Applying a parsed invoice now also sets the PO's **Final invoice
+   amount** to the parsed invoice total. When nothing else changed, a **"Set Final invoice amount"** button
+   appears so the total can still be captured.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

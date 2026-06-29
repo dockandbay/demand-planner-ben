@@ -1289,8 +1289,12 @@
     document.querySelectorAll('#podet-'+i+' .payin').forEach(function(inp){ inp.onchange=function(){
     // Starting deposit can't exceed what the deposit ref still holds — clamp + roll the rest into completion.
     if(inp.dataset.field==='pay_start_deposit_assigned' && inp.dataset.avail!=null){ var av=Number(inp.dataset.avail), v=Number(String(inp.value).replace(/,/g,''));
-      if(isFinite(av)&&isFinite(v)&&v>av+0.005){ inp.value=av.toFixed(2); alert('Starting deposit capped at the deposit ref&rsquo;s availability ('+money(av)+'). The remainder rolls into the completion deposit.'); } }
+      if(isFinite(av)&&isFinite(v)&&v>av+0.005){ inp.value=av.toFixed(2); alert('Starting deposit capped at the deposit ref’s availability ('+money(av)+'). The remainder rolls into the completion deposit.'); } }
     var body={}; body[inp.dataset.field]=String(inp.value).replace(/,/g,'').trim(); inp.classList.add('saved');   // accept pasted "1,350.91"
+    // When a starting deposit amount is entered, auto-stamp today's date (only if no date set yet).
+    if(inp.dataset.field==='pay_start_deposit_assigned'){ var _a=Number(String(inp.value).replace(/,/g,''));
+      var _d=document.querySelector('#podet-'+i+' .payin[data-field="pay_start_deposit_date"]');
+      if(_a>0 && _d && !_d.value){ body['pay_start_deposit_date']=new Date().toISOString().slice(0,10); } }
     fetch(inp.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
       .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); })
       .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; });
@@ -1364,17 +1368,21 @@
             return '<tr><td class="l">'+esc(l.sku)+'</td><td class="l">'+(l.status==='new'?'<span class="tool-badge bg-amber" style="font-size:9px">NEW</span>':'<span class="mut tiny">changed</span>')+'</td>'
               +'<td style="text-align:right;white-space:nowrap">'+q+'</td>'
               +'<td style="text-align:right;white-space:nowrap">'+p+'</td></tr>'; }).join('');
-          out.innerHTML='<div class="tiny" style="margin-bottom:4px">'+(j.po_detected?'<b>'+esc(j.po_detected)+'</b> · ':'')+t.count+' lines · '+money(t.value)+' — <b>'+t.changed+'</b> changed, <b>'+t.neu+'</b> new, '+(t.matched-t.changed)+' already match.</div>'
+          out.innerHTML='<div class="tiny" style="margin-bottom:4px">'+(j.po_detected?'<b>'+esc(j.po_detected)+'</b> · ':'')+t.count+' lines · invoice total <b>'+money(t.value)+'</b> — <b>'+t.changed+'</b> changed, <b>'+t.neu+'</b> new, '+(t.matched-t.changed)+' already match.</div>'
             +(diff.length?'<div class="tw" style="max-height:240px;overflow:auto"><table style="font-size:11px;width:100%"><thead><tr><th class="l" style="width:50%">SKU</th><th class="l">Status</th><th style="text-align:right">Qty</th><th style="text-align:right">Price</th></tr></thead><tbody>'+drows+'</tbody></table></div>'
-              +'<button class="save-btn inv-parse-apply" style="margin-top:6px">Apply '+(t.changed+t.neu)+' change(s) → Order Plan (to confirm)</button>'
-              :'<span class="mut tiny">Everything matches the order plan — nothing to change.</span>');
+              +'<button class="save-btn inv-parse-apply" style="margin-top:6px">Apply '+(t.changed+t.neu)+' change(s) + set invoice total → Order Plan (to confirm)</button>'
+              :'<div class="mut tiny" style="margin-top:4px">Everything matches the order plan — nothing to change. <button class="save-btn inv-set-final" style="margin-left:6px">Set Final invoice amount '+money(t.value)+'</button></div>');
+          // write the parsed invoice total into the PO's Final invoice amount
+          function setFinalInvoice(cb){ fetch('/api/supply/po/'+encodeURIComponent(po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({supplier_invoice_total:String(t.value)})}).then(function(r){return r.json();}).then(function(x){ if(x&&x.error)throw new Error(x.error); cb&&cb(); }).catch(function(e){ alert('Could not set the final invoice amount: '+(e.message||e)); }); }
           var ab=out.querySelector('.inv-parse-apply'); if(ab)ab.onclick=function(){ ab.disabled=true; ab.textContent='Applying…';
             fetch('/api/supply/portal-invoice-apply',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,data_base64:b64,submitted_by:'PO PLAN'})}).then(function(r){return r.json();}).then(function(rr){
               if(!rr||rr.error){ alert('Apply failed: '+((rr&&rr.error)||'')); ab.disabled=false; ab.textContent='Apply'; return; }
-              var rt=document.getElementById('podet-'+i), ot=rt&&rt.querySelector('.potab[data-pt="oplan"]'); if(ot)ot.click();   // land on ORDER PLAN, then refetch keeps that tab
-              invalidateDerived(); poRefetchPanel(po,i);
-              alert('Applied to the order plan: '+rr.applied+' line(s)'+(rr.added?' ('+rr.added+' new)':'')+'. Review & confirm the changes in the ORDER PLAN tab.'); })
-              .catch(function(e){ ab.disabled=false; ab.textContent='Apply'; alert('Apply failed: '+(e.message||e)); }); }; })
+              setFinalInvoice(function(){
+                var rt=document.getElementById('podet-'+i), ot=rt&&rt.querySelector('.potab[data-pt="oplan"]'); if(ot)ot.click();   // land on ORDER PLAN, then refetch keeps that tab
+                invalidateDerived(); poRefetchPanel(po,i);
+                alert('Applied to the order plan: '+rr.applied+' line(s)'+(rr.added?' ('+rr.added+' new)':'')+'. Final invoice amount set to '+money(t.value)+'. Review & confirm the changes in the ORDER PLAN tab.'); }); })
+              .catch(function(e){ ab.disabled=false; ab.textContent='Apply'; alert('Apply failed: '+(e.message||e)); }); };
+          var sb=out.querySelector('.inv-set-final'); if(sb)sb.onclick=function(){ sb.disabled=true; sb.textContent='Setting…'; setFinalInvoice(function(){ invalidateDerived(); poRefetchPanel(po,i); alert('Final invoice amount set to '+money(t.value)+'.'); }); }; })
           .catch(function(e){ btn.disabled=false; out.innerHTML='<span style="color:#b91c1c;font-size:11px">'+esc(e.message||'parse failed')+'</span>'; }); };
       rd.readAsDataURL(f); }; });
     // order plan — final cost price per line: live-recompute line + order totals, save on change
