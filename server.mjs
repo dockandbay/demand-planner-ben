@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.33';
+const APP_VERSION = 'v25.34';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1501,7 +1501,7 @@ app.get('/api/supply/:section', async (req, res) => {
                       WHERE p2.prod_no=po.prod_no AND coalesce(p2.supplier_name,'')=coalesce(po.supplier_name,'')),0)::int units,
             round(coalesce((SELECT sum(l.qty*l.cost_price) FROM planner.purchase_order_lines l
                       JOIN planner.purchase_orders p2 ON p2.po=l.po
-                      WHERE p2.prod_no=po.prod_no AND coalesce(p2.supplier_name,'')=coalesce(po.supplier_name,'')),0)) value
+                      WHERE p2.prod_no=po.prod_no AND coalesce(p2.supplier_name,'')=coalesce(po.supplier_name,'')),0), 2) value
           FROM planner.purchase_orders po WHERE coalesce(po.prod_no,'') <> ''
           GROUP BY po.prod_no, po.supplier_name ORDER BY po.prod_no DESC, supplier`);
         return res.json(prods.map(p => ({ ...p, status: p.all_complete ? 'Completed' : 'Active',

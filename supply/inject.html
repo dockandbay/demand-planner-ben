@@ -66,6 +66,7 @@
 #supply-root thead th.l{text-align:left}
 #supply-root tbody td{padding:4px 8px;text-align:right;border-bottom:1px solid #f1f1f1;font-variant-numeric:tabular-nums;white-space:nowrap}
 #supply-root tbody td.l{text-align:left}
+#supply-root table.samp-tbl thead th,#supply-root table.samp-tbl tbody td{text-align:left}   /* Samples grid: left-align everything */
 #supply-root tbody tr:hover td{background:#fafaf8}
 #supply-root tr.exp-row>td{background:#f8fafc;text-align:left;white-space:normal}
 #supply-root .tool-badge,#scenario-root .tool-badge{font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;letter-spacing:.2px;display:inline-block}
@@ -3517,7 +3518,7 @@
       var bar='<div class="bar">'+FILT.map(function(x){return '<span class="pill'+(x[0]===st.f?' active':'')+'" data-f="'+x[0]+'">'+x[1]+'</span>';}).join('')
         +'<button class="save-btn" id="samp-new" style="margin-left:6px">+ New sample</button>'
         +'<input class="flt" id="samp-q" placeholder="Filter ref / supplier / recipient…" value="'+esc(st.q)+'"><span class="count">'+f.length+' / '+rows.length+'</span></div>';
-      var tbl='<div class="tw"><table><thead><tr><th class="l"></th><th class="l">Ref</th><th class="l">Status</th><th class="l">Supplier</th><th class="l">Recipient</th><th class="l">Ship to</th><th class="l">Required</th><th class="l">Supplier exp.</th><th>Units</th><th class="l">Tracking</th><th class="l">Charges</th></tr></thead><tbody>'
+      var tbl='<div class="tw"><table class="samp-tbl"><thead><tr><th></th><th>Ref</th><th>Status</th><th>Supplier</th><th>Recipient</th><th>Ship to</th><th>Required</th><th>Supplier exp.</th><th>Units</th><th>Tracking</th><th>Charges</th></tr></thead><tbody>'
         +(f.length?f.map(rowHTML).join(''):'<tr><td colspan="11" class="count">No '+st.f+' samples.</td></tr>')+'</tbody></table></div>';
       c.innerHTML=lookupDatalists()+'<div id="samp-form"></div>'+bar+tbl;
       c.querySelectorAll('.bar .pill').forEach(function(p){p.onclick=function(){st.f=p.dataset.f;view();};});

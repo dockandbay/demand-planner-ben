@@ -234,6 +234,13 @@ BARCODES is no longer a top-level SUPPLY menu — it's now a **sub-tab of PRODUC
 Deposits / Other Payments / Payments Due / Payments Report). Old `barcodes` routes redirect to the new
 sub-tab. `renderBarcodes` now renders into the productions body.
 
+## v25.34 - Productions value to 2dp; Samples grid left-aligned
+
+- **Productions grid value** was rounded to 0 dp server-side, so `money()` always showed `.00` (looked like
+  integers). Now `round(…, 2)` — real cents flow through.
+- **Samples grid** is now fully **left-aligned** (the supply tables default to right-align; only `.l` cells go
+  left). Added a `samp-tbl` rule. Left is the intended default for grids.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
