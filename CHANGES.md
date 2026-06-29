@@ -42,6 +42,23 @@ overrides: now the **demand / SOH / cover rows show real numbers** (run-down) wi
 (post-disc columns get a subtle tint), and **DISC shows only on the buy rows** (Buy 3PL / Urgent / FBA) via
 their own cell functions. This is what actually makes v25.10/25.12 visible.
 
+## v25.14 - Buy plan: Buy-FBA reworked (visibility slice of Buy-3PL) + transfers continue past discontinue
+
+Two fixes to the Buy-FBA model:
+
+1. **Buy FBA no longer over-buys.** The v25.11 *independent* direct-to-FBA pre-pass ignored existing 3PL stock,
+   so it recommended buying direct to FBA even when 3PL was sitting on 26 weeks of cover (e.g.
+   TOWLB-CAB-LG-LTPNK-R/UK wanted 480 in June). That pre-pass is **removed**. Buy FBA is now the **FBA top-up
+   slice of the 3PL buy made visible** — `nextFbaNeed` (the forward FBA cover, over *lead + cover weeks*, that
+   existing 3PL on-hand + inbound can't transfer-cover). When 3PL is overstocked, transfers cover FBA →
+   `nextFbaNeed = 0` → **Buy FBA shows 0**. It is **not** a separate buy and is **not** stripped out of Buy 3PL
+   (Buy 3PL stays whole — it still funds the top-up, which is transferred 3PL→FBA later).
+
+2. **FBA transfers continue after discontinue.** 3PL→FBA transfers used to stop at the discontinue date (the
+   transfer target zeroed post-disc demand), stranding sellable stock in 3PL. The **transfer** target now uses
+   **real** FBA demand so existing stock keeps moving into FBA to sell down; **new buying** still stops at disc
+   (the buy target stays post-disc-zeroed).
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

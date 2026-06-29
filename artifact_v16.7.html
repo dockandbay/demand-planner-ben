@@ -2114,34 +2114,11 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
   const lm=Math.round(l3/4.33);
   const firstPossibleArrival=MAY_OFFSET+lm;
 
-  // ── PASS 0: direct-to-FBA buys — an INDEPENDENT FBA cover projection. When future demand comes from FBA,
-  // buy stock shipped DIRECT to FBA to hold the FBA cover target (tf weeks). These arrivals feed assumedArrF,
-  // so the 3PL pass sees FBA already covered and transfers/buys less → creating the FBA PO reduces Buy 3PL
-  // downstream. Direct china→FBA uses the same China lead as 3PL; no buy past the (rounded) discontinue.
+  // Buy FBA is NOT an independent buy. It is the FBA top-up portion of the 3PL buy made VISIBLE — the future
+  // FBA cover that existing 3PL on-hand + inbound can't transfer-cover (nextFbaNeed), which the 3PL buy already
+  // funds (tg3 includes it) and which is then transferred 3PL→FBA. fbaBuyDisp is filled in PASS 1 at the 3PL
+  // buy's placement month; assumedArrF stays empty (no direct-to-FBA arrivals — we don't strip FBA out of 3PL).
   const assumedArrF={},fbaBuyDisp={};
-  if(hasFBA){
-    let sFb=md['if_']||0;
-    const fbaDemF=fi=>{ if(fi<0||fi>=PROJ.length)return 0; const k=PROJ[fi].key; if(discCutoff&&k>=discCutoff)return 0; return (dem.FBA&&dem.FBA[k])||0; };
-    PROJ.forEach(({key,isActual,isForecast},i)=>{
-      if(isActual)return;
-      if(isForecast){
-        const _mtd=md['mtd_'+_CUR_MON_LC]||{}; const{elapsed,remaining,total}=CUR_DAYS;
-        const _fF=(dem.FBA&&dem.FBA[key])||0;
-        const _rfba=Math.round((elapsed>0?(_mtd.FBA||0)/elapsed:_fF/total)*remaining);
-        const _riF=(ibF[key]||[]).filter(s=>s.eta&&s.eta.slice(8,10)>String(TODAY.getDate()).padStart(2,'0')).reduce((s,x)=>s+(x.qty||0),0);
-        sFb=Math.max(sFb+_riF-_rfba,0); return;
-      }
-      const afterDisc=discCutoff&&key>=discCutoff;
-      const fbaDem=afterDisc?0:(dem.FBA&&dem.FBA[key])||0;
-      const confF=(ibF[key]||[]).reduce((s,x)=>s+(x.qty||0),0);
-      const closeFb=Math.max(sFb+confF+(assumedArrF[i]||0)-fbaDem,0);
-      const tgFb=fwdDemand(tf,i,fbaDemF);
-      const gap=tgFb-closeFb;
-      let bfq=0;
-      if(!afterDisc&&gap>=cp){ const pi=i-lm; if(pi>=1){ bfq=Math.max(Math.ceil(gap/cp)*cp,moq); fbaBuyDisp[pi]=(fbaBuyDisp[pi]||0)+bfq; assumedArrF[i]=(assumedArrF[i]||0)+bfq; } }
-      sFb=closeFb+bfq;
-    });
-  }
 
   let s3=md.i3||0,sF=md['if_']||0;
 
@@ -2184,13 +2161,22 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
       if(discCutoff&&k>=discCutoff)return 0;
       return (dem.FBA&&dem.FBA[k])||0;
     };
+    // Transfers (3PL→FBA) move EXISTING stock and must continue past discontinue so the product sells down
+    // through FBA — the transfer target uses REAL FBA demand (not zeroed at the disc cutoff). New BUYING still
+    // stops at disc, so nextFbaNeed (which feeds the 3PL buy via tg3) keeps using the post-disc-zeroed demand.
+    const fbaDemFnReal=fi=>{
+      if(fi<0||fi>=PROJ.length)return 0;
+      const k=PROJ[fi].key;
+      return (dem.FBA&&dem.FBA[k])||0;
+    };
     const d3DemFn=fi=>{
       if(fi<0||fi>=PROJ.length)return 0;
       const k=PROJ[fi].key;
       if(discCutoff&&k>=discCutoff)return 0;
       return ((dem.DTC&&dem.DTC[k])||0)+((dem.B2B&&dem.B2B[k])||0);
     };
-    const tgF=hasFBA?fwdDemand(tf,i,fbaDemFn):0;
+    const tgF=hasFBA?fwdDemand(tf,i,fbaDemFnReal):0;     // transfer target — real demand, continues post-disc
+    const tgFbuy=hasFBA?fwdDemand(tf,i,fbaDemFn):0;        // buy target — post-disc-zeroed, no buying past disc
 
     // FBA transfer: trigger when FBA closing is below forward target,
     // BUT protect 3PL — simulate forward to ensure no 3PL stockout in next 3 months
@@ -2235,8 +2221,9 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     transferOut[i]=fTx||0; // units transferred 3PL->FBA initiated at month i
 
     const c3=Math.max(pAD-fTx,0),cF=fAD+(tA1[i]||0);
-    // 3PL target: forward-looking sum of DTC+B2B demand over t3 weeks + FBA top-up need
-    const nextFbaNeed=Math.max(tgF-cF,0);
+    // 3PL target: forward-looking sum of DTC+B2B demand over t3 weeks + FBA top-up need (buy-target, no
+    // buying past disc). nextFbaNeed stays IN tg3 — Buy FBA is shown as a slice of it, not stripped out.
+    const nextFbaNeed=Math.max(tgFbuy-cF,0);
     const tg3=fwdDemand(t3,i,d3DemFn)+nextFbaNeed;
 
     let bQ=0,bPi=-1;
@@ -2264,6 +2251,9 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
         buyFromLbl[i]=(buyFromLbl[i]?buyFromLbl[i]+', ':'')+`${PROJ[pi].lbl} order`;
         // carried forward in s3 (c3final=c3+bQ) so consecutive months don't re-buy the same gap
         assumedArr[i]=(assumedArr[i]||0)+bQ;
+        // Buy FBA visibility: the FBA top-up slice of this 3PL buy (transferred to FBA later). Surfaced for
+        // visibility only — it is NOT a separate buy and is NOT subtracted from Buy 3PL.
+        if(nextFbaNeed>0)fbaBuyDisp[pi]=(fbaBuyDisp[pi]||0)+Math.min(nextFbaNeed,bQ);
         bPi=pi;
       }
       // else: bQ stays 0 → no phantom stock carried forward → the Urgent pass sees the gap and sizes the rush.
@@ -2445,13 +2435,20 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
       if(discCutoff&&k>=discCutoff)return 0;
       return (dem.FBA&&dem.FBA[k])||0;
     };
+    // Transfers continue past discontinue (real demand); buying stops at disc (zeroed) — mirrors PASS 1.
+    const fbaDemFnReal=fi=>{
+      if(fi<0||fi>=PROJ.length)return 0;
+      const k=PROJ[fi].key;
+      return (dem.FBA&&dem.FBA[k])||0;
+    };
     const d3DemFn=fi=>{
       if(fi<0||fi>=PROJ.length)return 0;
       const k=PROJ[fi].key;
       if(discCutoff&&k>=discCutoff)return 0;
       return ((dem.DTC&&dem.DTC[k])||0)+((dem.B2B&&dem.B2B[k])||0);
     };
-    const tgF=hasFBA?fwdDemand(tf,i,fbaDemFn):0;
+    const tgF=hasFBA?fwdDemand(tf,i,fbaDemFnReal):0;     // transfer target — real demand, continues post-disc
+    const tgFbuy=hasFBA?fwdDemand(tf,i,fbaDemFn):0;        // buy target — post-disc-zeroed
 
     // FBA transfer: multi-month weighted protection (same logic as pass 1)
     let fTx=0;
@@ -2489,7 +2486,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
 
     const trfIn=tA2[i]||0;
     const c3=Math.max(pAD-fTx,0),cF=fAD+trfIn;
-    const nextFbaNeed=Math.max(tgF-cF,0);
+    const nextFbaNeed=Math.max(tgFbuy-cF,0);
     const tg3=fwdDemand(t3,i,d3DemFn)+nextFbaNeed;
     // Cover: forward-looking — count how many weeks of future demand SOH covers
     // cover-weeks (display): count REAL future demand including post-discontinue, so cover runs down
