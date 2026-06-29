@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.9 - Buy plan: near-term gaps go to Urgent, not Buy-3PL
+
+A Buy-3PL is now only placed when there's **full standard lead time** (ideal placement is a real current/future
+month). If the ideal placement is already in the past (the need is sooner than a standard-lead order could
+arrive), it's **no longer shown as an overdue Buy-3PL** — it falls through to the **Buy 3PL Urgent** column
+(rush/air), and no phantom stock is carried forward so the Urgent pass sizes the gap correctly. Fixes a buy
+showing in Buy-3PL with a faster-than-lead delivery (e.g. June placement → July arrival on a 17-week lead).
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

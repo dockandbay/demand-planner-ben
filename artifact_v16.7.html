@@ -2223,19 +2223,21 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
       // the current month and flag it overdue so it surfaces as a ship-now recommendation
       // instead of being silently dropped (the old gate started all buys at next month).
       let pi=i-lm;
-      let overdue=false;
-      if(pi<1){pi=1;overdue=true;}
-      // First-buy A-tier: boost buy qty by 50%
-      const boostedGap=gap*fbTierBoost;
-      const r=Math.ceil(boostedGap/cp)*cp;
-      bQ=Math.max(r,moq);
-      buyDisplay[pi]=(buyDisplay[pi]||0)+bQ;
-      buyOverdue[pi]=buyOverdue[pi]||overdue;
-      buyFromLbl[i]=(buyFromLbl[i]?buyFromLbl[i]+', ':'')+`${PROJ[pi].lbl} order${overdue?' (late)':''}`;
-      // Arrival stays keyed at need-month i: the buy is carried forward in s3 (c3final=c3+bQ)
-      // so consecutive months don't re-buy the same gap. overdue conveys the timing risk.
-      assumedArr[i]=(assumedArr[i]||0)+bQ;
-      bPi=pi;
+      // Buy 3PL uses the FULL standard lead time and cannot assume faster delivery. If the ideal placement is
+      // already in the past (pi<1), the need is sooner than a standard order could ever arrive → it is NOT a
+      // Buy-3PL; leave it for the Buy 3PL Urgent column (rush/air). Only place a 3PL buy with full lead time.
+      if(pi>=1){
+        // First-buy A-tier: boost buy qty by 50%
+        const boostedGap=gap*fbTierBoost;
+        const r=Math.ceil(boostedGap/cp)*cp;
+        bQ=Math.max(r,moq);
+        buyDisplay[pi]=(buyDisplay[pi]||0)+bQ;
+        buyFromLbl[i]=(buyFromLbl[i]?buyFromLbl[i]+', ':'')+`${PROJ[pi].lbl} order`;
+        // carried forward in s3 (c3final=c3+bQ) so consecutive months don't re-buy the same gap
+        assumedArr[i]=(assumedArr[i]||0)+bQ;
+        bPi=pi;
+      }
+      // else: bQ stays 0 → no phantom stock carried forward → the Urgent pass sees the gap and sizes the rush.
     }
     // (urgent buys handled in separate post-loop scan)
     // Include this month's normal buy in closing
