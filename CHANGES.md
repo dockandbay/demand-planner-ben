@@ -299,6 +299,16 @@ sends the previewed supplier name. (`sample-note` also accepts `id` or `sample_i
 (must match a real supplier), and an optional contact — with **inline error messages** (no popups). Add/Cancel
 in the row; saves via the existing create endpoint.
 
+## v25.43 - Samples admin UI/UX polish
+
+Design pass on the admin Samples surface:
+- Grid: **"PLAN" → "View"** (right vocabulary for samples); **Units** now reads "3 · 2 SKUs" instead of the
+  cryptic "3 / 2"; the **required date turns red** when overdue (not just a small ⚠).
+- **Create form** regrouped into labelled sections (Supplier & recipient / Address / SKUs / Details) in a
+  bordered card with dividers, instead of one long stack.
+- **Detail panel** inputs now carry **persistent micro-labels** (so a filled "London" still shows it's *City*,
+  etc.) across recipient/address and tracking/carrier.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
