@@ -129,6 +129,13 @@ ORDERS and auto-expand the PO. The grid caps its render at 250 rows, so a PO bey
 and the link silently landed on the list without opening it. Now if the target PO isn't found, the grid
 reveals all rows and retries, so the direct PO always opens.
 
+## v25.22 - Purchase Orders: assign shipment without a grid refresh; HORIZON version label
+
+1. **Assigning a shipment no longer re-renders the whole grid.** The affected PO row is now patched in place
+   (no flash / scroll jump / collapsed detail). When the grid is grouped by shipment — where the PO must move
+   into the new shipment's group — it still does a full refresh, but now preserves scroll position.
+2. **Version label** in the SUPPLY sub-nav changed from `v25.xx · sandbox` to **`HORIZON v25.xx`**.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

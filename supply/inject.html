@@ -221,6 +221,7 @@
   var cache={},current=null,depRefs=null,poBy={},shipBy={},batchList=[],prodList=[],shipList=[],supplierList=[],branchList=[],crossdockList=[];
   var _pendingPO=null,_pendingPOTab=null,_pendingShip=null,_pendingOP=null,_pendingDep=null;   // cross-view navigation: expand this PO / shipment, pre-filter order plan / deposit register, after the target view renders
   var _poRefresh=null;   // set by the PO grid to refresh itself in place (no full section reload) after an assign
+  var _poPatchRow=null;  // set by the PO grid to patch a SINGLE row in place (no grid re-render) after an assign
   // a write to a PO / shipment / deposit changes the derived views — drop their caches so they re-fetch fresh
   function invalidateDerived(){ ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments'].forEach(function(k){delete cache[k];}); }
 
@@ -673,7 +674,10 @@
     pop.innerHTML='<div class="shpop-h">Assign <b>'+esc(po)+'</b> to shipment</div><input class="shpop-q" placeholder="search PO / shipment…"><div id="shpop-list"><div class="count" style="padding:8px">Loading…</div></div>';
     placePop(pop, anchor.getBoundingClientRect());
     setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
-    function reloadPO(){ closeShPop(); shipFull=null; if(_poRefresh){ invalidateDerived(); _poRefresh(); } else { delete cache['purchase-orders']; selectSection('purchase-orders'); } }
+    function reloadPO(){ closeShPop(); shipFull=null; invalidateDerived();
+      if(_poPatchRow){ _poPatchRow(po); } else if(_poRefresh){ _poRefresh(); } else { delete cache['purchase-orders']; selectSection('purchase-orders'); } }
+    function reloadPOFull(){ closeShPop(); shipFull=null; invalidateDerived();
+      if(_poRefresh){ _poRefresh(); } else { delete cache['purchase-orders']; selectSection('purchase-orders'); } }
     function go(ref,body){ shipPost('/api/supply/shipment/'+encodeURIComponent(ref)+'/assign',body,reloadPO); }
     fetchShipmentsFull(function(ships){
       var refs={}; ships.forEach(function(s){refs[s.shipment_ref]=1;});
@@ -689,7 +693,7 @@
           if(o.dataset.act==='master')go(po,{po:po,assign:true,master:true});
           else if(o.dataset.act==='unassign')go(cur,{po:po,assign:false});
           else if(o.dataset.ship)go(o.dataset.ship,{po:po,assign:true});
-          else if(o.dataset.pomaster){ var y=o.dataset.pomaster; shipPost('/api/supply/shipment/'+encodeURIComponent(y)+'/assign',{po:y,assign:true,master:true},function(){ go(y,{po:po,assign:true}); }); }
+          else if(o.dataset.pomaster){ var y=o.dataset.pomaster; shipPost('/api/supply/shipment/'+encodeURIComponent(y)+'/assign',{po:y,assign:true,master:true},function(){ shipPost('/api/supply/shipment/'+encodeURIComponent(y)+'/assign',{po:po,assign:true},reloadPOFull); }); }
         }; });
       }
       render(''); pop.querySelector('.shpop-q').oninput=function(){render(this.value);};
@@ -780,12 +784,26 @@
       document.querySelectorAll('#sup-grid .erp-up').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.up); }; }); }
     // refresh the grid IN PLACE after an assign (deposit / shipment / supplier / branch / …) — re-fetch the PO
     // rows and re-render only #sup-grid, so filters + scroll position are kept (no full section reload / jump).
-    function refreshGrid(){ invalidateDerived(); delete cache['purchase-orders'];
+    function refreshGrid(){ invalidateDerived(); delete cache['purchase-orders']; var sy=window.scrollY;
       fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(fresh){
         if(Array.isArray(fresh)){ rows.length=0; Array.prototype.push.apply(rows, fresh); }
-        view();
+        view(); try{window.scrollTo(0,sy);}catch(e){}
       }).catch(function(){ selectSection('purchase-orders'); }); }
-    _poRefresh=refreshGrid;
+    // Patch ONE PO row in place (no grid re-render / flash) after an assign. Only when not grouped by shipment —
+    // assigning a shipment changes the shipment group, which needs a regroup, so that case does a full refresh.
+    function patchPoRow(po){ if(state.grp==='shipment'){ refreshGrid(); return; }
+      invalidateDerived(); delete cache['purchase-orders'];
+      fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(fresh){
+        if(Array.isArray(fresh)){ rows.length=0; Array.prototype.push.apply(rows, fresh); }
+        rows.forEach(function(x){poBy[x.po]=x;});
+        var sel='#sup-grid .po-exp[data-po="'+((window.CSS&&CSS.escape)?CSS.escape(po):po)+'"]';
+        var btn=document.querySelector(sel), r=poBy[po];
+        if(!btn||!r){ view(); return; }
+        var tr=btn.closest('tr'), tmp=document.createElement('tbody'); tmp.innerHTML=poRowHtml(r,btn.dataset.i,false,null);
+        var nm=tmp.querySelector('tr'); if(nm&&tr&&tr.parentNode){ tr.parentNode.replaceChild(nm,tr); }
+        bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindDepPick(refreshGrid); bindPoStars();
+      }).catch(function(){ refreshGrid(); }); }
+    _poRefresh=refreshGrid; _poPatchRow=patchPoRow;
     c.querySelectorAll('#po-prog .pill:not(.po-recent):not(.po-focus)').forEach(function(p){p.onclick=function(){c.querySelectorAll('#po-prog .pill:not(.po-recent):not(.po-focus)').forEach(function(x){x.classList.remove('active');});p.classList.add('active');state.f=p.dataset.f;_poShowAll=false;view();};});
     var _rp=c.querySelector('#po-prog .po-recent'); if(_rp)_rp.onclick=function(){ state.recent=!state.recent; _rp.classList.toggle('active',state.recent); _poShowAll=false; view(); };
     var _fp=c.querySelector('#po-prog .po-focus'); if(_fp)_fp.onclick=function(){ state.focus=!state.focus; _fp.classList.toggle('active',state.focus); _poShowAll=false; view(); };
@@ -3444,7 +3462,7 @@
   function ensureRoot(){ if(document.getElementById('supply-root'))return;
     var app=document.getElementById('app')||document.body; if(!app)return;
     var rootEl=document.createElement('div'); rootEl.id='supply-root';
-    rootEl.innerHTML='<div id="supply-subnav">'+SECTIONS.map(function(s){return '<button class="stab" data-k="'+s[0]+'">'+s[1]+'</button>';}).join('')+'<span class="ver">__APP_VERSION__ · sandbox</span></div><div id="supply-content"></div>';
+    rootEl.innerHTML='<div id="supply-subnav">'+SECTIONS.map(function(s){return '<button class="stab" data-k="'+s[0]+'">'+s[1]+'</button>';}).join('')+'<span class="ver">HORIZON __APP_VERSION__</span></div><div id="supply-content"></div>';
     app.appendChild(rootEl);
     rootEl.querySelectorAll('.stab').forEach(function(b){b.onclick=function(){selectSection(b.dataset.k);};}); }
   function ensureNavButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('supply-btn'))return;
@@ -3778,7 +3796,7 @@
   function ensureScenarioRoot(){ if(document.getElementById('scenario-root'))return;
     var app=document.getElementById('app')||document.body; if(!app)return;
     var el=document.createElement('div'); el.id='scenario-root';
-    el.innerHTML='<div id="scenario-subnav">'+SCEN_SECTIONS.map(function(s){return '<button class="stab'+(s[0]===scenCurrent?' active':'')+'" data-k="'+s[0]+'">'+s[1]+'</button>';}).join('')+'<span class="ver">__APP_VERSION__ · sandbox</span></div><div id="scenario-content"></div>';
+    el.innerHTML='<div id="scenario-subnav">'+SCEN_SECTIONS.map(function(s){return '<button class="stab'+(s[0]===scenCurrent?' active':'')+'" data-k="'+s[0]+'">'+s[1]+'</button>';}).join('')+'<span class="ver">HORIZON __APP_VERSION__</span></div><div id="scenario-content"></div>';
     app.appendChild(el);
     el.querySelectorAll('.stab').forEach(function(b){b.onclick=function(){scenSelect(b.dataset.k);};}); }
   function showScenario(){ ensureScenarioRoot(); if(typeof hideSupply==='function')hideSupply(); var app=document.getElementById('app'); if(app)app.classList.add('scenario-active');
