@@ -175,6 +175,11 @@ When assigning a shipment to a PO, the picker now defaults (before you type) to 
 country as the PO**, with a "Shipments to {country} — type to search all" hint. Typing searches the full list
 across all shipments (ref / master PO / country). Each option now also shows the shipment's destination.
 
+## v25.28 - Productions: larger "add" buttons
+
+The **+ New production**, **+ Deposit**, and **+ Other payment** add buttons on the Productions sub-tabs are
+now full `save-btn` buttons instead of the small badge style.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

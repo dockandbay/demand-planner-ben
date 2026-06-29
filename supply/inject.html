@@ -1721,7 +1721,7 @@
   function prodListView(b, rows){
     var FILTERS=[['active','Active'],['completed','Completed'],['all','All']]; var state={f:'active',q:''};
     b.innerHTML='<div class="bar">'+FILTERS.map(function(f){return '<span class="pill'+(f[0]==='active'?' active':'')+'" data-f="'+f[0]+'">'+f[1]+'</span>';}).join('')
-      +'<button class="tool-badge bg-blue" id="prod-new" style="cursor:pointer;border:none">+ New production</button>'
+      +'<button class="save-btn" id="prod-new">+ New production</button>'
       +'<input class="flt" id="sup-search" placeholder="Filter PROD# / supplier…"><span class="count" id="sup-count"></span></div><div id="sup-grid"></div>';
     document.getElementById('prod-new').onclick=function(){ var p=prompt('New production number (e.g. P56):'); if(!p||!p.trim())return;
       shipPost('/api/supply/production-create',{prod_no:p.trim()},function(){ alert('Created '+p.trim()+'. Assign POs to it from the PROD# column in PURCHASE ORDERS, or expand a production and use "+ assign PO".'); delete cache['productions']; selectSection('productions'); }); };
@@ -1737,7 +1737,7 @@
     var depProdAll=false;   // Assigned productions column: false = only productions with OPEN POs; true = all
     var FILT=[['remaining','Remaining · open'],['open','To assign'],['closed','Closed'],['all','All']];
     b.innerHTML=lookupDatalists()+'<div class="bar">'+FILT.map(function(f){return '<span class="pill'+(f[0]==='remaining'?' active':'')+'" data-f="'+f[0]+'"'+(f[0]==='remaining'?' title="open (not closed) deposits that still have money remaining"':'')+'>'+f[1]+'</span>';}).join('')
-      +'<button class="tool-badge bg-blue" id="dep-new" style="cursor:pointer;border:none">+ Deposit</button>'
+      +'<button class="save-btn" id="dep-new">+ Deposit</button>'
       +'<button class="tool-badge bg-neutral" id="dep-prodtoggle" style="cursor:pointer;border:none;margin-left:4px" title="Linked purchase orders: show only OPEN (non-complete) POs, or all">POs: open only</button>'
       +'<input class="flt" id="dep-q" placeholder="Filter reference / supplier…"><span class="count" id="dep-cnt"></span></div>'
       +'<style>#deptbl{table-layout:fixed;width:100%}#deptbl td,#deptbl th{white-space:normal;overflow-wrap:break-word;vertical-align:top}#deptbl .fci{width:100%;box-sizing:border-box;min-width:0}</style>'
@@ -2593,7 +2593,7 @@
         document.querySelectorAll('#oth-wrap .oth-del').forEach(function(btn){btn.onclick=function(){ if(!confirm('Delete other payment "'+btn.dataset.ref+'"? This cannot be undone.'))return;
           shipPost('/api/supply/deposit/'+btn.dataset.id+'/delete',{},function(){ renderOtherPayments(b); }); };});
       }
-      b.innerHTML=lookupDatalists()+'<div class="bar"><button class="tool-badge bg-neutral" id="oth-new" style="cursor:pointer;border:none">+ Other payment</button><span class="count">sundry costs (freight, fees, write-offs) — paid rows lock; Edit to change</span></div><div id="oth-wrap"></div>';
+      b.innerHTML=lookupDatalists()+'<div class="bar"><button class="save-btn" id="oth-new">+ Other payment</button><span class="count">sundry costs (freight, fees, write-offs) — paid rows lock; Edit to change</span></div><div id="oth-wrap"></div>';
       document.getElementById('oth-new').onclick=function(){ shipPost('/api/supply/deposit-create',{is_deposit:false},function(){ renderOtherPayments(b); }); };
       draw(); })
       .catch(function(e){b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>';}); }); }
@@ -2849,7 +2849,7 @@
     var state={q:''};
     c.innerHTML=annot('deposits')+lookupDatalists()+'<div class="bar">'
       +'<input class="flt" id="sup-search" placeholder="Filter…">'
-      +'<button class="tool-badge bg-blue" id="dep-new" style="cursor:pointer;border:none">+ Deposit</button>'
+      +'<button class="save-btn" id="dep-new">+ Deposit</button>'
       +'<span class="count" id="sup-count"></span></div><div id="sup-grid"></div>';
     function view(){ var f=filt(rows,state.q); document.getElementById('sup-count').textContent=f.length+' deposits'; document.getElementById('sup-grid').innerHTML=depTable(f); bindEdits(); }
     document.getElementById('sup-search').oninput=function(){state.q=this.value;view();};
