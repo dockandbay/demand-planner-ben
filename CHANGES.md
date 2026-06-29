@@ -148,6 +148,16 @@ derived from the *effective* previous stage, so overriding an earlier date shift
 - Each override **date picker now pre-fills** with that stage's current final date (the previous override if
   set, else the calculated date) instead of opening on today. Nothing saves unless you change it.
 
+## v25.24 - Fix: DB connection exhaustion on the session-mode pooler
+
+Repeated dev-server restarts were stranding DB connections on the Supabase **session-mode pooler** (cap ~15),
+eventually causing `EMAXCONNSESSION max clients reached … pool_size: 15` and failed page loads. Fixes:
+- **Graceful shutdown** — `SIGINT`/`SIGTERM` now `pool.end()` before exit, so a restart releases its
+  connections immediately instead of leaving them lingering until the pooler times out.
+- **Lower pool `max`** (dev 10 → 6) so a stranded generation plus the live process stays well under 15.
+
+(No DB/schema change.)
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

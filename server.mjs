@@ -17,9 +17,11 @@ if (process.env.VERCEL) CONN = CONN.replace(':5432/', ':6543/');
 const pool = new pg.Pool({
   connectionString: CONN,
   ssl: { rejectUnauthorized: false },
-  max: process.env.VERCEL ? 4 : 10,
+  // Session-mode Supabase pooler caps the whole session at ~15 server connections. Keep `max` well under
+  // that so a stranded generation (after a restart/crash) plus the live process can't blow the cap.
+  max: process.env.VERCEL ? 4 : 6,
   allowExitOnIdle: true,
-  idleTimeoutMillis: 10000,
+  idleTimeoutMillis: 8000,
 });
 // ── Resilience guards ─────────────────────────────────────────────────────────
 // A dropped idle DB connection makes the pool emit 'error'; with no listener Node treats it as
@@ -31,6 +33,14 @@ pool.on('error', (err) => { console.error('[pg pool] idle client error (ignored)
 // in-memory state — it's a stateless proxy to Postgres — so logging and staying up beats crashing.
 process.on('unhandledRejection', (reason) => { console.error('[unhandledRejection]', reason && (reason.stack || reason.message || reason)); });
 process.on('uncaughtException', (err) => { console.error('[uncaughtException]', err && (err.stack || err.message || err)); });
+// Graceful shutdown: close the pool so a restart RELEASES its DB connections immediately instead of
+// stranding them on the session-mode pooler (the cause of "max clients reached … pool_size: 15" after
+// repeated restarts). Without this, killed processes leave connections lingering until the pooler times out.
+let _shuttingDown = false;
+async function shutdown() { if (_shuttingDown) return; _shuttingDown = true;
+  try { await pool.end(); } catch (e) {} process.exit(0); }
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
 import path from 'path';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
@@ -52,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.23';
+const APP_VERSION = 'v25.24';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
