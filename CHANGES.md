@@ -336,6 +336,12 @@ When a supplier posts a sample timeline note (or a charge is pending), the admin
 Added a **Not Accepted** filter pill to the SUPPLY ▸ Samples grid (status = "Awaiting supplier"), alongside
 Open / Closed / All.
 
+## v25.48 - Purchase Orders: Client columns under the DIRECT filter
+
+When the **DIRECT** ship-to pill is active, the PO grid now shows two extra columns — **Client** and **Client
+sales ref** — between Branch and Status (hidden otherwise; the columns already exist in the data as
+`client` / `sales_order_ref`). Expand-row colspan adjusts accordingly.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

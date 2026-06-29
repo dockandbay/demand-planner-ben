@@ -225,6 +225,7 @@
   var cache={},current=null,depRefs=null,poBy={},shipBy={},batchList=[],prodList=[],shipList=[],supplierList=[],branchList=[],crossdockList=[];
   var _pendingPO=null,_pendingPOTab=null,_pendingShip=null,_pendingOP=null,_pendingDep=null;   // cross-view navigation: expand this PO / shipment, pre-filter order plan / deposit register, after the target view renders
   var _poRefresh=null;   // set by the PO grid to refresh itself in place (no full section reload) after an assign
+  var _poShowClient=false;   // PO grid: show Client name + Client sales ref columns when the DIRECT pill is active
   var _poPatchRow=null;  // set by the PO grid to patch a SINGLE row in place (no grid re-render) after an assign
   var _sampleReload=null;  // set by the Samples grid so detail-panel actions can refresh it
   // a write to a PO / shipment / deposit changes the derived views — drop their caches so they re-fetch fresh
@@ -783,6 +784,7 @@
       return true; }); }
     // a text search overrides the status/action/country filters — search across ALL POs
     function view(){ var q=effQ(state.q); var f=q ? filt(rows,q) : cur();
+      _poShowClient=!!(state.ctry&&state.ctry['DIRECT']);   // DIRECT pill → reveal Client name + sales ref columns
       var shown=(_poShowAll||f.length<=PO_CAP)?f:f.slice(0,PO_CAP);
       document.getElementById('sup-count').textContent=(shown.length<f.length?shown.length+' of ':'')+f.length+' / '+rows.length+' POs'+(q?' (search — all statuses)':'');
       document.getElementById('sup-grid').innerHTML=poTable(shown,state.grp)
@@ -992,6 +994,7 @@
       +'<td class="l">'+cellPickBtn(r.po,'/api/supply/po/'+encodeURIComponent(r.po)+'/supplier','supplier_name',r.supplier_name,'supplier')+'</td>'
       +'<td class="l">'+(r.country?esc(clabel(r.country)):'<span class="mut tiny">—</span>')+(r.country_src==='M'?'<span class="src m">M</span>':'')+'</td>'
       +'<td class="l">'+cellPickBtn(r.po,ep,'branch',r.branch,'branch')+'</td>'
+      +(_poShowClient?'<td class="l">'+(r.client?esc(r.client):'<span class="mut">—</span>')+'</td><td class="l">'+(r.sales_order_ref?esc(r.sales_order_ref):'<span class="mut">—</span>')+'</td>':'')
       +'<td class="l">'+statusSel(ep,r.status)+'</td>'
       +'<td class="l">'+shipcell+'</td>'
       +'<td class="l">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0)+'</td>'
@@ -1006,9 +1009,9 @@
       +'<td class="l">'+cellPickBtn(r.po,ep,'prod_no',r.prod_no,'prod')+'</td>'
       +'<td class="l">'+cellPickBtn(r.po,ep,'batch_id',r.batch_id,'batch')+'</td>'
       +'</tr>'
-      +'<tr class="exp-row"'+ga+' id="poexp-'+i+'" style="display:none"><td colspan="21"><div id="podet-'+i+'" class="count">Loading…</div></td></tr>'; }
+      +'<tr class="exp-row"'+ga+' id="poexp-'+i+'" style="display:none"><td colspan="'+(_poShowClient?23:21)+'"><div id="podet-'+i+'" class="count">Loading…</div></td></tr>'; }
   function poTable(rows,groupBy){ if(!rows.length)return '<div class="count">No POs in this filter.</div>';
-    var head=lookupDatalists()+poErpRecon(rows)+'<div class="tw"><table class="po-tbl"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l">ERP</th><th class="l">Supplier</th><th class="l">Ship to</th><th class="l">Branch</th><th class="l">Status</th><th class="l">Shipment</th><th class="l">Deposit ref</th><th class="l">Start</th><th class="l">End</th><th class="l">Ship</th><th class="l">Delivery</th><th class="l">Completion</th><th>Value est</th><th>Pallets</th><th>Start dep</th><th>Completion</th><th>Balance</th><th class="l">PROD#</th><th class="l">Batch</th></tr></thead><tbody>';
+    var head=lookupDatalists()+poErpRecon(rows)+'<div class="tw"><table class="po-tbl"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l">ERP</th><th class="l">Supplier</th><th class="l">Ship to</th><th class="l">Branch</th>'+(_poShowClient?'<th class="l">Client</th><th class="l">Client sales ref</th>':'')+'<th class="l">Status</th><th class="l">Shipment</th><th class="l">Deposit ref</th><th class="l">Start</th><th class="l">End</th><th class="l">Ship</th><th class="l">Delivery</th><th class="l">Completion</th><th>Value est</th><th>Pallets</th><th>Start dep</th><th>Completion</th><th>Balance</th><th class="l">PROD#</th><th class="l">Batch</th></tr></thead><tbody>';
     var body='';
     if(!groupBy||groupBy==='none'){ rows.forEach(function(r,i){ body+=poRowHtml(r,i,false,null); }); }
     else {
