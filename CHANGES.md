@@ -187,6 +187,18 @@ and (b) uses a **1-cent tolerance** (`used > pool + 0.01`) instead of a strict `
 "Assigned start deposits 19360 exceed pool 19360 (remaining 0)" — a sub-cent rounding difference that the
 display rounded away — and stops the action appearing on already-closed deposits (e.g. P40-UK-XR3).
 
+## v25.30 - Samples feature — Phase 1: schema (migration 084)
+
+First slice of the new **Samples** feature. Adds migration **`084_samples.sql`**:
+- `planner.sample_requests` (+ `sample_request_lines`) — sample requests with recipient/address, SKUs/qty,
+  required completion, purpose[], notes, one assigned supplier, accept/expected-completion/tracking/carrier.
+- `planner.sample_notes` — shared admin/supplier timeline (mirrors `shipment_notes`).
+- `planner.supplier_charges` — generic charge table for **samples and shipments**; accepting one posts an
+  Other Payment (`deposits`, `is_deposit=false`).
+
+**DIVIYAJ — NEW MIGRATION:** `084_samples.sql` must be run on prod (first new migration since
+`diviyaj_deploy_2026-06-28.sql`). Idempotent. No data backfill. Later phases (endpoints + UI) build on it.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
