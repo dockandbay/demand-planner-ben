@@ -323,6 +323,14 @@ Reworked the supplier-portal Samples tab from a card list into a **grid (one row
 pills** (Open default · Not yet accepted · Closed · All, with counts) and a **search** box. The add button is
 now **"+ New Sample Shipment"**.
 
+## v25.46 - Admin Samples: prominent supplier-note notification + SAMPLES (n) nav count
+
+When a supplier posts a sample timeline note (or a charge is pending), the admin now sees it clearly:
+- A prominent **amber badge next to the View button** on that sample's row (was an easy-to-miss dot by the ref).
+- A **count badge on the SAMPLES top-menu tab** — "SAMPLES (n)" — counting samples with unread supplier
+  notes or pending charges; fetched on SUPPLY load so it shows without opening the tab, and refreshed when the
+  grid renders.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
