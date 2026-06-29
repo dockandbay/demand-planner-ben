@@ -279,6 +279,11 @@ product $0"), per spec. Reuses the generic `supplier_charges` table + `charge/:i
 Also added portal-scoped `/api/portal/shipment-charge(-s)` endpoints (supplier-side UI deferred until the
 real portal's Shipment Plan tab is fed data — a separate follow-up).
 
+## v25.40 - Portal Samples: SKUs shown as "qty × SKU", left-aligned
+
+Portal sample card SKUs now display as a left-aligned **"23 × TOWLB-CAB-LG"** list (qty × SKU) instead of a
+table.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
