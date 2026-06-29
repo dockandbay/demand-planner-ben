@@ -316,6 +316,13 @@ The SUPPLY ▸ Samples detail panel now opens **read-only** (clean display of re
 recipient/address, SKUs, notes, tracking/carrier, status **and Purpose** (checkboxes) are all editable;
 **Done** returns to read-only. Field label **"Completion req." → "Requested Completion Date"**.
 
+## v25.45 - Portal Samples: grid + Manage expand + filters/search
+
+Reworked the supplier-portal Samples tab from a card list into a **grid (one row per sample)** with a
+**Manage** button (+ action badge) that expands the full detail in place (like Shipments/POs). Added **filter
+pills** (Open default · Not yet accepted · Closed · All, with counts) and a **search** box. The add button is
+now **"+ New Sample Shipment"**.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
