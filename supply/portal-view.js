@@ -548,13 +548,21 @@
           +'<tr><td class="mut" style="padding:2px 14px 2px 0;text-align:left">Flexport ref</td><td style="text-align:left">'+(flexRef?'<b>'+esc(flexRef)+'</b>':'<span class="mut">—</span>')+'</td></tr>'
           +'</tbody></table>'
           +'<div class="tiny mut" style="margin-top:5px">Carrier &amp; tracking are managed on the shipment — to change them, contact Dock &amp; Bay.</div>'
+          +'<div class="sect-h" style="margin-top:14px">Freight charge</div>'
+          +'<div class="tiny mut" style="margin-bottom:6px">Add a freight cost for this shipment. Dock &amp; Bay reviews it; once accepted it becomes a payment to you.</div>'
+          +'<div class="pp-fchg-list" data-ref="'+esc(p.shipment)+'" style="margin-bottom:6px"><span class="mut tiny">…</span></div>'
+          +'<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end">'
+          +'<label class="tiny">Freight (&pound;/$)<br><input class="fci pp-fcost" data-ref="'+esc(p.shipment)+'" placeholder="0.00" style="width:110px;text-align:left" inputmode="decimal"></label>'
+          +'<label class="tiny">Note (optional)<br><input class="fci pp-fnote" data-ref="'+esc(p.shipment)+'" placeholder="e.g. extra container" style="width:200px;text-align:left"></label>'
+          +'<button class="save-btn pp-fchg-go" data-ref="'+esc(p.shipment)+'">Add freight charge</button></div>'
         // no shipment yet → editable: pick carrier + tracking; submitting creates the shipment for this PO
         : shipHead
           +'<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end">'
           +'<label class="tiny">Carrier<br><select class="fci pp-car" data-po="'+po+'" style="min-width:120px;text-align:left">'+carOpts+'</select></label>'
           +'<label class="tiny">Tracking ref<br><input class="fci pp-trk" data-po="'+po+'" value="'+esc(trkVal)+'" placeholder="e.g. MAEU… / Flexport ID" style="width:170px;text-align:left"></label>'
+          +'<label class="tiny">Freight charge (optional, &pound;/$)<br><input class="fci pp-fcost-new" data-po="'+po+'" placeholder="0.00" style="width:140px;text-align:left" inputmode="decimal"></label>'
           +'<button class="save-btn pp-trk-go" data-po="'+po+'">Create shipment &amp; save</button></div>'
-          +'<div class="tiny mut" style="margin-top:4px">Submitting creates the shipment for this PO and saves the carrier &amp; tracking.</div>';
+          +'<div class="tiny mut" style="margin-top:4px">Submitting creates the shipment for this PO, saves the carrier &amp; tracking, and logs any freight charge for Dock &amp; Bay to review.</div>';
       shipment = shipLabelBtn + shipment;
       if(cdSkus.length){ var xrows=cdSkus.map(function(s){ var q=xd[s];
           return '<tr><td class="l">'+esc(s)+'</td><td style="text-align:right"><input class="fci pp-xqty" data-po="'+po+'" data-sku="'+esc(s)+'" value="'+(q!=null&&q!==''?esc(q):'')+'" placeholder="qty shipped" style="width:96px;text-align:right" inputmode="numeric"></td></tr>'; }).join('');
@@ -649,6 +657,13 @@
                 postJSON(EP.shipmentNote,{shipment_ref:ref,author_kind:'supplier',author_email:STATE.by,body:v},function(){ ppShipTimeline(ref); }); }; }).catch(function(){}); }
           function sampChip(st){ var m={'Awaiting supplier':['#fef3c7','#92710a'],'Change requested':['#fee2e2','#b91c1c'],'In production':['#dbeafe','#1d4ed8'],'Charge to review':['#fee2e2','#b91c1c'],'Shipped':['#dcfce7','#166534'],'Complete':['#e2e8f0','#475569'],'Cancelled':['#f1f5f9','#94a3b8']}; var c=m[st]||['#e2e8f0','#475569']; return '<span style="background:'+c[0]+';color:'+c[1]+';border-radius:4px;font-size:10px;font-weight:700;padding:1px 6px">'+esc(st||'')+'</span>'; }
           function chgChip(st){ var m={pending:['#fef3c7','#92710a'],accepted:['#dcfce7','#166534'],rejected:['#f1f5f9','#94a3b8']}; var c=m[st]||['#e2e8f0','#475569']; return '<span style="background:'+c[0]+';color:'+c[1]+';border-radius:4px;font-size:10px;padding:1px 6px">'+esc(st)+'</span>'; }
+          // freight charges on a PO's shipment (lazy-loaded into .pp-fchg-list when a PO row is expanded)
+          function loadFreightCharges(container){ if(!container||!container.querySelectorAll)return;
+            Array.prototype.forEach.call(container.querySelectorAll('.pp-fchg-list'),function(el){ var ref=el.dataset.ref; if(!ref)return;
+              fetch(EP.shipmentChargesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(cs){
+                if(!Array.isArray(cs)||!cs.length){ el.innerHTML='<span class="mut tiny">No freight charges yet.</span>'; return; }
+                el.innerHTML=cs.map(function(c){ var t=(Number(c.freight_cost)||0)+(Number(c.product_cost)||0); return '<div class="tiny" style="margin:2px 0">'+chgChip(c.status)+' &nbsp;'+money(t)+(c.description?' · '+esc(c.description):'')+'</div>'; }).join('');
+              }).catch(function(){ el.innerHTML='<span class="mut tiny">—</span>'; }); }); }
           function ppSampleCard(s){
             function lbl(t){ return '<div style="font-size:9.5px;letter-spacing:.04em;text-transform:uppercase;color:#94a3b8;font-weight:700;margin-bottom:3px">'+t+'</div>'; }
             var skuList=(s.lines||[]).map(function(l){return '<div style="padding:1px 0;text-align:left"><b>'+units(l.qty)+'</b> × '+esc(l.sku)+'</div>';}).join('')||'<div class="mut tiny">no SKUs</div>';
@@ -794,7 +809,7 @@
             var ppsa=body.querySelector('.pp-showall'); if(ppsa)ppsa.onclick=function(){ _ppShowAllPO=true; renderPP(); };
             body.querySelectorAll('.pill[data-st]').forEach(function(p){ p.onclick=function(){ var s=p.dataset.st; PORTAL_PO_ST[s]=!PORTAL_PO_ST[s]; _ppShowAllPO=false; renderPP(); }; });
             var pqi=body.querySelector('.pp-po-q'); if(pqi)pqi.oninput=debounce(function(){ PORTAL_PO_Q=pqi.value; _ppShowAllPO=false; var foc=document.activeElement===pqi; renderPP(); if(foc){ var n=body.querySelector('.pp-po-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } } },350);
-            body.querySelectorAll('.pp-exp').forEach(function(btn){ btn.onclick=function(){ var ex=document.getElementById('pp-'+btn.dataset.i); if(!ex)return; ex.style.display=(ex.style.display!=='none')?'none':''; }; });
+            body.querySelectorAll('.pp-exp').forEach(function(btn){ btn.onclick=function(){ var ex=document.getElementById('pp-'+btn.dataset.i); if(!ex)return; ex.style.display=(ex.style.display!=='none')?'none':''; if(ex.style.display!=='none'&&!ex.dataset.fcLoaded){ ex.dataset.fcLoaded='1'; loadFreightCharges(ex); } }; });
             // re-render ONE PO's expanded detail in place (no full reload, so MANAGE + the open tab stay put)
             function rerenderRow(row,po,keepPt){ if(!row)return; var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; if(!p)return;
               var i=row.id.replace('pp-',''), cell=row.children[1]; if(!cell)return;
@@ -912,8 +927,15 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
               // supplier production status dropdown (grid + timeline) → saves + re-renders so the exception flag updates
               scope.querySelectorAll('.pp-prod').forEach(function(sel){ sel.onchange=function(){ sel.disabled=true;
                 postJSON(EP.submit,{po:sel.dataset.po,supplier_id:sid,submitted_by:by,production_status:sel.value},function(){ reload(); }); }; });
-              scope.querySelectorAll('.pp-trk-go').forEach(function(btn){ btn.onclick=function(){ var t=pick('pp-trk',btn.dataset.po).value, cc=pick('pp-car',btn.dataset.po).value; if(!t&&!cc){ alert('Pick a carrier and/or enter a tracking ref.'); return; } btn.disabled=true;
-                postJSON(EP.submit,{po:btn.dataset.po,supplier_id:sid,submitted_by:by,tracking:t,carrier:cc},function(j){ var made=(j.applied||[]).some(function(x){return /shipment created/.test(x);}); alert(made?'Shipment created for this PO — carrier & tracking saved.':'Carrier & tracking saved to the shipment.'); reload(); }); }; });
+              scope.querySelectorAll('.pp-trk-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po; var t=pick('pp-trk',po).value, cc=pick('pp-car',po).value; if(!t&&!cc){ alert('Pick a carrier and/or enter a tracking ref.'); return; } var fcEl=pick('pp-fcost-new',po); var fc=fcEl?Number(fcEl.value)||0:0; btn.disabled=true;
+                postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,tracking:t,carrier:cc},function(j){ var made=(j.applied||[]).some(function(x){return /shipment created/.test(x);});
+                  var done=function(){ alert((made?'Shipment created for this PO — carrier & tracking saved.':'Carrier & tracking saved to the shipment.')+(fc>0?'\nFreight charge submitted — Dock & Bay will review it.':'')); reload(); };
+                  // the new master shipment's ref = the PO number (server creates it that way), so the freight charge attaches to it
+                  if(fc>0){ postJSON(EP.shipmentCharge,{shipment_ref:po,freight_cost:fc},function(){ done(); }); } else done(); }); }; });
+              scope.querySelectorAll('.pp-fchg-go').forEach(function(btn){ btn.onclick=function(){ var ref=btn.dataset.ref;
+                var ci=scope.querySelector('.pp-fcost[data-ref="'+CSS.escape(ref)+'"]'), ni=scope.querySelector('.pp-fnote[data-ref="'+CSS.escape(ref)+'"]');
+                var fc=ci?Number(ci.value)||0:0; if(fc<=0){ alert('Enter a freight amount.'); return; } btn.disabled=true;
+                postJSON(EP.shipmentCharge,{shipment_ref:ref,freight_cost:fc,description:(ni&&ni.value)||null},function(j){ if(j&&j.error){alert(j.error);btn.disabled=false;return;} if(ci)ci.value=''; if(ni)ni.value=''; btn.disabled=false; loadFreightCharges(scope); }); }; });
               // jump to this PO's shipment in the Shipment Plan tab (search overrides the pills so it shows whatever its status)
               scope.querySelectorAll('.pp-go-shipplan').forEach(function(btn){ btn.onclick=function(){ PORTAL_TAB='shipmentplan'; PORTAL_SP_PO=btn.dataset.ref||''; renderPP(); }; });
               scope.querySelectorAll('.pp-inv-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po; var val=pick('pp-inv',po).value; var fin=pick('pp-inv-file',po); var f=fin&&fin.files[0]; if(!val&&!f)return; btn.disabled=true;

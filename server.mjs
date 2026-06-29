@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.56';
+const APP_VERSION = 'v25.57';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -896,6 +896,14 @@ app.get('/api/supply/shipment-charges/:ref', async (req, res) => {
     FROM planner.supplier_charges WHERE source_type='shipment' AND source_ref=$1 ORDER BY created_at`, [req.params.ref])).rows); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Create a shipment charge (admin / "preview as supplier" — mirrors /api/portal/shipment-charge without scoping)
+app.post('/api/supply/shipment-charge', async (req, res) => {
+  const b = req.body || {}; if(!b.shipment_ref) return res.status(400).json({ error: 'shipment_ref required' });
+  try { const sup = (await pool.query(`SELECT string_agg(DISTINCT supplier_name,', ') s FROM planner.purchase_orders WHERE shipment_ref=$1`, [b.shipment_ref])).rows[0].s || null;
+    const r = await pool.query(`INSERT INTO planner.supplier_charges (source_type, source_ref, supplier_name, freight_cost, product_cost, description, created_by)
+      VALUES ('shipment',$1,$2,$3,$4,$5,$6) RETURNING id`, [b.shipment_ref, b.supplier_name||sup, Number(b.freight_cost)||0, Number(b.product_cost)||0, b.description||null, b.created_by||'preview']);
+    res.json({ ok:true, id: r.rows[0].id }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // ── SUPPLY tab (Production Planner) read APIs — one route, section in the path.
 // Read-only JSON from the Phase-2 planner tables. No writes (writes are a later, gated step).
@@ -1419,7 +1427,8 @@ app.get('/api/supply/:section', async (req, res) => {
             (coalesce(a.pallets,0) > 20) over_pallets,   -- est. cargo over one 20-pallet container → exception
             coalesce(sh.escalated,false) escalated,
             coalesce(sh.starred,false) starred,   -- ⭐ Focus / favourite toggle (migration 082)
-            (SELECT count(*) FROM planner.shipment_notes sn WHERE sn.shipment_ref=sh.shipment_ref AND sn.author_kind='supplier' AND sn.read_at IS NULL)::int unread_notes
+            (SELECT count(*) FROM planner.shipment_notes sn WHERE sn.shipment_ref=sh.shipment_ref AND sn.author_kind='supplier' AND sn.read_at IS NULL)::int unread_notes,
+            (SELECT count(*) FROM planner.supplier_charges sc WHERE sc.source_type='shipment' AND sc.source_ref=sh.shipment_ref AND sc.status='pending')::int pending_charges
           FROM planner.shipments sh
           LEFT JOIN agg a ON a.shipment_ref=sh.shipment_ref
           LEFT JOIN LATERAL (SELECT f.* FROM planner.flexport_shipments f

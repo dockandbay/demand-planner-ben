@@ -420,6 +420,22 @@ admin detail also uses the existing `portal-upload`). Attachments listed in the 
   sample's unread badge and the SAMPLES(n) nav count — and the supply timeline shows a **Mark read** control for
   them so the notification can be cleared. (Reverts the v25.54 exclusion that suppressed them.)
 
+## v25.57 - Supplier portal: add freight charge on a PO → accept → Other Payment
+
+- **Portal PO card (SHIPMENT section):** suppliers can now add a **freight charge** next to carrier/tracking.
+  - PO already on a shipment → the charge attaches to that shipment; the supplier sees their submitted charges
+    with status (pending/accepted).
+  - PO with no shipment yet → enter carrier/tracking + an optional freight charge and "Create shipment & save"
+    creates the shipment (ref = PO) and logs the charge against it.
+- The charge enters the existing **acceptance workflow**: D&B reviews it in **SUPPLY▸Shipments ▸ Charges** and
+  accepting posts an **Other Payment** (reference = shipment, description lists the POs aboard).
+- **Discoverability:** the admin Shipments grid row and the Charges sub-tab now show a green **pending-charge
+  count** badge so D&B notices charges awaiting review.
+- New endpoint `/api/supply/shipment-charge` (preview/admin parity for the portal `/api/portal/shipment-charge`).
+
+**Deploy note (Diviyaj):** new live `/api/portal/shipment-charge` + `/api/portal/shipment-charges/:ref` must be
+wired (preview is on `/api/supply/*`). No new migration — reuses `planner.supplier_charges` (`source_type='shipment'`).
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
