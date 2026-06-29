@@ -94,6 +94,11 @@ Three changes:
    of the open filters). Derived views (Productions / Actions / cash flow) are still invalidated so they're
    fresh on next visit.
 
+## v25.17 - Shipments: colour the Mode column
+
+In SUPPLY ▸ Shipments the **Mode** dropdown is now colour-coded: **air → green**, **fob → purple**, sea stays
+default. Applies in both the grid and the shipment detail.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

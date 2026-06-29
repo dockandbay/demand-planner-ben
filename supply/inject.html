@@ -1949,7 +1949,9 @@
       +(v&&!has?'<option selected>'+esc(v)+'</option>':'')+O.map(function(o){return '<option'+(o===v?' selected':'')+'>'+o+'</option>';}).join('')+'</select>'; }
   function carrierRefInput(ep,val,dis){ return '<input class="fci txt" data-ep="'+ep+'" data-field="carrier_ref" value="'+esc(val||'')+'"'+(dis?' disabled':'')+' style="min-width:120px'+(dis?';opacity:.45;background:#f1f1f1':'')+'">'; }
   function shipDate(dt,src){ if(!dt)return '<span class="mut">—</span>'; return esc(fd(dt))+(src?'<span class="src '+(src==='S'?'m':'fx')+'">'+src+'</span>':''); }
-  function modeSel(ep,m){ return '<select class="fci" data-ep="'+ep+'" data-field="mode">'+['sea','air','fob'].map(function(o){return '<option'+(m===o?' selected':'')+'>'+o+'</option>';}).join('')+'</select>'; }
+  function modeSel(ep,m){ var col={air:['#dcfce7','#166534'],fob:['#ede9fe','#6d28d9']}[m];   // air → green, fob → purple, sea → default
+    var sty=col?' style="background:'+col[0]+';color:'+col[1]+';font-weight:600;border-color:'+col[0]+'"':'';
+    return '<select class="fci" data-ep="'+ep+'" data-field="mode"'+sty+'>'+['sea','air','fob'].map(function(o){return '<option'+(m===o?' selected':'')+'>'+o+'</option>';}).join('')+'</select>'; }
   // Shipment status dropdown: Planned (amber) / Active (green) / Complete (blue). Auto-set by the server; this overrides.
   function shipStatusSel(ep,val){ var v=(val==='Completed'?'Complete':(val||'Planned'));
     var O=[['Planned','#92710a','#fef3c7'],['Active','#15803d','#dcfce7'],['Complete','#1d4ed8','#dbeafe']], cur=O.filter(function(o){return o[0]===v;})[0]||O[0];
