@@ -122,6 +122,13 @@ Three fixes:
 The parse-invoice **Apply** button is now **light green** (more visible), and the summary line
 ("PO · N lines · invoice total … — N changed/new/match") is rendered at a larger font.
 
+## v25.21 - Fix: links to a PO now open the direct PO even past the render cap
+
+Links to a purchase order (from Shipments ▸ POs aboard, Deposits, Cash flow, Actions) navigate to PURCHASE
+ORDERS and auto-expand the PO. The grid caps its render at 250 rows, so a PO beyond the cap wasn't in the DOM
+and the link silently landed on the list without opening it. Now if the target PO isn't found, the grid
+reveals all rows and retries, so the direct PO always opens.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

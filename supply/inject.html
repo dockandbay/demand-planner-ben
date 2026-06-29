@@ -615,9 +615,9 @@
   function gotoOther(){ prodTab='other'; selectSection('productions'); }   // → PRODUCTIONS ▸ Other Payments
   function bindShipOpen(){ document.querySelectorAll('#supply-root .ship-open').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); gotoShipment(b.dataset.ref); }; }); }
   // after a view renders, expand the pending PO / shipment row (set by gotoPO / gotoShipment)
-  function expandPending(sel,want){ if(!want)return; var btn=null;
+  function expandPending(sel,want){ if(!want)return false; var btn=null;
     document.querySelectorAll(sel).forEach(function(b){ if((b.dataset.po||b.dataset.ref)===want)btn=b; });
-    if(btn){ btn.click(); try{btn.scrollIntoView({block:'center',behavior:'smooth'});}catch(e){} } }
+    if(btn){ btn.click(); try{btn.scrollIntoView({block:'center',behavior:'smooth'});}catch(e){} return true; } return false; }
   // Deposit picker popover (same UX as the shipment picker): search references, pick, or "No deposit".
   var depFull=null;
   function fetchDepositsFull(cb){ if(depFull)return cb(depFull);
@@ -773,7 +773,10 @@
       var sa=document.getElementById('po-showall'); if(sa)sa.onclick=function(){ _poShowAll=true; view(); };
       bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick();
       bindDepPick(refreshGrid); bindPoStars();
-      if(_pendingPO){ var want=_pendingPO; _pendingPO=null; setTimeout(function(){ expandPending('#sup-grid .po-exp[data-po]',want); },30); }
+      if(_pendingPO){ var want=_pendingPO; _pendingPO=null; setTimeout(function(){
+        // if the target PO is past the render cap it isn't in the DOM yet — reveal all rows and retry so the
+        // direct PO actually opens (links from Shipments / Deposits / Cash flow / Actions all rely on this)
+        if(!expandPending('#sup-grid .po-exp[data-po]',want) && !_poShowAll){ _poShowAll=true; view(); setTimeout(function(){ expandPending('#sup-grid .po-exp[data-po]',want); },30); } },30); }
       document.querySelectorAll('#sup-grid .erp-up').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.up); }; }); }
     // refresh the grid IN PLACE after an assign (deposit / shipment / supplier / branch / …) — re-fetch the PO
     // rows and re-render only #sup-grid, so filters + scroll position are kept (no full section reload / jump).
