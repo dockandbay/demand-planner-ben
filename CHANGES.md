@@ -180,6 +180,13 @@ across all shipments (ref / master PO / country). Each option now also shows the
 The **+ New production**, **+ Deposit**, and **+ Other payment** add buttons on the Productions sub-tabs are
 now full `save-btn` buttons instead of the small badge style.
 
+## v25.29 - Fix: "Deposit over-assigned" action false-firing
+
+The SUPPLY ▸ Actions "Deposit over-assigned" check now (a) **excludes closed deposits** (`status <> 'closed'`)
+and (b) uses a **1-cent tolerance** (`used > pool + 0.01`) instead of a strict `>`. This stops the nonsensical
+"Assigned start deposits 19360 exceed pool 19360 (remaining 0)" — a sub-cent rounding difference that the
+display rounded away — and stops the action appearing on already-closed deposits (e.g. P40-UK-XR3).
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.28';
+const APP_VERSION = 'v25.29';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1601,10 +1601,10 @@ app.get('/api/supply/:section', async (req, res) => {
             'Assigned start deposits '||round(dr.used)||' exceed pool '||round(d.pool)
             ||' (remaining '||round(d.pool-dr.used)||')', '','','', d.reference
             FROM (SELECT reference, sum(coalesce(amount,0)) pool FROM planner.deposits
-                  WHERE is_deposit AND reference IS NOT NULL GROUP BY reference) d
+                  WHERE is_deposit AND reference IS NOT NULL AND coalesce(status,'')<>'closed' GROUP BY reference) d
             JOIN (SELECT deposit_ref, sum(coalesce(pay_start_deposit_assigned,0)) used
                   FROM planner.purchase_orders WHERE deposit_ref IS NOT NULL GROUP BY deposit_ref
-            ) dr ON dr.deposit_ref=d.reference WHERE dr.used > d.pool
+            ) dr ON dr.deposit_ref=d.reference WHERE dr.used > d.pool + 0.01
           UNION ALL
           -- deposit still has money left, but its open POs have no start deposit left to allocate → review
           SELECT 'amber','Deposit remaining', x.reference,
