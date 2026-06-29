@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.49';
+const APP_VERSION = 'v25.50';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -5255,7 +5255,8 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
         (s.status NOT IN ('cancelled','complete') AND (coalesce(s.tracking_code,'')='' OR coalesce(s.change_requested,false) OR EXISTS
            (SELECT 1 FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending'))) is_open,
         coalesce((SELECT json_agg(json_build_object('sku',l.sku,'qty',l.qty) ORDER BY l.id) FROM planner.sample_request_lines l WHERE l.sample_id=s.id),'[]') lines,
-        coalesce((SELECT json_agg(json_build_object('id',c.id,'freight_cost',c.freight_cost,'product_cost',c.product_cost,'status',c.status,'description',coalesce(c.description,'')) ORDER BY c.created_at) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref),'[]') charges
+        coalesce((SELECT json_agg(json_build_object('id',c.id,'freight_cost',c.freight_cost,'product_cost',c.product_cost,'status',c.status,'description',coalesce(c.description,'')) ORDER BY c.created_at) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref),'[]') charges,
+        (SELECT count(*) FROM planner.sample_notes n WHERE n.sample_id=s.id AND n.author_kind='internal' AND n.read_at IS NULL)::int unread_dnb
         FROM planner.sample_requests s
         WHERE coalesce(s.supplier_name,'')=ANY($1) OR coalesce(s.supplier_id,-1)=ANY($2)
         ORDER BY s.created_at DESC`, [names, ids.length ? ids : [-1]]) : [];
@@ -5273,7 +5274,16 @@ async function portalOwnsSample(req, id){ if(!id)return null;
   return null; }
 app.get('/api/portal/sample-notes/:id', portalAuth, async (req, res) => {
   try { const s = await portalOwnsSample(req, req.params.id); if(!s) return res.status(403).json({ error: 'not your sample' });
-    res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at FROM planner.sample_notes WHERE sample_id=$1::bigint ORDER BY created_at`, [s.id])).rows); }
+    res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read FROM planner.sample_notes WHERE sample_id=$1::bigint ORDER BY created_at`, [s.id])).rows); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/portal/sample-note-read/:id', portalAuth, async (req, res) => {   // supplier marks a D&B (internal) note read/unread
+  try { const n = (await pool.query(`SELECT sr.supplier_name, sr.supplier_id, n.author_kind FROM planner.sample_notes n JOIN planner.sample_requests sr ON sr.id=n.sample_id WHERE n.id=$1::bigint`, [req.params.id])).rows[0];
+    if(!n) return res.status(404).json({ error: 'not found' });
+    const names = req.portal.suppliers||[], ids = (req.portal.supplierIds||[]).map(Number);
+    if(!((n.supplier_name && names.indexOf(n.supplier_name)>=0) || (n.supplier_id!=null && ids.indexOf(Number(n.supplier_id))>=0))) return res.status(403).json({ error: 'not your note' });
+    const read = !(req.body && req.body.read === false);
+    await pool.query(`UPDATE planner.sample_notes SET read_at=${read?'now()':'NULL'} WHERE id=$1::bigint AND author_kind='internal'`, [req.params.id]);
+    res.json({ ok: true, read }); }
   catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample-accept', portalAuth, async (req, res) => {
   try { const s = await portalOwnsSample(req, req.body && req.body.id); if(!s) return res.status(403).json({ error: 'not your sample' });

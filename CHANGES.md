@@ -353,6 +353,15 @@ includes it; the supplier portal shows **"Not accepted" / "Change requested" in 
 
 **DIVIYAJ — NEW MIGRATION:** `085_sample_change_requested.sql` (idempotent, no backfill).
 
+## v25.50 - Sample timeline: bigger text, left-aligned, bidirectional read/unread
+
+- Timeline notes are now **larger (13px) and left-aligned** on both the admin (SUPPLY ▸ Samples) and the
+  supplier portal.
+- **Bidirectional read/unread** (reusing `sample_notes.read_at` as "read by the recipient"): the admin reads
+  supplier notes (existing), and the **supplier now reads D&B notes** in the portal — unread D&B notes show a
+  highlighted "new" badge + Mark-read, feed a per-sample badge and the **SAMPLES tab count** in the portal.
+  New portal endpoint `/api/portal/sample-note-read/:id`.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
