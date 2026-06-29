@@ -573,6 +573,7 @@
       +lookupDatalists()+'<div class="cli-form" style="max-width:560px">'
       +row('PO Number','<input class="fci pom-po" data-po="'+esc(po)+'" value="'+esc(po)+'" style="width:200px;text-align:left">')
       +row('Branch',cellPickBtn(po,ep,'branch',r.branch,'branch'))
+      +row('Ship to <span class="mut tiny">(blank = use branch country)</span>',countrySel(ep,r.country_override,true)+' <span class="mut tiny">'+(r.country_src==='M'?'override':'branch country')+'</span>')
       +row('Supplier',cellPickBtn(po,'/api/supply/po/'+encodeURIComponent(po)+'/supplier','supplier_name',r.supplier_name,'supplier'))
       +row('Production',cellPickBtn(po,ep,'prod_no',r.prod_no,'prod'))
       +row('Batch ID',cellPickBtn(po,ep,'batch_id',r.batch_id,'batch'))
@@ -1185,7 +1186,6 @@
     function srcLbl(s){ return s==='S'?'<span class="src fx">shipment</span>':s==='FLEX'?'<span class="src fx">Flexport</span>':s==='calc'?'calculated':'—'; }
     var datesH='<div class="sect-h">Dates <span class="mut tiny">— only production start &amp; end are editable; the rest auto-calculate</span></div>'
       +'<div class="tw" style="max-width:760px"><table><thead><tr><th class="l">Milestone</th><th class="l">Date</th><th class="l" style="min-width:250px">Source</th></tr></thead><tbody>'
-      +'<tr><td class="l">Ship to <span class="mut tiny">(blank = branch country)</span></td><td class="l">'+countrySel(ep,r.country_override,true)+'</td><td class="l mut tiny">'+(r.country_src==='M'?'override':'branch')+'</td></tr>'
       +'<tr><td class="l"><b>Production start</b></td><td class="l">'+payIn(ep,'start_production',r.prod_start,true)+'</td><td class="l mut tiny">manual</td></tr>'
       +'<tr><td class="l"><b>Production end</b></td><td class="l">'+payIn(ep,'end_production_overide',r.end_override,true)+'</td><td class="l mut tiny">'+(r.end_override?'override':'start + supplier days')+'</td></tr>'
       +(function(){ var pse=r.require_confirmation?prodStatusException(r.production_status,r.prod_start,r.prod_end):'';

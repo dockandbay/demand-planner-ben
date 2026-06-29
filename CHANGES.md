@@ -158,6 +158,12 @@ eventually causing `EMAXCONNSESSION max clients reached … pool_size: 15` and f
 
 (No DB/schema change.)
 
+## v25.25 - PO detail: move "Ship to" to the Master Data sub-tab
+
+The PO **Ship to (country)** override now lives in the **Master Data** sub-tab (next to Branch/Supplier),
+where it belongs, and was removed from the Dates sub-tab. Blank = use the branch country; the source note
+shows "override" vs "branch country". (The grid's "M" badge still flags a manual ship-to override.)
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
