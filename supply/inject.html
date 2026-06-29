@@ -2250,7 +2250,7 @@
             +'<button class="pu-del" data-id="'+u.id+'" title="Remove" style="cursor:pointer;border:1px solid #fecaca;background:#fff5f5;color:#b91c1c;border-radius:4px;font-size:11px;padding:3px 9px">Remove</button></td></tr>'; }).join('');
       return lookupDatalists()
         +'<div class="sect-h">Portal users <span class="mut tiny">(approved supplier logins — each email is mapped to one supplier and sees only that supplier\'s data in the portal)</span> <button class="tool-badge bg-blue" id="pu-new" style="cursor:pointer;border:none;margin-left:8px">+ Portal user</button></div>'
-        +'<div class="tw" style="max-width:1000px"><table><thead><tr><th class="l">Email</th><th class="l" style="min-width:170px">Supplier</th><th class="l">Contact</th><th class="l">Access</th><th class="l">Sessions</th><th class="l"></th></tr></thead><tbody>'+(body||'<tr><td colspan="6" class="l mut">No portal users yet.</td></tr>')+'</tbody></table></div>'
+        +'<div class="tw" style="max-width:1000px"><table><thead><tr><th class="l">Email</th><th class="l" style="min-width:170px">Supplier</th><th class="l">Contact</th><th class="l">Access</th><th class="l">Sessions</th><th class="l"></th></tr></thead><tbody id="pu-tbody">'+(body||'<tr class="pu-empty"><td colspan="6" class="l mut">No portal users yet.</td></tr>')+'</tbody></table></div>'
         +'<div class="mut tiny" style="margin-top:6px">Magic link is a dev stub — it returns the login URL (valid 7 days) and copies it to your clipboard. Real email delivery is wired for production by Diviyaj.</div>'; }
     function batchTbl(rows){ var body=rows.map(function(r){ var ep='/api/supply/batch/'+encodeURIComponent(r.batch);
       return '<tr><td class="l"><b>'+esc(r.batch)+'</b></td><td class="l">'+editCell(ep,'batch_date',r.batch_date,'date')+'</td>'
@@ -2308,8 +2308,23 @@
       else if(CONFIG_SUB==='portalusers'){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/portal-users').then(function(r){return r.json();}).then(function(rows){
           fetchLookups(function(){ b.innerHTML=portalUsersTbl(rows); bindEdits();
-            document.getElementById('pu-new').onclick=function(){ var em=prompt('Portal user email:'); if(!em||!em.trim())return; var sup=prompt('Supplier (exact name — must match a supplier):')||'';
-              shipPost('/api/supply/portal-user-create',{email:em.trim(),supplier_name:sup.trim()||null},showSub); };
+            document.getElementById('pu-new').onclick=function(){ var tb=document.getElementById('pu-tbody'); if(!tb||tb.querySelector('.pu-newrow'))return;
+              var em0=tb.querySelector('.pu-empty'); if(em0)em0.remove();
+              var tr=document.createElement('tr'); tr.className='pu-newrow';
+              tr.innerHTML='<td class="l"><input class="fci txt pu-nemail" type="email" placeholder="email@supplier.com" style="width:200px"></td>'
+                +'<td class="l"><input class="fci txt pu-nsup" list="supplierlist" placeholder="search supplier…" style="width:170px"></td>'
+                +'<td class="l"><input class="fci txt pu-ncontact" placeholder="contact (optional)" style="width:140px"></td>'
+                +'<td class="l"><span class="mut tiny">—</span></td><td class="l"></td>'
+                +'<td class="l"><button class="save-btn pu-add" style="background:#16a34a;color:#fff;border-color:#15803d">Add</button> <button class="save-btn light pu-cancel">Cancel</button><div class="pu-err" style="color:#dc2626;font-size:11px;margin-top:2px"></div></td>';
+              tb.insertBefore(tr, tb.firstChild); tr.querySelector('.pu-nemail').focus();
+              tr.querySelector('.pu-cancel').onclick=function(){ tr.remove(); };
+              tr.querySelector('.pu-add').onclick=function(){ var btn=this; var em=(tr.querySelector('.pu-nemail').value||'').trim(), sup=(tr.querySelector('.pu-nsup').value||'').trim(), ct=(tr.querySelector('.pu-ncontact').value||'').trim(), err=tr.querySelector('.pu-err'); err.textContent='';
+                if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){ err.textContent='Enter a valid email address.'; tr.querySelector('.pu-nemail').focus(); return; }
+                if(!sup){ err.textContent='Select a supplier from the list.'; tr.querySelector('.pu-nsup').focus(); return; }
+                if((supplierList||[]).length && supplierList.indexOf(sup)<0){ err.textContent='“'+sup+'” isn’t in the supplier list — pick one.'; tr.querySelector('.pu-nsup').focus(); return; }
+                btn.disabled=true; fetch('/api/supply/portal-user-create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:em,supplier_name:sup,contact_name:ct||null})}).then(function(r){return r.json();})
+                  .then(function(j){ if(j&&j.error){ err.textContent=j.error; btn.disabled=false; return; } showSub(); })
+                  .catch(function(e){ err.textContent=(e&&e.message)||'failed'; btn.disabled=false; }); }; };
             b.querySelectorAll('.pu-magic').forEach(function(btn){ btn.onclick=function(){ fetch('/api/supply/portal-magic/'+btn.dataset.id,{method:'POST'}).then(function(r){return r.json();}).then(function(j){ if(j.error)return alert(j.error); copyText(j.url,'Magic link'); alert('Magic link for '+j.email+' (valid '+j.expires_days+' days) — copied to your clipboard:\n\n'+j.url); }); }; });
             b.querySelectorAll('.pu-del').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Remove this portal user? Their access is revoked.'))return; shipPost('/api/supply/portal-user/'+btn.dataset.id,{_delete:true},showSub); }; });
           }); }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); }

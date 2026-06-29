@@ -292,6 +292,13 @@ so the buttons did `fetch(undefined)` → "The string did not match the expected
 uses the `/api/portal/sample-*` equivalents), wired them into the preview EP, and the "new sample" form now
 sends the previewed supplier name. (`sample-note` also accepts `id` or `sample_id`.)
 
+## v25.42 - CONFIG ▸ Portal users: inline add row (no popups)
+
+"+ Portal user" now inserts an editable **new row** instead of `prompt()` dialogs: an **email** field
+(`type=email` + format validation), a **supplier** field that's a **search/dropdown from the supplier list**
+(must match a real supplier), and an optional contact — with **inline error messages** (no popups). Add/Cancel
+in the row; saves via the existing create endpoint.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
