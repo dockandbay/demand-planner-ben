@@ -55,7 +55,9 @@
   var EP={ lineCost:'/api/portal/line-cost', lineRemove:'/api/portal/line-remove', crossdockQty:'/api/portal/crossdock-qty',
     addlCost:'/api/portal/additional-cost', addlCostRemove:'/api/portal/additional-cost-remove', note:'/api/portal/note',
     notesBase:'/api/portal/notes/', noteReadBase:'/api/portal/note-read/', submit:'/api/portal/submit', upload:'/api/portal/upload',
-    labelData:'/api/portal/label-data' };
+    labelData:'/api/portal/label-data',
+    sampleAccept:'/api/portal/sample-accept', sampleUpdate:'/api/portal/sample-update', sampleNote:'/api/portal/sample-note',
+    sampleNotesBase:'/api/portal/sample-notes/', sampleCharge:'/api/portal/sample-charge', sampleCreate:'/api/portal/sample-create' };
 
   function showPortal(me){
     var sup=(me.suppliers||[]).join(', ')||'Supplier';

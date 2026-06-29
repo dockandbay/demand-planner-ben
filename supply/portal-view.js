@@ -412,7 +412,7 @@
     var _ppShowAllPO=false, _ppShowAllSP=false;   // "show all" toggles for the capped PO / shipment grids
     var _invFiles={};     // base64 of the last parsed invoice file, per PO (for the Apply step)
     var rootEl=opts.root; if(!rootEl.closest('#supply-root')){rootEl.id='supply-root';} rootEl.style.display='block';
-    rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders</span><span class="rtab" data-pt="shipmentplan">Shipment Plan</span><span class="rtab" data-pt="deposits">Deposits</span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
+    rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders</span><span class="rtab" data-pt="shipmentplan">Shipment Plan</span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="samples">Samples <span id="pp-samp-badge"></span></span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
     var tabsEl=document.getElementById('pp-tabs'), body=document.getElementById('pp-body');
     function postJSON(ep,b2,cb){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b2)}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} cb&&cb(j); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); }); }
     function ppCard(l,v){ return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px 14px;min-width:120px"><div class="tiny mut">'+l+'</div><div style="font-weight:700;font-size:16px">'+v+'</div></div>'; }
@@ -646,8 +646,69 @@
                 +((notes&&notes.length)?notes.map(function(n){return '<div class="tiny" style="margin:2px 0"><span class="mut">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span> — '+esc(n.body)+'</div>';}).join(''):'<div class="mut tiny">No timeline entries yet.</div>');
               box.querySelector('.sp-note-post').onclick=function(){ var inp=box.querySelector('.sp-note-in'); var v=(inp.value||'').trim(); if(!v)return;
                 postJSON(EP.shipmentNote,{shipment_ref:ref,author_kind:'supplier',author_email:STATE.by,body:v},function(){ ppShipTimeline(ref); }); }; }).catch(function(){}); }
+          function sampChip(st){ var m={'open':['#dbeafe','#1d4ed8'],'complete':['#dcfce7','#166534'],'cancelled':['#f1f5f9','#94a3b8']}; var c=m[st]||['#e2e8f0','#475569']; return '<span style="background:'+c[0]+';color:'+c[1]+';border-radius:4px;font-size:10px;font-weight:700;padding:1px 6px">'+esc(st||'')+'</span>'; }
+          function chgChip(st){ var m={pending:['#fef3c7','#92710a'],accepted:['#dcfce7','#166534'],rejected:['#f1f5f9','#94a3b8']}; var c=m[st]||['#e2e8f0','#475569']; return '<span style="background:'+c[0]+';color:'+c[1]+';border-radius:4px;font-size:10px;padding:1px 6px">'+esc(st)+'</span>'; }
+          function ppSampleCard(s){
+            var skus=(s.lines||[]).map(function(l){return esc(l.sku)+' <span class="mut">×'+units(l.qty)+'</span>';}).join(', ')||'—';
+            var addr=[s.address_line1,s.address_line2,[s.city,s.region].filter(Boolean).join(' '),[s.postcode,s.country].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+            var charges=(s.charges||[]).map(function(c){ var t=(Number(c.freight_cost)||0)+(Number(c.product_cost)||0); return '<div class="tiny" style="margin:1px 0">'+chgChip(c.status)+' freight '+money(c.freight_cost)+' + product '+money(c.product_cost)+' = <b>'+money(t)+'</b>'+(c.description?' · '+esc(c.description):'')+'</div>'; }).join('');
+            var shipped=!!s.tracking_code;
+            return '<div class="samp-card" data-id="'+s.id+'" data-ref="'+esc(s.ref)+'" style="border:1px solid #e5e7eb;border-radius:10px;padding:12px;margin-bottom:12px">'
+              +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><b style="font-size:14px">'+esc(s.ref)+'</b>'+sampChip(s.status)
+                +(s.accepted?'<span style="background:#dcfce7;color:#166534;border-radius:4px;font-size:10px;font-weight:700;padding:1px 6px">accepted</span>':'<button class="save-btn samp-accept" data-id="'+s.id+'" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Accept request</button>')
+                +'<span class="mut tiny" style="margin-left:auto">required '+(s.completion_required?fd(s.completion_required):'—')+'</span></div>'
+              +'<div class="tiny" style="margin-top:6px"><b>'+esc(s.recipient_company||'')+'</b> · '+esc(s.recipient_name||'')+' · '+esc(addr)+(s.phone?' · '+esc(s.phone):'')+'</div>'
+              +'<div class="tiny" style="margin-top:3px">SKUs: '+skus+'</div>'
+              +'<div class="mut tiny">Purpose: '+esc((s.purpose||[]).join(', ')||'—')+(s.notes?' · Notes: '+esc(s.notes):'')+'</div>'
+              +'<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;margin-top:8px">'
+                +'<div><div class="mut tiny">Expected completion</div><input type="date" class="fci samp-exp" value="'+esc(s.supplier_expected||'')+'" style="width:150px"></div>'
+                +'<div><div class="mut tiny">Tracking code</div><input class="fci txt samp-trk" value="'+esc(s.tracking_code||'')+'" style="width:170px" placeholder="tracking…"></div>'
+                +'<div><div class="mut tiny">Carrier</div><input class="fci txt samp-car" value="'+esc(s.carrier||'')+'" style="width:120px" placeholder="carrier…"></div>'
+                +'<button class="save-btn samp-save">Save</button></div>'
+              +'<div style="margin-top:10px;border-top:1px solid #f1f5f9;padding-top:8px"><div class="tiny" style="font-weight:600">Charges</div>'+(charges||'<div class="mut tiny">none</div>')
+                +'<div style="display:flex;gap:6px;align-items:flex-end;margin-top:4px;flex-wrap:wrap"><div><div class="mut tiny">Freight</div><input class="fci samp-cf" style="width:80px" placeholder="0.00"></div><div><div class="mut tiny">Product</div><input class="fci samp-cp" style="width:80px" placeholder="0.00"></div><div><div class="mut tiny">Note</div><input class="fci txt samp-cd" style="width:180px" placeholder="optional"></div><button class="save-btn samp-charge">Create charge</button></div></div>'
+              +'<div style="margin-top:10px;border-top:1px solid #f1f5f9;padding-top:8px"><div class="tiny" style="font-weight:600;margin-bottom:3px">Timeline</div>'
+                +'<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:6px"><textarea class="fci samp-note-in" rows="2" placeholder="Add a note…" style="flex:1;max-width:480px;text-align:left"></textarea><button class="save-btn samp-note-post">Post</button></div>'
+                +'<div class="samp-tl" data-id="'+s.id+'"></div></div>'
+              +'</div>'; }
+          function ppSamples(samples){
+            var open=samples.filter(function(s){return s.is_open;}), closed=samples.filter(function(s){return !s.is_open;});
+            return '<div class="bar" style="margin-bottom:8px"><b style="font-size:14px">Sample requests</b><button class="save-btn" id="samp-new-btn" style="margin-left:auto;background:#16a34a;color:#fff;border-color:#15803d">+ New sample request</button></div>'
+              +'<div id="samp-newform"></div>'
+              +(samples.length?('<div class="tiny" style="font-weight:600;margin:6px 0 4px">Open ('+open.length+')</div>'+(open.map(ppSampleCard).join('')||'<div class="mut tiny">none</div>')
+                +'<div class="tiny" style="font-weight:600;margin:12px 0 4px">Closed ('+closed.length+')</div>'+(closed.map(ppSampleCard).join('')||'<div class="mut tiny">none</div>'))
+                :'<div class="count">No sample requests yet.</div>'); }
+          function ppSampleTimeline(id){ var box=body.querySelector('.samp-tl[data-id="'+id+'"]'); if(!box)return;
+            fetch(EP.sampleNotesBase+id).then(function(r){return r.json();}).then(function(notes){
+              box.innerHTML=(notes&&notes.length)?notes.map(function(n){return '<div class="tiny" style="margin:2px 0"><span class="mut">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span> — '+esc(n.body)+'</div>';}).join(''):'<div class="mut tiny">No timeline entries yet.</div>'; }).catch(function(){}); }
+          function ppSampleNewForm(){ var box=document.getElementById('samp-newform'); if(box.dataset.open==='1'){box.dataset.open='';box.innerHTML='';return;} box.dataset.open='1';
+            var purp=['sales','product','photography','marketing','operations'].map(function(p){return '<label style="margin-right:10px;font-size:11px"><input type="checkbox" class="snf-purpose" value="'+p+'"> '+p+'</label>';}).join('');
+            box.innerHTML='<div style="border:1px solid #cbd5e1;border-radius:10px;padding:12px;margin-bottom:12px;background:#f8fafc"><div class="tiny" style="font-weight:700;margin-bottom:6px">New sample request</div>'
+              +'<div style="display:flex;gap:8px;flex-wrap:wrap"><input class="fci txt snf-recipient_company" placeholder="Recipient company" style="width:200px"><input class="fci txt snf-first_name" placeholder="First name" style="width:120px"><input class="fci txt snf-last_name" placeholder="Last name" style="width:120px"><input class="fci txt snf-phone" placeholder="Phone" style="width:140px"></div>'
+              +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px"><input class="fci txt snf-address_line1" placeholder="Address line 1" style="width:260px"><input class="fci txt snf-address_line2" placeholder="Line 2" style="width:160px"><input class="fci txt snf-city" placeholder="City" style="width:120px"><input class="fci txt snf-region" placeholder="Region" style="width:100px"><input class="fci txt snf-postcode" placeholder="Postcode" style="width:100px"><input class="fci txt snf-country" placeholder="Country" style="width:80px"></div>'
+              +'<div style="margin-top:4px"><span class="mut tiny">Completion required </span><input type="date" class="fci snf-completion" style="width:150px"> &nbsp; '+purp+'</div>'
+              +'<div style="margin-top:4px"><div class="mut tiny">SKUs — paste <b>sku, qty</b> per line:</div><textarea class="fci snf-paste" rows="3" style="width:320px;text-align:left" placeholder="TOWLB-..., 2"></textarea></div>'
+              +'<div style="margin-top:4px"><textarea class="fci snf-notes" rows="2" placeholder="Notes" style="width:320px;text-align:left"></textarea></div>'
+              +'<div style="margin-top:8px"><button class="save-btn snf-save" style="background:#16a34a;color:#fff;border-color:#15803d">Create</button> <button class="save-btn snf-cancel">Cancel</button></div></div>';
+            box.querySelector('.snf-cancel').onclick=function(){box.dataset.open='';box.innerHTML='';};
+            box.querySelector('.snf-save').onclick=function(){ var btn=this; function V(k){var f=box.querySelector('.snf-'+k);return f?f.value.trim():'';}
+              var purpose=Array.prototype.map.call(box.querySelectorAll('.snf-purpose:checked'),function(x){return x.value;});
+              var lines=[]; V('paste').split(/\n/).forEach(function(ln){var p=ln.split(/[,\t]/);var sku=(p[0]||'').trim();if(sku)lines.push({sku:sku,qty:Number((p[1]||'').trim())||0});});
+              btn.disabled=true; postJSON(EP.sampleCreate,{recipient_company:V('recipient_company')||null,first_name:V('first_name')||null,last_name:V('last_name')||null,phone:V('phone')||null,address_line1:V('address_line1')||null,address_line2:V('address_line2')||null,city:V('city')||null,region:V('region')||null,postcode:V('postcode')||null,country:V('country')||null,completion_date_required:V('completion')||null,purpose:purpose,notes:V('notes')||null,lines:lines},function(){ reload(); }); }; }
+          function wireSamples(){
+            var nb=document.getElementById('samp-new-btn'); if(nb)nb.onclick=ppSampleNewForm;
+            body.querySelectorAll('.samp-accept').forEach(function(b){ b.onclick=function(){ b.disabled=true; postJSON(EP.sampleAccept,{id:b.dataset.id},function(){ reload(); }); }; });
+            body.querySelectorAll('.samp-card').forEach(function(card){ var id=card.dataset.id;
+              var save=card.querySelector('.samp-save'); if(save)save.onclick=function(){ postJSON(EP.sampleUpdate,{id:id,supplier_expected_completion:card.querySelector('.samp-exp').value||null,tracking_code:card.querySelector('.samp-trk').value||null,carrier:card.querySelector('.samp-car').value||null},function(){ reload(); }); };
+              var ch=card.querySelector('.samp-charge'); if(ch)ch.onclick=function(){ var f=card.querySelector('.samp-cf').value, p=card.querySelector('.samp-cp').value, d=card.querySelector('.samp-cd').value; if(!f&&!p){alert('Enter a freight and/or product cost.');return;} ch.disabled=true; postJSON(EP.sampleCharge,{id:id,freight_cost:Number(f)||0,product_cost:Number(p)||0,description:d||null},function(){ reload(); }); };
+              var np=card.querySelector('.samp-note-post'); if(np)np.onclick=function(){ var inp=card.querySelector('.samp-note-in'); var v=(inp.value||'').trim(); if(!v)return; postJSON(EP.sampleNote,{id:id,body:v},function(){ inp.value=''; ppSampleTimeline(id); }); };
+              ppSampleTimeline(id);
+            }); }
           function renderPP(){ if(!_ppData)return; var body=document.getElementById('pp-body');
             tabsEl.querySelectorAll('.rtab').forEach(function(t){t.classList.toggle('active',t.dataset.pt===PORTAL_TAB);});
+            var sampUn=(_ppData.samples||[]).filter(function(s){return !s.accepted && s.status!=='cancelled' && s.status!=='complete';}).length;
+            var sbg=document.getElementById('pp-samp-badge'); if(sbg)sbg.innerHTML=sampUn?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+sampUn+'</span>':'';
+            if(PORTAL_TAB==='samples'){ body.innerHTML=ppSamples(_ppData.samples||[]); wireSamples(); return; }
             if(PORTAL_TAB==='shipmentplan'){
               var today=new Date().toISOString().slice(0,10);
               var allSp=_ppData.shipmentPlan||[];

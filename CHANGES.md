@@ -241,6 +241,17 @@ sub-tab. `renderBarcodes` now renders into the productions body.
 - **Samples grid** is now fully **left-aligned** (the supply tables default to right-align; only `.l` cells go
   left). Added a `samp-tbl` rule. Left is the intended default for grids.
 
+## v25.35 - Samples feature — Phase 4: supplier portal
+
+New **Samples** tab in the supplier portal (scoped to the logged-in supplier):
+- **Unaccepted counter** badge on the tab; Open/Closed grouping.
+- Per sample: **Accept request**, set **expected completion**, add **tracking + carrier**, post **timeline
+  notes**, and **create a charge** (freight + product → admin accepts → Other Payment).
+- **+ New sample request** — the supplier can originate a sample (recipient/address/SKUs-paste/purpose/notes).
+- Server: samples added to `/api/portal/bootstrap`; new portalAuth-scoped endpoints
+  `/api/portal/sample-{accept,update,note,charge,create}` + `/api/portal/sample-notes/:id` (each verifies the
+  sample belongs to the supplier). portal.html EP map extended.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.34';
+const APP_VERSION = 'v25.35';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -5214,10 +5214,67 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
     const lb = byPo(lines), notesByPo = byPo(notes), subsByPo = byPo(subs), addByPo = byPo(ac);
     const costsByPo = {}; lc.forEach(x => { (costsByPo[x.po] = costsByPo[x.po] || {})[x.sku] = x; });
     const xdByPo = {}; xd.forEach(x => { (xdByPo[x.po] = xdByPo[x.po] || {})[x.sku] = x.qty; });
+    const samples = names.length ? await q(`SELECT s.id, s.ref, coalesce(s.supplier_name,'') supplier_name,
+        coalesce(s.recipient_company,'') recipient_company, trim(coalesce(s.first_name,'')||' '||coalesce(s.last_name,'')) recipient_name,
+        coalesce(s.address_line1,'') address_line1, coalesce(s.address_line2,'') address_line2, coalesce(s.city,'') city,
+        coalesce(s.region,'') region, coalesce(s.postcode,'') postcode, coalesce(s.country,'') country, coalesce(s.phone,'') phone,
+        to_char(s.completion_date_required,'YYYY-MM-DD') completion_required, coalesce(s.purpose,'{}') purpose, coalesce(s.notes,'') notes,
+        s.status, (s.accepted_at IS NOT NULL) accepted, to_char(s.supplier_expected_completion,'YYYY-MM-DD') supplier_expected,
+        coalesce(s.tracking_code,'') tracking_code, coalesce(s.carrier,'') carrier,
+        (s.status NOT IN ('cancelled','complete') AND (coalesce(s.tracking_code,'')='' OR EXISTS
+           (SELECT 1 FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending'))) is_open,
+        coalesce((SELECT json_agg(json_build_object('sku',l.sku,'qty',l.qty) ORDER BY l.id) FROM planner.sample_request_lines l WHERE l.sample_id=s.id),'[]') lines,
+        coalesce((SELECT json_agg(json_build_object('id',c.id,'freight_cost',c.freight_cost,'product_cost',c.product_cost,'status',c.status,'description',coalesce(c.description,'')) ORDER BY c.created_at) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref),'[]') charges
+        FROM planner.sample_requests s
+        WHERE coalesce(s.supplier_name,'')=ANY($1) OR coalesce(s.supplier_id,-1)=ANY($2)
+        ORDER BY s.created_at DESC`, [names, ids.length ? ids : [-1]]) : [];
     res.json({ pos, lb, sdep: deps, sid: ids[0] || null, supplierName: names.join(', '),
-      notesByPo, subsByPo, costsByPo, supSkus, xdByPo, addByPo });
+      notesByPo, subsByPo, costsByPo, supSkus, xdByPo, addByPo, samples });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// ── PORTAL SAMPLES (supplier-scoped) ──────────────────────────────────────────
+async function portalOwnsSample(req, id){ if(!id)return null;
+  const r = await pool.query(`SELECT id, ref, coalesce(supplier_name,'') supplier_name, supplier_id, status FROM planner.sample_requests WHERE id=$1::bigint`, [id]);
+  const s = r.rows[0]; if(!s) return null;
+  const names = req.portal.suppliers||[], ids = (req.portal.supplierIds||[]).map(Number);
+  if ((s.supplier_name && names.indexOf(s.supplier_name)>=0) || (s.supplier_id!=null && ids.indexOf(Number(s.supplier_id))>=0)) return s;
+  return null; }
+app.get('/api/portal/sample-notes/:id', portalAuth, async (req, res) => {
+  try { const s = await portalOwnsSample(req, req.params.id); if(!s) return res.status(403).json({ error: 'not your sample' });
+    res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at FROM planner.sample_notes WHERE sample_id=$1::bigint ORDER BY created_at`, [s.id])).rows); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/portal/sample-accept', portalAuth, async (req, res) => {
+  try { const s = await portalOwnsSample(req, req.body && req.body.id); if(!s) return res.status(403).json({ error: 'not your sample' });
+    await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), updated_at=now() WHERE id=$1::bigint`, [s.id]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/portal/sample-update', portalAuth, async (req, res) => {   // supplier: expected completion / tracking / carrier
+  const b = req.body || {};
+  try { const s = await portalOwnsSample(req, b.id); if(!s) return res.status(403).json({ error: 'not your sample' });
+    patch(res, 'planner.sample_requests', 'id', s.id, { supplier_expected_completion:'date', tracking_code:'text', carrier:'text' }, b, 'bigint'); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/portal/sample-note', portalAuth, async (req, res) => {
+  const b = req.body || {};
+  try { const s = await portalOwnsSample(req, b.id); if(!s) return res.status(403).json({ error: 'not your sample' }); if(!b.body) return res.status(400).json({ error: 'body required' });
+    const r = await pool.query(`INSERT INTO planner.sample_notes (sample_id, author_kind, author_email, body) VALUES ($1::bigint,'supplier',$2,$3) RETURNING id`, [s.id, req.portal.email||null, String(b.body)]); res.json({ id: r.rows[0].id }); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/portal/sample-charge', portalAuth, async (req, res) => {   // supplier creates a charge → admin accepts → Other Payment
+  const b = req.body || {};
+  try { const s = await portalOwnsSample(req, b.id); if(!s) return res.status(403).json({ error: 'not your sample' });
+    const r = await pool.query(`INSERT INTO planner.supplier_charges (source_type, source_ref, supplier_name, freight_cost, product_cost, description, created_by)
+      VALUES ('sample',$1,$2,$3,$4,$5,$6) RETURNING id`, [s.ref, s.supplier_name, Number(b.freight_cost)||0, Number(b.product_cost)||0, b.description||null, req.portal.email||'supplier']); res.json({ ok: true, id: r.rows[0].id }); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/portal/sample-create', portalAuth, async (req, res) => {   // supplier originates a sample request
+  const b = req.body || {}; const names = req.portal.suppliers||[], ids = req.portal.supplierIds||[];
+  const supName = names[0]||null, supId = ids[0]||null; const client = await pool.connect();
+  try { await client.query('BEGIN');
+    const ins = await client.query(`INSERT INTO planner.sample_requests (supplier_id, supplier_name, recipient_company, first_name, last_name, address_line1, address_line2, city, region, postcode, country, phone, completion_date_required, purpose, notes, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
+      [supId, supName, b.recipient_company||null, b.first_name||null, b.last_name||null, b.address_line1||null, b.address_line2||null, b.city||null, b.region||null, b.postcode||null, (b.country||'').toUpperCase()||null, b.phone||null, b.completion_date_required||null, Array.isArray(b.purpose)?b.purpose:null, b.notes||null, req.portal.email||'supplier']);
+    const id = ins.rows[0].id, ref = 'SR-'+id; await client.query(`UPDATE planner.sample_requests SET ref=$1 WHERE id=$2`, [ref, id]);
+    for (const l of (Array.isArray(b.lines)?b.lines:[])) { if(!l||!l.sku) continue; await client.query(`INSERT INTO planner.sample_request_lines (sample_id, sku, qty) VALUES ($1,$2,$3)`, [id, String(l.sku).trim(), Math.round(Number(l.qty)||0)]); }
+    await client.query('COMMIT'); res.json({ ok: true, id, ref });
+  } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); } finally { client.release(); } });
 
 // Everything the supplier sees — scoped server-side to their supplier(s).
 app.get('/api/portal/data', portalAuth, async (req, res) => {
