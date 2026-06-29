@@ -649,26 +649,28 @@
           function sampChip(st){ var m={'open':['#dbeafe','#1d4ed8'],'complete':['#dcfce7','#166534'],'cancelled':['#f1f5f9','#94a3b8']}; var c=m[st]||['#e2e8f0','#475569']; return '<span style="background:'+c[0]+';color:'+c[1]+';border-radius:4px;font-size:10px;font-weight:700;padding:1px 6px">'+esc(st||'')+'</span>'; }
           function chgChip(st){ var m={pending:['#fef3c7','#92710a'],accepted:['#dcfce7','#166534'],rejected:['#f1f5f9','#94a3b8']}; var c=m[st]||['#e2e8f0','#475569']; return '<span style="background:'+c[0]+';color:'+c[1]+';border-radius:4px;font-size:10px;padding:1px 6px">'+esc(st)+'</span>'; }
           function ppSampleCard(s){
-            var skus=(s.lines||[]).map(function(l){return esc(l.sku)+' <span class="mut">×'+units(l.qty)+'</span>';}).join(', ')||'—';
-            var addr=[s.address_line1,s.address_line2,[s.city,s.region].filter(Boolean).join(' '),[s.postcode,s.country].filter(Boolean).join(' ')].filter(Boolean).join(', ');
-            var charges=(s.charges||[]).map(function(c){ var t=(Number(c.freight_cost)||0)+(Number(c.product_cost)||0); return '<div class="tiny" style="margin:1px 0">'+chgChip(c.status)+' freight '+money(c.freight_cost)+' + product '+money(c.product_cost)+' = <b>'+money(t)+'</b>'+(c.description?' · '+esc(c.description):'')+'</div>'; }).join('');
-            var shipped=!!s.tracking_code;
-            return '<div class="samp-card" data-id="'+s.id+'" data-ref="'+esc(s.ref)+'" style="border:1px solid #e5e7eb;border-radius:10px;padding:12px;margin-bottom:12px">'
-              +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><b style="font-size:14px">'+esc(s.ref)+'</b>'+sampChip(s.status)
-                +(s.accepted?'<span style="background:#dcfce7;color:#166534;border-radius:4px;font-size:10px;font-weight:700;padding:1px 6px">accepted</span>':'<button class="save-btn samp-accept" data-id="'+s.id+'" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Accept request</button>')
-                +'<span class="mut tiny" style="margin-left:auto">required '+(s.completion_required?fd(s.completion_required):'—')+'</span></div>'
-              +'<div class="tiny" style="margin-top:6px"><b>'+esc(s.recipient_company||'')+'</b> · '+esc(s.recipient_name||'')+' · '+esc(addr)+(s.phone?' · '+esc(s.phone):'')+'</div>'
-              +'<div class="tiny" style="margin-top:3px">SKUs: '+skus+'</div>'
-              +'<div class="mut tiny">Purpose: '+esc((s.purpose||[]).join(', ')||'—')+(s.notes?' · Notes: '+esc(s.notes):'')+'</div>'
-              +'<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;margin-top:8px">'
-                +'<div><div class="mut tiny">Expected completion</div><input type="date" class="fci samp-exp" value="'+esc(s.supplier_expected||'')+'" style="width:150px"></div>'
-                +'<div><div class="mut tiny">Tracking code</div><input class="fci txt samp-trk" value="'+esc(s.tracking_code||'')+'" style="width:170px" placeholder="tracking…"></div>'
-                +'<div><div class="mut tiny">Carrier</div><input class="fci txt samp-car" value="'+esc(s.carrier||'')+'" style="width:120px" placeholder="carrier…"></div>'
+            function lbl(t){ return '<div style="font-size:9.5px;letter-spacing:.04em;text-transform:uppercase;color:#94a3b8;font-weight:700;margin-bottom:3px">'+t+'</div>'; }
+            var skuRows=(s.lines||[]).map(function(l){return '<tr><td style="padding:2px 14px 2px 0">'+esc(l.sku)+'</td><td style="padding:2px 0;text-align:right;font-variant-numeric:tabular-nums;font-weight:600">'+units(l.qty)+'</td></tr>';}).join('')||'<tr><td colspan="2" class="mut tiny">no SKUs</td></tr>';
+            var addr=[s.address_line1,s.address_line2,[s.city,s.region,s.postcode].filter(Boolean).join(' '),s.country].filter(Boolean);
+            var charges=(s.charges||[]).map(function(c){ var t=(Number(c.freight_cost)||0)+(Number(c.product_cost)||0); return '<div class="tiny" style="margin:2px 0">'+chgChip(c.status)+' &nbsp;freight '+money(c.freight_cost)+' + product '+money(c.product_cost)+' = <b>'+money(t)+'</b>'+(c.description?' · '+esc(c.description):'')+'</div>'; }).join('')||'<div class="mut tiny">none yet</div>';
+            return '<div class="samp-card" data-id="'+s.id+'" data-ref="'+esc(s.ref)+'" style="border:1px solid #e5e7eb;border-radius:10px;padding:14px;margin-bottom:12px;background:#fff">'
+              +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px"><b style="font-size:15px">'+esc(s.ref)+'</b>'+sampChip(s.status)
+                +(s.accepted?'<span style="background:#dcfce7;color:#166534;border-radius:4px;font-size:10px;font-weight:700;padding:2px 7px">✓ accepted</span>':'<button class="save-btn samp-accept" data-id="'+s.id+'" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Accept request</button>')
+                +'<span class="mut tiny" style="margin-left:auto">Completion required: <b>'+(s.completion_required?fd(s.completion_required):'—')+'</b></span></div>'
+              +'<div style="display:flex;gap:32px;flex-wrap:wrap">'
+                +'<div style="min-width:190px">'+lbl('Ship to')+'<div class="tiny" style="line-height:1.65"><b>'+esc(s.recipient_company||'—')+'</b>'+(s.recipient_name?'<br>'+esc(s.recipient_name):'')+(addr.length?'<br>'+addr.map(esc).join('<br>'):'')+(s.phone?'<br>☏ '+esc(s.phone):'')+'</div></div>'
+                +'<div style="min-width:190px">'+lbl('SKUs &amp; quantities')+'<table style="font-size:12px;border-collapse:collapse"><tbody>'+skuRows+'</tbody></table></div>'
+                +'<div style="min-width:190px">'+lbl('Purpose')+'<div class="tiny" style="margin-bottom:10px">'+esc((s.purpose||[]).join(', ')||'—')+'</div>'+lbl('Notes')+'<div class="tiny" style="white-space:pre-wrap;background:#f8fafc;border:1px solid #eef2f7;border-radius:6px;padding:7px 9px;min-width:170px;max-width:300px">'+(s.notes?esc(s.notes):'<span class="mut">—</span>')+'</div></div>'
+              +'</div>'
+              +'<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px">'
+                +'<div>'+lbl('Expected completion')+'<input type="date" class="fci samp-exp" value="'+esc(s.supplier_expected||'')+'" style="width:150px"></div>'
+                +'<div>'+lbl('Tracking code')+'<input class="fci txt samp-trk" value="'+esc(s.tracking_code||'')+'" style="width:170px" placeholder="tracking…"></div>'
+                +'<div>'+lbl('Carrier')+'<input class="fci txt samp-car" value="'+esc(s.carrier||'')+'" style="width:120px" placeholder="carrier…"></div>'
                 +'<button class="save-btn samp-save">Save</button></div>'
-              +'<div style="margin-top:10px;border-top:1px solid #f1f5f9;padding-top:8px"><div class="tiny" style="font-weight:600">Charges</div>'+(charges||'<div class="mut tiny">none</div>')
-                +'<div style="display:flex;gap:6px;align-items:flex-end;margin-top:4px;flex-wrap:wrap"><div><div class="mut tiny">Freight</div><input class="fci samp-cf" style="width:80px" placeholder="0.00"></div><div><div class="mut tiny">Product</div><input class="fci samp-cp" style="width:80px" placeholder="0.00"></div><div><div class="mut tiny">Note</div><input class="fci txt samp-cd" style="width:180px" placeholder="optional"></div><button class="save-btn samp-charge">Create charge</button></div></div>'
-              +'<div style="margin-top:10px;border-top:1px solid #f1f5f9;padding-top:8px"><div class="tiny" style="font-weight:600;margin-bottom:3px">Timeline</div>'
-                +'<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:6px"><textarea class="fci samp-note-in" rows="2" placeholder="Add a note…" style="flex:1;max-width:480px;text-align:left"></textarea><button class="save-btn samp-note-post">Post</button></div>'
+              +'<div style="margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px">'+lbl('Charges')+charges
+                +'<div style="display:flex;gap:8px;align-items:flex-end;margin-top:6px;flex-wrap:wrap"><div><div class="mut tiny">Freight</div><input class="fci samp-cf" style="width:80px" placeholder="0.00"></div><div><div class="mut tiny">Product</div><input class="fci samp-cp" style="width:80px" placeholder="0.00"></div><div><div class="mut tiny">Note</div><input class="fci txt samp-cd" style="width:180px" placeholder="optional"></div><button class="save-btn samp-charge">Create charge</button></div></div>'
+              +'<div style="margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px">'+lbl('Timeline')
+                +'<div style="display:flex;gap:6px;align-items:flex-start;margin:4px 0 6px"><textarea class="fci samp-note-in" rows="2" placeholder="Add a note…" style="flex:1;max-width:480px;text-align:left"></textarea><button class="save-btn samp-note-post">Post</button></div>'
                 +'<div class="samp-tl" data-id="'+s.id+'"></div></div>'
               +'</div>'; }
           function ppSamples(samples){

@@ -264,6 +264,12 @@ The admin SUPPLY ▸ Portal Users "preview as supplier" now includes the supplie
 endpoint was enriched with address/notes/lines/charges, and `loadPortalData` feeds them to the preview).
 So the Samples tab is populated both in the real portal (`/api/portal/bootstrap`) and the admin preview.
 
+## v25.38 - Portal Samples cards: clearer, neater layout
+
+Reworked the supplier-portal sample cards into tidy labeled sections: **Ship to** (multi-line address),
+**SKUs & quantities** (proper table), **Purpose**, and **Notes** (in its own box), with the fulfilment
+inputs, charges, and timeline each in their own clearly separated block.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
