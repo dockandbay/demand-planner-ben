@@ -59,6 +59,27 @@ Two fixes to the Buy-FBA model:
    **real** FBA demand so existing stock keeps moving into FBA to sell down; **new buying** still stops at disc
    (the buy target stays post-disc-zeroed).
 
+## v25.15 - PO Payments: parse-invoice on admin side + deposit cap; Deposits: stranded-deposit surfacing
+
+Three changes:
+
+1. **Parse supplier invoice from PO ▸ Payments.** Next to *Final invoice amount* there's now an
+   **Upload &amp; parse invoice** control (.xlsx). It reuses the same server parse/apply endpoints as the
+   supplier portal: parse → preview the SKU / qty / price diffs vs the current order plan → **Apply**, which
+   writes the changes into `portal_line_costs` as **unconfirmed order-plan changes** and jumps to the ORDER
+   PLAN tab to review &amp; confirm (the existing accept flow). No new endpoints, no DB changes.
+
+2. **Starting deposit can't exceed the deposit ref's availability.** When a PO draws its start deposit on a
+   deposit ref, the drawn amount is now **capped at that ref's remaining balance** and the shortfall **rolls
+   into the completion deposit** (server calc). The manual *amount* input is also clamped (with a notice) so you
+   can't over-assign. Example: PO with only 0.01 left on its ref now draws 0.01 to start, rest to completion.
+   (Admin calc only — the supplier portal has no deposit-pool concept.)
+
+3. **Productions ▸ Deposits: stranded-deposit surfacing.** A deposit with **money remaining but no open PO**
+   now shows its *Remaining* in **red + bold** (title "Deposit remaining, no open PO"), and raises a matching
+   **action item** "Deposit remaining, no open PO". New default filter **"Remaining · open"** — open (not
+   closed) deposits that still hold money — is now the landing filter on the Deposits tab.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

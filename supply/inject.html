@@ -1001,7 +1001,7 @@
     .catch(function(e){ document.getElementById('podet-'+i).innerHTML='<span style="color:#dc2626">'+esc(e.message||e)+'</span>'; }); }
   // Editable PLAN payment panel. Terms come from the supplier; each milestone's amount, date and %
   // can be overridden inline (saves on blur). Saving re-pulls the PO so catch-up / owing ripple.
-  function payIn(ep,field,val,dt,dis){ return '<input class="fci payin'+(dt?' dt':'')+(dis?' pdis':'')+'"'+(dt?' type="date"':'')+(dis?' disabled title="set an amount first"':'')+' data-ep="'+esc(ep)+'" data-field="'+field+'" value="'+esc(val==null?'':val)+'">'; }
+  function payIn(ep,field,val,dt,dis,extra){ return '<input class="fci payin'+(dt?' dt':'')+(dis?' pdis':'')+'"'+(dt?' type="date"':'')+(dis?' disabled title="set an amount first"':'')+(extra?(' '+extra):'')+' data-ep="'+esc(ep)+'" data-field="'+field+'" value="'+esc(val==null?'':val)+'">'; }
   function payBadge(label,cls){ return '<span class="tool-badge '+cls+'">'+label+'</span>'; }
   // "pay »" quick-fill: when a milestone is owed + unpaid, one click fills its Amount box with the calc figure
   // and its Date paid with today, then saves both. (af/df = the amount + date field names on the PO.)
@@ -1102,6 +1102,10 @@
       +'<div class="cli-form" style="max-width:560px">'
       +cliRow('Estimate <span class="mut tiny">(order plan)</span>', money(r.value_est))
       +cliRow('<b>Final invoice amount</b>', '<input class="fci payin" style="width:120px;text-align:left" inputmode="decimal" data-ep="'+ep+'" data-field="supplier_invoice_total" value="'+esc(r.final_invoice==null?'':r.final_invoice)+'"> <span class="mut tiny">blank = use estimate</span>')
+      +cliRow('Upload &amp; parse invoice <span class="mut tiny">(.xlsx → proposes SKU / qty / price changes to the Order Plan to confirm)</span>',
+          '<input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="inv-parse-file" data-po="'+esc(r.po)+'" style="font-size:11px">'
+          +' <button class="save-btn inv-parse-go" data-po="'+esc(r.po)+'">Parse invoice</button>'
+          +'<div class="inv-parse-out" data-po="'+esc(r.po)+'" style="margin-top:6px"></div>')
       +cliRow('<b>Final payment due</b>', '<input type="date" class="fci txtin" style="width:150px;text-align:left" data-ep="'+ep+'" data-field="balance_due_date_overide" value="'+esc(r.final_payment_due||'')+'"> <span class="mut tiny">blank = calculated balance due date</span>')
       +(function(){ var si=d&&d.sup_invoice, docs=(d&&d.sup_docs)||[]; var out='';
         if(si){ var sv=Number(si.value), fv=(r.final_invoice!=null?Number(r.final_invoice):null), disc=(si.status==='applied'&&fv!=null&&Math.abs(sv-fv)>0.01), pend=(si.status==='pending');
@@ -1118,8 +1122,11 @@
       +'<div class="sect-h" style="margin-top:12px">Payment plan — terms from supplier; amount / date / % override inline (saves on blur)</div>'
       +'<div class="tw pay-tbl" style="max-width:1320px"><table><thead><tr><th class="l">Payment</th><th>Calc / est</th><th class="l">Amount</th><th class="l">Date paid</th><th class="l">Deposit ref</th><th class="l">Due</th><th class="l">Likely pay date</th><th class="l">Status</th></tr></thead><tbody>';
     h+=tr('<td class="l"><b>Start deposit</b> <input class="fci pctin payin" data-ep="'+ep+'" data-field="start_deposit_pct_override" value="'+esc(r.start_pct)+'"><span class="mut tiny">% · capped at ref avail</span></td>'
-      +'<td>'+money(r.start_calc)+((startOwed && startUnpaid && !r.deposit_ref)?payFillBtn('pay_start_deposit_assigned','pay_start_deposit_date',r.start_calc):'')+'</td>'
-      +'<td class="l">'+payIn(ep,'pay_start_deposit_assigned',r.start_assigned)+'</td>'
+      +(function(){ var term=Number(r.start_calc)||0, drawn=Number(r.start_dep)||0, rolled=Math.round((term-drawn)*100)/100;
+          var capped=(r.deposit_ref&&rolled>0.009);   // drew less than term because the ref ran short → rest in completion
+          return '<td>'+money(capped?drawn:r.start_calc)+(capped?' <span class="mut tiny" style="color:#b91c1c" title="capped at the deposit ref&rsquo;s remaining availability — the rest rolls into the completion deposit">of '+money(term)+' term · '+money(rolled)+' → completion</span>':'')
+            +((startOwed && startUnpaid && !r.deposit_ref)?payFillBtn('pay_start_deposit_assigned','pay_start_deposit_date',r.start_calc):'')+'</td>'; })()
+      +'<td class="l">'+payIn(ep,'pay_start_deposit_assigned',r.start_assigned,false,false,(r.deposit_ref&&r.deposit_avail!=null)?('data-avail="'+esc(Math.round((Number(r.deposit_avail||0)+Number(r.start_assigned||0))*100)/100)+'"'):'')+'</td>'
       +'<td class="l">'+payIn(ep,'pay_start_deposit_date',r.start_date,true,!(n(r.start_assigned)>0))+'</td>'
       +'<td class="l">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0)+(r.deposit_avail!=null?' <span class="mut tiny">'+money(r.deposit_avail)+' avail</span>':'')+'</td>'
       +dueCell(r.start_due,startUnpaid,'',startOwed)+likelyCell('dep:'+r.po,startUnpaid&&startOwed,r.likely_start)+'<td class="l">'+(startOwed?payBadge(sStat[0],sStat[1]):payBadge('—','bg-neutral'))+'</td>');
@@ -1280,6 +1287,9 @@
     document.querySelectorAll('#podet-'+i+' .pom-po').forEach(function(inp){ inp.onchange=function(){ var oldpo=inp.dataset.po, np=inp.value.trim(); if(!np||np===oldpo){inp.value=oldpo;return;} if(!confirm('Rename PO '+oldpo+' → '+np+'? Updates all its lines and references.')){inp.value=oldpo;return;}
       shipPost('/api/supply/po/'+encodeURIComponent(oldpo)+'/rename',{new_po:np},function(){ poGone(); }); }; });
     document.querySelectorAll('#podet-'+i+' .payin').forEach(function(inp){ inp.onchange=function(){
+    // Starting deposit can't exceed what the deposit ref still holds — clamp + roll the rest into completion.
+    if(inp.dataset.field==='pay_start_deposit_assigned' && inp.dataset.avail!=null){ var av=Number(inp.dataset.avail), v=Number(String(inp.value).replace(/,/g,''));
+      if(isFinite(av)&&isFinite(v)&&v>av+0.005){ inp.value=av.toFixed(2); alert('Starting deposit capped at the deposit ref&rsquo;s availability ('+money(av)+'). The remainder rolls into the completion deposit.'); } }
     var body={}; body[inp.dataset.field]=String(inp.value).replace(/,/g,'').trim(); inp.classList.add('saved');   // accept pasted "1,350.91"
     fetch(inp.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
       .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); })
@@ -1330,6 +1340,34 @@
       fetch('/api/supply/submission/'+b.dataset.id+'/dismiss',{method:'POST'}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error); poRefetchPanel(po,i); })
         .catch(function(e){ b.disabled=false; alert('Could not reject: '+(e.message||e)); }); }; });
+    // Upload + parse a supplier invoice (.xlsx) → preview qty/price diffs vs the order plan, then Apply as
+    // portal_line_costs overrides that surface as UNCONFIRMED changes in the ORDER PLAN tab. Reuses the same
+    // server parse/apply endpoints as the supplier portal (single source of truth).
+    document.querySelectorAll('#podet-'+i+' .inv-parse-go').forEach(function(btn){ btn.onclick=function(){
+      var root=document.getElementById('podet-'+i);
+      var fin=root.querySelector('.inv-parse-file'), f=fin&&fin.files&&fin.files[0], out=root.querySelector('.inv-parse-out');
+      if(!f){ out.innerHTML='<span class="mut tiny">Choose an Excel (.xlsx) invoice first.</span>'; return; }
+      btn.disabled=true; out.innerHTML='<span class="mut tiny">Parsing…</span>';
+      var rd=new FileReader(); rd.onload=function(){ var b64=String(rd.result);
+        fetch('/api/supply/portal-parse-invoice',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,data_base64:b64})}).then(function(r){return r.json();}).then(function(j){ btn.disabled=false;
+          if(!j||j.error||j.ok===false){ out.innerHTML='<span style="color:#b91c1c;font-size:11px">'+esc((j&&j.error)||'Could not parse the file.')+'</span>'; return; }
+          var t=j.totals, diff=j.lines.filter(function(l){return l.status!=='match';});
+          var drows=diff.map(function(l){ return '<tr><td class="l">'+esc(l.sku)+'</td><td class="l">'+(l.status==='new'?'<span class="tool-badge bg-amber" style="font-size:9px">NEW</span>':'<span class="mut tiny">changed</span>')+'</td>'
+            +'<td style="text-align:right">'+(l.cur_qty==null?'—':units(l.cur_qty))+' → <b>'+units(l.inv_qty)+'</b></td>'
+            +'<td style="text-align:right">'+(l.cur_cost==null?'—':money(l.cur_cost))+' → <b>'+(l.inv_price==null?'—':money(l.inv_price))+'</b></td></tr>'; }).join('');
+          out.innerHTML='<div class="tiny" style="margin-bottom:4px">'+(j.po_detected?'<b>'+esc(j.po_detected)+'</b> · ':'')+t.count+' lines · '+money(t.value)+' — <b>'+t.changed+'</b> changed, <b>'+t.neu+'</b> new, '+(t.matched-t.changed)+' already match.</div>'
+            +(diff.length?'<div class="tw" style="max-height:240px;overflow:auto"><table style="font-size:11px;width:auto"><thead><tr><th class="l">SKU</th><th class="l"></th><th style="text-align:right">Qty</th><th style="text-align:right">Price</th></tr></thead><tbody>'+drows+'</tbody></table></div>'
+              +'<button class="save-btn inv-parse-apply" style="margin-top:6px">Apply '+(t.changed+t.neu)+' change(s) → Order Plan (to confirm)</button>'
+              :'<span class="mut tiny">Everything matches the order plan — nothing to change.</span>');
+          var ab=out.querySelector('.inv-parse-apply'); if(ab)ab.onclick=function(){ ab.disabled=true; ab.textContent='Applying…';
+            fetch('/api/supply/portal-invoice-apply',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,data_base64:b64,submitted_by:'PO PLAN'})}).then(function(r){return r.json();}).then(function(rr){
+              if(!rr||rr.error){ alert('Apply failed: '+((rr&&rr.error)||'')); ab.disabled=false; ab.textContent='Apply'; return; }
+              var rt=document.getElementById('podet-'+i), ot=rt&&rt.querySelector('.potab[data-pt="oplan"]'); if(ot)ot.click();   // land on ORDER PLAN, then refetch keeps that tab
+              invalidateDerived(); poRefetchPanel(po,i);
+              alert('Applied to the order plan: '+rr.applied+' line(s)'+(rr.added?' ('+rr.added+' new)':'')+'. Review & confirm the changes in the ORDER PLAN tab.'); })
+              .catch(function(e){ ab.disabled=false; ab.textContent='Apply'; alert('Apply failed: '+(e.message||e)); }); }; })
+          .catch(function(e){ btn.disabled=false; out.innerHTML='<span style="color:#b91c1c;font-size:11px">'+esc(e.message||'parse failed')+'</span>'; }); };
+      rd.readAsDataURL(f); }; });
     // order plan — final cost price per line: live-recompute line + order totals, save on change
     document.querySelectorAll('#podet-'+i+' .opfin').forEach(function(inp){
       function recalc(){ var box=document.getElementById('podet-'+i); if(!box)return; var tot=0,tq=0;
@@ -1647,10 +1685,10 @@
     view(); }
   // Deposit register (under PRODUCTIONS) — editable + assign each deposit to a production inline.
   function renderDepRegister(b, deps, prods){ _prodList=prods; var pend=_pendingDep; _pendingDep=null;   // arriving from a cash-flow deposit link → filter to that ref
-    var st={f:pend?'all':'open',q:pend?String(pend).toLowerCase():''}; var DEP_EDIT={};   // row ids currently unlocked for editing
+    var st={f:pend?'all':'remaining',q:pend?String(pend).toLowerCase():''}; var DEP_EDIT={};   // default = open deposits that still hold money
     var depProdAll=false;   // Assigned productions column: false = only productions with OPEN POs; true = all
-    var FILT=[['open','To assign'],['closed','Closed'],['all','All']];
-    b.innerHTML=lookupDatalists()+'<div class="bar">'+FILT.map(function(f){return '<span class="pill'+(f[0]==='open'?' active':'')+'" data-f="'+f[0]+'">'+f[1]+'</span>';}).join('')
+    var FILT=[['remaining','Remaining · open'],['open','To assign'],['closed','Closed'],['all','All']];
+    b.innerHTML=lookupDatalists()+'<div class="bar">'+FILT.map(function(f){return '<span class="pill'+(f[0]==='remaining'?' active':'')+'" data-f="'+f[0]+'"'+(f[0]==='remaining'?' title="open (not closed) deposits that still have money remaining"':'')+'>'+f[1]+'</span>';}).join('')
       +'<button class="tool-badge bg-blue" id="dep-new" style="cursor:pointer;border:none">+ Deposit</button>'
       +'<button class="tool-badge bg-neutral" id="dep-prodtoggle" style="cursor:pointer;border:none;margin-left:4px" title="Linked purchase orders: show only OPEN (non-complete) POs, or all">POs: open only</button>'
       +'<input class="flt" id="dep-q" placeholder="Filter reference / supplier…"><span class="count" id="dep-cnt"></span></div>'
@@ -1677,7 +1715,10 @@
       var rem=Number(d.deposit_remaining)||0, est=Number(d.est_alloc)||0, hasOpenPO=(d.pos_open||'').trim()!=='';
       var estOver = d.is_deposit && est>rem;                       // est allocation exceeds what's left → red est
       var remStranded = d.is_deposit && hasOpenPO && est===0 && rem>0.01;   // open POs but nothing left to allocate → red remaining (matches the action)
-      var c_rem = '<td style="width:64px;white-space:nowrap'+((rem<0||remStranded)?';color:#dc2626;font-weight:700':'')+'"'+(remStranded?' title="Deposit remaining, none left to be allocated">':'>')+money(d.deposit_remaining)+(d.shared_ref?' <span class="src fx">pool</span>':'')+'</td>';
+      var remNoOpenPO = d.is_deposit && !hasOpenPO && rem>0.01 && !closed;  // money left but NO open PO drawing on it → red remaining (matches the action)
+      var redRem=(rem<0||remStranded||remNoOpenPO);
+      var remTitle=remNoOpenPO?'Deposit remaining, no open PO':(remStranded?'Deposit remaining, none left to be allocated':'');
+      var c_rem = '<td style="width:64px;white-space:nowrap'+(redRem?';color:#dc2626;font-weight:700':'')+'"'+(remTitle?(' title="'+remTitle+'"'):'')+'>'+money(d.deposit_remaining)+(d.shared_ref?' <span class="src fx">pool</span>':'')+'</td>';
       var c_est = '<td style="width:84px;white-space:nowrap'+(estOver?';color:#dc2626;font-weight:700':'')+'"'+(estOver?' title="Estimated allocation exceeds the remaining deposit">':'>')+(d.is_deposit?money(d.est_alloc):'')+'</td>';
       // purchase orders linked to this deposit (open-only by default; toggle shows all) — each links to the
       // PO opened on its PAYMENTS tab; the cell wraps so long lists flow onto multiple lines.
@@ -1695,7 +1736,9 @@
         ? ' <span class="mut tiny" title="Can’t delete — '+(d.date_paid?'this deposit has a payment date':'purchase order(s) are assigned to this deposit ('+esc(d.linked_pos)+')')+'.">🔒 locked</span>'
         : ' <button class="lnk-btn dep-del" data-id="'+d.id+'" data-ref="'+esc(d.reference||('#'+d.id))+'" title="delete this deposit" style="color:#dc2626">delete</button>';
       return '<tr'+(editing?' style="background:#f0f6ff"':(closed?' style="opacity:.55"':''))+'>'+c_ref+c_sup+c_prod+c_xero+c_amt+c_fx+c_paid+c_rem+c_est+c_asg+'<td class="l" style="white-space:nowrap">'+act+'</td></tr>'; }
-    function cur(){ return deps.filter(function(d){ if(st.f==='all')return true; if(st.f==='closed')return d.status==='closed'; return d.status!=='closed'; }); }
+    function cur(){ return deps.filter(function(d){ if(st.f==='all')return true; if(st.f==='closed')return d.status==='closed';
+      if(st.f==='remaining')return d.status!=='closed' && (Number(d.deposit_remaining)||0)>0.01;   // open + still holds money
+      return d.status!=='closed'; }); }
     function draw(){ var f=cur().filter(function(d){return !st.q||((d.reference||'')+' '+(d.supplier_name||'')).toLowerCase().indexOf(st.q)>=0;});
       document.getElementById('dep-cnt').textContent=f.length+' / '+deps.length+' deposits';
       document.getElementById('dep-rows').innerHTML=f.map(rowHTML).join(''); bindEdits();

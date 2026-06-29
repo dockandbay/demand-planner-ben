@@ -52,7 +52,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.14';
+const APP_VERSION = 'v25.15';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -956,10 +956,16 @@ app.get('/api/supply/:section', async (req, res) => {
               WHERE l.po=po.po) dty ON true
           ), calc AS (
             SELECT *,
-              round(val*sp/100,2) start_calc,                                  -- start deposit (term)
-              coalesce(pay_start_deposit_assigned, round(val*sp/100,2)) start_paid,  -- assigned or term
-              round((sp+cp)/100*val - coalesce(pay_start_deposit_assigned, val*sp/100),2) completion_calc, -- tops up to cumulative target (catch-up)
-              round(val*sp/100 - coalesce(pay_start_deposit_assigned, val*sp/100),2) catch_up,  -- start term − start paid
+              round(val*sp/100,2) start_calc,                                  -- start deposit (full term)
+              -- start deposit actually DRAWN: a manual assignment wins; otherwise the term — but when the PO draws
+              -- on a deposit ref the draw is CAPPED at that ref's remaining availability, and the shortfall rolls
+              -- into the completion deposit (you can't pay more deposit than the ref actually holds).
+              coalesce(pay_start_deposit_assigned,
+                LEAST(round(val*sp/100,2), CASE WHEN coalesce(deposit_ref,'')<>'' THEN GREATEST(round(coalesce(deposit_avail,0),2),0) ELSE round(val*sp/100,2) END)) start_paid,
+              round((sp+cp)/100*val - coalesce(pay_start_deposit_assigned,
+                LEAST(round(val*sp/100,2), CASE WHEN coalesce(deposit_ref,'')<>'' THEN GREATEST(round(coalesce(deposit_avail,0),2),0) ELSE round(val*sp/100,2) END)),2) completion_calc, -- completion term + any rolled-in start shortfall
+              round(val*sp/100 - coalesce(pay_start_deposit_assigned,
+                LEAST(round(val*sp/100,2), CASE WHEN coalesce(deposit_ref,'')<>'' THEN GREATEST(round(coalesce(deposit_avail,0),2),0) ELSE round(val*sp/100,2) END)),2) catch_up,  -- start term − start drawn (rolled into completion)
               -- production end: manual override ▸ start production + supplier lead (production_days)
               coalesce(end_production_overide,
                 CASE WHEN start_production IS NOT NULL AND production_days IS NOT NULL
@@ -1600,6 +1606,18 @@ app.get('/api/supply/:section', async (req, res) => {
               FROM (SELECT DISTINCT reference FROM planner.deposits WHERE is_deposit AND coalesce(status,'')<>'closed' AND coalesce(reference,'')<>'') dref
             ) x
             WHERE x.rem > 0.01 AND x.est = 0 AND x.open_po > 0
+          UNION ALL
+          -- deposit still has money left, but NO open (non-complete) PO is drawing on it → stranded cash, reassign/close
+          SELECT 'amber','Deposit remaining, no open PO', x2.reference,
+            'Deposit remaining '||round(x2.rem,2)||', no open PO assigned', '','deposit','', x2.reference
+            FROM (
+              SELECT dref.reference,
+                (SELECT sum(coalesce(amount,0)) FROM planner.deposits d2 WHERE d2.reference=dref.reference)
+                  - coalesce((SELECT sum(coalesce(po.pay_start_deposit_assigned,0)) FROM planner.purchase_orders po WHERE po.deposit_ref=dref.reference),0) rem,
+                (SELECT count(*) FROM planner.purchase_orders po WHERE po.deposit_ref=dref.reference AND coalesce(po.status,'') NOT ILIKE '%complete%') open_po
+              FROM (SELECT DISTINCT reference FROM planner.deposits WHERE is_deposit AND coalesce(status,'')<>'closed' AND coalesce(reference,'')<>'') dref
+            ) x2
+            WHERE x2.rem > 0.01 AND x2.open_po = 0
           UNION ALL
           SELECT 'amber','Partial cartons need approval', l.po,
             count(*)||' line(s) not a full carton multiple and not yet approved', 'orderplan','','partials', l.po
