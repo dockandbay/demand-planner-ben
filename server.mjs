@@ -52,7 +52,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.22';
+const APP_VERSION = 'v25.23';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1293,21 +1293,26 @@ app.get('/api/supply/:section', async (req, res) => {
             -- effective dates: shipment override ▸ Flexport ▸ CALCULATED from the master PO (prod-end +7 = departure;
             -- + branch transit lead by mode = landing/arrival) so an unlinked shipment still shows dates.
             coalesce(to_char(sh.departure_date,'YYYY-MM-DD'), to_char(fx.departure_date,'YYYY-MM-DD'), to_char(mp.ship_calc,'YYYY-MM-DD')) departure,
-            coalesce(to_char(sh.landing_date,'YYYY-MM-DD'), to_char(fx.landing_date,'YYYY-MM-DD'), to_char(mp.delivery_calc,'YYYY-MM-DD')) landing,
-            CASE WHEN sh.landing_date IS NOT NULL THEN 'S' WHEN fx.landing_date IS NOT NULL THEN 'FLEX' WHEN mp.delivery_calc IS NOT NULL THEN 'calc' END landing_src,
+            -- effective LANDING: override ▸ Flexport ▸ (EFFECTIVE departure + branch transit). Chains off the
+            -- departure override, so overriding an earlier date shifts the later CALCULATED ones (final dates).
+            coalesce(to_char(sh.landing_date,'YYYY-MM-DD'), to_char(fx.landing_date,'YYYY-MM-DD'),
+              to_char((coalesce(sh.departure_date, fx.departure_date, mp.ship_calc) + (coalesce(mp.transit_days,0)||' days')::interval)::date,'YYYY-MM-DD')) landing,
+            CASE WHEN sh.landing_date IS NOT NULL THEN 'S' WHEN fx.landing_date IS NOT NULL THEN 'FLEX' WHEN mp.ship_calc IS NOT NULL THEN 'calc' END landing_src,
             CASE WHEN sh.departure_date IS NOT NULL THEN 'S' WHEN fx.departure_date IS NOT NULL THEN 'FLEX' WHEN mp.ship_calc IS NOT NULL THEN 'calc' END departure_src,
-            CASE WHEN sh.arrival_date IS NOT NULL THEN 'S' WHEN fx.arrival_date IS NOT NULL THEN 'FLEX' WHEN mp.delivery_calc IS NOT NULL THEN 'calc' END arrival_src,
+            CASE WHEN sh.arrival_date IS NOT NULL THEN 'S' WHEN fx.arrival_date IS NOT NULL THEN 'FLEX' WHEN mp.ship_calc IS NOT NULL THEN 'calc' END arrival_src,
             (fx.flex_id IS NOT NULL) flex_matched,
-            coalesce(to_char(sh.arrival_date,'YYYY-MM-DD'), to_char(fx.arrival_date,'YYYY-MM-DD'), to_char(mp.delivery_calc,'YYYY-MM-DD')) arrival,
+            -- effective ARRIVAL: override ▸ Flexport ▸ EFFECTIVE landing (chained off departure)
+            coalesce(to_char(sh.arrival_date,'YYYY-MM-DD'), to_char(fx.arrival_date,'YYYY-MM-DD'),
+              to_char(coalesce(sh.landing_date, fx.landing_date, (coalesce(sh.departure_date, fx.departure_date, mp.ship_calc) + (coalesce(mp.transit_days,0)||' days')::interval)::date),'YYYY-MM-DD')) arrival,
             to_char(sh.departure_date,'YYYY-MM-DD') ov_departure,
             to_char(sh.landing_date,'YYYY-MM-DD')   ov_landing,
             to_char(sh.delivery_date,'YYYY-MM-DD')  ov_delivery,
             to_char(sh.arrival_date,'YYYY-MM-DD')   ov_arrival,
-            -- completion = warehouse-received date = override (sh.delivery_date) ▸ arrival + 7 days
+            -- completion = warehouse-received = override (sh.delivery_date) ▸ EFFECTIVE arrival + 7 days
             coalesce(to_char(sh.delivery_date,'YYYY-MM-DD'),
-              to_char((coalesce(sh.arrival_date, fx.arrival_date, sh.landing_date, fx.landing_date, mp.delivery_calc) + interval '7 days')::date,'YYYY-MM-DD')) completion,
+              to_char((coalesce(sh.arrival_date, fx.arrival_date, coalesce(sh.landing_date, fx.landing_date, (coalesce(sh.departure_date, fx.departure_date, mp.ship_calc) + (coalesce(mp.transit_days,0)||' days')::interval)::date)) + interval '7 days')::date,'YYYY-MM-DD')) completion,
             CASE WHEN sh.delivery_date IS NOT NULL THEN 'S'
-                 WHEN coalesce(sh.arrival_date, fx.arrival_date, sh.landing_date, fx.landing_date, mp.delivery_calc) IS NOT NULL THEN 'calc' END completion_src,
+                 WHEN coalesce(sh.arrival_date, fx.arrival_date, sh.landing_date, fx.landing_date, mp.ship_calc) IS NOT NULL THEN 'calc' END completion_src,
             -- exception only when NOT complete and genuinely unlinked (no carrier ref + no Flexport match);
             -- a complete/landed shipment is never an exception.
             (coalesce(NULLIF(sh.status,''),
@@ -1326,6 +1331,8 @@ app.get('/api/supply/:section', async (req, res) => {
           -- master-PO date calc: prod-end +7 = departure; + branch transit (air/sea by shipment mode) = landing/arrival
           LEFT JOIN LATERAL (
             SELECT CASE WHEN pe IS NOT NULL THEN (pe + interval '7 days')::date END ship_calc,
+                   (CASE WHEN coalesce(lower(sh.mode), CASE WHEN fx.mode ILIKE 'air%' THEN 'air' ELSE 'sea' END)='air'
+                         THEN coalesce(mb.air_lead_time_days,0) ELSE coalesce(mb.sea_lead_time_days,0) END) transit_days,
                    CASE WHEN pe IS NOT NULL THEN (pe + interval '7 days'
                       + ((CASE WHEN coalesce(lower(sh.mode), CASE WHEN fx.mode ILIKE 'air%' THEN 'air' ELSE 'sea' END)='air'
                                THEN coalesce(mb.air_lead_time_days,0) ELSE coalesce(mb.sea_lead_time_days,0) END)||' days')::interval)::date END delivery_calc,

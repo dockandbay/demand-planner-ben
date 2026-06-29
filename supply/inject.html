@@ -2040,7 +2040,10 @@
     var locked=!!s.flex_matched;   // linked to Flexport → dates are authoritative, not overridable here
     // a date field: override input (or "from Flexport" when locked) + the FINAL effective date and its source
     var dateFld=function(lbl,field,ovVal,finalVal,src){
-      var inp=locked?'<div class="mut tiny" style="padding:4px 0">from Flexport</div>':editCell(ep,field,ovVal||'','date');
+      // override picker pre-fills with the current FINAL date for this stage (which already chains off the
+      // previous override / calc) — so opening it defaults to the previous override or the calculated date,
+      // not today. Nothing saves unless the value is actually changed.
+      var inp=locked?'<div class="mut tiny" style="padding:4px 0">from Flexport</div>':editCell(ep,field,ovVal||finalVal||'','date');
       return '<div style="margin-right:16px;min-width:130px">'
         +'<div class="mut tiny" style="text-transform:uppercase;letter-spacing:.04em">'+lbl+'</div>'
         +'<div style="font-weight:700;font-size:15px;margin:2px 0 4px">'+(finalVal?shipDate(finalVal,src):'<span class="mut">—</span>')+'</div>'

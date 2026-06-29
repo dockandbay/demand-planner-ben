@@ -136,6 +136,18 @@ reveals all rows and retries, so the direct PO always opens.
    into the new shipment's group — it still does a full refresh, but now preserves scroll position.
 2. **Version label** in the SUPPLY sub-nav changed from `v25.xx · sandbox` to **`HORIZON v25.xx`**.
 
+## v25.23 - Shipments: chained final dates + smarter override defaults
+
+Shipment dates (departure → landing → arrival → completion) now **chain**: each stage's calculated date is
+derived from the *effective* previous stage, so overriding an earlier date shifts the later calculated ones.
+- Landing = effective departure + branch transit (by mode); Arrival = effective landing; Completion =
+  effective arrival + 7 days.
+- The grid and the Dates & tracking sub-tab already show the effective ("final") dates, so they now reflect
+  overrides correctly (a directly-overridden stage tags **S**; a derived stage tags **calc** but uses the
+  chained date).
+- Each override **date picker now pre-fills** with that stage's current final date (the previous override if
+  set, else the calculated date) instead of opening on today. Nothing saves unless you change it.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
