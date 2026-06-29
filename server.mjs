@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.38';
+const APP_VERSION = 'v25.39';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -885,6 +885,13 @@ app.get('/api/supply/sample-notes', async (req, res) => {
   try { res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
     to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read
     FROM planner.sample_notes WHERE sample_id=$1::bigint ORDER BY created_at`, [req.query.id || '0'])).rows); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Charges for a shipment (admin) — list + status; create/accept/reject reuse /api/supply/charge-*.
+app.get('/api/supply/shipment-charges/:ref', async (req, res) => {
+  try { res.json((await pool.query(`SELECT id, coalesce(supplier_name,'') supplier_name, freight_cost, product_cost,
+    coalesce(description,'') description, status, to_char(created_at,'YYYY-MM-DD') created_at, other_payment_id
+    FROM planner.supplier_charges WHERE source_type='shipment' AND source_ref=$1 ORDER BY created_at`, [req.params.ref])).rows); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -5279,6 +5286,21 @@ app.post('/api/portal/sample-create', portalAuth, async (req, res) => {   // sup
     for (const l of (Array.isArray(b.lines)?b.lines:[])) { if(!l||!l.sku) continue; await client.query(`INSERT INTO planner.sample_request_lines (sample_id, sku, qty) VALUES ($1,$2,$3)`, [id, String(l.sku).trim(), Math.round(Number(l.qty)||0)]); }
     await client.query('COMMIT'); res.json({ ok: true, id, ref });
   } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); } finally { client.release(); } });
+
+app.get('/api/portal/shipment-charges/:ref', portalAuth, async (req, res) => {   // supplier: charges on a shipment they're on
+  const names = req.portal.suppliers||[];
+  try { const own = (await pool.query(`SELECT 1 FROM planner.purchase_orders WHERE shipment_ref=$1 AND supplier_name=ANY($2) LIMIT 1`, [req.params.ref, names])).rows[0];
+    if(!own) return res.status(403).json({ error: 'not your shipment' });
+    res.json((await pool.query(`SELECT id, freight_cost, product_cost, coalesce(description,'') description, status, to_char(created_at,'YYYY-MM-DD') created_at FROM planner.supplier_charges WHERE source_type='shipment' AND source_ref=$1 ORDER BY created_at`, [req.params.ref])).rows); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/portal/shipment-charge', portalAuth, async (req, res) => {   // supplier creates a charge on a shipment
+  const b = req.body||{}, names = req.portal.suppliers||[];
+  if(!b.shipment_ref) return res.status(400).json({ error: 'shipment_ref required' });
+  try { const own = (await pool.query(`SELECT 1 FROM planner.purchase_orders WHERE shipment_ref=$1 AND supplier_name=ANY($2) LIMIT 1`, [b.shipment_ref, names])).rows[0];
+    if(!own) return res.status(403).json({ error: 'not your shipment' });
+    const r = await pool.query(`INSERT INTO planner.supplier_charges (source_type, source_ref, supplier_name, freight_cost, product_cost, description, created_by)
+      VALUES ('shipment',$1,$2,$3,$4,$5,$6) RETURNING id`, [b.shipment_ref, names[0]||null, Number(b.freight_cost)||0, Number(b.product_cost)||0, b.description||null, req.portal.email||'supplier']); res.json({ ok: true, id: r.rows[0].id }); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
 
 // Everything the supplier sees — scoped server-side to their supplier(s).
 app.get('/api/portal/data', portalAuth, async (req, res) => {

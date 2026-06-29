@@ -2109,9 +2109,9 @@
         var xdPanel='<div class="sect-h">Crossdock SKUs on this shipment ('+xd.length+')</div>'
           +(xd.length?'<div class="tw"><table><thead><tr><th class="l">Crossdock SKU</th><th style="text-align:right">Qty shipped</th><th class="l">Source PO</th><th class="l">Supplier</th><th class="l">Client</th><th class="l">Client sales order</th></tr></thead><tbody>'+xdRows+'</tbody></table></div>'
             :'<div class="count">No crossdock SKUs on the POs in this shipment.</div>');
-        var tabbar='<div class="po-subnav" style="margin-bottom:8px"><button class="rtab shtab active" data-st="dates">Dates &amp; tracking</button><button class="rtab shtab" data-st="pos">POs aboard</button><button class="rtab shtab" data-st="xd">Crossdock'+(xd.length?' ('+xd.length+')':'')+'</button><button class="rtab shtab" data-st="timeline">Timeline &amp; notes</button></div>';
+        var tabbar='<div class="po-subnav" style="margin-bottom:8px"><button class="rtab shtab active" data-st="dates">Dates &amp; tracking</button><button class="rtab shtab" data-st="pos">POs aboard</button><button class="rtab shtab" data-st="charges">Charges</button><button class="rtab shtab" data-st="xd">Crossdock'+(xd.length?' ('+xd.length+')':'')+'</button><button class="rtab shtab" data-st="timeline">Timeline &amp; notes</button></div>';
         var box=document.getElementById('shipdet-'+i);
-        box.innerHTML=tabbar+'<div class="shtab-panel" data-st="dates">'+head+'</div><div class="shtab-panel" data-st="pos" style="display:none">'+t+'</div><div class="shtab-panel" data-st="xd" style="display:none">'+xdPanel+'</div>'
+        box.innerHTML=tabbar+'<div class="shtab-panel" data-st="dates">'+head+'</div><div class="shtab-panel" data-st="pos" style="display:none">'+t+'</div><div class="shtab-panel" data-st="charges" style="display:none"><div class="ship-charges" data-ref="'+esc(ref)+'"></div></div><div class="shtab-panel" data-st="xd" style="display:none">'+xdPanel+'</div>'
           +'<div class="shtab-panel" data-st="timeline" style="display:none"><div class="sp-timeline" data-ref="'+esc(ref)+'"></div>'
             +'<div style="margin-top:14px;padding-top:10px;border-top:1px solid #f1f1f1"><button class="save-btn ship-del" data-ref="'+esc(ref)+'" style="background:#fff5f5;border:1px solid #fecaca;color:#b91c1c">🗑 Delete this shipment</button> <span class="mut tiny">unassigns the POs aboard (they’re kept) and removes this shipment.</span></div></div>';
         box.classList.remove('count'); bindEdits();
@@ -2119,6 +2119,7 @@
         box.querySelectorAll('.ship-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete shipment '+ref+'?\n\nThe POs aboard will be unassigned (not deleted), and this shipment + its timeline will be removed.'))return;
           b.disabled=true; shipPost('/api/supply/shipment/'+encodeURIComponent(ref)+'/delete',{},function(j){ invalidateDerived(); shipReload(); }); }; });
         box.querySelectorAll('.shtab').forEach(function(tb){ tb.onclick=function(){ box.querySelectorAll('.shtab').forEach(function(x){x.classList.toggle('active',x===tb);}); box.querySelectorAll('.shtab-panel').forEach(function(pl){pl.style.display=(pl.dataset.st===tb.dataset.st)?'':'none';}); }; });
+        loadShipCharges(ref);
         box.querySelectorAll('button[data-act]').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po;
           if(btn.dataset.act==='unassign'){ if(confirm('Unassign '+po+' from '+ref+'?'))shipPost('/api/supply/shipment/'+encodeURIComponent(ref)+'/assign',{po:po,assign:false},shipReload); }
           else shipPost('/api/supply/shipment/'+encodeURIComponent(ref)+'/assign',{po:po,assign:true,master:true},shipReload); }; });
@@ -3531,6 +3532,19 @@
     }
     view();
   }
+  function loadShipCharges(ref){ var box=document.querySelector('.ship-charges[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(!box)return;
+    fetch('/api/supply/shipment-charges/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(rows){
+      var list=(rows&&rows.length)?rows.map(function(c){ var t=(Number(c.freight_cost)||0)+(Number(c.product_cost)||0);
+        return '<tr><td class="l">'+esc(c.supplier_name||'')+'</td><td class="l">'+sampleChargeChip(c.status)+'</td><td>'+money(c.freight_cost)+'</td><td>'+money(c.product_cost)+'</td><td><b>'+money(t)+'</b></td><td class="l">'+esc(c.description||'')+'</td><td class="l">'+(c.status==='pending'?'<button class="save-btn shc-acc" data-id="'+c.id+'" style="background:#bbf7d0;border:1px solid #16a34a;color:#166534;font-weight:700">Accept → Other Payments</button> <button class="save-btn light shc-rej" data-id="'+c.id+'">Reject</button>':'')+'</td></tr>'; }).join(''):'<tr><td colspan="7" class="mut">no charges</td></tr>';
+      box.innerHTML=lookupDatalists()+'<div class="sect-h">Charges <span class="mut tiny">— freight / product; accepting posts an Other Payment with this shipment&rsquo;s POs in the description</span></div>'
+        +'<div class="tw"><table><thead><tr><th class="l">Supplier</th><th class="l">Status</th><th>Freight</th><th>Product</th><th>Total</th><th class="l">Description</th><th class="l"></th></tr></thead><tbody>'+list+'</tbody></table></div>'
+        +'<div style="display:flex;gap:8px;align-items:flex-end;margin-top:8px;flex-wrap:wrap"><div><div class="mut tiny">Supplier</div><input class="fci txt shc-sup" list="supplierlist" style="width:160px"></div><div><div class="mut tiny">Freight</div><input class="fci shc-f" style="width:80px" placeholder="0.00"></div><div><div class="mut tiny">Product</div><input class="fci shc-p" style="width:80px" placeholder="0.00"></div><div><div class="mut tiny">Note</div><input class="fci txt shc-d" style="width:200px" placeholder="optional"></div><button class="save-btn shc-add">Create charge</button></div>';
+      box.querySelectorAll('.shc-acc').forEach(function(b){ b.onclick=function(){ b.disabled=true; shipPost('/api/supply/charge/'+b.dataset.id+'/accept',{},function(j){ if(j&&j.error){alert(j.error);b.disabled=false;return;} alert('Charge accepted — posted to Other Payments.'); loadShipCharges(ref); }); }; });
+      box.querySelectorAll('.shc-rej').forEach(function(b){ b.onclick=function(){ if(!confirm('Reject this charge?'))return; shipPost('/api/supply/charge/'+b.dataset.id+'/reject',{},function(){ loadShipCharges(ref); }); }; });
+      box.querySelector('.shc-add').onclick=function(){ var sup=box.querySelector('.shc-sup').value.trim(), f=box.querySelector('.shc-f').value, p=box.querySelector('.shc-p').value, d=box.querySelector('.shc-d').value;
+        if(!sup){alert('Pick the supplier this charge is for.');return;} if(!f&&!p){alert('Enter a freight and/or product cost.');return;}
+        shipPost('/api/supply/charge-create',{source_type:'shipment',source_ref:ref,supplier_name:sup,freight_cost:Number(f)||0,product_cost:Number(p)||0,description:d||null,created_by:'PO PLAN'},function(){ loadShipCharges(ref); }); };
+    }).catch(function(){}); }
   function loadSampleDetail(id,i){ var box=document.getElementById('sampdet-'+i);
     fetch('/api/supply/sample-detail/'+id).then(function(r){return r.json();}).then(function(d){ if(!d||d.error){box.innerHTML='<div style="color:#dc2626">'+esc((d&&d.error)||'load failed')+'</div>';return;}
       var s=d.sample, ep='/api/supply/sample/'+id;

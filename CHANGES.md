@@ -270,6 +270,15 @@ Reworked the supplier-portal sample cards into tidy labeled sections: **Ship to*
 **SKUs & quantities** (proper table), **Purpose**, and **Notes** (in its own box), with the fulfilment
 inputs, charges, and timeline each in their own clearly separated block.
 
+## v25.39 - Samples feature — Phase 5: "create charge" on Shipments
+
+Shipments now have a **Charges** sub-tab (admin shipment detail): create a charge (supplier + freight +
+product), list charges, and **Accept → Other Payments** / Reject. Accepting posts an Other Payment whose
+description names the shipment **and its linked POs** (e.g. "Shipment PO-57EUBL1 (POs: …) — freight $300 +
+product $0"), per spec. Reuses the generic `supplier_charges` table + `charge/:id/accept`.
+Also added portal-scoped `/api/portal/shipment-charge(-s)` endpoints (supplier-side UI deferred until the
+real portal's Shipment Plan tab is fed data — a separate follow-up).
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
