@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.36';
+const APP_VERSION = 'v25.37';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -899,6 +899,10 @@ app.get('/api/supply/:section', async (req, res) => {
           coalesce(s.recipient_company,'') recipient_company,
           trim(coalesce(s.first_name,'')||' '||coalesce(s.last_name,'')) recipient_name,
           coalesce(s.city,'') city, coalesce(s.country,'') country,
+          coalesce(s.address_line1,'') address_line1, coalesce(s.address_line2,'') address_line2,
+          coalesce(s.region,'') region, coalesce(s.postcode,'') postcode, coalesce(s.phone,'') phone, coalesce(s.notes,'') notes,
+          coalesce((SELECT json_agg(json_build_object('sku',l.sku,'qty',l.qty) ORDER BY l.id) FROM planner.sample_request_lines l WHERE l.sample_id=s.id),'[]') lines,
+          coalesce((SELECT json_agg(json_build_object('id',c.id,'freight_cost',c.freight_cost,'product_cost',c.product_cost,'status',c.status,'description',coalesce(c.description,'')) ORDER BY c.created_at) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref),'[]') charges,
           to_char(s.completion_date_required,'YYYY-MM-DD') completion_required,
           to_char(s.supplier_expected_completion,'YYYY-MM-DD') supplier_expected,
           s.status, coalesce(s.tracking_code,'') tracking_code, coalesce(s.carrier,'') carrier,

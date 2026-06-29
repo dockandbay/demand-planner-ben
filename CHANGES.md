@@ -258,6 +258,12 @@ The admin SUPPLY ▸ Samples detail panel is now editable: **recipient & address
 (add/remove/edit lines + Save SKUs), plus **tracking code & carrier** inputs. Saves via the existing
 sample patch / lines endpoints.
 
+## v25.37 - Samples show in the admin "preview as supplier"
+
+The admin SUPPLY ▸ Portal Users "preview as supplier" now includes the supplier's **samples** (the samples
+endpoint was enriched with address/notes/lines/charges, and `loadPortalData` feeds them to the preview).
+So the Samples tab is populated both in the real portal (`/api/portal/bootstrap`) and the admin preview.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
