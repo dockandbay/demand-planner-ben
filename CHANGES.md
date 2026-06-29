@@ -5,6 +5,19 @@ Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
+## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
+
+- **Discontinue rounding (15th rule)** — the discontinue cutoff month now rounds to the nearest month: a disc
+  date **after the 15th** → effective from the **1st of next month** (the disc month keeps its full forecast);
+  **on/before the 15th** → from the **1st of the current month** (that month is dropped). New shared
+  `discCutoffMo()` helper; replaces the old raw `disc.slice(0,7)` cutoff in both the cover calc and the buy calc.
+  Fixes the case where e.g. a 31 Oct discontinue wrongly zeroed October demand.
+- **No replenishment past discontinue** — a **Buy 3PL** (which always uses the full standard lead time) is now
+  **suppressed if it would land in/after the effective discontinue month** — a standard-lead order can't be sold
+  once the product is discontinued. A genuine near-term gap still surfaces in **Buy 3PL Urgent**.
+
+Artifact-only (no server/migration). Verify against TOWLB-DES-XL-TANTIDE / UK.
+
 ## v25.7 - BI: carton-rounded rec quantities + Urgent Buy grouped by market
 
 - **Whole-carton quantities** — Reallocate and Container Fill now round their move/add to **whole cartons,

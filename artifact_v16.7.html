@@ -1151,6 +1151,15 @@ let CUR='UK',SC_SEL=new Set(['ALL']),TI_SEL=new Set(['ALL']),ST_SEL=new Set(['AC
 let BP_VIEW='buy'; // 'buy' (Buy 3PL/Urgent/FBA + 3PL transfer opps) | 'fba' (Transfer-to-FBA + FBA inbound)
 let PSKU=null,PMKT='UK';
 
+// Effective discontinue cutoff month (YYYY_MM), rounded to the nearest month: a disc date AFTER the 15th
+// rounds to the 1st of the NEXT month (the disc month is still a full selling month); on/before the 15th
+// rounds to the 1st of the current month (that month is discontinued). Demand is zeroed from the cutoff on.
+function discCutoffMo(d){
+  if(!d)return null;
+  var y=+d.slice(0,4), mo=+d.slice(5,7), day=+d.slice(8,10);
+  if(day>15){ mo++; if(mo>12){mo=1;y++;} }
+  return y+'_'+String(mo).padStart(2,'0');
+}
 // Cache of projected buy qtys per SKU per market (computed on render)
 const BUY_CACHE={};
 
@@ -1310,7 +1319,7 @@ function donorSpare(dmd){
     const d=new Date(x.eta),k=`${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`;
     inb3[k]=(inb3[k]||0)+(x.qty||0);
   });
-  const discCutoff=dmd.disc?dmd.disc.slice(0,7).replace('-','_'):null;
+  const discCutoff=discCutoffMo(dmd.disc);
   let s=dmd.i3||0,trough=s,scanned=0;
   for(let i=0;i<PROJ.length&&scanned<horizonMonths;i++){
     if(PROJ[i].isActual||PROJ[i].isForecast)continue;
@@ -2075,7 +2084,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     else{if(!ib3[k])ib3[k]=[];ib3[k].push(s);}
   });
 
-  const discCutoff=md.disc?md.disc.slice(0,7).replace('-','_'):null;
+  const discCutoff=discCutoffMo(md.disc);
   const dem=md.demand||{};
 
   function demAt(idx){
@@ -2205,7 +2214,9 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     const gap=tg3-c3;
     // Only buy if gap is meaningful (>= case pack) OR stock is dangerously low (≤0)
     const meaningfulGap=gap>=cp||c3<=0;
-    if(c3<tg3&&w3next>0&&meaningfulGap){
+    // No Buy-3PL that would LAND in/after the effective discontinue month — a standard-lead order can't be
+    // sold once the product is discontinued (a true near-term gap still surfaces in Buy 3PL Urgent).
+    if(c3<tg3&&w3next>0&&meaningfulGap&&!afterDisc){
       // Ideal placement = arrival month i minus lead months. Allow placement as early as
       // the current actionable month (index 1 = current-month "Remaining" / "ship today").
       // If the ideal placement is in the past (pi<1) the order is already late: clamp it to
