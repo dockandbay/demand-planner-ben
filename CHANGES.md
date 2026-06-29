@@ -362,6 +362,13 @@ includes it; the supplier portal shows **"Not accepted" / "Change requested" in 
   highlighted "new" badge + Mark-read, feed a per-sample badge and the **SAMPLES tab count** in the portal.
   New portal endpoint `/api/portal/sample-note-read/:id`.
 
+## v25.51 - Sample unread badges show the total count
+
+The SAMPLES tab badge (portal) and SAMPLES nav badge (admin) now show the **total unread-note count** summed
+across samples (was a count of samples). The per-row Manage/View badge already shows that sample's own unread
+count. (Confirmed: a supplier's own notes never show "Mark read" in the portal, and a supplier-posted note
+shows as unread on the admin side — both already correct since v25.50.)
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

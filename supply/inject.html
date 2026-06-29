@@ -3699,7 +3699,7 @@
     app.appendChild(rootEl);
     rootEl.querySelectorAll('.stab').forEach(function(b){b.onclick=function(){selectSection(b.dataset.k);};});
     fetch('/api/supply/samples').then(function(r){return r.json();}).then(function(d){ if(Array.isArray(d)){ cache['samples']=d; samplesNavBadge(d); } }).catch(function(){}); }
-  function samplesNavBadge(rows){ var n=(rows||[]).filter(function(r){return (r.unread_notes>0)||(r.pending_charges>0);}).length;
+  function samplesNavBadge(rows){ var n=(rows||[]).reduce(function(a,r){return a+(r.unread_notes||0);},0);   // total unread supplier notes
     var btn=document.querySelector('#supply-subnav .stab[data-k="samples"]'); if(btn)btn.innerHTML='SAMPLES'+(n>0?' <span class="ex-badge">'+n+'</span>':''); }
   function ensureNavButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('supply-btn'))return;
     var navwrap=row.parentElement; if(navwrap&&!navwrap.id)navwrap.id='dab-navwrap';
