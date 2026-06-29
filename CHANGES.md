@@ -117,6 +117,11 @@ Three fixes:
    amount** to the parsed invoice total. When nothing else changed, a **"Set Final invoice amount"** button
    appears so the total can still be captured.
 
+## v25.20 - PO Payments: parse-preview polish
+
+The parse-invoice **Apply** button is now **light green** (more visible), and the summary line
+("PO · N lines · invoice total … — N changed/new/match") is rendered at a larger font.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
