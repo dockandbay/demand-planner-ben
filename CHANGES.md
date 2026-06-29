@@ -169,6 +169,12 @@ shows "override" vs "branch country". (The grid's "M" badge still flags a manual
 The "Ship to" country pill filters now show a **flag** (🇬🇧 UK, 🇺🇸 US, 🇦🇺 AU, 🇪🇺 EU, 🇨🇦 CA, 📦 Direct), and the
 PO filter bars (progress / action / country) are **more compact** — tighter spacing between pills and labels.
 
+## v25.27 - Assign shipment: default list is same-country shipments
+
+When assigning a shipment to a PO, the picker now defaults (before you type) to **shipments going to the same
+country as the PO**, with a "Shipments to {country} — type to search all" hint. Typing searches the full list
+across all shipments (ref / master PO / country). Each option now also shows the shipment's destination.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
