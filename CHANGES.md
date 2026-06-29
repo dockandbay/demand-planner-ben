@@ -228,6 +228,12 @@ New **SAMPLES** top-menu section under SUPPLY:
 (Server-side: also adds `status_calc` to the samples list endpoint.) Phases 4 (supplier portal) + 5 (shipment
 charges) still to come.
 
+## v25.33 - Move BARCODES under PRODUCTIONS
+
+BARCODES is no longer a top-level SUPPLY menu — it's now a **sub-tab of PRODUCTIONS** (alongside Productions /
+Deposits / Other Payments / Payments Due / Payments Report). Old `barcodes` routes redirect to the new
+sub-tab. `renderBarcodes` now renders into the productions body.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

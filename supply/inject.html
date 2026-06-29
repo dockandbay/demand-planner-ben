@@ -189,7 +189,7 @@
 (function(){
   var SECTIONS=[['actions','ACTIONS'],['reports','BI & REPORTS'],['productions','PRODUCTIONS'],['purchase-orders','PURCHASE ORDERS'],['order-plan','ORDER PLAN'],
     ['shipments','SHIPMENTS'],['samples','SAMPLES'],
-    ['barcodes','BARCODES'],['config','CONFIG']];
+    ['config','CONFIG']];
   // REPORTS is a parent tab; these are its sub-tabs (the read-across views).
   var REPORT_SECTIONS=[['metrics','METRICS'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
     ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['cashflow','CASH FLOW'],['directclient','DIRECT TO CLIENT'],['flexport','FLEXPORT']];
@@ -1703,7 +1703,7 @@
 
   // ---- PRODUCTIONS (POs grouped by PROD#; aggregated SKU view) ----
   var prodTab='list', _prodList=[];
-  var PROD_SUBS=[['list','Productions'],['deposits','Deposits'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report']];
+  var PROD_SUBS=[['list','Productions'],['deposits','Deposits'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['barcodes','Barcodes']];
   function renderProductions(rows){ var c=document.getElementById('supply-content');
     c.innerHTML=annot('productions')
       +'<div id="prod-subtabs">'+PROD_SUBS.map(function(t){return '<span class="rtab'+(prodTab===t[0]?' active':'')+'" data-pt="'+t[0]+'">'+t[1]+'</span>';}).join('')+'</div>'
@@ -1718,6 +1718,9 @@
     if(prodTab==='other'){ renderOtherPayments(b); return; }
     if(prodTab==='paydue'){ renderPaymentsDue(b); return; }
     if(prodTab==='payreport'){ renderPaymentsReport(b); return; }
+    if(prodTab==='barcodes'){ b.innerHTML='<div class="count">Loading…</div>';
+      fetch('/api/supply/barcodes').then(function(r){return r.json();}).then(function(d){ renderBarcodes(d, b); })
+        .catch(function(e){ b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>'; }); return; }
     prodListView(b, rows); }
   function prodListView(b, rows){
     var FILTERS=[['active','Active'],['completed','Completed'],['all','All']]; var state={f:'active',q:''};
@@ -3167,7 +3170,7 @@
       });
     }); }
   var RRP_MKTS=[['UK','uk_rt','£'],['US','us_rt','$'],['EU','eu_rt','€']];   // markets we hold RRP for (migration 023)
-  function renderBarcodes(payload){ var c=document.getElementById('supply-content');
+  function renderBarcodes(payload, tgt){ var c=tgt||document.getElementById('supply-content');
     var rows=(payload&&payload.rows)||[], batches=(payload&&payload.batches)||[];
     var batchBy={}; batches.forEach(function(b){ batchBy[b.batch]=b; });
     // values that can be comma-joined per SKU (prod numbers, suppliers) → flatten for the dropdowns
@@ -3564,6 +3567,7 @@
     }).catch(function(){}); }
 
   function selectSection(key){
+    if(key==='barcodes'){ prodTab='barcodes'; return selectSection('productions'); }   // Barcodes is now a Productions sub-tab
     if(key==='reports')return selectReport(reportTab||'metrics');
     if(REPORT_KEYS.indexOf(key)>=0)return selectReport(key);
     current=key; syncHash();
