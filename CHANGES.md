@@ -34,6 +34,14 @@ infinite. Now the **displayed cover** counts **real future demand including post
 realistically alongside the demand + SOH rows (display only — buy decisions keep their own post-disc-zeroed
 forward demand). Completes the discontinued-row cleanup.
 
+## v25.13 - Buy plan: DISC only on buy rows (real fix — dr() helper override)
+
+The previous discontinued-display work was masked by the **`dr()` row helper itself**, which replaced **every**
+cell with "DISC" for any post-discontinue month (and the month header showed "DISC" too). Removed both
+overrides: now the **demand / SOH / cover rows show real numbers** (run-down) with the **month labels intact**
+(post-disc columns get a subtle tint), and **DISC shows only on the buy rows** (Buy 3PL / Urgent / FBA) via
+their own cell functions. This is what actually makes v25.10/25.12 visible.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

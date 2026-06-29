@@ -2536,8 +2536,7 @@ function buildTable(proj,md,pd,is3,hasFBA){
   const tfOv=parseInt(document.getElementById('fbw')?.value)||null;
   const t3=md.t3||12,tf=(tfOv!==null?tfOv:(md.tf||4));
   const hdr='<tr><th class="rl">Row</th>'+proj.map(p=>{
-    if(p.isDisc)return`<th style="background:#f5f5f4;color:#a8a29e;font-size:9px;letter-spacing:.05em">DISC</th>`;
-    const bg=p.isActual?'background:#f0fdf4;':p.isForecast?'background:#f8fafc;':BUY_KEYS.includes(p.key)?'background:#eff6ff;color:#1d4ed8':'';
+    const bg=p.isDisc?'background:#fdf6f0;color:#b08968;':p.isActual?'background:#f0fdf4;':p.isForecast?'background:#f8fafc;':BUY_KEYS.includes(p.key)?'background:#eff6ff;color:#1d4ed8':'';
     const cls=p.now&&!p.isActual&&!p.isForecast?'now':'';
     const top=p.lbl2?`<span style="font-size:8px;display:block;color:#888;font-weight:400">${p.lbl2}</span>`:'';
     return `<th class="${cls}" style="${bg}">${top}${p.lbl}</th>`;
@@ -2656,7 +2655,7 @@ function buildTable(proj,md,pd,is3,hasFBA){
   return `<div class="pw"><table class="pt"><thead>${hdr}</thead><tbody>${rows.join('')}</tbody></table></div>`;
 }
 function sec(l,n){return`<tr><td class="rl sec">${l}</td>${Array(n).fill('<td class="sx"></td>').join('')}</tr>`;}
-function dr(l,proj,fn,ind){return`<tr><td class="rl${ind?' ind':''}">${l}</td>${proj.map(p=>p.isDisc?'<td style="background:#f5f5f4;color:#a8a29e;font-size:9px;text-align:center;letter-spacing:.05em">DISC</td>':fn(p)).join('')}</tr>`;}
+function dr(l,proj,fn,ind){return`<tr><td class="rl${ind?' ind':''}">${l}</td>${proj.map(p=>fn(p)).join('')}</tr>`;}
 function c(v,cls){return`<td class="${cls}">${v}</td>`;}
 function card(l,v,s,w){return`<div class="sc2 ${w}"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;}
 function fmt(n){if(n===null||n===undefined)return'\u2014';const r=Math.round(n);return Math.abs(r)>=1000?r.toLocaleString():String(r);}
