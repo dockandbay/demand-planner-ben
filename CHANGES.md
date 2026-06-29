@@ -164,6 +164,11 @@ The PO **Ship to (country)** override now lives in the **Master Data** sub-tab (
 where it belongs, and was removed from the Dates sub-tab. Blank = use the branch country; the source note
 shows "override" vs "branch country". (The grid's "M" badge still flags a manual ship-to override.)
 
+## v25.26 - Purchase Orders: country flags + more compact filter bars
+
+The "Ship to" country pill filters now show a **flag** (🇬🇧 UK, 🇺🇸 US, 🇦🇺 AU, 🇪🇺 EU, 🇨🇦 CA, 📦 Direct), and the
+PO filter bars (progress / action / country) are **more compact** — tighter spacing between pills and labels.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

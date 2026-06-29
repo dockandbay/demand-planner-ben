@@ -41,6 +41,9 @@
 #supply-root .pill.po-focus.active,#supply-root .pill.ship-focus.active{background:#f59e0b;color:#fff;border-color:#d97706}
 #supply-root .pill.po-focus.active:hover,#supply-root .pill.ship-focus.active:hover{background:#d97706;color:#fff}
 #supply-root .pill-lbl{font-size:11px;color:#444;font-weight:600}
+/* compact PO filter bars — tighter spacing between pills and their labels */
+#supply-root #po-prog>*,#supply-root #po-act>*,#supply-root #po-ctry>*{margin:2px 3px 2px 0}
+#supply-root #po-prog .pill,#supply-root #po-act .pill,#supply-root #po-ctry .pill{padding:2px 7px}
 /* level-3 sub-navs (REPORTS, CONFIG): underline tabs like the level-1/2 menus, in light blue */
 #supply-root #rep-subnav,#supply-root #config-subs,#supply-root #prod-subtabs,#supply-root .po-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 12px}
 #supply-root .ex-badge{display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:#dc2626;color:#fff;font-size:9px;font-weight:700;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px}
@@ -717,6 +720,7 @@
     var FILTERS=[['in_progress','In progress'],['future','Future'],['complete','Complete'],['all','All']];
     var ACTP=[['payment_overdue','⚠ Payment overdue'],['unpaid_payment','⚠ Unpaid payments'],['late','⚠ Late'],['unassigned_shipment','⚠ Unassigned shipment'],['production','Production']];
     var CTRYP=[['UK','UK'],['US','US'],['AU','AU'],['EU','EU'],['CA','CA'],['DIRECT','Direct']];
+    var CFLAG={UK:'🇬🇧',US:'🇺🇸',AU:'🇦🇺',EU:'🇪🇺',CA:'🇨🇦',DIRECT:'📦'};
     var GRP=[['none','None'],['production','Production'],['shipment','Master shipment']];
     // persist filters across edit reloads; reset to a clean view only when navigating to a specific PO
     if(_pendingPO){ _poState={f:'all',q:'',act:{},ctry:{},grp:'shipment',sup:'',prod:'',batch:''}; }
@@ -746,7 +750,7 @@
       +'<span class="pill po-focus'+(state.focus?' active':'')+'" data-focus title="show only starred POs (active only — completed are hidden)">★ Focus</span>'
       +'<input class="flt" id="sup-search" placeholder="Filter PO / supplier…" value="'+esc(state.q||'')+'"><span class="count" id="sup-count"></span>'
       +'<span style="margin-left:auto"><button class="save-btn" id="po-new" style="margin-right:8px">+ New PO</button><button class="save-btn" id="po-upload" style="margin-right:8px">⬆ Upload POs</button><button class="save-btn dark" id="po-csv" style="margin-right:8px">⬇ CSV for Fulfil</button><button class="save-btn dark" id="po-cin7-dates" title="push the planner completion date to Cin7 EstimatedDeliveryDate for every ACTIVE PO whose date differs from Cin7 — complete POs are skipped (live write)">📅 Sync Cin7 dates</button></span></div>'
-      +'<div class="bar" id="po-ctry"><span class="pill-lbl">Ship to</span>'+CTRYP.map(function(a){return '<span class="pill'+(state.ctry[a[0]]?' active':'')+'" data-c="'+a[0]+'">'+a[1]+' ('+ctryCount(a[0])+')</span>';}).join('')
+      +'<div class="bar" id="po-ctry"><span class="pill-lbl">Ship to</span>'+CTRYP.map(function(a){return '<span class="pill'+(state.ctry[a[0]]?' active':'')+'" data-c="'+a[0]+'">'+(CFLAG[a[0]]?CFLAG[a[0]]+' ':'')+a[1]+' ('+ctryCount(a[0])+')</span>';}).join('')
       +'<span class="pill-lbl" style="margin-left:14px">Supplier</span><select class="flt" id="po-sup" style="width:180px;max-width:180px;cursor:pointer;text-overflow:ellipsis"><option value="">All suppliers</option>'+(supplierList||[]).slice().sort().map(function(s){return '<option'+(s===state.sup?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select>'
       +'<span class="pill-lbl" style="margin-left:14px">Production</span><select class="flt" id="po-prod" style="width:62px;cursor:pointer;text-overflow:ellipsis"><option value="">All</option>'+optList(_prods,state.prod)+'</select>'
       +'<span class="pill-lbl" style="margin-left:10px">Batch</span><select class="flt" id="po-batch" style="width:94px;cursor:pointer;text-overflow:ellipsis"><option value="">All</option>'+optList(_batches,state.batch)+'</select></div>'
