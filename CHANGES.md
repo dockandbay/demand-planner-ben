@@ -99,6 +99,13 @@ Three changes:
 In SUPPLY ▸ Shipments the **Mode** dropdown is now colour-coded: **air → green**, **fob → purple**, sea stays
 default. Applies in both the grid and the shipment detail.
 
+## v25.18 - PO Payments: wider parse-invoice preview + tick for unchanged values
+
+The parse-invoice preview table (PO ▸ Payments) now **fills its width** (was shrinking to content) and the
+payments form was widened to give it room. In the Qty and Price columns an **unchanged** value now shows
+**`600 ✓`** (green tick) instead of `600 → 600`; only genuinely **changed** values show the `cur → new`
+arrow, and new SKUs show just the invoice value.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

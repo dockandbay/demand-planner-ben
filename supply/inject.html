@@ -1099,7 +1099,7 @@
       +'</div>';
     // ---- PAYMENTS chunk (order value + payment plan) ----
     var h='<div class="sect-h">Order value — final invoice overrides the estimate for all payment &amp; landed calcs</div>'
-      +'<div class="cli-form" style="max-width:560px">'
+      +'<div class="cli-form" style="max-width:760px">'
       +cliRow('Estimate <span class="mut tiny">(order plan)</span>', money(r.value_est))
       +cliRow('<b>Final invoice amount</b>', '<input class="fci payin" style="width:120px;text-align:left" inputmode="decimal" data-ep="'+ep+'" data-field="supplier_invoice_total" value="'+esc(r.final_invoice==null?'':r.final_invoice)+'"> <span class="mut tiny">blank = use estimate</span>')
       +cliRow('Upload &amp; parse invoice <span class="mut tiny">(.xlsx → proposes SKU / qty / price changes to the Order Plan to confirm)</span>',
@@ -1352,11 +1352,20 @@
         fetch('/api/supply/portal-parse-invoice',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,data_base64:b64})}).then(function(r){return r.json();}).then(function(j){ btn.disabled=false;
           if(!j||j.error||j.ok===false){ out.innerHTML='<span style="color:#b91c1c;font-size:11px">'+esc((j&&j.error)||'Could not parse the file.')+'</span>'; return; }
           var t=j.totals, diff=j.lines.filter(function(l){return l.status!=='match';});
-          var drows=diff.map(function(l){ return '<tr><td class="l">'+esc(l.sku)+'</td><td class="l">'+(l.status==='new'?'<span class="tool-badge bg-amber" style="font-size:9px">NEW</span>':'<span class="mut tiny">changed</span>')+'</td>'
-            +'<td style="text-align:right">'+(l.cur_qty==null?'—':units(l.cur_qty))+' → <b>'+units(l.inv_qty)+'</b></td>'
-            +'<td style="text-align:right">'+(l.cur_cost==null?'—':money(l.cur_cost))+' → <b>'+(l.inv_price==null?'—':money(l.inv_price))+'</b></td></tr>'; }).join('');
+          var drows=diff.map(function(l){
+            // unchanged dimension → "600 ✓"; changed → "cur → inv"; new SKU → just the invoice value
+            var q = l.cur_qty==null ? '<b>'+units(l.inv_qty)+'</b>'
+                  : (Number(l.cur_qty)===Number(l.inv_qty) ? units(l.inv_qty)+' <span style="color:#16a34a">✓</span>'
+                  : units(l.cur_qty)+' → <b>'+units(l.inv_qty)+'</b>');
+            var p = l.inv_price==null ? '<span class="mut">—</span>'
+                  : (l.cur_cost==null ? '<b>'+money(l.inv_price)+'</b>'
+                  : (Number(l.cur_cost)===Number(l.inv_price) ? money(l.inv_price)+' <span style="color:#16a34a">✓</span>'
+                  : money(l.cur_cost)+' → <b>'+money(l.inv_price)+'</b>'));
+            return '<tr><td class="l">'+esc(l.sku)+'</td><td class="l">'+(l.status==='new'?'<span class="tool-badge bg-amber" style="font-size:9px">NEW</span>':'<span class="mut tiny">changed</span>')+'</td>'
+              +'<td style="text-align:right;white-space:nowrap">'+q+'</td>'
+              +'<td style="text-align:right;white-space:nowrap">'+p+'</td></tr>'; }).join('');
           out.innerHTML='<div class="tiny" style="margin-bottom:4px">'+(j.po_detected?'<b>'+esc(j.po_detected)+'</b> · ':'')+t.count+' lines · '+money(t.value)+' — <b>'+t.changed+'</b> changed, <b>'+t.neu+'</b> new, '+(t.matched-t.changed)+' already match.</div>'
-            +(diff.length?'<div class="tw" style="max-height:240px;overflow:auto"><table style="font-size:11px;width:auto"><thead><tr><th class="l">SKU</th><th class="l"></th><th style="text-align:right">Qty</th><th style="text-align:right">Price</th></tr></thead><tbody>'+drows+'</tbody></table></div>'
+            +(diff.length?'<div class="tw" style="max-height:240px;overflow:auto"><table style="font-size:11px;width:100%"><thead><tr><th class="l" style="width:50%">SKU</th><th class="l">Status</th><th style="text-align:right">Qty</th><th style="text-align:right">Price</th></tr></thead><tbody>'+drows+'</tbody></table></div>'
               +'<button class="save-btn inv-parse-apply" style="margin-top:6px">Apply '+(t.changed+t.neu)+' change(s) → Order Plan (to confirm)</button>'
               :'<span class="mut tiny">Everything matches the order plan — nothing to change.</span>');
           var ab=out.querySelector('.inv-parse-apply'); if(ab)ab.onclick=function(){ ab.disabled=true; ab.textContent='Applying…';
