@@ -11,6 +11,13 @@ arrive), it's **no longer shown as an overdue Buy-3PL** — it falls through to 
 (rush/air), and no phantom stock is carried forward so the Urgent pass sizes the gap correctly. Fixes a buy
 showing in Buy-3PL with a faster-than-lead delivery (e.g. June placement → July arrival on a 17-week lead).
 
+## v25.10 - Buy plan: cleaner discontinued display
+
+After a product's discontinue date the buy plan now: (a) **removes the standalone "Discontinue Date" row**;
+(b) shows **"DISC"** only in the **buy columns** (Buy 3PL · Buy 3PL Urgent · Buy FBA) — i.e. no further buying;
+(c) **keeps showing the real demand forecast + stock-on-hand run-down** in the month cells (display pass uses
+real demand even past disc, while buys stay suppressed) so you can see the tail run down.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

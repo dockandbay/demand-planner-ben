@@ -2389,9 +2389,12 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     }
 
     const afterDisc=discCutoff&&key>=discCutoff;
-    const dtc=afterDisc?0:(dem.DTC&&dem.DTC[key])||0;
-    const b2b=afterDisc?0:(dem.B2B&&dem.B2B[key])||0;
-    const fba=afterDisc?0:(dem.FBA&&dem.FBA[key])||0;
+    // Display pass: show REAL demand + a stock-on-hand run-down even after discontinue. Buys are still
+    // suppressed post-disc (PASS 1 + the forward-target functions zero post-disc demand), so this only
+    // affects what's shown — you can watch demand + SOH run down with no further replenishment.
+    const dtc=(dem.DTC&&dem.DTC[key])||0;
+    const b2b=(dem.B2B&&dem.B2B[key])||0;
+    const fba=(dem.FBA&&dem.FBA[key])||0;
     const tot=dtc+b2b+fba;
     const nextTot=demAt(i+1),nextFba=fbaAt(i+1);
     const nextDtcB2b=nextTot-nextFba,w3next=nextDtcB2b/4.33,wFnext=nextFba/4.33;
@@ -2586,14 +2589,12 @@ function buildTable(proj,md,pd,is3,hasFBA){
 
   // ── Buy Plan ──
   rows.push(sec('Buy Plan',proj.length));
-  if(md.disc){
-    rows.push(dr('Discontinue Date',proj,p=>{
-      const discYM=md.disc.slice(0,7).replace('-','_');
-      return p.key===discYM?`<td class="disc-row" title="${md.disc}">disc</td>`:c('','cv0');
-    }));
-  }
+  // "DISC" in the buy columns once past the (rounded) discontinue date — no more buying (the standalone
+  // Discontinue Date row was removed; the demand + SOH rows still run down so the tail stays visible).
+  const discCell=`<td class="cv0" style="color:#b08968;font-weight:700;font-size:9px" title="discontinued · no further replenishment">DISC</td>`;
   rows.push(dr('Buy 3PL',proj,p=>{
     if(p.isActual)return c('\u2014','cv0');
+    if(p.isDisc)return discCell;
     if(!p.bQ)return c('\u2014','cv0');
     const hi=BUY_KEYS.includes(p.key);
     if(p.overdue){
@@ -2605,6 +2606,7 @@ function buildTable(proj,md,pd,is3,hasFBA){
   }));
   rows.push(dr('Buy 3PL URGENT',proj,p=>{
     if(p.isActual)return c('\u2014','cv0');
+    if(p.isDisc)return discCell;
     if(!p.bQu)return c('\u2014','cv0');
     const lead=p.urgentLead?`${p.urgentLead}wk lead`:'';
     const danger=p.urgentMonth?`stockout in ${p.urgentMonth}`:'stockout risk';
@@ -2613,6 +2615,7 @@ function buildTable(proj,md,pd,is3,hasFBA){
   if(hasFBA){
     rows.push(dr('Buy FBA',proj,p=>{
       if(p.isActual)return c('','cv0');
+      if(p.isDisc)return discCell;
       if(!p.fdQ)return c('\u2014','cv0');
       const hi=BUY_KEYS.includes(p.key);
       return `<td class="fbd" style="${hi?'border-top:2px solid #7c3aed':''}">${fmt(p.fdQ)}</td>`;
