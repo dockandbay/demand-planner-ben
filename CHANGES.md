@@ -566,6 +566,15 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
   on an in-transit/arrived PO isn't an actionable late exception. Late now applies only to not-yet-shipped POs
   (FUTURE / PRODUCTION / READY TO SHIP) that are past their forecast delivery date.
 
+## v25.73 - Purchase Orders: Exceptions Filters moved right + clearer "late" definitions
+
+- The **Exceptions Filters** box now sits at the far right of the filter bar (left-aligned text) so the label is
+  always fully visible.
+- Renamed/redefined two exceptions:
+  - **"Late - should be Completed"** — production completion date has passed but the PO is still in
+    FUTURE/PRODUCTION (not yet ready-to-ship/shipped/delivered).
+  - **"Late - should have Shipped"** — still in PRODUCTION and the ship date has passed.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

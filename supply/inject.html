@@ -723,8 +723,12 @@
       var startDepDue=Number(r.start_calc)>0.009 && r.start_assigned==null && !r.deposit_ref;
       var invoiceUnpaid=r.is_final && Number(r.balance_owing)>0.01;
       return startDepDue || invoiceUnpaid; },
-    late:function(r){return r.is_late;},
-    unassigned_shipment:function(r){return r.unassigned_shipment;},production:function(r){return r.is_production;},
+    // "Late - should be Completed": production completion date (prod_end) has passed but the PO hasn't reached a
+    // completed-production state (still FUTURE/PRODUCTION — not ready-to-ship/shipping/delivered/complete).
+    late:function(r){ var t=new Date().toISOString().slice(0,10); return !/ready to ship|shipping|deliver|complete/i.test(r.status||'') && r.prod_end && r.prod_end<t; },
+    unassigned_shipment:function(r){return r.unassigned_shipment;},
+    // "Late - should have Shipped": still in PRODUCTION and the ship date has passed.
+    production:function(r){ var t=new Date().toISOString().slice(0,10); return /production/i.test(r.status||'') && r.ship && r.ship<t; },
     // Direct to Client details set but the supplier hasn't approved them (only when the production requires confirmation)
     dtc_not_approved:function(r){ if(r.progress==='complete'||!r.require_confirmation)return false;
       var hasPack=r.pack_polybags||r.pack_dnb_barcodes||r.pack_rfid_barcodes||r.pack_dnb_carton||r.pack_client_carton||r.pack_polybags_notes||r.pack_dnb_barcodes_notes||r.pack_rfid_barcodes_notes||r.pack_dnb_carton_notes||r.pack_client_carton_notes||r.pack_pallet_notes||r.pack_other_notes;
@@ -734,7 +738,7 @@
   var _poState=null;   // PURCHASE ORDERS filter state — persisted across edit-triggered reloads so the filter survives
   function poInner(rows,c){
     var FILTERS=[['in_progress','In progress'],['future','Future'],['complete','Complete'],['all','All']];
-    var ACTP=[['payment_overdue','Payment overdue'],['unpaid_payment','Unpaid payments'],['late','Late'],['unassigned_shipment','Unassigned shipment'],['production','Production'],['dtc_not_approved','Direct to Client not approved'],['po_not_approved','Purchase Order not approved']];
+    var ACTP=[['payment_overdue','Payment overdue'],['unpaid_payment','Unpaid payments'],['late','Late - should be Completed'],['unassigned_shipment','Unassigned shipment'],['production','Late - should have Shipped'],['dtc_not_approved','Direct to Client not approved'],['po_not_approved','Purchase Order not approved']];
     var CTRYP=[['UK','UK'],['US','US'],['AU','AU'],['EU','EU'],['CA','CA'],['DIRECT','Direct']];
     var CFLAG={UK:'🇬🇧',US:'🇺🇸',AU:'🇦🇺',EU:'🇪🇺',CA:'🇨🇦',DIRECT:'📦'};
     var GRP=[['none','None'],['production','Production'],['shipment','Master shipment']];
@@ -772,12 +776,12 @@
       +'<span class="pill-lbl" style="margin-left:10px">Batch</span><select class="flt" id="po-batch" style="width:94px;cursor:pointer;text-overflow:ellipsis"><option value="">All</option>'+optList(_batches,state.batch)+'</select></div>'
       +'<div class="bar" id="po-act"><span class="pill po-actall" data-aa="1" style="background:#dc2626;color:#fff;border:1px solid #991b1b;font-weight:700" title="show only POs that have one or more open action items (the red badges)">ACTION ITEMS ('+actItemsCount()+')</span>'
       +'<span class="pill po-erp" data-erp="1" style="background:#b45309;color:#fff;border:1px solid #7c2d12;font-weight:700;margin-left:6px" title="show only POs misaligned with Fulfil/Cin7 — never pushed (upload the whole PO) or with pending qty/cost changes (update). Use the ERP button on the row, or Upload on the Order Plan, to push.">⬆ NEEDS ERP ('+erpCount()+')</span>'
-      +'<span style="display:inline-flex;align-items:center;gap:7px;margin-left:14px;white-space:nowrap"><span class="pill-lbl">Exceptions Filters</span>'
-        +'<select class="flt" id="po-exc" style="width:auto;max-width:260px;cursor:pointer;background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;font-weight:700">'
+      +'<span class="pill-lbl" style="margin-left:14px">Group</span><select class="flt" id="po-grp" style="width:auto;cursor:pointer">'+GRP.map(function(g){return '<option value="'+g[0]+'"'+(g[0]===state.grp?' selected':'')+'>'+esc(g[1])+'</option>';}).join('')+'</select>'
+      +'<span style="display:inline-flex;align-items:center;gap:7px;margin-left:auto;white-space:nowrap;text-align:left"><span class="pill-lbl" style="text-align:left">Exceptions Filters</span>'
+        +'<select class="flt" id="po-exc" style="width:auto;max-width:280px;cursor:pointer;text-align:left;background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;font-weight:700">'
         +'<option value="">⚠ All exceptions…</option>'
         +ACTP.map(function(a){return '<option value="'+a[0]+'"'+(state.act[a[0]]?' selected':'')+'>'+esc(a[1])+' ('+actCount(a[0])+')</option>';}).join('')
-      +'</select></span>'
-      +'<span class="pill-lbl" style="margin-left:14px">Group</span><select class="flt" id="po-grp" style="width:auto;cursor:pointer">'+GRP.map(function(g){return '<option value="'+g[0]+'"'+(g[0]===state.grp?' selected':'')+'>'+esc(g[1])+'</option>';}).join('')+'</select></div>'
+      +'</select></span></div>'
       +'<div id="sup-grid"></div>';
     function anyCtry(){ for(var k in state.ctry){ if(state.ctry[k])return true; } return false; }
     function cur(){ return rows.filter(function(r){
