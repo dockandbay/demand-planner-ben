@@ -1012,7 +1012,7 @@
       +'<td class="l">'+cellPickBtn(r.po,'/api/supply/po/'+encodeURIComponent(r.po)+'/supplier','supplier_name',r.supplier_name,'supplier')+'</td>'
       +'<td class="l">'+(r.country?esc(clabel(r.country)):'<span class="mut tiny">—</span>')+(r.country_src==='M'?'<span class="src m">M</span>':'')+'</td>'
       +'<td class="l">'+cellPickBtn(r.po,ep,'branch',r.branch,'branch')+'</td>'
-      +(_poShowClient?'<td class="l">'+(r.client?esc(r.client):'<span class="mut">—</span>')+'</td><td class="l">'+(r.sales_order_ref?esc(r.sales_order_ref):'<span class="mut">—</span>')+'</td>':'')
+      +'<td class="l" style="font-size:10px;line-height:1.05;max-width:130px;white-space:normal">'+(r.client?esc(r.client):'<span class="mut">—</span>')+'<br>'+(r.sales_order_ref?'<span class="mut">'+esc(r.sales_order_ref)+'</span>':'<span class="mut">—</span>')+'</td>'
       +'<td class="l">'+statusSel(ep,r.status)+'</td>'
       +'<td class="l">'+shipcell+'</td>'
       +'<td class="l">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0)+'</td>'
@@ -1023,13 +1023,12 @@
       +dTd(r.checkin,'',((r.status==='PRODUCTION'||r.status==='SHIPPING')&&datePast(r.checkin))?DTD_RED:'')
       +'<td>'+(r.is_final?money(r.value_used)+' <span class="tool-badge bg-green" title="final supplier invoice amount (overrides estimate)">final</span>':money(r.value_est)+' '+valnote)+'</td>'
       +'<td'+(Number(r.pallets)>20?' style="color:#dc2626;font-weight:700" title="over 20 pallets — more than one container; rebalance the production POs"':'')+'>'+(r.pallets!=null&&r.pallets!==''?r.pallets:'<span class="mut tiny">—</span>')+'</td>'
-      +'<td>'+money(r.start_dep)+'</td><td>'+money(r.completion)+'</td><td>'+money(r.balance_owing)+'</td>'
       +'<td class="l">'+cellPickBtn(r.po,ep,'prod_no',r.prod_no,'prod')+'</td>'
       +'<td class="l">'+cellPickBtn(r.po,ep,'batch_id',r.batch_id,'batch')+'</td>'
       +'</tr>'
-      +'<tr class="exp-row"'+ga+' id="poexp-'+i+'" style="display:none"><td colspan="'+(_poShowClient?23:21)+'"><div id="podet-'+i+'" class="count">Loading…</div></td></tr>'; }
+      +'<tr class="exp-row"'+ga+' id="poexp-'+i+'" style="display:none"><td colspan="19"><div id="podet-'+i+'" class="count">Loading…</div></td></tr>'; }
   function poTable(rows,groupBy){ if(!rows.length)return '<div class="count">No POs in this filter.</div>';
-    var head=lookupDatalists()+poErpRecon(rows)+'<div class="tw"><table class="po-tbl"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l">ERP</th><th class="l">Supplier</th><th class="l">Ship to</th><th class="l">Branch</th>'+(_poShowClient?'<th class="l">Client</th><th class="l">Client sales ref</th>':'')+'<th class="l">Status</th><th class="l">Shipment</th><th class="l">Deposit ref</th><th class="l">Start</th><th class="l">End</th><th class="l">Ship</th><th class="l">Delivery</th><th class="l">Completion</th><th>Value est</th><th>Pallets</th><th>Start dep</th><th>Completion</th><th>Balance</th><th class="l">PROD#</th><th class="l">Batch</th></tr></thead><tbody>';
+    var head=lookupDatalists()+poErpRecon(rows)+'<div class="tw"><table class="po-tbl"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l">ERP</th><th class="l">Supplier</th><th class="l">Ship to</th><th class="l">Branch</th><th class="l">Direct</th><th class="l">Status</th><th class="l">Shipment</th><th class="l">Deposit ref</th><th class="l">Start</th><th class="l">End</th><th class="l">Ship</th><th class="l">Delivery</th><th class="l">Completion</th><th>Value est</th><th>Pallets</th><th class="l">PROD#</th><th class="l">Batch</th></tr></thead><tbody>';
     var body='';
     if(!groupBy||groupBy==='none'){ rows.forEach(function(r,i){ body+=poRowHtml(r,i,false,null); }); }
     else {

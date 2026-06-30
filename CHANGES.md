@@ -596,6 +596,13 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
   value carried a trailing newline/space (common from spreadsheets). The search query is now trimmed, so pasted
   refs match. (Applied to all six supply-grid picker searches.)
 
+## v25.78 - Purchase Orders grid: "Direct" column; removed payment columns
+
+- New **Direct** column after Branch (always shown) — Client name on line 1, Client order ref on line 2, in
+  small text with tight line spacing (narrow). Replaces the old DIRECT-pill-only Client/Client-sales-ref columns.
+- Removed the **Start dep / Completion (amount) / Balance** payment columns from the grid (still in the PLAN ▸
+  Payments tab). Grid is less cluttered.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
