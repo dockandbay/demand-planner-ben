@@ -581,6 +581,10 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
   covered was the dropdown's `width:auto`; switched to a **fixed 220px width** (same pattern as the working
   Supplier/Production/Batch selects) so the label is never overlapped.
 
+## v25.75 - Purchase Orders: rename "Exceptions Filters" label to "Exceptions"
+
+- Shortened the PO filter label to **Exceptions**.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

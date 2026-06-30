@@ -776,7 +776,7 @@
       +'<span class="pill-lbl" style="margin-left:10px">Batch</span><select class="flt" id="po-batch" style="width:94px;cursor:pointer;text-overflow:ellipsis"><option value="">All</option>'+optList(_batches,state.batch)+'</select></div>'
       +'<div class="bar" id="po-act"><span class="pill po-actall" data-aa="1" style="background:#dc2626;color:#fff;border:1px solid #991b1b;font-weight:700" title="show only POs that have one or more open action items (the red badges)">ACTION ITEMS ('+actItemsCount()+')</span>'
       +'<span class="pill po-erp" data-erp="1" style="background:#b45309;color:#fff;border:1px solid #7c2d12;font-weight:700;margin-left:6px" title="show only POs misaligned with Fulfil/Cin7 — never pushed (upload the whole PO) or with pending qty/cost changes (update). Use the ERP button on the row, or Upload on the Order Plan, to push.">⬆ NEEDS ERP ('+erpCount()+')</span>'
-      +'<span class="pill-lbl" style="margin-left:14px;white-space:nowrap">Exceptions Filters</span>'
+      +'<span class="pill-lbl" style="margin-left:14px;white-space:nowrap">Exceptions</span>'
         +'<select class="flt" id="po-exc" style="width:220px;max-width:220px;cursor:pointer;text-align:left;text-overflow:ellipsis;background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;font-weight:700">'
         +'<option value="">⚠ All exceptions…</option>'
         +ACTP.map(function(a){return '<option value="'+a[0]+'"'+(state.act[a[0]]?' selected':'')+'>'+esc(a[1])+' ('+actCount(a[0])+')</option>';}).join('')
