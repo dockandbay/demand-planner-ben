@@ -554,6 +554,11 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
   the in-place fix shipped. Suppliers now always get the latest portal code.
 - Regression test extended to assert grid↔timeline prod-status sync with no reload.
 
+## v25.71 - Purchase Orders: "Exceptions Filters" label no longer hidden by the dropdown
+
+- Wrapped the label + dropdown in a no-wrap group with a fixed gap so the **Exceptions Filters** label stays
+  fully visible (the dropdown was overlapping the word "Filters" when the filter bar wrapped).
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
