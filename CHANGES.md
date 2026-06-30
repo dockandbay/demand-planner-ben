@@ -507,6 +507,14 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
   its only full rebuilds are structural create/delete (add/remove a row). Portal **Samples** actions and the
   shipment-plan **escalate** toggle still full-refresh — flagged as the next pass.
 
+## v25.66 - Purchase Orders: "Exceptions Filters" dropdown (+ two new exceptions)
+
+- The PO grid's "By type" exception pills are now a single coloured **Exceptions Filters** dropdown (red), each
+  option showing its count — tidier than the row of pills.
+- Two new exception filters: **Direct to Client not approved** (packing details set, production requires
+  confirmation, supplier hasn't approved) and **Purchase Order not approved** (production requires confirmation,
+  supplier hasn't confirmed the PO).
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
