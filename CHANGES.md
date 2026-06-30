@@ -496,6 +496,17 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
 - No app-code change — pure index. (The recent feature columns weren't the cause; this subquery was
   pre-existing and grows costlier with more POs.)
 
+## v25.65 - Supplier portal: no full-screen refresh on PO actions; sub-tabs no longer wrap early
+
+- The PO sub-tab bar (under MANAGE) no longer wraps early — the expanded card spans the full width.
+- PO-card actions now **update in place** (silent DB write, no screen refresh): **Approve Direct to Client
+  details**, **Confirm/withdraw order**, **production status**, **submit invoice**, and **create shipment &
+  save**. Added `poActCount`/`refreshRow` helpers so the MANAGE action badge + sub-tab badges stay correct
+  without a full reload.
+- Analysis: the supply-plan grid already saves inline edits/selections silently (a green flash, no re-render);
+  its only full rebuilds are structural create/delete (add/remove a row). Portal **Samples** actions and the
+  shipment-plan **escalate** toggle still full-refresh — flagged as the next pass.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

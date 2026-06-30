@@ -620,7 +620,7 @@
       function badge(n){ return n>0?' <span class="ex-badge">'+n+'</span>':''; }
       var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab pptab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'">'+t[1]+badge(t[3])+'</button>';}).join('')+'</div>';
       var panels=tabs.map(function(t,ti){return '<div class="pptab-panel" data-pt="'+t[0]+'"'+(ti===0?'':' style="display:none"')+'>'+t[2]+'</div>';}).join('');
-      return '<div class="ppx" style="padding:4px 2px;max-width:820px;text-align:left">'+bar+panels+'</div>'; }
+      return '<div class="ppx" style="padding:4px 2px;max-width:none;text-align:left">'+bar+panels+'</div>'; }
     function ppPOs(pos, data){ var lb=data.lb||{}, notesByPo=data.notesByPo||{}, subsByPo=data.subsByPo||{}, costsByPo=data.costsByPo||{}, supSkus=data.supSkus||[], xdByPo=data.xdByPo||{}, addByPo=data.addByPo||{};
       if(!pos.length)return '<div class="count">No purchase orders for this supplier.</div>';
       var today=new Date().toISOString().slice(0,10);
@@ -851,6 +851,20 @@
               var cur=cell.querySelector('.pptab.active'); var want=keepPt||(cur&&cur.dataset.pt)||'orderplan';   // keep the tab the user was on
               cell.innerHTML=ppExpand(p,_ppData.lb[po]||[],_ppData.notesByPo[po]||[],_ppData.subsByPo[po]||[],i,_ppData.costsByPo[po]||{},_ppData.supSkus||[],_ppData.xdByPo[po]||{},_ppData.addByPo[po]||[]);
               wireDetail(cell); var t=cell.querySelector('.pptab[data-pt="'+want+'"]'); if(t)t.onclick(); }
+            // recompute a PO's MANAGE action-badge count from current _ppData (mirrors the inline calc in ppPOs)
+            function poActCount(p){ if(!p)return 0; var po=p.po, today=new Date().toISOString().slice(0,10);
+              var sb=_ppData.subsByPo[po]||[], nts=_ppData.notesByPo[po]||[];
+              var unreadInt=nts.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
+              var cdS=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean), xdm=_ppData.xdByPo[po]||{};
+              var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
+              var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end):'';
+              var dtcPend=p.require_confirmation&&(p.pack_polybags||p.pack_dnb_barcodes||p.pack_rfid_barcodes||p.pack_dnb_carton||p.pack_client_carton||p.pack_polybags_notes||p.pack_dnb_barcodes_notes||p.pack_rfid_barcodes_notes||p.pack_dnb_carton_notes||p.pack_client_carton_notes||p.pack_pallet_notes||p.pack_other_notes)&&!p.dtc_accepted_at;
+              return (sb.some(function(s){return s.kind==='invoice_value';})?0:1)+((p.shipment||p.flexport_reference||sb.some(function(s){return s.kind==='tracking';}))?0:1)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0); }
+            // in-place row refresh after a write: re-render the open expanded cell + sync the MANAGE badge (no full reload)
+            function refreshRow(row,po){ if(!row)return; var i=row.id.replace('pp-',''); rerenderRow(row,po);
+              var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; var mb=document.querySelector('#supply-root .pp-exp[data-i="'+i+'"]')||document.querySelector('.pp-exp[data-i="'+i+'"]'); if(!mb||!p)return;
+              var n=poActCount(p), b=mb.querySelector('.ex-badge');
+              if(n>0){ if(b){b.textContent=n;} else { mb.insertAdjacentHTML('beforeend',' <span class="ex-badge" title="'+n+' action'+(n>1?'s':'')+' needed">'+n+'</span>'); } } else if(b){ b.remove(); } }
             wireDetail(body);
             // detail-level handlers, bound within a scope (whole body on render, or one cell after a targeted re-render)
             function wireDetail(scope){
@@ -869,7 +883,7 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
               scope.querySelectorAll('.pp-confirm').forEach(function(btn){ btn.onclick=function(){ var v=btn.dataset.v==='1';
                 if(v && !confirm('Confirm this order? You’re accepting the SKUs, quantities and dates as shown.'))return;
                 if(!v && !confirm('Withdraw your confirmation of this order?'))return;
-                btn.disabled=true; postJSON(EP.submit,{po:btn.dataset.po,supplier_id:sid,submitted_by:by,po_confirmed:v},function(){ reload(); }); }; });
+                var po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); btn.disabled=true; postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,po_confirmed:v},function(){ var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; if(p){ p.supplier_confirmed=v?(by||'confirmed'):null; p.supplier_confirmed_by=v?by:null; } refreshRow(row,po); }); }; });
               // post a note → refresh just this PO's timeline in place (re-fetch the supplier's notes, stay on TIMELINE)
               scope.querySelectorAll('.pp-note-post').forEach(function(btn){ btn.onclick=function(){ var ta=pick('pp-note-body',btn.dataset.po); var v=(ta.value||'').trim(); if(!v)return; var po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); btn.disabled=true;
                 postJSON(EP.note,{po:po,supplier_id:sid,body:v,author_kind:'supplier',author_email:by},function(){
@@ -960,24 +974,26 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
               scope.querySelectorAll('.pp-ac-rm').forEach(function(b){ b.onclick=function(){ var box=b.closest('.ppx'), po=(box.querySelector('.pp-ac-add')||{}).dataset.po, row=b.closest('tr[id^="pp-"]'), id=b.dataset.id;
                 postJSON(EP.addlCostRemove,{id:id},function(){  if(_ppData.addByPo[po])_ppData.addByPo[po]=_ppData.addByPo[po].filter(function(x){return String(x.id)!==String(id);}); rerenderRow(row,po,'orderplan'); }); }; });
               // supplier production status dropdown (grid + timeline) → saves + re-renders so the exception flag updates
-              scope.querySelectorAll('.pp-prod').forEach(function(sel){ sel.onchange=function(){ sel.disabled=true;
-                postJSON(EP.submit,{po:sel.dataset.po,supplier_id:sid,submitted_by:by,production_status:sel.value},function(){ reload(); }); }; });
+              scope.querySelectorAll('.pp-prod').forEach(function(sel){ sel.onchange=function(){ var po=sel.dataset.po, row=sel.closest('tr[id^="pp-"]'); sel.disabled=true;
+                postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,production_status:sel.value},function(){ var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; if(p){ p.production_status=sel.value; } refreshRow(row,po); }); }; });
               scope.querySelectorAll('.pp-trk-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po; var t=pick('pp-trk',po).value, cc=pick('pp-car',po).value; if(!t&&!cc){ alert('Pick a carrier and/or enter a tracking ref.'); return; } var fcEl=pick('pp-fcost-new',po); var fc=fcEl?Number(fcEl.value)||0:0; btn.disabled=true;
-                postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,tracking:t,carrier:cc},function(j){ var made=(j.applied||[]).some(function(x){return /shipment created/.test(x);});
-                  var done=function(){ alert((made?'Shipment created for this PO — carrier & tracking saved.':'Carrier & tracking saved to the shipment.')+(fc>0?'\nFreight charge submitted — Dock & Bay will review it.':'')); reload(); };
-                  // the new master shipment's ref = the PO number (server creates it that way), so the freight charge attaches to it
+                var row=btn.closest('tr[id^="pp-"]');
+                postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,tracking:t,carrier:cc},function(j){
+                  // update the PO card in place (shipment now linked); the new master shipment ref = the PO number
+                  var done=function(){ var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; if(p){ if(!p.shipment)p.shipment=po; if(cc)p.ship_carrier=cc; if(t)p.ship_carrier_ref=t; } refreshRow(row,po); };
                   if(fc>0){ postJSON(EP.shipmentCharge,{shipment_ref:po,freight_cost:fc},function(){ done(); }); } else done(); }); }; });
               scope.querySelectorAll('.pp-fchg-go').forEach(function(btn){ btn.onclick=function(){ var ref=btn.dataset.ref;
                 var ci=scope.querySelector('.pp-fcost[data-ref="'+CSS.escape(ref)+'"]'), ni=scope.querySelector('.pp-fnote[data-ref="'+CSS.escape(ref)+'"]');
                 var fc=ci?Number(ci.value)||0:0; if(fc<=0){ alert('Enter a freight amount.'); return; } btn.disabled=true;
                 postJSON(EP.shipmentCharge,{shipment_ref:ref,freight_cost:fc,description:(ni&&ni.value)||null},function(j){ if(j&&j.error){alert(j.error);btn.disabled=false;return;} if(ci)ci.value=''; if(ni)ni.value=''; btn.disabled=false; loadFreightCharges(scope); }); }; });
               // approve the Direct to Client details (packing & labelling)
-              scope.querySelectorAll('.pp-dtc-accept').forEach(function(btn){ btn.onclick=function(){ btn.disabled=true;
-                postJSON(EP.dtcAccept,{po:btn.dataset.po},function(j){ if(j&&j.error){alert(j.error);btn.disabled=false;return;} alert('Direct to Client details approved — thank you.'); reload(); }); }; });
+              scope.querySelectorAll('.pp-dtc-accept').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); btn.disabled=true;
+                postJSON(EP.dtcAccept,{po:po},function(j){ if(j&&j.error){alert(j.error);btn.disabled=false;return;}
+                  var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; if(p){ p.dtc_accepted_at=new Date().toISOString().slice(0,16).replace('T',' '); p.dtc_accepted_by=STATE.by; } refreshRow(row,po); }); }; });
               // jump to this PO's shipment in the Shipment Plan tab (search overrides the pills so it shows whatever its status)
               scope.querySelectorAll('.pp-go-shipplan').forEach(function(btn){ btn.onclick=function(){ PORTAL_TAB='shipmentplan'; PORTAL_SP_PO=btn.dataset.ref||''; renderPP(); }; });
-              scope.querySelectorAll('.pp-inv-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po; var val=pick('pp-inv',po).value; var fin=pick('pp-inv-file',po); var f=fin&&fin.files[0]; if(!val&&!f)return; btn.disabled=true;
-                var go=function(attId){ postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,invoice_value:val||null,invoice_attachment_id:attId||null},function(){ alert('Invoice submitted — awaiting Dock & Bay approval.'); reload(); }); };
+              scope.querySelectorAll('.pp-inv-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); var val=pick('pp-inv',po).value; var fin=pick('pp-inv-file',po); var f=fin&&fin.files[0]; if(!val&&!f)return; btn.disabled=true;
+                var go=function(attId){ postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,invoice_value:val||null,invoice_attachment_id:attId||null},function(){ (_ppData.subsByPo[po]=_ppData.subsByPo[po]||[]).push({kind:'invoice_value',value:val,status:'pending',submitted_at:new Date().toISOString().slice(0,10)}); refreshRow(row,po); }); };
                 if(f){ var rd=new FileReader(); rd.onload=function(){ postJSON(EP.upload,{po:po,supplier_id:sid,filename:f.name,mime:f.type,data_base64:rd.result,uploaded_by:by},function(j){ go(j.id); }); }; rd.readAsDataURL(f); } else go(null); }; });
               // upload a typed document (Commercial Invoice / Packing List / …) → store + show in the Documents list
               scope.querySelectorAll('.pp-doc-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po;
