@@ -585,6 +585,11 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
 
 - Shortened the PO filter label to **Exceptions**.
 
+## v25.76 - Purchase Orders: active filter dropdowns highlighted black
+
+- When a filter dropdown has a non-default value selected (Supplier, Production, Batch, Exceptions), it's now
+  highlighted **black with white text** so active filters are obvious at a glance.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

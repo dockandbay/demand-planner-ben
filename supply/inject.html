@@ -764,6 +764,9 @@
     function distinct(key){ var s={}; rows.forEach(function(r){ var v=r[key]; if(v!=null&&String(v).trim()!=='')s[String(v)]=true; }); return Object.keys(s).sort(function(a,b){return b.localeCompare(a,undefined,{numeric:true});}); }   // descending (newest PROD#/Batch first)
     var _prods=distinct('prod_no'), _batches=distinct('batch_id');
     function optList(arr,sel){ return arr.map(function(v){return '<option'+(String(v)===String(sel)?' selected':'')+'>'+esc(v)+'</option>';}).join(''); }
+    // a filter <select> with a non-default value is highlighted black/white so active filters stand out
+    var SEL_ON=';background:#0f172a;color:#fff;border-color:#0f172a;font-weight:700';
+    var _excOn=Object.keys(state.act||{}).some(function(k){return state.act[k];});
     c.innerHTML=annot('purchase-orders')
       +'<div class="bar" id="po-prog">'+FILTERS.map(function(f){return '<span class="pill'+(f[0]===state.f?' active':'')+'" data-f="'+f[0]+'">'+f[1]+'</span>';}).join('')
       +'<span class="pill po-recent'+(state.recent?' active':'')+'" data-recent title="when on, Completed shows only POs completed in the last 12 months (faster)">📅 Last 12m</span>'
@@ -771,13 +774,13 @@
       +'<input class="flt" id="sup-search" placeholder="Filter PO / supplier…" value="'+esc(state.q||'')+'" style="background:#eff6ff;border-color:#93c5fd"><span class="count" id="sup-count"></span>'
       +'<span style="margin-left:auto"><button class="save-btn" id="po-new" style="margin-right:8px">+ New PO</button><button class="save-btn" id="po-upload" style="margin-right:8px">⬆ Upload POs</button><button class="save-btn dark" id="po-csv" style="margin-right:8px">⬇ CSV for Fulfil</button><button class="save-btn dark" id="po-cin7-dates" title="push the planner completion date to Cin7 EstimatedDeliveryDate for every ACTIVE PO whose date differs from Cin7 — complete POs are skipped (live write)">📅 Sync Cin7 dates</button></span></div>'
       +'<div class="bar" id="po-ctry"><span class="pill-lbl">Ship to</span>'+CTRYP.map(function(a){return '<span class="pill'+(state.ctry[a[0]]?' active':'')+'" data-c="'+a[0]+'">'+(CFLAG[a[0]]?CFLAG[a[0]]+' ':'')+a[1]+' ('+ctryCount(a[0])+')</span>';}).join('')
-      +'<span class="pill-lbl" style="margin-left:14px">Supplier</span><select class="flt" id="po-sup" style="width:180px;max-width:180px;cursor:pointer;text-overflow:ellipsis"><option value="">All suppliers</option>'+(supplierList||[]).slice().sort().map(function(s){return '<option'+(s===state.sup?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select>'
-      +'<span class="pill-lbl" style="margin-left:14px">Production</span><select class="flt" id="po-prod" style="width:62px;cursor:pointer;text-overflow:ellipsis"><option value="">All</option>'+optList(_prods,state.prod)+'</select>'
-      +'<span class="pill-lbl" style="margin-left:10px">Batch</span><select class="flt" id="po-batch" style="width:94px;cursor:pointer;text-overflow:ellipsis"><option value="">All</option>'+optList(_batches,state.batch)+'</select></div>'
+      +'<span class="pill-lbl" style="margin-left:14px">Supplier</span><select class="flt" id="po-sup" style="width:180px;max-width:180px;cursor:pointer;text-overflow:ellipsis'+(state.sup?SEL_ON:'')+'"><option value="">All suppliers</option>'+(supplierList||[]).slice().sort().map(function(s){return '<option'+(s===state.sup?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select>'
+      +'<span class="pill-lbl" style="margin-left:14px">Production</span><select class="flt" id="po-prod" style="width:62px;cursor:pointer;text-overflow:ellipsis'+(state.prod?SEL_ON:'')+'"><option value="">All</option>'+optList(_prods,state.prod)+'</select>'
+      +'<span class="pill-lbl" style="margin-left:10px">Batch</span><select class="flt" id="po-batch" style="width:94px;cursor:pointer;text-overflow:ellipsis'+(state.batch?SEL_ON:'')+'"><option value="">All</option>'+optList(_batches,state.batch)+'</select></div>'
       +'<div class="bar" id="po-act"><span class="pill po-actall" data-aa="1" style="background:#dc2626;color:#fff;border:1px solid #991b1b;font-weight:700" title="show only POs that have one or more open action items (the red badges)">ACTION ITEMS ('+actItemsCount()+')</span>'
       +'<span class="pill po-erp" data-erp="1" style="background:#b45309;color:#fff;border:1px solid #7c2d12;font-weight:700;margin-left:6px" title="show only POs misaligned with Fulfil/Cin7 — never pushed (upload the whole PO) or with pending qty/cost changes (update). Use the ERP button on the row, or Upload on the Order Plan, to push.">⬆ NEEDS ERP ('+erpCount()+')</span>'
       +'<span class="pill-lbl" style="margin-left:14px;white-space:nowrap">Exceptions</span>'
-        +'<select class="flt" id="po-exc" style="width:220px;max-width:220px;cursor:pointer;text-align:left;text-overflow:ellipsis;background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;font-weight:700">'
+        +'<select class="flt" id="po-exc" style="width:220px;max-width:220px;cursor:pointer;text-align:left;text-overflow:ellipsis;'+(_excOn?'background:#0f172a;color:#fff;border:1px solid #0f172a;font-weight:700':'background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;font-weight:700')+'">'
         +'<option value="">⚠ All exceptions…</option>'
         +ACTP.map(function(a){return '<option value="'+a[0]+'"'+(state.act[a[0]]?' selected':'')+'>'+esc(a[1])+' ('+actCount(a[0])+')</option>';}).join('')
       +'</select>'
