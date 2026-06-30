@@ -72,7 +72,9 @@ plus new numbered migrations on top. See `migrations/README.md`.
     (the "change requested after accept" re-accept workflow). Idempotent.
   - **`086_po_packing_labelling.sql`** — Packing & Labelling on a PO (Client/FBA tab): 12 `pack_*` columns
     (polybags / DnB product barcodes / RFID / DnB carton / client carton — each bool+notes; pallet + other notes)
-    plus `dtc_accepted_at` / `dtc_accepted_by` for the supplier "Direct to Client details" approval. Idempotent. ⬅ *latest.*
+    plus `dtc_accepted_at` / `dtc_accepted_by` for the supplier "Direct to Client details" approval. Idempotent.
+  - **`087_pack_default_yes.sql`** — default Polybags / D&B Product barcodes / D&B Carton labels to **Yes**
+    (column defaults + one-time init of untouched POs). Run right after 086. Idempotent. ⬅ *latest.*
 
   **Packing & Labelling / Direct to Client details (Client/FBA tab → portal "Direct to Client details" tab):**
   - Live `/api/portal/dtc-accept` (supplier approves a PO's packing details) — preview is on `/api/supply/dtc-accept`.
@@ -118,7 +120,7 @@ plus new numbered migrations on top. See `migrations/README.md`.
   - On-behalf notes (D&B posting as the supplier in the preview pane) are stored `author_kind='supplier'`,
     `author_email='D&B'` and labelled "D&B as <supplier>"; they still notify the supply/samples page.
 
-- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`086` in order (**skip 081 — superseded by 083**). Do **not** run
+- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`087` in order (**skip 081 — superseded by 083**). Do **not** run
   `schema.sql` against an already-migrated DB (the table creates aren't idempotent).
 
 ---

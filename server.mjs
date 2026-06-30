@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.61';
+const APP_VERSION = 'v25.63';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3128,8 +3128,10 @@ app.post('/api/supply/po/:po/rename', async (req, res) => {
 // PO management engine — inline edits on the purchase_orders inputs/overrides.
 app.post('/api/supply/po/:po', async (req, res) => {
   const body = req.body || {};
-  // editing any packing/labelling detail invalidates a prior supplier "Direct to Client details" approval → re-approve
-  if (Object.keys(body).some(k => k.indexOf('pack_') === 0)) {
+  // editing anything shown in the "Direct to Client details" (packing/labelling OR the client sales ref /
+  // PO number / notes) invalidates a prior supplier approval → re-approve
+  const DTC_FIELDS = ['sales_order_ref', 'client_po_ref', 'client_requirements'];
+  if (Object.keys(body).some(k => k.indexOf('pack_') === 0 || DTC_FIELDS.indexOf(k) >= 0)) {
     try { await pool.query(`UPDATE planner.purchase_orders SET dtc_accepted_at=NULL, dtc_accepted_by=NULL WHERE po=$1`, [req.params.po]); } catch (e) {}
   }
   patch(res, 'planner.purchase_orders', 'po', req.params.po, {

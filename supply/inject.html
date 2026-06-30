@@ -1129,7 +1129,7 @@
       +cliRow('Client Specific Carton Labels',packField('pack_client_carton',r.pack_client_carton,'pack_client_carton_notes',r.pack_client_carton_notes))
       +cliRow('Pallet Packing requirements',txtIn(ep,'pack_pallet_notes',r.pack_pallet_notes,360,true))
       +cliRow('Other Packing &amp; Labelling requirements',txtIn(ep,'pack_other_notes',r.pack_other_notes,360,true))
-      +cliRow('Supplier approval',(r.dtc_accepted_at?'<span class="tool-badge bg-green">✓ Approved</span> <span class="mut tiny">'+esc(r.dtc_accepted_at)+(r.dtc_accepted_by?' · '+esc(r.dtc_accepted_by):'')+'</span>':'<span class="tool-badge bg-amber">Awaiting supplier approval</span> <span class="mut tiny">(editing any field above re-requests approval)</span>'))
+      +cliRow('Supplier approval',(!r.require_confirmation?'<span class="tool-badge bg-neutral">Approval not required</span> <span class="mut tiny">(this production isn&rsquo;t set to require supplier confirmation)</span>':(r.dtc_accepted_at?'<span class="tool-badge bg-green">✓ Approved</span> <span class="mut tiny">'+esc(r.dtc_accepted_at)+(r.dtc_accepted_by?' · '+esc(r.dtc_accepted_by):'')+'</span>':'<span class="tool-badge bg-amber">Awaiting supplier approval</span> <span class="mut tiny">(editing any field above re-requests approval)</span>')))
       +'</div>';
     var clientH='<div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start"><div style="flex:1 1 430px;min-width:360px">'
       +'<div class="sect-h">Client / FBA <span class="mut tiny">— who this PO is for; crossdock SKUs feed the supplier-portal label download</span></div>'
@@ -2457,7 +2457,7 @@
         +'<td class="l">'+(r.sales_order_ref?esc(r.sales_order_ref):'<span class="mut">—</span>')+'</td>'
         +'<td class="l">'+(r.dispatch_order_ref?esc(r.dispatch_order_ref):'<span class="mut">—</span>')+'</td>'
         +(function(){ var hasPack=r.pack_polybags||r.pack_dnb_barcodes||r.pack_rfid_barcodes||r.pack_dnb_carton||r.pack_client_carton||r.pack_polybags_notes||r.pack_dnb_barcodes_notes||r.pack_rfid_barcodes_notes||r.pack_dnb_carton_notes||r.pack_client_carton_notes||r.pack_pallet_notes||r.pack_other_notes;
-          return '<td class="l">'+(!hasPack?'<span class="mut">—</span>':(r.dtc_accepted_at?'<span class="tool-badge bg-green" title="approved '+esc(r.dtc_accepted_at)+(r.dtc_accepted_by?' by '+esc(r.dtc_accepted_by):'')+'">✓ Approved</span>':'<span class="tool-badge bg-amber">Awaiting</span>'))+'</td>'; })()
+          return '<td class="l">'+((!hasPack||!r.require_confirmation)?'<span class="mut">—</span>':(r.dtc_accepted_at?'<span class="tool-badge bg-green" title="approved '+esc(r.dtc_accepted_at)+(r.dtc_accepted_by?' by '+esc(r.dtc_accepted_by):'')+'">✓ Approved</span>':'<span class="tool-badge bg-amber">Awaiting</span>'))+'</td>'; })()
         +'<td class="l"'+((late||dlOver)?' style="color:#dc2626;font-weight:600"':'')+'>'+(r.client_deadline?fd(r.client_deadline):'<span class="mut">—</span>')+((late||dlOver)?' ⚠':'')+'</td>'
         +'<td class="l">'+(r.delivery?fd(r.delivery):'<span class="mut">—</span>')+'</td>'
         +'<td class="l">'+(/manufactur/i.test(r.branch||'')?'FOB':(r.shipment?esc(r.shipment):'<span class="mut">— none</span>'))+'</td>'

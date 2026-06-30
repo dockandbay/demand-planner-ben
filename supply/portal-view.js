@@ -585,25 +585,38 @@
       var packBools=[['Polybags',p.pack_polybags,p.pack_polybags_notes],['Dock & Bay Product barcodes',p.pack_dnb_barcodes,p.pack_dnb_barcodes_notes],['RFID Product Barcodes',p.pack_rfid_barcodes,p.pack_rfid_barcodes_notes],['Dock & Bay Carton labels',p.pack_dnb_carton,p.pack_dnb_carton_notes],['Client Specific Carton Labels',p.pack_client_carton,p.pack_client_carton_notes]];
       var packHasContent=packBools.some(function(x){return x[1]||x[2];})||p.pack_pallet_notes||p.pack_other_notes;
       var dtcAccepted=!!p.dtc_accepted_at;
+      // approval is only required when the production requires supplier confirmation (require_confirmation)
+      var dtcNeedsApproval=packHasContent&&!!p.require_confirmation;
       var dtcReqRow=function(lbl,yes,notes){ return '<tr><td class="mut" style="padding:3px 14px 3px 0;text-align:left;white-space:nowrap">'+esc(lbl)+'</td><td style="text-align:left;padding:3px 14px 3px 0">'+(yes?'<span style="color:#166534;font-weight:700">Yes</span>':'<span class="mut">No</span>')+'</td><td style="text-align:left;padding:3px 0">'+(notes?esc(notes):'<span class="mut">—</span>')+'</td></tr>'; };
       var dtcNoteRow=function(lbl,notes){ return '<tr><td class="mut" style="padding:3px 14px 3px 0;text-align:left;white-space:nowrap">'+esc(lbl)+'</td><td colspan="2" style="text-align:left;padding:3px 0">'+(notes?esc(notes):'<span class="mut">—</span>')+'</td></tr>'; };
-      var dtc=!packHasContent ? '<div class="mut" style="padding:8px 0">No Direct to Client packing &amp; labelling details have been set for this PO yet.</div>'
-        : '<div style="font-size:12px;margin-bottom:8px">Packing &amp; labelling requirements set by Dock &amp; Bay — please review and approve.</div>'
+      var dtcInfoRow=function(lbl,val,pre){ return '<tr><td class="mut" style="padding:3px 16px 3px 0;text-align:left;white-space:nowrap;vertical-align:top">'+esc(lbl)+'</td><td style="text-align:left;padding:3px 0'+(pre?';white-space:pre-wrap':'')+'">'+(val?'<b>'+esc(val)+'</b>':'<span class="mut">—</span>')+'</td></tr>'; };
+      var dtcInfo='<table style="font-size:12px;border-collapse:collapse;text-align:left;margin-bottom:12px"><tbody>'
+        +dtcInfoRow('Direct to Client sales ref',p.sales_order_ref)
+        +dtcInfoRow('Direct to Client PO number',p.client_po_ref)
+        +dtcInfoRow('Direct to Client notes',p.client_requirements,true)
+        +'</tbody></table>';
+      var dtcPackTbl=packHasContent
+        ? '<div style="font-size:12px;margin-bottom:8px">Packing &amp; labelling requirements set by Dock &amp; Bay — please review and approve.</div>'
           +'<table style="font-size:12px;border-collapse:collapse;text-align:left"><thead><tr><th class="l" style="padding:2px 14px 2px 0">Requirement</th><th class="l" style="padding:2px 14px 2px 0">Required</th><th class="l">Notes</th></tr></thead><tbody>'
           +packBools.map(function(x){return dtcReqRow(x[0],x[1],x[2]);}).join('')
           +dtcNoteRow('Pallet Packing requirements',p.pack_pallet_notes)
           +dtcNoteRow('Other Packing & Labelling requirements',p.pack_other_notes)
           +'</tbody></table>'
-          +'<div style="margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px">'
-          +(dtcAccepted
-             ? '<span style="background:#dcfce7;color:#166534;border-radius:4px;font-size:11px;font-weight:700;padding:3px 9px">✓ Approved</span> <span class="mut tiny">'+esc(p.dtc_accepted_at||'')+(p.dtc_accepted_by?' · '+esc(p.dtc_accepted_by):'')+'</span>'
-             : '<button class="save-btn pp-dtc-accept" data-po="'+po+'" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Approve Direct to Client details</button> <span class="mut tiny">confirms you can meet these packing &amp; labelling requirements</span>')
-          +'</div>';
+          +(dtcNeedsApproval
+             ? '<div style="margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px">'
+               +(dtcAccepted
+                  ? '<span style="background:#dcfce7;color:#166534;border-radius:4px;font-size:11px;font-weight:700;padding:3px 9px">✓ Approved</span> <span class="mut tiny">'+esc(p.dtc_accepted_at||'')+(p.dtc_accepted_by?' · '+esc(p.dtc_accepted_by):'')+'</span>'
+                  : '<button class="save-btn pp-dtc-accept" data-po="'+po+'" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Approve Direct to Client details</button> <span class="mut tiny">confirms you can meet these packing &amp; labelling requirements</span>')
+               +'</div>'
+             : '<div class="mut tiny" style="margin-top:10px;border-top:1px solid #f1f5f9;padding-top:8px">No supplier approval required for this production.</div>')
+        : '<div class="mut" style="padding:6px 0">No specific packing &amp; labelling requirements set for this PO.</div>';
+      var dtc='<div class="sect-h" style="margin:0 0 8px">Direct to Client details</div>'+dtcInfo
+        +'<div class="sect-h" style="margin:6px 0 8px">Packing &amp; Labelling</div>'+dtcPackTbl;
       // ---- tabs + action badges ----
       var tabs=[['timeline','TIMELINE',timeline,unreadInt+((needConfirm&&!confirmed)?1:0)+(prodExc?1:0)],['orderplan','ORDER PLAN',skus,0],
         ['invoice','INVOICE',invoice, has('invoice_value')?0:1],['shipment','SHIPMENT',shipment, ((p.shipment||p.flexport_reference||has('tracking'))?0:1)+xdAction],
         ['barcodes','BARCODES & LABELS',barcodesLabels,0]];
-      tabs.push(['dtc','DIRECT TO CLIENT DETAILS', dtc, (packHasContent&&!dtcAccepted)?1:0]);
+      tabs.push(['dtc','DIRECT TO CLIENT DETAILS', dtc, (dtcNeedsApproval&&!dtcAccepted)?1:0]);
       function badge(n){ return n>0?' <span class="ex-badge">'+n+'</span>':''; }
       var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab pptab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'">'+t[1]+badge(t[3])+'</button>';}).join('')+'</div>';
       var panels=tabs.map(function(t,ti){return '<div class="pptab-panel" data-pt="'+t[0]+'"'+(ti===0?'':' style="display:none"')+'>'+t[2]+'</div>';}).join('');
@@ -618,7 +631,7 @@
           var cdS=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean), xdm=xdByPo[p.po]||{};
           var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
           var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end):'';
-          var dtcPend=(p.pack_polybags||p.pack_dnb_barcodes||p.pack_rfid_barcodes||p.pack_dnb_carton||p.pack_client_carton||p.pack_polybags_notes||p.pack_dnb_barcodes_notes||p.pack_rfid_barcodes_notes||p.pack_dnb_carton_notes||p.pack_client_carton_notes||p.pack_pallet_notes||p.pack_other_notes)&&!p.dtc_accepted_at;
+          var dtcPend=p.require_confirmation&&(p.pack_polybags||p.pack_dnb_barcodes||p.pack_rfid_barcodes||p.pack_dnb_carton||p.pack_client_carton||p.pack_polybags_notes||p.pack_dnb_barcodes_notes||p.pack_rfid_barcodes_notes||p.pack_dnb_carton_notes||p.pack_client_carton_notes||p.pack_pallet_notes||p.pack_other_notes)&&!p.dtc_accepted_at;
           var act=(sb.some(function(s){return s.kind==='invoice_value';})?0:1)+((p.shipment||p.flexport_reference||sb.some(function(s){return s.kind==='tracking';}))?0:1)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0);
           var cdq=sb.filter(function(s){return s.kind==='completion_date';}); var cdVal=cdq.length?cdq[cdq.length-1].value:'';
           var cdGrid=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);

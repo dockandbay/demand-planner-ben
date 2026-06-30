@@ -2,9 +2,10 @@
 -- diviyaj_deploy_2026-06-30.sql  —  SINGLE consolidated script for Diviyaj
 -- ============================================================================
 -- Apply to PRODUCTION Supabase (project ref oolwklahstnvocaugryg, planner schema). Run ONCE.
--- Scope: every DB migration committed in the LAST ~24 HOURS (planner app v25.49 -> v25.61):
+-- Scope: every DB migration committed in the LAST ~24 HOURS (planner app v25.49 -> v25.62):
 --   084 (Samples feature), 085 (samples "change requested"), 086 (PO Packing & Labelling
---   + "Direct to Client details" approval).
+--   + "Direct to Client details" approval), 087 (default Polybags / D&B Product barcodes /
+--   D&B Carton labels to YES).
 -- Picks up where diviyaj_deploy_2026-06-28.sql left off (that package covered 072–083).
 -- WRAPPED IN ONE TRANSACTION (atomic: all-or-nothing). Every statement is idempotent
 -- (CREATE TABLE/INDEX IF NOT EXISTS / ADD COLUMN IF NOT EXISTS), so it is safe to re-run.
@@ -117,6 +118,25 @@ ALTER TABLE planner.purchase_orders
   ADD COLUMN IF NOT EXISTS pack_other_notes      text,
   ADD COLUMN IF NOT EXISTS dtc_accepted_at       timestamptz,
   ADD COLUMN IF NOT EXISTS dtc_accepted_by       text;
+
+-- ───────────────────────────────────────────────────────────────────────────
+-- 087_pack_default_yes.sql — default the standard D&B packing to YES (Polybags, D&B Product
+-- barcodes, D&B Carton labels). New POs default to true; existing UNTOUCHED POs are initialised
+-- to Yes (only rows with no packing content yet — safe to re-run, never overrides edited POs).
+-- ───────────────────────────────────────────────────────────────────────────
+ALTER TABLE planner.purchase_orders
+  ALTER COLUMN pack_polybags     SET DEFAULT true,
+  ALTER COLUMN pack_dnb_barcodes SET DEFAULT true,
+  ALTER COLUMN pack_dnb_carton   SET DEFAULT true;
+
+UPDATE planner.purchase_orders
+   SET pack_polybags = true, pack_dnb_barcodes = true, pack_dnb_carton = true
+ WHERE NOT pack_polybags AND NOT pack_dnb_barcodes AND NOT pack_rfid_barcodes
+   AND NOT pack_dnb_carton AND NOT pack_client_carton
+   AND coalesce(pack_polybags_notes,'')='' AND coalesce(pack_dnb_barcodes_notes,'')=''
+   AND coalesce(pack_rfid_barcodes_notes,'')='' AND coalesce(pack_dnb_carton_notes,'')=''
+   AND coalesce(pack_client_carton_notes,'')='' AND coalesce(pack_pallet_notes,'')=''
+   AND coalesce(pack_other_notes,'')='';
 
 COMMIT;
 

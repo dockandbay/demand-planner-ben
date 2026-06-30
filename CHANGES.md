@@ -469,6 +469,24 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
 - Added **Ship to country** and **Ship to branch** columns to the supplier-portal PO grid, immediately after
   **Status**. The portal bootstrap PO query now returns `branch` + `country` (admin preview already had them).
 
+## v25.62 - Direct to Client details: show client refs/notes + default packing to Yes
+
+- The portal **DIRECT TO CLIENT DETAILS** tab now shows, above the packing table: **Direct to Client sales ref**,
+  **Direct to Client PO number**, and **Direct to Client notes** (the PO's client requirements).
+- **Migration 087:** Polybags, Dock & Bay Product barcodes and Dock & Bay Carton labels now **default to Yes**
+  (new POs default true; existing untouched POs initialised to Yes). RFID + Client carton stay No by default.
+
+## v25.63 - Direct to Client approval gated on production confirmation + re-approve on any change
+
+- The **Approve Direct to Client details** workflow (button, notification, MANAGE action) now only applies when the
+  PO's production is set to **require supplier confirmation** (`require_confirmation`). Other POs show the details
+  read-only with "No supplier approval required for this production". (Fixes the every-PO notification noise.)
+- Approval is now **re-requested when anything in the Direct to Client details changes** — not just packing/labelling
+  but also the client **sales ref**, **PO number** and **notes** (editing any of these on the supply side clears the
+  approval).
+- Admin CLIENT/FBA + Direct to Client report reflect the gating ("Approval not required" / "—" when the production
+  doesn't require confirmation).
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
