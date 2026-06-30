@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.57';
+const APP_VERSION = 'v25.61';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -904,6 +904,11 @@ app.post('/api/supply/shipment-charge', async (req, res) => {
       VALUES ('shipment',$1,$2,$3,$4,$5,$6) RETURNING id`, [b.shipment_ref, b.supplier_name||sup, Number(b.freight_cost)||0, Number(b.product_cost)||0, b.description||null, b.created_by||'preview']);
     res.json({ ok:true, id: r.rows[0].id }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Direct to Client details approval (admin "preview as supplier")
+app.post('/api/supply/dtc-accept', async (req, res) => {
+  const po = req.body && req.body.po; if(!po) return res.status(400).json({ error: 'po required' });
+  try { await pool.query(`UPDATE planner.purchase_orders SET dtc_accepted_at=now(), dtc_accepted_by=$2 WHERE po=$1`, [po, req.body.by||'D&B (preview)']);
+    res.json({ ok:true }); } catch(e){ res.status(500).json({ error: e.message }); } });
 
 // ── SUPPLY tab (Production Planner) read APIs — one route, section in the path.
 // Read-only JSON from the Phase-2 planner tables. No writes (writes are a later, gated step).
@@ -1154,6 +1159,14 @@ app.get('/api/supply/:section', async (req, res) => {
             to_char(supplier_confirmed_at,'YYYY-MM-DD') supplier_confirmed, coalesce(supplier_confirmed_by,'') supplier_confirmed_by,
             coalesce(dispatch_order_ref,'') dispatch_order_ref, coalesce(final_delivery_address,'') final_delivery_address,
             coalesce(crossdock_skus,'') crossdock_skus,
+            -- Packing & Labelling (migration 086) + Direct to Client details approval
+            coalesce(pack_polybags,false) pack_polybags, coalesce(pack_polybags_notes,'') pack_polybags_notes,
+            coalesce(pack_dnb_barcodes,false) pack_dnb_barcodes, coalesce(pack_dnb_barcodes_notes,'') pack_dnb_barcodes_notes,
+            coalesce(pack_rfid_barcodes,false) pack_rfid_barcodes, coalesce(pack_rfid_barcodes_notes,'') pack_rfid_barcodes_notes,
+            coalesce(pack_dnb_carton,false) pack_dnb_carton, coalesce(pack_dnb_carton_notes,'') pack_dnb_carton_notes,
+            coalesce(pack_client_carton,false) pack_client_carton, coalesce(pack_client_carton_notes,'') pack_client_carton_notes,
+            coalesce(pack_pallet_notes,'') pack_pallet_notes, coalesce(pack_other_notes,'') pack_other_notes,
+            to_char(dtc_accepted_at,'YYYY-MM-DD HH24:MI') dtc_accepted_at, coalesce(dtc_accepted_by,'') dtc_accepted_by,
             coalesce(nullif(country_code,''), branch_country, '') country,
             CASE WHEN nullif(country_code,'') IS NOT NULL THEN 'M' WHEN branch_country IS NOT NULL THEN 'branch' END country_src,
             coalesce(country_code,'') country_override, coalesce(branch,'') branch,
@@ -3113,13 +3126,22 @@ app.post('/api/supply/po/:po/rename', async (req, res) => {
   finally { client.release(); }
 });
 // PO management engine — inline edits on the purchase_orders inputs/overrides.
-app.post('/api/supply/po/:po', (req, res) =>
+app.post('/api/supply/po/:po', async (req, res) => {
+  const body = req.body || {};
+  // editing any packing/labelling detail invalidates a prior supplier "Direct to Client details" approval → re-approve
+  if (Object.keys(body).some(k => k.indexOf('pack_') === 0)) {
+    try { await pool.query(`UPDATE planner.purchase_orders SET dtc_accepted_at=NULL, dtc_accepted_by=NULL WHERE po=$1`, [req.params.po]); } catch (e) {}
+  }
   patch(res, 'planner.purchase_orders', 'po', req.params.po, {
     status: 'text', ship_type: 'text', deposit_ref: 'text', shipment_ref: 'text', prod_no: 'text',
     starred: 'boolean',   // ⭐ Focus / favourite toggle (migration 082)
     batch_id: 'text', branch: 'text', erp_po: 'text', notes: 'text', container_size: 'text',
     country_code: 'text', client: 'text', client_requirements: 'text', sales_order_ref: 'text', client_deadline_date: 'date', asn_numbers: 'text',
     client_po_ref: 'text', dispatch_order_ref: 'text', final_delivery_address: 'text', crossdock_skus: 'text',
+    // Packing & Labelling (Client/FBA tab → supplier portal "Direct to Client details") — migration 086
+    pack_polybags: 'boolean', pack_polybags_notes: 'text', pack_dnb_barcodes: 'boolean', pack_dnb_barcodes_notes: 'text',
+    pack_rfid_barcodes: 'boolean', pack_rfid_barcodes_notes: 'text', pack_dnb_carton: 'boolean', pack_dnb_carton_notes: 'text',
+    pack_client_carton: 'boolean', pack_client_carton_notes: 'text', pack_pallet_notes: 'text', pack_other_notes: 'text',
     order_value_estimation: 'numeric', supplier_invoice_total: 'numeric',
     start_production: 'date', end_production_overide: 'date', landing_date_overide: 'date',
     delivery_date_overide: 'date', balance_due_date_overide: 'date', supplier_ship_date: 'date',
@@ -3130,7 +3152,8 @@ app.post('/api/supply/po/:po', (req, res) =>
     pay_balance_1_amount: 'numeric', pay_balance_1_date: 'date',
     pay_balance_2_amount: 'numeric', pay_balance_2_date: 'date',
     credit_amount: 'numeric',
-  }, req.body));
+  }, body);
+});
 // Supplier edit — sets the name AND resolves supplier_id so payment terms / production lead apply.
 app.post('/api/supply/po/:po/supplier', async (req, res) => {
   const name = (req.body && req.body.supplier_name || '').trim() || null;
@@ -4548,7 +4571,18 @@ const POS_SQL_PORTAL = `
     coalesce(deposit_ref,'') deposit_ref, coalesce(shipment_ref,'') shipment,
     coalesce(client,'') client, coalesce(dispatch_order_ref,'') dispatch_order_ref,
     coalesce(final_delivery_address,'') final_delivery_address, coalesce(crossdock_skus,'') crossdock_skus,
-    coalesce(prod_no,'') prod_no, coalesce(batch_id,'') batch_id
+    coalesce(prod_no,'') prod_no, coalesce(batch_id,'') batch_id,
+    coalesce(branch,'') branch, coalesce(nullif(country_code,''), branch_country, '') country,
+    coalesce(client_requirements,'') client_requirements, coalesce(sales_order_ref,'') sales_order_ref,
+    to_char(client_deadline_date,'YYYY-MM-DD') client_deadline, coalesce(client_po_ref,'') client_po_ref,
+    -- Packing & Labelling (migration 086) + Direct to Client details approval
+    coalesce(pack_polybags,false) pack_polybags, coalesce(pack_polybags_notes,'') pack_polybags_notes,
+    coalesce(pack_dnb_barcodes,false) pack_dnb_barcodes, coalesce(pack_dnb_barcodes_notes,'') pack_dnb_barcodes_notes,
+    coalesce(pack_rfid_barcodes,false) pack_rfid_barcodes, coalesce(pack_rfid_barcodes_notes,'') pack_rfid_barcodes_notes,
+    coalesce(pack_dnb_carton,false) pack_dnb_carton, coalesce(pack_dnb_carton_notes,'') pack_dnb_carton_notes,
+    coalesce(pack_client_carton,false) pack_client_carton, coalesce(pack_client_carton_notes,'') pack_client_carton_notes,
+    coalesce(pack_pallet_notes,'') pack_pallet_notes, coalesce(pack_other_notes,'') pack_other_notes,
+    to_char(dtc_accepted_at,'YYYY-MM-DD HH24:MI') dtc_accepted_at, coalesce(dtc_accepted_by,'') dtc_accepted_by
   FROM calc4 ORDER BY po`;
 function loadPortalPage() { try { return readFileSync(new URL('./supply/portal.html', import.meta.url), 'utf8'); } catch { return '<!doctype html><meta charset=utf8>portal page missing'; } }
 const PORTAL_PAGE = DEV ? null : loadPortalPage();
@@ -5399,6 +5433,14 @@ app.post('/api/portal/shipment-charge', portalAuth, async (req, res) => {   // s
     const r = await pool.query(`INSERT INTO planner.supplier_charges (source_type, source_ref, supplier_name, freight_cost, product_cost, description, created_by)
       VALUES ('shipment',$1,$2,$3,$4,$5,$6) RETURNING id`, [b.shipment_ref, names[0]||null, Number(b.freight_cost)||0, Number(b.product_cost)||0, b.description||null, req.portal.email||'supplier']); res.json({ ok: true, id: r.rows[0].id }); }
   catch (e) { res.status(500).json({ error: e.message }); } });
+// Direct to Client details — supplier approves the PO's packing & labelling requirements
+app.post('/api/portal/dtc-accept', portalAuth, async (req, res) => {
+  const po = req.body && req.body.po; const names = req.portal.suppliers||[];
+  if(!po) return res.status(400).json({ error: 'po required' });
+  try { const own = (await pool.query(`SELECT 1 FROM planner.purchase_orders WHERE po=$1 AND supplier_name=ANY($2) LIMIT 1`, [po, names])).rows[0];
+    if(!own) return res.status(403).json({ error: 'not your PO' });
+    await pool.query(`UPDATE planner.purchase_orders SET dtc_accepted_at=now(), dtc_accepted_by=$2 WHERE po=$1`, [po, req.portal.email||'supplier']);
+    res.json({ ok:true }); } catch(e){ res.status(500).json({ error: e.message }); } });
 
 // Everything the supplier sees — scoped server-side to their supplier(s).
 app.get('/api/portal/data', portalAuth, async (req, res) => {

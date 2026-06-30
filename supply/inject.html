@@ -291,9 +291,10 @@
   function prodStatusSel(ep,val){ return '<select class="fci" data-ep="'+esc(ep)+'" data-field="production_status"><option value=""'+(val?'':' selected')+'>—</option>'
     +PROD_STATUS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'; }
   function bindEdits(){ document.querySelectorAll('#supply-root .fci[data-ep]').forEach(function(inp){ if(inp._b)return; inp._b=1; inp.onchange=function(){
+    if(inp.classList.contains('boolsel')){ var yes=inp.value==='true'; inp.style.background=yes?'#dcfce7':'#fee2e2'; inp.style.color=yes?'#166534':'#b91c1c'; }
     var body={}; body[inp.dataset.field]=inp.value;
     fetch(inp.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
-      .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); inp.classList.remove('err'); inp.classList.add('saved'); setTimeout(function(){inp.classList.remove('saved');},1200); invalidateDerived(); })
+      .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); inp.classList.remove('err'); if(!inp.classList.contains('boolsel')){ inp.classList.add('saved'); setTimeout(function(){inp.classList.remove('saved');},1200); } invalidateDerived(); })
       .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; }); }
 
   function renderGeneric(key,rows){ var c=document.getElementById('supply-content');
@@ -1116,7 +1117,22 @@
     var xdList=(r.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
     // ---- CLIENT chunk (label/field rows, not an overflow table; crossdock picker grows freely) ----
     function cliRow(lbl,field){ return '<div class="cli-row"><div class="cli-lbl">'+lbl+'</div><div class="cli-val">'+field+'</div></div>'; }
-    var clientH='<div class="sect-h">Client / FBA <span class="mut tiny">— who this PO is for; crossdock SKUs feed the supplier-portal label download</span></div>'
+    // Packing & Labelling helpers: a Yes/No <select> (bindEdits POSTs .value; PO patch casts ::boolean) + a notes input
+    function boolSel(field,val){ var c=val?'background:#dcfce7;color:#166534':'background:#fee2e2;color:#b91c1c'; return '<select class="fci boolsel" data-ep="'+ep+'" data-field="'+field+'" style="width:78px;text-align:left;font-weight:700;'+c+'"><option value="false"'+(val?'':' selected')+'>No</option><option value="true"'+(val?' selected':'')+'>Yes</option></select>'; }
+    function packField(boolField,boolVal,notesField,notesVal){ return boolSel(boolField,boolVal)+' <input class="fci txtin" style="width:250px;text-align:left" data-ep="'+ep+'" data-field="'+notesField+'" value="'+esc(notesVal||'')+'" placeholder="notes…">'; }
+    var packH='<div class="sect-h">Packing and Labelling <span class="mut tiny">— shown to the supplier; they approve it as &ldquo;Direct to Client details&rdquo;</span></div>'
+      +'<div class="cli-form">'
+      +cliRow('Polybags',packField('pack_polybags',r.pack_polybags,'pack_polybags_notes',r.pack_polybags_notes))
+      +cliRow('Dock &amp; Bay Product barcodes',packField('pack_dnb_barcodes',r.pack_dnb_barcodes,'pack_dnb_barcodes_notes',r.pack_dnb_barcodes_notes))
+      +cliRow('RFID Product Barcodes',packField('pack_rfid_barcodes',r.pack_rfid_barcodes,'pack_rfid_barcodes_notes',r.pack_rfid_barcodes_notes))
+      +cliRow('Dock &amp; Bay Carton labels',packField('pack_dnb_carton',r.pack_dnb_carton,'pack_dnb_carton_notes',r.pack_dnb_carton_notes))
+      +cliRow('Client Specific Carton Labels',packField('pack_client_carton',r.pack_client_carton,'pack_client_carton_notes',r.pack_client_carton_notes))
+      +cliRow('Pallet Packing requirements',txtIn(ep,'pack_pallet_notes',r.pack_pallet_notes,360,true))
+      +cliRow('Other Packing &amp; Labelling requirements',txtIn(ep,'pack_other_notes',r.pack_other_notes,360,true))
+      +cliRow('Supplier approval',(r.dtc_accepted_at?'<span class="tool-badge bg-green">✓ Approved</span> <span class="mut tiny">'+esc(r.dtc_accepted_at)+(r.dtc_accepted_by?' · '+esc(r.dtc_accepted_by):'')+'</span>':'<span class="tool-badge bg-amber">Awaiting supplier approval</span> <span class="mut tiny">(editing any field above re-requests approval)</span>'))
+      +'</div>';
+    var clientH='<div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start"><div style="flex:1 1 430px;min-width:360px">'
+      +'<div class="sect-h">Client / FBA <span class="mut tiny">— who this PO is for; crossdock SKUs feed the supplier-portal label download</span></div>'
       +'<div class="cli-form">'
       +cliRow('Client name',txtIn(ep,'client',r.client,360))
       +cliRow('Client requirements',txtIn(ep,'client_requirements',r.client_requirements,440,true))
@@ -1133,7 +1149,7 @@
       +cliRow('Attachments <span class="mut tiny">(client / FBA docs)</span>',
           (function(){ var cd=(d&&d.client_docs)||[]; return (cd.length?cd.map(function(x){return '<a href="/api/supply/portal-attachment/'+x.id+'" target="_blank" rel="noopener">'+esc(x.filename||'view')+'</a>';}).join(' · ')+' &nbsp; ':'<span class="mut tiny">none yet — </span>')
             +'<input type="file" class="cli-attach" data-po="'+esc(r.po)+'" style="font-size:11px">'; })())
-      +'</div>';
+      +'</div></div><div style="flex:1 1 430px;min-width:360px">'+packH+'</div></div>';
     // ---- PAYMENTS chunk (order value + payment plan) ----
     var h='<div class="sect-h">Order value — final invoice overrides the estimate for all payment &amp; landed calcs</div>'
       +'<div class="cli-form" style="max-width:760px">'
@@ -2369,7 +2385,7 @@
             ban.innerHTML='<div style="background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:6px 11px;margin:4px 0 10px;font-size:12px">👁 Previewing the portal as <b>'+esc(name)+'</b> — exactly what they see, and any submit acts AS this supplier.</div>';
             if(!window.DBPortalView){ mt.innerHTML='<div class="count" style="color:#dc2626">portal view not loaded</div>'; return; }
             window.DBPortalView.mount({ root:mt, supplierName:name, by:'preview (acting as '+name+')', sid:supById[name],
-              ep:{ lineCost:'/api/supply/portal-line-cost', lineRemove:'/api/supply/portal-line-remove', crossdockQty:'/api/supply/crossdock-qty', addlCost:'/api/supply/additional-cost', addlCostRemove:'/api/supply/additional-cost-remove', note:'/api/supply/portal-note', notesBase:'/api/supply/portal-notes/', noteReadBase:'/api/supply/note-read/', submit:'/api/supply/portal-submit', upload:'/api/supply/portal-upload', labelData:'/api/supply/label-data', parseInvoice:'/api/supply/portal-parse-invoice', invoiceApply:'/api/supply/portal-invoice-apply', docRemove:'/api/supply/portal-attachment-remove', attachmentBase:'/api/supply/portal-attachment/', shipmentEscalate:'/api/supply/shipment/', shipmentNotesBase:'/api/supply/shipment-notes?ref=', shipmentNote:'/api/supply/shipment-note', shipmentCharge:'/api/supply/shipment-charge', shipmentChargesBase:'/api/supply/shipment-charges/', sampleAccept:'/api/supply/sample-accept', sampleUpdate:'/api/supply/sample-update', sampleNote:'/api/supply/sample-note', sampleNoteAuthorKind:'supplier', sampleNoteAuthorEmail:'D&B', sampleNotesBase:'/api/supply/sample-notes?id=', sampleNoteReadBase:'/api/supply/sample-note-read/', sampleCharge:'/api/supply/sample-charge', sampleCreate:'/api/supply/sample-create', sampleAttachment:'/api/supply/sample-attachment', sampleAttachmentRemove:'/api/supply/sample-attachment-remove' },
+              ep:{ lineCost:'/api/supply/portal-line-cost', lineRemove:'/api/supply/portal-line-remove', crossdockQty:'/api/supply/crossdock-qty', addlCost:'/api/supply/additional-cost', addlCostRemove:'/api/supply/additional-cost-remove', note:'/api/supply/portal-note', notesBase:'/api/supply/portal-notes/', noteReadBase:'/api/supply/note-read/', submit:'/api/supply/portal-submit', upload:'/api/supply/portal-upload', labelData:'/api/supply/label-data', parseInvoice:'/api/supply/portal-parse-invoice', invoiceApply:'/api/supply/portal-invoice-apply', docRemove:'/api/supply/portal-attachment-remove', attachmentBase:'/api/supply/portal-attachment/', shipmentEscalate:'/api/supply/shipment/', shipmentNotesBase:'/api/supply/shipment-notes?ref=', shipmentNote:'/api/supply/shipment-note', shipmentCharge:'/api/supply/shipment-charge', shipmentChargesBase:'/api/supply/shipment-charges/', dtcAccept:'/api/supply/dtc-accept', sampleAccept:'/api/supply/sample-accept', sampleUpdate:'/api/supply/sample-update', sampleNote:'/api/supply/sample-note', sampleNoteAuthorKind:'supplier', sampleNoteAuthorEmail:'D&B', sampleNotesBase:'/api/supply/sample-notes?id=', sampleNoteReadBase:'/api/supply/sample-note-read/', sampleCharge:'/api/supply/sample-charge', sampleCreate:'/api/supply/sample-create', sampleAttachment:'/api/supply/sample-attachment', sampleAttachmentRemove:'/api/supply/sample-attachment-remove' },
               bc:{ sheets:bcDownloadSheets, crossdock:bcDownloadCrossdock, placeholder:false },
               getData:function(){ return loadPortalData(name); },
               onChange:function(){ invalidateDerived(); }   // a portal write (e.g. creating a shipment) must refresh the admin grids
@@ -2432,7 +2448,7 @@
     var h=annot('directclient')+'<div class="bar"><span class="count">'+list.length+' in-progress direct-to-client / B2B orders</span></div>';
     if(!list.length){ c.innerHTML=h+'<div class="count">No in-progress direct-to-client orders.</div>'; return; }
     var today=new Date().toISOString().slice(0,10);
-    h+='<div class="tw"><table style="width:max-content"><thead><tr><th class="l">PO</th><th class="l">Branch</th><th class="l">Supplier</th><th class="l">Client sales ref</th><th class="l">Dispatch order</th><th class="l">Deadline</th><th class="l">Likely arrival</th><th class="l">Shipment</th><th class="l">Crossdock refs</th></tr></thead><tbody>';
+    h+='<div class="tw"><table style="width:max-content"><thead><tr><th class="l">PO</th><th class="l">Branch</th><th class="l">Supplier</th><th class="l">Client sales ref</th><th class="l">Dispatch order</th><th class="l">D2C details</th><th class="l">Deadline</th><th class="l">Likely arrival</th><th class="l">Shipment</th><th class="l">Crossdock refs</th></tr></thead><tbody>';
     list.forEach(function(r){
       var late=r.client_deadline && ((r.checkin && r.checkin>r.client_deadline) || (r.delivery && r.delivery>r.client_deadline));   // completion or arrival after the client deadline
       var dlOver=r.client_deadline && r.client_deadline<today;
@@ -2440,6 +2456,8 @@
         +'<td class="l">'+esc(r.branch||'')+'</td><td class="l">'+esc(r.supplier_name||'')+'</td>'
         +'<td class="l">'+(r.sales_order_ref?esc(r.sales_order_ref):'<span class="mut">—</span>')+'</td>'
         +'<td class="l">'+(r.dispatch_order_ref?esc(r.dispatch_order_ref):'<span class="mut">—</span>')+'</td>'
+        +(function(){ var hasPack=r.pack_polybags||r.pack_dnb_barcodes||r.pack_rfid_barcodes||r.pack_dnb_carton||r.pack_client_carton||r.pack_polybags_notes||r.pack_dnb_barcodes_notes||r.pack_rfid_barcodes_notes||r.pack_dnb_carton_notes||r.pack_client_carton_notes||r.pack_pallet_notes||r.pack_other_notes;
+          return '<td class="l">'+(!hasPack?'<span class="mut">—</span>':(r.dtc_accepted_at?'<span class="tool-badge bg-green" title="approved '+esc(r.dtc_accepted_at)+(r.dtc_accepted_by?' by '+esc(r.dtc_accepted_by):'')+'">✓ Approved</span>':'<span class="tool-badge bg-amber">Awaiting</span>'))+'</td>'; })()
         +'<td class="l"'+((late||dlOver)?' style="color:#dc2626;font-weight:600"':'')+'>'+(r.client_deadline?fd(r.client_deadline):'<span class="mut">—</span>')+((late||dlOver)?' ⚠':'')+'</td>'
         +'<td class="l">'+(r.delivery?fd(r.delivery):'<span class="mut">—</span>')+'</td>'
         +'<td class="l">'+(/manufactur/i.test(r.branch||'')?'FOB':(r.shipment?esc(r.shipment):'<span class="mut">— none</span>'))+'</td>'

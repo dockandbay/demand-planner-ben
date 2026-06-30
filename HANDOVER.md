@@ -69,7 +69,16 @@ plus new numbered migrations on top. See `migrations/README.md`.
     `sample_notes` (timeline, with `read_at` for bidirectional read/unread), and `supplier_charges`
     (sample/shipment charges → Other Payment on accept). Required for SUPPLY▸Samples + the portal Samples tab.
   - **`085_sample_change_requested.sql`** — adds `sample_requests.change_requested boolean NOT NULL DEFAULT false`
-    (the "change requested after accept" re-accept workflow). Idempotent. ⬅ *latest.*
+    (the "change requested after accept" re-accept workflow). Idempotent.
+  - **`086_po_packing_labelling.sql`** — Packing & Labelling on a PO (Client/FBA tab): 12 `pack_*` columns
+    (polybags / DnB product barcodes / RFID / DnB carton / client carton — each bool+notes; pallet + other notes)
+    plus `dtc_accepted_at` / `dtc_accepted_by` for the supplier "Direct to Client details" approval. Idempotent. ⬅ *latest.*
+
+  **Packing & Labelling / Direct to Client details (Client/FBA tab → portal "Direct to Client details" tab):**
+  - Live `/api/portal/dtc-accept` (supplier approves a PO's packing details) — preview is on `/api/supply/dtc-accept`.
+  - The live portal bootstrap PO rows + the admin `purchase-orders` query both return the `pack_*` and
+    `dtc_accepted_at`/`dtc_accepted_by` fields; editing any `pack_*` field clears the approval (app-level, in the
+    PO patch handler) so the supplier re-approves.
 
   **Invoice-upload feature (supplier portal) — live `/api/portal/*` to add (preview wired to `/api/supply/*`):**
   - `/api/portal/parse-invoice` + `/api/portal/invoice-apply` (parse a supplier `.xlsx` invoice → preview vs the
@@ -109,7 +118,7 @@ plus new numbered migrations on top. See `migrations/README.md`.
   - On-behalf notes (D&B posting as the supplier in the preview pane) are stored `author_kind='supplier'`,
     `author_email='D&B'` and labelled "D&B as <supplier>"; they still notify the supply/samples page.
 
-- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`085` in order (**skip 081 — superseded by 083**). Do **not** run
+- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`086` in order (**skip 081 — superseded by 083**). Do **not** run
   `schema.sql` against an already-migrated DB (the table creates aren't idempotent).
 
 ---

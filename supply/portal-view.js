@@ -581,10 +581,29 @@
         +(cdSkus.length?blRow('Crossdock box labels','<button class="save-btn pp-dl-cd" data-skus="'+esc(cdSkus.join(','))+'" data-po="'+po+'" data-do="'+esc(p.dispatch_order_ref||'')+'" data-client="'+esc(p.client||'')+'" data-address="'+esc(p.final_delivery_address||'')+'">⤓ Download crossdock labels</button> <span class="mut tiny">PO / dispatch order / client / delivery address overlaid</span>'):'')
         +(clientDocs.length?blRow('Direct to Client / FBA attachments',clientDocs.map(function(x){return '<a href="/api/portal/attachment/'+x.id+'" target="_blank" rel="noopener">'+esc(x.filename||'file')+'</a>';}).join(' &nbsp;·&nbsp; ')):'')
         +'</div>';
+      // ---- Direct to Client details (read-only packing & labelling) + approve workflow ----
+      var packBools=[['Polybags',p.pack_polybags,p.pack_polybags_notes],['Dock & Bay Product barcodes',p.pack_dnb_barcodes,p.pack_dnb_barcodes_notes],['RFID Product Barcodes',p.pack_rfid_barcodes,p.pack_rfid_barcodes_notes],['Dock & Bay Carton labels',p.pack_dnb_carton,p.pack_dnb_carton_notes],['Client Specific Carton Labels',p.pack_client_carton,p.pack_client_carton_notes]];
+      var packHasContent=packBools.some(function(x){return x[1]||x[2];})||p.pack_pallet_notes||p.pack_other_notes;
+      var dtcAccepted=!!p.dtc_accepted_at;
+      var dtcReqRow=function(lbl,yes,notes){ return '<tr><td class="mut" style="padding:3px 14px 3px 0;text-align:left;white-space:nowrap">'+esc(lbl)+'</td><td style="text-align:left;padding:3px 14px 3px 0">'+(yes?'<span style="color:#166534;font-weight:700">Yes</span>':'<span class="mut">No</span>')+'</td><td style="text-align:left;padding:3px 0">'+(notes?esc(notes):'<span class="mut">—</span>')+'</td></tr>'; };
+      var dtcNoteRow=function(lbl,notes){ return '<tr><td class="mut" style="padding:3px 14px 3px 0;text-align:left;white-space:nowrap">'+esc(lbl)+'</td><td colspan="2" style="text-align:left;padding:3px 0">'+(notes?esc(notes):'<span class="mut">—</span>')+'</td></tr>'; };
+      var dtc=!packHasContent ? '<div class="mut" style="padding:8px 0">No Direct to Client packing &amp; labelling details have been set for this PO yet.</div>'
+        : '<div style="font-size:12px;margin-bottom:8px">Packing &amp; labelling requirements set by Dock &amp; Bay — please review and approve.</div>'
+          +'<table style="font-size:12px;border-collapse:collapse;text-align:left"><thead><tr><th class="l" style="padding:2px 14px 2px 0">Requirement</th><th class="l" style="padding:2px 14px 2px 0">Required</th><th class="l">Notes</th></tr></thead><tbody>'
+          +packBools.map(function(x){return dtcReqRow(x[0],x[1],x[2]);}).join('')
+          +dtcNoteRow('Pallet Packing requirements',p.pack_pallet_notes)
+          +dtcNoteRow('Other Packing & Labelling requirements',p.pack_other_notes)
+          +'</tbody></table>'
+          +'<div style="margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px">'
+          +(dtcAccepted
+             ? '<span style="background:#dcfce7;color:#166534;border-radius:4px;font-size:11px;font-weight:700;padding:3px 9px">✓ Approved</span> <span class="mut tiny">'+esc(p.dtc_accepted_at||'')+(p.dtc_accepted_by?' · '+esc(p.dtc_accepted_by):'')+'</span>'
+             : '<button class="save-btn pp-dtc-accept" data-po="'+po+'" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Approve Direct to Client details</button> <span class="mut tiny">confirms you can meet these packing &amp; labelling requirements</span>')
+          +'</div>';
       // ---- tabs + action badges ----
       var tabs=[['timeline','TIMELINE',timeline,unreadInt+((needConfirm&&!confirmed)?1:0)+(prodExc?1:0)],['orderplan','ORDER PLAN',skus,0],
         ['invoice','INVOICE',invoice, has('invoice_value')?0:1],['shipment','SHIPMENT',shipment, ((p.shipment||p.flexport_reference||has('tracking'))?0:1)+xdAction],
         ['barcodes','BARCODES & LABELS',barcodesLabels,0]];
+      tabs.push(['dtc','DIRECT TO CLIENT DETAILS', dtc, (packHasContent&&!dtcAccepted)?1:0]);
       function badge(n){ return n>0?' <span class="ex-badge">'+n+'</span>':''; }
       var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab pptab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'">'+t[1]+badge(t[3])+'</button>';}).join('')+'</div>';
       var panels=tabs.map(function(t,ti){return '<div class="pptab-panel" data-pt="'+t[0]+'"'+(ti===0?'':' style="display:none"')+'>'+t[2]+'</div>';}).join('');
@@ -592,18 +611,21 @@
     function ppPOs(pos, data){ var lb=data.lb||{}, notesByPo=data.notesByPo||{}, subsByPo=data.subsByPo||{}, costsByPo=data.costsByPo||{}, supSkus=data.supSkus||[], xdByPo=data.xdByPo||{}, addByPo=data.addByPo||{};
       if(!pos.length)return '<div class="count">No purchase orders for this supplier.</div>';
       var today=new Date().toISOString().slice(0,10);
-      return '<div class="tw"><table class="pp-tbl"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l">Status</th><th class="l">Production status</th><th class="l">Start</th><th class="l">Est. completion</th><th class="l">Completion date</th><th class="l">Ship</th><th class="l">Flexport</th><th class="l">Ships With</th><th style="text-align:right">Start deposit assigned</th><th style="text-align:right">Completion</th><th style="text-align:right">Balance</th><th style="text-align:right">Amount due</th><th class="l">Due</th><th class="l">Deposit ref</th></tr></thead><tbody>'
+      return '<div class="tw"><table class="pp-tbl"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l">Status</th><th class="l">Ship to country</th><th class="l">Ship to branch</th><th class="l">Production status</th><th class="l">Start</th><th class="l">Est. completion</th><th class="l">Completion date</th><th class="l">Ship</th><th class="l">Flexport</th><th class="l">Ships With</th><th style="text-align:right">Start deposit assigned</th><th style="text-align:right">Completion</th><th style="text-align:right">Balance</th><th style="text-align:right">Amount due</th><th class="l">Due</th><th class="l">Deposit ref</th></tr></thead><tbody>'
         +pos.map(function(p,i){
-          var det='<tr id="pp-'+i+'" style="display:none"><td></td><td colspan="15">'+ppExpand(p, lb[p.po]||[], notesByPo[p.po]||[], subsByPo[p.po]||[], i, costsByPo[p.po]||{}, supSkus, xdByPo[p.po]||{}, addByPo[p.po]||[])+'</td></tr>';
+          var det='<tr id="pp-'+i+'" style="display:none"><td></td><td colspan="17">'+ppExpand(p, lb[p.po]||[], notesByPo[p.po]||[], subsByPo[p.po]||[], i, costsByPo[p.po]||{}, supSkus, xdByPo[p.po]||{}, addByPo[p.po]||[])+'</td></tr>';
           var sb=subsByPo[p.po]||[]; var nts=notesByPo[p.po]||[]; var unreadInt=nts.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
           var cdS=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean), xdm=xdByPo[p.po]||{};
           var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
           var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end):'';
-          var act=(sb.some(function(s){return s.kind==='invoice_value';})?0:1)+((p.shipment||p.flexport_reference||sb.some(function(s){return s.kind==='tracking';}))?0:1)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0);
+          var dtcPend=(p.pack_polybags||p.pack_dnb_barcodes||p.pack_rfid_barcodes||p.pack_dnb_carton||p.pack_client_carton||p.pack_polybags_notes||p.pack_dnb_barcodes_notes||p.pack_rfid_barcodes_notes||p.pack_dnb_carton_notes||p.pack_client_carton_notes||p.pack_pallet_notes||p.pack_other_notes)&&!p.dtc_accepted_at;
+          var act=(sb.some(function(s){return s.kind==='invoice_value';})?0:1)+((p.shipment||p.flexport_reference||sb.some(function(s){return s.kind==='tracking';}))?0:1)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0);
           var cdq=sb.filter(function(s){return s.kind==='completion_date';}); var cdVal=cdq.length?cdq[cdq.length-1].value:'';
           var cdGrid=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
           return '<tr><td class="l"><button class="save-btn pp-exp" data-i="'+i+'">MANAGE'+(act>0?' <span class="ex-badge" title="'+act+' action'+(act>1?'s':'')+' needed">'+act+'</span>':'')+'</button></td>'
             +'<td class="l"><b>'+esc(p.po)+'</b></td><td class="l"><span class="tool-badge '+statusBg(p.status)+'">'+esc(p.status||'')+'</span></td>'
+            +'<td class="l">'+(p.country?esc(p.country):'<span class="mut">—</span>')+'</td>'
+            +'<td class="l">'+(p.branch?esc(p.branch):'<span class="mut">—</span>')+'</td>'
             +'<td class="l" style="min-width:150px">'+prodStatusSel(p.po, p.production_status||'')+(prodExc?'<div class="tiny" style="color:#b91c1c;font-weight:600;margin-top:2px" title="'+esc(prodExc)+'">⚠ check status</div>':'')+'</td>'
             +'<td class="l">'+dcell(p.prod_start)+'</td><td class="l">'+dcell(p.prod_end)+'</td>'
             +'<td class="l" style="min-width:140px"><input type="date" class="pp-cd-grid" data-po="'+esc(p.po)+'" value="'+esc(cdVal)+'" title="click to pick your completion date — it saves automatically" style="width:128px;cursor:pointer;text-align:left;font:inherit;font-size:12px;padding:4px 6px;border:1px solid #93c5fd;border-radius:4px;background:#eff6ff;color:#1d4ed8;box-sizing:content-box"></td>'
@@ -936,6 +958,9 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                 var ci=scope.querySelector('.pp-fcost[data-ref="'+CSS.escape(ref)+'"]'), ni=scope.querySelector('.pp-fnote[data-ref="'+CSS.escape(ref)+'"]');
                 var fc=ci?Number(ci.value)||0:0; if(fc<=0){ alert('Enter a freight amount.'); return; } btn.disabled=true;
                 postJSON(EP.shipmentCharge,{shipment_ref:ref,freight_cost:fc,description:(ni&&ni.value)||null},function(j){ if(j&&j.error){alert(j.error);btn.disabled=false;return;} if(ci)ci.value=''; if(ni)ni.value=''; btn.disabled=false; loadFreightCharges(scope); }); }; });
+              // approve the Direct to Client details (packing & labelling)
+              scope.querySelectorAll('.pp-dtc-accept').forEach(function(btn){ btn.onclick=function(){ btn.disabled=true;
+                postJSON(EP.dtcAccept,{po:btn.dataset.po},function(j){ if(j&&j.error){alert(j.error);btn.disabled=false;return;} alert('Direct to Client details approved — thank you.'); reload(); }); }; });
               // jump to this PO's shipment in the Shipment Plan tab (search overrides the pills so it shows whatever its status)
               scope.querySelectorAll('.pp-go-shipplan').forEach(function(btn){ btn.onclick=function(){ PORTAL_TAB='shipmentplan'; PORTAL_SP_PO=btn.dataset.ref||''; renderPP(); }; });
               scope.querySelectorAll('.pp-inv-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po; var val=pick('pp-inv',po).value; var fin=pick('pp-inv-file',po); var f=fin&&fin.files[0]; if(!val&&!f)return; btn.disabled=true;

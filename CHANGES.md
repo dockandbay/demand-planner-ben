@@ -436,6 +436,39 @@ admin detail also uses the existing `portal-upload`). Attachments listed in the 
 **Deploy note (Diviyaj):** new live `/api/portal/shipment-charge` + `/api/portal/shipment-charges/:ref` must be
 wired (preview is on `/api/supply/*`). No new migration — reuses `planner.supplier_charges` (`source_type='shipment'`).
 
+## v25.58 - Packing & Labelling on a PO + supplier "Direct to Client details" approval
+
+- **SUPPLY ▸ Purchase Orders ▸ CLIENT/FBA tab:** new **Packing and Labelling** section (second column) — Polybags,
+  Dock & Bay Product barcodes, RFID Product Barcodes, Dock & Bay Carton labels, Client Specific Carton Labels (each
+  a Yes/No + notes), plus Pallet Packing requirements and Other Packing & Labelling requirements (notes). Shows the
+  supplier's approval status.
+- **Supplier portal (PO card):** new read-only **DIRECT TO CLIENT DETAILS** sub-tab showing all the above, with an
+  **Approve Direct to Client details** button. Until approved it shows as an action notification on the PO's MANAGE
+  badge. Editing any packing field on the admin side re-requests approval.
+- **SUPPLY ▸ Reports ▸ Direct to Client:** new **D2C details** column showing Approved / Awaiting / — per PO.
+- **Migration:** `086_po_packing_labelling.sql` (12 packing columns + `dtc_accepted_at` / `dtc_accepted_by` on
+  `purchase_orders`). Applied to sandbox; **Diviyaj must run on prod.**
+- New endpoints `/api/portal/dtc-accept` + `/api/supply/dtc-accept` (preview parity).
+
+**Deploy note (Diviyaj):** run migration **086**; wire live `/api/portal/dtc-accept`; the portal bootstrap PO rows
+and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accepted_*` fields.
+
+## v25.59 - Packing & Labelling Yes/No dropdowns colour-coded
+
+- The Yes/No dropdowns in the CLIENT/FBA ▸ Packing and Labelling section are now **green for Yes, red for No**,
+  recolouring instantly on change. (Save-confirmation flash suppressed on these so the colour reads true.)
+
+## v25.60 - Direct to Client details tab always shows on the portal
+
+- The **DIRECT TO CLIENT DETAILS** sub-tab now appears on every portal PO card (was hidden until D&B had entered
+  packing details). When nothing's set it shows an empty-state line; the approve **notification** + button still
+  only appear when there are details to approve.
+
+## v25.61 - Supplier portal PO grid: Ship to country + branch columns
+
+- Added **Ship to country** and **Ship to branch** columns to the supplier-portal PO grid, immediately after
+  **Status**. The portal bootstrap PO query now returns `branch` + `country` (admin preview already had them).
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
