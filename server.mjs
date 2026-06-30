@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.71';
+const APP_VERSION = 'v25.72';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1208,7 +1208,10 @@ app.get('/api/supply/:section', async (req, res) => {
             coalesce(production_status,'') production_status,
             (CURRENT_DATE - production_confirmed_at::date)::int prod_confirmed_age,
             -- action-item flags (vs current_date), only for POs not complete
-            (coalesce(status,'') NOT ILIKE '%complete%' AND eff_delivery < current_date) is_late,
+            -- "late" = past the forecast delivery date AND not yet shipped. Once SHIPPING (in transit) or
+            -- DELIVERED/COMPLETE it's no longer an actionable late exception, so exclude those statuses.
+            (coalesce(status,'') NOT ILIKE '%complete%' AND coalesce(status,'') NOT ILIKE '%shipping%'
+               AND coalesce(status,'') NOT ILIKE '%deliver%' AND eff_delivery < current_date) is_late,
             (coalesce(status,'') NOT ILIKE '%complete%' AND coalesce(shipment_ref,'')='') unassigned_shipment,
             (coalesce(status,'') NOT ILIKE '%complete%' AND (
                (start_production < current_date AND pay_start_deposit_assigned IS NULL AND coalesce(deposit_ref,'')='' AND start_calc > 0)

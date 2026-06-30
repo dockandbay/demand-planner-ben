@@ -559,6 +559,13 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
 - Wrapped the label + dropdown in a no-wrap group with a fixed gap so the **Exceptions Filters** label stays
   fully visible (the dropdown was overlapping the word "Filters" when the filter bar wrapped).
 
+## v25.72 - Purchase Orders: highlight search box + "Late" excludes shipped/delivered
+
+- The PO grid **search box** is now light blue (easier to spot).
+- **"Late" exception** no longer flags POs that are already **SHIPPING** or **DELIVERED** — a past delivery date
+  on an in-transit/arrived PO isn't an actionable late exception. Late now applies only to not-yet-shipped POs
+  (FUTURE / PRODUCTION / READY TO SHIP) that are past their forecast delivery date.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
