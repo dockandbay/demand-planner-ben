@@ -575,6 +575,12 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
     FUTURE/PRODUCTION (not yet ready-to-ship/shipped/delivered).
   - **"Late - should have Shipped"** — still in PRODUCTION and the ship date has passed.
 
+## v25.74 - Purchase Orders: Exceptions Filters back in place, fixed-width dropdown
+
+- Reverted the Exceptions Filters box to its original position (after NEEDS ERP). Root cause of the label being
+  covered was the dropdown's `width:auto`; switched to a **fixed 220px width** (same pattern as the working
+  Supplier/Production/Batch selects) so the label is never overlapped.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
