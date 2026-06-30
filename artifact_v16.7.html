@@ -2836,6 +2836,7 @@ let SKU_VIEW=null;
 let VIEW_MODE='planning'; // 'planning' | 'exec'
 let REPORT_VIEW='ex'; // REPORTS sub-tab: 'ex' (Exec Summary) | 'slow' (Slow Moving) | 'af' (Auto Forecast)
 let KPI_SUB='instock', KPI_T3PL=5, KPI_TFBA=5, KPI_GRP='', KPI_COVER=6, KPI_WITHIN=3, KPI_ACCM=3; // DEMAND ▸ KPIs state
+let KPI_ACC_LEVEL='cc', KPI_ACC_LAG=1; // Forecast-accuracy view: drill level (cc|category|sku) + lag (months forecast made before target)
 let DEMAND_VIEW='plan'; // DEMAND sub-tab: 'plan' (the demand plan) | 'targets' (sell-through targets) | 'actions'
 var TGT_CACHE=null;
 var _da={sec:'actions',mkt:'all',cat:'all',status:'open'}; // DEMAND ▸ Actions filters (sec: actions|insights|weather; status: open|snoozed|dismissed|done|all)
@@ -6517,6 +6518,7 @@ function renderKpisView(body){
       url:function(){ return '/api/kpi/forecast-accuracy?months='+KPI_ACCM; }, file:function(){return 'forecast_vs_runrate';},
       cols:[{h:'Country',k:'country',t:'text'},{h:'Channel',k:'channel',t:'text'},{h:'Actual / mo',k:'actual_avg',t:'num'},{h:'Forecast / mo',k:'forecast_avg',t:'num'},{h:'Variance',k:'variance_pct',t:'pct'}] }
   };
+  if(KPI_SUB==='accuracy'){ renderAccuracyView(kb,body); return; }
   var cfg=CFG[KPI_SUB]||CFG.instock;
   kb.innerHTML='<div style="display:flex;gap:14px;align-items:center;margin-bottom:10px;flex-wrap:wrap">'
     +'<div style="font-size:13px;font-weight:700">'+cfg.title+'</div>'+(cfg.controls||'')
@@ -6545,6 +6547,75 @@ function renderKpisView(body){
     }); }
   if(cfg.wire)cfg.wire(load);
   load();
+}
+// DEMAND ▸ KPIs ▸ Forecast accuracy — TRUE accuracy from SKU snapshots (accrues), with country/channel→category→SKU
+// drill-down, Bias/WMAPE/Attainment, CSV, a manual "take snapshot" button, and a plan-vs-run-rate panel for today.
+function renderAccuracyView(kb,body){
+  function dl(name,matrix){ var c=matrix.map(function(rr){return rr.map(function(x){x=(x==null?'':String(x));return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;}).join(',');}).join('\n')+'\n';
+    var bl=new Blob([c],{type:'text/csv'}),u=URL.createObjectURL(bl),a=document.createElement('a');a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u);},1000); }
+  function pctCol(v,goodLow){ if(v==null)return '#475569'; var a=Math.abs(v); return goodLow?(a<=10?'#15803d':a<=25?'#b45309':'#b91c1c'):(v>=90&&v<=110?'#15803d':(v>=75&&v<=125?'#b45309':'#b91c1c')); }
+  kb.innerHTML='<div style="color:#94a3b8;font-size:12px">Loading…</div>';
+  fetch('/api/kpi/forecast-accuracy?level='+KPI_ACC_LEVEL+'&lag='+KPI_ACC_LAG+'&months='+KPI_ACCM).then(function(r){return r.json();}).then(function(j){
+    if(!j||!j.ok){ kb.innerHTML='<div style="color:#dc2626;font-size:12px">Failed to load.</div>'; return; }
+    var s=j.snapshots||{}, ov=(j.accuracy&&j.accuracy.overall)||{}, rows=(j.accuracy&&j.accuracy.rows)||[];
+    var card=function(label,val,sub,col){ return '<div style="flex:1;min-width:130px;background:#f6f7f9;border-radius:8px;padding:10px 14px"><div style="font-size:22px;font-weight:700;color:'+(col||'#0f172a')+'">'+val+'</div><div style="font-size:11px;color:#64748b">'+label+(sub?' <span style="color:#94a3b8">'+sub+'</span>':'')+'</div></div>'; };
+    var pc=function(v){ return v==null?'—':(v>0?'+':'')+v+'%'; };
+    // snapshot bar + manual trigger
+    var snapBar='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'
+      +'<button id="acc-snap" style="font-size:12px;padding:5px 12px;border-radius:6px;cursor:pointer;border:1px solid #1d4ed8;background:#2563eb;color:#fff;font-weight:600">📸 Take forecast snapshot now</button>'
+      +'<span style="font-size:11px;color:#64748b">Snapshots: <b>'+(s.runs||0)+'</b> &middot; SKU snapshots: <b>'+(s.sku_runs||0)+'</b>'+(s.last_at?' &middot; last: '+s.last_at:'')+'</span>'
+      +'<span style="font-size:11px;color:#94a3b8;margin-left:auto">Diviyaj can add a monthly n8n trigger later</span></div>';
+    // accrual banner when no true-accuracy data yet
+    var banner=(ov.matched_rows>0)?'':'<div style="background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;font-size:12px;border-radius:8px;padding:9px 12px;margin-bottom:10px">'
+      +'<b>True forecast accuracy accrues over time.</b> It compares each month’s actuals to the SKU forecast that was snapshotted <i>before</i> that month. '
+      +'Take a snapshot each month (button above) — once a forecast month completes, accuracy populates here. Meanwhile, see <b>Plan vs recent run-rate</b> below.</div>';
+    // KPI cards
+    var cards='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+      +card('Forecast bias',pc(ov.bias_pct),'(+over / –under)',pctCol(ov.bias_pct,true))
+      +card('WMAPE',ov.wmape_pct==null?'—':ov.wmape_pct+'%','abs error ÷ actual',pctCol(ov.wmape_pct,true))
+      +card('Attainment',ov.attainment_pct==null?'—':ov.attainment_pct+'%','actual ÷ forecast',pctCol(ov.attainment_pct,false))
+      +card('Matched lines',ov.matched_rows||0,'forecast×actual')
+      +'</div>';
+    // controls: level + lag
+    var LEVELS=[['cc','Country × Channel'],['category','Category'],['sku','SKU']];
+    var LAGS=[[1,'1-mo ahead'],[3,'3-mo ahead'],[6,'6-mo ahead']];
+    var btn=function(active){ return 'font-size:11px;padding:3px 10px;border-radius:5px;cursor:pointer;border:1px solid #cbd5e1;'+(active?'background:#0f172a;color:#fff;border-color:#0f172a':'background:#fff;color:#334155'); };
+    var ctrl='<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'
+      +'<span style="display:flex;gap:4px;align-items:center"><span style="font-size:12px;color:#475569">Drill:</span>'+LEVELS.map(function(l){return '<button class="acc-lvl" data-v="'+l[0]+'" style="'+btn(l[0]===KPI_ACC_LEVEL)+'">'+l[1]+'</button>';}).join('')+'</span>'
+      +'<span style="display:flex;gap:4px;align-items:center"><span style="font-size:12px;color:#475569">Lag:</span>'+LAGS.map(function(l){return '<button class="acc-lag" data-v="'+l[0]+'" style="'+btn(l[0]===KPI_ACC_LAG)+'">'+l[1]+'</button>';}).join('')+'</span>'
+      +'<button id="acc-csv" style="margin-left:auto;font-size:11px;padding:3px 10px;border-radius:5px;cursor:pointer;border:1px solid #cbd5e1;background:#fff">&#8595; CSV</button></div>';
+    // accuracy table
+    var keyCols=KPI_ACC_LEVEL==='cc'?[['country','Country'],['channel','Channel']]:KPI_ACC_LEVEL==='category'?[['category','Category']]:[['sku','SKU'],['country','Country'],['channel','Channel']];
+    var th='padding:5px 12px;text-align:right',thl='padding:5px 12px;text-align:left';
+    var headCols=keyCols.concat([['fc_units','Forecast'],['act_units','Actual'],['bias_pct','Bias'],['wmape_pct','WMAPE'],['attainment_pct','Attainment'],['n','Lines']]);
+    var head='<tr style="background:#e9eef5;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:#475569">'+headCols.map(function(c,i){return '<th style="'+(i<keyCols.length?thl:th)+'">'+c[1]+'</th>';}).join('')+'</tr>';
+    var bodyH=rows.length?rows.map(function(r){ return '<tr style="border-bottom:1px solid #eef2f7">'+headCols.map(function(c,i){
+        var k=c[0],v=r[k],txt,col='';
+        if(k==='bias_pct'){txt=pc(v);col=';font-weight:600;color:'+pctCol(v,true);}
+        else if(k==='wmape_pct'){txt=v==null?'—':v+'%';col=';font-weight:600;color:'+pctCol(v,true);}
+        else if(k==='attainment_pct'){txt=v==null?'—':v+'%';col=';font-weight:600;color:'+pctCol(v,false);}
+        else if(k==='fc_units'||k==='act_units'||k==='n'){txt=v==null?'—':Number(v).toLocaleString();}
+        else txt=(v==null||v==='')?'—':v;
+        return '<td style="padding:4px 12px;text-align:'+(i<keyCols.length?'left':'right')+col+'">'+txt+'</td>'; }).join('')+'</tr>'; }).join('')
+      :'<tr><td colspan="'+headCols.length+'" style="padding:14px;color:#94a3b8;font-size:12px;text-align:center">No completed month has a prior forecast snapshot yet — accuracy will populate as snapshots accrue.</td></tr>';
+    var accTbl='<table style="border-collapse:collapse;font-size:12px;width:100%;max-width:900px"><thead>'+head+'</thead><tbody>'+bodyH+'</tbody></table>';
+    // plan vs run-rate panel (always available today)
+    var rr=(j.runrate&&j.runrate.rows)||[];
+    var rrHead='<tr style="background:#e9eef5;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:#475569"><th style="'+thl+'">Country</th><th style="'+thl+'">Channel</th><th style="'+th+'">Actual / mo</th><th style="'+th+'">Forecast / mo</th><th style="'+th+'">Variance</th></tr>';
+    var rrBody=rr.map(function(r){ return '<tr style="border-bottom:1px solid #eef2f7"><td style="padding:4px 12px">'+r.country+'</td><td style="padding:4px 12px">'+r.channel+'</td><td style="padding:4px 12px;text-align:right">'+Number(r.actual_avg).toLocaleString()+'</td><td style="padding:4px 12px;text-align:right">'+Number(r.forecast_avg).toLocaleString()+'</td><td style="padding:4px 12px;text-align:right;font-weight:600;color:'+pctCol(r.variance_pct,true)+'">'+pc(r.variance_pct)+'</td></tr>'; }).join('');
+    var rrPanel='<div style="margin-top:18px"><div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><div style="font-size:13px;font-weight:700">Plan vs recent run-rate</div>'
+      +'<span style="font-size:11px;color:#94a3b8">forward forecast monthly avg vs trailing '+((j.runrate&&j.runrate.months)||3)+'-mo actual avg — a level/growth sanity check, not accuracy</span>'
+      +'<button id="acc-rr-csv" style="margin-left:auto;font-size:11px;padding:3px 10px;border-radius:5px;cursor:pointer;border:1px solid #cbd5e1;background:#fff">&#8595; CSV</button></div>'
+      +'<table style="border-collapse:collapse;font-size:12px;width:100%;max-width:560px"><thead>'+rrHead+'</thead><tbody>'+rrBody+'</tbody></table></div>';
+    kb.innerHTML=snapBar+banner+cards+ctrl+accTbl+rrPanel;
+    // wire
+    kb.querySelectorAll('.acc-lvl').forEach(function(b){ b.onclick=function(){ KPI_ACC_LEVEL=b.dataset.v; renderAccuracyView(kb,body); }; });
+    kb.querySelectorAll('.acc-lag').forEach(function(b){ b.onclick=function(){ KPI_ACC_LAG=Number(b.dataset.v); renderAccuracyView(kb,body); }; });
+    var snapB=kb.querySelector('#acc-snap'); if(snapB)snapB.onclick=function(){ if(!confirm('Take a snapshot of the current SKU forecast now? This records what we forecast today so accuracy can be measured later.'))return; snapB.disabled=true; snapB.textContent='Snapshotting…';
+      fetch('/api/forecast/snapshot',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({note:'manual from KPIs'})}).then(function(r){return r.json();}).then(function(jj){ if(jj&&jj.error){alert('Failed: '+jj.error);snapB.disabled=false;snapB.textContent='📸 Take forecast snapshot now';return;} alert('Snapshot taken: '+jj.rows.toLocaleString()+' SKU-month rows captured.'); renderAccuracyView(kb,body); }).catch(function(){ alert('Snapshot failed.'); snapB.disabled=false; }); };
+    var csvB=kb.querySelector('#acc-csv'); if(csvB)csvB.onclick=function(){ var m=[headCols.map(function(c){return c[1];})].concat(rows.map(function(r){return headCols.map(function(c){return r[c[0]]==null?'':r[c[0]];});})); dl('forecast_accuracy_'+KPI_ACC_LEVEL+'_lag'+KPI_ACC_LAG+'.csv',m); };
+    var rrB=kb.querySelector('#acc-rr-csv'); if(rrB)rrB.onclick=function(){ var m=[['Country','Channel','Actual/mo','Forecast/mo','Variance%']].concat(rr.map(function(r){return [r.country,r.channel,r.actual_avg,r.forecast_avg,r.variance_pct];})); dl('plan_vs_runrate.csv',m); };
+  }).catch(function(){ kb.innerHTML='<div style="color:#dc2626;font-size:12px">Failed to load.</div>'; });
 }
 // ─── DEMAND sub-tabs (PLAN / KPIs / TARGETS / ACTIONS / CALENDAR) ───────────────────────────
 var DEMAND_TABS=[['plan','Plan'],['kpis','KPIs'],['targets','Targets'],['actions','Actions'],['calendar','Calendar']];

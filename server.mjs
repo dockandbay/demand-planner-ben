@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.68';
+const APP_VERSION = 'v25.69';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -5080,25 +5080,92 @@ app.get('/api/kpi/discontinued-stock', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// KPI 5 — Forecast vs recent run-rate (true historical accuracy needs stored forecast snapshots, which we don't have):
-// per country × channel, the next-12-mo forecast monthly average vs the trailing-N-month actual monthly average.
-app.get('/api/kpi/forecast-accuracy', async (req, res) => {
-  const months = Number(req.query.months); const N = isFinite(months) && months > 0 ? Math.min(12, months) : 3;
+// Snapshot the current SKU-level forecast (forecast_outputs) into forecast_runs + forecasts(level='sku').
+// Run monthly (Diviyaj wires an n8n trigger) and/or manually from the KPIs page so true forecast accuracy
+// accrues: a dated snapshot of what we forecast, later compared to actuals.
+app.post('/api/forecast/snapshot', async (req, res) => {
+  const client = await pool.connect();
   try {
-    // trailing N COMPLETE months of actuals (exclude the current partial month)
-    const act = (await pool.query(`SELECT upper(country) co, channel ch, sum(units) u FROM planner.sales_actuals
-        WHERE month >= date_trunc('month',current_date) - ($1||' months')::interval AND month < date_trunc('month',current_date) GROUP BY 1,2`, [N])).rows;
-    const fc = (await pool.query(`SELECT upper(split_part(warehouse,'_',1)) co,
-        CASE WHEN channel='FBA' THEN 'FBA' WHEN channel='B2B' THEN 'B2B' ELSE 'DTC' END ch, sum(units) u FROM planner.forecast_outputs
+    await client.query('BEGIN');
+    const hz = (await client.query(`SELECT min(month) s, max(month) e, count(*) n FROM planner.forecast_outputs`)).rows[0];
+    if (!hz.s || Number(hz.n) === 0) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'no forecast to snapshot (forecast_outputs is empty)' }); }
+    const run = (await client.query(`INSERT INTO planner.forecast_runs (engine_version, horizon_start, horizon_end, notes)
+      VALUES ('sku-snapshot', $1, $2, $3) RETURNING id, to_char(run_at,'YYYY-MM-DD HH24:MI') run_at`,
+      [hz.s, hz.e, (req.body && req.body.note) || 'Manual SKU forecast snapshot'])).rows[0];
+    const ins = await client.query(`INSERT INTO planner.forecasts (run_id, level, subcategory, country, channel, sku, warehouse, month, units, method, reason)
+      SELECT $1, 'sku', coalesce(NULLIF(p.subcategory,''),'Uncategorised'),
+        upper(split_part(fo.warehouse,'_',1)),
+        CASE WHEN upper(fo.channel)='FBA' THEN 'FBA' WHEN upper(fo.channel)='B2B' THEN 'B2B' ELSE 'DTC' END,
+        fo.sku, fo.warehouse, fo.month, fo.units, 'snapshot', 'manual snapshot'
+      FROM planner.forecast_outputs fo LEFT JOIN planner.products p ON p.sku=fo.sku`, [run.id]);
+    await client.query('COMMIT');
+    res.json({ ok: true, run_id: run.id, run_at: run.run_at, rows: ins.rowCount });
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
+});
+
+// Forecast accuracy KPI — TRUE historical accuracy from SKU snapshots (accrues as snapshots build), plus a
+// "plan vs recent run-rate" panel that's always available today. Params: level=cc|category|sku, lag (months
+// the forecast was made before the target month, default 1), window (trailing complete months, default 12).
+app.get('/api/kpi/forecast-accuracy', async (req, res) => {
+  const level = ['cc', 'category', 'sku'].includes(req.query.level) ? req.query.level : 'cc';
+  const lag = Math.max(0, Math.min(12, Number(req.query.lag) || 1));
+  const win = Math.max(1, Math.min(36, Number(req.query.window) || 12));
+  const rr = Math.max(1, Math.min(12, Number(req.query.months) || 3));
+  try {
+    // snapshot status
+    const snap = (await pool.query(`SELECT count(DISTINCT r.id) runs, max(to_char(r.run_at,'YYYY-MM-DD HH24:MI')) last_at,
+      (SELECT count(DISTINCT run_id) FROM planner.forecasts WHERE level='sku') sku_runs FROM planner.forecast_runs r`)).rows[0];
+
+    // TRUE accuracy: actuals for completed months in window, matched to the SKU forecast snapshot made >= lag months before
+    const grp = level === 'cc' ? `country, channel` : level === 'category' ? `category` : `sku, country, channel`;
+    const sel = level === 'cc' ? `country, channel` : level === 'category' ? `coalesce(category,'Uncategorised') category` : `sku, country, channel`;
+    const accSql = `
+      WITH act AS (
+        SELECT upper(country) country, channel, sku, month, sum(units) au FROM planner.sales_actuals
+        WHERE month >= date_trunc('month',current_date) - ($1||' months')::interval AND month < date_trunc('month',current_date)
+        GROUP BY 1,2,3,4),
+      fc AS (   -- the SKU forecast for each COMPLETED window month, taken from the snapshot made >= lag months before it
+        SELECT f.sku, f.country, f.channel, f.month, sum(f.units) fu, min(f.subcategory) subcategory
+        FROM planner.forecasts f JOIN planner.forecast_runs r ON r.id=f.run_id
+        WHERE f.level='sku'
+          AND f.month >= date_trunc('month',current_date) - ($1||' months')::interval AND f.month < date_trunc('month',current_date)
+          AND r.run_at < (f.month - ($2||' months')::interval)
+          AND NOT EXISTS (SELECT 1 FROM planner.forecasts f2 JOIN planner.forecast_runs r2 ON r2.id=f2.run_id
+             WHERE f2.level='sku' AND f2.sku=f.sku AND f2.country=f.country AND f2.channel=f.channel AND f2.month=f.month
+               AND r2.run_at < (f.month - ($2||' months')::interval) AND r2.run_at > r.run_at)
+        GROUP BY 1,2,3,4),
+      mfc AS (SELECT DISTINCT month FROM fc),   -- only evaluate months we actually forecast before they happened
+      m AS (
+        SELECT coalesce(a.sku,fc.sku) sku, coalesce(a.country,fc.country) country, coalesce(a.channel,fc.channel) channel,
+               coalesce(a.au,0) au, coalesce(fc.fu,0) fu, coalesce(fc.subcategory, pr.subcategory) category
+        FROM (SELECT * FROM act WHERE month IN (SELECT month FROM mfc)) a
+        FULL OUTER JOIN fc ON fc.sku=a.sku AND fc.country=a.country AND fc.channel=a.channel AND fc.month=a.month
+        LEFT JOIN planner.products pr ON pr.sku=coalesce(a.sku,fc.sku))
+      SELECT ${sel}, round(sum(fu)) fc_units, round(sum(au)) act_units, round(sum(abs(fu-au))) abs_err, count(*) n
+      FROM m GROUP BY ${grp} ORDER BY act_units DESC NULLS LAST`;
+    const accRows = (await pool.query(accSql, [win, lag])).rows.map(r => {
+      const fc = Number(r.fc_units) || 0, act = Number(r.act_units) || 0, ae = Number(r.abs_err) || 0;
+      return { ...r, fc_units: fc, act_units: act,
+        bias_pct: act > 0 ? Math.round((fc - act) / act * 100) : null,
+        wmape_pct: act > 0 ? Math.round(ae / act * 100) : null,
+        attainment_pct: fc > 0 ? Math.round(act / fc * 100) : null };
+    });
+    const tA = accRows.reduce((s, r) => s + r.act_units, 0), tF = accRows.reduce((s, r) => s + r.fc_units, 0), tE = accRows.reduce((s, r) => s + Math.abs(r.fc_units - r.act_units), 0);
+    const overall = { matched_rows: accRows.length, fc_units: tF, act_units: tA,
+      bias_pct: tA > 0 ? Math.round((tF - tA) / tA * 100) : null, wmape_pct: tA > 0 ? Math.round(tE / tA * 100) : null, attainment_pct: tF > 0 ? Math.round(tA / tF * 100) : null };
+
+    // plan-vs-run-rate (always available): forward forecast monthly avg vs trailing complete-month actual avg
+    const ra = (await pool.query(`SELECT upper(country) co, channel ch, sum(units) u FROM planner.sales_actuals
+        WHERE month >= date_trunc('month',current_date) - ($1||' months')::interval AND month < date_trunc('month',current_date) GROUP BY 1,2`, [rr])).rows;
+    const rf = (await pool.query(`SELECT upper(split_part(warehouse,'_',1)) co,
+        CASE WHEN upper(channel)='FBA' THEN 'FBA' WHEN upper(channel)='B2B' THEN 'B2B' ELSE 'DTC' END ch, sum(units) u FROM planner.forecast_outputs
         WHERE month >= date_trunc('month',current_date) AND month < date_trunc('month',current_date) + interval '12 months' GROUP BY 1,2`)).rows;
-    const A = {}, F = {};
-    act.forEach(r => { A[r.co + '|' + r.ch] = Number(r.u) || 0; });
-    fc.forEach(r => { F[r.co + '|' + r.ch] = Number(r.u) || 0; });
-    const keys = Array.from(new Set(Object.keys(A).concat(Object.keys(F)))).sort();
-    const rows = keys.map(k => { const [co, ch] = k.split('|'); const aAvg = (A[k] || 0) / N, fAvg = (F[k] || 0) / 12;
-      const variance = aAvg > 0 ? Math.round((fAvg - aAvg) / aAvg * 100) : (fAvg > 0 ? null : 0);
-      return { country: co, channel: ch, actual_avg: Math.round(aAvg), forecast_avg: Math.round(fAvg), variance_pct: variance }; });
-    res.json({ ok: true, months: N, note: 'forecast 12-mo monthly avg vs trailing ' + N + '-mo actual monthly avg', rows });
+    const A = {}, F = {}; ra.forEach(r => { A[r.co + '|' + r.ch] = Number(r.u) || 0; }); rf.forEach(r => { F[r.co + '|' + r.ch] = Number(r.u) || 0; });
+    const rrows = Array.from(new Set(Object.keys(A).concat(Object.keys(F)))).sort().map(k => { const [co, ch] = k.split('|'); const aAvg = (A[k] || 0) / rr, fAvg = (F[k] || 0) / 12;
+      return { country: co, channel: ch, actual_avg: Math.round(aAvg), forecast_avg: Math.round(fAvg), variance_pct: aAvg > 0 ? Math.round((fAvg - aAvg) / aAvg * 100) : (fAvg > 0 ? null : 0) }; });
+
+    res.json({ ok: true, level, lag, window: win, snapshots: { runs: Number(snap.runs) || 0, sku_runs: Number(snap.sku_runs) || 0, last_at: snap.last_at },
+      accuracy: { overall, rows: accRows }, runrate: { months: rr, rows: rrows } });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // ── Forecast export by country (CSV download · email · DriveHQ upload) ───────────────────────────────────

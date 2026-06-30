@@ -530,6 +530,19 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
   dominates. Only applies when the client sends `Accept-Encoding: gzip` and the body is >1.4 KB; verified the
   decompressed payload is byte-identical.
 
+## v25.69 - DEMAND ▸ KPIs ▸ Forecast accuracy (true accuracy, accrues from snapshots)
+
+- Replaced the old "forecast vs run-rate" proxy with a proper **Forecast accuracy** view: **Bias / WMAPE /
+  Attainment** KPI cards, **Country×Channel → Category → SKU** drill-down, **lag** selector (1/3/6-mo-ahead), and
+  **CSV export**. Computes true accuracy = actuals vs the SKU forecast snapshotted *before* that month.
+- New **forecast snapshot** mechanism: `POST /api/forecast/snapshot` captures the current SKU forecast
+  (`forecast_outputs`) into a dated `forecast_runs`/`forecasts` snapshot. A **"📸 Take snapshot now"** button on
+  the page triggers it manually (Diviyaj can add a monthly n8n trigger later).
+- Because only forward-looking forecasts exist today, true accuracy starts at 0 matched and **accrues** as monthly
+  snapshots build against actuals — the view shows an honest "accruing" banner plus a **Plan vs recent run-rate**
+  panel (always available) so it's useful immediately.
+- No migration (reuses existing `forecast_runs` / `forecasts` / `sales_actuals`).
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
