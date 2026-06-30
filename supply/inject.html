@@ -858,12 +858,16 @@
     syncActErp();
     c.querySelectorAll('#po-act .po-actall').forEach(function(p){p.onclick=function(){state.hasact=!state.hasact;if(state.hasact)state.erp=false;syncActErp();view();};});
     c.querySelectorAll('#po-act .po-erp').forEach(function(p){p.onclick=function(){state.erp=!state.erp;if(state.erp)state.hasact=false;syncActErp();view();};});
-    var _exc=c.querySelector('#po-exc'); if(_exc)_exc.onchange=function(){ state.act={}; if(this.value)state.act[this.value]=true; view(); };
+    // view() only re-renders the grid body, not the filter bar — so toggle the active-filter highlight on the
+    // <select> directly here (black = a value is applied; cleared = back to default).
+    function selHi(el,on){ if(!el)return; if(on){ el.style.background='#0f172a'; el.style.color='#fff'; el.style.borderColor='#0f172a'; el.style.fontWeight='700'; } else { el.style.background=''; el.style.color=''; el.style.borderColor=''; el.style.fontWeight=''; } }
+    var _exc=c.querySelector('#po-exc'); if(_exc)_exc.onchange=function(){ state.act={}; if(this.value)state.act[this.value]=true;
+      if(this.value){ selHi(this,true); } else { this.style.background='#fef2f2'; this.style.color='#991b1b'; this.style.borderColor='#fca5a5'; this.style.fontWeight='700'; } view(); };
     var pgrp=document.getElementById('po-grp'); if(pgrp)pgrp.onchange=function(){state.grp=this.value;view();};
     c.querySelectorAll('#po-ctry .pill').forEach(function(p){p.onclick=function(){var k=p.dataset.c;state.ctry[k]=!state.ctry[k];p.classList.toggle('active',state.ctry[k]);view();};});
-    var psup=document.getElementById('po-sup'); if(psup)psup.onchange=function(){state.sup=this.value;view();};
-    var pprod=document.getElementById('po-prod'); if(pprod)pprod.onchange=function(){state.prod=this.value;view();};
-    var pbatch=document.getElementById('po-batch'); if(pbatch)pbatch.onchange=function(){state.batch=this.value;view();};
+    var psup=document.getElementById('po-sup'); if(psup)psup.onchange=function(){state.sup=this.value;selHi(this,!!this.value);view();};
+    var pprod=document.getElementById('po-prod'); if(pprod)pprod.onchange=function(){state.prod=this.value;selHi(this,!!this.value);view();};
+    var pbatch=document.getElementById('po-batch'); if(pbatch)pbatch.onchange=function(){state.batch=this.value;selHi(this,!!this.value);view();};
     document.getElementById('sup-search').oninput=debounce(function(){state.q=this.value;_poShowAll=false;view();},350);
     document.getElementById('po-csv').onclick=function(){var q=effQ(state.q);csv(q?filt(rows,q):cur(),'purchase_orders.csv',PO_CSV_LABELS);};
     document.getElementById('po-new').onclick=function(){ var po=prompt('New PO number:'); if(!po||!po.trim())return;

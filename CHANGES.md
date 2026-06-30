@@ -608,6 +608,12 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
 - On empty Production / Batch (and Supplier / Branch) cells, the word **set** is now shown as a red bold pill
   (matching the deposit "assign" style) so unset fields stand out.
 
+## v25.80 - Purchase Orders: active filter highlight now updates immediately on change
+
+- Selecting a Supplier / Production / Batch / Exceptions value now turns the dropdown **black** straight away
+  (and clears back on reset). Previously the highlight only applied after a full section reload because the
+  change handler re-renders just the grid body, not the filter bar.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
