@@ -487,6 +487,15 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
 - Admin CLIENT/FBA + Direct to Client report reflect the gating ("Approval not required" / "—" when the production
   doesn't require confirmation).
 
+## v25.64 - Performance: index purchase_orders.deposit_ref (PO grid ~45% faster)
+
+- The supply-plan PO grid query (and the admin "Preview as supplier" path) had an un-indexed correlated
+  subquery — deposit availability summed over `purchase_orders` by `deposit_ref`, a full seq scan per PO
+  (O(n²)). **Migration 088** adds `po_deposit_ref_idx`; query execution dropped **711ms → 389ms** on the
+  sandbox set (the seq scan became an index scan). The real supplier-portal PO query was already ~32ms.
+- No app-code change — pure index. (The recent feature columns weren't the cause; this subquery was
+  pre-existing and grows costlier with more POs.)
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

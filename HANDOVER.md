@@ -74,7 +74,10 @@ plus new numbered migrations on top. See `migrations/README.md`.
     (polybags / DnB product barcodes / RFID / DnB carton / client carton — each bool+notes; pallet + other notes)
     plus `dtc_accepted_at` / `dtc_accepted_by` for the supplier "Direct to Client details" approval. Idempotent.
   - **`087_pack_default_yes.sql`** — default Polybags / D&B Product barcodes / D&B Carton labels to **Yes**
-    (column defaults + one-time init of untouched POs). Run right after 086. Idempotent. ⬅ *latest.*
+    (column defaults + one-time init of untouched POs). Run right after 086. Idempotent.
+  - **`088_po_deposit_ref_index.sql`** — **performance**: index `purchase_orders(deposit_ref)`. The PO grid
+    calc has a per-row correlated subquery over `purchase_orders` by `deposit_ref` (deposit availability) that
+    seq-scans without this index. Cuts the supply-plan PO query ~45% (711ms→389ms on the sandbox set). Idempotent. ⬅ *latest.*
 
   **Packing & Labelling / Direct to Client details (Client/FBA tab → portal "Direct to Client details" tab):**
   - Live `/api/portal/dtc-accept` (supplier approves a PO's packing details) — preview is on `/api/supply/dtc-accept`.
@@ -120,7 +123,7 @@ plus new numbered migrations on top. See `migrations/README.md`.
   - On-behalf notes (D&B posting as the supplier in the preview pane) are stored `author_kind='supplier'`,
     `author_email='D&B'` and labelled "D&B as <supplier>"; they still notify the supply/samples page.
 
-- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`087` in order (**skip 081 — superseded by 083**). Do **not** run
+- **Fresh DB** (new env): run `migrations/schema.sql` once, then `062`–`088` in order (**skip 081 — superseded by 083**). Do **not** run
   `schema.sql` against an already-migrated DB (the table creates aren't idempotent).
 
 ---

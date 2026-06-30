@@ -5,7 +5,7 @@
 -- Scope: every DB migration committed in the LAST ~24 HOURS (planner app v25.49 -> v25.62):
 --   084 (Samples feature), 085 (samples "change requested"), 086 (PO Packing & Labelling
 --   + "Direct to Client details" approval), 087 (default Polybags / D&B Product barcodes /
---   D&B Carton labels to YES).
+--   D&B Carton labels to YES), 088 (performance index on purchase_orders.deposit_ref).
 -- Picks up where diviyaj_deploy_2026-06-28.sql left off (that package covered 072–083).
 -- WRAPPED IN ONE TRANSACTION (atomic: all-or-nothing). Every statement is idempotent
 -- (CREATE TABLE/INDEX IF NOT EXISTS / ADD COLUMN IF NOT EXISTS), so it is safe to re-run.
@@ -137,6 +137,13 @@ UPDATE planner.purchase_orders
    AND coalesce(pack_rfid_barcodes_notes,'')='' AND coalesce(pack_dnb_carton_notes,'')=''
    AND coalesce(pack_client_carton_notes,'')='' AND coalesce(pack_pallet_notes,'')=''
    AND coalesce(pack_other_notes,'')='';
+
+-- ───────────────────────────────────────────────────────────────────────────
+-- 088_po_deposit_ref_index.sql — PERFORMANCE. Index purchase_orders(deposit_ref): the PO grid calc
+-- computes deposit availability with a per-row correlated subquery over purchase_orders by deposit_ref;
+-- without this index that is a full seq scan per PO (O(n^2)). Cuts the supply-plan PO query ~45%.
+-- ───────────────────────────────────────────────────────────────────────────
+CREATE INDEX IF NOT EXISTS po_deposit_ref_idx ON planner.purchase_orders(deposit_ref);
 
 COMMIT;
 
