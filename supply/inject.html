@@ -30,16 +30,16 @@
 /* "Last 12m" toggle pills — forest green so the default-on filter is easy to spot */
 #supply-root .pill.po-recent,#supply-root .pill.ship-recent{background:#f0fdf4;color:#166534;border-color:#86efac}
 #supply-root .pill.po-recent:hover,#supply-root .pill.ship-recent:hover{background:#dcfce7;color:#166534}
-#supply-root .pill.po-recent.active,#supply-root .pill.ship-recent.active{background:#166534;color:#fff;border-color:#14532d}
-#supply-root .pill.po-recent.active:hover,#supply-root .pill.ship-recent.active:hover{background:#15803d;color:#fff}
+#supply-root .pill.po-recent.active,#supply-root .pill.ship-recent.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
+#supply-root .pill.po-recent.active:hover,#supply-root .pill.ship-recent.active:hover{background:#000;color:#fff}
 /* ⭐ Focus / favourite — star icon next to PLAN + the amber Focus filter pill */
 #supply-root .fav-star{background:none;border:none;cursor:pointer;font-size:15px;line-height:1;padding:0 1px;margin-left:4px;color:#94a3b8;vertical-align:middle}
 #supply-root .fav-star:hover{color:#f59e0b}
 #supply-root .fav-star.on{color:#f59e0b}
 #supply-root .pill.po-focus,#supply-root .pill.ship-focus{background:#fffbeb;color:#b45309;border-color:#fcd34d}
 #supply-root .pill.po-focus:hover,#supply-root .pill.ship-focus:hover{background:#fef3c7;color:#b45309}
-#supply-root .pill.po-focus.active,#supply-root .pill.ship-focus.active{background:#f59e0b;color:#fff;border-color:#d97706}
-#supply-root .pill.po-focus.active:hover,#supply-root .pill.ship-focus.active:hover{background:#d97706;color:#fff}
+#supply-root .pill.po-focus.active,#supply-root .pill.ship-focus.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
+#supply-root .pill.po-focus.active:hover,#supply-root .pill.ship-focus.active:hover{background:#000;color:#fff}
 #supply-root .pill-lbl{font-size:11px;color:#444;font-weight:600}
 /* compact PO filter bars — tighter spacing between pills and their labels */
 #supply-root #po-prog>*,#supply-root #po-act>*,#supply-root #po-ctry>*{margin:2px 3px 2px 0}
@@ -848,13 +848,16 @@
       if(state.focus)view(); }; }); }
     var _actPill=c.querySelector('#po-act .po-actall'), _erpPill=c.querySelector('#po-act .po-erp');
     // active = halo ring + ✓ prefix; when one is on, the other dims so the selected filter is unmistakable
-    function pillToggle(el,on,anyOn,halo,base){ if(!el)return;
+    function pillToggle(el,on,anyOn,baseBg,baseBorder,base){ if(!el)return;
       el.style.opacity=(on||!anyOn)?'1':'.4';
-      el.style.boxShadow=on?('0 0 0 3px '+halo+',0 1px 3px rgba(0,0,0,.35)'):'none';
+      el.style.background=on?'#1a1a1a':baseBg;        // active filter → black
+      el.style.borderColor=on?'#1a1a1a':baseBorder;
+      el.style.color='#fff';
+      el.style.boxShadow=on?'0 1px 3px rgba(0,0,0,.35)':'none';
       el.textContent=(on?'✓ ':'')+base; }
     function syncActErp(){ var anyOn=state.hasact||state.erp;
-      pillToggle(_actPill,!!state.hasact,anyOn,'#fecaca','ACTION ITEMS ('+actItemsCount()+')');
-      pillToggle(_erpPill,!!state.erp,anyOn,'#fed7aa','⬆ NEEDS ERP ('+erpCount()+')'); }
+      pillToggle(_actPill,!!state.hasact,anyOn,'#dc2626','#991b1b','ACTION ITEMS ('+actItemsCount()+')');
+      pillToggle(_erpPill,!!state.erp,anyOn,'#b45309','#7c2d12','⬆ NEEDS ERP ('+erpCount()+')'); }
     syncActErp();
     c.querySelectorAll('#po-act .po-actall').forEach(function(p){p.onclick=function(){state.hasact=!state.hasact;if(state.hasact)state.erp=false;syncActErp();view();};});
     c.querySelectorAll('#po-act .po-erp').forEach(function(p){p.onclick=function(){state.erp=!state.erp;if(state.erp)state.hasact=false;syncActErp();view();};});

@@ -619,6 +619,12 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
 - Empty Production / Batch / Supplier / Branch cells now show simply **assign** (red pill) instead of
   "set production" / "set batch" etc.
 
+## v25.82 - Purchase Orders: all active filters highlight black
+
+- **ACTION ITEMS**, **NEEDS ERP**, **Last 12m** and **Focus** now go **black with white text** when active (was
+  red/amber/green). Consistent with the Supplier/Production/Batch/Exceptions dropdowns — black = filter applied.
+  (Last 12m / Focus change also applies in the Shipments grid for consistency.)
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
