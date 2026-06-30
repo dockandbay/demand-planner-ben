@@ -655,7 +655,7 @@
   // Not a link to a table; just the dropdown/search to set the value. data-list: 'supplier' | 'branch'.
   var CELL_LBL={supplier:'supplier',branch:'branch',prod:'production',batch:'batch'};
   function cellPickBtn(po,ep,field,val,kind){
-    return '<button class="cell-pick" data-po="'+esc(po)+'" data-ep="'+esc(ep)+'" data-field="'+esc(field)+'" data-kind="'+kind+'" title="'+esc(val||'')+'">'+(val?esc(val):'<span class="mut">— set '+(CELL_LBL[kind]||kind)+'</span>')+' ▾</button>'; }
+    return '<button class="cell-pick" data-po="'+esc(po)+'" data-ep="'+esc(ep)+'" data-field="'+esc(field)+'" data-kind="'+kind+'" title="'+esc(val||'')+'">'+(val?esc(val):'<span class="mut">— <span style="background:#fee2e2;color:#991b1b;font-weight:700;border-radius:3px;padding:0 3px">set</span> '+(CELL_LBL[kind]||kind)+'</span>')+' ▾</button>'; }
   function bindCellPick(){ document.querySelectorAll('#supply-root .cell-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openCellPick(b); }; }); }
   function openCellPick(btn){ closeShPop();
     var kind=btn.dataset.kind, lbl=CELL_LBL[kind]||kind;

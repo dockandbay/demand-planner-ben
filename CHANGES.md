@@ -603,6 +603,11 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
 - Removed the **Start dep / Completion (amount) / Balance** payment columns from the grid (still in the PLAN ▸
   Payments tab). Grid is less cluttered.
 
+## v25.79 - Purchase Orders grid: highlight "set" on empty pick cells
+
+- On empty Production / Batch (and Supplier / Branch) cells, the word **set** is now shown as a red bold pill
+  (matching the deposit "assign" style) so unset fields stand out.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
