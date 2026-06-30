@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.67';
+const APP_VERSION = 'v25.68';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -321,6 +321,26 @@ async function buildFBADIMS() {
 
 const app = express();
 app.use(express.json({ limit: '12mb' }));   // 12mb: portal invoice uploads arrive as base64 JSON
+
+// gzip large JSON responses (built-in zlib — no dependency). The PO grid payload is ~3.6MB of JSON;
+// gzip cuts it ~10x over the wire. Only kicks in when the client accepts gzip and the body is worth it.
+app.use((req, res, next) => {
+  const accepts = /\bgzip\b/.test(req.headers['accept-encoding'] || '');
+  const origJson = res.json.bind(res);
+  res.json = (obj) => {
+    let str; try { str = JSON.stringify(obj); } catch (e) { return origJson(obj); }
+    if (!accepts || str.length < 1400) return origJson(obj);   // small bodies: not worth the CPU
+    zlib.gzip(str, (err, buf) => {
+      if (err) { res.setHeader('Content-Type', 'application/json; charset=utf-8'); return res.end(str); }
+      res.setHeader('Content-Encoding', 'gzip');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Vary', 'Accept-Encoding');
+      res.end(buf);
+    });
+    return res;
+  };
+  next();
+});
 
 // Access gate — only active when PLANNER_KEY is set (production). Localhost (no env var)
 // stays open and identical to what you see now. Key accepted via ?key= (stored in a cookie)
