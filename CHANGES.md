@@ -614,6 +614,11 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
   (and clears back on reset). Previously the highlight only applied after a full section reload because the
   change handler re-renders just the grid body, not the filter bar.
 
+## v25.81 - Purchase Orders: empty pick cells say "assign" (was "set <field>")
+
+- Empty Production / Batch / Supplier / Branch cells now show simply **assign** (red pill) instead of
+  "set production" / "set batch" etc.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
