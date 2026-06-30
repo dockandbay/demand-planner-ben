@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.69';
+const APP_VERSION = 'v25.70';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -5347,6 +5347,9 @@ app.get('/api/portal/me', portalAuth, (req, res) => res.json({ email: req.portal
 let PORTAL_VIEW_JS = DEV ? null : (() => { try { return readFileSync(new URL('./supply/portal-view.js', import.meta.url), 'utf8'); } catch { return '/* portal-view.js missing */'; } })();
 app.get('/portal-view.js', (req, res) => {
   res.set('content-type', 'application/javascript; charset=utf-8');
+  // no-cache: the portal view changes often — always revalidate so suppliers never run a stale cached copy
+  // (a stale copy was causing old full-reload behaviour to persist after an in-place fix was deployed)
+  res.set('Cache-Control', 'no-cache, must-revalidate');
   res.send(DEV ? (() => { try { return readFileSync(new URL('./supply/portal-view.js', import.meta.url), 'utf8'); } catch { return '/* missing */'; } })() : PORTAL_VIEW_JS);
 });
 // Notes for the renderer's post-note refetch (path sid ignored — scoped to the session's supplier).

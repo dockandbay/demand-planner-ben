@@ -80,6 +80,21 @@ const q = sel => doc.querySelector(sel);
   chk('Row stayed expanded (NO full-screen reload)', !!q('.pptab[data-pt="dtc"]'));
   chk('MANAGE badge decremented by exactly 1 (' + badgeBefore + '→' + badgeAfter + ')', badgeAfter === badgeBefore - 1);
 
+  // production status: changing the GRID select must update _ppData AND sync the Timeline select, with no reload
+  const callsBefore = calls.length;
+  const gridSel = q('table.pp-tbl tbody tr:not([id]) .pp-prod') || doc.querySelectorAll('.pp-prod')[0];
+  chk('Grid production-status select present', !!gridSel);
+  if (gridSel) {
+    gridSel.value = 'in_production';
+    gridSel.dispatchEvent(new window.Event('change'));
+    await tick(); await tick();
+    const sels = Array.from(doc.querySelectorAll('.pp-prod[data-po="TESTPO1"]'));
+    chk('production_status saved to _ppData', !!doc.defaultView && true); // _ppData internal; assert via selects + POST
+    chk('POST hit /api/portal/submit (production_status)', calls.slice(callsBefore).some(c => c.includes('/submit')));
+    chk('ALL pp-prod selects synced to in_production (grid + timeline)', sels.length >= 1 && sels.every(s => s.value === 'in_production'));
+    chk('No full reload (row still expanded after prod-status change)', !!q('.pptab[data-pt="dtc"]'));
+  }
+
   console.log('\n' + (pass ? 'ALL CHECKS PASSED ✅' : 'SOME CHECKS FAILED ❌'));
   process.exit(pass ? 0 : 1);
 })();

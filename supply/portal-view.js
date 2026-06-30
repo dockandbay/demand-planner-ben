@@ -636,7 +636,7 @@
           var act=(sb.some(function(s){return s.kind==='invoice_value';})?0:1)+((p.shipment||p.flexport_reference||sb.some(function(s){return s.kind==='tracking';}))?0:1)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0);
           var cdq=sb.filter(function(s){return s.kind==='completion_date';}); var cdVal=cdq.length?cdq[cdq.length-1].value:'';
           var cdGrid=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
-          return '<tr><td class="l"><button class="save-btn pp-exp" data-i="'+i+'">MANAGE'+(act>0?' <span class="ex-badge" title="'+act+' action'+(act>1?'s':'')+' needed">'+act+'</span>':'')+'</button></td>'
+          return '<tr><td class="l"><button class="save-btn pp-exp" data-i="'+i+'" data-po="'+esc(p.po)+'">MANAGE'+(act>0?' <span class="ex-badge" title="'+act+' action'+(act>1?'s':'')+' needed">'+act+'</span>':'')+'</button></td>'
             +'<td class="l"><b>'+esc(p.po)+'</b></td><td class="l"><span class="tool-badge '+statusBg(p.status)+'">'+esc(p.status||'')+'</span></td>'
             +'<td class="l">'+(p.country?esc(p.country):'<span class="mut">—</span>')+'</td>'
             +'<td class="l">'+(p.branch?esc(p.branch):'<span class="mut">—</span>')+'</td>'
@@ -869,6 +869,17 @@
               var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; var mb=document.querySelector('#supply-root .pp-exp[data-i="'+i+'"]')||document.querySelector('.pp-exp[data-i="'+i+'"]'); if(!mb||!p)return;
               var n=poActCount(p), b=mb.querySelector('.ex-badge');
               if(n>0){ if(b){b.textContent=n;} else { mb.insertAdjacentHTML('beforeend',' <span class="ex-badge" title="'+n+' action'+(n>1?'s':'')+' needed">'+n+'</span>'); } } else if(b){ b.remove(); } }
+            // update just the MANAGE action-badge for one PO (by data-po) — no row rebuild
+            function setManageBadge(po){ var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; var mb=body.querySelector('.pp-exp[data-po="'+CSS.escape(po)+'"]'); if(!mb||!p)return;
+              var n=poActCount(p), b=mb.querySelector('.ex-badge');
+              if(n>0){ if(b){b.textContent=n;} else { mb.insertAdjacentHTML('beforeend',' <span class="ex-badge" title="'+n+' action'+(n>1?'s':'')+' needed">'+n+'</span>'); } } else if(b){ b.remove(); } }
+            // production status changed (from the grid row OR the Timeline tab) → update _ppData, sync BOTH
+            // selects + the badge in place, and refresh the open card so its ⚠ indicator reflects. No reload.
+            function applyProdStatus(po,val){ var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; if(p)p.production_status=val;
+              body.querySelectorAll('.pp-prod[data-po="'+CSS.escape(po)+'"]').forEach(function(s){ s.value=val; s.disabled=false; });
+              setManageBadge(po);
+              var ex=body.querySelector('tr[id^="pp-"][data-po="'+CSS.escape(po)+'"]');
+              if(ex && ex.dataset.built && ex.style.display!=='none') rerenderRow(ex,po); }
             wireDetail(body);
             // detail-level handlers, bound within a scope (whole body on render, or one cell after a targeted re-render)
             function wireDetail(scope){
@@ -977,9 +988,10 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                   (_ppData.addByPo[po]=_ppData.addByPo[po]||[]).push({id:j.id,description:desc,qty:q===''?null:Number(q),price:pr===''?null:Number(pr)}); rerenderRow(row,po,'orderplan'); }); }; });
               scope.querySelectorAll('.pp-ac-rm').forEach(function(b){ b.onclick=function(){ var box=b.closest('.ppx'), po=(box.querySelector('.pp-ac-add')||{}).dataset.po, row=b.closest('tr[id^="pp-"]'), id=b.dataset.id;
                 postJSON(EP.addlCostRemove,{id:id},function(){  if(_ppData.addByPo[po])_ppData.addByPo[po]=_ppData.addByPo[po].filter(function(x){return String(x.id)!==String(id);}); rerenderRow(row,po,'orderplan'); }); }; });
-              // supplier production status dropdown (grid + timeline) → saves + re-renders so the exception flag updates
-              scope.querySelectorAll('.pp-prod').forEach(function(sel){ sel.onchange=function(){ var po=sel.dataset.po, row=sel.closest('tr[id^="pp-"]'); sel.disabled=true;
-                postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,production_status:sel.value},function(){ var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; if(p){ p.production_status=sel.value; } refreshRow(row,po); }); }; });
+              // supplier production status dropdown (grid AND timeline share class .pp-prod) → save + sync BOTH
+              // selects + badge in place (no reload, no full-cell flash from the grid)
+              scope.querySelectorAll('.pp-prod').forEach(function(sel){ sel.onchange=function(){ var po=sel.dataset.po, val=sel.value; sel.disabled=true;
+                postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,production_status:val},function(){ applyProdStatus(po,val); }); }; });
               scope.querySelectorAll('.pp-trk-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po; var t=pick('pp-trk',po).value, cc=pick('pp-car',po).value; if(!t&&!cc){ alert('Pick a carrier and/or enter a tracking ref.'); return; } var fcEl=pick('pp-fcost-new',po); var fc=fcEl?Number(fcEl.value)||0:0; btn.disabled=true;
                 var row=btn.closest('tr[id^="pp-"]');
                 postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,tracking:t,carrier:cc},function(j){

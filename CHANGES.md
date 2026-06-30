@@ -543,6 +543,17 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
   panel (always available) so it's useful immediately.
 - No migration (reuses existing `forecast_runs` / `forecasts` / `sales_actuals`).
 
+## v25.70 - Portal: production-status syncs grid↔timeline in place; stale-JS fix
+
+- Changing **production status** in the portal PO grid now **syncs the Timeline tab's selector** (and vice
+  versa) in place, updates the MANAGE action badge, and refreshes the open card's ⚠ indicator — **no page
+  refresh**. (Previously the two selectors were independent: the grid showed the new value, Timeline still
+  showed blank.)
+- **Stale-JS fix:** `/portal-view.js` is now served `Cache-Control: no-cache`. A cached old copy was making
+  Confirm-order / production-status appear to do a full page reload (the old pre-v25.65 behaviour) even after
+  the in-place fix shipped. Suppliers now always get the latest portal code.
+- Regression test extended to assert grid↔timeline prod-status sync with no reload.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
