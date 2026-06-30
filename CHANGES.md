@@ -515,6 +515,14 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
   confirmation, supplier hasn't approved) and **Purchase Order not approved** (production requires confirmation,
   supplier hasn't confirmed the PO).
 
+## v25.67 - Performance: lazy-render portal PO expanded cards
+
+- The supplier-portal PO grid previously built every PO's full expanded card (all sub-tabs: timeline,
+  order-plan SKU lines, invoice, shipment, barcodes, Direct to Client) **upfront** (up to 200) and rebuilt them
+  on every filter/search. Now the card is built **only on first expand** (MANAGE) — matching the admin PLAN
+  grid and the portal Samples grid. Big cut to initial render + filter/search responsiveness, especially for
+  large suppliers. Regression test extended to assert the card is lazy.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

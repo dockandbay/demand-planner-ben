@@ -60,6 +60,9 @@ const q = sel => doc.querySelector(sel);
   if (!manage) { console.log('\nSOME CHECKS FAILED ❌'); process.exit(1); }
   const badgeBefore = manage.querySelector('.ex-badge') ? parseInt(manage.querySelector('.ex-badge').textContent, 10) : 0;
 
+  // lazy: the expanded card must NOT be built until the row is expanded
+  chk('Expanded card is lazy (not built before expand)', !q('.pptab[data-pt="dtc"]') && /Loading…/.test(q('tr[id^="pp-"]').innerHTML));
+
   manage.click(); await tick();
   const dtcTab = q('.pptab[data-pt="dtc"]');
   chk('DIRECT TO CLIENT DETAILS tab present', !!dtcTab);
