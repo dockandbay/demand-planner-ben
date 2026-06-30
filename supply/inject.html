@@ -638,7 +638,7 @@
     setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
     function set(ref){ fetch('/api/supply/po/'+encodeURIComponent(po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({deposit_ref:ref})}).then(function(r){return r.json();}).then(function(){ closeShPop(); done&&done(); }).catch(function(e){alert('Failed: '+(e.message||e));}); }
     fetchDepositsFull(function(deps){
-      function render(q){ q=(q||'').toLowerCase(); var html='';
+      function render(q){ q=(q||'').trim().toLowerCase(); var html='';
         html+='<div class="shpop-opt unassign" data-none="1">— No deposit</div>';
         var ms=deps.filter(function(d){return !q||((d.reference||'')+' '+(d.supplier_name||'')).toLowerCase().indexOf(q)>=0;});
         ms.slice(0,q?40:12).forEach(function(d){ html+='<div class="shpop-opt" data-ref="'+esc(d.reference)+'">'+esc(d.reference)+' <span class="mut tiny">'+esc(d.supplier_name||'')+(d.deposit_remaining!=null?' · '+money(d.deposit_remaining)+' left':'')+'</span></div>'; });
@@ -668,7 +668,7 @@
       fetch(btn.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error); closeShPop(); if(_poRefresh){ _poRefresh(); } else { invalidateDerived(); delete cache['purchase-orders']; selectSection('purchase-orders'); } })
         .catch(function(e){ alert('Failed: '+(e.message||e)); }); }
-    function render(q){ q=(q||'').toLowerCase(); var html='<div class="shpop-opt unassign" data-clear="1">— Clear</div>';
+    function render(q){ q=(q||'').trim().toLowerCase(); var html='<div class="shpop-opt unassign" data-clear="1">— Clear</div>';
       var ms=list.filter(function(n){return !q||String(n).toLowerCase().indexOf(q)>=0;});
       ms.slice(0,q?80:15).forEach(function(n){ html+='<div class="shpop-opt" data-v="'+esc(n)+'">'+esc(n)+'</div>'; });
       if(!q&&list.length>15)html+='<div class="mut tiny" style="padding:5px 10px">'+(list.length-15)+' more — type to search…</div>';
@@ -690,7 +690,7 @@
     var poCtry=((poBy[po]||{}).country||'').toUpperCase();   // PO's effective ship-to country
     fetchShipmentsFull(function(ships){
       var refs={}; ships.forEach(function(s){refs[s.shipment_ref]=1;});
-      function render(q){ q=(q||'').toLowerCase(); var html='';
+      function render(q){ q=(q||'').trim().toLowerCase(); var html='';
         html+='<div class="shpop-opt master" data-act="master">★ Make this PO a master shipment</div>';
         if(cur)html+='<div class="shpop-opt unassign" data-act="unassign">✕ Unassign from '+esc(cur)+'</div>';
         // default (no typing) = shipments to the SAME COUNTRY as this PO; typing searches the full list.
@@ -1873,7 +1873,7 @@
     var rc=anchor.getBoundingClientRect(); pop.style.cssText='position:fixed;z-index:100000;top:'+(rc.bottom+4)+'px;left:'+Math.max(8,Math.min(rc.left,window.innerWidth-312))+'px';
     pop.innerHTML='<div class="shpop-h">Assign <b>'+esc(ref)+'</b> to production</div><input class="shpop-q" placeholder="search PROD# / supplier…"><div id="shpop-list"></div>';
     document.body.appendChild(pop); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
-    function render(q){ q=(q||'').toLowerCase(); var ms=_prodList.filter(function(p){return !q||((p.prod_no||'')+' '+(p.supplier||'')).toLowerCase().indexOf(q)>=0;});
+    function render(q){ q=(q||'').trim().toLowerCase(); var ms=_prodList.filter(function(p){return !q||((p.prod_no||'')+' '+(p.supplier||'')).toLowerCase().indexOf(q)>=0;});
       document.getElementById('shpop-list').innerHTML=ms.slice(0,q?50:16).map(function(p){return '<div class="shpop-opt" data-prod="'+esc(p.prod_no)+'" data-sup="'+esc(p.supplier)+'">'+esc(p.prod_no)+' · '+esc(p.supplier)+' <span class="mut tiny">'+units(p.units)+'u</span></div>';}).join('')||'<div class="count" style="padding:8px">no match</div>';
       document.querySelectorAll('#shpop-list .shpop-opt').forEach(function(o){ o.onclick=function(){ shipPost('/api/supply/production-deposit',{prod_no:o.dataset.prod,supplier_name:o.dataset.sup,deposit_ref:ref,assign:true},function(){ closeShPop(); prodTab='deposits'; delete cache['productions']; selectSection('productions'); }); }; }); }
     render(''); pop.querySelector('.shpop-q').oninput=function(){render(this.value);}; pop.querySelector('.shpop-q').focus(); }
@@ -1930,7 +1930,7 @@
     document.body.appendChild(pop); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
     fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(rows){
       var avail=rows.filter(function(r){ return (r.supplier_name||'')===sup && (r.prod_no||'')!==prod; });
-      function render(q){ q=(q||'').toLowerCase(); var ms=avail.filter(function(r){return !q||((r.po||'')+' '+(r.prod_no||'')).toLowerCase().indexOf(q)>=0;});
+      function render(q){ q=(q||'').trim().toLowerCase(); var ms=avail.filter(function(r){return !q||((r.po||'')+' '+(r.prod_no||'')).toLowerCase().indexOf(q)>=0;});
         document.getElementById('shpop-list').innerHTML=ms.slice(0,q?60:16).map(function(r){return '<div class="shpop-opt" data-po="'+esc(r.po)+'">'+esc(r.po)+' <span class="mut tiny">'+(r.prod_no?'in '+esc(r.prod_no):'unassigned')+' · '+esc(r.country||'')+'</span></div>';}).join('')||'<div class="count" style="padding:8px">no '+esc(sup)+' POs to assign</div>';
         document.querySelectorAll('#shpop-list .shpop-opt').forEach(function(o){ o.onclick=function(){ shipPost('/api/supply/po/'+encodeURIComponent(o.dataset.po),{prod_no:prod},function(){ invalidateDerived(); closeShPop(); prodExpand(prod,sup,i); }); }; }); }
       render(''); pop.querySelector('.shpop-q').oninput=function(){render(this.value);}; pop.querySelector('.shpop-q').focus();
@@ -1941,7 +1941,7 @@
     var rc=anchor.getBoundingClientRect(); pop.style.cssText='position:fixed;z-index:100000;top:'+(rc.bottom+4)+'px;left:'+Math.max(8,Math.min(rc.left,window.innerWidth-312))+'px';
     pop.innerHTML='<div class="shpop-h">Assign deposit to <b>'+esc(prod)+' · '+esc(sup)+'</b></div><input class="shpop-q" placeholder="search reference / supplier…"><div id="shpop-list"><div class="count" style="padding:8px">Loading…</div></div>';
     document.body.appendChild(pop); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
-    fetchDepositsFull(function(deps){ function render(q){ q=(q||'').toLowerCase(); var ms=deps.filter(function(d){return !q||((d.reference||'')+' '+(d.supplier_name||'')).toLowerCase().indexOf(q)>=0;});
+    fetchDepositsFull(function(deps){ function render(q){ q=(q||'').trim().toLowerCase(); var ms=deps.filter(function(d){return !q||((d.reference||'')+' '+(d.supplier_name||'')).toLowerCase().indexOf(q)>=0;});
       document.getElementById('shpop-list').innerHTML=ms.slice(0,q?40:14).map(function(d){return '<div class="shpop-opt" data-ref="'+esc(d.reference)+'">'+esc(d.reference)+' <span class="mut tiny">'+esc(d.supplier_name||'')+(d.deposit_remaining!=null?' · '+money(d.deposit_remaining)+' left':'')+'</span></div>';}).join('')||'<div class="count" style="padding:8px">no match</div>';
       document.querySelectorAll('#shpop-list .shpop-opt').forEach(function(o){ o.onclick=function(){ shipPost('/api/supply/production-deposit',{prod_no:prod,supplier_name:sup,deposit_ref:o.dataset.ref,assign:true},function(){ closeShPop(); prodExpand(prod,sup,i); }); }; }); }
       render(''); pop.querySelector('.shpop-q').oninput=function(){render(this.value);}; pop.querySelector('.shpop-q').focus(); }); }

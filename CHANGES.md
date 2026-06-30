@@ -590,6 +590,12 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
 - When a filter dropdown has a non-default value selected (Supplier, Production, Batch, Exceptions), it's now
   highlighted **black with white text** so active filters are obvious at a glance.
 
+## v25.77 - Fix: pasted text into picker search boxes now matches (trim query)
+
+- Pasting into the Assign-shipment / Deposit / cell picker search boxes returned no results when the pasted
+  value carried a trailing newline/space (common from spreadsheets). The search query is now trimmed, so pasted
+  refs match. (Applied to all six supply-grid picker searches.)
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
