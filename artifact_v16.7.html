@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,-apple-system,sans-serif;font-size:12px;color:#1a1a1a;background:#fff}
@@ -10,6 +11,12 @@ body{font-family:system-ui,-apple-system,sans-serif;font-size:12px;color:#1a1a1a
 .pill.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
 .pill.priority.active{background:#1d4ed8;border-color:#1d4ed8;color:#fff}
 .pill.priority{font-weight:600}
+/* ── phone (≤640px): render at device width, stop whole-page side-scroll, let nav wrap ── */
+@media (max-width:640px){
+  html,body{overflow-x:hidden}
+  .wrap{padding:6px 7px}
+  #view-tabs-row{flex-wrap:wrap;gap:4px;row-gap:6px}
+}
 .catpill{font-size:9px !important;padding:2px 6px !important}
 .cat-opt:hover{background:#f5f5f5}
 .pill-lbl{font-size:11px;color:#444;white-space:nowrap;width:64px;flex-shrink:0;font-weight:600;letter-spacing:.02em}

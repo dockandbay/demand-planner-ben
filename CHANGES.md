@@ -671,6 +671,14 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
 
 - Added **Direct to Client Name** (the client) above the sales ref on the portal Direct to Client details tab.
 
+## v25.91 - Mobile (phone) — foundation pass
+
+- Added the **viewport meta tag** (the app had none, so phones rendered a shrunk desktop) + first phone
+  `@media (≤640px)` pass: app renders at device width, whole-page side-scroll stopped, top nav wraps, the supply
+  sub-nav + wide grids scroll (grids keep horizontal scroll with a sticky key column), filter dropdowns stack
+  full-width, bigger tap targets, Client/FBA form fields fit width. Foundation for the phone experience — card
+  layouts for the key grids to follow (iterating with Ben on-device).
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

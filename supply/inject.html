@@ -184,6 +184,18 @@
 #supply-root tr.batchrow td{background:#eef2ff!important;font-weight:600;border-top:1px solid #c7d2fe;text-align:left;white-space:normal}
 #supply-root tr.cat-hdr td{background:#e8e8e6;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#333;padding:3px 8px;text-align:left;border-top:2px solid #bbb}
 #supply-root .opapprove:hover{color:#15803d}
+/* ── phone (≤640px): stack the chrome, keep the wide grids horizontally scrollable, bigger tap targets ── */
+@media (max-width:640px){
+  #supply-root{padding-top:2px}
+  #supply-subnav{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;gap:4px}
+  #supply-root .bar{gap:4px 6px}
+  #supply-root .flt{width:100%!important;max-width:none!important}
+  #supply-root .tw{max-height:70vh;-webkit-overflow-scrolling:touch}
+  #supply-root .save-btn,#supply-root .pill{padding:6px 10px;font-size:11px}
+  #supply-root #po-prog>*,#supply-root #po-act>*,#supply-root #po-ctry>*{margin:3px 4px 3px 0}
+  #supply-root .cli-form{max-width:100%}
+  #supply-root .cli-val input,#supply-root .cli-val textarea,#supply-root .cli-val select{max-width:100%}
+}
 </style>
 <script src="/portal-view.js"></script>
 <script>
