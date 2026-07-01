@@ -632,6 +632,10 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
   a save handler for them (POST + update in-memory row + recolor). The notes fields were unaffected (they save
   via the `.txtin` handler). Fixes both sandbox and live.
 
+## v25.84 - Purchase Orders: light-blue action buttons
+
+- **New PO**, **Upload POs**, **CSV for Fulfil** and **Sync Cin7 dates** are now light blue (were default/dark).
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
