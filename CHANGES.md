@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.102 - Supplier portal: Production / Country / Branch filters
+
+The supplier portal's Purchase Orders tab gains three dropdown filters — **Production**,
+**Country**, **Branch** — next to the existing search + status pills. Each lists the distinct
+values across that supplier's own POs and AND-combines on top of the search/status filter
+(search still overrides status; the dropdowns always apply). A dropdown is hidden if the
+supplier has no values for it. No server or data changes (fields prod_no/country/branch already
+returned by the portal query).
+
+Deploy: no new env vars, no migrations. Files: `supply/portal-view.js`.
+
 ## v25.101 - Mobile: SHIPMENTS grid parity + filters side by side
 
 Applied the PO-grid mobile treatment to the SHIPMENTS grid: row "PLAN" button → "P"; reduced

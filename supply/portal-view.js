@@ -418,6 +418,7 @@
     var _ppData=null, PORTAL_TAB='pos', PORTAL_PO_ST=null;
     var PORTAL_SP_ESC=false, PORTAL_SP_PO='', PORTAL_SP_ACTIVE=true, PORTAL_SP_SHIPPED=false;   // Shipment Plan filters
     var PORTAL_PO_Q='';   // Purchase Orders search (overrides the status pills)
+    var PORTAL_PO_PROD='', PORTAL_PO_CTRY='', PORTAL_PO_BR='';   // Purchase Orders dropdown filters (Production / Country / Branch)
     var _ppShowAllPO=false, _ppShowAllSP=false;   // "show all" toggles for the capped PO / shipment grids
     var PORTAL_SAMP_F='open', PORTAL_SAMP_Q='';   // Samples grid filter + search (default: open)
     var _invFiles={};     // base64 of the last parsed invoice file, per PO (for the Apply step)
@@ -837,19 +838,33 @@
             if(PORTAL_PO_ST===null)PORTAL_PO_ST={};
             ordered.forEach(function(s){ if(PORTAL_PO_ST[s]===undefined)PORTAL_PO_ST[s]=(s==='PRODUCTION'||s==='SHIPPING'); });
             var pq=effQ(PORTAL_PO_Q);
+            // distinct dropdown values across this supplier's POs (blank-safe, sorted)
+            function _distinct(key){ var s={}; _ppData.pos.forEach(function(p){ var v=(p[key]==null?'':String(p[key])).trim(); if(v)s[v]=1; }); return Object.keys(s).sort(); }
+            var _prods=_distinct('prod_no'), _ctrys=_distinct('country'), _brs=_distinct('branch');
+            function _fSel(cls,cur,label,opts){ return opts.length?('<select class="fci '+cls+'" style="width:auto;max-width:150px;text-align:left"><option value="">'+label+'</option>'+opts.map(function(o){return '<option'+(o===cur?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>'):''; }
             var pillBar='<div class="bar" style="gap:5px;flex-wrap:wrap;align-items:center">'
               +'<input class="fci pp-po-q" placeholder="search PO / client…" value="'+esc(PORTAL_PO_Q)+'" style="width:170px;text-align:left">'
+              +_fSel('pp-po-prod',PORTAL_PO_PROD,'All productions',_prods)
+              +_fSel('pp-po-ctry',PORTAL_PO_CTRY,'All countries',_ctrys)
+              +_fSel('pp-po-br',PORTAL_PO_BR,'All branches',_brs)
               +'<span class="pill-lbl">Status</span>'
               +(ordered.length?ordered.map(function(s){return '<span class="pill'+(PORTAL_PO_ST[s]?' active':'')+(pq?' ':'')+'" data-st="'+esc(s)+'"'+(pq?' style="opacity:.4"':'')+'>'+esc(s)+'</span>';}).join(''):'<span class="mut tiny">no orders</span>')
               +(pq?'<span class="mut tiny">search overrides status</span>':'')+'</div>';
-            // a PO/client search OVERRIDES the status pills — find it whatever its status
-            var shown=_ppData.pos.filter(function(p){ if(pq) return nrm(p.po).indexOf(pq)>=0 || nrm(p.client).indexOf(pq)>=0 || nrm(p.shipment).indexOf(pq)>=0 || nrm(p.prod_no).indexOf(pq)>=0;
+            // a PO/client search OVERRIDES the status pills; the dropdown filters (production / country / branch) always AND on top
+            var shown=_ppData.pos.filter(function(p){
+              if(PORTAL_PO_PROD && (p.prod_no==null?'':String(p.prod_no).trim())!==PORTAL_PO_PROD) return false;
+              if(PORTAL_PO_CTRY && (p.country||'').trim()!==PORTAL_PO_CTRY) return false;
+              if(PORTAL_PO_BR && (p.branch||'').trim()!==PORTAL_PO_BR) return false;
+              if(pq) return nrm(p.po).indexOf(pq)>=0 || nrm(p.client).indexOf(pq)>=0 || nrm(p.shipment).indexOf(pq)>=0 || nrm(p.prod_no).indexOf(pq)>=0;
               return PORTAL_PO_ST[(p.status||'').toUpperCase()]; });
             var poCapped=(!_ppShowAllPO && shown.length>PP_CAP), poRender=poCapped?shown.slice(0,PP_CAP):shown;
             body.innerHTML=pillBar+'<div class="count" style="margin:2px 0 8px">'+(poCapped?poRender.length+' of ':'')+shown.length+' of '+_ppData.pos.length+' purchase orders</div>'+ppPOs(poRender,_ppData)
               +(poCapped?'<div style="margin:8px 0;text-align:center"><button class="save-btn pp-showall">Show all '+shown.length+' &darr;</button></div>':'');
             var ppsa=body.querySelector('.pp-showall'); if(ppsa)ppsa.onclick=function(){ _ppShowAllPO=true; renderPP(); };
             body.querySelectorAll('.pill[data-st]').forEach(function(p){ p.onclick=function(){ var s=p.dataset.st; PORTAL_PO_ST[s]=!PORTAL_PO_ST[s]; _ppShowAllPO=false; renderPP(); }; });
+            var _pr=body.querySelector('.pp-po-prod'); if(_pr)_pr.onchange=function(){ PORTAL_PO_PROD=this.value; _ppShowAllPO=false; renderPP(); };
+            var _ct=body.querySelector('.pp-po-ctry'); if(_ct)_ct.onchange=function(){ PORTAL_PO_CTRY=this.value; _ppShowAllPO=false; renderPP(); };
+            var _br=body.querySelector('.pp-po-br'); if(_br)_br.onchange=function(){ PORTAL_PO_BR=this.value; _ppShowAllPO=false; renderPP(); };
             var pqi=body.querySelector('.pp-po-q'); if(pqi)pqi.oninput=debounce(function(){ PORTAL_PO_Q=pqi.value; _ppShowAllPO=false; var foc=document.activeElement===pqi; renderPP(); if(foc){ var n=body.querySelector('.pp-po-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } } },350);
             body.querySelectorAll('.pp-exp').forEach(function(btn){ btn.onclick=function(){ var i=btn.dataset.i, ex=document.getElementById('pp-'+i); if(!ex)return;
               if(!ex.dataset.built){ ex.dataset.built='1'; var po=ex.dataset.po, p=_ppData.pos.filter(function(x){return x.po===po;})[0], cell=ex.children[1];
