@@ -2198,7 +2198,9 @@
     document.getElementById('ship-new').onclick=function(){ var ref=prompt('New shipment reference (usually the master PO number):'); if(ref&&ref.trim())shipPost('/api/supply/shipment-create',{shipment_ref:ref.trim()},shipReload); };
     view(); }   // Unassigned-POs moved to the PURCHASE ORDERS "Unassigned shipment" exception filter
   function shipComplete(s){ return s.status==='Complete'||s.status==='Completed'; }
-  function shipIsExc(s){ if(shipComplete(s))return false; return s.is_exception || s.over_pallets; }   // a completed shipment has no open exceptions
+  function shipShipping(s){ return s.status==='Shipping'||s.status==='Active'; }
+  // a completed shipment has no open exceptions; ">20 pallets" only matters BEFORE it ships (can't split once shipping/complete)
+  function shipIsExc(s){ if(shipComplete(s))return false; var over=s.over_pallets && !shipShipping(s); return s.is_exception || over; }
   function shipExReason(s){ var r=[]; if(s.over_pallets)r.push('Estimated cargo '+(s.pallets||0)+' pallets — over one 20-pallet container; split the shipment'); if(s.is_exception)r.push('No carrier reference — not linked to Flexport / DHL / etc.'); return r.join(' · '); }
   function shipExShort(s){ return s.over_pallets?'>20 pallets':'unlinked'; }
   function carrierSel(ep,val,dis){ var O=['Flexport','DHL','Fedex','FOB','Other'], v=val||'', has=O.indexOf(v)>=0;
@@ -2209,9 +2211,10 @@
   function modeSel(ep,m){ var col={air:['#dcfce7','#166534'],fob:['#ede9fe','#6d28d9']}[m];   // air → green, fob → purple, sea → default
     var sty=col?' style="background:'+col[0]+';color:'+col[1]+';font-weight:600;border-color:'+col[0]+'"':'';
     return '<select class="fci" data-ep="'+ep+'" data-field="mode"'+sty+'>'+['sea','air','fob'].map(function(o){return '<option'+(m===o?' selected':'')+'>'+o+'</option>';}).join('')+'</select>'; }
-  // Shipment status dropdown: Planned (amber) / Active (green) / Complete (blue). Auto-set by the server; this overrides.
-  function shipStatusSel(ep,val){ var v=(val==='Completed'?'Complete':(val||'Planned'));
-    var O=[['Planned','#92710a','#fef3c7'],['Active','#15803d','#dcfce7'],['Complete','#1d4ed8','#dbeafe']], cur=O.filter(function(o){return o[0]===v;})[0]||O[0];
+  // Shipment status dropdown: Planned (amber) / Shipping (green) / Completed (blue). Auto-set by the server; this overrides.
+  function shipStatusSel(ep,val){ var u=String(val||'').toLowerCase();
+    var v=(u==='active'?'Shipping':(u==='complete'||u==='completed')?'Completed':(val||'Planned'));   // normalise legacy Active/Complete
+    var O=[['Planned','#92710a','#fef3c7'],['Shipping','#15803d','#dcfce7'],['Completed','#1d4ed8','#dbeafe']], cur=O.filter(function(o){return o[0]===v;})[0]||O[0];
     return '<select class="fci" data-ep="'+ep+'" data-field="status" style="background:'+cur[2]+';color:'+cur[1]+';border:1px solid '+cur[2]+';font-weight:600;border-radius:4px">'+O.map(function(o){return '<option'+(o[0]===v?' selected':'')+'>'+o[0]+'</option>';}).join('')+'</select>'; }
   // Cheapest container combination for N pallets given the tiers [{cap,cost,sz}] (DP). Returns {cost, combo:{sz:n}}.
   function seaEst(tiers,pallets){ if(!tiers||!tiers.length)return null; var pal=Math.ceil(Number(pallets)||0); if(pal<=0)return {cost:0,combo:{}};
@@ -2241,7 +2244,7 @@
         +'<td class="l">'+modeSel(ep,s.mode_eff)+'</td>'
         +'<td class="l">'+(s.market?esc(s.market):'<span class="mut">—</span>')+'</td>'
         +'<td class="l">'+(s.branch?esc(s.branch):'<span class="mut">—</span>')+'</td>'
-        +'<td>'+esc(s.po_count)+'</td><td>'+esc(s.suppliers)+'</td><td'+((s.over_pallets&&!shipComplete(s))?' style="color:#dc2626;font-weight:700" title="over one 20-pallet container — split the shipment"':'')+'>'+esc(s.pallets||0)+'</td>'
+        +'<td>'+esc(s.po_count)+'</td><td>'+esc(s.suppliers)+'</td><td'+((s.over_pallets&&!shipComplete(s)&&!shipShipping(s))?' style="color:#dc2626;font-weight:700" title="over one 20-pallet container — split the shipment"':'')+'>'+esc(s.pallets||0)+'</td>'
         +'<td class="l">'+carrierSel(ep,s.carrier,s.mode_eff==='fob')+'</td>'
         +'<td class="l">'+carrierRefInput(ep,s.carrier_ref,s.mode_eff==='fob')+fxl+'</td>'
         +'<td class="l">'+shipDate(s.departure,s.departure_src)+'</td><td class="l">'+shipDate(s.landing,s.landing_src)+'</td><td class="l">'+shipDate(s.arrival,s.arrival_src)+'</td>'

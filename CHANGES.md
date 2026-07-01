@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.112 - SHIPMENTS: status vocabulary Planned / Shipping / Completed
+
+Shipment statuses are now **Planned · Shipping · Completed** — "Active" renamed to "Shipping"
+and "Complete" to "Completed" (dropdown + calculated status). Legacy stored values (Active /
+Complete) are normalised on read, so nothing needs a data migration. Also: a shipment in
+**Shipping** status no longer shows the ">20 pallets" exception (or the red pallets highlight) —
+once it's shipping you can't split it, so that warning only applies before departure (Planned).
+
+Deploy: no new env vars, no migrations. Files: `server.mjs`, `supply/inject.html`.
+
 ## v25.111 - SHIPMENTS ▸ POs aboard: assign a PO here + left-align empty message
 
 In a shipment's "POs aboard" tab you can now **add a PO directly**: a search box (dropdown of
