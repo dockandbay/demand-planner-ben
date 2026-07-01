@@ -636,6 +636,15 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
 
 - **New PO**, **Upload POs**, **CSV for Fulfil** and **Sync Cin7 dates** are now light blue (were default/dark).
 
+## v25.85 - Direct to Client approval scoped to actual direct-to-client orders
+
+- The **Direct to Client** approval workflow (admin "Direct to Client not approved" exception, CLIENT/FBA
+  approval status, Direct to Client report column, **and the portal "Direct to Client details" tab**) now only
+  applies when **both**: the PO branch is Direct to Client (incl. UK B2B JLEW / NEXT) **and** a client sales ref
+  (Sales Ref / Amazon Ref) is set. Otherwise the tab/exception don't show. Removes the mass of false
+  "not approved" exceptions caused by packing defaulting to Yes on every PO. (Dropped the `require_confirmation`
+  gate for DtC — the two branch/sales-ref conditions define it now.)
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

@@ -714,6 +714,10 @@
       pop.querySelector('.shpop-q').focus();
     });
   }
+  // Direct-to-Client details approval only applies when the PO's branch is Direct to Client (incl. UK B2B JLEW /
+  // NEXT — same set as the Direct to Client report) AND a client sales ref is set. Otherwise no approval workflow.
+  function poIsDtc(r){ var b=(r&&r.branch||'').toLowerCase();
+    return (b.indexOf('direct to client')>=0||b.indexOf('b2b jlew')>=0||b.indexOf('b2b next')>=0) && (r.sales_order_ref||'').trim()!==''; }
   // PO action-item quick filters (toggle, AND together and with the progress filter)
   var PO_ACTCOND={payment_overdue:function(r){return r.payment_overdue;},
     // unpaid payments: broader than "overdue" (which is date-past only) — a payment is OWED now, regardless
@@ -729,10 +733,8 @@
     unassigned_shipment:function(r){return r.unassigned_shipment;},
     // "Late - should have Shipped": still in PRODUCTION and the ship date has passed.
     production:function(r){ var t=new Date().toISOString().slice(0,10); return /production/i.test(r.status||'') && r.ship && r.ship<t; },
-    // Direct to Client details set but the supplier hasn't approved them (only when the production requires confirmation)
-    dtc_not_approved:function(r){ if(r.progress==='complete'||!r.require_confirmation)return false;
-      var hasPack=r.pack_polybags||r.pack_dnb_barcodes||r.pack_rfid_barcodes||r.pack_dnb_carton||r.pack_client_carton||r.pack_polybags_notes||r.pack_dnb_barcodes_notes||r.pack_rfid_barcodes_notes||r.pack_dnb_carton_notes||r.pack_client_carton_notes||r.pack_pallet_notes||r.pack_other_notes;
-      return !!hasPack && !r.dtc_accepted_at; },
+    // Direct to Client details not yet approved — only for Direct-to-Client POs with a client sales ref
+    dtc_not_approved:function(r){ return r.progress!=='complete' && poIsDtc(r) && !r.dtc_accepted_at; },
     // production requires supplier confirmation and the supplier hasn't confirmed the PO yet
     po_not_approved:function(r){ return r.progress!=='complete' && !!r.require_confirmation && !r.supplier_confirmed; }};
   var _poState=null;   // PURCHASE ORDERS filter state — persisted across edit-triggered reloads so the filter survives
@@ -1153,7 +1155,7 @@
       +cliRow('Client Specific Carton Labels',packField('pack_client_carton',r.pack_client_carton,'pack_client_carton_notes',r.pack_client_carton_notes))
       +cliRow('Pallet Packing requirements',txtIn(ep,'pack_pallet_notes',r.pack_pallet_notes,360,true))
       +cliRow('Other Packing &amp; Labelling requirements',txtIn(ep,'pack_other_notes',r.pack_other_notes,360,true))
-      +cliRow('Supplier approval',(!r.require_confirmation?'<span class="tool-badge bg-neutral">Approval not required</span> <span class="mut tiny">(this production isn&rsquo;t set to require supplier confirmation)</span>':(r.dtc_accepted_at?'<span class="tool-badge bg-green">✓ Approved</span> <span class="mut tiny">'+esc(r.dtc_accepted_at)+(r.dtc_accepted_by?' · '+esc(r.dtc_accepted_by):'')+'</span>':'<span class="tool-badge bg-amber">Awaiting supplier approval</span> <span class="mut tiny">(editing any field above re-requests approval)</span>')))
+      +cliRow('Supplier approval',(!poIsDtc(r)?'<span class="tool-badge bg-neutral">Not applicable</span> <span class="mut tiny">(approval only applies to Direct-to-Client orders with a client sales ref)</span>':(r.dtc_accepted_at?'<span class="tool-badge bg-green">✓ Approved</span> <span class="mut tiny">'+esc(r.dtc_accepted_at)+(r.dtc_accepted_by?' · '+esc(r.dtc_accepted_by):'')+'</span>':'<span class="tool-badge bg-amber">Awaiting supplier approval</span> <span class="mut tiny">(editing any field above re-requests approval)</span>')))
       +'</div>';
     var clientH='<div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start"><div style="flex:1 1 430px;min-width:360px">'
       +'<div class="sect-h">Client / FBA <span class="mut tiny">— who this PO is for; crossdock SKUs feed the supplier-portal label download</span></div>'
@@ -2487,8 +2489,7 @@
         +'<td class="l">'+esc(r.branch||'')+'</td><td class="l">'+esc(r.supplier_name||'')+'</td>'
         +'<td class="l">'+(r.sales_order_ref?esc(r.sales_order_ref):'<span class="mut">—</span>')+'</td>'
         +'<td class="l">'+(r.dispatch_order_ref?esc(r.dispatch_order_ref):'<span class="mut">—</span>')+'</td>'
-        +(function(){ var hasPack=r.pack_polybags||r.pack_dnb_barcodes||r.pack_rfid_barcodes||r.pack_dnb_carton||r.pack_client_carton||r.pack_polybags_notes||r.pack_dnb_barcodes_notes||r.pack_rfid_barcodes_notes||r.pack_dnb_carton_notes||r.pack_client_carton_notes||r.pack_pallet_notes||r.pack_other_notes;
-          return '<td class="l">'+((!hasPack||!r.require_confirmation)?'<span class="mut">—</span>':(r.dtc_accepted_at?'<span class="tool-badge bg-green" title="approved '+esc(r.dtc_accepted_at)+(r.dtc_accepted_by?' by '+esc(r.dtc_accepted_by):'')+'">✓ Approved</span>':'<span class="tool-badge bg-amber">Awaiting</span>'))+'</td>'; })()
+        +'<td class="l">'+(!poIsDtc(r)?'<span class="mut">—</span>':(r.dtc_accepted_at?'<span class="tool-badge bg-green" title="approved '+esc(r.dtc_accepted_at)+(r.dtc_accepted_by?' by '+esc(r.dtc_accepted_by):'')+'">✓ Approved</span>':'<span class="tool-badge bg-amber">Awaiting</span>'))+'</td>'
         +'<td class="l"'+((late||dlOver)?' style="color:#dc2626;font-weight:600"':'')+'>'+(r.client_deadline?fd(r.client_deadline):'<span class="mut">—</span>')+((late||dlOver)?' ⚠':'')+'</td>'
         +'<td class="l">'+(r.delivery?fd(r.delivery):'<span class="mut">—</span>')+'</td>'
         +'<td class="l">'+(/manufactur/i.test(r.branch||'')?'FOB':(r.shipment?esc(r.shipment):'<span class="mut">— none</span>'))+'</td>'
