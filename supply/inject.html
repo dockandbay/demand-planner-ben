@@ -1228,8 +1228,8 @@
   function payBadge(label,cls){ return '<span class="tool-badge '+cls+'">'+label+'</span>'; }
   // "pay »" quick-fill: when a milestone is owed + unpaid, one click fills its Amount box with the calc figure
   // and its Date paid with today, then saves both. (af/df = the amount + date field names on the PO.)
-  function payFillBtn(af,df,calc){ if(!(Number(calc)>0.009)) return '';
-    return ' <button class="pbtn pay-fill" data-af="'+af+'" data-df="'+df+'" data-calc="'+esc(calc)+'" title="record this payment — fill the amount with the calc figure and the date with today">pay &raquo;</button>'; }
+  function payFillBtn(af,df,calc,label){ if(!(Number(calc)>0.009)) return '';
+    return ' <button class="pbtn pay-fill" data-af="'+af+'" data-df="'+df+'" data-calc="'+esc(calc)+'" title="fill the amount with the calc figure and the date with today">'+(label||'pay')+' &raquo;</button>'; }
   // free-text PO field saver (no comma-stripping, unlike .payin) — saves on blur via .txtin
   function txtIn(ep,field,val,wide,area){ var w=wide||280; return area
     ? '<textarea class="fci txtin" rows="2" data-ep="'+esc(ep)+'" data-field="'+field+'" style="width:'+w+'px;resize:vertical;text-align:left">'+esc(val==null?'':val)+'</textarea>'
@@ -1363,7 +1363,9 @@
       +(function(){ var term=Number(r.start_calc)||0, drawn=Number(r.start_dep)||0, rolled=Math.round((term-drawn)*100)/100;
           var capped=(r.deposit_ref&&rolled>0.009);   // drew less than term because the ref ran short → rest in completion
           return '<td>'+money(capped?drawn:r.start_calc)+(capped?' <span class="mut tiny" style="color:#b91c1c" title="capped at the deposit ref&rsquo;s remaining availability — the rest rolls into the completion deposit">of '+money(term)+' term · '+money(rolled)+' → completion</span>':'')
-            +((startOwed && startUnpaid && !r.deposit_ref)?payFillBtn('pay_start_deposit_assigned','pay_start_deposit_date',r.start_calc):'')+'</td>'; })()
+            +((startOwed && startUnpaid && !r.deposit_ref)?payFillBtn('pay_start_deposit_assigned','pay_start_deposit_date',r.start_calc)   // direct cash
+              :(startOwed && r.deposit_ref && !(n(r.start_assigned)>0))?payFillBtn('pay_start_deposit_assigned','pay_start_deposit_date',(capped?drawn:r.start_calc),'assign')   // draw from the deposit pool
+              :'')+'</td>'; })()
       +'<td class="l">'+payIn(ep,'pay_start_deposit_assigned',r.start_assigned,false,false,(r.deposit_ref&&r.deposit_avail!=null)?('data-avail="'+esc(Math.round((Number(r.deposit_avail||0)+Number(r.start_assigned||0))*100)/100)+'"'):'')+'</td>'
       +'<td class="l">'+payIn(ep,'pay_start_deposit_date',r.start_date,true,!(n(r.start_assigned)>0))+'</td>'
       +'<td class="l">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0)+(r.deposit_avail!=null?' <span class="mut tiny">'+money(r.deposit_avail)+' avail'+(r.deposit_fx!=null&&r.deposit_fx!==''?' · FX '+Number(r.deposit_fx).toFixed(4):'')+'</span>':'')+'</td>'
@@ -1542,11 +1544,11 @@
           if(f&&poBy[po])poBy[po][f]=inp.value||null; delete cache['cashflow']; })
         .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; });
     // "pay »" quick-fill — record the calc amount + today's date for this milestone in one save, then refresh
-    document.querySelectorAll('#podet-'+i+' .pay-fill').forEach(function(b){ b.onclick=function(){ b.disabled=true; b.textContent='…';
+    document.querySelectorAll('#podet-'+i+' .pay-fill').forEach(function(b){ b.onclick=function(){ var orig=b.innerHTML; b.disabled=true; b.textContent='…';
       var today=new Date().toISOString().slice(0,10); var body={}; body[b.dataset.af]=b.dataset.calc; body[b.dataset.df]=today;
       fetch('/api/supply/po/'+encodeURIComponent(po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); })
-        .catch(function(e){ b.disabled=false; b.textContent='pay »'; alert('Failed: '+(e.message||e)); }); }; });
+        .catch(function(e){ b.disabled=false; b.innerHTML=orig; alert('Failed: '+(e.message||e)); }); }; });
     document.querySelectorAll('#podet-'+i+' .dep-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openDepPick(b.dataset.po,b,function(){ poRefetchPanel(po,i); }); }; });
     // Client/FBA file attachment upload (#12) — base64 into portal_attachments with category='client'
     document.querySelectorAll('#podet-'+i+' .cli-attach').forEach(function(inp){ inp.onchange=function(){ var f=inp.files&&inp.files[0]; if(!f)return;

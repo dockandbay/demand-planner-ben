@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.119 - PO Payments: "assign" button on the Start deposit (deposit-ref draws)
+
+The Start deposit row now shows a green **"assign »"** button (same behaviour as the "pay »"
+button) when the deposit is drawn from a deposit ref and nothing is assigned yet — one click
+fills the assigned amount (the calc figure, capped at ref availability) and the date with today.
+Direct-cash start deposits keep the existing "pay »" button. payFillBtn now takes an optional
+label; its handler restores the original label on error.
+
+Deploy: no new env vars, no migrations. Files: `supply/inject.html`.
+
 ## v25.118 - PO/shipment status dropdowns recolour instantly on change
 
 Changing a Status dropdown (PO grid or shipment grid/expand) now recolours it immediately to
