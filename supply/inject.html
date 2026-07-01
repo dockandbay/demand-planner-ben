@@ -382,7 +382,12 @@
     if(inp.classList.contains('boolsel')){ var yes=inp.value==='true'; inp.style.background=yes?'#dcfce7':'#fee2e2'; inp.style.color=yes?'#166534':'#b91c1c'; }
     var body={}; body[inp.dataset.field]=inp.value;
     fetch(inp.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
-      .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); inp.classList.remove('err'); if(!inp.classList.contains('boolsel')){ inp.classList.add('saved'); setTimeout(function(){inp.classList.remove('saved');},1200); } invalidateDerived(); })
+      .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); inp.classList.remove('err'); if(!inp.classList.contains('boolsel')){ inp.classList.add('saved'); setTimeout(function(){inp.classList.remove('saved');},1200); } invalidateDerived();
+        // keep any DUPLICATE control for the same record+field in sync in place (e.g. the shipments grid Mode/Carrier
+        // dropdown vs the same field in the expanded "Dates & tracking" panel) — no full refresh needed
+        var ep=inp.dataset.ep, fld=inp.dataset.field, val=inp.value;
+        document.querySelectorAll('#supply-root .fci[data-field="'+fld+'"]').forEach(function(o){ if(o===inp||o.dataset.ep!==ep||o.value===val)return; o.value=val;
+          if(fld==='mode'){ var col={air:['#dcfce7','#166534'],fob:['#ede9fe','#6d28d9']}[val]; o.style.background=col?col[0]:''; o.style.color=col?col[1]:''; o.style.borderColor=col?col[0]:''; } }); })
       .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; }); }
 
   function renderGeneric(key,rows){ var c=document.getElementById('supply-content');
@@ -2652,26 +2657,32 @@
   // DIRECT TO CLIENT report (#3): in-progress orders whose branch is Direct to Client / UK B2B JLEW / UK B2B NEXT.
   function renderDirectClient(rows){ var c=document.getElementById('rep-body')||document.getElementById('supply-content');
     var isDC=function(b){ b=(b||'').toLowerCase(); return b.indexOf('direct to client')>=0 || b.indexOf('b2b jlew')>=0 || b.indexOf('b2b next')>=0; };
-    var list=(rows||[]).filter(function(r){ return isDC(r.branch) && !/complete/i.test(r.status||''); })
+    var base=(rows||[]).filter(function(r){ return isDC(r.branch) && !/complete/i.test(r.status||''); })
       .sort(function(a,z){ return (a.client_deadline||'9999').localeCompare(z.client_deadline||'9999') || (a.delivery||'9999').localeCompare(z.delivery||'9999'); });
-    var h=annot('directclient')+'<div class="bar"><span class="count">'+list.length+' in-progress direct-to-client / B2B orders</span></div>';
-    if(!list.length){ c.innerHTML=h+'<div class="count">No in-progress direct-to-client orders.</div>'; return; }
-    var today=new Date().toISOString().slice(0,10);
-    h+='<div class="tw"><table style="width:max-content"><thead><tr><th class="l">PO</th><th class="l">Branch</th><th class="l">Supplier</th><th class="l">Client sales ref</th><th class="l">Dispatch order</th><th class="l">D2C details</th><th class="l">Deadline</th><th class="l">Likely arrival</th><th class="l">Shipment</th><th class="l">Crossdock refs</th></tr></thead><tbody>';
-    list.forEach(function(r){
-      var late=r.client_deadline && ((r.checkin && r.checkin>r.client_deadline) || (r.delivery && r.delivery>r.client_deadline));   // completion or arrival after the client deadline
-      var dlOver=r.client_deadline && r.client_deadline<today;
-      h+='<tr><td class="l"><button class="lnk-btn dc-po" data-po="'+esc(r.po)+'" title="open this PO’s Client/FBA tab"><b>'+esc(r.po)+'</b></button></td>'
-        +'<td class="l">'+esc(r.branch||'')+'</td><td class="l">'+esc(r.supplier_name||'')+'</td>'
-        +'<td class="l">'+(r.sales_order_ref?esc(r.sales_order_ref):'<span class="mut">—</span>')+'</td>'
-        +'<td class="l">'+(r.dispatch_order_ref?esc(r.dispatch_order_ref):'<span class="mut">—</span>')+'</td>'
-        +'<td class="l">'+(!poIsDtc(r)?'<span class="mut">—</span>':(r.dtc_accepted_at?'<span class="tool-badge bg-green" title="approved '+esc(r.dtc_accepted_at)+(r.dtc_accepted_by?' by '+esc(r.dtc_accepted_by):'')+'">✓ Approved</span>':'<span class="tool-badge bg-amber">Awaiting</span>'))+'</td>'
-        +'<td class="l"'+((late||dlOver)?' style="color:#dc2626;font-weight:600"':'')+'>'+(r.client_deadline?fd(r.client_deadline):'<span class="mut">—</span>')+((late||dlOver)?' ⚠':'')+'</td>'
-        +'<td class="l">'+(r.delivery?fd(r.delivery):'<span class="mut">—</span>')+'</td>'
-        +'<td class="l">'+(/manufactur/i.test(r.branch||'')?'FOB':(r.shipment?esc(r.shipment):'<span class="mut">— none</span>'))+'</td>'
-        +'<td class="l tiny">'+esc(r.crossdock_skus||'')+'</td></tr>'; });
-    c.innerHTML=h+'</tbody></table></div>';
-    c.querySelectorAll('.dc-po').forEach(function(b){ b.onclick=function(){ gotoPO(b.dataset.po,'client'); }; }); }
+    var today=new Date().toISOString().slice(0,10), st={q:''};
+    function dcTable(list){
+      var h='<div class="tw"><table style="width:max-content"><thead><tr><th class="l">PO</th><th class="l">Client</th><th class="l">Branch</th><th class="l">Supplier</th><th class="l">Client sales ref</th><th class="l">Dispatch order</th><th class="l">D2C details</th><th class="l">Deadline</th><th class="l">Likely arrival</th><th class="l">Shipment</th><th class="l">Crossdock refs</th></tr></thead><tbody>';
+      h+=list.map(function(r){
+        var late=r.client_deadline && ((r.checkin && r.checkin>r.client_deadline) || (r.delivery && r.delivery>r.client_deadline));
+        var dlOver=r.client_deadline && r.client_deadline<today;
+        return '<tr><td class="l"><button class="lnk-btn dc-po" data-po="'+esc(r.po)+'" title="open this PO’s Client/FBA tab"><b>'+esc(r.po)+'</b></button></td>'
+          +'<td class="l">'+(r.client?esc(r.client):'<span class="mut">—</span>')+'</td>'
+          +'<td class="l">'+esc(r.branch||'')+'</td><td class="l">'+esc(r.supplier_name||'')+'</td>'
+          +'<td class="l">'+(r.sales_order_ref?esc(r.sales_order_ref):'<span class="mut">—</span>')+'</td>'
+          +'<td class="l">'+(r.dispatch_order_ref?esc(r.dispatch_order_ref):'<span class="mut">—</span>')+'</td>'
+          +'<td class="l">'+(!poIsDtc(r)?'<span class="mut">—</span>':(r.dtc_accepted_at?'<span class="tool-badge bg-green" title="approved '+esc(r.dtc_accepted_at)+(r.dtc_accepted_by?' by '+esc(r.dtc_accepted_by):'')+'">✓ Approved</span>':'<span class="tool-badge bg-amber">Awaiting</span>'))+'</td>'
+          +'<td class="l"'+((late||dlOver)?' style="color:#dc2626;font-weight:600"':'')+'>'+(r.client_deadline?fd(r.client_deadline):'<span class="mut">—</span>')+((late||dlOver)?' ⚠':'')+'</td>'
+          +'<td class="l">'+(r.delivery?fd(r.delivery):'<span class="mut">—</span>')+'</td>'
+          +'<td class="l">'+(/manufactur/i.test(r.branch||'')?'FOB':(r.shipment?esc(r.shipment):'<span class="mut">— none</span>'))+'</td>'
+          +'<td class="l tiny">'+esc(r.crossdock_skus||'')+'</td></tr>'; }).join('');
+      return h+'</tbody></table></div>'; }
+    c.innerHTML=annot('directclient')+'<div class="bar"><input class="flt" id="dc-q" placeholder="Filter PO / client / supplier / ref…" style="background:#eff6ff;border-color:#93c5fd"><span class="count" id="dc-count" style="margin-left:auto"></span></div><div id="dc-grid"></div>';
+    function view(){ var f=filt(base, st.q);
+      document.getElementById('dc-count').textContent=f.length+(st.q?' / '+base.length:'')+' in-progress direct-to-client / B2B orders';
+      document.getElementById('dc-grid').innerHTML=f.length?dcTable(f):'<div class="count">'+(st.q?'No matches.':'No in-progress direct-to-client orders.')+'</div>';
+      document.querySelectorAll('#dc-grid .dc-po').forEach(function(b){ b.onclick=function(){ gotoPO(b.dataset.po,'client'); }; }); }
+    document.getElementById('dc-q').oninput=debounce(function(){ st.q=this.value; view(); },200);
+    view(); }
   function renderFlexport(rows){ var c=document.getElementById('rep-body')||document.getElementById('supply-content');
     var FILTERS=[['Active','Active'],['Completed','Completed'],['All','All']]; var st={f:'Active',q:''};
     c.innerHTML=annot('flexport')+'<div class="bar">'+FILTERS.map(function(f){return '<span class="pill'+(f[0]==='Active'?' active':'')+'" data-f="'+f[0]+'">'+f[1]+'</span>';}).join('')

@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.115 - Shipments Mode sync + Direct-to-Client report: Client column & search
+
+- **Mode/Carrier sync**: changing the Mode (or Carrier/ref) in a shipment's "Dates & tracking"
+  panel now instantly updates the same dropdown in the grid row above (and vice-versa), in
+  place — `bindEdits` syncs any duplicate control for the same record+field after a save
+  (Mode also re-colours). No full grid reload.
+- **SUPPLY ▸ BI & REPORTS ▸ DIRECT TO CLIENT**: added a **Client** column (client name) and a
+  **search/filter** box (matches PO / client / supplier / ref / branch / shipment).
+
+Deploy: no new env vars, no migrations. Files: `supply/inject.html`.
+
 ## v25.114 - SHIPMENTS: fix "unlinked" exception logic
 
 The "unlinked" exception previously meant "no carrier reference / no Flexport match", so a
