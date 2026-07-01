@@ -3,6 +3,23 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.95 - Mobile: fix the full-screen PO/shipment card (was blank / no tabs)
+
+The v25.93 full-screen card put `position:fixed` on the expand-row `<td>`. A fixed-positioned
+table cell renders unreliably (table-cell + fixed positioning is undefined in CSS), so the
+card's sub-tab bar ("nav 3": PAYMENTS / DATES / CLIENT/FBA / ORDER PLAN / …) and content
+weren't showing on phone.
+
+Fix: on phone, the expand cell's content is now moved into a real `<div>` overlay
+(`#mob-sheet-ov`, `position:fixed`) appended *inside* `#supply-root` (so all the panel's
+existing CSS still applies), with a sticky "← Back to list" bar; on close it moves back into
+the cell. The sub-tab strip now **wraps** so every tab is visible at once (instead of a
+hidden horizontal-scroll strip), and the PAYMENTS/CLIENT/DATES forms stack label-over-value
+with full-width inputs. Verified by rendering the card headless at phone width. Desktop is
+unchanged (the overlay is only created when the viewport is ≤640px).
+
+Deploy: no new env vars, no migrations. Files: `supply/inject.html`.
+
 ## v25.94 - Mobile: search in the top bar, DEMAND nav in the drawer, readable PO detail
 
 Three phone (≤640px) refinements, all additive; desktop untouched.
