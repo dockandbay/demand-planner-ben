@@ -662,6 +662,11 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
   responses off-screen). Scoped the tab to a compact max-width with wrapping cells, so Requirement / Required
   (Yes/No) / Notes all fit on one screen.
 
+## v25.89 - Supplier portal PO grid: "Direct" column (client name + sales ref)
+
+- Added a **Direct** column after Ship-to branch — client name on line 1, client sales ref on line 2, in small
+  tight text (same as the supply-plan PO grid).
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

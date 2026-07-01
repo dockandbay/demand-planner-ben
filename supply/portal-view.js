@@ -628,10 +628,10 @@
     function ppPOs(pos, data){ var lb=data.lb||{}, notesByPo=data.notesByPo||{}, subsByPo=data.subsByPo||{}, costsByPo=data.costsByPo||{}, supSkus=data.supSkus||[], xdByPo=data.xdByPo||{}, addByPo=data.addByPo||{};
       if(!pos.length)return '<div class="count">No purchase orders for this supplier.</div>';
       var today=new Date().toISOString().slice(0,10);
-      return '<div class="tw"><table class="pp-tbl"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l">Status</th><th class="l">Ship to country</th><th class="l">Ship to branch</th><th class="l">Production status</th><th class="l">Start</th><th class="l">Est. completion</th><th class="l">Completion date</th><th class="l">Ship</th><th class="l">Flexport</th><th class="l">Ships With</th><th style="text-align:right">Start deposit assigned</th><th style="text-align:right">Completion</th><th style="text-align:right">Balance</th><th style="text-align:right">Amount due</th><th class="l">Due</th><th class="l">Deposit ref</th></tr></thead><tbody>'
+      return '<div class="tw"><table class="pp-tbl"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l">Status</th><th class="l">Ship to country</th><th class="l">Ship to branch</th><th class="l">Direct</th><th class="l">Production status</th><th class="l">Start</th><th class="l">Est. completion</th><th class="l">Completion date</th><th class="l">Ship</th><th class="l">Flexport</th><th class="l">Ships With</th><th style="text-align:right">Start deposit assigned</th><th style="text-align:right">Completion</th><th style="text-align:right">Balance</th><th style="text-align:right">Amount due</th><th class="l">Due</th><th class="l">Deposit ref</th></tr></thead><tbody>'
         +pos.map(function(p,i){
           // lazy: the heavy expanded card (all sub-tabs) is built on first expand, not upfront (see .pp-exp handler)
-          var det='<tr id="pp-'+i+'" data-po="'+esc(p.po)+'" style="display:none"><td></td><td colspan="17"><div class="count">Loading…</div></td></tr>';
+          var det='<tr id="pp-'+i+'" data-po="'+esc(p.po)+'" style="display:none"><td></td><td colspan="18"><div class="count">Loading…</div></td></tr>';
           var sb=subsByPo[p.po]||[]; var nts=notesByPo[p.po]||[]; var unreadInt=nts.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
           var cdS=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean), xdm=xdByPo[p.po]||{};
           var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
@@ -644,6 +644,7 @@
             +'<td class="l"><b>'+esc(p.po)+'</b></td><td class="l"><span class="tool-badge '+statusBg(p.status)+'">'+esc(p.status||'')+'</span></td>'
             +'<td class="l">'+(p.country?esc(p.country):'<span class="mut">—</span>')+'</td>'
             +'<td class="l">'+(p.branch?esc(p.branch):'<span class="mut">—</span>')+'</td>'
+            +'<td class="l" style="font-size:10px;line-height:1.05;max-width:130px;white-space:normal">'+(p.client?esc(p.client):'<span class="mut">—</span>')+'<br>'+(p.sales_order_ref?'<span class="mut">'+esc(p.sales_order_ref)+'</span>':'<span class="mut">—</span>')+'</td>'
             +'<td class="l" style="min-width:150px">'+prodStatusSel(p.po, p.production_status||'')+(prodExc?'<div class="tiny" style="color:#b91c1c;font-weight:600;margin-top:2px" title="'+esc(prodExc)+'">⚠ check status</div>':'')+'</td>'
             +'<td class="l">'+dcell(p.prod_start)+'</td><td class="l">'+dcell(p.prod_end)+'</td>'
             +'<td class="l" style="min-width:140px"><input type="date" class="pp-cd-grid" data-po="'+esc(p.po)+'" value="'+esc(cdVal)+'" title="click to pick your completion date — it saves automatically" style="width:128px;cursor:pointer;text-align:left;font:inherit;font-size:12px;padding:4px 6px;border:1px solid #93c5fd;border-radius:4px;background:#eff6ff;color:#1d4ed8;box-sizing:content-box"></td>'
