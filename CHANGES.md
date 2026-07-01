@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.101 - Mobile: SHIPMENTS grid parity + filters side by side
+
+Applied the PO-grid mobile treatment to the SHIPMENTS grid: row "PLAN" button → "P"; reduced
+cell padding; long shipment refs wrap after ~15 chars; and columns 1 (P/★) + 2 (shipment ref)
+are now frozen/sticky on horizontal scroll (added on all viewports, mirroring the PO grid),
+with the frozen first column shrunk to 54px on phone so the ★ sits next to the ref.
+
+Also: the shipments page's Country + Branch filter dropdowns now sit side by side on one row on
+phone (wrapped in a `.sh-filt-row`; `display:contents` on desktop so it's unchanged there),
+instead of two full-width stacked rows.
+
+Deploy: no new env vars, no migrations. Files: `supply/inject.html`.
+
 ## v25.100 - Mobile: tighter PO grid cells + close the ★↔PO gap
 
 On phone, PURCHASE ORDERS grid: reduced cell padding (4px), and shrank the frozen first column

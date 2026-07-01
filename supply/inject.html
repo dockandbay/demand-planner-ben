@@ -111,6 +111,13 @@
 #supply-root table.po-tbl td.po-child b{font-weight:600}
 #supply-root table.po-tbl td.po-child .ind{color:#9ca3af}
 #supply-root table.po-tbl thead th:first-child,#supply-root table.po-tbl thead th:nth-child(2){z-index:3;background:#f3f3f1}
+/* freeze column 1 (PLAN) + column 2 (shipment ref) on the shipments grid too */
+#supply-root table.sh-tbl thead th:first-child,
+#supply-root table.sh-tbl tbody tr:not(.exp-row) td:first-child{position:sticky;left:0;z-index:2;background:#fff;box-sizing:border-box;width:78px;min-width:78px;max-width:78px;white-space:nowrap}
+#supply-root table.sh-tbl thead th:nth-child(2),
+#supply-root table.sh-tbl tbody tr:not(.exp-row) td:nth-child(2){position:sticky;left:78px;z-index:2;background:#fff;box-shadow:1px 0 0 #e0e0e0}
+#supply-root table.sh-tbl thead th:first-child,#supply-root table.sh-tbl thead th:nth-child(2){z-index:3;background:#f3f3f1}
+#supply-root .sh-filt-row{display:contents}   /* transparent on desktop; becomes a flex row on mobile */
 #supply-root .pay-tbl .fci.dt{width:96px}#supply-root .pay-tbl .pctin{width:38px;text-align:right}
 /* PLAN expand panel: never clip the column-1 labels (Production start, Start deposit, …) — give them room.
    width:max-content on the nested tables lets each sit at its natural size instead of being squeezed to
@@ -241,6 +248,20 @@
   #supply-root table.po-tbl tbody tr:not(.exp-row):not(.grp-row) td:nth-child(2){left:50px}
   #supply-root .po-tbl .po-numcell{padding-left:2px}
   #supply-root .po-tbl .fav-star{margin-left:2px}
+  /* SHIPMENTS grid: same treatment — "P" button, tight cells, wrap the ref after ~15 chars, frozen ref column */
+  #supply-root .po-exp[data-ref]{font-size:0;padding:5px 6px}
+  #supply-root .po-exp[data-ref]::before{content:"P";font-size:12px;font-weight:700}
+  #supply-root .sh-refcell b{display:inline-block;max-width:15ch;white-space:normal;word-break:break-all;vertical-align:top}
+  #supply-root .sh-tbl tbody td,#supply-root .sh-tbl thead th{padding:4px 4px}
+  #supply-root table.sh-tbl thead th:first-child,
+  #supply-root table.sh-tbl tbody tr:not(.exp-row) td:first-child{width:54px;min-width:54px;max-width:54px;padding-right:2px;white-space:normal}
+  #supply-root table.sh-tbl thead th:nth-child(2),
+  #supply-root table.sh-tbl tbody tr:not(.exp-row) td:nth-child(2){left:54px}
+  #supply-root .sh-tbl .sh-refcell{padding-left:2px}
+  #supply-root .sh-tbl .fav-star{margin-left:2px}
+  /* shipments filters: Country + Branch dropdowns share one row instead of stacking full-width */
+  #supply-root .sh-filt-row{display:flex;gap:6px;width:100%}
+  #supply-root .sh-filt-row .flt{width:auto!important;max-width:none!important;flex:1 1 0;min-width:0}
   #supply-root .cli-form{max-width:100%}
   /* PO detail (PAYMENTS / CLIENT / DATES) forms: stack label over value, inputs go full-width so the panel is readable */
   #supply-root .cli-row{flex-direction:column;gap:3px;align-items:stretch}
@@ -2125,8 +2146,10 @@
       +'<div class="bar" style="flex-wrap:wrap;gap:6px">'+FILTERS.map(function(f){return '<span class="pill'+(f[0]===state.f?' active':'')+'" data-f="'+f[0]+'">'+f[1]+'</span>';}).join('')
       +'<span class="pill ship-recent'+(state.recent?' active':'')+'" data-recent title="when on, Completed shows only shipments that arrived in the last 12 months (faster)">📅 Last 12m</span>'
       +'<span class="pill ship-focus'+(state.focus?' active':'')+'" data-focus title="show only starred shipments (active only — completed are hidden)">★ Focus</span>'
+      +'<span class="sh-filt-row">'
       +'<select class="flt" id="ship-ctry" style="width:auto"><option value="">All countries</option>'+ctrys.map(function(c){return '<option>'+esc(c)+'</option>';}).join('')+'</select>'
       +'<select class="flt" id="ship-br" style="width:auto"><option value="">All branches</option>'+brList.map(function(b){return '<option>'+esc(b)+'</option>';}).join('')+'</select>'
+      +'</span>'
       +'<input class="flt" id="sup-search" placeholder="Filter shipment / PO…">'
       +'<button class="tool-badge bg-blue" id="ship-new" style="cursor:pointer;border:none">+ New shipment</button>'
       +'<span class="count" id="sup-count"></span></div><div id="sup-grid"></div>';
@@ -2191,13 +2214,13 @@
     if(m==='air')return {c:Math.round((Number(s.weight_kg)||0)*(Number(s.air_rate)||15)),src:'~air'};
     var se=seaEst(s.sea_tiers, s.pallets); return se?{c:se.cost,src:'~sea'}:{c:null,src:''}; }
   function shipTable(rows){ if(!rows.length)return '<div class="count">No shipments in this filter.</div>';
-    var h='<div class="tw"><table style="width:max-content"><thead><tr><th class="l"></th><th class="l">Shipment (master)</th><th class="l">Escalated</th><th class="l">Status</th><th class="l">Mode</th><th class="l">Ship to</th><th class="l">Branch</th><th>POs</th><th>Suppliers</th><th>Pallets</th><th class="l">Carrier</th><th class="l">Carrier ref</th><th class="l">Departure</th><th class="l">Landing</th><th class="l">Arrival</th><th>Freight</th></tr></thead><tbody>';
+    var h='<div class="tw"><table class="sh-tbl" style="width:max-content"><thead><tr><th class="l"></th><th class="l">Shipment (master)</th><th class="l">Escalated</th><th class="l">Status</th><th class="l">Mode</th><th class="l">Ship to</th><th class="l">Branch</th><th>POs</th><th>Suppliers</th><th>Pallets</th><th class="l">Carrier</th><th class="l">Carrier ref</th><th class="l">Departure</th><th class="l">Landing</th><th class="l">Arrival</th><th>Freight</th></tr></thead><tbody>';
     rows.forEach(function(s,i){ shipBy[s.shipment_ref]=s; var ep='/api/supply/shipment/'+encodeURIComponent(s.shipment_ref);
       var mast=(s.master_po&&s.master_po!==s.shipment_ref)?(' <span class="mut tiny">★'+esc(s.master_po)+'</span>'):'';
       var alert=shipIsExc(s)?' <span class="tool-badge bg-red" title="'+esc(shipExReason(s))+'">⚠ '+esc(shipExShort(s))+'</span>':'';
       var fxl=s.flex_id?(' <a href="https://app.flexport.com/shipments/'+((String(s.carrier_ref||s.flex_id).match(/\d+/)||[''])[0])+'" target="_blank" rel="noopener" class="mut" title="open in Flexport" style="text-decoration:none">↗</a>'):'';
       h+='<tr><td class="l"><button class="planbtn po-exp" data-ref="'+esc(s.shipment_ref)+'" data-i="'+i+'">PLAN</button><button class="fav-star'+(s.starred?' on':'')+'" data-star-ref="'+esc(s.shipment_ref)+'" title="Focus / favourite">'+(s.starred?'★':'☆')+'</button> <span class="sh-unread" data-ref="'+esc(s.shipment_ref)+'">'+shUnreadBadge(s.unread_notes)+'</span>'+(s.pending_charges>0?' <span class="ex-badge" style="background:#16a34a" title="'+s.pending_charges+' freight charge(s) to review — open ▸ Charges">'+s.pending_charges+'</span>':'')+'</td>'
-        +'<td class="l"><b>'+esc(s.shipment_ref)+'</b>'+mast+alert+'</td>'
+        +'<td class="l sh-refcell"><b>'+esc(s.shipment_ref)+'</b>'+mast+alert+'</td>'
         +'<td class="l">'+(s.escalated?'<span class="tool-badge bg-red" title="escalated by the supplier in the portal">⚑ ESCALATED</span>':'<span class="mut">—</span>')+'</td>'
         +'<td class="l">'+shipStatusSel(ep,s.status)+'</td>'
         +'<td class="l">'+modeSel(ep,s.mode_eff)+'</td>'
