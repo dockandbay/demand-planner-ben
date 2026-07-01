@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.98 - Mobile: current section title next to the hamburger
+
+The mobile top bar now shows the active top-level view (DEMAND / SUPPLY / BUY / FBA / REPORTS)
+as a title right of the ☰ icon, so you always know where you are with the nav collapsed. Kept
+in sync via a MutationObserver on #view-tabs-row (updates however the view changes). The search
+box still appears only inside SUPPLY. Desktop unchanged.
+
+Deploy: no new env vars, no migrations. Files: `artifact_v16.7.html`.
+
 ## v25.97 - Mobile: PO card sub-nav collapses to primary tabs + "More ▾"
 
 The PO card's sub-tab strip (9 tabs) wrapped over 3 rows on phone. It now shows three primary

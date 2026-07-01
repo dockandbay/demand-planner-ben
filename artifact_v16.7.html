@@ -22,6 +22,7 @@ body{font-family:system-ui,-apple-system,sans-serif;font-size:12px;color:#1a1a1a
 }
 /* ── mobile top bar: hamburger + search (hidden on desktop) ── */
 #hz-topbar{display:none;position:fixed;top:0;left:0;right:0;z-index:5000;align-items:center;gap:8px;background:#0f172a;padding:7px 9px;box-shadow:0 1px 5px rgba(0,0,0,.3)}
+#hz-title{color:#fff;font-weight:700;font-size:14px;letter-spacing:.04em;white-space:nowrap;flex:0 0 auto}
 #hz-search{display:none;flex:1;min-width:0;font-size:15px;padding:8px 11px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#fff;font-family:inherit}
 #hz-search::placeholder{color:#94a3b8}
 #hz-burger{flex:0 0 auto;width:38px;height:34px;align-items:center;justify-content:center;background:#1e293b;color:#fff;border:none;border-radius:7px;font-size:17px;cursor:pointer;display:flex}
@@ -561,7 +562,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
 
 
 
-<div id="hz-topbar"><button id="hz-burger" aria-label="Menu">☰</button><input id="hz-search" type="search" autocomplete="off" placeholder="Search PO / shipment / order…"></div>
+<div id="hz-topbar"><button id="hz-burger" aria-label="Menu">☰</button><span id="hz-title"></span><input id="hz-search" type="search" autocomplete="off" placeholder="Search PO / shipment / order…"></div>
 <div id="hz-backdrop"></div>
 <nav id="hz-drawer" aria-label="Navigation"></nav>
 <div class="wrap" id="app">
@@ -9711,6 +9712,13 @@ document.getElementById('rf').onclick=function(){
   }
   burger.onclick=function(){ drawer.classList.contains('open')?close():open(); };
   backdrop.onclick=close;
+
+  // ── section title next to the hamburger: mirror the active top-level view (DEMAND/SUPPLY/…) ──
+  var titleEl=document.getElementById('hz-title');
+  function updateTitle(){ if(!titleEl)return; var a=document.querySelector('#view-tabs-row .view-toggle.active'); titleEl.textContent=a?a.textContent.trim():''; }
+  var vtr=document.getElementById('view-tabs-row');
+  if(vtr && window.MutationObserver){ new MutationObserver(updateTitle).observe(vtr,{subtree:true,attributes:true,attributeFilter:['class'],childList:true}); }
+  updateTitle();
 
   // ── top-bar search: proxy into the current SUPPLY grid's #sup-search (rebuilt per section) ──
   var box=document.getElementById('hz-search');
