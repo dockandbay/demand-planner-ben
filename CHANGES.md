@@ -667,6 +667,10 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
 - Added a **Direct** column after Ship-to branch — client name on line 1, client sales ref on line 2, in small
   tight text (same as the supply-plan PO grid).
 
+## v25.90 - Portal DtC tab: add "Direct to Client Name"
+
+- Added **Direct to Client Name** (the client) above the sales ref on the portal Direct to Client details tab.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

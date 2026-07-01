@@ -598,6 +598,7 @@
       var dtcNoteRow=function(lbl,notes){ return '<tr><td class="mut" style="padding:3px 14px 3px 0;text-align:left;white-space:nowrap">'+esc(lbl)+'</td><td colspan="2" style="text-align:left;padding:3px 0">'+(notes?esc(notes):'<span class="mut">—</span>')+'</td></tr>'; };
       var dtcInfoRow=function(lbl,val,pre){ return '<tr><td class="mut" style="padding:3px 16px 3px 0;text-align:left;white-space:nowrap;vertical-align:top">'+esc(lbl)+'</td><td style="text-align:left;padding:3px 0'+(pre?';white-space:pre-wrap':'')+'">'+(val?'<b>'+esc(val)+'</b>':'<span class="mut">—</span>')+'</td></tr>'; };
       var dtcInfo='<table style="font-size:12px;border-collapse:collapse;text-align:left;margin-bottom:12px"><tbody>'
+        +dtcInfoRow('Direct to Client Name',p.client)
         +dtcInfoRow('Direct to Client sales ref',p.sales_order_ref)
         +dtcInfoRow('Direct to Client PO number',p.client_po_ref)
         +dtcInfoRow('Direct to Client notes',p.client_requirements,true)
