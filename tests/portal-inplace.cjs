@@ -76,7 +76,7 @@ const q = sel => doc.querySelector(sel);
   const badgeAfter = manage2 && manage2.querySelector('.ex-badge') ? parseInt(manage2.querySelector('.ex-badge').textContent, 10) : 0;
   chk('postJSON hit /api/portal/dtc-accept', calls.some(c => c.includes('/api/portal/dtc-accept')));
   chk('Approve button removed after approving', !q('.pp-dtc-accept'));
-  chk('"✓ Approved" now shown', /✓ Approved/.test(q('#pp-body').innerHTML));
+  chk('approved state now shown', /Direct to Client details approved/.test(q('#pp-body').innerHTML));
   chk('Row stayed expanded (NO full-screen reload)', !!q('.pptab[data-pt="dtc"]'));
   chk('MANAGE badge decremented by exactly 1 (' + badgeBefore + '→' + badgeAfter + ')', badgeAfter === badgeBefore - 1);
 

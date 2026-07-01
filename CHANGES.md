@@ -650,6 +650,12 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
 - DtC approval now applies when the branch is Direct-to-Client (incl. UK B2B JLEW/NEXT) **OR** a client sales
   ref is populated (previously required both).
 
+## v25.87 - Portal: Direct to Client approve moved to top, Confirm-order style
+
+- The **Approve Direct to Client details** action now sits at the **top** of the DtC tab in the same format as
+  Confirm-order — green button in a yellow banner (turns green "✓ approved" once done), instead of a plain blue
+  button at the bottom.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

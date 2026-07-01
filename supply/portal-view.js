@@ -597,18 +597,19 @@
         +dtcInfoRow('Direct to Client PO number',p.client_po_ref)
         +dtcInfoRow('Direct to Client notes',p.client_requirements,true)
         +'</tbody></table>';
-      var dtcPackTbl='<div style="font-size:12px;margin-bottom:8px">Packing &amp; labelling requirements set by Dock &amp; Bay — please review and approve.</div>'
+      // approve bar — same format as the Confirm-order banner (green button, yellow box), at the TOP of the tab
+      var dtcApproveBar='<div style="margin:0 0 12px;padding:8px 11px;border-radius:6px;font-size:12px;'+(dtcAccepted?'background:#dcfce7;border:1px solid #86efac':'background:#fef3c7;border:1px solid #fcd34d')+'">'
+        +(dtcAccepted
+           ? '✓ <b>Direct to Client details approved</b>'+(p.dtc_accepted_at?' on '+esc(p.dtc_accepted_at):'')+(p.dtc_accepted_by?' · '+esc(p.dtc_accepted_by):'')
+           : '⏳ <b>Please approve these Direct to Client details.</b> Review the packing &amp; labelling below, then approve. &nbsp; <button class="save-btn pp-dtc-accept" data-po="'+po+'" data-v="1" style="background:#16a34a;color:#fff;border-color:#16a34a">✓ Approve Direct to Client details</button>')
+        +'</div>';
+      var dtcPackTbl='<div style="font-size:12px;margin-bottom:8px">Packing &amp; labelling requirements set by Dock &amp; Bay:</div>'
           +'<table style="font-size:12px;border-collapse:collapse;text-align:left"><thead><tr><th class="l" style="padding:2px 14px 2px 0">Requirement</th><th class="l" style="padding:2px 14px 2px 0">Required</th><th class="l">Notes</th></tr></thead><tbody>'
           +packBools.map(function(x){return dtcReqRow(x[0],x[1],x[2]);}).join('')
           +dtcNoteRow('Pallet Packing requirements',p.pack_pallet_notes)
           +dtcNoteRow('Other Packing & Labelling requirements',p.pack_other_notes)
-          +'</tbody></table>'
-          +'<div style="margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px">'
-          +(dtcAccepted
-             ? '<span style="background:#dcfce7;color:#166534;border-radius:4px;font-size:11px;font-weight:700;padding:3px 9px">✓ Approved</span> <span class="mut tiny">'+esc(p.dtc_accepted_at||'')+(p.dtc_accepted_by?' · '+esc(p.dtc_accepted_by):'')+'</span>'
-             : '<button class="save-btn pp-dtc-accept" data-po="'+po+'" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Approve Direct to Client details</button> <span class="mut tiny">confirms you can meet these packing &amp; labelling requirements</span>')
-          +'</div>';
-      var dtc='<div class="sect-h" style="margin:0 0 8px">Direct to Client details</div>'+dtcInfo
+          +'</tbody></table>';
+      var dtc=dtcApproveBar+'<div class="sect-h" style="margin:0 0 8px">Direct to Client details</div>'+dtcInfo
         +'<div class="sect-h" style="margin:6px 0 8px">Packing &amp; Labelling</div>'+dtcPackTbl;
       // ---- tabs + action badges ----
       var tabs=[['timeline','TIMELINE',timeline,unreadInt+((needConfirm&&!confirmed)?1:0)+(prodExc?1:0)],['orderplan','ORDER PLAN',skus,0],
