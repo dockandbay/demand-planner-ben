@@ -2258,7 +2258,7 @@
     if(typeof writeHash==='function')writeHash(open?['supply','shipments']:['supply','shipments',b.dataset.ref]);   // URL reflects the open shipment
     if(!open && !ex.dataset.loaded){ ex.dataset.loaded='1'; shipExpand(b.dataset.ref, i); } }; }); }
   // Expand: editable shipment header + date overrides, plus the POs aboard with master / unassign.
-  function shipExpand(ref,i){ var s=shipBy[ref]||{}, ep='/api/supply/shipment/'+encodeURIComponent(ref);
+  function shipExpand(ref,i,afterRender){ var s=shipBy[ref]||{}, ep='/api/supply/shipment/'+encodeURIComponent(ref);
     var fld=function(lbl,inp){ return '<div style="margin-right:16px"><div class="mut tiny">'+lbl+'</div>'+inp+'</div>'; };
     var locked=!!s.flex_matched;   // linked to Flexport → dates are authoritative, not overridable here
     // a date field: override input (or "from Flexport" when locked) + the FINAL effective date and its source
@@ -2344,12 +2344,14 @@
           if(msg)msg.textContent='';
           if(!po){ inp&&inp.focus(); return; }
           if(poLookupList.length && poLookupList.indexOf(po)<0){ if(msg)msg.textContent='"'+po+'" is not an active PO — pick one from the list.'; return; }
-          b.disabled=true; shipPost('/api/supply/shipment/'+encodeURIComponent(ref)+'/assign',{po:po,assign:true},shipReload); }; });
+          // silent refresh: re-render just this shipment's expand panel and stay on the POs-aboard tab (no full grid reload)
+          b.disabled=true; shipPost('/api/supply/shipment/'+encodeURIComponent(ref)+'/assign',{po:po,assign:true},function(){ invalidateDerived(); shipExpand(ref,i,function(bx){ var tb=bx.querySelector('.shtab[data-st="pos"]'); if(tb)tb.click(); }); }); }; });
         // destination override → writes to the SHIPMENT only (not the POs); refresh so grid + freight update
         box.querySelectorAll('.shipdest').forEach(function(el){ el.onchange=function(){ var body={}; body[el.dataset.field]=el.value; el.classList.add('saved');
           fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
             .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); shipReload(); })
-            .catch(function(){ el.classList.remove('saved'); el.classList.add('err'); }); }; }); })
+            .catch(function(){ el.classList.remove('saved'); el.classList.add('err'); }); }; });
+        if(typeof afterRender==='function')afterRender(box); })
       .catch(function(e){ document.getElementById('shipdet-'+i).innerHTML=head+'<span style="color:#dc2626">'+esc(e.message||e)+'</span>'; }); }
   function unassignedTable(un){ if(!un.length)return '<div class="count">None — every active PO is on a shipment 🎉</div>';
     var h='<div class="tw"><table><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th class="l">Status</th><th class="l">PROD#</th><th class="l">Assign to shipment</th><th class="l"></th></tr></thead><tbody>';

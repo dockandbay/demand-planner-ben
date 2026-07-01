@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.113 - SHIPMENTS: Add-PO refreshes silently
+
+Adding a PO from a shipment's "POs aboard" tab now refreshes just that shipment's expand panel
+in place (re-fetches the POs aboard and stays on the POs-aboard tab) instead of reloading the
+whole grid and collapsing the row. Implemented via an optional post-render callback on
+shipExpand. (The grid row's PO-count summary still refreshes on the next full load.)
+
+Deploy: no new env vars, no migrations. Files: `supply/inject.html`.
+
 ## v25.112 - SHIPMENTS: status vocabulary Planned / Shipping / Completed
 
 Shipment statuses are now **Planned · Shipping · Completed** — "Active" renamed to "Shipping"
