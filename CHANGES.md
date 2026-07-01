@@ -3,6 +3,20 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## Diviyaj deploy — SQL since early 2026-07-01
+
+Run **`diviyaj_deploy_2026-07-01_supply.sql`** on prod (schema `planner`). It bundles both of
+today's schema/data migrations (idempotent, wrapped in a transaction):
+- `089_productions_57_78_active_confirm.sql` — productions 57–78 → ACTIVE + require confirmation.
+- `090_erp_compare_ignored.sql` — new `planner.erp_compare_ignored` table for the ERP COMPARE
+  report's ignore list.
+
+All other v25.83–v25.119 changes are app code only (server.mjs + supply/inject.html +
+supply/portal-view.js) — no other schema changes. Separately, the ONE-OFF
+`po_client_master_update_2026-07-01.sql` (bulk PO client-data from CSV; not tracked in git, not a
+schema migration) still needs running once on live if it hasn't been already.
+(This consolidated file supersedes the earlier `diviyaj_deploy_2026-07-01.sql` (089 only).)
+
 ## v25.119 - PO Payments: "assign" button on the Start deposit (deposit-ref draws)
 
 The Start deposit row now shows a green **"assign »"** button (same behaviour as the "pay »"
