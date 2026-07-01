@@ -189,8 +189,14 @@
 #mob-sheet-ov .mob-back{position:sticky;top:0;z-index:3;display:block;width:100%;box-sizing:border-box;padding:13px 14px;border:none;border-bottom:1px solid #e5e7eb;background:#0f172a;color:#fff;font-weight:700;font-size:14px;text-align:left;cursor:pointer;font-family:inherit}
 #mob-sheet-ov .mob-sheet-body{padding:10px 12px 48px;box-sizing:border-box;max-width:100vw}
 /* inside the full-screen sheet the PO/shipment sub-tab strip (nav-3) WRAPS so every tab is visible */
-#mob-sheet-ov .po-subnav{flex-wrap:wrap!important;overflow:visible!important;margin:0 0 12px}
-#mob-sheet-ov .po-subnav .rtab{padding:6px 9px;font-size:11px}
+#mob-sheet-ov .po-subnav{position:relative;flex-wrap:wrap!important;overflow:visible!important;margin:0 0 12px}
+#mob-sheet-ov .po-subnav .rtab{padding:7px 11px;font-size:12px}
+#mob-sheet-ov .po-more-btn{font-weight:600;margin-left:auto}
+#mob-sheet-ov .po-more-btn.active{color:#2563eb;border-bottom-color:#3b82f6;font-weight:700}
+#mob-sheet-ov .po-more-menu{position:absolute;right:0;top:100%;margin-top:3px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 22px rgba(0,0,0,.2);z-index:10;min-width:200px;max-height:62vh;overflow:auto;padding:4px}
+#mob-sheet-ov .po-more-item{display:block;width:100%;text-align:left;background:transparent;border:none;padding:11px 12px;font-size:13px;font-family:inherit;color:#334155;cursor:pointer;border-radius:6px}
+#mob-sheet-ov .po-more-item:hover{background:#f1f5f9}
+#mob-sheet-ov .po-more-item .ex-badge{margin-left:6px}
 #mob-sheet-ov .cli-row{flex-direction:column;gap:3px;align-items:stretch}
 #mob-sheet-ov .cli-lbl{flex:0 0 auto;width:auto;padding-top:0}
 #mob-sheet-ov .cli-val{width:100%}
@@ -1105,6 +1111,27 @@
     return head+body+'</tbody></table></div>'; }
   // on phones an opened expand-row becomes a full-screen sheet with a Back bar (desktop unchanged)
   function isPhone(){ return window.matchMedia && window.matchMedia('(max-width:640px)').matches; }
+  // On phone the PO card sub-nav (many tabs) collapses to PAYMENTS · CLIENT/FBA · SHIPMENTS + a "More ▾"
+  // dropdown holding the rest, so it doesn't wrap over 3 rows. Desktop keeps the full strip.
+  function setupMobSubnav(root){ if(!root||!isPhone())return;
+    var nav=root.querySelector('.po-subnav'); if(!nav||nav._mobDone)return; nav._mobDone=1;
+    var PRIMARY={pay:1,client:1,shipments:1};
+    var tabs=Array.prototype.slice.call(nav.querySelectorAll('.potab'));
+    var overflow=tabs.filter(function(b){return !PRIMARY[b.dataset.pt];}); if(!overflow.length)return;
+    ['pay','client','shipments'].forEach(function(k){ var b=nav.querySelector('.potab[data-pt="'+k+'"]'); if(b)nav.appendChild(b); });   // primaries to the front
+    function moreLbl(b){ return (b.childNodes[0]&&b.childNodes[0].nodeValue||b.textContent||'').trim(); }
+    var overflowExc=0; overflow.forEach(function(b){ var e=b.querySelector('.ex-badge'); if(e)overflowExc+=parseInt(e.textContent,10)||0; });
+    var more=document.createElement('button'); more.type='button'; more.className='rtab po-more-btn';
+    var menu=document.createElement('div'); menu.className='po-more-menu'; menu.style.display='none';
+    function renderMore(active){ more.innerHTML=(active?moreLbl(active):'More')+' ▾'+(overflowExc>0?' <span class="ex-badge">'+overflowExc+'</span>':''); more.classList.toggle('active',!!active); }
+    overflow.forEach(function(b){ b.style.display='none';
+      b.addEventListener('click',function(){ renderMore(b); menu.style.display='none'; });   // fires for menu clicks AND deep-links
+      var it=document.createElement('button'); it.type='button'; it.className='po-more-item'; it.innerHTML=b.innerHTML;
+      it.onclick=function(e){ e.stopPropagation(); b.click(); }; menu.appendChild(it); });
+    ['pay','client','shipments'].forEach(function(k){ var b=nav.querySelector('.potab[data-pt="'+k+'"]'); if(b)b.addEventListener('click',function(){ renderMore(null); }); });
+    more.onclick=function(e){ e.stopPropagation(); var openNow=menu.style.display==='none'; menu.style.display=openNow?'block':'none';
+      if(openNow)setTimeout(function(){ document.addEventListener('click',function h(ev){ if(!menu.contains(ev.target)&&ev.target!==more){ menu.style.display='none'; document.removeEventListener('click',h); } }); },0); };
+    nav.appendChild(more); nav.appendChild(menu); renderMore(null); }
   // A fixed-positioned <td> does NOT render in Chrome/Safari (table-cell + position:fixed is undefined),
   // so instead we MOVE the expand cell's content into a body-level overlay <div> (which can be fixed),
   // then move it back on close. getElementById/querySelector on #podet-* still work wherever the node lives.
@@ -1585,7 +1612,8 @@
     var root=document.getElementById('podet-'+i);
     if(root) root.querySelectorAll('.potab').forEach(function(b){ b.onclick=function(){ var pt=b.dataset.pt;
       root.querySelectorAll('.potab').forEach(function(x){x.classList.toggle('active',x===b);});
-      root.querySelectorAll('.potab-panel').forEach(function(p){p.style.display=(p.dataset.pt===pt)?'':'none';}); }; }); }
+      root.querySelectorAll('.potab-panel').forEach(function(p){p.style.display=(p.dataset.pt===pt)?'':'none';}); }; });
+    setupMobSubnav(root); }
   function poDetailHTML(po,d,i){ function blk(t,rows){return '<div class="sect-h">'+t+' ('+rows.length+')</div>'+(rows.length?tableHTML(rows):'<div class="count">none linked</div>');}
     var p=payPanel(poBy[po],d);
     if(!p||typeof p==='string') return '<div class="count">No PO data.</div>';

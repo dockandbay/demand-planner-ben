@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.97 - Mobile: PO card sub-nav collapses to primary tabs + "More ▾"
+
+The PO card's sub-tab strip (9 tabs) wrapped over 3 rows on phone. It now shows three primary
+tabs — **PAYMENTS · CLIENT/FBA · SHIPMENTS** — plus a right-aligned **More ▾** dropdown holding
+the rest (DATES, ORDER PLAN, MASTER DATA, LANDED COSTS, TIMELINE, LINKED RECORDS). Picking an
+overflow tab shows its name on the More button; any exception counts on hidden tabs roll up
+into a badge on More so nothing actionable is buried. Desktop keeps the full strip.
+
+Implemented in `setupMobSubnav()` (called at the end of bindPay, phone-only) — a pure DOM
+transform over the existing tabs, so panel switching still uses the original handlers.
+
+Deploy: no new env vars, no migrations. Files: `supply/inject.html`.
+
 ## v25.96 - Mobile: payment-plan table scrolls sideways instead of squishing
 
 In the full-screen PO card (PAYMENTS tab), the payment-plan table was forced to 100% width
