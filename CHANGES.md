@@ -3,6 +3,22 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.116 - Silent in-place updates across PO + shipment grids (consistency sweep)
+
+Inline edits that previously re-rendered the whole grid (a visible flash / collapsing expands)
+now patch just the affected row in place:
+- **PO grid**: changing **Branch / Supplier / PROD# / Batch** (cell pickers) and assigning a
+  **Deposit** now use `patchPoRow` (re-fetch + replace that one `<tr>`) instead of a full grid
+  re-render. (Assigning a shipment already patched the row.)
+- **Shipments grid**: extracted the row into `shipRowHtml` and added `patchShipRow` — used for
+  **Add PO, Unassign, Make master, and the Ship-to / Branch destination override**. Each patches
+  the shipment's row AND refreshes its open expand in place (keeping the current sub-tab), rather
+  than `shipReload` collapsing everything.
+Creation/bulk/destructive actions (New PO, Upload, New shipment, Delete, ERP sync) still do a
+full refresh by design.
+
+Deploy: no new env vars, no migrations. Files: `supply/inject.html`.
+
 ## v25.115 - Shipments Mode sync + Direct-to-Client report: Client column & search
 
 - **Mode/Carrier sync**: changing the Mode (or Carrier/ref) in a shipment's "Dates & tracking"
