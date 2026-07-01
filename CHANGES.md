@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.96 - Mobile: payment-plan table scrolls sideways instead of squishing
+
+In the full-screen PO card (PAYMENTS tab), the payment-plan table was forced to 100% width
+while its first column has a 330px min-width, so on a phone the other 7 columns were crushed
+to a few pixels. Now wide tables inside the card (`#mob-sheet-ov .tw table`) size to their
+columns (`width:max-content;min-width:100%`) so they scroll horizontally within their
+bordered wrapper (which already has overflow:auto) — narrow tables still fill the width.
+Applies to the payment plan, order plan, landed costs and timeline tables.
+
+Deploy: no new env vars, no migrations. Files: `supply/inject.html`.
+
 ## v25.95 - Mobile: fix the full-screen PO/shipment card (was blank / no tabs)
 
 The v25.93 full-screen card put `position:fixed` on the expand-row `<td>`. A fixed-positioned

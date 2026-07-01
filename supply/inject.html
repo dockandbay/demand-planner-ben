@@ -199,6 +199,8 @@
 #mob-sheet-ov [style*="min-width:360px"],#mob-sheet-ov [style*="min-width:430px"]{min-width:0!important;flex-basis:100%!important}
 #mob-sheet-ov [style*="max-width:760px"],#mob-sheet-ov [style*="max-width:1340px"]{max-width:100%!important}
 #mob-sheet-ov .tw{max-height:none}
+/* wide tables in the card (payment plan, order plan, landed costs, timeline) size to their columns and scroll sideways instead of squishing; narrow ones still fill width */
+#mob-sheet-ov .tw table{width:max-content;min-width:100%}
 #supply-root #supply-nav-sel{display:none}   /* section dropdown: phone only */
 #supply-root .po-filt-toggle{display:none}   /* "Filters" toggle: phone only */
 /* ── phone (≤640px) UX: section dropdown, search-first, swipeable sub-tabs, collapsible filters ── */
