@@ -465,6 +465,7 @@
     else if(r.fix==='rebalance'){ fix='<button class="save-btn act-rebal" data-po="'+esc(r.target_key||r.ref)+'">⇄ Rebalance pallets</button>'; }
     else if(r.fix==='gotopo'){ fix='<button class="save-btn light act-gotopo" data-po="'+esc(r.target_key||r.ref)+'">Open PO ▸ PLAN</button>'; }
     else if(r.fix==='orderplan'){ var olbl=r.field==='suprisk'?'Open supplier-risk lines':r.field==='disc'?'Open discontinued lines':'Open unapproved partials'; fix='<button class="save-btn light act-open-op" data-k="'+esc(r.target_key||r.ref)+'" data-flt="'+esc(r.field||'partials')+'">'+olbl+'</button>'; }
+    else if(r.fix==='gotoreport'){ fix='<button class="save-btn light act-gotoreport" data-rk="'+esc(r.field||'erp-compare')+'">Open ERP Compare report ▸</button>'; }
     // Date conflict has TWO valid fixes: correct the date (above), OR advance the PO status (own line below).
     if(r.type==='Date conflict'){ fix2='<span class="tiny mut">or set status</span> <select class="fci act-postatus" data-po="'+esc(r.target_key||r.ref)+'" data-id="'+r._id+'"><option value="">—</option>'+PO_STATUSES.map(function(stx){return '<option>'+esc(stx)+'</option>';}).join('')+'</select>'; }
     // clickable ref → open the PO (expanded) or the shipment, based on the action's target
@@ -527,7 +528,8 @@
     document.querySelectorAll('#act-grid [data-goto]').forEach(function(b){b.onclick=function(){selectSection(b.dataset.goto);};});
     document.querySelectorAll('#act-grid .act-gotopo').forEach(function(b){b.onclick=function(){gotoPO(b.dataset.po);};});
     document.querySelectorAll('#act-grid .act-go').forEach(function(b){b.onclick=function(){ if(b.dataset.go==='po')gotoPO(b.dataset.k); else gotoShipment(b.dataset.k); };});
-    document.querySelectorAll('#act-grid .act-open-op').forEach(function(b){b.onclick=function(){ var f=b.dataset.flt||'partials'; var op={po:b.dataset.k}; op[f==='suprisk'?'suprisk':f==='disc'?'disc':'partials']=true; _pendingOP=op; selectSection('order-plan'); };}); }
+    document.querySelectorAll('#act-grid .act-open-op').forEach(function(b){b.onclick=function(){ var f=b.dataset.flt||'partials'; var op={po:b.dataset.k}; op[f==='suprisk'?'suprisk':f==='disc'?'disc':'partials']=true; _pendingOP=op; selectSection('order-plan'); };});
+    document.querySelectorAll('#act-grid .act-gotoreport').forEach(function(b){b.onclick=function(){selectReport(b.dataset.rk||'erp-compare');};}); }
 
   // ---- PIPELINE: PO lifecycle as a grouped timeline (stages = groups; cards ordered by next milestone) ----
   var PIPE_HC={late:'#b91c1c',soon:'#d97706',ok:'#15803d',done:'#6b7280',unknown:'#9ca3af'};
@@ -3567,20 +3569,34 @@
         +biTile('Deposits outstanding', '$'+units(d.deposits_outstanding||0), (d.deposit_pools||0)+' active pool'+(Number(d.deposit_pools)===1?'':'s'))
       +'</div>'; }
   // ERP COMPARE — open/draft ERP POs missing from the planner (supplier must be a planner product supplier)
-  function renderErpCompare(d){ var b=biBody(); d=d||{}; var rows=d.rows||[];
+  function renderErpCompare(d){ var b=biBody(); d=d||{}; var all=d.rows||[];
+    var active=all.filter(function(r){return !r.ignored;}), ignored=all.filter(function(r){return r.ignored;});
     var head='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:#0f172a">ERP compare — open ERP POs missing from the planner</div>'
-      +'<div class="mut tiny" style="margin-bottom:12px">Open/draft purchase orders in the ERP (Cin7) that are <b>not</b> in your PURCHASE ORDERS list — limited to POs whose supplier is a supplier in the planner (freight / internal / test vendors like Flexport &amp; HMRC are excluded). <b>'+rows.length+'</b> found.</div>';
-    if(!rows.length){ b.innerHTML=head+'<div class="count">Nothing to reconcile — every open ERP PO for your suppliers is already in the planner. ✓</div>'; return; }
-    var body=rows.map(function(r){ return '<tr>'
-      +'<td class="l"><b>'+esc(r.po)+'</b></td>'
-      +'<td class="l">'+esc(r.erp_po_id||'—')+'</td>'
-      +'<td class="l">'+esc(r.supplier_name||'—')+'</td>'
-      +'<td class="l"><span class="tool-badge bg-amber">'+esc(r.status||'—')+'</span></td>'
-      +'<td class="l">'+esc(r.order_date||'—')+'</td>'
-      +'<td>'+((r.total_value!=null&&r.total_value!=='')?esc((r.currency?r.currency+' ':'')+r.total_value):'<span class="mut">—</span>')+'</td>'
-      +'<td class="l">'+esc(r.final_delivery_date||'—')+'</td>'
-      +'<td class="l"><span class="mut tiny">'+esc(r.synced_at||'—')+'</span></td></tr>'; }).join('');
-    b.innerHTML=head+'<div class="tw"><table><thead><tr><th class="l">PO</th><th class="l">ERP id</th><th class="l">Supplier</th><th class="l">ERP status</th><th class="l">Order date</th><th>Value</th><th class="l">ERP delivery</th><th class="l">Synced</th></tr></thead><tbody>'+body+'</tbody></table></div>'; }
+      +'<div class="mut tiny" style="margin-bottom:12px">Open/draft purchase orders in the ERP (Cin7) that are <b>not</b> in your PURCHASE ORDERS list — limited to POs whose supplier is a supplier in the planner (freight / internal / test vendors like Flexport &amp; HMRC are excluded). <b>'+active.length+'</b> to review'+(ignored.length?' · '+ignored.length+' ignored':'')+'.</div>';
+    function tbl(list,isIgnored){
+      var body=list.map(function(r){ return '<tr'+(isIgnored?' style="opacity:.55"':'')+'>'
+        +'<td class="l"><b>'+esc(r.po)+'</b></td>'
+        +'<td class="l">'+esc(r.erp_po_id||'—')+'</td>'
+        +'<td class="l">'+esc(r.supplier_name||'—')+'</td>'
+        +'<td class="l">'+esc(r.branch||'—')+'</td>'
+        +'<td class="l"><span class="tool-badge '+(isIgnored?'bg-neutral':'bg-amber')+'">'+esc(r.status||'—')+'</span></td>'
+        +'<td class="l">'+esc(r.order_date||'—')+'</td>'
+        +'<td>'+((r.total_value!=null&&r.total_value!=='')?esc((r.currency?r.currency+' ':'')+r.total_value):'<span class="mut">—</span>')+'</td>'
+        +'<td class="l">'+esc(r.final_delivery_date||'—')+'</td>'
+        +'<td class="l"><span class="mut tiny">'+esc(r.synced_at||'—')+'</span></td>'
+        +'<td class="l">'+(isIgnored
+            ? '<button class="save-btn light erpc-unignore" data-po="'+esc(r.po)+'">↩ Un-ignore</button>'
+            : '<button class="save-btn light erpc-ignore" data-po="'+esc(r.po)+'">Ignore</button>')+'</td></tr>'; }).join('');
+      return '<div class="tw"><table><thead><tr><th class="l">PO</th><th class="l">ERP id</th><th class="l">Supplier</th><th class="l">Branch</th><th class="l">ERP status</th><th class="l">Order date</th><th>Value</th><th class="l">ERP delivery</th><th class="l">Synced</th><th class="l"></th></tr></thead><tbody>'+body+'</tbody></table></div>';
+    }
+    var htmlOut=head;
+    if(!active.length) htmlOut+='<div class="count">Nothing to reconcile — every open ERP PO for your suppliers is already in the planner (or ignored). ✓</div>';
+    else htmlOut+=tbl(active,false);
+    if(ignored.length) htmlOut+='<div class="sect-h" style="margin-top:16px">Ignored ('+ignored.length+') <span class="mut tiny">— excluded from the actions count; un-ignore to bring back</span></div>'+tbl(ignored,true);
+    b.innerHTML=htmlOut;
+    function setIgnore(po,ig){ fetch('/api/supply/bi/erp-compare/ignore',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,ignore:ig})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} selectReport('erp-compare'); }).catch(function(){alert('Could not update');}); }
+    b.querySelectorAll('.erpc-ignore').forEach(function(x){ x.onclick=function(){ setIgnore(x.dataset.po,true); }; });
+    b.querySelectorAll('.erpc-unignore').forEach(function(x){ x.onclick=function(){ setIgnore(x.dataset.po,false); }; }); }
   // URGENT BUY — SKU × market at stock-out risk (critical/soon) from the live cover projection
   function renderUrgentBuy(pj){ var b=biBody(); pj=pj||{}; var rows=pj.rows||[], cc=pj.counts||{};
     function chip(label,n,bg,fg){ return '<span class="tool-badge" style="background:'+bg+';color:'+fg+';font-size:11px;padding:3px 9px">'+label+' '+(n||0)+'</span>'; }

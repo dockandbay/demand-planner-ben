@@ -3,6 +3,22 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.110 - ERP COMPARE: Branch column, open-action item, ignore capability
+
+Three additions to the ERP COMPARE report:
+- **Branch column** — the ERP mirror has no branch field, so it's derived best-effort from the
+  PO reference (region token + FBA/Crossdock/B2B/Direct marker), e.g. "UK Crossdock"; shows "—"
+  when nothing parses. (To show the real branch, n8n would need to sync it into erp_purchase_orders.)
+- **Open-actions item** — when there are open ERP POs missing from the planner, a single
+  medium (amber) action appears in SUPPLY ▸ Actions: "There are N POs open in the ERP but not in
+  the planner — review the ERP Compare report", with a button that opens the report.
+- **Ignore** — each row has an Ignore button; ignored POs drop out of the active list and the
+  actions count and move to an "Ignored" section with an Un-ignore button. Persisted in the new
+  `planner.erp_compare_ignored` table. New endpoint `POST /api/supply/bi/erp-compare/ignore`.
+
+Deploy: **migration `090_erp_compare_ignored.sql` must be run** (creates planner.erp_compare_ignored).
+No new env vars. Files: `server.mjs`, `supply/inject.html`, `migrations/090_erp_compare_ignored.sql`.
+
 ## v25.109 - SHIPMENTS: auto-complete when all linked POs are complete
 
 A shipment whose linked POs are ALL complete now shows status **Complete** automatically —

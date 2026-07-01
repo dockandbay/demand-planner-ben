@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.109';
+const APP_VERSION = 'v25.110';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1951,6 +1951,12 @@ app.get('/api/supply/:section', async (req, res) => {
           ) _a ORDER BY CASE severity WHEN 'high' THEN 0 WHEN 'amber' THEN 1 ELSE 2 END, type LIMIT 400`);
         try { (await expediteActions()).forEach(a => arows.push(a)); } catch (e) { /* recommendation layer is best-effort */ }
         try { (await submissionActions()).forEach(a => arows.push(a)); } catch (e) { /* portal-submission layer is best-effort */ }
+        // ERP COMPARE — a single medium-priority action when there are open ERP POs missing from the planner
+        try { const ec = await erpCompareActiveCount();
+          if (ec > 0) arows.push({ severity: 'amber', type: 'ERP POs not in planner',
+            ref: ec + ' PO' + (ec > 1 ? 's' : ''),
+            detail: 'There ' + (ec > 1 ? 'are ' : 'is ') + ec + ' PO' + (ec > 1 ? 's' : '') + ' open in the ERP but not in the planner — review the ERP Compare report',
+            fix: 'gotoreport', target: '', field: 'erp-compare', target_key: 'erp-compare' }); } catch (e) { /* best-effort */ }
         const dtoday = (await pool.query(`SELECT to_char(current_date,'YYYY-MM-DD') d`)).rows[0].d;
         let astate = {};
         try { (await pool.query(`SELECT action_key, status, to_char(snooze_until,'YYYY-MM-DD') snooze_until FROM planner.supply_action_state`))
@@ -5002,23 +5008,48 @@ app.get('/api/supply/bi/consolidations', async (req, res) => {
 // ERP COMPARE — open/draft ERP POs that are NOT in the planner's purchase_orders, limited to POs whose
 // supplier matches a product supplier in the planner (planner.suppliers, kind='supplier') so freight/
 // internal/test vendors (Flexport, HMRC, print shops, …) are excluded.
+const ERP_COMPARE_SQL = `
+  SELECT e.po, coalesce(e.erp_po_id,'') erp_po_id, coalesce(e.supplier_name,'') supplier_name,
+         coalesce(e.status,'') status, to_char(e.order_date,'YYYY-MM-DD') order_date,
+         e.total_value, coalesce(e.currency,'') currency,
+         to_char(e.final_delivery_date,'YYYY-MM-DD') final_delivery_date,
+         to_char(e.synced_at,'YYYY-MM-DD HH24:MI') synced_at,
+         (i.po IS NOT NULL) ignored,
+         -- branch: the ERP mirror has no branch field, so derive a best-effort label from the PO reference
+         -- (region token + FBA/Crossdock/B2B/Direct marker). Shown as '—' when nothing parses.
+         NULLIF(trim(
+           coalesce(substring(upper(e.po) from 'PO-[0-9]+([A-Z]{2})'),'') || ' ' ||
+           CASE WHEN e.po ~* 'crossdock' THEN 'Crossdock' WHEN e.po ~* 'fba' THEN 'FBA'
+                WHEN e.po ~* 'b2b' THEN 'B2B' WHEN e.po ~* 'direct' THEN 'Direct' ELSE '' END
+         ),'') branch
+  FROM planner.erp_purchase_orders e
+  LEFT JOIN planner.purchase_orders p ON p.po = e.po
+  LEFT JOIN planner.erp_compare_ignored i ON i.po = e.po
+  WHERE p.po IS NULL                                                    -- not in the planner's PO list
+    AND coalesce(e.status,'') !~* '(complete|cancel|void|closed|received)'   -- open / draft only
+    AND EXISTS (SELECT 1 FROM planner.suppliers s
+                WHERE lower(trim(s.name)) = lower(trim(e.supplier_name))
+                  AND coalesce(s.kind,'supplier') = 'supplier')         -- product supplier in the planner
+  ORDER BY (i.po IS NOT NULL), e.supplier_name NULLS LAST, e.po`;
+// active (non-ignored) count — drives the open-actions item
+async function erpCompareActiveCount() {
+  try { return (await pool.query(`SELECT count(*)::int c FROM (${ERP_COMPARE_SQL}) z WHERE NOT z.ignored`)).rows[0].c; }
+  catch (e) { return 0; }
+}
 app.get('/api/supply/bi/erp-compare', async (req, res) => {
   try {
-    const rows = (await pool.query(`
-      SELECT e.po, coalesce(e.erp_po_id,'') erp_po_id, coalesce(e.supplier_name,'') supplier_name,
-             coalesce(e.status,'') status, to_char(e.order_date,'YYYY-MM-DD') order_date,
-             e.total_value, coalesce(e.currency,'') currency,
-             to_char(e.final_delivery_date,'YYYY-MM-DD') final_delivery_date,
-             to_char(e.synced_at,'YYYY-MM-DD HH24:MI') synced_at
-      FROM planner.erp_purchase_orders e
-      LEFT JOIN planner.purchase_orders p ON p.po = e.po
-      WHERE p.po IS NULL                                                    -- not in the planner's PO list
-        AND coalesce(e.status,'') !~* '(complete|cancel|void|closed|received)'   -- open / draft only
-        AND EXISTS (SELECT 1 FROM planner.suppliers s
-                    WHERE lower(trim(s.name)) = lower(trim(e.supplier_name))
-                      AND coalesce(s.kind,'supplier') = 'supplier')         -- product supplier in the planner
-      ORDER BY e.supplier_name NULLS LAST, e.po`)).rows;
-    res.json({ ok: true, count: rows.length, rows });
+    const rows = (await pool.query(ERP_COMPARE_SQL)).rows;
+    res.json({ ok: true, count: rows.filter(r => !r.ignored).length, rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Ignore / un-ignore an ERP PO on the compare report.
+app.post('/api/supply/bi/erp-compare/ignore', async (req, res) => {
+  const b = req.body || {}; if (!b.po) return res.status(400).json({ error: 'po required' });
+  try {
+    if (b.ignore === false) await pool.query(`DELETE FROM planner.erp_compare_ignored WHERE po=$1`, [b.po]);
+    else await pool.query(`INSERT INTO planner.erp_compare_ignored (po, ignored_by) VALUES ($1,$2)
+      ON CONFLICT (po) DO UPDATE SET ignored_by=excluded.ignored_by, ignored_at=now()`, [b.po, b.by || 'admin']);
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Apply a consolidation: re-point the merge shipment's POs onto the keep shipment, then mark applied.
