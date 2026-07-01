@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.103';
+const APP_VERSION = 'v25.104';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -780,7 +780,7 @@ app.get('/api/supply/asset/:name', (req, res) => {
 // scoped to a supplier via supplier_multiple_all (?prod=&supplier=). MASTER variants only, barcode present.
 app.get('/api/supply/label-data', async (req, res) => {
   try {
-    const { po, prod, supplier, skus } = req.query;
+    const { po, prod, supplier, skus, batch } = req.query;
     let where, params;
     if (skus) { where = 'sl.sku = ANY($1)'; params = [String(skus).split(',').map(s => s.trim()).filter(Boolean)]; }
     else if (po) { where = 'sl.sku IN (SELECT sku FROM planner.purchase_order_lines WHERE po=$1)'; params = [po]; }
@@ -788,7 +788,11 @@ app.get('/api/supply/label-data', async (req, res) => {
       where = "sl.sku IN (SELECT DISTINCT l.sku FROM planner.purchase_order_lines l JOIN planner.purchase_orders po ON po.po=l.po WHERE po.prod_no=$1)";
       params = [prod];
       if (supplier) { where += " AND coalesce(p.supplier_multiple_all,'') ILIKE '%'||$2||'%'"; params.push(supplier); }
-    } else return res.status(400).json({ error: 'po or prod required' });
+    } else if (batch) {
+      where = "sl.sku IN (SELECT DISTINCT l.sku FROM planner.purchase_order_lines l JOIN planner.purchase_orders po ON po.po=l.po WHERE po.batch_id=$1)";
+      params = [batch];
+      if (supplier) { where += " AND coalesce(p.supplier_multiple_all,'') ILIKE '%'||$2||'%'"; params.push(supplier); }
+    } else return res.status(400).json({ error: 'po, prod or batch required' });
     const rows = (await pool.query(`
       SELECT sl.sku, sl.barcode_sku_name, sl.barcode_carton_name, sl.barcode_inner_name,
         sl.size, coalesce(p.size_short, sl.size_short, '') size_short, sl.category, sl.carton_qty,

@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.104 - Fix: batch barcode download in admin "Preview as supplier"
+
+The Barcodes-tab batch download errored with "po or prod required" when used via the admin
+"Preview as supplier" (that path calls `/api/supply/label-data`, which v25.103 hadn't taught
+about batches — only the live `/api/portal/label-data` got it). Added the same
+`?batch=<id>&supplier=<name>` mode to `/api/supply/label-data`. Verified against live data.
+
+Deploy: no new env vars, no migrations. Files: `server.mjs`.
+
 ## v25.103 - Supplier portal: Barcodes tab (by batch)
 
 New **Barcodes** tab on the supplier portal. The supplier picks a **batch**; two buttons then
