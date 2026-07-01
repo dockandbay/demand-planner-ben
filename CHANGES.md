@@ -679,6 +679,17 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
   full-width, bigger tap targets, Client/FBA form fields fit width. Foundation for the phone experience — card
   layouts for the key grids to follow (iterating with Ben on-device).
 
+## v25.92 - Mobile UX: dropdown section nav, search-first, collapsible filters, swipeable sub-tabs
+
+- **Section navigation** on phone is now a single **dropdown** (SECTIONS) instead of a long horizontal tab row —
+  kept in sync with the desktop tabs; Samples unread count shows as "(n)".
+- **Search is the hero control** on mobile — moved to the top, full-width and enlarged (the main mobile task is
+  finding one PO / shipment / order-plan).
+- **Secondary filters** (Ship-to/Supplier/Production/Batch + Action/ERP/Exceptions/Group) are hidden behind a
+  **"⚙ Filters"** toggle on phone, so search + the grid aren't buried.
+- **Sub-tab strips** (reports / productions / config / PLAN panel) swipe horizontally instead of wrapping.
+- Desktop unchanged (tabs + inline filters as before).
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

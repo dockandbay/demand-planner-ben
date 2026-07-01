@@ -184,12 +184,23 @@
 #supply-root tr.batchrow td{background:#eef2ff!important;font-weight:600;border-top:1px solid #c7d2fe;text-align:left;white-space:normal}
 #supply-root tr.cat-hdr td{background:#e8e8e6;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#333;padding:3px 8px;text-align:left;border-top:2px solid #bbb}
 #supply-root .opapprove:hover{color:#15803d}
-/* ── phone (≤640px): stack the chrome, keep the wide grids horizontally scrollable, bigger tap targets ── */
+#supply-root #supply-nav-sel{display:none}   /* section dropdown: phone only */
+#supply-root .po-filt-toggle{display:none}   /* "Filters" toggle: phone only */
+/* ── phone (≤640px) UX: section dropdown, search-first, swipeable sub-tabs, collapsible filters ── */
 @media (max-width:640px){
   #supply-root{padding-top:2px}
-  #supply-subnav{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;gap:4px}
-  #supply-root .bar{gap:4px 6px}
+  /* section nav → a single dropdown (no more sideways tab-hunting) */
+  #supply-subnav{display:none}
+  #supply-root #supply-nav-sel{display:block;width:100%;font-size:14px;font-weight:700;padding:9px 10px;border:1px solid #0f172a;border-radius:8px;background:#0f172a;color:#fff;margin:2px 0 10px}
+  /* SEARCH is the hero control on mobile — first, full-width, prominent */
+  #supply-root #sup-search{order:-1;width:100%!important;max-width:none!important;font-size:15px;padding:9px 11px}
+  #supply-root .bar{gap:5px 6px}
   #supply-root .flt{width:100%!important;max-width:none!important}
+  /* secondary filters tucked behind the "Filters" toggle */
+  #supply-root .po-filt-toggle{display:inline-block}
+  #supply-content:not(.filters-open) #po-ctry,#supply-content:not(.filters-open) #po-act{display:none}
+  /* sub-tab strips swipe horizontally rather than wrapping */
+  #rep-subnav,#supply-root #prod-subtabs,#supply-root #config-subs,#supply-root .po-subnav{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch}
   #supply-root .tw{max-height:70vh;-webkit-overflow-scrolling:touch}
   #supply-root .save-btn,#supply-root .pill{padding:6px 10px;font-size:11px}
   #supply-root #po-prog>*,#supply-root #po-act>*,#supply-root #po-ctry>*{margin:3px 4px 3px 0}
@@ -786,6 +797,7 @@
       +'<span class="pill po-recent'+(state.recent?' active':'')+'" data-recent title="when on, Completed shows only POs completed in the last 12 months (faster)">📅 Last 12m</span>'
       +'<span class="pill po-focus'+(state.focus?' active':'')+'" data-focus title="show only starred POs (active only — completed are hidden)">★ Focus</span>'
       +'<input class="flt" id="sup-search" placeholder="Filter PO / supplier…" value="'+esc(state.q||'')+'" style="background:#eff6ff;border-color:#93c5fd"><span class="count" id="sup-count"></span>'
+      +'<button class="save-btn po-filt-toggle" id="po-filt-toggle">⚙ Filters</button>'
       +(function(){ var lb='background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;';   // light-blue PO action buttons
         return '<span style="margin-left:auto"><button class="save-btn" id="po-new" style="'+lb+'margin-right:8px">+ New PO</button><button class="save-btn" id="po-upload" style="'+lb+'margin-right:8px">⬆ Upload POs</button><button class="save-btn" id="po-csv" style="'+lb+'margin-right:8px">⬇ CSV for Fulfil</button><button class="save-btn" id="po-cin7-dates" style="'+lb+'" title="push the planner completion date to Cin7 EstimatedDeliveryDate for every ACTIVE PO whose date differs from Cin7 — complete POs are skipped (live write)">📅 Sync Cin7 dates</button></span></div>'; })()
       +'<div class="bar" id="po-ctry"><span class="pill-lbl">Ship to</span>'+CTRYP.map(function(a){return '<span class="pill'+(state.ctry[a[0]]?' active':'')+'" data-c="'+a[0]+'">'+(CFLAG[a[0]]?CFLAG[a[0]]+' ':'')+a[1]+' ('+ctryCount(a[0])+')</span>';}).join('')
@@ -887,6 +899,7 @@
     var pprod=document.getElementById('po-prod'); if(pprod)pprod.onchange=function(){state.prod=this.value;selHi(this,!!this.value);view();};
     var pbatch=document.getElementById('po-batch'); if(pbatch)pbatch.onchange=function(){state.batch=this.value;selHi(this,!!this.value);view();};
     document.getElementById('sup-search').oninput=debounce(function(){state.q=this.value;_poShowAll=false;view();},350);
+    var _ft=document.getElementById('po-filt-toggle'); if(_ft)_ft.onclick=function(){ var sc=document.getElementById('supply-content'); var on=sc.classList.toggle('filters-open'); this.textContent=on?'⚙ Filters ▴':'⚙ Filters'; };
     document.getElementById('po-csv').onclick=function(){var q=effQ(state.q);csv(q?filt(rows,q):cur(),'purchase_orders.csv',PO_CSV_LABELS);};
     document.getElementById('po-new').onclick=function(){ var po=prompt('New PO number:'); if(!po||!po.trim())return;
       var sup=prompt('Supplier (optional — exact name; set later in the row otherwise):')||'';
@@ -3384,6 +3397,7 @@
 
   function selectReport(rk){ current='reports'; reportTab=rk; syncHash();
     document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k==='reports');});
+    var _ns=document.getElementById('supply-nav-sel'); if(_ns)_ns.value='reports';
     var c=document.getElementById('supply-content');
     c.innerHTML='<div id="rep-subnav">'+REPORT_SECTIONS.map(function(s){return '<span class="rtab'+(s[0]===rk?' active':'')+'" data-rk="'+s[0]+'">'+s[1]+'</span>';}).join('')+'</div><div id="rep-body"><div class="count">Loading…</div></div>';
     c.querySelectorAll('#rep-subnav .rtab').forEach(function(p){p.onclick=function(){selectReport(p.dataset.rk);};});
@@ -3733,6 +3747,7 @@
     if(REPORT_KEYS.indexOf(key)>=0)return selectReport(key);
     current=key; syncHash();
     document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k===key);});
+    var _ns=document.getElementById('supply-nav-sel'); if(_ns&&_ns.value!==key)_ns.value=key;   // keep the phone section dropdown in sync
     var c=document.getElementById('supply-content'); c.innerHTML='<div class="count">Loading…</div>';
     var done=function(d){ cache[key]=d;
       if(key==='actions')return renderActions(d);
@@ -3767,12 +3782,16 @@
   function ensureRoot(){ if(document.getElementById('supply-root'))return;
     var app=document.getElementById('app')||document.body; if(!app)return;
     var rootEl=document.createElement('div'); rootEl.id='supply-root';
-    rootEl.innerHTML='<div id="supply-subnav">'+SECTIONS.map(function(s){return '<button class="stab" data-k="'+s[0]+'">'+s[1]+'</button>';}).join('')+'<span class="ver">HORIZON __APP_VERSION__</span></div><div id="supply-content"></div>';
+    rootEl.innerHTML='<div id="supply-subnav">'+SECTIONS.map(function(s){return '<button class="stab" data-k="'+s[0]+'">'+s[1]+'</button>';}).join('')+'<span class="ver">HORIZON __APP_VERSION__</span></div>'
+      +'<select id="supply-nav-sel" aria-label="Section">'+SECTIONS.map(function(s){return '<option value="'+s[0]+'">'+s[1]+'</option>';}).join('')+'</select>'
+      +'<div id="supply-content"></div>';
     app.appendChild(rootEl);
     rootEl.querySelectorAll('.stab').forEach(function(b){b.onclick=function(){selectSection(b.dataset.k);};});
+    var _navSel=rootEl.querySelector('#supply-nav-sel'); if(_navSel)_navSel.onchange=function(){selectSection(this.value);};
     fetch('/api/supply/samples').then(function(r){return r.json();}).then(function(d){ if(Array.isArray(d)){ cache['samples']=d; samplesNavBadge(d); } }).catch(function(){}); }
   function samplesNavBadge(rows){ var n=(rows||[]).reduce(function(a,r){return a+(r.unread_notes||0);},0);   // total unread supplier notes
-    var btn=document.querySelector('#supply-subnav .stab[data-k="samples"]'); if(btn)btn.innerHTML='SAMPLES'+(n>0?' <span class="ex-badge">'+n+'</span>':''); }
+    var btn=document.querySelector('#supply-subnav .stab[data-k="samples"]'); if(btn)btn.innerHTML='SAMPLES'+(n>0?' <span class="ex-badge">'+n+'</span>':'');
+    var opt=document.querySelector('#supply-nav-sel option[value="samples"]'); if(opt)opt.textContent='SAMPLES'+(n>0?' ('+n+')':''); }
   function ensureNavButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('supply-btn'))return;
     var navwrap=row.parentElement; if(navwrap&&!navwrap.id)navwrap.id='dab-navwrap';
     var btn=document.createElement('button'); btn.id='supply-btn'; btn.className='view-toggle supply-toggle'; btn.textContent='SUPPLY';
