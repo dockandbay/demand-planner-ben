@@ -379,16 +379,21 @@
   // supplier production-confidence status (writes to /prod-status, which stamps the confirmation time)
   function prodStatusSel(ep,val){ return '<select class="fci" data-ep="'+esc(ep)+'" data-field="production_status"><option value=""'+(val?'':' selected')+'>—</option>'
     +PROD_STATUS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'; }
+  // recolour a status/mode <select> to match its value immediately (colours normally only set at render time)
+  function recolorFci(el,fld,val){
+    if(fld==='mode'){ var col={air:['#dcfce7','#166534'],fob:['#ede9fe','#6d28d9']}[val]; el.style.background=col?col[0]:''; el.style.color=col?col[1]:''; el.style.borderColor=col?col[0]:''; return; }
+    if(fld==='status'){ var SHIP_PAL={Planned:['#fef3c7','#92710a'],Shipping:['#dcfce7','#15803d'],Completed:['#dbeafe','#1d4ed8']};   // shipment palette (title-case) ▸ PO palette (upper)
+      var bg=SHIP_PAL[val]||PO_STATUS_BG[String(val||'').toUpperCase()]; if(bg){ el.style.background=bg[0]; el.style.color=bg[1]; el.style.borderColor=bg[0]; } } }
   function bindEdits(){ document.querySelectorAll('#supply-root .fci[data-ep]').forEach(function(inp){ if(inp._b)return; inp._b=1; inp.onchange=function(){
     if(inp.classList.contains('boolsel')){ var yes=inp.value==='true'; inp.style.background=yes?'#dcfce7':'#fee2e2'; inp.style.color=yes?'#166534':'#b91c1c'; }
+    recolorFci(inp, inp.dataset.field, inp.value);   // recolour the changed control right away (e.g. status → green)
     var body={}; body[inp.dataset.field]=inp.value;
     fetch(inp.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
       .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); inp.classList.remove('err'); if(!inp.classList.contains('boolsel')){ inp.classList.add('saved'); setTimeout(function(){inp.classList.remove('saved');},1200); } invalidateDerived();
         // keep any DUPLICATE control for the same record+field in sync in place (e.g. the shipments grid Mode/Carrier
         // dropdown vs the same field in the expanded "Dates & tracking" panel) — no full refresh needed
         var ep=inp.dataset.ep, fld=inp.dataset.field, val=inp.value;
-        document.querySelectorAll('#supply-root .fci[data-field="'+fld+'"]').forEach(function(o){ if(o===inp||o.dataset.ep!==ep||o.value===val)return; o.value=val;
-          if(fld==='mode'){ var col={air:['#dcfce7','#166534'],fob:['#ede9fe','#6d28d9']}[val]; o.style.background=col?col[0]:''; o.style.color=col?col[1]:''; o.style.borderColor=col?col[0]:''; } }); })
+        document.querySelectorAll('#supply-root .fci[data-field="'+fld+'"]').forEach(function(o){ if(o===inp||o.dataset.ep!==ep||o.value===val)return; o.value=val; recolorFci(o, fld, val); }); })
       .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; }); }
 
   function renderGeneric(key,rows){ var c=document.getElementById('supply-content');

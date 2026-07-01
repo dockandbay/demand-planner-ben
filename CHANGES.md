@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.118 - PO/shipment status dropdowns recolour instantly on change
+
+Changing a Status dropdown (PO grid or shipment grid/expand) now recolours it immediately to
+match the new value — e.g. a PO set to SHIPPING turns green right away — instead of only after a
+reload. `bindEdits` recolours the changed control synchronously (and any synced duplicate), using
+the PO palette (upper-case statuses) or the shipment palette (Planned/Shipping/Completed). Mode
+dropdowns recolour the same way.
+
+Deploy: no new env vars, no migrations. Files: `supply/inject.html`.
+
 ## v25.117 - PO Payments: show deposit FX rate next to "avail"
 
 On PURCHASE ORDERS ▸ PLAN ▸ PAYMENTS, the deposit-ref cell now also shows the deposit's Xero FX
