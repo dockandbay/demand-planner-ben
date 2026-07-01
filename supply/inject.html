@@ -195,8 +195,8 @@
   /* section nav → a single dropdown (no more sideways tab-hunting) */
   #supply-subnav{display:none}
   #supply-root #supply-nav-sel{display:block;width:100%;font-size:14px;font-weight:700;padding:9px 10px;border:1px solid #0f172a;border-radius:8px;background:#0f172a;color:#fff;margin:2px 0 10px}
-  /* SEARCH is the hero control on mobile — first, full-width, prominent */
-  #supply-root #sup-search{order:-1;width:100%!important;max-width:none!important;font-size:15px;padding:9px 11px}
+  /* SEARCH lives in the fixed top bar on mobile — hide the in-content box (its count stays) */
+  #supply-root #sup-search{display:none!important}
   #supply-root .bar{gap:5px 6px}
   #supply-root .flt{width:100%!important;max-width:none!important}
   /* secondary filters tucked behind the "Filters" toggle */
@@ -208,7 +208,14 @@
   #supply-root .save-btn,#supply-root .pill{padding:6px 10px;font-size:11px}
   #supply-root #po-prog>*,#supply-root #po-act>*,#supply-root #po-ctry>*{margin:3px 4px 3px 0}
   #supply-root .cli-form{max-width:100%}
-  #supply-root .cli-val input,#supply-root .cli-val textarea,#supply-root .cli-val select{max-width:100%}
+  /* PO detail (PAYMENTS / CLIENT / DATES) forms: stack label over value, inputs go full-width so the panel is readable */
+  #supply-root .cli-row{flex-direction:column;gap:3px;align-items:stretch}
+  #supply-root .cli-lbl{flex:0 0 auto;width:auto;padding-top:0}
+  #supply-root .cli-val{width:100%}
+  #supply-root .cli-val input,#supply-root .cli-val textarea,#supply-root .cli-val select{width:100%!important;max-width:100%!important;box-sizing:border-box}
+  #supply-root .cli-val select.boolsel{width:auto!important;min-width:78px;max-width:120px!important;display:inline-block}   /* keep Yes/No compact */
+  #supply-root .potab-panel [style*="min-width:360px"],#supply-root .potab-panel [style*="min-width:430px"]{min-width:0!important;flex-basis:100%!important}   /* two-col client/pack layout stacks */
+  #supply-root .potab-panel [style*="max-width:760px"],#supply-root .potab-panel [style*="max-width:1340px"]{max-width:100%!important}
 }
 </style>
 <script src="/portal-view.js"></script>
@@ -3781,12 +3788,14 @@
 
   try{window.__supplyNav={sections:SECTIONS,reports:REPORT_SECTIONS,select:function(k){selectSection(k);},current:function(){return current;}};}catch(e){}   // bridge for the app-level mobile drawer
   function showSupply(noSelect){ ensureRoot(); if(typeof hideScenario==='function')hideScenario(); var app=document.getElementById('app'); if(app)app.classList.add('supply-active');
+    document.body.classList.add('supply-on');   // reveals the mobile top-bar search
     var r=document.getElementById('supply-root'); if(r)r.style.display='block';
     document.querySelectorAll('#view-tabs-row .view-toggle').forEach(function(b){b.classList.remove('active');});
     var sb=document.getElementById('supply-btn'); if(sb)sb.classList.add('active');
     var fb=document.getElementById('supply-float'); if(fb)fb.style.display='none';
     if(noSelect!==true)selectSection(current||'actions'); }   // noSelect: caller (applyRoute) will select the routed section itself
   function hideSupply(){ var app=document.getElementById('app'); if(app)app.classList.remove('supply-active');
+    document.body.classList.remove('supply-on');
     var r=document.getElementById('supply-root'); if(r)r.style.display='none';
     var sb=document.getElementById('supply-btn'); if(sb)sb.classList.remove('active');
     var fb=document.getElementById('supply-float'); if(fb)fb.style.display=''; }

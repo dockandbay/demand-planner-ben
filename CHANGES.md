@@ -3,6 +3,25 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.94 - Mobile: search in the top bar, DEMAND nav in the drawer, readable PO detail
+
+Three phone (≤640px) refinements, all additive; desktop untouched.
+
+- **Search moved into the fixed top bar**, next to the hamburger (`#hz-topbar` = ☰ + search).
+  The in-content supply search box is hidden on phone; the top-bar box proxies straight into
+  the current section's `#sup-search` (its result count still shows in the grid). It only
+  appears inside SUPPLY (`body.supply-on`, toggled by showSupply/hideSupply) and clears when
+  you navigate.
+- **DEMAND second-level nav in the drawer.** When DEMAND is the active view, the drawer now
+  lists its sub-tabs (Plan / KPIs / Targets / Actions / Calendar) under a "Demand planner"
+  heading — the same pattern as SUPPLY sections. Tapping DEMAND reveals them in place.
+- **PO detail panels readable on phone.** The PAYMENTS / CLIENT / DATES forms stack label
+  over value with full-width inputs (Yes/No selects stay compact), and the two-column
+  client/packing layout collapses to one column. Fixes the "can't see much" when opening a PO
+  and viewing its plan on mobile.
+
+Deploy: no new env vars, no migrations. Files: `artifact_v16.7.html`, `supply/inject.html`.
+
 ## v25.93 - Mobile: drawer navigation + full-screen card
 
 On phone (≤640px) the two stacked top navs (the dark view-tabs strip + the supply section
