@@ -228,9 +228,19 @@
   #supply-root .save-btn,#supply-root .pill{padding:6px 10px;font-size:11px}
   #supply-root #po-prog>*,#supply-root #po-act>*,#supply-root #po-ctry>*{margin:3px 4px 3px 0}
   /* PO grid: shrink the PLAN button to "P" and wrap long PO numbers after ~15 chars */
-  #supply-root .po-exp[data-po]{font-size:0;padding:6px 8px}
+  #supply-root .po-exp[data-po]{font-size:0;padding:5px 6px}
   #supply-root .po-exp[data-po]::before{content:"P";font-size:12px;font-weight:700}
   #supply-root .po-numcell b{display:inline-block;max-width:15ch;white-space:normal;word-break:break-all;vertical-align:top}
+  /* tighter PO-grid cells on mobile; close the gap between the ★ focus icon and the PO reference */
+  #supply-root .po-tbl tbody td,#supply-root .po-tbl thead th{padding:4px 4px}
+  /* the frozen first column is a fixed 78px (sized for the old "PLAN" label); with just "P"+★ that leaves a
+     big gap before the PO ref — shrink it to 50px and shift the PO column's sticky offset to match */
+  #supply-root table.po-tbl thead th:first-child,
+  #supply-root table.po-tbl tbody tr:not(.exp-row):not(.grp-row) td:first-child{width:50px;min-width:50px;max-width:50px;padding-right:2px}
+  #supply-root table.po-tbl thead th:nth-child(2),
+  #supply-root table.po-tbl tbody tr:not(.exp-row):not(.grp-row) td:nth-child(2){left:50px}
+  #supply-root .po-tbl .po-numcell{padding-left:2px}
+  #supply-root .po-tbl .fav-star{margin-left:2px}
   #supply-root .cli-form{max-width:100%}
   /* PO detail (PAYMENTS / CLIENT / DATES) forms: stack label over value, inputs go full-width so the panel is readable */
   #supply-root .cli-row{flex-direction:column;gap:3px;align-items:stretch}

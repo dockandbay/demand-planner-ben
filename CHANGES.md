@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.100 - Mobile: tighter PO grid cells + close the ★↔PO gap
+
+On phone, PURCHASE ORDERS grid: reduced cell padding (4px), and shrank the frozen first column
+from 78px → 50px. That column was sized for the old "PLAN" label; with just "P" + ★ it left a
+~30px gap before the PO reference. Shrinking it (and shifting the PO column's sticky offset to
+match) puts the ★ focus icon right next to the PO ref. Desktop unchanged.
+
+Deploy: no new env vars, no migrations. Files: `supply/inject.html`.
+
 ## v25.99 - Mobile: PO grid — "P" button + wrap long PO numbers
 
 On phone, in the PURCHASE ORDERS grid only: the row's "PLAN" button shows as "P" (to save
