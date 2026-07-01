@@ -381,6 +381,11 @@
 #supply-root tr.exp-row .tw>table{width:max-content;min-width:100%}
 #supply-root tr.exp-row table td:first-child,#supply-root tr.exp-row table th:first-child{white-space:nowrap;min-width:240px;padding-right:16px}
 #supply-root .pay-tbl td:first-child,#supply-root .pay-tbl th:first-child{white-space:nowrap;min-width:330px}
+/* Direct to Client details tab — keep it compact and on-screen (override the wide-first-column expand rule) */
+#supply-root .dtc-wrap{max-width:640px}
+#supply-root .dtc-wrap table{width:100%}
+#supply-root .dtc-wrap table td,#supply-root .dtc-wrap table th{white-space:normal!important;min-width:0!important;vertical-align:top}
+#supply-root .dtc-wrap table td:first-child,#supply-root .dtc-wrap table th:first-child{white-space:normal!important;min-width:0!important;padding-right:14px}
 #supply-root .payin.pdis,#supply-root .payin:disabled{background:#f1f1f1;color:#bbb;cursor:not-allowed;border-color:#eee}
 #supply-root .mut{color:#888}#supply-root .tiny{font-size:9.5px}
 #supply-root .todo{color:#16a34a;font-weight:700}  /* "to proceed / needs input" prompts — bright green */
@@ -609,8 +614,8 @@
           +dtcNoteRow('Pallet Packing requirements',p.pack_pallet_notes)
           +dtcNoteRow('Other Packing & Labelling requirements',p.pack_other_notes)
           +'</tbody></table>';
-      var dtc=dtcApproveBar+'<div class="sect-h" style="margin:0 0 8px">Direct to Client details</div>'+dtcInfo
-        +'<div class="sect-h" style="margin:6px 0 8px">Packing &amp; Labelling</div>'+dtcPackTbl;
+      var dtc='<div class="dtc-wrap">'+dtcApproveBar+'<div class="sect-h" style="margin:0 0 8px">Direct to Client details</div>'+dtcInfo
+        +'<div class="sect-h" style="margin:6px 0 8px">Packing &amp; Labelling</div>'+dtcPackTbl+'</div>';
       // ---- tabs + action badges ----
       var tabs=[['timeline','TIMELINE',timeline,unreadInt+((needConfirm&&!confirmed)?1:0)+(prodExc?1:0)],['orderplan','ORDER PLAN',skus,0],
         ['invoice','INVOICE',invoice, has('invoice_value')?0:1],['shipment','SHIPMENT',shipment, ((p.shipment||p.flexport_reference||has('tracking'))?0:1)+xdAction],

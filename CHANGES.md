@@ -656,6 +656,12 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
   Confirm-order — green button in a yellow banner (turns green "✓ approved" once done), instead of a plain blue
   button at the bottom.
 
+## v25.88 - Portal: Direct to Client details tab fits on screen
+
+- The DtC tab was too wide (a global expand-row rule forced a 240px no-wrap first column, pushing the Yes/No
+  responses off-screen). Scoped the tab to a compact max-width with wrapping cells, so Requirement / Required
+  (Yes/No) / Notes all fit on one screen.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
