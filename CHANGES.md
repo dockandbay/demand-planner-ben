@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.107 - SHIPMENTS: completed shipments have no exceptions
+
+A shipment with status Complete/Completed is now treated as exception-free: `shipIsExc()`
+returns false for it, so the ⚠ exception badge is suppressed, it's excluded from the
+Exceptions filter, and the over-20-pallets red highlight no longer shows. Active shipments
+are unaffected.
+
+Deploy: no new env vars, no migrations. Files: `supply/inject.html`.
+
 ## v25.106 - PURCHASE ORDERS: search results grouped by status
 
 When a search is active on the PURCHASE ORDERS grid (search already overrides all filters and

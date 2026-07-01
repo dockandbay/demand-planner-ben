@@ -2195,7 +2195,8 @@
     document.getElementById('ship-br').onchange=function(){state.br=this.value;_shipShowAll=false;view();};
     document.getElementById('ship-new').onclick=function(){ var ref=prompt('New shipment reference (usually the master PO number):'); if(ref&&ref.trim())shipPost('/api/supply/shipment-create',{shipment_ref:ref.trim()},shipReload); };
     view(); }   // Unassigned-POs moved to the PURCHASE ORDERS "Unassigned shipment" exception filter
-  function shipIsExc(s){ return s.is_exception || s.over_pallets; }
+  function shipComplete(s){ return s.status==='Complete'||s.status==='Completed'; }
+  function shipIsExc(s){ if(shipComplete(s))return false; return s.is_exception || s.over_pallets; }   // a completed shipment has no open exceptions
   function shipExReason(s){ var r=[]; if(s.over_pallets)r.push('Estimated cargo '+(s.pallets||0)+' pallets — over one 20-pallet container; split the shipment'); if(s.is_exception)r.push('No carrier reference — not linked to Flexport / DHL / etc.'); return r.join(' · '); }
   function shipExShort(s){ return s.over_pallets?'>20 pallets':'unlinked'; }
   function carrierSel(ep,val,dis){ var O=['Flexport','DHL','Fedex','FOB','Other'], v=val||'', has=O.indexOf(v)>=0;
@@ -2238,7 +2239,7 @@
         +'<td class="l">'+modeSel(ep,s.mode_eff)+'</td>'
         +'<td class="l">'+(s.market?esc(s.market):'<span class="mut">—</span>')+'</td>'
         +'<td class="l">'+(s.branch?esc(s.branch):'<span class="mut">—</span>')+'</td>'
-        +'<td>'+esc(s.po_count)+'</td><td>'+esc(s.suppliers)+'</td><td'+(s.over_pallets?' style="color:#dc2626;font-weight:700" title="over one 20-pallet container — split the shipment"':'')+'>'+esc(s.pallets||0)+'</td>'
+        +'<td>'+esc(s.po_count)+'</td><td>'+esc(s.suppliers)+'</td><td'+((s.over_pallets&&!shipComplete(s))?' style="color:#dc2626;font-weight:700" title="over one 20-pallet container — split the shipment"':'')+'>'+esc(s.pallets||0)+'</td>'
         +'<td class="l">'+carrierSel(ep,s.carrier,s.mode_eff==='fob')+'</td>'
         +'<td class="l">'+carrierRefInput(ep,s.carrier_ref,s.mode_eff==='fob')+fxl+'</td>'
         +'<td class="l">'+shipDate(s.departure,s.departure_src)+'</td><td class="l">'+shipDate(s.landing,s.landing_src)+'</td><td class="l">'+shipDate(s.arrival,s.arrival_src)+'</td>'
