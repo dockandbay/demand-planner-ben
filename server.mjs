@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.102';
+const APP_VERSION = 'v25.103';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -5592,13 +5592,14 @@ app.get('/api/portal/img', portalAuth, async (req, res) => {
 // Barcode label rows — only for SKUs that appear on THIS supplier's POs (intersect with owned SKUs).
 app.get('/api/portal/label-data', portalAuth, async (req, res) => {
   try {
-    const { po, prod, skus } = req.query, names = req.portal.suppliers;
+    const { po, prod, skus, batch } = req.query, names = req.portal.suppliers;
     let requested = [];
     if (skus) requested = String(skus).split(',').map(s => s.trim()).filter(Boolean);
     else if (po) { if (!await portalOwnsPO(req, po)) return res.status(403).json({ error: 'not your PO' });
       requested = (await pool.query(`SELECT sku FROM planner.purchase_order_lines WHERE po=$1`, [po])).rows.map(r => r.sku); }
     else if (prod) requested = (await pool.query(`SELECT DISTINCT l.sku FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po WHERE p.prod_no=$1 AND p.supplier_name = ANY($2)`, [prod, names])).rows.map(r => r.sku);
-    else return res.status(400).json({ error: 'po/prod/skus required' });
+    else if (batch) requested = (await pool.query(`SELECT DISTINCT l.sku FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po WHERE p.batch_id=$1 AND p.supplier_name = ANY($2)`, [batch, names])).rows.map(r => r.sku);
+    else return res.status(400).json({ error: 'po/prod/skus/batch required' });
     if (!requested.length) return res.json([]);
     const owned = new Set((await pool.query(`SELECT DISTINCT l.sku FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po WHERE p.supplier_name = ANY($1)`, [names])).rows.map(r => r.sku));
     const finalSkus = requested.filter(s => owned.has(s));

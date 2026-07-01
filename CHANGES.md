@@ -3,6 +3,21 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.103 - Supplier portal: Barcodes tab (by batch)
+
+New **Barcodes** tab on the supplier portal. The supplier picks a **batch**; two buttons then
+download **product barcodes** and **carton barcodes** for every product on their order-plan
+lines across POs assigned to that batch (their SKUs only). A yellow note at the top explains:
+"If a product is missing from a batch, amend the relevant purchase orders' Order Plan. Once
+approved, the product barcode can be downloaded in this batch." Buttons are disabled until a
+batch is selected; the batch list shows only batches present on the supplier's own POs.
+
+Reuses the existing label/barcode PDF subsystem; the `/api/portal/label-data` endpoint gains a
+`?batch=<id>&supplier=<name>` mode (SKUs from purchase_order_lines for the supplier's POs in
+that batch). No schema changes (batch_id already on purchase_orders).
+
+Deploy: no new env vars, no migrations. Files: `server.mjs`, `supply/portal-view.js`.
+
 ## v25.102 - Supplier portal: Production / Country / Branch filters
 
 The supplier portal's Purchase Orders tab gains three dropdown filters — **Production**,

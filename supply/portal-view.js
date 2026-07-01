@@ -419,11 +419,12 @@
     var PORTAL_SP_ESC=false, PORTAL_SP_PO='', PORTAL_SP_ACTIVE=true, PORTAL_SP_SHIPPED=false;   // Shipment Plan filters
     var PORTAL_PO_Q='';   // Purchase Orders search (overrides the status pills)
     var PORTAL_PO_PROD='', PORTAL_PO_CTRY='', PORTAL_PO_BR='';   // Purchase Orders dropdown filters (Production / Country / Branch)
+    var PORTAL_BC_BATCH='';   // Barcodes tab: selected batch id
     var _ppShowAllPO=false, _ppShowAllSP=false;   // "show all" toggles for the capped PO / shipment grids
     var PORTAL_SAMP_F='open', PORTAL_SAMP_Q='';   // Samples grid filter + search (default: open)
     var _invFiles={};     // base64 of the last parsed invoice file, per PO (for the Apply step)
     var rootEl=opts.root; if(!rootEl.closest('#supply-root')){rootEl.id='supply-root';} rootEl.style.display='block';
-    rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders</span><span class="rtab" data-pt="shipmentplan">Shipment Plan</span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="samples">Samples <span id="pp-samp-badge"></span></span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
+    rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders</span><span class="rtab" data-pt="shipmentplan">Shipment Plan</span><span class="rtab" data-pt="barcodes">Barcodes</span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="samples">Samples <span id="pp-samp-badge"></span></span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
     var tabsEl=document.getElementById('pp-tabs'), body=document.getElementById('pp-body');
     function postJSON(ep,b2,cb){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b2)}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} cb&&cb(j); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); }); }
     function ppCard(l,v){ return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px 14px;min-width:120px"><div class="tiny mut">'+l+'</div><div style="font-weight:700;font-size:16px">'+v+'</div></div>'; }
@@ -832,6 +833,33 @@
               var sq=body.querySelector('.sp-po-q'); if(sq)sq.oninput=debounce(function(){ PORTAL_SP_PO=sq.value; _ppShowAllSP=false; var f=document.activeElement===sq; renderPP(); if(f){ var n=body.querySelector('.sp-po-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } } },350);
               spRender.forEach(function(s){ ppShipTimeline(s.shipment_ref); }); return; }
             if(PORTAL_TAB==='deposits'){ body.innerHTML=ppDeposits(_ppData.sdep); return; }
+            if(PORTAL_TAB==='barcodes'){
+              // batches on this supplier's POs (distinct batch_id, sorted)
+              var bseen={}, batches=[]; _ppData.pos.forEach(function(p){ var b=(p.batch_id==null?'':String(p.batch_id)).trim(); if(b&&!bseen[b]){bseen[b]=1;batches.push(b);} });
+              batches.sort();
+              if(PORTAL_BC_BATCH && batches.indexOf(PORTAL_BC_BATCH)<0)PORTAL_BC_BATCH='';   // batch no longer present
+              var picked=!!PORTAL_BC_BATCH, dis=picked?'':' disabled';
+              var note='<div style="margin:0 0 12px;padding:9px 12px;border-radius:6px;font-size:12px;background:#fef3c7;border:1px solid #fcd34d">'
+                +'⚠ <b>If a product is missing from a batch, amend the relevant purchase orders&rsquo; &ldquo;Order Plan&rdquo;.</b> Once approved, the product barcode can be downloaded in this batch.</div>';
+              var picker='<div class="bar" style="gap:8px;flex-wrap:wrap;align-items:center">'
+                +'<span class="pill-lbl">Batch</span>'
+                +'<select class="fci pp-bc-batch" style="width:auto;min-width:150px;max-width:240px;text-align:left"><option value="">Select a batch…</option>'
+                +batches.map(function(b){return '<option'+(b===PORTAL_BC_BATCH?' selected':'')+'>'+esc(b)+'</option>';}).join('')+'</select>'
+                +'<button class="save-btn pp-bc-dl-prod"'+dis+'>⤓ Download product barcodes</button>'
+                +'<button class="save-btn pp-bc-dl-carton"'+dis+'>⤓ Download carton barcodes</button></div>';
+              var help = batches.length ? (picked
+                  ? '<div class="count" style="margin:2px 0 8px">Barcodes cover every product on your order-plan lines for POs in batch <b>'+esc(PORTAL_BC_BATCH)+'</b>.</div>'
+                  : '<div class="count" style="margin:2px 0 8px">Select a batch to enable the downloads.</div>')
+                : '<div class="count" style="margin:2px 0 8px">No batches are assigned to your purchase orders yet.</div>';
+              body.innerHTML=note+picker+help;
+              var bsel=body.querySelector('.pp-bc-batch'); if(bsel)bsel.onchange=function(){ PORTAL_BC_BATCH=this.value; renderPP(); };
+              function bcBatchDl(kind,btn){ if(!PORTAL_BC_BATCH)return; if(BC.placeholder){BC.note();return;} btn.disabled=true;
+                fetch(EP.labelData+'?batch='+encodeURIComponent(PORTAL_BC_BATCH)+'&supplier='+encodeURIComponent(STATE.supplierName)).then(function(r){return r.json();}).then(function(rows){ btn.disabled=false;
+                  if(rows&&rows.error){alert(rows.error);return;} if(!rows||!rows.length){alert('No '+kind+' barcodes found for batch '+PORTAL_BC_BATCH);return;}
+                  BC.sheets(rows,[kind],'batch_'+PORTAL_BC_BATCH+'_'+kind+'_barcodes.zip',btn); }).catch(function(){alert('Could not load barcodes');btn.disabled=false;}); }
+              var bp=body.querySelector('.pp-bc-dl-prod'); if(bp)bp.onclick=function(){ bcBatchDl('product',bp); };
+              var bc=body.querySelector('.pp-bc-dl-carton'); if(bc)bc.onclick=function(){ bcBatchDl('carton',bc); };
+              return; }
             // POs tab — status pill filters; default to PRODUCTION + SHIPPING
             var seen={}, present=[]; _ppData.pos.forEach(function(p){ var s=(p.status||'').toUpperCase(); if(s&&!seen[s]){seen[s]=1;present.push(s);} });
             var ordered=PO_STATUSES.filter(function(s){return seen[s];}).concat(present.filter(function(s){return PO_STATUSES.indexOf(s)<0;}));
