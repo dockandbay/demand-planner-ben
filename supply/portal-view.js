@@ -23,7 +23,7 @@
   var PP_CAP=200;   // cap rendered PO/shipment rows in the portal; "show all" reveals the rest
   var PO_STATUSES=['FUTURE','PRODUCTION','READY TO SHIP','SHIPPING','DELIVERED','COMPLETE'];
   // document types a supplier can attach (Documents section on the INVOICE tab)
-  var DOC_TYPES=['Commercial Invoice','Packing List','CI & PL','Transaction Certificate','Certificate of Origin','Photos','Other'];
+  var DOC_TYPES=['Commercial Invoice','Tax Invoice Consolidated','Packing List','CI & PL','Transaction Certificate','Certificate of Origin','Photos','Other'];
   // supplier production status — the supplier maintains this; an exception flags a status that conflicts with the dates
   var PROD_STATUS=[['not_started','Not started'],['in_production','In production'],['nearing_completion','Nearing completion'],['complete','Complete'],['shipped','Shipped']];
   function prodStatusLabel(v){ var m=PROD_STATUS.filter(function(o){return o[0]===v;}); return m.length?m[0][1]:''; }

@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.105 - Supplier portal: new document type "Tax Invoice Consolidated"
+
+Added "Tax Invoice Consolidated" to the supplier-portal document-upload type list (DOC_TYPES),
+after Commercial Invoice.
+
+Deploy: no new env vars, no migrations. Files: `supply/portal-view.js`.
+
 ## v25.104 - Fix: batch barcode download in admin "Preview as supplier"
 
 The Barcodes-tab batch download errored with "po or prod required" when used via the admin
