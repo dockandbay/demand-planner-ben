@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.108';
+const APP_VERSION = 'v25.109';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1411,11 +1411,12 @@ app.get('/api/supply/:section', async (req, res) => {
             GROUP BY po.shipment_ref
           )
           SELECT sh.shipment_ref, coalesce(sh.master_po, sh.shipment_ref) master_po,
-            coalesce(NULLIF(sh.status,''),
-              CASE WHEN a.all_complete OR coalesce(sh.arrival_date, fx.arrival_date, sh.landing_date, fx.landing_date) < current_date THEN 'Complete'
-                   WHEN coalesce(sh.departure_date, fx.departure_date) <= current_date THEN 'Active'
-                   ELSE 'Planned' END) status,
-            (sh.status IS NULL OR sh.status='') status_auto,
+            CASE WHEN a.all_complete THEN 'Complete'   -- all linked POs complete → shipment is complete (calculated, overrides any stored status)
+                 ELSE coalesce(NULLIF(sh.status,''),
+                   CASE WHEN coalesce(sh.arrival_date, fx.arrival_date, sh.landing_date, fx.landing_date) < current_date THEN 'Complete'
+                        WHEN coalesce(sh.departure_date, fx.departure_date) <= current_date THEN 'Active'
+                        ELSE 'Planned' END) END status,
+            (sh.status IS NULL OR sh.status='' OR a.all_complete) status_auto,
             coalesce(a.po_count,0) po_count, coalesce(a.pos,'') pos, coalesce(a.suppliers,0) suppliers,
             coalesce(a.units,0) units, coalesce(a.pallets,0) pallets, round(coalesce(a.value,0)) value,
             coalesce(sh.carrier, CASE WHEN sh.carrier_ref ILIKE 'FLEX%' THEN 'Flexport' END) carrier,
@@ -1460,9 +1461,10 @@ app.get('/api/supply/:section', async (req, res) => {
                  WHEN coalesce(sh.arrival_date, fx.arrival_date, sh.landing_date, fx.landing_date, mp.ship_calc) IS NOT NULL THEN 'calc' END completion_src,
             -- exception only when NOT complete and genuinely unlinked (no carrier ref + no Flexport match);
             -- a complete/landed shipment is never an exception.
-            (coalesce(NULLIF(sh.status,''),
-               CASE WHEN a.all_complete OR coalesce(sh.arrival_date, fx.arrival_date, sh.landing_date, fx.landing_date) < current_date THEN 'Complete'
-                    WHEN coalesce(sh.departure_date, fx.departure_date) <= current_date THEN 'Active' ELSE 'Planned' END) <> 'Complete'
+            ((CASE WHEN a.all_complete THEN 'Complete'
+                   ELSE coalesce(NULLIF(sh.status,''),
+                     CASE WHEN coalesce(sh.arrival_date, fx.arrival_date, sh.landing_date, fx.landing_date) < current_date THEN 'Complete'
+                          WHEN coalesce(sh.departure_date, fx.departure_date) <= current_date THEN 'Active' ELSE 'Planned' END) END) <> 'Complete'
              AND sh.carrier_ref IS NULL AND fx.flex_id IS NULL) is_exception,
             (coalesce(a.pallets,0) > 20) over_pallets,   -- est. cargo over one 20-pallet container → exception
             coalesce(sh.escalated,false) escalated,

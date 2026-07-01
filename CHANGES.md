@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.109 - SHIPMENTS: auto-complete when all linked POs are complete
+
+A shipment whose linked POs are ALL complete now shows status **Complete** automatically —
+even if it had a stored non-complete status. Previously all-complete only won when no explicit
+status was stored. `all_complete` is now evaluated ahead of the stored status in the shipments
+query (calculated status; nothing persisted), and `status_auto`/`is_exception` updated to match.
+
+Deploy: no new env vars, no migrations. Files: `server.mjs`.
+
 ## v25.108 - SUPPLY ▸ BI & REPORTS: new "ERP COMPARE" report
 
 New report listing open/draft ERP (Cin7) purchase orders that are **not** in the planner's
