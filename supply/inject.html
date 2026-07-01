@@ -227,6 +227,10 @@
   #supply-root .tw{max-height:70vh;-webkit-overflow-scrolling:touch}
   #supply-root .save-btn,#supply-root .pill{padding:6px 10px;font-size:11px}
   #supply-root #po-prog>*,#supply-root #po-act>*,#supply-root #po-ctry>*{margin:3px 4px 3px 0}
+  /* PO grid: shrink the PLAN button to "P" and wrap long PO numbers after ~15 chars */
+  #supply-root .po-exp[data-po]{font-size:0;padding:6px 8px}
+  #supply-root .po-exp[data-po]::before{content:"P";font-size:12px;font-weight:700}
+  #supply-root .po-numcell b{display:inline-block;max-width:15ch;white-space:normal;word-break:break-all;vertical-align:top}
   #supply-root .cli-form{max-width:100%}
   /* PO detail (PAYMENTS / CLIENT / DATES) forms: stack label over value, inputs go full-width so the panel is readable */
   #supply-root .cli-row{flex-direction:column;gap:3px;align-items:stretch}
@@ -1061,7 +1065,7 @@
       +(r.is_master?' <span class="tool-badge bg-blue" title="master / consolidation PO for this shipment">master</span>':'');
     var _ex=poExceptions(r,null);   // grid badge (invoice discrepancy resolves only once the PLAN panel is opened)
     var exFlag=_ex.all.length?' <span class="ex-badge" title="'+esc(_ex.all.length+' action'+(_ex.all.length>1?'s':'')+': '+_ex.all.join(' · '))+'">'+_ex.all.length+'</span>':'';
-    var pocell=indent?'<td class="l po-child"><span class="ind">└ </span><b>'+esc(r.po)+'</b>'+exFlag+'</td>':'<td class="l"><b>'+esc(r.po)+'</b>'+exFlag+'</td>';
+    var pocell=indent?'<td class="l po-child po-numcell"><span class="ind">└ </span><b>'+esc(r.po)+'</b>'+exFlag+'</td>':'<td class="l po-numcell"><b>'+esc(r.po)+'</b>'+exFlag+'</td>';
     // ERP cell — compact badge-style buttons (same look as the "✓ in sync" badge) → keeps the column narrow.
     // Labels collapse to a single action: Update lines / Update date / Update both. All open the same ERP modal.
     var erpStyle='cursor:pointer;border:none';

@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.99 - Mobile: PO grid — "P" button + wrap long PO numbers
+
+On phone, in the PURCHASE ORDERS grid only: the row's "PLAN" button shows as "P" (to save
+width), and long PO numbers wrap after ~15 characters (`.po-numcell b` → inline-block,
+max-width:15ch, word-break) so a long ref like PO-DILLARDS-3223429503 breaks onto two lines
+instead of stretching the column. Short refs stay on one line. Desktop unchanged.
+
+Deploy: no new env vars, no migrations. Files: `supply/inject.html`.
+
 ## v25.98 - Mobile: current section title next to the hamburger
 
 The mobile top bar now shows the active top-level view (DEMAND / SUPPLY / BUY / FBA / REPORTS)
