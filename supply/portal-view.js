@@ -10,10 +10,10 @@
   var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   function fd(s){ if(!s)return ''; var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(s)); return m?(m[3]+'-'+MON[+m[2]-1]+'-'+m[1].slice(2)):String(s); }
   function dcell(v){return v?esc(fd(v)):'<span class="mut tiny">—</span>';}
-  // Direct-to-Client details apply only when the PO branch is Direct to Client (incl. B2B JLEW/NEXT) AND a
+  // Direct-to-Client details apply when the PO branch is Direct to Client (incl. B2B JLEW/NEXT) OR a
   // client sales ref is set — otherwise the DtC tab + approval workflow do not show.
   function ppIsDtc(p){ var b=(p&&p.branch||'').toLowerCase();
-    return (b.indexOf('direct to client')>=0||b.indexOf('b2b jlew')>=0||b.indexOf('b2b next')>=0) && (p.sales_order_ref||'').trim()!==''; }
+    return (b.indexOf('direct to client')>=0||b.indexOf('b2b jlew')>=0||b.indexOf('b2b next')>=0) || (p.sales_order_ref||'').trim()!==''; }
   // debounce: coalesce rapid keystrokes into one call after `ms` quiet
   function debounce(fn,ms){ var t; return function(){ var a=arguments, c=this; clearTimeout(t); t=setTimeout(function(){ fn.apply(c,a); }, ms||220); }; }
   // normalise for matching: lowercase + drop spaces and the "└" tree char, so a search matches regardless of them

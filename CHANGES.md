@@ -645,6 +645,11 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
   "not approved" exceptions caused by packing defaulting to Yes on every PO. (Dropped the `require_confirmation`
   gate for DtC — the two branch/sales-ref conditions define it now.)
 
+## v25.86 - Direct to Client approval: branch OR sales ref (was AND)
+
+- DtC approval now applies when the branch is Direct-to-Client (incl. UK B2B JLEW/NEXT) **OR** a client sales
+  ref is populated (previously required both).
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue

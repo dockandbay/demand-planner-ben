@@ -714,10 +714,10 @@
       pop.querySelector('.shpop-q').focus();
     });
   }
-  // Direct-to-Client details approval only applies when the PO's branch is Direct to Client (incl. UK B2B JLEW /
-  // NEXT — same set as the Direct to Client report) AND a client sales ref is set. Otherwise no approval workflow.
+  // Direct-to-Client details approval applies when the PO's branch is Direct to Client (incl. UK B2B JLEW /
+  // NEXT — same set as the Direct to Client report) OR a client sales ref is set. Otherwise no approval workflow.
   function poIsDtc(r){ var b=(r&&r.branch||'').toLowerCase();
-    return (b.indexOf('direct to client')>=0||b.indexOf('b2b jlew')>=0||b.indexOf('b2b next')>=0) && (r.sales_order_ref||'').trim()!==''; }
+    return (b.indexOf('direct to client')>=0||b.indexOf('b2b jlew')>=0||b.indexOf('b2b next')>=0) || (r.sales_order_ref||'').trim()!==''; }
   // PO action-item quick filters (toggle, AND together and with the progress filter)
   var PO_ACTCOND={payment_overdue:function(r){return r.payment_overdue;},
     // unpaid payments: broader than "overdue" (which is date-past only) — a payment is OWED now, regardless
