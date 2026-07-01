@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.117 - PO Payments: show deposit FX rate next to "avail"
+
+On PURCHASE ORDERS ▸ PLAN ▸ PAYMENTS, the deposit-ref cell now also shows the deposit's Xero FX
+rate: "P56-AU-XR1 ▾  0.00 avail · FX 1.2763". The PO query's deposit-pool lateral now returns the
+ref's FX (`deposit_fx`, most-recent paid deposit on that reference).
+
+Deploy: no new env vars, no migrations. Files: `server.mjs`, `supply/inject.html`.
+
 ## v25.116 - Silent in-place updates across PO + shipment grids (consistency sweep)
 
 Inline edits that previously re-rendered the whole grid (a visible flash / collapsing expands)

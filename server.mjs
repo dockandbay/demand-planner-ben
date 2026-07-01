@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.116';
+const APP_VERSION = 'v25.117';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1048,7 +1048,7 @@ app.get('/api/supply/:section', async (req, res) => {
               sh.landing_date sh_landing, sh.delivery_date sh_delivery, sh.departure_date sh_departure, sh.arrival_date sh_arrival,
               sh.mode sh_mode, sh.carrier sh_carrier, sh.carrier_ref sh_carrier_ref, fx.mode flex_mode,
               (sh.master_po = po.po) is_master,
-              da.avail deposit_avail,
+              da.avail deposit_avail, da.fx_rate deposit_fx,
               -- landed-cost inputs: flexport quote, freight rate-card, import-tax rate, per-line duty
               coalesce(fx.total_quoted_amount, fx.total_freight_cost) flex_quote,
               fr.cost freight_rate, tr.tax_pct tax_pct, coalesce(tr.base,'landed') tax_base_kind,
@@ -1073,11 +1073,14 @@ app.get('/api/supply/:section', async (req, res) => {
             LEFT JOIN LATERAL (SELECT f.* FROM planner.flexport_shipments f
               WHERE f.flex_id=po.flexport_reference OR f.shipment_name=po.po OR f.shipment_name=po.shipment_ref
               ORDER BY (f.flex_id=po.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true
-            LEFT JOIN LATERAL (  -- remaining on the deposit ref this PO draws on (pool − assigned)
+            LEFT JOIN LATERAL (  -- remaining on the deposit ref this PO draws on (pool − assigned) + the deposit's Xero FX rate
               SELECT coalesce((SELECT sum(amount) FROM planner.deposits d
                                WHERE d.is_deposit AND d.reference=po.deposit_ref),0)
                    - coalesce((SELECT sum(coalesce(p2.pay_start_deposit_assigned,0)) FROM planner.purchase_orders p2
-                               WHERE p2.deposit_ref=po.deposit_ref),0) avail
+                               WHERE p2.deposit_ref=po.deposit_ref),0) avail,
+                (SELECT d.xero_fx FROM planner.deposits d
+                   WHERE d.is_deposit AND d.reference=po.deposit_ref AND d.xero_fx IS NOT NULL
+                   ORDER BY d.date_paid DESC NULLS LAST LIMIT 1) fx_rate
               WHERE coalesce(po.deposit_ref,'') <> '') da ON true
             LEFT JOIN LATERAL (SELECT cost FROM planner.freight_rates
               WHERE destination=coalesce(nullif(po.country_code,''), b.country_code) AND container_size=po.container_size LIMIT 1) fr ON true
@@ -1169,7 +1172,7 @@ app.get('/api/supply/:section', async (req, res) => {
             completion_calc, round(pay_completion_assigned,2) completion_assigned, to_char(pay_completion_date,'YYYY-MM-DD') completion_date,
             round(pay_balance_1_amount,2) balance_1_amount, to_char(pay_balance_1_date,'YYYY-MM-DD') balance_1_date,
             round(pay_balance_2_amount,2) balance_2_amount, to_char(pay_balance_2_date,'YYYY-MM-DD') balance_2_date,
-            round(catch_up,2) catch_up, round(deposit_avail,2) deposit_avail,
+            round(catch_up,2) catch_up, round(deposit_avail,2) deposit_avail, deposit_fx,
             CASE WHEN start_calc > 0 THEN to_char(start_production,'YYYY-MM-DD') END start_due,        -- no due date for a 0% milestone
             CASE WHEN completion_calc > 0 THEN to_char(eff_prod_end,'YYYY-MM-DD') END completion_due,
             to_char(bal_due_date,'YYYY-MM-DD') balance_due,

@@ -1361,7 +1361,7 @@
             +((startOwed && startUnpaid && !r.deposit_ref)?payFillBtn('pay_start_deposit_assigned','pay_start_deposit_date',r.start_calc):'')+'</td>'; })()
       +'<td class="l">'+payIn(ep,'pay_start_deposit_assigned',r.start_assigned,false,false,(r.deposit_ref&&r.deposit_avail!=null)?('data-avail="'+esc(Math.round((Number(r.deposit_avail||0)+Number(r.start_assigned||0))*100)/100)+'"'):'')+'</td>'
       +'<td class="l">'+payIn(ep,'pay_start_deposit_date',r.start_date,true,!(n(r.start_assigned)>0))+'</td>'
-      +'<td class="l">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0)+(r.deposit_avail!=null?' <span class="mut tiny">'+money(r.deposit_avail)+' avail</span>':'')+'</td>'
+      +'<td class="l">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0)+(r.deposit_avail!=null?' <span class="mut tiny">'+money(r.deposit_avail)+' avail'+(r.deposit_fx!=null&&r.deposit_fx!==''?' · FX '+Number(r.deposit_fx).toFixed(4):'')+'</span>':'')+'</td>'
       +dueCell(r.start_due,startUnpaid,'',startOwed)+likelyCell('dep:'+r.po,startUnpaid&&startOwed,r.likely_start)+'<td class="l">'+(startOwed?payBadge(sStat[0],sStat[1]):payBadge('—','bg-neutral'))+'</td>');
     h+=tr('<td class="l"><b>Completion</b> <input class="fci pctin payin" data-ep="'+ep+'" data-field="completion_pct_override" value="'+esc(r.completion_pct)+'"><span class="mut tiny">% + catch-up'+(Number(r.catch_up)?' '+(Number(r.catch_up)>0?'+':'')+money(r.catch_up):'')+'</span></td>'
       +'<td>'+money(r.completion_calc)+((compOwed && compUnpaid)?payFillBtn('pay_completion_assigned','pay_completion_date',r.completion_calc):'')+'</td>'
