@@ -3,6 +3,29 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.93 - Mobile: drawer navigation + full-screen card
+
+On phone (≤640px) the two stacked top navs (the dark view-tabs strip + the supply section
+dropdown) are replaced by an **off-canvas drawer**. A fixed hamburger (top-left) slides in a
+menu listing the top-level views (DEMAND / SUPPLY / BUY / FBA / REPORTS) and, when SUPPLY is
+active, its sections (Actions, BI & Reports, Productions, Purchase Orders, Order Plan, …).
+Tapping a view navigates; tapping SUPPLY reveals its sections in place; tapping a section
+navigates and closes the drawer. Desktop is untouched (drawer/hamburger are `display:none`;
+`#view-tabs-row` still shows).
+
+Implementation: additive. `artifact_v16.7.html` gains `#hz-burger` / `#hz-drawer` /
+`#hz-backdrop` + an IIFE that mirrors the real `#view-tabs-row` buttons (so it picks up the
+injected SUPPLY button automatically) and drives supply sections through a new
+`window.__supplyNav` bridge exposed from `supply/inject.html` (`{sections, reports, select,
+current}`). No server or data changes.
+
+Also (from the previous step, shipped here): when a PO or shipment row is expanded on phone,
+its detail panel renders as a **full-screen sheet** (`td.mob-sheet`, fixed/inset:0) with a
+sticky "← Back to list" bar, so the detail is readable without horizontal scrolling. Desktop
+still expands inline.
+
+Deploy: no new env vars, no migrations. Files: `artifact_v16.7.html`, `supply/inject.html`.
+
 ## v25.9 - Buy plan: near-term gaps go to Urgent, not Buy-3PL
 
 A Buy-3PL is now only placed when there's **full standard lead time** (ideal placement is a real current/future
