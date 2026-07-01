@@ -281,9 +281,9 @@
     ['config','CONFIG']];
   // REPORTS is a parent tab; these are its sub-tabs (the read-across views).
   var REPORT_SECTIONS=[['metrics','METRICS'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
-    ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['cashflow','CASH FLOW'],['directclient','DIRECT TO CLIENT'],['flexport','FLEXPORT']];
-  var REPORT_KEYS=['metrics','reallocate','urgent-buy','container-fill','consolidate','upcoming','pipeline','cashflow','directclient','flexport'];
-  var BI_TABS={'metrics':'/api/supply/bi','urgent-buy':'/api/supply/bi/projection','reallocate':'/api/supply/bi/reallocations','container-fill':'/api/supply/bi/container-fill','consolidate':'/api/supply/bi/consolidations'};   // fluid: always re-fetch
+    ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['cashflow','CASH FLOW'],['directclient','DIRECT TO CLIENT'],['flexport','FLEXPORT'],['erp-compare','ERP COMPARE']];
+  var REPORT_KEYS=['metrics','reallocate','urgent-buy','container-fill','consolidate','upcoming','pipeline','cashflow','directclient','flexport','erp-compare'];
+  var BI_TABS={'metrics':'/api/supply/bi','urgent-buy':'/api/supply/bi/projection','reallocate':'/api/supply/bi/reallocations','container-fill':'/api/supply/bi/container-fill','consolidate':'/api/supply/bi/consolidations','erp-compare':'/api/supply/bi/erp-compare'};   // fluid: always re-fetch
   var reportTab='metrics';   // BI & REPORTS opens on METRICS by default
   var ANNOT={
     actions:'<b>SUPPLY ▸ Actions.</b> Exceptions surfaced from the supply picture — date conflicts, unassigned shipments, missing supplier, unpaid deposits. Grouped by type.',
@@ -3533,6 +3533,7 @@
       if(rk==='reallocate')return renderReallocate(d);
       if(rk==='container-fill')return renderContainerFill(d);
       if(rk==='consolidate')return renderConsolidate(d);
+      if(rk==='erp-compare')return renderErpCompare(d);
       cache[rk]=d;   // reports cache; BI tabs stay fluid (re-fetched each visit)
       if(rk==='upcoming')return renderUpcoming(d);
       if(rk==='pipeline')return renderPipeline(d);
@@ -3565,6 +3566,21 @@
         +biTile('POs awaiting confirmation', d.awaiting_confirmation||0, '', (Number(d.awaiting_confirmation)>0?'#b45309':null))
         +biTile('Deposits outstanding', '$'+units(d.deposits_outstanding||0), (d.deposit_pools||0)+' active pool'+(Number(d.deposit_pools)===1?'':'s'))
       +'</div>'; }
+  // ERP COMPARE — open/draft ERP POs missing from the planner (supplier must be a planner product supplier)
+  function renderErpCompare(d){ var b=biBody(); d=d||{}; var rows=d.rows||[];
+    var head='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:#0f172a">ERP compare — open ERP POs missing from the planner</div>'
+      +'<div class="mut tiny" style="margin-bottom:12px">Open/draft purchase orders in the ERP (Cin7) that are <b>not</b> in your PURCHASE ORDERS list — limited to POs whose supplier is a supplier in the planner (freight / internal / test vendors like Flexport &amp; HMRC are excluded). <b>'+rows.length+'</b> found.</div>';
+    if(!rows.length){ b.innerHTML=head+'<div class="count">Nothing to reconcile — every open ERP PO for your suppliers is already in the planner. ✓</div>'; return; }
+    var body=rows.map(function(r){ return '<tr>'
+      +'<td class="l"><b>'+esc(r.po)+'</b></td>'
+      +'<td class="l">'+esc(r.erp_po_id||'—')+'</td>'
+      +'<td class="l">'+esc(r.supplier_name||'—')+'</td>'
+      +'<td class="l"><span class="tool-badge bg-amber">'+esc(r.status||'—')+'</span></td>'
+      +'<td class="l">'+esc(r.order_date||'—')+'</td>'
+      +'<td>'+((r.total_value!=null&&r.total_value!=='')?esc((r.currency?r.currency+' ':'')+r.total_value):'<span class="mut">—</span>')+'</td>'
+      +'<td class="l">'+esc(r.final_delivery_date||'—')+'</td>'
+      +'<td class="l"><span class="mut tiny">'+esc(r.synced_at||'—')+'</span></td></tr>'; }).join('');
+    b.innerHTML=head+'<div class="tw"><table><thead><tr><th class="l">PO</th><th class="l">ERP id</th><th class="l">Supplier</th><th class="l">ERP status</th><th class="l">Order date</th><th>Value</th><th class="l">ERP delivery</th><th class="l">Synced</th></tr></thead><tbody>'+body+'</tbody></table></div>'; }
   // URGENT BUY — SKU × market at stock-out risk (critical/soon) from the live cover projection
   function renderUrgentBuy(pj){ var b=biBody(); pj=pj||{}; var rows=pj.rows||[], cc=pj.counts||{};
     function chip(label,n,bg,fg){ return '<span class="tool-badge" style="background:'+bg+';color:'+fg+';font-size:11px;padding:3px 9px">'+label+' '+(n||0)+'</span>'; }

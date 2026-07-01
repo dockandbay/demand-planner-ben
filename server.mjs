@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.107';
+const APP_VERSION = 'v25.108';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -4995,6 +4995,28 @@ app.get('/api/supply/bi/consolidations', async (req, res) => {
       if (s.status === 'snoozed' && s.snooze_until && s.snooze_until >= today) return false; return true; });
     open.sort((a, b) => b.combined - a.combined);
     res.json({ ok: true, count: open.length, recs: open });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// ERP COMPARE — open/draft ERP POs that are NOT in the planner's purchase_orders, limited to POs whose
+// supplier matches a product supplier in the planner (planner.suppliers, kind='supplier') so freight/
+// internal/test vendors (Flexport, HMRC, print shops, …) are excluded.
+app.get('/api/supply/bi/erp-compare', async (req, res) => {
+  try {
+    const rows = (await pool.query(`
+      SELECT e.po, coalesce(e.erp_po_id,'') erp_po_id, coalesce(e.supplier_name,'') supplier_name,
+             coalesce(e.status,'') status, to_char(e.order_date,'YYYY-MM-DD') order_date,
+             e.total_value, coalesce(e.currency,'') currency,
+             to_char(e.final_delivery_date,'YYYY-MM-DD') final_delivery_date,
+             to_char(e.synced_at,'YYYY-MM-DD HH24:MI') synced_at
+      FROM planner.erp_purchase_orders e
+      LEFT JOIN planner.purchase_orders p ON p.po = e.po
+      WHERE p.po IS NULL                                                    -- not in the planner's PO list
+        AND coalesce(e.status,'') !~* '(complete|cancel|void|closed|received)'   -- open / draft only
+        AND EXISTS (SELECT 1 FROM planner.suppliers s
+                    WHERE lower(trim(s.name)) = lower(trim(e.supplier_name))
+                      AND coalesce(s.kind,'supplier') = 'supplier')         -- product supplier in the planner
+      ORDER BY e.supplier_name NULLS LAST, e.po`)).rows;
+    res.json({ ok: true, count: rows.length, rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Apply a consolidation: re-point the merge shipment's POs onto the keep shipment, then mark applied.

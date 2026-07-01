@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.108 - SUPPLY ▸ BI & REPORTS: new "ERP COMPARE" report
+
+New report listing open/draft ERP (Cin7) purchase orders that are **not** in the planner's
+PURCHASE ORDERS list — restricted to POs whose supplier matches a supplier in the planner
+(`planner.suppliers`, kind='supplier'), so freight / internal / test vendors (Flexport, HMRC,
+print shops) are excluded. Shows PO, ERP id, supplier, ERP status, order date, value, ERP
+delivery date and last-synced. New endpoint `GET /api/supply/bi/erp-compare` (reads the
+existing `planner.erp_purchase_orders` mirror; excludes complete/cancelled/void/received).
+
+Deploy: no new env vars, no migrations (uses existing erp_purchase_orders + suppliers tables).
+Files: `server.mjs`, `supply/inject.html`.
+
 ## v25.107 - SHIPMENTS: completed shipments have no exceptions
 
 A shipment with status Complete/Completed is now treated as exception-free: `shipIsExc()`
