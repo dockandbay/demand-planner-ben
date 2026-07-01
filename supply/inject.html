@@ -897,7 +897,7 @@
       _poShowClient=!!(state.ctry&&state.ctry['DIRECT']);   // DIRECT pill → reveal Client name + sales ref columns
       var shown=(_poShowAll||f.length<=PO_CAP)?f:f.slice(0,PO_CAP);
       document.getElementById('sup-count').textContent=(shown.length<f.length?shown.length+' of ':'')+f.length+' / '+rows.length+' POs'+(q?' (search — all statuses)':'');
-      document.getElementById('sup-grid').innerHTML=poTable(shown,state.grp)
+      document.getElementById('sup-grid').innerHTML=poTable(shown,q?'status':state.grp)   // search spans all statuses → group under status sub-labels
         +(shown.length<f.length?'<div style="margin:8px 0;text-align:center"><button class="save-btn light" id="po-showall">Show all '+f.length+' &darr;</button></div>':'');
       var sa=document.getElementById('po-showall'); if(sa)sa.onclick=function(){ _poShowAll=true; view(); };
       bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick();
@@ -1131,6 +1131,18 @@
     var head=lookupDatalists()+poErpRecon(rows)+'<div class="tw"><table class="po-tbl"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l">ERP</th><th class="l">Supplier</th><th class="l">Ship to</th><th class="l">Branch</th><th class="l">Direct</th><th class="l">Status</th><th class="l">Shipment</th><th class="l">Deposit ref</th><th class="l">Start</th><th class="l">End</th><th class="l">Ship</th><th class="l">Delivery</th><th class="l">Completion</th><th>Value est</th><th>Pallets</th><th class="l">PROD#</th><th class="l">Batch</th></tr></thead><tbody>';
     var body='';
     if(!groupBy||groupBy==='none'){ rows.forEach(function(r,i){ body+=poRowHtml(r,i,false,null); }); }
+    else if(groupBy==='status'){
+      // group under status sub-labels (used during a search, which spans all statuses)
+      var SORDER=['PRODUCTION','FUTURE','READY TO SHIP','SHIPPING','DELIVERED','COMPLETE'];
+      var smap={}, sextra=[];
+      rows.forEach(function(r){ var s=(r.status||'').toUpperCase()||'—'; if(!smap[s]){smap[s]=[]; if(SORDER.indexOf(s)<0)sextra.push(s);} smap[s].push(r); });
+      var sseq=SORDER.filter(function(s){return smap[s];}).concat(sextra.sort());
+      var si=0;
+      sseq.forEach(function(s){ var list=smap[s]; list.sort(function(a,b){return a.po<b.po?-1:a.po>b.po?1:0;});
+        body+='<tr class="grp-row cat-hdr"><td colspan="19">'+esc(s)+' <span style="opacity:.55;font-weight:600">('+list.length+')</span></td></tr>';
+        list.forEach(function(r){ body+=poRowHtml(r,si++,false,null); });
+      });
+    }
     else {
       var keyFn=groupBy==='production'?function(r){return r.prod_no||'';}:function(r){return r.shipment||'';};
       var groups={},order=[];

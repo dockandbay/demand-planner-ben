@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.106 - PURCHASE ORDERS: search results grouped by status
+
+When a search is active on the PURCHASE ORDERS grid (search already overrides all filters and
+spans every status), matching POs are now grouped under status sub-label rows in the order
+PRODUCTION · FUTURE · READY TO SHIP · SHIPPING · DELIVERED · COMPLETE (each with a count), so
+completed orders no longer sit mixed in at the top. New `groupBy:'status'` mode in poTable;
+non-search grouping (None / Production / Master shipment) is unchanged.
+
+Deploy: no new env vars, no migrations. Files: `supply/inject.html`.
+
 ## v25.105 - Supplier portal: new document type "Tax Invoice Consolidated"
 
 Added "Tax Invoice Consolidated" to the supplier-portal document-upload type list (DOC_TYPES),
