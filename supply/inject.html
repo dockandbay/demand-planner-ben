@@ -310,7 +310,7 @@
     if(u.indexOf('SHIP')>=0||u.indexOf('READY')>=0)return 'bg-red';
     if(u.indexOf('COMPLETE')>=0||u.indexOf('DELIVER')>=0)return 'bg-green'; return 'bg-blue'; }
   var STBG={'bg-neutral':['#f3f4f6','#4b5563'],'bg-amber':['#fef3c7','#92400e'],'bg-red':['#fee2e2','#991b1b'],'bg-green':['#dcfce7','#166534'],'bg-blue':['#dbeafe','#1e40af']};
-  var cache={},current=null,depRefs=null,poBy={},shipBy={},batchList=[],prodList=[],shipList=[],supplierList=[],branchList=[],crossdockList=[];
+  var cache={},current=null,depRefs=null,poBy={},shipBy={},batchList=[],prodList=[],shipList=[],supplierList=[],branchList=[],crossdockList=[],poLookupList=[];
   var _pendingPO=null,_pendingPOTab=null,_pendingShip=null,_pendingOP=null,_pendingDep=null;   // cross-view navigation: expand this PO / shipment, pre-filter order plan / deposit register, after the target view renders
   var _poRefresh=null;   // set by the PO grid to refresh itself in place (no full section reload) after an assign
   var _poShowClient=false;   // PO grid: show Client name + Client sales ref columns when the DIRECT pill is active
@@ -356,9 +356,9 @@
     return '<input class="'+cls+'"'+ty+' data-ep="'+esc(ep)+'" data-field="'+esc(field)+'"'+(extra?(' '+extra):'')+' value="'+esc(val==null?'':val)+'">'; }
   function depDatalist(){ return '<datalist id="deprefs"><option value="NO DEPOSIT">'+(depRefs||[]).map(function(r){return '<option value="'+esc(r)+'">';}).join('')+'</datalist>'; }
   function dl(id,arr){ return '<datalist id="'+id+'">'+(arr||[]).map(function(r){return '<option value="'+esc(r)+'">';}).join('')+'</datalist>'; }
-  function lookupDatalists(){ return depDatalist()+dl('batchlist',batchList)+dl('prodlist',prodList)+dl('shiplist',shipList)+dl('supplierlist',supplierList)+dl('branchlist',branchList)+dl('crossdocklist',crossdockList); }
+  function lookupDatalists(){ return depDatalist()+dl('batchlist',batchList)+dl('prodlist',prodList)+dl('shiplist',shipList)+dl('supplierlist',supplierList)+dl('branchlist',branchList)+dl('crossdocklist',crossdockList)+dl('polist',poLookupList); }
   function combo(ep,field,val,list){ return '<input class="fci txt" list="'+list+'" data-ep="'+esc(ep)+'" data-field="'+esc(field)+'" value="'+esc(val==null?'':val)+'">'; }
-  function fetchLookups(cb){ fetch('/api/supply/lookups').then(function(r){return r.json();}).then(function(d){ depRefs=d.deposits||[]; batchList=d.batches||[]; prodList=d.prods||[]; shipList=d.shipments||[]; supplierList=d.suppliers||[]; branchList=d.branches||[]; crossdockList=d.crossdock||[]; cb(); }).catch(cb); }
+  function fetchLookups(cb){ fetch('/api/supply/lookups').then(function(r){return r.json();}).then(function(d){ depRefs=d.deposits||[]; batchList=d.batches||[]; prodList=d.prods||[]; shipList=d.shipments||[]; supplierList=d.suppliers||[]; branchList=d.branches||[]; crossdockList=d.crossdock||[]; poLookupList=d.pos||[]; cb(); }).catch(cb); }
   // explicit per-status colours for the PO grid Status dropdown (Ben's palette). [background, text]
   var PO_STATUS_BG={'FUTURE':['#D3D3FF','#2a2a55'],'PRODUCTION':['#F2B949','#5a3a00'],'READY TO SHIP':['#8FD9FB','#0a3a4a'],
     'SHIPPING':['#50C878','#0f3d22'],'DELIVERED':['#2E8B57','#ffffff'],'COMPLETE':['#305CDE','#ffffff']};
@@ -2307,7 +2307,13 @@
         t+=rows.map(function(p){ return '<tr><td class="l"><button class="lnk-btn ship-po-link" data-po="'+esc(p.po)+'" title="open this PO’s payment plan"><b>'+esc(p.po)+'</b></button></td><td class="l">'+esc(p.supplier_name||'')+'</td><td class="l">'+esc(p.status||'')+'</td><td>'+units(p.units)+'</td><td>'+money(p.value)+'</td>'
           +'<td class="l">'+(p.is_master?'<span class="tool-badge bg-green">★ master</span>':'<button class="lnk-btn" data-act="master" data-po="'+esc(p.po)+'">make master</button>')+'</td>'
           +'<td class="l"><button class="lnk-btn" data-act="unassign" data-po="'+esc(p.po)+'">unassign</button></td></tr>'; }).join('')
-          +(rows.length?'':'<tr><td colspan="7" class="mut">No POs assigned yet — assign from the Unassigned list below.</td></tr>')+'</tbody></table></div>';
+          +(rows.length?'':'<tr><td colspan="7" class="l mut">No POs assigned yet — add one below.</td></tr>')+'</tbody></table></div>';
+        // add a PO to this shipment directly (search the active-PO list, then assign)
+        t+='<div style="margin-top:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">'
+          +'<span class="mut tiny">Add a PO to this shipment:</span>'
+          +'<input class="fci txt sh-addpo-inp" list="polist" placeholder="search PO…" style="width:220px;text-align:left">'
+          +'<button class="save-btn sh-addpo-go">+ Add PO</button>'
+          +'<span class="sh-addpo-msg mut tiny" style="color:#b91c1c"></span></div>';
         // crossdock rollup across the POs on this shipment
         var xdRows=xd.map(function(x){ return '<tr><td class="l">'+esc(x.sku)+'</td><td style="text-align:right">'+(x.qty!=null&&x.qty!==''?units(x.qty):'<span class="mut">—</span>')+'</td>'
           +'<td class="l">'+esc(x.po)+'</td><td class="l">'+esc(x.supplier_name||'')+'</td><td class="l">'+esc(x.client||'')+'</td><td class="l">'+esc(x.sales_order_ref||'')+'</td></tr>'; }).join('');
@@ -2329,6 +2335,13 @@
           if(btn.dataset.act==='unassign'){ if(confirm('Unassign '+po+' from '+ref+'?'))shipPost('/api/supply/shipment/'+encodeURIComponent(ref)+'/assign',{po:po,assign:false},shipReload); }
           else shipPost('/api/supply/shipment/'+encodeURIComponent(ref)+'/assign',{po:po,assign:true,master:true},shipReload); }; });
         box.querySelectorAll('.ship-po-link').forEach(function(b){ b.onclick=function(){ gotoPO(b.dataset.po); }; });
+        // Add a PO to this shipment (search + assign) — mirrors the unassign/master assign flow
+        box.querySelectorAll('.sh-addpo-go').forEach(function(b){ b.onclick=function(){
+          var inp=box.querySelector('.sh-addpo-inp'), po=(inp&&inp.value||'').trim(), msg=box.querySelector('.sh-addpo-msg');
+          if(msg)msg.textContent='';
+          if(!po){ inp&&inp.focus(); return; }
+          if(poLookupList.length && poLookupList.indexOf(po)<0){ if(msg)msg.textContent='"'+po+'" is not an active PO — pick one from the list.'; return; }
+          b.disabled=true; shipPost('/api/supply/shipment/'+encodeURIComponent(ref)+'/assign',{po:po,assign:true},shipReload); }; });
         // destination override → writes to the SHIPMENT only (not the POs); refresh so grid + freight update
         box.querySelectorAll('.shipdest').forEach(function(el){ el.onchange=function(){ var body={}; body[el.dataset.field]=el.value; el.classList.add('saved');
           fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})

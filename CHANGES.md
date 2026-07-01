@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.111 - SHIPMENTS ▸ POs aboard: assign a PO here + left-align empty message
+
+In a shipment's "POs aboard" tab you can now **add a PO directly**: a search box (dropdown of
+active POs) + "+ Add PO" button assigns the chosen PO to this shipment (reuses the existing
+assign endpoint; refreshes the grid). The empty-state message is now **left-aligned** and reads
+"No POs assigned yet — add one below." (previously right-aligned, referencing a list that
+wasn't there). `/api/supply/lookups` now also returns `pos` (active PO numbers) → `polist` datalist.
+
+Deploy: no new env vars, no migrations. Files: `server.mjs`, `supply/inject.html`.
+
 ## v25.110 - ERP COMPARE: Branch column, open-action item, ignore capability
 
 Three additions to the ERP COMPARE report:

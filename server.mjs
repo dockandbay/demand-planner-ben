@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.110';
+const APP_VERSION = 'v25.111';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1262,7 +1262,7 @@ app.get('/api/supply/:section', async (req, res) => {
         return res.json(_pos);
       }
       case 'lookups': {  // dropdown sources for PO editing: deposit refs, batches, prod#s, shipments
-        const [dep, bat, pr, sh, su, br, xd] = await Promise.all([
+        const [dep, bat, pr, sh, su, br, xd, po] = await Promise.all([
           q(`SELECT reference FROM planner.deposits ORDER BY reference`),
           q(`SELECT batch FROM planner.batches ORDER BY batch DESC`),
           q(`SELECT prod_no FROM planner.prod_numbers WHERE prod_no IS NOT NULL ORDER BY prod_no`),
@@ -1274,7 +1274,9 @@ app.get('/api/supply/:section', async (req, res) => {
                SELECT sku FROM planner.products WHERE sku ILIKE 'CROSSDOCK%' OR sku ILIKE 'PREORDER%'
                UNION SELECT sku FROM planner.sku_labels WHERE sku ILIKE 'CROSSDOCK%' OR sku ILIKE 'PREORDER%'
              ) z ORDER BY sku`),
-        ]).catch(() => [[], [], [], [], [], [], []]);
+          // active (not-complete) POs — for assigning a PO onto a shipment from the shipment view
+          q(`SELECT po FROM planner.purchase_orders WHERE coalesce(status,'') NOT ILIKE '%complete%' ORDER BY po`),
+        ]).catch(() => [[], [], [], [], [], [], [], []]);
         return res.json({
           deposits: dep.map(x => x.reference),
           batches: bat.map(x => x.batch),
@@ -1283,6 +1285,7 @@ app.get('/api/supply/:section', async (req, res) => {
           suppliers: su.map(x => x.name),
           branches: br.map(x => x.name),
           crossdock: xd.map(x => x.sku),
+          pos: po.map(x => x.po),
         });
       }
       case 'skus':  // SKU master for Order Plan "all in category" scope + release-window filtering + sticky attribute columns
