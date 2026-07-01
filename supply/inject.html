@@ -1400,6 +1400,13 @@
         .then(function(j){ if(j&&j.error)throw new Error(j.error); if(poBy[po])poBy[po][inp.dataset.field]=inp.value;
           if(inp.dataset.field==='balance_due_date_overide'){ invalidateDerived(); poRefetchPanel(po,i); } })   // recompute balance due + cash flow
         .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; });
+    // Packing & Labelling Yes/No selects (CLIENT/FBA tab) — the PLAN panel is wired by bindPay, not bindEdits,
+    // so these need their own save handler (else the Yes/No never persisted).
+    document.querySelectorAll('#podet-'+i+' .boolsel').forEach(function(sel){ sel.onchange=function(){ var yes=sel.value==='true';
+      sel.style.background=yes?'#dcfce7':'#fee2e2'; sel.style.color=yes?'#166534':'#b91c1c'; var body={}; body[sel.dataset.field]=sel.value;
+      fetch(sel.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
+        .then(function(j){ if(j&&j.error)throw new Error(j.error); if(poBy[po])poBy[po][sel.dataset.field]=yes; invalidateDerived(); })
+        .catch(function(){ sel.classList.add('err'); }); }; });
     // crossdock SKU chips — add (validated against the eligible list) / remove, save comma list
     function saveXd(skus){ fetch('/api/supply/po/'+encodeURIComponent(po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({crossdock_skus:skus.join(', ')})})
       .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); if(poBy[po])poBy[po].crossdock_skus=skus.join(', '); poRefetchPanel(po,i); }); }

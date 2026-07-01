@@ -625,6 +625,13 @@ and the admin `purchase-orders` query now also return the `pack_*` + `dtc_accept
   red/amber/green). Consistent with the Supplier/Production/Batch/Exceptions dropdowns — black = filter applied.
   (Last 12m / Focus change also applies in the Shipments grid for consistency.)
 
+## v25.83 - Fix: packing Yes/No selects on CLIENT/FBA now persist
+
+- The PLAN detail panel is wired by `bindPay` (not `bindEdits`), which had no handler for the packing Yes/No
+  `.boolsel` selects — so changing Polybags / barcodes / carton labels on the CLIENT/FBA tab didn't save. Added
+  a save handler for them (POST + update in-memory row + recolor). The notes fields were unaffected (they save
+  via the `.txtin` handler). Fixes both sandbox and live.
+
 **Consolidated go-live checklist: see `HANDOVER.md`.**
 
 ## v25.8 - Buy plan: discontinue-month rounding + no Buy-3PL past discontinue
