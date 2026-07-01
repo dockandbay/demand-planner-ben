@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.114 - SHIPMENTS: fix "unlinked" exception logic
+
+The "unlinked" exception previously meant "no carrier reference / no Flexport match", so a
+shipment WITH POs but no carrier (e.g. FOB) was wrongly flagged "unlinked" (reported: PO-1712945,
+2 POs). Split into two correct exceptions:
+- **unlinked** — the shipment has NO purchase orders linked (`no_pos`, po_count 0).
+- **no Flexport match** — the shipment carries a Flexport reference (carrier Flexport / FLEX- ref)
+  but there's no matching Flexport shipment (`no_flex_match`).
+The ">20 pallets" exception is unchanged (still suppressed for Shipping/Completed). Completed
+shipments remain exception-free.
+
+Deploy: no new env vars, no migrations. Files: `server.mjs`, `supply/inject.html`.
+
 ## v25.113 - SHIPMENTS: Add-PO refreshes silently
 
 Adding a PO from a shipment's "POs aboard" tab now refreshes just that shipment's expand panel

@@ -2200,9 +2200,14 @@
   function shipComplete(s){ return s.status==='Complete'||s.status==='Completed'; }
   function shipShipping(s){ return s.status==='Shipping'||s.status==='Active'; }
   // a completed shipment has no open exceptions; ">20 pallets" only matters BEFORE it ships (can't split once shipping/complete)
-  function shipIsExc(s){ if(shipComplete(s))return false; var over=s.over_pallets && !shipShipping(s); return s.is_exception || over; }
-  function shipExReason(s){ var r=[]; if(s.over_pallets)r.push('Estimated cargo '+(s.pallets||0)+' pallets — over one 20-pallet container; split the shipment'); if(s.is_exception)r.push('No carrier reference — not linked to Flexport / DHL / etc.'); return r.join(' · '); }
-  function shipExShort(s){ return s.over_pallets?'>20 pallets':'unlinked'; }
+  // ">20 pallets" only matters before it ships; "unlinked" = no POs; "no Flexport match" = has a Flexport ref that doesn't match
+  function shipIsExc(s){ if(shipComplete(s))return false; return !!s.no_pos || !!s.no_flex_match || (!!s.over_pallets && !shipShipping(s)); }
+  function shipExReason(s){ var r=[];
+    if(s.no_pos)r.push('No purchase orders linked to this shipment');
+    if(s.no_flex_match)r.push('Has a Flexport reference but no matching Flexport shipment');
+    if(s.over_pallets && !shipShipping(s))r.push('Estimated cargo '+(s.pallets||0)+' pallets — over one 20-pallet container; split the shipment');
+    return r.join(' · '); }
+  function shipExShort(s){ return s.no_pos?'unlinked':s.no_flex_match?'no Flexport match':s.over_pallets?'>20 pallets':''; }
   function carrierSel(ep,val,dis){ var O=['Flexport','DHL','Fedex','FOB','Other'], v=val||'', has=O.indexOf(v)>=0;
     return '<select class="fci" data-ep="'+ep+'" data-field="carrier"'+(dis?' disabled title="FOB — carrier handled by the client\'s forwarder"':'')+' style="min-width:96px'+(dis?';opacity:.45;background:#f1f1f1':'')+'"><option value=""'+(v?'':' selected')+'>—</option>'
       +(v&&!has?'<option selected>'+esc(v)+'</option>':'')+O.map(function(o){return '<option'+(o===v?' selected':'')+'>'+o+'</option>';}).join('')+'</select>'; }

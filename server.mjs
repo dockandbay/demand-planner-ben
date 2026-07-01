@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.113';
+const APP_VERSION = 'v25.114';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1466,16 +1466,11 @@ app.get('/api/supply/:section', async (req, res) => {
               to_char((coalesce(sh.arrival_date, fx.arrival_date, coalesce(sh.landing_date, fx.landing_date, (coalesce(sh.departure_date, fx.departure_date, mp.ship_calc) + (coalesce(mp.transit_days,0)||' days')::interval)::date)) + interval '7 days')::date,'YYYY-MM-DD')) completion,
             CASE WHEN sh.delivery_date IS NOT NULL THEN 'S'
                  WHEN coalesce(sh.arrival_date, fx.arrival_date, sh.landing_date, fx.landing_date, mp.ship_calc) IS NOT NULL THEN 'calc' END completion_src,
-            -- exception only when NOT complete and genuinely unlinked (no carrier ref + no Flexport match);
-            -- a complete/landed shipment is never an exception.
-            ((CASE WHEN a.all_complete THEN 'Completed'
-                   ELSE coalesce(
-                     CASE lower(NULLIF(sh.status,'')) WHEN 'active' THEN 'Shipping' WHEN 'complete' THEN 'Completed'
-                          WHEN 'completed' THEN 'Completed' WHEN 'shipping' THEN 'Shipping' WHEN 'planned' THEN 'Planned'
-                          ELSE NULLIF(sh.status,'') END,
-                     CASE WHEN coalesce(sh.arrival_date, fx.arrival_date, sh.landing_date, fx.landing_date) < current_date THEN 'Completed'
-                          WHEN coalesce(sh.departure_date, fx.departure_date) <= current_date THEN 'Shipping' ELSE 'Planned' END) END) <> 'Completed'
-             AND sh.carrier_ref IS NULL AND fx.flex_id IS NULL) is_exception,
+            -- exception flags (client suppresses all of these once the shipment is Completed):
+            --   no_pos       — not linked to ANY purchase orders (empty shipment)
+            --   no_flex_match — carries a Flexport reference that doesn't match a Flexport shipment
+            (coalesce(a.po_count,0) = 0) no_pos,
+            ((coalesce(sh.carrier,'') ILIKE 'flex%' OR coalesce(sh.carrier_ref,'') ILIKE 'FLEX%') AND fx.flex_id IS NULL) no_flex_match,
             (coalesce(a.pallets,0) > 20) over_pallets,   -- est. cargo over one 20-pallet container → exception
             coalesce(sh.escalated,false) escalated,
             coalesce(sh.starred,false) starred,   -- ⭐ Focus / favourite toggle (migration 082)
