@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.125 - PO Notes "N" badge: faster tooltip, smaller icon, MASTER DATA label
+
+Refinements to the PO Notes badge (v25.123): the hover tooltip is now a custom one that appears
+after ~120ms (was the browser's ~1s native `title`); the "N" icon is a bit smaller; and the
+MASTER DATA "Notes" field label now carries the same purple N in front of it.
+
+Deploy: no new env vars, no migrations. Files: `supply/inject.html`.
+
 ## v25.124 - Open-row highlight + Order Plan "approve all partials" per PO
 
 - **Open-row highlight**: when a PO or shipment row is expanded, that row's background turns

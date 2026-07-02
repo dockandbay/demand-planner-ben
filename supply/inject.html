@@ -47,8 +47,9 @@
 /* level-3 sub-navs (REPORTS, CONFIG): underline tabs like the level-1/2 menus, in light blue */
 #supply-root #rep-subnav,#supply-root #config-subs,#supply-root #prod-subtabs,#supply-root .po-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 12px}
 #supply-root .ex-badge{display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:#dc2626;color:#fff;font-size:9px;font-weight:700;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px}
-#supply-root .po-note-badge{display:inline-block;min-width:16px;height:16px;line-height:15px;border-radius:4px;background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;font-size:9px;font-weight:800;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px;cursor:pointer;font-family:inherit}
+#supply-root .po-note-badge{display:inline-block;min-width:13px;height:13px;line-height:12px;border-radius:3px;background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;font-size:8px;font-weight:800;text-align:center;padding:0 3px;margin-left:4px;vertical-align:1px;cursor:pointer;font-family:inherit}
 #supply-root .po-note-badge:hover{background:#ddd6fe}
+#po-note-tip{position:fixed;z-index:9000;display:none;max-width:340px;background:#1f2937;color:#fff;font-size:11px;line-height:1.35;padding:6px 9px;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.25);white-space:pre-wrap;pointer-events:none}
 #supply-root tr.row-open>td{background:#FDFBD4 !important}   /* the currently-open PO / shipment row (overrides sticky-column white) */
 #supply-root .cli-form{max-width:660px;margin-bottom:10px}
 #supply-root .cli-row{display:flex;align-items:flex-start;gap:10px;padding:5px 0;border-bottom:1px solid #f1f1f1}
@@ -689,7 +690,7 @@
       +row('Production',cellPickBtn(po,ep,'prod_no',r.prod_no,'prod'))
       +row('Batch ID',cellPickBtn(po,ep,'batch_id',r.batch_id,'batch'))
       +row('Supplier confirmation',(r.supplier_confirmed?'<span class="tool-badge bg-green">✓ confirmed '+esc(r.supplier_confirmed)+(r.supplier_confirmed_by?' · '+esc(r.supplier_confirmed_by):'')+'</span> <button class="save-btn light pom-unconfirm" data-po="'+esc(po)+'" title="reset so the supplier must re-confirm">reset</button>':'<span class="tool-badge bg-amber">⏳ awaiting supplier confirmation</span>'))
-      +row('Notes <span class="mut tiny">(internal — shows as a purple N on the PO row; separate from the Timeline)</span>',txtIn(ep,'notes',r.notes,540,true))
+      +row('<span class="po-note-badge" style="cursor:default">N</span> Notes <span class="mut tiny">(internal — shows as a purple N on the PO row; separate from the Timeline)</span>',txtIn(ep,'notes',r.notes,540,true))
       +'</div><div style="margin-top:14px"><button class="save-btn light pom-del" data-po="'+esc(po)+'" title="delete this PO + its lines" style="color:#dc2626;border-color:#fca5a5">🗑 Delete this PO</button></div>'; }
   // PLAN-panel SHIPMENTS tab (#10): assign a shipment / FOB, ASN numbers, iFulfillment pallet labels — this PO.
   function poShipPanel(po){ var r=poBy[po]||{}; var ep='/api/supply/po/'+encodeURIComponent(po);
@@ -1128,7 +1129,7 @@
     var _ex=poExceptions(r,null);   // grid badge (invoice discrepancy resolves only once the PLAN panel is opened)
     var exFlag=_ex.all.length?' <span class="ex-badge" title="'+esc(_ex.all.length+' action'+(_ex.all.length>1?'s':'')+': '+_ex.all.join(' · '))+'">'+_ex.all.length+'</span>':'';
     // purple "N" badge → this PO has internal Notes (MASTER DATA). Hover shows them; click opens the PLAN ▸ MASTER DATA tab.
-    var noteFlag=(r.notes&&String(r.notes).trim())?' <button class="po-note-badge" data-po="'+esc(r.po)+'" title="'+esc(String(r.notes).trim())+'">N</button>':'';
+    var noteFlag=(r.notes&&String(r.notes).trim())?' <button class="po-note-badge" data-po="'+esc(r.po)+'" data-note="'+esc(String(r.notes).trim())+'">N</button>':'';
     var pocell=indent?'<td class="l po-child po-numcell"><span class="ind">└ </span><b>'+esc(r.po)+'</b>'+noteFlag+exFlag+'</td>':'<td class="l po-numcell"><b>'+esc(r.po)+'</b>'+noteFlag+exFlag+'</td>';
     // ERP cell — compact badge-style buttons (same look as the "✓ in sync" badge) → keeps the column narrow.
     // Labels collapse to a single action: Update lines / Update date / Update both. All open the same ERP modal.
@@ -1238,8 +1239,18 @@
     applyMobSheet(ex, !open, function(){ b.click(); });
     if(typeof writeHash==='function')writeHash(open?['supply','purchase-orders']:['supply','purchase-orders',b.dataset.po]);   // URL reflects the open PO
     if(!open && !ex.dataset.loaded){ ex.dataset.loaded='1'; var wt=_pendingPOTab; _pendingPOTab=null; loadPoDetail(b.dataset.po,i,wt); } }; }); }
+  // fast hover tooltip for the PO notes badge (native title is ~1s slow; this shows after 120ms)
+  var _noteTip;
+  function noteTip(el){ if(!_noteTip){ _noteTip=document.createElement('div'); _noteTip.id='po-note-tip'; document.body.appendChild(_noteTip); }
+    _noteTip.textContent=el.getAttribute('data-note')||''; _noteTip.style.display='block';
+    var r=el.getBoundingClientRect(), w=_noteTip.offsetWidth||200;
+    _noteTip.style.left=Math.max(6,Math.min(r.left, window.innerWidth-w-8))+'px'; _noteTip.style.top=(r.bottom+5)+'px'; }
+  function hideNoteTip(){ if(_noteTip)_noteTip.style.display='none'; }
   // purple "N" badge → expand the PO on the MASTER DATA tab (where the Notes live)
-  function bindPoNotes(){ document.querySelectorAll('#supply-root .po-note-badge[data-po]').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(e){ e.stopPropagation();
+  function bindPoNotes(){ document.querySelectorAll('#supply-root .po-note-badge[data-po]').forEach(function(b){ if(b._b)return; b._b=1;
+    b.addEventListener('mouseenter',function(){ b._t=setTimeout(function(){ noteTip(b); },120); });
+    b.addEventListener('mouseleave',function(){ clearTimeout(b._t); hideNoteTip(); });
+    b.onclick=function(e){ e.stopPropagation(); hideNoteTip();
     var po=b.dataset.po, exBtn=document.querySelector('#sup-grid .po-exp[data-po="'+((window.CSS&&CSS.escape)?CSS.escape(po):po)+'"]'); if(!exBtn)return;
     var i=exBtn.dataset.i, ex=document.getElementById('poexp-'+i), open=ex&&ex.style.display!=='none';
     if(!open){ _pendingPOTab='masterdata'; exBtn.click(); }
