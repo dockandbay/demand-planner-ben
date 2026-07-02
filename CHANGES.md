@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.142 - PO grid: "→ set shipping" quick-advance when the shipment has departed
+
+When a PO is still in PRODUCTION but its assigned shipment has departed (effective status Shipping), a
+small "→ set shipping" button now appears under the STATUS dropdown. Clicking it sets that PO — and every
+PO on the same master shipment still in PRODUCTION ("ships-with") — to SHIPPING in one go. Only PRODUCTION
+POs are touched (never re-opens completed/delivered ones).
+- Server: new ship_status on the PO calc (mirrors the SHIPMENTS grid: departed→Shipping, arrived→Completed,
+  else Planned); new POST /api/supply/po/:po/set-shipping bulk-advances by shipment_ref.
+- Client: button in the status cell (shown only when status=PRODUCTION and ship_status=Shipping); grid
+  refreshes in place after the change.
+
 ## v25.141 - <$500 rule open-only + clear categorised exception chips
 
 - **<$500 rule now applies to open POs only** (v25.138). Completed POs keep their original supplier

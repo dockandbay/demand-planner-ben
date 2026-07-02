@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.141';
+const APP_VERSION = 'v25.142';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1076,6 +1076,7 @@ app.get('/api/supply/:section', async (req, res) => {
               coalesce(po.supplier_invoice_total, lv.line_value, po.order_value_estimation, 0) val,
               fx.flex_id, fx.landing_date flex_landing, fx.departure_date flex_departure,
               sh.landing_date sh_landing, sh.delivery_date sh_delivery, sh.departure_date sh_departure, sh.arrival_date sh_arrival,
+              coalesce(sh.status,'') sh_status_raw,
               sh.mode sh_mode, sh.carrier sh_carrier, sh.carrier_ref sh_carrier_ref, fx.mode flex_mode,
               (sh.master_po = po.po) is_master,
               da.avail deposit_avail, da.fx_rate deposit_fx,
@@ -1192,6 +1193,16 @@ app.get('/api/supply/:section', async (req, res) => {
           SELECT po, supplier_name, status,
             CASE WHEN coalesce(status,'') ILIKE '%complete%' THEN 'complete'
                  WHEN coalesce(status,'') ILIKE '%future%' THEN 'future' ELSE 'in_progress' END progress,
+            -- effective status of the assigned shipment (mirrors the SHIPMENTS grid; all-complete override is
+            -- irrelevant here since a PO showing this is itself open). Used to offer "advance to SHIPPING".
+            CASE WHEN coalesce(shipment_ref,'')='' THEN NULL
+                 ELSE coalesce(
+                   CASE lower(nullif(sh_status_raw,'')) WHEN 'active' THEN 'Shipping' WHEN 'complete' THEN 'Completed'
+                        WHEN 'completed' THEN 'Completed' WHEN 'shipping' THEN 'Shipping' WHEN 'planned' THEN 'Planned'
+                        ELSE nullif(sh_status_raw,'') END,
+                   CASE WHEN coalesce(sh_arrival, sh_landing, flex_landing) < current_date THEN 'Completed'
+                        WHEN coalesce(sh_departure, flex_departure) <= current_date THEN 'Shipping'
+                        ELSE 'Planned' END) END ship_status,
             to_char(start_production,'YYYY-MM-DD') prod_start,
             to_char(eff_prod_end,'YYYY-MM-DD') prod_end,
             CASE WHEN end_production_overide IS NOT NULL THEN 'M' WHEN prod_end_calc THEN 'calc' END prod_end_src,
@@ -3297,6 +3308,23 @@ app.post('/api/supply/po/:po', async (req, res) => {
     pay_balance_2_amount: 'numeric', pay_balance_2_date: 'date',
     credit_amount: 'numeric',
   }, body);
+});
+// Advance a PO (and every PO on the same master shipment still in PRODUCTION) to SHIPPING. Offered on the
+// grid when the shipment has departed but the PO status still says PRODUCTION. Only touches PRODUCTION POs
+// (never re-opens completed/delivered ones); scoped to the PO's shipment_ref so "ships-with" POs move together.
+app.post('/api/supply/po/:po/set-shipping', async (req, res) => {
+  try {
+    const r = (await pool.query(`SELECT coalesce(shipment_ref,'') shipment_ref FROM planner.purchase_orders WHERE po=$1`, [req.params.po])).rows[0];
+    if (!r) return res.status(404).json({ error: 'PO not found' });
+    let rows;
+    if (r.shipment_ref) rows = (await pool.query(
+      `UPDATE planner.purchase_orders SET status='SHIPPING', updated_at=now()
+        WHERE shipment_ref=$1 AND status ILIKE '%production%' RETURNING po`, [r.shipment_ref])).rows;
+    else rows = (await pool.query(
+      `UPDATE planner.purchase_orders SET status='SHIPPING', updated_at=now()
+        WHERE po=$1 AND status ILIKE '%production%' RETURNING po`, [req.params.po])).rows;
+    res.json({ updated: rows.length, pos: rows.map(x => x.po), shipment: r.shipment_ref || null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Supplier edit — sets the name AND resolves supplier_id so payment terms / production lead apply.
 app.post('/api/supply/po/:po/supplier', async (req, res) => {

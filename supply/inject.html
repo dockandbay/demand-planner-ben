@@ -49,6 +49,8 @@
 #supply-root .ex-badge{display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:#dc2626;color:#fff;font-size:9px;font-weight:700;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px}
 /* categorised exception chips on the PO row — one per area (Dates/Pay/Freight/Plan/Notes) so it's clear at a glance WHICH area has an issue; hover shows the specific message(s) */
 #supply-root .ex-cat{display:inline-block;height:15px;line-height:15px;border-radius:3px;color:#fff;font-size:8.5px;font-weight:700;letter-spacing:.02em;text-align:center;padding:0 5px;margin-left:4px;vertical-align:1px;cursor:help;white-space:nowrap}
+#supply-root .po-set-shipping{font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:#dbeafe;border:1px solid #60a5fa;color:#1d4ed8;cursor:pointer;white-space:nowrap}
+#supply-root .po-set-shipping:hover{background:#bfdbfe}
 #supply-root .po-note-badge{display:inline-block;min-width:13px;height:13px;line-height:12px;border-radius:3px;background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;font-size:8px;font-weight:800;text-align:center;padding:0 3px;margin-left:4px;vertical-align:1px;cursor:pointer;font-family:inherit}
 #supply-root .po-note-badge:hover{background:#ddd6fe}
 #po-note-tip{position:fixed;z-index:9000;display:none;max-width:340px;background:#1f2937;color:#fff;font-size:11px;line-height:1.35;padding:6px 9px;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.25);white-space:pre-wrap;pointer-events:none}
@@ -974,7 +976,7 @@
         +(shown.length<f.length?'<div style="margin:8px 0;text-align:center"><button class="save-btn light" id="po-showall">Show all '+f.length+' &darr;</button></div>':'');
       var sa=document.getElementById('po-showall'); if(sa)sa.onclick=function(){ _poShowAll=true; view(); };
       bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindPoNotes();
-      bindDepPick(patchPoRow); bindPoStars();
+      bindDepPick(patchPoRow); bindPoStars(); bindSetShipping();
       if(_pendingPO){ var want=_pendingPO; _pendingPO=null; setTimeout(function(){
         // if the target PO is past the render cap it isn't in the DOM yet — reveal all rows and retry so the
         // direct PO actually opens (links from Shipments / Deposits / Cash flow / Actions all rely on this)
@@ -987,6 +989,12 @@
         if(Array.isArray(fresh)){ rows.length=0; Array.prototype.push.apply(rows, fresh); }
         view(); try{window.scrollTo(0,sy);}catch(e){}
       }).catch(function(){ selectSection('purchase-orders'); }); }
+    // "→ set shipping": shipment has departed but PO still in Production → advance this PO + all ships-with POs
+    function bindSetShipping(){ document.querySelectorAll('#sup-grid .po-set-shipping').forEach(function(b){ b.onclick=function(e){ e.stopPropagation();
+      b.disabled=true; b.textContent='…';
+      fetch('/api/supply/po/'+encodeURIComponent(b.dataset.po)+'/set-shipping',{method:'POST'}).then(function(r){return r.json();}).then(function(j){
+        if(j&&j.error){ alert(j.error); b.disabled=false; b.textContent='→ set shipping'; return; }
+        refreshGrid(); }).catch(function(err){ alert('Failed: '+(err.message||err)); b.disabled=false; b.textContent='→ set shipping'; }); }; }); }
     // Patch ONE PO row in place (no grid re-render / flash) after an assign. Only when not grouped by shipment —
     // assigning a shipment changes the shipment group, which needs a regroup, so that case does a full refresh.
     function patchPoRow(po){ if(state.grp==='shipment'){ refreshGrid(); return; }
@@ -1001,7 +1009,7 @@
         var exOpen=(function(){var e=document.getElementById('poexp-'+btn.dataset.i);return e&&e.style.display!=='none';})();
         var nm=tmp.querySelector('tr'); if(nm&&tr&&tr.parentNode){ tr.parentNode.replaceChild(nm,tr); }
         if(exOpen&&nm){ nm.classList.add('row-open'); var eb=nm.querySelector('.po-exp'); if(eb)eb.classList.add('open'); }   // keep the open-row highlight after an in-place patch
-        bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindDepPick(patchPoRow); bindPoStars(); bindPoNotes();
+        bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindDepPick(patchPoRow); bindPoStars(); bindPoNotes(); bindSetShipping();
       }).catch(function(){ refreshGrid(); }); }
     _poRefresh=refreshGrid; _poPatchRow=patchPoRow;
     c.querySelectorAll('#po-prog .pill:not(.po-recent):not(.po-focus)').forEach(function(p){p.onclick=function(){c.querySelectorAll('#po-prog .pill:not(.po-recent):not(.po-focus)').forEach(function(x){x.classList.remove('active');});p.classList.add('active');state.f=p.dataset.f;_poShowAll=false;view();};});
@@ -1204,7 +1212,7 @@
       +'<td class="l">'+(r.country?esc(clabel(r.country)):'<span class="mut tiny">—</span>')+(r.country_src==='M'?'<span class="src m">M</span>':'')+'</td>'
       +'<td class="l">'+cellPickBtn(r.po,ep,'branch',r.branch,'branch')+'</td>'
       +'<td class="l" style="font-size:10px;line-height:1.05;max-width:130px;white-space:normal">'+(r.client?esc(r.client):'<span class="mut">—</span>')+'<br>'+(r.sales_order_ref?'<span class="mut">'+esc(r.sales_order_ref)+'</span>':'<span class="mut">—</span>')+'</td>'
-      +'<td class="l">'+statusSel(ep,r.status)+'</td>'
+      +'<td class="l">'+statusSel(ep,r.status)+((r.status==='PRODUCTION'&&r.ship_status==='Shipping')?'<div style="margin-top:3px"><button class="po-set-shipping" data-po="'+esc(r.po)+'" title="This PO&rsquo;s shipment has departed (Shipping) but the PO is still in Production — set this PO and every PO on the same shipment still in Production to SHIPPING">→ set shipping</button></div>':'')+'</td>'
       +'<td class="l">'+shipcell+'</td>'
       +'<td class="l">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0)+'</td>'
       +dTd(r.prod_start,'',(r.status==='FUTURE'&&datePast(r.prod_start))?DTD_LRED:'')
