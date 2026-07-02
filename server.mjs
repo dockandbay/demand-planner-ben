@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.119';
+const APP_VERSION = 'v25.120';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2364,6 +2364,19 @@ app.post('/api/supply/note-read/:id', async (req, res) => {
     res.json({ ok: true, read });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// The signed-in user's email, forwarded by the auth layer in front of the app (Diviyaj's Gmail login).
+// Checks the common auth-proxy headers; strips the IAP "accounts.google.com:" prefix. null if none present.
+function authUser(req) {
+  const h = req.headers || {};
+  let e = h['x-forwarded-email'] || h['x-auth-request-email'] || h['cf-access-authenticated-user-email']
+        || h['x-goog-authenticated-user-email'] || h['x-authenticated-user-email'] || h['x-user-email'] || '';
+  e = String(e).trim(); if (!e) return null;
+  if (e.indexOf(':') >= 0) e = e.slice(e.lastIndexOf(':') + 1);   // e.g. accounts.google.com:foo@bar.com → foo@bar.com
+  return e || null;
+}
+// Author to stamp on an INTERNAL (Dock & Bay side) note: the signed-in user if the auth layer forwards it,
+// else a real name the client passed (ignore the generic "Dock & Bay" placeholder), else null.
+function internalAuthor(req, clientVal) { const u = authUser(req); if (u) return u; return (clientVal && clientVal !== 'Dock & Bay') ? clientVal : null; }
 app.post('/api/supply/portal-note', async (req, res) => {
   const b = req.body || {};
   if (!b.po || !String(b.body || '').trim()) return res.status(400).json({ error: 'po and body required' });
@@ -2371,8 +2384,10 @@ app.post('/api/supply/portal-note', async (req, res) => {
     // stamp the PO's supplier so the note shows in that supplier's portal thread (internal/PO-PLAN posts don't pass one)
     let sid = b.supplier_id || null;
     if (!sid) { const r = await pool.query(`SELECT s.id FROM planner.purchase_orders po JOIN planner.suppliers s ON s.name=po.supplier_name WHERE po.po=$1`, [b.po]); sid = (r.rows[0] && r.rows[0].id) || null; }
+    const kind = b.author_kind || 'supplier';
+    const email = kind === 'internal' ? internalAuthor(req, b.author_email) : (b.author_email || null);
     await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body) VALUES ($1,$2,$3,$4,$5)`,
-      [b.po, sid, b.author_email || null, b.author_kind || 'supplier', String(b.body).trim()]);
+      [b.po, sid, email, kind, String(b.body).trim()]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -2584,8 +2599,10 @@ app.post('/api/supply/shipment-note', async (req, res) => {
   const b = req.body || {};
   if (!b.shipment_ref || !b.body) return res.status(400).json({ error: 'shipment_ref and body required' });
   try {
+    const kind = b.author_kind || 'internal';
+    const email = kind === 'internal' ? internalAuthor(req, b.author_email) : (b.author_email || null);
     const r = await pool.query(`INSERT INTO planner.shipment_notes (shipment_ref, author_kind, author_email, body)
-      VALUES ($1,$2,$3,$4) RETURNING id`, [b.shipment_ref, b.author_kind || 'internal', b.author_email || null, String(b.body)]);
+      VALUES ($1,$2,$3,$4) RETURNING id`, [b.shipment_ref, kind, email, String(b.body)]);
     res.json({ id: r.rows[0].id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -4452,8 +4469,10 @@ app.post('/api/supply/sample/:id', (req, res) =>     // patch fields (admin edit
 app.post('/api/supply/sample-note', async (req, res) => {
   const b = req.body || {}; const sid = b.sample_id || b.id;   // accept either key (admin grid vs portal preview)
   if (!sid || !b.body) return res.status(400).json({ error: 'sample_id and body required' });
-  try { const r = await pool.query(`INSERT INTO planner.sample_notes (sample_id, author_kind, author_email, body)
-    VALUES ($1::bigint,$2,$3,$4) RETURNING id`, [sid, b.author_kind||'internal', b.author_email||null, String(b.body)]);
+  try { const kind = b.author_kind || 'internal';
+    const email = kind === 'internal' ? internalAuthor(req, b.author_email) : (b.author_email || null);
+    const r = await pool.query(`INSERT INTO planner.sample_notes (sample_id, author_kind, author_email, body)
+    VALUES ($1::bigint,$2,$3,$4) RETURNING id`, [sid, kind, email, String(b.body)]);
     res.json({ id: r.rows[0].id }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Admin-gated sample actions matching the portal-view body shapes ({id} in body) — used by the

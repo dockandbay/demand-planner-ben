@@ -3,6 +3,21 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.120 - Timeline notes attributed to the signed-in user (not generic "Dock & Bay")
+
+Internal timeline notes (PO, shipment, sample) now record the signed-in user's email instead of
+the hard-coded "Dock & Bay". The server reads the authenticated email from the auth layer's
+forwarded header — `authUser()` checks x-forwarded-email / x-auth-request-email /
+cf-access-authenticated-user-email / x-goog-authenticated-user-email (strips the IAP prefix) /
+x-authenticated-user-email / x-user-email. Attribution is done SERVER-side (can't be spoofed by
+the client). If no header is present it falls back to "Dock & Bay" (unchanged behaviour).
+
+**ACTION FOR DIVIYAJ:** for this to light up in production, the Gmail auth layer in front of the
+app must forward the signed-in email to the Express server as one of the headers above (e.g. set
+`X-Forwarded-Email` from the session/proxy). Until it does, notes keep showing "Dock & Bay".
+
+Deploy: no new env vars, no migrations. Files: `server.mjs`.
+
 ## Diviyaj deploy — SQL since early 2026-07-01
 
 Run **`diviyaj_deploy_2026-07-01_supply.sql`** on prod (schema `planner`). It bundles both of
