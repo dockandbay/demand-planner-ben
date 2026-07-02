@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.139 - Deposit assignment: supplier match (in addition to region)
+
+Deposits could already only be assigned within the same region (AU vs non-AU). Added a second guard:
+a deposit can only be assigned to a PO from the **same supplier** — a Lixin PO can only take Lixin
+deposit references, etc.
+- Server (PO patch): rejects a deposit whose supplier differs from the PO's supplier (clear error), on
+  top of the existing region guard. apply-all already scopes by supplier + region.
+- Client (deposit picker): supplier-mismatched deposits are greyed/blocked with a "✗ <supplier>" flag
+  (same UX as the region block); assignable deposits are now sorted to the top of the list.
+- Matching is on supplier_name (all deposit supplier names match PO supplier names exactly).
+
 ## v25.138 - Small POs (< $500): 0% deposits + due on invoice/ship date
 
 New default for low-value orders. When a PO's value used (final invoice, or the order-plan estimate if

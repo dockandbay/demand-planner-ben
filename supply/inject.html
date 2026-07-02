@@ -784,6 +784,9 @@
   function isAU(c){ return String(c||'').trim().toUpperCase()==='AU'; }   // AU deposits/POs are region-isolated from everything else
   function openDepPick(po,anchor,done){ closeShPop();
     var poAU=isAU((poBy[po]||{}).country);   // this PO's region (AU vs not) — deposits must match
+    var poSup=String((poBy[po]||{}).supplier_name||'').trim().toLowerCase();   // this PO's supplier — deposits must match
+    // a deposit is assignable only if it matches the PO on BOTH region and supplier; returns '' (ok) or the reason
+    function depIssue(d){ if(isAU(d.country)!==poAU) return 'region'; if(poSup && String(d.supplier_name||'').trim().toLowerCase()!==poSup) return 'supplier'; return ''; }
     var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop';
     pop.innerHTML='<div class="shpop-h">Deposit for <b>'+esc(po)+'</b></div><input class="shpop-q" placeholder="search reference / supplier…"><div id="shpop-list"><div class="count" style="padding:8px">Loading…</div></div>';
     placePop(pop, anchor.getBoundingClientRect());
@@ -793,8 +796,11 @@
       function render(q){ q=(q||'').trim().toLowerCase(); var html='';
         html+='<div class="shpop-opt unassign" data-none="1">— No deposit</div>';
         var ms=deps.filter(function(d){return !q||((d.reference||'')+' '+(d.supplier_name||'')).toLowerCase().indexOf(q)>=0;});
-        ms.slice(0,q?40:12).forEach(function(d){ var bad=(isAU(d.country)!==poAU);   // region mismatch → show but block
-          html+='<div class="shpop-opt'+(bad?' dep-blocked':'')+'"'+(bad?' title="region mismatch — an AU deposit can only go on an AU PO (and vice-versa)" style="opacity:.45;cursor:not-allowed"':' data-ref="'+esc(d.reference)+'"')+'>'+esc(d.reference)+' <span class="mut tiny">'+esc(d.supplier_name||'')+(d.deposit_remaining!=null?' · '+money(d.deposit_remaining)+' left':'')+(bad?' · ✗ '+esc(d.country||'?')+' region':'')+'</span></div>'; });
+        ms.sort(function(a,b){ return (depIssue(a)?1:0)-(depIssue(b)?1:0); });   // assignable (matching) deposits first
+        ms.slice(0,q?40:12).forEach(function(d){ var issue=depIssue(d), bad=!!issue;   // region OR supplier mismatch → show but block
+          var reason=issue==='region'?'region mismatch — an AU deposit can only go on an AU PO (and vice-versa)':issue==='supplier'?'supplier mismatch — a deposit can only be assigned to a PO from the same supplier':'';
+          var flag=issue==='region'?' · ✗ '+esc(d.country||'?')+' region':issue==='supplier'?' · ✗ '+esc(d.supplier_name||'other supplier'):'';
+          html+='<div class="shpop-opt'+(bad?' dep-blocked':'')+'"'+(bad?' title="'+reason+'" style="opacity:.45;cursor:not-allowed"':' data-ref="'+esc(d.reference)+'"')+'>'+esc(d.reference)+' <span class="mut tiny">'+esc(d.supplier_name||'')+(d.deposit_remaining!=null?' · '+money(d.deposit_remaining)+' left':'')+flag+'</span></div>'; });
         if(!q&&deps.length>12)html+='<div class="mut tiny" style="padding:5px 10px">'+(deps.length-12)+' more — type to search…</div>';
         var list=document.getElementById('shpop-list'); list.innerHTML=html;
         list.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ if(o.classList.contains('dep-blocked'))return; set(o.dataset.none?'NO DEPOSIT':o.dataset.ref); }; });

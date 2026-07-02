@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.138';
+const APP_VERSION = 'v25.139';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3254,13 +3254,21 @@ app.post('/api/supply/po/:po', async (req, res) => {
   if (Object.keys(body).some(k => k.indexOf('pack_') === 0 || DTC_FIELDS.indexOf(k) >= 0)) {
     try { await pool.query(`UPDATE planner.purchase_orders SET dtc_accepted_at=NULL, dtc_accepted_by=NULL WHERE po=$1`, [req.params.po]); } catch (e) {}
   }
-  // Region guard: AU deposits pair only with AU POs, and non-AU deposits only with non-AU POs (prevents accidental cross-region assignment)
+  // Deposit assignment guards: (1) region — AU deposits pair only with AU POs and vice-versa; (2) supplier —
+  // a deposit can only go on a PO from the same supplier (a Lixin deposit only onto Lixin POs). Prevents
+  // accidental cross-region / cross-supplier assignment.
   if (body.deposit_ref && String(body.deposit_ref).trim() && String(body.deposit_ref).trim().toUpperCase() !== 'NO DEPOSIT') {
     try {
-      const dep = (await pool.query(`SELECT coalesce(country,'') country FROM planner.deposits WHERE reference=$1 LIMIT 1`, [String(body.deposit_ref).trim()])).rows[0];
-      const poc = (await pool.query(`SELECT upper(coalesce(nullif(po.country_code,''),(SELECT b.country_code FROM planner.branches b WHERE b.name=po.branch),'')) ctry FROM planner.purchase_orders po WHERE po.po=$1`, [req.params.po])).rows[0];
-      if (dep && poc) { const depAU = /^AU$/i.test((dep.country || '').trim()), poAU = /^AU$/.test(poc.ctry || '');
-        if (depAU !== poAU) return res.status(400).json({ error: 'Region mismatch — ' + (depAU ? 'an AU deposit' : 'a non-AU deposit') + ' cannot be assigned to ' + (poAU ? 'an AU purchase order' : 'a non-AU purchase order') + '.' }); }
+      const ref = String(body.deposit_ref).trim();
+      const dep = (await pool.query(`SELECT coalesce(country,'') country, coalesce(supplier_name,'') supplier FROM planner.deposits WHERE reference=$1 AND is_deposit LIMIT 1`, [ref])).rows[0];
+      const poc = (await pool.query(`SELECT upper(coalesce(nullif(po.country_code,''),(SELECT b.country_code FROM planner.branches b WHERE b.name=po.branch),'')) ctry, coalesce(po.supplier_name,'') supplier FROM planner.purchase_orders po WHERE po.po=$1`, [req.params.po])).rows[0];
+      if (dep && poc) {
+        const depAU = /^AU$/i.test((dep.country || '').trim()), poAU = /^AU$/.test(poc.ctry || '');
+        if (depAU !== poAU) return res.status(400).json({ error: 'Region mismatch — ' + (depAU ? 'an AU deposit' : 'a non-AU deposit') + ' cannot be assigned to ' + (poAU ? 'an AU purchase order' : 'a non-AU purchase order') + '.' });
+        const norm = s => String(s || '').trim().toLowerCase();
+        if (norm(dep.supplier) && norm(poc.supplier) && norm(dep.supplier) !== norm(poc.supplier))
+          return res.status(400).json({ error: 'Supplier mismatch — deposit ' + ref + ' belongs to ' + dep.supplier + ', but this PO is ' + poc.supplier + '. A deposit can only be assigned to a PO from the same supplier.' });
+      }
     } catch (e) { /* non-fatal — fall through */ }
   }
   patch(res, 'planner.purchase_orders', 'po', req.params.po, {
