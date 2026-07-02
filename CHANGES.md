@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.129 - Cash Flow: All-transactions export + monthly paid/unpaid summary
+
+The Cash Flow report toolbar now has three export groups:
+- **All transactions** — Copy + CSV of *every* cash-flow line (ignores the on-screen filters).
+- **Monthly paid/unpaid** — Copy + CSV of a per-month summary: Paid, Unpaid (split committed /
+  estimate), Total.
+- **This view** — the existing Copy + CSV of the currently filtered lines (unchanged).
+
+Deploy: no new env vars, no migrations. Files: `supply/inject.html`.
+
 ## v25.128 - Cash Flow: time on due date, unless a likely date is applied
 
 Cash Flow lines are now dated on the **due date**, overridden by a **likely date whenever one is

@@ -2881,10 +2881,17 @@
       +' <span class="tiny mut" style="margin-left:8px">Status:</span>'+statusChips
       +' <span class="tiny mut" style="margin-left:8px">Basis:</span>'+basisChips
       +' '+countrySelHtml+'<input class="flt" id="cf-q" placeholder="Filter PO / supplier…" style="width:170px">'
-      +'<span style="margin-left:auto;display:flex;align-items:center;gap:6px">'
-      +'<button class="save-btn" id="cf-copy" title="Copy the filtered lines to the clipboard">Copy</button>'
-      +'<button class="save-btn" id="cf-csv" title="Download the filtered lines as a CSV" style="background:#dcfce7;color:#166534;border-color:#16a34a">CSV</button>'
-      +'<span class="count">as of '+esc(fd(today))+'</span></span></div>'
+      +'<span style="margin-left:auto;display:flex;align-items:center;gap:5px;flex-wrap:wrap;justify-content:flex-end">'
+      +'<span class="tiny mut">All transactions:</span>'
+      +'<button class="save-btn" id="cf-copy-all" title="Copy every cash-flow transaction to the clipboard">⧉</button>'
+      +'<button class="save-btn" id="cf-csv-all" style="background:#dcfce7;color:#166534;border-color:#16a34a" title="Download every cash-flow transaction as CSV">⬇ CSV</button>'
+      +'<span class="tiny mut" style="margin-left:6px">Monthly paid/unpaid:</span>'
+      +'<button class="save-btn" id="cf-sum-copy" title="Copy the monthly paid/unpaid summary">⧉</button>'
+      +'<button class="save-btn" id="cf-sum-csv" style="background:#dcfce7;color:#166534;border-color:#16a34a" title="Download the monthly paid/unpaid summary CSV">⬇ CSV</button>'
+      +'<span class="tiny mut" style="margin-left:6px">This view:</span>'
+      +'<button class="save-btn" id="cf-copy" title="Copy the filtered lines to the clipboard">⧉</button>'
+      +'<button class="save-btn" id="cf-csv" title="Download the filtered lines as a CSV">⬇ CSV</button>'
+      +'<span class="count" style="margin-left:6px">as of '+esc(fd(today))+'</span></span></div>'
       +'<div id="cf-body"><div class="count">Loading…</div></div>';
     function cfExportRows(){ return exportLines.map(function(x){ return {
       Date:x.date||'', Month:cfMonthLabel(x.month), Type:x.type, Reference:x.ref||'', Supplier:x.supplier||'',
@@ -2892,8 +2899,25 @@
       Kind:x.date_kind, Basis:x.basis, Class:(x.estimate?'estimate':'committed'),
       Due:x.due||'', Paid_date:x.paid_date||'', Likely:x.likely_date||'' }; }); }
     function cfTag(){ return _cfState.month?cfMonthLabel(_cfState.month):'all months'; }
+    // ALL transactions (every line, ignores the on-screen filters)
+    function cfAllRows(){ return d.lines.map(function(x){ return {
+      Date:x.date||'', Month:cfMonthLabel(x.month), Type:x.type, Reference:x.ref||'', Supplier:x.supplier||'',
+      Market:x.country||'', Amount_USD:x.amount, Status:(x.paid?'Paid':x.overdue?'Overdue':'Due'),
+      Kind:x.date_kind, Basis:x.basis, Class:(x.estimate?'estimate':'committed'),
+      Due:x.due||'', Paid_date:x.paid_date||'', Likely:x.likely_date||'' }; }); }
+    // monthly summary: paid vs unpaid (unpaid split committed / estimate) — all transactions
+    function cfSummaryRows(){ var mg={},mo=[]; d.lines.forEach(function(x){ var m=x.month||'—'; if(!mg[m]){mg[m]={paid:0,uc:0,ue:0};mo.push(m);}
+        if(x.paid)mg[m].paid+=x.amount; else if(x.estimate)mg[m].ue+=x.amount; else mg[m].uc+=x.amount; });
+      mo.sort(function(a,b){if(a==='—')return 1;if(b==='—')return -1;return a<b?-1:1;});
+      return mo.map(function(m){ var g=mg[m]; return {Month:cfMonthLabel(m), Month_key:m, Paid_USD:Math.round(g.paid),
+        Unpaid_USD:Math.round(g.uc+g.ue), Unpaid_committed_USD:Math.round(g.uc), Unpaid_estimate_USD:Math.round(g.ue),
+        Total_USD:Math.round(g.paid+g.uc+g.ue)}; }); }
     c.querySelector('#cf-copy').onclick=function(){ copyRows(cfExportRows(),'Cash flow ('+cfTag()+')'); };
     c.querySelector('#cf-csv').onclick=function(){ csv(cfExportRows(),'cash_flow_'+(_cfState.month||'all')+'.csv'); };
+    c.querySelector('#cf-copy-all').onclick=function(){ copyRows(cfAllRows(),'Cash flow — all transactions'); };
+    c.querySelector('#cf-csv-all').onclick=function(){ csv(cfAllRows(),'cash_flow_all_transactions.csv'); };
+    c.querySelector('#cf-sum-copy').onclick=function(){ copyRows(cfSummaryRows(),'Cash flow — monthly paid/unpaid'); };
+    c.querySelector('#cf-sum-csv').onclick=function(){ csv(cfSummaryRows(),'cash_flow_monthly_summary.csv'); };
     c.querySelector('#cf-month').onchange=function(){_cfState.month=this.value;draw();};
     c.querySelectorAll('.pill[data-tt]').forEach(function(p){p.onclick=function(){var t=p.dataset.tt;_cfState.types[t]=!_cfState.types[t];p.classList.toggle('active',_cfState.types[t]);draw();};});
     c.querySelectorAll('.pill[data-st]').forEach(function(p){p.onclick=function(){_cfState.status=p.dataset.st;c.querySelectorAll('.pill[data-st]').forEach(function(x){x.classList.toggle('active',x===p);});draw();};});
