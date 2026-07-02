@@ -1448,8 +1448,10 @@
       +'<div class="tw pay-tbl" style="max-width:1320px"><table><thead><tr><th class="l">Payment</th><th>Calc / est</th><th class="l">Amount</th><th class="l">Date paid</th><th class="l">Deposit ref</th><th class="l">Due</th><th class="l">Likely pay date</th><th class="l">Status</th></tr></thead><tbody>';
     h+=tr('<td class="l"><b>Start deposit</b> <input class="fci pctin payin" data-ep="'+ep+'" data-field="start_deposit_pct_override" value="'+esc(r.start_pct)+'"><span class="mut tiny">% · capped at ref avail</span></td>'
       +(function(){ var term=Number(r.start_calc)||0, drawn=Number(r.start_dep)||0, rolled=Math.round((term-drawn)*100)/100;
-          var capped=(r.deposit_ref&&rolled>0.009);   // drew less than term because the ref ran short → rest in completion
-          return '<td>'+money(capped?drawn:r.start_calc)+(capped?' <span class="mut tiny" style="color:#b91c1c" title="capped at the deposit ref&rsquo;s remaining availability — the rest rolls into the completion deposit">of '+money(term)+' term · '+money(rolled)+' → completion</span>':'')
+          var capped=(r.deposit_ref&&rolled>0.009);   // drew less than term (NO DEPOSIT, or a ref that ran short) → rest rolls on
+          var dest=(Number(r.completion_pct)>0?'completion':'balance');   // rolls into completion if the supplier has one, else the balance
+          var noDep=(String(r.deposit_ref||'').toUpperCase()==='NO DEPOSIT');
+          return '<td>'+money(capped?drawn:r.start_calc)+(capped?' <span class="mut tiny" style="color:#b91c1c" title="'+(noDep?'no deposit taken':'capped at the deposit ref&rsquo;s remaining availability')+' — the rest rolls into the '+dest+'">'+(noDep?'no deposit · ':'of '+money(term)+' term · ')+money(rolled)+' → '+dest+'</span>':'')
             +((startOwed && startUnpaid && !r.deposit_ref)?payFillBtn('pay_start_deposit_assigned','pay_start_deposit_date',r.start_calc)   // direct cash
               :(startOwed && r.deposit_ref && !(n(r.start_assigned)>0))?payFillBtn('pay_start_deposit_assigned','pay_start_deposit_date',(capped?drawn:r.start_calc),'assign')   // draw from the deposit pool
               :'')+'</td>'; })()
@@ -1470,7 +1472,8 @@
       +'<td class="l"><span class="mut">—</span></td><td class="l"><span class="mut">—</span></td>'
       +'<td class="l"><span class="mut">—</span></td><td class="l"><span class="mut">—</span></td><td class="l"><span class="mut">—</span></td>');
     var balnote = r.credit_days!=null?'<span class="mut tiny">'+(r.credit_type==='on_shipment'?'ship':'clearance')+' +'+r.credit_days+'cr</span>':'';
-    h+=tr('<td class="l"><b>Balance'+(partial?' 1':'')+'</b> <span class="mut tiny">'+esc(r.balance_pct)+'% · remainder</span></td>'
+    var balPctShown=(n(r.value_used)>0?Math.round((n(r.value_used)-n(r.start_dep)-n(r.completion_calc))/n(r.value_used)*100):n(r.balance_pct));   // effective % of order value (matches the owing amount, incl. any start rolled in)
+    h+=tr('<td class="l"><b>Balance'+(partial?' 1':'')+'</b> <span class="mut tiny">'+esc(balPctShown)+'% · remainder</span></td>'
       +'<td>'+money(r.balance_owing)+' <span class="mut tiny">owing'+(n(r.credit_amount)>0?' · incl. '+money(r.credit_amount)+' credit':'')+'</span>'+(bal1Unpaid?payFillBtn('pay_balance_1_amount','pay_balance_1_date',r.balance_owing):'')+'</td>'
       +'<td class="l">'+payIn(ep,'pay_balance_1_amount',r.balance_1_amount)+'</td>'
       +'<td class="l">'+payIn(ep,'pay_balance_1_date',r.balance_1_date,true,!(n(r.balance_1_amount)>0))+'</td>'

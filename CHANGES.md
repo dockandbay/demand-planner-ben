@@ -3,6 +3,21 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.137 - Fix: NO DEPOSIT rolls the start deposit into completion (if any) else balance
+
+Reported on PO-56UKMQ1 (MQ Print, terms 50% start / 0% completion / 50% balance, deposit ref set to
+NO DEPOSIT): the start deposit still calculated 50% and rolled it into the COMPLETION milestone — but
+MQ Print has no completion term, so a phantom 50% completion appeared while the balance stayed at 50%.
+An undrawn start deposit now rolls into completion ONLY when the supplier actually has a completion
+milestone (completion% > 0); otherwise it stays in the balance. Applies to both NO DEPOSIT and a
+deposit ref that ran short.
+- Server: completion_calc and catch_up are 0 when completion% = 0 (the start shortfall lands in the balance).
+- Client: the start-row note now reads "→ completion" or "→ balance" per the supplier's terms (and
+  "no deposit · …" wording for NO DEPOSIT); the Balance row's % is computed from the actual amounts so it
+  matches the owing figure.
+- PO-56UKMQ1 now shows start 0, completion 0, balance 100% (6,764.78). Money conserved across all 1,362
+  POs (start + completion + balance = value + credit); PO-669591 (v25.135) unaffected.
+
 ## v25.136 - UX: paste dates into any date field
 
 Native `<input type="date">` only accepts `yyyy-mm-dd` in the exact locale format, so pasting a date
