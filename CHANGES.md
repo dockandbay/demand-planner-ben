@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.153 - BUY / FBA grids: launch & discontinue dates as dd-mmm-yy
+
+The BUY and FBA plan grids showed launch / discontinue dates as dd/mm/yy — now dd-mmm-yy (e.g. 14-May-26),
+matching the rest of the app. Scoped to those grid date cells (new dateDMY helper); month column headers and
+the DEMAND SKU view are unchanged.
+
 ## v25.152 - Key Accounts config: per-row Delete + search box
 
 - **Delete** button next to Edit on each key-account row (with a confirm). Uses the existing delete endpoint.

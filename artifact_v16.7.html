@@ -1199,6 +1199,7 @@ function stCls(st){return st==='ACTIVE'?'s-act':st==='FUTURE'?'s-fut':'s-dis';}
 function tiCls(t){return t==='A'?'ta':t==='B'?'tb':'tc';}
 function getSt(ms,mkt){return(ms&&ms[mkt]&&ms[mkt].st)||'ACTIVE';}
 function fmtDate(d){if(!d)return'';const p=d.slice(0,10).split('-');return`${p[2]}/${p[1]}/${String(p[0]).slice(2)}`;}
+function dateDMY(d){if(!d||typeof d!=='string')return'';var s=d.slice(0,10),p=s.split('-');if(p.length<3)return s;var mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];return p[2]+'-'+(mo[parseInt(p[1],10)-1]||p[1])+'-'+(p[0].length===4?p[0].slice(2):p[0]);}  // dd-mmm-yy (BUY/FBA grid dates)
 
 // Compute buy qtys for a SKU+market (sum over BUY_KEYS)
 function getBuyQtys(sku,mkt){
@@ -1663,7 +1664,7 @@ function render(){
         return '<td class="bq"><span class="bq-nil">—</span></td>';
       }
       const pairs=TRF_PAIRS[CUR]||[];
-      const launchStr=fmtDate(launch),discStr=fmtDate(disc);
+      const launchStr=dateDMY(launch),discStr=dateDMY(disc);
       let trail;
       if(BP_VIEW==='fba'){
         const cp=(PD[s.s]&&PD[s.s].cp)||0;
