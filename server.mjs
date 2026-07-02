@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.126';
+const APP_VERSION = 'v25.127';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1543,7 +1543,7 @@ app.get('/api/supply/:section', async (req, res) => {
           )
           SELECT d.id,d.reference,d.is_deposit,d.supplier_name,d.prod_no,d.country,d.description,
             d.amount,d.xero_fx,d.xero_account_code, coalesce(d.status,'') status, to_char(d.date_paid,'YYYY-MM-DD') date_paid,
-            to_char(d.date_due,'YYYY-MM-DD') date_due,
+            to_char(d.date_due,'YYYY-MM-DD') date_due, to_char(d.date_likely_pay,'YYYY-MM-DD') date_likely_pay,
             CASE WHEN d.is_deposit THEN coalesce(dr.used,0) END deposit_used,
             CASE WHEN d.is_deposit THEN coalesce(p.pool_amount, coalesce(d.amount,0))-coalesce(dr.used,0) END deposit_remaining,
             CASE WHEN d.is_deposit THEN round(coalesce(ea.est_alloc,0),2) END est_alloc,
@@ -2110,7 +2110,7 @@ app.post('/api/supply/deposit/:id', async (req, res) => {
          WHERE NOT EXISTS (SELECT 1 FROM planner.suppliers WHERE lower(trim(name))=lower(trim($1)))`, [nm.trim()]);
   } catch (e) { /* non-fatal */ }
   patch(res, 'planner.deposits', 'id', req.params.id,
-    { amount: 'numeric', xero_fx: 'numeric', date_paid: 'date', date_due: 'date', reference: 'text',
+    { amount: 'numeric', xero_fx: 'numeric', date_paid: 'date', date_due: 'date', date_likely_pay: 'date', reference: 'text',
       supplier_name: 'text', description: 'text', prod_no: 'text', country: 'text',
       xero_account_code: 'text', status: 'text' }, req.body, 'bigint');
 });

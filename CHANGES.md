@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.127 - Deposits: Due date + Likely-pay date on the register
+
+The Deposits register (Productions ▸ Deposits) now shows a **Due** column and a **Likely pay**
+column (in addition to Date paid) — both editable via the row's Edit button (and on newly-added
+deposits). Likely-pay shows a dash once the deposit is paid. Uses the existing
+`deposits.date_due` / `date_likely_pay` columns; the query now returns date_likely_pay and the
+deposit patch now accepts it.
+
+Deploy: no new env vars, no migrations. Files: `server.mjs`, `supply/inject.html`.
+
 ## v25.126 - Deposits: "apply to production" bulk-assign + AU region guard
 
 - **Apply a deposit to a whole production**: each deposit row (Productions ▸ Deposits) with a
