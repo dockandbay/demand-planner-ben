@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.130 - Actions: "Unpaid last month" + "Aged unpaid payments"
+
+Two new payment actions in SUPPLY ▸ Actions, computed from the cash flow:
+- **Unpaid — last month** (amber) — every cash-flow payment dated to the previous calendar month
+  that's still unpaid; opens the Cash Flow report filtered to that month (Overdue).
+- **Aged unpaid payments** (high) — everything unpaid from before last month; opens the Cash Flow
+  report on a new **Aged (before last month)** filter.
+Each shows the count + $ total and links straight into the filtered cash flow. Computed
+client-side from /api/supply/cashflow (no server change); a `gotoreport` action can now carry a
+cash-flow status/month filter, and the Cash Flow month picker gains an "Aged" option.
+
+Deploy: no new env vars, no migrations. Files: `supply/inject.html`.
+
 ## v25.129 - Cash Flow: All-transactions export + monthly paid/unpaid summary
 
 The Cash Flow report toolbar now has three export groups:
