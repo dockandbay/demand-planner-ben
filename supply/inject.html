@@ -1471,7 +1471,9 @@
       +'<td class="l">'+payIn(ep,'credit_amount',r.credit_amount)+'</td>'
       +'<td class="l"><span class="mut">—</span></td><td class="l"><span class="mut">—</span></td>'
       +'<td class="l"><span class="mut">—</span></td><td class="l"><span class="mut">—</span></td><td class="l"><span class="mut">—</span></td>');
-    var balnote = r.credit_days!=null?'<span class="mut tiny">'+(r.credit_type==='on_shipment'?'ship':'clearance')+' +'+r.credit_days+'cr</span>':'';
+    var isSmallPo = (n(r.value_used)>0 && n(r.value_used)<500);   // < $500 → due on invoice/ship date, no supplier credit terms
+    var balnote = isSmallPo ? '<span class="mut tiny" title="orders under $500 are due in full on the invoice-processed date, or the ship date while still an estimate">'+(r.is_final?'invoice date':'ship date')+' · under $500</span>'
+                : (r.credit_days!=null?'<span class="mut tiny">'+(r.credit_type==='on_shipment'?'ship':'clearance')+' +'+r.credit_days+'cr</span>':'');
     var balPctShown=(n(r.value_used)>0?Math.round((n(r.value_used)-n(r.start_dep)-n(r.completion_calc))/n(r.value_used)*100):n(r.balance_pct));   // effective % of order value (matches the owing amount, incl. any start rolled in)
     h+=tr('<td class="l"><b>Balance'+(partial?' 1':'')+'</b> <span class="mut tiny">'+esc(balPctShown)+'% · remainder</span></td>'
       +'<td>'+money(r.balance_owing)+' <span class="mut tiny">owing'+(n(r.credit_amount)>0?' · incl. '+money(r.credit_amount)+' credit':'')+'</span>'+(bal1Unpaid?payFillBtn('pay_balance_1_amount','pay_balance_1_date',r.balance_owing):'')+'</td>'

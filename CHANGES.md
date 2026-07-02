@@ -3,6 +3,22 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.138 - Small POs (< $500): 0% deposits + due on invoice/ship date
+
+New default for low-value orders. When a PO's value used (final invoice, or the order-plan estimate if
+none yet) is under $500, the start deposit and completion deposit both default to 0% (→ 100% balance),
+and the balance is due on the invoice-processed date once a final invoice is entered, or the ship date
+while still an estimate — no supplier credit terms applied. A per-PO % override still wins, and a manual
+"final payment due" override still takes priority over the computed date.
+- Migration 091: adds purchase_orders.invoice_processed_date + a trigger that auto-stamps it when a
+  final invoice total is set (and clears it when removed) — covers every write path.
+- Server: sp/cp default to 0 under $500 (override wins); balance due = invoice_processed_date ▸ ship date
+  for these POs.
+- Client: the balance-due note reads "invoice/ship date · under $500" instead of the supplier credit terms.
+- 179 existing POs fall under the rule; money conserved across all 1,362 (start + completion + balance =
+  value + credit); ≥$500 POs unchanged.
+- DEPLOY: Diviyaj runs migration 091 on prod (see diviyaj_deploy_2026-07-02_supply.sql).
+
 ## v25.137 - Fix: NO DEPOSIT rolls the start deposit into completion (if any) else balance
 
 Reported on PO-56UKMQ1 (MQ Print, terms 50% start / 0% completion / 50% balance, deposit ref set to
