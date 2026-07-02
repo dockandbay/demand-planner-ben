@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.127';
+const APP_VERSION = 'v25.128';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -536,7 +536,8 @@ async function cashflowResponse(pos, q) {
   // referenced-deposit pools (one cash line per reference; replaces the PO's own deposit line)
   const depPools = await q(`
     SELECT reference, round(sum(coalesce(amount,0)),2) amount, max(supplier_name) supplier, max(country) country,
-      to_char(max(date_paid),'YYYY-MM-DD') date_paid, bool_and(date_paid IS NOT NULL) all_paid
+      to_char(max(date_paid),'YYYY-MM-DD') date_paid, bool_and(date_paid IS NOT NULL) all_paid,
+      to_char(min(date_due),'YYYY-MM-DD') date_due, to_char(min(date_likely_pay),'YYYY-MM-DD') date_likely_pay
     FROM planner.deposits WHERE is_deposit AND coalesce(reference,'') <> '' GROUP BY reference`);
   // shipment freight inputs (cost only; dates come from the member POs' eff_delivery which is the shipment date)
   const shipRows = await q(`
@@ -569,10 +570,12 @@ async function cashflowResponse(pos, q) {
   const add = (o) => {
     if (!(num(o.amount) > 0.009)) return;                       // never emit a $0 (or negative) line
     const due = o.due || null;
-    const lk = likely[o.key] || null;
+    // "likely" date: the line's own likely date (e.g. a deposit's date_likely_pay) ▸ a manual per-line override
+    const lk = o.likely || likely[o.key] || null;
     let date = o.paid_date || due, kind = o.paid_date ? 'paid' : 'due';
     const overdue = !o.paid_date && due && due < today;
-    if (overdue && lk) { date = lk; kind = 'likely'; }
+    // cash flow is timed on the DUE date, unless a likely date is applied → then the likely date (whenever set, not just overdue)
+    if (!o.paid_date && lk) { date = lk; kind = 'likely'; }
     lines.push({
       key: o.key, type: o.type, ref: o.ref, supplier: o.supplier || '', country: o.country || '',
       amount: Math.round(num(o.amount)), paid: !!o.paid_date, estimate: !!o.estimate, basis: o.basis || 'po',
@@ -604,8 +607,10 @@ async function cashflowResponse(pos, q) {
   for (const d of depPools) {
     const linked = pos.filter(p => p.deposit_ref === d.reference);
     const earliest = linked.map(p => p.start_due).filter(Boolean).sort()[0] || null;
+    // due = the deposit's own due date (register) ▸ earliest linked-PO start due; likely = the deposit's likely-pay date
     add({ key: 'deppool:' + d.reference, type: 'Deposit', ref: d.reference, supplier: d.supplier, country: d.country,
-      amount: d.amount, due: earliest, paid_date: d.all_paid ? d.date_paid : null, basis: 'register' });
+      amount: d.amount, due: d.date_due || earliest, likely: d.date_likely_pay || null,
+      paid_date: d.all_paid ? d.date_paid : null, basis: 'register' });
   }
   // 5. freight + duty + tax — by shipment where assigned, else per PO. Skip complete POs (settled).
   const seenShip = {};

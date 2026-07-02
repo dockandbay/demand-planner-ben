@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.128 - Cash Flow: time on due date, unless a likely date is applied
+
+Cash Flow lines are now dated on the **due date**, overridden by a **likely date whenever one is
+set** (previously the likely override only kicked in once a line was overdue). Deposit-pool lines
+now carry the deposit register's own **date_due** (▸ earliest linked-PO start due) and
+**date_likely_pay**, so a deposit's cash-flow month follows its due date unless a likely-pay date
+is entered. Paid lines still sit on the paid date.
+
+Deploy: no new env vars, no migrations. Files: `server.mjs`.
+
 ## v25.127 - Deposits: Due date + Likely-pay date on the register
 
 The Deposits register (Productions ▸ Deposits) now shows a **Due** column and a **Likely pay**
