@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.122 - Upload POs: "Download template" button + tab-paste note
+
+Added a **⬇ Download template** button to the Upload POs popup — downloads `PO_upload_template.csv`
+(header + example rows) to open in Excel / Google Sheets, fill in, then copy-paste back. Clarified
+in the instructions that a Sheets/Excel paste is **tab-separated** and works without commas (the
+parser already auto-detects tab vs comma).
+
+Deploy: no new env vars, no migrations. Files: `supply/inject.html`.
+
 ## v25.121 - Upload POs: optional SKU + Qty lines (create OR add to existing PO)
 
 The PURCHASE ORDERS ▸ "Upload POs" paste now accepts optional **SKU** and **Qty** columns, and

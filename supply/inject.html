@@ -1028,12 +1028,19 @@
     return out; }
   function openPoUpload(){ var bg=document.createElement('div'); bg.className='pomodal-bg';
     bg.innerHTML='<div class="pomodal"><div style="font-weight:600;font-size:14px;margin-bottom:6px">Upload purchase orders</div>'
-      +'<div class="mut tiny" style="margin-bottom:8px">Paste rows (comma or tab separated). Include a <b>header row</b> to use SKU/Qty. Recognised columns: <b>PO</b>, Supplier, Ship to (UK/US/AU/EU/CA/DIRECT), Branch, Status, Start (YYYY-MM-DD), <b>SKU</b>, <b>Qty</b>. SKU + Qty are optional — repeat the PO on multiple lines to add several SKU/qty order-plan lines. New POs are created; <b>existing POs keep their details and just get the lines added</b>.</div>'
+      +'<div class="mut tiny" style="margin-bottom:8px">Paste rows (comma or tab separated). Include a <b>header row</b> to use SKU/Qty. Recognised columns: <b>PO</b>, Supplier, Ship to (UK/US/AU/EU/CA/DIRECT), Branch, Status, Start (YYYY-MM-DD), <b>SKU</b>, <b>Qty</b>. SKU + Qty are optional — repeat the PO on multiple lines to add several SKU/qty order-plan lines. New POs are created; <b>existing POs keep their details and just get the lines added</b>. Tip: open the template in Excel / Google Sheets, fill it in, then copy the cells and paste here — a Sheets/Excel paste is tab-separated and works without commas.</div>'
       +'<textarea id="po-up-ta" style="width:100%;height:170px;font:12px ui-monospace,Menlo,monospace;border:1px solid #d0d0d0;border-radius:6px;padding:8px;box-sizing:border-box" placeholder="PO,Supplier,Ship to,Branch,Status,SKU,Qty\nPO-90001,XR Textile,UK,UK ILG,FUTURE,TOWEL-LG-NAVY,500\nPO-90001,,,,,TOWEL-LG-CORAL,300\nPO-90002,Lixin,US,US Geneva,PRODUCTION,,"></textarea>'
       +'<div id="po-up-prev" class="mut tiny" style="margin:6px 0">&nbsp;</div>'
-      +'<div style="text-align:right;margin-top:8px"><button class="save-btn light" id="po-up-cancel">Cancel</button> <button class="save-btn dark" id="po-up-go">Import</button></div></div>';
+      +'<div style="display:flex;align-items:center;margin-top:8px"><button class="save-btn" id="po-up-tmpl" style="background:#eff6ff;border-color:#93c5fd">⬇ Download template</button><span style="margin-left:auto"></span><button class="save-btn light" id="po-up-cancel">Cancel</button> <button class="save-btn dark" id="po-up-go" style="margin-left:6px">Import</button></div></div>';
     document.body.appendChild(bg);
     var ta=document.getElementById('po-up-ta'), prev=document.getElementById('po-up-prev');
+    document.getElementById('po-up-tmpl').onclick=function(){
+      var csv='PO,Supplier,Ship to,Branch,Status,Start,SKU,Qty\n'
+        +'PO-90001,XR Textile,UK,UK ILG,FUTURE,2026-08-01,TOWEL-LG-NAVY,500\n'
+        +'PO-90001,,,,,,TOWEL-LG-CORAL,300\n'
+        +'PO-90002,Lixin,US,US Geneva,PRODUCTION,,,\n';
+      var bl=new Blob([csv],{type:'text/csv'}), u=URL.createObjectURL(bl), a=document.createElement('a');
+      a.href=u; a.download='PO_upload_template.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); };
     ta.oninput=function(){ var r=poUploadParse(ta.value); var pos={},ln=0; r.forEach(function(x){pos[x.po]=1; if((x.sku||'').trim())ln++;}); var np=Object.keys(pos).length;
       prev.textContent=np?(np+' PO(s)'+(ln?' · '+ln+' SKU line(s)':'')+' detected'):'nothing detected yet'; };
     bg.onclick=function(e){ if(e.target===bg)bg.parentNode.removeChild(bg); };
