@@ -54,6 +54,13 @@
 #supply-root .datepick[disabled]{opacity:.4;cursor:not-allowed}
 #supply-root .datepicknative{position:absolute;right:0;bottom:0;width:1px;height:1px;opacity:0;pointer-events:none;border:0;padding:0;margin:0}
 #supply-root .dateinp.err{border-color:#dc2626 !important;background:#fef2f2}
+/* subtle inline grid date editor — looks like plain read-only text until hovered/focused (no blue box) */
+#supply-root .fci.dinline{border:1px solid transparent;background:transparent;color:#1a1a1a;text-align:left;padding:1px 3px;min-width:0;border-radius:3px;cursor:text}
+#supply-root .fci.dinline:hover{border-color:#d8dee7;background:#fff}
+#supply-root .fci.dinline:focus{border-color:#94a3b8;background:#fff;outline:none}
+#supply-root .fci.dinline.err{border-color:#dc2626 !important;background:#fef2f2}
+/* breathing room below the PO / shipments grids so a bottom-row popover (assign shipment/deposit) has space to open */
+#supply-root .grid-tailspace{height:100px}
 #supply-root .po-set-shipping:hover{background:#bfdbfe}
 #supply-root .po-note-badge{display:inline-block;min-width:13px;height:13px;line-height:12px;border-radius:3px;background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;font-size:8px;font-weight:800;text-align:center;padding:0 3px;margin-left:4px;vertical-align:1px;cursor:pointer;font-family:inherit}
 #supply-root .po-note-badge:hover{background:#ddd6fe}
@@ -344,6 +351,13 @@
   function datePast(v){ if(!v)return false; var m=/^(\d{4}-\d{2}-\d{2})/.exec(String(v)); return m?m[1]<new Date().toISOString().slice(0,10):false; }
   // date cell with an optional background highlight (overdue milestone vs PO status)
   function dTd(v,src,hot){ return '<td class="l"'+(hot?' style="'+hot+'"':'')+'>'+dcell(v)+(src||'')+'</td>'; }
+  // grid date cell: subtle inline-editable for open POs (bound to the same field the DATES sub-tab edits),
+  // read-only text for completed ones. Shows the effective date; editing End sets a manual override.
+  function gDate(r,field,dispIso,src,hot){
+    var cell=(r.progress!=='complete')
+      ? dateField(dispIso,{inline:true, attrs:'data-ep="/api/supply/po/'+encodeURIComponent(r.po)+'" data-field="'+field+'"', width:'74px'})+(src||'')
+      : dcell(dispIso)+(src||'');
+    return '<td class="l"'+(hot?' style="'+hot+'"':'')+'>'+cell+'</td>'; }
   var DTD_LRED='background:#fee2e2', DTD_RED='background:#fca5a5;color:#7f1d1d;font-weight:700';
   function srctag(s){return s?'<span class="src '+(s==='FLEX'||s==='calc'?'fx':'m')+'">'+esc(s)+'</span>':'';}
   function flexNum(fid){ var m=String(fid||'').match(/\d+/); return m?m[0]:''; }   // Flexport shipment id → numeric part for the URL
@@ -395,19 +409,25 @@
   // Editable date field: a plain TEXT box (select / copy / paste / type any format) that resolves + validates
   // to ISO on change, plus a 📅 button that opens the native calendar picker. Replaces <input type="date">
   // (whose segmented field can't be selected or pasted into). opts: {attrs, cls, width, disabled}.
+  // opts: {attrs, cls, width, disabled, inline}. inline = subtle look (no visible border until focus, no 📅
+  // button) for the grid; clicking the box opens the native calendar. The picker + save always use ISO.
   function dateField(val, opts){ opts=opts||{};
     var iso = val ? String(val).slice(0,10) : '';
     var dis = opts.disabled ? ' disabled' : '';
+    var inline = !!opts.inline;
     // display the friendly dd-mmm-yy form (e.g. 14-May-26); the native picker + save use ISO under the hood
     return '<span class="datewrap">'
-      + '<input type="text" class="fci dateinp'+(opts.cls?(' '+opts.cls):'')+'" autocomplete="off" placeholder="dd-mmm-yy" '+(opts.attrs||'')+dis+' value="'+esc(iso?fd(iso):'')+'" style="width:'+(opts.width||'110px')+';text-align:left" title="type or paste any date — e.g. 2055-11-02, 12-May-25, 12/12/25 — shows as dd-mmm-yy once valid">'
-      + '<button type="button" class="datepick"'+dis+' tabindex="-1" title="pick from calendar">📅</button>'
+      + '<input type="text" class="fci dateinp'+(inline?' dinline':'')+(opts.cls?(' '+opts.cls):'')+'" autocomplete="off" placeholder="dd-mmm-yy" '+(opts.attrs||'')+dis+' value="'+esc(iso?fd(iso):'')+'" style="width:'+(opts.width||'110px')+';text-align:left" title="type or paste any date — e.g. 2055-11-02, 12-May-25, 12/12/25 — shows as dd-mmm-yy once valid'+(inline?'; click to open the calendar':'')+'">'
+      + (inline?'':'<button type="button" class="datepick"'+dis+' tabindex="-1" title="pick from calendar">📅</button>')
       + '<input type="date" class="datepicknative" tabindex="-1" aria-hidden="true" value="'+esc(iso)+'"'+dis+'>'
       + '</span>'; }
   // wire the 📅 buttons + native picker sync (idempotent — safe to call after any render)
   function bindDatePickers(){ document.querySelectorAll('#supply-root .datewrap').forEach(function(w){ if(w._bd)return; w._bd=1;
     var txt=w.querySelector('.dateinp'), nat=w.querySelector('.datepicknative'), btn=w.querySelector('.datepick');
-    if(btn&&nat){ btn.onclick=function(e){ e.preventDefault(); e.stopPropagation(); if(nat.disabled)return; nat.value=parseDateLoose(txt.value)||''; try{ nat.showPicker(); }catch(err){ try{ nat.focus(); nat.click(); }catch(e2){} } }; }
+    var openPick=function(){ if(!nat||nat.disabled)return; nat.value=parseDateLoose(txt.value)||''; try{ nat.showPicker(); }catch(err){ try{ nat.focus(); nat.click(); }catch(e2){} } };
+    if(btn&&nat){ btn.onclick=function(e){ e.preventDefault(); e.stopPropagation(); openPick(); }; }
+    // inline (grid) field with no button → clicking the box opens the calendar
+    if(txt&&nat&&txt.classList.contains('dinline')){ txt.onclick=function(){ openPick(); }; }
     if(nat){ nat.onchange=function(){ if(!nat.value)return; txt.value=nat.value; txt.classList.remove('err'); txt.dispatchEvent(new Event('change',{bubbles:true})); }; } }); }
   function depDatalist(){ return '<datalist id="deprefs"><option value="NO DEPOSIT">'+(depRefs||[]).map(function(r){return '<option value="'+esc(r)+'">';}).join('')+'</datalist>'; }
   function dl(id,arr){ return '<datalist id="'+id+'">'+(arr||[]).map(function(r){return '<option value="'+esc(r)+'">';}).join('')+'</datalist>'; }
@@ -796,16 +816,20 @@
   var shipFull=null;
   function fetchShipmentsFull(cb){ if(shipFull)return cb(shipFull);
     fetch('/api/supply/shipments').then(function(r){return r.json();}).then(function(d){ shipFull=d.shipments||[]; cb(shipFull); }).catch(function(){cb([]);}); }
-  function closeShPop(){ var p=document.getElementById('shpop'); if(p)p.parentNode.removeChild(p); document.removeEventListener('mousedown',shPopOutside,true); }
+  function closeShPop(){ var p=document.getElementById('shpop'); if(p){ if(p._mo){try{p._mo.disconnect();}catch(e){}} p.parentNode.removeChild(p); } document.removeEventListener('mousedown',shPopOutside,true); }
   // append a popover near its anchor, flipping it ABOVE the anchor when it would overflow the bottom of the
   // viewport (so a row near the bottom of the screen still gets a usable, fully-visible popup).
-  function placePop(pop, rc){ document.body.appendChild(pop);
-    var ph=pop.offsetHeight||340, pw=pop.offsetWidth||300;
-    var top=rc.bottom+4;
-    if(top+ph > window.innerHeight-8) top=rc.top-ph-4;                 // flip above
-    if(top < 8) top=Math.max(8, window.innerHeight-ph-8);             // still off-screen → clamp into view
-    var left=Math.max(8, Math.min(rc.left, window.innerWidth-pw-8));
-    pop.style.cssText='position:fixed;z-index:100000;top:'+top+'px;left:'+left+'px'; }
+  function placePop(pop, rc){ document.body.appendChild(pop); pop._rc=rc;
+    function pos(){ var r=pop._rc||rc; var ph=pop.offsetHeight||340, pw=pop.offsetWidth||300;
+      var top=r.bottom+4;
+      if(top+ph > window.innerHeight-8) top=r.top-ph-4;                 // flip above
+      if(top < 8) top=Math.max(8, window.innerHeight-ph-8);            // still off-screen → clamp into view
+      var left=Math.max(8, Math.min(r.left, window.innerWidth-pw-8));
+      pop.style.cssText='position:fixed;z-index:100000;top:'+top+'px;left:'+left+'px'; }
+    pos();
+    // the list loads async (fetch) — re-position whenever the popover's content changes so it never opens
+    // downward off the bottom of the screen; catches the deposit/shipment/cell pickers uniformly.
+    try{ var mo=new MutationObserver(pos); mo.observe(pop,{childList:true,subtree:true}); pop._mo=mo; }catch(e){} }
   function shPopOutside(e){ var p=document.getElementById('shpop'); if(p&&!p.contains(e.target)&&!(e.target.closest&&e.target.closest('.ship-pick,.dep-pick,.cell-pick')))closeShPop(); }
   function bindShipPick(){ document.querySelectorAll('#supply-root .ship-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openShipAssign(b.dataset.po,b); }; }); }
   // open a shipment from elsewhere: jump to SHIPMENTS and expand that shipment's row
@@ -1270,8 +1294,8 @@
       +'<td class="l">'+statusSel(ep,r.status)+((r.status==='PRODUCTION'&&r.ship_status==='Shipping')?'<div style="margin-top:3px"><button class="po-set-shipping" data-po="'+esc(r.po)+'" title="This PO&rsquo;s shipment has departed (Shipping) but the PO is still in Production — set this PO and every PO on the same shipment still in Production to SHIPPING">→ set shipping</button></div>':'')+'</td>'
       +'<td class="l">'+shipcell+'</td>'
       +'<td class="l">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0)+'</td>'
-      +dTd(r.prod_start,'',(r.status==='FUTURE'&&datePast(r.prod_start))?DTD_LRED:'')
-      +dTd(r.prod_end,srctag(r.prod_end_src),(r.status==='PRODUCTION'&&datePast(r.prod_end))?DTD_LRED:'')
+      +gDate(r,'start_production',r.prod_start,'',(r.status==='FUTURE'&&datePast(r.prod_start))?DTD_LRED:'')
+      +gDate(r,'end_production_overide',r.prod_end,srctag(r.prod_end_src),(r.status==='PRODUCTION'&&datePast(r.prod_end))?DTD_LRED:'')
       +'<td class="l">'+dcell(r.ship)+srctagLink(r.ship_src,r)+'</td>'
       +'<td class="l">'+dcell(r.delivery)+srctagLink(r.delivery_src,r)+'</td>'
       +dTd(r.checkin,'',((r.status==='PRODUCTION'||r.status==='SHIPPING')&&datePast(r.checkin))?DTD_RED:'')
@@ -1309,7 +1333,7 @@
         list.forEach(function(r){ var indent=(groupBy==='shipment'&&k&&!(r.po===k||r.is_master)); body+=poRowHtml(r,i++,indent,null); });
       });
     }
-    return head+body+'</tbody></table></div>'; }
+    return head+body+'</tbody></table></div><div class="grid-tailspace"></div>'; }
   // on phones an opened expand-row becomes a full-screen sheet with a Back bar (desktop unchanged)
   function isPhone(){ return window.matchMedia && window.matchMedia('(max-width:640px)').matches; }
   // On phone the PO card sub-nav (many tabs) collapses to PAYMENTS · CLIENT/FBA · SHIPMENTS + a "More ▾"
@@ -2479,7 +2503,7 @@
   function shipTable(rows){ if(!rows.length)return '<div class="count">No shipments in this filter.</div>';
     var h='<div class="tw"><table class="sh-tbl" style="width:max-content"><thead><tr><th class="l"></th><th class="l">Shipment (master)</th><th class="l">Escalated</th><th class="l">Status</th><th class="l">Mode</th><th class="l">Ship to</th><th class="l">Branch</th><th>POs</th><th>Suppliers</th><th>Pallets</th><th class="l">Carrier</th><th class="l">Carrier ref</th><th class="l">Departure</th><th class="l">Landing</th><th class="l">Arrival</th><th>Freight</th></tr></thead><tbody>';
     rows.forEach(function(s,i){ h+=shipRowHtml(s,i)+'<tr class="exp-row" id="shipexp-'+i+'" style="display:none"><td colspan="16"><div id="shipdet-'+i+'" class="count">Loading…</div></td></tr>'; });
-    return h+'</tbody></table></div>'; }
+    return h+'</tbody></table></div><div class="grid-tailspace"></div>'; }
   function bindShipExpand(){ document.querySelectorAll('#supply-root .po-exp[data-ref]').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(){
     var i=b.dataset.i, ex=document.getElementById('shipexp-'+i), open=ex.style.display!=='none';
     ex.style.display=open?'none':''; b.classList.toggle('open',!open); var _or=b.closest('tr'); if(_or)_or.classList.toggle('row-open',!open);

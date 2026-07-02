@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.148 - Inline-editable Start/End in the PO grid + popover & bottom-space fixes
+
+- **Start & End are now inline-editable in the PO grid** on open (non-complete) POs — styled to look exactly
+  like the read-only text (no blue box; a faint border only on focus). Type/paste any format (shows
+  dd-mmm-yy); clicking the cell opens the native calendar (no icon). Completed POs stay read-only.
+  Bound to the same fields the DATES sub-tab edits (start_production / end_production_overide), so edits
+  sync both ways and the row's derived cells refresh. End shows the effective date; editing sets a manual
+  override, clearing reverts to the calc. Only open rows get inputs (performance).
+- **~100px of bottom whitespace** under the PO and Shipments grids so a bottom-row "assign shipment / assign
+  deposit" popover has room to open.
+- **Popover positioning fix:** the picker popovers now re-position when their (async-loaded) list renders,
+  so they no longer open downward off the bottom of the screen.
+
 ## v25.147 - Editable dates display as dd-mmm-yy (14-May-26)
 
 The paste-friendly date boxes now show the friendly dd-mmm-yy form (e.g. 14-May-26) — the app's standard
