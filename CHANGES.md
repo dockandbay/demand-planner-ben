@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.145 - Editable date fields: paste-friendly text box + calendar picker
+
+Replaced the native `<input type="date">` (whose segmented field can't be selected or pasted into) with a
+plain text box you can select / copy / paste / type, plus a 📅 button that opens the native calendar. On
+change it resolves and validates any common format to ISO (yyyy-mm-dd) — accepts `2055-11-02`,
+`12-May-25`, `12/12/25`, `2 Mar 26`, `25/06/2023`, etc.; invalid text turns the box red and isn't saved.
+Applied across the PO payment plan (start/completion/balance dates), Production start/end, Client deadline,
+Final payment due, and the cash-flow "likely pay date" fields. (Samples/buy-plan date pickers unchanged for
+now; they still accept an ISO paste.)
+
 ## v25.144 - Fix: "Late - should be Completed" filter uses the completion date
 
 The filter was keyed on the production-end date, so POs whose production had ended but whose completion

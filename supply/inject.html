@@ -48,6 +48,12 @@
 #supply-root #rep-subnav,#supply-root #config-subs,#supply-root #prod-subtabs,#supply-root .po-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 12px}
 #supply-root .ex-badge{display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:#dc2626;color:#fff;font-size:9px;font-weight:700;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px}
 #supply-root .po-set-shipping{font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:#dbeafe;border:1px solid #60a5fa;color:#1d4ed8;cursor:pointer;white-space:nowrap}
+#supply-root .datewrap{display:inline-flex;align-items:center;gap:2px;position:relative}
+#supply-root .datepick{border:1px solid #cbd5e1;background:#f8fafc;border-radius:4px;cursor:pointer;font-size:11px;line-height:1;padding:3px 4px}
+#supply-root .datepick:hover{background:#eef2f7}
+#supply-root .datepick[disabled]{opacity:.4;cursor:not-allowed}
+#supply-root .datepicknative{position:absolute;right:0;bottom:0;width:1px;height:1px;opacity:0;pointer-events:none;border:0;padding:0;margin:0}
+#supply-root .dateinp.err{border-color:#dc2626 !important;background:#fef2f2}
 #supply-root .po-set-shipping:hover{background:#bfdbfe}
 #supply-root .po-note-badge{display:inline-block;min-width:13px;height:13px;line-height:12px;border-radius:3px;background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;font-size:8px;font-weight:800;text-align:center;padding:0 3px;margin-left:4px;vertical-align:1px;cursor:pointer;font-family:inherit}
 #supply-root .po-note-badge:hover{background:#ddd6fe}
@@ -362,9 +368,10 @@
   // effective search query: normalise, then ignore <2 chars and the universal "PO"/"PO-" prefix (matches every PO)
   function effQ(q){ q=nrm(q); if(q.length<2)return ''; if(/^po-?$/.test(q))return ''; return q; }
 
-  function editCell(ep,field,val,kind,extra){ var cls='fci'+(kind==='date'?' dt':(kind==='txt'?' txt':''));
-    var ty=kind==='date'?' type="date"':'';
-    return '<input class="'+cls+'"'+ty+' data-ep="'+esc(ep)+'" data-field="'+esc(field)+'"'+(extra?(' '+extra):'')+' value="'+esc(val==null?'':val)+'">'; }
+  function editCell(ep,field,val,kind,extra){
+    if(kind==='date') return dateField(val,{attrs:'data-ep="'+esc(ep)+'" data-field="'+esc(field)+'"'+(extra?(' '+extra):'')});
+    var cls='fci'+(kind==='txt'?' txt':'');
+    return '<input class="'+cls+'" data-ep="'+esc(ep)+'" data-field="'+esc(field)+'"'+(extra?(' '+extra):'')+' value="'+esc(val==null?'':val)+'">'; }
   // Paste-friendly dates: a native <input type="date"> only accepts yyyy-mm-dd in the exact locale
   // format, so pasting "25/06/2023" from Sheets/Excel silently fails. Parse the common formats → ISO.
   function parseDateLoose(s){ s=String(s||'').trim(); if(!s)return null; s=s.replace(/[T ]\d{1,2}:\d.*$/,'').trim();   // drop a trailing time part ("2023-06-25 00:00:00" / "…T09:30") but keep "25 Jun 2023"
@@ -372,8 +379,8 @@
     var m, mons={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
     if(m=s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/)) return mk(m[1],m[2],m[3]);            // yyyy-mm-dd (ISO / year-first)
     if(m=s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/)) return mk(m[3],m[2],m[1]);           // dd/mm/yyyy (UK day-first)
-    if(m=s.match(/^(\d{1,2})[ \-]([A-Za-z]{3,})[ \-,]+(\d{4})$/)){ var a=mons[m[2].slice(0,3).toLowerCase()]; return a?mk(m[3],a,m[1]):null; }   // 25 Jun 2023
-    if(m=s.match(/^([A-Za-z]{3,})[ \-]+(\d{1,2})[ ,]+(\d{4})$/)){ var b=mons[m[1].slice(0,3).toLowerCase()]; return b?mk(m[3],b,m[2]):null; }    // Jun 25, 2023
+    if(m=s.match(/^(\d{1,2})[ \-]([A-Za-z]{3,})[ \-,]+(\d{2,4})$/)){ var a=mons[m[2].slice(0,3).toLowerCase()]; return a?mk(m[3],a,m[1]):null; }   // 25 Jun 2023 / 12-may-25
+    if(m=s.match(/^([A-Za-z]{3,})[ \-]+(\d{1,2})[ ,]+(\d{2,4})$/)){ var b=mons[m[1].slice(0,3).toLowerCase()]; return b?mk(m[3],b,m[2]):null; }    // Jun 25, 2023
     return null; }
   // one-time (capture phase): intercept a paste into any date field, parse loosely, set ISO + fire change
   // so the existing onchange savers run. Unparseable text is left to the browser's default handling.
@@ -381,6 +388,22 @@
     if(!t||t.tagName!=='INPUT'||t.type!=='date')return;
     var cb=e.clipboardData||window.clipboardData; var iso=parseDateLoose(cb?cb.getData('text'):'');
     if(!iso)return; e.preventDefault(); t.value=iso; t.dispatchEvent(new Event('change',{bubbles:true})); }, true);
+  // Editable date field: a plain TEXT box (select / copy / paste / type any format) that resolves + validates
+  // to ISO on change, plus a 📅 button that opens the native calendar picker. Replaces <input type="date">
+  // (whose segmented field can't be selected or pasted into). opts: {attrs, cls, width, disabled}.
+  function dateField(val, opts){ opts=opts||{};
+    var iso = val ? String(val).slice(0,10) : '';
+    var dis = opts.disabled ? ' disabled' : '';
+    return '<span class="datewrap">'
+      + '<input type="text" class="fci dateinp'+(opts.cls?(' '+opts.cls):'')+'" inputmode="numeric" autocomplete="off" placeholder="yyyy-mm-dd" '+(opts.attrs||'')+dis+' value="'+esc(iso)+'" style="width:'+(opts.width||'110px')+';text-align:left" title="type or paste any date — e.g. 2055-11-02, 12-May-25, 12/12/25">'
+      + '<button type="button" class="datepick"'+dis+' tabindex="-1" title="pick from calendar">📅</button>'
+      + '<input type="date" class="datepicknative" tabindex="-1" aria-hidden="true" value="'+esc(iso)+'"'+dis+'>'
+      + '</span>'; }
+  // wire the 📅 buttons + native picker sync (idempotent — safe to call after any render)
+  function bindDatePickers(){ document.querySelectorAll('#supply-root .datewrap').forEach(function(w){ if(w._bd)return; w._bd=1;
+    var txt=w.querySelector('.dateinp'), nat=w.querySelector('.datepicknative'), btn=w.querySelector('.datepick');
+    if(btn&&nat){ btn.onclick=function(e){ e.preventDefault(); e.stopPropagation(); if(nat.disabled)return; nat.value=parseDateLoose(txt.value)||''; try{ nat.showPicker(); }catch(err){ try{ nat.focus(); nat.click(); }catch(e2){} } }; }
+    if(nat){ nat.onchange=function(){ if(!nat.value)return; txt.value=nat.value; txt.classList.remove('err'); txt.dispatchEvent(new Event('change',{bubbles:true})); }; } }); }
   function depDatalist(){ return '<datalist id="deprefs"><option value="NO DEPOSIT">'+(depRefs||[]).map(function(r){return '<option value="'+esc(r)+'">';}).join('')+'</datalist>'; }
   function dl(id,arr){ return '<datalist id="'+id+'">'+(arr||[]).map(function(r){return '<option value="'+esc(r)+'">';}).join('')+'</datalist>'; }
   function lookupDatalists(){ return depDatalist()+dl('batchlist',batchList)+dl('prodlist',prodList)+dl('shiplist',shipList)+dl('supplierlist',supplierList)+dl('branchlist',branchList)+dl('crossdocklist',crossdockList)+dl('polist',poLookupList); }
@@ -411,6 +434,9 @@
     if(fld==='status'){ var SHIP_PAL={Planned:['#fef3c7','#92710a'],Shipping:['#dcfce7','#15803d'],Completed:['#dbeafe','#1d4ed8']};   // shipment palette (title-case) ▸ PO palette (upper)
       var bg=SHIP_PAL[val]||PO_STATUS_BG[String(val||'').toUpperCase()]; if(bg){ el.style.background=bg[0]; el.style.color=bg[1]; el.style.borderColor=bg[0]; } } }
   function bindEdits(){ document.querySelectorAll('#supply-root .fci[data-ep]').forEach(function(inp){ if(inp._b)return; inp._b=1; inp.onchange=function(){
+    // text date field: resolve any typed/pasted format to ISO (yyyy-mm-dd) before saving; block invalid input
+    if(inp.classList.contains('dateinp')){ var raw=(inp.value||'').trim();
+      if(raw){ var iso=parseDateLoose(raw); if(!iso){ inp.classList.add('err'); return; } inp.value=iso; } inp.classList.remove('err'); }
     if(inp.classList.contains('boolsel')){ var yes=inp.value==='true'; inp.style.background=yes?'#dcfce7':'#fee2e2'; inp.style.color=yes?'#166534':'#b91c1c'; }
     recolorFci(inp, inp.dataset.field, inp.value);   // recolour the changed control right away (e.g. status → green)
     var body={}; body[inp.dataset.field]=inp.value;
@@ -423,7 +449,7 @@
         // live-sync the collapsed PO grid row when a field was edited in that PO's expansion sub-tabs
         var _pm=/^\/api\/supply\/po\/([^\/]+)$/.exec(ep);
         if(_pm && current==='purchase-orders' && typeof window.__poRowRefresh==='function'){ try{ window.__poRowRefresh(decodeURIComponent(_pm[1])); }catch(e){} } })
-      .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; }); }
+      .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; }); bindDatePickers(); }
 
   function renderGeneric(key,rows){ var c=document.getElementById('supply-content');
     c.innerHTML=annot(key)+'<div class="bar"><input class="flt" id="sup-search" placeholder="Filter…"><span class="count" id="sup-count">'+rows.length+' rows</span></div><div id="sup-grid">'+tableHTML(rows)+'</div>';
@@ -1351,7 +1377,9 @@
     .catch(function(e){ document.getElementById('podet-'+i).innerHTML='<span style="color:#dc2626">'+esc(e.message||e)+'</span>'; }); }
   // Editable PLAN payment panel. Terms come from the supplier; each milestone's amount, date and %
   // can be overridden inline (saves on blur). Saving re-pulls the PO so catch-up / owing ripple.
-  function payIn(ep,field,val,dt,dis,extra){ return '<input class="fci payin'+(dt?' dt':'')+(dis?' pdis':'')+'"'+(dt?' type="date"':'')+(dis?' disabled title="set an amount first"':'')+(extra?(' '+extra):'')+' data-ep="'+esc(ep)+'" data-field="'+field+'" value="'+esc(val==null?'':val)+'">'; }
+  function payIn(ep,field,val,dt,dis,extra){
+    if(dt) return dateField(val,{attrs:'data-ep="'+esc(ep)+'" data-field="'+esc(field)+'"'+(extra?(' '+extra):''), cls:'payin', disabled:!!dis});
+    return '<input class="fci payin'+(dis?' pdis':'')+'"'+(dis?' disabled title="set an amount first"':'')+(extra?(' '+extra):'')+' data-ep="'+esc(ep)+'" data-field="'+field+'" value="'+esc(val==null?'':val)+'">'; }
   function payBadge(label,cls){ return '<span class="tool-badge '+cls+'">'+label+'</span>'; }
   // "pay »" quick-fill: when a milestone is owed + unpaid, one click fills its Amount box with the calc figure
   // and its Date paid with today, then saves both. (af/df = the amount + date field names on the PO.)
@@ -1366,7 +1394,7 @@
     +(list.length?list.map(function(s){return '<span class="chip" data-sku="'+esc(s)+'">'+esc(s)+' <button class="xd-rm" data-sku="'+esc(s)+'" title="remove">&times;</button></span>';}).join(' ')+' ':'<span class="mut tiny">none — </span>')
     +'<input class="fci xd-add" list="crossdocklist" placeholder="add CROSSDOCK/PREORDER SKU…" style="width:240px;text-align:left"></div>'; }
   // editable "likely payment date" cell (only for unpaid milestones) — saves to the cash flow likely-date store
-  function likelyCell(key,unpaid,val){ return '<td class="l">'+(unpaid?'<input type="date" class="fci dt po-likely" data-key="'+esc(key)+'" value="'+esc(val||'')+'" title="likely payment date (drives the cash flow report)" style="width:140px">':'<span class="mut tiny">—</span>')+'</td>'; }
+  function likelyCell(key,unpaid,val){ return '<td class="l">'+(unpaid? dateField(val,{attrs:'data-key="'+esc(key)+'" title="likely payment date (drives the cash flow report)"', cls:'po-likely'}) :'<span class="mut tiny">—</span>')+'</td>'; }
   // FOB pickup = the goods don't land into one of our import warehouses (UK/US/EU/AU/CA) AND no shipment is
   // assigned yet. DIRECT / "Direct to Client" / blank destinations are pickup → no freight or import.
   // Once a shipment is assigned it takes priority (it carries the real destination + mode, incl. fob $0).
@@ -1451,7 +1479,7 @@
       +cliRow('Client name',txtIn(ep,'client',r.client,360))
       +cliRow('Client requirements',txtIn(ep,'client_requirements',r.client_requirements,440,true))
       +cliRow('Sales Ref / Amazon Ref',txtIn(ep,'sales_order_ref',r.sales_order_ref,220))
-      +cliRow('Client deadline date','<input type="date" class="fci txtin" style="width:150px;text-align:left" data-ep="'+ep+'" data-field="client_deadline_date" value="'+esc(r.client_deadline||'')+'"> <span class="mut tiny">(date the client needs it by)</span>')
+      +cliRow('Client deadline date', dateField(r.client_deadline,{attrs:'data-ep="'+ep+'" data-field="client_deadline_date"', cls:'txtin', width:'130px'})+' <span class="mut tiny">(date the client needs it by)</span>')
       +cliRow('Client purchase order ref',txtIn(ep,'client_po_ref',r.client_po_ref,220))
       +cliRow('Dispatch order ref',txtIn(ep,'dispatch_order_ref',r.dispatch_order_ref,220))
       +cliRow('Final delivery address <span class="mut tiny">(shown on crossdock labels)</span>',txtIn(ep,'final_delivery_address',r.final_delivery_address,440,true))
@@ -1473,7 +1501,7 @@
           '<input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="inv-parse-file" data-po="'+esc(r.po)+'" style="font-size:11px">'
           +' <button class="save-btn inv-parse-go" data-po="'+esc(r.po)+'">Parse invoice</button>'
           +'<div class="inv-parse-out" data-po="'+esc(r.po)+'" style="margin-top:6px"></div>')
-      +cliRow('<b>Final payment due</b>', '<input type="date" class="fci txtin" style="width:150px;text-align:left" data-ep="'+ep+'" data-field="balance_due_date_overide" value="'+esc(r.final_payment_due||'')+'"> <span class="mut tiny">blank = calculated balance due date</span>')
+      +cliRow('<b>Final payment due</b>', dateField(r.final_payment_due,{attrs:'data-ep="'+ep+'" data-field="balance_due_date_overide"', cls:'txtin', width:'130px'})+' <span class="mut tiny">blank = calculated balance due date</span>')
       +(function(){ var si=d&&d.sup_invoice, docs=(d&&d.sup_docs)||[]; var out='';
         if(si){ var sv=Number(si.value), fv=(r.final_invoice!=null?Number(r.final_invoice):null), disc=(si.status==='applied'&&fv!=null&&Math.abs(sv-fv)>0.01), pend=(si.status==='pending');
           out+=cliRow('Supplier submitted <span class="mut tiny">'+esc(si.submitted_at||'')+' · '+(si.status==='applied'?'applied':si.status==='dismissed'?'dismissed':'pending')+'</span>',
@@ -1662,6 +1690,8 @@
     document.querySelectorAll('#podet-'+i+' .pom-po').forEach(function(inp){ inp.onchange=function(){ var oldpo=inp.dataset.po, np=inp.value.trim(); if(!np||np===oldpo){inp.value=oldpo;return;} if(!confirm('Rename PO '+oldpo+' → '+np+'? Updates all its lines and references.')){inp.value=oldpo;return;}
       shipPost('/api/supply/po/'+encodeURIComponent(oldpo)+'/rename',{new_po:np},function(){ poGone(); }); }; });
     document.querySelectorAll('#podet-'+i+' .payin').forEach(function(inp){ inp.onchange=function(){
+    // date payin (start/completion/balance dates): resolve any typed/pasted format → ISO, validate
+    if(inp.classList.contains('dateinp')){ var _raw=(inp.value||'').trim(), _iso=_raw?parseDateLoose(_raw):''; if(_raw&&!_iso){ inp.classList.add('err'); return; } inp.classList.remove('err'); inp.value=_iso; }
     // Starting deposit can't exceed what the deposit ref still holds — clamp + roll the rest into completion.
     if(inp.dataset.field==='pay_start_deposit_assigned' && inp.dataset.avail!=null){ var av=Number(inp.dataset.avail), v=Number(String(inp.value).replace(/,/g,''));
       if(isFinite(av)&&isFinite(v)&&v>av+0.005){ inp.value=av.toFixed(2); alert('Starting deposit capped at the deposit ref’s availability ('+money(av)+'). The remainder rolls into the completion deposit.'); } }
@@ -1673,7 +1703,8 @@
     fetch(inp.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
       .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); })
       .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; });
-    document.querySelectorAll('#podet-'+i+' .po-likely').forEach(function(inp){ inp.onchange=function(){ inp.classList.add('saved');
+    document.querySelectorAll('#podet-'+i+' .po-likely').forEach(function(inp){ inp.onchange=function(){
+      var raw=(inp.value||'').trim(), iso=raw?parseDateLoose(raw):''; if(raw&&!iso){ inp.classList.add('err'); return; } inp.classList.remove('err'); inp.value=iso; inp.classList.add('saved');
       fetch('/api/supply/likely-date',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({line_key:inp.dataset.key,likely_date:inp.value})}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error);
           var pfx=inp.dataset.key.split(':')[0], f={dep:'likely_start',comp:'likely_completion',bal:'likely_balance_1',bal2:'likely_balance_2'}[pfx];
@@ -1695,7 +1726,9 @@
       rd.readAsDataURL(f); }; });
     document.querySelectorAll('#podet-'+i+' .po-go-ship').forEach(function(b){ b.onclick=function(){ if(b.dataset.ref)gotoShipment(b.dataset.ref); }; });
     // free-text client fields — save verbatim (commas allowed) on blur
-    document.querySelectorAll('#podet-'+i+' .txtin').forEach(function(inp){ inp.onchange=function(){ var body={}; body[inp.dataset.field]=inp.value; inp.classList.add('saved');
+    document.querySelectorAll('#podet-'+i+' .txtin').forEach(function(inp){ inp.onchange=function(){
+      if(inp.classList.contains('dateinp')){ var _r=(inp.value||'').trim(), _i=_r?parseDateLoose(_r):''; if(_r&&!_i){ inp.classList.add('err'); return; } inp.classList.remove('err'); inp.value=_i; }
+      var body={}; body[inp.dataset.field]=inp.value; inp.classList.add('saved');
       fetch(inp.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error); if(poBy[po])poBy[po][inp.dataset.field]=inp.value;
           if(inp.dataset.field==='balance_due_date_overide'){ invalidateDerived(); poRefetchPanel(po,i); } })   // recompute balance due + cash flow
@@ -1811,7 +1844,7 @@
     if(root) root.querySelectorAll('.potab').forEach(function(b){ b.onclick=function(){ var pt=b.dataset.pt;
       root.querySelectorAll('.potab').forEach(function(x){x.classList.toggle('active',x===b);});
       root.querySelectorAll('.potab-panel').forEach(function(p){p.style.display=(p.dataset.pt===pt)?'':'none';}); }; });
-    setupMobSubnav(root); }
+    setupMobSubnav(root); bindDatePickers(); }
   function poDetailHTML(po,d,i){ function blk(t,rows){return '<div class="sect-h">'+t+' ('+rows.length+')</div>'+(rows.length?tableHTML(rows):'<div class="count">none linked</div>');}
     var p=payPanel(poBy[po],d);
     if(!p||typeof p==='string') return '<div class="count">No PO data.</div>';
@@ -2937,7 +2970,7 @@
                    :'<span class="src fx">due</span>';
         var estBadge=x.estimate?' <span class="tool-badge bg-neutral" title="estimate — '+esc(x.basis)+(x.src?' · '+esc(x.src):'')+'">est·'+esc(x.basis==='shipment'?'shpmt':x.basis==='register'?'pool':'po')+'</span>':'';
         var st=x.paid?'<span class="tool-badge bg-green">paid ✓</span>':x.overdue?'<span class="tool-badge bg-red">overdue</span>':'<span class="tool-badge bg-neutral">due</span>';
-        var likely=(x.overdue&&!x.paid)?'<input type="date" class="fci dt cf-likely" data-key="'+esc(x.key)+'" value="'+esc(x.likely_date||'')+'" title="likely payment date" style="width:140px">':'<span class="mut tiny">—</span>';
+        var likely=(x.overdue&&!x.paid)? dateField(x.likely_date,{attrs:'data-key="'+esc(x.key)+'" title="likely payment date"', cls:'cf-likely'}) :'<span class="mut tiny">—</span>';
         return '<tr><td class="l" style="white-space:nowrap">'+(x.due?esc(fd(x.due)):'<span class="mut tiny">—</span>')+'</td>'
           +'<td class="l">'+likely+'</td>'
           +'<td class="l" style="white-space:nowrap">'+(x.paid_date?esc(fd(x.paid_date)):'<span class="mut tiny">—</span>')+'</td>'
@@ -2962,7 +2995,8 @@
       // strip card → set month filter
       document.querySelectorAll('#cf-body .cf-strip').forEach(function(card){ card.onclick=function(){ _cfState.month=card.dataset.m; var sel=document.getElementById('cf-month'); if(sel)sel.value=card.dataset.m; draw(); }; });
       // likely-date saves
-      document.querySelectorAll('#cf-body .cf-likely').forEach(function(inp){ inp.onchange=function(){ inp.classList.add('saved');
+      document.querySelectorAll('#cf-body .cf-likely').forEach(function(inp){ inp.onchange=function(){
+        var raw=(inp.value||'').trim(), iso=raw?parseDateLoose(raw):''; if(raw&&!iso){ inp.classList.add('err'); return; } inp.classList.remove('err'); inp.value=iso; inp.classList.add('saved');
         fetch('/api/supply/likely-date',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({line_key:inp.dataset.key,likely_date:inp.value})})
           .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); delete cache['cashflow']; selectSection('cashflow'); })
           .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; });
