@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.149 - Key Accounts + Direct-to-Client tags (custom / key account)
+
+- **Config ▸ Key accounts** — new CRUD table: name, packing/labelling (yes-no + notes), client requirements,
+  delivery address. (Migration 092: `key_accounts` table.)
+- **PO ▸ Client/FBA tab** — new "Direct-to-Client type" checkboxes: **Key account** + **Custom** (multi-select).
+  Client name is now a picker of saved key accounts; choosing one prompts to pull that account's packing /
+  labelling / requirements / address onto the PO (overwrites current), and auto-ticks Key account. (PO columns
+  dtc_custom / dtc_key_account.)
+- **Direct to Client report** — a **Type** column shows coloured badges (blue Key account, grey Custom) and
+  new **Type** filter pills (All / Key account / Custom).
+- DEPLOY: Diviyaj runs migration 092 (see diviyaj_deploy_2026-07-02_supply.sql — now 091 + 092).
+
 ## v25.148 - Inline-editable Start/End in the PO grid + popover & bottom-space fixes
 
 - **Start & End are now inline-editable in the PO grid** on open (non-complete) POs — styled to look exactly

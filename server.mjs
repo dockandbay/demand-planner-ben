@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.148';
+const APP_VERSION = 'v25.149';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1007,6 +1007,8 @@ app.get('/api/supply/:section', async (req, res) => {
           start_deposit_pct,completion_pct,balance_pct,credit_days,credit_type,
           credit_fee_on_balance_pct,production_days,country,contact_name,email
           FROM planner.suppliers ORDER BY kind,name`));
+      case 'key-accounts':
+        return res.json(await q(`SELECT * FROM planner.key_accounts ORDER BY name`));
       case 'bi': {   // SUPPLY ▸ BI — Metrics Summary (Phase 0a). Live operational counts; no engine yet.
         const UNITS = `coalesce((SELECT sum(l.qty) FROM planner.purchase_order_lines l WHERE l.po=p.po),0)`;
         const VAL   = `coalesce((SELECT sum(l.qty*coalesce(l.cost_price,0)) FROM planner.purchase_order_lines l WHERE l.po=p.po),0)`;
@@ -1242,6 +1244,7 @@ app.get('/api/supply/:section', async (req, res) => {
             to_char(supplier_confirmed_at,'YYYY-MM-DD') supplier_confirmed, coalesce(supplier_confirmed_by,'') supplier_confirmed_by,
             coalesce(dispatch_order_ref,'') dispatch_order_ref, coalesce(final_delivery_address,'') final_delivery_address,
             coalesce(crossdock_skus,'') crossdock_skus,
+            coalesce(dtc_custom,false) dtc_custom, coalesce(dtc_key_account,false) dtc_key_account,   -- Direct-to-Client tags
             -- Packing & Labelling (migration 086) + Direct to Client details approval
             coalesce(pack_polybags,false) pack_polybags, coalesce(pack_polybags_notes,'') pack_polybags_notes,
             coalesce(pack_dnb_barcodes,false) pack_dnb_barcodes, coalesce(pack_dnb_barcodes_notes,'') pack_dnb_barcodes_notes,
@@ -2282,6 +2285,47 @@ app.post('/api/supply/supplier-create', async (req, res) => {
     res.json({ ok: true, id: r.rows[0].id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// ── KEY ACCOUNTS (CONFIG) — clients whose packing/labelling + requirements + address default onto a PO's
+// Direct-to-Client details when selected. List / create / edit / delete, plus apply-to-PO.
+const KA_FIELDS = {
+  name: 'text', client_requirements: 'text', address: 'text', pack_pallet_notes: 'text', pack_other_notes: 'text',
+  pack_polybags: 'boolean', pack_polybags_notes: 'text', pack_dnb_barcodes: 'boolean', pack_dnb_barcodes_notes: 'text',
+  pack_rfid_barcodes: 'boolean', pack_rfid_barcodes_notes: 'text', pack_dnb_carton: 'boolean', pack_dnb_carton_notes: 'text',
+  pack_client_carton: 'boolean', pack_client_carton_notes: 'text',
+};
+app.post('/api/supply/key-account-create', async (req, res) => {
+  const name = ((req.body || {}).name || '').trim();
+  if (!name) return res.status(400).json({ error: 'key account name required' });
+  try { const r = await pool.query(`INSERT INTO planner.key_accounts (name) VALUES ($1) RETURNING id`, [name]); res.json({ ok: true, id: r.rows[0].id }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/key-account/:id', (req, res) =>
+  patch(res, 'planner.key_accounts', 'id', req.params.id, KA_FIELDS, req.body, 'int'));
+app.post('/api/supply/key-account/:id/delete', async (req, res) => {
+  try { await pool.query(`DELETE FROM planner.key_accounts WHERE id=$1::int`, [req.params.id]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Copy a key account's stored settings onto a PO's Direct-to-Client details + tag it a key-account order.
+app.post('/api/supply/po/:po/apply-key-account', async (req, res) => {
+  const name = ((req.body || {}).name || '').trim();
+  if (!name) return res.status(400).json({ error: 'key account name required' });
+  try {
+    const ka = (await pool.query(`SELECT * FROM planner.key_accounts WHERE lower(name)=lower($1) LIMIT 1`, [name])).rows[0];
+    if (!ka) return res.status(404).json({ error: 'key account "' + name + '" not found' });
+    await pool.query(`UPDATE planner.purchase_orders SET
+      client=$1, client_requirements=$2, final_delivery_address=$3,
+      pack_polybags=coalesce($4,false), pack_polybags_notes=$5, pack_dnb_barcodes=coalesce($6,false), pack_dnb_barcodes_notes=$7,
+      pack_rfid_barcodes=coalesce($8,false), pack_rfid_barcodes_notes=$9, pack_dnb_carton=coalesce($10,false), pack_dnb_carton_notes=$11,
+      pack_client_carton=coalesce($12,false), pack_client_carton_notes=$13, pack_pallet_notes=$14, pack_other_notes=$15,
+      dtc_key_account=true, dtc_accepted_at=NULL, dtc_accepted_by=NULL, updated_at=now()
+      WHERE po=$16`,
+      [ka.name, ka.client_requirements, ka.address,
+       ka.pack_polybags, ka.pack_polybags_notes, ka.pack_dnb_barcodes, ka.pack_dnb_barcodes_notes,
+       ka.pack_rfid_barcodes, ka.pack_rfid_barcodes_notes, ka.pack_dnb_carton, ka.pack_dnb_carton_notes,
+       ka.pack_client_carton, ka.pack_client_carton_notes, ka.pack_pallet_notes, ka.pack_other_notes, req.params.po]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // Batches — editable buying-batch table (CONFIG). Edit by batch name; create a new batch.
 app.post('/api/supply/batch/:batch', (req, res) =>
   patch(res, 'planner.batches', 'batch', req.params.batch,
@@ -3297,6 +3341,7 @@ app.post('/api/supply/po/:po', async (req, res) => {
     pack_polybags: 'boolean', pack_polybags_notes: 'text', pack_dnb_barcodes: 'boolean', pack_dnb_barcodes_notes: 'text',
     pack_rfid_barcodes: 'boolean', pack_rfid_barcodes_notes: 'text', pack_dnb_carton: 'boolean', pack_dnb_carton_notes: 'text',
     pack_client_carton: 'boolean', pack_client_carton_notes: 'text', pack_pallet_notes: 'text', pack_other_notes: 'text',
+    dtc_custom: 'boolean', dtc_key_account: 'boolean',
     order_value_estimation: 'numeric', supplier_invoice_total: 'numeric',
     start_production: 'date', end_production_overide: 'date', landing_date_overide: 'date',
     delivery_date_overide: 'date', balance_due_date_overide: 'date', supplier_ship_date: 'date',

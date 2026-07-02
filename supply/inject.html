@@ -843,6 +843,9 @@
   function expandPending(sel,want){ if(!want)return false; var btn=null;
     document.querySelectorAll(sel).forEach(function(b){ if((b.dataset.po||b.dataset.ref)===want)btn=b; });
     if(btn){ btn.click(); try{btn.scrollIntoView({block:'center',behavior:'smooth'});}catch(e){} return true; } return false; }
+  // Key accounts (config) — cached list for the Client/FBA tab picker + apply-defaults.
+  var KA_LIST=null;
+  function fetchKeyAccounts(cb){ fetch('/api/supply/key-accounts').then(function(r){return r.json();}).then(function(l){ KA_LIST=Array.isArray(l)?l:[]; cb&&cb(KA_LIST); }).catch(function(){ KA_LIST=KA_LIST||[]; cb&&cb(KA_LIST); }); }
   // Deposit picker popover (same UX as the shipment picker): search references, pick, or "No deposit".
   var depFull=null;
   function fetchDepositsFull(cb){ if(depFull)return cb(depFull);
@@ -1505,7 +1508,8 @@
     var clientH='<div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start"><div style="flex:1 1 430px;min-width:360px">'
       +'<div class="sect-h">Client / FBA <span class="mut tiny">— who this PO is for; crossdock SKUs feed the supplier-portal label download</span></div>'
       +'<div class="cli-form">'
-      +cliRow('Client name',txtIn(ep,'client',r.client,360))
+      +cliRow('Client name','<input class="fci txt dtc-client" list="kalist" data-po="'+esc(r.po)+'" value="'+esc(r.client||'')+'" style="width:360px;text-align:left" placeholder="type, or pick a saved key account…" title="pick a saved key account to pull in its packing / requirements / address"><datalist id="kalist"></datalist>')
+      +cliRow('Direct-to-Client type','<label style="margin-right:16px;cursor:pointer"><input type="checkbox" class="dtc-tag" data-po="'+esc(r.po)+'" data-field="dtc_key_account"'+(r.dtc_key_account?' checked':'')+'> Key account</label><label style="cursor:pointer"><input type="checkbox" class="dtc-tag" data-po="'+esc(r.po)+'" data-field="dtc_custom"'+(r.dtc_custom?' checked':'')+'> Custom</label>')
       +cliRow('Client requirements',txtIn(ep,'client_requirements',r.client_requirements,440,true))
       +cliRow('Sales Ref / Amazon Ref',txtIn(ep,'sales_order_ref',r.sales_order_ref,220))
       +cliRow('Client deadline date', dateField(r.client_deadline,{attrs:'data-ep="'+ep+'" data-field="client_deadline_date"', cls:'txtin', width:'130px'})+' <span class="mut tiny">(date the client needs it by)</span>')
@@ -1762,6 +1766,16 @@
         .then(function(j){ if(j&&j.error)throw new Error(j.error); if(poBy[po])poBy[po][inp.dataset.field]=inp.value;
           if(inp.dataset.field==='balance_due_date_overide'){ invalidateDerived(); poRefetchPanel(po,i); } })   // recompute balance due + cash flow
         .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; });
+    // Direct-to-Client tags (Key account / Custom checkboxes)
+    document.querySelectorAll('#podet-'+i+' .dtc-tag').forEach(function(cb){ cb.onchange=function(){ var b={}; b[cb.dataset.field]=cb.checked;
+      shipPost('/api/supply/po/'+encodeURIComponent(po),b,function(){ if(poBy[po])poBy[po][cb.dataset.field]=cb.checked; }); }; });
+    // Client name — save it; and if it matches a saved key account, offer to pull that account's defaults in.
+    fetchKeyAccounts(function(list){ var dl=document.getElementById('kalist'); if(dl)dl.innerHTML=(list||[]).map(function(k){return '<option value="'+esc(k.name)+'">';}).join(''); });
+    document.querySelectorAll('#podet-'+i+' .dtc-client').forEach(function(inp){ inp.onchange=function(){ var val=(inp.value||'').trim(); inp.classList.add('saved');
+      shipPost('/api/supply/po/'+encodeURIComponent(po),{client:val},function(){ if(poBy[po])poBy[po].client=val; });
+      var ka=(KA_LIST||[]).filter(function(k){return String(k.name||'').toLowerCase()===val.toLowerCase();})[0];
+      if(ka && confirm('Apply "'+ka.name+'" key-account defaults to this PO?\n\nThis overwrites the current packing / labelling, client requirements and delivery address.')){
+        shipPost('/api/supply/po/'+encodeURIComponent(po)+'/apply-key-account',{name:ka.name},function(j){ if(j&&j.error){alert(j.error);return;} invalidateDerived(); poRefetchPanel(po,i); }); } }; });
     // Packing & Labelling Yes/No selects (CLIENT/FBA tab) — the PLAN panel is wired by bindPay, not bindEdits,
     // so these need their own save handler (else the Yes/No never persisted).
     document.querySelectorAll('#podet-'+i+' .boolsel').forEach(function(sel){ sel.onchange=function(){ var yes=sel.value==='true';
@@ -2624,7 +2638,7 @@
   var PORTAL_SUP='', PORTAL_TAB='pos', PORTAL_PO_ST=null;   // CONFIG ▸ Portal preview: chosen supplier + inner tab + PO status filter
   var ROW_EDIT={};   // per-sub-tab: which row key is currently in Edit mode (Edit/Save rows for suppliers + productions)
   function renderConfig(d){ var c=document.getElementById('supply-content'); var sizes=d.sizes||[];
-    var SUBS=[['tax','Import tax'],['freight','Freight rates'],['duty','Import duty'],['branches','Branches'],['suppliers','Suppliers'],['batches','Batches'],['productions','Productions'],['products','Products'],['portalusers','Portal users'],['portal','Portal'],['forecast-export','Forecast export']];
+    var SUBS=[['tax','Import tax'],['freight','Freight rates'],['duty','Import duty'],['branches','Branches'],['suppliers','Suppliers'],['keyaccounts','Key accounts'],['batches','Batches'],['productions','Productions'],['products','Products'],['portalusers','Portal users'],['portal','Portal'],['forecast-export','Forecast export']];
     function reload(){ delete cache['config']; selectSection('config'); }   // refresh after a rate add (keeps sub-tab)
     // Generic Edit/Save row table: read-only cells + an Edit button per row; Edit swaps that row's cells to inputs
     // and shows Save/Cancel; Save POSTs all editable fields at once. cols: [{f,h,t:'text|num|select',ro,opts,w}].
@@ -2708,6 +2722,17 @@
     function supTbl(rows){
       return '<div class="sect-h">Suppliers — payment terms drive every payment calc <span class="mut tiny">(<b>Prod d</b> = production lead time; a PO\'s production-end date = start + this, unless overridden)</span> <button class="tool-badge bg-blue" id="sup-new" style="cursor:pointer;border:none;margin-left:8px">+ Supplier</button></div>'
         +editTbl('suppliers', rows, SUP_COLS, {key:'id'}); }
+    var KA_COLS=[{f:'name',h:'Name',w:130},
+      {f:'pack_polybags',h:'Polybags',t:'bool'},{f:'pack_polybags_notes',h:'Polybags notes',w:120},
+      {f:'pack_dnb_barcodes',h:'D&B barcodes',t:'bool'},{f:'pack_dnb_barcodes_notes',h:'notes',w:120},
+      {f:'pack_rfid_barcodes',h:'RFID',t:'bool'},{f:'pack_rfid_barcodes_notes',h:'notes',w:120},
+      {f:'pack_dnb_carton',h:'D&B carton',t:'bool'},{f:'pack_dnb_carton_notes',h:'notes',w:120},
+      {f:'pack_client_carton',h:'Client carton',t:'bool'},{f:'pack_client_carton_notes',h:'notes',w:120},
+      {f:'pack_pallet_notes',h:'Pallet notes',w:130},{f:'pack_other_notes',h:'Other notes',w:130},
+      {f:'client_requirements',h:'Client requirements',w:180},{f:'address',h:'Delivery address',w:180}];
+    function kaTbl(rows){
+      return '<div class="sect-h">Key accounts — client packing / labelling, requirements &amp; delivery address <span class="mut tiny">(defaulted onto a PO&rsquo;s Direct-to-Client details when the client is picked)</span> <button class="tool-badge bg-blue" id="ka-new" style="cursor:pointer;border:none;margin-left:8px">+ Key account</button></div>'
+        +editTbl('keyaccounts', rows, KA_COLS, {key:'id'}); }
     var PROD_COLS=[{f:'prod_no',h:'Production #',w:96},{f:'status',h:'Status',t:'select',opts:['','ACTIVE','CLOSED']},
       {f:'require_supplier_confirmation',h:'Require supplier confirmation',t:'bool',w:120},
       {f:'po_count',h:'POs',ro:true},{f:'suppliers',h:'Suppliers',ro:true},
@@ -2773,6 +2798,11 @@
           wireEditTbl('suppliers', function(k){return '/api/supply/supplier/'+k;}, showSub);
           document.getElementById('sup-new').onclick=function(){ var nm=prompt('New supplier name:'); if(!nm||!nm.trim())return; var cd=prompt('Supplier code (2 letters, optional):')||'';
             shipPost('/api/supply/supplier-create',{name:nm.trim(),code:cd.trim()||null},showSub); }; }); }
+      else if(CONFIG_SUB==='keyaccounts'){ b.innerHTML='<div class="count">Loading…</div>';
+        fetch('/api/supply/key-accounts').then(function(r){return r.json();}).then(function(rows){ b.innerHTML=kaTbl(rows);
+          wireEditTbl('keyaccounts', function(k){return '/api/supply/key-account/'+k;}, showSub);
+          document.getElementById('ka-new').onclick=function(){ var nm=prompt('New key account name (client):'); if(!nm||!nm.trim())return;
+            shipPost('/api/supply/key-account-create',{name:nm.trim()},showSub); }; }); }
       else if(CONFIG_SUB==='batches'){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/batches').then(function(r){return r.json();}).then(function(rows){ b.innerHTML=batchTbl(rows); bindEdits();
           document.getElementById('batch-new').onclick=function(){ var nm=prompt('New batch name:'); if(!nm||!nm.trim())return;
@@ -2903,14 +2933,16 @@
     var isDC=function(b){ b=(b||'').toLowerCase(); return b.indexOf('direct to client')>=0 || b.indexOf('b2b jlew')>=0 || b.indexOf('b2b next')>=0; };
     var base=(rows||[]).filter(function(r){ return isDC(r.branch) && !/complete/i.test(r.status||''); })
       .sort(function(a,z){ return (a.client_deadline||'9999').localeCompare(z.client_deadline||'9999') || (a.delivery||'9999').localeCompare(z.delivery||'9999'); });
-    var today=new Date().toISOString().slice(0,10), st={q:''};
+    var today=new Date().toISOString().slice(0,10), st={q:'',tag:''};
+    function dtcBadges(r){ return ((r.dtc_key_account?'<span class="tool-badge bg-blue">Key account</span> ':'')+(r.dtc_custom?'<span class="tool-badge bg-neutral">Custom</span>':''))||'<span class="mut">—</span>'; }
     function dcTable(list){
-      var h='<div class="tw"><table style="width:max-content"><thead><tr><th class="l">PO</th><th class="l">Client</th><th class="l">Branch</th><th class="l">Supplier</th><th class="l">Client sales ref</th><th class="l">Dispatch order</th><th class="l">D2C details</th><th class="l">Deadline</th><th class="l">Likely arrival</th><th class="l">Shipment</th><th class="l">Crossdock refs</th></tr></thead><tbody>';
+      var h='<div class="tw"><table style="width:max-content"><thead><tr><th class="l">PO</th><th class="l">Client</th><th class="l">Type</th><th class="l">Branch</th><th class="l">Supplier</th><th class="l">Client sales ref</th><th class="l">Dispatch order</th><th class="l">D2C details</th><th class="l">Deadline</th><th class="l">Likely arrival</th><th class="l">Shipment</th><th class="l">Crossdock refs</th></tr></thead><tbody>';
       h+=list.map(function(r){
         var late=r.client_deadline && ((r.checkin && r.checkin>r.client_deadline) || (r.delivery && r.delivery>r.client_deadline));
         var dlOver=r.client_deadline && r.client_deadline<today;
         return '<tr><td class="l"><button class="lnk-btn dc-po" data-po="'+esc(r.po)+'" title="open this PO’s Client/FBA tab"><b>'+esc(r.po)+'</b></button></td>'
           +'<td class="l">'+(r.client?esc(r.client):'<span class="mut">—</span>')+'</td>'
+          +'<td class="l">'+dtcBadges(r)+'</td>'
           +'<td class="l">'+esc(r.branch||'')+'</td><td class="l">'+esc(r.supplier_name||'')+'</td>'
           +'<td class="l">'+(r.sales_order_ref?esc(r.sales_order_ref):'<span class="mut">—</span>')+'</td>'
           +'<td class="l">'+(r.dispatch_order_ref?esc(r.dispatch_order_ref):'<span class="mut">—</span>')+'</td>'
@@ -2920,12 +2952,15 @@
           +'<td class="l">'+(/manufactur/i.test(r.branch||'')?'FOB':(r.shipment?esc(r.shipment):'<span class="mut">— none</span>'))+'</td>'
           +'<td class="l tiny">'+esc(r.crossdock_skus||'')+'</td></tr>'; }).join('');
       return h+'</tbody></table></div>'; }
-    c.innerHTML=annot('directclient')+'<div class="bar"><input class="flt" id="dc-q" placeholder="Filter PO / client / supplier / ref…" style="background:#eff6ff;border-color:#93c5fd"><span class="count" id="dc-count" style="margin-left:auto"></span></div><div id="dc-grid"></div>';
-    function view(){ var f=filt(base, st.q);
+    c.innerHTML=annot('directclient')+'<div class="bar"><input class="flt" id="dc-q" placeholder="Filter PO / client / supplier / ref…" style="background:#eff6ff;border-color:#93c5fd">'
+      +'<span class="pill-lbl" style="margin-left:10px">Type</span>'+[['','All'],['key','Key account'],['custom','Custom']].map(function(o){return '<span class="pill dc-tag'+(o[0]===''?' active':'')+'" data-tag="'+o[0]+'">'+o[1]+'</span>';}).join('')
+      +'<span class="count" id="dc-count" style="margin-left:auto"></span></div><div id="dc-grid"></div>';
+    function view(){ var f=filt(base.filter(function(r){ return st.tag==='key'?r.dtc_key_account:st.tag==='custom'?r.dtc_custom:true; }), st.q);
       document.getElementById('dc-count').textContent=f.length+(st.q?' / '+base.length:'')+' in-progress direct-to-client / B2B orders';
       document.getElementById('dc-grid').innerHTML=f.length?dcTable(f):'<div class="count">'+(st.q?'No matches.':'No in-progress direct-to-client orders.')+'</div>';
       document.querySelectorAll('#dc-grid .dc-po').forEach(function(b){ b.onclick=function(){ gotoPO(b.dataset.po,'client'); }; }); }
     document.getElementById('dc-q').oninput=debounce(function(){ st.q=this.value; view(); },200);
+    c.querySelectorAll('.dc-tag').forEach(function(p){ p.onclick=function(){ st.tag=p.dataset.tag; c.querySelectorAll('.dc-tag').forEach(function(x){x.classList.toggle('active',x===p);}); view(); }; });
     view(); }
   function renderFlexport(rows){ var c=document.getElementById('rep-body')||document.getElementById('supply-content');
     var FILTERS=[['Active','Active'],['Completed','Completed'],['All','All']]; var st={f:'Active',q:''};
