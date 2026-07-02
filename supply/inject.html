@@ -47,8 +47,6 @@
 /* level-3 sub-navs (REPORTS, CONFIG): underline tabs like the level-1/2 menus, in light blue */
 #supply-root #rep-subnav,#supply-root #config-subs,#supply-root #prod-subtabs,#supply-root .po-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 12px}
 #supply-root .ex-badge{display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:#dc2626;color:#fff;font-size:9px;font-weight:700;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px}
-/* categorised exception chips on the PO row — one per area (Dates/Pay/Freight/Plan/Notes) so it's clear at a glance WHICH area has an issue; hover shows the specific message(s) */
-#supply-root .ex-cat{display:inline-block;height:15px;line-height:15px;border-radius:3px;color:#fff;font-size:8.5px;font-weight:700;letter-spacing:.02em;text-align:center;padding:0 5px;margin-left:4px;vertical-align:1px;cursor:help;white-space:nowrap}
 #supply-root .po-set-shipping{font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:#dbeafe;border:1px solid #60a5fa;color:#1d4ed8;cursor:pointer;white-space:nowrap}
 #supply-root .po-set-shipping:hover{background:#bfdbfe}
 #supply-root .po-note-badge{display:inline-block;min-width:13px;height:13px;line-height:12px;border-radius:3px;background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;font-size:8px;font-weight:800;text-align:center;padding:0 3px;margin-left:4px;vertical-align:1px;cursor:pointer;font-family:inherit}
@@ -342,6 +340,10 @@
   function dTd(v,src,hot){ return '<td class="l"'+(hot?' style="'+hot+'"':'')+'>'+dcell(v)+(src||'')+'</td>'; }
   var DTD_LRED='background:#fee2e2', DTD_RED='background:#fca5a5;color:#7f1d1d;font-weight:700';
   function srctag(s){return s?'<span class="src '+(s==='FLEX'||s==='calc'?'fx':'m')+'">'+esc(s)+'</span>':'';}
+  function flexNum(fid){ var m=String(fid||'').match(/\d+/); return m?m[0]:''; }   // Flexport shipment id → numeric part for the URL
+  function flexUrl(fid){ var n=flexNum(fid); return n?'https://app.flexport.com/shipments/'+n:''; }
+  // FLEX source badge that links to the Flexport shipment when a flex id is known; otherwise the plain badge
+  function srctagLink(s,r){ if(s==='FLEX'&&r&&r.flex_id){ var u=flexUrl(r.flex_id); if(u)return '<a href="'+u+'" target="_blank" rel="noopener" class="src fx" style="text-decoration:none" title="open '+esc(r.flex_id)+' in Flexport ↗">FLEX ↗</a>'; } return srctag(s); }
   function annot(k){return '';}   // section description boxes removed (Ben) — ANNOT kept for reference only
   function cellFor(c,v){ if(v==null||v==='')return '<td></td>';
     if(c==='status'||c==='po_status')return '<td class="l"><span class="tool-badge '+statusBg(v)+'">'+esc(v)+'</span></td>';
@@ -417,7 +419,10 @@
         // keep any DUPLICATE control for the same record+field in sync in place (e.g. the shipments grid Mode/Carrier
         // dropdown vs the same field in the expanded "Dates & tracking" panel) — no full refresh needed
         var ep=inp.dataset.ep, fld=inp.dataset.field, val=inp.value;
-        document.querySelectorAll('#supply-root .fci[data-field="'+fld+'"]').forEach(function(o){ if(o===inp||o.dataset.ep!==ep||o.value===val)return; o.value=val; recolorFci(o, fld, val); }); })
+        document.querySelectorAll('#supply-root .fci[data-field="'+fld+'"]').forEach(function(o){ if(o===inp||o.dataset.ep!==ep||o.value===val)return; o.value=val; recolorFci(o, fld, val); });
+        // live-sync the collapsed PO grid row when a field was edited in that PO's expansion sub-tabs
+        var _pm=/^\/api\/supply\/po\/([^\/]+)$/.exec(ep);
+        if(_pm && current==='purchase-orders' && typeof window.__poRowRefresh==='function'){ try{ window.__poRowRefresh(decodeURIComponent(_pm[1])); }catch(e){} } })
       .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; }); }
 
   function renderGeneric(key,rows){ var c=document.getElementById('supply-content');
@@ -431,10 +436,11 @@
   function prodStatusOpts(sel){ return PROD_STATUS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===sel?' selected':'')+'>'+o[1]+'</option>';}).join(''); }
   function prodStatusLabel(v){ var m=PROD_STATUS.filter(function(o){return o[0]===v;}); return m.length?m[0][1]:''; }
   // logic-based exception on the supplier production status vs the production dates (returns '' when fine)
-  function prodStatusException(ps, prodStart, prodEnd, today){ ps=ps||''; today=today||new Date().toISOString().slice(0,10);
-    if((ps===''||ps==='not_started') && prodStart && prodStart<today) return 'Past production start ('+fd(prodStart)+') but status is '+(ps?prodStatusLabel(ps):'not set');
-    if(ps!=='complete' && ps!=='shipped' && prodEnd && prodEnd<today) return 'Past production completion ('+fd(prodEnd)+') but status is '+(ps?prodStatusLabel(ps):'not set');
-    return ''; }
+  function prodStatusStart(ps, prodStart, today){ ps=ps||''; today=today||new Date().toISOString().slice(0,10);
+    if((ps===''||ps==='not_started') && prodStart && prodStart<today) return 'Past production start ('+fd(prodStart)+') but status is '+(ps?prodStatusLabel(ps):'not set'); return ''; }
+  function prodStatusEnd(ps, prodEnd, today){ ps=ps||''; today=today||new Date().toISOString().slice(0,10);
+    if(ps!=='complete' && ps!=='shipped' && prodEnd && prodEnd<today) return 'Past production completion ('+fd(prodEnd)+') but status is '+(ps?prodStatusLabel(ps):'not set'); return ''; }
+  function prodStatusException(ps, prodStart, prodEnd, today){ return prodStatusStart(ps,prodStart,today) || prodStatusEnd(ps,prodEnd,today); }
   function cfLastMonth(cur){ var y=+cur.slice(0,4), m=+cur.slice(5,7)-1; return m===0?((y-1)+'-12'):(y+'-'+('0'+m).slice(-2)); }
   // Payment actions from the cash flow + other-payment register (timing = likely date if set, else due date):
   //   • one summary for UNPAID due LAST month  •  one INDIVIDUAL action per AGED unpaid item (before last month).
@@ -748,6 +754,7 @@
     return '<div class="sect-h">Shipments <span class="mut tiny">— assign a shipment or mark FOB, ASN numbers, Ships With Supplier pallet labels</span></div>'
       +lookupDatalists()+'<div class="cli-form" style="max-width:620px">'
       +row('Shipment / FOB',ship)
+      +((r.flex_id||r.flexport_reference)?row('Flexport <span class="mut tiny">(reference &amp; link)</span>',(function(){ var fid=r.flex_id||r.flexport_reference, u=flexUrl(fid); return u?'<a href="'+u+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;white-space:nowrap">'+esc(fid)+' ↗</a>':esc(fid); })()):'')
       +row('ASN numbers <span class="mut tiny">(comma-separated)</span>','<input class="fci txtin" data-ep="'+ep+'" data-field="asn_numbers" value="'+esc(r.asn_numbers||'')+'" placeholder="ASN1, ASN2…" style="width:280px;text-align:left">')
       +row('Ships With Supplier labels','<button class="save-btn po-dl-sw" data-po="'+esc(po)+'" title="SHIPS WITH SUPPLIER master pallet label (carton size)">⤓ Ships With Supplier labels</button>')
       +'</div>'; }
@@ -995,6 +1002,25 @@
       fetch('/api/supply/po/'+encodeURIComponent(b.dataset.po)+'/set-shipping',{method:'POST'}).then(function(r){return r.json();}).then(function(j){
         if(j&&j.error){ alert(j.error); b.disabled=false; b.textContent='→ set shipping'; return; }
         refreshGrid(); }).catch(function(err){ alert('Failed: '+(err.message||err)); b.disabled=false; b.textContent='→ set shipping'; }); }; }); }
+    // Silently sync ONE collapsed grid row after a field was edited in that PO's expansion sub-tabs (Dates,
+    // Payments, …). Re-fetches the data (derived dates/values recompute server-side), then swaps only the main
+    // <tr> — the open expansion <tr> (a separate sibling row) is left untouched, so the panel stays put.
+    function silentRowRefresh(po){ invalidateDerived(); delete cache['purchase-orders'];
+      fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(fresh){
+        if(!Array.isArray(fresh))return; rows.length=0; Array.prototype.push.apply(rows,fresh); rows.forEach(function(x){poBy[x.po]=x;});
+        var rr=poBy[po]; if(!rr)return;
+        var key=(window.CSS&&CSS.escape)?CSS.escape(po):po;
+        var expBtn=document.querySelector('#sup-grid .po-exp[data-po="'+key+'"]'); if(!expBtn)return;
+        var mainTr=expBtn.closest('tr'); if(!mainTr)return;
+        var g=mainTr.dataset.g, tmp=document.createElement('tbody');
+        tmp.innerHTML=poRowHtml(rr, expBtn.dataset.i, mainTr.classList.contains('po-child'), (g==null?null:g));
+        var newMain=tmp.querySelector('tr'); if(!newMain)return;
+        var wasOpen=mainTr.classList.contains('row-open');
+        mainTr.parentNode.replaceChild(newMain, mainTr);
+        if(wasOpen){ newMain.classList.add('row-open'); var eb=newMain.querySelector('.po-exp'); if(eb)eb.classList.add('open'); }
+        bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindDepPick(patchPoRow); bindPoStars(); bindPoNotes(); bindSetShipping();
+      }).catch(function(){}); }
+    try{ window.__poRowRefresh=silentRowRefresh; }catch(e){}
     // Patch ONE PO row in place (no grid re-render / flash) after an assign. Only when not grouped by shipment —
     // assigning a shipment changes the shipment group, which needs a regroup, so that case does a full refresh.
     function patchPoRow(po){ if(state.grp==='shipment'){ refreshGrid(); return; }
@@ -1189,13 +1215,11 @@
         ? '<button class="ship-open" data-ref="'+esc(r.shipment)+'" title="open this shipment">'+esc(r.shipment)+'</button> <button class="ship-pick" data-po="'+esc(r.po)+'" title="reassign">▾</button>'
         : '<button class="ship-pick" data-po="'+esc(r.po)+'">— assign ▾</button>')
       +(r.is_master?' <span class="tool-badge bg-blue" title="master / consolidation PO for this shipment">master</span>':'');
-    var _ex=poExceptions(r,null);   // grid badge (invoice discrepancy resolves only once the PLAN panel is opened)
-    // one labelled chip per exception area (Pay / Dates / Freight / Plan / Notes) so it's clear WHICH area is
-    // flagged and WHY (hover) — instead of an opaque count. Ordered by urgency; empty areas are skipped.
-    var exFlag=exCatBadges(_ex);
+    // exceptions surface inline at the data point (e.g. the DATES sub-tab Source column) + as per-sub-tab
+    // count badges in the PLAN panel + the grid date-cell highlights — not as a badge on the PO reference.
     // purple "N" badge → this PO has internal Notes (MASTER DATA). Hover shows them; click opens the PLAN ▸ MASTER DATA tab.
     var noteFlag=(r.notes&&String(r.notes).trim())?' <button class="po-note-badge" data-po="'+esc(r.po)+'" data-note="'+esc(String(r.notes).trim())+'">N</button>':'';
-    var pocell=indent?'<td class="l po-child po-numcell"><span class="ind">└ </span><b>'+esc(r.po)+'</b>'+noteFlag+exFlag+'</td>':'<td class="l po-numcell"><b>'+esc(r.po)+'</b>'+noteFlag+exFlag+'</td>';
+    var pocell=indent?'<td class="l po-child po-numcell"><span class="ind">└ </span><b>'+esc(r.po)+'</b>'+noteFlag+'</td>':'<td class="l po-numcell"><b>'+esc(r.po)+'</b>'+noteFlag+'</td>';
     // ERP cell — compact badge-style buttons (same look as the "✓ in sync" badge) → keeps the column narrow.
     // Labels collapse to a single action: Update lines / Update date / Update both. All open the same ERP modal.
     var erpStyle='cursor:pointer;border:none';
@@ -1217,8 +1241,8 @@
       +'<td class="l">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0)+'</td>'
       +dTd(r.prod_start,'',(r.status==='FUTURE'&&datePast(r.prod_start))?DTD_LRED:'')
       +dTd(r.prod_end,srctag(r.prod_end_src),(r.status==='PRODUCTION'&&datePast(r.prod_end))?DTD_LRED:'')
-      +'<td class="l">'+dcell(r.ship)+srctag(r.ship_src)+'</td>'
-      +'<td class="l">'+dcell(r.delivery)+srctag(r.delivery_src)+'</td>'
+      +'<td class="l">'+dcell(r.ship)+srctagLink(r.ship_src,r)+'</td>'
+      +'<td class="l">'+dcell(r.delivery)+srctagLink(r.delivery_src,r)+'</td>'
       +dTd(r.checkin,'',((r.status==='PRODUCTION'||r.status==='SHIPPING')&&datePast(r.checkin))?DTD_RED:'')
       +'<td>'+(r.is_final?money(r.value_used)+' <span class="tool-badge bg-green" title="final supplier invoice amount (overrides estimate)">final</span>':money(r.value_est)+' '+valnote)+'</td>'
       +'<td'+(Number(r.pallets)>20?' style="color:#dc2626;font-weight:700" title="over 20 pallets — more than one container; rebalance the production POs"':'')+'>'+(r.pallets!=null&&r.pallets!==''?r.pallets:'<span class="mut tiny">—</span>')+'</td>'
@@ -1375,11 +1399,6 @@
     var timeline=[]; if(Number(r.unread_notes)>0) timeline.push(r.unread_notes+' unread supplier note'+(r.unread_notes>1?'s':''));
     var oplan=[]; if(Number(r.orderplan_unconfirmed)>0) oplan.push(r.orderplan_unconfirmed+' unconfirmed order-plan change'+(r.orderplan_unconfirmed>1?'s':''));
     return { pay:pay, dates:dates, client:[], landed:landed, timeline:timeline, oplan:oplan, all:pay.concat(dates).concat(landed).concat(timeline).concat(oplan) }; }
-  // grid exception chips — one labelled, colour-coded chip per non-empty area, tooltip = that area's message(s).
-  function exCatBadges(ex){ if(!ex)return '';
-    var cats=[['pay','PAY','#dc2626'],['dates','DATES','#b45309'],['landed','FREIGHT','#c2410c'],['oplan','PLAN','#1d4ed8'],['timeline','NOTES','#6d28d9']];
-    return cats.map(function(c){ var m=ex[c[0]]||[]; if(!m.length)return '';
-      return '<span class="ex-cat" style="background:'+c[2]+'" title="'+esc(c[1]+': '+m.join(' · '))+'">⚠ '+c[1]+'</span>'; }).join(''); }
   function payPanel(r,d){ if(!r)return '';
     var ep='/api/supply/po/'+encodeURIComponent(r.po);
     var bal1=Number(r.balance_1_amount), owe=Number(r.balance_owing)||0;
@@ -1517,15 +1536,17 @@
     // ---- DATES chunk — only production start & end are editable; ship/delivery/completion are always calculated
     // (from the assigned shipment if any, else from supplier + branch lead times).
     function srcLbl(s){ return s==='S'?'<span class="src fx">shipment</span>':s==='FLEX'?'<span class="src fx">Flexport</span>':s==='calc'?'calculated':'—'; }
+    var _pseStart=r.require_confirmation?prodStatusStart(r.production_status,r.prod_start):'';
+    var _pseEnd=r.require_confirmation?prodStatusEnd(r.production_status,r.prod_end):'';
+    var _alert=function(m){ return m?' <span style="color:#b91c1c;font-weight:600">⚠ '+esc(m)+'</span>':''; };
     var datesH='<div class="sect-h">Dates <span class="mut tiny">— only production start &amp; end are editable; the rest auto-calculate</span></div>'
       +'<div class="tw" style="max-width:760px"><table><thead><tr><th class="l">Milestone</th><th class="l">Date</th><th class="l" style="min-width:250px">Source</th></tr></thead><tbody>'
-      +'<tr><td class="l"><b>Production start</b></td><td class="l">'+payIn(ep,'start_production',r.prod_start,true)+'</td><td class="l mut tiny">manual</td></tr>'
-      +'<tr><td class="l"><b>Production end</b></td><td class="l">'+payIn(ep,'end_production_overide',r.end_override,true)+'</td><td class="l mut tiny">'+(r.end_override?'override':'start + supplier days')+'</td></tr>'
-      +(function(){ var pse=r.require_confirmation?prodStatusException(r.production_status,r.prod_start,r.prod_end):'';
+      +'<tr'+(_pseStart?' style="background:#fff7ed"':'')+'><td class="l"><b>Production start</b></td><td class="l">'+payIn(ep,'start_production',r.prod_start,true)+'</td><td class="l mut tiny">manual'+_alert(_pseStart)+'</td></tr>'
+      +'<tr'+(_pseEnd?' style="background:#fff7ed"':'')+'><td class="l"><b>Production end</b></td><td class="l">'+payIn(ep,'end_production_overide',r.end_override,true)+'</td><td class="l mut tiny">'+(r.end_override?'override':'start + supplier days')+_alert(_pseEnd)+'</td></tr>'
+      +(function(){ var pse=(_pseStart||_pseEnd);
         return '<tr'+(pse?' style="background:#fff7ed"':'')+'><td class="l"><b>Supplier production status</b> <span class="mut tiny">(set by supplier / here)</span></td>'
           +'<td class="l">'+prodStatusSel(ep+'/prod-status', r.production_status)+'</td>'
-          +'<td class="l mut tiny">'+(r.production_status?(r.prod_confirmed_age!=null?'confirmed '+r.prod_confirmed_age+'d ago':'supplier-set'):'not set')
-          +(pse?' <span style="color:#b91c1c;font-weight:600">⚠ '+esc(pse)+'</span>':'')+'</td></tr>'; })()
+          +'<td class="l mut tiny">'+(r.production_status?(r.prod_confirmed_age!=null?'confirmed '+r.prod_confirmed_age+'d ago':'supplier-set'):'not set')+'</td></tr>'; })()
       +(function(){ var sc=d&&d.sup_completion; if(!sc)return ''; var pend=(sc.status==='pending');
         return '<tr'+(pend?' style="background:#fff7ed"':'')+'><td class="l">Supplier completion date <span class="mut tiny">(submitted in portal)</span></td>'
           +'<td class="l">'+(sc.value?'<b>'+fd(sc.value)+'</b>':'—')+' '+(pend?'<span class="tool-badge bg-amber">awaiting approval</span>':sc.status==='applied'?'<span class="tool-badge bg-green">applied to production end</span>':'<span class="tool-badge bg-neutral">rejected</span>')+'</td>'

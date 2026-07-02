@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.143 - Inline date alerts, Flexport links, live grid sync from sub-tabs
+
+- **Exception alerts now sit at the data point.** Removed the categorised chips from the PO reference
+  (v25.141). The production-status warning ("Past production start/completion … but status is …") now
+  shows in the DATES sub-tab's Source column, on the specific row it concerns (Production start / Production
+  end), highlighted amber — instead of a badge on the PO number.
+- **Flexport links.** The FLEX source badge on the PO grid (Ship/Delivery) is now a link to the Flexport
+  shipment; the PO's SHIPMENTS sub-tab shows the Flexport reference with the same link.
+- **Live grid sync.** Editing any PO field in an expansion sub-tab (e.g. Production end on DATES) now
+  silently refreshes that PO's collapsed grid row — derived dates/values recompute and the row updates in
+  place, without closing the open panel.
+
 ## v25.142 - PO grid: "→ set shipping" quick-advance when the shipment has departed
 
 When a PO is still in PRODUCTION but its assigned shipment has departed (effective status Shipping), a
