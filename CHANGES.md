@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.123 - Purchase Orders: internal "NOTES" field (separate from Timeline)
+
+New editable **Notes** field on a PO, on the PLAN ▸ **MASTER DATA** sub-tab — distinct from the
+Timeline notes. When a PO has notes, a small **purple "N"** badge shows on the grid right after
+the PO reference (before the action-count badge): hover to read the note, click to expand the PO
+straight onto the MASTER DATA tab. Uses the existing `purchase_orders.notes` column (already in
+the schema + PO patch); the grid query now returns it.
+
+Deploy: no new env vars, **no migrations** (notes column already exists). Files: `server.mjs`,
+`supply/inject.html`.
+
 ## v25.122 - Upload POs: "Download template" button + tab-paste note
 
 Added a **⬇ Download template** button to the Upload POs popup — downloads `PO_upload_template.csv`

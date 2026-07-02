@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.122';
+const APP_VERSION = 'v25.123';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1172,7 +1172,7 @@ app.get('/api/supply/:section', async (req, res) => {
             completion_calc, round(pay_completion_assigned,2) completion_assigned, to_char(pay_completion_date,'YYYY-MM-DD') completion_date,
             round(pay_balance_1_amount,2) balance_1_amount, to_char(pay_balance_1_date,'YYYY-MM-DD') balance_1_date,
             round(pay_balance_2_amount,2) balance_2_amount, to_char(pay_balance_2_date,'YYYY-MM-DD') balance_2_date,
-            round(catch_up,2) catch_up, round(deposit_avail,2) deposit_avail, deposit_fx,
+            round(catch_up,2) catch_up, round(deposit_avail,2) deposit_avail, deposit_fx, coalesce(notes,'') notes,
             CASE WHEN start_calc > 0 THEN to_char(start_production,'YYYY-MM-DD') END start_due,        -- no due date for a 0% milestone
             CASE WHEN completion_calc > 0 THEN to_char(eff_prod_end,'YYYY-MM-DD') END completion_due,
             to_char(bal_due_date,'YYYY-MM-DD') balance_due,
