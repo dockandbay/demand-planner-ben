@@ -388,14 +388,19 @@
     if(!t||t.tagName!=='INPUT'||t.type!=='date')return;
     var cb=e.clipboardData||window.clipboardData; var iso=parseDateLoose(cb?cb.getData('text'):'');
     if(!iso)return; e.preventDefault(); t.value=iso; t.dispatchEvent(new Event('change',{bubbles:true})); }, true);
+  // after a .dateinp change is saved (its own handler runs first, in ISO), reformat the DISPLAY to dd-mmm-yy
+  document.addEventListener('change', function(e){ var t=e.target;
+    if(!t||!t.classList||!t.classList.contains('dateinp'))return;
+    var iso=parseDateLoose(t.value); if(iso) t.value=fd(iso); }, false);
   // Editable date field: a plain TEXT box (select / copy / paste / type any format) that resolves + validates
   // to ISO on change, plus a 📅 button that opens the native calendar picker. Replaces <input type="date">
   // (whose segmented field can't be selected or pasted into). opts: {attrs, cls, width, disabled}.
   function dateField(val, opts){ opts=opts||{};
     var iso = val ? String(val).slice(0,10) : '';
     var dis = opts.disabled ? ' disabled' : '';
+    // display the friendly dd-mmm-yy form (e.g. 14-May-26); the native picker + save use ISO under the hood
     return '<span class="datewrap">'
-      + '<input type="text" class="fci dateinp'+(opts.cls?(' '+opts.cls):'')+'" inputmode="numeric" autocomplete="off" placeholder="yyyy-mm-dd" '+(opts.attrs||'')+dis+' value="'+esc(iso)+'" style="width:'+(opts.width||'110px')+';text-align:left" title="type or paste any date — e.g. 2055-11-02, 12-May-25, 12/12/25">'
+      + '<input type="text" class="fci dateinp'+(opts.cls?(' '+opts.cls):'')+'" autocomplete="off" placeholder="dd-mmm-yy" '+(opts.attrs||'')+dis+' value="'+esc(iso?fd(iso):'')+'" style="width:'+(opts.width||'110px')+';text-align:left" title="type or paste any date — e.g. 2055-11-02, 12-May-25, 12/12/25 — shows as dd-mmm-yy once valid">'
       + '<button type="button" class="datepick"'+dis+' tabindex="-1" title="pick from calendar">📅</button>'
       + '<input type="date" class="datepicknative" tabindex="-1" aria-hidden="true" value="'+esc(iso)+'"'+dis+'>'
       + '</span>'; }

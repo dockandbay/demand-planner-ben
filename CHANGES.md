@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.147 - Editable dates display as dd-mmm-yy (14-May-26)
+
+The paste-friendly date boxes now show the friendly dd-mmm-yy form (e.g. 14-May-26) — the app's standard
+display — instead of ISO. You can still type/paste any format; it resolves to ISO under the hood for the
+save + calendar picker, and the box reformats to dd-mmm-yy after a valid entry (and on page refresh).
+
 ## v25.146 - Samples date fields → same paste-friendly text box + picker
 
 Applied the v25.145 date field (text box + 📅 picker, resolves/validates any common format to ISO) to the
