@@ -417,7 +417,7 @@
     var inline = !!opts.inline;
     // display the friendly dd-mmm-yy form (e.g. 14-May-26); the native picker + save use ISO under the hood
     return '<span class="datewrap">'
-      + '<input type="text" class="fci dateinp'+(inline?' dinline':'')+(opts.cls?(' '+opts.cls):'')+'" autocomplete="off" placeholder="dd-mmm-yy" '+(opts.attrs||'')+dis+' value="'+esc(iso?fd(iso):'')+'" style="width:'+(opts.width||'110px')+';text-align:left" title="type or paste any date — e.g. 2055-11-02, 12-May-25, 12/12/25 — shows as dd-mmm-yy once valid'+(inline?'; click to open the calendar':'')+'">'
+      + '<input type="text" class="fci dateinp'+(inline?' dinline':'')+(opts.cls?(' '+opts.cls):'')+'" autocomplete="off" placeholder="dd-mmm-yy" '+(opts.attrs||'')+dis+' value="'+esc(iso?fd(iso):'')+'" style="width:'+(opts.width||'110px')+';text-align:left" title="type or paste any date — e.g. 2055-11-02, 12-May-25, 12/12/25 — shows as dd-mmm-yy once valid'+(inline?'; double-click to open the calendar':'')+'">'
       + (inline?'':'<button type="button" class="datepick"'+dis+' tabindex="-1" title="pick from calendar">📅</button>')
       + '<input type="date" class="datepicknative" tabindex="-1" aria-hidden="true" value="'+esc(iso)+'"'+dis+'>'
       + '</span>'; }
@@ -427,7 +427,7 @@
     var openPick=function(){ if(!nat||nat.disabled)return; nat.value=parseDateLoose(txt.value)||''; try{ nat.showPicker(); }catch(err){ try{ nat.focus(); nat.click(); }catch(e2){} } };
     if(btn&&nat){ btn.onclick=function(e){ e.preventDefault(); e.stopPropagation(); openPick(); }; }
     // inline (grid) field with no button → clicking the box opens the calendar
-    if(txt&&nat&&txt.classList.contains('dinline')){ txt.onclick=function(){ openPick(); }; }
+    if(txt&&nat&&txt.classList.contains('dinline')){ txt.ondblclick=function(){ openPick(); }; }   // double-click opens the calendar; single-click leaves the field selectable/copyable
     if(nat){ nat.onchange=function(){ if(!nat.value)return; txt.value=nat.value; txt.classList.remove('err'); txt.dispatchEvent(new Event('change',{bubbles:true})); }; } }); }
   function depDatalist(){ return '<datalist id="deprefs"><option value="NO DEPOSIT">'+(depRefs||[]).map(function(r){return '<option value="'+esc(r)+'">';}).join('')+'</datalist>'; }
   function dl(id,arr){ return '<datalist id="'+id+'">'+(arr||[]).map(function(r){return '<option value="'+esc(r)+'">';}).join('')+'</datalist>'; }
@@ -1276,7 +1276,7 @@
       : (r.shipment
         ? '<button class="ship-open" data-ref="'+esc(r.shipment)+'" title="open this shipment">'+esc(r.shipment)+'</button> <button class="ship-pick" data-po="'+esc(r.po)+'" title="reassign">▾</button>'
         : '<button class="ship-pick" data-po="'+esc(r.po)+'">— assign ▾</button>')
-      +(r.is_master?' <span class="tool-badge bg-blue" title="master / consolidation PO for this shipment">master</span>':'');
+      +(r.is_master?'<div style="margin-top:2px"><span class="tool-badge bg-blue" style="font-size:8px;padding:0 4px" title="master / consolidation PO for this shipment">master</span></div>':'');
     // exceptions surface inline at the data point (e.g. the DATES sub-tab Source column) + as per-sub-tab
     // count badges in the PLAN panel + the grid date-cell highlights — not as a badge on the PO reference.
     // purple "N" badge → this PO has internal Notes (MASTER DATA). Hover shows them; click opens the PLAN ▸ MASTER DATA tab.

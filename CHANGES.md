@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.154 - PO grid: copyable inline dates + master badge below the shipment
+
+- The inline Start/End date fields opened the calendar on single-click, which blocked selecting/copying the
+  text. Moved calendar-open to **double-click**; single-click now leaves the field selectable so you can
+  copy the date (Cmd/Ctrl-C).
+- The "master" badge in the SHIPMENT column now sits on its own line **under** the shipment, at a smaller size.
+
 ## v25.153 - BUY / FBA grids: launch & discontinue dates as dd-mmm-yy
 
 The BUY and FBA plan grids showed launch / discontinue dates as dd/mm/yy — now dd-mmm-yy (e.g. 14-May-26),
