@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.146 - Samples date fields → same paste-friendly text box + picker
+
+Applied the v25.145 date field (text box + 📅 picker, resolves/validates any common format to ISO) to the
+Samples "Completion required" date — both the new-sample request form and the inline row editor. Invalid
+input turns the box red and isn't saved. (Remaining native date inputs are the FBA/Buy-plan filter boxes.)
+
 ## v25.145 - Editable date fields: paste-friendly text box + calendar picker
 
 Replaced the native `<input type="date">` (whose segmented field can't be selected or pasted into) with a

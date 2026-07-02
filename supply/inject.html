@@ -4024,7 +4024,7 @@
         +R('SKUs','<div class="sf-lines"></div><button class="save-btn light sf-addline" style="margin-top:4px">+ line</button>'
           +'<div class="mut tiny" style="margin-top:6px">or paste <b>sku, qty</b> per line:</div><textarea class="fci sf-paste" rows="3" style="width:320px;text-align:left" placeholder="TOWLB-..., 2"></textarea> <button class="save-btn light sf-parsepaste">Add pasted</button>')
         +H('Details')
-        +R('Completion required','<input type="date" class="fci txt sf-completion" style="width:150px">')
+        +R('Completion required', dateField('',{cls:'sf-completion', width:'130px'}))
         +R('Purpose',purp)
         +R('Notes','<textarea class="fci sf-notes" rows="2" style="width:320px;text-align:left"></textarea>')
         +'<div style="margin-top:12px;border-top:1px solid #eef2f7;padding-top:10px"><button class="save-btn sf-save" style="background:#16a34a;border-color:#15803d;color:#fff;font-weight:700">Create sample request</button> <button class="save-btn light sf-cancel">Cancel</button></div></div>';
@@ -4049,9 +4049,10 @@
           recipient_company:V('recipient_company')||null, first_name:V('first_name')||null, last_name:V('last_name')||null,
           address_line1:V('address_line1')||null, address_line2:V('address_line2')||null, city:V('city')||null, region:V('region')||null,
           postcode:V('postcode')||null, country:(V('country')||'').toUpperCase()||null, phone:V('phone')||null,
-          completion_date_required:V('completion')||null, notes:V('notes')||null,
+          completion_date_required:(V('completion')?(parseDateLoose(V('completion'))||null):null), notes:V('notes')||null,
           lines:lines.filter(function(l){return l.sku&&l.sku.trim();}).map(function(l){return {sku:l.sku.trim(),qty:Number(l.qty)||0};}) };
         btn.disabled=true; shipPost('/api/supply/sample-create',body,function(j){ if(j&&j.error){alert('Failed: '+j.error);btn.disabled=false;return;} box.dataset.open=''; box.innerHTML=''; reload(); }); };
+      bindDatePickers();
     }
     function view(){ var f=cur();
       var bar='<div class="bar">'+FILT.map(function(x){return '<span class="pill'+(x[0]===st.f?' active':'')+'" data-f="'+x[0]+'">'+x[1]+'</span>';}).join('')
@@ -4117,7 +4118,7 @@
           ? '<div class="samp-lines"></div><button class="save-btn light samp-addline" style="margin-top:4px">+ line</button> <button class="save-btn samp-saveskus">Save SKUs</button>'
           : '<div class="tiny" style="line-height:1.7">'+((d.lines||[]).map(function(l){return '<div><b>'+units(l.qty)+'</b> × '+esc(l.sku)+'</div>';}).join('')||'<span class="mut">no SKUs</span>')+'</div>';
         var completion = editing
-          ? '<input type="date" class="fci txt samp-fld" data-field="completion_date_required" value="'+esc(s.completion_required||'')+'" style="width:140px">'
+          ? dateField(s.completion_required,{cls:'samp-fld', attrs:'data-field="completion_date_required"', width:'120px'})
           : '<span class="tiny"'+(s.overdue?' style="color:#dc2626;font-weight:700"':'')+'>'+(s.completion_required?fd(s.completion_required):'—')+'</span>';
         var tracking = editing ? fld('tracking_code',s.tracking_code,150,'tracking') : '<span class="tiny">'+(s.tracking_code?esc(s.tracking_code):'<span class="mut">—</span>')+'</span>';
         var carrier  = editing ? fld('carrier',s.carrier,120,'carrier') : '<span class="tiny">'+(s.carrier?esc(s.carrier):'<span class="mut">—</span>')+'</span>';
@@ -4152,7 +4153,10 @@
         box.querySelectorAll('.samp-charge-acc').forEach(function(b){ b.onclick=function(){ b.disabled=true; shipPost('/api/supply/charge/'+b.dataset.id+'/accept',{},function(j){ if(j&&j.error){alert(j.error);b.disabled=false;return;} alert('Charge accepted — posted to Other Payments.'); loadSampleDetail(id,i); }); }; });
         box.querySelectorAll('.samp-charge-rej').forEach(function(b){ b.onclick=function(){ if(!confirm('Reject this charge?'))return; shipPost('/api/supply/charge/'+b.dataset.id+'/reject',{},function(){ loadSampleDetail(id,i); }); }; });
         if(editing){
-          box.querySelectorAll('.samp-fld').forEach(function(inp){ inp.onchange=function(){ var b={}; b[inp.dataset.field]=inp.value; shipPost(ep,b,function(){ s[inp.dataset.field==='completion_date_required'?'completion_required':inp.dataset.field]=inp.value; }); }; });
+          box.querySelectorAll('.samp-fld').forEach(function(inp){ inp.onchange=function(){
+            if(inp.classList.contains('dateinp')){ var _r=(inp.value||'').trim(),_i=_r?parseDateLoose(_r):''; if(_r&&!_i){inp.classList.add('err');return;} inp.classList.remove('err'); inp.value=_i; }
+            var b={}; b[inp.dataset.field]=inp.value; shipPost(ep,b,function(){ s[inp.dataset.field==='completion_date_required'?'completion_required':inp.dataset.field]=inp.value; }); }; });
+          bindDatePickers();
           box.querySelectorAll('.samp-purpose').forEach(function(cb){ cb.onchange=function(){ var arr=Array.prototype.map.call(box.querySelectorAll('.samp-purpose:checked'),function(x){return x.value;}); s.purpose=arr; shipPost(ep,{purpose:arr},function(){}); }; });
           renderSlines();
           box.querySelector('.samp-addline').onclick=function(){ slines.push({sku:'',qty:''}); renderSlines(); };
