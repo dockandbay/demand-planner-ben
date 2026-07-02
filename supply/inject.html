@@ -416,18 +416,22 @@
     if(ps!=='complete' && ps!=='shipped' && prodEnd && prodEnd<today) return 'Past production completion ('+fd(prodEnd)+') but status is '+(ps?prodStatusLabel(ps):'not set');
     return ''; }
   function cfLastMonth(cur){ var y=+cur.slice(0,4), m=+cur.slice(5,7)-1; return m===0?((y-1)+'-12'):(y+'-'+('0'+m).slice(-2)); }
-  // Two summary actions from the cash flow: unpaid due LAST month, and AGED unpaid (before last month).
+  // Payment actions from the cash flow + other-payment register (timing = likely date if set, else due date):
+  //   • one summary for UNPAID due LAST month  •  one INDIVIDUAL action per AGED unpaid item (before last month).
   function cfUnpaidActions(cf){ var out=[]; if(!cf||!cf.lines)return out;
     var cur=(cf.today||new Date().toISOString().slice(0,10)).slice(0,7), lm=cfLastMonth(cur);
-    var lastSum=0,lastN=0,agedSum=0,agedN=0;
-    cf.lines.forEach(function(x){ if(x.paid||x.month==='—')return;
-      if(x.month===lm){lastSum+=x.amount;lastN++;} else if(x.month<lm){agedSum+=x.amount;agedN++;} });
+    // (1) last month — single summary linking to the cash flow filtered to that month
+    var lastSum=0,lastN=0;
+    cf.lines.forEach(function(x){ if(x.paid||x.month==='—')return; if(x.month===lm){lastSum+=x.amount;lastN++;} });
     if(lastN) out.push({ severity:'amber', status:'open', type:'Unpaid — last month', ref:lastN+' payment'+(lastN>1?'s':'')+' · $'+units(lastSum),
       detail:lastN+' payment'+(lastN>1?'s':'')+' due last month ('+cfMonthLabel(lm)+') still unpaid — $'+units(lastSum)+'. Open the cash flow to review.',
       fix:'gotoreport', field:'cashflow', cfstatus:'overdue', cfmonth:lm, target:'', target_key:'cf-lastmonth' });
-    if(agedN) out.push({ severity:'high', status:'open', type:'Aged unpaid payments', ref:agedN+' payment'+(agedN>1?'s':'')+' · $'+units(agedSum),
-      detail:agedN+' payment'+(agedN>1?'s':'')+' from before last month still unpaid — $'+units(agedSum)+'. Review, clear, or set a likely date.',
-      fix:'gotoreport', field:'cashflow', cfstatus:'overdue', cfmonth:'aged', target:'', target_key:'cf-aged' });
+    // (2) aged — one action PER item (PO milestone / deposit / other payment), each linking to its source
+    cf.lines.forEach(function(x){ if(x.paid||x.estimate||x.month==='—'||!(x.month<lm))return;   // committed only (skip freight/duty/tax estimates)
+      var go=x.basis==='register'?'dep':x.basis==='other'?'other':'po';
+      out.push({ severity:'high', status:'open', type:'Aged payment', ref:esc(x.ref)+' · '+x.type,
+        detail:x.type+' · $'+units(x.amount)+' · '+(x.likely_date?('likely '+fd(x.likely_date)):('due '+(x.due?fd(x.due):'—')))+' · '+cfMonthLabel(x.month),
+        fix:'gotoitem', gotarget:go, target:'', target_key:x.ref }); });
     return out; }
   function renderActions(rows){ var c=document.getElementById('supply-content'); fetchLookups(function(){
     fetch('/api/supply/cashflow').then(function(r){return r.json();}).then(function(cf){
@@ -435,7 +439,7 @@
       actBuild(rows,c);
     }).catch(function(){ actBuild(rows,c); }); }); }
   var ACT_GROUP={ 'Deposit not paid':'PAYMENTS','Deposit over-assigned':'PAYMENTS','Payment invalid':'PAYMENTS','Payment overdue':'PAYMENTS','Supplier invoice':'PAYMENTS',
-    'Unpaid — last month':'PAYMENTS','Aged unpaid payments':'PAYMENTS',
+    'Unpaid — last month':'PAYMENTS','Aged payment':'PAYMENTS',
     'Date conflict':'DATES','Production check-in':'DATES','Ship check-in':'DATES','Shipment missing dates':'DATES','Shipment ETA passed':'DATES','Shipment delivered — update PO':'DATES','Awaiting ERP receipt':'DATES','Consider air freight':'DATES','Expedite production':'DATES','Supplier completion date':'DATES' };
   function actGroup(t){ return ACT_GROUP[t]||'OTHER'; }   // everything else (supplier, ERP, partials, unassigned) → OTHER
   function actBuild(rows,c){
@@ -500,6 +504,7 @@
     else if(r.fix==='gotopo'){ fix='<button class="save-btn light act-gotopo" data-po="'+esc(r.target_key||r.ref)+'">Open PO ▸ PLAN</button>'; }
     else if(r.fix==='orderplan'){ var olbl=r.field==='suprisk'?'Open supplier-risk lines':r.field==='disc'?'Open discontinued lines':'Open unapproved partials'; fix='<button class="save-btn light act-open-op" data-k="'+esc(r.target_key||r.ref)+'" data-flt="'+esc(r.field||'partials')+'">'+olbl+'</button>'; }
     else if(r.fix==='gotoreport'){ var rlbl=r.field==='cashflow'?'Open cash flow ▸':'Open ERP Compare report ▸'; fix='<button class="save-btn light act-gotoreport" data-rk="'+esc(r.field||'erp-compare')+'" data-cfstatus="'+esc(r.cfstatus||'')+'" data-cfmonth="'+esc(r.cfmonth||'')+'">'+rlbl+'</button>'; }
+    else if(r.fix==='gotoitem'){ var ilbl=r.gotarget==='dep'?'Open deposit ▸':r.gotarget==='other'?'Open other payments ▸':'Open PO ▸ Payments'; fix='<button class="save-btn light act-gotoitem" data-go="'+esc(r.gotarget||'po')+'" data-k="'+esc(r.target_key||r.ref)+'">'+ilbl+'</button>'; }
     // Date conflict has TWO valid fixes: correct the date (above), OR advance the PO status (own line below).
     if(r.type==='Date conflict'){ fix2='<span class="tiny mut">or set status</span> <select class="fci act-postatus" data-po="'+esc(r.target_key||r.ref)+'" data-id="'+r._id+'"><option value="">—</option>'+PO_STATUSES.map(function(stx){return '<option>'+esc(stx)+'</option>';}).join('')+'</select>'; }
     // clickable ref → open the PO (expanded) or the shipment, based on the action's target
@@ -565,7 +570,9 @@
     document.querySelectorAll('#act-grid .act-open-op').forEach(function(b){b.onclick=function(){ var f=b.dataset.flt||'partials'; var op={po:b.dataset.k}; op[f==='suprisk'?'suprisk':f==='disc'?'disc':'partials']=true; _pendingOP=op; selectSection('order-plan'); };});
     document.querySelectorAll('#act-grid .act-gotoreport').forEach(function(b){b.onclick=function(){ var rk=b.dataset.rk||'erp-compare';
       if(rk==='cashflow'){ if(b.dataset.cfstatus)_cfState.status=b.dataset.cfstatus; if(b.dataset.cfmonth)_cfState.month=b.dataset.cfmonth; }
-      selectReport(rk); };}); }
+      selectReport(rk); };});
+    document.querySelectorAll('#act-grid .act-gotoitem').forEach(function(b){b.onclick=function(){ var g=b.dataset.go, k=b.dataset.k;
+      if(g==='dep')gotoDeposit(k); else if(g==='other')gotoOther(); else gotoPO(k,'pay'); };}); }
 
   // ---- PIPELINE: PO lifecycle as a grouped timeline (stages = groups; cards ordered by next milestone) ----
   var PIPE_HC={late:'#b91c1c',soon:'#d97706',ok:'#15803d',done:'#6b7280',unknown:'#9ca3af'};
@@ -2818,8 +2825,8 @@
   var OTH_STATE={status:'unpaid',supplier:''};   // Other Payments filters (persist across re-renders); default to unpaid
   var PDUE_STATE={status:'outstanding',supplier:''};   // Payments Due filters (persist across re-renders)
   // ---- CASH FLOW: itemised payment lines, flat list, filterable by month ----
-  var CF_TYPES=['Deposit','Completion','Balance','Freight','Import duty','Import tax'];
-  var CF_BG={Deposit:'bg-blue',Completion:'bg-amber',Balance:'bg-green',Freight:'bg-neutral','Import duty':'bg-red','Import tax':'bg-red'};
+  var CF_TYPES=['Deposit','Completion','Balance','Other','Freight','Import duty','Import tax'];
+  var CF_BG={Deposit:'bg-blue',Completion:'bg-amber',Balance:'bg-green',Other:'bg-neutral',Freight:'bg-neutral','Import duty':'bg-red','Import tax':'bg-red'};
   var _cfState={types:null,status:'all',basis:'all',country:'',month:null,q:''};   // month:null = not yet set (defaults to current month)
   function cfMonthLabel(m){ if(m==='—')return 'Undated'; if(m==='aged')return 'Aged (before last month)'; var p=m.split('-'); return MON[+p[1]-1]+' '+p[0]; }
   // all filters EXCEPT month (month is applied to the list only, so the summary strip stays a forward overview)
@@ -2869,7 +2876,7 @@
           +'<td class="l" style="white-space:nowrap">'+(x.paid_date?esc(fd(x.paid_date)):'<span class="mut tiny">—</span>')+'</td>'
           +'<td class="l">'+st+estBadge+'</td>'
           +'<td class="l"><span class="tool-badge '+(CF_BG[x.type]||'bg-neutral')+'">'+esc(x.type)+'</span></td>'
-          +'<td class="l">'+(x.ref?(x.basis==='shipment'?'<button class="lnk-btn cf-ref" data-go="ship" data-k="'+esc(x.ref)+'" title="open this shipment">'+esc(x.ref)+'</button>':x.basis==='register'?'<button class="lnk-btn cf-ref" data-go="dep" data-k="'+esc(x.ref)+'" title="open this deposit (Productions ▸ Deposits)">'+esc(x.ref)+'</button>':'<button class="lnk-btn cf-ref" data-go="po" data-k="'+esc(x.ref)+'" title="open this PO’s payment plan">'+esc(x.ref)+'</button>'):'')+'</td>'
+          +'<td class="l">'+(x.ref?(x.basis==='shipment'?'<button class="lnk-btn cf-ref" data-go="ship" data-k="'+esc(x.ref)+'" title="open this shipment">'+esc(x.ref)+'</button>':x.basis==='register'?'<button class="lnk-btn cf-ref" data-go="dep" data-k="'+esc(x.ref)+'" title="open this deposit (Productions ▸ Deposits)">'+esc(x.ref)+'</button>':x.basis==='other'?'<button class="lnk-btn cf-ref" data-go="other" data-k="'+esc(x.ref)+'" title="open Other Payments (Productions ▸ Other Payments)">'+esc(x.ref)+'</button>':'<button class="lnk-btn cf-ref" data-go="po" data-k="'+esc(x.ref)+'" title="open this PO’s payment plan">'+esc(x.ref)+'</button>'):'')+'</td>'
           +'<td style="text-align:right;white-space:nowrap">'+(x.estimate?'~':'')+'$'+units(x.amount)+'</td>'
           +'<td class="l">'+cfMonthLabel(x.month)+'</td>'
           +'<td class="l">'+esc(x.supplier||'')+'</td>'
@@ -2884,7 +2891,7 @@
         +'<tbody>'+(rows||'<tr><td colspan="10" class="l mut">No payments match.</td></tr>')+'</tbody>'
         +'<tfoot><tr class="batchrow"><td class="l" colspan="6"><b>TOTAL</b></td><td style="text-align:right"><b>$'+units(gT)+'</b></td><td colspan="3"></td></tr></tfoot></table></div>';
       // reference → open the PO (PLAN expanded) or the shipment (detail expanded) for payment review
-      document.querySelectorAll('#cf-body .cf-ref').forEach(function(b){ b.onclick=function(){ var g=b.dataset.go; if(g==='ship')gotoShipment(b.dataset.k); else if(g==='dep')gotoDeposit(b.dataset.k); else gotoPO(b.dataset.k); }; });
+      document.querySelectorAll('#cf-body .cf-ref').forEach(function(b){ b.onclick=function(){ var g=b.dataset.go; if(g==='ship')gotoShipment(b.dataset.k); else if(g==='dep')gotoDeposit(b.dataset.k); else if(g==='other')gotoOther(); else gotoPO(b.dataset.k); }; });
       // strip card → set month filter
       document.querySelectorAll('#cf-body .cf-strip').forEach(function(card){ card.onclick=function(){ _cfState.month=card.dataset.m; var sel=document.getElementById('cf-month'); if(sel)sel.value=card.dataset.m; draw(); }; });
       // likely-date saves

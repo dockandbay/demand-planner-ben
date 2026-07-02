@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.131 - Cash Flow includes Other payments; Aged action → per-item actions
+
+- **Cash Flow now includes Other payments** (sundry register rows, is_deposit=false) — one line
+  each, timed on due ▸ likely ▸ paid like everything else, with a new **Other** type filter and a
+  Reference link into Productions ▸ Other Payments.
+- **Aged unpaid** is now **one action per item** instead of a single summary: each aged unpaid
+  payment (PO milestone, deposit, or other payment) is its own action card that links straight to
+  its source — PO ▸ Payments, the deposit register, or Other Payments. Aging is by the effective
+  date (likely if set, else due). Committed only (freight/duty/tax estimates excluded). The
+  "Unpaid — last month" summary action is unchanged.
+
+Deploy: no new env vars, no migrations. Files: `server.mjs`, `supply/inject.html`.
+
 ## v25.130 - Actions: "Unpaid last month" + "Aged unpaid payments"
 
 Two new payment actions in SUPPLY ▸ Actions, computed from the cash flow:

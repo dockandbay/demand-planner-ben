@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.130';
+const APP_VERSION = 'v25.131';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -539,6 +539,12 @@ async function cashflowResponse(pos, q) {
       to_char(max(date_paid),'YYYY-MM-DD') date_paid, bool_and(date_paid IS NOT NULL) all_paid,
       to_char(min(date_due),'YYYY-MM-DD') date_due, to_char(min(date_likely_pay),'YYYY-MM-DD') date_likely_pay
     FROM planner.deposits WHERE is_deposit AND coalesce(reference,'') <> '' GROUP BY reference`);
+  // "Other payments" — sundry register rows (is_deposit=false): freight/fees/etc. entered directly.
+  const otherPays = await q(`
+    SELECT id, coalesce(reference,'') reference, coalesce(description,'') description, supplier_name, country,
+      round(coalesce(amount,0),2) amount, to_char(date_due,'YYYY-MM-DD') date_due,
+      to_char(date_likely_pay,'YYYY-MM-DD') date_likely_pay, to_char(date_paid,'YYYY-MM-DD') date_paid
+    FROM planner.deposits WHERE coalesce(is_deposit,false)=false`);
   // shipment freight inputs (cost only; dates come from the member POs' eff_delivery which is the shipment date)
   const shipRows = await q(`
     WITH agg AS (
@@ -645,6 +651,12 @@ async function cashflowResponse(pos, q) {
       add({ key: 'tax:po:' + p.po, type: 'Import tax', ref: p.po, supplier: p.supplier_name, country: p.country,
         amount: p.est_tax, due: dutyDue, estimate: true, basis: 'po' });
     }
+  }
+  // 6. other payments (sundry register rows) — due date ▸ likely date ▸ paid, same as any other line
+  for (const o of otherPays) {
+    add({ key: 'other:' + o.id, type: 'Other', ref: o.reference || o.description || ('#' + o.id),
+      supplier: o.supplier_name || '', country: o.country || '', amount: o.amount,
+      due: o.date_due, likely: o.date_likely_pay, paid_date: o.date_paid, basis: 'other' });
   }
   lines.sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999') || a.type.localeCompare(b.type));
   return { today, lines };
