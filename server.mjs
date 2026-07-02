@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.134';
+const APP_VERSION = 'v25.135';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1121,8 +1121,16 @@ app.get('/api/supply/:section', async (req, res) => {
               -- into the completion deposit (you can't pay more deposit than the ref actually holds).
               coalesce(pay_start_deposit_assigned,
                 LEAST(round(val*sp/100,2), CASE WHEN coalesce(deposit_ref,'')<>'' THEN GREATEST(round(coalesce(deposit_avail,0),2),0) ELSE round(val*sp/100,2) END)) start_paid,
-              round((sp+cp)/100*val - coalesce(pay_start_deposit_assigned,
-                LEAST(round(val*sp/100,2), CASE WHEN coalesce(deposit_ref,'')<>'' THEN GREATEST(round(coalesce(deposit_avail,0),2),0) ELSE round(val*sp/100,2) END)),2) completion_calc, -- completion term + any rolled-in start shortfall
+              -- completion term (+ any rolled-in start shortfall), but CAPPED at what's actually still owed after
+              -- the start deposit AND any balance already paid — completion can never exceed the outstanding
+              -- (e.g. if the balance was settled first, a term-based completion must not re-demand paid money).
+              LEAST(
+                round((sp+cp)/100*val - coalesce(pay_start_deposit_assigned,
+                  LEAST(round(val*sp/100,2), CASE WHEN coalesce(deposit_ref,'')<>'' THEN GREATEST(round(coalesce(deposit_avail,0),2),0) ELSE round(val*sp/100,2) END)),2),
+                GREATEST(round(val + coalesce(credit_amount,0) - coalesce(pay_start_deposit_assigned,
+                  LEAST(round(val*sp/100,2), CASE WHEN coalesce(deposit_ref,'')<>'' THEN GREATEST(round(coalesce(deposit_avail,0),2),0) ELSE round(val*sp/100,2) END))
+                  - coalesce(pay_balance_1_amount,0) - coalesce(pay_balance_2_amount,0), 2), 0)
+              ) completion_calc, -- completion term + any rolled-in start shortfall, capped at the remaining owed
               round(val*sp/100 - coalesce(pay_start_deposit_assigned,
                 LEAST(round(val*sp/100,2), CASE WHEN coalesce(deposit_ref,'')<>'' THEN GREATEST(round(coalesce(deposit_avail,0),2),0) ELSE round(val*sp/100,2) END)),2) catch_up,  -- start term − start drawn (rolled into completion)
               -- production end: manual override ▸ start production + supplier lead (production_days)

@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.135 - Fix: completion deposit capped at the outstanding balance
+
+Reported on PO-669591: order value 153.00, balance 151.42 already paid (1.58 remaining), yet the
+COMPLETION deposit showed 76.50 (= 50% × 153). The completion calc only ever subtracted the start
+deposit from its term — it ignored any balance already paid — so a term-based completion could exceed
+what the PO actually still owes. Completion calc is now capped at the remaining outstanding
+(value + credit − start paid − balance 1 − balance 2), floored at 0. For PO-669591 completion now
+shows 1.58. Term-normal POs (balance not yet paid) are unaffected — the cap only bites once a balance
+payment reduces the outstanding below the term amount.
+
 ## v25.134 - Fix: Order Plan blank + aged-payment action opening the wrong (empty) PO view
 
 Two client-side fixes, no schema change:
