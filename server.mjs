@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.139';
+const APP_VERSION = 'v25.140';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -628,6 +628,10 @@ async function cashflowResponse(pos, q) {
   for (const p of pos) {
     if (complete(p)) continue;
     const land = p.delivery;                                    // eff_delivery = the goods-land date
+    // once the goods have landed the shipment is no longer "shipping": duty is cleared at the border and freight
+    // is invoiced/settled around arrival, so the estimates are no longer a future cash need — drop them. (They
+    // only remain while the shipment is still in transit, i.e. the landing date is today or in the future.)
+    if (land && land < today) continue;
     if (p.shipment) {
       if (seenShip[p.shipment]) continue;                       // one set of lines per shipment
       seenShip[p.shipment] = true;

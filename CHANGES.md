@@ -3,6 +3,21 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.140 - Cash flow: drop duty/freight/tax once goods have landed
+
+Reported on PO-55AUXR1: import duty/tax showing as due in June, but the goods had already landed
+(2026-06-12) — customs is cleared and freight invoiced around arrival, so those estimates are no longer
+a future cash need. The cash flow already skipped landed-cost estimates for POs marked complete, but a PO
+whose status still says SHIPPING while the goods have actually arrived kept showing them. Now freight,
+import duty and import tax estimates are also dropped once the landing date is in the past (shipment no
+longer "shipping"); they remain only while the shipment is still in transit (landing today or later) or
+still in production. Goods-payment milestones (start/completion/balance) are unchanged.
+- Fleet-wide: 0 landed-cost estimates remain due in the past; 214 future/in-transit ones still shown.
+
+Note (no change needed): a PO's start deposit is already excluded from cash flow when a deposit reference
+is assigned (the referenced deposit pool is the actual cash line instead) — verified 0 leaks. The only
+P56-AU-LX1 line is the deposit pool itself, correctly marked paid.
+
 ## v25.139 - Deposit assignment: supplier match (in addition to region)
 
 Deposits could already only be assigned within the same region (AU vs non-AU). Added a second guard:
