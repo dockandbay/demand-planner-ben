@@ -1,17 +1,21 @@
 -- =============================================================================
--- Diviyaj deploy — SUPPLY changes 2026-07-02 (HORIZON v25.138)
+-- Diviyaj deploy — SUPPLY schema changes since your last migration (v25.128)
+-- Covers HORIZON v25.129 → v25.155.  Date: 2026-07-02.
 -- =============================================================================
 -- Run against PRODUCTION (project ref oolwklahstnvocaugryg), schema `planner`.
--- One schema migration. Idempotent — safe to re-run.
+-- TWO schema migrations. Both idempotent — safe to re-run.
 --
--- v25.132–v25.137 shipped since the 2026-07-01 deploy were app code only
--- (server.mjs + supply/inject.html) — no schema changes there.
+-- Everything else shipped in v25.129–v25.155 is app code only (server.mjs +
+-- supply/inject.html + artifact_v16.7.html) — no other schema changes.
 --
 -- Migrations included:
---   091_invoice_processed_date.sql — invoice_processed_date column + auto-stamp trigger.
---     Powers the new "< $500 orders → 0% deposits, due on invoice/ship date" default.
+--   091_invoice_processed_date.sql — purchase_orders.invoice_processed_date column + auto-stamp trigger.
+--     Powers the "< $500 orders → 0% deposits, due on invoice/ship date" default (v25.138).
 --   092_key_accounts.sql — key_accounts table + purchase_orders.dtc_custom / dtc_key_account.
 --     Powers Key Accounts (config) + Direct-to-Client tags/badges/filters (v25.149).
+--
+-- NOTE: the one-off po_client_master_update_2026-07-01.sql (bulk PO client data, gitignored) is separate —
+-- run it once on live if not already done; it is not a schema migration.
 -- =============================================================================
 
 BEGIN;
