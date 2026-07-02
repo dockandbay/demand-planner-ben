@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.124 - Open-row highlight + Order Plan "approve all partials" per PO
+
+- **Open-row highlight**: when a PO or shipment row is expanded, that row's background turns
+  cream (#FDFBD4) so it's clear which one is open (a `row-open` class; overrides the sticky
+  columns; re-applied after an in-place row patch).
+- **Order Plan**: each PO column with unapproved partial cartons now shows a green
+  **"✓ Approve N partial(s)"** button in the header, directly under the "N u · N plt" count —
+  one click approves every unapproved partial line on that PO (loops the per-line approve).
+
+Deploy: no new env vars, no migrations. Files: `supply/inject.html`.
+
 ## v25.123 - Purchase Orders: internal "NOTES" field (separate from Timeline)
 
 New editable **Notes** field on a PO, on the PLAN ▸ **MASTER DATA** sub-tab — distinct from the
