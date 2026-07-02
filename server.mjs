@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.120';
+const APP_VERSION = 'v25.121';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3260,31 +3260,46 @@ app.post('/api/supply/po-create', async (req, res) => {
     res.json({ ok: true, po });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-// Bulk-create POs from a pasted/uploaded list. Skips existing PO numbers; resolves supplier_id.
+// Bulk-upload POs from a pasted/uploaded list. Each row: PO (+ optional supplier/ship-to/branch/status/start
+// + optional SKU/Qty). Rows are grouped by PO — a NEW PO is created from its header fields; an EXISTING PO is
+// kept as-is (its details aren't overwritten). Any row carrying a SKU adds/updates an order-plan line
+// (proposed, erp_qty=0 → shows as "not in ERP" until pushed). Repeat the PO across lines for multiple SKUs.
 app.post('/api/supply/po-bulk', async (req, res) => {
   const rows = (req.body && req.body.rows) || [];
   if (!Array.isArray(rows) || !rows.length) return res.status(400).json({ error: 'no rows' });
-  let created = 0; const skipped = [], errors = [];
+  // group by PO, merging header fields (first non-empty wins) and collecting SKU/qty lines
+  const byPo = {};
   for (const r of rows) {
-    const po = (r.po || '').trim();
-    if (!po) continue;
+    const po = (r.po || '').trim(); if (!po) continue;
+    const g = byPo[po] || (byPo[po] = { po, supplier_name: '', country_code: '', branch: '', status: '', start_production: '', lines: [] });
+    ['supplier_name', 'country_code', 'branch', 'status', 'start_production'].forEach(k => { if (!g[k] && r[k]) g[k] = String(r[k]).trim(); });
+    const sku = (r.sku || '').toString().trim();
+    if (sku) { const q = (r.qty === '' || r.qty == null) ? 0 : Math.round(Number(r.qty)); g.lines.push({ sku: sku.toUpperCase(), qty: isNaN(q) ? 0 : q }); }
+  }
+  let created = 0, existing = 0, lines = 0; const errors = [];
+  for (const po of Object.keys(byPo)) {
+    const g = byPo[po];
     try {
       const dup = await pool.query(`SELECT 1 FROM planner.purchase_orders WHERE po=$1`, [po]);
-      if (dup.rowCount) { skipped.push(po); continue; }
-      let supId = null;
-      if (r.supplier_name) {
-        const s = await pool.query(`SELECT id FROM planner.suppliers WHERE name=$1 LIMIT 1`, [r.supplier_name]);
-        supId = s.rows[0] ? s.rows[0].id : null;
+      if (!dup.rowCount) {
+        let supId = null;
+        if (g.supplier_name) { const s = await pool.query(`SELECT id FROM planner.suppliers WHERE name=$1 LIMIT 1`, [g.supplier_name]); supId = s.rows[0] ? s.rows[0].id : null; }
+        await pool.query(`INSERT INTO planner.purchase_orders
+          (po, supplier_name, supplier_id, country_code, branch, status, start_production)
+          VALUES ($1,$2,$3,$4,$5,coalesce($6,'FUTURE'),$7)`,
+          [po, g.supplier_name || null, supId, g.country_code || null, g.branch || null, g.status || null, g.start_production || null]);
+        created++;
+      } else { existing++; }   // keep existing PO's details; only add its lines
+      for (const l of g.lines) {
+        if (!l.sku) continue;
+        await pool.query(`INSERT INTO planner.purchase_order_lines (po_sku, po, sku, qty, erp_qty, proposed_at, proposed_by)
+          VALUES ($1,$2,$3,$4::int,0,now(),'upload') ON CONFLICT (po_sku) DO UPDATE SET qty=excluded.qty, proposed_at=now(), proposed_by='upload'`,
+          [po + '|' + l.sku, po, l.sku, l.qty]);
+        lines++;
       }
-      await pool.query(`INSERT INTO planner.purchase_orders
-        (po, supplier_name, supplier_id, country_code, branch, status, start_production)
-        VALUES ($1,$2,$3,$4,$5,coalesce($6,'FUTURE'),$7)`,
-        [po, r.supplier_name || null, supId, r.country_code || null, r.branch || null,
-         r.status || null, r.start_production || null]);
-      created++;
     } catch (e) { errors.push(po + ': ' + e.message); }
   }
-  res.json({ created, skipped, errors });
+  res.json({ created, existing, lines, errors });
 });
 // PO detail — the linked records across tables (lines, deposit, payments, flexport) for one PO.
 app.get('/api/supply/po-detail/:po', async (req, res) => {

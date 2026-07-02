@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.121 - Upload POs: optional SKU + Qty lines (create OR add to existing PO)
+
+The PURCHASE ORDERS ▸ "Upload POs" paste now accepts optional **SKU** and **Qty** columns, and
+supports **multiple lines per PO** (repeat the PO number to add several SKU/qty order-plan lines).
+Behaviour: a NEW PO is created from its header fields; an EXISTING PO is kept as-is (its details
+aren't overwritten) and just has the lines added/updated. Lines are inserted as proposed
+(erp_qty=0 → "not in ERP" until pushed), upserted by po+sku. Header row required when using
+SKU/Qty. Import summary now reports new / existing-updated / lines-added.
+
+Deploy: no new env vars, no migrations. Files: `server.mjs`, `supply/inject.html`.
+
 ## v25.120 - Timeline notes attributed to the signed-in user (not generic "Dock & Bay")
 
 Internal timeline notes (PO, shipment, sample) now record the signed-in user's email instead of
