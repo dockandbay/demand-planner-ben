@@ -1324,9 +1324,9 @@
     var open=(r.progress!=='complete');   // completed POs don't raise payment/freight actions (not actionable noise)
     var pay=[];
     // only overdue if there's actually an amount for that milestone (a 0% deposit is never "overdue")
-    if(open && totalDue>0.01 && r.start_due && r.start_due<today && startUnpaid && n(r.start_calc)>0.009) pay.push('Start deposit overdue ('+fd(r.start_due)+')');
-    if(open && totalDue>0.01 && r.completion_due && r.completion_due<today && compUnpaid && n(r.completion_calc)>0.009) pay.push('Completion payment overdue ('+fd(r.completion_due)+')');
-    if(open && r.balance_due && r.balance_due<today && totalDue>0.01) pay.push('Balance overdue ('+fd(r.balance_due)+')');
+    if(open && totalDue>0.02 && r.start_due && r.start_due<today && startUnpaid && n(r.start_calc)>0.009) pay.push('Start deposit overdue ('+fd(r.start_due)+')');
+    if(open && totalDue>0.02 && r.completion_due && r.completion_due<today && compUnpaid && n(r.completion_calc)>0.009) pay.push('Completion payment overdue ('+fd(r.completion_due)+')');
+    if(open && r.balance_due && r.balance_due<today && totalDue>0.02) pay.push('Balance overdue ('+fd(r.balance_due)+')');
     // supplier-submitted invoice awaiting approve/reject (actionable on any PO — shows on the grid flag and the PAYMENTS badge)
     if(r.sup_invoice_pending!=null) pay.push('Supplier invoice '+money(r.sup_invoice_pending)+' awaiting approve/reject');
     if(d&&d.sup_invoice&&d.sup_invoice.status==='applied'){ var sv=Number(d.sup_invoice.value), fv=(r.final_invoice!=null?Number(r.final_invoice):null);
@@ -1369,7 +1369,7 @@
     var startPaid=(!!r.start_date || !!r.deposit_ref), compPaid=(!!r.completion_date), bal1Paid=(!!r.balance_1_date), bal2Paid=(!!r.balance_2_date);
     // "unpaid" for due/overdue purposes only when the PO still owes money — a fully-paid PO (totalDue≤0) has no
     // outstanding milestone even if a single milestone (e.g. start) was never separately dated (paid via the balance).
-    var startUnpaid=(totalDue>0.01 && !startPaid), compUnpaid=(totalDue>0.01 && !compPaid), bal1Unpaid=(totalDue>0.01 && !bal1Paid);
+    var startUnpaid=(totalDue>0.02 && !startPaid), compUnpaid=(totalDue>0.02 && !compPaid), bal1Unpaid=(totalDue>0.02 && !bal1Paid);
     var xdList=(r.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
     // ---- CLIENT chunk (label/field rows, not an overflow table; crossdock picker grows freely) ----
     function cliRow(lbl,field){ return '<div class="cli-row"><div class="cli-lbl">'+lbl+'</div><div class="cli-val">'+field+'</div></div>'; }
@@ -1426,7 +1426,7 @@
         if(docs.length){ out+=cliRow('Invoice doc'+(docs.length>1?'s':''), docs.map(function(x){return '<a href="/api/supply/portal-attachment/'+x.id+'" target="_blank" rel="noopener">'+esc(x.filename||'view')+'</a>';}).join(' · ')); }
         return out; })()
       +cliRow('Value used', '<b>'+money(r.value_used)+'</b>'+(r.is_final?' <span class="tool-badge bg-green">final</span>':''))
-      +cliRow('<b>Total amount due</b>', '<b'+(totalDue>0.01?' style="color:#991b1b"':'')+'>'+money(totalDue)+'</b> <span class="mut tiny">remaining'+(paid>0.01?' · '+money(paid)+' paid':'')+'</span>')
+      +cliRow('<b>Total amount due</b>', '<b'+(totalDue>0.02?' style="color:#991b1b"':'')+'>'+money(totalDue)+'</b> <span class="mut tiny">remaining'+(paid>0.01?' · '+money(paid)+' paid':'')+'</span>')
       +'</div>'
       +'<div class="sect-h" style="margin-top:12px">Payment plan — terms from supplier; amount / date / % override inline (saves on blur)</div>'
       +'<div class="tw pay-tbl" style="max-width:1320px"><table><thead><tr><th class="l">Payment</th><th>Calc / est</th><th class="l">Amount</th><th class="l">Date paid</th><th class="l">Deposit ref</th><th class="l">Due</th><th class="l">Likely pay date</th><th class="l">Status</th></tr></thead><tbody>';
@@ -1462,11 +1462,11 @@
       +dueCell(r.balance_due,bal1Unpaid,' '+balnote)+likelyCell('bal:'+r.po,bal1Unpaid,r.likely_balance_1)+'<td class="l">'+payBadge(b1Stat[0],b1Stat[1])+'</td>');
     if(partial){ var rem2=Math.round((owe-bal1)*100)/100;
       h+=tr('<td class="l"><b>Balance 2</b> <span class="mut tiny">remainder</span></td>'
-        +'<td>'+money(rem2)+' <span class="mut tiny">owing</span>'+((totalDue>0.01 && !bal2Paid)?payFillBtn('pay_balance_2_amount','pay_balance_2_date',rem2):'')+'</td>'
+        +'<td>'+money(rem2)+' <span class="mut tiny">owing</span>'+((totalDue>0.02 && !bal2Paid)?payFillBtn('pay_balance_2_amount','pay_balance_2_date',rem2):'')+'</td>'
         +'<td class="l">'+payIn(ep,'pay_balance_2_amount',r.balance_2_amount)+'</td>'
         +'<td class="l">'+payIn(ep,'pay_balance_2_date',r.balance_2_date,true,!(n(r.balance_2_amount)>0))+'</td>'
         +'<td class="l"><span class="mut">—</span></td>'
-        +dueCell(r.balance_due,totalDue>0.01 && !bal2Paid)+likelyCell('bal2:'+r.po,totalDue>0.01 && !bal2Paid,r.likely_balance_2)+'<td class="l">'+payBadge(r.balance_2_amount!=null?'paid':'est',r.balance_2_amount!=null?'bg-green':'bg-amber')+'</td>'); }
+        +dueCell(r.balance_due,totalDue>0.02 && !bal2Paid)+likelyCell('bal2:'+r.po,totalDue>0.02 && !bal2Paid,r.likely_balance_2)+'<td class="l">'+payBadge(r.balance_2_amount!=null?'paid':'est',r.balance_2_amount!=null?'bg-green':'bg-amber')+'</td>'); }
     h+='</tbody></table></div>'
       +'<div class="mut tiny" style="margin:2px 2px 8px">Balance 2 appears automatically when balance 1 is partial · clear a % to revert to the supplier&rsquo;s terms · a start deposit drawn on a deposit ref is no longer a cash due · saving recalcs catch-up &amp; owing.</div>';
     var payH=h;

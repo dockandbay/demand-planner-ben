@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.132';
+const APP_VERSION = 'v25.133';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -601,7 +601,7 @@ async function cashflowResponse(pos, q) {
     // its unpaid milestone TERMS are phantom — a paid-in-full PO must not show a milestone as due/overdue.
     const poDue = Math.round((num(p.value_used) + num(p.credit_amount)
       - num(p.start_assigned) - num(p.completion_assigned) - num(p.balance_1_amount) - num(p.balance_2_amount)) * 100) / 100;
-    const owes = poDue > 0.01;   // still money outstanding on the PO
+    const owes = poDue > 0.02;   // still money outstanding on the PO (0.02 absorbs rounding)
     // 1. start deposit — ONLY when no deposit_ref (the referenced pool covers it instead). Skip an UNPAID term when nothing's owed.
     if (!hasRef && (p.start_date || owes)) add({ key: 'dep:' + p.po, type: 'Deposit', ref: p.po, supplier: p.supplier_name, country: p.country,
       amount: p.start_assigned != null ? p.start_assigned : p.start_calc, due: p.start_due, paid_date: p.start_date });

@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.133 - Payment threshold 0.01 → 0.02 (absorb rounding)
+
+Follow-up to v25.132. The "PO still owes money" gate that suppresses phantom payment
+actions/overdue rows now uses a **0.02** threshold instead of 0.01, so a PO whose remaining
+due is under 2 cents (rounding noise) raises no payment actions or overdue highlights.
+Applied consistently across: cash flow milestone lines (server), PLAN ▸ Payments overdue
+highlight, payPanel unpaid flags (start/completion/balance/balance-2), the PO-grid payment
+exceptions, and the "Total amount due" red styling. App code only — no schema change.
+
 ## v25.132 - Fix: fully-paid POs no longer show phantom overdue milestones
 
 A PO paid in full via one milestone (e.g. the whole value recorded as the balance) was still
