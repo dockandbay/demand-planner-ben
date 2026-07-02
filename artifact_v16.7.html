@@ -2874,7 +2874,7 @@ var _da={sec:'actions',mkt:'all',cat:'all',status:'open'}; // DEMAND ▸ Actions
 var DA_INSIGHT_TYPES={'Trading behind last year':1,'Trading ahead of last year':1,'Forecast vs trend':1};
 function daSection(x){ return DA_INSIGHT_TYPES[x.type]?'insights':'actions'; }
 let AF_MARKET='all'; let AF_COVER=2; let AF_FREIGHT=15; var AF_CACHE={}; // Auto Forecast: market, cover-months, freight% + response cache (keyed market|cover|freight)
-var SM_CACHE=null; var SM={market:'all',whtype:'all',basis:'trail',cat:'all',cover:26,days:'',vel:'',units:50,sort:'value'}; // Slow Moving state
+var SM_CACHE=null; var SM={market:'uk',whtype:'3pl',basis:'trail',cat:'all',cover:26,days:'',vel:'',units:50,sort:'value'}; // Slow Moving state (defaults: UK · 3PL)
 var ME={market:'all',status:'all',basis:'fc',end:''}; var ME_CACHE={}; // Markdown & EOS state (cache keyed market|basis|end; status filtered client-side)
 var OTB={market:'all',status:'all',months:6,defcover:8}; var OTB_CACHE={}; // Open-to-Buy state (cache keyed market|months|defcover; status filtered client-side)
 var KA_CACHE=null; var KA={weeks:4,market:'all',risk:'critical'}; // Key Stock Arrivals state
@@ -7181,7 +7181,7 @@ function renderReportView(){
 function reportPlaceholder(body,title,desc){ body.innerHTML='<div style="padding:28px;text-align:center;color:#666">'
   +'<div style="font-size:15px;font-weight:600;color:#333;margin-bottom:6px">'+title+'</div>'
   +'<div style="font-size:12px;max-width:560px;margin:0 auto">'+desc+'</div></div>'; }
-function smPills(name,opts){ return opts.map(function(o){return '<button class="view-toggle sm-'+name+(o[0]===SM[name]?' active':'')+'" data-v="'+o[0]+'">'+o[1]+'</button>';}).join(''); }
+function smPills(name,opts){ return opts.map(function(o){var on=(o[0]===SM[name]); return '<button class="view-toggle sm-'+name+(on?' active':'')+'"'+(on?' style="background:#000;color:#fff;border-color:#000;font-weight:700"':'')+' data-v="'+o[0]+'">'+o[1]+'</button>';}).join(''); }
 function renderSlowMovingReport(body){
   var draw=function(rows){
     var MK=[['all','All'],['uk','UK'],['us','US'],['eu','EU'],['au','AU'],['ca','CA']];
@@ -7193,12 +7193,14 @@ function renderSlowMovingReport(body){
     var BS=[['trail','Trailing actual'],['fc','Forecast (seasonal)']];
     body.innerHTML='<div style="display:flex;flex-wrap:wrap;gap:14px 18px;align-items:center;margin-bottom:8px">'
       +'<span style="display:inline-flex;gap:4px;align-items:center"><span style="font-size:11px;font-weight:700;color:#888">MARKET</span>'+smPills('market',MK)+'</span>'
-      +'<span style="display:inline-flex;gap:4px;align-items:center"><span style="font-size:11px;font-weight:700;color:#888">WHSE</span>'+smPills('whtype',WT)+'</span>'
+      +'<span style="display:inline-flex;gap:4px;align-items:center"><span style="font-size:11px;font-weight:700;color:#888">WAREHOUSE</span>'+smPills('whtype',WT)+'</span>'
       +'<span style="display:inline-flex;gap:4px;align-items:center"><span style="font-size:11px;font-weight:700;color:#888">CATEGORY</span>'
         +'<select class="sm-cat" style="font-size:11px;padding:2px 5px;border:1px solid #ccc;border-radius:4px;font-family:inherit"><option value="all">All</option>'+cats.map(function(c){return '<option value="'+esc2(c)+'"'+(SM.cat===c?' selected':'')+'>'+esc2(c)+'</option>';}).join('')+'</select></span>'
+      +'<button class="sm-csv" style="margin-left:auto;font-size:11px;padding:4px 10px;border:1px solid #0f172a;background:#0f172a;color:#fff;border-radius:4px;cursor:pointer;font-weight:600">⬇ CSV</button>'
+      +'</div>'
+      +'<div style="display:flex;flex-wrap:wrap;gap:14px 18px;align-items:center;margin-bottom:8px">'
       +'<span style="display:inline-flex;gap:4px;align-items:center"><span style="font-size:11px;font-weight:700;color:#888">VELOCITY</span>'+smPills('basis',BS)+'</span>'
       +'<span style="display:inline-flex;gap:4px;align-items:center"><span style="font-size:11px;font-weight:700;color:#888">SORT</span>'+smPills('sort',[['value','£ tied up'],['sku','SKU'],['cover','Cover wk']])+'</span>'
-      +'<button class="sm-csv" style="margin-left:auto;font-size:11px;padding:4px 10px;border:1px solid #0f172a;background:#0f172a;color:#fff;border-radius:4px;cursor:pointer;font-weight:600">⬇ CSV</button>'
       +'</div>'
       +'<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-bottom:10px;padding:8px 10px;background:#f6f7f9;border-radius:6px">'
       +'<span style="font-size:11px;font-weight:700;color:#888">SLOW IF</span>'
@@ -7238,7 +7240,7 @@ function renderSlowMovingReport(body){
       +'<div style="overflow-x:auto"><table class="tw" style="font-size:11px;min-width:900px"><thead><tr>'
       +'<th style="text-align:left;padding:4px 6px">SKU</th><th style="text-align:left;padding:4px 6px">Category</th>'
       +'<th style="text-align:left;padding:4px 6px">Release</th>'
-      +'<th style="text-align:left;padding:4px 6px">Whse</th><th style="text-align:right;padding:4px 6px">On hand</th>'
+      +'<th style="text-align:left;padding:4px 6px">Warehouse</th><th style="text-align:right;padding:4px 6px">On hand</th>'
       +'<th style="text-align:right;padding:4px 6px">Vel/wk</th><th style="text-align:right;padding:4px 6px">Cover wk</th>'
       +'<th style="text-align:right;padding:4px 6px">No sale (d)</th><th style="text-align:right;padding:4px 6px">£ tied up</th></tr></thead><tbody>';
     f.slice(0,400).forEach(function(r){

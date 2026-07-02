@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.155 - Reports ▸ Slow Moving: clearer filters, two-row layout, defaults
+
+- Selected filter pills are now full black background / white text (clearly distinct from unselected).
+- Moved VELOCITY and SORT onto a second row, under MARKET / WAREHOUSE / CATEGORY.
+- Renamed "WHSE" → "WAREHOUSE" (filter label + table column header).
+- Defaults changed to MARKET = UK and WAREHOUSE = 3PL.
+
 ## v25.154 - PO grid: copyable inline dates + master badge below the shipment
 
 - The inline Start/End date fields opened the calendar on single-click, which blocked selecting/copying the
