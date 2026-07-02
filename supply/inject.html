@@ -2676,12 +2676,17 @@
         }).join('');
         var act=ed
           ? '<td class="l"><button class="et-save" data-k="'+esc(k)+'" style="cursor:pointer;border:none;background:#2563eb;color:#fff;padding:3px 11px;border-radius:4px;font-size:11px;font-weight:600">Save</button> <button class="et-cancel" style="cursor:pointer;border:1px solid #cbd5e1;background:#fff;padding:3px 9px;border-radius:4px;font-size:11px">Cancel</button></td>'
-          : '<td class="l"><button class="et-edit" data-k="'+esc(k)+'" style="cursor:pointer;border:1px solid #cbd5e1;background:#f8fafc;padding:3px 12px;border-radius:4px;font-size:11px">Edit</button></td>';
+          : '<td class="l"><button class="et-edit" data-k="'+esc(k)+'" style="cursor:pointer;border:1px solid #cbd5e1;background:#f8fafc;padding:3px 12px;border-radius:4px;font-size:11px">Edit</button>'+(opts.del?' <button class="et-del" data-k="'+esc(k)+'" data-name="'+esc(r[opts.nameKey||'name']||k)+'" style="cursor:pointer;border:1px solid #fecaca;background:#fef2f2;color:#b91c1c;padding:3px 10px;border-radius:4px;font-size:11px">Delete</button>':'')+'</td>';
         return '<tr>'+cells+act+'</tr>';
       }).join('');
       return '<div class="tw"'+(opts.maxw?' style="max-width:'+opts.maxw+'px"':'')+'><table><thead>'+heads+'</thead><tbody>'+body+'</tbody></table></div>'; }
-    // Wire Edit/Save/Cancel. epFn(key)->update endpoint. reRender() redraws the sub-tab.
-    function wireEditTbl(subKey, epFn, reRender){ var b=document.getElementById('config-body');
+    // Wire Edit/Save/Cancel (+ optional Delete). epFn(key)->update endpoint. reRender() redraws the sub-tab.
+    // delEpFn(key)->delete endpoint enables the Delete buttons (rendered when editTbl opts.del is set).
+    function wireEditTbl(subKey, epFn, reRender, delEpFn){ var b=document.getElementById('config-body');
+      if(delEpFn) b.querySelectorAll('.et-del').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Delete "'+(btn.dataset.name||btn.dataset.k)+'"? This cannot be undone.'))return;
+        btn.textContent='…'; btn.disabled=true;
+        fetch(delEpFn(btn.dataset.k),{method:'POST'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); delete ROW_EDIT[subKey]; invalidateDerived(); reRender(); })
+          .catch(function(e){ btn.textContent='Delete'; btn.disabled=false; alert('Delete failed: '+(e&&e.message||e)); }); }; });
       b.querySelectorAll('.et-edit').forEach(function(btn){ btn.onclick=function(){ ROW_EDIT[subKey]=btn.dataset.k; reRender(); }; });
       b.querySelectorAll('.et-cancel').forEach(function(btn){ btn.onclick=function(){ delete ROW_EDIT[subKey]; reRender(); }; });
       b.querySelectorAll('.et-save').forEach(function(btn){ btn.onclick=function(){ var tr=btn.closest('tr'); var body={};
@@ -2748,9 +2753,6 @@
       {f:'pack_rfid_barcodes',h:'RFID',t:'bool'},{f:'pack_rfid_barcodes_notes',h:'notes',t:'area',w:170},
       {f:'pack_dnb_carton',h:'D&B carton',t:'bool'},{f:'pack_dnb_carton_notes',h:'notes',t:'area',w:170},
       {f:'pack_client_carton',h:'Client carton',t:'bool'},{f:'pack_client_carton_notes',h:'notes',t:'area',w:170}];
-    function kaTbl(rows){
-      return '<div class="sect-h">Key accounts — client packing / labelling, requirements &amp; delivery address <span class="mut tiny">(defaulted onto a PO&rsquo;s Direct-to-Client details when the client is picked)</span> <button class="tool-badge bg-blue" id="ka-new" style="cursor:pointer;border:none;margin-left:8px">+ Key account</button></div>'
-        +editTbl('keyaccounts', rows, KA_COLS, {key:'id'}); }
     var PROD_COLS=[{f:'prod_no',h:'Production #',w:96},{f:'status',h:'Status',t:'select',opts:['','ACTIVE','CLOSED']},
       {f:'require_supplier_confirmation',h:'Require supplier confirmation',t:'bool',w:120},
       {f:'po_count',h:'POs',ro:true},{f:'suppliers',h:'Suppliers',ro:true},
@@ -2817,10 +2819,18 @@
           document.getElementById('sup-new').onclick=function(){ var nm=prompt('New supplier name:'); if(!nm||!nm.trim())return; var cd=prompt('Supplier code (2 letters, optional):')||'';
             shipPost('/api/supply/supplier-create',{name:nm.trim(),code:cd.trim()||null},showSub); }; }); }
       else if(CONFIG_SUB==='keyaccounts'){ b.innerHTML='<div class="count">Loading…</div>';
-        fetch('/api/supply/key-accounts').then(function(r){return r.json();}).then(function(rows){ b.innerHTML=kaTbl(rows);
-          wireEditTbl('keyaccounts', function(k){return '/api/supply/key-account/'+k;}, showSub);
+        fetch('/api/supply/key-accounts').then(function(r){return r.json();}).then(function(rows){
+          b.innerHTML='<div class="sect-h">Key accounts — client packing / labelling, requirements &amp; delivery address <span class="mut tiny">(defaulted onto a PO&rsquo;s Direct-to-Client details when the client is picked)</span> <button class="tool-badge bg-blue" id="ka-new" style="cursor:pointer;border:none;margin-left:8px">+ Key account</button></div>'
+            +'<div class="bar"><input class="flt" id="ka-q" placeholder="Search name / requirements / address / notes…" style="width:300px;background:#eff6ff;border-color:#93c5fd"><span class="count" id="ka-count" style="margin-left:8px"></span></div><div id="ka-tblwrap"></div>';
+          var kq='';
+          function draw(){ var f=kq?rows.filter(function(x){return String(JSON.stringify(x)||'').toLowerCase().indexOf(kq)>=0;}):rows;
+            document.getElementById('ka-tblwrap').innerHTML=editTbl('keyaccounts', f, KA_COLS, {key:'id', del:true});
+            var cnt=document.getElementById('ka-count'); if(cnt)cnt.textContent=f.length+(kq?' / '+rows.length:'')+' key account'+(f.length===1?'':'s');
+            wireEditTbl('keyaccounts', function(k){return '/api/supply/key-account/'+k;}, draw, function(k){return '/api/supply/key-account/'+k+'/delete';}); }
           document.getElementById('ka-new').onclick=function(){ var nm=prompt('New key account name (client):'); if(!nm||!nm.trim())return;
-            shipPost('/api/supply/key-account-create',{name:nm.trim()},showSub); }; }); }
+            shipPost('/api/supply/key-account-create',{name:nm.trim()},showSub); };
+          document.getElementById('ka-q').oninput=function(){ kq=this.value.trim().toLowerCase(); draw(); };
+          draw(); }); }
       else if(CONFIG_SUB==='batches'){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/batches').then(function(r){return r.json();}).then(function(rows){ b.innerHTML=batchTbl(rows); bindEdits();
           document.getElementById('batch-new').onclick=function(){ var nm=prompt('New batch name:'); if(!nm||!nm.trim())return;

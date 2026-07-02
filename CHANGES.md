@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.152 - Key Accounts config: per-row Delete + search box
+
+- **Delete** button next to Edit on each key-account row (with a confirm). Uses the existing delete endpoint.
+  Added as an opt-in (`del`) to the shared config editable-table helper so other tables are unaffected.
+- **Search box** at the top of the Key Accounts tab — filters rows live by name / requirements / address /
+  notes, with a match count; the box keeps focus while filtering.
+
 ## v25.151 - Key Accounts config: multi-line cells + reordered columns
 
 The Key Accounts table's text fields (client requirements, delivery address, pallet/other notes and the
