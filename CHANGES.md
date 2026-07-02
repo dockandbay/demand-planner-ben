@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.151 - Key Accounts config: multi-line cells + reordered columns
+
+The Key Accounts table's text fields (client requirements, delivery address, pallet/other notes and the
+per-pack notes) are now multi-line — a wrapping cell in read-only, a textarea in edit mode — so long text
+isn't cropped. Columns reordered to: Name, Client requirements, Delivery address, Pallet notes, Other notes,
+then the packing yes/no + notes pairs. (Added an `area` column type to the shared config editable-table helper.)
+
 ## v25.150 - "Create as key account" from a PO + BI recommendations split in ACTIONS
 
 - **Create as key account:** on a PO's Client/FBA tab, when the client name isn't already a saved key

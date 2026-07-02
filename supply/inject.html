@@ -2661,6 +2661,7 @@
       var body=(rows||[]).map(function(r){ var k=String(r[opts.key||'id']); var ed=(editK===k);
         var cells=cols.map(function(c){ var v=r[c.f];
           if(c.t==='bool'&&(c.ro||!ed)) return '<td class="l">'+(v===true||String(v)==='true'?'<span class="tool-badge bg-green">Yes</span>':'<span class="mut">No</span>')+'</td>';
+          if(c.t==='area'&&(c.ro||!ed)) return '<td class="l" style="white-space:pre-wrap;max-width:'+(c.w||200)+'px;vertical-align:top">'+(v==null||v===''?'<span class="mut">—</span>':esc(v))+'</td>';   // wrapping multi-line read-only cell
           if(c.ro||!ed) return '<td class="l">'+(v==null||v===''?'<span class="mut">—</span>':esc(v))+'</td>';
           if(c.t==='bool'){ var bv=(v===true||String(v)==='true');
             return '<td class="l"><select class="et-in" data-f="'+esc(c.f)+'"><option value="false"'+(bv?'':' selected')+'>No</option><option value="true"'+(bv?' selected':'')+'>Yes</option></select></td>'; }
@@ -2669,6 +2670,7 @@
             var oh=(ov&&!matched?'<option selected>'+esc(ov)+'</option>':'')  // preserve a current value not in the list
               +opts.map(function(o){return '<option'+(ov.toLowerCase()===String(o).toLowerCase()?' selected':'')+'>'+esc(o)+'</option>';}).join('');
             return '<td class="l"><select class="et-in" data-f="'+esc(c.f)+'">'+oh+'</select></td>'; }
+          if(c.t==='area') return '<td class="l"><textarea class="et-in" data-f="'+esc(c.f)+'" rows="3" style="width:'+(c.w||200)+'px;padding:3px 5px;border:1px solid #cbd5e1;border-radius:4px;font-size:11px;font-family:inherit;resize:vertical;vertical-align:top">'+esc(v==null?'':v)+'</textarea></td>';   // multi-line editor
           var w=String(c.w||(c.t==='num'?58:118));   // text inputs honour the column width so long values (e.g. Xero account) aren't cropped
           return '<td class="l"><input class="et-in" data-f="'+esc(c.f)+'" value="'+esc(v==null?'':v)+'" style="width:'+w+'px;padding:2px 5px;border:1px solid #cbd5e1;border-radius:4px;font-size:11px"></td>';
         }).join('');
@@ -2736,14 +2738,16 @@
     function supTbl(rows){
       return '<div class="sect-h">Suppliers — payment terms drive every payment calc <span class="mut tiny">(<b>Prod d</b> = production lead time; a PO\'s production-end date = start + this, unless overridden)</span> <button class="tool-badge bg-blue" id="sup-new" style="cursor:pointer;border:none;margin-left:8px">+ Supplier</button></div>'
         +editTbl('suppliers', rows, SUP_COLS, {key:'id'}); }
-    var KA_COLS=[{f:'name',h:'Name',w:130},
-      {f:'pack_polybags',h:'Polybags',t:'bool'},{f:'pack_polybags_notes',h:'Polybags notes',w:120},
-      {f:'pack_dnb_barcodes',h:'D&B barcodes',t:'bool'},{f:'pack_dnb_barcodes_notes',h:'notes',w:120},
-      {f:'pack_rfid_barcodes',h:'RFID',t:'bool'},{f:'pack_rfid_barcodes_notes',h:'notes',w:120},
-      {f:'pack_dnb_carton',h:'D&B carton',t:'bool'},{f:'pack_dnb_carton_notes',h:'notes',w:120},
-      {f:'pack_client_carton',h:'Client carton',t:'bool'},{f:'pack_client_carton_notes',h:'notes',w:120},
-      {f:'pack_pallet_notes',h:'Pallet notes',w:130},{f:'pack_other_notes',h:'Other notes',w:130},
-      {f:'client_requirements',h:'Client requirements',w:180},{f:'address',h:'Delivery address',w:180}];
+    var KA_COLS=[{f:'name',h:'Name',w:140},
+      {f:'client_requirements',h:'Client requirements',t:'area',w:240},
+      {f:'address',h:'Delivery address',t:'area',w:220},
+      {f:'pack_pallet_notes',h:'Pallet notes',t:'area',w:200},
+      {f:'pack_other_notes',h:'Other notes',t:'area',w:200},
+      {f:'pack_polybags',h:'Polybags',t:'bool'},{f:'pack_polybags_notes',h:'Polybags notes',t:'area',w:170},
+      {f:'pack_dnb_barcodes',h:'D&B barcodes',t:'bool'},{f:'pack_dnb_barcodes_notes',h:'notes',t:'area',w:170},
+      {f:'pack_rfid_barcodes',h:'RFID',t:'bool'},{f:'pack_rfid_barcodes_notes',h:'notes',t:'area',w:170},
+      {f:'pack_dnb_carton',h:'D&B carton',t:'bool'},{f:'pack_dnb_carton_notes',h:'notes',t:'area',w:170},
+      {f:'pack_client_carton',h:'Client carton',t:'bool'},{f:'pack_client_carton_notes',h:'notes',t:'area',w:170}];
     function kaTbl(rows){
       return '<div class="sect-h">Key accounts — client packing / labelling, requirements &amp; delivery address <span class="mut tiny">(defaulted onto a PO&rsquo;s Direct-to-Client details when the client is picked)</span> <button class="tool-badge bg-blue" id="ka-new" style="cursor:pointer;border:none;margin-left:8px">+ Key account</button></div>'
         +editTbl('keyaccounts', rows, KA_COLS, {key:'id'}); }
