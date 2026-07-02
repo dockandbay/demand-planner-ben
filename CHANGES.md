@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.136 - UX: paste dates into any date field
+
+Native `<input type="date">` only accepts `yyyy-mm-dd` in the exact locale format, so pasting a date
+copied from Sheets/Excel (e.g. `25/06/2023`) silently failed. Added a single capture-phase paste
+handler that intercepts a paste into any date field, parses the common formats to ISO, sets the value
+and fires `change` (so existing savers run). Keeps the native calendar picker. Formats handled:
+ISO `2023-06-25`, UK day-first `25/06/2023` / `25-06-2023` / `25.06.2023` (2-digit years → 20xx),
+`25 Jun 2023`, `Jun 25, 2023`, and cells carrying a time (`2023-06-25 00:00:00`). Unparseable text is
+left to the browser.
+
 ## v25.135 - Fix: completion deposit capped at the outstanding balance
 
 Reported on PO-669591: order value 153.00, balance 151.42 already paid (1.58 remaining), yet the

@@ -359,6 +359,22 @@
   function editCell(ep,field,val,kind,extra){ var cls='fci'+(kind==='date'?' dt':(kind==='txt'?' txt':''));
     var ty=kind==='date'?' type="date"':'';
     return '<input class="'+cls+'"'+ty+' data-ep="'+esc(ep)+'" data-field="'+esc(field)+'"'+(extra?(' '+extra):'')+' value="'+esc(val==null?'':val)+'">'; }
+  // Paste-friendly dates: a native <input type="date"> only accepts yyyy-mm-dd in the exact locale
+  // format, so pasting "25/06/2023" from Sheets/Excel silently fails. Parse the common formats → ISO.
+  function parseDateLoose(s){ s=String(s||'').trim(); if(!s)return null; s=s.replace(/[T ]\d{1,2}:\d.*$/,'').trim();   // drop a trailing time part ("2023-06-25 00:00:00" / "…T09:30") but keep "25 Jun 2023"
+    function mk(y,mo,d){ mo=+mo; d=+d; if(!(mo>=1&&mo<=12&&d>=1&&d<=31))return null; if(String(y).length===2)y='20'+y; return y+'-'+('0'+mo).slice(-2)+'-'+('0'+d).slice(-2); }
+    var m, mons={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+    if(m=s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/)) return mk(m[1],m[2],m[3]);            // yyyy-mm-dd (ISO / year-first)
+    if(m=s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/)) return mk(m[3],m[2],m[1]);           // dd/mm/yyyy (UK day-first)
+    if(m=s.match(/^(\d{1,2})[ \-]([A-Za-z]{3,})[ \-,]+(\d{4})$/)){ var a=mons[m[2].slice(0,3).toLowerCase()]; return a?mk(m[3],a,m[1]):null; }   // 25 Jun 2023
+    if(m=s.match(/^([A-Za-z]{3,})[ \-]+(\d{1,2})[ ,]+(\d{4})$/)){ var b=mons[m[1].slice(0,3).toLowerCase()]; return b?mk(m[3],b,m[2]):null; }    // Jun 25, 2023
+    return null; }
+  // one-time (capture phase): intercept a paste into any date field, parse loosely, set ISO + fire change
+  // so the existing onchange savers run. Unparseable text is left to the browser's default handling.
+  document.addEventListener('paste', function(e){ var t=e.target;
+    if(!t||t.tagName!=='INPUT'||t.type!=='date')return;
+    var cb=e.clipboardData||window.clipboardData; var iso=parseDateLoose(cb?cb.getData('text'):'');
+    if(!iso)return; e.preventDefault(); t.value=iso; t.dispatchEvent(new Event('change',{bubbles:true})); }, true);
   function depDatalist(){ return '<datalist id="deprefs"><option value="NO DEPOSIT">'+(depRefs||[]).map(function(r){return '<option value="'+esc(r)+'">';}).join('')+'</datalist>'; }
   function dl(id,arr){ return '<datalist id="'+id+'">'+(arr||[]).map(function(r){return '<option value="'+esc(r)+'">';}).join('')+'</datalist>'; }
   function lookupDatalists(){ return depDatalist()+dl('batchlist',batchList)+dl('prodlist',prodList)+dl('shiplist',shipList)+dl('supplierlist',supplierList)+dl('branchlist',branchList)+dl('crossdocklist',crossdockList)+dl('polist',poLookupList); }
