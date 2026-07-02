@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.134 - Fix: Order Plan blank + aged-payment action opening the wrong (empty) PO view
+
+Two client-side fixes, no schema change:
+- **Order Plan wouldn't render** — the pivot's PO-header "✓ Approve N partials" button referenced
+  `lines` / `isUnapprovedPartial` from `opBuild`'s scope, but `pivot()` is a sibling function, so it
+  threw `ReferenceError: lines is not defined` on every render and blanked the whole tab. Now counts
+  unapproved partials from the pivot's own `rows` (the displayed lines) with an inline carton check.
+- **Aged-payment action → PO opened nothing** — clicking an "Aged payment" action for an old completed
+  PO (e.g. PO-37AUMQ2, completed 2023) navigated to PURCHASE ORDERS but nothing loaded: the nav reset
+  the filter to "all" yet left the "Last 12m" recency filter on, hiding years-old completed POs so there
+  was no row to expand. Navigating to a specific PO now seeds the search box with the PO number (search
+  spans all statuses/recency) so the single PO always loads and auto-expands.
+
 ## v25.133 - Payment threshold 0.01 → 0.02 (absorb rounding)
 
 Follow-up to v25.132. The "PO still owes money" gate that suppresses phantom payment
