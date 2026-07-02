@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.131';
+const APP_VERSION = 'v25.132';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -597,16 +597,21 @@ async function cashflowResponse(pos, q) {
 
   for (const p of pos) {
     const hasRef = (p.deposit_ref || '') !== '';
-    // 1. start deposit — ONLY when no deposit_ref (the referenced pool covers it instead)
-    if (!hasRef) add({ key: 'dep:' + p.po, type: 'Deposit', ref: p.po, supplier: p.supplier_name, country: p.country,
+    // outstanding on this PO = value used (+credit) − everything assigned/paid. When it's fully paid (owes ≤ 0),
+    // its unpaid milestone TERMS are phantom — a paid-in-full PO must not show a milestone as due/overdue.
+    const poDue = Math.round((num(p.value_used) + num(p.credit_amount)
+      - num(p.start_assigned) - num(p.completion_assigned) - num(p.balance_1_amount) - num(p.balance_2_amount)) * 100) / 100;
+    const owes = poDue > 0.01;   // still money outstanding on the PO
+    // 1. start deposit — ONLY when no deposit_ref (the referenced pool covers it instead). Skip an UNPAID term when nothing's owed.
+    if (!hasRef && (p.start_date || owes)) add({ key: 'dep:' + p.po, type: 'Deposit', ref: p.po, supplier: p.supplier_name, country: p.country,
       amount: p.start_assigned != null ? p.start_assigned : p.start_calc, due: p.start_due, paid_date: p.start_date });
     // 2. completion
-    add({ key: 'comp:' + p.po, type: 'Completion', ref: p.po, supplier: p.supplier_name, country: p.country,
+    if (p.completion_date || owes) add({ key: 'comp:' + p.po, type: 'Completion', ref: p.po, supplier: p.supplier_name, country: p.country,
       amount: p.completion, due: p.completion_due, paid_date: p.completion_date });
     // 3. balance (and optional 2nd balance)
-    add({ key: 'bal:' + p.po, type: 'Balance', ref: p.po, supplier: p.supplier_name, country: p.country,
+    if (p.balance_1_date || owes) add({ key: 'bal:' + p.po, type: 'Balance', ref: p.po, supplier: p.supplier_name, country: p.country,
       amount: p.balance_1_amount != null ? p.balance_1_amount : p.balance_owing, due: p.balance_due, paid_date: p.balance_1_date });
-    if (p.balance_2_amount != null) add({ key: 'bal2:' + p.po, type: 'Balance', ref: p.po, supplier: p.supplier_name,
+    if (p.balance_2_amount != null && (p.balance_2_date || owes)) add({ key: 'bal2:' + p.po, type: 'Balance', ref: p.po, supplier: p.supplier_name,
       country: p.country, amount: p.balance_2_amount, due: p.balance_due, paid_date: p.balance_2_date });
   }
   // 4. referenced-deposit pools — one line per reference

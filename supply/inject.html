@@ -1324,8 +1324,8 @@
     var open=(r.progress!=='complete');   // completed POs don't raise payment/freight actions (not actionable noise)
     var pay=[];
     // only overdue if there's actually an amount for that milestone (a 0% deposit is never "overdue")
-    if(open && r.start_due && r.start_due<today && startUnpaid && n(r.start_calc)>0.009) pay.push('Start deposit overdue ('+fd(r.start_due)+')');
-    if(open && r.completion_due && r.completion_due<today && compUnpaid && n(r.completion_calc)>0.009) pay.push('Completion payment overdue ('+fd(r.completion_due)+')');
+    if(open && totalDue>0.01 && r.start_due && r.start_due<today && startUnpaid && n(r.start_calc)>0.009) pay.push('Start deposit overdue ('+fd(r.start_due)+')');
+    if(open && totalDue>0.01 && r.completion_due && r.completion_due<today && compUnpaid && n(r.completion_calc)>0.009) pay.push('Completion payment overdue ('+fd(r.completion_due)+')');
     if(open && r.balance_due && r.balance_due<today && totalDue>0.01) pay.push('Balance overdue ('+fd(r.balance_due)+')');
     // supplier-submitted invoice awaiting approve/reject (actionable on any PO — shows on the grid flag and the PAYMENTS badge)
     if(r.sup_invoice_pending!=null) pay.push('Supplier invoice '+money(r.sup_invoice_pending)+' awaiting approve/reject');
@@ -1367,7 +1367,9 @@
     // deposit pool ref). Once paid, the "likely pay date" input + overdue highlight drop away — they only apply
     // to milestones still awaiting payment.
     var startPaid=(!!r.start_date || !!r.deposit_ref), compPaid=(!!r.completion_date), bal1Paid=(!!r.balance_1_date), bal2Paid=(!!r.balance_2_date);
-    var startUnpaid=!startPaid, compUnpaid=!compPaid, bal1Unpaid=(totalDue>0.01 && !bal1Paid);   // balance unpaid while owed AND no payment date yet
+    // "unpaid" for due/overdue purposes only when the PO still owes money — a fully-paid PO (totalDue≤0) has no
+    // outstanding milestone even if a single milestone (e.g. start) was never separately dated (paid via the balance).
+    var startUnpaid=(totalDue>0.01 && !startPaid), compUnpaid=(totalDue>0.01 && !compPaid), bal1Unpaid=(totalDue>0.01 && !bal1Paid);
     var xdList=(r.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
     // ---- CLIENT chunk (label/field rows, not an overflow table; crossdock picker grows freely) ----
     function cliRow(lbl,field){ return '<div class="cli-row"><div class="cli-lbl">'+lbl+'</div><div class="cli-val">'+field+'</div></div>'; }

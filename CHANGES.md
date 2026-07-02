@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.132 - Fix: fully-paid POs no longer show phantom overdue milestones
+
+A PO paid in full via one milestone (e.g. the whole value recorded as the balance) was still
+showing its other milestone TERMS (e.g. the 30% start deposit) as unpaid/overdue — surfacing a
+false "deposit remaining" action and an overdue row on the PLAN ▸ Payments tab (reported:
+PO-23AUFY1). Now a milestone only counts as due/overdue when the PO still owes money
+(value used + credit − everything assigned/paid > 0):
+- Cash flow skips unpaid milestone lines on fully-paid POs (removed ~185 phantom aged items).
+- The PLAN ▸ Payments overdue highlight + the PO-grid payment exceptions are gated the same way.
+Genuinely-outstanding milestones are unaffected.
+
+Deploy: no new env vars, no migrations. Files: `server.mjs`, `supply/inject.html`.
+
 ## v25.131 - Cash Flow includes Other payments; Aged action → per-item actions
 
 - **Cash Flow now includes Other payments** (sundry register rows, is_deposit=false) — one line
