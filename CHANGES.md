@@ -3,6 +3,20 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.126 - Deposits: "apply to production" bulk-assign + AU region guard
+
+- **Apply a deposit to a whole production**: each deposit row (Productions ▸ Deposits) with a
+  PROD# + supplier gets a purple **⤿ apply to prod N** button. It assigns that deposit's reference
+  to every OPEN PO on that production + supplier that has no deposit yet. New endpoint
+  `POST /api/supply/deposit/:id/apply-all` (returns assigned + skipped-region counts).
+- **Region guard (AU isolated)**: an AU deposit can only be assigned to AU POs, and a non-AU
+  deposit only to non-AU POs (UK/US/EU/OT interchangeable). Enforced server-side on every
+  deposit_ref assignment (the PO patch returns 400 on mismatch) — covers the bulk apply, the
+  deposit picker, and any path. The picker also greys out mismatched deposits with a "✗ region" note.
+
+Deploy: no new env vars, no migrations (uses existing columns/endpoints). Files: `server.mjs`,
+`supply/inject.html`.
+
 ## v25.125 - PO Notes "N" badge: faster tooltip, smaller icon, MASTER DATA label
 
 Refinements to the PO Notes badge (v25.123): the hover tooltip is now a custom one that appears

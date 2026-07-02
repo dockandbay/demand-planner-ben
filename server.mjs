@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.125';
+const APP_VERSION = 'v25.126';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2131,6 +2131,26 @@ app.post('/api/supply/deposit/:id/delete', async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Apply a deposit to every open PO in its production + supplier that has no deposit yet.
+// Region-guarded: an AU deposit only lands on AU POs, a non-AU deposit only on non-AU POs.
+app.post('/api/supply/deposit/:id/apply-all', async (req, res) => {
+  try {
+    const d = (await pool.query(`SELECT coalesce(reference,'') reference, coalesce(supplier_name,'') supplier_name,
+      coalesce(prod_no,'') prod_no, coalesce(country,'') country FROM planner.deposits WHERE id=$1 AND is_deposit`, [req.params.id])).rows[0];
+    if (!d || !d.reference) return res.status(404).json({ error: 'deposit not found' });
+    if (!d.prod_no || !d.supplier_name) return res.status(400).json({ error: 'This deposit needs a production (PROD#) and supplier set before it can be applied.' });
+    const depAU = /^AU$/i.test((d.country || '').trim());
+    // candidate open POs on the same production + supplier with no deposit yet
+    const cand = (await pool.query(`
+      SELECT po.po, upper(coalesce(nullif(po.country_code,''),(SELECT b.country_code FROM planner.branches b WHERE b.name=po.branch),'')) ctry
+      FROM planner.purchase_orders po
+      WHERE coalesce(po.prod_no,'')=$1 AND lower(trim(coalesce(po.supplier_name,'')))=lower(trim($2))
+        AND coalesce(po.deposit_ref,'')='' AND coalesce(po.status,'') NOT ILIKE '%complete%'`, [d.prod_no, d.supplier_name])).rows;
+    const match = cand.filter(r => (/^AU$/.test(r.ctry || '')) === depAU);
+    for (const r of match) await pool.query(`UPDATE planner.purchase_orders SET deposit_ref=$1 WHERE po=$2`, [d.reference, r.po]);
+    res.json({ assigned: match.length, skipped_region: cand.length - match.length, reference: d.reference, pos: match.map(r => r.po) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // CASH FLOW — manual "likely payment date" for an overdue line. Empty date clears the override.
 app.post('/api/supply/likely-date', async (req, res) => {
   const { line_key, likely_date } = req.body || {};
@@ -3193,6 +3213,15 @@ app.post('/api/supply/po/:po', async (req, res) => {
   const DTC_FIELDS = ['sales_order_ref', 'client_po_ref', 'client_requirements'];
   if (Object.keys(body).some(k => k.indexOf('pack_') === 0 || DTC_FIELDS.indexOf(k) >= 0)) {
     try { await pool.query(`UPDATE planner.purchase_orders SET dtc_accepted_at=NULL, dtc_accepted_by=NULL WHERE po=$1`, [req.params.po]); } catch (e) {}
+  }
+  // Region guard: AU deposits pair only with AU POs, and non-AU deposits only with non-AU POs (prevents accidental cross-region assignment)
+  if (body.deposit_ref && String(body.deposit_ref).trim() && String(body.deposit_ref).trim().toUpperCase() !== 'NO DEPOSIT') {
+    try {
+      const dep = (await pool.query(`SELECT coalesce(country,'') country FROM planner.deposits WHERE reference=$1 LIMIT 1`, [String(body.deposit_ref).trim()])).rows[0];
+      const poc = (await pool.query(`SELECT upper(coalesce(nullif(po.country_code,''),(SELECT b.country_code FROM planner.branches b WHERE b.name=po.branch),'')) ctry FROM planner.purchase_orders po WHERE po.po=$1`, [req.params.po])).rows[0];
+      if (dep && poc) { const depAU = /^AU$/i.test((dep.country || '').trim()), poAU = /^AU$/.test(poc.ctry || '');
+        if (depAU !== poAU) return res.status(400).json({ error: 'Region mismatch — ' + (depAU ? 'an AU deposit' : 'a non-AU deposit') + ' cannot be assigned to ' + (poAU ? 'an AU purchase order' : 'a non-AU purchase order') + '.' }); }
+    } catch (e) { /* non-fatal — fall through */ }
   }
   patch(res, 'planner.purchase_orders', 'po', req.params.po, {
     status: 'text', ship_type: 'text', deposit_ref: 'text', shipment_ref: 'text', prod_no: 'text',

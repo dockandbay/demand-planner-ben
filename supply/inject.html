@@ -737,20 +737,23 @@
   var depFull=null;
   function fetchDepositsFull(cb){ if(depFull)return cb(depFull);
     fetch('/api/supply/deposits').then(function(r){return r.json();}).then(function(d){ depFull=(d||[]).filter(function(x){return x.is_deposit&&x.reference;}); cb(depFull); }).catch(function(){cb([]);}); }
+  function isAU(c){ return String(c||'').trim().toUpperCase()==='AU'; }   // AU deposits/POs are region-isolated from everything else
   function openDepPick(po,anchor,done){ closeShPop();
+    var poAU=isAU((poBy[po]||{}).country);   // this PO's region (AU vs not) — deposits must match
     var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop';
     pop.innerHTML='<div class="shpop-h">Deposit for <b>'+esc(po)+'</b></div><input class="shpop-q" placeholder="search reference / supplier…"><div id="shpop-list"><div class="count" style="padding:8px">Loading…</div></div>';
     placePop(pop, anchor.getBoundingClientRect());
     setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
-    function set(ref){ fetch('/api/supply/po/'+encodeURIComponent(po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({deposit_ref:ref})}).then(function(r){return r.json();}).then(function(){ closeShPop(); done&&done(po); }).catch(function(e){alert('Failed: '+(e.message||e));}); }
+    function set(ref){ fetch('/api/supply/po/'+encodeURIComponent(po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({deposit_ref:ref})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ alert(j.error); return; } closeShPop(); done&&done(po); }).catch(function(e){alert('Failed: '+(e.message||e));}); }
     fetchDepositsFull(function(deps){
       function render(q){ q=(q||'').trim().toLowerCase(); var html='';
         html+='<div class="shpop-opt unassign" data-none="1">— No deposit</div>';
         var ms=deps.filter(function(d){return !q||((d.reference||'')+' '+(d.supplier_name||'')).toLowerCase().indexOf(q)>=0;});
-        ms.slice(0,q?40:12).forEach(function(d){ html+='<div class="shpop-opt" data-ref="'+esc(d.reference)+'">'+esc(d.reference)+' <span class="mut tiny">'+esc(d.supplier_name||'')+(d.deposit_remaining!=null?' · '+money(d.deposit_remaining)+' left':'')+'</span></div>'; });
+        ms.slice(0,q?40:12).forEach(function(d){ var bad=(isAU(d.country)!==poAU);   // region mismatch → show but block
+          html+='<div class="shpop-opt'+(bad?' dep-blocked':'')+'"'+(bad?' title="region mismatch — an AU deposit can only go on an AU PO (and vice-versa)" style="opacity:.45;cursor:not-allowed"':' data-ref="'+esc(d.reference)+'"')+'>'+esc(d.reference)+' <span class="mut tiny">'+esc(d.supplier_name||'')+(d.deposit_remaining!=null?' · '+money(d.deposit_remaining)+' left':'')+(bad?' · ✗ '+esc(d.country||'?')+' region':'')+'</span></div>'; });
         if(!q&&deps.length>12)html+='<div class="mut tiny" style="padding:5px 10px">'+(deps.length-12)+' more — type to search…</div>';
         var list=document.getElementById('shpop-list'); list.innerHTML=html;
-        list.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ set(o.dataset.none?'NO DEPOSIT':o.dataset.ref); }; });
+        list.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ if(o.classList.contains('dep-blocked'))return; set(o.dataset.none?'NO DEPOSIT':o.dataset.ref); }; });
       }
       render(''); pop.querySelector('.shpop-q').oninput=function(){render(this.value);}; pop.querySelector('.shpop-q').focus();
     }); }
@@ -2048,6 +2051,8 @@
       act += (hasPOs || d.date_paid)
         ? ' <span class="mut tiny" title="Can’t delete — '+(d.date_paid?'this deposit has a payment date':'purchase order(s) are assigned to this deposit ('+esc(d.linked_pos)+')')+'.">🔒 locked</span>'
         : ' <button class="lnk-btn dep-del" data-id="'+d.id+'" data-ref="'+esc(d.reference||('#'+d.id))+'" title="delete this deposit" style="color:#dc2626">delete</button>';
+      // apply this deposit to all open, unassigned POs in its production + supplier (region-matched)
+      if(d.is_deposit && d.prod_no && d.supplier_name && !closed) act += ' <button class="lnk-btn dep-apply-all" data-id="'+d.id+'" style="color:#6d28d9" title="assign this deposit to every open '+esc(d.supplier_name)+' PO in production '+esc(d.prod_no)+' ('+esc(d.country||'?')+' region) that has no deposit yet">⤿ apply to prod '+esc(d.prod_no)+'</button>';
       return '<tr'+(editing?' style="background:#f0f6ff"':(closed?' style="opacity:.55"':''))+'>'+c_ref+c_sup+c_prod+c_xero+c_amt+c_fx+c_paid+c_rem+c_est+c_asg+'<td class="l" style="white-space:nowrap">'+act+'</td></tr>'; }
     function cur(){ return deps.filter(function(d){ if(st.f==='all')return true; if(st.f==='closed')return d.status==='closed';
       if(st.f==='remaining')return d.status!=='closed' && (Number(d.deposit_remaining)||0)>0.01;   // open + still holds money
@@ -2064,7 +2069,13 @@
           delete cache['productions']; invalidateDerived();   // keep Productions / Actions / cash flow fresh next visit — no full re-render
           draw(); }); }; });   // redraw just the register (closed rows drop out of the open filters)
       b.querySelectorAll('.dep-del').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Delete deposit "'+btn.dataset.ref+'"? This cannot be undone.'))return;
-        shipPost('/api/supply/deposit/'+btn.dataset.id+'/delete',{},function(){ prodTab='deposits'; delete cache['productions']; selectSection('productions'); }); }; }); }
+        shipPost('/api/supply/deposit/'+btn.dataset.id+'/delete',{},function(){ prodTab='deposits'; delete cache['productions']; selectSection('productions'); }); }; });
+      b.querySelectorAll('.dep-apply-all').forEach(function(btn){ btn.onclick=function(){ var d=deps.filter(function(x){return String(x.id)===String(btn.dataset.id);})[0]; if(!d)return;
+        if(!confirm('Assign deposit '+d.reference+' to every open '+d.supplier_name+' PO in production '+d.prod_no+' ('+(d.country||'?')+' region) that has no deposit yet?'))return;
+        btn.disabled=true; btn.textContent='…';
+        shipPost('/api/supply/deposit/'+btn.dataset.id+'/apply-all',{},function(j){
+          alert('Assigned '+d.reference+' to '+j.assigned+' PO(s)'+(j.skipped_region?'; '+j.skipped_region+' skipped (different region)':'')+'.');
+          delete cache['purchase-orders']; delete cache['productions']; invalidateDerived(); prodTab='deposits'; selectSection('productions'); }); }; }); }
     b.querySelectorAll('.bar .pill').forEach(function(p){p.onclick=function(){b.querySelectorAll('.bar .pill').forEach(function(x){x.classList.remove('active');});p.classList.add('active');st.f=p.dataset.f;draw();};});
     document.getElementById('dep-q').oninput=function(){st.q=this.value.toLowerCase();draw();};
     document.getElementById('dep-new').onclick=function(){ shipPost('/api/supply/deposit-create',{is_deposit:true},function(){ prodTab='deposits'; delete cache['productions']; selectSection('productions'); }); };
