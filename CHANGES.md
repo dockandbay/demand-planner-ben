@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.144 - Fix: "Late - should be Completed" filter uses the completion date
+
+The filter was keyed on the production-end date, so POs whose production had ended but whose completion
+date was still in the future (e.g. PO-1712952, completion 15-Jul-26) were wrongly flagged. Now it means
+what it says: the COMPLETION date (delivery + 7, the Fulfil/Cin7 completion) has passed and the PO isn't
+marked complete. (22 POs qualify; none with a future completion date.)
+
 ## v25.143 - Inline date alerts, Flexport links, live grid sync from sub-tabs
 
 - **Exception alerts now sit at the data point.** Removed the categorised chips from the PO reference

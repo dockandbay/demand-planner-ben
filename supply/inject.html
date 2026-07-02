@@ -897,9 +897,9 @@
       var startDepDue=Number(r.start_calc)>0.009 && r.start_assigned==null && !r.deposit_ref;
       var invoiceUnpaid=r.is_final && Number(r.balance_owing)>0.01;
       return startDepDue || invoiceUnpaid; },
-    // "Late - should be Completed": production completion date (prod_end) has passed but the PO hasn't reached a
-    // completed-production state (still FUTURE/PRODUCTION — not ready-to-ship/shipping/delivered/complete).
-    late:function(r){ var t=new Date().toISOString().slice(0,10); return !/ready to ship|shipping|deliver|complete/i.test(r.status||'') && r.prod_end && r.prod_end<t; },
+    // "Late - should be Completed": the COMPLETION date (checkin = delivery + 7, the Fulfil/Cin7 completion) has
+    // passed but the PO isn't marked complete yet. (Was wrongly keyed on the production-end date.)
+    late:function(r){ var t=new Date().toISOString().slice(0,10); return r.progress!=='complete' && r.checkin && r.checkin<t; },
     unassigned_shipment:function(r){return r.unassigned_shipment;},
     // "Late - should have Shipped": still in PRODUCTION and the ship date has passed.
     production:function(r){ var t=new Date().toISOString().slice(0,10); return /production/i.test(r.status||'') && r.ship && r.ship<t; },
