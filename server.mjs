@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.149';
+const APP_VERSION = 'v25.150';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2324,6 +2324,31 @@ app.post('/api/supply/po/:po/apply-key-account', async (req, res) => {
        ka.pack_rfid_barcodes, ka.pack_rfid_barcodes_notes, ka.pack_dnb_carton, ka.pack_dnb_carton_notes,
        ka.pack_client_carton, ka.pack_client_carton_notes, ka.pack_pallet_notes, ka.pack_other_notes, req.params.po]);
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Create a key account in config FROM a PO's current Direct-to-Client details (client name + packing +
+// requirements + address), and tag the PO as a key-account order. For clients not yet in the config list.
+app.post('/api/supply/po/:po/create-key-account', async (req, res) => {
+  try {
+    const p = (await pool.query(`SELECT coalesce(client,'') client, client_requirements, final_delivery_address,
+      pack_polybags, pack_polybags_notes, pack_dnb_barcodes, pack_dnb_barcodes_notes, pack_rfid_barcodes, pack_rfid_barcodes_notes,
+      pack_dnb_carton, pack_dnb_carton_notes, pack_client_carton, pack_client_carton_notes, pack_pallet_notes, pack_other_notes
+      FROM planner.purchase_orders WHERE po=$1`, [req.params.po])).rows[0];
+    if (!p) return res.status(404).json({ error: 'PO not found' });
+    const name = (p.client || '').trim();
+    if (!name) return res.status(400).json({ error: 'Enter a client name on the PO first.' });
+    const exists = (await pool.query(`SELECT 1 FROM planner.key_accounts WHERE lower(name)=lower($1) LIMIT 1`, [name])).rows[0];
+    if (exists) return res.status(400).json({ error: 'A key account named "' + name + '" already exists.' });
+    const r = await pool.query(`INSERT INTO planner.key_accounts
+      (name, client_requirements, address, pack_polybags, pack_polybags_notes, pack_dnb_barcodes, pack_dnb_barcodes_notes,
+       pack_rfid_barcodes, pack_rfid_barcodes_notes, pack_dnb_carton, pack_dnb_carton_notes, pack_client_carton, pack_client_carton_notes,
+       pack_pallet_notes, pack_other_notes)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
+      [name, p.client_requirements, p.final_delivery_address, p.pack_polybags, p.pack_polybags_notes, p.pack_dnb_barcodes, p.pack_dnb_barcodes_notes,
+       p.pack_rfid_barcodes, p.pack_rfid_barcodes_notes, p.pack_dnb_carton, p.pack_dnb_carton_notes, p.pack_client_carton, p.pack_client_carton_notes,
+       p.pack_pallet_notes, p.pack_other_notes]);
+    await pool.query(`UPDATE planner.purchase_orders SET dtc_key_account=true, updated_at=now() WHERE po=$1`, [req.params.po]);
+    res.json({ ok: true, id: r.rows[0].id, name });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Batches — editable buying-batch table (CONFIG). Edit by batch name; create a new batch.

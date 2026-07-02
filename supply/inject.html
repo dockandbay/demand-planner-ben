@@ -517,7 +517,9 @@
     }).catch(function(){ actBuild(rows,c); }); }); }
   var ACT_GROUP={ 'Deposit not paid':'PAYMENTS','Deposit over-assigned':'PAYMENTS','Payment invalid':'PAYMENTS','Payment overdue':'PAYMENTS','Supplier invoice':'PAYMENTS',
     'Unpaid — last month':'PAYMENTS','Aged payment':'PAYMENTS',
-    'Date conflict':'DATES','Production check-in':'DATES','Ship check-in':'DATES','Shipment missing dates':'DATES','Shipment ETA passed':'DATES','Shipment delivered — update PO':'DATES','Awaiting ERP receipt':'DATES','Consider air freight':'DATES','Expedite production':'DATES','Supplier completion date':'DATES' };
+    'Date conflict':'DATES','Production check-in':'DATES','Ship check-in':'DATES','Shipment missing dates':'DATES','Shipment ETA passed':'DATES','Shipment delivered — update PO':'DATES','Awaiting ERP receipt':'DATES','Supplier completion date':'DATES',
+    // BI recommendations — advisory (from the forecast/expedite engine), not blocking actions
+    'Consider air freight':'RECOMMENDATIONS','Expedite production':'RECOMMENDATIONS' };
   function actGroup(t){ return ACT_GROUP[t]||'OTHER'; }   // everything else (supplier, ERP, partials, unassigned) → OTHER
   function actBuild(rows,c){
     actRows=rows; rows.forEach(function(r,i){ r._id=i; });
@@ -559,10 +561,12 @@
         document.getElementById('act-typebtn').textContent=typeLbl()+' ▾'; document.getElementById('act-typebtn').classList.toggle('active',!!st.types.length); document.getElementById('act-type-all').checked=!st.types.length; view(); }; });
       document.getElementById('act-refresh').onclick=function(){ delete cache['actions']; selectSection('actions'); }; }
     function view(){ var f=pool().filter(function(r){return st.sev==='All'||r.severity===st.sev;}).filter(typeMatch);
-      var G={PAYMENTS:[],DATES:[],OTHER:[]}; f.forEach(function(r){ (G[actGroup(r.type)]||G.OTHER).push(r); });
-      var html=''; ['PAYMENTS','DATES','OTHER'].forEach(function(g){ var arr=G[g]; if(!arr.length)return;
-        var hi=arr.filter(function(r){return r.severity==='high';}).length;
-        html+='<div class="sect-h" style="margin-top:12px">'+g+' <span class="mut tiny">('+arr.length+(hi?' · '+hi+' high':'')+')</span></div>'
+      var G={PAYMENTS:[],DATES:[],OTHER:[],RECOMMENDATIONS:[]}; f.forEach(function(r){ (G[actGroup(r.type)]||G.OTHER).push(r); });
+      // BI recommendations render last, in their own clearly-labelled (advisory) section, separate from actions
+      var GROUPS=[['PAYMENTS','PAYMENTS'],['DATES','DATES'],['OTHER','OTHER'],['RECOMMENDATIONS','💡 BI RECOMMENDATIONS']];
+      var html=''; GROUPS.forEach(function(gg){ var g=gg[0], arr=G[g]; if(!arr.length)return;
+        var hi=arr.filter(function(r){return r.severity==='high';}).length, isRec=(g==='RECOMMENDATIONS');
+        html+='<div class="sect-h" style="margin-top:12px'+(isRec?';color:#6d28d9;border-top:1px dashed #ddd6fe;padding-top:10px':'')+'">'+gg[1]+' <span class="mut tiny">('+arr.length+(hi?' · '+hi+' high':'')+(isRec?' · advisory, not blocking':'')+')</span></div>'
           +'<div class="act-cards">'+arr.map(actCard).join('')+'</div>'; });
       document.getElementById('act-grid').innerHTML=html||'<div class="count">none in this view 🎉</div>'; bindActFix(); bindLifecycle(statBar,sevBar,view); }
     statBar(); sevBar(); view(); }
@@ -1508,7 +1512,7 @@
     var clientH='<div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start"><div style="flex:1 1 430px;min-width:360px">'
       +'<div class="sect-h">Client / FBA <span class="mut tiny">— who this PO is for; crossdock SKUs feed the supplier-portal label download</span></div>'
       +'<div class="cli-form">'
-      +cliRow('Client name','<input class="fci txt dtc-client" list="kalist" data-po="'+esc(r.po)+'" value="'+esc(r.client||'')+'" style="width:360px;text-align:left" placeholder="type, or pick a saved key account…" title="pick a saved key account to pull in its packing / requirements / address"><datalist id="kalist"></datalist>')
+      +cliRow('Client name','<input class="fci txt dtc-client" list="kalist" data-po="'+esc(r.po)+'" value="'+esc(r.client||'')+'" style="width:360px;text-align:left" placeholder="type, or pick a saved key account…" title="pick a saved key account to pull in its packing / requirements / address"><datalist id="kalist"></datalist> <button class="save-btn dtc-mkka" data-po="'+esc(r.po)+'" style="display:none" title="save this client as a key account in config, using this PO&rsquo;s current packing / requirements / address">＋ Create as key account</button>')
       +cliRow('Direct-to-Client type','<label style="margin-right:16px;cursor:pointer"><input type="checkbox" class="dtc-tag" data-po="'+esc(r.po)+'" data-field="dtc_key_account"'+(r.dtc_key_account?' checked':'')+'> Key account</label><label style="cursor:pointer"><input type="checkbox" class="dtc-tag" data-po="'+esc(r.po)+'" data-field="dtc_custom"'+(r.dtc_custom?' checked':'')+'> Custom</label>')
       +cliRow('Client requirements',txtIn(ep,'client_requirements',r.client_requirements,440,true))
       +cliRow('Sales Ref / Amazon Ref',txtIn(ep,'sales_order_ref',r.sales_order_ref,220))
@@ -1769,13 +1773,23 @@
     // Direct-to-Client tags (Key account / Custom checkboxes)
     document.querySelectorAll('#podet-'+i+' .dtc-tag').forEach(function(cb){ cb.onchange=function(){ var b={}; b[cb.dataset.field]=cb.checked;
       shipPost('/api/supply/po/'+encodeURIComponent(po),b,function(){ if(poBy[po])poBy[po][cb.dataset.field]=cb.checked; }); }; });
-    // Client name — save it; and if it matches a saved key account, offer to pull that account's defaults in.
-    fetchKeyAccounts(function(list){ var dl=document.getElementById('kalist'); if(dl)dl.innerHTML=(list||[]).map(function(k){return '<option value="'+esc(k.name)+'">';}).join(''); });
-    document.querySelectorAll('#podet-'+i+' .dtc-client').forEach(function(inp){ inp.onchange=function(){ var val=(inp.value||'').trim(); inp.classList.add('saved');
-      shipPost('/api/supply/po/'+encodeURIComponent(po),{client:val},function(){ if(poBy[po])poBy[po].client=val; });
-      var ka=(KA_LIST||[]).filter(function(k){return String(k.name||'').toLowerCase()===val.toLowerCase();})[0];
-      if(ka && confirm('Apply "'+ka.name+'" key-account defaults to this PO?\n\nThis overwrites the current packing / labelling, client requirements and delivery address.')){
-        shipPost('/api/supply/po/'+encodeURIComponent(po)+'/apply-key-account',{name:ka.name},function(j){ if(j&&j.error){alert(j.error);return;} invalidateDerived(); poRefetchPanel(po,i); }); } }; });
+    // Client name — save it; if it matches a saved key account offer to pull its defaults in; if it does NOT
+    // match, reveal a "Create as key account" button (isKa toggles which affordance shows).
+    function mkKaToggle(){ var inp=document.querySelector('#podet-'+i+' .dtc-client'), btn=document.querySelector('#podet-'+i+' .dtc-mkka'); if(!inp||!btn)return;
+      var v=(inp.value||'').trim(); var isKa=(KA_LIST||[]).some(function(k){return String(k.name||'').toLowerCase()===v.toLowerCase();});
+      btn.style.display=(v && !isKa)?'':'none'; }
+    fetchKeyAccounts(function(list){ var dl=document.getElementById('kalist'); if(dl)dl.innerHTML=(list||[]).map(function(k){return '<option value="'+esc(k.name)+'">';}).join(''); mkKaToggle(); });
+    document.querySelectorAll('#podet-'+i+' .dtc-client').forEach(function(inp){
+      inp.oninput=mkKaToggle;
+      inp.onchange=function(){ var val=(inp.value||'').trim(); inp.classList.add('saved');
+        shipPost('/api/supply/po/'+encodeURIComponent(po),{client:val},function(){ if(poBy[po])poBy[po].client=val; });
+        mkKaToggle();
+        var ka=(KA_LIST||[]).filter(function(k){return String(k.name||'').toLowerCase()===val.toLowerCase();})[0];
+        if(ka && confirm('Apply "'+ka.name+'" key-account defaults to this PO?\n\nThis overwrites the current packing / labelling, client requirements and delivery address.')){
+          shipPost('/api/supply/po/'+encodeURIComponent(po)+'/apply-key-account',{name:ka.name},function(j){ if(j&&j.error){alert(j.error);return;} invalidateDerived(); poRefetchPanel(po,i); }); } }; });
+    document.querySelectorAll('#podet-'+i+' .dtc-mkka').forEach(function(btn){ btn.onclick=function(){ var inp=document.querySelector('#podet-'+i+' .dtc-client'); var v=(inp&&inp.value||'').trim(); if(!v){alert('Enter a client name first.');return;}
+      if(!confirm('Create "'+v+'" as a key account in config, using this PO’s current packing / labelling, client requirements and delivery address?'))return;
+      btn.disabled=true; shipPost('/api/supply/po/'+encodeURIComponent(po)+'/create-key-account',{},function(j){ if(j&&j.error){alert(j.error);btn.disabled=false;return;} KA_LIST=null; invalidateDerived(); poRefetchPanel(po,i); }); }; });
     // Packing & Labelling Yes/No selects (CLIENT/FBA tab) — the PLAN panel is wired by bindPay, not bindEdits,
     // so these need their own save handler (else the Yes/No never persisted).
     document.querySelectorAll('#podet-'+i+' .boolsel').forEach(function(sel){ sel.onchange=function(){ var yes=sel.value==='true';

@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.150 - "Create as key account" from a PO + BI recommendations split in ACTIONS
+
+- **Create as key account:** on a PO's Client/FBA tab, when the client name isn't already a saved key
+  account, a "＋ Create as key account" button appears next to it — it creates the key account in config
+  from the PO's current packing / labelling / client requirements / delivery address, and tags the PO as a
+  key account. (New endpoint /api/supply/po/:po/create-key-account.)
+- **ACTIONS — BI recommendations separated:** the advisory "Expedite production" and "Consider air freight"
+  items (from the forecast/expedite engine) now render in their own "💡 BI RECOMMENDATIONS" section at the
+  bottom (purple, "advisory, not blocking"), instead of mixed into DATES actions.
+
 ## v25.149 - Key Accounts + Direct-to-Client tags (custom / key account)
 
 - **Config ▸ Key accounts** — new CRUD table: name, packing/labelling (yes-no + notes), client requirements,
