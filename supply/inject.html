@@ -47,6 +47,8 @@
 /* level-3 sub-navs (REPORTS, CONFIG): underline tabs like the level-1/2 menus, in light blue */
 #supply-root #rep-subnav,#supply-root #config-subs,#supply-root #prod-subtabs,#supply-root .po-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 12px}
 #supply-root .ex-badge{display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:#dc2626;color:#fff;font-size:9px;font-weight:700;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px}
+/* categorised exception chips on the PO row — one per area (Dates/Pay/Freight/Plan/Notes) so it's clear at a glance WHICH area has an issue; hover shows the specific message(s) */
+#supply-root .ex-cat{display:inline-block;height:15px;line-height:15px;border-radius:3px;color:#fff;font-size:8.5px;font-weight:700;letter-spacing:.02em;text-align:center;padding:0 5px;margin-left:4px;vertical-align:1px;cursor:help;white-space:nowrap}
 #supply-root .po-note-badge{display:inline-block;min-width:13px;height:13px;line-height:12px;border-radius:3px;background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;font-size:8px;font-weight:800;text-align:center;padding:0 3px;margin-left:4px;vertical-align:1px;cursor:pointer;font-family:inherit}
 #supply-root .po-note-badge:hover{background:#ddd6fe}
 #po-note-tip{position:fixed;z-index:9000;display:none;max-width:340px;background:#1f2937;color:#fff;font-size:11px;line-height:1.35;padding:6px 9px;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.25);white-space:pre-wrap;pointer-events:none}
@@ -1180,7 +1182,9 @@
         : '<button class="ship-pick" data-po="'+esc(r.po)+'">— assign ▾</button>')
       +(r.is_master?' <span class="tool-badge bg-blue" title="master / consolidation PO for this shipment">master</span>':'');
     var _ex=poExceptions(r,null);   // grid badge (invoice discrepancy resolves only once the PLAN panel is opened)
-    var exFlag=_ex.all.length?' <span class="ex-badge" title="'+esc(_ex.all.length+' action'+(_ex.all.length>1?'s':'')+': '+_ex.all.join(' · '))+'">'+_ex.all.length+'</span>':'';
+    // one labelled chip per exception area (Pay / Dates / Freight / Plan / Notes) so it's clear WHICH area is
+    // flagged and WHY (hover) — instead of an opaque count. Ordered by urgency; empty areas are skipped.
+    var exFlag=exCatBadges(_ex);
     // purple "N" badge → this PO has internal Notes (MASTER DATA). Hover shows them; click opens the PLAN ▸ MASTER DATA tab.
     var noteFlag=(r.notes&&String(r.notes).trim())?' <button class="po-note-badge" data-po="'+esc(r.po)+'" data-note="'+esc(String(r.notes).trim())+'">N</button>':'';
     var pocell=indent?'<td class="l po-child po-numcell"><span class="ind">└ </span><b>'+esc(r.po)+'</b>'+noteFlag+exFlag+'</td>':'<td class="l po-numcell"><b>'+esc(r.po)+'</b>'+noteFlag+exFlag+'</td>';
@@ -1363,6 +1367,11 @@
     var timeline=[]; if(Number(r.unread_notes)>0) timeline.push(r.unread_notes+' unread supplier note'+(r.unread_notes>1?'s':''));
     var oplan=[]; if(Number(r.orderplan_unconfirmed)>0) oplan.push(r.orderplan_unconfirmed+' unconfirmed order-plan change'+(r.orderplan_unconfirmed>1?'s':''));
     return { pay:pay, dates:dates, client:[], landed:landed, timeline:timeline, oplan:oplan, all:pay.concat(dates).concat(landed).concat(timeline).concat(oplan) }; }
+  // grid exception chips — one labelled, colour-coded chip per non-empty area, tooltip = that area's message(s).
+  function exCatBadges(ex){ if(!ex)return '';
+    var cats=[['pay','PAY','#dc2626'],['dates','DATES','#b45309'],['landed','FREIGHT','#c2410c'],['oplan','PLAN','#1d4ed8'],['timeline','NOTES','#6d28d9']];
+    return cats.map(function(c){ var m=ex[c[0]]||[]; if(!m.length)return '';
+      return '<span class="ex-cat" style="background:'+c[2]+'" title="'+esc(c[1]+': '+m.join(' · '))+'">⚠ '+c[1]+'</span>'; }).join(''); }
   function payPanel(r,d){ if(!r)return '';
     var ep='/api/supply/po/'+encodeURIComponent(r.po);
     var bal1=Number(r.balance_1_amount), owe=Number(r.balance_owing)||0;

@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.140';
+const APP_VERSION = 'v25.141';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1065,10 +1065,11 @@ app.get('/api/supply/:section', async (req, res) => {
             SELECT po.*, s.credit_days, s.credit_type,
               -- effective %s: per-PO override wins over the supplier's standard terms; small POs (value used
               -- < $500) default to 0% start + 0% completion (→ 100% balance) unless a per-PO override is set.
+              -- ONLY for open POs (not complete) — completed history keeps its original supplier terms.
               coalesce(po.start_deposit_pct_override,
-                CASE WHEN coalesce(po.supplier_invoice_total, lv.line_value, po.order_value_estimation, 0) < 500 THEN 0 ELSE s.start_deposit_pct END, 0) sp,
+                CASE WHEN coalesce(po.status,'') NOT ILIKE '%complete%' AND coalesce(po.supplier_invoice_total, lv.line_value, po.order_value_estimation, 0) < 500 THEN 0 ELSE s.start_deposit_pct END, 0) sp,
               coalesce(po.completion_pct_override,
-                CASE WHEN coalesce(po.supplier_invoice_total, lv.line_value, po.order_value_estimation, 0) < 500 THEN 0 ELSE s.completion_pct END, 0) cp,
+                CASE WHEN coalesce(po.status,'') NOT ILIKE '%complete%' AND coalesce(po.supplier_invoice_total, lv.line_value, po.order_value_estimation, 0) < 500 THEN 0 ELSE s.completion_pct END, 0) cp,
               coalesce(lv.line_value, po.order_value_estimation) value_est,
               (lv.line_value IS NOT NULL) value_from_lines,
               -- final supplier invoice amount trumps the estimate for every payment / landed calc
@@ -1183,7 +1184,7 @@ app.get('/api/supply/:section', async (req, res) => {
               -- date once final, else the ship date while still an estimate — no credit terms applied;
               -- else the normal rule: (on-shipment → ship; on-clearance → delivery) + supplier credit days
               coalesce(balance_due_date_overide,
-                CASE WHEN val < 500 THEN coalesce(invoice_processed_date, eff_ship)
+                CASE WHEN val < 500 AND coalesce(status,'') NOT ILIKE '%complete%' THEN coalesce(invoice_processed_date, eff_ship)
                      ELSE ((CASE WHEN credit_type='on_shipment' THEN eff_ship ELSE eff_delivery END)
                         + (coalesce(credit_days,0)||' days')::interval)::date END) bal_due_date
             FROM calc3

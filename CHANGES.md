@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.141 - <$500 rule open-only + clear categorised exception chips
+
+- **<$500 rule now applies to open POs only** (v25.138). Completed POs keep their original supplier
+  deposit terms and due dates — no retroactive restatement of closed orders. Open (incl. future) POs under
+  $500 still default to 0% start + 0% completion, due on invoice/ship date. (10 open affected; 169
+  completed reverted to their original terms.)
+- **Clearer PO-grid exception badges.** The single opaque red count on the PO reference is replaced with
+  one labelled, colour-coded chip per flagged area — ⚠ PAY (red), ⚠ DATES (amber), ⚠ FREIGHT (orange),
+  ⚠ PLAN (blue), ⚠ NOTES (purple). The chip says WHICH area at a glance; hovering shows the specific
+  message (e.g. "DATES: Past production completion (30 Jun) but status is In production"). Applies across
+  payments / dates / order-plan / freight / notes exceptions.
+
 ## v25.140 - Cash flow: drop duty/freight/tax once goods have landed
 
 Reported on PO-55AUXR1: import duty/tax showing as due in June, but the goods had already landed
