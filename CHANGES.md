@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.194 - DEMAND category popup now closes on filter-bar clicks
+
+v25.188's click-away used a bubble-phase document listener, so filter-bar controls that call
+stopPropagation() on their own click stopped it from firing (popup stayed open). Switched the listener to
+capture phase (fires first, regardless of stopPropagation) — clicking anywhere outside the category control,
+including the filters bar, now closes the popup; clicks inside it still keep it open.
+
 ## v25.193 - Favicon + page title (HORIZON)
 
 Added the HORIZON favicon and a page `<title>` (HORIZON — Dock & Bay) to the app `<head>`. The favicon is
