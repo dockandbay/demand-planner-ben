@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.173 - ERP deviations table: SKU column shows full SKU (was clipping)
+
+The ERP deviations table (ORDER PLAN) was clipping the SKU to ~10 chars. Cause: the global
+`#supply-root table{width:100%}` stretched the 2-column table full width, and `class="tw"` on the table
+added `overflow:auto` which clipped the nowrap SKU. Fixed: the table now sizes to content (inline
+`width:auto` overrides the global), SKU column is `min-width:45ch` with nowrap so long SKUs (e.g.
+BALLAST-SUM-CSTCANDY) show in full, and it uses a plain `overflow-x:auto` wrapper instead of `.tw`
+(which re-imposes `min-width:100%` inside the expanded row).
+
+No new env vars or migrations.
+
 ## v25.172 - FBA download reads carton dims from planner.products; products report column filter
 
 - **FBA Transfer download now sources carton dims/weights from `planner.products`** (the new
