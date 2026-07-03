@@ -2946,7 +2946,19 @@ let SKU_SORT='alpha';
 let EXPANDED=new Set((function(){try{return JSON.parse(localStorage.getItem('db_layout_expanded_v1'))||[];}catch(e){return [];}})()); // 'subcat|co|ch' combos with SKU rows expanded — restored from last session
 function saveLayout(){ try{ localStorage.setItem('db_layout_expanded_v1',JSON.stringify(Array.from(EXPANDED))); }catch(e){} }
 var PLAN_SKU_QRY=''; // planner SKU filter text (matches sku code or product name)
-var SMOOTH_PREVIEW=null; // {pk:'subcat|co|ch', m:'YYYY_MM', vals:{sku:units}} — one pending smooth preview at a time
+var SMOOTH_PREVIEW=null; // {pk:'subcat|co|ch', fy:startY|null, months:{'YYYY_MM':{sku:units}}} — one pending smooth preview at a time (fy set = whole-FY smooth)
+var SMOOTH_LEADER=false;  // false = Standard (pure proportional), true = Leader (protect historically-strong SKUs). Set via the FY-total dropdown; applies to ALL smoothing.
+// 120ms hover tooltip explaining Standard vs Leader smoothing (used on the FY-total dropdown).
+var _smTip=null;
+function smoothModeTip(el){
+  el.addEventListener('mouseenter',function(){ el._t=setTimeout(function(){
+    if(!_smTip){_smTip=document.createElement('div');_smTip.style.cssText='position:fixed;z-index:100001;max-width:290px;background:#111827;color:#fff;font-size:11px;line-height:1.45;padding:8px 10px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none';document.body.appendChild(_smTip);}
+    _smTip.innerHTML='<b>Standard</b> — pure proportional rescale: every SKU is scaled by the same factor so the SKU sum matches the subcategory forecast.<br><br><b>Leader</b> — protects historically-strong SKUs: enforces a floor (80% of their historical share × tier target) so top performers aren&rsquo;t diluted by the rescale.';
+    _smTip.style.display='block';
+    var r=el.getBoundingClientRect(); _smTip.style.left=Math.max(6,Math.min(r.left,window.innerWidth-296))+'px'; _smTip.style.top=(r.bottom+5)+'px';
+  },120); });
+  el.addEventListener('mouseleave',function(){ clearTimeout(el._t); if(_smTip)_smTip.style.display='none'; });
+}
 function markDirty(){
   _dirty=true; scheduleAutoSave();
   const btn=document.getElementById('sv');
@@ -5590,15 +5602,52 @@ function insertInlineSkuRows(s,co,ch,afterTr){
   // During an active Smooth preview, show each SKU's proposed (uncommitted) override in amber.
   // The override cell (input) carries the proposed units; the forecast cell mirrors it.
   function applyPreview(inp,fcDiv,mo,sku){
-    if(!SMOOTH_PREVIEW||SMOOTH_PREVIEW.pk!==parentKey||SMOOTH_PREVIEW.m!==mo)return;
-    if(!Object.prototype.hasOwnProperty.call(SMOOTH_PREVIEW.vals,sku))return;
-    var pv=SMOOTH_PREVIEW.vals[sku];
+    if(!SMOOTH_PREVIEW||SMOOTH_PREVIEW.pk!==parentKey||!SMOOTH_PREVIEW.months||!SMOOTH_PREVIEW.months[mo])return;
+    if(!Object.prototype.hasOwnProperty.call(SMOOTH_PREVIEW.months[mo],sku))return;
+    var pv=SMOOTH_PREVIEW.months[mo][sku];
     if(inp){inp.value=String(pv);inp.disabled=true;inp.style.color='#b45309';inp.style.fontWeight='700';inp.title='Smooth preview — not yet applied';}
     if(fcDiv){fcDiv.textContent=fn(pv);fcDiv.style.color='#b45309';fcDiv.style.fontWeight='700';fcDiv.style.fontStyle='normal';fcDiv.title='Proposed by Smooth — click \u2713 apply to commit';}
   }
   // Re-render this subcategory's expanded SKU rows in place (after a preview/apply/cancel).
   function reExpand(){
     refreshRow(s,co,ch);
+  }
+  // Commit every month in the current preview (single-month or whole-FY) → SKU overrides. Review step first.
+  function applySmoothPreview(){
+    if(!SMOOTH_PREVIEW||!SMOOTH_PREVIEW.months)return;
+    Object.keys(SMOOTH_PREVIEW.months).forEach(function(mo){ applySmoothAlloc(co,ch,mo,SMOOTH_PREVIEW.months[mo]); });
+    SMOOTH_PREVIEW=null; reExpand();
+  }
+  // Preview a smooth across ALL forecast months in one financial year (startY). Uses the current
+  // Standard/Leader mode (SMOOTH_LEADER). Includes the current month's forecast (the 'fc' side).
+  function fySmoothAll(startY){
+    var months={};
+    fyMonths(startY).forEach(function(m){
+      if(isActualMonth(m) && m!==CUR_MONTH) return;   // forecast months only (+ the current-month forecast)
+      var alloc=computeSmoothAlloc(s,co,ch,m,{protectLeaders:SMOOTH_LEADER});
+      if(alloc && Object.keys(alloc).length) months[m]=alloc;
+    });
+    if(!Object.keys(months).length){ return; }
+    SMOOTH_PREVIEW={pk:parentKey,fy:startY,months:months};
+    reExpand();
+  }
+  // Standard/Leader dropdown → set the mode; if a preview is live, recompute it in place.
+  function setSmoothMode(leader){
+    SMOOTH_LEADER=!!leader;
+    if(SMOOTH_PREVIEW && SMOOTH_PREVIEW.pk===parentKey){
+      if(SMOOTH_PREVIEW.fy!=null){ fySmoothAll(SMOOTH_PREVIEW.fy); }
+      else { var mo=Object.keys(SMOOTH_PREVIEW.months||{})[0]; if(mo){ var o={}; o[mo]=computeSmoothAlloc(s,co,ch,mo,{protectLeaders:SMOOTH_LEADER}); SMOOTH_PREVIEW={pk:parentKey,fy:null,months:o}; reExpand(); } }
+    }
+  }
+  // ✓ / ✕ review controls (shared by single-month + whole-FY previews).
+  function smoothReviewBar(container){
+    var ok=document.createElement('button');ok.textContent='✓';ok.title='Apply this smooth (writes SKU overrides — auto-saves)';
+    ok.style.cssText='font-size:8px;line-height:1;padding:1px 5px;border:1px solid #16a34a;border-radius:3px;background:#dcfce7;color:#166534;cursor:pointer;font-weight:700';
+    ok.onclick=function(e){e.stopPropagation();applySmoothPreview();};
+    var no=document.createElement('button');no.textContent='✕';no.title='Discard preview';
+    no.style.cssText='font-size:8px;line-height:1;padding:1px 5px;margin-left:2px;border:1px solid #cbd5e1;border-radius:3px;background:#f1f5f9;color:#64748b;cursor:pointer;font-weight:700';
+    no.onclick=function(e){e.stopPropagation();SMOOTH_PREVIEW=null;reExpand();};
+    container.appendChild(ok);container.appendChild(no);
   }
 
   skus.forEach(function(sku){
@@ -6105,16 +6154,17 @@ function insertInlineSkuRows(s,co,ch,afterTr){
   // exceeds ±5% of the subcat forecast, a per-month Smooth button is added.
   function gapFill(std,m,sum,isFc){
     var target=(m===CUR_MONTH)?curMonthForecast(s,co,ch):(subcatFU[m]||0);
-    var prevActive=isFc&&SMOOTH_PREVIEW&&SMOOTH_PREVIEW.pk===parentKey&&SMOOTH_PREVIEW.m===m;
-    if(prevActive){ var psum=0,pv=SMOOTH_PREVIEW.vals; Object.keys(pv).forEach(function(k){psum+=pv[k];}); sum=psum; }
+    var prevActive=isFc&&SMOOTH_PREVIEW&&SMOOTH_PREVIEW.pk===parentKey&&SMOOTH_PREVIEW.months&&SMOOTH_PREVIEW.months[m];
+    if(prevActive){ var psum=0,pv=SMOOTH_PREVIEW.months[m]; Object.keys(pv).forEach(function(k){psum+=pv[k];}); sum=psum; }
     var g=Math.round(sum-target);
     var c=g===0?'#9ca3af':(g<0?'#dc2626':'#b45309');
     var sumDiv=document.createElement('div');sumDiv.textContent=sum?fn(sum):'';if(prevActive)sumDiv.style.color='#b45309';std.appendChild(sumDiv);
     var gapDiv=document.createElement('div');gapDiv.style.cssText='font-size:7px;font-weight:700;color:'+c;
     gapDiv.textContent=g===0?'0':(g>0?'+':'\u2212')+fn(Math.abs(g));std.appendChild(gapDiv);
-    if(prevActive){
+    if(prevActive && SMOOTH_PREVIEW.fy==null){
       var bar=document.createElement('div');bar.style.cssText='margin-top:1px;display:flex;gap:2px;justify-content:flex-end;align-items:center;flex-wrap:wrap';
-      // Toggle: Protect historical leaders (off = pure proportional, on = tier-aware floors).
+      smoothReviewBar(bar);std.appendChild(bar);
+    } else if(false){
       var pl=!!SMOOTH_PREVIEW.protectLeaders;
       var tog=document.createElement('button');
       tog.textContent=pl?'\u2605 leaders':'\u2606 leaders';
@@ -6133,14 +6183,14 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       no.style.cssText='font-size:8px;line-height:1;padding:1px 5px;border:1px solid #cbd5e1;border-radius:3px;background:#f1f5f9;color:#64748b;cursor:pointer;font-weight:700';
       no.onclick=function(e){e.stopPropagation();SMOOTH_PREVIEW=null;reExpand();};
       bar.appendChild(tog);bar.appendChild(ok);bar.appendChild(no);std.appendChild(bar);
-    } else if(isFc&&target>0&&Math.abs(g)/target>0.05){
+    } else if(!prevActive&&isFc&&target>0&&Math.abs(g)/target>0.05){
       var isF27=(std.className||'').indexOf('bg27')>=0;
       std.classList.add('smoothable');
       std.title='Click to preview a proportional rescale of all SKUs in '+s+' ('+co+'/'+ch+') for '+m.replace('_','-')+' to within \u00b15% of the subcategory forecast ('+fn(Math.round(target))+'). Use the \u2606 leaders toggle in the preview to apply tier-aware historical floors.';
       var lnk=document.createElement('div');lnk.textContent='smooth';
       lnk.style.cssText='margin-top:1px;font-size:7px;line-height:1.2;font-weight:500;font-style:italic;color:#9ca3af';
       std.appendChild(lnk);
-      std.onclick=function(e){e.stopPropagation();SMOOTH_PREVIEW={pk:parentKey,m:m,protectLeaders:false,vals:computeSmoothAlloc(s,co,ch,m)};reExpand();};
+      std.onclick=function(e){e.stopPropagation();var o={};o[m]=computeSmoothAlloc(s,co,ch,m,{protectLeaders:SMOOTH_LEADER});SMOOTH_PREVIEW={pk:parentKey,fy:null,months:o};reExpand();};
     }
   }
   var eff=subcatSkuEffTotals(s,co,ch); // all-subcat effective totals (incl. discontinued) for gap/subtotal
@@ -6163,11 +6213,36 @@ function insertInlineSkuRows(s,co,ch,afterTr){
     }
     str.appendChild(std);
   }
-  // Time region: per-month gap-vs-subcat (FY total columns left blank)
+  // Time region: per-month gap-vs-subcat; FY-total columns carry the "Smooth All" control + Standard/Leader mode
   TIME_COLS.forEach(function(tc){
     var std=document.createElement('td');
     if(tc.t==='tot'){
-      std.style.cssText='background:#ebebea;border-bottom:2px solid #b0b0ae';
+      std.style.cssText='background:#ebebea;border-bottom:2px solid #b0b0ae;padding:2px 4px;vertical-align:top';
+      var stY=tc.startY;
+      var hasFc=fyMonths(stY).some(function(mm){return !isActualMonth(mm)||mm===CUR_MONTH;});   // only FYs with forecast months
+      if(hasFc){
+        var wrap=document.createElement('div'); wrap.style.cssText='display:flex;flex-direction:column;gap:2px;align-items:stretch';
+        var fyPrev=SMOOTH_PREVIEW&&SMOOTH_PREVIEW.pk===parentKey&&SMOOTH_PREVIEW.fy===stY;
+        if(fyPrev){
+          var lbl=document.createElement('div'); lbl.textContent='review smooth all'; lbl.style.cssText='font-size:7px;font-weight:700;color:#b45309;text-align:center;line-height:1.1';
+          var rb=document.createElement('div'); rb.style.cssText='display:flex;gap:2px;justify-content:center';
+          smoothReviewBar(rb);
+          wrap.appendChild(lbl); wrap.appendChild(rb);
+        } else {
+          var sa=document.createElement('button'); sa.textContent='⤳ Smooth All';
+          sa.title='Preview a smooth of EVERY forecast month in this financial year to the subcategory forecast — review before applying.';
+          sa.style.cssText='font-size:7px;line-height:1.1;padding:2px 4px;border:1px solid #16a34a;border-radius:3px;background:#dcfce7;color:#166534;cursor:pointer;font-weight:700';
+          sa.onclick=function(e){e.stopPropagation();fySmoothAll(stY);};
+          var sel=document.createElement('select'); sel.style.cssText='font-size:7px;padding:0 1px;border:1px solid #cbd5e1;border-radius:3px;background:#fff;cursor:pointer;color:#334155';
+          sel.innerHTML='<option value="std">Standard</option><option value="ldr">Leader</option>';
+          sel.value=SMOOTH_LEADER?'ldr':'std';
+          sel.onchange=function(e){e.stopPropagation();setSmoothMode(sel.value==='ldr');};
+          sel.onclick=function(e){e.stopPropagation();};
+          smoothModeTip(sel);
+          wrap.appendChild(sa); wrap.appendChild(sel);
+        }
+        std.appendChild(wrap);
+      }
     } else {
       var m=tc.m,Y=fyStartOf(m),first=(tc.t==='m'&&m===fyMonths(Y)[0]);
       std.className=fyBg(Y)+(first?' sep2':'');

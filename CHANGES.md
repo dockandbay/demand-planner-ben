@@ -3,6 +3,21 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.186 - Smooth: "Smooth All" per financial year + FY-level Standard/Leader mode
+
+Reworked the DEMAND SKU-smoothing controls:
+- **"⤳ Smooth All" button in each FY-total column** (subcat subtotal row) — previews a smooth of EVERY
+  forecast month in that financial year to the subcategory forecast, with a review step (✓ apply all / ✕
+  discard) shown in the same FY-total cell.
+- **Standard / Leader dropdown** next to it (per FY), with a 120ms hover tooltip explaining the difference
+  (Standard = pure proportional rescale; Leader = protect historically-strong SKUs with tier-aware floors).
+- **The Standard/Leader choice now applies to ALL smoothing in scope, including the per-month smooth** — so
+  the old per-month "☆ leaders" toggle in the month preview is removed.
+- The preview model is now multi-month (SMOOTH_PREVIEW.months) so single-month and whole-FY previews share
+  the same apply/review path. Applied smooths write SKU overrides (auto-saved).
+
+Headless load verified clean (no console errors). No new env vars or migrations.
+
 ## v25.185 - ERP date: materiality threshold, DATES tab counter, date-only modal button
 
 - **Update-ERP modal shows only the relevant button(s):** if only the DATE is out of sync → just "Update Cin7
