@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.160 - Payments Report search: match the full amount (commas + decimals)
+
+The amount search now matches the full base amount whether typed with commas or not, and with the trailing
+decimal — "6,211.20", "6211.20" and "6211.2" all find a 6,211.20 payment (partial digit runs still match too).
+Matches against the run total and each line amount, compared on their 2-dp value.
+
 ## v25.159 - Barcodes: larger, light-blue download-all buttons
 
 The "⤓ All Cartons (+inners)" and "⤓ All Products" download buttons on the Barcodes tab are now larger,
