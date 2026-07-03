@@ -3,6 +3,22 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.169 - ERP deviations: correct cost-trigger signal, ORDER PLAN action badge, wider SKU column
+
+Follow-ups to the ERP-deviation feature:
+
+- **Fixed the cost-trigger signal.** Cost/price drift was wrongly triggering on
+  `purchase_orders.supplier_invoice_total`, which is populated broadly from import (set on 1179/1362 POs) —
+  so POs like PO-55USLX-FBA1 flagged a price deviation with no invoice or portal price ever uploaded. Now
+  cost drift only counts when the supplier has actually given us a price via the portal: line-cost
+  adjustments (`portal_line_costs.actual_cost`/`final_cost`) OR a submitted invoice value
+  (`supplier_submissions` kind=invoice_value, not rejected/superseded). PO-55USLX-FBA1 no longer triggers.
+- **Action badge on the ORDER PLAN sub-tab.** When a PO has ERP deviations, the ORDER PLAN tab now shows a
+  count badge (e.g. "1"), same rule as the banner. Folded into the existing order-plan exception count.
+- **Wider SKU column** in the ERP deviations table (min-width 260px, no wrap) so long SKUs are readable.
+
+No new env vars or migrations.
+
 ## v25.168 - FBA Transfer file: UK/EU SKU alias + box-dimension unit fallback
 
 Two tweaks to the FBA Transfer Upload (.xlsx) on the FBA tab:

@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.168';
+const APP_VERSION = 'v25.169';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1264,14 +1264,16 @@ app.get('/api/supply/:section', async (req, res) => {
             coalesce(starred,false) starred,   -- ⭐ Focus / favourite toggle (migration 082)
             -- ERP sync: drift = planned qty/cost differs from the ERP MIRROR (planner.erp_purchase_order_lines,
             -- fed by n8n). erp_in/erp_total drive the 3-state badge (✓ match / ⚠ drift / ✗ not in ERP).
-            -- Focus: SKU + QUANTITY. Cost/price drift is only flagged once we hold a trusted price to assert
-            -- against the ERP — a final invoice uploaded (supplier_invoice_total set) OR supplier-submitted
-            -- prices in the portal (portal_line_costs.actual_cost). COMPLETE POs are ignored entirely.
+            -- Focus: SKU + QUANTITY. Cost/price drift is only flagged once the supplier has actually given us a
+            -- price via the portal — line-cost adjustments (portal_line_costs.actual_cost/final_cost) OR a
+            -- submitted invoice value (supplier_submissions kind=invoice_value, not rejected/superseded). NOTE:
+            -- purchase_orders.supplier_invoice_total is populated broadly from import, so it is NOT a valid
+            -- signal. COMPLETE POs are ignored entirely.
             (CASE WHEN coalesce(status,'') ILIKE '%complete%' THEN 0 ELSE
               (SELECT count(*) FROM planner.purchase_order_lines l LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
                  WHERE l.po=calc4.po AND ( l.qty IS DISTINCT FROM el.qty
-                   OR ( (calc4.supplier_invoice_total IS NOT NULL
-                          OR EXISTS(SELECT 1 FROM planner.portal_line_costs plc WHERE plc.po=calc4.po AND plc.actual_cost IS NOT NULL))
+                   OR ( (EXISTS(SELECT 1 FROM planner.portal_line_costs plc WHERE plc.po=calc4.po AND (plc.actual_cost IS NOT NULL OR plc.final_cost IS NOT NULL))
+                          OR EXISTS(SELECT 1 FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='invoice_value' AND coalesce(ss.status,'') NOT IN ('rejected','superseded')))
                         AND l.cost_price IS DISTINCT FROM el.cost) )) END)::int erp_pending,
             (SELECT count(*) FROM planner.purchase_order_lines l JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku WHERE l.po=calc4.po)::int erp_in,
             (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=calc4.po)::int erp_total,
@@ -3545,11 +3547,12 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
       pool.query(`SELECT sku, qty FROM planner.crossdock_shipments WHERE po=$1`, [po]).catch(() => ({ rows: [] })),
       // ORDER PLAN: supplier-entered additional cost lines for this PO
       pool.query(`SELECT id, coalesce(description,'') description, qty, price FROM planner.portal_additional_costs WHERE po=$1 ORDER BY id`, [po]).catch(() => ({ rows: [] })),
-      // ERP-deviation gate for THIS PO: is it COMPLETE (→ ignore the check), and do we hold a trusted price
-      // (final invoice uploaded OR supplier-submitted portal prices) that justifies flagging cost drift?
+      // ERP-deviation gate for THIS PO: is it COMPLETE (→ ignore the check), and has the supplier actually
+      // given us a price via the portal — line-cost adjustments OR a submitted invoice value — that justifies
+      // flagging cost drift? (supplier_invoice_total is import-populated, so it is NOT used here.)
       pool.query(`SELECT coalesce(p.status,'') ILIKE '%complete%' AS is_complete,
-                    (p.supplier_invoice_total IS NOT NULL
-                      OR EXISTS(SELECT 1 FROM planner.portal_line_costs plc WHERE plc.po=p.po AND plc.actual_cost IS NOT NULL)) AS cost_check
+                    (EXISTS(SELECT 1 FROM planner.portal_line_costs plc WHERE plc.po=p.po AND (plc.actual_cost IS NOT NULL OR plc.final_cost IS NOT NULL))
+                      OR EXISTS(SELECT 1 FROM planner.supplier_submissions ss WHERE ss.po=p.po AND ss.kind='invoice_value' AND coalesce(ss.status,'') NOT IN ('rejected','superseded'))) AS cost_check
                   FROM planner.purchase_orders p WHERE p.po=$1`, [po]).catch(() => ({ rows: [] })),
     ]);
     const lc = {}; lineCosts.rows.forEach(r => { lc[r.sku] = r; });
