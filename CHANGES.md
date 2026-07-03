@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.177 - Deep-linkable PO detail sub-tabs
+
+PO detail sub-tabs are now addressable in the URL: `#/supply/purchase-orders/<slug>/<PO>`, e.g.
+`#/supply/purchase-orders/payments/PO-56UKLX3-AIR` or `.../dates/PO-56UKLX3-AIR`. Slugs: payments, dates,
+client, order-plan, shipments, master-data, landed, timeline, linked.
+- Inbound: opening such a URL expands the PO and activates that sub-tab.
+- Outbound: expanding a PO or clicking a sub-tab updates the URL to match (so you can copy/share it);
+  collapsing returns to `#/supply/purchase-orders`.
+Existing links still work: `.../purchase-orders/<PO>` (opens on the default tab) and the umbrella sub-tabs
+(`.../deposits`, `.../payreport`, …).
+
 ## v25.176 - DATES table: fixed layout so the alert wraps and the table can't scroll
 
 v25.175's white-space:normal wasn't enough — with table-layout:auto the long alert (plus the wide
