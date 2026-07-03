@@ -3,6 +3,22 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.187 - Pre-launch SKUs now show everywhere (availability view fix, migration 094)
+
+Pre-launch SKUs (flagged available for a market/channel but before their launch date) were hidden from the
+demand planner (and anything using availability), because `v_product_availability` forced is_available=false
+whenever the launch date was in the future. That's wrong — pre-launch SKUs must be visible to plan/buy the
+launch, and the forecast's own launch clamp already zeroes pre-launch months. Fixed the view to drop the two
+pre-launch clauses (retail for DTC/FBA, wholesale for B2B); the discontinue guard stays.
+
+Diagnosed live + sandbox: e.g. PICNIC-DES-LG-BRGTSIDE and TOWLB-SUM-XL-OCEAN (AU, launch 2026-07-31) were
+correctly flagged available but hidden by the launch date. After the view change (applied to sandbox) both
+read is_available=true for AU DTC/FBA.
+
+DEPLOY (Diviyaj): **migration `094_availability_include_prelaunch.sql`** (also
+`diviyaj_deploy_2026-07-03_availability.sql`) — `CREATE OR REPLACE VIEW`, no data change. Applied to sandbox.
+No new env vars.
+
 ## v25.186 - Smooth: "Smooth All" per financial year + FY-level Standard/Leader mode
 
 Reworked the DEMAND SKU-smoothing controls:
