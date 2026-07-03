@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.155';
+const APP_VERSION = 'v25.156';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1782,7 +1782,7 @@ app.get('/api/supply/:section', async (req, res) => {
             FROM planner.purchase_orders
             WHERE landing_date_overide < current_date AND coalesce(status,'') NOT ILIKE '%complete%'
           UNION ALL
-          SELECT 'amber','Unassigned shipment', po, 'Past production with no shipment assigned',
+          SELECT 'low','Unassigned shipment', po, 'Past production with no shipment assigned',
             'shipment','po','shipment_ref', po
             FROM planner.purchase_orders
             WHERE shipment_ref IS NULL AND coalesce(status,'') NOT ILIKE '%complete%'
@@ -1841,7 +1841,7 @@ app.get('/api/supply/:section', async (req, res) => {
             ) x2
             WHERE x2.rem > 0.01 AND x2.open_po = 0
           UNION ALL
-          SELECT 'amber','Partial cartons need approval', l.po,
+          SELECT 'low','Partial cartons need approval', l.po,
             count(*)||' line(s) not a full carton multiple and not yet approved', 'orderplan','','partials', l.po
             FROM planner.v_purchase_order_lines l
             JOIN planner.purchase_orders p ON p.po=l.po
@@ -1849,7 +1849,7 @@ app.get('/api/supply/:section', async (req, res) => {
             GROUP BY l.po
           UNION ALL
           -- supplier hasn't confirmed the order (SKUs / qty / dates) yet — chase confirmation
-          SELECT 'amber','Awaiting supplier confirmation', po,
+          SELECT 'low','Awaiting supplier confirmation', po,
             'Supplier has not yet confirmed this order (SKUs / qty / dates)', '','po','', po
             FROM planner.purchase_orders
             WHERE supplier_confirmed_at IS NULL AND coalesce(supplier_name,'')<>''

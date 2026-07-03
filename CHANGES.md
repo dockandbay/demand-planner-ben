@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.156 - Actions: Unassigned shipment / Partial cartons / Awaiting supplier confirmation → LOW severity
+
+Reclassified these three action types from amber to **low** severity: "Unassigned shipment", "Partial cartons
+need approval", "Awaiting supplier confirmation". Added a **Low** pill to the Actions severity filter (with
+count); low cards get a grey type badge (green left border). They sort after High/Amber.
+
 ## v25.155 - Reports ▸ Slow Moving: clearer filters, two-row layout, defaults
 
 - Selected filter pills are now full black background / white text (clearly distinct from unselected).

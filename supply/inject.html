@@ -540,10 +540,10 @@
       +STAT.map(function(s){return '<span class="pill stpill'+(st.status===s[0]?' active':'')+'" data-st="'+s[0]+'">'+s[1]+' ('+statCount(s[0])+')</span>';}).join('');
       document.querySelectorAll('#act-statbar .stpill').forEach(function(p){p.onclick=function(){st.status=p.dataset.st;st.sev='All';statBar();sevBar();view();};}); }
     function typeLbl(){ return st.types.length?('Type: '+st.types.length):'Type: all'; }
-    function sevBar(){ var pl=pool(), nH=pl.filter(function(r){return r.severity==='high';}).length, nA=pl.filter(function(r){return r.severity==='amber';}).length;
+    function sevBar(){ var pl=pool(), nH=pl.filter(function(r){return r.severity==='high';}).length, nA=pl.filter(function(r){return r.severity==='amber';}).length, nL=pl.filter(function(r){return r.severity==='low';}).length;
       var typeOpts=types.slice().sort();
       document.getElementById('act-sevbar').innerHTML='<span class="pill-lbl">Severity</span><span class="pill spill'+(st.sev==='All'?' active':'')+'" data-s="All">All ('+pl.length+')</span>'
-        +'<span class="pill spill'+(st.sev==='high'?' active':'')+'" data-s="high">High ('+nH+')</span><span class="pill spill'+(st.sev==='amber'?' active':'')+'" data-s="amber">Amber ('+nA+')</span>'
+        +'<span class="pill spill'+(st.sev==='high'?' active':'')+'" data-s="high">High ('+nH+')</span><span class="pill spill'+(st.sev==='amber'?' active':'')+'" data-s="amber">Amber ('+nA+')</span><span class="pill spill'+(st.sev==='low'?' active':'')+'" data-s="low">Low ('+nL+')</span>'
         +'<span class="pill-lbl" style="margin-left:14px">Type</span>'
         +'<span style="position:relative;display:inline-block"><button class="pill'+(st.types.length?' active':'')+'" id="act-typebtn">'+typeLbl()+' ▾</button>'
         +'<div id="act-typepop" style="display:none;position:absolute;z-index:1000;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 30px rgba(15,23,42,.16);padding:6px;min-width:250px;max-height:320px;overflow:auto">'
@@ -601,7 +601,7 @@
           ? '<span class="tool-badge bg-neutral">'+esc(r.status)+(r.snooze_until?' → '+esc(r.snooze_until):'')+'</span><button class="save-btn light act-life" data-id="'+r._id+'" data-st="open">↩ Restore</button>'
           : '<button class="save-btn light act-life" data-id="'+r._id+'" data-st="dismissed">Dismiss</button><button class="save-btn light act-life" data-id="'+r._id+'" data-st="snoozed" data-days="7">Snooze 1wk</button><button class="save-btn light act-life" data-id="'+r._id+'" data-st="snoozed" data-days="30">Snooze 1mo</button>')
         +'</div>'; }
-    return '<div class="card '+esc(r.severity||'low')+'" id="actcard-'+r._id+'"><div class="t">'+refHtml+' <span class="tool-badge '+(r.severity==='high'?'bg-red':'bg-amber')+'">'+esc(r.type)+'</span></div><div class="d">'+esc(r.detail||'')+'</div>'+(fix?'<div style="margin-top:6px">'+fix+'</div>':'')+(fix2?'<div style="margin-top:6px">'+fix2+'</div>':'')+life+'</div>'; }
+    return '<div class="card '+esc(r.severity||'low')+'" id="actcard-'+r._id+'"><div class="t">'+refHtml+' <span class="tool-badge '+(r.severity==='high'?'bg-red':r.severity==='low'?'bg-neutral':'bg-amber')+'">'+esc(r.type)+'</span></div><div class="d">'+esc(r.detail||'')+'</div>'+(fix?'<div style="margin-top:6px">'+fix+'</div>':'')+(fix2?'<div style="margin-top:6px">'+fix2+'</div>':'')+life+'</div>'; }
   function bindLifecycle(statBar,sevBar,view){
     document.querySelectorAll('#act-grid .act-life').forEach(function(b){ b.onclick=function(){
       var id=b.dataset.id, r=actRows[id]; if(!r||!r.key)return; var ns=b.dataset.st; b.disabled=true;
