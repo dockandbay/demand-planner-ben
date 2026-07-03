@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.193 - Favicon + page title (HORIZON)
+
+Added the HORIZON favicon and a page `<title>` (HORIZON — Dock & Bay) to the app `<head>`. The favicon is
+inlined as a 64px data-URI (downscaled from the supplied favicon.png), so it needs no static-file hosting
+and works identically on localhost and Vercel. Also set as apple-touch-icon.
+
 ## v25.192 - ORDER PLAN add-SKU: searchable supplier-scoped SKU picker
 
 The add-SKU inputs in ORDER PLAN edit mode are now a searchable picker (datalist) limited to the PO's
