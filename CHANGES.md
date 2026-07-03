@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.181 - Forecast auto-save is batched (~1 min) with an unload flush
+
+Perf: instead of saving ~1.5s after each edit, edits now batch and commit ~every 60s (schedule-once, so
+continuous editing still saves each minute rather than firing per keystroke). To cover the longer window:
+- tab hidden (visibilitychange) → save immediately while still open;
+- page closing (pagehide) → navigator.sendBeacon flush of both subcat + SKU changes (survives unload;
+  same-origin pk cookie rides along for the auth gate).
+Extracted buildSkuChanges() (shared by saveSkuForecasts + the beacon). Manual Save still commits now.
+
 ## v25.180 - DEMAND planner auto-saves forecasts (no need to click Save)
 
 Forecast edits now persist to Supabase automatically: a debounced auto-save fires ~1.5s after the last

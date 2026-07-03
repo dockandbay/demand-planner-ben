@@ -578,7 +578,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
       <button class="tool-btn" id="insights-btn" title="Get AI insights"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 1 4 12.7c-.7.5-1 1.3-1 2.1V18H9v-1.2c0-.8-.3-1.6-1-2.1A7 7 0 0 1 12 2z"/></svg>AI Insights</button>
       <span class="tool-divider"></span>
       <button class="tool-btn" id="rf" title="Refresh data"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>Refresh</button>
-      <button class="tool-btn primary" id="sv" title="Auto-saves to Supabase ~1.5s after each edit — click to save immediately"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Save Forecasts</button>
+      <button class="tool-btn primary" id="sv" title="Auto-saves to Supabase (batched ~every minute, and on leaving the page) — click to save immediately"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Save Forecasts</button>
     </div>
     <div class="tool-bar" id="buy-tools" role="group" aria-label="Buy plan tools" style="display:none"></div>
     <button class="tool-btn" id="help-btn" title="What to do &amp; when" onclick="openHelp()" style="margin-left:6px;border:1px solid #e0e0e0;border-radius:6px;height:26px;padding:0 9px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>Help</button>
@@ -8099,17 +8099,8 @@ function buildSavePayload(){
 // Surgical: only the months actually edited (tracked in FC_DIRTY) are written; untouched
 // months on the row are never overwritten. Deleted cell -> 0 (matches the old behaviour).
 async function saveSkuForecasts(btn){
-  var dirtyKeys=Object.keys(FC_DIRTY);
-  if(!dirtyKeys.length)return 0;
-  var changes=[];
-  dirtyKeys.forEach(function(k){
-    var parts=k.split('|');if(parts.length<3)return;
-    var sku=parts[0],wh=parts[1],ch=parts[2];
-    var months=FC_DIRTY[k]||{};var mo=FC_OUTPUTS[k]||{};
-    Object.keys(months).forEach(function(ym){
-      changes.push({sku:sku,warehouse:wh,channel:ch,month:ym,units:Math.round(mo[ym]!=null?mo[ym]:0)});
-    });
-  });
+  if(!Object.keys(FC_DIRTY).length)return 0;
+  var changes=buildSkuChanges();
   if(!changes.length){FC_DIRTY={};return 0;}
   if(btn)btn.textContent='Saving SKUs...';
   var resp=await fetch('/api/save-sku-forecasts',{
@@ -8142,11 +8133,25 @@ function buildInputChanges(){
 
 // Save edited subcat forecasts to Supabase (planner.forecast_inputs) via the rehost server.
 // Replaces the old Anthropic-API + Airtable-MCP round-trip - the app is now the source of truth.
-// Auto-persist: debounce a save ~1.5s after the last forecast edit so changes commit to Supabase
-// automatically (no need to click Save Forecasts). Manual Save still works; concurrent saves are guarded.
-var _autoSaveTimer=null, _saving=false;
-function scheduleAutoSave(){ clearTimeout(_autoSaveTimer); _autoSaveTimer=setTimeout(function(){ if(_dirty){ if(_saving) scheduleAutoSave(); else saveForecasts(); } },1500); }
+// Auto-persist: BATCH edits and commit to Supabase ~every 60s (schedule-once, so continuous editing still
+// saves each minute rather than one request per keystroke). A flush on tab-hide / page-close (below) covers
+// the window so nothing is lost. Manual Save still commits immediately; concurrent saves are guarded.
+var _autoSaveTimer=null, _saving=false, AUTOSAVE_MS=60000;
+function scheduleAutoSave(){ if(_autoSaveTimer)return;   // one save already scheduled — this edit batches into it
+  _autoSaveTimer=setTimeout(function(){ _autoSaveTimer=null; if(_dirty){ if(_saving) scheduleAutoSave(); else saveForecasts(); } },AUTOSAVE_MS); }
 function markDirty(){ _dirty=true; scheduleAutoSave(); }   // SKU-level edits (FC_DIRTY) call this — sets _dirty + auto-saves
+// Build the SKU-level (FC_OUTPUTS) change list — shared by saveSkuForecasts + the unload beacon flush.
+function buildSkuChanges(){ var changes=[]; Object.keys(FC_DIRTY).forEach(function(k){ var parts=k.split('|'); if(parts.length<3)return;
+    var sku=parts[0],wh=parts[1],ch=parts[2], months=FC_DIRTY[k]||{}, mo=FC_OUTPUTS[k]||{};
+    Object.keys(months).forEach(function(ym){ changes.push({sku:sku,warehouse:wh,channel:ch,month:ym,units:Math.round(mo[ym]!=null?mo[ym]:0)}); }); });
+  return changes; }
+// Reliable flush when the tab is closing: sendBeacon survives unload (a normal fetch may be cancelled).
+// Same-origin cookie (pk) rides along so it passes the auth gate in production.
+function flushSaveBeacon(){ if(!_dirty||!navigator.sendBeacon)return;
+  try{ var sc=buildInputChanges(); if(sc.length)navigator.sendBeacon('/api/save-forecasts',new Blob([JSON.stringify({changes:sc,who:'autosave-flush'})],{type:'application/json'}));
+       var kc=buildSkuChanges(); if(kc.length)navigator.sendBeacon('/api/save-sku-forecasts',new Blob([JSON.stringify({changes:kc,who:'autosave-flush'})],{type:'application/json'})); }catch(e){} }
+document.addEventListener('visibilitychange',function(){ if(document.hidden && _dirty && !_saving) saveForecasts(); });   // tab hidden → save now (still open, fetch completes)
+window.addEventListener('pagehide',flushSaveBeacon);   // page closing → beacon (best-effort, survives unload)
 async function saveForecasts(){
   if(_saving)return;                 // a save is already running — the scheduler re-fires if still dirty
   if(!_dirty){st('No changes to save');return;}
