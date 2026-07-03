@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.189 - STOCK column: next-inbound date + hover list of all inbound
+
+The DEMAND sticky STOCK column showed on-hand / >>inbound-qty. Now under the inbound quantity it also shows
+the **next inbound arrival date** (↙ earliest ETA), and a **120ms hover** lists every inbound shipment for
+that row (date · qty · SKU), capped at 14 with a "+N more". Added everywhere the stock cell renders:
+subcategory row, individual SKU rows, subcat subtotal, category rollup, and the grand total (aggregated
+across the group's SKUs, sorted by ETA). Data comes from the existing SKUI inbound map (SKU|warehouse);
+one delegated tooltip handles the hover. Headless load verified clean.
+
 ## v25.188 - DEMAND category dropdown closes on click-away
 
 The DEMAND "Category" dropdown (#cat-pop) stayed open when clicking elsewhere. Added a one-time

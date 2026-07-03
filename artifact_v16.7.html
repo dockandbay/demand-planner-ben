@@ -4433,7 +4433,7 @@ function buildDataRow(s,co,ch,x,fu_cache){
   // col1: sticky stock (OH / inbound) at the channel warehouse
   var stk=stockFor(s,co,ch);
   var stkTd=document.createElement('td');stkTd.className='stk2';
-  stkTd.innerHTML=stockCellHTML(stk.oh,stk.inb);
+  stkTd.innerHTML=stockCellHTML(stk.oh,stk.inb,inbEntries(_skuSetForSubcat(s,co,ch),co,ch));
   tr.appendChild(stkTd);
 
   // Stacked actuals: each year/period is one column (Units / Revenue / YoY%)
@@ -4581,12 +4581,41 @@ function stockFor(s,co,ch){
   });
   return {oh:oh,inb:inb};
 }
-// Two-line OH / +inbound cell HTML for the sticky stock column.
-function stockCellHTML(oh,inb){
+// Two-line OH / +inbound cell HTML for the sticky stock column (+ next-inbound date & hover list).
+function stockCellHTML(oh,inb,entries){
   return '<div style="padding:2px 5px;text-align:right;font-size:9px;line-height:1.25;font-variant-numeric:tabular-nums">'
     +'<div style="color:#334155;font-weight:600">'+fn(oh)+'</div>'
-    +'<div style="color:#94a3b8">&gt;&gt;'+fn(inb)+'</div></div>';
+    +inbDiv(inb,entries,'#94a3b8')+'</div>';
 }
+// --- Inbound detail for the STOCK column: next-arrival date under the >>inbound number + a 120ms hover
+// listing every inbound shipment. Data comes from SKUI ("SKU|warehouse" -> [{ref,qty,eta,type}]). ---
+function _skuSetForSubcat(s,co,ch){ var ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':'b', out=[];
+  Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p||p.s!==s)return; var av=(p.av||{})[ctry]||''; if(av.indexOf(chKey)>=0)out.push(sku); }); return out; }
+function inbEntries(skuList,co,ch){ var wh=skuWh(co,ch), out=[];
+  (skuList||[]).forEach(function(sku){ var v=SKUI[sku+'|'+wh]; if(!v)return; (Array.isArray(v)?v:[v]).forEach(function(x){ if((x.qty||0)>0) out.push({eta:x.eta||null, qty:x.qty||0, sku:sku}); }); });
+  out.sort(function(a,b){ return String(a.eta||'9999-99-99').localeCompare(String(b.eta||'9999-99-99')); }); return out; }
+function _etaShort(d){ if(!d)return 'TBC'; var p=String(d).split('-'); if(p.length<3)return String(d);
+  var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return (+p[2])+' '+(mn[(+p[1])-1]||'')+" '"+p[0].slice(2); }
+// The ">>inbound" div, with a next-arrival sub-line + hover tooltip (data-tip) listing all shipments.
+function inbDiv(inb, entries, color){
+  var base='color:'+(color||'#94a3b8');
+  if(!entries||!entries.length) return '<div style="'+base+'">&gt;&gt;'+fn(inb)+'</div>';
+  var CAP=14, shown=entries.slice(0,CAP);
+  var tip=entries.length+' inbound shipment'+(entries.length>1?'s':'')+':<br>'
+    + shown.map(function(x){ return _etaShort(x.eta)+' &middot; '+fn(x.qty)+(x.sku?(' &middot; '+x.sku):''); }).join('<br>')
+    + (entries.length>CAP?('<br>+ '+(entries.length-CAP)+' more'):'');
+  var next=entries[0].eta;
+  return '<div class="stk-inb" data-tip="'+tip.replace(/"/g,'&quot;')+'" style="'+base+';cursor:default">&gt;&gt;'+fn(inb)
+    +'<span style="display:block;font-size:8px;opacity:.9">&#8601; '+(next?_etaShort(next):'TBC')+'</span></div>';
+}
+// One delegated 120ms hover tooltip for any .stk-inb[data-tip] (bound once).
+(function(){ var el=null,t=null;
+  function hide(){ if(el)el.style.display='none'; }
+  document.addEventListener('mouseover',function(e){ var n=e.target&&e.target.closest?e.target.closest('.stk-inb[data-tip]'):null; if(!n)return;
+    clearTimeout(t); t=setTimeout(function(){ if(!el){el=document.createElement('div'); el.style.cssText='position:fixed;z-index:100001;max-width:260px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:7px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none'; document.body.appendChild(el);} el.innerHTML=n.getAttribute('data-tip'); el.style.display='block'; var r=n.getBoundingClientRect(); el.style.left=Math.max(6,Math.min(r.left,window.innerWidth-266))+'px'; el.style.top=(r.bottom+5)+'px'; },120); });
+  document.addEventListener('mouseout',function(e){ var n=e.target&&e.target.closest?e.target.closest('.stk-inb[data-tip]'):null; if(n){clearTimeout(t); hide();} });
+  document.addEventListener('scroll',hide,true);
+})();
 
 // Compute SKU forecast for a given month using subcat growth assumption
 // SKU share = SKU's LY contribution to subcat LY total
@@ -5711,7 +5740,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         var sOh=p.inv&&p.inv[wh]||0, sOo=p.oo&&p.oo[wh]||0;
         td.style.cssText='position:sticky;left:160px;background:#fafafa;border-bottom:1px solid #f0f0ee;border-right:2px solid #b0b0ae;padding:2px 5px;text-align:right;font-size:9px;line-height:1.25;font-variant-numeric:tabular-nums;z-index:1';
         td.innerHTML='<div style="color:'+(sOh<0?'#dc2626':'#334155')+';font-weight:600">'+fn(sOh)+'</div>'
-          +'<div style="color:#94a3b8">&gt;&gt;'+fn(sOo)+'</div>';
+          +inbDiv(sOo, inbEntries([sku],co,ch), '#94a3b8');
 
       } else if(ci===2){
         // Fiscal FY (two back), units only — no revenue at SKU level
@@ -6207,7 +6236,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       // Sticky stock total (OH / inbound) for the subcategory
       var stkSub=stockFor(s,co,ch);
       std.style.cssText='position:sticky;left:160px;z-index:1;background:#ebebea;border-right:2px solid #b0b0ae;border-bottom:2px solid #b0b0ae;padding:2px 5px;text-align:right;font-size:9px;font-weight:700;line-height:1.25;font-variant-numeric:tabular-nums';
-      std.innerHTML='<div style="color:#334155">'+fn(stkSub.oh)+'</div><div style="color:#94a3b8;font-weight:600">&gt;&gt;'+fn(stkSub.inb)+'</div>';
+      std.innerHTML='<div style="color:#334155">'+fn(stkSub.oh)+'</div>'+inbDiv(stkSub.inb, inbEntries(_skuSetForSubcat(s,co,ch),co,ch), '#94a3b8');
     } else {
       std.style.cssText='background:#ebebea;border-bottom:2px solid #b0b0ae';
     }
@@ -6317,10 +6346,11 @@ function buildBody(){
         +(y?'<div style="font-size:8px;font-weight:600;color:#fff">'+y+'</div>':'')+'</div>',cls);
     }
     // col1: sticky stock total across all categories in scope
-    var allOH=0,allIN=0;DATA.forEach(function(r){if(r.co!==CUR)return;if(CF&&r.ch!==CF)return;var st=stockFor(r.s,CUR,r.ch);allOH+=st.oh;allIN+=st.inb;});
+    var allOH=0,allIN=0,gEnt=[];DATA.forEach(function(r){if(r.co!==CUR)return;if(CF&&r.ch!==CF)return;var st=stockFor(r.s,CUR,r.ch);allOH+=st.oh;allIN+=st.inb;gEnt=gEnt.concat(inbEntries(_skuSetForSubcat(r.s,CUR,r.ch),CUR,r.ch));});
+    gEnt.sort(function(a,b){return String(a.eta||'9999-99-99').localeCompare(String(b.eta||'9999-99-99'));});
     var gstk=document.createElement('td');gstk.className='stk2';
     gstk.style.cssText='position:sticky;left:160px;z-index:1;background:#1a1a1a;border-right:2px solid #b0b0ae;padding:2px 5px;text-align:right;font-size:9px;line-height:1.25;font-variant-numeric:tabular-nums;color:#fff';
-    gstk.innerHTML='<div style="font-weight:700">'+fn(allOH)+'</div><div style="color:#93c5fd">&gt;&gt;'+fn(allIN)+'</div>';
+    gstk.innerHTML='<div style="font-weight:700">'+fn(allOH)+'</div>'+inbDiv(allIN, gEnt, '#93c5fd');
     gtr.appendChild(gstk);
     gtStack(fn(gt24u),fr(gt24r),'','sep2');
     gtStack(fn(gt25u),fr(gt25r),fp(gt25u,gt24u),'sep2');
@@ -6405,10 +6435,11 @@ function buildBody(){
         +(y?'<div class="'+fpc(y)+'" style="font-size:8px;font-weight:600">'+y+'</div>':'')+'</div>',cls);
     }
     // col1: sticky stock total for this category
-    var catOH=0,catIN=0;allR.forEach(function(r){var st=stockFor(r.s,CUR,r.ch);catOH+=st.oh;catIN+=st.inb;});
+    var catOH=0,catIN=0,cEnt=[];allR.forEach(function(r){var st=stockFor(r.s,CUR,r.ch);catOH+=st.oh;catIN+=st.inb;cEnt=cEnt.concat(inbEntries(_skuSetForSubcat(r.s,CUR,r.ch),CUR,r.ch));});
+    cEnt.sort(function(a,b){return String(a.eta||'9999-99-99').localeCompare(String(b.eta||'9999-99-99'));});
     var cstk=document.createElement('td');cstk.className='stk2';
     cstk.style.cssText='position:sticky;left:160px;z-index:1;background:#eaeae8;border-right:2px solid #b0b0ae;padding:2px 5px;text-align:right;font-size:9px;line-height:1.25;font-variant-numeric:tabular-nums';
-    cstk.innerHTML='<div style="color:#334155;font-weight:600">'+fn(catOH)+'</div><div style="color:#94a3b8">&gt;&gt;'+fn(catIN)+'</div>';
+    cstk.innerHTML='<div style="color:#334155;font-weight:600">'+fn(catOH)+'</div>'+inbDiv(catIN, cEnt, '#94a3b8');
     totr.appendChild(cstk);
     tStack(fn(c24u),fr(c24r),'','sep2');
     tStack(fn(c25u),fr(c25r),fp(c25u,c24u),'sep2');
