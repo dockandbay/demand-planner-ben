@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.176 - DATES table: fixed layout so the alert wraps and the table can't scroll
+
+v25.175's white-space:normal wasn't enough — with table-layout:auto the long alert (plus the wide
+"Supplier production status…" label) could still push the table past its wrapper. Switched the DATES table
+to `table-layout:fixed` via a `dates-tbl` class (Milestone 190px / Date 130px / Source = rest) and made all
+its cells wrap (white-space:normal;word-break:break-word). The table is now pinned to its wrapper width, so
+the production-status alert wraps onto multiple lines and there is no horizontal scroll.
+
 ## v25.175 - DATES table: production-status alert wraps (no horizontal scroll)
 
 The long production-status alert in the DATES-tab Source column forced the table wider than its wrapper, so
