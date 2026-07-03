@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.182 - Remove DEMAND Save/Refresh buttons; ERP delivery-date banner on DATES tab
+
+- **Removed the "Save Forecasts" and "Refresh" toolbar buttons** in DEMAND (auto-save now handles
+  persistence; the Refresh button was an obsolete "ask Claude" note). All JS references to #sv/#rf are
+  null-guarded so nothing breaks with the buttons gone.
+- **ERP delivery-date banner on the DATES sub-tab:** when our completed-at-warehouse date differs from the
+  ERP's final delivery date (erp_date_pending, non-complete POs), a light-yellow banner shows "ERP final
+  delivery <date> → completed-at-warehouse <date>" with a light-red "⬆ Update ERP" button (same look as the
+  ORDER PLAN ERP-deviations box; opens the same ERP-push modal).
+
+No new env vars or migrations.
+
 ## v25.181 - Forecast auto-save is batched (~1 min) with an unload flush
 
 Perf: instead of saving ~1.5s after each edit, edits now batch and commit ~every 60s (schedule-once, so
