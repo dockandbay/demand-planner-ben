@@ -2984,15 +2984,20 @@
           var rws=Array.from(new Set(all.map(function(r){return r.release_window;}).filter(Boolean))).sort();
           b.innerHTML='<div class="sect-h">Products <span class="mut tiny">(full <code>products</code> master, all fields — read-only; SKU column stays in view when scrolling)</span></div>'
             +'<div class="bar"><span class="pill-lbl">SKU</span><input id="prod-q" class="flt" placeholder="filter SKU(s) — space/comma separated…" style="width:240px">'
+            +'<span class="pill-lbl">Columns</span><input id="prod-cols" class="flt" placeholder="filter columns — comma separated (e.g. carton, weight)…" style="width:260px">'
             +'<span class="pill-lbl">Release window</span><select id="prod-rw" class="flt" style="width:auto"><option value="">All</option>'+rws.map(function(w){return '<option>'+esc(w)+'</option>';}).join('')+'</select>'
             +'<span class="count" id="prod-count" style="margin-left:auto"></span></div><div id="prod-tbl"></div>';
           function draw(){ var raw=(document.getElementById('prod-q').value||'').toLowerCase().trim();
             var toks=raw?raw.split(/[\s,]+/).filter(Boolean):[]; var rw=document.getElementById('prod-rw').value;
+            // column filter: comma-separated substrings; keep any column whose header matches. SKU (col 0) always kept.
+            var colRaw=(document.getElementById('prod-cols').value||'').toLowerCase().trim();
+            var colToks=colRaw?colRaw.split(',').map(function(s){return s.trim();}).filter(Boolean):[];
+            var shownCols=colToks.length?cols.filter(function(c,i){ return i===0 || colToks.some(function(t){return String(c).toLowerCase().indexOf(t)>=0;}); }):cols;
             var rows=all.filter(function(r){ var sk=String(r.sku||'').toLowerCase();
               return (!toks.length||toks.some(function(t){return sk.indexOf(t)>=0;}))&&(!rw||r.release_window===rw); });
-            document.getElementById('prod-tbl').innerHTML=productsTable(cols,rows);
-            document.getElementById('prod-count').textContent=rows.length+' / '+all.length+' products · '+cols.length+' fields'; }
-          document.getElementById('prod-q').oninput=draw; document.getElementById('prod-rw').onchange=draw; draw();
+            document.getElementById('prod-tbl').innerHTML=productsTable(shownCols,rows);
+            document.getElementById('prod-count').textContent=rows.length+' / '+all.length+' products · '+shownCols.length+(colToks.length?' / '+cols.length:'')+' fields'; }
+          document.getElementById('prod-q').oninput=draw; document.getElementById('prod-cols').oninput=draw; document.getElementById('prod-rw').onchange=draw; draw();
         }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); }
     }
     showSub();

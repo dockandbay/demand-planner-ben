@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.171';
+const APP_VERSION = 'v25.172';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -309,13 +309,16 @@ async function buildPROD_CONST() {
 
 // FBA carton dims for the FBA Transfer Upload (box L/W/H/weight per region) + units-per-box.
 async function buildFBADIMS() {
+  // Carton dims/weights for the FBA Transfer download. Source = planner.products (live-updated from Airtable
+  // SKU_CHILD via n8n) — the source of truth. Order per unit: [length, width, height, weight]. cm / kg.
   const { rows } = await pool.query(`SELECT sku, carton_qty cp,
-    uk_carton_l,uk_carton_w,uk_carton_h,uk_carton_wt, us_carton_l,us_carton_w,us_carton_h,us_carton_wt
-    FROM planner.sku_labels WHERE coalesce(uk_carton_l, us_carton_l) IS NOT NULL`);
+    uk_carton_length,uk_carton_width,uk_carton_height,uk_carton_weight,
+    us_carton_length,us_carton_width,us_carton_height,us_carton_weight
+    FROM planner.products WHERE coalesce(uk_carton_length, us_carton_length) IS NOT NULL`);
   const o = {};
   for (const r of rows) o[r.sku] = { cp: r.cp,
-    u: [r.uk_carton_l, r.uk_carton_w, r.uk_carton_h, r.uk_carton_wt],
-    s: [r.us_carton_l, r.us_carton_w, r.us_carton_h, r.us_carton_wt] };
+    u: [r.uk_carton_length, r.uk_carton_width, r.uk_carton_height, r.uk_carton_weight],
+    s: [r.us_carton_length, r.us_carton_width, r.us_carton_height, r.us_carton_weight] };
   return o;
 }
 

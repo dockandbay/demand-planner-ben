@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.172 - FBA download reads carton dims from planner.products; products report column filter
+
+- **FBA Transfer download now sources carton dims/weights from `planner.products`** (the new
+  `*_carton_length/width/height/weight` fields, live-updated from Airtable) instead of `sku_labels`.
+  `sku_labels` was an unclear source of truth; `products` is the live master. Units unchanged (cm / kg).
+- **CONFIG ▸ Products report:** added a **Columns** filter — comma-separated substrings; only column headers
+  matching any token are shown (SKU column always kept). Count shows shown/total fields.
+
+No new env vars or migrations.
+
 ## v25.171 - Product/pack/carton dimension fields on planner.products (migration 093)
 
 Added 22 numeric dimension/weight columns to `planner.products` (keyed by sku), sourced from the Airtable
