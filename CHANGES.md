@@ -3,6 +3,26 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.167 - ERP-sync deviations: qty-focused, cost only with a trusted price, ignore COMPLETE
+
+Reworked the plan-vs-ERP comparison (order-plan panel banner + PO grid "ERP Sync" column + the
+"pending ERP push" alert) so it stops nagging about price noise:
+
+- **Focus is SKU + QUANTITY.** A line is flagged when its planned qty differs from the ERP (a SKU not
+  in the ERP still shows as a qty deviation → "not in ERP").
+- **Cost/price drift is only flagged when we hold a trusted price to assert:** a final invoice has been
+  uploaded (`supplier_invoice_total` set) OR the supplier submitted prices via the portal
+  (`portal_line_costs.actual_cost`). Until then the Cost column is hidden and cost differences don't count.
+- **COMPLETE POs are ignored entirely** — no banner, no grid badge, no alert.
+- Applied consistently to: grid `erp_pending` count, the per-PO ORDER PLAN deviations banner, and the
+  DEMAND/BI "Order-plan change pending ERP push" alert.
+
+Visuals on the deviations banner: **outline is now light yellow** (exception look) and the button is
+**light red** ("⬆ Upload to ERP"), replacing the previous light blue.
+
+po-detail now returns `qty_pending`/`cost_pending` per line plus PO-level `erp_complete`/`erp_cost_check`.
+No new env vars or migrations.
+
 ## v25.166 - FBA Transfer Upload now outputs a valid Amazon .xlsx; barcode label tweak
 
 Two changes:

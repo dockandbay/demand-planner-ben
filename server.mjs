@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.166';
+const APP_VERSION = 'v25.167';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1264,8 +1264,15 @@ app.get('/api/supply/:section', async (req, res) => {
             coalesce(starred,false) starred,   -- ⭐ Focus / favourite toggle (migration 082)
             -- ERP sync: drift = planned qty/cost differs from the ERP MIRROR (planner.erp_purchase_order_lines,
             -- fed by n8n). erp_in/erp_total drive the 3-state badge (✓ match / ⚠ drift / ✗ not in ERP).
-            (SELECT count(*) FROM planner.purchase_order_lines l LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
-               WHERE l.po=calc4.po AND (l.qty IS DISTINCT FROM el.qty OR l.cost_price IS DISTINCT FROM el.cost))::int erp_pending,
+            -- Focus: SKU + QUANTITY. Cost/price drift is only flagged once we hold a trusted price to assert
+            -- against the ERP — a final invoice uploaded (supplier_invoice_total set) OR supplier-submitted
+            -- prices in the portal (portal_line_costs.actual_cost). COMPLETE POs are ignored entirely.
+            (CASE WHEN coalesce(status,'') ILIKE '%complete%' THEN 0 ELSE
+              (SELECT count(*) FROM planner.purchase_order_lines l LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
+                 WHERE l.po=calc4.po AND ( l.qty IS DISTINCT FROM el.qty
+                   OR ( (calc4.supplier_invoice_total IS NOT NULL
+                          OR EXISTS(SELECT 1 FROM planner.portal_line_costs plc WHERE plc.po=calc4.po AND plc.actual_cost IS NOT NULL))
+                        AND l.cost_price IS DISTINCT FROM el.cost) )) END)::int erp_pending,
             (SELECT count(*) FROM planner.purchase_order_lines l JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku WHERE l.po=calc4.po)::int erp_in,
             (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=calc4.po)::int erp_total,
             -- ERP date misalignment: our calculated "completed at warehouse" date (eff_checkin) vs the
@@ -1929,7 +1936,8 @@ app.get('/api/supply/:section', async (req, res) => {
           SELECT 'amber','Order-plan change pending ERP push', l.po,
             count(*)||' line(s) edited, not yet uploaded to the ERP', 'upload','po','', l.po
             FROM planner.purchase_order_lines l LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
-            WHERE l.qty IS DISTINCT FROM el.qty
+            JOIN planner.purchase_orders p ON p.po=l.po AND coalesce(p.status,'') NOT ILIKE '%complete%'  -- ignore COMPLETE POs
+            WHERE l.qty IS DISTINCT FROM el.qty  -- focus: SKU + QUANTITY (cost drift handled in the PO order-plan panel)
             GROUP BY l.po HAVING count(*) FILTER (WHERE el.qty IS NOT NULL)>0  -- has ≥1 line in the ERP mirror (else "not in ERP" below)
           UNION ALL
           SELECT 'high','PO not in ERP', l.po,
@@ -3488,10 +3496,11 @@ app.post('/api/supply/po-bulk', async (req, res) => {
 app.get('/api/supply/po-detail/:po', async (req, res) => {
   const po = req.params.po;
   try {
-    const [lines, deposit, payments, flexport, supInv, supDocs, notes, subs, lineCosts, supComp, xdShip, addCosts] = await Promise.all([
+    const [lines, deposit, payments, flexport, supInv, supDocs, notes, subs, lineCosts, supComp, xdShip, addCosts, poMeta] = await Promise.all([
       pool.query(`SELECT l.sku,l.qty,l.carton_qty,l.full_carton_check,l.cost_price,
                     el.qty erp_qty, el.cost erp_cost,
-                    (l.qty IS DISTINCT FROM el.qty OR l.cost_price IS DISTINCT FROM el.cost) pending
+                    (l.qty IS DISTINCT FROM el.qty) qty_pending,
+                    (l.cost_price IS DISTINCT FROM el.cost) cost_pending
                   FROM planner.v_purchase_order_lines l
                   LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
                   WHERE l.po=$1 ORDER BY l.sku`, [po]),
@@ -3536,6 +3545,12 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
       pool.query(`SELECT sku, qty FROM planner.crossdock_shipments WHERE po=$1`, [po]).catch(() => ({ rows: [] })),
       // ORDER PLAN: supplier-entered additional cost lines for this PO
       pool.query(`SELECT id, coalesce(description,'') description, qty, price FROM planner.portal_additional_costs WHERE po=$1 ORDER BY id`, [po]).catch(() => ({ rows: [] })),
+      // ERP-deviation gate for THIS PO: is it COMPLETE (→ ignore the check), and do we hold a trusted price
+      // (final invoice uploaded OR supplier-submitted portal prices) that justifies flagging cost drift?
+      pool.query(`SELECT coalesce(p.status,'') ILIKE '%complete%' AS is_complete,
+                    (p.supplier_invoice_total IS NOT NULL
+                      OR EXISTS(SELECT 1 FROM planner.portal_line_costs plc WHERE plc.po=p.po AND plc.actual_cost IS NOT NULL)) AS cost_check
+                  FROM planner.purchase_orders p WHERE p.po=$1`, [po]).catch(() => ({ rows: [] })),
     ]);
     const lc = {}; lineCosts.rows.forEach(r => { lc[r.sku] = r; });
     res.json({ lines: lines.rows, deposit: deposit.rows, payments: payments.rows, flexport: flexport.rows,
@@ -3543,7 +3558,9 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
       sup_docs: supDocs.rows.filter(x => x.category !== 'client'),
       client_docs: supDocs.rows.filter(x => x.category === 'client'),
       notes: notes.rows, subs: subs.rows, line_costs: lc,
-      sup_completion: supComp.rows[0] || null, crossdock_shipped: xdShip.rows, additional_costs: addCosts.rows });
+      sup_completion: supComp.rows[0] || null, crossdock_shipped: xdShip.rows, additional_costs: addCosts.rows,
+      erp_complete: !!(poMeta.rows[0] && poMeta.rows[0].is_complete),
+      erp_cost_check: !!(poMeta.rows[0] && poMeta.rows[0].cost_check) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // SHIPS-WITH master label fields for one PO. source supplier + production ref = this PO; ships-with supplier + PO
