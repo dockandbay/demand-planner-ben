@@ -3,6 +3,22 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.168 - FBA Transfer file: UK/EU SKU alias + box-dimension unit fallback
+
+Two tweaks to the FBA Transfer Upload (.xlsx) on the FBA tab:
+
+- **UK/EU merchant-SKU alias.** For CUR = UK or EU only, `BAGF-CAB-MD-NAVY` is written as
+  `BAGF-CAB-MD-NAVY.` (trailing dot) to match how Amazon UK/EU has it registered. Implemented as an
+  extensible map (`FBA_SKU_ALIAS_EUUK`) so more SKUs can be added later.
+- **Box dimensions now fill from either unit.** Dims come from `planner.sku_labels` carton fields
+  (`uk_carton_*` metric / `us_carton_*` imperial) — NOT the products table. When the region-native set is
+  missing, the file now converts from the other unit (in↔cm ×2.54, lb↔kg ×0.453592). The carton is one
+  physical box, so the conversion is exact. Previously ~92 of 907 FBA SKUs had only US carton dims filled,
+  so a metric UK file left Box L/W/H/weight blank; now they populate whenever any carton size is on file.
+
+No new env vars or migrations. NOTE: dims are only as good as the carton data in sku_labels — SKUs with
+no carton dims at all still export blank (fill them in the PIM / sku_labels).
+
 ## v25.167 - ERP-sync deviations: qty-focused, cost only with a trusted price, ignore COMPLETE
 
 Reworked the plan-vs-ERP comparison (order-plan panel banner + PO grid "ERP Sync" column + the

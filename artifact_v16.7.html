@@ -1785,9 +1785,14 @@ function buildXlsx(sheetName, grid){ var enc=new TextEncoder();
 // template"). UK/EU/AU = metric (cm/kg) + Default prep/labeling rows; US/CA = imperial (in/lb). Columns:
 // Merchant SKU, Quantity, Expiration date, Manufacturing lot code, Units/box, #boxes, box L/W/H, weight.
 // Box dims + units/box from window.FBA_DIMS (carton dims per region) injected by the server.
+// Amazon UK/EU has some SKUs registered under a slightly different merchant SKU (e.g. a trailing dot).
+// Map the D&B SKU → the Amazon UK/EU merchant SKU here; applied only for CUR UK/EU in the manifest.
+var FBA_SKU_ALIAS_EUUK={'BAGF-CAB-MD-NAVY':'BAGF-CAB-MD-NAVY.'};
 function downloadFbaTransfer(){
-  var us=(CUR==='US'||CUR==='CA');
+  var us=(CUR==='US'||CUR==='CA'), euuk=(CUR==='UK'||CUR==='EU');
   var DIMS=(typeof window!=='undefined'&&window.FBA_DIMS)||{};
+  var n=function(x){return (x==null||x==='')?null:Number(x);};
+  var r1=function(x){return Math.round(x*10)/10;}, r2=function(x){return Math.round(x*100)/100;};
   var rows=[];
   Object.keys(FBA_TICK).forEach(function(k){
     if(!FBA_TICK[k])return;
@@ -1797,9 +1802,16 @@ function downloadFbaTransfer(){
     var d=DIMS[sku]||{};
     var cp=(PD[sku]&&PD[sku].cp)||d.cp||0;
     var box=cp>0?Math.ceil(qty/cp):'';
-    var dd=(us?d.s:d.u)||[null,null,null,null];
-    var cl=function(x){return x==null?'':x;};
-    rows.push([sku,qty,'','',cp||'',box,cl(dd[0]),cl(dd[1]),cl(dd[2]),cl(dd[3])]);
+    // Box dims from sku_labels carton fields (uk_carton_* metric / us_carton_* imperial). If the region-native
+    // set is missing, convert the other unit (in↔cm ×2.54, lb↔kg ×0.453592) so the file still carries sizes
+    // whenever ANY carton size is on file — the carton is one physical box, so the conversion is exact.
+    var u=d.u||[], s=d.s||[];
+    var uL=n(u[0]),uW=n(u[1]),uH=n(u[2]),uWt=n(u[3]), sL=n(s[0]),sW=n(s[1]),sH=n(s[2]),sWt=n(s[3]);
+    var L,W,H,Wt;
+    if(us){ L=sL!=null?sL:(uL!=null?r1(uL/2.54):''); W=sW!=null?sW:(uW!=null?r1(uW/2.54):''); H=sH!=null?sH:(uH!=null?r1(uH/2.54):''); Wt=sWt!=null?sWt:(uWt!=null?r2(uWt/0.453592):''); }
+    else   { L=uL!=null?uL:(sL!=null?r1(sL*2.54):''); W=uW!=null?uW:(sW!=null?r1(sW*2.54):''); H=uH!=null?uH:(sH!=null?r1(sH*2.54):''); Wt=uWt!=null?uWt:(sWt!=null?r2(sWt*0.453592):''); }
+    var outSku=(euuk&&FBA_SKU_ALIAS_EUUK[sku])||sku;
+    rows.push([outSku,qty,'','',cp||'',box,L,W,H,Wt]);
   });
   if(!rows.length){alert('No rows ticked for '+CUR+'. Tick the Ship box on the rows you want to transfer.');return;}
   // Amazon manifest layout: US/CA imperial (in/lb, headers on row 7); UK/EU/AU metric (cm/kg, Default
