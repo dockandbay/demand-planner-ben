@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.178 - Actions deep-link to the right PO sub-tab; PO-row action counter badge
+
+- **Actions open the relevant PO sub-tab.** When an action references a PO, "Open PO ▸ …" and the clickable
+  PO ref now land on the sub-tab that matches the issue: payment issues → PAYMENTS, date issues → DATES,
+  shipping issues → SHIPMENTS, ERP/order-plan → ORDER PLAN (unknown types → default tab). Uses the
+  deep-link plumbing from v25.177.
+- **Action-items counter on the PO grid.** A red count badge now sits next to the PO number showing how many
+  open actions that PO has (payment overdue, unpaid, late, unassigned shipment, late-should-have-shipped,
+  DTC not approved, not confirmed). Hover lists them; click expands the PO on the most relevant sub-tab.
+
+No new env vars or migrations.
+
 ## v25.177 - Deep-linkable PO detail sub-tabs
 
 PO detail sub-tabs are now addressable in the URL: `#/supply/purchase-orders/<slug>/<PO>`, e.g.

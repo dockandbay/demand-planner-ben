@@ -530,6 +530,13 @@
     // BI recommendations — advisory (from the forecast/expedite engine), not blocking actions
     'Consider air freight':'RECOMMENDATIONS','Expedite production':'RECOMMENDATIONS' };
   function actGroup(t){ return ACT_GROUP[t]||'OTHER'; }   // everything else (supplier, ERP, partials, unassigned) → OTHER
+  // Which PO detail sub-tab an action should deep-link to (payment issues → PAYMENTS, date issues → DATES,
+  // shipping → SHIPMENTS, ERP/order-plan → ORDER PLAN). Null → the default (first) tab.
+  var ACT_POTAB={ 'Deposit not paid':'pay','Deposit over-assigned':'pay','Payment invalid':'pay','Payment overdue':'pay','Supplier invoice':'pay','Unpaid — last month':'pay','Aged payment':'pay',
+    'Date conflict':'dates','Production check-in':'dates','Supplier completion date':'dates','Awaiting ERP receipt':'dates',
+    'Ship check-in':'shipments','Shipment missing dates':'shipments','Shipment ETA passed':'shipments','Shipment delivered — update PO':'shipments','Unassigned shipment':'shipments',
+    'Order-plan change pending ERP push':'oplan','PO not in ERP':'oplan','Partial cartons need approval':'oplan' };
+  function poTabForAction(t){ return ACT_POTAB[t]||null; }
   function actBuild(rows,c){
     actRows=rows; rows.forEach(function(r,i){ r._id=i; });
     if(!rows.length){c.innerHTML=annot('actions')+'<div class="count">No actions 🎉</div>';return;}
@@ -591,7 +598,7 @@
     else if(r.fix==='prodstatus'){ fix='<span class="tiny mut">supplier status</span> <select class="fci act-in" data-id="'+r._id+'"><option value="">—</option>'+prodStatusOpts('')+'</select> '+applyBtn(r._id); }
     else if(r.fix==='applysub'){ fix='<button class="save-btn act-applysub" data-id="'+r._id+'">✓ Apply</button> <button class="save-btn light act-dismisssub" data-id="'+r._id+'">Dismiss</button>'+(r.attachment_id?' <a class="lnk-btn" href="/api/supply/portal-attachment/'+r.attachment_id+'" target="_blank">view doc</a>':''); }
     else if(r.fix==='rebalance'){ fix='<button class="save-btn act-rebal" data-po="'+esc(r.target_key||r.ref)+'">⇄ Rebalance pallets</button>'; }
-    else if(r.fix==='gotopo'){ fix='<button class="save-btn light act-gotopo" data-po="'+esc(r.target_key||r.ref)+'">Open PO ▸ PLAN</button>'; }
+    else if(r.fix==='gotopo'){ var _gt=poTabForAction(r.type); fix='<button class="save-btn light act-gotopo" data-po="'+esc(r.target_key||r.ref)+'" data-tab="'+esc(_gt||'')+'">Open PO ▸ '+(_gt?esc((POTAB_SLUG[_gt]||_gt).toUpperCase()):'PLAN')+'</button>'; }
     else if(r.fix==='orderplan'){ var olbl=r.field==='suprisk'?'Open supplier-risk lines':r.field==='disc'?'Open discontinued lines':'Open unapproved partials'; fix='<button class="save-btn light act-open-op" data-k="'+esc(r.target_key||r.ref)+'" data-flt="'+esc(r.field||'partials')+'">'+olbl+'</button>'; }
     else if(r.fix==='gotoreport'){ var rlbl=r.field==='cashflow'?'Open cash flow ▸':'Open ERP Compare report ▸'; fix='<button class="save-btn light act-gotoreport" data-rk="'+esc(r.field||'erp-compare')+'" data-cfstatus="'+esc(r.cfstatus||'')+'" data-cfmonth="'+esc(r.cfmonth||'')+'">'+rlbl+'</button>'; }
     else if(r.fix==='gotoitem'){ var ilbl=r.gotarget==='dep'?'Open deposit ▸':r.gotarget==='other'?'Open other payments ▸':'Open PO ▸ Payments'; fix='<button class="save-btn light act-gotoitem" data-go="'+esc(r.gotarget||'po')+'" data-k="'+esc(r.target_key||r.ref)+'">'+ilbl+'</button>'; }
@@ -599,7 +606,7 @@
     if(r.type==='Date conflict'){ fix2='<span class="tiny mut">or set status</span> <select class="fci act-postatus" data-po="'+esc(r.target_key||r.ref)+'" data-id="'+r._id+'"><option value="">—</option>'+PO_STATUSES.map(function(stx){return '<option>'+esc(stx)+'</option>';}).join('')+'</select>'; }
     // clickable ref → open the PO (expanded) or the shipment, based on the action's target
     var key=r.target_key||r.ref, ref=esc(r.ref||'');
-    var refHtml = r.target==='po' ? '<button class="lnk-btn act-go" data-go="po" data-k="'+esc(key)+'">'+ref+'</button>'
+    var refHtml = r.target==='po' ? '<button class="lnk-btn act-go" data-go="po" data-k="'+esc(key)+'" data-tab="'+esc(poTabForAction(r.type)||'')+'">'+ref+'</button>'
                 : r.target==='shipment' ? '<button class="lnk-btn act-go" data-go="ship" data-k="'+esc(key)+'">'+ref+'</button>'
                 : ref;
     // lifecycle: dismiss / snooze / done (handled but kept visible via the status pills); restore reopens
@@ -655,8 +662,8 @@
       fetch('/api/supply/submission/'+encodeURIComponent(r.target_key)+'/dismiss',{method:'POST'}).then(function(x){return x.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); actResolve(id,'dismissed'); }).catch(function(e){ b.disabled=false; alert('Failed: '+(e.message||e)); }); }; });
     document.querySelectorAll('#act-grid .act-rebal').forEach(function(b){ b.onclick=function(){ openRebalance(b.dataset.po); }; });
     document.querySelectorAll('#act-grid [data-goto]').forEach(function(b){b.onclick=function(){selectSection(b.dataset.goto);};});
-    document.querySelectorAll('#act-grid .act-gotopo').forEach(function(b){b.onclick=function(){gotoPO(b.dataset.po);};});
-    document.querySelectorAll('#act-grid .act-go').forEach(function(b){b.onclick=function(){ if(b.dataset.go==='po')gotoPO(b.dataset.k); else gotoShipment(b.dataset.k); };});
+    document.querySelectorAll('#act-grid .act-gotopo').forEach(function(b){b.onclick=function(){gotoPO(b.dataset.po, b.dataset.tab||undefined);};});
+    document.querySelectorAll('#act-grid .act-go').forEach(function(b){b.onclick=function(){ if(b.dataset.go==='po')gotoPO(b.dataset.k, b.dataset.tab||undefined); else gotoShipment(b.dataset.k); };});
     document.querySelectorAll('#act-grid .act-open-op').forEach(function(b){b.onclick=function(){ var f=b.dataset.flt||'partials'; var op={po:b.dataset.k}; op[f==='suprisk'?'suprisk':f==='disc'?'disc':'partials']=true; _pendingOP=op; selectSection('order-plan'); };});
     document.querySelectorAll('#act-grid .act-gotoreport').forEach(function(b){b.onclick=function(){ var rk=b.dataset.rk||'erp-compare';
       if(rk==='cashflow'){ if(b.dataset.cfstatus)_cfState.status=b.dataset.cfstatus; if(b.dataset.cfmonth)_cfState.month=b.dataset.cfmonth; }
@@ -978,6 +985,10 @@
     dtc_not_approved:function(r){ return r.progress!=='complete' && poIsDtc(r) && !r.dtc_accepted_at; },
     // production requires supplier confirmation and the supplier hasn't confirmed the PO yet
     po_not_approved:function(r){ return r.progress!=='complete' && !!r.require_confirmation && !r.supplier_confirmed; }};
+  // PO-row action badge: label + which PO detail sub-tab each condition deep-links to.
+  var PO_ACT_LABEL={payment_overdue:'Payment overdue',unpaid_payment:'Unpaid payment',late:'Late — should be completed',unassigned_shipment:'Unassigned shipment',production:'Late — should have shipped',dtc_not_approved:'Direct-to-Client not approved',po_not_approved:'Not confirmed by supplier'};
+  var PO_ACT_TAB={payment_overdue:'pay',unpaid_payment:'pay',late:'dates',unassigned_shipment:'shipments',production:'shipments',dtc_not_approved:'client',po_not_approved:'dates'};
+  function poActions(r){ var out=[]; for(var k in PO_ACTCOND){ try{ if(PO_ACTCOND[k](r))out.push(k); }catch(e){} } return out; }
   var _poState=null;   // PURCHASE ORDERS filter state — persisted across edit-triggered reloads so the filter survives
   function poInner(rows,c){
     var FILTERS=[['in_progress','In progress'],['future','Future'],['complete','Complete'],['all','All']];
@@ -1054,7 +1065,7 @@
       document.getElementById('sup-grid').innerHTML=poTable(shown,q?'status':state.grp)   // search spans all statuses → group under status sub-labels
         +(shown.length<f.length?'<div style="margin:8px 0;text-align:center"><button class="save-btn light" id="po-showall">Show all '+f.length+' &darr;</button></div>':'');
       var sa=document.getElementById('po-showall'); if(sa)sa.onclick=function(){ _poShowAll=true; view(); };
-      bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindPoNotes();
+      bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindPoNotes(); bindPoActBadge();
       bindDepPick(patchPoRow); bindPoStars(); bindSetShipping();
       if(_pendingPO){ var want=_pendingPO; _pendingPO=null; setTimeout(function(){
         // if the target PO is past the render cap it isn't in the DOM yet — reveal all rows and retry so the
@@ -1090,7 +1101,7 @@
         var wasOpen=mainTr.classList.contains('row-open');
         mainTr.parentNode.replaceChild(newMain, mainTr);
         if(wasOpen){ newMain.classList.add('row-open'); var eb=newMain.querySelector('.po-exp'); if(eb)eb.classList.add('open'); }
-        bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindDepPick(patchPoRow); bindPoStars(); bindPoNotes(); bindSetShipping();
+        bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindDepPick(patchPoRow); bindPoStars(); bindPoNotes(); bindPoActBadge(); bindSetShipping();
       }).catch(function(){}); }
     try{ window.__poRowRefresh=silentRowRefresh; }catch(e){}
     // Patch ONE PO row in place (no grid re-render / flash) after an assign. Only when not grouped by shipment —
@@ -1107,7 +1118,7 @@
         var exOpen=(function(){var e=document.getElementById('poexp-'+btn.dataset.i);return e&&e.style.display!=='none';})();
         var nm=tmp.querySelector('tr'); if(nm&&tr&&tr.parentNode){ tr.parentNode.replaceChild(nm,tr); }
         if(exOpen&&nm){ nm.classList.add('row-open'); var eb=nm.querySelector('.po-exp'); if(eb)eb.classList.add('open'); }   // keep the open-row highlight after an in-place patch
-        bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindDepPick(patchPoRow); bindPoStars(); bindPoNotes(); bindSetShipping();
+        bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindDepPick(patchPoRow); bindPoStars(); bindPoNotes(); bindPoActBadge(); bindSetShipping();
       }).catch(function(){ refreshGrid(); }); }
     _poRefresh=refreshGrid; _poPatchRow=patchPoRow;
     c.querySelectorAll('#po-prog .pill:not(.po-recent):not(.po-focus)').forEach(function(p){p.onclick=function(){c.querySelectorAll('#po-prog .pill:not(.po-recent):not(.po-focus)').forEach(function(x){x.classList.remove('active');});p.classList.add('active');state.f=p.dataset.f;_poShowAll=false;view();};});
@@ -1291,7 +1302,11 @@
     // count badges in the PLAN panel + the grid date-cell highlights — not as a badge on the PO reference.
     // purple "N" badge → this PO has internal Notes (MASTER DATA). Hover shows them; click opens the PLAN ▸ MASTER DATA tab.
     var noteFlag=(r.notes&&String(r.notes).trim())?' <button class="po-note-badge" data-po="'+esc(r.po)+'" data-note="'+esc(String(r.notes).trim())+'">N</button>':'';
-    var pocell=indent?'<td class="l po-child po-numcell"><span class="ind">└ </span><b>'+esc(r.po)+'</b>'+noteFlag+'</td>':'<td class="l po-numcell"><b>'+esc(r.po)+'</b>'+noteFlag+'</td>';
+    // action-items counter: red badge with the count of open actions on this PO; click deep-links to the
+    // most relevant detail sub-tab (payment→PAYMENTS, date→DATES, shipping→SHIPMENTS).
+    var _acts=poActions(r);
+    var actFlag=_acts.length?' <button class="po-act-badge ex-badge" style="cursor:pointer;border:none" data-po="'+esc(r.po)+'" data-tab="'+(PO_ACT_TAB[_acts[0]]||'')+'" title="'+_acts.length+' action item'+(_acts.length>1?'s':'')+' — '+esc(_acts.map(function(k){return PO_ACT_LABEL[k]||k;}).join('; '))+' (click to open)">'+_acts.length+'</button>':'';
+    var pocell=indent?'<td class="l po-child po-numcell"><span class="ind">└ </span><b>'+esc(r.po)+'</b>'+noteFlag+actFlag+'</td>':'<td class="l po-numcell"><b>'+esc(r.po)+'</b>'+noteFlag+actFlag+'</td>';
     // ERP cell — compact badge-style buttons (same look as the "✓ in sync" badge) → keeps the column narrow.
     // Labels collapse to a single action: Update lines / Update date / Update both. All open the same ERP modal.
     var erpStyle='cursor:pointer;border:none';
@@ -1418,6 +1433,14 @@
     if(!open){ _pendingPOTab='masterdata'; exBtn.click(); }
     else { var t=document.querySelector('#podet-'+i+' .potab[data-pt="masterdata"]'); if(t)t.onclick(); }
     setTimeout(function(){ if(ex)ex.scrollIntoView({block:'center',behavior:'smooth'}); },80); }; }); }
+  // red action-count badge on the PO row → expand the PO on the tab most relevant to its top action.
+  function bindPoActBadge(){ document.querySelectorAll('#supply-root .po-act-badge[data-po]').forEach(function(b){ if(b._b)return; b._b=1;
+    b.onclick=function(e){ e.stopPropagation(); var po=b.dataset.po, tab=b.dataset.tab||'';
+      var exBtn=document.querySelector('#sup-grid .po-exp[data-po="'+((window.CSS&&CSS.escape)?CSS.escape(po):po)+'"]'); if(!exBtn){ gotoPO(po,tab||undefined); return; }
+      var i=exBtn.dataset.i, ex=document.getElementById('poexp-'+i), open=ex&&ex.style.display!=='none';
+      if(!open){ if(tab)_pendingPOTab=tab; exBtn.click(); }
+      else if(tab){ var t=document.querySelector('#podet-'+i+' .potab[data-pt="'+tab+'"]'); if(t)t.onclick(); }
+      setTimeout(function(){ if(ex)ex.scrollIntoView({block:'center',behavior:'smooth'}); },80); }; }); }
   function loadPoDetail(po,i,wantTab){ fetch('/api/supply/po-detail/'+encodeURIComponent(po)).then(function(r){return r.json();})
     .then(function(d){ document.getElementById('podet-'+i).innerHTML=poDetailHTML(po,d,i); bindPay(po,i);
       if(wantTab){ var t=document.querySelector('#podet-'+i+' .potab[data-pt="'+wantTab+'"]'); if(t)t.onclick(); } })
