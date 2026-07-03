@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.191 - PO ORDER PLAN tab: edit quantities, add SKUs, copy SKU+Qty
+
+The per-PO ORDER PLAN grid (PURCHASE ORDERS ▸ expand ▸ ORDER PLAN) is now editable:
+- **✎ Edit qty / add SKU** button toggles edit mode: quantity cells become inputs, and a **＋ Add SKU** row
+  lets you add new lines (SKU + qty; add as many as you like). **Save** writes each change/addition via the
+  existing `/api/supply/po-line/{po|sku}` upsert (proposed → shows as ERP-pending until Upload); **Cancel**
+  discards. Edits auto-persist to the DB like any plan edit.
+- **⧉ Copy SKU + Qty** button copies the PO's SKUs + quantities to the clipboard (tab-separated, pastes into
+  Sheets/Excel columns).
+
+Reuses the existing line-upsert endpoint — no new server routes. Headless load verified clean.
+
 ## v25.190 - Update-ERP modal: show current Cin7 date → completion date on the date button
 
 The "Update Cin7 Date" button in the Update-ERP modal now spells out the change: "Cin7 EstimatedDeliveryDate:
