@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.184 - Category / grand-total current-month forecast showed MTD actual instead of full-month forecast
+
+The current-month FORECAST column ('fc') on the category rollup and the ALL-CATEGORIES grand total summed the
+partial month-to-date ACTUAL (e.g. Beach Towels showing 258) instead of the full-month forecast (~30k). The
+subcat rows were already correct (curFcCell → curMonthForecast). Fixed the rollups: they now accumulate the
+sum of curMonthForecast() across subcats for the current-month forecast column (units + revenue), rendered as
+a forecast (not the actual MTD). The adjacent actual-MTD column is unchanged.
+
+No new env vars or migrations.
+
 ## v25.183 - Fix 1mo/3mo trend picking up the partial current month (showed -100%)
 
 The stacked 1mo/3mo trend column used `sales[CUR_MONTH]` — CUR_MONTH is the leading PARTIAL month (e.g. the

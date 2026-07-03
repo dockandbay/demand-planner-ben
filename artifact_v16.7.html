@@ -6195,10 +6195,11 @@ function buildBody(){
     var allRows=DATA.filter(function(r){return r.co===CUR&&(!CF||r.ch===CF);});
     var gt24u=0,gt25u=0,gty25u=0,gty26u=0,gty26r=0,gtf26u=0,gtf27u=0,gtf28u=0,gt24r=0,gt25r=0,gtf26r=0,gtf27r=0,gtf28r=0;
     var gtm1_25=0,gtm1_26=0,gtm3_25=0,gtm3_26=0;
-    var gtMonthLY={},gtMonthFC={},gtMonthFCRev={}; // YYYY_MM -> total LY units, TY units, TY revenue
+    var gtMonthLY={},gtMonthFC={},gtMonthFCRev={},gtCurFC=0; // YYYY_MM -> total LY units, TY units, TY revenue; gtCurFC = current-month full forecast
     DISP_MONTHS.forEach(function(fym){gtMonthLY[fym]=0;gtMonthFC[fym]=0;gtMonthFCRev[fym]=0;});
     allRows.forEach(function(r){
       var a=ga(CUR,r.ch,r.s);
+      gtCurFC+=curMonthForecast(r.s,CUR,r.ch);   // full-month forecast (not the partial MTD actual) for the current-month 'fc' column
       gt24u+=fyU(a,CUR_FY_START-2);gt25u+=fyU(a,CUR_FY_START-1);gt24r+=fyR(a,CUR_FY_START-2);gt25r+=fyR(a,CUR_FY_START-1);
       var _gtPrevEnd=ym(pa(CUR_YTD_END).y-1,pa(CUR_YTD_END).mo);
       gty25u+=fyToDateU(a,CUR_FY_START-1,_gtPrevEnd);gty26u+=fyToDateU(a,CUR_FY_START,CUR_YTD_END);gty26r+=fyToDateR(a,CUR_FY_START,CUR_YTD_END);
@@ -6254,8 +6255,8 @@ function buildBody(){
       +'<div style="font-size:8px;color:#cbd5e1">'+(fp(gtm3_26,gtm3_25)||'--')+'</div></div>','sc sep1');
     gtadd('','lbltd sep2');gtadd('','rectd');
     // Time region (data-driven): monthly cells + per-FY totals
-    function gtMonthCell(m,first){
-      var ly=Math.round(gtMonthLY[m]||0),fc=Math.round(gtMonthFC[m]||0);
+    function gtMonthCell(m,first,isFcCol){
+      var ly=Math.round(gtMonthLY[m]||0),fc=Math.round(isFcCol?gtCurFC:(gtMonthFC[m]||0));
       var yoy=ly>0?Math.round((fc-ly)/ly*100):null;
       var yoyStr=yoy!=null?((yoy>=0?'+':'')+yoy+'%'):'';
       var yoyCls=yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp';
@@ -6277,7 +6278,7 @@ function buildBody(){
       gtr.appendChild(td);
     }
     TIME_COLS.forEach(function(tc){
-      if(tc.t==='fc'){ gtMonthCell(tc.m,false); }
+      if(tc.t==='fc'){ gtMonthCell(tc.m,false,true); }
       else if(tc.t==='tot'){ gtFyCell(tc.startY); }
       else { gtMonthCell(tc.m, tc.m===fyMonths(fyStartOf(tc.m))[0]); }
     });
@@ -6342,12 +6343,15 @@ function buildBody(){
       +'<div class="'+fpc(t3t)+'" style="font-size:8px">'+(t3t||'--')+'</div></div>','sc sep1');
     tadd('','lbltd sep2');tadd('','rectd');
     // Per-month: sum LY actuals + forecast across all subcategories
-    var cMonthLY={},cMonthFC={},cMonthLYRev={},cMonthFCRev={};
+    var cMonthLY={},cMonthFC={},cMonthLYRev={},cMonthFCRev={},cCurFC=0,cCurFCRev=0;
     DISP_MONTHS.forEach(function(fym){cMonthLY[fym]=0;cMonthFC[fym]=0;cMonthLYRev[fym]=0;cMonthFCRev[fym]=0;});
     allR.forEach(function(r){
       var a=ga(CUR,r.ch,r.s);
       var rk2=r.s+'|'+CUR+'|'+r.ch;
       var fu2=fu_cache[rk2]||(calc(r.s,CUR,r.ch).fu);
+      // current-month FULL forecast (not the partial MTD actual) — for the current-month 'fc' rollup column
+      var _cmf=curMonthForecast(r.s,CUR,r.ch); cCurFC+=_cmf;
+      var _cm=pa(CUR_MONTH); cCurFCRev+=_cmf*getASP(CUR,r.ch,r.s,_cm.y,_cm.mo);
       DISP_MONTHS.forEach(function(fym){
         var mo=pa(fym).mo,y=pa(fym).y,isAct=isActualMonth(fym);
         // LY units: forecast-on-forecast years anchor on prior-year forecast; else prior-year actual
@@ -6363,14 +6367,14 @@ function buildBody(){
         else { cMonthFCRev[fym]+=(fu2[fym]||0)*getASP(CUR,r.ch,r.s,y,mo); }
       });
     });
-    function cMonthCell(m,first){
-      var isAct=isActualMonth(m),Y=fyStartOf(m);
+    function cMonthCell(m,first,isFcCol){
+      var isAct=isActualMonth(m)&&!isFcCol,Y=fyStartOf(m);   // the current-month 'fc' column renders as a forecast, not the MTD actual
       var bgCls=fyBg(Y)+' fctd'+(isAct?' actual':'')+(first?' sep2':'');
-      var ly=Math.round(cMonthLY[m]||0),fc=Math.round(cMonthFC[m]||0);
+      var ly=Math.round(cMonthLY[m]||0),fc=Math.round(isFcCol?cCurFC:(cMonthFC[m]||0));
       var yoy=ly>0?Math.round((fc-ly)/ly*100):null;
       var yoyStr=yoy!=null?((yoy>=0?'+':'')+yoy+'%'):'';
       var yoyCls=yoy!=null?(yoy>0?' gp':yoy<0?' rp':' fp'):' fp';
-      var lyR=cMonthLYRev[m]||0,fcR=cMonthFCRev[m]||0;
+      var lyR=cMonthLYRev[m]||0,fcR=isFcCol?cCurFCRev:(cMonthFCRev[m]||0);
       var revYoY=lyR>0?Math.round((fcR-lyR)/lyR*100):null;
       var revYoyHtml='';
       if(revYoY!=null){var rClr=revYoY>=2?'#15803d':revYoY<=-2?'#A32D2D':'#666';revYoyHtml=' <span style="color:'+rClr+'">'+(revYoY>=0?'+':'')+revYoY+'%</span>';}
@@ -6392,7 +6396,7 @@ function buildBody(){
       totr.appendChild(td);
     }
     TIME_COLS.forEach(function(tc){
-      if(tc.t==='fc'){ cMonthCell(tc.m,false); }
+      if(tc.t==='fc'){ cMonthCell(tc.m,false,true); }
       else if(tc.t==='tot'){ cFyCell(tc.startY); }
       else { cMonthCell(tc.m, tc.m===fyMonths(fyStartOf(tc.m))[0]); }
     });
