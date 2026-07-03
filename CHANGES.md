@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.158 - Payments Report: supplier / amount search
+
+Added a Search box to the Payments Report (PURCHASE ORDERS ▸ Payments Report) — filters runs by supplier
+name or amount. It **overrides the date filter** (spans all history) while a search term is present; clearing
+it returns to the date-filtered view. Clear also resets the search.
+
 ## v25.157 - PRODUCTIONS folded into PURCHASE ORDERS (shared sub-nav)
 
 Removed the standalone PRODUCTIONS top-menu item. PURCHASE ORDERS is now the umbrella with a sub-nav:

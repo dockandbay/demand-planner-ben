@@ -3028,7 +3028,7 @@
   var payTab='pay'; // 'pay' (register) | 'other' (sundry)
   // Payments report date filter (typed YYYY / YYYY-MM / YYYY-MM-DD). Defaults to the last 60 days so the
   // report opens on recent activity (the register holds full history back to 2017); Clear to see everything.
-  var PAY_FROM=(function(){ var d=new Date(); d.setDate(d.getDate()-60); return d.toISOString().slice(0,10); })(), PAY_TO='';
+  var PAY_FROM=(function(){ var d=new Date(); d.setDate(d.getDate()-60); return d.toISOString().slice(0,10); })(), PAY_TO='', PAY_Q='';
   var OTH_STATE={status:'unpaid',supplier:''};   // Other Payments filters (persist across re-renders); default to unpaid
   var PDUE_STATE={status:'outstanding',supplier:''};   // Payments Due filters (persist across re-renders)
   // ---- CASH FLOW: itemised payment lines, flat list, filterable by month ----
@@ -3276,8 +3276,13 @@
   function renderPaymentsReport(b){ b.innerHTML='<div class="count">Loading…</div>';
     fetch('/api/supply/payments-report').then(function(r){return r.json();}).then(function(rows){
       // date filter: type a date (or partial, e.g. 2026-06) into From / To — no date picker
-      b.innerHTML='<div class="bar"><span class="pill-lbl">Date</span><span class="tiny mut">from</span> <input class="flt" id="pay-from" placeholder="YYYY-MM-DD" value="'+esc(PAY_FROM)+'" style="width:118px"> <span class="tiny mut">to</span> <input class="flt" id="pay-to" placeholder="YYYY-MM-DD" value="'+esc(PAY_TO)+'" style="width:118px"> <button class="save-btn light" id="pay-clear">Clear</button> <span class="tiny mut">default: last 60 days · Clear to see all history · or type a full/partial date (e.g. 2026-06)</span></div><div id="pay-rep"></div>';
-      function draw(){ var f=rows.filter(function(r){ var d=r.dt||''; return (!PAY_FROM || d>=PAY_FROM) && (!PAY_TO || d.slice(0,PAY_TO.length)<=PAY_TO); });
+      b.innerHTML='<div class="bar"><span class="pill-lbl">Date</span><span class="tiny mut">from</span> <input class="flt" id="pay-from" placeholder="YYYY-MM-DD" value="'+esc(PAY_FROM)+'" style="width:118px"> <span class="tiny mut">to</span> <input class="flt" id="pay-to" placeholder="YYYY-MM-DD" value="'+esc(PAY_TO)+'" style="width:118px"> <button class="save-btn light" id="pay-clear">Clear</button>'
+        +'<span class="pill-lbl" style="margin-left:14px">Search</span><input class="flt" id="pay-q" placeholder="supplier / amount…" value="'+esc(PAY_Q)+'" style="width:180px;background:#eff6ff;border-color:#93c5fd" title="search by supplier name or amount — overrides the date filter (spans all history)"> <span class="tiny mut">supplier or amount (spans all dates)</span></div><div id="pay-rep"></div>';
+      function draw(){ var q=(PAY_Q||'').trim().toLowerCase();
+        var f=rows.filter(function(r){
+          if(q){ var sup=String(r.supplier||'').toLowerCase(), qn=q.replace(/[^0-9.]/g,''), amt=String(r.total==null?'':r.total);
+            return sup.indexOf(q)>=0 || (qn!==''&&amt.indexOf(qn)>=0); }   // search overrides the date filter → all history
+          var d=r.dt||''; return (!PAY_FROM || d>=PAY_FROM) && (!PAY_TO || d.slice(0,PAY_TO.length)<=PAY_TO); });
         var rep=document.getElementById('pay-rep'); rep.innerHTML=payReportHTML(f); bindPayFx(rep);
         // read the LIVE bank ccy/amount from the row inputs so a just-typed currency applies without refresh
         function liveFx(btn){ var tr=btn.closest('tr'); var a=tr.querySelector('.pfx-amt'), c=tr.querySelector('.pfx-ccy'); return {ccy:c?c.value:'', amt:a?a.value:''}; }
@@ -3286,7 +3291,8 @@
         rep.querySelectorAll('.pay-sum-copy').forEach(function(btn){ btn.onclick=function(){ var fx=liveFx(btn); xbCopySummary(f[+btn.dataset.i],fx.ccy,fx.amt,btn); }; }); }
       document.getElementById('pay-from').oninput=function(){ PAY_FROM=this.value.trim(); draw(); };
       document.getElementById('pay-to').oninput=function(){ PAY_TO=this.value.trim(); draw(); };
-      document.getElementById('pay-clear').onclick=function(){ PAY_FROM=''; PAY_TO=''; document.getElementById('pay-from').value=''; document.getElementById('pay-to').value=''; draw(); };
+      document.getElementById('pay-clear').onclick=function(){ PAY_FROM=''; PAY_TO=''; PAY_Q=''; document.getElementById('pay-from').value=''; document.getElementById('pay-to').value=''; var _q=document.getElementById('pay-q'); if(_q)_q.value=''; draw(); };
+      document.getElementById('pay-q').oninput=function(){ PAY_Q=this.value; draw(); };
       draw(); })
       .catch(function(e){b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>';}); }
   var PAY_CCY=['','GBP','EUR','AUD','USD'];
