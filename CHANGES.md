@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.175 - DATES table: production-status alert wraps (no horizontal scroll)
+
+The long production-status alert in the DATES-tab Source column forced the table wider than its wrapper, so
+it scrolled. The Source cells now wrap (white-space:normal), the Source column is a bit wider (min 360px) and
+the table max-width nudged to 820px, so the full message shows without any horizontal scroll.
+
 ## v25.174 - Production date exceptions now key off PO status (not the supplier-confirmation field)
 
 The DATES-tab production exceptions were checking `production_status` (the supplier-confirmation field,

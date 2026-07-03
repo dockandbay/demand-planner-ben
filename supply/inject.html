@@ -1615,9 +1615,9 @@
     var _pseEnd=r.require_confirmation?prodStatusEnd(r.status,r.prod_end):'';
     var _alert=function(m){ return m?' <span style="color:#b91c1c;font-weight:600">⚠ '+esc(m)+'</span>':''; };
     var datesH='<div class="sect-h">Dates <span class="mut tiny">— only production start &amp; end are editable; the rest auto-calculate</span></div>'
-      +'<div class="tw" style="max-width:760px"><table><thead><tr><th class="l">Milestone</th><th class="l">Date</th><th class="l" style="min-width:250px">Source</th></tr></thead><tbody>'
-      +'<tr'+(_pseStart?' style="background:#fff7ed"':'')+'><td class="l"><b>Production start</b></td><td class="l">'+payIn(ep,'start_production',r.prod_start,true)+'</td><td class="l mut tiny">manual'+_alert(_pseStart)+'</td></tr>'
-      +'<tr'+(_pseEnd?' style="background:#fff7ed"':'')+'><td class="l"><b>Production end</b></td><td class="l">'+payIn(ep,'end_production_overide',r.end_override,true)+'</td><td class="l mut tiny">'+(r.end_override?'override':'start + supplier days')+_alert(_pseEnd)+'</td></tr>'
+      +'<div class="tw" style="max-width:820px"><table><thead><tr><th class="l">Milestone</th><th class="l">Date</th><th class="l" style="min-width:360px">Source</th></tr></thead><tbody>'
+      +'<tr'+(_pseStart?' style="background:#fff7ed"':'')+'><td class="l"><b>Production start</b></td><td class="l">'+payIn(ep,'start_production',r.prod_start,true)+'</td><td class="l mut tiny" style="white-space:normal">manual'+_alert(_pseStart)+'</td></tr>'
+      +'<tr'+(_pseEnd?' style="background:#fff7ed"':'')+'><td class="l"><b>Production end</b></td><td class="l">'+payIn(ep,'end_production_overide',r.end_override,true)+'</td><td class="l mut tiny" style="white-space:normal">'+(r.end_override?'override':'start + supplier days')+_alert(_pseEnd)+'</td></tr>'
       +(function(){ var pse=(_pseStart||_pseEnd);
         return '<tr'+(pse?' style="background:#fff7ed"':'')+'><td class="l"><b>Supplier production status</b> <span class="mut tiny">(set by supplier / here)</span></td>'
           +'<td class="l">'+prodStatusSel(ep+'/prod-status', r.production_status)+'</td>'
