@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.160';
+const APP_VERSION = 'v25.161';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1672,7 +1672,7 @@ app.get('/api/supply/:section', async (req, res) => {
         // per-market RRP from products (uk/us/eu only — migration 023) for the optional RRP columns.
         const rows = await q(`WITH sku_po AS (
             SELECT l.sku,
-              string_agg(DISTINCT po.prod_no, ', ') FILTER (WHERE po.prod_no ~ '^P[0-9]') prod_nos,   -- real prod numbers only (P54…); excludes junk like 'AU'
+              string_agg(DISTINCT po.prod_no, ', ') FILTER (WHERE po.prod_no ~ '^[0-9]') prod_nos,   -- real (numeric) prod numbers only; excludes junk like 'AU'
               string_agg(DISTINCT po.supplier_name, ', ') FILTER (WHERE coalesce(po.supplier_name,'')<>'') suppliers
             FROM planner.purchase_order_lines l JOIN planner.purchase_orders po ON po.po=l.po
             GROUP BY l.sku)

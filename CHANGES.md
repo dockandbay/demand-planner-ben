@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.161 - Barcodes: fix PROD# filter + smaller download-all buttons
+
+- **PROD# filter fixed** — the barcodes query aggregated prod numbers only where prod_no matched `^P[0-9]`,
+  but prod numbers are plain digits (23, 24, …) so it matched nothing and the dropdown was empty. Now `^[0-9]`
+  — the PROD# dropdown populates and filters (509 SKUs carry a prod number).
+- **Download-all buttons** ("All Cartons (+inners)" / "All Products") reverted to normal size (not big/bold),
+  still light blue.
+
 ## v25.160 - Payments Report search: match the full amount (commas + decimals)
 
 The amount search now matches the full base amount whether typed with commas or not, and with the trailing
