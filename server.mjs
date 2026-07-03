@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.163';
+const APP_VERSION = 'v25.164';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3489,8 +3489,11 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
   const po = req.params.po;
   try {
     const [lines, deposit, payments, flexport, supInv, supDocs, notes, subs, lineCosts, supComp, xdShip, addCosts] = await Promise.all([
-      pool.query(`SELECT sku,qty,carton_qty,full_carton_check,cost_price
-                  FROM planner.v_purchase_order_lines WHERE po=$1 ORDER BY sku`, [po]),
+      pool.query(`SELECT l.sku,l.qty,l.carton_qty,l.full_carton_check,l.cost_price,
+                    el.qty erp_qty, (l.qty IS DISTINCT FROM el.qty) pending
+                  FROM planner.v_purchase_order_lines l
+                  LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
+                  WHERE l.po=$1 ORDER BY l.sku`, [po]),
       pool.query(`SELECT d.reference,d.supplier_name,d.amount,d.xero_fx,
                     to_char(d.date_paid,'YYYY-MM-DD') date_paid,d.deposit_used,d.deposit_remaining
                   FROM planner.deposits d JOIN planner.purchase_orders p ON p.deposit_ref=d.reference

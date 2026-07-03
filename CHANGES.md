@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.164 - PO ▸ ORDER PLAN tab: ERP-deviations banner + Update ERP
+
+Each PO's PLAN ▸ ORDER PLAN tab now shows, at the top, an ERP-deviations banner: the SKUs whose planned qty
+differs from Fulfil/Cin7 (Plan / ERP / Δ, "not in ERP" for never-pushed lines) plus an "⬆ Update ERP" button.
+Hidden when the PO has no deviations. (po-detail now returns per-line erp_qty + pending.)
+
 ## v25.163 - Fix: delivery uses Flexport ARRIVAL (not landing) + "Arrival/Delivery" label
 
 Reported on PO-55USLX-FBA1: the DATES delivery showed 24-Jun (Flexport landing) but the Flexport report's
