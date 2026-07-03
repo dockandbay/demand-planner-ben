@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.184';
+const APP_VERSION = 'v25.185';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1275,10 +1275,14 @@ app.get('/api/supply/:section', async (req, res) => {
             (SELECT count(*) FROM planner.purchase_order_lines l JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku WHERE l.po=calc4.po)::int erp_in,
             (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=calc4.po)::int erp_total,
             -- ERP date misalignment: our calculated "completed at warehouse" date (eff_checkin) vs the
-            -- ERP's final delivery date. 1 = differs (needs a date update in the ERP). Only when mirrored.
+            -- ERP's final delivery date. 1 = differs MATERIALLY. Materiality = the day gap as a fraction of how
+            -- far away the date is (days from today to eff_checkin): only flag when the gap is >=10% of the
+            -- lead time. E.g. 2 days out of ~100 away = 2% → not flagged; 5 days out of 30 away = 17% → flagged.
             to_char(erp_final_delivery_date,'YYYY-MM-DD') erp_final_delivery, coalesce(erp_po_id_src,'') erp_po_id, erp_present,
             (CASE WHEN erp_final_delivery_date IS NOT NULL AND eff_checkin IS NOT NULL
-                  AND eff_checkin IS DISTINCT FROM erp_final_delivery_date THEN 1 ELSE 0 END)::int erp_date_pending,
+                  AND eff_checkin IS DISTINCT FROM erp_final_delivery_date
+                  AND abs(eff_checkin - erp_final_delivery_date)::numeric / GREATEST(abs(eff_checkin - CURRENT_DATE), 1) >= 0.10
+                  THEN 1 ELSE 0 END)::int erp_date_pending,
             -- supplier production-confidence: confirmed status + days since last confirmation
             coalesce(production_status,'') production_status,
             (CURRENT_DATE - production_confirmed_at::date)::int prod_confirmed_age,

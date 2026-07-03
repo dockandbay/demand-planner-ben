@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.185 - ERP date: materiality threshold, DATES tab counter, date-only modal button
+
+- **Update-ERP modal shows only the relevant button(s):** if only the DATE is out of sync → just "Update Cin7
+  Date"; if line items differ (qty / not-in-ERP) → both buttons + the manual CSV/copy fallback (as before).
+- **ERP date exception now uses a 10% materiality threshold.** Only flag when the day gap between our
+  completed-at-warehouse date and the ERP date is >=10% of how far away the date is (days from today to the
+  completion date). E.g. 2 days out of ~100 = 2% → not flagged; 5 days out of 30 = 17% → flagged. Verified:
+  sub-10% POs (1%/6%/9%) no longer flag; PO-55EUWK2 (24%) does.
+- **ERP date drift now counts on the DATES sub-tab action badge** (added to the date exceptions).
+
+No new env vars or migrations.
+
 ## v25.184 - Category / grand-total current-month forecast showed MTD actual instead of full-month forecast
 
 The current-month FORECAST column ('fc') on the category rollup and the ALL-CATEGORIES grand total summed the
