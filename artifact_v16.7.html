@@ -578,7 +578,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
       <button class="tool-btn" id="insights-btn" title="Get AI insights"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 1 4 12.7c-.7.5-1 1.3-1 2.1V18H9v-1.2c0-.8-.3-1.6-1-2.1A7 7 0 0 1 12 2z"/></svg>AI Insights</button>
       <span class="tool-divider"></span>
       <button class="tool-btn" id="rf" title="Refresh data"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>Refresh</button>
-      <button class="tool-btn primary" id="sv" title="Save forecasts to Airtable"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Save Forecasts</button>
+      <button class="tool-btn primary" id="sv" title="Auto-saves to Supabase ~1.5s after each edit — click to save immediately"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Save Forecasts</button>
     </div>
     <div class="tool-bar" id="buy-tools" role="group" aria-label="Buy plan tools" style="display:none"></div>
     <button class="tool-btn" id="help-btn" title="What to do &amp; when" onclick="openHelp()" style="margin-left:6px;border:1px solid #e0e0e0;border-radius:6px;height:26px;padding:0 9px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>Help</button>
@@ -2951,7 +2951,7 @@ function saveLayout(){ try{ localStorage.setItem('db_layout_expanded_v1',JSON.st
 var PLAN_SKU_QRY=''; // planner SKU filter text (matches sku code or product name)
 var SMOOTH_PREVIEW=null; // {pk:'subcat|co|ch', m:'YYYY_MM', vals:{sku:units}} — one pending smooth preview at a time
 function markDirty(){
-  _dirty=true;
+  _dirty=true; scheduleAutoSave();
   const btn=document.getElementById('sv');
   if(btn&&btn.textContent==='Save Forecasts')btn.textContent='Save Forecasts *';
 }
@@ -8142,8 +8142,15 @@ function buildInputChanges(){
 
 // Save edited subcat forecasts to Supabase (planner.forecast_inputs) via the rehost server.
 // Replaces the old Anthropic-API + Airtable-MCP round-trip - the app is now the source of truth.
+// Auto-persist: debounce a save ~1.5s after the last forecast edit so changes commit to Supabase
+// automatically (no need to click Save Forecasts). Manual Save still works; concurrent saves are guarded.
+var _autoSaveTimer=null, _saving=false;
+function scheduleAutoSave(){ clearTimeout(_autoSaveTimer); _autoSaveTimer=setTimeout(function(){ if(_dirty){ if(_saving) scheduleAutoSave(); else saveForecasts(); } },1500); }
+function markDirty(){ _dirty=true; scheduleAutoSave(); }   // SKU-level edits (FC_DIRTY) call this — sets _dirty + auto-saves
 async function saveForecasts(){
+  if(_saving)return;                 // a save is already running — the scheduler re-fires if still dirty
   if(!_dirty){st('No changes to save');return;}
+  _saving=true;
 
   var changes=buildInputChanges();
   var skuDirty=Object.keys(FC_DIRTY).length;
@@ -8181,6 +8188,7 @@ async function saveForecasts(){
     st('Save error: '+(e.message||e).toString().slice(0,120));
     btn.textContent='Save Forecasts *';
   }
+  _saving=false;
   btn.disabled=false;
 }
 
@@ -8473,7 +8481,7 @@ function applyInsight(idx){
   });
   ins._applied=true;
   ins._appliedAt=new Date().toISOString();
-  _dirty=true;
+  _dirty=true; scheduleAutoSave();
   markDirty();
   saveInsightsToStorage(CUR);
   renderInsights();
@@ -8508,7 +8516,7 @@ function unapplyInsight(idx){
   });
   ins._applied=false;
   ins._appliedAt=null;
-  _dirty=true;
+  _dirty=true; scheduleAutoSave();
   markDirty();
   saveInsightsToStorage(CUR);
   renderInsights();

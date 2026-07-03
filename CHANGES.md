@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.180 - DEMAND planner auto-saves forecasts (no need to click Save)
+
+Forecast edits now persist to Supabase automatically: a debounced auto-save fires ~1.5s after the last
+edit, calling the existing saveForecasts() (both subcat inputs and SKU-level cells). Concurrent saves are
+guarded (_saving) and a save-in-flight re-fires if more edits arrive. The manual "Save Forecasts" button
+still works (and shows status). Also defined markDirty() so SKU-level edits (FC_DIRTY) correctly set the
+dirty flag — previously they only set FC_DIRTY, so a SKU-only change wasn't picked up by Save.
+
+No new env vars or migrations.
+
 ## v25.179 - PO action-count badge uses the fast 120ms tooltip
 
 The new action-count badge showed its detail via the native title (~1s delay). Switched it to the same fast
