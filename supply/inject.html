@@ -3659,7 +3659,7 @@
     var swX=440,swY=15,swW=120;
     if(kind==='product' && opts.swatchUri) el.push('<image x="'+swX+'" y="'+swY+'" width="'+swW+'" height="'+swW+'" preserveAspectRatio="xMidYMid slice" href="'+opts.swatchUri+'" xlink:href="'+opts.swatchUri+'"/>');
     if(circle){ el.push('<circle cx="405" cy="50" r="30" fill="#111"/>'); el.push(svgText(405,58,circle,{size:circle.length>1?20:25,bold:true,fill:'#fff',anchor:'middle'})); }
-    if(batch){ var by=swY+swW+24; el.push(svgText(swX+swW/2,by,'BATCH '+batch.batch,{size:12,anchor:'middle'})); el.push(svgText(swX+swW/2,by+15,'DATE OF PRODUCTION:',{size:12,bold:true,anchor:'middle'})); el.push(svgText(swX+swW/2,by+30,batch.batch_date?fd(batch.batch_date):'',{size:12,bold:true,anchor:'middle'})); }
+    if(batch){ var by=swY+swW+24; el.push(svgText(swX+swW/2,by,'BATCH '+batch.batch,{size:12,anchor:'middle'})); el.push(svgText(swX+swW/2,by+15,'DATE OF PRODUCTION:',{size:11,bold:true,anchor:'middle'})); el.push(svgText(swX+swW/2,by+30,batch.batch_date?fd(batch.batch_date):'',{size:12,bold:true,anchor:'middle'})); }
     // carton: GRS material text (icon artwork still TODO)
     if(kind==='carton' && r.grs_material){ var gy=afterSku+30; wrapLines(r.grs_material,72).slice(0,4).forEach(function(ln){ el.push(svgText(40,gy,ln,{size:9,fill:'#444'})); gy+=12; }); }
     // barcode

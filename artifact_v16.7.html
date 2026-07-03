@@ -1750,10 +1750,41 @@ function showCsvOverlay(csv,title){
   document.getElementById('csv-overlay').style.display='flex';
 }
 
-// FBA Transfer Upload: tab-separated .txt in Amazon's EXACT send-to-Amazon template.
-// US/CA use the US template (Expiration/Lot cols, in/lb); UK/EU/AU use the UK template
-// (Prep/Labeling owner cols + Default…Seller header rows, cm/kg). Box dims + units/box from
-// window.FBA_DIMS (carton dims per region) injected by the server.
+// ---- minimal XLSX builder (no library): OOXML parts zipped STORE (CRC32, no compression) ----
+function _xlsxEsc(s){ return String(s==null?'':s).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
+function _xlsxCol(i){ var s=''; i=i+1; while(i){ var r=(i-1)%26; s=String.fromCharCode(65+r)+s; i=((i-r)/26)|0; } return s; }
+function _xlsxCell(ref,v){ if(v===''||v==null)return '';
+  if(typeof v==='number'&&isFinite(v)) return '<c r="'+ref+'"><v>'+v+'</v></c>';
+  return '<c r="'+ref+'" t="inlineStr"><is><t xml:space="preserve">'+_xlsxEsc(v)+'</t></is></c>'; }
+function _xlsxSheet(grid){ var rows=grid.map(function(row,ri){ var cells=(row||[]).map(function(v,ci){ return _xlsxCell(_xlsxCol(ci)+(ri+1),v); }).join(''); return cells?'<row r="'+(ri+1)+'">'+cells+'</row>':''; }).join('');
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'+rows+'</sheetData></worksheet>'; }
+function _crc32(buf){ var t=_crc32._t; if(!t){ t=_crc32._t=[]; for(var n=0;n<256;n++){ var c=n; for(var k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1); t[n]=c>>>0; } }
+  var crc=0xFFFFFFFF; for(var i=0;i<buf.length;i++)crc=(crc>>>8)^t[(crc^buf[i])&0xFF]; return (crc^0xFFFFFFFF)>>>0; }
+function _zipStore(files){ var enc=new TextEncoder(), parts=[], len=0, central=[];
+  function u16(n){return new Uint8Array([n&255,(n>>8)&255]);} function u32(n){return new Uint8Array([n&255,(n>>8)&255,(n>>16)&255,(n>>>24)&255]);}
+  function push(u){parts.push(u); len+=u.length;}
+  files.forEach(function(f){ var nm=enc.encode(f.name), data=f.data, crc=_crc32(data), off=len;
+    push(u32(0x04034b50)); push(u16(20)); push(u16(0)); push(u16(0)); push(u16(0)); push(u16(0)); push(u32(crc)); push(u32(data.length)); push(u32(data.length)); push(u16(nm.length)); push(u16(0)); push(nm); push(data);
+    central.push({nm:nm,crc:crc,len:data.length,off:off}); });
+  var cstart=len;
+  central.forEach(function(c){ push(u32(0x02014b50)); push(u16(20)); push(u16(20)); push(u16(0)); push(u16(0)); push(u16(0)); push(u16(0)); push(u32(c.crc)); push(u32(c.len)); push(u32(c.len)); push(u16(c.nm.length)); push(u16(0)); push(u16(0)); push(u16(0)); push(u16(0)); push(u32(0)); push(u32(c.off)); push(c.nm); });
+  var csize=len-cstart;
+  push(u32(0x06054b50)); push(u16(0)); push(u16(0)); push(u16(central.length)); push(u16(central.length)); push(u32(csize)); push(u32(cstart)); push(u16(0));
+  var out=new Uint8Array(len), p=0; parts.forEach(function(u){ out.set(u,p); p+=u.length; }); return out; }
+function buildXlsx(sheetName, grid){ var enc=new TextEncoder();
+  var files=[
+    {name:'[Content_Types].xml', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'},
+    {name:'_rels/.rels', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'},
+    {name:'xl/workbook.xml', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="'+_xlsxEsc(sheetName)+'" sheetId="1" r:id="rId1"/></sheets></workbook>'},
+    {name:'xl/_rels/workbook.xml.rels', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'},
+    {name:'xl/worksheets/sheet1.xml', str:_xlsxSheet(grid)}
+  ];
+  return _zipStore(files.map(function(f){ return {name:f.name, data:enc.encode(f.str)}; })); }
+
+// FBA Transfer Upload: Amazon's official send-to-Amazon manifest as an XLSX (sheet "Create workflow –
+// template"). UK/EU/AU = metric (cm/kg) + Default prep/labeling rows; US/CA = imperial (in/lb). Columns:
+// Merchant SKU, Quantity, Expiration date, Manufacturing lot code, Units/box, #boxes, box L/W/H, weight.
+// Box dims + units/box from window.FBA_DIMS (carton dims per region) injected by the server.
 function downloadFbaTransfer(){
   var us=(CUR==='US'||CUR==='CA');
   var DIMS=(typeof window!=='undefined'&&window.FBA_DIMS)||{};
@@ -1771,31 +1802,32 @@ function downloadFbaTransfer(){
     rows.push([sku,qty,'','',cp||'',box,cl(dd[0]),cl(dd[1]),cl(dd[2]),cl(dd[3])]);
   });
   if(!rows.length){alert('No rows ticked for '+CUR+'. Tick the Ship box on the rows you want to transfer.');return;}
+  // Amazon manifest layout: US/CA imperial (in/lb, headers on row 7); UK/EU/AU metric (cm/kg, Default
+  // prep/labeling rows → headers on row 8). Columns C/D = Expiration date / Manufacturing lot code (optional).
   var hdr=us?[
-    ['Please review the Example tab before you complete this sheet','','','','','','','','',''],
-    ['','','','','','','','','',''],['','','','','','','','','',''],['','','','','','','','','',''],['','','','','','','','','',''],
-    ['','','Optional','','Optional: Use only for case-packed SKUs','','','','',''],
+    ['Please review the Example tab before you complete this sheet'],
+    [],[],[],[],
+    ['','','Optional','','Optional: Use only for case-packed SKUs'],
     ['Merchant SKU','Quantity','Expiration date (MM/DD/YYYY)','Manufacturing lot code','Units per box','Number of boxes','Box length (in)','Box width (in)','Box height (in)','Box weight (lb)']
   ]:[
-    ['Please review the Example tab before you complete this sheet','','','','','','','','',''],
-    ['','','','','','','','','',''],
-    ['Default prep owner','Seller','','','','','','','',''],
-    ['Default labeling owner','Seller','','','','','','','',''],
-    ['','','','','','','','','',''],
-    ['','','Optional','','Optional: Use only for case-packed SKUs','','','','',''],
-    ['Merchant SKU','Quantity','Prep owner','Labeling owner','Units per box','Number of boxes','Box length (cm)','Box width (cm)','Box height (cm)','Box weight (kg)']
+    ['Please review the Example tab before you complete this sheet'],
+    [],
+    ['Default prep owner','Seller'],
+    ['Default labeling owner','Seller'],
+    [],[],
+    ['','','Optional','','Optional: Use only for case-packed SKUs'],
+    ['Merchant SKU','Quantity','Expiration date (MM/DD/YYYY)','Manufacturing lot code','Units per box','Number of boxes','Box length (cm)','Box width (cm)','Box height (cm)','Box weight (kg)']
   ];
-  var txt=hdr.concat(rows).map(function(r){return r.join('\t');}).join('\n')+'\n';
-  var fname='FBA_UP_'+CUR+'_'+new Date().toISOString().slice(0,10)+'.txt';
+  var grid=hdr.concat(rows);
+  var fname='FBA_Transfer_'+CUR+'_'+new Date().toISOString().slice(0,10)+'.xlsx';
   try{
-    var blob=new Blob([txt],{type:'text/tab-separated-values'});
+    var bytes=buildXlsx('Create workflow – template', grid);
+    var blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
     var url=URL.createObjectURL(blob);
     var a=document.createElement('a');a.href=url;a.download=fname;
     document.body.appendChild(a);a.click();
     setTimeout(function(){URL.revokeObjectURL(url);a.remove();},150);
-  }catch(e){
-    showCsvOverlay(txt,'FBA Transfer Upload ('+CUR+') — copy/paste'); // fallback if download is blocked
-  }
+  }catch(e){ alert('FBA Transfer Upload could not be built: '+(e&&e.message||e)); }
 }
 
 function buildReport(type){
@@ -2754,7 +2786,7 @@ var BUY_SCAFFOLD=`<div class="wrap">
         </div>
       </span>
     </span>
-    <button type="button" id="fba-dl-btn" onclick="BP.downloadFbaTransfer()" title="Download ticked rows as a tab-separated FBA Transfer Upload file" style="display:none;margin-left:6px;font-size:10px;padding:1px 8px;border:1px solid #16a34a;border-radius:3px;background:#dcfce7;color:#166534;cursor:pointer;font-weight:600">&#8681; FBA Transfer Upload</button>
+    <button type="button" id="fba-dl-btn" onclick="BP.downloadFbaTransfer()" title="Download ticked rows as an Amazon FBA Transfer Upload workbook (.xlsx)" style="display:none;margin-left:6px;font-size:10px;padding:1px 8px;border:1px solid #16a34a;border-radius:3px;background:#dcfce7;color:#166534;cursor:pointer;font-weight:600">&#8681; FBA Transfer Upload</button>
     <button type="button" id="fba-create-btn" onclick="alert('Feature to build - Direct created shipment in Amazon FBA')" title="Create the shipment directly in Amazon FBA (coming soon)" style="display:none;margin-left:6px;font-size:10px;padding:1px 8px;border:1px solid #d97706;border-radius:3px;background:#fef3c7;color:#92400e;cursor:pointer;font-weight:600">Create FBA Shipment</button>
     <span id="fba-sel-summary" style="display:none;align-items:center;gap:4px;font-size:11px;padding:3px 12px;background:#fef9c3;border:1px solid #fde047;border-radius:5px;color:#713f12"></span>
   </div>

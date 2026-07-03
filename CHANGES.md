@@ -3,6 +3,26 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.166 - FBA Transfer Upload now outputs a valid Amazon .xlsx; barcode label tweak
+
+Two changes:
+
+1. **FBA Transfer Upload (FBA tab) now builds a real `.xlsx`** instead of the TXT that was throwing an
+   error. Matches Amazon's official Send-to-Amazon manifest layout (sheet "Create workflow – template"):
+   - UK/EU/AU = metric (cm/kg) with Default prep/labeling-owner rows, headers on row 8.
+   - US/CA = imperial (in/lb), headers on row 7.
+   - Columns: Merchant SKU, Quantity, Expiration date, Manufacturing lot code, Units per box, Number of
+     boxes, Box L/W/H, Box weight.
+   - XLSX is hand-built client-side (CSP-safe, no library): OOXML parts zipped with a STORE zip + CRC32,
+     inline strings. Validated as a well-formed ZIP with well-formed XML parts.
+   - Filename `FBA_Transfer_<CUR>_<date>.xlsx`.
+   - NOTE: only the single data sheet is generated (not all 4 sheets of Amazon's template). Needs one real
+     upload test against Amazon to confirm acceptance.
+
+2. **Product barcodes:** "DATE OF PRODUCTION:" label reduced by 1pt (12 → 11) per request.
+
+No new env vars or migrations.
+
 ## v25.165 - Fix: ERP-deviations banner now includes COST diffs (matches the badge)
 
 Reported on PO-55USLX-FBA1: the grid showed "Update lines" but the ORDER PLAN ERP-deviations banner was
