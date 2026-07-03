@@ -3,6 +3,27 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.171 - Product/pack/carton dimension fields on planner.products (migration 093)
+
+Added 22 numeric dimension/weight columns to `planner.products` (keyed by sku), sourced from the Airtable
+SKU_CHILD export, UK + US each:
+- prod: `*_prod_width/height/length/weight`
+- pack:  `*_pack_width/height/length` (no pack weight)
+- carton: `*_carton_width/height/length/weight`
+
+Units: cm for dimensions, kg for weights.
+
+DEPLOY (Diviyaj): **migration `093_product_dims.sql`** (also `diviyaj_deploy_2026-07-03_products.sql`) — schema
+only, idempotent (ADD COLUMN IF NOT EXISTS). Applied to sandbox already.
+
+DATA (Ben runs on live): `product_dims_load_2026-07-03.sql` (git-ignored, 91KB) — idempotent ALTER + UPDATE
+for 960 SKUs. 958 matched products in the sandbox; 2 CSV SKUs not in products (PONCHK-CAB-MD-YELL,
+PONCHK-CAB-SM-YELL) are skipped. Match is on sku.
+
+NOTE: `sku_labels` already holds abbreviated carton dims (uk_carton_l/w/h/wt) which the FBA Transfer
+download reads. These new product-master fields are longer-named and currently NOT wired into the FBA
+download — flagged for a follow-up decision (rewiring would also fix SKUs missing carton dims in sku_labels).
+
 ## v25.170 - ERP deviations = quantity only; supplier invoice surfaced in PAYMENTS
 
 Simpler rule + supplier-invoice workflow:
