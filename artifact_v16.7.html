@@ -8105,11 +8105,18 @@ function catFilterRows(q){
     r.style.display=(!q||n.indexOf(q)>=0)?'':'none';
   });
 }
+var _catDocBound=false;
 function toggleCatPop(e){
   if(e)e.stopPropagation();
   var p=document.getElementById('cat-pop');if(!p)return;
   if(p.style.display!=='block'){buildCatPop();p.style.display='block';var s=document.getElementById('cat-search');if(s)s.focus();}
   else p.style.display='none';
+  // close when clicking anywhere outside the category control (bind once). Clicks on the button, chips or
+  // inside the popup stay open because they're all within #catrow1-wrap (the popup's parent).
+  if(!_catDocBound){_catDocBound=true;document.addEventListener('click',function(ev){
+    var pp=document.getElementById('cat-pop');
+    if(pp&&pp.style.display==='block'){var wrap=pp.parentNode;if(wrap&&!wrap.contains(ev.target))closeCatPop();}
+  });}
 }
 function closeCatPop(){var p=document.getElementById('cat-pop');if(p)p.style.display='none';}
 function renderCatControl(){

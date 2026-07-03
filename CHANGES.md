@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.188 - DEMAND category dropdown closes on click-away
+
+The DEMAND "Category" dropdown (#cat-pop) stayed open when clicking elsewhere. Added a one-time
+document click handler that closes it on any click outside #catrow1-wrap (clicks on the button, chips,
+or inside the popup keep it open) — matching the BUY-plan dropdown's behaviour.
+
 ## v25.187 - Pre-launch SKUs now show everywhere (availability view fix, migration 094)
 
 Pre-launch SKUs (flagged available for a market/channel but before their launch date) were hidden from the
