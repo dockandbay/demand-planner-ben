@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.165 - Fix: ERP-deviations banner now includes COST diffs (matches the badge)
+
+Reported on PO-55USLX-FBA1: the grid showed "Update lines" but the ORDER PLAN ERP-deviations banner was
+empty. Cause: the grid badge counts lines differing in qty OR cost, but the banner only checked qty — and
+this PO's 11 diffs were all cost (plan £4.85 vs ERP £4.81). The banner now flags qty AND cost deviations
+(columns: Qty plan→ERP, Cost plan→ERP), so it matches what the badge counts. po-detail now returns erp_cost.
+
 ## v25.164 - PO ▸ ORDER PLAN tab: ERP-deviations banner + Update ERP
 
 Each PO's PLAN ▸ ORDER PLAN tab now shows, at the top, an ERP-deviations banner: the SKUs whose planned qty

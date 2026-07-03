@@ -1686,13 +1686,20 @@
     var banner = unconf>0 ? '<div style="margin:4px 0 8px;padding:7px 11px;background:#fff7ed;border:1px solid #fdba74;border-radius:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
         +'<span style="font-weight:700;color:#92400e">⚠ '+unconf+' unconfirmed supplier change'+(unconf>1?'s':'')+'</span>'
         +'<button class="save-btn op-accept-all" data-po="'+esc(po)+'">Accept all changes</button></div>' : '';
-    // ERP deviations for THIS PO — order-plan lines whose planned qty differs from Fulfil/Cin7. Hidden if none.
+    // ERP deviations for THIS PO — order-plan lines whose planned qty OR cost differs from Fulfil/Cin7
+    // (same set the grid's "Update lines" badge counts). Shows the differing qty and/or cost. Hidden if none.
     var erpDevBlock=(function(){ var dev=(lines||[]).filter(function(l){return l.pending;}); if(!dev.length)return '';
-      var trs=dev.map(function(l){ var plan=Number(l.qty)||0, erp=Number(l.erp_qty||0), dd=plan-erp;
-        return '<tr><td class="l">'+esc(l.sku)+'</td><td style="text-align:right;padding:1px 12px">'+units(plan)+'</td><td style="text-align:right;padding:1px 12px">'+(l.erp_qty==null?'<span class="mut">not in ERP</span>':units(erp))+'</td><td style="text-align:right;padding:1px 12px;font-weight:600;color:'+(dd>=0?'#166534':'#b91c1c')+'">'+(dd>0?'+':'')+units(dd)+'</td></tr>'; }).join('');
+      var red='color:#b91c1c;font-weight:600';
+      var trs=dev.map(function(l){
+        var pq=Number(l.qty)||0, eq=(l.erp_qty==null?null:Number(l.erp_qty));
+        var pc=(l.cost_price==null||l.cost_price==='')?null:Number(l.cost_price), ec=(l.erp_cost==null||l.erp_cost==='')?null:Number(l.erp_cost);
+        var qDiff=(eq==null||pq!==eq), cDiff=(pc!=null&&ec!=null&&Math.abs(pc-ec)>0.0001)||(ec==null&&pc!=null&&eq!=null);
+        var qCell=qDiff?('<span style="'+red+'">'+units(pq)+' → '+(eq==null?'not in ERP':units(eq))+'</span>'):units(pq);
+        var cCell=cDiff?('<span style="'+red+'">'+(pc==null?'—':'$'+money(pc))+' → '+(ec==null?'—':'$'+money(ec))+'</span>'):(pc==null?'<span class="mut">—</span>':'$'+money(pc));
+        return '<tr><td class="l">'+esc(l.sku)+'</td><td style="text-align:right;padding:1px 12px">'+qCell+'</td><td style="text-align:right;padding:1px 12px">'+cCell+'</td></tr>'; }).join('');
       return '<div style="margin:4px 0 10px;padding:9px 12px;background:#eff6ff;border:1px solid #93c5fd;border-radius:6px;max-width:1000px">'
-        +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:5px;flex-wrap:wrap"><span style="font-weight:700;color:#1e40af">⚠ ERP deviations — '+dev.length+' line'+(dev.length>1?'s':'')+' differ from Fulfil/Cin7</span><button class="save-btn op-erp-up-panel" data-po="'+esc(po)+'" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd">⬆ Update ERP</button></div>'
-        +'<table class="tw" style="font-size:11px"><thead><tr><th class="l">SKU</th><th style="text-align:right;padding:1px 12px">Plan</th><th style="text-align:right;padding:1px 12px">ERP</th><th style="text-align:right;padding:1px 12px">Δ</th></tr></thead><tbody>'+trs+'</tbody></table></div>'; })();
+        +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:5px;flex-wrap:wrap"><span style="font-weight:700;color:#1e40af">⚠ ERP deviations — '+dev.length+' line'+(dev.length>1?'s':'')+' differ from Fulfil/Cin7 <span class="mut tiny" style="font-weight:400">(qty and/or cost)</span></span><button class="save-btn op-erp-up-panel" data-po="'+esc(po)+'" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd">⬆ Update ERP</button></div>'
+        +'<table class="tw" style="font-size:11px"><thead><tr><th class="l">SKU</th><th style="text-align:right;padding:1px 12px">Qty (plan → ERP)</th><th style="text-align:right;padding:1px 12px">Cost (plan → ERP)</th></tr></thead><tbody>'+trs+'</tbody></table></div>'; })();
     return '<div class="sect-h">Order plan — agree the final cost price per line '
       +'<button class="lnk-btn op-goto" data-po="'+esc(po)+'" style="margin-left:8px" title="open the full ORDER PLAN filtered to this PO">↗ open in full order plan</button>'
       +'<div class="mut tiny" style="font-weight:400">supplier prices &amp; amendments flow in from the portal; ⚠ = differs from estimate / qty amended · <b>Accept</b> confirms a change · set a final price to override</div></div>'

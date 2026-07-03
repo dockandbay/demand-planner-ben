@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.164';
+const APP_VERSION = 'v25.165';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3490,7 +3490,8 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
   try {
     const [lines, deposit, payments, flexport, supInv, supDocs, notes, subs, lineCosts, supComp, xdShip, addCosts] = await Promise.all([
       pool.query(`SELECT l.sku,l.qty,l.carton_qty,l.full_carton_check,l.cost_price,
-                    el.qty erp_qty, (l.qty IS DISTINCT FROM el.qty) pending
+                    el.qty erp_qty, el.cost erp_cost,
+                    (l.qty IS DISTINCT FROM el.qty OR l.cost_price IS DISTINCT FROM el.cost) pending
                   FROM planner.v_purchase_order_lines l
                   LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
                   WHERE l.po=$1 ORDER BY l.sku`, [po]),
