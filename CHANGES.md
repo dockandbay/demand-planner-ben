@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.174 - Production date exceptions now key off PO status (not the supplier-confirmation field)
+
+The DATES-tab production exceptions were checking `production_status` (the supplier-confirmation field,
+often null) instead of the PO lifecycle `status`. On PO-56UKLX3-AIR (status=PRODUCTION) that wrongly showed
+"Past production start … but status is not set". Reworked to key off the PO `status`
+(FUTURE → PRODUCTION → SHIPPING → DELIVERED → COMPLETE):
+- **Past production START:** only an exception when status is still FUTURE/unset. Once in PRODUCTION+,
+  being past the start date is expected → no exception.
+- **Past production COMPLETION:** an exception when status is still FUTURE or PRODUCTION → message now reads
+  "…but status is still PRODUCTION (should be SHIPPING or READY TO SHIP, or extend date)".
+
+Still gated by require_supplier_confirmation (unchanged set of POs). No new env vars or migrations.
+
 ## v25.173 - ERP deviations table: SKU column shows full SKU (was clipping)
 
 The ERP deviations table (ORDER PLAN) was clipping the SKU to ~10 chars. Cause: the global

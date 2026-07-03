@@ -487,12 +487,16 @@
   var PROD_STATUS=[['not_started','Not started'],['in_production','In production'],['nearing_completion','Nearing completion'],['complete','Complete'],['shipped','Shipped']];
   function prodStatusOpts(sel){ return PROD_STATUS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===sel?' selected':'')+'>'+o[1]+'</option>';}).join(''); }
   function prodStatusLabel(v){ var m=PROD_STATUS.filter(function(o){return o[0]===v;}); return m.length?m[0][1]:''; }
-  // logic-based exception on the supplier production status vs the production dates (returns '' when fine)
-  function prodStatusStart(ps, prodStart, today){ ps=ps||''; today=today||new Date().toISOString().slice(0,10);
-    if((ps===''||ps==='not_started') && prodStart && prodStart<today) return 'Past production start ('+fd(prodStart)+') but status is '+(ps?prodStatusLabel(ps):'not set'); return ''; }
-  function prodStatusEnd(ps, prodEnd, today){ ps=ps||''; today=today||new Date().toISOString().slice(0,10);
-    if(ps!=='complete' && ps!=='shipped' && prodEnd && prodEnd<today) return 'Past production completion ('+fd(prodEnd)+') but status is '+(ps?prodStatusLabel(ps):'not set'); return ''; }
-  function prodStatusException(ps, prodStart, prodEnd, today){ return prodStatusStart(ps,prodStart,today) || prodStatusEnd(ps,prodEnd,today); }
+  // Logic-based exception on the PO LIFECYCLE STATUS vs the production dates (returns '' when fine).
+  // Status order: FUTURE → PRODUCTION → SHIPPING → DELIVERED → COMPLETE.
+  function prodStatusStart(status, prodStart, today){ var s=String(status||'').toUpperCase(); today=today||new Date().toISOString().slice(0,10);
+    // past the start date but the PO hasn't entered production yet (still FUTURE / unset). Once in PRODUCTION+
+    // it has started, so being past the start date is expected — not an exception.
+    if(prodStart && prodStart<today && (s===''||s==='FUTURE')) return 'Past production start ('+fd(prodStart)+') but status is still '+(s||'not set')+' (should be PRODUCTION, or extend date)'; return ''; }
+  function prodStatusEnd(status, prodEnd, today){ var s=String(status||'').toUpperCase(); today=today||new Date().toISOString().slice(0,10);
+    // past the completion date but still in production (or not yet started) — should have moved on to shipping.
+    if(prodEnd && prodEnd<today && (s===''||s==='FUTURE'||s==='PRODUCTION')) return 'Past production completion ('+fd(prodEnd)+') but status is still '+(s||'not set')+' (should be SHIPPING or READY TO SHIP, or extend date)'; return ''; }
+  function prodStatusException(status, prodStart, prodEnd, today){ return prodStatusStart(status,prodStart,today) || prodStatusEnd(status,prodEnd,today); }
   function cfLastMonth(cur){ var y=+cur.slice(0,4), m=+cur.slice(5,7)-1; return m===0?((y-1)+'-12'):(y+'-'+('0'+m).slice(-2)); }
   // Payment actions from the cash flow + other-payment register (timing = likely date if set, else due date):
   //   • one summary for UNPAID due LAST month  •  one INDIVIDUAL action per AGED unpaid item (before last month).
@@ -1461,7 +1465,7 @@
     var landed=[]; if(open && frEst==null && !isFOB && !r.shipment) landed.push('No freight rate for destination'+(r.country?' ('+r.country+')':'')+' — can’t estimate sea freight');
     var dates=[]; if(r.sup_completion_pending) dates.push('Supplier completion date '+fd(r.sup_completion_pending)+' awaiting approve/reject');
     // only flag a missing/late production status when this production actually requires supplier confirmation
-    var _pse=r.require_confirmation?prodStatusException(r.production_status, r.prod_start, r.prod_end, today):''; if(_pse) dates.push('Production status: '+_pse);
+    var _pse=r.require_confirmation?prodStatusException(r.status, r.prod_start, r.prod_end, today):''; if(_pse) dates.push('Production status: '+_pse);
     var timeline=[]; if(Number(r.unread_notes)>0) timeline.push(r.unread_notes+' unread supplier note'+(r.unread_notes>1?'s':''));
     var oplan=[]; if(Number(r.orderplan_unconfirmed)>0) oplan.push(r.orderplan_unconfirmed+' unconfirmed order-plan change'+(r.orderplan_unconfirmed>1?'s':''));
     return { pay:pay, dates:dates, client:[], landed:landed, timeline:timeline, oplan:oplan, all:pay.concat(dates).concat(landed).concat(timeline).concat(oplan) }; }
@@ -1607,8 +1611,8 @@
     // ---- DATES chunk — only production start & end are editable; ship/delivery/completion are always calculated
     // (from the assigned shipment if any, else from supplier + branch lead times).
     function srcLbl(s){ return s==='S'?'<span class="src fx">shipment</span>':s==='FLEX'?'<span class="src fx">Flexport</span>':s==='calc'?'calculated':'—'; }
-    var _pseStart=r.require_confirmation?prodStatusStart(r.production_status,r.prod_start):'';
-    var _pseEnd=r.require_confirmation?prodStatusEnd(r.production_status,r.prod_end):'';
+    var _pseStart=r.require_confirmation?prodStatusStart(r.status,r.prod_start):'';
+    var _pseEnd=r.require_confirmation?prodStatusEnd(r.status,r.prod_end):'';
     var _alert=function(m){ return m?' <span style="color:#b91c1c;font-weight:600">⚠ '+esc(m)+'</span>':''; };
     var datesH='<div class="sect-h">Dates <span class="mut tiny">— only production start &amp; end are editable; the rest auto-calculate</span></div>'
       +'<div class="tw" style="max-width:760px"><table><thead><tr><th class="l">Milestone</th><th class="l">Date</th><th class="l" style="min-width:250px">Source</th></tr></thead><tbody>'
