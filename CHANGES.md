@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.192 - ORDER PLAN add-SKU: searchable supplier-scoped SKU picker
+
+The add-SKU inputs in ORDER PLAN edit mode are now a searchable picker (datalist) limited to the PO's
+supplier's SKUs (via /api/supply/supplier-skus), showing SKU + product name — same UX as the "assign
+shipment" box. Populated on entering edit mode.
+
 ## v25.191 - PO ORDER PLAN tab: edit quantities, add SKUs, copy SKU+Qty
 
 The per-PO ORDER PLAN grid (PURCHASE ORDERS ▸ expand ▸ ORDER PLAN) is now editable:
