@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.183 - Fix 1mo/3mo trend picking up the partial current month (showed -100%)
+
+The stacked 1mo/3mo trend column used `sales[CUR_MONTH]` — CUR_MONTH is the leading PARTIAL month (e.g. the
+current month with only a few days of data), so the 1-month trend read ~-100% on many rows, and the 3-month
+trend used `ACTUAL_MONTHS.slice(-3)` which included that partial month. Now both use completed months only:
+1mo = CUR_YTD_END (last complete month) vs same month last year; 3mo = the 3 completed months up to
+CUR_YTD_END. This matches the other (already-correct) trend calc. No new env vars or migrations.
+
 ## v25.182 - Remove DEMAND Save/Refresh buttons; ERP delivery-date banner on DATES tab
 
 - **Removed the "Save Forecasts" and "Refresh" toolbar buttons** in DEMAND (auto-save now handles

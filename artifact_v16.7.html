@@ -5691,10 +5691,12 @@ function insertInlineSkuRows(s,co,ch,afterTr){
           +(yoyYTD!=null?'<div class="'+(yoyYTD>0?'gp':yoyYTD<0?'rp':'fp')+'" style="font-size:8px;font-weight:600">'+(yoyYTD>0?'+':'')+yoyYTD+'%</div>':'');
 
       } else if(ci===5){
-        // Trends stacked: 1mo over 3mo
-        var mo1_26=sales[CUR_MONTH]||0, mo1_25=sales[(parseInt(CUR_MONTH.slice(0,4))-1)+'_'+CUR_MONTH.slice(5)]||0;
+        // Trends stacked: 1mo over 3mo — over the last COMPLETED full month(s). The current month (CUR_MONTH)
+        // is partial, so exclude it: use CUR_YTD_END (= last complete month) and the 3 completed months up to it.
+        var _lc=CUR_YTD_END;
+        var mo1_26=sales[_lc]||0, mo1_25=sales[(parseInt(_lc.slice(0,4))-1)+'_'+_lc.slice(5)]||0;
         var t1=mo1_25>0?Math.round((mo1_26-mo1_25)/mo1_25*100):null;
-        var t3months=ACTUAL_MONTHS.slice(-3);
+        var t3months=ACTUAL_MONTHS.filter(function(m){return m<=_lc;}).slice(-3);   // 3 completed months (excludes the partial current month)
         var t3_26=t3months.reduce(function(a,m){return a+(sales[m]||0);},0);
         var t3_25=t3months.map(function(m){return (parseInt(m.slice(0,4))-1)+'_'+m.slice(5);}).reduce(function(a,m){return a+(sales[m]||0);},0);
         var t3=t3_25>0?Math.round((t3_26-t3_25)/t3_25*100):null;
