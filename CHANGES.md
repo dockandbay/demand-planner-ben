@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.190 - Update-ERP modal: show current Cin7 date → completion date on the date button
+
+The "Update Cin7 Date" button in the Update-ERP modal now spells out the change: "Cin7 EstimatedDeliveryDate:
+<current ERP date> → <this PO's completion date>", so you can see exactly what it will write before clicking.
+
 ## v25.189 - STOCK column: next-inbound date + hover list of all inbound
 
 The DEMAND sticky STOCK column showed on-hand / >>inbound-qty. Now under the inbound quantity it also shows

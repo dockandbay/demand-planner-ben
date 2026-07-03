@@ -1247,7 +1247,8 @@
       +'<div style="font-weight:700;font-size:15px;margin-bottom:6px">Update ERP'+(po?(' — '+esc(po)):'')+'</div>'
       +manualBlk
       +'<div style="margin-top:12px;border-top:1px solid #eee;padding-top:12px;display:flex;flex-direction:column;gap:8px">'
-        +(showDate?'<div><button class="save-btn" id="erp-cin7" style="background:#0b6;color:#fff;border-color:#0b6">📅 Update Cin7 Date</button> <span class="mut tiny">sets the Cin7 PO EstimatedDeliveryDate to this PO\'s Completion date (live write)</span></div>':'')
+        +(showDate?'<div><button class="save-btn" id="erp-cin7" style="background:#0b6;color:#fff;border-color:#0b6">📅 Update Cin7 Date</button>'
+            +' <span class="mut tiny">Cin7 EstimatedDeliveryDate: <b>'+(_r.erp_final_delivery?fd(_r.erp_final_delivery):'—')+'</b> &rarr; <b>'+(_r.checkin?fd(_r.checkin):'—')+'</b> (this PO&rsquo;s completion date) &middot; live write</span></div>':'')
         +(showLines?'<div><button class="save-btn" id="erp-cin7-lines" style="background:#0a8;color:#fff;border-color:#0a8">📦 Update / Create Cin7 PO (SKUs / Qty / Price)</button> <span class="mut tiny">updates the Cin7 PO, or creates it if not in Cin7 — price = approved supplier final cost, else standard (live write)</span></div>':'')
       +'</div>'
       +'<div class="mut tiny" id="erp-msg" style="margin-top:10px"></div>'
