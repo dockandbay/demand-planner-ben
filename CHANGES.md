@@ -3,6 +3,23 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.170 - ERP deviations = quantity only; supplier invoice surfaced in PAYMENTS
+
+Simpler rule + supplier-invoice workflow:
+
+- **ERP deviations are now QUANTITY-only.** Price/cost differences between the order plan and the ERP are
+  never raised as an exception (banner, ORDER PLAN badge, grid ERP Sync, and the alert). When the user
+  pushes an update to the ERP, the cost still rides along (the push already writes erp_cost=cost_price), so
+  prices sync on update without ever nagging. Dropped the cost-trigger machinery entirely.
+- **Supplier invoice in PO ▸ PLAN ▸ PAYMENTS.** The portal-submitted invoice now sits directly under
+  "Final invoice amount" as **"Supplier Submitted Invoice Total"**, with an **Apply → final** button (writes
+  it into the Final invoice amount) and the uploaded **invoice document download**. Apply now also works to
+  re-sync if the final was edited after a prior apply (only a rejected submission can't be applied).
+- **PAYMENTS tab notification:** a pending supplier invoice already surfaces as an action item on the
+  PAYMENTS sub-tab badge (unchanged) — confirmed it fires when the supplier submits.
+
+No new env vars or migrations.
+
 ## v25.169 - ERP deviations: correct cost-trigger signal, ORDER PLAN action badge, wider SKU column
 
 Follow-ups to the ERP-deviation feature:

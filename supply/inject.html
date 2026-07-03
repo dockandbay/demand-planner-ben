@@ -1536,20 +1536,24 @@
       +'<div class="cli-form" style="max-width:760px">'
       +cliRow('Estimate <span class="mut tiny">(order plan)</span>', money(r.value_est))
       +cliRow('<b>Final invoice amount</b>', '<input class="fci payin" style="width:120px;text-align:left" inputmode="decimal" data-ep="'+ep+'" data-field="supplier_invoice_total" value="'+esc(r.final_invoice==null?'':r.final_invoice)+'"> <span class="mut tiny">blank = use estimate</span>')
+      // Supplier-submitted invoice total (from the portal) — shown right next to the Final invoice amount so it
+      // can be reviewed and applied. "Apply → final" writes it into supplier_invoice_total; the doc downloads here.
+      +(function(){ var si=d&&d.sup_invoice, docs=(d&&d.sup_docs)||[]; var out='';
+        if(si && si.status!=='dismissed'){ var sv=Number(si.value), fv=(r.final_invoice!=null?Number(r.final_invoice):null);
+          var pend=(si.status==='pending'), applied=(si.status==='applied'), differs=(fv!=null&&Math.abs(sv-fv)>0.01), canApply=(fv==null||differs);
+          var tag= pend?'<span class="tool-badge bg-amber">⏳ new — awaiting review</span>'
+                 : applied?(differs?'<span class="tool-badge bg-amber">applied · final changed since (Δ '+money(Math.abs(sv-fv))+')</span>':'<span class="tool-badge bg-green">applied to final</span>'):'';
+          out+=cliRow('<b>Supplier Submitted Invoice Total</b> <span class="mut tiny">'+esc(si.submitted_at||'')+(si.submitted_by?' · '+esc(si.submitted_by):'')+'</span>',
+            '<b>'+money(sv)+'</b> '+tag
+            +(canApply?' <button class="save-btn inv-approve" data-id="'+si.id+'" title="set this as the Final invoice amount">Apply → final</button>':'')
+            +(pend?' <button class="save-btn light inv-reject" data-id="'+si.id+'" title="reject this submission">Reject</button>':'')); }
+        if(docs.length){ out+=cliRow('Invoice document'+(docs.length>1?'s':''), docs.map(function(x){return '<a href="/api/supply/portal-attachment/'+x.id+'" target="_blank" rel="noopener">⤓ '+esc(x.filename||'download')+'</a>';}).join(' · ')); }
+        return out; })()
       +cliRow('Upload &amp; parse invoice <span class="mut tiny">(.xlsx → proposes SKU / qty / price changes to the Order Plan to confirm)</span>',
           '<input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="inv-parse-file" data-po="'+esc(r.po)+'" style="font-size:11px">'
           +' <button class="save-btn inv-parse-go" data-po="'+esc(r.po)+'">Parse invoice</button>'
           +'<div class="inv-parse-out" data-po="'+esc(r.po)+'" style="margin-top:6px"></div>')
       +cliRow('<b>Final payment due</b>', dateField(r.final_payment_due,{attrs:'data-ep="'+ep+'" data-field="balance_due_date_overide"', cls:'txtin', width:'130px'})+' <span class="mut tiny">blank = calculated balance due date</span>')
-      +(function(){ var si=d&&d.sup_invoice, docs=(d&&d.sup_docs)||[]; var out='';
-        if(si){ var sv=Number(si.value), fv=(r.final_invoice!=null?Number(r.final_invoice):null), disc=(si.status==='applied'&&fv!=null&&Math.abs(sv-fv)>0.01), pend=(si.status==='pending');
-          out+=cliRow('Supplier submitted <span class="mut tiny">'+esc(si.submitted_at||'')+' · '+(si.status==='applied'?'applied':si.status==='dismissed'?'dismissed':'pending')+'</span>',
-            '<span'+(pend?' style="background:#fef3c7;color:#92400e;font-weight:700;padding:0 4px;border-radius:3px"':disc?' style="background:#fef3c7;color:#92400e;font-weight:700;padding:0 4px;border-radius:3px"':'')+'>'+money(sv)
-            +(pend?' ⏳ awaiting approval':disc?' ⚠ differs (Δ '+money(Math.abs(sv-fv))+')':(si.status==='applied'?' <span class="tool-badge bg-green">applied to final</span>':si.status==='dismissed'?' <span class="tool-badge bg-neutral">rejected</span>':''))+'</span>'
-            +(pend?' <button class="save-btn inv-approve" data-id="'+si.id+'" title="apply this value as the Final Invoice Amount">Approve → final</button>'
-                  +' <button class="save-btn light inv-reject" data-id="'+si.id+'" title="reject this submission">Reject</button>':'')); }
-        if(docs.length){ out+=cliRow('Invoice doc'+(docs.length>1?'s':''), docs.map(function(x){return '<a href="/api/supply/portal-attachment/'+x.id+'" target="_blank" rel="noopener">'+esc(x.filename||'view')+'</a>';}).join(' · ')); }
-        return out; })()
       +cliRow('Value used', '<b>'+money(r.value_used)+'</b>'+(r.is_final?' <span class="tool-badge bg-green">final</span>':''))
       +cliRow('<b>Total amount due</b>', '<b'+(totalDue>0.02?' style="color:#991b1b"':'')+'>'+money(totalDue)+'</b> <span class="mut tiny">remaining'+(paid>0.01?' · '+money(paid)+' paid':'')+'</span>')
       +'</div>'
@@ -1654,10 +1658,10 @@
     var exc=poExceptions(r,d);
     return { client:clientH, pay:payH, dates:datesH, landed:landedH, ex:{ pay:exc.pay.length, dates:exc.dates.length, client:exc.client.length, landed:exc.landed.length, timeline:exc.timeline.length, oplan:exc.oplan.length } }; }
   // ---- ORDER PLAN (PO PLAN): SKU × qty × est/supplier-submitted/final cost + line totals + order total ----
-  // Shared ERP-deviation rule (banner + ORDER PLAN tab action badge use the SAME set): focus SKU + QUANTITY;
-  // cost drift only counts when the supplier has given a price (erpMeta.costCheck); COMPLETE POs = none.
-  function erpDevLines(lines,erpMeta){ erpMeta=erpMeta||{}; if(erpMeta.complete)return []; var costOn=!!erpMeta.costCheck;
-    return (lines||[]).filter(function(l){ return l.qty_pending || (costOn && l.cost_pending); }); }
+  // Shared ERP-deviation rule (banner + ORDER PLAN tab action badge use the SAME set): QUANTITY only —
+  // price differences are never an exception. COMPLETE POs raise nothing.
+  function erpDevLines(lines,erpMeta){ erpMeta=erpMeta||{}; if(erpMeta.complete)return [];
+    return (lines||[]).filter(function(l){ return l.qty_pending; }); }
   function orderPlanPanel(po,lines,costs,addc,erpMeta){ costs=costs||{}; addc=addc||[]; erpMeta=erpMeta||{};
     var totQ=0, totC=0, lineSkus={}, unconf=0; (lines||[]).forEach(function(l){lineSkus[l.sku]=1;});
     function row(sku,orderQty,est,lcr,added){ lcr=lcr||{};
@@ -1694,22 +1698,17 @@
     // trusted price to assert (final invoice uploaded OR supplier-submitted portal prices). COMPLETE POs are
     // ignored entirely. Same rule as the grid's "Update lines" badge. Outline = light yellow exception box.
     var erpDevBlock=(function(){
-      var costOn=!!erpMeta.costCheck;                     // only compare cost with a supplier-given price
       var dev=erpDevLines(lines,erpMeta);
       if(!dev.length)return '';
       var red='color:#b91c1c;font-weight:600';
       var skuTd='class="l" style="min-width:260px;white-space:nowrap"';
       var trs=dev.map(function(l){
         var pq=Number(l.qty)||0, eq=(l.erp_qty==null?null:Number(l.erp_qty));
-        var qCell=l.qty_pending?('<span style="'+red+'">'+units(pq)+' → '+(eq==null?'not in ERP':units(eq))+'</span>'):units(pq);
-        if(!costOn) return '<tr><td '+skuTd+'>'+esc(l.sku)+'</td><td style="text-align:right;padding:1px 12px">'+qCell+'</td></tr>';
-        var pc=(l.cost_price==null||l.cost_price==='')?null:Number(l.cost_price), ec=(l.erp_cost==null||l.erp_cost==='')?null:Number(l.erp_cost);
-        var cCell=l.cost_pending?('<span style="'+red+'">'+(pc==null?'—':'$'+money(pc))+' → '+(ec==null?'—':'$'+money(ec))+'</span>'):(pc==null?'<span class="mut">—</span>':'$'+money(pc));
-        return '<tr><td '+skuTd+'>'+esc(l.sku)+'</td><td style="text-align:right;padding:1px 12px">'+qCell+'</td><td style="text-align:right;padding:1px 12px">'+cCell+'</td></tr>'; }).join('');
-      var costTh=costOn?'<th style="text-align:right;padding:1px 12px">Cost (plan → ERP)</th>':'';
+        var qCell='<span style="'+red+'">'+units(pq)+' → '+(eq==null?'not in ERP':units(eq))+'</span>';
+        return '<tr><td '+skuTd+'>'+esc(l.sku)+'</td><td style="text-align:right;padding:1px 12px">'+qCell+'</td></tr>'; }).join('');
       return '<div style="margin:4px 0 10px;padding:9px 12px;background:#fefce8;border:1px solid #eab308;border-radius:6px;max-width:1000px">'
-        +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:5px;flex-wrap:wrap"><span style="font-weight:700;color:#854d0e">⚠ ERP deviations — '+dev.length+' line'+(dev.length>1?'s':'')+' differ from Fulfil/Cin7 <span class="mut tiny" style="font-weight:400">('+(costOn?'qty &amp; cost':'qty')+')</span></span><button class="save-btn op-erp-up-panel" data-po="'+esc(po)+'" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5">⬆ Upload to ERP</button></div>'
-        +'<table class="tw" style="font-size:11px"><thead><tr><th class="l" style="min-width:260px">SKU</th><th style="text-align:right;padding:1px 12px">Qty (plan → ERP)</th>'+costTh+'</tr></thead><tbody>'+trs+'</tbody></table></div>'; })();
+        +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:5px;flex-wrap:wrap"><span style="font-weight:700;color:#854d0e">⚠ ERP deviations — '+dev.length+' line'+(dev.length>1?'s':'')+' differ from Fulfil/Cin7 <span class="mut tiny" style="font-weight:400">(quantity)</span></span><button class="save-btn op-erp-up-panel" data-po="'+esc(po)+'" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5">⬆ Upload to ERP</button> <span class="mut tiny">prices are pushed with the update too</span></div>'
+        +'<table class="tw" style="font-size:11px"><thead><tr><th class="l" style="min-width:260px">SKU</th><th style="text-align:right;padding:1px 12px">Qty (plan → ERP)</th></tr></thead><tbody>'+trs+'</tbody></table></div>'; })();
     return '<div class="sect-h">Order plan — agree the final cost price per line '
       +'<button class="lnk-btn op-goto" data-po="'+esc(po)+'" style="margin-left:8px" title="open the full ORDER PLAN filtered to this PO">↗ open in full order plan</button>'
       +'<div class="mut tiny" style="font-weight:400">supplier prices &amp; amendments flow in from the portal; ⚠ = differs from estimate / qty amended · <b>Accept</b> confirms a change · set a final price to override</div></div>'
@@ -1933,8 +1932,8 @@
   function poDetailHTML(po,d,i){ function blk(t,rows){return '<div class="sect-h">'+t+' ('+rows.length+')</div>'+(rows.length?tableHTML(rows):'<div class="count">none linked</div>');}
     var p=payPanel(poBy[po],d);
     if(!p||typeof p==='string') return '<div class="count">No PO data.</div>';
-    var erpMeta={complete:d.erp_complete,costCheck:d.erp_cost_check};
-    var erpN=erpDevLines(d.lines,erpMeta).length;   // ERP deviations → action badge on the ORDER PLAN tab
+    var erpMeta={complete:d.erp_complete};
+    var erpN=erpDevLines(d.lines,erpMeta).length;   // ERP deviations (qty-only) → action badge on ORDER PLAN tab
     var oplanH=orderPlanPanel(po,d.lines,d.line_costs,d.additional_costs,erpMeta);
     var timelineH=timelinePanel(po,d);
     var linkedH='<div class="sect-h">Linked records across tables</div>'+blk('Deposit',d.deposit)+blk('Payments',d.payments)+blk('Flexport',d.flexport);

@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.169';
+const APP_VERSION = 'v25.170';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1264,17 +1264,11 @@ app.get('/api/supply/:section', async (req, res) => {
             coalesce(starred,false) starred,   -- ⭐ Focus / favourite toggle (migration 082)
             -- ERP sync: drift = planned qty/cost differs from the ERP MIRROR (planner.erp_purchase_order_lines,
             -- fed by n8n). erp_in/erp_total drive the 3-state badge (✓ match / ⚠ drift / ✗ not in ERP).
-            -- Focus: SKU + QUANTITY. Cost/price drift is only flagged once the supplier has actually given us a
-            -- price via the portal — line-cost adjustments (portal_line_costs.actual_cost/final_cost) OR a
-            -- submitted invoice value (supplier_submissions kind=invoice_value, not rejected/superseded). NOTE:
-            -- purchase_orders.supplier_invoice_total is populated broadly from import, so it is NOT a valid
-            -- signal. COMPLETE POs are ignored entirely.
+            -- ERP deviation = QUANTITY only. Price differences are NEVER an exception (cost still rides along
+            -- when the user pushes an update — see erp_cost=cost_price on the push). COMPLETE POs are ignored.
             (CASE WHEN coalesce(status,'') ILIKE '%complete%' THEN 0 ELSE
               (SELECT count(*) FROM planner.purchase_order_lines l LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
-                 WHERE l.po=calc4.po AND ( l.qty IS DISTINCT FROM el.qty
-                   OR ( (EXISTS(SELECT 1 FROM planner.portal_line_costs plc WHERE plc.po=calc4.po AND (plc.actual_cost IS NOT NULL OR plc.final_cost IS NOT NULL))
-                          OR EXISTS(SELECT 1 FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='invoice_value' AND coalesce(ss.status,'') NOT IN ('rejected','superseded')))
-                        AND l.cost_price IS DISTINCT FROM el.cost) )) END)::int erp_pending,
+                 WHERE l.po=calc4.po AND l.qty IS DISTINCT FROM el.qty) END)::int erp_pending,
             (SELECT count(*) FROM planner.purchase_order_lines l JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku WHERE l.po=calc4.po)::int erp_in,
             (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=calc4.po)::int erp_total,
             -- ERP date misalignment: our calculated "completed at warehouse" date (eff_checkin) vs the
@@ -2790,7 +2784,9 @@ app.post('/api/supply/submission/:id/apply', async (req, res) => {
   try {
     const s = (await pool.query(`SELECT * FROM planner.supplier_submissions WHERE id=$1`, [req.params.id])).rows[0];
     if (!s) return res.status(404).json({ error: 'no such submission' });
-    if (s.status !== 'pending') return res.status(400).json({ error: 'already ' + s.status });
+    // allow (re)apply on pending OR already-applied (e.g. the final was later edited and needs re-syncing);
+    // only a rejected/dismissed submission can't be applied.
+    if (s.status === 'dismissed') return res.status(400).json({ error: 'this submission was rejected' });
     let applied;
     if (s.kind === 'completion_date') { await pool.query(`UPDATE planner.purchase_orders SET end_production_overide=$1::date, updated_at=now() WHERE po=$2`, [s.value, s.po]); applied = 'production-end → ' + s.value; }
     else if (s.kind === 'invoice_value') { await pool.query(`UPDATE planner.purchase_orders SET supplier_invoice_total=$1::numeric, updated_at=now() WHERE po=$2`, [s.value, s.po]); applied = 'invoice total → $' + s.value; }
@@ -3547,12 +3543,9 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
       pool.query(`SELECT sku, qty FROM planner.crossdock_shipments WHERE po=$1`, [po]).catch(() => ({ rows: [] })),
       // ORDER PLAN: supplier-entered additional cost lines for this PO
       pool.query(`SELECT id, coalesce(description,'') description, qty, price FROM planner.portal_additional_costs WHERE po=$1 ORDER BY id`, [po]).catch(() => ({ rows: [] })),
-      // ERP-deviation gate for THIS PO: is it COMPLETE (→ ignore the check), and has the supplier actually
-      // given us a price via the portal — line-cost adjustments OR a submitted invoice value — that justifies
-      // flagging cost drift? (supplier_invoice_total is import-populated, so it is NOT used here.)
-      pool.query(`SELECT coalesce(p.status,'') ILIKE '%complete%' AS is_complete,
-                    (EXISTS(SELECT 1 FROM planner.portal_line_costs plc WHERE plc.po=p.po AND (plc.actual_cost IS NOT NULL OR plc.final_cost IS NOT NULL))
-                      OR EXISTS(SELECT 1 FROM planner.supplier_submissions ss WHERE ss.po=p.po AND ss.kind='invoice_value' AND coalesce(ss.status,'') NOT IN ('rejected','superseded'))) AS cost_check
+      // ERP-deviation gate for THIS PO: only COMPLETE matters (deviations are quantity-only; price is never
+      // an exception, so no cost-trigger signal is needed).
+      pool.query(`SELECT coalesce(p.status,'') ILIKE '%complete%' AS is_complete
                   FROM planner.purchase_orders p WHERE p.po=$1`, [po]).catch(() => ({ rows: [] })),
     ]);
     const lc = {}; lineCosts.rows.forEach(r => { lc[r.sku] = r; });
@@ -3562,8 +3555,7 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
       client_docs: supDocs.rows.filter(x => x.category === 'client'),
       notes: notes.rows, subs: subs.rows, line_costs: lc,
       sup_completion: supComp.rows[0] || null, crossdock_shipped: xdShip.rows, additional_costs: addCosts.rows,
-      erp_complete: !!(poMeta.rows[0] && poMeta.rows[0].is_complete),
-      erp_cost_check: !!(poMeta.rows[0] && poMeta.rows[0].cost_check) });
+      erp_complete: !!(poMeta.rows[0] && poMeta.rows[0].is_complete) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // SHIPS-WITH master label fields for one PO. source supplier + production ref = this PO; ships-with supplier + PO
