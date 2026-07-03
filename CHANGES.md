@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.157 - PRODUCTIONS folded into PURCHASE ORDERS (shared sub-nav)
+
+Removed the standalone PRODUCTIONS top-menu item. PURCHASE ORDERS is now the umbrella with a sub-nav:
+**PLAN** (the PO grid — default) · Productions · Deposits · Other Payments · Payments Due · Payments Report ·
+Barcodes. All former PRODUCTIONS content moved under it unchanged. Routing rewired to
+/supply/purchase-orders[/<sub-tab>]; legacy /supply/productions and /supply/purchase-orders/<PO> links still
+resolve (PO numbers open PLAN + that PO; known sub-tab names open that tab). Internal navigation (deposit /
+other-payment jumps, refresh-after-edit) rewired to the new sub-tabs. No schema change.
+
 ## v25.156 - Actions: Unassigned shipment / Partial cartons / Awaiting supplier confirmation → LOW severity
 
 Reclassified these three action types from amber to **low** severity: "Unassigned shipment", "Partial cartons

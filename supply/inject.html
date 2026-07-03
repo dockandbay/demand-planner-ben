@@ -295,7 +295,7 @@
 <script src="/portal-view.js"></script>
 <script>
 (function(){
-  var SECTIONS=[['actions','ACTIONS'],['reports','BI & REPORTS'],['productions','PRODUCTIONS'],['purchase-orders','PURCHASE ORDERS'],['order-plan','ORDER PLAN'],
+  var SECTIONS=[['actions','ACTIONS'],['reports','BI & REPORTS'],['purchase-orders','PURCHASE ORDERS'],['order-plan','ORDER PLAN'],
     ['shipments','SHIPMENTS'],['samples','SAMPLES'],
     ['config','CONFIG']];
   // REPORTS is a parent tab; these are its sub-tabs (the read-across views).
@@ -838,10 +838,10 @@
   function bindShipPick(){ document.querySelectorAll('#supply-root .ship-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openShipAssign(b.dataset.po,b); }; }); }
   // open a shipment from elsewhere: jump to SHIPMENTS and expand that shipment's row
   function gotoShipment(ref){ _pendingShip=ref; selectSection('shipments'); }
-  function gotoPO(po,tab){ _pendingPO=po; _pendingPOTab=tab||null; selectSection('purchase-orders'); }
+  function gotoPO(po,tab){ _pendingPO=po; _pendingPOTab=tab||null; showPoSub('plan'); }
   function gotoOrderPlan(po){ _pendingOP={po:po}; selectSection('order-plan'); }   // → full ORDER PLAN, PO pre-filtered
-  function gotoDeposit(ref){ _pendingDep=ref; prodTab='deposits'; selectSection('productions'); }   // → PRODUCTIONS ▸ Deposits, filtered to this ref
-  function gotoOther(){ prodTab='other'; selectSection('productions'); }   // → PRODUCTIONS ▸ Other Payments
+  function gotoDeposit(ref){ _pendingDep=ref; showPoSub('deposits'); }   // → PURCHASE ORDERS ▸ Deposits, filtered to this ref
+  function gotoOther(){ showPoSub('other'); }   // → PURCHASE ORDERS ▸ Other Payments
   function bindShipOpen(){ document.querySelectorAll('#supply-root .ship-open').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); gotoShipment(b.dataset.ref); }; }); }
   // after a view renders, expand the pending PO / shipment row (set by gotoPO / gotoShipment)
   function expandPending(sel,want){ if(!want)return false; var btn=null;
@@ -1001,7 +1001,7 @@
     // a filter <select> with a non-default value is highlighted black/white so active filters stand out
     var SEL_ON=';background:#0f172a;color:#fff;border-color:#0f172a;font-weight:700';
     var _excOn=Object.keys(state.act||{}).some(function(k){return state.act[k];});
-    c.innerHTML=annot('purchase-orders')
+    c.innerHTML=annot('purchase-orders')+poSubNav()
       +'<div class="bar" id="po-prog">'+FILTERS.map(function(f){return '<span class="pill'+(f[0]===state.f?' active':'')+'" data-f="'+f[0]+'">'+f[1]+'</span>';}).join('')
       +'<span class="pill po-recent'+(state.recent?' active':'')+'" data-recent title="when on, Completed shows only POs completed in the last 12 months (faster)">📅 Last 12m</span>'
       +'<span class="pill po-focus'+(state.focus?' active':'')+'" data-focus title="show only starred POs (active only — completed are hidden)">★ Focus</span>'
@@ -1022,6 +1022,7 @@
       +'</select>'
       +'<span class="pill-lbl" style="margin-left:14px">Group</span><select class="flt" id="po-grp" style="width:auto;cursor:pointer">'+GRP.map(function(g){return '<option value="'+g[0]+'"'+(g[0]===state.grp?' selected':'')+'>'+esc(g[1])+'</option>';}).join('')+'</select></div>'
       +'<div id="sup-grid"></div>';
+    bindPoSubNav();
     function anyCtry(){ for(var k in state.ctry){ if(state.ctry[k])return true; } return false; }
     function cur(){ return rows.filter(function(r){
       if(state.focus){ if(!r.starred || r.progress==='complete')return false; }   // Focus = starred + active only (overrides status)
@@ -2152,12 +2153,26 @@
 
   // ---- PRODUCTIONS (POs grouped by PROD#; aggregated SKU view) ----
   var prodTab='list', _prodList=[];
-  var PROD_SUBS=[['list','Productions'],['deposits','Deposits'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['barcodes','Barcodes']];
+  // PURCHASE ORDERS is now the umbrella: PLAN (the PO grid) + the former PRODUCTIONS sub-tabs.
+  var poSub='plan';
+  var PO_SUBS=[['plan','PLAN'],['list','Productions'],['deposits','Deposits'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['barcodes','Barcodes']];
+  var PO_SUB_KEYS=PO_SUBS.map(function(t){return t[0];});
+  function poSubNav(){ return '<div id="prod-subtabs">'+PO_SUBS.map(function(t){return '<span class="rtab'+(poSub===t[0]?' active':'')+'" data-posub="'+t[0]+'">'+t[1]+'</span>';}).join('')+'</div>'; }
+  function bindPoSubNav(){ document.querySelectorAll('#supply-content .rtab[data-posub]').forEach(function(p){ p.onclick=function(){ showPoSub(p.dataset.posub); }; }); }
+  // render the PURCHASE ORDERS section on the given sub-tab (plan = PO grid; others = former productions views)
+  function showPoSub(tab){ poSub=(PO_SUB_KEYS.indexOf(tab)>=0?tab:'plan'); current='purchase-orders'; syncHash();
+    document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k==='purchase-orders');});
+    var _ns=document.getElementById('supply-nav-sel'); if(_ns&&_ns.value!=='purchase-orders')_ns.value='purchase-orders';
+    var c=document.getElementById('supply-content');
+    if(poSub==='plan'){ if(cache['purchase-orders'])return renderPO(cache['purchase-orders']); c.innerHTML='<div class="count">Loading…</div>';
+      fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(d){cache['purchase-orders']=d; renderPO(d);}).catch(function(e){c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
+    prodTab=poSub;
+    if(cache['productions'])return renderProductions(cache['productions']); c.innerHTML='<div class="count">Loading…</div>';
+    fetch('/api/supply/productions').then(function(r){return r.json();}).then(function(d){cache['productions']=d; renderProductions(d);}).catch(function(e){c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); }
   function renderProductions(rows){ var c=document.getElementById('supply-content');
-    c.innerHTML=annot('productions')
-      +'<div id="prod-subtabs">'+PROD_SUBS.map(function(t){return '<span class="rtab'+(prodTab===t[0]?' active':'')+'" data-pt="'+t[0]+'">'+t[1]+'</span>';}).join('')+'</div>'
+    c.innerHTML=annot('productions')+poSubNav()
       +'<div id="prod-body"><div class="count">Loading…</div></div>';
-    c.querySelectorAll('#prod-subtabs .rtab').forEach(function(p){p.onclick=function(){prodTab=p.dataset.pt;syncHash();c.querySelectorAll('#prod-subtabs .rtab').forEach(function(x){x.classList.toggle('active',x===p);});prodSub(rows);};});
+    bindPoSubNav();
     prodSub(rows); }
   function prodSub(rows){ var b=document.getElementById('prod-body');
     if(prodTab==='deposits'){ b.innerHTML='<div class="count">Loading…</div>';
@@ -3873,15 +3888,15 @@
     else writeHash([v]);
   }
   function syncHash(){ if(current==='reports') writeHash(['supply','reports',reportTab]);
-    else if(current==='productions') writeHash(['supply','productions',prodTab]);
+    else if(current==='purchase-orders') writeHash(['supply','purchase-orders'].concat(poSub&&poSub!=='plan'?[poSub]:[]));
     else if(current==='config') writeHash(['supply','config',CONFIG_SUB]);
     else if(current) writeHash(['supply',current]); }
   function applyRoute(){ var seg=(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean); _expectedHash=location.hash;
     if(seg[0]==='supply'){ showSupply(true); var sec=seg[1]||'actions';   // (true) = show chrome but don't auto-select Actions; we select the routed section next
       if(sec==='reports') selectReport(seg[2]||reportTab||'metrics');
-      else if(sec==='productions'){ if(seg[2])prodTab=seg[2]; selectSection('productions'); }
+      else if(sec==='productions'){ showPoSub(seg[2]&&PO_SUB_KEYS.indexOf(seg[2])>=0?seg[2]:'list'); }   // legacy links → PURCHASE ORDERS umbrella
       else if(sec==='config'){ if(seg[2])CONFIG_SUB=seg[2]; selectSection('config'); }
-      else if(sec==='purchase-orders'){ if(seg[2])_pendingPO=decodeURIComponent(seg[2]); selectSection('purchase-orders'); }
+      else if(sec==='purchase-orders'){ if(seg[2]&&PO_SUB_KEYS.indexOf(seg[2])>=0){ showPoSub(seg[2]); } else { if(seg[2])_pendingPO=decodeURIComponent(seg[2]); showPoSub('plan'); } }
       else if(sec==='shipments'){ if(seg[2])_pendingShip=decodeURIComponent(seg[2]); selectSection('shipments'); }
       else selectSection(sec);
     } else if(seg[0]==='scenario'){ if(typeof showScenario==='function'){ showScenario(); if(seg[1])scenSelect(seg[1]); } }
@@ -4271,7 +4286,9 @@
     }).catch(function(){}); }
 
   function selectSection(key){
-    if(key==='barcodes'){ prodTab='barcodes'; return selectSection('productions'); }   // Barcodes is now a Productions sub-tab
+    if(key==='barcodes')return showPoSub('barcodes');                                   // now a PURCHASE ORDERS sub-tab
+    if(key==='productions')return showPoSub(PO_SUB_KEYS.indexOf(prodTab)>=0&&prodTab!=='plan'?prodTab:'list');   // PRODUCTIONS folded under PURCHASE ORDERS
+    if(key==='purchase-orders')return showPoSub(poSub||'plan');
     if(key==='reports')return selectReport(reportTab||'metrics');
     if(REPORT_KEYS.indexOf(key)>=0)return selectReport(key);
     current=key; syncHash();
