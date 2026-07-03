@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.162 - Barcodes: bulk download honours the A4 Print Mold setting
+
+The "All Products" / "All Cartons (+inners)" downloads now respect the **File Download** dropdown: when set
+to **A4 Print Mold** they produce a ZIP of A4 print-mould PDFs (36-up product / 4-up carton, one per SKU,
+foldered by supplier); **Individual PNG** keeps the previous PNG-zip behaviour. (Previously the bulk buttons
+always output PNGs regardless of the setting.)
+
 ## v25.161 - Barcodes: fix PROD# filter + smaller download-all buttons
 
 - **PROD# filter fixed** — the barcodes query aggregated prod numbers only where prod_no matched `^P[0-9]`,

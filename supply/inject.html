@@ -3759,6 +3759,9 @@
   // render one label (kind) → PNG bytes
   function renderLabelPng(kind,r,base,swatchUri){ return new Promise(function(resolve){ var opts={}; for(var k in base)opts[k]=base[k]; opts.swatchUri=swatchUri;
     rasterizeSVGCanvas(buildLabelSVG(kind,r,opts),2,function(cv){ if(!cv){resolve(null);return;} cv.toBlob(function(b){ if(!b){resolve(null);return;} b.arrayBuffer().then(function(ab){resolve(new Uint8Array(ab));}); },'image/png'); }); }); }
+  // same label, but wrapped in an A4 print-mould PDF (36-up product / 4-up carton) — for the bulk "A4 Print Mold" download
+  function renderLabelA4Pdf(kind,r,base,swatchUri){ return new Promise(function(resolve){ var opts={}; for(var k in base)opts[k]=base[k]; opts.swatchUri=swatchUri; var cells=kind==='product'?MOLD_36:MOLD_4;
+    rasterizeSVGCanvas(buildLabelSVG(kind,r,opts),2.5,function(cv){ if(!cv){resolve(null);return;} cv.toBlob(function(b){ if(!b){resolve(null);return;} b.arrayBuffer().then(function(ab){ resolve(pdfA4(new Uint8Array(ab),cv.width,cv.height,cells)); }); },'image/jpeg',0.92); }); }); }
   // download ALL barcodes (of the given kinds) in view as a ZIP, foldered by supplier (multi-supplier SKUs → each folder)
   function bcDownloadAll(rows,batch,rrp,btn,kinds,zipname,opts){ opts=opts||{};
     var items=rows.filter(function(r){ return kinds.some(function(k){ return rowHasKind(r,k); }); });
@@ -3777,8 +3780,10 @@
           swP.then(function(sw){
             var sups=opts.flat ? [''] : String(r.supplier_multiple||'').split(',').map(function(s){return s.trim();}).filter(Boolean); if(!sups.length)sups=['_no supplier'];
             var kp=kinds.filter(function(k){ return rowHasKind(r,k); }), ki=0;
+            var a4=(opts.fmt==='a4');
             function nextKind(){ if(ki>=kp.length) return next(); var kind=kp[ki++];
-              renderLabelPng(kind,r,base,sw).then(function(png){ if(png) sups.forEach(function(sn){ files.push({name:(sn?zipSafe(sn)+'/':'')+kindPrefix(kind)+zipSafe(r.sku)+'.png',data:png}); }); nextKind(); }); }
+              if(a4){ renderLabelA4Pdf(kind,r,base,sw).then(function(pdf){ if(pdf) sups.forEach(function(sn){ files.push({name:(sn?zipSafe(sn)+'/':'')+kindPrefix(kind)+zipSafe(r.sku)+'_A4.pdf',data:pdf}); }); nextKind(); }); }
+              else { renderLabelPng(kind,r,base,sw).then(function(png){ if(png) sups.forEach(function(sn){ files.push({name:(sn?zipSafe(sn)+'/':'')+kindPrefix(kind)+zipSafe(r.sku)+'.png',data:png}); }); nextKind(); }); } }
             nextKind();
           });
         }
@@ -3813,8 +3818,8 @@
         +'<span class="bar-grp"><span class="pill-lbl">Market</span><select class="flt" id="bc-mkt" style="width:auto;padding:3px 6px"><option>All</option>'+RRP_MKTS.map(function(m){return '<option'+(m[0]===st.rmkt?' selected':'')+'>'+m[0]+'</option>';}).join('')+'</select></span>'
         +'<span class="bar-sep"></span>'
         +'<span class="bar-grp"><span class="pill-lbl">File Download</span><select class="flt" id="bc-dlfmt" style="width:auto;padding:3px 6px"><option value="a4">A4 Print Mold</option><option value="png">Individual PNG</option></select></span>'
-        +'<button id="bc-dlall-cart" class="bc-dlall-btn" style="cursor:pointer;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:5px;padding:4px 10px;font-size:11px;white-space:nowrap" title="download every CARTON + INNER barcode in view as a ZIP, foldered by supplier (individual PNGs)">⤓ All Cartons (+inners)</button>'
-        +'<button id="bc-dlall-prod" class="bc-dlall-btn" style="cursor:pointer;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:5px;padding:4px 10px;font-size:11px;white-space:nowrap" title="download every PRODUCT barcode in view as a ZIP, foldered by supplier (individual PNGs)">⤓ All Products</button>'
+        +'<button id="bc-dlall-cart" class="bc-dlall-btn" style="cursor:pointer;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:5px;padding:4px 10px;font-size:11px;white-space:nowrap" title="download every CARTON + INNER barcode in view as a ZIP, foldered by supplier — A4 print-mould PDFs or individual PNGs per the File Download setting">⤓ All Cartons (+inners)</button>'
+        +'<button id="bc-dlall-prod" class="bc-dlall-btn" style="cursor:pointer;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:5px;padding:4px 10px;font-size:11px;white-space:nowrap" title="download every PRODUCT barcode in view as a ZIP, foldered by supplier — A4 print-mould PDFs or individual PNGs per the File Download setting">⤓ All Products</button>'
       +'</div>'
       +'<div id="sup-grid">'+bcTable(rows,opts())+'</div>';
     var cur=rows;   // rows currently in view (after filters) — what "Download all" operates on
@@ -3838,8 +3843,8 @@
     document.getElementById('bc-batch').onchange=function(){st.batch=this.value;apply();};
     document.getElementById('bc-rrp').onchange=function(){st.rrp=this.checked;apply();};
     document.getElementById('bc-dlfmt').onchange=function(){st.dlfmt=this.value;};
-    document.getElementById('bc-dlall-prod').onclick=function(){ bcDownloadAll(cur, st.batch?batchBy[st.batch]:null, st.rrp, this, ['product'], 'product_barcodes_by_supplier.zip'); };
-    document.getElementById('bc-dlall-cart').onclick=function(){ bcDownloadAll(cur, st.batch?batchBy[st.batch]:null, st.rrp, this, ['carton','inner'], 'carton_inner_barcodes_by_supplier.zip'); };
+    document.getElementById('bc-dlall-prod').onclick=function(){ var a4=st.dlfmt==='a4'; bcDownloadAll(cur, st.batch?batchBy[st.batch]:null, st.rrp, this, ['product'], a4?'product_barcodes_A4_by_supplier.zip':'product_barcodes_by_supplier.zip', {fmt:st.dlfmt}); };
+    document.getElementById('bc-dlall-cart').onclick=function(){ var a4=st.dlfmt==='a4'; bcDownloadAll(cur, st.batch?batchBy[st.batch]:null, st.rrp, this, ['carton','inner'], a4?'carton_inner_barcodes_A4_by_supplier.zip':'carton_inner_barcodes_by_supplier.zip', {fmt:st.dlfmt}); };
     document.getElementById('bc-mkt').onchange=function(){ st.rmkt=this.value; if(st.rrp)apply(); };
     // label download buttons (delegated — survives grid re-renders on filter)
     var bySku={}; rows.forEach(function(r){ bySku[r.sku]=r; });
