@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.163 - Fix: delivery uses Flexport ARRIVAL (not landing) + "Arrival/Delivery" label
+
+Reported on PO-55USLX-FBA1: the DATES delivery showed 24-Jun (Flexport landing) but the Flexport report's
+ARRIVAL is 30-Jun. The delivery calc used only Flexport landing and ignored arrival — even though it already
+prefers arrival over landing for shipment dates. Now Flexport ARRIVAL is preferred over landing (arrival is
+~7 days later across all 120 Flexport rows and is the date shown on the Flexport report). Delivery →
+completion (delivery+7) and the cash-flow balance dates shift accordingly for Flexport-matched POs. Ship stays
+the departure date. Also renamed the "Delivery" label/column to "Arrival / Delivery" for clarity.
+
 ## v25.162 - Barcodes: bulk download honours the A4 Print Mold setting
 
 The "All Products" / "All Cartons (+inners)" downloads now respect the **File Download** dropdown: when set

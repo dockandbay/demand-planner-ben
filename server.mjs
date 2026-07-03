@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.162';
+const APP_VERSION = 'v25.163';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1076,7 +1076,7 @@ app.get('/api/supply/:section', async (req, res) => {
               (lv.line_value IS NOT NULL) value_from_lines,
               -- final supplier invoice amount trumps the estimate for every payment / landed calc
               coalesce(po.supplier_invoice_total, lv.line_value, po.order_value_estimation, 0) val,
-              fx.flex_id, fx.landing_date flex_landing, fx.departure_date flex_departure,
+              fx.flex_id, fx.landing_date flex_landing, fx.arrival_date flex_arrival, fx.departure_date flex_departure,
               sh.landing_date sh_landing, sh.delivery_date sh_delivery, sh.departure_date sh_departure, sh.arrival_date sh_arrival,
               coalesce(sh.status,'') sh_status_raw,
               sh.mode sh_mode, sh.carrier sh_carrier, sh.carrier_ref sh_carrier_ref, fx.mode flex_mode,
@@ -1166,11 +1166,14 @@ app.get('/api/supply/:section', async (req, res) => {
             SELECT *,
               -- delivery: shipment delivery/arrival/landing (if assigned) ▸ flexport ▸ ship + branch transit
               -- lead (sea/air by shipment mode). No PO override.
-              coalesce(sh_delivery, sh_arrival, sh_landing, flex_landing,
+              -- delivery/arrival: shipment overrides ▸ Flexport ARRIVAL (the real arrival date) ▸ Flexport landing
+              -- (early ETA) ▸ ship + transit lead. Flexport arrival is preferred over landing (arrival is ~a week
+              -- later and is the date shown on the Flexport report), matching the shipment arrival-before-landing order.
+              coalesce(sh_delivery, sh_arrival, sh_landing, flex_arrival, flex_landing,
                 CASE WHEN eff_ship IS NOT NULL AND transit_lead IS NOT NULL
                      THEN (eff_ship + (transit_lead||' days')::interval)::date END) eff_delivery,
               CASE WHEN sh_delivery IS NOT NULL OR sh_arrival IS NOT NULL OR sh_landing IS NOT NULL THEN 'S'
-                   WHEN flex_landing IS NOT NULL THEN 'FLEX'
+                   WHEN flex_arrival IS NOT NULL OR flex_landing IS NOT NULL THEN 'FLEX'
                    WHEN eff_ship IS NOT NULL AND transit_lead IS NOT NULL THEN 'calc' END delivery_src
             FROM calc2
           ), calc4 AS (
