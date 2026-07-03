@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.179 - PO action-count badge uses the fast 120ms tooltip
+
+The new action-count badge showed its detail via the native title (~1s delay). Switched it to the same fast
+120ms tooltip the notes badge uses (data-note + noteTip on mouseenter, 120ms), so the action list appears
+promptly on hover.
+
 ## v25.178 - Actions deep-link to the right PO sub-tab; PO-row action counter badge
 
 - **Actions open the relevant PO sub-tab.** When an action references a PO, "Open PO ▸ …" and the clickable

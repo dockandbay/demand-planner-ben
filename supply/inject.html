@@ -1305,7 +1305,7 @@
     // action-items counter: red badge with the count of open actions on this PO; click deep-links to the
     // most relevant detail sub-tab (payment→PAYMENTS, date→DATES, shipping→SHIPMENTS).
     var _acts=poActions(r);
-    var actFlag=_acts.length?' <button class="po-act-badge ex-badge" style="cursor:pointer;border:none" data-po="'+esc(r.po)+'" data-tab="'+(PO_ACT_TAB[_acts[0]]||'')+'" title="'+_acts.length+' action item'+(_acts.length>1?'s':'')+' — '+esc(_acts.map(function(k){return PO_ACT_LABEL[k]||k;}).join('; '))+' (click to open)">'+_acts.length+'</button>':'';
+    var actFlag=_acts.length?' <button class="po-act-badge ex-badge" style="cursor:pointer;border:none" data-po="'+esc(r.po)+'" data-tab="'+(PO_ACT_TAB[_acts[0]]||'')+'" data-note="'+esc(_acts.length+' action item'+(_acts.length>1?'s':'')+' — '+_acts.map(function(k){return PO_ACT_LABEL[k]||k;}).join('; ')+' (click to open)')+'">'+_acts.length+'</button>':'';
     var pocell=indent?'<td class="l po-child po-numcell"><span class="ind">└ </span><b>'+esc(r.po)+'</b>'+noteFlag+actFlag+'</td>':'<td class="l po-numcell"><b>'+esc(r.po)+'</b>'+noteFlag+actFlag+'</td>';
     // ERP cell — compact badge-style buttons (same look as the "✓ in sync" badge) → keeps the column narrow.
     // Labels collapse to a single action: Update lines / Update date / Update both. All open the same ERP modal.
@@ -1435,7 +1435,9 @@
     setTimeout(function(){ if(ex)ex.scrollIntoView({block:'center',behavior:'smooth'}); },80); }; }); }
   // red action-count badge on the PO row → expand the PO on the tab most relevant to its top action.
   function bindPoActBadge(){ document.querySelectorAll('#supply-root .po-act-badge[data-po]').forEach(function(b){ if(b._b)return; b._b=1;
-    b.onclick=function(e){ e.stopPropagation(); var po=b.dataset.po, tab=b.dataset.tab||'';
+    b.addEventListener('mouseenter',function(){ b._t=setTimeout(function(){ noteTip(b); },120); });   // fast 120ms tooltip (native title is ~1s)
+    b.addEventListener('mouseleave',function(){ clearTimeout(b._t); hideNoteTip(); });
+    b.onclick=function(e){ e.stopPropagation(); hideNoteTip(); var po=b.dataset.po, tab=b.dataset.tab||'';
       var exBtn=document.querySelector('#sup-grid .po-exp[data-po="'+((window.CSS&&CSS.escape)?CSS.escape(po):po)+'"]'); if(!exBtn){ gotoPO(po,tab||undefined); return; }
       var i=exBtn.dataset.i, ex=document.getElementById('poexp-'+i), open=ex&&ex.style.display!=='none';
       if(!open){ if(tab)_pendingPOTab=tab; exBtn.click(); }
