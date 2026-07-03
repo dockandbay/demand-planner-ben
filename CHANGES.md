@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.159 - Barcodes: larger, light-blue download-all buttons
+
+The "⤓ All Cartons (+inners)" and "⤓ All Products" download buttons on the Barcodes tab are now larger,
+bold, light-blue buttons instead of small grey badges — clearer/more obvious.
+
 ## v25.158 - Payments Report: supplier / amount search
 
 Added a Search box to the Payments Report (PURCHASE ORDERS ▸ Payments Report) — filters runs by supplier

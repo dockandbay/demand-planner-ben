@@ -24,6 +24,7 @@
 #supply-root #bc-settings{display:flow-root}   /* flow-root contains the floated Download-all button so the box still grows */
 #supply-root #bc-settings>*{display:inline-block;vertical-align:middle}
 #supply-root #bc-dlall-prod,#supply-root #bc-dlall-cart{float:right;margin-left:8px}   /* sit top-right, above the grid's "labels" column */
+#supply-root .bc-dlall-btn:hover{background:#bfdbfe}
 #supply-root .pill{padding:3px 9px;font-size:10px;cursor:pointer;border:1px solid #d0d0d0;background:#fff;color:#666;border-radius:4px;white-space:nowrap;font-weight:600}
 #supply-root .pill:hover{background:#f5f5f5;color:#333}
 #supply-root .pill.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
@@ -3808,8 +3809,8 @@
         +'<span class="bar-grp"><span class="pill-lbl">Market</span><select class="flt" id="bc-mkt" style="width:auto;padding:3px 6px"><option>All</option>'+RRP_MKTS.map(function(m){return '<option'+(m[0]===st.rmkt?' selected':'')+'>'+m[0]+'</option>';}).join('')+'</select></span>'
         +'<span class="bar-sep"></span>'
         +'<span class="bar-grp"><span class="pill-lbl">File Download</span><select class="flt" id="bc-dlfmt" style="width:auto;padding:3px 6px"><option value="a4">A4 Print Mold</option><option value="png">Individual PNG</option></select></span>'
-        +'<button class="tool-badge bg-neutral" id="bc-dlall-cart" style="cursor:pointer;border:none;white-space:nowrap" title="download every CARTON + INNER barcode in view as a ZIP, foldered by supplier (individual PNGs)">⤓ All Cartons (+inners)</button>'
-        +'<button class="tool-badge bg-neutral" id="bc-dlall-prod" style="cursor:pointer;border:none;white-space:nowrap" title="download every PRODUCT barcode in view as a ZIP, foldered by supplier (individual PNGs)">⤓ All Products</button>'
+        +'<button id="bc-dlall-cart" class="bc-dlall-btn" style="cursor:pointer;background:#dbeafe;color:#1e40af;border:1px solid #60a5fa;border-radius:7px;padding:7px 16px;font-size:13px;font-weight:700;white-space:nowrap" title="download every CARTON + INNER barcode in view as a ZIP, foldered by supplier (individual PNGs)">⤓ All Cartons (+inners)</button>'
+        +'<button id="bc-dlall-prod" class="bc-dlall-btn" style="cursor:pointer;background:#dbeafe;color:#1e40af;border:1px solid #60a5fa;border-radius:7px;padding:7px 16px;font-size:13px;font-weight:700;white-space:nowrap" title="download every PRODUCT barcode in view as a ZIP, foldered by supplier (individual PNGs)">⤓ All Products</button>'
       +'</div>'
       +'<div id="sup-grid">'+bcTable(rows,opts())+'</div>';
     var cur=rows;   // rows currently in view (after filters) — what "Download all" operates on
