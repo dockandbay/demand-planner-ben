@@ -75,6 +75,18 @@
 #supply-root .rtab{background:transparent;border:none;padding:6px 14px;font-size:12px;font-weight:500;cursor:pointer;color:#7c93b8;border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit}
 #supply-root .rtab:hover{color:#2563eb}
 #supply-root .rtab.active{color:#2563eb;border-bottom-color:#3b82f6;font-weight:600}
+/* Shipment drawer — right-side slide-in popout (open a shipment without leaving PURCHASE ORDERS) */
+#supply-root #shipdrawer-bg{position:fixed;inset:0;z-index:900;background:rgba(15,23,42,0);transition:background .18s ease}
+#supply-root #shipdrawer-bg.open{background:rgba(15,23,42,.32)}
+#supply-root #shipdrawer{position:absolute;top:0;right:0;height:100%;width:min(920px,94vw);background:#fff;box-shadow:-8px 0 28px rgba(15,23,42,.18);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1)}
+#supply-root #shipdrawer-bg.open #shipdrawer{transform:translateX(0)}
+#supply-root .shipdrawer-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 18px;border-bottom:1px solid #e6ebf2;background:#f8fafc;flex:0 0 auto}
+#supply-root .shipdrawer-title{font-size:15px;font-weight:700;color:#0f172a}
+#supply-root .shipdrawer-x{background:transparent;border:none;font-size:18px;line-height:1;cursor:pointer;color:#64748b;padding:4px 8px;font-family:inherit}
+#supply-root .shipdrawer-x:hover{color:#0f172a}
+#supply-root .shipdrawer-full{margin-right:6px}
+#supply-root .shipdrawer-body{padding:16px 18px;overflow:auto;flex:1 1 auto}
+@media (max-width:700px){#supply-root #shipdrawer{width:100vw}}
 #supply-root #op-status,#supply-root #op-country{display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center}
 #supply-root .flt{border:1px solid #d0d0d0;border-radius:4px;padding:4px 9px;font-size:11px;font-family:inherit;width:230px}
 #supply-root select.flt.sel-on{background:#1a1a1a;color:#fff;border-color:#1a1a1a;font-weight:600}   /* a chosen (non-All) filter dropdown shows black */
@@ -853,8 +865,9 @@
     try{ var mo=new MutationObserver(pos); mo.observe(pop,{childList:true,subtree:true}); pop._mo=mo; }catch(e){} }
   function shPopOutside(e){ var p=document.getElementById('shpop'); if(p&&!p.contains(e.target)&&!(e.target.closest&&e.target.closest('.ship-pick,.dep-pick,.cell-pick')))closeShPop(); }
   function bindShipPick(){ document.querySelectorAll('#supply-root .ship-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openShipAssign(b.dataset.po,b); }; }); }
-  // open a shipment from elsewhere: jump to SHIPMENTS and expand that shipment's row
-  function gotoShipment(ref){ _pendingShip=ref; showPoSub('shipments'); }
+  // open a shipment from elsewhere: right-side drawer popout (stays on the current page). "Full page ↗" in the
+  // drawer jumps to the full Shipments tab via gotoShipmentPage.
+  function gotoShipment(ref){ openShipDrawer(ref); }
   function gotoPO(po,tab){ _pendingPO=po; _pendingPOTab=tab||null; showPoSub('plan'); }
   function gotoOrderPlan(po){ _pendingOP={po:po}; selectSection('order-plan'); }   // → full ORDER PLAN, PO pre-filtered
   function gotoDeposit(ref){ _pendingDep=ref; showPoSub('deposits'); }   // → PURCHASE ORDERS ▸ Deposits, filtered to this ref
@@ -2831,6 +2844,38 @@
             .catch(function(){ el.classList.remove('saved'); el.classList.add('err'); }); }; });
         if(typeof afterRender==='function')afterRender(box); })
       .catch(function(e){ document.getElementById('shipdet-'+i).innerHTML=head+'<span style="color:#dc2626">'+esc(e.message||e)+'</span>'; }); }
+  // ── Shipment DRAWER: right-side slide-in popout so a shipment can be opened/edited without leaving PURCHASE ORDERS.
+  // Reuses shipExpand(ref,'DRAWER') into #shipdet-DRAWER; the drawer lives inside #supply-root so bindEdits (scoped to
+  // '#supply-root .fci[data-ep]') wires every edit field, and the same shtab tabs / assign / delete flows work unchanged.
+  var _shipDrawerPrevPatch=null;   // saved _shipPatchRow, restored on close
+  function openShipDrawer(ref){ if(!ref)return;
+    closeShipDrawer(true);   // drop any existing drawer (silent: keep the saved patch to restore later)
+    var root=document.getElementById('supply-root')||document.body;
+    var bg=document.createElement('div'); bg.id='shipdrawer-bg';
+    bg.innerHTML='<div id="shipdrawer"><div class="shipdrawer-head"><div class="shipdrawer-title">Shipment '+esc(ref)+'</div>'
+      +'<div><button class="lnk-btn shipdrawer-full" title="open the full Shipments page for this shipment">Full page ↗</button>'
+      +'<button class="shipdrawer-x" title="close">✕</button></div></div>'
+      +'<div class="shipdrawer-body"><div id="shipdet-DRAWER" class="count">Loading…</div></div></div>';
+    root.appendChild(bg);
+    requestAnimationFrame(function(){ bg.classList.add('open'); });
+    bg.addEventListener('mousedown',function(e){ if(e.target===bg)closeShipDrawer(); });
+    bg.querySelector('.shipdrawer-x').onclick=function(){ closeShipDrawer(); };
+    bg.querySelector('.shipdrawer-full').onclick=function(){ closeShipDrawer(); gotoShipmentPage(ref); };
+    // while the drawer is open, in-place refreshes (after an edit/assign) target the drawer — the grid row that
+    // normally patches itself may not exist on this page (e.g. PURCHASE ORDERS ▸ Plan).
+    if(_shipPatchRow!==refreshShipDrawer){ _shipDrawerPrevPatch=_shipPatchRow; _shipPatchRow=refreshShipDrawer; }
+    var render=function(){ shipExpand(ref,'DRAWER'); };
+    if(shipBy[ref])render();
+    else fetchShipmentsFull(function(list){ (list||[]).forEach(function(s){ shipBy[s.shipment_ref]=s; }); render(); });
+  }
+  function refreshShipDrawer(ref){ var box=document.getElementById('shipdet-DRAWER'); if(!box)return;
+    var at=box.querySelector('.shtab.active'), st=at?at.dataset.st:'dates';   // keep the active sub-tab across the refresh
+    delete cache['shipments']; invalidateDerived(); shipFull=null;   // header fields (shipBy) come from the shipments list — refetch it
+    fetchShipmentsFull(function(list){ (list||[]).forEach(function(s){ shipBy[s.shipment_ref]=s; });
+      shipExpand(ref,'DRAWER',function(bx){ var tb=bx.querySelector('.shtab[data-st="'+st+'"]'); if(tb)tb.click(); }); }); }
+  function closeShipDrawer(silent){ var bg=document.getElementById('shipdrawer-bg'); if(bg&&bg.parentNode)bg.parentNode.removeChild(bg);
+    if(!silent && _shipPatchRow===refreshShipDrawer){ _shipPatchRow=_shipDrawerPrevPatch; _shipDrawerPrevPatch=null; } }
+  function gotoShipmentPage(ref){ _pendingShip=ref; showPoSub('shipments'); }   // "Full page ↗" — jump to the full Shipments tab + expand
   function unassignedTable(un){ if(!un.length)return '<div class="count">None — every active PO is on a shipment 🎉</div>';
     var h='<div class="tw"><table><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th class="l">Status</th><th class="l">PROD#</th><th class="l">Assign to shipment</th><th class="l"></th></tr></thead><tbody>';
     h+=un.map(function(p){

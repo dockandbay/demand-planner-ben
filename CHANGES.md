@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.203 - Shipment drawer: open a shipment without leaving PURCHASE ORDERS
+
+Clicking a shipment link (e.g. from a PO's payment plan) now opens a right-side slide-in **drawer**
+instead of navigating to the Shipments tab. The drawer loads the full shipment detail — all sub-tabs
+(Dates & tracking, POs aboard, Charges, Crossdock, Timeline & notes) and every field editable exactly as
+on the Shipments page. It reuses shipExpand() rendered into #shipdet-DRAWER inside #supply-root, so all
+edit wiring / assign / master / delete flows are unchanged. Edits made in the drawer refresh the drawer in
+place (keeping the active sub-tab). A "Full page ↗" button jumps to the full Shipments tab; ✕ or clicking
+the backdrop closes it. The Shipments sub-tab (added in v25.202) remains.
+
 ## v25.202 - Move Shipments under the PURCHASE ORDERS sub-nav
 
 SHIPMENTS is no longer a separate top-level menu item — it is now a sub-tab under PURCHASE ORDERS
