@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.199 - ORDER PLAN: no unapproved-partial / supplier-risk flags once a PO has shipped
+
+The Unapproved-partials and Supplier-risk action flags (and their counts) now exclude POs that are SHIPPING /
+DELIVERED / COMPLETE (previously only COMPLETE) — the plan is locked at that point, so there is nothing to
+action. Added a poLocked() helper. ERP-diff and Discontinued checks are unchanged.
+
 ## v25.198 - ORDER PLAN: PROD#/Batch/Supplier moved to the Country row; default country = UK
 
 Moved the PROD#, Batch and Supplier dropdowns onto the same row as the Country pills (Category + Release stay

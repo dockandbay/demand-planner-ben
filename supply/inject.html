@@ -2084,13 +2084,15 @@
     var defS=statuses.filter(function(s){return /production/i.test(s);}); if(!defS.length)defS=statuses.slice(0,1);
     var st={statuses:new Set(defS),countries:new Set(countries.indexOf('UK')>=0?['UK']:countries),prod:'All',cat:'All',batch:'All',supplier:'All',q:'',poq:'',scope:'ordered',rw:'All',partials:false,erpdiff:false,suprisk:false,disc:false,focus:false};
     // action sets (exclude complete POs): unapproved partial cartons, and lines whose planned qty differs from the ERP
-    function isUnapprovedPartial(l){ return !/complete/i.test(l.status||'') && (l.full_carton_check||'').indexOf('⚠')>=0; }
+    // Once a PO has shipped/delivered/completed the plan is locked — no partials / supplier-risk to action.
+    function poLocked(l){ return /complete|shipping|deliver/i.test(l.status||''); }
+    function isUnapprovedPartial(l){ return !poLocked(l) && (l.full_carton_check||'').indexOf('⚠')>=0; }
     function erpDiff(l){ return !/complete/i.test(l.status||'') && Number(l.qty)!==Number(l.erp_qty==null?l.qty:l.erp_qty); }
     // supplier risk: line ordered against a PO whose supplier isn't in the SKU's allowed multi-supplier list.
     function supMismatch(l){ var a=skuAttr[l.sku]||{}; var allowed=(a.sm||'').split(',').map(function(s){return s.trim().toLowerCase();}).filter(Boolean); var ps=(l.supplier_name||'').trim().toLowerCase(); return allowed.length>0 && !!ps && allowed.indexOf(ps)<0; }
     // discontinued: line's arrive (delivery) date is after the SKU's discontinue date (per-destination).
     function discMismatch(l){ var dd=pickDisc(l.country,skuAttr[l.sku]||{}); return !!(dd && l.delivery && String(l.delivery)>String(dd)); }
-    function lineSupRisk(l){ return !/complete/i.test(l.status||'') && Number(l.qty)>0 && supMismatch(l) && !l.supplier_risk_approved; }
+    function lineSupRisk(l){ return !poLocked(l) && Number(l.qty)>0 && supMismatch(l) && !l.supplier_risk_approved; }
     function lineDisc(l){ return !/complete/i.test(l.status||'') && Number(l.qty)>0 && discMismatch(l) && !l.discontinue_approved; }
     if(_pendingOP){ st.partials=!!_pendingOP.partials; st.suprisk=!!_pendingOP.suprisk; st.disc=!!_pendingOP.disc; if(_pendingOP.po)st.poq=String(_pendingOP.po).toLowerCase();
       st.statuses=new Set(pillStatuses);   // show all (non-complete) statuses so the flagged lines aren't hidden by the status filter
