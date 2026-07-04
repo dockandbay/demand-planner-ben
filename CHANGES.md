@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.198 - ORDER PLAN: PROD#/Batch/Supplier moved to the Country row; default country = UK
+
+Moved the PROD#, Batch and Supplier dropdowns onto the same row as the Country pills (Category + Release stay
+on the SKUs row). Default country filter is now UK only (was all countries).
+
 ## v25.197 - ORDER PLAN: Supplier filter (by PO's assigned supplier)
 
 Added a **Supplier** dropdown to the ORDER PLAN filter bar (A→Z) that filters to lines on POs assigned to that

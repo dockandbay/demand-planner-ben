@@ -2082,7 +2082,7 @@
       skuAttr[s.sku]={sup:s.supplier||'',cq:s.carton_qty||'',dis:s.discontinue||'',disAu:s.discontinue_au||'',disCa:s.discontinue_ca||'',sm:s.supplier_multiple_all||''};});
     lines.forEach(function(l){if(l.category)skuCat[l.sku]=l.category; if(l.release_window)skuRW[l.sku]=l.release_window;});
     var defS=statuses.filter(function(s){return /production/i.test(s);}); if(!defS.length)defS=statuses.slice(0,1);
-    var st={statuses:new Set(defS),countries:new Set(countries),prod:'All',cat:'All',batch:'All',supplier:'All',q:'',poq:'',scope:'ordered',rw:'All',partials:false,erpdiff:false,suprisk:false,disc:false,focus:false};
+    var st={statuses:new Set(defS),countries:new Set(countries.indexOf('UK')>=0?['UK']:countries),prod:'All',cat:'All',batch:'All',supplier:'All',q:'',poq:'',scope:'ordered',rw:'All',partials:false,erpdiff:false,suprisk:false,disc:false,focus:false};
     // action sets (exclude complete POs): unapproved partial cartons, and lines whose planned qty differs from the ERP
     function isUnapprovedPartial(l){ return !/complete/i.test(l.status||'') && (l.full_carton_check||'').indexOf('⚠')>=0; }
     function erpDiff(l){ return !/complete/i.test(l.status||'') && Number(l.qty)!==Number(l.erp_qty==null?l.qty:l.erp_qty); }
@@ -2101,9 +2101,10 @@
     c.innerHTML=annot('order-plan')
       +'<div class="bar"><span class="pill-lbl">Status</span><span id="op-status">'+pillsHTML(pillStatuses,st.statuses)+'</span><span class="mut tiny" style="margin-left:6px">completed POs: search a PO number below</span>'
         +'<span class="pill-lbl" style="margin-left:12px">PO(s)</span><input class="flt" id="op-po" placeholder="PO number(s) — space / comma…" title="one or more PO numbers, separated by space, comma or line break — overrides the status &amp; country filters" style="width:240px;background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8" value="'+esc(st.poq||'')+'"></div>'
-      +'<div class="bar"><span class="pill-lbl">Country</span><span id="op-country">'+pillsHTML(countries,st.countries)+'</span></div>'
+      +'<div class="bar"><span class="pill-lbl">Country</span><span id="op-country">'+pillsHTML(countries,st.countries)+'</span>'
+        +'<span style="margin-left:12px"></span>'+sel('op-prod','PROD#',prods,st.prod)+sel('op-batch','Batch',batches,st.batch)+sel('op-supplier','Supplier',suppliers,st.supplier)+'</div>'
       +'<div class="bar"><span class="pill-lbl">SKUs</span><span class="pill active" data-sc="ordered">Ordered</span><span class="pill" data-sc="allskus">All SKUs</span><span class="pill" data-sc="all">All in category</span>'
-        +sel('op-cat','Category',cats,st.cat)+sel('op-rw','Release',rws,st.rw)+sel('op-prod','PROD#',prods,st.prod)+sel('op-batch','Batch',batches,st.batch)+sel('op-supplier','Supplier',suppliers,st.supplier)
+        +sel('op-cat','Category',cats,st.cat)+sel('op-rw','Release',rws,st.rw)
         +'<input class="flt" id="op-q" placeholder="filter SKU…" style="width:120px">'
         +'<button class="save-btn" id="op-dl" style="margin-left:auto;background:#2563eb;color:#fff;border-color:#2563eb" title="Download XLSX — SKUs (rows) × purchase orders (columns) × quantities, for the current view">⤓ Download report</button>'
         +'<span class="count" id="op-count" style="margin-left:8px"></span></div>'
