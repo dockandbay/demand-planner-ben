@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.197 - ORDER PLAN: Supplier filter (by PO's assigned supplier)
+
+Added a **Supplier** dropdown to the ORDER PLAN filter bar (A→Z) that filters to lines on POs assigned to that
+supplier (purchase_orders.supplier_name). Highlights black when selected, like the other dropdowns.
+
 ## v25.196 - ORDER PLAN: XLSX download report, Batch filter, descending order, selected-filter highlight
 
 - **⤓ Download report** button (right side of the SKUs bar) → XLSX of the current view: SKUs down column 1,

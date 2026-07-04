@@ -2071,6 +2071,7 @@
     var plcMap={}; plc.forEach(function(x){ plcMap[x.po+'|'+x.sku]=x; });   // (po|sku) → supplier change (for inline confirm in cells)
     function uniq(k){var s={};lines.forEach(function(l){if(l[k])s[l[k]]=1;});return Object.keys(s).sort();}
     var statuses=uniq('status'), countries=uniq('country'), prods=uniq('prod_no').reverse(), batches=uniq('batch_id').reverse();   // prod# / batch dropdowns: descending (newest first)
+    var suppliers=uniq('supplier_name');   // PO-assigned supplier (purchase_orders.supplier_name), A→Z
     // COMPLETE POs (1000+ from the ERP history) are excluded from the status pills + "All" — including them
     // in an all-SKUs pivot explodes it (crashes). They surface only via a PO search in the PO box (≥5 chars),
     // which overrides the status filter.
@@ -2081,7 +2082,7 @@
       skuAttr[s.sku]={sup:s.supplier||'',cq:s.carton_qty||'',dis:s.discontinue||'',disAu:s.discontinue_au||'',disCa:s.discontinue_ca||'',sm:s.supplier_multiple_all||''};});
     lines.forEach(function(l){if(l.category)skuCat[l.sku]=l.category; if(l.release_window)skuRW[l.sku]=l.release_window;});
     var defS=statuses.filter(function(s){return /production/i.test(s);}); if(!defS.length)defS=statuses.slice(0,1);
-    var st={statuses:new Set(defS),countries:new Set(countries),prod:'All',cat:'All',batch:'All',q:'',poq:'',scope:'ordered',rw:'All',partials:false,erpdiff:false,suprisk:false,disc:false,focus:false};
+    var st={statuses:new Set(defS),countries:new Set(countries),prod:'All',cat:'All',batch:'All',supplier:'All',q:'',poq:'',scope:'ordered',rw:'All',partials:false,erpdiff:false,suprisk:false,disc:false,focus:false};
     // action sets (exclude complete POs): unapproved partial cartons, and lines whose planned qty differs from the ERP
     function isUnapprovedPartial(l){ return !/complete/i.test(l.status||'') && (l.full_carton_check||'').indexOf('⚠')>=0; }
     function erpDiff(l){ return !/complete/i.test(l.status||'') && Number(l.qty)!==Number(l.erp_qty==null?l.qty:l.erp_qty); }
@@ -2102,7 +2103,7 @@
         +'<span class="pill-lbl" style="margin-left:12px">PO(s)</span><input class="flt" id="op-po" placeholder="PO number(s) — space / comma…" title="one or more PO numbers, separated by space, comma or line break — overrides the status &amp; country filters" style="width:240px;background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8" value="'+esc(st.poq||'')+'"></div>'
       +'<div class="bar"><span class="pill-lbl">Country</span><span id="op-country">'+pillsHTML(countries,st.countries)+'</span></div>'
       +'<div class="bar"><span class="pill-lbl">SKUs</span><span class="pill active" data-sc="ordered">Ordered</span><span class="pill" data-sc="allskus">All SKUs</span><span class="pill" data-sc="all">All in category</span>'
-        +sel('op-cat','Category',cats,st.cat)+sel('op-rw','Release',rws,st.rw)+sel('op-prod','PROD#',prods,st.prod)+sel('op-batch','Batch',batches,st.batch)
+        +sel('op-cat','Category',cats,st.cat)+sel('op-rw','Release',rws,st.rw)+sel('op-prod','PROD#',prods,st.prod)+sel('op-batch','Batch',batches,st.batch)+sel('op-supplier','Supplier',suppliers,st.supplier)
         +'<input class="flt" id="op-q" placeholder="filter SKU…" style="width:120px">'
         +'<button class="save-btn" id="op-dl" style="margin-left:auto;background:#2563eb;color:#fff;border-color:#2563eb" title="Download XLSX — SKUs (rows) × purchase orders (columns) × quantities, for the current view">⤓ Download report</button>'
         +'<span class="count" id="op-count" style="margin-left:8px"></span></div>'
@@ -2122,7 +2123,7 @@
       if(st.focus){ if(!l.starred || /complete/i.test(l.status||''))return false; }   // Focus = starred + active only (overrides status / PO box)
       else if(pt.length){ if(!pt.some(function(t){return nrm(l.po).indexOf(t)>=0;}))return false; }
       else { if(!st.statuses.has(l.status))return false; if(!(allC||st.countries.has(l.country)))return false; }
-      return (st.prod==='All'||l.prod_no===st.prod)&&(st.batch==='All'||l.batch_id===st.batch)&&(st.cat==='All'||l.category===st.cat)&&(st.rw==='All'||skuRW[l.sku]===st.rw)&&(!st.partials||isUnapprovedPartial(l))&&(!st.erpdiff||erpDiff(l))&&(!st.suprisk||lineSupRisk(l))&&(!st.disc||lineDisc(l))&&(!nrm(st.q)||nrm(l.sku).indexOf(nrm(st.q))>=0); }); }
+      return (st.prod==='All'||l.prod_no===st.prod)&&(st.batch==='All'||l.batch_id===st.batch)&&(st.supplier==='All'||l.supplier_name===st.supplier)&&(st.cat==='All'||l.category===st.cat)&&(st.rw==='All'||skuRW[l.sku]===st.rw)&&(!st.partials||isUnapprovedPartial(l))&&(!st.erpdiff||erpDiff(l))&&(!st.suprisk||lineSupRisk(l))&&(!st.disc||lineDisc(l))&&(!nrm(st.q)||nrm(l.sku).indexOf(nrm(st.q))>=0); }); }
     function rowsFor(cl){ var set={},list=[]; cl.forEach(function(l){if(!set[l.sku]){set[l.sku]=1;list.push(l.sku);}});
       function addMaster(reqCat){ skuMaster.forEach(function(s){ if(set[s.sku])return;
         if(reqCat&&s.category!==st.cat)return; if(st.cat!=='All'&&s.category!==st.cat)return;
@@ -2192,6 +2193,7 @@
     document.getElementById('op-rw').onchange=function(){st.rw=this.value;markSel(this);viewReset();};
     document.getElementById('op-prod').onchange=function(){st.prod=this.value;markSel(this);viewReset();};
     document.getElementById('op-batch').onchange=function(){st.batch=this.value;markSel(this);viewReset();};
+    document.getElementById('op-supplier').onchange=function(){st.supplier=this.value;markSel(this);viewReset();};
     // Download report — XLSX of the current view: SKUs down column 1, purchase orders across the top (descending), quantities in the grid.
     document.getElementById('op-dl').onclick=function(){ var b=this; var cl=curLines(); var skus=rowsFor(cl);
       var pset={},pos=[]; cl.forEach(function(l){ if(!pset[l.po]){pset[l.po]=1;pos.push(l.po);} }); pos.sort().reverse();
