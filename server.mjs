@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.200';
+const APP_VERSION = 'v25.201';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1197,6 +1197,15 @@ app.get('/api/supply/:section', async (req, res) => {
                      ELSE ((CASE WHEN credit_type='on_shipment' THEN eff_ship ELSE eff_delivery END)
                         + (coalesce(credit_days,0)||' days')::interval)::date END) bal_due_date
             FROM calc3
+          ), mastered AS (
+            -- Shipment wins: a PO on a shipment inherits the MASTER PO's effective dates (they travel as one).
+            -- The shipment's master is shipments.master_po (or, for a master-PO-as-shipment, the shipment_ref
+            -- itself). m_* are null for the master itself and for POs not on a shipment → they keep own dates.
+            SELECT calc4.*, m.eff_delivery m_delivery, m.eff_checkin m_checkin, m.eff_ship m_ship,
+                   coalesce(nullif(sh2.master_po,''), calc4.shipment_ref) ship_master_po
+            FROM calc4
+            LEFT JOIN planner.shipments sh2 ON sh2.shipment_ref = calc4.shipment_ref
+            LEFT JOIN calc4 m ON m.po = coalesce(nullif(sh2.master_po,''), calc4.shipment_ref) AND m.po <> calc4.po
           )
           SELECT po, supplier_name, status,
             CASE WHEN coalesce(status,'') ILIKE '%complete%' THEN 'complete'
@@ -1214,9 +1223,10 @@ app.get('/api/supply/:section', async (req, res) => {
             to_char(start_production,'YYYY-MM-DD') prod_start,
             to_char(eff_prod_end,'YYYY-MM-DD') prod_end,
             CASE WHEN end_production_overide IS NOT NULL THEN 'M' WHEN prod_end_calc THEN 'calc' END prod_end_src,
-            to_char(eff_ship,'YYYY-MM-DD') ship, ship_src,
-            to_char(eff_delivery,'YYYY-MM-DD') delivery, delivery_src,
-            to_char(eff_checkin,'YYYY-MM-DD') checkin,
+            to_char(coalesce(m_ship, eff_ship),'YYYY-MM-DD') ship, CASE WHEN m_ship IS NOT NULL THEN 'S' ELSE ship_src END ship_src,
+            to_char(coalesce(m_delivery, eff_delivery),'YYYY-MM-DD') delivery, CASE WHEN m_delivery IS NOT NULL THEN 'S' ELSE delivery_src END delivery_src,
+            to_char(coalesce(m_checkin, eff_checkin),'YYYY-MM-DD') checkin,
+            CASE WHEN m_delivery IS NOT NULL THEN ship_master_po END delivery_master_po,   -- set = these dates came from this shipment's master PO
             -- raw overrides for the PLAN date editors (blank = use the calculated value)
             to_char(end_production_overide,'YYYY-MM-DD') end_override,
             to_char(supplier_ship_date,'YYYY-MM-DD') ship_override,
@@ -1279,9 +1289,9 @@ app.get('/api/supply/:section', async (req, res) => {
             -- far away the date is (days from today to eff_checkin): only flag when the gap is >=10% of the
             -- lead time. E.g. 2 days out of ~100 away = 2% → not flagged; 5 days out of 30 away = 17% → flagged.
             to_char(erp_final_delivery_date,'YYYY-MM-DD') erp_final_delivery, coalesce(erp_po_id_src,'') erp_po_id, erp_present,
-            (CASE WHEN erp_final_delivery_date IS NOT NULL AND eff_checkin IS NOT NULL
-                  AND eff_checkin IS DISTINCT FROM erp_final_delivery_date
-                  AND abs(eff_checkin - erp_final_delivery_date)::numeric / GREATEST(abs(eff_checkin - CURRENT_DATE), 1) >= 0.10
+            (CASE WHEN erp_final_delivery_date IS NOT NULL AND coalesce(m_checkin, eff_checkin) IS NOT NULL
+                  AND coalesce(m_checkin, eff_checkin) IS DISTINCT FROM erp_final_delivery_date
+                  AND abs(coalesce(m_checkin, eff_checkin) - erp_final_delivery_date)::numeric / GREATEST(abs(coalesce(m_checkin, eff_checkin) - CURRENT_DATE), 1) >= 0.10
                   THEN 1 ELSE 0 END)::int erp_date_pending,
             -- supplier production-confidence: confirmed status + days since last confirmation
             coalesce(production_status,'') production_status,
@@ -1290,7 +1300,7 @@ app.get('/api/supply/:section', async (req, res) => {
             -- "late" = past the forecast delivery date AND not yet shipped. Once SHIPPING (in transit) or
             -- DELIVERED/COMPLETE it's no longer an actionable late exception, so exclude those statuses.
             (coalesce(status,'') NOT ILIKE '%complete%' AND coalesce(status,'') NOT ILIKE '%shipping%'
-               AND coalesce(status,'') NOT ILIKE '%deliver%' AND eff_delivery < current_date) is_late,
+               AND coalesce(status,'') NOT ILIKE '%deliver%' AND coalesce(m_delivery, eff_delivery) < current_date) is_late,
             (coalesce(status,'') NOT ILIKE '%complete%' AND coalesce(shipment_ref,'')='') unassigned_shipment,
             (coalesce(status,'') NOT ILIKE '%complete%' AND (
                (start_production < current_date AND pay_start_deposit_assigned IS NULL AND coalesce(deposit_ref,'')='' AND start_calc > 0)
@@ -1332,7 +1342,7 @@ app.get('/api/supply/:section', async (req, res) => {
                   + (CASE WHEN tax_base_kind='goods' THEN val
                           ELSE val + coalesce(duty,0) + coalesce(flex_quote, freight_rate, 0) END)
                     * coalesce(tax_pct,0)/100, 2) landed_total
-          FROM calc4 ORDER BY po`);
+          FROM mastered calc4 ORDER BY po`);
         if (req.params.section === 'cashflow') return res.json(await cashflowResponse(_pos, q));
         return res.json(_pos);
       }

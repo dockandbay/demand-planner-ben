@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.201 - Fix: PO on a shipment inherits the master PO's dates (shipment wins)
+
+A PO assigned to a shipment now takes the MASTER PO's effective ship/delivery/completion dates (they travel
+as one), overriding its own — previously it only read the shipment RECORD's dates, which are empty for a
+master-PO-as-shipment, so e.g. PO-54AUMQ1-FEB kept its own May dates instead of PO-57AUXR1's Aug/Sep dates.
+Added a mastered CTE (self-join on the shipment's master_po). delivery_src becomes S and a new
+delivery_master_po field drives the DATES-tab note: "from shipment <PO>" with a link. is_late + ERP date
+drift also use the mastered dates. (Final-payment-due still uses the PO's own basis — can extend if needed.)
+Verified PO-54AUMQ1-FEB -> 08-03/08-31/09-07 matching PO-57AUXR1.
+
 ## v25.200 - ORDER PLAN download report: extra SKU columns + PO metadata rows
 
 The ⤓ Download report XLSX now includes per-SKU columns — EAN (product_ean), Carton qty, Release window,
