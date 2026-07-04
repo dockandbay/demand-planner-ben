@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.202 - Move Shipments under the PURCHASE ORDERS sub-nav
+
+SHIPMENTS is no longer a separate top-level menu item — it is now a sub-tab under PURCHASE ORDERS
+(#/supply/purchase-orders/shipments), same grid + behaviour. gotoShipment / shipReload / legacy
+#/supply/shipments links redirect there. (Shipment deep-link ref dropped from the URL to avoid clashing
+with the per-PO SHIPMENTS detail-tab slug.)
+
 ## v25.201 - Fix: PO on a shipment inherits the master PO's dates (shipment wins)
 
 A PO assigned to a shipment now takes the MASTER PO's effective ship/delivery/completion dates (they travel

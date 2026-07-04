@@ -302,8 +302,8 @@
 <script>
 (function(){
   var SECTIONS=[['actions','ACTIONS'],['reports','BI & REPORTS'],['purchase-orders','PURCHASE ORDERS'],['order-plan','ORDER PLAN'],
-    ['shipments','SHIPMENTS'],['samples','SAMPLES'],
-    ['config','CONFIG']];
+    ['samples','SAMPLES'],
+    ['config','CONFIG']];   // SHIPMENTS now lives under the PURCHASE ORDERS sub-nav (poSub 'shipments')
   // REPORTS is a parent tab; these are its sub-tabs (the read-across views).
   var REPORT_SECTIONS=[['metrics','METRICS'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
     ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['cashflow','CASH FLOW'],['directclient','DIRECT TO CLIENT'],['flexport','FLEXPORT'],['erp-compare','ERP COMPARE']];
@@ -854,7 +854,7 @@
   function shPopOutside(e){ var p=document.getElementById('shpop'); if(p&&!p.contains(e.target)&&!(e.target.closest&&e.target.closest('.ship-pick,.dep-pick,.cell-pick')))closeShPop(); }
   function bindShipPick(){ document.querySelectorAll('#supply-root .ship-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openShipAssign(b.dataset.po,b); }; }); }
   // open a shipment from elsewhere: jump to SHIPMENTS and expand that shipment's row
-  function gotoShipment(ref){ _pendingShip=ref; selectSection('shipments'); }
+  function gotoShipment(ref){ _pendingShip=ref; showPoSub('shipments'); }
   function gotoPO(po,tab){ _pendingPO=po; _pendingPOTab=tab||null; showPoSub('plan'); }
   function gotoOrderPlan(po){ _pendingOP={po:po}; selectSection('order-plan'); }   // → full ORDER PLAN, PO pre-filtered
   function gotoDeposit(ref){ _pendingDep=ref; showPoSub('deposits'); }   // → PURCHASE ORDERS ▸ Deposits, filtered to this ref
@@ -2333,7 +2333,7 @@
   var prodTab='list', _prodList=[];
   // PURCHASE ORDERS is now the umbrella: PLAN (the PO grid) + the former PRODUCTIONS sub-tabs.
   var poSub='plan';
-  var PO_SUBS=[['plan','PLAN'],['list','Productions'],['deposits','Deposits'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['barcodes','Barcodes']];
+  var PO_SUBS=[['plan','PLAN'],['shipments','Shipments'],['list','Productions'],['deposits','Deposits'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['barcodes','Barcodes']];
   var PO_SUB_KEYS=PO_SUBS.map(function(t){return t[0];});
   function poSubNav(){ return '<div id="prod-subtabs">'+PO_SUBS.map(function(t){return '<span class="rtab'+(poSub===t[0]?' active':'')+'" data-posub="'+t[0]+'">'+t[1]+'</span>';}).join('')+'</div>'; }
   function bindPoSubNav(){ document.querySelectorAll('#supply-content .rtab[data-posub]').forEach(function(p){ p.onclick=function(){ showPoSub(p.dataset.posub); }; }); }
@@ -2344,6 +2344,9 @@
     var c=document.getElementById('supply-content');
     if(poSub==='plan'){ if(cache['purchase-orders'])return renderPO(cache['purchase-orders']); c.innerHTML='<div class="count">Loading…</div>';
       fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(d){cache['purchase-orders']=d; renderPO(d);}).catch(function(e){c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
+    if(poSub==='shipments'){ var showShip=function(d){ c.innerHTML=poSubNav()+'<div id="prod-body"></div>'; bindPoSubNav(); fetchLookups(function(){ shipInner(d, document.getElementById('prod-body')); }); };
+      if(cache['shipments'])return showShip(cache['shipments']); c.innerHTML='<div class="count">Loading…</div>';
+      fetch('/api/supply/shipments').then(function(r){return r.json();}).then(function(d){cache['shipments']=d; showShip(d);}).catch(function(e){c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
     prodTab=poSub;
     if(cache['productions'])return renderProductions(cache['productions']); c.innerHTML='<div class="count">Loading…</div>';
     fetch('/api/supply/productions').then(function(r){return r.json();}).then(function(d){cache['productions']=d; renderProductions(d);}).catch(function(e){c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); }
@@ -2564,7 +2567,7 @@
 
   // ---- SHIPMENTS (real planner.shipments records; dates OVERRIDE the POs aboard) ----
   var CARRIERS=['Flexport','DHL','FedEx','Sea freight','Air freight','Other'];
-  function shipReload(){ delete cache['shipments']; selectSection('shipments'); }
+  function shipReload(){ delete cache['shipments']; showPoSub('shipments'); }
   function shipPost(ep,body,cb){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
     .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); cb&&cb(j); })
     .catch(function(e){ alert('Failed: '+(e.message||e)); }); }
@@ -2729,7 +2732,7 @@
     var i=b.dataset.i, ex=document.getElementById('shipexp-'+i), open=ex.style.display!=='none';
     ex.style.display=open?'none':''; b.classList.toggle('open',!open); var _or=b.closest('tr'); if(_or)_or.classList.toggle('row-open',!open);
     applyMobSheet(ex, !open, function(){ b.click(); });
-    if(typeof writeHash==='function')writeHash(open?['supply','shipments']:['supply','shipments',b.dataset.ref]);   // URL reflects the open shipment
+    if(typeof writeHash==='function')writeHash(['supply','purchase-orders','shipments']);   // shipments now lives under PURCHASE ORDERS
     if(!open && !ex.dataset.loaded){ ex.dataset.loaded='1'; shipExpand(b.dataset.ref, i); } }; }); }
   // Expand: editable shipment header + date overrides, plus the POs aboard with master / unassign.
   function shipExpand(ref,i,afterRender){ var s=shipBy[ref]||{}, ep='/api/supply/shipment/'+encodeURIComponent(ref);
@@ -4103,7 +4106,7 @@
         if(_s2 && POTAB_FROM_SLUG[_s2] && _s3){ _pendingPO=_s3; _pendingPOTab=POTAB_FROM_SLUG[_s2]; showPoSub('plan'); }   // deep-link a PO detail sub-tab: .../<slug>/<PO>
         else if(_s2 && PO_SUB_KEYS.indexOf(_s2)>=0){ showPoSub(_s2); }   // PURCHASE ORDERS umbrella sub-tab
         else { if(_s2)_pendingPO=_s2; showPoSub('plan'); } }   // just a PO → open it in PLAN, default tab
-      else if(sec==='shipments'){ if(seg[2])_pendingShip=decodeURIComponent(seg[2]); selectSection('shipments'); }
+      else if(sec==='shipments'){ if(seg[2])_pendingShip=decodeURIComponent(seg[2]); showPoSub('shipments'); }   // legacy: shipments moved under purchase-orders
       else selectSection(sec);
     } else if(seg[0]==='scenario'){ if(typeof showScenario==='function'){ showScenario(); if(seg[1])scenSelect(seg[1]); } }
     else if(seg[0]==='demand'){ if(seg[1]&&typeof DEMAND_VIEW!=='undefined')DEMAND_VIEW=seg[1]; var _db=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]'); if(_db)_db.click(); }
