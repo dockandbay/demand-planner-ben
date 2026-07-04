@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.195 - Full ORDER PLAN grid: Supplier column shows suppliers_multiple_all
+
+The Supplier column in the full ORDER PLAN grid showed the single main supplier (main_supplier_final); it now
+shows the SKU's allowed multi-supplier list (products.supplier_multiple_all), with the main supplier in the
+tooltip. Header relabelled "Suppliers". The "⚠ Supplier risk" (supplier-not-allowed) comparison was already
+against supplier_multiple_all — unchanged. PO's single assigned supplier is unchanged (that's separate).
+
 ## v25.194 - DEMAND category popup now closes on filter-bar clicks
 
 v25.188's click-away used a bubble-phase document listener, so filter-bar controls that call

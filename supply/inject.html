@@ -2222,7 +2222,7 @@
       +'<br><span class="tiny mut" style="'+sp+'">&nbsp;</span></th>'
       +'<th class="l" style="'+fzc('rw','#f3f3f1',5)+';'+fzh+'">Release</th>'
       +'<th class="l" style="'+fzc('cq','#f3f3f1',5)+';'+fzh+';text-align:right">Carton</th>'
-      +'<th class="l" style="'+fzc('sup','#f3f3f1',5)+';'+fzh+'">Supplier</th>'
+      +'<th class="l" style="'+fzc('sup','#f3f3f1',5)+';'+fzh+'" title="allowed suppliers for the SKU (supplier_multiple_all)">Suppliers</th>'
       +'<th class="l" style="'+fzc('dis','#f3f3f1',5)+';'+fzh+'">Discontinue</th>';
     pos.forEach(function(po){var m=meta[po],ps=pstat[po];
       h+='<th style="min-width:'+POW+';width:'+POW+'"><button class="lnk-btn op-po-link" data-po="'+esc(po)+'" title="open this PO’s order plan in PURCHASE ORDERS"><b style="font-size:12px">'+esc(po)+'</b></button><br><span class="tiny mut" style="'+sp+'">'+esc(m?m.s:'')+'</span>'
@@ -2261,7 +2261,7 @@
       h+='<tr><td class="l" style="'+fzc('sku','#fff',2)+'">'+esc(sku)+'</td>'
         +'<td class="l" style="'+fzc('rw','#fff',2)+'"><span class="tiny">'+esc(skuRW[sku]||'')+'</span></td>'
         +'<td style="'+fzc('cq','#fff',2)+';text-align:right"><span class="tiny">'+(a.cq?esc(a.cq):'')+'</span></td>'
-        +'<td class="l" style="'+fzc('sup','#fff',2)+';overflow:hidden;text-overflow:ellipsis" title="'+esc(a.sup||'')+(a.sm?' · allowed: '+esc(a.sm):'')+'"><span class="tiny">'+esc(a.sup||'')+'</span></td>'
+        +'<td class="l" style="'+fzc('sup','#fff',2)+';overflow:hidden;text-overflow:ellipsis" title="allowed suppliers (supplier_multiple_all): '+esc(a.sm||'—')+(a.sup?' · main: '+esc(a.sup):'')+'"><span class="tiny">'+esc(a.sm||a.sup||'')+'</span></td>'
         +'<td class="l" style="'+fzc('dis','#fff',2)+'"><span class="tiny mut">'+(a.dis?fd(a.dis):'')+'</span></td>'
         +tds+'<td style="text-align:center"><b>'+units(tot)+'</b></td></tr>'; });
     var gu=0,gv=0,gpl=0,ptd=''; pos.forEach(function(po){var u=pstat[po].u,pl=pstat[po].pl,v=0; skuList.forEach(function(sku){var cc=cell[po+'|'+sku]; if(cc)v+=cc.q*cc.c;}); gu+=u;gv+=v;gpl+=pl; ptd+='<td style="text-align:center"><b>'+units(u)+'</b><br><span class="tiny mut">$'+money(v)+' · '+plt(pl)+'</span></td>';});
