@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.200 - ORDER PLAN download report: extra SKU columns + PO metadata rows
+
+The ⤓ Download report XLSX now includes per-SKU columns — EAN (product_ean), Carton qty, Release window,
+Product title (product_name), Size (size_short), Colour (colour_long) — before the PO quantity columns, and
+adds metadata rows under the PO-number row: Production end, Client (DTC), DTC sales order ref, Branch,
+Country. Added client/sales_order_ref/branch to the order-plan query and product_ean/product_name/size_short/
+colour_long to the skus master. (size_uk_desc doesn't exist; used size_short, the readable UK size e.g. XL / One Size.)
+
 ## v25.199 - ORDER PLAN: no unapproved-partial / supplier-risk flags once a PO has shipped
 
 The Unapproved-partials and Supplier-risk action flags (and their counts) now exclude POs that are SHIPPING /

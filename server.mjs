@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.199';
+const APP_VERSION = 'v25.200';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1366,6 +1366,8 @@ app.get('/api/supply/:section', async (req, res) => {
       case 'skus':  // SKU master for Order Plan "all in category" scope + release-window filtering + sticky attribute columns
         return res.json(await q(`SELECT s.sku, coalesce(s.category,'') category, coalesce(s.release_window,'') release_window,
           coalesce(s.barcode_sku_name,'') name,
+          coalesce(p.product_ean,'') product_ean, coalesce(p.product_name,'') product_name,
+          coalesce(p.size_short,'') size, coalesce(p.colour_long,'') colour_long,
           p.main_supplier_final supplier, p.supplier_multiple_all,
           nullif(p.carton_qty,'') carton_qty,
           nullif(p.discontinue_date_final,'') discontinue, nullif(p.discontinue_date_au_final,'') discontinue_au, nullif(p.discontinue_date_ca,'') discontinue_ca
@@ -1450,6 +1452,7 @@ app.get('/api/supply/:section', async (req, res) => {
           coalesce(p.batch_id,'') batch_id,
           coalesce(p.supplier_name,'') supplier_name, coalesce(p.shipment_ref,'') shipment_ref,
           coalesce(nullif(p.country_code,''), b.country_code, '') country,
+          coalesce(p.client,'') client, coalesce(p.sales_order_ref,'') sales_order_ref, coalesce(p.branch,'') branch,
           coalesce(sl.category,'') category, coalesce(sl.release_window,'') release_window, sl.pallet_qty,
           to_char(p.start_production,'YYYY-MM-DD') prod_start,
           to_char(p.end_production_overide,'YYYY-MM-DD') prod_end,

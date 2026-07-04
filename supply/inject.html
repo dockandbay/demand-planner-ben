@@ -2079,7 +2079,7 @@
     var cats=Array.from(new Set(skuMaster.map(function(s){return s.category;}).concat(lines.map(function(l){return l.category;})).filter(Boolean))).sort();
     var rws=Array.from(new Set(skuMaster.map(function(s){return s.release_window;}).filter(Boolean))).sort();
     var skuCat={},skuRW={},skuAttr={}; skuMaster.forEach(function(s){skuCat[s.sku]=s.category;skuRW[s.sku]=s.release_window;
-      skuAttr[s.sku]={sup:s.supplier||'',cq:s.carton_qty||'',dis:s.discontinue||'',disAu:s.discontinue_au||'',disCa:s.discontinue_ca||'',sm:s.supplier_multiple_all||''};});
+      skuAttr[s.sku]={sup:s.supplier||'',cq:s.carton_qty||'',dis:s.discontinue||'',disAu:s.discontinue_au||'',disCa:s.discontinue_ca||'',sm:s.supplier_multiple_all||'',ean:s.product_ean||'',title:s.product_name||'',size:s.size||'',colour:s.colour_long||''};});
     lines.forEach(function(l){if(l.category)skuCat[l.sku]=l.category; if(l.release_window)skuRW[l.sku]=l.release_window;});
     var defS=statuses.filter(function(s){return /production/i.test(s);}); if(!defS.length)defS=statuses.slice(0,1);
     var st={statuses:new Set(defS),countries:new Set(countries.indexOf('UK')>=0?['UK']:countries),prod:'All',cat:'All',batch:'All',supplier:'All',q:'',poq:'',scope:'ordered',rw:'All',partials:false,erpdiff:false,suprisk:false,disc:false,focus:false};
@@ -2199,11 +2199,22 @@
     document.getElementById('op-supplier').onchange=function(){st.supplier=this.value;markSel(this);viewReset();};
     // Download report — XLSX of the current view: SKUs down column 1, purchase orders across the top (descending), quantities in the grid.
     document.getElementById('op-dl').onclick=function(){ var b=this; var cl=curLines(); var skus=rowsFor(cl);
-      var pset={},pos=[]; cl.forEach(function(l){ if(!pset[l.po]){pset[l.po]=1;pos.push(l.po);} }); pos.sort().reverse();
+      var pset={},pos=[],pmeta={}; cl.forEach(function(l){ if(!pset[l.po]){pset[l.po]=1;pos.push(l.po);pmeta[l.po]={pe:l.prod_end||'',client:l.client||'',so:l.sales_order_ref||'',branch:l.branch||'',co:l.country||''};} }); pos.sort().reverse();
       if(!skus.length||!pos.length){ alert('Nothing to export for the current filter.'); return; }
       var qmap={}; cl.forEach(function(l){ var k=l.sku+'|'+l.po; qmap[k]=(qmap[k]||0)+(Number(l.qty)||0); });
-      var grid=[['SKU'].concat(pos)];
-      skus.forEach(function(sku){ grid.push([sku].concat(pos.map(function(po){ var q=qmap[sku+'|'+po]; return q?q:''; }))); });
+      // 7 left (per-SKU) columns, then one column per PO. PO metadata rows sit under the PO-number top row.
+      var LEFT=7, pad=function(v){ var a=new Array(LEFT-1); for(var i=0;i<a.length;i++)a[i]=''; return [v].concat(a); };
+      var grid=[];
+      grid.push(pad('PO').concat(pos));                                                   // top row: PO numbers
+      grid.push(pad('Production end').concat(pos.map(function(po){return pmeta[po].pe;})));
+      grid.push(pad('Client (DTC)').concat(pos.map(function(po){return pmeta[po].client;})));
+      grid.push(pad('DTC sales order ref').concat(pos.map(function(po){return pmeta[po].so;})));
+      grid.push(pad('Branch').concat(pos.map(function(po){return pmeta[po].branch;})));
+      grid.push(pad('Country').concat(pos.map(function(po){return pmeta[po].co;})));
+      grid.push(['SKU','EAN','Carton qty','Release window','Product title','Size','Colour'].concat(pos));   // SKU-attribute header (PO numbers repeat as qty columns)
+      skus.forEach(function(sku){ var a=skuAttr[sku]||{};
+        grid.push([sku, a.ean||'', a.cq||'', (skuRW[sku]||''), a.title||'', a.size||'', a.colour||'']
+          .concat(pos.map(function(po){ var q=qmap[sku+'|'+po]; return q?q:''; }))); });
       try{ var bytes=buildXlsx('Order Plan', grid); var blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
         var url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download='OrderPlan_'+new Date().toISOString().slice(0,10)+'.xlsx'; document.body.appendChild(a); a.click();
         setTimeout(function(){URL.revokeObjectURL(url);a.remove();},150); }
