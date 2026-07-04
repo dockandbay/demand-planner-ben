@@ -77,6 +77,7 @@
 #supply-root .rtab.active{color:#2563eb;border-bottom-color:#3b82f6;font-weight:600}
 #supply-root #op-status,#supply-root #op-country{display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center}
 #supply-root .flt{border:1px solid #d0d0d0;border-radius:4px;padding:4px 9px;font-size:11px;font-family:inherit;width:230px}
+#supply-root select.flt.sel-on{background:#1a1a1a;color:#fff;border-color:#1a1a1a;font-weight:600}   /* a chosen (non-All) filter dropdown shows black */
 #supply-root .save-btn{font-size:11px;padding:4px 12px;cursor:pointer;border:1px solid #ccc;border-radius:4px;background:#fff;font-weight:600;font-family:inherit}
 #supply-root .save-btn:hover{background:#f5f5f5}
 #supply-root .save-btn.dark{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
@@ -2035,6 +2036,33 @@
     return '<div style="padding:4px 4px;max-width:1340px">'+bar+panels+'</div>'; }
 
   // ---- ORDER PLAN (side-by-side: SKU rows × PO columns; status/country pills, production default) ----
+  // Minimal client-side XLSX writer (OOXML zipped with STORE + CRC32 — CSP-safe, no library). grid = array of rows.
+  function _xlsxEsc(s){ return String(s==null?'':s).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
+  function _xlsxCol(i){ var s=''; i=i+1; while(i){ var r=(i-1)%26; s=String.fromCharCode(65+r)+s; i=((i-r)/26)|0; } return s; }
+  function _xlsxCell(ref,v){ if(v===''||v==null)return ''; if(typeof v==='number'&&isFinite(v)) return '<c r="'+ref+'"><v>'+v+'</v></c>'; return '<c r="'+ref+'" t="inlineStr"><is><t xml:space="preserve">'+_xlsxEsc(v)+'</t></is></c>'; }
+  function _xlsxSheet(grid){ var rows=grid.map(function(row,ri){ var cells=(row||[]).map(function(v,ci){ return _xlsxCell(_xlsxCol(ci)+(ri+1),v); }).join(''); return cells?'<row r="'+(ri+1)+'">'+cells+'</row>':''; }).join('');
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'+rows+'</sheetData></worksheet>'; }
+  function _crc32(buf){ var t=_crc32._t; if(!t){ t=_crc32._t=[]; for(var n=0;n<256;n++){ var c=n; for(var k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1); t[n]=c>>>0; } } var crc=0xFFFFFFFF; for(var i=0;i<buf.length;i++)crc=(crc>>>8)^t[(crc^buf[i])&0xFF]; return (crc^0xFFFFFFFF)>>>0; }
+  function _zipStore(files){ var enc=new TextEncoder(), parts=[], len=0, central=[];
+    function u16(n){return new Uint8Array([n&255,(n>>8)&255]);} function u32(n){return new Uint8Array([n&255,(n>>8)&255,(n>>16)&255,(n>>>24)&255]);}
+    function push(u){parts.push(u); len+=u.length;}
+    files.forEach(function(f){ var nm=enc.encode(f.name), data=f.data, crc=_crc32(data), off=len;
+      push(u32(0x04034b50)); push(u16(20)); push(u16(0)); push(u16(0)); push(u16(0)); push(u16(0)); push(u32(crc)); push(u32(data.length)); push(u32(data.length)); push(u16(nm.length)); push(u16(0)); push(nm); push(data);
+      central.push({nm:nm,crc:crc,len:data.length,off:off}); });
+    var cstart=len;
+    central.forEach(function(c){ push(u32(0x02014b50)); push(u16(20)); push(u16(20)); push(u16(0)); push(u16(0)); push(u16(0)); push(u16(0)); push(u32(c.crc)); push(u32(c.len)); push(u32(c.len)); push(u16(c.nm.length)); push(u16(0)); push(u16(0)); push(u16(0)); push(u16(0)); push(u32(0)); push(u32(c.off)); push(c.nm); });
+    var csize=len-cstart;
+    push(u32(0x06054b50)); push(u16(0)); push(u16(0)); push(u16(central.length)); push(u16(central.length)); push(u32(csize)); push(u32(cstart)); push(u16(0));
+    var out=new Uint8Array(len), p=0; parts.forEach(function(u){ out.set(u,p); p+=u.length; }); return out; }
+  function buildXlsx(sheetName, grid){ var enc=new TextEncoder();
+    var files=[
+      {name:'[Content_Types].xml', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'},
+      {name:'_rels/.rels', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'},
+      {name:'xl/workbook.xml', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="'+_xlsxEsc(sheetName)+'" sheetId="1" r:id="rId1"/></sheets></workbook>'},
+      {name:'xl/_rels/workbook.xml.rels', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'},
+      {name:'xl/worksheets/sheet1.xml', str:_xlsxSheet(grid)}
+    ];
+    return _zipStore(files.map(function(f){ return {name:f.name, data:enc.encode(f.str)}; })); }
   function renderOrderPlan(lines){ var c=document.getElementById('supply-content');
     Promise.all([fetch('/api/supply/skus').then(function(r){return r.json();}).catch(function(){return [];}),
       fetch('/api/supply/portal-line-costs').then(function(r){return r.json();}).catch(function(){return [];})])
@@ -2042,7 +2070,7 @@
   function opBuild(lines,c,skuMaster,plc){ plc=plc||[];
     var plcMap={}; plc.forEach(function(x){ plcMap[x.po+'|'+x.sku]=x; });   // (po|sku) → supplier change (for inline confirm in cells)
     function uniq(k){var s={};lines.forEach(function(l){if(l[k])s[l[k]]=1;});return Object.keys(s).sort();}
-    var statuses=uniq('status'), countries=uniq('country'), prods=uniq('prod_no');
+    var statuses=uniq('status'), countries=uniq('country'), prods=uniq('prod_no').reverse(), batches=uniq('batch_id').reverse();   // prod# / batch dropdowns: descending (newest first)
     // COMPLETE POs (1000+ from the ERP history) are excluded from the status pills + "All" — including them
     // in an all-SKUs pivot explodes it (crashes). They surface only via a PO search in the PO box (≥5 chars),
     // which overrides the status filter.
@@ -2053,7 +2081,7 @@
       skuAttr[s.sku]={sup:s.supplier||'',cq:s.carton_qty||'',dis:s.discontinue||'',disAu:s.discontinue_au||'',disCa:s.discontinue_ca||'',sm:s.supplier_multiple_all||''};});
     lines.forEach(function(l){if(l.category)skuCat[l.sku]=l.category; if(l.release_window)skuRW[l.sku]=l.release_window;});
     var defS=statuses.filter(function(s){return /production/i.test(s);}); if(!defS.length)defS=statuses.slice(0,1);
-    var st={statuses:new Set(defS),countries:new Set(countries),prod:'All',cat:'All',q:'',poq:'',scope:'ordered',rw:'All',partials:false,erpdiff:false,suprisk:false,disc:false,focus:false};
+    var st={statuses:new Set(defS),countries:new Set(countries),prod:'All',cat:'All',batch:'All',q:'',poq:'',scope:'ordered',rw:'All',partials:false,erpdiff:false,suprisk:false,disc:false,focus:false};
     // action sets (exclude complete POs): unapproved partial cartons, and lines whose planned qty differs from the ERP
     function isUnapprovedPartial(l){ return !/complete/i.test(l.status||'') && (l.full_carton_check||'').indexOf('⚠')>=0; }
     function erpDiff(l){ return !/complete/i.test(l.status||'') && Number(l.qty)!==Number(l.erp_qty==null?l.qty:l.erp_qty); }
@@ -2067,14 +2095,17 @@
       st.statuses=new Set(pillStatuses);   // show all (non-complete) statuses so the flagged lines aren't hidden by the status filter
       _pendingOP=null; }
     function pillsHTML(opts,setv){ return opts.map(function(o){return '<span class="pill'+(setv.has(o)?' active':'')+'" data-v="'+esc(o)+'">'+esc(o)+'</span>';}).join('')+'<span class="pill" data-all="1">All</span>'; }
-    function sel(id,label,opts,val){return '<span class="pill-lbl">'+label+'</span><select class="flt" id="'+id+'" style="width:auto;padding:3px 6px"><option>All</option>'+opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>';}
+    function sel(id,label,opts,val){return '<span class="pill-lbl">'+label+'</span><select class="flt'+(val&&val!=='All'?' sel-on':'')+'" id="'+id+'" style="width:auto;padding:3px 6px"><option>All</option>'+opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>';}
+    function markSel(el){ if(el)el.classList.toggle('sel-on', el.value && el.value!=='All'); }   // black-highlight a dropdown when a non-All option is chosen
     c.innerHTML=annot('order-plan')
       +'<div class="bar"><span class="pill-lbl">Status</span><span id="op-status">'+pillsHTML(pillStatuses,st.statuses)+'</span><span class="mut tiny" style="margin-left:6px">completed POs: search a PO number below</span>'
         +'<span class="pill-lbl" style="margin-left:12px">PO(s)</span><input class="flt" id="op-po" placeholder="PO number(s) — space / comma…" title="one or more PO numbers, separated by space, comma or line break — overrides the status &amp; country filters" style="width:240px;background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8" value="'+esc(st.poq||'')+'"></div>'
       +'<div class="bar"><span class="pill-lbl">Country</span><span id="op-country">'+pillsHTML(countries,st.countries)+'</span></div>'
       +'<div class="bar"><span class="pill-lbl">SKUs</span><span class="pill active" data-sc="ordered">Ordered</span><span class="pill" data-sc="allskus">All SKUs</span><span class="pill" data-sc="all">All in category</span>'
-        +sel('op-cat','Category',cats,st.cat)+sel('op-rw','Release',rws,st.rw)+sel('op-prod','PROD#',prods,st.prod)
-        +'<input class="flt" id="op-q" placeholder="filter SKU…" style="width:120px"><span class="count" id="op-count" style="margin-left:auto"></span></div>'
+        +sel('op-cat','Category',cats,st.cat)+sel('op-rw','Release',rws,st.rw)+sel('op-prod','PROD#',prods,st.prod)+sel('op-batch','Batch',batches,st.batch)
+        +'<input class="flt" id="op-q" placeholder="filter SKU…" style="width:120px">'
+        +'<button class="save-btn" id="op-dl" style="margin-left:auto;background:#2563eb;color:#fff;border-color:#2563eb" title="Download XLSX — SKUs (rows) × purchase orders (columns) × quantities, for the current view">⤓ Download report</button>'
+        +'<span class="count" id="op-count" style="margin-left:8px"></span></div>'
       +'<div class="bar"><span class="pill-lbl">Action items</span>'
         +'<span class="pill'+(st.partials?' active':'')+'" id="op-partials">⚠ Unapproved partials <span id="op-partials-n" style="color:#dc2626;font-weight:700"></span></span>'
         +'<span class="pill'+(st.erpdiff?' active':'')+'" id="op-erp">⚠ Update ERP <span id="op-erp-n" style="color:#dc2626;font-weight:700"></span></span>'
@@ -2091,7 +2122,7 @@
       if(st.focus){ if(!l.starred || /complete/i.test(l.status||''))return false; }   // Focus = starred + active only (overrides status / PO box)
       else if(pt.length){ if(!pt.some(function(t){return nrm(l.po).indexOf(t)>=0;}))return false; }
       else { if(!st.statuses.has(l.status))return false; if(!(allC||st.countries.has(l.country)))return false; }
-      return (st.prod==='All'||l.prod_no===st.prod)&&(st.cat==='All'||l.category===st.cat)&&(st.rw==='All'||skuRW[l.sku]===st.rw)&&(!st.partials||isUnapprovedPartial(l))&&(!st.erpdiff||erpDiff(l))&&(!st.suprisk||lineSupRisk(l))&&(!st.disc||lineDisc(l))&&(!nrm(st.q)||nrm(l.sku).indexOf(nrm(st.q))>=0); }); }
+      return (st.prod==='All'||l.prod_no===st.prod)&&(st.batch==='All'||l.batch_id===st.batch)&&(st.cat==='All'||l.category===st.cat)&&(st.rw==='All'||skuRW[l.sku]===st.rw)&&(!st.partials||isUnapprovedPartial(l))&&(!st.erpdiff||erpDiff(l))&&(!st.suprisk||lineSupRisk(l))&&(!st.disc||lineDisc(l))&&(!nrm(st.q)||nrm(l.sku).indexOf(nrm(st.q))>=0); }); }
     function rowsFor(cl){ var set={},list=[]; cl.forEach(function(l){if(!set[l.sku]){set[l.sku]=1;list.push(l.sku);}});
       function addMaster(reqCat){ skuMaster.forEach(function(s){ if(set[s.sku])return;
         if(reqCat&&s.category!==st.cat)return; if(st.cat!=='All'&&s.category!==st.cat)return;
@@ -2157,9 +2188,21 @@
     document.getElementById('op-suprisk').onclick=function(){st.suprisk=!st.suprisk; this.classList.toggle('active',st.suprisk); viewReset();};
     document.getElementById('op-disc').onclick=function(){st.disc=!st.disc; this.classList.toggle('active',st.disc); viewReset();};
     document.getElementById('op-focus').onclick=function(){st.focus=!st.focus; this.classList.toggle('active',st.focus); viewReset();};
-    document.getElementById('op-cat').onchange=function(){st.cat=this.value;viewReset();};
-    document.getElementById('op-rw').onchange=function(){st.rw=this.value;viewReset();};
-    document.getElementById('op-prod').onchange=function(){st.prod=this.value;viewReset();};
+    document.getElementById('op-cat').onchange=function(){st.cat=this.value;markSel(this);viewReset();};
+    document.getElementById('op-rw').onchange=function(){st.rw=this.value;markSel(this);viewReset();};
+    document.getElementById('op-prod').onchange=function(){st.prod=this.value;markSel(this);viewReset();};
+    document.getElementById('op-batch').onchange=function(){st.batch=this.value;markSel(this);viewReset();};
+    // Download report — XLSX of the current view: SKUs down column 1, purchase orders across the top (descending), quantities in the grid.
+    document.getElementById('op-dl').onclick=function(){ var b=this; var cl=curLines(); var skus=rowsFor(cl);
+      var pset={},pos=[]; cl.forEach(function(l){ if(!pset[l.po]){pset[l.po]=1;pos.push(l.po);} }); pos.sort().reverse();
+      if(!skus.length||!pos.length){ alert('Nothing to export for the current filter.'); return; }
+      var qmap={}; cl.forEach(function(l){ var k=l.sku+'|'+l.po; qmap[k]=(qmap[k]||0)+(Number(l.qty)||0); });
+      var grid=[['SKU'].concat(pos)];
+      skus.forEach(function(sku){ grid.push([sku].concat(pos.map(function(po){ var q=qmap[sku+'|'+po]; return q?q:''; }))); });
+      try{ var bytes=buildXlsx('Order Plan', grid); var blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+        var url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download='OrderPlan_'+new Date().toISOString().slice(0,10)+'.xlsx'; document.body.appendChild(a); a.click();
+        setTimeout(function(){URL.revokeObjectURL(url);a.remove();},150); }
+      catch(e){ alert('Could not build the report: '+(e&&e.message||e)); } };
     document.getElementById('op-po').oninput=debounce(function(){st.poq=this.value.toLowerCase();viewReset();},350);
     document.getElementById('op-q').oninput=debounce(function(){st.q=this.value;viewReset();},350);
     // ---- supplier changes awaiting approval (from the portal) — accept here too, not just on PO PLAN ----
@@ -2201,7 +2244,7 @@
     var pos=[],psn={},cell={},meta={};
     rows.forEach(function(l){ if(!psn[l.po]){psn[l.po]=1;pos.push(l.po);meta[l.po]={s:l.supplier_name,co:l.country,ps:l.prod_start,pe:l.prod_end,sd:l.ship_date,dl:l.delivery};}
       cell[l.po+'|'+l.sku]={q:l.qty,eq:(l.erp_qty==null?l.qty:l.erp_qty),c:Number(l.cost_price)||0,pq:Number(l.pallet_qty)||0,fcc:(l.full_carton_check||''),sra:!!l.supplier_risk_approved,dca:!!l.discontinue_approved}; });
-    pos.sort();
+    pos.sort().reverse();   // purchase orders across the top, descending (newest first)
     var poTotal=pos.length, poCapped=(!showAllPos && poTotal>OP_POCAP);
     if(poCapped)pos=pos.slice(0,OP_POCAP);   // render only the first N PO columns until "show all"
     if(cn)cn.textContent=skuList.length+' SKUs × '+(poCapped?OP_POCAP+' of ':'')+poTotal+' POs'+(poCapped?' · capped for speed':(poTotal>25?' · narrow with filters':''));

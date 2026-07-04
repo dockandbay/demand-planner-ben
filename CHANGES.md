@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.196 - ORDER PLAN: XLSX download report, Batch filter, descending order, selected-filter highlight
+
+- **⤓ Download report** button (right side of the SKUs bar) → XLSX of the current view: SKUs down column 1,
+  purchase orders across the top (descending), quantities in the grid. Client-side OOXML writer (no library).
+- **Batch filter** dropdown added (sorted descending / newest first); filters the grid by PO batch_id
+  (added batch_id to the order-plan query).
+- **PROD# dropdown sorted descending**, and the grid's **PO columns are now descending** (newest first).
+- **Selected filter dropdowns highlight black** (Category / Release / PROD# / Batch) when a non-"All" option
+  is chosen. PO filtering stays the text box (unchanged); each PO still has one supplier (unchanged).
+
+No new env vars. NOTE: batch_id column added to the order-plan endpoint — no migration (existing column).
+
 ## v25.195 - Full ORDER PLAN grid: Supplier column shows suppliers_multiple_all
 
 The Supplier column in the full ORDER PLAN grid showed the single main supplier (main_supplier_final); it now
