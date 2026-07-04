@@ -86,7 +86,18 @@
 #supply-root .shipdrawer-x:hover{color:#0f172a}
 #supply-root .shipdrawer-full{margin-right:6px}
 #supply-root .shipdrawer-body{padding:16px 18px;overflow:auto;flex:1 1 auto}
-@media (max-width:700px){#supply-root #shipdrawer{width:100vw}}
+/* Mobile: the drawer becomes a full-screen takeover (slides up from the bottom, dark app header) — a distinct
+   experience from the desktop side-drawer. */
+@media (max-width:700px){
+  #supply-root #shipdrawer-bg{background:transparent!important}
+  #supply-root #shipdrawer{top:0;right:0;left:0;width:100vw;height:100vh;height:100dvh;box-shadow:none;transform:translateY(100%);transition:transform .24s cubic-bezier(.4,0,.2,1)}
+  #supply-root #shipdrawer-bg.open #shipdrawer{transform:translateY(0)}
+  #supply-root .shipdrawer-head{padding:13px 14px;background:#0f172a;border-bottom:none;position:sticky;top:0;z-index:3}
+  #supply-root .shipdrawer-title{color:#fff;font-size:15px}
+  #supply-root .shipdrawer-x{color:#fff;font-size:22px;padding:6px 10px}
+  #supply-root .shipdrawer-full{color:#93c5fd;font-size:13px;padding:6px 4px}
+  #supply-root .shipdrawer-body{padding:12px 12px 56px}
+}
 #supply-root #op-status,#supply-root #op-country{display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center}
 #supply-root .flt{border:1px solid #d0d0d0;border-radius:4px;padding:4px 9px;font-size:11px;font-family:inherit;width:230px}
 #supply-root select.flt.sel-on{background:#1a1a1a;color:#fff;border-color:#1a1a1a;font-weight:600}   /* a chosen (non-All) filter dropdown shows black */

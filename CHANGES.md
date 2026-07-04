@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.204 - Shipment drawer: full-screen takeover on mobile
+
+On phones (≤700px) the shipment drawer is now a full-screen experience distinct from the desktop
+side-drawer: it fills the whole viewport (100dvh), slides up from the bottom, and uses the app's dark
+sticky header (matching the mobile sheet pattern) with larger tap targets for ✕ and "Full page ↗".
+Desktop keeps the right-side slide-in. Same content/tabs/edits either way.
+
 ## v25.203 - Shipment drawer: open a shipment without leaving PURCHASE ORDERS
 
 Clicking a shipment link (e.g. from a PO's payment plan) now opens a right-side slide-in **drawer**
