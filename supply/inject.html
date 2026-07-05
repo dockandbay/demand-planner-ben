@@ -76,7 +76,7 @@
 #supply-root .rtab:hover{color:#2563eb}
 #supply-root .rtab.active{color:#2563eb;border-bottom-color:#3b82f6;font-weight:600}
 /* Shipment drawer — right-side slide-in popout (open a shipment without leaving PURCHASE ORDERS) */
-#supply-root #shipdrawer-bg{position:fixed;inset:0;z-index:900;background:rgba(15,23,42,0);transition:background .18s ease}
+#supply-root #shipdrawer-bg{position:fixed;inset:0;z-index:6100;background:rgba(15,23,42,0);transition:background .18s ease}   /* above the mobile PO sheet (#mob-sheet-ov, z6000) so the drawer opens on top of it */
 #supply-root #shipdrawer-bg.open{background:rgba(15,23,42,.32)}
 #supply-root #shipdrawer{position:absolute;top:0;right:0;height:100%;width:min(920px,94vw);background:#fff;box-shadow:-8px 0 28px rgba(15,23,42,.18);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1)}
 #supply-root #shipdrawer-bg.open #shipdrawer{transform:translateX(0)}
@@ -1404,14 +1404,14 @@
     return head+body+'</tbody></table></div><div class="grid-tailspace"></div>'; }
   // on phones an opened expand-row becomes a full-screen sheet with a Back bar (desktop unchanged)
   function isPhone(){ return window.matchMedia && window.matchMedia('(max-width:640px)').matches; }
-  // On phone the PO card sub-nav (many tabs) collapses to PAYMENTS · CLIENT/FBA · SHIPMENTS + a "More ▾"
-  // dropdown holding the rest, so it doesn't wrap over 3 rows. Desktop keeps the full strip.
+  // On phone the PO card sub-nav (many tabs) collapses to PAYMENTS · DATES · CLIENT/FBA + a "More ▾"
+  // dropdown holding the rest (incl. SHIPMENTS), so it doesn't wrap over 3 rows. Desktop keeps the full strip.
   function setupMobSubnav(root){ if(!root||!isPhone())return;
     var nav=root.querySelector('.po-subnav'); if(!nav||nav._mobDone)return; nav._mobDone=1;
-    var PRIMARY={pay:1,client:1,shipments:1};
+    var PRIMARY={pay:1,client:1,dates:1};
     var tabs=Array.prototype.slice.call(nav.querySelectorAll('.potab'));
     var overflow=tabs.filter(function(b){return !PRIMARY[b.dataset.pt];}); if(!overflow.length)return;
-    ['pay','client','shipments'].forEach(function(k){ var b=nav.querySelector('.potab[data-pt="'+k+'"]'); if(b)nav.appendChild(b); });   // primaries to the front
+    ['pay','dates','client'].forEach(function(k){ var b=nav.querySelector('.potab[data-pt="'+k+'"]'); if(b)nav.appendChild(b); });   // primaries to the front
     function moreLbl(b){ return (b.childNodes[0]&&b.childNodes[0].nodeValue||b.textContent||'').trim(); }
     var overflowExc=0; overflow.forEach(function(b){ var e=b.querySelector('.ex-badge'); if(e)overflowExc+=parseInt(e.textContent,10)||0; });
     var more=document.createElement('button'); more.type='button'; more.className='rtab po-more-btn';
@@ -1421,7 +1421,7 @@
       b.addEventListener('click',function(){ renderMore(b); menu.style.display='none'; });   // fires for menu clicks AND deep-links
       var it=document.createElement('button'); it.type='button'; it.className='po-more-item'; it.innerHTML=b.innerHTML;
       it.onclick=function(e){ e.stopPropagation(); b.click(); }; menu.appendChild(it); });
-    ['pay','client','shipments'].forEach(function(k){ var b=nav.querySelector('.potab[data-pt="'+k+'"]'); if(b)b.addEventListener('click',function(){ renderMore(null); }); });
+    ['pay','dates','client'].forEach(function(k){ var b=nav.querySelector('.potab[data-pt="'+k+'"]'); if(b)b.addEventListener('click',function(){ renderMore(null); }); });
     more.onclick=function(e){ e.stopPropagation(); var openNow=menu.style.display==='none'; menu.style.display=openNow?'block':'none';
       if(openNow)setTimeout(function(){ document.addEventListener('click',function h(ev){ if(!menu.contains(ev.target)&&ev.target!==more){ menu.style.display='none'; document.removeEventListener('click',h); } }); },0); };
     nav.appendChild(more); nav.appendChild(menu); renderMore(null); }

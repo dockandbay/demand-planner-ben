@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.205 - Fix mobile shipment drawer + reshuffle mobile PO tabs
+
+- Fix: on mobile the shipment drawer wasn't clicking through — it opened *behind* the full-screen
+  mobile PO sheet (#mob-sheet-ov, z6000) because the drawer was z900. Bumped the drawer to z6100 so
+  it opens on top of the sheet.
+- Mobile PO card sub-nav: SHIPMENTS moved into the "More ▾" overflow; DATES promoted to a visible tab.
+  Visible tabs are now PAYMENTS · DATES · CLIENT/FBA. Desktop keeps the full strip.
+
 ## v25.204 - Shipment drawer: full-screen takeover on mobile
 
 On phones (≤700px) the shipment drawer is now a full-screen experience distinct from the desktop
