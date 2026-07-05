@@ -1145,7 +1145,7 @@
       _poShowClient=!!(state.ctry&&state.ctry['DIRECT']);   // DIRECT pill → reveal Client name + sales ref columns
       var shown=(_poShowAll||f.length<=PO_CAP)?f:f.slice(0,PO_CAP);
       document.getElementById('sup-count').textContent=(shown.length<f.length?shown.length+' of ':'')+f.length+' / '+rows.length+' POs'+(q?' (search — all statuses)':'');
-      document.getElementById('sup-grid').innerHTML=poTable(shown,q?'status':state.grp)   // search spans all statuses → group under status sub-labels
+      document.getElementById('sup-grid').innerHTML=poTable(shown,q?(state.grp==='shipment'?'shipment':'status'):state.grp)   // search spans all statuses → group under status sub-labels (but keep the Master-shipment hierarchy if that grouping is chosen)
         +(shown.length<f.length?'<div style="margin:8px 0;text-align:center"><button class="save-btn light" id="po-showall">Show all '+f.length+' &darr;</button></div>':'');
       var sa=document.getElementById('po-showall'); if(sa)sa.onclick=function(){ _poShowAll=true; view(); };
       bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindPoNotes(); bindPoActBadge(); bindPoCopy();
@@ -1448,10 +1448,17 @@
       });
     }
     else if(groupBy==='shipment'){
-      // Master shipment: keep plain alphabetical PO order — do NOT cluster shipment POs at the top. A PO that
-      // sits on another PO's master shipment (a member, not the master) is simply indented in place.
-      var sorted=rows.slice().sort(function(a,b){return a.po<b.po?-1:a.po>b.po?1:0;});
-      sorted.forEach(function(r,idx){ var indent=!!(r.shipment && !r.is_master && r.shipment!==r.po); body+=poRowHtml(r,idx,indent,null); });
+      // Master shipment: order by the shipment's MASTER PO (= shipment_ref) for POs on a shipment, else the
+      // PO's own ref for standalone — so a group sits at the master's alphabetical position (NOT all clustered
+      // at the top). Within a group the master sits first and its members are indented directly beneath it.
+      var keyOf=function(r){ return (r.shipment&&String(r.shipment))||r.po; };
+      var isMasterRow=function(r){ return !r.shipment || r.is_master || r.po===r.shipment; };
+      rows.slice().sort(function(a,b){
+        var ka=keyOf(a), kb=keyOf(b);
+        if(ka!==kb) return ka<kb?-1:1;                                  // groups ordered by master ref
+        var ra=isMasterRow(a)?0:1, rb=isMasterRow(b)?0:1;
+        return ra-rb || (a.po<b.po?-1:a.po>b.po?1:0);                   // master first, then members alphabetically
+      }).forEach(function(r,idx){ body+=poRowHtml(r,idx,!isMasterRow(r),null); });
     }
     else {
       // Production: cluster POs under their production number (alphabetical within each).

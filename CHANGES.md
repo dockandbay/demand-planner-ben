@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.228 - PO Master-shipment grouping: members sit under their master (hierarchy)
+
+Fixed Master-shipment grouping so a member PO sits directly beneath its master, indented — rather than
+floating to its own alphabetical spot (which could put a member above its master, e.g. PO-56UKJM1 above
+PO-56UKXR2). Groups are ordered by the master PO ref (so they're not all clustered at the top, per v25.220);
+within a group the master is first, members indented. Also: when Master-shipment grouping is chosen, a search
+now keeps that hierarchy instead of switching to status-grouping.
+
 ## v25.227 - FBA mobile: merge Status+Type & Launch+Disc columns; SKU on P's line
 
 - On FBA mobile the Status+Type columns merge into one (stacked) column and Launch+Disc merge into one,
