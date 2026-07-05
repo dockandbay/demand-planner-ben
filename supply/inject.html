@@ -344,7 +344,16 @@
   #supply-root #op-filters .pill-lbl{margin:0 3px 0 0!important;font-size:11px}
   #supply-root #op-filters .pill{padding:3px 7px;margin:2px 3px 2px 0;font-size:11px}
   #supply-root #op-filters select.flt{width:calc(50% - 48px)!important;min-width:88px;padding:3px 4px!important}
+  #supply-root #op-filters #op-prod,#supply-root #op-filters #op-batch{width:92px!important;min-width:92px}   /* PROD# / Batch hold short codes — narrower */
   #supply-root #op-filters .op-hint{display:none}   /* drop the "completed POs: search…" hint on mobile to save a line */
+  /* ORDER PLAN pivot grid: the 430px of frozen label columns are wider than the phone, hiding the PO/qty
+     columns behind them so the grid can't be scrolled or edited. On mobile keep ONLY the SKU column frozen
+     (narrowed) and un-freeze Release/Carton/Suppliers/Discontinue → the PO/qty columns become reachable and
+     tappable by swiping horizontally, while the SKU label stays pinned. */
+  #supply-root .op-pivot th:first-child,#supply-root .op-pivot td:first-child{position:sticky!important;left:0!important;min-width:112px!important;width:112px!important;max-width:112px!important;white-space:normal!important;word-break:break-word}
+  #supply-root .op-pivot th:nth-child(n+2),#supply-root .op-pivot td:nth-child(n+2){position:static!important;left:auto!important}
+  #supply-root .op-pivot tr.cat-hdr td{position:static!important;left:auto!important;min-width:0!important;width:auto!important;max-width:none!important}   /* category separator: don't pin its colspan cell (it's 430px wide, would cover the row) */
+  #supply-root .op-pivot-tw{max-height:66vh;overflow:auto;-webkit-overflow-scrolling:touch}
 }
 </style>
 <script src="/portal-view.js"></script>
@@ -2329,7 +2338,7 @@
     // column-1 header mirrors the PO-column line structure so the Prod/Ship/Arrive labels sit once
     // here (rows), instead of repeating on every PO column.
     var lbl='font-weight:600;text-transform:none', sp='text-transform:none;font-weight:400';
-    var h='<div class="tw"><table style="border-collapse:separate;border-spacing:0;width:max-content"><thead><tr><th class="l" style="'+fzc('sku','#f3f3f1',5)+'"><b>SKU</b>'
+    var h='<div class="tw op-pivot-tw"><table class="op-pivot" style="border-collapse:separate;border-spacing:0;width:max-content"><thead><tr><th class="l" style="'+fzc('sku','#f3f3f1',5)+'"><b>SKU</b>'
       +'<br><span class="tiny mut" style="'+sp+'">&nbsp;</span>'
       +'<br><span class="tiny mut" style="'+lbl+'">Prod</span>'
       +'<br><span class="tiny mut" style="'+lbl+'">Ship</span>'

@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.211 - ORDER PLAN mobile: scrollable/editable pivot + narrower PROD#/Batch
+
+- Fix: the ORDER PLAN pivot grid was unusable on mobile — 430px of frozen label columns are wider than the
+  phone screen, so they covered the viewport and the PO/qty columns behind them couldn't be scrolled to or
+  edited. On mobile only the SKU column stays frozen (narrowed to 112px); Release/Carton/Suppliers/Discontinue
+  un-freeze, so you swipe horizontally to reach and tap the qty cells while the SKU stays pinned.
+- PROD# and Batch filter dropdowns narrowed further (92px) since they hold short codes.
+
 ## v25.210 - ORDER PLAN mobile filters: collapsible + condensed
 
 - On mobile the ORDER PLAN filters/options now collapse behind a "⚙ Filters" button (row count stays
