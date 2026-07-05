@@ -163,6 +163,9 @@
 #supply-root table.po-tbl tbody tr:not(.exp-row):not(.grp-row) td:nth-child(2){position:sticky;left:78px;z-index:2;background:#fff;box-shadow:1px 0 0 #e0e0e0}
 #supply-root table.po-tbl td.po-child b{font-weight:600}
 #supply-root table.po-tbl td.po-child .ind{color:#9ca3af}
+#supply-root table.po-tbl td.po-child .ind::before{content:"└ ";user-select:none;-webkit-user-select:none}   /* indent marker via ::before → not included when copying the row/PO */
+#supply-root .po-numcell{cursor:default}
+#supply-root .po-numcell.po-copied{background:#dcfce7!important;transition:background .15s}   /* brief flash on double-click copy */
 #supply-root table.po-tbl thead th:first-child,#supply-root table.po-tbl thead th:nth-child(2){z-index:3;background:#f3f3f1}
 /* freeze column 1 (PLAN) + column 2 (shipment ref) on the shipments grid too */
 #supply-root table.sh-tbl thead th:first-child,
@@ -1143,7 +1146,7 @@
       document.getElementById('sup-grid').innerHTML=poTable(shown,q?'status':state.grp)   // search spans all statuses → group under status sub-labels
         +(shown.length<f.length?'<div style="margin:8px 0;text-align:center"><button class="save-btn light" id="po-showall">Show all '+f.length+' &darr;</button></div>':'');
       var sa=document.getElementById('po-showall'); if(sa)sa.onclick=function(){ _poShowAll=true; view(); };
-      bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindPoNotes(); bindPoActBadge();
+      bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindPoNotes(); bindPoActBadge(); bindPoCopy();
       bindDepPick(patchPoRow); bindPoStars(); bindSetShipping();
       if(_pendingPO){ var want=_pendingPO; _pendingPO=null; setTimeout(function(){
         // if the target PO is past the render cap it isn't in the DOM yet — reveal all rows and retry so the
@@ -1179,7 +1182,7 @@
         var wasOpen=mainTr.classList.contains('row-open');
         mainTr.parentNode.replaceChild(newMain, mainTr);
         if(wasOpen){ newMain.classList.add('row-open'); var eb=newMain.querySelector('.po-exp'); if(eb)eb.classList.add('open'); }
-        bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindDepPick(patchPoRow); bindPoStars(); bindPoNotes(); bindPoActBadge(); bindSetShipping();
+        bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindDepPick(patchPoRow); bindPoStars(); bindPoNotes(); bindPoActBadge(); bindSetShipping(); bindPoCopy();
       }).catch(function(){}); }
     try{ window.__poRowRefresh=silentRowRefresh; }catch(e){}
     // Patch ONE PO row in place (no grid re-render / flash) after an assign. Only when not grouped by shipment —
@@ -1196,7 +1199,7 @@
         var exOpen=(function(){var e=document.getElementById('poexp-'+btn.dataset.i);return e&&e.style.display!=='none';})();
         var nm=tmp.querySelector('tr'); if(nm&&tr&&tr.parentNode){ tr.parentNode.replaceChild(nm,tr); }
         if(exOpen&&nm){ nm.classList.add('row-open'); var eb=nm.querySelector('.po-exp'); if(eb)eb.classList.add('open'); }   // keep the open-row highlight after an in-place patch
-        bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindDepPick(patchPoRow); bindPoStars(); bindPoNotes(); bindPoActBadge(); bindSetShipping();
+        bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindDepPick(patchPoRow); bindPoStars(); bindPoNotes(); bindPoActBadge(); bindSetShipping(); bindPoCopy();
       }).catch(function(){ refreshGrid(); }); }
     _poRefresh=refreshGrid; _poPatchRow=patchPoRow;
     c.querySelectorAll('#po-prog .pill:not(.po-recent):not(.po-focus)').forEach(function(p){p.onclick=function(){c.querySelectorAll('#po-prog .pill:not(.po-recent):not(.po-focus)').forEach(function(x){x.classList.remove('active');});p.classList.add('active');state.f=p.dataset.f;_poShowAll=false;view();};});
@@ -1395,7 +1398,7 @@
     // most relevant detail sub-tab (payment→PAYMENTS, date→DATES, shipping→SHIPMENTS).
     var _acts=poActions(r);
     var actFlag=_acts.length?' <button class="po-act-badge ex-badge" style="cursor:pointer;border:none" data-po="'+esc(r.po)+'" data-tab="'+(PO_ACT_TAB[_acts[0]]||'')+'" data-note="'+esc(_acts.length+' action item'+(_acts.length>1?'s':'')+' — '+_acts.map(function(k){return PO_ACT_LABEL[k]||k;}).join('; ')+' (click to open)')+'">'+_acts.length+'</button>':'';
-    var pocell=indent?'<td class="l po-child po-numcell"><span class="ind">└ </span><b>'+esc(r.po)+'</b>'+noteFlag+actFlag+'</td>':'<td class="l po-numcell"><b>'+esc(r.po)+'</b>'+noteFlag+actFlag+'</td>';
+    var pocell=indent?'<td class="l po-child po-numcell" data-po="'+esc(r.po)+'" title="double-click to copy PO reference"><span class="ind"></span><b>'+esc(r.po)+'</b>'+noteFlag+actFlag+'</td>':'<td class="l po-numcell" data-po="'+esc(r.po)+'" title="double-click to copy PO reference"><b>'+esc(r.po)+'</b>'+noteFlag+actFlag+'</td>';
     // ERP cell — compact badge-style buttons (same look as the "✓ in sync" badge) → keeps the column narrow.
     // Labels collapse to a single action: Update lines / Update date / Update both. All open the same ERP modal.
     var erpStyle='cursor:pointer;border:none';
@@ -1442,16 +1445,20 @@
         list.forEach(function(r){ body+=poRowHtml(r,si++,false,null); });
       });
     }
+    else if(groupBy==='shipment'){
+      // Master shipment: keep plain alphabetical PO order — do NOT cluster shipment POs at the top. A PO that
+      // sits on another PO's master shipment (a member, not the master) is simply indented in place.
+      var sorted=rows.slice().sort(function(a,b){return a.po<b.po?-1:a.po>b.po?1:0;});
+      sorted.forEach(function(r,idx){ var indent=!!(r.shipment && !r.is_master && r.shipment!==r.po); body+=poRowHtml(r,idx,indent,null); });
+    }
     else {
-      var keyFn=groupBy==='production'?function(r){return r.prod_no||'';}:function(r){return r.shipment||'';};
+      // Production: cluster POs under their production number (alphabetical within each).
       var groups={},order=[];
-      rows.forEach(function(r){ var k=keyFn(r); if(!groups[k]){groups[k]=[];order.push(k);} groups[k].push(r); });
+      rows.forEach(function(r){ var k=r.prod_no||''; if(!groups[k]){groups[k]=[];order.push(k);} groups[k].push(r); });
       order.sort(function(a,b){ if(!a)return 1; if(!b)return -1; return a<b?-1:a>b?1:0; });   // named groups first, blank last
       var i=0;
-      order.forEach(function(k,gi){ var list=groups[k];
-        if(groupBy==='shipment'){ list.sort(function(a,b){ var am=(a.po===k||a.is_master)?0:1,bm=(b.po===k||b.is_master)?0:1; return am-bm||(a.po<b.po?-1:a.po>b.po?1:0); }); }
-        else list.sort(function(a,b){return a.po<b.po?-1:a.po>b.po?1:0;});
-        list.forEach(function(r){ var indent=(groupBy==='shipment'&&k&&!(r.po===k||r.is_master)); body+=poRowHtml(r,i++,indent,null); });
+      order.forEach(function(k){ var list=groups[k]; list.sort(function(a,b){return a.po<b.po?-1:a.po>b.po?1:0;});
+        list.forEach(function(r){ body+=poRowHtml(r,i++,false,null); });
       });
     }
     return head+body+'</tbody></table></div><div class="grid-tailspace"></div>'; }
@@ -1498,6 +1505,15 @@
       restoreMob(td); if(_mobActiveTd===td)_mobActiveTd=null;
       if(ov){ ov.style.display='none'; ov.innerHTML=''; }
       document.body.style.overflow=''; } }
+  // double-click a PO cell → copy its reference to the clipboard (no dialog; brief green flash for feedback)
+  function copyPoRef(po,cell){ if(!po)return;
+    var ok=function(){ if(cell){ cell.classList.add('po-copied'); setTimeout(function(){cell.classList.remove('po-copied');},700); } };
+    try{ if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(po).then(ok,function(){ try{legacyCopy(po);}catch(e){} ok(); }); }
+      else { try{legacyCopy(po);}catch(e){} ok(); } }catch(e){ ok(); } }
+  function bindPoCopy(){ var g=document.getElementById('sup-grid'); if(!g||g._pocopy)return; g._pocopy=1;
+    g.addEventListener('dblclick',function(e){ var td=e.target.closest&&e.target.closest('.po-numcell'); if(!td||!td.dataset.po)return;
+      try{ var sel=window.getSelection&&window.getSelection(); if(sel&&sel.removeAllRanges)sel.removeAllRanges(); }catch(_){}   // clear the browser's dblclick text-selection
+      copyPoRef(td.dataset.po, td); }); }
   function bindExpand(){ document.querySelectorAll('#supply-root .po-exp[data-po]').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(){
     var i=b.dataset.i, ex=document.getElementById('poexp-'+i), open=ex.style.display!=='none';
     ex.style.display=open?'none':''; b.classList.toggle('open',!open); var _or=b.closest('tr'); if(_or)_or.classList.toggle('row-open',!open);

@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.220 - PO grid: master-shipment grouping = alphabetical + indent; dbl-click copy
+
+- "Group by Master shipment" on PURCHASE ORDERS no longer clusters shipment POs at the top. POs stay in
+  plain alphabetical order; a PO that sits on another PO's master shipment (a member, not the master) is just
+  indented in place with the "└ " marker.
+- The "└ " indent marker is now a CSS ::before pseudo-element, so it isn't included when you copy a row/PO.
+- Double-clicking a PO cell copies its PO reference to the clipboard (brief green flash; no dialog).
+
 ## v25.219 - Consistent "Filters" collapse across REPORTS + SCENARIO (mobile)
 
 Added a shared mobileFilterCollapse() helper that, on mobile, tucks a view's leading filter row(s) behind a
