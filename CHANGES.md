@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.215 - ORDER PLAN mobile: fix sticky header/column-1 corner overlap
+
+The PO-title header cells had no opaque background, so when the sticky header/column-1 overlapped while
+scrolling, body content bled through and the top-left corner didn't layer cleanly. Gave the header row an
+opaque background, the SKU body cells an opaque white background, fixed the z-index stack (corner > header
+row > SKU column > body), and kept the category-separator grey band.
+
 ## v25.214 - Fix fast-clicking loading the wrong view (nav race)
 
 Clicking menu options quickly could leave you on the previous view (e.g. tap ORDER PLAN but it still shows
