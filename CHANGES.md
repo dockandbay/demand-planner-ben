@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.223 - Mobile: hide status footer, version in top bar, fix BUY SKU cut-off
+
+- Hid the "Inputs loaded live from Supabase / Data extract last updated … vXX" footer (#statusbar) on mobile.
+- Added "HORIZON vXX" to the right side of the top blue bar on mobile.
+- Fixed the BUY/FBA SKU column being cut off: the SKU code (.scode) was white-space:nowrap + flex-shrink:0
+  inside a flex .snm, so it couldn't wrap in the 132px column. Now it wraps (and the .snm row wraps) so the
+  full SKU shows.
+
 ## v25.222 - FBA/BUY mobile: sticky category titles + fix Status/SKU overlap
 
 - Category divider titles now stay sticky on mobile, pinned just below the (already-sticky) column header —

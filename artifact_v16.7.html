@@ -31,6 +31,9 @@ body{font-family:system-ui,-apple-system,sans-serif;font-size:12px;color:#1a1a1a
   #buy-wrap thead th.stk,#buy-wrap td.stk{width:132px !important;min-width:132px !important;max-width:132px !important;white-space:normal !important;word-break:break-word;overflow-wrap:anywhere;overflow:hidden !important}   /* sticky SKU column: wraps within its box so it's fully visible but never bleeds over the Status column */
   #buy-wrap td.stk{font-size:13px !important;line-height:1.22;background:#fff !important}   /* larger SKU text; opaque so the Status column slides under it (keeps base z-index:1 → still under the sticky header) */
   #buy-wrap tr.sch td{font-size:8.5px !important;padding:2px 6px !important;position:sticky !important;top:var(--bp-hdr-h,30px);z-index:3}   /* category titles stick just below the sticky header row */
+  #buy-wrap td.stk .snm{flex-wrap:wrap;padding:3px 5px !important}                 /* let the SKU cell's row wrap */
+  #buy-wrap td.stk .scode{white-space:normal !important;word-break:break-word;overflow-wrap:anywhere;flex-shrink:1 !important;font-size:12px !important}   /* SKU code wraps in the 132px column instead of being cut off */
+  #statusbar{display:none !important}                                              /* hide the "Inputs loaded / Data extract / version" footer on mobile (version now in the top bar) */
   #buy-wrap .ov.open{padding-top:0 !important;align-items:stretch !important}    /* SKU detail = true full-screen popup (!important: the base rule appears later in the sheet) */
   #buy-wrap .pn{width:100vw !important;max-width:100vw !important;height:100dvh !important;max-height:100dvh !important;border:0 !important;border-radius:0 !important}
   #buy-wrap table.pt th.rl,#buy-wrap table.pt td.rl{width:120px !important;min-width:120px !important;max-width:120px !important;white-space:normal !important;word-break:break-word;overflow:hidden}   /* plan popup: narrower first column */
@@ -47,6 +50,7 @@ body{font-family:system-ui,-apple-system,sans-serif;font-size:12px;color:#1a1a1a
 /* ── mobile top bar: hamburger + search (hidden on desktop) ── */
 #hz-topbar{display:none;position:fixed;top:0;left:0;right:0;z-index:5000;align-items:center;gap:8px;background:#0f172a;padding:7px 9px;box-shadow:0 1px 5px rgba(0,0,0,.3)}
 #hz-title{color:#fff;font-weight:700;font-size:14px;letter-spacing:.04em;white-space:nowrap;flex:0 0 auto}
+#hz-ver{margin-left:auto;color:#93c5fd;font-size:11px;font-weight:700;white-space:nowrap;flex:0 0 auto;letter-spacing:.02em}
 #hz-search{display:none;flex:1;min-width:0;font-size:15px;padding:8px 11px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#fff;font-family:inherit}
 #hz-search::placeholder{color:#94a3b8}
 #hz-burger{flex:0 0 auto;width:38px;height:34px;align-items:center;justify-content:center;background:#1e293b;color:#fff;border:none;border-radius:7px;font-size:17px;cursor:pointer;display:flex}
@@ -587,7 +591,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
 
 
 
-<div id="hz-topbar"><button id="hz-burger" aria-label="Menu">☰</button><span id="hz-title"></span><input id="hz-search" type="search" autocomplete="off" placeholder="Search PO / shipment / order…"></div>
+<div id="hz-topbar"><button id="hz-burger" aria-label="Menu">☰</button><span id="hz-title"></span><input id="hz-search" type="search" autocomplete="off" placeholder="Search PO / shipment / order…"><span id="hz-ver"></span></div>
 <div id="hz-backdrop"></div>
 <nav id="hz-drawer" aria-label="Navigation"></nav>
 <div class="wrap" id="app">
@@ -6628,7 +6632,7 @@ function syncTabs(){
 }
 
 function st(msg){var e=document.getElementById('st');if(e)e.textContent=msg;}
-(function(){var label='';var iso=EXTRACT_TS;if(iso&&iso.slice(0,2)!=='__'){var d=new Date(iso);if(!isNaN(d.getTime())){var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],p=function(n){return(n<10?'0':'')+n;};label='Data extract last updated '+p(d.getDate())+'-'+mn[d.getMonth()]+'-'+String(d.getFullYear()).slice(2)+' '+p(d.getHours())+':'+p(d.getMinutes())+'.&nbsp;&nbsp;';}}document.getElementById('ver').innerHTML=label+'<b>'+VERSION+'</b>';})();
+(function(){var label='';var iso=EXTRACT_TS;if(iso&&iso.slice(0,2)!=='__'){var d=new Date(iso);if(!isNaN(d.getTime())){var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],p=function(n){return(n<10?'0':'')+n;};label='Data extract last updated '+p(d.getDate())+'-'+mn[d.getMonth()]+'-'+String(d.getFullYear()).slice(2)+' '+p(d.getHours())+':'+p(d.getMinutes())+'.&nbsp;&nbsp;';}}document.getElementById('ver').innerHTML=label+'<b>'+VERSION+'</b>';var _hv=document.getElementById('hz-ver');if(_hv)_hv.textContent='HORIZON '+VERSION;})();
 function render(){
   // load trading-calendar events once (for the PLAN month-cell "C" markers); re-render when they arrive
   if(CAL_EVENTS===null){ CAL_EVENTS=[]; fetch('/api/trading-calendar').then(function(r){return r.json();}).then(function(d){ CAL_EVENTS=(d&&d.events)||[]; if(VIEW_MODE==='planning')render(); }).catch(function(){}); }
