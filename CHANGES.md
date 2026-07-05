@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.209 - Fix DATES tab 📅 picker button being clipped
+
+The date fields on the PO ▸ DATES tab (Production start / end) had a fixed 110px text box + 📅 button that
+overflowed the narrow "Date" column, clipping the 📅 picker button on both desktop and mobile. The field is
+now fluid inside that column (text box flex-shrinks, button pinned) so 📅 always stays visible and tappable.
+
 ## v25.208 - Mobile: ERP deviations table fits full width
 
 The ORDER PLAN tab's ERP-deviations table (SKU · Qty plan→ERP) had a 45ch min-width + nowrap SKU column

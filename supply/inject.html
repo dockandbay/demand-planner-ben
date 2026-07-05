@@ -54,6 +54,11 @@
 #supply-root .datepick:hover{background:#eef2f7}
 #supply-root .datepick[disabled]{opacity:.4;cursor:not-allowed}
 #supply-root .datepicknative{position:absolute;right:0;bottom:0;width:1px;height:1px;opacity:0;pointer-events:none;border:0;padding:0;margin:0}
+/* DATES tab: the "Date" column is narrow — make the date field fluid so the text box shrinks and the 📅 picker
+   button always stays inside the cell (it was getting clipped off the right edge on both desktop and mobile). */
+#supply-root .dates-tbl .datewrap{display:flex;width:100%;max-width:100%}
+#supply-root .dates-tbl .datewrap .dateinp{flex:1 1 auto;min-width:0;width:auto!important}
+#supply-root .dates-tbl .datewrap .datepick{flex:0 0 auto}
 #supply-root .dateinp.err{border-color:#dc2626 !important;background:#fef2f2}
 /* subtle inline grid date editor — looks like plain read-only text until hovered/focused (no blue box) */
 #supply-root .fci.dinline{border:1px solid transparent;background:transparent;color:#1a1a1a;text-align:left;padding:1px 3px;min-width:0;border-radius:3px;cursor:text}
