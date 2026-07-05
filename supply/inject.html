@@ -2152,7 +2152,11 @@
   // Minimal client-side XLSX writer (OOXML zipped with STORE + CRC32 — CSP-safe, no library). grid = array of rows.
   function _xlsxEsc(s){ return String(s==null?'':s).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
   function _xlsxCol(i){ var s=''; i=i+1; while(i){ var r=(i-1)%26; s=String.fromCharCode(65+r)+s; i=((i-r)/26)|0; } return s; }
-  function _xlsxCell(ref,v){ if(v===''||v==null)return ''; if(typeof v==='number'&&isFinite(v)) return '<c r="'+ref+'"><v>'+v+'</v></c>'; return '<c r="'+ref+'" t="inlineStr"><is><t xml:space="preserve">'+_xlsxEsc(v)+'</t></is></c>'; }
+  function _xlsxCell(ref,v){ var st=null; if(v&&typeof v==='object'&&('v' in v)){ st=v.s; v=v.v; }   // {v,s} = value + cell-style index (fills)
+    var sa=(st!=null&&st>0)?(' s="'+st+'"'):'';
+    if(v===''||v==null){ return sa?('<c r="'+ref+'"'+sa+'/>'):''; }
+    if(typeof v==='number'&&isFinite(v)) return '<c r="'+ref+'"'+sa+'><v>'+v+'</v></c>';
+    return '<c r="'+ref+'"'+sa+' t="inlineStr"><is><t xml:space="preserve">'+_xlsxEsc(v)+'</t></is></c>'; }
   function _xlsxSheet(grid){ var rows=grid.map(function(row,ri){ var cells=(row||[]).map(function(v,ci){ return _xlsxCell(_xlsxCol(ci)+(ri+1),v); }).join(''); return cells?'<row r="'+(ri+1)+'">'+cells+'</row>':''; }).join('');
     return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'+rows+'</sheetData></worksheet>'; }
   function _crc32(buf){ var t=_crc32._t; if(!t){ t=_crc32._t=[]; for(var n=0;n<256;n++){ var c=n; for(var k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1); t[n]=c>>>0; } } var crc=0xFFFFFFFF; for(var i=0;i<buf.length;i++)crc=(crc>>>8)^t[(crc^buf[i])&0xFF]; return (crc^0xFFFFFFFF)>>>0; }
@@ -2168,11 +2172,27 @@
     push(u32(0x06054b50)); push(u16(0)); push(u16(0)); push(u16(central.length)); push(u16(central.length)); push(u32(csize)); push(u32(cstart)); push(u16(0));
     var out=new Uint8Array(len), p=0; parts.forEach(function(u){ out.set(u,p); p+=u.length; }); return out; }
   function buildXlsx(sheetName, grid){ var enc=new TextEncoder();
+    // cell styles: index 0 = default; 1=UK 2=US 3=AU 4=EU solid fills (fills 2..5)
+    var STYLES='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+      +'<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>'
+      +'<fills count="6"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
+      +'<fill><patternFill patternType="solid"><fgColor rgb="FFFA5053"/></patternFill></fill>'
+      +'<fill><patternFill patternType="solid"><fgColor rgb="FF8FD9FB"/></patternFill></fill>'
+      +'<fill><patternFill patternType="solid"><fgColor rgb="FFADEBB3"/></patternFill></fill>'
+      +'<fill><patternFill patternType="solid"><fgColor rgb="FFDAB1DA"/></patternFill></fill></fills>'
+      +'<borders count="1"><border/></borders>'
+      +'<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+      +'<cellXfs count="5"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+      +'<xf numFmtId="0" fontId="0" fillId="2" borderId="0" xfId="0" applyFill="1"/>'
+      +'<xf numFmtId="0" fontId="0" fillId="3" borderId="0" xfId="0" applyFill="1"/>'
+      +'<xf numFmtId="0" fontId="0" fillId="4" borderId="0" xfId="0" applyFill="1"/>'
+      +'<xf numFmtId="0" fontId="0" fillId="5" borderId="0" xfId="0" applyFill="1"/></cellXfs></styleSheet>';
     var files=[
-      {name:'[Content_Types].xml', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'},
+      {name:'[Content_Types].xml', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'},
       {name:'_rels/.rels', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'},
       {name:'xl/workbook.xml', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="'+_xlsxEsc(sheetName)+'" sheetId="1" r:id="rId1"/></sheets></workbook>'},
-      {name:'xl/_rels/workbook.xml.rels', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'},
+      {name:'xl/_rels/workbook.xml.rels', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'},
+      {name:'xl/styles.xml', str:STYLES},
       {name:'xl/worksheets/sheet1.xml', str:_xlsxSheet(grid)}
     ];
     return _zipStore(files.map(function(f){ return {name:f.name, data:enc.encode(f.str)}; })); }
@@ -2318,23 +2338,35 @@
       var pset={},pos=[],pmeta={}; cl.forEach(function(l){ if(!pset[l.po]){pset[l.po]=1;pos.push(l.po);pmeta[l.po]={pe:l.prod_end||'',client:l.client||'',so:l.sales_order_ref||'',branch:l.branch||'',co:l.country||''};} }); pos.sort().reverse();
       if(!skus.length||!pos.length){ alert('Nothing to export for the current filter.'); return; }
       var qmap={}; cl.forEach(function(l){ var k=l.sku+'|'+l.po; qmap[k]=(qmap[k]||0)+(Number(l.qty)||0); });
-      // 7 left (per-SKU) columns, then one column per PO. PO metadata rows sit under the PO-number top row.
-      var LEFT=7, pad=function(v){ var a=new Array(LEFT-1); for(var i=0;i<a.length;i++)a[i]=''; return [v].concat(a); };
-      var grid=[];
-      grid.push(pad('PO').concat(pos));                                                   // top row: PO numbers
-      grid.push(pad('Production end').concat(pos.map(function(po){return pmeta[po].pe;})));
-      grid.push(pad('Client (DTC)').concat(pos.map(function(po){return pmeta[po].client;})));
-      grid.push(pad('DTC sales order ref').concat(pos.map(function(po){return pmeta[po].so;})));
-      grid.push(pad('Branch').concat(pos.map(function(po){return pmeta[po].branch;})));
-      grid.push(pad('Country').concat(pos.map(function(po){return pmeta[po].co;})));
-      grid.push(['SKU','EAN','Carton qty','Release window','Product title','Size','Colour'].concat(pos));   // SKU-attribute header (PO numbers repeat as qty columns)
-      skus.forEach(function(sku){ var a=skuAttr[sku]||{};
-        grid.push([sku, a.ean||'', a.cq||'', (skuRW[sku]||''), a.title||'', a.size||'', a.colour||'']
-          .concat(pos.map(function(po){ var q=qmap[sku+'|'+po]; return q?q:''; }))); });
-      try{ var bytes=buildXlsx('Order Plan', grid); var blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+      var _lbl=b.textContent; b.disabled=true; b.textContent='Building…';
+      // pull the full PO list to resolve each PO's master shipment + the other POs/suppliers it ships with
+      fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(all){
+        all=Array.isArray(all)?all:[]; var poShip={}, shipGroup={};
+        all.forEach(function(p){ poShip[p.po]={ship:p.shipment||'',sup:p.supplier_name||''}; if(p.shipment){ (shipGroup[p.shipment]=shipGroup[p.shipment]||[]).push({po:p.po,sup:p.supplier_name||''}); } });
+        function others(po){ var s=poShip[po]&&poShip[po].ship; if(!s)return {s:'',g:[]}; return {s:s,g:(shipGroup[s]||[]).filter(function(x){return x.po!==po;})}; }
+        function shipsWith(po){ var o=others(po); if(!o.s||!o.g.length)return ''; var sup=Array.from(new Set(o.g.map(function(x){return x.sup;}).filter(Boolean))); return o.s+(sup.length?' — '+sup.join(', '):''); }
+        function shipmentsWith(po){ var o=others(po); return o.g.map(function(x){return x.po;}).join(', '); }
+        var CO_STYLE={UK:1,US:2,AU:3,EU:4};   // solid fills defined in styles.xml
+        // 7 left (per-SKU) columns, then one column per PO. PO metadata rows sit under the Country top row.
+        var LEFT=7, pad=function(v){ var a=new Array(LEFT-1); for(var i=0;i<a.length;i++)a[i]=''; return [v].concat(a); };
+        var grid=[];
+        grid.push(pad('Country').concat(pos.map(function(po){ var co=pmeta[po].co||''; var st=CO_STYLE[String(co).toUpperCase()]||0; return st?{v:co,s:st}:co; })));   // row 1: country, colour-coded
+        grid.push(pad('PO').concat(pos));
+        grid.push(pad('Ships with').concat(pos.map(function(po){return shipsWith(po);})));                    // master shipment + the other suppliers on it
+        grid.push(pad('Shipments with this PO').concat(pos.map(function(po){return shipmentsWith(po);})));      // the other PO refs on that master shipment
+        grid.push(pad('Production end').concat(pos.map(function(po){return pmeta[po].pe;})));
+        grid.push(pad('Client (DTC)').concat(pos.map(function(po){return pmeta[po].client;})));
+        grid.push(pad('DTC sales order ref').concat(pos.map(function(po){return pmeta[po].so;})));
+        grid.push(pad('Branch').concat(pos.map(function(po){return pmeta[po].branch;})));
+        grid.push(['SKU','EAN','Carton qty','Release window','Product title','Size','Colour'].concat(pos));   // SKU-attribute header (PO numbers repeat as qty columns)
+        skus.forEach(function(sku){ var a=skuAttr[sku]||{};
+          grid.push([sku, a.ean||'', a.cq||'', (skuRW[sku]||''), a.title||'', a.size||'', a.colour||'']
+            .concat(pos.map(function(po){ var q=qmap[sku+'|'+po]; return q?q:''; }))); });
+        var bytes=buildXlsx('Order Plan', grid); var blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
         var url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download='OrderPlan_'+new Date().toISOString().slice(0,10)+'.xlsx'; document.body.appendChild(a); a.click();
-        setTimeout(function(){URL.revokeObjectURL(url);a.remove();},150); }
-      catch(e){ alert('Could not build the report: '+(e&&e.message||e)); } };
+        setTimeout(function(){URL.revokeObjectURL(url);a.remove();},150);
+        b.disabled=false; b.textContent=_lbl;
+      }).catch(function(e){ b.disabled=false; b.textContent=_lbl; alert('Could not build the report: '+(e&&e.message||e)); }); };
     document.getElementById('op-po').oninput=debounce(function(){st.poq=this.value.toLowerCase();viewReset();},350);
     document.getElementById('op-q').oninput=debounce(function(){st.q=this.value;viewReset();},350);
     // mobile: collapse/expand the whole filter panel behind the "⚙ Filters" button to save screen space

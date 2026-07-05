@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.229 - ORDER PLAN download report: colour-coded country + shipment rows
+
+Reworked the ORDER PLAN XLSX report:
+- Country moved to row 1, colour-coded per market (UK #FA5053, US #8FD9FB, AU #ADEBB3, EU #DAB1DA) — added
+  a styles.xml with solid fills to the client-side XLSX writer.
+- New "Ships with" row: the PO's master shipment reference + the other suppliers on that shipment.
+- New "Shipments with this PO" row: the other PO references sharing that master shipment.
+
 ## v25.228 - PO Master-shipment grouping: members sit under their master (hierarchy)
 
 Fixed Master-shipment grouping so a member PO sits directly beneath its master, indented — rather than
