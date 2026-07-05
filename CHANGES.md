@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.217 - SCENARIO in mobile menu + mobile-optimise all report sub-views
+
+- Fix: SCENARIO was missing from the mobile hamburger drawer (the drawer only kept buttons with a
+  data-view or the SUPPLY button). Now SCENARIO appears, and selecting it reveals its sub-nav
+  (Prime Day / B2B Allocation / Financial Forecast / PO Stock Priority) in the drawer, like SUPPLY/DEMAND.
+- Mobile pass over the report sub-views (REPORTS: Exec/Slow Moving/Auto Forecast/Key Arrivals/Markdown &
+  EOS/Open-to-Buy; SCENARIO: the 4 above): swipeable sub-tab strips, condensed filter bars (tighter gaps,
+  smaller numeric inputs, wrapping), and touch-scrolling tables with a sensible mobile max-height. Tables
+  already scrolled via .tw/.exec-tw; this makes the filters and tab strips usable on a phone. Desktop
+  unchanged.
+
 ## v25.216 - BUY / FBA plan: mobile-friendly (filters toggle, scrollable grid, full-screen panel)
 
 The BUY and FBA tabs share the same scaffold, so this covers both:

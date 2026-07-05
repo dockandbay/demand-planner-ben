@@ -32,6 +32,11 @@ body{font-family:system-ui,-apple-system,sans-serif;font-size:12px;color:#1a1a1a
   #buy-wrap .ov.open{padding-top:0 !important;align-items:stretch !important}    /* SKU detail = true full-screen popup (!important: the base rule appears later in the sheet) */
   #buy-wrap .pn{width:100vw !important;max-width:100vw !important;height:100dvh !important;max-height:100dvh !important;border:0 !important;border-radius:0 !important}
   #buy-wrap table.pt th.rl,#buy-wrap table.pt td.rl{width:120px !important;min-width:120px !important;max-width:120px !important;white-space:normal !important;word-break:break-word;overflow:hidden}   /* plan popup: narrower first column */
+  /* REPORTS: swipeable sub-tab strip + condensed filter bars (tables already scroll via .tw / .exec-tw) */
+  #report-tabs{flex-wrap:nowrap !important;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  #report-body [style*="gap:14px 18px"],#report-body [style*="gap:10px 18px"],#exec-wrap [style*="gap:14px 18px"],#exec-wrap [style*="gap:10px 18px"]{gap:5px 9px !important}
+  #report-body input[type="number"]{width:58px !important}
+  #report-body .exec-tw,#exec-wrap .exec-tw,#report-body .tw{max-height:calc(100dvh - 140px) !important;-webkit-overflow-scrolling:touch}
 }
 /* ── mobile top bar: hamburger + search (hidden on desktop) ── */
 #hz-topbar{display:none;position:fixed;top:0;left:0;right:0;z-index:5000;align-items:center;gap:8px;background:#0f172a;padding:7px 9px;box-shadow:0 1px 5px rgba(0,0,0,.3)}
@@ -9878,16 +9883,17 @@ var _rfBtn=document.getElementById('rf'); if(_rfBtn)_rfBtn.onclick=function(){
     var x=document.createElement('button'); x.className='hz-close'; x.innerHTML='&times;'; x.onclick=close; drawer.appendChild(x);
     drawer.appendChild(lbl('Navigate'));
     var views=Array.prototype.slice.call(document.querySelectorAll('#view-tabs-row .view-toggle'));
-    var supplyActive=false, demandActive=false;
+    var supplyActive=false, demandActive=false, scenActive=false;
     views.forEach(function(vb){
-      if(!vb.dataset.view && vb.id!=='supply-btn')return;   // skip tools/help, keep view + SUPPLY buttons
-      var isSup=vb.id==='supply-btn';
+      if(!vb.dataset.view && vb.id!=='supply-btn' && vb.id!=='scenario-btn')return;   // skip tools/help, keep view + SUPPLY + SCENARIO buttons
+      var isSup=vb.id==='supply-btn', isScen=vb.id==='scenario-btn';
       var active=vb.classList.contains('active');
       if(isSup && active)supplyActive=true;
+      if(isScen && active)scenActive=true;
       if(vb.dataset.view==='planning' && active)demandActive=true;
       drawer.appendChild(item(vb.textContent.trim(), active, function(){
         clearSearch(); vb.click();
-        if(isSup || vb.dataset.view==='planning'){ setTimeout(build,60); } else { close(); }   // reveal that view's sub-nav in place
+        if(isSup || isScen || vb.dataset.view==='planning'){ setTimeout(build,60); } else { close(); }   // reveal that view's sub-nav in place
       }));
     });
     var nav=window.__supplyNav;
@@ -9902,6 +9908,11 @@ var _rfBtn=document.getElementById('rf'); if(_rfBtn)_rfBtn.onclick=function(){
       var dtabs=Array.prototype.slice.call(document.querySelectorAll('#demand-tabs .dnav'));
       if(dtabs.length){ drawer.appendChild(lbl('Demand planner'));
         dtabs.forEach(function(db){ drawer.appendChild(item(db.textContent.trim(), db.classList.contains('active'), function(){ db.click(); close(); })); }); }
+    } else if(scenActive){
+      // mirror the SCENARIO second-level nav (Prime Day / B2B / Financial Forecast / PO Stock Priority)
+      var stabs=Array.prototype.slice.call(document.querySelectorAll('#scenario-subnav .stab'));
+      if(stabs.length){ drawer.appendChild(lbl('Scenario'));
+        stabs.forEach(function(sb){ drawer.appendChild(item(sb.textContent.trim(), sb.classList.contains('active'), function(){ sb.click(); close(); })); }); }
     }
   }
   burger.onclick=function(){ drawer.classList.contains('open')?close():open(); };

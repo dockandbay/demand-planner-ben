@@ -364,6 +364,13 @@
   #supply-root .op-pivot tbody td:nth-child(n+2){position:static!important;left:auto!important}   /* un-freeze the other label columns in the BODY (header stays sticky-top) */
   #supply-root .op-pivot tr.cat-hdr td{position:static!important;left:auto!important;min-width:0!important;width:auto!important;max-width:none!important;background:#e8e8e6!important}   /* category separator: don't pin its colspan cell (430px wide, would cover the row); keep the grey band */
   #supply-root .op-pivot-tw{max-height:66vh;overflow:auto;-webkit-overflow-scrolling:touch}
+  /* SCENARIO reports (Prime Day / B2B / Financial Forecast / PO Stock): swipeable sub-tabs, condensed
+     filter bars, touch-scrolling tables (tables already scroll via .tw / .exec-tw). */
+  #scenario-root #scenario-subnav{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  #scenario-root .bar{gap:5px 8px}
+  #scenario-root .bar input[type="number"]{width:60px}
+  #scenario-root .bar input[type="text"],#scenario-root .bar textarea{max-width:100%;box-sizing:border-box}
+  #scenario-root .tw,#scenario-root .exec-tw{max-height:calc(100dvh - 140px);-webkit-overflow-scrolling:touch}
 }
 </style>
 <script src="/portal-view.js"></script>
