@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.227 - FBA mobile: merge Status+Type & Launch+Disc columns; SKU on P's line
+
+- On FBA mobile the Status+Type columns merge into one (stacked) column and Launch+Disc merge into one,
+  saving horizontal room. Column count, category-row colspans (COLS_EFF / _nameCol) adjusted accordingly.
+  Desktop FBA and BUY are unchanged.
+- SKU code now sits on the same line as the "P" button (snm no longer wraps; SKU wraps within its space).
+
 ## v25.226 - Fix: SKU detail panel ✕ hidden behind top bar on mobile
 
 The full-screen SKU detail panel (opened from "P"/"Plan") overlay was z-index:100, below the fixed top bar

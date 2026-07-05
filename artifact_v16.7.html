@@ -31,8 +31,8 @@ body{font-family:system-ui,-apple-system,sans-serif;font-size:12px;color:#1a1a1a
   #buy-wrap thead th.stk,#buy-wrap td.stk{width:156px !important;min-width:156px !important;max-width:156px !important;white-space:normal !important;word-break:break-word;overflow-wrap:anywhere;overflow:hidden !important}   /* sticky SKU column: wider + wraps within its box (fully visible, never bleeds over Status) */
   #buy-wrap td.stk{font-size:13px !important;line-height:1.22;background:#fff !important}   /* larger SKU text; opaque so the Status column slides under it (keeps base z-index:1 → still under the sticky header) */
   #buy-wrap tr.sch td{font-size:8.5px !important;padding:2px 6px !important;position:sticky !important;top:var(--bp-hdr-h,30px);z-index:3}   /* category titles stick just below the sticky header row */
-  #buy-wrap td.stk .snm{flex-wrap:wrap;padding:3px 5px !important}                 /* let the SKU cell's row wrap */
-  #buy-wrap td.stk .scode{white-space:normal !important;word-break:break-word;overflow-wrap:anywhere;flex-shrink:1 !important;font-size:12px !important}   /* SKU code wraps in the 132px column instead of being cut off */
+  #buy-wrap td.stk .snm{flex-wrap:nowrap !important;align-items:flex-start;padding:3px 5px !important;gap:3px}   /* keep the SKU on the same line as the P button */
+  #buy-wrap td.stk .scode{white-space:normal !important;word-break:break-word;overflow-wrap:anywhere;flex:1 1 auto;min-width:0;font-size:12px !important}   /* SKU wraps within its space next to P (never cut off) */
   #statusbar{display:none !important}                                              /* hide the "Inputs loaded / Data extract / version" footer on mobile (version now in the top bar) */
   /* BUY/FBA filter rows were single-line flex → the tier/status/type pill groups ran off-screen to the right
      (looked like missing filters). Wrap them so every filter group is visible in the expanded panel. */
@@ -1564,15 +1564,15 @@ function render(){
   var showNonGRS=(BP_VIEW==='fba'&&(_CU==='UK'||_CU==='US'));
   var showAWD=(BP_VIEW==='fba'&&_CU==='US');
   var _extra=(showNonGRS?1:0)+(showAWD?1:0);   // extra lead columns vs the base FBA layout
+  // Mobile FBA: merge Status+Type into one column and Launch+Disc into one (saves horizontal room).
+  var _MERGE=(BP_VIEW==='fba' && window.matchMedia && window.matchMedia('(max-width:640px)').matches);
   // Rebuild trailing header columns for the active view (buy vs fba)
   var _hdr=document.getElementById('main-hdr');
   if(_hdr){
     var _lead='<tr>'
       +'<th class="stk" style="min-width:320px">SKU</th>'
-      +'<th style="min-width:52px">Status</th>'
-      +'<th style="min-width:64px">Type</th>'
-      +'<th style="min-width:60px">Launch</th>'
-      +'<th style="min-width:60px">Disc</th>'
+      +(_MERGE?'<th style="min-width:60px">Status<br>Type</th>':'<th style="min-width:52px">Status</th><th style="min-width:64px">Type</th>')
+      +(_MERGE?'<th style="min-width:58px">Launch<br>Disc</th>':'<th style="min-width:60px">Launch</th><th style="min-width:60px">Disc</th>')
       +'<th class="r" style="min-width:60px">SOH 3PL</th>'
       +(showNonGRS?'<th class="r" style="min-width:72px">SOH NON GRS</th>':'')
       +'<th class="r" style="min-width:60px">SOH FBA</th>'
@@ -1654,16 +1654,17 @@ function render(){
   const gk=Object.keys(grp).sort((a,b)=>{const ai=CAT_ORDER.indexOf(a),bi=CAT_ORDER.indexOf(b);if(ai<0&&bi<0)return a.localeCompare(b);if(ai<0)return 1;if(bi<0)return-1;return ai-bi;});
   let h='';
   const COLS=(BP_VIEW==='fba')?(14+_extra):13;
-  if(!vis.length){h='<tr><td colspan="'+COLS+'" class="nd">No SKUs match filters</td></tr>';}
+  const COLS_EFF=COLS-(_MERGE?2:0);   // mobile FBA merges 2 column pairs → 2 fewer columns
+  if(!vis.length){h='<tr><td colspan="'+COLS_EFF+'" class="nd">No SKUs match filters</td></tr>';}
   else gk.forEach(sc=>{
     const _catNm=`${sc} <span style="font-weight:400;color:#888">(${grp[sc].length})</span>`;
     const _catEsc=String(sc).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
     if(BP_VIEW==='fba'){
       // category header: name spans up to the Ship column, the per-category "select all" sits in the Ship column itself
-      var _nameCol=9+_extra;   // Ship column index shifts by the extra SOH NON GRS / SOH AWD columns
+      var _nameCol=(9+_extra)-(_MERGE?2:0);   // Ship column index shifts by extra SOH cols and the mobile merge (2 fewer)
       h+=`<tr class="sch"><td colspan="${_nameCol}">${_catNm}</td><td class="r"><span class="cat-selall" data-cat="${_catEsc}" title="Tick all ${_catEsc} rows for shipping" style="cursor:pointer;color:#94a3b8;font-weight:400;font-size:8px;white-space:nowrap">select all</span></td><td colspan="4"></td></tr>`;
     } else {
-      h+=`<tr class="sch"><td colspan="${COLS}">${_catNm}</td></tr>`;
+      h+=`<tr class="sch"><td colspan="${COLS_EFF}">${_catNm}</td></tr>`;
     }
     grp[sc].forEach(s=>{
       const md=s.ms[CUR]||{};
@@ -1725,10 +1726,14 @@ function render(){
       }
       h+=`<tr class="sr">
         <td class="stk"><div class="snm"><button class="ob" data-sku="${s.s}">Plan \u25b8</button><span class="${tc}">${s.ti}</span><span class="scode">${s.s}</span>${launch&&launch.slice(0,10)>(new Date()).toISOString().slice(0,10)&&(b3||b3u)?` <span class="fb-flag" title="First Buy: +${(function(){var v=parseInt((document.getElementById('fbl')||{}).value,10);return isFinite(v)&&v>=0?v:4;})()}wk lead, ${(function(){var v=parseInt((document.getElementById('fbm')||{}).value,10);return isFinite(v)&&v>0?v:4;})()}mo cover${s.ti==='A'?', +50% A-tier contingency':''}">FB</span>`:''}</div></td>
-        <td style="padding:2px 8px"><span class="${sc2}">${st}</span></td>
-        <td style="padding:2px 6px;font-size:10px">${s.cs?`<span class="cs-${s.cs.toLowerCase().replace('-','')}">${s.cs}</span>`:'<span style="color:#bbb">—</span>'}</td>
-        <td class="dt">${launchStr?`<span class="${st==='FUTURE'?'dt-launch':''}">${launchStr}</span>`:''}</td>
-        <td class="dt">${discStr?`<span class="${st==='DISC'?'dt-disc':''}">${discStr}</span>`:''}</td>
+        ${_MERGE
+          ? `<td style="padding:2px 6px;font-size:10px;line-height:1.3"><span class="${sc2}">${st}</span><br>${s.cs?`<span class="cs-${s.cs.toLowerCase().replace('-','')}">${s.cs}</span>`:'<span style="color:#bbb">—</span>'}</td>`
+          : `<td style="padding:2px 8px"><span class="${sc2}">${st}</span></td>
+        <td style="padding:2px 6px;font-size:10px">${s.cs?`<span class="cs-${s.cs.toLowerCase().replace('-','')}">${s.cs}</span>`:'<span style="color:#bbb">—</span>'}</td>`}
+        ${_MERGE
+          ? `<td class="dt" style="line-height:1.3">${launchStr?`<span class="${st==='FUTURE'?'dt-launch':''}">${launchStr}</span>`:'<span style="color:#bbb">—</span>'}<br>${discStr?`<span class="${st==='DISC'?'dt-disc':''}">${discStr}</span>`:'<span style="color:#bbb">—</span>'}</td>`
+          : `<td class="dt">${launchStr?`<span class="${st==='FUTURE'?'dt-launch':''}">${launchStr}</span>`:''}</td>
+        <td class="dt">${discStr?`<span class="${st==='DISC'?'dt-disc':''}">${discStr}</span>`:''}</td>`}
         <td class="iv"><span class="iv-v ${i3<0?'iv-neg':'iv-pos'}">${fmt(i3)}</span></td>
         ${showNonGRS?`<td class="iv"><span class="iv-v" style="color:#475569" title="Non-GRS on-hand (sellable via 3PL; display only)">${(function(){var ng=nonGrsOf(s.s,CUR);return ng>0?fmt(ng):'—';})()}</span></td>`:''}
         <td class="iv"><span class="iv-v ${ifv<0?'iv-neg':'iv-pos'}">${fmt(ifv)}</span></td>
