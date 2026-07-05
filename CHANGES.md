@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.210 - ORDER PLAN mobile filters: collapsible + condensed
+
+- On mobile the ORDER PLAN filters/options now collapse behind a "⚙ Filters" button (row count stays
+  visible in the header), reclaiming most of the screen. Tap to expand; starts collapsed each visit.
+- When expanded, the panel is condensed: tighter pill padding, labels sit right next to their dropdowns,
+  smaller gaps, and the filter dropdowns are narrower still (~half minus label). "completed POs" hint hidden
+  on mobile. Desktop shows the filters inline as before (count moves to a small header row).
+
 ## v25.209 - Fix DATES tab 📅 picker button being clipped
 
 The date fields on the PO ▸ DATES tab (Production start / end) had a fixed 110px text box + 📅 button that

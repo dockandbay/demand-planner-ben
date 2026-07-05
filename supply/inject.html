@@ -269,6 +269,7 @@
 #mob-sheet-ov .tw table{width:max-content;min-width:100%}
 #supply-root #supply-nav-sel{display:none}   /* section dropdown: phone only */
 #supply-root .po-filt-toggle{display:none}   /* "Filters" toggle: phone only */
+#supply-root .op-filt-toggle{display:none}   /* ORDER PLAN "Filters" toggle button: phone only (desktop shows filters inline) */
 /* ── phone (≤640px) UX: section dropdown, search-first, swipeable sub-tabs, collapsible filters ── */
 @media (max-width:640px){
   #supply-root{padding-top:2px}
@@ -336,6 +337,14 @@
   /* ORDER PLAN ▸ ERP-deviations table: only 2 columns — let the SKU wrap so it fits full width instead of scrolling */
   #supply-root .erp-dev-tbl{width:100%!important;table-layout:fixed}
   #supply-root .erp-dev-tbl th,#supply-root .erp-dev-tbl td{min-width:0!important;white-space:normal!important;overflow-wrap:anywhere;word-break:break-word;padding:4px 8px!important}
+  /* ORDER PLAN filters: collapse behind the "⚙ Filters" button (saves space) + condense the expanded panel */
+  #supply-root .op-filt-toggle{display:inline-flex}
+  #supply-content:not(.op-filters-open) #op-filters{display:none}
+  #supply-root #op-filters .bar{gap:2px 3px;margin-bottom:5px}
+  #supply-root #op-filters .pill-lbl{margin:0 3px 0 0!important;font-size:11px}
+  #supply-root #op-filters .pill{padding:3px 7px;margin:2px 3px 2px 0;font-size:11px}
+  #supply-root #op-filters select.flt{width:calc(50% - 48px)!important;min-width:88px;padding:3px 4px!important}
+  #supply-root #op-filters .op-hint{display:none}   /* drop the "completed POs: search…" hint on mobile to save a line */
 }
 </style>
 <script src="/portal-view.js"></script>
@@ -2143,23 +2152,26 @@
     function sel(id,label,opts,val){return '<span class="pill-lbl">'+label+'</span><select class="flt'+(val&&val!=='All'?' sel-on':'')+'" id="'+id+'" style="width:auto;padding:3px 6px"><option>All</option>'+opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>';}
     function markSel(el){ if(el)el.classList.toggle('sel-on', el.value && el.value!=='All'); }   // black-highlight a dropdown when a non-All option is chosen
     c.innerHTML=annot('order-plan')
-      +'<div class="bar"><span class="pill-lbl">Status</span><span id="op-status">'+pillsHTML(pillStatuses,st.statuses)+'</span><span class="mut tiny" style="margin-left:6px">completed POs: search a PO number below</span>'
+      +'<div class="bar op-filt-head"><button class="save-btn op-filt-toggle" id="op-filt-toggle">⚙ Filters</button><span class="count" id="op-count" style="margin-left:8px"></span></div>'
+      +'<div id="op-filters">'
+      +'<div class="bar"><span class="pill-lbl">Status</span><span id="op-status">'+pillsHTML(pillStatuses,st.statuses)+'</span><span class="mut tiny op-hint" style="margin-left:6px">completed POs: search a PO number below</span>'
         +'<span class="pill-lbl" style="margin-left:12px">PO(s)</span><input class="flt" id="op-po" placeholder="PO number(s) — space / comma…" title="one or more PO numbers, separated by space, comma or line break — overrides the status &amp; country filters" style="width:240px;background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8" value="'+esc(st.poq||'')+'"></div>'
       +'<div class="bar"><span class="pill-lbl">Country</span><span id="op-country">'+pillsHTML(countries,st.countries)+'</span>'
         +'<span style="margin-left:12px"></span>'+sel('op-prod','PROD#',prods,st.prod)+sel('op-batch','Batch',batches,st.batch)+sel('op-supplier','Supplier',suppliers,st.supplier)+'</div>'
       +'<div class="bar"><span class="pill-lbl">SKUs</span><span class="pill active" data-sc="ordered">Ordered</span><span class="pill" data-sc="allskus">All SKUs</span><span class="pill" data-sc="all">All in category</span>'
         +sel('op-cat','Category',cats,st.cat)+sel('op-rw','Release',rws,st.rw)
         +'<input class="flt" id="op-q" placeholder="filter SKU…" style="width:120px">'
-        +'<button class="save-btn" id="op-dl" style="margin-left:auto;background:#2563eb;color:#fff;border-color:#2563eb" title="Download XLSX — SKUs (rows) × purchase orders (columns) × quantities, for the current view">⤓ Download report</button>'
-        +'<span class="count" id="op-count" style="margin-left:8px"></span></div>'
+        +'<button class="save-btn" id="op-dl" style="margin-left:auto;background:#2563eb;color:#fff;border-color:#2563eb" title="Download XLSX — SKUs (rows) × purchase orders (columns) × quantities, for the current view">⤓ Download report</button></div>'
       +'<div class="bar"><span class="pill-lbl">Action items</span>'
         +'<span class="pill'+(st.partials?' active':'')+'" id="op-partials">⚠ Unapproved partials <span id="op-partials-n" style="color:#dc2626;font-weight:700"></span></span>'
         +'<span class="pill'+(st.erpdiff?' active':'')+'" id="op-erp">⚠ Update ERP <span id="op-erp-n" style="color:#dc2626;font-weight:700"></span></span>'
         +'<span class="pill'+(st.suprisk?' active':'')+'" id="op-suprisk" title="lines ordered against a supplier not in the SKU\'s allowed multi-supplier list">⚠ Supplier risk <span id="op-suprisk-n" style="color:#dc2626;font-weight:700"></span></span>'
         +'<span class="pill'+(st.disc?' active':'')+'" id="op-disc" title="lines forecast to arrive after the product\'s discontinue date">⚠ Discontinued <span id="op-disc-n" style="color:#dc2626;font-weight:700"></span></span>'
         +'<span class="pill po-focus'+(st.focus?' active':'')+'" id="op-focus" style="margin-left:14px" title="show only starred (Focus) POs that are still active / in progress">★ Focus</span></div>'
+      +'</div>'   // /#op-filters
       +'<div id="op-changes"></div>'
       +'<div id="op-grid"></div>';
+    try{ document.getElementById('supply-content').classList.remove('op-filters-open'); }catch(e){}   // start collapsed on mobile each visit
     // parse the PO box into tokens (space / comma / newline). When present it OVERRIDES the status + country filters.
     // PO-search tokens — require ≥5 chars so a short/partial entry doesn't accidentally override the status
     // filter (and pull in the 1000+ completed POs). Below 5 chars the PO box is inert.
@@ -2263,6 +2275,8 @@
       catch(e){ alert('Could not build the report: '+(e&&e.message||e)); } };
     document.getElementById('op-po').oninput=debounce(function(){st.poq=this.value.toLowerCase();viewReset();},350);
     document.getElementById('op-q').oninput=debounce(function(){st.q=this.value;viewReset();},350);
+    // mobile: collapse/expand the whole filter panel behind the "⚙ Filters" button to save screen space
+    var _oft=document.getElementById('op-filt-toggle'); if(_oft)_oft.onclick=function(){ var sc=document.getElementById('supply-content'); var on=sc.classList.toggle('op-filters-open'); this.textContent=on?'⚙ Filters ▴':'⚙ Filters'; };
     // ---- supplier changes awaiting approval (from the portal) — accept here too, not just on PO PLAN ----
     var lineQty={}; lines.forEach(function(l){ lineQty[l.po+'|'+l.sku]=l.qty; });
     function renderChanges(){ var box=document.getElementById('op-changes'); if(!box)return;
