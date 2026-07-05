@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.224 - FBA/BUY mobile: surface all filters (wrap) + wider SKU column
+
+- Filter rows were single-line flex, so the tier/status/type/buy-type pill groups ran off-screen to the right
+  — looked like filters were missing. The filter rows now wrap so every group is visible in the expanded
+  ⚙ Filters panel (SKU search on its own full-width line; vertical separators hidden).
+- SKU column widened 132 → 156px on mobile.
+
 ## v25.223 - Mobile: hide status footer, version in top bar, fix BUY SKU cut-off
 
 - Hid the "Inputs loaded live from Supabase / Data extract last updated … vXX" footer (#statusbar) on mobile.
