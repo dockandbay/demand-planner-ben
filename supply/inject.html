@@ -166,6 +166,8 @@
 #supply-root table.po-tbl td.po-child .ind::before{content:"└ ";user-select:none;-webkit-user-select:none}   /* indent marker via ::before → not included when copying the row/PO */
 #supply-root .po-numcell{cursor:default}
 #supply-root .po-numcell.po-copied{background:#dcfce7!important;transition:background .15s}   /* brief flash on double-click copy */
+.po-copy-tip{position:fixed;z-index:100002;transform:translate(-50%,-100%);background:#111827;color:#fff;font:600 11px/1.3 Arial,Helvetica,sans-serif;padding:5px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .12s}
+.po-copy-tip.show{opacity:1}
 #supply-root table.po-tbl thead th:first-child,#supply-root table.po-tbl thead th:nth-child(2){z-index:3;background:#f3f3f1}
 /* freeze column 1 (PLAN) + column 2 (shipment ref) on the shipments grid too */
 #supply-root table.sh-tbl thead th:first-child,
@@ -1505,9 +1507,19 @@
       restoreMob(td); if(_mobActiveTd===td)_mobActiveTd=null;
       if(ov){ ov.style.display='none'; ov.innerHTML=''; }
       document.body.style.overflow=''; } }
-  // double-click a PO cell → copy its reference to the clipboard (no dialog; brief green flash for feedback)
+  // small floating "Copied to clipboard" tooltip anchored just above a cell (fades out on its own)
+  var _copyTip=null,_copyTipT=null;
+  function showCopyTip(cell){ if(!cell)return;
+    if(!_copyTip){ _copyTip=document.createElement('div'); _copyTip.className='po-copy-tip'; document.body.appendChild(_copyTip); }
+    _copyTip.textContent='Copied to clipboard ✓';
+    var r=cell.getBoundingClientRect();
+    _copyTip.style.left=Math.max(6,Math.round(r.left+r.width/2))+'px';
+    _copyTip.style.top=Math.max(4,Math.round(r.top-8))+'px';
+    _copyTip.classList.add('show');
+    clearTimeout(_copyTipT); _copyTipT=setTimeout(function(){ if(_copyTip)_copyTip.classList.remove('show'); },1100); }
+  // double-click a PO cell → copy its reference to the clipboard (no dialog; green flash + "copied" tooltip)
   function copyPoRef(po,cell){ if(!po)return;
-    var ok=function(){ if(cell){ cell.classList.add('po-copied'); setTimeout(function(){cell.classList.remove('po-copied');},700); } };
+    var ok=function(){ if(cell){ cell.classList.add('po-copied'); setTimeout(function(){cell.classList.remove('po-copied');},700); } showCopyTip(cell); };
     try{ if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(po).then(ok,function(){ try{legacyCopy(po);}catch(e){} ok(); }); }
       else { try{legacyCopy(po);}catch(e){} ok(); } }catch(e){ ok(); } }
   function bindPoCopy(){ var g=document.getElementById('sup-grid'); if(!g||g._pocopy)return; g._pocopy=1;

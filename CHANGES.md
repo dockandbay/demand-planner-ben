@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.221 - PO dbl-click copy: add "Copied to clipboard" tooltip
+
+Double-clicking a PO reference (green flash) now also shows a small "Copied to clipboard ✓" tooltip just
+above the cell, fading out after ~1s.
+
 ## v25.220 - PO grid: master-shipment grouping = alphabetical + indent; dbl-click copy
 
 - "Group by Master shipment" on PURCHASE ORDERS no longer clusters shipment POs at the top. POs stay in

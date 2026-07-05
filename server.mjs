@@ -13,7 +13,7 @@ import pg from 'pg';
 // short-lived serverless connections — with a tiny per-instance pool. Session pooler (5432)
 // caps at 15 clients and serverless instances exhaust it. Locally, keep 5432 + a larger pool.
 let CONN = process.env.DATABASE_URL || '';
-if (process.env.VERCEL) CONN = CONN.replace(':5432/', ':6543/');
+if (process.env.VERCEL || process.env.USE_TXN_POOLER) CONN = CONN.replace(':5432/', ':6543/');   // USE_TXN_POOLER: local dev escape hatch when the session pooler (cap 15) is exhausted
 const pool = new pg.Pool({
   connectionString: CONN,
   ssl: { rejectUnauthorized: false },
@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.220';
+const APP_VERSION = 'v25.221';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
