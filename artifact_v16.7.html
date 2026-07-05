@@ -39,7 +39,11 @@ body{font-family:system-ui,-apple-system,sans-serif;font-size:12px;color:#1a1a1a
   #report-body [style*="gap:14px 18px"],#report-body [style*="gap:10px 18px"],#exec-wrap [style*="gap:14px 18px"],#exec-wrap [style*="gap:10px 18px"]{gap:5px 9px !important}
   #report-body input[type="number"]{width:58px !important}
   #report-body .exec-tw,#exec-wrap .exec-tw,#report-body .tw{max-height:calc(100dvh - 140px) !important;-webkit-overflow-scrolling:touch}
+  /* consistent collapsible "Filters" button (reports / scenario / any view via mobileFilterCollapse) */
+  .mob-filt-toggle{display:inline-flex !important;align-items:center;font-size:10px;padding:3px 11px;border:1px solid #cbd5e1;border-radius:4px;background:#f1f5f9;color:#0f172a;cursor:pointer;font-weight:700;margin-bottom:6px;font-family:inherit}
+  .mob-filt-panel:not(.open){display:none}
 }
+.mob-filt-toggle{display:none}   /* desktop: never show the mobile Filters button (panels only created on phones); mobile rule above wins via !important */
 /* ── mobile top bar: hamburger + search (hidden on desktop) ── */
 #hz-topbar{display:none;position:fixed;top:0;left:0;right:0;z-index:5000;align-items:center;gap:8px;background:#0f172a;padding:7px 9px;box-shadow:0 1px 5px rgba(0,0,0,.3)}
 #hz-title{color:#fff;font-weight:700;font-size:14px;letter-spacing:.04em;white-space:nowrap;flex:0 0 auto}
@@ -7332,6 +7336,37 @@ var EXPANDED_CHANNELS=new Set(); // which channel rows are expanded
 // REPORT view hosts several reports under a sub-tab bar. Exec Summary is the existing report;
 // Slow Moving and Auto Forecast are the new ones.
 var REPORT_TABS=[['ex','Exec Summary'],['slow','Slow Moving'],['af','Auto Forecast'],['ka','Key Arrivals'],['me','Markdown & EOS'],['otb','Open-to-Buy']];
+// Mobile: collapse a view's leading filter bar(s) behind a consistent "⚙ Filters" button. Generic + idempotent —
+// grabs the leading child DIVs that hold filter controls (before the first table / KPI / content block) and tucks
+// them into a collapsible panel with a toggle. No-op on desktop and when there are no leading filter rows.
+function mobileFilterCollapse(container){
+  try{
+    if(!container || !(window.matchMedia && window.matchMedia('(max-width:640px)').matches)) return;
+    function attempt(){
+      if(container.querySelector(':scope > .mob-filt-toggle')) return;   // already wrapped
+      var kids=Array.prototype.slice.call(container.children), fils=[], started=false;
+      for(var i=0;i<kids.length;i++){ var k=kids[i];
+        if(k.querySelector && k.querySelector('table')) break;           // reached the data table → stop
+        var isFilter=(k.nodeName==='DIV' && k.querySelector('input,select,textarea,.pill'));
+        if(isFilter){ fils.push(k); started=true; }                       // a filter row
+        else if(started) break;                                           // filters ended (hit KPIs / content)
+        // else: leading annotation / heading before the filters → skip and keep scanning
+      }
+      if(!fils.length) return;
+      var panel=document.createElement('div'); panel.className='mob-filt-panel'+(container._mfcOpen?' open':'');
+      container.insertBefore(panel, fils[0]);
+      fils.forEach(function(e){ panel.appendChild(e); });
+      var btn=document.createElement('button'); btn.type='button'; btn.className='mob-filt-toggle'; btn.innerHTML='&#9881; Filters &#9662;';
+      btn.onclick=function(){ container._mfcOpen=panel.classList.toggle('open'); };
+      container.insertBefore(btn, panel);
+    }
+    attempt();
+    // reports/scenario render (and re-render on filter change) asynchronously — observe so the toggle appears
+    // when filters render and is re-applied after each re-render (open state preserved via _mfcOpen).
+    if(!container._mfcObs){ container._mfcObs=new MutationObserver(function(){ attempt(); }); container._mfcObs.observe(container,{childList:true}); }
+  }catch(e){}
+}
+if(typeof window!=='undefined')window.mobileFilterCollapse=mobileFilterCollapse;   // shared with the SUPPLY/Scenario module
 function renderReportView(){
   var origTw=document.getElementById('tw'); if(origTw)origTw.style.display='none';
   var buyWrap=document.getElementById('buy-wrap'); if(buyWrap)buyWrap.remove();
@@ -7348,11 +7383,11 @@ function renderReportView(){
   var ew=document.getElementById('exec-wrap'); if(ew)ew.remove();
   var body=document.getElementById('report-body');
   if(!body){ body=document.createElement('div'); body.id='report-body'; document.querySelector('.wrap').appendChild(body); }
-  if(REPORT_VIEW==='slow') return renderSlowMovingReport(body);
-  if(REPORT_VIEW==='af') return renderAutoForecastReport(body);
-  if(REPORT_VIEW==='ka') return renderKeyArrivalsReport(body);
-  if(REPORT_VIEW==='me') return renderMarkdownEosReport(body);
-  if(REPORT_VIEW==='otb') return renderOtbReport(body);
+  if(REPORT_VIEW==='slow'){ renderSlowMovingReport(body); mobileFilterCollapse(body); return; }
+  if(REPORT_VIEW==='af'){ renderAutoForecastReport(body); mobileFilterCollapse(body); return; }
+  if(REPORT_VIEW==='ka'){ renderKeyArrivalsReport(body); mobileFilterCollapse(body); return; }
+  if(REPORT_VIEW==='me'){ renderMarkdownEosReport(body); mobileFilterCollapse(body); return; }
+  if(REPORT_VIEW==='otb'){ renderOtbReport(body); mobileFilterCollapse(body); return; }
 }
 // Placeholders until the full reports are built (next phases).
 function reportPlaceholder(body,title,desc){ body.innerHTML='<div style="padding:28px;text-align:center;color:#666">'

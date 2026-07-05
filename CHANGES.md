@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.219 - Consistent "Filters" collapse across REPORTS + SCENARIO (mobile)
+
+Added a shared mobileFilterCollapse() helper that, on mobile, tucks a view's leading filter row(s) behind a
+consistent "⚙ Filters" button (matching BUY/FBA/ORDER PLAN/Purchase Orders). Wired into every REPORTS
+sub-view (Slow Moving/Auto Forecast/Key Arrivals/Markdown & EOS/Open-to-Buy) and every SCENARIO sub-view
+(Prime Day/B2B/Financial Forecast/PO Stock Priority). Skips leading annotations, no-ops on desktop and when
+a view has no filters. Now filters live under the Filters button consistently on these tabs.
+
 ## v25.218 - FBA/BUY mobile: bigger SKU, smaller category lines, controls on one row
 
 Mobile tweaks to the shared BUY/FBA grid:

@@ -4692,10 +4692,11 @@
   function scenSelect(key){ scenCurrent=key; writeHash(['scenario',key]);
     document.querySelectorAll('#scenario-subnav .stab').forEach(function(b){b.classList.toggle('active',b.dataset.k===key);});
     var c=document.getElementById('scenario-content'); if(!c)return;
-    if(key==='prime')return renderPrimeDay(c);
-    if(key==='finmodel')return renderFinModel(c);
-    if(key==='b2b')return renderB2B(c);
-    if(key==='postock')return renderPoStock(c);
+    var mfc=function(){ if(window.mobileFilterCollapse)window.mobileFilterCollapse(c); };   // mobile: collapse filters under a "⚙ Filters" button (consistent with the rest of the app)
+    if(key==='prime'){ renderPrimeDay(c); mfc(); return; }
+    if(key==='finmodel'){ renderFinModel(c); mfc(); return; }
+    if(key==='b2b'){ renderB2B(c); mfc(); return; }
+    if(key==='postock'){ renderPoStock(c); mfc(); return; }
     c.innerHTML=scenAnnot(key); }
   // ---- PO STOCK PRIORITY ----
   var POSTOCK_STATE={po:'',sort:'priority',hide:{}};
