@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.206 - Tighten mobile PO sub-nav so it fits one row
+
+Reduced padding/gap/font-size on the mobile PO card sub-nav (PAYMENTS · DATES · CLIENT/FBA · More ▾)
+so all tabs fit on a single row without wrapping to a second line. Desktop unchanged.
+
 ## v25.205 - Fix mobile shipment drawer + reshuffle mobile PO tabs
 
 - Fix: on mobile the shipment drawer wasn't clicking through — it opened *behind* the full-screen
