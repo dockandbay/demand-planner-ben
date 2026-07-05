@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.212 - ORDER PLAN mobile filter tweaks
+
+- Hid the "N SKUs × N POs · narrow with filters" count line on mobile.
+- Moved the "⤓ Download report" button up to the header next to "⚙ Filters" on mobile (the in-panel one is
+  hidden there; desktop keeps it in the filter bar).
+- PO(s) label + search box now sit together on one full-width row on mobile (box fills the space next to the
+  label instead of wrapping to its own line).
+
 ## v25.211 - ORDER PLAN mobile: scrollable/editable pivot + narrower PROD#/Batch
 
 - Fix: the ORDER PLAN pivot grid was unusable on mobile — 430px of frozen label columns are wider than the

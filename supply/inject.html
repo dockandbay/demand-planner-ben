@@ -270,6 +270,8 @@
 #supply-root #supply-nav-sel{display:none}   /* section dropdown: phone only */
 #supply-root .po-filt-toggle{display:none}   /* "Filters" toggle: phone only */
 #supply-root .op-filt-toggle{display:none}   /* ORDER PLAN "Filters" toggle button: phone only (desktop shows filters inline) */
+#supply-root .op-dl-top{display:none}        /* ORDER PLAN header Download button: phone only (desktop keeps it in the filter bar) */
+#supply-root .op-po-grp{display:inline-flex;align-items:center;gap:4px}   /* keep the PO(s) label + search box together */
 /* ── phone (≤640px) UX: section dropdown, search-first, swipeable sub-tabs, collapsible filters ── */
 @media (max-width:640px){
   #supply-root{padding-top:2px}
@@ -346,6 +348,11 @@
   #supply-root #op-filters select.flt{width:calc(50% - 48px)!important;min-width:88px;padding:3px 4px!important}
   #supply-root #op-filters #op-prod,#supply-root #op-filters #op-batch{width:92px!important;min-width:92px}   /* PROD# / Batch hold short codes — narrower */
   #supply-root #op-filters .op-hint{display:none}   /* drop the "completed POs: search…" hint on mobile to save a line */
+  #supply-root #op-count{display:none}              /* drop the "N SKUs × N POs" line on mobile */
+  #supply-root .op-dl-top{display:inline-flex}      /* show the Download button in the header (next to Filters) */
+  #supply-root #op-filters #op-dl{display:none}     /* hide the in-panel Download (it's now in the header) */
+  #supply-root #op-filters .op-po-grp{display:flex;width:100%;margin-left:0!important}   /* PO(s) label + box on their own full-width row, together */
+  #supply-root #op-filters #op-po{flex:1 1 auto;width:auto!important;min-width:0}         /* box fills the row next to its label */
   /* ORDER PLAN pivot grid: the 430px of frozen label columns are wider than the phone, hiding the PO/qty
      columns behind them so the grid can't be scrolled or edited. On mobile keep ONLY the SKU column frozen
      (narrowed) and un-freeze Release/Carton/Suppliers/Discontinue → the PO/qty columns become reachable and
@@ -2161,10 +2168,10 @@
     function sel(id,label,opts,val){return '<span class="pill-lbl">'+label+'</span><select class="flt'+(val&&val!=='All'?' sel-on':'')+'" id="'+id+'" style="width:auto;padding:3px 6px"><option>All</option>'+opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>';}
     function markSel(el){ if(el)el.classList.toggle('sel-on', el.value && el.value!=='All'); }   // black-highlight a dropdown when a non-All option is chosen
     c.innerHTML=annot('order-plan')
-      +'<div class="bar op-filt-head"><button class="save-btn op-filt-toggle" id="op-filt-toggle">⚙ Filters</button><span class="count" id="op-count" style="margin-left:8px"></span></div>'
+      +'<div class="bar op-filt-head"><button class="save-btn op-filt-toggle" id="op-filt-toggle">⚙ Filters</button><button class="save-btn op-dl-top" id="op-dl-top" style="background:#2563eb;color:#fff;border-color:#2563eb" title="Download XLSX report">⤓ Download report</button><span class="count" id="op-count" style="margin-left:8px"></span></div>'
       +'<div id="op-filters">'
       +'<div class="bar"><span class="pill-lbl">Status</span><span id="op-status">'+pillsHTML(pillStatuses,st.statuses)+'</span><span class="mut tiny op-hint" style="margin-left:6px">completed POs: search a PO number below</span>'
-        +'<span class="pill-lbl" style="margin-left:12px">PO(s)</span><input class="flt" id="op-po" placeholder="PO number(s) — space / comma…" title="one or more PO numbers, separated by space, comma or line break — overrides the status &amp; country filters" style="width:240px;background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8" value="'+esc(st.poq||'')+'"></div>'
+        +'<span class="op-po-grp" style="margin-left:12px"><span class="pill-lbl">PO(s)</span><input class="flt" id="op-po" placeholder="PO number(s) — space / comma…" title="one or more PO numbers, separated by space, comma or line break — overrides the status &amp; country filters" style="width:240px;background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8" value="'+esc(st.poq||'')+'"></span></div>'
       +'<div class="bar"><span class="pill-lbl">Country</span><span id="op-country">'+pillsHTML(countries,st.countries)+'</span>'
         +'<span style="margin-left:12px"></span>'+sel('op-prod','PROD#',prods,st.prod)+sel('op-batch','Batch',batches,st.batch)+sel('op-supplier','Supplier',suppliers,st.supplier)+'</div>'
       +'<div class="bar"><span class="pill-lbl">SKUs</span><span class="pill active" data-sc="ordered">Ordered</span><span class="pill" data-sc="allskus">All SKUs</span><span class="pill" data-sc="all">All in category</span>'
@@ -2286,6 +2293,7 @@
     document.getElementById('op-q').oninput=debounce(function(){st.q=this.value;viewReset();},350);
     // mobile: collapse/expand the whole filter panel behind the "⚙ Filters" button to save screen space
     var _oft=document.getElementById('op-filt-toggle'); if(_oft)_oft.onclick=function(){ var sc=document.getElementById('supply-content'); var on=sc.classList.toggle('op-filters-open'); this.textContent=on?'⚙ Filters ▴':'⚙ Filters'; };
+    var _odt=document.getElementById('op-dl-top'); if(_odt)_odt.onclick=function(){ var b=document.getElementById('op-dl'); if(b)b.click(); };   // mobile header Download → reuse the report handler
     // ---- supplier changes awaiting approval (from the portal) — accept here too, not just on PO PLAN ----
     var lineQty={}; lines.forEach(function(l){ lineQty[l.po+'|'+l.sku]=l.qty; });
     function renderChanges(){ var box=document.getElementById('op-changes'); if(!box)return;
