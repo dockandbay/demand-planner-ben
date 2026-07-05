@@ -28,9 +28,9 @@ body{font-family:system-ui,-apple-system,sans-serif;font-size:12px;color:#1a1a1a
   #buy-wrap:not(.bpf-open) #bp-filters{display:none !important}                 /* filters collapsed until the toggle is tapped */
   #buy-wrap .tw{max-height:calc(100dvh - 120px) !important;-webkit-overflow-scrolling:touch}
   #buy-wrap #main-tbl{width:max-content;min-width:100%}                         /* size to content so the grid scrolls sideways */
-  #buy-wrap thead th.stk,#buy-wrap td.stk{width:132px !important;min-width:132px !important;max-width:132px !important;white-space:normal !important;word-break:break-word;overflow:visible !important}   /* sticky SKU column: fully visible (wraps, not clipped) */
-  #buy-wrap td.stk{font-size:13px !important;line-height:1.22}                    /* larger, more readable SKU text */
-  #buy-wrap tr.sch td{font-size:8.5px !important;padding:2px 6px !important}       /* smaller category divider lines */
+  #buy-wrap thead th.stk,#buy-wrap td.stk{width:132px !important;min-width:132px !important;max-width:132px !important;white-space:normal !important;word-break:break-word;overflow-wrap:anywhere;overflow:hidden !important}   /* sticky SKU column: wraps within its box so it's fully visible but never bleeds over the Status column */
+  #buy-wrap td.stk{font-size:13px !important;line-height:1.22;background:#fff !important}   /* larger SKU text; opaque so the Status column slides under it (keeps base z-index:1 → still under the sticky header) */
+  #buy-wrap tr.sch td{font-size:8.5px !important;padding:2px 6px !important;position:sticky !important;top:var(--bp-hdr-h,30px);z-index:3}   /* category titles stick just below the sticky header row */
   #buy-wrap .ov.open{padding-top:0 !important;align-items:stretch !important}    /* SKU detail = true full-screen popup (!important: the base rule appears later in the sheet) */
   #buy-wrap .pn{width:100vw !important;max-width:100vw !important;height:100dvh !important;max-height:100dvh !important;border:0 !important;border-radius:0 !important}
   #buy-wrap table.pt th.rl,#buy-wrap table.pt td.rl{width:120px !important;min-width:120px !important;max-width:120px !important;white-space:normal !important;word-break:break-word;overflow:hidden}   /* plan popup: narrower first column */
@@ -8108,6 +8108,10 @@ function renderBuyView(mode){
   // Build pills, bind table clicks, and render the buy list. initUI() reads the freshly
   // injected (empty) pill containers, so rebuilding on each BUY/FBA-tab entry is correct.
   BP.initUI();
+  // keep --bp-hdr-h in sync with the sticky header's height so the sticky category titles sit just below it
+  try{ var hdr=document.getElementById('main-hdr');
+    if(hdr && window.ResizeObserver){ var setH=function(){ wrap.style.setProperty('--bp-hdr-h', (hdr.offsetHeight||30)+'px'); };
+      setH(); new ResizeObserver(setH).observe(hdr); } }catch(e){}
 }
 
 // View mode toggle (Planning / Exec)

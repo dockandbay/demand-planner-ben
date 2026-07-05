@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.222 - FBA/BUY mobile: sticky category titles + fix Status/SKU overlap
+
+- Category divider titles now stay sticky on mobile, pinned just below the (already-sticky) column header —
+  the header height is measured into a --bp-hdr-h variable so they sit at the right offset for both BUY and
+  FBA (which have taller headers).
+- Fixed the Status column overlapping the sticky SKU column: the SKU column's overflow was set to visible in
+  v25.218, letting content bleed; reverted to hidden (SKU still fully visible — it wraps within its 132px box)
+  and made it opaque so Status cleanly slides under it when scrolling.
+
 ## v25.221 - PO dbl-click copy: add "Copied to clipboard" tooltip
 
 Double-clicking a PO reference (green flash) now also shows a small "Copied to clipboard ✓" tooltip just
