@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.216 - BUY / FBA plan: mobile-friendly (filters toggle, scrollable grid, full-screen panel)
+
+The BUY and FBA tabs share the same scaffold, so this covers both:
+- Filters (Country / Category / SKU search + pills) now collapse behind a "⚙ Filters" button on mobile;
+  the action buttons (Download, Create POs, FBA Transfer Upload) stay visible. Desktop unchanged.
+- Grid scrolls sideways on mobile (table sized to content) with the SKU column still sticky, narrowed to
+  116px so more of the other fields are visible.
+- The SKU detail "plan" popup opens true full-screen on mobile (100vw × 100dvh, no border/radius); its plan
+  table's first column narrowed too.
+
 ## v25.215 - ORDER PLAN mobile: fix sticky header/column-1 corner overlap
 
 The PO-title header cells had no opaque background, so when the sticky header/column-1 overlapped while
