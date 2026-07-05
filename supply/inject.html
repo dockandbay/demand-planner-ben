@@ -328,6 +328,9 @@
   #supply-root .dates-tbl th:first-child,#supply-root .dates-tbl td:first-child{width:34%!important}
   #supply-root .dates-tbl th:nth-child(2),#supply-root .dates-tbl td:nth-child(2){width:30%!important}
   #supply-root .dates-tbl input,#supply-root .dates-tbl select{max-width:100%;box-sizing:border-box}
+  /* ORDER PLAN ▸ ERP-deviations table: only 2 columns — let the SKU wrap so it fits full width instead of scrolling */
+  #supply-root .erp-dev-tbl{width:100%!important;table-layout:fixed}
+  #supply-root .erp-dev-tbl th,#supply-root .erp-dev-tbl td{min-width:0!important;white-space:normal!important;overflow-wrap:anywhere;word-break:break-word;padding:4px 8px!important}
 }
 </style>
 <script src="/portal-view.js"></script>
@@ -1802,7 +1805,7 @@
         return '<tr><td '+skuTd+'>'+esc(l.sku)+'</td><td class="l" style="text-align:right;padding:2px 12px">'+qCell+'</td></tr>'; }).join('');
       return '<div style="margin:4px 0 10px;padding:9px 12px;background:#fefce8;border:1px solid #eab308;border-radius:6px;max-width:1000px">'
         +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:5px;flex-wrap:wrap"><span style="font-weight:700;color:#854d0e">⚠ ERP deviations — '+dev.length+' line'+(dev.length>1?'s':'')+' differ from Fulfil/Cin7 <span class="mut tiny" style="font-weight:400">(quantity)</span></span><button class="save-btn op-erp-up-panel" data-po="'+esc(po)+'" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5">⬆ Upload to ERP</button> <span class="mut tiny">prices are pushed with the update too</span></div>'
-        +'<div style="overflow-x:auto"><table style="width:auto;border-collapse:collapse;font-size:11px;border:1px solid #e0e0e0;border-radius:6px;background:#fff"><thead><tr><th class="l" style="min-width:45ch;padding:4px 12px">SKU</th><th class="l" style="text-align:right;padding:4px 12px">Qty (plan → ERP)</th></tr></thead><tbody>'+trs+'</tbody></table></div></div>'; })();
+        +'<div style="overflow-x:auto"><table class="erp-dev-tbl" style="width:auto;border-collapse:collapse;font-size:11px;border:1px solid #e0e0e0;border-radius:6px;background:#fff"><thead><tr><th class="l" style="min-width:45ch;padding:4px 12px">SKU</th><th class="l" style="text-align:right;padding:4px 12px">Qty (plan → ERP)</th></tr></thead><tbody>'+trs+'</tbody></table></div></div>'; })();
     var copyData=encodeURIComponent((lines||[]).map(function(l){return l.sku+'\t'+(Number(l.qty)||0);}).join('\n'));
     var addRowHtml=editing?'<tr class="op-addrow"><td class="l"><input class="op-add-sku" list="opsku-'+po+'" placeholder="search supplier SKU…" style="width:220px" autocomplete="off"></td><td style="text-align:right"><input class="op-add-qty" placeholder="qty" style="width:74px;text-align:right" inputmode="numeric"></td><td colspan="5" class="mut tiny">new line — added as proposed (not in ERP until you Upload)</td></tr>':'';
     var opBtns=editing

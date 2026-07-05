@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.208 - Mobile: ERP deviations table fits full width
+
+The ORDER PLAN tab's ERP-deviations table (SKU · Qty plan→ERP) had a 45ch min-width + nowrap SKU column
+that forced a horizontal scroll on mobile. It's only 2 columns, so on mobile it now uses a fixed full-width
+layout with the SKU wrapping — no more sideways scroll. Desktop unchanged.
+
 ## v25.207 - Mobile: fix DATES table + slim the filter dropdowns
 
 - DATES tab table on mobile now fits the screen with a fixed 3-column layout (34% / 30% / rest) and wraps
