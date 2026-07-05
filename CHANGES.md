@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.218 - FBA/BUY mobile: bigger SKU, smaller category lines, controls on one row
+
+Mobile tweaks to the shared BUY/FBA grid:
+- SKU column widened to 132px, text enlarged to 13px, and set to wrap/overflow-visible so the SKU is fully
+  visible (no clipping).
+- Category divider lines shrunk (8.5px) so they take less room.
+- The "⚙ Filters", "⚙ Settings" and "ⓘ FBA Transfer Logic" buttons now sit together on one top control row
+  (the Filters toggle moved into the action row ahead of Settings). Desktop unchanged.
+
 ## v25.217 - SCENARIO in mobile menu + mobile-optimise all report sub-views
 
 - Fix: SCENARIO was missing from the mobile hamburger drawer (the drawer only kept buttons with a
