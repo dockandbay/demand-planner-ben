@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.225 - FBA/BUY mobile: "Plan ▸" button → compact "P" icon
+
+On mobile the SKU cell's "Plan ▸" button now shows just "P" (via CSS, click unchanged), freeing room for the
+SKU text. Desktop keeps the full "Plan ▸" label.
+
 ## v25.224 - FBA/BUY mobile: surface all filters (wrap) + wider SKU column
 
 - Filter rows were single-line flex, so the tier/status/type/buy-type pill groups ran off-screen to the right
