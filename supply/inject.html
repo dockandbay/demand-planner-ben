@@ -404,6 +404,7 @@
     if(u.indexOf('COMPLETE')>=0||u.indexOf('DELIVER')>=0)return 'bg-green'; return 'bg-blue'; }
   var STBG={'bg-neutral':['#f3f4f6','#4b5563'],'bg-amber':['#fef3c7','#92400e'],'bg-red':['#fee2e2','#991b1b'],'bg-green':['#dcfce7','#166534'],'bg-blue':['#dbeafe','#1e40af']};
   var cache={},current=null,depRefs=null,poBy={},shipBy={},batchList=[],prodList=[],shipList=[],supplierList=[],branchList=[],crossdockList=[],poLookupList=[];
+  var _navToken=0;   // bumps on every section / PO sub-tab navigation; async renders check it so a slow fetch from a view you've left can't overwrite the newer one (fixes fast-clicking loading the wrong view)
   var _pendingPO=null,_pendingPOTab=null,_pendingShip=null,_pendingOP=null,_pendingDep=null;   // cross-view navigation: expand this PO / shipment, pre-filter order plan / deposit register, after the target view renders
   var _poRefresh=null;   // set by the PO grid to refresh itself in place (no full section reload) after an assign
   var _poShowClient=false;   // PO grid: show Client name + Client sales ref columns when the DIRECT pill is active
@@ -2414,17 +2415,18 @@
   function bindPoSubNav(){ document.querySelectorAll('#supply-content .rtab[data-posub]').forEach(function(p){ p.onclick=function(){ showPoSub(p.dataset.posub); }; }); }
   // render the PURCHASE ORDERS section on the given sub-tab (plan = PO grid; others = former productions views)
   function showPoSub(tab){ poSub=(PO_SUB_KEYS.indexOf(tab)>=0?tab:'plan'); current='purchase-orders'; syncHash();
+    var _tk=++_navToken;   // this navigation — invalidates any slower async render from a view we've since left
     document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k==='purchase-orders');});
     var _ns=document.getElementById('supply-nav-sel'); if(_ns&&_ns.value!=='purchase-orders')_ns.value='purchase-orders';
     var c=document.getElementById('supply-content');
     if(poSub==='plan'){ if(cache['purchase-orders'])return renderPO(cache['purchase-orders']); c.innerHTML='<div class="count">Loading…</div>';
-      fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(d){cache['purchase-orders']=d; renderPO(d);}).catch(function(e){c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
-    if(poSub==='shipments'){ var showShip=function(d){ c.innerHTML=poSubNav()+'<div id="prod-body"></div>'; bindPoSubNav(); fetchLookups(function(){ shipInner(d, document.getElementById('prod-body')); }); };
+      fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(d){cache['purchase-orders']=d; if(_tk!==_navToken)return; renderPO(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
+    if(poSub==='shipments'){ var showShip=function(d){ if(_tk!==_navToken)return; c.innerHTML=poSubNav()+'<div id="prod-body"></div>'; bindPoSubNav(); fetchLookups(function(){ if(_tk!==_navToken)return; shipInner(d, document.getElementById('prod-body')); }); };
       if(cache['shipments'])return showShip(cache['shipments']); c.innerHTML='<div class="count">Loading…</div>';
-      fetch('/api/supply/shipments').then(function(r){return r.json();}).then(function(d){cache['shipments']=d; showShip(d);}).catch(function(e){c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
+      fetch('/api/supply/shipments').then(function(r){return r.json();}).then(function(d){cache['shipments']=d; showShip(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
     prodTab=poSub;
     if(cache['productions'])return renderProductions(cache['productions']); c.innerHTML='<div class="count">Loading…</div>';
-    fetch('/api/supply/productions').then(function(r){return r.json();}).then(function(d){cache['productions']=d; renderProductions(d);}).catch(function(e){c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); }
+    fetch('/api/supply/productions').then(function(r){return r.json();}).then(function(d){cache['productions']=d; if(_tk!==_navToken)return; renderProductions(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); }
   function renderProductions(rows){ var c=document.getElementById('supply-content');
     c.innerHTML=annot('productions')+poSubNav()
       +'<div id="prod-body"><div class="count">Loading…</div></div>';
@@ -4608,10 +4610,11 @@
     if(key==='reports')return selectReport(reportTab||'metrics');
     if(REPORT_KEYS.indexOf(key)>=0)return selectReport(key);
     current=key; syncHash();
+    var _tk=++_navToken;   // this navigation — a later click bumps _navToken and invalidates our async render below
     document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k===key);});
     var _ns=document.getElementById('supply-nav-sel'); if(_ns&&_ns.value!==key)_ns.value=key;   // keep the phone section dropdown in sync
     var c=document.getElementById('supply-content'); c.innerHTML='<div class="count">Loading…</div>';
-    var done=function(d){ cache[key]=d;
+    var done=function(d){ cache[key]=d; if(_tk!==_navToken)return;   // navigated away before this resolved → don't overwrite the newer view
       if(key==='actions')return renderActions(d);
       if(key==='upcoming')return renderUpcoming(d);
       if(key==='pipeline')return renderPipeline(d);
@@ -4627,7 +4630,7 @@
       if(key==='config')return renderConfig(d);
       renderGeneric(key,d); };
     if(cache[key])return done(cache[key]);
-    fetch('/api/supply/'+key).then(function(r){return r.json();}).then(done).catch(function(e){c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); }
+    fetch('/api/supply/'+key).then(function(r){return r.json();}).then(done).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); }
 
   try{window.__supplyNav={sections:SECTIONS,reports:REPORT_SECTIONS,select:function(k){selectSection(k);},current:function(){return current;}};}catch(e){}   // bridge for the app-level mobile drawer
   function showSupply(noSelect){ ensureRoot(); if(typeof hideScenario==='function')hideScenario(); var app=document.getElementById('app'); if(app)app.classList.add('supply-active');

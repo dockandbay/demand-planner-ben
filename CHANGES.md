@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.214 - Fix fast-clicking loading the wrong view (nav race)
+
+Clicking menu options quickly could leave you on the previous view (e.g. tap ORDER PLAN but it still shows
+BI/Actions) — a slow fetch from the view you left resolved after the new one and overwrote it. Added a
+nav-token guard: every section / PO sub-tab navigation bumps a token, and each async render bails if a newer
+navigation has happened since, so only the latest click paints. Data is still cached either way.
+
 ## v25.213 - ORDER PLAN mobile: full sticky header row
 
 The pivot header row now sticks to the top for ALL columns on mobile (was column 1 only) — the v25.211
