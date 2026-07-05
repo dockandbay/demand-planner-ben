@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.226 - Fix: SKU detail panel ✕ hidden behind top bar on mobile
+
+The full-screen SKU detail panel (opened from "P"/"Plan") overlay was z-index:100, below the fixed top bar
+(z5000), so its ✕ close button sat behind the header and couldn't be tapped. Raised the open panel to
+z-index:9000 on mobile so it covers the top bar and the ✕ is tappable.
+
 ## v25.225 - FBA/BUY mobile: "Plan ▸" button → compact "P" icon
 
 On mobile the SKU cell's "Plan ▸" button now shows just "P" (via CSS, click unchanged), freeing room for the
