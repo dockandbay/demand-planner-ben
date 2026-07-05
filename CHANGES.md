@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.213 - ORDER PLAN mobile: full sticky header row
+
+The pivot header row now sticks to the top for ALL columns on mobile (was column 1 only) — the v25.211
+un-freeze rule was also killing vertical stickiness for the PO/label header cells. Split header vs body:
+the whole thead sticks to the top on vertical scroll, column 1 (SKU) still sticks to the left, and the
+top-left corner sticks both ways; only the body's middle label columns un-freeze horizontally.
+
 ## v25.212 - ORDER PLAN mobile filter tweaks
 
 - Hid the "N SKUs × N POs · narrow with filters" count line on mobile.
