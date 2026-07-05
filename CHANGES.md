@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.207 - Mobile: fix DATES table + slim the filter dropdowns
+
+- DATES tab table on mobile now fits the screen with a fixed 3-column layout (34% / 30% / rest) and wraps
+  text — the "Source" column (exception reasons, e.g. PO-1700649) no longer clips or forces a wide
+  horizontal scroll. Long buttons/notes in that column wrap instead of overflowing.
+- Dropdown filters on PURCHASE ORDERS + ORDER PLAN are now ~half-width on mobile (2-up) instead of a
+  full-width row each, reclaiming screen space. Text-input filters stay full-width. Desktop unchanged.
+
 ## v25.206 - Tighten mobile PO sub-nav so it fits one row
 
 Reduced padding/gap/font-size on the mobile PO card sub-nav (PAYMENTS · DATES · CLIENT/FBA · More ▾)

@@ -273,7 +273,9 @@
   /* SEARCH lives in the fixed top bar on mobile — hide the in-content box (its count stays) */
   #supply-root #sup-search{display:none!important}
   #supply-root .bar{gap:5px 6px}
-  #supply-root .flt{width:100%!important;max-width:none!important}
+  #supply-root input.flt{width:100%!important;max-width:none!important}
+  /* dropdown filters take ~half the row (2-up) instead of a full-width row each — saves screen space */
+  #supply-root select.flt{width:calc(50% - 5px)!important;max-width:none!important;min-width:0}
   /* secondary filters tucked behind the "Filters" toggle */
   #supply-root .po-filt-toggle{display:inline-block}
   #supply-content:not(.filters-open) #po-ctry,#supply-content:not(.filters-open) #po-act{display:none}
@@ -319,6 +321,13 @@
   #supply-root .cli-val select.boolsel{width:auto!important;min-width:78px;max-width:120px!important;display:inline-block}   /* keep Yes/No compact */
   #supply-root .potab-panel [style*="min-width:360px"],#supply-root .potab-panel [style*="min-width:430px"]{min-width:0!important;flex-basis:100%!important}   /* two-col client/pack layout stacks */
   #supply-root .potab-panel [style*="max-width:760px"],#supply-root .potab-panel [style*="max-width:1340px"]{max-width:100%!important}
+  /* DATES tab table: fit the screen and WRAP (esp. the exception-reason "Source" column) instead of scrolling
+     wide off the edge. Fixed layout + % columns so all 3 columns stay visible and text flows. */
+  #supply-root .dates-tbl{width:100%!important;min-width:0!important;table-layout:fixed}
+  #supply-root .dates-tbl th,#supply-root .dates-tbl td{width:auto!important;white-space:normal!important;overflow-wrap:anywhere;word-break:break-word;vertical-align:top;padding:5px 5px}
+  #supply-root .dates-tbl th:first-child,#supply-root .dates-tbl td:first-child{width:34%!important}
+  #supply-root .dates-tbl th:nth-child(2),#supply-root .dates-tbl td:nth-child(2){width:30%!important}
+  #supply-root .dates-tbl input,#supply-root .dates-tbl select{max-width:100%;box-sizing:border-box}
 }
 </style>
 <script src="/portal-view.js"></script>
