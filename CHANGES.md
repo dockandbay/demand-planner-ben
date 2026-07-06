@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.235 - SUPPLY Manufacturing tab (mock) + BOM config
+
+Mock of a Manufacturing feature: new PURCHASE ORDERS sub-tab "Manufacturing" (after Shipments) + CONFIG
+"Manufacturing BOM" tab. A manufacturing PO = branch set to Manufacturing; its finished/bundle SKUs explode
+via the BOM (planner.manufacturing_bom, migration 096, seeded from CSV) into required components, matched
+against component-PO quantities to show coverage/shortfall. Sandbox seeded with a demo mfg PO for review.
+
 ## v25.234 - ORDER PLAN report: wider A-G, Branch to row 3, centred + wider H+ columns
 
 - Column widths A-G sized to their text; H+ (PO/qty) columns ~50% wider.

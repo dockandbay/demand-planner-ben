@@ -2512,7 +2512,7 @@
   var prodTab='list', _prodList=[];
   // PURCHASE ORDERS is now the umbrella: PLAN (the PO grid) + the former PRODUCTIONS sub-tabs.
   var poSub='plan';
-  var PO_SUBS=[['plan','PLAN'],['shipments','Shipments'],['list','Productions'],['deposits','Deposits'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['barcodes','Barcodes']];
+  var PO_SUBS=[['plan','PLAN'],['shipments','Shipments'],['manufacturing','Manufacturing'],['list','Productions'],['deposits','Deposits'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['barcodes','Barcodes']];
   var PO_SUB_KEYS=PO_SUBS.map(function(t){return t[0];});
   function poSubNav(){ return '<div id="prod-subtabs">'+PO_SUBS.map(function(t){return '<span class="rtab'+(poSub===t[0]?' active':'')+'" data-posub="'+t[0]+'">'+t[1]+'</span>';}).join('')+'</div>'; }
   function bindPoSubNav(){ document.querySelectorAll('#supply-content .rtab[data-posub]').forEach(function(p){ p.onclick=function(){ showPoSub(p.dataset.posub); }; }); }
@@ -2527,9 +2527,34 @@
     if(poSub==='shipments'){ var showShip=function(d){ if(_tk!==_navToken)return; c.innerHTML=poSubNav()+'<div id="prod-body"></div>'; bindPoSubNav(); fetchLookups(function(){ if(_tk!==_navToken)return; shipInner(d, document.getElementById('prod-body')); }); };
       if(cache['shipments'])return showShip(cache['shipments']); c.innerHTML='<div class="count">Loading…</div>';
       fetch('/api/supply/shipments').then(function(r){return r.json();}).then(function(d){cache['shipments']=d; showShip(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
+    if(poSub==='manufacturing'){ var showMfg=function(d){ if(_tk!==_navToken)return; c.innerHTML=poSubNav()+'<div id="prod-body"></div>'; bindPoSubNav(); renderManufacturing(d, document.getElementById('prod-body')); };
+      if(cache['manufacturing'])return showMfg(cache['manufacturing']); c.innerHTML='<div class="count">Loading…</div>';
+      fetch('/api/supply/manufacturing').then(function(r){return r.json();}).then(function(d){cache['manufacturing']=d; showMfg(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
     prodTab=poSub;
     if(cache['productions'])return renderProductions(cache['productions']); c.innerHTML='<div class="count">Loading…</div>';
     fetch('/api/supply/productions').then(function(r){return r.json();}).then(function(d){cache['productions']=d; if(_tk!==_navToken)return; renderProductions(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); }
+  // MANUFACTURING sub-tab (mock): manufacturing-branch POs assemble bundle/finished products from components
+  // (per the BOM); shows required components vs quantity on component POs. Part report, part management.
+  function renderManufacturing(d, b){ d=d||{}; if(!b)return;
+    var mfg=d.mfgPos||[], comps=d.components||[], bom=d.bom||[];
+    var bomBy={}; bom.forEach(function(x){(bomBy[x.parent_sku]=bomBy[x.parent_sku]||[]).push(x);});
+    var short=comps.filter(function(c){return c.shortfall>0;}).length;
+    var h='<div class="sect-h">Manufacturing — bundle assembly coverage</div>'
+      +'<div class="mut tiny" style="margin-bottom:10px">POs on the <b>Manufacturing</b> branch assemble finished / bundle products from components (per the <b>BOM</b> in CONFIG). Below: the components those POs require vs the quantity on <b>component purchase orders</b>. '
+      +(short?'<b style="color:#b91c1c">⚠ '+short+' component(s) short.</b>':(comps.length?'<b style="color:#166534">✓ All components covered.</b>':''))+'</div>';
+    if(!mfg.length){ b.innerHTML=h+'<div class="count">No manufacturing POs yet — set a PO’s <b>Branch</b> to <b>Manufacturing</b> (PURCHASE ORDERS ▸ PLAN) so it assembles bundles, then it appears here.</div>'; return; }
+    h+='<div class="sect-h">Component coverage ('+comps.length+')</div>'
+      +'<div class="tw" style="max-width:720px"><table><thead><tr><th class="l">Component SKU</th><th>Required</th><th>On component POs</th><th>Shortfall</th></tr></thead><tbody>'
+      +comps.map(function(c){ var sh=c.shortfall>0; return '<tr><td class="l">'+esc(c.component_sku)+'</td><td>'+units(c.required)+'</td><td>'+units(c.available)+'</td><td'+(sh?' style="color:#b91c1c;font-weight:700"':'')+'>'+(sh?units(c.shortfall):'<span class="tool-badge bg-green">✓</span>')+'</td></tr>'; }).join('')
+      +'</tbody></table></div>';
+    h+='<div class="sect-h">Manufacturing POs ('+mfg.length+')</div>'
+      +mfg.map(function(p){ var fin=(p.finished||[]).map(function(f){
+          var kids=(bomBy[f.sku]||[]).map(function(x){ return '<div class="mut tiny" style="margin-left:16px">└ '+esc(x.component_sku)+' × '+units(f.qty*Number(x.qty))+' <span class="mut">('+units(x.qty)+'/unit)</span></div>'; }).join('');
+          return '<div style="margin:3px 0"><b>'+esc(f.sku)+'</b> × '+units(f.qty)+kids+'</div>'; }).join('');
+        return '<div style="border:1px solid #e5e7eb;border-radius:6px;padding:8px 10px;margin-bottom:8px;max-width:720px"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:2px"><button class="lnk-btn mfg-po-go" data-po="'+esc(p.po)+'"><b>'+esc(p.po)+'</b></button><span class="mut tiny">'+esc(p.status||'')+(p.supplier?' · '+esc(p.supplier):'')+'</span></div>'+fin+'</div>'; }).join('');
+    b.innerHTML=h;
+    b.querySelectorAll('.mfg-po-go').forEach(function(x){ x.onclick=function(){ gotoPO(x.dataset.po); }; });
+  }
   function renderProductions(rows){ var c=document.getElementById('supply-content');
     c.innerHTML=annot('productions')+poSubNav()
       +'<div id="prod-body"><div class="count">Loading…</div></div>';
@@ -3060,7 +3085,7 @@
   var PORTAL_SUP='', PORTAL_TAB='pos', PORTAL_PO_ST=null;   // CONFIG ▸ Portal preview: chosen supplier + inner tab + PO status filter
   var ROW_EDIT={};   // per-sub-tab: which row key is currently in Edit mode (Edit/Save rows for suppliers + productions)
   function renderConfig(d){ var c=document.getElementById('supply-content'); var sizes=d.sizes||[];
-    var SUBS=[['tax','Import tax'],['freight','Freight rates'],['duty','Import duty'],['branches','Branches'],['suppliers','Suppliers'],['keyaccounts','Key accounts'],['batches','Batches'],['productions','Productions'],['products','Products'],['portalusers','Portal users'],['portal','Portal'],['forecast-export','Forecast export']];
+    var SUBS=[['tax','Import tax'],['freight','Freight rates'],['duty','Import duty'],['branches','Branches'],['suppliers','Suppliers'],['keyaccounts','Key accounts'],['batches','Batches'],['productions','Productions'],['products','Products'],['mfgbom','Manufacturing BOM'],['portalusers','Portal users'],['portal','Portal'],['forecast-export','Forecast export']];
     function reload(){ delete cache['config']; selectSection('config'); }   // refresh after a rate add (keeps sub-tab)
     // Generic Edit/Save row table: read-only cells + an Edit button per row; Edit swaps that row's cells to inputs
     // and shows Save/Cancel; Save POSTs all editable fields at once. cols: [{f,h,t:'text|num|select',ro,opts,w}].
@@ -3343,6 +3368,17 @@
           document.getElementById('fx-email-all').onclick=function(){ if(!confirm('Email the 12-month forecast CSV to every country that has an email set?'))return; msg.textContent='Emailing all countries…'; post('/api/forecast/email-all',this).then(function(j){ msg.innerHTML=(j.results||[]).map(fmtE).join('<br>'); }); };
           document.getElementById('fx-drive-all').onclick=function(){ if(!confirm('Upload the 12-month forecast CSV for all countries to DriveHQ?'))return; msg.textContent='Uploading all countries…'; post('/api/forecast/drivehq-all',this).then(function(j){ msg.innerHTML=(j.results||[]).map(fmtD).join('<br>'); }); };
         }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); }
+      else if(CONFIG_SUB==='mfgbom'){ b.innerHTML='<div class="count">Loading…</div>';
+        fetch('/api/supply/manufacturing-bom').then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
+          var byP={}; rows.forEach(function(x){(byP[x.parent_sku]=byP[x.parent_sku]||[]).push(x);});
+          var parents=Object.keys(byP).sort();
+          b.innerHTML='<div class="sect-h">Manufacturing BOM <span class="mut tiny">(finished / bundle product → components × per-unit qty. Source: Airtable; read-only mock)</span></div>'
+            +(parents.length?parents.map(function(p){ return '<div style="margin-bottom:10px;max-width:620px"><div style="font-weight:700;margin-bottom:2px">'+esc(p)+' <span class="mut tiny">('+byP[p].length+' components)</span></div>'
+              +'<div class="tw"><table><thead><tr><th class="l">Component SKU</th><th>Qty / unit</th></tr></thead><tbody>'
+              +byP[p].map(function(x){return '<tr><td class="l">'+esc(x.component_sku)+'</td><td>'+units(x.qty)+'</td></tr>';}).join('')
+              +'</tbody></table></div></div>'; }).join('')
+              :'<div class="count">No BOM rows. Seed the Manufacturing BOM (migration 096) to populate.</div>');
+        }).catch(function(e){ b.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>'; }); }
       else if(CONFIG_SUB==='products'){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/products-all').then(function(r){return r.json();}).then(function(d){ if(d&&d.error){b.innerHTML='<div class="count">'+esc(d.error)+'</div>';return;}
           var cols=d.columns||[], all=d.rows||[];

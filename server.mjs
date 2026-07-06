@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.234';
+const APP_VERSION = 'v25.235';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1383,6 +1383,31 @@ app.get('/api/supply/:section', async (req, res) => {
           nullif(p.discontinue_date_final,'') discontinue, nullif(p.discontinue_date_au_final,'') discontinue_au, nullif(p.discontinue_date_ca,'') discontinue_ca
           FROM planner.sku_labels s LEFT JOIN planner.products p ON p.sku = s.sku
           WHERE coalesce(s.status,'') NOT ILIKE '%discontinued%' ORDER BY s.category, s.sku`));
+      case 'manufacturing-bom':   // CONFIG ▸ Manufacturing BOM — parent (finished) → component × qty
+        return res.json(await q(`SELECT parent_sku, component_sku, qty::numeric qty FROM planner.manufacturing_bom ORDER BY parent_sku, component_sku`));
+      case 'manufacturing': {     // SUPPLY ▸ PURCHASE ORDERS ▸ Manufacturing — mfg-branch POs vs component-PO supply
+        const bom = await q(`SELECT parent_sku, component_sku, qty::numeric qty FROM planner.manufacturing_bom ORDER BY parent_sku, component_sku`);
+        const comps = [...new Set(bom.map(b => b.component_sku))];
+        const mrows = await q(`SELECT l.po, l.sku, l.qty::numeric qty, coalesce(p.status,'') status, coalesce(p.supplier_name,'') supplier, coalesce(p.branch,'') branch
+          FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po
+          WHERE p.branch ILIKE '%manufactur%' ORDER BY l.po, l.sku`);
+        const supRows = comps.length ? (await pool.query(`SELECT l.sku, sum(l.qty)::numeric qty
+          FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po
+          WHERE l.sku = ANY($1) AND coalesce(p.branch,'') NOT ILIKE '%manufactur%' GROUP BY l.sku`, [comps])).rows : [];
+        const supply = {}; supRows.forEach(r => supply[r.sku] = Number(r.qty) || 0);
+        const bomBy = {}; bom.forEach(b => { (bomBy[b.parent_sku] = bomBy[b.parent_sku] || []).push(b); });
+        const poMap = {};
+        mrows.forEach(r => { if (!bomBy[r.sku]) return;   // only BOM parents count as finished products
+          if (!poMap[r.po]) poMap[r.po] = { po: r.po, status: r.status, supplier: r.supplier, branch: r.branch, finished: [] };
+          poMap[r.po].finished.push({ sku: r.sku, qty: Number(r.qty) || 0 }); });
+        const mfgPos = Object.values(poMap);
+        const required = {};
+        mfgPos.forEach(po => po.finished.forEach(f => { (bomBy[f.sku] || []).forEach(b => { required[b.component_sku] = (required[b.component_sku] || 0) + f.qty * Number(b.qty); }); }));
+        const components = comps.map(cs => { const req = required[cs] || 0, avail = supply[cs] || 0; return { component_sku: cs, required: req, available: avail, shortfall: Math.max(0, req - avail) }; })
+          .filter(c => c.required > 0)
+          .sort((a, b) => (b.shortfall - a.shortfall) || (a.component_sku < b.component_sku ? -1 : 1));
+        return res.json({ bom, mfgPos, components });
+      }
       case 'client-attachments':   // Client/FBA docs across all POs (category='client') — portal Barcodes & Labels tab
         return res.json(await q(`SELECT po, id, filename FROM planner.portal_attachments WHERE coalesce(category,'')='client' ORDER BY uploaded_at DESC`));
       case 'portal-docs':   // supplier-uploaded documents across all POs (every category except 'client') — portal Documents section
