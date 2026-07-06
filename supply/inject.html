@@ -639,14 +639,20 @@
       document.querySelectorAll('#act-statbar .stpill').forEach(function(p){p.onclick=function(){st.status=p.dataset.st;st.sev='All';statBar();sevBar();view();};}); }
     function typeLbl(){ return st.types.length?('Type: '+st.types.length):'Type: all'; }
     function sevBar(){ var pl=pool(), nH=pl.filter(function(r){return r.severity==='high';}).length, nA=pl.filter(function(r){return r.severity==='amber';}).length, nL=pl.filter(function(r){return r.severity==='low';}).length;
-      var typeOpts=types.slice().sort();
+      // group the type options by the same categories used for the cards, then flow the groups into 2 columns
+      var GORDER=['PAYMENTS','DATES','OTHER','RECOMMENDATIONS'], GLBL={PAYMENTS:'Payments',DATES:'Dates',OTHER:'Other',RECOMMENDATIONS:'💡 Recommendations'};
+      var byG={}; types.slice().sort().forEach(function(t){ (byG[actGroup(t)]=byG[actGroup(t)]||[]).push(t); });
+      var typeGroupsHtml=GORDER.filter(function(g){return byG[g]&&byG[g].length;}).map(function(g){ var nSel=byG[g].filter(function(t){return st.types.indexOf(t)>=0;}).length;
+        return '<div style="break-inside:avoid;margin-bottom:9px"><div style="display:flex;justify-content:space-between;align-items:center;font-weight:700;font-size:10px;text-transform:uppercase;color:#64748b;letter-spacing:.04em;margin:0 0 3px"><span>'+GLBL[g]+' <span style="font-weight:400;color:#94a3b8">('+byG[g].length+')</span></span><label style="cursor:pointer;font-weight:400;text-transform:none;color:#475569"><input type="checkbox" class="act-typegrp" data-grp="'+g+'"'+(nSel&&nSel===byG[g].length?' checked':'')+'> all</label></div>'
+          +byG[g].map(function(t){return '<label style="display:block;padding:2px 4px;cursor:pointer;font-size:12px;white-space:nowrap"><input type="checkbox" class="act-typechk" data-grp="'+g+'" value="'+esc(t)+'"'+(st.types.indexOf(t)>=0?' checked':'')+'> '+esc(t)+'</label>';}).join('')
+          +'</div>'; }).join('');
       document.getElementById('act-sevbar').innerHTML='<span class="pill-lbl">Severity</span><span class="pill spill'+(st.sev==='All'?' active':'')+'" data-s="All">All ('+pl.length+')</span>'
         +'<span class="pill spill'+(st.sev==='high'?' active':'')+'" data-s="high">High ('+nH+')</span><span class="pill spill'+(st.sev==='amber'?' active':'')+'" data-s="amber">Amber ('+nA+')</span><span class="pill spill'+(st.sev==='low'?' active':'')+'" data-s="low">Low ('+nL+')</span>'
         +'<span class="pill-lbl" style="margin-left:14px">Type</span>'
         +'<span style="position:relative;display:inline-block"><button class="pill'+(st.types.length?' active':'')+'" id="act-typebtn">'+typeLbl()+' ▾</button>'
-        +'<div id="act-typepop" style="display:none;position:absolute;z-index:1000;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 30px rgba(15,23,42,.16);padding:6px;min-width:250px;max-height:320px;overflow:auto">'
-          +'<label style="display:block;padding:4px 6px;font-weight:600;cursor:pointer;border-bottom:1px solid #eef0f2;margin-bottom:3px"><input type="checkbox" id="act-type-all"'+(st.types.length?'':' checked')+'> All types</label>'
-          +typeOpts.map(function(t){return '<label style="display:block;padding:3px 6px;cursor:pointer;font-size:12px;white-space:nowrap"><input type="checkbox" class="act-typechk" value="'+esc(t)+'"'+(st.types.indexOf(t)>=0?' checked':'')+'> '+esc(t)+'</label>';}).join('')
+        +'<div id="act-typepop" style="display:none;position:absolute;z-index:1000;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 30px rgba(15,23,42,.16);padding:8px 10px;width:460px;max-width:90vw;max-height:360px;overflow:auto">'
+          +'<label style="display:block;padding:4px 4px 6px;font-weight:600;cursor:pointer;border-bottom:1px solid #eef0f2;margin-bottom:6px"><input type="checkbox" id="act-type-all"'+(st.types.length?'':' checked')+'> All types</label>'
+          +'<div style="column-count:2;column-gap:20px">'+typeGroupsHtml+'</div>'
         +'</div></span>'
         +'<button class="tool-badge bg-neutral" id="act-refresh" style="cursor:pointer;border:none;margin-left:auto">↻ Refresh</button>';
       document.querySelectorAll('#act-sevbar .spill').forEach(function(p){p.onclick=function(){st.sev=p.dataset.s;sevBar();view();};});
@@ -654,9 +660,15 @@
       tb.onclick=function(e){ e.stopPropagation(); var open=tp.style.display!=='none'; tp.style.display=open?'none':'block';
         if(!open)setTimeout(function(){document.addEventListener('mousedown',actTypeOutside,true);},0); };
       document.getElementById('act-type-all').onchange=function(){ st.types=[]; sevBar(); view(); };
+      function syncTypeBtn(){ var tbn=document.getElementById('act-typebtn'); tbn.textContent=typeLbl()+' ▾'; tbn.classList.toggle('active',!!st.types.length); document.getElementById('act-type-all').checked=!st.types.length; }
+      function syncGrpAll(g){ var boxes=document.querySelectorAll('#act-sevbar .act-typechk[data-grp="'+g+'"]'); var allOn=boxes.length&&[].every.call(boxes,function(cb){return cb.checked;}); var ga=document.querySelector('#act-sevbar .act-typegrp[data-grp="'+g+'"]'); if(ga)ga.checked=!!allOn; }
       document.querySelectorAll('#act-sevbar .act-typechk').forEach(function(chk){ chk.onchange=function(){ var v=chk.value,i=st.types.indexOf(v);
         if(chk.checked){ if(i<0)st.types.push(v); } else if(i>=0)st.types.splice(i,1);
-        document.getElementById('act-typebtn').textContent=typeLbl()+' ▾'; document.getElementById('act-typebtn').classList.toggle('active',!!st.types.length); document.getElementById('act-type-all').checked=!st.types.length; view(); }; });
+        syncGrpAll(chk.dataset.grp); syncTypeBtn(); view(); }; });
+      document.querySelectorAll('#act-sevbar .act-typegrp').forEach(function(chk){ chk.onchange=function(){ var g=chk.dataset.grp, on=chk.checked;
+        document.querySelectorAll('#act-sevbar .act-typechk[data-grp="'+g+'"]').forEach(function(cb){ cb.checked=on; var v=cb.value,i=st.types.indexOf(v);
+          if(on){ if(i<0)st.types.push(v); } else if(i>=0)st.types.splice(i,1); });
+        syncTypeBtn(); view(); }; });
       document.getElementById('act-refresh').onclick=function(){ delete cache['actions']; selectSection('actions'); }; }
     function view(){ var f=pool().filter(function(r){return st.sev==='All'||r.severity===st.sev;}).filter(typeMatch);
       var G={PAYMENTS:[],DATES:[],OTHER:[],RECOMMENDATIONS:[]}; f.forEach(function(r){ (G[actGroup(r.type)]||G.OTHER).push(r); });

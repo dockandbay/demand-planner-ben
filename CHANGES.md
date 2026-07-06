@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.252 - SUPPLY ▸ Actions: Type filter categorised + 2-column layout
+
+The Type filter dropdown now groups the (many) action types under their categories (Payments, Dates, Other,
+💡 Recommendations) and lays them out in two columns. Each category has an "all" toggle to select/clear its
+whole group; the group toggle and individual ticks stay in sync. Wider popover (460px).
+
 ## v25.251 - Manufacturing (a): "📦 FINISHED Open order" header no longer clipped
 
 Applied the same width:max-content fix to the (a) open-orders table so its header (and rows) show in full.
