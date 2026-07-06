@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.263';
+const APP_VERSION = 'v25.264';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3370,10 +3370,9 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
     // Cin7 v1 PO line fields: code (SKU), qty, unitCost. (Confirm field names against your Cin7 account.)
     const lineItems = lines.map(l => ({ code: l.sku, qty: Number(l.qty), unitCost: Number(l.price) || 0 }));
     const edd = completion ? (/T/.test(completion) ? completion : completion + 'T00:00:00Z') : undefined;
-    let newId = cin7Id, r, txt, memberId, branchId;
+    let newId = cin7Id, r, txt, memberId, branchId, curApproved;
     if (cin7Id) {
       // UPDATE existing Cin7 PO — preserve its current approval state (don't flip a draft to approved)
-      let curApproved;
       try {
         const g = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=1&fields=id,isApproved&where=' + encodeURIComponent('id=' + cin7Id),
           { headers: { Authorization: auth, 'content-type': 'application/json' } });
@@ -3420,6 +3419,43 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
           [po, String(newId), poRow.supplier_name || null, 'open']);
       }
     }
+    // VALIDATE: read the Cin7 PO back and confirm it matches what we sent. If Cin7 kept lines we didn't send
+    // (e.g. a removed SKU — happens if the PUT merged rather than replaced), re-PUT with those extras at qty 0
+    // to force exact alignment. Qty is compared (not unitCost — Cin7 may hold it in a different currency).
+    let validation = null;
+    try {
+      const sentByCode = {}; lineItems.forEach(li => { sentByCode[String(li.code).toUpperCase()] = li; });
+      const validateId = newId || cin7Id;
+      async function getCin7Lines() {
+        const g = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=1&fields=id,lineItems&where=' + encodeURIComponent('id=' + validateId),
+          { headers: { Authorization: auth, 'content-type': 'application/json' } });
+        if (!g.ok) return null;
+        const arr = await g.json(); const o = Array.isArray(arr) ? arr[0] : arr;
+        return (o && Array.isArray(o.lineItems)) ? o.lineItems : [];
+      }
+      if (validateId) {
+        const cur = await getCin7Lines();
+        if (cur) {
+          const byCode = {}; cur.forEach(li => { if (li && li.code) byCode[String(li.code).toUpperCase()] = li; });
+          const extras = Object.keys(byCode).filter(c => !sentByCode[c] && Number(byCode[c].qty) > 0);   // in Cin7, not in plan
+          const qtyOff = Object.keys(sentByCode).filter(c => !byCode[c] || Number(byCode[c].qty) !== Number(sentByCode[c].qty));
+          validation = { checked: true, extras: extras.length, qty_off: qtyOff.length, corrected: false, aligned: (!extras.length && !qtyOff.length) };
+          if (extras.length || qtyOff.length) {
+            // corrective PUT: all our lines (fixes qty) + the extras at qty 0 (force removal)
+            const fix = lineItems.concat(extras.map(c => ({ code: byCode[c].code, qty: 0, unitCost: Number(byCode[c].unitCost) || 0 })));
+            const body2 = [{ id: Number(validateId) || validateId, lineItems: fix }]; if (typeof curApproved === 'boolean') body2[0].isApproved = curApproved;
+            const r2 = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
+              { method: 'PUT', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify(body2) });
+            validation.corrected = true; validation.correction_ok = r2.ok;
+            const cur2 = r2.ok ? await getCin7Lines() : null;
+            if (cur2) { const b2 = {}; cur2.forEach(li => { if (li && li.code) b2[String(li.code).toUpperCase()] = li; });
+              validation.extras_after = Object.keys(b2).filter(c => !sentByCode[c] && Number(b2[c].qty) > 0).length;
+              validation.qty_off_after = Object.keys(sentByCode).filter(c => !b2[c] || Number(b2[c].qty) !== Number(sentByCode[c].qty)).length;
+              validation.aligned = (!validation.extras_after && !validation.qty_off_after); }
+          }
+        }
+      }
+    } catch (e) { validation = { checked: false, error: e.message }; }
     // optimistically sync the local ERP mirror (lines + delivery date) so the "Update ERP" drift flags clear
     // immediately — reflects what Cin7 now holds; n8n re-confirms on its next sync. Non-fatal if it fails.
     let mirrored = false;
@@ -3432,7 +3468,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
       if (edd) await pool.query(`UPDATE planner.erp_purchase_orders SET final_delivery_date=$2::date, synced_at=now() WHERE po=$1`, [po, completion]);
       mirrored = true;
     } catch (e) { /* non-fatal — Cin7 write already succeeded */ }
-    res.json({ ok: true, mode, cin7_id: newId, cin7_member_id: memberId || null, cin7_branch_id: branchId || null, lines: lines.length, approved: lines.filter(l => l.approved_price).length, erp_mirror_updated: mirrored,
+    res.json({ ok: true, mode, cin7_id: newId, cin7_member_id: memberId || null, cin7_branch_id: branchId || null, lines: lines.length, approved: lines.filter(l => l.approved_price).length, erp_mirror_updated: mirrored, validation,
       link: newId ? 'https://go.cin7.com/Cloud/TransactionEntry/TransactionEntry.aspx?idCustomerAppsLink=951111&OrderId=' + encodeURIComponent(newId) : null });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

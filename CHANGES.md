@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.264 - Cin7 lines push: read-back validation + auto qty-0 correction
+
+After the PUT, the /cin7-lines endpoint now GETs the Cin7 PO back and confirms every line matches what was
+sent (qty + presence; unitCost skipped — currency). If Cin7 kept SKUs we didn't send (e.g. removed lines, if
+the PUT merged rather than replaced), it re-PUTs those extras at qty 0 to force exact alignment, then
+re-reads to confirm. Result surfaced in the UI ("✓ verified exact match" / "auto-corrected N stray SKUs" /
+"⚠ still off — check Cin7"). Response carries a `validation` object. Needs CIN7_AUTH (prod) to exercise live.
+
 ## v25.263 - Cin7 modal reverted to drift-based visibility; full-push kept as a direct button
 
 Per Ben's spec: the Update-ERP modal buttons are drift-based and price-agnostic again — date-only drift shows

@@ -1338,6 +1338,13 @@
     ta.focus(); }
   // Upload to Fulfil/Cin7 is not yet wired (awaiting Diviyaj's n8n webhook). The popup says so, but offers a
   // manual export of the revised order plan (SKU → qty) as a CSV download or clipboard copy with Code/Qty headers.
+  // format the post-push Cin7 read-back validation for the user
+  function cin7ValMsg(v){ if(!v||!v.checked)return (v&&v.error)?' · <span class="mut tiny">(couldn\'t verify: '+esc(v.error)+')</span>':'';
+    if(v.aligned)return ' · <span style="color:#166534;font-weight:700">✓ verified exact match in Cin7</span>';
+    if(v.corrected){ var still=(v.extras_after||v.qty_off_after); return still
+      ? ' · <span style="color:#b91c1c;font-weight:700">⚠ re-pushed but '+(v.extras_after||0)+' extra / '+(v.qty_off_after||0)+' qty still off — check Cin7</span>'
+      : ' · <span style="color:#92710a;font-weight:700">✓ auto-corrected '+(v.extras||0)+' stray SKU(s) → now aligned</span>'; }
+    return ' · <span style="color:#b91c1c;font-weight:700">⚠ '+(v.extras||0)+' extra / '+(v.qty_off||0)+' qty off in Cin7</span>'; }
   function erpUploadInert(po){ closeShPop&&closeShPop();
     // What's actually out of sync decides which buttons show: only the DATE differs → just the date button;
     // line items differ (qty/not-in-ERP) → show both (lines + date), plus the manual CSV/copy fallback.
@@ -1393,7 +1400,7 @@
       msg.textContent='Sending to Cin7…';
       fetch('/api/supply/po/'+encodeURIComponent(po)+'/cin7-lines',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({completion_date:comp})}).then(function(r){return r.json();}).then(function(j){
         if(j&&j.error){ msg.innerHTML='<span style="color:#dc2626">'+esc(j.error)+'</span>'; return; }
-        msg.innerHTML='<span style="color:#166534;font-weight:700">✓ Cin7 PO '+(j.mode==='created'?'created':'updated')+'</span> — '+esc(j.lines)+' line(s)'+(j.approved?' ('+esc(j.approved)+' at approved supplier price)':'')+(j.erp_mirror_updated?' · ERP mirror synced':'')+(j.link?' — <a href="'+esc(j.link)+'" target="_blank" rel="noopener">open Cin7 PO ↗</a>':'');
+        msg.innerHTML='<span style="color:#166534;font-weight:700">✓ Cin7 PO '+(j.mode==='created'?'created':'updated')+'</span> — '+esc(j.lines)+' line(s)'+(j.approved?' ('+esc(j.approved)+' at approved supplier price)':'')+cin7ValMsg(j.validation)+(j.erp_mirror_updated?' · ERP mirror synced':'')+(j.link?' — <a href="'+esc(j.link)+'" target="_blank" rel="noopener">open Cin7 PO ↗</a>':'');
         invalidateDerived(); delete cache['purchase-orders']; selectSection('purchase-orders');   // clear the ERP drift flags in real time
       }).catch(function(e){ msg.innerHTML='<span style="color:#dc2626">Failed: '+esc(e.message||e)+'</span>'; }); };
   }
@@ -2157,7 +2164,7 @@
       var orig=b.textContent; b.disabled=true; b.textContent='Sending…';
       fetch('/api/supply/po/'+encodeURIComponent(p)+'/cin7-lines',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({completion_date:(poBy[p]||{}).checkin||''})}).then(function(r){return r.json();}).then(function(j){
         if(j&&j.error){ b.disabled=false; b.textContent=orig; alert('Cin7: '+j.error); return; }
-        b.textContent='✓ Pushed ('+(j.lines||0)+' lines)'; invalidateDerived(); delete cache['purchase-orders'];
+        b.textContent='✓ Pushed ('+(j.lines||0)+' lines)'; var vt=(j.validation&&j.validation.checked)?(j.validation.aligned?' ✓ verified':' ⚠ check Cin7'):''; if(vt)b.textContent+=vt; invalidateDerived(); delete cache['purchase-orders'];
       }).catch(function(e){ b.disabled=false; b.textContent=orig; alert('Failed: '+(e.message||e)); }); }; });
     document.querySelectorAll('#podet-'+i+' .erp-up-dates').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po); }; });
     // CLIENT tab label downloads — crossdock barcodes (same as portal) + SHIPS WITH SUPPLIER master label
