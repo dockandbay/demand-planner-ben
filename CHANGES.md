@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.282 - ORDER PLAN: Carton to col 2 (sticky), colour search, past-discontinue highlight
+
+Three tweaks to the ORDER PLAN pivot: (1) the sticky Carton column now sits in column 2, immediately after
+SKU (Release shifts to column 3); both stay frozen. (2) The filter search now matches SKU OR the SKU's colour
+long (placeholder updated to "filter SKU / colour…"). (3) Rows whose discontinue date is already in the past
+are tinted light red, with the discontinue date cell in a stronger red/bold for visibility.
+
 ## v25.281 - ORDER PLAN cell shortcuts: "Nc" (cartons) and "Nr" (round up to carton)
 
 In any ORDER PLAN quantity cell you can now type a shortcut instead of a plain number, resolved against the
