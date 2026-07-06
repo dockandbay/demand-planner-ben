@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.269';
+const APP_VERSION = 'v25.270';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3382,8 +3382,8 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
           if (o && Number(o.currencyRate)) rate = Number(o.currencyRate); }
       } catch (e) { /* fall through — omit isApproved / rate */ }
     }
-    const toBase = usd => rate ? Math.round((Number(usd) / rate) * 10000) / 10000 : (Number(usd) || 0);
-    const lineItems = lines.map(l => ({ code: l.sku, qty: Number(l.qty), unitPrice: toBase(l.price) }));
+    // Cin7 expects the line unitPrice in the ORDER currency (USD) on write and converts to base itself — send planUSD as-is.
+    const lineItems = lines.map(l => ({ code: l.sku, qty: Number(l.qty), unitPrice: Number(l.price) || 0 }));
     if (cin7Id) {
       // UPDATE existing Cin7 PO — preserve its current approval state (don't flip a draft to approved)
       const upd = { id: Number(cin7Id) || cin7Id, lineItems };
@@ -3461,7 +3461,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
           if (extras.length || qtyOff.length || pOff.length) {
             // corrective PUT: re-price EVERY line using the PO's real currencyRate (unitPrice = planUSD / rate) —
             // this self-heals the create path (rate unknown at build) and any price drift — plus extras at qty 0.
-            const fixItems = lines.map(l => ({ code: l.sku, qty: Number(l.qty), unitPrice: d.rate ? Math.round((Number(l.price) / d.rate) * 10000) / 10000 : Number(l.price) }));
+            const fixItems = lines.map(l => ({ code: l.sku, qty: Number(l.qty), unitPrice: Number(l.price) || 0 }));
             const fix = fixItems.concat(extras.map(c => ({ code: byCode[c].code, qty: 0, unitPrice: Number(byCode[c].unitPrice) || 0 })));
             const body2 = [{ id: Number(validateId) || validateId, lineItems: fix }]; if (typeof curApproved === 'boolean') body2[0].isApproved = curApproved;
             const r2 = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
