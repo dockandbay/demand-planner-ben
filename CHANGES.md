@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.261 - Admin PO detail (mobile): sticky sub-tab strip
+
+In the mobile full-screen PO sheet (SUPPLY ▸ PURCHASE ORDERS ▸ open a PO), the PO sub-tab strip
+(PAYMENTS / DATES / SHIPMENTS / …) now sticks just below the already-sticky back header, so it stays
+reachable while scrolling a long panel. CSS-only.
+
 ## v25.260 - Supplier portal mobile polish: badge, PO wrap, sticky sub-nav, font sizes
 
 Mobile (≤640px) portal fixes: (1) first column widened to 60px so the MANAGE "M" shows its action-count
