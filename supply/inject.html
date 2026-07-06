@@ -2585,12 +2585,12 @@
         var st=c.diff<0?'short':c.diff>0?'over':'ok';
         var diffTxt=st==='ok'?'<span class="tool-badge bg-green">match</span>':(st==='short'?'<span style="color:#b91c1c;font-weight:700">short '+units(-c.diff)+'</span>':'<span style="color:#92710a;font-weight:700">over '+units(c.diff)+'</span>');
         var mfgList=(c.mfgPos||[]).filter(function(m){return m.qty;});
-        var mfgHtml=mfgList.length?mfgList.map(function(m){return '<button class="lnk-btn mfg-po-go" data-po="'+esc(m.po)+'" title="'+esc(m.status||'')+'">'+esc(m.po)+'</button> <span class="mut tiny">×'+units(m.qty)+'</span>';}).join('<br>')
+        var mfgHtml=mfgList.length?mfgList.map(function(m){return '<span style="white-space:nowrap"><button class="lnk-btn mfg-po-go" data-po="'+esc(m.po)+'" title="'+esc(m.status||'')+'">'+esc(m.po)+'</button> <span class="mut tiny">×'+units(m.qty)+'</span></span>';}).join('<br>')
           :'<span class="mut tiny">no open MFG orders</span>';
         var acc=(st!=='ok')?'<label class="mut tiny" style="cursor:pointer;white-space:nowrap"><input type="checkbox" class="mfg-acc" data-comp="'+esc(c.component_sku)+'"'+(c.accepted?' checked':'')+'> accept</label>':'';
         return '<tr'+(st!=='ok'&&!c.accepted?' style="background:#fff7ed"':'')+'><td class="l">'+esc(c.component_sku)+'</td><td>'+units(c.required)+'</td><td class="l">'+mfgHtml+'</td><td>'+units(c.supplied)+'</td><td>'+diffTxt+'</td><td class="l">'+acc+'</td></tr>';
       }).join('');
-      var bTbl='<div class="tw" style="max-width:820px"><table><thead><tr><th class="l">Component SKU</th><th>Required</th><th class="l">'+badgeMfg+' Open MFG orders</th><th>Supplied</th><th>Mismatch</th><th class="l">Sign-off</th></tr></thead><tbody>'+compRows+'</tbody></table></div>';
+      var bTbl='<div class="tw" style="max-width:960px"><table><thead><tr><th class="l">Component SKU</th><th>Required</th><th class="l" style="min-width:210px;white-space:nowrap">'+badgeMfg+' Open MFG orders</th><th>Supplied</th><th>Mismatch</th><th class="l">Sign-off</th></tr></thead><tbody>'+compRows+'</tbody></table></div>';
       return '<div style="margin-bottom:18px;max-width:1200px;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px">'
         +'<div style="font-weight:800;font-size:14px;margin-bottom:8px">'+esc(bn.parent_sku)+'</div>'
         +'<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">'

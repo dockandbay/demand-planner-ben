@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.248 - Manufacturing (b): widen the "Open MFG orders" column (no longer cut off)
+
+Gave the Open MFG orders column a min-width and kept each PO ×qty on one line; widened the (b) table so
+the column header and order rows are no longer truncated.
+
 ## v25.247 - CONFIG ▸ Manufacturing BOM: delete an entire bundle
 
 Each bundle group now has a "🗑 Delete entire bundle" button (confirm) that removes all of that parent's
