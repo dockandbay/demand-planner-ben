@@ -2453,7 +2453,11 @@
     document.getElementById('op-batch').onchange=function(){st.batch=this.value;markSel(this);viewReset();};
     document.getElementById('op-supplier').onchange=function(){st.supplier=this.value;markSel(this);viewReset();};
     // Download report — XLSX of the current view: SKUs down column 1, purchase orders across the top (descending), quantities in the grid.
-    document.getElementById('op-dl').onclick=function(){ var b=this; var cl=curLines(); var skus=rowsFor(cl);
+    document.getElementById('op-dl').onclick=function(){ var b=this; var cl=curLines();
+      // Export is ALWAYS ordered-only: just the SKUs that actually have order lines in the current filter
+      // (supplier/batch/prod/category/etc.), regardless of the on-screen "All SKUs / All in category" pill.
+      var skus=(function(){ var seen={},arr=[]; cl.forEach(function(l){ if(!seen[l.sku]){seen[l.sku]=1;arr.push(l.sku);} });
+        return arr.sort(function(a,b){var ca=skuCat[a]||'~~',cb=skuCat[b]||'~~'; return ca<cb?-1:ca>cb?1:(a<b?-1:1);}); })();
       var pset={},pos=[],pmeta={}; cl.forEach(function(l){ if(!pset[l.po]){pset[l.po]=1;pos.push(l.po);pmeta[l.po]={pe:l.prod_end||'',client:l.client||'',so:l.sales_order_ref||'',branch:l.branch||'',co:l.country||''};} }); pos.sort().reverse();
       if(!skus.length||!pos.length){ alert('Nothing to export for the current filter.'); return; }
       var qmap={}; cl.forEach(function(l){ var k=l.sku+'|'+l.po; qmap[k]=(qmap[k]||0)+(Number(l.qty)||0); });

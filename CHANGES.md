@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.286 - ORDER PLAN export: always ordered-only SKUs (ignore the All-SKUs pill)
+
+Per Ben, the XLSX download should always contain only the SKUs that actually have order lines within the
+current supplier/batch/prod/category/etc. filter — never the extra master SKUs the "All SKUs / All in category"
+pill adds to the on-screen grid. Switched the export's row set from rowsFor(cl) (scope-driven) to the distinct
+ordered SKUs from the filtered lines, sorted by category then SKU.
+
 ## v25.285 - PURCHASE ORDERS: sticky PO detail — stick the <td>, not a child div (v25.284 fix)
 
 v25.284's sticky on the wrapper div didn't hold: position:sticky on a div inside a <td> is unreliable in
