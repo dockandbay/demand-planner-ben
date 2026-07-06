@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.236 - Manufacturing tab: demand-vs-supply matching + accept tick
+
+Reworked to Ben's model: finished-bundle demand (parent SKU qty on finished-product POs) × BOM = the component
+qty the Manufacturing-branch POs must carry. Per bundle, shows each component Required vs On-mfg-POs vs Diff
+(shortage/overage), with an Accept tick to sign off a mismatch (persisted, migration 097). Demo mfg PO now
+carries components.
+
 ## v25.235 - SUPPLY Manufacturing tab (mock) + BOM config
 
 Mock of a Manufacturing feature: new PURCHASE ORDERS sub-tab "Manufacturing" (after Shipments) + CONFIG

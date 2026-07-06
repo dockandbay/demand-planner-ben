@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.235';
+const APP_VERSION = 'v25.236';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1385,28 +1385,31 @@ app.get('/api/supply/:section', async (req, res) => {
           WHERE coalesce(s.status,'') NOT ILIKE '%discontinued%' ORDER BY s.category, s.sku`));
       case 'manufacturing-bom':   // CONFIG ▸ Manufacturing BOM — parent (finished) → component × qty
         return res.json(await q(`SELECT parent_sku, component_sku, qty::numeric qty FROM planner.manufacturing_bom ORDER BY parent_sku, component_sku`));
-      case 'manufacturing': {     // SUPPLY ▸ PURCHASE ORDERS ▸ Manufacturing — mfg-branch POs vs component-PO supply
+      case 'manufacturing': {     // SUPPLY ▸ PURCHASE ORDERS ▸ Manufacturing — finished-bundle demand vs manufacturing-PO component supply
         const bom = await q(`SELECT parent_sku, component_sku, qty::numeric qty FROM planner.manufacturing_bom ORDER BY parent_sku, component_sku`);
+        const parents = [...new Set(bom.map(b => b.parent_sku))];
         const comps = [...new Set(bom.map(b => b.component_sku))];
-        const mrows = await q(`SELECT l.po, l.sku, l.qty::numeric qty, coalesce(p.status,'') status, coalesce(p.supplier_name,'') supplier, coalesce(p.branch,'') branch
+        // finished-bundle DEMAND = parent SKU qty on NON-manufacturing POs (e.g. "PO XXX has 600 gift boxes")
+        const demRows = parents.length ? (await pool.query(`SELECT l.sku, l.po, l.qty::numeric qty, coalesce(p.branch,'') branch, coalesce(p.status,'') status
           FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po
-          WHERE p.branch ILIKE '%manufactur%' ORDER BY l.po, l.sku`);
-        const supRows = comps.length ? (await pool.query(`SELECT l.sku, sum(l.qty)::numeric qty
+          WHERE l.sku = ANY($1) AND coalesce(p.branch,'') NOT ILIKE '%manufactur%'`, [parents])).rows : [];
+        // manufacturing SUPPLY = component SKU qty on MANUFACTURING-branch POs
+        const supRows = comps.length ? (await pool.query(`SELECT l.sku, l.po, l.qty::numeric qty, coalesce(p.status,'') status
           FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po
-          WHERE l.sku = ANY($1) AND coalesce(p.branch,'') NOT ILIKE '%manufactur%' GROUP BY l.sku`, [comps])).rows : [];
-        const supply = {}; supRows.forEach(r => supply[r.sku] = Number(r.qty) || 0);
-        const bomBy = {}; bom.forEach(b => { (bomBy[b.parent_sku] = bomBy[b.parent_sku] || []).push(b); });
-        const poMap = {};
-        mrows.forEach(r => { if (!bomBy[r.sku]) return;   // only BOM parents count as finished products
-          if (!poMap[r.po]) poMap[r.po] = { po: r.po, status: r.status, supplier: r.supplier, branch: r.branch, finished: [] };
-          poMap[r.po].finished.push({ sku: r.sku, qty: Number(r.qty) || 0 }); });
-        const mfgPos = Object.values(poMap);
-        const required = {};
-        mfgPos.forEach(po => po.finished.forEach(f => { (bomBy[f.sku] || []).forEach(b => { required[b.component_sku] = (required[b.component_sku] || 0) + f.qty * Number(b.qty); }); }));
-        const components = comps.map(cs => { const req = required[cs] || 0, avail = supply[cs] || 0; return { component_sku: cs, required: req, available: avail, shortfall: Math.max(0, req - avail) }; })
-          .filter(c => c.required > 0)
-          .sort((a, b) => (b.shortfall - a.shortfall) || (a.component_sku < b.component_sku ? -1 : 1));
-        return res.json({ bom, mfgPos, components });
+          WHERE l.sku = ANY($1) AND coalesce(p.branch,'') ILIKE '%manufactur%'`, [comps])).rows : [];
+        const accepted = {}; (await q(`SELECT component_sku, accepted FROM planner.manufacturing_accept`)).forEach(r => { accepted[r.component_sku] = !!r.accepted; });
+        const demandBy = {}, finishedPosBy = {}, supplyBy = {}, mfgPosBy = {};
+        demRows.forEach(r => { demandBy[r.sku] = (demandBy[r.sku] || 0) + Number(r.qty); (finishedPosBy[r.sku] = finishedPosBy[r.sku] || []).push({ po: r.po, qty: Number(r.qty), branch: r.branch, status: r.status }); });
+        supRows.forEach(r => { supplyBy[r.sku] = (supplyBy[r.sku] || 0) + Number(r.qty); (mfgPosBy[r.sku] = mfgPosBy[r.sku] || []).push({ po: r.po, qty: Number(r.qty), status: r.status }); });
+        const bundles = parents.map(parent => {
+          const demand = demandBy[parent] || 0;
+          const components = bom.filter(b => b.parent_sku === parent).map(b => {
+            const required = demand * Number(b.qty), supplied = supplyBy[b.component_sku] || 0;
+            return { component_sku: b.component_sku, per: Number(b.qty), required, supplied, diff: supplied - required, mfgPos: mfgPosBy[b.component_sku] || [], accepted: !!accepted[b.component_sku] };
+          });
+          return { parent_sku: parent, demand, finishedPos: finishedPosBy[parent] || [], components };
+        });
+        return res.json({ bom, bundles });
       }
       case 'client-attachments':   // Client/FBA docs across all POs (category='client') — portal Barcodes & Labels tab
         return res.json(await q(`SELECT po, id, filename FROM planner.portal_attachments WHERE coalesce(category,'')='client' ORDER BY uploaded_at DESC`));
@@ -2797,6 +2800,17 @@ app.post('/api/supply/portal-invoice-apply', async (req, res) => {
     res.json({ ok: true, po, applied, added, unchanged, zeroed, total: parsed.lines.length });
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
+});
+// Manufacturing: accept (sign off) a component's shortage/overage between finished-bundle demand and the mfg POs.
+app.post('/api/supply/manufacturing-accept', async (req, res) => {
+  const b = req.body || {}; if (!b.component_sku) return res.status(400).json({ error: 'component_sku required' });
+  const on = b.accepted !== false;
+  try {
+    if (on) await pool.query(`INSERT INTO planner.manufacturing_accept (component_sku, accepted, accepted_by, accepted_at)
+      VALUES ($1, true, $2, now()) ON CONFLICT (component_sku) DO UPDATE SET accepted=true, accepted_by=$2, accepted_at=now()`, [b.component_sku, b.accepted_by || 'PO PLAN']);
+    else await pool.query(`DELETE FROM planner.manufacturing_accept WHERE component_sku=$1`, [b.component_sku]);
+    res.json({ ok: true, component_sku: b.component_sku, accepted: on });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Toggle a shipment's ESCALATED status (supplier portal or admin grid). Upserts the shipment row if needed.
 app.post('/api/supply/shipment/:ref/escalate', async (req, res) => {
