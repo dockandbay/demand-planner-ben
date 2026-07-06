@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.230 - Parse invoice: set order-plan SKUs not on the invoice to 0
+
+When parsing a supplier invoice, SKUs that are on the PO order plan but NOT on the invoice are now proposed as
+qty 0 (they weren't shipped/invoiced) — previously they kept their old quantity. Shown in the parse preview
+with a "not on invoice" badge (cur → 0) and written as amended_qty=0 proposals on apply. Verified on
+PO-55USLX1: 6 not-on-invoice SKUs flagged → 0.
+
 ## v25.229 - ORDER PLAN download report: colour-coded country + shipment rows
 
 Reworked the ORDER PLAN XLSX report:

@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.229';
+const APP_VERSION = 'v25.230';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2716,10 +2716,15 @@ app.post('/api/supply/portal-parse-invoice', async (req, res) => {
       const cq = cur ? Number(cur.qty) : null, cc = cur ? Number(cur.cost_price) : null;
       const status = !cur ? 'new' : ((cq !== l.qty || (l.price != null && cc !== l.price)) ? 'changed' : 'match');
       return { sku: l.sku, inv_qty: l.qty, inv_price: l.price, cur_qty: cq, cur_cost: cc, status }; });
+    // plan SKUs NOT on the invoice → propose qty 0 (they weren't shipped/invoiced)
+    const invSkus = new Set(parsed.lines.map(l => l.sku.toUpperCase()));
+    const removed = plan.filter(l => !invSkus.has(String(l.sku).toUpperCase()) && Number(l.qty) > 0)
+      .map(l => ({ sku: l.sku, inv_qty: 0, inv_price: null, cur_qty: Number(l.qty), cur_cost: (l.cost_price != null ? Number(l.cost_price) : null), status: 'removed' }));
+    const allLines = lines.concat(removed);
     res.json({ ok: true, po_detected: parsed.po,
       totals: { count: lines.length, qty: lines.reduce((s, r) => s + r.inv_qty, 0), value: Math.round(lines.reduce((s, r) => s + r.inv_qty * (r.inv_price || 0), 0) * 100) / 100,
-        matched: lines.filter(r => r.status !== 'new').length, changed: lines.filter(r => r.status === 'changed').length, neu: lines.filter(r => r.status === 'new').length },
-      lines });
+        matched: lines.filter(r => r.status !== 'new').length, changed: lines.filter(r => r.status === 'changed').length, neu: lines.filter(r => r.status === 'new').length, removed: removed.length },
+      lines: allLines });
   } catch (e) { res.status(400).json({ error: 'Could not parse the file: ' + e.message }); }
 });
 // Apply a parsed supplier invoice to the PO's order plan as portal overrides (amended_qty / actual_cost). Re-parses
@@ -2752,8 +2757,19 @@ app.post('/api/supply/portal-invoice-apply', async (req, res) => {
         [po, l.sku, l.price, l.qty, isNew, by]);
       applied++; if (isNew) added++;
     }
+    // plan SKUs NOT on the invoice → propose amended_qty 0 (weren't shipped/invoiced). Cost left untouched on conflict.
+    const invSkus = new Set(parsed.lines.map(l => l.sku.toUpperCase()));
+    let zeroed = 0;
+    for (const l of plan) {
+      if (invSkus.has(String(l.sku).toUpperCase()) || Number(l.qty) <= 0) continue;
+      await client.query(`INSERT INTO planner.portal_line_costs (po, sku, actual_cost, amended_qty, is_added, submitted_by, submitted_at)
+        VALUES ($1,$2,$3,0,false,$4, now())
+        ON CONFLICT (po, sku) DO UPDATE SET amended_qty=0, submitted_by=excluded.submitted_by, submitted_at=now()`,
+        [po, l.sku, (l.cost_price != null ? Number(l.cost_price) : null), by]);
+      applied++; zeroed++;
+    }
     await client.query('COMMIT');
-    res.json({ ok: true, po, applied, added, unchanged, total: parsed.lines.length });
+    res.json({ ok: true, po, applied, added, unchanged, zeroed, total: parsed.lines.length });
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
