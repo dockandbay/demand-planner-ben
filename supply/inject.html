@@ -2562,37 +2562,39 @@
     function kpi(label,val,bg,fg){ return '<div style="flex:0 0 auto;min-width:96px;padding:8px 12px;border-radius:8px;background:'+bg+';color:'+fg+'"><div style="font-size:19px;font-weight:800;line-height:1">'+val+'</div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.04em;opacity:.85;margin-top:2px">'+label+'</div></div>'; }
     var shortN=allComps.filter(function(c){return c.diff<0;}).length, overN=allComps.filter(function(c){return c.diff>0;}).length;
     var h='<div class="sect-h">Manufacturing — bundle assembly coverage</div>'
-      +'<div class="mut tiny" style="margin-bottom:8px">'+badgeFin+' POs carry the <b>finished bundle</b> (the demand). '+badgeMfg+' POs (branch = <b>Manufacturing</b>) carry the <b>component</b> SKUs (the supply). Demand × BOM must be covered by the MFG POs. Tick <b>Accept</b> to sign off a shortage/overage.</div>'
+      +'<div class="mut tiny" style="margin-bottom:8px">Grouped by bundle. '+badgeFin+' = open finished-product orders (the demand); '+badgeMfg+' = open Manufacturing-branch orders supplying the component SKUs. Demand × BOM must be covered by the MFG orders. Tick <b>Accept</b> to sign off a shortage/overage. (Open orders only — complete/shipped excluded.)</div>'
       +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'
-        +kpi('MFG POs',mfgPos.length,'#fef3c7','#92400e')
-        +kpi('Finished POs',finPos.length,'#dbeafe','#1e40af')
         +kpi('Bundles',bundles.length,'#f1f5f9','#334155')
+        +kpi('Finished orders',finPos.length,'#dbeafe','#1e40af')
+        +kpi('MFG orders',mfgPos.length,'#fef3c7','#92400e')
         +kpi('Short',shortN,shortN?'#fee2e2':'#f1f5f9',shortN?'#b91c1c':'#334155')
         +kpi('Over',overN,overN?'#fef9c3':'#f1f5f9',overN?'#92710a':'#334155')
       +'</div>';
     if(!bundles.length){ b.innerHTML=h+'<div class="count">No BOM bundles configured — add them in CONFIG ▸ Manufacturing BOM.</div>'; return; }
-    // Manufacturing POs list — the direct answer to "which are the manufacturing POs" -------------
-    h+='<div style="font-weight:700;margin:2px 0 4px">'+badgeMfg+' Manufacturing POs <span class="mut tiny" style="font-weight:400">('+mfgPos.length+') — component supply</span></div>';
-    h+= mfgPos.length
-      ? '<div class="tw" style="max-width:760px;margin-bottom:16px"><table><thead><tr><th class="l">Manufacturing PO</th><th class="l">Status</th><th class="l">Supplies components</th></tr></thead><tbody>'
-        +mfgPos.map(function(p){ return '<tr style="background:#fffbeb"><td class="l"><button class="lnk-btn mfg-po-go" data-po="'+esc(p.po)+'">'+esc(p.po)+'</button></td><td class="l mut tiny">'+esc(p.status)+'</td><td class="l">'+p.comps.map(function(x){return esc(x.sku)+' <span class="mut tiny">×'+units(x.qty)+'</span>';}).join('<br>')+'</td></tr>'; }).join('')
-        +'</tbody></table></div>'
-      : '<div class="count" style="margin-bottom:16px">No Manufacturing-branch POs yet — component supply is 0. Set a PO\'s branch to <b>Manufacturing</b> so it counts here.</div>';
-    // Per-bundle coverage cards -------------------------------------------------------------------
-    h+='<div style="font-weight:700;margin:2px 0 6px">Bundle coverage</div>';
+    // One card per bundle SKU: (a) open finished orders + total demand, (b) each component's open MFG orders + mismatch
     h+=bundles.map(function(bn){
       var pos=(bn.finishedPos||[]).filter(function(x){return x.qty;});
-      var poList=pos.length?pos.map(function(x){return badgeFin+' <button class="lnk-btn mfg-po-go" data-po="'+esc(x.po)+'" title="'+esc(x.branch||'')+'">'+esc(x.po)+'</button> <span class="mut tiny">×'+units(x.qty)+'</span>';}).join(' &nbsp; '):'<span class="mut tiny">no finished-product POs</span>';
-      var rows=(bn.components||[]).map(function(c){
+      // (a) open finished orders → demand
+      var ordRows=pos.length?pos.map(function(x){return '<tr><td class="l"><button class="lnk-btn mfg-po-go" data-po="'+esc(x.po)+'" title="'+esc(x.branch||'')+'">'+esc(x.po)+'</button></td><td>'+units(x.qty)+'</td></tr>';}).join('')
+        :'<tr><td class="l mut tiny" colspan="2">no open finished orders</td></tr>';
+      var aTbl='<div class="tw" style="max-width:340px"><table><thead><tr><th class="l">'+badgeFin+' Open order</th><th>Qty</th></tr></thead><tbody>'+ordRows
+        +'<tr style="border-top:2px solid #cbd5e1;font-weight:700;background:#f8fafc"><td class="l">Total demand</td><td>'+units(bn.demand)+'</td></tr></tbody></table></div>';
+      // (b) components — each with its open MFG orders + mismatch
+      var compRows=(bn.components||[]).map(function(c){
         var st=c.diff<0?'short':c.diff>0?'over':'ok';
         var diffTxt=st==='ok'?'<span class="tool-badge bg-green">match</span>':(st==='short'?'<span style="color:#b91c1c;font-weight:700">short '+units(-c.diff)+'</span>':'<span style="color:#92710a;font-weight:700">over '+units(c.diff)+'</span>');
-        var mfgTip=(c.mfgPos||[]).map(function(m){return m.po+' ×'+units(m.qty);}).join(', ');
+        var mfgList=(c.mfgPos||[]).filter(function(m){return m.qty;});
+        var mfgHtml=mfgList.length?mfgList.map(function(m){return '<button class="lnk-btn mfg-po-go" data-po="'+esc(m.po)+'" title="'+esc(m.status||'')+'">'+esc(m.po)+'</button> <span class="mut tiny">×'+units(m.qty)+'</span>';}).join('<br>')
+          :'<span class="mut tiny">no open MFG orders</span>';
         var acc=(st!=='ok')?'<label class="mut tiny" style="cursor:pointer;white-space:nowrap"><input type="checkbox" class="mfg-acc" data-comp="'+esc(c.component_sku)+'"'+(c.accepted?' checked':'')+'> accept</label>':'';
-        return '<tr'+(st!=='ok'&&!c.accepted?' style="background:#fff7ed"':'')+'><td class="l">'+esc(c.component_sku)+'</td><td>'+units(c.required)+'</td><td title="'+esc(mfgTip)+'">'+units(c.supplied)+'</td><td>'+diffTxt+'</td><td class="l">'+acc+'</td></tr>';
+        return '<tr'+(st!=='ok'&&!c.accepted?' style="background:#fff7ed"':'')+'><td class="l">'+esc(c.component_sku)+'</td><td>'+units(c.required)+'</td><td class="l">'+mfgHtml+'</td><td>'+units(c.supplied)+'</td><td>'+diffTxt+'</td><td class="l">'+acc+'</td></tr>';
       }).join('');
-      return '<div style="margin-bottom:14px;max-width:760px;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px"><div style="font-weight:700;margin-bottom:1px">'+esc(bn.parent_sku)+' <span class="mut tiny" style="font-weight:400">— demand '+units(bn.demand)+'</span></div>'
-        +'<div class="mut tiny" style="margin-bottom:6px">from: '+poList+'</div>'
-        +'<div class="tw"><table><thead><tr><th class="l">Component</th><th>Required</th><th>On MFG POs</th><th>Diff</th><th class="l">Sign-off</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+      var bTbl='<div class="tw" style="max-width:820px"><table><thead><tr><th class="l">Component SKU</th><th>Required</th><th class="l">'+badgeMfg+' Open MFG orders</th><th>Supplied</th><th>Mismatch</th><th class="l">Sign-off</th></tr></thead><tbody>'+compRows+'</tbody></table></div>';
+      return '<div style="margin-bottom:18px;max-width:860px;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px">'
+        +'<div style="font-weight:800;font-size:14px;margin-bottom:8px">'+esc(bn.parent_sku)+'</div>'
+        +'<div style="font-weight:700;font-size:12px;margin-bottom:3px">(a) Open finished orders → demand</div>'+aTbl
+        +'<div style="font-weight:700;font-size:12px;margin:12px 0 3px">(b) Components — required vs open MFG orders</div>'+bTbl
+        +'</div>';
     }).join('');
     b.innerHTML=h;
     b.querySelectorAll('.mfg-po-go').forEach(function(x){ x.onclick=function(){ gotoPO(x.dataset.po); }; });

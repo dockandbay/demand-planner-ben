@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.244 - Manufacturing tab restructured: per-bundle (a) open orders + total, (b) component MFG orders + mismatch
+
+Reworked SUPPLY ▸ PURCHASE ORDERS ▸ Manufacturing around Ben's model. One card per bundle SKU with two
+sections: (a) the open finished orders and quantities with a bold Total demand row; (b) a component table
+showing each component SKU, its required qty, the itemised open Manufacturing orders + quantities, supplied
+total, and the mismatch (match/short/over) with per-component Accept. Component supply is now measured
+open-vs-open: the manufacturing SUPPLY query also excludes COMPLETE/DELIVERED/SHIPPING (matches the demand
+scope). Dropped the standalone Manufacturing-POs table (now shown inline per component). No schema change.
+
 ## v25.243 - CONFIG ▸ Manufacturing BOM is now editable (add / edit qty + save / delete)
 
 The Manufacturing BOM config tab is no longer read-only. Per bundle you can edit a component's qty/unit

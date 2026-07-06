@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.243';
+const APP_VERSION = 'v25.244';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1395,10 +1395,12 @@ app.get('/api/supply/:section', async (req, res) => {
           FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po
           WHERE l.sku = ANY($1) AND coalesce(p.branch,'') NOT ILIKE '%manufactur%'
             AND coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%deliver%' AND coalesce(p.status,'') NOT ILIKE '%ship%'`, [parents])).rows : [];
-        // manufacturing SUPPLY = component SKU qty on MANUFACTURING-branch POs
+        // manufacturing SUPPLY = component SKU qty on OPEN MANUFACTURING-branch POs (open-vs-open: exclude
+        // COMPLETE / DELIVERED / SHIPPING so open demand is measured against open supply).
         const supRows = comps.length ? (await pool.query(`SELECT l.sku, l.po, l.qty::numeric qty, coalesce(p.status,'') status
           FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po
-          WHERE l.sku = ANY($1) AND coalesce(p.branch,'') ILIKE '%manufactur%'`, [comps])).rows : [];
+          WHERE l.sku = ANY($1) AND coalesce(p.branch,'') ILIKE '%manufactur%'
+            AND coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%deliver%' AND coalesce(p.status,'') NOT ILIKE '%ship%'`, [comps])).rows : [];
         const accepted = {}; (await q(`SELECT component_sku, accepted FROM planner.manufacturing_accept`)).forEach(r => { accepted[r.component_sku] = !!r.accepted; });
         const demandBy = {}, finishedPosBy = {}, supplyBy = {}, mfgPosBy = {};
         demRows.forEach(r => { demandBy[r.sku] = (demandBy[r.sku] || 0) + Number(r.qty); (finishedPosBy[r.sku] = finishedPosBy[r.sku] || []).push({ po: r.po, qty: Number(r.qty), branch: r.branch, status: r.status }); });
