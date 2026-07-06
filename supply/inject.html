@@ -5310,7 +5310,7 @@
     fetch('/api/supply/prod-numbers').then(function(r){return r.json();}).then(function(rows){ var prods=(rows||[]).map(function(p){return p.prod_no;}).filter(Boolean);
       var sel=document.getElementById('bp-prod'); sel.innerHTML='<option value="">— choose production —</option>'+prods.map(function(p){return '<option>'+esc(p)+'</option>';}).join(''); }).catch(function(){});
     function refreshCount(){ var n=document.querySelectorAll('#bp-skus .bp-skutick:checked').length; var c=document.getElementById('bp-skucount'); if(c)c.textContent=n+' SKU(s) ticked'; }
-    fetch('/api/supply/buyplan-skus',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({items:items})}).then(function(r){return r.json();}).then(function(d){
+    fetch('/api/supply/buyplan-skus',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({items:items,country:country})}).then(function(r){return r.json();}).then(function(d){
       var skus=(d&&d.skus)||[]; var box=document.getElementById('bp-skus');
       if(d&&d.error){ box.innerHTML='<div style="color:#dc2626">'+esc(d.error)+'</div>'; return; }
       // sort by category (alpha) then SKU (alpha); render with category group headers
@@ -5328,7 +5328,7 @@
         var pal=s.pallet_qty>0?(Math.round(s.qty/s.pallet_qty*10)/10):('<span style="color:#b45309" title="no pallet_qty — included, not counted in the 20-pallet split">n/a</span>');
         return rows+='<tr data-sku="'+esc(s.sku)+'" data-qty="'+s.qty+'" data-code="'+esc(code)+'">'
           +'<td style="'+tdB+';text-align:center"><input type="checkbox" class="bp-skutick"'+(hasCode?' checked':'')+'></td>'
-          +'<td style="'+tdB+';text-align:left;min-width:180px">'+esc(s.sku)+'</td>'
+          +'<td style="'+tdB.replace('white-space:nowrap','')+';text-align:left;min-width:200px"><div style="display:flex;align-items:center;gap:6px"><span>'+esc(s.sku)+'</span><button class="bp-plan" data-sku="'+esc(s.sku)+'" title="show the buy plan for this SKU" style="font-size:9px;padding:1px 6px;border:1px solid #d0d0d0;border-radius:3px;background:#fff;cursor:pointer;white-space:nowrap">Plan ▸</button></div>'+(s.discontinue?'<div style="font-size:9px;color:#9ca3af;margin-top:1px">discontinue '+esc(fd(s.discontinue))+'</div>':'')+'</td>'
           +'<td style="'+tdB+';text-align:center">'+s.qty.toLocaleString()+'</td>'
           +'<td style="'+tdB+';text-align:center">'+pal+'</td>'
           +'<td style="'+tdB+';text-align:left;min-width:160px">'+supCell+'</td></tr>'; });
@@ -5340,6 +5340,8 @@
         +'<th style="'+thB+';text-align:left;min-width:160px">Supplier</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
       var ta=document.getElementById('bp-tickall'); if(ta)ta.onchange=function(){ document.querySelectorAll('#bp-skus .bp-skutick:not([disabled])').forEach(function(t){t.checked=ta.checked;}); refreshCount(); };
       box.querySelectorAll('.bp-skutick').forEach(function(t){ t.onchange=refreshCount; }); refreshCount();
+      // "Plan ▸" → open the BUY-tab plan popup for that SKU (artifact's global open_)
+      box.querySelectorAll('.bp-plan').forEach(function(b){ b.onclick=function(){ var sku=b.dataset.sku; if(window.open_){ try{ window.open_(sku); var ov=document.getElementById('ov'); if(ov)ov.style.zIndex='300000'; /* sit above the create-PO modal (z200000) */ }catch(e){ alert('Could not open the plan for '+sku); } } else { alert('Open the BUY tab first, then use Plan.'); } }; });
     }).catch(function(e){ document.getElementById('bp-skus').innerHTML='<div style="color:#dc2626">'+esc(String(e))+'</div>'; });
     function gather(){ var out=[]; document.querySelectorAll('#bp-skus tbody tr').forEach(function(tr){ var t=tr.querySelector('.bp-skutick'); if(!t||!t.checked)return;
       var code=tr.dataset.code; var sel=tr.querySelector('.bp-skusup'); if(sel)code=sel.value;
