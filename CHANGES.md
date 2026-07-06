@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.240 - ORDER PLAN PO search: works from 3 chars; no misleading full-grid fallback
+
+The PO(s) search box now filters from 3 characters (was 5) and, when it has text below that, shows no rows
+instead of silently falling back to the full unfiltered grid. Fixes "type 1631 shows items without 1631".
+
 ## v25.239 - ORDER PLAN country pills: no "All", empty = all (like PURCHASE ORDERS)
 
 Removed the "All" country pill on ORDER PLAN; default is now no country selected = all countries shown, and

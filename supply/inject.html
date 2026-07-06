@@ -2270,12 +2270,13 @@
       +'<div id="op-grid"></div>';
     try{ document.getElementById('supply-content').classList.remove('op-filters-open'); }catch(e){}   // start collapsed on mobile each visit
     // parse the PO box into tokens (space / comma / newline). When present it OVERRIDES the status + country filters.
-    // PO-search tokens — require ≥5 chars so a short/partial entry doesn't accidentally override the status
-    // filter (and pull in the 1000+ completed POs). Below 5 chars the PO box is inert.
-    function poToks(){ return String(st.poq||'').split(/[\s,]+/).map(nrm).filter(function(t){return t.length>=5;}); }
-    function curLines(){ var allC=(st.countries.size===0||st.countries.size===countries.length), pt=poToks(); return lines.filter(function(l){
+    // PO-search tokens — ≥3 chars (the pivot caps PO columns, so a broad match is bounded). The box searches
+    // the PO reference as a substring across ALL statuses (overrides the status/country filter).
+    function poToks(){ return String(st.poq||'').split(/[\s,]+/).map(nrm).filter(function(t){return t.length>=3;}); }
+    function curLines(){ var allC=(st.countries.size===0||st.countries.size===countries.length), pt=poToks(), poqOn=!!String(st.poq||'').trim(); return lines.filter(function(l){
       if(st.focus){ if(!l.starred || /complete/i.test(l.status||''))return false; }   // Focus = starred + active only (overrides status / PO box)
-      else if(pt.length){ if(!pt.some(function(t){return nrm(l.po).indexOf(t)>=0;}))return false; }
+      else if(poqOn){ if(!pt.length)return false;   // typed a PO search but under 3 chars → no results (don't fall back to showing everything)
+        if(!pt.some(function(t){return nrm(l.po).indexOf(t)>=0;}))return false; }
       else { if(!st.statuses.has(l.status))return false; if(!(allC||st.countries.has(l.country)))return false; }
       return (st.prod==='All'||l.prod_no===st.prod)&&(st.batch==='All'||l.batch_id===st.batch)&&(st.supplier==='All'||l.supplier_name===st.supplier)&&(st.cat==='All'||l.category===st.cat)&&(st.rw==='All'||skuRW[l.sku]===st.rw)&&(!st.partials||isUnapprovedPartial(l))&&(!st.erpdiff||erpDiff(l))&&(!st.suprisk||lineSupRisk(l))&&(!st.disc||lineDisc(l))&&(!nrm(st.q)||nrm(l.sku).indexOf(nrm(st.q))>=0); }); }
     function rowsFor(cl){ var set={},list=[]; cl.forEach(function(l){if(!set[l.sku]){set[l.sku]=1;list.push(l.sku);}});
