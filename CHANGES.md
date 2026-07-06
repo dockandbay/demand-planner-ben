@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.281 - ORDER PLAN cell shortcuts: "Nc" (cartons) and "Nr" (round up to carton)
+
+In any ORDER PLAN quantity cell you can now type a shortcut instead of a plain number, resolved against the
+SKU's carton qty (skuAttr.cq): "4c" → 4 × carton qty (carton 12 → 48); "150r" → round 150 UP to the nearest
+full carton (carton 12 → 156). On blur the cell normalises to the resolved number, and that number is what's
+saved. A small tip note explaining both shortcuts now sits next to the ★ Focus button. If a SKU has no carton
+qty, the suffix is ignored and the leading number is used.
+
 ## v25.280 - Fix: ORDER PLAN cell edit no longer jumps to top of page
 
 Typing a quantity into an empty ORDER PLAN cell (a PO×SKU pair that wasn't yet a line) triggered a full grid

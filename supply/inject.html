@@ -2328,7 +2328,8 @@
         +'<span class="pill'+(st.erpdiff?' active':'')+'" id="op-erp">⚠ Update ERP <span id="op-erp-n" style="color:#dc2626;font-weight:700"></span></span>'
         +'<span class="pill'+(st.suprisk?' active':'')+'" id="op-suprisk" title="lines ordered against a supplier not in the SKU\'s allowed multi-supplier list">⚠ Supplier risk <span id="op-suprisk-n" style="color:#dc2626;font-weight:700"></span></span>'
         +'<span class="pill'+(st.disc?' active':'')+'" id="op-disc" title="lines forecast to arrive after the product\'s discontinue date">⚠ Discontinued <span id="op-disc-n" style="color:#dc2626;font-weight:700"></span></span>'
-        +'<span class="pill po-focus'+(st.focus?' active':'')+'" id="op-focus" style="margin-left:14px" title="show only starred (Focus) POs that are still active / in progress">★ Focus</span></div>'
+        +'<span class="pill po-focus'+(st.focus?' active':'')+'" id="op-focus" style="margin-left:14px" title="show only starred (Focus) POs that are still active / in progress">★ Focus</span>'
+        +'<span style="margin-left:14px;font-size:9px;line-height:1.2;color:#64748b" title="In a quantity cell you can type shortcuts instead of a plain number:\n• 4c = 4 cartons = 4 × the SKU\'s carton qty (e.g. carton 12 → 48)\n• 150r = round 150 UP to the nearest full carton (e.g. carton 12 → 156)">💡 in a cell: <b>4c</b> = 4 cartons · <b>150r</b> = round up to carton</span></div>'
       +'</div>'   // /#op-filters
       +'<div id="op-changes"></div>'
       +'<div id="op-grid"></div>';
@@ -2385,10 +2386,16 @@
         .then(function(j){ if(j&&j.error)throw 0; var ch=plcMap[ps]; if(ch){ if(ch.amended_qty!=null&&ch.amended_qty!==''){ var l=lines.find(function(x){return x.po===po&&x.sku===sku;}); if(l)l.qty=Number(ch.amended_qty); } ch.unconfirmed=false; }
           invalidateDerived(); renderChanges(); view(); })
         .catch(function(){ alert('Could not confirm'); }); }; }); }
+    // Cell shortcuts: "4c" = 4 × carton qty; "150r" = round 150 UP to the nearest full carton. Needs the SKU's carton qty (skuAttr.cq).
+    function resolveQty(raw,cq){ raw=String(raw==null?'':raw).trim().toLowerCase(); if(!raw)return 0; var m;
+      if((m=raw.match(/^(\d+(?:\.\d+)?)c$/))&&cq>0)return Math.round(parseFloat(m[1])*cq);
+      if((m=raw.match(/^(\d+(?:\.\d+)?)r$/))&&cq>0)return Math.ceil(parseFloat(m[1])/cq)*cq;
+      return parseInt(raw,10)||0; }
     function bindQty(){ document.querySelectorAll('#op-grid input.qtycell').forEach(function(inp){
-      function mm(){ var n=parseInt(inp.value,10)||0; inp.classList.toggle('mm', String(n)!==String(inp.dataset.erp)); inp.classList.toggle('z', !n); }
+      var cq=Number((skuAttr[inp.dataset.sku]||{}).cq)||0;
+      function mm(){ var n=resolveQty(inp.value,cq); inp.classList.toggle('mm', String(n)!==String(inp.dataset.erp)); inp.classList.toggle('z', !n); }
       mm(); inp.oninput=mm;
-      inp.onchange=function(){ var po=inp.dataset.po, sku=inp.dataset.sku, v=parseInt(inp.value,10)||0, fresh=false;
+      inp.onchange=function(){ var po=inp.dataset.po, sku=inp.dataset.sku, v=resolveQty(inp.value,cq), fresh=false; inp.value=v||'';   // normalise a shortcut (4c/150r) to its resolved number in the cell
         var l=lines.find(function(x){return x.po===po&&x.sku===sku;});
         if(l){l.qty=v;} else { fresh=true; var pr=lines.find(function(x){return x.po===po;})||{}, sr=lines.find(function(x){return x.sku===sku;})||{};
           lines.push({po:po,sku:sku,qty:v,erp_qty:0,cost_price:sr.cost_price||0,pallet_qty:sr.pallet_qty||0,full_carton_check:'',prod_no:pr.prod_no,status:pr.status,supplier_name:pr.supplier_name,shipment_ref:pr.shipment_ref,country:pr.country,category:skuCat[sku]||sr.category,release_window:skuRW[sku],prod_start:pr.prod_start,prod_end:pr.prod_end,ship_date:pr.ship_date,delivery:pr.delivery}); }
