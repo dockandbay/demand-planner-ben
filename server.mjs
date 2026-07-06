@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.241';
+const APP_VERSION = 'v25.242';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1389,10 +1389,12 @@ app.get('/api/supply/:section', async (req, res) => {
         const bom = await q(`SELECT parent_sku, component_sku, qty::numeric qty FROM planner.manufacturing_bom ORDER BY parent_sku, component_sku`);
         const parents = [...new Set(bom.map(b => b.parent_sku))];
         const comps = [...new Set(bom.map(b => b.component_sku))];
-        // finished-bundle DEMAND = parent SKU qty on NON-manufacturing POs (e.g. "PO XXX has 600 gift boxes")
+        // finished-bundle DEMAND = parent SKU qty on OPEN NON-manufacturing POs (e.g. "PO XXX has 600 gift boxes").
+        // Only POs still needing assembly count — exclude COMPLETE / DELIVERED / SHIPPING (already built/shipped).
         const demRows = parents.length ? (await pool.query(`SELECT l.sku, l.po, l.qty::numeric qty, coalesce(p.branch,'') branch, coalesce(p.status,'') status
           FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po
-          WHERE l.sku = ANY($1) AND coalesce(p.branch,'') NOT ILIKE '%manufactur%'`, [parents])).rows : [];
+          WHERE l.sku = ANY($1) AND coalesce(p.branch,'') NOT ILIKE '%manufactur%'
+            AND coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%deliver%' AND coalesce(p.status,'') NOT ILIKE '%ship%'`, [parents])).rows : [];
         // manufacturing SUPPLY = component SKU qty on MANUFACTURING-branch POs
         const supRows = comps.length ? (await pool.query(`SELECT l.sku, l.po, l.qty::numeric qty, coalesce(p.status,'') status
           FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po

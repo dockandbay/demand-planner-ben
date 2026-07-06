@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.242 - Manufacturing demand = open POs only (exclude complete/delivered/shipping)
+
+Manufacturing bundle DEMAND now counts only finished-product POs still needing assembly — POs with a
+COMPLETE / DELIVERED / SHIPPING status are excluded (they're already built/shipped, so their components
+are consumed). Component supply still counts all Manufacturing-branch POs. No schema change.
+
 ## v25.241 - Manufacturing tab redesign: MFG vs FINISHED POs clearly distinguished
 
 Reworked SUPPLY ▸ PURCHASE ORDERS ▸ Manufacturing UX so the two PO populations read at a glance:
