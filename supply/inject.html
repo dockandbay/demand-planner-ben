@@ -2230,7 +2230,7 @@
       skuAttr[s.sku]={sup:s.supplier||'',cq:s.carton_qty||'',dis:s.discontinue||'',disAu:s.discontinue_au||'',disCa:s.discontinue_ca||'',sm:s.supplier_multiple_all||'',ean:s.product_ean||'',title:s.product_name||'',size:s.size||'',size_long:s.size_long||'',colour:s.colour_long||''};});
     lines.forEach(function(l){if(l.category)skuCat[l.sku]=l.category; if(l.release_window)skuRW[l.sku]=l.release_window;});
     var defS=statuses.filter(function(s){return /production/i.test(s);}); if(!defS.length)defS=statuses.slice(0,1);
-    var st={statuses:new Set(defS),countries:new Set(countries.indexOf('UK')>=0?['UK']:countries),prod:'All',cat:'All',batch:'All',supplier:'All',q:'',poq:'',scope:'ordered',rw:'All',partials:false,erpdiff:false,suprisk:false,disc:false,focus:false};
+    var st={statuses:new Set(defS),countries:new Set(),prod:'All',cat:'All',batch:'All',supplier:'All',q:'',poq:'',scope:'ordered',rw:'All',partials:false,erpdiff:false,suprisk:false,disc:false,focus:false};   // countries: empty = all (like PURCHASE ORDERS)
     // action sets (exclude complete POs): unapproved partial cartons, and lines whose planned qty differs from the ERP
     // Once a PO has shipped/delivered/completed the plan is locked — no partials / supplier-risk to action.
     function poLocked(l){ return /complete|shipping|deliver/i.test(l.status||''); }
@@ -2245,7 +2245,7 @@
     if(_pendingOP){ st.partials=!!_pendingOP.partials; st.suprisk=!!_pendingOP.suprisk; st.disc=!!_pendingOP.disc; if(_pendingOP.po)st.poq=String(_pendingOP.po).toLowerCase();
       st.statuses=new Set(pillStatuses);   // show all (non-complete) statuses so the flagged lines aren't hidden by the status filter
       _pendingOP=null; }
-    function pillsHTML(opts,setv){ return opts.map(function(o){return '<span class="pill'+(setv.has(o)?' active':'')+'" data-v="'+esc(o)+'">'+esc(o)+'</span>';}).join('')+'<span class="pill" data-all="1">All</span>'; }
+    function pillsHTML(opts,setv,noAll){ return opts.map(function(o){return '<span class="pill'+(setv.has(o)?' active':'')+'" data-v="'+esc(o)+'">'+esc(o)+'</span>';}).join('')+(noAll?'':'<span class="pill" data-all="1">All</span>'); }
     function sel(id,label,opts,val){return '<span class="pill-lbl">'+label+'</span><select class="flt'+(val&&val!=='All'?' sel-on':'')+'" id="'+id+'" style="width:auto;padding:3px 6px"><option>All</option>'+opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>';}
     function markSel(el){ if(el)el.classList.toggle('sel-on', el.value && el.value!=='All'); }   // black-highlight a dropdown when a non-All option is chosen
     c.innerHTML=annot('order-plan')
@@ -2253,7 +2253,7 @@
       +'<div id="op-filters">'
       +'<div class="bar"><span class="pill-lbl">Status</span><span id="op-status">'+pillsHTML(pillStatuses,st.statuses)+'</span><span class="mut tiny op-hint" style="margin-left:6px">completed POs: search a PO number below</span>'
         +'<span class="op-po-grp" style="margin-left:12px"><span class="pill-lbl">PO(s)</span><input class="flt" id="op-po" placeholder="PO number(s) — space / comma…" title="one or more PO numbers, separated by space, comma or line break — overrides the status &amp; country filters" style="width:240px;background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8" value="'+esc(st.poq||'')+'"></span></div>'
-      +'<div class="bar"><span class="pill-lbl">Country</span><span id="op-country">'+pillsHTML(countries,st.countries)+'</span>'
+      +'<div class="bar"><span class="pill-lbl">Country</span><span id="op-country">'+pillsHTML(countries,st.countries,true)+'</span>'
         +'<span style="margin-left:12px"></span>'+sel('op-prod','PROD#',prods,st.prod)+sel('op-batch','Batch',batches,st.batch)+sel('op-supplier','Supplier',suppliers,st.supplier)+'</div>'
       +'<div class="bar"><span class="pill-lbl">SKUs</span><span class="pill active" data-sc="ordered">Ordered</span><span class="pill" data-sc="allskus">All SKUs</span><span class="pill" data-sc="all">All in category</span>'
         +sel('op-cat','Category',cats,st.cat)+sel('op-rw','Release',rws,st.rw)
@@ -2273,7 +2273,7 @@
     // PO-search tokens — require ≥5 chars so a short/partial entry doesn't accidentally override the status
     // filter (and pull in the 1000+ completed POs). Below 5 chars the PO box is inert.
     function poToks(){ return String(st.poq||'').split(/[\s,]+/).map(nrm).filter(function(t){return t.length>=5;}); }
-    function curLines(){ var allC=st.countries.size===countries.length, pt=poToks(); return lines.filter(function(l){
+    function curLines(){ var allC=(st.countries.size===0||st.countries.size===countries.length), pt=poToks(); return lines.filter(function(l){
       if(st.focus){ if(!l.starred || /complete/i.test(l.status||''))return false; }   // Focus = starred + active only (overrides status / PO box)
       else if(pt.length){ if(!pt.some(function(t){return nrm(l.po).indexOf(t)>=0;}))return false; }
       else { if(!st.statuses.has(l.status))return false; if(!(allC||st.countries.has(l.country)))return false; }
@@ -2335,7 +2335,7 @@
         fetch('/api/supply/po-line/'+encodeURIComponent(psku)+'/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({approved:true,field:field})}).then(function(r){return r.json();}).then(function(){var l=lines.find(function(x){return (x.po+'|'+x.sku)===psku;}); if(l)set(l); view();}); }; }); }
       approveExc('opapprove-sup','supplier',function(l){l.supplier_risk_approved=true;});
       approveExc('opapprove-disc','discontinue',function(l){l.discontinue_approved=true;}); }
-    function togglebar(id,opts,setv){ document.getElementById(id).onclick=function(e){var t=e.target; if(t.dataset.all)setv=new Set(opts); else if(t.dataset.v!=null){if(setv.has(t.dataset.v))setv.delete(t.dataset.v);else setv.add(t.dataset.v);} else return; if(id==='op-status')st.statuses=setv; else st.countries=setv; document.getElementById(id).innerHTML=pillsHTML(opts,setv); viewReset(); }; }
+    function togglebar(id,opts,setv){ document.getElementById(id).onclick=function(e){var t=e.target; if(t.dataset.all)setv=new Set(opts); else if(t.dataset.v!=null){if(setv.has(t.dataset.v))setv.delete(t.dataset.v);else setv.add(t.dataset.v);} else return; if(id==='op-status')st.statuses=setv; else st.countries=setv; document.getElementById(id).innerHTML=pillsHTML(opts,setv,id==='op-country'); viewReset(); }; }
     togglebar('op-status',pillStatuses,st.statuses); togglebar('op-country',countries,st.countries);
     c.querySelectorAll('[data-sc]').forEach(function(p){p.onclick=function(){st.scope=p.dataset.sc; c.querySelectorAll('[data-sc]').forEach(function(x){x.classList.toggle('active',x===p);}); viewReset();};});
     document.getElementById('op-partials').onclick=function(){st.partials=!st.partials; this.classList.toggle('active',st.partials); viewReset();};

@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.239 - ORDER PLAN country pills: no "All", empty = all (like PURCHASE ORDERS)
+
+Removed the "All" country pill on ORDER PLAN; default is now no country selected = all countries shown, and
+deselecting all shows everything (matches the PURCHASE ORDERS behaviour). Status pills keep their All pill.
+
 ## v25.238 - PURCHASE ORDERS: Ship-to pills drop the count
 
 The Ship to country pills now show just the flag + code (e.g. 🇬🇧 UK) without the per-country count.
