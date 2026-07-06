@@ -1342,13 +1342,12 @@
     // What's actually out of sync decides which buttons show: only the DATE differs → just the date button;
     // line items differ (qty/not-in-ERP) → show both (lines + date), plus the manual CSV/copy fallback.
     var _r=poBy[po]||{};
-    var linesPending=(_r.erp_total>0&&!(_r.erp_in>0))||_r.erp_pending>0;
     var datePending=_r.erp_date_pending>0 && !poComplete(_r);
-    var showLines=linesPending, showDate=datePending||linesPending;
-    var manualBlk=showLines
-      ? '<div class="mut" style="margin-bottom:12px;font-size:13px">This does <b>not</b> update Fulfil/Cin7 yet (integration pending). Until then, export the revised order plan (Code &amp; Qty) and enter it into the ERP manually:</div>'
-        +'<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px"><button class="save-btn" id="erp-dl" style="background:#2563eb;color:#fff;border-color:#2563eb">⬇ Download CSV</button><button class="save-btn" id="erp-cp">⧉ Copy to clipboard</button></div>'
-      : '<div class="mut" style="margin-bottom:12px;font-size:13px">The completed-at-warehouse date differs from the Cin7 delivery date. Push the updated date:</div>';
+    // Ben's rule: the per-PO "Update lines" push must ALWAYS be available so it can TOTALLY OVERRIDE Cin7
+    // (all SKUs + qty + price), even when only price drifted (qty-only detection would otherwise hide it).
+    var showLines=true, showDate=datePending;
+    var manualBlk='<div class="mut" style="margin-bottom:12px;font-size:13px">Push this PO to Cin7 as a full override (all SKUs, quantities &amp; prices). Or export the order plan (Code &amp; Qty) to enter manually:</div>'
+        +'<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px"><button class="save-btn" id="erp-dl" style="background:#2563eb;color:#fff;border-color:#2563eb">⬇ Download CSV</button><button class="save-btn" id="erp-cp">⧉ Copy to clipboard</button></div>';
     var bg=document.createElement('div'); bg.id='erp-bg'; bg.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100000;display:flex;align-items:flex-start;justify-content:center;padding:60px 12px';
     bg.innerHTML='<div style="background:#fff;border-radius:10px;max-width:460px;width:100%;padding:18px;font-family:Arial,Helvetica,sans-serif">'
       +'<div style="font-weight:700;font-size:15px;margin-bottom:6px">Update ERP'+(po?(' — '+esc(po)):'')+'</div>'
@@ -1910,7 +1909,7 @@
     var addRowHtml=editing?'<tr class="op-addrow"><td class="l"><input class="op-add-sku" list="opsku-'+po+'" placeholder="search supplier SKU…" style="width:220px" autocomplete="off"></td><td style="text-align:right"><input class="op-add-qty" placeholder="qty" style="width:74px;text-align:right" inputmode="numeric"></td><td colspan="5" class="mut tiny">new line — added as proposed (not in ERP until you Upload)</td></tr>':'';
     var opBtns=editing
       ? '<button class="lnk-btn op-add-row" data-po="'+esc(po)+'" style="margin-left:8px">＋ Add SKU</button> <button class="save-btn op-save" data-po="'+esc(po)+'" style="margin-left:4px;background:#dcfce7;border:1px solid #16a34a;color:#166534;font-weight:700">✓ Save</button> <button class="save-btn light op-cancel">Cancel</button>'
-      : '<button class="save-btn op-edit" data-po="'+esc(po)+'" style="margin-left:8px">✎ Edit qty / add SKU</button> <button class="save-btn light op-copy" data-copy="'+copyData+'" style="margin-left:4px" title="copy this PO&rsquo;s SKUs + quantities to the clipboard (tab-separated)">⧉ Copy SKU + Qty</button>';
+      : '<button class="save-btn op-edit" data-po="'+esc(po)+'" style="margin-left:8px">✎ Edit qty / add SKU</button> <button class="save-btn light op-copy" data-copy="'+copyData+'" style="margin-left:4px" title="copy this PO&rsquo;s SKUs + quantities to the clipboard (tab-separated)">⧉ Copy SKU + Qty</button> <button class="save-btn op-cin7-full" data-po="'+esc(po)+'" style="margin-left:4px;background:#0a8;color:#fff;border-color:#0a8" title="push ALL of this PO&rsquo;s SKUs, quantities and prices to Cin7 — full override for exact alignment (live write)">⬆ Push to Cin7 (full)</button>';
     return '<div class="sect-h">Order plan — agree the final cost price per line '
       +'<button class="lnk-btn op-goto" data-po="'+esc(po)+'" style="margin-left:8px" title="open the full ORDER PLAN filtered to this PO">↗ open in full order plan</button>'
       +opBtns
@@ -2150,6 +2149,7 @@
         .then(function(){ OP_EDIT=null; invalidateDerived(); poRefetchPanel(po,i); })
         .catch(function(e){ b.disabled=false; b.textContent='✓ Save'; alert('Save failed: '+(e.message||e)); }); }; });
     document.querySelectorAll('#podet-'+i+' .op-erp-up-panel').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po); }; });
+    document.querySelectorAll('#podet-'+i+' .op-cin7-full').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po); }; });
     document.querySelectorAll('#podet-'+i+' .erp-up-dates').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po); }; });
     // CLIENT tab label downloads — crossdock barcodes (same as portal) + SHIPS WITH SUPPLIER master label
     document.querySelectorAll('#podet-'+i+' .po-dl-xd').forEach(function(b){ b.onclick=function(){ var skus=((poBy[po]&&poBy[po].crossdock_skus)||'').trim();

@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.262 - Cin7 per-PO lines push always available (full override, incl. price-only changes)
+
+Diagnosis of PO-56EUXR1: qty matched Cin7 but 9 lines kept stale prices. Root cause — the per-PO
+"Update Cin7 PO (SKUs/Qty/Price)" push (a full override: every SKU + qty + price) was only *offered* when
+QUANTITY differed, so a price-only invoice change never surfaced it. Fix: the lines push is now always
+available — always shown in the Update-ERP modal, plus a new "⬆ Push to Cin7 (full)" button on the PO's
+ORDER PLAN tab. Per-PO date push and the bulk date-only sync are unchanged. (NB: internal ERP mirror is USD;
+Cin7's default CSV export is GBP — export in USD to compare.) No schema change.
+
 ## v25.261 - Admin PO detail (mobile): sticky sub-tab strip
 
 In the mobile full-screen PO sheet (SUPPLY ▸ PURCHASE ORDERS ▸ open a PO), the PO sub-tab strip
