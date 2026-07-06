@@ -55,7 +55,10 @@
 #supply-root #rep-subnav,#supply-root #config-subs,#supply-root #prod-subtabs,#supply-root .po-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 12px}
 /* Opened PO detail lives inside the wide, horizontally-scrolling PO grid — pin its sub-tab strip to the left
    so PAYMENTS/DATES/etc stay fixed while the grid scrolls sideways (desktop). */
-#supply-root tr.exp-row .po-subnav{position:sticky;left:0;z-index:6;width:max-content}
+/* Pin the whole expanded PO detail panel (sub-tabs + panels) to the left of the horizontally-scrolling grid.
+   Sticky must sit on the wrapper (containing block = the full-width colspan td), NOT on .po-subnav (whose
+   containing block is this narrow 1340px wrapper, so it slid away once you scrolled past it). */
+#supply-root tr.exp-row .po-detail-wrap{position:sticky;left:0;z-index:6}
 #supply-root .ex-badge{display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:#dc2626;color:#fff;font-size:9px;font-weight:700;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px}
 #supply-root .po-set-shipping{font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:#dbeafe;border:1px solid #60a5fa;color:#1d4ed8;cursor:pointer;white-space:nowrap}
 #supply-root .datewrap{display:inline-flex;align-items:center;gap:2px;position:relative}
@@ -2217,7 +2220,7 @@
     function badge(n){ return n>0?' <span class="ex-badge" title="'+n+' exception'+(n>1?'s':'')+' / action'+(n>1?'s':'')+'">'+n+'</span>':''; }
     var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab potab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'" data-po="'+esc(po)+'">'+t[1]+badge(t[3])+'</button>';}).join('')+'</div>';
     var panels=tabs.map(function(t,ti){return '<div class="potab-panel" data-pt="'+t[0]+'"'+(ti===0?'':' style="display:none"')+'>'+t[2]+'</div>';}).join('');
-    return '<div style="padding:4px 4px;max-width:1340px">'+bar+panels+'</div>'; }
+    return '<div class="po-detail-wrap" style="padding:4px 4px;max-width:1340px">'+bar+panels+'</div>'; }
 
   // ---- ORDER PLAN (side-by-side: SKU rows × PO columns; status/country pills, production default) ----
   // Minimal client-side XLSX writer (OOXML zipped with STORE + CRC32 — CSP-safe, no library). grid = array of rows.

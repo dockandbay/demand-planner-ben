@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.284 - PURCHASE ORDERS: expanded PO detail (sub-tabs) pinned when scrolling the grid
+
+The PLAN sub-tab menu (Payments/Dates/Client-FBA/…) scrolled sideways with the wide PO grid. The v25.275
+sticky was on .po-subnav, but its containing block is the narrow 1340px wrapper that sits at the far left of
+the 19-column colspan cell — so it slid off once you scrolled past it. Moved the sticky to the wrapper itself
+(.po-detail-wrap), whose containing block is the full-width td, so the whole detail panel now stays pinned to
+the left of the horizontally-scrolling grid.
+
 ## v25.283 - ORDER PLAN: no scroll-jump on approve, + fast explanatory tooltips
 
 (1) Approving a partial (the p✓ tick), "approve all partials", supplier/discontinue approvals, and confirming
