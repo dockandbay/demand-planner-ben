@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.241 - Manufacturing tab redesign: MFG vs FINISHED POs clearly distinguished
+
+Reworked SUPPLY ▸ PURCHASE ORDERS ▸ Manufacturing UX so the two PO populations read at a glance:
+coloured badges (🏭 MFG amber / 📦 FINISHED blue), a KPI strip (MFG POs, Finished POs, Bundles,
+Short, Over), and a prominent **Manufacturing POs** list showing each MFG PO and the component SKUs
+it supplies. Per-bundle coverage cards retained (Required / On MFG POs / Diff / Accept sign-off).
+No schema change; derives both PO lists client-side from the existing `manufacturing` endpoint.
+
 ## v25.240 - ORDER PLAN PO search: works from 3 chars; no misleading full-grid fallback
 
 The PO(s) search box now filters from 3 characters (was 5) and, when it has text below that, shows no rows
