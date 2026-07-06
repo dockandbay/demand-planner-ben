@@ -1992,6 +1992,13 @@
           .catch(function(e){ inp.disabled=false; alert('Upload failed: '+(e.message||e)); }); };
       rd.readAsDataURL(f); }; });
     document.querySelectorAll('#podet-'+i+' .po-go-ship').forEach(function(b){ b.onclick=function(){ if(b.dataset.ref)gotoShipment(b.dataset.ref); }; });
+    // DOCUMENTS tab: delete any doc / upload a doc (held in the DB)
+    document.querySelectorAll('#podet-'+i+' .podoc-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete document “'+(b.dataset.name||'')+'” from PO '+b.dataset.po+'? This cannot be undone.'))return; b.disabled=true;
+      fetch('/api/supply/po-doc-delete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:b.dataset.id})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); poRefetchPanel(po,i); }).catch(function(e){ b.disabled=false; alert('Delete failed: '+(e.message||e)); }); }; });
+    document.querySelectorAll('#podet-'+i+' .podoc-up').forEach(function(b){ b.onclick=function(){ var inp=document.querySelector('#podet-'+i+' .podoc-file[data-po="'+CSS.escape(b.dataset.po)+'"]'); var f=inp&&inp.files&&inp.files[0]; if(!f){alert('Choose a file to upload.');return;} b.disabled=true;
+      var rd=new FileReader(); rd.onload=function(){ fetch('/api/supply/po-doc-upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:b.dataset.po,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),uploaded_by:'admin'})})
+        .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); poRefetchPanel(po,i); }).catch(function(e){ b.disabled=false; alert('Upload failed: '+(e.message||e)); }); };
+      rd.readAsDataURL(f); }; });
     // free-text client fields — save verbatim (commas allowed) on blur
     document.querySelectorAll('#podet-'+i+' .txtin').forEach(function(inp){ inp.onchange=function(){
       if(inp.classList.contains('dateinp')){ var _r=(inp.value||'').trim(), _i=_r?parseDateLoose(_r):''; if(_r&&!_i){ inp.classList.add('err'); return; } inp.classList.remove('err'); inp.value=_i; }
@@ -2159,6 +2166,18 @@
       root.querySelectorAll('.potab-panel').forEach(function(p){p.style.display=(p.dataset.pt===pt)?'':'none';});
       if(b.dataset.po) writePoTabHash(b.dataset.po, pt); }; });   // deep-link the open sub-tab into the URL
     setupMobSubnav(root); bindDatePickers(); }
+  // PO ▸ DOCUMENTS tab: every file held for this PO (all categories) — list + download + delete + upload.
+  function docsPanel(po,d){ var docs=(d&&d.all_docs)||[];
+    function fsize(b){ b=Number(b)||0; return b>=1048576?(b/1048576).toFixed(1)+' MB':b>=1024?Math.round(b/1024)+' KB':(b?b+' B':''); }
+    var rows=docs.length?docs.map(function(x){ var url='/api/supply/portal-attachment/'+esc(x.id);
+      return '<tr><td class="l"><a href="'+url+'" target="_blank" rel="noopener">'+esc(x.filename||'file')+'</a></td>'
+        +'<td class="l"><span class="tool-badge bg-neutral">'+esc(x.category||'')+'</span></td>'
+        +'<td class="l">'+esc(x.uploaded_at||'')+'</td><td class="l">'+esc(x.uploaded_by||'')+'</td><td class="l">'+esc(fsize(x.byte_size))+'</td>'
+        +'<td class="l" style="white-space:nowrap"><a class="lnk-btn" href="'+url+'" target="_blank" rel="noopener">⤓ download</a> &nbsp; <button class="lnk-btn podoc-del" data-id="'+esc(x.id)+'" data-po="'+esc(po)+'" data-name="'+esc(x.filename||'')+'" style="color:#b91c1c">✕ delete</button></td></tr>';
+    }).join(''):'<tr><td colspan="6" class="count">No documents held for this PO yet.</td></tr>';
+    return '<div class="sect-h">Documents <span class="mut tiny">(every file held for this PO — invoices, supplier uploads, client/FBA docs)</span></div>'
+      +'<div class="tw" style="max-width:900px"><table><thead><tr><th class="l">File</th><th class="l">Type</th><th class="l">Uploaded</th><th class="l">By</th><th class="l">Size</th><th class="l">Actions</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+      +'<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><label class="tiny">Upload a document<br><input type="file" class="podoc-file" data-po="'+esc(po)+'" style="font-size:11px"></label><button class="save-btn podoc-up" data-po="'+esc(po)+'">⬆ Upload</button></div>'; }
   function poDetailHTML(po,d,i){ function blk(t,rows){return '<div class="sect-h">'+t+' ('+rows.length+')</div>'+(rows.length?tableHTML(rows):'<div class="count">none linked</div>');}
     var p=payPanel(poBy[po],d);
     if(!p||typeof p==='string') return '<div class="count">No PO data.</div>';
@@ -2168,7 +2187,8 @@
     var timelineH=timelinePanel(po,d);
     var linkedH='<div class="sect-h">Linked records across tables</div>'+blk('Deposit',d.deposit)+blk('Payments',d.payments)+blk('Flexport',d.flexport);
     var masterH=poMasterPanel(po), shipH=poShipPanel(po);
-    var tabs=[['pay','PAYMENTS',p.pay,p.ex.pay],['dates','DATES',p.dates,p.ex.dates],['client','CLIENT/FBA',p.client,p.ex.client],['oplan','ORDER PLAN',oplanH,(p.ex.oplan||0)+erpN],['shipments','SHIPMENTS',shipH,0],['masterdata','MASTER DATA',masterH,0],['landed','LANDED COSTS',p.landed,p.ex.landed],['timeline','TIMELINE',timelineH,p.ex.timeline],['linked','LINKED RECORDS',linkedH,0]];
+    var docsH=docsPanel(po,d);
+    var tabs=[['pay','PAYMENTS',p.pay,p.ex.pay],['dates','DATES',p.dates,p.ex.dates],['client','CLIENT/FBA',p.client,p.ex.client],['oplan','ORDER PLAN',oplanH,(p.ex.oplan||0)+erpN],['shipments','SHIPMENTS',shipH,0],['documents','DOCUMENTS',docsH,0],['masterdata','MASTER DATA',masterH,0],['landed','LANDED COSTS',p.landed,p.ex.landed],['timeline','TIMELINE',timelineH,p.ex.timeline],['linked','LINKED RECORDS',linkedH,0]];
     function badge(n){ return n>0?' <span class="ex-badge" title="'+n+' exception'+(n>1?'s':'')+' / action'+(n>1?'s':'')+'">'+n+'</span>':''; }
     var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab potab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'" data-po="'+esc(po)+'">'+t[1]+badge(t[3])+'</button>';}).join('')+'</div>';
     var panels=tabs.map(function(t,ti){return '<div class="potab-panel" data-pt="'+t[0]+'"'+(ti===0?'':' style="display:none"')+'>'+t[2]+'</div>';}).join('');
@@ -4433,7 +4453,7 @@
   window.writeHash=writeHash; // exposed so the core artifact's DEMAND/REPORTS sub-tabs can sync the URL
   // PO detail sub-tabs are deep-linkable: #/supply/purchase-orders/<slug>/<PO> (e.g. .../payments/PO-… ,
   // .../dates/PO-…). Map the internal potab keys to URL-friendly slugs both ways.
-  var POTAB_SLUG={pay:'payments',dates:'dates',client:'client',oplan:'order-plan',shipments:'shipments',masterdata:'master-data',landed:'landed',timeline:'timeline',linked:'linked'};
+  var POTAB_SLUG={pay:'payments',dates:'dates',client:'client',oplan:'order-plan',shipments:'shipments',documents:'documents',masterdata:'master-data',landed:'landed',timeline:'timeline',linked:'linked'};
   var POTAB_FROM_SLUG={}; Object.keys(POTAB_SLUG).forEach(function(k){POTAB_FROM_SLUG[POTAB_SLUG[k]]=k;});
   function writePoTabHash(po,tab){ if(!po)return; writeHash(['supply','purchase-orders',POTAB_SLUG[tab]||tab,po]); }
   // Friendly top-level view URLs: planning→#/demand/<sub>, exec→#/reports/<sub>, others as-is.

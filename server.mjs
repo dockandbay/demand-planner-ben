@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.258';
+const APP_VERSION = 'v25.259';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2658,6 +2658,24 @@ app.post('/api/supply/portal-attachment-remove', async (req, res) => {
   try { const r = await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1 AND coalesce(category,'')<>'client'`, [id]); res.json({ ok: true, deleted: r.rowCount }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Admin PO ▸ DOCUMENTS tab: delete ANY document for a PO (incl. client/FBA docs — admin-managed here).
+app.post('/api/supply/po-doc-delete', async (req, res) => {
+  const id = req.body && req.body.id;
+  if (!id) return res.status(400).json({ error: 'id required' });
+  try { const r = await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1`, [id]); res.json({ ok: true, deleted: r.rowCount }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Admin PO ▸ DOCUMENTS tab: upload a document against a PO (held in the DB, like all other uploads).
+app.post('/api/supply/po-doc-upload', async (req, res) => {
+  const b = req.body || {};
+  if (!b.po || !b.data_base64) return res.status(400).json({ error: 'po and data_base64 required' });
+  try {
+    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, uploaded_by, category)
+      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`, [b.po, b.filename || 'document', b.mime || 'application/octet-stream', buf.length, buf, b.uploaded_by || 'admin', b.category || 'document']);
+    res.json({ id: r.rows[0].id, byte_size: buf.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.post('/api/supply/portal-submit', async (req, res) => {
   const b = req.body || {}; const sid = b.supplier_id || null, by = b.submitted_by || 'portal';
   if (!b.po) return res.status(400).json({ error: 'po required' });
@@ -3674,7 +3692,8 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
       // supplier-portal: latest submitted invoice value (+ id, status, doc) and all uploaded invoice docs
       pool.query(`SELECT id, value, status, submitted_by, to_char(submitted_at,'YYYY-MM-DD') submitted_at, attachment_id
                   FROM planner.supplier_submissions WHERE po=$1 AND kind='invoice_value' ORDER BY id DESC LIMIT 1`, [po]).catch(() => ({ rows: [] })),
-      pool.query(`SELECT id, filename, coalesce(category,'invoice') category FROM planner.portal_attachments WHERE po=$1 ORDER BY uploaded_at DESC`, [po]).catch(() => ({ rows: [] })),
+      pool.query(`SELECT id, filename, coalesce(category,'invoice') category, coalesce(uploaded_by,'') uploaded_by, byte_size,
+                    to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments WHERE po=$1 ORDER BY uploaded_at DESC`, [po]).catch(() => ({ rows: [] })),
       // PO PLAN Timeline: notes (supplier + internal) + submission status
       pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
                     to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read
@@ -3706,6 +3725,7 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
       sup_invoice: supInv.rows[0] || null,
       sup_docs: supDocs.rows.filter(x => x.category !== 'client'),
       client_docs: supDocs.rows.filter(x => x.category === 'client'),
+      all_docs: supDocs.rows,   // every document held for this PO (all categories) — PO ▸ DOCUMENTS tab
       notes: notes.rows, subs: subs.rows, line_costs: lc,
       sup_completion: supComp.rows[0] || null, crossdock_shipped: xdShip.rows, additional_costs: addCosts.rows,
       erp_complete: !!(poMeta.rows[0] && poMeta.rows[0].is_complete) });

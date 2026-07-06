@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.259 - PO detail: new DOCUMENTS tab (list / download / delete / upload)
+
+Added a DOCUMENTS sub-tab to the admin PO detail panel (SUPPLY ▸ PURCHASE ORDERS) showing every file held for
+that PO across all categories (invoices, supplier uploads, client/FBA docs) — filename, type, uploaded
+date/by, size — with download + delete, plus an admin upload (all held in planner.portal_attachments, bytea).
+Confirmed all uploads incl. the portal "upload invoice" already persist to the DB. New endpoints:
+po-doc-delete (deletes any doc incl. client), po-doc-upload; PO-detail payload now returns all_docs.
+
 ## v25.258 - Supplier portal mobile: MANAGE button → "M"
 
 On mobile (≤640px) the Purchase Orders MANAGE button shows a compact "M" (badge still shows), and the pinned
