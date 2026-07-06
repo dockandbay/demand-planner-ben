@@ -2328,12 +2328,14 @@
     // PO-search tokens — ≥3 chars (the pivot caps PO columns, so a broad match is bounded). The box searches
     // the PO reference as a substring across ALL statuses (overrides the status/country filter).
     function poToks(){ return String(st.poq||'').split(/[\s,]+/).map(nrm).filter(function(t){return t.length>=3;}); }
-    function curLines(){ var allC=(st.countries.size===0||st.countries.size===countries.length), pt=poToks(), poqOn=!!String(st.poq||'').trim(); return lines.filter(function(l){
+    // skipCat=true → ignore the Category filter. Category is a PRODUCT (row) filter, not a PO filter: it must
+    // decide which SKU rows show, NOT which POs (columns) appear. So PO columns are built from curLines(true).
+    function curLines(skipCat){ var allC=(st.countries.size===0||st.countries.size===countries.length), pt=poToks(), poqOn=!!String(st.poq||'').trim(); return lines.filter(function(l){
       if(st.focus){ if(!l.starred || /complete/i.test(l.status||''))return false; }   // Focus = starred + active only (overrides status / PO box)
       else if(poqOn){ if(!pt.length)return false;   // typed a PO search but under 3 chars → no results (don't fall back to showing everything)
         if(!pt.some(function(t){return nrm(l.po).indexOf(t)>=0;}))return false; }
       else { if(!st.statuses.has(l.status))return false; if(!(allC||st.countries.has(l.country)))return false; }
-      return (st.prod==='All'||l.prod_no===st.prod)&&(st.batch==='All'||l.batch_id===st.batch)&&(st.supplier==='All'||l.supplier_name===st.supplier)&&(st.cat==='All'||l.category===st.cat)&&(st.rw==='All'||skuRW[l.sku]===st.rw)&&(!st.partials||isUnapprovedPartial(l))&&(!st.erpdiff||erpDiff(l))&&(!st.suprisk||lineSupRisk(l))&&(!st.disc||lineDisc(l))&&(!nrm(st.q)||nrm(l.sku).indexOf(nrm(st.q))>=0); }); }
+      return (st.prod==='All'||l.prod_no===st.prod)&&(st.batch==='All'||l.batch_id===st.batch)&&(st.supplier==='All'||l.supplier_name===st.supplier)&&(skipCat||st.cat==='All'||l.category===st.cat)&&(st.rw==='All'||skuRW[l.sku]===st.rw)&&(!st.partials||isUnapprovedPartial(l))&&(!st.erpdiff||erpDiff(l))&&(!st.suprisk||lineSupRisk(l))&&(!st.disc||lineDisc(l))&&(!nrm(st.q)||nrm(l.sku).indexOf(nrm(st.q))>=0); }); }
     function rowsFor(cl){ var set={},list=[]; cl.forEach(function(l){if(!set[l.sku]){set[l.sku]=1;list.push(l.sku);}});
       function addMaster(reqCat){ skuMaster.forEach(function(s){ if(set[s.sku])return;
         if(reqCat&&s.category!==st.cat)return; if(st.cat!=='All'&&s.category!==st.cat)return;
@@ -2356,7 +2358,7 @@
       var dn=document.getElementById('op-disc-n'); if(dn)dn.textContent=dc?('('+dc+')'):''; }
     var _opShowAllPos=false;
     function viewReset(){ _opShowAllPos=false; view(); }   // any filter/search change re-caps the PO columns
-    function view(){ var cl=curLines(); document.getElementById('op-grid').innerHTML=pivot(cl,rowsFor(cl),skuCat,plcMap,skuAttr,skuRW,_opShowAllPos); bindQty(); bindUploads(); bindApprove(); bindConfirm(); bindPoLinks(); updateActionCounts();
+    function view(){ var cl=curLines(); var poCl=curLines(true); document.getElementById('op-grid').innerHTML=pivot(poCl,rowsFor(cl),skuCat,plcMap,skuAttr,skuRW,_opShowAllPos); bindQty(); bindUploads(); bindApprove(); bindConfirm(); bindPoLinks(); updateActionCounts();
       var spa=document.querySelector('#op-grid .op-showall-pos'); if(spa)spa.onclick=function(){ _opShowAllPos=true; view(); }; }
     // PO column header → open that PO in PURCHASE ORDERS with its ORDER PLAN tab expanded
     function bindPoLinks(){ document.querySelectorAll('#op-grid .op-po-link').forEach(function(b){ b.onclick=function(){ gotoPO(b.dataset.po,'oplan'); }; }); }
