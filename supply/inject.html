@@ -1923,6 +1923,7 @@
     return '<div class="sect-h">Order plan — agree the final cost price per line '
       +'<button class="lnk-btn op-goto" data-po="'+esc(po)+'" style="margin-left:8px" title="open the full ORDER PLAN filtered to this PO">↗ open in full order plan</button>'
       +opBtns
+      +'<span class="op-cin7-msg" style="margin-left:8px;font-size:11px"></span>'
       +'<div class="mut tiny" style="font-weight:400">supplier prices &amp; amendments flow in from the portal; ⚠ = differs from estimate / qty amended · <b>Accept</b> confirms a change · set a final price to override'+(editing?' · <b style="color:#166534">editing quantities — change values, add SKUs below, then Save</b>':'')+'</div></div>'
       +erpDevBlock
       +banner
@@ -2164,7 +2165,9 @@
       var orig=b.textContent; b.disabled=true; b.textContent='Sending…';
       fetch('/api/supply/po/'+encodeURIComponent(p)+'/cin7-lines',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({completion_date:(poBy[p]||{}).checkin||''})}).then(function(r){return r.json();}).then(function(j){
         if(j&&j.error){ b.disabled=false; b.textContent=orig; alert('Cin7: '+j.error); return; }
-        b.textContent='✓ Pushed ('+(j.lines||0)+' lines)'; var vt=(j.validation&&j.validation.checked)?(j.validation.aligned?' ✓ verified':' ⚠ check Cin7'):''; if(vt)b.textContent+=vt; invalidateDerived(); delete cache['purchase-orders'];
+        b.textContent='✓ Pushed ('+(j.lines||0)+' lines)'; b.disabled=false;
+        var m=document.querySelector('#podet-'+i+' .op-cin7-msg'); if(m)m.innerHTML='<b style="color:#166534">Cin7 updated — '+(j.lines||0)+' lines</b>'+cin7ValMsg(j.validation);
+        invalidateDerived(); delete cache['purchase-orders'];
       }).catch(function(e){ b.disabled=false; b.textContent=orig; alert('Failed: '+(e.message||e)); }); }; });
     document.querySelectorAll('#podet-'+i+' .erp-up-dates').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po); }; });
     // CLIENT tab label downloads — crossdock barcodes (same as portal) + SHIPS WITH SUPPLIER master label
