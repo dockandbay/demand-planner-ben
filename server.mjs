@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.242';
+const APP_VERSION = 'v25.243';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2812,6 +2812,29 @@ app.post('/api/supply/manufacturing-accept', async (req, res) => {
       VALUES ($1, true, $2, now()) ON CONFLICT (component_sku) DO UPDATE SET accepted=true, accepted_by=$2, accepted_at=now()`, [b.component_sku, b.accepted_by || 'PO PLAN']);
     else await pool.query(`DELETE FROM planner.manufacturing_accept WHERE component_sku=$1`, [b.component_sku]);
     res.json({ ok: true, component_sku: b.component_sku, accepted: on });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// CONFIG ▸ Manufacturing BOM — upsert a parent→component row (qty per finished unit). Add or edit.
+app.post('/api/supply/manufacturing-bom-save', async (req, res) => {
+  const b = req.body || {};
+  const parent = String(b.parent_sku || '').trim(), comp = String(b.component_sku || '').trim();
+  const qty = Number(b.qty);
+  if (!parent || !comp) return res.status(400).json({ error: 'parent_sku and component_sku required' });
+  if (!isFinite(qty) || qty <= 0) return res.status(400).json({ error: 'qty must be a positive number' });
+  try {
+    await pool.query(`INSERT INTO planner.manufacturing_bom (parent_sku, component_sku, qty, updated_at)
+      VALUES ($1,$2,$3, now()) ON CONFLICT (parent_sku, component_sku) DO UPDATE SET qty=$3, updated_at=now()`, [parent, comp, qty]);
+    res.json({ ok: true, parent_sku: parent, component_sku: comp, qty });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// CONFIG ▸ Manufacturing BOM — delete a parent→component row.
+app.post('/api/supply/manufacturing-bom-delete', async (req, res) => {
+  const b = req.body || {};
+  const parent = String(b.parent_sku || '').trim(), comp = String(b.component_sku || '').trim();
+  if (!parent || !comp) return res.status(400).json({ error: 'parent_sku and component_sku required' });
+  try {
+    await pool.query(`DELETE FROM planner.manufacturing_bom WHERE parent_sku=$1 AND component_sku=$2`, [parent, comp]);
+    res.json({ ok: true, parent_sku: parent, component_sku: comp });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Toggle a shipment's ESCALATED status (supplier portal or admin grid). Upserts the shipment row if needed.

@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.243 - CONFIG ▸ Manufacturing BOM is now editable (add / edit qty + save / delete)
+
+The Manufacturing BOM config tab is no longer read-only. Per bundle you can edit a component's qty/unit
+and Save, Delete a component row, or Add a new component; a "New bundle" box creates a parent+first
+component. Backed by two new endpoints — POST /api/supply/manufacturing-bom-save (upsert) and
+/api/supply/manufacturing-bom-delete — writing planner.manufacturing_bom. No schema change.
+NOTE for prod: if a future Airtable→Supabase sync feeds manufacturing_bom, decide authority (app vs
+Airtable) so in-app edits aren't overwritten.
+
 ## v25.242 - Manufacturing demand = open POs only (exclude complete/delivered/shipping)
 
 Manufacturing bundle DEMAND now counts only finished-product POs still needing assembly — POs with a
