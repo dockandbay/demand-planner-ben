@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.237 - PURCHASE ORDERS: Branch filter
+
+Added a Branch dropdown filter to the PURCHASE ORDERS grid (next to Supplier), filtering POs by their branch.
+
 ## v25.236 - Manufacturing tab: demand-vs-supply matching + accept tick
 
 Reworked to Ben's model: finished-bundle demand (parent SKU qty on finished-product POs) × BOM = the component

@@ -1080,8 +1080,8 @@
     var CFLAG={UK:'🇬🇧',US:'🇺🇸',AU:'🇦🇺',EU:'🇪🇺',CA:'🇨🇦',DIRECT:'📦'};
     var GRP=[['none','None'],['production','Production'],['shipment','Master shipment']];
     // persist filters across edit reloads; reset to a clean view only when navigating to a specific PO
-    if(_pendingPO){ _poState={f:'all',q:_pendingPO,act:{},ctry:{},grp:'shipment',sup:'',prod:'',batch:'',recent:false}; }   // seed the search with the PO # so a single PO loads regardless of status/recency (e.g. a years-old completed PO from an aged-payment action)
-    else if(!_poState){ _poState={f:'in_progress',q:'',act:{},ctry:{},grp:'shipment',sup:'',prod:'',batch:''}; }
+    if(_pendingPO){ _poState={f:'all',q:_pendingPO,act:{},ctry:{},grp:'shipment',sup:'',prod:'',batch:'',branch:'',recent:false}; }   // seed the search with the PO # so a single PO loads regardless of status/recency (e.g. a years-old completed PO from an aged-payment action)
+    else if(!_poState){ _poState={f:'in_progress',q:'',act:{},ctry:{},grp:'shipment',sup:'',prod:'',batch:'',branch:''}; }
     if(_poState.prod==null)_poState.prod=''; if(_poState.batch==null)_poState.batch='';
     if(_poState.recent==null)_poState.recent=true;   // completed POs default to last 12 months only (perf)
     if(_poState.focus==null)_poState.focus=false;   // ⭐ Focus filter (starred + active only)
@@ -1100,6 +1100,7 @@
     // distinct non-empty values for a column (for the Production # / Batch filter dropdowns)
     function distinct(key){ var s={}; rows.forEach(function(r){ var v=r[key]; if(v!=null&&String(v).trim()!=='')s[String(v)]=true; }); return Object.keys(s).sort(function(a,b){return b.localeCompare(a,undefined,{numeric:true});}); }   // descending (newest PROD#/Batch first)
     var _prods=distinct('prod_no'), _batches=distinct('batch_id');
+    var _branches=Array.from(new Set(rows.map(function(r){return r.branch;}).filter(function(v){return v&&String(v).trim();}))).sort();   // A→Z branch options
     function optList(arr,sel){ return arr.map(function(v){return '<option'+(String(v)===String(sel)?' selected':'')+'>'+esc(v)+'</option>';}).join(''); }
     // a filter <select> with a non-default value is highlighted black/white so active filters stand out
     var SEL_ON=';background:#0f172a;color:#fff;border-color:#0f172a;font-weight:700';
@@ -1114,6 +1115,7 @@
         return '<span style="margin-left:auto"><button class="save-btn" id="po-new" style="'+lb+'margin-right:8px">+ New PO</button><button class="save-btn" id="po-upload" style="'+lb+'margin-right:8px">⬆ Upload POs</button><button class="save-btn" id="po-csv" style="'+lb+'margin-right:8px">⬇ CSV for Fulfil</button><button class="save-btn" id="po-cin7-dates" style="'+lb+'" title="push the planner completion date to Cin7 EstimatedDeliveryDate for every ACTIVE PO whose date differs from Cin7 — complete POs are skipped (live write)">📅 Sync Cin7 dates</button></span></div>'; })()
       +'<div class="bar" id="po-ctry"><span class="pill-lbl">Ship to</span>'+CTRYP.map(function(a){return '<span class="pill'+(state.ctry[a[0]]?' active':'')+'" data-c="'+a[0]+'">'+(CFLAG[a[0]]?CFLAG[a[0]]+' ':'')+a[1]+' ('+ctryCount(a[0])+')</span>';}).join('')
       +'<span class="pill-lbl" style="margin-left:14px">Supplier</span><select class="flt" id="po-sup" style="width:180px;max-width:180px;cursor:pointer;text-overflow:ellipsis'+(state.sup?SEL_ON:'')+'"><option value="">All suppliers</option>'+(supplierList||[]).slice().sort().map(function(s){return '<option'+(s===state.sup?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select>'
+      +'<span class="pill-lbl" style="margin-left:14px">Branch</span><select class="flt" id="po-branch" style="width:auto;max-width:150px;cursor:pointer;text-overflow:ellipsis'+(state.branch?SEL_ON:'')+'"><option value="">All branches</option>'+optList(_branches,state.branch)+'</select>'
       +'<span class="pill-lbl" style="margin-left:14px">Production</span><select class="flt" id="po-prod" style="width:62px;cursor:pointer;text-overflow:ellipsis'+(state.prod?SEL_ON:'')+'"><option value="">All</option>'+optList(_prods,state.prod)+'</select>'
       +'<span class="pill-lbl" style="margin-left:10px">Batch</span><select class="flt" id="po-batch" style="width:94px;cursor:pointer;text-overflow:ellipsis'+(state.batch?SEL_ON:'')+'"><option value="">All</option>'+optList(_batches,state.batch)+'</select></div>'
       +'<div class="bar" id="po-act"><span class="pill po-actall" data-aa="1" style="background:#dc2626;color:#fff;border:1px solid #991b1b;font-weight:700" title="show only POs that have one or more open action items (the red badges)">ACTION ITEMS ('+actItemsCount()+')</span>'
@@ -1137,6 +1139,7 @@
       for(var k in state.act){ if(state.act[k] && !PO_ACTCOND[k](r))return false; }
       if(anyCtry() && !state.ctry[r.country])return false;   // country pills: OR within, AND with the rest
       if(state.sup && r.supplier_name!==state.sup)return false;
+      if(state.branch && String(r.branch)!==state.branch)return false;
       if(state.prod && String(r.prod_no)!==state.prod)return false;
       if(state.batch && String(r.batch_id)!==state.batch)return false;
       return true; }); }
@@ -1236,6 +1239,7 @@
     var pgrp=document.getElementById('po-grp'); if(pgrp)pgrp.onchange=function(){state.grp=this.value;view();};
     c.querySelectorAll('#po-ctry .pill').forEach(function(p){p.onclick=function(){var k=p.dataset.c;state.ctry[k]=!state.ctry[k];p.classList.toggle('active',state.ctry[k]);view();};});
     var psup=document.getElementById('po-sup'); if(psup)psup.onchange=function(){state.sup=this.value;selHi(this,!!this.value);view();};
+    var pbr=document.getElementById('po-branch'); if(pbr)pbr.onchange=function(){state.branch=this.value;selHi(this,!!this.value);view();};
     var pprod=document.getElementById('po-prod'); if(pprod)pprod.onchange=function(){state.prod=this.value;selHi(this,!!this.value);view();};
     var pbatch=document.getElementById('po-batch'); if(pbatch)pbatch.onchange=function(){state.batch=this.value;selHi(this,!!this.value);view();};
     document.getElementById('sup-search').oninput=debounce(function(){state.q=this.value;_poShowAll=false;view();},350);
