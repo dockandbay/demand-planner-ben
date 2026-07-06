@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.249 - Manufacturing (b): Open MFG orders column no longer clipped (table sizes to content)
+
+Force the (b) table to width:max-content so the "Open MFG orders" header + rows get their full width
+(scrolls within the panel if the total exceeds it). Supersedes the min-width approach in v25.248.
+
 ## v25.248 - Manufacturing (b): widen the "Open MFG orders" column (no longer cut off)
 
 Gave the Open MFG orders column a min-width and kept each PO ×qty on one line; widened the (b) table so
