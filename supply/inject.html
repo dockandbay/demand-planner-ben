@@ -2359,6 +2359,7 @@
     var _opShowAllPos=false;
     function viewReset(){ _opShowAllPos=false; view(); }   // any filter/search change re-caps the PO columns
     function view(){ var cl=curLines(); var poCl=curLines(true); document.getElementById('op-grid').innerHTML=pivot(poCl,rowsFor(cl),skuCat,plcMap,skuAttr,skuRW,_opShowAllPos); bindQty(); bindUploads(); bindApprove(); bindConfirm(); bindPoLinks(); updateActionCounts();
+      document.querySelectorAll('#op-grid .op-plan').forEach(function(b){ b.onclick=function(){ var sku=b.dataset.sku; if(window.open_){ try{ window.open_(sku); var ov=document.getElementById('ov'); if(ov)ov.style.zIndex='300000'; }catch(e){ alert('Could not open the plan for '+sku); } } else { alert('Open the BUY tab once, then use PLAN.'); } }; });
       var spa=document.querySelector('#op-grid .op-showall-pos'); if(spa)spa.onclick=function(){ _opShowAllPos=true; view(); }; }
     // PO column header → open that PO in PURCHASE ORDERS with its ORDER PLAN tab expanded
     function bindPoLinks(){ document.querySelectorAll('#op-grid .op-po-link').forEach(function(b){ b.onclick=function(){ gotoPO(b.dataset.po,'oplan'); }; }); }
@@ -2559,7 +2560,7 @@
             if(cc.dca) badge+=' <span class="tool-badge bg-green" title="discontinue approved">d✓</span>';
             else { if(!tdc)tdc=' class="pcell"'; badge+=' <button class="pbtn opapprove-disc" data-ap="'+esc(po+'|'+sku)+'" title="arrives '+fd(arr)+' after discontinue '+fd(dd)+' — review &amp; approve" style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;white-space:nowrap">d ⚠</button>'; } } }
         tds+='<td'+tdc+' style="min-width:'+POW+';width:'+POW+';text-align:center"><input class="qtycell'+(q?'':' z')+'" data-po="'+esc(po)+'" data-sku="'+esc(sku)+'" data-erp="'+eq+'" value="'+(q||'')+'">'+badge+'</td>';});
-      h+='<tr><td class="l" style="'+fzc('sku','#fff',2)+'">'+esc(sku)+'</td>'
+      h+='<tr><td class="l" style="'+fzc('sku','#fff',2)+'"><button class="op-plan" data-sku="'+esc(sku)+'" title="show the buy plan for this SKU (pick country in the popup)" style="font-size:8px;font-weight:700;padding:0 4px;margin-right:5px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer;vertical-align:middle">PLAN</button>'+esc(sku)+'</td>'
         +'<td class="l" style="'+fzc('rw','#fff',2)+'"><span class="tiny">'+esc(skuRW[sku]||'')+'</span></td>'
         +'<td style="'+fzc('cq','#fff',2)+';text-align:right"><span class="tiny">'+(a.cq?esc(a.cq):'')+'</span></td>'
         +'<td class="l" style="'+fzc('sup','#fff',2)+';overflow:hidden;text-overflow:ellipsis" title="allowed suppliers (supplier_multiple_all): '+esc(a.sm||'—')+(a.sup?' · main: '+esc(a.sup):'')+'"><span class="tiny">'+esc(a.sm||a.sup||'')+'</span></td>'
