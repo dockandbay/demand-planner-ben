@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.255 - FOB shipment-plan cards: editable production end date (submit for approval) + PO timeline
+
+The portal Shipment Plan FOB cards are no longer display-only. Added: (1) a Production end date field the
+supplier submits for Dock & Bay approval — reuses the existing completion_date submission flow (applies to
+end_production_overide on approval), with awaiting/approved/rejected status; (2) a Timeline of notes on the
+purchase order (FOB has no shipment, so notes attach to the PO) — reuses the PO-notes store/endpoints. No
+schema change or new endpoints (reuses portal submit + note).
+
 ## v25.254 - Supplier portal Shipment Plan now shows open FOB orders (display-only)
 
 FOB orders (no shipment to us — collected at the factory / delivered to a nominated forwarder) now appear in

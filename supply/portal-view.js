@@ -665,6 +665,9 @@
       var rows=deps.filter(function(d){return d.is_deposit;}).map(function(d){
         return '<tr><td class="l">'+esc(d.reference||'—')+'</td><td style="text-align:right">$'+units(d.amount)+'</td><td class="l">'+(d.date_paid?esc(fd(d.date_paid)):'<span class="mut">unpaid</span>')+'</td><td style="text-align:right">$'+units(d.deposit_used||0)+'</td><td style="text-align:right">$'+units(d.deposit_remaining||0)+'</td></tr>'; }).join('');
       return cards+'<div class="tw"><table><thead><tr><th class="l">Deposit reference</th><th style="text-align:right">Amount</th><th class="l">Paid</th><th style="text-align:right">Drawn down</th><th style="text-align:right">Remaining</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5" class="l mut">No deposits for this supplier.</td></tr>')+'</tbody></table></div>'; }
+          // FOB card timeline = notes on the PO itself (FOB has no shipment). Reuses the PO-notes store.
+          function fobTLHtml(po){ var nts=(_ppData.notesByPo&&_ppData.notesByPo[po])||[];
+            return nts.length?nts.map(function(n){ return '<div class="tiny" style="margin:2px 0"><span class="mut">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span> — '+esc(n.body)+'</div>'; }).join(''):'<div class="mut tiny">No timeline entries yet.</div>'; }
           function ppShipmentPlan(rows){ rows=rows||[];
             if(!rows.length)return '<div class="count">No shipments for your orders yet.</div>';
             // a prominent "label / big value" cell for the dates & Flexport strip
@@ -673,20 +676,34 @@
               var members=s.members.length?'<table style="font-size:11px;width:auto;margin-top:4px"><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th>Est. pallets</th><th class="l">Client</th></tr></thead><tbody>'
                 +s.members.map(function(m){return '<tr><td class="l">'+esc(m.po)+(m.is_master?' <span class="tool-badge bg-green" style="font-size:9px">★ master</span>':'')+'</td><td class="l">'+esc(m.supplier||'')+'</td><td style="text-align:right">'+esc(m.pallets)+'</td><td class="l">'+(m.client?esc(m.client):'<span class="mut">—</span>')+'</td></tr>';}).join('')
                 +'<tr style="font-weight:700;border-top:1px solid #ccc"><td class="l">Total</td><td></td><td style="text-align:right">'+esc(s.total_pallets)+'</td><td></td></tr></tbody></table>':'<span class="mut tiny">no POs on this shipment</span>';
-              // FOB orders — no shipment to us; display-only (collected at factory / delivered to a forwarder)
+              // FOB orders — no shipment to us (collected at factory / delivered to a forwarder). Editable:
+              // production end date (submitted for D&B approval, like elsewhere) + a timeline of PO notes.
               if(s.is_fob){
+                var po=s.master_po;
+                var subs=(_ppData.subsByPo&&_ppData.subsByPo[po])||[];
+                var cdq=subs.filter(function(x){return x.kind==='completion_date';}), cd=cdq.length?cdq[cdq.length-1]:null;
+                var cdStatus=cd?(cd.status==='applied'?'<span class="tool-badge bg-green">approved</span>':cd.status==='dismissed'?'<span class="tool-badge bg-neutral">rejected — please resubmit</span>':'<span class="tool-badge bg-amber">awaiting Dock &amp; Bay approval</span>'):'';
+                var cdVal=(cd&&cd.status!=='dismissed')?cd.value:'';
                 var fobStrip='<div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:8px;padding:9px 12px;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:7px">'
                   +spCell('Type','FOB — collection')
                   +spCell('Status', esc(s.status||''))
-                  +spCell('Ready (prod. end)', s.prod_end?esc(fd(s.prod_end)):'')
+                  +spCell('Current prod. end', s.prod_end?esc(fd(s.prod_end)):'')
                   +(s.master_client?spCell('Client', esc(s.master_client)):'')
                   +(s.master_deadline?spCell('Client deadline', esc(fd(s.master_deadline))):'')
                   +'</div>';
+                var prodEndEdit='<div style="margin-top:10px;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">'
+                  +'<label class="tiny">Production end date <span class="mut">(submit for Dock &amp; Bay approval)</span><br>'
+                  +'<input type="date" class="sp-fob-cd" data-po="'+esc(po)+'" value="'+esc(cdVal)+'" title="pick your production end date — submitted for Dock &amp; Bay to approve" style="width:150px;text-align:left;font:inherit;font-size:12px;padding:4px 6px;border:1px solid #93c5fd;border-radius:4px;background:#eff6ff;color:#1d4ed8"></label>'
+                  +(cdStatus?'<div class="tiny">'+cdStatus+(cd&&cd.status==='pending'?' — '+esc(fd(cd.value)):'')+'</div>':'')+'</div>';
+                var timeline='<div style="margin-top:10px;border-top:1px solid #f1f1f1;padding-top:8px">'
+                  +'<div style="font-weight:600;font-size:12px;margin-bottom:4px">Timeline <span class="mut tiny">(notes on this purchase order)</span></div>'
+                  +'<div class="sp-fob-tl" data-po="'+esc(po)+'">'+fobTLHtml(po)+'</div>'
+                  +'<div style="display:flex;gap:6px;align-items:flex-start;margin-top:6px"><textarea class="fci sp-fob-note-body" data-po="'+esc(po)+'" rows="2" placeholder="Add a note to the timeline… (multiple lines OK)" style="flex:1;max-width:560px;min-height:44px;text-align:left;resize:vertical;line-height:1.4"></textarea><button class="save-btn sp-fob-note-post" data-po="'+esc(po)+'">Post</button></div></div>';
                 return '<div style="border:1px solid #ddd6fe;border-radius:8px;padding:10px 12px;margin-bottom:10px;background:#fff">'
                   +'<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">'
-                  +'<div style="font-weight:700;font-size:15px">'+esc(s.master_po)+'</div>'
+                  +'<div style="font-weight:700;font-size:15px">'+esc(po)+'</div>'
                   +'<span style="background:#ede9fe;color:#6d28d9;border-radius:10px;font-size:10px;font-weight:700;padding:2px 8px">📦 FOB — no shipment</span>'
-                  +'</div>'+fobStrip+'<div style="margin-top:8px">'+members+'</div>'
+                  +'</div>'+fobStrip+'<div style="margin-top:8px">'+members+'</div>'+prodEndEdit+timeline
                   +'<div class="mut tiny" style="margin-top:6px">No shipment to Dock &amp; Bay — collected at your factory or delivered to a nominated forwarder.</div></div>';
               }
               // prominent shipment dates + Flexport details
@@ -847,6 +864,18 @@
               body.querySelectorAll('.pill[data-spf]').forEach(function(p){ p.onclick=function(){ var f=p.dataset.spf;
                 if(f==='active')PORTAL_SP_ACTIVE=!PORTAL_SP_ACTIVE; else if(f==='shipped')PORTAL_SP_SHIPPED=!PORTAL_SP_SHIPPED; else if(f==='esc')PORTAL_SP_ESC=!PORTAL_SP_ESC; _ppShowAllSP=false; renderPP(); }; });
               var sq=body.querySelector('.sp-po-q'); if(sq)sq.oninput=debounce(function(){ PORTAL_SP_PO=sq.value; _ppShowAllSP=false; var f=document.activeElement===sq; renderPP(); if(f){ var n=body.querySelector('.sp-po-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } } },350);
+              // FOB cards: production end date → submit for D&B approval (completion_date, applies to end_production_overide)
+              var _sid=(_ppData&&_ppData.sid)||sid||null;
+              body.querySelectorAll('.sp-fob-cd').forEach(function(inp){ var t;
+                inp.onclick=function(){ try{ if(inp.showPicker)inp.showPicker(); }catch(e){} };
+                inp.onchange=function(){ var v=inp.value; if(!/^\d{4}-\d{2}-\d{2}$/.test(v))return; clearTimeout(t); inp.style.borderColor='#f59e0b';
+                  t=setTimeout(function(){ postJSON(EP.submit,{po:inp.dataset.po,supplier_id:_sid,submitted_by:by,completion_date:v},function(){ inp.style.borderColor='#16a34a';
+                    (_ppData.subsByPo=_ppData.subsByPo||{}); (_ppData.subsByPo[inp.dataset.po]=_ppData.subsByPo[inp.dataset.po]||[]).push({kind:'completion_date',value:v,status:'pending'}); }); },800); }; });
+              // FOB cards: timeline note → PO note (author supplier)
+              body.querySelectorAll('.sp-fob-note-post').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po, ta=body.querySelector('.sp-fob-note-body[data-po="'+(window.CSS&&CSS.escape?CSS.escape(po):po)+'"]'); var v=ta?(ta.value||'').trim():''; if(!v)return; btn.disabled=true;
+                postJSON(EP.note,{po:po,supplier_id:_sid,body:v,author_kind:'supplier',author_email:by},function(){ btn.disabled=false;
+                  (_ppData.notesByPo=_ppData.notesByPo||{}); (_ppData.notesByPo[po]=_ppData.notesByPo[po]||[]).push({po:po,author_kind:'supplier',body:v,created_at:new Date().toISOString().slice(0,16).replace('T',' ')});
+                  if(ta)ta.value=''; var box=body.querySelector('.sp-fob-tl[data-po="'+(window.CSS&&CSS.escape?CSS.escape(po):po)+'"]'); if(box)box.innerHTML=fobTLHtml(po); }); }; });
               spRender.forEach(function(s){ if(!s.is_fob) ppShipTimeline(s.shipment_ref); }); return; }
             if(PORTAL_TAB==='deposits'){ body.innerHTML=ppDeposits(_ppData.sdep); return; }
             if(PORTAL_TAB==='barcodes'){
