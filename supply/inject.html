@@ -2342,26 +2342,37 @@
       if(!skus.length||!pos.length){ alert('Nothing to export for the current filter.'); return; }
       var qmap={}; cl.forEach(function(l){ var k=l.sku+'|'+l.po; qmap[k]=(qmap[k]||0)+(Number(l.qty)||0); });
       var _lbl=b.textContent; b.disabled=true; b.textContent='Building…';
-      // pull the full PO list to resolve each PO's master shipment + the other POs/suppliers it ships with
-      fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(all){
-        all=Array.isArray(all)?all:[]; var poShip={}, shipGroup={};
-        all.forEach(function(p){ poShip[p.po]={ship:p.shipment||'',sup:p.supplier_name||''}; if(p.shipment){ (shipGroup[p.shipment]=shipGroup[p.shipment]||[]).push({po:p.po,sup:p.supplier_name||''}); } });
-        function others(po){ var s=poShip[po]&&poShip[po].ship; if(!s)return {s:'',g:[]}; return {s:s,g:(shipGroup[s]||[]).filter(function(x){return x.po!==po;})}; }
-        function shipsWith(po){ var o=others(po); if(!o.s||!o.g.length)return ''; var sup=Array.from(new Set(o.g.map(function(x){return x.sup;}).filter(Boolean))); return o.s+(sup.length?' — '+sup.join(', '):''); }
-        function shipmentsWith(po){ var o=others(po); return o.g.map(function(x){return x.po;}).join(', '); }
+      // pull the full PO list + shipments (for master_po) to resolve the shipment hierarchy.
+      Promise.all([
+        fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).catch(function(){return [];}),
+        fetch('/api/supply/shipments').then(function(r){return r.json();}).catch(function(){return {};})
+      ]).then(function(R){
+        var all=Array.isArray(R[0])?R[0]:[]; var ships=(R[1]&&R[1].shipments)||[];
+        var poSup={}, poShipRef={}, shipMasterPo={}, membersByShip={};
+        all.forEach(function(p){ poSup[p.po]=p.supplier_name||''; poShipRef[p.po]=p.shipment||'';
+          if(p.shipment){ (membersByShip[p.shipment]=membersByShip[p.shipment]||[]).push(p.po); } });
+        ships.forEach(function(s){ shipMasterPo[s.shipment_ref]=s.master_po||''; });
+        // "Ships with" — a MEMBER's row: the master shipment it rides on + that shipment's (master's) supplier.
+        function shipsWith(po){ var s=poShipRef[po]; if(!s)return ''; var master=shipMasterPo[s]||''; if(master===po)return '';   // this PO is the shipment's master → not "ships with"
+          var msup=poSup[master]||''; return s+(msup?' — '+msup:''); }
+        // "Shipments with this PO" — a MASTER's row only: the member POs riding on the shipment(s) it masters (+ supplier). Blank for members.
+        function shipmentsWith(po){ var mem=[];
+          Object.keys(shipMasterPo).forEach(function(s){ if(shipMasterPo[s]===po){ (membersByShip[s]||[]).forEach(function(mp){ if(mp!==po)mem.push(mp); }); } });
+          mem=Array.from(new Set(mem));
+          return mem.map(function(mp){ var sup=poSup[mp]; return mp+(sup?' ('+sup+')':''); }).join(', '); }
         var CO_STYLE={UK:1,US:2,AU:3,EU:4};   // solid fills defined in styles.xml
         // 7 left (per-SKU) columns, then one column per PO. PO metadata rows sit under the Country top row.
         var LEFT=7, pad=function(v){ var a=new Array(LEFT-1); for(var i=0;i<a.length;i++)a[i]=''; return [v].concat(a); };
         var grid=[];
         grid.push(pad('Country').concat(pos.map(function(po){ var co=pmeta[po].co||''; var st=CO_STYLE[String(co).toUpperCase()]||0; return st?{v:co,s:st}:co; })));   // row 1: country, colour-coded
         grid.push(pad('PO').concat(pos));
-        grid.push(pad('Ships with').concat(pos.map(function(po){return shipsWith(po);})));                    // master shipment + the other suppliers on it
-        grid.push(pad('Shipments with this PO').concat(pos.map(function(po){return shipmentsWith(po);})));      // the other PO refs on that master shipment
+        grid.push(pad('Ships with').concat(pos.map(function(po){return shipsWith(po);})));                    // (members) master shipment + its supplier
+        grid.push(pad('Shipments with this PO').concat(pos.map(function(po){return shipmentsWith(po);})));      // (masters) member POs + suppliers; blank for non-masters
         grid.push(pad('Production end').concat(pos.map(function(po){return pmeta[po].pe;})));
         grid.push(pad('Client (DTC)').concat(pos.map(function(po){return pmeta[po].client;})));
         grid.push(pad('DTC sales order ref').concat(pos.map(function(po){return pmeta[po].so;})));
         grid.push(pad('Branch').concat(pos.map(function(po){return pmeta[po].branch;})));
-        grid.push(['SKU','EAN','Carton qty','Release window','Product title','Size','Colour'].concat(pos));   // SKU-attribute header (PO numbers repeat as qty columns)
+        grid.push(['SKU','EAN','Carton qty','Release window','Product title','Size','Colour'].concat(pos.map(function(){return 'QTY';})));   // qty-column headers say QTY (PO already labels each column in the PO row)
         skus.forEach(function(sku){ var a=skuAttr[sku]||{};
           grid.push([sku, a.ean||'', a.cq||'', (skuRW[sku]||''), a.title||'', a.size_long||'', a.colour||'']
             .concat(pos.map(function(po){ var q=qmap[sku+'|'+po]; return q?q:''; }))); });

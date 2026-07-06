@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.232 - ORDER PLAN report fixes: shipment hierarchy + supplier + QTY header
+
+- "Shipments with this PO" now populates only for the MASTER PO (lists the member POs with their supplier,
+  e.g. "PO-DILLARDS-3222503002 (Lixin)"); blank for member/non-master POs. Uses shipments.master_po (the
+  master PO often has a blank shipment_ref, so grouping by PO.shipment alone missed it).
+- "Ships with" (member rows) = the master shipment ref + the master supplier.
+- SKU qty-column headers now say "QTY" instead of repeating the PO number (the PO row already labels them).
+
 ## v25.231 - Add size_long to products; ORDER PLAN export Size = long description
 
 Added a size_long column to planner.products (migration 095 + seed from SKU_CHILD-NEW FIELDS.csv, 904 SKUs).
