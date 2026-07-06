@@ -5364,6 +5364,7 @@
       fetch('/api/supply/buyplan-pos',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(p)}).then(function(r){return r.json();}).then(renderPreview).catch(function(e){document.getElementById('bp-result').innerHTML='<div style="color:#dc2626">'+esc(String(e))+'</div>';}); };
     document.getElementById('bp-create').onclick=function(){ var btn=this; var p=payload(true); if(!p.prod_no)return; btn.disabled=true; btn.textContent='Creating…';
       fetch('/api/supply/buyplan-pos',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(p)}).then(function(r){return r.json();}).then(function(d){ if(d.error)throw new Error(d.error);
+        invalidateDerived();   // new POs created → drop cached grids so PURCHASE ORDERS / ORDER PLAN show them on next screen change (no refresh needed)
         close(); if(window.gotoSupplySection)window.gotoSupplySection('order-plan'); setTimeout(function(){alert('Created '+(d.created||0)+' PO(s) for '+p.prod_no+'. Review & adjust in Order Plan, then Upload to push to the ERP.');},250); })
         .catch(function(e){ btn.disabled=false; btn.textContent='Create POs'; alert('Create failed: '+(e.message||e)); }); };
   }
