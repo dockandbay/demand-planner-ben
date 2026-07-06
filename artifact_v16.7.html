@@ -2784,11 +2784,12 @@ return {project:project, getBuyQtys:getBuyQtys, buyplanItems:buyplanItems, rende
   downloadReport:downloadReport, downloadReportCSV:downloadReportCSV, updateDlMenuLabels:updateDlMenuLabels,
   updateTrfHeaders:updateTrfHeaders, getFilteredVis:getFilteredVis,
   BUY_CACHE:BUY_CACHE, D:D, setView:function(v){var was=BP_VIEW;BP_VIEW=(v==='fba')?'fba':'buy';if(BP_VIEW==='fba'&&was!=='fba')BU_SEL='TRFFBA';}, fbaClearAll:fbaClearAll, fbaSelectAll:fbaSelectAll, fbaClearOverrides:fbaClearOverrides, fbaClearTicks:fbaClearTicks, downloadFbaTransfer:downloadFbaTransfer,
+  open_:open_, close_:close_,
   get CUR(){return CUR;}, set CUR(v){CUR=v;}};
 })();
 /* ===== END BUY PLAN ENGINE ===== */
 /* Expose handlers referenced by engine-generated inline markup (e.g. panel market tabs use onclick="swM(...)"). */
-if(typeof window!=='undefined'){window.swM=BP.swM;window.rpc=BP.rpc;window.open_=open_;window.close_=close_;}
+if(typeof window!=='undefined'){window.swM=BP.swM;window.rpc=BP.rpc;window.open_=BP.open_;window.close_=BP.close_;}
 
 // Buy plan scaffold HTML (pills, settings, table, overlay). Injected into #buy-wrap by renderBuyView().
 var BUY_SCAFFOLD=`<div class="wrap">
