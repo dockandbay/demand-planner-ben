@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.245 - Manufacturing: (a) open orders and (b) components sit side by side per bundle
+
+Within each bundle card, section (a) open finished orders + total demand and section (b) component/MFG-order
+coverage now lay out side by side (flex; wraps to stacked on narrow/mobile). No logic change.
+
 ## v25.244 - Manufacturing tab restructured: per-bundle (a) open orders + total, (b) component MFG orders + mismatch
 
 Reworked SUPPLY ▸ PURCHASE ORDERS ▸ Manufacturing around Ben's model. One card per bundle SKU with two
