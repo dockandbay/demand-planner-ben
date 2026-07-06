@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.254 - Supplier portal Shipment Plan now shows open FOB orders (display-only)
+
+FOB orders (no shipment to us — collected at the factory / delivered to a nominated forwarder) now appear in
+the supplier-portal Shipment Plan alongside real shipments. Included: open FOB POs (PRODUCTION/FUTURE; not
+complete/shipped/delivered) where the PO has no shipment_ref AND is either on the Manufacturing branch or a
+destination that isn't a UK/US/EU/AU/CA import warehouse (mirrors the app's isFOBdest rule). Shown as a
+display-only card (📦 FOB — no shipment) with status, ready/production-end date, client & deadline, and the
+PO/pallet members table; no escalate button or timeline (no shipment to track). shipment-plan endpoint now
+appends these FOB entries (is_fob:true). No schema change.
+
 ## v25.253 - SUPPLY ▸ Actions: PRIORITY category + 3-column Type filter
 
 Added a new ⚠ PRIORITY category (PO not in ERP, Shipment escalated, Manufacturing mismatch, Client deadline

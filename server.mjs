@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.253';
+const APP_VERSION = 'v25.254';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1490,8 +1490,34 @@ app.get('/api/supply/:section', async (req, res) => {
             if (!s.master_supplier) s.master_supplier = m.supplier_name;
           });
         }
-        return res.json(Object.keys(byRef).map(k => { const s = byRef[k]; s.total_pallets = Math.round(s.total_pallets * 10) / 10; return s; })
-          .sort((a, b) => (a.departure || '9999').localeCompare(b.departure || '9999') || a.shipment_ref.localeCompare(b.shipment_ref)));
+        const shipEntries = Object.keys(byRef).map(k => { const s = byRef[k]; s.total_pallets = Math.round(s.total_pallets * 10) / 10; return s; });
+        // FOB orders — no shipment to us (collected at the factory / delivered to a nominated forwarder). Show open
+        // ones (PRODUCTION/FUTURE) as display-only entries. FOB = no shipment_ref AND (Manufacturing branch OR a
+        // destination that isn't one of our import warehouses UK/US/EU/AU/CA) — mirrors the app's isFOBdest rule.
+        const fobRows = (await pool.query(`
+          SELECT p.po, coalesce(p.supplier_name,'') supplier_name, coalesce(p.client,'') client, coalesce(p.status,'') status,
+            to_char(p.client_deadline_date,'YYYY-MM-DD') client_deadline,
+            to_char(coalesce(p.end_production_overide, p.start_production + (coalesce(s.production_days,0)||' days')::interval)::date,'YYYY-MM-DD') prod_end,
+            round(coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0)) FROM planner.purchase_order_lines l
+              LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=p.po),0)::numeric,1) pallets
+          FROM planner.purchase_orders p
+          LEFT JOIN planner.suppliers s ON s.id=p.supplier_id
+          LEFT JOIN planner.branches  b ON b.name=p.branch
+          WHERE coalesce(p.shipment_ref,'')=''
+            AND NOT EXISTS (SELECT 1 FROM planner.shipments sh WHERE sh.master_po = p.po)  -- a master PO can have a blank shipment_ref but still be on a shipment
+            AND coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%deliver%' AND coalesce(p.status,'') NOT ILIKE '%ship%'
+            AND ( p.branch ILIKE '%manufactur%' OR upper(coalesce(nullif(p.country_code,''), b.country_code, '')) NOT IN ('UK','US','EU','AU','CA') )
+            AND EXISTS (SELECT 1 FROM planner.purchase_order_lines l WHERE l.po=p.po AND coalesce(l.qty,0)>0)`)).rows;
+        // definitive guard: never show a PO as FOB if it's already represented on a real shipment (as master or member)
+        const onShip = new Set(); shipEntries.forEach(s => { if (s.master_po) onShip.add(s.master_po); (s.members || []).forEach(m => onShip.add(m.po)); });
+        fobRows.forEach(r => { if (onShip.has(r.po)) return; const pallets = Number(r.pallets) || 0; shipEntries.push({
+          shipment_ref: '', is_fob: true, master_po: r.po, mode: 'FOB', carrier: '', carrier_ref: '', flex_id: '',
+          departure: '', landing: '', arrival: '', escalated: false, status: r.status, prod_end: r.prod_end || '',
+          master_client: r.client, master_deadline: r.client_deadline, master_supplier: r.supplier_name,
+          total_pallets: pallets, suppliers: r.supplier_name ? [r.supplier_name] : [],
+          members: [{ po: r.po, supplier: r.supplier_name, pallets, client: r.client, is_master: true }] }); });
+        return res.json(shipEntries
+          .sort((a, b) => (a.departure || '9999').localeCompare(b.departure || '9999') || String(a.master_po).localeCompare(String(b.master_po))));
       }
       case 'shipment-notes':   // ?ref=… → timeline notes for a master shipment
         return res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read

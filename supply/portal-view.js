@@ -673,6 +673,22 @@
               var members=s.members.length?'<table style="font-size:11px;width:auto;margin-top:4px"><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th>Est. pallets</th><th class="l">Client</th></tr></thead><tbody>'
                 +s.members.map(function(m){return '<tr><td class="l">'+esc(m.po)+(m.is_master?' <span class="tool-badge bg-green" style="font-size:9px">★ master</span>':'')+'</td><td class="l">'+esc(m.supplier||'')+'</td><td style="text-align:right">'+esc(m.pallets)+'</td><td class="l">'+(m.client?esc(m.client):'<span class="mut">—</span>')+'</td></tr>';}).join('')
                 +'<tr style="font-weight:700;border-top:1px solid #ccc"><td class="l">Total</td><td></td><td style="text-align:right">'+esc(s.total_pallets)+'</td><td></td></tr></tbody></table>':'<span class="mut tiny">no POs on this shipment</span>';
+              // FOB orders — no shipment to us; display-only (collected at factory / delivered to a forwarder)
+              if(s.is_fob){
+                var fobStrip='<div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:8px;padding:9px 12px;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:7px">'
+                  +spCell('Type','FOB — collection')
+                  +spCell('Status', esc(s.status||''))
+                  +spCell('Ready (prod. end)', s.prod_end?esc(fd(s.prod_end)):'')
+                  +(s.master_client?spCell('Client', esc(s.master_client)):'')
+                  +(s.master_deadline?spCell('Client deadline', esc(fd(s.master_deadline))):'')
+                  +'</div>';
+                return '<div style="border:1px solid #ddd6fe;border-radius:8px;padding:10px 12px;margin-bottom:10px;background:#fff">'
+                  +'<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">'
+                  +'<div style="font-weight:700;font-size:15px">'+esc(s.master_po)+'</div>'
+                  +'<span style="background:#ede9fe;color:#6d28d9;border-radius:10px;font-size:10px;font-weight:700;padding:2px 8px">📦 FOB — no shipment</span>'
+                  +'</div>'+fobStrip+'<div style="margin-top:8px">'+members+'</div>'
+                  +'<div class="mut tiny" style="margin-top:6px">No shipment to Dock &amp; Bay — collected at your factory or delivered to a nominated forwarder.</div></div>';
+              }
               // prominent shipment dates + Flexport details
               var flex=s.flex_id?('<a href="https://app.flexport.com/shipments/'+((String(s.carrier_ref||s.flex_id).match(/\d+/)||[''])[0])+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline">'+esc(s.flex_id)+' ↗</a>'):'';
               var datesStrip='<div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:8px;padding:9px 12px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:7px">'
@@ -823,7 +839,7 @@
                 +'<span class="pill'+(PORTAL_SP_ACTIVE?' active':'')+'" data-spf="active">Still to ship</span>'
                 +'<span class="pill'+(PORTAL_SP_SHIPPED?' active':'')+'" data-spf="shipped">Shipped</span>'
                 +'<span class="pill'+(PORTAL_SP_ESC?' active':'')+'" data-spf="esc" style="'+(PORTAL_SP_ESC?'background:#dc2626;color:#fff;border-color:#dc2626':'color:#dc2626')+'">⚑ Escalated only</span>'
-                +'<span class="mut tiny" style="margin-left:auto">'+(spCapped?spRender.length+' of ':'')+shownSp.length+' of '+allSp.length+' shipments</span></div>';
+                +'<span class="mut tiny" style="margin-left:auto">'+(spCapped?spRender.length+' of ':'')+shownSp.length+' of '+allSp.length+' shipments &amp; FOB collections</span></div>';
               body.innerHTML=fbar+ppShipmentPlan(spRender)
                 +(spCapped?'<div style="margin:8px 0;text-align:center"><button class="save-btn sp-showall">Show all '+shownSp.length+' &darr;</button></div>':'');
               var spsa=body.querySelector('.sp-showall'); if(spsa)spsa.onclick=function(){ _ppShowAllSP=true; renderPP(); };
@@ -831,7 +847,7 @@
               body.querySelectorAll('.pill[data-spf]').forEach(function(p){ p.onclick=function(){ var f=p.dataset.spf;
                 if(f==='active')PORTAL_SP_ACTIVE=!PORTAL_SP_ACTIVE; else if(f==='shipped')PORTAL_SP_SHIPPED=!PORTAL_SP_SHIPPED; else if(f==='esc')PORTAL_SP_ESC=!PORTAL_SP_ESC; _ppShowAllSP=false; renderPP(); }; });
               var sq=body.querySelector('.sp-po-q'); if(sq)sq.oninput=debounce(function(){ PORTAL_SP_PO=sq.value; _ppShowAllSP=false; var f=document.activeElement===sq; renderPP(); if(f){ var n=body.querySelector('.sp-po-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } } },350);
-              spRender.forEach(function(s){ ppShipTimeline(s.shipment_ref); }); return; }
+              spRender.forEach(function(s){ if(!s.is_fob) ppShipTimeline(s.shipment_ref); }); return; }
             if(PORTAL_TAB==='deposits'){ body.innerHTML=ppDeposits(_ppData.sdep); return; }
             if(PORTAL_TAB==='barcodes'){
               // batches on this supplier's POs (distinct batch_id, sorted)
