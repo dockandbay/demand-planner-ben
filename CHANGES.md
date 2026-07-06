@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.253 - SUPPLY ▸ Actions: PRIORITY category + 3-column Type filter
+
+Added a new ⚠ PRIORITY category (PO not in ERP, Shipment escalated, Manufacturing mismatch, Client deadline
+at risk) — it now renders first in both the Type filter and the action-card list. Type filter is now a fixed
+3-column layout (col 1: Priority + Payments, col 2: Dates + Other, col 3: 💡 Recommendations); popover 660px.
+
 ## v25.252 - SUPPLY ▸ Actions: Type filter categorised + 2-column layout
 
 The Type filter dropdown now groups the (many) action types under their categories (Payments, Dates, Other,

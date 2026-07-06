@@ -606,7 +606,9 @@
       try{ var extra=cfUnpaidActions(cf); if(extra.length)rows=extra.concat(rows); }catch(e){}
       actBuild(rows,c);
     }).catch(function(){ actBuild(rows,c); }); }); }
-  var ACT_GROUP={ 'Deposit not paid':'PAYMENTS','Deposit over-assigned':'PAYMENTS','Payment invalid':'PAYMENTS','Payment overdue':'PAYMENTS','Supplier invoice':'PAYMENTS',
+  var ACT_GROUP={ // PRIORITY — the highest-attention exceptions, surfaced first
+    'PO not in ERP':'PRIORITY','Shipment escalated':'PRIORITY','Manufacturing mismatch':'PRIORITY','Client deadline at risk':'PRIORITY',
+    'Deposit not paid':'PAYMENTS','Deposit over-assigned':'PAYMENTS','Payment invalid':'PAYMENTS','Payment overdue':'PAYMENTS','Supplier invoice':'PAYMENTS',
     'Unpaid — last month':'PAYMENTS','Aged payment':'PAYMENTS',
     'Date conflict':'DATES','Production check-in':'DATES','Ship check-in':'DATES','Shipment missing dates':'DATES','Shipment ETA passed':'DATES','Shipment delivered — update PO':'DATES','Awaiting ERP receipt':'DATES','Supplier completion date':'DATES',
     // BI recommendations — advisory (from the forecast/expedite engine), not blocking actions
@@ -639,20 +641,23 @@
       document.querySelectorAll('#act-statbar .stpill').forEach(function(p){p.onclick=function(){st.status=p.dataset.st;st.sev='All';statBar();sevBar();view();};}); }
     function typeLbl(){ return st.types.length?('Type: '+st.types.length):'Type: all'; }
     function sevBar(){ var pl=pool(), nH=pl.filter(function(r){return r.severity==='high';}).length, nA=pl.filter(function(r){return r.severity==='amber';}).length, nL=pl.filter(function(r){return r.severity==='low';}).length;
-      // group the type options by the same categories used for the cards, then flow the groups into 2 columns
-      var GORDER=['PAYMENTS','DATES','OTHER','RECOMMENDATIONS'], GLBL={PAYMENTS:'Payments',DATES:'Dates',OTHER:'Other',RECOMMENDATIONS:'💡 Recommendations'};
+      // group the type options by the same categories used for the cards, then lay the groups into 3 fixed
+      // columns — col 1: Priority + Payments, col 2: Dates + Other, col 3: Recommendations.
+      var GLBL={PRIORITY:'⚠ Priority',PAYMENTS:'Payments',DATES:'Dates',OTHER:'Other',RECOMMENDATIONS:'💡 Recommendations'};
+      var COLS=[['PRIORITY','PAYMENTS'],['DATES','OTHER'],['RECOMMENDATIONS']];
       var byG={}; types.slice().sort().forEach(function(t){ (byG[actGroup(t)]=byG[actGroup(t)]||[]).push(t); });
-      var typeGroupsHtml=GORDER.filter(function(g){return byG[g]&&byG[g].length;}).map(function(g){ var nSel=byG[g].filter(function(t){return st.types.indexOf(t)>=0;}).length;
-        return '<div style="break-inside:avoid;margin-bottom:9px"><div style="display:flex;justify-content:space-between;align-items:center;font-weight:700;font-size:10px;text-transform:uppercase;color:#64748b;letter-spacing:.04em;margin:0 0 3px"><span>'+GLBL[g]+' <span style="font-weight:400;color:#94a3b8">('+byG[g].length+')</span></span><label style="cursor:pointer;font-weight:400;text-transform:none;color:#475569"><input type="checkbox" class="act-typegrp" data-grp="'+g+'"'+(nSel&&nSel===byG[g].length?' checked':'')+'> all</label></div>'
+      function grpBlock(g){ if(!byG[g]||!byG[g].length)return ''; var nSel=byG[g].filter(function(t){return st.types.indexOf(t)>=0;}).length;
+        return '<div style="margin-bottom:9px"><div style="display:flex;justify-content:space-between;align-items:center;font-weight:700;font-size:10px;text-transform:uppercase;color:#64748b;letter-spacing:.04em;margin:0 0 3px"><span>'+GLBL[g]+' <span style="font-weight:400;color:#94a3b8">('+byG[g].length+')</span></span><label style="cursor:pointer;font-weight:400;text-transform:none;color:#475569"><input type="checkbox" class="act-typegrp" data-grp="'+g+'"'+(nSel&&nSel===byG[g].length?' checked':'')+'> all</label></div>'
           +byG[g].map(function(t){return '<label style="display:block;padding:2px 4px;cursor:pointer;font-size:12px;white-space:nowrap"><input type="checkbox" class="act-typechk" data-grp="'+g+'" value="'+esc(t)+'"'+(st.types.indexOf(t)>=0?' checked':'')+'> '+esc(t)+'</label>';}).join('')
-          +'</div>'; }).join('');
+          +'</div>'; }
+      var typeGroupsHtml=COLS.map(function(col){ return '<div style="flex:1 1 0;min-width:0">'+col.map(grpBlock).join('')+'</div>'; }).join('');
       document.getElementById('act-sevbar').innerHTML='<span class="pill-lbl">Severity</span><span class="pill spill'+(st.sev==='All'?' active':'')+'" data-s="All">All ('+pl.length+')</span>'
         +'<span class="pill spill'+(st.sev==='high'?' active':'')+'" data-s="high">High ('+nH+')</span><span class="pill spill'+(st.sev==='amber'?' active':'')+'" data-s="amber">Amber ('+nA+')</span><span class="pill spill'+(st.sev==='low'?' active':'')+'" data-s="low">Low ('+nL+')</span>'
         +'<span class="pill-lbl" style="margin-left:14px">Type</span>'
         +'<span style="position:relative;display:inline-block"><button class="pill'+(st.types.length?' active':'')+'" id="act-typebtn">'+typeLbl()+' ▾</button>'
-        +'<div id="act-typepop" style="display:none;position:absolute;z-index:1000;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 30px rgba(15,23,42,.16);padding:8px 10px;width:460px;max-width:90vw;max-height:360px;overflow:auto">'
+        +'<div id="act-typepop" style="display:none;position:absolute;z-index:1000;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 30px rgba(15,23,42,.16);padding:8px 10px;width:660px;max-width:92vw;max-height:360px;overflow:auto">'
           +'<label style="display:block;padding:4px 4px 6px;font-weight:600;cursor:pointer;border-bottom:1px solid #eef0f2;margin-bottom:6px"><input type="checkbox" id="act-type-all"'+(st.types.length?'':' checked')+'> All types</label>'
-          +'<div style="column-count:2;column-gap:20px">'+typeGroupsHtml+'</div>'
+          +'<div style="display:flex;gap:20px;align-items:flex-start">'+typeGroupsHtml+'</div>'
         +'</div></span>'
         +'<button class="tool-badge bg-neutral" id="act-refresh" style="cursor:pointer;border:none;margin-left:auto">↻ Refresh</button>';
       document.querySelectorAll('#act-sevbar .spill').forEach(function(p){p.onclick=function(){st.sev=p.dataset.s;sevBar();view();};});
@@ -671,9 +676,9 @@
         syncTypeBtn(); view(); }; });
       document.getElementById('act-refresh').onclick=function(){ delete cache['actions']; selectSection('actions'); }; }
     function view(){ var f=pool().filter(function(r){return st.sev==='All'||r.severity===st.sev;}).filter(typeMatch);
-      var G={PAYMENTS:[],DATES:[],OTHER:[],RECOMMENDATIONS:[]}; f.forEach(function(r){ (G[actGroup(r.type)]||G.OTHER).push(r); });
-      // BI recommendations render last, in their own clearly-labelled (advisory) section, separate from actions
-      var GROUPS=[['PAYMENTS','PAYMENTS'],['DATES','DATES'],['OTHER','OTHER'],['RECOMMENDATIONS','💡 BI RECOMMENDATIONS']];
+      var G={PRIORITY:[],PAYMENTS:[],DATES:[],OTHER:[],RECOMMENDATIONS:[]}; f.forEach(function(r){ (G[actGroup(r.type)]||G.OTHER).push(r); });
+      // PRIORITY first; BI recommendations render last, in their own clearly-labelled (advisory) section
+      var GROUPS=[['PRIORITY','⚠ PRIORITY'],['PAYMENTS','PAYMENTS'],['DATES','DATES'],['OTHER','OTHER'],['RECOMMENDATIONS','💡 BI RECOMMENDATIONS']];
       var html=''; GROUPS.forEach(function(gg){ var g=gg[0], arr=G[g]; if(!arr.length)return;
         var hi=arr.filter(function(r){return r.severity==='high';}).length, isRec=(g==='RECOMMENDATIONS');
         html+='<div class="sect-h" style="margin-top:12px'+(isRec?';color:#6d28d9;border-top:1px dashed #ddd6fe;padding-top:10px':'')+'">'+gg[1]+' <span class="mut tiny">('+arr.length+(hi?' · '+hi+' high':'')+(isRec?' · advisory, not blocking':'')+')</span></div>'
