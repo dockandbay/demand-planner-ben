@@ -8132,6 +8132,14 @@ function renderBuyView(mode){
       setH(); new ResizeObserver(setH).observe(hdr); } }catch(e){}
 }
 
+// SUPPLY (ORDER PLAN "PLAN" button, "Create 3PL POs" popup) opens the buy-plan detail via window.open_,
+// but #ov lives inside #buy-wrap which renderBuyView builds lazily on first BUY render. Expose a guarded
+// helper that builds the scaffold (data — PD/SL — is already loaded) WITHOUT switching the visible view,
+// so SUPPLY can pop the plan over itself. Leaving SUPPLY calls render(), which rebuilds cleanly.
+if(typeof window!=='undefined'){
+  window.ensureBuyPlanScaffold=function(){ if(!document.getElementById('ov')){ try{renderBuyView('buy');}catch(e){console.error('ensureBuyPlanScaffold failed',e);} } };
+}
+
 // View mode toggle (Planning / Exec)
 document.querySelectorAll('.view-toggle').forEach(function(b){
   b.onclick=function(){VIEW_MODE=b.dataset.view;render();};

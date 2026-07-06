@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.279 - Fix: ORDER PLAN / Create-3PL-PO "PLAN" button now opens the buy-plan popup
+
+The "PLAN" button on the ORDER PLAN grid (and in the "Create 3PL POs from Buy Plan" modal) did nothing because
+the buy-plan detail overlay `#ov` lives inside `#buy-wrap`, which the artifact builds LAZILY on the first BUY
+render — so on the SUPPLY/ORDER PLAN page it didn't exist yet, and the reveal CSS was also out-specificity'd by
+the supply-active hide rule. Fixes: (1) artifact exposes `window.ensureBuyPlanScaffold()` that builds
+`#buy-wrap`/`#ov` on demand (data PD/SL is already loaded) without switching the visible view; the SUPPLY
+handlers call it before `window.open_(sku)`. (2) Reveal CSS bumped to specificity (3,2,0) via `:not(#supply-root)`
+so it beats the hide rule (3,1,0), and the buy grid behind the overlay is suppressed so only `#ov` shows.
+Country switching inside the popup works via the existing market tabs. No new env vars / migrations.
+
 ## v25.264 - Cin7 lines push: read-back validation + auto qty-0 correction
 
 After the PUT, the /cin7-lines endpoint now GETs the Cin7 PO back and confirms every line matches what was

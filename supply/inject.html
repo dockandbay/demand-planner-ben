@@ -5,6 +5,12 @@
 <style>
 #supply-root{display:none;font-size:12px;color:#1a1a1a;padding-top:4px}
 #app.supply-active > *:not(#dab-navwrap):not(#supply-root){display:none!important}
+/* while a SKU buy-plan popup is opened from SUPPLY (e.g. ORDER PLAN "PLAN" button), reveal #buy-wrap so its
+   #ov overlay can render — the overlay (z300000) covers it; hidden again on close. The :not(#supply-root)
+   bumps specificity to (3,2,0) so it beats the hide rule (3,1,0), whose :not(#id) selectors each count as
+   an ID. Only #ov shows; the buy grid behind it stays hidden. */
+#app.supply-active.plan-ov-open > #buy-wrap:not(#supply-root){display:block!important}
+#app.supply-active.plan-ov-open > #buy-wrap:not(#supply-root) > *:not(#ov){display:none!important}
 #app.supply-active #dab-navwrap > *:not(#view-tabs-row){display:none!important}
 #app.supply-active #view-tabs-row .tool-bar{display:none!important}
 #supply-subnav{display:flex;gap:2px;border-bottom:1px solid #e0e0e0;margin:2px 0 10px;align-items:center;flex-wrap:wrap}
@@ -2362,7 +2368,14 @@
     var _opShowAllPos=false;
     function viewReset(){ _opShowAllPos=false; view(); }   // any filter/search change re-caps the PO columns
     function view(){ var cl=curLines(); var poCl=curLines(true); document.getElementById('op-grid').innerHTML=pivot(poCl,rowsFor(cl),skuCat,plcMap,skuAttr,skuRW,_opShowAllPos); bindQty(); bindUploads(); bindApprove(); bindConfirm(); bindPoLinks(); updateActionCounts();
-      document.querySelectorAll('#op-grid .op-plan').forEach(function(b){ b.onclick=function(){ var sku=b.dataset.sku; if(window.open_){ try{ window.open_(sku); var ov=document.getElementById('ov'); if(ov)ov.style.zIndex='300000'; }catch(e){ alert('Could not open the plan for '+sku); } } else { alert('Open the BUY tab once, then use PLAN.'); } }; });
+      document.querySelectorAll('#op-grid .op-plan').forEach(function(b){ b.onclick=function(){ var sku=b.dataset.sku;
+        if(!window.open_){ alert('Buy plan unavailable — reload the page.'); return; }
+        if(window.ensureBuyPlanScaffold)window.ensureBuyPlanScaffold();   // build #buy-wrap/#ov lazily if BUY view never rendered
+        var app=document.getElementById('app'); if(app)app.classList.add('plan-ov-open');   // reveal #buy-wrap so #ov can render over SUPPLY
+        try{ window.open_(sku); }catch(e){ if(app)app.classList.remove('plan-ov-open'); alert('Could not open the plan for '+sku); return; }
+        var ov=document.getElementById('ov'); if(ov){ ov.style.zIndex='300000';
+          var mo=new MutationObserver(function(){ if(!ov.classList.contains('open')){ if(app)app.classList.remove('plan-ov-open'); mo.disconnect(); } });
+          mo.observe(ov,{attributes:true,attributeFilter:['class']}); } }; });
       var spa=document.querySelector('#op-grid .op-showall-pos'); if(spa)spa.onclick=function(){ _opShowAllPos=true; view(); }; }
     // PO column header → open that PO in PURCHASE ORDERS with its ORDER PLAN tab expanded
     function bindPoLinks(){ document.querySelectorAll('#op-grid .op-po-link').forEach(function(b){ b.onclick=function(){ gotoPO(b.dataset.po,'oplan'); }; }); }
@@ -5347,7 +5360,14 @@
       var ta=document.getElementById('bp-tickall'); if(ta)ta.onchange=function(){ document.querySelectorAll('#bp-skus .bp-skutick:not([disabled])').forEach(function(t){t.checked=ta.checked;}); refreshCount(); };
       box.querySelectorAll('.bp-skutick').forEach(function(t){ t.onchange=refreshCount; }); refreshCount();
       // "Plan ▸" → open the BUY-tab plan popup for that SKU (artifact's global open_)
-      box.querySelectorAll('.bp-plan').forEach(function(b){ b.onclick=function(){ var sku=b.dataset.sku; if(window.open_){ try{ window.open_(sku); var ov=document.getElementById('ov'); if(ov)ov.style.zIndex='300000'; /* sit above the create-PO modal (z200000) */ }catch(e){ alert('Could not open the plan for '+sku); } } else { alert('Open the BUY tab first, then use Plan.'); } }; });
+      box.querySelectorAll('.bp-plan').forEach(function(b){ b.onclick=function(){ var sku=b.dataset.sku;
+        if(!window.open_){ alert('Buy plan unavailable — reload the page.'); return; }
+        if(window.ensureBuyPlanScaffold)window.ensureBuyPlanScaffold();   // build #buy-wrap/#ov lazily if BUY view never rendered
+        var app=document.getElementById('app'); if(app)app.classList.add('plan-ov-open');   // reveal #buy-wrap so #ov can render over SUPPLY
+        try{ window.open_(sku); }catch(e){ if(app)app.classList.remove('plan-ov-open'); alert('Could not open the plan for '+sku); return; }
+        var ov=document.getElementById('ov'); if(ov){ ov.style.zIndex='300000'; /* sit above the create-PO modal (z200000) */
+          var mo=new MutationObserver(function(){ if(!ov.classList.contains('open')){ if(app)app.classList.remove('plan-ov-open'); mo.disconnect(); } });
+          mo.observe(ov,{attributes:true,attributeFilter:['class']}); } }; });
     }).catch(function(e){ document.getElementById('bp-skus').innerHTML='<div style="color:#dc2626">'+esc(String(e))+'</div>'; });
     function gather(){ var out=[]; document.querySelectorAll('#bp-skus tbody tr').forEach(function(tr){ var t=tr.querySelector('.bp-skutick'); if(!t||!t.checked)return;
       var code=tr.dataset.code; var sel=tr.querySelector('.bp-skusup'); if(sel)code=sel.value;
