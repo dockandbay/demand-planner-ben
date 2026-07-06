@@ -2580,7 +2580,7 @@
       pos.sort(function(a,c){ var da=a.prod_end||'', dc=c.prod_end||''; if(!da&&!dc)return 0; if(!da)return 1; if(!dc)return -1; return da<dc?-1:(da>dc?1:0); });
       var ordRows=pos.length?pos.map(function(x){return '<tr><td class="l"><button class="lnk-btn mfg-po-go" data-po="'+esc(x.po)+'" title="'+esc(x.branch||'')+'">'+esc(x.po)+'</button></td><td class="l">'+dcell(x.prod_end)+'</td><td>'+units(x.qty)+'</td></tr>';}).join('')
         :'<tr><td class="l mut tiny" colspan="3">no open finished orders</td></tr>';
-      var aTbl='<div class="tw" style="max-width:400px"><table><thead><tr><th class="l">'+badgeFin+' Open order</th><th class="l">Prod. end</th><th>Qty</th></tr></thead><tbody>'+ordRows
+      var aTbl='<div class="tw" style="max-width:440px"><table style="width:max-content;min-width:100%"><thead><tr><th class="l" style="white-space:nowrap">'+badgeFin+' Open order</th><th class="l">Prod. end</th><th>Qty</th></tr></thead><tbody>'+ordRows
         +'<tr style="border-top:2px solid #cbd5e1;font-weight:700;background:#f8fafc"><td class="l">Total demand</td><td></td><td>'+units(bn.demand)+'</td></tr></tbody></table></div>';
       // (b) components — each with its open MFG orders + mismatch
       var compRows=(bn.components||[]).map(function(c){

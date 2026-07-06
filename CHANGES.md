@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.251 - Manufacturing (a): "📦 FINISHED Open order" header no longer clipped
+
+Applied the same width:max-content fix to the (a) open-orders table so its header (and rows) show in full.
+
 ## v25.250 - Manufacturing mismatch → SUPPLY ▸ Actions card + Prod. end shown dd-mmm-yy
 
 Two changes:
