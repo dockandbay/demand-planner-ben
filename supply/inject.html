@@ -47,6 +47,9 @@
 #supply-root #po-prog .pill,#supply-root #po-act .pill,#supply-root #po-ctry .pill{padding:2px 7px}
 /* level-3 sub-navs (REPORTS, CONFIG): underline tabs like the level-1/2 menus, in light blue */
 #supply-root #rep-subnav,#supply-root #config-subs,#supply-root #prod-subtabs,#supply-root .po-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 12px}
+/* Opened PO detail lives inside the wide, horizontally-scrolling PO grid — pin its sub-tab strip to the left
+   so PAYMENTS/DATES/etc stay fixed while the grid scrolls sideways (desktop). */
+#supply-root tr.exp-row .po-subnav{position:sticky;left:0;z-index:6;width:max-content}
 #supply-root .ex-badge{display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:#dc2626;color:#fff;font-size:9px;font-weight:700;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px}
 #supply-root .po-set-shipping{font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:#dbeafe;border:1px solid #60a5fa;color:#1d4ed8;cursor:pointer;white-space:nowrap}
 #supply-root .datewrap{display:inline-flex;align-items:center;gap:2px;position:relative}
