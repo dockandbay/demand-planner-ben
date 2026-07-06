@@ -1339,13 +1339,18 @@
   // Upload to Fulfil/Cin7 is not yet wired (awaiting Diviyaj's n8n webhook). The popup says so, but offers a
   // manual export of the revised order plan (SKU → qty) as a CSV download or clipboard copy with Code/Qty headers.
   // format the post-push Cin7 read-back validation for the user
-  function cin7ValMsg(v){ if(!v||!v.checked)return (v&&v.error)?' · <span class="mut tiny">(couldn\'t verify: '+esc(v.error)+')</span>':'';
-    if(v.aligned)return ' · <span style="color:#166534;font-weight:700">✓ verified exact match in Cin7 (qty + price)</span>';
+  function cin7ValMsg(v){ if(!v||!v.checked)return (v&&v.error)?'<div class="mut tiny" style="margin-top:6px">Couldn\'t verify against Cin7: '+esc(v.error)+'</div>':'';
+    if(v.aligned)return '<div style="color:#166534;font-weight:700;margin-top:6px">✓ Verified exact match in Cin7 (quantity + price)</div>';
     var eo=(v.extras_after!=null?v.extras_after:v.extras)||0, qo=(v.qty_off_after!=null?v.qty_off_after:v.qty_off)||0, po=(v.price_off_after!=null?v.price_off_after:v.price_off)||0;
+    var det=v.price_off_detail||[];
     var parts=[]; if(qo)parts.push(qo+' qty'); if(eo)parts.push(eo+' extra SKU'); if(po)parts.push(po+' price');
-    var skus=(po&&v.price_off_skus&&v.price_off_skus.length)?' ('+v.price_off_skus.slice(0,4).map(esc).join(', ')+(po>4?'…':'')+')':'';
-    return ' · <span style="color:#b91c1c;font-weight:700">⚠ '+(v.corrected?'re-pushed; ':'')+parts.join(' / ')+' still off in Cin7'+skus+'</span>'; }
-  function erpUploadInert(po){ closeShPop&&closeShPop();
+    var head='<div style="color:#b91c1c;font-weight:700;margin-top:8px">⚠ '+(v.corrected?'Re-pushed, but ':'')+parts.join(' / ')+' still off in Cin7</div>';
+    var tbl=(po&&det.length)
+      ? '<div class="tw" style="max-width:380px;margin-top:5px"><table><thead><tr><th class="l">SKU (price rejected by Cin7)</th><th>Plan $</th><th>Cin7 $</th></tr></thead><tbody>'
+        +det.map(function(d){return '<tr style="color:#b91c1c"><td class="l">'+esc(d.sku)+'</td><td>'+money(d.plan)+'</td><td>'+money(d.cin7)+'</td></tr>';}).join('')
+        +'</tbody></table></div>' : '';
+    return head+tbl; }
+  function erpUploadInert(po,forceFull){ closeShPop&&closeShPop();
     // What's actually out of sync decides which buttons show: only the DATE differs → just the date button;
     // line items differ (qty/not-in-ERP) → show both (lines + date), plus the manual CSV/copy fallback.
     var _r=poBy[po]||{};
@@ -1353,7 +1358,7 @@
     // the lines button; a date drift shows the date button. Lines drift also surfaces the date button.
     var linesPending=(_r.erp_total>0&&!(_r.erp_in>0))||_r.erp_pending>0;
     var datePending=_r.erp_date_pending>0 && !poComplete(_r);
-    var showLines=linesPending, showDate=datePending||linesPending;
+    var showLines=linesPending||forceFull, showDate=datePending||linesPending;   // forceFull (Push to Cin7 full) always offers the lines override
     var manualBlk=showLines
       ? '<div class="mut" style="margin-bottom:12px;font-size:13px">Push the revised order plan to Cin7 (SKUs, quantities &amp; prices — full override), or export it to enter manually:</div>'
         +'<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px"><button class="save-btn" id="erp-dl" style="background:#2563eb;color:#fff;border-color:#2563eb">⬇ Download CSV</button><button class="save-btn" id="erp-cp">⧉ Copy to clipboard</button></div>'
@@ -1923,7 +1928,6 @@
     return '<div class="sect-h">Order plan — agree the final cost price per line '
       +'<button class="lnk-btn op-goto" data-po="'+esc(po)+'" style="margin-left:8px" title="open the full ORDER PLAN filtered to this PO">↗ open in full order plan</button>'
       +opBtns
-      +'<span class="op-cin7-msg" style="margin-left:8px;font-size:11px"></span>'
       +'<div class="mut tiny" style="font-weight:400">supplier prices &amp; amendments flow in from the portal; ⚠ = differs from estimate / qty amended · <b>Accept</b> confirms a change · set a final price to override'+(editing?' · <b style="color:#166534">editing quantities — change values, add SKUs below, then Save</b>':'')+'</div></div>'
       +erpDevBlock
       +banner
@@ -2160,15 +2164,7 @@
         .then(function(){ OP_EDIT=null; invalidateDerived(); poRefetchPanel(po,i); })
         .catch(function(e){ b.disabled=false; b.textContent='✓ Save'; alert('Save failed: '+(e.message||e)); }); }; });
     document.querySelectorAll('#podet-'+i+' .op-erp-up-panel').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po); }; });
-    document.querySelectorAll('#podet-'+i+' .op-cin7-full').forEach(function(b){ b.onclick=function(){ var p=b.dataset.po;
-      if(!confirm('Push ALL of '+p+'’s SKUs, quantities and prices to Cin7 as a full override?\n\nUpdates the Cin7 PO (creates it if missing). Price = approved supplier final cost, else standard. This writes to the LIVE Cin7 ERP.'))return;
-      var orig=b.textContent; b.disabled=true; b.textContent='Sending…';
-      fetch('/api/supply/po/'+encodeURIComponent(p)+'/cin7-lines',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({completion_date:(poBy[p]||{}).checkin||''})}).then(function(r){return r.json();}).then(function(j){
-        if(j&&j.error){ b.disabled=false; b.textContent=orig; alert('Cin7: '+j.error); return; }
-        b.textContent='✓ Pushed ('+(j.lines||0)+' lines)'; b.disabled=false;
-        var m=document.querySelector('#podet-'+i+' .op-cin7-msg'); if(m)m.innerHTML='<b style="color:#166534">Cin7 updated — '+(j.lines||0)+' lines</b>'+cin7ValMsg(j.validation);
-        invalidateDerived(); delete cache['purchase-orders'];
-      }).catch(function(e){ b.disabled=false; b.textContent=orig; alert('Failed: '+(e.message||e)); }); }; });
+    document.querySelectorAll('#podet-'+i+' .op-cin7-full').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po, true); }; });   // open the Cin7 pop, force the full-override push (result + any price discrepancies show IN the pop)
     document.querySelectorAll('#podet-'+i+' .erp-up-dates').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po); }; });
     // CLIENT tab label downloads — crossdock barcodes (same as portal) + SHIPS WITH SUPPLIER master label
     document.querySelectorAll('#podet-'+i+' .po-dl-xd').forEach(function(b){ b.onclick=function(){ var skus=((poBy[po]&&poBy[po].crossdock_skus)||'').trim();

@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.267';
+const APP_VERSION = 'v25.268';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3436,8 +3436,10 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
       // Cin7 line price on read = unitPrice (base currency); USD = unitPrice × currencyRate. Compare to what we sent.
       function priceOff(items, rate) { if (!rate) return [];
         const by = {}; items.forEach(li => { if (li && li.code) by[String(li.code).toUpperCase()] = li; });
-        return Object.keys(sentByCode).filter(c => { const li = by[c]; if (!li || li.unitPrice == null) return false;
-          return Math.abs(Number(li.unitPrice) * rate - (Number(sentByCode[c].unitCost) || 0)) >= 0.01; }); }
+        const out = []; Object.keys(sentByCode).forEach(c => { const li = by[c]; if (!li || li.unitPrice == null) return;
+          const cin = Math.round(Number(li.unitPrice) * rate * 100) / 100, sent = Math.round((Number(sentByCode[c].unitCost) || 0) * 100) / 100;
+          if (Math.abs(cin - sent) >= 0.01) out.push({ sku: sentByCode[c].code, plan: sent, cin7: cin }); });
+        return out; }
       if (validateId) {
         const d = await getCin7Data();
         if (d) {
@@ -3445,7 +3447,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
           const extras = Object.keys(byCode).filter(c => !sentByCode[c] && Number(byCode[c].qty) > 0);   // in Cin7, not in plan
           const qtyOff = Object.keys(sentByCode).filter(c => !byCode[c] || Number(byCode[c].qty) !== Number(sentByCode[c].qty));
           const pOff = priceOff(d.items, d.rate);
-          validation = { checked: true, currency_rate: d.rate, extras: extras.length, qty_off: qtyOff.length, price_off: pOff.length, price_off_skus: pOff.slice(0, 25), corrected: false, aligned: (!extras.length && !qtyOff.length && !pOff.length) };
+          validation = { checked: true, currency_rate: d.rate, extras: extras.length, qty_off: qtyOff.length, price_off: pOff.length, price_off_detail: pOff.slice(0, 60), corrected: false, aligned: (!extras.length && !qtyOff.length && !pOff.length) };
           if (extras.length || qtyOff.length) {
             // corrective PUT: all our lines (fixes qty) + the extras at qty 0 (force removal). (Price it can't self-heal — Cin7 rejects some price changes; reported as price_off.)
             const fix = lineItems.concat(extras.map(c => ({ code: byCode[c].code, qty: 0, unitCost: Number(byCode[c].unitCost) || 0 })));
@@ -3457,7 +3459,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
             if (d2) { const b2 = {}; d2.items.forEach(li => { if (li && li.code) b2[String(li.code).toUpperCase()] = li; });
               validation.extras_after = Object.keys(b2).filter(c => !sentByCode[c] && Number(b2[c].qty) > 0).length;
               validation.qty_off_after = Object.keys(sentByCode).filter(c => !b2[c] || Number(b2[c].qty) !== Number(sentByCode[c].qty)).length;
-              validation.price_off_after = priceOff(d2.items, d2.rate).length;
+              const pOff2 = priceOff(d2.items, d2.rate); validation.price_off_after = pOff2.length; validation.price_off_detail = pOff2.slice(0, 60);
               validation.aligned = (!validation.extras_after && !validation.qty_off_after && !validation.price_off_after); }
           }
         }
