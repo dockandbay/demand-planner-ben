@@ -672,6 +672,22 @@
             if(!rows.length)return '<div class="count">No shipments for your orders yet.</div>';
             // a prominent "label / big value" cell for the dates & Flexport strip
             function spCell(lbl,val,strong){ return '<div style="min-width:96px"><div class="mut" style="font-size:10px;text-transform:uppercase;letter-spacing:.04em">'+lbl+'</div><div style="font-weight:700;font-size:15px;margin-top:1px">'+(val?val:'<span class="mut" style="font-weight:400">—</span>')+'</div></div>'; }
+            // Direct-to-Client details + label downloads for a PO on this card (client name / requirements /
+            // delivery address, Ships-With shipment labels, crossdock labels if the PO has crossdock SKUs).
+            var posByPo={}; (_ppData.pos||[]).forEach(function(p){ posByPo[p.po]=p; });
+            function dtcBlock(po){ var p=posByPo[po]; if(!p||!ppIsDtc(p))return '';
+              var cd=(p.crossdock_skus||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
+              return '<div style="margin-top:8px;padding:9px 12px;background:#ecfeff;border:1px solid #a5f3fc;border-radius:7px">'
+                +'<div style="font-weight:700;font-size:12px;color:#0e7490;margin-bottom:4px">📍 Direct to Client — '+esc(po)+'</div>'
+                +'<div style="font-size:12px;line-height:1.55">'
+                  +'<div><b>Client:</b> '+(p.client?esc(p.client):'<span class="mut">—</span>')+(p.sales_order_ref?' <span class="mut">('+esc(p.sales_order_ref)+')</span>':'')+'</div>'
+                  +'<div><b>Delivery address:</b> '+(p.final_delivery_address?esc(p.final_delivery_address):'<span class="mut">—</span>')+'</div>'
+                  +'<div><b>Client requirements:</b> '+(p.client_requirements?esc(p.client_requirements):'<span class="mut">none</span>')+'</div>'
+                +'</div>'
+                +'<div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap">'
+                  +'<button class="save-btn sp-shiplabel" data-po="'+esc(po)+'" title="download the Ships With shipment labels for this PO">⤓ Shipment labels</button>'
+                  +(cd.length?'<button class="save-btn sp-cd" data-po="'+esc(po)+'" data-skus="'+esc(cd.join(','))+'" data-do="'+esc(p.dispatch_order_ref||'')+'" data-client="'+esc(p.client||'')+'" data-address="'+esc(p.final_delivery_address||'')+'" title="crossdock box labels (PO / dispatch order / client / delivery address overlaid)">⤓ Crossdock labels</button>':'')
+                +'</div></div>'; }
             return rows.map(function(s){
               var members=s.members.length?'<table style="font-size:11px;width:auto;margin-top:4px"><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th>Est. pallets</th><th class="l">Client</th></tr></thead><tbody>'
                 +s.members.map(function(m){return '<tr><td class="l">'+esc(m.po)+(m.is_master?' <span class="tool-badge bg-green" style="font-size:9px">★ master</span>':'')+'</td><td class="l">'+esc(m.supplier||'')+'</td><td style="text-align:right">'+esc(m.pallets)+'</td><td class="l">'+(m.client?esc(m.client):'<span class="mut">—</span>')+'</td></tr>';}).join('')
@@ -703,7 +719,7 @@
                   +'<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">'
                   +'<div style="font-weight:700;font-size:15px">'+esc(po)+'</div>'
                   +'<span style="background:#ede9fe;color:#6d28d9;border-radius:10px;font-size:10px;font-weight:700;padding:2px 8px">📦 FOB — no shipment</span>'
-                  +'</div>'+fobStrip+'<div style="margin-top:8px">'+members+'</div>'+prodEndEdit+timeline
+                  +'</div>'+fobStrip+'<div style="margin-top:8px">'+members+'</div>'+dtcBlock(po)+prodEndEdit+timeline
                   +'<div class="mut tiny" style="margin-top:6px">No shipment to Dock &amp; Bay — collected at your factory or delivered to a nominated forwarder.</div></div>';
               }
               // prominent shipment dates + Flexport details
@@ -723,6 +739,7 @@
                 +'<div style="font-weight:700;font-size:15px">'+esc(s.master_po)+'</div>'
                 +'<button class="save-btn pp-esc" data-ref="'+esc(s.shipment_ref)+'" data-on="'+(s.escalated?'1':'0')+'" style="margin-left:auto'+(s.escalated?';background:#dc2626;color:#fff;border-color:#dc2626':';color:#dc2626')+'">'+(s.escalated?'⚑ ESCALATED':'⚑ Escalate')+'</button>'
                 +'</div>'+datesStrip+'<div style="margin-top:8px">'+members+'</div>'
+                +(s.members||[]).map(function(m){return dtcBlock(m.po);}).join('')
                 +'<div class="sp-timeline" data-ref="'+esc(s.shipment_ref)+'" style="margin-top:8px;border-top:1px solid #f1f1f1;padding-top:6px"></div></div>'; }).join(''); }
           function ppShipTimeline(ref){ var box=rootEl.querySelector('.sp-timeline[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(!box)return;
             fetch(EP.shipmentNotesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){
@@ -876,6 +893,11 @@
                 postJSON(EP.note,{po:po,supplier_id:_sid,body:v,author_kind:'supplier',author_email:by},function(){ btn.disabled=false;
                   (_ppData.notesByPo=_ppData.notesByPo||{}); (_ppData.notesByPo[po]=_ppData.notesByPo[po]||[]).push({po:po,author_kind:'supplier',body:v,created_at:new Date().toISOString().slice(0,16).replace('T',' ')});
                   if(ta)ta.value=''; var box=body.querySelector('.sp-fob-tl[data-po="'+(window.CSS&&CSS.escape?CSS.escape(po):po)+'"]'); if(box)box.innerHTML=fobTLHtml(po); }); }; });
+              // Direct-to-Client label downloads on shipment-plan cards (Ships-With shipment labels + crossdock)
+              body.querySelectorAll('.sp-shiplabel').forEach(function(btn){ btn.onclick=function(){ dlShipsWith(btn.dataset.po, btn); }; });
+              body.querySelectorAll('.sp-cd').forEach(function(btn){ btn.onclick=function(){ if(BC.placeholder){BC.note();return;} btn.disabled=true;
+                fetch(EP.labelData+'?skus='+encodeURIComponent(btn.dataset.skus)).then(function(r){return r.json();}).then(function(rows){ btn.disabled=false; if(!rows||!rows.length||rows.error){alert('No crossdock barcodes found');return;}
+                  BC.crossdock(rows,btn.dataset.po,btn.dataset.do,btn.dataset.client,btn.dataset.address,btn,btn.dataset.po+'_crossdock_labels.zip'); }).catch(function(){alert('Could not load crossdock labels');btn.disabled=false;}); }; });
               spRender.forEach(function(s){ if(!s.is_fob) ppShipTimeline(s.shipment_ref); }); return; }
             if(PORTAL_TAB==='deposits'){ body.innerHTML=ppDeposits(_ppData.sdep); return; }
             if(PORTAL_TAB==='barcodes'){

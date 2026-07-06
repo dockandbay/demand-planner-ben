@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.256 - Shipment Plan: Direct-to-Client details + label downloads
+
+Shipment-plan cards (both real shipments and FOB) now surface a Direct-to-Client block for any DtC PO on the
+card: client name (+ sales ref), delivery address, and client requirements, plus download buttons for the
+Ships-With shipment labels and (if the PO has crossdock SKUs) crossdock labels — reusing the existing
+dlShipsWith + BC.crossdock label generators. No schema change or new endpoints.
+
 ## v25.255 - FOB shipment-plan cards: editable production end date (submit for approval) + PO timeline
 
 The portal Shipment Plan FOB cards are no longer display-only. Added: (1) a Production end date field the
