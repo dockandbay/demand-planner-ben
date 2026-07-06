@@ -2393,7 +2393,12 @@
         if(l){l.qty=v;} else { fresh=true; var pr=lines.find(function(x){return x.po===po;})||{}, sr=lines.find(function(x){return x.sku===sku;})||{};
           lines.push({po:po,sku:sku,qty:v,erp_qty:0,cost_price:sr.cost_price||0,pallet_qty:sr.pallet_qty||0,full_carton_check:'',prod_no:pr.prod_no,status:pr.status,supplier_name:pr.supplier_name,shipment_ref:pr.shipment_ref,country:pr.country,category:skuCat[sku]||sr.category,release_window:skuRW[sku],prod_start:pr.prod_start,prod_end:pr.prod_end,ship_date:pr.ship_date,delivery:pr.delivery}); }
         fetch('/api/supply/po-line/'+encodeURIComponent(po+'|'+sku),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({qty:v,po:po,sku:sku})}).then(function(r){return r.json();}).then(function(j){if(j&&j.error)throw 0;}).catch(function(){inp.classList.add('err');});
-        mm(); if(fresh)view(); else bindUploads(); }; }); }
+        mm();
+        if(fresh){   // a brand-new PO×SKU line needs the grid rebuilt (upload btn, counts) — preserve scroll so we don't jump to the top
+          var _tw=document.querySelector('#op-grid .op-pivot-tw'), _sx=window.scrollX, _sy=window.scrollY, _tl=_tw?_tw.scrollLeft:0, _tt=_tw?_tw.scrollTop:0;
+          view();
+          try{ window.scrollTo(_sx,_sy); var _tw2=document.querySelector('#op-grid .op-pivot-tw'); if(_tw2){ _tw2.scrollLeft=_tl; _tw2.scrollTop=_tt; } }catch(e){}
+        } else bindUploads(); }; }); }
     function bindUploads(){ document.querySelectorAll('#op-grid .opup').forEach(function(b){ var po=b.dataset.up;
       var pend=lines.some(function(x){return x.po===po&&Number(x.qty)!==Number(x.erp_qty==null?x.qty:x.erp_qty);});
       b.style.display=pend?'inline-block':'none'; b.classList.toggle('has',pend);

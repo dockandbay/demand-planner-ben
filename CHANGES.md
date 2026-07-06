@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.280 - Fix: ORDER PLAN cell edit no longer jumps to top of page
+
+Typing a quantity into an empty ORDER PLAN cell (a PO×SKU pair that wasn't yet a line) triggered a full grid
+re-render via view() to add the new line, which reset scroll to the top. Now the fresh-line re-render
+preserves and restores window scroll + the pivot container's scrollLeft/scrollTop, so the view stays put.
+Editing an already-existing line was unaffected (it never re-rendered).
+
 ## v25.279 - Fix: ORDER PLAN / Create-3PL-PO "PLAN" button now opens the buy-plan popup
 
 The "PLAN" button on the ORDER PLAN grid (and in the "Create 3PL POs from Buy Plan" modal) did nothing because
