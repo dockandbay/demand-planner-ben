@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.245';
+const APP_VERSION = 'v25.247';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1391,8 +1391,10 @@ app.get('/api/supply/:section', async (req, res) => {
         const comps = [...new Set(bom.map(b => b.component_sku))];
         // finished-bundle DEMAND = parent SKU qty on OPEN NON-manufacturing POs (e.g. "PO XXX has 600 gift boxes").
         // Only POs still needing assembly count — exclude COMPLETE / DELIVERED / SHIPPING (already built/shipped).
-        const demRows = parents.length ? (await pool.query(`SELECT l.sku, l.po, l.qty::numeric qty, coalesce(p.branch,'') branch, coalesce(p.status,'') status
+        const demRows = parents.length ? (await pool.query(`SELECT l.sku, l.po, l.qty::numeric qty, coalesce(p.branch,'') branch, coalesce(p.status,'') status,
+            to_char(coalesce(p.end_production_overide, p.start_production + (coalesce(sup.production_days,0)||' days')::interval)::date,'YYYY-MM-DD') prod_end
           FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po
+          LEFT JOIN planner.suppliers sup ON sup.id=p.supplier_id
           WHERE l.sku = ANY($1) AND coalesce(p.branch,'') NOT ILIKE '%manufactur%'
             AND coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%deliver%' AND coalesce(p.status,'') NOT ILIKE '%ship%'`, [parents])).rows : [];
         // manufacturing SUPPLY = component SKU qty on OPEN MANUFACTURING-branch POs (open-vs-open: exclude
@@ -1403,7 +1405,7 @@ app.get('/api/supply/:section', async (req, res) => {
             AND coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%deliver%' AND coalesce(p.status,'') NOT ILIKE '%ship%'`, [comps])).rows : [];
         const accepted = {}; (await q(`SELECT component_sku, accepted FROM planner.manufacturing_accept`)).forEach(r => { accepted[r.component_sku] = !!r.accepted; });
         const demandBy = {}, finishedPosBy = {}, supplyBy = {}, mfgPosBy = {};
-        demRows.forEach(r => { demandBy[r.sku] = (demandBy[r.sku] || 0) + Number(r.qty); (finishedPosBy[r.sku] = finishedPosBy[r.sku] || []).push({ po: r.po, qty: Number(r.qty), branch: r.branch, status: r.status }); });
+        demRows.forEach(r => { demandBy[r.sku] = (demandBy[r.sku] || 0) + Number(r.qty); (finishedPosBy[r.sku] = finishedPosBy[r.sku] || []).push({ po: r.po, qty: Number(r.qty), branch: r.branch, status: r.status, prod_end: r.prod_end || '' }); });
         supRows.forEach(r => { supplyBy[r.sku] = (supplyBy[r.sku] || 0) + Number(r.qty); (mfgPosBy[r.sku] = mfgPosBy[r.sku] || []).push({ po: r.po, qty: Number(r.qty), status: r.status }); });
         const bundles = parents.map(parent => {
           const demand = demandBy[parent] || 0;
@@ -2829,14 +2831,19 @@ app.post('/api/supply/manufacturing-bom-save', async (req, res) => {
     res.json({ ok: true, parent_sku: parent, component_sku: comp, qty });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-// CONFIG ▸ Manufacturing BOM — delete a parent→component row.
+// CONFIG ▸ Manufacturing BOM — delete a parent→component row, or the WHOLE bundle when no component given.
 app.post('/api/supply/manufacturing-bom-delete', async (req, res) => {
   const b = req.body || {};
   const parent = String(b.parent_sku || '').trim(), comp = String(b.component_sku || '').trim();
-  if (!parent || !comp) return res.status(400).json({ error: 'parent_sku and component_sku required' });
+  if (!parent) return res.status(400).json({ error: 'parent_sku required' });
   try {
-    await pool.query(`DELETE FROM planner.manufacturing_bom WHERE parent_sku=$1 AND component_sku=$2`, [parent, comp]);
-    res.json({ ok: true, parent_sku: parent, component_sku: comp });
+    if (comp) {   // single component row
+      await pool.query(`DELETE FROM planner.manufacturing_bom WHERE parent_sku=$1 AND component_sku=$2`, [parent, comp]);
+      res.json({ ok: true, parent_sku: parent, component_sku: comp });
+    } else {      // entire bundle — every component of this parent
+      const r = await pool.query(`DELETE FROM planner.manufacturing_bom WHERE parent_sku=$1`, [parent]);
+      res.json({ ok: true, parent_sku: parent, deleted: r.rowCount });
+    }
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Toggle a shipment's ESCALATED status (supplier portal or admin grid). Upserts the shipment row if needed.

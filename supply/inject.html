@@ -2574,11 +2574,12 @@
     // One card per bundle SKU: (a) open finished orders + total demand, (b) each component's open MFG orders + mismatch
     h+=bundles.map(function(bn){
       var pos=(bn.finishedPos||[]).filter(function(x){return x.qty;});
-      // (a) open finished orders → demand
-      var ordRows=pos.length?pos.map(function(x){return '<tr><td class="l"><button class="lnk-btn mfg-po-go" data-po="'+esc(x.po)+'" title="'+esc(x.branch||'')+'">'+esc(x.po)+'</button></td><td>'+units(x.qty)+'</td></tr>';}).join('')
-        :'<tr><td class="l mut tiny" colspan="2">no open finished orders</td></tr>';
-      var aTbl='<div class="tw" style="max-width:340px"><table><thead><tr><th class="l">'+badgeFin+' Open order</th><th>Qty</th></tr></thead><tbody>'+ordRows
-        +'<tr style="border-top:2px solid #cbd5e1;font-weight:700;background:#f8fafc"><td class="l">Total demand</td><td>'+units(bn.demand)+'</td></tr></tbody></table></div>';
+      // (a) open finished orders → demand — sorted by production end date (earliest first; blanks last)
+      pos.sort(function(a,c){ var da=a.prod_end||'', dc=c.prod_end||''; if(!da&&!dc)return 0; if(!da)return 1; if(!dc)return -1; return da<dc?-1:(da>dc?1:0); });
+      var ordRows=pos.length?pos.map(function(x){return '<tr><td class="l"><button class="lnk-btn mfg-po-go" data-po="'+esc(x.po)+'" title="'+esc(x.branch||'')+'">'+esc(x.po)+'</button></td><td class="l">'+(x.prod_end?esc(x.prod_end):'<span class="mut tiny">—</span>')+'</td><td>'+units(x.qty)+'</td></tr>';}).join('')
+        :'<tr><td class="l mut tiny" colspan="3">no open finished orders</td></tr>';
+      var aTbl='<div class="tw" style="max-width:400px"><table><thead><tr><th class="l">'+badgeFin+' Open order</th><th class="l">Prod. end</th><th>Qty</th></tr></thead><tbody>'+ordRows
+        +'<tr style="border-top:2px solid #cbd5e1;font-weight:700;background:#f8fafc"><td class="l">Total demand</td><td></td><td>'+units(bn.demand)+'</td></tr></tbody></table></div>';
       // (b) components — each with its open MFG orders + mismatch
       var compRows=(bn.components||[]).map(function(c){
         var st=c.diff<0?'short':c.diff>0?'over':'ok';
@@ -3424,9 +3425,10 @@
           var parents=Object.keys(byP).sort();
           function bomSave(parent,comp,qty){ return fetch('/api/supply/manufacturing-bom-save',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({parent_sku:parent,component_sku:comp,qty:qty})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); return j; }); }
           function bomDel(parent,comp){ return fetch('/api/supply/manufacturing-bom-delete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({parent_sku:parent,component_sku:comp})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); return j; }); }
-          b.innerHTML='<div class="sect-h">Manufacturing BOM <span class="mut tiny">(finished / bundle product → components × per-unit qty. Edit a qty and Save, add components, or delete a row.)</span></div>'
+          b.innerHTML='<div class="sect-h">Manufacturing BOM <span class="mut tiny">(finished / bundle product → components × per-unit qty. Edit a qty and Save, add components, delete a row, or delete an entire bundle.)</span></div>'
             +(parents.length?parents.map(function(p){ return '<div class="bom-grp" data-parent="'+esc(p)+'" style="margin-bottom:14px;max-width:640px;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px">'
-              +'<div style="font-weight:700;margin-bottom:4px">'+esc(p)+' <span class="mut tiny" style="font-weight:400">('+byP[p].length+' component'+(byP[p].length===1?'':'s')+')</span></div>'
+              +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><div style="font-weight:700">'+esc(p)+' <span class="mut tiny" style="font-weight:400">('+byP[p].length+' component'+(byP[p].length===1?'':'s')+')</span></div>'
+                +'<button class="lnk-btn bom-delbundle" style="color:#b91c1c;font-size:11px">🗑 Delete entire bundle</button></div>'
               +'<div class="tw"><table><thead><tr><th class="l">Component SKU</th><th>Qty / unit</th><th class="l">Actions</th></tr></thead><tbody>'
               +byP[p].map(function(x){return '<tr data-comp="'+esc(x.component_sku)+'"><td class="l">'+esc(x.component_sku)+'</td>'
                 +'<td><input type="number" min="0" step="1" class="flt bom-qty" value="'+esc(String(x.qty))+'" data-orig="'+esc(String(x.qty))+'" style="width:80px;text-align:right"></td>'
@@ -3449,6 +3451,9 @@
             btn.disabled=true; btn.textContent='…'; bomSave(grp.dataset.parent,tr.dataset.comp,qty).then(function(){ btn.textContent='✓ Saved'; tr.querySelector('.bom-qty').dataset.orig=String(qty); setTimeout(function(){btn.textContent='Save';btn.style.opacity='.4';},1200); }).catch(function(e){ btn.disabled=false; btn.textContent='Save'; alert('Could not save: '+(e.message||e)); }); }; });
           b.querySelectorAll('.bom-del').forEach(function(btn){ btn.onclick=function(){ var tr=btn.closest('tr'), grp=btn.closest('.bom-grp'); if(!confirm('Delete '+tr.dataset.comp+' from '+grp.dataset.parent+'?'))return;
             bomDel(grp.dataset.parent,tr.dataset.comp).then(function(){ showSub(); }).catch(function(e){ alert('Could not delete: '+(e.message||e)); }); }; });
+          b.querySelectorAll('.bom-delbundle').forEach(function(btn){ btn.onclick=function(){ var grp=btn.closest('.bom-grp'), parent=grp.dataset.parent;
+            if(!confirm('Delete the ENTIRE bundle "'+parent+'" and all its components? This cannot be undone.'))return;
+            btn.disabled=true; bomDel(parent,'').then(function(){ showSub(); }).catch(function(e){ btn.disabled=false; alert('Could not delete bundle: '+(e.message||e)); }); }; });
           b.querySelectorAll('.bom-add').forEach(function(btn){ btn.onclick=function(){ var tr=btn.closest('tr'), grp=btn.closest('.bom-grp'); var comp=tr.querySelector('.bom-ncomp').value.trim(), qty=Number(tr.querySelector('.bom-nqty').value);
             if(!comp){alert('Enter a component SKU');return;} if(!(qty>0)){alert('Enter a qty > 0');return;}
             btn.disabled=true; bomSave(grp.dataset.parent,comp,qty).then(function(){ showSub(); }).catch(function(e){ btn.disabled=false; alert('Could not add: '+(e.message||e)); }); }; });

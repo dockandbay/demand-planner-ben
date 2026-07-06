@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.247 - CONFIG ▸ Manufacturing BOM: delete an entire bundle
+
+Each bundle group now has a "🗑 Delete entire bundle" button (confirm) that removes all of that parent's
+component rows in one go. manufacturing-bom-delete now deletes the whole parent when no component_sku is
+given (single-row delete unchanged).
+
+## v25.246 - Manufacturing (a) open orders: add Production end date + sort earliest→latest
+
+Section (a) open finished orders now shows each PO's production end date (end_production_overide, else
+start_production + supplier production_days) and sorts the orders by that date, earliest first (blanks last).
+Endpoint's demand query joins suppliers for production_days and returns prod_end per finished PO.
+
 ## v25.245 - Manufacturing: (a) open orders and (b) components sit side by side per bundle
 
 Within each bundle card, section (a) open finished orders + total demand and section (b) component/MFG-order
