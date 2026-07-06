@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.234 - ORDER PLAN report: wider A-G, Branch to row 3, centred + wider H+ columns
+
+- Column widths A-G sized to their text; H+ (PO/qty) columns ~50% wider.
+- "Branch" moved up to row 3 (others shift down); SKU header stays row 9.
+- H onward data (metadata + qty) centre-aligned.
+
 ## v25.233 - ORDER PLAN report: freeze panes (col A + rows 1-9) + bold PO/SKU header rows
 
 Froze the first column and the top 9 rows (metadata + SKU header) so they stay visible when scrolling, and

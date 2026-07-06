@@ -2160,11 +2160,12 @@
     if(v===''||v==null){ return sa?('<c r="'+ref+'"'+sa+'/>'):''; }
     if(typeof v==='number'&&isFinite(v)) return '<c r="'+ref+'"'+sa+'><v>'+v+'</v></c>';
     return '<c r="'+ref+'"'+sa+' t="inlineStr"><is><t xml:space="preserve">'+_xlsxEsc(v)+'</t></is></c>'; }
-  function _xlsxSheet(grid, freeze){ var rows=grid.map(function(row,ri){ var cells=(row||[]).map(function(v,ci){ return _xlsxCell(_xlsxCol(ci)+(ri+1),v); }).join(''); return cells?'<row r="'+(ri+1)+'">'+cells+'</row>':''; }).join('');
+  function _xlsxSheet(grid, freeze, cols){ var rows=grid.map(function(row,ri){ var cells=(row||[]).map(function(v,ci){ return _xlsxCell(_xlsxCol(ci)+(ri+1),v); }).join(''); return cells?'<row r="'+(ri+1)+'">'+cells+'</row>':''; }).join('');
     var views='';
     if(freeze&&(freeze.x||freeze.y)){ var tl=_xlsxCol(freeze.x||0)+((freeze.y||0)+1);   // frozen top-left of the scrolling pane
       views='<sheetViews><sheetView workbookViewId="0"><pane'+(freeze.x?' xSplit="'+freeze.x+'"':'')+(freeze.y?' ySplit="'+freeze.y+'"':'')+' topLeftCell="'+tl+'" activePane="bottomRight" state="frozen"/></sheetView></sheetViews>'; }
-    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+views+'<sheetData>'+rows+'</sheetData></worksheet>'; }
+    var colXml=(cols&&cols.length)?'<cols>'+cols.map(function(c){return '<col min="'+c.min+'" max="'+c.max+'" width="'+c.width+'" customWidth="1"/>';}).join('')+'</cols>':'';
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+views+colXml+'<sheetData>'+rows+'</sheetData></worksheet>'; }
   function _crc32(buf){ var t=_crc32._t; if(!t){ t=_crc32._t=[]; for(var n=0;n<256;n++){ var c=n; for(var k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1); t[n]=c>>>0; } } var crc=0xFFFFFFFF; for(var i=0;i<buf.length;i++)crc=(crc>>>8)^t[(crc^buf[i])&0xFF]; return (crc^0xFFFFFFFF)>>>0; }
   function _zipStore(files){ var enc=new TextEncoder(), parts=[], len=0, central=[];
     function u16(n){return new Uint8Array([n&255,(n>>8)&255]);} function u32(n){return new Uint8Array([n&255,(n>>8)&255,(n>>16)&255,(n>>>24)&255]);}
@@ -2177,7 +2178,7 @@
     var csize=len-cstart;
     push(u32(0x06054b50)); push(u16(0)); push(u16(0)); push(u16(central.length)); push(u16(central.length)); push(u32(csize)); push(u32(cstart)); push(u16(0));
     var out=new Uint8Array(len), p=0; parts.forEach(function(u){ out.set(u,p); p+=u.length; }); return out; }
-  function buildXlsx(sheetName, grid, freeze){ var enc=new TextEncoder();
+  function buildXlsx(sheetName, grid, freeze, cols){ var enc=new TextEncoder();
     // cell styles: 0=default; 1=UK 2=US 3=AU 4=EU solid fills (fills 2..5); 5=bold
     var STYLES='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
       +'<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>'
@@ -2188,19 +2189,22 @@
       +'<fill><patternFill patternType="solid"><fgColor rgb="FFDAB1DA"/></patternFill></fill></fills>'
       +'<borders count="1"><border/></borders>'
       +'<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-      +'<cellXfs count="6"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
-      +'<xf numFmtId="0" fontId="0" fillId="2" borderId="0" xfId="0" applyFill="1"/>'
-      +'<xf numFmtId="0" fontId="0" fillId="3" borderId="0" xfId="0" applyFill="1"/>'
-      +'<xf numFmtId="0" fontId="0" fillId="4" borderId="0" xfId="0" applyFill="1"/>'
-      +'<xf numFmtId="0" fontId="0" fillId="5" borderId="0" xfId="0" applyFill="1"/>'
-      +'<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs></styleSheet>';
+      // 0 default | 1-4 country fills+centre | 5 bold(left) | 6 centre | 7 bold+centre
+      +'<cellXfs count="8"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+      +'<xf numFmtId="0" fontId="0" fillId="2" borderId="0" xfId="0" applyFill="1" applyAlignment="1"><alignment horizontal="center"/></xf>'
+      +'<xf numFmtId="0" fontId="0" fillId="3" borderId="0" xfId="0" applyFill="1" applyAlignment="1"><alignment horizontal="center"/></xf>'
+      +'<xf numFmtId="0" fontId="0" fillId="4" borderId="0" xfId="0" applyFill="1" applyAlignment="1"><alignment horizontal="center"/></xf>'
+      +'<xf numFmtId="0" fontId="0" fillId="5" borderId="0" xfId="0" applyFill="1" applyAlignment="1"><alignment horizontal="center"/></xf>'
+      +'<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
+      +'<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment horizontal="center"/></xf>'
+      +'<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center"/></xf></cellXfs></styleSheet>';
     var files=[
       {name:'[Content_Types].xml', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'},
       {name:'_rels/.rels', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'},
       {name:'xl/workbook.xml', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="'+_xlsxEsc(sheetName)+'" sheetId="1" r:id="rId1"/></sheets></workbook>'},
       {name:'xl/_rels/workbook.xml.rels', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'},
       {name:'xl/styles.xml', str:STYLES},
-      {name:'xl/worksheets/sheet1.xml', str:_xlsxSheet(grid, freeze)}
+      {name:'xl/worksheets/sheet1.xml', str:_xlsxSheet(grid, freeze, cols)}
     ];
     return _zipStore(files.map(function(f){ return {name:f.name, data:enc.encode(f.str)}; })); }
   function renderOrderPlan(lines){ var c=document.getElementById('supply-content');
@@ -2368,20 +2372,26 @@
         // 7 left (per-SKU) columns, then one column per PO. PO metadata rows sit under the Country top row.
         var LEFT=7, pad=function(v){ var a=new Array(LEFT-1); for(var i=0;i<a.length;i++)a[i]=''; return [v].concat(a); };
         var grid=[];
-        grid.push(pad('Country').concat(pos.map(function(po){ var co=pmeta[po].co||''; var st=CO_STYLE[String(co).toUpperCase()]||0; return st?{v:co,s:st}:co; })));   // row 1: country, colour-coded
-        var bold=function(arr){ return arr.map(function(v){ return {v:(v&&typeof v==='object'&&'v' in v)?v.v:v, s:5}; }); };   // row-level bold (style 5)
-        grid.push(bold(pad('PO').concat(pos)));   // row 2: PO — bold
-        grid.push(pad('Ships with').concat(pos.map(function(po){return shipsWith(po);})));                    // (members) master shipment + its supplier
-        grid.push(pad('Shipments with this PO').concat(pos.map(function(po){return shipmentsWith(po);})));      // (masters) member POs + suppliers; blank for non-masters
-        grid.push(pad('Production end').concat(pos.map(function(po){return pmeta[po].pe;})));
-        grid.push(pad('Client (DTC)').concat(pos.map(function(po){return pmeta[po].client;})));
-        grid.push(pad('DTC sales order ref').concat(pos.map(function(po){return pmeta[po].so;})));
-        grid.push(pad('Branch').concat(pos.map(function(po){return pmeta[po].branch;})));
-        grid.push(bold(['SKU','EAN','Carton qty','Release window','Product title','Size','Colour'].concat(pos.map(function(){return 'QTY';}))));   // row 9: SKU header — bold; qty columns say QTY
+        // cell-style helpers — CTR=6 (centre, H+ data), BOLDL=5 (bold left, A-G labels), BOLDC=7 (bold+centre, H+ headers)
+        var boldL=function(arr){ return arr.map(function(v){ return {v:(v&&typeof v==='object'&&'v' in v)?v.v:v, s:5}; }); };
+        var ctr=function(v){ return {v:v==null?'':v, s:6}; };            // centre a single H+ data cell
+        var metaRow=function(lbl,fn){ return pad(lbl).concat(pos.map(function(po){ return ctr(fn(po)); })); };
+        grid.push(pad('Country').concat(pos.map(function(po){ var co=pmeta[po].co||''; return {v:co, s:(CO_STYLE[String(co).toUpperCase()]||6)}; })));   // row 1: country — colour-coded + centred
+        grid.push(boldL(pad('PO')).concat(pos.map(function(po){ return {v:po, s:7}; })));                          // row 2: PO — bold + centred
+        grid.push(metaRow('Branch', function(po){return pmeta[po].branch;}));                                       // row 3: Branch (moved up)
+        grid.push(metaRow('Ships with', function(po){return shipsWith(po);}));                                      // row 4 (members) master shipment + supplier
+        grid.push(metaRow('Shipments with this PO', function(po){return shipmentsWith(po);}));                      // row 5 (masters) member POs + suppliers
+        grid.push(metaRow('Production end', function(po){return pmeta[po].pe;}));                                   // row 6
+        grid.push(metaRow('Client (DTC)', function(po){return pmeta[po].client;}));                                 // row 7
+        grid.push(metaRow('DTC sales order ref', function(po){return pmeta[po].so;}));                              // row 8
+        grid.push(boldL(['SKU','EAN','Carton qty','Release window','Product title','Size','Colour']).concat(pos.map(function(){return {v:'QTY', s:7};})));   // row 9: SKU header — bold; qty cols = QTY
         skus.forEach(function(sku){ var a=skuAttr[sku]||{};
           grid.push([sku, a.ean||'', a.cq||'', (skuRW[sku]||''), a.title||'', a.size_long||'', a.colour||'']
-            .concat(pos.map(function(po){ var q=qmap[sku+'|'+po]; return q?q:''; }))); });
-        var bytes=buildXlsx('Order Plan', grid, {x:1,y:9}); var blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});   // freeze column A + rows 1-9
+            .concat(pos.map(function(po){ var q=qmap[sku+'|'+po]; return ctr(q?q:''); }))); });                     // qty cells centred
+        // column widths: A-G sized to their text; H+ (qty/PO columns) ~50% wider than the 8.43 default
+        var colDefs=[30,15,10,18,34,26,18].map(function(w,i){ return {min:i+1,max:i+1,width:w}; });
+        colDefs.push({min:8, max:7+pos.length, width:12.6});
+        var bytes=buildXlsx('Order Plan', grid, {x:1,y:9}, colDefs); var blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});   // freeze A + rows 1-9; sized cols
         var url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download='OrderPlan_'+new Date().toISOString().slice(0,10)+'.xlsx'; document.body.appendChild(a); a.click();
         setTimeout(function(){URL.revokeObjectURL(url);a.remove();},150);
         b.disabled=false; b.textContent=_lbl;
