@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.264';
+const APP_VERSION = 'v25.266';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3426,32 +3426,39 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
     try {
       const sentByCode = {}; lineItems.forEach(li => { sentByCode[String(li.code).toUpperCase()] = li; });
       const validateId = newId || cin7Id;
-      async function getCin7Lines() {
-        const g = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=1&fields=id,lineItems&where=' + encodeURIComponent('id=' + validateId),
+      async function getCin7Data() {
+        const g = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=1&fields=id,currencyRate,lineItems&where=' + encodeURIComponent('id=' + validateId),
           { headers: { Authorization: auth, 'content-type': 'application/json' } });
         if (!g.ok) return null;
         const arr = await g.json(); const o = Array.isArray(arr) ? arr[0] : arr;
-        return (o && Array.isArray(o.lineItems)) ? o.lineItems : [];
+        return { items: (o && Array.isArray(o.lineItems)) ? o.lineItems : [], rate: Number(o && o.currencyRate) || null };
       }
+      // Cin7 line price on read = unitPrice (base currency); USD = unitPrice × currencyRate. Compare to what we sent.
+      function priceOff(items, rate) { if (!rate) return [];
+        const by = {}; items.forEach(li => { if (li && li.code) by[String(li.code).toUpperCase()] = li; });
+        return Object.keys(sentByCode).filter(c => { const li = by[c]; if (!li || li.unitPrice == null) return false;
+          return Math.abs(Number(li.unitPrice) * rate - (Number(sentByCode[c].unitCost) || 0)) >= 0.01; }); }
       if (validateId) {
-        const cur = await getCin7Lines();
-        if (cur) {
-          const byCode = {}; cur.forEach(li => { if (li && li.code) byCode[String(li.code).toUpperCase()] = li; });
+        const d = await getCin7Data();
+        if (d) {
+          const byCode = {}; d.items.forEach(li => { if (li && li.code) byCode[String(li.code).toUpperCase()] = li; });
           const extras = Object.keys(byCode).filter(c => !sentByCode[c] && Number(byCode[c].qty) > 0);   // in Cin7, not in plan
           const qtyOff = Object.keys(sentByCode).filter(c => !byCode[c] || Number(byCode[c].qty) !== Number(sentByCode[c].qty));
-          validation = { checked: true, extras: extras.length, qty_off: qtyOff.length, corrected: false, aligned: (!extras.length && !qtyOff.length) };
+          const pOff = priceOff(d.items, d.rate);
+          validation = { checked: true, currency_rate: d.rate, extras: extras.length, qty_off: qtyOff.length, price_off: pOff.length, price_off_skus: pOff.slice(0, 25), corrected: false, aligned: (!extras.length && !qtyOff.length && !pOff.length) };
           if (extras.length || qtyOff.length) {
-            // corrective PUT: all our lines (fixes qty) + the extras at qty 0 (force removal)
+            // corrective PUT: all our lines (fixes qty) + the extras at qty 0 (force removal). (Price it can't self-heal — Cin7 rejects some price changes; reported as price_off.)
             const fix = lineItems.concat(extras.map(c => ({ code: byCode[c].code, qty: 0, unitCost: Number(byCode[c].unitCost) || 0 })));
             const body2 = [{ id: Number(validateId) || validateId, lineItems: fix }]; if (typeof curApproved === 'boolean') body2[0].isApproved = curApproved;
             const r2 = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
               { method: 'PUT', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify(body2) });
             validation.corrected = true; validation.correction_ok = r2.ok;
-            const cur2 = r2.ok ? await getCin7Lines() : null;
-            if (cur2) { const b2 = {}; cur2.forEach(li => { if (li && li.code) b2[String(li.code).toUpperCase()] = li; });
+            const d2 = r2.ok ? await getCin7Data() : null;
+            if (d2) { const b2 = {}; d2.items.forEach(li => { if (li && li.code) b2[String(li.code).toUpperCase()] = li; });
               validation.extras_after = Object.keys(b2).filter(c => !sentByCode[c] && Number(b2[c].qty) > 0).length;
               validation.qty_off_after = Object.keys(sentByCode).filter(c => !b2[c] || Number(b2[c].qty) !== Number(sentByCode[c].qty)).length;
-              validation.aligned = (!validation.extras_after && !validation.qty_off_after); }
+              validation.price_off_after = priceOff(d2.items, d2.rate).length;
+              validation.aligned = (!validation.extras_after && !validation.qty_off_after && !validation.price_off_after); }
           }
         }
       }
@@ -3470,6 +3477,46 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
     } catch (e) { /* non-fatal — Cin7 write already succeeded */ }
     res.json({ ok: true, mode, cin7_id: newId, cin7_member_id: memberId || null, cin7_branch_id: branchId || null, lines: lines.length, approved: lines.filter(l => l.approved_price).length, erp_mirror_updated: mirrored, validation,
       link: newId ? 'https://go.cin7.com/Cloud/TransactionEntry/TransactionEntry.aspx?idCustomerAppsLink=951111&OrderId=' + encodeURIComponent(newId) : null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// READ-ONLY verify: GET the Cin7 PO's line items and compare to the planner order plan (qty AND price).
+// No write. price = approved supplier final cost, else cost_price (same as the push). ratio = cin7/plan
+// (≈1.0 → USD match; ≈0.75 → Cin7 is showing GBP; anything else → didn't take).
+app.get('/api/supply/po/:po/cin7-verify', async (req, res) => {
+  const po = req.params.po;
+  try {
+    const erpRow = (await pool.query('SELECT erp_po_id FROM planner.erp_purchase_orders WHERE po=$1', [po])).rows[0];
+    const cin7Id = erpRow && erpRow.erp_po_id;
+    if (!cin7Id) return res.status(404).json({ error: 'No Cin7 PO id for ' + po });
+    const auth = cin7Auth();
+    if (!auth) return res.status(501).json({ error: 'Cin7 credentials not configured' });
+    const plan = (await pool.query(
+      `SELECT l.sku, l.qty::numeric qty,
+              coalesce((SELECT plc.final_cost FROM planner.portal_line_costs plc WHERE plc.po=l.po AND plc.sku=l.sku AND plc.confirmed_at IS NOT NULL AND plc.final_cost IS NOT NULL), l.cost_price)::numeric price
+       FROM planner.purchase_order_lines l WHERE l.po=$1 AND coalesce(l.qty,0)>0`, [po])).rows;
+    const planBy = {}; plan.forEach(l => { planBy[String(l.sku).toUpperCase()] = l; });
+    const g = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=1&fields=id,currencyRate,lineItems&where=' + encodeURIComponent('id=' + cin7Id),
+      { headers: { Authorization: auth, 'content-type': 'application/json' } });
+    if (!g.ok) return res.status(502).json({ error: 'Cin7 read error ' + g.status });
+    const arr = await g.json(); const o = Array.isArray(arr) ? arr[0] : arr;
+    // Cin7 line unitPrice is in the order's BASE currency; USD = unitPrice / currencyRate (Ben). Match to 0.01.
+    const rate = Number(o && o.currencyRate) || null;
+    const cin = (o && Array.isArray(o.lineItems)) ? o.lineItems : [];
+    const cinBy = {}; cin.forEach(li => { if (li && li.code) cinBy[String(li.code).toUpperCase()] = li; });
+    const rows = plan.map(l => { const c = cinBy[String(l.sku).toUpperCase()];
+      const pq = Number(l.qty), pp = Number(l.price);
+      const cq = c ? Number(c.qty) : null, raw = c ? Number(c.unitPrice) : null;
+      const usd = (raw != null && rate) ? Math.round((raw * rate) * 10000) / 10000 : null;   // base→USD (rate is USD per base unit)
+      return { sku: l.sku, plan_qty: pq, cin7_qty: cq, plan_price: pp, cin7_unitprice: raw, cin7_usd: usd,
+        created: c ? c.createdDate : null, qtyShipped: c ? Number(c.qtyShipped) : null, holdingQty: c ? Number(c.holdingQty) : null,
+        qty_ok: c ? cq === pq : false,
+        price_ok: (usd != null && pp != null) ? Math.abs(usd - pp) < 0.01 : false }; });
+    const extras = Object.keys(cinBy).filter(c => !planBy[c] && Number(cinBy[c].qty) > 0);
+    res.json({ ok: true, cin7_id: cin7Id, currency_rate: rate, lines: rows.length,
+      qty_ok: rows.filter(r => r.qty_ok).length, price_ok: rows.filter(r => r.price_ok).length,
+      qty_off: rows.filter(r => !r.qty_ok).map(r => r.sku),
+      price_off: rows.filter(r => !r.price_ok).map(r => ({ sku: r.sku, plan_usd: r.plan_price, cin7_usd: r.cin7_usd, created: r.created, qtyShipped: r.qtyShipped, holdingQty: r.holdingQty })),
+      extras_in_cin7: extras });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // BULK "Update Cin7 Date" — push the planner completion date to Cin7 EstimatedDeliveryDate for every supplied PO.

@@ -1340,11 +1340,11 @@
   // manual export of the revised order plan (SKU → qty) as a CSV download or clipboard copy with Code/Qty headers.
   // format the post-push Cin7 read-back validation for the user
   function cin7ValMsg(v){ if(!v||!v.checked)return (v&&v.error)?' · <span class="mut tiny">(couldn\'t verify: '+esc(v.error)+')</span>':'';
-    if(v.aligned)return ' · <span style="color:#166534;font-weight:700">✓ verified exact match in Cin7</span>';
-    if(v.corrected){ var still=(v.extras_after||v.qty_off_after); return still
-      ? ' · <span style="color:#b91c1c;font-weight:700">⚠ re-pushed but '+(v.extras_after||0)+' extra / '+(v.qty_off_after||0)+' qty still off — check Cin7</span>'
-      : ' · <span style="color:#92710a;font-weight:700">✓ auto-corrected '+(v.extras||0)+' stray SKU(s) → now aligned</span>'; }
-    return ' · <span style="color:#b91c1c;font-weight:700">⚠ '+(v.extras||0)+' extra / '+(v.qty_off||0)+' qty off in Cin7</span>'; }
+    if(v.aligned)return ' · <span style="color:#166534;font-weight:700">✓ verified exact match in Cin7 (qty + price)</span>';
+    var eo=(v.extras_after!=null?v.extras_after:v.extras)||0, qo=(v.qty_off_after!=null?v.qty_off_after:v.qty_off)||0, po=(v.price_off_after!=null?v.price_off_after:v.price_off)||0;
+    var parts=[]; if(qo)parts.push(qo+' qty'); if(eo)parts.push(eo+' extra SKU'); if(po)parts.push(po+' price');
+    var skus=(po&&v.price_off_skus&&v.price_off_skus.length)?' ('+v.price_off_skus.slice(0,4).map(esc).join(', ')+(po>4?'…':'')+')':'';
+    return ' · <span style="color:#b91c1c;font-weight:700">⚠ '+(v.corrected?'re-pushed; ':'')+parts.join(' / ')+' still off in Cin7'+skus+'</span>'; }
   function erpUploadInert(po){ closeShPop&&closeShPop();
     // What's actually out of sync decides which buttons show: only the DATE differs → just the date button;
     // line items differ (qty/not-in-ERP) → show both (lines + date), plus the manual CSV/copy fallback.
