@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.233 - ORDER PLAN report: freeze panes (col A + rows 1-9) + bold PO/SKU header rows
+
+Froze the first column and the top 9 rows (metadata + SKU header) so they stay visible when scrolling, and
+bolded row 2 (PO) and row 9 (SKU header). Added freeze-pane support + a bold cell style to the XLSX writer.
+
 ## v25.232 - ORDER PLAN report fixes: shipment hierarchy + supplier + QTY header
 
 - "Shipments with this PO" now populates only for the MASTER PO (lists the member POs with their supplier,
