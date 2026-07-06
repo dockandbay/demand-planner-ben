@@ -55,10 +55,8 @@
 #supply-root #rep-subnav,#supply-root #config-subs,#supply-root #prod-subtabs,#supply-root .po-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 12px}
 /* Opened PO detail lives inside the wide, horizontally-scrolling PO grid — pin its sub-tab strip to the left
    so PAYMENTS/DATES/etc stay fixed while the grid scrolls sideways (desktop). */
-/* Pin the whole expanded PO detail panel (sub-tabs + panels) to the left of the horizontally-scrolling grid.
-   Sticky must sit on the wrapper (containing block = the full-width colspan td), NOT on .po-subnav (whose
-   containing block is this narrow 1340px wrapper, so it slid away once you scrolled past it). */
-#supply-root tr.exp-row .po-detail-wrap{position:sticky;left:0;z-index:6}
+/* Pinning the expanded PO detail panel is done by sticking the <td> ITSELF (see the table.po-tbl exp-row
+   rule below), not a child div — position:sticky on a div inside a <td> is unreliable in table layouts. */
 #supply-root .ex-badge{display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:#dc2626;color:#fff;font-size:9px;font-weight:700;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px}
 #supply-root .po-set-shipping{font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:#dbeafe;border:1px solid #60a5fa;color:#1d4ed8;cursor:pointer;white-space:nowrap}
 #supply-root .datewrap{display:inline-flex;align-items:center;gap:2px;position:relative}
@@ -134,6 +132,9 @@
 #supply-root table.samp-tbl thead th,#supply-root table.samp-tbl tbody td{text-align:left}   /* Samples grid: left-align everything */
 #supply-root tbody tr:hover td{background:#fafaf8}
 #supply-root tr.exp-row>td{background:#f8fafc;text-align:left;white-space:normal}
+/* PO grid only: stick the expanded detail cell to the left so its sub-tabs + panels stay put while the wide
+   grid scrolls sideways. Sticking the <td> itself (like the frozen first columns) works where a child div did not. */
+#supply-root table.po-tbl tr.exp-row>td{position:sticky;left:0;z-index:5}
 #supply-root .tool-badge,#scenario-root .tool-badge{font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;letter-spacing:.2px;display:inline-block}
 #supply-root .chip{display:inline-block;background:#e0f2fe;color:#075985;font-size:11px;padding:2px 6px;border-radius:10px;margin:2px 2px;white-space:nowrap}
 #supply-root .chip .xd-rm{border:none;background:none;color:#0369a1;cursor:pointer;font-weight:700;padding:0 0 0 2px;font-size:12px;line-height:1}

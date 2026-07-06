@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.285 - PURCHASE ORDERS: sticky PO detail — stick the <td>, not a child div (v25.284 fix)
+
+v25.284's sticky on the wrapper div didn't hold: position:sticky on a div inside a <td> is unreliable in
+table layouts (Chrome/Safari). Switched to sticking the exp-row <td> itself (PO grid only), the same pattern
+the frozen first columns use — so the expanded PO detail (sub-tabs + panels) now stays pinned to the left
+while the wide grid scrolls sideways.
+
 ## v25.284 - PURCHASE ORDERS: expanded PO detail (sub-tabs) pinned when scrolling the grid
 
 The PLAN sub-tab menu (Payments/Dates/Client-FBA/…) scrolled sideways with the wide PO grid. The v25.275
