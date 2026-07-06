@@ -2788,7 +2788,7 @@ return {project:project, getBuyQtys:getBuyQtys, buyplanItems:buyplanItems, rende
 })();
 /* ===== END BUY PLAN ENGINE ===== */
 /* Expose handlers referenced by engine-generated inline markup (e.g. panel market tabs use onclick="swM(...)"). */
-if(typeof window!=='undefined'){window.swM=BP.swM;window.rpc=BP.rpc;}
+if(typeof window!=='undefined'){window.swM=BP.swM;window.rpc=BP.rpc;window.open_=open_;window.close_=close_;}
 
 // Buy plan scaffold HTML (pills, settings, table, overlay). Injected into #buy-wrap by renderBuyView().
 var BUY_SCAFFOLD=`<div class="wrap">
