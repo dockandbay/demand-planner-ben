@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.260 - Supplier portal mobile polish: badge, PO wrap, sticky sub-nav, font sizes
+
+Mobile (≤640px) portal fixes: (1) first column widened to 60px so the MANAGE "M" shows its action-count
+badge; (2) PO number column wraps after ~12 chars; (3) the PO-detail sub-menu (TIMELINE / ORDER PLAN / …)
+is a sticky, horizontally-scrollable strip instead of wrapping across multiple rows; (4) stop iOS text
+inflation (text-size-adjust:100%) and trim oversized headings (section headers, invoice/packing-list). CSS-only.
+
 ## v25.259 - PO detail: new DOCUMENTS tab (list / download / delete / upload)
 
 Added a DOCUMENTS sub-tab to the admin PO detail panel (SUPPLY ▸ PURCHASE ORDERS) showing every file held for

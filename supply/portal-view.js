@@ -294,7 +294,7 @@
         next();
       });
     }); }
-  var STYLE=`#supply-root{display:none;font-size:12px;color:#1a1a1a;padding-top:4px}
+  var STYLE=`#supply-root{display:none;font-size:12px;color:#1a1a1a;padding-top:4px;-webkit-text-size-adjust:100%;text-size-adjust:100%}
 #supply-root .stab{background:transparent;border:none;padding:6px 13px;font-size:12px;font-weight:500;cursor:pointer;color:#888;border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit}
 #supply-root .stab:hover{color:#1a1a1a}
 #supply-root .stab.active{color:#1a1a1a;border-bottom-color:#1a1a1a;font-weight:600}
@@ -422,14 +422,23 @@
   #supply-root #pp-tabs{display:flex!important;flex:1 1 100%;width:100%;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 0 8px;border-bottom:1px solid #e5e7eb}
   #supply-root #pp-tabs::-webkit-scrollbar{height:0}
   #supply-root #pp-tabs .rtab{flex:0 0 auto;padding:9px 13px;font-size:13px;white-space:nowrap;border-bottom-width:3px}
-  /* compact MANAGE → "M" to save horizontal space; narrow the pinned first column to match */
+  /* compact MANAGE → "M", but keep the first column wide enough to show the action-count badge */
   #supply-root .pp-exp .mng-txt{display:none}
-  #supply-root .pp-exp{padding:4px 8px}
+  #supply-root .pp-exp{padding:4px 6px}
   #supply-root .pp-exp::before{content:"M"}
   #supply-root table.pp-tbl thead th:first-child,
-  #supply-root table.pp-tbl tbody tr:not([id]) td:first-child{width:40px;min-width:40px;max-width:40px}
+  #supply-root table.pp-tbl tbody tr:not([id]) td:first-child{width:60px;min-width:60px;max-width:60px;overflow:visible}
   #supply-root table.pp-tbl thead th:nth-child(2),
-  #supply-root table.pp-tbl tbody tr:not([id]) td:nth-child(2){left:40px}
+  #supply-root table.pp-tbl tbody tr:not([id]) td:nth-child(2){left:60px;white-space:normal;word-break:break-all;max-width:12ch;min-width:0}
+  /* PO-detail sub-menu (TIMELINE / ORDER PLAN / …): the detail renders inside a very wide table cell, so pin
+     the strip to the viewport (sticky left:0 + width:100vw) and let it scroll sideways within that, instead of
+     spanning the full table width. sticky top:0 keeps it visible while scrolling the panel. */
+  #supply-root .po-subnav{position:sticky;left:0;top:0;z-index:5;width:100vw;max-width:100vw;box-sizing:border-box;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  #supply-root .po-subnav::-webkit-scrollbar{height:0}
+  #supply-root .po-subnav .rtab{flex:0 0 auto;white-space:nowrap}
+  /* stop iOS inflating large text; trim oversized headings */
+  #supply-root .sect-h{font-size:11px}
+  #supply-root .ppx-h{font-size:12px}
 }`;
   function injectStyle(){ if(document.getElementById('pv-style'))return; var st=document.createElement('style'); st.id='pv-style'; st.textContent=STYLE; document.head.appendChild(st); }
 
@@ -480,7 +489,7 @@
       var addOpts=supSkus.filter(function(s){ return !lineSkus[s.sku] && !(costs[s.sku]&&costs[s.sku].is_added); }).map(function(s){ return '<option value="'+esc(s.sku)+'">'+esc(s.product_name||'')+'</option>'; }).join('');
       // upload a commercial invoice / packing (.xlsx) to auto-fill qty + price overrides from the file
       var invUpload='<div style="margin:0 0 10px;padding:8px 11px;border:1px solid #cdd9ea;border-radius:7px;background:#f8fafc">'
-        +'<div style="font-weight:600;font-size:12px;margin-bottom:4px">📄 Upload invoice / packing list (Excel) to auto-fill qty &amp; price</div>'
+        +'<div class="ppx-h" style="font-weight:600;font-size:12px;margin-bottom:4px">📄 Upload invoice / packing list (Excel) to auto-fill qty &amp; price</div>'
         +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><input type="file" class="pp-inv-parse-file" data-po="'+po+'" accept=".xlsx" style="font-size:11px;max-width:280px"><button class="save-btn pp-inv-parse-go" data-po="'+po+'">Parse file</button></div>'
         +'<div class="pp-inv-parse-out" data-po="'+po+'" style="margin-top:6px"></div>'
         +'<div class="tiny mut" style="margin-top:3px">Reads the SKU / Q’TY (PCS) / Unit Price columns and proposes qty + price overrides. You review, then apply — it then goes to Dock &amp; Bay to approve.</div></div>';
