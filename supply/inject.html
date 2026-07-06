@@ -684,6 +684,7 @@
     else if(r.fix==='orderplan'){ var olbl=r.field==='suprisk'?'Open supplier-risk lines':r.field==='disc'?'Open discontinued lines':'Open unapproved partials'; fix='<button class="save-btn light act-open-op" data-k="'+esc(r.target_key||r.ref)+'" data-flt="'+esc(r.field||'partials')+'">'+olbl+'</button>'; }
     else if(r.fix==='gotoreport'){ var rlbl=r.field==='cashflow'?'Open cash flow ▸':'Open ERP Compare report ▸'; fix='<button class="save-btn light act-gotoreport" data-rk="'+esc(r.field||'erp-compare')+'" data-cfstatus="'+esc(r.cfstatus||'')+'" data-cfmonth="'+esc(r.cfmonth||'')+'">'+rlbl+'</button>'; }
     else if(r.fix==='gotoitem'){ var ilbl=r.gotarget==='dep'?'Open deposit ▸':r.gotarget==='other'?'Open other payments ▸':'Open PO ▸ Payments'; fix='<button class="save-btn light act-gotoitem" data-go="'+esc(r.gotarget||'po')+'" data-k="'+esc(r.target_key||r.ref)+'">'+ilbl+'</button>'; }
+    else if(r.fix==='gotomfg'){ fix='<button class="save-btn light act-gotomfg">Open Manufacturing ▸</button>'; }
     // Date conflict has TWO valid fixes: correct the date (above), OR advance the PO status (own line below).
     if(r.type==='Date conflict'){ fix2='<span class="tiny mut">or set status</span> <select class="fci act-postatus" data-po="'+esc(r.target_key||r.ref)+'" data-id="'+r._id+'"><option value="">—</option>'+PO_STATUSES.map(function(stx){return '<option>'+esc(stx)+'</option>';}).join('')+'</select>'; }
     // clickable ref → open the PO (expanded) or the shipment, based on the action's target
@@ -751,7 +752,8 @@
       if(rk==='cashflow'){ if(b.dataset.cfstatus)_cfState.status=b.dataset.cfstatus; if(b.dataset.cfmonth)_cfState.month=b.dataset.cfmonth; }
       selectReport(rk); };});
     document.querySelectorAll('#act-grid .act-gotoitem').forEach(function(b){b.onclick=function(){ var g=b.dataset.go, k=b.dataset.k;
-      if(g==='dep')gotoDeposit(k); else if(g==='other')gotoOther(); else gotoPO(k,'pay'); };}); }
+      if(g==='dep')gotoDeposit(k); else if(g==='other')gotoOther(); else gotoPO(k,'pay'); };});
+    document.querySelectorAll('#act-grid .act-gotomfg').forEach(function(b){b.onclick=function(){ showPoSub('manufacturing'); };}); }
 
   // ---- PIPELINE: PO lifecycle as a grouped timeline (stages = groups; cards ordered by next milestone) ----
   var PIPE_HC={late:'#b91c1c',soon:'#d97706',ok:'#15803d',done:'#6b7280',unknown:'#9ca3af'};
@@ -2576,7 +2578,7 @@
       var pos=(bn.finishedPos||[]).filter(function(x){return x.qty;});
       // (a) open finished orders → demand — sorted by production end date (earliest first; blanks last)
       pos.sort(function(a,c){ var da=a.prod_end||'', dc=c.prod_end||''; if(!da&&!dc)return 0; if(!da)return 1; if(!dc)return -1; return da<dc?-1:(da>dc?1:0); });
-      var ordRows=pos.length?pos.map(function(x){return '<tr><td class="l"><button class="lnk-btn mfg-po-go" data-po="'+esc(x.po)+'" title="'+esc(x.branch||'')+'">'+esc(x.po)+'</button></td><td class="l">'+(x.prod_end?esc(x.prod_end):'<span class="mut tiny">—</span>')+'</td><td>'+units(x.qty)+'</td></tr>';}).join('')
+      var ordRows=pos.length?pos.map(function(x){return '<tr><td class="l"><button class="lnk-btn mfg-po-go" data-po="'+esc(x.po)+'" title="'+esc(x.branch||'')+'">'+esc(x.po)+'</button></td><td class="l">'+dcell(x.prod_end)+'</td><td>'+units(x.qty)+'</td></tr>';}).join('')
         :'<tr><td class="l mut tiny" colspan="3">no open finished orders</td></tr>';
       var aTbl='<div class="tw" style="max-width:400px"><table><thead><tr><th class="l">'+badgeFin+' Open order</th><th class="l">Prod. end</th><th>Qty</th></tr></thead><tbody>'+ordRows
         +'<tr style="border-top:2px solid #cbd5e1;font-weight:700;background:#f8fafc"><td class="l">Total demand</td><td></td><td>'+units(bn.demand)+'</td></tr></tbody></table></div>';

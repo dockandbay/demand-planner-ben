@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.250 - Manufacturing mismatch → SUPPLY ▸ Actions card + Prod. end shown dd-mmm-yy
+
+Two changes:
+- **Mismatch action cards:** each parent bundle SKU with an UNACCEPTED component mismatch (short/over vs
+  demand) now raises a card in SUPPLY ▸ Actions ("Manufacturing mismatch"; high if any shortage, else amber)
+  listing the offending components and an "Open Manufacturing ▸" jump. Dismiss/snooze/done lifecycle applies
+  like other actions; accepting the mismatch (or fixing the qty) clears it. Refactored the manufacturing
+  demand/supply computation into a shared helper reused by the endpoint and the action generator.
+- **Prod. end format:** the (a) open-orders "Prod. end" column now displays dd-mmm-yy (e.g. 30-Jun-26);
+  sorting still uses the underlying date.
+
 ## v25.249 - Manufacturing (b): Open MFG orders column no longer clipped (table sizes to content)
 
 Force the (b) table to width:max-content so the "Open MFG orders" header + rows get their full width
