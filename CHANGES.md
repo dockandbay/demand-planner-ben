@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.257 - Supplier portal: mobile-friendly tab strip + sticky PO columns
+
+Two portal fixes: (1) the sub-menu tab strip (Purchase Orders / Shipment Plan / Barcodes / Deposits /
+Samples) becomes a full-width horizontally-scrollable row on mobile (≤640px) instead of wrapping/overlapping;
+(2) the Purchase Orders grid now pins the MANAGE + PO columns (position:sticky) while the wide grid scrolls
+sideways — data rows only, the expanded detail row is excluded. CSS-only (portal STYLE block).
+
 ## v25.256 - Shipment Plan: Direct-to-Client details + label downloads
 
 Shipment-plan cards (both real shipments and FOB) now surface a Direct-to-Client block for any DtC PO on the

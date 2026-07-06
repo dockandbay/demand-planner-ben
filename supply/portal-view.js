@@ -407,7 +407,22 @@
 #supply-root .bc-mono{font-family:ui-monospace,Menlo,monospace}
 #supply-root tr.batchrow td{background:#eef2ff!important;font-weight:600;border-top:1px solid #c7d2fe;text-align:left;white-space:normal}
 #supply-root tr.cat-hdr td{background:#e8e8e6;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#333;padding:3px 8px;text-align:left;border-top:2px solid #bbb}
-#supply-root .opapprove:hover{color:#15803d}`;
+#supply-root .opapprove:hover{color:#15803d}
+/* Purchase Orders grid: keep the MANAGE + PO columns anchored while scrolling the wide grid sideways
+   (data rows only — the expanded detail row has id="pp-N" and must not be pinned). */
+#supply-root table.pp-tbl thead th:first-child,
+#supply-root table.pp-tbl tbody tr:not([id]) td:first-child{position:sticky;left:0;z-index:2;background:#fff;width:72px;min-width:72px;max-width:72px;box-sizing:border-box}
+#supply-root table.pp-tbl thead th:nth-child(2),
+#supply-root table.pp-tbl tbody tr:not([id]) td:nth-child(2){position:sticky;left:72px;z-index:2;background:#fff;box-shadow:1px 0 0 #e0e0e0}
+#supply-root table.pp-tbl thead th:first-child,#supply-root table.pp-tbl thead th:nth-child(2){z-index:3;background:#f3f3f1}
+/* Mobile: turn the portal sub-menu (tab strip) into a full-width horizontally-scrollable row so all tabs
+   stay reachable instead of wrapping/overlapping. */
+@media (max-width:640px){
+  #supply-root .bar{flex-wrap:wrap}
+  #supply-root #pp-tabs{display:flex!important;flex:1 1 100%;width:100%;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 0 8px;border-bottom:1px solid #e5e7eb}
+  #supply-root #pp-tabs::-webkit-scrollbar{height:0}
+  #supply-root #pp-tabs .rtab{flex:0 0 auto;padding:9px 13px;font-size:13px;white-space:nowrap;border-bottom-width:3px}
+}`;
   function injectStyle(){ if(document.getElementById('pv-style'))return; var st=document.createElement('style'); st.id='pv-style'; st.textContent=STYLE; document.head.appendChild(st); }
 
   function mount(opts){
