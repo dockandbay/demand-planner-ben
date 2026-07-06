@@ -1342,12 +1342,15 @@
     // What's actually out of sync decides which buttons show: only the DATE differs → just the date button;
     // line items differ (qty/not-in-ERP) → show both (lines + date), plus the manual CSV/copy fallback.
     var _r=poBy[po]||{};
+    // Button visibility is drift-based and PRICE-AGNOSTIC (price is never a drift factor): SKU/qty drift shows
+    // the lines button; a date drift shows the date button. Lines drift also surfaces the date button.
+    var linesPending=(_r.erp_total>0&&!(_r.erp_in>0))||_r.erp_pending>0;
     var datePending=_r.erp_date_pending>0 && !poComplete(_r);
-    // Ben's rule: the per-PO "Update lines" push must ALWAYS be available so it can TOTALLY OVERRIDE Cin7
-    // (all SKUs + qty + price), even when only price drifted (qty-only detection would otherwise hide it).
-    var showLines=true, showDate=datePending;
-    var manualBlk='<div class="mut" style="margin-bottom:12px;font-size:13px">Push this PO to Cin7 as a full override (all SKUs, quantities &amp; prices). Or export the order plan (Code &amp; Qty) to enter manually:</div>'
-        +'<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px"><button class="save-btn" id="erp-dl" style="background:#2563eb;color:#fff;border-color:#2563eb">⬇ Download CSV</button><button class="save-btn" id="erp-cp">⧉ Copy to clipboard</button></div>';
+    var showLines=linesPending, showDate=datePending||linesPending;
+    var manualBlk=showLines
+      ? '<div class="mut" style="margin-bottom:12px;font-size:13px">Push the revised order plan to Cin7 (SKUs, quantities &amp; prices — full override), or export it to enter manually:</div>'
+        +'<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px"><button class="save-btn" id="erp-dl" style="background:#2563eb;color:#fff;border-color:#2563eb">⬇ Download CSV</button><button class="save-btn" id="erp-cp">⧉ Copy to clipboard</button></div>'
+      : '<div class="mut" style="margin-bottom:12px;font-size:13px">The completed-at-warehouse date differs from the Cin7 delivery date. Push the updated date:</div>';
     var bg=document.createElement('div'); bg.id='erp-bg'; bg.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100000;display:flex;align-items:flex-start;justify-content:center;padding:60px 12px';
     bg.innerHTML='<div style="background:#fff;border-radius:10px;max-width:460px;width:100%;padding:18px;font-family:Arial,Helvetica,sans-serif">'
       +'<div style="font-weight:700;font-size:15px;margin-bottom:6px">Update ERP'+(po?(' — '+esc(po)):'')+'</div>'
@@ -2149,7 +2152,13 @@
         .then(function(){ OP_EDIT=null; invalidateDerived(); poRefetchPanel(po,i); })
         .catch(function(e){ b.disabled=false; b.textContent='✓ Save'; alert('Save failed: '+(e.message||e)); }); }; });
     document.querySelectorAll('#podet-'+i+' .op-erp-up-panel').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po); }; });
-    document.querySelectorAll('#podet-'+i+' .op-cin7-full').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po); }; });
+    document.querySelectorAll('#podet-'+i+' .op-cin7-full').forEach(function(b){ b.onclick=function(){ var p=b.dataset.po;
+      if(!confirm('Push ALL of '+p+'’s SKUs, quantities and prices to Cin7 as a full override?\n\nUpdates the Cin7 PO (creates it if missing). Price = approved supplier final cost, else standard. This writes to the LIVE Cin7 ERP.'))return;
+      var orig=b.textContent; b.disabled=true; b.textContent='Sending…';
+      fetch('/api/supply/po/'+encodeURIComponent(p)+'/cin7-lines',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({completion_date:(poBy[p]||{}).checkin||''})}).then(function(r){return r.json();}).then(function(j){
+        if(j&&j.error){ b.disabled=false; b.textContent=orig; alert('Cin7: '+j.error); return; }
+        b.textContent='✓ Pushed ('+(j.lines||0)+' lines)'; invalidateDerived(); delete cache['purchase-orders'];
+      }).catch(function(e){ b.disabled=false; b.textContent=orig; alert('Failed: '+(e.message||e)); }); }; });
     document.querySelectorAll('#podet-'+i+' .erp-up-dates').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po); }; });
     // CLIENT tab label downloads — crossdock barcodes (same as portal) + SHIPS WITH SUPPLIER master label
     document.querySelectorAll('#podet-'+i+' .po-dl-xd').forEach(function(b){ b.onclick=function(){ var skus=((poBy[po]&&poBy[po].crossdock_skus)||'').trim();

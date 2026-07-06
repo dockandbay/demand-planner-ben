@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.263 - Cin7 modal reverted to drift-based visibility; full-push kept as a direct button
+
+Per Ben's spec: the Update-ERP modal buttons are drift-based and price-agnostic again — date-only drift shows
+the date button; SKU/qty drift shows date + lines; price is never a visibility factor. The "⬆ Push to Cin7
+(full)" button on the ORDER PLAN tab now fires the full lines override DIRECTLY (confirm → /cin7-lines) rather
+than opening the (now drift-gated) modal, so a price-only change can still be force-pushed. Refines v25.262.
+
 ## v25.262 - Cin7 per-PO lines push always available (full override, incl. price-only changes)
 
 Diagnosis of PO-56EUXR1: qty matched Cin7 but 9 lines kept stale prices. Root cause — the per-PO
