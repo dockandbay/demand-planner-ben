@@ -2215,7 +2215,7 @@
     var cats=Array.from(new Set(skuMaster.map(function(s){return s.category;}).concat(lines.map(function(l){return l.category;})).filter(Boolean))).sort();
     var rws=Array.from(new Set(skuMaster.map(function(s){return s.release_window;}).filter(Boolean))).sort();
     var skuCat={},skuRW={},skuAttr={}; skuMaster.forEach(function(s){skuCat[s.sku]=s.category;skuRW[s.sku]=s.release_window;
-      skuAttr[s.sku]={sup:s.supplier||'',cq:s.carton_qty||'',dis:s.discontinue||'',disAu:s.discontinue_au||'',disCa:s.discontinue_ca||'',sm:s.supplier_multiple_all||'',ean:s.product_ean||'',title:s.product_name||'',size:s.size||'',colour:s.colour_long||''};});
+      skuAttr[s.sku]={sup:s.supplier||'',cq:s.carton_qty||'',dis:s.discontinue||'',disAu:s.discontinue_au||'',disCa:s.discontinue_ca||'',sm:s.supplier_multiple_all||'',ean:s.product_ean||'',title:s.product_name||'',size:s.size||'',size_long:s.size_long||'',colour:s.colour_long||''};});
     lines.forEach(function(l){if(l.category)skuCat[l.sku]=l.category; if(l.release_window)skuRW[l.sku]=l.release_window;});
     var defS=statuses.filter(function(s){return /production/i.test(s);}); if(!defS.length)defS=statuses.slice(0,1);
     var st={statuses:new Set(defS),countries:new Set(countries.indexOf('UK')>=0?['UK']:countries),prod:'All',cat:'All',batch:'All',supplier:'All',q:'',poq:'',scope:'ordered',rw:'All',partials:false,erpdiff:false,suprisk:false,disc:false,focus:false};
@@ -2363,7 +2363,7 @@
         grid.push(pad('Branch').concat(pos.map(function(po){return pmeta[po].branch;})));
         grid.push(['SKU','EAN','Carton qty','Release window','Product title','Size','Colour'].concat(pos));   // SKU-attribute header (PO numbers repeat as qty columns)
         skus.forEach(function(sku){ var a=skuAttr[sku]||{};
-          grid.push([sku, a.ean||'', a.cq||'', (skuRW[sku]||''), a.title||'', a.size||'', a.colour||'']
+          grid.push([sku, a.ean||'', a.cq||'', (skuRW[sku]||''), a.title||'', a.size_long||'', a.colour||'']
             .concat(pos.map(function(po){ var q=qmap[sku+'|'+po]; return q?q:''; }))); });
         var bytes=buildXlsx('Order Plan', grid); var blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
         var url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download='OrderPlan_'+new Date().toISOString().slice(0,10)+'.xlsx'; document.body.appendChild(a); a.click();

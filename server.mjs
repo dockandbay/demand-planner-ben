@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.230';
+const APP_VERSION = 'v25.231';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1377,7 +1377,7 @@ app.get('/api/supply/:section', async (req, res) => {
         return res.json(await q(`SELECT s.sku, coalesce(s.category,'') category, coalesce(s.release_window,'') release_window,
           coalesce(s.barcode_sku_name,'') name,
           coalesce(p.product_ean,'') product_ean, coalesce(p.product_name,'') product_name,
-          coalesce(p.size_short,'') size, coalesce(p.colour_long,'') colour_long,
+          coalesce(p.size_short,'') size, coalesce(p.size_long,'') size_long, coalesce(p.colour_long,'') colour_long,
           p.main_supplier_final supplier, p.supplier_multiple_all,
           nullif(p.carton_qty,'') carton_qty,
           nullif(p.discontinue_date_final,'') discontinue, nullif(p.discontinue_date_au_final,'') discontinue_au, nullif(p.discontinue_date_ca,'') discontinue_ca

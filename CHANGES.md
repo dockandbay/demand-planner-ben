@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.231 - Add size_long to products; ORDER PLAN export Size = long description
+
+Added a size_long column to planner.products (migration 095 + seed from SKU_CHILD-NEW FIELDS.csv, 904 SKUs).
+Surfaced in the SKUs query; the ORDER PLAN XLSX export "Size" column now shows the long size description
+(e.g. "Extra Large (200x90cm)") instead of the short code. NOTE for Diviyaj: n8n must map Airtable
+sku_child.size_long into planner.products for ongoing sync.
+
 ## v25.230 - Parse invoice: set order-plan SKUs not on the invoice to 0
 
 When parsing a supplier invoice, SKUs that are on the PO order plan but NOT on the invoice are now proposed as
