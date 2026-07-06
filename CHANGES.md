@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.283 - ORDER PLAN: no scroll-jump on approve, + fast explanatory tooltips
+
+(1) Approving a partial (the p✓ tick), "approve all partials", supplier/discontinue approvals, and confirming
+a supplier change all rebuilt the grid via view(), jumping to the top. Routed them all (plus the fresh-line
+rebuild) through a new viewKeep() that preserves window + pivot scroll. (2) Added fast 120ms hover tooltips on
+the grid: a qty cell explains "Red = changed — differs from the ERP/Cin7 qty… use ⬆ Upload" (and shows the
+4c/150r shortcut hint when unchanged), and the partial badges explain what a partial carton is. Reuses the
+existing #po-note-tip element via a delegated handler on #op-grid.
+
 ## v25.282 - ORDER PLAN: Carton to col 2 (sticky), colour search, past-discontinue highlight
 
 Three tweaks to the ORDER PLAN pivot: (1) the sticky Carton column now sits in column 2, immediately after

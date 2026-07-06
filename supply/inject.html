@@ -2370,7 +2370,7 @@
       var dn=document.getElementById('op-disc-n'); if(dn)dn.textContent=dc?('('+dc+')'):''; }
     var _opShowAllPos=false;
     function viewReset(){ _opShowAllPos=false; view(); }   // any filter/search change re-caps the PO columns
-    function view(){ var cl=curLines(); var poCl=curLines(true); document.getElementById('op-grid').innerHTML=pivot(poCl,rowsFor(cl),skuCat,plcMap,skuAttr,skuRW,_opShowAllPos); bindQty(); bindUploads(); bindApprove(); bindConfirm(); bindPoLinks(); updateActionCounts();
+    function view(){ var cl=curLines(); var poCl=curLines(true); document.getElementById('op-grid').innerHTML=pivot(poCl,rowsFor(cl),skuCat,plcMap,skuAttr,skuRW,_opShowAllPos); bindQty(); bindUploads(); bindApprove(); bindConfirm(); bindPoLinks(); bindOpTips(); updateActionCounts();
       document.querySelectorAll('#op-grid .op-plan').forEach(function(b){ b.onclick=function(){ var sku=b.dataset.sku;
         if(!window.open_){ alert('Buy plan unavailable — reload the page.'); return; }
         if(window.ensureBuyPlanScaffold)window.ensureBuyPlanScaffold();   // build #buy-wrap/#ov lazily if BUY view never rendered
@@ -2386,8 +2386,19 @@
     function bindConfirm(){ document.querySelectorAll('#op-grid .opconfirm').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var ps=b.dataset.ps, po=ps.split('|')[0], sku=ps.slice(ps.indexOf('|')+1);
       fetch('/api/supply/po-line-accept',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,sku:sku})}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw 0; var ch=plcMap[ps]; if(ch){ if(ch.amended_qty!=null&&ch.amended_qty!==''){ var l=lines.find(function(x){return x.po===po&&x.sku===sku;}); if(l)l.qty=Number(ch.amended_qty); } ch.unconfirmed=false; }
-          invalidateDerived(); renderChanges(); view(); })
+          invalidateDerived(); renderChanges(); viewKeep(); })
         .catch(function(){ alert('Could not confirm'); }); }; }); }
+    // re-render the grid but keep the user's scroll position — approve/confirm/fresh-line all rebuild the whole grid, which would otherwise jump to the top
+    function viewKeep(){ var _t=document.querySelector('#op-grid .op-pivot-tw'), _sx=window.scrollX, _sy=window.scrollY, _tl=_t?_t.scrollLeft:0, _tt=_t?_t.scrollTop:0; view(); try{ window.scrollTo(_sx,_sy); var _t2=document.querySelector('#op-grid .op-pivot-tw'); if(_t2){ _t2.scrollLeft=_tl; _t2.scrollTop=_tt; } }catch(e){} }
+    // fast 120ms explanatory tooltips over the ORDER PLAN grid (qty cells that go red, partial/exception badges). Native title is ~1s; this reuses the shared #po-note-tip element. Delegated on #op-grid, which persists across re-renders.
+    function opTip(el){ if(!_noteTip){ _noteTip=document.createElement('div'); _noteTip.id='po-note-tip'; document.body.appendChild(_noteTip); }
+      var txt=el.getAttribute('data-tip')||''; if(!txt){ _noteTip.style.display='none'; return; }
+      _noteTip.textContent=txt; _noteTip.style.display='block';
+      var r=el.getBoundingClientRect(), w=_noteTip.offsetWidth||260;
+      _noteTip.style.left=Math.max(6,Math.min(r.left, window.innerWidth-w-8))+'px'; _noteTip.style.top=(r.bottom+5)+'px'; }
+    function bindOpTips(){ var g=document.getElementById('op-grid'); if(!g||g._tips)return; g._tips=1; var t;
+      g.addEventListener('mouseover',function(e){ var el=e.target.closest&&e.target.closest('[data-tip]'); if(!el)return; clearTimeout(t); t=setTimeout(function(){ opTip(el); },120); });
+      g.addEventListener('mouseout',function(e){ var el=e.target.closest&&e.target.closest('[data-tip]'); if(!el)return; clearTimeout(t); hideNoteTip(); }); }
     // Cell shortcuts: "4c" = 4 × carton qty; "150r" = round 150 UP to the nearest full carton. Needs the SKU's carton qty (skuAttr.cq).
     function resolveQty(raw,cq){ raw=String(raw==null?'':raw).trim().toLowerCase(); if(!raw)return 0; var m;
       if((m=raw.match(/^(\d+(?:\.\d+)?)c$/))&&cq>0)return Math.round(parseFloat(m[1])*cq);
@@ -2395,7 +2406,10 @@
       return parseInt(raw,10)||0; }
     function bindQty(){ document.querySelectorAll('#op-grid input.qtycell').forEach(function(inp){
       var cq=Number((skuAttr[inp.dataset.sku]||{}).cq)||0;
-      function mm(){ var n=resolveQty(inp.value,cq); inp.classList.toggle('mm', String(n)!==String(inp.dataset.erp)); inp.classList.toggle('z', !n); }
+      function mm(){ var n=resolveQty(inp.value,cq), diff=String(n)!==String(inp.dataset.erp); inp.classList.toggle('mm', diff); inp.classList.toggle('z', !n);
+        inp.setAttribute('data-tip', diff
+          ? ('Red = changed. This quantity ('+(n||0)+') differs from the ERP/Cin7 quantity ('+(inp.dataset.erp||'0')+'). Click ⬆ Upload on this PO column header to push the new quantity to Cin7.')
+          : 'Order quantity. Shortcuts: 4c = 4 cartons (4 × carton qty) · 150r = round up to the nearest full carton.'); }
       mm(); inp.oninput=mm;
       inp.onchange=function(){ var po=inp.dataset.po, sku=inp.dataset.sku, v=resolveQty(inp.value,cq), fresh=false; inp.value=v||'';   // normalise a shortcut (4c/150r) to its resolved number in the cell
         var l=lines.find(function(x){return x.po===po&&x.sku===sku;});
@@ -2403,25 +2417,22 @@
           lines.push({po:po,sku:sku,qty:v,erp_qty:0,cost_price:sr.cost_price||0,pallet_qty:sr.pallet_qty||0,full_carton_check:'',prod_no:pr.prod_no,status:pr.status,supplier_name:pr.supplier_name,shipment_ref:pr.shipment_ref,country:pr.country,category:skuCat[sku]||sr.category,release_window:skuRW[sku],prod_start:pr.prod_start,prod_end:pr.prod_end,ship_date:pr.ship_date,delivery:pr.delivery}); }
         fetch('/api/supply/po-line/'+encodeURIComponent(po+'|'+sku),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({qty:v,po:po,sku:sku})}).then(function(r){return r.json();}).then(function(j){if(j&&j.error)throw 0;}).catch(function(){inp.classList.add('err');});
         mm();
-        if(fresh){   // a brand-new PO×SKU line needs the grid rebuilt (upload btn, counts) — preserve scroll so we don't jump to the top
-          var _tw=document.querySelector('#op-grid .op-pivot-tw'), _sx=window.scrollX, _sy=window.scrollY, _tl=_tw?_tw.scrollLeft:0, _tt=_tw?_tw.scrollTop:0;
-          view();
-          try{ window.scrollTo(_sx,_sy); var _tw2=document.querySelector('#op-grid .op-pivot-tw'); if(_tw2){ _tw2.scrollLeft=_tl; _tw2.scrollTop=_tt; } }catch(e){}
-        } else bindUploads(); }; }); }
+        if(fresh) viewKeep();   // a brand-new PO×SKU line needs the grid rebuilt (upload btn, counts) — keep scroll so we don't jump to the top
+        else bindUploads(); }; }); }
     function bindUploads(){ document.querySelectorAll('#op-grid .opup').forEach(function(b){ var po=b.dataset.up;
       var pend=lines.some(function(x){return x.po===po&&Number(x.qty)!==Number(x.erp_qty==null?x.qty:x.erp_qty);});
       b.style.display=pend?'inline-block':'none'; b.classList.toggle('has',pend);
       b.onclick=function(){ erpUploadInert(po); }; }); }
     function bindApprove(){ document.querySelectorAll('#op-grid .opapprove').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var psku=b.dataset.ap;
-      fetch('/api/supply/po-line/'+encodeURIComponent(psku)+'/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({approved:true})}).then(function(r){return r.json();}).then(function(){var l=lines.find(function(x){return (x.po+'|'+x.sku)===psku;}); if(l)l.full_carton_check='OK Partial'; view();}); }; });
+      fetch('/api/supply/po-line/'+encodeURIComponent(psku)+'/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({approved:true})}).then(function(r){return r.json();}).then(function(){var l=lines.find(function(x){return (x.po+'|'+x.sku)===psku;}); if(l)l.full_carton_check='OK Partial'; viewKeep();}); }; });
       // "Approve all partials" for a whole PO column (header button)
       document.querySelectorAll('#op-grid .op-approve-all').forEach(function(b){ b.onclick=function(e){ e.stopPropagation();
         var po=b.dataset.po, ps=lines.filter(function(l){return l.po===po && isUnapprovedPartial(l);}); if(!ps.length)return;
         b.disabled=true; b.textContent='…';
         Promise.all(ps.map(function(l){ return fetch('/api/supply/po-line/'+encodeURIComponent(l.po+'|'+l.sku)+'/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({approved:true})}).then(function(r){return r.json();}).then(function(){ l.full_carton_check='OK Partial'; }); }))
-          .then(function(){ view(); }).catch(function(){ alert('Some partials failed to approve.'); view(); }); }; });
+          .then(function(){ viewKeep(); }).catch(function(){ alert('Some partials failed to approve.'); viewKeep(); }); }; });
       function approveExc(cls,field,set){ document.querySelectorAll('#op-grid .'+cls).forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var psku=b.dataset.ap;
-        fetch('/api/supply/po-line/'+encodeURIComponent(psku)+'/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({approved:true,field:field})}).then(function(r){return r.json();}).then(function(){var l=lines.find(function(x){return (x.po+'|'+x.sku)===psku;}); if(l)set(l); view();}); }; }); }
+        fetch('/api/supply/po-line/'+encodeURIComponent(psku)+'/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({approved:true,field:field})}).then(function(r){return r.json();}).then(function(){var l=lines.find(function(x){return (x.po+'|'+x.sku)===psku;}); if(l)set(l); viewKeep();}); }; }); }
       approveExc('opapprove-sup','supplier',function(l){l.supplier_risk_approved=true;});
       approveExc('opapprove-disc','discontinue',function(l){l.discontinue_approved=true;}); }
     function togglebar(id,opts,setv){ document.getElementById(id).onclick=function(e){var t=e.target; if(t.dataset.all)setv=new Set(opts); else if(t.dataset.v!=null){if(setv.has(t.dataset.v))setv.delete(t.dataset.v);else setv.add(t.dataset.v);} else return; if(id==='op-status')st.statuses=setv; else st.countries=setv; document.getElementById(id).innerHTML=pillsHTML(opts,setv,id==='op-country'); viewReset(); }; }
@@ -2579,8 +2590,8 @@
           var pq=(ch.amended_qty!=null&&ch.amended_qty!=='')?units(ch.amended_qty):'✓';
           var ttl=(ch.amended_qty!=null&&ch.amended_qty!==''?'qty '+units(ch.amended_qty):'')+(ch.actual_cost!=null&&ch.actual_cost!==''?(ch.amended_qty!=null?' · ':'')+'cost $'+money(ch.actual_cost):'');
           tdc=' class="chgcell"'; badge=' <button class="opconfirm" data-ps="'+esc(po+'|'+sku)+'" title="supplier change — '+esc(ttl)+' · click to confirm" style="cursor:pointer;border:1px solid #f59e0b;background:#fef3c7;color:#92400e;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;white-space:nowrap">'+pq+' ✓</button>'; }
-        else if(fcc.indexOf('⚠')>=0){ tdc=' class="pcell"'; badge=' <button class="pbtn opapprove" data-ap="'+esc(po+'|'+sku)+'" title="approve partial carton qty">p ✓</button>'; }
-        else if(fcc.indexOf('OK Partial')>=0){ tdc=' class="pcellok"'; badge=' <span class="tool-badge bg-green" title="partial approved">p✓</span>'; }
+        else if(fcc.indexOf('⚠')>=0){ tdc=' class="pcell"'; badge=' <button class="pbtn opapprove" data-ap="'+esc(po+'|'+sku)+'" data-tip="Partial carton: this quantity isn\'t a whole number of cartons for the SKU (carton qty '+(a.cq||'?')+'). Click ✓ to approve ordering a partial carton." title="approve partial carton qty">p ✓</button>'; }
+        else if(fcc.indexOf('OK Partial')>=0){ tdc=' class="pcellok"'; badge=' <span class="tool-badge bg-green" data-tip="Partial carton — approved. This line intentionally orders a non-whole number of cartons." title="partial approved">p✓</span>'; }
         if(cc && q>0){   // exception flags: supplier risk + discontinued (approve like partials)
           var allowed=(a.sm||'').split(',').map(function(s){return s.trim().toLowerCase();}).filter(Boolean), psup=(meta[po].s||'').trim().toLowerCase();
           if(allowed.length && psup && allowed.indexOf(psup)<0){
