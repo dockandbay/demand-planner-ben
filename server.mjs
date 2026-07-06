@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.268';
+const APP_VERSION = 'v25.269';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3367,17 +3367,25 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
     const mode = cin7Id ? 'updated' : 'created';
     const auth = cin7Auth();
     if (!auth) return res.status(501).json({ error: 'Cin7 API credentials not configured (set CIN7_AUTH). No write performed.', lines: lines.length, mode });
-    // Cin7 v1 PO line fields: code (SKU), qty, unitCost. (Confirm field names against your Cin7 account.)
-    const lineItems = lines.map(l => ({ code: l.sku, qty: Number(l.qty), unitCost: Number(l.price) || 0 }));
     const edd = completion ? (/T/.test(completion) ? completion : completion + 'T00:00:00Z') : undefined;
-    let newId = cin7Id, r, txt, memberId, branchId, curApproved;
+    let newId = cin7Id, r, txt, memberId, branchId, curApproved, rate = null;
+    // Cin7 PO line COST field is `unitPrice` (there is NO unitCost on a PO line — the API ignores it and defaults
+    // to the product's cost). unitPrice is in the order's BASE currency, so convert: unitPrice = planUSD / currencyRate.
+    // For an existing PO read its currencyRate (and approval) first; for a new PO the rate is looked up on create,
+    // then reconciled by the price validation below.
+    if (cin7Id) {
+      try {
+        const g = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=1&fields=id,isApproved,currencyRate&where=' + encodeURIComponent('id=' + cin7Id),
+          { headers: { Authorization: auth, 'content-type': 'application/json' } });
+        if (g.ok) { const arr = await g.json(); const o = Array.isArray(arr) ? arr[0] : null;
+          if (o && typeof o.isApproved === 'boolean') curApproved = o.isApproved;
+          if (o && Number(o.currencyRate)) rate = Number(o.currencyRate); }
+      } catch (e) { /* fall through — omit isApproved / rate */ }
+    }
+    const toBase = usd => rate ? Math.round((Number(usd) / rate) * 10000) / 10000 : (Number(usd) || 0);
+    const lineItems = lines.map(l => ({ code: l.sku, qty: Number(l.qty), unitPrice: toBase(l.price) }));
     if (cin7Id) {
       // UPDATE existing Cin7 PO — preserve its current approval state (don't flip a draft to approved)
-      try {
-        const g = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=1&fields=id,isApproved&where=' + encodeURIComponent('id=' + cin7Id),
-          { headers: { Authorization: auth, 'content-type': 'application/json' } });
-        if (g.ok) { const arr = await g.json(); if (Array.isArray(arr) && arr[0] && typeof arr[0].isApproved === 'boolean') curApproved = arr[0].isApproved; }
-      } catch (e) { /* fall through — omit isApproved */ }
       const upd = { id: Number(cin7Id) || cin7Id, lineItems };
       if (curApproved !== undefined) upd.isApproved = curApproved;
       const body = [upd];
@@ -3425,6 +3433,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
     let validation = null;
     try {
       const sentByCode = {}; lineItems.forEach(li => { sentByCode[String(li.code).toUpperCase()] = li; });
+      const planUsdBy = {}; lines.forEach(l => { planUsdBy[String(l.sku).toUpperCase()] = Number(l.price); });   // plan cost in USD, for price validation
       const validateId = newId || cin7Id;
       async function getCin7Data() {
         const g = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=1&fields=id,currencyRate,lineItems&where=' + encodeURIComponent('id=' + validateId),
@@ -3434,11 +3443,12 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
         return { items: (o && Array.isArray(o.lineItems)) ? o.lineItems : [], rate: Number(o && o.currencyRate) || null };
       }
       // Cin7 line price on read = unitPrice (base currency); USD = unitPrice × currencyRate. Compare to what we sent.
+      // Cin7 line price on read = unitPrice (base currency); USD = unitPrice × currencyRate. Compare to plan USD.
       function priceOff(items, rate) { if (!rate) return [];
         const by = {}; items.forEach(li => { if (li && li.code) by[String(li.code).toUpperCase()] = li; });
         const out = []; Object.keys(sentByCode).forEach(c => { const li = by[c]; if (!li || li.unitPrice == null) return;
-          const cin = Math.round(Number(li.unitPrice) * rate * 100) / 100, sent = Math.round((Number(sentByCode[c].unitCost) || 0) * 100) / 100;
-          if (Math.abs(cin - sent) >= 0.01) out.push({ sku: sentByCode[c].code, plan: sent, cin7: cin }); });
+          const cin = Math.round(Number(li.unitPrice) * rate * 100) / 100, plan = Math.round((Number(planUsdBy[c]) || 0) * 100) / 100;
+          if (Math.abs(cin - plan) >= 0.01) out.push({ sku: sentByCode[c].code, plan: plan, cin7: cin }); });
         return out; }
       if (validateId) {
         const d = await getCin7Data();
@@ -3448,9 +3458,11 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
           const qtyOff = Object.keys(sentByCode).filter(c => !byCode[c] || Number(byCode[c].qty) !== Number(sentByCode[c].qty));
           const pOff = priceOff(d.items, d.rate);
           validation = { checked: true, currency_rate: d.rate, extras: extras.length, qty_off: qtyOff.length, price_off: pOff.length, price_off_detail: pOff.slice(0, 60), corrected: false, aligned: (!extras.length && !qtyOff.length && !pOff.length) };
-          if (extras.length || qtyOff.length) {
-            // corrective PUT: all our lines (fixes qty) + the extras at qty 0 (force removal). (Price it can't self-heal — Cin7 rejects some price changes; reported as price_off.)
-            const fix = lineItems.concat(extras.map(c => ({ code: byCode[c].code, qty: 0, unitCost: Number(byCode[c].unitCost) || 0 })));
+          if (extras.length || qtyOff.length || pOff.length) {
+            // corrective PUT: re-price EVERY line using the PO's real currencyRate (unitPrice = planUSD / rate) —
+            // this self-heals the create path (rate unknown at build) and any price drift — plus extras at qty 0.
+            const fixItems = lines.map(l => ({ code: l.sku, qty: Number(l.qty), unitPrice: d.rate ? Math.round((Number(l.price) / d.rate) * 10000) / 10000 : Number(l.price) }));
+            const fix = fixItems.concat(extras.map(c => ({ code: byCode[c].code, qty: 0, unitPrice: Number(byCode[c].unitPrice) || 0 })));
             const body2 = [{ id: Number(validateId) || validateId, lineItems: fix }]; if (typeof curApproved === 'boolean') body2[0].isApproved = curApproved;
             const r2 = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
               { method: 'PUT', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify(body2) });
