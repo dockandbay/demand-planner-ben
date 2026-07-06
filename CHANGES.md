@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.258 - Supplier portal mobile: MANAGE button → "M"
+
+On mobile (≤640px) the Purchase Orders MANAGE button shows a compact "M" (badge still shows), and the pinned
+first column narrows to 40px to reclaim space. Desktop unchanged. CSS-only + a label span.
+
 ## v25.257 - Supplier portal: mobile-friendly tab strip + sticky PO columns
 
 Two portal fixes: (1) the sub-menu tab strip (Purchase Orders / Shipment Plan / Barcodes / Deposits /

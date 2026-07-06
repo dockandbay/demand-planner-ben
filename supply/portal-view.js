@@ -422,6 +422,14 @@
   #supply-root #pp-tabs{display:flex!important;flex:1 1 100%;width:100%;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 0 8px;border-bottom:1px solid #e5e7eb}
   #supply-root #pp-tabs::-webkit-scrollbar{height:0}
   #supply-root #pp-tabs .rtab{flex:0 0 auto;padding:9px 13px;font-size:13px;white-space:nowrap;border-bottom-width:3px}
+  /* compact MANAGE → "M" to save horizontal space; narrow the pinned first column to match */
+  #supply-root .pp-exp .mng-txt{display:none}
+  #supply-root .pp-exp{padding:4px 8px}
+  #supply-root .pp-exp::before{content:"M"}
+  #supply-root table.pp-tbl thead th:first-child,
+  #supply-root table.pp-tbl tbody tr:not([id]) td:first-child{width:40px;min-width:40px;max-width:40px}
+  #supply-root table.pp-tbl thead th:nth-child(2),
+  #supply-root table.pp-tbl tbody tr:not([id]) td:nth-child(2){left:40px}
 }`;
   function injectStyle(){ if(document.getElementById('pv-style'))return; var st=document.createElement('style'); st.id='pv-style'; st.textContent=STYLE; document.head.appendChild(st); }
 
@@ -658,7 +666,7 @@
           var act=(sb.some(function(s){return s.kind==='invoice_value';})?0:1)+((p.shipment||p.flexport_reference||sb.some(function(s){return s.kind==='tracking';}))?0:1)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0);
           var cdq=sb.filter(function(s){return s.kind==='completion_date';}); var cdVal=cdq.length?cdq[cdq.length-1].value:'';
           var cdGrid=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
-          return '<tr><td class="l"><button class="save-btn pp-exp" data-i="'+i+'" data-po="'+esc(p.po)+'">MANAGE'+(act>0?' <span class="ex-badge" title="'+act+' action'+(act>1?'s':'')+' needed">'+act+'</span>':'')+'</button></td>'
+          return '<tr><td class="l"><button class="save-btn pp-exp" data-i="'+i+'" data-po="'+esc(p.po)+'"><span class="mng-txt">MANAGE</span>'+(act>0?' <span class="ex-badge" title="'+act+' action'+(act>1?'s':'')+' needed">'+act+'</span>':'')+'</button></td>'
             +'<td class="l"><b>'+esc(p.po)+'</b></td><td class="l"><span class="tool-badge '+statusBg(p.status)+'">'+esc(p.status||'')+'</span></td>'
             +'<td class="l">'+(p.country?esc(p.country):'<span class="mut">—</span>')+'</td>'
             +'<td class="l">'+(p.branch?esc(p.branch):'<span class="mut">—</span>')+'</td>'
