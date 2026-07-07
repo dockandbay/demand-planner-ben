@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.292 - PO DATES tab: source always references/links the assigned shipment
+
+The DATES source only named the shipment ("from shipment X") when the shipment actually supplied the date
+(ship_src='S'). A PO on a brand-new shipment with no dates showed "calculated" with no shipment reference.
+srcLbl now also links the assigned shipment when the date is still calculated ("calculated · 🚢 X") and links
+the ship ref for self-master 'S' rows too — so once a PO is on a shipment you can always see + click through
+to it from the DATES tab.
+
 ## v25.291 - PURCHASE ORDERS: assigning a shipment now live-updates the open PO detail (DATES)
 
 Follow-on to v25.290: the silent row patch left the expanded PO detail stale, so a newly-assigned shipment

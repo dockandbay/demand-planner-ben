@@ -1836,8 +1836,15 @@
     var payH=h;
     // ---- DATES chunk — only production start & end are editable; ship/delivery/completion are always calculated
     // (from the assigned shipment if any, else from supplier + branch lead times).
-    function srcLbl(s,masterPo){ if(s==='S'){ return masterPo?'from shipment <button class="lnk-btn po-go-ship" data-ref="'+esc(masterPo)+'" title="open shipment '+esc(masterPo)+'">'+esc(masterPo)+'</button>':'<span class="src fx">shipment</span>'; }
-      return s==='FLEX'?'<span class="src fx">Flexport</span>':s==='calc'?'calculated':'—'; }
+    // source label for a date. masterPo = the shipment whose date was used (S); shipRef = the shipment this PO is
+    // assigned to (may have no dates yet). Always link the shipment when the PO is on one — even when the date is
+    // still 'calculated' (shipment has no dates), so you can click through and set them.
+    function srcLbl(s,masterPo,shipRef){ var ref=masterPo||shipRef||'';
+      var link=function(){ return '<button class="lnk-btn po-go-ship" data-ref="'+esc(ref)+'" title="open shipment '+esc(ref)+'">'+esc(ref)+'</button>'; };
+      if(s==='S'){ return ref?('from shipment '+link()):'<span class="src fx">shipment</span>'; }
+      if(s==='FLEX')return '<span class="src fx">Flexport</span>';
+      if(s==='calc')return ref?('calculated · 🚢 '+link()):'calculated';
+      return '—'; }
     var _pseStart=r.require_confirmation?prodStatusStart(r.status,r.prod_start):'';
     var _pseEnd=r.require_confirmation?prodStatusEnd(r.status,r.prod_end):'';
     var _alert=function(m){ return m?' <span style="color:#b91c1c;font-weight:600">⚠ '+esc(m)+'</span>':''; };
@@ -1861,8 +1868,8 @@
         return '<tr'+(pend?' style="background:#fff7ed"':'')+'><td class="l">Supplier completion date <span class="mut tiny">(submitted in portal)</span></td>'
           +'<td class="l">'+(sc.value?'<b>'+fd(sc.value)+'</b>':'—')+' '+(pend?'<span class="tool-badge bg-amber">awaiting approval</span>':sc.status==='applied'?'<span class="tool-badge bg-green">applied to production end</span>':'<span class="tool-badge bg-neutral">rejected</span>')+'</td>'
           +'<td class="l" style="white-space:nowrap">'+(pend?'<button class="save-btn inv-approve" data-id="'+sc.id+'" title="apply as the production-end date">Approve → production end</button> <button class="save-btn light inv-reject" data-id="'+sc.id+'">Reject</button>':sc.status==='applied'?'<span class="src fx">supplier portal</span>':'<span class="mut tiny">supplier portal · '+esc(sc.submitted_at||'')+'</span>')+'</td></tr>'; })()
-      +'<tr><td class="l">Ship</td><td class="l"><b>'+(r.ship?fd(r.ship):'—')+'</b></td><td class="l">'+srcLbl(r.ship_src,r.delivery_master_po)+'</td></tr>'
-      +'<tr><td class="l">Arrival / Delivery</td><td class="l"><b>'+(r.delivery?fd(r.delivery):'—')+'</b></td><td class="l">'+srcLbl(r.delivery_src,r.delivery_master_po)+'</td></tr>'
+      +'<tr><td class="l">Ship</td><td class="l"><b>'+(r.ship?fd(r.ship):'—')+'</b></td><td class="l">'+srcLbl(r.ship_src,r.delivery_master_po,r.shipment)+'</td></tr>'
+      +'<tr><td class="l">Arrival / Delivery</td><td class="l"><b>'+(r.delivery?fd(r.delivery):'—')+'</b></td><td class="l">'+srcLbl(r.delivery_src,r.delivery_master_po,r.shipment)+'</td></tr>'
       +'<tr><td class="l"><b>Completion</b> <span class="mut tiny">delivery +7 · Fulfil/Cin7</span></td><td class="l"><b>'+(r.checkin?fd(r.checkin):'—')+'</b></td><td class="l mut tiny">calculated</td></tr>'
       +'</tbody></table></div>'
       +'<div class="mut tiny" style="margin:2px 2px 8px">Ship = production end + 7 days (or the shipment\'s departure). Delivery = ship + branch transit lead (air/sea by the shipment\'s mode; sea assumed without a shipment). Completion = delivery + 7.</div>';
