@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.293';
+const APP_VERSION = 'v25.294';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3358,7 +3358,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
   const completion = ((req.body && req.body.completion_date) || '').trim();
   try {
     const erpRow = (await pool.query('SELECT erp_po_id FROM planner.erp_purchase_orders WHERE po=$1', [po])).rows[0];
-    const cin7Id = erpRow && erpRow.erp_po_id;          // present → update; absent → create a new Cin7 PO
+    let cin7Id = erpRow && erpRow.erp_po_id;            // present → update; absent → create a new Cin7 PO (nulled below if the mirrored id turns out to be voided/gone)
     const poRow = (await pool.query('SELECT coalesce(supplier_name,$2) supplier_name, coalesce(branch,$2) branch FROM planner.purchase_orders WHERE po=$1', [po, ''])).rows[0];
     if (!poRow) return res.status(404).json({ error: 'PO ' + po + ' not found in the planner.' });
     const lines = (await pool.query(
@@ -3371,7 +3371,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
                  WHERE plc.po=l.po AND plc.sku=l.sku AND plc.confirmed_at IS NOT NULL AND plc.final_cost IS NOT NULL) IS NOT NULL) approved_price
        FROM planner.purchase_order_lines l WHERE l.po=$1 AND coalesce(l.qty,0)>0 ORDER BY l.sku`, [po])).rows;
     if (!lines.length) return res.status(400).json({ error: 'No order-plan lines with qty for ' + po + '.' });
-    const mode = cin7Id ? 'updated' : 'created';
+    let mode = cin7Id ? 'updated' : 'created';
     const auth = cin7Auth();
     if (!auth) return res.status(501).json({ error: 'Cin7 API credentials not configured (set CIN7_AUTH). No write performed.', lines: lines.length, mode });
     const edd = completion ? (/T/.test(completion) ? completion : completion + 'T00:00:00Z') : undefined;
@@ -3382,11 +3382,21 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
     // then reconciled by the price validation below.
     if (cin7Id) {
       try {
-        const g = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=1&fields=id,isApproved,currencyRate&where=' + encodeURIComponent('id=' + cin7Id),
+        const g = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=1&fields=id,isApproved,currencyRate,isVoid,status&where=' + encodeURIComponent('id=' + cin7Id),
           { headers: { Authorization: auth, 'content-type': 'application/json' } });
         if (g.ok) { const arr = await g.json(); const o = Array.isArray(arr) ? arr[0] : null;
-          if (o && typeof o.isApproved === 'boolean') curApproved = o.isApproved;
-          if (o && Number(o.currencyRate)) rate = Number(o.currencyRate); }
+          const voided = o && (o.isVoid === true || /void/i.test(String(o.status || '')));
+          if (!o || voided) {
+            // The mirrored Cin7 id no longer points at a live PO (voided in Cin7, or deleted). Do NOT PUT to it —
+            // that would resurrect / re-approve the voided order (and if it was mis-filed as a sale, poke a dead
+            // record). Drop the stale mapping and fall through to CREATE a fresh PO instead.
+            await pool.query('DELETE FROM planner.erp_purchase_orders WHERE po=$1', [po]).catch(() => {});
+            cin7Id = null; newId = null; mode = 'created';
+          } else {
+            if (typeof o.isApproved === 'boolean') curApproved = o.isApproved;
+            if (Number(o.currencyRate)) rate = Number(o.currencyRate);
+          }
+        }
       } catch (e) { /* fall through — omit isApproved / rate */ }
     }
     // Cin7 expects the line unitPrice in the ORDER currency (USD) on write and converts to base itself — send planUSD as-is.

@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.294 - Cin7 push: never resurrect a voided/deleted PO (create fresh instead)
+
+If the ERP mirror's `erp_po_id` pointed at a Cin7 order that had since been **voided** (or deleted), the
+/cin7-lines update path PUT `lineItems` + the old `isApproved` straight onto it — un-voiding / re-approving a
+dead order (Ben's catch: a voided-then-repushed order flips back to approved). The pre-update read now also
+fetches `isVoid`/`status`; if the mirrored order is voided or missing, we drop the stale mapping and CREATE a
+fresh PO instead of updating the dead one.
+
 ## v25.293 - ERP completion-date deviation: 5%-of-lead threshold with a 3-day floor
 
 The date-drift flag (erp_date_pending) used a 10%-of-days-until-completion ratio with no floor, so a 1-day gap
