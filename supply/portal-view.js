@@ -469,6 +469,16 @@
     rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders</span><span class="rtab" data-pt="shipmentplan">Shipment Plan</span><span class="rtab" data-pt="barcodes">Barcodes</span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="samples">Samples <span id="pp-samp-badge"></span></span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
     var tabsEl=document.getElementById('pp-tabs'), body=document.getElementById('pp-body');
     function postJSON(ep,b2,cb){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b2)}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} cb&&cb(j); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); }); }
+    // Should the INVOICE action fire for this PO? Rules (Ben): never on FUTURE POs; never once an invoice value is
+    // submitted; only when the production END date is in the PAST — preferring the supplier-submitted end date
+    // (completion_date submission), else the calculated prod_end; if there's no end date at all, don't show.
+    function invoiceDue(p, subsArr){ subsArr=subsArr||[];
+      if(/future/i.test(p.status||'')) return false;
+      if(subsArr.some(function(s){return s.kind==='invoice_value';})) return false;
+      var supEnd=''; subsArr.forEach(function(s){ if(s.kind==='completion_date' && s.status!=='dismissed' && s.value) supEnd=s.value; });   // latest supplier-submitted production end
+      var effEnd = supEnd || p.prod_end || '';
+      if(!effEnd) return false;   // no production end date (supplier or calculated) → nothing to invoice against yet
+      return effEnd < new Date().toISOString().slice(0,10); }
     function ppCard(l,v){ return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px 14px;min-width:120px"><div class="tiny mut">'+l+'</div><div style="font-weight:700;font-size:16px">'+v+'</div></div>'; }
     // portal payment cell: only show a payment once it's been MADE (a paid date exists), with that date
     function ppPay(amt,dt){ return dt ? '$'+units(amt||0)+'<br><span class="mut tiny">'+esc(fd(dt))+'</span>' : '<span class="mut">—</span>'; }
@@ -690,7 +700,7 @@
         +'<div class="tiny mut" style="margin-top:6px">Total invoice value shows its payment due date. Amounts/dates are the deposit &amp; balance milestones from your PO.</div>';
       // ---- tabs + action badges ----
       var tabs=[['timeline','TIMELINE',timeline,unreadInt+((needConfirm&&!confirmed)?1:0)+(prodExc?1:0)],['orderplan','ORDER PLAN',skus,0],
-        ['invoice','INVOICE',invoice, (has('invoice_value')||!(p.prod_end&&p.prod_end<today))?0:1],['payments','PAYMENTS',payments,0],
+        ['invoice','INVOICE',invoice, invoiceDue(p,subs)?1:0],['payments','PAYMENTS',payments,0],
         ['shipment','SHIPMENT',shipment, ((p.shipment||p.flexport_reference||has('tracking'))?0:1)+xdAction],
         ['barcodes','BARCODES & LABELS',barcodesLabels,0]];
       if(dtcApplies) tabs.push(['dtc','DIRECT TO CLIENT DETAILS', dtc, dtcAccepted?0:1]);
@@ -715,7 +725,7 @@
           var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
           var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end):'';
           var dtcPend=ppIsDtc(p)&&!p.dtc_accepted_at;
-          var act=((sb.some(function(s){return s.kind==='invoice_value';})||!(p.prod_end&&p.prod_end<today))?0:1)+((p.shipment||p.flexport_reference||sb.some(function(s){return s.kind==='tracking';}))?0:1)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0);
+          var act=(invoiceDue(p,sb)?1:0)+((p.shipment||p.flexport_reference||sb.some(function(s){return s.kind==='tracking';}))?0:1)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0);
           var cdq=sb.filter(function(s){return s.kind==='completion_date';}); var cdVal=cdq.length?cdq[cdq.length-1].value:'';
           var cdGrid=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
           return _grpHdr+'<tr><td class="l"><button class="save-btn pp-exp" data-i="'+i+'" data-po="'+esc(p.po)+'"><span class="mng-txt">MANAGE</span> <span class="ex-badge'+(act>0?'':' done')+'" title="'+act+' action'+(act===1?'':'s')+(act>0?' needed':' — all done')+'">'+act+'</span></button></td>'
@@ -1102,7 +1112,7 @@
               var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
               var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end):'';
               var dtcPend=ppIsDtc(p)&&!p.dtc_accepted_at;
-              return ((sb.some(function(s){return s.kind==='invoice_value';})||!(p.prod_end&&p.prod_end<today))?0:1)+((p.shipment||p.flexport_reference||sb.some(function(s){return s.kind==='tracking';}))?0:1)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0); }
+              return (invoiceDue(p,sb)?1:0)+((p.shipment||p.flexport_reference||sb.some(function(s){return s.kind==='tracking';}))?0:1)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0); }
             // in-place row refresh after a write: re-render the open expanded cell + sync the MANAGE badge (no full reload)
             function refreshRow(row,po){ if(!row)return; var i=row.id.replace('pp-',''); rerenderRow(row,po);
               var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; var mb=document.querySelector('#supply-root .pp-exp[data-i="'+i+'"]')||document.querySelector('.pp-exp[data-i="'+i+'"]'); if(!mb||!p)return;

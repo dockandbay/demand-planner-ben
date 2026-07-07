@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.313 - Supplier portal invoice action: refined rules (invoiceDue helper)
+
+Invoice notification now: never on FUTURE POs; never once invoice_value submitted; production end date =
+supplier-submitted completion_date preferred, else calculated prod_end; if no end date at all, do not show;
+otherwise show only when that date is past. Applied via one invoiceDue() helper across tab badge + MANAGE counter
++ recompute. (So PO-57UKLX5, being FUTURE, no longer shows the invoice (1).)
+
 ## v25.312 - Supplier portal: invoice action only fires once production end is past
 
 The INVOICE tab badge + MANAGE action counter flagged a missing invoice value on ANY PO (even FUTURE). Now the
