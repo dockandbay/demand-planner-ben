@@ -411,17 +411,19 @@
 /* Purchase Orders grid: keep the MANAGE + PO columns anchored while scrolling the wide grid sideways
    (data rows only — the expanded detail row has id="pp-N" and must not be pinned). */
 #supply-root table.pp-tbl thead th:first-child,
-#supply-root table.pp-tbl tbody tr:not([id]) td:first-child{position:sticky;left:0;z-index:2;background:#fff;width:72px;min-width:72px;max-width:72px;box-sizing:border-box}
+#supply-root table.pp-tbl tbody tr:not([id]) td:first-child{position:sticky;left:0;z-index:2;background:#fff;width:100px;min-width:100px;max-width:100px;box-sizing:border-box}
 #supply-root table.pp-tbl thead th:nth-child(2),
-#supply-root table.pp-tbl tbody tr:not([id]) td:nth-child(2){position:sticky;left:72px;z-index:2;background:#fff;box-shadow:1px 0 0 #e0e0e0}
+#supply-root table.pp-tbl tbody tr:not([id]) td:nth-child(2){position:sticky;left:100px;z-index:2;background:#fff;box-shadow:1px 0 0 #e0e0e0}
 #supply-root table.pp-tbl thead th:first-child,#supply-root table.pp-tbl thead th:nth-child(2){z-index:3;background:#f3f3f1}
 /* MANAGE button: compact; and never clip the action-count badge (which is always shown — grey 0 = nothing
    outstanding, red N = N actions needed). */
-#supply-root .pp-exp{font-size:9.5px;padding:3px 7px;line-height:1.15}
+#supply-root .pp-exp{font-size:9px;padding:2px 4px;line-height:1.1;background:#111827;color:#fff;border:1px solid #111827}
+#supply-root .pp-exp:hover{background:#000}
 #supply-root table.pp-tbl tbody tr:not([id]) td:first-child{overflow:visible}
 #supply-root .ex-badge.done{background:#9ca3af}
-/* Production sub-heading row spanning the portal PO grid (pinned left while scrolling sideways). */
-#supply-root table.pp-tbl tr.pp-grp td{position:sticky;left:0;z-index:2;background:#e5e7eb;color:#374151;font-weight:700;font-size:11px;padding:6px 10px;text-align:left;letter-spacing:.03em;text-transform:uppercase;border-top:2px solid #cbd5e1;border-bottom:1px solid #cbd5e1}
+/* Production sub-heading row spanning the portal PO grid. NOT position:sticky — a sticky <td> drops its
+   background in Chrome (border-collapse), which left this banner white; a normal full-width row paints grey. */
+#supply-root table.pp-tbl tr.pp-grp td{background:#e5e7eb;color:#374151;font-weight:700;font-size:11px;padding:6px 10px;text-align:left;letter-spacing:.03em;text-transform:uppercase;border-top:2px solid #cbd5e1;border-bottom:1px solid #cbd5e1}
 /* Mobile: turn the portal sub-menu (tab strip) into a full-width horizontally-scrollable row so all tabs
    stay reachable instead of wrapping/overlapping. */
 @media (max-width:640px){
@@ -698,7 +700,7 @@
     function ppPOs(pos, data){ var lb=data.lb||{}, notesByPo=data.notesByPo||{}, subsByPo=data.subsByPo||{}, costsByPo=data.costsByPo||{}, supSkus=data.supSkus||[], xdByPo=data.xdByPo||{}, addByPo=data.addByPo||{};
       if(!pos.length)return '<div class="count">No purchase orders for this supplier.</div>';
       var today=new Date().toISOString().slice(0,10);
-      return '<div class="tw"><table class="pp-tbl"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l">Production</th><th class="l">Status</th><th class="l">Ship to country</th><th class="l">Ship to branch</th><th class="l">Direct</th><th class="l">Production status</th><th class="l">Start</th><th class="l">Est. completion</th><th class="l">Completion date</th><th class="l">Ship</th><th class="l">Flexport</th><th class="l">Ships With</th><th style="text-align:right">Start deposit assigned</th><th style="text-align:right">Completion</th><th style="text-align:right">Balance</th><th style="text-align:right">Amount due</th><th class="l">Due</th><th class="l">Deposit ref</th></tr></thead><tbody>'
+      return '<div class="tw"><table class="pp-tbl"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l" style="width:38px;min-width:38px" title="Production number">P#</th><th class="l">Status</th><th class="l">Ship to country</th><th class="l">Ship to branch</th><th class="l">Direct</th><th class="l">Production status</th><th class="l">Start</th><th class="l">Est. completion</th><th class="l">Completion date</th><th class="l">Ship</th><th class="l">Flexport</th><th class="l">Ships With</th><th style="text-align:right">Start deposit</th><th style="text-align:right">Completion</th><th style="text-align:right">Balance</th><th style="text-align:right">Amount due</th><th class="l">Due</th><th class="l">Deposit ref</th></tr></thead><tbody>'
         +pos.slice().sort(function(a,b){ var pa=((a.prod_no==null?'':String(a.prod_no)).trim())||'~~~', pb=((b.prod_no==null?'':String(b.prod_no)).trim())||'~~~'; return pa<pb?-1:pa>pb?1:(String(a.po||'')<String(b.po||'')?-1:1); }).map(function(p,i,arr){
           // group the grid by production number — emit a sub-heading row at the first PO of each prod_no group
           function _pk(x){ return (x.prod_no==null?'':String(x.prod_no)).trim(); }
@@ -717,7 +719,7 @@
           var cdGrid=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
           return _grpHdr+'<tr><td class="l"><button class="save-btn pp-exp" data-i="'+i+'" data-po="'+esc(p.po)+'"><span class="mng-txt">MANAGE</span> <span class="ex-badge'+(act>0?'':' done')+'" title="'+act+' action'+(act===1?'':'s')+(act>0?' needed':' — all done')+'">'+act+'</span></button></td>'
             +'<td class="l"><b>'+esc(p.po)+'</b></td>'
-            +'<td class="l">'+(p.prod_no?esc(p.prod_no):'<span class="mut">—</span>')+'</td>'
+            +'<td class="l" style="width:38px;min-width:38px;white-space:nowrap">'+(p.prod_no?esc(p.prod_no):'<span class="mut">—</span>')+'</td>'
             +'<td class="l"><span class="tool-badge '+statusBg(p.status)+'">'+esc(p.status||'')+'</span></td>'
             +'<td class="l">'+(p.country?esc(p.country):'<span class="mut">—</span>')+'</td>'
             +'<td class="l">'+(p.branch?esc(p.branch):'<span class="mut">—</span>')+'</td>'

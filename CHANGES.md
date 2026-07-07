@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.300 - Supplier portal PO grid: grey separator fix, MANAGE button, P# column
+
+- Production separator was still white: a sticky <td> drops its background in Chrome (border-collapse). Dropped
+  position:sticky on the group row so the grey banner paints.
+- MANAGE button: smaller, black, reduced padding; first column widened to 100px (PO column offset moved to
+  match) so the button + always-on action counter fit and aren't clipped.
+- "Production" column renamed to "P#" and narrowed (~38px) to fit the short production number.
+
 ## v25.299 - Supplier portal: Shipment Plan (collapse, FOB/country pills, PO links) + PAYMENTS/grid polish
 
 Shipment Plan:
