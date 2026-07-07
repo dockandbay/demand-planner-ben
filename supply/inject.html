@@ -55,8 +55,9 @@
 #supply-root #rep-subnav,#supply-root #config-subs,#supply-root #prod-subtabs,#supply-root .po-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 12px}
 /* Opened PO detail lives inside the wide, horizontally-scrolling PO grid — pin its sub-tab strip to the left
    so PAYMENTS/DATES/etc stay fixed while the grid scrolls sideways (desktop). */
-/* Pinning the expanded PO detail panel is done by sticking the <td> ITSELF (see the table.po-tbl exp-row
-   rule below), not a child div — position:sticky on a div inside a <td> is unreliable in table layouts. */
+/* The expanded PO detail panel (.po-detail-wrap) is pinned to the left of the horizontally-scrolling grid via
+   JS (bindPoScrollPin): a passive scroll listener translateX()es it by the grid's scrollLeft. CSS sticky can't
+   do it — the colspan cell fills the full table width, so sticky has no containing-block slack to slide in. */
 #supply-root .ex-badge{display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:#dc2626;color:#fff;font-size:9px;font-weight:700;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px}
 #supply-root .po-set-shipping{font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:#dbeafe;border:1px solid #60a5fa;color:#1d4ed8;cursor:pointer;white-space:nowrap}
 #supply-root .datewrap{display:inline-flex;align-items:center;gap:2px;position:relative}
@@ -132,9 +133,6 @@
 #supply-root table.samp-tbl thead th,#supply-root table.samp-tbl tbody td{text-align:left}   /* Samples grid: left-align everything */
 #supply-root tbody tr:hover td{background:#fafaf8}
 #supply-root tr.exp-row>td{background:#f8fafc;text-align:left;white-space:normal}
-/* PO grid only: stick the expanded detail cell to the left so its sub-tabs + panels stay put while the wide
-   grid scrolls sideways. Sticking the <td> itself (like the frozen first columns) works where a child div did not. */
-#supply-root table.po-tbl tr.exp-row>td{position:sticky;left:0;z-index:5}
 #supply-root .tool-badge,#scenario-root .tool-badge{font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;letter-spacing:.2px;display:inline-block}
 #supply-root .chip{display:inline-block;background:#e0f2fe;color:#075985;font-size:11px;padding:2px 6px;border-radius:10px;margin:2px 2px;white-space:nowrap}
 #supply-root .chip .xd-rm{border:none;background:none;color:#0369a1;cursor:pointer;font-weight:700;padding:0 0 0 2px;font-size:12px;line-height:1}
@@ -1184,7 +1182,7 @@
       document.getElementById('sup-grid').innerHTML=poTable(shown,q?(state.grp==='shipment'?'shipment':'status'):state.grp)   // search spans all statuses → group under status sub-labels (but keep the Master-shipment hierarchy if that grouping is chosen)
         +(shown.length<f.length?'<div style="margin:8px 0;text-align:center"><button class="save-btn light" id="po-showall">Show all '+f.length+' &darr;</button></div>':'');
       var sa=document.getElementById('po-showall'); if(sa)sa.onclick=function(){ _poShowAll=true; view(); };
-      bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindPoNotes(); bindPoActBadge(); bindPoCopy();
+      bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindPoNotes(); bindPoActBadge(); bindPoCopy(); bindPoScrollPin();
       bindDepPick(patchPoRow); bindPoStars(); bindSetShipping();
       if(_pendingPO){ var want=_pendingPO; _pendingPO=null; setTimeout(function(){
         // if the target PO is past the render cap it isn't in the DOM yet — reveal all rows and retry so the
@@ -1220,7 +1218,7 @@
         var wasOpen=mainTr.classList.contains('row-open');
         mainTr.parentNode.replaceChild(newMain, mainTr);
         if(wasOpen){ newMain.classList.add('row-open'); var eb=newMain.querySelector('.po-exp'); if(eb)eb.classList.add('open'); }
-        bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindDepPick(patchPoRow); bindPoStars(); bindPoNotes(); bindPoActBadge(); bindSetShipping(); bindPoCopy();
+        bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindDepPick(patchPoRow); bindPoStars(); bindPoNotes(); bindPoActBadge(); bindSetShipping(); bindPoCopy(); bindPoScrollPin();
       }).catch(function(){}); }
     try{ window.__poRowRefresh=silentRowRefresh; }catch(e){}
     // Patch ONE PO row in place (no grid re-render / flash) after an assign. Only when not grouped by shipment —
@@ -1237,7 +1235,7 @@
         var exOpen=(function(){var e=document.getElementById('poexp-'+btn.dataset.i);return e&&e.style.display!=='none';})();
         var nm=tmp.querySelector('tr'); if(nm&&tr&&tr.parentNode){ tr.parentNode.replaceChild(nm,tr); }
         if(exOpen&&nm){ nm.classList.add('row-open'); var eb=nm.querySelector('.po-exp'); if(eb)eb.classList.add('open'); }   // keep the open-row highlight after an in-place patch
-        bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindDepPick(patchPoRow); bindPoStars(); bindPoNotes(); bindPoActBadge(); bindSetShipping(); bindPoCopy();
+        bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindDepPick(patchPoRow); bindPoStars(); bindPoNotes(); bindPoActBadge(); bindSetShipping(); bindPoCopy(); bindPoScrollPin();
       }).catch(function(){ refreshGrid(); }); }
     _poRefresh=refreshGrid; _poPatchRow=patchPoRow;
     c.querySelectorAll('#po-prog .pill:not(.po-recent):not(.po-focus)').forEach(function(p){p.onclick=function(){c.querySelectorAll('#po-prog .pill:not(.po-recent):not(.po-focus)').forEach(function(x){x.classList.remove('active');});p.classList.add('active');state.f=p.dataset.f;_poShowAll=false;view();};});
@@ -1584,6 +1582,13 @@
     g.addEventListener('dblclick',function(e){ var td=e.target.closest&&e.target.closest('.po-numcell'); if(!td||!td.dataset.po)return;
       try{ var sel=window.getSelection&&window.getSelection(); if(sel&&sel.removeAllRanges)sel.removeAllRanges(); }catch(_){}   // clear the browser's dblclick text-selection
       copyPoRef(td.dataset.po, td); }); }
+  // Pin the expanded PO detail panel(s) to the left as the wide grid scrolls sideways. transform:translateX is
+  // compositor-only (no layout/paint); the handler is passive + rAF-coalesced, so it's imperceptible.
+  function poGridTw(){ var tbl=document.querySelector('#supply-content table.po-tbl'); return tbl&&tbl.closest('.tw'); }
+  function applyPoPin(){ var tw=poGridTw(); if(!tw)return; var x=tw.scrollLeft;
+    document.querySelectorAll('#supply-content .po-detail-wrap').forEach(function(p){ p.style.transform=x?('translateX('+x+'px)'):''; }); }
+  function bindPoScrollPin(){ var tw=poGridTw(); if(!tw||tw._pin)return; tw._pin=1; var raf=0;
+    tw.addEventListener('scroll',function(){ if(!raf)raf=requestAnimationFrame(function(){ raf=0; applyPoPin(); }); },{passive:true}); }
   function bindExpand(){ document.querySelectorAll('#supply-root .po-exp[data-po]').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(){
     var i=b.dataset.i, ex=document.getElementById('poexp-'+i), open=ex.style.display!=='none';
     ex.style.display=open?'none':''; b.classList.toggle('open',!open); var _or=b.closest('tr'); if(_or)_or.classList.toggle('row-open',!open);
@@ -1619,7 +1624,7 @@
       else if(tab){ var t=document.querySelector('#podet-'+i+' .potab[data-pt="'+tab+'"]'); if(t)t.onclick(); }
       setTimeout(function(){ if(ex)ex.scrollIntoView({block:'center',behavior:'smooth'}); },80); }; }); }
   function loadPoDetail(po,i,wantTab){ fetch('/api/supply/po-detail/'+encodeURIComponent(po)).then(function(r){return r.json();})
-    .then(function(d){ document.getElementById('podet-'+i).innerHTML=poDetailHTML(po,d,i); bindPay(po,i);
+    .then(function(d){ document.getElementById('podet-'+i).innerHTML=poDetailHTML(po,d,i); bindPay(po,i); bindPoScrollPin(); applyPoPin();   // pin left + position for any current horizontal scroll
       if(wantTab){ var t=document.querySelector('#podet-'+i+' .potab[data-pt="'+wantTab+'"]'); if(t)t.onclick(); } })
     .catch(function(e){ document.getElementById('podet-'+i).innerHTML='<span style="color:#dc2626">'+esc(e.message||e)+'</span>'; }); }
   // Editable PLAN payment panel. Terms come from the supplier; each milestone's amount, date and %

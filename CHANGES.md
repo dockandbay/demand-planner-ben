@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.287 - PURCHASE ORDERS: pin expanded PO detail via JS (CSS sticky can't)
+
+CSS sticky fundamentally can't pin the expanded PO detail: the colspan cell fills the full table width, so
+sticky has no containing-block slack. Replaced with JS — bindPoScrollPin() adds one passive, rAF-coalesced
+scroll listener on the grid's .tw container that translateX()es the .po-detail-wrap by scrollLeft (compositor-
+only, no layout/paint). applyPoPin() also runs on panel load so it's positioned if the grid is already scrolled.
+Removed the dead sticky CSS from v25.284/285.
+
 ## v25.286 - ORDER PLAN export: always ordered-only SKUs (ignore the All-SKUs pill)
 
 Per Ben, the XLSX download should always contain only the SKUs that actually have order lines within the
