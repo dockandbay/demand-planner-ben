@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.308 - Supplier portal: tighten MANAGE column padding
+
+First column (MANAGE) cell padding tightened to 5px each side (was 8px); MANAGE button horizontal padding
+reduced to 2px (was 4px).
+
 ## v25.307 - Supplier portal: MANAGE button is now white with black text
 
 Flipped .pp-exp from black/white to a white button with black text + black border (light-grey hover).

@@ -411,13 +411,13 @@
 /* Purchase Orders grid: keep the MANAGE + PO columns anchored while scrolling the wide grid sideways
    (data rows only — the expanded detail row has id="pp-N" and must not be pinned). */
 #supply-root table.pp-tbl thead th:first-child,
-#supply-root table.pp-tbl tbody tr:not([id]) td:first-child{position:sticky;left:0;z-index:2;background:#fff;width:100px;min-width:100px;max-width:100px;box-sizing:border-box}
+#supply-root table.pp-tbl tbody tr:not([id]) td:first-child{position:sticky;left:0;z-index:2;background:#fff;width:100px;min-width:100px;max-width:100px;box-sizing:border-box;padding-left:5px;padding-right:5px}
 #supply-root table.pp-tbl thead th:nth-child(2),
 #supply-root table.pp-tbl tbody tr:not([id]) td:nth-child(2){position:sticky;left:100px;z-index:2;background:#fff;box-shadow:1px 0 0 #e0e0e0}
 #supply-root table.pp-tbl thead th:first-child,#supply-root table.pp-tbl thead th:nth-child(2){z-index:3;background:#f3f3f1}
 /* MANAGE button: compact; and never clip the action-count badge (which is always shown — grey 0 = nothing
    outstanding, red N = N actions needed). */
-#supply-root .pp-exp{font-size:9px;padding:2px 4px;line-height:1.1;background:#fff;color:#111827;border:1px solid #111827}
+#supply-root .pp-exp{font-size:9px;padding:2px 2px;line-height:1.1;background:#fff;color:#111827;border:1px solid #111827}
 #supply-root .pp-exp:hover{background:#f1f5f9}
 #supply-root table.pp-tbl tbody tr:not([id]) td:first-child{overflow:visible}
 #supply-root .ex-badge.done{background:#9ca3af}
