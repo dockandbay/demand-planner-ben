@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.305 - DEMAND grid: data-point text +1pt
+
+Bumped the SKU demand grid's numeric cells by 1pt for readability: td.trd (monthly values) 10→11px, td.totu
+(total units) and td.totr (total revenue) 11→12px.
+
 ## v25.304 - Supplier portal PAYMENTS: narrower table, deposit ref filled, style always refreshes
 
 - PAYMENTS tab content capped at ~560px so it isn't full-screen width.
