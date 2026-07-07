@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.290 - PURCHASE ORDERS: assigning a shipment is now silent (no grid re-render / lost place)
+
+Assigning (or unassigning) a shipment in the default shipment-grouped view called refreshGrid(), which
+re-rendered the whole grid and collapsed any open PO detail — losing your place. Now it routes through the
+existing silentRowRefresh(po): re-fetches data and swaps only that PO's main row in place (its shipment cell
+updates), leaving the expansion open and scroll intact. Trade-off: the row doesn't jump to its new shipment
+group until the next natural full render — worth it to keep the user's place.
+
 ## v25.289 - PURCHASE ORDERS: grid no longer sticks on "all" (no filter) after a PO jump
 
 Jumping to a specific PO (from an action / link / search) seeded the grid state with f:'all' + the PO # in the

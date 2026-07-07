@@ -1226,9 +1226,11 @@
         bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindDepPick(patchPoRow); bindPoStars(); bindPoNotes(); bindPoActBadge(); bindSetShipping(); bindPoCopy(); bindPoScrollPin();
       }).catch(function(){}); }
     try{ window.__poRowRefresh=silentRowRefresh; }catch(e){}
-    // Patch ONE PO row in place (no grid re-render / flash) after an assign. Only when not grouped by shipment —
-    // assigning a shipment changes the shipment group, which needs a regroup, so that case does a full refresh.
-    function patchPoRow(po){ if(state.grp==='shipment'){ refreshGrid(); return; }
+    // Patch ONE PO row in place (no grid re-render / flash) after an assign. In shipment-grouped mode the row
+    // would ideally move to its new shipment group, but a full regroup collapses any open PO detail and loses
+    // the user's place — so we patch the row in place instead (its shipment cell updates); the regroup happens
+    // on the next natural full render. This keeps the expansion open and the scroll position, per Ben.
+    function patchPoRow(po){ if(state.grp==='shipment'){ silentRowRefresh(po); return; }
       invalidateDerived(); delete cache['purchase-orders'];
       fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(fresh){
         if(Array.isArray(fresh)){ rows.length=0; Array.prototype.push.apply(rows, fresh); }
