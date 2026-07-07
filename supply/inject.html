@@ -572,7 +572,12 @@
         document.querySelectorAll('#supply-root .fci[data-field="'+fld+'"]').forEach(function(o){ if(o===inp||o.dataset.ep!==ep||o.value===val)return; o.value=val; recolorFci(o, fld, val); });
         // live-sync the collapsed PO grid row when a field was edited in that PO's expansion sub-tabs
         var _pm=/^\/api\/supply\/po\/([^\/]+)$/.exec(ep);
-        if(_pm && current==='purchase-orders' && typeof window.__poRowRefresh==='function'){ try{ window.__poRowRefresh(decodeURIComponent(_pm[1])); }catch(e){} } })
+        if(_pm && current==='purchase-orders' && typeof window.__poRowRefresh==='function'){ try{ window.__poRowRefresh(decodeURIComponent(_pm[1])); }catch(e){} }
+        // shipment edit (e.g. a departure/landing/arrival override in the shipment drawer/popout): re-render the
+        // drawer or grid row so the chained Ship/Arrival/Completion "final" dates recompute — they're display-only
+        // text, not .fci inputs, so the duplicate-control sync above can't touch them.
+        var _sm=/^\/api\/supply\/shipment\/([^\/]+)$/.exec(ep);
+        if(_sm && typeof _shipPatchRow==='function'){ try{ _shipPatchRow(decodeURIComponent(_sm[1])); }catch(e){} } })
       .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; }); bindDatePickers(); }
 
   function renderGeneric(key,rows){ var c=document.getElementById('supply-content');

@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.288 - Shipment drawer: date overrides now recompute the chained dates live
+
+Entering a departure/landing/arrival override in the shipment popout (drawer) saved to the DB (the full
+Shipments tab showed it on reload) but the drawer never re-rendered — so the derived Ship/Arrival/Completion
+"final" dates stayed blank/stale. bindEdits only live-refreshed PO rows, never shipments. Added: after a
+shipment field save (ep = /api/supply/shipment/REF), call _shipPatchRow(ref) so the drawer / grid row
+re-renders with recomputed dates. Also fixes the same staleness for carrier/status/mode edits.
+
 ## v25.287 - PURCHASE ORDERS: pin expanded PO detail via JS (CSS sticky can't)
 
 CSS sticky fundamentally can't pin the expanded PO detail: the colspan cell fills the full table width, so
