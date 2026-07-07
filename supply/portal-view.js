@@ -415,6 +415,13 @@
 #supply-root table.pp-tbl thead th:nth-child(2),
 #supply-root table.pp-tbl tbody tr:not([id]) td:nth-child(2){position:sticky;left:72px;z-index:2;background:#fff;box-shadow:1px 0 0 #e0e0e0}
 #supply-root table.pp-tbl thead th:first-child,#supply-root table.pp-tbl thead th:nth-child(2){z-index:3;background:#f3f3f1}
+/* MANAGE button: compact; and never clip the action-count badge (which is always shown — grey 0 = nothing
+   outstanding, red N = N actions needed). */
+#supply-root .pp-exp{font-size:9.5px;padding:3px 7px;line-height:1.15}
+#supply-root table.pp-tbl tbody tr:not([id]) td:first-child{overflow:visible}
+#supply-root .ex-badge.done{background:#9ca3af}
+/* Production sub-heading row spanning the portal PO grid (pinned left while scrolling sideways). */
+#supply-root table.pp-tbl tr.pp-grp td{position:sticky;left:0;z-index:2;background:#eef2ff;color:#1e3a8a;font-weight:700;font-size:11px;padding:5px 8px;text-align:left;letter-spacing:.02em}
 /* Mobile: turn the portal sub-menu (tab strip) into a full-width horizontally-scrollable row so all tabs
    stay reachable instead of wrapping/overlapping. */
 @media (max-width:640px){
@@ -663,10 +670,15 @@
     function ppPOs(pos, data){ var lb=data.lb||{}, notesByPo=data.notesByPo||{}, subsByPo=data.subsByPo||{}, costsByPo=data.costsByPo||{}, supSkus=data.supSkus||[], xdByPo=data.xdByPo||{}, addByPo=data.addByPo||{};
       if(!pos.length)return '<div class="count">No purchase orders for this supplier.</div>';
       var today=new Date().toISOString().slice(0,10);
-      return '<div class="tw"><table class="pp-tbl"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l">Status</th><th class="l">Ship to country</th><th class="l">Ship to branch</th><th class="l">Direct</th><th class="l">Production status</th><th class="l">Start</th><th class="l">Est. completion</th><th class="l">Completion date</th><th class="l">Ship</th><th class="l">Flexport</th><th class="l">Ships With</th><th style="text-align:right">Start deposit assigned</th><th style="text-align:right">Completion</th><th style="text-align:right">Balance</th><th style="text-align:right">Amount due</th><th class="l">Due</th><th class="l">Deposit ref</th></tr></thead><tbody>'
-        +pos.map(function(p,i){
+      return '<div class="tw"><table class="pp-tbl"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l">Production</th><th class="l">Status</th><th class="l">Ship to country</th><th class="l">Ship to branch</th><th class="l">Direct</th><th class="l">Production status</th><th class="l">Start</th><th class="l">Est. completion</th><th class="l">Completion date</th><th class="l">Ship</th><th class="l">Flexport</th><th class="l">Ships With</th><th style="text-align:right">Start deposit assigned</th><th style="text-align:right">Completion</th><th style="text-align:right">Balance</th><th style="text-align:right">Amount due</th><th class="l">Due</th><th class="l">Deposit ref</th></tr></thead><tbody>'
+        +pos.slice().sort(function(a,b){ var pa=((a.prod_no==null?'':String(a.prod_no)).trim())||'~~~', pb=((b.prod_no==null?'':String(b.prod_no)).trim())||'~~~'; return pa<pb?-1:pa>pb?1:(String(a.po||'')<String(b.po||'')?-1:1); }).map(function(p,i,arr){
+          // group the grid by production number — emit a sub-heading row at the first PO of each prod_no group
+          function _pk(x){ return (x.prod_no==null?'':String(x.prod_no)).trim(); }
+          var _gk=_pk(p), _grpHdr=(i===0||_pk(arr[i-1])!==_gk)
+            ? '<tr class="pp-grp"><td colspan="20">'+(_gk?('Production '+esc(_gk)):'No production number')+' — '+arr.filter(function(x){return _pk(x)===_gk;}).length+' PO'+(arr.filter(function(x){return _pk(x)===_gk;}).length>1?'s':'')+'</td></tr>'
+            : '';
           // lazy: the heavy expanded card (all sub-tabs) is built on first expand, not upfront (see .pp-exp handler)
-          var det='<tr id="pp-'+i+'" data-po="'+esc(p.po)+'" style="display:none"><td></td><td colspan="18"><div class="count">Loading…</div></td></tr>';
+          var det='<tr id="pp-'+i+'" data-po="'+esc(p.po)+'" style="display:none"><td></td><td colspan="19"><div class="count">Loading…</div></td></tr>';
           var sb=subsByPo[p.po]||[]; var nts=notesByPo[p.po]||[]; var unreadInt=nts.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
           var cdS=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean), xdm=xdByPo[p.po]||{};
           var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
@@ -675,8 +687,10 @@
           var act=(sb.some(function(s){return s.kind==='invoice_value';})?0:1)+((p.shipment||p.flexport_reference||sb.some(function(s){return s.kind==='tracking';}))?0:1)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0);
           var cdq=sb.filter(function(s){return s.kind==='completion_date';}); var cdVal=cdq.length?cdq[cdq.length-1].value:'';
           var cdGrid=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
-          return '<tr><td class="l"><button class="save-btn pp-exp" data-i="'+i+'" data-po="'+esc(p.po)+'"><span class="mng-txt">MANAGE</span>'+(act>0?' <span class="ex-badge" title="'+act+' action'+(act>1?'s':'')+' needed">'+act+'</span>':'')+'</button></td>'
-            +'<td class="l"><b>'+esc(p.po)+'</b></td><td class="l"><span class="tool-badge '+statusBg(p.status)+'">'+esc(p.status||'')+'</span></td>'
+          return _grpHdr+'<tr><td class="l"><button class="save-btn pp-exp" data-i="'+i+'" data-po="'+esc(p.po)+'"><span class="mng-txt">MANAGE</span> <span class="ex-badge'+(act>0?'':' done')+'" title="'+act+' action'+(act===1?'':'s')+(act>0?' needed':' — all done')+'">'+act+'</span></button></td>'
+            +'<td class="l"><b>'+esc(p.po)+'</b></td>'
+            +'<td class="l">'+(p.prod_no?esc(p.prod_no):'<span class="mut">—</span>')+'</td>'
+            +'<td class="l"><span class="tool-badge '+statusBg(p.status)+'">'+esc(p.status||'')+'</span></td>'
             +'<td class="l">'+(p.country?esc(p.country):'<span class="mut">—</span>')+'</td>'
             +'<td class="l">'+(p.branch?esc(p.branch):'<span class="mut">—</span>')+'</td>'
             +'<td class="l" style="font-size:10px;line-height:1.05;max-width:130px;white-space:normal">'+(p.client?esc(p.client):'<span class="mut">—</span>')+'<br>'+(p.sales_order_ref?'<span class="mut">'+esc(p.sales_order_ref)+'</span>':'<span class="mut">—</span>')+'</td>'

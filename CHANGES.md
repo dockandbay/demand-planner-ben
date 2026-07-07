@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.297 - Supplier portal: fix blank "Ships With" + Production column/grouping + compact MANAGE
+
+Two portal-grid changes:
+- **Fix (bug):** the portal's "Ships With" column was always blank while the admin plan showed shipments. The
+  admin app derives ships_with client-side from ALL POs, which the supplier-scoped portal can't see, and
+  POS_SQL_PORTAL never computed it. Added `ships_with` (shipment ref) + `ships_with_supplier` (the shipment's
+  master-PO supplier) to POS_SQL_PORTAL. (Server query change; live portal.)
+- **Feature:** added a Production column and grouped the grid by production number with a pinned sub-heading row;
+  MANAGE button made smaller; the action-count badge now always shows (grey 0 = nothing outstanding, red N).
+
 ## v25.296 - ORDER PLAN filter pills: counters show impacted ORDERS, not SKUs
 
 The Partials / ⚠ ERP / Supplier-risk / Discontinued pill counters counted matching SKU lines. They now count

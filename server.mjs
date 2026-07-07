@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.296';
+const APP_VERSION = 'v25.297';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -5134,6 +5134,12 @@ const POS_SQL_PORTAL = `
     round(pay_balance_1_amount,2) balance_1_amount, to_char(pay_balance_1_date,'YYYY-MM-DD') balance_1_date,
     to_char(bal_due_date,'YYYY-MM-DD') balance_due,
     coalesce(deposit_ref,'') deposit_ref, coalesce(shipment_ref,'') shipment,
+    -- "Ships With" for the portal: the shipment this PO rides on + that shipment's master-PO supplier. Computed
+    -- server-side because the admin app derives it client-side from ALL POs, which the supplier-scoped portal
+    -- can't see — so without this the portal's Ships With column was always blank.
+    coalesce(shipment_ref,'') ships_with,
+    coalesce((SELECT m.supplier_name FROM planner.purchase_orders m
+       WHERE m.po = coalesce((SELECT s.master_po FROM planner.shipments s WHERE s.shipment_ref=calc4.shipment_ref), calc4.shipment_ref)),'') ships_with_supplier,
     coalesce(client,'') client, coalesce(dispatch_order_ref,'') dispatch_order_ref,
     coalesce(final_delivery_address,'') final_delivery_address, coalesce(crossdock_skus,'') crossdock_skus,
     coalesce(prod_no,'') prod_no, coalesce(batch_id,'') batch_id,
