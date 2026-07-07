@@ -417,8 +417,8 @@
 #supply-root table.pp-tbl thead th:first-child,#supply-root table.pp-tbl thead th:nth-child(2){z-index:3;background:#f3f3f1}
 /* MANAGE button: compact; and never clip the action-count badge (which is always shown — grey 0 = nothing
    outstanding, red N = N actions needed). */
-#supply-root .pp-exp{font-size:9px;padding:2px 4px;line-height:1.1;background:#111827;color:#fff;border:1px solid #111827}
-#supply-root .pp-exp:hover{background:#000}
+#supply-root .pp-exp{font-size:9px;padding:2px 4px;line-height:1.1;background:#fff;color:#111827;border:1px solid #111827}
+#supply-root .pp-exp:hover{background:#f1f5f9}
 #supply-root table.pp-tbl tbody tr:not([id]) td:first-child{overflow:visible}
 #supply-root .ex-badge.done{background:#9ca3af}
 /* Production sub-heading row spanning the portal PO grid. NOT position:sticky — a sticky <td> drops its

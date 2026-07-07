@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.307 - Supplier portal: MANAGE button is now white with black text
+
+Flipped .pp-exp from black/white to a white button with black text + black border (light-grey hover).
+
 ## v25.306 - Supplier portal layout: full-width + PO table fills screen (mirror Diviyaj's prod fixes)
 
 Mirrors two CSS fixes Diviyaj already applied to production (portal.html): (1) #pv-wrap dropped max-width:1100px/
