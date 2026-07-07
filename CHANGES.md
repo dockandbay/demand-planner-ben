@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.312 - Supplier portal: invoice action only fires once production end is past
+
+The INVOICE tab badge + MANAGE action counter flagged a missing invoice value on ANY PO (even FUTURE). Now the
+invoice action only counts when the production end date is in the past AND no invoice_value submitted — gated in
+all three calcs (tab badge, MANAGE counter, recompute).
+
 ## v25.311 - Supplier portal: MANAGE column widened to 104px (82px cut off the button)
 
 82px was too tight — the button+counter overflowed and was hidden behind the sticky PO column. Set to 104px
