@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.310 - Supplier portal: tighten MANAGE column (narrow to hug button) + snug counter
+
+MANAGE column narrowed 100px->82px (PO column offset moved to match) so the white button no longer sits in a
+wide white cell that read as side-padding; the action counter badge margin reduced to 3px.
+
 ## v25.309 - Supplier portal PO grid: "Ship to country" header -> "CTRY"
 
 Renamed the column header to CTRY (full label kept as a tooltip).
