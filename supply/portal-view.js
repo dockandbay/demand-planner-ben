@@ -411,10 +411,10 @@
 /* Purchase Orders grid: keep the MANAGE + PO columns anchored while scrolling the wide grid sideways
    (data rows only — the expanded detail row has id="pp-N" and must not be pinned). */
 #supply-root table.pp-tbl thead th:first-child,
-#supply-root table.pp-tbl tbody tr:not([id]) td:first-child{position:sticky;left:0;z-index:2;background:#fff;width:82px;min-width:82px;max-width:82px;box-sizing:border-box;padding-left:5px;padding-right:5px}
+#supply-root table.pp-tbl tbody tr:not([id]) td:first-child{position:sticky;left:0;z-index:2;background:#fff;width:104px;min-width:104px;max-width:104px;box-sizing:border-box;padding-left:5px;padding-right:5px}
 #supply-root .pp-exp .ex-badge{margin-left:3px}   /* snug the counter to the MANAGE text */
 #supply-root table.pp-tbl thead th:nth-child(2),
-#supply-root table.pp-tbl tbody tr:not([id]) td:nth-child(2){position:sticky;left:82px;z-index:2;background:#fff;box-shadow:1px 0 0 #e0e0e0}
+#supply-root table.pp-tbl tbody tr:not([id]) td:nth-child(2){position:sticky;left:104px;z-index:2;background:#fff;box-shadow:1px 0 0 #e0e0e0}
 #supply-root table.pp-tbl thead th:first-child,#supply-root table.pp-tbl thead th:nth-child(2){z-index:3;background:#f3f3f1}
 /* MANAGE button: compact; and never clip the action-count badge (which is always shown — grey 0 = nothing
    outstanding, red N = N actions needed). */

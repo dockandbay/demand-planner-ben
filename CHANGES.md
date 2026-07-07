@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.311 - Supplier portal: MANAGE column widened to 104px (82px cut off the button)
+
+82px was too tight — the button+counter overflowed and was hidden behind the sticky PO column. Set to 104px
+(PO offset moved to match) so the full MANAGE button + counter shows.
+
 ## v25.310 - Supplier portal: tighten MANAGE column (narrow to hug button) + snug counter
 
 MANAGE column narrowed 100px->82px (PO column offset moved to match) so the white button no longer sits in a
