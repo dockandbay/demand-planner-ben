@@ -2392,10 +2392,12 @@
         if(!qMatch(x.sku))return;
         set[x.sku]=1; list.push(x.sku); });
       return list; }
-    function updateActionCounts(){ var pc=lines.filter(isUnapprovedPartial).length, ec=lines.filter(erpDiff).length;
+    // pill counters show the number of ORDERS (distinct POs) impacted, not the number of SKU lines
+    function poCount(fn){ var s={}; lines.forEach(function(l){ if(fn(l))s[l.po]=1; }); return Object.keys(s).length; }
+    function updateActionCounts(){ var pc=poCount(isUnapprovedPartial), ec=poCount(erpDiff);
       var pn=document.getElementById('op-partials-n'); if(pn)pn.textContent=pc?('('+pc+')'):'';
       var en=document.getElementById('op-erp-n'); if(en)en.textContent=ec?('('+ec+')'):'';
-      var sc=lines.filter(lineSupRisk).length, dc=lines.filter(lineDisc).length;
+      var sc=poCount(lineSupRisk), dc=poCount(lineDisc);
       var sn=document.getElementById('op-suprisk-n'); if(sn)sn.textContent=sc?('('+sc+')'):'';
       var dn=document.getElementById('op-disc-n'); if(dn)dn.textContent=dc?('('+dc+')'):''; }
     var _opShowAllPos=false;
