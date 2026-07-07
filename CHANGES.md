@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.304 - Supplier portal PAYMENTS: narrower table, deposit ref filled, style always refreshes
+
+- PAYMENTS tab content capped at ~560px so it isn't full-screen width.
+- Deposit reference was blank (the ledger's deposit_ref is empty for balance/completion rows) — now falls back
+  to the PO's own deposit_ref (both /api/portal/bootstrap and /api/supply/supplier-payments).
+- injectStyle() now always (re)applies the latest CSS instead of skipping when a #pv-style already exists — a
+  stale style from an earlier load in the admin SPA was keeping the old MANAGE/divider styling in the preview.
+
 ## v25.303 - Admin app: cache-bust portal-view.js too (CONFIG ▸ Portal preview was using stale code)
 
 The CONFIG ▸ Portal "preview as supplier" uses window.DBPortalView from portal-view.js — but inject.html loaded

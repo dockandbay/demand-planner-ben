@@ -449,7 +449,7 @@
   #supply-root .sect-h{font-size:11px}
   #supply-root .ppx-h{font-size:12px}
 }`;
-  function injectStyle(){ if(document.getElementById('pv-style'))return; var st=document.createElement('style'); st.id='pv-style'; st.textContent=STYLE; document.head.appendChild(st); }
+  function injectStyle(){ var st=document.getElementById('pv-style'); if(!st){ st=document.createElement('style'); st.id='pv-style'; document.head.appendChild(st); } st.textContent=STYLE; }   // always (re)apply the latest CSS — a stale pv-style from an earlier load in the admin SPA must be refreshed
 
   function mount(opts){
     injectStyle();
@@ -760,7 +760,7 @@
           +'<div class="pay-body" style="display:none;padding:0 12px 12px"><table style="font-size:12px;border-collapse:collapse;text-align:left;width:100%;max-width:720px;table-layout:fixed">'
             +'<colgroup><col style="width:42%"><col style="width:20%"><col style="width:20%"><col style="width:18%"></colgroup>'
             +'<thead><tr><th class="l">PO reference</th><th class="l">Type</th><th style="text-align:right">Amount</th><th class="l">Deposit ref</th></tr></thead><tbody>'+body+'</tbody></table></div></div>'; }).join('');
-      return head+cards; }
+      return '<div style="max-width:560px">'+head+cards+'</div>'; }   // cap the tab to ~half width so it doesn't span full screen
           // FOB card timeline = notes on the PO itself (FOB has no shipment). Reuses the PO-notes store.
           function fobTLHtml(po){ var nts=(_ppData.notesByPo&&_ppData.notesByPo[po])||[];
             return nts.length?nts.map(function(n){ return '<div class="tiny" style="margin:2px 0"><span class="mut">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span> — '+esc(n.body)+'</div>'; }).join(''):'<div class="mut tiny">No timeline entries yet.</div>'; }
