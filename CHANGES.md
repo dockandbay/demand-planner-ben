@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.289 - PURCHASE ORDERS: grid no longer sticks on "all" (no filter) after a PO jump
+
+Jumping to a specific PO (from an action / link / search) seeded the grid state with f:'all' + the PO # in the
+search box, so it could find a completed PO. But a text search already spans ALL statuses (filt ignores the
+pill), so the 'all' filter was redundant — and it PERSISTED, so once the search was cleared the grid showed
+everything instead of defaulting back to In progress. Now the jump seeds f:'in_progress' (the default) and
+relies on the search to find the PO across statuses. Result: the grid always defaults to In progress.
+
 ## v25.288 - Shipment drawer: date overrides now recompute the chained dates live
 
 Entering a departure/landing/arrival override in the shipment popout (drawer) saved to the DB (the full

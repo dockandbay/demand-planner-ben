@@ -1116,7 +1116,7 @@
     var CFLAG={UK:'🇬🇧',US:'🇺🇸',AU:'🇦🇺',EU:'🇪🇺',CA:'🇨🇦',DIRECT:'📦'};
     var GRP=[['none','None'],['production','Production'],['shipment','Master shipment']];
     // persist filters across edit reloads; reset to a clean view only when navigating to a specific PO
-    if(_pendingPO){ _poState={f:'all',q:_pendingPO,act:{},ctry:{},grp:'shipment',sup:'',prod:'',batch:'',branch:'',recent:false}; }   // seed the search with the PO # so a single PO loads regardless of status/recency (e.g. a years-old completed PO from an aged-payment action)
+    if(_pendingPO){ _poState={f:'in_progress',q:_pendingPO,act:{},ctry:{},grp:'shipment',sup:'',prod:'',batch:'',branch:''}; }   // seed only the SEARCH with the PO # — a text search spans ALL statuses/recency (filt), so it finds even a years-old completed PO WITHOUT forcing the 'all' filter. (The old 'all' seed used to stick, so after such a search the grid showed unfiltered instead of defaulting back to In progress once the search was cleared.)
     else if(!_poState){ _poState={f:'in_progress',q:'',act:{},ctry:{},grp:'shipment',sup:'',prod:'',batch:'',branch:''}; }
     if(_poState.prod==null)_poState.prod=''; if(_poState.batch==null)_poState.batch='';
     if(_poState.recent==null)_poState.recent=true;   // completed POs default to last 12 months only (perf)
