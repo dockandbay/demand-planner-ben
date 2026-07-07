@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.313';
+const APP_VERSION = 'v25.314';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2565,7 +2565,9 @@ app.post('/api/supply/portal-line-remove', async (req, res) => {
 });
 // SKUs assignable by a supplier (from products.supplier_multiple_all) — for the portal "add SKU" picker
 app.get('/api/supply/supplier-skus/:supplier', async (req, res) => {
-  try { res.json(await qp(`SELECT sku, coalesce(product_name,'') product_name
+  try { res.json(await qp(`SELECT sku, coalesce(product_name_final,product_name,'') product_name,
+      coalesce(product_ean,'') ean, coalesce(carton_qty::text,'') carton_qty, coalesce(size_long,'') size_long,
+      coalesce(colour_long,'') colour, coalesce(release_window,'') release_window
     FROM planner.products WHERE coalesce(supplier_multiple_all,'') ILIKE '%'||$1||'%' AND coalesce(sku,'')<>'' ORDER BY sku`, [req.params.supplier])); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -6015,7 +6017,10 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
       grab(`SELECT id, po, coalesce(description,'') description, qty, price FROM planner.portal_additional_costs WHERE po = ANY($1) ORDER BY id`),
       ids.length ? q(`SELECT id, po, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read FROM planner.supplier_notes WHERE supplier_id = ANY($1) ORDER BY created_at`, [ids]) : Promise.resolve([]),
       ids.length ? q(`SELECT id, po, kind, value, status, attachment_id, to_char(submitted_at,'YYYY-MM-DD') submitted_at, to_char(applied_at,'YYYY-MM-DD') applied_at, note FROM planner.supplier_submissions WHERE supplier_id = ANY($1) ORDER BY submitted_at DESC`, [ids]) : Promise.resolve([]),
-      q(`SELECT sku, coalesce(product_name,'') product_name FROM planner.products WHERE coalesce(sku,'')<>'' AND (${names.map((_, i) => `coalesce(supplier_multiple_all,'') ILIKE '%'||$${i + 1}||'%'`).join(' OR ') || 'false'}) ORDER BY sku`, names).catch(() => []),
+      q(`SELECT sku, coalesce(product_name_final,product_name,'') product_name, coalesce(product_ean,'') ean,
+          coalesce(carton_qty::text,'') carton_qty, coalesce(size_long,'') size_long, coalesce(colour_long,'') colour,
+          coalesce(release_window,'') release_window
+        FROM planner.products WHERE coalesce(sku,'')<>'' AND (${names.map((_, i) => `coalesce(supplier_multiple_all,'') ILIKE '%'||$${i + 1}||'%'`).join(' OR ') || 'false'}) ORDER BY sku`, names).catch(() => []),
     ]);
     const byPo = (rows) => rows.reduce((m, r) => { (m[r.po] = m[r.po] || []).push(r); return m; }, {});
     const lb = byPo(lines), notesByPo = byPo(notes), subsByPo = byPo(subs), addByPo = byPo(ac);

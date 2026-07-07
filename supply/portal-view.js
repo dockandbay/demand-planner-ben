@@ -459,6 +459,7 @@
     var BC=opts.bc||(typeof bcDownloadSheets==='function'?{sheets:bcDownloadSheets,crossdock:bcDownloadCrossdock}:{placeholder:true,note:function(){alert('Labels unavailable.');}});
     var _ppData=null, PORTAL_TAB='pos', PORTAL_PO_ST=null, _ppOpenPO=null;   // _ppOpenPO: a PO to auto-expand after switching to the Purchase Orders tab
     var PORTAL_SP_ESC=false, PORTAL_SP_PO='', PORTAL_SP_ACTIVE=true, PORTAL_SP_SHIPPED=false, PORTAL_SP_FOB=false, PORTAL_SP_CTRY={};   // Shipment Plan filters
+    var PORTAL_PROD_BATCH='';   // PRODUCTIONS tab: selected batch id
     var PORTAL_PO_Q='';   // Purchase Orders search (overrides the status pills)
     var PORTAL_PO_PROD='', PORTAL_PO_CTRY='', PORTAL_PO_BR='';   // Purchase Orders dropdown filters (Production / Country / Branch)
     var PORTAL_BC_BATCH='';   // Barcodes tab: selected batch id
@@ -466,7 +467,7 @@
     var PORTAL_SAMP_F='open', PORTAL_SAMP_Q='';   // Samples grid filter + search (default: open)
     var _invFiles={};     // base64 of the last parsed invoice file, per PO (for the Apply step)
     var rootEl=opts.root; if(!rootEl.closest('#supply-root')){rootEl.id='supply-root';} rootEl.style.display='block';
-    rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders</span><span class="rtab" data-pt="shipmentplan">Shipment Plan</span><span class="rtab" data-pt="barcodes">Barcodes</span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="samples">Samples <span id="pp-samp-badge"></span></span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
+    rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders</span><span class="rtab" data-pt="shipmentplan">Shipment Plan</span><span class="rtab" data-pt="barcodes">Barcodes</span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="productions">Productions</span><span class="rtab" data-pt="samples">Samples <span id="pp-samp-badge"></span></span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
     var tabsEl=document.getElementById('pp-tabs'), body=document.getElementById('pp-body');
     function postJSON(ep,b2,cb){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b2)}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} cb&&cb(j); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); }); }
     // Should the INVOICE action fire for this PO? Rules (Ben): never on FUTURE POs; never once an invoice value is
@@ -479,6 +480,59 @@
       var effEnd = supEnd || p.prod_end || '';
       if(!effEnd) return false;   // no production end date (supplier or calculated) → nothing to invoice against yet
       return effEnd < new Date().toISOString().slice(0,10); }
+    // ── Minimal XLSX writer (ported from the main app) so PRODUCTIONS can export the same ORDER PLAN .xlsx ──
+    function _xlsxEsc(s){ return String(s==null?'':s).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
+    function _xlsxCol(i){ var s=''; i=i+1; while(i){ var r=(i-1)%26; s=String.fromCharCode(65+r)+s; i=((i-r)/26)|0; } return s; }
+    function _xlsxCell(ref,v){ var st=null; if(v&&typeof v==='object'&&('v' in v)){ st=v.s; v=v.v; }
+      var sa=(st!=null&&st>0)?(' s="'+st+'"'):'';
+      if(v===''||v==null){ return sa?('<c r="'+ref+'"'+sa+'/>'):''; }
+      if(typeof v==='number'&&isFinite(v)) return '<c r="'+ref+'"'+sa+'><v>'+v+'</v></c>';
+      return '<c r="'+ref+'"'+sa+' t="inlineStr"><is><t xml:space="preserve">'+_xlsxEsc(v)+'</t></is></c>'; }
+    function _xlsxSheet(grid, freeze, cols){ var rows=grid.map(function(row,ri){ var cells=(row||[]).map(function(v,ci){ return _xlsxCell(_xlsxCol(ci)+(ri+1),v); }).join(''); return cells?'<row r="'+(ri+1)+'">'+cells+'</row>':''; }).join('');
+      var views='';
+      if(freeze&&(freeze.x||freeze.y)){ var tl=_xlsxCol(freeze.x||0)+((freeze.y||0)+1);
+        views='<sheetViews><sheetView workbookViewId="0"><pane'+(freeze.x?' xSplit="'+freeze.x+'"':'')+(freeze.y?' ySplit="'+freeze.y+'"':'')+' topLeftCell="'+tl+'" activePane="bottomRight" state="frozen"/></sheetView></sheetViews>'; }
+      var colXml=(cols&&cols.length)?'<cols>'+cols.map(function(c){return '<col min="'+c.min+'" max="'+c.max+'" width="'+c.width+'" customWidth="1"/>';}).join('')+'</cols>':'';
+      return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+views+colXml+'<sheetData>'+rows+'</sheetData></worksheet>'; }
+    function _crc32(buf){ var t=_crc32._t; if(!t){ t=_crc32._t=[]; for(var n=0;n<256;n++){ var c=n; for(var k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1); t[n]=c>>>0; } } var crc=0xFFFFFFFF; for(var i=0;i<buf.length;i++)crc=(crc>>>8)^t[(crc^buf[i])&0xFF]; return (crc^0xFFFFFFFF)>>>0; }
+    function _zipStore(files){ var enc=new TextEncoder(), parts=[], len=0, central=[];
+      function u16(n){return new Uint8Array([n&255,(n>>8)&255]);} function u32(n){return new Uint8Array([n&255,(n>>8)&255,(n>>16)&255,(n>>>24)&255]);}
+      function push(u){parts.push(u); len+=u.length;}
+      files.forEach(function(f){ var nm=enc.encode(f.name), data=f.data, crc=_crc32(data), off=len;
+        push(u32(0x04034b50)); push(u16(20)); push(u16(0)); push(u16(0)); push(u16(0)); push(u16(0)); push(u32(crc)); push(u32(data.length)); push(u32(data.length)); push(u16(nm.length)); push(u16(0)); push(nm); push(data);
+        central.push({nm:nm,crc:crc,len:data.length,off:off}); });
+      var cstart=len;
+      central.forEach(function(c){ push(u32(0x02014b50)); push(u16(20)); push(u16(20)); push(u16(0)); push(u16(0)); push(u16(0)); push(u16(0)); push(u32(c.crc)); push(u32(c.len)); push(u32(c.len)); push(u16(c.nm.length)); push(u16(0)); push(u16(0)); push(u16(0)); push(u16(0)); push(u32(0)); push(u32(c.off)); push(c.nm); });
+      var csize=len-cstart;
+      push(u32(0x06054b50)); push(u16(0)); push(u16(0)); push(u16(central.length)); push(u16(central.length)); push(u32(csize)); push(u32(cstart)); push(u16(0));
+      var out=new Uint8Array(len), p=0; parts.forEach(function(u){ out.set(u,p); p+=u.length; }); return out; }
+    function buildXlsx(sheetName, grid, freeze, cols){ var enc=new TextEncoder();
+      var STYLES='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        +'<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>'
+        +'<fills count="6"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
+        +'<fill><patternFill patternType="solid"><fgColor rgb="FFFA5053"/></patternFill></fill>'
+        +'<fill><patternFill patternType="solid"><fgColor rgb="FF8FD9FB"/></patternFill></fill>'
+        +'<fill><patternFill patternType="solid"><fgColor rgb="FFADEBB3"/></patternFill></fill>'
+        +'<fill><patternFill patternType="solid"><fgColor rgb="FFDAB1DA"/></patternFill></fill></fills>'
+        +'<borders count="1"><border/></borders>'
+        +'<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+        +'<cellXfs count="8"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+        +'<xf numFmtId="0" fontId="0" fillId="2" borderId="0" xfId="0" applyFill="1" applyAlignment="1"><alignment horizontal="center"/></xf>'
+        +'<xf numFmtId="0" fontId="0" fillId="3" borderId="0" xfId="0" applyFill="1" applyAlignment="1"><alignment horizontal="center"/></xf>'
+        +'<xf numFmtId="0" fontId="0" fillId="4" borderId="0" xfId="0" applyFill="1" applyAlignment="1"><alignment horizontal="center"/></xf>'
+        +'<xf numFmtId="0" fontId="0" fillId="5" borderId="0" xfId="0" applyFill="1" applyAlignment="1"><alignment horizontal="center"/></xf>'
+        +'<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
+        +'<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment horizontal="center"/></xf>'
+        +'<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center"/></xf></cellXfs></styleSheet>';
+      var files=[
+        {name:'[Content_Types].xml', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'},
+        {name:'_rels/.rels', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'},
+        {name:'xl/workbook.xml', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="'+_xlsxEsc(sheetName)+'" sheetId="1" r:id="rId1"/></sheets></workbook>'},
+        {name:'xl/_rels/workbook.xml.rels', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'},
+        {name:'xl/styles.xml', str:STYLES},
+        {name:'xl/worksheets/sheet1.xml', str:_xlsxSheet(grid, freeze, cols)}
+      ];
+      return _zipStore(files.map(function(f){ return {name:f.name, data:enc.encode(f.str)}; })); }
     function ppCard(l,v){ return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px 14px;min-width:120px"><div class="tiny mut">'+l+'</div><div style="font-weight:700;font-size:16px">'+v+'</div></div>'; }
     // portal payment cell: only show a payment once it's been MADE (a paid date exists), with that date
     function ppPay(amt,dt){ return dt ? '$'+units(amt||0)+'<br><span class="mut tiny">'+esc(fd(dt))+'</span>' : '<span class="mut">—</span>'; }
@@ -772,6 +826,54 @@
             +'<colgroup><col style="width:42%"><col style="width:20%"><col style="width:20%"><col style="width:18%"></colgroup>'
             +'<thead><tr><th class="l">PO reference</th><th class="l">Type</th><th style="text-align:right">Amount</th><th class="l">Deposit ref</th></tr></thead><tbody>'+body+'</tbody></table></div></div>'; }).join('');
       return '<div style="max-width:560px">'+head+cards+'</div>'; }   // cap the tab to ~half width so it doesn't span full screen
+    // ── PRODUCTIONS tab: pick a batch → order-plan pivot (SKUs × POs × qty) for that batch, + XLSX download ──
+    function prodBatchesList(){ var s={}; (_ppData.pos||[]).forEach(function(p){ var b=(p.batch_id==null?'':String(p.batch_id)).trim(); if(b)s[b]=1; }); return Object.keys(s).sort().reverse(); }
+    function prodBatchPOs(){ return (_ppData.pos||[]).filter(function(p){ return ((p.batch_id==null?'':String(p.batch_id)).trim())===PORTAL_PROD_BATCH; }); }
+    function prodPivotData(bp){ var qmap={},skuSet={},skus=[]; bp.forEach(function(p){ (_ppData.lb[p.po]||[]).forEach(function(l){ var k=l.sku+'|'+p.po; qmap[k]=(qmap[k]||0)+(Number(l.qty)||0); if(!skuSet[l.sku]){skuSet[l.sku]=1;skus.push(l.sku);} }); }); skus.sort();
+      var poList=bp.map(function(p){return p.po;}).sort().reverse(); var attr={}; (_ppData.supSkus||[]).forEach(function(s){ attr[s.sku]=s; }); return {qmap:qmap,skus:skus,poList:poList,attr:attr}; }
+    function ppProductions(){
+      var batches=prodBatchesList();
+      var sel='<div class="bar" style="gap:8px;align-items:center;flex-wrap:wrap"><span class="pill-lbl" style="width:auto">Batch</span>'
+        +'<select class="fci pv-prod-batch" style="min-width:200px;text-align:left"><option value="">— choose a batch —</option>'
+        +batches.map(function(b){return '<option value="'+esc(b)+'"'+(PORTAL_PROD_BATCH===b?' selected':'')+'>'+esc(b)+'</option>';}).join('')+'</select>'
+        +(PORTAL_PROD_BATCH?'<button class="save-btn pv-prod-dl" style="margin-left:auto">⤓ Download order plan (XLSX)</button>':'')+'</div>';
+      if(!batches.length) return sel+'<div class="count">No batches on your purchase orders yet.</div>';
+      if(!PORTAL_PROD_BATCH) return sel+'<div class="count">Choose a batch to see its order plan.</div>';
+      var bp=prodBatchPOs(); if(!bp.length) return sel+'<div class="count">No purchase orders in that batch.</div>';
+      var d=prodPivotData(bp);
+      if(!d.skus.length) return sel+'<div class="count">No SKUs ordered in that batch.</div>';
+      var th='<th class="l" style="position:sticky;left:0;background:#f3f3f1;z-index:3">SKU</th><th class="l">Product</th>'+d.poList.map(function(po){return '<th style="text-align:right;min-width:70px">'+esc(po)+'</th>';}).join('');
+      var body=d.skus.map(function(sku){ var a=d.attr[sku]||{};
+        return '<tr><td class="l" style="position:sticky;left:0;background:#fff;z-index:1;font-weight:600;white-space:nowrap">'+esc(sku)+'</td><td class="l" style="white-space:nowrap"><span class="mut">'+esc(a.product_name||'')+'</span></td>'
+          +d.poList.map(function(po){ var q=d.qmap[sku+'|'+po]; return '<td style="text-align:right">'+(q?units(q):'<span class="mut">—</span>')+'</td>'; }).join('')+'</tr>'; }).join('');
+      return sel+'<div class="mut tiny" style="margin:2px 0 8px">'+bp.length+' PO'+(bp.length>1?'s':'')+' · '+d.skus.length+' SKU'+(d.skus.length>1?'s':'')+' in batch '+esc(PORTAL_PROD_BATCH)+'</div>'
+        +'<div class="tw" style="max-height:calc(100vh - 220px)"><table class="pp-tbl"><thead><tr>'+th+'</tr></thead><tbody>'+body+'</tbody></table></div>'; }
+    function downloadProductionPlan(){
+      var bp=prodBatchPOs(); if(!bp.length){ alert('No POs in that batch.'); return; }
+      var d=prodPivotData(bp), poList=d.poList; if(!d.skus.length){ alert('No SKUs ordered in that batch.'); return; }
+      var pmeta={}; bp.forEach(function(p){ pmeta[p.po]={co:p.country||'',branch:p.branch||'',sw:(p.ships_with?p.ships_with+(p.ships_with_supplier?' — '+p.ships_with_supplier:''):''),pe:p.prod_end||'',client:p.client||'',so:p.sales_order_ref||''}; });
+      var CO_STYLE={UK:1,US:2,AU:3,EU:4};
+      var LEFT=7, pad=function(v){ var a=new Array(LEFT-1); for(var i=0;i<a.length;i++)a[i]=''; return [v].concat(a); };
+      var boldL=function(arr){ return arr.map(function(v){ return {v:(v&&typeof v==='object'&&'v' in v)?v.v:v, s:5}; }); };
+      var ctr=function(v){ return {v:v==null?'':v, s:6}; };
+      var metaRow=function(lbl,fn){ return pad(lbl).concat(poList.map(function(po){ return ctr(fn(po)); })); };
+      var grid=[];
+      grid.push(pad('Country').concat(poList.map(function(po){ var co=pmeta[po].co||''; return {v:co, s:(CO_STYLE[String(co).toUpperCase()]||6)}; })));
+      grid.push(boldL(pad('PO')).concat(poList.map(function(po){ return {v:po, s:7}; })));
+      grid.push(metaRow('Branch', function(po){return pmeta[po].branch;}));
+      grid.push(metaRow('Ships with', function(po){return pmeta[po].sw;}));
+      grid.push(metaRow('Production end', function(po){return pmeta[po].pe;}));
+      grid.push(metaRow('Client (DTC)', function(po){return pmeta[po].client;}));
+      grid.push(metaRow('DTC sales order ref', function(po){return pmeta[po].so;}));
+      grid.push(boldL(['SKU','EAN','Carton qty','Release window','Product title','Size','Colour']).concat(poList.map(function(){return {v:'QTY', s:7};})));
+      d.skus.forEach(function(sku){ var a=d.attr[sku]||{};
+        grid.push([sku, a.ean||'', a.carton_qty||'', a.release_window||'', a.product_name||'', a.size_long||'', a.colour||'']
+          .concat(poList.map(function(po){ var q=d.qmap[sku+'|'+po]; return ctr(q?q:''); }))); });
+      var colDefs=[30,15,10,18,34,26,18].map(function(w,i){ return {min:i+1,max:i+1,width:w}; }); colDefs.push({min:8, max:7+poList.length, width:12.6});
+      var bytes=buildXlsx('Order Plan', grid, {x:1,y:8}, colDefs);   // freeze col A + rows 1-8 (7 meta rows + SKU header)
+      var blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+      var url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download='OrderPlan_'+String(PORTAL_PROD_BATCH).replace(/[^A-Za-z0-9_-]/g,'_')+'_'+new Date().toISOString().slice(0,10)+'.xlsx'; document.body.appendChild(a); a.click();
+      setTimeout(function(){URL.revokeObjectURL(url);a.remove();},150); }
           // FOB card timeline = notes on the PO itself (FOB has no shipment). Reuses the PO-notes store.
           function fobTLHtml(po){ var nts=(_ppData.notesByPo&&_ppData.notesByPo[po])||[];
             return nts.length?nts.map(function(n){ return '<div class="tiny" style="margin:2px 0"><span class="mut">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span> — '+esc(n.body)+'</div>'; }).join(''):'<div class="mut tiny">No timeline entries yet.</div>'; }
@@ -1029,6 +1131,10 @@
             if(PORTAL_TAB==='deposits'){ body.innerHTML=ppDeposits(_ppData.sdep); return; }
             if(PORTAL_TAB==='payments'){ body.innerHTML=ppPayments(_ppData.payments||[]);
               body.querySelectorAll('.pay-head').forEach(function(h){ h.onclick=function(){ var c=h.closest('.sp-card'), bd=c&&c.querySelector('.pay-body'), tg=h.querySelector('.pay-toggle'); if(!bd)return; var open=bd.style.display!=='none'; bd.style.display=open?'none':''; if(tg)tg.textContent=open?'▸':'▾'; }; });
+              return; }
+            if(PORTAL_TAB==='productions'){ body.innerHTML=ppProductions();
+              var pb=body.querySelector('.pv-prod-batch'); if(pb)pb.onchange=function(){ PORTAL_PROD_BATCH=this.value; renderPP(); };
+              var pdl=body.querySelector('.pv-prod-dl'); if(pdl)pdl.onclick=function(){ downloadProductionPlan(); };
               return; }
             if(PORTAL_TAB==='barcodes'){
               // batches on this supplier's POs (distinct batch_id, sorted)

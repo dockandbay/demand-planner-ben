@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.314 - Supplier portal: new PRODUCTIONS tab (batch order plan + XLSX export)
+
+New master tab: pick a batch ID -> order-plan pivot (SKUs x POs x qty) for that batch, with a Download that
+builds the SAME ORDER PLAN .xlsx as the main SUPPLY plan (ported the XLSX writer into portal-view.js; enriched
+the portal supplier-SKU data with EAN/carton/size/colour/release so the export columns match).
+
 ## v25.313 - Supplier portal invoice action: refined rules (invoiceDue helper)
 
 Invoice notification now: never on FUTURE POs; never once invoice_value submitted; production end date =
