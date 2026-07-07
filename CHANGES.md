@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.306 - Supplier portal layout: full-width + PO table fills screen (mirror Diviyaj's prod fixes)
+
+Mirrors two CSS fixes Diviyaj already applied to production (portal.html): (1) #pv-wrap dropped max-width:1100px/
+margin:auto so the portal uses full width; (2) added `#pv-wrap #supply-root .tw{max-height:calc(100vh-160px)}`
+to remove the dead strip at the bottom of the PO table. The double-ID selector is needed to beat
+portal-view.js's injected `#supply-root .tw{max-height:calc(100vh-210px)}` (equal specificity + load order).
+
 ## v25.305 - DEMAND grid: data-point text +1pt
 
 Bumped the SKU demand grid's numeric cells by 1pt for readability: td.trd (monthly values) 10→11px, td.totu
