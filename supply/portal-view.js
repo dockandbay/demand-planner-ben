@@ -842,9 +842,9 @@
       var bp=prodBatchPOs(); if(!bp.length) return sel+'<div class="count">No purchase orders in that batch.</div>';
       var d=prodPivotData(bp);
       if(!d.skus.length) return sel+'<div class="count">No SKUs ordered in that batch.</div>';
-      var th='<th class="l" style="position:sticky;left:0;background:#f3f3f1;z-index:3">SKU</th><th class="l">Product</th>'+d.poList.map(function(po){return '<th style="text-align:right;min-width:70px">'+esc(po)+'</th>';}).join('');
+      var th='<th class="l" style="position:sticky;left:0;background:#f3f3f1;z-index:3;min-width:190px">SKU</th><th class="l">EAN</th><th class="l">Size</th>'+d.poList.map(function(po){return '<th style="text-align:right;min-width:70px">'+esc(po)+'</th>';}).join('');
       var body=d.skus.map(function(sku){ var a=d.attr[sku]||{};
-        return '<tr><td class="l" style="position:sticky;left:0;background:#fff;z-index:1;font-weight:600;white-space:nowrap">'+esc(sku)+'</td><td class="l" style="white-space:nowrap"><span class="mut">'+esc(a.product_name||'')+'</span></td>'
+        return '<tr><td class="l" style="position:sticky;left:0;background:#fff;z-index:1;font-weight:600;white-space:nowrap;min-width:190px">'+esc(sku)+'</td><td class="l" style="white-space:nowrap"><span class="mut">'+esc(a.ean||'')+'</span></td><td class="l" style="white-space:nowrap"><span class="mut">'+esc(a.size_long||'')+'</span></td>'
           +d.poList.map(function(po){ var q=d.qmap[sku+'|'+po]; return '<td style="text-align:right">'+(q?units(q):'<span class="mut">—</span>')+'</td>'; }).join('')+'</tr>'; }).join('');
       return sel+'<div class="mut tiny" style="margin:2px 0 8px">'+bp.length+' PO'+(bp.length>1?'s':'')+' · '+d.skus.length+' SKU'+(d.skus.length>1?'s':'')+' in batch '+esc(PORTAL_PROD_BATCH)+'</div>'
         +'<div class="tw" style="max-height:calc(100vh - 220px)"><table class="pp-tbl"><thead><tr>'+th+'</tr></thead><tbody>'+body+'</tbody></table></div>'; }

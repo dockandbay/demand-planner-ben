@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.315 - Supplier portal PRODUCTIONS pivot: drop Product, widen SKU, add EAN + Size
+
+On-screen batch pivot columns are now SKU (wider, ~190px, sticky) + EAN + Size (size_long), then the PO qty
+columns. Removed the Product title column. (XLSX export unchanged — still matches the main order plan.)
+
 ## v25.314 - Supplier portal: new PRODUCTIONS tab (batch order plan + XLSX export)
 
 New master tab: pick a batch ID -> order-plan pivot (SKUs x POs x qty) for that batch, with a Download that
