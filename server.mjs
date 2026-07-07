@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.302';
+const APP_VERSION = 'v25.303';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2954,6 +2954,18 @@ app.get('/api/supply/portal-notes/:sid', async (req, res) => {
 app.get('/api/supply/portal-submissions/:sid', async (req, res) => {
   try { res.json(await qp(`SELECT id, po, kind, value, status, attachment_id, to_char(submitted_at,'YYYY-MM-DD') submitted_at, to_char(applied_at,'YYYY-MM-DD') applied_at, note
     FROM planner.supplier_submissions WHERE supplier_id=$1 ORDER BY submitted_at DESC`, [req.params.sid])); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Payments made to a supplier (payment ledger) — feeds the CONFIG ▸ Portal preview's master PAYMENTS tab (the
+// real portal gets the same data via /api/portal/bootstrap).
+app.get('/api/supply/supplier-payments/:name', async (req, res) => {
+  try { res.json(await pool.query(`SELECT to_char(payment_date,'YYYY-MM-DD') payment_date, coalesce(payment_run_ref,'') payment_run_ref,
+      coalesce(transaction_reference,'') reference, coalesce(transaction_type,'') type, transaction_amount amount,
+      coalesce(deposit_ref,'') deposit_ref, coalesce(invoice_reference,'') invoice_reference,
+      coalesce(po_completion,'') po_completion, coalesce(po_balance_1,'') po_balance_1,
+      coalesce(po_balance_2,'') po_balance_2, coalesce(po_balance_3,'') po_balance_3
+    FROM planner.payment_transactions WHERE transaction_supplier = $1
+    ORDER BY payment_date DESC NULLS LAST, id DESC`, [req.params.name]).then(r => r.rows)); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Internal one-click apply / dismiss of a staged supplier submission (Phase 4). Apply writes to the live PO

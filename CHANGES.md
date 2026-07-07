@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.303 - Admin app: cache-bust portal-view.js too (CONFIG ▸ Portal preview was using stale code)
+
+The CONFIG ▸ Portal "preview as supplier" uses window.DBPortalView from portal-view.js — but inject.html loaded
+`<script src="/portal-view.js">` with no cache-bust, so the admin app kept using a STALE cached portal-view.js
+(v25.302 only cache-busted the standalone portal.html). Now inject.html loads it as ?v=__APP_VERSION__, so the
+preview reflects the latest portal code on every version bump. Also wired the preview's data (loadPortalData)
+to include `payments` (new /api/supply/supplier-payments/:name endpoint) so the master PAYMENTS tab populates
+in the preview too, not just the live portal.
+
 ## v25.302 - Supplier portal: cache-bust portal-view.js (stale CSS/JS/data was hiding recent changes)
 
 portal.html loaded /portal-view.js with no cache-bust, so the browser/tunnel served a STALE copy — recent CSS
