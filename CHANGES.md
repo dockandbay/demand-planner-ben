@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.298 - Supplier portal: pinned sub-menu + new PAYMENTS sub-tab
+
+- The expanded PO's sub-menu (Timeline / Order Plan / …) now stays pinned to the left while the wide grid
+  scrolls sideways — same JS scroll-translate as the main PURCHASE ORDERS grid (bindPortalScrollPin translates
+  the .ppx detail panel by the grid's scrollLeft).
+- New PAYMENTS sub-tab: total invoice value + payment due date, starting deposit (amount/date/deposit ref),
+  completion deposit (amount/date), balance payment (amount/date), and an Amount paid / Amount due summary.
+
 ## v25.297 - Supplier portal: fix blank "Ships With" + Production column/grouping + compact MANAGE
 
 Two portal-grid changes:

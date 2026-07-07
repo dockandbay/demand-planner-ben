@@ -469,6 +469,14 @@
     function ppCard(l,v){ return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px 14px;min-width:120px"><div class="tiny mut">'+l+'</div><div style="font-weight:700;font-size:16px">'+v+'</div></div>'; }
     // portal payment cell: only show a payment once it's been MADE (a paid date exists), with that date
     function ppPay(amt,dt){ return dt ? '$'+units(amt||0)+'<br><span class="mut tiny">'+esc(fd(dt))+'</span>' : '<span class="mut">—</span>'; }
+    // Pin an expanded PO's detail panel (its sub-tabs + content) to the left while the wide portal grid scrolls
+    // sideways — same JS-translate approach as the main PURCHASE ORDERS grid (CSS sticky can't: the detail cell
+    // spans the full table width, so it has no containing-block slack). transform is compositor-only + rAF-coalesced.
+    function portalGridTw(){ var tbl=document.querySelector('#supply-root table.pp-tbl'); return tbl&&tbl.closest('.tw'); }
+    function applyPortalPin(){ var tw=portalGridTw(); if(!tw)return; var x=tw.scrollLeft;
+      document.querySelectorAll('#supply-root table.pp-tbl .ppx').forEach(function(el){ el.style.transform=x?('translateX('+x+'px)'):''; }); }
+    function bindPortalScrollPin(){ var tw=portalGridTw(); if(!tw||tw._pin)return; tw._pin=1; var raf=0;
+      tw.addEventListener('scroll',function(){ if(!raf)raf=requestAnimationFrame(function(){ raf=0; applyPortalPin(); }); },{passive:true}); }
     function subFmt(s){ if(s.kind==='tracking'){ try{var o=JSON.parse(s.value);return 'tracking '+(o.tracking||'')+(o.carrier?' / '+o.carrier:'');}catch(e){return 'tracking';} }
       if(s.kind==='completion_date')return 'completion '+s.value; if(s.kind==='invoice_value')return 'invoice $'+s.value; return s.kind+' '+(s.value||''); }
     function ppExpand(p, lines, notes, subs, i, costs, supSkus, xd, add){ var po=esc(p.po); costs=costs||{}; supSkus=supSkus||[]; xd=xd||{}; add=add||[];
@@ -658,9 +666,27 @@
           +'</tbody></table>';
       var dtc='<div class="dtc-wrap">'+dtcApproveBar+'<div class="sect-h" style="margin:0 0 8px">Direct to Client details</div>'+dtcInfo
         +'<div class="sect-h" style="margin:6px 0 8px">Packing &amp; Labelling</div>'+dtcPackTbl+'</div>';
+      // ---- PAYMENTS tab: invoice value + due date, the deposit/completion/balance milestones, and a paid/due summary
+      var _pm=function(v){ return (v==null||v==='')?'<span class="mut">—</span>':'$'+units(v); };
+      var _pd=function(v){ return v?esc(fd(v)):'<span class="mut">—</span>'; };
+      var startAmt=(p.start_assigned!=null?p.start_assigned:p.start_dep), compAmt=(p.completion_assigned!=null?p.completion_assigned:p.completion), balAmt=p.balance_1_amount;
+      var paidTot=(p.start_date?Number(startAmt)||0:0)+(p.completion_date?Number(compAmt)||0:0)+(p.balance_1_date?Number(balAmt)||0:0);
+      var dueTot=(p.balance_owing!=null?Number(p.balance_owing):null);
+      var _prow=function(lbl,amt,dt,ref){ return '<tr><td class="l" style="padding:4px 16px 4px 0;white-space:nowrap">'+lbl+'</td><td class="l" style="padding:4px 16px 4px 0"><b>'+_pm(amt)+'</b></td><td class="l" style="padding:4px 16px 4px 0">'+_pd(dt)+'</td><td class="l" style="padding:4px 0">'+(ref?esc(ref):'<span class="mut">—</span>')+'</td></tr>'; };
+      var payments='<div class="sect-h">Payments</div>'
+        +'<table style="font-size:12px;border-collapse:collapse;text-align:left;min-width:440px"><thead><tr>'
+          +'<th class="l" style="padding:3px 16px 3px 0">Milestone</th><th class="l" style="padding:3px 16px 3px 0">Amount</th><th class="l" style="padding:3px 16px 3px 0">Date</th><th class="l">Deposit reference</th></tr></thead><tbody>'
+        +_prow('Total invoice value', p.supplier_invoice_total, p.balance_due, '')
+        +_prow('Starting deposit', startAmt, p.start_date, p.deposit_ref)
+        +_prow('Completion deposit', compAmt, p.completion_date, '')
+        +_prow('Balance payment', balAmt, p.balance_1_date, '')
+        +'</tbody></table>'
+        +'<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">'+ppCard('Amount paid','$'+units(paidTot))+ppCard('Amount due',dueTot!=null?'$'+units(dueTot):'—')+'</div>'
+        +'<div class="tiny mut" style="margin-top:6px">Total invoice value shows its payment due date. Amounts/dates are the deposit &amp; balance milestones from your PO.</div>';
       // ---- tabs + action badges ----
       var tabs=[['timeline','TIMELINE',timeline,unreadInt+((needConfirm&&!confirmed)?1:0)+(prodExc?1:0)],['orderplan','ORDER PLAN',skus,0],
-        ['invoice','INVOICE',invoice, has('invoice_value')?0:1],['shipment','SHIPMENT',shipment, ((p.shipment||p.flexport_reference||has('tracking'))?0:1)+xdAction],
+        ['invoice','INVOICE',invoice, has('invoice_value')?0:1],['payments','PAYMENTS',payments,0],
+        ['shipment','SHIPMENT',shipment, ((p.shipment||p.flexport_reference||has('tracking'))?0:1)+xdAction],
         ['barcodes','BARCODES & LABELS',barcodesLabels,0]];
       if(dtcApplies) tabs.push(['dtc','DIRECT TO CLIENT DETAILS', dtc, dtcAccepted?0:1]);
       function badge(n){ return n>0?' <span class="ex-badge">'+n+'</span>':''; }
@@ -1001,6 +1027,7 @@
             var poCapped=(!_ppShowAllPO && shown.length>PP_CAP), poRender=poCapped?shown.slice(0,PP_CAP):shown;
             body.innerHTML=pillBar+'<div class="count" style="margin:2px 0 8px">'+(poCapped?poRender.length+' of ':'')+shown.length+' of '+_ppData.pos.length+' purchase orders</div>'+ppPOs(poRender,_ppData)
               +(poCapped?'<div style="margin:8px 0;text-align:center"><button class="save-btn pp-showall">Show all '+shown.length+' &darr;</button></div>':'');
+            bindPortalScrollPin();   // pin expanded PO detail(s) to the left while the grid scrolls sideways
             var ppsa=body.querySelector('.pp-showall'); if(ppsa)ppsa.onclick=function(){ _ppShowAllPO=true; renderPP(); };
             body.querySelectorAll('.pill[data-st]').forEach(function(p){ p.onclick=function(){ var s=p.dataset.st; PORTAL_PO_ST[s]=!PORTAL_PO_ST[s]; _ppShowAllPO=false; renderPP(); }; });
             var _pr=body.querySelector('.pp-po-prod'); if(_pr)_pr.onchange=function(){ PORTAL_PO_PROD=this.value; _ppShowAllPO=false; renderPP(); };
@@ -1010,7 +1037,8 @@
             body.querySelectorAll('.pp-exp').forEach(function(btn){ btn.onclick=function(){ var i=btn.dataset.i, ex=document.getElementById('pp-'+i); if(!ex)return;
               if(!ex.dataset.built){ ex.dataset.built='1'; var po=ex.dataset.po, p=_ppData.pos.filter(function(x){return x.po===po;})[0], cell=ex.children[1];
                 if(p&&cell){ cell.innerHTML=ppExpand(p,_ppData.lb[po]||[],_ppData.notesByPo[po]||[],_ppData.subsByPo[po]||[],i,_ppData.costsByPo[po]||{},_ppData.supSkus||[],_ppData.xdByPo[po]||{},_ppData.addByPo[po]||[]); wireDetail(cell); } }
-              ex.style.display=(ex.style.display!=='none')?'none':''; if(ex.style.display!=='none'&&!ex.dataset.fcLoaded){ ex.dataset.fcLoaded='1'; loadFreightCharges(ex); } }; });
+              ex.style.display=(ex.style.display!=='none')?'none':''; if(ex.style.display!=='none'&&!ex.dataset.fcLoaded){ ex.dataset.fcLoaded='1'; loadFreightCharges(ex); }
+              applyPortalPin(); }; });   // align the just-opened detail to the current horizontal scroll
             // re-render ONE PO's expanded detail in place (no full reload, so MANAGE + the open tab stay put)
             function rerenderRow(row,po,keepPt){ if(!row)return; var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; if(!p)return;
               var i=row.id.replace('pp-',''), cell=row.children[1]; if(!cell)return;
