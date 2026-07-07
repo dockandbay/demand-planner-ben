@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.298';
+const APP_VERSION = 'v25.299';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1452,12 +1452,14 @@ app.get('/api/supply/:section', async (req, res) => {
             to_char(coalesce(sh.landing_date, fx.landing_date),'YYYY-MM-DD') landing,
             to_char(coalesce(sh.arrival_date, fx.arrival_date),'YYYY-MM-DD') arrival,
             p.po, coalesce(p.supplier_name,'') supplier_name, coalesce(p.client,'') client,
+            upper(coalesce(nullif(p.country_code,''), b.country_code, '')) country,
             to_char(p.client_deadline_date,'YYYY-MM-DD') client_deadline,
             (p.po = coalesce(sh.master_po, p.shipment_ref)) is_master, coalesce(sh.escalated,false) escalated,
             round(coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0))
               FROM planner.purchase_order_lines l LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=p.po),0)::numeric,1) pallets
           FROM planner.purchase_orders p
           LEFT JOIN planner.shipments sh ON sh.shipment_ref=p.shipment_ref
+          LEFT JOIN planner.branches b ON b.name=p.branch
           LEFT JOIN LATERAL (SELECT f.flex_id, f.mode, f.departure_date, f.landing_date, f.arrival_date FROM planner.flexport_shipments f
             WHERE f.flex_id=sh.carrier_ref OR f.shipment_name=p.shipment_ref OR f.flex_id=p.flexport_reference
             ORDER BY (f.flex_id=p.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true
@@ -1465,9 +1467,10 @@ app.get('/api/supply/:section', async (req, res) => {
           ORDER BY p.shipment_ref, (p.po = coalesce(sh.master_po, p.shipment_ref)) DESC, p.po`);
         const byRef = {};
         rows.forEach(r => { let s = byRef[r.shipment_ref];
-          if (!s) s = byRef[r.shipment_ref] = { shipment_ref: r.shipment_ref, master_po: r.master_po, mode: r.mode, carrier: r.carrier, carrier_ref: r.carrier_ref, flex_id: r.flex_id, departure: r.departure, landing: r.landing, arrival: r.arrival, escalated: !!r.escalated, master_client: '', master_deadline: '', master_supplier: '', total_pallets: 0, suppliers: [], members: [] };
+          if (!s) s = byRef[r.shipment_ref] = { shipment_ref: r.shipment_ref, master_po: r.master_po, mode: r.mode, carrier: r.carrier, carrier_ref: r.carrier_ref, flex_id: r.flex_id, departure: r.departure, landing: r.landing, arrival: r.arrival, escalated: !!r.escalated, master_client: '', master_deadline: '', master_supplier: '', country: '', total_pallets: 0, suppliers: [], members: [] };
           s.total_pallets += Number(r.pallets) || 0;
           if (s.suppliers.indexOf(r.supplier_name) < 0 && r.supplier_name) s.suppliers.push(r.supplier_name);
+          if (r.country && (r.is_master || !s.country)) s.country = r.country;   // destination country — prefer the master PO's
           if (r.is_master) { s.master_client = r.client; s.master_deadline = r.client_deadline; s.master_supplier = r.supplier_name; }
           // include EVERY PO on the shipment (incl. the master) so the summary's pallets sum to the total
           s.members.push({ po: r.po, supplier: r.supplier_name, pallets: Number(r.pallets) || 0, client: r.client, is_master: !!r.is_master });
@@ -1499,6 +1502,7 @@ app.get('/api/supply/:section', async (req, res) => {
         // destination that isn't one of our import warehouses UK/US/EU/AU/CA) — mirrors the app's isFOBdest rule.
         const fobRows = (await pool.query(`
           SELECT p.po, coalesce(p.supplier_name,'') supplier_name, coalesce(p.client,'') client, coalesce(p.status,'') status,
+            upper(coalesce(nullif(p.country_code,''), b.country_code, '')) country,
             to_char(p.client_deadline_date,'YYYY-MM-DD') client_deadline,
             to_char(coalesce(p.end_production_overide, p.start_production + (coalesce(s.production_days,0)||' days')::interval)::date,'YYYY-MM-DD') prod_end,
             round(coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0)) FROM planner.purchase_order_lines l
@@ -1514,7 +1518,7 @@ app.get('/api/supply/:section', async (req, res) => {
         // definitive guard: never show a PO as FOB if it's already represented on a real shipment (as master or member)
         const onShip = new Set(); shipEntries.forEach(s => { if (s.master_po) onShip.add(s.master_po); (s.members || []).forEach(m => onShip.add(m.po)); });
         fobRows.forEach(r => { if (onShip.has(r.po)) return; const pallets = Number(r.pallets) || 0; shipEntries.push({
-          shipment_ref: '', is_fob: true, master_po: r.po, mode: 'FOB', carrier: '', carrier_ref: '', flex_id: '',
+          shipment_ref: '', is_fob: true, master_po: r.po, mode: 'FOB', carrier: '', carrier_ref: '', flex_id: '', country: r.country || '',
           departure: '', landing: '', arrival: '', escalated: false, status: r.status, prod_end: r.prod_end || '',
           master_client: r.client, master_deadline: r.client_deadline, master_supplier: r.supplier_name,
           total_pallets: pallets, suppliers: r.supplier_name ? [r.supplier_name] : [],

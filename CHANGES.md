@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.299 - Supplier portal: Shipment Plan (collapse, FOB/country pills, PO links) + PAYMENTS/grid polish
+
+Shipment Plan:
+- Each shipment/FOB card is now collapsed to a summary header with an expand (▸) toggle.
+- New filter pills: 📦 FOB (FOB collections only) and one per destination country (added `country` to the
+  shipment-plan rows server-side, from the PO/branch country).
+- PO references (card header + POs-aboard table) now link back to the Purchase Orders tab and auto-open that PO.
+PO grid / PAYMENTS:
+- Production group separator is now a clear grey banner line (was pale blue).
+- PAYMENTS table is fixed-layout with a wide first column (190px) so labels + dates no longer clip.
+
 ## v25.298 - Supplier portal: pinned sub-menu + new PAYMENTS sub-tab
 
 - The expanded PO's sub-menu (Timeline / Order Plan / …) now stays pinned to the left while the wide grid

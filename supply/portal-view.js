@@ -421,7 +421,7 @@
 #supply-root table.pp-tbl tbody tr:not([id]) td:first-child{overflow:visible}
 #supply-root .ex-badge.done{background:#9ca3af}
 /* Production sub-heading row spanning the portal PO grid (pinned left while scrolling sideways). */
-#supply-root table.pp-tbl tr.pp-grp td{position:sticky;left:0;z-index:2;background:#eef2ff;color:#1e3a8a;font-weight:700;font-size:11px;padding:5px 8px;text-align:left;letter-spacing:.02em}
+#supply-root table.pp-tbl tr.pp-grp td{position:sticky;left:0;z-index:2;background:#e5e7eb;color:#374151;font-weight:700;font-size:11px;padding:6px 10px;text-align:left;letter-spacing:.03em;text-transform:uppercase;border-top:2px solid #cbd5e1;border-bottom:1px solid #cbd5e1}
 /* Mobile: turn the portal sub-menu (tab strip) into a full-width horizontally-scrollable row so all tabs
    stay reachable instead of wrapping/overlapping. */
 @media (max-width:640px){
@@ -454,8 +454,8 @@
     var EP=opts.ep, STATE={supplierName:opts.supplierName||'', sid:opts.sid||null, by:opts.by||'portal'};
     var by=STATE.by, sid=STATE.sid;
     var BC=opts.bc||(typeof bcDownloadSheets==='function'?{sheets:bcDownloadSheets,crossdock:bcDownloadCrossdock}:{placeholder:true,note:function(){alert('Labels unavailable.');}});
-    var _ppData=null, PORTAL_TAB='pos', PORTAL_PO_ST=null;
-    var PORTAL_SP_ESC=false, PORTAL_SP_PO='', PORTAL_SP_ACTIVE=true, PORTAL_SP_SHIPPED=false;   // Shipment Plan filters
+    var _ppData=null, PORTAL_TAB='pos', PORTAL_PO_ST=null, _ppOpenPO=null;   // _ppOpenPO: a PO to auto-expand after switching to the Purchase Orders tab
+    var PORTAL_SP_ESC=false, PORTAL_SP_PO='', PORTAL_SP_ACTIVE=true, PORTAL_SP_SHIPPED=false, PORTAL_SP_FOB=false, PORTAL_SP_CTRY={};   // Shipment Plan filters
     var PORTAL_PO_Q='';   // Purchase Orders search (overrides the status pills)
     var PORTAL_PO_PROD='', PORTAL_PO_CTRY='', PORTAL_PO_BR='';   // Purchase Orders dropdown filters (Production / Country / Branch)
     var PORTAL_BC_BATCH='';   // Barcodes tab: selected batch id
@@ -674,8 +674,10 @@
       var dueTot=(p.balance_owing!=null?Number(p.balance_owing):null);
       var _prow=function(lbl,amt,dt,ref){ return '<tr><td class="l" style="padding:4px 16px 4px 0;white-space:nowrap">'+lbl+'</td><td class="l" style="padding:4px 16px 4px 0"><b>'+_pm(amt)+'</b></td><td class="l" style="padding:4px 16px 4px 0">'+_pd(dt)+'</td><td class="l" style="padding:4px 0">'+(ref?esc(ref):'<span class="mut">—</span>')+'</td></tr>'; };
       var payments='<div class="sect-h">Payments</div>'
-        +'<table style="font-size:12px;border-collapse:collapse;text-align:left;min-width:440px"><thead><tr>'
-          +'<th class="l" style="padding:3px 16px 3px 0">Milestone</th><th class="l" style="padding:3px 16px 3px 0">Amount</th><th class="l" style="padding:3px 16px 3px 0">Date</th><th class="l">Deposit reference</th></tr></thead><tbody>'
+        +'<table style="font-size:12px;border-collapse:collapse;text-align:left;table-layout:fixed;width:600px;max-width:100%">'
+          +'<colgroup><col style="width:190px"><col style="width:120px"><col style="width:130px"><col style="width:160px"></colgroup>'
+          +'<thead><tr>'
+          +'<th class="l" style="padding:3px 10px 3px 0">Milestone</th><th class="l" style="padding:3px 10px 3px 0">Amount</th><th class="l" style="padding:3px 10px 3px 0">Date</th><th class="l">Deposit reference</th></tr></thead><tbody>'
         +_prow('Total invoice value', p.supplier_invoice_total, p.balance_due, '')
         +_prow('Starting deposit', startAmt, p.start_date, p.deposit_ref)
         +_prow('Completion deposit', compAmt, p.completion_date, '')
@@ -747,6 +749,8 @@
             // Direct-to-Client details + label downloads for a PO on this card (client name / requirements /
             // delivery address, Ships-With shipment labels, crossdock labels if the PO has crossdock SKUs).
             var posByPo={}; (_ppData.pos||[]).forEach(function(p){ posByPo[p.po]=p; });
+            // a PO reference that links back to the Purchase Orders tab with that PO opened
+            function poLink(po){ return '<button class="lnk-btn pp-go-po" data-po="'+esc(po)+'" title="open '+esc(po)+' in Purchase Orders" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;background:none;border:none;padding:0;font:inherit">'+esc(po)+'</button>'; }
             function dtcBlock(po){ var p=posByPo[po]; if(!p||!ppIsDtc(p))return '';
               var cd=(p.crossdock_skus||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
               return '<div style="margin-top:8px;padding:9px 12px;background:#ecfeff;border:1px solid #a5f3fc;border-radius:7px">'
@@ -762,7 +766,7 @@
                 +'</div></div>'; }
             return rows.map(function(s){
               var members=s.members.length?'<table style="font-size:11px;width:auto;margin-top:4px"><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th>Est. pallets</th><th class="l">Client</th></tr></thead><tbody>'
-                +s.members.map(function(m){return '<tr><td class="l">'+esc(m.po)+(m.is_master?' <span class="tool-badge bg-green" style="font-size:9px">★ master</span>':'')+'</td><td class="l">'+esc(m.supplier||'')+'</td><td style="text-align:right">'+esc(m.pallets)+'</td><td class="l">'+(m.client?esc(m.client):'<span class="mut">—</span>')+'</td></tr>';}).join('')
+                +s.members.map(function(m){return '<tr><td class="l">'+poLink(m.po)+(m.is_master?' <span class="tool-badge bg-green" style="font-size:9px">★ master</span>':'')+'</td><td class="l">'+esc(m.supplier||'')+'</td><td style="text-align:right">'+esc(m.pallets)+'</td><td class="l">'+(m.client?esc(m.client):'<span class="mut">—</span>')+'</td></tr>';}).join('')
                 +'<tr style="font-weight:700;border-top:1px solid #ccc"><td class="l">Total</td><td></td><td style="text-align:right">'+esc(s.total_pallets)+'</td><td></td></tr></tbody></table>':'<span class="mut tiny">no POs on this shipment</span>';
               // FOB orders — no shipment to us (collected at factory / delivered to a forwarder). Editable:
               // production end date (submitted for D&B approval, like elsewhere) + a timeline of PO notes.
@@ -787,12 +791,15 @@
                   +'<div style="font-weight:600;font-size:12px;margin-bottom:4px">Timeline <span class="mut tiny">(notes on this purchase order)</span></div>'
                   +'<div class="sp-fob-tl" data-po="'+esc(po)+'">'+fobTLHtml(po)+'</div>'
                   +'<div style="display:flex;gap:6px;align-items:flex-start;margin-top:6px"><textarea class="fci sp-fob-note-body" data-po="'+esc(po)+'" rows="2" placeholder="Add a note to the timeline… (multiple lines OK)" style="flex:1;max-width:560px;min-height:44px;text-align:left;resize:vertical;line-height:1.4"></textarea><button class="save-btn sp-fob-note-post" data-po="'+esc(po)+'">Post</button></div></div>';
-                return '<div style="border:1px solid #ddd6fe;border-radius:8px;padding:10px 12px;margin-bottom:10px;background:#fff">'
-                  +'<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">'
-                  +'<div style="font-weight:700;font-size:15px">'+esc(po)+'</div>'
+                return '<div class="sp-card" style="border:1px solid #ddd6fe;border-radius:8px;margin-bottom:10px;background:#fff">'
+                  +'<div class="sp-head" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:10px 12px;cursor:pointer">'
+                  +'<span class="sp-toggle" style="font-size:12px;color:#6d28d9">▸</span>'
+                  +'<div style="font-weight:700;font-size:15px">'+poLink(po)+'</div>'
                   +'<span style="background:#ede9fe;color:#6d28d9;border-radius:10px;font-size:10px;font-weight:700;padding:2px 8px">📦 FOB — no shipment</span>'
-                  +'</div>'+fobStrip+'<div style="margin-top:8px">'+members+'</div>'+dtcBlock(po)+prodEndEdit+timeline
-                  +'<div class="mut tiny" style="margin-top:6px">No shipment to Dock &amp; Bay — collected at your factory or delivered to a nominated forwarder.</div></div>';
+                  +'<span class="mut tiny">'+esc(s.status||'')+(s.prod_end?' · prod end '+esc(fd(s.prod_end)):'')+'</span>'
+                  +'</div>'
+                  +'<div class="sp-body" style="display:none;padding:0 12px 12px">'+fobStrip+'<div style="margin-top:8px">'+members+'</div>'+dtcBlock(po)+prodEndEdit+timeline
+                  +'<div class="mut tiny" style="margin-top:6px">No shipment to Dock &amp; Bay — collected at your factory or delivered to a nominated forwarder.</div></div></div>';
               }
               // prominent shipment dates + Flexport details
               var flex=s.flex_id?('<a href="https://app.flexport.com/shipments/'+((String(s.carrier_ref||s.flex_id).match(/\d+/)||[''])[0])+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline">'+esc(s.flex_id)+' ↗</a>'):'';
@@ -806,13 +813,16 @@
                 +(s.master_client?spCell('Client', esc(s.master_client)):'')
                 +(s.master_deadline?spCell('Client deadline', esc(fd(s.master_deadline))):'')
                 +'</div>';
-              return '<div style="border:1px solid '+(s.escalated?'#fca5a5':'#e0e0e0')+';border-radius:8px;padding:10px 12px;margin-bottom:10px;background:'+(s.escalated?'#fef2f2':'#fff')+'">'
-                +'<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center">'
-                +'<div style="font-weight:700;font-size:15px">'+esc(s.master_po)+'</div>'
+              return '<div class="sp-card" style="border:1px solid '+(s.escalated?'#fca5a5':'#e0e0e0')+';border-radius:8px;margin-bottom:10px;background:'+(s.escalated?'#fef2f2':'#fff')+'">'
+                +'<div class="sp-head" style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:10px 12px;cursor:pointer">'
+                +'<span class="sp-toggle" style="font-size:12px;color:#475569">▸</span>'
+                +'<div style="font-weight:700;font-size:15px">'+poLink(s.master_po)+'</div>'
+                +'<span class="mut tiny">'+esc((s.mode||'—')+(s.carrier?' · '+s.carrier:''))+(s.departure?' · dep '+esc(fd(s.departure)):'')+(s.arrival?' · arr '+esc(fd(s.arrival)):'')+'</span>'
                 +'<button class="save-btn pp-esc" data-ref="'+esc(s.shipment_ref)+'" data-on="'+(s.escalated?'1':'0')+'" style="margin-left:auto'+(s.escalated?';background:#dc2626;color:#fff;border-color:#dc2626':';color:#dc2626')+'">'+(s.escalated?'⚑ ESCALATED':'⚑ Escalate')+'</button>'
-                +'</div>'+datesStrip+'<div style="margin-top:8px">'+members+'</div>'
+                +'</div>'
+                +'<div class="sp-body" style="display:none;padding:0 12px 12px">'+datesStrip+'<div style="margin-top:8px">'+members+'</div>'
                 +(s.members||[]).map(function(m){return dtcBlock(m.po);}).join('')
-                +'<div class="sp-timeline" data-ref="'+esc(s.shipment_ref)+'" style="margin-top:8px;border-top:1px solid #f1f1f1;padding-top:6px"></div></div>'; }).join(''); }
+                +'<div class="sp-timeline" data-ref="'+esc(s.shipment_ref)+'" style="margin-top:8px;border-top:1px solid #f1f1f1;padding-top:6px"></div></div></div>'; }).join(''); }
           function ppShipTimeline(ref){ var box=rootEl.querySelector('.sp-timeline[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(!box)return;
             fetch(EP.shipmentNotesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){
               box.innerHTML='<div style="font-weight:600;font-size:12px;margin-bottom:4px">Add timeline note</div>'
@@ -933,9 +943,13 @@
               // a shipment has "shipped" once it has a departure date that has passed
               function spShipped(s){ return !!(s.departure && s.departure<=today); }
               var poq=effQ(PORTAL_SP_PO);
+              var _ctrySel=Object.keys(PORTAL_SP_CTRY).filter(function(k){return PORTAL_SP_CTRY[k];});
+              var _allCtrys=(function(){ var s={}; allSp.forEach(function(x){ var c=(x.country||'').toUpperCase(); if(c)s[c]=1; }); return Object.keys(s).sort(); })();
               var shownSp=allSp.filter(function(s){
                 // a PO/shipment search OVERRIDES the filter pills — find it whatever its status / escalation
                 if(poq) return nrm(s.master_po).indexOf(poq)>=0 || nrm(s.shipment_ref).indexOf(poq)>=0 || (s.members||[]).some(function(m){return nrm(m.po).indexOf(poq)>=0;});
+                if(PORTAL_SP_FOB && !s.is_fob)return false;
+                if(_ctrySel.length && _ctrySel.indexOf((s.country||'').toUpperCase())<0)return false;
                 if(PORTAL_SP_ESC && !s.escalated)return false;
                 var shipped=spShipped(s); if(shipped?!PORTAL_SP_SHIPPED:!PORTAL_SP_ACTIVE)return false;
                 return true; });
@@ -945,13 +959,21 @@
                 +'<span class="pill'+(PORTAL_SP_ACTIVE?' active':'')+'" data-spf="active">Still to ship</span>'
                 +'<span class="pill'+(PORTAL_SP_SHIPPED?' active':'')+'" data-spf="shipped">Shipped</span>'
                 +'<span class="pill'+(PORTAL_SP_ESC?' active':'')+'" data-spf="esc" style="'+(PORTAL_SP_ESC?'background:#dc2626;color:#fff;border-color:#dc2626':'color:#dc2626')+'">⚑ Escalated only</span>'
+                +'<span class="pill'+(PORTAL_SP_FOB?' active':'')+'" data-spf="fob">📦 FOB</span>'
+                +(_allCtrys.length?'<span class="mut tiny" style="margin-left:6px">Destination</span>'+_allCtrys.map(function(c){return '<span class="pill'+(PORTAL_SP_CTRY[c]?' active':'')+'" data-spctry="'+esc(c)+'">'+esc(c)+'</span>';}).join(''):'')
                 +'<span class="mut tiny" style="margin-left:auto">'+(spCapped?spRender.length+' of ':'')+shownSp.length+' of '+allSp.length+' shipments &amp; FOB collections</span></div>';
               body.innerHTML=fbar+ppShipmentPlan(spRender)
                 +(spCapped?'<div style="margin:8px 0;text-align:center"><button class="save-btn sp-showall">Show all '+shownSp.length+' &darr;</button></div>':'');
               var spsa=body.querySelector('.sp-showall'); if(spsa)spsa.onclick=function(){ _ppShowAllSP=true; renderPP(); };
+              // collapse each Shipment Plan card behind its header — click the header (not the buttons/fields) to expand
+              body.querySelectorAll('.sp-card .sp-head').forEach(function(h){ h.onclick=function(e){ if(e.target.closest('button,input,textarea,select,a'))return;
+                var card=h.closest('.sp-card'), bd=card&&card.querySelector('.sp-body'), tg=h.querySelector('.sp-toggle'); if(!bd)return;
+                var open=bd.style.display!=='none'; bd.style.display=open?'none':''; if(tg)tg.textContent=open?'▸':'▾'; }; });
               body.querySelectorAll('.pp-esc').forEach(function(b){ b.onclick=function(){ var on=b.dataset.on!=='1'; postJSON(EP.shipmentEscalate+encodeURIComponent(b.dataset.ref)+'/escalate',{escalated:on},function(){ reload(); }); }; });
               body.querySelectorAll('.pill[data-spf]').forEach(function(p){ p.onclick=function(){ var f=p.dataset.spf;
-                if(f==='active')PORTAL_SP_ACTIVE=!PORTAL_SP_ACTIVE; else if(f==='shipped')PORTAL_SP_SHIPPED=!PORTAL_SP_SHIPPED; else if(f==='esc')PORTAL_SP_ESC=!PORTAL_SP_ESC; _ppShowAllSP=false; renderPP(); }; });
+                if(f==='active')PORTAL_SP_ACTIVE=!PORTAL_SP_ACTIVE; else if(f==='shipped')PORTAL_SP_SHIPPED=!PORTAL_SP_SHIPPED; else if(f==='esc')PORTAL_SP_ESC=!PORTAL_SP_ESC; else if(f==='fob')PORTAL_SP_FOB=!PORTAL_SP_FOB; _ppShowAllSP=false; renderPP(); }; });
+              body.querySelectorAll('.pill[data-spctry]').forEach(function(p){ p.onclick=function(){ var c=p.dataset.spctry; PORTAL_SP_CTRY[c]=!PORTAL_SP_CTRY[c]; _ppShowAllSP=false; renderPP(); }; });
+              body.querySelectorAll('.pp-go-po').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); PORTAL_TAB='pos'; PORTAL_PO_Q=b.dataset.po; _ppOpenPO=b.dataset.po; renderPP(); }; });
               var sq=body.querySelector('.sp-po-q'); if(sq)sq.oninput=debounce(function(){ PORTAL_SP_PO=sq.value; _ppShowAllSP=false; var f=document.activeElement===sq; renderPP(); if(f){ var n=body.querySelector('.sp-po-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } } },350);
               // FOB cards: production end date → submit for D&B approval (completion_date, applies to end_production_overide)
               var _sid=(_ppData&&_ppData.sid)||sid||null;
@@ -1034,6 +1056,7 @@
             var _ct=body.querySelector('.pp-po-ctry'); if(_ct)_ct.onchange=function(){ PORTAL_PO_CTRY=this.value; _ppShowAllPO=false; renderPP(); };
             var _br=body.querySelector('.pp-po-br'); if(_br)_br.onchange=function(){ PORTAL_PO_BR=this.value; _ppShowAllPO=false; renderPP(); };
             var pqi=body.querySelector('.pp-po-q'); if(pqi)pqi.oninput=debounce(function(){ PORTAL_PO_Q=pqi.value; _ppShowAllPO=false; var foc=document.activeElement===pqi; renderPP(); if(foc){ var n=body.querySelector('.pp-po-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } } },350);
+            if(_ppOpenPO){ var _ob=body.querySelector('.pp-exp[data-po="'+((window.CSS&&CSS.escape)?CSS.escape(_ppOpenPO):_ppOpenPO)+'"]'); _ppOpenPO=null; if(_ob)setTimeout(function(){_ob.click();},0); }   // came from a Shipment Plan PO link → auto-open it
             body.querySelectorAll('.pp-exp').forEach(function(btn){ btn.onclick=function(){ var i=btn.dataset.i, ex=document.getElementById('pp-'+i); if(!ex)return;
               if(!ex.dataset.built){ ex.dataset.built='1'; var po=ex.dataset.po, p=_ppData.pos.filter(function(x){return x.po===po;})[0], cell=ex.children[1];
                 if(p&&cell){ cell.innerHTML=ppExpand(p,_ppData.lb[po]||[],_ppData.notesByPo[po]||[],_ppData.subsByPo[po]||[],i,_ppData.costsByPo[po]||{},_ppData.supSkus||[],_ppData.xdByPo[po]||{},_ppData.addByPo[po]||[]); wireDetail(cell); } }
