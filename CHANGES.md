@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.302 - Supplier portal: cache-bust portal-view.js (stale CSS/JS/data was hiding recent changes)
+
+portal.html loaded /portal-view.js with no cache-bust, so the browser/tunnel served a STALE copy — recent CSS
+(grey production separator, black compact MANAGE button) and the new master PAYMENTS tab data appeared broken
+even though the code was correct. Now loaded as /portal-view.js?v=<ts> to always fetch the latest. Verified via
+one-shot headless screenshot (grey separators + black MANAGE render correctly) and end-to-end bootstrap
+(Lixin returns 51 payments).
+
 ## v25.301 - Supplier portal: master PAYMENTS tab + deposits table cropped
 
 - New master-level PAYMENTS tab: the payments MADE to the supplier (from the payment ledger, scoped by
