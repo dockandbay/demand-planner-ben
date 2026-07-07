@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.295 - ORDER PLAN: ERP "⬆ Upload" button now opens the PO's ORDER PLAN sub-tab
+
+The per-PO "⬆ Upload" button on SUPPLY ▸ ORDER PLAN opened the inline ERP-upload modal. It now redirects to
+PURCHASE ORDERS ▸ that PO ▸ ORDER PLAN sub-tab (via gotoPO(po,'oplan')), where the full order-plan review + ERP
+push lives — so all ERP pushing happens in one place. Still shows only when the PO has pending changes.
+
 ## v25.294 - Cin7 push: never resurrect a voided/deleted PO (create fresh instead)
 
 If the ERP mirror's `erp_po_id` pointed at a Cin7 order that had since been **voided** (or deleted), the

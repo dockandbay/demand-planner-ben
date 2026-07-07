@@ -2452,7 +2452,7 @@
     function bindUploads(){ document.querySelectorAll('#op-grid .opup').forEach(function(b){ var po=b.dataset.up;
       var pend=lines.some(function(x){return x.po===po&&Number(x.qty)!==Number(x.erp_qty==null?x.qty:x.erp_qty);});
       b.style.display=pend?'inline-block':'none'; b.classList.toggle('has',pend);
-      b.onclick=function(){ erpUploadInert(po); }; }); }
+      b.onclick=function(){ gotoPO(po,'oplan'); }; }); }   // redirect to PURCHASE ORDERS ▸ that PO ▸ ORDER PLAN sub-tab (where ERP push lives), instead of the inline upload modal
     function bindApprove(){ document.querySelectorAll('#op-grid .opapprove').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var psku=b.dataset.ap;
       fetch('/api/supply/po-line/'+encodeURIComponent(psku)+'/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({approved:true})}).then(function(r){return r.json();}).then(function(){var l=lines.find(function(x){return (x.po+'|'+x.sku)===psku;}); if(l)l.full_carton_check='OK Partial'; viewKeep();}); }; });
       // "Approve all partials" for a whole PO column (header button)
@@ -2609,7 +2609,7 @@
         +'<br><span class="tiny" style="text-transform:none">'+units(ps.u)+' u · '+plt(ps.pl)+'</span>'
         +(function(){ var np=rows.filter(function(l){return l.po===po && !/complete/i.test(l.status||'') && (l.full_carton_check||'').indexOf('⚠')>=0;}).length;
             return np?'<br><button class="save-btn op-approve-all" data-po="'+esc(po)+'" title="approve all '+np+' unapproved partial carton line(s) on '+esc(po)+'" style="font-size:9px;padding:2px 6px;background:#dcfce7;border:1px solid #86efac;color:#166534;margin-top:3px;white-space:nowrap">✓ Approve '+np+' partial'+(np>1?'s':'')+'</button>':''; })()
-        +'<br><button class="opup" data-up="'+esc(po)+'" style="display:none">⬆ Upload</button></th>';});
+        +'<br><button class="opup" data-up="'+esc(po)+'" title="open this PO in PURCHASE ORDERS ▸ ORDER PLAN to review &amp; push changes to the ERP" style="display:none">⬆ Upload</button></th>';});
     h+='<th>SKU TOTAL</th></tr></thead><tbody>';
     var sorted=skuList.slice().sort(function(a,b){var ca=skuCat[a]||'~~',cb=skuCat[b]||'~~'; return ca<cb?-1:ca>cb?1:(a<b?-1:1);});
     var ncol=pos.length+6, curCat=null;   // 5 frozen label cols + PO cols + SKU TOTAL
