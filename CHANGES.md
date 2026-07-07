@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.291 - PURCHASE ORDERS: assigning a shipment now live-updates the open PO detail (DATES)
+
+Follow-on to v25.290: the silent row patch left the expanded PO detail stale, so a newly-assigned shipment
+didn't show in the DATES sub-tab (Ship/Arrival/Completion still calc-based). patchPoRow now also calls
+refreshOpenPanel(po): if that PO's detail is open, it re-renders the panel via poRefetchPanel (re-fetches the
+PO row → poBy, keeps the active sub-tab) so DATES and other row-driven tabs reflect the shipment immediately —
+still no collapse / full refresh.
+
 ## v25.290 - PURCHASE ORDERS: assigning a shipment is now silent (no grid re-render / lost place)
 
 Assigning (or unassigning) a shipment in the default shipment-grouped view called refreshGrid(), which

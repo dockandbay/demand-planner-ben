@@ -1230,7 +1230,14 @@
     // would ideally move to its new shipment group, but a full regroup collapses any open PO detail and loses
     // the user's place — so we patch the row in place instead (its shipment cell updates); the regroup happens
     // on the next natural full render. This keeps the expansion open and the scroll position, per Ben.
-    function patchPoRow(po){ if(state.grp==='shipment'){ silentRowRefresh(po); return; }
+    // If this PO's detail panel is open, re-render it (keeping the active sub-tab) so tabs that read the PO row
+    // — e.g. DATES (Ship/Arrival/Completion recompute off the newly-assigned shipment) — update without a refresh.
+    function refreshOpenPanel(po){ var key=(window.CSS&&CSS.escape)?CSS.escape(po):po;
+      var eb=document.querySelector('#sup-grid .po-exp[data-po="'+key+'"]'); if(!eb)return;
+      var ex=document.getElementById('poexp-'+eb.dataset.i);
+      if(ex && ex.style.display!=='none' && ex.dataset.loaded){ poRefetchPanel(po, eb.dataset.i); } }
+    function patchPoRow(po){ refreshOpenPanel(po);   // keep any open PO detail in sync with the assign (DATES etc.)
+      if(state.grp==='shipment'){ silentRowRefresh(po); return; }
       invalidateDerived(); delete cache['purchase-orders'];
       fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(fresh){
         if(Array.isArray(fresh)){ rows.length=0; Array.prototype.push.apply(rows, fresh); }
