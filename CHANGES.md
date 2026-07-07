@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.293 - ERP completion-date deviation: 5%-of-lead threshold with a 3-day floor
+
+The date-drift flag (erp_date_pending) used a 10%-of-days-until-completion ratio with no floor, so a 1-day gap
+on a near-term PO tripped it. Now it flags only when the gap (days) ≥ 5% of days-until-completion, with a
+minimum of 3 days: 100 days out → ≥5 days; 30 days out → ceil(1.5)=2 → floored to 3; anything ≤2 days never
+flags. Per Ben.
+
 ## v25.292 - PO DATES tab: source always references/links the assigned shipment
 
 The DATES source only named the shipment ("from shipment X") when the shipment actually supplied the date
