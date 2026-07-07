@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.301 - Supplier portal: master PAYMENTS tab + deposits table cropped
+
+- New master-level PAYMENTS tab: the payments MADE to the supplier (from the payment ledger, scoped by
+  transaction_supplier), grouped by payment run into collapsible cards (date + total), expanding to the line
+  breakdown — PO reference, type (Deposit/Completion/Balance/Other), amount, deposit reference. Bootstrap now
+  returns a `payments` payload.
+- Deposits table no longer stretches full width — capped (max-width 720px, width:auto) for readability.
+
 ## v25.300 - Supplier portal PO grid: grey separator fix, MANAGE button, P# column
 
 - Production separator was still white: a sticky <td> drops its background in Chrome (border-collapse). Dropped

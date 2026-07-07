@@ -62,7 +62,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.300';
+const APP_VERSION = 'v25.301';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -6035,8 +6035,16 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
         FROM planner.sample_requests s
         WHERE coalesce(s.supplier_name,'')=ANY($1) OR coalesce(s.supplier_id,-1)=ANY($2)
         ORDER BY s.created_at DESC`, [names, ids.length ? ids : [-1]]) : [];
+    // Payments MADE to this supplier (the actual payment ledger) — for the portal's master PAYMENTS tab.
+    const payments = names.length ? await q(`SELECT to_char(payment_date,'YYYY-MM-DD') payment_date, coalesce(payment_run_ref,'') payment_run_ref,
+        coalesce(transaction_reference,'') reference, coalesce(transaction_type,'') type, transaction_amount amount,
+        coalesce(deposit_ref,'') deposit_ref, coalesce(invoice_reference,'') invoice_reference,
+        coalesce(po_completion,'') po_completion, coalesce(po_balance_1,'') po_balance_1,
+        coalesce(po_balance_2,'') po_balance_2, coalesce(po_balance_3,'') po_balance_3
+      FROM planner.payment_transactions WHERE transaction_supplier = ANY($1)
+      ORDER BY payment_date DESC NULLS LAST, id DESC`, [names]).catch(() => []) : [];
     res.json({ pos, lb, sdep: deps, sid: ids[0] || null, supplierName: names.join(', '),
-      notesByPo, subsByPo, costsByPo, supSkus, xdByPo, addByPo, samples });
+      notesByPo, subsByPo, costsByPo, supSkus, xdByPo, addByPo, samples, payments });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

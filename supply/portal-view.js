@@ -465,7 +465,7 @@
     var PORTAL_SAMP_F='open', PORTAL_SAMP_Q='';   // Samples grid filter + search (default: open)
     var _invFiles={};     // base64 of the last parsed invoice file, per PO (for the Apply step)
     var rootEl=opts.root; if(!rootEl.closest('#supply-root')){rootEl.id='supply-root';} rootEl.style.display='block';
-    rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders</span><span class="rtab" data-pt="shipmentplan">Shipment Plan</span><span class="rtab" data-pt="barcodes">Barcodes</span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="samples">Samples <span id="pp-samp-badge"></span></span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
+    rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders</span><span class="rtab" data-pt="shipmentplan">Shipment Plan</span><span class="rtab" data-pt="barcodes">Barcodes</span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="samples">Samples <span id="pp-samp-badge"></span></span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
     var tabsEl=document.getElementById('pp-tabs'), body=document.getElementById('pp-body');
     function postJSON(ep,b2,cb){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b2)}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} cb&&cb(j); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); }); }
     function ppCard(l,v){ return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px 14px;min-width:120px"><div class="tiny mut">'+l+'</div><div style="font-weight:700;font-size:16px">'+v+'</div></div>'; }
@@ -740,7 +740,27 @@
       var cards='<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">'+ppCard('Total deposits','$'+units(paid))+ppCard('Drawn down','$'+units(used))+ppCard('Remaining','$'+units(rem))+'</div>';
       var rows=deps.filter(function(d){return d.is_deposit;}).map(function(d){
         return '<tr><td class="l">'+esc(d.reference||'—')+'</td><td style="text-align:right">$'+units(d.amount)+'</td><td class="l">'+(d.date_paid?esc(fd(d.date_paid)):'<span class="mut">unpaid</span>')+'</td><td style="text-align:right">$'+units(d.deposit_used||0)+'</td><td style="text-align:right">$'+units(d.deposit_remaining||0)+'</td></tr>'; }).join('');
-      return cards+'<div class="tw"><table><thead><tr><th class="l">Deposit reference</th><th style="text-align:right">Amount</th><th class="l">Paid</th><th style="text-align:right">Drawn down</th><th style="text-align:right">Remaining</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5" class="l mut">No deposits for this supplier.</td></tr>')+'</tbody></table></div>'; }
+      return cards+'<div class="tw" style="max-width:720px"><table style="width:auto;min-width:0"><thead><tr><th class="l">Deposit reference</th><th style="text-align:right">Amount</th><th class="l">Paid</th><th style="text-align:right">Drawn down</th><th style="text-align:right">Remaining</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5" class="l mut">No deposits for this supplier.</td></tr>')+'</tbody></table></div>'; }
+    // Master PAYMENTS tab: payments MADE to this supplier (the ledger), grouped by payment run and expandable to
+    // the per-line breakdown (PO reference, type, amount, deposit ref).
+    function ppPayments(rows){ rows=rows||[];
+      if(!rows.length)return '<div class="count">No payments recorded against your account yet.</div>';
+      function poRef(r){ return r.reference||r.po_completion||r.po_balance_1||r.po_balance_2||r.po_balance_3||''; }
+      var groups={}, order=[]; rows.forEach(function(r){ var k=r.payment_run_ref||r.payment_date||'—'; if(!groups[k]){groups[k]=[];order.push(k);} groups[k].push(r); });
+      var total=rows.reduce(function(a,r){return a+(Number(r.amount)||0);},0);
+      var head='<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">'+ppCard('Total paid','$'+units(total))+ppCard('Payments',String(rows.length))+'</div>';
+      var cards=order.map(function(k){ var items=groups[k]; var gtot=items.reduce(function(a,r){return a+(Number(r.amount)||0);},0); var dt=items[0].payment_date;
+        var body=items.map(function(r){ return '<tr><td class="l">'+esc(poRef(r)||'—')+'</td><td class="l">'+(r.type?esc(r.type):'<span class="mut">—</span>')+'</td><td style="text-align:right">$'+units(r.amount||0)+'</td><td class="l">'+(r.deposit_ref?esc(r.deposit_ref):'<span class="mut">—</span>')+'</td></tr>'; }).join('');
+        return '<div class="sp-card" style="border:1px solid #e0e0e0;border-radius:8px;margin-bottom:8px;background:#fff">'
+          +'<div class="pay-head" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:9px 12px;cursor:pointer">'
+            +'<span class="pay-toggle" style="font-size:12px;color:#475569">▸</span>'
+            +'<div style="font-weight:700">'+esc(dt?fd(dt):k)+'</div>'
+            +'<span class="mut tiny">'+items.length+' payment'+(items.length>1?'s':'')+'</span>'
+            +'<div style="margin-left:auto;font-weight:700">$'+units(gtot)+'</div></div>'
+          +'<div class="pay-body" style="display:none;padding:0 12px 12px"><table style="font-size:12px;border-collapse:collapse;text-align:left;width:100%;max-width:720px;table-layout:fixed">'
+            +'<colgroup><col style="width:42%"><col style="width:20%"><col style="width:20%"><col style="width:18%"></colgroup>'
+            +'<thead><tr><th class="l">PO reference</th><th class="l">Type</th><th style="text-align:right">Amount</th><th class="l">Deposit ref</th></tr></thead><tbody>'+body+'</tbody></table></div></div>'; }).join('');
+      return head+cards; }
           // FOB card timeline = notes on the PO itself (FOB has no shipment). Reuses the PO-notes store.
           function fobTLHtml(po){ var nts=(_ppData.notesByPo&&_ppData.notesByPo[po])||[];
             return nts.length?nts.map(function(n){ return '<div class="tiny" style="margin:2px 0"><span class="mut">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span> — '+esc(n.body)+'</div>'; }).join(''):'<div class="mut tiny">No timeline entries yet.</div>'; }
@@ -996,6 +1016,9 @@
                   BC.crossdock(rows,btn.dataset.po,btn.dataset.do,btn.dataset.client,btn.dataset.address,btn,btn.dataset.po+'_crossdock_labels.zip'); }).catch(function(){alert('Could not load crossdock labels');btn.disabled=false;}); }; });
               spRender.forEach(function(s){ if(!s.is_fob) ppShipTimeline(s.shipment_ref); }); return; }
             if(PORTAL_TAB==='deposits'){ body.innerHTML=ppDeposits(_ppData.sdep); return; }
+            if(PORTAL_TAB==='payments'){ body.innerHTML=ppPayments(_ppData.payments||[]);
+              body.querySelectorAll('.pay-head').forEach(function(h){ h.onclick=function(){ var c=h.closest('.sp-card'), bd=c&&c.querySelector('.pay-body'), tg=h.querySelector('.pay-toggle'); if(!bd)return; var open=bd.style.display!=='none'; bd.style.display=open?'none':''; if(tg)tg.textContent=open?'▸':'▾'; }; });
+              return; }
             if(PORTAL_TAB==='barcodes'){
               // batches on this supplier's POs (distinct batch_id, sorted)
               var bseen={}, batches=[]; _ppData.pos.forEach(function(p){ var b=(p.batch_id==null?'':String(p.batch_id)).trim(); if(b&&!bseen[b]){bseen[b]=1;batches.push(b);} });
