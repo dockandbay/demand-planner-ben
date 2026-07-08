@@ -73,7 +73,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.345';
+const APP_VERSION = 'v25.346';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3438,6 +3438,8 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
     if (!auth) return res.status(501).json({ error: 'Cin7 API credentials not configured (set CIN7_AUTH). No write performed.', lines: lines.length, mode });
     const edd = completion ? (/T/.test(completion) ? completion : completion + 'T00:00:00Z') : undefined;
     let newId = cin7Id, r, txt, memberId, branchId, curApproved, rate = null;
+    const trace = [];   // Cin7 API-call trace, returned to the UI popup for debugging
+    const traceResp = t => { try { return JSON.parse(t); } catch (e) { return String(t || '').slice(0, 400); } };
     // Cin7 PO line COST field is `unitPrice` (there is NO unitCost on a PO line — the API ignores it and defaults
     // to the product's cost). unitPrice is in the order's BASE currency, so convert: unitPrice = planUSD / currencyRate.
     // For an existing PO read its currencyRate (and approval) first; for a new PO the rate is looked up on create,
@@ -3490,11 +3492,12 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
     // if one exists; if a voided order / sales order holds the reference, stop with a clear error (not a silent fail).
     if (!cin7Id) {
       const dup = await cin7FindOrderByRef(po);
+      trace.push({ step: 'reference-precheck', reference: po, found: dup || null });
       if (dup && dup.kind === 'PO' && !dup.isVoid) {
         cin7Id = dup.id; newId = dup.id; mode = 'updated';   // orphaned live PO (mirror lost) → update it
         if (typeof dup.isApproved === 'boolean') curApproved = dup.isApproved;
       } else if (dup) {
-        return res.status(409).json({ error: 'Cin7 already has a ' + (dup.isVoid ? 'voided ' : '') + (dup.kind === 'SO' ? 'sales order' : 'purchase order') + ' with reference "' + po + '" (Cin7 id ' + dup.id + '). Cin7 reserves that reference permanently — orders can only be voided, not deleted, and a voided order still blocks the reference. Push this PO under a unique reference (e.g. add a suffix) to create it.', lines: lines.length, mode: 'created', cin7_conflict: dup });
+        return res.status(409).json({ error: 'Cin7 already has a ' + (dup.isVoid ? 'voided ' : '') + (dup.kind === 'SO' ? 'sales order' : 'purchase order') + ' with reference "' + po + '" (Cin7 id ' + dup.id + '). Cin7 reserves that reference permanently — orders can only be voided, not deleted, and a voided order still blocks the reference. Push this PO under a unique reference (e.g. add a suffix) to create it.', lines: lines.length, mode: 'created', cin7_conflict: dup, cin7_trace: trace });
       }
     }
     // Cin7 expects the line unitPrice in the ORDER currency (USD) on write and converts to base itself — send planUSD as-is.
@@ -3508,7 +3511,8 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
       r = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
         { method: 'PUT', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify(body) });
       txt = await r.text();
-      if (!r.ok) return res.status(502).json({ error: 'Cin7 API error ' + r.status + ': ' + txt.slice(0, 300) });
+      trace.push({ step: 'update', method: 'PUT', endpoint: '/v1/PurchaseOrders', request: body, http: r.status, response: traceResp(txt) });
+      if (!r.ok) return res.status(502).json({ error: 'Cin7 API error ' + r.status + ': ' + txt.slice(0, 300), cin7_trace: trace });
     } else {
       // CREATE a new Cin7 PO (the planner PO isn't in Cin7 yet). It MUST carry the supplier memberId (resolved
       // above) + a branchId — without the supplier link Cin7 mis-files the order as a SALES ORDER. Fail the
@@ -3526,11 +3530,12 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
       r = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
         { method: 'POST', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify([create]) });
       txt = await r.text();
-      if (!r.ok) return res.status(502).json({ error: 'Cin7 create error ' + r.status + ': ' + txt.slice(0, 300) });
+      trace.push({ step: 'create', method: 'POST', endpoint: '/v1/PurchaseOrders', request: [create], http: r.status, response: traceResp(txt) });
+      if (!r.ok) return res.status(502).json({ error: 'Cin7 create error ' + r.status + ': ' + txt.slice(0, 300), cin7_trace: trace });
       try { const j = JSON.parse(txt); const o = Array.isArray(j) ? j[0] : j; newId = (o && (o.id || o.orderId)) || null; } catch (e) { newId = null; }
       // Cin7 can return HTTP 200 with no id when it rejects the create (e.g. a duplicate reference). Surface it
       // rather than silently reporting success with no PO.
-      if (!newId) return res.status(502).json({ error: 'Cin7 accepted the request but returned no PO id — the create was rejected (usually a reference that already exists in Cin7, incl. a voided order). Response: ' + txt.slice(0, 300), lines: lines.length, mode: 'created' });
+      if (!newId) return res.status(502).json({ error: 'Cin7 accepted the request but returned no PO id — the create was rejected (usually a reference that already exists in Cin7, incl. a voided order). Response: ' + txt.slice(0, 300), lines: lines.length, mode: 'created', cin7_trace: trace });
       // mirror the new Cin7 id back into the ERP mirror so future pushes UPDATE rather than re-create
       if (newId) {
         await pool.query('DELETE FROM planner.erp_purchase_orders WHERE po=$1', [po]);
@@ -3602,7 +3607,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
       if (edd) await pool.query(`UPDATE planner.erp_purchase_orders SET final_delivery_date=$2::date, synced_at=now() WHERE po=$1`, [po, completion]);
       mirrored = true;
     } catch (e) { /* non-fatal — Cin7 write already succeeded */ }
-    res.json({ ok: true, mode, cin7_id: newId, cin7_member_id: memberId || null, cin7_branch_id: branchId || null, lines: lines.length, approved: lines.filter(l => l.approved_price).length, erp_mirror_updated: mirrored, validation,
+    res.json({ ok: true, mode, cin7_id: newId, cin7_member_id: memberId || null, cin7_branch_id: branchId || null, lines: lines.length, approved: lines.filter(l => l.approved_price).length, erp_mirror_updated: mirrored, validation, cin7_trace: trace,
       link: newId ? 'https://go.cin7.com/Cloud/TransactionEntry/TransactionEntry.aspx?idCustomerAppsLink=951111&OrderId=' + encodeURIComponent(newId) : null });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

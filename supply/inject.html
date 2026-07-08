@@ -1363,6 +1363,16 @@
     ta.focus(); }
   // Upload to Fulfil/Cin7 is not yet wired (awaiting Diviyaj's n8n webhook). The popup says so, but offers a
   // manual export of the revised order plan (SKU → qty) as a CSV download or clipboard copy with Code/Qty headers.
+  // debug: show the raw Cin7 API calls the push made (request + response), collapsed
+  function cin7TraceHtml(tr){ if(!tr||!tr.length)return '';
+    var rows=tr.map(function(t){ var j=function(x){return esc(typeof x==='string'?x:JSON.stringify(x));};
+      return '<div style="margin:4px 0;padding:5px 7px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;font-size:10px;line-height:1.5">'
+        +'<b>'+esc(t.step||'')+'</b>'+(t.method?' <span class="mut">'+esc(t.method)+' '+esc(t.endpoint||'')+(t.http!=null?' → HTTP '+t.http:'')+'</span>':'')
+        +(t.found!==undefined?'<div>found: <code>'+j(t.found)+'</code></div>':'')
+        +(t.request!==undefined?'<div>request: <code style="word-break:break-all">'+j(t.request)+'</code></div>':'')
+        +(t.response!==undefined?'<div>response: <code style="word-break:break-all">'+j(t.response)+'</code></div>':'')
+        +'</div>'; }).join('');
+    return '<details style="margin-top:6px"><summary style="cursor:pointer;font-size:11px;color:#475569">Cin7 API calls ('+tr.length+')</summary>'+rows+'</details>'; }
   // format the post-push Cin7 read-back validation for the user
   function cin7ValMsg(v){ if(!v||!v.checked)return (v&&v.error)?'<div class="mut tiny" style="margin-top:6px">Couldn\'t verify against Cin7: '+esc(v.error)+'</div>':'';
     if(v.aligned)return '<div style="color:#166534;font-weight:700;margin-top:6px">✓ Verified exact match in Cin7 (quantity + price)</div>';
@@ -1429,8 +1439,8 @@
       if(!confirm('Push this PO\'s SKUs, quantities and prices to Cin7?\n\nIf the PO already exists in Cin7 it is updated; otherwise a NEW Cin7 PO is created. Price = the approved supplier final cost where there is one, otherwise the standard cost. This writes to the LIVE Cin7 ERP.'))return;
       msg.textContent='Sending to Cin7…';
       fetch('/api/supply/po/'+encodeURIComponent(po)+'/cin7-lines',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({completion_date:comp})}).then(function(r){return r.json();}).then(function(j){
-        if(j&&j.error){ msg.innerHTML='<span style="color:#dc2626">'+esc(j.error)+'</span>'; return; }
-        msg.innerHTML='<span style="color:#166534;font-weight:700">✓ Cin7 PO '+(j.mode==='created'?'created':'updated')+'</span> — '+esc(j.lines)+' line(s)'+(j.approved?' ('+esc(j.approved)+' at approved supplier price)':'')+cin7ValMsg(j.validation)+(j.erp_mirror_updated?' · ERP mirror synced':'')+(j.link?' — <a href="'+esc(j.link)+'" target="_blank" rel="noopener">open Cin7 PO ↗</a>':'');
+        if(j&&j.error){ msg.innerHTML='<span style="color:#dc2626">'+esc(j.error)+'</span>'+cin7TraceHtml(j.cin7_trace); return; }
+        msg.innerHTML='<span style="color:#166534;font-weight:700">✓ Cin7 PO '+(j.mode==='created'?'created':'updated')+'</span> — '+esc(j.lines)+' line(s)'+(j.approved?' ('+esc(j.approved)+' at approved supplier price)':'')+cin7ValMsg(j.validation)+(j.erp_mirror_updated?' · ERP mirror synced':'')+(j.link?' — <a href="'+esc(j.link)+'" target="_blank" rel="noopener">open Cin7 PO ↗</a>':'')+cin7TraceHtml(j.cin7_trace);
         invalidateDerived(); delete cache['purchase-orders']; selectSection('purchase-orders');   // clear the ERP drift flags in real time
       }).catch(function(e){ msg.innerHTML='<span style="color:#dc2626">Failed: '+esc(e.message||e)+'</span>'; }); };
   }

@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.346 - Cin7 push shows an API-call trace in the popup (debugging)
+
+The Cin7 push now returns `cin7_trace` — each Cin7 call it made (reference pre-check, create/update) with the
+request payload, HTTP status and response — and the SUPPLY PO popup shows it in a collapsed "Cin7 API calls"
+section (on success and error). Makes it visible what was sent/returned when debugging PO-vs-sales-order issues.
+
+## v25.345 - Cin7 reference-collision error reflects void-only (cannot delete)
+
+Cin7 can only void orders, not delete, and a voided order still reserves the reference — so the collision
+error now says to push under a unique reference (there is no delete option).
+
 ## v25.344 - Cin7 reference-collision fix + FBA Cartons pills
 
 - **Cin7 push no longer fails silently on a reference collision.** Before creating, we look up any existing
