@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.350 - Cin7: keep estimatedDeliveryDate on update + corrective PUT
+
+Moved `estimatedDeliveryDate` (completion date) into the shared `poFields`, so the update and the corrective
+PUT carry it too — previously only the create sent it, so a follow-up PUT could drop the delivery date.
+
 ## v25.349 - Cin7 UPDATE now re-asserts PO fields (fixes update→sales-order)
 
 The update PUT only sent `{id, lineItems, memberId, isApproved}` — missing `company`/`branchId`, which let

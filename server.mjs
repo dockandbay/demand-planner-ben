@@ -73,7 +73,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.349';
+const APP_VERSION = 'v25.350';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3496,6 +3496,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
     const poFields = { company: poRow.supplier_name || '', isApproved: false };
     if (memberId) poFields.memberId = Number(memberId);
     if (branchId) poFields.branchId = Number(branchId);
+    if (edd) poFields.estimatedDeliveryDate = edd;   // completion date — kept on create, update AND the corrective PUT
     // Find any existing Cin7 order (PO or SO, incl. voided) with this reference — Cin7 matches by reference and
     // will SILENTLY reject creating a duplicate, even against a voided order.
     async function cin7FindOrderByRef(reference) {
@@ -3542,7 +3543,6 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
       // Do NOT send `stage` — let Cin7 apply the account's default PO stage. currencyCode = the supplier's
       // default_currency (USD today); Cin7 looks up the rate. poFields carries memberId/company/branchId + draft.
       const create = Object.assign({ reference: po, currencyCode: poRow.currency || 'USD', lineItems }, poFields);
-      if (edd) create.estimatedDeliveryDate = edd;
       r = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
         { method: 'POST', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify([create]) });
       txt = await r.text();
