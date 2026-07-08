@@ -73,7 +73,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.343';
+const APP_VERSION = 'v25.344';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3473,6 +3473,30 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
       const arr = await g.json(); return (Array.isArray(arr) && arr[0] && arr[0].id) ? arr[0].id : null;
     }
     memberId = poRow.cin7_member_id ? Number(poRow.cin7_member_id) : await cin7IdByCompany('Contacts', poRow.supplier_name);
+    // Find any existing Cin7 order (PO or SO, incl. voided) with this reference — Cin7 matches by reference and
+    // will SILENTLY reject creating a duplicate, even against a voided order.
+    async function cin7FindOrderByRef(reference) {
+      const w = encodeURIComponent("reference='" + String(reference).replace(/'/g, "''") + "'");
+      for (const [resource, kind] of [['PurchaseOrders', 'PO'], ['SalesOrders', 'SO']]) {
+        const g = await cin7Fetch('https://api.cin7.com/api/v1/' + resource + '?rows=1&fields=id,isVoid,isApproved&where=' + w,
+          { headers: { Authorization: auth, 'content-type': 'application/json' } });
+        if (!g.ok) continue;
+        const arr = await g.json();
+        if (Array.isArray(arr) && arr[0] && arr[0].id) return { id: arr[0].id, kind, isVoid: !!arr[0].isVoid, isApproved: arr[0].isApproved };
+      }
+      return null;
+    }
+    // No mirrored id → we'd CREATE. But Cin7 won't create against an existing reference. Reconnect to a live PO
+    // if one exists; if a voided order / sales order holds the reference, stop with a clear error (not a silent fail).
+    if (!cin7Id) {
+      const dup = await cin7FindOrderByRef(po);
+      if (dup && dup.kind === 'PO' && !dup.isVoid) {
+        cin7Id = dup.id; newId = dup.id; mode = 'updated';   // orphaned live PO (mirror lost) → update it
+        if (typeof dup.isApproved === 'boolean') curApproved = dup.isApproved;
+      } else if (dup) {
+        return res.status(409).json({ error: 'Cin7 already has a ' + (dup.isVoid ? 'voided ' : '') + (dup.kind === 'SO' ? 'sales order' : 'purchase order') + ' with reference "' + po + '" (Cin7 id ' + dup.id + '). Cin7 will not create a duplicate against it — delete or rename that order in Cin7 (or use a different PO reference), then retry.', lines: lines.length, mode: 'created', cin7_conflict: dup });
+      }
+    }
     // Cin7 expects the line unitPrice in the ORDER currency (USD) on write and converts to base itself — send planUSD as-is.
     const lineItems = lines.map(l => ({ code: l.sku, qty: Number(l.qty), unitPrice: Number(l.price) || 0 }));
     if (cin7Id) {
@@ -3504,6 +3528,9 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
       txt = await r.text();
       if (!r.ok) return res.status(502).json({ error: 'Cin7 create error ' + r.status + ': ' + txt.slice(0, 300) });
       try { const j = JSON.parse(txt); const o = Array.isArray(j) ? j[0] : j; newId = (o && (o.id || o.orderId)) || null; } catch (e) { newId = null; }
+      // Cin7 can return HTTP 200 with no id when it rejects the create (e.g. a duplicate reference). Surface it
+      // rather than silently reporting success with no PO.
+      if (!newId) return res.status(502).json({ error: 'Cin7 accepted the request but returned no PO id — the create was rejected (usually a reference that already exists in Cin7, incl. a voided order). Response: ' + txt.slice(0, 300), lines: lines.length, mode: 'created' });
       // mirror the new Cin7 id back into the ERP mirror so future pushes UPDATE rather than re-create
       if (newId) {
         await pool.query('DELETE FROM planner.erp_purchase_orders WHERE po=$1', [po]);

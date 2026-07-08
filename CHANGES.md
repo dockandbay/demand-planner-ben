@@ -3,6 +3,21 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.344 - Cin7 reference-collision fix + FBA Cartons pills
+
+- **Cin7 push no longer fails silently on a reference collision.** Before creating, we look up any existing
+  Cin7 order (PO or SO, incl. voided) with that reference: if a live PO exists we reconnect and update it; if
+  a voided/sales order holds the reference we return a clear error (Cin7 won't create a duplicate — delete/
+  rename it in Cin7 or use a new reference). Also surface a create that returns no id (was silent).
+  Root cause of PO-55USWK1: a voided sales order (id 1632868) held that reference, blocking the create.
+- **FBA Cartons filter is now pills** (Full / Partial) next to the FBA mode pills, FBA-view only — moved out
+  of the hidden Settings panel.
+
+## v25.343 - FBA tab: SKU+Category on one row; Type badges (S/C) + header tooltip
+
+Moved SKU search onto the Category row (SKU first); Type column shows single-letter badges (Seasonal=green S,
+Core=blue C, Non-core=orange C) with a "Core or seasonal" tooltip on the header.
+
 ## v25.342 - FBA transfer: CARTONS Full/Partial filter + robust case-pack
 
 - New **Cartons: Full (default) / Partial** toggle on the FBA transfer toolbar. Full = whole cartons only
