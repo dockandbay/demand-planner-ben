@@ -73,7 +73,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.347';
+const APP_VERSION = 'v25.348';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3534,11 +3534,12 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
       if (!memberId) return res.status(422).json({ error: 'Supplier "' + (poRow.supplier_name || '(none)') + '" was not found as a Cin7 contact — cannot create the PO. Set the supplier\'s Cin7 member id (or spell-match the name in Cin7), then retry.', lines: lines.length, mode });
       branchId = poRow.branch ? await cin7IdByCompany('Branches', poRow.branch) : null;
       if (poRow.branch && !branchId) return res.status(422).json({ error: 'Branch "' + poRow.branch + '" was not found in Cin7 Branches — cannot create the PO. Make the planner branch name match the Cin7 branch exactly, then retry.', lines: lines.length, mode });
-      // DRAFT (isApproved:false) so a person reviews/approves in Cin7; stage New = standard new PO.
+      // DRAFT (isApproved:false) so a person reviews/approves in Cin7. Do NOT send `stage` — let Cin7 apply
+      // the account's default PO stage (sending a stage put POs in the wrong workflow stage).
       // Set the PO currency to the supplier's default_currency (USD for all suppliers today; GBP/EUR/etc.
       // supported). Cin7 looks up the rate itself. Without this Cin7 falls back to the GBP account currency
       // and our line costs get mislabelled.
-      const create = { reference: po, memberId: Number(memberId), company: poRow.supplier_name || '', isApproved: false, stage: 'New', currencyCode: poRow.currency || 'USD', lineItems };
+      const create = { reference: po, memberId: Number(memberId), company: poRow.supplier_name || '', isApproved: false, currencyCode: poRow.currency || 'USD', lineItems };
       if (branchId) create.branchId = Number(branchId);
       if (edd) create.estimatedDeliveryDate = edd;
       r = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',

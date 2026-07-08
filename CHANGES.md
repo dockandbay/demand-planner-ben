@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.348 - Cin7 PO create: drop the `stage` field
+
+Removed `stage: 'New'` from the Cin7 PO create payload — let Cin7 apply the account's default PO stage.
+The account's real POs use a custom stage ('Production'); forcing 'New' put new POs in the wrong workflow
+stage. (Update calls never sent a stage.)
+
 ## v25.347 - Log every Cin7 API call to a file (server-side, for analysis)
 
 `cin7Fetch` now appends every Cin7 call (timestamp, method, url, request body, HTTP status, response body)
