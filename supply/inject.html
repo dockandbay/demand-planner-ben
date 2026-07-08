@@ -3515,7 +3515,7 @@
                 var docsByPo={}; docs.forEach(function(x){ if(poset[x.po]) (docsByPo[x.po]=docsByPo[x.po]||[]).push(x); });
                 var samples=(allsamp||[]).filter(function(s){return (s.supplier_name||'')===name;});
                 return {pos:pos,lb:lb,sdep:sdep,sid:sid,notesByPo:notesByPo,subsByPo:subsByPo,costsByPo:costsByPo,supSkus:supSkus,xdByPo:xdByPo,addByPo:addByPo,docsByPo:docsByPo,samples:samples,payments:payments,
-                  shipmentPlan:(res[10]||[]).filter(function(s){return (s.master_supplier||'')===name;})}; }); }
+                  shipmentPlan:(res[10]||[]).filter(function(s){return (s.suppliers||[]).some(function(n){return (n||'').toLowerCase()===(name||'').toLowerCase();});})}; }); }
           function mountFor(name){ var ban=document.getElementById('pp-banner'), mt=document.getElementById('pp-mount');
             if(!name){ ban.innerHTML=''; mt.innerHTML='<div class="count">Choose a supplier to preview their portal.</div>'; return; }
             ban.innerHTML='<div style="background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:6px 11px;margin:4px 0 10px;font-size:12px">👁 Previewing the portal as <b>'+esc(name)+'</b> — exactly what they see, and any submit acts AS this supplier.</div>';

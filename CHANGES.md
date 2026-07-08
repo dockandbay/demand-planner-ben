@@ -3,6 +3,20 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.327 - Portal Shipment Plan now populated for real suppliers (Samples follow-on)
+
+Closes the deferred Samples/portal item: the real `/api/portal/bootstrap` didn't return `shipmentPlan`,
+so the supplier portal's Shipment Plan tab (and its freight-charge form) was empty for real suppliers —
+only the admin CONFIG▸Portal preview had it.
+
+- server.mjs: extracted the shipment-plan logic into a shared `buildShipmentPlan()` helper; the admin
+  `/api/supply/shipment-plan` case now calls it (behaviour unchanged, verified 64 shipments).
+- `/api/portal/bootstrap` now returns `shipmentPlan`, filtered to shipments the supplier is on — as the
+  consolidator (master) OR with a PO aboard (so they see who consolidates their goods / whose POs share
+  their shipment). Verified: Lixin gets 22 entries.
+- inject.html admin preview filter widened to match (supplier on the shipment as master OR member), so the
+  preview equals the real portal.
+
 ## v25.326 - Cin7 PO push: use supplier default_currency (not hardcoded USD)
 
 The Cin7 PO currency now comes from `planner.suppliers.default_currency` instead of a hardcoded

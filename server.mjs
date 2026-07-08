@@ -73,7 +73,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.326';
+const APP_VERSION = 'v25.327';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1026,6 +1026,87 @@ app.post('/api/supply/dtc-accept', async (req, res) => {
 
 // ── SUPPLY tab (Production Planner) read APIs — one route, section in the path.
 // Read-only JSON from the Phase-2 planner tables. No writes (writes are a later, gated step).
+// Shared shipment-plan builder — real shipments (master PO + all POs aboard, consolidated) plus display-only
+// FOB entries. Used by the admin SUPPLY ▸ Shipment Plan sub-tab and the supplier portal Shipment Plan tab.
+async function buildShipmentPlan() {
+  const q = (sql) => pool.query(sql).then(r => r.rows);
+  const rows = await q(`
+    SELECT p.shipment_ref,
+      coalesce(sh.master_po, p.shipment_ref) master_po,
+      coalesce(lower(sh.mode), CASE WHEN fx.mode ILIKE 'air%' THEN 'air' ELSE 'sea' END) mode,
+      coalesce(sh.carrier, CASE WHEN sh.carrier_ref ILIKE 'FLEX%' THEN 'Flexport' END, '') carrier,
+      coalesce(sh.carrier_ref,'') carrier_ref, coalesce(fx.flex_id,'') flex_id,
+      to_char(coalesce(sh.departure_date, fx.departure_date),'YYYY-MM-DD') departure,
+      to_char(coalesce(sh.landing_date, fx.landing_date),'YYYY-MM-DD') landing,
+      to_char(coalesce(sh.arrival_date, fx.arrival_date),'YYYY-MM-DD') arrival,
+      p.po, coalesce(p.supplier_name,'') supplier_name, coalesce(p.client,'') client,
+      upper(coalesce(nullif(p.country_code,''), b.country_code, '')) country,
+      to_char(p.client_deadline_date,'YYYY-MM-DD') client_deadline,
+      (p.po = coalesce(sh.master_po, p.shipment_ref)) is_master, coalesce(sh.escalated,false) escalated,
+      round(coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0))
+        FROM planner.purchase_order_lines l LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=p.po),0)::numeric,1) pallets
+    FROM planner.purchase_orders p
+    LEFT JOIN planner.shipments sh ON sh.shipment_ref=p.shipment_ref
+    LEFT JOIN planner.branches b ON b.name=p.branch
+    LEFT JOIN LATERAL (SELECT f.flex_id, f.mode, f.departure_date, f.landing_date, f.arrival_date FROM planner.flexport_shipments f
+      WHERE f.flex_id=sh.carrier_ref OR f.shipment_name=p.shipment_ref OR f.flex_id=p.flexport_reference
+      ORDER BY (f.flex_id=p.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true
+    WHERE coalesce(p.shipment_ref,'')<>'' AND coalesce(p.status,'') NOT ILIKE '%complete%'
+    ORDER BY p.shipment_ref, (p.po = coalesce(sh.master_po, p.shipment_ref)) DESC, p.po`);
+  const byRef = {};
+  rows.forEach(r => { let s = byRef[r.shipment_ref];
+    if (!s) s = byRef[r.shipment_ref] = { shipment_ref: r.shipment_ref, master_po: r.master_po, mode: r.mode, carrier: r.carrier, carrier_ref: r.carrier_ref, flex_id: r.flex_id, departure: r.departure, landing: r.landing, arrival: r.arrival, escalated: !!r.escalated, master_client: '', master_deadline: '', master_supplier: '', country: '', total_pallets: 0, suppliers: [], members: [] };
+    s.total_pallets += Number(r.pallets) || 0;
+    if (s.suppliers.indexOf(r.supplier_name) < 0 && r.supplier_name) s.suppliers.push(r.supplier_name);
+    if (r.country && (r.is_master || !s.country)) s.country = r.country;
+    if (r.is_master) { s.master_client = r.client; s.master_deadline = r.client_deadline; s.master_supplier = r.supplier_name; }
+    s.members.push({ po: r.po, supplier: r.supplier_name, pallets: Number(r.pallets) || 0, client: r.client, is_master: !!r.is_master });
+  });
+  const masterPos = Object.keys(byRef).map(k => byRef[k].master_po).filter(Boolean);
+  if (masterPos.length) {
+    const masters = (await pool.query(`SELECT p.po, coalesce(p.supplier_name,'') supplier_name, coalesce(p.client,'') client,
+        to_char(p.client_deadline_date,'YYYY-MM-DD') client_deadline,
+        round(coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0)) FROM planner.purchase_order_lines l
+          LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=p.po),0)::numeric,1) pallets
+      FROM planner.purchase_orders p WHERE p.po = ANY($1)`, [masterPos])).rows;
+    const mById = {}; masters.forEach(m => mById[m.po] = m);
+    Object.keys(byRef).forEach(k => { const s = byRef[k]; const m = mById[s.master_po]; if (!m) return;
+      if (!s.members.some(x => x.po === s.master_po)) {
+        s.members.unshift({ po: m.po, supplier: m.supplier_name, pallets: Number(m.pallets) || 0, client: m.client, is_master: true });
+        s.total_pallets += Number(m.pallets) || 0;
+        if (s.suppliers.indexOf(m.supplier_name) < 0 && m.supplier_name) s.suppliers.push(m.supplier_name);
+      }
+      if (!s.master_client) s.master_client = m.client;
+      if (!s.master_deadline) s.master_deadline = m.client_deadline;
+      if (!s.master_supplier) s.master_supplier = m.supplier_name;
+    });
+  }
+  const shipEntries = Object.keys(byRef).map(k => { const s = byRef[k]; s.total_pallets = Math.round(s.total_pallets * 10) / 10; return s; });
+  const fobRows = (await pool.query(`
+    SELECT p.po, coalesce(p.supplier_name,'') supplier_name, coalesce(p.client,'') client, coalesce(p.status,'') status,
+      upper(coalesce(nullif(p.country_code,''), b.country_code, '')) country,
+      to_char(p.client_deadline_date,'YYYY-MM-DD') client_deadline,
+      to_char(coalesce(p.end_production_overide, p.start_production + (coalesce(s.production_days,0)||' days')::interval)::date,'YYYY-MM-DD') prod_end,
+      round(coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0)) FROM planner.purchase_order_lines l
+        LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=p.po),0)::numeric,1) pallets
+    FROM planner.purchase_orders p
+    LEFT JOIN planner.suppliers s ON s.id=p.supplier_id
+    LEFT JOIN planner.branches  b ON b.name=p.branch
+    WHERE coalesce(p.shipment_ref,'')=''
+      AND NOT EXISTS (SELECT 1 FROM planner.shipments sh WHERE sh.master_po = p.po)
+      AND coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%deliver%' AND coalesce(p.status,'') NOT ILIKE '%ship%'
+      AND ( p.branch ILIKE '%manufactur%' OR upper(coalesce(nullif(p.country_code,''), b.country_code, '')) NOT IN ('UK','US','EU','AU','CA') )
+      AND EXISTS (SELECT 1 FROM planner.purchase_order_lines l WHERE l.po=p.po AND coalesce(l.qty,0)>0)`)).rows;
+  const onShip = new Set(); shipEntries.forEach(s => { if (s.master_po) onShip.add(s.master_po); (s.members || []).forEach(m => onShip.add(m.po)); });
+  fobRows.forEach(r => { if (onShip.has(r.po)) return; const pallets = Number(r.pallets) || 0; shipEntries.push({
+    shipment_ref: '', is_fob: true, master_po: r.po, mode: 'FOB', carrier: '', carrier_ref: '', flex_id: '', country: r.country || '',
+    departure: '', landing: '', arrival: '', escalated: false, status: r.status, prod_end: r.prod_end || '',
+    master_client: r.client, master_deadline: r.client_deadline, master_supplier: r.supplier_name,
+    total_pallets: pallets, suppliers: r.supplier_name ? [r.supplier_name] : [],
+    members: [{ po: r.po, supplier: r.supplier_name, pallets, client: r.client, is_master: true }] }); });
+  return shipEntries.sort((a, b) => (a.departure || '9999').localeCompare(b.departure || '9999') || String(a.master_po).localeCompare(String(b.master_po)));
+}
+
 app.get('/api/supply/:section', async (req, res) => {
   const q = (sql) => pool.query(sql).then(r => r.rows);
   try {
@@ -1456,91 +1537,8 @@ app.get('/api/supply/:section', async (req, res) => {
       case 'portal-docs':   // supplier-uploaded documents across all POs (every category except 'client') — portal Documents section
         return res.json(await q(`SELECT po, id, filename, coalesce(category,'Other') category, to_char(uploaded_at,'YYYY-MM-DD') uploaded_at
           FROM planner.portal_attachments WHERE coalesce(category,'') NOT IN ('client') ORDER BY uploaded_at DESC`));
-      case 'shipment-plan': {   // master shipments + the POs aboard each (Shipment Plan — admin sub-tab + supplier portal tab)
-        const rows = await q(`
-          SELECT p.shipment_ref,
-            coalesce(sh.master_po, p.shipment_ref) master_po,
-            coalesce(lower(sh.mode), CASE WHEN fx.mode ILIKE 'air%' THEN 'air' ELSE 'sea' END) mode,
-            coalesce(sh.carrier, CASE WHEN sh.carrier_ref ILIKE 'FLEX%' THEN 'Flexport' END, '') carrier,
-            coalesce(sh.carrier_ref,'') carrier_ref, coalesce(fx.flex_id,'') flex_id,
-            to_char(coalesce(sh.departure_date, fx.departure_date),'YYYY-MM-DD') departure,
-            to_char(coalesce(sh.landing_date, fx.landing_date),'YYYY-MM-DD') landing,
-            to_char(coalesce(sh.arrival_date, fx.arrival_date),'YYYY-MM-DD') arrival,
-            p.po, coalesce(p.supplier_name,'') supplier_name, coalesce(p.client,'') client,
-            upper(coalesce(nullif(p.country_code,''), b.country_code, '')) country,
-            to_char(p.client_deadline_date,'YYYY-MM-DD') client_deadline,
-            (p.po = coalesce(sh.master_po, p.shipment_ref)) is_master, coalesce(sh.escalated,false) escalated,
-            round(coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0))
-              FROM planner.purchase_order_lines l LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=p.po),0)::numeric,1) pallets
-          FROM planner.purchase_orders p
-          LEFT JOIN planner.shipments sh ON sh.shipment_ref=p.shipment_ref
-          LEFT JOIN planner.branches b ON b.name=p.branch
-          LEFT JOIN LATERAL (SELECT f.flex_id, f.mode, f.departure_date, f.landing_date, f.arrival_date FROM planner.flexport_shipments f
-            WHERE f.flex_id=sh.carrier_ref OR f.shipment_name=p.shipment_ref OR f.flex_id=p.flexport_reference
-            ORDER BY (f.flex_id=p.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true
-          WHERE coalesce(p.shipment_ref,'')<>'' AND coalesce(p.status,'') NOT ILIKE '%complete%'
-          ORDER BY p.shipment_ref, (p.po = coalesce(sh.master_po, p.shipment_ref)) DESC, p.po`);
-        const byRef = {};
-        rows.forEach(r => { let s = byRef[r.shipment_ref];
-          if (!s) s = byRef[r.shipment_ref] = { shipment_ref: r.shipment_ref, master_po: r.master_po, mode: r.mode, carrier: r.carrier, carrier_ref: r.carrier_ref, flex_id: r.flex_id, departure: r.departure, landing: r.landing, arrival: r.arrival, escalated: !!r.escalated, master_client: '', master_deadline: '', master_supplier: '', country: '', total_pallets: 0, suppliers: [], members: [] };
-          s.total_pallets += Number(r.pallets) || 0;
-          if (s.suppliers.indexOf(r.supplier_name) < 0 && r.supplier_name) s.suppliers.push(r.supplier_name);
-          if (r.country && (r.is_master || !s.country)) s.country = r.country;   // destination country — prefer the master PO's
-          if (r.is_master) { s.master_client = r.client; s.master_deadline = r.client_deadline; s.master_supplier = r.supplier_name; }
-          // include EVERY PO on the shipment (incl. the master) so the summary's pallets sum to the total
-          s.members.push({ po: r.po, supplier: r.supplier_name, pallets: Number(r.pallets) || 0, client: r.client, is_master: !!r.is_master });
-        });
-        // ensure each shipment's MASTER PO appears in members (+ its pallets/client) even if it doesn't
-        // reference its own shipment_ref — so the summary's pallets sum to the true total.
-        const masterPos = Object.keys(byRef).map(k => byRef[k].master_po).filter(Boolean);
-        if (masterPos.length) {
-          const masters = (await pool.query(`SELECT p.po, coalesce(p.supplier_name,'') supplier_name, coalesce(p.client,'') client,
-              to_char(p.client_deadline_date,'YYYY-MM-DD') client_deadline,
-              round(coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0)) FROM planner.purchase_order_lines l
-                LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=p.po),0)::numeric,1) pallets
-            FROM planner.purchase_orders p WHERE p.po = ANY($1)`, [masterPos])).rows;
-          const mById = {}; masters.forEach(m => mById[m.po] = m);
-          Object.keys(byRef).forEach(k => { const s = byRef[k]; const m = mById[s.master_po]; if (!m) return;
-            if (!s.members.some(x => x.po === s.master_po)) {   // master not already aboard → add it
-              s.members.unshift({ po: m.po, supplier: m.supplier_name, pallets: Number(m.pallets) || 0, client: m.client, is_master: true });
-              s.total_pallets += Number(m.pallets) || 0;
-              if (s.suppliers.indexOf(m.supplier_name) < 0 && m.supplier_name) s.suppliers.push(m.supplier_name);
-            }
-            if (!s.master_client) s.master_client = m.client;
-            if (!s.master_deadline) s.master_deadline = m.client_deadline;
-            if (!s.master_supplier) s.master_supplier = m.supplier_name;
-          });
-        }
-        const shipEntries = Object.keys(byRef).map(k => { const s = byRef[k]; s.total_pallets = Math.round(s.total_pallets * 10) / 10; return s; });
-        // FOB orders — no shipment to us (collected at the factory / delivered to a nominated forwarder). Show open
-        // ones (PRODUCTION/FUTURE) as display-only entries. FOB = no shipment_ref AND (Manufacturing branch OR a
-        // destination that isn't one of our import warehouses UK/US/EU/AU/CA) — mirrors the app's isFOBdest rule.
-        const fobRows = (await pool.query(`
-          SELECT p.po, coalesce(p.supplier_name,'') supplier_name, coalesce(p.client,'') client, coalesce(p.status,'') status,
-            upper(coalesce(nullif(p.country_code,''), b.country_code, '')) country,
-            to_char(p.client_deadline_date,'YYYY-MM-DD') client_deadline,
-            to_char(coalesce(p.end_production_overide, p.start_production + (coalesce(s.production_days,0)||' days')::interval)::date,'YYYY-MM-DD') prod_end,
-            round(coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0)) FROM planner.purchase_order_lines l
-              LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=p.po),0)::numeric,1) pallets
-          FROM planner.purchase_orders p
-          LEFT JOIN planner.suppliers s ON s.id=p.supplier_id
-          LEFT JOIN planner.branches  b ON b.name=p.branch
-          WHERE coalesce(p.shipment_ref,'')=''
-            AND NOT EXISTS (SELECT 1 FROM planner.shipments sh WHERE sh.master_po = p.po)  -- a master PO can have a blank shipment_ref but still be on a shipment
-            AND coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%deliver%' AND coalesce(p.status,'') NOT ILIKE '%ship%'
-            AND ( p.branch ILIKE '%manufactur%' OR upper(coalesce(nullif(p.country_code,''), b.country_code, '')) NOT IN ('UK','US','EU','AU','CA') )
-            AND EXISTS (SELECT 1 FROM planner.purchase_order_lines l WHERE l.po=p.po AND coalesce(l.qty,0)>0)`)).rows;
-        // definitive guard: never show a PO as FOB if it's already represented on a real shipment (as master or member)
-        const onShip = new Set(); shipEntries.forEach(s => { if (s.master_po) onShip.add(s.master_po); (s.members || []).forEach(m => onShip.add(m.po)); });
-        fobRows.forEach(r => { if (onShip.has(r.po)) return; const pallets = Number(r.pallets) || 0; shipEntries.push({
-          shipment_ref: '', is_fob: true, master_po: r.po, mode: 'FOB', carrier: '', carrier_ref: '', flex_id: '', country: r.country || '',
-          departure: '', landing: '', arrival: '', escalated: false, status: r.status, prod_end: r.prod_end || '',
-          master_client: r.client, master_deadline: r.client_deadline, master_supplier: r.supplier_name,
-          total_pallets: pallets, suppliers: r.supplier_name ? [r.supplier_name] : [],
-          members: [{ po: r.po, supplier: r.supplier_name, pallets, client: r.client, is_master: true }] }); });
-        return res.json(shipEntries
-          .sort((a, b) => (a.departure || '9999').localeCompare(b.departure || '9999') || String(a.master_po).localeCompare(String(b.master_po))));
-      }
+      case 'shipment-plan':   // master shipments + the POs aboard each (Shipment Plan — admin sub-tab + supplier portal tab)
+        return res.json(await buildShipmentPlan());
       case 'shipment-notes':   // ?ref=… → timeline notes for a master shipment
         return res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read
           FROM planner.shipment_notes WHERE shipment_ref=$1 ORDER BY created_at`, [req.query.ref || ''])).rows);
@@ -6095,8 +6093,12 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
         coalesce(po_balance_2,'') po_balance_2, coalesce(po_balance_3,'') po_balance_3
       FROM planner.payment_transactions pt WHERE pt.transaction_supplier = ANY($1)
       ORDER BY payment_date DESC NULLS LAST, id DESC`, [names]).catch(() => []) : [];
+    // Shipment Plan tab: all shipments this supplier is on — as consolidator (master) OR with a PO aboard
+    // (so they see who consolidates their goods / whose POs share their shipment). Same builder as the admin tab.
+    const nameSet = new Set(names.map(n => String(n).toLowerCase()));
+    const shipmentPlan = (await buildShipmentPlan()).filter(s => (s.suppliers || []).some(n => nameSet.has(String(n).toLowerCase())));
     res.json({ pos, lb, sdep: deps, sid: ids[0] || null, supplierName: names.join(', '),
-      notesByPo, subsByPo, costsByPo, supSkus, xdByPo, addByPo, samples, payments });
+      notesByPo, subsByPo, costsByPo, supSkus, xdByPo, addByPo, samples, payments, shipmentPlan });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
