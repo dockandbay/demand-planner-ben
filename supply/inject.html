@@ -1184,7 +1184,7 @@
       _poShowClient=!!(state.ctry&&state.ctry['DIRECT']);   // DIRECT pill → reveal Client name + sales ref columns
       var shown=(_poShowAll||f.length<=PO_CAP)?f:f.slice(0,PO_CAP);
       document.getElementById('sup-count').textContent=(shown.length<f.length?shown.length+' of ':'')+f.length+' / '+rows.length+' POs'+(q?' (search — all statuses)':'');
-      document.getElementById('sup-grid').innerHTML=poTable(shown,q?(state.grp==='shipment'?'shipment':'status'):state.grp)   // search spans all statuses → group under status sub-labels (but keep the Master-shipment hierarchy if that grouping is chosen)
+      document.getElementById('sup-grid').innerHTML=poTable(shown,q?'status':state.grp)   // a search spans all statuses → always group the results under status sub-labels (Production ▸ Ready to ship ▸ Future ▸ Shipping ▸ Complete)
         +(shown.length<f.length?'<div style="margin:8px 0;text-align:center"><button class="save-btn light" id="po-showall">Show all '+f.length+' &darr;</button></div>':'');
       var sa=document.getElementById('po-showall'); if(sa)sa.onclick=function(){ _poShowAll=true; view(); };
       bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindPoNotes(); bindPoActBadge(); bindPoCopy(); bindPoScrollPin();
@@ -1500,7 +1500,7 @@
     if(!groupBy||groupBy==='none'){ rows.forEach(function(r,i){ body+=poRowHtml(r,i,false,null); }); }
     else if(groupBy==='status'){
       // group under status sub-labels (used during a search, which spans all statuses)
-      var SORDER=['PRODUCTION','FUTURE','READY TO SHIP','SHIPPING','DELIVERED','COMPLETE'];
+      var SORDER=['PRODUCTION','READY TO SHIP','FUTURE','SHIPPING','DELIVERED','COMPLETE'];   // Ben's order: Production ▸ Ready to ship ▸ Future ▸ Shipping ▸ (Delivered) ▸ Complete
       var smap={}, sextra=[];
       rows.forEach(function(r){ var s=(r.status||'').toUpperCase()||'—'; if(!smap[s]){smap[s]=[]; if(SORDER.indexOf(s)<0)sextra.push(s);} smap[s].push(r); });
       var sseq=SORDER.filter(function(s){return smap[s];}).concat(sextra.sort());
