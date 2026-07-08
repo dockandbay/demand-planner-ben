@@ -3,6 +3,21 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.323 - Inventory sourced from planner.products (not product_inventory)
+
+All on-hand inventory reads now come from `planner.products.inventory_*` instead of the
+legacy `planner.product_inventory` table (fresher, live/Airtable-fed, and carries the extra
+us_awd / uk_nongrs / us_nongrs pools).
+
+- Migration **100_inventory_from_products.sql**: adds `planner.safe_int(text)` (defensive
+  text→int) and `planner.v_product_inventory` — a view unpivoting products' 9 warehouse
+  columns into the same `(sku, warehouse, available)` shape the old table had.
+- server.mjs: repointed all 15 `product_inventory` reads → `v_product_inventory` (semantics
+  identical). AWD pool re-sourced `awd_us` → `inventory_us_awd` at all sites. NonGRS already
+  read `inventory_uk/us_nongrs` (unchanged).
+- The old `planner.product_inventory` table is left in place (unused) — **safe to DROP on live
+  once verified.**
+
 ## v25.316 - Orange SANDBOX ONLY banner (sandbox only, never live)
 
 Server shows a fixed orange "SANDBOX ONLY" strip at the top of the app + portal whenever the DB is NOT the

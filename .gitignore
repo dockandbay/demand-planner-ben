@@ -24,3 +24,4 @@ po_client_master_update_2026-07-01.sql
 backfill_final_payment_due_2026-07-03.sql
 product_dims_load_2026-07-03.sql
 migrations/098_product_inventory_refresh.sql
+migrations/099_product_carton_dims.sql
