@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.337 - Samples: status dropdown + must-enter exceptions + admin read-through
+
+- Migration **101_sample_production_status.sql**: adds `production_status` to `planner.sample_requests`.
+- Portal Samples card: new **Status** dropdown (Not started / In production / Ready to ship / Shipped),
+  mirroring the PO production status. Auto-saves on change (and on Save).
+- **Exceptions (count as sample actions):** blank **expected completion date** and blank **status** each
+  show a red "⚠ Must enter…" badge and count on the Samples badge (top + per-row), same as POs. Also a past
+  expected date while still in production counts. Gated to active (non-cancelled/complete) samples.
+- **Read-through:** the supplier's production status now shows on the SUPPLY ▸ Samples grid under the status chip.
+- server: `sample-update` accepts `production_status`; both samples queries (portal + admin) return it.
+
 ## v25.336 - Fix portal completion-date binding/reset/badge
 
 The completion-date handler saved the submission but never updated local state, so: (a) it didn't

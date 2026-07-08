@@ -1008,7 +1008,8 @@
                 +'<div style="min-width:190px">'+lbl('Purpose')+'<div class="tiny" style="margin-bottom:10px">'+esc((s.purpose||[]).join(', ')||'—')+'</div>'+lbl('Notes')+'<div class="tiny" style="white-space:pre-wrap;background:#f8fafc;border:1px solid #eef2f7;border-radius:6px;padding:7px 9px;min-width:170px;max-width:300px">'+(s.notes?esc(s.notes):'<span class="mut">—</span>')+'</div></div>'
               +'</div>'
               +'<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px">'
-                +'<div>'+lbl('Expected completion')+'<input type="date" class="fci samp-exp" value="'+esc(s.supplier_expected||'')+'" style="width:150px"></div>'
+                +'<div>'+lbl('Status')+'<select class="fci samp-prod" data-id="'+s.id+'" style="width:150px;font-size:12px'+(sampStMissing(s)?';border-color:#dc2626;background:#fef2f2':'')+'"><option value="">—</option>'+PROD_STATUS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===(s.production_status||'')?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'+(sampStMissing(s)?'<div style="margin-top:3px"><span style="background:#dc2626;color:#fff;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px">⚠ Must enter status</span></div>':'')+'</div>'
+                +'<div>'+lbl('Expected completion')+'<input type="date" class="fci samp-exp" value="'+esc(s.supplier_expected||'')+'" style="width:150px'+(sampCdMissing(s)?';border:1px solid #dc2626;background:#fef2f2':'')+'">'+(sampCdMissing(s)?'<div style="margin-top:3px"><span style="background:#dc2626;color:#fff;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px">⚠ Must enter completion date</span></div>':'')+'</div>'
                 +'<div>'+lbl('Tracking code')+'<input class="fci txt samp-trk" value="'+esc(s.tracking_code||'')+'" style="width:170px" placeholder="tracking…"></div>'
                 +'<div>'+lbl('Carrier')+'<input class="fci txt samp-car" value="'+esc(s.carrier||'')+'" style="width:120px" placeholder="carrier…"></div>'
                 +'<button class="save-btn samp-save">Save</button></div>'
@@ -1023,7 +1024,15 @@
               +'</div>'; }
           function sampNeedsAccept(s){ return (!s.accepted||s.change_requested)&&s.status!=='cancelled'&&s.status!=='complete'; }
           function sampInFilt(s,f){ if(f==='all')return true; if(f==='closed')return !s.is_open; if(f==='unaccepted')return sampNeedsAccept(s); return s.is_open; }
-          function sampActions(s){ return (sampNeedsAccept(s)?1:0)+((s.unread_dnb)||0); }   // supplier action: needs (re-)accept OR unread D&B message
+          function sampActive(s){ return s.status!=='cancelled' && s.status!=='complete'; }
+          function sampCdMissing(s){ return sampActive(s) && !s.supplier_expected; }   // must enter expected completion date
+          function sampStMissing(s){ return sampActive(s) && !s.production_status; }     // must enter status
+          // supplier actions on a sample: needs (re-)accept, unread D&B message, missing expected date / status,
+          // or a past expected date while still in production (mirrors the PO exceptions).
+          function sampActions(s){ var today=new Date().toISOString().slice(0,10);
+            var n=(sampNeedsAccept(s)?1:0)+((s.unread_dnb)||0)+(sampCdMissing(s)?1:0)+(sampStMissing(s)?1:0);
+            if(sampActive(s) && s.supplier_expected && s.supplier_expected<today && s.production_status!=='ready_to_ship' && s.production_status!=='shipped') n++;
+            return n; }
           function setSampBadge(){ var n=((_ppData&&_ppData.samples)||[]).reduce(function(a,s){return a+sampActions(s);},0);   // supplier actions: needs-(re)accept + unread D&B notes
             var sbg=document.getElementById('pp-samp-badge'); if(sbg)sbg.innerHTML=n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
           function ppBadgeHtml(n){ return n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
@@ -1074,7 +1083,8 @@
             return bar+'<div id="samp-newform"></div>'+tbl; }
           function wireSampleCard(scope,id){
             var ac=scope.querySelector('.samp-accept'); if(ac)ac.onclick=function(){ ac.disabled=true; postJSON(EP.sampleAccept,{id:id},function(){ reload(); }); };
-            var save=scope.querySelector('.samp-save'); if(save)save.onclick=function(){ postJSON(EP.sampleUpdate,{id:id,supplier_expected_completion:scope.querySelector('.samp-exp').value||null,tracking_code:scope.querySelector('.samp-trk').value||null,carrier:scope.querySelector('.samp-car').value||null},function(){ reload(); }); };
+            var save=scope.querySelector('.samp-save'); if(save)save.onclick=function(){ var ps=scope.querySelector('.samp-prod'); postJSON(EP.sampleUpdate,{id:id,supplier_expected_completion:scope.querySelector('.samp-exp').value||null,tracking_code:scope.querySelector('.samp-trk').value||null,carrier:scope.querySelector('.samp-car').value||null,production_status:(ps&&ps.value)||null},function(){ reload(); }); };
+            var sprod=scope.querySelector('.samp-prod'); if(sprod)sprod.onchange=function(){ postJSON(EP.sampleUpdate,{id:id,production_status:sprod.value||null},function(){ reload(); }); };
             var ch=scope.querySelector('.samp-charge'); if(ch)ch.onclick=function(){ var f=scope.querySelector('.samp-cf').value,p=scope.querySelector('.samp-cp').value,d=scope.querySelector('.samp-cd').value; if(!f&&!p){alert('Enter a freight and/or product cost.');return;} ch.disabled=true; postJSON(EP.sampleCharge,{id:id,freight_cost:Number(f)||0,product_cost:Number(p)||0,description:d||null},function(){ reload(); }); };
             var np=scope.querySelector('.samp-note-post'); if(np)np.onclick=function(){ var inp=scope.querySelector('.samp-note-in'); var v=(inp.value||'').trim(); if(!v)return; postJSON(EP.sampleNote,{id:id,body:v,author_kind:EP.sampleNoteAuthorKind,author_email:EP.sampleNoteAuthorEmail},function(){ inp.value=''; ppSampleTimeline(id); }); };
             var af=scope.querySelector('.ps-att-file'), au=scope.querySelector('.ps-att-up');
