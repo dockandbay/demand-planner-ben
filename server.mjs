@@ -73,7 +73,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.323';
+const APP_VERSION = 'v25.324';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -4084,13 +4084,13 @@ app.post('/api/scenario/prime-day', async (req, res) => {
       SELECT p.sku, coalesce(p.product_name,'') name, coalesce(p.category,'') category,
         coalesce(sum(pi.available) FILTER (WHERE pi.warehouse LIKE '%\\_fba'),0)::int fba,
         coalesce(sum(pi.available) FILTER (WHERE pi.warehouse LIKE '%\\_3pl'),0)::int three_pl,
-        (CASE WHEN $${pAwd} THEN planner.safe_int(p.inventory_us_awd) ELSE 0 END)::int awd,
-        (coalesce(sum(pi.available),0) + CASE WHEN $${pAwd} THEN planner.safe_int(p.inventory_us_awd) ELSE 0 END)::int total
+        (CASE WHEN $${pAwd} THEN coalesce(p.inventory_us_awd,0)::int ELSE 0 END)::int awd,
+        (coalesce(sum(pi.available),0) + CASE WHEN $${pAwd} THEN coalesce(p.inventory_us_awd,0)::int ELSE 0 END)::int total
       FROM planner.products p
       JOIN planner.v_product_inventory pi ON pi.sku=p.sku
       ${wsql}
       GROUP BY p.sku, p.product_name, p.category, p.inventory_us_awd
-      HAVING coalesce(sum(pi.available),0) > 0 OR planner.safe_int(p.inventory_us_awd) > 0 OR $${pSkuFlag} = true
+      HAVING coalesce(sum(pi.available),0) > 0 OR coalesce(p.inventory_us_awd,0)::int > 0 OR $${pSkuFlag} = true
       ORDER BY total DESC`, [...vals, awdApplies, skus.length > 0]);
     const tot = rows.reduce((a, r) => { a.fba += r.fba; a.three_pl += r.three_pl; a.awd += r.awd; a.total += r.total; return a; }, { fba: 0, three_pl: 0, awd: 0, total: 0 });
     res.json({ rows, totals: tot, sku_count: rows.length, awd_available: awdApplies });
@@ -4107,7 +4107,7 @@ app.get('/api/buy-extra-stock', async (req, res) => {
         AND column_name IN ('inventory_uk_nongrs','inventory_us_nongrs')`)).rows.map(r => r.column_name);
     const ukn = cols.includes('inventory_uk_nongrs') ? 'coalesce(inventory_uk_nongrs,0)' : '0';
     const usn = cols.includes('inventory_us_nongrs') ? 'coalesce(inventory_us_nongrs,0)' : '0';
-    const rows = (await pool.query(`SELECT sku, planner.safe_int(inventory_us_awd) awd, ${ukn}::int nuk, ${usn}::int nus
+    const rows = (await pool.query(`SELECT sku, coalesce(inventory_us_awd,0)::int awd, ${ukn}::int nuk, ${usn}::int nus
       FROM planner.products WHERE in_planning_scope`)).rows;
     const stock = {};
     rows.forEach(r => { if (r.awd || r.nuk || r.nus) stock[r.sku] = { awd: r.awd, nuk: r.nuk, nus: r.nus }; });
@@ -4127,7 +4127,7 @@ app.post('/api/scenario/b2b', async (req, res) => {
     const { rows } = await pool.query(`
       SELECT p.sku, coalesce(p.product_name,'') name, coalesce(p.category,'') category,
         (coalesce((SELECT sum(available) FROM planner.v_product_inventory pi WHERE pi.sku=p.sku AND pi.warehouse LIKE $2||'\\_%'),0)
-         + CASE WHEN $2='us' THEN planner.safe_int(p.inventory_us_awd) ELSE 0 END)::int available,
+         + CASE WHEN $2='us' THEN coalesce(p.inventory_us_awd,0)::int ELSE 0 END)::int available,
         coalesce((SELECT sum(units) FROM planner.sales_actuals sa WHERE sa.sku=p.sku AND lower(sa.country)=$2
                   AND sa.month > (SELECT max(month) FROM planner.sales_actuals) - interval '3 months'),0)::int recent_units,
         p.prod_weight_uk weight,
@@ -4424,8 +4424,8 @@ app.get('/api/scenario/slow-moving', async (req, res) => {
         GROUP BY 1,2),
       inv AS (  -- AWD (US-only, upstream) is pooled into us_fba: it feeds FBA and is the same stock pool
         SELECT i.sku, i.warehouse wh,
-          (i.available + CASE WHEN i.warehouse='us_fba' THEN planner.safe_int(p.inventory_us_awd) ELSE 0 END)::int on_hand,
-          (CASE WHEN i.warehouse='us_fba' THEN planner.safe_int(p.inventory_us_awd) ELSE 0 END)::int awd
+          (i.available + CASE WHEN i.warehouse='us_fba' THEN coalesce(p.inventory_us_awd,0)::int ELSE 0 END)::int on_hand,
+          (CASE WHEN i.warehouse='us_fba' THEN coalesce(p.inventory_us_awd,0)::int ELSE 0 END)::int awd
         FROM planner.v_product_inventory i JOIN planner.products p ON p.sku=i.sku WHERE p.in_planning_scope)
       SELECT inv.sku, p.product_name, p.category, p.subcategory, p.release_window, inv.wh,
         inv.on_hand, inv.awd,
@@ -4489,7 +4489,7 @@ app.get('/api/scenario/markdown-eos', async (req, res) => {
         WHERE month >= date_trunc('month',CURRENT_DATE) AND month <= date_trunc('month',$1::date) GROUP BY 1,2),
       cost AS (SELECT sku, avg(cost_price) c FROM planner.purchase_order_lines WHERE cost_price>0 GROUP BY 1),
       inv AS (SELECT i.sku, split_part(i.warehouse,'_',1) market,
-          sum(i.available + CASE WHEN i.warehouse='us_fba' THEN planner.safe_int(p.inventory_us_awd) ELSE 0 END)::int on_hand
+          sum(i.available + CASE WHEN i.warehouse='us_fba' THEN coalesce(p.inventory_us_awd,0)::int ELSE 0 END)::int on_hand
         FROM planner.v_product_inventory i JOIN planner.products p ON p.sku=i.sku
         WHERE p.in_planning_scope GROUP BY 1,2),
       avail AS (SELECT sku, lower(country) market, bool_or(is_available) live
@@ -4559,7 +4559,7 @@ app.get('/api/scenario/otb', async (req, res) => {
             AND coalesce(s.arrival_date,s.delivery_date,s.landing_date,po.landing_date_overide) < CURRENT_DATE + ($1||' months')::interval
           GROUP BY 1,2),
       oh AS (SELECT p.category, split_part(i.warehouse,'_',1) market,
-            sum(i.available + CASE WHEN i.warehouse='us_fba' THEN planner.safe_int(p.inventory_us_awd) ELSE 0 END)::numeric onhand
+            sum(i.available + CASE WHEN i.warehouse='us_fba' THEN coalesce(p.inventory_us_awd,0)::int ELSE 0 END)::numeric onhand
           FROM planner.v_product_inventory i JOIN planner.products p ON p.sku=i.sku
           WHERE p.in_planning_scope GROUP BY 1,2),
       cost AS (SELECT pr.category, avg(l.cost_price) c FROM planner.purchase_order_lines l
@@ -4629,7 +4629,7 @@ app.get('/api/scenario/key-arrivals', async (req, res) => {
       SELECT arr.po, arr.shipment_ref, arr.supplier, arr.market, arr.status,
         to_char(arr.arrival,'YYYY-MM-DD') arrival, (arr.arrival - CURRENT_DATE)::int days_to_arrival,
         l.sku, l.qty::int qty, coalesce(p.product_name,'') name, coalesce(p.subcategory,'') subcat,
-        (coalesce(oh.oh,0) + CASE WHEN arr.market='us' THEN planner.safe_int(p.inventory_us_awd) ELSE 0 END)::numeric on_hand,
+        (coalesce(oh.oh,0) + CASE WHEN arr.market='us' THEN coalesce(p.inventory_us_awd,0)::int ELSE 0 END)::numeric on_hand,
         coalesce(fc.fsold,0)::numeric fc_win
       FROM arr
       JOIN planner.purchase_order_lines l ON l.po=arr.po AND l.qty>0
@@ -4744,7 +4744,7 @@ async function stActuals() {
       FROM planner.sales_actuals sa JOIN planner.products p ON p.sku=sa.sku, ss
       WHERE sa.month >= ss.d AND p.category IS NOT NULL GROUP BY 1,2),
     oh AS (SELECT p.category, upper(split_part(i.warehouse,'_',1)) market,
-             sum(i.available + CASE WHEN i.warehouse='us_fba' THEN planner.safe_int(p.inventory_us_awd) ELSE 0 END)::numeric u
+             sum(i.available + CASE WHEN i.warehouse='us_fba' THEN coalesce(p.inventory_us_awd,0)::int ELSE 0 END)::numeric u
       FROM planner.v_product_inventory i JOIN planner.products p ON p.sku=i.sku WHERE p.category IS NOT NULL GROUP BY 1,2)
     SELECT coalesce(sold.category,oh.category) category, coalesce(sold.market,oh.market) market,
       coalesce(sold.u,0) sold, coalesce(oh.u,0) onhand

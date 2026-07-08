@@ -3,20 +3,26 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
-## v25.323 - Inventory sourced from planner.products (not product_inventory)
+## v25.324 - Inventory sourced from planner.products + all inventory fields numeric
 
 All on-hand inventory reads now come from `planner.products.inventory_*` instead of the
 legacy `planner.product_inventory` table (fresher, live/Airtable-fed, and carries the extra
-us_awd / uk_nongrs / us_nongrs pools).
+us_awd / uk_nongrs / us_nongrs pools). The inventory columns are also normalised to numeric.
 
-- Migration **100_inventory_from_products.sql**: adds `planner.safe_int(text)` (defensive
-  text→int) and `planner.v_product_inventory` — a view unpivoting products' 9 warehouse
-  columns into the same `(sku, warehouse, available)` shape the old table had.
-- server.mjs: repointed all 15 `product_inventory` reads → `v_product_inventory` (semantics
-  identical). AWD pool re-sourced `awd_us` → `inventory_us_awd` at all sites. NonGRS already
-  read `inventory_uk/us_nongrs` (unchanged).
+- Migration **100_inventory_from_products.sql** (revised — self-contained, safe to re-run):
+  - Converts the 10 text inventory columns (`inventory_*_3pl/fba` + `inventory_us_awd`) to
+    **numeric**; the two nongrs columns were already numeric — so ALL inventory fields are now
+    numeric. Data verified junk-free on sandbox + live; defensive cast (non-numeric/blank → NULL).
+  - Creates `planner.v_product_inventory` — a view unpivoting products' 9 warehouse columns into
+    the same `(sku, warehouse, available)` shape the old table had (identical aggregation semantics).
+  - No `safe_int` helper needed any more (columns are numeric).
+- server.mjs: repointed all 15 `product_inventory` reads → `v_product_inventory`. AWD pool
+  re-sourced `awd_us` → `inventory_us_awd` at all sites. NonGRS already read `inventory_uk/us_nongrs`.
 - The old `planner.product_inventory` table is left in place (unused) — **safe to DROP on live
   once verified.**
+- ⚠️ **n8n/ETL note for Diviyaj:** now that these columns are numeric, the Airtable→Supabase sync
+  must write numbers or NULL — an empty-string write (`''`) into a numeric column will now error.
+  Confirm the sync coerces blanks to NULL.
 
 ## v25.316 - Orange SANDBOX ONLY banner (sandbox only, never live)
 
