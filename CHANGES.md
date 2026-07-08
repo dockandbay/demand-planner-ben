@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.347 - Log every Cin7 API call to a file (server-side, for analysis)
+
+`cin7Fetch` now appends every Cin7 call (timestamp, method, url, request body, HTTP status, response body)
+to `cin7-calls.jsonl` (gitignored) and a short line to the server log. Covers all Cin7 traffic, not just the
+push. Response body read from a clone so callers are unaffected.
+
 ## v25.346 - Cin7 push shows an API-call trace in the popup (debugging)
 
 The Cin7 push now returns `cin7_trace` — each Cin7 call it made (reference pre-check, create/update) with the

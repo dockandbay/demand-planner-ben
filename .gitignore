@@ -25,3 +25,6 @@ backfill_final_payment_due_2026-07-03.sql
 product_dims_load_2026-07-03.sql
 migrations/098_product_inventory_refresh.sql
 migrations/099_product_carton_dims.sql
+
+# Cin7 API call log (sandbox debugging)
+cin7-calls.jsonl

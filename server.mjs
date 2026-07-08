@@ -6,7 +6,7 @@
 //   WRITE : POST /api/save-forecasts upserts edited subcat inputs back to forecast_inputs.
 import 'dotenv/config';
 import express from 'express';
-import { readFileSync } from 'fs';
+import { readFileSync, appendFile } from 'fs';
 import pg from 'pg';
 
 // On Vercel (serverless) use Supabase's TRANSACTION pooler (port 6543) — built for many
@@ -73,7 +73,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.346';
+const APP_VERSION = 'v25.347';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3350,6 +3350,19 @@ function cin7Auth() {
 // calls are serialised with a minimum gap, and 429s are retried with backoff (honouring Retry-After). This
 // keeps bulk pushes/lookups under Cin7's limit instead of getting rejected.
 let _cin7LastCall = 0, _cin7Chain = Promise.resolve();
+// Append one Cin7 call (request + response) to cin7-calls.jsonl for later analysis. Reads the response body
+// from a CLONE so the caller's body is untouched. Best-effort — never throws into the request path.
+function logCin7(url, opts, resp) {
+  try {
+    resp.clone().text().then(body => {
+      const entry = { ts: new Date().toISOString(), method: (opts && opts.method) || 'GET', url,
+        status: resp.status, req: (opts && opts.body) ? String(opts.body).slice(0, 4000) : undefined,
+        resp: String(body || '').slice(0, 4000) };
+      appendFile('cin7-calls.jsonl', JSON.stringify(entry) + '\n', () => {});
+      console.log('[cin7] ' + entry.method + ' ' + resp.status + ' ' + String(url).replace('https://api.cin7.com/api/v1', '').slice(0, 90));
+    }).catch(() => {});
+  } catch (e) { /* never break the push over logging */ }
+}
 function cin7Fetch(url, opts) {
   const MIN_GAP = 400;   // ms between Cin7 calls → ~2.5/sec, safely under the 3/sec cap
   const run = async () => {
@@ -3358,7 +3371,8 @@ function cin7Fetch(url, opts) {
     for (let attempt = 0; ; attempt++) {
       _cin7LastCall = Date.now();
       const resp = await fetch(url, opts);
-      if (resp.status !== 429 || attempt >= 4) return resp;
+      if (resp.status !== 429 || attempt >= 4) { logCin7(url, opts, resp); return resp; }
+      logCin7(url, opts, resp);   // log the 429 too, then back off + retry
       const ra = Number(resp.headers.get('retry-after'));
       await new Promise(r => setTimeout(r, ra > 0 ? ra * 1000 : 1000 * (attempt + 1)));
     }
