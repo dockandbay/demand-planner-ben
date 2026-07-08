@@ -1008,8 +1008,9 @@
                 +'<div style="min-width:190px">'+lbl('Purpose')+'<div class="tiny" style="margin-bottom:10px">'+esc((s.purpose||[]).join(', ')||'—')+'</div>'+lbl('Notes')+'<div class="tiny" style="white-space:pre-wrap;background:#f8fafc;border:1px solid #eef2f7;border-radius:6px;padding:7px 9px;min-width:170px;max-width:300px">'+(s.notes?esc(s.notes):'<span class="mut">—</span>')+'</div></div>'
               +'</div>'
               +'<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px">'
-                +'<div>'+lbl('Status')+'<select class="fci samp-prod" data-id="'+s.id+'" style="width:150px;font-size:12px'+(sampStMissing(s)?';border-color:#dc2626;background:#fef2f2':'')+'"><option value="">—</option>'+PROD_STATUS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===(s.production_status||'')?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'+(sampStMissing(s)?'<div style="margin-top:3px"><span style="background:#dc2626;color:#fff;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px">⚠ Must enter status</span></div>':'')+'</div>'
-                +'<div>'+lbl('Expected completion')+'<input type="date" class="fci samp-exp" value="'+esc(s.supplier_expected||'')+'" style="width:150px'+(sampCdMissing(s)?';border:1px solid #dc2626;background:#fef2f2':'')+'">'+(sampCdMissing(s)?'<div style="margin-top:3px"><span style="background:#dc2626;color:#fff;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px">⚠ Must enter completion date</span></div>':'')+'</div>'
+                +'<div>'+lbl('Status')+'<select class="fci samp-prod" data-id="'+s.id+'" style="width:150px;font-size:12px'+((sampStMissing(s)||sampDateConflict(s))?';border:1px solid #dc2626;background:#fef2f2':'')+'"><option value="">—</option>'+PROD_STATUS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===(s.production_status||'')?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'+(sampStMissing(s)?'<div style="margin-top:3px"><span style="background:#dc2626;color:#fff;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px">⚠ Must enter status</span></div>':'')+'</div>'
+                +'<div>'+lbl('Expected completion')+'<input type="date" class="fci samp-exp" value="'+esc(s.supplier_expected||'')+'" style="width:150px'+((sampCdMissing(s)||sampDateConflict(s))?';border:1px solid #dc2626;background:#fef2f2':'')+'">'+(sampCdMissing(s)?'<div style="margin-top:3px"><span style="background:#dc2626;color:#fff;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px">⚠ Must enter completion date</span></div>':'')+'</div>'
+                +(sampDateConflict(s)?'<div style="flex-basis:100%"><span style="background:#dc2626;color:#fff;border-radius:4px;font-size:10px;font-weight:700;padding:2px 7px">⚠ Expected completion date has passed but status is still "In production" — please update</span></div>':'')
                 +'<div>'+lbl('Tracking code')+'<input class="fci txt samp-trk" value="'+esc(s.tracking_code||'')+'" style="width:170px" placeholder="tracking…"></div>'
                 +'<div>'+lbl('Carrier')+'<input class="fci txt samp-car" value="'+esc(s.carrier||'')+'" style="width:120px" placeholder="carrier…"></div>'
                 +'<button class="save-btn samp-save">Save</button></div>'
@@ -1027,12 +1028,11 @@
           function sampActive(s){ return s.status!=='cancelled' && s.status!=='complete'; }
           function sampCdMissing(s){ return sampActive(s) && !s.supplier_expected; }   // must enter expected completion date
           function sampStMissing(s){ return sampActive(s) && !s.production_status; }     // must enter status
+          // logic conflict: the expected completion date has passed but the supplier still says "In production".
+          function sampDateConflict(s){ return sampActive(s) && !!s.supplier_expected && s.supplier_expected<new Date().toISOString().slice(0,10) && s.production_status==='in_production'; }
           // supplier actions on a sample: needs (re-)accept, unread D&B message, missing expected date / status,
-          // or a past expected date while still in production (mirrors the PO exceptions).
-          function sampActions(s){ var today=new Date().toISOString().slice(0,10);
-            var n=(sampNeedsAccept(s)?1:0)+((s.unread_dnb)||0)+(sampCdMissing(s)?1:0)+(sampStMissing(s)?1:0);
-            if(sampActive(s) && s.supplier_expected && s.supplier_expected<today && s.production_status!=='ready_to_ship' && s.production_status!=='shipped') n++;
-            return n; }
+          // or a past-expected-date-while-in-production conflict.
+          function sampActions(s){ return (sampNeedsAccept(s)?1:0)+((s.unread_dnb)||0)+(sampCdMissing(s)?1:0)+(sampStMissing(s)?1:0)+(sampDateConflict(s)?1:0); }
           function setSampBadge(){ var n=((_ppData&&_ppData.samples)||[]).reduce(function(a,s){return a+sampActions(s);},0);   // supplier actions: needs-(re)accept + unread D&B notes
             var sbg=document.getElementById('pp-samp-badge'); if(sbg)sbg.innerHTML=n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
           function sampRowBadgeHtml(s){ var n=sampActions(s); var act=n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;margin-left:4px" title="needs your attention">'+n+'</span>':''; var nu=s.unread_dnb?'<span style="background:#f59e0b;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;margin-left:3px" title="new note from Dock &amp; Bay">'+s.unread_dnb+'</span>':''; return act+nu; }

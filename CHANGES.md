@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.339 - Samples: flag past-expected-date-while-in-production conflict
+
+Common-sense check: if a sample's Expected completion date is in the past but status is still
+"In production", that's contradictory — now highlights the Status + Expected fields red, shows a
+"⚠ Expected completion date has passed but status is still In production" message, and counts as a
+sample action (top + per-row badge).
+
 ## v25.338 - Samples completion date + status save silently (no reload)
 
 The Samples Status and Expected-completion-date fields now auto-save on change and refresh in place
