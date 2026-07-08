@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.316 - Orange SANDBOX ONLY banner (sandbox only, never live)
+
+Server shows a fixed orange "SANDBOX ONLY" strip at the top of the app + portal whenever the DB is NOT the
+production Supabase (ref oolwklahstnvocaugryg). Live never shows it. Keyed off the real prod DB ref so it is
+correct wherever it runs.
+
 ## v25.315 - Supplier portal PRODUCTIONS pivot: drop Product, widen SKU, add EAN + Size
 
 On-screen batch pivot columns are now SKU (wider, ~190px, sticky) + EAN + Size (size_long), then the PO qty

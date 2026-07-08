@@ -14,6 +14,10 @@ import pg from 'pg';
 // caps at 15 clients and serverless instances exhaust it. Locally, keep 5432 + a larger pool.
 let CONN = process.env.DATABASE_URL || '';
 if (process.env.VERCEL || process.env.USE_TXN_POOLER) CONN = CONN.replace(':5432/', ':6543/');   // USE_TXN_POOLER: local dev escape hatch when the session pooler (cap 15) is exhausted
+// Environment marker: show a SANDBOX banner unless we're pointed at the PRODUCTION Supabase (ref oolwklahstnvocaugryg).
+// Keyed off the real prod DB ref so it's correct wherever it runs — live never shows it, any non-prod DB does.
+const IS_SANDBOX = !String(CONN).includes('oolwklahstnvocaugryg');
+const SANDBOX_BANNER = '<div id="sbx-banner" style="position:fixed;top:0;left:0;right:0;height:20px;line-height:20px;background:#f97316;color:#fff;font:700 11px/20px system-ui,-apple-system,sans-serif;text-align:center;letter-spacing:.14em;z-index:100001">SANDBOX ONLY — test data, not live</div><style>body{padding-top:20px}#hz-topbar{top:20px!important}</style>';
 const pool = new pg.Pool({
   connectionString: CONN,
   ssl: { rejectUnauthorized: false },
@@ -62,7 +66,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.315';
+const APP_VERSION = 'v25.316';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -409,6 +413,7 @@ app.get('/', async (_req, res) => {
     const FBADIMS_JS = '<script>window.FBA_DIMS=' + JSON.stringify(FBADIMS) + ';</script>';
     const injectTail = FBADIMS_JS + FIT + (DEV ? loadInject() : SUPPLY_INJECT).split('__APP_VERSION__').join(APP_VERSION) + '</body>';
     html = html.replace('</body>', () => injectTail);
+    if (IS_SANDBOX) html = html.replace(/<body[^>]*>/, m => m + SANDBOX_BANNER);   // orange "SANDBOX ONLY" strip — never on prod
     res.set('content-type', 'text/html').set('Cache-Control', 'no-store').send(html);
   } catch (e) {
     res.status(500).send('inject failed: ' + e.message);
@@ -5930,7 +5935,9 @@ app.get('/portal', async (req, res) => {
       }
       return res.redirect('/portal?e=expired');
     }
-    res.set('content-type', 'text/html').send(DEV ? loadPortalPage() : PORTAL_PAGE);
+    var _pp = DEV ? loadPortalPage() : PORTAL_PAGE;
+    if (IS_SANDBOX) _pp = _pp.replace(/<body[^>]*>/, m => m + SANDBOX_BANNER);
+    res.set('content-type', 'text/html').send(_pp);
   } catch (e) { res.status(500).send('portal error'); }
 });
 
