@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.328 - Portal Samples card: force left alignment
+
+The Samples card on the supplier portal had right-aligned items (Completion required, Charges,
+Timeline, "No timeline entries yet"). Forced the whole card left-aligned and removed the
+`margin-left:auto` on Completion required. Portal content should always be left-aligned.
+
 ## v25.327 - Portal Shipment Plan now populated for real suppliers (Samples follow-on)
 
 Closes the deferred Samples/portal item: the real `/api/portal/bootstrap` didn't return `shipmentPlan`,
