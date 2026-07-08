@@ -73,7 +73,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.348';
+const APP_VERSION = 'v25.349';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3489,6 +3489,13 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
       const arr = await g.json(); return (Array.isArray(arr) && arr[0] && arr[0].id) ? arr[0].id : null;
     }
     memberId = poRow.cin7_member_id ? Number(poRow.cin7_member_id) : await cin7IdByCompany('Contacts', poRow.supplier_name);
+    branchId = poRow.branch ? await cin7IdByCompany('Branches', poRow.branch) : null;
+    // The fields that anchor an order as a PURCHASE order in Cin7 (supplier member + branch + company). Sent on
+    // BOTH create AND update — an update that omits company/branchId flips the order into a SALES ORDER. Always
+    // pushed as a draft (isApproved:false) so a person approves it in Cin7.
+    const poFields = { company: poRow.supplier_name || '', isApproved: false };
+    if (memberId) poFields.memberId = Number(memberId);
+    if (branchId) poFields.branchId = Number(branchId);
     // Find any existing Cin7 order (PO or SO, incl. voided) with this reference — Cin7 matches by reference and
     // will SILENTLY reject creating a duplicate, even against a voided order.
     async function cin7FindOrderByRef(reference) {
@@ -3517,10 +3524,9 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
     // Cin7 expects the line unitPrice in the ORDER currency (USD) on write and converts to base itself — send planUSD as-is.
     const lineItems = lines.map(l => ({ code: l.sku, qty: Number(l.qty), unitPrice: Number(l.price) || 0 }));
     if (cin7Id) {
-      // UPDATE existing Cin7 PO — preserve its current approval state (don't flip a draft to approved)
-      const upd = { id: Number(cin7Id) || cin7Id, lineItems };
-      if (memberId) upd.memberId = Number(memberId);   // re-assert the supplier link on every update
-      if (curApproved !== undefined) upd.isApproved = curApproved;
+      // UPDATE existing Cin7 PO — re-assert the SAME PO-anchoring fields as create (memberId/company/branchId +
+      // draft). Sending only id+lines (as before) let Cin7 reclassify the order as a sales order.
+      const upd = Object.assign({ id: Number(cin7Id) || cin7Id, lineItems }, poFields);
       const body = [upd];
       r = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
         { method: 'PUT', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -3532,15 +3538,10 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
       // above) + a branchId — without the supplier link Cin7 mis-files the order as a SALES ORDER. Fail the
       // create (no write) if either can't be resolved, so we never silently create a malformed order again.
       if (!memberId) return res.status(422).json({ error: 'Supplier "' + (poRow.supplier_name || '(none)') + '" was not found as a Cin7 contact — cannot create the PO. Set the supplier\'s Cin7 member id (or spell-match the name in Cin7), then retry.', lines: lines.length, mode });
-      branchId = poRow.branch ? await cin7IdByCompany('Branches', poRow.branch) : null;
       if (poRow.branch && !branchId) return res.status(422).json({ error: 'Branch "' + poRow.branch + '" was not found in Cin7 Branches — cannot create the PO. Make the planner branch name match the Cin7 branch exactly, then retry.', lines: lines.length, mode });
-      // DRAFT (isApproved:false) so a person reviews/approves in Cin7. Do NOT send `stage` — let Cin7 apply
-      // the account's default PO stage (sending a stage put POs in the wrong workflow stage).
-      // Set the PO currency to the supplier's default_currency (USD for all suppliers today; GBP/EUR/etc.
-      // supported). Cin7 looks up the rate itself. Without this Cin7 falls back to the GBP account currency
-      // and our line costs get mislabelled.
-      const create = { reference: po, memberId: Number(memberId), company: poRow.supplier_name || '', isApproved: false, currencyCode: poRow.currency || 'USD', lineItems };
-      if (branchId) create.branchId = Number(branchId);
+      // Do NOT send `stage` — let Cin7 apply the account's default PO stage. currencyCode = the supplier's
+      // default_currency (USD today); Cin7 looks up the rate. poFields carries memberId/company/branchId + draft.
+      const create = Object.assign({ reference: po, currencyCode: poRow.currency || 'USD', lineItems }, poFields);
       if (edd) create.estimatedDeliveryDate = edd;
       r = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
         { method: 'POST', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify([create]) });
@@ -3596,9 +3597,10 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
             // directly) — self-heals any qty/price drift — plus any Cin7-only extras zeroed out.
             const fixItems = lines.map(l => ({ code: l.sku, qty: Number(l.qty), unitPrice: Number(l.price) || 0 }));
             const fix = fixItems.concat(extras.map(c => ({ code: byCode[c].code, qty: 0, unitPrice: Number(byCode[c].unitPrice) || 0 })));
-            const body2 = [{ id: Number(validateId) || validateId, lineItems: fix }]; if (typeof curApproved === 'boolean') body2[0].isApproved = curApproved;
+            const body2 = [Object.assign({ id: Number(validateId) || validateId, lineItems: fix }, poFields)];   // keep the PO-anchoring fields so the corrective PUT doesn't reclassify it
             const r2 = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
               { method: 'PUT', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify(body2) });
+            trace.push({ step: 'correct', method: 'PUT', endpoint: '/v1/PurchaseOrders', request: body2, http: r2.status });
             validation.corrected = true; validation.correction_ok = r2.ok;
             const d2 = r2.ok ? await getCin7Data() : null;
             if (d2) { const b2 = {}; d2.items.forEach(li => { if (li && li.code) b2[String(li.code).toUpperCase()] = li; });

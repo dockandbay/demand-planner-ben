@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.349 - Cin7 UPDATE now re-asserts PO fields (fixes update→sales-order)
+
+The update PUT only sent `{id, lineItems, memberId, isApproved}` — missing `company`/`branchId`, which let
+Cin7 reclassify the order as a **sales order** on update. Now create, update AND the corrective PUT all send
+the same PO-anchoring fields (`memberId` + `company` + `branchId` + `isApproved:false` draft) via a shared
+`poFields`; branchId is resolved up-front for both paths. Update no longer preserves a stray `isApproved:true`.
+
 ## v25.348 - Cin7 PO create: drop the `stage` field
 
 Removed `stage: 'New'` from the Cin7 PO create payload — let Cin7 apply the account's default PO stage.
