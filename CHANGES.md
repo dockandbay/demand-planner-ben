@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.336 - Fix portal completion-date binding/reset/badge
+
+The completion-date handler saved the submission but never updated local state, so: (a) it didn't
+sync to the PO grid row, (b) changing production status re-rendered from stale data and blanked it, and
+(c) the "Must enter completion date" badge stayed. Now on save it updates `_ppData.subsByPo`, syncs every
+`.pp-cd-grid` input for the PO, re-renders the open row, and refreshes the badges — so grid + TIMELINE
+stay in sync, the date survives a status change, and the red badge clears once a date is entered.
+
 ## v25.335 - Portal TIMELINE completion date + revised production statuses
 
 - **Completion date on the TIMELINE tab** (under Production status): a date field bound to the PO's

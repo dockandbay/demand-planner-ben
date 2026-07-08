@@ -1317,8 +1317,18 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
               scope.querySelectorAll('.pp-cd-grid').forEach(function(inp){ var t;
                 inp.onclick=function(){ try{ if(inp.showPicker)inp.showPicker(); }catch(e){} };
                 inp.onchange=function(){ var v=inp.value; if(!/^\d{4}-\d{2}-\d{2}$/.test(v))return;
-                  clearTimeout(t); inp.style.borderColor='#f59e0b';
-                  t=setTimeout(function(){ postJSON(EP.submit,{po:inp.dataset.po,supplier_id:sid,submitted_by:by,completion_date:v},function(){ inp.style.borderColor='#16a34a';  }); },900); }; });
+                  clearTimeout(t); inp.style.borderColor='#f59e0b'; var po=inp.dataset.po;
+                  t=setTimeout(function(){ postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,completion_date:v},function(){
+                    // reflect locally so the grid row, TIMELINE field, badges & 'must enter' all update without a reload
+                    // (and survive a production-status change, which re-renders the detail from _ppData)
+                    (_ppData.subsByPo=_ppData.subsByPo||{}); var arr=(_ppData.subsByPo[po]=_ppData.subsByPo[po]||[]);
+                    arr.forEach(function(s){ if(s.kind==='completion_date'&&s.status==='pending')s.status='superseded'; });
+                    arr.push({kind:'completion_date',value:v,status:'pending',submitted_at:new Date().toISOString().slice(0,10)});
+                    var pe=(window.CSS&&CSS.escape)?CSS.escape(po):po;
+                    rootEl.querySelectorAll('.pp-cd-grid[data-po="'+pe+'"]').forEach(function(o){ o.value=v; o.style.borderColor='#16a34a'; o.style.background='#eff6ff'; });
+                    var ex=body.querySelector('tr[id^="pp-"][data-po="'+pe+'"]'); if(ex && ex.dataset.built && ex.style.display!=='none') rerenderRow(ex,po);
+                    setManageBadge(po); setPosBadge(); setShipBadge();
+                  }); },900); }; });
               // order-plan amended qty + cost prices: live-recompute line + grand totals, save on change (no reload)
               scope.querySelectorAll('.pp-cost,.pp-qty').forEach(function(inp){
                 function recalc(box){ if(!box)return; var tot=0,tq=0;
