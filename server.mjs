@@ -73,7 +73,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.330';
+const APP_VERSION = 'v25.331';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -6097,6 +6097,15 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
     // (so they see who consolidates their goods / whose POs share their shipment). Same builder as the admin tab.
     const nameSet = new Set(names.map(n => String(n).toLowerCase()));
     const shipmentPlan = (await buildShipmentPlan()).filter(s => (s.suppliers || []).some(n => nameSet.has(String(n).toLowerCase())));
+    // Attach unread Dock&Bay (internal) shipment-note counts per real shipment — powers the Shipment Plan
+    // notification badges. (read_at on internal notes = "supplier has read it"; admin only uses it on supplier notes.)
+    const shipRefs = shipmentPlan.filter(s => s.shipment_ref).map(s => s.shipment_ref);
+    if (shipRefs.length) {
+      const un = await q(`SELECT shipment_ref, count(*)::int unread FROM planner.shipment_notes
+        WHERE shipment_ref = ANY($1) AND author_kind='internal' AND read_at IS NULL GROUP BY 1`, [shipRefs]);
+      const um = {}; un.forEach(r => { um[r.shipment_ref] = r.unread; });
+      shipmentPlan.forEach(s => { if (s.shipment_ref) s.unread_dnb = um[s.shipment_ref] || 0; });
+    }
     res.json({ pos, lb, sdep: deps, sid: ids[0] || null, supplierName: names.join(', '),
       notesByPo, subsByPo, costsByPo, supSkus, xdByPo, addByPo, samples, payments, shipmentPlan });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -6172,6 +6181,41 @@ app.post('/api/portal/sample-create', portalAuth, async (req, res) => {   // sup
     for (const l of (Array.isArray(b.lines)?b.lines:[])) { if(!l||!l.sku) continue; await client.query(`INSERT INTO planner.sample_request_lines (sample_id, sku, qty) VALUES ($1,$2,$3)`, [id, String(l.sku).trim(), Math.round(Number(l.qty)||0)]); }
     await client.query('COMMIT'); res.json({ ok: true, id, ref });
   } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); } finally { client.release(); } });
+
+// Supplier marks a shipment's Dock&Bay (internal) timeline notes as read → clears the shipment's notification.
+app.post('/api/portal/shipment-notes-read', portalAuth, async (req, res) => {
+  const ref = ((req.body && req.body.shipment_ref) || '').trim();
+  if (!ref) return res.status(400).json({ error: 'shipment_ref required' });
+  try {
+    const own = (await pool.query(`SELECT 1 FROM planner.purchase_orders WHERE shipment_ref=$1 AND supplier_name = ANY($2) LIMIT 1`, [ref, req.portal.suppliers])).rows[0];
+    if (!own) return res.status(403).json({ error: 'not your shipment' });
+    await pool.query(`UPDATE planner.shipment_notes SET read_at=now() WHERE shipment_ref=$1 AND author_kind='internal' AND read_at IS NULL`, [ref]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// The supplier must be on the shipment (has a PO with that shipment_ref) to see/add its timeline notes.
+async function portalOwnsShipmentRef(req, ref) {
+  if (!ref) return false;
+  return !!(await pool.query(`SELECT 1 FROM planner.purchase_orders WHERE shipment_ref=$1 AND supplier_name = ANY($2) LIMIT 1`, [ref, req.portal.suppliers])).rows[0];
+}
+app.get('/api/portal/shipment-notes/:ref', portalAuth, async (req, res) => {   // supplier: a shipment's timeline notes
+  try {
+    if (!await portalOwnsShipmentRef(req, req.params.ref)) return res.status(403).json({ error: 'not your shipment' });
+    res.json(await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
+      to_char(created_at,'YYYY-MM-DD HH24:MI') created_at FROM planner.shipment_notes WHERE shipment_ref=$1 ORDER BY created_at`, [req.params.ref]).then(r => r.rows));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/portal/shipment-note', portalAuth, async (req, res) => {   // supplier posts a shipment timeline note
+  const b = req.body || {}; const ref = (b.shipment_ref || '').trim();
+  if (!ref || !b.body) return res.status(400).json({ error: 'shipment_ref and body required' });
+  try {
+    if (!await portalOwnsShipmentRef(req, ref)) return res.status(403).json({ error: 'not your shipment' });
+    const r = await pool.query(`INSERT INTO planner.shipment_notes (shipment_ref, author_kind, author_email, body)
+      VALUES ($1,'supplier',$2,$3) RETURNING id`, [ref, req.portal.email || null, String(b.body)]);
+    res.json({ id: r.rows[0].id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 app.get('/api/portal/shipment-charges/:ref', portalAuth, async (req, res) => {   // supplier: charges on a shipment they're on
   const names = req.portal.suppliers||[];

@@ -889,6 +889,8 @@
             var posByPo={}; (_ppData.pos||[]).forEach(function(p){ posByPo[p.po]=p; });
             // a PO reference that links back to the Purchase Orders tab with that PO opened
             function poLink(po){ return '<button class="lnk-btn pp-go-po" data-po="'+esc(po)+'" title="open '+esc(po)+' in Purchase Orders" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;background:none;border:none;padding:0;font:inherit">'+esc(po)+'</button>'; }
+            // per-shipment action counter shown BEFORE the PO number in the card header
+            function spBadge(s){ var n=shipActCount(s); return n?'<span class="sp-shipbadge" data-ref="'+esc(s.shipment_ref||'')+'" title="needs your attention">'+ppBadgeHtml(n)+'</span> ':''; }
             function dtcBlock(po){ var p=posByPo[po]; if(!p||!ppIsDtc(p))return '';
               var cd=(p.crossdock_skus||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
               return '<div style="margin-top:8px;padding:9px 12px;background:#ecfeff;border:1px solid #a5f3fc;border-radius:7px">'
@@ -932,7 +934,7 @@
                 return '<div class="sp-card" style="border:1px solid #ddd6fe;border-radius:8px;margin-bottom:10px;background:#fff">'
                   +'<div class="sp-head" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:10px 12px;cursor:pointer">'
                   +'<span class="sp-toggle" style="font-size:12px;color:#6d28d9">▸</span>'
-                  +'<div style="font-weight:700;font-size:15px">'+poLink(po)+'</div>'
+                  +spBadge(s)+'<div style="font-weight:700;font-size:15px">'+poLink(po)+'</div>'
                   +'<span style="background:#ede9fe;color:#6d28d9;border-radius:10px;font-size:10px;font-weight:700;padding:2px 8px">📦 FOB — no shipment</span>'
                   +'<span class="mut tiny">'+esc(s.status||'')+(s.prod_end?' · prod end '+esc(fd(s.prod_end)):'')+'</span>'
                   +'</div>'
@@ -954,10 +956,10 @@
               return '<div class="sp-card" style="border:1px solid '+(s.escalated?'#fca5a5':'#e0e0e0')+';border-radius:8px;margin-bottom:10px;background:'+(s.escalated?'#fef2f2':'#fff')+'">'
                 +'<div class="sp-head" style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:10px 12px;cursor:pointer">'
                 +'<span class="sp-toggle" style="font-size:12px;color:#475569">▸</span>'
-                +'<div style="font-weight:700;font-size:15px">'+poLink(s.master_po)+'</div>'
+                +spBadge(s)+'<div style="font-weight:700;font-size:15px">'+poLink(s.master_po)+'</div>'
                 +(/^fob$/i.test(s.mode||'')?'<span style="background:#ede9fe;color:#6d28d9;border-radius:10px;font-size:10px;font-weight:700;padding:2px 8px">📦 FOB</span>':'')
                 +'<span class="mut tiny">'+esc((s.mode||'—')+(s.carrier?' · '+s.carrier:''))+(s.departure?' · dep '+esc(fd(s.departure)):'')+(s.arrival?' · arr '+esc(fd(s.arrival)):'')+'</span>'
-                +'<button class="save-btn pp-esc" data-ref="'+esc(s.shipment_ref)+'" data-on="'+(s.escalated?'1':'0')+'" style="margin-left:auto'+(s.escalated?';background:#dc2626;color:#fff;border-color:#dc2626':';color:#dc2626')+'">'+(s.escalated?'⚑ ESCALATED':'⚑ Escalate')+'</button>'
+                +(EP.shipmentEscalate?('<button class="save-btn pp-esc" data-ref="'+esc(s.shipment_ref)+'" data-on="'+(s.escalated?'1':'0')+'" style="margin-left:auto'+(s.escalated?';background:#dc2626;color:#fff;border-color:#dc2626':';color:#dc2626')+'">'+(s.escalated?'⚑ ESCALATED':'⚑ Escalate')+'</button>'):'')
                 +'</div>'
                 +'<div class="sp-body" style="display:none;padding:0 12px 12px">'+datesStrip+'<div style="margin-top:8px">'+members+'</div>'
                 +(s.members||[]).map(function(m){return dtcBlock(m.po);}).join('')
@@ -968,6 +970,9 @@
                 +'<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:10px"><textarea class="fci sp-note-in" rows="3" placeholder="Add a note to the timeline… (multiple lines OK)" style="flex:1;max-width:560px;min-height:58px;text-align:left;resize:vertical;line-height:1.4"></textarea><button class="save-btn sp-note-post" style="flex:0 0 auto">Post</button></div>'
                 +'<div class="tiny" style="font-weight:600;margin-bottom:3px">Timeline</div>'
                 +((notes&&notes.length)?notes.map(function(n){return '<div class="tiny" style="margin:2px 0"><span class="mut">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span> — '+esc(n.body)+'</div>';}).join(''):'<div class="mut tiny">No timeline entries yet.</div>');
+              // opening the timeline marks Dock&Bay notes read → clears this shipment's notification
+              var ent=(_ppData.shipmentPlan||[]).filter(function(x){return x.shipment_ref===ref;})[0];
+              if(EP.shipmentNotesRead&&ent&&(ent.unread_dnb||0)>0){ postJSON(EP.shipmentNotesRead,{shipment_ref:ref},function(){ ent.unread_dnb=0; setShipBadge(); var bd=rootEl.querySelector('.sp-shipbadge[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(bd)bd.innerHTML=''; }); }
               box.querySelector('.sp-note-post').onclick=function(){ var inp=box.querySelector('.sp-note-in'); var v=(inp.value||'').trim(); if(!v)return;
                 postJSON(EP.shipmentNote,{shipment_ref:ref,author_kind:'supplier',author_email:STATE.by,body:v},function(){ ppShipTimeline(ref); }); }; }).catch(function(){}); }
           function sampChip(st){ var m={'Awaiting supplier':['#fef3c7','#92710a'],'Change requested':['#fee2e2','#b91c1c'],'In production':['#dbeafe','#1d4ed8'],'Charge to review':['#fee2e2','#b91c1c'],'Shipped':['#dcfce7','#166534'],'Complete':['#e2e8f0','#475569'],'Cancelled':['#f1f5f9','#94a3b8']}; var c=m[st]||['#e2e8f0','#475569']; return '<span style="background:'+c[0]+';color:'+c[1]+';border-radius:4px;font-size:10px;font-weight:700;padding:1px 6px">'+esc(st||'')+'</span>'; }
@@ -1009,8 +1014,8 @@
               +'</div>'; }
           function sampNeedsAccept(s){ return (!s.accepted||s.change_requested)&&s.status!=='cancelled'&&s.status!=='complete'; }
           function sampInFilt(s,f){ if(f==='all')return true; if(f==='closed')return !s.is_open; if(f==='unaccepted')return sampNeedsAccept(s); return s.is_open; }
-          function sampActions(s){ return sampNeedsAccept(s)?1:0; }   // supplier action: needs (re-)accepting
-          function setSampBadge(){ var n=((_ppData&&_ppData.samples)||[]).reduce(function(a,s){return a+sampActions(s)+(s.unread_dnb||0);},0);   // supplier actions: needs-(re)accept + unread D&B notes
+          function sampActions(s){ return (sampNeedsAccept(s)?1:0)+((s.unread_dnb)||0); }   // supplier action: needs (re-)accept OR unread D&B message
+          function setSampBadge(){ var n=((_ppData&&_ppData.samples)||[]).reduce(function(a,s){return a+sampActions(s);},0);   // supplier actions: needs-(re)accept + unread D&B notes
             var sbg=document.getElementById('pp-samp-badge'); if(sbg)sbg.innerHTML=n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
           function ppBadgeHtml(n){ return n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
           // Purchase Orders top-menu badge = open supplier ACTIONS across all POs. Deliberately EXCLUDES the
@@ -1026,6 +1031,16 @@
               return a+(invoiceDue(p,sb)?1:0)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0);
             },0);
             var b=document.getElementById('pp-pos-badge'); if(b)b.innerHTML=ppBadgeHtml(n); }
+          // Shipment action count = FOB production-end pending (not submitted / rejected) + unread Dock&Bay notes.
+          function shipActCount(s){ if(!s)return 0;
+            if(s.is_fob){ var subs=(_ppData.subsByPo&&_ppData.subsByPo[s.master_po])||[];
+              var cdq=subs.filter(function(x){return x.kind==='completion_date';}); var cd=cdq.length?cdq[cdq.length-1]:null;
+              var pend=(!cd||cd.status==='dismissed')?1:0;
+              var nts=(_ppData.notesByPo&&_ppData.notesByPo[s.master_po])||[];
+              return pend+nts.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length; }
+            return Number(s.unread_dnb)||0; }
+          function setShipBadge(){ var n=((_ppData&&_ppData.shipmentPlan)||[]).reduce(function(a,s){return a+shipActCount(s);},0);
+            var b=document.getElementById('pp-ship-badge'); if(b)b.innerHTML=ppBadgeHtml(n); }
           function ppSampleRow(s,i){
             var act=sampActions(s)?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;margin-left:4px" title="needs your attention">'+sampActions(s)+'</span>':'';
             var nu=s.unread_dnb?'<span style="background:#f59e0b;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;margin-left:3px" title="new note from Dock & Bay">'+s.unread_dnb+'</span>':'';
@@ -1088,7 +1103,7 @@
               if(!open && !ex.dataset.loaded){ ex.dataset.loaded='1'; var det=ex.querySelector('.ps-det'); var s=(_ppData.samples||[]).filter(function(x){return String(x.id)===String(b.dataset.id);})[0]; if(s){ det.innerHTML=ppSampleCard(s); wireSampleCard(det, s.id); } } }; }); }
           function renderPP(){ if(!_ppData)return; var body=document.getElementById('pp-body');
             tabsEl.querySelectorAll('.rtab').forEach(function(t){t.classList.toggle('active',t.dataset.pt===PORTAL_TAB);});
-            setSampBadge(); setPosBadge();
+            setSampBadge(); setPosBadge(); setShipBadge();
             if(PORTAL_TAB==='samples'){ body.innerHTML=ppSamples(_ppData.samples||[]); wireSamples(); return; }
             if(PORTAL_TAB==='shipmentplan'){
               var today=new Date().toISOString().slice(0,10);

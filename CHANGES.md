@@ -3,6 +3,22 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.331 - Portal SHIPMENT PLAN notifications + samples unread-as-action
+
+- **Shipment Plan notifications:** top-menu badge next to "Shipment Plan" + a per-shipment counter
+  before the PO number on each card. Counts = FOB production-end pending (not submitted / rejected)
+  + unread Dock&Bay timeline notes. Opening a shipment's timeline marks its D&B notes read → clears it.
+- Wired the previously-missing **portal shipment-note endpoints** (they were never reachable while the
+  Shipment Plan tab was empty): GET `/api/portal/shipment-notes/:ref`, POST `/api/portal/shipment-note`,
+  POST `/api/portal/shipment-notes-read` (all ownership-checked). Bootstrap now attaches `unread_dnb`
+  per real shipment. Escalate button hidden on the real portal (D&B-only action).
+- **Samples:** an unread Dock&Bay message now counts as a per-sample action (not just the top badge) —
+  so a sample like SR-6 shows a notification on its row too. `sampActions` = needs-accept + unread.
+
+Note: the empty Shipment Plan tab on LIVE for Lixin is the **deploy gap** — the shipmentPlan-in-bootstrap
+work (v25.327+) isn't on live yet. Data is fine (Lixin: 37 POs / 38 shipments, name matches). Deploy the
+branch and it populates.
+
 ## v25.330 - Portal PURCHASE ORDERS top-menu action badge
 
 Added an action-count badge next to "Purchase Orders" in the portal top menu (mirrors SAMPLES).
