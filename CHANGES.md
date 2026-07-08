@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.330 - Portal PURCHASE ORDERS top-menu action badge
+
+Added an action-count badge next to "Purchase Orders" in the portal top menu (mirrors SAMPLES).
+Counts genuine supplier actions across all POs: invoice due, needs-confirm, unread D&B notes,
+crossdock qty missing (when shipping), production exception, DTC pending. Deliberately excludes the
+per-PO "no shipment yet" term (a passive state — would show ~1 per in-production PO). Shipment Plan
+badge placeholder added; its action definition pending Ben.
+
 ## v25.329 - Portal SAMPLES top-menu badge shows action count
 
 The SAMPLES tab badge (top menu) now counts supplier actions — samples needing (re-)accept PLUS

@@ -470,7 +470,7 @@
     var PORTAL_SAMP_F='open', PORTAL_SAMP_Q='';   // Samples grid filter + search (default: open)
     var _invFiles={};     // base64 of the last parsed invoice file, per PO (for the Apply step)
     var rootEl=opts.root; if(!rootEl.closest('#supply-root')){rootEl.id='supply-root';} rootEl.style.display='block';
-    rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders</span><span class="rtab" data-pt="shipmentplan">Shipment Plan</span><span class="rtab" data-pt="barcodes">Barcodes</span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="productions">Productions</span><span class="rtab" data-pt="samples">Samples <span id="pp-samp-badge"></span></span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
+    rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders <span id="pp-pos-badge"></span></span><span class="rtab" data-pt="shipmentplan">Shipment Plan <span id="pp-ship-badge"></span></span><span class="rtab" data-pt="barcodes">Barcodes</span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="productions">Productions</span><span class="rtab" data-pt="samples">Samples <span id="pp-samp-badge"></span></span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
     var tabsEl=document.getElementById('pp-tabs'), body=document.getElementById('pp-body');
     function postJSON(ep,b2,cb){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b2)}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} cb&&cb(j); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); }); }
     // Should the INVOICE action fire for this PO? Rules (Ben): never on FUTURE POs; never once an invoice value is
@@ -1012,6 +1012,20 @@
           function sampActions(s){ return sampNeedsAccept(s)?1:0; }   // supplier action: needs (re-)accepting
           function setSampBadge(){ var n=((_ppData&&_ppData.samples)||[]).reduce(function(a,s){return a+sampActions(s)+(s.unread_dnb||0);},0);   // supplier actions: needs-(re)accept + unread D&B notes
             var sbg=document.getElementById('pp-samp-badge'); if(sbg)sbg.innerHTML=n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
+          function ppBadgeHtml(n){ return n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
+          // Purchase Orders top-menu badge = open supplier ACTIONS across all POs. Deliberately EXCLUDES the
+          // per-PO "no shipment yet" term (a passive state, not an action — it would show ~1 per in-production PO).
+          function setPosBadge(){ var today=new Date().toISOString().slice(0,10);
+            var n=((_ppData&&_ppData.pos)||[]).reduce(function(a,p){ var po=p.po;
+              var sb=(_ppData.subsByPo&&_ppData.subsByPo[po])||[], nts=(_ppData.notesByPo&&_ppData.notesByPo[po])||[];
+              var unreadInt=nts.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
+              var cdS=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean), xdm=(_ppData.xdByPo&&_ppData.xdByPo[po])||{};
+              var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
+              var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end):'';
+              var dtcPend=ppIsDtc(p)&&!p.dtc_accepted_at;
+              return a+(invoiceDue(p,sb)?1:0)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0);
+            },0);
+            var b=document.getElementById('pp-pos-badge'); if(b)b.innerHTML=ppBadgeHtml(n); }
           function ppSampleRow(s,i){
             var act=sampActions(s)?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;margin-left:4px" title="needs your attention">'+sampActions(s)+'</span>':'';
             var nu=s.unread_dnb?'<span style="background:#f59e0b;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;margin-left:3px" title="new note from Dock & Bay">'+s.unread_dnb+'</span>':'';
@@ -1074,7 +1088,7 @@
               if(!open && !ex.dataset.loaded){ ex.dataset.loaded='1'; var det=ex.querySelector('.ps-det'); var s=(_ppData.samples||[]).filter(function(x){return String(x.id)===String(b.dataset.id);})[0]; if(s){ det.innerHTML=ppSampleCard(s); wireSampleCard(det, s.id); } } }; }); }
           function renderPP(){ if(!_ppData)return; var body=document.getElementById('pp-body');
             tabsEl.querySelectorAll('.rtab').forEach(function(t){t.classList.toggle('active',t.dataset.pt===PORTAL_TAB);});
-            setSampBadge();
+            setSampBadge(); setPosBadge();
             if(PORTAL_TAB==='samples'){ body.innerHTML=ppSamples(_ppData.samples||[]); wireSamples(); return; }
             if(PORTAL_TAB==='shipmentplan'){
               var today=new Date().toISOString().slice(0,10);
