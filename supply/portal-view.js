@@ -955,6 +955,7 @@
                 +'<div class="sp-head" style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:10px 12px;cursor:pointer">'
                 +'<span class="sp-toggle" style="font-size:12px;color:#475569">▸</span>'
                 +'<div style="font-weight:700;font-size:15px">'+poLink(s.master_po)+'</div>'
+                +(/^fob$/i.test(s.mode||'')?'<span style="background:#ede9fe;color:#6d28d9;border-radius:10px;font-size:10px;font-weight:700;padding:2px 8px">📦 FOB</span>':'')
                 +'<span class="mut tiny">'+esc((s.mode||'—')+(s.carrier?' · '+s.carrier:''))+(s.departure?' · dep '+esc(fd(s.departure)):'')+(s.arrival?' · arr '+esc(fd(s.arrival)):'')+'</span>'
                 +'<button class="save-btn pp-esc" data-ref="'+esc(s.shipment_ref)+'" data-on="'+(s.escalated?'1':'0')+'" style="margin-left:auto'+(s.escalated?';background:#dc2626;color:#fff;border-color:#dc2626':';color:#dc2626')+'">'+(s.escalated?'⚑ ESCALATED':'⚑ Escalate')+'</button>'
                 +'</div>'
