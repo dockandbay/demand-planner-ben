@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.332 - Portal deposits fix + 2dp money + bigger samples text
+
+- **Deposits Drawn down / Remaining were wrong** — the portal read the stored `deposits` columns;
+  the main plan *computes* them. Portal now computes identically (used = Σ PO start-deposit assigned per
+  ref; remaining = pooled amount − used), so they match SUPPLY ▸ Purchase Orders ▸ Deposits. Verified
+  against Lixin.
+- Deposits now **sorted newest-first** (date_paid desc); summary totals deduped by reference.
+- **Payments & deposits now show 2 decimal places** (money format), not rounded to integers.
+- **Samples card text enlarged** — card base 13px, labels 11px, `.tiny`/`.mut` scaled up (Ship to,
+  SKUs & quantities, Purpose, Completion required, etc.).
+
 ## v25.331 - Portal SHIPMENT PLAN notifications + samples unread-as-action
 
 - **Shipment Plan notifications:** top-menu badge next to "Shipment Plan" + a per-shipment counter

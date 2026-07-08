@@ -73,7 +73,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.331';
+const APP_VERSION = 'v25.332';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -6041,8 +6041,19 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
     const [lines, deps, lc, xd, ac, notes, subs, supSkus] = await Promise.all([
       grab(`SELECT l.po, l.sku, l.qty, l.cost_price, l.carton_qty
             FROM planner.purchase_order_lines l WHERE l.po = ANY($1) ORDER BY l.po, l.sku`),
-      names.length ? q(`SELECT reference, amount, is_deposit, to_char(date_paid,'YYYY-MM-DD') date_paid,
-            deposit_used, deposit_remaining FROM planner.deposits WHERE supplier_name = ANY($1) ORDER BY reference`, [names]).catch(() => []) : Promise.resolve([]),
+      names.length ? q(`
+            WITH draw AS (SELECT po.deposit_ref, sum(coalesce(po.pay_start_deposit_assigned,0)) used
+              FROM planner.purchase_orders po WHERE po.deposit_ref IS NOT NULL GROUP BY po.deposit_ref),
+            pool AS (SELECT reference, sum(coalesce(amount,0)) pool_amount
+              FROM planner.deposits WHERE is_deposit AND reference IS NOT NULL GROUP BY reference)
+            SELECT d.reference, d.amount, d.is_deposit, to_char(d.date_paid,'YYYY-MM-DD') date_paid,
+              CASE WHEN d.is_deposit THEN coalesce(dr.used,0) END deposit_used,
+              CASE WHEN d.is_deposit THEN coalesce(p.pool_amount, coalesce(d.amount,0))-coalesce(dr.used,0) END deposit_remaining
+            FROM planner.deposits d
+            LEFT JOIN draw dr ON dr.deposit_ref=d.reference
+            LEFT JOIN pool p ON p.reference=d.reference
+            WHERE d.supplier_name = ANY($1)
+            ORDER BY d.date_paid DESC NULLS LAST, d.reference DESC`, [names]).catch(() => []) : Promise.resolve([]),
       grab(`SELECT po, sku, actual_cost, amended_qty, is_added, final_cost, confirmed_at FROM planner.portal_line_costs WHERE po = ANY($1)`),
       grab(`SELECT po, sku, qty FROM planner.crossdock_shipments WHERE po = ANY($1)`),
       grab(`SELECT id, po, coalesce(description,'') description, qty, price FROM planner.portal_additional_costs WHERE po = ANY($1) ORDER BY id`),

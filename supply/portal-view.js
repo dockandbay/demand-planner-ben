@@ -391,6 +391,7 @@
 #supply-root .dtc-wrap table td:first-child,#supply-root .dtc-wrap table th:first-child{white-space:normal!important;min-width:0!important;padding-right:14px}
 #supply-root .payin.pdis,#supply-root .payin:disabled{background:#f1f1f1;color:#bbb;cursor:not-allowed;border-color:#eee}
 #supply-root .mut{color:#888}#supply-root .tiny{font-size:9.5px}
+#supply-root .samp-card{font-size:13px}#supply-root .samp-card .tiny{font-size:12.5px}#supply-root .samp-card .mut.tiny{font-size:12px}#supply-root .samp-card .mut{font-size:inherit}
 #supply-root .todo{color:#16a34a;font-weight:700}  /* "to proceed / needs input" prompts — bright green */
 #supply-root .lnk-btn{background:none;border:none;color:#1d4ed8;cursor:pointer;font-size:11px;font-family:inherit;text-decoration:underline;padding:0}#supply-root .lnk-btn:hover{color:#dc2626}
 #supply-root .ship-pick{background:none;border:none;color:#1d4ed8;cursor:pointer;font:inherit;font-size:11px;padding:0;white-space:nowrap}#supply-root .ship-pick:hover{text-decoration:underline}
@@ -804,10 +805,10 @@
             +'<td style="text-align:right">'+(p.balance_owing!=null?'$'+units(p.balance_owing):'<span class="mut">—</span>')+'</td>'
             +'<td class="l">'+dcell(p.balance_due)+'</td><td class="l">'+(p.deposit_ref?esc(p.deposit_ref):'<span class="mut">—</span>')+'</td></tr>'+det; }).join('')
         +'</tbody></table></div>'; }
-    function ppDeposits(deps){ var paid=0,used=0,rem=0; deps.forEach(function(d){ if(d.is_deposit){ paid+=Number(d.amount)||0; used+=Number(d.deposit_used)||0; rem+=Number(d.deposit_remaining)||0; } });
-      var cards='<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">'+ppCard('Total deposits','$'+units(paid))+ppCard('Drawn down','$'+units(used))+ppCard('Remaining','$'+units(rem))+'</div>';
+    function ppDeposits(deps){ var paid=0,used=0,rem=0,seenRef={}; deps.forEach(function(d,di){ if(!d.is_deposit)return; paid+=Number(d.amount)||0; var k=d.reference||('__'+di); if(seenRef[k])return; seenRef[k]=1; used+=Number(d.deposit_used)||0; rem+=Number(d.deposit_remaining)||0; });
+      var cards='<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">'+ppCard('Total deposits','$'+money(paid))+ppCard('Drawn down','$'+money(used))+ppCard('Remaining','$'+money(rem))+'</div>';
       var rows=deps.filter(function(d){return d.is_deposit;}).map(function(d){
-        return '<tr><td class="l">'+esc(d.reference||'—')+'</td><td style="text-align:right">$'+units(d.amount)+'</td><td class="l">'+(d.date_paid?esc(fd(d.date_paid)):'<span class="mut">unpaid</span>')+'</td><td style="text-align:right">$'+units(d.deposit_used||0)+'</td><td style="text-align:right">$'+units(d.deposit_remaining||0)+'</td></tr>'; }).join('');
+        return '<tr><td class="l">'+esc(d.reference||'—')+'</td><td style="text-align:right">$'+money(d.amount)+'</td><td class="l">'+(d.date_paid?esc(fd(d.date_paid)):'<span class="mut">unpaid</span>')+'</td><td style="text-align:right">$'+money(d.deposit_used||0)+'</td><td style="text-align:right">$'+money(d.deposit_remaining||0)+'</td></tr>'; }).join('');
       return cards+'<div class="tw" style="max-width:720px"><table style="width:auto;min-width:0"><thead><tr><th class="l">Deposit reference</th><th style="text-align:right">Amount</th><th class="l">Paid</th><th style="text-align:right">Drawn down</th><th style="text-align:right">Remaining</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5" class="l mut">No deposits for this supplier.</td></tr>')+'</tbody></table></div>'; }
     // Master PAYMENTS tab: payments MADE to this supplier (the ledger), grouped by payment run and expandable to
     // the per-line breakdown (PO reference, type, amount, deposit ref).
@@ -816,15 +817,15 @@
       function poRef(r){ return r.reference||r.po_completion||r.po_balance_1||r.po_balance_2||r.po_balance_3||''; }
       var groups={}, order=[]; rows.forEach(function(r){ var k=r.payment_run_ref||r.payment_date||'—'; if(!groups[k]){groups[k]=[];order.push(k);} groups[k].push(r); });
       var total=rows.reduce(function(a,r){return a+(Number(r.amount)||0);},0);
-      var head='<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">'+ppCard('Total paid','$'+units(total))+ppCard('Payments',String(rows.length))+'</div>';
+      var head='<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">'+ppCard('Total paid','$'+money(total))+ppCard('Payments',String(rows.length))+'</div>';
       var cards=order.map(function(k){ var items=groups[k]; var gtot=items.reduce(function(a,r){return a+(Number(r.amount)||0);},0); var dt=items[0].payment_date;
-        var body=items.map(function(r){ return '<tr><td class="l">'+esc(poRef(r)||'—')+'</td><td class="l">'+(r.type?esc(r.type):'<span class="mut">—</span>')+'</td><td style="text-align:right">$'+units(r.amount||0)+'</td><td class="l">'+(r.deposit_ref?esc(r.deposit_ref):'<span class="mut">—</span>')+'</td></tr>'; }).join('');
+        var body=items.map(function(r){ return '<tr><td class="l">'+esc(poRef(r)||'—')+'</td><td class="l">'+(r.type?esc(r.type):'<span class="mut">—</span>')+'</td><td style="text-align:right">$'+money(r.amount||0)+'</td><td class="l">'+(r.deposit_ref?esc(r.deposit_ref):'<span class="mut">—</span>')+'</td></tr>'; }).join('');
         return '<div class="sp-card" style="border:1px solid #e0e0e0;border-radius:8px;margin-bottom:8px;background:#fff">'
           +'<div class="pay-head" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:9px 12px;cursor:pointer">'
             +'<span class="pay-toggle" style="font-size:12px;color:#475569">▸</span>'
             +'<div style="font-weight:700">'+esc(dt?fd(dt):k)+'</div>'
             +'<span class="mut tiny">'+items.length+' payment'+(items.length>1?'s':'')+'</span>'
-            +'<div style="margin-left:auto;font-weight:700">$'+units(gtot)+'</div></div>'
+            +'<div style="margin-left:auto;font-weight:700">$'+money(gtot)+'</div></div>'
           +'<div class="pay-body" style="display:none;padding:0 12px 12px"><table style="font-size:12px;border-collapse:collapse;text-align:left;width:100%;max-width:720px;table-layout:fixed">'
             +'<colgroup><col style="width:42%"><col style="width:20%"><col style="width:20%"><col style="width:18%"></colgroup>'
             +'<thead><tr><th class="l">PO reference</th><th class="l">Type</th><th style="text-align:right">Amount</th><th class="l">Deposit ref</th></tr></thead><tbody>'+body+'</tbody></table></div></div>'; }).join('');
@@ -985,7 +986,7 @@
                 el.innerHTML=cs.map(function(c){ var t=(Number(c.freight_cost)||0)+(Number(c.product_cost)||0); return '<div class="tiny" style="margin:2px 0">'+chgChip(c.status)+' &nbsp;'+money(t)+(c.description?' · '+esc(c.description):'')+'</div>'; }).join('');
               }).catch(function(){ el.innerHTML='<span class="mut tiny">—</span>'; }); }); }
           function ppSampleCard(s){
-            function lbl(t){ return '<div style="font-size:9.5px;letter-spacing:.04em;text-transform:uppercase;color:#94a3b8;font-weight:700;margin-bottom:3px">'+t+'</div>'; }
+            function lbl(t){ return '<div style="font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:#94a3b8;font-weight:700;margin-bottom:3px">'+t+'</div>'; }
             var skuList=(s.lines||[]).map(function(l){return '<div style="padding:1px 0;text-align:left"><b>'+units(l.qty)+'</b> × '+esc(l.sku)+'</div>';}).join('')||'<div class="mut tiny">no SKUs</div>';
             var addr=[s.address_line1,s.address_line2,[s.city,s.region,s.postcode].filter(Boolean).join(' '),s.country].filter(Boolean);
             var charges=(s.charges||[]).map(function(c){ var t=(Number(c.freight_cost)||0)+(Number(c.product_cost)||0); return '<div class="tiny" style="margin:2px 0">'+chgChip(c.status)+' &nbsp;freight '+money(c.freight_cost)+' + product '+money(c.product_cost)+' = <b>'+money(t)+'</b>'+(c.description?' · '+esc(c.description):'')+'</div>'; }).join('')||'<div class="mut tiny">none yet</div>';
