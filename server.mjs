@@ -18,6 +18,13 @@ if (process.env.VERCEL || process.env.USE_TXN_POOLER) CONN = CONN.replace(':5432
 // Keyed off the real prod DB ref so it's correct wherever it runs — live never shows it, any non-prod DB does.
 const IS_SANDBOX = !String(CONN).includes('oolwklahstnvocaugryg');
 const SANDBOX_BANNER = '<div id="sbx-banner" style="position:fixed;top:0;left:0;right:0;height:20px;line-height:20px;background:#f97316;color:#fff;font:700 11px/20px system-ui,-apple-system,sans-serif;text-align:center;letter-spacing:.14em;z-index:100001">SANDBOX ONLY — test data, not live</div><style>body{padding-top:20px}#hz-topbar{top:20px!important}</style>';
+// Sandbox favicon: the normal app logo (favicon.png) wrapped in an orange border, so sandbox tabs are visually
+// distinct from live. Served at /favicon-sbx.svg and swapped into the page only when IS_SANDBOX.
+const FAVICON_SBX_SVG = (() => {
+  try { const b = readFileSync(new URL('./favicon.png', import.meta.url)).toString('base64');
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="3.5" y="3.5" width="93" height="93" rx="18" fill="#fff7ed" stroke="#f97316" stroke-width="9"/><image href="data:image/png;base64,' + b + '" x="17" y="17" width="66" height="66" preserveAspectRatio="xMidYMid meet"/></svg>'; }
+  catch (e) { return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="4" y="4" width="92" height="92" rx="18" fill="#f97316"/><text x="50" y="66" font-size="46" font-weight="700" text-anchor="middle" fill="#fff" font-family="system-ui">S</text></svg>'; }
+})();
 const pool = new pg.Pool({
   connectionString: CONN,
   ssl: { rejectUnauthorized: false },
@@ -66,7 +73,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.321';
+const APP_VERSION = 'v25.322';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -413,7 +420,10 @@ app.get('/', async (_req, res) => {
     const FBADIMS_JS = '<script>window.FBA_DIMS=' + JSON.stringify(FBADIMS) + ';</script>';
     const injectTail = FBADIMS_JS + FIT + (DEV ? loadInject() : SUPPLY_INJECT).split('__APP_VERSION__').join(APP_VERSION) + '</body>';
     html = html.replace('</body>', () => injectTail);
-    if (IS_SANDBOX) html = html.replace(/<body[^>]*>/, m => m + SANDBOX_BANNER);   // orange "SANDBOX ONLY" strip — never on prod
+    if (IS_SANDBOX) {
+      html = html.replace(/<body[^>]*>/, m => m + SANDBOX_BANNER);   // orange "SANDBOX ONLY" strip — never on prod
+      html = html.replace(/<link rel="icon"[^>]*>/, '<link rel="icon" type="image/svg+xml" href="/favicon-sbx.svg?v=' + APP_VERSION + '">');   // orange-bordered favicon on sandbox
+    }
     res.set('content-type', 'text/html').set('Cache-Control', 'no-store').send(html);
   } catch (e) {
     res.status(500).send('inject failed: ' + e.message);
@@ -5967,6 +5977,9 @@ app.get('/api/portal/me', portalAuth, (req, res) => res.json({ email: req.portal
 
 // Shared portal renderer (generated from inject.html). Served to the supplier portal page.
 let PORTAL_VIEW_JS = DEV ? null : (() => { try { return readFileSync(new URL('./supply/portal-view.js', import.meta.url), 'utf8'); } catch { return '/* portal-view.js missing */'; } })();
+app.get('/favicon-sbx.svg', (req, res) => {   // orange-bordered sandbox favicon
+  res.set('content-type', 'image/svg+xml').set('Cache-Control', 'no-cache').send(FAVICON_SBX_SVG);
+});
 app.get('/portal-view.js', (req, res) => {
   res.set('content-type', 'application/javascript; charset=utf-8');
   // no-cache: the portal view changes often — always revalidate so suppliers never run a stale cached copy
