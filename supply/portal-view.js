@@ -28,13 +28,13 @@
   // document types a supplier can attach (Documents section on the INVOICE tab)
   var DOC_TYPES=['Commercial Invoice','Tax Invoice Consolidated','Packing List','CI & PL','Transaction Certificate','Certificate of Origin','Photos','Other'];
   // supplier production status — the supplier maintains this; an exception flags a status that conflicts with the dates
-  var PROD_STATUS=[['not_started','Not started'],['in_production','In production'],['nearing_completion','Nearing completion'],['complete','Complete'],['shipped','Shipped']];
+  var PROD_STATUS=[['not_started','Not started'],['in_production','In production'],['ready_to_ship','Ready to ship'],['shipped','Shipped']];
   function prodStatusLabel(v){ var m=PROD_STATUS.filter(function(o){return o[0]===v;}); return m.length?m[0][1]:''; }
   function prodStatusSel(po,val){ return '<select class="fci pp-prod" data-po="'+esc(po)+'" style="font-size:11px;text-align:left;width:130px;min-width:0"><option value=""'+(val?'':' selected')+'>—</option>'
     +PROD_STATUS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'; }
   function prodStatusException(ps, prodStart, prodEnd){ ps=ps||''; var today=new Date().toISOString().slice(0,10);
     if((ps===''||ps==='not_started') && prodStart && prodStart<today) return 'Past production start ('+fd(prodStart)+') but status is '+(ps?prodStatusLabel(ps):'not set');
-    if(ps!=='complete' && ps!=='shipped' && prodEnd && prodEnd<today) return 'Past production completion ('+fd(prodEnd)+') but status is '+(ps?prodStatusLabel(ps):'not set');
+    if(ps!=='ready_to_ship' && ps!=='shipped' && prodEnd && prodEnd<today) return 'Past completion date ('+fd(prodEnd)+') but status is '+(ps?prodStatusLabel(ps):'not set');
     return ''; }
   // portal: a production status needs the supplier's attention when it's unset OR it conflicts with the dates
   function prodAttention(ps, prodStart, prodEnd){ var e=prodStatusException(ps, prodStart, prodEnd); if(e)return e; if(!ps)return 'Please set your production status'; return ''; }
@@ -484,6 +484,11 @@
       var effEnd = supEnd || p.prod_end || '';
       if(!effEnd) return false;   // no production end date (supplier or calculated) → nothing to invoice against yet
       return effEnd < new Date().toISOString().slice(0,10); }
+    // Completion date the supplier has provided: latest non-dismissed completion_date submission, else the
+    // applied end_production_overide (p.completion_date). Blank = supplier hasn't entered one yet.
+    function poCdVal(p, subsArr){ subsArr=subsArr||[]; var v=''; subsArr.forEach(function(s){ if(s.kind==='completion_date'&&s.status!=='dismissed'&&s.value) v=s.value; }); return v||(p&&p.completion_date)||''; }
+    // "Must enter completion date" exception — a confirmation-required, not-yet-shipped PO with no completion date.
+    function poCdMissing(p, subsArr){ return !!(p&&p.require_confirmation) && p.production_status!=='shipped' && !poCdVal(p, subsArr); }
     // ── Minimal XLSX writer (ported from the main app) so PRODUCTIONS can export the same ORDER PLAN .xlsx ──
     function _xlsxEsc(s){ return String(s==null?'':s).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
     function _xlsxCol(i){ var s=''; i=i+1; while(i){ var r=(i-1)%26; s=String.fromCharCode(65+r)+s; i=((i-r)/26)|0; } return s; }
@@ -622,8 +627,11 @@
       // ---- TIMELINE: production status + status + notes (Dock & Bay notes show as 'new' until you mark them read) ----
       var unreadInt=notes.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
       var prodExc=needConfirm?prodAttention(p.production_status, p.prod_start, p.prod_end):'';
-      var prodBlock='<div style="margin-bottom:10px;padding:8px 11px;border-radius:6px;font-size:12px;'+(prodExc?'background:#fef3c7;border:1px solid #fcd34d':'background:#f1f5f9;border:1px solid #e5e7eb')+'">'
+      var cdVal=poCdVal(p, subs), cdMiss=poCdMissing(p, subs);
+      var prodBlock='<div style="margin-bottom:10px;padding:8px 11px;border-radius:6px;font-size:12px;'+((prodExc||cdMiss)?'background:#fef3c7;border:1px solid #fcd34d':'background:#f1f5f9;border:1px solid #e5e7eb')+'">'
         +'<b>Production status</b> &nbsp; '+prodStatusSel(p.po, p.production_status||'')
+        +'<div style="margin-top:8px"><b>Completion date</b> &nbsp; <input type="date" class="pp-cd-grid" data-po="'+esc(p.po)+'" value="'+esc(cdVal)+'" title="your production completion date — submitted for Dock &amp; Bay approval; kept in sync with the purchase order grid" style="width:150px;cursor:pointer;text-align:left;font:inherit;font-size:12px;padding:4px 6px;border:1px solid '+(cdMiss?'#dc2626':'#93c5fd')+';border-radius:4px;background:'+(cdMiss?'#fef2f2':'#eff6ff')+';color:#1d4ed8">'
+        +(cdMiss?' <span style="background:#dc2626;color:#fff;border-radius:4px;font-size:10px;font-weight:700;padding:2px 7px">⚠ Must enter completion date</span>':'')+'</div>'
         +(prodExc?'<div class="tiny" style="color:#b45309;margin-top:4px">⚠ '+esc(prodExc)+'</div>':'')+'</div>';
       var timeline=confirmBar+prodBlock
         +(pend.length?'<div class="tiny" style="color:#92400e;margin-bottom:3px">⏳ Submitted, awaiting approval: '+pend.map(function(s){return esc(subFmt(s));}).join(' · ')+'</div>':'')
@@ -757,7 +765,7 @@
         +'<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">'+ppCard('Amount paid','$'+units(paidTot))+ppCard('Amount due',dueTot!=null?'$'+units(dueTot):'—')+'</div>'
         +'<div class="tiny mut" style="margin-top:6px">Total invoice value shows its payment due date. Amounts/dates are the deposit &amp; balance milestones from your PO.</div>';
       // ---- tabs + action badges ----
-      var tabs=[['timeline','TIMELINE',timeline,unreadInt+((needConfirm&&!confirmed)?1:0)+(prodExc?1:0)],['orderplan','ORDER PLAN',skus,0],
+      var tabs=[['timeline','TIMELINE',timeline,unreadInt+((needConfirm&&!confirmed)?1:0)+(prodExc?1:0)+(cdMiss?1:0)],['orderplan','ORDER PLAN',skus,0],
         ['invoice','INVOICE',invoice, invoiceDue(p,subs)?1:0],['payments','PAYMENTS',payments,0],
         ['shipment','SHIPMENT',shipment, ((p.shipment||p.flexport_reference||has('tracking'))?0:1)+xdAction],
         ['barcodes','BARCODES & LABELS',barcodesLabels,0]];
@@ -783,8 +791,8 @@
           var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
           var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end):'';
           var dtcPend=ppIsDtc(p)&&!p.dtc_accepted_at;
-          var act=(invoiceDue(p,sb)?1:0)+((p.shipment||p.flexport_reference||sb.some(function(s){return s.kind==='tracking';}))?0:1)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0);
-          var cdq=sb.filter(function(s){return s.kind==='completion_date';}); var cdVal=cdq.length?cdq[cdq.length-1].value:'';
+          var act=(invoiceDue(p,sb)?1:0)+((p.shipment||p.flexport_reference||sb.some(function(s){return s.kind==='tracking';}))?0:1)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0)+(poCdMissing(p,sb)?1:0);
+          var cdVal=poCdVal(p, sb);
           var cdGrid=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
           return _grpHdr+'<tr><td class="l"><button class="save-btn pp-exp" data-i="'+i+'" data-po="'+esc(p.po)+'"><span class="mng-txt">MANAGE</span>'+(act>0?' <span class="ex-badge" title="'+act+' action'+(act>1?'s':'')+' needed">'+act+'</span>':'')+'</button></td>'
             +'<td class="l"><b>'+esc(p.po)+'</b></td>'
@@ -1029,7 +1037,7 @@
               var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
               var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end):'';
               var dtcPend=ppIsDtc(p)&&!p.dtc_accepted_at;
-              return a+(invoiceDue(p,sb)?1:0)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0);
+              return a+(invoiceDue(p,sb)?1:0)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0)+(poCdMissing(p,sb)?1:0);
             },0);
             var b=document.getElementById('pp-pos-badge'); if(b)b.innerHTML=ppBadgeHtml(n); }
           // Shipment action count = FOB production-end pending (not submitted / rejected) + unread Dock&Bay notes.
@@ -1252,7 +1260,7 @@
               var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
               var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end):'';
               var dtcPend=ppIsDtc(p)&&!p.dtc_accepted_at;
-              return (invoiceDue(p,sb)?1:0)+((p.shipment||p.flexport_reference||sb.some(function(s){return s.kind==='tracking';}))?0:1)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0); }
+              return (invoiceDue(p,sb)?1:0)+((p.shipment||p.flexport_reference||sb.some(function(s){return s.kind==='tracking';}))?0:1)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0)+(poCdMissing(p,sb)?1:0); }
             // in-place row refresh after a write: re-render the open expanded cell + sync the MANAGE badge (no full reload)
             function refreshRow(row,po){ if(!row)return; var i=row.id.replace('pp-',''); rerenderRow(row,po);
               var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; var mb=document.querySelector('#supply-root .pp-exp[data-i="'+i+'"]')||document.querySelector('.pp-exp[data-i="'+i+'"]'); if(!mb||!p)return;

@@ -73,7 +73,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.333';
+const APP_VERSION = 'v25.335';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2077,7 +2077,7 @@ app.get('/api/supply/:section', async (req, res) => {
                   LEFT JOIN planner.suppliers s ON s.id=po.supplier_id
                   LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
                   WHERE coalesce(po.status,'') NOT ILIKE '%complete%') y
-            WHERE y.shipd IS NOT NULL AND y.shipd <= current_date + 7 AND y.ps='complete'
+            WHERE y.shipd IS NOT NULL AND y.shipd <= current_date + 7 AND y.ps='ready_to_ship'
           UNION ALL
           SELECT 'amber','Shipment missing dates', s.shipment_ref,
             'Assigned to live PO(s) but has no departure/ETA date set', 'date','shipment','arrival_date', s.shipment_ref
@@ -2218,8 +2218,8 @@ app.get('/api/supply/:section', async (req, res) => {
           else if (r.prod_start && r.prod_start <= today) st = 'in_production';
           else st = 'awaiting';
           const atLeast = m => { if (order.indexOf(st) < order.indexOf(m)) st = m; };          // trust confirmed status
-          if (r.production_status === 'in_production' || r.production_status === 'nearing_completion') atLeast('in_production');
-          if (r.production_status === 'complete') atLeast('prod_complete');
+          if (r.production_status === 'in_production') atLeast('in_production');
+          if (r.production_status === 'ready_to_ship') atLeast('prod_complete');   // ready to ship = production complete
           if (r.production_status === 'shipped') atLeast('in_transit');
           const nextDate = { awaiting: r.prod_start, in_production: r.prod_end, prod_complete: r.ship_date,
             in_transit: r.arrival, arriving: r.arrival, checked_in: null }[st];
@@ -2233,7 +2233,7 @@ app.get('/api/supply/:section', async (req, res) => {
           const mstatus = (r.status || '').toUpperCase();
           const mPastCompletion = /SHIPPING|READY TO SHIP|DELIVERED/.test(mstatus);
           const mDelivered = /DELIVERED/.test(mstatus);
-          const prodDone = r.production_status === 'complete' || r.production_status === 'shipped' || mPastCompletion;
+          const prodDone = r.production_status === 'ready_to_ship' || r.production_status === 'shipped' || mPastCompletion;
           const departed = r.departed || r.production_status === 'shipped' || /SHIPPING|DELIVERED/.test(mstatus);
           const arrived = r.arrived || mDelivered;
           let overdue = null;
@@ -3747,7 +3747,7 @@ app.post('/api/supply/po/:po/supplier', async (req, res) => {
 });
 // Supplier production-confidence: set the confirmed production status and stamp the confirmation time
 // (now). Clearing the status clears the stamp. Drives the "Production unconfirmed" action.
-const PROD_STATUSES = ['not_started','in_production','nearing_completion','complete','shipped'];
+const PROD_STATUSES = ['not_started','in_production','ready_to_ship','shipped'];
 app.post('/api/supply/po/:po/prod-status', async (req, res) => {
   const st = (req.body && req.body.production_status || '').trim();
   if (st && !PROD_STATUSES.includes(st)) return res.status(400).json({ error: 'bad status' });
@@ -5167,6 +5167,7 @@ const POS_SQL_PORTAL = `
   SELECT po, supplier_name, status,
     to_char(start_production,'YYYY-MM-DD') prod_start,
     to_char(eff_prod_end,'YYYY-MM-DD') prod_end,
+    to_char(end_production_overide,'YYYY-MM-DD') completion_date,
     to_char(eff_ship,'YYYY-MM-DD') ship,
     flexport_reference, flex_id, value_est,
     round(supplier_invoice_total,2) final_invoice, round(val,2) value_used,

@@ -587,7 +587,7 @@
   // ACTIONS: entering a value does NOT commit — an explicit Apply button does, then the card stays
   // visible (marked ✓) so the entry can be verified. Resolved cards clear on Refresh / re-fetch.
   var actRows=[];
-  var PROD_STATUS=[['not_started','Not started'],['in_production','In production'],['nearing_completion','Nearing completion'],['complete','Complete'],['shipped','Shipped']];
+  var PROD_STATUS=[['not_started','Not started'],['in_production','In production'],['ready_to_ship','Ready to ship'],['shipped','Shipped']];
   function prodStatusOpts(sel){ return PROD_STATUS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===sel?' selected':'')+'>'+o[1]+'</option>';}).join(''); }
   function prodStatusLabel(v){ var m=PROD_STATUS.filter(function(o){return o[0]===v;}); return m.length?m[0][1]:''; }
   // Logic-based exception on the PO LIFECYCLE STATUS vs the production dates (returns '' when fine).
@@ -854,7 +854,7 @@
           if(_up.mkt!=='all'&&p.market!==_up.mkt)return;
           var date=type==='completing'?p.prod_end:type==='shipping'?p.ship_date:p.arrival;
           if(!date||date<today||date>cap)return;
-          if(type==='completing'&&(p.production_status==='complete'||p.production_status==='shipped'))return;  // already past this milestone
+          if(type==='completing'&&(p.production_status==='ready_to_ship'||p.production_status==='shipped'))return;  // already past this milestone
           if(type==='shipping'&&p.production_status==='shipped')return;
           out.push({po:p.po,supplier:p.supplier,market:p.market,units:p.units,val:p.val,date:date,ship:p.shipment_ref||'',flex:p.flex||''}); });
         return out; }

@@ -3,6 +3,24 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.335 - Portal TIMELINE completion date + revised production statuses
+
+- **Completion date on the TIMELINE tab** (under Production status): a date field bound to the PO's
+  production-end (`end_production_overide`) — the same value the PO grid edits, kept in sync. Saved as a
+  `completion_date` submission for Dock&Bay approval (staged, per Ben).
+- **Blank completion date = exception**: red "⚠ Must enter completion date" badge + it counts on the
+  TIMELINE sub-tab badge and the Purchase Orders action badges. Gated to confirmation-required, not-yet-shipped POs.
+- **Past completion date while In production** stays a red production-status exception (counts as an action).
+- **Production statuses revised** (portal + main grid + server mapping): removed "Nearing completion" and
+  "Complete", added "Ready to ship". Supplier ends at Shipped; statuses map to the main grid stages
+  (ready_to_ship → production-complete). Updated BI-alert + payment-milestone logic that referenced 'complete'.
+- POS_SQL_PORTAL now exposes `completion_date` (raw end_production_overide) so the portal can tell an
+  entered date from a derived one.
+
+## v25.333 - Portal shipment-plan FOB label "Production end date" -> "Ship Date"
+
+FOB shipment-plan card label renamed to "Ship Date".
+
 ## v25.332 - Portal deposits fix + 2dp money + bigger samples text
 
 - **Deposits Drawn down / Remaining were wrong** — the portal read the stored `deposits` columns;
