@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.329 - Portal SAMPLES top-menu badge shows action count
+
+The SAMPLES tab badge (top menu) now counts supplier actions — samples needing (re-)accept PLUS
+unread Dock&Bay notes — not just unread notes. So an unaccepted sample (e.g. Lixin's "(1)") now
+surfaces as a notification next to SAMPLES.
+
 ## v25.328 - Portal Samples card: force left alignment
 
 The Samples card on the supplier portal had right-aligned items (Completion required, Charges,

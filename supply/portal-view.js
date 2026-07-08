@@ -1010,7 +1010,7 @@
           function sampNeedsAccept(s){ return (!s.accepted||s.change_requested)&&s.status!=='cancelled'&&s.status!=='complete'; }
           function sampInFilt(s,f){ if(f==='all')return true; if(f==='closed')return !s.is_open; if(f==='unaccepted')return sampNeedsAccept(s); return s.is_open; }
           function sampActions(s){ return sampNeedsAccept(s)?1:0; }   // supplier action: needs (re-)accepting
-          function setSampBadge(){ var n=((_ppData&&_ppData.samples)||[]).reduce(function(a,s){return a+(s.unread_dnb||0);},0);   // total unread D&B notes
+          function setSampBadge(){ var n=((_ppData&&_ppData.samples)||[]).reduce(function(a,s){return a+sampActions(s)+(s.unread_dnb||0);},0);   // supplier actions: needs-(re)accept + unread D&B notes
             var sbg=document.getElementById('pp-samp-badge'); if(sbg)sbg.innerHTML=n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
           function ppSampleRow(s,i){
             var act=sampActions(s)?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;margin-left:4px" title="needs your attention">'+sampActions(s)+'</span>':'';
