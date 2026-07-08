@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.340 - Fix FBA Transfer Upload file (US errors)
+
+Matches Amazon's current Send-to-Amazon template and clears the upload errors:
+- **Default prep owner = Seller** and **Default labeling owner = Seller** rows added for ALL regions
+  (were only on the metric/UK layout — US was missing them → the B0 errors). Layout now: title r1,
+  owners r3-4, section labels r7, headers r8, data r9.
+- **Zero-quantity rows are no longer emitted** (fixes the B8/B9/F8/F9 invalid-quantity/boxes errors and
+  the "qty 0 should never happen" issue).
+- **Box dimensions rounded to whole numbers** (0 decimals).
+- **Case-pack columns (units/box, #boxes, box dims) only when the ticked qty is an exact multiple of the
+  case pack** (Amazon requires Quantity = Units per box × Number of boxes → fixes the E11/F11 mismatch).
+  Non-multiple quantities are sent as loose units with the case-pack columns blank.
+
 ## v25.339 - Samples: flag past-expected-date-while-in-production conflict
 
 Common-sense check: if a sample's Expected completion date is in the past but status is still

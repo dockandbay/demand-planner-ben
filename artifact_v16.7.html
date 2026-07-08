@@ -1838,36 +1838,37 @@ function downloadFbaTransfer(){
     var sep=k.lastIndexOf('|'),sku=k.slice(0,sep),co=k.slice(sep+1);
     if(co!==CUR)return;
     var qty=fbaTransferEff(sku,CUR);
+    if(!(Number(qty)>0))return;   // never emit zero/blank-quantity rows (Amazon rejects them)
     var d=DIMS[sku]||{};
     var cp=(PD[sku]&&PD[sku].cp)||d.cp||0;
-    var box=cp>0?Math.ceil(qty/cp):'';
-    // Box dims from sku_labels carton fields (uk_carton_* metric / us_carton_* imperial). If the region-native
-    // set is missing, convert the other unit (in↔cm ×2.54, lb↔kg ×0.453592) so the file still carries sizes
-    // whenever ANY carton size is on file — the carton is one physical box, so the conversion is exact.
+    // Box dims from carton fields (uk_carton_* metric / us_carton_* imperial). If the region-native set is
+    // missing, convert the other unit (in↔cm ×2.54, lb↔kg ×0.453592). Amazon wants whole numbers → round (ri).
     var u=d.u||[], s=d.s||[];
     var uL=n(u[0]),uW=n(u[1]),uH=n(u[2]),uWt=n(u[3]), sL=n(s[0]),sW=n(s[1]),sH=n(s[2]),sWt=n(s[3]);
     var L,W,H,Wt;
-    if(us){ L=sL!=null?sL:(uL!=null?r1(uL/2.54):''); W=sW!=null?sW:(uW!=null?r1(uW/2.54):''); H=sH!=null?sH:(uH!=null?r1(uH/2.54):''); Wt=sWt!=null?sWt:(uWt!=null?r2(uWt/0.453592):''); }
-    else   { L=uL!=null?uL:(sL!=null?r1(sL*2.54):''); W=uW!=null?uW:(sW!=null?r1(sW*2.54):''); H=uH!=null?uH:(sH!=null?r1(sH*2.54):''); Wt=uWt!=null?uWt:(sWt!=null?r2(sWt*0.453592):''); }
+    if(us){ L=sL!=null?sL:(uL!=null?uL/2.54:''); W=sW!=null?sW:(uW!=null?uW/2.54:''); H=sH!=null?sH:(uH!=null?uH/2.54:''); Wt=sWt!=null?sWt:(uWt!=null?uWt/0.453592:''); }
+    else   { L=uL!=null?uL:(sL!=null?sL*2.54:''); W=uW!=null?uW:(sW!=null?sW*2.54:''); H=uH!=null?uH:(sH!=null?sH*2.54:''); Wt=uWt!=null?uWt:(sWt!=null?sWt*0.453592:''); }
+    var ri=function(x){return (x===''||x==null)?'':Math.round(Number(x));};
     var outSku=(euuk&&FBA_SKU_ALIAS_EUUK[sku])||sku;
-    rows.push([outSku,qty,'','',cp||'',box,L,W,H,Wt]);
+    // Case-pack columns (units/box, #boxes, box dims) ONLY when qty is an exact multiple of the case pack —
+    // Amazon requires Quantity == Units per box × Number of boxes. Otherwise send loose units (case cols blank).
+    var caseOk=cp>0 && (qty % cp)===0;
+    rows.push([outSku, qty, '', '', caseOk?cp:'', caseOk?(qty/cp):'', caseOk?ri(L):'', caseOk?ri(W):'', caseOk?ri(H):'', caseOk?ri(Wt):'']);
   });
   if(!rows.length){alert('No rows ticked for '+CUR+'. Tick the Ship box on the rows you want to transfer.');return;}
-  // Amazon manifest layout: US/CA imperial (in/lb, headers on row 7); UK/EU/AU metric (cm/kg, Default
-  // prep/labeling rows → headers on row 8). Columns C/D = Expiration date / Manufacturing lot code (optional).
-  var hdr=us?[
-    ['Please review the Example tab before you complete this sheet'],
-    [],[],[],[],
-    ['','','Optional','','Optional: Use only for case-packed SKUs'],
-    ['Merchant SKU','Quantity','Expiration date (MM/DD/YYYY)','Manufacturing lot code','Units per box','Number of boxes','Box length (in)','Box width (in)','Box height (in)','Box weight (lb)']
-  ]:[
+  // Amazon manifest layout (identical for all regions): title (row1), Default prep/labeling owner = Seller
+  // (rows 3-4), optional-section labels (row7), column headers (row8), data from row 9. Only the box-dimension
+  // units differ — US/CA imperial (in/lb), UK/EU/AU metric (cm/kg).
+  var boxCols=us?['Box length (in)','Box width (in)','Box height (in)','Box weight (lb)']
+                :['Box length (cm)','Box width (cm)','Box height (cm)','Box weight (kg)'];
+  var hdr=[
     ['Please review the Example tab before you complete this sheet'],
     [],
     ['Default prep owner','Seller'],
     ['Default labeling owner','Seller'],
     [],[],
     ['','','Optional','','Optional: Use only for case-packed SKUs'],
-    ['Merchant SKU','Quantity','Expiration date (MM/DD/YYYY)','Manufacturing lot code','Units per box','Number of boxes','Box length (cm)','Box width (cm)','Box height (cm)','Box weight (kg)']
+    ['Merchant SKU','Quantity','Expiration date (MM/DD/YYYY)','Manufacturing lot code','Units per box','Number of boxes'].concat(boxCols)
   ];
   var grid=hdr.concat(rows);
   var fname='FBA_Transfer_'+CUR+'_'+new Date().toISOString().slice(0,10)+'.xlsx';
