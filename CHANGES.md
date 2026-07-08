@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.341 - Cin7: store supplier memberId + send on update + throttle all calls
+
+- **Migration 102**: `planner.suppliers.cin7_member_id` — stores each supplier's Cin7 contact id (seeded
+  for 9 single-match suppliers incl. Weireken=22962; ambiguous/no-match left NULL → falls back to name lookup).
+- Cin7 PO push now resolves the supplier `memberId` **once** (stored id → name lookup) and **sends it on BOTH
+  create and update** — an update now re-asserts the supplier link (previously updates sent only id + lines +
+  approval, so a mis-filed order couldn't be corrected).
+- **All 11 Cin7 API calls now go through a throttled `cin7Fetch`** — serialised with a ~400ms gap (~2.5/sec,
+  under Cin7's 3/sec cap) and auto-retry on HTTP 429 honouring Retry-After. Fixes the rate-limit rejections.
+
 ## v25.340 - Fix FBA Transfer Upload file (US errors)
 
 Matches Amazon's current Send-to-Amazon template and clears the upload errors:

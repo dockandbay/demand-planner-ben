@@ -73,7 +73,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.340';
+const APP_VERSION = 'v25.341';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3346,6 +3346,27 @@ function cin7Auth() {
   if (u && k) return 'Basic ' + Buffer.from(u + ':' + k).toString('base64');
   return null;
 }
+// Throttle + auto-retry for the Cin7 Omni API (rate limit ~3 req/sec). Every Cin7 call goes through here:
+// calls are serialised with a minimum gap, and 429s are retried with backoff (honouring Retry-After). This
+// keeps bulk pushes/lookups under Cin7's limit instead of getting rejected.
+let _cin7LastCall = 0, _cin7Chain = Promise.resolve();
+function cin7Fetch(url, opts) {
+  const MIN_GAP = 400;   // ms between Cin7 calls → ~2.5/sec, safely under the 3/sec cap
+  const run = async () => {
+    const gap = MIN_GAP - (Date.now() - _cin7LastCall);
+    if (gap > 0) await new Promise(r => setTimeout(r, gap));
+    for (let attempt = 0; ; attempt++) {
+      _cin7LastCall = Date.now();
+      const resp = await fetch(url, opts);
+      if (resp.status !== 429 || attempt >= 4) return resp;
+      const ra = Number(resp.headers.get('retry-after'));
+      await new Promise(r => setTimeout(r, ra > 0 ? ra * 1000 : 1000 * (attempt + 1)));
+    }
+  };
+  const p = _cin7Chain.then(run, run);   // chain so concurrent requests are serialised (single-instance server)
+  _cin7Chain = p.catch(() => {});
+  return p;
+}
 // Update the Cin7 PO's EstimatedDeliveryDate to the planner's Completion date (#14). LIVE write to Cin7 —
 // gated: requires Cin7 creds (see cin7Auth). Safe no-op (501) when the credential is absent.
 app.post('/api/supply/po/:po/cin7-date', async (req, res) => {
@@ -3363,14 +3384,14 @@ app.post('/api/supply/po/:po/cin7-date', async (req, res) => {
     // flips a draft to approved. If we can't read it, omit isApproved entirely (Cin7 leaves it unchanged on PUT).
     let curApproved;
     try {
-      const g = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=1&fields=id,isApproved&where=' + encodeURIComponent('id=' + cin7Id),
+      const g = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=1&fields=id,isApproved&where=' + encodeURIComponent('id=' + cin7Id),
         { headers: { Authorization: auth, 'content-type': 'application/json' } });
       if (g.ok) { const arr = await g.json(); if (Array.isArray(arr) && arr[0] && typeof arr[0].isApproved === 'boolean') curApproved = arr[0].isApproved; }
     } catch (e) { /* fall through — omit isApproved */ }
     const upd = { id: Number(cin7Id) || cin7Id, estimatedDeliveryDate: edd };
     if (curApproved !== undefined) upd.isApproved = curApproved;
     const body = [upd];
-    const r = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
+    const r = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
       { method: 'PUT', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify(body) });
     const txt = await r.text();
     if (!r.ok) return res.status(502).json({ error: 'Cin7 API error ' + r.status + ': ' + txt.slice(0, 300) });
@@ -3395,7 +3416,8 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
     // created in this currency so line costs (held in the supplier's currency) are labelled correctly.
     const poRow = (await pool.query(
       `SELECT coalesce(po.supplier_name,'') supplier_name, coalesce(po.branch,'') branch,
-              coalesce(s.default_currency, sn.default_currency, 'USD') currency
+              coalesce(s.default_currency, sn.default_currency, 'USD') currency,
+              coalesce(s.cin7_member_id, sn.cin7_member_id) cin7_member_id
        FROM planner.purchase_orders po
        LEFT JOIN planner.suppliers s  ON s.id = po.supplier_id
        LEFT JOIN planner.suppliers sn ON lower(sn.name) = lower(po.supplier_name)
@@ -3422,7 +3444,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
     // then reconciled by the price validation below.
     if (cin7Id) {
       try {
-        const g = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=1&fields=id,isApproved,currencyRate,isVoid,status&where=' + encodeURIComponent('id=' + cin7Id),
+        const g = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=1&fields=id,isApproved,currencyRate,isVoid,status&where=' + encodeURIComponent('id=' + cin7Id),
           { headers: { Authorization: auth, 'content-type': 'application/json' } });
         if (g.ok) { const arr = await g.json(); const o = Array.isArray(arr) ? arr[0] : null;
           const voided = o && (o.isVoid === true || /void/i.test(String(o.status || '')));
@@ -3439,33 +3461,35 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
         }
       } catch (e) { /* fall through — omit isApproved / rate */ }
     }
+    // Resolve the Cin7 supplier link (memberId) ONCE — prefer the stored suppliers.cin7_member_id, else look it
+    // up by company name. Sent on BOTH create and update so the order is always tied to the supplier (a missing
+    // supplier link is what makes Cin7 mis-file an order as a sales order).
+    async function cin7IdByCompany(resource, company) {
+      if (!company) return null;
+      const g = await cin7Fetch('https://api.cin7.com/api/v1/' + resource + "?rows=1&fields=id,company&where=" +
+        encodeURIComponent("company='" + String(company).replace(/'/g, "''") + "'"),
+        { headers: { Authorization: auth, 'content-type': 'application/json' } });
+      if (!g.ok) return null;
+      const arr = await g.json(); return (Array.isArray(arr) && arr[0] && arr[0].id) ? arr[0].id : null;
+    }
+    memberId = poRow.cin7_member_id ? Number(poRow.cin7_member_id) : await cin7IdByCompany('Contacts', poRow.supplier_name);
     // Cin7 expects the line unitPrice in the ORDER currency (USD) on write and converts to base itself — send planUSD as-is.
     const lineItems = lines.map(l => ({ code: l.sku, qty: Number(l.qty), unitPrice: Number(l.price) || 0 }));
     if (cin7Id) {
       // UPDATE existing Cin7 PO — preserve its current approval state (don't flip a draft to approved)
       const upd = { id: Number(cin7Id) || cin7Id, lineItems };
+      if (memberId) upd.memberId = Number(memberId);   // re-assert the supplier link on every update
       if (curApproved !== undefined) upd.isApproved = curApproved;
       const body = [upd];
-      r = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
+      r = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
         { method: 'PUT', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify(body) });
       txt = await r.text();
       if (!r.ok) return res.status(502).json({ error: 'Cin7 API error ' + r.status + ': ' + txt.slice(0, 300) });
     } else {
-      // CREATE a new Cin7 PO (the planner PO isn't in Cin7 yet).
-      // A Cin7 PurchaseOrder MUST be linked to the supplier via memberId and to a branchId — sending only
-      // free-text `company` makes Cin7 mis-file the order (it surfaced as a SALES ORDER). Resolve both from
-      // Cin7 by exact name match (branch name = planner branch; supplier = Cin7 contact company) and FAIL the
+      // CREATE a new Cin7 PO (the planner PO isn't in Cin7 yet). It MUST carry the supplier memberId (resolved
+      // above) + a branchId — without the supplier link Cin7 mis-files the order as a SALES ORDER. Fail the
       // create (no write) if either can't be resolved, so we never silently create a malformed order again.
-      async function cin7IdByCompany(resource, company) {
-        if (!company) return null;
-        const g = await fetch('https://api.cin7.com/api/v1/' + resource + "?rows=1&fields=id,company&where=" +
-          encodeURIComponent("company='" + String(company).replace(/'/g, "''") + "'"),
-          { headers: { Authorization: auth, 'content-type': 'application/json' } });
-        if (!g.ok) return null;
-        const arr = await g.json(); return (Array.isArray(arr) && arr[0] && arr[0].id) ? arr[0].id : null;
-      }
-      memberId = await cin7IdByCompany('Contacts', poRow.supplier_name);
-      if (!memberId) return res.status(422).json({ error: 'Supplier "' + (poRow.supplier_name || '(none)') + '" was not found as a Cin7 contact — cannot create the PO. (Creating without a supplier link is what made the previous order a sales order.) Add/spell-match the supplier in Cin7, then retry.', lines: lines.length, mode });
+      if (!memberId) return res.status(422).json({ error: 'Supplier "' + (poRow.supplier_name || '(none)') + '" was not found as a Cin7 contact — cannot create the PO. Set the supplier\'s Cin7 member id (or spell-match the name in Cin7), then retry.', lines: lines.length, mode });
       branchId = poRow.branch ? await cin7IdByCompany('Branches', poRow.branch) : null;
       if (poRow.branch && !branchId) return res.status(422).json({ error: 'Branch "' + poRow.branch + '" was not found in Cin7 Branches — cannot create the PO. Make the planner branch name match the Cin7 branch exactly, then retry.', lines: lines.length, mode });
       // DRAFT (isApproved:false) so a person reviews/approves in Cin7; stage New = standard new PO.
@@ -3475,7 +3499,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
       const create = { reference: po, memberId: Number(memberId), company: poRow.supplier_name || '', isApproved: false, stage: 'New', currencyCode: poRow.currency || 'USD', lineItems };
       if (branchId) create.branchId = Number(branchId);
       if (edd) create.estimatedDeliveryDate = edd;
-      r = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
+      r = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
         { method: 'POST', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify([create]) });
       txt = await r.text();
       if (!r.ok) return res.status(502).json({ error: 'Cin7 create error ' + r.status + ': ' + txt.slice(0, 300) });
@@ -3496,7 +3520,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
       const planUsdBy = {}; lines.forEach(l => { planUsdBy[String(l.sku).toUpperCase()] = Number(l.price); });   // plan cost in USD, for price validation
       const validateId = newId || cin7Id;
       async function getCin7Data() {
-        const g = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=1&fields=id,currencyCode,currencyRate,lineItems&where=' + encodeURIComponent('id=' + validateId),
+        const g = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=1&fields=id,currencyCode,currencyRate,lineItems&where=' + encodeURIComponent('id=' + validateId),
           { headers: { Authorization: auth, 'content-type': 'application/json' } });
         if (!g.ok) return null;
         const arr = await g.json(); const o = Array.isArray(arr) ? arr[0] : arr;
@@ -3526,7 +3550,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
             const fixItems = lines.map(l => ({ code: l.sku, qty: Number(l.qty), unitPrice: Number(l.price) || 0 }));
             const fix = fixItems.concat(extras.map(c => ({ code: byCode[c].code, qty: 0, unitPrice: Number(byCode[c].unitPrice) || 0 })));
             const body2 = [{ id: Number(validateId) || validateId, lineItems: fix }]; if (typeof curApproved === 'boolean') body2[0].isApproved = curApproved;
-            const r2 = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
+            const r2 = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
               { method: 'PUT', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify(body2) });
             validation.corrected = true; validation.correction_ok = r2.ok;
             const d2 = r2.ok ? await getCin7Data() : null;
@@ -3571,7 +3595,7 @@ app.get('/api/supply/po/:po/cin7-verify', async (req, res) => {
               coalesce((SELECT plc.final_cost FROM planner.portal_line_costs plc WHERE plc.po=l.po AND plc.sku=l.sku AND plc.confirmed_at IS NOT NULL AND plc.final_cost IS NOT NULL), l.cost_price)::numeric price
        FROM planner.purchase_order_lines l WHERE l.po=$1 AND coalesce(l.qty,0)>0`, [po])).rows;
     const planBy = {}; plan.forEach(l => { planBy[String(l.sku).toUpperCase()] = l; });
-    const g = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=1&fields=id,currencyRate,lineItems&where=' + encodeURIComponent('id=' + cin7Id),
+    const g = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=1&fields=id,currencyRate,lineItems&where=' + encodeURIComponent('id=' + cin7Id),
       { headers: { Authorization: auth, 'content-type': 'application/json' } });
     if (!g.ok) return res.status(502).json({ error: 'Cin7 read error ' + g.status });
     const arr = await g.json(); const o = Array.isArray(arr) ? arr[0] : arr;
@@ -3626,7 +3650,7 @@ app.post('/api/supply/cin7-dates-sync', async (req, res) => {
     for (let i = 0; i < ids.length; i += 100) {
       const chunk = ids.slice(i, i + 100);
       try {
-        const g = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=250&fields=id,isApproved&where=' + encodeURIComponent('id IN (' + chunk.join(',') + ')'),
+        const g = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=250&fields=id,isApproved&where=' + encodeURIComponent('id IN (' + chunk.join(',') + ')'),
           { headers: { Authorization: auth, 'content-type': 'application/json' } });
         if (g.ok) { const arr = await g.json(); if (Array.isArray(arr)) arr.forEach(o => { if (o && typeof o.isApproved === 'boolean') approvedById[o.id] = o.isApproved; }); }
       } catch (e) { /* unread → isApproved omitted, Cin7 leaves it unchanged */ }
@@ -3634,7 +3658,7 @@ app.post('/api/supply/cin7-dates-sync', async (req, res) => {
     // 3) one batched PUT, echoing each PO's current approval state
     const batch = todo.map(t => { const upd = { id: t.id, estimatedDeliveryDate: t.edd };
       if (approvedById[t.id] !== undefined) upd.isApproved = approvedById[t.id]; return upd; });
-    const r = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
+    const r = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
       { method: 'PUT', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify(batch) });
     const txt = await r.text();
     if (!r.ok) return res.status(502).json({ error: 'Cin7 API error ' + r.status + ': ' + txt.slice(0, 300) });
