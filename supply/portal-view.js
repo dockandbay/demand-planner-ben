@@ -1035,6 +1035,16 @@
             return n; }
           function setSampBadge(){ var n=((_ppData&&_ppData.samples)||[]).reduce(function(a,s){return a+sampActions(s);},0);   // supplier actions: needs-(re)accept + unread D&B notes
             var sbg=document.getElementById('pp-samp-badge'); if(sbg)sbg.innerHTML=n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
+          function sampRowBadgeHtml(s){ var n=sampActions(s); var act=n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;margin-left:4px" title="needs your attention">'+n+'</span>':''; var nu=s.unread_dnb?'<span style="background:#f59e0b;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;margin-left:3px" title="new note from Dock &amp; Bay">'+s.unread_dnb+'</span>':''; return act+nu; }
+          function sampById(id){ return ((_ppData&&_ppData.samples)||[]).filter(function(x){return String(x.id)===String(id);})[0]; }
+          // Silent in-place refresh of one sample card + its row/top badges (no full reload / no screen refresh).
+          function refreshSampleCard(id){ var s=sampById(id); if(!s)return;
+            var det=body.querySelector('.ps-det[data-id="'+id+'"]');
+            if(det && det.innerHTML.trim()){ var trk=det.querySelector('.samp-trk'), car=det.querySelector('.samp-car');
+              if(trk)s.tracking_code=trk.value; if(car)s.carrier=car.value;   // keep any unsaved sibling edits visible
+              det.innerHTML=ppSampleCard(s); wireSampleCard(det, id); }
+            var rb=body.querySelector('.ps-rowbadge[data-id="'+id+'"]'); if(rb)rb.innerHTML=sampRowBadgeHtml(s);
+            setSampBadge(); }
           function ppBadgeHtml(n){ return n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
           // Purchase Orders top-menu badge = open supplier ACTIONS across all POs. Deliberately EXCLUDES the
           // per-PO "no shipment yet" term (a passive state, not an action — it would show ~1 per in-production PO).
@@ -1060,10 +1070,8 @@
           function setShipBadge(){ var n=((_ppData&&_ppData.shipmentPlan)||[]).reduce(function(a,s){return a+shipActCount(s);},0);
             var b=document.getElementById('pp-ship-badge'); if(b)b.innerHTML=ppBadgeHtml(n); }
           function ppSampleRow(s,i){
-            var act=sampActions(s)?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;margin-left:4px" title="needs your attention">'+sampActions(s)+'</span>':'';
-            var nu=s.unread_dnb?'<span style="background:#f59e0b;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;margin-left:3px" title="new note from Dock & Bay">'+s.unread_dnb+'</span>':'';
             var units=(s.lines||[]).reduce(function(a,l){return a+(Number(l.qty)||0);},0), nsku=(s.lines||[]).length;
-            return '<tr><td class="l"><button class="planbtn ps-manage" data-id="'+s.id+'" data-i="'+i+'">Manage</button>'+act+nu+'</td>'
+            return '<tr><td class="l"><button class="planbtn ps-manage" data-id="'+s.id+'" data-i="'+i+'">Manage</button><span class="ps-rowbadge" data-id="'+s.id+'">'+sampRowBadgeHtml(s)+'</span></td>'
               +'<td class="l"><b>'+esc(s.ref)+'</b></td>'
               +'<td class="l">'+sampChip(s.status_calc)+'</td>'
               +'<td class="l">'+esc(s.recipient_company||'')+(s.recipient_name?' <span class="mut tiny">'+esc(s.recipient_name)+'</span>':'')+'</td>'
@@ -1083,8 +1091,12 @@
             return bar+'<div id="samp-newform"></div>'+tbl; }
           function wireSampleCard(scope,id){
             var ac=scope.querySelector('.samp-accept'); if(ac)ac.onclick=function(){ ac.disabled=true; postJSON(EP.sampleAccept,{id:id},function(){ reload(); }); };
-            var save=scope.querySelector('.samp-save'); if(save)save.onclick=function(){ var ps=scope.querySelector('.samp-prod'); postJSON(EP.sampleUpdate,{id:id,supplier_expected_completion:scope.querySelector('.samp-exp').value||null,tracking_code:scope.querySelector('.samp-trk').value||null,carrier:scope.querySelector('.samp-car').value||null,production_status:(ps&&ps.value)||null},function(){ reload(); }); };
-            var sprod=scope.querySelector('.samp-prod'); if(sprod)sprod.onchange=function(){ postJSON(EP.sampleUpdate,{id:id,production_status:sprod.value||null},function(){ reload(); }); };
+            var save=scope.querySelector('.samp-save'); if(save)save.onclick=function(){ var ps=scope.querySelector('.samp-prod'),ex=scope.querySelector('.samp-exp'),tk=scope.querySelector('.samp-trk'),cr=scope.querySelector('.samp-car');
+              var ev=(ex&&ex.value)||null,pv=(ps&&ps.value)||null,tv=(tk&&tk.value)||null,cv=(cr&&cr.value)||null;
+              postJSON(EP.sampleUpdate,{id:id,supplier_expected_completion:ev,tracking_code:tv,carrier:cv,production_status:pv},function(){ var s=sampById(id); if(s){s.supplier_expected=ev||'';s.production_status=pv||'';s.tracking_code=tv||'';s.carrier=cv||'';} refreshSampleCard(id); }); };
+            // completion date + status auto-save silently on change (no reload / no screen refresh)
+            var sexp=scope.querySelector('.samp-exp'); if(sexp)sexp.onchange=function(){ var v=sexp.value||null; postJSON(EP.sampleUpdate,{id:id,supplier_expected_completion:v},function(){ var s=sampById(id); if(s)s.supplier_expected=v||''; refreshSampleCard(id); }); };
+            var sprod=scope.querySelector('.samp-prod'); if(sprod)sprod.onchange=function(){ var v=sprod.value||null; postJSON(EP.sampleUpdate,{id:id,production_status:v},function(){ var s=sampById(id); if(s)s.production_status=v||''; refreshSampleCard(id); }); };
             var ch=scope.querySelector('.samp-charge'); if(ch)ch.onclick=function(){ var f=scope.querySelector('.samp-cf').value,p=scope.querySelector('.samp-cp').value,d=scope.querySelector('.samp-cd').value; if(!f&&!p){alert('Enter a freight and/or product cost.');return;} ch.disabled=true; postJSON(EP.sampleCharge,{id:id,freight_cost:Number(f)||0,product_cost:Number(p)||0,description:d||null},function(){ reload(); }); };
             var np=scope.querySelector('.samp-note-post'); if(np)np.onclick=function(){ var inp=scope.querySelector('.samp-note-in'); var v=(inp.value||'').trim(); if(!v)return; postJSON(EP.sampleNote,{id:id,body:v,author_kind:EP.sampleNoteAuthorKind,author_email:EP.sampleNoteAuthorEmail},function(){ inp.value=''; ppSampleTimeline(id); }); };
             var af=scope.querySelector('.ps-att-file'), au=scope.querySelector('.ps-att-up');

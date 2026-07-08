@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.338 - Samples completion date + status save silently (no reload)
+
+The Samples Status and Expected-completion-date fields now auto-save on change and refresh in place
+(the one sample card + its row/top badges) instead of triggering a full `reload()`. So entering them
+updates silently without a screen refresh, the must-enter badges clear immediately, and the tab/scroll
+position is kept. The Save button is silent too.
+
 ## v25.337 - Samples: status dropdown + must-enter exceptions + admin read-through
 
 - Migration **101_sample_production_status.sql**: adds `production_status` to `planner.sample_requests`.
