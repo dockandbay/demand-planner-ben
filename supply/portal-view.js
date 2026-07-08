@@ -925,7 +925,7 @@
                   +(s.master_deadline?spCell('Client deadline', esc(fd(s.master_deadline))):'')
                   +'</div>';
                 var prodEndEdit='<div style="margin-top:10px;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">'
-                  +'<label class="tiny">Production end date <span class="mut">(submit for Dock &amp; Bay approval)</span><br>'
+                  +'<label class="tiny">Ship Date <span class="mut">(submit for Dock &amp; Bay approval)</span><br>'
                   +'<input type="date" class="sp-fob-cd" data-po="'+esc(po)+'" value="'+esc(cdVal)+'" title="pick your production end date — submitted for Dock &amp; Bay to approve" style="width:150px;text-align:left;font:inherit;font-size:12px;padding:4px 6px;border:1px solid #93c5fd;border-radius:4px;background:#eff6ff;color:#1d4ed8"></label>'
                   +(cdStatus?'<div class="tiny">'+cdStatus+(cd&&cd.status==='pending'?' — '+esc(fd(cd.value)):'')+'</div>':'')+'</div>';
                 var timeline='<div style="margin-top:10px;border-top:1px solid #f1f1f1;padding-top:8px">'
