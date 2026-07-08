@@ -14,6 +14,9 @@
   // client sales ref is set — otherwise the DtC tab + approval workflow do not show.
   function ppIsDtc(p){ var b=(p&&p.branch||'').toLowerCase();
     return (b.indexOf('direct to client')>=0||b.indexOf('b2b jlew')>=0||b.indexOf('b2b next')>=0) || (p.sales_order_ref||'').trim()!==''; }
+  // FOB pickup — mirrors the main app's isFOBdest: no shipment AND (Manufacturing branch OR a destination that
+  // isn't one of our import warehouses UK/US/EU/AU/CA). Used to badge FOB POs on the portal grid.
+  function ppIsFOB(p){ if(!p)return false; if(p.shipment)return false; if(/manufactur/i.test(p.branch||''))return true; return !/^(UK|US|EU|AU|CA)/i.test((p.country||'').trim()); }
   // debounce: coalesce rapid keystrokes into one call after `ms` quiet
   function debounce(fn,ms){ var t; return function(){ var a=arguments, c=this; clearTimeout(t); t=setTimeout(function(){ fn.apply(c,a); }, ms||220); }; }
   // normalise for matching: lowercase + drop spaces and the "└" tree char, so a search matches regardless of them
@@ -785,7 +788,7 @@
           return _grpHdr+'<tr><td class="l"><button class="save-btn pp-exp" data-i="'+i+'" data-po="'+esc(p.po)+'"><span class="mng-txt">MANAGE</span>'+(act>0?' <span class="ex-badge" title="'+act+' action'+(act>1?'s':'')+' needed">'+act+'</span>':'')+'</button></td>'
             +'<td class="l"><b>'+esc(p.po)+'</b></td>'
             +'<td class="l" style="width:38px;min-width:38px;white-space:nowrap">'+(p.prod_no?esc(p.prod_no):'<span class="mut">—</span>')+'</td>'
-            +'<td class="l"><span class="tool-badge '+statusBg(p.status)+'">'+esc(p.status||'')+'</span></td>'
+            +'<td class="l"><span class="tool-badge '+statusBg(p.status)+'">'+esc(p.status||'')+'</span>'+(ppIsFOB(p)?' <span style="background:#ede9fe;color:#6d28d9;border-radius:10px;font-size:9px;font-weight:700;padding:1px 6px;white-space:nowrap" title="FOB — collected at your factory, no import shipment">📦 FOB</span>':'')+'</td>'
             +'<td class="l">'+(p.country?esc(p.country):'<span class="mut">—</span>')+'</td>'
             +'<td class="l">'+(p.branch?esc(p.branch):'<span class="mut">—</span>')+'</td>'
             +'<td class="l" style="font-size:10px;line-height:1.05;max-width:130px;white-space:normal">'+(p.client?esc(p.client):'<span class="mut">—</span>')+'<br>'+(p.sales_order_ref?'<span class="mut">'+esc(p.sales_order_ref)+'</span>':'<span class="mut">—</span>')+'</td>'
