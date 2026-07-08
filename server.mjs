@@ -73,7 +73,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.324';
+const APP_VERSION = 'v25.325';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3463,7 +3463,10 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
       branchId = poRow.branch ? await cin7IdByCompany('Branches', poRow.branch) : null;
       if (poRow.branch && !branchId) return res.status(422).json({ error: 'Branch "' + poRow.branch + '" was not found in Cin7 Branches — cannot create the PO. Make the planner branch name match the Cin7 branch exactly, then retry.', lines: lines.length, mode });
       // DRAFT (isApproved:false) so a person reviews/approves in Cin7; stage New = standard new PO.
-      const create = { reference: po, memberId: Number(memberId), company: poRow.supplier_name || '', isApproved: false, stage: 'New', lineItems };
+      // All suppliers invoice in USD → force the PO currency to USD (Cin7 looks up the rate itself).
+      // Without this Cin7 defaults to the account currency (GBP) and our USD unitPrice values get
+      // mislabelled as GBP.
+      const create = { reference: po, memberId: Number(memberId), company: poRow.supplier_name || '', isApproved: false, stage: 'New', currencyCode: 'USD', lineItems };
       if (branchId) create.branchId = Number(branchId);
       if (edd) create.estimatedDeliveryDate = edd;
       r = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
@@ -3487,18 +3490,20 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
       const planUsdBy = {}; lines.forEach(l => { planUsdBy[String(l.sku).toUpperCase()] = Number(l.price); });   // plan cost in USD, for price validation
       const validateId = newId || cin7Id;
       async function getCin7Data() {
-        const g = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=1&fields=id,currencyRate,lineItems&where=' + encodeURIComponent('id=' + validateId),
+        const g = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=1&fields=id,currencyCode,currencyRate,lineItems&where=' + encodeURIComponent('id=' + validateId),
           { headers: { Authorization: auth, 'content-type': 'application/json' } });
         if (!g.ok) return null;
         const arr = await g.json(); const o = Array.isArray(arr) ? arr[0] : arr;
-        return { items: (o && Array.isArray(o.lineItems)) ? o.lineItems : [], rate: Number(o && o.currencyRate) || null };
+        return { items: (o && Array.isArray(o.lineItems)) ? o.lineItems : [], rate: Number(o && o.currencyRate) || null, cur: (o && o.currencyCode) || null };
       }
-      // Cin7 line price on read = unitPrice (base currency); USD = unitPrice × currencyRate. Compare to what we sent.
-      // Cin7 line price on read = unitPrice (base currency); USD = unitPrice × currencyRate. Compare to plan USD.
-      function priceOff(items, rate) { if (!rate) return [];
+      // Line unitPrice reads back in the ORDER currency. New POs are USD (all suppliers invoice in USD) so we
+      // compare unitPrice to plan USD directly. Legacy non-USD orders (GBP base) are compared via currencyRate.
+      function priceOff(items, rate, cur) {
+        const factor = (cur === 'USD') ? 1 : rate;      // USD order → unitPrice already USD; else convert to USD
+        if (!factor) return [];
         const by = {}; items.forEach(li => { if (li && li.code) by[String(li.code).toUpperCase()] = li; });
         const out = []; Object.keys(sentByCode).forEach(c => { const li = by[c]; if (!li || li.unitPrice == null) return;
-          const cin = Math.round(Number(li.unitPrice) * rate * 100) / 100, plan = Math.round((Number(planUsdBy[c]) || 0) * 100) / 100;
+          const cin = Math.round(Number(li.unitPrice) * factor * 100) / 100, plan = Math.round((Number(planUsdBy[c]) || 0) * 100) / 100;
           if (Math.abs(cin - plan) >= 0.01) out.push({ sku: sentByCode[c].code, plan: plan, cin7: cin }); });
         return out; }
       if (validateId) {
@@ -3507,11 +3512,11 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
           const byCode = {}; d.items.forEach(li => { if (li && li.code) byCode[String(li.code).toUpperCase()] = li; });
           const extras = Object.keys(byCode).filter(c => !sentByCode[c] && Number(byCode[c].qty) > 0);   // in Cin7, not in plan
           const qtyOff = Object.keys(sentByCode).filter(c => !byCode[c] || Number(byCode[c].qty) !== Number(sentByCode[c].qty));
-          const pOff = priceOff(d.items, d.rate);
-          validation = { checked: true, currency_rate: d.rate, extras: extras.length, qty_off: qtyOff.length, price_off: pOff.length, price_off_detail: pOff.slice(0, 60), corrected: false, aligned: (!extras.length && !qtyOff.length && !pOff.length) };
+          const pOff = priceOff(d.items, d.rate, d.cur);
+          validation = { checked: true, currency: d.cur, currency_rate: d.rate, extras: extras.length, qty_off: qtyOff.length, price_off: pOff.length, price_off_detail: pOff.slice(0, 60), corrected: false, aligned: (!extras.length && !qtyOff.length && !pOff.length) };
           if (extras.length || qtyOff.length || pOff.length) {
-            // corrective PUT: re-price EVERY line using the PO's real currencyRate (unitPrice = planUSD / rate) —
-            // this self-heals the create path (rate unknown at build) and any price drift — plus extras at qty 0.
+            // corrective PUT: re-send EVERY line at its plan USD cost (the order is USD, so unitPrice = planUSD
+            // directly) — self-heals any qty/price drift — plus any Cin7-only extras zeroed out.
             const fixItems = lines.map(l => ({ code: l.sku, qty: Number(l.qty), unitPrice: Number(l.price) || 0 }));
             const fix = fixItems.concat(extras.map(c => ({ code: byCode[c].code, qty: 0, unitPrice: Number(byCode[c].unitPrice) || 0 })));
             const body2 = [{ id: Number(validateId) || validateId, lineItems: fix }]; if (typeof curApproved === 'boolean') body2[0].isApproved = curApproved;
@@ -3522,7 +3527,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
             if (d2) { const b2 = {}; d2.items.forEach(li => { if (li && li.code) b2[String(li.code).toUpperCase()] = li; });
               validation.extras_after = Object.keys(b2).filter(c => !sentByCode[c] && Number(b2[c].qty) > 0).length;
               validation.qty_off_after = Object.keys(sentByCode).filter(c => !b2[c] || Number(b2[c].qty) !== Number(sentByCode[c].qty)).length;
-              const pOff2 = priceOff(d2.items, d2.rate); validation.price_off_after = pOff2.length; validation.price_off_detail = pOff2.slice(0, 60);
+              const pOff2 = priceOff(d2.items, d2.rate, d2.cur); validation.price_off_after = pOff2.length; validation.price_off_detail = pOff2.slice(0, 60);
               validation.aligned = (!validation.extras_after && !validation.qty_off_after && !validation.price_off_after); }
           }
         }

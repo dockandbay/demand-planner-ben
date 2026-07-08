@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.325 - Cin7 PO push: force currencyCode=USD
+
+Cin7 PO creates now set `currencyCode: 'USD'` (all suppliers invoice in USD). Previously the PO
+defaulted to the account currency (GBP) and our USD line costs were mislabelled as GBP — e.g.
+PO-57USLX3 showed a £61,481.99 total that was really the USD figure. Cin7 looks up the rate itself.
+
+- server.mjs `/api/supply/po/:po/cin7-lines`: add `currencyCode: 'USD'` to the create payload.
+- Price validation is now currency-aware: for USD orders it compares line `unitPrice` to plan USD
+  directly (no rate math); legacy non-USD (GBP) orders still convert via `currencyRate`.
+- Only affects newly-created POs. Existing GBP POs keep their currency until re-created.
+
 ## v25.324 - Inventory sourced from planner.products + all inventory fields numeric
 
 All on-hand inventory reads now come from `planner.products.inventory_*` instead of the
