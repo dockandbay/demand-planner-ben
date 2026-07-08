@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.326 - Cin7 PO push: use supplier default_currency (not hardcoded USD)
+
+The Cin7 PO currency now comes from `planner.suppliers.default_currency` instead of a hardcoded
+'USD'. All suppliers are USD today, but GBP/EUR/AUD/CAD are supported for when one changes.
+
+- server.mjs `cin7-lines`: PO's supplier lookup now joins `planner.suppliers` (by `supplier_id`,
+  falling back to name) to get `default_currency`; the create payload sets
+  `currencyCode: <supplier currency>` (default USD).
+- Price validation simplified to a direct compare (factor 1) for all currencies — line cost is held
+  in the supplier's currency, which is the order currency, so no rate conversion is needed (a GBP
+  order has currencyRate=1 vs the GBP account base — same calculation).
+- Follow-on: Fulfil invoices should align to the same supplier currency when that integration lands.
+
 ## v25.325 - Cin7 PO push: force currencyCode=USD
 
 Cin7 PO creates now set `currencyCode: 'USD'` (all suppliers invoice in USD). Previously the PO

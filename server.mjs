@@ -73,7 +73,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.325';
+const APP_VERSION = 'v25.326';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3393,7 +3393,15 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
   try {
     const erpRow = (await pool.query('SELECT erp_po_id FROM planner.erp_purchase_orders WHERE po=$1', [po])).rows[0];
     let cin7Id = erpRow && erpRow.erp_po_id;            // present → update; absent → create a new Cin7 PO (nulled below if the mirrored id turns out to be voided/gone)
-    const poRow = (await pool.query('SELECT coalesce(supplier_name,$2) supplier_name, coalesce(branch,$2) branch FROM planner.purchase_orders WHERE po=$1', [po, ''])).rows[0];
+    // Pull the supplier's default_currency (join by id first, else by name; default USD). The Cin7 PO is
+    // created in this currency so line costs (held in the supplier's currency) are labelled correctly.
+    const poRow = (await pool.query(
+      `SELECT coalesce(po.supplier_name,'') supplier_name, coalesce(po.branch,'') branch,
+              coalesce(s.default_currency, sn.default_currency, 'USD') currency
+       FROM planner.purchase_orders po
+       LEFT JOIN planner.suppliers s  ON s.id = po.supplier_id
+       LEFT JOIN planner.suppliers sn ON lower(sn.name) = lower(po.supplier_name)
+       WHERE po.po = $1`, [po])).rows[0];
     if (!poRow) return res.status(404).json({ error: 'PO ' + po + ' not found in the planner.' });
     const lines = (await pool.query(
       `SELECT l.sku, l.qty,
@@ -3463,10 +3471,10 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
       branchId = poRow.branch ? await cin7IdByCompany('Branches', poRow.branch) : null;
       if (poRow.branch && !branchId) return res.status(422).json({ error: 'Branch "' + poRow.branch + '" was not found in Cin7 Branches — cannot create the PO. Make the planner branch name match the Cin7 branch exactly, then retry.', lines: lines.length, mode });
       // DRAFT (isApproved:false) so a person reviews/approves in Cin7; stage New = standard new PO.
-      // All suppliers invoice in USD → force the PO currency to USD (Cin7 looks up the rate itself).
-      // Without this Cin7 defaults to the account currency (GBP) and our USD unitPrice values get
-      // mislabelled as GBP.
-      const create = { reference: po, memberId: Number(memberId), company: poRow.supplier_name || '', isApproved: false, stage: 'New', currencyCode: 'USD', lineItems };
+      // Set the PO currency to the supplier's default_currency (USD for all suppliers today; GBP/EUR/etc.
+      // supported). Cin7 looks up the rate itself. Without this Cin7 falls back to the GBP account currency
+      // and our line costs get mislabelled.
+      const create = { reference: po, memberId: Number(memberId), company: poRow.supplier_name || '', isApproved: false, stage: 'New', currencyCode: poRow.currency || 'USD', lineItems };
       if (branchId) create.branchId = Number(branchId);
       if (edd) create.estimatedDeliveryDate = edd;
       r = await fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
@@ -3496,11 +3504,11 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
         const arr = await g.json(); const o = Array.isArray(arr) ? arr[0] : arr;
         return { items: (o && Array.isArray(o.lineItems)) ? o.lineItems : [], rate: Number(o && o.currencyRate) || null, cur: (o && o.currencyCode) || null };
       }
-      // Line unitPrice reads back in the ORDER currency. New POs are USD (all suppliers invoice in USD) so we
-      // compare unitPrice to plan USD directly. Legacy non-USD orders (GBP base) are compared via currencyRate.
+      // Line unitPrice reads back in the ORDER currency, which equals the supplier's currency — the same
+      // currency the plan cost is held in. So compare directly (no rate conversion), uniform for every currency
+      // (a GBP order just has currencyRate=1 against the GBP account base — same calculation).
       function priceOff(items, rate, cur) {
-        const factor = (cur === 'USD') ? 1 : rate;      // USD order → unitPrice already USD; else convert to USD
-        if (!factor) return [];
+        const factor = 1;
         const by = {}; items.forEach(li => { if (li && li.code) by[String(li.code).toUpperCase()] = li; });
         const out = []; Object.keys(sentByCode).forEach(c => { const li = by[c]; if (!li || li.unitPrice == null) return;
           const cin = Math.round(Number(li.unitPrice) * factor * 100) / 100, plan = Math.round((Number(planUsdBy[c]) || 0) * 100) / 100;
