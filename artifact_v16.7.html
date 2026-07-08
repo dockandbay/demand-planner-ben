@@ -1210,6 +1210,7 @@ const BUY_KEYS=AFTER15?[PROJ[1].key,PROJ[2].key]:[PROJ[1].key];
 const BUY_LBL=AFTER15?`${MN[_CUR_M]} + ${PROJ[2].lbl}`:`${MN[_CUR_M]}`;
 
 let CUR='UK',SC_SEL=new Set(['ALL']),TI_SEL=new Set(['ALL']),ST_SEL=new Set(['ACTIVE','FUTURE']),CS_SEL=new Set(['ALL']),BU_SEL='ALL';
+let FBA_CARTON_MODE='FULL';   // FBA transfer sizing: 'FULL' = whole cartons (default), 'PARTIAL' = raw shortfall
 let BP_VIEW='buy'; // 'buy' (Buy 3PL/Urgent/FBA + 3PL transfer opps) | 'fba' (Transfer-to-FBA + FBA inbound)
 let PSKU=null,PMKT='UK';
 
@@ -1351,6 +1352,12 @@ function fbaTransferRec(sku,mkt){
   let base=Math.min(need,cap);
   if(base<=0)return 0;
   const d90=fbaFwdDemand(md,3), d60=fbaFwdDemand(md,2);
+  if(FBA_CARTON_MODE==='PARTIAL'){
+    // PARTIAL: ship the raw shortfall (within the 50% cap), no carton rounding. Keep the min-size floor.
+    const q=Math.round(base);
+    return q<0.2*d60?0:q;
+  }
+  // FULL (default): prioritise whole cartons where the 90-day FBA demand supports it.
   if(d90<0.7*cp)return 0;                              // too small for a full carton
   const cartons=Math.min(Math.floor(base/cp),Math.floor(d90/cp));
   const qty=cartons*cp;
@@ -2862,6 +2869,12 @@ var BUY_SCAFFOLD=`<div class="wrap">
           <button type="button" class="fbw-preset" onclick="document.getElementById('fbw').value=12;BP.render()" style="font-size:9px;padding:1px 5px;border:1px solid #d0d0d0;border-radius:3px;background:#f8f8f8;cursor:pointer">12</button>
         </span>
       </span>
+
+      <span class="sl">Cartons:</span>
+      <select class="si" id="fbaCarton" onchange="FBA_CARTON_MODE=this.value;BP.render()" title="Full = whole cartons only (default). Partial = ship the exact shortfall, part-cartons allowed." style="width:auto;padding:2px 6px">
+        <option value="FULL">Full (default)</option>
+        <option value="PARTIAL">Partial</option>
+      </select>
 
       <span class="sl">Transfer flag:</span>
       <span style="display:inline-flex;align-items:center;gap:6px"><span class="sl">over &gt;</span><input type="number" class="si" id="txh" value="20" onchange="BP.render()" style="width:60px"><span class="sl">wks, under &lt;</span><input type="number" class="si" id="txl" value="6" onchange="BP.render()" style="width:60px"><span class="sl">wks</span></span>

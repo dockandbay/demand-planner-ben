@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.342 - FBA transfer: CARTONS Full/Partial filter + robust case-pack
+
+- New **Cartons: Full (default) / Partial** toggle on the FBA transfer toolbar. Full = whole cartons only
+  (the existing full-carton logic); Partial = ship the exact shortfall within the 50% cap (part-cartons
+  allowed), keeping the min-size floor.
+- **`cp` (case pack) now falls back to `carton_qty` when `case_pack_size` is empty** (server PROD_CONST).
+  Previously ~65% of SKUs had no case_pack_size → cp defaulted to 1 → the full-carton rounding was a no-op
+  and recommendations came out as raw numbers (e.g. 111). Now they round to the real carton.
+
+Note: for SKUs that DO have a case pack (e.g. TOWLB-CAB-LG-KHAKI-R = 40 on both live+sandbox), the
+recommendation already rounds — a non-multiple there means the "Transfer FBA (non GRS)" mode (ships all
+non-GRS stock, unrounded) or an adjacent SOH/demand column, not the recommendation.
+
 ## v25.341 - Cin7: store supplier memberId + send on update + throttle all calls
 
 - **Migration 102**: `planner.suppliers.cin7_member_id` — stores each supplier's Cin7 contact id (seeded

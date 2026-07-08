@@ -73,7 +73,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.341';
+const APP_VERSION = 'v25.342';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -284,7 +284,7 @@ const BAKED_FM = (() => {
 //   per-SKU override wins); fm[co] -> baked (not in Supabase). Live so lead/cover/moq stay current.
 async function buildPROD_CONST() {
   const [prods, cover, ovr] = await Promise.all([
-    pool.query(`SELECT sku, case_pack_size cp, moq, supplier supp, category,
+    pool.query(`SELECT sku, coalesce(nullif(case_pack_size,0)::int, nullif(carton_qty,'')::numeric::int) cp, moq, supplier supp, category,
                        transfer_3pl_to_fba_lead_time_weeks lt,
                        china_to_uk_lead_time_weeks uk, china_to_us_lead_time_weeks us,
                        china_to_eu_lead_time_weeks eu, china_to_au_lead_time_weeks au,
