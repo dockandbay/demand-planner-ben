@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.351 - Remove the "open Cin7 PO" link from the Cin7 upload modal
+
+Removed the "— open Cin7 PO ↗" link from both push results (lines + date) in the SUPPLY ERP/Cin7 upload modal.
+
 ## v25.350 - Cin7: keep estimatedDeliveryDate on update + corrective PUT
 
 Moved `estimatedDeliveryDate` (completion date) into the shared `poFields`, so the update and the corrective
