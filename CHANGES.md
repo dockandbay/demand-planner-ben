@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.370 - Shipment drawer: Flexport reference is now a clickable link
+
+The "🔗 Linked to Flexport (FLEX-xxxxx)" reference in the shipment drawer now links to the Flexport
+shipment page (`https://app.flexport.com/shipments/<id>`, matching the existing ↗ link in the shipment
+list row).
+
 ## v25.369 - Invoice + Packing List generator (Commercial / Tax) — endpoints + engine
 
 New `invoice.mjs` (ExcelJS) fills the supplier template as a formatting shell with live data.

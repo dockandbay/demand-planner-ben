@@ -3215,9 +3215,11 @@
       return '<div style="margin-right:16px;min-width:130px"><div class="mut tiny" style="text-transform:uppercase;letter-spacing:.04em">'+lbl+'</div>'
         +'<div style="font-weight:700;font-size:15px;margin:2px 0 4px">'+(finalVal?esc(finalVal)+(src?'<span class="src '+(src==='S'?'m':'fx')+'">'+esc(src)+'</span>':''):'<span class="mut">—</span>')+'</div>'
         +'<div class="mut tiny">override</div>'+inp+'</div>'; };
+    function flexUrl(fid){ var m=String(fid||'').match(/(\d{4,})/); return m?'https://app.flexport.com/shipments/'+m[1]:null; }
+    function flexRef(fid){ var u=flexUrl(fid); return u?'<a href="'+u+'" target="_blank" rel="noopener" style="color:#0369a1;font-weight:700;text-decoration:underline">'+esc(fid)+' ↗</a>':esc(fid); }
     var head='<div class="sect-h">Shipment details</div>'
       +(locked
-        ? '<div class="tiny" style="margin-bottom:8px;color:#0369a1">🔗 Linked to Flexport ('+esc(s.flex_id)+') — dates come from the Flexport feed and can’t be overridden here.</div>'
+        ? '<div class="tiny" style="margin-bottom:8px;color:#0369a1">🔗 Linked to Flexport ('+flexRef(s.flex_id)+') — dates come from the Flexport feed and can’t be overridden here.</div>'
         : '<div class="mut tiny" style="margin-bottom:8px">Overrides take precedence over the POs aboard. <b>final</b> shows the date used and its source — <span class="src m">S</span> shipment override, <span class="src fx">FLEX</span> Flexport.</div>')
       +'<div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px 0;margin-bottom:10px">'
       +fld('Carrier', carrierSel(ep,s.carrier,s.mode_eff==='fob'))
