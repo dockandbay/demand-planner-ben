@@ -9,6 +9,7 @@ import express from 'express';
 import { readFileSync, appendFile } from 'fs';
 import pg from 'pg';
 import { buildInvoice } from './invoice.mjs';
+import { buildAsnLabelsPdf } from './asnpdf.mjs';
 
 // On Vercel (serverless) use Supabase's TRANSACTION pooler (port 6543) — built for many
 // short-lived serverless connections — with a tiny per-instance pool. Session pooler (5432)
@@ -74,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.371';
+const APP_VERSION = 'v25.372';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2762,6 +2763,19 @@ app.get('/api/invoice/shipment/:ref', async (req, res) => {
     const pos = (await pool.query('SELECT po FROM planner.purchase_orders WHERE shipment_ref=$1 OR po=$1', [ref])).rows.map((r) => r.po);
     if (!pos.length) return res.status(404).json({ error: 'No POs found for shipment ' + ref });
     sendXlsx(res, await buildInvoice(pool, { type: 'tax', pos, ref, master: ref }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// ASN pallet labels PDF (AU Coghlans) — one A4 landscape page per ASN number (1 ASN = 1 pallet).
+app.get('/api/asn-labels/:po', async (req, res) => {
+  const po = decodeURIComponent(req.params.po || '');
+  try {
+    const r = (await pool.query('SELECT asn_numbers FROM planner.purchase_orders WHERE po=$1', [po])).rows[0];
+    const asns = String((r && r.asn_numbers) || '').split(',').map((s) => s.trim()).filter(Boolean);
+    if (!asns.length) return res.status(400).json({ error: 'No ASN numbers entered for ' + po });
+    const buf = buildAsnLabelsPdf('DOCK & BAY PTY LTD', asns);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', "attachment; filename*=UTF-8''" + encodeURIComponent('ASN Pallet Labels - ' + po + '.pdf'));
+    res.send(buf);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/portal-note', async (req, res) => {

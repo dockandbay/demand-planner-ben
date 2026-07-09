@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.372 - Pre-shipment docs (Rule 1): AU Coghlans ASN entry + pallet-label PDF
+
+First slice of the pre-shipment documents feature. On a PO's PLAN ▸ SHIPMENTS sub-tab, the **ASN numbers**
+entry now shows **only for AU Coghlans** POs (1 ASN per pallet, comma-separated) with a **⤓ ASN PALLET LABELS**
+button. New `asnpdf.mjs` (dependency-free) + `GET /api/asn-labels/:po` generate an **A4 landscape** PDF, one
+page per ASN: large centred `DOCK & BAY PTY LTD` / `ASN# …` / `PALLET n`.
+(Still to come: the overdue exception/counter, the portal download + "NEW ASN" timeline, and Rules 2/3
+uploads for FBA/AWD + EU iFulfillment.)
+
 ## v25.371 - Invoice/Packing List download buttons (4 surfaces)
 
 Wired the generator endpoints into the UI:
