@@ -963,7 +963,7 @@
       +lookupDatalists()+'<div class="cli-form" style="max-width:620px">'
       +row('Shipment / FOB',ship)
       +((r.flex_id||r.flexport_reference)?row('Flexport <span class="mut tiny">(reference &amp; link)</span>',(function(){ var fid=r.flex_id||r.flexport_reference, u=flexUrl(fid); return u?'<a href="'+u+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;white-space:nowrap">'+esc(fid)+' ↗</a>':esc(fid); })()):'')
-      +(isCogh?row('ASN numbers <span class="mut tiny">(1 per pallet, comma-separated)</span>','<input class="fci txtin" data-ep="'+ep+'" data-field="asn_numbers" value="'+esc(r.asn_numbers||'')+'" placeholder="ASN1, ASN2…" style="width:280px;text-align:left"> <button class="save-btn" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd" title="download A4 pallet labels — one page per ASN (save your ASN entry first)" onclick="window.open(\'/api/asn-labels/\'+encodeURIComponent(\''+esc(po)+'\'))">⤓ ASN PALLET LABELS</button>'):'')
+      +(isCogh?row('ASN numbers <span class="mut tiny">(1 per pallet, comma-separated)</span>',(r.prod_end&&r.prod_end<today&&r.progress!=='complete'&&!String(r.asn_numbers||'').trim()?'<div style="color:#b91c1c;font-weight:700;margin-bottom:4px">⚠ ASN pallet labels overdue — production ended '+fd(r.prod_end)+'</div>':'')+'<input class="fci txtin" data-ep="'+ep+'" data-field="asn_numbers" value="'+esc(r.asn_numbers||'')+'" placeholder="ASN1, ASN2…" style="width:280px;text-align:left"> <button class="save-btn" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd" title="download A4 pallet labels — one page per ASN (save your ASN entry first)" onclick="window.open(\'/api/asn-labels/\'+encodeURIComponent(\''+esc(po)+'\'))">⤓ ASN PALLET LABELS</button>'):'')
       +row('Ships With Supplier labels','<button class="save-btn po-dl-sw" data-po="'+esc(po)+'" title="SHIPS WITH SUPPLIER master pallet label (carton size)">⤓ Ships With Supplier labels</button>')
       +'</div>'; }
   // iFulfillment pallet labels — opens a printable A4 sheet of one label per pallet (PO / shipment / ASN / pallet n of N).
@@ -1764,7 +1764,12 @@
     var _pse=r.require_confirmation?prodStatusException(r.status, r.prod_start, r.prod_end, today):''; if(_pse) dates.push('Production status: '+_pse);
     var timeline=[]; if(Number(r.unread_notes)>0) timeline.push(r.unread_notes+' unread supplier note'+(r.unread_notes>1?'s':''));
     var oplan=[]; if(Number(r.orderplan_unconfirmed)>0) oplan.push(r.orderplan_unconfirmed+' unconfirmed order-plan change'+(r.orderplan_unconfirmed>1?'s':''));
-    return { pay:pay, dates:dates, client:[], landed:landed, timeline:timeline, oplan:oplan, all:pay.concat(dates).concat(landed).concat(timeline).concat(oplan) }; }
+    // Pre-shipment docs (SHIPMENTS tab): overdue once production has ended (prod_end = override ▸ computed) and
+    // the required branch document is missing. Rule 1 (AU Coghlans): ASN pallet labels.
+    var ship=[];
+    if(open && r.prod_end && r.prod_end<today && /coghlans/i.test(r.branch||'') && !String(r.asn_numbers||'').trim())
+      ship.push('ASN pallet labels overdue — production ended '+fd(r.prod_end)+', no ASN numbers entered');
+    return { pay:pay, dates:dates, client:[], landed:landed, timeline:timeline, oplan:oplan, ship:ship, all:pay.concat(dates).concat(landed).concat(timeline).concat(oplan).concat(ship) }; }
   function payPanel(r,d){ if(!r)return '';
     var ep='/api/supply/po/'+encodeURIComponent(r.po);
     var bal1=Number(r.balance_1_amount), owe=Number(r.balance_owing)||0;
@@ -1857,6 +1862,7 @@
       +cliRow('Value used', '<b>'+money(r.value_used)+'</b>'+(r.is_final?' <span class="tool-badge bg-green">final</span>':''))
       +cliRow('<b>Total amount due</b>', '<b'+(totalDue>0.02?' style="color:#991b1b"':'')+'>'+money(totalDue)+'</b> <span class="mut tiny">remaining'+(paid>0.01?' · '+money(paid)+' paid':'')+'</span>')
       +'</div>'
+      +'<div style="margin:10px 0 4px"><button class="save-btn" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd" title="download the Commercial Invoice + Packing List for this PO" onclick="window.open(\'/api/invoice/po/\'+encodeURIComponent(\''+esc(r.po)+'\'))">📄 Commercial Invoice</button></div>'
       +'<div class="sect-h" style="margin-top:12px">Payment plan — terms from supplier; amount / date / % override inline (saves on blur)</div>'
       +'<div class="tw pay-tbl" style="max-width:1320px"><table><thead><tr><th class="l">Payment</th><th>Calc / est</th><th class="l">Amount</th><th class="l">Date paid</th><th class="l">Deposit ref</th><th class="l">Due</th><th class="l">Likely pay date</th><th class="l">Status</th></tr></thead><tbody>';
     h+=tr('<td class="l"><b>Start deposit</b> <input class="fci pctin payin" data-ep="'+ep+'" data-field="start_deposit_pct_override" value="'+esc(r.start_pct)+'"><span class="mut tiny">% · capped at ref avail</span></td>'
@@ -1972,7 +1978,7 @@
         :'Freight assumes <b>sea</b>, sized from the order-plan pallets (cheapest container combo). These freight &amp; import costs post to <b>CASH FLOW</b> on the due dates above — <b>unless a shipment is assigned</b>, in which case its freight &amp; tax are driven by the <b>SHIPMENTS</b> page instead.')+'</div>';
     // ---- exception counters per tab (red badge) — shared with the grid via poExceptions() ----
     var exc=poExceptions(r,d);
-    return { client:clientH, pay:payH, dates:datesH, landed:landedH, ex:{ pay:exc.pay.length, dates:exc.dates.length, client:exc.client.length, landed:exc.landed.length, timeline:exc.timeline.length, oplan:exc.oplan.length } }; }
+    return { client:clientH, pay:payH, dates:datesH, landed:landedH, ex:{ pay:exc.pay.length, dates:exc.dates.length, client:exc.client.length, landed:exc.landed.length, timeline:exc.timeline.length, oplan:exc.oplan.length, ship:exc.ship.length } }; }
   // ---- ORDER PLAN (PO PLAN): SKU × qty × est/supplier-submitted/final cost + line totals + order total ----
   // Shared ERP-deviation rule (banner + ORDER PLAN tab action badge use the SAME set): QUANTITY only —
   // price differences are never an exception. COMPLETE POs raise nothing.
@@ -2313,10 +2319,9 @@
     var linkedH='<div class="sect-h">Linked records across tables</div>'+blk('Deposit',d.deposit)+blk('Payments',d.payments)+blk('Flexport',d.flexport);
     var masterH=poMasterPanel(po), shipH=poShipPanel(po);
     var docsH=docsPanel(po,d);
-    var tabs=[['pay','PAYMENTS',p.pay,p.ex.pay],['dates','DATES',p.dates,p.ex.dates],['client','CLIENT/FBA',p.client,p.ex.client],['oplan','ORDER PLAN',oplanH,(p.ex.oplan||0)+erpN],['shipments','SHIPMENTS',shipH,0],['documents','DOCUMENTS',docsH,0],['masterdata','MASTER DATA',masterH,0],['landed','LANDED COSTS',p.landed,p.ex.landed],['timeline','TIMELINE',timelineH,p.ex.timeline],['linked','LINKED RECORDS',linkedH,0]];
+    var tabs=[['pay','PAYMENTS',p.pay,p.ex.pay],['dates','DATES',p.dates,p.ex.dates],['client','CLIENT/FBA',p.client,p.ex.client],['oplan','ORDER PLAN',oplanH,(p.ex.oplan||0)+erpN],['shipments','SHIPMENTS',shipH,(p.ex.ship||0)],['documents','DOCUMENTS',docsH,0],['masterdata','MASTER DATA',masterH,0],['landed','LANDED COSTS',p.landed,p.ex.landed],['timeline','TIMELINE',timelineH,p.ex.timeline],['linked','LINKED RECORDS',linkedH,0]];
     function badge(n){ return n>0?' <span class="ex-badge" title="'+n+' exception'+(n>1?'s':'')+' / action'+(n>1?'s':'')+'">'+n+'</span>':''; }
-    var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab potab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'" data-po="'+esc(po)+'">'+t[1]+badge(t[3])+'</button>';}).join('')
-      +'<button class="save-btn" style="margin-left:auto;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd" title="download the Commercial Invoice + Packing List for this PO" onclick="window.open(\'/api/invoice/po/\'+encodeURIComponent(\''+esc(po)+'\'))">📄 Commercial Invoice</button></div>';
+    var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab potab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'" data-po="'+esc(po)+'">'+t[1]+badge(t[3])+'</button>';}).join('')+'</div>';
     var panels=tabs.map(function(t,ti){return '<div class="potab-panel" data-pt="'+t[0]+'"'+(ti===0?'':' style="display:none"')+'>'+t[2]+'</div>';}).join('');
     return '<div class="po-detail-wrap" style="padding:4px 4px;max-width:1340px">'+bar+panels+'</div>'; }
 

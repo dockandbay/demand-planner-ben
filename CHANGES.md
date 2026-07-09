@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.373 - ASN overdue exception + PROD/BATCH dropdowns + Commercial Invoice button moved
+
+- **Pre-shipment docs Rule 1 exception:** a Coghlans PO past its production-end date (override ▸ computed)
+  with no ASN numbers now raises an overdue exception — red count on the PO's SHIPMENTS sub-tab + a red
+  "⚠ ASN pallet labels overdue" banner in the panel. (Row badge + SUPPLY ▸ Actions integration next.)
+- **PROD / BATCH filter dropdowns:** both list **most-recent first (descending)**; **PROD shows ACTIVE
+  productions only** (server: `status='ACTIVE' ORDER BY prod_no DESC`; batches already descending).
+- **Commercial Invoice button moved:** from the PO detail sub-nav to **under "Total amount due", above the
+  Payment plan grid**.
+
 ## v25.372 - Pre-shipment docs (Rule 1): AU Coghlans ASN entry + pallet-label PDF
 
 First slice of the pre-shipment documents feature. On a PO's PLAN ▸ SHIPMENTS sub-tab, the **ASN numbers**
