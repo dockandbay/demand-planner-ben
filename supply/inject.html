@@ -105,6 +105,8 @@
 /* Mobile: the drawer becomes a full-screen takeover (slides up from the bottom, dark app header) — a distinct
    experience from the desktop side-drawer. */
 @media (max-width:700px){
+  #supply-root #sup-count{display:none}            /* PO count line — hide on mobile */
+  #supply-root .po-erp-match{display:none}         /* ERP-match summary — hide on mobile */
   #supply-root #shipdrawer-bg{background:transparent!important}
   #supply-root #shipdrawer{top:0;right:0;left:0;width:100vw;height:100vh;height:100dvh;box-shadow:none;transform:translateY(100%);transition:transform .24s cubic-bezier(.4,0,.2,1)}
   #supply-root #shipdrawer-bg.open #shipdrawer{transform:translateY(0)}
@@ -1486,7 +1488,7 @@
   function poErpRecon(rows){ // ERP reconciliation summary across the visible POs
     var absent=0,drift=0,match=0,nolines=0,datedrift=0;
     rows.forEach(function(r){ if(r.erp_date_pending>0&&!poComplete(r))datedrift++; if(!(r.erp_total>0))nolines++; else if(!(r.erp_in>0))absent++; else if(r.erp_pending>0)drift++; else match++; });
-    return '<div class="count" style="margin-bottom:6px">ERP match: <b style="color:#15803d">'+match+' ✓ in sync</b>'
+    return '<div class="count po-erp-match" style="margin-bottom:6px">ERP match: <b style="color:#15803d">'+match+' ✓ in sync</b>'
       +(drift?' · <b style="color:#b45309">'+drift+' ⚠ qty/cost drift</b>':'')
       +(datedrift?' · <b style="color:#b45309">'+datedrift+' ⚠ date ≠ ERP</b>':'')
       +(absent?' · <b style="color:#b91c1c">'+absent+' ✗ not in ERP</b>':'')

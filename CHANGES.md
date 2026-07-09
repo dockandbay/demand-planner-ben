@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.354 - Purchase Orders: hide count + ERP-match summary on mobile
+
+On phones (≤700px) the "N / M POs" count line and the "ERP match: … in sync / drift / date ≠ ERP" summary
+are hidden to save space; both still show on desktop.
+
 ## v25.353 - Purchase Orders: "Import/Export" pop-down for the action buttons
 
 Consolidated the row of PO action buttons (+ New PO, Upload POs, Import PO from Cin7, CSV for Fulfil, Sync
