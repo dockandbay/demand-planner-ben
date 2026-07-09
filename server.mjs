@@ -73,7 +73,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.357';
+const APP_VERSION = 'v25.358';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3875,7 +3875,7 @@ app.post('/api/supply/po-import-cin7', async (req, res) => {
     let branch = null;
     if (o.branchId) { const bg = await cin7Fetch('https://api.cin7.com/api/v1/Branches?rows=1&fields=id,company&where=' + encodeURIComponent('id=' + o.branchId), { headers: { Authorization: auth, 'content-type': 'application/json' } }); if (bg.ok) { const ba = await bg.json(); if (Array.isArray(ba) && ba[0]) branch = ba[0].company; } }
     const delivery = o.estimatedDeliveryDate ? String(o.estimatedDeliveryDate).slice(0, 10) : null;
-    const lines = (o.lineItems || []).filter(l => l && l.code).map(l => ({ sku: String(l.code), qty: Math.round(Number(l.qty) || 0) }));
+    const lines = (o.lineItems || []).filter(l => l && l.code).map(l => ({ sku: String(l.code), qty: Math.round(Number(l.qty) || 0), cost: Number(l.unitCost != null ? l.unitCost : (l.unitPrice != null ? l.unitPrice : l.price)) || 0 }));
     const exists = (await pool.query('SELECT 1 FROM planner.purchase_orders WHERE po=$1', [o.reference])).rowCount > 0;
     const preview = { cin7_id: o.id, po: o.reference, supplier_name, supplier_id, branch, currency: o.currencyCode || null, delivery, isVoid: !!o.isVoid, lines, line_count: lines.length, exists };
     if (!confirm) return res.json({ found: true, preview });
@@ -3885,9 +3885,14 @@ app.post('/api/supply/po-import-cin7', async (req, res) => {
     } else {
       await pool.query("INSERT INTO planner.purchase_orders (po, supplier_name, supplier_id, branch, status, delivery_date_overide) VALUES ($1,$2,$3,$4,'FUTURE',$5::date)", [o.reference, supplier_name, supplier_id, branch, delivery]);
     }
+    // Replace the planner lines with Cin7's, and mirror the SAME values into the ERP mirror
+    // (erp_purchase_order_lines) so an imported PO reads as fully in-sync — no phantom drift. The
+    // import IS the ERP truth, so qty=erp_qty and cost_price=erp_cost=el.cost; nothing is "proposed".
     await pool.query('DELETE FROM planner.purchase_order_lines WHERE po=$1', [o.reference]);
+    await pool.query('DELETE FROM planner.erp_purchase_order_lines WHERE po=$1', [o.reference]);
     for (const l of lines) {
-      await pool.query("INSERT INTO planner.purchase_order_lines (po_sku, po, sku, qty, erp_qty, proposed_at, proposed_by) VALUES ($1,$2,$3,$4::int,$4::int,now(),'cin7-import') ON CONFLICT (po_sku) DO UPDATE SET qty=excluded.qty, erp_qty=excluded.erp_qty, proposed_at=now(), proposed_by='cin7-import'", [o.reference + '|' + l.sku, o.reference, l.sku, l.qty]);
+      await pool.query("INSERT INTO planner.purchase_order_lines (po_sku, po, sku, qty, erp_qty, cost_price, erp_cost, proposed_at, proposed_by) VALUES ($1,$2,$3,$4::int,$4::int,$5::numeric,$5::numeric,NULL,NULL) ON CONFLICT (po_sku) DO UPDATE SET qty=excluded.qty, erp_qty=excluded.erp_qty, cost_price=excluded.cost_price, erp_cost=excluded.erp_cost, proposed_at=NULL, proposed_by=NULL", [o.reference + '|' + l.sku, o.reference, l.sku, l.qty, l.cost]);
+      await pool.query("INSERT INTO planner.erp_purchase_order_lines (po, sku, qty, cost, synced_at) VALUES ($1,$2,$3::int,$4::numeric,now()) ON CONFLICT (po,sku) DO UPDATE SET qty=excluded.qty, cost=excluded.cost, synced_at=now()", [o.reference, l.sku, l.qty, l.cost]);
     }
     await pool.query('DELETE FROM planner.erp_purchase_orders WHERE po=$1', [o.reference]);
     await pool.query("INSERT INTO planner.erp_purchase_orders (po, erp_po_id, supplier_name, status, synced_at) VALUES ($1,$2,$3,'open',now())", [o.reference, String(o.id), supplier_name]);

@@ -3,6 +3,21 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.358 - Import PO from Cin7: no phantom ERP drift + light-blue toggle on the left
+
+- **Import from Cin7 now mirrors the ERP lines.** Previously an imported PO showed an immediate
+  qty discrepancy because only `purchase_order_lines` was written (stamped `proposed`), while the
+  drift comparison reads `planner.erp_purchase_order_lines` — which was left empty. Now the import
+  populates the ERP mirror with the SAME qty and cost it just imported, sets `erp_qty`/`erp_cost` on
+  the planner lines, and clears `proposed_at`/`proposed_by`. Result: a freshly imported PO reads as
+  fully in-sync with the ERP (no "Needs ERP" / drift flag). Cost is taken from Cin7's `unitCost`.
+- **Import/Export button** is now **light blue** and sits **on the left**, on the same row right after
+  the "Filter PO / supplier" box (was pushed to the far right with `margin-left:auto`).
+
+## v25.357 - Import PO from Cin7 button uses up arrow
+
+- Changed the "Import PO from Cin7" button glyph from ⬇ to ⬆ (import pulls a PO up into the planner).
+
 ## v25.356 - Default landing = SUPPLY ▸ Purchase Orders + fix mobile filter columns
 
 - **Default landing page is now SUPPLY ▸ Purchase Orders** — on a fresh load with no URL hash, the app routes
