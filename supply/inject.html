@@ -1389,7 +1389,9 @@
     goBtn.onclick=function(){ var r=(ref.value||'').trim(); goBtn.disabled=true; goBtn.textContent='Importing…';
       fetch('/api/supply/po-import-cin7',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({reference:r,confirm:true})}).then(function(x){return x.json();}).then(function(j){
         if(j&&j.error){ prev.innerHTML='<span style="color:#dc2626">'+esc(j.error)+'</span>'; goBtn.disabled=false; goBtn.textContent='Import'; return; }
-        bg.parentNode.removeChild(bg); invalidateDerived(); delete cache['purchase-orders']; selectSection('purchase-orders'); }).catch(function(e){ prev.innerHTML='<span style="color:#dc2626">Failed: '+esc(e.message||e)+'</span>'; goBtn.disabled=false; goBtn.textContent='Import'; }); };
+        bg.parentNode.removeChild(bg); invalidateDerived(); delete cache['purchase-orders'];
+        var impPo=(j&&j.po)||r; _poState={f:'in_progress',q:impPo,act:{},ctry:{},grp:'shipment',sup:'',prod:'',batch:'',branch:''};   // drop the imported PO into the search so the grid auto-filters to it
+        selectSection('purchase-orders'); }).catch(function(e){ prev.innerHTML='<span style="color:#dc2626">Failed: '+esc(e.message||e)+'</span>'; goBtn.disabled=false; goBtn.textContent='Import'; }); };
     bg.onclick=function(e){ if(e.target===bg)bg.parentNode.removeChild(bg); };
     document.getElementById('po-imp-cancel').onclick=function(){ bg.parentNode.removeChild(bg); };
     setTimeout(function(){ ref.focus(); },0);

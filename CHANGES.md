@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.368 - Import PO from Cin7: auto-filter the grid to the imported PO
+
+After a successful import, the imported PO number is dropped into the Purchase Orders search box so the grid
+immediately filters to just that PO (search spans all statuses, so it shows regardless of the status pill).
+
 ## v25.367 - Import PO from Cin7: land as PRODUCTION (not FUTURE)
 
 Newly imported POs were created with status FUTURE, which the Purchase Orders grid's default "In progress"
