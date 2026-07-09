@@ -3339,7 +3339,21 @@
   var PORTAL_SUP='', PORTAL_TAB='pos', PORTAL_PO_ST=null;   // CONFIG ▸ Portal preview: chosen supplier + inner tab + PO status filter
   var ROW_EDIT={};   // per-sub-tab: which row key is currently in Edit mode (Edit/Save rows for suppliers + productions)
   var ME=null;   // caller's app permissions (/api/me): {email,live,supply_edit,demand_edit,is_admin}. null until loaded; sandbox = full access.
-  function fetchMe(cb){ fetch('/api/me').then(function(r){return r.json();}).then(function(j){ ME=j||null; try{window.ME=ME;}catch(e){} if(cb)cb(); }).catch(function(){ if(cb)cb(); }); }
+  function fetchMe(cb){ fetch('/api/me').then(function(r){return r.json();}).then(function(j){ ME=j||null; try{window.ME=ME;}catch(e){} try{updatePermBanner();}catch(e){} if(cb)cb(); }).catch(function(){ if(cb)cb(); }); }
+  // Read-only UX. The server is the hard boundary (403); this surfaces it: a global 403-readonly toast
+  // (covers every view incl. DEMAND/FBA) + a banner on SUPPLY/CONFIG when you lack the edit right.
+  (function(){ if(window.__permFetchWrapped)return; window.__permFetchWrapped=true; var of=window.fetch;
+    window.fetch=function(){ return of.apply(this,arguments).then(function(res){
+      if(res&&res.status===403&&res.clone){ res.clone().json().then(function(j){ if(j&&j.code==='readonly')permToast(j.error||'Read-only access — ask an admin.'); }).catch(function(){}); }
+      return res; }); }; })();
+  function permToast(msg){ var t=document.getElementById('perm-toast'); if(!t){ t=document.createElement('div'); t.id='perm-toast'; t.style.cssText='position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#991b1b;color:#fff;padding:10px 16px;border-radius:8px;font:600 13px system-ui;z-index:300000;box-shadow:0 6px 20px rgba(0,0,0,.3);max-width:90vw;text-align:center'; document.body.appendChild(t); } t.textContent=msg; t.style.display='block'; clearTimeout(t._t); t._t=setTimeout(function(){t.style.display='none';},4600); }
+  function updatePermBanner(){ var root=document.getElementById('supply-root'); if(!root)return;
+    var app=document.getElementById('app'); var inConfig=app&&app.classList.contains('config-mode');
+    var ro=ME&&ME.live&&(inConfig?!(ME.supply_edit||ME.demand_edit):!ME.supply_edit);
+    var el=document.getElementById('perm-banner');
+    if(!ro){ if(el)el.style.display='none'; return; }
+    if(!el){ el=document.createElement('div'); el.id='perm-banner'; el.style.cssText='background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:7px 12px;border-radius:6px;margin:0 0 10px;font-size:12px;font-weight:700'; var content=document.getElementById('supply-content'); root.insertBefore(el, content||root.firstChild); }
+    el.style.display='block'; el.textContent='👁 Read-only access — you don’t have '+(inConfig?'CONFIG':'SUPPLY')+' edit rights here. Edits are rejected; ask an admin (CONFIG ▸ Permissions).'; }
   function renderConfig(d){ var c=document.getElementById('supply-content'); var sizes=d.sizes||[];
     var SUBS=[['tax','Import tax'],['freight','Freight rates'],['duty','Import duty'],['branches','Branches'],['suppliers','Suppliers'],['keyaccounts','Key accounts'],['batches','Batches'],['productions','Productions'],['products','Products'],['mfgbom','Manufacturing BOM'],['portalusers','Portal users'],['portal','Portal'],['forecast-export','Forecast export']];
     if(ME&&ME.is_admin)SUBS=SUBS.concat([['permissions','Permissions']]);   // admin-only tab
@@ -5096,6 +5110,7 @@
     document.querySelectorAll('#view-tabs-row .view-toggle').forEach(function(b){b.classList.remove('active');});
     var sb=document.getElementById('supply-btn'); if(sb)sb.classList.add('active');
     var fb=document.getElementById('supply-float'); if(fb)fb.style.display='none';
+    try{updatePermBanner();}catch(e){}
     if(noSelect!==true)selectSection(current||'actions'); }   // noSelect: caller (applyRoute) will select the routed section itself
   function hideSupply(){ var app=document.getElementById('app'); if(app){app.classList.remove('supply-active');app.classList.remove('config-mode');}
     document.body.classList.remove('supply-on');
@@ -5108,6 +5123,7 @@
   function enterConfig(){ showSupply(true); var app=document.getElementById('app'); if(app)app.classList.add('config-mode');
     var sb=document.getElementById('supply-btn'); if(sb)sb.classList.remove('active');
     var cb=document.getElementById('config-btn'); if(cb)cb.classList.add('active');
+    try{updatePermBanner();}catch(e){}
     selectSection('config'); }
   function ensureConfigButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('config-btn'))return;
     var btn=document.createElement('button'); btn.id='config-btn'; btn.className='view-toggle config-toggle'; btn.textContent='CONFIG';

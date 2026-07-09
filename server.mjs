@@ -73,7 +73,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.362';
+const APP_VERSION = 'v25.363';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -378,6 +378,48 @@ app.use((req, res, next) => {
     return next();
   }
   res.set('content-type', 'text/html').send(`<!doctype html><meta charset=utf8><title>Dock & Bay — Demand Planner</title><style>body{font-family:system-ui;background:#0f172a;color:#e2e8f0;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}form{background:#1e293b;padding:36px 40px;border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.4);text-align:center}h1{font-size:15px;letter-spacing:.18em;text-transform:uppercase;color:#94a3b8;margin:0 0 4px}h2{font-size:20px;margin:0 0 22px}input{padding:10px 12px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#fff;width:200px;text-align:center}button{margin-left:8px;padding:10px 18px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:600;cursor:pointer}</style><form method=get><h1>Dock &amp; Bay</h1><h2>Demand Planner</h2><input name=key type=password placeholder="Access key" autofocus><button>Enter</button></form>`);
+});
+
+// ── Edit-permission guard (access control, phase 4) ──────────────────────────────────────────────
+// Blocks write requests from users lacking the relevant grant. LIVE-ONLY: with no auth-proxy email
+// (sandbox/local) permsFor().live is false → every request passes, so this never bites in the sandbox.
+// Reads (GET/HEAD) are always open. Never gated here: the supplier portal (/api/portal/* — its own
+// magic-link auth), SCENARIO (open to all), /api/me, /api/ai, and the permissions API (self-checks admin).
+const CONFIG_WRITE = [   // config reference-data writes — editable by anyone with SUPPLY *or* DEMAND edit
+  /^\/api\/supply\/tax-rate\//, /^\/api\/supply\/freight-rate/, /^\/api\/supply\/freight-upsert$/,
+  /^\/api\/supply\/freight-pallets$/, /^\/api\/supply\/air-rate\//, /^\/api\/supply\/duty-rate/,
+  /^\/api\/supply\/duty-upsert$/, /^\/api\/supply\/branch\//, /^\/api\/supply\/supplier\//,
+  /^\/api\/supply\/supplier-create$/, /^\/api\/supply\/key-account/, /^\/api\/supply\/batch\//,
+  /^\/api\/supply\/batch-create$/, /^\/api\/supply\/production-create$/, /^\/api\/supply\/prod-number\//,
+  /^\/api\/supply\/portal-user/, /^\/api\/supply\/manufacturing-bom-(save|delete)$/,
+  /^\/api\/supply\/manufacturing-accept$/,
+];
+function requiredCap(method, p) {
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return null;   // reads open to all
+  if (p.startsWith('/api/portal/')) return null;             // supplier portal — separate magic-link auth
+  if (p.startsWith('/api/scenario/')) return null;           // SCENARIO open to all
+  if (p.startsWith('/api/config/permissions')) return null;  // permissions API self-checks admin
+  if (p === '/api/me' || p === '/api/ai') return null;       // profile + AI helper (no gated DB write)
+  if (p === '/api/save-forecasts' || p === '/api/save-sku-forecasts' || p === '/api/targets'
+      || p === '/api/demand-actions/state' || p.startsWith('/api/trading-calendar')
+      || p.startsWith('/api/forecast/')) return 'demand';    // DEMAND / forecasting domain
+  if (CONFIG_WRITE.some((re) => re.test(p))) return 'config'; // config reference data → supply OR demand
+  if (p.startsWith('/api/supply/')) return 'supply';          // everything else under supply = SUPPLY feature
+  return null;   // unknown non-supply write → fail-open (don't block routes we haven't classified)
+}
+app.use(async (req, res, next) => {
+  try {
+    const cap = requiredCap(req.method, req.path);
+    if (!cap) return next();
+    const me = await permsFor(req);
+    if (!me.live) return next();   // sandbox / no auth proxy → full access
+    const ok = cap === 'demand' ? me.demand_edit
+             : cap === 'supply' ? me.supply_edit
+             : cap === 'config' ? (me.supply_edit || me.demand_edit) : true;
+    if (ok) return next();
+    const label = cap === 'demand' ? 'DEMAND' : cap === 'config' ? 'CONFIG' : 'SUPPLY';
+    return res.status(403).json({ error: 'Read-only access — you don’t have ' + label + ' edit rights. Ask an admin (CONFIG ▸ Permissions).', code: 'readonly', cap });
+  } catch (e) { return next(); }   // the guard must never break a request itself
 });
 
 app.get('/', async (_req, res) => {

@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.363 - Permissions enforcement: server guard + read-only UX
+
+Phases 3 + 4 of access control (the actual lock).
+- **Server guard** (server.mjs): one middleware before all routes classifies every write request as
+  demand / supply / config and blocks it (403 `{code:'readonly'}`) unless the caller holds the grant.
+  **Live-only** — sandbox/local has no auth-proxy email so every request passes (Ben never locks himself
+  out). Reads (GET) always open. Never gated: supplier portal (`/api/portal/*`), SCENARIO, `/api/me`,
+  `/api/ai`, and the permissions API (self-checks admin). Config writes accept SUPPLY *or* DEMAND edit.
+  All five seeded users are full-access, so no one is restricted today — the guard only bites on future
+  partial grants.
+- **Client UX**: a global 403-readonly toast (covers every view incl. DEMAND/FBA) + a read-only banner on
+  SUPPLY/CONFIG when you lack the edit right. FBA Override + SCENARIO stay editable by all.
+
 ## v25.362 - Permissions: table + API + admin-only Config panel
 
 Phase 2 of access control (see migration **103_app_permissions.sql**).
