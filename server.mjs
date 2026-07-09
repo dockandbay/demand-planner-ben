@@ -73,7 +73,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.351';
+const APP_VERSION = 'v25.352';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3850,6 +3850,48 @@ app.post('/api/supply/po-create', async (req, res) => {
       [po, b.supplier_name || null, supId, b.country_code || null, b.branch || null,
        b.status || null, b.start_production || null]);
     res.json({ ok: true, po });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Import a purchase order FROM Cin7 into the planner (reverse of the push). Provide a Cin7 PO reference; we
+// read it from Cin7, map the supplier (via suppliers.cin7_member_id, else the Cin7 company name) and branch
+// (via branchId → Cin7 branch name), and bring in the line SKUs/quantities as-is. confirm=false → preview only;
+// confirm=true → write (overwrite the PO's lines from Cin7) + mirror the Cin7 id so future pushes update it.
+app.post('/api/supply/po-import-cin7', async (req, res) => {
+  const b = req.body || {}, reference = (b.reference || '').trim(), confirm = !!b.confirm;
+  if (!reference) return res.status(400).json({ error: 'PO reference required' });
+  const auth = cin7Auth();
+  if (!auth) return res.status(501).json({ error: 'Cin7 API credentials not configured (set CIN7_AUTH).' });
+  try {
+    const w = encodeURIComponent("reference='" + reference.replace(/'/g, "''") + "'");
+    const g = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?rows=1&fields=id,reference,memberId,branchId,company,currencyCode,estimatedDeliveryDate,isVoid,lineItems&where=' + w,
+      { headers: { Authorization: auth, 'content-type': 'application/json' } });
+    if (!g.ok) return res.status(502).json({ error: 'Cin7 read error ' + g.status });
+    const arr = await g.json(); const o = Array.isArray(arr) ? arr[0] : null;
+    if (!o || !o.id) return res.status(404).json({ error: 'No Cin7 purchase order found with reference "' + reference + '".' });
+    // supplier: reverse-map memberId → planner supplier; fall back to the Cin7 company name
+    let supplier_name = o.company || null, supplier_id = null;
+    if (o.memberId) { const s = await pool.query('SELECT id,name FROM planner.suppliers WHERE cin7_member_id=$1 LIMIT 1', [o.memberId]); if (s.rows[0]) { supplier_id = s.rows[0].id; supplier_name = s.rows[0].name; } }
+    // branch: Cin7 branchId → branch name
+    let branch = null;
+    if (o.branchId) { const bg = await cin7Fetch('https://api.cin7.com/api/v1/Branches?rows=1&fields=id,company&where=' + encodeURIComponent('id=' + o.branchId), { headers: { Authorization: auth, 'content-type': 'application/json' } }); if (bg.ok) { const ba = await bg.json(); if (Array.isArray(ba) && ba[0]) branch = ba[0].company; } }
+    const delivery = o.estimatedDeliveryDate ? String(o.estimatedDeliveryDate).slice(0, 10) : null;
+    const lines = (o.lineItems || []).filter(l => l && l.code).map(l => ({ sku: String(l.code), qty: Math.round(Number(l.qty) || 0) }));
+    const exists = (await pool.query('SELECT 1 FROM planner.purchase_orders WHERE po=$1', [o.reference])).rowCount > 0;
+    const preview = { cin7_id: o.id, po: o.reference, supplier_name, supplier_id, branch, currency: o.currencyCode || null, delivery, isVoid: !!o.isVoid, lines, line_count: lines.length, exists };
+    if (!confirm) return res.json({ found: true, preview });
+    // IMPORT (overwrite): upsert header, replace lines from Cin7, mirror the Cin7 id
+    if (exists) {
+      await pool.query('UPDATE planner.purchase_orders SET supplier_name=$2, supplier_id=$3, branch=$4, delivery_date_overide=coalesce($5::date, delivery_date_overide), updated_at=now() WHERE po=$1', [o.reference, supplier_name, supplier_id, branch, delivery]);
+    } else {
+      await pool.query("INSERT INTO planner.purchase_orders (po, supplier_name, supplier_id, branch, status, delivery_date_overide) VALUES ($1,$2,$3,$4,'FUTURE',$5::date)", [o.reference, supplier_name, supplier_id, branch, delivery]);
+    }
+    await pool.query('DELETE FROM planner.purchase_order_lines WHERE po=$1', [o.reference]);
+    for (const l of lines) {
+      await pool.query("INSERT INTO planner.purchase_order_lines (po_sku, po, sku, qty, erp_qty, proposed_at, proposed_by) VALUES ($1,$2,$3,$4::int,$4::int,now(),'cin7-import') ON CONFLICT (po_sku) DO UPDATE SET qty=excluded.qty, erp_qty=excluded.erp_qty, proposed_at=now(), proposed_by='cin7-import'", [o.reference + '|' + l.sku, o.reference, l.sku, l.qty]);
+    }
+    await pool.query('DELETE FROM planner.erp_purchase_orders WHERE po=$1', [o.reference]);
+    await pool.query("INSERT INTO planner.erp_purchase_orders (po, erp_po_id, supplier_name, status, synced_at) VALUES ($1,$2,$3,'open',now())", [o.reference, String(o.id), supplier_name]);
+    res.json({ ok: true, imported: true, po: o.reference, lines: lines.length, supplier_name, branch, currency: o.currencyCode || null, cin7_id: o.id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Bulk-upload POs from a pasted/uploaded list. Each row: PO (+ optional supplier/ship-to/branch/status/start

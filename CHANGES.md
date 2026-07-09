@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.352 - Import a PO from Cin7 into the planner
+
+New **"⬇ Import PO from Cin7"** button on SUPPLY ▸ Purchase Orders → popup: enter a Cin7 PO number, it reads
+that PO from Cin7 and imports it into the planner.
+- Maps supplier (reverse `suppliers.cin7_member_id`, else the Cin7 company name), branch (Cin7 branchId →
+  branch name), and the line SKUs + quantities (imported as-is, incl. unknown SKUs). Also brings the delivery
+  date (→ `delivery_date_overide`) and shows the Cin7 currency.
+- Preview first (supplier / branch / currency / delivery / lines / "already exists" flag), then Import.
+- If the PO already exists, its lines are **overwritten** from Cin7. Mirrors the Cin7 id so future pushes
+  update rather than duplicate. Endpoint `POST /api/supply/po-import-cin7` (preview vs confirm).
+- Note: currency is shown but not stored on the PO (no column — it's derivable from the supplier).
+
 ## v25.351 - Remove the "open Cin7 PO" link from the Cin7 upload modal
 
 Removed the "— open Cin7 PO ↗" link from both push results (lines + date) in the SUPPLY ERP/Cin7 upload modal.

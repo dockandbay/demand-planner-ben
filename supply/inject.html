@@ -1148,7 +1148,7 @@
       +'<input class="flt" id="sup-search" placeholder="Filter PO / supplier…" value="'+esc(state.q||'')+'" style="background:#eff6ff;border-color:#93c5fd"><span class="count" id="sup-count"></span>'
       +'<button class="save-btn po-filt-toggle" id="po-filt-toggle">⚙ Filters</button>'
       +(function(){ var lb='background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;';   // light-blue PO action buttons
-        return '<span style="margin-left:auto"><button class="save-btn" id="po-new" style="'+lb+'margin-right:8px">+ New PO</button><button class="save-btn" id="po-upload" style="'+lb+'margin-right:8px">⬆ Upload POs</button><button class="save-btn" id="po-csv" style="'+lb+'margin-right:8px">⬇ CSV for Fulfil</button><button class="save-btn" id="po-cin7-dates" style="'+lb+'" title="push the planner completion date to Cin7 EstimatedDeliveryDate for every ACTIVE PO whose date differs from Cin7 — complete POs are skipped (live write)">📅 Sync Cin7 dates</button></span></div>'; })()
+        return '<span style="margin-left:auto"><button class="save-btn" id="po-new" style="'+lb+'margin-right:8px">+ New PO</button><button class="save-btn" id="po-upload" style="'+lb+'margin-right:8px">⬆ Upload POs</button><button class="save-btn" id="po-import-cin7" style="'+lb+'margin-right:8px" title="import a purchase order from Cin7 by its PO number — brings in supplier, branch, SKUs &amp; quantities">⬇ Import PO from Cin7</button><button class="save-btn" id="po-csv" style="'+lb+'margin-right:8px">⬇ CSV for Fulfil</button><button class="save-btn" id="po-cin7-dates" style="'+lb+'" title="push the planner completion date to Cin7 EstimatedDeliveryDate for every ACTIVE PO whose date differs from Cin7 — complete POs are skipped (live write)">📅 Sync Cin7 dates</button></span></div>'; })()
       +'<div class="bar" id="po-ctry"><span class="pill-lbl">Ship to</span>'+CTRYP.map(function(a){return '<span class="pill'+(state.ctry[a[0]]?' active':'')+'" data-c="'+a[0]+'">'+(CFLAG[a[0]]?CFLAG[a[0]]+' ':'')+a[1]+'</span>';}).join('')
       +'<span class="pill-lbl" style="margin-left:14px">Supplier</span><select class="flt" id="po-sup" style="width:180px;max-width:180px;cursor:pointer;text-overflow:ellipsis'+(state.sup?SEL_ON:'')+'"><option value="">All suppliers</option>'+(supplierList||[]).slice().sort().map(function(s){return '<option'+(s===state.sup?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select>'
       +'<span class="pill-lbl" style="margin-left:14px">Branch</span><select class="flt" id="po-branch" style="width:auto;max-width:150px;cursor:pointer;text-overflow:ellipsis'+(state.branch?SEL_ON:'')+'"><option value="">All branches</option>'+optList(_branches,state.branch)+'</select>'
@@ -1294,6 +1294,7 @@
       var sup=prompt('Supplier (optional — exact name; set later in the row otherwise):')||'';
       shipPost('/api/supply/po-create',{po:po.trim(),supplier_name:sup.trim()||null,status:'FUTURE'},function(){ delete cache['purchase-orders']; selectSection('purchase-orders'); }); };
     document.getElementById('po-upload').onclick=openPoUpload;
+    var _impBtn=document.getElementById('po-import-cin7'); if(_impBtn)_impBtn.onclick=openPoImportCin7;
     // BULK Cin7 date sync — every ACTIVE PO whose completed-at-warehouse date differs from Cin7 (same condition as
     // the row "⚠ Date ≠ ERP" button); complete POs are excluded (poComplete). Live write → strong confirm.
     document.getElementById('po-cin7-dates').onclick=function(){ var btn=this;
@@ -1337,6 +1338,34 @@
         start_production:map.start_production>=0?(c[map.start_production]||''):'',
         sku:map.sku>=0?(c[map.sku]||''):'', qty:map.qty>=0?(c[map.qty]||''):''}); }
     return out; }
+  // Import a PO from Cin7 by number: check → preview → import (overwrites lines if the PO already exists).
+  function openPoImportCin7(){ var bg=document.createElement('div'); bg.className='pomodal-bg';
+    bg.innerHTML='<div class="pomodal"><div style="font-weight:600;font-size:14px;margin-bottom:6px">Import PO from Cin7</div>'
+      +'<div class="mut tiny" style="margin-bottom:8px">Enter a Cin7 purchase order number. We read it from Cin7 and import the supplier, branch, SKUs &amp; quantities into the planner. If the PO already exists, its lines are overwritten from Cin7.</div>'
+      +'<div style="display:flex;gap:6px;align-items:center"><input id="po-imp-ref" type="text" placeholder="e.g. PO-56USMQ1" style="flex:1;font-size:13px;padding:5px 8px;border:1px solid #d0d0d0;border-radius:6px"><button class="save-btn" id="po-imp-check">Check Cin7</button></div>'
+      +'<div id="po-imp-prev" style="margin:8px 0;font-size:12px">&nbsp;</div>'
+      +'<div style="display:flex;align-items:center;margin-top:8px"><span style="margin-left:auto"></span><button class="save-btn light" id="po-imp-cancel">Cancel</button> <button class="save-btn dark" id="po-imp-go" style="margin-left:6px;display:none">Import</button></div></div>';
+    document.body.appendChild(bg);
+    var ref=document.getElementById('po-imp-ref'), prev=document.getElementById('po-imp-prev'), goBtn=document.getElementById('po-imp-go');
+    function doCheck(){ var r=(ref.value||'').trim(); if(!r){prev.textContent='Enter a PO number.';return;} prev.textContent='Checking Cin7…'; goBtn.style.display='none';
+      fetch('/api/supply/po-import-cin7',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({reference:r})}).then(function(x){return x.json();}).then(function(j){
+        if(j&&j.error){ prev.innerHTML='<span style="color:#dc2626">'+esc(j.error)+'</span>'; return; }
+        var p=j.preview;
+        prev.innerHTML='<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:8px">'
+          +'<div><b>'+esc(p.po)+'</b>'+(p.isVoid?' <span style="color:#dc2626">(VOID in Cin7)</span>':'')+(p.exists?' <span style="color:#b45309">· already in planner — lines will be overwritten</span>':'')+'</div>'
+          +'<div class="mut tiny" style="margin-top:2px">Supplier: <b>'+esc(p.supplier_name||'—')+'</b> · Branch: <b>'+esc(p.branch||'—')+'</b> · Currency: '+esc(p.currency||'—')+(p.delivery?' · Delivery: '+esc(p.delivery):'')+'</div>'
+          +'<div class="mut tiny" style="margin-top:3px">'+p.line_count+' line(s): '+esc(p.lines.slice(0,8).map(function(l){return l.sku+'×'+l.qty;}).join(', '))+(p.line_count>8?' …':'')+'</div></div>';
+        goBtn.style.display=''; }).catch(function(e){ prev.innerHTML='<span style="color:#dc2626">Failed: '+esc(e.message||e)+'</span>'; }); }
+    document.getElementById('po-imp-check').onclick=doCheck;
+    ref.onkeydown=function(e){ if(e.key==='Enter')doCheck(); };
+    goBtn.onclick=function(){ var r=(ref.value||'').trim(); goBtn.disabled=true; goBtn.textContent='Importing…';
+      fetch('/api/supply/po-import-cin7',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({reference:r,confirm:true})}).then(function(x){return x.json();}).then(function(j){
+        if(j&&j.error){ prev.innerHTML='<span style="color:#dc2626">'+esc(j.error)+'</span>'; goBtn.disabled=false; goBtn.textContent='Import'; return; }
+        bg.parentNode.removeChild(bg); invalidateDerived(); delete cache['purchase-orders']; selectSection('purchase-orders'); }).catch(function(e){ prev.innerHTML='<span style="color:#dc2626">Failed: '+esc(e.message||e)+'</span>'; goBtn.disabled=false; goBtn.textContent='Import'; }); };
+    bg.onclick=function(e){ if(e.target===bg)bg.parentNode.removeChild(bg); };
+    document.getElementById('po-imp-cancel').onclick=function(){ bg.parentNode.removeChild(bg); };
+    setTimeout(function(){ ref.focus(); },0);
+  }
   function openPoUpload(){ var bg=document.createElement('div'); bg.className='pomodal-bg';
     bg.innerHTML='<div class="pomodal"><div style="font-weight:600;font-size:14px;margin-bottom:6px">Upload purchase orders</div>'
       +'<div class="mut tiny" style="margin-bottom:8px">Paste rows (comma or tab separated). Include a <b>header row</b> to use SKU/Qty. Recognised columns: <b>PO</b>, Supplier, Ship to (UK/US/AU/EU/CA/DIRECT), Branch, Status, Start (YYYY-MM-DD), <b>SKU</b>, <b>Qty</b>. SKU + Qty are optional — repeat the PO on multiple lines to add several SKU/qty order-plan lines. New POs are created; <b>existing POs keep their details and just get the lines added</b>. Tip: open the template in Excel / Google Sheets, fill it in, then copy the cells and paste here — a Sheets/Excel paste is tab-separated and works without commas.</div>'
