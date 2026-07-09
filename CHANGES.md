@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.366 - Fix: move Consignees endpoints off /api/supply/ (route collision)
+
+The consignee routes were shadowed by the generic `/api/supply/:section` (GET) and `/api/supply/:po`
+(POST) catch-alls. Moved them to `/api/consignees`, `/api/consignee`, `/api/consignee/:country/delete`
+and gated the writes as config in the permission guard. Verified: list works, sandbox write allowed,
+read-only live user blocked (403).
+
 ## v25.365 - CONFIG ▸ Consignees + invoice product fields (invoice-generator groundwork)
 
 Groundwork for the Commercial/Tax Invoice + Packing List generator.
