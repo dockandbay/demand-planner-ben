@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.365 - CONFIG ▸ Consignees + invoice product fields (invoice-generator groundwork)
+
+Groundwork for the Commercial/Tax Invoice + Packing List generator.
+- **CONFIG ▸ Consignees** (new sub-tab, styled like Import tax): consignee + notify-party (+ port of
+  discharge) addresses per delivery country, editable. **Any country not listed falls back to UK.**
+  Table `planner.invoice_consignees` (migration 105), seeded UK/US/EU/AU from the template. New endpoints
+  `GET /api/supply/consignees`, `POST /api/supply/consignee`, `.../:country/delete` (config-gated).
+- **products invoice fields** (migration 104): `sku_invoice_title` + `hscode_uk/us/eu/ca/au`, sourced from
+  Ben's CSV (Airtable-owned). Generator uses `hscode_<country>` with `hscode_us` as the fallback.
+
 ## v25.364 - FBA Cartons filter: add "Any" (default) + scope to Transfer FBA modes
 
 Fix: the Full/Partial cartons sizing defaulted to **Full**, which zeroes the transfer for any SKU whose

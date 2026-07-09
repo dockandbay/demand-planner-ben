@@ -73,7 +73,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.364';
+const APP_VERSION = 'v25.365';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -392,7 +392,7 @@ const CONFIG_WRITE = [   // config reference-data writes — editable by anyone 
   /^\/api\/supply\/supplier-create$/, /^\/api\/supply\/key-account/, /^\/api\/supply\/batch\//,
   /^\/api\/supply\/batch-create$/, /^\/api\/supply\/production-create$/, /^\/api\/supply\/prod-number\//,
   /^\/api\/supply\/portal-user/, /^\/api\/supply\/manufacturing-bom-(save|delete)$/,
-  /^\/api\/supply\/manufacturing-accept$/,
+  /^\/api\/supply\/manufacturing-accept$/, /^\/api\/supply\/consignee/,
 ];
 function requiredCap(method, p) {
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return null;   // reads open to all
@@ -2723,6 +2723,23 @@ app.delete('/api/config/permissions/:email', async (req, res) => { const me = aw
     const isAdminRow = (await pool.query('SELECT is_admin FROM planner.app_permissions WHERE lower(email)=$1', [email])).rows[0];
     if (isAdminRow && isAdminRow.is_admin) { const n = (await pool.query('SELECT count(*)::int n FROM planner.app_permissions WHERE is_admin')).rows[0].n; if (n <= 1) return res.status(400).json({ error: 'cannot remove the last admin' }); }
     await pool.query('DELETE FROM planner.app_permissions WHERE lower(email)=$1', [email]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
+
+// ── CONFIG ▸ Consignees ── per-delivery-country consignee + notify-party addresses for the invoice generator.
+// The generator falls back to the UK row for any country not listed here. Config-gated (see CONFIG_WRITE).
+app.get('/api/supply/consignees', async (req, res) => {
+  try { const r = await pool.query("SELECT country, consignee, notify_party, port_of_discharge, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at, updated_by FROM planner.invoice_consignees ORDER BY country");
+    res.json(r.rows); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/supply/consignee', async (req, res) => {
+  const b = req.body || {}; const country = String(b.country || '').trim().toUpperCase();
+  if (!country) return res.status(400).json({ error: 'country required' });
+  try { await pool.query(`INSERT INTO planner.invoice_consignees (country, consignee, notify_party, port_of_discharge, updated_at, updated_by)
+      VALUES ($1,$2,$3,$4,now(),$5) ON CONFLICT (country) DO UPDATE SET consignee=excluded.consignee, notify_party=excluded.notify_party, port_of_discharge=excluded.port_of_discharge, updated_at=now(), updated_by=excluded.updated_by`,
+      [country, b.consignee || null, b.notify_party || null, b.port_of_discharge || null, (await permsFor(req)).email || 'sandbox']);
+    res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/supply/consignee/:country/delete', async (req, res) => {
+  const country = String(req.params.country || '').trim().toUpperCase();
+  try { await pool.query('DELETE FROM planner.invoice_consignees WHERE country=$1', [country]); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/supply/portal-note', async (req, res) => {
   const b = req.body || {};
