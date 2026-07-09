@@ -1210,7 +1210,7 @@ const BUY_KEYS=AFTER15?[PROJ[1].key,PROJ[2].key]:[PROJ[1].key];
 const BUY_LBL=AFTER15?`${MN[_CUR_M]} + ${PROJ[2].lbl}`:`${MN[_CUR_M]}`;
 
 let CUR='UK',SC_SEL=new Set(['ALL']),TI_SEL=new Set(['ALL']),ST_SEL=new Set(['ACTIVE','FUTURE']),CS_SEL=new Set(['ALL']),BU_SEL='ALL';
-let FBA_CARTON_MODE='FULL';   // FBA transfer sizing: 'FULL' = whole cartons (default), 'PARTIAL' = raw shortfall
+let FBA_CARTON_MODE='ANY';   // FBA transfer sizing: 'ANY' = full shortfall, no restriction (default) | 'FULL' = whole cartons only | 'PARTIAL' = raw shortfall with floor
 let BP_VIEW='buy'; // 'buy' (Buy 3PL/Urgent/FBA + 3PL transfer opps) | 'fba' (Transfer-to-FBA + FBA inbound)
 let PSKU=null,PMKT='UK';
 
@@ -1352,6 +1352,11 @@ function fbaTransferRec(sku,mkt){
   let base=Math.min(need,cap);
   if(base<=0)return 0;
   const d90=fbaFwdDemand(md,3), d60=fbaFwdDemand(md,2);
+  if(FBA_CARTON_MODE==='ANY'){
+    // ANY (default): the full shortfall within the 50% cap — no carton rounding, no min-size floor, so
+    // every SKU with real FBA need shows (nothing is filtered out by carton sizing).
+    return Math.round(base);
+  }
   if(FBA_CARTON_MODE==='PARTIAL'){
     // PARTIAL: ship the raw shortfall (within the 50% cap), no carton rounding. Keep the min-size floor.
     const q=Math.round(base);
@@ -1549,8 +1554,9 @@ function initUI(){
   // FBA transfer sizing pills: Full (whole cartons, default) / Partial — FBA view only
   const cartp=document.getElementById('cartp'), cartpWrap=document.getElementById('cartp-wrap');
   if(cartp){ cartp.innerHTML='';
-    if(BP_VIEW==='fba'){ if(cartpWrap)cartpWrap.style.display='inline-flex';
-      [['Full','FULL'],['Partial','PARTIAL']].forEach(([lbl,val])=>{
+    // Carton sizing only applies to the transfer recommendation — show the pills only under Transfer FBA modes.
+    if(BP_VIEW==='fba' && (BU_SEL==='TRFFBA'||BU_SEL==='TRFFBA_NG')){ if(cartpWrap)cartpWrap.style.display='inline-flex';
+      [['Any','ANY'],['Full','FULL'],['Partial','PARTIAL']].forEach(([lbl,val])=>{
         const b=mk('button','pill'+(val===FBA_CARTON_MODE?' active':''),lbl);
         if(val!==FBA_CARTON_MODE)b.style.opacity='.55';
         b.onclick=()=>{ FBA_CARTON_MODE=val; render(); };
@@ -2842,7 +2848,7 @@ var BUY_SCAFFOLD=`<div class="wrap">
     <div style="display:flex;gap:3px" id="csp"></div>
     <div style="width:1px;height:14px;background:#e0e0e0;margin:0 4px;flex-shrink:0"></div>
     <div style="display:flex;gap:3px" id="bup"></div>
-    <span id="cartp-wrap" style="display:none;align-items:center;gap:3px"><div style="width:1px;height:14px;background:#e0e0e0;margin:0 4px;flex-shrink:0"></div><span class="pill-lbl" title="Full = whole cartons only. Partial = exact shortfall, part-cartons allowed.">Cartons</span><span style="display:flex;gap:3px" id="cartp"></span></span>
+    <span id="cartp-wrap" style="display:none;align-items:center;gap:3px"><div style="width:1px;height:14px;background:#e0e0e0;margin:0 4px;flex-shrink:0"></div><span class="pill-lbl" title="Any = full shortfall, no restriction (default). Full = whole cartons only. Partial = exact shortfall with min-size floor.">Cartons</span><span style="display:flex;gap:3px" id="cartp"></span></span>
   </div>
   </div><!-- /#bp-filters -->
   <div style="display:flex;align-items:center;gap:6px;font-size:11px;flex-wrap:wrap">

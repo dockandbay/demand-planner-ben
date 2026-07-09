@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.364 - FBA Cartons filter: add "Any" (default) + scope to Transfer FBA modes
+
+Fix: the Full/Partial cartons sizing defaulted to **Full**, which zeroes the transfer for any SKU whose
+90-day FBA demand is under ~0.7 of a carton — so under **Transfer FBA** (which hides rows with 0 transfer)
+the grid showed nothing.
+- Added **Any** (new default): full shortfall within the 50% cap, no carton rounding and no min-size floor,
+  so every SKU with real FBA need shows.
+- The Any / Full / Partial pills now appear **only** under **Transfer FBA** or **Transfer FBA (non GRS)**
+  (carton sizing is irrelevant otherwise).
+
 ## v25.363 - Permissions enforcement: server guard + read-only UX
 
 Phases 3 + 4 of access control (the actual lock).
