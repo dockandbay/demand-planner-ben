@@ -73,7 +73,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.361';
+const APP_VERSION = 'v25.362';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2649,6 +2649,39 @@ function authUser(req) {
 // Author to stamp on an INTERNAL (Dock & Bay side) note: the signed-in user if the auth layer forwards it,
 // else a real name the client passed (ignore the generic "Dock & Bay" placeholder), else null.
 function internalAuthor(req, clientVal) { const u = authUser(req); if (u) return u; return (clientVal && clientVal !== 'Dock & Bay') ? clientVal : null; }
+
+// ── Access control ────────────────────────────────────────────────────────────────────────────
+// Resolve the caller's app permissions. LIVE-ONLY: with no auth proxy (sandbox/local) there is no email,
+// so everyone is full access (live=false) and the model doesn't bite. On live, an email absent from
+// planner.app_permissions is read-only everywhere.
+async function permsFor(req) {
+  const email = authUser(req);
+  if (!email) return { email: null, live: false, supply_edit: true, demand_edit: true, is_admin: true };
+  const e = email.toLowerCase();
+  let row = null;
+  try { row = (await pool.query('SELECT supply_edit, demand_edit, is_admin FROM planner.app_permissions WHERE lower(email)=$1', [e])).rows[0] || null; } catch (_) {}
+  return { email: e, live: true, supply_edit: !!(row && row.supply_edit), demand_edit: !!(row && row.demand_edit), is_admin: !!(row && row.is_admin) };
+}
+// What the client asks on load to decide what to enable (read-only UI otherwise).
+app.get('/api/me', async (req, res) => { try { res.json(await permsFor(req)); } catch (e) { res.status(500).json({ error: e.message }); } });
+// Permissions admin — ADMIN-ONLY (sandbox counts as admin so Ben can build/test locally).
+app.get('/api/config/permissions', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
+  try { const r = await pool.query('SELECT email, supply_edit, demand_edit, is_admin, to_char(updated_at,\'YYYY-MM-DD HH24:MI\') updated_at, updated_by FROM planner.app_permissions ORDER BY email'); res.json(r.rows); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/config/permissions', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
+  const b = req.body || {}; const email = String(b.email || '').trim().toLowerCase();
+  if (!email || email.indexOf('@') < 0) return res.status(400).json({ error: 'valid email required' });
+  try { await pool.query(`INSERT INTO planner.app_permissions (email, supply_edit, demand_edit, is_admin, updated_at, updated_by)
+      VALUES ($1,$2,$3,$4,now(),$5) ON CONFLICT (email) DO UPDATE SET supply_edit=excluded.supply_edit, demand_edit=excluded.demand_edit, is_admin=excluded.is_admin, updated_at=now(), updated_by=excluded.updated_by`,
+      [email, !!b.supply_edit, !!b.demand_edit, !!b.is_admin, me.email || 'sandbox']);
+    res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.delete('/api/config/permissions/:email', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
+  const email = String(req.params.email || '').trim().toLowerCase(); if (!email) return res.status(400).json({ error: 'email required' });
+  try { // never let the last admin be removed (lockout guard)
+    const isAdminRow = (await pool.query('SELECT is_admin FROM planner.app_permissions WHERE lower(email)=$1', [email])).rows[0];
+    if (isAdminRow && isAdminRow.is_admin) { const n = (await pool.query('SELECT count(*)::int n FROM planner.app_permissions WHERE is_admin')).rows[0].n; if (n <= 1) return res.status(400).json({ error: 'cannot remove the last admin' }); }
+    await pool.query('DELETE FROM planner.app_permissions WHERE lower(email)=$1', [email]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/supply/portal-note', async (req, res) => {
   const b = req.body || {};
   if (!b.po || !String(b.body || '').trim()) return res.status(400).json({ error: 'po and body required' });

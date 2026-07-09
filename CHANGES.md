@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.362 - Permissions: table + API + admin-only Config panel
+
+Phase 2 of access control (see migration **103_app_permissions.sql**).
+- New table `planner.app_permissions` (email, supply_edit, demand_edit, is_admin) — seeded with ben /
+  diviyaj / sarah / andy / abi @dockandbay.com, all admin + full edit.
+- Server: `permsFor(req)` resolves the caller's rights from the Gmail email (`authUser`); **live-only** —
+  no auth proxy (sandbox) = full access. New endpoints: `GET /api/me` (what to enable client-side), and
+  **admin-only** `GET/POST /api/config/permissions` + `DELETE /api/config/permissions/:email`
+  (with a last-admin lockout guard).
+- UI: a **Permissions** sub-tab under CONFIG, shown only to admins — grant/revoke SUPPLY / DEMAND / Admin
+  per email, add by email, changes save immediately.
+- No enforcement yet (that's the next phase) — this adds the model, API and admin surface.
+
 ## v25.361 - CONFIG promoted to a top-level menu item (out of SUPPLY)
 
 - **CONFIG is now its own top-level view** in the header nav (alongside DEMAND / SUPPLY / BUY / FBA /

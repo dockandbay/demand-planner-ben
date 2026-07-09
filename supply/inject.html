@@ -3338,8 +3338,12 @@
   var CONFIG_SUB='tax';
   var PORTAL_SUP='', PORTAL_TAB='pos', PORTAL_PO_ST=null;   // CONFIG ▸ Portal preview: chosen supplier + inner tab + PO status filter
   var ROW_EDIT={};   // per-sub-tab: which row key is currently in Edit mode (Edit/Save rows for suppliers + productions)
+  var ME=null;   // caller's app permissions (/api/me): {email,live,supply_edit,demand_edit,is_admin}. null until loaded; sandbox = full access.
+  function fetchMe(cb){ fetch('/api/me').then(function(r){return r.json();}).then(function(j){ ME=j||null; try{window.ME=ME;}catch(e){} if(cb)cb(); }).catch(function(){ if(cb)cb(); }); }
   function renderConfig(d){ var c=document.getElementById('supply-content'); var sizes=d.sizes||[];
     var SUBS=[['tax','Import tax'],['freight','Freight rates'],['duty','Import duty'],['branches','Branches'],['suppliers','Suppliers'],['keyaccounts','Key accounts'],['batches','Batches'],['productions','Productions'],['products','Products'],['mfgbom','Manufacturing BOM'],['portalusers','Portal users'],['portal','Portal'],['forecast-export','Forecast export']];
+    if(ME&&ME.is_admin)SUBS=SUBS.concat([['permissions','Permissions']]);   // admin-only tab
+    if(CONFIG_SUB==='permissions'&&!(ME&&ME.is_admin))CONFIG_SUB='tax';   // guard: non-admins can't land on Permissions
     function reload(){ delete cache['config']; selectSection('config'); }   // refresh after a rate add (keeps sub-tab)
     // Generic Edit/Save row table: read-only cells + an Edit button per row; Edit swaps that row's cells to inputs
     // and shows Save/Cancel; Save POSTs all editable fields at once. cols: [{f,h,t:'text|num|select',ro,opts,w}].
@@ -3550,6 +3554,34 @@
             b.querySelectorAll('.pu-magic').forEach(function(btn){ btn.onclick=function(){ fetch('/api/supply/portal-magic/'+btn.dataset.id,{method:'POST'}).then(function(r){return r.json();}).then(function(j){ if(j.error)return alert(j.error); copyText(j.url,'Magic link'); alert('Magic link for '+j.email+' (valid '+j.expires_days+' days) — copied to your clipboard:\n\n'+j.url); }); }; });
             b.querySelectorAll('.pu-del').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Remove this portal user? Their access is revoked.'))return; shipPost('/api/supply/portal-user/'+btn.dataset.id,{_delete:true},showSub); }; });
           }); }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); }
+      else if(CONFIG_SUB==='permissions'){ b.innerHTML='<div class="count">Loading…</div>';
+        fetch('/api/config/permissions').then(function(r){return r.json();}).then(function(rows){
+          if(rows&&rows.error){ b.innerHTML='<div class="count" style="color:#dc2626">'+esc(rows.error)+'</div>'; return; }
+          function chk(email,field,val){ return '<input type="checkbox" class="pm-chk" data-em="'+esc(email)+'" data-f="'+field+'"'+(val?' checked':'')+'>'; }
+          var body=(rows||[]).map(function(r){ return '<tr data-em="'+esc(r.email)+'"><td class="l">'+esc(r.email)+'</td>'
+              +'<td class="l" style="text-align:center">'+chk(r.email,'supply_edit',r.supply_edit)+'</td>'
+              +'<td class="l" style="text-align:center">'+chk(r.email,'demand_edit',r.demand_edit)+'</td>'
+              +'<td class="l" style="text-align:center">'+chk(r.email,'is_admin',r.is_admin)+'</td>'
+              +'<td class="l"><span class="mut tiny">'+esc(r.updated_at||'')+(r.updated_by?' · '+esc(r.updated_by):'')+'</span></td>'
+              +'<td class="l"><button class="pm-del" data-em="'+esc(r.email)+'" style="cursor:pointer;border:1px solid #fecaca;background:#fff5f5;color:#b91c1c;border-radius:4px;font-size:11px;padding:3px 9px">Remove</button></td></tr>'; }).join('');
+          b.innerHTML='<div class="annot"><b>CONFIG ▸ Permissions.</b> Access is <b>read-only for everyone</b> by default. Grant <b>SUPPLY</b> and/or <b>DEMAND</b> edit rights per email (the Gmail login). <b>Admin</b> can use this panel. FBA stays read-only (bar its Override column); SCENARIO is open to all; anyone with SUPPLY or DEMAND edit can edit the rest of Config. <span class="mut">Live only — your sandbox is always full-access.</span></div>'
+            +'<div class="sect-h">Access <span class="mut tiny">(changes save immediately)</span></div>'
+            +'<div class="bar" style="gap:8px"><input class="flt" id="pm-nemail" type="email" placeholder="email@dockandbay.com" style="width:240px">'
+              +'<label style="font-size:12px"><input type="checkbox" id="pm-nsupply" checked> SUPPLY</label>'
+              +'<label style="font-size:12px"><input type="checkbox" id="pm-ndemand" checked> DEMAND</label>'
+              +'<label style="font-size:12px"><input type="checkbox" id="pm-nadmin"> Admin</label>'
+              +'<button class="tool-badge bg-blue" id="pm-add" style="cursor:pointer;border:none">+ Grant access</button>'
+              +'<span class="pm-err" style="color:#dc2626;font-size:12px"></span></div>'
+            +'<div class="tw" style="max-width:820px"><table><thead><tr><th class="l" style="min-width:220px">Email</th><th class="l">SUPPLY edit</th><th class="l">DEMAND edit</th><th class="l">Admin</th><th class="l">Updated</th><th class="l"></th></tr></thead><tbody id="pm-tbody">'+(body||'<tr><td colspan="6" class="l mut">No one granted — everyone is read-only.</td></tr>')+'</tbody></table></div>';
+          function save(payload,cb){ fetch('/api/config/permissions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(function(r){return r.json();}).then(function(j){ if(cb)cb(j); }).catch(function(e){ if(cb)cb({error:(e&&e.message)||'failed'}); }); }
+          b.querySelectorAll('.pm-chk').forEach(function(cb){ cb.onchange=function(){ var tr=cb.closest('tr'); var payload={email:cb.dataset.em,
+              supply_edit:tr.querySelector('.pm-chk[data-f="supply_edit"]').checked, demand_edit:tr.querySelector('.pm-chk[data-f="demand_edit"]').checked, is_admin:tr.querySelector('.pm-chk[data-f="is_admin"]').checked };
+            cb.disabled=true; save(payload,function(j){ cb.disabled=false; if(j&&j.error){ alert(j.error); showSub(); } }); }; });
+          b.querySelectorAll('.pm-del').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Remove '+btn.dataset.em+'? They revert to read-only everywhere.'))return; fetch('/api/config/permissions/'+encodeURIComponent(btn.dataset.em),{method:'DELETE'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)return alert(j.error); showSub(); }); }; });
+          document.getElementById('pm-add').onclick=function(){ var em=(document.getElementById('pm-nemail').value||'').trim(); var err=b.querySelector('.pm-err'); err.textContent='';
+            if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){ err.textContent='Enter a valid email.'; return; }
+            save({email:em,supply_edit:document.getElementById('pm-nsupply').checked,demand_edit:document.getElementById('pm-ndemand').checked,is_admin:document.getElementById('pm-nadmin').checked},function(j){ if(j&&j.error){ err.textContent=j.error; return; } showSub(); }); };
+        }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); }
       else if(CONFIG_SUB==='portal'){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/suppliers').then(function(r){return r.json();}).then(function(sups){
           var supById={}; sups.forEach(function(s){supById[s.name]=s.id;});
@@ -5544,7 +5576,7 @@
     var t='SUPPLY', h=raw, m=raw.match(/^<b>([^<]*)<\/b>\s*([\s\S]*)$/);
     if(m){ t=m[1].replace(/[.\s]+$/,''); h=m[2]; }
     return {t:t, h:h||'This SUPPLY section.'}; };
-  function boot(){ try{ ensureRoot(); ensureNavButton(); ensureScenarioRoot(); ensureScenarioButton(); ensureConfigButton();
+  function boot(){ try{ if(ME===null)fetchMe(); ensureRoot(); ensureNavButton(); ensureScenarioRoot(); ensureScenarioButton(); ensureConfigButton();
     if(!_routed){ _routed=true; try{ if(/^#\/?(supply|config|scenario|demand|reports|buy|fba|planning|exec)(\/|$)/.test(location.hash)) applyRoute();
       else { location.hash='#/supply/purchase-orders'; applyRoute(); } }catch(e){} }   // deep-link on first load; no hash → default landing = SUPPLY ▸ Purchase Orders
   }catch(e){ if(window.console)console.log('[SUPPLY] boot error',e&&e.message); } }
