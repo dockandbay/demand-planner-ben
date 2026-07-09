@@ -954,17 +954,26 @@
       +row('<span class="po-note-badge" style="cursor:default">N</span> Notes <span class="mut tiny">(internal — shows as a purple N on the PO row; separate from the Timeline)</span>',txtIn(ep,'notes',r.notes,540,true))
       +'</div><div style="margin-top:14px"><button class="save-btn light pom-del" data-po="'+esc(po)+'" title="delete this PO + its lines" style="color:#dc2626;border-color:#fca5a5">🗑 Delete this PO</button></div>'; }
   // PLAN-panel SHIPMENTS tab (#10): assign a shipment / FOB, ASN numbers, iFulfillment pallet labels — this PO.
-  function poShipPanel(po){ var r=poBy[po]||{}; var ep='/api/supply/po/'+encodeURIComponent(po);
+  function poShipPanel(po,d){ var r=poBy[po]||{}; var ep='/api/supply/po/'+encodeURIComponent(po);
     var isCogh=/coghlans/i.test(r.branch||'');   // ASN pallet labels apply to AU Coghlans only
-    var preshipBranch=isCogh||/fba|awd/i.test(r.branch||'')||/ifulfillment/i.test(r.branch||'');   // any branch with a pre-shipment doc rule
+    var isFbaAwd=/fba|awd/i.test(r.branch||''), isEU=/ifulfillment/i.test(r.branch||'');
+    var preshipBranch=isCogh||isFbaAwd||isEU;   // any branch with a pre-shipment doc rule
     var ship=/manufactur/i.test(r.branch||'')?'<span class="tool-badge bg-neutral" title="MANUFACTURING = FOB">FOB</span>'
       :(r.shipment?'<button class="ship-open" data-ref="'+esc(r.shipment)+'">'+esc(r.shipment)+'</button> <button class="ship-pick" data-po="'+esc(po)+'">▾</button>':'<button class="ship-pick" data-po="'+esc(po)+'">— assign ▾</button>');
     function row(lbl,f){ return '<div class="cli-row"><div class="cli-lbl">'+lbl+'</div><div class="cli-val">'+f+'</div></div>'; }
+    // Rule 2/3 doc block: list uploaded files of a category (admin uploads → supplier downloads), + upload control.
+    function docBlock(cat,label){ var ds=((d&&d.all_docs)||[]).filter(function(x){return x.category===cat;});
+      var over=(r.status==='PRODUCTION'||r.production_status==='ready_to_ship')&&!r.preship_not_required&&r.prod_end&&r.prod_end<today&&!ds.length;
+      return row(label,(over?'<div style="color:#b91c1c;font-weight:700;margin-bottom:4px">⚠ overdue — production ended '+fd(r.prod_end)+'</div>':'')
+        +(ds.length?ds.map(function(x){return '<a href="/api/supply/portal-attachment/'+esc(x.id)+'" target="_blank" rel="noopener">⤓ '+esc(x.filename||'file')+'</a> <button class="lnk-btn podoc-del" data-id="'+esc(x.id)+'" data-po="'+esc(po)+'" data-name="'+esc(x.filename||'')+'" style="color:#b91c1c">✕</button>';}).join(' &nbsp; ')+'<br>':'<span class="mut tiny">none uploaded — </span>')
+        +'<input type="file" class="shdoc-file" data-po="'+esc(po)+'" data-category="'+cat+'" style="font-size:11px"> <button class="save-btn shdoc-up" data-po="'+esc(po)+'" data-category="'+cat+'">⬆ Upload</button>'); }
     return '<div class="sect-h">Shipments <span class="mut tiny">— assign a shipment or mark FOB, ASN numbers, Ships With Supplier pallet labels</span></div>'
       +lookupDatalists()+'<div class="cli-form" style="max-width:620px">'
       +row('Shipment / FOB',ship)
       +((r.flex_id||r.flexport_reference)?row('Flexport <span class="mut tiny">(reference &amp; link)</span>',(function(){ var fid=r.flex_id||r.flexport_reference, u=flexUrl(fid); return u?'<a href="'+u+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;white-space:nowrap">'+esc(fid)+' ↗</a>':esc(fid); })()):'')
       +(isCogh?row('ASN numbers <span class="mut tiny">(1 per pallet, comma-separated)</span>',(r.prod_end&&r.prod_end<today&&r.progress!=='complete'&&!String(r.asn_numbers||'').trim()?'<div style="color:#b91c1c;font-weight:700;margin-bottom:4px">⚠ ASN pallet labels overdue — production ended '+fd(r.prod_end)+'</div>':'')+'<input class="fci txtin" data-ep="'+ep+'" data-field="asn_numbers" value="'+esc(r.asn_numbers||'')+'" placeholder="ASN1, ASN2…" style="width:280px;text-align:left"> <button class="save-btn" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd" title="download A4 pallet labels — one page per ASN (save your ASN entry first)" onclick="window.open(\'/api/asn-labels/\'+encodeURIComponent(\''+esc(po)+'\'))">⤓ ASN PALLET LABELS</button>'):'')
+      +(isFbaAwd?docBlock('carton_barcode','Carton barcodes <span class="mut tiny">(upload — supplier downloads on the portal)</span>')+docBlock('pallet_barcode','Pallet barcodes <span class="mut tiny">(upload)</span>'):'')
+      +(isEU?docBlock('idn_pallet_label','IDN pallet labels <span class="mut tiny">(upload — supplier downloads on the portal)</span>'):'')
       +(preshipBranch?row('Not required?','<label style="font-size:12px;cursor:pointer"><input type="checkbox" class="fci" data-ep="'+ep+'" data-field="preship_not_required" '+(r.preship_not_required?'checked':'')+' style="width:auto;min-width:0;vertical-align:middle;margin-right:5px">mark pre-shipment documents not required for this PO (clears the overdue action)</label>'):'')
       +row('Ships With Supplier labels','<button class="save-btn po-dl-sw" data-po="'+esc(po)+'" title="SHIPS WITH SUPPLIER master pallet label (carton size)">⤓ Ships With Supplier labels</button>')
       +'</div>'; }
@@ -1771,8 +1780,12 @@
     // Only PRODUCTION / ready-to-ship orders raise a pre-shipment-docs action; a "not required" tick suppresses it.
     var ship=[];
     var _preshipActive=(r.status==='PRODUCTION'||r.production_status==='ready_to_ship') && !r.preship_not_required;
-    if(_preshipActive && r.prod_end && r.prod_end<today && /coghlans/i.test(r.branch||'') && !String(r.asn_numbers||'').trim())
-      ship.push('ASN pallet labels overdue — production ended '+fd(r.prod_end)+', no ASN numbers entered');
+    if(_preshipActive && r.prod_end && r.prod_end<today){
+      var _br=r.branch||'', _dc=String(r.doc_cats||''), _late=' overdue — production ended '+fd(r.prod_end);
+      if(/coghlans/i.test(_br)){ if(!String(r.asn_numbers||'').trim()) ship.push('ASN pallet labels'+_late+', no ASN numbers entered'); }
+      else if(/fba|awd/i.test(_br)){ if(_dc.indexOf('carton_barcode')<0) ship.push('Carton barcodes'+_late+', not uploaded'); if(_dc.indexOf('pallet_barcode')<0) ship.push('Pallet barcodes'+_late+', not uploaded'); }
+      else if(/ifulfillment/i.test(_br)){ if(_dc.indexOf('idn_pallet_label')<0) ship.push('IDN pallet labels'+_late+', not uploaded'); }
+    }
     return { pay:pay, dates:dates, client:[], landed:landed, timeline:timeline, oplan:oplan, ship:ship, all:pay.concat(dates).concat(landed).concat(timeline).concat(oplan).concat(ship) }; }
   function payPanel(r,d){ if(!r)return '';
     var ep='/api/supply/po/'+encodeURIComponent(r.po);
@@ -2133,6 +2146,12 @@
       var rd=new FileReader(); rd.onload=function(){ fetch('/api/supply/po-doc-upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:b.dataset.po,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),uploaded_by:'admin'})})
         .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); poRefetchPanel(po,i); }).catch(function(e){ b.disabled=false; alert('Upload failed: '+(e.message||e)); }); };
       rd.readAsDataURL(f); }; });
+    // SHIPMENTS tab: category-specific pre-shipment doc uploads (carton/pallet barcodes, IDN pallet labels)
+    document.querySelectorAll('#podet-'+i+' .shdoc-up').forEach(function(b){ b.onclick=function(){ var cat=b.dataset.category;
+      var inp=document.querySelector('#podet-'+i+' .shdoc-file[data-po="'+CSS.escape(b.dataset.po)+'"][data-category="'+cat+'"]'); var f=inp&&inp.files&&inp.files[0]; if(!f){alert('Choose a file to upload.');return;} b.disabled=true;
+      var rd=new FileReader(); rd.onload=function(){ fetch('/api/supply/po-doc-upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:b.dataset.po,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),uploaded_by:'admin',category:cat})})
+        .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); poRefetchPanel(po,i); }).catch(function(e){ b.disabled=false; alert('Upload failed: '+(e.message||e)); }); };
+      rd.readAsDataURL(f); }; });
     // free-text client fields — save verbatim (commas allowed) on blur
     document.querySelectorAll('#podet-'+i+' .txtin').forEach(function(inp){ inp.onchange=function(){
       if(inp.classList.contains('dateinp')){ var _r=(inp.value||'').trim(), _i=_r?parseDateLoose(_r):''; if(_r&&!_i){ inp.classList.add('err'); return; } inp.classList.remove('err'); inp.value=_i; }
@@ -2321,7 +2340,7 @@
     var oplanH=orderPlanPanel(po,d.lines,d.line_costs,d.additional_costs,erpMeta);
     var timelineH=timelinePanel(po,d);
     var linkedH='<div class="sect-h">Linked records across tables</div>'+blk('Deposit',d.deposit)+blk('Payments',d.payments)+blk('Flexport',d.flexport);
-    var masterH=poMasterPanel(po), shipH=poShipPanel(po);
+    var masterH=poMasterPanel(po), shipH=poShipPanel(po,d);
     var docsH=docsPanel(po,d);
     var tabs=[['pay','PAYMENTS',p.pay,p.ex.pay],['dates','DATES',p.dates,p.ex.dates],['client','CLIENT/FBA',p.client,p.ex.client],['oplan','ORDER PLAN',oplanH,(p.ex.oplan||0)+erpN],['shipments','SHIPMENTS',shipH,(p.ex.ship||0)],['documents','DOCUMENTS',docsH,0],['masterdata','MASTER DATA',masterH,0],['landed','LANDED COSTS',p.landed,p.ex.landed],['timeline','TIMELINE',timelineH,p.ex.timeline],['linked','LINKED RECORDS',linkedH,0]];
     function badge(n){ return n>0?' <span class="ex-badge" title="'+n+' exception'+(n>1?'s':'')+' / action'+(n>1?'s':'')+'">'+n+'</span>':''; }

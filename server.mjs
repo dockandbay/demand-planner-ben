@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.374';
+const APP_VERSION = 'v25.375';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1601,6 +1601,7 @@ app.get('/api/supply/:section', async (req, res) => {
           pol.supplier_risk_approved, pol.discontinue_approved,
           coalesce(p.prod_no,'') prod_no, coalesce(p.status,'') status, coalesce(p.starred,false) starred,
           coalesce(p.preship_not_required,false) preship_not_required,
+          (SELECT string_agg(DISTINCT category,',') FROM planner.portal_attachments a WHERE a.po=p.po) doc_cats,
           coalesce(p.batch_id,'') batch_id,
           coalesce(p.supplier_name,'') supplier_name, coalesce(p.shipment_ref,'') shipment_ref,
           coalesce(nullif(p.country_code,''), b.country_code, '') country,

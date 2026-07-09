@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.375 - Pre-shipment docs Rules 2 & 3: FBA/AWD barcode + EU IDN-label uploads
+
+On the SHIPMENTS sub-tab, branch-conditional upload blocks (admin uploads → supplier downloads on the portal),
+reusing `portal_attachments` with a category tag:
+- **FBA / AWD** (UK/US/CA FBA, US AWD): **Carton barcodes** + **Pallet barcodes** upload/list/download.
+- **EU iFulfillment**: **IDN pallet labels** upload/list/download.
+Each shows an ⚠ overdue note when production has ended and the doc is missing, and feeds the same
+SHIPMENTS-tab exception counter (scoped to PRODUCTION/ready-to-ship, suppressed by "not required").
+PO payload now carries `doc_cats` (categories present) so the exception detects missing uploads.
+
 ## v25.374 - Pre-shipment docs: scope to PRODUCTION/ready-to-ship + "not required" tick
 
 - The pre-shipment overdue exception now fires **only for PRODUCTION or ready-to-ship POs** (not
