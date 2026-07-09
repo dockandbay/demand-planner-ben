@@ -13,6 +13,8 @@
 #app.supply-active.plan-ov-open > #buy-wrap:not(#supply-root) > *:not(#ov){display:none!important}
 #app.supply-active #dab-navwrap > *:not(#view-tabs-row){display:none!important}
 #app.supply-active #view-tabs-row .tool-bar{display:none!important}
+/* CONFIG is now a top-level view: it reuses the SUPPLY render surface but hides the SUPPLY section sub-nav */
+#app.config-mode #supply-subnav,#app.config-mode #supply-nav-sel{display:none!important}
 #supply-subnav{display:flex;gap:2px;border-bottom:1px solid #e0e0e0;margin:2px 0 10px;align-items:center;flex-wrap:wrap}
 #supply-root .stab{background:transparent;border:none;padding:6px 13px;font-size:12px;font-weight:500;cursor:pointer;color:#888;border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit}
 #supply-root .stab:hover{color:#1a1a1a}
@@ -411,8 +413,7 @@
 <script>
 (function(){
   var SECTIONS=[['actions','ACTIONS'],['reports','BI & REPORTS'],['purchase-orders','PURCHASE ORDERS'],['order-plan','ORDER PLAN'],
-    ['samples','SAMPLES'],
-    ['config','CONFIG']];   // SHIPMENTS now lives under the PURCHASE ORDERS sub-nav (poSub 'shipments')
+    ['samples','SAMPLES']];   // CONFIG is now a top-level view (see enterConfig); SHIPMENTS lives under the PURCHASE ORDERS sub-nav (poSub 'shipments')
   // REPORTS is a parent tab; these are its sub-tabs (the read-across views).
   var REPORT_SECTIONS=[['metrics','METRICS'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
     ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['cashflow','CASH FLOW'],['directclient','DIRECT TO CLIENT'],['flexport','FLEXPORT'],['erp-compare','ERP COMPARE']];
@@ -4627,20 +4628,21 @@
   }
   function syncHash(){ if(current==='reports') writeHash(['supply','reports',reportTab]);
     else if(current==='purchase-orders') writeHash(['supply','purchase-orders'].concat(poSub&&poSub!=='plan'?[poSub]:[]));
-    else if(current==='config') writeHash(['supply','config',CONFIG_SUB]);
+    else if(current==='config') writeHash(['config',CONFIG_SUB]);
     else if(current) writeHash(['supply',current]); }
   function applyRoute(){ var seg=(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean); _expectedHash=location.hash;
     if(seg[0]==='supply'){ showSupply(true); var sec=seg[1]||'actions';   // (true) = show chrome but don't auto-select Actions; we select the routed section next
       if(sec==='reports') selectReport(seg[2]||reportTab||'metrics');
       else if(sec==='productions'){ showPoSub(seg[2]&&PO_SUB_KEYS.indexOf(seg[2])>=0?seg[2]:'list'); }   // legacy links → PURCHASE ORDERS umbrella
-      else if(sec==='config'){ if(seg[2])CONFIG_SUB=seg[2]; selectSection('config'); }
+      else if(sec==='config'){ if(seg[2])CONFIG_SUB=seg[2]; enterConfig(); }   // legacy #/supply/config → top-level CONFIG
       else if(sec==='purchase-orders'){ var _s2=seg[2]?decodeURIComponent(seg[2]):null, _s3=seg[3]?decodeURIComponent(seg[3]):null;
         if(_s2 && POTAB_FROM_SLUG[_s2] && _s3){ _pendingPO=_s3; _pendingPOTab=POTAB_FROM_SLUG[_s2]; showPoSub('plan'); }   // deep-link a PO detail sub-tab: .../<slug>/<PO>
         else if(_s2 && PO_SUB_KEYS.indexOf(_s2)>=0){ showPoSub(_s2); }   // PURCHASE ORDERS umbrella sub-tab
         else { if(_s2)_pendingPO=_s2; showPoSub('plan'); } }   // just a PO → open it in PLAN, default tab
       else if(sec==='shipments'){ if(seg[2])_pendingShip=decodeURIComponent(seg[2]); showPoSub('shipments'); }   // legacy: shipments moved under purchase-orders
       else selectSection(sec);
-    } else if(seg[0]==='scenario'){ if(typeof showScenario==='function'){ showScenario(); if(seg[1])scenSelect(seg[1]); } }
+    } else if(seg[0]==='config'){ if(seg[1])CONFIG_SUB=seg[1]; if(typeof enterConfig==='function')enterConfig(); }
+    else if(seg[0]==='scenario'){ if(typeof showScenario==='function'){ showScenario(); if(seg[1])scenSelect(seg[1]); } }
     else if(seg[0]==='demand'){ if(seg[1]&&typeof DEMAND_VIEW!=='undefined')DEMAND_VIEW=seg[1]; var _db=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]'); if(_db)_db.click(); }
     else if(seg[0]==='reports'){ if(seg[1]&&typeof REPORT_VIEW!=='undefined')REPORT_VIEW=seg[1]; var _rb=document.querySelector('#view-tabs-row .view-toggle[data-view="exec"]'); if(_rb)_rb.click(); }
     else if(seg[0]){ var btn=document.querySelector('#view-tabs-row .view-toggle[data-view="'+seg[0]+'"]'); if(btn)btn.click(); } }
@@ -5056,18 +5058,29 @@
     fetch('/api/supply/'+key).then(function(r){return r.json();}).then(done).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); }
 
   try{window.__supplyNav={sections:SECTIONS,reports:REPORT_SECTIONS,select:function(k){selectSection(k);},current:function(){return current;}};}catch(e){}   // bridge for the app-level mobile drawer
-  function showSupply(noSelect){ ensureRoot(); if(typeof hideScenario==='function')hideScenario(); var app=document.getElementById('app'); if(app)app.classList.add('supply-active');
+  function showSupply(noSelect){ ensureRoot(); if(typeof hideScenario==='function')hideScenario(); var app=document.getElementById('app'); if(app){app.classList.add('supply-active');app.classList.remove('config-mode');}
     document.body.classList.add('supply-on');   // reveals the mobile top-bar search
     var r=document.getElementById('supply-root'); if(r)r.style.display='block';
     document.querySelectorAll('#view-tabs-row .view-toggle').forEach(function(b){b.classList.remove('active');});
     var sb=document.getElementById('supply-btn'); if(sb)sb.classList.add('active');
     var fb=document.getElementById('supply-float'); if(fb)fb.style.display='none';
     if(noSelect!==true)selectSection(current||'actions'); }   // noSelect: caller (applyRoute) will select the routed section itself
-  function hideSupply(){ var app=document.getElementById('app'); if(app)app.classList.remove('supply-active');
+  function hideSupply(){ var app=document.getElementById('app'); if(app){app.classList.remove('supply-active');app.classList.remove('config-mode');}
     document.body.classList.remove('supply-on');
     var r=document.getElementById('supply-root'); if(r)r.style.display='none';
     var sb=document.getElementById('supply-btn'); if(sb)sb.classList.remove('active');
+    var cb=document.getElementById('config-btn'); if(cb)cb.classList.remove('active');
     var fb=document.getElementById('supply-float'); if(fb)fb.style.display=''; }
+  // CONFIG top-level view: reuse the SUPPLY surface (supply-root + supply-content) but flag config-mode so
+  // the SUPPLY section sub-nav is hidden and the CONFIG button (not SUPPLY) reads active.
+  function enterConfig(){ showSupply(true); var app=document.getElementById('app'); if(app)app.classList.add('config-mode');
+    var sb=document.getElementById('supply-btn'); if(sb)sb.classList.remove('active');
+    var cb=document.getElementById('config-btn'); if(cb)cb.classList.add('active');
+    selectSection('config'); }
+  function ensureConfigButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('config-btn'))return;
+    var btn=document.createElement('button'); btn.id='config-btn'; btn.className='view-toggle config-toggle'; btn.textContent='CONFIG';
+    var spacer=row.querySelector('div[style*="flex:1"]'); if(spacer)row.insertBefore(btn,spacer); else row.appendChild(btn);
+    btn.onclick=enterConfig; }
 
   // Decoupled builders — SUPPLY works even if the nav can't be augmented.
   function ensureRoot(){ if(document.getElementById('supply-root'))return;
@@ -5531,8 +5544,8 @@
     var t='SUPPLY', h=raw, m=raw.match(/^<b>([^<]*)<\/b>\s*([\s\S]*)$/);
     if(m){ t=m[1].replace(/[.\s]+$/,''); h=m[2]; }
     return {t:t, h:h||'This SUPPLY section.'}; };
-  function boot(){ try{ ensureRoot(); ensureNavButton(); ensureScenarioRoot(); ensureScenarioButton();
-    if(!_routed){ _routed=true; try{ if(/^#\/?(supply|scenario|demand|reports|buy|fba|planning|exec)(\/|$)/.test(location.hash)) applyRoute();
+  function boot(){ try{ ensureRoot(); ensureNavButton(); ensureScenarioRoot(); ensureScenarioButton(); ensureConfigButton();
+    if(!_routed){ _routed=true; try{ if(/^#\/?(supply|config|scenario|demand|reports|buy|fba|planning|exec)(\/|$)/.test(location.hash)) applyRoute();
       else { location.hash='#/supply/purchase-orders'; applyRoute(); } }catch(e){} }   // deep-link on first load; no hash → default landing = SUPPLY ▸ Purchase Orders
   }catch(e){ if(window.console)console.log('[SUPPLY] boot error',e&&e.message); } }
   if(window.console)console.log('[SUPPLY] inject __APP_VERSION__ executing');

@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.361 - CONFIG promoted to a top-level menu item (out of SUPPLY)
+
+- **CONFIG is now its own top-level view** in the header nav (alongside DEMAND / SUPPLY / BUY / FBA /
+  REPORTS / SCENARIO), no longer a sub-tab under SUPPLY. Reached via a new `CONFIG` button and the
+  `#/config` route (legacy `#/supply/config/...` links still resolve to it). It reuses the SUPPLY render
+  surface but hides the SUPPLY section sub-nav (`config-mode` class); its own sub-tabs (Import tax,
+  Freight, Suppliers, …) are unchanged. First of the permissions work — Config is being separated so it
+  can carry the access model.
+
 ## v25.360 - PO filters: tighter labels, "Prod", drop "Exceptions" + "Ship to" labels
 
 - Reduced the label→control gap on mobile filter items (`gap:5px` → `3px`).
