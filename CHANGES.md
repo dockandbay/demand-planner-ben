@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.371 - Invoice/Packing List download buttons (4 surfaces)
+
+Wired the generator endpoints into the UI:
+- **Supply ▸ Purchase Orders ▸ PLAN** — "📄 Commercial Invoice" button in the PO detail sub-nav.
+- **Supply ▸ Shipments** (drawer) — "📄 Tax Invoice" button under Freight & tracking.
+- **Portal ▸ Purchase Orders** — "📄" download in each PO's MANAGE cell (Commercial Invoice).
+- **Portal ▸ Shipment Plan** — "📄 Tax Invoice" button in each shipment's expanded body.
+Each opens `/api/invoice/po/:po` or `/api/invoice/shipment/:ref`.
+
 ## v25.370 - Shipment drawer: Flexport reference is now a clickable link
 
 The "🔗 Linked to Flexport (FLEX-xxxxx)" reference in the shipment drawer now links to the Flexport

@@ -2314,7 +2314,8 @@
     var docsH=docsPanel(po,d);
     var tabs=[['pay','PAYMENTS',p.pay,p.ex.pay],['dates','DATES',p.dates,p.ex.dates],['client','CLIENT/FBA',p.client,p.ex.client],['oplan','ORDER PLAN',oplanH,(p.ex.oplan||0)+erpN],['shipments','SHIPMENTS',shipH,0],['documents','DOCUMENTS',docsH,0],['masterdata','MASTER DATA',masterH,0],['landed','LANDED COSTS',p.landed,p.ex.landed],['timeline','TIMELINE',timelineH,p.ex.timeline],['linked','LINKED RECORDS',linkedH,0]];
     function badge(n){ return n>0?' <span class="ex-badge" title="'+n+' exception'+(n>1?'s':'')+' / action'+(n>1?'s':'')+'">'+n+'</span>':''; }
-    var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab potab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'" data-po="'+esc(po)+'">'+t[1]+badge(t[3])+'</button>';}).join('')+'</div>';
+    var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab potab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'" data-po="'+esc(po)+'">'+t[1]+badge(t[3])+'</button>';}).join('')
+      +'<button class="save-btn" style="margin-left:auto;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd" title="download the Commercial Invoice + Packing List for this PO" onclick="window.open(\'/api/invoice/po/\'+encodeURIComponent(\''+esc(po)+'\'))">📄 Commercial Invoice</button></div>';
     var panels=tabs.map(function(t,ti){return '<div class="potab-panel" data-pt="'+t[0]+'"'+(ti===0?'':' style="display:none"')+'>'+t[2]+'</div>';}).join('');
     return '<div class="po-detail-wrap" style="padding:4px 4px;max-width:1340px">'+bar+panels+'</div>'; }
 
@@ -3242,7 +3243,8 @@
           +fld('Freight (manual £/$)', editCell(ep,'cost_manual',s.cost_manual==null?'':s.cost_manual,''))
           +'<div style="margin-right:16px"><div class="mut tiny">Freight used</div><div style="padding:4px 0;font-weight:600">'+(fr.c==null?'—':money(fr.c))+' <span class="src '+(fr.src==='FLEX'?'fx':'m')+'">'+esc(fr.src)+'</span></div></div>'
           +'<div style="margin-right:16px"><div class="mut tiny">Estimate ('+esc(m)+')</div><div class="tiny" style="padding:5px 0;color:#475569">'+estTxt+'</div></div>'
-          +'</div>'; })();   // shipment notes now live in the Timeline & notes tab (multi-line)
+          +'</div>'; })()
+      +'<div style="margin:2px 0 12px"><button class="save-btn" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd" title="download the Tax Invoice + Packing List for this shipment" onclick="window.open(\'/api/invoice/shipment/\'+encodeURIComponent(\''+ref+'\'))">📄 Tax Invoice</button></div>';   // shipment notes now live in the Timeline & notes tab (multi-line)
     Promise.all([fetch('/api/supply/shipment-detail/'+encodeURIComponent(ref)).then(function(r){return r.json();}),
       fetch('/api/supply/shipment-crossdock/'+encodeURIComponent(ref)).then(function(r){return r.json();}).catch(function(){return [];})])
       .then(function(R){ var rows=R[0]||[], xd=R[1]||[]; var t='<div class="sect-h">POs aboard ('+rows.length+') — ★ marks the master (consolidation) PO</div>';
