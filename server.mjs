@@ -73,7 +73,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.366';
+const APP_VERSION = 'v25.367';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3976,7 +3976,7 @@ app.post('/api/supply/po-import-cin7', async (req, res) => {
     if (exists) {
       await pool.query('UPDATE planner.purchase_orders SET supplier_name=$2, supplier_id=$3, branch=$4, delivery_date_overide=coalesce($5::date, delivery_date_overide), updated_at=now() WHERE po=$1', [o.reference, supplier_name, supplier_id, branch, delivery]);
     } else {
-      await pool.query("INSERT INTO planner.purchase_orders (po, supplier_name, supplier_id, branch, status, delivery_date_overide) VALUES ($1,$2,$3,$4,'FUTURE',$5::date)", [o.reference, supplier_name, supplier_id, branch, delivery]);
+      await pool.query("INSERT INTO planner.purchase_orders (po, supplier_name, supplier_id, branch, status, delivery_date_overide) VALUES ($1,$2,$3,$4,'PRODUCTION',$5::date)", [o.reference, supplier_name, supplier_id, branch, delivery]);   // imported POs land as PRODUCTION so they show under the default In-progress filter
     }
     // Replace the planner lines with Cin7's, and mirror the SAME values into the ERP mirror
     // (erp_purchase_order_lines) so an imported PO reads as fully in-sync — no phantom drift. The

@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.367 - Import PO from Cin7: land as PRODUCTION (not FUTURE)
+
+Newly imported POs were created with status FUTURE, which the Purchase Orders grid's default "In progress"
+filter hides — so an imported PO looked missing until you switched to Future/All. Imported POs now land as
+**PRODUCTION** so they show under the default filter. (Overwriting an existing PO still leaves its status
+untouched.)
+
 ## v25.366 - Fix: move Consignees endpoints off /api/supply/ (route collision)
 
 The consignee routes were shadowed by the generic `/api/supply/:section` (GET) and `/api/supply/:po`
