@@ -581,7 +581,7 @@
       if(raw){ var iso=parseDateLoose(raw); if(!iso){ inp.classList.add('err'); return; } inp.value=iso; } inp.classList.remove('err'); }
     if(inp.classList.contains('boolsel')){ var yes=inp.value==='true'; inp.style.background=yes?'#dcfce7':'#fee2e2'; inp.style.color=yes?'#166534':'#b91c1c'; }
     recolorFci(inp, inp.dataset.field, inp.value);   // recolour the changed control right away (e.g. status → green)
-    var body={}; body[inp.dataset.field]=inp.value;
+    var body={}; body[inp.dataset.field]=(inp.type==='checkbox')?inp.checked:inp.value;
     fetch(inp.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
       .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); inp.classList.remove('err'); if(!inp.classList.contains('boolsel')){ inp.classList.add('saved'); setTimeout(function(){inp.classList.remove('saved');},1200); } invalidateDerived();
         // keep any DUPLICATE control for the same record+field in sync in place (e.g. the shipments grid Mode/Carrier
@@ -956,6 +956,7 @@
   // PLAN-panel SHIPMENTS tab (#10): assign a shipment / FOB, ASN numbers, iFulfillment pallet labels — this PO.
   function poShipPanel(po){ var r=poBy[po]||{}; var ep='/api/supply/po/'+encodeURIComponent(po);
     var isCogh=/coghlans/i.test(r.branch||'');   // ASN pallet labels apply to AU Coghlans only
+    var preshipBranch=isCogh||/fba|awd/i.test(r.branch||'')||/ifulfillment/i.test(r.branch||'');   // any branch with a pre-shipment doc rule
     var ship=/manufactur/i.test(r.branch||'')?'<span class="tool-badge bg-neutral" title="MANUFACTURING = FOB">FOB</span>'
       :(r.shipment?'<button class="ship-open" data-ref="'+esc(r.shipment)+'">'+esc(r.shipment)+'</button> <button class="ship-pick" data-po="'+esc(po)+'">▾</button>':'<button class="ship-pick" data-po="'+esc(po)+'">— assign ▾</button>');
     function row(lbl,f){ return '<div class="cli-row"><div class="cli-lbl">'+lbl+'</div><div class="cli-val">'+f+'</div></div>'; }
@@ -964,6 +965,7 @@
       +row('Shipment / FOB',ship)
       +((r.flex_id||r.flexport_reference)?row('Flexport <span class="mut tiny">(reference &amp; link)</span>',(function(){ var fid=r.flex_id||r.flexport_reference, u=flexUrl(fid); return u?'<a href="'+u+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;white-space:nowrap">'+esc(fid)+' ↗</a>':esc(fid); })()):'')
       +(isCogh?row('ASN numbers <span class="mut tiny">(1 per pallet, comma-separated)</span>',(r.prod_end&&r.prod_end<today&&r.progress!=='complete'&&!String(r.asn_numbers||'').trim()?'<div style="color:#b91c1c;font-weight:700;margin-bottom:4px">⚠ ASN pallet labels overdue — production ended '+fd(r.prod_end)+'</div>':'')+'<input class="fci txtin" data-ep="'+ep+'" data-field="asn_numbers" value="'+esc(r.asn_numbers||'')+'" placeholder="ASN1, ASN2…" style="width:280px;text-align:left"> <button class="save-btn" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd" title="download A4 pallet labels — one page per ASN (save your ASN entry first)" onclick="window.open(\'/api/asn-labels/\'+encodeURIComponent(\''+esc(po)+'\'))">⤓ ASN PALLET LABELS</button>'):'')
+      +(preshipBranch?row('Not required?','<label style="font-size:12px;cursor:pointer"><input type="checkbox" class="fci" data-ep="'+ep+'" data-field="preship_not_required" '+(r.preship_not_required?'checked':'')+' style="width:auto;min-width:0;vertical-align:middle;margin-right:5px">mark pre-shipment documents not required for this PO (clears the overdue action)</label>'):'')
       +row('Ships With Supplier labels','<button class="save-btn po-dl-sw" data-po="'+esc(po)+'" title="SHIPS WITH SUPPLIER master pallet label (carton size)">⤓ Ships With Supplier labels</button>')
       +'</div>'; }
   // iFulfillment pallet labels — opens a printable A4 sheet of one label per pallet (PO / shipment / ASN / pallet n of N).
@@ -1766,8 +1768,10 @@
     var oplan=[]; if(Number(r.orderplan_unconfirmed)>0) oplan.push(r.orderplan_unconfirmed+' unconfirmed order-plan change'+(r.orderplan_unconfirmed>1?'s':''));
     // Pre-shipment docs (SHIPMENTS tab): overdue once production has ended (prod_end = override ▸ computed) and
     // the required branch document is missing. Rule 1 (AU Coghlans): ASN pallet labels.
+    // Only PRODUCTION / ready-to-ship orders raise a pre-shipment-docs action; a "not required" tick suppresses it.
     var ship=[];
-    if(open && r.prod_end && r.prod_end<today && /coghlans/i.test(r.branch||'') && !String(r.asn_numbers||'').trim())
+    var _preshipActive=(r.status==='PRODUCTION'||r.production_status==='ready_to_ship') && !r.preship_not_required;
+    if(_preshipActive && r.prod_end && r.prod_end<today && /coghlans/i.test(r.branch||'') && !String(r.asn_numbers||'').trim())
       ship.push('ASN pallet labels overdue — production ended '+fd(r.prod_end)+', no ASN numbers entered');
     return { pay:pay, dates:dates, client:[], landed:landed, timeline:timeline, oplan:oplan, ship:ship, all:pay.concat(dates).concat(landed).concat(timeline).concat(oplan).concat(ship) }; }
   function payPanel(r,d){ if(!r)return '';

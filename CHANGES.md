@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.374 - Pre-shipment docs: scope to PRODUCTION/ready-to-ship + "not required" tick
+
+- The pre-shipment overdue exception now fires **only for PRODUCTION or ready-to-ship POs** (not
+  future/shipped/complete).
+- New **"Not required"** checkbox on the SHIPMENTS sub-tab (any branch with a doc rule) → suppresses the
+  overdue action for that PO. Stored as `purchase_orders.preship_not_required` (migration 107); the shared
+  field-save handler now supports checkboxes.
+
 ## v25.373 - ASN overdue exception + PROD/BATCH dropdowns + Commercial Invoice button moved
 
 - **Pre-shipment docs Rule 1 exception:** a Coghlans PO past its production-end date (override ▸ computed)

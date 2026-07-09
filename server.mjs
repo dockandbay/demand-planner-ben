@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.373';
+const APP_VERSION = 'v25.374';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1600,6 +1600,7 @@ app.get('/api/supply/:section', async (req, res) => {
           l.cost_price, l.carton_qty, l.partial_carton_approved, l.full_carton_check,
           pol.supplier_risk_approved, pol.discontinue_approved,
           coalesce(p.prod_no,'') prod_no, coalesce(p.status,'') status, coalesce(p.starred,false) starred,
+          coalesce(p.preship_not_required,false) preship_not_required,
           coalesce(p.batch_id,'') batch_id,
           coalesce(p.supplier_name,'') supplier_name, coalesce(p.shipment_ref,'') shipment_ref,
           coalesce(nullif(p.country_code,''), b.country_code, '') country,
@@ -3900,6 +3901,7 @@ app.post('/api/supply/po/:po', async (req, res) => {
   patch(res, 'planner.purchase_orders', 'po', req.params.po, {
     status: 'text', ship_type: 'text', deposit_ref: 'text', shipment_ref: 'text', prod_no: 'text',
     starred: 'boolean',   // ⭐ Focus / favourite toggle (migration 082)
+    preship_not_required: 'boolean',   // "not required" tick suppresses the pre-shipment-docs action (migration 107)
     batch_id: 'text', branch: 'text', erp_po: 'text', notes: 'text', container_size: 'text',
     country_code: 'text', client: 'text', client_requirements: 'text', sales_order_ref: 'text', client_deadline_date: 'date', asn_numbers: 'text',
     client_po_ref: 'text', dispatch_order_ref: 'text', final_delivery_address: 'text', crossdock_skus: 'text',
