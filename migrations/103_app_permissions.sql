@@ -26,3 +26,18 @@ ON CONFLICT (email) DO UPDATE
       demand_edit = excluded.demand_edit,
       is_admin    = excluded.is_admin,
       updated_at  = now();
+
+-- SUPPLY-only editors (no demand, not admin); zera also gets DEMAND.
+INSERT INTO planner.app_permissions (email, supply_edit, demand_edit, is_admin) VALUES
+  ('hannah@dockandbay.com',     true, false, false),
+  ('avry@dockandbay.com',       true, false, false),
+  ('liam@dockandbay.com',       true, false, false),
+  ('alexandria@dockandbay.com', true, false, false),
+  ('madison@dockandbay.com',    true, false, false),
+  ('gabby@dockandbay.com',      true, false, false),
+  ('zera@dockandbay.com',       true, true,  false)
+ON CONFLICT (email) DO UPDATE
+  SET supply_edit = excluded.supply_edit,
+      demand_edit = excluded.demand_edit,
+      is_admin    = excluded.is_admin,
+      updated_at  = now();
