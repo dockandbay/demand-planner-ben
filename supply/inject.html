@@ -291,6 +291,19 @@
 #supply-root .op-filt-toggle{display:none}   /* ORDER PLAN "Filters" toggle button: phone only (desktop shows filters inline) */
 #supply-root .op-dl-top{display:none}        /* ORDER PLAN header Download button: phone only (desktop keeps it in the filter bar) */
 #supply-root .op-po-grp{display:inline-flex;align-items:center;gap:4px}   /* keep the PO(s) label + search box together */
+/* PO filter items: desktop = inline (as before); mobile = 2 per row (50/50), Ship-to on its own row */
+#supply-root .po-filt-ship{display:inline-flex;align-items:center;flex-wrap:wrap;gap:3px}
+#supply-root .po-filt-ship .pill-lbl{margin-right:2px}
+#supply-root .po-filt-item{display:inline-flex;align-items:center;gap:5px;margin-left:14px}
+@media (max-width:700px){
+  #supply-root #po-ctry, #supply-root #po-act{flex-wrap:wrap;row-gap:6px}
+  #supply-root .po-filt-ship{flex:0 0 100%;margin:0}
+  #supply-root .po-filt-ship .pill{padding:2px 5px;font-size:10px}
+  #supply-root .po-filt-ship .pill-lbl{margin-right:4px}
+  #supply-root .po-filt-item{flex:0 0 50%;max-width:50%;margin-left:0;box-sizing:border-box;padding-right:8px}
+  #supply-root .po-filt-item .pill-lbl{margin:0}
+  #supply-root .po-filt-item>select.flt, #supply-root .po-filt-item>.pill{flex:1 1 auto;width:auto!important;max-width:none!important;min-width:0}
+}
 /* ── phone (≤640px) UX: section dropdown, search-first, swipeable sub-tabs, collapsible filters ── */
 @media (max-width:640px){
   #supply-root{padding-top:2px}
@@ -1158,19 +1171,21 @@
           +'<button class="save-btn" id="po-csv" style="'+lb+'">⬇ CSV for Fulfil</button>'
           +'<button class="save-btn" id="po-cin7-dates" style="'+lb+'" title="push the planner completion date to Cin7 EstimatedDeliveryDate for every ACTIVE PO whose date differs from Cin7 — complete POs are skipped (live write)">📅 Sync Cin7 dates</button>'
           +'</div>'; })()
-      +'<div class="bar" id="po-ctry"><span class="pill-lbl">Ship to</span>'+CTRYP.map(function(a){return '<span class="pill'+(state.ctry[a[0]]?' active':'')+'" data-c="'+a[0]+'">'+(CFLAG[a[0]]?CFLAG[a[0]]+' ':'')+a[1]+'</span>';}).join('')
-      +'<span class="pill-lbl" style="margin-left:14px">Supplier</span><select class="flt" id="po-sup" style="width:180px;max-width:180px;cursor:pointer;text-overflow:ellipsis'+(state.sup?SEL_ON:'')+'"><option value="">All suppliers</option>'+(supplierList||[]).slice().sort().map(function(s){return '<option'+(s===state.sup?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select>'
-      +'<span class="pill-lbl" style="margin-left:14px">Branch</span><select class="flt" id="po-branch" style="width:auto;max-width:150px;cursor:pointer;text-overflow:ellipsis'+(state.branch?SEL_ON:'')+'"><option value="">All branches</option>'+optList(_branches,state.branch)+'</select>'
-      +'<span class="pill-lbl" style="margin-left:14px">Production</span><select class="flt" id="po-prod" style="width:62px;cursor:pointer;text-overflow:ellipsis'+(state.prod?SEL_ON:'')+'"><option value="">All</option>'+optList(_prods,state.prod)+'</select>'
-      +'<span class="pill-lbl" style="margin-left:10px">Batch</span><select class="flt" id="po-batch" style="width:94px;cursor:pointer;text-overflow:ellipsis'+(state.batch?SEL_ON:'')+'"><option value="">All</option>'+optList(_batches,state.batch)+'</select></div>'
-      +'<div class="bar" id="po-act"><span class="pill po-actall" data-aa="1" style="background:#dc2626;color:#fff;border:1px solid #991b1b;font-weight:700" title="show only POs that have one or more open action items (the red badges)">ACTION ITEMS ('+actItemsCount()+')</span>'
-      +'<span class="pill po-erp" data-erp="1" style="background:#b45309;color:#fff;border:1px solid #7c2d12;font-weight:700;margin-left:6px" title="show only POs misaligned with Fulfil/Cin7 — never pushed (upload the whole PO) or with pending qty/cost changes (update). Use the ERP button on the row, or Upload on the Order Plan, to push.">⬆ NEEDS ERP ('+erpCount()+')</span>'
-      +'<span class="pill-lbl" style="margin-left:14px;white-space:nowrap">Exceptions</span>'
+      +'<div class="bar" id="po-ctry">'
+      +'<span class="po-filt-ship"><span class="pill-lbl">Ship to</span>'+CTRYP.map(function(a){return '<span class="pill'+(state.ctry[a[0]]?' active':'')+'" data-c="'+a[0]+'">'+(CFLAG[a[0]]?CFLAG[a[0]]+' ':'')+a[1]+'</span>';}).join('')+'</span>'
+      +'<span class="po-filt-item"><span class="pill-lbl">Supplier</span><select class="flt" id="po-sup" style="width:180px;max-width:180px;cursor:pointer;text-overflow:ellipsis'+(state.sup?SEL_ON:'')+'"><option value="">All suppliers</option>'+(supplierList||[]).slice().sort().map(function(s){return '<option'+(s===state.sup?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>'
+      +'<span class="po-filt-item"><span class="pill-lbl">Branch</span><select class="flt" id="po-branch" style="width:auto;max-width:150px;cursor:pointer;text-overflow:ellipsis'+(state.branch?SEL_ON:'')+'"><option value="">All branches</option>'+optList(_branches,state.branch)+'</select></span>'
+      +'<span class="po-filt-item"><span class="pill-lbl">Production</span><select class="flt" id="po-prod" style="width:62px;cursor:pointer;text-overflow:ellipsis'+(state.prod?SEL_ON:'')+'"><option value="">All</option>'+optList(_prods,state.prod)+'</select></span>'
+      +'<span class="po-filt-item"><span class="pill-lbl">Batch</span><select class="flt" id="po-batch" style="width:94px;cursor:pointer;text-overflow:ellipsis'+(state.batch?SEL_ON:'')+'"><option value="">All</option>'+optList(_batches,state.batch)+'</select></span></div>'
+      +'<div class="bar" id="po-act">'
+      +'<span class="po-filt-item"><span class="pill po-actall" data-aa="1" style="background:#dc2626;color:#fff;border:1px solid #991b1b;font-weight:700" title="show only POs that have one or more open action items (the red badges)">ACTION ITEMS ('+actItemsCount()+')</span></span>'
+      +'<span class="po-filt-item"><span class="pill po-erp" data-erp="1" style="background:#b45309;color:#fff;border:1px solid #7c2d12;font-weight:700" title="show only POs misaligned with Fulfil/Cin7 — never pushed (upload the whole PO) or with pending qty/cost changes (update). Use the ERP button on the row, or Upload on the Order Plan, to push.">⬆ NEEDS ERP ('+erpCount()+')</span></span>'
+      +'<span class="po-filt-item"><span class="pill-lbl">Exceptions</span>'
         +'<select class="flt" id="po-exc" style="width:220px;max-width:220px;cursor:pointer;text-align:left;text-overflow:ellipsis;'+(_excOn?'background:#0f172a;color:#fff;border:1px solid #0f172a;font-weight:700':'background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;font-weight:700')+'">'
         +'<option value="">⚠ All exceptions…</option>'
         +ACTP.map(function(a){return '<option value="'+a[0]+'"'+(state.act[a[0]]?' selected':'')+'>'+esc(a[1])+' ('+actCount(a[0])+')</option>';}).join('')
-      +'</select>'
-      +'<span class="pill-lbl" style="margin-left:14px">Group</span><select class="flt" id="po-grp" style="width:auto;cursor:pointer">'+GRP.map(function(g){return '<option value="'+g[0]+'"'+(g[0]===state.grp?' selected':'')+'>'+esc(g[1])+'</option>';}).join('')+'</select></div>'
+      +'</select></span>'
+      +'<span class="po-filt-item"><span class="pill-lbl">Group</span><select class="flt" id="po-grp" style="width:auto;cursor:pointer">'+GRP.map(function(g){return '<option value="'+g[0]+'"'+(g[0]===state.grp?' selected':'')+'>'+esc(g[1])+'</option>';}).join('')+'</select></span></div>'
       +'<div id="sup-grid"></div>';
     bindPoSubNav();
     function anyCtry(){ for(var k in state.ctry){ if(state.ctry[k])return true; } return false; }

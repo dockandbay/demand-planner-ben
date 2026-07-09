@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.355 - Purchase Orders filters: 2-per-row on mobile
+
+Wrapped each PO filter (Supplier, Branch, Production, Batch, Action items, Needs ERP, Exceptions, Group) in
+a `.po-filt-item`. On mobile (≤700px) they lay out **2 per row (50/50)** in order — Supplier/Branch,
+Production/Batch, Action items/Needs ERP, Exceptions/Group — with label padding removed and controls filling
+their half. **Ship-to** sits on its own full-width row with tighter pill padding so all country pills fit on
+one line. Desktop layout unchanged (inline).
+
 ## v25.354 - Purchase Orders: hide count + ERP-match summary on mobile
 
 On phones (≤700px) the "N / M POs" count line and the "ERP match: … in sync / drift / date ≠ ERP" summary
