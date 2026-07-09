@@ -296,12 +296,14 @@
 #supply-root .po-filt-ship .pill-lbl{margin-right:2px}
 #supply-root .po-filt-item{display:inline-flex;align-items:center;gap:5px;margin-left:14px}
 @media (max-width:700px){
-  #supply-root #po-ctry, #supply-root #po-act{flex-wrap:wrap;row-gap:6px}
-  #supply-root .po-filt-ship{flex:0 0 100%;margin:0}
-  #supply-root .po-filt-ship .pill{padding:2px 5px;font-size:10px}
-  #supply-root .po-filt-ship .pill-lbl{margin-right:4px}
-  #supply-root .po-filt-item{flex:0 0 50%;max-width:50%;margin-left:0;box-sizing:border-box;padding-right:8px}
-  #supply-root .po-filt-item .pill-lbl{margin:0}
+  #supply-root #po-ctry, #supply-root #po-act{flex-wrap:wrap;row-gap:4px}
+  /* Ship-to: own full-width row; tight so all country pills fit one line */
+  #supply-root .po-filt-ship{flex:0 0 100%!important;max-width:100%!important;margin:3px 0!important;gap:2px}
+  #supply-root .po-filt-ship .pill-lbl{margin:0 2px 0 0!important}
+  #supply-root .po-filt-ship .pill{padding:2px 4px;font-size:10px;margin:0}
+  /* 2-per-row 50/50 filter items (margin:3px 0 kills the 4px right margin that was breaking the pairs) */
+  #supply-root .po-filt-item{flex:0 0 50%!important;max-width:50%!important;margin:3px 0!important;box-sizing:border-box;padding-right:8px}
+  #supply-root .po-filt-item .pill-lbl{margin:0!important;white-space:nowrap}
   #supply-root .po-filt-item>select.flt, #supply-root .po-filt-item>.pill{flex:1 1 auto;width:auto!important;max-width:none!important;min-width:0}
 }
 /* ── phone (≤640px) UX: section dropdown, search-first, swipeable sub-tabs, collapsible filters ── */
@@ -5530,7 +5532,8 @@
     if(m){ t=m[1].replace(/[.\s]+$/,''); h=m[2]; }
     return {t:t, h:h||'This SUPPLY section.'}; };
   function boot(){ try{ ensureRoot(); ensureNavButton(); ensureScenarioRoot(); ensureScenarioButton();
-    if(!_routed){ _routed=true; try{ if(/^#\/?(supply|scenario|demand|reports|buy|fba|planning|exec)(\/|$)/.test(location.hash)) applyRoute(); }catch(e){} }   // deep-link on first load
+    if(!_routed){ _routed=true; try{ if(/^#\/?(supply|scenario|demand|reports|buy|fba|planning|exec)(\/|$)/.test(location.hash)) applyRoute();
+      else { location.hash='#/supply/purchase-orders'; applyRoute(); } }catch(e){} }   // deep-link on first load; no hash → default landing = SUPPLY ▸ Purchase Orders
   }catch(e){ if(window.console)console.log('[SUPPLY] boot error',e&&e.message); } }
   if(window.console)console.log('[SUPPLY] inject __APP_VERSION__ executing');
   boot(); document.addEventListener('DOMContentLoaded',boot); window.addEventListener('load',boot);

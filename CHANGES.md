@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.356 - Default landing = SUPPLY ▸ Purchase Orders + fix mobile filter columns
+
+- **Default landing page is now SUPPLY ▸ Purchase Orders** — on a fresh load with no URL hash, the app routes
+  to `#/supply/purchase-orders` (deep-links to other views still open as before).
+- **Fixed mobile filters** (v25.355 regression): the 50/50 items were forced to one column by the phone
+  `#po-ctry>*{margin:… 4px …}` rule pushing two items past 100%. Now `margin:3px 0` + `!important` widths so
+  they pair 2-per-row. Ship-to tightened further (label margin 2px, pill padding 2px 4px) so all country pills
+  (incl. DIRECT) fit on one line.
+
 ## v25.355 - Purchase Orders filters: 2-per-row on mobile
 
 Wrapped each PO filter (Supplier, Branch, Production, Batch, Action items, Needs ERP, Exceptions, Group) in
