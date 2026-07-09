@@ -658,7 +658,8 @@
         +'<label class="tiny">Type<br><select class="fci pp-doc-type" data-po="'+po+'" style="text-align:left;min-width:160px">'+DOC_TYPES.map(function(t){return '<option>'+esc(t)+'</option>';}).join('')+'</select></label>'
         +'<label class="tiny">File<br><input type="file" class="pp-doc-file" data-po="'+po+'" style="font-size:11px;width:210px"></label>'
         +'<button class="save-btn pp-doc-go" data-po="'+po+'">Upload document</button></div>'
-        +'<table style="font-size:11px;width:auto"><thead><tr><th class="l">Type</th><th class="l">File</th><th class="l">Uploaded</th><th></th></tr></thead><tbody>'+docRows+'</tbody></table>';
+        +'<table style="font-size:11px;width:auto"><thead><tr><th class="l">Type</th><th class="l">File</th><th class="l">Uploaded</th><th></th></tr></thead><tbody>'+docRows+'</tbody></table>'
+        +(/coghlans/i.test(p.branch||'')?'<div style="margin-top:8px"><button class="save-btn" onclick="window.open(\'/api/portal/asn-labels/\'+encodeURIComponent(\''+po+'\'))" title="download your A4 ASN pallet labels — one page per pallet">⤓ ASN Pallet Labels</button> <span class="mut tiny">one A4 page per pallet</span></div>':'');
       // ---- SHIPMENT: flexport details, else submit tracking/carrier + completion ----
       var shipLabelBtn=(p.ship_other_supplier?'<div style="margin:6px 0"><button class="save-btn pp-shiplabel" data-po="'+po+'" title="this shipment consolidates under another supplier’s master — download the SHIPS WITH labels for your cartons">⤓ Shipment Labels</button> <span class="mut tiny">consolidated under another supplier — label your cartons</span></div>':'');
       // carrier + tracking live on the SHIPMENT (same carrier list as the planner). If this PO isn't on a

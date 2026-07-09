@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.377 - Pre-shipment docs: supplier portal downloads
+
+- **ASN pallet labels** now downloadable on the supplier portal for Coghlans POs (new gate-exempt
+  `GET /api/portal/asn-labels/:po` + a "⤓ ASN Pallet Labels" button in the PO's Documents section).
+- **Carton/pallet barcodes + IDN labels** already surface on the portal automatically — they're
+  `portal_attachments` (non-'client'), so the portal's per-PO Documents list shows them with download links.
+- Remaining nicety: a "NEW …" unread timeline counter when docs are added (downloads work regardless).
+
 ## v25.376 - Pre-shipment docs: grid-level overdue counter
 
 The pre-shipment overdue now shows on the **red PO-ref action badge** in the Purchase Orders grid (new
