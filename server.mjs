@@ -8,6 +8,7 @@ import 'dotenv/config';
 import express from 'express';
 import { readFileSync, appendFile } from 'fs';
 import pg from 'pg';
+import { buildInvoice } from './invoice.mjs';
 
 // On Vercel (serverless) use Supabase's TRANSACTION pooler (port 6543) — built for many
 // short-lived serverless connections — with a tiny per-instance pool. Session pooler (5432)
@@ -73,7 +74,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.368';
+const APP_VERSION = 'v25.369';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2742,6 +2743,27 @@ app.post('/api/consignee/:country/delete', async (req, res) => {
   const country = String(req.params.country || '').trim().toUpperCase();
   try { await pool.query('DELETE FROM planner.invoice_consignees WHERE country=$1', [country]); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); } });
+
+// ── Invoice + Packing List generator (xlsx download) ──
+// Commercial Invoice = one PO. Tax Invoice = a shipment (every PO whose shipment_ref is the master PO ref).
+function sendXlsx(res, r) {
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', "attachment; filename*=UTF-8''" + encodeURIComponent(r.filename));
+  res.send(r.buffer);
+}
+app.get('/api/invoice/po/:po', async (req, res) => {
+  const po = decodeURIComponent(req.params.po || '');
+  try { sendXlsx(res, await buildInvoice(pool, { type: 'commercial', pos: [po], ref: po, master: po })); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/invoice/shipment/:ref', async (req, res) => {
+  const ref = decodeURIComponent(req.params.ref || '');
+  try {
+    const pos = (await pool.query('SELECT po FROM planner.purchase_orders WHERE shipment_ref=$1 OR po=$1', [ref])).rows.map((r) => r.po);
+    if (!pos.length) return res.status(404).json({ error: 'No POs found for shipment ' + ref });
+    sendXlsx(res, await buildInvoice(pool, { type: 'tax', pos, ref, master: ref }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.post('/api/supply/portal-note', async (req, res) => {
   const b = req.body || {};
   if (!b.po || !String(b.body || '').trim()) return res.status(400).json({ error: 'po and body required' });

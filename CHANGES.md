@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.369 - Invoice + Packing List generator (Commercial / Tax) — endpoints + engine
+
+New `invoice.mjs` (ExcelJS) fills the supplier template as a formatting shell with live data.
+- `GET /api/invoice/po/:po` → **Commercial Invoice** (one PO). `GET /api/invoice/shipment/:ref` → **Tax
+  Invoice** (all POs on that shipment; lines merged by SKU, header from the master shipment PO's supplier).
+- Header A1 = supplier company name + `Textile Exchange-ID (TE-ID): …` when set (new `suppliers.te_id`,
+  migration 106; seeded Lixin=TE-00055808). Consignee/notify by delivery country (UK fallback). Lines carry
+  SKU, invoice title, HS code (per country, US fallback), qty, unit price, amount; CERT "GRS" / "100%" only
+  when `grs_approved='1 checked out of 1'`. Packing List: carton size, cartons, pcs, GW, order qty (centred).
+- Table auto-expands past the template's 27-row block for large shipments (verified on a 126-SKU shipment).
+- Adds the **exceljs** dependency + bundles `templates/invoice-packing-template.xlsx` (runtime shell).
+- Buttons (portal + supply) come next.
+
 ## v25.368 - Import PO from Cin7: auto-filter the grid to the imported PO
 
 After a successful import, the imported PO number is dropped into the Purchase Orders search box so the grid
