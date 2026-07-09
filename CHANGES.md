@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.353 - Purchase Orders: "Import/Export" pop-down for the action buttons
+
+Consolidated the row of PO action buttons (+ New PO, Upload POs, Import PO from Cin7, CSV for Fulfil, Sync
+Cin7 dates) behind an **"⇅ Import/Export"** toggle on the same row as the "⚙ Filters" button — it pops down a
+bar showing all five (was a wide row of buttons, awkward on mobile). Button ids/handlers unchanged.
+
 ## v25.352 - Import a PO from Cin7 into the planner
 
 New **"⬇ Import PO from Cin7"** button on SUPPLY ▸ Purchase Orders → popup: enter a Cin7 PO number, it reads

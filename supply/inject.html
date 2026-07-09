@@ -1147,8 +1147,15 @@
       +'<span class="pill po-focus'+(state.focus?' active':'')+'" data-focus title="show only starred POs (active only — completed are hidden)">★ Focus</span>'
       +'<input class="flt" id="sup-search" placeholder="Filter PO / supplier…" value="'+esc(state.q||'')+'" style="background:#eff6ff;border-color:#93c5fd"><span class="count" id="sup-count"></span>'
       +'<button class="save-btn po-filt-toggle" id="po-filt-toggle">⚙ Filters</button>'
+      +'<button class="save-btn" id="po-impexp-toggle" style="margin-left:auto">⇅ Import/Export</button></div>'
       +(function(){ var lb='background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;';   // light-blue PO action buttons
-        return '<span style="margin-left:auto"><button class="save-btn" id="po-new" style="'+lb+'margin-right:8px">+ New PO</button><button class="save-btn" id="po-upload" style="'+lb+'margin-right:8px">⬆ Upload POs</button><button class="save-btn" id="po-import-cin7" style="'+lb+'margin-right:8px" title="import a purchase order from Cin7 by its PO number — brings in supplier, branch, SKUs &amp; quantities">⬇ Import PO from Cin7</button><button class="save-btn" id="po-csv" style="'+lb+'margin-right:8px">⬇ CSV for Fulfil</button><button class="save-btn" id="po-cin7-dates" style="'+lb+'" title="push the planner completion date to Cin7 EstimatedDeliveryDate for every ACTIVE PO whose date differs from Cin7 — complete POs are skipped (live write)">📅 Sync Cin7 dates</button></span></div>'; })()
+        return '<div class="bar" id="po-impexp-bar" style="display:none;gap:8px;flex-wrap:wrap">'
+          +'<button class="save-btn" id="po-new" style="'+lb+'">+ New PO</button>'
+          +'<button class="save-btn" id="po-upload" style="'+lb+'">⬆ Upload POs</button>'
+          +'<button class="save-btn" id="po-import-cin7" style="'+lb+'" title="import a purchase order from Cin7 by its PO number — brings in supplier, branch, SKUs &amp; quantities">⬇ Import PO from Cin7</button>'
+          +'<button class="save-btn" id="po-csv" style="'+lb+'">⬇ CSV for Fulfil</button>'
+          +'<button class="save-btn" id="po-cin7-dates" style="'+lb+'" title="push the planner completion date to Cin7 EstimatedDeliveryDate for every ACTIVE PO whose date differs from Cin7 — complete POs are skipped (live write)">📅 Sync Cin7 dates</button>'
+          +'</div>'; })()
       +'<div class="bar" id="po-ctry"><span class="pill-lbl">Ship to</span>'+CTRYP.map(function(a){return '<span class="pill'+(state.ctry[a[0]]?' active':'')+'" data-c="'+a[0]+'">'+(CFLAG[a[0]]?CFLAG[a[0]]+' ':'')+a[1]+'</span>';}).join('')
       +'<span class="pill-lbl" style="margin-left:14px">Supplier</span><select class="flt" id="po-sup" style="width:180px;max-width:180px;cursor:pointer;text-overflow:ellipsis'+(state.sup?SEL_ON:'')+'"><option value="">All suppliers</option>'+(supplierList||[]).slice().sort().map(function(s){return '<option'+(s===state.sup?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select>'
       +'<span class="pill-lbl" style="margin-left:14px">Branch</span><select class="flt" id="po-branch" style="width:auto;max-width:150px;cursor:pointer;text-overflow:ellipsis'+(state.branch?SEL_ON:'')+'"><option value="">All branches</option>'+optList(_branches,state.branch)+'</select>'
@@ -1289,6 +1296,7 @@
     var pbatch=document.getElementById('po-batch'); if(pbatch)pbatch.onchange=function(){state.batch=this.value;selHi(this,!!this.value);view();};
     document.getElementById('sup-search').oninput=debounce(function(){state.q=this.value;_poShowAll=false;view();},350);
     var _ft=document.getElementById('po-filt-toggle'); if(_ft)_ft.onclick=function(){ var sc=document.getElementById('supply-content'); var on=sc.classList.toggle('filters-open'); this.textContent=on?'⚙ Filters ▴':'⚙ Filters'; };
+    var _ie=document.getElementById('po-impexp-toggle'); if(_ie)_ie.onclick=function(){ var pb=document.getElementById('po-impexp-bar'); if(!pb)return; var on=(pb.style.display==='none'||!pb.style.display); pb.style.display=on?'flex':'none'; this.textContent=on?'⇅ Import/Export ▴':'⇅ Import/Export'; };
     document.getElementById('po-csv').onclick=function(){var q=effQ(state.q);csv(q?filt(rows,q):cur(),'purchase_orders.csv',PO_CSV_LABELS);};
     document.getElementById('po-new').onclick=function(){ var po=prompt('New PO number:'); if(!po||!po.trim())return;
       var sup=prompt('Supplier (optional — exact name; set later in the row otherwise):')||'';
