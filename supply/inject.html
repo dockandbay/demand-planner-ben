@@ -302,7 +302,7 @@
   #supply-root .po-filt-ship .pill-lbl{margin:0 2px 0 0!important}
   #supply-root .po-filt-ship .pill{padding:2px 4px;font-size:10px;margin:0}
   /* 2-per-row 50/50 filter items (margin:3px 0 kills the 4px right margin that was breaking the pairs) */
-  #supply-root .po-filt-item{flex:0 0 50%!important;max-width:50%!important;margin:3px 0!important;box-sizing:border-box;padding-right:8px}
+  #supply-root .po-filt-item{flex:0 0 50%!important;max-width:50%!important;margin:3px 0!important;box-sizing:border-box;padding-right:8px;gap:3px!important}
   #supply-root .po-filt-item .pill-lbl{margin:0!important;white-space:nowrap}
   #supply-root .po-filt-item>select.flt, #supply-root .po-filt-item>.pill{flex:1 1 auto;width:auto!important;max-width:none!important;min-width:0}
 }
@@ -1174,15 +1174,15 @@
           +'<button class="save-btn" id="po-cin7-dates" style="'+lb+'" title="push the planner completion date to Cin7 EstimatedDeliveryDate for every ACTIVE PO whose date differs from Cin7 — complete POs are skipped (live write)">📅 Sync Cin7 dates</button>'
           +'</div>'; })()
       +'<div class="bar" id="po-ctry">'
-      +'<span class="po-filt-ship"><span class="pill-lbl">Ship to</span>'+CTRYP.map(function(a){return '<span class="pill'+(state.ctry[a[0]]?' active':'')+'" data-c="'+a[0]+'">'+(CFLAG[a[0]]?CFLAG[a[0]]+' ':'')+a[1]+'</span>';}).join('')+'</span>'
+      +'<span class="po-filt-ship">'+CTRYP.map(function(a){return '<span class="pill'+(state.ctry[a[0]]?' active':'')+'" data-c="'+a[0]+'">'+(CFLAG[a[0]]?CFLAG[a[0]]+' ':'')+a[1]+'</span>';}).join('')+'</span>'
       +'<span class="po-filt-item"><span class="pill-lbl">Supplier</span><select class="flt" id="po-sup" style="width:180px;max-width:180px;cursor:pointer;text-overflow:ellipsis'+(state.sup?SEL_ON:'')+'"><option value="">All suppliers</option>'+(supplierList||[]).slice().sort().map(function(s){return '<option'+(s===state.sup?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>'
       +'<span class="po-filt-item"><span class="pill-lbl">Branch</span><select class="flt" id="po-branch" style="width:auto;max-width:150px;cursor:pointer;text-overflow:ellipsis'+(state.branch?SEL_ON:'')+'"><option value="">All branches</option>'+optList(_branches,state.branch)+'</select></span>'
-      +'<span class="po-filt-item"><span class="pill-lbl">Production</span><select class="flt" id="po-prod" style="width:62px;cursor:pointer;text-overflow:ellipsis'+(state.prod?SEL_ON:'')+'"><option value="">All</option>'+optList(_prods,state.prod)+'</select></span>'
+      +'<span class="po-filt-item"><span class="pill-lbl">Prod</span><select class="flt" id="po-prod" style="width:62px;cursor:pointer;text-overflow:ellipsis'+(state.prod?SEL_ON:'')+'"><option value="">All</option>'+optList(_prods,state.prod)+'</select></span>'
       +'<span class="po-filt-item"><span class="pill-lbl">Batch</span><select class="flt" id="po-batch" style="width:94px;cursor:pointer;text-overflow:ellipsis'+(state.batch?SEL_ON:'')+'"><option value="">All</option>'+optList(_batches,state.batch)+'</select></span></div>'
       +'<div class="bar" id="po-act">'
       +'<span class="po-filt-item"><span class="pill po-actall" data-aa="1" style="background:#dc2626;color:#fff;border:1px solid #991b1b;font-weight:700" title="show only POs that have one or more open action items (the red badges)">ACTION ITEMS ('+actItemsCount()+')</span></span>'
       +'<span class="po-filt-item"><span class="pill po-erp" data-erp="1" style="background:#b45309;color:#fff;border:1px solid #7c2d12;font-weight:700" title="show only POs misaligned with Fulfil/Cin7 — never pushed (upload the whole PO) or with pending qty/cost changes (update). Use the ERP button on the row, or Upload on the Order Plan, to push.">⬆ NEEDS ERP ('+erpCount()+')</span></span>'
-      +'<span class="po-filt-item"><span class="pill-lbl">Exceptions</span>'
+      +'<span class="po-filt-item">'
         +'<select class="flt" id="po-exc" style="width:220px;max-width:220px;cursor:pointer;text-align:left;text-overflow:ellipsis;'+(_excOn?'background:#0f172a;color:#fff;border:1px solid #0f172a;font-weight:700':'background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;font-weight:700')+'">'
         +'<option value="">⚠ All exceptions…</option>'
         +ACTP.map(function(a){return '<option value="'+a[0]+'"'+(state.act[a[0]]?' selected':'')+'>'+esc(a[1])+' ('+actCount(a[0])+')</option>';}).join('')

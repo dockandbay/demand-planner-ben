@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.360 - PO filters: tighter labels, "Prod", drop "Exceptions" + "Ship to" labels
+
+- Reduced the label→control gap on mobile filter items (`gap:5px` → `3px`).
+- Renamed the **Production** filter label to **Prod**.
+- Removed the **Exceptions** label (the dropdown's own "⚠ All exceptions…" text is self-explanatory).
+- Removed the **Ship to** label (the country pills are self-explanatory).
+
 ## v25.359 - Purchase Orders filters really go 2-per-row on mobile
 
 The 50/50 filter items were still stacking one-per-row on phones: the `≤640px` `.bar{gap:5px 6px}`
