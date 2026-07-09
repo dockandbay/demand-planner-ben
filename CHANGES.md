@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.359 - Purchase Orders filters really go 2-per-row on mobile
+
+The 50/50 filter items were still stacking one-per-row on phones: the `≤640px` `.bar{gap:5px 6px}`
+rule added a **6px column-gap**, so two items at 50% + 6px > 100% and wrapped. Added
+`column-gap:0!important` on `#po-ctry`/`#po-act` so the pairs sit two-up (label + dropdown/pill fit in
+each half via `box-sizing:border-box` + `padding-right:8px`). Row-gap and Ship-to's own row unchanged.
+
 ## v25.358 - Import PO from Cin7: no phantom ERP drift + light-blue toggle on the left
 
 - **Import from Cin7 now mirrors the ERP lines.** Previously an imported PO showed an immediate
