@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.376 - Pre-shipment docs: grid-level overdue counter
+
+The pre-shipment overdue now shows on the **red PO-ref action badge** in the Purchase Orders grid (new
+`preship` condition, routes to the SHIPMENTS tab) as well as the ACTION ITEMS filter (already counted via
+poExceptions). Covers all three rules (ASN / FBA barcodes / EU IDN labels).
+
 ## v25.375 - Pre-shipment docs Rules 2 & 3: FBA/AWD barcode + EU IDN-label uploads
 
 On the SHIPMENTS sub-tab, branch-conditional upload blocks (admin uploads → supplier downloads on the portal),

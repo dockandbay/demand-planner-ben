@@ -1133,10 +1133,18 @@
     // Direct to Client details not yet approved — only for Direct-to-Client POs with a client sales ref
     dtc_not_approved:function(r){ return r.progress!=='complete' && poIsDtc(r) && !r.dtc_accepted_at; },
     // production requires supplier confirmation and the supplier hasn't confirmed the PO yet
-    po_not_approved:function(r){ return r.progress!=='complete' && !!r.require_confirmation && !r.supplier_confirmed; }};
+    po_not_approved:function(r){ return r.progress!=='complete' && !!r.require_confirmation && !r.supplier_confirmed; },
+    // Pre-shipment documents overdue: PRODUCTION/ready-to-ship, production end passed, required branch doc missing, not waived.
+    preship:function(r){ if(!(r.status==='PRODUCTION'||r.production_status==='ready_to_ship')||r.preship_not_required)return false;
+      var t=new Date().toISOString().slice(0,10); if(!(r.prod_end&&r.prod_end<t))return false;
+      var br=r.branch||'', dc=String(r.doc_cats||'');
+      if(/coghlans/i.test(br))return !String(r.asn_numbers||'').trim();
+      if(/fba|awd/i.test(br))return dc.indexOf('carton_barcode')<0||dc.indexOf('pallet_barcode')<0;
+      if(/ifulfillment/i.test(br))return dc.indexOf('idn_pallet_label')<0;
+      return false; }};
   // PO-row action badge: label + which PO detail sub-tab each condition deep-links to.
-  var PO_ACT_LABEL={payment_overdue:'Payment overdue',unpaid_payment:'Unpaid payment',late:'Late — should be completed',unassigned_shipment:'Unassigned shipment',production:'Late — should have shipped',dtc_not_approved:'Direct-to-Client not approved',po_not_approved:'Not confirmed by supplier'};
-  var PO_ACT_TAB={payment_overdue:'pay',unpaid_payment:'pay',late:'dates',unassigned_shipment:'shipments',production:'shipments',dtc_not_approved:'client',po_not_approved:'dates'};
+  var PO_ACT_LABEL={payment_overdue:'Payment overdue',unpaid_payment:'Unpaid payment',late:'Late — should be completed',unassigned_shipment:'Unassigned shipment',production:'Late — should have shipped',dtc_not_approved:'Direct-to-Client not approved',po_not_approved:'Not confirmed by supplier',preship:'Pre-shipment documents overdue'};
+  var PO_ACT_TAB={payment_overdue:'pay',unpaid_payment:'pay',late:'dates',unassigned_shipment:'shipments',production:'shipments',dtc_not_approved:'client',po_not_approved:'dates',preship:'shipments'};
   function poActions(r){ var out=[]; for(var k in PO_ACTCOND){ try{ if(PO_ACTCOND[k](r))out.push(k); }catch(e){} } return out; }
   var _poState=null;   // PURCHASE ORDERS filter state — persisted across edit-triggered reloads so the filter survives
   function poInner(rows,c){
