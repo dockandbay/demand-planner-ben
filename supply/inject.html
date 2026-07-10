@@ -1174,13 +1174,27 @@
     var A='<span class="act-mk" data-po="'+esc(po)+'" data-note="'+esc(help)+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#dc2626;color:#fff;font-weight:800;font-size:10px;cursor:help;vertical-align:middle;margin-left:5px">A</span>';
     var snz=sn
       ? ' <span class="mut tiny" style="white-space:nowrap">💤'+esc(s.snooze_until||'')+' <button class="act-snz" data-po="'+esc(po)+'" data-code="'+esc(code)+'" data-d="0" style="border:none;background:none;color:#1d4ed8;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">wake</button></span>'
-      : ' <span style="white-space:nowrap">'+[1,3,7].map(function(d){return '<button class="act-snz" data-po="'+esc(po)+'" data-code="'+esc(code)+'" data-d="'+d+'" title="snooze '+d+' day'+(d>1?'s':'')+'" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:4px;font-size:10px;padding:1px 4px;margin-left:2px;cursor:pointer">'+d+'d</button>';}).join('')+'</span>';
+      : ' <button class="act-snz-btn" data-po="'+esc(po)+'" data-code="'+esc(code)+'" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:4px;font-size:10px;padding:1px 6px;margin-left:4px;cursor:pointer">SNOOZE ▾</button>';
     return A+snz; }
+  // Snooze menu popped from a SNOOZE button (1/3/7 days).
+  function openSnzMenu(btn){ var po=btn.dataset.po, code=btn.dataset.code;
+    var ex=document.getElementById('snz-menu'); if(ex)ex.remove();
+    var m=document.createElement('div'); m.id='snz-menu'; m.style.cssText='position:absolute;z-index:200002;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 6px 20px rgba(15,23,42,.18);padding:4px;font-size:12px;min-width:96px';
+    m.innerHTML='<div style="font-weight:700;color:#64748b;font-size:10px;padding:2px 10px 4px">Snooze</div>'+[[1,'1 day'],[3,'3 days'],[7,'7 days']].map(function(o){return '<div class="snz-opt" data-d="'+o[0]+'" style="padding:5px 12px;cursor:pointer;border-radius:4px">'+o[1]+'</div>';}).join('');
+    document.body.appendChild(m);
+    var rc=btn.getBoundingClientRect(); m.style.left=(window.scrollX+Math.min(rc.left,window.innerWidth-140))+'px'; m.style.top=(window.scrollY+rc.bottom+3)+'px';
+    function close(){ m.remove(); document.removeEventListener('mousedown',out,true); }
+    function out(e){ if(!m.contains(e.target)&&e.target!==btn)close(); }
+    setTimeout(function(){ document.addEventListener('mousedown',out,true); },0);
+    var pd=btn.closest('[id^="podet-"]'), i=pd?pd.id.replace('podet-',''):null;
+    m.querySelectorAll('.snz-opt').forEach(function(o){ o.onmouseenter=function(){o.style.background='#eff6ff';}; o.onmouseleave=function(){o.style.background='';};
+      o.onclick=function(){ close(); poSnoozeSet(po,code,parseInt(o.dataset.d,10),function(){ if(i!=null && typeof poRefetchPanel==='function')poRefetchPanel(po,i); else if(window.__poView)window.__poView(); }); }; }); }
   function bindActMark(scope){ var root=scope||document;
     root.querySelectorAll('.act-mk[data-note]').forEach(function(b){ if(b._b)return; b._b=1;
       b.addEventListener('mouseenter',function(){ b._t=setTimeout(function(){ noteTip(b); },120); });
       b.addEventListener('mouseleave',function(){ clearTimeout(b._t); hideNoteTip(); }); });
-    root.querySelectorAll('.act-snz').forEach(function(x){ if(x._b)return; x._b=1; x.onclick=function(e){ e.stopPropagation();
+    root.querySelectorAll('.act-snz-btn').forEach(function(x){ if(x._b)return; x._b=1; x.onclick=function(e){ e.stopPropagation(); openSnzMenu(x); }; });
+    root.querySelectorAll('.act-snz').forEach(function(x){ if(x._b)return; x._b=1; x.onclick=function(e){ e.stopPropagation();   // "wake" (data-d=0) restores an already-snoozed item
       var pd=x.closest('[id^="podet-"]'), i=pd?pd.id.replace('podet-',''):null;
       poSnoozeSet(x.dataset.po,x.dataset.code,parseInt(x.dataset.d,10),function(){ if(i!=null && typeof poRefetchPanel==='function')poRefetchPanel(x.dataset.po,i); else if(window.__poView)window.__poView(); }); }; }); }
   var _poState=null;   // PURCHASE ORDERS filter state — persisted across edit-triggered reloads so the filter survives
