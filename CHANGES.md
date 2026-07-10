@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.398 - CONFIG in the mobile menu
+
+CONFIG was missing from the mobile hamburger drawer: the drawer builder kept only `.view-toggle`
+buttons with a `data-view` plus `supply-btn`/`scenario-btn`, and the injected `config-btn` has neither
+— so it was skipped. Added `config-btn` to the allow-list, tracked its active state, and mirrored the
+CONFIG sub-nav (Tax/Freight/Duty/…/Permissions) in the drawer like SUPPLY/SCENARIO.
+
 ## v25.397 - PO country filter: DIRECT pill → OTHER (any non-major destination)
 
 The PURCHASE ORDERS country filter's **DIRECT** pill is now **OTHER** and matches any PO whose country

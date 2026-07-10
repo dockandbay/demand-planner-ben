@@ -9993,17 +9993,18 @@ var _rfBtn=document.getElementById('rf'); if(_rfBtn)_rfBtn.onclick=function(){
     var x=document.createElement('button'); x.className='hz-close'; x.innerHTML='&times;'; x.onclick=close; drawer.appendChild(x);
     drawer.appendChild(lbl('Navigate'));
     var views=Array.prototype.slice.call(document.querySelectorAll('#view-tabs-row .view-toggle'));
-    var supplyActive=false, demandActive=false, scenActive=false;
+    var supplyActive=false, demandActive=false, scenActive=false, configActive=false;
     views.forEach(function(vb){
-      if(!vb.dataset.view && vb.id!=='supply-btn' && vb.id!=='scenario-btn')return;   // skip tools/help, keep view + SUPPLY + SCENARIO buttons
-      var isSup=vb.id==='supply-btn', isScen=vb.id==='scenario-btn';
+      if(!vb.dataset.view && vb.id!=='supply-btn' && vb.id!=='scenario-btn' && vb.id!=='config-btn')return;   // skip tools/help, keep view + SUPPLY + SCENARIO + CONFIG buttons
+      var isSup=vb.id==='supply-btn', isScen=vb.id==='scenario-btn', isCfg=vb.id==='config-btn';
       var active=vb.classList.contains('active');
       if(isSup && active)supplyActive=true;
       if(isScen && active)scenActive=true;
+      if(isCfg && active)configActive=true;
       if(vb.dataset.view==='planning' && active)demandActive=true;
       drawer.appendChild(item(vb.textContent.trim(), active, function(){
         clearSearch(); vb.click();
-        if(isSup || isScen || vb.dataset.view==='planning'){ setTimeout(build,60); } else { close(); }   // reveal that view's sub-nav in place
+        if(isSup || isScen || isCfg || vb.dataset.view==='planning'){ setTimeout(build,60); } else { close(); }   // reveal that view's sub-nav in place
       }));
     });
     var nav=window.__supplyNav;
@@ -10023,6 +10024,11 @@ var _rfBtn=document.getElementById('rf'); if(_rfBtn)_rfBtn.onclick=function(){
       var stabs=Array.prototype.slice.call(document.querySelectorAll('#scenario-subnav .stab'));
       if(stabs.length){ drawer.appendChild(lbl('Scenario'));
         stabs.forEach(function(sb){ drawer.appendChild(item(sb.textContent.trim(), sb.classList.contains('active'), function(){ sb.click(); close(); })); }); }
+    } else if(configActive){
+      // mirror the CONFIG sub-nav (Tax / Freight / Duty / Branches / Suppliers / … / Permissions)
+      var ctabs=Array.prototype.slice.call(document.querySelectorAll('#config-subs .rtab'));
+      if(ctabs.length){ drawer.appendChild(lbl('Config'));
+        ctabs.forEach(function(cb){ drawer.appendChild(item(cb.textContent.trim(), cb.classList.contains('active'), function(){ cb.click(); close(); })); }); }
     }
   }
   burger.onclick=function(){ drawer.classList.contains('open')?close():open(); };
