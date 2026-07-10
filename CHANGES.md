@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.400 - New SCENARIO report: Sales Planning
+
+New SCENARIO ▸ SALES PLANNING tab. For a chosen country + channel (3PL/FBA) + month, per SKU:
+- **On hand now** (FBA pools FBA + AWD [US] + 3PL, components shown — 3PL is transferable to FBA),
+- **Projected stock at the start of the month** = on-hand + inbound landing before the month (incl.
+  on-order POs with calculated ETAs) − forecast sell-through before the month,
+- **Weeks of cover** at that date (projected ÷ selected-month forecast ÷ 4.33; colour-flagged <4 / <8 wk),
+- **Discontinued** by that date (per-country discontinue from planner.products).
+
+Forecast = latest committed SKU-level run (`planner.forecasts`). Sort by on-hand or weeks; group by
+discontinued status or flat; export to CSV (filename `sales-planning_<COUNTRY>_<CHANNEL>_<date_time>.csv`).
+New endpoint `POST /api/scenario/sales-planning`. No migration.
+
 ## v25.399 - FOB POs no longer raise an "unassigned shipment" action
 
 `unassigned_shipment` was `status not complete AND no shipment_ref` — with no FOB exclusion, so FOB POs

@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.399';
+const APP_VERSION = 'v25.400';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -4391,6 +4391,75 @@ app.post('/api/supply/shipment/:ref/delete', async (req, res) => {
 // Prime Day: inventory by SKU split into FBA / 3PL / AWD per the selected market(s).
 // v_product_inventory warehouses are '{country}_{type}' (uk_3pl, us_fba, …), sourced from
 // planner.products.inventory_*. AWD (inventory_us_awd) is a separate US pool, added on below.
+// SALES PLANNING — per SKU for a country + channel (3pl|fba) + month: current on-hand, projected stock at
+// the start of that month, weeks of cover at that date, and whether it's discontinued by then. Numbers come
+// from the latest committed SKU-level forecast run. FBA pools FBA + AWD (US) + 3PL (3PL is transferable to
+// FBA), with the components shown. Projected = on-hand + inbound landing before the month − forecast
+// sell-through before the month. Cover = projected ÷ (selected month's forecast ÷ 4.33).
+app.post('/api/scenario/sales-planning', async (req, res) => {
+  const b = req.body || {};
+  const country = String(b.country || '').toUpperCase();
+  const channel = String(b.channel || '3pl').toLowerCase() === 'fba' ? 'fba' : '3pl';
+  const month = String(b.month || '').slice(0, 7);
+  if (!/^[A-Z]{2}$/.test(country) || !/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'country + month (YYYY-MM) required' });
+  const co = country.toLowerCase(), monthStart = month + '-01', isUS = country === 'US';
+  const wh3 = co + '_3pl', whF = co + '_fba';
+  const pools = channel === 'fba' ? [whF, wh3] : [wh3];       // FBA view also pools transferable 3PL stock
+  const fchs = channel === 'fba' ? ['FBA'] : ['DTC', 'B2B'];  // sales channels the warehouse fulfils
+  const discCol = country === 'AU' ? 'discontinue_date_au_final' : country === 'CA' ? 'discontinue_date_ca' : 'discontinue_date_final';
+  try {
+    const run = (await pool.query(`SELECT max(run_id) mx FROM planner.forecasts WHERE level='sku'`)).rows[0].mx;
+    // SKUs available in this country + channel (3pl ↔ DTC/B2B, fba ↔ FBA)
+    const availSkus = (await pool.query(`SELECT DISTINCT sku FROM planner.v_product_availability
+        WHERE upper(country)=$1 AND channel = ANY($2) AND is_available`, [country, fchs])).rows.map(r => r.sku);
+    if (!availSkus.length) return res.json({ rows: [], country, channel, month });
+    // inventory for the pooled warehouses
+    const inv = {}; (await pool.query(`SELECT sku, warehouse, available FROM planner.v_product_inventory WHERE warehouse = ANY($1)`, [[wh3, whF]])).rows
+      .forEach(r => { (inv[r.sku] || (inv[r.sku] = {}))[r.warehouse] = Number(r.available) || 0; });
+    // product meta: name, per-country discontinue, AWD (US)
+    const meta = {}; (await pool.query(`SELECT sku, coalesce(product_name,'') name,
+        nullif(${discCol},'') disc, coalesce(inventory_us_awd,0)::int awd FROM planner.products WHERE in_planning_scope`)).rows
+      .forEach(r => { meta[r.sku] = r; });
+    // inbound landing BEFORE the month (real inbound feed + open POs with the same calc ETA as the SUPPLY view)
+    const inbBefore = {}; (await pool.query(`SELECT sku, sum(qty)::int q FROM (
+        SELECT sku, (quantity-coalesce(received_quantity,0)) qty FROM planner.inbound_shipments
+          WHERE coalesce(received_quantity,0) < quantity AND destination_warehouse = ANY($1)
+            AND estimated_delivery_date IS NOT NULL AND to_char(estimated_delivery_date,'YYYY-MM-DD') < $2
+        UNION ALL
+        SELECT l.sku, l.qty FROM planner.purchase_order_lines l
+          JOIN planner.purchase_orders po ON po.po=l.po
+          LEFT JOIN planner.branches b ON b.name=po.branch
+          LEFT JOIN planner.suppliers s ON s.id=po.supplier_id
+          WHERE coalesce(l.qty,0)>0 AND coalesce(po.status,'') NOT ILIKE '%complete%'
+            AND (lower(coalesce(nullif(po.country_code,''), b.country_code)) || '_' || (CASE WHEN po.branch ILIKE '%fba%' THEN 'fba' ELSE '3pl' END)) = ANY($1)
+            AND NOT EXISTS (SELECT 1 FROM planner.inbound_shipments i WHERE i.reference=po.po)
+            AND to_char((coalesce(po.end_production_overide, CASE WHEN po.start_production IS NOT NULL AND s.production_days IS NOT NULL
+                  THEN (po.start_production + (s.production_days||' days')::interval)::date END)
+                + interval '7 days' + (b.sea_lead_time_days||' days')::interval)::date,'YYYY-MM-DD') < $2
+      ) z GROUP BY sku`, [pools, monthStart])).rows.forEach(r => { inbBefore[r.sku] = Number(r.q) || 0; });
+    // forecast: demand before the month + the selected month's demand (for the weekly cover rate)
+    const fc = {}; (await pool.query(`SELECT sku,
+        coalesce(sum(units) FILTER (WHERE to_char(month,'YYYY-MM') >= to_char(CURRENT_DATE,'YYYY-MM') AND to_char(month,'YYYY-MM') < $3),0)::int dem_before,
+        coalesce(sum(units) FILTER (WHERE to_char(month,'YYYY-MM') = $3),0)::int dem_month
+      FROM planner.forecasts WHERE level='sku' AND run_id=$1 AND upper(country)=$2 AND channel = ANY($4)
+      GROUP BY sku`, [run, country, month, fchs])).rows.forEach(r => { fc[r.sku] = r; });
+
+    const rows = availSkus.map(sku => {
+      const m = meta[sku] || {}, iv = inv[sku] || {}, f = fc[sku] || { dem_before: 0, dem_month: 0 };
+      const oh3 = iv[wh3] || 0, ohF = channel === 'fba' ? (iv[whF] || 0) : 0, ohAwd = (channel === 'fba' && isUS) ? (m.awd || 0) : 0;
+      const ohTotal = channel === 'fba' ? (ohF + ohAwd + oh3) : oh3;
+      const inb = inbBefore[sku] || 0, demB = Number(f.dem_before) || 0, demM = Number(f.dem_month) || 0;
+      const projected = ohTotal + inb - demB;
+      const rate = demM / 4.33;   // weekly sell-through in the selected month
+      const weeks = rate > 0 ? Math.round(Math.max(0, projected) / rate * 10) / 10 : null;  // null = no forecast → infinite cover
+      const discontinued = !!(m.disc && m.disc < monthStart);
+      return { sku, name: m.name || '', oh_fba: ohF, oh_awd: ohAwd, oh_3pl: oh3, oh_total: ohTotal,
+        inbound_before: inb, dem_before: demB, projected, dem_month: demM, weeks, discontinued };
+    });
+    res.json({ rows, country, channel, month, isUS, forecast_run: run });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/scenario/prime-day', async (req, res) => {
   const b = req.body || {};
   const skus = Array.isArray(b.skus) ? b.skus.filter(Boolean).map(s => s.trim().toUpperCase()) : [];

@@ -5343,7 +5343,7 @@
   // (Removed the bottom-right floating "SUPPLY" button at Ben's request — the top-nav SUPPLY tab is
   // the single entry point now.)
   // ── SCENARIO planner (parallel top tab) ──────────────────────────────────
-  var SCEN_SECTIONS=[['prime','PRIME DAY'],['b2b','B2B ALLOCATION'],['finmodel','FINANCIAL FORECAST MODEL'],['postock','PO STOCK PRIORITY']];
+  var SCEN_SECTIONS=[['prime','PRIME DAY'],['b2b','B2B ALLOCATION'],['finmodel','FINANCIAL FORECAST MODEL'],['postock','PO STOCK PRIORITY'],['salesplan','SALES PLANNING']];
   var scenCurrent='prime', CATS_CACHE=null;
   var scenExp=new Set();   // Financial Forecast: which channel rows are expanded to countries
   var scenExpCo=new Set();  // Financial Forecast: which channel|country rows are expanded to sub-categories
@@ -5351,7 +5351,8 @@
     prime:'<b>SCENARIO ▸ Prime Day.</b> Enter a SKU list or filter by category / market to see available inventory split by FBA, AWD and 3PL.',
     b2b:'<b>SCENARIO ▸ B2B Allocation.</b> Should we take this order? Models stock impact, whether it\'s worth it after the air cost to rush in any shortfall, and a take/decline verdict. Switch market to re-analyse (stock + price are market-specific). Air rate $10/kg · £7/kg.',
     finmodel:'<b>SCENARIO ▸ Financial Forecast Model.</b> FY (Mar–Feb) units &amp; revenue by category × market in the exec-summary style — overlay a <b>growth %</b> and <b>price change %</b> per category × quarter to model the year vs last-year actuals; YoY badges + FY total. Forecast only; saves live to the database.',
-    postock:'<b>SCENARIO ▸ PO Stock Priority.</b> Pick a <b>production</b> PO (not yet shipped) to see, per SKU, how much of its ordered quantity is actually needed — comparing <b>stock on hand</b> + <b>OTHER inbound</b> (this PO removed) against <b>forecast demand</b> to the cover window. Flags each line <b>HIGH / MEDIUM / LOW / NOT REQUIRED</b> so over-ordered lines can be trimmed. Sort by SKU or priority; export the full analysis to CSV.'};
+    postock:'<b>SCENARIO ▸ PO Stock Priority.</b> Pick a <b>production</b> PO (not yet shipped) to see, per SKU, how much of its ordered quantity is actually needed — comparing <b>stock on hand</b> + <b>OTHER inbound</b> (this PO removed) against <b>forecast demand</b> to the cover window. Flags each line <b>HIGH / MEDIUM / LOW / NOT REQUIRED</b> so over-ordered lines can be trimmed. Sort by SKU or priority; export the full analysis to CSV.',
+    salesplan:'<b>SCENARIO ▸ Sales Planning.</b> For a chosen <b>country</b>, <b>channel</b> and <b>month</b>: current on-hand, the <b>projected stock at the start of that month</b> (on-hand + inbound landing before then − forecast sell-through), <b>weeks of cover</b> at that date, and whether the SKU is <b>discontinued</b> by then. FBA pools FBA + AWD (US) + 3PL (3PL is transferable to FBA), components shown. Forecast = latest committed run. Sort by on-hand or weeks; group by discontinued; export to CSV.'};
   function scenAnnot(k){return SCEN_ANNOT[k]?'<div class="annot">'+SCEN_ANNOT[k]+'</div>':'';}
   function scenSelect(key){ scenCurrent=key; writeHash(['scenario',key]);
     document.querySelectorAll('#scenario-subnav .stab').forEach(function(b){b.classList.toggle('active',b.dataset.k===key);});
@@ -5361,6 +5362,7 @@
     if(key==='finmodel'){ renderFinModel(c); mfc(); return; }
     if(key==='b2b'){ renderB2B(c); mfc(); return; }
     if(key==='postock'){ renderPoStock(c); mfc(); return; }
+    if(key==='salesplan'){ renderSalesPlan(c); mfc(); return; }
     c.innerHTML=scenAnnot(key); }
   // ---- PO STOCK PRIORITY ----
   var POSTOCK_STATE={po:'',sort:'priority',hide:{}};
@@ -5412,6 +5414,72 @@
       var csv='﻿'+head.join(',')+'\n'+visible().map(function(r){return [r.sku,r.qty,r.on_hand,r.demand,r.other_inbound,r.required,r.removable,r.priority,r.recommendation].map(esc2).join(',');}).join('\n')+'\n';
       var bl=new Blob([csv],{type:'text/csv;charset=utf-8'}),u=URL.createObjectURL(bl),a=document.createElement('a');a.href=u;a.download='PO_STOCK_PRIORITY_'+(data.po||'').replace(/[^A-Za-z0-9]+/g,'_')+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u);},1000); };
     if(POSTOCK_STATE.po)load(); }
+  // ---- SALES PLANNING ----
+  var SP_STATE=null;
+  function spMonthList(){ var out=[], d=new Date(); d.setDate(1); for(var i=0;i<18;i++){ var y=d.getFullYear(), m=d.getMonth()+1; out.push(y+'-'+(m<10?'0':'')+m); d.setMonth(d.getMonth()+1); } return out; }
+  function spMonthLabel(ym){ var p=String(ym||'').split('-'); if(p.length<2)return ym||''; var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return (mn[(+p[1])-1]||'')+' '+p[0]; }
+  function renderSalesPlan(c){
+    if(!SP_STATE){ SP_STATE={co:'UK',ch:'3pl',month:spMonthList()[0],sort:'weeks',group:'none',data:null}; }
+    var months=spMonthList(); if(months.indexOf(SP_STATE.month)<0)SP_STATE.month=months[0];
+    var COS=['UK','US','EU','AU','CA'];
+    c.innerHTML=scenAnnot('salesplan')
+      +'<div class="bar"><span class="pill-lbl">Country</span>'+COS.map(function(x){return '<span class="pill'+(x===SP_STATE.co?' active':'')+'" data-sp-co="'+x+'">'+x+'</span>';}).join('')
+      +'<span class="pill-lbl" style="margin-left:10px">Channel</span><span class="pill'+(SP_STATE.ch==='3pl'?' active':'')+'" data-sp-ch="3pl">3PL</span><span class="pill'+(SP_STATE.ch==='fba'?' active':'')+'" data-sp-ch="fba">FBA</span>'
+      +'<span class="pill-lbl" style="margin-left:10px">Month</span><select class="fci" id="sp-month" style="text-align:left;min-width:120px">'+months.map(function(m){return '<option value="'+m+'"'+(m===SP_STATE.month?' selected':'')+'>'+spMonthLabel(m)+'</option>';}).join('')+'</select></div>'
+      +'<div class="bar"><span class="pill-lbl">Sort</span><span class="pill'+(SP_STATE.sort==='oh'?' active':'')+'" data-sp-sort="oh">On hand</span><span class="pill'+(SP_STATE.sort==='weeks'?' active':'')+'" data-sp-sort="weeks">Weeks cover</span>'
+      +'<span class="pill-lbl" style="margin-left:10px">Group</span><span class="pill'+(SP_STATE.group==='none'?' active':'')+'" data-sp-grp="none">By SKU</span><span class="pill'+(SP_STATE.group==='disc'?' active':'')+'" data-sp-grp="disc">Discontinued status</span>'
+      +'<span class="count" id="sp-count" style="margin-left:10px"></span>'
+      +'<button class="pill" id="sp-csv" style="margin-left:auto">⬇ Export CSV</button></div>'
+      +'<div id="sp-grid"><div class="count">Loading…</div></div>';
+    c.querySelectorAll('[data-sp-co]').forEach(function(p){p.onclick=function(){SP_STATE.co=p.dataset.spCo;load();};});
+    c.querySelectorAll('[data-sp-ch]').forEach(function(p){p.onclick=function(){SP_STATE.ch=p.dataset.spCh;load();};});
+    c.querySelector('#sp-month').onchange=function(){SP_STATE.month=this.value;load();};
+    c.querySelectorAll('[data-sp-sort]').forEach(function(p){p.onclick=function(){SP_STATE.sort=p.dataset.spSort;draw();paintPills();};});
+    c.querySelectorAll('[data-sp-grp]').forEach(function(p){p.onclick=function(){SP_STATE.group=p.dataset.spGrp;draw();paintPills();};});
+    c.querySelector('#sp-csv').onclick=spExport;
+    function paintPills(){ c.querySelectorAll('[data-sp-co]').forEach(function(p){p.classList.toggle('active',p.dataset.spCo===SP_STATE.co);});
+      c.querySelectorAll('[data-sp-ch]').forEach(function(p){p.classList.toggle('active',p.dataset.spCh===SP_STATE.ch);});
+      c.querySelectorAll('[data-sp-sort]').forEach(function(p){p.classList.toggle('active',p.dataset.spSort===SP_STATE.sort);});
+      c.querySelectorAll('[data-sp-grp]').forEach(function(p){p.classList.toggle('active',p.dataset.spGrp===SP_STATE.group);}); }
+    function load(){ paintPills(); var g=document.getElementById('sp-grid'); if(g)g.innerHTML='<div class="count">Loading…</div>';
+      fetch('/api/scenario/sales-planning',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({country:SP_STATE.co,channel:SP_STATE.ch,month:SP_STATE.month})})
+        .then(function(r){return r.json();}).then(function(d){ if(d&&d.error)throw new Error(d.error); SP_STATE.data=d; draw(); })
+        .catch(function(e){ var g=document.getElementById('sp-grid'); if(g)g.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>'; }); }
+    function sortRows(rows){ var s=SP_STATE.sort; return rows.slice().sort(function(a,b){
+        if(s==='oh')return (b.oh_total||0)-(a.oh_total||0);
+        var aw=a.weeks==null?1e9:a.weeks, bw=b.weeks==null?1e9:b.weeks; return aw-bw;   // weeks: lowest cover first, ∞ last
+      }); }
+    function wkCell(w){ if(w==null)return '<span class="mut">∞</span>'; var col=w<4?'#b91c1c':w<8?'#b45309':'#334155'; return '<span style="color:'+col+';font-weight:'+(w<8?'700':'600')+'">'+w.toFixed(1)+'</span>'; }
+    function isFba(){ return SP_STATE.ch==='fba'; }
+    function headCols(){ var h='<th class="l">SKU</th><th class="l">Name</th>';
+      if(isFba()){ h+='<th>On hand</th><th class="mut">FBA</th>'+(SP_STATE.data&&SP_STATE.data.isUS?'<th class="mut">AWD</th>':'')+'<th class="mut">3PL</th>'; }
+      else h+='<th>On hand (3PL)</th>';
+      h+='<th>Proj @ '+esc(spMonthLabel(SP_STATE.month))+'</th><th>Weeks cover</th><th class="l">Discontinued</th>'; return h; }
+    function rowCells(r){ var td='<td class="l"><b>'+esc(r.sku)+'</b></td><td class="l">'+esc(r.name)+'</td>';
+      if(isFba()){ td+='<td><b>'+units(r.oh_total)+'</b></td><td class="mut">'+units(r.oh_fba)+'</td>'+(SP_STATE.data&&SP_STATE.data.isUS?'<td class="mut">'+units(r.oh_awd)+'</td>':'')+'<td class="mut">'+units(r.oh_3pl)+'</td>'; }
+      else td+='<td><b>'+units(r.oh_3pl)+'</b></td>';
+      td+='<td'+(r.projected<0?' style="color:#b91c1c"':'')+'>'+units(r.projected)+'</td><td>'+wkCell(r.weeks)+'</td>'
+        +'<td class="l">'+(r.discontinued?'<span class="tool-badge bg-red">Discontinued</span>':'<span class="mut">—</span>')+'</td>'; return td; }
+    function tableFor(rows){ var cc=headCols().split('</th>').length-1;
+      return '<div class="tw"><table><thead><tr>'+headCols()+'</tr></thead><tbody>'
+        +(rows.length?rows.map(function(r){return '<tr>'+rowCells(r)+'</tr>';}).join(''):'<tr><td colspan="'+cc+'" class="l mut">No SKUs.</td></tr>')+'</tbody></table></div>'; }
+    function draw(){ var g=document.getElementById('sp-grid'); if(!g||!SP_STATE.data)return; var rows=SP_STATE.data.rows||[];
+      var cnt=document.getElementById('sp-count'); if(cnt)cnt.textContent=rows.length+' SKU'+(rows.length!==1?'s':'');
+      if(SP_STATE.group==='disc'){ var live=sortRows(rows.filter(function(r){return !r.discontinued;})), dead=sortRows(rows.filter(function(r){return r.discontinued;}));
+        g.innerHTML='<div class="sect-h">Active ('+live.length+')</div>'+tableFor(live)+'<div class="sect-h" style="margin-top:12px">Discontinued by '+esc(spMonthLabel(SP_STATE.month))+' ('+dead.length+')</div>'+tableFor(dead); }
+      else g.innerHTML=tableFor(sortRows(rows)); }
+    function spExport(){ var d=SP_STATE.data; if(!d||!d.rows){alert('Nothing to export yet.');return;}
+      var fba=isFba(), us=d.isUS;
+      var head=['SKU','Name']; if(fba){ head=head.concat(['On hand total','FBA']); if(us)head.push('AWD'); head.push('3PL'); } else head.push('On hand 3PL');
+      head=head.concat(['Projected @ '+spMonthLabel(SP_STATE.month),'Weeks cover','Discontinued']);
+      var rows=SP_STATE.group==='disc'?sortRows(d.rows.filter(function(r){return !r.discontinued;})).concat(sortRows(d.rows.filter(function(r){return r.discontinued;}))):sortRows(d.rows);
+      var lines=[head]; rows.forEach(function(r){ var line=[r.sku,r.name]; if(fba){ line.push(r.oh_total,r.oh_fba); if(us)line.push(r.oh_awd); line.push(r.oh_3pl); } else line.push(r.oh_3pl);
+        line.push(r.projected, r.weeks==null?'':r.weeks, r.discontinued?'Yes':'No'); lines.push(line); });
+      var csv=lines.map(function(row){return row.map(function(v){var s=String(v==null?'':v); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}).join(',');}).join('\r\n');
+      var now=new Date(); var pad=function(n){return (n<10?'0':'')+n;}; var stamp=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate())+'_'+pad(now.getHours())+pad(now.getMinutes());
+      var fname='sales-planning_'+SP_STATE.co+'_'+SP_STATE.ch.toUpperCase()+'_'+stamp+'.csv';
+      var blob=new Blob([csv],{type:'text/csv'}); var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=fname; document.body.appendChild(a); a.click(); setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},100); }
+    load(); }
   function renderPrimeDay(c){
     c.innerHTML=scenAnnot('prime')
      +'<div class="bar"><span class="pill-lbl">Market</span>'
