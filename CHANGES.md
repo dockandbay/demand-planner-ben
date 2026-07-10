@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.405 - Forecast cell notes (double-click to add)
+
+Per-cell notes on the demand PLAN grid forecast cells (SKU + sub-category rows). **Double-click** a
+forecast cell (not the input) opens an "Add note" popup — no plus button. Each note records the text, the
+timestamp and the logged-in user. Multiple notes per cell; edit/delete any (DEMAND edit rights). Cells with
+notes show a small blue **"N"** badge; a **120ms hover tooltip** lists the notes (text · user · date/time).
+Keyed `level|item|country|channel|month` (matches the forecast override key). New table `forecast_notes`
+(migration 112); endpoints `GET/POST /api/forecast/notes`, `POST /api/forecast/note/:id`.
+
 ## v25.404 - Demand grid: dark-grey gridlines + red border for discontinued
 
 - The demand PLAN grid (`#t`, category + SKU levels) now has **dark-grey cell borders** (#9a9a9a) so every

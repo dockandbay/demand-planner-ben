@@ -294,6 +294,10 @@ td{padding:0;border-bottom:1px solid #f0f0f0;vertical-align:middle;overflow:hidd
 /* Dark-grey gridlines on the demand grid (#t) so every cell is visible — category + SKU levels. */
 #t td{border-right:1px solid #9a9a9a;border-bottom:1px solid #9a9a9a}
 #t thead th{border-right:1px solid #9a9a9a}
+/* Per-cell forecast notes: little "N" badge + add-note popup + hover tooltip. */
+.fc-note-n{position:absolute;top:0;right:1px;z-index:3;font-size:8px;font-weight:800;line-height:1;color:#fff;background:#2563eb;border-radius:2px;padding:1px 2px;cursor:pointer}
+#fc-note-pop{position:absolute;z-index:100050;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 30px rgba(15,23,42,.18);padding:10px 12px;width:300px;font-size:12px;color:#0f172a;text-align:left}
+#fc-note-tip{position:fixed;z-index:100060;max-width:300px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:7px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none;display:none;text-align:left}
 td.stk{position:sticky;left:0;z-index:1;background:#fff;text-align:left;width:160px;min-width:160px;max-width:160px}
 td.stk2{position:sticky;left:160px;z-index:1;background:#fff;text-align:right;width:62px;min-width:62px;max-width:62px;border-right:2px solid #b0b0ae}
 .nm{padding:3px 4px 3px 14px;display:flex;align-items:center;gap:3px;white-space:nowrap;overflow:hidden;font-size:11px}
@@ -4293,6 +4297,56 @@ function showConfidencePopup(anchor,popup){
   },0);
 }
 
+// ── Per-cell forecast notes: double-click a forecast cell to add / view notes; an "N" badge + 120ms
+// hover tooltip surface existing notes. Keyed level|item|country|channel|month (matches the override key).
+var FC_NOTES={}, FC_NOTES_KEY='__none__';
+function fcNotesLoad(co,ch,cb){
+  fetch('/api/forecast/notes?country='+encodeURIComponent(co)+'&channel='+encodeURIComponent(ch))
+    .then(function(r){return r.json();}).then(function(d){ FC_NOTES={};
+      ((d&&d.rows)||[]).forEach(function(n){ var k=n.level+'|'+n.item+'|'+co+'|'+ch+'|'+n.month; (FC_NOTES[k]||(FC_NOTES[k]=[])).push(n); });
+      FC_NOTES_KEY=co+'|'+ch; if(cb)cb();
+    }).catch(function(){ FC_NOTES_KEY=co+'|'+ch; if(cb)cb(); });   // set KEY even on failure so renderMain won't loop
+}
+function _fcNk(nk){ var p=(nk||'').split('|'); return {level:p[0],item:p[1],co:p[2],ch:p[3],month:p[4]}; }
+function _fcMlbl(m){ var p=String(m||'').split(/[-_]/); if(p.length<2)return m||''; var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return (mn[(+p[1])-1]||'')+" '"+String(p[0]).slice(2); }
+function _fcEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+var _fcMut='style="font-size:10px;color:#94a3b8"';
+function fcNoteBadge(nk){ var sel=(window.CSS&&CSS.escape)?CSS.escape(nk):nk;
+  document.querySelectorAll('td.fctd[data-nk="'+sel+'"]').forEach(function(td){ var ex=td.querySelector('.fc-note-n'), has=(FC_NOTES[nk]&&FC_NOTES[nk].length);
+    if(has&&!ex){ var b=document.createElement('span'); b.className='fc-note-n'; b.textContent='N'; b.dataset.nk=nk; td.appendChild(b); } else if(!has&&ex)ex.remove(); }); }
+function fcNoteTipHtml(nk){ var arr=FC_NOTES[nk]||[]; if(!arr.length)return '';
+  return arr.map(function(n){ return _fcEsc(n.note)+'<br><span style="opacity:.7;font-size:10px">'+_fcEsc(n.created_by||'—')+' · '+_fcEsc(n.created_at||'')+(n.updated_at?' · edited':'')+'</span>'; }).join('<hr style="border:0;border-top:1px solid #374151;margin:5px 0">'); }
+function _fcClosePop(){ var p=document.getElementById('fc-note-pop'); if(p)p.remove(); document.removeEventListener('mousedown',_fcPopOut,true); }
+function _fcPopOut(e){ var p=document.getElementById('fc-note-pop'); if(p && !p.contains(e.target) && !(e.target.classList&&e.target.classList.contains('fc-note-n')))_fcClosePop(); }
+function _fcBtn(cls,txt,primary){ return '<button class="'+cls+'" style="font-size:11px;font-family:inherit;cursor:pointer;border-radius:5px;padding:3px 10px;border:1px solid '+(primary?'#2563eb':'#cbd5e1')+';background:'+(primary?'#2563eb':'#fff')+';color:'+(primary?'#fff':'#475569')+'">'+txt+'</button>'; }
+function openFcNotePopup(td){ var nk=td&&td.dataset.nk; if(!nk)return; _fcClosePop(); var m=_fcNk(nk), editId=null;
+  var pop=document.createElement('div'); pop.id='fc-note-pop'; document.body.appendChild(pop);
+  function draw(){ var arr=FC_NOTES[nk]||[];
+    pop.innerHTML='<div style="font-weight:700">Forecast notes</div><div '+_fcMut+' style="font-size:10px;color:#94a3b8;margin-bottom:6px">'+_fcEsc(m.item)+' · '+_fcEsc(m.co)+' · '+_fcEsc(m.ch)+' · '+_fcEsc(_fcMlbl(m.month))+'</div>'
+      +(arr.length?arr.map(function(n){return '<div style="border-top:1px solid #f1f5f9;padding:5px 0"><div style="white-space:pre-wrap">'+_fcEsc(n.note)+'</div><div style="font-size:10px;color:#94a3b8">'+_fcEsc(n.created_by||'—')+' · '+_fcEsc(n.created_at||'')+(n.updated_at?' · edited':'')+' &nbsp;<a href="#" class="fcn-ed" data-id="'+n.id+'" style="color:#2563eb">edit</a> <a href="#" class="fcn-dl" data-id="'+n.id+'" style="color:#b91c1c">delete</a></div></div>';}).join(''):'<div style="font-size:10px;color:#94a3b8;padding:4px 0">No notes yet.</div>')
+      +'<div style="border-top:1px solid #e2e8f0;margin-top:6px;padding-top:6px"><textarea class="fcn-new" rows="2" placeholder="Add a note…" style="width:100%;box-sizing:border-box;font-family:inherit;font-size:12px;border:1px solid #cbd5e1;border-radius:5px;padding:5px"></textarea>'
+      +'<div style="text-align:right;margin-top:4px">'+(editId?_fcBtn('fcn-cancel','Cancel',false)+' ':'')+_fcBtn('fcn-save',editId?'Save':'Add note',true)+'</div></div>';
+    var ta=pop.querySelector('.fcn-new'); if(editId){ var cur=(FC_NOTES[nk]||[]).filter(function(x){return String(x.id)===String(editId);})[0]; if(cur)ta.value=cur.note; } try{ta.focus();}catch(_){}
+    pop.querySelector('.fcn-save').onclick=function(){ var v=ta.value.trim(); if(!v)return; this.disabled=true;
+      if(editId){ var _id=editId; fetch('/api/forecast/note/'+_id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({note:v})}).then(function(r){return r.json();}).then(function(){ var cur=(FC_NOTES[nk]||[]).filter(function(x){return String(x.id)===String(_id);})[0]; if(cur){cur.note=v;cur.updated_at='1';} editId=null; draw(); fcNoteBadge(nk); }).catch(function(){ draw(); }); }
+      else { fetch('/api/forecast/notes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({level:m.level,item:m.item,country:m.co,channel:m.ch,month:m.month,note:v})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.id){ (FC_NOTES[nk]||(FC_NOTES[nk]=[])).push({id:j.id,note:v,created_by:j.created_by||'',created_at:j.created_at||''}); } draw(); fcNoteBadge(nk); }).catch(function(){ draw(); }); } };
+    var cn=pop.querySelector('.fcn-cancel'); if(cn)cn.onclick=function(){ editId=null; draw(); };
+    pop.querySelectorAll('.fcn-ed').forEach(function(a){ a.onclick=function(e){ e.preventDefault(); editId=a.dataset.id; draw(); }; });
+    pop.querySelectorAll('.fcn-dl').forEach(function(a){ a.onclick=function(e){ e.preventDefault(); if(!confirm('Delete this note?'))return; var id=a.dataset.id;
+      fetch('/api/forecast/note/'+id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({delete:true})}).then(function(r){return r.json();}).then(function(){ FC_NOTES[nk]=(FC_NOTES[nk]||[]).filter(function(x){return String(x.id)!==String(id);}); if(String(editId)===String(id))editId=null; draw(); fcNoteBadge(nk); }); }; });
+  }
+  draw();
+  var rc=td.getBoundingClientRect(); pop.style.left=(window.scrollX+Math.max(6,Math.min(rc.left,window.innerWidth-320)))+'px'; pop.style.top=(window.scrollY+rc.bottom+4)+'px';
+  setTimeout(function(){ document.addEventListener('mousedown',_fcPopOut,true); },0);
+}
+(function(){   // delegated: dbl-click a forecast cell to open notes; 120ms hover tooltip on the N badge
+  document.addEventListener('dblclick',function(e){ if(e.target&&e.target.tagName==='INPUT')return; var td=e.target.closest?e.target.closest('td.fctd[data-nk]'):null; if(td)openFcNotePopup(td); });
+  var tip=null,tt=null;
+  document.addEventListener('mouseover',function(e){ var n=e.target.closest?e.target.closest('.fc-note-n'):null; if(!n)return; clearTimeout(tt);
+    tt=setTimeout(function(){ var html=fcNoteTipHtml(n.dataset.nk); if(!html)return; if(!tip){tip=document.createElement('div');tip.id='fc-note-tip';document.body.appendChild(tip);} tip.innerHTML=html; tip.style.display='block'; var r=n.getBoundingClientRect(); tip.style.left=Math.max(6,Math.min(r.left,window.innerWidth-306))+'px'; tip.style.top=(r.bottom+5)+'px'; },120); });
+  document.addEventListener('mouseout',function(e){ var n=e.target.closest?e.target.closest('.fc-note-n'):null; if(n){ clearTimeout(tt); if(tip)tip.style.display='none'; } });
+  document.addEventListener('scroll',function(){ if(tip)tip.style.display='none'; },true);
+})();
 function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   const{y,mo}=pa(fym);
   const ik=s+'|'+co+'|'+ch+'|'+fym;
@@ -4342,6 +4396,9 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   const is27=fym.startsWith('2027');
   const isFcLy=y>=2027; // forecast month whose LY ref is itself a forecast
   var anom=aflags&&aflags[fym]?(' anomaly-'+aflags[fym].type):'';  const td=document.createElement('td');td.className='fctd'+extraCls+(is27?' y27':y>=2028?' y28':'')+anom;
+  // per-cell forecast note key + "N" badge (dbl-click the cell to add/view notes)
+  var _nk=((typeof SKUM!=='undefined'&&SKUM[s])?'sku':'subcat')+'|'+s+'|'+co+'|'+ch+'|'+fym; td.dataset.nk=_nk;
+  if(typeof FC_NOTES!=='undefined'&&FC_NOTES[_nk]&&FC_NOTES[_nk].length){ var _nb=document.createElement('span'); _nb.className='fc-note-n'; _nb.textContent='N'; _nb.dataset.nk=_nk; td.appendChild(_nb); }
   const d=document.createElement('div');d.className='fcin';
   const lyD=document.createElement('div');lyD.className='fcly';
   // Forecast-on-forecast years: LY is the prior-year forecast (not an actual) — keep neutral colour
@@ -6611,6 +6668,9 @@ function remapExpanded(dim,newVal){
   EXPANDED=ne;
 }
 function renderMain(){
+  // load per-cell forecast notes for the current country+channel before building the grid (so the N badges
+  // render). fcNotesLoad always sets FC_NOTES_KEY (even on failure) so this can't loop.
+  if(typeof FC_NOTES_KEY!=='undefined' && FC_NOTES_KEY!==CUR+'|'+CF){ fcNotesLoad(CUR,CF,function(){ renderMain(); }); return; }
   SKU_VIEW=null;
   SMOOTH_PREVIEW=null; // drop any pending smooth preview when the grid is rebuilt
   // Always reset tw — SKU view replaces its contents so we can't rely on #t existing

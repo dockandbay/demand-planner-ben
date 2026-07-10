@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.404';
+const APP_VERSION = 'v25.405';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -5373,6 +5373,44 @@ app.get('/api/demand-actions/state', async (req, res) => {
     res.json({ today, state });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// ── Forecast cell notes (DEMAND ▸ Plan grid) — per-cell notes keyed level|item|country|channel|month.
+// GET lists all notes for a country+channel (client indexes by cell); POST creates; edit/delete by id.
+app.get('/api/forecast/notes', async (req, res) => {
+  const country = (req.query.country || '').toUpperCase(), channel = (req.query.channel || '').toUpperCase();
+  try {
+    const rows = (await pool.query(`SELECT id, level, item, month, note, coalesce(created_by,'') created_by,
+        to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, coalesce(updated_by,'') updated_by,
+        to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at
+      FROM planner.forecast_notes WHERE upper(country)=$1 AND upper(channel)=$2 ORDER BY created_at`,
+      [country, channel])).rows;
+    res.json({ rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/forecast/notes', async (req, res) => {
+  const b = req.body || {}, level = (b.level || 'sku').trim(), item = (b.item || '').trim();
+  const country = (b.country || '').trim(), channel = (b.channel || '').trim(), month = (b.month || '').trim(), note = (b.note || '').trim();
+  if (!item || !country || !channel || !month || !note) return res.status(400).json({ error: 'item, country, channel, month, note required' });
+  try {
+    const who = authUser(req);
+    const r = (await pool.query(`INSERT INTO planner.forecast_notes (level,item,country,channel,month,note,created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at`,
+      [level, item, country, channel, month, note, who || null])).rows[0];
+    res.json({ ok: true, id: r.id, created_at: r.created_at, created_by: who || '' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/forecast/note/:id', async (req, res) => {
+  const id = req.params.id, b = req.body || {};
+  try {
+    const who = authUser(req);
+    if (b.delete) { await pool.query(`DELETE FROM planner.forecast_notes WHERE id=$1`, [id]); return res.json({ ok: true, deleted: true }); }
+    const note = (b.note || '').trim();
+    if (!note) return res.status(400).json({ error: 'note required (or delete:true)' });
+    await pool.query(`UPDATE planner.forecast_notes SET note=$2, updated_by=$3, updated_at=now() WHERE id=$1`, [id, note, who || null]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Trading calendar (DEMAND ▸ Calendar) — events by date × market; editable + CSV up/down.
 const CAL_FIELDS = { event_date: 'date', market: 'text', category: 'text', sku_list: 'text', event_type: 'text', title: 'text', uplift_pct: 'numeric', notes: 'text' };
 app.get('/api/trading-calendar', async (req, res) => {
