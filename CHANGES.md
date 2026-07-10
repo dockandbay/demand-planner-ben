@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.382 - Inline action marker: red Ⓐ + 120ms tooltip + snooze (payments first)
+
+New reusable inline indicator: a **red Ⓐ** (A = Action) with a **120ms tooltip** explaining the action + its
+rule, plus **1 / 3 / 7-day snooze** (or "wake") right next to the exception. Keyed to the same condition as
+the PO-ref badge, so snoozing the Ⓐ, the badge, or the popover are one and the same. Wired first to the
+**overdue payment dates** in the PLAN ▸ payments grid (your example). Rolls out to the other exception types
+(late / should-have-shipped / DtC / pre-shipment) next.
+
 ## v25.381 - Fix: PO-ref badge count now matches the detail sub-tabs
 
 The red PO-ref badge counted `PO_ACTCOND` conditions (e.g. late / should-have-shipped / DtC-not-approved)

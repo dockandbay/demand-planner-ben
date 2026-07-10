@@ -1158,6 +1158,31 @@
   // all matched conditions for a PO (unfiltered); poActions() drops snoozed unless "show snoozed" is on.
   function poActionsAll(r){ var out=[]; for(var k in PO_ACTCOND){ try{ if(PO_ACTCOND[k](r))out.push(k); }catch(e){} } return out; }
   function poActions(r){ return poActionsAll(r).filter(function(k){ return _poShowSnoozed || !poActSnoozed(r.po,k); }); }
+  // Inline action indicator: red Ⓐ (120ms tooltip explaining the rule) + snooze 1/3/7d (or wake), keyed like the badge.
+  var ACT_HELP={
+    payment_overdue:'Payment overdue — a payment’s due date has passed and it’s still unpaid. Due dates come from the supplier’s deposit / completion / balance terms.',
+    unpaid_payment:'Unpaid payment — money is owed now: either the start deposit is due (not assigned / no deposit pool) or the invoice is final with a balance still owing. Excludes completed POs.',
+    late:'Late — should be completed: the completion date (delivery + 7, the Fulfil/Cin7 check-in) has passed but the PO isn’t marked complete.',
+    production:'Late — should have shipped: the PO is still in PRODUCTION and its ship date has passed.',
+    unassigned_shipment:'No shipment assigned — this PO isn’t on a shipment yet (and isn’t FOB / pickup).',
+    dtc_not_approved:'Direct-to-Client details not approved — a DtC order whose packing/requirements the supplier hasn’t approved in the portal.',
+    po_not_approved:'Not confirmed by supplier — this production requires supplier confirmation and it hasn’t been given.',
+    preship:'Pre-shipment documents overdue — production has ended and the required branch document (AU Coghlans ASN, FBA/AWD barcodes, or EU iFulfillment IDN labels) is missing.'
+  };
+  function actMark(po,code){ if(poActSnoozed(po,code) && !_poShowSnoozed) return '';
+    var help=ACT_HELP[code]||'Action required.', s=_poActState[poActKey(po,code)]||{}, sn=poActSnoozed(po,code);
+    var A='<span class="act-mk" data-po="'+esc(po)+'" data-note="'+esc(help)+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#dc2626;color:#fff;font-weight:800;font-size:10px;cursor:help;vertical-align:middle;margin-left:5px">A</span>';
+    var snz=sn
+      ? ' <span class="mut tiny" style="white-space:nowrap">💤'+esc(s.snooze_until||'')+' <button class="act-snz" data-po="'+esc(po)+'" data-code="'+esc(code)+'" data-d="0" style="border:none;background:none;color:#1d4ed8;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">wake</button></span>'
+      : ' <span style="white-space:nowrap">'+[1,3,7].map(function(d){return '<button class="act-snz" data-po="'+esc(po)+'" data-code="'+esc(code)+'" data-d="'+d+'" title="snooze '+d+' day'+(d>1?'s':'')+'" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:4px;font-size:10px;padding:1px 4px;margin-left:2px;cursor:pointer">'+d+'d</button>';}).join('')+'</span>';
+    return A+snz; }
+  function bindActMark(scope){ var root=scope||document;
+    root.querySelectorAll('.act-mk[data-note]').forEach(function(b){ if(b._b)return; b._b=1;
+      b.addEventListener('mouseenter',function(){ b._t=setTimeout(function(){ noteTip(b); },120); });
+      b.addEventListener('mouseleave',function(){ clearTimeout(b._t); hideNoteTip(); }); });
+    root.querySelectorAll('.act-snz').forEach(function(x){ if(x._b)return; x._b=1; x.onclick=function(e){ e.stopPropagation();
+      var pd=x.closest('[id^="podet-"]'), i=pd?pd.id.replace('podet-',''):null;
+      poSnoozeSet(x.dataset.po,x.dataset.code,parseInt(x.dataset.d,10),function(){ if(i!=null && typeof poRefetchPanel==='function')poRefetchPanel(x.dataset.po,i); else if(window.__poView)window.__poView(); }); }; }); }
   var _poState=null;   // PURCHASE ORDERS filter state — persisted across edit-triggered reloads so the filter survives
   function poInner(rows,c){
     if(!_poActStateLoaded){ loadPoActState(function(){ try{view();}catch(e){} }); }   // snooze map → re-render once loaded
@@ -1874,6 +1899,10 @@
     // "unpaid" for due/overdue purposes only when the PO still owes money — a fully-paid PO (totalDue≤0) has no
     // outstanding milestone even if a single milestone (e.g. start) was never separately dated (paid via the balance).
     var startUnpaid=(totalDue>0.02 && !startPaid), compUnpaid=(totalDue>0.02 && !compPaid), bal1Unpaid=(totalDue>0.02 && !bal1Paid);
+    // Inline action marker on overdue payment rows — keyed to the badge's payment condition so snooze stays consistent.
+    var _pa=poActionsAll(r), payCode=_pa.indexOf('payment_overdue')>=0?'payment_overdue':(_pa.indexOf('unpaid_payment')>=0?'unpaid_payment':null);
+    function mkPay(cell,over){ return (payCode&&over)?cell.replace(/<\/td>\s*$/, actMark(r.po,payCode)+'</td>') : cell; }
+    var _startOver=startOwed&&startUnpaid&&r.start_due&&r.start_due<today, _compOver=compOwed&&compUnpaid&&r.completion_due&&r.completion_due<today, _balOver=bal1Unpaid&&r.balance_due&&r.balance_due<today;
     var xdList=(r.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
     // ---- CLIENT chunk (label/field rows, not an overflow table; crossdock picker grows freely) ----
     function cliRow(lbl,field){ return '<div class="cli-row"><div class="cli-lbl">'+lbl+'</div><div class="cli-val">'+field+'</div></div>'; }
@@ -1952,13 +1981,13 @@
       +'<td class="l">'+payIn(ep,'pay_start_deposit_assigned',r.start_assigned,false,false,(r.deposit_ref&&r.deposit_avail!=null)?('data-avail="'+esc(Math.round((Number(r.deposit_avail||0)+Number(r.start_assigned||0))*100)/100)+'"'):'')+'</td>'
       +'<td class="l">'+payIn(ep,'pay_start_deposit_date',r.start_date,true,!(n(r.start_assigned)>0))+'</td>'
       +'<td class="l">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0)+(r.deposit_avail!=null?' <span class="mut tiny">'+money(r.deposit_avail)+' avail'+(r.deposit_fx!=null&&r.deposit_fx!==''?' · FX '+Number(r.deposit_fx).toFixed(4):'')+'</span>':'')+'</td>'
-      +dueCell(r.start_due,startUnpaid,'',startOwed)+likelyCell('dep:'+r.po,startUnpaid&&startOwed,r.likely_start)+'<td class="l">'+(startOwed?payBadge(sStat[0],sStat[1]):payBadge('—','bg-neutral'))+'</td>');
+      +mkPay(dueCell(r.start_due,startUnpaid,'',startOwed),_startOver)+likelyCell('dep:'+r.po,startUnpaid&&startOwed,r.likely_start)+'<td class="l">'+(startOwed?payBadge(sStat[0],sStat[1]):payBadge('—','bg-neutral'))+'</td>');
     h+=tr('<td class="l"><b>Completion</b> <input class="fci pctin payin" data-ep="'+ep+'" data-field="completion_pct_override" value="'+esc(r.completion_pct)+'"><span class="mut tiny">% + catch-up'+(Number(r.catch_up)?' '+(Number(r.catch_up)>0?'+':'')+money(r.catch_up):'')+'</span></td>'
       +'<td>'+money(r.completion_calc)+((compOwed && compUnpaid)?payFillBtn('pay_completion_assigned','pay_completion_date',r.completion_calc):'')+'</td>'
       +'<td class="l">'+payIn(ep,'pay_completion_assigned',r.completion_assigned)+'</td>'
       +'<td class="l">'+payIn(ep,'pay_completion_date',r.completion_date,true,!(n(r.completion_assigned)>0))+'</td>'
       +'<td class="l"><span class="mut tiny">— direct cash</span></td>'
-      +dueCell(r.completion_due,compUnpaid,'',compOwed)+likelyCell('comp:'+r.po,compUnpaid&&compOwed,r.likely_completion)+'<td class="l">'+(compOwed?payBadge(cStat[0],cStat[1]):payBadge('—','bg-neutral'))+'</td>');
+      +mkPay(dueCell(r.completion_due,compUnpaid,'',compOwed),_compOver)+likelyCell('comp:'+r.po,compUnpaid&&compOwed,r.likely_completion)+'<td class="l">'+(compOwed?payBadge(cStat[0],cStat[1]):payBadge('—','bg-neutral'))+'</td>');
     // Credit amount — a charge added to the invoice, settled within the balance (editable here)
     h+=tr('<td class="l"><b>Credit amount</b> <span class="mut tiny">added to invoice · paid in the balance</span></td>'
       +'<td>'+money(r.credit_amount)+'</td>'
@@ -1974,7 +2003,7 @@
       +'<td class="l">'+payIn(ep,'pay_balance_1_amount',r.balance_1_amount)+'</td>'
       +'<td class="l">'+payIn(ep,'pay_balance_1_date',r.balance_1_date,true,!(n(r.balance_1_amount)>0))+'</td>'
       +'<td class="l"><span class="mut">—</span></td>'
-      +dueCell(r.balance_due,bal1Unpaid,' '+balnote)+likelyCell('bal:'+r.po,bal1Unpaid,r.likely_balance_1)+'<td class="l">'+payBadge(b1Stat[0],b1Stat[1])+'</td>');
+      +mkPay(dueCell(r.balance_due,bal1Unpaid,' '+balnote),_balOver)+likelyCell('bal:'+r.po,bal1Unpaid,r.likely_balance_1)+'<td class="l">'+payBadge(b1Stat[0],b1Stat[1])+'</td>');
     if(partial){ var rem2=Math.round((owe-bal1)*100)/100;
       h+=tr('<td class="l"><b>Balance 2</b> <span class="mut tiny">remainder</span></td>'
         +'<td>'+money(rem2)+' <span class="mut tiny">owing</span>'+((totalDue>0.02 && !bal2Paid)?payFillBtn('pay_balance_2_amount','pay_balance_2_date',rem2):'')+'</td>'
@@ -2155,6 +2184,7 @@
     // MASTER DATA + SHIPMENTS PLAN-panel controls (#2 / #10) — pickers + rename / delete / pallet labels for this PO
     bindCellPick(); bindShipPick(); bindShipOpen();
     function poGone(){ invalidateDerived(); delete cache['purchase-orders']; if(_poRefresh)_poRefresh(); else selectSection('purchase-orders'); }
+    bindActMark(document.getElementById('podet-'+i));   // inline Ⓐ action markers (tooltip + snooze) in the detail
     document.querySelectorAll('#podet-'+i+' .pom-del').forEach(function(b){ b.onclick=function(){ var p=b.dataset.po; if(!confirm('Delete PO '+p+' and all its lines? This cannot be undone.'))return;
       shipPost('/api/supply/po/'+encodeURIComponent(p)+'/delete',{},function(){ poGone(); }); }; });
     document.querySelectorAll('#podet-'+i+' .pom-unconfirm').forEach(function(b){ b.onclick=function(){ var p=b.dataset.po; if(!confirm('Reset supplier confirmation for '+p+'? They will need to re-confirm in the portal.'))return;
