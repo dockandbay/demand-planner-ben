@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.402 - Sales Planning: slow-moving + recommended-for-clearance
+
+Added two flags to the Sales Planning report (per SKU, for the selected country+channel):
+- **Slow moving** — >26 weeks of trailing cover (units sold in the channel over the last ~13 weeks) or
+  no sales in that window. Tooltip shows days-since-last-sale + trailing cover.
+- **Rec. clearance** — discontinued with stock that won't clear by the month, OR a badly overstocked
+  slow mover (>52wk trailing cover).
+Both as columns, both as "Only" filter toggles (combine with the discontinued grouping), and both in the
+CSV export. Thresholds (26/52 wk) are easy to tune. Query extended to read trailing sales from
+`sales_actuals`.
+
 ## v25.401 - Sales Planning: FBA and 3PL as separate columns
 
 Per Ben: on the FBA report, FBA and 3PL are now distinct columns. FBA cover pool = **FBA + AWD (US)**;

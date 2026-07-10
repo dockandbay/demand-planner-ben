@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.401';
+const APP_VERSION = 'v25.402';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -4444,9 +4444,18 @@ app.post('/api/scenario/sales-planning', async (req, res) => {
         coalesce(sum(units) FILTER (WHERE to_char(month,'YYYY-MM') = $3),0)::int dem_month
       FROM planner.forecasts WHERE level='sku' AND run_id=$1 AND upper(country)=$2 AND channel = ANY($4)
       GROUP BY sku`, [run, country, month, fchs])).rows.forEach(r => { fc[r.sku] = r; });
-
+    // trailing velocity + last sale for slow-moving / clearance flags (same basis as the Slow Moving report:
+    // units sold in the channel(s) over the last ~13 weeks). SLOW = >26wk trailing cover (or no recent sales);
+    // CLEARANCE = discontinued with stock that won't clear by the month, OR a badly overstocked slow mover.
+    const VEL_WEEKS = 13, SLOW_WKS = 26, CLR_WKS = 52;
+    const vel = {}; (await pool.query(`SELECT sku,
+        coalesce(sum(units) FILTER (WHERE month > (SELECT max(month) FROM planner.sales_actuals) - interval '3 months'),0)::numeric sold3,
+        to_char(max(month) FILTER (WHERE units>0),'YYYY-MM-DD') last_m
+      FROM planner.sales_actuals WHERE upper(country)=$1 AND channel = ANY($2) GROUP BY sku`, [country, fchs]))
+      .rows.forEach(r => { vel[r.sku] = r; });
+    const nowMs = Date.now();
     const rows = availSkus.map(sku => {
-      const m = meta[sku] || {}, iv = inv[sku] || {}, f = fc[sku] || { dem_before: 0, dem_month: 0 };
+      const m = meta[sku] || {}, iv = inv[sku] || {}, f = fc[sku] || { dem_before: 0, dem_month: 0 }, vv = vel[sku] || {};
       const oh3 = iv[wh3] || 0, ohF = channel === 'fba' ? (iv[whF] || 0) : 0, ohAwd = (channel === 'fba' && isUS) ? (m.awd || 0) : 0;
       const ohTotal = channel === 'fba' ? (ohF + ohAwd) : oh3;   // FBA cover pool = FBA + AWD; 3PL is separate/transferable
       const inb = inbBefore[sku] || 0, demB = Number(f.dem_before) || 0, demM = Number(f.dem_month) || 0;
@@ -4454,8 +4463,14 @@ app.post('/api/scenario/sales-planning', async (req, res) => {
       const rate = demM / 4.33;   // weekly sell-through in the selected month
       const weeks = rate > 0 ? Math.round(Math.max(0, projected) / rate * 10) / 10 : null;  // null = no forecast → infinite cover
       const discontinued = !!(m.disc && m.disc < monthStart);
+      const trailVel = (Number(vv.sold3) || 0) / VEL_WEEKS;
+      const trailCover = ohTotal > 0 ? (trailVel > 0 ? Math.round(ohTotal / trailVel) : null) : 0;  // null = has stock, no trailing sales
+      const daysSince = vv.last_m ? Math.round((nowMs - Date.parse(vv.last_m)) / 864e5) : null;
+      const slowMoving = ohTotal > 0 && (trailVel === 0 || (trailCover != null && trailCover > SLOW_WKS));
+      const recClearance = (discontinued && projected > 0) || (slowMoving && (trailVel === 0 || (trailCover != null && trailCover > CLR_WKS)));
       return { sku, name: m.name || '', oh_fba: ohF, oh_awd: ohAwd, oh_3pl: oh3, oh_total: ohTotal,
-        inbound_before: inb, dem_before: demB, projected, dem_month: demM, weeks, discontinued };
+        inbound_before: inb, dem_before: demB, projected, dem_month: demM, weeks, discontinued,
+        trail_cover: trailCover, days_since: daysSince, slow_moving: slowMoving, rec_clearance: recClearance };
     });
     res.json({ rows, country, channel, month, isUS, forecast_run: run });
   } catch (e) { res.status(500).json({ error: e.message }); }
