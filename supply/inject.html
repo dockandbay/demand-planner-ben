@@ -1152,7 +1152,15 @@
   // ── PO-grid action-item snooze ── keyed poact|<po>|<condition> in supply_action_state (shared store).
   var _poActState={}, _poActStateLoaded=false, _poShowSnoozed=false;
   function poActKey(po,cond){ return 'poact|'+po+'|'+cond; }
-  function poActSnoozed(po,cond){ var s=_poActState[poActKey(po,cond)]; return !!(s&&s.status==='snoozed'&&s.snooze_until&&s.snooze_until>=today); }
+  function poActSnoozed(po,cond){ var s=_poActState[poActKey(po,cond)]; var t=new Date().toISOString().slice(0,10); return !!(s&&s.status==='snoozed'&&s.snooze_until&&s.snooze_until>=t); }
+  var _cssEsc=function(x){ return (window.CSS&&CSS.escape)?CSS.escape(x):String(x).replace(/["\\]/g,'\\$&'); };
+  // Silent in-place refresh after a snooze/wake: re-render the affected markers + recompute the PO-ref badge count.
+  function refreshActInPlace(po,code){
+    document.querySelectorAll('.act-wrap[data-mk="'+_cssEsc(po+'|'+code)+'"]').forEach(function(w){ var t=document.createElement('span'); t.innerHTML=actMark(po,code); if(t.firstChild)w.replaceWith(t.firstChild); else w.remove(); });
+    try{ bindActMark(document); }catch(e){}
+    document.querySelectorAll('.po-act-badge[data-po="'+_cssEsc(po)+'"]').forEach(function(b){ var all=(b.dataset.allacts||'').split(',').filter(Boolean);
+      var n=all.filter(function(k){ return !poActSnoozed(po,k); }).length; if(n<=0){ b.style.display='none'; } else { b.style.display=''; b.textContent=n; } });
+  }
   function loadPoActState(cb){ fetch('/api/supply/actions/state').then(function(r){return r.json();}).then(function(rows){ _poActState={}; (rows||[]).forEach(function(s){ _poActState[s.action_key]=s; }); _poActStateLoaded=true; if(cb)cb(); }).catch(function(){ _poActStateLoaded=true; if(cb)cb(); }); }
   function poSnoozeSet(po,cond,days,cb){ fetch('/api/supply/actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:poActKey(po,cond),status:(days?'snoozed':'open'),snooze_days:days||0,restore:!days})}).then(function(r){return r.json();}).then(function(){ loadPoActState(cb); }).catch(function(){ if(cb)cb(); }); }
   // all matched conditions for a PO (unfiltered); poActions() drops snoozed unless "show snoozed" is on.
@@ -1169,13 +1177,14 @@
     po_not_approved:'Not confirmed by supplier — this production requires supplier confirmation and it hasn’t been given.',
     preship:'Pre-shipment documents overdue — production has ended and the required branch document (AU Coghlans ASN, FBA/AWD barcodes, or EU iFulfillment IDN labels) is missing.'
   };
-  function actMark(po,code){ if(poActSnoozed(po,code) && !_poShowSnoozed) return '';
+  function actMark(po,code){
     var help=ACT_HELP[code]||'Action required.', s=_poActState[poActKey(po,code)]||{}, sn=poActSnoozed(po,code);
-    var A='<span class="act-mk" data-po="'+esc(po)+'" data-note="'+esc(help)+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#dc2626;color:#fff;font-weight:800;font-size:10px;cursor:help;vertical-align:middle;margin-left:5px">A</span>';
+    // The Ⓐ stays visible even when snoozed (muted); the count badges drop it, but the marker still reads "Snoozed".
+    var A='<span class="act-mk" data-po="'+esc(po)+'" data-note="'+esc(help)+(sn?' — currently snoozed until '+esc(s.snooze_until||'')+(s.snoozed_by?' by '+esc(s.snoozed_by):'')+(s.snoozed_at?' on '+esc(s.snoozed_at):''):'')+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:'+(sn?'#f3a3a3':'#dc2626')+';color:#fff;font-weight:800;font-size:10px;cursor:help;vertical-align:middle;margin-left:5px">A</span>';
     var snz=sn
-      ? ' <span class="mut tiny" style="white-space:nowrap">💤'+esc(s.snooze_until||'')+' <button class="act-snz" data-po="'+esc(po)+'" data-code="'+esc(code)+'" data-d="0" style="border:none;background:none;color:#1d4ed8;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">wake</button></span>'
+      ? ' <span class="mut tiny" style="white-space:nowrap">Snoozed → '+esc(s.snooze_until||'')+' <button class="act-snz" data-po="'+esc(po)+'" data-code="'+esc(code)+'" data-d="0" style="border:none;background:none;color:#1d4ed8;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">wake</button></span>'
       : ' <button class="act-snz-btn" data-po="'+esc(po)+'" data-code="'+esc(code)+'" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:4px;font-size:10px;padding:1px 6px;margin-left:4px;cursor:pointer">SNOOZE ▾</button>';
-    return A+snz; }
+    return '<span class="act-wrap" data-mk="'+esc(po)+'|'+esc(code)+'">'+A+snz+'</span>'; }
   // Snooze menu popped from a SNOOZE button (1/3/7 days).
   function openSnzMenu(btn){ var po=btn.dataset.po, code=btn.dataset.code;
     var ex=document.getElementById('snz-menu'); if(ex)ex.remove();
@@ -1186,17 +1195,15 @@
     function close(){ m.remove(); document.removeEventListener('mousedown',out,true); }
     function out(e){ if(!m.contains(e.target)&&e.target!==btn)close(); }
     setTimeout(function(){ document.addEventListener('mousedown',out,true); },0);
-    var pd=btn.closest('[id^="podet-"]'), i=pd?pd.id.replace('podet-',''):null;
     m.querySelectorAll('.snz-opt').forEach(function(o){ o.onmouseenter=function(){o.style.background='#eff6ff';}; o.onmouseleave=function(){o.style.background='';};
-      o.onclick=function(){ close(); poSnoozeSet(po,code,parseInt(o.dataset.d,10),function(){ if(i!=null && typeof poRefetchPanel==='function')poRefetchPanel(po,i); else if(window.__poView)window.__poView(); }); }; }); }
+      o.onclick=function(){ close(); poSnoozeSet(po,code,parseInt(o.dataset.d,10),function(){ refreshActInPlace(po,code); }); }; }); }
   function bindActMark(scope){ var root=scope||document;
     root.querySelectorAll('.act-mk[data-note]').forEach(function(b){ if(b._b)return; b._b=1;
       b.addEventListener('mouseenter',function(){ b._t=setTimeout(function(){ noteTip(b); },120); });
       b.addEventListener('mouseleave',function(){ clearTimeout(b._t); hideNoteTip(); }); });
     root.querySelectorAll('.act-snz-btn').forEach(function(x){ if(x._b)return; x._b=1; x.onclick=function(e){ e.stopPropagation(); openSnzMenu(x); }; });
     root.querySelectorAll('.act-snz').forEach(function(x){ if(x._b)return; x._b=1; x.onclick=function(e){ e.stopPropagation();   // "wake" (data-d=0) restores an already-snoozed item
-      var pd=x.closest('[id^="podet-"]'), i=pd?pd.id.replace('podet-',''):null;
-      poSnoozeSet(x.dataset.po,x.dataset.code,parseInt(x.dataset.d,10),function(){ if(i!=null && typeof poRefetchPanel==='function')poRefetchPanel(x.dataset.po,i); else if(window.__poView)window.__poView(); }); }; }); }
+      poSnoozeSet(x.dataset.po,x.dataset.code,parseInt(x.dataset.d,10),function(){ refreshActInPlace(x.dataset.po,x.dataset.code); }); }; }); }
   var _poState=null;   // PURCHASE ORDERS filter state — persisted across edit-triggered reloads so the filter survives
   function poInner(rows,c){
     if(!_poActStateLoaded){ loadPoActState(function(){ try{view();}catch(e){} }); }   // snooze map → re-render once loaded
@@ -1797,10 +1804,9 @@
     function close(){ pop.remove(); document.removeEventListener('mousedown',out,true); }
     function out(e){ if(!pop.contains(e.target)&&e.target!==b)close(); }
     setTimeout(function(){ document.addEventListener('mousedown',out,true); },0);
-    var reRender=function(){ close(); if(window.__poView)try{window.__poView();}catch(e){} };
     pop.querySelector('.pap-close').onclick=close;
-    pop.querySelectorAll('.pap-sn').forEach(function(x){ x.onclick=function(){ pop.querySelectorAll('button').forEach(function(y){y.disabled=true;}); poSnoozeSet(po,x.dataset.k,parseInt(x.dataset.d,10),reRender); }; });
-    pop.querySelectorAll('.pap-un').forEach(function(x){ x.onclick=function(){ pop.querySelectorAll('button').forEach(function(y){y.disabled=true;}); poSnoozeSet(po,x.dataset.k,0,reRender); }; });
+    pop.querySelectorAll('.pap-sn').forEach(function(x){ x.onclick=function(){ var k=x.dataset.k; pop.querySelectorAll('button').forEach(function(y){y.disabled=true;}); poSnoozeSet(po,k,parseInt(x.dataset.d,10),function(){ close(); refreshActInPlace(po,k); }); }; });
+    pop.querySelectorAll('.pap-un').forEach(function(x){ x.onclick=function(){ var k=x.dataset.k; pop.querySelectorAll('button').forEach(function(y){y.disabled=true;}); poSnoozeSet(po,k,0,function(){ close(); refreshActInPlace(po,k); }); }; });
     pop.querySelectorAll('.pap-go').forEach(function(x){ x.onclick=function(){ close(); poActGoto(po,x.dataset.tab); }; });
   }
   function bindPoActBadge(){ document.querySelectorAll('#supply-root .po-act-badge[data-po]').forEach(function(b){ if(b._b)return; b._b=1;

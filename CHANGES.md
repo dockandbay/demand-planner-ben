@@ -3,6 +3,20 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.384 - Snooze polish: fix "today", silent in-place update, Ⓐ stays as "Snoozed"
+
+- Fixed `today is not defined` on snooze (`poActSnoozed` now computes the date itself).
+- Snoozing/waking updates **silently in place** — no screen/panel refresh: the marker swaps to "Snoozed →
+  date · wake" and the PO-ref action count recomputes, without reloading. Applied to the inline Ⓐ, the SNOOZE
+  menu, and the badge popover.
+- The **Ⓐ stays visible** when snoozed (muted red) reading "Snoozed → date"; only the count badges drop it.
+  The tooltip also notes who snoozed it and until when.
+
+## v25.383 - Inline action snooze: single SNOOZE button with a 1/3/7-day popup
+
+Replaced the three inline day-buttons with one **SNOOZE ▾** that pops a **1 / 3 / 7 days** menu (Ⓐ + tooltip
+unchanged).
+
 ## v25.382 - Inline action marker: red Ⓐ + 120ms tooltip + snooze (payments first)
 
 New reusable inline indicator: a **red Ⓐ** (A = Action) with a **120ms tooltip** explaining the action + its
