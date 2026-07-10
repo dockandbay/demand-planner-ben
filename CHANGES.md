@@ -3,6 +3,22 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.386 - Planning scope now derived (sync-proof), not sync-fed
+
+Root cause of the LIVE BUY/FBA outage: the overnight n8n product sync clobbered
+`in_planning_scope` to false for everything, emptying the planner. Fixed by making
+scope **derived in the DB** so a sync write can never break it again.
+
+- **New rule** (Ben, agreed): a SKU is in planning scope iff `variant_type = 'MASTER'`
+  **AND** it is available in ≥1 country/channel (any `available_<country>_<channel>` = TRUE).
+  SET variants and rows available nowhere are out of scope.
+- **Migration 109** adds a `BEFORE INSERT OR UPDATE` trigger on `planner.products`
+  (`planner.set_in_planning_scope`) that recomputes the flag on every row write, plus a
+  one-time backfill. The sync may keep sending the column; the trigger overrides it.
+- No server query changes: all 11 `in_planning_scope` predicates and `v_product_availability`
+  keep working unchanged. Per-country/channel granularity still flows via `v_product_availability.av`.
+- Sandbox result: 678 SKUs in scope (was 722 — dropped SET variants + MASTERs available nowhere).
+
 ## v25.385 - Buy plan on-order: reconcile the PLAN detail with the grid
 
 Not a calc bug — the three figures were three views. Made the PLAN detail reconcile:
