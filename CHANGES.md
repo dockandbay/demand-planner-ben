@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.410 - DB streamlining: drop unused tables (migration 114)
+
+Live audit found dead/orphan tables. **Migration 114** (all DROP IF EXISTS) removes:
+- Dead app tables: `buy_plan` (buy plan is client-side, never persisted -- Ben confirmed), `inventory_snapshots`,
+  `prepack_bom` (both 0 rows, 0 code refs).
+- 9 dated backup snapshots (`*_bak_20260626`, `z_products_bak_20260708/10`, `z_product_countries_bak_20260710`,
+  `erp_lines_pruned_20260626`).
+
+**Not dropped (flagged for Diviyaj):** `planner.product_inventory` (~17.7k rows, ETL-fed) is ORPHANED --
+`v_product_inventory` unpivots `planner.products.inventory_*` and nothing reads `product_inventory`. Retire
+its n8n write step first, then drop the table. Confirmed: **all app on-hand reads resolve to
+`planner.products`** (directly for AWD/NonGRS, or via `v_product_inventory`).
+
 ## v25.409 - Escalate on shipment + sample timelines
 
 Extended the escalate button (v25.407) to the **shipment** and **sample** timelines, on both the main grid
