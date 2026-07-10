@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.387 - Snooze now clears the PAYMENTS tab count too
+
+A snoozed payment (e.g. the completion payment on PO-1700649) cleared the PO-ref badge and the
+ACTION ITEMS filter, but the PAYMENTS sub-tab still showed "(1)". The tab count came from
+`poExceptions.pay[]`, which pushed the overdue items directly with no snooze check.
+
+- `poExceptions` overdue pushes (start / completion / balance) are now guarded by the
+  `payment_overdue` snooze state — so a snooze drops them from the PAYMENTS tab count, consistent
+  with the badge and the ACTION ITEMS filter. "Show snoozed" brings them back.
+- The snooze stays **silent**: `refreshActInPlace` now also recomputes the open drawer's
+  PAYMENTS/DATES/CLIENT/SHIPMENTS tab badges in place (from the stashed PO detail) — no refetch,
+  no re-render.
+
 ## v25.386 - Planning scope now derived (sync-proof), not sync-fed
 
 Root cause of the LIVE BUY/FBA outage: the overnight n8n product sync clobbered

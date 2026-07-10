@@ -1160,6 +1160,14 @@
     try{ bindActMark(document); }catch(e){}
     document.querySelectorAll('.po-act-badge[data-po="'+_cssEsc(po)+'"]').forEach(function(b){ var all=(b.dataset.allacts||'').split(',').filter(Boolean);
       var n=all.filter(function(k){ return !poActSnoozed(po,k); }).length; if(n<=0){ b.style.display='none'; } else { b.style.display=''; b.textContent=n; } });
+    // any open PO drawer for this PO: recompute the snooze-affected sub-tab badges (PAYMENTS/DATES/CLICK/SHIPMENTS)
+    // in place from the stashed detail — keeps the snooze silent (no refetch/re-render) while the counts follow.
+    document.querySelectorAll('[id^="podet-"]').forEach(function(pd){ var nav=pd.querySelector('.po-subnav'); if(!nav)return;
+      if(!nav.querySelector('.potab[data-po="'+_cssEsc(po)+'"]'))return; var r=poBy[po]; if(!r)return;
+      var exc=poExceptions(r, pd._poDetail); var cnt={pay:exc.pay.length,dates:exc.dates.length,client:exc.client.length,shipments:exc.ship.length};
+      nav.querySelectorAll('.potab').forEach(function(btn){ var pt=btn.dataset.pt; if(!(pt in cnt))return; var n=cnt[pt], bd=btn.querySelector('.ex-badge');
+        if(n>0){ var ttl=n+' exception'+(n>1?'s':'')+' / action'+(n>1?'s':''); if(bd){ bd.textContent=n; bd.title=ttl; } else btn.insertAdjacentHTML('beforeend',' <span class="ex-badge" title="'+ttl+'">'+n+'</span>'); }
+        else if(bd){ bd.remove(); } }); });
   }
   function loadPoActState(cb){ fetch('/api/supply/actions/state').then(function(r){return r.json();}).then(function(rows){ _poActState={}; (rows||[]).forEach(function(s){ _poActState[s.action_key]=s; }); _poActStateLoaded=true; if(cb)cb(); }).catch(function(){ _poActStateLoaded=true; if(cb)cb(); }); }
   function poSnoozeSet(po,cond,days,cb){ fetch('/api/supply/actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:poActKey(po,cond),status:(days?'snoozed':'open'),snooze_days:days||0,restore:!days})}).then(function(r){return r.json();}).then(function(){ loadPoActState(cb); }).catch(function(){ if(cb)cb(); }); }
@@ -1814,7 +1822,8 @@
     b.addEventListener('mouseleave',function(){ clearTimeout(b._t); hideNoteTip(); });
     b.onclick=function(e){ e.stopPropagation(); hideNoteTip(); poActPopover(b); }; }); }
   function loadPoDetail(po,i,wantTab){ fetch('/api/supply/po-detail/'+encodeURIComponent(po)).then(function(r){return r.json();})
-    .then(function(d){ document.getElementById('podet-'+i).innerHTML=poDetailHTML(po,d,i); bindPay(po,i); bindPoScrollPin(); applyPoPin();   // pin left + position for any current horizontal scroll
+    .then(function(d){ var _pd=document.getElementById('podet-'+i); _pd.innerHTML=poDetailHTML(po,d,i); _pd._poDetail=d;   // stash detail so a silent snooze can recompute tab badges in place
+      bindPay(po,i); bindPoScrollPin(); applyPoPin();   // pin left + position for any current horizontal scroll
       if(wantTab){ var t=document.querySelector('#podet-'+i+' .potab[data-pt="'+wantTab+'"]'); if(t)t.onclick(); } })
     .catch(function(e){ document.getElementById('podet-'+i).innerHTML='<span style="color:#dc2626">'+esc(e.message||e)+'</span>'; }); }
   // Editable PLAN payment panel. Terms come from the supplier; each milestone's amount, date and %
@@ -1851,10 +1860,15 @@
     var startUnpaid=(r.start_assigned==null && !r.deposit_ref), compUnpaid=(r.completion_assigned==null);
     var open=(r.progress!=='complete');   // completed POs don't raise payment/freight actions (not actionable noise)
     var pay=[];
+    // snooze-aware: the overdue payment items all map to the payment_overdue action key, so a snooze on it
+    // (set from the due cell) must also drop them from the PAYMENTS tab count — not just the PO-ref badge.
+    var _payOverSnz=(!_poShowSnoozed && poActSnoozed(r.po,'payment_overdue'));
     // only overdue if there's actually an amount for that milestone (a 0% deposit is never "overdue")
-    if(open && totalDue>0.02 && r.start_due && r.start_due<today && startUnpaid && n(r.start_calc)>0.009) pay.push('Start deposit overdue ('+fd(r.start_due)+')');
-    if(open && totalDue>0.02 && r.completion_due && r.completion_due<today && compUnpaid && n(r.completion_calc)>0.009) pay.push('Completion payment overdue ('+fd(r.completion_due)+')');
-    if(open && r.balance_due && r.balance_due<today && totalDue>0.02) pay.push('Balance overdue ('+fd(r.balance_due)+')');
+    if(!_payOverSnz){
+      if(open && totalDue>0.02 && r.start_due && r.start_due<today && startUnpaid && n(r.start_calc)>0.009) pay.push('Start deposit overdue ('+fd(r.start_due)+')');
+      if(open && totalDue>0.02 && r.completion_due && r.completion_due<today && compUnpaid && n(r.completion_calc)>0.009) pay.push('Completion payment overdue ('+fd(r.completion_due)+')');
+      if(open && r.balance_due && r.balance_due<today && totalDue>0.02) pay.push('Balance overdue ('+fd(r.balance_due)+')');
+    }
     // supplier-submitted invoice awaiting approve/reject (actionable on any PO — shows on the grid flag and the PAYMENTS badge)
     if(r.sup_invoice_pending!=null) pay.push('Supplier invoice '+money(r.sup_invoice_pending)+' awaiting approve/reject');
     if(d&&d.sup_invoice&&d.sup_invoice.status==='applied'){ var sv=Number(d.sup_invoice.value), fv=(r.final_invoice!=null?Number(r.final_invoice):null);
