@@ -1184,14 +1184,15 @@
     unassigned_shipment:'No shipment assigned — this PO isn’t on a shipment yet (and isn’t FOB / pickup).',
     dtc_not_approved:'Direct-to-Client details not approved — a DtC order whose packing/requirements the supplier hasn’t approved in the portal.',
     po_not_approved:'Not confirmed by supplier — this production requires supplier confirmation and it hasn’t been given.',
-    preship:'Pre-shipment documents overdue — production has ended and the required branch document (AU Coghlans ASN, FBA/AWD barcodes, or EU iFulfillment IDN labels) is missing.'
+    preship:'Pre-shipment documents overdue — production has ended and the required branch document (AU Coghlans ASN, FBA/AWD barcodes, or EU iFulfillment IDN labels) is missing.',
+    erp_date:'ERP delivery date differs — the planner’s completion date doesn’t match Cin7’s EstimatedDeliveryDate. Resolve by pushing the date to Cin7 (⬆ Update ERP), or snooze to defer the reminder. Separate from the PO-grid ACTION ITEMS filter.'
   };
   function actMark(po,code){
     var help=ACT_HELP[code]||'Action required.', s=_poActState[poActKey(po,code)]||{}, sn=poActSnoozed(po,code);
     // The Ⓐ stays visible even when snoozed (muted); the count badges drop it, but the marker still reads "Snoozed".
     var A='<span class="act-mk" data-po="'+esc(po)+'" data-note="'+esc(help)+(sn?' — currently snoozed until '+esc(s.snooze_until||'')+(s.snoozed_by?' by '+esc(s.snoozed_by):'')+(s.snoozed_at?' on '+esc(s.snoozed_at):''):'')+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:'+(sn?'#f3a3a3':'#dc2626')+';color:#fff;font-weight:800;font-size:10px;cursor:help;vertical-align:middle;margin-left:5px">A</span>';
     var snz=sn
-      ? ' <span class="mut tiny" style="white-space:nowrap">Snoozed → '+esc(s.snooze_until||'')+' <button class="act-snz" data-po="'+esc(po)+'" data-code="'+esc(code)+'" data-d="0" style="border:none;background:none;color:#1d4ed8;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">wake</button></span>'
+      ? ' <span class="mut tiny" style="white-space:nowrap">Snoozed'+(s.snoozed_by?' by '+esc(s.snoozed_by):'')+' → '+esc(s.snooze_until||'')+' <button class="act-snz" data-po="'+esc(po)+'" data-code="'+esc(code)+'" data-d="0" style="border:none;background:none;color:#1d4ed8;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">wake</button></span>'
       : ' <button class="act-snz-btn" data-po="'+esc(po)+'" data-code="'+esc(code)+'" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:4px;font-size:10px;padding:1px 6px;margin-left:4px;cursor:pointer">SNOOZE ▾</button>';
     return '<span class="act-wrap" data-mk="'+esc(po)+'|'+esc(code)+'">'+A+snz+'</span>'; }
   // Snooze menu popped from a SNOOZE button (1/3/7 days).
@@ -1879,8 +1880,8 @@
     var frEst; if(r.flex_quote!=null) frEst=Number(r.flex_quote); else { var se=seaEst(r.sea_tiers,r.pallets); frEst=se?se.cost:null; }
     var landed=[]; if(open && frEst==null && !isFOB && !r.shipment) landed.push('No freight rate for destination'+(r.country?' ('+r.country+')':'')+' — can’t estimate sea freight');
     var dates=[]; if(r.sup_completion_pending) dates.push('Supplier completion date '+fd(r.sup_completion_pending)+' awaiting approve/reject');
-    // ERP delivery-date drift (materiality-thresholded server-side) → DATES sub-tab action counter
-    if(r.erp_date_pending>0 && !poComplete(r)) dates.push('ERP delivery date differs from Cin7 — update');
+    // ERP delivery-date drift (materiality-thresholded server-side) → DATES sub-tab action counter (snooze-aware)
+    if(r.erp_date_pending>0 && !poComplete(r) && !(!_poShowSnoozed && poActSnoozed(r.po,'erp_date'))) dates.push('ERP delivery date differs from Cin7 — update');
     // only flag a missing/late production status when this production actually requires supplier confirmation
     var _pse=r.require_confirmation?prodStatusException(r.status, r.prod_start, r.prod_end, today):''; if(_pse) dates.push('Production status: '+_pse);
     var timeline=[]; if(Number(r.unread_notes)>0) timeline.push(r.unread_notes+' unread supplier note'+(r.unread_notes>1?'s':''));
@@ -2069,7 +2070,7 @@
       '<div style="margin:4px 0 10px;padding:9px 12px;background:#fefce8;border:1px solid #eab308;border-radius:6px;max-width:820px">'
       +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="font-weight:700;color:#854d0e">⚠ ERP delivery date needs updating</span>'
       +'<span class="mut tiny">ERP final delivery <b>'+(r.erp_final_delivery?fd(r.erp_final_delivery):'—')+'</b> → completed-at-warehouse <b>'+(r.checkin?fd(r.checkin):'—')+'</b></span>'
-      +'<button class="save-btn erp-up-dates" data-po="'+esc(r.po)+'" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5">⬆ Update ERP</button></div></div>' : '';
+      +'<button class="save-btn erp-up-dates" data-po="'+esc(r.po)+'" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5">⬆ Update ERP</button>'+actMark(r.po,'erp_date')+'</div></div>' : '';
     var datesH='<div class="sect-h">Dates <span class="mut tiny">— only production start &amp; end are editable; the rest auto-calculate</span></div>'
       +_erpDateBanner
       +'<div class="tw" style="max-width:820px"><table class="dates-tbl" style="width:100%"><thead><tr><th class="l" style="width:190px">Milestone</th><th class="l" style="width:130px">Date</th><th class="l">Source</th></tr></thead><tbody>'

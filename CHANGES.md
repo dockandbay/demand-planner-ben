@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.392 - ERP date deviation snoozable + "Snoozed by <user>" label
+
+- **ERP delivery-date deviation is now snoozable** on the DATES tab: inline Ⓐ + SNOOZE on the
+  "⚠ ERP delivery date needs updating" banner (key `erp_date`). Snoozing drops it from the DATES
+  tab exception count; the banner + "⬆ Update ERP" button stay. It's deliberately kept out of the
+  PO-grid ACTION ITEMS filter (not a `PO_ACTCOND`), matching how ERP deviations are tracked.
+- **Snooze label now shows the user**: the inline "Snoozed → date" now reads
+  "Snoozed by <email> → date", where the email is the logged-in Vercel/Cloudflare user captured
+  server-side (`authUser`). Shows on live; blank on the sandbox tunnel (no auth). The badge popover
+  already showed the snoozed-by user.
+
 ## v25.391 - "Late — should have shipped" action moved to DATES
 
 `production` ("late — should have shipped") is ship-date-driven, so its inline Ⓐ + snooze now sits on
