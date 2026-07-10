@@ -2214,10 +2214,14 @@
     var pend=subs.filter(function(s){return s.status==='pending';}), appl=subs.filter(function(s){return s.status==='applied';});
     var head=(pend.length?'<div class="tiny" style="color:#92400e;margin-bottom:3px">⏳ Awaiting your approval: '+pend.map(function(s){return esc(sf(s));}).join(' · ')+'</div>':'')
       +(appl.length?'<div class="tiny" style="color:#166534;margin-bottom:6px">✓ Applied: '+appl.map(function(s){return esc(sf(s));}).join(' · ')+'</div>':'');
+    var recent=notes.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0]; var recentId=recent?recent.id:null;
     var list=notes.length?notes.map(function(n){ var sup=(n.author_kind!=='internal');
       return '<div style="font-size:11px;margin:3px 0;padding:5px 8px;background:'+(sup?(n.read?'#f1f5f9':'#fff7ed'):'#eef2ff')+';border:1px solid '+(sup&&!n.read?'#fdba74':'#e5e7eb')+';border-radius:5px;display:flex;justify-content:space-between;gap:10px;align-items:flex-start">'
         +'<div><span class="mut tiny">'+esc(n.created_at)+' · '+(sup?'supplier':'Dock &amp; Bay')+(n.author_email?' ('+esc(n.author_email)+')':'')+'</span>'+(sup&&!n.read?' <span class="ex-badge">new</span>':'')+'<br><span style="color:#1a1a1a">'+esc(n.body)+'</span></div>'
-        +(sup?(n.read?'<a class="note-read" data-id="'+n.id+'" data-read="1" style="flex:0 0 auto;font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline;white-space:nowrap">mark unread</a>':'<button class="save-btn light note-read" data-id="'+n.id+'" data-read="0" style="flex:0 0 auto">Mark read</button>'):'')+'</div>'; }).join(''):'<div class="mut tiny">No timeline notes yet.</div>';
+        +'<div style="flex:0 0 auto;display:flex;flex-direction:column;gap:3px;align-items:flex-end">'
+        +(sup?(n.read?'<a class="note-read" data-id="'+n.id+'" data-read="1" style="font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline;white-space:nowrap">mark unread</a>':'<button class="save-btn light note-read" data-id="'+n.id+'" data-read="0">Mark read</button>'):'')
+        +(n.id===recentId?'<button class="save-btn light po-esc" data-po="'+esc(po)+'" data-msg="'+esc(n.body)+'" title="Escalate this message to the supplier by email" style="color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'')
+        +'</div></div>'; }).join(''):'<div class="mut tiny">No timeline notes yet.</div>';
     var compose='<div style="margin-top:8px;display:flex;gap:6px;align-items:flex-start"><textarea class="po-note-body fci" data-po="'+esc(po)+'" rows="2" placeholder="Add a note for the supplier…" style="flex:1;min-height:34px;max-width:480px;text-align:left"></textarea><button class="save-btn po-note-post" data-po="'+esc(po)+'" style="flex:0 0 auto">Post to supplier</button></div>'
       +'<div class="mut tiny" style="margin:4px 2px">Posting appears in the supplier&rsquo;s portal timeline. Unread supplier replies show as an action.</div>';
     return '<div class="sect-h">Timeline <span class="mut tiny">— shared message thread with the supplier (their portal shows the same)</span></div>'+head+list+compose; }
@@ -2401,6 +2405,14 @@
       fetch('/api/supply/note-read/'+b.dataset.id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({read:read})}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); })
         .catch(function(e){ b.disabled=false; alert('Could not update: '+(e.message||e)); }); }; });
+    // Escalate the most recent timeline message → email the supplier's portal users (internal-initiated)
+    document.querySelectorAll('#podet-'+i+' .po-esc').forEach(function(b){ b.onclick=function(){ var msg=b.dataset.msg||''; if(!msg){alert('No message to escalate.');return;}
+      if(!confirm('Escalate this message to '+b.dataset.po+' — email the supplier’s portal user(s)?'))return; b.disabled=true; var t=b.textContent; b.textContent='Sending…';
+      fetch('/api/supply/escalate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({initiator:'internal',kind:'po',ref:b.dataset.po,message:msg})}).then(function(r){return r.json();})
+        .then(function(j){ if(j&&j.error)throw new Error(j.error); b.textContent='✓ Escalated';
+          if(j.sandbox) alert('Sandbox: no email key, nothing sent. On live this would email: '+((j.emails||[]).join(', ')||'(no portal users for this supplier)'));
+          else if(!j.sent) alert('No active portal users for this supplier to email.'); })
+        .catch(function(e){ b.disabled=false; b.textContent=t; alert('Escalate failed: '+(e.message||e)); }); }; });
     // ORDER PLAN tab — accept a supplier change (per line / all), and jump to the full ORDER PLAN filtered to this PO
     document.querySelectorAll('#podet-'+i+' .op-accept').forEach(function(b){ b.onclick=function(){ b.disabled=true;
       fetch('/api/supply/po-line-accept',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:b.dataset.po,sku:b.dataset.sku})}).then(function(r){return r.json();})
@@ -3539,7 +3551,7 @@
 
   // ---- SETTINGS (landed-cost rate cards: import tax by country, freight by lane × size) ----
   // ---- CONFIG: reference data, one editable table per sub-tab ----
-  var CONFIG_SUB='tax';
+  var CONFIG_SUB='general';
   var PORTAL_SUP='', PORTAL_TAB='pos', PORTAL_PO_ST=null;   // CONFIG ▸ Portal preview: chosen supplier + inner tab + PO status filter
   var ROW_EDIT={};   // per-sub-tab: which row key is currently in Edit mode (Edit/Save rows for suppliers + productions)
   var ME=null;   // caller's app permissions (/api/me): {email,live,supply_edit,demand_edit,is_admin}. null until loaded; sandbox = full access.
@@ -3559,7 +3571,7 @@
     if(!el){ el=document.createElement('div'); el.id='perm-banner'; el.style.cssText='background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:7px 12px;border-radius:6px;margin:0 0 10px;font-size:12px;font-weight:700'; var content=document.getElementById('supply-content'); root.insertBefore(el, content||root.firstChild); }
     el.style.display='block'; el.textContent='👁 Read-only access — you don’t have '+(inConfig?'CONFIG':'SUPPLY')+' edit rights here. Edits are rejected; ask an admin (CONFIG ▸ Permissions).'; }
   function renderConfig(d){ var c=document.getElementById('supply-content'); var sizes=d.sizes||[];
-    var SUBS=[['tax','Import tax'],['freight','Freight rates'],['duty','Import duty'],['branches','Branches'],['consignees','Consignees'],['suppliers','Suppliers'],['keyaccounts','Key accounts'],['batches','Batches'],['productions','Productions'],['products','Products'],['mfgbom','Manufacturing BOM'],['portalusers','Portal users'],['portal','Portal'],['forecast-export','Forecast export']];
+    var SUBS=[['general','General settings'],['tax','Import tax'],['freight','Freight rates'],['duty','Import duty'],['branches','Branches'],['consignees','Consignees'],['suppliers','Suppliers'],['keyaccounts','Key accounts'],['batches','Batches'],['productions','Productions'],['products','Products'],['mfgbom','Manufacturing BOM'],['portalusers','Portal users'],['portal','Portal'],['forecast-export','Forecast export']];
     if(ME&&ME.is_admin)SUBS=SUBS.concat([['permissions','Permissions']]);   // admin-only tab
     if(CONFIG_SUB==='permissions'&&!(ME&&ME.is_admin))CONFIG_SUB='tax';   // guard: non-admins can't land on Permissions
     function reload(){ delete cache['config']; selectSection('config'); }   // refresh after a rate add (keeps sub-tab)
@@ -3767,7 +3779,22 @@
       +'<div id="config-body"><div class="count">Loading…</div></div>';
     c.querySelectorAll('#config-subs .rtab').forEach(function(p){p.onclick=function(){CONFIG_SUB=p.dataset.cs;syncHash();c.querySelectorAll('#config-subs .rtab').forEach(function(x){x.classList.toggle('active',x===p);});showSub();};});
     function showSub(){ var b=document.getElementById('config-body');
-      if(CONFIG_SUB==='tax'){ b.innerHTML=taxTbl(); bindEdits(); }
+      if(CONFIG_SUB==='general'){ b.innerHTML='<div class="count">Loading…</div>';
+        fetch('/api/app-settings').then(function(r){return r.json();}).then(function(s){ s=s||{};
+          var FIELDS=[['escalation_supply_chain','Supply chain','Default recipients for escalations (any PO/shipment that isn’t Direct-to-Client).'],
+            ['escalation_dtc','Direct to Client','Used when the PO branch is Direct to Client / JLEW / NEXT.'],
+            ['escalation_samples','Samples','Used when a sample is escalated (and it is NOT a product-development sample).'],
+            ['escalation_product_dev','Product development','Used when a product-development sample is escalated.']];
+          b.innerHTML='<div class="annot"><b>CONFIG ▸ General settings.</b> Email recipients for <b>escalations</b> raised on a timeline message. When a <b>supplier</b> escalates, it goes to the list below that matches the context; when <b>Dock &amp; Bay</b> escalates, it goes to that supplier’s portal user(s). Comma-separate multiple addresses.</div>'
+            +'<div class="sect-h">Escalation email recipients</div>'
+            +'<div style="max-width:720px">'+FIELDS.map(function(f){ return '<div style="margin:0 0 12px"><div style="font-weight:600;font-size:13px">'+esc(f[1])+'</div><div class="mut tiny" style="margin:1px 0 4px">'+f[2]+'</div>'
+              +'<input class="fci gs-set" data-key="'+f[0]+'" value="'+esc(s[f[0]]||'')+'" placeholder="email@dockandbay.com, other@dockandbay.com" style="width:100%;box-sizing:border-box;text-align:left"></div>'; }).join('')+'</div>';
+          b.querySelectorAll('.gs-set').forEach(function(inp){ inp.onchange=function(){ inp.style.borderColor='#d0d0d0';
+            fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:inp.dataset.key,value:inp.value})})
+              .then(function(r){return r.json();}).then(function(j){ inp.style.borderColor=(j&&j.error)?'#dc2626':'#16a34a'; setTimeout(function(){inp.style.borderColor='';},900); })
+              .catch(function(){ inp.style.borderColor='#dc2626'; }); }; });
+        }).catch(function(e){ b.innerHTML='<div class="count" style="color:#dc2626">'+esc(String(e))+'</div>'; }); }
+      else if(CONFIG_SUB==='tax'){ b.innerHTML=taxTbl(); bindEdits(); }
       else if(CONFIG_SUB==='freight'){ b.innerHTML=frTbl(); bindEdits();   // bindEdits wires the air-tier rate inputs (.fci)
         b.querySelectorAll('.fr-cell').forEach(function(inp){ inp.onchange=function(){ var v=inp.value.trim().replace(/[$,\s]/g,''); inp.style.borderColor='#d0d0d0';
           fetch('/api/supply/freight-upsert',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({destination:inp.dataset.country,container_size:inp.dataset.sz,cost:v})})
@@ -3926,7 +3953,7 @@
             ban.innerHTML='<div style="background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:6px 11px;margin:4px 0 10px;font-size:12px">👁 Previewing the portal as <b>'+esc(name)+'</b> — exactly what they see, and any submit acts AS this supplier.</div>';
             if(!window.DBPortalView){ mt.innerHTML='<div class="count" style="color:#dc2626">portal view not loaded</div>'; return; }
             window.DBPortalView.mount({ root:mt, supplierName:name, by:'preview (acting as '+name+')', sid:supById[name],
-              ep:{ lineCost:'/api/supply/portal-line-cost', lineRemove:'/api/supply/portal-line-remove', crossdockQty:'/api/supply/crossdock-qty', addlCost:'/api/supply/additional-cost', addlCostRemove:'/api/supply/additional-cost-remove', note:'/api/supply/portal-note', notesBase:'/api/supply/portal-notes/', noteReadBase:'/api/supply/note-read/', submit:'/api/supply/portal-submit', upload:'/api/supply/portal-upload', labelData:'/api/supply/label-data', parseInvoice:'/api/supply/portal-parse-invoice', invoiceApply:'/api/supply/portal-invoice-apply', docRemove:'/api/supply/portal-attachment-remove', attachmentBase:'/api/supply/portal-attachment/', shipmentEscalate:'/api/supply/shipment/', shipmentNotesBase:'/api/supply/shipment-notes?ref=', shipmentNote:'/api/supply/shipment-note', shipmentCharge:'/api/supply/shipment-charge', shipmentChargesBase:'/api/supply/shipment-charges/', dtcAccept:'/api/supply/dtc-accept', sampleAccept:'/api/supply/sample-accept', sampleUpdate:'/api/supply/sample-update', sampleNote:'/api/supply/sample-note', sampleNoteAuthorKind:'supplier', sampleNoteAuthorEmail:'D&B', sampleNotesBase:'/api/supply/sample-notes?id=', sampleNoteReadBase:'/api/supply/sample-note-read/', sampleCharge:'/api/supply/sample-charge', sampleCreate:'/api/supply/sample-create', sampleAttachment:'/api/supply/sample-attachment', sampleAttachmentRemove:'/api/supply/sample-attachment-remove' },
+              ep:{ lineCost:'/api/supply/portal-line-cost', lineRemove:'/api/supply/portal-line-remove', crossdockQty:'/api/supply/crossdock-qty', addlCost:'/api/supply/additional-cost', addlCostRemove:'/api/supply/additional-cost-remove', note:'/api/supply/portal-note', notesBase:'/api/supply/portal-notes/', noteReadBase:'/api/supply/note-read/', escalate:'/api/supply/escalate', submit:'/api/supply/portal-submit', upload:'/api/supply/portal-upload', labelData:'/api/supply/label-data', parseInvoice:'/api/supply/portal-parse-invoice', invoiceApply:'/api/supply/portal-invoice-apply', docRemove:'/api/supply/portal-attachment-remove', attachmentBase:'/api/supply/portal-attachment/', shipmentEscalate:'/api/supply/shipment/', shipmentNotesBase:'/api/supply/shipment-notes?ref=', shipmentNote:'/api/supply/shipment-note', shipmentCharge:'/api/supply/shipment-charge', shipmentChargesBase:'/api/supply/shipment-charges/', dtcAccept:'/api/supply/dtc-accept', sampleAccept:'/api/supply/sample-accept', sampleUpdate:'/api/supply/sample-update', sampleNote:'/api/supply/sample-note', sampleNoteAuthorKind:'supplier', sampleNoteAuthorEmail:'D&B', sampleNotesBase:'/api/supply/sample-notes?id=', sampleNoteReadBase:'/api/supply/sample-note-read/', sampleCharge:'/api/supply/sample-charge', sampleCreate:'/api/supply/sample-create', sampleAttachment:'/api/supply/sample-attachment', sampleAttachmentRemove:'/api/supply/sample-attachment-remove' },
               bc:{ sheets:bcDownloadSheets, crossdock:bcDownloadCrossdock, placeholder:false },
               getData:function(){ return loadPortalData(name); },
               onChange:function(){ invalidateDerived(); }   // a portal write (e.g. creating a shipment) must refresh the admin grids

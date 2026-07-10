@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.406';
+const APP_VERSION = 'v25.407';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -430,7 +430,7 @@ const CONFIG_WRITE = [   // config reference-data writes — editable by anyone 
   /^\/api\/supply\/supplier-create$/, /^\/api\/supply\/key-account/, /^\/api\/supply\/batch\//,
   /^\/api\/supply\/batch-create$/, /^\/api\/supply\/production-create$/, /^\/api\/supply\/prod-number\//,
   /^\/api\/supply\/portal-user/, /^\/api\/supply\/manufacturing-bom-(save|delete)$/,
-  /^\/api\/supply\/manufacturing-accept$/,
+  /^\/api\/supply\/manufacturing-accept$/, /^\/api\/supply\/settings$/,
 ];
 function requiredCap(method, p) {
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return null;   // reads open to all
@@ -442,6 +442,7 @@ function requiredCap(method, p) {
       || p === '/api/demand-actions/state' || p.startsWith('/api/trading-calendar')
       || p.startsWith('/api/forecast/')) return 'demand';    // DEMAND / forecasting domain
   if (p === '/api/consignee' || p.startsWith('/api/consignee/')) return 'config'; // CONFIG ▸ Consignees
+  if (p === '/api/app-settings') return 'config';            // CONFIG ▸ General settings
   if (CONFIG_WRITE.some((re) => re.test(p))) return 'config'; // config reference data → supply OR demand
   if (p.startsWith('/api/supply/')) return 'supply';          // everything else under supply = SUPPLY feature
   return null;   // unknown non-supply write → fail-open (don't block routes we haven't classified)
@@ -2729,6 +2730,85 @@ app.post('/api/supply/portal-remind', async (req, res) => {
       body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', to: emails, subject, html }) });
     if (!r.ok) { const t = await r.text().catch(() => ''); return res.status(502).json({ error: 'email send failed: ' + t.slice(0, 200) }); }
     res.json({ ok: true, sent: emails.length, emails });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── General settings (CONFIG ▸ General Settings) — key/value store ──────────────────────────────
+app.get('/api/app-settings', async (req, res) => {
+  try { const o = {}; (await pool.query(`SELECT key, value FROM planner.app_settings`)).rows.forEach(r => { o[r.key] = r.value; }); res.json(o); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/app-settings', async (req, res) => {
+  const b = req.body || {}, key = (b.key || '').trim();
+  if (!key) return res.status(400).json({ error: 'key required' });
+  try {
+    await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ($1,$2,$3,now())
+      ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [key, b.value || '', authUser(req) || null]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Escalate a timeline message as an email ─────────────────────────────────────────────────────
+// initiator 'supplier' (portal) → routed to a CONFIG-managed internal list by context; link → planner.
+// initiator 'internal' (grid)   → that supplier's active portal users;                 link → portal.
+const PLANNER_URL = (process.env.PLANNER_URL || 'https://horizon.dockandbay.com').replace(/\/$/, '');
+const PORTAL_URL = (process.env.PORTAL_URL || 'https://suppliers.dockandbay.com/portal').replace(/\/$/, '');
+function _eh(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function _emails(s) { return String(s || '').split(/[,;\s]+/).map(x => x.trim()).filter(x => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x)); }
+function escLink(kind, ref, audience) {
+  if (audience === 'portal') return PORTAL_URL;   // portal has no per-record deep link — ref is in the subject
+  if (kind === 'shipment') return PLANNER_URL + '/#/supply/purchase-orders/shipments/' + encodeURIComponent(ref);
+  if (kind === 'sample') return PLANNER_URL + '/#/supply/samples';
+  return PLANNER_URL + '/#/supply/purchase-orders/plan/' + encodeURIComponent(ref);
+}
+async function escalateSend(r) { const to = r.emails;
+  if (!process.env.RESEND_API_KEY) { console.log('[escalate] no RESEND_API_KEY — would email ' + to.join(', ')); return { sandbox: true }; }
+  const resp = await fetch('https://api.resend.com/emails', { method: 'POST',
+    headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', to, subject: r.subject, html: r.html }) });
+  if (!resp.ok) { const t = await resp.text().catch(() => ''); throw new Error('email send failed: ' + t.slice(0, 200)); }
+  return { sent: to.length };
+}
+async function escalateCore({ initiator, kind, ref, message, user, supplierId }) {
+  kind = ['po', 'shipment', 'sample'].includes(kind) ? kind : 'po';
+  ref = String(ref || '').trim(); message = String(message || '').trim();
+  if (!ref || !message) throw new Error('ref + message required');
+  let emails = [], audience;
+  if (initiator === 'internal') {
+    audience = 'portal'; let sid = supplierId;
+    if (!sid) {
+      if (kind === 'sample') sid = (await pool.query(`SELECT supplier_id FROM planner.sample_requests WHERE ref=$1`, [ref])).rows[0]?.supplier_id;
+      else if (kind === 'shipment') sid = (await pool.query(`SELECT po.supplier_id FROM planner.shipments sh JOIN planner.purchase_orders po ON po.po=coalesce(sh.master_po,sh.shipment_ref) WHERE sh.shipment_ref=$1`, [ref])).rows[0]?.supplier_id;
+      else sid = (await pool.query(`SELECT supplier_id FROM planner.purchase_orders WHERE po=$1`, [ref])).rows[0]?.supplier_id;
+    }
+    if (sid) emails = (await pool.query(`SELECT DISTINCT lower(email) e FROM planner.supplier_portal_users WHERE supplier_id=$1 AND active=true AND coalesce(email,'')<>''`, [sid])).rows.map(x => x.e);
+  } else {
+    audience = 'planner'; let key = 'escalation_supply_chain';
+    if (kind === 'sample') {
+      const purpose = (await pool.query(`SELECT coalesce(purpose::text,'') p FROM planner.sample_requests WHERE ref=$1`, [ref])).rows[0]?.p || '';
+      key = /product\s*develop/i.test(purpose) ? 'escalation_product_dev' : 'escalation_samples';
+    } else {
+      const branch = (await pool.query(`SELECT coalesce(branch,'') b FROM planner.purchase_orders WHERE po=$1`, [ref])).rows[0]?.b || '';
+      if (/direct to client|jlew|next/i.test(branch)) key = 'escalation_dtc';
+    }
+    const s = (await pool.query(`SELECT value FROM planner.app_settings WHERE key=$1`, [key])).rows[0];
+    emails = _emails(s ? s.value : '');
+  }
+  if (!emails.length) return { ok: true, sent: 0, emails: [], note: 'no recipients configured for this route' };
+  const link = escLink(kind, ref, audience);
+  const subject = 'horizon escalation - ' + ref;
+  const html = '<p><b>' + _eh(user || 'A user') + '</b> has escalated this message:</p>'
+    + '<blockquote style="border-left:3px solid #cbd5e1;margin:0;padding:4px 12px;color:#334155;white-space:pre-wrap">' + _eh(message) + '</blockquote>'
+    + '<p>Link: <a href="' + link + '">' + link + '</a></p>';
+  const sent = await escalateSend({ emails, subject, html });
+  return { ok: true, sent: sent.sent || 0, emails, sandbox: !!sent.sandbox, link };
+}
+app.post('/api/supply/escalate', async (req, res) => {
+  const b = req.body || {};
+  try {
+    const initiator = b.initiator === 'internal' ? 'internal' : 'supplier';
+    const user = initiator === 'internal' ? (authUser(req) || b.user || 'A user') : (b.user || 'The supplier');
+    res.json(await escalateCore({ initiator, kind: b.kind, ref: b.ref, message: b.message, user, supplierId: b.supplier_id }));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -6930,6 +7010,15 @@ app.post('/api/portal/note', portalAuth, async (req, res) => {
     await pool.query(`INSERT INTO planner.supplier_notes (po,supplier_id,author_email,author_kind,body) VALUES ($1,$2,$3,'supplier',$4)`,
       [b.po, sid, req.portal.email, String(b.body).trim()]);
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Supplier escalates a timeline message → routed to a CONFIG internal list by context; link → planner.
+app.post('/api/portal/escalate', portalAuth, async (req, res) => {
+  const b = req.body || {}, kind = ['po', 'shipment', 'sample'].includes(b.kind) ? b.kind : 'po';
+  if (kind === 'po' && b.ref && !await portalOwnsPO(req, b.ref)) return portalDeny(res);
+  try {
+    const user = (req.portal.suppliers && req.portal.suppliers[0]) || 'The supplier';
+    res.json(await escalateCore({ initiator: 'supplier', kind, ref: b.ref, message: b.message, user }));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/portal/upload', portalAuth, async (req, res) => {

@@ -3,6 +3,24 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.407 - Escalate a timeline message by email + CONFIG ▸ General Settings
+
+- **Escalate button** on the **most recent** timeline note, on both the main-grid PO timeline and the
+  supplier portal timeline. Sends that message as an email — subject `horizon escalation - <ref>`, body
+  "<user> has escalated this message" + the message + an audience-matched deep link.
+- **Routing:** a **supplier** escalation → the CONFIG list matching the context (sample+product-dev →
+  Product development; other sample → Samples; branch Direct-to-Client/JLEW/NEXT → Direct-to-Client; else →
+  Supply chain), link → planner. A **Dock & Bay** escalation → that supplier's active portal user(s),
+  link → portal.
+- **CONFIG ▸ General Settings** — new **first** tab (also the default landing) with 4 comma-separated email
+  recipient lists. New `app_settings` key/value table (**migration 113**).
+- Endpoints: `GET/POST /api/app-settings`, `POST /api/supply/escalate` (internal + preview),
+  `POST /api/portal/escalate` (real portal, session-scoped). Live send via Resend; **sandbox has no key so
+  nothing sends**. `/api/app-settings` gated as CONFIG.
+
+Note: escalation applies to PO timelines now; shipment/sample timeline escalation reuses the same endpoint
+(kind shipment/sample) and is a fast-follow on those surfaces.
+
 ## v25.406 - CONFIG ▸ Portal Users: per-supplier open-action counter + reminder email
 
 Each portal-user row now shows an **Open actions** count for that supplier — the same items the supplier
