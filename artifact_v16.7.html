@@ -1559,7 +1559,10 @@ function initUI(){
       [['Any','ANY'],['Full','FULL'],['Partial','PARTIAL']].forEach(([lbl,val])=>{
         const b=mk('button','pill'+(val===FBA_CARTON_MODE?' active':''),lbl);
         if(val!==FBA_CARTON_MODE)b.style.opacity='.55';
-        b.onclick=()=>{ FBA_CARTON_MODE=val; render(); };
+        b.onclick=()=>{ FBA_CARTON_MODE=val;
+          cartp.querySelectorAll('button').forEach(btn=>{ const isActive=btn.textContent===lbl; btn.classList.toggle('active',isActive); btn.style.opacity=isActive?'1':'.55'; });
+          render();
+        };
         cartp.appendChild(b);
       });
     } else if(cartpWrap){ cartpWrap.style.display='none'; }

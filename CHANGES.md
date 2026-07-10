@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.378 - Fix: FBA Cartons pills (Any/Full/Partial) active state stuck
+
+The cartons pills only called `render()` on click and relied on a toolbar rebuild to repaint the active
+pill — which didn't happen reliably, so after a click the selected pill's colour didn't update. Now they
+toggle their own active class + opacity in-place on click (same pattern as the Buy pills), then render.
+
 ## v25.377 - Pre-shipment docs: supplier portal downloads
 
 - **ASN pallet labels** now downloadable on the supplier portal for Coghlans POs (new gate-exempt
