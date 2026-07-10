@@ -1222,8 +1222,8 @@
     if(!_poActStateLoaded){ loadPoActState(function(){ try{view();}catch(e){} }); }   // snooze map → re-render once loaded
     var FILTERS=[['in_progress','In progress'],['future','Future'],['complete','Complete'],['all','All']];
     var ACTP=[['payment_overdue','Payment overdue'],['unpaid_payment','Unpaid payments'],['late','Late - should be Completed'],['unassigned_shipment','Unassigned shipment'],['production','Late - should have Shipped'],['dtc_not_approved','Direct to Client not approved'],['po_not_approved','Purchase Order not approved']];
-    var CTRYP=[['UK','UK'],['US','US'],['AU','AU'],['EU','EU'],['CA','CA'],['DIRECT','Direct']];
-    var CFLAG={UK:'🇬🇧',US:'🇺🇸',AU:'🇦🇺',EU:'🇪🇺',CA:'🇨🇦',DIRECT:'📦'};
+    var CTRYP=[['UK','UK'],['US','US'],['AU','AU'],['EU','EU'],['CA','CA'],['OTHER','OTHER']];
+    var CFLAG={UK:'🇬🇧',US:'🇺🇸',AU:'🇦🇺',EU:'🇪🇺',CA:'🇨🇦',OTHER:'📦'};
     var GRP=[['none','None'],['production','Production'],['shipment','Master shipment']];
     // persist filters across edit reloads; reset to a clean view only when navigating to a specific PO
     if(_pendingPO){ _poState={f:'in_progress',q:_pendingPO,act:{},ctry:{},grp:'shipment',sup:'',prod:'',batch:'',branch:''}; }   // seed only the SEARCH with the PO # — a text search spans ALL statuses/recency (filt), so it finds even a years-old completed PO WITHOUT forcing the 'all' filter. (The old 'all' seed used to stick, so after such a search the grid showed unfiltered instead of defaulting back to In progress once the search was cleared.)
@@ -1285,6 +1285,10 @@
       +'<div id="sup-grid"></div>';
     bindPoSubNav();
     function anyCtry(){ for(var k in state.ctry){ if(state.ctry[k])return true; } return false; }
+    // country pill match: the majors match their own country; OTHER matches anything that is not a major
+    // (DIRECT, OT, blank, etc.).
+    function ctryMatch(r){ var maj={UK:1,US:1,AU:1,EU:1,CA:1}; var c=String(r.country||'').toUpperCase();
+      return maj[c] ? !!state.ctry[c] : !!state.ctry['OTHER']; }
     function cur(){ return rows.filter(function(r){
       if(state.focus){ if(!r.starred || r.progress==='complete')return false; }   // Focus = starred + active only (overrides status)
       else if(state.erp){ if(!poErpMisaligned(r))return false; }          // NEEDS ERP spans all statuses (like ACTION ITEMS)
@@ -1293,7 +1297,7 @@
       // completed POs: default to those completed in the last 12 months (toggle off for all-time)
       if(state.recent && r.progress==='complete' && !((r.checkin||'')>=RECENT_CUT))return false;
       for(var k in state.act){ if(state.act[k] && !PO_ACTCOND[k](r))return false; }
-      if(anyCtry() && !state.ctry[r.country])return false;   // country pills: OR within, AND with the rest
+      if(anyCtry() && !ctryMatch(r))return false;   // country pills: OR within, AND with the rest (OTHER = non-major)
       if(state.sup && r.supplier_name!==state.sup)return false;
       if(state.branch && String(r.branch)!==state.branch)return false;
       if(state.prod && String(r.prod_no)!==state.prod)return false;
@@ -1301,7 +1305,7 @@
       return true; }); }
     // a text search overrides the status/action/country filters — search across ALL POs
     function view(){ var q=effQ(state.q); var f=q ? filt(rows,q) : cur();
-      _poShowClient=!!(state.ctry&&state.ctry['DIRECT']);   // DIRECT pill → reveal Client name + sales ref columns
+      _poShowClient=!!(state.ctry&&state.ctry['OTHER']);   // OTHER pill (incl. Direct-to-Client) → reveal Client name + sales ref columns
       var shown=(_poShowAll||f.length<=PO_CAP)?f:f.slice(0,PO_CAP);
       document.getElementById('sup-count').textContent=(shown.length<f.length?shown.length+' of ':'')+f.length+' / '+rows.length+' POs'+(q?' (search — all statuses)':'');
       document.getElementById('sup-grid').innerHTML=poTable(shown,q?'status':state.grp)   // a search spans all statuses → always group the results under status sub-labels (Production ▸ Ready to ship ▸ Future ▸ Shipping ▸ Complete)

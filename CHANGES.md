@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.397 - PO country filter: DIRECT pill → OTHER (any non-major destination)
+
+The PURCHASE ORDERS country filter's **DIRECT** pill is now **OTHER** and matches any PO whose country
+is not one of UK/US/AU/EU/CA (DIRECT, OT, blank, etc.) — previously it only matched the literal `DIRECT`
+country and missed things like `OT`. New `ctryMatch()` maps majors to themselves and everything else to
+OTHER. (Only the grid filter pill changed; DIRECT remains a real destination for assigning/editing a PO.)
+
 ## v25.396 - Retire planner.product_countries (consolidate onto planner.products)
 
 `product_countries` was only still used by the availability view's discontinue gate and a dead per-SKU
