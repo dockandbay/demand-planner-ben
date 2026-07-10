@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.395 - Launch/discontinue dates read from planner.products
+
+The demand plan sourced launch/discontinue from `planner.product_countries`, but that table is barely
+populated (and Ben only maintains `planner.products`). Result: SKUs like TOWLB-CAB-MD-BLUE (launch 2027)
+showed no launch/discontinue dates and were treated as ACTIVE now — forecasting from the current month
+instead of being gated FUTURE until launch.
+
+- `buildSKURAW` now reads launch/discontinue per country from `planner.products`
+  (`launch_date_<c>_final ▸ launch_date_<c>`, `discontinue_date_final` / `_au_final` / `_ca`), with
+  `product_countries` kept only as a coalesce fallback (so a live sync that populates that table still works).
+- SKUs now correctly show their launch/discontinue dates and pre-launch SKUs are gated FUTURE.
+
 ## v25.394 - On-order POs get a calculated landing date + show as inbound
 
 On-order POs not yet in the freight/inbound feed used to carry no ETA — so they were invisible to the

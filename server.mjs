@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.394';
+const APP_VERSION = 'v25.395';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -170,10 +170,35 @@ async function buildSKURAW() {
   const [prods, pcs, inv, avail, oo, sales, inbound, openpo] = await Promise.all([
     pool.query(`SELECT sku, product_name n, subcategory s, category c, market_tier ti, core_seasonal cs
                 FROM planner.products WHERE in_planning_scope`),
-    pool.query(`SELECT sku, lower(country) co,
-                       to_char(launch_date_retail,'YYYY-MM-DD') lch,
-                       to_char(discontinue_date,'YYYY-MM-DD') disc
-                FROM planner.product_countries`),
+    // Launch + discontinue dates per country. Source of truth is planner.products (the table Ben updates);
+    // product_countries is only a fallback (coalesce) in case a live sync populates that table instead.
+    // Values are already ISO text on products, so pass through; the artifact compares them as strings.
+    pool.query(`SELECT sku, co, lch, disc FROM (
+                  SELECT p.sku, 'uk' co,
+                    coalesce(nullif(p.launch_date_uk_final,''), nullif(p.launch_date_uk,''), to_char(pc.launch_date_retail,'YYYY-MM-DD')) lch,
+                    coalesce(nullif(p.discontinue_date_final,''), to_char(pc.discontinue_date,'YYYY-MM-DD')) disc
+                  FROM planner.products p LEFT JOIN planner.product_countries pc ON pc.sku=p.sku AND pc.country='UK' WHERE p.in_planning_scope
+                  UNION ALL
+                  SELECT p.sku, 'us',
+                    coalesce(nullif(p.launch_date_us,''), to_char(pc.launch_date_retail,'YYYY-MM-DD')),
+                    coalesce(nullif(p.discontinue_date_final,''), to_char(pc.discontinue_date,'YYYY-MM-DD'))
+                  FROM planner.products p LEFT JOIN planner.product_countries pc ON pc.sku=p.sku AND pc.country='US' WHERE p.in_planning_scope
+                  UNION ALL
+                  SELECT p.sku, 'eu',
+                    coalesce(nullif(p.launch_date_eu,''), to_char(pc.launch_date_retail,'YYYY-MM-DD')),
+                    coalesce(nullif(p.discontinue_date_final,''), to_char(pc.discontinue_date,'YYYY-MM-DD'))
+                  FROM planner.products p LEFT JOIN planner.product_countries pc ON pc.sku=p.sku AND pc.country='EU' WHERE p.in_planning_scope
+                  UNION ALL
+                  SELECT p.sku, 'au',
+                    coalesce(nullif(p.launch_date_au_final,''), nullif(p.launch_date_au,''), to_char(pc.launch_date_retail,'YYYY-MM-DD')),
+                    coalesce(nullif(p.discontinue_date_au_final,''), to_char(pc.discontinue_date,'YYYY-MM-DD'))
+                  FROM planner.products p LEFT JOIN planner.product_countries pc ON pc.sku=p.sku AND pc.country='AU' WHERE p.in_planning_scope
+                  UNION ALL
+                  SELECT p.sku, 'ca',
+                    coalesce(nullif(p.launch_date_ca_retail,''), to_char(pc.launch_date_retail,'YYYY-MM-DD')),
+                    coalesce(nullif(p.discontinue_date_ca,''), to_char(pc.discontinue_date,'YYYY-MM-DD'))
+                  FROM planner.products p LEFT JOIN planner.product_countries pc ON pc.sku=p.sku AND pc.country='CA' WHERE p.in_planning_scope
+                ) x WHERE lch IS NOT NULL OR disc IS NOT NULL`),
     pool.query(`SELECT sku, warehouse wh, available::int qty FROM planner.v_product_inventory`),
     pool.query(`SELECT sku, lower(country) co,
                        string_agg(CASE channel WHEN 'DTC' THEN 'd' WHEN 'FBA' THEN 'f' WHEN 'B2B' THEN 'b' END,
