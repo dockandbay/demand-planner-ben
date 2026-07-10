@@ -3,6 +3,20 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.394 - On-order POs get a calculated landing date + show as inbound
+
+On-order POs not yet in the freight/inbound feed used to carry no ETA — so they were invisible to the
+buy plan's stock projection (it silently ignored placed-but-unshipped POs, over-recommending buys) and
+only appeared as a bare "not shipped" count.
+
+- **Server** computes a landing ETA for each such PO using the same logic as the SUPPLY PO view:
+  `prod_end (override ▸ start + supplier days) + 7 (ship) + branch sea transit`.
+- **Artifact** carries that ETA into `md.inb`, so these POs now land in the SOH projection at their
+  computed date (correctly reducing the recommended buy) and appear in the stock-column inbound list +
+  hover (marked "on order"). Dedup is intact (open POs are those *not* in the feed).
+- The old "On order · not shipped" card is now "On order · no landing date" and only lists POs whose
+  production dates are missing (a genuine data gap to fix).
+
 ## v25.393 - ERP date deviation counts on the overall PO badge
 
 The ERP delivery-date deviation was showing on the DATES tab but not on the overall PO-ref badge

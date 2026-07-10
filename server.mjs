@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.393';
+const APP_VERSION = 'v25.394';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -210,10 +210,17 @@ async function buildSKURAW() {
     pool.query(`SELECT l.sku,
                   lower(coalesce(nullif(po.country_code,''), b.country_code)) || '_' ||
                     (CASE WHEN po.branch ILIKE '%fba%' THEN 'fba' ELSE '3pl' END) wh,
-                  po.po ref, l.qty::int qty, coalesce(po.status,'') status
+                  po.po ref, l.qty::int qty, coalesce(po.status,'') status,
+                  -- estimated landing (delivery to warehouse), same calc as the SUPPLY PO view for an
+                  -- unshipped PO: prod_end (override ▸ start + supplier days) + 7 (ship) + branch sea transit.
+                  to_char((coalesce(po.end_production_overide,
+                             CASE WHEN po.start_production IS NOT NULL AND s.production_days IS NOT NULL
+                                  THEN (po.start_production + (s.production_days||' days')::interval)::date END)
+                           + interval '7 days' + (b.sea_lead_time_days||' days')::interval)::date,'YYYY-MM-DD') eta
                 FROM planner.purchase_order_lines l
                 JOIN planner.purchase_orders po ON po.po = l.po
                 LEFT JOIN planner.branches b ON b.name = po.branch
+                LEFT JOIN planner.suppliers s ON s.id = po.supplier_id
                 WHERE coalesce(l.qty,0) > 0
                   AND coalesce(po.status,'') NOT ILIKE '%complete%'
                   AND coalesce(nullif(po.country_code,''), b.country_code) IN ('UK','US','EU','AU','CA')
@@ -244,7 +251,7 @@ async function buildSKURAW() {
   for (const r of openpo.rows) {
     if (!r.wh) continue;
     const k = r.sku + '|' + r.wh;
-    (oi[k] || (oi[k] = [])).push({ ref: r.ref || '', qty: r.qty || 0, eta: null, type: 'open_po', status: r.status || '' });
+    (oi[k] || (oi[k] = [])).push({ ref: r.ref || '', qty: r.qty || 0, eta: r.eta || null, type: 'open_po', status: r.status || '' });
   }
   return { p, s, i, oi };
 }
