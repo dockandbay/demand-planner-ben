@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.404 - Demand grid: dark-grey gridlines + red border for discontinued
+
+- The demand PLAN grid (`#t`, category + SKU levels) now has **dark-grey cell borders** (#9a9a9a) so every
+  cell is visible (was a near-invisible #f0f0f0 bottom border only).
+- The small red **"d" badge** on discontinued-rundown months is replaced by a **red border** around the cell
+  (inset outline; keeps the "discontinued this month — selling down" tooltip).
+
 ## v25.403 - New PURCHASE ORDERS report: Crossdock
 
 New **CROSSDOCK** sub-tab under PURCHASE ORDERS. On-hand + inbound for every `CROSSDOCK%`/`PREORDER%` SKU

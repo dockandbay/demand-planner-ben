@@ -291,6 +291,9 @@ tr.sku-inline:not(.subtot-row) td{border-bottom-color:#cfcfcf !important}
 .bglbl{background:#edf2ff !important}
 .bgrec{background:#f0fdf4 !important}
 td{padding:0;border-bottom:1px solid #f0f0f0;vertical-align:middle;overflow:hidden;text-align:right}
+/* Dark-grey gridlines on the demand grid (#t) so every cell is visible — category + SKU levels. */
+#t td{border-right:1px solid #9a9a9a;border-bottom:1px solid #9a9a9a}
+#t thead th{border-right:1px solid #9a9a9a}
 td.stk{position:sticky;left:0;z-index:1;background:#fff;text-align:left;width:160px;min-width:160px;max-width:160px}
 td.stk2{position:sticky;left:160px;z-index:1;background:#fff;text-align:right;width:62px;min-width:62px;max-width:62px;border-right:2px solid #b0b0ae}
 .nm{padding:3px 4px 3px 14px;display:flex;align-items:center;gap:3px;white-space:nowrap;overflow:hidden;font-size:11px}
@@ -5706,16 +5709,12 @@ function insertInlineSkuRows(s,co,ch,afterTr){
     if(inp){inp.value='0';inp.disabled=true;inp.style.color='#991b1b';inp.style.fontStyle='italic';inp.title='Discontinued — on-hand + inbound stock exhausted';}
     if(fcDiv){fcDiv.textContent='disc';fcDiv.style.color='#991b1b';fcDiv.style.fontStyle='italic';}
   }
-  // Small red "d" badge (top-left) for months where the SKU is past its discontinue date
-  // but is still selling down remaining stock (rundown, stock not yet exhausted).
+  // Red cell border for months where the SKU is past its discontinue date but is still selling down
+  // remaining stock (rundown, stock not yet exhausted). Replaces the old small red "d" badge.
   function markDiscRundown(td,on){
     if(!on||!td)return;
-    td.style.position='relative';
-    var b=document.createElement('span');
-    b.textContent='d';
-    b.title='Discontinued this month — selling down remaining stock';
-    b.style.cssText='position:absolute;top:0;left:1px;z-index:2;font-size:8px;font-weight:700;line-height:1;color:#dc2626;pointer-events:none';
-    td.appendChild(b);
+    td.style.boxShadow='inset 0 0 0 1.5px #dc2626';   // red outline = discontinued this month
+    if(!td.title)td.title='Discontinued this month — selling down remaining stock';
   }
   // During an active Smooth preview, show each SKU's proposed (uncommitted) override in amber.
   // The override cell (input) carries the proposed units; the forecast cell mirrors it.
