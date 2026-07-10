@@ -3,6 +3,20 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.388 - Inline Ⓐ + snooze rolled out to all action types
+
+The inline red Ⓐ (120ms rule tooltip) + SNOOZE ▾ control — previously only on overdue payment
+due-cells — now sits next to every action condition, in the tab it belongs to:
+- **DATES ▸ Completion** — `late` (should be completed)
+- **SHIPMENTS ▸ Shipment/FOB** — `production` (should have shipped) + `unassigned_shipment`
+- **SHIPMENTS ▸ Pre-shipment docs** — `preship`
+- **CLIENT/FBA ▸ Supplier approval** — `dtc_not_approved`
+- **MASTER DATA ▸ Supplier confirmation** — `po_not_approved`
+
+Each marker is gated on its `PO_ACTCOND`, so it shows exactly when the badge counts it, and snoozing
+it silently drops the PO-ref badge, the tab count and the ACTION ITEMS filter (v25.387 machinery),
+while still showing "Snoozed". "Show snoozed" brings them back.
+
 ## v25.387 - Snooze now clears the PAYMENTS tab count too
 
 A snoozed payment (e.g. the completion payment on PO-1700649) cleared the PO-ref badge and the
