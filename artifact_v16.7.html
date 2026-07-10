@@ -935,6 +935,7 @@ const SKUM=_SKU_RAW.p||{}; // SKU master: {sku: {n,s,c,ti,cs,av,disc,lch,inv,oo}
 })();
 const SKUS=_SKU_RAW.s||{}; // SKU sales: {"SKU|wh": {"YYYY_MM": units}}
 const SKUI=_SKU_RAW.i||_SKU_RAW.inbound||{}; // SKU inbound: {"SKU|wh": {qty, eta} | array}
+const SKUOI=_SKU_RAW.oi||{}; // open POs not yet in the inbound feed (on-order, not shipped): {"SKU|wh": [{ref,qty,status}]}
 const INPUT_FLD_MAP={
   "2026_06":"fldncBaho6WeW5KGN","2026_07":"fld83GjApy854rA2h","2026_08":"fldXsCw7OgvGoHksW",
   "2026_09":"flditZfNyFvUPmCMO","2026_10":"fldmnvLYW19dazKmM","2026_11":"fldUYw8RjhrssZNqX",
@@ -1105,9 +1106,12 @@ DATA=(DATA||[]).filter(function(r){
       md.inb=[];
       [wh3,whF].forEach(function(wh){
         if(!wh)return;
-        var v=SKUI[sku+'|'+wh];if(!v)return;
-        var arr=Array.isArray(v)?v:[v];
-        arr.forEach(function(s){md.inb.push({ref:s.ref||'',qty:s.qty||0,eta:s.eta||null,type:s.type||'supplier_china',wh:wh});});
+        var v=SKUI[sku+'|'+wh];
+        if(v){ var arr=Array.isArray(v)?v:[v];
+          arr.forEach(function(s){md.inb.push({ref:s.ref||'',qty:s.qty||0,eta:s.eta||null,type:s.type||'supplier_china',wh:wh});}); }
+        // open POs not yet shipped/in the inbound feed — counted in On Order, shown here so the list reconciles
+        var op=SKUOI[sku+'|'+wh];
+        if(op){ (Array.isArray(op)?op:[op]).forEach(function(s){md.inb.push({ref:s.ref||'',qty:s.qty||0,eta:null,type:'open_po',status:s.status||'',wh:wh});}); }
       });
       // demand and pka are left alone — buildLiveDemand() rebuilds demand from FC_OUTPUTS
       // and the cascade. mtd_<mon> is left alone (will be 0 for current month until the
@@ -2113,7 +2117,10 @@ function rpc(){
   let cards='<div class="scs">';
   if(is3)cards+=card('SOH 3PL',fmt(md.i3),`target ${md.t3}wk`,md.i3<0?'warn':'');
   if(hasFBA)cards+=card('SOH FBA',fmt(md['if_']),`target ${md.tf}wk`,md['if_']<0?'warn':'');
-  if(is3)cards+=card('On Order',fmt(md.oo3||0),'confirmed POs','');
+  if(is3||hasFBA)cards+=card('On Order',fmt((md.oo3||0)+(md.oof||0)),fmt(md.oo3||0)+' 3PL · '+fmt(md.oof||0)+' FBA','');
+  // Open POs counted in On Order but not yet in the inbound feed (no ETA) — surfaced so the inbound line items reconcile with On Order.
+  (function(){ var op=(md.inb||[]).filter(function(x){return x.type==='open_po';}); var t=op.reduce(function(a,x){return a+(x.qty||0);},0);
+    if(t>0)cards+=card('On order · not shipped',fmt(t),op.map(function(x){return (x.ref||'')+(x.qty?' '+fn(x.qty):'');}).slice(0,3).join(' · ')+(op.length>3?' +'+(op.length-3):''),'warn'); })();
   if(b3>0)cards+=card('Buy 3PL',fmt(b3),BUY_LBL,'blue');
   if(b3u>0){
     // Find urgent details from project to get suggested lead time + danger month

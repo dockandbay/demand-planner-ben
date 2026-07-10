@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.384';
+const APP_VERSION = 'v25.385';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -167,7 +167,7 @@ async function buildFC_OUTPUTS() {
 // av (channel-availability string e.g. "dfb") derived from v_product_availability;
 // oo (on-order) derived from outstanding inbound — both fill gaps the baked snapshot lacked.
 async function buildSKURAW() {
-  const [prods, pcs, inv, avail, oo, sales, inbound] = await Promise.all([
+  const [prods, pcs, inv, avail, oo, sales, inbound, openpo] = await Promise.all([
     pool.query(`SELECT sku, product_name n, subcategory s, category c, market_tier ti, core_seasonal cs
                 FROM planner.products WHERE in_planning_scope`),
     pool.query(`SELECT sku, lower(country) co,
@@ -205,6 +205,19 @@ async function buildSKURAW() {
                        to_char(estimated_delivery_date,'YYYY-MM-DD') eta, source_type type
                 FROM planner.inbound_shipments WHERE coalesce(received_quantity,0) < quantity
                 ORDER BY estimated_delivery_date`),
+    // Open POs counted in on-order but NOT yet in the inbound feed — shown as "on order / not shipped" line items
+    // so the PLAN inbound list reconciles with the on-order total. Same warehouse mapping + dedup as the oo query.
+    pool.query(`SELECT l.sku,
+                  lower(coalesce(nullif(po.country_code,''), b.country_code)) || '_' ||
+                    (CASE WHEN po.branch ILIKE '%fba%' THEN 'fba' ELSE '3pl' END) wh,
+                  po.po ref, l.qty::int qty, coalesce(po.status,'') status
+                FROM planner.purchase_order_lines l
+                JOIN planner.purchase_orders po ON po.po = l.po
+                LEFT JOIN planner.branches b ON b.name = po.branch
+                WHERE coalesce(l.qty,0) > 0
+                  AND coalesce(po.status,'') NOT ILIKE '%complete%'
+                  AND coalesce(nullif(po.country_code,''), b.country_code) IN ('UK','US','EU','AU','CA')
+                  AND NOT EXISTS (SELECT 1 FROM planner.inbound_shipments i WHERE i.reference = po.po)`),
   ]);
   const p = {};
   for (const r of prods.rows)
@@ -226,7 +239,14 @@ async function buildSKURAW() {
     const k = r.sku + '|' + r.wh;
     (i[k] || (i[k] = [])).push({ ref: r.ref || '', qty: r.qty || 0, eta: r.eta || null, type: r.type || 'supplier_china' });
   }
-  return { p, s, i };
+  // Open POs not yet in the inbound feed — same key shape as `i`, tagged so the UI can label them "on order".
+  const oi = {};
+  for (const r of openpo.rows) {
+    if (!r.wh) continue;
+    const k = r.sku + '|' + r.wh;
+    (oi[k] || (oi[k] = [])).push({ ref: r.ref || '', qty: r.qty || 0, eta: null, type: 'open_po', status: r.status || '' });
+  }
+  return { p, s, i, oi };
 }
 
 // Category metadata: {category:{a:active, g:grouping}}

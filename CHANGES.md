@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.385 - Buy plan on-order: reconcile the PLAN detail with the grid
+
+Not a calc bug — the three figures were three views. Made the PLAN detail reconcile:
+- **On Order card now shows the total** (3PL + FBA) with the split as its subtitle (e.g. "5,283 3PL · 960
+  FBA" = 6,243), matching the grid (was showing 3PL-only).
+- **Open POs counted in on-order but not yet in the inbound feed** (no inbound_shipments record, so no ETA)
+  now surface as an **"On order · not shipped"** card with the PO refs — so the inbound line items reconcile
+  with On Order (inbound + not-shipped = total). Server injects these as `_SKU_RAW.oi` (same dedup/mapping as
+  the on-order calc); artifact reads `SKUOI`.
+
 ## v25.384 - Snooze polish: fix "today", silent in-place update, Ⓐ stays as "Snoozed"
 
 - Fixed `today is not defined` on snooze (`poActSnoozed` now computes the date itself).
