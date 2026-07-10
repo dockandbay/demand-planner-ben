@@ -1836,7 +1836,15 @@
       else if(/fba|awd/i.test(_br)){ if(_dc.indexOf('carton_barcode')<0) ship.push('Carton barcodes'+_late+', not uploaded'); if(_dc.indexOf('pallet_barcode')<0) ship.push('Pallet barcodes'+_late+', not uploaded'); }
       else if(/ifulfillment/i.test(_br)){ if(_dc.indexOf('idn_pallet_label')<0) ship.push('IDN pallet labels'+_late+', not uploaded'); }
     }
-    return { pay:pay, dates:dates, client:[], landed:landed, timeline:timeline, oplan:oplan, ship:ship, all:pay.concat(dates).concat(landed).concat(timeline).concat(oplan).concat(ship) }; }
+    var client=[];
+    // Mirror the red-badge action conditions onto their detail sub-tabs (snooze-aware) so the tabs light up
+    // consistently with the PO-ref badge count. Payments are already covered by pay[]; preship already in ship[].
+    var _mirrorSkip={payment_overdue:1,unpaid_payment:1,preship:1};
+    poActionsAll(r).forEach(function(k){ if(_mirrorSkip[k])return; if(!_poShowSnoozed && poActSnoozed(r.po,k))return;
+      var cat=PO_ACT_TAB[k], lbl=PO_ACT_LABEL[k]||k;
+      var arr=(cat==='pay'?pay:cat==='dates'?dates:cat==='shipments'?ship:cat==='client'?client:null);
+      if(arr && arr.indexOf(lbl)<0) arr.push(lbl); });
+    return { pay:pay, dates:dates, client:client, landed:landed, timeline:timeline, oplan:oplan, ship:ship, all:pay.concat(dates).concat(client).concat(landed).concat(timeline).concat(oplan).concat(ship) }; }
   function payPanel(r,d){ if(!r)return '';
     var ep='/api/supply/po/'+encodeURIComponent(r.po);
     var bal1=Number(r.balance_1_amount), owe=Number(r.balance_owing)||0;

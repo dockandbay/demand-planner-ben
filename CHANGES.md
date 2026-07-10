@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.381 - Fix: PO-ref badge count now matches the detail sub-tabs
+
+The red PO-ref badge counted `PO_ACTCOND` conditions (e.g. late / should-have-shipped / DtC-not-approved)
+that the detail's `poExceptions` sub-tabs never surfaced — so a PO could show "(3)" with empty tabs and no
+red highlighting. `poExceptions` now **mirrors the badge conditions onto their sub-tabs** (DATES / SHIPMENTS /
+CLICK-FBA / CLIENT), snooze-aware, so the tab badges light up consistently with the count. (Snooze the items
+by clicking the red badge → popover.)
+
 ## v25.380 - Snooze actions part 2: PO-grid badges + ACTION ITEMS counter are snooze-aware
 
 - Clicking a PO's **red action badge** now opens a **popover** listing each action item with **1 / 3 / 7-day
