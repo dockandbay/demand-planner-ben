@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.409 - Escalate on shipment + sample timelines
+
+Extended the escalate button (v25.407) to the **shipment** and **sample** timelines, on both the main grid
+(internal -> supplier's portal users) and the supplier portal (supplier -> routed internal list). Server
+routing refined: a supplier-escalated **shipment** now resolves its master PO's branch for Direct-to-Client
+routing; a **sample** routes to the **Product development** list when its `purpose` includes `product`
+(the 5 purposes are sales / product / photography / marketing / operations), else the **Samples** list.
+No migration.
+
 ## v25.408 - Sales Planning: narrower month selector
 
 The month dropdown on SCENARIO > Sales Planning is capped at 20ch wide (was min-width 120px).

@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.408';
+const APP_VERSION = 'v25.409';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2785,10 +2785,14 @@ async function escalateCore({ initiator, kind, ref, message, user, supplierId })
   } else {
     audience = 'planner'; let key = 'escalation_supply_chain';
     if (kind === 'sample') {
-      const purpose = (await pool.query(`SELECT coalesce(purpose::text,'') p FROM planner.sample_requests WHERE ref=$1`, [ref])).rows[0]?.p || '';
-      key = /product\s*develop/i.test(purpose) ? 'escalation_product_dev' : 'escalation_samples';
+      // sample "purposes" (multi-select): sales, product, photography, marketing, operations.
+      // 'product' = product development → product-dev list; anything else → samples list.
+      const hasProduct = (await pool.query(`SELECT ('product' = ANY(coalesce(purpose,'{}'::text[]))) x FROM planner.sample_requests WHERE ref=$1`, [ref])).rows[0]?.x;
+      key = hasProduct ? 'escalation_product_dev' : 'escalation_samples';
     } else {
-      const branch = (await pool.query(`SELECT coalesce(branch,'') b FROM planner.purchase_orders WHERE po=$1`, [ref])).rows[0]?.b || '';
+      const branch = kind === 'shipment'
+        ? (await pool.query(`SELECT coalesce(po.branch,'') b FROM planner.shipments sh JOIN planner.purchase_orders po ON po.po=coalesce(sh.master_po,sh.shipment_ref) WHERE sh.shipment_ref=$1`, [ref])).rows[0]?.b || ''
+        : (await pool.query(`SELECT coalesce(branch,'') b FROM planner.purchase_orders WHERE po=$1`, [ref])).rows[0]?.b || '';
       if (/direct to client|jlew|next/i.test(branch)) key = 'escalation_dtc';
     }
     const s = (await pool.query(`SELECT value FROM planner.app_settings WHERE key=$1`, [key])).rows[0];
