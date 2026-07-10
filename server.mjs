@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.398';
+const APP_VERSION = 'v25.399';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1526,7 +1526,12 @@ app.get('/api/supply/:section', async (req, res) => {
             -- DELIVERED/COMPLETE it's no longer an actionable late exception, so exclude those statuses.
             (coalesce(status,'') NOT ILIKE '%complete%' AND coalesce(status,'') NOT ILIKE '%shipping%'
                AND coalesce(status,'') NOT ILIKE '%deliver%' AND coalesce(m_delivery, eff_delivery) < current_date) is_late,
-            (coalesce(status,'') NOT ILIKE '%complete%' AND coalesce(shipment_ref,'')='') unassigned_shipment,
+            -- unassigned shipment: not complete, no shipment, and NOT FOB. FOB (mirrors isFOBdest) = a
+            -- manufacturing branch OR a non-major destination country → those never take a shipment, so
+            -- they must not raise an "unassigned shipment" action.
+            (coalesce(status,'') NOT ILIKE '%complete%' AND coalesce(shipment_ref,'')=''
+               AND coalesce(branch,'') NOT ILIKE '%manufactur%'
+               AND upper(coalesce(nullif(country_code,''), branch_country, '')) IN ('UK','US','EU','AU','CA')) unassigned_shipment,
             (coalesce(status,'') NOT ILIKE '%complete%' AND (
                (start_production < current_date AND pay_start_deposit_assigned IS NULL AND coalesce(deposit_ref,'')='' AND start_calc > 0)
                OR (eff_prod_end < current_date AND pay_completion_assigned IS NULL AND completion_calc > 0)

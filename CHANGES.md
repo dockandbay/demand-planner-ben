@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.399 - FOB POs no longer raise an "unassigned shipment" action
+
+`unassigned_shipment` was `status not complete AND no shipment_ref` — with no FOB exclusion, so FOB POs
+(which never take a shipment) were wrongly flagged (e.g. live PO-1700673, branch Manufacturing, country
+OT). Now mirrors `isFOBdest`: the flag is suppressed when the branch is Manufacturing OR the destination
+country isn't UK/US/AU/EU/CA. Query-only, no migration.
+
 ## v25.398 - CONFIG in the mobile menu
 
 CONFIG was missing from the mobile hamburger drawer: the drawer builder kept only `.view-toggle`
