@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.391 - "Late — should have shipped" action moved to DATES
+
+`production` ("late — should have shipped") is ship-date-driven, so its inline Ⓐ + snooze now sits on
+the **DATES** tab next to the Ship date (was on SHIPMENTS). SHIPMENTS keeps only `unassigned_shipment`.
+Also flipped `PO_ACT_TAB.production` shipments→dates so the tab badge count, the PO-ref badge deep-link
+and the marker all agree.
+
 ## v25.390 - Migration 109 null-safety + sandbox product refresh
 
 - **Migration 109 fix:** the derived-scope trigger + backfill now wrap the expression in

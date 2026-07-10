@@ -973,7 +973,7 @@
         +'<input type="file" class="shdoc-file" data-po="'+esc(po)+'" data-category="'+cat+'" style="font-size:11px"> <button class="save-btn shdoc-up" data-po="'+esc(po)+'" data-category="'+cat+'">⬆ Upload</button>'); }
     return '<div class="sect-h">Shipments <span class="mut tiny">— assign a shipment or mark FOB, ASN numbers, Ships With Supplier pallet labels</span></div>'
       +lookupDatalists()+'<div class="cli-form" style="max-width:620px">'
-      +row('Shipment / FOB',ship+(PO_ACTCOND.production(r)?actMark(po,'production'):'')+(PO_ACTCOND.unassigned_shipment(r)?actMark(po,'unassigned_shipment'):''))
+      +row('Shipment / FOB',ship+(PO_ACTCOND.unassigned_shipment(r)?actMark(po,'unassigned_shipment'):''))
       +(PO_ACTCOND.preship(r)?row('Pre-shipment docs',actMark(po,'preship')):'')
       +((r.flex_id||r.flexport_reference)?row('Flexport <span class="mut tiny">(reference &amp; link)</span>',(function(){ var fid=r.flex_id||r.flexport_reference, u=flexUrl(fid); return u?'<a href="'+u+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;white-space:nowrap">'+esc(fid)+' ↗</a>':esc(fid); })()):'')
       +(isCogh?row('ASN numbers <span class="mut tiny">(1 per pallet, comma-separated)</span>',(r.prod_end&&r.prod_end<today&&r.progress!=='complete'&&!String(r.asn_numbers||'').trim()?'<div style="color:#b91c1c;font-weight:700;margin-bottom:4px">⚠ ASN pallet labels overdue — production ended '+fd(r.prod_end)+'</div>':'')+'<input class="fci txtin" data-ep="'+ep+'" data-field="asn_numbers" value="'+esc(r.asn_numbers||'')+'" placeholder="ASN1, ASN2…" style="width:280px;text-align:left"> <button class="save-btn" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd" title="download A4 pallet labels — one page per ASN (save your ASN entry first)" onclick="window.open(\'/api/asn-labels/\'+encodeURIComponent(\''+esc(po)+'\'))">⤓ ASN PALLET LABELS</button>'):'')
@@ -1149,7 +1149,7 @@
       return false; }};
   // PO-row action badge: label + which PO detail sub-tab each condition deep-links to.
   var PO_ACT_LABEL={payment_overdue:'Payment overdue',unpaid_payment:'Unpaid payment',late:'Late — should be completed',unassigned_shipment:'Unassigned shipment',production:'Late — should have shipped',dtc_not_approved:'Direct-to-Client not approved',po_not_approved:'Not confirmed by supplier',preship:'Pre-shipment documents overdue'};
-  var PO_ACT_TAB={payment_overdue:'pay',unpaid_payment:'pay',late:'dates',unassigned_shipment:'shipments',production:'shipments',dtc_not_approved:'client',po_not_approved:'dates',preship:'shipments'};
+  var PO_ACT_TAB={payment_overdue:'pay',unpaid_payment:'pay',late:'dates',unassigned_shipment:'shipments',production:'dates',dtc_not_approved:'client',po_not_approved:'dates',preship:'shipments'};
   // ── PO-grid action-item snooze ── keyed poact|<po>|<condition> in supply_action_state (shared store).
   var _poActState={}, _poActStateLoaded=false, _poShowSnoozed=false;
   function poActKey(po,cond){ return 'poact|'+po+'|'+cond; }
@@ -2083,7 +2083,7 @@
         return '<tr'+(pend?' style="background:#fff7ed"':'')+'><td class="l">Supplier completion date <span class="mut tiny">(submitted in portal)</span></td>'
           +'<td class="l">'+(sc.value?'<b>'+fd(sc.value)+'</b>':'—')+' '+(pend?'<span class="tool-badge bg-amber">awaiting approval</span>':sc.status==='applied'?'<span class="tool-badge bg-green">applied to production end</span>':'<span class="tool-badge bg-neutral">rejected</span>')+'</td>'
           +'<td class="l" style="white-space:nowrap">'+(pend?'<button class="save-btn inv-approve" data-id="'+sc.id+'" title="apply as the production-end date">Approve → production end</button> <button class="save-btn light inv-reject" data-id="'+sc.id+'">Reject</button>':sc.status==='applied'?'<span class="src fx">supplier portal</span>':'<span class="mut tiny">supplier portal · '+esc(sc.submitted_at||'')+'</span>')+'</td></tr>'; })()
-      +'<tr><td class="l">Ship</td><td class="l"><b>'+(r.ship?fd(r.ship):'—')+'</b></td><td class="l">'+srcLbl(r.ship_src,r.delivery_master_po,r.shipment)+'</td></tr>'
+      +'<tr><td class="l">Ship</td><td class="l"><b>'+(r.ship?fd(r.ship):'—')+'</b></td><td class="l">'+srcLbl(r.ship_src,r.delivery_master_po,r.shipment)+(PO_ACTCOND.production(r)?actMark(r.po,'production'):'')+'</td></tr>'
       +'<tr><td class="l">Arrival / Delivery</td><td class="l"><b>'+(r.delivery?fd(r.delivery):'—')+'</b></td><td class="l">'+srcLbl(r.delivery_src,r.delivery_master_po,r.shipment)+'</td></tr>'
       +'<tr><td class="l"><b>Completion</b> <span class="mut tiny">delivery +7 · Fulfil/Cin7</span></td><td class="l"><b>'+(r.checkin?fd(r.checkin):'—')+'</b></td><td class="l mut tiny">calculated'+(PO_ACTCOND.late(r)?actMark(r.po,'late'):'')+'</td></tr>'
       +'</tbody></table></div>'
