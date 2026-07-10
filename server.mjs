@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.405';
+const APP_VERSION = 'v25.406';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2699,6 +2699,36 @@ app.post('/api/supply/portal-magic/:id', async (req, res) => {
     await pool.query(`INSERT INTO planner.portal_magic_tokens (token, email, expires_at) VALUES ($1,$2, now() + interval '7 days')`, [token, u.email]);
     const base = (req.headers['x-forwarded-proto'] ? req.headers['x-forwarded-proto'] + '://' : 'http://') + (req.headers['x-forwarded-host'] || req.headers.host);
     res.json({ email: u.email, url: base + '/portal?token=' + token, expires_days: 7 });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Bulk signals for the CONFIG ▸ Portal Users open-action counts: unread internal (D&B) notes per PO +
+// all supplier submissions. Combined client-side with /api/supply/purchase-orders + samples to compute
+// each supplier's open actions (same conditions the portal shows the supplier).
+app.get('/api/supply/portal-signals', async (req, res) => {
+  try {
+    const unread = (await pool.query(`SELECT po, count(*)::int n FROM planner.supplier_notes WHERE author_kind='internal' AND read_at IS NULL GROUP BY po`)).rows;
+    const subs = (await pool.query(`SELECT po, kind, coalesce(status,'') status, coalesce(value,'') value FROM planner.supplier_submissions`)).rows;
+    res.json({ unread, subs });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Send an open-actions reminder email to a supplier's registered portal address(es) — LIVE via Resend.
+// Recipients are derived server-side from ACTIVE portal users for the supplier_id (the client cannot email
+// an arbitrary address). Sandbox has no RESEND_API_KEY → nothing is sent (safe to test).
+app.post('/api/supply/portal-remind', async (req, res) => {
+  const b = req.body || {}, sid = b.supplier_id;
+  if (!sid) return res.status(400).json({ error: 'supplier_id required' });
+  try {
+    const emails = (await pool.query(`SELECT DISTINCT lower(email) email FROM planner.supplier_portal_users WHERE supplier_id=$1 AND active=true AND coalesce(email,'')<>''`, [sid])).rows.map(r => r.email);
+    if (!emails.length) return res.status(400).json({ error: 'no active portal email for this supplier' });
+    const subject = String(b.subject || 'Dock & Bay — open items on your supplier portal').slice(0, 200);
+    const html = b.html || '<p>Please log in to the supplier portal and action your open items.</p>';
+    if (!process.env.RESEND_API_KEY) { console.log('[portal remind] no RESEND_API_KEY — would email ' + emails.join(', ')); return res.json({ ok: true, sent: 0, emails, sandbox: true }); }
+    const r = await fetch('https://api.resend.com/emails', { method: 'POST',
+      headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', to: emails, subject, html }) });
+    if (!r.ok) { const t = await r.text().catch(() => ''); return res.status(502).json({ error: 'email send failed: ' + t.slice(0, 200) }); }
+    res.json({ ok: true, sent: emails.length, emails });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

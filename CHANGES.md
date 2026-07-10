@@ -3,6 +3,23 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.406 - CONFIG ▸ Portal Users: per-supplier open-action counter + reminder email
+
+Each portal-user row now shows an **Open actions** count for that supplier — the same items the supplier
+sees in their portal (PO: submit invoice, enter tracking+freight, unread D&B messages, crossdock qty,
+confirm order, completion date, production status, DtC approval; Samples: accept, expected date, status).
+Computed client-side from `/api/supply/purchase-orders` + new `/api/supply/portal-signals` (bulk unread
+notes + submissions) + crossdock + samples, so it matches the portal badges.
+
+Clicking the count opens a **drawer** listing every open action (grouped PO / Sample), with a **✉ Send
+reminder email** button — emails the supplier's registered portal address(es) **live via Resend** (new
+`POST /api/supply/portal-remind`; recipients derived server-side from active portal users, so an arbitrary
+address can't be targeted). Confirm dialog before sending. **Sandbox has no `RESEND_API_KEY` → nothing is
+sent there.** No migration.
+
+Note: shipment-plan actions currently surface via their master PO (completion/notes); shipment-note-level
+actions are a fast-follow.
+
 ## v25.405 - Forecast cell notes (double-click to add)
 
 Per-cell notes on the demand PLAN grid forecast cells (SKU + sub-category rows). **Double-click** a
