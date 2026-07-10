@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.408 - Sales Planning: narrower month selector
+
+The month dropdown on SCENARIO > Sales Planning is capped at 20ch wide (was min-width 120px).
+
 ## v25.407 - Escalate a timeline message by email + CONFIG ▸ General Settings
 
 - **Escalate button** on the **most recent** timeline note, on both the main-grid PO timeline and the
