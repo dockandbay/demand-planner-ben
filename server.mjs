@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.400';
+const APP_VERSION = 'v25.401';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -4393,9 +4393,10 @@ app.post('/api/supply/shipment/:ref/delete', async (req, res) => {
 // planner.products.inventory_*. AWD (inventory_us_awd) is a separate US pool, added on below.
 // SALES PLANNING — per SKU for a country + channel (3pl|fba) + month: current on-hand, projected stock at
 // the start of that month, weeks of cover at that date, and whether it's discontinued by then. Numbers come
-// from the latest committed SKU-level forecast run. FBA pools FBA + AWD (US) + 3PL (3PL is transferable to
-// FBA), with the components shown. Projected = on-hand + inbound landing before the month − forecast
-// sell-through before the month. Cover = projected ÷ (selected month's forecast ÷ 4.33).
+// from the latest committed SKU-level forecast run. FBA cover pool = FBA + AWD (US); 3PL is returned as a
+// separate transferable figure (shown as its own column, NOT in the FBA cover math). Projected = pool
+// on-hand + inbound landing before the month − forecast sell-through before the month. Cover = projected
+// ÷ (selected month's forecast ÷ 4.33).
 app.post('/api/scenario/sales-planning', async (req, res) => {
   const b = req.body || {};
   const country = String(b.country || '').toUpperCase();
@@ -4404,7 +4405,7 @@ app.post('/api/scenario/sales-planning', async (req, res) => {
   if (!/^[A-Z]{2}$/.test(country) || !/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'country + month (YYYY-MM) required' });
   const co = country.toLowerCase(), monthStart = month + '-01', isUS = country === 'US';
   const wh3 = co + '_3pl', whF = co + '_fba';
-  const pools = channel === 'fba' ? [whF, wh3] : [wh3];       // FBA view also pools transferable 3PL stock
+  const pools = channel === 'fba' ? [whF] : [wh3];            // projection pool: FBA (+AWD) for fba, 3PL for 3pl. 3PL is shown as a separate transferable column on the FBA report, not in the cover math.
   const fchs = channel === 'fba' ? ['FBA'] : ['DTC', 'B2B'];  // sales channels the warehouse fulfils
   const discCol = country === 'AU' ? 'discontinue_date_au_final' : country === 'CA' ? 'discontinue_date_ca' : 'discontinue_date_final';
   try {
@@ -4447,7 +4448,7 @@ app.post('/api/scenario/sales-planning', async (req, res) => {
     const rows = availSkus.map(sku => {
       const m = meta[sku] || {}, iv = inv[sku] || {}, f = fc[sku] || { dem_before: 0, dem_month: 0 };
       const oh3 = iv[wh3] || 0, ohF = channel === 'fba' ? (iv[whF] || 0) : 0, ohAwd = (channel === 'fba' && isUS) ? (m.awd || 0) : 0;
-      const ohTotal = channel === 'fba' ? (ohF + ohAwd + oh3) : oh3;
+      const ohTotal = channel === 'fba' ? (ohF + ohAwd) : oh3;   // FBA cover pool = FBA + AWD; 3PL is separate/transferable
       const inb = inbBefore[sku] || 0, demB = Number(f.dem_before) || 0, demM = Number(f.dem_month) || 0;
       const projected = ohTotal + inb - demB;
       const rate = demM / 4.33;   // weekly sell-through in the selected month

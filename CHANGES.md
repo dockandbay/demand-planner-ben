@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.401 - Sales Planning: FBA and 3PL as separate columns
+
+Per Ben: on the FBA report, FBA and 3PL are now distinct columns. FBA cover pool = **FBA + AWD (US)**;
+**3PL is a separate "(transfer)" column** — stock that could be moved to FBA, not included in the cover
+math. Projected/weeks now reflect the true FBA position (can go negative = FBA shortfall).
+
 ## v25.400 - New SCENARIO report: Sales Planning
 
 New SCENARIO ▸ SALES PLANNING tab. For a chosen country + channel (3PL/FBA) + month, per SKU:
