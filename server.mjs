@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.410';
+const APP_VERSION = 'v25.411';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3820,6 +3820,23 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
               ((SELECT plc.final_cost FROM planner.portal_line_costs plc
                  WHERE plc.po=l.po AND plc.sku=l.sku AND plc.confirmed_at IS NOT NULL AND plc.final_cost IS NOT NULL) IS NOT NULL) approved_price
        FROM planner.purchase_order_lines l WHERE l.po=$1 AND coalesce(l.qty,0)>0 ORDER BY l.sku`, [po])).rows;
+    // Crossdock SKUs carried by the shipment this PO is master of upload to ERP at $0 ONCE the master is
+    // shipped (they're physical contents of the master shipment, not a cost to it). qty = supplier-entered
+    // shipped (crossdock_shipments); only lines with qty>0 are pushed.
+    {
+      const st = (await pool.query(`SELECT coalesce(status,'') s FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0];
+      if (st && /shipped|shipping|deliver|complete/i.test(st.s)) {
+        const xd = (await pool.query(`
+          SELECT trim(s.sku) sku, coalesce(cs.qty,0)::int qty
+          FROM planner.purchase_orders po2
+          CROSS JOIN LATERAL unnest(string_to_array(coalesce(po2.crossdock_skus,''),',')) AS s(sku)
+          LEFT JOIN planner.crossdock_shipments cs ON cs.po=po2.po AND cs.sku=trim(s.sku)
+          WHERE po2.shipment_ref IN (SELECT shipment_ref FROM planner.shipments WHERE master_po=$1)
+            AND trim(s.sku)<>''`, [po])).rows;
+        const have = new Set(lines.map(l => l.sku));
+        xd.forEach(x => { if (x.sku && x.qty > 0 && !have.has(x.sku)) { lines.push({ sku: x.sku, qty: x.qty, price: 0, approved_price: true, crossdock: true }); have.add(x.sku); } });
+      }
+    }
     if (!lines.length) return res.status(400).json({ error: 'No order-plan lines with qty for ' + po + '.' });
     let mode = cin7Id ? 'updated' : 'created';
     const auth = cin7Auth();
@@ -4374,8 +4391,19 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
       pool.query(`SELECT coalesce(p.status,'') ILIKE '%complete%' AS is_complete
                   FROM planner.purchase_orders p WHERE p.po=$1`, [po]).catch(() => ({ rows: [] })),
     ]);
+    // Crossdock SKUs across the shipment THIS PO is the master of (every PO on the shipment, incl. this one),
+    // with supplier-entered shipped qty -> shown as derived rows in the master PO's ORDER PLAN.
+    const xdMaster = await pool.query(`
+      SELECT po.po, coalesce(po.supplier_name,'') supplier, coalesce(po.client,'') client,
+             coalesce(po.sales_order_ref,'') sales_order_ref, trim(s.sku) sku, coalesce(cs.qty,0)::int qty
+      FROM planner.purchase_orders po
+      CROSS JOIN LATERAL unnest(string_to_array(coalesce(po.crossdock_skus,''),',')) AS s(sku)
+      LEFT JOIN planner.crossdock_shipments cs ON cs.po=po.po AND cs.sku=trim(s.sku)
+      WHERE po.shipment_ref IN (SELECT shipment_ref FROM planner.shipments WHERE master_po=$1)
+        AND trim(s.sku)<>'' ORDER BY po.po, sku`, [po]).catch(() => ({ rows: [] }));
     const lc = {}; lineCosts.rows.forEach(r => { lc[r.sku] = r; });
     res.json({ lines: lines.rows, deposit: deposit.rows, payments: payments.rows, flexport: flexport.rows,
+      crossdock_lines: xdMaster.rows,
       sup_invoice: supInv.rows[0] || null,
       sup_docs: supDocs.rows.filter(x => x.category !== 'client'),
       client_docs: supDocs.rows.filter(x => x.category === 'client'),

@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.411 - Crossdock SKUs flow into the master PO's order plan (+ $0 + ERP)
+
+When a master-PO shipment has linked POs carrying crossdock SKUs, those crossdock SKUs now appear in the
+**master PO's ORDER PLAN** as a derived "Crossdock SKUs on this shipment" sub-table (every crossdock SKU
+across the shipment, qty = supplier-entered `crossdock_shipments`, **cost $0** to the master; source PO +
+client shown). `po-detail` returns `crossdock_lines` (only when the PO is a shipment master).
+
+They're treated as an **ERP deviation**: once the master PO is **shipped** (status shipped/shipping/deliver/
+complete), the order plan flags them as an exception, and the **Cin7 push includes them at $0** (appended to
+`/api/supply/po/:po/cin7-lines`, qty>0 only). Derived display; no PO-line data write.
+
 ## v25.410 - DB streamlining: drop unused tables (migration 114)
 
 Live audit found dead/orphan tables. **Migration 114** (all DROP IF EXISTS) removes:

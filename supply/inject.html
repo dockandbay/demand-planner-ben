@@ -2132,7 +2132,7 @@
   function erpDevLines(lines,erpMeta){ erpMeta=erpMeta||{}; if(erpMeta.complete)return [];
     return (lines||[]).filter(function(l){ return l.qty_pending; }); }
   var OP_EDIT=null;   // po currently in ORDER PLAN edit mode (qty editable + add SKUs); null = view mode
-  function orderPlanPanel(po,lines,costs,addc,erpMeta){ costs=costs||{}; addc=addc||[]; erpMeta=erpMeta||{};
+  function orderPlanPanel(po,lines,costs,addc,erpMeta,xdLines){ costs=costs||{}; addc=addc||[]; erpMeta=erpMeta||{}; xdLines=xdLines||[];
     var editing=(OP_EDIT===po);
     var totQ=0, totC=0, lineSkus={}, unconf=0; (lines||[]).forEach(function(l){lineSkus[l.sku]=1;});
     function row(sku,orderQty,est,lcr,added){ lcr=lcr||{};
@@ -2198,6 +2198,13 @@
       +addRowHtml
       +'<tr class="op-total" style="font-weight:700;border-top:2px solid #999"><td class="l">TOTAL</td><td style="text-align:right" class="op-totq">'+units(totQ)+'</td><td></td><td></td><td style="text-align:right">FINAL</td><td style="text-align:right" class="op-totc">$'+money(totC)+'</td><td></td></tr>'
       +'</tbody></table></div>'
+      +(function(){ if(!xdLines.length)return ''; var tot=xdLines.reduce(function(a,x){return a+(Number(x.qty)||0);},0);
+        var shipped=/shipped|shipping|deliver|complete/i.test(((poBy[po]||{}).status)||'');
+        var trs=xdLines.map(function(x){ return '<tr><td class="l"><b>'+esc(x.sku)+'</b> <span class="tool-badge bg-blue" style="font-size:8px">crossdock</span></td><td style="text-align:right">'+units(x.qty)+'</td><td style="text-align:right">$0.00</td><td class="l">'+esc(x.po||'')+'</td><td class="l">'+esc(x.client||x.supplier||'')+'</td></tr>'; }).join('');
+        return '<div class="sect-h" style="margin-top:10px">Crossdock SKUs on this shipment <span class="mut tiny">(carried by the POs linked to this master shipment; <b>$0 cost</b> to the master; qty = supplier-entered shipped)</span></div>'
+          +(shipped?'<div style="margin:4px 0 8px;padding:7px 11px;background:#fefce8;border:1px solid #eab308;border-radius:6px;font-size:12px;color:#854d0e"><b>⚠ ERP deviation:</b> these crossdock SKUs aren’t on the ERP PO — they upload to Cin7 at <b>$0</b> when you Push this (shipped) master PO.</div>':'<div class="mut tiny" style="margin:2px 0 6px">Uploads to Cin7 at $0 once this master PO is marked shipped.</div>')
+          +'<div class="tw" style="max-width:760px"><table style="width:max-content"><thead><tr><th class="l">SKU</th><th style="text-align:right">Qty</th><th style="text-align:right">Cost</th><th class="l">From PO</th><th class="l">Client / supplier</th></tr></thead><tbody>'+trs
+          +'<tr style="font-weight:700;border-top:1px solid #ccc"><td class="l">TOTAL</td><td style="text-align:right">'+units(tot)+'</td><td style="text-align:right">$0.00</td><td></td><td></td></tr></tbody></table></div>'; })()
       +(function(){ var addTot=0; var ar=addc.map(function(a){ var q=Number(a.qty)||0, pr=Number(a.price)||0, lt=q*pr; addTot+=lt;
           return '<tr><td class="l">'+esc(a.description||'')+'</td><td style="text-align:right">'+(a.qty!=null?units(a.qty):'')+'</td><td style="text-align:right">'+(a.price!=null?'$'+money(a.price):'')+'</td><td style="text-align:right">$'+money(lt)+'</td></tr>'; }).join('');
         var inv=totC+addTot;
@@ -2480,7 +2487,7 @@
     if(!p||typeof p==='string') return '<div class="count">No PO data.</div>';
     var erpMeta={complete:d.erp_complete};
     var erpN=erpDevLines(d.lines,erpMeta).length;   // ERP deviations (qty-only) → action badge on ORDER PLAN tab
-    var oplanH=orderPlanPanel(po,d.lines,d.line_costs,d.additional_costs,erpMeta);
+    var oplanH=orderPlanPanel(po,d.lines,d.line_costs,d.additional_costs,erpMeta,d.crossdock_lines);
     var timelineH=timelinePanel(po,d);
     var linkedH='<div class="sect-h">Linked records across tables</div>'+blk('Deposit',d.deposit)+blk('Payments',d.payments)+blk('Flexport',d.flexport);
     var masterH=poMasterPanel(po), shipH=poShipPanel(po,d);
