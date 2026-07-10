@@ -3,6 +3,20 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.403 - New PURCHASE ORDERS report: Crossdock
+
+New **CROSSDOCK** sub-tab under PURCHASE ORDERS. On-hand + inbound for every `CROSSDOCK%`/`PREORDER%` SKU
+across the four 3PL warehouses (UK/US/EU/AU), with:
+- **Attribution ("what is this stock?")** in priority: inbound→PO (client/sales-order) ▸ preorder
+  (ref/ship date) ▸ assigned crossdock PO (candidates by matching country / non-major-country routing).
+- **Unknown** rows (nothing explains the stock) flagged amber, with an editable **note** — auto-wiped once
+  that SKU's on-hand + inbound in the warehouse returns to 0 (shipped out). New table `crossdock_notes`
+  (migration 111).
+- **Crossdock assigned to open POs not yet showing inbound** listed separately (SKU / PO / client / sales
+  order / destination / shipped qty).
+
+New endpoints `GET /api/supply/crossdock-report`, `POST /api/supply/crossdock-note`. **Migration 111.**
+
 ## v25.402 - Sales Planning: slow-moving + recommended-for-clearance
 
 Added two flags to the Sales Planning report (per SKU, for the selected country+channel):

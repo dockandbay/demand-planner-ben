@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.402';
+const APP_VERSION = 'v25.403';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1039,6 +1039,74 @@ app.get('/api/supply/shipment-crossdock/:ref', async (req, res) => {
     LEFT JOIN planner.crossdock_shipments cs ON cs.po=po.po AND cs.sku=trim(s.sku)
     WHERE po.shipment_ref=$1 AND trim(s.sku)<>'' ORDER BY po.po, sku`, [req.params.ref])); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── CROSSDOCK report (PURCHASE ORDERS ▸ CROSSDOCK) — on-hand + inbound for every CROSSDOCK%/PREORDER% SKU
+// across the four 3PL warehouses, with an attempt to attribute each SKU's stock to a source
+// (inbound→PO ▸ preorder ▸ assigned crossdock PO), a list of crossdock assigned to open POs that isn't yet
+// showing inbound, and a manual note per warehouse×SKU for anything the app can't identify (auto-wiped once
+// that SKU's on-hand+inbound in the warehouse returns to 0).
+const XD_WH = ['uk_3pl', 'us_3pl', 'eu_3pl', 'au_3pl'];
+app.get('/api/supply/crossdock-report', async (req, res) => {
+  try {
+    const [invR, inbR, preR, poR, notesR] = await Promise.all([
+      pool.query(`SELECT sku, warehouse wh, available::int oh FROM planner.v_product_inventory
+                  WHERE warehouse = ANY($1) AND (sku ILIKE 'CROSSDOCK%' OR sku ILIKE 'PREORDER%') AND available<>0`, [XD_WH]),
+      pool.query(`SELECT i.sku, i.destination_warehouse wh, coalesce(i.reference,'') ref,
+                    (i.quantity-coalesce(i.received_quantity,0))::int qty, to_char(i.estimated_delivery_date,'YYYY-MM-DD') eta,
+                    coalesce(po.client,'') client, coalesce(po.sales_order_ref,'') so, (po.po IS NOT NULL) is_po
+                  FROM planner.inbound_shipments i
+                  LEFT JOIN planner.purchase_orders po ON po.po = i.reference
+                  WHERE i.destination_warehouse = ANY($1) AND (i.sku ILIKE 'CROSSDOCK%' OR i.sku ILIKE 'PREORDER%')
+                    AND coalesce(i.received_quantity,0) < i.quantity`, [XD_WH]),
+      pool.query(`SELECT coalesce(reference,'') ref, sku, warehouse wh, to_char(ship_date,'YYYY-MM-DD') ship_date, quantity::int qty
+                  FROM planner.preorders WHERE warehouse = ANY($1) AND (sku ILIKE 'CROSSDOCK%' OR sku ILIKE 'PREORDER%')`, [XD_WH]),
+      pool.query(`SELECT po.po, trim(s.sku) sku, upper(coalesce(nullif(po.country_code,''), b.country_code,'')) country,
+                    coalesce(po.client,'') client, coalesce(po.sales_order_ref,'') so, coalesce(cs.qty,0)::int shipped,
+                    EXISTS(SELECT 1 FROM planner.inbound_shipments i WHERE i.reference=po.po) has_inbound
+                  FROM planner.purchase_orders po
+                  LEFT JOIN planner.branches b ON b.name=po.branch
+                  CROSS JOIN LATERAL unnest(string_to_array(coalesce(po.crossdock_skus,''),',')) AS s(sku)
+                  LEFT JOIN planner.crossdock_shipments cs ON cs.po=po.po AND cs.sku=trim(s.sku)
+                  WHERE coalesce(po.status,'') NOT ILIKE '%complete%' AND trim(s.sku)<>''`),
+      pool.query(`SELECT warehouse wh, sku, coalesce(note,'') note, coalesce(updated_by,'') updated_by,
+                    to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at FROM planner.crossdock_notes`),
+    ]);
+    const byKey = {}, key = (wh, sku) => wh + '|' + sku;
+    const ensure = (wh, sku) => byKey[key(wh, sku)] || (byKey[key(wh, sku)] = { wh, sku, on_hand: 0, inbound: 0, sources: [] });
+    invR.rows.forEach(r => { ensure(r.wh, r.sku).on_hand += r.oh; });
+    inbR.rows.forEach(r => { const row = ensure(r.wh, r.sku); row.inbound += r.qty;
+      row.sources.push({ type: 'inbound', qty: r.qty, ref: r.ref, po: r.is_po ? r.ref : '', client: r.client, so: r.so, date: r.eta }); });
+    preR.rows.forEach(r => { const row = ensure(r.wh, r.sku); row.sources.push({ type: 'preorder', qty: r.qty, ref: r.ref, date: r.ship_date }); });
+    // crossdock PO assignments per SKU (candidates); warehouse match = same country, or a non-major country
+    // (OT / direct-to-client crossdock can route through any 3PL).
+    const majors = { UK: 1, US: 1, EU: 1, AU: 1, CA: 1 }, bySku = {};
+    poR.rows.forEach(r => { (bySku[r.sku] || (bySku[r.sku] = [])).push(r); });
+    Object.keys(byKey).forEach(k => { const row = byKey[k], whCo = row.wh.split('_')[0].toUpperCase();
+      (bySku[row.sku] || []).forEach(p => { if (p.country === whCo || !majors[p.country])
+        row.sources.push({ type: 'crossdock_po', qty: p.shipped, po: p.po, client: p.client, so: p.so }); }); });
+    const rows = Object.values(byKey).map(row => { row.unknown = row.sources.length === 0; return row; });
+    // notes: attach + auto-wipe any note whose (wh,sku) is no longer active (stock shipped out → on_hand+inbound=0)
+    const active = new Set(Object.keys(byKey)), noteMap = {};
+    notesR.rows.forEach(n => { noteMap[key(n.wh, n.sku)] = n; });
+    const stale = notesR.rows.filter(n => !active.has(key(n.wh, n.sku)));
+    if (stale.length) await pool.query(`DELETE FROM planner.crossdock_notes WHERE (warehouse,sku) IN (${stale.map((_, i) => `($${i * 2 + 1},$${i * 2 + 2})`).join(',')})`, stale.flatMap(n => [n.wh, n.sku]));
+    rows.forEach(row => { const n = noteMap[key(row.wh, row.sku)]; if (n) { row.note = n.note; row.note_by = n.updated_by; row.note_at = n.updated_at; } });
+    const expected = poR.rows.filter(r => !r.has_inbound).map(r => ({ sku: r.sku, po: r.po, client: r.client, so: r.so, country: r.country, shipped: r.shipped }));
+    rows.sort((a, b) => a.wh.localeCompare(b.wh) || a.sku.localeCompare(b.sku));
+    res.json({ warehouses: XD_WH, rows, expected });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/crossdock-note', async (req, res) => {
+  const b = req.body || {}, wh = (b.warehouse || '').trim(), sku = (b.sku || '').trim();
+  if (!wh || !sku) return res.status(400).json({ error: 'warehouse + sku required' });
+  try {
+    const who = authUser(req);
+    if (!(b.note || '').trim()) { await pool.query(`DELETE FROM planner.crossdock_notes WHERE warehouse=$1 AND sku=$2`, [wh, sku]); return res.json({ ok: true, cleared: true }); }
+    await pool.query(`INSERT INTO planner.crossdock_notes (warehouse,sku,note,updated_by,updated_at) VALUES ($1,$2,$3,$4,now())
+      ON CONFLICT (warehouse,sku) DO UPDATE SET note=excluded.note, updated_by=excluded.updated_by, updated_at=now()`, [wh, sku, b.note, who || null]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── SAMPLES — detail / address autocomplete / timeline (specific routes BEFORE the :section catch-all)

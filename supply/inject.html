@@ -2883,7 +2883,7 @@
   var prodTab='list', _prodList=[];
   // PURCHASE ORDERS is now the umbrella: PLAN (the PO grid) + the former PRODUCTIONS sub-tabs.
   var poSub='plan';
-  var PO_SUBS=[['plan','PLAN'],['shipments','Shipments'],['manufacturing','Manufacturing'],['list','Productions'],['deposits','Deposits'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['barcodes','Barcodes']];
+  var PO_SUBS=[['plan','PLAN'],['shipments','Shipments'],['crossdock','Crossdock'],['manufacturing','Manufacturing'],['list','Productions'],['deposits','Deposits'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['barcodes','Barcodes']];
   var PO_SUB_KEYS=PO_SUBS.map(function(t){return t[0];});
   function poSubNav(){ return '<div id="prod-subtabs">'+PO_SUBS.map(function(t){return '<span class="rtab'+(poSub===t[0]?' active':'')+'" data-posub="'+t[0]+'">'+t[1]+'</span>';}).join('')+'</div>'; }
   function bindPoSubNav(){ document.querySelectorAll('#supply-content .rtab[data-posub]').forEach(function(p){ p.onclick=function(){ showPoSub(p.dataset.posub); }; }); }
@@ -2901,9 +2901,47 @@
     if(poSub==='manufacturing'){ var showMfg=function(d){ if(_tk!==_navToken)return; c.innerHTML=poSubNav()+'<div id="prod-body"></div>'; bindPoSubNav(); renderManufacturing(d, document.getElementById('prod-body')); };
       if(cache['manufacturing'])return showMfg(cache['manufacturing']); c.innerHTML='<div class="count">Loading…</div>';
       fetch('/api/supply/manufacturing').then(function(r){return r.json();}).then(function(d){cache['manufacturing']=d; showMfg(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
+    if(poSub==='crossdock'){ c.innerHTML=poSubNav()+'<div id="prod-body"><div class="count">Loading…</div></div>'; bindPoSubNav();
+      fetch('/api/supply/crossdock-report').then(function(r){return r.json();}).then(function(d){ if(_tk!==_navToken)return; renderCrossdock(d, document.getElementById('prod-body')); })
+        .catch(function(e){ if(_tk!==_navToken)return; var pb=document.getElementById('prod-body'); if(pb)pb.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>'; }); return; }
     prodTab=poSub;
     if(cache['productions'])return renderProductions(cache['productions']); c.innerHTML='<div class="count">Loading…</div>';
     fetch('/api/supply/productions').then(function(r){return r.json();}).then(function(d){cache['productions']=d; if(_tk!==_navToken)return; renderProductions(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); }
+  // CROSSDOCK sub-tab: on-hand + inbound for every CROSSDOCK/PREORDER SKU in the four 3PL warehouses, the app's
+  // best-guess attribution of what each stock is, a manual note for anything unknown (auto-wiped on ship-out),
+  // and the crossdock assigned to open POs that isn't showing inbound yet.
+  function renderCrossdock(d, body){ if(!body)return; d=d||{}; var rows=d.rows||[], expected=d.expected||[];
+    var WHL={uk_3pl:'UK 3PL',us_3pl:'US 3PL',eu_3pl:'EU 3PL',au_3pl:'AU 3PL'};
+    function srcLabel(s){
+      if(s.type==='inbound')return 'Inbound '+units(s.qty)+' · '+esc(s.po||s.ref||'?')+(s.client?' ('+esc(s.client)+')':'')+(s.date?' · '+esc(s.date):'');
+      if(s.type==='preorder')return 'Preorder '+units(s.qty)+' · '+esc(s.ref||'?')+(s.date?' ships '+esc(s.date):'');
+      if(s.type==='crossdock_po')return 'PO '+esc(s.po||'?')+(s.client?' ('+esc(s.client)+')':'')+(s.so?' · '+esc(s.so):'')+(s.qty?' · '+units(s.qty)+' shipped':'');
+      return esc(s.type); }
+    var out='<div class="annot"><b>PURCHASE ORDERS ▸ Crossdock.</b> On-hand and inbound for every CROSSDOCK / PREORDER SKU in the four 3PL warehouses, with a best-guess at what each stock is (inbound → PO, then preorder, then assigned crossdock PO). Stock it cannot identify is flagged amber — add a note, which is auto-wiped once that stock ships out.</div>';
+    (d.warehouses||['uk_3pl','us_3pl','eu_3pl','au_3pl']).forEach(function(wh){
+      var wr=rows.filter(function(r){return r.wh===wh;});
+      out+='<div class="sect-h">'+esc(WHL[wh]||wh)+' <span class="mut tiny">('+wr.length+' SKU'+(wr.length!==1?'s':'')+')</span></div>';
+      if(!wr.length){ out+='<div class="count" style="margin-bottom:10px">No crossdock / preorder stock.</div>'; return; }
+      out+='<div class="tw" style="margin-bottom:12px"><table><thead><tr><th class="l">SKU</th><th>On hand</th><th>Inbound</th><th class="l">What is this stock?</th><th class="l">Note</th></tr></thead><tbody>'
+        +wr.map(function(r){ var srcs=(r.sources&&r.sources.length)?r.sources.map(function(s){return '<div class="tiny">'+srcLabel(s)+'</div>';}).join(''):'<span class="tool-badge bg-amber">Unknown</span>';
+          return '<tr'+(r.unknown?' style="background:#fffbeb"':'')+'><td class="l"><b>'+esc(r.sku)+'</b></td>'
+            +'<td'+(r.on_hand<0?' style="color:#b91c1c"':'')+'>'+units(r.on_hand)+'</td><td>'+units(r.inbound)+'</td>'
+            +'<td class="l">'+srcs+'</td>'
+            +'<td class="l"><input class="fci xd-note" data-wh="'+esc(r.wh)+'" data-sku="'+esc(r.sku)+'" value="'+esc(r.note||'')+'" placeholder="note…" style="width:200px;text-align:left">'
+            +(r.note_by?'<div class="mut tiny">'+esc(r.note_by)+(r.note_at?' · '+esc(r.note_at):'')+'</div>':'')+'</td></tr>'; }).join('')
+        +'</tbody></table></div>';
+    });
+    out+='<div class="sect-h">Crossdock assigned to open POs — not yet showing inbound <span class="mut tiny">('+expected.length+')</span></div>';
+    if(expected.length){ out+='<div class="tw"><table><thead><tr><th class="l">SKU</th><th class="l">PO</th><th class="l">Client</th><th class="l">Sales order</th><th class="l">Dest</th><th>Shipped</th></tr></thead><tbody>'
+      +expected.map(function(e){return '<tr><td class="l"><b>'+esc(e.sku)+'</b></td><td class="l">'+esc(e.po)+'</td><td class="l">'+esc(e.client||'—')+'</td><td class="l">'+esc(e.so||'—')+'</td><td class="l">'+esc(e.country||'—')+'</td><td>'+units(e.shipped||0)+'</td></tr>';}).join('')
+      +'</tbody></table></div>'; }
+    else out+='<div class="count">None.</div>';
+    body.innerHTML=out;
+    body.querySelectorAll('.xd-note').forEach(function(inp){ inp.onblur=function(){ inp.style.opacity='0.5';
+      fetch('/api/supply/crossdock-note',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({warehouse:inp.dataset.wh,sku:inp.dataset.sku,note:inp.value})})
+        .then(function(r){return r.json();}).then(function(){ inp.style.opacity=''; inp.style.borderColor='#16a34a'; setTimeout(function(){inp.style.borderColor='';},800); })
+        .catch(function(){ inp.style.opacity=''; inp.style.borderColor='#dc2626'; }); }; });
+  }
   // MANUFACTURING sub-tab (mock): for each finished bundle, its demand (from finished-product POs) × BOM = the
   // component qty the MANUFACTURING-branch POs must carry. Shows required vs on-mfg-POs, the diff (shortage/overage),
   // and an "Accept" tick to sign off a mismatch. Part report, part management.
