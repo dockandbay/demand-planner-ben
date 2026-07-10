@@ -1146,10 +1146,13 @@
       if(/coghlans/i.test(br))return !String(r.asn_numbers||'').trim();
       if(/fba|awd/i.test(br))return dc.indexOf('carton_barcode')<0||dc.indexOf('pallet_barcode')<0;
       if(/ifulfillment/i.test(br))return dc.indexOf('idn_pallet_label')<0;
-      return false; }};
+      return false; },
+    // ERP delivery-date deviation: planner completion date differs from Cin7 EstimatedDeliveryDate.
+    // A first-class action so it counts on the PO-ref badge and the DATES tab consistently.
+    erp_date:function(r){ return r.erp_date_pending>0 && !poComplete(r); }};
   // PO-row action badge: label + which PO detail sub-tab each condition deep-links to.
-  var PO_ACT_LABEL={payment_overdue:'Payment overdue',unpaid_payment:'Unpaid payment',late:'Late — should be completed',unassigned_shipment:'Unassigned shipment',production:'Late — should have shipped',dtc_not_approved:'Direct-to-Client not approved',po_not_approved:'Not confirmed by supplier',preship:'Pre-shipment documents overdue'};
-  var PO_ACT_TAB={payment_overdue:'pay',unpaid_payment:'pay',late:'dates',unassigned_shipment:'shipments',production:'dates',dtc_not_approved:'client',po_not_approved:'dates',preship:'shipments'};
+  var PO_ACT_LABEL={payment_overdue:'Payment overdue',unpaid_payment:'Unpaid payment',late:'Late — should be completed',unassigned_shipment:'Unassigned shipment',production:'Late — should have shipped',dtc_not_approved:'Direct-to-Client not approved',po_not_approved:'Not confirmed by supplier',preship:'Pre-shipment documents overdue',erp_date:'ERP delivery date differs'};
+  var PO_ACT_TAB={payment_overdue:'pay',unpaid_payment:'pay',late:'dates',unassigned_shipment:'shipments',production:'dates',dtc_not_approved:'client',po_not_approved:'dates',preship:'shipments',erp_date:'dates'};
   // ── PO-grid action-item snooze ── keyed poact|<po>|<condition> in supply_action_state (shared store).
   var _poActState={}, _poActStateLoaded=false, _poShowSnoozed=false;
   function poActKey(po,cond){ return 'poact|'+po+'|'+cond; }
@@ -1880,8 +1883,8 @@
     var frEst; if(r.flex_quote!=null) frEst=Number(r.flex_quote); else { var se=seaEst(r.sea_tiers,r.pallets); frEst=se?se.cost:null; }
     var landed=[]; if(open && frEst==null && !isFOB && !r.shipment) landed.push('No freight rate for destination'+(r.country?' ('+r.country+')':'')+' — can’t estimate sea freight');
     var dates=[]; if(r.sup_completion_pending) dates.push('Supplier completion date '+fd(r.sup_completion_pending)+' awaiting approve/reject');
-    // ERP delivery-date drift (materiality-thresholded server-side) → DATES sub-tab action counter (snooze-aware)
-    if(r.erp_date_pending>0 && !poComplete(r) && !(!_poShowSnoozed && poActSnoozed(r.po,'erp_date'))) dates.push('ERP delivery date differs from Cin7 — update');
+    // ERP delivery-date drift (materiality-thresholded server-side) → DATES sub-tab count comes from the
+    // snooze-aware mirror loop below (erp_date is now a PO_ACTCOND action mapped to the dates tab).
     // only flag a missing/late production status when this production actually requires supplier confirmation
     var _pse=r.require_confirmation?prodStatusException(r.status, r.prod_start, r.prod_end, today):''; if(_pse) dates.push('Production status: '+_pse);
     var timeline=[]; if(Number(r.unread_notes)>0) timeline.push(r.unread_notes+' unread supplier note'+(r.unread_notes>1?'s':''));

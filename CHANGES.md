@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.393 - ERP date deviation counts on the overall PO badge
+
+The ERP delivery-date deviation was showing on the DATES tab but not on the overall PO-ref badge
+(they diverged). Promoted `erp_date` to a first-class `PO_ACTCOND` action (mapped to the DATES tab),
+so the PO badge now equals the sum of the sub-tab notifications. The DATES count now comes from the
+snooze-aware mirror loop (removed the duplicate explicit push). Consequence: a PO whose only
+outstanding item is an ERP date deviation now also appears in the ACTION ITEMS filter (previously
+excluded) — flag if that's not wanted.
+
 ## v25.392 - ERP date deviation snoozable + "Snoozed by <user>" label
 
 - **ERP delivery-date deviation is now snoozable** on the DATES tab: inline Ⓐ + SNOOZE on the
