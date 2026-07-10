@@ -3,6 +3,20 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.396 - Retire planner.product_countries (consolidate onto planner.products)
+
+`product_countries` was only still used by the availability view's discontinue gate and a dead per-SKU
+duty override (that column was 100% empty). Ben maintains only `planner.products`, so we've consolidated:
+- **Migration 110** redefines `v_product_availability` to take the per-country discontinue date from
+  `planner.products` (`discontinue_date_au_final` for AU, `discontinue_date_ca` for CA, else
+  `discontinue_date_final`), then `DROP TABLE planner.product_countries`.
+- Server: removed the dead `product_countries` duty-override join and the launch/discontinue fallback
+  (both now read `planner.products` only).
+- Availability is now *more* accurate: it correctly excludes 247 in-scope SKUs with a past discontinue
+  date in products that `product_countries` had been missing (sandbox available rows 4,760 → 4,673).
+- ⚠ Ship migration 110 **with** the v25.396 code (the code drops the last references; the migration drops
+  the table).
+
 ## v25.395 - Launch/discontinue dates read from planner.products
 
 The demand plan sourced launch/discontinue from `planner.product_countries`, but that table is barely
