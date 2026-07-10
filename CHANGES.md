@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.390 - Migration 109 null-safety + sandbox product refresh
+
+- **Migration 109 fix:** the derived-scope trigger + backfill now wrap the expression in
+  `coalesce(…, false)`. A null `variant_type` gives `(null='MASTER') AND true = null`, which
+  violates the NOT NULL constraint on insert/update. **This matters for live** — without it the
+  product sync would fail on any null-variant row that's available. Treat "unknown" as out of scope.
+- **Sandbox data:** refreshed `planner.products` from the current Airtable `sku_child` grid export
+  (1,043 SKUs, all 172 columns; canonical `product_name`/`supplier`/`case_pack_size` derived from the
+  `*_final`/`carton_qty` sources; `in_planning_scope` re-derived → 723 in scope). Sandbox-only, no
+  migration — realistic current numbers for testing. (No live impact.)
+
 ## v25.389 - Fix "po is not defined" on PURCHASE ORDERS ▸ PLAN
 
 Regression from v25.388: the CLIENT-tab action marker used a bare `po`, but its enclosing

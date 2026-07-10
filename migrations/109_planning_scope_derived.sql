@@ -23,7 +23,9 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
-  NEW.in_planning_scope :=
+  -- coalesce to false: a null variant_type gives (null='MASTER')=null, and null AND true = null,
+  -- which would violate the NOT NULL constraint. Treat "unknown" as out of scope.
+  NEW.in_planning_scope := coalesce(
     (NEW.variant_type = 'MASTER')
     AND (
          NEW.available_uk_dtc IS TRUE OR NEW.available_uk_fba IS TRUE OR NEW.available_uk_b2b IS TRUE
@@ -31,7 +33,7 @@ BEGIN
       OR NEW.available_eu_dtc IS TRUE OR NEW.available_eu_fba IS TRUE OR NEW.available_eu_b2b IS TRUE
       OR NEW.available_au_dtc IS TRUE OR NEW.available_au_fba IS TRUE
       OR NEW.available_ca_fba IS TRUE
-    );
+    ), false);
   RETURN NEW;
 END;
 $$;
@@ -44,7 +46,7 @@ EXECUTE FUNCTION planner.set_in_planning_scope();
 
 -- One-time backfill of existing rows to the derived value.
 UPDATE planner.products
-SET in_planning_scope = (
+SET in_planning_scope = coalesce(
     (variant_type = 'MASTER')
     AND (
          available_uk_dtc IS TRUE OR available_uk_fba IS TRUE OR available_uk_b2b IS TRUE
@@ -52,7 +54,6 @@ SET in_planning_scope = (
       OR available_eu_dtc IS TRUE OR available_eu_fba IS TRUE OR available_eu_b2b IS TRUE
       OR available_au_dtc IS TRUE OR available_au_fba IS TRUE
       OR available_ca_fba IS TRUE
-    )
-  );
+    ), false);
 
 COMMIT;
