@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.380 - Snooze actions part 2: PO-grid badges + ACTION ITEMS counter are snooze-aware
+
+- Clicking a PO's **red action badge** now opens a **popover** listing each action item with **1 / 3 / 7-day
+  snooze** (or "wake"), the **"snoozed → date by email on time"** label, and an **open ↗** deep-link.
+- Snoozed items drop off the red badge **and** the **ACTION ITEMS** count until they expire (keys
+  `poact|<po>|<condition>` in the shared `supply_action_state`). The ACTION ITEMS filter now mirrors the red
+  badges (snooze-aware) rather than the broader poExceptions set.
+- New **"show snoozed"** toggle next to the **⚠ All exceptions…** dropdown — surfaces snoozed items back in
+  the badges/counts so they can be reviewed/woken.
+- New `GET /api/supply/actions/state` feeds the grid the snooze map.
+
 ## v25.379 - Snooze actions: "snoozed by … on …" label, 1/3/7-day presets, show-snoozed toggle
 
 SUPPLY ▸ Actions snooze upgrades (part 1 of the snooze feature):

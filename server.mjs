@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.379';
+const APP_VERSION = 'v25.380';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3155,6 +3155,13 @@ app.get('/api/supply/portal-attachment/:id', async (req, res) => {
     res.setHeader('Content-Type', r.mime || 'application/octet-stream');
     res.setHeader('Content-Disposition', 'inline; filename="' + (r.filename || 'file').replace(/"/g, '') + '"');
     res.send(r.data);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Full snooze/dismiss state map (used by the PO grid so its badges/counter respect snooze).
+app.get('/api/supply/actions/state', async (req, res) => {
+  try {
+    const r = await pool.query(`SELECT action_key, status, to_char(snooze_until,'YYYY-MM-DD') snooze_until, snoozed_by, to_char(snoozed_at,'YYYY-MM-DD HH24:MI') snoozed_at FROM planner.supply_action_state`);
+    res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Lifecycle for SUPPLY ▸ Actions (dismiss / snooze / done) by stable key. Absent row = open; restore deletes.
