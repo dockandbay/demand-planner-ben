@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.389 - Fix "po is not defined" on PURCHASE ORDERS ▸ PLAN
+
+Regression from v25.388: the CLIENT-tab action marker used a bare `po`, but its enclosing
+function (`payPanel`) only has `r`. Changed to `r.po`. (The other four markers were already
+in functions with a `po` param or used `r.po`.)
+
 ## v25.388 - Inline Ⓐ + snooze rolled out to all action types
 
 The inline red Ⓐ (120ms rule tooltip) + SNOOZE ▾ control — previously only on overdue payment
