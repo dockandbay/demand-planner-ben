@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.378';
+const APP_VERSION = 'v25.379';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2198,14 +2198,14 @@ app.get('/api/supply/:section', async (req, res) => {
             fix: 'gotoreport', target: '', field: 'erp-compare', target_key: 'erp-compare' }); } catch (e) { /* best-effort */ }
         const dtoday = (await pool.query(`SELECT to_char(current_date,'YYYY-MM-DD') d`)).rows[0].d;
         let astate = {};
-        try { (await pool.query(`SELECT action_key, status, to_char(snooze_until,'YYYY-MM-DD') snooze_until FROM planner.supply_action_state`))
+        try { (await pool.query(`SELECT action_key, status, to_char(snooze_until,'YYYY-MM-DD') snooze_until, snoozed_by, to_char(snoozed_at,'YYYY-MM-DD HH24:MI') snoozed_at FROM planner.supply_action_state`))
           .rows.forEach(s => { astate[s.action_key] = s; }); } catch (e) { /* table not yet created (migration 037) */ }
         arows.forEach(r => {
           // portal-submission cards carry their own apply/dismiss (no generic snooze/dismiss lifecycle)
           if (r.fix === 'applysub') { r.status = 'open'; return; }
-          r.key = r.type + '|' + (r.target_key || r.ref || ''); const s = astate[r.key]; r.status = 'open'; r.snooze_until = null;
-          if (s) { if (s.status === 'snoozed' && s.snooze_until && s.snooze_until >= dtoday) { r.status = 'snoozed'; r.snooze_until = s.snooze_until; }
-            else if (s.status !== 'snoozed') r.status = s.status; } });
+          r.key = r.type + '|' + (r.target_key || r.ref || ''); const s = astate[r.key]; r.status = 'open'; r.snooze_until = null; r.snoozed_by = null; r.snoozed_at = null;
+          if (s) { if (s.status === 'snoozed' && s.snooze_until && s.snooze_until >= dtoday) { r.status = 'snoozed'; r.snooze_until = s.snooze_until; r.snoozed_by = s.snoozed_by; r.snoozed_at = s.snoozed_at; }
+            else if (s.status !== 'snoozed') { r.status = s.status; r.snoozed_by = s.snoozed_by; r.snoozed_at = s.snoozed_at; } } });
         return res.json(arows);
       }
       case 'upcoming':    // "What's next" briefing reuses the same per-PO milestone data as the pipeline
@@ -3164,10 +3164,11 @@ app.post('/api/supply/actions/state', async (req, res) => {
   try {
     if (b.status === 'open' || b.restore) { await pool.query(`DELETE FROM planner.supply_action_state WHERE action_key=$1`, [key]); return res.json({ ok: true }); }
     const days = String(parseInt(b.snooze_days, 10) || 7);
-    await pool.query(`INSERT INTO planner.supply_action_state (action_key, status, snooze_until, note)
-      VALUES ($1,$2, CASE WHEN $2='snoozed' THEN current_date + ($3||' days')::interval ELSE NULL END, $4)
-      ON CONFLICT (action_key) DO UPDATE SET status=excluded.status, snooze_until=excluded.snooze_until, note=excluded.note, updated_at=now()`,
-      [key, b.status || 'dismissed', days, b.note || null]);
+    const who = authUser(req);
+    await pool.query(`INSERT INTO planner.supply_action_state (action_key, status, snooze_until, note, snoozed_by, snoozed_at)
+      VALUES ($1,$2, CASE WHEN $2='snoozed' THEN current_date + ($3||' days')::interval ELSE NULL END, $4, $5, now())
+      ON CONFLICT (action_key) DO UPDATE SET status=excluded.status, snooze_until=excluded.snooze_until, note=excluded.note, snoozed_by=excluded.snoozed_by, snoozed_at=excluded.snoozed_at, updated_at=now()`,
+      [key, b.status || 'dismissed', days, b.note || null, who || null]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

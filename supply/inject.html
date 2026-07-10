@@ -661,9 +661,9 @@
     if(!rows.length){c.innerHTML=annot('actions')+'<div class="count">No actions 🎉</div>';return;}
     var types=Array.from(new Set(rows.map(function(r){return r.type;})));
     var STAT=[['open','Open'],['snoozed','Snoozed'],['dismissed','Dismissed'],['done','Done'],['all','All']];
-    var st={sev:'All',status:'open',types:[]};   // types: [] = all
+    var st={sev:'All',status:'open',types:[],showSnoozed:false};   // types: [] = all; showSnoozed = surface snoozed items in the Open view
     function stOf(r){ return r.status||'open'; }
-    function inStat(r){ return st.status==='all'?true:stOf(r)===st.status; }
+    function inStat(r){ if(st.status==='all')return true; if(st.status==='open'&&st.showSnoozed&&stOf(r)==='snoozed')return true; return stOf(r)===st.status; }
     function typeMatch(r){ return !st.types.length||st.types.indexOf(r.type)>=0; }
     function actTypeOutside(e){ var pop=document.getElementById('act-typepop'),btn=document.getElementById('act-typebtn');
       if(pop&&!pop.contains(e.target)&&e.target!==btn){ pop.style.display='none'; document.removeEventListener('mousedown',actTypeOutside,true); } }
@@ -672,8 +672,10 @@
     c.innerHTML=annot('actions')+lookupDatalists()
       +'<div class="bar" id="act-statbar"></div><div class="bar" id="act-sevbar"></div><div id="act-grid"></div>';
     function statBar(){ document.getElementById('act-statbar').innerHTML='<span class="pill-lbl">Status</span>'
-      +STAT.map(function(s){return '<span class="pill stpill'+(st.status===s[0]?' active':'')+'" data-st="'+s[0]+'">'+s[1]+' ('+statCount(s[0])+')</span>';}).join('');
-      document.querySelectorAll('#act-statbar .stpill').forEach(function(p){p.onclick=function(){st.status=p.dataset.st;st.sev='All';statBar();sevBar();view();};}); }
+      +STAT.map(function(s){return '<span class="pill stpill'+(st.status===s[0]?' active':'')+'" data-st="'+s[0]+'">'+s[1]+' ('+statCount(s[0])+')</span>';}).join('')
+      +'<label style="margin-left:12px;font-size:12px;cursor:pointer;'+(st.status==='open'?'':'opacity:.4')+'"><input type="checkbox" id="act-showsnz"'+(st.showSnoozed?' checked':'')+(st.status==='open'?'':' disabled')+'> show snoozed as active</label>';
+      document.querySelectorAll('#act-statbar .stpill').forEach(function(p){p.onclick=function(){st.status=p.dataset.st;st.sev='All';statBar();sevBar();view();};});
+      var ss=document.getElementById('act-showsnz'); if(ss)ss.onchange=function(){st.showSnoozed=this.checked;sevBar();view();}; }
     function typeLbl(){ return st.types.length?('Type: '+st.types.length):'Type: all'; }
     function sevBar(){ var pl=pool(), nH=pl.filter(function(r){return r.severity==='high';}).length, nA=pl.filter(function(r){return r.severity==='amber';}).length, nL=pl.filter(function(r){return r.severity==='low';}).length;
       // group the type options by the same categories used for the cards, then lay the groups into 3 fixed
@@ -749,8 +751,10 @@
     if(r.key){ var resolved=(r.status&&r.status!=='open');
       life='<div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">'
         +(resolved
-          ? '<span class="tool-badge bg-neutral">'+esc(r.status)+(r.snooze_until?' → '+esc(r.snooze_until):'')+'</span><button class="save-btn light act-life" data-id="'+r._id+'" data-st="open">↩ Restore</button>'
-          : '<button class="save-btn light act-life" data-id="'+r._id+'" data-st="dismissed">Dismiss</button><button class="save-btn light act-life" data-id="'+r._id+'" data-st="snoozed" data-days="7">Snooze 1wk</button><button class="save-btn light act-life" data-id="'+r._id+'" data-st="snoozed" data-days="30">Snooze 1mo</button>')
+          ? '<span class="tool-badge bg-neutral">'+esc(r.status)+(r.snooze_until?' → '+esc(r.snooze_until):'')+'</span>'
+            +((r.snoozed_by||r.snoozed_at)?'<span class="mut tiny">'+esc(r.status==='snoozed'?'snoozed':r.status)+' by '+esc(r.snoozed_by||'—')+(r.snoozed_at?' on '+esc(r.snoozed_at):'')+'</span>':'')
+            +'<button class="save-btn light act-life" data-id="'+r._id+'" data-st="open">↩ Restore</button>'
+          : '<button class="save-btn light act-life" data-id="'+r._id+'" data-st="dismissed">Dismiss</button><button class="save-btn light act-life" data-id="'+r._id+'" data-st="snoozed" data-days="1">Snooze 1d</button><button class="save-btn light act-life" data-id="'+r._id+'" data-st="snoozed" data-days="3">Snooze 3d</button><button class="save-btn light act-life" data-id="'+r._id+'" data-st="snoozed" data-days="7">Snooze 7d</button>')
         +'</div>'; }
     return '<div class="card '+esc(r.severity||'low')+'" id="actcard-'+r._id+'"><div class="t">'+refHtml+' <span class="tool-badge '+(r.severity==='high'?'bg-red':r.severity==='low'?'bg-neutral':'bg-amber')+'">'+esc(r.type)+'</span></div><div class="d">'+esc(r.detail||'')+'</div>'+(fix?'<div style="margin-top:6px">'+fix+'</div>':'')+(fix2?'<div style="margin-top:6px">'+fix2+'</div>':'')+life+'</div>'; }
   function bindLifecycle(statBar,sevBar,view){

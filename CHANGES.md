@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.379 - Snooze actions: "snoozed by … on …" label, 1/3/7-day presets, show-snoozed toggle
+
+SUPPLY ▸ Actions snooze upgrades (part 1 of the snooze feature):
+- Snooze now records **who** (email via authUser) and **when** (`supply_action_state.snoozed_by` +
+  `snoozed_at`, migration 108) — shown as a **"snoozed by ben@… on 2026-07-10 05:37"** label on each
+  snoozed/dismissed card.
+- Snooze presets changed to **1 / 3 / 7 days** (were 1wk/1mo).
+- New **"show snoozed as active"** toggle on the Status bar — surfaces snoozed items back in the Open view
+  so they can be reviewed/un-snoozed.
+- (Next: make the PO-grid red badges + ACTION ITEMS counter snooze-aware.)
+
 ## v25.378 - Fix: FBA Cartons pills (Any/Full/Partial) active state stuck
 
 The cartons pills only called `render()` on click and relied on a toolbar rebuild to repaint the active
