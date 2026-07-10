@@ -40,7 +40,7 @@ Please keep the following data up to date against each order — this is the inf
 - **Shipment Plan** — shipments by destination, including FOB. Here you can **download shipment labels** (and **crossdock labels once your shipment is allocated**), and see how shipments are **consolidated** — i.e. which supplier will consolidate your shipment, or which other suppliers' POs are being consolidated onto your shipment.
 - **Payments** — amounts, payment types and references.
 - **Productions** — full order plan per batch, downloadable. You can also **self-serve download product and carton barcodes** for each batch.
-- **Samples** — request and track sample orders, and log the **DHL/FedEx freight cost and tracking code** for samples you ship from your own account.
+- **Samples** — request and track sample orders, and log the **DHL/FedEx freight cost and tracking code** for samples you ship from your own account. **Please enter the freight cost against each sample here, not as a monthly email invoice** — so every charge is captured against the right order and reconciled directly.
 
 **Can't log in?** If your email isn't recognised or the link doesn't arrive, please contact **Zera** or **[Ben]** and we'll get you set up.
 
