@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.412 - Crossdock derivation excludes completed POs
+
+The crossdock-into-master-PO derivation now skips linked POs whose status is COMPLETE. Applied in both
+places: the `po-detail` `crossdock_lines` query (on-screen ORDER PLAN sub-table) and the Cin7-push append
+(`POST /api/supply/po/:po/cin7-lines`). Completed POs' crossdock SKUs are already fulfilled, so they no
+longer show as derived rows or get pushed to ERP again. No migration.
+
 ## v25.411 - Crossdock SKUs flow into the master PO's order plan (+ $0 + ERP)
 
 When a master-PO shipment has linked POs carrying crossdock SKUs, those crossdock SKUs now appear in the

@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.411';
+const APP_VERSION = 'v25.412';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3832,6 +3832,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
           CROSS JOIN LATERAL unnest(string_to_array(coalesce(po2.crossdock_skus,''),',')) AS s(sku)
           LEFT JOIN planner.crossdock_shipments cs ON cs.po=po2.po AND cs.sku=trim(s.sku)
           WHERE po2.shipment_ref IN (SELECT shipment_ref FROM planner.shipments WHERE master_po=$1)
+            AND coalesce(po2.status,'') NOT ILIKE '%complete%'
             AND trim(s.sku)<>''`, [po])).rows;
         const have = new Set(lines.map(l => l.sku));
         xd.forEach(x => { if (x.sku && x.qty > 0 && !have.has(x.sku)) { lines.push({ sku: x.sku, qty: x.qty, price: 0, approved_price: true, crossdock: true }); have.add(x.sku); } });
@@ -4400,6 +4401,7 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
       CROSS JOIN LATERAL unnest(string_to_array(coalesce(po.crossdock_skus,''),',')) AS s(sku)
       LEFT JOIN planner.crossdock_shipments cs ON cs.po=po.po AND cs.sku=trim(s.sku)
       WHERE po.shipment_ref IN (SELECT shipment_ref FROM planner.shipments WHERE master_po=$1)
+        AND coalesce(po.status,'') NOT ILIKE '%complete%'
         AND trim(s.sku)<>'' ORDER BY po.po, sku`, [po]).catch(() => ({ rows: [] }));
     const lc = {}; lineCosts.rows.forEach(r => { lc[r.sku] = r; });
     res.json({ lines: lines.rows, deposit: deposit.rows, payments: payments.rows, flexport: flexport.rows,
