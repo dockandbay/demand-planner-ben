@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.420 - Analyse consolidation: smarter recommendation engine + oversize split flags
+
+Rebuilt the recommendation. The old engine just added POs until it crossed 20 pallets, which overshot the
+container (e.g. 22.2 → a 30-slot two-container plan, 74% full). The new engine does a **best-fit pack of one
+40ft container (20 pal, preferred)** seeded with the anchor, **without overshooting** — on the same example
+it now picks 4 POs summing to exactly 20.0 (**100% full**). The banner shows the fill % and prompts to tick
+more for a second container. Small totals still recommend a 20ft (10 pal).
+
+**Oversize POs:** any PO over one container (>20 pal) is now shown with its **pallets in red** and a
+**"⚠ split off N"** note (N = pallets above whole 40ft loads), on both the anchor summary and the table.
+Oversize POs are excluded from the auto-recommendation (they must be split first); if the anchor itself is
+oversize the banner says so. No migration.
+
 ## v25.419 - Analyse consolidation: sticky Select+PO columns, Pallets to col 3, compact
 
 Mobile table tweaks: the **Select** and **PO** columns are now **sticky/pinned** to the left while the rest

@@ -1148,15 +1148,33 @@
     function planTxt(t){ var c=containerPlan(t); if(!c.length)return '—'; var f40=c.filter(function(x){return x===20;}).length, f20=c.filter(function(x){return x===10;}).length; var parts=[]; if(f40)parts.push(f40+'×40ft (20 pal)'); if(f20)parts.push(f20+'×20ft (10 pal)'); var cap=c.reduce(function(a,x){return a+x;},0); return parts.join(' + ')+' — '+(Math.round(t*10)/10)+' of '+cap+' pallet slots'; }
     var _MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     function cdate(s){ if(!s)return '—'; var p=String(s).slice(0,10).split('-'); if(p.length<3)return String(s); return p[2]+'-'+(_MON[(+p[1])-1]||'?'); }  // 2026-06-30 → 30-Jun
+    var CAP=20, TOL=0.05;   // a 40ft holds 20 pallets (preferred); a 20ft holds 10
+    // amount to split off a PO bigger than one container (the remainder above whole 40ft loads) — 22.2→2.2, 45→5
+    function splitOff(p){ p=p||0; if(p<=CAP+TOL)return 0; return Math.round((p-CAP*Math.floor((p+1e-6)/CAP))*10)/10; }
+    // pallets <td>: red + "split N" when a single PO overflows a container
+    function palCell(p, bold){ p=Math.round((p||0)*10)/10; var over=p>CAP+TOL, sp=splitOff(p);
+      var style='padding:4px 6px;white-space:nowrap'+(over?';color:#dc2626':'')+((over||bold)?';font-weight:700':'');
+      return '<td style="'+style+'">'+p+(over&&sp>TOL?' <span style="font-weight:600;font-size:10px">⚠ split '+sp+'</span>':'')+'</td>'; }
+    // Smarter recommendation: tightly fill ONE 40ft (20 pal, preferred) seeded with the anchor, best-fit and
+    // WITHOUT overshooting the container (the old engine crossed 20 and wasted a second container). POs that
+    // are zero or over a container (need splitting) are never auto-picked. Returns the selected-PO map.
+    function recommendSet(A, cs){ var sel={}, total=A.pallets||0;
+      if(total>CAP+TOL) return sel;   // anchor alone overflows → split it first, don't pre-pick anything
+      var pool=cs.filter(function(c){ var p=c.pallets||0; return p>TOL && p<=CAP+TOL; });
+      while(true){ var room=CAP-total, best=null;
+        pool.forEach(function(c){ if(sel[c.po])return; var p=c.pallets||0; if(p<=room+TOL){ var bp=best?(best.pallets||0):-1;
+          if(p>bp || (p===bp && Math.abs(c.delta_days)<Math.abs(best.delta_days))) best=c; } });
+        if(!best) break; sel[best.po]=true; total+=best.pallets||0; }
+      return sel; }
     function render(d){
       var A=d.anchor, cs=d.candidates||[];
-      var rec={}, run=A.pallets||0;   // recommended pre-selection: greedily fill toward 20 (anchor first, candidates by proximity)
-      cs.forEach(function(c){ if(run<20){ rec[c.po]=true; run+=c.pallets||0; } });
+      var rec=recommendSet(A,cs);   // smart pre-selection: tightly fill one 40ft, no overshoot
+      var recPal=A.pallets||0; cs.forEach(function(c){ if(rec[c.po]) recPal+=c.pallets||0; }); recPal=Math.round(recPal*10)/10;
       var h='';
       if(d.note)h+='<div style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;padding:8px 10px;border-radius:6px;margin-bottom:10px">'+esc(d.note)+'</div>';
       h+='<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:9px 11px;margin-bottom:10px;font-size:12px;line-height:1.7">'
         +'<div><b>'+esc(A.po)+'</b>'+(A.prod_no?' <span class="mut">· prod P'+esc(A.prod_no)+'</span>':'')+' <span class="mut">· '+esc(A.country||'')+'</span></div>'
-        +'<div>completes <b>'+esc(cdate(A.completion))+'</b> &nbsp;·&nbsp; <b>'+(A.pallets||0)+'</b> pallets &nbsp;·&nbsp; '+(A.shipment_ref?'on '+esc(A.shipment_ref):'<span class="mut">not yet on a shipment</span>')+'</div></div>';
+        +'<div>completes <b>'+esc(cdate(A.completion))+'</b> &nbsp;·&nbsp; <b'+((A.pallets||0)>CAP+TOL?' style="color:#dc2626"':'')+'>'+(A.pallets||0)+'</b> pallets'+((A.pallets||0)>CAP+TOL&&splitOff(A.pallets)>TOL?' <span style="color:#dc2626;font-weight:600">⚠ split off '+splitOff(A.pallets)+'</span>':'')+' &nbsp;·&nbsp; '+(A.shipment_ref?'on '+esc(A.shipment_ref):'<span class="mut">not yet on a shipment</span>')+'</div></div>';
       if(!cs.length){ h+='<div class="mut" style="padding:12px">No other '+esc(A.country||'')+' POs complete within '+((d.window_days||21)/7)+' weeks of '+esc(cdate(A.completion))+'.</div>'
         +'<div style="text-align:right;margin-top:8px"><button class="save-btn light" id="consol-cancel">Close</button></div>';
         body.innerHTML=h; document.getElementById('consol-cancel').onclick=function(){ bg.parentNode.removeChild(bg); }; return; }
@@ -1164,10 +1182,10 @@
       h+='<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">';
       h+='<table class="consol-tbl" style="width:100%;min-width:660px;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;border-bottom:1px solid #e2e8f0">'
         +'<th style="padding:4px 6px"><input type="checkbox" id="consol-all"></th><th style="padding:4px 6px">PO</th><th style="padding:4px 6px">Pallets</th><th style="padding:4px 6px">Prod</th><th style="padding:4px 6px">Supplier</th><th style="padding:4px 6px">Client</th><th style="padding:4px 6px">Completes</th><th style="padding:4px 6px">Δ days</th><th style="padding:4px 6px">Current shipment</th></tr></thead><tbody>';
-      h+='<tr class="anchor"><td style="padding:4px 6px"><input type="checkbox" checked disabled></td><td style="padding:4px 6px;white-space:nowrap"><b>'+esc(A.po)+'</b> <span class="mut tiny">anchor</span></td><td style="padding:4px 6px"><b>'+(A.pallets||0)+'</b></td><td style="padding:4px 6px">'+(A.prod_no?'P'+esc(A.prod_no):'')+'</td><td style="padding:4px 6px">'+esc(A.supplier||'')+'</td><td style="padding:4px 6px">'+esc(A.client||'')+'</td><td style="padding:4px 6px;white-space:nowrap">'+esc(cdate(A.completion))+'</td><td style="padding:4px 6px">0</td><td style="padding:4px 6px">'+esc(A.shipment_ref||'—')+'</td></tr>';
+      h+='<tr class="anchor"><td style="padding:4px 6px"><input type="checkbox" checked disabled></td><td style="padding:4px 6px;white-space:nowrap"><b>'+esc(A.po)+'</b> <span class="mut tiny">anchor</span></td>'+palCell(A.pallets,true)+'<td style="padding:4px 6px">'+(A.prod_no?'P'+esc(A.prod_no):'')+'</td><td style="padding:4px 6px">'+esc(A.supplier||'')+'</td><td style="padding:4px 6px">'+esc(A.client||'')+'</td><td style="padding:4px 6px;white-space:nowrap">'+esc(cdate(A.completion))+'</td><td style="padding:4px 6px">0</td><td style="padding:4px 6px">'+esc(A.shipment_ref||'—')+'</td></tr>';
       cs.forEach(function(c){ var dd=c.delta_days;
         h+='<tr><td style="padding:4px 6px"><input type="checkbox" class="consol-ck" data-po="'+esc(c.po)+'" data-pal="'+(c.pallets||0)+'"'+(rec[c.po]?' checked':'')+'></td>'
-          +'<td style="padding:4px 6px;white-space:nowrap">'+esc(c.po)+'</td><td style="padding:4px 6px">'+(c.pallets||0)+'</td><td style="padding:4px 6px">'+(c.prod_no?'P'+esc(c.prod_no):'')+'</td><td style="padding:4px 6px">'+esc(c.supplier||'')+'</td><td style="padding:4px 6px">'+esc(c.client||'')+'</td>'
+          +'<td style="padding:4px 6px;white-space:nowrap">'+esc(c.po)+'</td>'+palCell(c.pallets,false)+'<td style="padding:4px 6px">'+(c.prod_no?'P'+esc(c.prod_no):'')+'</td><td style="padding:4px 6px">'+esc(c.supplier||'')+'</td><td style="padding:4px 6px">'+esc(c.client||'')+'</td>'
           +'<td style="padding:4px 6px;white-space:nowrap">'+esc(cdate(c.completion))+'</td><td style="padding:4px 6px">'+(dd>0?'+':'')+dd+'</td>'
           +'<td style="padding:4px 6px">'+(c.shipment_ref?esc(c.shipment_ref)+(c.is_master?' <span class="mut tiny">(master)</span>':''):'<span class="mut tiny">unassigned</span>')+'</td></tr>';
       });
@@ -1188,8 +1206,13 @@
         document.getElementById('consol-tot').innerHTML='<b>'+n+'</b> POs · <b>'+t+'</b> pallets — '+planTxt(t); }
       body.querySelectorAll('.consol-ck').forEach(function(ck){ ck.onchange=totals; });
       document.getElementById('consol-all').onchange=function(){ var v=this.checked; body.querySelectorAll('.consol-ck').forEach(function(ck){ ck.checked=v; }); totals(); };
-      var recN=Object.keys(rec).length+1, recPal=Math.round(run*10)/10;
-      document.getElementById('consol-rec').innerHTML='<span style="display:inline-block;line-height:1.5;background:#ecfeff;border:1px solid #a5f3fc;border-radius:6px;padding:5px 9px">💡 Recommended: '+recN+' PO'+(recN===1?'':'s')+' pre-selected to fill '+planTxt(recPal)+'</span>';
+      var recN=Object.keys(rec).length+1;
+      var _rc=containerPlan(recPal), _rcap=_rc.reduce(function(a,x){return a+x;},0), _rutil=_rcap?Math.round(recPal/_rcap*100):0;
+      var recHtml;
+      if((A.pallets||0)>CAP+TOL){ recHtml='⚠ Anchor PO is over one container ('+(A.pallets||0)+' pal) — split off '+splitOff(A.pallets)+' pallets before consolidating (see red below).'; }
+      else if(recN<=1){ recHtml='No nearby PO fits alongside the anchor in one container — select manually below.'; }
+      else { recHtml='💡 Recommended: '+recN+' POs → '+planTxt(recPal)+' ('+_rutil+'% full). Tick more below to start another container.'; }
+      document.getElementById('consol-rec').innerHTML='<span style="display:inline-block;line-height:1.5;background:'+((A.pallets||0)>CAP+TOL?'#fef2f2;border:1px solid #fecaca':'#ecfeff;border:1px solid #a5f3fc')+';border-radius:6px;padding:5px 9px">'+recHtml+'</span>';
       totals();
       body.querySelectorAll('input[name=consol-tgt]').forEach(function(r){ r.onchange=function(){ var ex=body.querySelector('input[name=consol-tgt]:checked').value==='existing'; document.getElementById('consol-ref').disabled=ex; document.getElementById('consol-exref').disabled=!ex; }; });
       document.getElementById('consol-cancel').onclick=function(){ bg.parentNode.removeChild(bg); };
