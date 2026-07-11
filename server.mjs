@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.451';
+const APP_VERSION = 'v25.452';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -6811,7 +6811,7 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
     const poList = pos.map(p => p.po);
     const grab = (sql) => poList.length ? q(sql, [poList]) : Promise.resolve([]);
     const [lines, deps, lc, xd, ac, notes, subs, supSkus] = await Promise.all([
-      grab(`SELECT l.po, l.sku, l.qty, l.cost_price, l.carton_qty
+      grab(`SELECT l.po, l.sku, l.qty, l.erp_qty, l.cost_price, l.carton_qty
             FROM planner.purchase_order_lines l WHERE l.po = ANY($1) ORDER BY l.po, l.sku`),
       names.length ? q(`
             WITH draw AS (SELECT po.deposit_ref, sum(coalesce(po.pay_start_deposit_assigned,0)) used
@@ -6874,8 +6874,8 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
         coalesce(invoice_reference,'') invoice_reference,
         coalesce(po_completion,'') po_completion, coalesce(po_balance_1,'') po_balance_1,
         coalesce(po_balance_2,'') po_balance_2, coalesce(po_balance_3,'') po_balance_3
-      FROM planner.payment_transactions pt WHERE pt.transaction_supplier = ANY($1)
-      ORDER BY payment_date DESC NULLS LAST, id DESC`, [names]).catch(() => []) : [];
+      FROM planner.payment_transactions pt WHERE lower(trim(pt.transaction_supplier)) = ANY($1)
+      ORDER BY payment_date DESC NULLS LAST, id DESC`, [names.map(n => String(n).toLowerCase().trim())]).catch(() => []) : [];
     // Shipment Plan tab: all shipments this supplier is on — as consolidator (master) OR with a PO aboard
     // (so they see who consolidates their goods / whose POs share their shipment). Same builder as the admin tab.
     const nameSet = new Set(names.map(n => String(n).toLowerCase()));

@@ -587,7 +587,18 @@
         +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><input type="file" class="pp-inv-parse-file" data-po="'+po+'" accept=".xlsx" style="font-size:11px;max-width:280px"><button class="save-btn pp-inv-parse-go" data-po="'+po+'">Parse file</button></div>'
         +'<div class="pp-inv-parse-out" data-po="'+po+'" style="margin-top:6px"></div>'
         +'<div class="tiny mut" style="margin-top:3px">Reads the SKU / Q’TY (PCS) / Unit Price columns and proposes qty + price overrides. You review, then apply — it then goes to Dock &amp; Bay to approve.</div></div>';
-      var skus=invUpload+'<table style="font-size:11px;margin:3px 0 6px;width:auto"><thead><tr><th class="l">SKU</th><th style="text-align:right">Qty</th><th style="text-align:right">Est. cost</th><th style="text-align:right">Your cost</th><th style="text-align:right">Line total</th><th></th></tr></thead><tbody>'
+      // "What changed" — when the order plan differs from what was last synced to the ERP (i.e. the plan was
+      // amended and needs the supplier's re-approval), show exactly which SKUs/qtys changed so they can see it.
+      var _synced=lines.some(function(l){return l.erp_qty!=null&&l.erp_qty!=='';});   // only after the PO has been synced once (else it's the original order, not a change)
+      var _chgs=[]; if(_synced){ lines.forEach(function(l){ var nw=Number(l.qty)||0, old=(l.erp_qty==null||l.erp_qty==='')?null:Number(l.erp_qty);
+        if(old===null){ if(nw>0)_chgs.push({sku:l.sku,old:0,nw:nw,kind:'new'}); }
+        else if(nw!==old)_chgs.push({sku:l.sku,old:old,nw:nw,kind:(nw===0?'removed':(nw>old?'up':'down'))}); }); }
+      var chgHtml=_chgs.length ? '<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:8px 11px;margin:0 0 8px">'
+        +'<div style="font-weight:700;font-size:12px;margin-bottom:4px">⚠ Changes to approve — this order plan was amended since you last approved it</div>'
+        +'<table style="font-size:11px;border-collapse:collapse"><thead><tr><th class="l" style="padding:2px 12px 3px 0">SKU</th><th style="text-align:right;padding:2px 12px 3px">Was</th><th style="text-align:right;padding:2px 12px 3px">Now</th><th class="l" style="padding:2px 0 3px">Change</th></tr></thead><tbody>'
+        +_chgs.map(function(c){ var d=c.nw-c.old; return '<tr><td class="l" style="padding:1px 12px 1px 0">'+esc(c.sku)+'</td><td style="text-align:right;padding:1px 12px">'+(c.kind==='new'?'<span class="mut">—</span>':c.old)+'</td><td style="text-align:right;padding:1px 12px">'+c.nw+'</td><td class="l" style="font-weight:600;color:'+(c.kind==='removed'?'#b91c1c':d>0?'#166534':'#b45309')+'">'+(c.kind==='new'?'added':c.kind==='removed'?'removed':(d>0?'+':'')+d)+'</td></tr>'; }).join('')
+        +'</tbody></table></div>' : '';
+      var skus=chgHtml+invUpload+'<table style="font-size:11px;margin:3px 0 6px;width:auto"><thead><tr><th class="l">SKU</th><th style="text-align:right">Qty</th><th style="text-align:right">Est. cost</th><th style="text-align:right">Your cost</th><th style="text-align:right">Line total</th><th></th></tr></thead><tbody>'
         +rws
         +'<tr style="font-weight:700;border-top:2px solid #999"><td class="l">TOTAL</td><td style="text-align:right" class="pp-totq">'+units(totQ)+'</td><td></td><td style="text-align:right">FINAL</td><td style="text-align:right" class="pp-totp">$'+money(totP)+'</td><td></td></tr>'
         +'</tbody></table>'

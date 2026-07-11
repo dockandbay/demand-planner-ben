@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.452 - Portal: show order-plan changes for re-approval + case-insensitive payment match
+
+- **What changed on re-approval**: when a PO order plan is amended (differs from the last-synced ERP), the
+  supplier portal ORDER PLAN tab now shows a "Changes to approve" panel listing each SKU Was -> Now (added /
+  removed / +/- delta), so the supplier sees exactly what they are approving. (Needs `erp_qty`, now included
+  in the portal line payload; only shows once a PO has been synced, so a brand-new order isn't all "added".)
+- **Payment match**: the portal payments filter now matches `transaction_supplier` case-insensitively /
+  trimmed, so a payment whose supplier name differs only by case/whitespace still shows. No migration.
+
 ## v25.451 - SHIPPING => production_status shipped; invoices only from production 57+
 
 - Any PO in SHIPPING status now defaults production_status to "shipped" (SHIPPING implies production done +
