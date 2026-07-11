@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.434 - Action-badge popover: single SNOOZE ▾ dropdown
+
+In the row action-badge popovers (PO and shipment), replaced the inline 1d / 3d / 7d / ∞ buttons with a
+single **SNOOZE ▾** button that opens the shared snooze dropdown (1 day / 3 days / 7 days / Indefinitely) —
+tidier, matching the inline "A" marker. No migration.
+
 ## v25.433 - PO grid: Supplier column narrower + no L/R padding
 
 Tightened the Supplier column further (cell-pick max-width ~82px, no left/right padding on the button + cell) so it takes minimal width; names still wrap onto a second line at 10px. No migration.
