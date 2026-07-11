@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.423 - Shipments grid: Planned/Shipping split + FOB filter
+
+PURCHASE ORDERS ▸ SHIPMENTS filters reworked. The old **Active** pill is split into **Planned** and
+**Shipping** (by shipment `status`), **defaulting to Planned**. Added a **FOB / Non-FOB** filter (dropdown in
+the country/branch row) driven by `mode_eff==='fob'` — "FOB & non-FOB" (all), "Non-FOB only", "FOB only".
+Verified counts on live sandbox: Planned 64 · Shipping 15 · Completed 587 · FOB 96 · Non-FOB 570. No migration.
+
 ## v25.422 - Analyse consolidation: recommend one container + spillover note
 
 Reverted to a **single 40ft container** recommendation (per Ben) but with a clear overflow note. Phase 1
