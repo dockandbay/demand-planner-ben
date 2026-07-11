@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.453 - Portal payments derived from the report source; order-plan diff vs what the supplier approved
+
+- **Payments (root-cause fix)**: the supplier portal read the `payment_transactions` ledger, which is
+  import-only and never captures payment dates/amounts entered in PURCHASE ORDERS > Payments / Deposits /
+  Other. The portal now **derives payments from the same source-of-truth as the admin Payments Report** — PO
+  completion + balance milestones, the deposit register, and Other payments (starting deposits excluded).
+  Verified on sandbox: Lixin now shows 126 payments (was 51 from the ledger). Fixes the missing 01-Jul-26 payment.
+- **Order-plan "what changed"**: now diffs the current plan against a **snapshot of what the supplier
+  approved** (migration 116 `approved_lines`, captured on confirm) rather than the ERP sync — the ORDER PLAN
+  tab shows "Changes since you approved" (SKU Was -> Now) only after they've approved and something changed.
+
 ## v25.452 - Portal: show order-plan changes for re-approval + case-insensitive payment match
 
 - **What changed on re-approval**: when a PO order plan is amended (differs from the last-synced ERP), the

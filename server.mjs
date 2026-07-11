@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.452';
+const APP_VERSION = 'v25.453';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3227,7 +3227,10 @@ app.post('/api/supply/portal-submit', async (req, res) => {
     }
     // PO confirmation (#supplier confirms SKUs / qty / dates). po_confirmed:true → confirm; false → clear (re-request).
     if (b.po_confirmed != null) {
-      if (b.po_confirmed) { await client.query(`UPDATE planner.purchase_orders SET supplier_confirmed_at=now(), supplier_confirmed_by=$2 WHERE po=$1`, [b.po, by]); out.applied.push('PO confirmed'); }
+      if (b.po_confirmed) { await client.query(`UPDATE planner.purchase_orders
+          SET supplier_confirmed_at=now(), supplier_confirmed_by=$2,
+              approved_lines=(SELECT jsonb_object_agg(sku, qty) FROM planner.purchase_order_lines WHERE po=$1 AND coalesce(qty,0)>0)
+          WHERE po=$1`, [b.po, by]); out.applied.push('PO confirmed'); }   // snapshot the SKUs/qtys the supplier approved → diff against on re-approval
       else { await client.query(`UPDATE planner.purchase_orders SET supplier_confirmed_at=NULL, supplier_confirmed_by=NULL WHERE po=$1`, [b.po]); out.applied.push('PO confirmation cleared'); }
     }
     await client.query('COMMIT');
@@ -6840,6 +6843,9 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
     const lb = byPo(lines), notesByPo = byPo(notes), subsByPo = byPo(subs), addByPo = byPo(ac);
     const costsByPo = {}; lc.forEach(x => { (costsByPo[x.po] = costsByPo[x.po] || {})[x.sku] = x; });
     const xdByPo = {}; xd.forEach(x => { (xdByPo[x.po] = xdByPo[x.po] || {})[x.sku] = x.qty; });
+    // snapshot of the SKUs/qtys the supplier last approved (set on confirm) → portal diffs the current plan against it
+    const _ap = poList.length ? await q(`SELECT po, approved_lines FROM planner.purchase_orders WHERE po = ANY($1) AND approved_lines IS NOT NULL`, [poList]) : [];
+    const approvedByPo = {}; _ap.forEach(r => { approvedByPo[r.po] = r.approved_lines; });
     const samples = names.length ? await q(`SELECT s.id, s.ref, coalesce(s.supplier_name,'') supplier_name,
         coalesce(s.recipient_company,'') recipient_company, trim(coalesce(s.first_name,'')||' '||coalesce(s.last_name,'')) recipient_name,
         coalesce(s.address_line1,'') address_line1, coalesce(s.address_line2,'') address_line2, coalesce(s.city,'') city,
@@ -6867,15 +6873,27 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
         FROM planner.sample_requests s
         WHERE coalesce(s.supplier_name,'')=ANY($1) OR coalesce(s.supplier_id,-1)=ANY($2)
         ORDER BY s.created_at DESC`, [names, ids.length ? ids : [-1]]) : [];
-    // Payments MADE to this supplier (the actual payment ledger) — for the portal's master PAYMENTS tab.
-    const payments = names.length ? await q(`SELECT to_char(payment_date,'YYYY-MM-DD') payment_date, coalesce(payment_run_ref,'') payment_run_ref,
-        coalesce(transaction_reference,'') reference, coalesce(transaction_type,'') type, transaction_amount amount,
-        coalesce(nullif(pt.deposit_ref,''), (SELECT po.deposit_ref FROM planner.purchase_orders po WHERE po.po = coalesce(nullif(pt.transaction_reference,''), nullif(pt.po_completion,''), nullif(pt.po_balance_1,''), nullif(pt.po_balance_2,''), nullif(pt.po_balance_3,'')) LIMIT 1), '') deposit_ref,
-        coalesce(invoice_reference,'') invoice_reference,
-        coalesce(po_completion,'') po_completion, coalesce(po_balance_1,'') po_balance_1,
-        coalesce(po_balance_2,'') po_balance_2, coalesce(po_balance_3,'') po_balance_3
-      FROM planner.payment_transactions pt WHERE lower(trim(pt.transaction_supplier)) = ANY($1)
-      ORDER BY payment_date DESC NULLS LAST, id DESC`, [names.map(n => String(n).toLowerCase().trim())]).catch(() => []) : [];
+    // Payments for this supplier — DERIVED from the same source-of-truth as the admin Payments Report (PO
+    // completion + balance milestones, the deposit register, and Other payments), NOT the payment_transactions
+    // ledger (which is import-only and doesn't capture plan-entered dates/amounts). Starting deposits are
+    // excluded (they're a drawdown against a register deposit, not a separate cash payment).
+    const _pnames = names.map(n => String(n).toLowerCase().trim());
+    const payments = names.length ? await q(`SELECT dt payment_date, dt payment_run_ref, reference, type, amount, deposit_ref FROM (
+        SELECT to_char(o.pay_completion_date,'YYYY-MM-DD') dt, o.po reference, round(o.pay_completion_assigned,2) amount, 'Completion' type, coalesce(o.deposit_ref,'') deposit_ref
+          FROM planner.purchase_orders o WHERE o.pay_completion_date IS NOT NULL AND coalesce(o.pay_completion_assigned,0)>0 AND lower(trim(o.supplier_name))=ANY($1)
+        UNION ALL
+        SELECT to_char(o.pay_balance_1_date,'YYYY-MM-DD'), o.po, round(o.pay_balance_1_amount,2), 'Balance', coalesce(o.deposit_ref,'')
+          FROM planner.purchase_orders o WHERE o.pay_balance_1_date IS NOT NULL AND coalesce(o.pay_balance_1_amount,0)>0 AND lower(trim(o.supplier_name))=ANY($1)
+        UNION ALL
+        SELECT to_char(o.pay_balance_2_date,'YYYY-MM-DD'), o.po, round(o.pay_balance_2_amount,2), 'Balance', coalesce(o.deposit_ref,'')
+          FROM planner.purchase_orders o WHERE o.pay_balance_2_date IS NOT NULL AND coalesce(o.pay_balance_2_amount,0)>0 AND lower(trim(o.supplier_name))=ANY($1)
+        UNION ALL
+        SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(nullif(reference,''), description, ''), round(amount,2), 'Deposit', ''
+          FROM planner.deposits WHERE is_deposit=true AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND lower(trim(supplier_name))=ANY($1)
+        UNION ALL
+        SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(nullif(reference,''), description, ''), round(amount,2), 'Other', ''
+          FROM planner.deposits WHERE is_deposit=false AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND lower(trim(supplier_name))=ANY($1)
+      ) t ORDER BY payment_date DESC NULLS LAST`, [_pnames]).catch(() => []) : [];
     // Shipment Plan tab: all shipments this supplier is on — as consolidator (master) OR with a PO aboard
     // (so they see who consolidates their goods / whose POs share their shipment). Same builder as the admin tab.
     const nameSet = new Set(names.map(n => String(n).toLowerCase()));
@@ -6890,7 +6908,7 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
       shipmentPlan.forEach(s => { if (s.shipment_ref) s.unread_dnb = um[s.shipment_ref] || 0; });
     }
     res.json({ pos, lb, sdep: deps, sid: ids[0] || null, supplierName: names.join(', '),
-      notesByPo, subsByPo, costsByPo, supSkus, xdByPo, addByPo, samples, payments, shipmentPlan });
+      notesByPo, subsByPo, costsByPo, supSkus, xdByPo, addByPo, approvedByPo, samples, payments, shipmentPlan });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
