@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.443 - Portal: no-shipment PO is not an action; own-carrier tickbox
+
+On the supplier portal, a PO with no shipment assigned is a passive state, not an action. Enlarged the "No
+shipment assigned yet…" message and moved the carrier / tracking ref / freight-charge inputs behind a new
+tickbox "Supplier shipped this with own carrier account (ie. DHL / Fedex)" — unticked shows just the message
+(nothing to do); ticking reveals the inputs + "Create shipment & save". Combined with v25.441 (blank
+destination no longer FOB) this clears the phantom shipment action. No migration.
+
 ## v25.442 - Created-note wording + attribute to the real user (DEV_USER on sandbox)
 
 - Timeline note now reads **"<user> created a new purchase order"** (added the missing "a").

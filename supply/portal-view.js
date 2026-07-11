@@ -681,7 +681,7 @@
             +(p.ships_with_supplier?' &nbsp;·&nbsp; ships with supplier: <b>'+esc(p.ships_with_supplier)+'</b>':'')
             +'<br>Ship date: '+(p.ship?esc(fd(p.ship)):'<span class="mut">—</span>')+' · Est. completion: '+(p.prod_end?esc(fd(p.prod_end)):'<span class="mut">—</span>')
             +' &nbsp; <button class="lnk-btn pp-go-shipplan" data-ref="'+esc(p.shipment)+'" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;background:none;border:none;padding:0;font:inherit">View in Shipment Plan →</button></div>'
-        : '<div class="tiny mut" style="margin-bottom:8px">No shipment assigned yet — enter the carrier &amp; tracking below and we’ll create the shipment for this PO.</div>';
+        : '<div style="font-size:13px;color:#334155;margin-bottom:8px">No shipment assigned yet — enter the carrier &amp; tracking below and we’ll create the shipment for this PO.</div>';
       var flexRef=p.flexport_reference||p.flex_id||((carVal==='Flexport')?trkVal:'');
       var shipment=hasShip
         // shipment already linked → carrier / tracking / Flexport ref are READ-ONLY (managed on the shipment centrally)
@@ -699,14 +699,18 @@
           +'<label class="tiny">Freight (&pound;/$)<br><input class="fci pp-fcost" data-ref="'+esc(p.shipment)+'" placeholder="0.00" style="width:110px;text-align:left" inputmode="decimal"></label>'
           +'<label class="tiny">Note (optional)<br><input class="fci pp-fnote" data-ref="'+esc(p.shipment)+'" placeholder="e.g. extra container" style="width:200px;text-align:left"></label>'
           +'<button class="save-btn pp-fchg-go" data-ref="'+esc(p.shipment)+'">Add freight charge</button></div>'
-        // no shipment yet → editable: pick carrier + tracking; submitting creates the shipment for this PO
+        // no shipment yet → NOT an action. Only if the supplier ticks "shipped with own carrier" do we reveal
+        // the carrier/tracking/charge inputs (submitting then creates the shipment for this PO).
         : shipHead
+          +'<label style="display:block;font-size:12px;margin-bottom:6px;cursor:pointer"><input type="checkbox" class="pp-ownship" data-po="'+po+'" style="vertical-align:middle;margin-right:6px">Supplier shipped this with own carrier account (ie. DHL / Fedex)</label>'
+          +'<div class="pp-ownship-box" data-po="'+po+'" style="display:none">'
           +'<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end">'
           +'<label class="tiny">Carrier<br><select class="fci pp-car" data-po="'+po+'" style="min-width:120px;text-align:left">'+carOpts+'</select></label>'
           +'<label class="tiny">Tracking ref<br><input class="fci pp-trk" data-po="'+po+'" value="'+esc(trkVal)+'" placeholder="e.g. MAEU… / Flexport ID" style="width:170px;text-align:left"></label>'
           +'<label class="tiny">Freight charge (optional, &pound;/$)<br><input class="fci pp-fcost-new" data-po="'+po+'" placeholder="0.00" style="width:140px;text-align:left" inputmode="decimal"></label>'
           +'<button class="save-btn pp-trk-go" data-po="'+po+'">Create shipment &amp; save</button></div>'
-          +'<div class="tiny mut" style="margin-top:4px">Submitting creates the shipment for this PO, saves the carrier &amp; tracking, and logs any freight charge for Dock &amp; Bay to review.</div>';
+          +'<div class="tiny mut" style="margin-top:4px">Submitting creates the shipment for this PO, saves the carrier &amp; tracking, and logs any freight charge for Dock &amp; Bay to review.</div>'
+          +'</div>';
       shipment = shipLabelBtn + shipment;
       if(cdSkus.length){ var xrows=cdSkus.map(function(s){ var q=xd[s];
           return '<tr><td class="l">'+esc(s)+'</td><td style="text-align:right"><input class="fci pp-xqty" data-po="'+po+'" data-sku="'+esc(s)+'" value="'+(q!=null&&q!==''?esc(q):'')+'" placeholder="qty shipped" style="width:96px;text-align:right" inputmode="numeric"></td></tr>'; }).join('');
@@ -1440,6 +1444,7 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
               // selects + badge in place (no reload, no full-cell flash from the grid)
               scope.querySelectorAll('.pp-prod').forEach(function(sel){ sel.onchange=function(){ var po=sel.dataset.po, val=sel.value; sel.disabled=true;
                 postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,production_status:val},function(){ applyProdStatus(po,val); }); }; });
+              scope.querySelectorAll('.pp-ownship').forEach(function(cb){ cb.onchange=function(){ var bx=scope.querySelector('.pp-ownship-box[data-po="'+cb.dataset.po+'"]'); if(bx)bx.style.display=cb.checked?'':'none'; }; });
               scope.querySelectorAll('.pp-trk-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po; var t=pick('pp-trk',po).value, cc=pick('pp-car',po).value; if(!t&&!cc){ alert('Pick a carrier and/or enter a tracking ref.'); return; } var fcEl=pick('pp-fcost-new',po); var fc=fcEl?Number(fcEl.value)||0:0; btn.disabled=true;
                 var row=btn.closest('tr[id^="pp-"]');
                 postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,tracking:t,carrier:cc},function(j){
