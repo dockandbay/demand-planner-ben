@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.419 - Analyse consolidation: sticky Select+PO columns, Pallets to col 3, compact
+
+Mobile table tweaks: the **Select** and **PO** columns are now **sticky/pinned** to the left while the rest
+scrolls horizontally; **Pallets** moved to **column 3** (right after PO, so the container-fill size stays
+visible with the pinned columns). Tightened the **Select** column (24px, minimal padding — removed the extra
+whitespace around the checkbox) and reduced cell padding on mobile (≤640px) for a compact grid. No migration.
+
 ## v25.418 - Analyse consolidation: readable anchor line + dd-mmm dates
 
 Anchor summary in the consolidation modal now spans two lines with generous line-height (was squished on
