@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.417 - Analyse consolidation: mobile fixes
+
+Made the Analyse-consolidation modal usable on mobile: added an always-visible **✕ close button** in the
+header (the backdrop was hard to tap on a full-width phone modal), and wrapped the candidate table in a
+**horizontal-scroll container** with a `min-width` so columns keep their width and the table scrolls
+sideways instead of squashing. No migration.
+
 ## v25.416 - Shorten dockandbay.com user in ALL note timelines (incl. demand planner + portal)
 
 Extends the `ben@` shortening to timeline note **bodies and authors** everywhere they render, so older

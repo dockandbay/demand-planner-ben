@@ -1127,10 +1127,13 @@
     var bg=document.createElement('div'); bg.className='pomodal-bg';
     bg.innerHTML='<div class="pomodal" style="width:940px;max-width:96vw;display:flex;flex-direction:column;max-height:90vh">'
       +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="font-weight:700;font-size:15px">⊕ Analyse consolidation</div>'
-      +'<div class="mut tiny" style="margin-left:auto">anchor <b>'+esc(anchorPo)+'</b></div></div>'
+      +'<div class="mut tiny" style="margin-left:auto">anchor <b>'+esc(anchorPo)+'</b></div>'
+      +'<button id="consol-x" title="Close" style="flex:0 0 auto;border:none;background:transparent;font-size:22px;line-height:1;cursor:pointer;color:#64748b;padding:2px 6px;font-family:inherit">✕</button></div>'
       +'<div id="consol-body" style="overflow:auto;flex:1 1 auto"><div class="count" style="padding:20px">Loading…</div></div></div>';
     document.body.appendChild(bg);
-    bg.onclick=function(e){ if(e.target===bg)bg.parentNode.removeChild(bg); };
+    function closeConsol(){ if(bg.parentNode)bg.parentNode.removeChild(bg); }
+    bg.onclick=function(e){ if(e.target===bg)closeConsol(); };
+    bg.querySelector('#consol-x').onclick=closeConsol;
     var body=bg.querySelector('#consol-body');
     function containerPlan(t){ t=Math.round(t*10)/10; var c=[]; var full=Math.floor((t+1e-6)/20); for(var i=0;i<full;i++)c.push(20); var rem=Math.round((t-full*20)*10)/10; if(rem>0.05)c.push(rem<=10?10:20); return c; }
     function planTxt(t){ var c=containerPlan(t); if(!c.length)return '—'; var f40=c.filter(function(x){return x===20;}).length, f20=c.filter(function(x){return x===10;}).length; var parts=[]; if(f40)parts.push(f40+'×40ft (20 pal)'); if(f20)parts.push(f20+'×20ft (10 pal)'); var cap=c.reduce(function(a,x){return a+x;},0); return parts.join(' + ')+' — '+(Math.round(t*10)/10)+' of '+cap+' pallet slots'; }
@@ -1147,7 +1150,8 @@
         +'<div style="text-align:right;margin-top:8px"><button class="save-btn light" id="consol-cancel">Close</button></div>';
         body.innerHTML=h; document.getElementById('consol-cancel').onclick=function(){ bg.parentNode.removeChild(bg); }; return; }
       h+='<div id="consol-rec" style="font-size:12px;margin-bottom:8px"></div>';
-      h+='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;border-bottom:1px solid #e2e8f0">'
+      h+='<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">';
+      h+='<table style="width:100%;min-width:660px;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;border-bottom:1px solid #e2e8f0">'
         +'<th style="padding:4px 6px"><input type="checkbox" id="consol-all"></th><th style="padding:4px 6px">PO</th><th style="padding:4px 6px">Prod</th><th style="padding:4px 6px">Supplier</th><th style="padding:4px 6px">Client</th><th style="padding:4px 6px">Completes</th><th style="padding:4px 6px">Δ days</th><th style="padding:4px 6px;text-align:right">Pallets</th><th style="padding:4px 6px">Current shipment</th></tr></thead><tbody>';
       h+='<tr style="background:#f8fafc"><td style="padding:4px 6px"><input type="checkbox" checked disabled></td><td style="padding:4px 6px"><b>'+esc(A.po)+'</b> <span class="mut tiny">anchor</span></td><td style="padding:4px 6px">'+(A.prod_no?'P'+esc(A.prod_no):'')+'</td><td style="padding:4px 6px">'+esc(A.supplier||'')+'</td><td style="padding:4px 6px">'+esc(A.client||'')+'</td><td style="padding:4px 6px">'+esc(A.completion||'')+'</td><td style="padding:4px 6px">0</td><td style="padding:4px 6px;text-align:right">'+(A.pallets||0)+'</td><td style="padding:4px 6px">'+esc(A.shipment_ref||'—')+'</td></tr>';
       cs.forEach(function(c){ var dd=c.delta_days;
@@ -1156,7 +1160,7 @@
           +'<td style="padding:4px 6px">'+esc(c.completion||'')+'</td><td style="padding:4px 6px">'+(dd>0?'+':'')+dd+'</td><td style="padding:4px 6px;text-align:right">'+(c.pallets||0)+'</td>'
           +'<td style="padding:4px 6px">'+(c.shipment_ref?esc(c.shipment_ref)+(c.is_master?' <span class="mut tiny">(master)</span>':''):'<span class="mut tiny">unassigned</span>')+'</td></tr>';
       });
-      h+='</tbody></table>';
+      h+='</tbody></table></div>';
       if(d.truncated)h+='<div class="mut tiny" style="margin-top:6px">Showing the nearest 80 POs by completion date.</div>';
       var exSet={}; cs.forEach(function(c){ if(c.shipment_ref)exSet[c.shipment_ref]=1; }); if(A.shipment_ref)exSet[A.shipment_ref]=1;
       var exRefs=Object.keys(exSet);
