@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.422 - Analyse consolidation: recommend one container + spillover note
+
+Reverted to a **single 40ft container** recommendation (per Ben) but with a clear overflow note. Phase 1
+best-fits nearby POs into one 20-pallet container without overshooting; Phase 2 — only when it's still
+notably under-filled and just larger POs remain — adds the smallest PO that tops it over 20 and reports the
+spill: **"plus N pallets from PO xxx that won't fit — place on another shipment."** Clean 20/20 fills show no
+note (verified: PO-1672805 / PO-55USLX1 fill exactly 20). Oversize anchor reports its own spill. No migration.
+
 ## v25.421 - Analyse consolidation: recommendation fills up to two containers
 
 Extended the engine to consolidate **up to two 40ft containers (~40 pallets)**, not just one. A knapsack over
