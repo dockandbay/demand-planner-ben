@@ -578,6 +578,8 @@
     return '<input class="'+cls+'" list="deprefs" placeholder="'+(needed?'assign deposit…':'no deposit')+'" data-ep="'+esc(ep)+'" data-field="deposit_ref" value="'+esc(val==null?'':val)+'">'; }
   var PO_COUNTRIES=[['UK','UK'],['US','US'],['AU','AU'],['EU','EU'],['CA','CA'],['DIRECT','Direct to Client']];
   function clabel(c){ return c==='DIRECT'?'Direct':(c||''); }
+  // grid Ship-to display: the five majors show as-is; anything else (DIRECT / other) shows as "OT" (OTHER)
+  function cgridLabel(c){ if(!c)return ''; c=String(c).toUpperCase(); return ['UK','US','AU','EU','CA'].indexOf(c)>=0?c:'OT'; }
   function countrySel(ep,val,pay,cls){ var opts='<option value=""'+(val?'':' selected')+'>— (use branch)</option>';
     var known=PO_COUNTRIES.some(function(o){return o[0]===val;});
     if(val&&!known)opts+='<option value="'+esc(val)+'" selected>'+esc(val)+'</option>';
@@ -1779,7 +1781,7 @@
     return '<tr'+ga+'><td class="l"><button class="planbtn po-exp" data-po="'+esc(r.po)+'" data-i="'+i+'">PLAN</button><button class="fav-star'+(r.starred?' on':'')+'" data-star-po="'+esc(r.po)+'" title="Focus / favourite">'+(r.starred?'★':'☆')+'</button></td>'+pocell
       +'<td class="l">'+erpCell+'</td>'
       +'<td class="l">'+cellPickBtn(r.po,'/api/supply/po/'+encodeURIComponent(r.po)+'/supplier','supplier_name',r.supplier_name,'supplier')+'</td>'
-      +'<td class="l">'+cellPickBtn(r.po,ep,'country_code',clabel(r.country),'country')+(r.country_src==='branch'&&r.country?'<span class="mut tiny" title="inherited from branch country"> (branch)</span>':'')+'</td>'
+      +'<td class="l">'+cellPickBtn(r.po,ep,'country_code',cgridLabel(r.country),'country')+(r.country_src==='branch'&&r.country?'<div class="mut tiny" style="margin-top:1px" title="inherited from branch country">(branch)</div>':'')+'</td>'
       +'<td class="l">'+cellPickBtn(r.po,ep,'branch',r.branch,'branch')+'</td>'
       +'<td class="l" style="font-size:10px;line-height:1.05;max-width:130px;white-space:normal">'+(r.client?esc(r.client):'<span class="mut">—</span>')+'<br>'+(r.sales_order_ref?'<span class="mut">'+esc(r.sales_order_ref)+'</span>':'<span class="mut">—</span>')+'</td>'
       +'<td class="l">'+statusSel(ep,r.status)+((r.status==='PRODUCTION'&&r.ship_status==='Shipping')?'<div style="margin-top:3px"><button class="po-set-shipping" data-po="'+esc(r.po)+'" title="This PO&rsquo;s shipment has departed (Shipping) but the PO is still in Production — set this PO and every PO on the same shipment still in Production to SHIPPING">→ set shipping</button></div>':'')+'</td>'

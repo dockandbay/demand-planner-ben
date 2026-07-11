@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.431 - PO grid Ship-to: "(branch)" on its own line + Direct shows "OT"
+
+The inherited "(branch)" hint now sits on a second line below the value (not after it), and the Ship-to cell
+displays anything that isn't UK/US/AU/EU/CA (i.e. Direct / other) as **"OT"**. Grid display only; the picker
+options and stored `country_code` are unchanged. No migration.
+
 ## v25.430 - PO grid: Ship-to matches Branch cell-pick + narrower Supplier column
 
 - **Ship to** now uses the exact **cell-pick** control as Branch — value + a small ▾, opening the same popover
