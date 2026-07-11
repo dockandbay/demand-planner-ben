@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.430 - PO grid: Ship-to matches Branch cell-pick + narrower Supplier column
+
+- **Ship to** now uses the exact **cell-pick** control as Branch — value + a small ▾, opening the same popover
+  (country list: UK / US / AU / EU / CA / Direct / "— use branch"). Saves the `country_code` override in place;
+  a "(branch)" hint shows when inherited. (Replaces the native select from v25.428/429.)
+- **Supplier** column narrowed: long names now **wrap onto a second line** and the text is **1pt smaller**
+  (10px, max-width ~104px) so the column takes less width. No migration.
+
 ## v25.429 - PO grid Ship-to dropdown: subtle grey styling
 
 Styled the grid Ship-to country dropdown to match the Branch cell-pick — transparent border, no fill, grey

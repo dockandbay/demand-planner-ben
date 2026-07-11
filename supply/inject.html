@@ -153,9 +153,8 @@
 #supply-root .fci.saved{border-color:#16a34a!important;background:#f0fdf4!important;color:#166534!important}
 #supply-root .fci.err{border-color:#dc2626!important;background:#fef2f2!important;color:#991b1b!important}
 #supply-root select.fci{cursor:pointer;font-weight:700;text-align:left}
-/* grid Ship-to dropdown: subtle grey (matches the branch cell-pick), blends into the table */
-#supply-root select.fci.cc-grid{border:1px solid transparent;background:none;color:#1a1a1a;font-weight:400;padding:2px 5px}
-#supply-root select.fci.cc-grid:hover{border-color:#cbd5e1;background:#f8fafc}
+/* Supplier cell: narrower column — wrap long names onto a second line, 1pt smaller */
+#supply-root .cell-pick[data-kind="supplier"]{white-space:normal;font-size:10px;line-height:1.15;max-width:104px}
 #supply-root .fci.needdep{background:#fee2e2;border-color:#fca5a5;color:#991b1b}
 #supply-root .qtycell{width:54px;text-align:center;font-size:11px;border:1px solid transparent;background:transparent;border-radius:3px;color:#1a1a1a;font-family:inherit;padding:2px 4px}
 #supply-root .qtycell:hover,#supply-root .qtycell:focus{border-color:#93c5fd;background:#fff;outline:none}
@@ -1073,28 +1072,29 @@
   function bindDepPick(done){ document.querySelectorAll('#supply-root .dep-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openDepPick(b.dataset.po,b,done); }; }); }
   // Generic searchable cell picker (same UX as the shipment/deposit popovers) — used for Supplier & Branch.
   // Not a link to a table; just the dropdown/search to set the value. data-list: 'supplier' | 'branch'.
-  var CELL_LBL={supplier:'supplier',branch:'branch',prod:'production',batch:'batch'};
+  var CELL_LBL={supplier:'supplier',branch:'branch',prod:'production',batch:'batch',country:'ship-to'};
   function cellPickBtn(po,ep,field,val,kind){
     return '<button class="cell-pick" data-po="'+esc(po)+'" data-ep="'+esc(ep)+'" data-field="'+esc(field)+'" data-kind="'+kind+'" title="'+esc(val||'')+'">'+(val?esc(val):'<span class="mut">— <span style="background:#fee2e2;color:#991b1b;font-weight:700;border-radius:3px;padding:0 3px">assign</span></span>')+' ▾</button>'; }
   function bindCellPick(){ document.querySelectorAll('#supply-root .cell-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openCellPick(b); }; }); }
   function openCellPick(btn){ closeShPop();
-    var kind=btn.dataset.kind, lbl=CELL_LBL[kind]||kind;
-    var src={supplier:supplierList,branch:branchList,prod:prodList,batch:batchList}[kind]||[];
-    var list=src.slice().sort();
+    var kind=btn.dataset.kind, lbl=CELL_LBL[kind]||kind, isCtry=(kind==='country');
+    // list of {v:value, l:label}; country is a fixed code→label set, the rest are searchable string lists
+    var list=isCtry ? PO_COUNTRIES.map(function(o){return {v:o[0],l:o[1]};})
+                     : ({supplier:supplierList,branch:branchList,prod:prodList,batch:batchList}[kind]||[]).slice().sort().map(function(n){return {v:n,l:n};});
     var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop';
-    pop.innerHTML='<div class="shpop-h">Set '+lbl+' for <b>'+esc(btn.dataset.po)+'</b></div><input class="shpop-q" placeholder="search '+lbl+'…"><div id="shpop-list"></div>';
+    pop.innerHTML='<div class="shpop-h">Set '+lbl+' for <b>'+esc(btn.dataset.po)+'</b></div>'+(isCtry?'':'<input class="shpop-q" placeholder="search '+lbl+'…">')+'<div id="shpop-list"></div>';
     placePop(pop, btn.getBoundingClientRect()); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
     function set(val){ var body={}; body[btn.dataset.field]=val;
       fetch(btn.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error); closeShPop(); if(_poPatchRow){ _poPatchRow(btn.dataset.po); } else if(_poRefresh){ _poRefresh(); } else { invalidateDerived(); delete cache['purchase-orders']; selectSection('purchase-orders'); } })   // patch just this row (silent)
         .catch(function(e){ alert('Failed: '+(e.message||e)); }); }
-    function render(q){ q=(q||'').trim().toLowerCase(); var html='<div class="shpop-opt unassign" data-clear="1">— Clear</div>';
-      var ms=list.filter(function(n){return !q||String(n).toLowerCase().indexOf(q)>=0;});
-      ms.slice(0,q?80:15).forEach(function(n){ html+='<div class="shpop-opt" data-v="'+esc(n)+'">'+esc(n)+'</div>'; });
+    function render(q){ q=(q||'').trim().toLowerCase(); var html='<div class="shpop-opt unassign" data-clear="1">'+(isCtry?'— (use branch country)':'— Clear')+'</div>';
+      var ms=list.filter(function(n){return !q||n.l.toLowerCase().indexOf(q)>=0;});
+      ms.slice(0,q?80:15).forEach(function(n){ html+='<div class="shpop-opt" data-v="'+esc(n.v)+'">'+esc(n.l)+'</div>'; });
       if(!q&&list.length>15)html+='<div class="mut tiny" style="padding:5px 10px">'+(list.length-15)+' more — type to search…</div>';
       var l=document.getElementById('shpop-list'); l.innerHTML=html;
       l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ set(o.dataset.clear?'':o.dataset.v); }; }); }
-    render(''); pop.querySelector('.shpop-q').oninput=function(){render(this.value);}; pop.querySelector('.shpop-q').focus(); }
+    render(''); var qi=pop.querySelector('.shpop-q'); if(qi){ qi.oninput=function(){render(this.value);}; qi.focus(); } }
   function openShipAssign(po,anchor){ closeShPop();
     if(/manufactur/i.test((poBy[po]||{}).branch||'')){ alert('PO '+po+' is on the MANUFACTURING branch (FOB) — collected at the factory, so no shipment is assigned.'); return; }
     var cur=(poBy[po]||{}).shipment||'';
@@ -1779,7 +1779,7 @@
     return '<tr'+ga+'><td class="l"><button class="planbtn po-exp" data-po="'+esc(r.po)+'" data-i="'+i+'">PLAN</button><button class="fav-star'+(r.starred?' on':'')+'" data-star-po="'+esc(r.po)+'" title="Focus / favourite">'+(r.starred?'★':'☆')+'</button></td>'+pocell
       +'<td class="l">'+erpCell+'</td>'
       +'<td class="l">'+cellPickBtn(r.po,'/api/supply/po/'+encodeURIComponent(r.po)+'/supplier','supplier_name',r.supplier_name,'supplier')+'</td>'
-      +'<td class="l">'+countrySel(ep,r.country_override,false,'cc-grid')+(r.country_src==='branch'&&r.country?' <span class="mut tiny" title="inherited from branch country">'+esc(clabel(r.country))+'</span>':'')+'</td>'
+      +'<td class="l">'+cellPickBtn(r.po,ep,'country_code',clabel(r.country),'country')+(r.country_src==='branch'&&r.country?'<span class="mut tiny" title="inherited from branch country"> (branch)</span>':'')+'</td>'
       +'<td class="l">'+cellPickBtn(r.po,ep,'branch',r.branch,'branch')+'</td>'
       +'<td class="l" style="font-size:10px;line-height:1.05;max-width:130px;white-space:normal">'+(r.client?esc(r.client):'<span class="mut">—</span>')+'<br>'+(r.sales_order_ref?'<span class="mut">'+esc(r.sales_order_ref)+'</span>':'<span class="mut">—</span>')+'</td>'
       +'<td class="l">'+statusSel(ep,r.status)+((r.status==='PRODUCTION'&&r.ship_status==='Shipping')?'<div style="margin-top:3px"><button class="po-set-shipping" data-po="'+esc(r.po)+'" title="This PO&rsquo;s shipment has departed (Shipping) but the PO is still in Production — set this PO and every PO on the same shipment still in Production to SHIPPING">→ set shipping</button></div>':'')+'</td>'
