@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.457 - CONFIG portal preview payments also derived (not the ledger)
+
+The CONFIG > Portal preview uses /api/supply/supplier-payments/:name, which still read the import-only
+payment_transactions ledger — so plan-entered payments were missing in the preview even after v25.453 fixed
+the real portal. Switched this endpoint to the same derived source (PO completion/balance + deposit register
++ other). Verified: Lixin preview now returns 128 payments incl. newly-added test entries. No migration.
+
 ## v25.456 - Deep-link each supplier portal preview: #/config/portal/<name>
 
 The CONFIG portal preview is now deep-linkable per supplier, e.g. #/config/portal/lixin — opens CONFIG >

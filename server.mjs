@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.456';
+const APP_VERSION = 'v25.457';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3451,14 +3451,26 @@ app.get('/api/supply/portal-submissions/:sid', async (req, res) => {
 // Payments made to a supplier (payment ledger) — feeds the CONFIG ▸ Portal preview's master PAYMENTS tab (the
 // real portal gets the same data via /api/portal/bootstrap).
 app.get('/api/supply/supplier-payments/:name', async (req, res) => {
-  try { res.json(await pool.query(`SELECT to_char(payment_date,'YYYY-MM-DD') payment_date, coalesce(payment_run_ref,'') payment_run_ref,
-      coalesce(transaction_reference,'') reference, coalesce(transaction_type,'') type, transaction_amount amount,
-      coalesce(nullif(pt.deposit_ref,''), (SELECT po.deposit_ref FROM planner.purchase_orders po WHERE po.po = coalesce(nullif(pt.transaction_reference,''), nullif(pt.po_completion,''), nullif(pt.po_balance_1,''), nullif(pt.po_balance_2,''), nullif(pt.po_balance_3,'')) LIMIT 1), '') deposit_ref,
-      coalesce(invoice_reference,'') invoice_reference,
-      coalesce(po_completion,'') po_completion, coalesce(po_balance_1,'') po_balance_1,
-      coalesce(po_balance_2,'') po_balance_2, coalesce(po_balance_3,'') po_balance_3
-    FROM planner.payment_transactions pt WHERE pt.transaction_supplier = $1
-    ORDER BY payment_date DESC NULLS LAST, id DESC`, [req.params.name]).then(r => r.rows)); }
+  // DERIVED from the same source-of-truth as the admin Payments Report + the real portal bootstrap: PO
+  // completion + balance milestones, the deposit register, and Other payments (NOT the import-only
+  // payment_transactions ledger, which misses plan-entered dates/amounts). Starting deposits excluded.
+  const nm = [String(req.params.name || '').toLowerCase().trim()];
+  try { res.json(await pool.query(`SELECT dt payment_date, dt payment_run_ref, reference, type, amount, deposit_ref FROM (
+      SELECT to_char(o.pay_completion_date,'YYYY-MM-DD') dt, o.po reference, round(o.pay_completion_assigned,2) amount, 'Completion' type, coalesce(o.deposit_ref,'') deposit_ref
+        FROM planner.purchase_orders o WHERE o.pay_completion_date IS NOT NULL AND coalesce(o.pay_completion_assigned,0)>0 AND lower(trim(o.supplier_name))=ANY($1)
+      UNION ALL
+      SELECT to_char(o.pay_balance_1_date,'YYYY-MM-DD'), o.po, round(o.pay_balance_1_amount,2), 'Balance', coalesce(o.deposit_ref,'')
+        FROM planner.purchase_orders o WHERE o.pay_balance_1_date IS NOT NULL AND coalesce(o.pay_balance_1_amount,0)>0 AND lower(trim(o.supplier_name))=ANY($1)
+      UNION ALL
+      SELECT to_char(o.pay_balance_2_date,'YYYY-MM-DD'), o.po, round(o.pay_balance_2_amount,2), 'Balance', coalesce(o.deposit_ref,'')
+        FROM planner.purchase_orders o WHERE o.pay_balance_2_date IS NOT NULL AND coalesce(o.pay_balance_2_amount,0)>0 AND lower(trim(o.supplier_name))=ANY($1)
+      UNION ALL
+      SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(nullif(reference,''), description, ''), round(amount,2), 'Deposit', ''
+        FROM planner.deposits WHERE is_deposit=true AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND lower(trim(supplier_name))=ANY($1)
+      UNION ALL
+      SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(nullif(reference,''), description, ''), round(amount,2), 'Other', ''
+        FROM planner.deposits WHERE is_deposit=false AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND lower(trim(supplier_name))=ANY($1)
+    ) t ORDER BY payment_date DESC NULLS LAST`, [nm]).then(r => r.rows)); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Internal one-click apply / dismiss of a staged supplier submission (Phase 4). Apply writes to the live PO
