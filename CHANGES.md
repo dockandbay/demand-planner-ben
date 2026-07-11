@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.433 - PO grid: Supplier column narrower + no L/R padding
+
+Tightened the Supplier column further (cell-pick max-width ~82px, no left/right padding on the button + cell) so it takes minimal width; names still wrap onto a second line at 10px. No migration.
+
 ## v25.432 - PO grid: narrower PO column + note icon next to the star
 
 The PO reference now wraps onto a second line past ~15 characters (narrower PO column), and the "N" note

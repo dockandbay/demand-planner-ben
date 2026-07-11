@@ -153,8 +153,9 @@
 #supply-root .fci.saved{border-color:#16a34a!important;background:#f0fdf4!important;color:#166534!important}
 #supply-root .fci.err{border-color:#dc2626!important;background:#fef2f2!important;color:#991b1b!important}
 #supply-root select.fci{cursor:pointer;font-weight:700;text-align:left}
-/* Supplier cell: narrower column — wrap long names onto a second line, 1pt smaller */
-#supply-root .cell-pick[data-kind="supplier"]{white-space:normal;font-size:10px;line-height:1.15;max-width:104px}
+/* Supplier cell: narrow column — wrap long names, 1pt smaller, no L/R padding */
+#supply-root .po-supcell{padding-left:1px!important;padding-right:1px!important}
+#supply-root .cell-pick[data-kind="supplier"]{white-space:normal;font-size:10px;line-height:1.1;max-width:82px;padding-left:0;padding-right:0}
 #supply-root .fci.needdep{background:#fee2e2;border-color:#fca5a5;color:#991b1b}
 #supply-root .qtycell{width:54px;text-align:center;font-size:11px;border:1px solid transparent;background:transparent;border-radius:3px;color:#1a1a1a;font-family:inherit;padding:2px 4px}
 #supply-root .qtycell:hover,#supply-root .qtycell:focus{border-color:#93c5fd;background:#fff;outline:none}
@@ -1782,7 +1783,7 @@
     else erpCell='<span class="tool-badge bg-green" title="planned quantities match the ERP">✓ in sync</span>';
     return '<tr'+ga+'><td class="l" style="white-space:nowrap"><button class="planbtn po-exp" data-po="'+esc(r.po)+'" data-i="'+i+'">PLAN</button><button class="fav-star'+(r.starred?' on':'')+'" data-star-po="'+esc(r.po)+'" title="Focus / favourite">'+(r.starred?'★':'☆')+'</button>'+noteFlag+'</td>'+pocell
       +'<td class="l">'+erpCell+'</td>'
-      +'<td class="l">'+cellPickBtn(r.po,'/api/supply/po/'+encodeURIComponent(r.po)+'/supplier','supplier_name',r.supplier_name,'supplier')+'</td>'
+      +'<td class="l po-supcell">'+cellPickBtn(r.po,'/api/supply/po/'+encodeURIComponent(r.po)+'/supplier','supplier_name',r.supplier_name,'supplier')+'</td>'
       +'<td class="l">'+cellPickBtn(r.po,ep,'country_code',cgridLabel(r.country),'country')+(r.country_src==='branch'&&r.country?'<div class="mut tiny" style="margin-top:1px" title="inherited from branch country">(branch)</div>':'')+'</td>'
       +'<td class="l">'+cellPickBtn(r.po,ep,'branch',r.branch,'branch')+'</td>'
       +'<td class="l" style="font-size:10px;line-height:1.05;max-width:130px;white-space:normal">'+(r.client?esc(r.client):'<span class="mut">—</span>')+'<br>'+(r.sales_order_ref?'<span class="mut">'+esc(r.sales_order_ref)+'</span>':'<span class="mut">—</span>')+'</td>'
