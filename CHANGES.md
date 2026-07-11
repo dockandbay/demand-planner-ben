@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.445 - Portal PLAN > SHIPMENTS sub-tab: drop the no-shipment "(1)"
+
+Confirmed the "(1) next to SHIPMENT" is the per-PO PLAN > SHIPMENTS sub-tab badge (supplier portal > Purchase
+Orders > PLAN). It counted "no shipment / tracking submitted yet" as 1 action for every PO not on a shipment.
+Removed that term — the badge now only reflects a real outstanding crossdock quantity entry. (portal.html
+already cache-busts portal-view.js per load, so a fresh portal open shows it; the earlier persistence was a
+non-reloaded page.) No migration.
+
 ## v25.444 - Portal: remove the "(1)" on SHIPMENT for POs with no shipment
 
 The SHIPMENT sub-tab badge counted "no shipment/tracking submitted yet" as 1 action for every PO not yet on

@@ -778,7 +778,7 @@
       // ---- tabs + action badges ----
       var tabs=[['timeline','TIMELINE',timeline,unreadInt+((needConfirm&&!confirmed)?1:0)+(prodExc?1:0)+(cdMiss?1:0)],['orderplan','ORDER PLAN',skus,0],
         ['invoice','INVOICE',invoice, invoiceDue(p,subs)?1:0],['payments','PAYMENTS',payments,0],
-        ['shipment','SHIPMENT',shipment, xdAction],   // no-shipment-yet is a passive state, not an action — only a real crossdock qty entry counts
+        ['shipment','SHIPMENT',shipment, xdAction],   // "no shipment assigned yet" is a passive state, not an action — only a real outstanding crossdock qty entry counts
         ['barcodes','BARCODES & LABELS',barcodesLabels,0]];
       if(dtcApplies) tabs.push(['dtc','DIRECT TO CLIENT DETAILS', dtc, dtcAccepted?0:1]);
       function badge(n){ return n>0?' <span class="ex-badge">'+n+'</span>':''; }
