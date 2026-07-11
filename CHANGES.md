@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.416 - Shorten dockandbay.com user in ALL note timelines (incl. demand planner + portal)
+
+Extends the `ben@` shortening to timeline note **bodies and authors** everywhere they render, so older
+"<user> created ..." notes (whose full email is baked into the stored body) also show short. A `shortNotes()`
+normalizer shortens each notes array at load: supply PO/shipment/sample timelines (inject) and the supplier
+**portal** PO/shipment/sample timelines (portal-view). Demand-planner forecast-note authors were already
+shortened (v25.415). Display-only; stored data unchanged. No migration.
+
 ## v25.415 - New-PO timeline note + shorten dockandbay.com user to "ben@"
 
 Two changes:

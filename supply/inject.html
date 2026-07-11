@@ -458,6 +458,7 @@
 
   function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function shortUser(s){return String(s==null?'':s).replace(/@dockandbay\.com\b/gi,'@');}  // ben@dockandbay.com → ben@ (display only)
+  function shortNotes(arr){ (arr||[]).forEach(function(n){ if(n){ if(n.body)n.body=shortUser(n.body); if(n.author_email)n.author_email=shortUser(n.author_email); } }); return arr; }  // shorten user emails in timeline bodies/authors
   function isNum(v){return v!==''&&v!=null&&!isNaN(Number(v))&&/^-?[\d.]+$/.test(String(v));}
   function money(v){return v==null||v===''?'':Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});}
   function units(v){return v==null||v===''?'':Number(v).toLocaleString(undefined,{maximumFractionDigits:0});}
@@ -2294,7 +2295,7 @@
       +'<div class="mut tiny" style="margin:2px 2px 8px">Qty shows the order plan; <b>→ N ⚠</b> = supplier-amended quantity, <b>added</b> = SKU the supplier added. <b>Accept</b> (or Accept all) confirms the supplier change and adopts their cost as the final if none is set. Confirmed agreed prices/quantities are what would be pushed to Cin7/Fulfil <span class="todo tiny">(ERP push — to build, gated)</span>.</div>'
       +(editing?'<datalist id="opsku-'+po+'"></datalist>':''); }
   // ---- TIMELINE (PO PLAN): shared note thread with the supplier; D&B posts notify the supplier portal ----
-  function timelinePanel(po,d){ var notes=(d&&d.notes)||[], subs=(d&&d.subs)||[];
+  function timelinePanel(po,d){ var notes=shortNotes((d&&d.notes)||[]), subs=(d&&d.subs)||[];
     function sf(s){ if(s.kind==='tracking'){ try{var o=JSON.parse(s.value);return 'tracking '+(o.tracking||'')+(o.carrier?' / '+o.carrier:'');}catch(e){return 'tracking';} }
       if(s.kind==='completion_date')return 'completion '+s.value; if(s.kind==='invoice_value')return 'invoice $'+s.value; return s.kind+' '+(s.value||''); }
     var pend=subs.filter(function(s){return s.status==='pending';}), appl=subs.filter(function(s){return s.status==='applied';});
@@ -3341,6 +3342,7 @@
   function loadShipTimeline(ref, authorKind, getBase, postEp){ var box=document.querySelector('.sp-timeline[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(!box)return;
     var admin=(authorKind||'internal')==='internal';
     fetch(getBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){
+      shortNotes(notes);
       var unread=0;
       var recentId=(notes&&notes.length)?notes.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0].id:null;
       var list=(notes&&notes.length)?notes.map(function(n){ var sup=(n.author_kind==='supplier'); var nu=sup&&!n.read; if(nu)unread++;
@@ -5479,6 +5481,7 @@
   function loadSampleTimeline(ref, sampleId, authorKind, supName){ var box=document.querySelector('.sp-timeline[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(!box)return;
     var admin=(authorKind||'internal')==='internal';
     fetch('/api/supply/sample-notes?id='+sampleId).then(function(r){return r.json();}).then(function(notes){
+      shortNotes(notes);
       var recentId=(notes&&notes.length)?notes.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0].id:null;
       var list=(notes&&notes.length)?notes.map(function(n){ var supSide=(n.author_kind==='supplier'); var onBehalf=(supSide&&n.author_email==='D&B'); var nu=supSide&&!n.read;
         var who=onBehalf?('D&amp;B as '+esc(supName||'supplier')):(supSide?'Supplier':'D&amp;B');

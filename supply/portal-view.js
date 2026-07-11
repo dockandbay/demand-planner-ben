@@ -5,6 +5,8 @@
 // PDF subsystem; the live host's default bc renders via the /api/portal asset + label-data endpoints.
 (function(){
   var esc=function(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});};
+  var shortUser=function(s){return String(s==null?'':s).replace(/@dockandbay\.com\b/gi,'@');};  // ben@dockandbay.com → ben@ (display only)
+  var shortNotes=function(arr){ (arr||[]).forEach(function(n){ if(n){ if(n.body)n.body=shortUser(n.body); if(n.author_email)n.author_email=shortUser(n.author_email); } }); return arr; };
   function money(v){return v==null||v===''?'':Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});}
   function units(v){return v==null||v===''?'':Number(v).toLocaleString(undefined,{maximumFractionDigits:0});}
   var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -980,7 +982,7 @@
                 +'<div style="margin-top:10px"><button class="save-btn" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd" title="download Tax Invoice + Packing List for this shipment" onclick="window.open(\'/api/invoice/shipment/\'+encodeURIComponent(\''+esc(s.shipment_ref)+'\'))">📄 Tax Invoice</button></div>'
                 +'<div class="sp-timeline" data-ref="'+esc(s.shipment_ref)+'" style="margin-top:8px;border-top:1px solid #f1f1f1;padding-top:6px"></div></div></div>'; }).join(''); }
           function ppShipTimeline(ref){ var box=rootEl.querySelector('.sp-timeline[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(!box)return;
-            fetch(EP.shipmentNotesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){
+            fetch(EP.shipmentNotesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){ shortNotes(notes);
               var recentId=(notes&&notes.length)?notes.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0].id:null;
               box.innerHTML='<div style="font-weight:600;font-size:12px;margin-bottom:4px">Add timeline note</div>'
                 +'<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:10px"><textarea class="fci sp-note-in" rows="3" placeholder="Add a note to the timeline… (multiple lines OK)" style="flex:1;max-width:560px;min-height:58px;text-align:left;resize:vertical;line-height:1.4"></textarea><button class="save-btn sp-note-post" style="flex:0 0 auto">Post</button></div>'
@@ -1114,7 +1116,7 @@
             ppSampleTimeline(id); }
           function ppSampleTimeline(id){ var box=body.querySelector('.samp-tl[data-id="'+id+'"]'); if(!box)return;
             var _s=(_ppData.samples||[]).filter(function(x){return String(x.id)===String(id);})[0], sref=_s?_s.ref:'';
-            fetch(EP.sampleNotesBase+id).then(function(r){return r.json();}).then(function(notes){
+            fetch(EP.sampleNotesBase+id).then(function(r){return r.json();}).then(function(notes){ shortNotes(notes);
               var recentId=(notes&&notes.length)?notes.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0].id:null;
               box.innerHTML=(notes&&notes.length)?notes.map(function(n){ var onBehalf=(n.author_kind==='supplier'&&n.author_email==='D&B'); var dnb=(n.author_kind!=='supplier'), nu=dnb&&!n.read;
                 var who=onBehalf?('D&amp;B as '+esc(STATE.supplierName||'supplier')):(dnb?'Dock &amp; Bay':'You');
@@ -1334,7 +1336,7 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
               // post a note → refresh just this PO's timeline in place (re-fetch the supplier's notes, stay on TIMELINE)
               scope.querySelectorAll('.pp-note-post').forEach(function(btn){ btn.onclick=function(){ var ta=pick('pp-note-body',btn.dataset.po); var v=(ta.value||'').trim(); if(!v)return; var po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); btn.disabled=true;
                 postJSON(EP.note,{po:po,supplier_id:sid,body:v,author_kind:'supplier',author_email:by},function(){
-                  fetch(EP.notesBase+sid).then(function(r){return r.json();}).then(function(notes){ var byPo={}; (notes||[]).forEach(function(n){ (byPo[n.po]=byPo[n.po]||[]).push(n); }); _ppData.notesByPo=byPo; rerenderRow(row,po,'timeline'); })
+                  fetch(EP.notesBase+sid).then(function(r){return r.json();}).then(function(notes){ shortNotes(notes); var byPo={}; (notes||[]).forEach(function(n){ (byPo[n.po]=byPo[n.po]||[]).push(n); }); _ppData.notesByPo=byPo; rerenderRow(row,po,'timeline'); })
                     .catch(function(){ rerenderRow(row,po,'timeline'); }); }); }; });
               function adjBadge(el,delta){ if(!el)return; var b=el.querySelector('.ex-badge'); var cur=b?(parseInt(b.textContent,10)||0):0; var nv=Math.max(0,cur+delta);
                 if(nv<=0){ if(b)b.remove(); } else if(b){ b.textContent=nv; } else { el.insertAdjacentHTML('beforeend',' <span class="ex-badge">'+nv+'</span>'); } }
@@ -1469,7 +1471,7 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                 postJSON(EP.docRemove,{id:id},function(){ if(po&&_ppData.docsByPo&&_ppData.docsByPo[po])_ppData.docsByPo[po]=_ppData.docsByPo[po].filter(function(d){return String(d.id)!==String(id);}); rerenderRow(row,po,'invoice'); }); }; });
             } }
     function loadPreview(){ tabsEl.style.display=''; body.innerHTML='<div class="count">Loading…</div>';
-      opts.getData().then(function(d){ _ppData=d; renderPP(); }).catch(function(e){ body.innerHTML='<div class="count" style="color:#dc2626">'+esc(e&&e.message||e)+'</div>'; }); }
+      opts.getData().then(function(d){ if(d&&d.notesByPo){ Object.keys(d.notesByPo).forEach(function(k){ shortNotes(d.notesByPo[k]); }); } _ppData=d; renderPP(); }).catch(function(e){ body.innerHTML='<div class="count" style="color:#dc2626">'+esc(e&&e.message||e)+'</div>'; }); }
     function reload(){ if(typeof opts.onChange==='function')try{opts.onChange();}catch(e){} loadPreview(); }
     tabsEl.querySelectorAll('.rtab').forEach(function(t){ t.onclick=function(){ PORTAL_TAB=t.dataset.pt; renderPP(); }; });
     loadPreview();
