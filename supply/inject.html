@@ -1155,16 +1155,23 @@
     function palCell(p, bold){ p=Math.round((p||0)*10)/10; var over=p>CAP+TOL, sp=splitOff(p);
       var style='padding:4px 6px;white-space:nowrap'+(over?';color:#dc2626':'')+((over||bold)?';font-weight:700':'');
       return '<td style="'+style+'">'+p+(over&&sp>TOL?' <span style="font-weight:600;font-size:10px">⚠ split '+sp+'</span>':'')+'</td>'; }
-    // Smarter recommendation: tightly fill ONE 40ft (20 pal, preferred) seeded with the anchor, best-fit and
-    // WITHOUT overshooting the container (the old engine crossed 20 and wasted a second container). POs that
-    // are zero or over a container (need splitting) are never auto-picked. Returns the selected-PO map.
-    function recommendSet(A, cs){ var sel={}, total=A.pallets||0;
-      if(total>CAP+TOL) return sel;   // anchor alone overflows → split it first, don't pre-pick anything
-      var pool=cs.filter(function(c){ var p=c.pallets||0; return p>TOL && p<=CAP+TOL; });
-      while(true){ var room=CAP-total, best=null;
-        pool.forEach(function(c){ if(sel[c.po])return; var p=c.pallets||0; if(p<=room+TOL){ var bp=best?(best.pallets||0):-1;
-          if(p>bp || (p===bp && Math.abs(c.delta_days)<Math.abs(best.delta_days))) best=c; } });
-        if(!best) break; sel[best.po]=true; total+=best.pallets||0; }
+    // Smarter recommendation: fill up to TWO 40ft containers (~40 pal) as full as possible, seeded with the
+    // anchor. A knapsack over nearby POs (tenths of a pallet) finds the LARGEST total whose container
+    // utilisation clears ~85% — so it only opens/extends into a container it can fill well, and it prefers
+    // consolidating MORE goods (2 containers to 40) over stopping at one. Large POs may span containers (a
+    // 23-pal PO fills one 40ft + starts a second, which nearby goods then top up). Nearer POs are tried first.
+    function capTenths(t){ var pal=t/10, full=Math.floor((pal+1e-6)/20), rem=Math.round((pal-full*20)*10)/10; return Math.round((full*20+(rem>0.05?(rem<=10?10:20):0))*10); }
+    function recommendSet(A, cs){ var sel={}, aT=Math.round((A.pallets||0)*10);
+      var MAX=Math.max(400, Math.ceil((aT+1)/200)*200);   // cap the auto-pick at ~2 full 40ft (or clear an oversize anchor)
+      var pool=cs.filter(function(c){ return (c.pallets||0)>0.05 && Math.round((c.pallets||0)*10)<=MAX; })
+                 .slice().sort(function(a,b){ var d=Math.abs(a.delta_days)-Math.abs(b.delta_days); return d||((b.pallets||0)-(a.pallets||0)); });
+      var reach=[], par=[]; reach[aT]=true;
+      pool.forEach(function(c){ var p=Math.round((c.pallets||0)*10); if(p<=0||p>MAX)return;
+        for(var t=MAX-p;t>=0;t--){ if(reach[t]&&!reach[t+p]){ reach[t+p]=true; par[t+p]={f:t,po:c.po}; } } });
+      var THRESH=0.85, bestT=aT, bestScore=-1;
+      for(var t=aT;t<=MAX;t++){ if(!reach[t])continue; var cap=capTenths(t); if(cap<=0)continue; var util=t/cap, meets=util>=THRESH?1:0;
+        var score=meets*1e9+(meets?t:Math.round(util*1000)); if(score>bestScore){ bestScore=score; bestT=t; } }
+      var tt=bestT; while(tt!==aT && par[tt]){ sel[par[tt].po]=true; tt=par[tt].f; }
       return sel; }
     function render(d){
       var A=d.anchor, cs=d.candidates||[];
@@ -1207,12 +1214,11 @@
       body.querySelectorAll('.consol-ck').forEach(function(ck){ ck.onchange=totals; });
       document.getElementById('consol-all').onchange=function(){ var v=this.checked; body.querySelectorAll('.consol-ck').forEach(function(ck){ ck.checked=v; }); totals(); };
       var recN=Object.keys(rec).length+1;
-      var _rc=containerPlan(recPal), _rcap=_rc.reduce(function(a,x){return a+x;},0), _rutil=_rcap?Math.round(recPal/_rcap*100):0;
+      var _rc=containerPlan(recPal), _rcap=_rc.reduce(function(a,x){return a+x;},0), _rutil=_rcap?Math.round(recPal/_rcap*100):0, _over=(A.pallets||0)>CAP+TOL;
       var recHtml;
-      if((A.pallets||0)>CAP+TOL){ recHtml='⚠ Anchor PO is over one container ('+(A.pallets||0)+' pal) — split off '+splitOff(A.pallets)+' pallets before consolidating (see red below).'; }
-      else if(recN<=1){ recHtml='No nearby PO fits alongside the anchor in one container — select manually below.'; }
-      else { recHtml='💡 Recommended: '+recN+' POs → '+planTxt(recPal)+' ('+_rutil+'% full). Tick more below to start another container.'; }
-      document.getElementById('consol-rec').innerHTML='<span style="display:inline-block;line-height:1.5;background:'+((A.pallets||0)>CAP+TOL?'#fef2f2;border:1px solid #fecaca':'#ecfeff;border:1px solid #a5f3fc')+';border-radius:6px;padding:5px 9px">'+recHtml+'</span>';
+      if(recN<=1){ recHtml=_over? '⚠ Anchor is '+(A.pallets||0)+' pallets — over one container. No nearby POs to fill the 2nd container efficiently; add manually below.' : 'No nearby PO fills a container with the anchor — select manually below.'; }
+      else { recHtml='💡 Recommended: '+recN+' POs → '+planTxt(recPal)+' ('+_rutil+'% full). Tick more or fewer below.'; }
+      document.getElementById('consol-rec').innerHTML='<span style="display:inline-block;line-height:1.5;background:'+((recN<=1&&_over)?'#fef2f2;border:1px solid #fecaca':'#ecfeff;border:1px solid #a5f3fc')+';border-radius:6px;padding:5px 9px">'+recHtml+'</span>';
       totals();
       body.querySelectorAll('input[name=consol-tgt]').forEach(function(r){ r.onchange=function(){ var ex=body.querySelector('input[name=consol-tgt]:checked').value==='existing'; document.getElementById('consol-ref').disabled=ex; document.getElementById('consol-exref').disabled=!ex; }; });
       document.getElementById('consol-cancel').onclick=function(){ bg.parentNode.removeChild(bg); };

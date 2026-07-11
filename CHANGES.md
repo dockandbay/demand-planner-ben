@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.421 - Analyse consolidation: recommendation fills up to two containers
+
+Extended the engine to consolidate **up to two 40ft containers (~40 pallets)**, not just one. A knapsack over
+nearby POs finds the **largest total that keeps container utilisation ≥85%**, so it opens/extends into a
+second container only when it can fill it well — and it prefers consolidating more goods (40) over stopping
+at 20. **Large POs can now be used and span containers** (e.g. a 21–23-pallet PO fills one 40ft and starts a
+second, which nearby stock tops up to 40). Verified on live sandbox: PO-1672805 (anchor 0.2) now recommends
+40.0 pal across [20,20] at 100%; PO-55USLX1 (anchor 18.9) fills 39.8 at 99%. Oversize POs still show red +
+"split off N". No migration.
+
 ## v25.420 - Analyse consolidation: smarter recommendation engine + oversize split flags
 
 Rebuilt the recommendation. The old engine just added POs until it crossed 20 pallets, which overshot the
