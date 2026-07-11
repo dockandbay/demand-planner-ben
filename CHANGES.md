@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.449 - Crossdock SKU picker uses the batch/branch search-popover format
+
+The "add crossdock SKU" control on Client/FBA now uses the same searchable cell-pick popover as "assign batch"
+(a "＋ add crossdock SKU ▾" button opening a type-to-search list) instead of the datalist input. Multi-add is
+preserved (chips + remove); picking a SKU appends it and saves. No migration.
+
 ## v25.448 - Default landing is SUPPLY (no DEMAND flash)
 
 The app painted DEMAND (hardcoded active tab) then redirected to SUPPLY, causing a flash + DEMAND underline.

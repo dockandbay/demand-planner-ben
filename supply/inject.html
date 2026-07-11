@@ -1102,6 +1102,19 @@
       var l=document.getElementById('shpop-list'); l.innerHTML=html;
       l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ set(o.dataset.clear?'':o.dataset.v); }; }); }
     render(''); var qi=pop.querySelector('.shpop-q'); if(qi){ qi.oninput=function(){render(this.value);}; qi.focus(); } }
+  // Crossdock SKU add — same searchable popover UX as the batch/branch cell picker, but multi-add: picking a
+  // SKU calls onPick(sku) (the caller appends + saves the comma list). Excludes already-selected SKUs.
+  function openXdPick(btn, curList, onPick){ closeShPop();
+    var list=crossdockList.filter(function(s){return curList.indexOf(s)<0;}).slice().sort();
+    var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop';
+    pop.innerHTML='<div class="shpop-h">Add crossdock SKU</div><input class="shpop-q" placeholder="search CROSSDOCK / PREORDER SKU…"><div id="shpop-list"></div>';
+    placePop(pop, btn.getBoundingClientRect()); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
+    function render(q){ q=(q||'').trim().toLowerCase(); var ms=list.filter(function(n){return !q||n.toLowerCase().indexOf(q)>=0;});
+      var html=ms.slice(0,q?80:20).map(function(n){return '<div class="shpop-opt" data-v="'+esc(n)+'">'+esc(n)+'</div>';}).join('')||'<div class="count" style="padding:8px">no matching SKU</div>';
+      if(!q&&list.length>20)html+='<div class="mut tiny" style="padding:5px 10px">'+(list.length-20)+' more — type to search…</div>';
+      var l=document.getElementById('shpop-list'); l.innerHTML=html;
+      l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ closeShPop(); onPick(o.dataset.v); }; }); }
+    render(''); pop.querySelector('.shpop-q').oninput=function(){render(this.value);}; pop.querySelector('.shpop-q').focus(); }
   function openShipAssign(po,anchor){ closeShPop();
     if(/manufactur/i.test((poBy[po]||{}).branch||'')){ alert('PO '+po+' is on the MANUFACTURING branch (FOB) — collected at the factory, so no shipment is assigned.'); return; }
     var cur=(poBy[po]||{}).shipment||'';
@@ -2034,7 +2047,7 @@
   // crossdock SKU multi-picker — chips (remove ×) + add input backed by #crossdocklist; saves comma list to crossdock_skus
   function crossdockPicker(po,list){ return '<div class="xd-pick" data-po="'+esc(po)+'">'
     +(list.length?list.map(function(s){return '<span class="chip" data-sku="'+esc(s)+'">'+esc(s)+' <button class="xd-rm" data-sku="'+esc(s)+'" title="remove">&times;</button></span>';}).join(' ')+' ':'<span class="mut tiny">none — </span>')
-    +'<input class="fci xd-add" list="crossdocklist" placeholder="add CROSSDOCK/PREORDER SKU…" style="width:240px;text-align:left"></div>'; }
+    +'<button class="cell-pick xd-addbtn" data-po="'+esc(po)+'" style="border:1px solid #cbd5e1;background:#f8fafc">＋ add crossdock SKU ▾</button></div>'; }
   // editable "likely payment date" cell (only for unpaid milestones) — saves to the cash flow likely-date store
   function likelyCell(key,unpaid,val){ return '<td class="l">'+(unpaid? dateField(val,{attrs:'data-key="'+esc(key)+'" title="likely payment date (drives the cash flow report)"', cls:'po-likely'}) :'<span class="mut tiny">—</span>')+'</td>'; }
   // FOB pickup = the goods don't land into one of our import warehouses (UK/US/EU/AU/CA) AND no shipment is
@@ -2517,10 +2530,9 @@
     document.querySelectorAll('#podet-'+i+' .xd-rm').forEach(function(b){ b.onclick=function(){ var pick=b.closest('.xd-pick');
       var cur=Array.prototype.map.call(pick.querySelectorAll('.chip'),function(c){return c.dataset.sku;});
       saveXd(cur.filter(function(s){return s!==b.dataset.sku;})); }; });
-    document.querySelectorAll('#podet-'+i+' .xd-add').forEach(function(inp){ inp.onchange=function(){ var v=(inp.value||'').trim(); if(!v)return;
-      if(crossdockList.indexOf(v)<0){ inp.classList.add('err'); inp.title='not an eligible CROSSDOCK/PREORDER SKU'; return; }
-      var pick=inp.closest('.xd-pick'); var cur=Array.prototype.map.call(pick.querySelectorAll('.chip'),function(c){return c.dataset.sku;});
-      if(cur.indexOf(v)>=0){ inp.value=''; return; } cur.push(v); saveXd(cur); }; });
+    document.querySelectorAll('#podet-'+i+' .xd-addbtn').forEach(function(b){ b.onclick=function(e){ e.stopPropagation();
+      var pick=b.closest('.xd-pick'); var cur=Array.prototype.map.call(pick.querySelectorAll('.chip'),function(c){return c.dataset.sku;});
+      openXdPick(b, cur, function(sku){ if(cur.indexOf(sku)<0){ cur.push(sku); saveXd(cur); } }); }; });
     // supplier invoice — Approve (apply value → Final Invoice Amount) / Reject
     document.querySelectorAll('#podet-'+i+' .inv-approve').forEach(function(b){ b.onclick=function(){ b.disabled=true;
       fetch('/api/supply/submission/'+b.dataset.id+'/apply',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({by:'PO PLAN'})}).then(function(r){return r.json();})
