@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.432 - PO grid: narrower PO column + note icon next to the star
+
+The PO reference now wraps onto a second line past ~15 characters (narrower PO column), and the "N" note
+icon moved into the first cell — between the ★ focus star and the PO number — filling the blank space
+instead of trailing after the reference. No migration.
+
 ## v25.431 - PO grid Ship-to: "(branch)" on its own line + Direct shows "OT"
 
 The inherited "(branch)" hint now sits on a second line below the value (not after it), and the Ship-to cell

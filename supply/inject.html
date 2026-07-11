@@ -185,6 +185,8 @@
 #supply-root table.po-tbl td.po-child .ind{color:#9ca3af}
 #supply-root table.po-tbl td.po-child .ind::before{content:"└ ";user-select:none;-webkit-user-select:none}   /* indent marker via ::before → not included when copying the row/PO */
 #supply-root .po-numcell{cursor:default}
+/* narrow PO column: wrap the reference onto a second line past ~15 chars */
+#supply-root .po-numcell b{display:inline-block;max-width:15ch;white-space:normal;word-break:break-all;vertical-align:middle;line-height:1.1}
 #supply-root .po-numcell.po-copied{background:#dcfce7!important;transition:background .15s}   /* brief flash on double-click copy */
 .po-copy-tip{position:fixed;z-index:100002;transform:translate(-50%,-100%);background:#111827;color:#fff;font:600 11px/1.3 Arial,Helvetica,sans-serif;padding:5px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .12s}
 .po-copy-tip.show{opacity:1}
@@ -1767,7 +1769,7 @@
     // most relevant detail sub-tab (payment→PAYMENTS, date→DATES, shipping→SHIPMENTS).
     var _acts=poActions(r);
     var actFlag=_acts.length?' <button class="po-act-badge ex-badge" style="cursor:pointer;border:none" data-po="'+esc(r.po)+'" data-tab="'+(PO_ACT_TAB[_acts[0]]||'')+'" data-allacts="'+esc(poActionsAll(r).join(','))+'" data-note="'+esc(_acts.length+' action item'+(_acts.length>1?'s':'')+' — '+_acts.map(function(k){return PO_ACT_LABEL[k]||k;}).join('; ')+' (click to snooze / open)')+'">'+_acts.length+'</button>':'';
-    var pocell=indent?'<td class="l po-child po-numcell" data-po="'+esc(r.po)+'" title="double-click to copy PO reference"><span class="ind"></span><b>'+esc(r.po)+'</b>'+noteFlag+actFlag+'</td>':'<td class="l po-numcell" data-po="'+esc(r.po)+'" title="double-click to copy PO reference"><b>'+esc(r.po)+'</b>'+noteFlag+actFlag+'</td>';
+    var pocell=indent?'<td class="l po-child po-numcell" data-po="'+esc(r.po)+'" title="double-click to copy PO reference"><span class="ind"></span><b>'+esc(r.po)+'</b>'+actFlag+'</td>':'<td class="l po-numcell" data-po="'+esc(r.po)+'" title="double-click to copy PO reference"><b>'+esc(r.po)+'</b>'+actFlag+'</td>';
     // ERP cell — compact badge-style buttons (same look as the "✓ in sync" badge) → keeps the column narrow.
     // Labels collapse to a single action: Update lines / Update date / Update both. All open the same ERP modal.
     var erpStyle='cursor:pointer;border:none';
@@ -1778,7 +1780,7 @@
     else if(linesPending) erpCell='<button class="erp-up tool-badge bg-blue" data-up="'+esc(r.po)+'" style="'+erpStyle+'" title="'+((r.erp_total>0&&!(r.erp_in>0))?r.erp_total+' line(s) not yet in the ERP (never pushed)':r.erp_pending+' order-plan line(s) differ from the ERP')+'">Update lines</button>';
     else if(datePending) erpCell='<button class="erp-up tool-badge bg-amber" data-up="'+esc(r.po)+'" style="'+erpStyle+'" title="completed-at-warehouse '+esc(r.checkin||'?')+' ≠ ERP final delivery '+esc(r.erp_final_delivery||'?')+'">Update date</button>';
     else erpCell='<span class="tool-badge bg-green" title="planned quantities match the ERP">✓ in sync</span>';
-    return '<tr'+ga+'><td class="l"><button class="planbtn po-exp" data-po="'+esc(r.po)+'" data-i="'+i+'">PLAN</button><button class="fav-star'+(r.starred?' on':'')+'" data-star-po="'+esc(r.po)+'" title="Focus / favourite">'+(r.starred?'★':'☆')+'</button></td>'+pocell
+    return '<tr'+ga+'><td class="l" style="white-space:nowrap"><button class="planbtn po-exp" data-po="'+esc(r.po)+'" data-i="'+i+'">PLAN</button><button class="fav-star'+(r.starred?' on':'')+'" data-star-po="'+esc(r.po)+'" title="Focus / favourite">'+(r.starred?'★':'☆')+'</button>'+noteFlag+'</td>'+pocell
       +'<td class="l">'+erpCell+'</td>'
       +'<td class="l">'+cellPickBtn(r.po,'/api/supply/po/'+encodeURIComponent(r.po)+'/supplier','supplier_name',r.supplier_name,'supplier')+'</td>'
       +'<td class="l">'+cellPickBtn(r.po,ep,'country_code',cgridLabel(r.country),'country')+(r.country_src==='branch'&&r.country?'<div class="mut tiny" style="margin-top:1px" title="inherited from branch country">(branch)</div>':'')+'</td>'
