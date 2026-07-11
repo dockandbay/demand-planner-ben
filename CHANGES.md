@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.460 - Portal diff box sizing + timeline escalate/read on the left, own-notes-only
+
+- **"Changes since you approved" box**: was stretching full-width (global `table{width:100%}`) and clipping
+  the SKU (e.g. "TOWLB-CAB-LG-BL…"). Box now capped at 540px, table sized to content and horizontally
+  scrollable, SKU column min 30ch + nowrap so the full SKU + Was/Now qty always show.
+- **Timeline controls moved to the LEFT** of each note (was right), both the supplier portal and the
+  supply-plan PO timeline.
+- **Escalate now only on your OWN notes**: on the portal the supplier can escalate only their own latest
+  message (emails D&B); in the supply plan an internal user can escalate only their own latest message
+  (emails the supplier). Escalate no longer appears on the other party's notes. Mark-read still sits on the
+  incoming (other-party) notes. No migration.
+
 ## v25.459 - CONFIG portal preview parity: "changes since you approved" diff now shows there too
 
 The CONFIG > Portal preview assembles its data client-side (loadPortalData) rather than from

@@ -597,11 +597,11 @@
       var _chgs=[]; if(_appr){ var _cur={}; lines.forEach(function(l){ _cur[l.sku]=Number(l.qty)||0; });
         Object.keys(_appr).forEach(function(sku){ var old=Number(_appr[sku])||0, nw=(_cur[sku]!=null?_cur[sku]:0); if(nw!==old)_chgs.push({sku:sku,old:old,nw:nw,kind:(nw===0?'removed':(nw>old?'up':'down'))}); });
         lines.forEach(function(l){ var nw=Number(l.qty)||0; if(nw>0 && !(l.sku in _appr))_chgs.push({sku:l.sku,old:0,nw:nw,kind:'new'}); }); }
-      var chgHtml=_chgs.length ? '<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:8px 11px;margin:0 0 8px">'
+      var chgHtml=_chgs.length ? '<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:8px 11px;margin:0 0 8px;max-width:540px">'
         +'<div style="font-weight:700;font-size:12px;margin-bottom:4px">⚠ Changes since you approved — please review &amp; re-confirm</div>'
-        +'<table style="font-size:11px;border-collapse:collapse"><thead><tr><th class="l" style="padding:2px 12px 3px 0">SKU</th><th style="text-align:right;padding:2px 12px 3px">Was</th><th style="text-align:right;padding:2px 12px 3px">Now</th><th class="l" style="padding:2px 0 3px">Change</th></tr></thead><tbody>'
-        +_chgs.map(function(c){ var d=c.nw-c.old; return '<tr><td class="l" style="padding:1px 12px 1px 0">'+esc(c.sku)+'</td><td style="text-align:right;padding:1px 12px">'+(c.kind==='new'?'<span class="mut">—</span>':c.old)+'</td><td style="text-align:right;padding:1px 12px">'+c.nw+'</td><td class="l" style="font-weight:600;color:'+(c.kind==='removed'?'#b91c1c':d>0?'#166534':'#b45309')+'">'+(c.kind==='new'?'added':c.kind==='removed'?'removed':(d>0?'+':'')+d)+'</td></tr>'; }).join('')
-        +'</tbody></table></div>' : '';
+        +'<div style="overflow-x:auto"><table style="font-size:11px;border-collapse:collapse;width:auto"><thead><tr><th class="l" style="padding:2px 12px 3px 0;min-width:30ch;white-space:nowrap">SKU</th><th style="text-align:right;padding:2px 12px 3px">Was</th><th style="text-align:right;padding:2px 12px 3px">Now</th><th class="l" style="padding:2px 0 3px">Change</th></tr></thead><tbody>'
+        +_chgs.map(function(c){ var d=c.nw-c.old; return '<tr><td class="l" style="padding:1px 12px 1px 0;min-width:30ch;white-space:nowrap">'+esc(c.sku)+'</td><td style="text-align:right;padding:1px 12px">'+(c.kind==='new'?'<span class="mut">—</span>':c.old)+'</td><td style="text-align:right;padding:1px 12px">'+c.nw+'</td><td class="l" style="font-weight:600;color:'+(c.kind==='removed'?'#b91c1c':d>0?'#166534':'#b45309')+'">'+(c.kind==='new'?'added':c.kind==='removed'?'removed':(d>0?'+':'')+d)+'</td></tr>'; }).join('')
+        +'</tbody></table></div></div>' : '';
       var skus=chgHtml+invUpload
         +'<div style="margin:3px 0 4px"><button class="lnk-btn pp-op-csv" data-po="'+po+'" style="font-size:11px">⤓ Download to CSV</button></div>'
         +'<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table style="font-size:11px;margin:3px 0 6px;width:auto"><thead><tr><th class="l" style="white-space:nowrap">SKU</th><th style="text-align:right">Qty</th><th style="text-align:right">Est. cost</th><th style="text-align:right">Your cost</th><th style="text-align:right">Line total</th><th></th></tr></thead><tbody>'
@@ -653,17 +653,20 @@
         +'<div style="margin-top:8px"><b>Completion date</b> &nbsp; <input type="date" class="pp-cd-grid" data-po="'+esc(p.po)+'" value="'+esc(cdVal)+'" title="your production completion date — submitted for Dock &amp; Bay approval; kept in sync with the purchase order grid" style="width:150px;cursor:pointer;text-align:left;font:inherit;font-size:12px;padding:4px 6px;border:1px solid '+(cdMiss?'#dc2626':'#93c5fd')+';border-radius:4px;background:'+(cdMiss?'#fef2f2':'#eff6ff')+';color:#1d4ed8">'
         +(cdMiss?' <span style="background:#dc2626;color:#fff;border-radius:4px;font-size:10px;font-weight:700;padding:2px 7px">⚠ Must enter completion date</span>':'')+'</div>'
         +(prodExc?'<div class="tiny" style="color:#b45309;margin-top:4px">⚠ '+esc(prodExc)+'</div>':'')+'</div>';
-      var _recentNoteId=(notes&&notes.length)?notes.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0].id:null;
+      // escalate is only offered on the supplier's OWN latest message (it emails Dock & Bay) — never on a D&B note
+      var _supNotes=(notes||[]).filter(function(n){return n.author_kind!=='internal';});
+      var _recentSupNoteId=_supNotes.length?_supNotes.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0].id:null;
       var timeline=confirmBar+prodBlock
         +(pend.length?'<div class="tiny" style="color:#92400e;margin-bottom:3px">⏳ Submitted, awaiting approval: '+pend.map(function(s){return esc(subFmt(s));}).join(' · ')+'</div>':'')
         +(appl.length?'<div class="tiny" style="color:#166534;margin-bottom:6px">✓ Applied: '+appl.map(function(s){return esc(subFmt(s))+(s.attachment_id?' <a href="/api/portal/attachment/'+s.attachment_id+'" target="_blank">doc</a>':'');}).join(' · ')+'</div>':'')
         +(notes.length?notes.map(function(n){ var internal=(n.author_kind==='internal');
-          return '<div style="font-size:11px;margin:3px 0;padding:5px 8px;background:'+(internal?(n.read?'#eef2ff':'#fff7ed'):'#f1f5f9')+';border:1px solid '+(internal&&!n.read?'#fdba74':'#e5e7eb')+';border-radius:5px;display:flex;justify-content:space-between;gap:10px;align-items:flex-start">'
-            +'<div><span class="mut tiny">'+esc(n.created_at)+' · '+(internal?'Dock &amp; Bay':'You')+'</span>'+(internal&&!n.read?' <span class="ex-badge">new</span>':'')+'<br>'+esc(n.body)+'</div>'
-            +'<div style="flex:0 0 auto;display:flex;flex-direction:column;gap:3px;align-items:flex-end">'
-            +(internal?(n.read?'<a class="pp-note-read" data-id="'+n.id+'" data-read="1" style="font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline;white-space:nowrap">mark unread</a>':'<button class="save-btn light pp-note-read" data-id="'+n.id+'" data-read="0">Mark read</button>'):'')
-            +((EP.escalate&&n.id===_recentNoteId)?'<button class="save-btn light pp-esc-note" data-po="'+po+'" data-msg="'+esc(n.body)+'" title="Escalate this message to Dock & Bay by email" style="color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'')
-            +'</div></div>'; }).join(''):'<div class="mut tiny">No notes yet.</div>')
+          var ctrl = internal
+            ? (n.read?'<a class="pp-note-read" data-id="'+n.id+'" data-read="1" style="font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline;white-space:nowrap">mark unread</a>':'<button class="save-btn light pp-note-read" data-id="'+n.id+'" data-read="0">Mark read</button>')
+            : ((EP.escalate&&n.id===_recentSupNoteId)?'<button class="save-btn light pp-esc-note" data-po="'+po+'" data-msg="'+esc(n.body)+'" title="Escalate this message to Dock & Bay by email" style="color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'');
+          return '<div style="font-size:11px;margin:3px 0;padding:5px 8px;background:'+(internal?(n.read?'#eef2ff':'#fff7ed'):'#f1f5f9')+';border:1px solid '+(internal&&!n.read?'#fdba74':'#e5e7eb')+';border-radius:5px;display:flex;gap:10px;align-items:flex-start">'
+            +(ctrl?'<div style="flex:0 0 auto;display:flex;flex-direction:column;gap:3px;align-items:flex-start;min-width:78px">'+ctrl+'</div>':'')
+            +'<div style="flex:1"><span class="mut tiny">'+esc(n.created_at)+' · '+(internal?'Dock &amp; Bay':'You')+'</span>'+(internal&&!n.read?' <span class="ex-badge">new</span>':'')+'<br>'+esc(n.body)+'</div>'
+            +'</div>'; }).join(''):'<div class="mut tiny">No notes yet.</div>')
         +'<div style="margin-top:6px;display:flex;gap:5px"><textarea class="pp-note-body fci" data-po="'+po+'" rows="1" placeholder="Reply to Dock &amp; Bay…" style="flex:1;min-height:26px;max-width:420px;text-align:left"></textarea><button class="save-btn pp-note-post" data-po="'+po+'">Post</button></div>';
       // ---- INVOICE (the submitted value persists here with its approval status) ----
       var invSubsAll=subs.filter(function(s){return s.kind==='invoice_value';}); var invSub=invSubsAll.length?invSubsAll[invSubsAll.length-1]:null;
