@@ -5765,12 +5765,14 @@ function insertInlineSkuRows(s,co,ch,afterTr){
     if(!isOut)return;
     if(inp){inp.value='0';inp.disabled=true;inp.style.color='#991b1b';inp.style.fontStyle='italic';inp.title='Discontinued — on-hand + inbound stock exhausted';}
     if(fcDiv){fcDiv.textContent='disc';fcDiv.style.color='#991b1b';fcDiv.style.fontStyle='italic';}
+    var _td=(fcDiv&&fcDiv.closest&&fcDiv.closest('td'))||(inp&&inp.closest&&inp.closest('td'));   // "disc" cells get the same red border as the rundown cells
+    if(_td)_td.style.boxShadow='inset 0 0 0 1.5px #FF746C';
   }
   // Red cell border for months where the SKU is past its discontinue date but is still selling down
   // remaining stock (rundown, stock not yet exhausted). Replaces the old small red "d" badge.
   function markDiscRundown(td,on){
     if(!on||!td)return;
-    td.style.boxShadow='inset 0 0 0 1.5px #dc2626';   // red outline = discontinued this month
+    td.style.boxShadow='inset 0 0 0 1.5px #FF746C';   // lighter red outline = discontinued this month
     if(!td.title)td.title='Discontinued this month — selling down remaining stock';
   }
   // During an active Smooth preview, show each SKU's proposed (uncommitted) override in amber.

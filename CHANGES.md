@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.450 - DEMAND: lighter discontinued red (#FF746C) + border on "disc" cells
+
+Discontinued-rundown cell outline is now a lighter red (#FF746C, was #dc2626), and cells showing "disc"
+(stock exhausted) now get the same red border. No migration.
+
 ## v25.449 - Crossdock SKU picker uses the batch/branch search-popover format
 
 The "add crossdock SKU" control on Client/FBA now uses the same searchable cell-pick popover as "assign batch"
