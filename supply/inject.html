@@ -1318,7 +1318,11 @@
   function loadPoActState(cb){ fetch('/api/supply/actions/state').then(function(r){return r.json();}).then(function(rows){ _poActState={}; (rows||[]).forEach(function(s){ _poActState[s.action_key]=s; }); _poActStateLoaded=true; if(cb)cb(); }).catch(function(){ _poActStateLoaded=true; if(cb)cb(); }); }
   function poSnoozeSet(po,cond,days,cb){ var ind=(days<0), snz=(ind||days>0); fetch('/api/supply/actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:poActKey(po,cond),status:(snz?'snoozed':'open'),snooze_days:(days>0?days:7),indefinite:ind,restore:!snz})}).then(function(r){return r.json();}).then(function(){ loadPoActState(cb); }).catch(function(){ if(cb)cb(); }); }
   // all matched conditions for a PO (unfiltered); poActions() drops snoozed unless "show snoozed" is on.
-  function poActionsAll(r){ var out=[]; for(var k in PO_ACTCOND){ try{ if(PO_ACTCOND[k](r))out.push(k); }catch(e){} } return out; }
+  function poActionsAll(r){ var out=[]; for(var k in PO_ACTCOND){ try{ if(PO_ACTCOND[k](r))out.push(k); }catch(e){} }
+    // an OVERDUE payment is inherently unpaid — count it once (matches the PAYMENTS tab, which lists the
+    // overdue milestone and snoozes both as a single unit) rather than double-counting on the PO badge
+    if(out.indexOf('payment_overdue')>=0) out=out.filter(function(k){return k!=='unpaid_payment';});
+    return out; }
   function poActions(r){ return poActionsAll(r).filter(function(k){ return _poShowSnoozed || !poActSnoozed(r.po,k); }); }
   // Inline action indicator: red Ⓐ (120ms tooltip explaining the rule) + snooze 1/3/7d (or wake), keyed like the badge.
   var ACT_HELP={

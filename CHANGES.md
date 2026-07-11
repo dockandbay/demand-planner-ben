@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.437 - PO badge: don't double-count an overdue-and-unpaid payment
+
+The PO action badge counted `payment_overdue` and `unpaid_payment` separately, but an overdue payment is
+inherently unpaid — the PAYMENTS tab already shows it as one line and snoozes both together. Now when
+`payment_overdue` fires, `unpaid_payment` is dropped from the badge count, so the badge matches the tabs
+(PO-57UKLX3: 4, not 5). `unpaid_payment` still stands alone when a payment is owed but not yet overdue.
+No migration.
+
 ## v25.436 - ORDER PLAN: ERP deviation is ONE action (A + snooze), not N lines
 
 The ORDER PLAN tab counted the number of ERP-differing lines (e.g. 10) as 10 actions. It's really **one**
