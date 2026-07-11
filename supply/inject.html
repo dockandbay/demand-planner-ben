@@ -153,6 +153,9 @@
 #supply-root .fci.saved{border-color:#16a34a!important;background:#f0fdf4!important;color:#166534!important}
 #supply-root .fci.err{border-color:#dc2626!important;background:#fef2f2!important;color:#991b1b!important}
 #supply-root select.fci{cursor:pointer;font-weight:700;text-align:left}
+/* grid Ship-to dropdown: subtle grey (matches the branch cell-pick), blends into the table */
+#supply-root select.fci.cc-grid{border:1px solid transparent;background:none;color:#1a1a1a;font-weight:400;padding:2px 5px}
+#supply-root select.fci.cc-grid:hover{border-color:#cbd5e1;background:#f8fafc}
 #supply-root .fci.needdep{background:#fee2e2;border-color:#fca5a5;color:#991b1b}
 #supply-root .qtycell{width:54px;text-align:center;font-size:11px;border:1px solid transparent;background:transparent;border-radius:3px;color:#1a1a1a;font-family:inherit;padding:2px 4px}
 #supply-root .qtycell:hover,#supply-root .qtycell:focus{border-color:#93c5fd;background:#fff;outline:none}
@@ -576,11 +579,11 @@
     return '<input class="'+cls+'" list="deprefs" placeholder="'+(needed?'assign deposit…':'no deposit')+'" data-ep="'+esc(ep)+'" data-field="deposit_ref" value="'+esc(val==null?'':val)+'">'; }
   var PO_COUNTRIES=[['UK','UK'],['US','US'],['AU','AU'],['EU','EU'],['CA','CA'],['DIRECT','Direct to Client']];
   function clabel(c){ return c==='DIRECT'?'Direct':(c||''); }
-  function countrySel(ep,val,pay){ var opts='<option value=""'+(val?'':' selected')+'>— (use branch)</option>';
+  function countrySel(ep,val,pay,cls){ var opts='<option value=""'+(val?'':' selected')+'>— (use branch)</option>';
     var known=PO_COUNTRIES.some(function(o){return o[0]===val;});
     if(val&&!known)opts+='<option value="'+esc(val)+'" selected>'+esc(val)+'</option>';
     opts+=PO_COUNTRIES.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+o[1]+'</option>';}).join('');
-    return '<select class="fci'+(pay?' payin':'')+'" data-ep="'+esc(ep)+'" data-field="country_code">'+opts+'</select>'; }
+    return '<select class="fci'+(pay?' payin':'')+(cls?' '+cls:'')+'" data-ep="'+esc(ep)+'" data-field="country_code">'+opts+'</select>'; }
   // supplier production-confidence status (writes to /prod-status, which stamps the confirmation time)
   function prodStatusSel(ep,val){ return '<select class="fci" data-ep="'+esc(ep)+'" data-field="production_status"><option value=""'+(val?'':' selected')+'>—</option>'
     +PROD_STATUS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'; }
@@ -1776,7 +1779,7 @@
     return '<tr'+ga+'><td class="l"><button class="planbtn po-exp" data-po="'+esc(r.po)+'" data-i="'+i+'">PLAN</button><button class="fav-star'+(r.starred?' on':'')+'" data-star-po="'+esc(r.po)+'" title="Focus / favourite">'+(r.starred?'★':'☆')+'</button></td>'+pocell
       +'<td class="l">'+erpCell+'</td>'
       +'<td class="l">'+cellPickBtn(r.po,'/api/supply/po/'+encodeURIComponent(r.po)+'/supplier','supplier_name',r.supplier_name,'supplier')+'</td>'
-      +'<td class="l">'+countrySel(ep,r.country_override,false)+(r.country_src==='branch'&&r.country?' <span class="mut tiny" title="inherited from branch country">'+esc(clabel(r.country))+'</span>':'')+'</td>'
+      +'<td class="l">'+countrySel(ep,r.country_override,false,'cc-grid')+(r.country_src==='branch'&&r.country?' <span class="mut tiny" title="inherited from branch country">'+esc(clabel(r.country))+'</span>':'')+'</td>'
       +'<td class="l">'+cellPickBtn(r.po,ep,'branch',r.branch,'branch')+'</td>'
       +'<td class="l" style="font-size:10px;line-height:1.05;max-width:130px;white-space:normal">'+(r.client?esc(r.client):'<span class="mut">—</span>')+'<br>'+(r.sales_order_ref?'<span class="mut">'+esc(r.sales_order_ref)+'</span>':'<span class="mut">—</span>')+'</td>'
       +'<td class="l">'+statusSel(ep,r.status)+((r.status==='PRODUCTION'&&r.ship_status==='Shipping')?'<div style="margin-top:3px"><button class="po-set-shipping" data-po="'+esc(r.po)+'" title="This PO&rsquo;s shipment has departed (Shipping) but the PO is still in Production — set this PO and every PO on the same shipment still in Production to SHIPPING">→ set shipping</button></div>':'')+'</td>'

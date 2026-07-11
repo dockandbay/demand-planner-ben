@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.429 - PO grid Ship-to dropdown: subtle grey styling
+
+Styled the grid Ship-to country dropdown to match the Branch cell-pick — transparent border, no fill, grey
+text, light hover — so it blends into the table instead of the prominent blue `.fci` look. No migration.
+
 ## v25.428 - PO grid: inline-editable Ship-to country dropdown
 
 The **Ship to** column on the PO grid is now an inline **country dropdown** (UK / US / AU / EU / CA / Direct /
