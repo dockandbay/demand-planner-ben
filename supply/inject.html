@@ -55,6 +55,9 @@
 #supply-root #po-prog .pill,#supply-root #po-act .pill,#supply-root #po-ctry .pill{padding:2px 7px}
 /* level-3 sub-navs (REPORTS, CONFIG): underline tabs like the level-1/2 menus, in light blue */
 #supply-root #rep-subnav,#supply-root #config-subs,#supply-root #prod-subtabs,#supply-root .po-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 12px}
+/* keep each tab's label + its action-count badge on one line (never wrap the badge below the header) */
+#supply-root #prod-subtabs .rtab,#supply-root .po-subnav .rtab{white-space:nowrap}
+#supply-root #prod-subtabs .rtab .ex-badge,#supply-root .po-subnav .rtab .ex-badge{display:inline-block;vertical-align:middle}
 /* Opened PO detail lives inside the wide, horizontally-scrolling PO grid — pin its sub-tab strip to the left
    so PAYMENTS/DATES/etc stay fixed while the grid scrolls sideways (desktop). */
 /* The expanded PO detail panel (.po-detail-wrap) is pinned to the left of the horizontally-scrolling grid via
@@ -3528,6 +3531,9 @@
   function recomputeShipNavCount(){ _navCounts.shipments=_allShips.filter(function(s){ return shipActions(s).length>0; }).length; updateNavBadges(); }
   function refreshShipActInPlace(ref){ var s=shipBy[ref]; if(s){ var acts=shipActions(s);
       document.querySelectorAll('.ship-act-badge[data-ref="'+_cssEsc(ref)+'"]').forEach(function(b){ if(acts.length){ b.style.display=''; b.textContent=acts.length; } else b.style.display='none'; }); }
+    // re-render inline "A" markers in any open shipment expand (marker stays, muted, when snoozed)
+    document.querySelectorAll('.ship-act-row[data-mk^="'+_cssEsc(ref)+'|"]').forEach(function(w){ var code=w.dataset.mk.split('|')[1]; var t=document.createElement('div'); t.innerHTML=shipActMark(ref,code); var nm=t.firstChild; if(nm)w.replaceWith(nm); });
+    try{ bindShipActMark(document); }catch(e){}
     recomputeShipNavCount(); }
   function shipActBadge(s){ var acts=shipActions(s); if(!acts.length)return '';
     return ' <button class="ship-act-badge ex-badge" style="cursor:pointer;border:none" data-ref="'+esc(s.shipment_ref)+'" data-allacts="'+esc(shipActionsAll(s).join(','))+'" data-note="'+esc(acts.length+' action item'+(acts.length>1?'s':'')+' — '+acts.map(function(k){return SHIP_ACT_LABEL[k]||k;}).join('; ')+' (click to snooze / open)')+'">'+acts.length+'</button>'; }
@@ -3556,6 +3562,30 @@
     pop.querySelectorAll('.sap-sn').forEach(function(x){ x.onclick=function(){ var k=x.dataset.k; pop.querySelectorAll('button').forEach(function(y){y.disabled=true;}); snoozeKeySet(shipActKey(ref,k),parseInt(x.dataset.d,10),function(){ close(); refreshShipActInPlace(ref); }); }; });
     pop.querySelectorAll('.sap-un').forEach(function(x){ x.onclick=function(){ var k=x.dataset.k; pop.querySelectorAll('button').forEach(function(y){y.disabled=true;}); snoozeKeySet(shipActKey(ref,k),0,function(){ close(); refreshShipActInPlace(ref); }); }; });
   }
+  // Inline "A" marker (with snooze) shown INSIDE a shipment-expand panel — explains the sub-tab's count badge.
+  function shipActMark(ref,code){ var s=_poActState[shipActKey(ref,code)]||{}, sn=shipActSnoozed(ref,code), lbl=SHIP_ACT_LABEL[code]||code;
+    var A='<span title="'+esc(lbl)+(sn?' — snoozed until '+esc(s.snooze_until||''):'')+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:'+(sn?'#f3a3a3':'#dc2626')+';color:#fff;font-weight:800;font-size:10px;flex:0 0 auto;margin-right:6px">A</span>';
+    var snz=sn
+      ? '<span class="mut tiny" style="white-space:nowrap">Snoozed'+(s.snoozed_by?' by '+esc(shortUser(s.snoozed_by)):'')+' → '+esc(s.snooze_until||'')+' <button class="ship-act-snz" data-ref="'+esc(ref)+'" data-code="'+esc(code)+'" data-d="0" style="border:none;background:none;color:#1d4ed8;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">wake</button></span>'
+      : '<button class="ship-act-snz-btn" data-ref="'+esc(ref)+'" data-code="'+esc(code)+'" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:4px;font-size:10px;padding:1px 6px;margin-left:8px;cursor:pointer;flex:0 0 auto">SNOOZE ▾</button>';
+    return '<div class="ship-act-row" data-mk="'+esc(ref)+'|'+esc(code)+'" style="display:flex;align-items:center;padding:2px 0;font-size:12px">'+A+'<span style="font-weight:600;color:#b91c1c">'+esc(lbl)+'</span>'+snz+'</div>'; }
+  // Banner of a panel's actions (all conditions — snoozed ones show muted with a wake link, matching POs).
+  function shipActBanner(ref,tab){ var s=shipBy[ref]; if(!s)return ''; var acts=shipActionsAll(s).filter(function(k){ return SHIP_ACT_TAB[k]===tab; }); if(!acts.length)return '';
+    return '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:6px 9px;margin-bottom:8px">'+acts.map(function(k){ return shipActMark(ref,k); }).join('')+'</div>'; }
+  function openShipSnz(btn){ var ref=btn.dataset.ref, code=btn.dataset.code;
+    var ex=document.getElementById('snz-menu'); if(ex)ex.remove();
+    var m=document.createElement('div'); m.id='snz-menu'; m.style.cssText='position:absolute;z-index:200002;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 6px 20px rgba(15,23,42,.18);padding:4px;font-size:12px;min-width:96px';
+    m.innerHTML='<div style="font-weight:700;color:#64748b;font-size:10px;padding:2px 10px 4px">Snooze</div>'+[[1,'1 day'],[3,'3 days'],[7,'7 days']].map(function(o){return '<div class="snz-opt" data-d="'+o[0]+'" style="padding:5px 12px;cursor:pointer;border-radius:4px">'+o[1]+'</div>';}).join('');
+    document.body.appendChild(m);
+    var rc=btn.getBoundingClientRect(); m.style.left=(window.scrollX+Math.min(rc.left,window.innerWidth-140))+'px'; m.style.top=(window.scrollY+rc.bottom+3)+'px';
+    function close(){ m.remove(); document.removeEventListener('mousedown',out,true); }
+    function out(e){ if(!m.contains(e.target)&&e.target!==btn)close(); }
+    setTimeout(function(){ document.addEventListener('mousedown',out,true); },0);
+    m.querySelectorAll('.snz-opt').forEach(function(o){ o.onmouseenter=function(){o.style.background='#eff6ff';}; o.onmouseleave=function(){o.style.background='';};
+      o.onclick=function(){ close(); snoozeKeySet(shipActKey(ref,code),parseInt(o.dataset.d,10),function(){ refreshShipActInPlace(ref); }); }; }); }
+  function bindShipActMark(scope){ var root=scope||document;
+    root.querySelectorAll('.ship-act-snz-btn').forEach(function(x){ if(x._b)return; x._b=1; x.onclick=function(e){ e.stopPropagation(); openShipSnz(x); }; });
+    root.querySelectorAll('.ship-act-snz').forEach(function(x){ if(x._b)return; x._b=1; x.onclick=function(e){ e.stopPropagation(); snoozeKeySet(shipActKey(x.dataset.ref,x.dataset.code),parseInt(x.dataset.d,10),function(){ refreshShipActInPlace(x.dataset.ref); }); }; }); }
   // a completed shipment has no open exceptions; ">20 pallets" only matters BEFORE it ships (can't split once shipping/complete)
   // ">20 pallets" only matters before it ships; "unlinked" = no POs; "no Flexport match" = has a Flexport ref that doesn't match
   function shipIsExc(s){ if(shipComplete(s))return false; return !!s.no_pos || !!s.no_flex_match || (!!s.over_pallets && !shipShipping(s)); }
@@ -3692,10 +3722,10 @@
         var _sc={}; shipActions(shipBy[ref]||s).forEach(function(k){ var tb=SHIP_ACT_TAB[k]; _sc[tb]=(_sc[tb]||0)+1; });   // action counts per shipment sub-tab
         var tabbar='<div class="po-subnav" style="margin-bottom:8px"><button class="rtab shtab active" data-st="dates">Dates &amp; tracking'+navBadge(_sc.dates)+'</button><button class="rtab shtab" data-st="pos">POs aboard'+navBadge(_sc.pos)+'</button><button class="rtab shtab" data-st="charges">Charges'+((shipBy[ref]&&shipBy[ref].pending_charges>0)?' <span class="ex-badge" style="background:#16a34a">'+shipBy[ref].pending_charges+'</span>':'')+'</button><button class="rtab shtab" data-st="xd">Crossdock'+(xd.length?' ('+xd.length+')':'')+'</button><button class="rtab shtab" data-st="timeline">Timeline &amp; notes'+navBadge(_sc.timeline)+'</button></div>';
         var box=document.getElementById('shipdet-'+i);
-        box.innerHTML=tabbar+'<div class="shtab-panel" data-st="dates">'+head+'</div><div class="shtab-panel" data-st="pos" style="display:none">'+t+'</div><div class="shtab-panel" data-st="charges" style="display:none"><div class="ship-charges" data-ref="'+esc(ref)+'"></div></div><div class="shtab-panel" data-st="xd" style="display:none">'+xdPanel+'</div>'
-          +'<div class="shtab-panel" data-st="timeline" style="display:none"><div class="sp-timeline" data-ref="'+esc(ref)+'"></div>'
+        box.innerHTML=tabbar+'<div class="shtab-panel" data-st="dates">'+shipActBanner(ref,'dates')+head+'</div><div class="shtab-panel" data-st="pos" style="display:none">'+shipActBanner(ref,'pos')+t+'</div><div class="shtab-panel" data-st="charges" style="display:none"><div class="ship-charges" data-ref="'+esc(ref)+'"></div></div><div class="shtab-panel" data-st="xd" style="display:none">'+xdPanel+'</div>'
+          +'<div class="shtab-panel" data-st="timeline" style="display:none">'+shipActBanner(ref,'timeline')+'<div class="sp-timeline" data-ref="'+esc(ref)+'"></div>'
             +'<div style="margin-top:14px;padding-top:10px;border-top:1px solid #f1f1f1"><button class="save-btn ship-del" data-ref="'+esc(ref)+'" style="background:#fff5f5;border:1px solid #fecaca;color:#b91c1c">🗑 Delete this shipment</button> <span class="mut tiny">unassigns the POs aboard (they’re kept) and removes this shipment.</span></div></div>';
-        box.classList.remove('count'); bindEdits();
+        box.classList.remove('count'); bindEdits(); bindShipActMark(box);
         loadShipTimeline(ref,'internal','/api/supply/shipment-notes?ref=','/api/supply/shipment-note');
         box.querySelectorAll('.ship-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete shipment '+ref+'?\n\nThe POs aboard will be unassigned (not deleted), and this shipment + its timeline will be removed.'))return;
           b.disabled=true; shipPost('/api/supply/shipment/'+encodeURIComponent(ref)+'/delete',{},function(j){ invalidateDerived(); shipReload(); }); }; });

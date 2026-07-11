@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.425 - Shipment sub-tab "A" markers + sub-nav badge stays on one line
+
+Fixes v25.424 gaps:
+- **Inline "A" markers**: a shipment-expand sub-tab could show an action count with nothing visible behind it
+  (e.g. PO-57AUBL1's "over 20 pallets" counted on POs aboard but no marker). Each panel (Dates / POs aboard /
+  Timeline) now renders a red **"A" banner** naming the action with a **SNOOZE ▾** / wake control — full parity
+  with the PO inline markers. Snoozing mutes the marker + drops it from the counts.
+- **Sub-nav counter on one row**: the PLAN / Shipments / Manufacturing count badge now stays on the same line
+  as the tab label (white-space:nowrap) instead of wrapping below, on mobile and desktop.
+
 ## v25.424 - Shipment actions (A badge + snooze) + sub-menu notification counters
 
 Brings the PO action system to SHIPMENTS and adds tab counters.
