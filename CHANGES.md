@@ -3,6 +3,26 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.458 - Portal ORDER PLAN: CSV export, SKU fit, completion-aware timeline + main-app SKU picker
+
+Batch of supplier-portal + main-app ORDER PLAN fixes:
+- **(portal) Download to CSV** — ORDER PLAN tab now has a "⤓ Download to CSV" button exporting every SKU +
+  qty (with est/your cost + line total) for the PO.
+- **(portal) SKU column fit** — SKU cells are now `nowrap` and the plan table scrolls horizontally, so long
+  SKUs always show in full (was truncating/wrapping on narrow panels).
+- **(portal) Completion-aware production status** — `prodAttention` now uses the effective completion date
+  (latest supplier-submitted completion_date overrides the calculated prod_end), matching invoiceDue. Fixes
+  the false "⚠ Past completion date (30-Jun-26) but status is In production" timeline action on PO-1693118
+  when the supplier had already submitted a later completion (29-Aug-26).
+- **(main app → portal) Order-plan edit invalidates approval** — editing/adding SKUs or qtys in SUPPLY > PO >
+  PLAN > ORDER PLAN on an order the supplier already confirmed now (a) posts a "<user> made an edit to the
+  order plan" timeline note (deduped to one per edit burst) and (b) clears the supplier's confirmation so the
+  portal shows it for re-confirmation (with the existing "changes since you approved" diff).
+- **(main app) ORDER PLAN add-SKU picker** — the add-SKU field now opens the same searchable popover used for
+  BATCH/crossdock on the PO grid (type-to-filter), replacing the plain datalist.
+
+No migration (uses existing approved_lines from mig 116).
+
 ## v25.457 - CONFIG portal preview payments also derived (not the ledger)
 
 The CONFIG > Portal preview uses /api/supply/supplier-payments/:name, which still read the import-only

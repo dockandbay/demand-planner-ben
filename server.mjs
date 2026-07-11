@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.457';
+const APP_VERSION = 'v25.458';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3026,6 +3026,21 @@ async function notePoCreated(db, po, user) {
       VALUES ($1,$2,$3,'internal',$4)`, [po, (sid && sid.id) || null, user || null, who + ' created a new purchase order']);
   } catch (e) { /* best-effort — never block the PO write */ }
 }
+// Post an internal PO timeline note when the order plan (SKUs/qtys) is edited in the main app — notifies the
+// supplier that the order changed and needs re-confirmation. Deduped: only posts if the PO's most recent note
+// isn't already this same "made an edit" message (collapses a burst of line edits into one note). Best-effort.
+async function notePoEdited(db, po, user) {
+  if (!po) return;
+  const who = shortUser(user) || 'A user';
+  const body = who + ' made an edit to the order plan';
+  try {
+    const last = (await db.query(`SELECT body FROM planner.supplier_notes WHERE po=$1 ORDER BY created_at DESC LIMIT 1`, [po])).rows[0];
+    if (last && last.body === body) return;   // last note is already this message → don't spam a note per edited line
+    const sid = (await db.query(`SELECT s.id FROM planner.purchase_orders p JOIN planner.suppliers s ON s.name=p.supplier_name WHERE p.po=$1`, [po])).rows[0];
+    await db.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body)
+      VALUES ($1,$2,$3,'internal',$4)`, [po, (sid && sid.id) || null, user || null, body]);
+  } catch (e) { /* best-effort — never block the plan edit */ }
+}
 
 // ── Access control ────────────────────────────────────────────────────────────────────────────
 // Resolve the caller's app permissions. LIVE-ONLY: with no auth proxy (sandbox/local) there is no email,
@@ -3609,6 +3624,18 @@ app.post('/api/supply/po-line/:po_sku', async (req, res) => {
          proposed_at = CASE WHEN excluded.qty IS DISTINCT FROM coalesce((SELECT el.qty FROM planner.erp_purchase_order_lines el WHERE el.po=planner.purchase_order_lines.po AND el.sku=planner.purchase_order_lines.sku),0) THEN now() ELSE NULL END,
          proposed_by = CASE WHEN excluded.qty IS DISTINCT FROM coalesce((SELECT el.qty FROM planner.erp_purchase_order_lines el WHERE el.po=planner.purchase_order_lines.po AND el.sku=planner.purchase_order_lines.sku),0) THEN $5 ELSE NULL END`,
       [key, po, sku, b.qty, b.who || 'review_ui']);
+    // If this materially changes an order the supplier had already confirmed, invalidate that approval so they
+    // must re-confirm, and drop a timeline note (deduped). approved_lines is the snapshot from their last confirm.
+    try {
+      const st = (await pool.query(`SELECT supplier_confirmed_at IS NOT NULL confirmed, coalesce(approved_lines->>$2,'') appr FROM planner.purchase_orders WHERE po=$1`, [po, sku])).rows[0];
+      if (st && st.confirmed) {
+        const newQ = String(parseInt(b.qty, 10) || 0), oldQ = String(parseInt(st.appr, 10) || 0);
+        if (newQ !== oldQ) {
+          await pool.query(`UPDATE planner.purchase_orders SET supplier_confirmed_at=NULL, supplier_confirmed_by=NULL WHERE po=$1`, [po]);
+          await notePoEdited(pool, po, authUser(req));
+        }
+      }
+    } catch (e) { /* confirmation reset / note is best-effort — never block the plan edit */ }
     res.json({ updated: r.rowCount });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

@@ -39,7 +39,10 @@
     if(ps!=='ready_to_ship' && ps!=='shipped' && prodEnd && prodEnd<today) return 'Past completion date ('+fd(prodEnd)+') but status is '+(ps?prodStatusLabel(ps):'not set');
     return ''; }
   // portal: a production status needs the supplier's attention when it's unset OR it conflicts with the dates
-  function prodAttention(ps, prodStart, prodEnd){ var e=prodStatusException(ps, prodStart, prodEnd); if(e)return e; if(!ps)return 'Please set your production status'; return ''; }
+  function prodAttention(ps, prodStart, prodEnd, subsArr){ subsArr=subsArr||[];
+    var supEnd=''; subsArr.forEach(function(s){ if(s.kind==='completion_date' && s.status!=='dismissed' && s.value) supEnd=s.value; });   // supplier-submitted completion overrides the calculated prod_end
+    var effEnd = supEnd || prodEnd || '';
+    var e=prodStatusException(ps, prodStart, effEnd); if(e)return e; if(!ps)return 'Please set your production status'; return ''; }
   function statusBg(s){ var u=String(s||'').toUpperCase();
     if(u.indexOf('FUTURE')>=0)return 'bg-neutral'; if(u.indexOf('PRODUCTION')>=0)return 'bg-amber';
     if(u.indexOf('SHIP')>=0||u.indexOf('READY')>=0)return 'bg-red';
@@ -569,7 +572,7 @@
         var aq=(c&&c.amended_qty!=null&&c.amended_qty!=='')?Number(c.amended_qty):null;
         var qn=(aq!=null?aq:(Number(orderQty)||0)), price=(act!=null?act:(est!=null?est:0)), lt=qn*price; totQ+=qn; totP+=lt;
         var qVal=(aq!=null?aq:(orderQty!=null?orderQty:''));
-        return '<tr><td class="l">'+esc(sku)+(added?' <span class="tool-badge bg-blue" style="font-size:8px">added</span>':'')+'</td>'
+        return '<tr><td class="l" style="white-space:nowrap">'+esc(sku)+(added?' <span class="tool-badge bg-blue" style="font-size:8px">added</span>':'')+'</td>'
           +'<td style="text-align:right"><input class="fci pp-qty" data-po="'+po+'" data-sku="'+esc(sku)+'" value="'+esc(qVal)+'" style="width:62px;text-align:right" inputmode="numeric"></td>'
           +'<td style="text-align:right">'+(est!=null?'$'+money(est):'<span class="mut">—</span>')+'</td>'
           +'<td style="text-align:right"><input class="fci pp-cost" data-po="'+po+'" data-sku="'+esc(sku)+'" data-est="'+(est!=null?est:0)+'" value="'+(act!=null?esc(act):'')+'" placeholder="'+(est!=null?money(est):'0.00')+'" style="width:80px;text-align:right" inputmode="decimal"></td>'
@@ -599,10 +602,12 @@
         +'<table style="font-size:11px;border-collapse:collapse"><thead><tr><th class="l" style="padding:2px 12px 3px 0">SKU</th><th style="text-align:right;padding:2px 12px 3px">Was</th><th style="text-align:right;padding:2px 12px 3px">Now</th><th class="l" style="padding:2px 0 3px">Change</th></tr></thead><tbody>'
         +_chgs.map(function(c){ var d=c.nw-c.old; return '<tr><td class="l" style="padding:1px 12px 1px 0">'+esc(c.sku)+'</td><td style="text-align:right;padding:1px 12px">'+(c.kind==='new'?'<span class="mut">—</span>':c.old)+'</td><td style="text-align:right;padding:1px 12px">'+c.nw+'</td><td class="l" style="font-weight:600;color:'+(c.kind==='removed'?'#b91c1c':d>0?'#166534':'#b45309')+'">'+(c.kind==='new'?'added':c.kind==='removed'?'removed':(d>0?'+':'')+d)+'</td></tr>'; }).join('')
         +'</tbody></table></div>' : '';
-      var skus=chgHtml+invUpload+'<table style="font-size:11px;margin:3px 0 6px;width:auto"><thead><tr><th class="l">SKU</th><th style="text-align:right">Qty</th><th style="text-align:right">Est. cost</th><th style="text-align:right">Your cost</th><th style="text-align:right">Line total</th><th></th></tr></thead><tbody>'
+      var skus=chgHtml+invUpload
+        +'<div style="margin:3px 0 4px"><button class="lnk-btn pp-op-csv" data-po="'+po+'" style="font-size:11px">⤓ Download to CSV</button></div>'
+        +'<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table style="font-size:11px;margin:3px 0 6px;width:auto"><thead><tr><th class="l" style="white-space:nowrap">SKU</th><th style="text-align:right">Qty</th><th style="text-align:right">Est. cost</th><th style="text-align:right">Your cost</th><th style="text-align:right">Line total</th><th></th></tr></thead><tbody>'
         +rws
         +'<tr style="font-weight:700;border-top:2px solid #999"><td class="l">TOTAL</td><td style="text-align:right" class="pp-totq">'+units(totQ)+'</td><td></td><td style="text-align:right">FINAL</td><td style="text-align:right" class="pp-totp">$'+money(totP)+'</td><td></td></tr>'
-        +'</tbody></table>'
+        +'</tbody></table></div>'
         +'<div style="margin:6px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><input class="fci pp-add-sku" list="'+dlId+'" data-po="'+po+'" placeholder="search a SKU you supply…" style="width:250px"><datalist id="'+dlId+'">'+addOpts+'</datalist>'
         +'<input class="fci pp-add-qty" data-po="'+po+'" placeholder="qty" style="width:62px;text-align:right" inputmode="numeric">'
         +'<input class="fci pp-add-cost" data-po="'+po+'" placeholder="price" style="width:80px;text-align:right" inputmode="decimal">'
@@ -641,7 +646,7 @@
         +'</div>'):'';
       // ---- TIMELINE: production status + status + notes (Dock & Bay notes show as 'new' until you mark them read) ----
       var unreadInt=notes.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
-      var prodExc=needConfirm?prodAttention(p.production_status, p.prod_start, p.prod_end):'';
+      var prodExc=needConfirm?prodAttention(p.production_status, p.prod_start, p.prod_end, subs):'';
       var cdVal=poCdVal(p, subs), cdMiss=poCdMissing(p, subs);
       var prodBlock='<div style="margin-bottom:10px;padding:8px 11px;border-radius:6px;font-size:12px;'+((prodExc||cdMiss)?'background:#fef3c7;border:1px solid #fcd34d':'background:#f1f5f9;border:1px solid #e5e7eb')+'">'
         +'<b>Production status</b> &nbsp; '+prodStatusSel(p.po, p.production_status||'')
@@ -814,7 +819,7 @@
           var sb=subsByPo[p.po]||[]; var nts=notesByPo[p.po]||[]; var unreadInt=nts.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
           var cdS=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean), xdm=xdByPo[p.po]||{};
           var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
-          var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end):'';
+          var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end, sb):'';
           var dtcPend=ppIsDtc(p)&&!p.dtc_accepted_at;
           var act=(invoiceDue(p,sb)?1:0)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0)+(poCdMissing(p,sb)?1:0);   // no-shipment-yet is NOT an action (matches the SHIPMENTS sub-tab + the top PO badge)
           var cdVal=poCdVal(p, sb);
@@ -1083,7 +1088,7 @@
               var unreadInt=nts.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
               var cdS=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean), xdm=(_ppData.xdByPo&&_ppData.xdByPo[po])||{};
               var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
-              var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end):'';
+              var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end, sb):'';
               var dtcPend=ppIsDtc(p)&&!p.dtc_accepted_at;
               return a+(invoiceDue(p,sb)?1:0)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0)+(poCdMissing(p,sb)?1:0);
             },0);
@@ -1313,7 +1318,7 @@
               var unreadInt=nts.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
               var cdS=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean), xdm=_ppData.xdByPo[po]||{};
               var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
-              var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end):'';
+              var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end, sb):'';
               var dtcPend=ppIsDtc(p)&&!p.dtc_accepted_at;
               return (invoiceDue(p,sb)?1:0)+((p.shipment||p.flexport_reference||sb.some(function(s){return s.kind==='tracking';}))?0:1)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0)+(poCdMissing(p,sb)?1:0); }
             // in-place row refresh after a write: re-render the open expanded cell + sync the MANAGE badge (no full reload)
@@ -1411,6 +1416,21 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                 postJSON(EP.lineCost,{po:po,sku:sku,amended_qty:q,actual_cost:pr||null,is_added:true,submitted_by:by},function(){
 
                   (_ppData.costsByPo[po]=_ppData.costsByPo[po]||{})[sku]={actual_cost:pr||null,amended_qty:q,is_added:true}; rerenderRow(row,po); }); }; });
+              // ORDER PLAN → download all SKUs/quantities (and costs) for this PO as a CSV
+              scope.querySelectorAll('.pp-op-csv').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po;
+                var lines=_ppData.lb[po]||[], costs=_ppData.costsByPo[po]||{}, lineSkus={};
+                function csvCell(v){ v=String(v==null?'':v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+                var out=['SKU,Qty,Est cost,Your cost,Line total'];
+                function pushRow(sku,orderQty,est){ var c=costs[sku]||{};
+                  var aq=(c.amended_qty!=null&&c.amended_qty!=='')?Number(c.amended_qty):null;
+                  var act=(c.actual_cost!=null&&c.actual_cost!=='')?Number(c.actual_cost):null;
+                  var qn=(aq!=null?aq:(Number(orderQty)||0)), price=(act!=null?act:(est!=null?est:0));
+                  out.push([csvCell(sku),qn,est!=null?est:'',act!=null?act:'',(qn*price)].join(',')); }
+                lines.forEach(function(l){ lineSkus[l.sku]=1; pushRow(l.sku, l.qty, (l.cost_price!=null&&l.cost_price!=='')?Number(l.cost_price):null); });
+                Object.keys(costs).forEach(function(sku){ var c=costs[sku]; if(c&&c.is_added&&!lineSkus[sku]) pushRow(sku, null, null); });
+                var blob=new Blob([out.join('\n')],{type:'text/csv'}), url=URL.createObjectURL(blob);
+                var a=document.createElement('a'); a.href=url; a.download=po+'-order-plan.csv'; document.body.appendChild(a); a.click();
+                setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },100); }; });
               // parse an uploaded invoice / packing .xlsx → preview proposed qty + price overrides; then Apply
               scope.querySelectorAll('.pp-inv-parse-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po;
                 var fin=pick('pp-inv-parse-file',po), f=fin&&fin.files&&fin.files[0], out=pick('pp-inv-parse-out',po), row=btn.closest('tr[id^="pp-"]');

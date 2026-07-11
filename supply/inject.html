@@ -1115,6 +1115,27 @@
       var l=document.getElementById('shpop-list'); l.innerHTML=html;
       l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ closeShPop(); onPick(o.dataset.v); }; }); }
     render(''); pop.querySelector('.shpop-q').oninput=function(){render(this.value);}; pop.querySelector('.shpop-q').focus(); }
+  // ORDER PLAN add-SKU picker — same searchable popover UX as the batch/crossdock cell picker, scoped to the
+  // PO's supplier SKUs. On pick calls onPick(sku). Fetches (and caches in OP_SKUS) the supplier list on demand.
+  function openOpSkuPick(btn, po, onPick){ closeShPop();
+    var sup=(poBy[po]&&poBy[po].supplier_name)||'';
+    var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop';
+    pop.innerHTML='<div class="shpop-h">Add SKU to <b>'+esc(po)+'</b></div><input class="shpop-q" placeholder="search supplier SKU…"><div id="shpop-list"><div class="count" style="padding:8px">Loading…</div></div>';
+    placePop(pop, btn.getBoundingClientRect()); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
+    function render(q){ q=(q||'').trim().toLowerCase(); var rows=OP_SKUS[po]||[];
+      var ms=rows.filter(function(r){return !q||((r.sku+' '+(r.product_name||'')).toLowerCase().indexOf(q)>=0);});
+      var html=ms.slice(0,q?80:20).map(function(r){return '<div class="shpop-opt" data-v="'+esc(r.sku)+'">'+esc(r.sku)+(r.product_name?' <span class="mut tiny">'+esc(r.product_name)+'</span>':'')+'</div>';}).join('')||'<div class="count" style="padding:8px">no matching SKU</div>';
+      if(!q&&rows.length>20)html+='<div class="mut tiny" style="padding:5px 10px">'+(rows.length-20)+' more — type to search…</div>';
+      var l=document.getElementById('shpop-list'); if(!l)return; l.innerHTML=html;
+      l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ closeShPop(); onPick(o.dataset.v); }; }); }
+    function ready(){ render(''); var qi=pop.querySelector('.shpop-q'); if(qi){ qi.oninput=function(){render(this.value);}; qi.focus(); } }
+    if(OP_SKUS[po]){ ready(); }
+    else if(sup){ fetch('/api/supply/supplier-skus/'+encodeURIComponent(sup)).then(function(r){return r.json();}).then(function(rows){ OP_SKUS[po]=Array.isArray(rows)?rows:[]; ready(); }).catch(function(){ OP_SKUS[po]=[]; ready(); }); }
+    else { OP_SKUS[po]=[]; ready(); } }
+  // Wire the readonly add-SKU field(s) in a scope to the searchable popover (used for both the initial edit row
+  // and dynamically-added rows). Picking a SKU fills the field and jumps focus to the qty input.
+  function bindOpAddSku(scope){ if(!scope)return; scope.querySelectorAll('.op-add-sku').forEach(function(inp){ if(inp._opBound)return; inp._opBound=1;
+    inp.onclick=function(){ var po=inp.dataset.po||OP_EDIT; openOpSkuPick(inp, po, function(sku){ inp.value=sku; var tr=inp.closest('tr'), q=tr&&tr.querySelector('.op-add-qty'); if(q)q.focus(); }); }; }); }
   function openShipAssign(po,anchor){ closeShPop();
     if(/manufactur/i.test((poBy[po]||{}).branch||'')){ alert('PO '+po+' is on the MANUFACTURING branch (FOB) — collected at the factory, so no shipment is assigned.'); return; }
     var cur=(poBy[po]||{}).shipment||'';
@@ -2327,6 +2348,7 @@
   function erpDevLines(lines,erpMeta){ erpMeta=erpMeta||{}; if(erpMeta.complete)return [];
     return (lines||[]).filter(function(l){ return l.qty_pending; }); }
   var OP_EDIT=null;   // po currently in ORDER PLAN edit mode (qty editable + add SKUs); null = view mode
+  var OP_SKUS={};     // po → supplier SKU rows [{sku,product_name}] for the add-SKU search picker (item 5)
   function orderPlanPanel(po,lines,costs,addc,erpMeta,xdLines){ costs=costs||{}; addc=addc||[]; erpMeta=erpMeta||{}; xdLines=xdLines||[];
     var editing=(OP_EDIT===po);
     var totQ=0, totC=0, lineSkus={}, unconf=0; (lines||[]).forEach(function(l){lineSkus[l.sku]=1;});
@@ -2378,7 +2400,7 @@
         +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:5px;flex-wrap:wrap"><span style="font-weight:700;color:#854d0e">⚠ ERP deviations — '+dev.length+' line'+(dev.length>1?'s':'')+' differ from Fulfil/Cin7 <span class="mut tiny" style="font-weight:400">(quantity)</span></span><button class="save-btn op-erp-up-panel" data-po="'+esc(po)+'" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5">⬆ Upload to ERP</button>'+actMark(po,'erp_lines')+' <span class="mut tiny">prices are pushed with the update too</span></div>'
         +'<div style="overflow-x:auto"><table class="erp-dev-tbl" style="width:auto;border-collapse:collapse;font-size:11px;border:1px solid #e0e0e0;border-radius:6px;background:#fff"><thead><tr><th class="l" style="min-width:45ch;padding:4px 12px">SKU</th><th class="l" style="text-align:right;padding:4px 12px">Qty (plan → ERP)</th></tr></thead><tbody>'+trs+'</tbody></table></div></div>'; })();
     var copyData=encodeURIComponent((lines||[]).map(function(l){return l.sku+'\t'+(Number(l.qty)||0);}).join('\n'));
-    var addRowHtml=editing?'<tr class="op-addrow"><td class="l"><input class="op-add-sku" list="opsku-'+po+'" placeholder="search supplier SKU…" style="width:220px" autocomplete="off"></td><td style="text-align:right"><input class="op-add-qty" placeholder="qty" style="width:74px;text-align:right" inputmode="numeric"></td><td colspan="5" class="mut tiny">new line — added as proposed (not in ERP until you Upload)</td></tr>':'';
+    var addRowHtml=editing?'<tr class="op-addrow"><td class="l"><input class="op-add-sku" data-po="'+esc(po)+'" readonly placeholder="click to pick SKU…" style="width:220px;cursor:pointer;background:#fff" autocomplete="off"></td><td style="text-align:right"><input class="op-add-qty" placeholder="qty" style="width:74px;text-align:right" inputmode="numeric"></td><td colspan="5" class="mut tiny">new line — added as proposed (not in ERP until you Upload)</td></tr>':'';
     var opBtns=editing
       ? '<button class="lnk-btn op-add-row" data-po="'+esc(po)+'" style="margin-left:8px">＋ Add SKU</button> <button class="save-btn op-save" data-po="'+esc(po)+'" style="margin-left:4px;background:#dcfce7;border:1px solid #16a34a;color:#166534;font-weight:700">✓ Save</button> <button class="save-btn light op-cancel">Cancel</button>'
       : '<button class="save-btn op-edit" data-po="'+esc(po)+'" style="margin-left:8px">✎ Edit qty / add SKU</button> <button class="save-btn light op-copy" data-copy="'+copyData+'" style="margin-left:4px" title="copy this PO&rsquo;s SKUs + quantities to the clipboard (tab-separated)">⧉ Copy SKU + Qty</button> <button class="save-btn op-cin7-full" data-po="'+esc(po)+'" style="margin-left:4px;background:#0a8;color:#fff;border-color:#0a8" title="push ALL of this PO&rsquo;s SKUs, quantities and prices to Cin7 — full override for exact alignment (live write)">⬆ Push to Cin7 (full)</button>';
@@ -2407,8 +2429,7 @@
             +'<div class="tw" style="max-width:560px"><table style="width:max-content"><thead><tr><th class="l">Description</th><th style="text-align:right">Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Total</th></tr></thead><tbody>'+ar
             +'<tr style="font-weight:700;border-top:1px solid #ccc"><td class="l">Additional total</td><td></td><td></td><td style="text-align:right">$'+money(addTot)+'</td></tr></tbody></table></div>':'')
           +'<div style="margin:6px 2px 10px;font-weight:700">Total invoice cost: $'+money(inv)+' <span class="mut tiny" style="font-weight:400">(order plan $'+money(totC)+(addc.length?' + additional $'+money(addTot):'')+')</span></div>'; })()
-      +'<div class="mut tiny" style="margin:2px 2px 8px">Qty shows the order plan; <b>→ N ⚠</b> = supplier-amended quantity, <b>added</b> = SKU the supplier added. <b>Accept</b> (or Accept all) confirms the supplier change and adopts their cost as the final if none is set. Confirmed agreed prices/quantities are what would be pushed to Cin7/Fulfil <span class="todo tiny">(ERP push — to build, gated)</span>.</div>'
-      +(editing?'<datalist id="opsku-'+po+'"></datalist>':''); }
+      +'<div class="mut tiny" style="margin:2px 2px 8px">Qty shows the order plan; <b>→ N ⚠</b> = supplier-amended quantity, <b>added</b> = SKU the supplier added. <b>Accept</b> (or Accept all) confirms the supplier change and adopts their cost as the final if none is set. Confirmed agreed prices/quantities are what would be pushed to Cin7/Fulfil <span class="todo tiny">(ERP push — to build, gated)</span>.</div>'; }
   // ---- TIMELINE (PO PLAN): shared note thread with the supplier; D&B posts notify the supplier portal ----
   function timelinePanel(po,d){ var notes=shortNotes((d&&d.notes)||[]), subs=(d&&d.subs)||[];
     function sf(s){ if(s.kind==='tracking'){ try{var o=JSON.parse(s.value);return 'tracking '+(o.tracking||'')+(o.carrier?' / '+o.carrier:'');}catch(e){return 'tracking';} }
@@ -2625,18 +2646,18 @@
         .catch(function(e){ b.disabled=false; alert('Could not accept: '+(e.message||e)); }); }; });
     document.querySelectorAll('#podet-'+i+' .op-goto').forEach(function(b){ b.onclick=function(){ gotoOrderPlan(b.dataset.po); }; });
     // ORDER PLAN edit mode: toggle, add-SKU row, copy, save (writes qty / new lines as proposed → auto ERP-pending)
-    // in edit mode, populate the supplier-scoped SKU picker (datalist) for the add-SKU inputs
-    (function(){ var dl=document.getElementById('opsku-'+po); if(!dl)return; var sup=(poBy[po]&&poBy[po].supplier_name)||''; if(!sup)return;
-      fetch('/api/supply/supplier-skus/'+encodeURIComponent(sup)).then(function(r){return r.json();}).then(function(rows){ if(!Array.isArray(rows))return;
-        dl.innerHTML=rows.map(function(x){return '<option value="'+esc(x.sku)+'">'+esc(x.product_name||'')+'</option>';}).join(''); }).catch(function(){}); })();
+    // in edit mode, prefetch the supplier-scoped SKU list (cached in OP_SKUS) and wire the add-SKU search picker
+    (function(){ if(OP_EDIT!==po)return; var sup=(poBy[po]&&poBy[po].supplier_name)||'';
+      if(sup&&!OP_SKUS[po]){ fetch('/api/supply/supplier-skus/'+encodeURIComponent(sup)).then(function(r){return r.json();}).then(function(rows){ OP_SKUS[po]=Array.isArray(rows)?rows:[]; }).catch(function(){ OP_SKUS[po]=[]; }); }
+      bindOpAddSku(document.getElementById('podet-'+i)); })();
     document.querySelectorAll('#podet-'+i+' .op-edit').forEach(function(b){ b.onclick=function(){ OP_EDIT=b.dataset.po; poRefetchPanel(po,i); }; });
     document.querySelectorAll('#podet-'+i+' .op-cancel').forEach(function(b){ b.onclick=function(){ OP_EDIT=null; poRefetchPanel(po,i); }; });
     document.querySelectorAll('#podet-'+i+' .op-copy').forEach(function(b){ b.onclick=function(){ var tsv=decodeURIComponent(b.dataset.copy||''); if(!tsv){alert('No lines to copy.');return;}
       navigator.clipboard.writeText(tsv).then(function(){ var o=b.textContent; b.textContent='✓ Copied'; setTimeout(function(){b.textContent=o;},1200); }).catch(function(){ alert('Copy failed — clipboard blocked.'); }); }; });
     document.querySelectorAll('#podet-'+i+' .op-add-row').forEach(function(b){ b.onclick=function(){ var box=document.getElementById('podet-'+i), tb=box&&box.querySelector('.op-tbody'); if(!tb)return;
       var tr=document.createElement('tr'); tr.className='op-addrow';
-      tr.innerHTML='<td class="l"><input class="op-add-sku" list="opsku-'+b.dataset.po+'" placeholder="search supplier SKU…" style="width:220px" autocomplete="off"></td><td style="text-align:right"><input class="op-add-qty" placeholder="qty" style="width:74px;text-align:right" inputmode="numeric"></td><td colspan="5" class="mut tiny">new line — added as proposed (not in ERP until you Upload)</td>';
-      tb.insertBefore(tr, tb.querySelector('.op-total')); var f=tr.querySelector('.op-add-sku'); if(f)f.focus(); }; });
+      tr.innerHTML='<td class="l"><input class="op-add-sku" data-po="'+esc(b.dataset.po)+'" readonly placeholder="click to pick SKU…" style="width:220px;cursor:pointer;background:#fff" autocomplete="off"></td><td style="text-align:right"><input class="op-add-qty" placeholder="qty" style="width:74px;text-align:right" inputmode="numeric"></td><td colspan="5" class="mut tiny">new line — added as proposed (not in ERP until you Upload)</td>';
+      tb.insertBefore(tr, tb.querySelector('.op-total')); bindOpAddSku(tr); var f=tr.querySelector('.op-add-sku'); if(f)f.click(); }; });
     document.querySelectorAll('#podet-'+i+' .op-save').forEach(function(b){ b.onclick=function(){ var box=document.getElementById('podet-'+i); if(!box)return; var po2=b.dataset.po, jobs=[];
       box.querySelectorAll('.op-eq').forEach(function(inp){ var v=inp.value.trim(); if(v===''||v===inp.dataset.orig)return; var n=parseInt(v.replace(/[^0-9-]/g,''),10); if(isNaN(n))return; jobs.push({sku:inp.dataset.sku,qty:n}); });
       box.querySelectorAll('.op-addrow').forEach(function(tr){ var sk=((tr.querySelector('.op-add-sku')||{}).value||'').trim().toUpperCase(); var qv=(tr.querySelector('.op-add-qty')||{}).value; var n=parseInt(String(qv||'').replace(/[^0-9-]/g,''),10); if(sk&&!isNaN(n)) jobs.push({sku:sk,qty:n}); });
