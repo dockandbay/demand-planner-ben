@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.428 - PO grid: inline-editable Ship-to country dropdown
+
+The **Ship to** column on the PO grid is now an inline **country dropdown** (UK / US / AU / EU / CA / Direct /
+— use branch) instead of read-only text. Changing it saves the PO's `country_code` override immediately with
+no page refresh (same `.fci` in-place save as the Status column); when left blank it shows the inherited
+branch country as a grey hint. No migration.
+
 ## v25.427 - Analyse consolidation: target chooser at top + left-aligned table
 
 Moved the **Create new consolidation shipment / Add to existing shipment** chooser to the **top** of the
