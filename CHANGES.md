@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.436 - ORDER PLAN: ERP deviation is ONE action (A + snooze), not N lines
+
+The ORDER PLAN tab counted the number of ERP-differing lines (e.g. 10) as 10 actions. It's really **one**
+action — "push to align with ERP". Added a first-class `erp_lines` PO action (mapped to the ORDER PLAN tab)
+that counts as **1**, shows an inline **"A"** next to the "Upload to ERP" button in the deviations box, and is
+**snoozable** like every other action. It also now shows on the PO-ref action badge. (PO-57UKLX3 now reads 1,
+not 10.) No migration.
+
 ## v25.435 - Fix DATES phantom count + snooze date format + label wrap
 
 - **DATES count with no "A" fixed**: the "Not confirmed by supplier" action (`po_not_approved`) was counted
