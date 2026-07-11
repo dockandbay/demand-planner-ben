@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.444 - Portal: remove the "(1)" on SHIPMENT for POs with no shipment
+
+The SHIPMENT sub-tab badge counted "no shipment/tracking submitted yet" as 1 action for every PO not yet on
+a shipment. Removed that term — the SHIPMENT badge now only reflects a real outstanding crossdock quantity
+entry. No migration.
+
 ## v25.443 - Portal: no-shipment PO is not an action; own-carrier tickbox
 
 On the supplier portal, a PO with no shipment assigned is a passive state, not an action. Enlarged the "No
