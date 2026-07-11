@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.462 - Timeline messages capped at ~640px for readability (full width on mobile)
+
+Timeline note rows were stretching the full page width on desktop, making long threads hard to read. Capped
+each note row at max-width 640px across all timelines (PO / shipment / sample, on both the supplier portal
+and the supply plan). On mobile the viewport is narrower than 640px, so rows stay full width. No migration.
+
 ## v25.461 - Timeline controls on the LEFT across ALL timelines (shipment + sample), escalate own-notes-only
 
 v25.460 moved the PO timeline controls left; this extends the same treatment to the remaining timelines so
