@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.435 - Fix DATES phantom count + snooze date format + label wrap
+
+- **DATES count with no "A" fixed**: the "Not confirmed by supplier" action (`po_not_approved`) was counted
+  on the DATES tab but its "A" marker lives on the MASTER DATA tab's Supplier-confirmation row. Remapped it to
+  **MASTER DATA** (new `master` exception bucket + count badge), so the count and the marker are on the same
+  tab. (This was PO-57UKLX3's mystery DATES counter.)
+- **Snooze date format**: the "Snoozed → …" label now shows **dd-mmm-yy** (e.g. `14-Jul-26`) instead of ISO.
+- **Label wrap**: the DATES "Supplier production status (set by supplier / here)" hint now sits on a second
+  line so it no longer clips. No migration.
+
 ## v25.434 - Action-badge popover: single SNOOZE ▾ dropdown
 
 In the row action-badge popovers (PO and shipment), replaced the inline 1d / 3d / 7d / ∞ buttons with a

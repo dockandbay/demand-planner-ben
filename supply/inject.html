@@ -1287,13 +1287,14 @@
     erp_date:function(r){ return r.erp_date_pending>0 && !poComplete(r); }};
   // PO-row action badge: label + which PO detail sub-tab each condition deep-links to.
   var PO_ACT_LABEL={payment_overdue:'Payment overdue',unpaid_payment:'Unpaid payment',late:'Late — should be completed',unassigned_shipment:'Unassigned shipment',production:'Late — should have shipped',dtc_not_approved:'Direct-to-Client not approved',po_not_approved:'Not confirmed by supplier',preship:'Pre-shipment documents overdue',erp_date:'ERP delivery date differs'};
-  var PO_ACT_TAB={payment_overdue:'pay',unpaid_payment:'pay',late:'dates',unassigned_shipment:'shipments',production:'dates',dtc_not_approved:'client',po_not_approved:'dates',preship:'shipments',erp_date:'dates'};
+  var PO_ACT_TAB={payment_overdue:'pay',unpaid_payment:'pay',late:'dates',unassigned_shipment:'shipments',production:'dates',dtc_not_approved:'client',po_not_approved:'masterdata',preship:'shipments',erp_date:'dates'};
   // ── PO-grid action-item snooze ── keyed poact|<po>|<condition> in supply_action_state (shared store).
   var _poActState={}, _poActStateLoaded=false, _poShowSnoozed=false;
   function poActKey(po,cond){ return 'poact|'+po+'|'+cond; }
   // a snoozed action with NO expiry (snooze_until null) = snoozed indefinitely
   function snzActive(s){ var t=new Date().toISOString().slice(0,10); return !!(s&&s.status==='snoozed'&&(!s.snooze_until||s.snooze_until>=t)); }
-  function snzUntil(s){ return (s&&s.snooze_until)?s.snooze_until:'indefinitely'; }
+  var _SNZMON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function snzUntil(s){ if(!s||!s.snooze_until)return 'indefinitely'; var p=String(s.snooze_until).slice(0,10).split('-'); if(p.length<3)return String(s.snooze_until); return p[2]+'-'+(_SNZMON[(+p[1])-1]||'?')+'-'+p[0].slice(2); }  // 2026-07-14 → 14-Jul-26
   function poActSnoozed(po,cond){ return snzActive(_poActState[poActKey(po,cond)]); }
   var _cssEsc=function(x){ return (window.CSS&&CSS.escape)?CSS.escape(x):String(x).replace(/["\\]/g,'\\$&'); };
   // Silent in-place refresh after a snooze/wake: re-render the affected markers + recompute the PO-ref badge count.
@@ -1306,7 +1307,7 @@
     // in place from the stashed detail — keeps the snooze silent (no refetch/re-render) while the counts follow.
     document.querySelectorAll('[id^="podet-"]').forEach(function(pd){ var nav=pd.querySelector('.po-subnav'); if(!nav)return;
       if(!nav.querySelector('.potab[data-po="'+_cssEsc(po)+'"]'))return; var r=poBy[po]; if(!r)return;
-      var exc=poExceptions(r, pd._poDetail); var cnt={pay:exc.pay.length,dates:exc.dates.length,client:exc.client.length,shipments:exc.ship.length};
+      var exc=poExceptions(r, pd._poDetail); var cnt={pay:exc.pay.length,dates:exc.dates.length,client:exc.client.length,shipments:exc.ship.length,masterdata:exc.master.length};
       nav.querySelectorAll('.potab').forEach(function(btn){ var pt=btn.dataset.pt; if(!(pt in cnt))return; var n=cnt[pt], bd=btn.querySelector('.ex-badge');
         if(n>0){ var ttl=n+' exception'+(n>1?'s':'')+' / action'+(n>1?'s':''); if(bd){ bd.textContent=n; bd.title=ttl; } else btn.insertAdjacentHTML('beforeend',' <span class="ex-badge" title="'+ttl+'">'+n+'</span>'); }
         else if(bd){ bd.remove(); } }); });
@@ -2043,15 +2044,15 @@
       else if(/fba|awd/i.test(_br)){ if(_dc.indexOf('carton_barcode')<0) ship.push('Carton barcodes'+_late+', not uploaded'); if(_dc.indexOf('pallet_barcode')<0) ship.push('Pallet barcodes'+_late+', not uploaded'); }
       else if(/ifulfillment/i.test(_br)){ if(_dc.indexOf('idn_pallet_label')<0) ship.push('IDN pallet labels'+_late+', not uploaded'); }
     }
-    var client=[];
+    var client=[], master=[];
     // Mirror the red-badge action conditions onto their detail sub-tabs (snooze-aware) so the tabs light up
     // consistently with the PO-ref badge count. Payments are already covered by pay[]; preship already in ship[].
     var _mirrorSkip={payment_overdue:1,unpaid_payment:1,preship:1};
     poActionsAll(r).forEach(function(k){ if(_mirrorSkip[k])return; if(!_poShowSnoozed && poActSnoozed(r.po,k))return;
       var cat=PO_ACT_TAB[k], lbl=PO_ACT_LABEL[k]||k;
-      var arr=(cat==='pay'?pay:cat==='dates'?dates:cat==='shipments'?ship:cat==='client'?client:null);
+      var arr=(cat==='pay'?pay:cat==='dates'?dates:cat==='shipments'?ship:cat==='client'?client:cat==='masterdata'?master:null);
       if(arr && arr.indexOf(lbl)<0) arr.push(lbl); });
-    return { pay:pay, dates:dates, client:client, landed:landed, timeline:timeline, oplan:oplan, ship:ship, all:pay.concat(dates).concat(client).concat(landed).concat(timeline).concat(oplan).concat(ship) }; }
+    return { pay:pay, dates:dates, client:client, master:master, landed:landed, timeline:timeline, oplan:oplan, ship:ship, all:pay.concat(dates).concat(client).concat(master).concat(landed).concat(timeline).concat(oplan).concat(ship) }; }
   function payPanel(r,d){ if(!r)return '';
     var ep='/api/supply/po/'+encodeURIComponent(r.po);
     var bal1=Number(r.balance_1_amount), owe=Number(r.balance_owing)||0;
@@ -2223,7 +2224,7 @@
       +'<tr'+(_pseStart?' style="background:#fff7ed"':'')+'><td class="l"><b>Production start</b></td><td class="l">'+payIn(ep,'start_production',r.prod_start,true)+'</td><td class="l mut tiny">manual'+_alert(_pseStart)+'</td></tr>'
       +'<tr'+(_pseEnd?' style="background:#fff7ed"':'')+'><td class="l"><b>Production end</b></td><td class="l">'+payIn(ep,'end_production_overide',r.end_override,true)+'</td><td class="l mut tiny">'+(r.end_override?'override':'start + supplier days')+_alert(_pseEnd)+'</td></tr>'
       +(function(){ var pse=(_pseStart||_pseEnd);
-        return '<tr'+(pse?' style="background:#fff7ed"':'')+'><td class="l"><b>Supplier production status</b> <span class="mut tiny">(set by supplier / here)</span></td>'
+        return '<tr'+(pse?' style="background:#fff7ed"':'')+'><td class="l"><b>Supplier production status</b><br><span class="mut tiny">(set by supplier / here)</span></td>'
           +'<td class="l">'+prodStatusSel(ep+'/prod-status', r.production_status)+'</td>'
           +'<td class="l mut tiny">'+(r.production_status?(r.prod_confirmed_age!=null?'confirmed '+r.prod_confirmed_age+'d ago':'supplier-set'):'not set')+'</td></tr>'; })()
       +(function(){ var sc=d&&d.sup_completion; if(!sc)return ''; var pend=(sc.status==='pending');
@@ -2264,7 +2265,7 @@
         :'Freight assumes <b>sea</b>, sized from the order-plan pallets (cheapest container combo). These freight &amp; import costs post to <b>CASH FLOW</b> on the due dates above — <b>unless a shipment is assigned</b>, in which case its freight &amp; tax are driven by the <b>SHIPMENTS</b> page instead.')+'</div>';
     // ---- exception counters per tab (red badge) — shared with the grid via poExceptions() ----
     var exc=poExceptions(r,d);
-    return { client:clientH, pay:payH, dates:datesH, landed:landedH, ex:{ pay:exc.pay.length, dates:exc.dates.length, client:exc.client.length, landed:exc.landed.length, timeline:exc.timeline.length, oplan:exc.oplan.length, ship:exc.ship.length } }; }
+    return { client:clientH, pay:payH, dates:datesH, landed:landedH, ex:{ pay:exc.pay.length, dates:exc.dates.length, client:exc.client.length, master:exc.master.length, landed:exc.landed.length, timeline:exc.timeline.length, oplan:exc.oplan.length, ship:exc.ship.length } }; }
   // ---- ORDER PLAN (PO PLAN): SKU × qty × est/supplier-submitted/final cost + line totals + order total ----
   // Shared ERP-deviation rule (banner + ORDER PLAN tab action badge use the SAME set): QUANTITY only —
   // price differences are never an exception. COMPLETE POs raise nothing.
@@ -2631,7 +2632,7 @@
     var linkedH='<div class="sect-h">Linked records across tables</div>'+blk('Deposit',d.deposit)+blk('Payments',d.payments)+blk('Flexport',d.flexport);
     var masterH=poMasterPanel(po), shipH=poShipPanel(po,d);
     var docsH=docsPanel(po,d);
-    var tabs=[['pay','PAYMENTS',p.pay,p.ex.pay],['dates','DATES',p.dates,p.ex.dates],['client','CLIENT/FBA',p.client,p.ex.client],['oplan','ORDER PLAN',oplanH,(p.ex.oplan||0)+erpN],['shipments','SHIPMENTS',shipH,(p.ex.ship||0)],['documents','DOCUMENTS',docsH,0],['masterdata','MASTER DATA',masterH,0],['landed','LANDED COSTS',p.landed,p.ex.landed],['timeline','TIMELINE',timelineH,p.ex.timeline],['linked','LINKED RECORDS',linkedH,0]];
+    var tabs=[['pay','PAYMENTS',p.pay,p.ex.pay],['dates','DATES',p.dates,p.ex.dates],['client','CLIENT/FBA',p.client,p.ex.client],['oplan','ORDER PLAN',oplanH,(p.ex.oplan||0)+erpN],['shipments','SHIPMENTS',shipH,(p.ex.ship||0)],['documents','DOCUMENTS',docsH,0],['masterdata','MASTER DATA',masterH,(p.ex.master||0)],['landed','LANDED COSTS',p.landed,p.ex.landed],['timeline','TIMELINE',timelineH,p.ex.timeline],['linked','LINKED RECORDS',linkedH,0]];
     function badge(n){ return n>0?' <span class="ex-badge" title="'+n+' exception'+(n>1?'s':'')+' / action'+(n>1?'s':'')+'">'+n+'</span>':''; }
     var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab potab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'" data-po="'+esc(po)+'">'+t[1]+badge(t[3])+'</button>';}).join('')+'</div>';
     var panels=tabs.map(function(t,ti){return '<div class="potab-panel" data-pt="'+t[0]+'"'+(ti===0?'':' style="display:none"')+'>'+t[2]+'</div>';}).join('');
