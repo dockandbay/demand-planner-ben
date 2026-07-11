@@ -802,7 +802,7 @@
           var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
           var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end):'';
           var dtcPend=ppIsDtc(p)&&!p.dtc_accepted_at;
-          var act=(invoiceDue(p,sb)?1:0)+((p.shipment||p.flexport_reference||sb.some(function(s){return s.kind==='tracking';}))?0:1)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0)+(poCdMissing(p,sb)?1:0);
+          var act=(invoiceDue(p,sb)?1:0)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0)+(poCdMissing(p,sb)?1:0);   // no-shipment-yet is NOT an action (matches the SHIPMENTS sub-tab + the top PO badge)
           var cdVal=poCdVal(p, sb);
           var cdGrid=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
           return _grpHdr+'<tr><td class="l"><button class="save-btn pp-exp" data-i="'+i+'" data-po="'+esc(p.po)+'"><span class="mng-txt">MANAGE</span>'+(act>0?' <span class="ex-badge" title="'+act+' action'+(act>1?'s':'')+' needed">'+act+'</span>':'')+'</button> <button class="save-btn" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;padding:2px 6px" title="download Commercial Invoice + Packing List" onclick="window.open(\'/api/invoice/po/\'+encodeURIComponent(\''+esc(p.po)+'\'))">📄</button></td>'

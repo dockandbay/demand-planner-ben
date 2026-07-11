@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.446 - Portal MANAGE count: drop no-shipment-yet term (matches sub-tab)
+
+The per-PO MANAGE (N) badge on the supplier portal still added 1 for "no shipment/tracking yet", so it read
+one higher than the sub-tabs (MANAGE 5 vs 4). Removed that term so MANAGE matches the SHIPMENTS sub-tab and
+the top PO badge. No migration.
+
 ## v25.445 - Portal PLAN > SHIPMENTS sub-tab: drop the no-shipment "(1)"
 
 Confirmed the "(1) next to SHIPMENT" is the per-PO PLAN > SHIPMENTS sub-tab badge (supplier portal > Purchase
