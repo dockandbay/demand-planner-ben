@@ -219,7 +219,7 @@
 .pomodal-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100001;display:flex;align-items:center;justify-content:center}
 .pomodal{background:#fff;border-radius:10px;width:580px;max-width:92vw;max-height:88vh;overflow:auto;padding:16px;font:13px system-ui;color:#1a1a1a}
 /* Analyse-consolidation table: pin the Select + PO columns while the rest scrolls horizontally on mobile */
-.consol-tbl th,.consol-tbl td{background:#fff}
+.consol-tbl th,.consol-tbl td{background:#fff;text-align:left}
 .consol-tbl tr.anchor td{background:#f8fafc}
 .consol-tbl input[type=checkbox]{margin:0;vertical-align:middle}
 .consol-tbl th:nth-child(1),.consol-tbl td:nth-child(1){position:sticky;left:0;width:24px;min-width:24px;max-width:24px;padding:3px 3px!important;text-align:center;z-index:2}
@@ -1189,6 +1189,13 @@
         +'<div style="text-align:right;margin-top:8px"><button class="save-btn light" id="consol-cancel">Close</button></div>';
         body.innerHTML=h; document.getElementById('consol-cancel').onclick=function(){ bg.parentNode.removeChild(bg); }; return; }
       h+='<div id="consol-rec" style="font-size:12px;margin-bottom:8px"></div>';
+      var exSet={}; cs.forEach(function(c){ if(c.shipment_ref)exSet[c.shipment_ref]=1; }); if(A.shipment_ref)exSet[A.shipment_ref]=1;
+      var exRefs=Object.keys(exSet);
+      h+='<div style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:8px 10px;margin-bottom:10px">'
+        +'<div style="margin-bottom:6px"><label><input type="radio" name="consol-tgt" value="create" checked> Create new consolidation shipment</label> '
+        +'<input id="consol-ref" type="text" value="'+esc(d.suggested_ref||'')+'" style="font-size:12px;padding:4px 7px;border:1px solid #d0d0d0;border-radius:6px;width:230px;margin-left:4px"> <span class="mut tiny">(no master PO)</span></div>'
+        +'<div><label><input type="radio" name="consol-tgt" value="existing"'+(exRefs.length?'':' disabled')+'> Add to existing shipment</label> '
+        +'<select id="consol-exref" style="font-size:12px;padding:4px 7px;border:1px solid #d0d0d0;border-radius:6px;margin-left:4px"'+(exRefs.length?'':' disabled')+'>'+exRefs.map(function(r){return '<option value="'+esc(r)+'">'+esc(r)+'</option>';}).join('')+'</select></div></div>';
       h+='<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">';
       h+='<table class="consol-tbl" style="width:100%;min-width:660px;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;border-bottom:1px solid #e2e8f0">'
         +'<th style="padding:4px 6px"><input type="checkbox" id="consol-all"></th><th style="padding:4px 6px">PO</th><th style="padding:4px 6px">Pallets</th><th style="padding:4px 6px">Prod</th><th style="padding:4px 6px">Supplier</th><th style="padding:4px 6px">Client</th><th style="padding:4px 6px">Completes</th><th style="padding:4px 6px">Δ days</th><th style="padding:4px 6px">Current shipment</th></tr></thead><tbody>';
@@ -1201,13 +1208,6 @@
       });
       h+='</tbody></table></div>';
       if(d.truncated)h+='<div class="mut tiny" style="margin-top:6px">Showing the nearest 80 POs by completion date.</div>';
-      var exSet={}; cs.forEach(function(c){ if(c.shipment_ref)exSet[c.shipment_ref]=1; }); if(A.shipment_ref)exSet[A.shipment_ref]=1;
-      var exRefs=Object.keys(exSet);
-      h+='<div style="border-top:1px solid #eee;margin-top:12px;padding-top:10px">'
-        +'<div style="margin-bottom:6px"><label><input type="radio" name="consol-tgt" value="create" checked> Create new consolidation shipment</label> '
-        +'<input id="consol-ref" type="text" value="'+esc(d.suggested_ref||'')+'" style="font-size:12px;padding:4px 7px;border:1px solid #d0d0d0;border-radius:6px;width:230px;margin-left:4px"> <span class="mut tiny">(no master PO)</span></div>'
-        +'<div><label><input type="radio" name="consol-tgt" value="existing"'+(exRefs.length?'':' disabled')+'> Add to existing shipment</label> '
-        +'<select id="consol-exref" style="font-size:12px;padding:4px 7px;border:1px solid #d0d0d0;border-radius:6px;margin-left:4px"'+(exRefs.length?'':' disabled')+'>'+exRefs.map(function(r){return '<option value="'+esc(r)+'">'+esc(r)+'</option>';}).join('')+'</select></div></div>';
       h+='<div style="display:flex;align-items:center;gap:12px;margin-top:12px;border-top:1px solid #eee;padding-top:10px">'
         +'<div id="consol-tot" style="font-size:12px"></div><span style="margin-left:auto"></span>'
         +'<button class="save-btn light" id="consol-cancel">Cancel</button><button class="save-btn dark" id="consol-go" style="margin-left:6px">Assign to shipment</button></div>';

@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.427 - Analyse consolidation: target chooser at top + left-aligned table
+
+Moved the **Create new consolidation shipment / Add to existing shipment** chooser to the **top** of the
+modal (directly under the recommendation banner, in a light panel) instead of below the candidate table.
+Left-aligned the candidate table cells (PO etc.) to match the grid default. No migration.
+
 ## v25.426 - Snooze indefinitely (all snooze surfaces)
 
 Added a **Snooze indefinitely** option everywhere an action can be snoozed — a snoozed state with no expiry
