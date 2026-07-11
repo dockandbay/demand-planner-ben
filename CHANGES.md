@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.413 - Analyse consolidation (fill containers from nearby POs)
+
+New **"⊕ Analyse consolidation"** option in the assign-shipment dropdown (under Unassign). For the anchor PO
+it opens a modal listing every **same-country** PO whose completion (production-end) date falls within
+**±3 weeks**, with each PO's **estimated pallets** (Σ line qty ÷ sku pallet_qty). It recommends a fill,
+greedily pre-selecting POs toward a **20-pallet (40ft, preferred)** container and showing the live container
+breakdown (20 / 10 pallet slots, splitting overflow e.g. 30 -> 20+10). Tick the POs you want and assign them
+to either an **existing shipment** (dropdown of nearby shipments) or a **new master-less consolidation
+reference** (pre-filled `P<prod_no>-<COUNTRY>-CONSOL-<n>`, e.g. `P57-UK-CONSOL-1`). Candidates include both
+loose POs and POs already on other shipments (so you can merge). FOB / manufacturing-branch POs are excluded.
+Endpoints: `GET /api/supply/consolidation?po=`, `POST /api/supply/consolidate`. No migration.
+
 ## v25.412 - Crossdock derivation excludes completed POs
 
 The crossdock-into-master-PO derivation now skips linked POs whose status is COMPLETE. Applied in both

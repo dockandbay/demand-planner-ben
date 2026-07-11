@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.412';
+const APP_VERSION = 'v25.413';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1040,6 +1040,87 @@ app.get('/api/supply/shipment-crossdock/:ref', async (req, res) => {
     LEFT JOIN planner.crossdock_shipments cs ON cs.po=po.po AND cs.sku=trim(s.sku)
     WHERE po.shipment_ref=$1 AND trim(s.sku)<>'' ORDER BY po.po, sku`, [req.params.ref])); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── CONSOLIDATION analysis (assign-shipment ▸ "Analyse consolidation") — for an anchor PO, find other POs
+// to the SAME country whose completion (production-end) date falls within ±3 weeks, with each PO's estimated
+// pallets (Σ line qty ÷ sku pallet_qty). Lets the user fill 20-pallet (40ft, preferred) / 10-pallet (20ft)
+// containers by assigning several POs onto one shipment — either an existing master shipment or a new
+// master-less consolidation reference (e.g. P57-UK-CONSOL-1, where 57 is the anchor's production number).
+const PROD_END_SQL = `coalesce(p.end_production_overide, p.start_production + (coalesce(s.production_days,0)||' days')::interval)::date`;
+const PO_PALLETS_SQL = `coalesce((SELECT round(sum(l.qty::numeric/NULLIF(sl.pallet_qty,0)),1) FROM planner.purchase_order_lines l LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=p.po),0)`;
+app.get('/api/supply/consolidation', async (req, res) => {
+  const po = String(req.query.po || '').trim();
+  if (!po) return res.status(400).json({ error: 'po required' });
+  try {
+    const a = (await pool.query(`
+      SELECT p.po, coalesce(p.prod_no,'') prod_no, coalesce(p.supplier_name,'') supplier, coalesce(p.client,'') client,
+             upper(coalesce(nullif(p.country_code,''), b.country_code, '')) country,
+             coalesce(p.shipment_ref,'') shipment_ref, coalesce(p.branch,'') branch,
+             to_char(${PROD_END_SQL},'YYYY-MM-DD') completion, ${PO_PALLETS_SQL} pallets
+      FROM planner.purchase_orders p
+      LEFT JOIN planner.branches b ON b.name=p.branch
+      LEFT JOIN planner.suppliers s ON s.id=p.supplier_id
+      WHERE p.po=$1`, [po])).rows[0];
+    if (!a) return res.status(404).json({ error: 'PO ' + po + ' not found' });
+    if (/manufactur/i.test(a.branch)) return res.json({ anchor: a, candidates: [], note: 'This PO is on the MANUFACTURING branch (FOB) — collected at the factory, so it isn’t consolidated into a container.' });
+    if (!a.country) return res.json({ anchor: a, candidates: [], note: 'This PO has no destination country resolved, so nearby shipments can’t be matched.' });
+
+    const cand = (await pool.query(`
+      WITH anchor AS (
+        SELECT ${PROD_END_SQL} comp
+        FROM planner.purchase_orders p
+        LEFT JOIN planner.suppliers s ON s.id=p.supplier_id
+        WHERE p.po=$1)
+      SELECT p.po, coalesce(p.prod_no,'') prod_no, coalesce(p.supplier_name,'') supplier, coalesce(p.client,'') client,
+             coalesce(p.shipment_ref,'') shipment_ref, coalesce(sh.master_po,'') master_po,
+             (p.po = coalesce(sh.master_po, nullif(p.shipment_ref,''))) is_master,
+             to_char(${PROD_END_SQL},'YYYY-MM-DD') completion,
+             (${PROD_END_SQL} - anchor.comp) delta_days, ${PO_PALLETS_SQL} pallets
+      FROM planner.purchase_orders p
+      LEFT JOIN planner.branches b ON b.name=p.branch
+      LEFT JOIN planner.suppliers s ON s.id=p.supplier_id
+      LEFT JOIN planner.shipments sh ON sh.shipment_ref=p.shipment_ref
+      CROSS JOIN anchor
+      WHERE p.po<>$1
+        AND coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%cancel%'
+        AND coalesce(p.branch,'') NOT ILIKE '%manufactur%'
+        AND upper(coalesce(nullif(p.country_code,''), b.country_code, '')) = $2
+        AND ${PROD_END_SQL} IS NOT NULL AND anchor.comp IS NOT NULL
+        AND abs((${PROD_END_SQL}) - anchor.comp) <= 21
+      ORDER BY abs((${PROD_END_SQL}) - anchor.comp), pallets DESC`, [po, a.country])).rows;
+
+    const LIMIT = 80, truncated = cand.length > LIMIT;
+    const candidates = cand.slice(0, LIMIT).map(r => ({ ...r, pallets: Number(r.pallets) || 0, delta_days: Number(r.delta_days) || 0, is_master: !!r.is_master }));
+    // suggested new consolidation reference: P<prod_no>-<COUNTRY>-CONSOL-<n>
+    const pfx = (a.prod_no ? 'P' + a.prod_no + '-' : '') + a.country + '-CONSOL-';
+    const n = (await pool.query(`SELECT count(*)::int c FROM planner.shipments WHERE shipment_ref ILIKE $1`, [pfx + '%'])).rows[0].c;
+    res.json({ anchor: { ...a, pallets: Number(a.pallets) || 0 }, candidates, suggested_ref: pfx + (n + 1), truncated, window_days: 21 });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Perform a consolidation: assign `pos` onto one shipment. create=true makes a NEW master-less shipment
+// (shipment_ref=ref, master_po NULL); otherwise `ref` is an existing shipment and the POs are moved onto it.
+app.post('/api/supply/consolidate', async (req, res) => {
+  const b = req.body || {}, ref = String(b.ref || '').trim();
+  const pos = Array.isArray(b.pos) ? b.pos.map(x => String(x || '').trim()).filter(Boolean) : [];
+  if (!ref) return res.status(400).json({ error: 'ref required' });
+  if (!pos.length) return res.status(400).json({ error: 'no POs selected' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    if (b.create) {
+      await client.query(`INSERT INTO planner.shipments (shipment_ref, master_po, country_code)
+        VALUES ($1, NULL, $2) ON CONFLICT (shipment_ref) DO NOTHING`, [ref, String(b.country || '') || null]);
+    } else {
+      const ex = (await client.query(`SELECT 1 FROM planner.shipments WHERE shipment_ref=$1`, [ref])).rows[0];
+      if (!ex) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'shipment ' + ref + ' does not exist (tick "create new" to make it)' }); }
+    }
+    const upd = await client.query(`UPDATE planner.purchase_orders SET shipment_ref=$1 WHERE po = ANY($2::text[])`, [ref, pos]);
+    await client.query(`UPDATE planner.shipments SET updated_at=now() WHERE shipment_ref=$1`, [ref]);
+    await client.query('COMMIT');
+    res.json({ ok: true, ref, assigned: upd.rowCount });
+  } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
 });
 
 // ── CROSSDOCK report (PURCHASE ORDERS ▸ CROSSDOCK) — on-hand + inbound for every CROSSDOCK%/PREORDER% SKU
