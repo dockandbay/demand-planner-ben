@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.455 - Portal own-carrier dropdown: DHL / Fedex / SF Express / Local Delivery / Other
+
+Updated the supplier-portal carrier dropdown (under 'shipped with own carrier account'): removed Flexport,
+renamed FOB to 'Local Delivery', added 'SF Express'. No migration.
+
 ## v25.454 - Portal: move PO invoice download into the INVOICE & DOCUMENTS tab
 
 Removed the commercial-invoice icon between MANAGE and the PO number on Purchase Orders. Added a "⤓ DOWNLOAD

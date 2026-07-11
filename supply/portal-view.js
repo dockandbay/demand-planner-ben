@@ -685,7 +685,7 @@
       // carrier + tracking live on the SHIPMENT (same carrier list as the planner). If this PO isn't on a
       // shipment yet, submitting creates a master shipment for it and assigns this PO.
       var hasShip=!!p.shipment;
-      var CARS_PP=['Flexport','DHL','Fedex','FOB','Other'];
+      var CARS_PP=['DHL','Fedex','SF Express','Local Delivery','Other'];
       var carVal=p.ship_carrier||(p.flexport_reference?'Flexport':'');
       var trkVal=p.ship_carrier_ref||p.flexport_reference||'';
       var carOpts='<option value="">—</option>'+((carVal&&CARS_PP.indexOf(carVal)<0)?'<option selected>'+esc(carVal)+'</option>':'')
