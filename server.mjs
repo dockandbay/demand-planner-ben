@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.439';
+const APP_VERSION = 'v25.440';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -4347,10 +4347,10 @@ app.post('/api/supply/po-create', async (req, res) => {
       supId = s.rows[0] ? s.rows[0].id : null;
     }
     await pool.query(`INSERT INTO planner.purchase_orders
-      (po, supplier_name, supplier_id, country_code, branch, status, start_production)
-      VALUES ($1,$2,$3,$4,$5,coalesce($6,'FUTURE'),$7)`,
+      (po, supplier_name, supplier_id, country_code, branch, status, start_production, prod_no, batch_id)
+      VALUES ($1,$2,$3,$4,$5,coalesce($6,'FUTURE'),$7,$8,$9)`,
       [po, b.supplier_name || null, supId, b.country_code || null, b.branch || null,
-       b.status || null, b.start_production || null]);
+       b.status || null, b.start_production || null, b.prod_no || null, b.batch_id || null]);
     await notePoCreated(pool, po, authUser(req));
     res.json({ ok: true, po });
   } catch (e) { res.status(500).json({ error: e.message }); }

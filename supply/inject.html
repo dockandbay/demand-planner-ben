@@ -1565,9 +1565,7 @@
     var _ft=document.getElementById('po-filt-toggle'); if(_ft)_ft.onclick=function(){ var sc=document.getElementById('supply-content'); var on=sc.classList.toggle('filters-open'); this.textContent=on?'⚙ Filters ▴':'⚙ Filters'; };
     var _ie=document.getElementById('po-impexp-toggle'); if(_ie)_ie.onclick=function(){ var pb=document.getElementById('po-impexp-bar'); if(!pb)return; var on=(pb.style.display==='none'||!pb.style.display); pb.style.display=on?'flex':'none'; this.textContent=on?'⇅ Import/Export ▴':'⇅ Import/Export'; };
     document.getElementById('po-csv').onclick=function(){var q=effQ(state.q);csv(q?filt(rows,q):cur(),'purchase_orders.csv',PO_CSV_LABELS);};
-    document.getElementById('po-new').onclick=function(){ var po=prompt('New PO number:'); if(!po||!po.trim())return;
-      var sup=prompt('Supplier (optional — exact name; set later in the row otherwise):')||'';
-      shipPost('/api/supply/po-create',{po:po.trim(),supplier_name:sup.trim()||null,status:'FUTURE'},function(){ delete cache['purchase-orders']; selectSection('purchase-orders'); }); };
+    document.getElementById('po-new').onclick=openPoCreate;
     document.getElementById('po-upload').onclick=openPoUpload;
     var _impBtn=document.getElementById('po-import-cin7'); if(_impBtn)_impBtn.onclick=openPoImportCin7;
     // BULK Cin7 date sync — every ACTIVE PO whose completed-at-warehouse date differs from Cin7 (same condition as
@@ -1642,6 +1640,41 @@
     bg.onclick=function(e){ if(e.target===bg)bg.parentNode.removeChild(bg); };
     document.getElementById('po-imp-cancel').onclick=function(){ bg.parentNode.removeChild(bg); };
     setTimeout(function(){ ref.focus(); },0);
+  }
+  // Single "New PO" form: PO number (PO- prefilled), supplier (search dropdown), branch, production start,
+  // production number, batch number. One POST to /api/supply/po-create.
+  function openPoCreate(){ var bg=document.createElement('div'); bg.className='pomodal-bg';
+    function fld(lbl,inner){ return '<div style="margin-bottom:9px"><div class="mut tiny" style="margin-bottom:2px">'+lbl+'</div>'+inner+'</div>'; }
+    var ist='font-size:13px;padding:5px 8px;border:1px solid #d0d0d0;border-radius:6px;width:100%;box-sizing:border-box;text-align:left';
+    bg.innerHTML='<div class="pomodal" style="width:420px">'+lookupDatalists()
+      +'<div style="font-weight:700;font-size:15px;margin-bottom:10px">New purchase order</div>'
+      +fld('PO number','<input id="npo-po" type="text" value="PO-" style="'+ist+'">')
+      +fld('Supplier','<input id="npo-sup" list="supplierlist" placeholder="search supplier…" style="'+ist+'">')
+      +fld('Branch','<input id="npo-br" list="branchlist" placeholder="search branch…" style="'+ist+'">')
+      +fld('Production start date','<input id="npo-start" type="date" style="'+ist+'">')
+      +fld('Production number','<input id="npo-prod" list="prodlist" placeholder="e.g. 57" style="'+ist+'">')
+      +fld('Batch number','<input id="npo-batch" list="batchlist" placeholder="optional" style="'+ist+'">')
+      +'<div id="npo-msg" style="color:#dc2626;font-size:12px;min-height:14px;margin:2px 0"></div>'
+      +'<div style="display:flex;justify-content:flex-end;gap:6px;margin-top:4px"><button class="save-btn light" id="npo-cancel">Cancel</button><button class="save-btn dark" id="npo-go">Create PO</button></div></div>';
+    document.body.appendChild(bg);
+    bg.onclick=function(e){ if(e.target===bg)bg.parentNode.removeChild(bg); };
+    document.getElementById('npo-cancel').onclick=function(){ bg.parentNode.removeChild(bg); };
+    var poI=document.getElementById('npo-po'); setTimeout(function(){ poI.focus(); poI.setSelectionRange(poI.value.length,poI.value.length); },0);
+    document.getElementById('npo-go').onclick=function(){
+      var po=(poI.value||'').trim(), msg=document.getElementById('npo-msg');
+      if(!po||po==='PO-'){ msg.textContent='Enter a PO number.'; poI.focus(); return; }
+      var body={ po:po, supplier_name:(document.getElementById('npo-sup').value||'').trim()||null,
+        branch:(document.getElementById('npo-br').value||'').trim()||null,
+        start_production:(document.getElementById('npo-start').value||'').trim()||null,
+        prod_no:(document.getElementById('npo-prod').value||'').trim()||null,
+        batch_id:(document.getElementById('npo-batch').value||'').trim()||null, status:'FUTURE' };
+      var go=document.getElementById('npo-go'); go.disabled=true; go.textContent='Creating…';
+      fetch('/api/supply/po-create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();}).then(function(j){
+        if(j&&j.error){ msg.textContent=j.error; go.disabled=false; go.textContent='Create PO'; return; }
+        bg.parentNode.removeChild(bg); invalidateDerived(); delete cache['purchase-orders'];
+        _poState={f:'in_progress',q:po,act:{},ctry:{},grp:'shipment',sup:'',prod:'',batch:'',branch:''};   // drop the new PO into the search so the grid filters to it
+        selectSection('purchase-orders');
+      }).catch(function(e){ msg.textContent='Failed: '+(e.message||e); go.disabled=false; go.textContent='Create PO'; }); };
   }
   function openPoUpload(){ var bg=document.createElement('div'); bg.className='pomodal-bg';
     bg.innerHTML='<div class="pomodal"><div style="font-weight:600;font-size:14px;margin-bottom:6px">Upload purchase orders</div>'
