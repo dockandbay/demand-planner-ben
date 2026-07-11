@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.413';
+const APP_VERSION = 'v25.414';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1109,8 +1109,9 @@ app.post('/api/supply/consolidate', async (req, res) => {
   try {
     await client.query('BEGIN');
     if (b.create) {
-      await client.query(`INSERT INTO planner.shipments (shipment_ref, master_po, country_code)
-        VALUES ($1, NULL, $2) ON CONFLICT (shipment_ref) DO NOTHING`, [ref, String(b.country || '') || null]);
+      const ins = await client.query(`INSERT INTO planner.shipments (shipment_ref, master_po, country_code)
+        VALUES ($1, NULL, $2) ON CONFLICT (shipment_ref) DO NOTHING RETURNING shipment_ref`, [ref, String(b.country || '') || null]);
+      if (ins.rowCount) await noteShipmentCreated(client, ref, authUser(req));
     } else {
       const ex = (await client.query(`SELECT 1 FROM planner.shipments WHERE shipment_ref=$1`, [ref])).rows[0];
       if (!ex) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'shipment ' + ref + ' does not exist (tick "create new" to make it)' }); }
@@ -2999,6 +3000,17 @@ function authUser(req) {
 // Author to stamp on an INTERNAL (Dock & Bay side) note: the signed-in user if the auth layer forwards it,
 // else a real name the client passed (ignore the generic "Dock & Bay" placeholder), else null.
 function internalAuthor(req, clientVal) { const u = authUser(req); if (u) return u; return (clientVal && clientVal !== 'Dock & Bay') ? clientVal : null; }
+// Post an internal timeline note when a shipment is first created — this is what notifies the supplier on
+// their portal (unread internal note on the Shipment Plan). Called only after a genuine INSERT (not an
+// on-conflict no-op). `db` is a pool or a transaction client. Non-fatal on error.
+async function noteShipmentCreated(db, ref, user) {
+  if (!ref) return;
+  const who = user || 'A user';
+  try {
+    await db.query(`INSERT INTO planner.shipment_notes (shipment_ref, author_kind, author_email, body)
+      VALUES ($1,'internal',$2,$3)`, [ref, user || null, who + ' created a new shipment']);
+  } catch (e) { /* timeline note is best-effort — never block the shipment write */ }
+}
 
 // ── Access control ────────────────────────────────────────────────────────────────────────────
 // Resolve the caller's app permissions. LIVE-ONLY: with no auth proxy (sandbox/local) there is no email,
@@ -4628,8 +4640,9 @@ app.post('/api/supply/shipment/:ref', async (req, res) => {
   }
   const upd = cols.slice(1).map(c => `${c}=excluded.${c}`).join(',') || 'updated_at=now()';
   try {
-    await pool.query(`INSERT INTO planner.shipments (${cols.join(',')}) VALUES (${ph.join(',')})
-      ON CONFLICT (shipment_ref) DO UPDATE SET ${upd}, updated_at=now()`, vals);
+    const up = await pool.query(`INSERT INTO planner.shipments (${cols.join(',')}) VALUES (${ph.join(',')})
+      ON CONFLICT (shipment_ref) DO UPDATE SET ${upd}, updated_at=now() RETURNING (xmax = 0) AS inserted`, vals);
+    if (up.rows[0] && up.rows[0].inserted) await noteShipmentCreated(pool, ref, authUser(req));
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -4638,9 +4651,10 @@ app.post('/api/supply/shipment-create', async (req, res) => {
   const ref = (req.body && req.body.shipment_ref || '').trim();
   if (!ref) return res.status(400).json({ error: 'shipment_ref required' });
   try {
-    await pool.query(`INSERT INTO planner.shipments (shipment_ref, master_po, carrier, carrier_ref)
-      VALUES ($1,$2,$3,$4) ON CONFLICT (shipment_ref) DO NOTHING`,
+    const ins = await pool.query(`INSERT INTO planner.shipments (shipment_ref, master_po, carrier, carrier_ref)
+      VALUES ($1,$2,$3,$4) ON CONFLICT (shipment_ref) DO NOTHING RETURNING shipment_ref`,
       [ref, (req.body.master_po || ref), req.body.carrier || null, req.body.carrier_ref || null]);
+    if (ins.rowCount) await noteShipmentCreated(pool, ref, authUser(req));
     res.json({ ok: true, shipment_ref: ref });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -4655,8 +4669,9 @@ app.post('/api/supply/shipment/:ref/assign', async (req, res) => {
       await pool.query(`UPDATE planner.shipments SET master_po=NULL, updated_at=now()
         WHERE shipment_ref=$1 AND master_po=$2`, [ref, b.po]);
     } else {
-      await pool.query(`INSERT INTO planner.shipments (shipment_ref, master_po) VALUES ($1,$1)
-        ON CONFLICT (shipment_ref) DO NOTHING`, [ref]);
+      const ins = await pool.query(`INSERT INTO planner.shipments (shipment_ref, master_po) VALUES ($1,$1)
+        ON CONFLICT (shipment_ref) DO NOTHING RETURNING shipment_ref`, [ref]);
+      if (ins.rowCount) await noteShipmentCreated(pool, ref, authUser(req));
       await pool.query(`UPDATE planner.purchase_orders SET shipment_ref=$2 WHERE po=$1`, [b.po, ref]);
       if (b.master) await pool.query(`UPDATE planner.shipments SET master_po=$2, updated_at=now()
         WHERE shipment_ref=$1`, [ref, b.po]);

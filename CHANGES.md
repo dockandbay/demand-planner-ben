@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.414 - New-shipment timeline note (notifies the supplier)
+
+When a shipment is **first created**, an internal timeline note **"<user> created a new shipment"** is now
+posted automatically (author = the logged-in Vercel/auth user; falls back to "A user" where no auth email is
+forwarded, e.g. sandbox). Because it's an unread internal note, it shows on the supplier's **portal Shipment
+Plan** as a Dock & Bay notification. Fires on genuine creation only (not on re-save/edit or an on-conflict
+no-op) across all four creation paths: make-master assign, `shipment-create`, the shipment upsert
+(insert-detected via `xmax=0`), and Analyse-consolidation. No new endpoint, no migration.
+
 ## v25.413 - Analyse consolidation (fill containers from nearby POs)
 
 New **"⊕ Analyse consolidation"** option in the assign-shipment dropdown (under Unassign). For the anchor PO
