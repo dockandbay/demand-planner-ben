@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.447 - Fix "today is not defined" on the PO SHIPMENTS panel
+
+poShipPanel (PLAN > SHIPMENTS) referenced a bare `today` (pre-shipment-doc overdue checks) with no local
+definition, throwing "today is not defined" when the panel rendered. Added a local `today`. No migration.
+
 ## v25.446 - Portal MANAGE count: drop no-shipment-yet term (matches sub-tab)
 
 The per-PO MANAGE (N) badge on the supplier portal still added 1 for "no shipment/tracking yet", so it read

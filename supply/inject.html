@@ -982,6 +982,7 @@
       +'</div><div style="margin-top:14px"><button class="save-btn light pom-del" data-po="'+esc(po)+'" title="delete this PO + its lines" style="color:#dc2626;border-color:#fca5a5">🗑 Delete this PO</button></div>'; }
   // PLAN-panel SHIPMENTS tab (#10): assign a shipment / FOB, ASN numbers, iFulfillment pallet labels — this PO.
   function poShipPanel(po,d){ var r=poBy[po]||{}; var ep='/api/supply/po/'+encodeURIComponent(po);
+    var today=new Date().toISOString().slice(0,10);   // used by the pre-shipment-doc overdue checks below
     var isCogh=/coghlans/i.test(r.branch||'');   // ASN pallet labels apply to AU Coghlans only
     var isFbaAwd=/fba|awd/i.test(r.branch||''), isEU=/ifulfillment/i.test(r.branch||'');
     var preshipBranch=isCogh||isFbaAwd||isEU;   // any branch with a pre-shipment doc rule
