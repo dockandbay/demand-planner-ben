@@ -3,6 +3,21 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.424 - Shipment actions (A badge + snooze) + sub-menu notification counters
+
+Brings the PO action system to SHIPMENTS and adds tab counters.
+- **Shipment "A" count badge + snooze** (same UX as POs): each shipment row shows a red action-count badge;
+  click it → popover listing each action with 1d/3d/7d snooze + wake ("Snoozed by <user>"). Snooze reuses the
+  shared `/api/supply/actions/state` store with key `shipact|<ref>|<code>`. Action conditions: no POs linked,
+  no Flexport match, over 20 pallets (planned), escalated, shipment dates missing, ETA passed. The old inline
+  ⚠ exception tag is superseded by this badge. Shipment-expand sub-tabs (Dates / POs aboard / Timeline) also
+  carry per-tab action counts.
+- **Sub-menu notification counters**: PLAN, Shipments and Manufacturing sub-tabs now show a count badge of
+  rows needing action (open = snoozed excluded). PLAN = POs with open actions; Shipments = shipments with
+  open actions; Manufacturing = unaccepted discrepancy SKU rows. Counts compute client-side (consistent with
+  the per-row badges) and prefetch in the background so all badges show from any sub-tab. Verified on sandbox:
+  Shipments 68, Manufacturing 6. No migration.
+
 ## v25.423 - Shipments grid: Planned/Shipping split + FOB filter
 
 PURCHASE ORDERS ▸ SHIPMENTS filters reworked. The old **Active** pill is split into **Planned** and

@@ -1436,6 +1436,7 @@
       var sa=document.getElementById('po-showall'); if(sa)sa.onclick=function(){ _poShowAll=true; view(); };
       bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindPoNotes(); bindPoActBadge(); bindPoCopy(); bindPoScrollPin();
       bindDepPick(patchPoRow); bindPoStars(); bindSetShipping();
+      _navCounts.plan=actItemsCount(); updateNavBadges();   // PLAN sub-menu action counter (POs with open actions)
       if(_pendingPO){ var want=_pendingPO; _pendingPO=null; setTimeout(function(){
         // if the target PO is past the render cap it isn't in the DOM yet — reveal all rows and retry so the
         // direct PO actually opens (links from Shipments / Deposits / Cash flow / Actions all rely on this)
@@ -3027,7 +3028,20 @@
   var poSub='plan';
   var PO_SUBS=[['plan','PLAN'],['shipments','Shipments'],['crossdock','Crossdock'],['manufacturing','Manufacturing'],['list','Productions'],['deposits','Deposits'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['barcodes','Barcodes']];
   var PO_SUB_KEYS=PO_SUBS.map(function(t){return t[0];});
-  function poSubNav(){ return '<div id="prod-subtabs">'+PO_SUBS.map(function(t){return '<span class="rtab'+(poSub===t[0]?' active':'')+'" data-posub="'+t[0]+'">'+t[1]+'</span>';}).join('')+'</div>'; }
+  // Sub-menu action counters: rows-needing-action count per sub-tab (open = snooze-excluded). Populated as each
+  // section's data renders (_navCounts.plan / .shipments / .manufacturing) + a background prefetch on entry.
+  var _navCounts={}, _allShips=[], _NAVLBL={plan:'PLAN',shipments:'Shipments',manufacturing:'Manufacturing'};
+  function navBadge(n){ n=Number(n)||0; return n>0?' <span class="ex-badge" title="'+n+' item'+(n>1?'s':'')+' needing action">'+n+'</span>':''; }
+  function updateNavBadges(){ document.querySelectorAll('#supply-content #prod-subtabs .rtab[data-posub]').forEach(function(sp){ var k=sp.dataset.posub; if(_NAVLBL[k]!==undefined) sp.innerHTML=_NAVLBL[k]+navBadge(_navCounts[k]); }); }
+  function poSubNav(){ return '<div id="prod-subtabs">'+PO_SUBS.map(function(t){ var bd=(_NAVLBL[t[0]]!==undefined)?navBadge(_navCounts[t[0]]):''; return '<span class="rtab'+(poSub===t[0]?' active':'')+'" data-posub="'+t[0]+'">'+t[1]+bd+'</span>'; }).join('')+'</div>'; }
+  // Populate the Shipments + Manufacturing counters in the background so their badges show from any sub-tab
+  // (PLAN's count fills when the PO grid renders — it's the default tab). Runs once each; then cached.
+  function prefetchNavCounts(){
+    if(_navCounts.shipments===undefined){ (cache['shipments']?Promise.resolve(cache['shipments']):fetch('/api/supply/shipments').then(function(r){return r.json();}).then(function(d){cache['shipments']=d;return d;}))
+      .then(function(d){ _allShips=(d&&d.shipments)||[]; if(!_poActStateLoaded)loadPoActState(recomputeShipNavCount); else recomputeShipNavCount(); }).catch(function(){}); }
+    if(_navCounts.manufacturing===undefined){ (cache['manufacturing']?Promise.resolve(cache['manufacturing']):fetch('/api/supply/manufacturing').then(function(r){return r.json();}).then(function(d){cache['manufacturing']=d;return d;}))
+      .then(function(d){ var cc=[]; ((d&&d.bundles)||[]).forEach(function(bn){(bn.components||[]).forEach(function(c){cc.push(c);});}); _navCounts.manufacturing=cc.filter(function(c){return c.diff!==0&&!c.accepted;}).length; updateNavBadges(); }).catch(function(){}); }
+  }
   function bindPoSubNav(){ document.querySelectorAll('#supply-content .rtab[data-posub]').forEach(function(p){ p.onclick=function(){ showPoSub(p.dataset.posub); }; }); }
   // render the PURCHASE ORDERS section on the given sub-tab (plan = PO grid; others = former productions views)
   function showPoSub(tab){ poSub=(PO_SUB_KEYS.indexOf(tab)>=0?tab:'plan'); current='purchase-orders'; syncHash();
@@ -3035,6 +3049,7 @@
     document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k==='purchase-orders');});
     var _ns=document.getElementById('supply-nav-sel'); if(_ns&&_ns.value!=='purchase-orders')_ns.value='purchase-orders';
     var c=document.getElementById('supply-content');
+    prefetchNavCounts();   // fill Shipments + Manufacturing counters in the background so all sub-nav badges show
     if(poSub==='plan'){ if(cache['purchase-orders'])return renderPO(cache['purchase-orders']); c.innerHTML='<div class="count">Loading…</div>';
       fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(d){cache['purchase-orders']=d; if(_tk!==_navToken)return; renderPO(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
     if(poSub==='shipments'){ var showShip=function(d){ if(_tk!==_navToken)return; c.innerHTML=poSubNav()+'<div id="prod-body"></div>'; bindPoSubNav(); fetchLookups(function(){ if(_tk!==_navToken)return; shipInner(d, document.getElementById('prod-body')); }); };
@@ -3091,6 +3106,7 @@
     var bundles=d.bundles||[];
     var allComps=[]; bundles.forEach(function(bn){(bn.components||[]).forEach(function(c){allComps.push(c);});});
     var openMis=allComps.filter(function(c){return c.diff!==0 && !c.accepted;});
+    _navCounts.manufacturing=openMis.length; updateNavBadges();   // Manufacturing sub-menu counter: unaccepted discrepancy SKU rows
     // derive the two distinct PO populations client-side ------------------------------------------
     // FINISHED-product POs: carry the bundle (parent) SKUs → these create the demand.
     var finMap={}; bundles.forEach(function(bn){ (bn.finishedPos||[]).forEach(function(x){ if(!x.qty)return;
@@ -3414,6 +3430,9 @@
     }).catch(function(){}); }
   function shipInner(data,c){
     var ships=data.shipments||[], un=data.unassigned||[];
+    _allShips=ships;   // snooze map may not be loaded yet on this view → ensure it, then (re)compute + re-render
+    if(!_poActStateLoaded){ loadPoActState(function(){ recomputeShipNavCount(); try{ view(); }catch(e){} }); }
+    recomputeShipNavCount();
     var FILTERS=[['planned','Planned'],['shipping','Shipping'],['completed','Completed'],['exceptions','Exceptions'],['escalated','Escalated'],['all','All']];
     var state={f:_pendingShip?'all':'planned',q:'',ctry:'',br:'',fob:'',recent:true,focus:false};   // default Planned; show all when navigating to a specific shipment
     var SHIP_CAP=250, _shipShowAll=false;   // cap rendered rows; "show all" reveals the rest
@@ -3452,7 +3471,7 @@
       document.getElementById('sup-grid').innerHTML=shipTable(shown)
         +(shown.length<f.length?'<div style="margin:8px 0;text-align:center"><button class="save-btn light" id="ship-showall">Show all '+f.length+' &darr;</button></div>':'');
       var sa=document.getElementById('ship-showall'); if(sa)sa.onclick=function(){ _shipShowAll=true; view(); };
-      bindShipExpand(); bindEdits(); bindShipStars();
+      bindShipExpand(); bindEdits(); bindShipStars(); bindShipActBadge();
       if(_pendingShip){ var want=_pendingShip; _pendingShip=null; setTimeout(function(){ expandPending('#sup-grid .po-exp[data-ref]',want); },30); } }
     // patch ONE shipment row in place (+ refresh its open expand, keeping the sub-tab) — no full grid re-render
     function patchShipRow(ref){ delete cache['shipments']; invalidateDerived();
@@ -3465,7 +3484,7 @@
         var exOpen=(function(){var e=document.getElementById('shipexp-'+i);return e&&e.style.display!=='none';})();
         var nm=tmp.querySelector('tr'); if(nm&&tr&&tr.parentNode){ tr.parentNode.replaceChild(nm,tr); }
         if(exOpen&&nm){ nm.classList.add('row-open'); var eb=nm.querySelector('.po-exp'); if(eb)eb.classList.add('open'); }   // keep the open-row highlight after an in-place patch
-        bindShipExpand(); bindEdits(); bindShipStars();
+        bindShipExpand(); bindEdits(); bindShipStars(); bindShipActBadge();
         var ex=document.getElementById('shipexp-'+i);   // if this row is expanded, refresh the panel keeping the active sub-tab
         if(ex && ex.style.display!=='none'){ var box=document.getElementById('shipdet-'+i), at=box&&box.querySelector('.shtab.active'), st=at?at.dataset.st:'dates';
           shipExpand(ref,i,function(bx){ var tb=bx.querySelector('.shtab[data-st="'+st+'"]'); if(tb)tb.click(); }); }
@@ -3488,6 +3507,55 @@
     view(); }   // Unassigned-POs moved to the PURCHASE ORDERS "Unassigned shipment" exception filter
   function shipComplete(s){ return s.status==='Complete'||s.status==='Completed'; }
   function shipShipping(s){ return s.status==='Shipping'||s.status==='Active'; }
+  // ── SHIPMENT actions (mirror the PO action system: per-row "A" count badge, snooze popover, sub-tab counts).
+  // Conditions read the shipment row `s`; snooze reuses the shared /api/supply/actions/state store (_poActState)
+  // with the key 'shipact|<ref>|<code>'. Snoozed items drop out of the counts unless "show snoozed" is on.
+  var SHIP_ACTCOND={
+    unlinked:function(s){ return !shipComplete(s) && !!s.no_pos; },
+    no_flex:function(s){ return !shipComplete(s) && !!s.no_flex_match; },
+    over_pallets:function(s){ return !shipComplete(s) && !shipShipping(s) && !!s.over_pallets; },
+    escalated:function(s){ return !!s.escalated; },
+    missing_dates:function(s){ return !shipComplete(s) && !s.no_pos && !s.departure && !s.landing && !s.arrival; },
+    eta_passed:function(s){ var t=new Date().toISOString().slice(0,10); var eta=s.arrival||s.landing; return !shipComplete(s) && !s.no_pos && !!eta && eta<t; }};
+  var SHIP_ACT_LABEL={unlinked:'No POs linked',no_flex:'No Flexport match',over_pallets:'Over 20 pallets — split',escalated:'Escalated by supplier',missing_dates:'Shipment dates missing',eta_passed:'ETA passed — not arrived'};
+  var SHIP_ACT_TAB={unlinked:'pos',no_flex:'dates',over_pallets:'pos',escalated:'timeline',missing_dates:'dates',eta_passed:'dates'};
+  function shipActKey(ref,code){ return 'shipact|'+ref+'|'+code; }
+  function shipActSnoozed(ref,code){ var s=_poActState[shipActKey(ref,code)]; var t=new Date().toISOString().slice(0,10); return !!(s&&s.status==='snoozed'&&s.snooze_until&&s.snooze_until>=t); }
+  function shipActionsAll(s){ var out=[]; for(var k in SHIP_ACTCOND){ try{ if(SHIP_ACTCOND[k](s))out.push(k); }catch(e){} } return out; }
+  function shipActions(s){ return shipActionsAll(s).filter(function(k){ return _poShowSnoozed || !shipActSnoozed(s.shipment_ref,k); }); }
+  // generic snooze setter (works for any action_key — POs use poSnoozeSet; shipments use this)
+  function snoozeKeySet(key,days,cb){ fetch('/api/supply/actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:key,status:(days?'snoozed':'open'),snooze_days:days||0,restore:!days})}).then(function(r){return r.json();}).then(function(){ loadPoActState(cb); }).catch(function(){ if(cb)cb(); }); }
+  function recomputeShipNavCount(){ _navCounts.shipments=_allShips.filter(function(s){ return shipActions(s).length>0; }).length; updateNavBadges(); }
+  function refreshShipActInPlace(ref){ var s=shipBy[ref]; if(s){ var acts=shipActions(s);
+      document.querySelectorAll('.ship-act-badge[data-ref="'+_cssEsc(ref)+'"]').forEach(function(b){ if(acts.length){ b.style.display=''; b.textContent=acts.length; } else b.style.display='none'; }); }
+    recomputeShipNavCount(); }
+  function shipActBadge(s){ var acts=shipActions(s); if(!acts.length)return '';
+    return ' <button class="ship-act-badge ex-badge" style="cursor:pointer;border:none" data-ref="'+esc(s.shipment_ref)+'" data-allacts="'+esc(shipActionsAll(s).join(','))+'" data-note="'+esc(acts.length+' action item'+(acts.length>1?'s':'')+' — '+acts.map(function(k){return SHIP_ACT_LABEL[k]||k;}).join('; ')+' (click to snooze / open)')+'">'+acts.length+'</button>'; }
+  function bindShipActBadge(){ document.querySelectorAll('#supply-root .ship-act-badge[data-ref]').forEach(function(b){ if(b._b)return; b._b=1;
+    b.addEventListener('mouseenter',function(){ b._t=setTimeout(function(){ noteTip(b); },120); });
+    b.addEventListener('mouseleave',function(){ clearTimeout(b._t); hideNoteTip(); });
+    b.onclick=function(e){ e.stopPropagation(); hideNoteTip(); shipActPopover(b); }; }); }
+  function shipActPopover(b){ var ref=b.dataset.ref, conds=(b.dataset.allacts||'').split(',').filter(Boolean);
+    var ex=document.getElementById('po-act-pop'); if(ex)ex.remove();
+    var pop=document.createElement('div'); pop.id='po-act-pop';
+    pop.style.cssText='position:absolute;z-index:200000;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 30px rgba(15,23,42,.18);padding:8px 10px;min-width:300px;font-size:12px';
+    pop.innerHTML='<div style="font-weight:700;margin-bottom:4px">'+esc(ref)+' — action items</div>'
+      +conds.map(function(k){ var sn=shipActSnoozed(ref,k), s=_poActState[shipActKey(ref,k)]||{};
+        return '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-top:1px solid #f1f5f9">'
+          +'<span style="flex:1">'+esc(SHIP_ACT_LABEL[k]||k)+(sn?'<br><span class="mut tiny">snoozed → '+esc(s.snooze_until||'')+(s.snoozed_by?' by '+esc(shortUser(s.snoozed_by)):'')+(s.snoozed_at?' on '+esc(s.snoozed_at):'')+'</span>':'')+'</span>'
+          +(sn?'<button class="save-btn light sap-un" data-k="'+esc(k)+'">wake</button>'
+              :'<button class="save-btn light sap-sn" data-k="'+esc(k)+'" data-d="1">1d</button><button class="save-btn light sap-sn" data-k="'+esc(k)+'" data-d="3">3d</button><button class="save-btn light sap-sn" data-k="'+esc(k)+'" data-d="7">7d</button>')
+          +'</div>'; }).join('')
+      +'<div style="text-align:right;margin-top:6px"><button class="save-btn light sap-close">close</button></div>';
+    document.body.appendChild(pop);
+    var rc=b.getBoundingClientRect(); pop.style.left=(window.scrollX+Math.min(rc.left,window.innerWidth-330))+'px'; pop.style.top=(window.scrollY+rc.bottom+4)+'px';
+    function close(){ pop.remove(); document.removeEventListener('mousedown',out,true); }
+    function out(e){ if(!pop.contains(e.target)&&e.target!==b)close(); }
+    setTimeout(function(){ document.addEventListener('mousedown',out,true); },0);
+    pop.querySelector('.sap-close').onclick=close;
+    pop.querySelectorAll('.sap-sn').forEach(function(x){ x.onclick=function(){ var k=x.dataset.k; pop.querySelectorAll('button').forEach(function(y){y.disabled=true;}); snoozeKeySet(shipActKey(ref,k),parseInt(x.dataset.d,10),function(){ close(); refreshShipActInPlace(ref); }); }; });
+    pop.querySelectorAll('.sap-un').forEach(function(x){ x.onclick=function(){ var k=x.dataset.k; pop.querySelectorAll('button').forEach(function(y){y.disabled=true;}); snoozeKeySet(shipActKey(ref,k),0,function(){ close(); refreshShipActInPlace(ref); }); }; });
+  }
   // a completed shipment has no open exceptions; ">20 pallets" only matters BEFORE it ships (can't split once shipping/complete)
   // ">20 pallets" only matters before it ships; "unlinked" = no POs; "no Flexport match" = has a Flexport ref that doesn't match
   function shipIsExc(s){ if(shipComplete(s))return false; return !!s.no_pos || !!s.no_flex_match || (!!s.over_pallets && !shipShipping(s)); }
@@ -3528,7 +3596,7 @@
   // one shipment's main row (the expand row is added by shipTable). Named so a single row can be patched in place.
   function shipRowHtml(s,i){ shipBy[s.shipment_ref]=s; var ep='/api/supply/shipment/'+encodeURIComponent(s.shipment_ref);
     var mast=(s.master_po&&s.master_po!==s.shipment_ref)?(' <span class="mut tiny">★'+esc(s.master_po)+'</span>'):'';
-    var alert=shipIsExc(s)?' <span class="tool-badge bg-red" title="'+esc(shipExReason(s))+'">⚠ '+esc(shipExShort(s))+'</span>':'';
+    var alert=shipActBadge(s);   // snoozable "A" count badge (supersedes the old inline ⚠ exception tag)
     var fxl=s.flex_id?(' <a href="https://app.flexport.com/shipments/'+((String(s.carrier_ref||s.flex_id).match(/\d+/)||[''])[0])+'" target="_blank" rel="noopener" class="mut" title="open in Flexport" style="text-decoration:none">↗</a>'):'';
     return '<tr><td class="l"><button class="planbtn po-exp" data-ref="'+esc(s.shipment_ref)+'" data-i="'+i+'">PLAN</button><button class="fav-star'+(s.starred?' on':'')+'" data-star-ref="'+esc(s.shipment_ref)+'" title="Focus / favourite">'+(s.starred?'★':'☆')+'</button> <span class="sh-unread" data-ref="'+esc(s.shipment_ref)+'">'+shUnreadBadge(s.unread_notes)+'</span>'+(s.pending_charges>0?' <span class="ex-badge" style="background:#16a34a" title="'+s.pending_charges+' freight charge(s) to review — open ▸ Charges">'+s.pending_charges+'</span>':'')+'</td>'
         +'<td class="l sh-refcell"><b>'+esc(s.shipment_ref)+'</b>'+mast+alert+'</td>'
@@ -3621,7 +3689,8 @@
         var xdPanel='<div class="sect-h">Crossdock SKUs on this shipment ('+xd.length+')</div>'
           +(xd.length?'<div class="tw"><table><thead><tr><th class="l">Crossdock SKU</th><th style="text-align:right">Qty shipped</th><th class="l">Source PO</th><th class="l">Supplier</th><th class="l">Client</th><th class="l">Client sales order</th></tr></thead><tbody>'+xdRows+'</tbody></table></div>'
             :'<div class="count">No crossdock SKUs on the POs in this shipment.</div>');
-        var tabbar='<div class="po-subnav" style="margin-bottom:8px"><button class="rtab shtab active" data-st="dates">Dates &amp; tracking</button><button class="rtab shtab" data-st="pos">POs aboard</button><button class="rtab shtab" data-st="charges">Charges'+((shipBy[ref]&&shipBy[ref].pending_charges>0)?' <span class="ex-badge" style="background:#16a34a">'+shipBy[ref].pending_charges+'</span>':'')+'</button><button class="rtab shtab" data-st="xd">Crossdock'+(xd.length?' ('+xd.length+')':'')+'</button><button class="rtab shtab" data-st="timeline">Timeline &amp; notes</button></div>';
+        var _sc={}; shipActions(shipBy[ref]||s).forEach(function(k){ var tb=SHIP_ACT_TAB[k]; _sc[tb]=(_sc[tb]||0)+1; });   // action counts per shipment sub-tab
+        var tabbar='<div class="po-subnav" style="margin-bottom:8px"><button class="rtab shtab active" data-st="dates">Dates &amp; tracking'+navBadge(_sc.dates)+'</button><button class="rtab shtab" data-st="pos">POs aboard'+navBadge(_sc.pos)+'</button><button class="rtab shtab" data-st="charges">Charges'+((shipBy[ref]&&shipBy[ref].pending_charges>0)?' <span class="ex-badge" style="background:#16a34a">'+shipBy[ref].pending_charges+'</span>':'')+'</button><button class="rtab shtab" data-st="xd">Crossdock'+(xd.length?' ('+xd.length+')':'')+'</button><button class="rtab shtab" data-st="timeline">Timeline &amp; notes'+navBadge(_sc.timeline)+'</button></div>';
         var box=document.getElementById('shipdet-'+i);
         box.innerHTML=tabbar+'<div class="shtab-panel" data-st="dates">'+head+'</div><div class="shtab-panel" data-st="pos" style="display:none">'+t+'</div><div class="shtab-panel" data-st="charges" style="display:none"><div class="ship-charges" data-ref="'+esc(ref)+'"></div></div><div class="shtab-panel" data-st="xd" style="display:none">'+xdPanel+'</div>'
           +'<div class="shtab-panel" data-st="timeline" style="display:none"><div class="sp-timeline" data-ref="'+esc(ref)+'"></div>'
