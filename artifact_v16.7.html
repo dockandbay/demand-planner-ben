@@ -612,7 +612,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
 <div class="wrap" id="app">
 <div style="display:flex;flex-direction:column;gap:4px;padding-bottom:8px;border-bottom:1px solid #e8e8e8;margin-bottom:6px">
   <div id="view-tabs-row" style="display:flex;align-items:center;gap:6px;background:#374151;border-radius:7px;padding:5px 8px">
-    <button class="view-toggle active" data-view="planning">DEMAND</button>
+    <button class="view-toggle" data-view="planning">DEMAND</button>
     <button class="view-toggle" data-view="buy">BUY</button>
     <button class="view-toggle" data-view="fba">FBA</button>
     <button class="view-toggle" data-view="exec">REPORTS</button>
@@ -10034,7 +10034,9 @@ var _rfBtn=document.getElementById('rf'); if(_rfBtn)_rfBtn.onclick=function(){
   // Snapshot the post-load IV state — anything different from this is a user edit (dirty)
   FC_INITIAL=Object.assign({},IV);
   syncPlanActiveDates();
-  render();
+  // HORIZON default landing is SUPPLY (the harness routes to it). Only paint a demand-side view up front when
+  // the URL explicitly asks for one — avoids the DEMAND flash/redirect on a plain first load.
+  if(/^#\/?(planning|demand|buy|fba|exec|reports)(\/|$)/.test(location.hash||'')) render();
 })();
 
 /* ── Mobile drawer navigation (phone only; CSS gates visibility) ────────────

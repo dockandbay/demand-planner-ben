@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.448 - Default landing is SUPPLY (no DEMAND flash)
+
+The app painted DEMAND (hardcoded active tab) then redirected to SUPPLY, causing a flash + DEMAND underline.
+Removed DEMAND's default `active` and gated the artifact's initial render() so it only paints a demand-side
+view when the URL asks for one; a plain first load goes straight to SUPPLY (harness route) with no DEMAND
+flash. Clicking DEMAND (or a #/demand deep link) still renders it. No migration.
+
 ## v25.447 - Fix "today is not defined" on the PO SHIPMENTS panel
 
 poShipPanel (PLAN > SHIPMENTS) referenced a bare `today` (pre-shipment-doc overdue checks) with no local
