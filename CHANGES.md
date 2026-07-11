@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.454 - Portal: move PO invoice download into the INVOICE & DOCUMENTS tab
+
+Removed the commercial-invoice icon between MANAGE and the PO number on Purchase Orders. Added a "⤓ DOWNLOAD
+GENERATED TAX INVOICE FOR THIS PO" button at the top of the INVOICE tab (above Documents), and renamed the
+tab to "INVOICE & DOCUMENTS". No migration.
+
 ## v25.453 - Portal payments derived from the report source; order-plan diff vs what the supplier approved
 
 - **Payments (root-cause fix)**: the supplier portal read the `payment_transactions` ledger, which is
