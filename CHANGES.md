@@ -3,6 +3,20 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.415 - New-PO timeline note + shorten dockandbay.com user to "ben@"
+
+Two changes:
+1. **New-PO timeline note** — when a PO is **first created**, an internal note **"<user> created new purchase
+   order"** is posted to the PO timeline (resolves the PO's supplier, so it notifies them on the portal).
+   Fires on genuine creation only across all four PO-creation paths: `po-create`, Cin7 import (new only),
+   bulk upload (new rows only), and buy-plan PO creation (insert-detected via RETURNING). Author = the
+   logged-in user.
+2. **User display shortened** — a dockandbay.com address now shows as just the local part + "@"
+   (`ben@dockandbay.com` -> `ben@`) everywhere the user is attributed: the created-shipment / created-PO note
+   bodies, escalation emails (server, via `shortUser()`), and — display-side — timeline note authors, snooze
+   "by" labels, and forecast-cell note authors. Stored identities (author_email) keep the full address; only
+   the shown text is shortened. Other domains are unchanged. No migration.
+
 ## v25.414 - New-shipment timeline note (notifies the supplier)
 
 When a shipment is **first created**, an internal timeline note **"<user> created a new shipment"** is now

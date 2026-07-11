@@ -457,6 +457,7 @@
   function invalidateDerived(){ ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments'].forEach(function(k){delete cache[k];}); }
 
   function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  function shortUser(s){return String(s==null?'':s).replace(/@dockandbay\.com\b/gi,'@');}  // ben@dockandbay.com → ben@ (display only)
   function isNum(v){return v!==''&&v!=null&&!isNaN(Number(v))&&/^-?[\d.]+$/.test(String(v));}
   function money(v){return v==null||v===''?'':Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});}
   function units(v){return v==null||v===''?'':Number(v).toLocaleString(undefined,{maximumFractionDigits:0});}
@@ -752,7 +753,7 @@
       life='<div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">'
         +(resolved
           ? '<span class="tool-badge bg-neutral">'+esc(r.status)+(r.snooze_until?' → '+esc(r.snooze_until):'')+'</span>'
-            +((r.snoozed_by||r.snoozed_at)?'<span class="mut tiny">'+esc(r.status==='snoozed'?'snoozed':r.status)+' by '+esc(r.snoozed_by||'—')+(r.snoozed_at?' on '+esc(r.snoozed_at):'')+'</span>':'')
+            +((r.snoozed_by||r.snoozed_at)?'<span class="mut tiny">'+esc(r.status==='snoozed'?'snoozed':r.status)+' by '+esc(shortUser(r.snoozed_by)||'—')+(r.snoozed_at?' on '+esc(r.snoozed_at):'')+'</span>':'')
             +'<button class="save-btn light act-life" data-id="'+r._id+'" data-st="open">↩ Restore</button>'
           : '<button class="save-btn light act-life" data-id="'+r._id+'" data-st="dismissed">Dismiss</button><button class="save-btn light act-life" data-id="'+r._id+'" data-st="snoozed" data-days="1">Snooze 1d</button><button class="save-btn light act-life" data-id="'+r._id+'" data-st="snoozed" data-days="3">Snooze 3d</button><button class="save-btn light act-life" data-id="'+r._id+'" data-st="snoozed" data-days="7">Snooze 7d</button>')
         +'</div>'; }
@@ -1271,9 +1272,9 @@
   function actMark(po,code){
     var help=ACT_HELP[code]||'Action required.', s=_poActState[poActKey(po,code)]||{}, sn=poActSnoozed(po,code);
     // The Ⓐ stays visible even when snoozed (muted); the count badges drop it, but the marker still reads "Snoozed".
-    var A='<span class="act-mk" data-po="'+esc(po)+'" data-note="'+esc(help)+(sn?' — currently snoozed until '+esc(s.snooze_until||'')+(s.snoozed_by?' by '+esc(s.snoozed_by):'')+(s.snoozed_at?' on '+esc(s.snoozed_at):''):'')+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:'+(sn?'#f3a3a3':'#dc2626')+';color:#fff;font-weight:800;font-size:10px;cursor:help;vertical-align:middle;margin-left:5px">A</span>';
+    var A='<span class="act-mk" data-po="'+esc(po)+'" data-note="'+esc(help)+(sn?' — currently snoozed until '+esc(s.snooze_until||'')+(s.snoozed_by?' by '+esc(shortUser(s.snoozed_by)):'')+(s.snoozed_at?' on '+esc(s.snoozed_at):''):'')+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:'+(sn?'#f3a3a3':'#dc2626')+';color:#fff;font-weight:800;font-size:10px;cursor:help;vertical-align:middle;margin-left:5px">A</span>';
     var snz=sn
-      ? ' <span class="mut tiny" style="white-space:nowrap">Snoozed'+(s.snoozed_by?' by '+esc(s.snoozed_by):'')+' → '+esc(s.snooze_until||'')+' <button class="act-snz" data-po="'+esc(po)+'" data-code="'+esc(code)+'" data-d="0" style="border:none;background:none;color:#1d4ed8;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">wake</button></span>'
+      ? ' <span class="mut tiny" style="white-space:nowrap">Snoozed'+(s.snoozed_by?' by '+esc(shortUser(s.snoozed_by)):'')+' → '+esc(s.snooze_until||'')+' <button class="act-snz" data-po="'+esc(po)+'" data-code="'+esc(code)+'" data-d="0" style="border:none;background:none;color:#1d4ed8;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">wake</button></span>'
       : ' <button class="act-snz-btn" data-po="'+esc(po)+'" data-code="'+esc(code)+'" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:4px;font-size:10px;padding:1px 6px;margin-left:4px;cursor:pointer">SNOOZE ▾</button>';
     return '<span class="act-wrap" data-mk="'+esc(po)+'|'+esc(code)+'">'+A+snz+'</span>'; }
   // Snooze menu popped from a SNOOZE button (1/3/7 days).
@@ -1889,7 +1890,7 @@
     pop.innerHTML='<div style="font-weight:700;margin-bottom:4px">'+esc(po)+' — action items</div>'
       +conds.map(function(k){ var sn=poActSnoozed(po,k), s=_poActState[poActKey(po,k)]||{};
         return '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-top:1px solid #f1f5f9">'
-          +'<span style="flex:1">'+esc(PO_ACT_LABEL[k]||k)+(sn?'<br><span class="mut tiny">snoozed → '+esc(s.snooze_until||'')+(s.snoozed_by?' by '+esc(s.snoozed_by):'')+(s.snoozed_at?' on '+esc(s.snoozed_at):'')+'</span>':'')+'</span>'
+          +'<span style="flex:1">'+esc(PO_ACT_LABEL[k]||k)+(sn?'<br><span class="mut tiny">snoozed → '+esc(s.snooze_until||'')+(s.snoozed_by?' by '+esc(shortUser(s.snoozed_by)):'')+(s.snoozed_at?' on '+esc(s.snoozed_at):'')+'</span>':'')+'</span>'
           +(sn?'<button class="save-btn light pap-un" data-k="'+esc(k)+'">wake</button>'
               :'<button class="save-btn light pap-sn" data-k="'+esc(k)+'" data-d="1">1d</button><button class="save-btn light pap-sn" data-k="'+esc(k)+'" data-d="3">3d</button><button class="save-btn light pap-sn" data-k="'+esc(k)+'" data-d="7">7d</button>')
           +'<button class="lnk-btn pap-go" data-k="'+esc(k)+'" data-tab="'+(PO_ACT_TAB[k]||'')+'">open ↗</button></div>'; }).join('')
@@ -2302,7 +2303,7 @@
     var recent=notes.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0]; var recentId=recent?recent.id:null;
     var list=notes.length?notes.map(function(n){ var sup=(n.author_kind!=='internal');
       return '<div style="font-size:11px;margin:3px 0;padding:5px 8px;background:'+(sup?(n.read?'#f1f5f9':'#fff7ed'):'#eef2ff')+';border:1px solid '+(sup&&!n.read?'#fdba74':'#e5e7eb')+';border-radius:5px;display:flex;justify-content:space-between;gap:10px;align-items:flex-start">'
-        +'<div><span class="mut tiny">'+esc(n.created_at)+' · '+(sup?'supplier':'Dock &amp; Bay')+(n.author_email?' ('+esc(n.author_email)+')':'')+'</span>'+(sup&&!n.read?' <span class="ex-badge">new</span>':'')+'<br><span style="color:#1a1a1a">'+esc(n.body)+'</span></div>'
+        +'<div><span class="mut tiny">'+esc(n.created_at)+' · '+(sup?'supplier':'Dock &amp; Bay')+(n.author_email?' ('+esc(shortUser(n.author_email))+')':'')+'</span>'+(sup&&!n.read?' <span class="ex-badge">new</span>':'')+'<br><span style="color:#1a1a1a">'+esc(n.body)+'</span></div>'
         +'<div style="flex:0 0 auto;display:flex;flex-direction:column;gap:3px;align-items:flex-end">'
         +(sup?(n.read?'<a class="note-read" data-id="'+n.id+'" data-read="1" style="font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline;white-space:nowrap">mark unread</a>':'<button class="save-btn light note-read" data-id="'+n.id+'" data-read="0">Mark read</button>'):'')
         +(n.id===recentId?'<button class="save-btn light po-esc" data-po="'+esc(po)+'" data-msg="'+esc(n.body)+'" title="Escalate this message to the supplier by email" style="color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'')

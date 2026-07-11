@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.414';
+const APP_VERSION = 'v25.415';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2893,7 +2893,7 @@ app.post('/api/supply/escalate', async (req, res) => {
   const b = req.body || {};
   try {
     const initiator = b.initiator === 'internal' ? 'internal' : 'supplier';
-    const user = initiator === 'internal' ? (authUser(req) || b.user || 'A user') : (b.user || 'The supplier');
+    const user = initiator === 'internal' ? (shortUser(authUser(req)) || b.user || 'A user') : (b.user || 'The supplier');
     res.json(await escalateCore({ initiator, kind: b.kind, ref: b.ref, message: b.message, user, supplierId: b.supplier_id }));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -3000,16 +3000,30 @@ function authUser(req) {
 // Author to stamp on an INTERNAL (Dock & Bay side) note: the signed-in user if the auth layer forwards it,
 // else a real name the client passed (ignore the generic "Dock & Bay" placeholder), else null.
 function internalAuthor(req, clientVal) { const u = authUser(req); if (u) return u; return (clientVal && clientVal !== 'Dock & Bay') ? clientVal : null; }
+// Display form of a user identity: for a dockandbay.com address, show just the local part + "@"
+// (ben@dockandbay.com → ben@); any other address is shown in full. Used wherever the user is attributed.
+function shortUser(u) { if (!u) return u; return String(u).replace(/@dockandbay\.com\b/gi, '@'); }
 // Post an internal timeline note when a shipment is first created — this is what notifies the supplier on
 // their portal (unread internal note on the Shipment Plan). Called only after a genuine INSERT (not an
 // on-conflict no-op). `db` is a pool or a transaction client. Non-fatal on error.
 async function noteShipmentCreated(db, ref, user) {
   if (!ref) return;
-  const who = user || 'A user';
+  const who = shortUser(user) || 'A user';
   try {
     await db.query(`INSERT INTO planner.shipment_notes (shipment_ref, author_kind, author_email, body)
       VALUES ($1,'internal',$2,$3)`, [ref, user || null, who + ' created a new shipment']);
   } catch (e) { /* timeline note is best-effort — never block the shipment write */ }
+}
+// Post an internal PO timeline note when a PO is first created — notifies the supplier on their portal
+// (unread internal supplier_note). Resolves the PO's supplier so the note lands in that supplier's thread.
+async function notePoCreated(db, po, user) {
+  if (!po) return;
+  const who = shortUser(user) || 'A user';
+  try {
+    const sid = (await db.query(`SELECT s.id FROM planner.purchase_orders p JOIN planner.suppliers s ON s.name=p.supplier_name WHERE p.po=$1`, [po])).rows[0];
+    await db.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body)
+      VALUES ($1,$2,$3,'internal',$4)`, [po, (sid && sid.id) || null, user || null, who + ' created new purchase order']);
+  } catch (e) { /* best-effort — never block the PO write */ }
 }
 
 // ── Access control ────────────────────────────────────────────────────────────────────────────
@@ -3734,8 +3748,9 @@ app.post('/api/supply/buyplan-pos', async (req, res) => {
     if (!commit) return res.json({ preview: true, mode, branch, target_pallets: MAXPAL, pos, warnings: warn });
     let created = 0;
     for (const p of pos) {
-      await pool.query(`INSERT INTO planner.purchase_orders (po, supplier_name, prod_no, country_code, branch, start_production, status)
-        VALUES ($1,$2,$3,$4,$5,$6,'FUTURE') ON CONFLICT (po) DO NOTHING`, [p.po, p.supplier_name, prod, country, branch, startDate]);
+      const insPo = await pool.query(`INSERT INTO planner.purchase_orders (po, supplier_name, prod_no, country_code, branch, start_production, status)
+        VALUES ($1,$2,$3,$4,$5,$6,'FUTURE') ON CONFLICT (po) DO NOTHING RETURNING po`, [p.po, p.supplier_name, prod, country, branch, startDate]);
+      if (insPo.rowCount) await notePoCreated(pool, p.po, authUser(req));
       for (const l of p.lines)
         await pool.query(`INSERT INTO planner.purchase_order_lines (po_sku, po, sku, qty, erp_qty, proposed_at, proposed_by)
           VALUES ($1,$2,$3,$4::int,0,now(),'buyplan') ON CONFLICT (po_sku) DO UPDATE SET qty=excluded.qty, proposed_at=now(), proposed_by='buyplan'`,
@@ -4335,6 +4350,7 @@ app.post('/api/supply/po-create', async (req, res) => {
       VALUES ($1,$2,$3,$4,$5,coalesce($6,'FUTURE'),$7)`,
       [po, b.supplier_name || null, supId, b.country_code || null, b.branch || null,
        b.status || null, b.start_production || null]);
+    await notePoCreated(pool, po, authUser(req));
     res.json({ ok: true, po });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -4382,6 +4398,7 @@ app.post('/api/supply/po-import-cin7', async (req, res) => {
     }
     await pool.query('DELETE FROM planner.erp_purchase_orders WHERE po=$1', [o.reference]);
     await pool.query("INSERT INTO planner.erp_purchase_orders (po, erp_po_id, supplier_name, status, synced_at) VALUES ($1,$2,$3,'open',now())", [o.reference, String(o.id), supplier_name]);
+    if (!exists) await notePoCreated(pool, o.reference, authUser(req));
     res.json({ ok: true, imported: true, po: o.reference, lines: lines.length, supplier_name, branch, currency: o.currencyCode || null, cin7_id: o.id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -4414,6 +4431,7 @@ app.post('/api/supply/po-bulk', async (req, res) => {
           VALUES ($1,$2,$3,$4,$5,coalesce($6,'FUTURE'),$7)`,
           [po, g.supplier_name || null, supId, g.country_code || null, g.branch || null, g.status || null, g.start_production || null]);
         created++;
+        await notePoCreated(pool, po, authUser(req));
       } else { existing++; }   // keep existing PO's details; only add its lines
       for (const l of g.lines) {
         if (!l.sku) continue;
