@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.426 - Snooze indefinitely (all snooze surfaces)
+
+Added a **Snooze indefinitely** option everywhere an action can be snoozed — a snoozed state with no expiry
+(stored as `snooze_until = NULL`, still `status = 'snoozed'`), so it stays snoozed until manually woken.
+Surfaces: PO inline "A" snooze menu + row-badge popover, shipment inline "A" menu + row-badge popover, the
+SUPPLY ▸ Actions lifecycle buttons, and DEMAND ▸ Actions cards. Labels show "indefinitely" instead of a
+date. Detection (client + server, both supply_action_state and demand_action_state) now treats a null-expiry
+snooze as active. No migration (columns already nullable).
+
 ## v25.425 - Shipment sub-tab "A" markers + sub-nav badge stays on one line
 
 Fixes v25.424 gaps:

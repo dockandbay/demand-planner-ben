@@ -7190,7 +7190,7 @@ function daClientDetectors(stateMap){
 }
 function renderDemandActionsView(body){
   var SC={high:'#b91c1c',amber:'#d97706',info:'#0369a1'};
-  function setState(key,status,days){ return fetch('/api/demand-actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:key,status:status,snooze_days:days})}).then(function(r){return r.json();}); }
+  function setState(key,status,days){ var ind=(parseInt(days,10)<0); return fetch('/api/demand-actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:key,status:status,snooze_days:(ind?7:days),indefinite:ind})}).then(function(r){return r.json();}); }
   function load(){ body.innerHTML='<div style="padding:18px;color:#666;font-size:12px">Loading…</div>';
     Promise.all([
       fetch('/api/demand-actions').then(function(r){return r.json();}),
@@ -7250,8 +7250,9 @@ function renderDemandActionsView(body){
         ? '<button class="da-act" data-k="'+tHesc(x.key)+'" data-s="open" style="border:1px solid #1d4ed8;color:#1d4ed8;background:#fff;border-radius:5px;padding:3px 9px;cursor:pointer;font:inherit;font-size:11px">↺ Restore to open</button>'
         : '<button class="da-act" data-k="'+tHesc(x.key)+'" data-s="done" style="border:1px solid #15803d;color:#15803d;background:#fff;border-radius:5px;padding:3px 9px;cursor:pointer;font:inherit;font-size:11px">✓ Done</button>'
           +' <button class="da-act" data-k="'+tHesc(x.key)+'" data-s="snoozed" data-days="30" style="border:1px solid #cbd5e1;background:#fff;border-radius:5px;padding:3px 9px;cursor:pointer;font:inherit;font-size:11px">Snooze 30d</button>'
+          +' <button class="da-act" data-k="'+tHesc(x.key)+'" data-s="snoozed" data-days="-1" title="snooze indefinitely" style="border:1px solid #cbd5e1;background:#fff;border-radius:5px;padding:3px 9px;cursor:pointer;font:inherit;font-size:11px">Snooze ∞</button>'
           +' <button class="da-act" data-k="'+tHesc(x.key)+'" data-s="dismissed" style="border:1px solid #cbd5e1;background:#fff;border-radius:5px;padding:3px 9px;cursor:pointer;font:inherit;font-size:11px">Dismiss</button>';
-      var stTag = resolved ? ' <span style="font-size:10px;color:#999">· '+x.status+(x.snooze_until?' until '+x.snooze_until:'')+'</span>' : '';
+      var stTag = resolved ? ' <span style="font-size:10px;color:#999">· '+x.status+(x.status==='snoozed'?(x.snooze_until?' until '+x.snooze_until:' indefinitely'):'')+'</span>' : '';
       return '<div style="border:1px solid #e8e8e8;border-left:4px solid '+c+';border-radius:7px;padding:9px 12px;margin-bottom:8px;'+(resolved?'opacity:.72':'')+'">'
         +'<div style="display:flex;align-items:baseline;gap:8px"><div style="font-weight:700;font-size:12.5px;flex:1"><span style="color:'+c+'">'+tHesc(x.type)+'</span> · '+tHesc(x.cat)+' '+tHesc(x.market)+stTag+'</div>'
         +(x.impact>0?'<div style="font-weight:700;font-size:12px;color:'+c+'" title="estimated £ at risk">'+daMoney(x.impact)+'</div>':'')+'</div>'

@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.425';
+const APP_VERSION = 'v25.426';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2395,7 +2395,7 @@ app.get('/api/supply/:section', async (req, res) => {
           // portal-submission cards carry their own apply/dismiss (no generic snooze/dismiss lifecycle)
           if (r.fix === 'applysub') { r.status = 'open'; return; }
           r.key = r.type + '|' + (r.target_key || r.ref || ''); const s = astate[r.key]; r.status = 'open'; r.snooze_until = null; r.snoozed_by = null; r.snoozed_at = null;
-          if (s) { if (s.status === 'snoozed' && s.snooze_until && s.snooze_until >= dtoday) { r.status = 'snoozed'; r.snooze_until = s.snooze_until; r.snoozed_by = s.snoozed_by; r.snoozed_at = s.snoozed_at; }
+          if (s) { if (s.status === 'snoozed' && (!s.snooze_until || s.snooze_until >= dtoday)) { r.status = 'snoozed'; r.snooze_until = s.snooze_until; r.snoozed_by = s.snoozed_by; r.snoozed_at = s.snoozed_at; }
             else if (s.status !== 'snoozed') { r.status = s.status; r.snoozed_by = s.snoozed_by; r.snoozed_at = s.snoozed_at; } } });
         return res.json(arows);
       }
@@ -3499,12 +3499,13 @@ app.post('/api/supply/actions/state', async (req, res) => {
   if (!key) return res.status(400).json({ error: 'key required' });
   try {
     if (b.status === 'open' || b.restore) { await pool.query(`DELETE FROM planner.supply_action_state WHERE action_key=$1`, [key]); return res.json({ ok: true }); }
+    const indef = !!b.indefinite;   // snooze indefinitely = snoozed with no expiry (snooze_until NULL)
     const days = String(parseInt(b.snooze_days, 10) || 7);
     const who = authUser(req);
     await pool.query(`INSERT INTO planner.supply_action_state (action_key, status, snooze_until, note, snoozed_by, snoozed_at)
-      VALUES ($1,$2, CASE WHEN $2='snoozed' THEN current_date + ($3||' days')::interval ELSE NULL END, $4, $5, now())
+      VALUES ($1,$2, CASE WHEN $2!='snoozed' THEN NULL WHEN $6 THEN NULL ELSE current_date + ($3||' days')::interval END, $4, $5, now())
       ON CONFLICT (action_key) DO UPDATE SET status=excluded.status, snooze_until=excluded.snooze_until, note=excluded.note, snoozed_by=excluded.snoozed_by, snoozed_at=excluded.snoozed_at, updated_at=now()`,
-      [key, b.status || 'dismissed', days, b.note || null, who || null]);
+      [key, b.status || 'dismissed', days, b.note || null, who || null, indef]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -5595,7 +5596,7 @@ app.get('/api/demand-actions', async (req, res) => {
     (await pool.query(`SELECT action_key, status, to_char(snooze_until,'YYYY-MM-DD') snooze_until FROM planner.demand_action_state`))
       .rows.forEach(s => { state[s.action_key] = s; });
     out.forEach(o => { const s = state[o.key]; o.status = 'open'; o.snooze_until = null;
-      if (s) { if (s.status === 'snoozed' && s.snooze_until && s.snooze_until >= today) { o.status = 'snoozed'; o.snooze_until = s.snooze_until; }
+      if (s) { if (s.status === 'snoozed' && (!s.snooze_until || s.snooze_until >= today)) { o.status = 'snoozed'; o.snooze_until = s.snooze_until; }
         else if (s.status !== 'snoozed') o.status = s.status; } });
     const rank = { high: 0, amber: 1, info: 2 };
     out.sort((a, b) => (rank[a.severity] - rank[b.severity]) || (b.impact - a.impact) || (a.cat < b.cat ? -1 : 1));
@@ -5608,11 +5609,12 @@ app.post('/api/demand-actions/state', async (req, res) => {
   if (!key) return res.status(400).json({ error: 'key required' });
   try {
     if (b.status === 'open' || b.restore) { await pool.query(`DELETE FROM planner.demand_action_state WHERE action_key=$1`, [key]); return res.json({ ok: true }); }
+    const indef = !!b.indefinite;   // snooze indefinitely = snoozed, no expiry
     const days = String(parseInt(b.snooze_days, 10) || 7);
     await pool.query(`INSERT INTO planner.demand_action_state (action_key, status, snooze_until, note)
-      VALUES ($1,$2, CASE WHEN $2='snoozed' THEN current_date + ($3||' days')::interval ELSE NULL END, $4)
+      VALUES ($1,$2, CASE WHEN $2!='snoozed' THEN NULL WHEN $5 THEN NULL ELSE current_date + ($3||' days')::interval END, $4)
       ON CONFLICT (action_key) DO UPDATE SET status=excluded.status, snooze_until=excluded.snooze_until, note=excluded.note, updated_at=now()`,
-      [key, b.status || 'dismissed', days, b.note || null]);
+      [key, b.status || 'dismissed', days, b.note || null, indef]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -5625,7 +5627,7 @@ app.get('/api/demand-actions/state', async (req, res) => {
     (await pool.query(`SELECT action_key, status, to_char(snooze_until,'YYYY-MM-DD') snooze_until FROM planner.demand_action_state`))
       .rows.forEach(s => {
         let status = s.status, snooze_until = null;
-        if (s.status === 'snoozed') { if (s.snooze_until && s.snooze_until >= today) { snooze_until = s.snooze_until; } else status = 'open'; }
+        if (s.status === 'snoozed') { if (!s.snooze_until || s.snooze_until >= today) { snooze_until = s.snooze_until; } else status = 'open'; }
         if (status !== 'open') state[s.action_key] = { status, snooze_until };
       });
     res.json({ today, state });

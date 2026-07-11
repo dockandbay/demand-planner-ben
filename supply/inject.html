@@ -768,16 +768,17 @@
           ? '<span class="tool-badge bg-neutral">'+esc(r.status)+(r.snooze_until?' → '+esc(r.snooze_until):'')+'</span>'
             +((r.snoozed_by||r.snoozed_at)?'<span class="mut tiny">'+esc(r.status==='snoozed'?'snoozed':r.status)+' by '+esc(shortUser(r.snoozed_by)||'—')+(r.snoozed_at?' on '+esc(r.snoozed_at):'')+'</span>':'')
             +'<button class="save-btn light act-life" data-id="'+r._id+'" data-st="open">↩ Restore</button>'
-          : '<button class="save-btn light act-life" data-id="'+r._id+'" data-st="dismissed">Dismiss</button><button class="save-btn light act-life" data-id="'+r._id+'" data-st="snoozed" data-days="1">Snooze 1d</button><button class="save-btn light act-life" data-id="'+r._id+'" data-st="snoozed" data-days="3">Snooze 3d</button><button class="save-btn light act-life" data-id="'+r._id+'" data-st="snoozed" data-days="7">Snooze 7d</button>')
+          : '<button class="save-btn light act-life" data-id="'+r._id+'" data-st="dismissed">Dismiss</button><button class="save-btn light act-life" data-id="'+r._id+'" data-st="snoozed" data-days="1">Snooze 1d</button><button class="save-btn light act-life" data-id="'+r._id+'" data-st="snoozed" data-days="3">Snooze 3d</button><button class="save-btn light act-life" data-id="'+r._id+'" data-st="snoozed" data-days="7">Snooze 7d</button><button class="save-btn light act-life" data-id="'+r._id+'" data-st="snoozed" data-days="-1" title="snooze indefinitely">Snooze ∞</button>')
         +'</div>'; }
     return '<div class="card '+esc(r.severity||'low')+'" id="actcard-'+r._id+'"><div class="t">'+refHtml+' <span class="tool-badge '+(r.severity==='high'?'bg-red':r.severity==='low'?'bg-neutral':'bg-amber')+'">'+esc(r.type)+'</span></div><div class="d">'+esc(r.detail||'')+'</div>'+(fix?'<div style="margin-top:6px">'+fix+'</div>':'')+(fix2?'<div style="margin-top:6px">'+fix2+'</div>':'')+life+'</div>'; }
   function bindLifecycle(statBar,sevBar,view){
     document.querySelectorAll('#act-grid .act-life').forEach(function(b){ b.onclick=function(){
       var id=b.dataset.id, r=actRows[id]; if(!r||!r.key)return; var ns=b.dataset.st; b.disabled=true;
-      fetch('/api/supply/actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:r.key,status:ns,snooze_days:b.dataset.days||7})})
+      var _ind=parseInt(b.dataset.days,10)<0;   // Snooze ∞ → indefinite (no expiry)
+      fetch('/api/supply/actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:r.key,status:ns,snooze_days:(_ind?7:(b.dataset.days||7)),indefinite:_ind})})
         .then(function(x){return x.json();}).then(function(j){ if(j&&j.error)throw 0;
           r.status=(ns==='open'?'open':ns);
-          if(ns==='snoozed'){ var d=new Date(); d.setDate(d.getDate()+(parseInt(b.dataset.days,10)||7)); r.snooze_until=d.toISOString().slice(0,10); } else r.snooze_until=null;
+          if(ns==='snoozed'){ if(_ind){ r.snooze_until=null; } else { var d=new Date(); d.setDate(d.getDate()+(parseInt(b.dataset.days,10)||7)); r.snooze_until=d.toISOString().slice(0,10); } } else r.snooze_until=null;
           statBar(); sevBar(); view(); })
         .catch(function(){ b.disabled=false; alert('Could not update action state'); });
       };
@@ -1282,7 +1283,10 @@
   // ── PO-grid action-item snooze ── keyed poact|<po>|<condition> in supply_action_state (shared store).
   var _poActState={}, _poActStateLoaded=false, _poShowSnoozed=false;
   function poActKey(po,cond){ return 'poact|'+po+'|'+cond; }
-  function poActSnoozed(po,cond){ var s=_poActState[poActKey(po,cond)]; var t=new Date().toISOString().slice(0,10); return !!(s&&s.status==='snoozed'&&s.snooze_until&&s.snooze_until>=t); }
+  // a snoozed action with NO expiry (snooze_until null) = snoozed indefinitely
+  function snzActive(s){ var t=new Date().toISOString().slice(0,10); return !!(s&&s.status==='snoozed'&&(!s.snooze_until||s.snooze_until>=t)); }
+  function snzUntil(s){ return (s&&s.snooze_until)?s.snooze_until:'indefinitely'; }
+  function poActSnoozed(po,cond){ return snzActive(_poActState[poActKey(po,cond)]); }
   var _cssEsc=function(x){ return (window.CSS&&CSS.escape)?CSS.escape(x):String(x).replace(/["\\]/g,'\\$&'); };
   // Silent in-place refresh after a snooze/wake: re-render the affected markers + recompute the PO-ref badge count.
   function refreshActInPlace(po,code){
@@ -1300,7 +1304,7 @@
         else if(bd){ bd.remove(); } }); });
   }
   function loadPoActState(cb){ fetch('/api/supply/actions/state').then(function(r){return r.json();}).then(function(rows){ _poActState={}; (rows||[]).forEach(function(s){ _poActState[s.action_key]=s; }); _poActStateLoaded=true; if(cb)cb(); }).catch(function(){ _poActStateLoaded=true; if(cb)cb(); }); }
-  function poSnoozeSet(po,cond,days,cb){ fetch('/api/supply/actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:poActKey(po,cond),status:(days?'snoozed':'open'),snooze_days:days||0,restore:!days})}).then(function(r){return r.json();}).then(function(){ loadPoActState(cb); }).catch(function(){ if(cb)cb(); }); }
+  function poSnoozeSet(po,cond,days,cb){ var ind=(days<0), snz=(ind||days>0); fetch('/api/supply/actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:poActKey(po,cond),status:(snz?'snoozed':'open'),snooze_days:(days>0?days:7),indefinite:ind,restore:!snz})}).then(function(r){return r.json();}).then(function(){ loadPoActState(cb); }).catch(function(){ if(cb)cb(); }); }
   // all matched conditions for a PO (unfiltered); poActions() drops snoozed unless "show snoozed" is on.
   function poActionsAll(r){ var out=[]; for(var k in PO_ACTCOND){ try{ if(PO_ACTCOND[k](r))out.push(k); }catch(e){} } return out; }
   function poActions(r){ return poActionsAll(r).filter(function(k){ return _poShowSnoozed || !poActSnoozed(r.po,k); }); }
@@ -1319,16 +1323,16 @@
   function actMark(po,code){
     var help=ACT_HELP[code]||'Action required.', s=_poActState[poActKey(po,code)]||{}, sn=poActSnoozed(po,code);
     // The Ⓐ stays visible even when snoozed (muted); the count badges drop it, but the marker still reads "Snoozed".
-    var A='<span class="act-mk" data-po="'+esc(po)+'" data-note="'+esc(help)+(sn?' — currently snoozed until '+esc(s.snooze_until||'')+(s.snoozed_by?' by '+esc(shortUser(s.snoozed_by)):'')+(s.snoozed_at?' on '+esc(s.snoozed_at):''):'')+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:'+(sn?'#f3a3a3':'#dc2626')+';color:#fff;font-weight:800;font-size:10px;cursor:help;vertical-align:middle;margin-left:5px">A</span>';
+    var A='<span class="act-mk" data-po="'+esc(po)+'" data-note="'+esc(help)+(sn?' — currently snoozed until '+esc(snzUntil(s))+(s.snoozed_by?' by '+esc(shortUser(s.snoozed_by)):'')+(s.snoozed_at?' on '+esc(s.snoozed_at):''):'')+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:'+(sn?'#f3a3a3':'#dc2626')+';color:#fff;font-weight:800;font-size:10px;cursor:help;vertical-align:middle;margin-left:5px">A</span>';
     var snz=sn
-      ? ' <span class="mut tiny" style="white-space:nowrap">Snoozed'+(s.snoozed_by?' by '+esc(shortUser(s.snoozed_by)):'')+' → '+esc(s.snooze_until||'')+' <button class="act-snz" data-po="'+esc(po)+'" data-code="'+esc(code)+'" data-d="0" style="border:none;background:none;color:#1d4ed8;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">wake</button></span>'
+      ? ' <span class="mut tiny" style="white-space:nowrap">Snoozed'+(s.snoozed_by?' by '+esc(shortUser(s.snoozed_by)):'')+' → '+esc(snzUntil(s))+' <button class="act-snz" data-po="'+esc(po)+'" data-code="'+esc(code)+'" data-d="0" style="border:none;background:none;color:#1d4ed8;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">wake</button></span>'
       : ' <button class="act-snz-btn" data-po="'+esc(po)+'" data-code="'+esc(code)+'" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:4px;font-size:10px;padding:1px 6px;margin-left:4px;cursor:pointer">SNOOZE ▾</button>';
     return '<span class="act-wrap" data-mk="'+esc(po)+'|'+esc(code)+'">'+A+snz+'</span>'; }
   // Snooze menu popped from a SNOOZE button (1/3/7 days).
   function openSnzMenu(btn){ var po=btn.dataset.po, code=btn.dataset.code;
     var ex=document.getElementById('snz-menu'); if(ex)ex.remove();
     var m=document.createElement('div'); m.id='snz-menu'; m.style.cssText='position:absolute;z-index:200002;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 6px 20px rgba(15,23,42,.18);padding:4px;font-size:12px;min-width:96px';
-    m.innerHTML='<div style="font-weight:700;color:#64748b;font-size:10px;padding:2px 10px 4px">Snooze</div>'+[[1,'1 day'],[3,'3 days'],[7,'7 days']].map(function(o){return '<div class="snz-opt" data-d="'+o[0]+'" style="padding:5px 12px;cursor:pointer;border-radius:4px">'+o[1]+'</div>';}).join('');
+    m.innerHTML='<div style="font-weight:700;color:#64748b;font-size:10px;padding:2px 10px 4px">Snooze</div>'+[[1,'1 day'],[3,'3 days'],[7,'7 days'],[-1,'Indefinitely']].map(function(o){return '<div class="snz-opt" data-d="'+o[0]+'" style="padding:5px 12px;cursor:pointer;border-radius:4px">'+o[1]+'</div>';}).join('');
     document.body.appendChild(m);
     var rc=btn.getBoundingClientRect(); m.style.left=(window.scrollX+Math.min(rc.left,window.innerWidth-140))+'px'; m.style.top=(window.scrollY+rc.bottom+3)+'px';
     function close(){ m.remove(); document.removeEventListener('mousedown',out,true); }
@@ -1938,9 +1942,9 @@
     pop.innerHTML='<div style="font-weight:700;margin-bottom:4px">'+esc(po)+' — action items</div>'
       +conds.map(function(k){ var sn=poActSnoozed(po,k), s=_poActState[poActKey(po,k)]||{};
         return '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-top:1px solid #f1f5f9">'
-          +'<span style="flex:1">'+esc(PO_ACT_LABEL[k]||k)+(sn?'<br><span class="mut tiny">snoozed → '+esc(s.snooze_until||'')+(s.snoozed_by?' by '+esc(shortUser(s.snoozed_by)):'')+(s.snoozed_at?' on '+esc(s.snoozed_at):'')+'</span>':'')+'</span>'
+          +'<span style="flex:1">'+esc(PO_ACT_LABEL[k]||k)+(sn?'<br><span class="mut tiny">snoozed → '+esc(snzUntil(s))+(s.snoozed_by?' by '+esc(shortUser(s.snoozed_by)):'')+(s.snoozed_at?' on '+esc(s.snoozed_at):'')+'</span>':'')+'</span>'
           +(sn?'<button class="save-btn light pap-un" data-k="'+esc(k)+'">wake</button>'
-              :'<button class="save-btn light pap-sn" data-k="'+esc(k)+'" data-d="1">1d</button><button class="save-btn light pap-sn" data-k="'+esc(k)+'" data-d="3">3d</button><button class="save-btn light pap-sn" data-k="'+esc(k)+'" data-d="7">7d</button>')
+              :'<button class="save-btn light pap-sn" data-k="'+esc(k)+'" data-d="1">1d</button><button class="save-btn light pap-sn" data-k="'+esc(k)+'" data-d="3">3d</button><button class="save-btn light pap-sn" data-k="'+esc(k)+'" data-d="7">7d</button><button class="save-btn light pap-sn" data-k="'+esc(k)+'" data-d="-1" title="snooze indefinitely">∞</button>')
           +'<button class="lnk-btn pap-go" data-k="'+esc(k)+'" data-tab="'+(PO_ACT_TAB[k]||'')+'">open ↗</button></div>'; }).join('')
       +'<div style="text-align:right;margin-top:6px"><button class="save-btn light pap-close">close</button></div>';
     document.body.appendChild(pop);
@@ -3523,11 +3527,11 @@
   var SHIP_ACT_LABEL={unlinked:'No POs linked',no_flex:'No Flexport match',over_pallets:'Over 20 pallets — split',escalated:'Escalated by supplier',missing_dates:'Shipment dates missing',eta_passed:'ETA passed — not arrived'};
   var SHIP_ACT_TAB={unlinked:'pos',no_flex:'dates',over_pallets:'pos',escalated:'timeline',missing_dates:'dates',eta_passed:'dates'};
   function shipActKey(ref,code){ return 'shipact|'+ref+'|'+code; }
-  function shipActSnoozed(ref,code){ var s=_poActState[shipActKey(ref,code)]; var t=new Date().toISOString().slice(0,10); return !!(s&&s.status==='snoozed'&&s.snooze_until&&s.snooze_until>=t); }
+  function shipActSnoozed(ref,code){ return snzActive(_poActState[shipActKey(ref,code)]); }
   function shipActionsAll(s){ var out=[]; for(var k in SHIP_ACTCOND){ try{ if(SHIP_ACTCOND[k](s))out.push(k); }catch(e){} } return out; }
   function shipActions(s){ return shipActionsAll(s).filter(function(k){ return _poShowSnoozed || !shipActSnoozed(s.shipment_ref,k); }); }
   // generic snooze setter (works for any action_key — POs use poSnoozeSet; shipments use this)
-  function snoozeKeySet(key,days,cb){ fetch('/api/supply/actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:key,status:(days?'snoozed':'open'),snooze_days:days||0,restore:!days})}).then(function(r){return r.json();}).then(function(){ loadPoActState(cb); }).catch(function(){ if(cb)cb(); }); }
+  function snoozeKeySet(key,days,cb){ var ind=(days<0), snz=(ind||days>0); fetch('/api/supply/actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:key,status:(snz?'snoozed':'open'),snooze_days:(days>0?days:7),indefinite:ind,restore:!snz})}).then(function(r){return r.json();}).then(function(){ loadPoActState(cb); }).catch(function(){ if(cb)cb(); }); }
   function recomputeShipNavCount(){ _navCounts.shipments=_allShips.filter(function(s){ return shipActions(s).length>0; }).length; updateNavBadges(); }
   function refreshShipActInPlace(ref){ var s=shipBy[ref]; if(s){ var acts=shipActions(s);
       document.querySelectorAll('.ship-act-badge[data-ref="'+_cssEsc(ref)+'"]').forEach(function(b){ if(acts.length){ b.style.display=''; b.textContent=acts.length; } else b.style.display='none'; }); }
@@ -3548,9 +3552,9 @@
     pop.innerHTML='<div style="font-weight:700;margin-bottom:4px">'+esc(ref)+' — action items</div>'
       +conds.map(function(k){ var sn=shipActSnoozed(ref,k), s=_poActState[shipActKey(ref,k)]||{};
         return '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-top:1px solid #f1f5f9">'
-          +'<span style="flex:1">'+esc(SHIP_ACT_LABEL[k]||k)+(sn?'<br><span class="mut tiny">snoozed → '+esc(s.snooze_until||'')+(s.snoozed_by?' by '+esc(shortUser(s.snoozed_by)):'')+(s.snoozed_at?' on '+esc(s.snoozed_at):'')+'</span>':'')+'</span>'
+          +'<span style="flex:1">'+esc(SHIP_ACT_LABEL[k]||k)+(sn?'<br><span class="mut tiny">snoozed → '+esc(snzUntil(s))+(s.snoozed_by?' by '+esc(shortUser(s.snoozed_by)):'')+(s.snoozed_at?' on '+esc(s.snoozed_at):'')+'</span>':'')+'</span>'
           +(sn?'<button class="save-btn light sap-un" data-k="'+esc(k)+'">wake</button>'
-              :'<button class="save-btn light sap-sn" data-k="'+esc(k)+'" data-d="1">1d</button><button class="save-btn light sap-sn" data-k="'+esc(k)+'" data-d="3">3d</button><button class="save-btn light sap-sn" data-k="'+esc(k)+'" data-d="7">7d</button>')
+              :'<button class="save-btn light sap-sn" data-k="'+esc(k)+'" data-d="1">1d</button><button class="save-btn light sap-sn" data-k="'+esc(k)+'" data-d="3">3d</button><button class="save-btn light sap-sn" data-k="'+esc(k)+'" data-d="7">7d</button><button class="save-btn light sap-sn" data-k="'+esc(k)+'" data-d="-1" title="snooze indefinitely">∞</button>')
           +'</div>'; }).join('')
       +'<div style="text-align:right;margin-top:6px"><button class="save-btn light sap-close">close</button></div>';
     document.body.appendChild(pop);
@@ -3564,9 +3568,9 @@
   }
   // Inline "A" marker (with snooze) shown INSIDE a shipment-expand panel — explains the sub-tab's count badge.
   function shipActMark(ref,code){ var s=_poActState[shipActKey(ref,code)]||{}, sn=shipActSnoozed(ref,code), lbl=SHIP_ACT_LABEL[code]||code;
-    var A='<span title="'+esc(lbl)+(sn?' — snoozed until '+esc(s.snooze_until||''):'')+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:'+(sn?'#f3a3a3':'#dc2626')+';color:#fff;font-weight:800;font-size:10px;flex:0 0 auto;margin-right:6px">A</span>';
+    var A='<span title="'+esc(lbl)+(sn?' — snoozed until '+esc(snzUntil(s)):'')+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:'+(sn?'#f3a3a3':'#dc2626')+';color:#fff;font-weight:800;font-size:10px;flex:0 0 auto;margin-right:6px">A</span>';
     var snz=sn
-      ? '<span class="mut tiny" style="white-space:nowrap">Snoozed'+(s.snoozed_by?' by '+esc(shortUser(s.snoozed_by)):'')+' → '+esc(s.snooze_until||'')+' <button class="ship-act-snz" data-ref="'+esc(ref)+'" data-code="'+esc(code)+'" data-d="0" style="border:none;background:none;color:#1d4ed8;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">wake</button></span>'
+      ? '<span class="mut tiny" style="white-space:nowrap">Snoozed'+(s.snoozed_by?' by '+esc(shortUser(s.snoozed_by)):'')+' → '+esc(snzUntil(s))+' <button class="ship-act-snz" data-ref="'+esc(ref)+'" data-code="'+esc(code)+'" data-d="0" style="border:none;background:none;color:#1d4ed8;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">wake</button></span>'
       : '<button class="ship-act-snz-btn" data-ref="'+esc(ref)+'" data-code="'+esc(code)+'" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:4px;font-size:10px;padding:1px 6px;margin-left:8px;cursor:pointer;flex:0 0 auto">SNOOZE ▾</button>';
     return '<div class="ship-act-row" data-mk="'+esc(ref)+'|'+esc(code)+'" style="display:flex;align-items:center;padding:2px 0;font-size:12px">'+A+'<span style="font-weight:600;color:#b91c1c">'+esc(lbl)+'</span>'+snz+'</div>'; }
   // Banner of a panel's actions (all conditions — snoozed ones show muted with a wake link, matching POs).
@@ -3575,7 +3579,7 @@
   function openShipSnz(btn){ var ref=btn.dataset.ref, code=btn.dataset.code;
     var ex=document.getElementById('snz-menu'); if(ex)ex.remove();
     var m=document.createElement('div'); m.id='snz-menu'; m.style.cssText='position:absolute;z-index:200002;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 6px 20px rgba(15,23,42,.18);padding:4px;font-size:12px;min-width:96px';
-    m.innerHTML='<div style="font-weight:700;color:#64748b;font-size:10px;padding:2px 10px 4px">Snooze</div>'+[[1,'1 day'],[3,'3 days'],[7,'7 days']].map(function(o){return '<div class="snz-opt" data-d="'+o[0]+'" style="padding:5px 12px;cursor:pointer;border-radius:4px">'+o[1]+'</div>';}).join('');
+    m.innerHTML='<div style="font-weight:700;color:#64748b;font-size:10px;padding:2px 10px 4px">Snooze</div>'+[[1,'1 day'],[3,'3 days'],[7,'7 days'],[-1,'Indefinitely']].map(function(o){return '<div class="snz-opt" data-d="'+o[0]+'" style="padding:5px 12px;cursor:pointer;border-radius:4px">'+o[1]+'</div>';}).join('');
     document.body.appendChild(m);
     var rc=btn.getBoundingClientRect(); m.style.left=(window.scrollX+Math.min(rc.left,window.innerWidth-140))+'px'; m.style.top=(window.scrollY+rc.bottom+3)+'px';
     function close(){ m.remove(); document.removeEventListener('mousedown',out,true); }
