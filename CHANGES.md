@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.461 - Timeline controls on the LEFT across ALL timelines (shipment + sample), escalate own-notes-only
+
+v25.460 moved the PO timeline controls left; this extends the same treatment to the remaining timelines so
+every timeline behaves identically: shipment + sample, on both the supplier portal and the supply plan.
+Mark-read sits on the incoming (other-party) notes on the left; escalate sits on your OWN latest note on the
+left (portal: supplier's own → emails D&B; supply plan: internal's own → emails supplier). Escalate no
+longer appears on the other party's notes on any timeline. (Mark-read was already left on shipment/sample;
+this makes escalate consistent and own-notes-only.) No migration.
+
 ## v25.460 - Portal diff box sizing + timeline escalate/read on the left, own-notes-only
 
 - **"Changes since you approved" box**: was stretching full-width (global `table{width:100%}`) and clipping
