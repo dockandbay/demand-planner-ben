@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.450';
+const APP_VERSION = 'v25.451';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -4302,11 +4302,12 @@ app.post('/api/supply/po/:po/set-shipping', async (req, res) => {
     const r = (await pool.query(`SELECT coalesce(shipment_ref,'') shipment_ref FROM planner.purchase_orders WHERE po=$1`, [req.params.po])).rows[0];
     if (!r) return res.status(404).json({ error: 'PO not found' });
     let rows;
+    // SHIPPING implies production is done + shipped → default production_status to 'shipped' (stamped)
     if (r.shipment_ref) rows = (await pool.query(
-      `UPDATE planner.purchase_orders SET status='SHIPPING', updated_at=now()
+      `UPDATE planner.purchase_orders SET status='SHIPPING', production_status='shipped', production_confirmed_at=coalesce(production_confirmed_at,now()), updated_at=now()
         WHERE shipment_ref=$1 AND status ILIKE '%production%' RETURNING po`, [r.shipment_ref])).rows;
     else rows = (await pool.query(
-      `UPDATE planner.purchase_orders SET status='SHIPPING', updated_at=now()
+      `UPDATE planner.purchase_orders SET status='SHIPPING', production_status='shipped', production_confirmed_at=coalesce(production_confirmed_at,now()), updated_at=now()
         WHERE po=$1 AND status ILIKE '%production%' RETURNING po`, [req.params.po])).rows;
     res.json({ updated: rows.length, pos: rows.map(x => x.po), shipment: r.shipment_ref || null });
   } catch (e) { res.status(500).json({ error: e.message }); }

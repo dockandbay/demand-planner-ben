@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.451 - SHIPPING => production_status shipped; invoices only from production 57+
+
+- Any PO in SHIPPING status now defaults production_status to "shipped" (SHIPPING implies production done +
+  shipped): backfill migration 115 (run on sandbox; Diviyaj runs on live) + the set-shipping endpoint now
+  sets it going forward. Backfilled 55 sandbox POs.
+- Supplier-portal INVOICE exception now only applies to production 57 and later — production 56 or earlier no
+  longer flags an invoice-due exception (invoiceDue returns false for prod_no < 57).
+
 ## v25.450 - DEMAND: lighter discontinued red (#FF746C) + border on "disc" cells
 
 Discontinued-rundown cell outline is now a lighter red (#FF746C, was #dc2626), and cells showing "disc"

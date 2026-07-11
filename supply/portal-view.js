@@ -480,6 +480,7 @@
     // submitted; only when the production END date is in the PAST — preferring the supplier-submitted end date
     // (completion_date submission), else the calculated prod_end; if there's no end date at all, don't show.
     function invoiceDue(p, subsArr){ subsArr=subsArr||[];
+      var _pn=parseInt(p.prod_no,10); if(isFinite(_pn) && _pn<57) return false;   // invoices are only required from production 57 onward — 56 and earlier don't need one
       if(/future/i.test(p.status||'')) return false;
       if(subsArr.some(function(s){return s.kind==='invoice_value';})) return false;
       var supEnd=''; subsArr.forEach(function(s){ if(s.kind==='completion_date' && s.status!=='dismissed' && s.value) supEnd=s.value; });   // latest supplier-submitted production end
