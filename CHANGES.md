@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.459 - CONFIG portal preview parity: "changes since you approved" diff now shows there too
+
+The CONFIG > Portal preview assembles its data client-side (loadPortalData) rather than from
+/api/portal/bootstrap, and it was missing `approvedByPo` — so the "⚠ Changes since you approved" diff
+banner only rendered in the real supplier portal, not the admin preview. Added `approved_lines` to the
+shared /api/supply/purchase-orders projection and built `approvedByPo` in loadPortalData. Verified the
+v25.458 portal changes (CSV, SKU fit, completion-aware status) already share portal-view.js and render
+identically in both views; this closes the last data-parity gap. No migration.
+
 ## v25.458 - Portal ORDER PLAN: CSV export, SKU fit, completion-aware timeline + main-app SKU picker
 
 Batch of supplier-portal + main-app ORDER PLAN fixes:
