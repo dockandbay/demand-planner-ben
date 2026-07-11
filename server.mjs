@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.441';
+const APP_VERSION = 'v25.442';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2993,7 +2993,8 @@ function authUser(req) {
   const h = req.headers || {};
   let e = h['x-forwarded-email'] || h['x-auth-request-email'] || h['cf-access-authenticated-user-email']
         || h['x-goog-authenticated-user-email'] || h['x-authenticated-user-email'] || h['x-user-email'] || '';
-  e = String(e).trim(); if (!e) return null;
+  e = String(e).trim();
+  if (!e) return process.env.DEV_USER || null;   // sandbox has no auth proxy → optional DEV_USER attributes actions to you (live always sends a real forwarded header, which wins)
   if (e.indexOf(':') >= 0) e = e.slice(e.lastIndexOf(':') + 1);   // e.g. accounts.google.com:foo@bar.com → foo@bar.com
   return e || null;
 }
@@ -3022,7 +3023,7 @@ async function notePoCreated(db, po, user) {
   try {
     const sid = (await db.query(`SELECT s.id FROM planner.purchase_orders p JOIN planner.suppliers s ON s.name=p.supplier_name WHERE p.po=$1`, [po])).rows[0];
     await db.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body)
-      VALUES ($1,$2,$3,'internal',$4)`, [po, (sid && sid.id) || null, user || null, who + ' created new purchase order']);
+      VALUES ($1,$2,$3,'internal',$4)`, [po, (sid && sid.id) || null, user || null, who + ' created a new purchase order']);
   } catch (e) { /* best-effort — never block the PO write */ }
 }
 

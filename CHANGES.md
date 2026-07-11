@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.442 - Created-note wording + attribute to the real user (DEV_USER on sandbox)
+
+- Timeline note now reads **"<user> created a new purchase order"** (added the missing "a").
+- The note showed "A user" on the sandbox because the tunnel has no auth proxy (nothing tells the server who
+  you are). Added an optional **`DEV_USER`** env fallback in `authUser()` so the sandbox attributes actions to
+  you (set `DEV_USER=ben@dockandbay.com` in the sandbox `.env`); **live always sends a real forwarded auth
+  header, which takes precedence** — do NOT set `DEV_USER` in production. Fixed PO-TEST1234's existing note.
+  No migration.
+
 ## v25.441 - Fix new-PO portal: blank destination isn't FOB + created-note follows late-assigned supplier
 
 Two portal bugs on a freshly-created PO (no branch/country yet, supplier assigned after creation):
