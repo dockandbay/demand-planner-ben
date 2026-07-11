@@ -1810,7 +1810,7 @@
       +'</tr>'
       +'<tr class="exp-row"'+ga+' id="poexp-'+i+'" style="display:none"><td colspan="19"><div id="podet-'+i+'" class="count">Loading…</div></td></tr>'; }
   function poTable(rows,groupBy){ if(!rows.length)return '<div class="count">No POs in this filter.</div>';
-    var head=lookupDatalists()+poErpRecon(rows)+'<div class="tw"><table class="po-tbl"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l">ERP</th><th class="l">Supplier</th><th class="l">Ship to</th><th class="l">Branch</th><th class="l">Direct</th><th class="l">Status</th><th class="l">Shipment</th><th class="l">Deposit ref</th><th class="l">Start</th><th class="l">End</th><th class="l">Ship</th><th class="l">Arrival/Delivery</th><th class="l">Completion</th><th>Value est</th><th>Pallets</th><th class="l">PROD#</th><th class="l">Batch</th></tr></thead><tbody>';
+    var head=lookupDatalists()+'<div class="tw"><table class="po-tbl"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l">ERP</th><th class="l">Supplier</th><th class="l">Ship to</th><th class="l">Branch</th><th class="l">Direct</th><th class="l">Status</th><th class="l">Shipment</th><th class="l">Deposit ref</th><th class="l">Start</th><th class="l">End</th><th class="l">Ship</th><th class="l">Arrival/Delivery</th><th class="l">Completion</th><th>Value est</th><th>Pallets</th><th class="l">PROD#</th><th class="l">Batch</th></tr></thead><tbody>';
     var body='';
     if(!groupBy||groupBy==='none'){ rows.forEach(function(r,i){ body+=poRowHtml(r,i,false,null); }); }
     else if(groupBy==='status'){

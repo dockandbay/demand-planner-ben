@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.438 - PO grid: remove the "ERP match: ... in sync ... not in ERP" summary line
+
+Removed the ERP-reconciliation summary strip from the top of the purchase-order grid (per-row ERP status + the ORDER PLAN action already convey this). No migration.
+
 ## v25.437 - PO badge: don't double-count an overdue-and-unpaid payment
 
 The PO action badge counted `payment_overdue` and `unpaid_payment` separately, but an overdue payment is
