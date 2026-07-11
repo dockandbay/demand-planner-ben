@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.441 - Fix new-PO portal: blank destination isn't FOB + created-note follows late-assigned supplier
+
+Two portal bugs on a freshly-created PO (no branch/country yet, supplier assigned after creation):
+- **Not FOB**: a PO with a blank destination was badged **FOB** in the supplier portal (`ppIsFOB` treated
+  "no import warehouse" as FOB even when unset). Now a blank destination is **not FOB** (FOB needs the
+  manufacturing branch or an explicit non-major destination). Also tightened the server FOB shipment-plan rows
+  the same way, so a blank-destination PO no longer shows a phantom FOB shipment.
+- **"created new purchase order" note now reaches the supplier**: the note is stamped with the PO's supplier
+  at creation, but if the supplier is assigned *afterwards* it was left unscoped (`supplier_id` null) so the
+  portal couldn't show it. The supplier-assign endpoint now **back-fills** the supplier on any unscoped notes
+  for that PO. (Existing PO-TEST1234 note back-filled.) No migration.
+
 ## v25.440 - New PO: single form (supplier dropdown, branch, dates, prod/batch)
 
 Replaced the two-step prompt() dialogs for "+ New PO" with a single modal form: PO number (prefilled "PO-"),

@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.440';
+const APP_VERSION = 'v25.441';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1327,7 +1327,7 @@ async function buildShipmentPlan() {
     WHERE coalesce(p.shipment_ref,'')=''
       AND NOT EXISTS (SELECT 1 FROM planner.shipments sh WHERE sh.master_po = p.po)
       AND coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%deliver%' AND coalesce(p.status,'') NOT ILIKE '%ship%'
-      AND ( p.branch ILIKE '%manufactur%' OR upper(coalesce(nullif(p.country_code,''), b.country_code, '')) NOT IN ('UK','US','EU','AU','CA') )
+      AND ( p.branch ILIKE '%manufactur%' OR (upper(coalesce(nullif(p.country_code,''), b.country_code, '')) <> '' AND upper(coalesce(nullif(p.country_code,''), b.country_code, '')) NOT IN ('UK','US','EU','AU','CA')) )
       AND EXISTS (SELECT 1 FROM planner.purchase_order_lines l WHERE l.po=p.po AND coalesce(l.qty,0)>0)`)).rows;
   const onShip = new Set(); shipEntries.forEach(s => { if (s.master_po) onShip.add(s.master_po); (s.members || []).forEach(m => onShip.add(m.po)); });
   fobRows.forEach(r => { if (onShip.has(r.po)) return; const pallets = Number(r.pallets) || 0; shipEntries.push({
@@ -4317,6 +4317,11 @@ app.post('/api/supply/po/:po/supplier', async (req, res) => {
     await pool.query(`UPDATE planner.purchase_orders
       SET supplier_name=$2, supplier_id=(SELECT id FROM planner.suppliers WHERE name=$2 LIMIT 1)
       WHERE po=$1`, [req.params.po, name]);
+    // back-fill any PO notes that were created before the supplier was assigned (e.g. the "created new PO"
+    // note) so they land in this supplier's portal thread + raise the unread badge
+    await pool.query(`UPDATE planner.supplier_notes
+      SET supplier_id=(SELECT id FROM planner.suppliers WHERE name=$2 LIMIT 1)
+      WHERE po=$1 AND supplier_id IS NULL`, [req.params.po, name]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

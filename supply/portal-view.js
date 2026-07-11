@@ -18,7 +18,7 @@
     return (b.indexOf('direct to client')>=0||b.indexOf('b2b jlew')>=0||b.indexOf('b2b next')>=0) || (p.sales_order_ref||'').trim()!==''; }
   // FOB pickup — mirrors the main app's isFOBdest: no shipment AND (Manufacturing branch OR a destination that
   // isn't one of our import warehouses UK/US/EU/AU/CA). Used to badge FOB POs on the portal grid.
-  function ppIsFOB(p){ if(!p)return false; if(p.shipment)return false; if(/manufactur/i.test(p.branch||''))return true; return !/^(UK|US|EU|AU|CA)/i.test((p.country||'').trim()); }
+  function ppIsFOB(p){ if(!p)return false; if(p.shipment)return false; if(/manufactur/i.test(p.branch||''))return true; var c=(p.country||'').trim(); if(!c)return false; return !/^(UK|US|EU|AU|CA)/i.test(c); }   // blank destination = not yet set, NOT FOB
   // debounce: coalesce rapid keystrokes into one call after `ms` quiet
   function debounce(fn,ms){ var t; return function(){ var a=arguments, c=this; clearTimeout(t); t=setTimeout(function(){ fn.apply(c,a); }, ms||220); }; }
   // normalise for matching: lowercase + drop spaces and the "└" tree char, so a search matches regardless of them
