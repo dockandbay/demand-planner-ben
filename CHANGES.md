@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.456 - Deep-link each supplier portal preview: #/config/portal/<name>
+
+The CONFIG portal preview is now deep-linkable per supplier, e.g. #/config/portal/lixin — opens CONFIG >
+Portal preview acting as that supplier. Selecting a supplier updates the URL; the name segment is matched
+case-insensitively. No migration.
+
 ## v25.455 - Portal own-carrier dropdown: DHL / Fedex / SF Express / Local Delivery / Other
 
 Updated the supplier-portal carrier dropdown (under 'shipped with own carrier account'): removed Flexport,
