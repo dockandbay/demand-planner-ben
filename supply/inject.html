@@ -1137,27 +1137,29 @@
     var body=bg.querySelector('#consol-body');
     function containerPlan(t){ t=Math.round(t*10)/10; var c=[]; var full=Math.floor((t+1e-6)/20); for(var i=0;i<full;i++)c.push(20); var rem=Math.round((t-full*20)*10)/10; if(rem>0.05)c.push(rem<=10?10:20); return c; }
     function planTxt(t){ var c=containerPlan(t); if(!c.length)return '—'; var f40=c.filter(function(x){return x===20;}).length, f20=c.filter(function(x){return x===10;}).length; var parts=[]; if(f40)parts.push(f40+'×40ft (20 pal)'); if(f20)parts.push(f20+'×20ft (10 pal)'); var cap=c.reduce(function(a,x){return a+x;},0); return parts.join(' + ')+' — '+(Math.round(t*10)/10)+' of '+cap+' pallet slots'; }
+    var _MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    function cdate(s){ if(!s)return '—'; var p=String(s).slice(0,10).split('-'); if(p.length<3)return String(s); return p[2]+'-'+(_MON[(+p[1])-1]||'?'); }  // 2026-06-30 → 30-Jun
     function render(d){
       var A=d.anchor, cs=d.candidates||[];
       var rec={}, run=A.pallets||0;   // recommended pre-selection: greedily fill toward 20 (anchor first, candidates by proximity)
       cs.forEach(function(c){ if(run<20){ rec[c.po]=true; run+=c.pallets||0; } });
       var h='';
       if(d.note)h+='<div style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;padding:8px 10px;border-radius:6px;margin-bottom:10px">'+esc(d.note)+'</div>';
-      h+='<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:9px 11px;margin-bottom:10px;font-size:12px">'
-        +'<b>'+esc(A.po)+'</b>'+(A.prod_no?' · prod P'+esc(A.prod_no):'')+' · '+esc(A.country||'')+' · completes <b>'+esc(A.completion||'—')+'</b> · <b>'+(A.pallets||0)+'</b> pallets'
-        +(A.shipment_ref?' · currently on '+esc(A.shipment_ref):' · not yet on a shipment')+'</div>';
-      if(!cs.length){ h+='<div class="mut" style="padding:12px">No other '+esc(A.country||'')+' POs complete within '+((d.window_days||21)/7)+' weeks of '+esc(A.completion||'this PO')+'.</div>'
+      h+='<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:9px 11px;margin-bottom:10px;font-size:12px;line-height:1.7">'
+        +'<div><b>'+esc(A.po)+'</b>'+(A.prod_no?' <span class="mut">· prod P'+esc(A.prod_no)+'</span>':'')+' <span class="mut">· '+esc(A.country||'')+'</span></div>'
+        +'<div>completes <b>'+esc(cdate(A.completion))+'</b> &nbsp;·&nbsp; <b>'+(A.pallets||0)+'</b> pallets &nbsp;·&nbsp; '+(A.shipment_ref?'on '+esc(A.shipment_ref):'<span class="mut">not yet on a shipment</span>')+'</div></div>';
+      if(!cs.length){ h+='<div class="mut" style="padding:12px">No other '+esc(A.country||'')+' POs complete within '+((d.window_days||21)/7)+' weeks of '+esc(cdate(A.completion))+'.</div>'
         +'<div style="text-align:right;margin-top:8px"><button class="save-btn light" id="consol-cancel">Close</button></div>';
         body.innerHTML=h; document.getElementById('consol-cancel').onclick=function(){ bg.parentNode.removeChild(bg); }; return; }
       h+='<div id="consol-rec" style="font-size:12px;margin-bottom:8px"></div>';
       h+='<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">';
       h+='<table style="width:100%;min-width:660px;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;border-bottom:1px solid #e2e8f0">'
         +'<th style="padding:4px 6px"><input type="checkbox" id="consol-all"></th><th style="padding:4px 6px">PO</th><th style="padding:4px 6px">Prod</th><th style="padding:4px 6px">Supplier</th><th style="padding:4px 6px">Client</th><th style="padding:4px 6px">Completes</th><th style="padding:4px 6px">Δ days</th><th style="padding:4px 6px;text-align:right">Pallets</th><th style="padding:4px 6px">Current shipment</th></tr></thead><tbody>';
-      h+='<tr style="background:#f8fafc"><td style="padding:4px 6px"><input type="checkbox" checked disabled></td><td style="padding:4px 6px"><b>'+esc(A.po)+'</b> <span class="mut tiny">anchor</span></td><td style="padding:4px 6px">'+(A.prod_no?'P'+esc(A.prod_no):'')+'</td><td style="padding:4px 6px">'+esc(A.supplier||'')+'</td><td style="padding:4px 6px">'+esc(A.client||'')+'</td><td style="padding:4px 6px">'+esc(A.completion||'')+'</td><td style="padding:4px 6px">0</td><td style="padding:4px 6px;text-align:right">'+(A.pallets||0)+'</td><td style="padding:4px 6px">'+esc(A.shipment_ref||'—')+'</td></tr>';
+      h+='<tr style="background:#f8fafc"><td style="padding:4px 6px"><input type="checkbox" checked disabled></td><td style="padding:4px 6px"><b>'+esc(A.po)+'</b> <span class="mut tiny">anchor</span></td><td style="padding:4px 6px">'+(A.prod_no?'P'+esc(A.prod_no):'')+'</td><td style="padding:4px 6px">'+esc(A.supplier||'')+'</td><td style="padding:4px 6px">'+esc(A.client||'')+'</td><td style="padding:4px 6px;white-space:nowrap">'+esc(cdate(A.completion))+'</td><td style="padding:4px 6px">0</td><td style="padding:4px 6px;text-align:right">'+(A.pallets||0)+'</td><td style="padding:4px 6px">'+esc(A.shipment_ref||'—')+'</td></tr>';
       cs.forEach(function(c){ var dd=c.delta_days;
         h+='<tr><td style="padding:4px 6px"><input type="checkbox" class="consol-ck" data-po="'+esc(c.po)+'" data-pal="'+(c.pallets||0)+'"'+(rec[c.po]?' checked':'')+'></td>'
           +'<td style="padding:4px 6px">'+esc(c.po)+'</td><td style="padding:4px 6px">'+(c.prod_no?'P'+esc(c.prod_no):'')+'</td><td style="padding:4px 6px">'+esc(c.supplier||'')+'</td><td style="padding:4px 6px">'+esc(c.client||'')+'</td>'
-          +'<td style="padding:4px 6px">'+esc(c.completion||'')+'</td><td style="padding:4px 6px">'+(dd>0?'+':'')+dd+'</td><td style="padding:4px 6px;text-align:right">'+(c.pallets||0)+'</td>'
+          +'<td style="padding:4px 6px;white-space:nowrap">'+esc(cdate(c.completion))+'</td><td style="padding:4px 6px">'+(dd>0?'+':'')+dd+'</td><td style="padding:4px 6px;text-align:right">'+(c.pallets||0)+'</td>'
           +'<td style="padding:4px 6px">'+(c.shipment_ref?esc(c.shipment_ref)+(c.is_master?' <span class="mut tiny">(master)</span>':''):'<span class="mut tiny">unassigned</span>')+'</td></tr>';
       });
       h+='</tbody></table></div>';
@@ -1178,7 +1180,7 @@
       body.querySelectorAll('.consol-ck').forEach(function(ck){ ck.onchange=totals; });
       document.getElementById('consol-all').onchange=function(){ var v=this.checked; body.querySelectorAll('.consol-ck').forEach(function(ck){ ck.checked=v; }); totals(); };
       var recN=Object.keys(rec).length+1, recPal=Math.round(run*10)/10;
-      document.getElementById('consol-rec').innerHTML='<span style="background:#ecfeff;border:1px solid #a5f3fc;border-radius:6px;padding:3px 8px">💡 Recommended: '+recN+' PO'+(recN===1?'':'s')+' pre-selected to fill '+planTxt(recPal)+'</span>';
+      document.getElementById('consol-rec').innerHTML='<span style="display:inline-block;line-height:1.5;background:#ecfeff;border:1px solid #a5f3fc;border-radius:6px;padding:5px 9px">💡 Recommended: '+recN+' PO'+(recN===1?'':'s')+' pre-selected to fill '+planTxt(recPal)+'</span>';
       totals();
       body.querySelectorAll('input[name=consol-tgt]').forEach(function(r){ r.onchange=function(){ var ex=body.querySelector('input[name=consol-tgt]:checked').value==='existing'; document.getElementById('consol-ref').disabled=ex; document.getElementById('consol-exref').disabled=!ex; }; });
       document.getElementById('consol-cancel').onclick=function(){ bg.parentNode.removeChild(bg); };

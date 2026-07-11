@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.418 - Analyse consolidation: readable anchor line + dd-mmm dates
+
+Anchor summary in the consolidation modal now spans two lines with generous line-height (was squished on
+mobile), and the 💡 recommendation chip wraps as a block instead of breaking its background. All dates in
+the view are shown as **dd-mmm** (e.g. `30-Jun`) via a `cdate()` formatter — anchor completion, candidate
+completion column, and the "no nearby POs" message. No migration.
+
 ## v25.417 - Analyse consolidation: mobile fixes
 
 Made the Analyse-consolidation modal usable on mobile: added an always-visible **✕ close button** in the
