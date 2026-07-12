@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.476 - Completion-date days badge on READY TO SHIP / SHIPPING / DELIVERED POs
+
+Added the same colour-coded days-to-go badge to the PO grid Completion column, shown only when the PO status
+is READY TO SHIP, SHIPPING or DELIVERED (mirrors the END-date badge which shows only in PRODUCTION). No migration.
+
 ## v25.475 - END-date days badge only on PRODUCTION-status POs
 
 The colour-coded days-until-end badge in the PO grid END DATE column now shows only when the PO status is

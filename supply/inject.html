@@ -501,7 +501,7 @@
   function srctag(s){return s?'<span class="src '+(s==='FLEX'||s==='calc'?'fx':'m')+'">'+esc(s)+'</span>':'';}
   // END DATE cell: days until the (effective) production-end date — negative = overdue. Colour-coded:
   // <=0 red · <=7 dark orange · <=14 light orange · <=30 light blue · >30 light green.
-  function endDaysBadge(iso){ if(!iso)return ''; var m=/^(\d{4}-\d{2}-\d{2})/.exec(String(iso)); if(!m)return '';
+  function endDaysBadge(iso,label){ if(!iso)return ''; var m=/^(\d{4}-\d{2}-\d{2})/.exec(String(iso)); if(!m)return '';
     var t=new Date(); t.setHours(0,0,0,0); var days=Math.round((new Date(m[1]+'T00:00:00')-t)/86400000);
     var bg,fg;
     if(days<=0){ bg='#fca5a5'; fg='#7f1d1d'; }
@@ -509,7 +509,7 @@
     else if(days<=14){ bg='#fed7aa'; fg='#9a3412'; }
     else if(days<=30){ bg='#bfdbfe'; fg='#1e40af'; }
     else { bg='#bbf7d0'; fg='#166534'; }
-    return ' <span style="display:inline-block;font-size:9px;font-weight:700;padding:0 4px;border-radius:6px;background:'+bg+';color:'+fg+'" title="days until production end ('+m[1]+')">'+days+'d</span>'; }
+    return ' <span style="display:inline-block;font-size:9px;font-weight:700;padding:0 4px;border-radius:6px;background:'+bg+';color:'+fg+'" title="days until '+(label||'production end')+' ('+m[1]+')">'+days+'d</span>'; }
   function flexNum(fid){ var m=String(fid||'').match(/\d+/); return m?m[0]:''; }   // Flexport shipment id → numeric part for the URL
   function flexUrl(fid){ var n=flexNum(fid); return n?'https://app.flexport.com/shipments/'+n:''; }
   // FLEX source badge that links to the Flexport shipment when a flex id is known; otherwise the plain badge
@@ -1896,7 +1896,7 @@
       +gDate(r,'end_production_overide',r.prod_end,(r.status==='PRODUCTION'?endDaysBadge(r.prod_end):''),(r.status==='PRODUCTION'&&datePast(r.prod_end))?DTD_LRED:'')
       +'<td class="l">'+dcell(r.ship)+srctagLink(r.ship_src,r)+'</td>'
       +'<td class="l">'+dcell(r.delivery)+srctagLink(r.delivery_src,r)+'</td>'
-      +dTd(r.checkin,'',((r.status==='PRODUCTION'||r.status==='SHIPPING')&&datePast(r.checkin))?DTD_RED:'')
+      +dTd(r.checkin,(['READY TO SHIP','SHIPPING','DELIVERED'].indexOf(r.status)>=0?endDaysBadge(r.checkin,'completion'):''),((r.status==='PRODUCTION'||r.status==='SHIPPING')&&datePast(r.checkin))?DTD_RED:'')
       +'<td>'+(r.is_final?money(r.value_used)+' <span class="tool-badge bg-green" title="final supplier invoice amount (overrides estimate)">final</span>':money(r.value_est)+' '+valnote)+'</td>'
       +'<td'+(Number(r.pallets)>20?' style="color:#dc2626;font-weight:700" title="over 20 pallets — more than one container; rebalance the production POs"':'')+'>'+(r.pallets!=null&&r.pallets!==''?r.pallets:'<span class="mut tiny">—</span>')+'</td>'
       +'<td class="l">'+cellPickBtn(r.po,ep,'prod_no',r.prod_no,'prod')+'</td>'
