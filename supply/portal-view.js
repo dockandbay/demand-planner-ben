@@ -459,8 +459,8 @@
   #supply-root .sect-h{font-size:11px}
   #supply-root .ppx-h{font-size:12px}
   /* smaller grouping-row text on mobile (production groups + shipment date bands) */
-  #supply-root table.pp-tbl tr.pp-grp td{font-size:9px!important;padding:4px 8px!important}
-  #supply-root .sp-grp{font-size:10px!important;padding:5px 9px!important}
+  #supply-root table.pp-tbl tr.pp-grp td{font-size:8px!important;padding:3px 7px!important}
+  #supply-root .sp-grp{font-size:8px!important;padding:3px 8px!important}
 }`;
   function injectStyle(){ var st=document.getElementById('pv-style'); if(!st){ st=document.createElement('style'); st.id='pv-style'; document.head.appendChild(st); } st.textContent=STYLE; }   // always (re)apply the latest CSS — a stale pv-style from an earlier load in the admin SPA must be refreshed
 

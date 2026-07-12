@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.468 - Grouping-row text smaller still on mobile
+
+Reduced the mobile grouping-header font from 9–10px to 8px (with tighter padding) across all four grouping
+headers (portal PO groups + shipment bands; supply-plan PO groups + shipment bands). No migration.
+
 ## v25.467 - Smaller grouping-row text on mobile + Production is the default PO grid grouping
 
 - Mobile: reduced the text size of the new grouping headers (portal PO groups + shipment date bands; supply
