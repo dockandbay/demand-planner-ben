@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.465 - Supplier portal Shipment Plan grouped by production-end date
+
+The portal Shipment Plan now groups shipment/FOB cards under date headers based on Production End Date:
+DUE NOW (< 1 week) / DUE SOON (1–3 weeks) / UPCOMING (3–6 weeks) / 6+ weeks / no date yet. Cards are sorted
+into those buckets (soonest first, then by prod end within a bucket). Grouping applies to the current
+filtered view. No migration.
+
 ## v25.464 - Grouping-row label "P# 54 — 2 PO's" + same feature in the supply-plan PO grid
 
 - Relabelled the portal grouping row from "Production 54 — 2 POs" to "P# 54 — 2 PO's".

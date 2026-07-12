@@ -947,7 +947,11 @@
                   +'<button class="save-btn sp-shiplabel" data-po="'+esc(po)+'" title="download the Ships With shipment labels for this PO">⤓ Shipment labels</button>'
                   +(cd.length?'<button class="save-btn sp-cd" data-po="'+esc(po)+'" data-skus="'+esc(cd.join(','))+'" data-do="'+esc(p.dispatch_order_ref||'')+'" data-client="'+esc(p.client||'')+'" data-address="'+esc(p.final_delivery_address||'')+'" title="crossdock box labels (PO / dispatch order / client / delivery address overlaid)">⤓ Crossdock labels</button>':'')
                 +'</div></div>'; }
-            return rows.map(function(s){
+            // group the cards by production-end date: DUE NOW (<1wk) / DUE SOON (1–3wk) / UPCOMING (3–6wk) / 6+wk / no date
+            var _tdy=new Date(); _tdy.setHours(0,0,0,0);
+            function _bucketOf(s){ var pe=s.prod_end; if(!pe)return 4; var d=new Date(pe+'T00:00:00'); if(isNaN(d.getTime()))return 4; var days=Math.round((d-_tdy)/86400000); if(days<7)return 0; if(days<21)return 1; if(days<42)return 2; return 3; }
+            var _BKT=[{t:'DUE NOW',d:'Production End Date &lt; 1 week',bg:'#fee2e2',bd:'#fca5a5',c:'#991b1b'},{t:'DUE SOON',d:'Production End Date 1–3 weeks',bg:'#ffedd5',bd:'#fdba74',c:'#9a3412'},{t:'UPCOMING',d:'Production End Date 3–6 weeks',bg:'#fef9c3',bd:'#facc15',c:'#854d0e'},{t:'',d:'Production End Date 6+ weeks',bg:'#e5e7eb',bd:'#cbd5e1',c:'#374151'},{t:'',d:'No production end date yet',bg:'#e5e7eb',bd:'#cbd5e1',c:'#374151'}];
+            function cardHtml(s){
               var members=s.members.length?'<table style="font-size:11px;width:auto;margin-top:4px"><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th>Est. pallets</th><th class="l">Client</th></tr></thead><tbody>'
                 +s.members.map(function(m){return '<tr><td class="l">'+poLink(m.po)+(m.is_master?' <span class="tool-badge bg-green" style="font-size:9px">★ master</span>':'')+'</td><td class="l">'+esc(m.supplier||'')+'</td><td style="text-align:right">'+esc(m.pallets)+'</td><td class="l">'+(m.client?esc(m.client):'<span class="mut">—</span>')+'</td></tr>';}).join('')
                 +'<tr style="font-weight:700;border-top:1px solid #ccc"><td class="l">Total</td><td></td><td style="text-align:right">'+esc(s.total_pallets)+'</td><td></td></tr></tbody></table>':'<span class="mut tiny">no POs on this shipment</span>';
@@ -1007,7 +1011,11 @@
                 +'<div class="sp-body" style="display:none;padding:0 12px 12px">'+datesStrip+'<div style="margin-top:8px">'+members+'</div>'
                 +(s.members||[]).map(function(m){return dtcBlock(m.po);}).join('')
                 +'<div style="margin-top:10px"><button class="save-btn" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd" title="download Tax Invoice + Packing List for this shipment" onclick="window.open(\'/api/invoice/shipment/\'+encodeURIComponent(\''+esc(s.shipment_ref)+'\'))">📄 Tax Invoice</button></div>'
-                +'<div class="sp-timeline" data-ref="'+esc(s.shipment_ref)+'" style="margin-top:8px;border-top:1px solid #f1f1f1;padding-top:6px"></div></div></div>'; }).join(''); }
+                +'<div class="sp-timeline" data-ref="'+esc(s.shipment_ref)+'" style="margin-top:8px;border-top:1px solid #f1f1f1;padding-top:6px"></div></div></div>'; }
+            var _sorted=rows.slice().map(function(s){return {s:s,b:_bucketOf(s)};}).sort(function(a,b){ if(a.b!==b.b)return a.b-b.b; var pa=a.s.prod_end||'~', pb=b.s.prod_end||'~'; return pa<pb?-1:pa>pb?1:0; });
+            var _out='', _cur=-1;
+            _sorted.forEach(function(o){ if(o.b!==_cur){ _cur=o.b; var g=_BKT[o.b]; _out+='<div class="sp-grp" style="margin:14px 0 8px;padding:7px 12px;background:'+g.bg+';border:1px solid '+g.bd+';border-radius:6px;font-weight:700;font-size:12px;color:'+g.c+'">'+(g.t?g.t+'. ':'')+g.d+'</div>'; } _out+=cardHtml(o.s); });
+            return _out; }
           function ppShipTimeline(ref){ var box=rootEl.querySelector('.sp-timeline[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(!box)return;
             fetch(EP.shipmentNotesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){ shortNotes(notes);
               var _supN=(notes||[]).filter(function(n){return n.author_kind==='supplier';});   // escalate only on the supplier's OWN latest note
