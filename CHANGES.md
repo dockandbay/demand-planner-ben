@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.472 - PO grid Shipment cell: clickable FLEX badge for Flexport-linked POs
+
+In the SUPPLY ▸ Purchase Orders grid Shipment column, a Flexport-linked PO now shows a clickable "FLEX ↗"
+badge (next to the "master" badge, under the shipment ref) that opens the shipment in Flexport. Shown
+whenever the PO carries a flex_id / flexport_reference. No migration.
+
 ## v25.471 - PO grid END DATE: replace the "M" source tag with a colour-coded days-until-end badge
 
 On SUPPLY ▸ Purchase Orders, the END DATE cell no longer shows the "M" source icon. Instead it shows the

@@ -1855,12 +1855,15 @@
     var valnote=r.value_from_lines?'<span class="src fx" title="Σ qty×cost from order plan">∑</span>':'<span class="mut tiny" title="stored estimate (no lines yet)">est</span>';
     // MANUFACTURING branch = FOB (goods collected at the factory) → no shipment can be assigned.
     var isMfg=/manufactur/i.test(r.branch||'');
-    var shipcell=isMfg
+    var _fxfid=r.flex_id||r.flexport_reference, _fxu=_fxfid?flexUrl(_fxfid):'';   // Flexport-linked shipment → clickable FLEX badge
+    var _shipBadges=(r.is_master?'<span class="tool-badge bg-blue" style="font-size:8px;padding:0 4px" title="master / consolidation PO for this shipment">master</span>':'')
+      +(_fxu?(r.is_master?' ':'')+'<a href="'+_fxu+'" target="_blank" rel="noopener" class="tool-badge" style="font-size:8px;padding:0 4px;background:#0369a1;color:#fff;text-decoration:none;white-space:nowrap" title="open '+esc(_fxfid)+' in Flexport ↗">FLEX ↗</a>':'');
+    var shipcell=(isMfg
       ? '<span class="tool-badge bg-neutral" title="MANUFACTURING branch = FOB — collected at factory, no shipment assigned">FOB</span>'
       : (r.shipment
         ? '<button class="ship-open" data-ref="'+esc(r.shipment)+'" title="open this shipment">'+esc(r.shipment)+'</button> <button class="ship-pick" data-po="'+esc(r.po)+'" title="reassign">▾</button>'
-        : '<button class="ship-pick" data-po="'+esc(r.po)+'">— assign ▾</button>')
-      +(r.is_master?'<div style="margin-top:2px"><span class="tool-badge bg-blue" style="font-size:8px;padding:0 4px" title="master / consolidation PO for this shipment">master</span></div>':'');
+        : '<button class="ship-pick" data-po="'+esc(r.po)+'">— assign ▾</button>'))
+      +(_shipBadges?'<div style="margin-top:2px">'+_shipBadges+'</div>':'');
     // exceptions surface inline at the data point (e.g. the DATES sub-tab Source column) + as per-sub-tab
     // count badges in the PLAN panel + the grid date-cell highlights — not as a badge on the PO reference.
     // purple "N" badge → this PO has internal Notes (MASTER DATA). Hover shows them; click opens the PLAN ▸ MASTER DATA tab.
