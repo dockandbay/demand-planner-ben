@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.470 - PO production grouping: consolidated members indented under their master PO
+
+Within each P# production group, POs are now clustered by shipment (master PO first) and the consolidated
+member POs are visually indented beneath their master (the "└ " child-row style used by the Master-shipment
+grouping). Standalone POs (no shipment) stay flush. No migration.
+
 ## v25.469 - PO production grouping keyed off the shipment's MASTER PO production number
 
 The supply-plan PO grid's Production grouping now groups each PO by the production number of its shipment's
