@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.474 - PO grid FLEX badge uses the standard flex-badge style
+
+The Shipment-column FLEX badge (v25.472) now uses the same `.src fx` style as the flex badges next to the
+Arrival/Delivery date, instead of a custom blue chip. No migration.
+
 ## v25.473 - Shipment drawer: Tax Invoice button moved to the "POs aboard" tab
 
 In the shipment popout drawer, the "📄 Tax Invoice" button moved from the Dates & tracking tab to the POs
