@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.464 - Grouping-row label "P# 54 — 2 PO's" + same feature in the supply-plan PO grid
+
+- Relabelled the portal grouping row from "Production 54 — 2 POs" to "P# 54 — 2 PO's".
+- Brought the same summary feature to the supply-plan PO grid (SUPPLY ▸ Purchase Orders, Group ▸ Production):
+  a grey grouping header per production ("P# 54 — 2 PO's") with expand/collapse (▾/▸, default expanded).
+  Collapsing hides that production's PO rows + any open detail rows; expanding shows the PO rows. Reuses the
+  existing per-row data-g group tag; headers use the grp-row/cat-hdr styling (excluded from the sticky
+  columns). No migration.
+
 ## v25.463 - Portal PO grid: production grouping row grey + expand/collapse
 
 The "Production 54 — 2 POs" grouping row on the supplier portal PO grid was rendering white — the sticky

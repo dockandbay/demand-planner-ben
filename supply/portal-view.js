@@ -816,7 +816,7 @@
           function _pk(x){ return (x.prod_no==null?'':String(x.prod_no)).trim(); }
           var _gk=_pk(p), _gkey=_gk||'none', _gcnt=arr.filter(function(x){return _pk(x)===_gk;}).length;
           var _grpHdr=(i===0||_pk(arr[i-1])!==_gk)
-            ? '<tr class="pp-grp" data-grp="'+esc(_gkey)+'"><td colspan="20" style="cursor:pointer;user-select:none" title="click to expand / collapse this production"><span class="pp-grp-car">▾</span> '+(_gk?('Production '+esc(_gk)):'No production number')+' — '+_gcnt+' PO'+(_gcnt>1?'s':'')+'</td></tr>'
+            ? '<tr class="pp-grp" data-grp="'+esc(_gkey)+'"><td colspan="20" style="cursor:pointer;user-select:none" title="click to expand / collapse this production"><span class="pp-grp-car">▾</span> '+(_gk?('P# '+esc(_gk)):'No production number')+' — '+_gcnt+" PO"+(_gcnt>1?"'s":"")+'</td></tr>'
             : '';
           // lazy: the heavy expanded card (all sub-tabs) is built on first expand, not upfront (see .pp-exp handler)
           var det='<tr id="pp-'+i+'" data-po="'+esc(p.po)+'" data-grp="'+esc(_gkey)+'" style="display:none"><td></td><td colspan="19"><div class="count">Loading…</div></td></tr>';

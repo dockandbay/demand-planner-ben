@@ -1493,7 +1493,7 @@
       document.getElementById('sup-grid').innerHTML=poTable(shown,q?'status':state.grp)   // a search spans all statuses → always group the results under status sub-labels (Production ▸ Ready to ship ▸ Future ▸ Shipping ▸ Complete)
         +(shown.length<f.length?'<div style="margin:8px 0;text-align:center"><button class="save-btn light" id="po-showall">Show all '+f.length+' &darr;</button></div>':'');
       var sa=document.getElementById('po-showall'); if(sa)sa.onclick=function(){ _poShowAll=true; view(); };
-      bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindPoNotes(); bindPoActBadge(); bindPoCopy(); bindPoScrollPin();
+      bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindPoNotes(); bindPoActBadge(); bindPoCopy(); bindPoScrollPin(); bindPoGrpToggle();
       bindDepPick(patchPoRow); bindPoStars(); bindSetShipping();
       _navCounts.plan=actItemsCount(); updateNavBadges();   // PLAN sub-menu action counter (POs with open actions)
       if(_pendingPO){ var want=_pendingPO; _pendingPO=null; setTimeout(function(){
@@ -1514,6 +1514,15 @@
       fetch('/api/supply/po/'+encodeURIComponent(b.dataset.po)+'/set-shipping',{method:'POST'}).then(function(r){return r.json();}).then(function(j){
         if(j&&j.error){ alert(j.error); b.disabled=false; b.textContent='→ set shipping'; return; }
         refreshGrid(); }).catch(function(err){ alert('Failed: '+(err.message||err)); b.disabled=false; b.textContent='→ set shipping'; }); }; }); }
+    // Production grouping headers ("P# 54 — 2 PO's") expand / collapse their POs (default expanded) — collapse
+    // hides the group's PO rows + any open detail rows; expand shows the PO rows (detail rows stay closed).
+    function bindPoGrpToggle(){ document.querySelectorAll('#sup-grid tr.po-grp').forEach(function(row){ if(row._b)return; row._b=1; row.onclick=function(){
+      var gk=row.dataset.grp, car=row.querySelector('.po-grp-car'), collapsed=row.dataset.collapsed==='1';
+      var sel='#sup-grid tr[data-g="'+((window.CSS&&CSS.escape)?CSS.escape(gk):gk)+'"]';
+      document.querySelectorAll(sel).forEach(function(r){
+        if(collapsed){ if(!r.classList.contains('exp-row')) r.style.display=''; }   // expand: PO rows only
+        else { r.style.display='none'; } });                                        // collapse: PO + detail rows
+      row.dataset.collapsed=collapsed?'0':'1'; if(car)car.textContent=collapsed?'▾':'▸'; }; }); }
     // Silently sync ONE collapsed grid row after a field was edited in that PO's expansion sub-tabs (Dates,
     // Payments, …). Re-fetches the data (derived dates/values recompute server-side), then swaps only the main
     // <tr> — the open expansion <tr> (a separate sibling row) is left untouched, so the panel stays put.
@@ -1908,13 +1917,16 @@
       }).forEach(function(r,idx){ body+=poRowHtml(r,idx,!isMasterRow(r),null); });
     }
     else {
-      // Production: cluster POs under their production number (alphabetical within each).
+      // Production: grey grouping header per production number ("P# 54 — 2 PO's", expand/collapse, default
+      // expanded), POs clustered + alphabetical beneath it.
       var groups={},order=[];
       rows.forEach(function(r){ var k=r.prod_no||''; if(!groups[k]){groups[k]=[];order.push(k);} groups[k].push(r); });
       order.sort(function(a,b){ if(!a)return 1; if(!b)return -1; return a<b?-1:a>b?1:0; });   // named groups first, blank last
       var i=0;
       order.forEach(function(k){ var list=groups[k]; list.sort(function(a,b){return a.po<b.po?-1:a.po>b.po?1:0;});
-        list.forEach(function(r){ body+=poRowHtml(r,i++,false,null); });
+        var gkey=k||'none', cnt=list.length;
+        body+='<tr class="grp-row cat-hdr po-grp" data-grp="'+esc(gkey)+'"><td colspan="19" style="cursor:pointer;user-select:none" title="click to expand / collapse this production"><span class="po-grp-car">▾</span> '+(k?('P# '+esc(k)):'No production number')+' — '+cnt+" PO"+(cnt>1?"'s":"")+'</td></tr>';
+        list.forEach(function(r){ body+=poRowHtml(r,i++,false,gkey); });
       });
     }
     return head+body+'</tbody></table></div><div class="grid-tailspace"></div>'; }
