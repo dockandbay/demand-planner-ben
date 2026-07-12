@@ -490,6 +490,8 @@
   function datePast(v){ if(!v)return false; var m=/^(\d{4}-\d{2}-\d{2})/.exec(String(v)); return m?m[1]<new Date().toISOString().slice(0,10):false; }
   // date cell with an optional background highlight (overdue milestone vs PO status)
   function dTd(v,src,hot){ return '<td class="l"'+(hot?' style="'+hot+'"':'')+'>'+dcell(v)+(src||'')+'</td>'; }
+  // timeline notes shown newest-first (descending by created_at)
+  function tlDesc(a){ return (a||[]).slice().sort(function(x,y){ var cx=String(x.created_at||''), cy=String(y.created_at||''); return cx<cy?1:(cx>cy?-1:0); }); }
   // grid date cell: subtle inline-editable for open POs (bound to the same field the DATES sub-tab edits),
   // read-only text for completed ones. Shows the effective date; editing End sets a manual override.
   function gDate(r,field,dispIso,src,hot){
@@ -2475,7 +2477,7 @@
     // escalate is only offered on YOUR OWN (internal) latest message (it emails the supplier) — never on a supplier note
     var _ownNotes=notes.filter(function(n){return n.author_kind==='internal';});
     var recentOwnId=_ownNotes.length?_ownNotes.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0].id:null;
-    var list=notes.length?notes.map(function(n){ var sup=(n.author_kind!=='internal');
+    var list=notes.length?tlDesc(notes).map(function(n){ var sup=(n.author_kind!=='internal');
       var ctrl = sup
         ? (n.read?'<a class="note-read" data-id="'+n.id+'" data-read="1" style="font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline;white-space:nowrap">mark unread</a>':'<button class="save-btn light note-read" data-id="'+n.id+'" data-read="0">Mark read</button>')
         : ((n.id===recentOwnId)?'<button class="save-btn light po-esc" data-po="'+esc(po)+'" data-msg="'+esc(n.body)+'" title="Escalate this message to the supplier by email" style="color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'');
@@ -3534,7 +3536,7 @@
       var unread=0;
       var _ownN=(notes||[]).filter(function(n){return n.author_kind!=='supplier';});   // escalate only on YOUR OWN latest note
       var recentOwnId=_ownN.length?_ownN.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0].id:null;
-      var list=(notes&&notes.length)?notes.map(function(n){ var sup=(n.author_kind==='supplier'); var nu=sup&&!n.read; if(nu)unread++;
+      var list=(notes&&notes.length)?tlDesc(notes).map(function(n){ var sup=(n.author_kind==='supplier'); var nu=sup&&!n.read; if(nu)unread++;
         var ctrl=(admin&&sup)?(n.read?'<a class="sp-note-read" data-id="'+n.id+'" data-read="1" style="flex:0 0 auto;font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline;white-space:nowrap">mark unread</a>':'<button class="save-btn light sp-note-read" data-id="'+n.id+'" data-read="0" style="flex:0 0 auto">Mark read</button>')
           :((admin&&n.id===recentOwnId)?'<button class="save-btn light sp-esc" data-ref="'+esc(ref)+'" data-msg="'+esc(n.body)+'" title="Escalate this message to the supplier by email" style="flex:0 0 auto;color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'');
         return '<div class="tiny" style="margin:2px 0;max-width:640px;display:flex;gap:10px;align-items:flex-start'+(nu?';background:#fff7ed;border:1px solid #fdba74;border-radius:5px;padding:3px 6px':'')+'">'
@@ -5770,7 +5772,7 @@
       shortNotes(notes);
       var _ownN=(notes||[]).filter(function(n){return n.author_kind!=='supplier';});   // escalate only on YOUR OWN latest note
       var recentOwnId=_ownN.length?_ownN.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0].id:null;
-      var list=(notes&&notes.length)?notes.map(function(n){ var supSide=(n.author_kind==='supplier'); var onBehalf=(supSide&&n.author_email==='D&B'); var nu=supSide&&!n.read;
+      var list=(notes&&notes.length)?tlDesc(notes).map(function(n){ var supSide=(n.author_kind==='supplier'); var onBehalf=(supSide&&n.author_email==='D&B'); var nu=supSide&&!n.read;
         var who=onBehalf?('D&amp;B as '+esc(supName||'supplier')):(supSide?'Supplier':'D&amp;B');
         var ctrl=(admin&&supSide)?(n.read?'<a class="ssp-read" data-id="'+n.id+'" data-read="1" style="font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline">mark unread</a>':'<button class="save-btn light ssp-read" data-id="'+n.id+'" data-read="0">Mark read</button>')
           :((admin&&n.id===recentOwnId)?'<button class="save-btn light samp-esc" data-ref="'+esc(ref)+'" data-msg="'+esc(n.body)+'" title="Escalate this message to the supplier by email" style="flex:0 0 auto;color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'');

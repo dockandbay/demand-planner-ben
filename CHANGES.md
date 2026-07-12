@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.478 - Timeline notes shown newest-first across all timelines
+
+Every timeline note thread now renders newest→oldest (was oldest→newest). Applied to all six render sites:
+supplier portal (purchase orders, shipment plan, samples) and supply plan (purchase orders, shipments,
+samples), via a shared `tlDesc()` descending sort by created_at. No migration.
+
 ## v25.477 - Portal "mark unread" renders as a small text button (not a Mark-read-style button)
 
 On the supplier portal PO timeline, after marking a Dock & Bay note read the control now becomes a small

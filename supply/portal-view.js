@@ -43,6 +43,8 @@
     var supEnd=''; subsArr.forEach(function(s){ if(s.kind==='completion_date' && s.status!=='dismissed' && s.value) supEnd=s.value; });   // supplier-submitted completion overrides the calculated prod_end
     var effEnd = supEnd || prodEnd || '';
     var e=prodStatusException(ps, prodStart, effEnd); if(e)return e; if(!ps)return 'Please set your production status'; return ''; }
+  // timeline notes shown newest-first (descending by created_at)
+  function tlDesc(a){ return (a||[]).slice().sort(function(x,y){ var cx=String(x.created_at||''), cy=String(y.created_at||''); return cx<cy?1:(cx>cy?-1:0); }); }
   function statusBg(s){ var u=String(s||'').toUpperCase();
     if(u.indexOf('FUTURE')>=0)return 'bg-neutral'; if(u.indexOf('PRODUCTION')>=0)return 'bg-amber';
     if(u.indexOf('SHIP')>=0||u.indexOf('READY')>=0)return 'bg-red';
@@ -662,7 +664,7 @@
       var timeline=confirmBar+prodBlock
         +(pend.length?'<div class="tiny" style="color:#92400e;margin-bottom:3px">⏳ Submitted, awaiting approval: '+pend.map(function(s){return esc(subFmt(s));}).join(' · ')+'</div>':'')
         +(appl.length?'<div class="tiny" style="color:#166534;margin-bottom:6px">✓ Applied: '+appl.map(function(s){return esc(subFmt(s))+(s.attachment_id?' <a href="/api/portal/attachment/'+s.attachment_id+'" target="_blank">doc</a>':'');}).join(' · ')+'</div>':'')
-        +(notes.length?notes.map(function(n){ var internal=(n.author_kind==='internal');
+        +(notes.length?tlDesc(notes).map(function(n){ var internal=(n.author_kind==='internal');
           var ctrl = internal
             ? (n.read?'<button class="pp-note-read" data-id="'+n.id+'" data-read="1" style="font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline;white-space:nowrap;background:none;border:none;padding:0">mark unread</button>':'<button class="save-btn light pp-note-read" data-id="'+n.id+'" data-read="0">Mark read</button>')
             : ((EP.escalate&&n.id===_recentSupNoteId)?'<button class="save-btn light pp-esc-note" data-po="'+po+'" data-msg="'+esc(n.body)+'" title="Escalate this message to Dock & Bay by email" style="color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'');
@@ -1026,7 +1028,7 @@
               box.innerHTML='<div style="font-weight:600;font-size:12px;margin-bottom:4px">Add timeline note</div>'
                 +'<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:10px"><textarea class="fci sp-note-in" rows="3" placeholder="Add a note to the timeline… (multiple lines OK)" style="flex:1;max-width:560px;min-height:58px;text-align:left;resize:vertical;line-height:1.4"></textarea><button class="save-btn sp-note-post" style="flex:0 0 auto">Post</button></div>'
                 +'<div class="tiny" style="font-weight:600;margin-bottom:3px">Timeline</div>'
-                +((notes&&notes.length)?notes.map(function(n){ var escBtn=(EP.escalate&&n.id===recentSupId)?'<button class="save-btn light sp-esc-note" data-ref="'+esc(ref)+'" data-msg="'+esc(n.body)+'" title="Escalate this message to Dock & Bay by email" style="flex:0 0 auto;color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'';
+                +((notes&&notes.length)?tlDesc(notes).map(function(n){ var escBtn=(EP.escalate&&n.id===recentSupId)?'<button class="save-btn light sp-esc-note" data-ref="'+esc(ref)+'" data-msg="'+esc(n.body)+'" title="Escalate this message to Dock & Bay by email" style="flex:0 0 auto;color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'';
                   return '<div class="tiny" style="margin:2px 0;max-width:640px;display:flex;gap:8px;align-items:flex-start">'+(escBtn?'<div style="flex:0 0 auto;min-width:78px">'+escBtn+'</div>':'')+'<div style="flex:1"><span class="mut">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span> — '+esc(n.body)+'</div></div>';}).join(''):'<div class="mut tiny">No timeline entries yet.</div>');
               var _se=box.querySelector('.sp-esc-note'); if(_se)_se.onclick=function(){ var msg=_se.dataset.msg||''; if(!msg)return; if(!confirm('Escalate this message to Dock & Bay by email?'))return; _se.disabled=true; _se.textContent='Sending…';
                 postJSON(EP.escalate,{kind:'shipment',ref:_se.dataset.ref,message:msg,initiator:'supplier'},function(j){ _se.textContent='✓ Escalated'; if(j&&j.sandbox)alert('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); };
@@ -1159,7 +1161,7 @@
             fetch(EP.sampleNotesBase+id).then(function(r){return r.json();}).then(function(notes){ shortNotes(notes);
               var _supN=(notes||[]).filter(function(n){return n.author_kind==='supplier';});   // escalate only on the supplier's OWN latest note
               var recentSupId=_supN.length?_supN.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0].id:null;
-              box.innerHTML=(notes&&notes.length)?notes.map(function(n){ var onBehalf=(n.author_kind==='supplier'&&n.author_email==='D&B'); var dnb=(n.author_kind!=='supplier'), nu=dnb&&!n.read;
+              box.innerHTML=(notes&&notes.length)?tlDesc(notes).map(function(n){ var onBehalf=(n.author_kind==='supplier'&&n.author_email==='D&B'); var dnb=(n.author_kind!=='supplier'), nu=dnb&&!n.read;
                 var who=onBehalf?('D&amp;B as '+esc(STATE.supplierName||'supplier')):(dnb?'Dock &amp; Bay':'You');
                 var ctrl = nu ? '<button class="save-btn light ps-note-read" data-id="'+n.id+'" style="flex:0 0 auto">Mark read</button>'
                               : ((EP.escalate&&sref&&!dnb&&n.id===recentSupId)?'<button class="save-btn light samp-esc-note" data-ref="'+esc(sref)+'" data-msg="'+esc(n.body)+'" title="Escalate this message to Dock & Bay by email" style="flex:0 0 auto;color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'');
