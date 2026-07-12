@@ -194,9 +194,9 @@
 #supply-root table.po-tbl thead th:first-child,#supply-root table.po-tbl thead th:nth-child(2){z-index:3;background:#f3f3f1}
 /* freeze column 1 (PLAN) + column 2 (shipment ref) on the shipments grid too */
 #supply-root table.sh-tbl thead th:first-child,
-#supply-root table.sh-tbl tbody tr:not(.exp-row) td:first-child{position:sticky;left:0;z-index:2;background:#fff;box-sizing:border-box;width:78px;min-width:78px;max-width:78px;white-space:nowrap}
+#supply-root table.sh-tbl tbody tr:not(.exp-row):not(.grp-row) td:first-child{position:sticky;left:0;z-index:2;background:#fff;box-sizing:border-box;width:78px;min-width:78px;max-width:78px;white-space:nowrap}
 #supply-root table.sh-tbl thead th:nth-child(2),
-#supply-root table.sh-tbl tbody tr:not(.exp-row) td:nth-child(2){position:sticky;left:78px;z-index:2;background:#fff;box-shadow:1px 0 0 #e0e0e0}
+#supply-root table.sh-tbl tbody tr:not(.exp-row):not(.grp-row) td:nth-child(2){position:sticky;left:78px;z-index:2;background:#fff;box-shadow:1px 0 0 #e0e0e0}
 #supply-root table.sh-tbl thead th:first-child,#supply-root table.sh-tbl thead th:nth-child(2){z-index:3;background:#f3f3f1}
 #supply-root .sh-filt-row{display:contents}   /* transparent on desktop; becomes a flex row on mobile */
 #supply-root .pay-tbl .fci.dt{width:96px}#supply-root .pay-tbl .pctin{width:38px;text-align:right}
@@ -366,9 +366,9 @@
   #supply-root .sh-refcell b{display:inline-block;max-width:15ch;white-space:normal;word-break:break-all;vertical-align:top}
   #supply-root .sh-tbl tbody td,#supply-root .sh-tbl thead th{padding:4px 4px}
   #supply-root table.sh-tbl thead th:first-child,
-  #supply-root table.sh-tbl tbody tr:not(.exp-row) td:first-child{width:54px;min-width:54px;max-width:54px;padding-right:2px;white-space:normal}
+  #supply-root table.sh-tbl tbody tr:not(.exp-row):not(.grp-row) td:first-child{width:54px;min-width:54px;max-width:54px;padding-right:2px;white-space:normal}
   #supply-root table.sh-tbl thead th:nth-child(2),
-  #supply-root table.sh-tbl tbody tr:not(.exp-row) td:nth-child(2){left:54px}
+  #supply-root table.sh-tbl tbody tr:not(.exp-row):not(.grp-row) td:nth-child(2){left:54px}
   #supply-root .sh-tbl .sh-refcell{padding-left:2px}
   #supply-root .sh-tbl .fav-star{margin-left:2px}
   /* shipments filters: Country + Branch dropdowns share one row instead of stacking full-width */
@@ -3746,7 +3746,15 @@
         +(function(){var fr=shipFreight(s);return '<td>'+(fr.c==null?'<span class="mut">—</span>':money(fr.c))+(fr.src?'<span class="src '+(fr.src==='FLEX'?'fx':'m')+'">'+fr.src+'</span>':'')+'</td>';})()+'</tr>'; }
   function shipTable(rows){ if(!rows.length)return '<div class="count">No shipments in this filter.</div>';
     var h='<div class="tw"><table class="sh-tbl" style="width:max-content"><thead><tr><th class="l"></th><th class="l">Shipment (master)</th><th class="l">Escalated</th><th class="l">Status</th><th class="l">Mode</th><th class="l">Ship to</th><th class="l">Branch</th><th>POs</th><th>Suppliers</th><th>Pallets</th><th class="l">Carrier</th><th class="l">Carrier ref</th><th class="l">Departure</th><th class="l">Landing</th><th class="l">Arrival</th><th>Freight</th></tr></thead><tbody>';
-    rows.forEach(function(s,i){ h+=shipRowHtml(s,i)+'<tr class="exp-row" id="shipexp-'+i+'" style="display:none"><td colspan="16"><div id="shipdet-'+i+'" class="count">Loading…</div></td></tr>'; });
+    // group by production-end date: DUE NOW (<1wk) / DUE SOON (1–3wk) / UPCOMING (3–6wk) / 6+wk / no date
+    var _tdy=new Date(); _tdy.setHours(0,0,0,0);
+    function _bkt(s){ var pe=s.prod_end; if(!pe)return 4; var d=new Date(pe+'T00:00:00'); if(isNaN(d.getTime()))return 4; var days=Math.round((d-_tdy)/86400000); if(days<7)return 0; if(days<21)return 1; if(days<42)return 2; return 3; }
+    var _BKT=[{t:'DUE NOW',d:'Production End Date &lt; 1 week',bg:'#fee2e2',c:'#991b1b'},{t:'DUE SOON',d:'Production End Date 1–3 weeks',bg:'#ffedd5',c:'#9a3412'},{t:'UPCOMING',d:'Production End Date 3–6 weeks',bg:'#fef9c3',c:'#854d0e'},{t:'',d:'Production End Date 6+ weeks',bg:'#e8e8e6',c:'#374151'},{t:'',d:'No production end date',bg:'#e8e8e6',c:'#374151'}];
+    var _sorted=rows.map(function(s,i){return {s:s,i:i,b:_bkt(s)};}).sort(function(a,b){ if(a.b!==b.b)return a.b-b.b; var pa=a.s.prod_end||'~', pb=b.s.prod_end||'~'; return pa<pb?-1:pa>pb?1:0; });
+    var _cur=-1;
+    _sorted.forEach(function(o){ var s=o.s, i=o.i;
+      if(o.b!==_cur){ _cur=o.b; var g=_BKT[o.b]; h+='<tr class="grp-row"><td colspan="16" style="background:'+g.bg+';color:'+g.c+';font-weight:700;font-size:11px;letter-spacing:.02em;padding:6px 10px;text-align:left;border-top:2px solid #cbd5e1;border-bottom:1px solid #cbd5e1">'+(g.t?g.t+'. ':'')+g.d+'</td></tr>'; }
+      h+=shipRowHtml(s,i)+'<tr class="exp-row" id="shipexp-'+i+'" style="display:none"><td colspan="16"><div id="shipdet-'+i+'" class="count">Loading…</div></td></tr>'; });
     return h+'</tbody></table></div><div class="grid-tailspace"></div>'; }
   function bindShipExpand(){ document.querySelectorAll('#supply-root .po-exp[data-ref]').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(){
     var i=b.dataset.i, ex=document.getElementById('shipexp-'+i), open=ex.style.display!=='none';

@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.466 - Supply-plan Shipments grid grouped by production-end date (same bands as the portal)
+
+Applied the same date-band separation to the main-app SUPPLY ▸ Shipments grid: DUE NOW (< 1 week) / DUE SOON
+(1–3 weeks) / UPCOMING (3–6 weeks) / 6+ weeks / no date, keyed off each shipment's production-end date.
+Added a derived `prod_end` to the /api/supply/shipments query = MAX(production end) across the POs aboard
+each shipment (override ▸ start + supplier days). Grid sorts into the bands (soonest first) with coloured
+header rows; excluded the new group rows from the sh-tbl sticky columns. No migration.
+
 ## v25.465 - Supplier portal Shipment Plan grouped by production-end date
 
 The portal Shipment Plan now groups shipment/FOB cards under date headers based on Production End Date:

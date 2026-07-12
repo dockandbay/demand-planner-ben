@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.465';
+const APP_VERSION = 'v25.466';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1832,8 +1832,11 @@ app.get('/api/supply/:section', async (req, res) => {
                  FROM planner.purchase_order_lines l JOIN planner.products p ON p.sku=l.sku WHERE l.po=po.po),0))::numeric) weight_kg,
               max(upper(coalesce(nullif(po.country_code,''), pb.country_code, ''))) market,   -- fall back to the branch country (PO country_code is often blank)
               string_agg(DISTINCT nullif(po.branch,''), ', ') branch,
-              sum(coalesce((SELECT sum(l.qty*l.cost_price) FROM planner.purchase_order_lines l WHERE l.po=po.po),0)) value
+              sum(coalesce((SELECT sum(l.qty*l.cost_price) FROM planner.purchase_order_lines l WHERE l.po=po.po),0)) value,
+              -- latest production-end across the POs aboard (override ▸ start + supplier days) → shipment's "goods ready" date
+              max(coalesce(po.end_production_overide, po.start_production + (coalesce(sup.production_days,0)||' days')::interval)::date) prod_end
             FROM planner.purchase_orders po LEFT JOIN planner.branches pb ON pb.name=po.branch
+              LEFT JOIN planner.suppliers sup ON sup.id=po.supplier_id
             WHERE po.shipment_ref IS NOT NULL
             GROUP BY po.shipment_ref
           )
@@ -1850,6 +1853,7 @@ app.get('/api/supply/:section', async (req, res) => {
             (sh.status IS NULL OR sh.status='' OR a.all_complete) status_auto,
             coalesce(a.po_count,0) po_count, coalesce(a.pos,'') pos, coalesce(a.suppliers,0) suppliers,
             coalesce(a.units,0) units, coalesce(a.pallets,0) pallets, round(coalesce(a.value,0)) value,
+            to_char(a.prod_end,'YYYY-MM-DD') prod_end,   -- shipment production-end date (max across its POs) → grid date-band grouping
             coalesce(sh.carrier, CASE WHEN sh.carrier_ref ILIKE 'FLEX%' THEN 'Flexport' END) carrier,
             coalesce(sh.carrier_ref,'') carrier_ref, coalesce(sh.notes,'') notes,
             fx.flex_id, fx.mode, fx.container_numbers, fx.total_freight_cost,
