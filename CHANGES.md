@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.475 - END-date days badge only on PRODUCTION-status POs
+
+The colour-coded days-until-end badge in the PO grid END DATE column now shows only when the PO status is
+PRODUCTION (hidden for Future / Shipping / Complete etc.). No migration.
+
 ## v25.474 - PO grid FLEX badge uses the standard flex-badge style
 
 The Shipment-column FLEX badge (v25.472) now uses the same `.src fx` style as the flex badges next to the
