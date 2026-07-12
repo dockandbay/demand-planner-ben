@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.471 - PO grid END DATE: replace the "M" source tag with a colour-coded days-until-end badge
+
+On SUPPLY ▸ Purchase Orders, the END DATE cell no longer shows the "M" source icon. Instead it shows the
+number of days until the (effective) production-end date (negative = overdue), colour-coded: <=0 red,
+<=7 dark orange, <=14 light orange, <=30 light blue, >30 light green. No migration.
+
 ## v25.470 - PO production grouping: consolidated members indented under their master PO
 
 Within each P# production group, POs are now clustered by shipment (master PO first) and the consolidated
