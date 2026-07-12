@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.463 - Portal PO grid: production grouping row grey + expand/collapse
+
+The "Production 54 — 2 POs" grouping row on the supplier portal PO grid was rendering white — the sticky
+first-column rule (more specific) was overriding the intended grey. Excluded `.pp-grp` from that rule so it
+shows light grey (#e5e7eb). Added an expand/collapse toggle on the grouping row (▾/▸, default expanded):
+clicking collapses that production's PO rows and any open detail cards; clicking again shows the PO rows.
+No migration.
+
 ## v25.462 - Timeline messages capped at ~640px for readability (full width on mobile)
 
 Timeline note rows were stretching the full page width on desktop, making long threads hard to read. Capped

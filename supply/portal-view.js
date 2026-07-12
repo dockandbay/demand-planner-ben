@@ -420,7 +420,7 @@
 /* Purchase Orders grid: keep the MANAGE + PO columns anchored while scrolling the wide grid sideways
    (data rows only — the expanded detail row has id="pp-N" and must not be pinned). */
 #supply-root table.pp-tbl thead th:first-child,
-#supply-root table.pp-tbl tbody tr:not([id]) td:first-child{position:sticky;left:0;z-index:2;background:#fff;width:104px;min-width:104px;max-width:104px;box-sizing:border-box;padding-left:5px;padding-right:5px}
+#supply-root table.pp-tbl tbody tr:not([id]):not(.pp-grp) td:first-child{position:sticky;left:0;z-index:2;background:#fff;width:104px;min-width:104px;max-width:104px;box-sizing:border-box;padding-left:5px;padding-right:5px}
 #supply-root .pp-exp .ex-badge{margin-left:3px}   /* snug the counter to the MANAGE text */
 #supply-root table.pp-tbl thead th:nth-child(2),
 #supply-root table.pp-tbl tbody tr:not([id]) td:nth-child(2){position:sticky;left:104px;z-index:2;background:#fff;box-shadow:1px 0 0 #e0e0e0}
@@ -814,11 +814,12 @@
         +pos.slice().sort(function(a,b){ var pa=((a.prod_no==null?'':String(a.prod_no)).trim())||'~~~', pb=((b.prod_no==null?'':String(b.prod_no)).trim())||'~~~'; return pa<pb?-1:pa>pb?1:(String(a.po||'')<String(b.po||'')?-1:1); }).map(function(p,i,arr){
           // group the grid by production number — emit a sub-heading row at the first PO of each prod_no group
           function _pk(x){ return (x.prod_no==null?'':String(x.prod_no)).trim(); }
-          var _gk=_pk(p), _grpHdr=(i===0||_pk(arr[i-1])!==_gk)
-            ? '<tr class="pp-grp"><td colspan="20">'+(_gk?('Production '+esc(_gk)):'No production number')+' — '+arr.filter(function(x){return _pk(x)===_gk;}).length+' PO'+(arr.filter(function(x){return _pk(x)===_gk;}).length>1?'s':'')+'</td></tr>'
+          var _gk=_pk(p), _gkey=_gk||'none', _gcnt=arr.filter(function(x){return _pk(x)===_gk;}).length;
+          var _grpHdr=(i===0||_pk(arr[i-1])!==_gk)
+            ? '<tr class="pp-grp" data-grp="'+esc(_gkey)+'"><td colspan="20" style="cursor:pointer;user-select:none" title="click to expand / collapse this production"><span class="pp-grp-car">▾</span> '+(_gk?('Production '+esc(_gk)):'No production number')+' — '+_gcnt+' PO'+(_gcnt>1?'s':'')+'</td></tr>'
             : '';
           // lazy: the heavy expanded card (all sub-tabs) is built on first expand, not upfront (see .pp-exp handler)
-          var det='<tr id="pp-'+i+'" data-po="'+esc(p.po)+'" style="display:none"><td></td><td colspan="19"><div class="count">Loading…</div></td></tr>';
+          var det='<tr id="pp-'+i+'" data-po="'+esc(p.po)+'" data-grp="'+esc(_gkey)+'" style="display:none"><td></td><td colspan="19"><div class="count">Loading…</div></td></tr>';
           var sb=subsByPo[p.po]||[]; var nts=notesByPo[p.po]||[]; var unreadInt=nts.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
           var cdS=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean), xdm=xdByPo[p.po]||{};
           var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
@@ -827,7 +828,7 @@
           var act=(invoiceDue(p,sb)?1:0)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0)+(poCdMissing(p,sb)?1:0);   // no-shipment-yet is NOT an action (matches the SHIPMENTS sub-tab + the top PO badge)
           var cdVal=poCdVal(p, sb);
           var cdGrid=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
-          return _grpHdr+'<tr><td class="l"><button class="save-btn pp-exp" data-i="'+i+'" data-po="'+esc(p.po)+'"><span class="mng-txt">MANAGE</span>'+(act>0?' <span class="ex-badge" title="'+act+' action'+(act>1?'s':'')+' needed">'+act+'</span>':'')+'</button></td>'
+          return _grpHdr+'<tr class="pp-row" data-grp="'+esc(_gkey)+'"><td class="l"><button class="save-btn pp-exp" data-i="'+i+'" data-po="'+esc(p.po)+'"><span class="mng-txt">MANAGE</span>'+(act>0?' <span class="ex-badge" title="'+act+' action'+(act>1?'s':'')+' needed">'+act+'</span>':'')+'</button></td>'
             +'<td class="l"><b>'+esc(p.po)+'</b></td>'
             +'<td class="l" style="width:38px;min-width:38px;white-space:nowrap">'+(p.prod_no?esc(p.prod_no):'<span class="mut">—</span>')+'</td>'
             +'<td class="l"><span class="tool-badge '+statusBg(p.status)+'">'+esc(p.status||'')+'</span>'+(ppIsFOB(p)?' <span style="background:#ede9fe;color:#6d28d9;border-radius:10px;font-size:9px;font-weight:700;padding:1px 6px;white-space:nowrap" title="FOB — collected at your factory, no import shipment">📦 FOB</span>':'')+'</td>'
@@ -1313,6 +1314,16 @@
                 if(p&&cell){ cell.innerHTML=ppExpand(p,_ppData.lb[po]||[],_ppData.notesByPo[po]||[],_ppData.subsByPo[po]||[],i,_ppData.costsByPo[po]||{},_ppData.supSkus||[],_ppData.xdByPo[po]||{},_ppData.addByPo[po]||[]); wireDetail(cell); } }
               ex.style.display=(ex.style.display!=='none')?'none':''; if(ex.style.display!=='none'&&!ex.dataset.fcLoaded){ ex.dataset.fcLoaded='1'; loadFreightCharges(ex); }
               applyPortalPin(); }; });   // align the just-opened detail to the current horizontal scroll
+            // production grouping rows expand / collapse their POs (default expanded) — collapse hides the group's
+            // PO rows + any open detail cards; expand shows the PO rows again (detail cards stay closed)
+            body.querySelectorAll('tr.pp-grp').forEach(function(row){ row.onclick=function(){
+              var gk=row.dataset.grp, car=row.querySelector('.pp-grp-car'), collapsed=row.dataset.collapsed==='1';
+              var sel='[data-grp="'+((window.CSS&&CSS.escape)?CSS.escape(gk):gk)+'"]';
+              body.querySelectorAll(sel).forEach(function(r){ if(r===row)return;
+                if(collapsed){ if(r.classList.contains('pp-row')) r.style.display=''; }   // expand: PO rows only
+                else { r.style.display='none'; } });                                      // collapse: PO + detail rows
+              row.dataset.collapsed=collapsed?'0':'1'; if(car)car.textContent=collapsed?'▾':'▸';
+              applyPortalPin(); }; });
             // re-render ONE PO's expanded detail in place (no full reload, so MANAGE + the open tab stay put)
             function rerenderRow(row,po,keepPt){ if(!row)return; var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; if(!p)return;
               var i=row.id.replace('pp-',''), cell=row.children[1]; if(!cell)return;
