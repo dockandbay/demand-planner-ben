@@ -1,4 +1,5 @@
 .env
+create_user_readonly.txt
 node_modules
 *.bak
 .vercel

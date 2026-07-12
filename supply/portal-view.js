@@ -664,7 +664,7 @@
         +(appl.length?'<div class="tiny" style="color:#166534;margin-bottom:6px">✓ Applied: '+appl.map(function(s){return esc(subFmt(s))+(s.attachment_id?' <a href="/api/portal/attachment/'+s.attachment_id+'" target="_blank">doc</a>':'');}).join(' · ')+'</div>':'')
         +(notes.length?notes.map(function(n){ var internal=(n.author_kind==='internal');
           var ctrl = internal
-            ? (n.read?'<a class="pp-note-read" data-id="'+n.id+'" data-read="1" style="font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline;white-space:nowrap">mark unread</a>':'<button class="save-btn light pp-note-read" data-id="'+n.id+'" data-read="0">Mark read</button>')
+            ? (n.read?'<button class="pp-note-read" data-id="'+n.id+'" data-read="1" style="font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline;white-space:nowrap;background:none;border:none;padding:0">mark unread</button>':'<button class="save-btn light pp-note-read" data-id="'+n.id+'" data-read="0">Mark read</button>')
             : ((EP.escalate&&n.id===_recentSupNoteId)?'<button class="save-btn light pp-esc-note" data-po="'+po+'" data-msg="'+esc(n.body)+'" title="Escalate this message to Dock & Bay by email" style="color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'');
           return '<div style="font-size:11px;margin:3px 0;max-width:640px;padding:5px 8px;background:'+(internal?(n.read?'#eef2ff':'#fff7ed'):'#f1f5f9')+';border:1px solid '+(internal&&!n.read?'#fdba74':'#e5e7eb')+';border-radius:5px;display:flex;gap:10px;align-items:flex-start">'
             +(ctrl?'<div style="flex:0 0 auto;display:flex;flex-direction:column;gap:3px;align-items:flex-start;min-width:78px">'+ctrl+'</div>':'')
@@ -1394,7 +1394,9 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                 if(nv<=0){ if(b)b.remove(); } else if(b){ b.textContent=nv; } else { el.insertAdjacentHTML('beforeend',' <span class="ex-badge">'+nv+'</span>'); } }
               scope.querySelectorAll('.pp-note-read').forEach(function(btn){ btn.onclick=function(){ var read=btn.dataset.read!=='1';
                 postJSON(EP.noteReadBase+btn.dataset.id,{read:read},function(){
-                  btn.dataset.read=read?'1':'0'; btn.textContent=read?'Mark unread':'Mark read';
+                  btn.dataset.read=read?'1':'0'; btn.textContent=read?'mark unread':'Mark read';
+                  if(read){ btn.className='pp-note-read'; btn.setAttribute('style','font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline;white-space:nowrap;background:none;border:none;padding:0'); }   // read → small text button
+                  else { btn.className='save-btn light pp-note-read'; btn.removeAttribute('style'); }   // unread → Mark read button
                   var wrap=btn.parentNode; wrap.style.background=read?'#eef2ff':'#fff7ed'; wrap.style.borderColor=read?'#e5e7eb':'#fdba74';
                   var info=wrap.firstChild, nb=info&&info.querySelector('.ex-badge');
                   if(read){ if(nb)nb.remove(); } else if(!nb){ var sp=info.querySelector('.mut'); if(sp)sp.insertAdjacentHTML('afterend',' <span class="ex-badge">new</span>'); }

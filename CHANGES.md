@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.477 - Portal "mark unread" renders as a small text button (not a Mark-read-style button)
+
+On the supplier portal PO timeline, after marking a Dock & Bay note read the control now becomes a small
+underlined text button ("mark unread") instead of keeping the solid "Mark read" button styling. The in-place
+toggle now restyles the element to match each state (Mark read = button; mark unread = small text). No migration.
+
 ## v25.476 - Completion-date days badge on READY TO SHIP / SHIPPING / DELIVERED POs
 
 Added the same colour-coded days-to-go badge to the PO grid Completion column, shown only when the PO status
