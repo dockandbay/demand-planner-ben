@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.469 - PO production grouping keyed off the shipment's MASTER PO production number
+
+The supply-plan PO grid's Production grouping now groups each PO by the production number of its shipment's
+master PO, so a PO consolidated onto another production's master shipment sits under that master's P# (e.g. a
+prod-54 PO on a prod-55 master shipment now shows under "P# 55"). Falls back to the PO's own prod_no when it
+isn't on a shipment; the master PO sorts first within its group. Each row's own production still shows in the
+PROD# column. No migration.
+
 ## v25.468 - Grouping-row text smaller still on mobile
 
 Reduced the mobile grouping-header font from 9–10px to 8px (with tighter padding) across all four grouping

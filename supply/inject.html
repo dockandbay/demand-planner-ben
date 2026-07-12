@@ -1919,13 +1919,18 @@
       }).forEach(function(r,idx){ body+=poRowHtml(r,idx,!isMasterRow(r),null); });
     }
     else {
-      // Production: grey grouping header per production number ("P# 54 — 2 PO's", expand/collapse, default
-      // expanded), POs clustered + alphabetical beneath it.
+      // Production: group each PO by the production number of its shipment's MASTER PO — a PO consolidated onto
+      // another production's master shipment sits under that master's P# (e.g. a prod-54 PO on a prod-55 master
+      // shipment shows under "P# 55"), falling back to the PO's own prod_no when it isn't on a shipment. Grey
+      // "P# 55 — N PO's" header (expand/collapse, default expanded); the master PO sorts first within its group.
+      var prodByPo={}; rows.forEach(function(r){ prodByPo[r.po]=(r.prod_no||''); });
+      function grpKeyOf(r){ var m=r.shipment?(prodByPo[r.shipment]!=null?prodByPo[r.shipment]:(poBy[r.shipment]&&poBy[r.shipment].prod_no)):null; return (m!=null&&m!=='')?m:(r.prod_no||''); }
       var groups={},order=[];
-      rows.forEach(function(r){ var k=r.prod_no||''; if(!groups[k]){groups[k]=[];order.push(k);} groups[k].push(r); });
+      rows.forEach(function(r){ var k=grpKeyOf(r); if(!groups[k]){groups[k]=[];order.push(k);} groups[k].push(r); });
       order.sort(function(a,b){ if(!a)return 1; if(!b)return -1; return a<b?-1:a>b?1:0; });   // named groups first, blank last
       var i=0;
-      order.forEach(function(k){ var list=groups[k]; list.sort(function(a,b){return a.po<b.po?-1:a.po>b.po?1:0;});
+      order.forEach(function(k){ var list=groups[k];
+        list.sort(function(a,b){ var am=(a.is_master||a.po===a.shipment)?0:1, bm=(b.is_master||b.po===b.shipment)?0:1; return am-bm || (a.po<b.po?-1:a.po>b.po?1:0); });   // master PO first, then alphabetical
         var gkey=k||'none', cnt=list.length;
         body+='<tr class="grp-row cat-hdr po-grp" data-grp="'+esc(gkey)+'"><td colspan="19" style="cursor:pointer;user-select:none" title="click to expand / collapse this production"><span class="po-grp-car">▾</span> '+(k?('P# '+esc(k)):'No production number')+' — '+cnt+" PO"+(cnt>1?"'s":"")+'</td></tr>';
         list.forEach(function(r){ body+=poRowHtml(r,i++,false,gkey); });
