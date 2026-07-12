@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.467 - Smaller grouping-row text on mobile + Production is the default PO grid grouping
+
+- Mobile: reduced the text size of the new grouping headers (portal PO groups + shipment date bands; supply
+  -plan PO production groups + shipment date bands) so they don't dominate on small screens (font-size 9–10px).
+- The supply-plan Purchase Orders grid now defaults to **Production** grouping (was Master shipment) — the
+  grey "P# … — N PO's" headers with expand/collapse. Still switchable via the Group dropdown. No migration.
+
 ## v25.466 - Supply-plan Shipments grid grouped by production-end date (same bands as the portal)
 
 Applied the same date-band separation to the main-app SUPPLY ▸ Shipments grid: DUE NOW (< 1 week) / DUE SOON

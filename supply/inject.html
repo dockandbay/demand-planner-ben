@@ -371,6 +371,8 @@
   #supply-root table.sh-tbl tbody tr:not(.exp-row):not(.grp-row) td:nth-child(2){left:54px}
   #supply-root .sh-tbl .sh-refcell{padding-left:2px}
   #supply-root .sh-tbl .fav-star{margin-left:2px}
+  /* smaller grouping-row text on mobile (PO production groups + shipment date bands) */
+  #supply-root tr.po-grp td,#supply-root table.sh-tbl tr.grp-row td{font-size:9px!important;padding:4px 6px!important}
   /* shipments filters: Country + Branch dropdowns share one row instead of stacking full-width */
   #supply-root .sh-filt-row{display:flex;gap:6px;width:100%}
   #supply-root .sh-filt-row .flt{width:auto!important;max-width:none!important;flex:1 1 0;min-width:0}
@@ -1408,8 +1410,8 @@
     var CFLAG={UK:'🇬🇧',US:'🇺🇸',AU:'🇦🇺',EU:'🇪🇺',CA:'🇨🇦',OTHER:'📦'};
     var GRP=[['none','None'],['production','Production'],['shipment','Master shipment']];
     // persist filters across edit reloads; reset to a clean view only when navigating to a specific PO
-    if(_pendingPO){ _poState={f:'in_progress',q:_pendingPO,act:{},ctry:{},grp:'shipment',sup:'',prod:'',batch:'',branch:''}; }   // seed only the SEARCH with the PO # — a text search spans ALL statuses/recency (filt), so it finds even a years-old completed PO WITHOUT forcing the 'all' filter. (The old 'all' seed used to stick, so after such a search the grid showed unfiltered instead of defaulting back to In progress once the search was cleared.)
-    else if(!_poState){ _poState={f:'in_progress',q:'',act:{},ctry:{},grp:'shipment',sup:'',prod:'',batch:'',branch:''}; }
+    if(_pendingPO){ _poState={f:'in_progress',q:_pendingPO,act:{},ctry:{},grp:'production',sup:'',prod:'',batch:'',branch:''}; }   // seed only the SEARCH with the PO # — a text search spans ALL statuses/recency (filt), so it finds even a years-old completed PO WITHOUT forcing the 'all' filter. (The old 'all' seed used to stick, so after such a search the grid showed unfiltered instead of defaulting back to In progress once the search was cleared.)
+    else if(!_poState){ _poState={f:'in_progress',q:'',act:{},ctry:{},grp:'production',sup:'',prod:'',batch:'',branch:''}; }
     if(_poState.prod==null)_poState.prod=''; if(_poState.batch==null)_poState.batch='';
     if(_poState.recent==null)_poState.recent=true;   // completed POs default to last 12 months only (perf)
     if(_poState.focus==null)_poState.focus=false;   // ⭐ Focus filter (starred + active only)
@@ -1679,7 +1681,7 @@
       fetch('/api/supply/po-import-cin7',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({reference:r,confirm:true})}).then(function(x){return x.json();}).then(function(j){
         if(j&&j.error){ prev.innerHTML='<span style="color:#dc2626">'+esc(j.error)+'</span>'; goBtn.disabled=false; goBtn.textContent='Import'; return; }
         bg.parentNode.removeChild(bg); invalidateDerived(); delete cache['purchase-orders'];
-        var impPo=(j&&j.po)||r; _poState={f:'in_progress',q:impPo,act:{},ctry:{},grp:'shipment',sup:'',prod:'',batch:'',branch:''};   // drop the imported PO into the search so the grid auto-filters to it
+        var impPo=(j&&j.po)||r; _poState={f:'in_progress',q:impPo,act:{},ctry:{},grp:'production',sup:'',prod:'',batch:'',branch:''};   // drop the imported PO into the search so the grid auto-filters to it
         selectSection('purchase-orders'); }).catch(function(e){ prev.innerHTML='<span style="color:#dc2626">Failed: '+esc(e.message||e)+'</span>'; goBtn.disabled=false; goBtn.textContent='Import'; }); };
     bg.onclick=function(e){ if(e.target===bg)bg.parentNode.removeChild(bg); };
     document.getElementById('po-imp-cancel').onclick=function(){ bg.parentNode.removeChild(bg); };
@@ -1716,7 +1718,7 @@
       fetch('/api/supply/po-create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();}).then(function(j){
         if(j&&j.error){ msg.textContent=j.error; go.disabled=false; go.textContent='Create PO'; return; }
         bg.parentNode.removeChild(bg); invalidateDerived(); delete cache['purchase-orders'];
-        _poState={f:'in_progress',q:po,act:{},ctry:{},grp:'shipment',sup:'',prod:'',batch:'',branch:''};   // drop the new PO into the search so the grid filters to it
+        _poState={f:'in_progress',q:po,act:{},ctry:{},grp:'production',sup:'',prod:'',batch:'',branch:''};   // drop the new PO into the search so the grid filters to it
         selectSection('purchase-orders');
       }).catch(function(e){ msg.textContent='Failed: '+(e.message||e); go.disabled=false; go.textContent='Create PO'; }); };
   }
