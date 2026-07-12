@@ -3832,8 +3832,7 @@
           +fld('Freight (manual £/$)', editCell(ep,'cost_manual',s.cost_manual==null?'':s.cost_manual,''))
           +'<div style="margin-right:16px"><div class="mut tiny">Freight used</div><div style="padding:4px 0;font-weight:600">'+(fr.c==null?'—':money(fr.c))+' <span class="src '+(fr.src==='FLEX'?'fx':'m')+'">'+esc(fr.src)+'</span></div></div>'
           +'<div style="margin-right:16px"><div class="mut tiny">Estimate ('+esc(m)+')</div><div class="tiny" style="padding:5px 0;color:#475569">'+estTxt+'</div></div>'
-          +'</div>'; })()
-      +'<div style="margin:2px 0 12px"><button class="save-btn" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd" title="download the Tax Invoice + Packing List for this shipment" onclick="window.open(\'/api/invoice/shipment/\'+encodeURIComponent(\''+ref+'\'))">📄 Tax Invoice</button></div>';   // shipment notes now live in the Timeline & notes tab (multi-line)
+          +'</div>'; })();   // shipment notes now live in the Timeline & notes tab (multi-line); Tax Invoice button moved to the POs-aboard tab
     Promise.all([fetch('/api/supply/shipment-detail/'+encodeURIComponent(ref)).then(function(r){return r.json();}),
       fetch('/api/supply/shipment-crossdock/'+encodeURIComponent(ref)).then(function(r){return r.json();}).catch(function(){return [];})])
       .then(function(R){ var rows=R[0]||[], xd=R[1]||[]; var t='<div class="sect-h">POs aboard ('+rows.length+') — ★ marks the master (consolidation) PO</div>';
@@ -3848,6 +3847,8 @@
           +'<input class="fci txt sh-addpo-inp" list="polist" placeholder="search PO…" style="width:220px;text-align:left">'
           +'<button class="save-btn sh-addpo-go">+ Add PO</button>'
           +'<span class="sh-addpo-msg mut tiny" style="color:#b91c1c"></span></div>';
+        // consolidated Tax Invoice for every PO aboard this shipment
+        t+='<div style="margin-top:14px;padding-top:10px;border-top:1px solid #f1f1f1"><button class="save-btn" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd" title="download the consolidated Tax Invoice + Packing List for this shipment" onclick="window.open(\'/api/invoice/shipment/\'+encodeURIComponent(\''+ref+'\'))">📄 Tax Invoice</button> <span class="mut tiny">Download the consolidated tax invoice for all purchase orders on this shipment.</span></div>';
         // crossdock rollup across the POs on this shipment
         var xdRows=xd.map(function(x){ return '<tr><td class="l">'+esc(x.sku)+'</td><td style="text-align:right">'+(x.qty!=null&&x.qty!==''?units(x.qty):'<span class="mut">—</span>')+'</td>'
           +'<td class="l">'+esc(x.po)+'</td><td class="l">'+esc(x.supplier_name||'')+'</td><td class="l">'+esc(x.client||'')+'</td><td class="l">'+esc(x.sales_order_ref||'')+'</td></tr>'; }).join('');

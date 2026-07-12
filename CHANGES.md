@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.473 - Shipment drawer: Tax Invoice button moved to the "POs aboard" tab
+
+In the shipment popout drawer, the "📄 Tax Invoice" button moved from the Dates & tracking tab to the POs
+aboard tab, with the caption "Download the consolidated tax invoice for all purchase orders on this
+shipment." No migration.
+
 ## v25.472 - PO grid Shipment cell: clickable FLEX badge for Flexport-linked POs
 
 In the SUPPLY ▸ Purchase Orders grid Shipment column, a Flexport-linked PO now shows a clickable "FLEX ↗"
