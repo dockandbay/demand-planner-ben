@@ -345,6 +345,9 @@
 #supply-root .tw{overflow:auto;border:1px solid #e0e0e0;border-radius:6px;background:#fff;margin-bottom:10px;max-height:calc(100vh - 210px)}
 #supply-root table{border-collapse:collapse;font-size:11px;width:100%}
 #supply-root thead th{background:#f3f3f1;padding:5px 8px;font-weight:600;font-size:9.5px;color:#444;border-bottom:1px solid #d5d5d5;text-align:right;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;position:sticky;top:0;z-index:1}
+/* small tables inside an expanded PO detail must NOT have sticky headers — otherwise the order-plan "Qty"
+   header floats over the sections below (e.g. Additional costs) as the page scrolls */
+#supply-root .ppx thead th{position:static;top:auto;z-index:auto}
 #supply-root thead th.l{text-align:left}
 #supply-root tbody td{padding:4px 8px;text-align:right;border-bottom:1px solid #f1f1f1;font-variant-numeric:tabular-nums;white-space:nowrap}
 #supply-root tbody td.l{text-align:left}
@@ -630,7 +633,7 @@
         +rws
         +'<tr style="font-weight:700;border-top:2px solid #999"><td class="l">TOTAL</td><td style="text-align:right" class="pp-totq">'+units(totQ)+'</td><td></td><td style="text-align:right">FINAL</td><td style="text-align:right" class="pp-totp">$'+money(totP)+'</td><td></td></tr>'
         +'</tbody></table></div>'
-        +'<div style="margin:6px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="pp-sku-wrap" style="position:relative;display:inline-block"><input class="fci pp-add-sku" data-po="'+po+'" placeholder="search a SKU you supply…" style="width:250px" autocomplete="off"><div class="pp-sku-menu" style="display:none;position:absolute;left:0;top:calc(100% + 2px);z-index:60;background:#fff;border:1px solid #cbd5e1;border-radius:6px;max-height:240px;overflow:auto;min-width:280px;box-shadow:0 8px 24px rgba(15,23,42,.18)"></div></span>'
+        +'<div style="margin:6px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="pp-sku-wrap" style="position:relative;display:inline-block"><input class="fci pp-add-sku" data-po="'+po+'" placeholder="search a SKU you supply…" style="width:250px;text-align:left" autocomplete="off"><div class="pp-sku-menu" style="display:none;position:absolute;left:0;top:calc(100% + 2px);z-index:60;background:#fff;border:1px solid #cbd5e1;border-radius:6px;max-height:240px;overflow:auto;min-width:280px;box-shadow:0 8px 24px rgba(15,23,42,.18)"></div></span>'
         +'<input class="fci pp-add-qty" data-po="'+po+'" placeholder="qty" style="width:62px;text-align:right" inputmode="numeric">'
         +'<input class="fci pp-add-cost" data-po="'+po+'" placeholder="price" style="width:80px;text-align:right" inputmode="decimal">'
         +'<button class="save-btn pp-add-go" data-po="'+po+'">Add SKU</button></div>'

@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.489 - Portal ORDER PLAN: stop the sticky "Qty" header floating; left-align add-SKU search
+
+- The global sticky table-header rule was applied to the small tables inside an expanded PO detail too, so the
+  order-plan "Qty" header floated over the sections below (Additional costs) while scrolling. Detail-panel
+  tables (inside `.ppx`) now have static headers.
+- Add-SKU search input is left-aligned (`.fci` defaults to right-align). No migration.
+
 ## v25.488 - Portal ORDER PLAN SKU width + search dropdown; shipment-plan PO not linked; DTC action gating
 
 - ORDER PLAN SKU column now min 30ch (+ nowrap) so long SKUs aren't cut off.
