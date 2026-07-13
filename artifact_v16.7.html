@@ -1386,13 +1386,31 @@ function fbaTransferRec(sku,mkt){
   const cap=amazonOnly?Math.max(i3,0):Math.floor(0.5*Math.max(i3,0)); // 50% of 3PL unless Amazon-only
   return fbaTransferSized(sku,mkt,cap);
 }
+// Non-GRS transfer: demand-driven (FBA shortfall over the target weeks), drawn from the non-GRS pool.
+//  - no 3PL protection cap (3PL never uses non-GRS stock)
+//  - round UP to whole cartons where possible (capped at what we hold)
+//  - if the demand requirement is > 65% of the whole non-GRS pool, just send it all
+function fbaTransferNonGrs(sku,mkt){
+  const pool=nonGrsOf(sku,mkt);
+  if(pool<=0)return 0;
+  const pd=PD[sku];const md=pd&&pd.mkts&&pd.mkts[mkt];if(!md)return 0;
+  const cp=pd.cp||1;
+  const iF=md['if_']||0, oof=md.oof||0, awd=awdOf(sku,mkt);
+  const fbw=parseInt(document.getElementById('fbw')?.value)||8;
+  const targetMonths=Math.max(1,Math.round(fbw/4.33));
+  const target=fbaFwdDemand(md,targetMonths);
+  const need=Math.max(0,target-(iF+oof+awd));   // demand-driven requirement
+  if(need<=0)return 0;
+  const base=Math.min(need,pool);               // can't send more than we hold
+  if(base>0.65*pool)return pool;                // demand needs >65% of the pool → send the lot
+  return Math.min(Math.ceil(base/cp)*cp,pool);  // else round UP to whole cartons (capped at the pool)
+}
 // Effective transfer = manual override if entered, else the recommendation.
 function fbaTransferEff(sku,mkt){
   const k=sku+'|'+mkt;
   if(FBA_OV[k]!=null&&FBA_OV[k]!=='')return parseInt(FBA_OV[k])||0;
-  // "Transfer FBA (non GRS)" mode: demand-driven (sized to FBA need), drawn from the non-GRS pool.
-  // Cap = ALL non-GRS stock in this market (3PL never uses non-GRS stock, so no 3PL protection here).
-  if(BU_SEL==='TRFFBA_NG')return fbaTransferSized(sku,mkt,nonGrsOf(sku,mkt));
+  // "Transfer FBA (non GRS)" mode: demand-driven, carton-rounded-up, drawn from the non-GRS pool.
+  if(BU_SEL==='TRFFBA_NG')return fbaTransferNonGrs(sku,mkt);
   return fbaTransferRec(sku,mkt);
 }
 

@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.515 - Non-GRS transfer: round up to cartons + send-all above 65% of pool
+
+Refined the non-GRS FBA transfer (`fbaTransferNonGrs`): still demand-driven, but now rounds the quantity
+**up** to whole cartons where possible (capped at what we hold), and if the demand requirement exceeds
+**65%** of the SKU's entire non-GRS pool it sends the whole pool. No 3PL protection cap.
+
 ## v25.514 - FBA "Transfer FBA (non GRS)": demand-driven, not "send everything"
 
 The non-GRS transfer used to suggest ALL non-GRS stock in the market (e.g. 1,474 units regardless of FBA
