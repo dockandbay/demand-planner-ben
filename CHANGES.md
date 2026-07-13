@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.487 - Portal invoice downloads fixed (portal-scoped endpoint + real file download) + label
+
+The portal Tax Invoice buttons used `window.open('/api/invoice/...')`, which opens a tab but doesn't download
+on the portal host (only `/api/portal/*` is routed there). Added portal-scoped, supplier-scoped endpoints
+`/api/portal/invoice/shipment/:ref` and `/api/portal/invoice/po/:po` (portalAuth), and switched the buttons to
+a fetch->blob download so a file actually saves. Added the label "Download a consolidated shipment tax
+invoice" above the Shipment Plan button. CONFIG preview keeps the admin `/api/invoice/*` routes via EP. No migration.
+
 ## v25.486 - Portal Shipment Plan date bands: real shipments now get a production-end date
 
 The shipment-plan builder only set `prod_end` on FOB entries, so real shipments all fell into the "No

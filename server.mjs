@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.486';
+const APP_VERSION = 'v25.487';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3127,6 +3127,22 @@ app.get('/api/invoice/shipment/:ref', async (req, res) => {
     const pos = (await pool.query('SELECT po FROM planner.purchase_orders WHERE shipment_ref=$1 OR po=$1', [ref])).rows.map((r) => r.po);
     if (!pos.length) return res.status(404).json({ error: 'No POs found for shipment ' + ref });
     sendXlsx(res, await buildInvoice(pool, { type: 'tax', pos, ref, master: ref }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Portal-scoped invoice downloads — same generator, namespaced under /api/portal/* (so they route on the
+// portal host) and scoped to the caller's own suppliers. The supplier portal fetches these as a blob.
+app.get('/api/portal/invoice/shipment/:ref', portalAuth, async (req, res) => {
+  const ref = decodeURIComponent(req.params.ref || ''), names = req.portal.suppliers;
+  try {
+    const pos = (await pool.query('SELECT po FROM planner.purchase_orders WHERE (shipment_ref=$1 OR po=$1) AND supplier_name = ANY($2)', [ref, names])).rows.map((r) => r.po);
+    if (!pos.length) return res.status(404).json({ error: 'No POs found for shipment ' + ref });
+    sendXlsx(res, await buildInvoice(pool, { type: 'tax', pos, ref, master: ref }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/portal/invoice/po/:po', portalAuth, async (req, res) => {
+  const po = decodeURIComponent(req.params.po || '');
+  try { if (!await portalOwnsPO(req, po)) return res.status(403).json({ error: 'not your PO' });
+    sendXlsx(res, await buildInvoice(pool, { type: 'commercial', pos: [po], ref: po, master: po }));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // ASN pallet labels PDF (AU Coghlans) — one A4 landscape page per ASN number (1 ASN = 1 pallet).

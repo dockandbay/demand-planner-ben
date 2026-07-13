@@ -485,6 +485,18 @@
     var rootEl=opts.root; if(!rootEl.closest('#supply-root')){rootEl.id='supply-root';} rootEl.style.display='block';
     rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders <span id="pp-pos-badge"></span></span><span class="rtab" data-pt="shipmentplan">Shipment Plan <span id="pp-ship-badge"></span></span><span class="rtab" data-pt="barcodes">Barcodes</span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="productions">Productions</span><span class="rtab" data-pt="samples">Samples <span id="pp-samp-badge"></span></span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
     var tabsEl=document.getElementById('pp-tabs'), body=document.getElementById('pp-body');
+    // download a generated invoice as a real file (fetch -> blob) rather than opening a tab — works on the
+    // portal host where /api/invoice/* isn't routed (uses the /api/portal/* endpoints via EP).
+    function dlInvoice(url, btn){ var t=btn?btn.textContent:'';
+      if(btn){ btn.disabled=true; btn.textContent='Preparing…'; }
+      fetch(url).then(function(r){ if(!r.ok) return r.text().then(function(tx){ var m; try{m=JSON.parse(tx);}catch(e){} throw new Error((m&&m.error)||('HTTP '+r.status)); });
+          var cd=r.headers.get('content-disposition')||''; var fm=/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd); var fn=fm?decodeURIComponent(fm[1]):'invoice.xlsx';
+          return r.blob().then(function(b){ var u=URL.createObjectURL(b); var a=document.createElement('a'); a.href=u; a.download=fn; document.body.appendChild(a); a.click(); setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(u); },120); }); })
+        .then(function(){ if(btn){ btn.disabled=false; btn.textContent=t; } })
+        .catch(function(e){ if(btn){ btn.disabled=false; btn.textContent=t; } alert('Could not generate the invoice: '+(e&&e.message||e)); }); }
+    if(!rootEl._invBound){ rootEl._invBound=1; rootEl.addEventListener('click', function(e){ var b=e.target.closest('.pp-ship-inv,.pp-po-inv'); if(!b)return; e.preventDefault();
+      if(b.classList.contains('pp-ship-inv')) dlInvoice((EP.shipmentInvoice||'/api/invoice/shipment/')+encodeURIComponent(b.dataset.ref), b);
+      else dlInvoice((EP.poInvoice||'/api/invoice/po/')+encodeURIComponent(b.dataset.po), b); }); }
     function postJSON(ep,b2,cb){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b2)}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} cb&&cb(j); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); }); }
     // Should the INVOICE action fire for this PO? Rules (Ben): never on FUTURE POs; never once an invoice value is
     // submitted; only when the production END date is in the PAST — preferring the supplier-submitted end date
@@ -687,7 +699,7 @@
       var attBase=(EP.attachmentBase||'/api/portal/attachment/');
       var docRows=pdocs.length?pdocs.map(function(d){ return '<tr><td class="l">'+esc(d.category||'Other')+'</td><td class="l"><a href="'+attBase+d.id+'" target="_blank" rel="noopener">'+esc(d.filename||'file')+'</a></td><td class="l mut tiny">'+esc(d.uploaded_at||'')+'</td><td class="l"><button class="lnk-btn pp-doc-rm" data-id="'+d.id+'" data-po="'+po+'" style="color:#b91c1c">remove</button></td></tr>'; }).join('')
         :'<tr><td colspan="4" class="mut tiny">No documents uploaded yet.</td></tr>';
-      invoice+='<div style="margin-top:14px"><button class="save-btn" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;font-weight:600" onclick="window.open(\'/api/invoice/po/\'+encodeURIComponent(\''+esc(po)+'\'))">⤓ DOWNLOAD GENERATED TAX INVOICE FOR THIS PO</button></div>';
+      invoice+='<div style="margin-top:14px"><button class="save-btn pp-po-inv" data-po="'+esc(po)+'" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;font-weight:600">⤓ DOWNLOAD GENERATED TAX INVOICE FOR THIS PO</button></div>';
       invoice+='<div class="sect-h" style="margin-top:14px">Documents <span class="mut tiny">— attach your commercial invoice, packing list, certificates, photos…</span></div>'
         +'<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:6px">'
         +'<label class="tiny">Type<br><select class="fci pp-doc-type" data-po="'+po+'" style="text-align:left;min-width:160px">'+DOC_TYPES.map(function(t){return '<option>'+esc(t)+'</option>';}).join('')+'</select></label>'
@@ -1017,7 +1029,7 @@
                 +'</div>'
                 +'<div class="sp-body" style="display:none;padding:0 12px 12px">'+datesStrip+'<div style="margin-top:8px">'+members+'</div>'
                 +(s.members||[]).map(function(m){return dtcBlock(m.po);}).join('')
-                +'<div style="margin-top:10px"><button class="save-btn" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd" title="download Tax Invoice + Packing List for this shipment" onclick="window.open(\'/api/invoice/shipment/\'+encodeURIComponent(\''+esc(s.shipment_ref)+'\'))">📄 Tax Invoice</button></div>'
+                +'<div style="margin-top:10px"><div class="mut tiny" style="margin-bottom:3px">Download a consolidated shipment tax invoice</div><button class="save-btn pp-ship-inv" data-ref="'+esc(s.shipment_ref)+'" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd" title="download the consolidated Tax Invoice + Packing List for this shipment">📄 Tax Invoice</button></div>'
                 +'<div class="sp-timeline" data-ref="'+esc(s.shipment_ref)+'" style="margin-top:8px;border-top:1px solid #f1f1f1;padding-top:6px"></div></div></div>'; }
             var _sorted=rows.slice().map(function(s){return {s:s,b:_bucketOf(s)};}).sort(function(a,b){ if(a.b!==b.b)return a.b-b.b; var pa=a.s.prod_end||'~', pb=b.s.prod_end||'~'; return pa<pb?-1:pa>pb?1:0; });
             var _out='', _cur=-1;
