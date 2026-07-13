@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.491 - Portal ORDER PLAN Additional costs: wrap table + force-static detail headers
+
+Wrapped the Additional costs table in the standard `.tw` container (max 540px) so it can't bleed out, and
+made the detail-panel sticky-header override `!important` (belt-and-suspenders vs the floating "Qty").
+Awaiting a screenshot to confirm the floating-qty is resolved. No migration.
+
 ## v25.490 - Portal ORDER PLAN add-SKU dropdown renders above the grid (body-fixed popover)
 
 The add-SKU search dropdown was position:absolute inside the grid, so it was clipped by the table overflow /

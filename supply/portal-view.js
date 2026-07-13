@@ -347,7 +347,7 @@
 #supply-root thead th{background:#f3f3f1;padding:5px 8px;font-weight:600;font-size:9.5px;color:#444;border-bottom:1px solid #d5d5d5;text-align:right;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;position:sticky;top:0;z-index:1}
 /* small tables inside an expanded PO detail must NOT have sticky headers — otherwise the order-plan "Qty"
    header floats over the sections below (e.g. Additional costs) as the page scrolls */
-#supply-root .ppx thead th{position:static;top:auto;z-index:auto}
+#supply-root .ppx thead th{position:static!important;top:auto!important;z-index:auto!important}
 #supply-root thead th.l{text-align:left}
 #supply-root tbody td{padding:4px 8px;text-align:right;border-bottom:1px solid #f1f1f1;font-variant-numeric:tabular-nums;white-space:nowrap}
 #supply-root tbody td.l{text-align:left}
@@ -647,11 +647,11 @@
           +'<td class="l"><button class="lnk-btn pp-ac-rm" data-id="'+a.id+'" title="remove" style="color:#b91c1c">✕</button></td></tr>'; }).join('');
       var invTot=totP+addTot;
       skus+='<div class="sect-h" style="margin-top:12px">Additional costs <span class="mut tiny">(freight, tooling, surcharges… — added to the invoice)</span></div>'
-        +'<table style="font-size:11px;width:auto"><thead><tr><th class="l">Description</th><th style="text-align:right">Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Total</th><th></th></tr></thead><tbody>'
+        +'<div class="tw" style="max-width:540px"><table style="font-size:11px;width:auto"><thead><tr><th class="l">Description</th><th style="text-align:right">Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Total</th><th></th></tr></thead><tbody>'
         +acRows
         +'<tr><td class="l"><input class="fci pp-ac-ndesc" data-po="'+po+'" placeholder="+ add a cost…" style="width:190px"></td><td style="text-align:right"><input class="fci pp-ac-nqty" data-po="'+po+'" placeholder="qty" style="width:56px;text-align:right" inputmode="numeric"></td><td style="text-align:right"><input class="fci pp-ac-nprice" data-po="'+po+'" placeholder="price" style="width:74px;text-align:right" inputmode="decimal"></td><td></td><td class="l"><button class="save-btn pp-ac-add" data-po="'+po+'">Add</button></td></tr>'
         +(add.length?'<tr style="font-weight:700;border-top:1px solid #ccc"><td class="l">Additional total</td><td></td><td></td><td style="text-align:right">$'+money(addTot)+'</td><td></td></tr>':'')
-        +'</tbody></table>'
+        +'</tbody></table></div>'
         +'<div style="margin:8px 0 4px;font-weight:700;font-size:12px">Total invoice cost: <span class="pp-inv-tot" data-add="'+addTot+'">$'+money(invTot)+'</span> <span class="mut tiny" style="font-weight:400">(line items $'+money(totP)+' + additional $'+money(addTot)+')</span></div>';
       // ---- crossdock SKUs → shipped-qty entry lives in the SHIPMENT tab (becomes an open action once shipping) ----
       var cdSkus=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
