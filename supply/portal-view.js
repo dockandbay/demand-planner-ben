@@ -633,7 +633,7 @@
         +rws
         +'<tr style="font-weight:700;border-top:2px solid #999"><td class="l">TOTAL</td><td style="text-align:right" class="pp-totq">'+units(totQ)+'</td><td></td><td style="text-align:right">FINAL</td><td style="text-align:right" class="pp-totp">$'+money(totP)+'</td><td></td></tr>'
         +'</tbody></table></div>'
-        +'<div style="margin:6px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="pp-sku-wrap" style="position:relative;display:inline-block"><input class="fci pp-add-sku" data-po="'+po+'" placeholder="search a SKU you supply…" style="width:250px;text-align:left" autocomplete="off"><div class="pp-sku-menu" style="display:none;position:absolute;left:0;top:calc(100% + 2px);z-index:60;background:#fff;border:1px solid #cbd5e1;border-radius:6px;max-height:240px;overflow:auto;min-width:280px;box-shadow:0 8px 24px rgba(15,23,42,.18)"></div></span>'
+        +'<div style="margin:6px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><input class="fci pp-add-sku" data-po="'+po+'" placeholder="search a SKU you supply…" style="width:250px;text-align:left" autocomplete="off">'
         +'<input class="fci pp-add-qty" data-po="'+po+'" placeholder="qty" style="width:62px;text-align:right" inputmode="numeric">'
         +'<input class="fci pp-add-cost" data-po="'+po+'" placeholder="price" style="width:80px;text-align:right" inputmode="decimal">'
         +'<button class="save-btn pp-add-go" data-po="'+po+'">Add SKU</button></div>'
@@ -1497,15 +1497,18 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                 inp.oninput=function(){ recalc(inp.closest('.ppx')); };
                 inp.onchange=function(){ var box=inp.closest('.ppx'); recalc(box); saveLine(box,inp.dataset.po,inp.dataset.sku); }; });
               // add-SKU search: a filterable dropdown of the supplier's SKUs not already on the order (standard picker UX)
-              scope.querySelectorAll('.pp-add-sku').forEach(function(inp){ var po=inp.dataset.po, menu=inp.parentNode.querySelector('.pp-sku-menu'); if(!menu)return;
+              scope.querySelectorAll('.pp-add-sku').forEach(function(inp){ var po=inp.dataset.po, pop=null;
                 function cands(){ var on={}; (_ppData.lb[po]||[]).forEach(function(l){on[l.sku]=1;}); var cb=_ppData.costsByPo[po]||{}; Object.keys(cb).forEach(function(s){ if(cb[s]&&cb[s].is_added)on[s]=1; }); return (_ppData.supSkus||[]).filter(function(s){return !on[s.sku];}); }
-                function render(){ var q=(inp.value||'').trim().toLowerCase(); var list=cands().filter(function(s){return !q||((s.sku+' '+(s.product_name||'')).toLowerCase().indexOf(q)>=0);});
-                  menu.innerHTML=list.slice(0,60).map(function(s){return '<div class="pp-sku-opt" data-sku="'+esc(s.sku)+'" style="padding:5px 9px;cursor:pointer;font-size:12px;border-bottom:1px solid #f1f5f9"><b>'+esc(s.sku)+'</b>'+(s.product_name?' <span class="mut tiny">'+esc(s.product_name)+'</span>':'')+'</div>';}).join('')||'<div style="padding:6px 9px" class="mut tiny">no matching SKU</div>';
-                  menu.querySelectorAll('.pp-sku-opt').forEach(function(o){ o.onmouseover=function(){o.style.background='#f1f5f9';}; o.onmouseout=function(){o.style.background='';};
-                    o.onmousedown=function(e){ e.preventDefault(); inp.value=o.dataset.sku; menu.style.display='none'; var qi=inp.parentNode.parentNode.querySelector('.pp-add-qty'); if(qi)qi.focus(); }; });
-                  menu.style.display=''; }
-                inp.onfocus=render; inp.oninput=render;
-                inp.onblur=function(){ setTimeout(function(){ menu.style.display='none'; },150); }; });
+                function close(){ if(pop){ pop.remove(); pop=null; } document.removeEventListener('scroll',onScroll,true); window.removeEventListener('resize',close); }
+                function onScroll(){ close(); }   // close on scroll rather than track (avoids drift + escapes the grid)
+                function place(){ if(!pop)return; var r=inp.getBoundingClientRect(); pop.style.left=r.left+'px'; pop.style.top=(r.bottom+2)+'px'; pop.style.minWidth=Math.max(r.width,280)+'px'; }
+                function render(){ if(!pop)return; var q=(inp.value||'').trim().toLowerCase(); var list=cands().filter(function(s){return !q||((s.sku+' '+(s.product_name||'')).toLowerCase().indexOf(q)>=0);});
+                  pop.innerHTML=list.slice(0,60).map(function(s){return '<div class="pp-sku-opt" data-sku="'+esc(s.sku)+'" style="padding:5px 9px;cursor:pointer;border-bottom:1px solid #f1f5f9"><b>'+esc(s.sku)+'</b>'+(s.product_name?' <span class="mut tiny">'+esc(s.product_name)+'</span>':'')+'</div>';}).join('')||'<div style="padding:6px 9px" class="mut tiny">no matching SKU</div>';
+                  pop.querySelectorAll('.pp-sku-opt').forEach(function(o){ o.onmouseover=function(){o.style.background='#f1f5f9';}; o.onmouseout=function(){o.style.background='';};
+                    o.onmousedown=function(e){ e.preventDefault(); inp.value=o.dataset.sku; close(); var qi=inp.parentNode.querySelector('.pp-add-qty'); if(qi)qi.focus(); }; }); }
+                function open(){ if(pop)return; pop=document.createElement('div'); pop.style.cssText='position:fixed;z-index:99999;background:#fff;border:1px solid #cbd5e1;border-radius:6px;max-height:260px;overflow:auto;box-shadow:0 8px 24px rgba(15,23,42,.22);font-size:12px'; document.body.appendChild(pop); place(); render(); document.addEventListener('scroll',onScroll,true); window.addEventListener('resize',close); }
+                inp.onfocus=open; inp.oninput=function(){ if(!pop)open(); else render(); };
+                inp.onblur=function(){ setTimeout(close,150); }; });
               // add a SKU (typed/searched from the supplier's list) → re-render this PO's detail in place, stay on ORDER PLAN
               scope.querySelectorAll('.pp-add-go').forEach(function(btn){ btn.onclick=function(){ var box=btn.closest('.ppx'); var po=btn.dataset.po;
                 var sku=(box.querySelector('.pp-add-sku').value||'').trim(); if(!sku){ alert('Search and pick a SKU to add.'); return; }

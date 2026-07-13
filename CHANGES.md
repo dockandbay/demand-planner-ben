@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.490 - Portal ORDER PLAN add-SKU dropdown renders above the grid (body-fixed popover)
+
+The add-SKU search dropdown was position:absolute inside the grid, so it was clipped by the table overflow /
+hidden under the next row's sticky cells. Now it's a body-appended position:fixed popover (z-index 99999)
+placed at the input, closing on scroll/resize — so it renders on top of the PO grid. No migration.
+
 ## v25.489 - Portal ORDER PLAN: stop the sticky "Qty" header floating; left-align add-SKU search
 
 - The global sticky table-header rule was applied to the small tables inside an expanded PO detail too, so the
