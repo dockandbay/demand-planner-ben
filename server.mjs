@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.496';
+const APP_VERSION = 'v25.497';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2863,10 +2863,16 @@ async function escalateSend(r) { const to = r.emails;
   if (!resp.ok) { const t = await resp.text().catch(() => ''); throw new Error('email send failed: ' + t.slice(0, 200)); }
   return { sent: to.length };
 }
-async function escalateCore({ initiator, kind, ref, message, user, supplierId }) {
+async function escalateCore({ initiator, kind, ref, message, user, supplierId, setEscalated }) {
   kind = ['po', 'shipment', 'sample'].includes(kind) ? kind : 'po';
   ref = String(ref || '').trim(); message = String(message || '').trim();
   if (!ref || !message) throw new Error('ref + message required');
+  // "Escalate shipment" also raises the shipment's escalated STATUS (filterable on the portal + supply plan).
+  // Only real shipments have a shipments row; FOB escalations (kind='po') stay email-only. Non-fatal.
+  if (setEscalated && kind === 'shipment') {
+    try { await pool.query(`INSERT INTO planner.shipments (shipment_ref, escalated, escalated_at) VALUES ($1, true, now())
+      ON CONFLICT (shipment_ref) DO UPDATE SET escalated=true, escalated_at=now(), updated_at=now()`, [ref]); } catch (e) { /* status flag best-effort */ }
+  }
   let emails = [], audience;
   if (initiator === 'internal') {
     audience = 'portal'; let sid = supplierId;
@@ -7274,7 +7280,7 @@ app.post('/api/portal/escalate', portalAuth, async (req, res) => {
   if (kind === 'po' && b.ref && !await portalOwnsPO(req, b.ref)) return portalDeny(res);
   try {
     const user = (req.portal.suppliers && req.portal.suppliers[0]) || 'The supplier';
-    res.json(await escalateCore({ initiator: 'supplier', kind, ref: b.ref, message: b.message, user }));
+    res.json(await escalateCore({ initiator: 'supplier', kind, ref: b.ref, message: b.message, user, setEscalated: !!b.set_escalated }));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/portal/upload', portalAuth, async (req, res) => {

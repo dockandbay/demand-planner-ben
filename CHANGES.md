@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.497 - "Escalate shipment" now sets the escalated STATUS (filterable both sides)
+
+"Escalate shipment" previously only emailed. It now also raises the shipment's `escalated` status (via
+escalateCore when the portal passes set_escalated), so the shipment appears in the "Escalated" filter on the
+supplier portal AND the supply-plan Shipments grid (red card / ⚑ ESCALATED badge). Per-note "Flag" stays
+email-only. FOB escalations (no shipments row) remain email-only. No migration.
+
 ## v25.496 - Portal: per-note "Flag" on ALL timelines
 
 Relabelled the per-note escalate to "⚑ Flag" (emails that note to the supply planner) across every portal
