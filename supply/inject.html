@@ -5716,7 +5716,7 @@
           ? '<textarea class="fci samp-fld" data-field="notes" rows="2" style="width:240px;text-align:left">'+esc(s.notes||'')+'</textarea>'
           : '<div class="tiny" style="white-space:pre-wrap;background:#f8fafc;border:1px solid #eef2f7;border-radius:6px;padding:6px;max-width:260px">'+(s.notes?esc(s.notes):'<span class="mut">—</span>')+'</div>';
         var skus = editing
-          ? '<div class="samp-lines"></div><button class="save-btn light samp-addline" style="margin-top:4px">+ line</button> <button class="save-btn samp-saveskus">Save SKUs</button>'
+          ? '<div class="samp-lines"></div><button class="save-btn light samp-addline" style="margin-top:4px">+ line</button> <span class="mut tiny" style="margin-left:4px">saved with ✓ Done</span>'
           : '<div class="tiny" style="line-height:1.7">'+((d.lines||[]).map(function(l){return '<div><b>'+units(l.qty)+'</b> × '+esc(l.sku)+'</div>';}).join('')||'<span class="mut">no SKUs</span>')+'</div>';
         var completion = editing
           ? dateField(s.completion_required,{cls:'samp-fld', attrs:'data-field="completion_date_required"', width:'120px'})
@@ -5746,7 +5746,8 @@
           +'<div class="sect-h" style="margin-top:10px">Charges</div><div class="tw"><table><thead><tr><th class="l">Status</th><th>Freight</th><th>Product</th><th>Total</th><th class="l">Description</th><th class="l"></th></tr></thead><tbody>'+charges+'</tbody></table></div>'
           +'<div class="sect-h" style="margin-top:10px">Timeline</div><div class="sp-timeline" data-ref="'+esc(s.ref)+'"></div>';
         var eb=box.querySelector('.samp-edit'); if(eb)eb.onclick=function(){ editing=true; paint(); };
-        var db=box.querySelector('.samp-done'); if(db)db.onclick=function(){ editing=false; if(_sampleReload)_sampleReload(); };
+        var db=box.querySelector('.samp-done'); if(db)db.onclick=function(){ db.disabled=true;   // ✓ Done also persists the SKU lines (fields already auto-save on change)
+          shipPost('/api/supply/sample/'+id+'/lines',{lines:slines.filter(function(l){return l.sku&&String(l.sku).trim();}).map(function(l){return {sku:String(l.sku).trim(),qty:Number(l.qty)||0};})},function(){ editing=false; if(_sampleReload)_sampleReload(); }); };
         var af=box.querySelector('.samp-att-file'), au=box.querySelector('.samp-att-up');
         if(au)au.onclick=function(){ var f=af&&af.files&&af.files[0]; if(!f){alert('Choose a file to upload.');return;} au.disabled=true; var rd=new FileReader(); rd.onload=function(){ shipPost('/api/supply/portal-upload',{po:s.ref,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),category:'sample',uploaded_by:'PO PLAN'},function(j){ if(j&&j.error){alert(j.error);au.disabled=false;return;} loadSampleDetail(id,i); }); }; rd.readAsDataURL(f); };
         box.querySelectorAll('.samp-att-rm').forEach(function(b){ b.onclick=function(){ if(!confirm('Remove this attachment?'))return; shipPost('/api/supply/portal-attachment-remove',{id:b.dataset.aid},function(){ loadSampleDetail(id,i); }); }; });
@@ -5761,7 +5762,6 @@
           box.querySelectorAll('.samp-purpose').forEach(function(cb){ cb.onchange=function(){ var arr=Array.prototype.map.call(box.querySelectorAll('.samp-purpose:checked'),function(x){return x.value;}); s.purpose=arr; shipPost(ep,{purpose:arr},function(){}); }; });
           renderSlines();
           box.querySelector('.samp-addline').onclick=function(){ slines.push({sku:'',qty:''}); renderSlines(); };
-          box.querySelector('.samp-saveskus').onclick=function(){ var btn=this; btn.disabled=true; shipPost('/api/supply/sample/'+id+'/lines',{lines:slines.filter(function(l){return l.sku&&String(l.sku).trim();}).map(function(l){return {sku:String(l.sku).trim(),qty:Number(l.qty)||0};})},function(){ d.lines=slines.map(function(l){return {sku:String(l.sku).trim(),qty:Number(l.qty)||0};}); btn.textContent='Saved ✓'; btn.disabled=false; }); };
         }
         loadSampleTimeline(s.ref, id, 'internal', s.supplier_name);
       }

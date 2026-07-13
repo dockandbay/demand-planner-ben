@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.485 - Samples: SKU edits save with ✓ Done (no separate Save SKUs button)
+
+On SUPPLY ▸ Samples, editing SKUs no longer needs its own "Save SKUs" button — the SKU lines now persist as
+part of the "✓ Done" save (other fields already auto-save on change). Removed the separate button. No migration.
+
 ## v25.484 - Payments refresh after final-cost edit + narrower Credit amount box
 
 - Editing an order-plan line's final cost now marks the PO detail stale; opening the Payments (or Landed
