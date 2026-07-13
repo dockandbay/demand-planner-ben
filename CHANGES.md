@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.509 - Portal: master PO marked 'shipped' → its shipment advances to Shipping
+
+- When a supplier sets a **master PO's** production status to **shipped**, its shipment is now advanced to
+  **Shipping** (unless already Completed). Fires only for a master PO — a child/consolidated PO leaves the
+  shipment untouched. Shared `shipmentShippingFromMasterPO()` helper.
+- **Fix:** the real portal submit endpoint (`/api/portal/submit`) previously ignored `production_status`
+  entirely — production-status changes made on the live portal weren't saved. It now applies it (matching the
+  internal preview handler), which is also what powers the trigger above.
+- Portal refreshes _ppData silently after a 'shipped' change so the Shipment Plan reflects the new status.
+
+No migration.
+
 ## v25.508 - Portal: PO Status column colours aligned to production-status palette
 
 The Status column on the supplier-portal Purchase Orders grid now follows the same progression as the

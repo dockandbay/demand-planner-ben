@@ -1679,7 +1679,10 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
               // supplier production status dropdown (grid AND timeline share class .pp-prod) → save + sync BOTH
               // selects + badge in place (no reload, no full-cell flash from the grid)
               scope.querySelectorAll('.pp-prod').forEach(function(sel){ paintProdSel(sel); sel.onchange=function(){ var po=sel.dataset.po, val=sel.value; paintProdSel(sel); sel.disabled=true;
-                postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,production_status:val},function(){ applyProdStatus(po,val); }); }; });
+                postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,production_status:val},function(){ applyProdStatus(po,val);
+                  // a master PO marked 'shipped' advances its shipment to Shipping server-side → refresh _ppData silently
+                  if(val==='shipped'){ opts.getData().then(function(d){ if(d){ if(d.notesByPo)Object.keys(d.notesByPo).forEach(function(k){ shortNotes(d.notesByPo[k]); }); _ppData=d; } }).catch(function(){}); }
+                }); }; });
               scope.querySelectorAll('.pp-ownship').forEach(function(cb){ cb.onchange=function(){ var bx=scope.querySelector('.pp-ownship-box[data-po="'+cb.dataset.po+'"]'); if(bx)bx.style.display=cb.checked?'':'none'; }; });
               scope.querySelectorAll('.pp-trk-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po; var t=pick('pp-trk',po).value, cc=pick('pp-car',po).value; if(!t&&!cc){ alert('Pick a carrier and/or enter a tracking ref.'); return; } var fcEl=pick('pp-fcost-new',po); var fc=fcEl?Number(fcEl.value)||0:0; btn.disabled=true;
                 var row=btn.closest('tr[id^="pp-"]');

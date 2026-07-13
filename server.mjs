@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.508';
+const APP_VERSION = 'v25.509';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3298,6 +3298,8 @@ app.post('/api/supply/portal-submit', async (req, res) => {
       await client.query(`UPDATE planner.purchase_orders SET production_status=$2,
         production_confirmed_at=CASE WHEN $2='' THEN NULL ELSE now() END WHERE po=$1`, [b.po, st]);
       out.applied.push('production status → ' + (st || 'cleared'));
+      // master PO marked shipped → its shipment advances to Shipping (master POs only)
+      if (st === 'shipped') { const shref = await shipmentShippingFromMasterPO(client, b.po); if (shref) out.applied.push('shipment ' + shref + ' → Shipping'); }
     }
     // PO confirmation (#supplier confirms SKUs / qty / dates). po_confirmed:true → confirm; false → clear (re-request).
     if (b.po_confirmed != null) {
@@ -4425,6 +4427,17 @@ app.post('/api/supply/po/:po/set-shipping', async (req, res) => {
 // Shared: advance every PO on a shipment still in PRODUCTION to SHIPPING + production_status 'shipped'.
 // Matches the shipment's children (shipment_ref=ref), the ref itself (self-master), and the shipment's
 // master_po (a master PO whose own shipment_ref is blank). Never re-opens completed/delivered POs.
+// If `po` is the MASTER PO of a shipment, advance that shipment to Shipping (unless already Completed).
+// Used when a supplier marks the master PO's production status 'shipped'. Only fires for a master PO —
+// a child/consolidated PO returns no row and leaves the shipment untouched. `q` = pool or a txn client.
+async function shipmentShippingFromMasterPO(q, po) {
+  if (!po) return null;
+  const r = (await q.query(`SELECT shipment_ref FROM planner.shipments
+    WHERE (master_po=$1 OR (coalesce(master_po,'')='' AND shipment_ref=$1))
+      AND coalesce(status,'') NOT ILIKE '%complete%' LIMIT 1`, [po])).rows[0];
+  if (r) await q.query(`UPDATE planner.shipments SET status='Shipping', updated_at=now() WHERE shipment_ref=$1`, [r.shipment_ref]);
+  return r ? r.shipment_ref : null;
+}
 async function propagateShippingToPOs(ref) {
   if (!ref) return 0;
   return (await pool.query(`UPDATE planner.purchase_orders SET status='SHIPPING', production_status='shipped',
@@ -7393,6 +7406,16 @@ app.post('/api/portal/submit', portalAuth, async (req, res) => {
           [sid, b.po, JSON.stringify({ tracking: b.tracking || null, carrier: b.carrier || null }), by]);
         out.staged.push('tracking');
       }
+    }
+    // supplier production status — '' clears it. Applied directly (like the internal preview handler).
+    if (b.production_status != null) {
+      const st = String(b.production_status).trim();
+      if (st !== '' && !PROD_STATUSES.includes(st)) return res.status(400).json({ error: 'bad production_status' });
+      await pool.query(`UPDATE planner.purchase_orders SET production_status=$2,
+        production_confirmed_at=CASE WHEN $2='' THEN NULL ELSE now() END WHERE po=$1`, [b.po, st]);
+      out.applied.push('production status → ' + (st || 'cleared'));
+      // master PO marked shipped → its shipment advances to Shipping (master POs only)
+      if (st === 'shipped') { const shref = await shipmentShippingFromMasterPO(pool, b.po); if (shref) out.applied.push('shipment ' + shref + ' → Shipping'); }
     }
     res.json(out);
   } catch (e) { res.status(500).json({ error: e.message }); }
