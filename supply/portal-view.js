@@ -1003,6 +1003,7 @@
                   +'<input type="date" class="sp-fob-cd" data-po="'+esc(po)+'" value="'+esc(cdVal)+'" title="pick your production end date — submitted for Dock &amp; Bay to approve" style="width:150px;text-align:left;font:inherit;font-size:12px;padding:4px 6px;border:1px solid #93c5fd;border-radius:4px;background:#eff6ff;color:#1d4ed8"></label>'
                   +(cdStatus?'<div class="tiny">'+cdStatus+(cd&&cd.status==='pending'?' — '+esc(fd(cd.value)):'')+'</div>':'')+'</div>';
                 var timeline='<div style="margin-top:10px;border-top:1px solid #f1f1f1;padding-top:8px">'
+                  +(EP.escalate?'<div style="margin-bottom:8px"><button class="save-btn sp-esc-fob" data-po="'+esc(po)+'" style="color:#b91c1c;border-color:#fca5a5;font-weight:600" title="flag this order to Dock &amp; Bay by email">⚑ Escalate to Dock &amp; Bay</button></div>':'')
                   +'<div style="font-weight:600;font-size:12px;margin-bottom:4px">Timeline <span class="mut tiny">(notes on this purchase order)</span></div>'
                   +'<div class="sp-fob-tl" data-po="'+esc(po)+'">'+fobTLHtml(po)+'</div>'
                   +'<div style="display:flex;gap:6px;align-items:flex-start;margin-top:6px"><textarea class="fci sp-fob-note-body" data-po="'+esc(po)+'" rows="2" placeholder="Add a note to the timeline… (multiple lines OK)" style="flex:1;max-width:560px;min-height:44px;text-align:left;resize:vertical;line-height:1.4"></textarea><button class="save-btn sp-fob-note-post" data-po="'+esc(po)+'">Post</button></div></div>';
@@ -1034,7 +1035,7 @@
                 +spBadge(s)+'<div style="font-weight:700;font-size:15px">'+esc(s.master_po)+'</div>'
                 +(/^fob$/i.test(s.mode||'')?'<span style="background:#ede9fe;color:#6d28d9;border-radius:10px;font-size:10px;font-weight:700;padding:2px 8px">📦 FOB</span>':'')
                 +'<span class="mut tiny">'+esc((s.mode||'—')+(s.carrier?' · '+s.carrier:''))+(s.departure?' · dep '+esc(fd(s.departure)):'')+(s.arrival?' · arr '+esc(fd(s.arrival)):'')+'</span>'
-                +(EP.shipmentEscalate?('<button class="save-btn pp-esc" data-ref="'+esc(s.shipment_ref)+'" data-on="'+(s.escalated?'1':'0')+'" style="margin-left:auto'+(s.escalated?';background:#dc2626;color:#fff;border-color:#dc2626':';color:#dc2626')+'">'+(s.escalated?'⚑ ESCALATED':'⚑ Escalate')+'</button>'):'')
+                +(s.escalated?'<span class="tool-badge bg-red" style="margin-left:auto">⚑ ESCALATED</span>':'')
                 +'</div>'
                 +'<div class="sp-body" style="display:none;padding:0 12px 12px">'+datesStrip+'<div style="margin-top:8px">'+members+'</div>'
                 +(s.members||[]).map(function(m){return dtcBlock(m.po);}).join('')
@@ -1048,13 +1049,17 @@
             fetch(EP.shipmentNotesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){ shortNotes(notes);
               var _supN=(notes||[]).filter(function(n){return n.author_kind==='supplier';});   // escalate only on the supplier's OWN latest note
               var recentSupId=_supN.length?_supN.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0].id:null;
-              box.innerHTML='<div style="font-weight:600;font-size:12px;margin-bottom:4px">Add timeline note</div>'
+              box.innerHTML=(EP.escalate?'<div style="margin-bottom:10px"><button class="save-btn sp-esc-ship" data-ref="'+esc(ref)+'" style="color:#b91c1c;border-color:#fca5a5;font-weight:600" title="flag this shipment to Dock &amp; Bay by email — sends your latest note (or a general alert)">⚑ Escalate to Dock &amp; Bay</button></div>':'')
+                +'<div style="font-weight:600;font-size:12px;margin-bottom:4px">Add timeline note</div>'
                 +'<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:10px"><textarea class="fci sp-note-in" rows="3" placeholder="Add a note to the timeline… (multiple lines OK)" style="flex:1;max-width:560px;min-height:58px;text-align:left;resize:vertical;line-height:1.4"></textarea><button class="save-btn sp-note-post" style="flex:0 0 auto">Post</button></div>'
                 +'<div class="tiny" style="font-weight:600;margin-bottom:3px">Timeline</div>'
-                +((notes&&notes.length)?tlDesc(notes).map(function(n){ var escBtn=(EP.escalate&&n.id===recentSupId)?'<button class="save-btn light sp-esc-note" data-ref="'+esc(ref)+'" data-msg="'+esc(n.body)+'" title="Escalate this message to Dock & Bay by email" style="flex:0 0 auto;color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'';
-                  return '<div class="tiny" style="margin:2px 0;max-width:640px;display:flex;gap:8px;align-items:flex-start">'+(escBtn?'<div style="flex:0 0 auto;min-width:78px">'+escBtn+'</div>':'')+'<div style="flex:1"><span class="mut">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span> — '+esc(n.body)+'</div></div>';}).join(''):'<div class="mut tiny">No timeline entries yet.</div>');
-              var _se=box.querySelector('.sp-esc-note'); if(_se)_se.onclick=function(){ var msg=_se.dataset.msg||''; if(!msg)return; if(!confirm('Escalate this message to Dock & Bay by email?'))return; _se.disabled=true; _se.textContent='Sending…';
-                postJSON(EP.escalate,{kind:'shipment',ref:_se.dataset.ref,message:msg,initiator:'supplier'},function(j){ _se.textContent='✓ Escalated'; if(j&&j.sandbox)alert('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); };
+                +((notes&&notes.length)?tlDesc(notes).map(function(n){
+                  return '<div class="tiny" style="margin:2px 0;max-width:640px"><span class="mut">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span> — '+esc(n.body)+'</div>';}).join(''):'<div class="mut tiny">No timeline entries yet.</div>');
+              var _se=box.querySelector('.sp-esc-ship'); if(_se)_se.onclick=function(){ if(!confirm('Escalate this shipment to Dock & Bay by email?'))return;
+                var _ln=(notes||[]).filter(function(n){return n.author_kind==='supplier';}).sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0];
+                var msg=(_ln&&_ln.body)||('Escalation requested for shipment '+ref);
+                _se.disabled=true; _se.textContent='Sending…';
+                postJSON(EP.escalate,{kind:'shipment',ref:ref,message:msg,initiator:'supplier'},function(j){ _se.textContent='✓ Escalated'; if(j&&j.sandbox)alert('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); };
               // opening the timeline marks Dock&Bay notes read → clears this shipment's notification
               var ent=(_ppData.shipmentPlan||[]).filter(function(x){return x.shipment_ref===ref;})[0];
               if(EP.shipmentNotesRead&&ent&&(ent.unread_dnb||0)>0){ postJSON(EP.shipmentNotesRead,{shipment_ref:ref},function(){ ent.unread_dnb=0; setShipBadge(); var bd=rootEl.querySelector('.sp-shipbadge[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(bd)bd.innerHTML=''; }); }
@@ -1263,6 +1268,12 @@
                 inp.onchange=function(){ var v=inp.value; if(!/^\d{4}-\d{2}-\d{2}$/.test(v))return; clearTimeout(t); inp.style.borderColor='#f59e0b';
                   t=setTimeout(function(){ postJSON(EP.submit,{po:inp.dataset.po,supplier_id:_sid,submitted_by:by,completion_date:v},function(){ inp.style.borderColor='#16a34a';
                     (_ppData.subsByPo=_ppData.subsByPo||{}); (_ppData.subsByPo[inp.dataset.po]=_ppData.subsByPo[inp.dataset.po]||[]).push({kind:'completion_date',value:v,status:'pending'}); }); },800); }; });
+              // FOB cards: escalate the ORDER (no shipment record) to Dock & Bay by email
+              body.querySelectorAll('.sp-esc-fob').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Escalate this order to Dock & Bay by email?'))return; var po=btn.dataset.po;
+                var _ln=((_ppData.notesByPo&&_ppData.notesByPo[po])||[]).filter(function(n){return n.author_kind==='supplier';}).slice(-1)[0];
+                var msg=(_ln&&_ln.body)||('Escalation requested for '+po);
+                btn.disabled=true; btn.textContent='Sending…';
+                postJSON(EP.escalate,{kind:'po',ref:po,message:msg,initiator:'supplier'},function(j){ btn.textContent='✓ Escalated'; if(j&&j.sandbox)alert('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); }; });
               // FOB cards: timeline note → PO note (author supplier)
               body.querySelectorAll('.sp-fob-note-post').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po, ta=body.querySelector('.sp-fob-note-body[data-po="'+(window.CSS&&CSS.escape?CSS.escape(po):po)+'"]'); var v=ta?(ta.value||'').trim():''; if(!v)return; btn.disabled=true;
                 postJSON(EP.note,{po:po,supplier_id:_sid,body:v,author_kind:'supplier',author_email:by},function(){ btn.disabled=false;

@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.494 - Portal Shipment Plan: prominent Escalate on every card (incl FOB), above the timeline box
+
+The escalate control was a preview-only flag button tucked in the card header and absent on FOB (and not
+wired on the live portal at all). Replaced with a prominent "⚑ Escalate to Dock & Bay" button at the top of
+the timeline section — on every card. It emails D&B (via /api/portal/escalate, which works for any ref):
+real shipments escalate as kind=shipment, FOB entries as kind=po (no shipment record). Sends the supplier's
+latest note as the message, else a general alert. Removed the per-note escalate + header flag button; the
+red "⚑ ESCALATED" badge still shows if the shipment is flagged. No migration.
+
 ## v25.493 - Portal ORDER PLAN Additional costs: fixed table layout (no overlapping inputs)
 
 Root cause of the "floating qty": the Additional costs table used auto layout inside the expanded detail row,
