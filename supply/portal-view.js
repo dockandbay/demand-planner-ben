@@ -35,7 +35,11 @@
   // supplier production status — the supplier maintains this; an exception flags a status that conflicts with the dates
   var PROD_STATUS=[['not_started','Not started'],['in_production','In production'],['ready_to_ship','Ready to ship'],['shipped','Shipped']];
   function prodStatusLabel(v){ var m=PROD_STATUS.filter(function(o){return o[0]===v;}); return m.length?m[0][1]:''; }
-  function prodStatusSel(po,val){ return '<select class="fci pp-prod" data-po="'+esc(po)+'" style="font-size:11px;text-align:left;width:130px;min-width:0"><option value=""'+(val?'':' selected')+'>—</option>'
+  // production-status colour coding: —/not started grey, in production blue, ready to ship amber, shipped green
+  var PROD_STATUS_COL={'':['#f1f5f9','#64748b','#e2e8f0'],not_started:['#f1f5f9','#64748b','#e2e8f0'],in_production:['#dbeafe','#1d4ed8','#93c5fd'],ready_to_ship:['#fef3c7','#92710a','#fcd34d'],shipped:['#dcfce7','#15803d','#86efac']};
+  function prodStatusStyle(v){ var c=PROD_STATUS_COL[v||'']||PROD_STATUS_COL['']; return 'background:'+c[0]+';color:'+c[1]+';border:1px solid '+c[2]+';font-weight:600'; }
+  function paintProdSel(el){ if(!el)return; var c=PROD_STATUS_COL[el.value||'']||PROD_STATUS_COL['']; el.style.background=c[0]; el.style.color=c[1]; el.style.borderColor=c[2]; el.style.fontWeight='600'; }
+  function prodStatusSel(po,val){ return '<select class="fci pp-prod" data-po="'+esc(po)+'" style="font-size:11px;text-align:left;width:130px;min-width:0;'+prodStatusStyle(val)+'"><option value=""'+(val?'':' selected')+'>—</option>'
     +PROD_STATUS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'; }
   function prodStatusException(ps, prodStart, prodEnd){ ps=ps||''; var today=new Date().toISOString().slice(0,10);
     if((ps===''||ps==='not_started') && prodStart && prodStart<today) return 'Past production start ('+fd(prodStart)+') but status is '+(ps?prodStatusLabel(ps):'not set');
@@ -1512,7 +1516,7 @@
             // production status changed (from the grid row OR the Timeline tab) → update _ppData, sync BOTH
             // selects + the badge in place, and refresh the open card so its ⚠ indicator reflects. No reload.
             function applyProdStatus(po,val){ var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; if(p)p.production_status=val;
-              body.querySelectorAll('.pp-prod[data-po="'+CSS.escape(po)+'"]').forEach(function(s){ s.value=val; s.disabled=false; });
+              body.querySelectorAll('.pp-prod[data-po="'+CSS.escape(po)+'"]').forEach(function(s){ s.value=val; s.disabled=false; paintProdSel(s); });
               setManageBadge(po);
               var ex=body.querySelector('tr[id^="pp-"][data-po="'+CSS.escape(po)+'"]');
               if(ex && ex.dataset.built && ex.style.display!=='none') rerenderRow(ex,po); }
@@ -1670,7 +1674,7 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                 postJSON(EP.addlCostRemove,{id:id},function(){  if(_ppData.addByPo[po])_ppData.addByPo[po]=_ppData.addByPo[po].filter(function(x){return String(x.id)!==String(id);}); rerenderRow(row,po,'orderplan'); }); }; });
               // supplier production status dropdown (grid AND timeline share class .pp-prod) → save + sync BOTH
               // selects + badge in place (no reload, no full-cell flash from the grid)
-              scope.querySelectorAll('.pp-prod').forEach(function(sel){ sel.onchange=function(){ var po=sel.dataset.po, val=sel.value; sel.disabled=true;
+              scope.querySelectorAll('.pp-prod').forEach(function(sel){ paintProdSel(sel); sel.onchange=function(){ var po=sel.dataset.po, val=sel.value; paintProdSel(sel); sel.disabled=true;
                 postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,production_status:val},function(){ applyProdStatus(po,val); }); }; });
               scope.querySelectorAll('.pp-ownship').forEach(function(cb){ cb.onchange=function(){ var bx=scope.querySelector('.pp-ownship-box[data-po="'+cb.dataset.po+'"]'); if(bx)bx.style.display=cb.checked?'':'none'; }; });
               scope.querySelectorAll('.pp-trk-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po; var t=pick('pp-trk',po).value, cc=pick('pp-car',po).value; if(!t&&!cc){ alert('Pick a carrier and/or enter a tracking ref.'); return; } var fcEl=pick('pp-fcost-new',po); var fc=fcEl?Number(fcEl.value)||0:0; btn.disabled=true;
