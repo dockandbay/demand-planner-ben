@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.481 - Supplier portal Barcodes: add INNER barcode download
+
+Added the missing INNER option to the portal Barcodes tab: a batch-level "⤓ Download inner barcodes"
+button, plus an Inner barcode column + per-SKU "⤓ Inner" download in the SKU list (shown when the SKU has
+an inner barcode). No migration.
+
 ## v25.480 - Supplier portal Barcodes: per-SKU list + filter
 
 On the supplier portal Barcodes tab, selecting a batch now shows a list of every SKU in that batch —

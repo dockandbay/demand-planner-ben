@@ -1274,7 +1274,8 @@
                 +'<select class="fci pp-bc-batch" style="width:auto;min-width:150px;max-width:240px;text-align:left"><option value="">Select a batch…</option>'
                 +batches.map(function(b){return '<option'+(b===PORTAL_BC_BATCH?' selected':'')+'>'+esc(b)+'</option>';}).join('')+'</select>'
                 +'<button class="save-btn pp-bc-dl-prod"'+dis+'>⤓ Download product barcodes</button>'
-                +'<button class="save-btn pp-bc-dl-carton"'+dis+'>⤓ Download carton barcodes</button></div>';
+                +'<button class="save-btn pp-bc-dl-carton"'+dis+'>⤓ Download carton barcodes</button>'
+                +'<button class="save-btn pp-bc-dl-inner"'+dis+'>⤓ Download inner barcodes</button></div>';
               var help = batches.length ? (picked
                   ? '<div class="count" style="margin:2px 0 8px">Barcodes cover every product on your order-plan lines for POs in batch <b>'+esc(PORTAL_BC_BATCH)+'</b>.</div>'
                   : '<div class="count" style="margin:2px 0 8px">Select a batch to enable the downloads.</div>')
@@ -1293,6 +1294,7 @@
                   BC.sheets(rows,[kind],'batch_'+PORTAL_BC_BATCH+'_'+kind+'_barcodes.zip',btn); }).catch(function(){alert('Could not load barcodes');btn.disabled=false;}); }
               var bp=body.querySelector('.pp-bc-dl-prod'); if(bp)bp.onclick=function(){ bcBatchDl('product',bp); };
               var bc=body.querySelector('.pp-bc-dl-carton'); if(bc)bc.onclick=function(){ bcBatchDl('carton',bc); };
+              var bi=body.querySelector('.pp-bc-dl-inner'); if(bi)bi.onclick=function(){ bcBatchDl('inner',bi); };
               if(picked){
                 var _bkey='__'+PORTAL_BC_BATCH;
                 function renderBcList(rows){ var listEl=body.querySelector('#pp-bc-list'); if(!listEl)return;
@@ -1303,14 +1305,16 @@
                   if(!f.length){ listEl.innerHTML='<div class="count">No SKUs match &ldquo;'+esc(PORTAL_BC_Q)+'&rdquo;.</div>'; return; }
                   var mono='font-family:ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap';
                   listEl.innerHTML='<div class="count" style="margin:0 0 4px">'+f.length+' of '+rows.length+' SKUs</div>'
-                    +'<div class="tw"><table style="font-size:11px;width:auto"><thead><tr><th class="l"></th><th class="l">SKU</th><th class="l">Product barcode</th><th class="l">Carton barcode</th><th class="l">Download</th></tr></thead><tbody>'
+                    +'<div class="tw"><table style="font-size:11px;width:auto"><thead><tr><th class="l"></th><th class="l">SKU</th><th class="l">Product barcode</th><th class="l">Carton barcode</th><th class="l">Inner barcode</th><th class="l">Download</th></tr></thead><tbody>'
                     +f.map(function(r){ return '<tr><td class="l">'+(r.swatch_url?'<img src="'+esc(r.swatch_url)+'" loading="lazy" style="width:36px;height:36px;object-fit:cover;border-radius:4px;vertical-align:middle">':'')+'</td>'
                       +'<td class="l" style="white-space:nowrap"><b>'+esc(r.sku||'')+'</b>'+((r.barcode_sku_name||r.product_name)?'<div class="mut tiny" style="white-space:normal;max-width:220px">'+esc(r.barcode_sku_name||r.product_name)+'</div>':'')+'</td>'
                       +'<td class="l" style="'+mono+'">'+(r.product_barcode?esc(r.product_barcode):'<span class="mut">—</span>')+'</td>'
                       +'<td class="l" style="'+mono+'">'+(r.carton_barcode?esc(r.carton_barcode):'<span class="mut">—</span>')+'</td>'
+                      +'<td class="l" style="'+mono+'">'+(r.inner_barcode?esc(r.inner_barcode):'<span class="mut">—</span>')+'</td>'
                       +'<td class="l" style="white-space:nowrap">'
                         +(r.product_barcode?'<button class="save-btn light pp-bc-one" data-sku="'+esc(r.sku)+'" data-kind="product">⤓ Product</button> ':'')
-                        +(r.carton_barcode?'<button class="save-btn light pp-bc-one" data-sku="'+esc(r.sku)+'" data-kind="carton">⤓ Carton</button>':'')
+                        +(r.carton_barcode?'<button class="save-btn light pp-bc-one" data-sku="'+esc(r.sku)+'" data-kind="carton">⤓ Carton</button> ':'')
+                        +(r.inner_barcode?'<button class="save-btn light pp-bc-one" data-sku="'+esc(r.sku)+'" data-kind="inner">⤓ Inner</button>':'')
                       +'</td></tr>'; }).join('')
                     +'</tbody></table></div>';
                   listEl.querySelectorAll('.pp-bc-one').forEach(function(btn){ btn.onclick=function(){ if(BC.placeholder){BC.note();return;} var r=listEl._bySku[btn.dataset.sku]; if(!r)return; var kind=btn.dataset.kind; BC.sheets([r],[kind], r.sku+'_'+kind+'_barcode.zip', btn); }; });
