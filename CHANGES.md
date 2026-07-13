@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.503 - Fix: master PO recognises its own shipment; Shipping propagation reaches the master + preview
+
+Two fixes for the consolidated-shipment case (a master PO whose own shipment_ref is blank, with child POs
+pointing at it):
+- **Per-PO Shipments tab** no longer shows "No shipment assigned yet" for the master PO. The portal + admin
+  PO queries now derive `shipment` as shipment_ref OR the shipment whose master_po = this PO.
+- **Marking a shipment Shipping now advances ALL its POs** — children (shipment_ref=ref), the ref itself,
+  AND the master PO (whose shipment_ref was blank) — to SHIPPING with production_status='shipped'. Extracted
+  to a shared `propagateShippingToPOs()` helper, now also fired by the internal shipment update (so the CONFIG
+  portal preview and the admin status→Shipping behave the same as the supplier portal).
+
+No migration.
+
 ## v25.502 - Portal Shipment Plan: update box on top, ship→PO propagation, inherited dates, coloured status
 
 - **"📝 Update this shipment" box moved to the top** of each card, above the POs-on-board.

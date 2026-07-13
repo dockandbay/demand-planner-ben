@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.502';
+const APP_VERSION = 'v25.503';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1640,7 +1640,7 @@ app.get('/api/supply/:section', async (req, res) => {
             to_char(bal_due_date,'YYYY-MM-DD') balance_due,
             to_char(balance_due_date_overide,'YYYY-MM-DD') final_payment_due,   -- the "final payment due" override (priority for balance due)
             credit_days, credit_type,
-            coalesce(deposit_ref,'') deposit_ref, coalesce(shipment_ref,'') shipment,
+            coalesce(deposit_ref,'') deposit_ref, coalesce(nullif(shipment_ref,''), (SELECT s.shipment_ref FROM planner.shipments s WHERE s.master_po=calc4.po LIMIT 1), '') shipment,
             coalesce(sh_carrier,'') ship_carrier, coalesce(sh_carrier_ref,'') ship_carrier_ref,
             coalesce(client,'') client, coalesce(client_requirements,'') client_requirements,
             coalesce(sales_order_ref,'') sales_order_ref, coalesce(client_po_ref,'') client_po_ref,
@@ -4422,6 +4422,16 @@ app.post('/api/supply/po/:po/set-shipping', async (req, res) => {
     res.json({ updated: rows.length, pos: rows.map(x => x.po), shipment: r.shipment_ref || null });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Shared: advance every PO on a shipment still in PRODUCTION to SHIPPING + production_status 'shipped'.
+// Matches the shipment's children (shipment_ref=ref), the ref itself (self-master), and the shipment's
+// master_po (a master PO whose own shipment_ref is blank). Never re-opens completed/delivered POs.
+async function propagateShippingToPOs(ref) {
+  if (!ref) return 0;
+  return (await pool.query(`UPDATE planner.purchase_orders SET status='SHIPPING', production_status='shipped',
+    production_confirmed_at=coalesce(production_confirmed_at,now()), updated_at=now()
+    WHERE (shipment_ref=$1 OR po=$1 OR po=(SELECT master_po FROM planner.shipments WHERE shipment_ref=$1 LIMIT 1))
+      AND status ILIKE '%production%'`, [ref])).rowCount;
+}
 // Supplier edit — sets the name AND resolves supplier_id so payment terms / production lead apply.
 app.post('/api/supply/po/:po/supplier', async (req, res) => {
   const name = (req.body && req.body.supplier_name || '').trim() || null;
@@ -4779,6 +4789,8 @@ app.post('/api/supply/shipment/:ref', async (req, res) => {
     const up = await pool.query(`INSERT INTO planner.shipments (${cols.join(',')}) VALUES (${ph.join(',')})
       ON CONFLICT (shipment_ref) DO UPDATE SET ${upd}, updated_at=now() RETURNING (xmax = 0) AS inserted`, vals);
     if (up.rows[0] && up.rows[0].inserted) await noteShipmentCreated(pool, ref, authUser(req));
+    // status → Shipping advances the POs on board (same as the "→ set shipping" action / supplier portal)
+    if ((req.body || {}).status === 'Shipping') await propagateShippingToPOs(ref);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -6060,7 +6072,7 @@ const POS_SQL_PORTAL = `
     completion_calc, round(pay_completion_assigned,2) completion_assigned, to_char(pay_completion_date,'YYYY-MM-DD') completion_date,
     round(pay_balance_1_amount,2) balance_1_amount, to_char(pay_balance_1_date,'YYYY-MM-DD') balance_1_date,
     to_char(bal_due_date,'YYYY-MM-DD') balance_due,
-    coalesce(deposit_ref,'') deposit_ref, coalesce(shipment_ref,'') shipment,
+    coalesce(deposit_ref,'') deposit_ref, coalesce(nullif(shipment_ref,''), (SELECT s.shipment_ref FROM planner.shipments s WHERE s.master_po=calc4.po LIMIT 1), '') shipment,
     -- "Ships With" for the portal: the shipment this PO rides on + that shipment's master-PO supplier. Computed
     -- server-side because the admin app derives it client-side from ALL POs, which the supplier-scoped portal
     -- can't see — so without this the portal's Ships With column was always blank.
@@ -7148,13 +7160,9 @@ app.post('/api/portal/shipment/:ref', portalAuth, async (req, res) => {
     const upd = cols.slice(1).map(c => `${c}=excluded.${c}`).join(',');
     await pool.query(`INSERT INTO planner.shipments (${cols.join(',')}) VALUES (${ph.join(',')})
       ON CONFLICT (shipment_ref) DO UPDATE SET ${upd}, updated_at=now()`, vals);
-    // Supplier marked the shipment Shipping → advance every PO on board still in PRODUCTION to SHIPPING
-    // (production done + shipped). Mirrors the internal "→ set shipping" action; scoped to this shipment.
-    if (b.status === 'Shipping') {
-      await pool.query(`UPDATE planner.purchase_orders SET status='SHIPPING', production_status='shipped',
-        production_confirmed_at=coalesce(production_confirmed_at,now()), updated_at=now()
-        WHERE shipment_ref=$1 AND status ILIKE '%production%'`, [ref]);
-    }
+    // Supplier marked the shipment Shipping → advance every PO on board (incl. the master) still in
+    // PRODUCTION to SHIPPING + production_status 'shipped'. Mirrors the internal "→ set shipping" action.
+    if (b.status === 'Shipping') await propagateShippingToPOs(ref);
     if (dateChanged) {
       const who = (req.portal.suppliers && req.portal.suppliers[0]) || 'The supplier';
       try { await pool.query(`INSERT INTO planner.shipment_notes (shipment_ref, author_kind, author_email, body)
