@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.495 - Portal Shipment Plan: "Escalate shipment" button + per-note "Flag"
+
+Renamed the top button to "⚑ Escalate shipment" (sends a shipment-level escalation email). Restored a
+per-note "⚑ Flag" button on the supplier's latest timeline note — emails that specific note to the supply
+planner recipients. Both route through /api/portal/escalate. No migration.
+
 ## v25.494 - Portal Shipment Plan: prominent Escalate on every card (incl FOB), above the timeline box
 
 The escalate control was a preview-only flag button tucked in the card header and absent on FOB (and not
