@@ -477,6 +477,8 @@
     var PORTAL_PO_Q='';   // Purchase Orders search (overrides the status pills)
     var PORTAL_PO_PROD='', PORTAL_PO_CTRY='', PORTAL_PO_BR='';   // Purchase Orders dropdown filters (Production / Country / Branch)
     var PORTAL_BC_BATCH='';   // Barcodes tab: selected batch id
+    var PORTAL_BC_Q='';       // Barcodes tab: per-SKU filter text
+    var _bcRowsCache={};      // Barcodes tab: batch → fetched label-data rows (avoid refetch on filter/re-render)
     var _ppShowAllPO=false, _ppShowAllSP=false;   // "show all" toggles for the capped PO / shipment grids
     var PORTAL_SAMP_F='open', PORTAL_SAMP_Q='';   // Samples grid filter + search (default: open)
     var _invFiles={};     // base64 of the last parsed invoice file, per PO (for the Apply step)
@@ -1277,14 +1279,48 @@
                   ? '<div class="count" style="margin:2px 0 8px">Barcodes cover every product on your order-plan lines for POs in batch <b>'+esc(PORTAL_BC_BATCH)+'</b>.</div>'
                   : '<div class="count" style="margin:2px 0 8px">Select a batch to enable the downloads.</div>')
                 : '<div class="count" style="margin:2px 0 8px">No batches are assigned to your purchase orders yet.</div>';
-              body.innerHTML=note+picker+help;
-              var bsel=body.querySelector('.pp-bc-batch'); if(bsel)bsel.onchange=function(){ PORTAL_BC_BATCH=this.value; renderPP(); };
+              // when a batch is picked: a filter box + a per-SKU list (picture · SKU · barcode numbers · per-SKU download)
+              var listBlock = picked
+                ? '<div class="bar" style="gap:8px;margin:10px 0 4px;align-items:center"><span class="pill-lbl">Filter</span>'
+                  +'<input class="fci pp-bc-q" placeholder="search SKU / name…" value="'+esc(PORTAL_BC_Q)+'" style="width:240px;text-align:left"></div>'
+                  +'<div id="pp-bc-list"><div class="count">Loading…</div></div>'
+                : '';
+              body.innerHTML=note+picker+help+listBlock;
+              var bsel=body.querySelector('.pp-bc-batch'); if(bsel)bsel.onchange=function(){ PORTAL_BC_BATCH=this.value; PORTAL_BC_Q=''; renderPP(); };
               function bcBatchDl(kind,btn){ if(!PORTAL_BC_BATCH)return; if(BC.placeholder){BC.note();return;} btn.disabled=true;
                 fetch(EP.labelData+'?batch='+encodeURIComponent(PORTAL_BC_BATCH)+'&supplier='+encodeURIComponent(STATE.supplierName)).then(function(r){return r.json();}).then(function(rows){ btn.disabled=false;
                   if(rows&&rows.error){alert(rows.error);return;} if(!rows||!rows.length){alert('No '+kind+' barcodes found for batch '+PORTAL_BC_BATCH);return;}
                   BC.sheets(rows,[kind],'batch_'+PORTAL_BC_BATCH+'_'+kind+'_barcodes.zip',btn); }).catch(function(){alert('Could not load barcodes');btn.disabled=false;}); }
               var bp=body.querySelector('.pp-bc-dl-prod'); if(bp)bp.onclick=function(){ bcBatchDl('product',bp); };
               var bc=body.querySelector('.pp-bc-dl-carton'); if(bc)bc.onclick=function(){ bcBatchDl('carton',bc); };
+              if(picked){
+                var _bkey='__'+PORTAL_BC_BATCH;
+                function renderBcList(rows){ var listEl=body.querySelector('#pp-bc-list'); if(!listEl)return;
+                  if(!rows.length){ listEl.innerHTML='<div class="count">No barcodes found for this batch.</div>'; return; }
+                  var q=(PORTAL_BC_Q||'').trim().toLowerCase();
+                  var f=q?rows.filter(function(r){ return (String(r.sku||'')+' '+String(r.barcode_sku_name||r.product_name||'')).toLowerCase().indexOf(q)>=0; }):rows;
+                  var bySku={}; rows.forEach(function(r){ bySku[r.sku]=r; }); listEl._bySku=bySku;
+                  if(!f.length){ listEl.innerHTML='<div class="count">No SKUs match &ldquo;'+esc(PORTAL_BC_Q)+'&rdquo;.</div>'; return; }
+                  var mono='font-family:ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap';
+                  listEl.innerHTML='<div class="count" style="margin:0 0 4px">'+f.length+' of '+rows.length+' SKUs</div>'
+                    +'<div class="tw"><table style="font-size:11px;width:auto"><thead><tr><th class="l"></th><th class="l">SKU</th><th class="l">Product barcode</th><th class="l">Carton barcode</th><th class="l">Download</th></tr></thead><tbody>'
+                    +f.map(function(r){ return '<tr><td class="l">'+(r.swatch_url?'<img src="'+esc(r.swatch_url)+'" loading="lazy" style="width:36px;height:36px;object-fit:cover;border-radius:4px;vertical-align:middle">':'')+'</td>'
+                      +'<td class="l" style="white-space:nowrap"><b>'+esc(r.sku||'')+'</b>'+((r.barcode_sku_name||r.product_name)?'<div class="mut tiny" style="white-space:normal;max-width:220px">'+esc(r.barcode_sku_name||r.product_name)+'</div>':'')+'</td>'
+                      +'<td class="l" style="'+mono+'">'+(r.product_barcode?esc(r.product_barcode):'<span class="mut">—</span>')+'</td>'
+                      +'<td class="l" style="'+mono+'">'+(r.carton_barcode?esc(r.carton_barcode):'<span class="mut">—</span>')+'</td>'
+                      +'<td class="l" style="white-space:nowrap">'
+                        +(r.product_barcode?'<button class="save-btn light pp-bc-one" data-sku="'+esc(r.sku)+'" data-kind="product">⤓ Product</button> ':'')
+                        +(r.carton_barcode?'<button class="save-btn light pp-bc-one" data-sku="'+esc(r.sku)+'" data-kind="carton">⤓ Carton</button>':'')
+                      +'</td></tr>'; }).join('')
+                    +'</tbody></table></div>';
+                  listEl.querySelectorAll('.pp-bc-one').forEach(function(btn){ btn.onclick=function(){ if(BC.placeholder){BC.note();return;} var r=listEl._bySku[btn.dataset.sku]; if(!r)return; var kind=btn.dataset.kind; BC.sheets([r],[kind], r.sku+'_'+kind+'_barcode.zip', btn); }; });
+                }
+                if(_bcRowsCache[_bkey]) renderBcList(_bcRowsCache[_bkey]);
+                else fetch(EP.labelData+'?batch='+encodeURIComponent(PORTAL_BC_BATCH)+'&supplier='+encodeURIComponent(STATE.supplierName)).then(function(r){return r.json();}).then(function(rows){
+                  if(rows&&rows.error){ var le=body.querySelector('#pp-bc-list'); if(le)le.innerHTML='<div class="count">'+esc(rows.error)+'</div>'; return; }
+                  _bcRowsCache[_bkey]=rows||[]; renderBcList(_bcRowsCache[_bkey]); }).catch(function(){ var le=body.querySelector('#pp-bc-list'); if(le)le.innerHTML='<div class="count">Could not load barcodes.</div>'; });
+                var qi=body.querySelector('.pp-bc-q'); if(qi)qi.oninput=function(){ PORTAL_BC_Q=this.value; if(_bcRowsCache[_bkey]) renderBcList(_bcRowsCache[_bkey]); };
+              }
               return; }
             // POs tab — status pill filters; default to PRODUCTION + SHIPPING
             var seen={}, present=[]; _ppData.pos.forEach(function(p){ var s=(p.status||'').toUpperCase(); if(s&&!seen[s]){seen[s]=1;present.push(s);} });

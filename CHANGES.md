@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.480 - Supplier portal Barcodes: per-SKU list + filter
+
+On the supplier portal Barcodes tab, selecting a batch now shows a list of every SKU in that batch —
+swatch picture, SKU (+ name), product barcode number, carton barcode number — each with per-SKU download
+buttons (Product / Carton). Added a filter box above the list so a supplier can find and download barcodes
+for specific SKUs. The existing batch-level "download all product/carton" buttons remain. No migration.
+
 ## v25.479 - Barcodes page + carton/inner label tweaks
 
 - Barcodes grid search box: paste now filters (added an onpaste handler — paste didn't reliably fire input).
