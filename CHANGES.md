@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.499 - Portal: larger black timeline message text; faster FLAG tooltip
+
+- Shipment-plan timeline messages (both real-shipment and FOB timelines) now render the message body at
+  13px in near-black (#1a1a1a) via a shared `.tl-msg` class, instead of the tiny 9.5px grey-ish text. The
+  timestamp/author line stays small and muted.
+- The per-note "⚑ Flag" tooltip is now a CSS tooltip that appears after 120ms (instead of the slow native
+  browser `title` delay). Applied to all Flag buttons via a shared `.tip` class + `data-tip`.
+
+No migration.
+
 ## v25.498 - "Escalate shipment" posts a timeline note + emails supply chain; red focus star
 
 Two changes:
