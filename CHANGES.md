@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.512 - Fix: portal PO query never returned production_status (dropdown always blank)
+
+Root cause of "production status blank in the supplier portal": POS_SQL_PORTAL never selected
+`production_status`, so the portal PO grid + timeline dropdown always rendered blank regardless of the DB
+value. Added `coalesce(production_status,'') production_status` to the final projection (the admin PO query
+already had it). **Requires a live deploy** to take effect on the live portal — the migration 117 data fix
+alone isn't visible until this code is deployed.
+
 ## v25.511 - Migration 117 fix: exclude "READY TO SHIP" from the shipped backfill
 
 Corrected migration 117 to use `status ILIKE 'ship%'` (not `'%ship%'`) so it no longer catches

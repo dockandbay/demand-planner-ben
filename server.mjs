@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.511';
+const APP_VERSION = 'v25.512';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -6073,6 +6073,7 @@ const POS_SQL_PORTAL = `
       + (coalesce(credit_days,0)||' days')::interval)::date) bal_due_date FROM calc3
   )
   SELECT po, supplier_name, status,
+    coalesce(production_status,'') production_status,   -- portal PO grid + timeline production-status dropdown (was never selected → always blank)
     to_char(start_production,'YYYY-MM-DD') prod_start,
     to_char(eff_prod_end,'YYYY-MM-DD') prod_end,
     to_char(end_production_overide,'YYYY-MM-DD') prod_completion_date,   -- production completion (was aliased 'completion_date', shadowed by the payment one below)
