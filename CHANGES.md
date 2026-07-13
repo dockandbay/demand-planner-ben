@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.492 - Portal PAYMENTS: only show CONFIRMED (dated) payments
+
+The portal PAYMENTS tab showed the calculated Starting deposit / Completion deposit / Balance milestones even
+before a paid date was assigned — projections, not payments. Now each milestone row only renders once it has
+a paid date (confirmed); shows "No payments recorded yet." when none are. Total invoice value row unchanged.
+No migration.
+
 ## v25.491 - Portal ORDER PLAN Additional costs: wrap table + force-static detail headers
 
 Wrapped the Additional costs table in the standard `.tw` container (max 540px) so it can't bleed out, and

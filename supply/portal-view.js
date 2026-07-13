@@ -816,9 +816,12 @@
           +'<thead><tr>'
           +'<th class="l" style="padding:3px 10px 3px 0">Milestone</th><th class="l" style="padding:3px 10px 3px 0">Amount</th><th class="l" style="padding:3px 10px 3px 0">Date</th><th class="l">Deposit reference</th></tr></thead><tbody>'
         +_prow('Total invoice value', p.supplier_invoice_total, p.balance_due, '')
-        +_prow('Starting deposit', startAmt, p.start_date, p.deposit_ref)
-        +_prow('Completion deposit', compAmt, p.completion_date, '')
-        +_prow('Balance payment', balAmt, p.balance_1_date, '')
+        // only show a deposit/balance milestone once it's a CONFIRMED payment (a paid date is set) — the
+        // calculated-but-undated amounts are projections, not payments to show the supplier
+        +(p.start_date?_prow('Starting deposit', startAmt, p.start_date, p.deposit_ref):'')
+        +(p.completion_date?_prow('Completion deposit', compAmt, p.completion_date, ''):'')
+        +(p.balance_1_date?_prow('Balance payment', balAmt, p.balance_1_date, ''):'')
+        +((!p.start_date&&!p.completion_date&&!p.balance_1_date)?'<tr><td class="l mut" colspan="4" style="padding:4px 0">No payments recorded yet.</td></tr>':'')
         +'</tbody></table>'
         +'<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">'+ppCard('Amount paid','$'+units(paidTot))+ppCard('Amount due',dueTot!=null?'$'+units(dueTot):'—')+'</div>'
         +'<div class="tiny mut" style="margin-top:6px">Total invoice value shows its payment due date. Amounts/dates are the deposit &amp; balance milestones from your PO.</div>';
