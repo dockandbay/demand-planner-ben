@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.510 - Migration 117: backfill production_status='shipped' for completed/delivered POs
+
+Added `migrations/117_completed_delivered_prodstatus_shipped.sql` — extends migration 115 (which covered
+SHIPPING only) to also set production_status='shipped' for POs whose status is COMPLETED or DELIVERED (and
+SHIPPED/SHIPPING). Idempotent, safe to re-run. **Run on live** (Diviyaj) as part of the next deploy. No code change.
+
 ## v25.509 - Portal: master PO marked 'shipped' → its shipment advances to Shipping
 
 - When a supplier sets a **master PO's** production status to **shipped**, its shipment is now advanced to
