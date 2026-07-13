@@ -3,6 +3,8 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.507 - Portal: swap production-status colours (In production amber, Ready to ship blue)
+
 ## v25.506 - Portal: colour-coded production status dropdowns (PO grid + timeline)
 
 The supplier-portal production-status dropdown (shared by the Purchase Orders grid and the Timeline sub-tab)

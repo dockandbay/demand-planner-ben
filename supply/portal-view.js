@@ -35,8 +35,8 @@
   // supplier production status — the supplier maintains this; an exception flags a status that conflicts with the dates
   var PROD_STATUS=[['not_started','Not started'],['in_production','In production'],['ready_to_ship','Ready to ship'],['shipped','Shipped']];
   function prodStatusLabel(v){ var m=PROD_STATUS.filter(function(o){return o[0]===v;}); return m.length?m[0][1]:''; }
-  // production-status colour coding: —/not started grey, in production blue, ready to ship amber, shipped green
-  var PROD_STATUS_COL={'':['#f1f5f9','#64748b','#e2e8f0'],not_started:['#f1f5f9','#64748b','#e2e8f0'],in_production:['#dbeafe','#1d4ed8','#93c5fd'],ready_to_ship:['#fef3c7','#92710a','#fcd34d'],shipped:['#dcfce7','#15803d','#86efac']};
+  // production-status colour coding: —/not started grey, in production amber, ready to ship blue, shipped green
+  var PROD_STATUS_COL={'':['#f1f5f9','#64748b','#e2e8f0'],not_started:['#f1f5f9','#64748b','#e2e8f0'],in_production:['#fef3c7','#92710a','#fcd34d'],ready_to_ship:['#dbeafe','#1d4ed8','#93c5fd'],shipped:['#dcfce7','#15803d','#86efac']};
   function prodStatusStyle(v){ var c=PROD_STATUS_COL[v||'']||PROD_STATUS_COL['']; return 'background:'+c[0]+';color:'+c[1]+';border:1px solid '+c[2]+';font-weight:600'; }
   function paintProdSel(el){ if(!el)return; var c=PROD_STATUS_COL[el.value||'']||PROD_STATUS_COL['']; el.style.background=c[0]; el.style.color=c[1]; el.style.borderColor=c[2]; el.style.fontWeight='600'; }
   function prodStatusSel(po,val){ return '<select class="fci pp-prod" data-po="'+esc(po)+'" style="font-size:11px;text-align:left;width:130px;min-width:0;'+prodStatusStyle(val)+'"><option value=""'+(val?'':' selected')+'>—</option>'
