@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.514 - FBA "Transfer FBA (non GRS)": demand-driven, not "send everything"
+
+The non-GRS transfer used to suggest ALL non-GRS stock in the market (e.g. 1,474 units regardless of FBA
+demand). It's now **demand-driven**: sized to forecast FBA demand over the FBA-target weeks minus current
+FBA cover (on-hand + inbound + AWD), capped by the available non-GRS pool. No 3PL protection cap (3PL never
+uses non-GRS stock). Refactored the shared sizing into `fbaTransferSized(sku, mkt, capUnits)` — the normal
+3PL transfer passes the 50%/Amazon-only cap, the non-GRS transfer passes the full non-GRS pool; identical
+demand + carton logic otherwise.
+
 ## v25.513 - FBA tab: highlight SOH FBA + SOH AWD columns light yellow
 
 On the buy-plan FBA view, the SOH FBA and SOH AWD columns (header + cells) now have a light-yellow

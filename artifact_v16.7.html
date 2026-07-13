@@ -1346,46 +1346,53 @@ function fbaFwdDemand(md,n){
 //  - Amazon-only SKUs (FBA available, DTC not): exempt from the 50% cap (3PL only feeds Amazon)
 //  - carton rounding off next-90-day FBA demand; skip if <70% of a carton
 //  - skip if the result is <20% of next-60-day FBA demand (defer to a fuller shipment)
+// Shared demand sizing: units to move to FBA now = forecast FBA demand over the FBA-target weeks minus
+// current FBA cover (on-hand + inbound + AWD), LIMITED by `capUnits` (the pool we're allowed to draw from),
+// then carton-rounded per FBA_CARTON_MODE. Callers set the cap: 50%-of-3PL for the normal 3PL transfer,
+// or the full non-GRS pool for the non-GRS transfer (3PL never uses non-GRS stock, so no 3PL cap there).
+function fbaTransferSized(sku,mkt,capUnits){
+  const pd=PD[sku];const md=pd&&pd.mkts&&pd.mkts[mkt];if(!md)return 0;
+  const cp=pd.cp||1;
+  const iF=md['if_']||0, oof=md.oof||0;
+  const awd=awdOf(sku,mkt);   // AWD (US upstream) + inbound-to-AWD counts as FBA cover — same pool for the calc
+  const fbw=parseInt(document.getElementById('fbw')?.value)||8;
+  const targetMonths=Math.max(1,Math.round(fbw/4.33));
+  const target=fbaFwdDemand(md,targetMonths);
+  const need=Math.max(0,target-(iF+oof+awd));   // FBA shortfall vs the target — this is the demand-driven ceiling
+  if(need<=0)return 0;
+  let base=Math.min(need,Math.max(capUnits,0));
+  if(base<=0)return 0;
+  const d90=fbaFwdDemand(md,3), d60=fbaFwdDemand(md,2);
+  if(FBA_CARTON_MODE==='ANY')return Math.round(base);                 // full shortfall within cap, no rounding
+  if(FBA_CARTON_MODE==='PARTIAL'){ const q=Math.round(base); return q<0.2*d60?0:q; }   // raw, keep min-size floor
+  if(d90<0.7*cp)return 0;                                             // FULL: too small for a whole carton
+  const cartons=Math.min(Math.floor(base/cp),Math.floor(d90/cp));
+  const qty=cartons*cp;
+  if(qty<0.2*d60)return 0;                                            // below the 20% forward-demand floor
+  return qty;
+}
+// Recommended units to transfer 3PL -> FBA now, per the agreed rules:
+//  - size the shipment to forecast FBA demand over the FBA-target weeks (from the demand plan)
+//  - draw down BOTH 3PL and FBA toward balance; do NOT hold 3PL at full cover while FBA runs dry
+//  - dual-channel SKUs: never transfer more than 50% of 3PL on-hand (this is the website protection)
+//  - Amazon-only SKUs (FBA available, DTC not): exempt from the 50% cap (3PL only feeds Amazon)
+//  - carton rounding off next-90-day FBA demand; skip if <70% of a carton
+//  - skip if the result is <20% of next-60-day FBA demand (defer to a fuller shipment)
 function fbaTransferRec(sku,mkt){
   const pd=PD[sku];const md=pd&&pd.mkts&&pd.mkts[mkt];if(!md)return 0;
   const ch=md.ch||[];
   const amazonOnly=ch.includes('FBA')&&!ch.includes('DTC');
-  const cp=pd.cp||1;
-  const i3=md.i3||0, iF=md['if_']||0, oof=md.oof||0;
-  const awd=awdOf(sku,mkt);   // AWD (US upstream) + inbound-to-AWD counts as FBA cover — same pool for the calc
-  // Target FBA stock = forecast FBA demand over the FBA-target weeks; need = target minus FBA on-hand+inbound+AWD
-  const fbw=parseInt(document.getElementById('fbw')?.value)||8;
-  const targetMonths=Math.max(1,Math.round(fbw/4.33));
-  const target=fbaFwdDemand(md,targetMonths);
-  const need=Math.max(0,target-(iF+oof+awd));
-  if(need<=0)return 0;
+  const i3=md.i3||0;
   const cap=amazonOnly?Math.max(i3,0):Math.floor(0.5*Math.max(i3,0)); // 50% of 3PL unless Amazon-only
-  let base=Math.min(need,cap);
-  if(base<=0)return 0;
-  const d90=fbaFwdDemand(md,3), d60=fbaFwdDemand(md,2);
-  if(FBA_CARTON_MODE==='ANY'){
-    // ANY (default): the full shortfall within the 50% cap — no carton rounding, no min-size floor, so
-    // every SKU with real FBA need shows (nothing is filtered out by carton sizing).
-    return Math.round(base);
-  }
-  if(FBA_CARTON_MODE==='PARTIAL'){
-    // PARTIAL: ship the raw shortfall (within the 50% cap), no carton rounding. Keep the min-size floor.
-    const q=Math.round(base);
-    return q<0.2*d60?0:q;
-  }
-  // FULL (default): prioritise whole cartons where the 90-day FBA demand supports it.
-  if(d90<0.7*cp)return 0;                              // too small for a full carton
-  const cartons=Math.min(Math.floor(base/cp),Math.floor(d90/cp));
-  const qty=cartons*cp;
-  if(qty<0.2*d60)return 0;                             // below the 20% forward-demand floor
-  return qty;
+  return fbaTransferSized(sku,mkt,cap);
 }
 // Effective transfer = manual override if entered, else the recommendation.
 function fbaTransferEff(sku,mkt){
   const k=sku+'|'+mkt;
   if(FBA_OV[k]!=null&&FBA_OV[k]!=='')return parseInt(FBA_OV[k])||0;
-  // "Transfer FBA (non GRS)" mode: the transfer = all non-GRS stock in this market (the maximum to push to FBA)
-  if(BU_SEL==='TRFFBA_NG')return nonGrsOf(sku,mkt);
+  // "Transfer FBA (non GRS)" mode: demand-driven (sized to FBA need), drawn from the non-GRS pool.
+  // Cap = ALL non-GRS stock in this market (3PL never uses non-GRS stock, so no 3PL protection here).
+  if(BU_SEL==='TRFFBA_NG')return fbaTransferSized(sku,mkt,nonGrsOf(sku,mkt));
   return fbaTransferRec(sku,mkt);
 }
 
