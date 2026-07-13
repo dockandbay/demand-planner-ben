@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.513 - FBA tab: highlight SOH FBA + SOH AWD columns light yellow
+
+On the buy-plan FBA view, the SOH FBA and SOH AWD columns (header + cells) now have a light-yellow
+background (#fef9c3). Scoped to the FBA view — SOH FBA isn't highlighted in the other buy-plan views.
+
 ## v25.512 - Fix: portal PO query never returned production_status (dropdown always blank)
 
 Root cause of "production status blank in the supplier portal": POS_SQL_PORTAL never selected

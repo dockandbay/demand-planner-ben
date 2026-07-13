@@ -1614,8 +1614,8 @@ function render(){
       +(_MERGE?'<th style="min-width:58px">Launch<br>Disc</th>':'<th style="min-width:60px">Launch</th><th style="min-width:60px">Disc</th>')
       +'<th class="r" style="min-width:60px">SOH 3PL</th>'
       +(showNonGRS?'<th class="r" style="min-width:72px">SOH NON GRS</th>':'')
-      +'<th class="r" style="min-width:60px">SOH FBA</th>'
-      +(showAWD?'<th class="r" style="min-width:60px">SOH AWD</th>':'')
+      +'<th class="r" style="min-width:60px'+(BP_VIEW==='fba'?';background:#fef9c3':'')+'">SOH FBA</th>'
+      +(showAWD?'<th class="r" style="min-width:60px;background:#fef9c3">SOH AWD</th>':'')
       +'<th class="r" style="min-width:60px">On Order</th>';
     var _trail=(BP_VIEW==='fba')
       ? '<th class="r" style="min-width:54px">Carton<br>qty</th>'
@@ -1775,8 +1775,8 @@ function render(){
         <td class="dt">${discStr?`<span class="${st==='DISC'?'dt-disc':''}">${discStr}</span>`:''}</td>`}
         <td class="iv"><span class="iv-v ${i3<0?'iv-neg':'iv-pos'}">${fmt(i3)}</span></td>
         ${showNonGRS?`<td class="iv"><span class="iv-v" style="color:#475569" title="Non-GRS on-hand (sellable via 3PL; display only)">${(function(){var ng=nonGrsOf(s.s,CUR);return ng>0?fmt(ng):'—';})()}</span></td>`:''}
-        <td class="iv"><span class="iv-v ${ifv<0?'iv-neg':'iv-pos'}">${fmt(ifv)}</span></td>
-        ${showAWD?`<td class="iv"><span class="iv-v" style="color:#475569" title="AWD (US upstream) — pooled into FBA cover for the transfer calc">${(function(){var a=awdOf(s.s,CUR);return a>0?fmt(a):'—';})()}</span></td>`:''}
+        <td class="iv"${BP_VIEW==='fba'?' style="background:#fef9c3"':''}><span class="iv-v ${ifv<0?'iv-neg':'iv-pos'}">${fmt(ifv)}</span></td>
+        ${showAWD?`<td class="iv" style="background:#fef9c3"><span class="iv-v" style="color:#475569" title="AWD (US upstream) — pooled into FBA cover for the transfer calc">${(function(){var a=awdOf(s.s,CUR);return a>0?fmt(a):'—';})()}</span></td>`:''}
         <td class="iv"><span class="iv-v">${oo>0?fmt(oo):'—'}</span></td>
         ${trail}
       </tr>`;
