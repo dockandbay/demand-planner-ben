@@ -500,7 +500,11 @@
           return r.blob().then(function(b){ var u=URL.createObjectURL(b); var a=document.createElement('a'); a.href=u; a.download=fn; document.body.appendChild(a); a.click(); setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(u); },120); }); })
         .then(function(){ if(btn){ btn.disabled=false; btn.textContent=t; } })
         .catch(function(e){ if(btn){ btn.disabled=false; btn.textContent=t; } alert('Could not generate the invoice: '+(e&&e.message||e)); }); }
-    if(!rootEl._invBound){ rootEl._invBound=1; rootEl.addEventListener('click', function(e){ var b=e.target.closest('.pp-ship-inv,.pp-po-inv'); if(!b)return; e.preventDefault();
+    if(!rootEl._invBound){ rootEl._invBound=1; rootEl.addEventListener('click', function(e){
+      var fb=e.target.closest('.sp-fob-flag');   // FOB timeline "Flag" — delegated so it survives the note-list re-render
+      if(fb){ e.preventDefault(); if(!EP.escalate)return; var msg=fb.dataset.msg||''; if(!msg)return; if(!confirm('Email this note to the supply planner?'))return; fb.disabled=true; fb.textContent='Sending…';
+        postJSON(EP.escalate,{kind:'po',ref:fb.dataset.po,message:msg,initiator:'supplier'},function(j){ fb.textContent='✓ Flagged'; if(j&&j.sandbox)alert('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); return; }
+      var b=e.target.closest('.pp-ship-inv,.pp-po-inv'); if(!b)return; e.preventDefault();
       if(b.classList.contains('pp-ship-inv')) dlInvoice((EP.shipmentInvoice||'/api/invoice/shipment/')+encodeURIComponent(b.dataset.ref), b);
       else dlInvoice((EP.poInvoice||'/api/invoice/po/')+encodeURIComponent(b.dataset.po), b); }); }
     function postJSON(ep,b2,cb){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b2)}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} cb&&cb(j); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); }); }
@@ -687,7 +691,7 @@
         +(notes.length?tlDesc(notes).map(function(n){ var internal=(n.author_kind==='internal');
           var ctrl = internal
             ? (n.read?'<button class="pp-note-read" data-id="'+n.id+'" data-read="1" style="font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline;white-space:nowrap;background:none;border:none;padding:0">mark unread</button>':'<button class="save-btn light pp-note-read" data-id="'+n.id+'" data-read="0">Mark read</button>')
-            : ((EP.escalate&&n.id===_recentSupNoteId)?'<button class="save-btn light pp-esc-note" data-po="'+po+'" data-msg="'+esc(n.body)+'" title="Escalate this message to Dock & Bay by email" style="color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'');
+            : ((EP.escalate&&n.id===_recentSupNoteId)?'<button class="save-btn light pp-esc-note" data-po="'+po+'" data-msg="'+esc(n.body)+'" title="email this note to the supply planner" style="color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Flag</button>':'');
           return '<div style="font-size:11px;margin:3px 0;max-width:640px;padding:5px 8px;background:'+(internal?(n.read?'#eef2ff':'#fff7ed'):'#f1f5f9')+';border:1px solid '+(internal&&!n.read?'#fdba74':'#e5e7eb')+';border-radius:5px;display:flex;gap:10px;align-items:flex-start">'
             +(ctrl?'<div style="flex:0 0 auto;display:flex;flex-direction:column;gap:3px;align-items:flex-start;min-width:78px">'+ctrl+'</div>':'')
             +'<div style="flex:1"><span class="mut tiny">'+esc(n.created_at)+' · '+(internal?'Dock &amp; Bay':'You')+'</span>'+(internal&&!n.read?' <span class="ex-badge">new</span>':'')+'<br>'+esc(n.body)+'</div>'
@@ -950,7 +954,9 @@
       setTimeout(function(){URL.revokeObjectURL(url);a.remove();},150); }
           // FOB card timeline = notes on the PO itself (FOB has no shipment). Reuses the PO-notes store.
           function fobTLHtml(po){ var nts=(_ppData.notesByPo&&_ppData.notesByPo[po])||[];
-            return nts.length?nts.map(function(n){ return '<div class="tiny" style="margin:2px 0"><span class="mut">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span> — '+esc(n.body)+'</div>'; }).join(''):'<div class="mut tiny">No timeline entries yet.</div>'; }
+            var sup=nts.filter(function(n){return n.author_kind==='supplier';}); var recent=sup.length?sup.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0]:null;
+            return nts.length?nts.map(function(n){ var flag=(EP.escalate&&recent&&n===recent)?' <button class="save-btn light sp-fob-flag" data-po="'+esc(po)+'" data-msg="'+esc(n.body)+'" title="email this note to the supply planner" style="color:#b91c1c;border-color:#fca5a5;white-space:nowrap;font-size:10px;padding:0 5px">⚑ Flag</button>':'';
+              return '<div class="tiny" style="margin:2px 0"><span class="mut">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span> — '+esc(n.body)+flag+'</div>'; }).join(''):'<div class="mut tiny">No timeline entries yet.</div>'; }
           function ppShipmentPlan(rows){ rows=rows||[];
             if(!rows.length)return '<div class="count">No shipments for your orders yet.</div>';
             // a prominent "label / big value" cell for the dates & Flexport strip
@@ -1192,11 +1198,11 @@
               box.innerHTML=(notes&&notes.length)?tlDesc(notes).map(function(n){ var onBehalf=(n.author_kind==='supplier'&&n.author_email==='D&B'); var dnb=(n.author_kind!=='supplier'), nu=dnb&&!n.read;
                 var who=onBehalf?('D&amp;B as '+esc(STATE.supplierName||'supplier')):(dnb?'Dock &amp; Bay':'You');
                 var ctrl = nu ? '<button class="save-btn light ps-note-read" data-id="'+n.id+'" style="flex:0 0 auto">Mark read</button>'
-                              : ((EP.escalate&&sref&&!dnb&&n.id===recentSupId)?'<button class="save-btn light samp-esc-note" data-ref="'+esc(sref)+'" data-msg="'+esc(n.body)+'" title="Escalate this message to Dock & Bay by email" style="flex:0 0 auto;color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'');
+                              : ((EP.escalate&&sref&&!dnb&&n.id===recentSupId)?'<button class="save-btn light samp-esc-note" data-ref="'+esc(sref)+'" data-msg="'+esc(n.body)+'" title="email this note to the supply planner" style="flex:0 0 auto;color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Flag</button>':'');
                 return '<div style="font-size:13px;line-height:1.5;text-align:left;margin:4px 0;max-width:640px;display:flex;gap:10px;align-items:flex-start'+(nu?';background:#fff7ed;border:1px solid #fdba74;border-radius:6px;padding:6px 9px':'')+'">'+(ctrl?'<div style="flex:0 0 auto;min-width:74px">'+ctrl+'</div>':'')+'<div style="flex:1"><span class="mut" style="font-size:11px">'+esc(n.created_at)+' · '+who+'</span>'+(nu?' <span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">new</span>':'')+'<br>'+esc(n.body)+'</div></div>'; }).join(''):'<div class="mut" style="font-size:12px">No timeline entries yet.</div>';
               box.querySelectorAll('.ps-note-read').forEach(function(b){ b.onclick=function(){ postJSON(EP.sampleNoteReadBase+b.dataset.id,{read:true},function(){ var s=(_ppData.samples||[]).filter(function(x){return String(x.id)===String(id);})[0]; if(s&&s.unread_dnb>0)s.unread_dnb--; setSampBadge(); ppSampleTimeline(id); }); }; });
-              var _se=box.querySelector('.samp-esc-note'); if(_se)_se.onclick=function(){ var msg=_se.dataset.msg||''; if(!msg)return; if(!confirm('Escalate this message to Dock & Bay by email?'))return; _se.disabled=true; _se.textContent='Sending…';
-                postJSON(EP.escalate,{kind:'sample',ref:_se.dataset.ref,message:msg,initiator:'supplier'},function(j){ _se.textContent='✓ Escalated'; if(j&&j.sandbox)alert('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); };
+              var _se=box.querySelector('.samp-esc-note'); if(_se)_se.onclick=function(){ var msg=_se.dataset.msg||''; if(!msg)return; if(!confirm('Email this note to the supply planner?'))return; _se.disabled=true; _se.textContent='Sending…';
+                postJSON(EP.escalate,{kind:'sample',ref:_se.dataset.ref,message:msg,initiator:'supplier'},function(j){ _se.textContent='✓ Flagged'; if(j&&j.sandbox)alert('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); };
             }).catch(function(){}); }
           function ppSampleNewForm(){ var box=document.getElementById('samp-newform'); if(box.dataset.open==='1'){box.dataset.open='';box.innerHTML='';return;} box.dataset.open='1';
             var purp=['sales','product','photography','marketing','operations'].map(function(p){return '<label style="margin-right:10px;font-size:11px"><input type="checkbox" class="snf-purpose" value="'+p+'"> '+p+'</label>';}).join('');
@@ -1480,8 +1486,8 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                   if(m)adjBadge(body.querySelector('.pp-exp[data-i="'+m[1]+'"]'), delta);
                 }); }; });
               scope.querySelectorAll('.pp-esc-note').forEach(function(btn){ btn.onclick=function(){ var msg=btn.dataset.msg||''; if(!msg)return;
-                if(!confirm('Escalate this message to Dock & Bay by email?'))return; btn.disabled=true; var t=btn.textContent; btn.textContent='Sending…';
-                postJSON(EP.escalate,{kind:'po',ref:btn.dataset.po,message:msg,initiator:'supplier'},function(j){ btn.textContent='✓ Escalated';
+                if(!confirm('Email this note to the supply planner?'))return; btn.disabled=true; var t=btn.textContent; btn.textContent='Sending…';
+                postJSON(EP.escalate,{kind:'po',ref:btn.dataset.po,message:msg,initiator:'supplier'},function(j){ btn.textContent='✓ Flagged';
                   if(j&&j.sandbox)alert('Sandbox: no email key configured, so nothing was sent. On live this routes to the internal recipients set in CONFIG ▸ General settings.'); }); }; });
               scope.querySelectorAll('.pp-cd-grid').forEach(function(inp){ var t;
                 inp.onclick=function(){ try{ if(inp.showPicker)inp.showPicker(); }catch(e){} };

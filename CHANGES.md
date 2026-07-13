@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.496 - Portal: per-note "Flag" on ALL timelines
+
+Relabelled the per-note escalate to "⚑ Flag" (emails that note to the supply planner) across every portal
+timeline — Purchase Orders, Shipment Plan, FOB, and Samples. Shipment "Escalate shipment" button unchanged.
+FOB Flag is delegated so it survives the note-list re-render. No migration.
+
 ## v25.495 - Portal Shipment Plan: "Escalate shipment" button + per-note "Flag"
 
 Renamed the top button to "⚑ Escalate shipment" (sends a shipment-level escalation email). Restored a
