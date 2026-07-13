@@ -16,6 +16,9 @@
   // client sales ref is set — otherwise the DtC tab + approval workflow do not show.
   function ppIsDtc(p){ var b=(p&&p.branch||'').toLowerCase();
     return (b.indexOf('direct to client')>=0||b.indexOf('b2b jlew')>=0||b.indexOf('b2b next')>=0) || (p.sales_order_ref||'').trim()!==''; }
+  // once a PO is shipping / shipped / delivered / complete, production is done → DTC approval is no longer an action
+  function ppShipped(p){ return /ship|deliver|complete/i.test((p&&p.status)||'') || (p&&p.production_status)==='shipped'; }
+  function dtcActionDue(p){ return ppIsDtc(p) && !(p&&p.dtc_accepted_at) && !ppShipped(p); }
   // FOB pickup — mirrors the main app's isFOBdest: no shipment AND (Manufacturing branch OR a destination that
   // isn't one of our import warehouses UK/US/EU/AU/CA). Used to badge FOB POs on the portal grid.
   function ppIsFOB(p){ if(!p)return false; if(p.shipment)return false; if(/manufactur/i.test(p.branch||''))return true; var c=(p.country||'').trim(); if(!c)return false; return !/^(UK|US|EU|AU|CA)/i.test(c); }   // blank destination = not yet set, NOT FOB
@@ -591,7 +594,7 @@
         var aq=(c&&c.amended_qty!=null&&c.amended_qty!=='')?Number(c.amended_qty):null;
         var qn=(aq!=null?aq:(Number(orderQty)||0)), price=(act!=null?act:(est!=null?est:0)), lt=qn*price; totQ+=qn; totP+=lt;
         var qVal=(aq!=null?aq:(orderQty!=null?orderQty:''));
-        return '<tr><td class="l" style="white-space:nowrap">'+esc(sku)+(added?' <span class="tool-badge bg-blue" style="font-size:8px">added</span>':'')+'</td>'
+        return '<tr><td class="l" style="white-space:nowrap;min-width:30ch">'+esc(sku)+(added?' <span class="tool-badge bg-blue" style="font-size:8px">added</span>':'')+'</td>'
           +'<td style="text-align:right"><input class="fci pp-qty" data-po="'+po+'" data-sku="'+esc(sku)+'" value="'+esc(qVal)+'" style="width:62px;text-align:right" inputmode="numeric"></td>'
           +'<td style="text-align:right">'+(est!=null?'$'+money(est):'<span class="mut">—</span>')+'</td>'
           +'<td style="text-align:right"><input class="fci pp-cost" data-po="'+po+'" data-sku="'+esc(sku)+'" data-est="'+(est!=null?est:0)+'" value="'+(act!=null?esc(act):'')+'" placeholder="'+(est!=null?money(est):'0.00')+'" style="width:80px;text-align:right" inputmode="decimal"></td>'
@@ -623,11 +626,11 @@
         +'</tbody></table></div></div>' : '';
       var skus=chgHtml+invUpload
         +'<div style="margin:3px 0 4px"><button class="lnk-btn pp-op-csv" data-po="'+po+'" style="font-size:11px">⤓ Download to CSV</button></div>'
-        +'<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table style="font-size:11px;margin:3px 0 6px;width:auto"><thead><tr><th class="l" style="white-space:nowrap">SKU</th><th style="text-align:right">Qty</th><th style="text-align:right">Est. cost</th><th style="text-align:right">Your cost</th><th style="text-align:right">Line total</th><th></th></tr></thead><tbody>'
+        +'<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table style="font-size:11px;margin:3px 0 6px;width:auto"><thead><tr><th class="l" style="white-space:nowrap;min-width:30ch">SKU</th><th style="text-align:right">Qty</th><th style="text-align:right">Est. cost</th><th style="text-align:right">Your cost</th><th style="text-align:right">Line total</th><th></th></tr></thead><tbody>'
         +rws
         +'<tr style="font-weight:700;border-top:2px solid #999"><td class="l">TOTAL</td><td style="text-align:right" class="pp-totq">'+units(totQ)+'</td><td></td><td style="text-align:right">FINAL</td><td style="text-align:right" class="pp-totp">$'+money(totP)+'</td><td></td></tr>'
         +'</tbody></table></div>'
-        +'<div style="margin:6px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><input class="fci pp-add-sku" list="'+dlId+'" data-po="'+po+'" placeholder="search a SKU you supply…" style="width:250px"><datalist id="'+dlId+'">'+addOpts+'</datalist>'
+        +'<div style="margin:6px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="pp-sku-wrap" style="position:relative;display:inline-block"><input class="fci pp-add-sku" data-po="'+po+'" placeholder="search a SKU you supply…" style="width:250px" autocomplete="off"><div class="pp-sku-menu" style="display:none;position:absolute;left:0;top:calc(100% + 2px);z-index:60;background:#fff;border:1px solid #cbd5e1;border-radius:6px;max-height:240px;overflow:auto;min-width:280px;box-shadow:0 8px 24px rgba(15,23,42,.18)"></div></span>'
         +'<input class="fci pp-add-qty" data-po="'+po+'" placeholder="qty" style="width:62px;text-align:right" inputmode="numeric">'
         +'<input class="fci pp-add-cost" data-po="'+po+'" placeholder="price" style="width:80px;text-align:right" inputmode="decimal">'
         +'<button class="save-btn pp-add-go" data-po="'+po+'">Add SKU</button></div>'
@@ -821,7 +824,7 @@
         ['invoice','INVOICE &amp; DOCUMENTS',invoice, invoiceDue(p,subs)?1:0],['payments','PAYMENTS',payments,0],
         ['shipment','SHIPMENT',shipment, xdAction],   // "no shipment assigned yet" is a passive state, not an action — only a real outstanding crossdock qty entry counts
         ['barcodes','BARCODES & LABELS',barcodesLabels,0]];
-      if(dtcApplies) tabs.push(['dtc','DIRECT TO CLIENT DETAILS', dtc, dtcAccepted?0:1]);
+      if(dtcApplies) tabs.push(['dtc','DIRECT TO CLIENT DETAILS', dtc, (dtcAccepted||ppShipped(p))?0:1]);
       function badge(n){ return n>0?' <span class="ex-badge">'+n+'</span>':''; }
       var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab pptab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'">'+t[1]+badge(t[3])+'</button>';}).join('')+'</div>';
       var panels=tabs.map(function(t,ti){return '<div class="pptab-panel" data-pt="'+t[0]+'"'+(ti===0?'':' style="display:none"')+'>'+t[2]+'</div>';}).join('');
@@ -843,7 +846,7 @@
           var cdS=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean), xdm=xdByPo[p.po]||{};
           var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
           var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end, sb):'';
-          var dtcPend=ppIsDtc(p)&&!p.dtc_accepted_at;
+          var dtcPend=dtcActionDue(p);
           var act=(invoiceDue(p,sb)?1:0)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0)+(poCdMissing(p,sb)?1:0);   // no-shipment-yet is NOT an action (matches the SHIPMENTS sub-tab + the top PO badge)
           var cdVal=poCdVal(p, sb);
           var cdGrid=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
@@ -1000,7 +1003,7 @@
                 return '<div class="sp-card" style="border:1px solid #ddd6fe;border-radius:8px;margin-bottom:10px;background:#fff">'
                   +'<div class="sp-head" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:10px 12px;cursor:pointer">'
                   +'<span class="sp-toggle" style="font-size:12px;color:#6d28d9">▸</span>'
-                  +spBadge(s)+'<div style="font-weight:700;font-size:15px">'+poLink(po)+'</div>'
+                  +spBadge(s)+'<div style="font-weight:700;font-size:15px">'+esc(po)+'</div>'
                   +'<span style="background:#ede9fe;color:#6d28d9;border-radius:10px;font-size:10px;font-weight:700;padding:2px 8px">📦 FOB — no shipment</span>'
                   +'<span class="mut tiny">'+esc(s.status||'')+(s.prod_end?' · prod end '+esc(fd(s.prod_end)):'')+'</span>'
                   +'</div>'
@@ -1022,7 +1025,7 @@
               return '<div class="sp-card" style="border:1px solid '+(s.escalated?'#fca5a5':'#e0e0e0')+';border-radius:8px;margin-bottom:10px;background:'+(s.escalated?'#fef2f2':'#fff')+'">'
                 +'<div class="sp-head" style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:10px 12px;cursor:pointer">'
                 +'<span class="sp-toggle" style="font-size:12px;color:#475569">▸</span>'
-                +spBadge(s)+'<div style="font-weight:700;font-size:15px">'+poLink(s.master_po)+'</div>'
+                +spBadge(s)+'<div style="font-weight:700;font-size:15px">'+esc(s.master_po)+'</div>'
                 +(/^fob$/i.test(s.mode||'')?'<span style="background:#ede9fe;color:#6d28d9;border-radius:10px;font-size:10px;font-weight:700;padding:2px 8px">📦 FOB</span>':'')
                 +'<span class="mut tiny">'+esc((s.mode||'—')+(s.carrier?' · '+s.carrier:''))+(s.departure?' · dep '+esc(fd(s.departure)):'')+(s.arrival?' · arr '+esc(fd(s.arrival)):'')+'</span>'
                 +(EP.shipmentEscalate?('<button class="save-btn pp-esc" data-ref="'+esc(s.shipment_ref)+'" data-on="'+(s.escalated?'1':'0')+'" style="margin-left:auto'+(s.escalated?';background:#dc2626;color:#fff;border-color:#dc2626':';color:#dc2626')+'">'+(s.escalated?'⚑ ESCALATED':'⚑ Escalate')+'</button>'):'')
@@ -1122,7 +1125,7 @@
               var cdS=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean), xdm=(_ppData.xdByPo&&_ppData.xdByPo[po])||{};
               var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
               var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end, sb):'';
-              var dtcPend=ppIsDtc(p)&&!p.dtc_accepted_at;
+              var dtcPend=dtcActionDue(p);
               return a+(invoiceDue(p,sb)?1:0)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0)+(poCdMissing(p,sb)?1:0);
             },0);
             var b=document.getElementById('pp-pos-badge'); if(b)b.innerHTML=ppBadgeHtml(n); }
@@ -1402,7 +1405,7 @@
               var cdS=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean), xdm=_ppData.xdByPo[po]||{};
               var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
               var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end, sb):'';
-              var dtcPend=ppIsDtc(p)&&!p.dtc_accepted_at;
+              var dtcPend=dtcActionDue(p);
               return (invoiceDue(p,sb)?1:0)+((p.shipment||p.flexport_reference||sb.some(function(s){return s.kind==='tracking';}))?0:1)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0)+(poCdMissing(p,sb)?1:0); }
             // in-place row refresh after a write: re-render the open expanded cell + sync the MANAGE badge (no full reload)
             function refreshRow(row,po){ if(!row)return; var i=row.id.replace('pp-',''); rerenderRow(row,po);
@@ -1490,6 +1493,16 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                   postJSON(EP.lineCost,{po:po,sku:sku,amended_qty:(qel&&qel.value.trim())||null,actual_cost:(cel&&cel.value.trim())||null,submitted_by:by},function(){   }); }
                 inp.oninput=function(){ recalc(inp.closest('.ppx')); };
                 inp.onchange=function(){ var box=inp.closest('.ppx'); recalc(box); saveLine(box,inp.dataset.po,inp.dataset.sku); }; });
+              // add-SKU search: a filterable dropdown of the supplier's SKUs not already on the order (standard picker UX)
+              scope.querySelectorAll('.pp-add-sku').forEach(function(inp){ var po=inp.dataset.po, menu=inp.parentNode.querySelector('.pp-sku-menu'); if(!menu)return;
+                function cands(){ var on={}; (_ppData.lb[po]||[]).forEach(function(l){on[l.sku]=1;}); var cb=_ppData.costsByPo[po]||{}; Object.keys(cb).forEach(function(s){ if(cb[s]&&cb[s].is_added)on[s]=1; }); return (_ppData.supSkus||[]).filter(function(s){return !on[s.sku];}); }
+                function render(){ var q=(inp.value||'').trim().toLowerCase(); var list=cands().filter(function(s){return !q||((s.sku+' '+(s.product_name||'')).toLowerCase().indexOf(q)>=0);});
+                  menu.innerHTML=list.slice(0,60).map(function(s){return '<div class="pp-sku-opt" data-sku="'+esc(s.sku)+'" style="padding:5px 9px;cursor:pointer;font-size:12px;border-bottom:1px solid #f1f5f9"><b>'+esc(s.sku)+'</b>'+(s.product_name?' <span class="mut tiny">'+esc(s.product_name)+'</span>':'')+'</div>';}).join('')||'<div style="padding:6px 9px" class="mut tiny">no matching SKU</div>';
+                  menu.querySelectorAll('.pp-sku-opt').forEach(function(o){ o.onmouseover=function(){o.style.background='#f1f5f9';}; o.onmouseout=function(){o.style.background='';};
+                    o.onmousedown=function(e){ e.preventDefault(); inp.value=o.dataset.sku; menu.style.display='none'; var qi=inp.parentNode.parentNode.querySelector('.pp-add-qty'); if(qi)qi.focus(); }; });
+                  menu.style.display=''; }
+                inp.onfocus=render; inp.oninput=render;
+                inp.onblur=function(){ setTimeout(function(){ menu.style.display='none'; },150); }; });
               // add a SKU (typed/searched from the supplier's list) → re-render this PO's detail in place, stay on ORDER PLAN
               scope.querySelectorAll('.pp-add-go').forEach(function(btn){ btn.onclick=function(){ var box=btn.closest('.ppx'); var po=btn.dataset.po;
                 var sku=(box.querySelector('.pp-add-sku').value||'').trim(); if(!sku){ alert('Search and pick a SKU to add.'); return; }

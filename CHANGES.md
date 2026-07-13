@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.488 - Portal ORDER PLAN SKU width + search dropdown; shipment-plan PO not linked; DTC action gating
+
+- ORDER PLAN SKU column now min 30ch (+ nowrap) so long SKUs aren't cut off.
+- Add-SKU box is now a filterable search dropdown (type to filter the supplier's SKUs not already on the
+  order; click to pick) instead of the native datalist.
+- Shipment Plan: the master PO number in the card header is plain text (no longer hyperlinks to Purchase Orders).
+- Direct-to-Client approval no longer counts as an action once the PO is shipping/shipped/delivered/complete
+  (the tab + approve UI stay, but the "A" badge/count drops).
+No migration.
+
 ## v25.487 - Portal invoice downloads fixed (portal-scoped endpoint + real file download) + label
 
 The portal Tax Invoice buttons used `window.open('/api/invoice/...')`, which opens a tab but doesn't download
