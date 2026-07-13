@@ -647,11 +647,11 @@
           +'<td class="l"><button class="lnk-btn pp-ac-rm" data-id="'+a.id+'" title="remove" style="color:#b91c1c">✕</button></td></tr>'; }).join('');
       var invTot=totP+addTot;
       skus+='<div class="sect-h" style="margin-top:12px">Additional costs <span class="mut tiny">(freight, tooling, surcharges… — added to the invoice)</span></div>'
-        +'<div class="tw" style="max-width:540px"><table style="font-size:11px;width:auto"><thead><tr><th class="l">Description</th><th style="text-align:right">Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Total</th><th></th></tr></thead><tbody>'
+        +'<table style="font-size:11px;border-collapse:collapse;text-align:left;table-layout:fixed;width:540px;max-width:100%"><colgroup><col style="width:200px"><col style="width:72px"><col style="width:90px"><col style="width:88px"><col style="width:70px"></colgroup><thead><tr><th class="l">Description</th><th class="l">Qty</th><th class="l">Price</th><th class="l">Total</th><th></th></tr></thead><tbody>'
         +acRows
         +'<tr><td class="l"><input class="fci pp-ac-ndesc" data-po="'+po+'" placeholder="+ add a cost…" style="width:190px"></td><td style="text-align:right"><input class="fci pp-ac-nqty" data-po="'+po+'" placeholder="qty" style="width:56px;text-align:right" inputmode="numeric"></td><td style="text-align:right"><input class="fci pp-ac-nprice" data-po="'+po+'" placeholder="price" style="width:74px;text-align:right" inputmode="decimal"></td><td></td><td class="l"><button class="save-btn pp-ac-add" data-po="'+po+'">Add</button></td></tr>'
         +(add.length?'<tr style="font-weight:700;border-top:1px solid #ccc"><td class="l">Additional total</td><td></td><td></td><td style="text-align:right">$'+money(addTot)+'</td><td></td></tr>':'')
-        +'</tbody></table></div>'
+        +'</tbody></table>'
         +'<div style="margin:8px 0 4px;font-weight:700;font-size:12px">Total invoice cost: <span class="pp-inv-tot" data-add="'+addTot+'">$'+money(invTot)+'</span> <span class="mut tiny" style="font-weight:400">(line items $'+money(totP)+' + additional $'+money(addTot)+')</span></div>';
       // ---- crossdock SKUs → shipped-qty entry lives in the SHIPMENT tab (becomes an open action once shipping) ----
       var cdSkus=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);

@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.493 - Portal ORDER PLAN Additional costs: fixed table layout (no overlapping inputs)
+
+Root cause of the "floating qty": the Additional costs table used auto layout inside the expanded detail row,
+where `tr.exp-row .tw>table{width:max-content}` + the auto column algorithm squished the cells so the Qty
+input overlapped the Description box. Switched to an explicit colgroup + `table-layout:fixed;width:540px`
+(same as the working Payments table) and dropped the `.tw` wrapper. No migration.
+
 ## v25.492 - Portal PAYMENTS: only show CONFIRMED (dated) payments
 
 The portal PAYMENTS tab showed the calculated Starting deposit / Completion deposit / Balance milestones even
