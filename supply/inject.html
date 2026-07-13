@@ -2241,6 +2241,7 @@
       +'<div class="cli-form" style="max-width:760px">'
       +cliRow('Estimate <span class="mut tiny">(order plan)</span>', money(r.value_est))
       +cliRow('<b>Final invoice amount</b>', '<input class="fci payin" style="width:120px;text-align:left" inputmode="decimal" data-ep="'+ep+'" data-field="supplier_invoice_total" value="'+esc(r.final_invoice==null?'':r.final_invoice)+'"> <span class="mut tiny">blank = use estimate</span>')
+      +cliRow('<b>Credit amount</b> <span class="mut tiny">added to invoice · paid in the balance</span>', payIn(ep,'credit_amount',r.credit_amount))
       // Supplier-submitted invoice total (from the portal) — shown right next to the Final invoice amount so it
       // can be reviewed and applied. "Apply → final" writes it into supplier_invoice_total; the doc downloads here.
       +(function(){ var si=d&&d.sup_invoice, docs=(d&&d.sup_docs)||[]; var out='';
@@ -2284,12 +2285,7 @@
       +'<td class="l">'+payIn(ep,'pay_completion_date',r.completion_date,true,!(n(r.completion_assigned)>0))+'</td>'
       +'<td class="l"><span class="mut tiny">— direct cash</span></td>'
       +mkPay(dueCell(r.completion_due,compUnpaid,'',compOwed),_compOver)+likelyCell('comp:'+r.po,compUnpaid&&compOwed,r.likely_completion)+'<td class="l">'+(compOwed?payBadge(cStat[0],cStat[1]):payBadge('—','bg-neutral'))+'</td>');
-    // Credit amount — a charge added to the invoice, settled within the balance (editable here)
-    h+=tr('<td class="l"><b>Credit amount</b> <span class="mut tiny">added to invoice · paid in the balance</span></td>'
-      +'<td>'+money(r.credit_amount)+'</td>'
-      +'<td class="l">'+payIn(ep,'credit_amount',r.credit_amount)+'</td>'
-      +'<td class="l"><span class="mut">—</span></td><td class="l"><span class="mut">—</span></td>'
-      +'<td class="l"><span class="mut">—</span></td><td class="l"><span class="mut">—</span></td><td class="l"><span class="mut">—</span></td>');
+    // Credit amount now lives in the Order-value form above (under Final invoice amount), not the payment table.
     var isSmallPo = (n(r.value_used)>0 && n(r.value_used)<500);   // < $500 → due on invoice/ship date, no supplier credit terms
     var balnote = isSmallPo ? '<span class="mut tiny" title="orders under $500 are due in full on the invoice-processed date, or the ship date while still an estimate">'+(r.is_final?'invoice date':'ship date')+' · under $500</span>'
                 : (r.credit_days!=null?'<span class="mut tiny">'+(r.credit_type==='on_shipment'?'ship':'clearance')+' +'+r.credit_days+'cr</span>':'');

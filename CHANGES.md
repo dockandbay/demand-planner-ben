@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.483 - Payments: Credit amount moved under Final invoice amount
+
+On SUPPLY ▸ Purchase Orders ▸ Payments, the "Credit amount" field moved from the payment-plan table up into
+the Order-value form, directly under "Final invoice amount". No migration.
+
 ## v25.482 - ERP push mirror + qty-0 removal + final price used everywhere
 
 Four ERP / order-plan fixes (all live-relevant; Diviyaj deploys):
