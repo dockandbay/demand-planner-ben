@@ -3,6 +3,23 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.482 - ERP push mirror + qty-0 removal + final price used everywhere
+
+Four ERP / order-plan fixes (all live-relevant; Diviyaj deploys):
+- **ERP mirror after push**: the push now also DELETEs mirror rows for SKUs no longer on the order (zeroed /
+  removed), so the "Update ERP" drift flag clears immediately instead of lingering against stale rows.
+- **qty 0 removes the line**: setting an order-plan line to 0 now DELETEs it (removed from the order plan)
+  rather than keeping a 0-qty row.
+- **Final price is authoritative**: `po-line-final` now stamps `confirmed_at`, so a D&B-entered final cost is
+  actually used by the ERP push, the Cin7 verify/discrepancy popup (was showing plan price), and value calcs.
+- **Payments + PO grid values use the final price**: PO value (Σ qty × cost) now uses `coalesce(final_cost,
+  cost_price)` instead of plan cost — feeds the payment milestones, PO grid value, and deposit-allocation est.
+
+⚠ Deploy note: existing `final_cost` rows set BEFORE this (on live) have `confirmed_at` NULL, so they won't be
+picked up until re-saved. Either re-enter the final price, or backfill:
+`UPDATE planner.portal_line_costs SET confirmed_at=now() WHERE final_cost IS NOT NULL AND confirmed_at IS NULL;`
+No migration.
+
 ## v25.481 - Supplier portal Barcodes: add INNER barcode download
 
 Added the missing INNER option to the portal Barcodes tab: a batch-level "⤓ Download inner barcodes"

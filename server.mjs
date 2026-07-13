@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.481';
+const APP_VERSION = 'v25.482';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1478,7 +1478,9 @@ app.get('/api/supply/:section', async (req, res) => {
             LEFT JOIN planner.erp_purchase_orders erp ON erp.po=po.po
             LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
             LEFT JOIN planner.import_tax_rates tr ON tr.country=coalesce(nullif(po.country_code,''), b.country_code)
-            LEFT JOIN LATERAL (SELECT sum(l.qty*l.cost_price) line_value
+            LEFT JOIN LATERAL (SELECT sum(l.qty * coalesce(
+                (SELECT plc.final_cost FROM planner.portal_line_costs plc WHERE plc.po=l.po AND plc.sku=l.sku AND plc.confirmed_at IS NOT NULL AND plc.final_cost IS NOT NULL),
+                l.cost_price)) line_value
               FROM planner.purchase_order_lines l WHERE l.po=po.po) lv ON true
             LEFT JOIN LATERAL (SELECT f.* FROM planner.flexport_shipments f
               WHERE f.flex_id=po.flexport_reference OR f.shipment_name=po.po OR f.shipment_name=po.shipment_ref
@@ -1958,7 +1960,9 @@ app.get('/api/supply/:section', async (req, res) => {
               count(*) open_unalloc
             FROM planner.purchase_orders po
             LEFT JOIN planner.suppliers s ON s.id=po.supplier_id
-            LEFT JOIN LATERAL (SELECT sum(l.qty*l.cost_price) line_value FROM planner.purchase_order_lines l WHERE l.po=po.po) lv ON true
+            LEFT JOIN LATERAL (SELECT sum(l.qty * coalesce(
+                (SELECT plc.final_cost FROM planner.portal_line_costs plc WHERE plc.po=l.po AND plc.sku=l.sku AND plc.confirmed_at IS NOT NULL AND plc.final_cost IS NOT NULL),
+                l.cost_price)) line_value FROM planner.purchase_order_lines l WHERE l.po=po.po) lv ON true
             WHERE po.deposit_ref IS NOT NULL
               AND coalesce(po.status,'') NOT ILIKE '%complete%'
               AND po.pay_start_deposit_assigned IS NULL
@@ -2947,8 +2951,13 @@ app.post('/api/supply/po-line-final', async (req, res) => {
   if (!b.po || !b.sku) return res.status(400).json({ error: 'po and sku required' });
   try {
     const cost = (b.final_cost === '' || b.final_cost == null) ? null : Number(b.final_cost);
-    await pool.query(`INSERT INTO planner.portal_line_costs (po, sku, final_cost, submitted_at)
-      VALUES ($1,$2,$3, now()) ON CONFLICT (po, sku) DO UPDATE SET final_cost=excluded.final_cost`,
+    // A D&B-entered final cost IS the agreed price → stamp confirmed_at so the push / ERP verify use it
+    // (both coalesce final_cost only WHEN confirmed_at IS NOT NULL). Clearing it leaves confirmed_at as-is
+    // (the coalesce ignores a null final_cost anyway and falls back to the plan cost_price).
+    await pool.query(`INSERT INTO planner.portal_line_costs (po, sku, final_cost, submitted_at, confirmed_at)
+      VALUES ($1,$2,$3::numeric, now(), CASE WHEN $3::numeric IS NULL THEN NULL ELSE now() END)
+      ON CONFLICT (po, sku) DO UPDATE SET final_cost=excluded.final_cost,
+        confirmed_at = CASE WHEN excluded.final_cost IS NOT NULL THEN now() ELSE planner.portal_line_costs.confirmed_at END`,
       [b.po, b.sku, cost]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -3621,14 +3630,20 @@ app.post('/api/supply/po-line/:po_sku', async (req, res) => {
   const po = b.po || key.split('|')[0];
   const sku = b.sku || key.slice(key.indexOf('|') + 1);
   try {
-    // upsert: editing a blank cell (no existing line) creates a proposed line (erp_qty=0 → pending).
-    const r = await pool.query(
-      `INSERT INTO planner.purchase_order_lines (po_sku, po, sku, qty, proposed_at, proposed_by)
-       VALUES ($1,$2,$3,$4::int, CASE WHEN $4::int<>0 THEN now() END, CASE WHEN $4::int<>0 THEN $5 END)
-       ON CONFLICT (po_sku) DO UPDATE SET qty=excluded.qty,
-         proposed_at = CASE WHEN excluded.qty IS DISTINCT FROM coalesce((SELECT el.qty FROM planner.erp_purchase_order_lines el WHERE el.po=planner.purchase_order_lines.po AND el.sku=planner.purchase_order_lines.sku),0) THEN now() ELSE NULL END,
-         proposed_by = CASE WHEN excluded.qty IS DISTINCT FROM coalesce((SELECT el.qty FROM planner.erp_purchase_order_lines el WHERE el.po=planner.purchase_order_lines.po AND el.sku=planner.purchase_order_lines.sku),0) THEN $5 ELSE NULL END`,
-      [key, po, sku, b.qty, b.who || 'review_ui']);
+    const qn = parseInt(b.qty, 10);
+    let r;
+    if (!qn) {   // qty 0 (or blank/NaN) → REMOVE the SKU from the order plan entirely (don't keep a 0-qty line)
+      r = await pool.query(`DELETE FROM planner.purchase_order_lines WHERE po_sku=$1`, [key]);
+    } else {
+      // upsert: editing a blank cell (no existing line) creates a proposed line (erp_qty=0 → pending).
+      r = await pool.query(
+        `INSERT INTO planner.purchase_order_lines (po_sku, po, sku, qty, proposed_at, proposed_by)
+         VALUES ($1,$2,$3,$4::int, CASE WHEN $4::int<>0 THEN now() END, CASE WHEN $4::int<>0 THEN $5 END)
+         ON CONFLICT (po_sku) DO UPDATE SET qty=excluded.qty,
+           proposed_at = CASE WHEN excluded.qty IS DISTINCT FROM coalesce((SELECT el.qty FROM planner.erp_purchase_order_lines el WHERE el.po=planner.purchase_order_lines.po AND el.sku=planner.purchase_order_lines.sku),0) THEN now() ELSE NULL END,
+           proposed_by = CASE WHEN excluded.qty IS DISTINCT FROM coalesce((SELECT el.qty FROM planner.erp_purchase_order_lines el WHERE el.po=planner.purchase_order_lines.po AND el.sku=planner.purchase_order_lines.sku),0) THEN $5 ELSE NULL END`,
+        [key, po, sku, b.qty, b.who || 'review_ui']);
+    }
     // If this materially changes an order the supplier had already confirmed, invalidate that approval so they
     // must re-confirm, and drop a timeline note (deduped). approved_lines is the snapshot from their last confirm.
     try {
@@ -4170,6 +4185,9 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
           VALUES ($1,$2,$3,$4,now()) ON CONFLICT (po,sku) DO UPDATE SET qty=excluded.qty, cost=excluded.cost, synced_at=now()`,
           [po, l.sku, Number(l.qty), Number(l.price) || 0]);
       }
+      // drop mirror rows for SKUs no longer on the pushed order (zeroed / removed) — Cin7 no longer holds them,
+      // so the mirror must match exactly or the "Update ERP" drift flag would persist against stale rows.
+      await pool.query(`DELETE FROM planner.erp_purchase_order_lines WHERE po=$1 AND NOT (sku = ANY($2))`, [po, lines.map(l => l.sku)]);
       if (edd) await pool.query(`UPDATE planner.erp_purchase_orders SET final_delivery_date=$2::date, synced_at=now() WHERE po=$1`, [po, completion]);
       mirrored = true;
     } catch (e) { /* non-fatal — Cin7 write already succeeded */ }
