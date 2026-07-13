@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.501';
+const APP_VERSION = 'v25.502';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1274,6 +1274,7 @@ async function buildShipmentPlan() {
       to_char(coalesce(p.end_production_overide, p.start_production + (coalesce(sup.production_days,0)||' days')::interval)::date,'YYYY-MM-DD') prod_end,
       p.po, coalesce(p.supplier_name,'') supplier_name, coalesce(p.client,'') client,
       upper(coalesce(nullif(p.country_code,''), b.country_code, '')) country,
+      b.sea_lead_time_days sea_lead, b.air_lead_time_days air_lead,
       to_char(p.client_deadline_date,'YYYY-MM-DD') client_deadline,
       (p.po = coalesce(sh.master_po, p.shipment_ref)) is_master, coalesce(sh.escalated,false) escalated,
       round(coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0))
@@ -1289,13 +1290,22 @@ async function buildShipmentPlan() {
     ORDER BY p.shipment_ref, (p.po = coalesce(sh.master_po, p.shipment_ref)) DESC, p.po`);
   const byRef = {};
   rows.forEach(r => { let s = byRef[r.shipment_ref];
-    if (!s) s = byRef[r.shipment_ref] = { shipment_ref: r.shipment_ref, master_po: r.master_po, mode: r.mode, carrier: r.carrier, carrier_ref: r.carrier_ref, flex_id: r.flex_id, status: r.status, departure: r.departure, landing: r.landing, arrival: r.arrival, prod_end: '', escalated: !!r.escalated, master_client: '', master_deadline: '', master_supplier: '', country: '', total_pallets: 0, suppliers: [], members: [] };
+    if (!s) s = byRef[r.shipment_ref] = { shipment_ref: r.shipment_ref, master_po: r.master_po, mode: r.mode, carrier: r.carrier, carrier_ref: r.carrier_ref, flex_id: r.flex_id, status: r.status, departure: r.departure, landing: r.landing, arrival: r.arrival, sea_lead: r.sea_lead, air_lead: r.air_lead, prod_end: '', escalated: !!r.escalated, master_client: '', master_deadline: '', master_supplier: '', country: '', total_pallets: 0, suppliers: [], members: [] };
     if (r.prod_end && r.prod_end > s.prod_end) s.prod_end = r.prod_end;   // shipment production-end = latest across its POs (drives the portal date bands)
     s.total_pallets += Number(r.pallets) || 0;
     if (s.suppliers.indexOf(r.supplier_name) < 0 && r.supplier_name) s.suppliers.push(r.supplier_name);
     if (r.country && (r.is_master || !s.country)) s.country = r.country;
     if (r.is_master) { s.master_client = r.client; s.master_deadline = r.client_deadline; s.master_supplier = r.supplier_name; }
     s.members.push({ po: r.po, supplier: r.supplier_name, pallets: Number(r.pallets) || 0, client: r.client, is_master: !!r.is_master });
+  });
+  // Fill missing shipment dates by inheriting/calculating from the master PO: ship = prod-end + 7 days,
+  // landing/arrival = ship + branch transit lead (air vs sea). Flagged *_est so the UI can mark them estimated.
+  const _addDays = (ymd, n) => { if (!ymd) return null; const d = new Date(ymd + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + (Number(n) || 0)); return d.toISOString().slice(0, 10); };
+  Object.keys(byRef).forEach(k => { const s = byRef[k];
+    if (!s.departure && s.prod_end) { s.departure = _addDays(s.prod_end, 7); s.departure_est = true; }
+    const lead = (String(s.mode).toLowerCase() === 'air' ? s.air_lead : s.sea_lead);
+    if (!s.arrival && s.departure && lead != null) { s.arrival = _addDays(s.departure, lead); s.arrival_est = true; }
+    if (!s.landing && s.arrival) { s.landing = s.arrival; s.landing_est = true; }
   });
   const masterPos = Object.keys(byRef).map(k => byRef[k].master_po).filter(Boolean);
   if (masterPos.length) {
@@ -7138,6 +7148,13 @@ app.post('/api/portal/shipment/:ref', portalAuth, async (req, res) => {
     const upd = cols.slice(1).map(c => `${c}=excluded.${c}`).join(',');
     await pool.query(`INSERT INTO planner.shipments (${cols.join(',')}) VALUES (${ph.join(',')})
       ON CONFLICT (shipment_ref) DO UPDATE SET ${upd}, updated_at=now()`, vals);
+    // Supplier marked the shipment Shipping → advance every PO on board still in PRODUCTION to SHIPPING
+    // (production done + shipped). Mirrors the internal "→ set shipping" action; scoped to this shipment.
+    if (b.status === 'Shipping') {
+      await pool.query(`UPDATE planner.purchase_orders SET status='SHIPPING', production_status='shipped',
+        production_confirmed_at=coalesce(production_confirmed_at,now()), updated_at=now()
+        WHERE shipment_ref=$1 AND status ILIKE '%production%'`, [ref]);
+    }
     if (dateChanged) {
       const who = (req.portal.suppliers && req.portal.suppliers[0]) || 'The supplier';
       try { await pool.query(`INSERT INTO planner.shipment_notes (shipment_ref, author_kind, author_email, body)

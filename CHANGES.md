@@ -3,6 +3,20 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.502 - Portal Shipment Plan: update box on top, ship→PO propagation, inherited dates, coloured status
+
+- **"📝 Update this shipment" box moved to the top** of each card, above the POs-on-board.
+- **Marking a shipment Shipping propagates to its POs.** When a supplier sets the shipment to Shipping, every
+  PO on board still in PRODUCTION is advanced to SHIPPING with production_status='shipped' (mirrors the
+  internal "→ set shipping" action). Handled in POST /api/portal/shipment/:ref.
+- **Inherited/estimated dates.** When a shipment has no departure/landing/arrival, they're now calculated from
+  the master PO: ship = production-end + 7 days, landing/arrival = ship + branch transit lead (air vs sea).
+  Shown with a small "est" marker; the editable Ship-date field stays blank so the supplier enters the actual.
+  (buildShipmentPlan now returns sea_lead/air_lead + *_est flags.)
+- **Coloured status dropdown** — orange for Planned, green for Shipping (recolours live on change).
+
+No migration.
+
 ## v25.501 - Portal Shipment Plan: supplier status limited to Planned / Shipping
 
 Suppliers can only set a shipment to **Planned** or **Shipping** (their final stage) — 'Completed' stays

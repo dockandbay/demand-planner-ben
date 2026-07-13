@@ -1033,9 +1033,9 @@
                 +spCell('Mode / Carrier', esc((s.mode||'—')+(s.carrier?' · '+s.carrier:'')))
                 +spCell('Tracking', s.carrier_ref?esc(s.carrier_ref):'')
                 +spCell('Flexport', flex)
-                +spCell('Departure', s.departure?esc(fd(s.departure)):'')
-                +spCell('Landing', s.landing?esc(fd(s.landing)):'')
-                +spCell('Arrival', s.arrival?esc(fd(s.arrival)):'')
+                +spCell('Departure', s.departure?(esc(fd(s.departure))+(s.departure_est?' <span class="mut" style="font-size:9px;font-weight:400">est</span>':'')):'')
+                +spCell('Landing', s.landing?(esc(fd(s.landing))+(s.landing_est?' <span class="mut" style="font-size:9px;font-weight:400">est</span>':'')):'')
+                +spCell('Arrival', s.arrival?(esc(fd(s.arrival))+(s.arrival_est?' <span class="mut" style="font-size:9px;font-weight:400">est</span>':'')):'')
                 +(s.master_client?spCell('Client', esc(s.master_client)):'')
                 +(s.master_deadline?spCell('Client deadline', esc(fd(s.master_deadline))):'')
                 +'</div>';
@@ -1049,10 +1049,10 @@
                 +'<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">'
                   +'<div>'+eLbl('Carrier')+'<input class="fci txt sp-e-carrier" data-ref="'+rf+'" value="'+esc(s.carrier||'')+'" placeholder="carrier…" style="width:140px;text-align:left"></div>'
                   +'<div>'+eLbl('Tracking code')+'<input class="fci txt sp-e-trk" data-ref="'+rf+'" value="'+esc(s.carrier_ref||'')+'" placeholder="tracking…" style="width:170px;text-align:left"></div>'
-                  +'<div>'+eLbl('Ship date')+'<input type="date" class="fci sp-e-date" data-ref="'+rf+'" value="'+esc(s.departure||'')+'" style="width:150px;text-align:left"></div>'
+                  +'<div>'+eLbl('Ship date')+'<input type="date" class="fci sp-e-date" data-ref="'+rf+'" value="'+esc(s.departure_est?'':(s.departure||''))+'"'+(s.departure_est?' title="estimated '+esc(s.departure)+' — enter the actual ship date"':'')+' style="width:150px;text-align:left"></div>'
                   +'<div>'+eLbl('Status')+(stNorm==='Completed'
                     ? '<div style="font-weight:700;color:#1d4ed8;font-size:13px;padding:4px 0">Completed</div><div class="tiny mut">set by Dock &amp; Bay</div>'
-                    : '<select class="fci sp-e-status" data-ref="'+rf+'" style="width:130px">'+STO.map(function(o){return '<option'+(o===stNorm?' selected':'')+'>'+o+'</option>';}).join('')+'</select>')+'</div>'
+                    : '<select class="fci sp-e-status" data-ref="'+rf+'" style="width:130px;font-weight:600;'+(stNorm==='Shipping'?'background:#dcfce7;color:#15803d;border:1px solid #86efac':'background:#ffedd5;color:#9a3412;border:1px solid #fdba74')+'">'+STO.map(function(o){return '<option'+(o===stNorm?' selected':'')+'>'+o+'</option>';}).join('')+'</select>')+'</div>'
                   +'<button class="save-btn sp-ship-save" data-ref="'+rf+'" style="background:#16a34a;color:#fff;border-color:#15803d">Save</button>'
                 +'</div></div>';
               var chgPanel='<div style="margin-top:10px;padding:10px 12px;background:#fffbeb;border:1px solid #fde68a;border-radius:7px">'
@@ -1071,9 +1071,9 @@
                 +'<span class="mut tiny">'+esc((s.mode||'—')+(s.carrier?' · '+s.carrier:''))+(s.departure?' · dep '+esc(fd(s.departure)):'')+(s.arrival?' · arr '+esc(fd(s.arrival)):'')+'</span>'
                 +(s.escalated?'<span class="tool-badge bg-red" style="margin-left:auto">⚑ ESCALATED</span>':'')
                 +'</div>'
-                +'<div class="sp-body" style="display:none;padding:0 12px 12px">'+datesStrip+'<div style="margin-top:8px">'+members+'</div>'
+                +'<div class="sp-body" style="display:none;padding:0 12px 12px">'+editPanel+datesStrip+'<div style="margin-top:8px">'+members+'</div>'
                 +(s.members||[]).map(function(m){return dtcBlock(m.po);}).join('')
-                +editPanel+chgPanel
+                +chgPanel
                 +'<div style="margin-top:10px"><div class="mut tiny" style="margin-bottom:3px">Download a consolidated shipment tax invoice</div><button class="save-btn pp-ship-inv" data-ref="'+esc(s.shipment_ref)+'" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd" title="download the consolidated Tax Invoice + Packing List for this shipment">📄 Tax Invoice</button></div>'
                 +'<div class="sp-timeline" data-ref="'+esc(s.shipment_ref)+'" style="margin-top:8px;border-top:1px solid #f1f1f1;padding-top:6px"></div></div></div>'; }
             var _sorted=rows.slice().map(function(s){return {s:s,b:_bucketOf(s)};}).sort(function(a,b){ if(a.b!==b.b)return a.b-b.b; var pa=a.s.prod_end||'~', pb=b.s.prod_end||'~'; return pa<pb?-1:pa>pb?1:0; });
@@ -1265,7 +1265,7 @@
               var today=new Date().toISOString().slice(0,10);
               var allSp=_ppData.shipmentPlan||[];
               // a shipment has "shipped" once it has a departure date that has passed
-              function spShipped(s){ return !!(s.departure && s.departure<=today); }
+              function spShipped(s){ return (String(s.status||'').toLowerCase()==='shipping') || !!(s.departure && !s.departure_est && s.departure<=today); }
               var poq=effQ(PORTAL_SP_PO);
               var _ctrySel=Object.keys(PORTAL_SP_CTRY).filter(function(k){return PORTAL_SP_CTRY[k];});
               var _allCtrys=(function(){ var s={}; allSp.forEach(function(x){ var c=(x.country||'').toUpperCase(); if(c)s[c]=1; }); return Object.keys(s).sort(); })();
@@ -1326,6 +1326,9 @@
               function loadShipCharges(el){ if(!el||el.dataset.loaded)return; el.dataset.loaded='1'; var ref=el.dataset.ref;
                 fetch(EP.shipmentChargesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(cs){
                   el.innerHTML=(Array.isArray(cs)&&cs.length)?cs.map(chgRow).join(''):'<span class="mut tiny">No charges yet.</span>'; }).catch(function(){ el.innerHTML='<span class="mut tiny">—</span>'; }); }
+              // recolor the status dropdown live — orange = Planned, green = Shipping
+              body.querySelectorAll('.sp-e-status').forEach(function(sel){ sel.onchange=function(){ var sh=sel.value==='Shipping';
+                sel.style.background=sh?'#dcfce7':'#ffedd5'; sel.style.color=sh?'#15803d':'#9a3412'; sel.style.borderColor=sh?'#86efac':'#fdba74'; }; });
               body.querySelectorAll('.sp-ship-save').forEach(function(btn){ btn.onclick=function(){ var ref=btn.dataset.ref;
                 var g=function(cls){ var el=body.querySelector('.'+cls+'[data-ref="'+_rfEsc(ref)+'"]'); return el?el.value:''; };
                 var stEl=body.querySelector('.sp-e-status[data-ref="'+_rfEsc(ref)+'"]');   // absent when D&B has marked it Completed
