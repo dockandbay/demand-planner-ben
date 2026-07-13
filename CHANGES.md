@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.479 - Barcodes page + carton/inner label tweaks
+
+- Barcodes grid search box: paste now filters (added an onpaste handler — paste didn't reliably fire input).
+- Barcodes grid: **labels** (download) column moved to column 1.
+- Settings ▸ Batch dropdown now sorted **descending** (newest batch first).
+- Carton/Inner label PDF: added clearance below the DOCK & BAY logo so the "BOX OF n x …" header no longer
+  sits tight against the wordmark. No migration.
+
 ## v25.478 - Timeline notes shown newest-first across all timelines
 
 Every timeline note thread now renders newest→oldest (was oldest→newest). Applied to all six render sites:

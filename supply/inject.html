@@ -5017,7 +5017,7 @@
     var l1=(nm && nm.indexOf(r.sku)>=0) ? nm.slice(0,nm.indexOf(r.sku)).trim() : (kind==='carton'?('BOX OF '+(r.carton_qty||'?')+'  x'):'INNER  x');
     var boxSku=(kind==='carton'?'BOX-':'INNER-')+r.sku, sizeName=lblSizeName(r), circle=lblCircle(r,sizeName), batch=opts.batch;
     var y=26;
-    if(opts.dbUri){ var lw=150, lh=Math.round(lw*916/1488); el.push('<image x="'+(cx-lw/2)+'" y="'+y+'" width="'+lw+'" height="'+lh+'" href="'+opts.dbUri+'" xlink:href="'+opts.dbUri+'"/>'); y+=lh+16; }
+    if(opts.dbUri){ var lw=150, lh=Math.round(lw*916/1488); el.push('<image x="'+(cx-lw/2)+'" y="'+y+'" width="'+lw+'" height="'+lh+'" href="'+opts.dbUri+'" xlink:href="'+opts.dbUri+'"/>'); y+=lh+32; }   // more gap below the logo before the "BOX OF n x" header
     else { el.push(svgText(cx,y+26,'DOCK & BAY',{size:30,bold:true,anchor:'middle',ls:0.5})); y+=48; }
     el.push(svgText(cx,y,l1,{size:21,bold:true,anchor:'middle'})); y+=27;
     el.push(svgText(cx,y,r.sku,{size:21,bold:true,anchor:'middle'})); y+=27;
@@ -5279,7 +5279,7 @@
       +'<div class="bar" id="bc-settings" style="background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:4px 8px">'
         +'<span class="pill-lbl" style="font-weight:700;margin-right:6px">Settings</span>'
         +'<span class="bar-grp"><span class="pill-lbl">Batch</span><select class="flt" id="bc-batch" style="width:auto;padding:3px 6px"><option value="">— none —</option>'
-          +batches.map(function(b){return '<option value="'+esc(b.batch)+'">'+esc(b.batch)+(b.batch_date?' · '+esc(b.batch_date):'')+'</option>';}).join('')+'</select></span>'
+          +batches.slice().sort(function(a,b){var da=a.batch_date||'',db=b.batch_date||''; if(da!==db)return da<db?1:-1; return String(a.batch)<String(b.batch)?1:-1;}).map(function(b){return '<option value="'+esc(b.batch)+'">'+esc(b.batch)+(b.batch_date?' · '+esc(b.batch_date):'')+'</option>';}).join('')+'</select></span>'
         +'<span class="bar-sep"></span>'
         +'<label class="pill-lbl bar-grp" style="cursor:pointer"><input type="checkbox" id="bc-rrp"> Show RRP</label>'
         +'<span class="bar-sep"></span>'
@@ -5307,7 +5307,8 @@
     document.getElementById('bc-sup').onchange=function(){st.sup=this.value;apply();};
     document.getElementById('bc-cat').onchange=function(){st.cat=this.value;apply();};
     document.getElementById('bc-rw').onchange=function(){st.rw=this.value;apply();};
-    document.getElementById('bc-q').oninput=function(){st.q=this.value;apply();};
+    (function(){ var bq=document.getElementById('bc-q'); bq.oninput=function(){st.q=this.value;apply();};
+      bq.onpaste=function(){ var el=this; setTimeout(function(){ st.q=el.value; apply(); },0); }; })();   // paste didn't always fire input → apply on next tick
     document.getElementById('bc-batch').onchange=function(){st.batch=this.value;apply();};
     document.getElementById('bc-rrp').onchange=function(){st.rrp=this.checked;apply();};
     document.getElementById('bc-dlfmt').onchange=function(){st.dlfmt=this.value;};
@@ -5321,10 +5322,10 @@
       else bcMakeSheet(b.dataset.kind,r,batch,st.rrp); }; }                        // default A4 Print Mold → merge sheet PDF
   function bcTable(rows,opts){ opts=opts||{}; if(!rows.length)return '<div class="count">No rows.</div>';
     var rrpCols = opts.rrp ? (opts.rmkt==='All' ? RRP_MKTS : RRP_MKTS.filter(function(m){return m[0]===opts.rmkt;})) : [];
-    var head='<div class="tw"><table class="bc-tbl"><thead><tr><th class="l" style="width:30px"></th><th class="l" style="min-width:280px">sku</th><th class="l">name</th><th class="l">size</th><th class="l">category</th><th class="l">supplier (multiple)</th>'
+    var head='<div class="tw"><table class="bc-tbl"><thead><tr><th class="l">labels</th><th class="l" style="width:30px"></th><th class="l" style="min-width:280px">sku</th><th class="l">name</th><th class="l">size</th><th class="l">category</th><th class="l">supplier (multiple)</th>'
       +'<th class="l">GRS</th><th class="l">GRS carton material</th>'
       +rrpCols.map(function(m){return '<th class="l">RRP '+m[0]+'</th>';}).join('')
-      +'<th class="l">product EAN</th><th class="l">carton EAN</th><th class="l">inner EAN</th><th class="l">labels</th></tr></thead><tbody>';
+      +'<th class="l">product EAN</th><th class="l">carton EAN</th><th class="l">inner EAN</th></tr></thead><tbody>';
     function lbl(kind,code,sku){ var n=kind==='product'?36:4; return code?'<button class="bc-lbl" data-kind="'+kind+'" data-sku="'+esc(sku)+'" title="download '+kind+' label — A4 '+n+'-up PDF, or single PNG if ‘Individual’ is ticked">'+kind.charAt(0).toUpperCase()+'</button>':''; }
     var body=rows.map(function(r){
       var grs=/GRS/i.test(r.grs_material||'');
@@ -5334,9 +5335,9 @@
       var supCell='<td class="l" style="white-space:normal;max-width:200px">'+esc(r.supplier_multiple||'')+'</td>';
       var rrpc=rrpCols.map(function(m){ var v=r[m[1]]; return '<td class="l">'+(v!=null&&v!==''?m[2]+money(v):'<span class="mut">—</span>')+'</td>'; }).join('');
       var labelsCell='<td class="l" style="white-space:nowrap">'+lbl('product',r.product_barcode,r.sku)+lbl('carton',r.carton_barcode,r.sku)+lbl('inner',r.inner_barcode,r.sku)+'</td>';
-      return '<tr><td class="l" style="width:30px">'+(r.swatch_url?'<img class="swatch" src="'+esc(r.swatch_url)+'" loading="lazy">':'')+'</td><td class="l" style="white-space:nowrap"><span style="display:inline-block;white-space:nowrap;min-width:250px">'+esc(r.sku||'')+'</span></td>'+nameCell+'<td class="l"><span title="'+esc(r.size||'')+'" style="display:inline-block;max-width:90px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle">'+esc(r.size||'')+'</span></td><td class="l">'+esc(r.category||'')+'</td>'+supCell
+      return '<tr>'+labelsCell+'<td class="l" style="width:30px">'+(r.swatch_url?'<img class="swatch" src="'+esc(r.swatch_url)+'" loading="lazy">':'')+'</td><td class="l" style="white-space:nowrap"><span style="display:inline-block;white-space:nowrap;min-width:250px">'+esc(r.sku||'')+'</span></td>'+nameCell+'<td class="l"><span title="'+esc(r.size||'')+'" style="display:inline-block;max-width:90px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle">'+esc(r.size||'')+'</span></td><td class="l">'+esc(r.category||'')+'</td>'+supCell
         +grsCell+matCell+rrpc
-        +'<td class="l bc-mono">'+esc(r.product_barcode||'')+'</td><td class="l bc-mono">'+esc(r.carton_barcode||'')+'</td><td class="l bc-mono">'+esc(r.inner_barcode||'')+'</td>'+labelsCell+'</tr>';
+        +'<td class="l bc-mono">'+esc(r.product_barcode||'')+'</td><td class="l bc-mono">'+esc(r.carton_barcode||'')+'</td><td class="l bc-mono">'+esc(r.inner_barcode||'')+'</td></tr>';
     }).join('');
     return head+body+'</tbody></table></div>'; }
 
