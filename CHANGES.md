@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.498 - "Escalate shipment" posts a timeline note + emails supply chain; red focus star
+
+Two changes:
+- **Escalate shipment → timeline note + email.** When a supplier clicks "Escalate shipment" (real shipment or
+  FOB), escalateCore now also posts a timeline note "<user> escalated this shipment" (shipment_notes for real
+  shipments, supplier_notes for FOB POs) and emails the supply-chain recipients as if the message was flagged
+  (via the `post_note` flag on the escalate endpoints). The timeline re-renders immediately so the note shows.
+- **Red focus star for escalated shipments.** On the SUPPLY ▸ Shipments grid, escalated shipments now show a
+  RED focus star (was amber/yellow) and are surfaced by the Focus filter alongside starred shipments.
+
+No migration.
+
 ## v25.497 - "Escalate shipment" now sets the escalated STATUS (filterable both sides)
 
 "Escalate shipment" previously only emailed. It now also raises the shipment's `escalated` status (via

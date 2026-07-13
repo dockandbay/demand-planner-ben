@@ -1063,8 +1063,9 @@
                   return '<div class="tiny" style="margin:2px 0;max-width:640px;display:flex;gap:8px;align-items:flex-start">'+(flag?'<div style="flex:0 0 auto;min-width:60px">'+flag+'</div>':'')+'<div style="flex:1"><span class="mut">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span> — '+esc(n.body)+'</div></div>';}).join(''):'<div class="mut tiny">No timeline entries yet.</div>');
               var _se=box.querySelector('.sp-esc-ship'); if(_se)_se.onclick=function(){ if(!confirm('Escalate this shipment to Dock & Bay by email?'))return;
                 _se.disabled=true; _se.textContent='Sending…';
-                postJSON(EP.escalate,{kind:'shipment',ref:ref,message:'Escalation requested for shipment '+ref,initiator:'supplier',set_escalated:true},function(j){ _se.textContent='✓ Escalated';
+                postJSON(EP.escalate,{kind:'shipment',ref:ref,message:'Escalation requested for shipment '+ref,initiator:'supplier',set_escalated:true,post_note:true},function(j){ _se.textContent='✓ Escalated';
                   var ent=(_ppData.shipmentPlan||[]).filter(function(x){return x.shipment_ref===ref;})[0]; if(ent)ent.escalated=true; setShipBadge&&setShipBadge();   // reflect the new escalated status (filterable)
+                  ppShipTimeline(ref);   // re-render so the "<user> escalated this shipment" note appears on the timeline
                   if(j&&j.sandbox)alert('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); };
               var _fn=box.querySelector('.sp-flag-note'); if(_fn)_fn.onclick=function(){ var msg=_fn.dataset.msg||''; if(!msg)return; if(!confirm('Email this note to the supply planner?'))return; _fn.disabled=true; _fn.textContent='Sending…';
                 postJSON(EP.escalate,{kind:'shipment',ref:_fn.dataset.ref,message:msg,initiator:'supplier'},function(j){ _fn.textContent='✓ Flagged'; if(j&&j.sandbox)alert('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); };
@@ -1277,11 +1278,14 @@
                   t=setTimeout(function(){ postJSON(EP.submit,{po:inp.dataset.po,supplier_id:_sid,submitted_by:by,completion_date:v},function(){ inp.style.borderColor='#16a34a';
                     (_ppData.subsByPo=_ppData.subsByPo||{}); (_ppData.subsByPo[inp.dataset.po]=_ppData.subsByPo[inp.dataset.po]||[]).push({kind:'completion_date',value:v,status:'pending'}); }); },800); }; });
               // FOB cards: escalate the ORDER (no shipment record) to Dock & Bay by email
-              body.querySelectorAll('.sp-esc-fob').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Escalate this order to Dock & Bay by email?'))return; var po=btn.dataset.po;
-                var _ln=((_ppData.notesByPo&&_ppData.notesByPo[po])||[]).filter(function(n){return n.author_kind==='supplier';}).slice(-1)[0];
-                var msg=(_ln&&_ln.body)||('Escalation requested for '+po);
+              body.querySelectorAll('.sp-esc-fob').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Escalate this shipment to Dock & Bay by email?'))return; var po=btn.dataset.po;
+                var msg='Escalation requested for '+po;
                 btn.disabled=true; btn.textContent='Sending…';
-                postJSON(EP.escalate,{kind:'po',ref:po,message:msg,initiator:'supplier'},function(j){ btn.textContent='✓ Escalated'; if(j&&j.sandbox)alert('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); }; });
+                postJSON(EP.escalate,{kind:'po',ref:po,message:msg,initiator:'supplier',post_note:true},function(j){ btn.textContent='✓ Escalated';
+                  var noteBody=(by||'The supplier')+' escalated this shipment';   // mirror the note the server posted so the timeline shows it
+                  (_ppData.notesByPo=_ppData.notesByPo||{}); (_ppData.notesByPo[po]=_ppData.notesByPo[po]||[]).push({po:po,author_kind:'supplier',body:noteBody,created_at:new Date().toISOString().slice(0,16).replace('T',' ')});
+                  var box=body.querySelector('.sp-fob-tl[data-po="'+(window.CSS&&CSS.escape?CSS.escape(po):po)+'"]'); if(box)box.innerHTML=fobTLHtml(po);
+                  if(j&&j.sandbox)alert('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); }; });
               // FOB cards: timeline note → PO note (author supplier)
               body.querySelectorAll('.sp-fob-note-post').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po, ta=body.querySelector('.sp-fob-note-body[data-po="'+(window.CSS&&CSS.escape?CSS.escape(po):po)+'"]'); var v=ta?(ta.value||'').trim():''; if(!v)return; btn.disabled=true;
                 postJSON(EP.note,{po:po,supplier_id:_sid,body:v,author_kind:'supplier',author_email:by},function(){ btn.disabled=false;

@@ -45,6 +45,7 @@
 #supply-root .fav-star{background:none;border:none;cursor:pointer;font-size:15px;line-height:1;padding:0 1px;margin-left:4px;color:#94a3b8;vertical-align:middle}
 #supply-root .fav-star:hover{color:#f59e0b}
 #supply-root .fav-star.on{color:#f59e0b}
+#supply-root .fav-star.esc{color:#dc2626}   /* escalated shipment → red focus star */
 #supply-root .pill.po-focus,#supply-root .pill.ship-focus{background:#fffbeb;color:#b45309;border-color:#fcd34d}
 #supply-root .pill.po-focus:hover,#supply-root .pill.ship-focus:hover{background:#fef3c7;color:#b45309}
 #supply-root .pill.po-focus.active,#supply-root .pill.ship-focus.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
@@ -3576,7 +3577,7 @@
     c.innerHTML=annot('shipments')+lookupDatalists()+dl('carrierlist',CARRIERS)
       +'<div class="bar" style="flex-wrap:wrap;gap:6px">'+FILTERS.map(function(f){return '<span class="pill'+(f[0]===state.f?' active':'')+'" data-f="'+f[0]+'">'+f[1]+'</span>';}).join('')
       +'<span class="pill ship-recent'+(state.recent?' active':'')+'" data-recent title="when on, Completed shows only shipments that arrived in the last 12 months (faster)">📅 Last 12m</span>'
-      +'<span class="pill ship-focus'+(state.focus?' active':'')+'" data-focus title="show only starred shipments (active only — completed are hidden)">★ Focus</span>'
+      +'<span class="pill ship-focus'+(state.focus?' active':'')+'" data-focus title="show only starred or escalated shipments (active only — completed are hidden)">★ Focus</span>'
       +'<span class="sh-filt-row">'
       +'<select class="flt" id="ship-ctry" style="width:auto"><option value="">All countries</option>'+ctrys.map(function(c){return '<option>'+esc(c)+'</option>';}).join('')+'</select>'
       +'<select class="flt" id="ship-br" style="width:auto"><option value="">All branches</option>'+brList.map(function(b){return '<option>'+esc(b)+'</option>';}).join('')+'</select>'
@@ -3592,7 +3593,7 @@
       if(state.fob==='nonfob' && s.mode_eff==='fob')return false;    // non-FOB only
       if(searching)return true;   // a shipment / PO search overrides the status filter (find it whatever its status)
       var complete=(s.status==='Complete'||s.status==='Completed');
-      if(state.focus)return s.starred && !complete;   // Focus = starred + active only (overrides status)
+      if(state.focus)return (s.starred || s.escalated) && !complete;   // Focus = starred OR escalated, active only (overrides status)
       if(state.recent && complete && !(shipRecentDate(s)>=RECENT_CUT))return false;   // completed default: last 12 months
       if(state.f==='all')return true; if(state.f==='escalated')return !!s.escalated; if(state.f==='exceptions')return shipIsExc(s); if(state.f==='completed')return complete;
       if(state.f==='shipping')return !complete && s.status==='Shipping';   // shipping = in transit
@@ -3757,7 +3758,7 @@
     var mast=(s.master_po&&s.master_po!==s.shipment_ref)?(' <span class="mut tiny">★'+esc(s.master_po)+'</span>'):'';
     var alert=shipActBadge(s);   // snoozable "A" count badge (supersedes the old inline ⚠ exception tag)
     var fxl=s.flex_id?(' <a href="https://app.flexport.com/shipments/'+((String(s.carrier_ref||s.flex_id).match(/\d+/)||[''])[0])+'" target="_blank" rel="noopener" class="mut" title="open in Flexport" style="text-decoration:none">↗</a>'):'';
-    return '<tr><td class="l"><button class="planbtn po-exp" data-ref="'+esc(s.shipment_ref)+'" data-i="'+i+'">PLAN</button><button class="fav-star'+(s.starred?' on':'')+'" data-star-ref="'+esc(s.shipment_ref)+'" title="Focus / favourite">'+(s.starred?'★':'☆')+'</button> <span class="sh-unread" data-ref="'+esc(s.shipment_ref)+'">'+shUnreadBadge(s.unread_notes)+'</span>'+(s.pending_charges>0?' <span class="ex-badge" style="background:#16a34a" title="'+s.pending_charges+' freight charge(s) to review — open ▸ Charges">'+s.pending_charges+'</span>':'')+'</td>'
+    return '<tr><td class="l"><button class="planbtn po-exp" data-ref="'+esc(s.shipment_ref)+'" data-i="'+i+'">PLAN</button><button class="fav-star'+(s.escalated?' esc':(s.starred?' on':''))+'" data-star-ref="'+esc(s.shipment_ref)+'" title="'+(s.escalated?'Escalated — shown in Focus':'Focus / favourite')+'">'+((s.escalated||s.starred)?'★':'☆')+'</button> <span class="sh-unread" data-ref="'+esc(s.shipment_ref)+'">'+shUnreadBadge(s.unread_notes)+'</span>'+(s.pending_charges>0?' <span class="ex-badge" style="background:#16a34a" title="'+s.pending_charges+' freight charge(s) to review — open ▸ Charges">'+s.pending_charges+'</span>':'')+'</td>'
         +'<td class="l sh-refcell"><b>'+esc(s.shipment_ref)+'</b>'+mast+alert+'</td>'
         +'<td class="l">'+(s.escalated?'<span class="tool-badge bg-red" title="escalated by the supplier in the portal">⚑ ESCALATED</span>':'<span class="mut">—</span>')+'</td>'
         +'<td class="l">'+shipStatusSel(ep,s.status)+'</td>'
