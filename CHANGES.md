@@ -3,6 +3,21 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.504 - Fix: shipped PO shows production status + completion date; stamp completion date on shipping
+
+Following on from v25.503 (the propagation was actually working server-side, but the portal showed stale/blank
+values):
+- **Duplicate `completion_date` alias fixed.** POS_SQL_PORTAL aliased BOTH end_production_overide AND
+  pay_completion_date as `completion_date`, so the payment one shadowed the production one — the portal's
+  "Completion date" always read the (blank) payment date. Production completion is now returned as
+  `prod_completion_date`; poCdVal reads it.
+- **Completion date stamped on shipping.** propagateShippingToPOs now also sets end_production_overide =
+  today when it's blank (completion date → today if blank), alongside status=SHIPPING / production_status='shipped'.
+- **Portal refreshes after a Shipping save.** Marking a shipment Shipping now reloads the portal so the PO tab
+  immediately reflects the advanced production status + completion date (was stale until manual reload).
+
+No migration.
+
 ## v25.503 - Fix: master PO recognises its own shipment; Shipping propagation reaches the master + preview
 
 Two fixes for the consolidated-shipment case (a master PO whose own shipment_ref is blank, with child POs

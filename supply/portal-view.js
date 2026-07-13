@@ -525,7 +525,7 @@
       return effEnd < new Date().toISOString().slice(0,10); }
     // Completion date the supplier has provided: latest non-dismissed completion_date submission, else the
     // applied end_production_overide (p.completion_date). Blank = supplier hasn't entered one yet.
-    function poCdVal(p, subsArr){ subsArr=subsArr||[]; var v=''; subsArr.forEach(function(s){ if(s.kind==='completion_date'&&s.status!=='dismissed'&&s.value) v=s.value; }); return v||(p&&p.completion_date)||''; }
+    function poCdVal(p, subsArr){ subsArr=subsArr||[]; var v=''; subsArr.forEach(function(s){ if(s.kind==='completion_date'&&s.status!=='dismissed'&&s.value) v=s.value; }); return v||(p&&(p.prod_completion_date||p.completion_date))||''; }
     // "Must enter completion date" exception — a confirmation-required, not-yet-shipped PO with no completion date.
     function poCdMissing(p, subsArr){ return !!(p&&p.require_confirmation) && p.production_status!=='shipped' && !poCdVal(p, subsArr); }
     // ── Minimal XLSX writer (ported from the main app) so PRODUCTIONS can export the same ORDER PLAN .xlsx ──
@@ -1341,6 +1341,8 @@
                   var ent=(_ppData.shipmentPlan||[]).filter(function(x){return x.shipment_ref===ref;})[0];
                   if(ent){ ent.carrier=payload.carrier; ent.carrier_ref=payload.carrier_ref; ent.departure=payload.departure_date; if(stEl)ent.status=payload.status; }
                   if(j&&j.date_note&&typeof ppShipTimeline==='function')ppShipTimeline(ref);   // show the "set ship date" note
+                  // Shipping advances the POs on board (status + production_status 'shipped' + completion date) — reload so the PO tab reflects it
+                  if(stEl&&stEl.value==='Shipping'&&typeof reload==='function'){ setTimeout(reload,600); }
                 }); }; });
               body.querySelectorAll('.sp-chg-go').forEach(function(btn){ btn.onclick=function(){ var ref=btn.dataset.ref;
                 var cEl=body.querySelector('.sp-chg-cost[data-ref="'+_rfEsc(ref)+'"]'), dEl=body.querySelector('.sp-chg-desc[data-ref="'+_rfEsc(ref)+'"]');

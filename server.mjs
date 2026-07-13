@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.503';
+const APP_VERSION = 'v25.504';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -4428,7 +4428,9 @@ app.post('/api/supply/po/:po/set-shipping', async (req, res) => {
 async function propagateShippingToPOs(ref) {
   if (!ref) return 0;
   return (await pool.query(`UPDATE planner.purchase_orders SET status='SHIPPING', production_status='shipped',
-    production_confirmed_at=coalesce(production_confirmed_at,now()), updated_at=now()
+    production_confirmed_at=coalesce(production_confirmed_at,now()),
+    end_production_overide=coalesce(end_production_overide, current_date),   -- completion date → today if blank
+    updated_at=now()
     WHERE (shipment_ref=$1 OR po=$1 OR po=(SELECT master_po FROM planner.shipments WHERE shipment_ref=$1 LIMIT 1))
       AND status ILIKE '%production%'`, [ref])).rowCount;
 }
@@ -6060,7 +6062,7 @@ const POS_SQL_PORTAL = `
   SELECT po, supplier_name, status,
     to_char(start_production,'YYYY-MM-DD') prod_start,
     to_char(eff_prod_end,'YYYY-MM-DD') prod_end,
-    to_char(end_production_overide,'YYYY-MM-DD') completion_date,
+    to_char(end_production_overide,'YYYY-MM-DD') prod_completion_date,   -- production completion (was aliased 'completion_date', shadowed by the payment one below)
     to_char(eff_ship,'YYYY-MM-DD') ship,
     flexport_reference, flex_id, value_est,
     round(supplier_invoice_total,2) final_invoice, round(val,2) value_used,
