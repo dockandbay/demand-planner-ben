@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.484 - Payments refresh after final-cost edit + narrower Credit amount box
+
+- Editing an order-plan line's final cost now marks the PO detail stale; opening the Payments (or Landed
+  Costs) sub-tab rebuilds it with the recalculated figures (was showing stale plan-price calcs).
+- Credit amount input narrowed (~8 chars, fits "9,999.00"). No migration.
+
 ## v25.483 - Payments: Credit amount moved under Final invoice amount
 
 On SUPPLY ▸ Purchase Orders ▸ Payments, the "Credit amount" field moved from the payment-plan table up into

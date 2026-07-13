@@ -2241,7 +2241,7 @@
       +'<div class="cli-form" style="max-width:760px">'
       +cliRow('Estimate <span class="mut tiny">(order plan)</span>', money(r.value_est))
       +cliRow('<b>Final invoice amount</b>', '<input class="fci payin" style="width:120px;text-align:left" inputmode="decimal" data-ep="'+ep+'" data-field="supplier_invoice_total" value="'+esc(r.final_invoice==null?'':r.final_invoice)+'"> <span class="mut tiny">blank = use estimate</span>')
-      +cliRow('<b>Credit amount</b> <span class="mut tiny">added to invoice · paid in the balance</span>', payIn(ep,'credit_amount',r.credit_amount))
+      +cliRow('<b>Credit amount</b> <span class="mut tiny">added to invoice · paid in the balance</span>', payIn(ep,'credit_amount',r.credit_amount,false,false,'style="width:90px;text-align:left"'))
       // Supplier-submitted invoice total (from the portal) — shown right next to the Final invoice amount so it
       // can be reviewed and applied. "Apply → final" writes it into supplier_invoice_total; the doc downloads here.
       +(function(){ var si=d&&d.sup_invoice, docs=(d&&d.sup_docs)||[]; var out='';
@@ -2652,7 +2652,7 @@
       inp.oninput=recalc;
       inp.onchange=function(){ recalc(); inp.classList.add('saved');
         fetch('/api/supply/po-line-final',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:inp.dataset.po,sku:inp.dataset.sku,final_cost:inp.value.trim()===''?null:inp.value.trim()})}).then(function(r){return r.json();})
-          .then(function(j){ if(j&&j.error)throw new Error(j.error); })
+          .then(function(j){ if(j&&j.error)throw new Error(j.error); var pd=document.getElementById('podet-'+i); if(pd)pd.dataset.calcStale='1'; invalidateDerived(); })   // value-driven tabs (Payments/Landed) rebuild when next opened
           .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; });
     // timeline — post a note (notifies the supplier) / toggle read-unread on a supplier note
     document.querySelectorAll('#podet-'+i+' .po-note-post').forEach(function(b){ b.onclick=function(){ var ta=document.querySelector('#podet-'+i+' .po-note-body[data-po="'+CSS.escape(b.dataset.po)+'"]'); var v=(ta&&ta.value||'').trim(); if(!v)return; b.disabled=true;
@@ -2719,7 +2719,11 @@
     if(root) root.querySelectorAll('.potab').forEach(function(b){ b.onclick=function(){ var pt=b.dataset.pt;
       root.querySelectorAll('.potab').forEach(function(x){x.classList.toggle('active',x===b);});
       root.querySelectorAll('.potab-panel').forEach(function(p){p.style.display=(p.dataset.pt===pt)?'':'none';});
-      if(b.dataset.po) writePoTabHash(b.dataset.po, pt); }; });   // deep-link the open sub-tab into the URL
+      if(b.dataset.po) writePoTabHash(b.dataset.po, pt);
+      // an order-plan final-cost edit marks the panel stale → rebuild the value-driven tabs (Payments/Landed)
+      // with fresh figures when they're opened (poRefetchPanel keeps the just-activated tab)
+      var pd=document.getElementById('podet-'+i);
+      if(pd && pd.dataset.calcStale==='1' && (pt==='pay'||pt==='landed')){ pd.dataset.calcStale=''; poRefetchPanel(po,i); } }; });   // deep-link the open sub-tab into the URL
     setupMobSubnav(root); bindDatePickers(); }
   // PO ▸ DOCUMENTS tab: every file held for this PO (all categories) — list + download + delete + upload.
   function docsPanel(po,d){ var docs=(d&&d.all_docs)||[];
