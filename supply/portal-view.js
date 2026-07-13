@@ -1341,8 +1341,9 @@
                   var ent=(_ppData.shipmentPlan||[]).filter(function(x){return x.shipment_ref===ref;})[0];
                   if(ent){ ent.carrier=payload.carrier; ent.carrier_ref=payload.carrier_ref; ent.departure=payload.departure_date; if(stEl)ent.status=payload.status; }
                   if(j&&j.date_note&&typeof ppShipTimeline==='function')ppShipTimeline(ref);   // show the "set ship date" note
-                  // Shipping advances the POs on board (status + production_status 'shipped' + completion date) — reload so the PO tab reflects it
-                  if(stEl&&stEl.value==='Shipping'&&typeof reload==='function'){ setTimeout(reload,600); }
+                  // Shipping advances the POs on board (status + production_status 'shipped' + completion date).
+                  // Refresh _ppData SILENTLY (no Loading… flash / no view reset) so the PO tab reflects it next view.
+                  if(stEl&&stEl.value==='Shipping'){ opts.getData().then(function(d){ if(d){ if(d.notesByPo)Object.keys(d.notesByPo).forEach(function(k){ shortNotes(d.notesByPo[k]); }); _ppData=d; } }).catch(function(){}); }
                 }); }; });
               body.querySelectorAll('.sp-chg-go').forEach(function(btn){ btn.onclick=function(){ var ref=btn.dataset.ref;
                 var cEl=body.querySelector('.sp-chg-cost[data-ref="'+_rfEsc(ref)+'"]'), dEl=body.querySelector('.sp-chg-desc[data-ref="'+_rfEsc(ref)+'"]');

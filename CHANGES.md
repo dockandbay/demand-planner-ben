@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.505 - Portal: silent refresh after a Shipping save (no Loading flash / view reset)
+
+The post-Shipping portal refresh is now silent — instead of reload() (which blanked the view with "Loading…"
+and reset the current tab), the Shipping save re-fetches the bootstrap data in the background and swaps _ppData
+quietly. The PO tab shows the advanced production status + completion date next time it's viewed, with no flash.
+
+No migration.
+
 ## v25.504 - Fix: shipped PO shows production status + completion date; stamp completion date on shipping
 
 Following on from v25.503 (the propagation was actually working server-side, but the portal showed stale/blank
