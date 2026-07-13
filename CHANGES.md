@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.501 - Portal Shipment Plan: supplier status limited to Planned / Shipping
+
+Suppliers can only set a shipment to **Planned** or **Shipping** (their final stage) — 'Completed' stays
+Dock & Bay-controlled. If D&B has already marked a shipment Completed, the portal shows a read-only
+"Completed — set by Dock & Bay" label instead of the dropdown. The `POST /api/portal/shipment/:ref`
+endpoint now rejects any status other than Planned/Shipping. Internal supply-plan grid keeps all three
+stages unchanged.
+
 ## v25.500 - Portal Shipment Plan: supplier can update the shipment (carrier/tracking/ship date/status) + add a charge
 
 Restored/added inline editing on each real-shipment card in the supplier portal Shipment Plan:

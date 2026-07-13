@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.500';
+const APP_VERSION = 'v25.501';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -7121,7 +7121,7 @@ app.post('/api/portal/shipment-note', portalAuth, async (req, res) => {   // sup
 app.post('/api/portal/shipment/:ref', portalAuth, async (req, res) => {
   const ref = req.params.ref, b = req.body || {};
   const ALLOW = { carrier: 'text', carrier_ref: 'text', status: 'text', departure_date: 'date' };
-  const STATUSES = ['Planned', 'Shipping', 'Completed'];
+  const STATUSES = ['Planned', 'Shipping'];   // suppliers can only move a shipment to Shipping; 'Completed' is Dock & Bay-only
   try {
     if (!await portalOwnsShipmentRef(req, ref)) return res.status(403).json({ error: 'not your shipment' });
     if (b.status != null && b.status !== '' && !STATUSES.includes(b.status)) return res.status(400).json({ error: 'invalid status' });

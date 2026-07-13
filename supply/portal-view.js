@@ -1041,7 +1041,7 @@
                 +'</div>';
               // supplier-editable panel — carrier / tracking / ship date / status (writes straight to the shipment)
               var _u=String(s.status||'').toLowerCase(), stNorm=(_u==='active'?'Shipping':(_u==='complete'||_u==='completed')?'Completed':(s.status||'Planned'));
-              var STO=['Planned','Shipping','Completed'];
+              var STO=['Planned','Shipping'];   // supplier-settable stages only; 'Completed' stays Dock & Bay-controlled
               function eLbl(t){ return '<div class="mut" style="font-size:10px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px">'+t+'</div>'; }
               var rf=esc(s.shipment_ref);
               var editPanel='<div style="margin-top:10px;padding:10px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:7px">'
@@ -1050,7 +1050,9 @@
                   +'<div>'+eLbl('Carrier')+'<input class="fci txt sp-e-carrier" data-ref="'+rf+'" value="'+esc(s.carrier||'')+'" placeholder="carrier…" style="width:140px;text-align:left"></div>'
                   +'<div>'+eLbl('Tracking code')+'<input class="fci txt sp-e-trk" data-ref="'+rf+'" value="'+esc(s.carrier_ref||'')+'" placeholder="tracking…" style="width:170px;text-align:left"></div>'
                   +'<div>'+eLbl('Ship date')+'<input type="date" class="fci sp-e-date" data-ref="'+rf+'" value="'+esc(s.departure||'')+'" style="width:150px;text-align:left"></div>'
-                  +'<div>'+eLbl('Status')+'<select class="fci sp-e-status" data-ref="'+rf+'" style="width:130px">'+STO.map(function(o){return '<option'+(o===stNorm?' selected':'')+'>'+o+'</option>';}).join('')+'</select></div>'
+                  +'<div>'+eLbl('Status')+(stNorm==='Completed'
+                    ? '<div style="font-weight:700;color:#1d4ed8;font-size:13px;padding:4px 0">Completed</div><div class="tiny mut">set by Dock &amp; Bay</div>'
+                    : '<select class="fci sp-e-status" data-ref="'+rf+'" style="width:130px">'+STO.map(function(o){return '<option'+(o===stNorm?' selected':'')+'>'+o+'</option>';}).join('')+'</select>')+'</div>'
                   +'<button class="save-btn sp-ship-save" data-ref="'+rf+'" style="background:#16a34a;color:#fff;border-color:#15803d">Save</button>'
                 +'</div></div>';
               var chgPanel='<div style="margin-top:10px;padding:10px 12px;background:#fffbeb;border:1px solid #fde68a;border-radius:7px">'
@@ -1326,13 +1328,15 @@
                   el.innerHTML=(Array.isArray(cs)&&cs.length)?cs.map(chgRow).join(''):'<span class="mut tiny">No charges yet.</span>'; }).catch(function(){ el.innerHTML='<span class="mut tiny">—</span>'; }); }
               body.querySelectorAll('.sp-ship-save').forEach(function(btn){ btn.onclick=function(){ var ref=btn.dataset.ref;
                 var g=function(cls){ var el=body.querySelector('.'+cls+'[data-ref="'+_rfEsc(ref)+'"]'); return el?el.value:''; };
-                var payload={ carrier:g('sp-e-carrier'), carrier_ref:g('sp-e-trk'), departure_date:g('sp-e-date'), status:g('sp-e-status') };
+                var stEl=body.querySelector('.sp-e-status[data-ref="'+_rfEsc(ref)+'"]');   // absent when D&B has marked it Completed
+                var payload={ carrier:g('sp-e-carrier'), carrier_ref:g('sp-e-trk'), departure_date:g('sp-e-date') };
+                if(stEl)payload.status=stEl.value;
                 btn.disabled=true; var ot=btn.textContent; btn.textContent='Saving…';
                 postJSON(EP.shipmentUpdate+encodeURIComponent(ref),payload,function(j){ btn.disabled=false;
                   if(j&&j.error){ btn.textContent=ot; alert('Failed: '+j.error); return; }
                   btn.textContent='✓ Saved'; setTimeout(function(){ btn.textContent=ot; },1500);
                   var ent=(_ppData.shipmentPlan||[]).filter(function(x){return x.shipment_ref===ref;})[0];
-                  if(ent){ ent.carrier=payload.carrier; ent.carrier_ref=payload.carrier_ref; ent.departure=payload.departure_date; ent.status=payload.status; }
+                  if(ent){ ent.carrier=payload.carrier; ent.carrier_ref=payload.carrier_ref; ent.departure=payload.departure_date; if(stEl)ent.status=payload.status; }
                   if(j&&j.date_note&&typeof ppShipTimeline==='function')ppShipTimeline(ref);   // show the "set ship date" note
                 }); }; });
               body.querySelectorAll('.sp-chg-go').forEach(function(btn){ btn.onclick=function(){ var ref=btn.dataset.ref;
