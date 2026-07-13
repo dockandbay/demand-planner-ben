@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.486 - Portal Shipment Plan date bands: real shipments now get a production-end date
+
+The shipment-plan builder only set `prod_end` on FOB entries, so real shipments all fell into the "No
+production end date" band. Now each real shipment gets `prod_end` = the latest production-end across its POs
+aboard (override ▸ start + supplier days) — so they sort into the DUE NOW / DUE SOON / UPCOMING / 6+ bands.
+Verified: 38/39 real shipments now carry a date. No migration.
+
 ## v25.485 - Samples: SKU edits save with ✓ Done (no separate Save SKUs button)
 
 On SUPPLY ▸ Samples, editing SKUs no longer needs its own "Save SKUs" button — the SKU lines now persist as

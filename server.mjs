@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.485';
+const APP_VERSION = 'v25.486';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1271,6 +1271,7 @@ async function buildShipmentPlan() {
       to_char(coalesce(sh.departure_date, fx.departure_date),'YYYY-MM-DD') departure,
       to_char(coalesce(sh.landing_date, fx.landing_date),'YYYY-MM-DD') landing,
       to_char(coalesce(sh.arrival_date, fx.arrival_date),'YYYY-MM-DD') arrival,
+      to_char(coalesce(p.end_production_overide, p.start_production + (coalesce(sup.production_days,0)||' days')::interval)::date,'YYYY-MM-DD') prod_end,
       p.po, coalesce(p.supplier_name,'') supplier_name, coalesce(p.client,'') client,
       upper(coalesce(nullif(p.country_code,''), b.country_code, '')) country,
       to_char(p.client_deadline_date,'YYYY-MM-DD') client_deadline,
@@ -1280,6 +1281,7 @@ async function buildShipmentPlan() {
     FROM planner.purchase_orders p
     LEFT JOIN planner.shipments sh ON sh.shipment_ref=p.shipment_ref
     LEFT JOIN planner.branches b ON b.name=p.branch
+    LEFT JOIN planner.suppliers sup ON sup.id=p.supplier_id
     LEFT JOIN LATERAL (SELECT f.flex_id, f.mode, f.departure_date, f.landing_date, f.arrival_date FROM planner.flexport_shipments f
       WHERE f.flex_id=sh.carrier_ref OR f.shipment_name=p.shipment_ref OR f.flex_id=p.flexport_reference
       ORDER BY (f.flex_id=p.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true
@@ -1287,7 +1289,8 @@ async function buildShipmentPlan() {
     ORDER BY p.shipment_ref, (p.po = coalesce(sh.master_po, p.shipment_ref)) DESC, p.po`);
   const byRef = {};
   rows.forEach(r => { let s = byRef[r.shipment_ref];
-    if (!s) s = byRef[r.shipment_ref] = { shipment_ref: r.shipment_ref, master_po: r.master_po, mode: r.mode, carrier: r.carrier, carrier_ref: r.carrier_ref, flex_id: r.flex_id, departure: r.departure, landing: r.landing, arrival: r.arrival, escalated: !!r.escalated, master_client: '', master_deadline: '', master_supplier: '', country: '', total_pallets: 0, suppliers: [], members: [] };
+    if (!s) s = byRef[r.shipment_ref] = { shipment_ref: r.shipment_ref, master_po: r.master_po, mode: r.mode, carrier: r.carrier, carrier_ref: r.carrier_ref, flex_id: r.flex_id, departure: r.departure, landing: r.landing, arrival: r.arrival, prod_end: '', escalated: !!r.escalated, master_client: '', master_deadline: '', master_supplier: '', country: '', total_pallets: 0, suppliers: [], members: [] };
+    if (r.prod_end && r.prod_end > s.prod_end) s.prod_end = r.prod_end;   // shipment production-end = latest across its POs (drives the portal date bands)
     s.total_pallets += Number(r.pallets) || 0;
     if (s.suppliers.indexOf(r.supplier_name) < 0 && r.supplier_name) s.suppliers.push(r.supplier_name);
     if (r.country && (r.is_master || !s.country)) s.country = r.country;
