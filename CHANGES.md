@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.511 - Migration 117 fix: exclude "READY TO SHIP" from the shipped backfill
+
+Corrected migration 117 to use `status ILIKE 'ship%'` (not `'%ship%'`) so it no longer catches
+"READY TO SHIP" (a pre-ship status). Verified against live: would set 1,175 COMPLETE POs to shipped and
+leave the 11 READY TO SHIP untouched. Still needs to be RUN on live (not yet applied there).
+
 ## v25.510 - Migration 117: backfill production_status='shipped' for completed/delivered POs
 
 Added `migrations/117_completed_delivered_prodstatus_shipped.sql` — extends migration 115 (which covered
