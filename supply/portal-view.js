@@ -52,10 +52,14 @@
     var e=prodStatusException(ps, prodStart, effEnd); if(e)return e; if(!ps)return 'Please set your production status'; return ''; }
   // timeline notes shown newest-first (descending by created_at)
   function tlDesc(a){ return (a||[]).slice().sort(function(x,y){ var cx=String(x.created_at||''), cy=String(y.created_at||''); return cx<cy?1:(cx>cy?-1:0); }); }
+  // PO status colours — aligned to the production-status progression: planned/future grey → production amber
+  // → shipping blue → completed/delivered green
   function statusBg(s){ var u=String(s||'').toUpperCase();
-    if(u.indexOf('FUTURE')>=0)return 'bg-neutral'; if(u.indexOf('PRODUCTION')>=0)return 'bg-amber';
-    if(u.indexOf('SHIP')>=0||u.indexOf('READY')>=0)return 'bg-red';
-    if(u.indexOf('COMPLETE')>=0||u.indexOf('DELIVER')>=0)return 'bg-green'; return 'bg-blue'; }
+    if(u.indexOf('COMPLETE')>=0||u.indexOf('DELIVER')>=0)return 'bg-green';
+    if(u.indexOf('SHIP')>=0)return 'bg-blue';
+    if(u.indexOf('PRODUCTION')>=0||u.indexOf('READY')>=0)return 'bg-amber';
+    if(u.indexOf('FUTURE')>=0||u.indexOf('PLAN')>=0)return 'bg-neutral';
+    return 'bg-neutral'; }
   // ── label/barcode PDF subsystem (extracted from inject.html; assets scoped to /api/portal) ──
   function ean13Pattern(code){ code=String(code||'').replace(/\D/g,''); if(code.length===12)code='0'+code; if(code.length!==13)return null;
     var L={'0':'0001101','1':'0011001','2':'0010011','3':'0111101','4':'0100011','5':'0110001','6':'0101111','7':'0111011','8':'0110111','9':'0001011'};
