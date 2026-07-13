@@ -1039,6 +1039,28 @@
                 +(s.master_client?spCell('Client', esc(s.master_client)):'')
                 +(s.master_deadline?spCell('Client deadline', esc(fd(s.master_deadline))):'')
                 +'</div>';
+              // supplier-editable panel — carrier / tracking / ship date / status (writes straight to the shipment)
+              var _u=String(s.status||'').toLowerCase(), stNorm=(_u==='active'?'Shipping':(_u==='complete'||_u==='completed')?'Completed':(s.status||'Planned'));
+              var STO=['Planned','Shipping','Completed'];
+              function eLbl(t){ return '<div class="mut" style="font-size:10px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px">'+t+'</div>'; }
+              var rf=esc(s.shipment_ref);
+              var editPanel='<div style="margin-top:10px;padding:10px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:7px">'
+                +'<div style="font-weight:700;font-size:12px;color:#166534;margin-bottom:8px">📝 Update this shipment</div>'
+                +'<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">'
+                  +'<div>'+eLbl('Carrier')+'<input class="fci txt sp-e-carrier" data-ref="'+rf+'" value="'+esc(s.carrier||'')+'" placeholder="carrier…" style="width:140px;text-align:left"></div>'
+                  +'<div>'+eLbl('Tracking code')+'<input class="fci txt sp-e-trk" data-ref="'+rf+'" value="'+esc(s.carrier_ref||'')+'" placeholder="tracking…" style="width:170px;text-align:left"></div>'
+                  +'<div>'+eLbl('Ship date')+'<input type="date" class="fci sp-e-date" data-ref="'+rf+'" value="'+esc(s.departure||'')+'" style="width:150px;text-align:left"></div>'
+                  +'<div>'+eLbl('Status')+'<select class="fci sp-e-status" data-ref="'+rf+'" style="width:130px">'+STO.map(function(o){return '<option'+(o===stNorm?' selected':'')+'>'+o+'</option>';}).join('')+'</select></div>'
+                  +'<button class="save-btn sp-ship-save" data-ref="'+rf+'" style="background:#16a34a;color:#fff;border-color:#15803d">Save</button>'
+                +'</div></div>';
+              var chgPanel='<div style="margin-top:10px;padding:10px 12px;background:#fffbeb;border:1px solid #fde68a;border-radius:7px">'
+                +'<div style="font-weight:700;font-size:12px;color:#92400e;margin-bottom:6px">💰 Freight charges</div>'
+                +'<div class="sp-chg-list" data-ref="'+rf+'"><span class="mut tiny">Loading…</span></div>'
+                +'<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-top:8px">'
+                  +'<div>'+eLbl('Freight cost')+'<input class="fci sp-chg-cost" data-ref="'+rf+'" placeholder="0.00" style="width:100px;text-align:right"></div>'
+                  +'<div>'+eLbl('Description')+'<input class="fci txt sp-chg-desc" data-ref="'+rf+'" placeholder="e.g. fuel surcharge" style="width:220px;text-align:left"></div>'
+                  +'<button class="save-btn sp-chg-go" data-ref="'+rf+'">Add charge</button>'
+                +'</div><div class="tiny mut" style="margin-top:4px">Charges go to Dock &amp; Bay to review.</div></div>';
               return '<div class="sp-card" style="border:1px solid '+(s.escalated?'#fca5a5':'#e0e0e0')+';border-radius:8px;margin-bottom:10px;background:'+(s.escalated?'#fef2f2':'#fff')+'">'
                 +'<div class="sp-head" style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:10px 12px;cursor:pointer">'
                 +'<span class="sp-toggle" style="font-size:12px;color:#475569">▸</span>'
@@ -1049,6 +1071,7 @@
                 +'</div>'
                 +'<div class="sp-body" style="display:none;padding:0 12px 12px">'+datesStrip+'<div style="margin-top:8px">'+members+'</div>'
                 +(s.members||[]).map(function(m){return dtcBlock(m.po);}).join('')
+                +editPanel+chgPanel
                 +'<div style="margin-top:10px"><div class="mut tiny" style="margin-bottom:3px">Download a consolidated shipment tax invoice</div><button class="save-btn pp-ship-inv" data-ref="'+esc(s.shipment_ref)+'" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd" title="download the consolidated Tax Invoice + Packing List for this shipment">📄 Tax Invoice</button></div>'
                 +'<div class="sp-timeline" data-ref="'+esc(s.shipment_ref)+'" style="margin-top:8px;border-top:1px solid #f1f1f1;padding-top:6px"></div></div></div>'; }
             var _sorted=rows.slice().map(function(s){return {s:s,b:_bucketOf(s)};}).sort(function(a,b){ if(a.b!==b.b)return a.b-b.b; var pa=a.s.prod_end||'~', pb=b.s.prod_end||'~'; return pa<pb?-1:pa>pb?1:0; });
@@ -1295,6 +1318,33 @@
                 postJSON(EP.note,{po:po,supplier_id:_sid,body:v,author_kind:'supplier',author_email:by},function(){ btn.disabled=false;
                   (_ppData.notesByPo=_ppData.notesByPo||{}); (_ppData.notesByPo[po]=_ppData.notesByPo[po]||[]).push({po:po,author_kind:'supplier',body:v,created_at:new Date().toISOString().slice(0,16).replace('T',' ')});
                   if(ta)ta.value=''; var box=body.querySelector('.sp-fob-tl[data-po="'+(window.CSS&&CSS.escape?CSS.escape(po):po)+'"]'); if(box)box.innerHTML=fobTLHtml(po); }); }; });
+              // Real shipments: supplier edits carrier / tracking / ship date / status → direct write to the shipment
+              var _rfEsc=function(r){ return window.CSS&&CSS.escape?CSS.escape(r):r; };
+              var chgRow=function(c){ var t=(Number(c.freight_cost)||0)+(Number(c.product_cost)||0); return '<div class="tiny" style="margin:2px 0">'+chgChip(c.status)+' &nbsp;'+money(t)+(c.description?' · '+esc(c.description):'')+'</div>'; };
+              function loadShipCharges(el){ if(!el||el.dataset.loaded)return; el.dataset.loaded='1'; var ref=el.dataset.ref;
+                fetch(EP.shipmentChargesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(cs){
+                  el.innerHTML=(Array.isArray(cs)&&cs.length)?cs.map(chgRow).join(''):'<span class="mut tiny">No charges yet.</span>'; }).catch(function(){ el.innerHTML='<span class="mut tiny">—</span>'; }); }
+              body.querySelectorAll('.sp-ship-save').forEach(function(btn){ btn.onclick=function(){ var ref=btn.dataset.ref;
+                var g=function(cls){ var el=body.querySelector('.'+cls+'[data-ref="'+_rfEsc(ref)+'"]'); return el?el.value:''; };
+                var payload={ carrier:g('sp-e-carrier'), carrier_ref:g('sp-e-trk'), departure_date:g('sp-e-date'), status:g('sp-e-status') };
+                btn.disabled=true; var ot=btn.textContent; btn.textContent='Saving…';
+                postJSON(EP.shipmentUpdate+encodeURIComponent(ref),payload,function(j){ btn.disabled=false;
+                  if(j&&j.error){ btn.textContent=ot; alert('Failed: '+j.error); return; }
+                  btn.textContent='✓ Saved'; setTimeout(function(){ btn.textContent=ot; },1500);
+                  var ent=(_ppData.shipmentPlan||[]).filter(function(x){return x.shipment_ref===ref;})[0];
+                  if(ent){ ent.carrier=payload.carrier; ent.carrier_ref=payload.carrier_ref; ent.departure=payload.departure_date; ent.status=payload.status; }
+                  if(j&&j.date_note&&typeof ppShipTimeline==='function')ppShipTimeline(ref);   // show the "set ship date" note
+                }); }; });
+              body.querySelectorAll('.sp-chg-go').forEach(function(btn){ btn.onclick=function(){ var ref=btn.dataset.ref;
+                var cEl=body.querySelector('.sp-chg-cost[data-ref="'+_rfEsc(ref)+'"]'), dEl=body.querySelector('.sp-chg-desc[data-ref="'+_rfEsc(ref)+'"]');
+                var fc=Number(cEl&&cEl.value)||0; if(fc<=0){ alert('Enter a freight cost greater than 0.'); return; }
+                btn.disabled=true; postJSON(EP.shipmentCharge,{shipment_ref:ref,freight_cost:fc,description:(dEl&&dEl.value)||null},function(j){ btn.disabled=false;
+                  if(j&&j.error){ alert('Failed: '+j.error); return; }
+                  if(cEl)cEl.value=''; if(dEl)dEl.value='';
+                  var list=body.querySelector('.sp-chg-list[data-ref="'+_rfEsc(ref)+'"]'); if(list){ list.dataset.loaded=''; loadShipCharges(list); } }); }; });
+              // lazy-load a card's freight charges the first time it is expanded
+              body.querySelectorAll('.sp-card .sp-head').forEach(function(h){ var prev=h.onclick; h.addEventListener('click',function(e){ if(e.target.closest('button,input,textarea,select,a'))return;
+                var card=h.closest('.sp-card'), bd=card&&card.querySelector('.sp-body'); if(bd&&bd.style.display!=='none'){ var el=card.querySelector('.sp-chg-list'); if(el)loadShipCharges(el); } }); });
               // Direct-to-Client label downloads on shipment-plan cards (Ships-With shipment labels + crossdock)
               body.querySelectorAll('.sp-shiplabel').forEach(function(btn){ btn.onclick=function(){ dlShipsWith(btn.dataset.po, btn); }; });
               body.querySelectorAll('.sp-cd').forEach(function(btn){ btn.onclick=function(){ if(BC.placeholder){BC.note();return;} btn.disabled=true;

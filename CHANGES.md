@@ -3,6 +3,22 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.500 - Portal Shipment Plan: supplier can update the shipment (carrier/tracking/ship date/status) + add a charge
+
+Restored/added inline editing on each real-shipment card in the supplier portal Shipment Plan:
+- **"📝 Update this shipment"** panel — Carrier, Tracking code, Ship date (departure), Status
+  (Planned / Shipping / Completed). Saves **directly** to the shared shipment (same model as the PO-side
+  tracking/carrier write) via new `POST /api/portal/shipment/:ref` (supplier-scoped; whitelisted fields).
+  When the supplier sets/changes the ship date, a timeline note "<supplier> set the ship date to <date>"
+  is posted so both sides see it.
+- **"💰 Freight charges"** panel — lists existing charges and lets the supplier add one (freight cost +
+  description), routed to Dock & Bay to review via the existing shipment-charge endpoint. Charges lazy-load
+  when a card is expanded.
+- buildShipmentPlan now returns the shipment `status` so the status dropdown reflects saved values.
+- Same UI shows in the CONFIG portal preview (writes go to the internal `/api/supply/shipment/:ref`).
+
+No migration (uses existing planner.shipments columns + supplier_charges).
+
 ## v25.499 - Portal: larger black timeline message text; faster FLAG tooltip
 
 - Shipment-plan timeline messages (both real-shipment and FOB timelines) now render the message body at

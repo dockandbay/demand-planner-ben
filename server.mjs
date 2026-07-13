@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.499';
+const APP_VERSION = 'v25.500';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1267,7 +1267,7 @@ async function buildShipmentPlan() {
       coalesce(sh.master_po, p.shipment_ref) master_po,
       coalesce(lower(sh.mode), CASE WHEN fx.mode ILIKE 'air%' THEN 'air' ELSE 'sea' END) mode,
       coalesce(sh.carrier, CASE WHEN sh.carrier_ref ILIKE 'FLEX%' THEN 'Flexport' END, '') carrier,
-      coalesce(sh.carrier_ref,'') carrier_ref, coalesce(fx.flex_id,'') flex_id,
+      coalesce(sh.carrier_ref,'') carrier_ref, coalesce(fx.flex_id,'') flex_id, coalesce(sh.status,'') status,
       to_char(coalesce(sh.departure_date, fx.departure_date),'YYYY-MM-DD') departure,
       to_char(coalesce(sh.landing_date, fx.landing_date),'YYYY-MM-DD') landing,
       to_char(coalesce(sh.arrival_date, fx.arrival_date),'YYYY-MM-DD') arrival,
@@ -1289,7 +1289,7 @@ async function buildShipmentPlan() {
     ORDER BY p.shipment_ref, (p.po = coalesce(sh.master_po, p.shipment_ref)) DESC, p.po`);
   const byRef = {};
   rows.forEach(r => { let s = byRef[r.shipment_ref];
-    if (!s) s = byRef[r.shipment_ref] = { shipment_ref: r.shipment_ref, master_po: r.master_po, mode: r.mode, carrier: r.carrier, carrier_ref: r.carrier_ref, flex_id: r.flex_id, departure: r.departure, landing: r.landing, arrival: r.arrival, prod_end: '', escalated: !!r.escalated, master_client: '', master_deadline: '', master_supplier: '', country: '', total_pallets: 0, suppliers: [], members: [] };
+    if (!s) s = byRef[r.shipment_ref] = { shipment_ref: r.shipment_ref, master_po: r.master_po, mode: r.mode, carrier: r.carrier, carrier_ref: r.carrier_ref, flex_id: r.flex_id, status: r.status, departure: r.departure, landing: r.landing, arrival: r.arrival, prod_end: '', escalated: !!r.escalated, master_client: '', master_deadline: '', master_supplier: '', country: '', total_pallets: 0, suppliers: [], members: [] };
     if (r.prod_end && r.prod_end > s.prod_end) s.prod_end = r.prod_end;   // shipment production-end = latest across its POs (drives the portal date bands)
     s.total_pallets += Number(r.pallets) || 0;
     if (s.suppliers.indexOf(r.supplier_name) < 0 && r.supplier_name) s.suppliers.push(r.supplier_name);
@@ -7115,6 +7115,37 @@ app.post('/api/portal/shipment-note', portalAuth, async (req, res) => {   // sup
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Supplier updates their shipment's carrier / tracking / ship (departure) date / status directly.
+// Writes straight onto the shared shipment (same model as PO-side tracking/carrier). Whitelisted fields
+// only. When the ship date is set or changed, a timeline note is posted so both sides see it.
+app.post('/api/portal/shipment/:ref', portalAuth, async (req, res) => {
+  const ref = req.params.ref, b = req.body || {};
+  const ALLOW = { carrier: 'text', carrier_ref: 'text', status: 'text', departure_date: 'date' };
+  const STATUSES = ['Planned', 'Shipping', 'Completed'];
+  try {
+    if (!await portalOwnsShipmentRef(req, ref)) return res.status(403).json({ error: 'not your shipment' });
+    if (b.status != null && b.status !== '' && !STATUSES.includes(b.status)) return res.status(400).json({ error: 'invalid status' });
+    // detect a ship-date change so we can drop a timeline note
+    const prev = (await pool.query(`SELECT to_char(departure_date,'YYYY-MM-DD') d FROM planner.shipments WHERE shipment_ref=$1`, [ref])).rows[0];
+    const newDate = (b.departure_date === '' ? null : b.departure_date);
+    const dateChanged = ('departure_date' in b) && newDate && newDate !== (prev ? prev.d : null);
+    const cols = ['shipment_ref'], vals = [ref], ph = ['$1::text']; let i = 2;
+    for (const k of Object.keys(b)) {
+      if (!ALLOW[k]) continue;
+      cols.push(k); vals.push(b[k] === '' ? null : b[k]); ph.push(`$${i++}::${ALLOW[k]}`);
+    }
+    if (cols.length === 1) return res.status(400).json({ error: 'no editable fields supplied' });
+    const upd = cols.slice(1).map(c => `${c}=excluded.${c}`).join(',');
+    await pool.query(`INSERT INTO planner.shipments (${cols.join(',')}) VALUES (${ph.join(',')})
+      ON CONFLICT (shipment_ref) DO UPDATE SET ${upd}, updated_at=now()`, vals);
+    if (dateChanged) {
+      const who = (req.portal.suppliers && req.portal.suppliers[0]) || 'The supplier';
+      try { await pool.query(`INSERT INTO planner.shipment_notes (shipment_ref, author_kind, author_email, body)
+        VALUES ($1,'supplier',$2,$3)`, [ref, req.portal.email || null, who + ' set the ship date to ' + newDate]); } catch (e) { /* note best-effort */ }
+    }
+    res.json({ ok: true, date_note: dateChanged });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/api/portal/shipment-charges/:ref', portalAuth, async (req, res) => {   // supplier: charges on a shipment they're on
   const names = req.portal.suppliers||[];
   try { const own = (await pool.query(`SELECT 1 FROM planner.purchase_orders WHERE shipment_ref=$1 AND supplier_name=ANY($2) LIMIT 1`, [req.params.ref, names])).rows[0];
