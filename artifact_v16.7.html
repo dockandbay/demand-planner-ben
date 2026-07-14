@@ -1570,7 +1570,7 @@ function initUI(){
   // Buy filter pills: All / Urgent / Buy 3PL / Buy FBA
   const bup=document.getElementById('bup');
   var BU_PILLS=(BP_VIEW==='fba')
-    ? [['All','ALL'],['Transfer FBA','TRFFBA'],['Transfer FBA (non GRS)','TRFFBA_NG']]
+    ? [['All','ALL'],['Transfer FBA','TRFFBA'],['Transfer FBA (non GRS)','TRFFBA_NG']].concat(_CU==='US'?[['AWD · FBA <3wk','AWDLOW']]:[])   // US only: AWD on hand + FBA under 3 weeks cover
     : [['All','ALL'],['Urgent','URGENT'],['Buy 3PL','3PL'],['Buy FBA','FBA'],['First Buy','FIRST'],['Transfer','TRF']];
   if(!BU_PILLS.some(p=>p[1]===BU_SEL))BU_SEL=(BP_VIEW==='fba')?'TRFFBA':'ALL'; // FBA view defaults to Transfer FBA
   BU_PILLS.forEach(([lbl,val])=>{
@@ -1682,6 +1682,10 @@ function render(){
       const bq=getBuyQtys(s.s,CUR);
       if(BU_SEL==='TRFFBA'&&!(fbaTransferEff(s.s,CUR)>0))return false;
       if(BU_SEL==='TRFFBA_NG'&&!(nonGrsOf(s.s,CUR)>0))return false;   // only SKUs with non-GRS stock in this country
+      if(BU_SEL==='AWDLOW'){ if(!(awdOf(s.s,CUR)>0))return false;   // US only: AWD on hand AND FBA under 3 weeks cover
+        var _md=PD[s.s]&&PD[s.s].mkts&&PD[s.s].mkts[CUR]; var _wk=_md?fbaFwdDemand(_md,3)/13:0;   // avg weekly FBA demand (next 90 days)
+        var _cov=_wk>0?((_md['if_']||0)+(_md.oof||0))/_wk:Infinity;   // FBA on-hand + inbound, in weeks
+        if(!(_cov<3))return false; }
       if(BU_SEL==='URGENT'&&!bq.b3u)return false;
       if(BU_SEL==='3PL'&&!bq.b3)return false;
       if(BU_SEL==='FBA'&&!bq.bf)return false;

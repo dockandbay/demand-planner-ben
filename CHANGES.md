@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.527 - FBA tab: "AWD · FBA <3wk" filter (US); reverted the AWD→FBA transfer rec
+
+Reverted the previous AWD→FBA transfer-recommendation change (FBA transfer logic is back exactly as before).
+Instead added a simple **US-only filter "AWD · FBA <3wk"** on the FBA tab: shows SKUs where AWD on hand > 0
+AND FBA cover is under 3 weeks (FBA on-hand + inbound ÷ avg weekly FBA demand over the next 90 days). Pure
+filter over the existing view — no new columns, no calc changes.
+
 ## v25.526 - Deposits PROD# picker sources from CONFIG > Productions (active)
 
 Re-pointed the deposits PROD# searchable picker at the CONFIG > Productions table (planner.prod_numbers,
