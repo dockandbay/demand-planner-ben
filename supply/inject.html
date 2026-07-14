@@ -3470,19 +3470,24 @@
       document.getElementById('shpop-list').innerHTML=ms.slice(0,q?50:16).map(function(p){return '<div class="shpop-opt" data-prod="'+esc(p.prod_no)+'" data-sup="'+esc(p.supplier)+'">'+esc(p.prod_no)+' · '+esc(p.supplier)+' <span class="mut tiny">'+units(p.units)+'u</span></div>';}).join('')||'<div class="count" style="padding:8px">no match</div>';
       document.querySelectorAll('#shpop-list .shpop-opt').forEach(function(o){ o.onclick=function(){ shipPost('/api/supply/production-deposit',{prod_no:o.dataset.prod,supplier_name:o.dataset.sup,deposit_ref:ref,assign:true},function(){ closeShPop(); prodTab='deposits'; delete cache['productions']; selectSection('productions'); }); }; }); }
     render(''); pop.querySelector('.shpop-q').oninput=function(){render(this.value);}; pop.querySelector('.shpop-q').focus(); }
-  // Set a deposit's PROD# via the searchable dropdown over ACTIVE productions (saves the deposit's prod_no field)
+  // Set a deposit's PROD# via a searchable dropdown over the ACTIVE productions in the CONFIG > Productions
+  // table (planner.prod_numbers). Saves the deposit's prod_no field. Active list cached after first load.
+  var _depProdsCache=null;
   function openDepProdNoPick(btn){ closeShPop(); var id=btn.dataset.id;
     var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop';
     var rc=btn.getBoundingClientRect(); pop.style.cssText='position:fixed;z-index:100000;top:'+(rc.bottom+4)+'px;left:'+Math.max(8,Math.min(rc.left,window.innerWidth-312))+'px';
-    pop.innerHTML='<div class="shpop-h">Set production #</div><input class="shpop-q" placeholder="search PROD# / supplier…"><div id="shpop-list"></div>';
+    pop.innerHTML='<div class="shpop-h">Set production #</div><input class="shpop-q" placeholder="search production #…"><div id="shpop-list"><div class="count" style="padding:8px">Loading…</div></div>';
     document.body.appendChild(pop); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
-    var active=(_prodList||[]).filter(function(p){return String(p.status||'').toLowerCase()==='active';});   // active productions only
     function save(val){ shipPost('/api/supply/deposit/'+id,{prod_no:val},function(){ closeShPop(); prodTab='deposits'; delete cache['productions']; selectSection('productions'); }); }
-    function render(q){ q=(q||'').trim().toLowerCase(); var ms=active.filter(function(p){return !q||((p.prod_no||'')+' '+(p.supplier||'')).toLowerCase().indexOf(q)>=0;});
-      var html='<div class="shpop-opt unassign" data-clear="1">— Clear</div>'+ms.slice(0,q?60:20).map(function(p){return '<div class="shpop-opt" data-v="'+esc(p.prod_no)+'">'+esc(p.prod_no)+' · '+esc(p.supplier||'')+' <span class="mut tiny">'+units(p.units)+'u</span></div>';}).join('');
-      document.getElementById('shpop-list').innerHTML=html;
-      document.querySelectorAll('#shpop-list .shpop-opt').forEach(function(o){ o.onclick=function(){ save(o.dataset.clear?'':o.dataset.v); }; }); }
-    render(''); pop.querySelector('.shpop-q').oninput=function(){render(this.value);}; pop.querySelector('.shpop-q').focus(); }
+    function render(q){ q=(q||'').trim().toLowerCase(); var list=_depProdsCache||[];
+      var ms=list.filter(function(p){return !q||String(p.prod_no||'').toLowerCase().indexOf(q)>=0;});
+      var html='<div class="shpop-opt unassign" data-clear="1">— Clear</div>'+ms.slice(0,q?80:20).map(function(p){return '<div class="shpop-opt" data-v="'+esc(p.prod_no)+'">'+esc(p.prod_no)+(p.xero_account_code?' <span class="mut tiny">'+esc(p.xero_account_code)+'</span>':'')+'</div>';}).join('');
+      var l=document.getElementById('shpop-list'); if(l){ l.innerHTML=html; l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ save(o.dataset.clear?'':o.dataset.v); }; }); } }
+    var qi=pop.querySelector('.shpop-q'); qi.oninput=function(){render(this.value);}; qi.focus();
+    if(_depProdsCache){ render(''); }
+    else fetch('/api/supply/prod-numbers').then(function(r){return r.json();}).then(function(rows){
+      _depProdsCache=(rows||[]).filter(function(p){return String(p.status||'').toUpperCase()==='ACTIVE';}).sort(function(a,b){return String(b.prod_no).localeCompare(String(a.prod_no),undefined,{numeric:true});});
+      render(''); }).catch(function(){ var l=document.getElementById('shpop-list'); if(l)l.innerHTML='<div class="count" style="padding:8px;color:#dc2626">could not load productions</div>'; }); }
   function prodTable(rows){ if(!rows.length)return '<div class="count">No productions in this filter.</div>';
     var h='<div class="tw"><table><thead><tr><th class="l"></th><th class="l">PROD#</th><th class="l">Supplier</th><th>POs</th><th>Units</th><th>Value</th><th class="l">Deposits</th><th class="l">Status</th></tr></thead><tbody>';
     rows.forEach(function(p,i){

@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.526 - Deposits PROD# picker sources from CONFIG > Productions (active)
+
+Re-pointed the deposits PROD# searchable picker at the CONFIG > Productions table (planner.prod_numbers,
+ACTIVE only) via /api/supply/prod-numbers, instead of the grouped /api/supply/productions (_prodList) used
+in v25.525. Lists every active production number (even those without POs yet); cached after first load.
+
 ## v25.525 - Deposits PROD#: searchable picker over active productions (fix v25.523)
 
 Replaced the deposits PROD# dropdown with the searchable cell-picker (the preferred dropdown UI) over the

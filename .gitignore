@@ -29,3 +29,4 @@ migrations/099_product_carton_dims.sql
 
 # Cin7 API call log (sandbox debugging)
 cin7-calls.jsonl
+*Screenshot at*.png
