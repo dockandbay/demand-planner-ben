@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.516 - Fix: buy-plan PO creation now links supplier_id (was name-only)
+
+`/api/supply/buyplan-pos` (BUY PLAN → PURCHASE ORDERS) inserted `supplier_name` but never resolved
+`supplier_id`, so POs created from the buy plan landed unlinked. With no supplier link there's no production
+lead time → no computable ETA → the inbound never appeared on the buy plan's timeline (e.g. PO-57UKLX5's 752
+units). Now resolves supplier_id by code (fallback to name) at insert. The manual po-create path already did
+this. Existing unlinked POs still need a one-off data fix (set supplier_id by name).
+
 ## v25.515 - Non-GRS transfer: round up to cartons + send-all above 65% of pool
 
 Refined the non-GRS FBA transfer (`fbaTransferNonGrs`): still demand-driven, but now rounds the quantity

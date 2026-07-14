@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.515';
+const APP_VERSION = 'v25.516';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3857,10 +3857,17 @@ app.post('/api/supply/buyplan-pos', async (req, res) => {
         lines: bin.lines.map(x => ({ sku: x.sku, qty: x.qty, pallets: Math.round(x.pallets * 10) / 10 })) }));
     }
     if (!commit) return res.json({ preview: true, mode, branch, target_pallets: MAXPAL, pos, warnings: warn });
+    // Resolve supplier_id (by code, fall back to name) so buy-plan POs land LINKED to the supplier. Without
+    // this they carried only the name → no supplier lead time → no computable ETA → the inbound never showed
+    // in the buy plan (e.g. PO-57UKLX5). The manual po-create path already did this; the buy-plan split didn't.
+    const supRows = (await pool.query(`SELECT id, upper(coalesce(code,'')) code, lower(trim(coalesce(name,''))) name FROM planner.suppliers`)).rows;
+    const supByCode = {}, supByName = {};
+    supRows.forEach(s => { if (s.code) supByCode[s.code] = s.id; if (s.name) supByName[s.name] = s.id; });
+    const supIdOf = (code, name) => supByCode[String(code || '').toUpperCase()] || supByName[String(name || '').trim().toLowerCase()] || null;
     let created = 0;
     for (const p of pos) {
-      const insPo = await pool.query(`INSERT INTO planner.purchase_orders (po, supplier_name, prod_no, country_code, branch, start_production, status)
-        VALUES ($1,$2,$3,$4,$5,$6,'FUTURE') ON CONFLICT (po) DO NOTHING RETURNING po`, [p.po, p.supplier_name, prod, country, branch, startDate]);
+      const insPo = await pool.query(`INSERT INTO planner.purchase_orders (po, supplier_name, supplier_id, prod_no, country_code, branch, start_production, status)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,'FUTURE') ON CONFLICT (po) DO NOTHING RETURNING po`, [p.po, p.supplier_name, supIdOf(p.supplier_code, p.supplier_name), prod, country, branch, startDate]);
       if (insPo.rowCount) await notePoCreated(pool, p.po, authUser(req));
       for (const l of p.lines)
         await pool.query(`INSERT INTO planner.purchase_order_lines (po_sku, po, sku, qty, erp_qty, proposed_at, proposed_by)
