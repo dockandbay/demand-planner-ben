@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.531 - Hard 30-minute staleness reload + idle-reload
+
+Belt-and-braces on top of the version/data poll: a tab open longer than 30 minutes is treated as stale and
+refreshes at the next safe moment. "Safe moment" = tab backgrounded (silent reload) OR visible-but-idle for
+90s (no mouse/key/scroll) → reload; if the user is actively working, the small Refresh nudge shows instead
+and retries every 30s. So no one sits on a stale session, and no one gets yanked mid-edit.
+
 ## v25.530 - Auto-update now also catches stale DATA (not just stale code)
 
 Extended the auto-update poll to reload when the underlying source DATA changes, not only on a code deploy.

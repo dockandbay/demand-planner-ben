@@ -6453,21 +6453,28 @@
   var BOOT='__APP_VERSION__';                       // version this tab booted with (replaced at serve time)
   if(!/^v?\d/.test(BOOT))return;                     // only run when a real version was injected
   var BOOT_DATA=(typeof EXTRACT_TS!=='undefined'&&EXTRACT_TS&&EXTRACT_TS.slice(0,2)!=='__')?EXTRACT_TS:null;   // source-data timestamp at load
-  var pending=false, nagShown=false, nagMsg='HORIZON has an update ready.';
+  var pending=false, nagShown=false, nagMsg='HORIZON has an update ready.', lastAct=Date.now();
+  var STALE_MS=30*60*1000, IDLE_MS=90*1000;   // reload a session open >30 min; "idle" = no interaction 90s
+  ['mousemove','keydown','mousedown','scroll','touchstart'].forEach(function(ev){ window.addEventListener(ev,function(){ lastAct=Date.now(); },{passive:true,capture:true}); });
   function nag(){ if(nagShown||!document.body)return; nagShown=true;
     var d=document.createElement('div'); d.id='hz-update-nag';
     d.style.cssText='position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:2147483000;background:#0f172a;color:#fff;font:13px system-ui;padding:10px 14px;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.35);display:flex;gap:10px;align-items:center';
     d.innerHTML='<span>'+nagMsg+'</span><button id="hz-update-go" style="background:#2563eb;color:#fff;border:0;border-radius:6px;padding:5px 12px;font-weight:600;cursor:pointer">Refresh</button>';
     document.body.appendChild(d); document.getElementById('hz-update-go').onclick=function(){ location.reload(); }; }
-  function apply(){ if(!pending)return; if(document.hidden){ location.reload(); } else { nag(); } }   // reload silently in the background; else nudge
+  function apply(){ if(!pending)return;
+    if(document.hidden){ location.reload(); return; }              // backgrounded → reload silently
+    if(Date.now()-lastAct>IDLE_MS){ location.reload(); return; }   // visible but idle → reload (no interruption)
+    nag(); }                                                        // actively in use → nudge; retried below
   function check(){ fetch('/api/version',{cache:'no-store',credentials:'same-origin'}).then(function(r){return r.ok?r.json():null;}).then(function(j){
     if(!j)return;
     var newCode=(j.version&&j.version!==BOOT);
     var newData=(BOOT_DATA&&j.data&&j.data!==BOOT_DATA);   // ETL/source data changed since this tab loaded
     if(newCode||newData){ nagMsg=newCode?'A new version of HORIZON is ready.':'Newer data is available.'; pending=true; apply(); } }).catch(function(){}); }
-  document.addEventListener('visibilitychange',function(){ if(document.hidden){ apply(); } else { check(); } });
-  window.addEventListener('focus',check);
-  setInterval(check,5*60*1000);   // poll every 5 minutes
-  setTimeout(check,15000);        // and shortly after load
+  document.addEventListener('visibilitychange',function(){ if(document.hidden){ apply(); } else { lastAct=Date.now(); check(); } });
+  window.addEventListener('focus',function(){ lastAct=Date.now(); check(); });
+  setInterval(check,5*60*1000);                        // poll for new version / data every 5 minutes
+  setInterval(function(){ if(pending)apply(); },30*1000);   // once stale/updated, reload at the next safe moment
+  setTimeout(check,15000);                             // and shortly after load
+  setTimeout(function(){ if(!pending){ pending=true; nagMsg='This session has been open a while — refreshing to stay current.'; } apply(); }, STALE_MS);   // hard 30-min staleness cap
 })();
 </script>
