@@ -3359,13 +3359,8 @@
       var c_sup = locked?'<td class="l">'+txt(d.supplier_name)+'</td>':'<td class="l">'+supSel(ep,d.supplier_name)+'</td>';
       var DEP_MKTS=['UK','AU','EU','US','CA'];   // deposit region — drives which POs can use it (AU is isolated)
       var c_ctry= locked?'<td class="l">'+txt(d.country)+'</td>':'<td class="l"><select class="fci" data-ep="'+esc(ep)+'" data-field="country"><option value=""></option>'+DEP_MKTS.map(function(mk){return '<option'+(String(d.country||'').toUpperCase()===mk?' selected':'')+'>'+mk+'</option>';}).join('')+'</select></td>';
-      var _prodOpts=(prodList||[]).map(String);   // production numbers from lookups; include the current value if missing
-      if(d.prod_no && _prodOpts.indexOf(String(d.prod_no))<0)_prodOpts.push(String(d.prod_no));
-      _prodOpts.sort(function(a,b){return b.localeCompare(a,undefined,{numeric:true});});   // newest first
       var c_prod= locked?'<td class="l">'+txt(d.prod_no)+'</td>'
-        :'<td class="l">'+(_prodOpts.length
-            ?'<select class="fci" data-ep="'+esc(ep)+'" data-field="prod_no"><option value=""></option>'+_prodOpts.map(function(pn){return '<option'+(String(d.prod_no||'')===pn?' selected':'')+'>'+esc(pn)+'</option>';}).join('')+'</select>'
-            :editCell(ep,'prod_no',d.prod_no,'txt'))+'</td>';
+        :'<td class="l"><button class="cell-pick dep-prod-pick" data-id="'+d.id+'" title="pick an active production">'+(d.prod_no?esc(d.prod_no):'<span class="mut">— set</span>')+' ▾</button></td>';
       var c_xero= locked?'<td class="l">'+txt(d.xero_account_code)+'</td>':'<td class="l">'+editCell(ep,'xero_account_code',d.xero_account_code,'txt')+'</td>';
       var c_amt = locked?'<td>'+txt(d.amount)+'</td>':'<td>'+editCell(ep,'amount',d.amount)+'</td>';
       var c_fx  = locked?'<td>'+txt(d.xero_fx)+'</td>':'<td>'+editCell(ep,'xero_fx',d.xero_fx)+'</td>';
@@ -3407,6 +3402,7 @@
     function draw(){ var f=cur().filter(function(d){return !st.q||((d.reference||'')+' '+(d.supplier_name||'')).toLowerCase().indexOf(st.q)>=0;});
       document.getElementById('dep-cnt').textContent=f.length+' / '+deps.length+' deposits';
       document.getElementById('dep-rows').innerHTML=f.map(rowHTML).join(''); bindEdits();
+      b.querySelectorAll('.dep-prod-pick').forEach(function(btn){ btn.onclick=function(e){ e.stopPropagation(); openDepProdNoPick(btn); }; });   // searchable active-productions picker
       b.querySelectorAll('.dep-po-link').forEach(function(btn){ btn.onclick=function(){ gotoPO(btn.dataset.po,'pay'); }; });
       b.querySelectorAll('.dep-edit').forEach(function(btn){ btn.onclick=function(){ DEP_EDIT[btn.dataset.id]=true; draw(); }; });   // unlock this row in place
       b.querySelectorAll('.dep-save').forEach(function(btn){ btn.onclick=function(){ delete DEP_EDIT[btn.dataset.id]; prodTab='deposits'; delete cache['productions']; selectSection('productions'); }; });   // relock + refresh (edits auto-saved inline)
@@ -3473,6 +3469,19 @@
     function render(q){ q=(q||'').trim().toLowerCase(); var ms=_prodList.filter(function(p){return !q||((p.prod_no||'')+' '+(p.supplier||'')).toLowerCase().indexOf(q)>=0;});
       document.getElementById('shpop-list').innerHTML=ms.slice(0,q?50:16).map(function(p){return '<div class="shpop-opt" data-prod="'+esc(p.prod_no)+'" data-sup="'+esc(p.supplier)+'">'+esc(p.prod_no)+' · '+esc(p.supplier)+' <span class="mut tiny">'+units(p.units)+'u</span></div>';}).join('')||'<div class="count" style="padding:8px">no match</div>';
       document.querySelectorAll('#shpop-list .shpop-opt').forEach(function(o){ o.onclick=function(){ shipPost('/api/supply/production-deposit',{prod_no:o.dataset.prod,supplier_name:o.dataset.sup,deposit_ref:ref,assign:true},function(){ closeShPop(); prodTab='deposits'; delete cache['productions']; selectSection('productions'); }); }; }); }
+    render(''); pop.querySelector('.shpop-q').oninput=function(){render(this.value);}; pop.querySelector('.shpop-q').focus(); }
+  // Set a deposit's PROD# via the searchable dropdown over ACTIVE productions (saves the deposit's prod_no field)
+  function openDepProdNoPick(btn){ closeShPop(); var id=btn.dataset.id;
+    var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop';
+    var rc=btn.getBoundingClientRect(); pop.style.cssText='position:fixed;z-index:100000;top:'+(rc.bottom+4)+'px;left:'+Math.max(8,Math.min(rc.left,window.innerWidth-312))+'px';
+    pop.innerHTML='<div class="shpop-h">Set production #</div><input class="shpop-q" placeholder="search PROD# / supplier…"><div id="shpop-list"></div>';
+    document.body.appendChild(pop); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
+    var active=(_prodList||[]).filter(function(p){return String(p.status||'').toLowerCase()==='active';});   // active productions only
+    function save(val){ shipPost('/api/supply/deposit/'+id,{prod_no:val},function(){ closeShPop(); prodTab='deposits'; delete cache['productions']; selectSection('productions'); }); }
+    function render(q){ q=(q||'').trim().toLowerCase(); var ms=active.filter(function(p){return !q||((p.prod_no||'')+' '+(p.supplier||'')).toLowerCase().indexOf(q)>=0;});
+      var html='<div class="shpop-opt unassign" data-clear="1">— Clear</div>'+ms.slice(0,q?60:20).map(function(p){return '<div class="shpop-opt" data-v="'+esc(p.prod_no)+'">'+esc(p.prod_no)+' · '+esc(p.supplier||'')+' <span class="mut tiny">'+units(p.units)+'u</span></div>';}).join('');
+      document.getElementById('shpop-list').innerHTML=html;
+      document.querySelectorAll('#shpop-list .shpop-opt').forEach(function(o){ o.onclick=function(){ save(o.dataset.clear?'':o.dataset.v); }; }); }
     render(''); pop.querySelector('.shpop-q').oninput=function(){render(this.value);}; pop.querySelector('.shpop-q').focus(); }
   function prodTable(rows){ if(!rows.length)return '<div class="count">No productions in this filter.</div>';
     var h='<div class="tw"><table><thead><tr><th class="l"></th><th class="l">PROD#</th><th class="l">Supplier</th><th>POs</th><th>Units</th><th>Value</th><th class="l">Deposits</th><th class="l">Status</th></tr></thead><tbody>';

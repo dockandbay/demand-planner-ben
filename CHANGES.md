@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.525 - Deposits PROD#: searchable picker over active productions (fix v25.523)
+
+Replaced the deposits PROD# dropdown with the searchable cell-picker (the preferred dropdown UI) over the
+ACTIVE productions from the PRODUCTIONS table. v25.523 wrongly bound it to the global prodList of strings
+(vs the deposit view's `_prodList` of production objects), so it was broken. Now lists active productions
+(PROD# · supplier · units) with a search box, saves the deposit's prod_no, and re-renders.
+
 ## v25.524 - Samples timeline shows supplier+email; +Deposit visible under Remaining·open
 
 - Sample timeline notes from a supplier now show the supplier name and the portal user's email
