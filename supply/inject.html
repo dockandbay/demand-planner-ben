@@ -1103,7 +1103,10 @@
     var kind=btn.dataset.kind, lbl=CELL_LBL[kind]||kind, isCtry=(kind==='country');
     // list of {v:value, l:label}; country is a fixed code→label set, the rest are searchable string lists
     var list=isCtry ? PO_COUNTRIES.map(function(o){return {v:o[0],l:o[1]};})
-                     : ({supplier:supplierList,branch:branchList,prod:prodList,batch:batchList}[kind]||[]).slice().sort().map(function(n){return {v:n,l:n};});
+                     : (function(){ var arr=({supplier:supplierList,branch:branchList,prod:prodList,batch:batchList}[kind]||[]).slice();
+                         if(kind==='batch'||kind==='prod') arr.sort(function(a,b){return String(b).localeCompare(String(a),undefined,{numeric:true});});   // batch / PROD# → newest first (descending)
+                         else arr.sort();   // supplier / branch → alphabetical
+                         return arr.map(function(n){return {v:n,l:n};}); })();
     var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop';
     pop.innerHTML='<div class="shpop-h">Set '+lbl+' for <b>'+esc(btn.dataset.po)+'</b></div>'+(isCtry?'':'<input class="shpop-q" placeholder="search '+lbl+'…">')+'<div id="shpop-list"></div>';
     placePop(pop, btn.getBoundingClientRect()); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);

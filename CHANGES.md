@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.517 - PO grid Batch/PROD# cell picker sorts descending (newest first)
+
+The Batch (and PROD#) cell picker in the Purchase Orders grid — the dropdown when you click a Batch cell to
+assign it — sorted ascending. Now sorts descending (numeric, newest first), matching the filter dropdowns.
+Supplier/branch pickers stay alphabetical.
+
 ## v25.516 - Fix: buy-plan PO creation now links supplier_id (was name-only)
 
 `/api/supply/buyplan-pos` (BUY PLAN → PURCHASE ORDERS) inserted `supplier_name` but never resolved
