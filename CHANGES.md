@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.521 - Deposits: hide Close while editing; confirm Close when money remains
+
+- While a deposit row is being edited, the Close button is hidden — only Save shows (edits auto-save; Save just
+  relocks the row).
+- Clicking Close on a deposit that still has a remaining balance now prompts: "There is remaining deposit of
+  $X — are you sure you want to close?" (OK = close, Cancel = keep open). Fully-drawn deposits close with no prompt.
+
 ## v25.520 - Deposits register: add editable Country column
 
 Added a Country column (editable select UK/AU/EU/US/CA) to the Deposits register. This is the field that

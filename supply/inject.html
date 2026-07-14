@@ -3383,8 +3383,9 @@
       var act;
       if(closed) act='<span class="tool-badge bg-neutral" style="margin-right:5px">closed</span><button class="lnk-btn dep-close" data-id="'+d.id+'" data-st="">reopen</button>';
       else { var paidTag = lockedPay ? '<span class="tool-badge bg-green" style="margin-right:5px" title="paid &amp; FX applied">paid</span>' : '';
-        act = paidTag + (editing?'<button class="lnk-btn dep-save" data-id="'+d.id+'">✓ save</button> ':'<button class="lnk-btn dep-edit" data-id="'+d.id+'">edit</button> ')
-            + '<button class="lnk-btn dep-close" data-id="'+d.id+'" data-st="closed">close</button>'; }
+        act = paidTag + (editing
+            ? '<button class="lnk-btn dep-save" data-id="'+d.id+'">✓ save</button> '   // editing: just Save (no Close)
+            : '<button class="lnk-btn dep-edit" data-id="'+d.id+'">edit</button> <button class="lnk-btn dep-close" data-id="'+d.id+'" data-st="closed">close</button>'); }
       // delete allowed only when NO purchase orders are assigned AND not paid (a payment date locks deletion)
       var hasPOs=(d.linked_pos||'').trim()!=='';
       act += (hasPOs || d.date_paid)
@@ -3402,7 +3403,10 @@
       b.querySelectorAll('.dep-po-link').forEach(function(btn){ btn.onclick=function(){ gotoPO(btn.dataset.po,'pay'); }; });
       b.querySelectorAll('.dep-edit').forEach(function(btn){ btn.onclick=function(){ DEP_EDIT[btn.dataset.id]=true; draw(); }; });   // unlock this row in place
       b.querySelectorAll('.dep-save').forEach(function(btn){ btn.onclick=function(){ delete DEP_EDIT[btn.dataset.id]; prodTab='deposits'; delete cache['productions']; selectSection('productions'); }; });   // relock + refresh (edits auto-saved inline)
-      b.querySelectorAll('.dep-close').forEach(function(btn){ btn.onclick=function(){ btn.disabled=true;
+      b.querySelectorAll('.dep-close').forEach(function(btn){ btn.onclick=function(){
+        if(btn.dataset.st==='closed'){ var dd=deps.filter(function(x){return String(x.id)===String(btn.dataset.id);})[0]; var rem=dd?Number(dd.deposit_remaining)||0:0;
+          if(rem>0.01 && !confirm('There is remaining deposit of $'+money(rem)+' — are you sure you want to close?'))return; }
+        btn.disabled=true;
         shipPost('/api/supply/deposit/'+btn.dataset.id,{status:btn.dataset.st},function(){
           var d=deps.filter(function(x){return String(x.id)===String(btn.dataset.id);})[0]; if(d)d.status=btn.dataset.st;   // update the row in place
           delete cache['productions']; invalidateDerived();   // keep Productions / Actions / cash flow fresh next visit — no full re-render
