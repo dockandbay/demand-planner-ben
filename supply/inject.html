@@ -3359,7 +3359,13 @@
       var c_sup = locked?'<td class="l">'+txt(d.supplier_name)+'</td>':'<td class="l">'+supSel(ep,d.supplier_name)+'</td>';
       var DEP_MKTS=['UK','AU','EU','US','CA'];   // deposit region — drives which POs can use it (AU is isolated)
       var c_ctry= locked?'<td class="l">'+txt(d.country)+'</td>':'<td class="l"><select class="fci" data-ep="'+esc(ep)+'" data-field="country"><option value=""></option>'+DEP_MKTS.map(function(mk){return '<option'+(String(d.country||'').toUpperCase()===mk?' selected':'')+'>'+mk+'</option>';}).join('')+'</select></td>';
-      var c_prod= locked?'<td class="l">'+txt(d.prod_no)+'</td>':'<td class="l">'+editCell(ep,'prod_no',d.prod_no,'txt')+'</td>';
+      var _prodOpts=(prodList||[]).map(String);   // production numbers from lookups; include the current value if missing
+      if(d.prod_no && _prodOpts.indexOf(String(d.prod_no))<0)_prodOpts.push(String(d.prod_no));
+      _prodOpts.sort(function(a,b){return b.localeCompare(a,undefined,{numeric:true});});   // newest first
+      var c_prod= locked?'<td class="l">'+txt(d.prod_no)+'</td>'
+        :'<td class="l">'+(_prodOpts.length
+            ?'<select class="fci" data-ep="'+esc(ep)+'" data-field="prod_no"><option value=""></option>'+_prodOpts.map(function(pn){return '<option'+(String(d.prod_no||'')===pn?' selected':'')+'>'+esc(pn)+'</option>';}).join('')+'</select>'
+            :editCell(ep,'prod_no',d.prod_no,'txt'))+'</td>';
       var c_xero= locked?'<td class="l">'+txt(d.xero_account_code)+'</td>':'<td class="l">'+editCell(ep,'xero_account_code',d.xero_account_code,'txt')+'</td>';
       var c_amt = locked?'<td>'+txt(d.amount)+'</td>':'<td>'+editCell(ep,'amount',d.amount)+'</td>';
       var c_fx  = locked?'<td>'+txt(d.xero_fx)+'</td>':'<td>'+editCell(ep,'xero_fx',d.xero_fx)+'</td>';

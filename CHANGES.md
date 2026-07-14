@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.523 - Deposits: PROD# is now a dropdown
+
+The PROD# field in the Deposits register is now a dropdown (production numbers from lookups, newest-first,
+current value always included) instead of free text. Falls back to a text input if the lookup list is empty.
+
 ## v25.522 - Deposits date-field UX + custom close dialog; SUPPLY tab defaults to Purchase Orders
 
 - **Deposits date inputs** now fill their column and left-align (mirrored the working `.dates-tbl` datewrap
