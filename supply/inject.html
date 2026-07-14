@@ -3342,9 +3342,10 @@
       +'<button class="save-btn" id="dep-new">+ Deposit</button>'
       +'<button class="tool-badge bg-neutral" id="dep-prodtoggle" style="cursor:pointer;border:none;margin-left:4px" title="Linked purchase orders: show only OPEN (non-complete) POs, or all">POs: open only</button>'
       +'<input class="flt" id="dep-q" placeholder="Filter reference / supplier…"><span class="count" id="dep-cnt"></span></div>'
-      +'<style>#deptbl{table-layout:fixed;width:100%}#deptbl td,#deptbl th{white-space:normal;overflow-wrap:break-word;vertical-align:top}#deptbl .fci{width:100%;box-sizing:border-box;min-width:0}</style>'
+      +'<style>#deptbl{table-layout:fixed;width:100%}#deptbl td,#deptbl th{white-space:normal;overflow-wrap:break-word;vertical-align:top}#deptbl .fci{width:100%;box-sizing:border-box;min-width:0;text-align:left}'
+      +'#deptbl .datewrap{display:flex;width:100%;max-width:100%}#deptbl .datewrap .dateinp{flex:1 1 auto;min-width:0;width:auto!important;text-align:left!important}#deptbl .datewrap .datepick{flex:0 0 auto}</style>'
       +'<div class="tw"><table id="deptbl"><colgroup>'
-      +'<col style="width:120px"><col style="width:140px"><col style="width:56px"><col style="width:50px"><col style="width:102px"><col style="width:90px"><col style="width:60px"><col style="width:122px"><col style="width:84px"><col style="width:92px"><col><col style="width:128px"></colgroup>'
+      +'<col style="width:120px"><col style="width:140px"><col style="width:56px"><col style="width:50px"><col style="width:102px"><col style="width:90px"><col style="width:60px"><col style="width:118px"><col style="width:118px"><col style="width:118px"><col><col style="width:128px"></colgroup>'
       +'<thead><tr><th class="l">Reference</th><th class="l">Supplier</th><th class="l" title="AU deposits are region-isolated; a PO can only use a deposit in its own region">Country</th><th class="l">PROD#</th><th class="l">Xero code</th><th>Amount</th><th>FX</th><th class="l">Due</th><th class="l">Likely pay</th><th class="l">Date paid</th><th>Remaining</th><th title="Σ calculated start deposits of OPEN, not-yet-allocated POs on this reference">Est. alloc.</th><th class="l">Linked purchase orders</th><th class="l"></th></tr></thead><tbody id="dep-rows"></tbody></table></div>';
     // Every deposit row is read-only by default; click Edit to unlock it, Save to relock. (A closed row must
     // be reopened first.) Edit state (DEP_EDIT) holds while you edit; saving relocks all rows.
@@ -3403,14 +3404,26 @@
       b.querySelectorAll('.dep-po-link').forEach(function(btn){ btn.onclick=function(){ gotoPO(btn.dataset.po,'pay'); }; });
       b.querySelectorAll('.dep-edit').forEach(function(btn){ btn.onclick=function(){ DEP_EDIT[btn.dataset.id]=true; draw(); }; });   // unlock this row in place
       b.querySelectorAll('.dep-save').forEach(function(btn){ btn.onclick=function(){ delete DEP_EDIT[btn.dataset.id]; prodTab='deposits'; delete cache['productions']; selectSection('productions'); }; });   // relock + refresh (edits auto-saved inline)
+      // custom confirm for closing a deposit that still holds money (native confirm can't relabel buttons)
+      function depCloseConfirm(rem,onYes){
+        var ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200001;display:flex;align-items:center;justify-content:center;padding:20px';
+        ov.innerHTML='<div style="background:#fff;border-radius:10px;max-width:400px;padding:18px 20px;box-shadow:0 10px 40px rgba(0,0,0,.3)">'
+          +'<div style="font-size:13px;color:#1a1a1a;line-height:1.5;margin-bottom:16px">There is remaining deposit of <b>$'+money(rem)+'</b> — are you sure you want to close?</div>'
+          +'<div style="display:flex;justify-content:flex-end;gap:8px">'
+          +'<button id="dcc-cancel" style="font-size:12px;padding:6px 14px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;cursor:pointer">Cancel</button>'
+          +'<button id="dcc-yes" style="font-size:12px;padding:6px 14px;border:1px solid #b91c1c;border-radius:5px;background:#dc2626;color:#fff;cursor:pointer;font-weight:600">Yes, close</button></div></div>';
+        document.body.appendChild(ov); var close=function(){ ov.remove(); };
+        ov.addEventListener('click',function(e){ if(e.target===ov)close(); });
+        ov.querySelector('#dcc-cancel').onclick=close; ov.querySelector('#dcc-yes').onclick=function(){ close(); onYes(); }; }
       b.querySelectorAll('.dep-close').forEach(function(btn){ btn.onclick=function(){
+        var doClose=function(){ btn.disabled=true;
+          shipPost('/api/supply/deposit/'+btn.dataset.id,{status:btn.dataset.st},function(){
+            var d=deps.filter(function(x){return String(x.id)===String(btn.dataset.id);})[0]; if(d)d.status=btn.dataset.st;   // update the row in place
+            delete cache['productions']; invalidateDerived();   // keep Productions / Actions / cash flow fresh next visit — no full re-render
+            draw(); }); };   // redraw just the register (closed rows drop out of the open filters)
         if(btn.dataset.st==='closed'){ var dd=deps.filter(function(x){return String(x.id)===String(btn.dataset.id);})[0]; var rem=dd?Number(dd.deposit_remaining)||0:0;
-          if(rem>0.01 && !confirm('There is remaining deposit of $'+money(rem)+' — are you sure you want to close?'))return; }
-        btn.disabled=true;
-        shipPost('/api/supply/deposit/'+btn.dataset.id,{status:btn.dataset.st},function(){
-          var d=deps.filter(function(x){return String(x.id)===String(btn.dataset.id);})[0]; if(d)d.status=btn.dataset.st;   // update the row in place
-          delete cache['productions']; invalidateDerived();   // keep Productions / Actions / cash flow fresh next visit — no full re-render
-          draw(); }); }; });   // redraw just the register (closed rows drop out of the open filters)
+          if(rem>0.01){ depCloseConfirm(rem,doClose); return; } }
+        doClose(); }; });
       b.querySelectorAll('.dep-del').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Delete deposit "'+btn.dataset.ref+'"? This cannot be undone.'))return;
         shipPost('/api/supply/deposit/'+btn.dataset.id+'/delete',{},function(){ prodTab='deposits'; delete cache['productions']; selectSection('productions'); }); }; });
       b.querySelectorAll('.dep-apply-all').forEach(function(btn){ btn.onclick=function(){ var d=deps.filter(function(x){return String(x.id)===String(btn.dataset.id);})[0]; if(!d)return;
@@ -5877,7 +5890,9 @@
     var buyBtn=row.querySelector('button[data-view="buy"]');
     if(buyBtn)row.insertBefore(btn,buyBtn);
     else { var spacer=row.querySelector('div[style*="flex:1"]'); if(spacer)row.insertBefore(btn,spacer); else row.appendChild(btn); }
-    btn.onclick=showSupply;
+    // From CONFIG (or any non-supply state), the SUPPLY tab lands on PURCHASE ORDERS; otherwise it returns
+    // to the last supply section. (current==='config' isn't a supply section, so it would render blank.)
+    btn.onclick=function(){ var cfg=(current==='config'); showSupply(true); selectSection(cfg?'purchase-orders':(current||'actions')); };
     row.querySelectorAll('.view-toggle:not(.supply-toggle)').forEach(function(b){b.addEventListener('click',function(){hideSupply(); if(b.dataset.view)writeViewHash(b.dataset.view);});}); }
   // (Removed the bottom-right floating "SUPPLY" button at Ben's request — the top-nav SUPPLY tab is
   // the single entry point now.)

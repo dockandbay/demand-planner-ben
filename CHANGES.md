@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.522 - Deposits date-field UX + custom close dialog; SUPPLY tab defaults to Purchase Orders
+
+- **Deposits date inputs** now fill their column and left-align (mirrored the working `.dates-tbl` datewrap
+  rules into `#deptbl`; widened the Due/Likely/Paid columns). Fixes the cut-off/right-aligned date inputs.
+- **Close-with-remaining** now uses a custom dialog with **Cancel** / **Yes, close** buttons (instead of the
+  native OK/Cancel).
+- **SUPPLY top tab**: coming from CONFIG (or any non-supply state) now lands on **PURCHASE ORDERS** instead of
+  rendering a blank page (it was trying to re-select the 'config' section).
+
 ## v25.521 - Deposits: hide Close while editing; confirm Close when money remains
 
 - While a deposit row is being edited, the Close button is hidden — only Save shows (edits auto-save; Save just
