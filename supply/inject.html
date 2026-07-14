@@ -6300,6 +6300,7 @@
       +'<div style="display:flex;align-items:center;margin-bottom:8px"><b style="font-size:15px">Create '+modeLbl+' POs from Buy Plan</b><span style="margin-left:auto;cursor:pointer;font-size:18px" id="bp-x">✕</span></div>'
       +'<div style="font-size:12px;color:#555;margin-bottom:10px"><b>'+items.length+'</b> SKU(s) with a '+qtyLbl+' qty · ship-to <b>'+esc(country)+'</b>. Tick the SKUs to order; pick a supplier where a SKU has more than one. Split into ≤20-pallet POs; branch set automatically ('+modeLbl+'); status FUTURE.</div>'
       +'<div class="bar"><span class="pill-lbl">Production</span><select id="bp-prod" class="flt" style="width:auto"></select>'
+      +'<span class="pill-lbl">Batch</span><select id="bp-batch" class="flt" style="width:auto"><option value="">— optional —</option></select>'
       +'<span class="pill-lbl">Start date</span><input id="bp-start" type="date" class="flt" style="width:auto">'
       +'<button id="bp-preview" class="tool-badge bg-blue" style="border:none;cursor:pointer;padding:6px 13px;margin-left:6px">Preview PO plan</button>'
       +'<button id="bp-create" class="tool-badge bg-green" style="border:none;cursor:pointer;padding:6px 13px;display:none">Create POs</button></div>'
@@ -6312,6 +6313,9 @@
     ov.addEventListener('click',function(e){ if(e.target===ov)close(); }); document.getElementById('bp-x').onclick=close;
     fetch('/api/supply/prod-numbers').then(function(r){return r.json();}).then(function(rows){ var prods=(rows||[]).map(function(p){return p.prod_no;}).filter(Boolean);
       var sel=document.getElementById('bp-prod'); sel.innerHTML='<option value="">— choose production —</option>'+prods.map(function(p){return '<option>'+esc(p)+'</option>';}).join(''); }).catch(function(){});
+    // batch options (optional) — newest first, matching the PO grid dropdowns
+    fetch('/api/supply/lookups').then(function(r){return r.json();}).then(function(d){ var batches=((d&&d.batches)||[]).slice().sort(function(a,b){return String(b).localeCompare(String(a),undefined,{numeric:true});});
+      var bs=document.getElementById('bp-batch'); if(bs)bs.innerHTML='<option value="">— optional —</option>'+batches.map(function(x){return '<option>'+esc(x)+'</option>';}).join(''); }).catch(function(){});
     function refreshCount(){ var n=document.querySelectorAll('#bp-skus .bp-skutick:checked').length; var c=document.getElementById('bp-skucount'); if(c)c.textContent=n+' SKU(s) ticked'; }
     fetch('/api/supply/buyplan-skus',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({items:items,country:country})}).then(function(r){return r.json();}).then(function(d){
       var skus=(d&&d.skus)||[]; var box=document.getElementById('bp-skus');
@@ -6358,7 +6362,8 @@
       // include ticked rows even with no supplier — the preview flags them as "not placed" so the gap is visible
       out.push({sku:tr.dataset.sku, qty:Number(tr.dataset.qty), supplier_code:code||''}); }); return out; }
     function payload(commit){ var prod=document.getElementById('bp-prod').value;
-      return {prod_no:prod, country:country, mode:mode, start_date:document.getElementById('bp-start').value||null, items:gather(), commit:!!commit}; }
+      var bb=document.getElementById('bp-batch');
+      return {prod_no:prod, batch_id:(bb&&bb.value)||null, country:country, mode:mode, start_date:document.getElementById('bp-start').value||null, items:gather(), commit:!!commit}; }
     function renderPreview(d){ var r=document.getElementById('bp-result');
       if(d.error){ r.innerHTML='<div style="color:#dc2626">'+esc(d.error)+'</div>'; return; }
       var pos=d.pos||[], warn=d.warnings||[];

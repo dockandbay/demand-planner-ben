@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.518';
+const APP_VERSION = 'v25.519';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3811,6 +3811,7 @@ app.post('/api/supply/buyplan-pos', async (req, res) => {
   const b = req.body || {}, MAXPAL = 20;
   const prod = (b.prod_no || '').trim(), country = (b.country || '').trim().toUpperCase();
   const startDate = (b.start_date || '').trim() || null;
+  const batchId = (b.batch_id || '').trim() || null;   // optional buying-batch tag applied to every created PO
   const codes = (Array.isArray(b.supplier_codes) ? b.supplier_codes : []).map(c => String(c).toUpperCase()).filter(Boolean);
   const items = (Array.isArray(b.items) ? b.items : []).filter(it => it && it.sku && Number(it.qty) > 0);
   const commit = !!b.commit;
@@ -3866,8 +3867,8 @@ app.post('/api/supply/buyplan-pos', async (req, res) => {
     const supIdOf = (code, name) => supByCode[String(code || '').toUpperCase()] || supByName[String(name || '').trim().toLowerCase()] || null;
     let created = 0;
     for (const p of pos) {
-      const insPo = await pool.query(`INSERT INTO planner.purchase_orders (po, supplier_name, supplier_id, prod_no, country_code, branch, start_production, status)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,'FUTURE') ON CONFLICT (po) DO NOTHING RETURNING po`, [p.po, p.supplier_name, supIdOf(p.supplier_code, p.supplier_name), prod, country, branch, startDate]);
+      const insPo = await pool.query(`INSERT INTO planner.purchase_orders (po, supplier_name, supplier_id, prod_no, batch_id, country_code, branch, start_production, status)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'FUTURE') ON CONFLICT (po) DO NOTHING RETURNING po`, [p.po, p.supplier_name, supIdOf(p.supplier_code, p.supplier_name), prod, batchId, country, branch, startDate]);
       if (insPo.rowCount) await notePoCreated(pool, p.po, authUser(req));
       for (const l of p.lines)
         await pool.query(`INSERT INTO planner.purchase_order_lines (po_sku, po, sku, qty, erp_qty, proposed_at, proposed_by)

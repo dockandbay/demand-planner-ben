@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.519 - Buy-plan → PO modal: add optional Batch number
+
+Added a Batch dropdown (optional, newest-first) to the "Create POs from Buy Plan" modal, alongside
+Production. The chosen batch is stamped onto every PO created in that run (buyplan-pos now sets batch_id).
+Branch already auto-defaults by destination×channel (UK 3PL → UK ILG, UK FBA → UK FBA, etc.).
+
 ## v25.518 - Portal users: Magic link button copies silently (no more 2 popups)
 
 The Magic link button in CONFIG ▸ Portal users used to fire two alerts (copyText's confirmation + a second
