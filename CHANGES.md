@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.527 - FBA tab: AWD → FBA transfer recommendation (US Amazon)
+
+New "Transfer AWD → FBA" filter (US only) on the FBA tab. When applied, the transfer column shows an AWD→FBA
+recommendation: forecast FBA demand over the FBA-target weeks minus current FBA cover (on-hand + inbound),
+capped at AWD on hand, carton-rounded per the carton mode. Only SKUs with a recommendation are listed. AWD is
+already netted out of the 3PL→FBA calc, so "AWD fills first, then 3PL covers the rest" holds with no
+double-count — this just surfaces the AWD slice. Reuses the tick/override/download machinery (like the
+non-GRS filter). Also aligned the non-GRS column display to its demand-driven value.
+
 ## v25.526 - Deposits PROD# picker sources from CONFIG > Productions (active)
 
 Re-pointed the deposits PROD# searchable picker at the CONFIG > Productions table (planner.prod_numbers,

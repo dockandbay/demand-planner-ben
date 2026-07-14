@@ -760,7 +760,7 @@ var CTX_HELP={
   'planning|actions':{t:'DEMAND ▸ Actions',h:'Demand exceptions: behind / ahead of sell-through target, trading vs last year, and upcoming trading-calendar events (with cover-at-uplift). Filter by market / category / status; dismiss, snooze or mark done — handled items stay viewable under the status pills.'},
   'planning|calendar':{t:'DEMAND ▸ Calendar',h:'Trading calendar of promo / campaign events by date × market × category (optional SKU list + uplift %). Upload / download CSV; the timeline focuses on the next 6 months. Events surface as “C” markers in Plan and as Demand Actions.'},
   'buy':{t:'BUY plan',h:'Recommended buys by SKU × market — Buy 3PL, Urgent, Buy FBA, and 3PL→market transfer opportunities. <b>3PL / FBA – Create POs</b> turn those quantities into proposed POs split into ≤20-pallet containers (supplier picked per SKU). <b>On Order</b> includes confirmed inbound + open POs (deduped by PO ref).'},
-  'fba':{t:'FBA transfer',h:'3PL → FBA replenishment, sized to the FBA-target weeks and drawing both pools down toward balance. <b>SOH AWD</b> (US) is pooled into FBA cover; <b>SOH NON GRS</b> shows non-GRS stock. The “Transfer FBA (non GRS)” filter pushes all non-GRS stock to FBA. Tick rows → download the FBA Transfer Upload.'},
+  'fba':{t:'FBA transfer',h:'3PL → FBA replenishment, sized to the FBA-target weeks and drawing both pools down toward balance. <b>SOH AWD</b> (US) is pooled into FBA cover; <b>SOH NON GRS</b> shows non-GRS stock. The “Transfer FBA (non GRS)” filter pushes all non-GRS stock to FBA. The “Transfer AWD → FBA” filter (US) recommends moving stock from the AWD upstream pool into FBA, sized to FBA demand over the target weeks and capped at AWD on hand. Tick rows → download the FBA Transfer Upload.'},
   'exec|ex':{t:'REPORTS ▸ Exec Summary',h:'Top-line summary across the planning estate.'},
   'exec|slow':{t:'REPORTS ▸ Slow Moving',h:'Stock with excess cover or no recent sales, ranked by cash tied up. Tunable cover / velocity / units thresholds and trailing-vs-forecast basis; FBA + AWD treated as one pool.'},
   'exec|af':{t:'REPORTS ▸ Auto Forecast',h:'Suggested buy by target cover-months and freight assumption, per market.'},
@@ -1350,7 +1350,7 @@ function fbaFwdDemand(md,n){
 // current FBA cover (on-hand + inbound + AWD), LIMITED by `capUnits` (the pool we're allowed to draw from),
 // then carton-rounded per FBA_CARTON_MODE. Callers set the cap: 50%-of-3PL for the normal 3PL transfer,
 // or the full non-GRS pool for the non-GRS transfer (3PL never uses non-GRS stock, so no 3PL cap there).
-function fbaTransferSized(sku,mkt,capUnits){
+function fbaTransferSized(sku,mkt,capUnits,exclAwd){
   const pd=PD[sku];const md=pd&&pd.mkts&&pd.mkts[mkt];if(!md)return 0;
   const cp=pd.cp||1;
   const iF=md['if_']||0, oof=md.oof||0;
@@ -1358,7 +1358,8 @@ function fbaTransferSized(sku,mkt,capUnits){
   const fbw=parseInt(document.getElementById('fbw')?.value)||8;
   const targetMonths=Math.max(1,Math.round(fbw/4.33));
   const target=fbaFwdDemand(md,targetMonths);
-  const need=Math.max(0,target-(iF+oof+awd));   // FBA shortfall vs the target — this is the demand-driven ceiling
+  // exclAwd=true (AWD→FBA sizing): AWD is the SOURCE, so don't count it as cover — need = full FBA shortfall
+  const need=Math.max(0,target-(iF+oof+(exclAwd?0:awd)));   // FBA shortfall vs the target — the demand-driven ceiling
   if(need<=0)return 0;
   let base=Math.min(need,Math.max(capUnits,0));
   if(base<=0)return 0;
@@ -1405,10 +1406,16 @@ function fbaTransferNonGrs(sku,mkt){
   if(base>0.65*pool)return pool;                // demand needs >65% of the pool → send the lot
   return Math.min(Math.ceil(base/cp)*cp,pool);  // else round UP to whole cartons (capped at the pool)
 }
+// AWD → FBA transfer (US Amazon only): fill the FBA demand shortfall over the target weeks from the AWD
+// upstream pool, capped at AWD available. AWD is normally counted as FBA cover for the 3PL→FBA calc, so this
+// surfaces the slice AWD is covering; the 3PL→FBA recommendation still sizes on the remaining shortfall (no
+// double-count). Carton-rounded per FBA_CARTON_MODE.
+function awdToFbaRec(sku,mkt){ if(String(mkt).toUpperCase()!=='US')return 0; var awd=awdOf(sku,mkt); if(awd<=0)return 0; return fbaTransferSized(sku,mkt,awd,true); }
 // Effective transfer = manual override if entered, else the recommendation.
 function fbaTransferEff(sku,mkt){
   const k=sku+'|'+mkt;
   if(FBA_OV[k]!=null&&FBA_OV[k]!=='')return parseInt(FBA_OV[k])||0;
+  if(BU_SEL==='TRFAWD')return awdToFbaRec(sku,mkt);                    // AWD → FBA (US) mode
   // "Transfer FBA (non GRS)" mode: demand-driven, carton-rounded-up, drawn from the non-GRS pool.
   if(BU_SEL==='TRFFBA_NG')return fbaTransferNonGrs(sku,mkt);
   return fbaTransferRec(sku,mkt);
@@ -1570,7 +1577,7 @@ function initUI(){
   // Buy filter pills: All / Urgent / Buy 3PL / Buy FBA
   const bup=document.getElementById('bup');
   var BU_PILLS=(BP_VIEW==='fba')
-    ? [['All','ALL'],['Transfer FBA','TRFFBA'],['Transfer FBA (non GRS)','TRFFBA_NG']]
+    ? [['All','ALL'],['Transfer FBA','TRFFBA'],['Transfer FBA (non GRS)','TRFFBA_NG']].concat(_CU==='US'?[['Transfer AWD → FBA','TRFAWD']]:[])   // AWD → FBA is US Amazon only
     : [['All','ALL'],['Urgent','URGENT'],['Buy 3PL','3PL'],['Buy FBA','FBA'],['First Buy','FIRST'],['Transfer','TRF']];
   if(!BU_PILLS.some(p=>p[1]===BU_SEL))BU_SEL=(BP_VIEW==='fba')?'TRFFBA':'ALL'; // FBA view defaults to Transfer FBA
   BU_PILLS.forEach(([lbl,val])=>{
@@ -1645,7 +1652,7 @@ function render(){
     var _trail=(BP_VIEW==='fba')
       ? '<th class="r" style="min-width:54px">Carton<br>qty</th>'
         +'<th class="r" style="min-width:88px">Ship<br><button type="button" onclick="BP.fbaSelectAll()" title="Tick all visible rows" style="font-size:8px;font-weight:400;padding:1px 4px;margin-top:1px;border:1px solid #cbd5e1;border-radius:3px;background:#f8fafc;color:#475569;cursor:pointer">Select all</button> <button type="button" onclick="BP.fbaClearTicks()" title="Clear all tick boxes" style="font-size:8px;font-weight:400;padding:1px 4px;border:1px solid #cbd5e1;border-radius:3px;background:#f8fafc;color:#475569;cursor:pointer">Clear</button></th>'
-        +'<th class="r" style="min-width:74px">Transfer<br>FBA</th>'
+        +'<th class="r" style="min-width:74px'+(BU_SEL==='TRFAWD'?';background:#fef9c3':'')+'">'+(BU_SEL==='TRFAWD'?'Transfer<br>AWD→FBA':'Transfer<br>FBA')+'</th>'
         +'<th class="r" style="min-width:64px">Override<br><button type="button" onclick="BP.fbaClearOverrides()" title="Clear all override numbers" style="font-size:8px;font-weight:400;padding:1px 5px;margin-top:1px;border:1px solid #cbd5e1;border-radius:3px;background:#f8fafc;color:#475569;cursor:pointer">Clear all</button></th>'
         +'<th class="r" style="min-width:78px">FBA inbound<br>\u226414 days</th>'
         +'<th class="r" style="min-width:78px">FBA inbound<br>15+ days</th>'
@@ -1682,6 +1689,7 @@ function render(){
       const bq=getBuyQtys(s.s,CUR);
       if(BU_SEL==='TRFFBA'&&!(fbaTransferEff(s.s,CUR)>0))return false;
       if(BU_SEL==='TRFFBA_NG'&&!(nonGrsOf(s.s,CUR)>0))return false;   // only SKUs with non-GRS stock in this country
+      if(BU_SEL==='TRFAWD'&&!(awdToFbaRec(s.s,CUR)>0))return false;   // only SKUs with an AWD → FBA recommendation
       if(BU_SEL==='URGENT'&&!bq.b3u)return false;
       if(BU_SEL==='3PL'&&!bq.b3)return false;
       if(BU_SEL==='FBA'&&!bq.bf)return false;
@@ -1767,7 +1775,7 @@ function render(){
       let trail;
       if(BP_VIEW==='fba'){
         const cp=(PD[s.s]&&PD[s.s].cp)||0;
-        const rec=(BU_SEL==='TRFFBA_NG')?nonGrsOf(s.s,CUR):fbaTransferRec(s.s,CUR);   // NG mode: transfer = all non-GRS stock
+        const rec=(BU_SEL==='TRFFBA_NG')?fbaTransferNonGrs(s.s,CUR):(BU_SEL==='TRFAWD')?awdToFbaRec(s.s,CUR):fbaTransferRec(s.s,CUR);   // NG: from non-GRS pool; AWD: from AWD pool (US)
         const ovKey=s.s+'|'+CUR;
         const ovVal=(FBA_OV[ovKey]!=null?FBA_OV[ovKey]:'');
         const {soon,later}=fbaInbSplit(s.s,CUR);
