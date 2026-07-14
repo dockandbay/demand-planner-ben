@@ -15,6 +15,16 @@ Two parts:
 Users always end up on the latest Horizon **without manual action**, and **without interrupting** work in
 progress — i.e. silent when possible, a gentle nudge otherwise.
 
+## Update: this also covers stale DATA, not just stale code (v25.530)
+The bigger issue than stale code: the demand/buy-plan data is **baked into the page at load and frozen** for
+an open tab (it's read from in-memory globals as the user navigates the SPA). So after an ETL sync (new sales
+/ inventory / on-order), an open tab shows **old numbers all day** until reloaded. We now detect this too:
+`/api/version` returns `{version, data}` where `data` is the latest change across the **ETL-fed source tables**
+(sales_actuals, products, inbound_shipments, flexport_shipments). The client reloads (silent/nudge) when
+`data` advances. We deliberately EXCLUDE user-edited tables (forecasts, POs, deposits) from that signal so a
+user's own edits never force a reload. **Nothing extra needed from you for this** — same caching asks below.
+(If you'd like live cross-user sync of POs/deposits without a reload, that's a separate mechanism — tell us.)
+
 ## What we've built (app code — already in this package)
 - **`GET /api/version`** — tiny endpoint returning the running `APP_VERSION`, sent `Cache-Control: no-store`.
 - **Client version-poll** (in the SUPPLY harness, so it runs across the whole main app): polls `/api/version`

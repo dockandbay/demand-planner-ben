@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.529';
+const APP_VERSION = 'v25.530';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -94,9 +94,30 @@ function replaceGlobal(html, name, jsonText) {
   return html.slice(0, start) + jsonText + html.slice(i);
 }
 
+// Latest change across the ETL-fed SOURCE data that gets BAKED into the page (and is otherwise frozen for an
+// open tab): sales, inventory/products, on-order/inbound, Flexport. Deliberately EXCLUDES user-edited tables
+// (forecast_inputs, purchase_orders, deposits) — their updated_at bumps on the user's own edits, which would
+// otherwise force a reload on every edit. Drives EXTRACT_TS + the client's data-freshness auto-reload.
 async function freshness() {
-  const { rows } = await pool.query(`SELECT max(loaded_at) AS ts FROM planner.sales_actuals`);
-  return rows[0].ts ? new Date(rows[0].ts).toISOString() : null;
+  const SRC = { sales_actuals: 'loaded_at', products: 'updated_at', inbound_shipments: 'updated_at', flexport_shipments: 'updated_at' };
+  try {
+    const have = (await pool.query(`SELECT table_name, column_name FROM information_schema.columns
+      WHERE table_schema='planner' AND table_name=ANY($1) AND column_name=ANY($2)`,
+      [Object.keys(SRC), [...new Set(Object.values(SRC))]])).rows;
+    const parts = Object.keys(SRC).filter(t => have.some(r => r.table_name === t && r.column_name === SRC[t]))
+      .map(t => `SELECT max(${SRC[t]}) ts FROM planner.${t}`);
+    if (!parts.length) return null;
+    const { rows } = await pool.query(`SELECT max(ts) AS ts FROM (${parts.join(' UNION ALL ')}) x`);
+    return rows[0].ts ? new Date(rows[0].ts).toISOString() : null;
+  } catch (e) { return null; }
+}
+// 60s-cached freshness for the frequently-polled /api/version (avoids re-scanning on every client poll).
+let _freshCache = { at: 0, val: null };
+async function freshnessCached() {
+  const now = Date.now();
+  if (now - _freshCache.at < 60000) return _freshCache.val;
+  _freshCache = { at: now, val: await freshness() };
+  return _freshCache.val;
 }
 
 async function buildDATA() {
@@ -908,7 +929,7 @@ async function expediteActions() {
 
 // Lightweight, always-fresh version probe — the client polls this to detect a new deploy while a tab is
 // left open (the app is a SPA, so an open tab keeps running its booted version until reloaded).
-app.get('/api/version', (_req, res) => { res.set('Cache-Control', 'no-store').json({ version: APP_VERSION }); });
+app.get('/api/version', async (_req, res) => { res.set('Cache-Control', 'no-store').json({ version: APP_VERSION, data: await freshnessCached() }); });
 app.get('/api/health', async (_req, res) => {
   try {
     const [DATA, FC, FO, SKU, CATS, SUBS, BI, PC] = await Promise.all([

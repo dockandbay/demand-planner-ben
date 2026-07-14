@@ -6452,15 +6452,19 @@
 (function(){
   var BOOT='__APP_VERSION__';                       // version this tab booted with (replaced at serve time)
   if(!/^v?\d/.test(BOOT))return;                     // only run when a real version was injected
-  var pending=false, nagShown=false;
+  var BOOT_DATA=(typeof EXTRACT_TS!=='undefined'&&EXTRACT_TS&&EXTRACT_TS.slice(0,2)!=='__')?EXTRACT_TS:null;   // source-data timestamp at load
+  var pending=false, nagShown=false, nagMsg='HORIZON has an update ready.';
   function nag(){ if(nagShown||!document.body)return; nagShown=true;
     var d=document.createElement('div'); d.id='hz-update-nag';
     d.style.cssText='position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:2147483000;background:#0f172a;color:#fff;font:13px system-ui;padding:10px 14px;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.35);display:flex;gap:10px;align-items:center';
-    d.innerHTML='<span>A new version of HORIZON is ready.</span><button id="hz-update-go" style="background:#2563eb;color:#fff;border:0;border-radius:6px;padding:5px 12px;font-weight:600;cursor:pointer">Refresh</button>';
+    d.innerHTML='<span>'+nagMsg+'</span><button id="hz-update-go" style="background:#2563eb;color:#fff;border:0;border-radius:6px;padding:5px 12px;font-weight:600;cursor:pointer">Refresh</button>';
     document.body.appendChild(d); document.getElementById('hz-update-go').onclick=function(){ location.reload(); }; }
   function apply(){ if(!pending)return; if(document.hidden){ location.reload(); } else { nag(); } }   // reload silently in the background; else nudge
   function check(){ fetch('/api/version',{cache:'no-store',credentials:'same-origin'}).then(function(r){return r.ok?r.json():null;}).then(function(j){
-    if(j&&j.version&&j.version!==BOOT){ pending=true; apply(); } }).catch(function(){}); }
+    if(!j)return;
+    var newCode=(j.version&&j.version!==BOOT);
+    var newData=(BOOT_DATA&&j.data&&j.data!==BOOT_DATA);   // ETL/source data changed since this tab loaded
+    if(newCode||newData){ nagMsg=newCode?'A new version of HORIZON is ready.':'Newer data is available.'; pending=true; apply(); } }).catch(function(){}); }
   document.addEventListener('visibilitychange',function(){ if(document.hidden){ apply(); } else { check(); } });
   window.addEventListener('focus',check);
   setInterval(check,5*60*1000);   // poll every 5 minutes

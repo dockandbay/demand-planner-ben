@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.530 - Auto-update now also catches stale DATA (not just stale code)
+
+Extended the auto-update poll to reload when the underlying source DATA changes, not only on a code deploy.
+The demand/buy-plan data is baked into the page at load and frozen for an open tab, so an ETL sync (new
+sales / inventory / on-order) would otherwise never reach an open tab. `freshness()` now returns the latest
+change across the ETL-fed SOURCE tables (sales_actuals, products, inbound_shipments, flexport_shipments) —
+NOT user-edited tables (forecasts/POs/deposits), so a user's own edits never trigger a reload. `/api/version`
+returns `{version, data}` (freshness cached 60s); the client reloads (silent when backgrounded, else nudge)
+when either changes.
+
 ## v25.529 - Silent auto-update (stops users getting stuck on old versions)
 
 New `GET /api/version` (no-store) + a client poll in the harness: every 5 min / on tab focus / 15s after load
