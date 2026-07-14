@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.529 - Silent auto-update (stops users getting stuck on old versions)
+
+New `GET /api/version` (no-store) + a client poll in the harness: every 5 min / on tab focus / 15s after load
+it compares the server version to the tab's booted version; on a newer deploy it reloads SILENTLY when the tab
+is backgrounded, else shows a small "Refresh" nudge. Main app HTML is already served no-store so reloads are
+fresh. Advisory doc for Diviyaj (edge-cache confirmation + what we need) in ADVISORY_2026-07-14_auto-update.md.
+
 ## v25.528 - Fix broken FBA pills; per-country URLs for BUY/FBA
 
 - **FIX:** the v25.527 AWD filter pill referenced `_CU` (only defined inside render()), which threw in the

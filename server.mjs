@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.528';
+const APP_VERSION = 'v25.529';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -906,6 +906,9 @@ async function expediteActions() {
   return out;
 }
 
+// Lightweight, always-fresh version probe — the client polls this to detect a new deploy while a tab is
+// left open (the app is a SPA, so an open tab keeps running its booted version until reloaded).
+app.get('/api/version', (_req, res) => { res.set('Cache-Control', 'no-store').json({ version: APP_VERSION }); });
 app.get('/api/health', async (_req, res) => {
   try {
     const [DATA, FC, FO, SKU, CATS, SUBS, BI, PC] = await Promise.all([
