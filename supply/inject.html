@@ -3344,8 +3344,8 @@
       +'<input class="flt" id="dep-q" placeholder="Filter reference / supplier…"><span class="count" id="dep-cnt"></span></div>'
       +'<style>#deptbl{table-layout:fixed;width:100%}#deptbl td,#deptbl th{white-space:normal;overflow-wrap:break-word;vertical-align:top}#deptbl .fci{width:100%;box-sizing:border-box;min-width:0}</style>'
       +'<div class="tw"><table id="deptbl"><colgroup>'
-      +'<col style="width:120px"><col style="width:140px"><col style="width:50px"><col style="width:102px"><col style="width:90px"><col style="width:60px"><col style="width:122px"><col style="width:84px"><col style="width:92px"><col><col style="width:128px"></colgroup>'
-      +'<thead><tr><th class="l">Reference</th><th class="l">Supplier</th><th class="l">PROD#</th><th class="l">Xero code</th><th>Amount</th><th>FX</th><th class="l">Due</th><th class="l">Likely pay</th><th class="l">Date paid</th><th>Remaining</th><th title="Σ calculated start deposits of OPEN, not-yet-allocated POs on this reference">Est. alloc.</th><th class="l">Linked purchase orders</th><th class="l"></th></tr></thead><tbody id="dep-rows"></tbody></table></div>';
+      +'<col style="width:120px"><col style="width:140px"><col style="width:56px"><col style="width:50px"><col style="width:102px"><col style="width:90px"><col style="width:60px"><col style="width:122px"><col style="width:84px"><col style="width:92px"><col><col style="width:128px"></colgroup>'
+      +'<thead><tr><th class="l">Reference</th><th class="l">Supplier</th><th class="l" title="AU deposits are region-isolated; a PO can only use a deposit in its own region">Country</th><th class="l">PROD#</th><th class="l">Xero code</th><th>Amount</th><th>FX</th><th class="l">Due</th><th class="l">Likely pay</th><th class="l">Date paid</th><th>Remaining</th><th title="Σ calculated start deposits of OPEN, not-yet-allocated POs on this reference">Est. alloc.</th><th class="l">Linked purchase orders</th><th class="l"></th></tr></thead><tbody id="dep-rows"></tbody></table></div>';
     // Every deposit row is read-only by default; click Edit to unlock it, Save to relock. (A closed row must
     // be reopened first.) Edit state (DEP_EDIT) holds while you edit; saving relocks all rows.
     function rowHTML(d){ var ep='/api/supply/deposit/'+encodeURIComponent(d.id);
@@ -3356,6 +3356,8 @@
       function txt(v,isd){ return (v==null||v==='')?'<span class="mut">—</span>':esc(isd?fd(v):v); }
       var c_ref = locked?'<td class="l">'+txt(d.reference)+'</td>':'<td class="l">'+editCell(ep,'reference',d.reference,'txt')+'</td>';
       var c_sup = locked?'<td class="l">'+txt(d.supplier_name)+'</td>':'<td class="l">'+supSel(ep,d.supplier_name)+'</td>';
+      var DEP_MKTS=['UK','AU','EU','US','CA'];   // deposit region — drives which POs can use it (AU is isolated)
+      var c_ctry= locked?'<td class="l">'+txt(d.country)+'</td>':'<td class="l"><select class="fci" data-ep="'+esc(ep)+'" data-field="country"><option value=""></option>'+DEP_MKTS.map(function(mk){return '<option'+(String(d.country||'').toUpperCase()===mk?' selected':'')+'>'+mk+'</option>';}).join('')+'</select></td>';
       var c_prod= locked?'<td class="l">'+txt(d.prod_no)+'</td>':'<td class="l">'+editCell(ep,'prod_no',d.prod_no,'txt')+'</td>';
       var c_xero= locked?'<td class="l">'+txt(d.xero_account_code)+'</td>':'<td class="l">'+editCell(ep,'xero_account_code',d.xero_account_code,'txt')+'</td>';
       var c_amt = locked?'<td>'+txt(d.amount)+'</td>':'<td>'+editCell(ep,'amount',d.amount)+'</td>';
@@ -3390,7 +3392,7 @@
         : ' <button class="lnk-btn dep-del" data-id="'+d.id+'" data-ref="'+esc(d.reference||('#'+d.id))+'" title="delete this deposit" style="color:#dc2626">delete</button>';
       // apply this deposit to all open, unassigned POs in its production + supplier (region-matched)
       if(d.is_deposit && d.prod_no && d.supplier_name && !closed) act += ' <button class="lnk-btn dep-apply-all" data-id="'+d.id+'" style="color:#6d28d9" title="assign this deposit to every open '+esc(d.supplier_name)+' PO in production '+esc(d.prod_no)+' ('+esc(d.country||'?')+' region) that has no deposit yet">⤿ apply to prod '+esc(d.prod_no)+'</button>';
-      return '<tr'+(editing?' style="background:#f0f6ff"':(closed?' style="opacity:.55"':''))+'>'+c_ref+c_sup+c_prod+c_xero+c_amt+c_fx+c_due+c_likely+c_paid+c_rem+c_est+c_asg+'<td class="l" style="white-space:nowrap">'+act+'</td></tr>'; }
+      return '<tr'+(editing?' style="background:#f0f6ff"':(closed?' style="opacity:.55"':''))+'>'+c_ref+c_sup+c_ctry+c_prod+c_xero+c_amt+c_fx+c_due+c_likely+c_paid+c_rem+c_est+c_asg+'<td class="l" style="white-space:nowrap">'+act+'</td></tr>'; }
     function cur(){ return deps.filter(function(d){ if(st.f==='all')return true; if(st.f==='closed')return d.status==='closed';
       if(st.f==='remaining')return d.status!=='closed' && (Number(d.deposit_remaining)||0)>0.01;   // open + still holds money
       return d.status!=='closed'; }); }

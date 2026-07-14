@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.520 - Deposits register: add editable Country column
+
+Added a Country column (editable select UK/AU/EU/US/CA) to the Deposits register. This is the field that
+decides a deposit's region for PO assignment (AU is isolated), but there was no way to see/set it in the UI —
+so directly-entered deposits landed with country NULL and couldn't be matched to a PO (e.g. P57-AU-XR1 to an
+AU PO). Auto-saves inline like the other cells; server already accepted `country`.
+
 ## v25.519 - Buy-plan → PO modal: add optional Batch number
 
 Added a Batch dropdown (optional, newest-first) to the "Create POs from Buy Plan" modal, alongside
