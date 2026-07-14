@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.528 - Fix broken FBA pills; per-country URLs for BUY/FBA
+
+- **FIX:** the v25.527 AWD filter pill referenced `_CU` (only defined inside render()), which threw in the
+  pill-builder function and broke the FBA tab (it fell back to showing the Buy-plan pills). Uses `CUR` now, so
+  the FBA pills — and the US-only "AWD · FBA <3wk" filter — render correctly.
+- **Per-country URLs** for the BUY and FBA tabs: clicking a country pill now writes `#/buy/<cc>` / `#/fba/<cc>`
+  (e.g. `#/fba/us`, `#/buy/uk`), and those URLs deep-link straight to that view + market. applyRoute sets the
+  market from the country segment before switching in.
+
 ## v25.527 - FBA tab: "AWD · FBA <3wk" filter (US); reverted the AWD→FBA transfer rec
 
 Reverted the previous AWD→FBA transfer-recommendation change (FBA transfer logic is back exactly as before).
