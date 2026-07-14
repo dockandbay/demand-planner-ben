@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.518 - Portal users: Magic link button copies silently (no more 2 popups)
+
+The Magic link button in CONFIG ▸ Portal users used to fire two alerts (copyText's confirmation + a second
+alert with the URL). Now it copies the link straight to the clipboard and just flashes "✓ Copied" on the
+button — no popups (error still alerts).
+
 ## v25.517 - PO grid Batch/PROD# cell picker sorts descending (newest first)
 
 The Batch (and PROD#) cell picker in the Purchase Orders grid — the dropdown when you click a Batch cell to

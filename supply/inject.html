@@ -4250,7 +4250,9 @@
                 btn.disabled=true; fetch('/api/supply/portal-user-create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:em,supplier_name:sup,contact_name:ct||null})}).then(function(r){return r.json();})
                   .then(function(j){ if(j&&j.error){ err.textContent=j.error; btn.disabled=false; return; } showSub(); })
                   .catch(function(e){ err.textContent=(e&&e.message)||'failed'; btn.disabled=false; }); }; };
-            b.querySelectorAll('.pu-magic').forEach(function(btn){ btn.onclick=function(){ fetch('/api/supply/portal-magic/'+btn.dataset.id,{method:'POST'}).then(function(r){return r.json();}).then(function(j){ if(j.error)return alert(j.error); copyText(j.url,'Magic link'); alert('Magic link for '+j.email+' (valid '+j.expires_days+' days) — copied to your clipboard:\n\n'+j.url); }); }; });
+            b.querySelectorAll('.pu-magic').forEach(function(btn){ btn.onclick=function(){ fetch('/api/supply/portal-magic/'+btn.dataset.id,{method:'POST'}).then(function(r){return r.json();}).then(function(j){ if(j.error)return alert(j.error);
+              var ok=function(){ var o=btn.textContent; btn.textContent='✓ Copied'; setTimeout(function(){ btn.textContent=o; },1500); };   // copy silently, flash the button — no popups
+              if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(j.url).then(ok,function(){ legacyCopy(j.url); ok(); }); } else { legacyCopy(j.url); ok(); } }); }; });
             b.querySelectorAll('.pu-del').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Remove this portal user? Their access is revoked.'))return; shipPost('/api/supply/portal-user/'+btn.dataset.id,{_delete:true},showSub); }; });
           }); }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); }
       else if(CONFIG_SUB==='consignees'){ b.innerHTML='<div class="count">Loading…</div>';
