@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.524 - Samples timeline shows supplier+email; +Deposit visible under Remaining·open
+
+- Sample timeline notes from a supplier now show the supplier name and the portal user's email
+  (e.g. "Lixin (sherry@)") instead of the generic "Supplier". D&B / "D&B as <supplier>" labels unchanged.
+- The Deposits "Remaining · open" filter now also shows brand-new/blank deposits (amount not yet entered), so
+  a freshly-created +Deposit appears in the default view instead of being hidden until you fill in an amount.
+
 ## v25.523 - Deposits: PROD# is now a dropdown
 
 The PROD# field in the Deposits register is now a dropdown (production numbers from lookups, newest-first,

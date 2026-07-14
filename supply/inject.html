@@ -3402,7 +3402,7 @@
       if(d.is_deposit && d.prod_no && d.supplier_name && !closed) act += ' <button class="lnk-btn dep-apply-all" data-id="'+d.id+'" style="color:#6d28d9" title="assign this deposit to every open '+esc(d.supplier_name)+' PO in production '+esc(d.prod_no)+' ('+esc(d.country||'?')+' region) that has no deposit yet">⤿ apply to prod '+esc(d.prod_no)+'</button>';
       return '<tr'+(editing?' style="background:#f0f6ff"':(closed?' style="opacity:.55"':''))+'>'+c_ref+c_sup+c_ctry+c_prod+c_xero+c_amt+c_fx+c_due+c_likely+c_paid+c_rem+c_est+c_asg+'<td class="l" style="white-space:nowrap">'+act+'</td></tr>'; }
     function cur(){ return deps.filter(function(d){ if(st.f==='all')return true; if(st.f==='closed')return d.status==='closed';
-      if(st.f==='remaining')return d.status!=='closed' && (Number(d.deposit_remaining)||0)>0.01;   // open + still holds money
+      if(st.f==='remaining')return d.status!=='closed' && ((Number(d.deposit_remaining)||0)>0.01 || !(Number(d.amount)>0));   // open + still holds money, OR a new/blank deposit not yet filled in (so +Deposit is visible here)
       return d.status!=='closed'; }); }
     function draw(){ var f=cur().filter(function(d){return !st.q||((d.reference||'')+' '+(d.supplier_name||'')).toLowerCase().indexOf(st.q)>=0;});
       document.getElementById('dep-cnt').textContent=f.length+' / '+deps.length+' deposits';
@@ -5805,7 +5805,9 @@
       var _ownN=(notes||[]).filter(function(n){return n.author_kind!=='supplier';});   // escalate only on YOUR OWN latest note
       var recentOwnId=_ownN.length?_ownN.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0].id:null;
       var list=(notes&&notes.length)?tlDesc(notes).map(function(n){ var supSide=(n.author_kind==='supplier'); var onBehalf=(supSide&&n.author_email==='D&B'); var nu=supSide&&!n.read;
-        var who=onBehalf?('D&amp;B as '+esc(supName||'supplier')):(supSide?'Supplier':'D&amp;B');
+        var who=onBehalf?('D&amp;B as '+esc(supName||'supplier'))
+          :supSide?(esc(supName||'Supplier')+(n.author_email&&n.author_email!=='D&B'?' ('+esc(n.author_email)+')':''))   // which supplier + which portal user
+          :'D&amp;B';
         var ctrl=(admin&&supSide)?(n.read?'<a class="ssp-read" data-id="'+n.id+'" data-read="1" style="font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline">mark unread</a>':'<button class="save-btn light ssp-read" data-id="'+n.id+'" data-read="0">Mark read</button>')
           :((admin&&n.id===recentOwnId)?'<button class="save-btn light samp-esc" data-ref="'+esc(ref)+'" data-msg="'+esc(n.body)+'" title="Escalate this message to the supplier by email" style="flex:0 0 auto;color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'');
         return '<div style="font-size:13px;line-height:1.5;text-align:left;margin:4px 0;max-width:640px;display:flex;gap:10px;align-items:flex-start'+(nu?';background:#fff7ed;border:1px solid #fdba74;border-radius:6px;padding:6px 9px':'')+'">'+(ctrl?'<div style="flex:0 0 auto;min-width:70px">'+ctrl+'</div>':'')+'<div style="flex:1"><span class="mut" style="font-size:11px">'+esc(n.created_at)+' · '+who+'</span>'+(nu?' <span class="ex-badge">new</span>':'')+'<br>'+esc(n.body)+'</div></div>'; }).join(''):'<div class="mut" style="font-size:12px">No timeline entries yet.</div>';
