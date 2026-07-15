@@ -679,7 +679,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
 <div id="sa-drawer-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:5900" onclick="closeSADrawer()"></div>
 <div id="sa-drawer" style="display:none;position:fixed;top:0;right:0;height:100%;width:clamp(400px,50vw,900px);background:#fff;box-shadow:-8px 0 28px rgba(0,0,0,.22);z-index:6000;flex-direction:column">
   <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;border-bottom:1px solid #e5e5e5;flex:0 0 auto"><b style="font-size:15px">Stock Availability</b><button onclick="closeSADrawer()" title="Close" style="width:28px;height:28px;border-radius:6px;border:1px solid #cbd5e1;background:#f8fafc;cursor:pointer;font-size:16px;line-height:1">&times;</button></div>
-  <div id="sa-drawer-body" style="flex:1 1 auto;overflow:auto;padding:12px 16px">Loading…</div>
+  <div id="sa-drawer-body" style="flex:1 1 auto;overflow:auto;padding:0 16px 12px">Loading…</div>
 </div>
 <div id="help-ov" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:flex-start;justify-content:center" onclick="if(event.target===this)closeHelp()">
   <div style="background:#fff;max-width:580px;width:92%;margin-top:46px;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.25);padding:18px 22px;max-height:82vh;overflow:auto;font-size:13px;line-height:1.5;color:#222">
@@ -7600,7 +7600,6 @@ function renderStockAvailability(container){ if(!container)return;
       +'<span style="width:1px;height:16px;background:#e0e0e0;margin:0 4px"></span>'
       +'<input class="sa-q" placeholder="Filter by SKU(s) — space/comma separated…" value="'+saEsc(SA_Q||'')+'" style="font-size:11px;padding:3px 8px;border:1px solid #d0d0d0;border-radius:4px;width:280px">'
       +'<select class="sa-cat" style="font-size:11px;padding:3px 8px;border:1px solid #d0d0d0;border-radius:4px;max-width:220px">'+catOpts+'</select>'
-      +'<span style="font-size:10px;color:#999;margin-left:auto">'+rows.length+' of '+all.length+' SKUs</span>'
     +'</div>'+saTableHTML(rows,SA_CUR==='US')+'</div>';
   container.querySelectorAll('.sa-mkt').forEach(function(b){ b.onclick=function(){ SA_CUR=b.dataset.m; renderStockAvailability(container); }; });
   var cs=container.querySelector('.sa-cat'); if(cs)cs.onchange=function(){ SA_CAT=this.value; renderStockAvailability(container); };
@@ -7617,7 +7616,7 @@ function renderStockAvailability(container){ if(!container)return;
 function saEnsureDrawer(){ var d=document.getElementById('sa-drawer');
   if(!d){ d=document.createElement('div'); d.id='sa-drawer';
     d.style.cssText='position:fixed;top:0;right:0;height:100%;width:clamp(400px,50vw,900px);background:#fff;box-shadow:-8px 0 28px rgba(0,0,0,.22);z-index:6000;flex-direction:column;display:none';
-    d.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;border-bottom:1px solid #e5e5e5;flex:0 0 auto"><b style="font-size:15px">Stock Availability</b><button id="sa-drawer-x" title="Close" style="width:28px;height:28px;border-radius:6px;border:1px solid #cbd5e1;background:#f8fafc;cursor:pointer;font-size:16px;line-height:1">&times;</button></div><div id="sa-drawer-body" style="flex:1 1 auto;overflow:auto;padding:12px 16px">Loading…</div>';
+    d.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;border-bottom:1px solid #e5e5e5;flex:0 0 auto"><b style="font-size:15px">Stock Availability</b><button id="sa-drawer-x" title="Close" style="width:28px;height:28px;border-radius:6px;border:1px solid #cbd5e1;background:#f8fafc;cursor:pointer;font-size:16px;line-height:1">&times;</button></div><div id="sa-drawer-body" style="flex:1 1 auto;overflow:auto;padding:0 16px 12px">Loading…</div>';
     document.body.appendChild(d); var x=d.querySelector('#sa-drawer-x'); if(x)x.onclick=closeSADrawer; }
   else if(d.parentNode!==document.body)document.body.appendChild(d);
   var bk=document.getElementById('sa-drawer-backdrop');
