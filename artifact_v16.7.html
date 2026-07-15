@@ -6787,7 +6787,7 @@ function syncTabs(){
 }
 
 function st(msg){var e=document.getElementById('st');if(e)e.textContent=msg;}
-(function(){var label='';var iso=EXTRACT_TS;if(iso&&iso.slice(0,2)!=='__'){var d=new Date(iso);if(!isNaN(d.getTime())){var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],p=function(n){return(n<10?'0':'')+n;};label='Data extract last updated '+p(d.getDate())+'-'+mn[d.getMonth()]+'-'+String(d.getFullYear()).slice(2)+' '+p(d.getHours())+':'+p(d.getMinutes())+'.&nbsp;&nbsp;';}}document.getElementById('ver').innerHTML=label+'<b>'+VERSION+'</b>';var _hv=document.getElementById('hz-ver');if(_hv)_hv.innerHTML='HORIZON<br>'+VERSION;})();
+(function(){document.getElementById('ver').innerHTML='<b>'+VERSION+'</b>';var _hv=document.getElementById('hz-ver');if(_hv)_hv.innerHTML='HORIZON<br>'+VERSION;})();
 function render(){
   // load trading-calendar events once (for the PLAN month-cell "C" markers); re-render when they arrive
   if(CAL_EVENTS===null){ CAL_EVENTS=[]; fetch('/api/trading-calendar').then(function(r){return r.json();}).then(function(d){ CAL_EVENTS=(d&&d.events)||[]; if(VIEW_MODE==='planning')render(); }).catch(function(){}); }
@@ -10184,7 +10184,8 @@ var _rfBtn=document.getElementById('rf'); if(_rfBtn)_rfBtn.onclick=function(){
   // Rehost: Supabase (forecast_inputs, injected live into FC_CURRENT->FC_SEED->IV) is the
   // source of truth. The localStorage overlay is intentionally NOT applied on load so a
   // server-injected page always reflects the saved DB state, not a stale local session.
-  st('Inputs loaded live from Supabase (forecast_inputs)');
+  // (no on-load status message — Ben asked to drop the "Inputs loaded…/Data extract…" footer text;
+  //  #st is still used for transient save feedback.)
   // Snapshot the post-load IV state — anything different from this is a user edit (dirty)
   FC_INITIAL=Object.assign({},IV);
   syncPlanActiveDates();

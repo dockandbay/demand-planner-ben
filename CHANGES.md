@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.546 - DEMAND: drop the status-footer info text
+
+Removed the on-load "Inputs loaded live from Supabase (forecast_inputs)" status message and the
+"Data extract last updated …" prefix on the footer. The footer now shows only the version (bold,
+right-aligned), and `#st` is still used for transient save feedback ("✓ Saved … forecast inputs").
+
+Files: artifact_v16.7.html. No migrations, no new env vars.
+
 ## v25.545 - SA report: fix sticky headers by removing the nested scroll container
 
 The table was wrapped in its own `<div style="overflow:auto">`, so the `<thead>` pinned relative to
