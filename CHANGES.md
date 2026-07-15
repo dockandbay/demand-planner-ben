@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.533 - Fix: per-country BUY/FBA URLs never switched market (so #/fba/us showed UK → no AWD pill)
+
+The v25.528 router called a bare `setFilters(...)` to apply the market from `#/fba/us` etc., but the BUY/FBA
+engine is an IIFE (`var BP=(function(){…})()`) — `setFilters` isn't global, so the call was a no-op and the
+market stayed UK. That's why `#/fba/us` didn't show the US-only "AWD · FBA <3wk" pill. Now uses
+`window.BP.setFilters(<CC>)`. Fixes both the missing AWD pill on `#/fba/us` and per-country deep-links generally.
+
 ## v25.532 - Auto-update on the supplier portal too
 
 Extended the auto-update (new-version + 30-min staleness reload, silent-when-safe / else nudge) to the

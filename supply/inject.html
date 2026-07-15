@@ -5443,7 +5443,7 @@
     else if(seg[0]==='reports'){ if(seg[1]&&typeof REPORT_VIEW!=='undefined')REPORT_VIEW=seg[1]; var _rb=document.querySelector('#view-tabs-row .view-toggle[data-view="exec"]'); if(_rb)_rb.click(); }
     else if(seg[0]){
       // buy/fba can carry a country: #/fba/us, #/buy/uk → set the market before switching in
-      if((seg[0]==='buy'||seg[0]==='fba')&&seg[1]&&typeof setFilters==='function'&&['uk','us','eu','au','ca'].indexOf(seg[1].toLowerCase())>=0)setFilters(seg[1].toUpperCase());
+      if((seg[0]==='buy'||seg[0]==='fba')&&seg[1]&&window.BP&&window.BP.setFilters&&['uk','us','eu','au','ca'].indexOf(seg[1].toLowerCase())>=0){ try{ window.BP.setFilters(seg[1].toUpperCase()); }catch(e){} }   // BP is an IIFE — set market via the exposed API, not a bare global
       var btn=document.querySelector('#view-tabs-row .view-toggle[data-view="'+seg[0]+'"]'); if(btn)btn.click(); } }
   window.addEventListener('hashchange',function(){ if(location.hash===_expectedHash)return; applyRoute(); });
 
