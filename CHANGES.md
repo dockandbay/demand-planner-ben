@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.539 - Update nudge: prominent yellow top bar
+
+The "A new version of HORIZON is ready" nudge is now a full-width yellow bar pinned to the top of the screen
+with larger text and a bold "Refresh now" button (was a small dark chip at the bottom). Applied to both the
+main app and the supplier portal.
+
 ## v25.538 - Stock Availability: column/layout fixes + snappier SA drawer
 
 - SKU column never truncates and is **pinned (sticky-left)** so it stays visible when the drawer scrolls.

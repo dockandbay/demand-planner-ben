@@ -93,8 +93,8 @@
   var pending=false,nagShown=false,nagMsg='A new version is ready.',lastAct=Date.now(),STALE_MS=30*60*1000,IDLE_MS=90*1000;
   ['mousemove','keydown','mousedown','scroll','touchstart'].forEach(function(ev){window.addEventListener(ev,function(){lastAct=Date.now();},{passive:true,capture:true});});
   function nag(){ if(nagShown||!document.body)return; nagShown=true; var d=document.createElement('div');
-    d.style.cssText='position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:2147483000;background:#0f172a;color:#fff;font:13px system-ui;padding:10px 14px;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.35);display:flex;gap:10px;align-items:center';
-    d.innerHTML='<span>'+nagMsg+'</span><button id="hz-pu-go" style="background:#2563eb;color:#fff;border:0;border-radius:6px;padding:5px 12px;font-weight:600;cursor:pointer">Refresh</button>';
+    d.style.cssText='position:fixed;top:0;left:0;right:0;z-index:2147483000;background:#fde047;color:#111827;font:700 15px system-ui;padding:11px 18px;display:flex;gap:16px;align-items:center;justify-content:center;box-shadow:0 3px 14px rgba(0,0,0,.28);border-bottom:2px solid #eab308';
+    d.innerHTML='<span style="font-size:16px">🔄 '+nagMsg+'</span><button id="hz-pu-go" style="background:#111827;color:#fde047;border:0;border-radius:6px;padding:8px 18px;font-weight:700;font-size:14px;cursor:pointer">Refresh now</button>';
     document.body.appendChild(d); document.getElementById('hz-pu-go').onclick=function(){location.reload();}; }
   function apply(){ if(!pending)return; if(document.hidden){location.reload();return;} if(Date.now()-lastAct>IDLE_MS){location.reload();return;} nag(); }
   function check(){ fetch('/api/version',{cache:'no-store',credentials:'same-origin'}).then(function(r){return r.ok?r.json():null;}).then(function(j){ if(j&&j.version&&j.version!==BOOT){pending=true;apply();} }).catch(function(){}); }
