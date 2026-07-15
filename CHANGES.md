@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.532 - Auto-update on the supplier portal too
+
+Extended the auto-update (new-version + 30-min staleness reload, silent-when-safe / else nudge) to the
+supplier portal (portal.html), which is a separate page and had none of it. `/api/version` is now gate-exempt
+(public — returns only version + a data timestamp) so a portal session (no planner key) can poll it; the
+portal page is now served `no-store` with the version stamped in. Portal uses version + staleness only (not
+the ETL data signal — suppliers don't view that data).
+
 ## v25.531 - Hard 30-minute staleness reload + idle-reload
 
 Belt-and-braces on top of the version/data poll: a tab open longer than 30 minutes is treated as stale and

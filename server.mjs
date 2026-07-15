@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.531';
+const APP_VERSION = 'v25.532';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -425,7 +425,7 @@ function cookieVal(req, name) {
 }
 app.use((req, res, next) => {
   // Supplier portal has its own magic-link/session auth — it must NOT require the planner key.
-  if (req.path === '/portal' || req.path === '/portal-view.js' || req.path.startsWith('/api/portal/')) return next();
+  if (req.path === '/portal' || req.path === '/portal-view.js' || req.path === '/api/version' || req.path.startsWith('/api/portal/')) return next();   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
   if (!GATE) return next();                       // open locally
   if (req.path.startsWith('/api/')) {             // APIs: header or cookie
     if (req.get('x-planner-key') === GATE || cookieVal(req, 'pk') === GATE) return next();
@@ -6898,9 +6898,9 @@ app.get('/portal', async (req, res) => {
       }
       return res.redirect('/portal?e=expired');
     }
-    var _pp = DEV ? loadPortalPage() : PORTAL_PAGE;
+    var _pp = (DEV ? loadPortalPage() : PORTAL_PAGE).split('__APP_VERSION__').join(APP_VERSION);   // stamp version for the auto-update poll
     if (IS_SANDBOX) _pp = _pp.replace(/<body[^>]*>/, m => m + SANDBOX_BANNER);
-    res.set('content-type', 'text/html').send(_pp);
+    res.set('content-type', 'text/html').set('Cache-Control', 'no-store').send(_pp);
   } catch (e) { res.status(500).send('portal error'); }
 });
 

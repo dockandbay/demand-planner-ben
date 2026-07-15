@@ -86,6 +86,23 @@
 
   get('/api/portal/me').then(showPortal).catch(function(){ showLogin(); });
 })();
+// ── Silent auto-update (supplier portal) ── mirrors the main app: reload on a new deploy or a >30-min stale
+// session, silently when backgrounded/idle, else a small Refresh nudge.
+(function(){
+  var BOOT='__APP_VERSION__'; if(!/^v?\d/.test(BOOT))return;
+  var pending=false,nagShown=false,nagMsg='A new version is ready.',lastAct=Date.now(),STALE_MS=30*60*1000,IDLE_MS=90*1000;
+  ['mousemove','keydown','mousedown','scroll','touchstart'].forEach(function(ev){window.addEventListener(ev,function(){lastAct=Date.now();},{passive:true,capture:true});});
+  function nag(){ if(nagShown||!document.body)return; nagShown=true; var d=document.createElement('div');
+    d.style.cssText='position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:2147483000;background:#0f172a;color:#fff;font:13px system-ui;padding:10px 14px;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.35);display:flex;gap:10px;align-items:center';
+    d.innerHTML='<span>'+nagMsg+'</span><button id="hz-pu-go" style="background:#2563eb;color:#fff;border:0;border-radius:6px;padding:5px 12px;font-weight:600;cursor:pointer">Refresh</button>';
+    document.body.appendChild(d); document.getElementById('hz-pu-go').onclick=function(){location.reload();}; }
+  function apply(){ if(!pending)return; if(document.hidden){location.reload();return;} if(Date.now()-lastAct>IDLE_MS){location.reload();return;} nag(); }
+  function check(){ fetch('/api/version',{cache:'no-store',credentials:'same-origin'}).then(function(r){return r.ok?r.json():null;}).then(function(j){ if(j&&j.version&&j.version!==BOOT){pending=true;apply();} }).catch(function(){}); }
+  document.addEventListener('visibilitychange',function(){ if(document.hidden){apply();}else{lastAct=Date.now();check();} });
+  window.addEventListener('focus',function(){lastAct=Date.now();check();});
+  setInterval(check,5*60*1000); setInterval(function(){if(pending)apply();},30*1000); setTimeout(check,15000);
+  setTimeout(function(){ if(!pending){pending=true;nagMsg='This session has been open a while — refreshing to stay current.';} apply(); },STALE_MS);
+})();
 </script>
 </body>
 </html>
