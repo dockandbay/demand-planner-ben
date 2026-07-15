@@ -176,8 +176,8 @@
     y+=28; el.push(svgText(lx,y,'CARTON / PALLET COUNT',{size:13,fill:'#222'})); el.push(svgText(vx,y,'___________ of ___________',{size:14}));
     return '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">'+fontCss(opts)+'<rect width="'+W+'" height="'+H+'" fill="#fff"/>'+el.join('')+'</svg>'; }
   // SHIPS-WITH label → A4 print mould (4-up, carton size), one PDF
-  function dlShipsWith(po,btn){ var orig=btn?btn.textContent:''; if(btn)btn.disabled=true;
-    fetch('/api/supply/ships-with/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(d){
+  function dlShipsWith(po,btn,base){ var orig=btn?btn.textContent:''; if(btn)btn.disabled=true;
+    fetch((base||'/api/supply/ships-with/')+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(d){
       if(!d||d.error){ if(btn){btn.textContent=orig;btn.disabled=false;} alert((d&&d.error)||'Could not load ships-with data'); return; }
       Promise.all([fetchImgDataUri('/api/portal/asset/gotham-book'),fetchImgDataUri('/api/portal/asset/gotham-bold')]).then(function(a){
         var opts={fontBook:a[0],fontBold:a[1]};
@@ -788,6 +788,7 @@
       var barcodesLabels='<div class="sect-h">Barcodes &amp; Labels</div><div style="max-width:640px;font-size:12px">'
         +blRow('Barcodes for this PO','<button class="save-btn pp-dl-po" data-po="'+po+'">⤓ Download barcodes for PO</button>')
         +(p.prod_no?blRow('Barcodes for production '+esc(p.prod_no),'<button class="save-btn pp-dl-prod" data-prod="'+esc(p.prod_no)+'">⤓ Download barcodes for '+esc(p.prod_no)+'</button>'):'')
+        +(p.shipment&&!p.ship_other_supplier?blRow('Shipment labels','<button class="save-btn pp-shiplabel" data-po="'+po+'">⤓ Download shipment labels</button> <span class="mut tiny">SHIPS WITH master label for shipment '+esc(p.shipment)+'</span>'):'')
         +(p.ship_other_supplier?blRow('Ship To pallet labels','<button class="save-btn pp-shiplabel" data-po="'+po+'">⤓ Download Ship To Pallet Labels</button> <span class="mut tiny">this PO ships under another supplier’s PO</span>'):'')
         +(cdSkus.length?blRow('Crossdock box labels','<button class="save-btn pp-dl-cd" data-skus="'+esc(cdSkus.join(','))+'" data-po="'+po+'" data-do="'+esc(p.dispatch_order_ref||'')+'" data-client="'+esc(p.client||'')+'" data-address="'+esc(p.final_delivery_address||'')+'">⤓ Download crossdock labels</button> <span class="mut tiny">PO / dispatch order / client / delivery address overlaid</span>'):'')
         +(clientDocs.length?blRow('Direct to Client / FBA attachments',clientDocs.map(function(x){return '<a href="/api/portal/attachment/'+x.id+'" target="_blank" rel="noopener">'+esc(x.filename||'file')+'</a>';}).join(' &nbsp;·&nbsp; ')):'')
@@ -1364,7 +1365,7 @@
               body.querySelectorAll('.sp-card .sp-head').forEach(function(h){ var prev=h.onclick; h.addEventListener('click',function(e){ if(e.target.closest('button,input,textarea,select,a'))return;
                 var card=h.closest('.sp-card'), bd=card&&card.querySelector('.sp-body'); if(bd&&bd.style.display!=='none'){ var el=card.querySelector('.sp-chg-list'); if(el)loadShipCharges(el); } }); });
               // Direct-to-Client label downloads on shipment-plan cards (Ships-With shipment labels + crossdock)
-              body.querySelectorAll('.sp-shiplabel').forEach(function(btn){ btn.onclick=function(){ dlShipsWith(btn.dataset.po, btn); }; });
+              body.querySelectorAll('.sp-shiplabel').forEach(function(btn){ btn.onclick=function(){ dlShipsWith(btn.dataset.po, btn, EP.shipsWith); }; });
               body.querySelectorAll('.sp-cd').forEach(function(btn){ btn.onclick=function(){ if(BC.placeholder){BC.note();return;} btn.disabled=true;
                 fetch(EP.labelData+'?skus='+encodeURIComponent(btn.dataset.skus)).then(function(r){return r.json();}).then(function(rows){ btn.disabled=false; if(!rows||!rows.length||rows.error){alert('No crossdock barcodes found');return;}
                   BC.crossdock(rows,btn.dataset.po,btn.dataset.do,btn.dataset.client,btn.dataset.address,btn,btn.dataset.po+'_crossdock_labels.zip'); }).catch(function(){alert('Could not load crossdock labels');btn.disabled=false;}); }; });
@@ -1537,7 +1538,7 @@
 scope.querySelectorAll('.pp-dl-po').forEach(function(btn){ btn.onclick=function(){ ppDl(EP.labelData+'?po='+encodeURIComponent(btn.dataset.po), btn.dataset.po+'_barcodes.zip', btn); }; });
 scope.querySelectorAll('.pp-dl-prod').forEach(function(btn){ btn.onclick=function(){ ppDl(EP.labelData+'?prod='+encodeURIComponent(btn.dataset.prod)+'&supplier='+encodeURIComponent(STATE.supplierName), btn.dataset.prod+'_barcodes.zip', btn); }; });
 scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(){ if(BC.placeholder){BC.note();return;} btn.disabled=true; fetch(EP.labelData+'?skus='+encodeURIComponent(btn.dataset.skus)).then(function(r){return r.json();}).then(function(rows){ btn.disabled=false; if(!rows||!rows.length||rows.error){alert('No crossdock barcodes found');return;} BC.crossdock(rows,btn.dataset.po,btn.dataset.do,btn.dataset.client,btn.dataset.address,btn,btn.dataset.po+'_crossdock_labels.zip'); }).catch(function(){alert('Could not load crossdock labels');btn.disabled=false;}); }; });
-              scope.querySelectorAll('.pp-shiplabel').forEach(function(btn){ btn.onclick=function(){ dlShipsWith(btn.dataset.po, btn); }; });   // #11 — SHIPS WITH labels when consolidated under another supplier
+              scope.querySelectorAll('.pp-shiplabel').forEach(function(btn){ btn.onclick=function(){ dlShipsWith(btn.dataset.po, btn, EP.shipsWith); }; });   // SHIPS WITH shipment label (per-PO, barcodes & labels tab)
               // PO confirmation: supplier confirms (or withdraws) acceptance of the order's SKUs / qty / dates
               scope.querySelectorAll('.pp-confirm').forEach(function(btn){ btn.onclick=function(){ var v=btn.dataset.v==='1';
                 if(v && !confirm('Confirm this order? You’re accepting the SKUs, quantities and dates as shown.'))return;

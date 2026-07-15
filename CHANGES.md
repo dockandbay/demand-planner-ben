@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.535 - Supplier portal: "Download shipment labels" under a PO's Barcodes & Labels
+
+Added a **Download shipment labels** button to each PO's Barcodes & Labels sub-tab on the supplier portal
+(the SHIPS-WITH master A4 label, e.g. SHIPSWITH-PO-…_A4.pdf). Shown whenever the PO is on a shipment (the
+existing "Ship To pallet labels" row still covers the ships-under-another-supplier case). Also added a
+supplier-scoped `/api/portal/ships-with/:po` endpoint + `EP.shipsWith`, and routed `dlShipsWith` through it —
+previously it hit `/api/supply/ships-with` which the real portal (no planner key) couldn't reach.
+
 ## v25.534 - Fix: US AWD pill didn't appear on a country switch (pill bar wasn't rebuilt)
 
 The BUY/FBA filter-pill bar (#bup) was only built by initUI (on view-switch); the country pill click calls

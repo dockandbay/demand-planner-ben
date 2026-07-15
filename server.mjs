@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.534';
+const APP_VERSION = 'v25.535';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -7295,6 +7295,24 @@ app.get('/api/portal/img', portalAuth, async (req, res) => {
   } catch (e) { res.status(500).end(); }
 });
 // Barcode label rows — only for SKUs that appear on THIS supplier's POs (intersect with owned SKUs).
+// SHIPS-WITH shipment-label fields for one PO — supplier-scoped mirror of /api/supply/ships-with/:po.
+app.get('/api/portal/ships-with/:po', portalAuth, async (req, res) => {
+  try {
+    if (!await portalOwnsPO(req, req.params.po)) return res.status(403).json({ error: 'not your PO' });
+    const r = await pool.query(`
+      SELECT po.po production_ref, coalesce(po.supplier_name,'') source_supplier,
+             coalesce(po.shipment_ref,'') ships_with_po, coalesce(po.branch,'') dest_branch,
+             coalesce(nullif(po.country_code,''), b.country_code, '') dest_country,
+             coalesce(po.client,'') client, coalesce(po.sales_order_ref,'') sales_order_ref,
+             coalesce(mpo.supplier_name,'') ships_with_supplier
+      FROM planner.purchase_orders po
+      LEFT JOIN planner.branches b ON b.name=po.branch
+      LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
+      LEFT JOIN planner.purchase_orders mpo ON mpo.po = coalesce(nullif(sh.master_po,''), sh.shipment_ref)
+      WHERE po.po=$1`, [req.params.po]);
+    res.json(r.rows[0] || {});
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/api/portal/label-data', portalAuth, async (req, res) => {
   try {
     const { po, prod, skus, batch } = req.query, names = req.portal.suppliers;
