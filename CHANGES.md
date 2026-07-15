@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.540 - SA drawer opens reliably + SKU wraps at 25ch
+
+SA drawer now ensures itself under <body> (create-if-missing) so it opens on the current page every time -
+it was trapped inside #app and only surfaced after navigating. SKU column caps at ~25ch and wraps beyond
+(still never truncated).
+
 ## v25.539 - Update nudge: prominent yellow top bar
 
 The "A new version of HORIZON is ready" nudge is now a full-width yellow bar pinned to the top of the screen
