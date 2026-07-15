@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.538 - Stock Availability: column/layout fixes + snappier SA drawer
+
+- SKU column never truncates and is **pinned (sticky-left)** so it stays visible when the drawer scrolls.
+- SOH 3PL / SOH FBA / SOH AWD columns narrowed to just fit their headings.
+- Inbound cells now stack **qty / date / reference on three rows** (top-aligned).
+- SA drawer now **paints instantly** (shows a Loading… state, then builds the table a tick later) and is
+  wrapped in try/catch — fixes the "doesn't pop out quickly / or at all" lag on the big table.
+
 ## v25.537 - Fix: false "Unpaid payment" PO action for not-yet-due invoice balances
 
 The PO-level "Unpaid payment" action fired on `is_final && balance_owing>0` regardless of due date, so any
