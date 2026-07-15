@@ -7567,7 +7567,7 @@ function saInbCell(x){ if(!x)return '<td class="sa-inb" style="text-align:right;
     +'<div style="font-size:9.5px">'+(x.ref?'<a class="sa-poref" data-po="'+saEsc(x.ref)+'" title="Open '+saEsc(x.ref)+'" style="color:#1d4ed8;text-decoration:underline;cursor:pointer">'+saEsc(x.ref)+'</a>':'<span style="color:#94a3b8">—</span>')+'</div></td>'; }
 function saTableHTML(rows,awCol){ var ncols=awCol?10:9;
   if(!rows.length)return '<div class="count" style="padding:10px;color:#888">No SKUs match.</div>';
-  var h='<div style="overflow:auto"><table><thead><tr>'
+  var h='<table><thead><tr>'
     +'<th class="l sku">SKU</th><th class="l">Status</th><th class="l">Type</th><th class="l">Launch</th><th class="l">Disc</th>'
     +'<th class="soh">SOH 3PL</th><th class="soh">SOH FBA</th>'+(awCol?'<th class="soh">SOH AWD</th>':'')
     +'<th>Next inbound</th><th>2nd inbound</th></tr></thead><tbody>';
@@ -7579,7 +7579,7 @@ function saTableHTML(rows,awCol){ var ncols=awCol?10:9;
       +'<td class="l">'+(r.lch?saDate(r.lch):'—')+'</td><td class="l">'+(r.disc?saDate(r.disc):'—')+'</td>'
       +'<td class="soh">'+saFmt(r.s3)+'</td><td class="soh">'+saFmt(r.sf)+'</td>'+(awCol?'<td class="soh">'+(r.aw?saFmt(r.aw):'—')+'</td>':'')
       +saInbCell(r.inb[0])+saInbCell(r.inb[1])+'</tr>'; });
-  return h+'</tbody></table></div>'; }
+  return h+'</tbody></table>'; }
 function renderStockAvailability(container){ if(!container)return;
   if(!SA_CUR)SA_CUR=(typeof CUR!=='undefined'&&CUR)?CUR:'UK';
   var all=saRows(SA_CUR), cats=[], seen={};

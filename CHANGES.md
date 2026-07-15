@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.545 - SA report: fix sticky headers by removing the nested scroll container
+
+The table was wrapped in its own `<div style="overflow:auto">`, so the `<thead>` pinned relative to
+THAT inner div rather than the report's scroller — nested scroll containers break `position:sticky`,
+which is why the column headers slid under the first category band and never stuck. Removed the inner
+wrapper so there's a single scroller (the drawer body in the drawer; `.sa-report` in the reports tab);
+the filter bar and column headers now both pin above the category bands in both contexts. Horizontal
+scroll is now handled by that same scroller.
+
+Files: artifact_v16.7.html. No migrations, no new env vars.
+
 ## v25.544 - SA report: show discontinued / out-of-scope SKUs that still hold stock
 
 The Stock Availability report was built from `_SKU_RAW.p` (planning-scope only), so discontinued /
