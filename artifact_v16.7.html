@@ -949,6 +949,7 @@ const SKUM=_SKU_RAW.p||{}; // SKU master: {sku: {n,s,c,ti,cs,av,disc,lch,inv,oo}
 const SKUS=_SKU_RAW.s||{}; // SKU sales: {"SKU|wh": {"YYYY_MM": units}}
 const SKUI=_SKU_RAW.i||_SKU_RAW.inbound||{}; // SKU inbound: {"SKU|wh": {qty, eta} | array}
 const SKUOI=_SKU_RAW.oi||{}; // open POs not yet in the inbound feed (on-order): {"SKU|wh": [{ref,qty,status,eta}]} — eta is the calculated landing (prod end +7 +sea transit)
+const _SA_EXTRA={}; // out-of-scope (discontinued/dropped) SKUs with residual stock/inbound — live-injected; Stock Availability report only. Same entry shape as SKUM + {oos:true}.
 const INPUT_FLD_MAP={
   "2026_06":"fldncBaho6WeW5KGN","2026_07":"fld83GjApy854rA2h","2026_08":"fldXsCw7OgvGoHksW",
   "2026_09":"flditZfNyFvUPmCMO","2026_10":"fldmnvLYW19dazKmM","2026_11":"fldUYw8RjhrssZNqX",
@@ -7545,7 +7546,11 @@ function saInbound(sku,mkt){ var whs=[SA_WH3[mkt],SA_WHF[mkt]].filter(Boolean),o
   out.sort(function(a,b){ var ea=a.eta||'9999-99',eb=b.eta||'9999-99'; return ea<eb?-1:ea>eb?1:0; });
   return out.slice(0,2); }
 function saRows(mkt){ var co=mkt.toLowerCase(),wh3=SA_WH3[mkt],whF=SA_WHF[mkt],rows=[],SK=(typeof SKUM!=='undefined'?SKUM:{});
-  Object.keys(SK).forEach(function(sku){ var p=SK[sku]; if(!p)return;
+  // Also fold in out-of-scope (discontinued/dropped) SKUs that still carry stock or inbound — these
+  // aren't in the planning-scope master (SKUM) but Ben wants them visible on Stock Availability.
+  var EX=(typeof _SA_EXTRA!=='undefined'&&_SA_EXTRA)?_SA_EXTRA:{};
+  var keys=Object.keys(SK); Object.keys(EX).forEach(function(k){ if(!SK[k])keys.push(k); });
+  keys.forEach(function(sku){ var p=SK[sku]||EX[sku]; if(!p)return;
     var av=(p.av||{})[co]||'',inv=p.inv||{};
     var s3=wh3?(inv[wh3]||0):0,sf=whF?(inv[whF]||0):0,aw=(mkt==='US'&&typeof awdOf==='function')?(awdOf(sku,mkt)||0):0;
     var inb=saInbound(sku,mkt);

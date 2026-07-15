@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.543';
+const APP_VERSION = 'v25.544';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -286,6 +286,47 @@ async function buildSKURAW() {
   return { p, s, i, oi };
 }
 
+// _SA_EXTRA: OUT-OF-SCOPE SKUs (NOT in_planning_scope, i.e. discontinued/dropped) that STILL carry
+// stock or unreceived inbound. _SKU_RAW.p is planning-scope only, so the Stock Availability report
+// couldn't see these. Same entry shape as p, tagged {oos:true}. Inbound (_SKU_RAW.i) and open-PO
+// (_SKU_RAW.oi) maps are already built without a scope filter, so those SKUs' arrivals are present —
+// we only need to supply the product meta + SOH + launch/disc here.
+async function buildSAEXTRA() {
+  const [prods, inv, pcs, inbSkus, poSkus] = await Promise.all([
+    pool.query(`SELECT sku, product_name n, subcategory s, category c, market_tier ti, core_seasonal cs
+                FROM planner.products WHERE NOT in_planning_scope`),
+    pool.query(`SELECT sku, warehouse wh, available::int qty FROM planner.v_product_inventory WHERE available <> 0`),
+    pool.query(`SELECT sku, co, lch, disc FROM (
+                  SELECT sku, 'uk' co, coalesce(nullif(launch_date_uk_final,''), nullif(launch_date_uk,'')) lch, nullif(discontinue_date_final,'') disc FROM planner.products WHERE NOT in_planning_scope
+                  UNION ALL
+                  SELECT sku, 'us', nullif(launch_date_us,''), nullif(discontinue_date_final,'') FROM planner.products WHERE NOT in_planning_scope
+                  UNION ALL
+                  SELECT sku, 'eu', nullif(launch_date_eu,''), nullif(discontinue_date_final,'') FROM planner.products WHERE NOT in_planning_scope
+                  UNION ALL
+                  SELECT sku, 'au', coalesce(nullif(launch_date_au_final,''), nullif(launch_date_au,'')), nullif(discontinue_date_au_final,'') FROM planner.products WHERE NOT in_planning_scope
+                  UNION ALL
+                  SELECT sku, 'ca', nullif(launch_date_ca_retail,''), nullif(discontinue_date_ca,'') FROM planner.products WHERE NOT in_planning_scope
+                ) x WHERE lch IS NOT NULL OR disc IS NOT NULL`),
+    pool.query(`SELECT DISTINCT sku FROM planner.inbound_shipments WHERE coalesce(received_quantity,0) < quantity`),
+    pool.query(`SELECT DISTINCT l.sku FROM planner.purchase_order_lines l
+                  JOIN planner.purchase_orders po ON po.po = l.po
+                  WHERE coalesce(l.qty,0) > 0 AND coalesce(po.status,'') NOT ILIKE '%complete%'`),
+  ]);
+  const signal = new Set();   // only keep out-of-scope SKUs that still have a reason to appear
+  for (const r of inv.rows) signal.add(r.sku);
+  for (const r of inbSkus.rows) signal.add(r.sku);
+  for (const r of poSkus.rows) signal.add(r.sku);
+  const p = {};
+  for (const r of prods.rows) {
+    if (!signal.has(r.sku)) continue;
+    p[r.sku] = { n: r.n, s: r.s, c: r.c, ti: r.ti, cs: r.cs === 'Seasonal' ? 'S' : 'C',
+                 csf: r.cs || '', av: {}, disc: {}, lch: {}, inv: {}, oo: {}, oos: true };
+  }
+  for (const r of inv.rows) if (p[r.sku]) p[r.sku].inv[r.wh] = r.qty;
+  for (const r of pcs.rows) if (p[r.sku]) { if (r.lch) p[r.sku].lch[r.co] = r.lch; if (r.disc) p[r.sku].disc[r.co] = r.disc; }
+  return p;
+}
+
 // Category metadata: {category:{a:active, g:grouping}}
 async function buildCATS_META() {
   const { rows } = await pool.query(`SELECT category, is_active, grouping FROM planner.categories`);
@@ -486,15 +527,16 @@ app.use(async (req, res, next) => {
 app.get('/', async (_req, res) => {
   try {
     // Fetch every live global in parallel, then splice sequentially (string ops on one buffer).
-    const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts, FBADIMS] = await Promise.all([
+    const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts, FBADIMS, SA_EXTRA] = await Promise.all([
       buildDATA(), buildFC_CURRENT(), buildFC_OUTPUTS(), buildSKURAW(),
-      buildCATS_META(), buildSUBS_META(), buildBI_RULES(), buildPROD_CONST(), freshness(), buildFBADIMS(),
+      buildCATS_META(), buildSUBS_META(), buildBI_RULES(), buildPROD_CONST(), freshness(), buildFBADIMS(), buildSAEXTRA(),
     ]);
     let html = DEV ? loadHTML() : HTML;
     html = replaceGlobal(html, 'DATA', JSON.stringify(DATA));
     html = replaceGlobal(html, 'FC_CURRENT', JSON.stringify(FC_CURRENT));
     html = replaceGlobal(html, 'FC_OUTPUTS', JSON.stringify(FC_OUTPUTS));
     html = replaceGlobal(html, '_SKU_RAW', JSON.stringify(SKU_RAW));
+    html = replaceGlobal(html, '_SA_EXTRA', JSON.stringify(SA_EXTRA));
     html = replaceGlobal(html, 'CATS_META', JSON.stringify(CATS));
     html = replaceGlobal(html, 'SUBS_META', JSON.stringify(SUBS));
     html = replaceGlobal(html, 'BI_RULES', JSON.stringify(BI));

@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.544 - SA report: show discontinued / out-of-scope SKUs that still hold stock
+
+The Stock Availability report was built from `_SKU_RAW.p` (planning-scope only), so discontinued /
+dropped SKUs that still carry residual stock or unreceived inbound were invisible. Added a new
+`buildSAEXTRA()` (server) that returns out-of-scope products (`NOT in_planning_scope`) filtered to
+those with a live signal (non-zero inventory, unreceived inbound, or an open PO line), in the same
+entry shape as `p` and tagged `oos:true`. Injected as the `_SA_EXTRA` global and merged into `saRows`
+(iterates SKUM ∪ _SA_EXTRA). Inbound/open-PO arrivals for these SKUs were already present in
+`_SKU_RAW.i`/`.oi` (those queries have no scope filter), so no change needed there.
+
+Files: server.mjs, artifact_v16.7.html. No migrations, no new env vars.
+
 ## v25.543 - SA report (reports tab): make column headers actually stick
 
 In the REPORTS tab the page owns the scroll, so the SA table's sticky `<thead>` never pinned
