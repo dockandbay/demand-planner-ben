@@ -617,12 +617,12 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
     <button class="view-toggle" data-view="fba">FBA</button>
     <button class="view-toggle" data-view="exec">REPORTS</button>
     <div style="flex:1"></div>
+    <button id="sa-drawer-btn" title="Stock Availability" onclick="openSADrawer()" style="margin-right:4px;height:24px;padding:0 9px;border-radius:12px;border:1px solid #2563eb;background:#1d4ed8;color:#fff;cursor:pointer;font-weight:700;font-size:11px;letter-spacing:.03em;line-height:1;flex:0 0 auto">SA</button>
     <button id="ctx-help-btn" title="Help for this page" onclick="openCtxHelp(event)" style="margin-right:2px;width:24px;height:24px;border-radius:50%;border:1px solid #6b7280;background:#4b5563;color:#fff;cursor:pointer;font-weight:700;font-size:13px;line-height:1;flex:0 0 auto">?</button>
     <div class="tool-bar" id="plan-tools" role="group" aria-label="AI tools">
       <button class="tool-btn" id="insights-btn" title="Get AI insights"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 1 4 12.7c-.7.5-1 1.3-1 2.1V18H9v-1.2c0-.8-.3-1.6-1-2.1A7 7 0 0 1 12 2z"/></svg>AI Insights</button>
     </div>
     <div class="tool-bar" id="buy-tools" role="group" aria-label="Buy plan tools" style="display:none"></div>
-    <button class="tool-btn" id="help-btn" title="What to do &amp; when" onclick="openHelp()" style="margin-left:6px;border:1px solid #e0e0e0;border-radius:6px;height:26px;padding:0 9px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>Help</button>
   </div>
   <div id="ctabs-row" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
     <span class="pill-lbl">Country</span>
@@ -675,6 +675,11 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
     <div id="cat-chips" style="display:flex;gap:4px;flex-wrap:nowrap"></div>
     <div id="cat-pop" style="display:none;position:absolute;top:30px;left:64px;z-index:300;background:#fff;border:1px solid #d0d0d0;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.18);width:440px;padding:8px"></div>
   </div>
+</div>
+<div id="sa-drawer-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:5900" onclick="closeSADrawer()"></div>
+<div id="sa-drawer" style="display:none;position:fixed;top:0;right:0;height:100%;width:clamp(400px,50vw,900px);background:#fff;box-shadow:-8px 0 28px rgba(0,0,0,.22);z-index:6000;flex-direction:column">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;border-bottom:1px solid #e5e5e5;flex:0 0 auto"><b style="font-size:15px">Stock Availability</b><button onclick="closeSADrawer()" title="Close" style="width:28px;height:28px;border-radius:6px;border:1px solid #cbd5e1;background:#f8fafc;cursor:pointer;font-size:16px;line-height:1">&times;</button></div>
+  <div id="sa-drawer-body" style="flex:1 1 auto;overflow:auto;padding:12px 16px">Loading…</div>
 </div>
 <div id="help-ov" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:flex-start;justify-content:center" onclick="if(event.target===this)closeHelp()">
   <div style="background:#fff;max-width:580px;width:92%;margin-top:46px;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.25);padding:18px 22px;max-height:82vh;overflow:auto;font-size:13px;line-height:1.5;color:#222">
@@ -786,7 +791,8 @@ function openCtxHelp(ev){ if(ev)ev.stopPropagation();
     document.body.appendChild(pop);
     document.addEventListener('click',function(e){ if(pop.style.display!=='none'&&!pop.contains(e.target)&&e.target.id!=='ctx-help-btn')pop.style.display='none'; });
     window.addEventListener('resize',function(){pop.style.display='none';}); }
-  pop.innerHTML='<div style="font-weight:700;color:#7dd3fc;margin-bottom:6px;font-size:13px">'+info.t+'</div><div>'+info.h+'</div>';
+  pop.innerHTML='<div style="font-weight:700;color:#7dd3fc;margin-bottom:6px;font-size:13px">'+info.t+'</div><div>'+info.h+'</div>'
+    +'<div style="margin-top:10px;border-top:1px solid #334155;padding-top:8px"><button type="button" onclick="var p=document.getElementById(\'ctx-help-pop\');if(p)p.style.display=\'none\';openHelp()" style="background:none;border:0;color:#7dd3fc;cursor:pointer;font-weight:700;font-size:12px;padding:0">▸ What to do &amp; when (full guide)</button></div>';   // ported from the removed top-nav Help button
   pop.style.display='block';
   var b=document.getElementById('ctx-help-btn').getBoundingClientRect();
   pop.style.top=(b.bottom+6)+'px'; pop.style.left='auto'; pop.style.right=Math.max(8,window.innerWidth-b.right)+'px';
@@ -7488,7 +7494,7 @@ var EXPANDED_CHANNELS=new Set(); // which channel rows are expanded
 // ─── REPORTS area: sub-tab shell ──────────────────────────────────────────
 // REPORT view hosts several reports under a sub-tab bar. Exec Summary is the existing report;
 // Slow Moving and Auto Forecast are the new ones.
-var REPORT_TABS=[['ex','Exec Summary'],['slow','Slow Moving'],['af','Auto Forecast'],['ka','Key Arrivals'],['me','Markdown & EOS'],['otb','Open-to-Buy']];
+var REPORT_TABS=[['ex','Exec Summary'],['slow','Slow Moving'],['af','Auto Forecast'],['ka','Key Arrivals'],['me','Markdown & EOS'],['otb','Open-to-Buy'],['sa','Stock Availability']];
 // Mobile: collapse a view's leading filter bar(s) behind a consistent "⚙ Filters" button. Generic + idempotent —
 // grabs the leading child DIVs that hold filter controls (before the first table / KPI / content block) and tucks
 // them into a collapsible panel with a toggle. No-op on desktop and when there are no leading filter rows.
@@ -7520,6 +7526,83 @@ function mobileFilterCollapse(container){
   }catch(e){}
 }
 if(typeof window!=='undefined')window.mobileFilterCollapse=mobileFilterCollapse;   // shared with the SUPPLY/Scenario module
+// ── STOCK AVAILABILITY report (REPORTS ▸ Stock Availability, and the top-right "SA" drawer) ──────────────
+// Country pills; all SKUs grouped by category; Status/Type/Launch/Disc (like the buy plan); SOH 3PL/FBA/AWD;
+// and the next 2 inbound deliveries to that market (qty · date · reference). All from client-side globals.
+var SA_CUR=null, SA_Q='', SA_CAT='__ALL__';
+var SA_MKTS=['UK','US','EU','AU','CA'];
+var SA_WH3={UK:'uk_3pl',US:'us_3pl',EU:'eu_3pl',AU:'au_3pl',CA:null};
+var SA_WHF={UK:'uk_fba',US:'us_fba',EU:'eu_fba',AU:'au_fba',CA:'ca_fba'};
+function saEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function saFmt(n){ var r=Math.round(Number(n)||0); return r?r.toLocaleString():'0'; }
+function saDate(d){ if(!d)return ''; var m=String(d).slice(0,10).match(/^(\d{4})-(\d{2})-(\d{2})/); if(!m)return String(d).slice(0,10); var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return m[3]+'-'+mn[+m[2]-1]+'-'+m[1].slice(2); }
+function saStatus(lch,disc){ var t=new Date().toISOString().slice(0,10); if(disc&&String(disc).slice(0,10)<=t)return 'DISC'; if(lch&&String(lch).slice(0,10)>t)return 'FUTURE'; return 'ACTIVE'; }
+function saSkuMatch(sku,q){ if(!q)return true; var toks=q.split(/[\s,]+/).filter(Boolean); if(!toks.length)return true; var s=sku.toLowerCase(); return toks.some(function(t){return s.indexOf(t)>=0;}); }
+function saInbound(sku,mkt){ var whs=[SA_WH3[mkt],SA_WHF[mkt]].filter(Boolean),out=[];
+  whs.forEach(function(wh){ var k=sku+'|'+wh;
+    var inb=(typeof SKUI!=='undefined')?SKUI[k]:null; if(inb){ (Array.isArray(inb)?inb:[inb]).forEach(function(x){ if(x&&(Number(x.qty)||x.eta))out.push({qty:Number(x.qty)||0,eta:x.eta||null,ref:x.ref||''}); }); }
+    var op=(typeof SKUOI!=='undefined')?SKUOI[k]:null; if(op&&op.length)op.forEach(function(x){ out.push({qty:Number(x.qty)||0,eta:x.eta||null,ref:x.ref||''}); }); });
+  out.sort(function(a,b){ var ea=a.eta||'9999-99',eb=b.eta||'9999-99'; return ea<eb?-1:ea>eb?1:0; });
+  return out.slice(0,2); }
+function saRows(mkt){ var co=mkt.toLowerCase(),wh3=SA_WH3[mkt],whF=SA_WHF[mkt],rows=[],SK=(typeof SKUM!=='undefined'?SKUM:{});
+  Object.keys(SK).forEach(function(sku){ var p=SK[sku]; if(!p)return;
+    var av=(p.av||{})[co]||'',inv=p.inv||{};
+    var s3=wh3?(inv[wh3]||0):0,sf=whF?(inv[whF]||0):0,aw=(mkt==='US'&&typeof awdOf==='function')?(awdOf(sku,mkt)||0):0;
+    var inb=saInbound(sku,mkt);
+    if(!av && !(s3||sf||aw) && !inb.length)return;   // not present in this market
+    var lch=(p.lch||{})[co]||'',disc=(p.disc||{})[co]||'';
+    rows.push({sku:sku,cat:p.c||'(uncategorised)',ti:p.ti||'',cs:(p.cs==='S'?'Seasonal':p.cs==='C'?'Core':(p.csf||'')),st:saStatus(lch,disc),lch:lch,disc:disc,s3:s3,sf:sf,aw:aw,inb:inb}); });
+  rows.sort(function(a,b){ return a.cat<b.cat?-1:a.cat>b.cat?1:(a.sku<b.sku?-1:1); });
+  return rows; }
+function saStatusBadge(st){ var c=st==='DISC'?['#f1f5f9','#64748b']:st==='FUTURE'?['#fef3c7','#92400e']:['#dcfce7','#166534']; return '<span style="background:'+c[0]+';color:'+c[1]+';font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px">'+st+'</span>'; }
+function saInbCell(x){ if(!x)return '<td style="text-align:right;color:#bbb">—</td>'; return '<td style="text-align:right;white-space:nowrap"><b>'+saFmt(x.qty)+'</b><div style="font-size:9px;color:#666">'+(x.eta?saDate(x.eta):'no date')+(x.ref?' · '+saEsc(x.ref):'')+'</div></td>'; }
+function saTableHTML(rows,awCol){ var ncols=awCol?10:9;
+  if(!rows.length)return '<div class="count" style="padding:10px;color:#888">No SKUs match.</div>';
+  var h='<div style="overflow:auto"><table><thead><tr>'
+    +'<th class="l">SKU</th><th class="l">Status</th><th class="l">Type</th><th class="l">Launch</th><th class="l">Disc</th>'
+    +'<th>SOH 3PL</th><th>SOH FBA</th>'+(awCol?'<th>SOH AWD</th>':'')
+    +'<th>Next inbound</th><th>2nd inbound</th></tr></thead><tbody>';
+  var cur=null;
+  rows.forEach(function(r){ if(r.cat!==cur){ cur=r.cat; h+='<tr class="sa-cat"><td colspan="'+ncols+'">'+saEsc(r.cat)+'</td></tr>'; }
+    h+='<tr><td class="l"><b>'+saEsc(r.sku)+'</b></td>'
+      +'<td class="l">'+saStatusBadge(r.st)+'</td>'
+      +'<td class="l">'+saEsc(r.cs||'—')+(r.ti?' <span style="color:#94a3b8;font-size:9px">'+saEsc(r.ti)+'</span>':'')+'</td>'
+      +'<td class="l">'+(r.lch?saDate(r.lch):'—')+'</td><td class="l">'+(r.disc?saDate(r.disc):'—')+'</td>'
+      +'<td>'+saFmt(r.s3)+'</td><td>'+saFmt(r.sf)+'</td>'+(awCol?'<td>'+(r.aw?saFmt(r.aw):'—')+'</td>':'')
+      +saInbCell(r.inb[0])+saInbCell(r.inb[1])+'</tr>'; });
+  return h+'</tbody></table></div>'; }
+function renderStockAvailability(container){ if(!container)return;
+  if(!SA_CUR)SA_CUR=(typeof CUR!=='undefined'&&CUR)?CUR:'UK';
+  var all=saRows(SA_CUR), cats=[], seen={};
+  all.forEach(function(r){ if(!seen[r.cat]){seen[r.cat]=1;cats.push(r.cat);} }); cats.sort();
+  if(SA_CAT!=='__ALL__'&&cats.indexOf(SA_CAT)<0)SA_CAT='__ALL__';
+  var q=(SA_Q||'').trim().toLowerCase();
+  var rows=all.filter(function(r){ if(SA_CAT!=='__ALL__'&&r.cat!==SA_CAT)return false; return saSkuMatch(r.sku,q); });
+  var FLAGS={UK:'\u{1F1EC}\u{1F1E7}',US:'\u{1F1FA}\u{1F1F8}',EU:'\u{1F1EA}\u{1F1FA}',AU:'\u{1F1E6}\u{1F1FA}',CA:'\u{1F1E8}\u{1F1E6}'};
+  var pills=SA_MKTS.map(function(m){ return '<button class="sa-mkt" data-m="'+m+'" style="cursor:pointer;font-size:11px;font-weight:600;padding:3px 10px;border-radius:14px;border:1px solid '+(m===SA_CUR?'#1d4ed8':'#cbd5e1')+';background:'+(m===SA_CUR?'#1d4ed8':'#fff')+';color:'+(m===SA_CUR?'#fff':'#334155')+'">'+(FLAGS[m]||'')+' '+m+'</button>'; }).join('');
+  var catOpts='<option value="__ALL__">All categories</option>'+cats.map(function(c){return '<option value="'+saEsc(c)+'"'+(c===SA_CAT?' selected':'')+'>'+saEsc(c)+'</option>';}).join('');
+  container.innerHTML='<style>'
+    +'.sa-report table{border-collapse:collapse;width:100%;font-size:11px}'
+    +'.sa-report th{position:sticky;top:0;background:#f3f3f1;padding:4px 8px;text-align:right;font-size:9px;text-transform:uppercase;letter-spacing:.03em;color:#555;border-bottom:1px solid #d5d5d5;white-space:nowrap;z-index:1}'
+    +'.sa-report th.l{text-align:left}.sa-report td{padding:3px 8px;border-bottom:1px solid #f1f1f1;text-align:right;white-space:nowrap}.sa-report td.l{text-align:left}'
+    +'.sa-report tr.sa-cat td{background:#e8e8e6;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#333;text-align:left;border-top:2px solid #bbb}'
+    +'</style>'
+    +'<div class="sa-report"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">'
+      +'<span style="font-size:11px;font-weight:700;letter-spacing:.04em;color:#888;margin-right:2px">MARKET</span>'+pills
+      +'<span style="width:1px;height:16px;background:#e0e0e0;margin:0 4px"></span>'
+      +'<input class="sa-q" placeholder="Filter by SKU(s) — space/comma separated…" value="'+saEsc(SA_Q||'')+'" style="font-size:11px;padding:3px 8px;border:1px solid #d0d0d0;border-radius:4px;width:280px">'
+      +'<select class="sa-cat" style="font-size:11px;padding:3px 8px;border:1px solid #d0d0d0;border-radius:4px;max-width:220px">'+catOpts+'</select>'
+      +'<span style="font-size:10px;color:#999;margin-left:auto">'+rows.length+' of '+all.length+' SKUs</span>'
+    +'</div>'+saTableHTML(rows,SA_CUR==='US')+'</div>';
+  container.querySelectorAll('.sa-mkt').forEach(function(b){ b.onclick=function(){ SA_CUR=b.dataset.m; renderStockAvailability(container); }; });
+  var cs=container.querySelector('.sa-cat'); if(cs)cs.onchange=function(){ SA_CAT=this.value; renderStockAvailability(container); };
+  var qi=container.querySelector('.sa-q'); if(qi)qi.oninput=function(){ SA_Q=this.value; var foc=document.activeElement===qi; renderStockAvailability(container); if(foc){ var n=container.querySelector('.sa-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } } };
+}
+// SA drawer (half-screen pop-out) — reuses the same report component
+function openSADrawer(){ var d=document.getElementById('sa-drawer'),bk=document.getElementById('sa-drawer-backdrop'); if(!d)return;
+  d.style.display='flex'; if(bk)bk.style.display='block'; renderStockAvailability(document.getElementById('sa-drawer-body')); }
+function closeSADrawer(){ var d=document.getElementById('sa-drawer'); if(d)d.style.display='none'; var bk=document.getElementById('sa-drawer-backdrop'); if(bk)bk.style.display='none'; }
+if(typeof window!=='undefined'){ window.openSADrawer=openSADrawer; window.closeSADrawer=closeSADrawer; }
 function renderReportView(){
   var origTw=document.getElementById('tw'); if(origTw)origTw.style.display='none';
   var buyWrap=document.getElementById('buy-wrap'); if(buyWrap)buyWrap.remove();
@@ -7541,6 +7624,7 @@ function renderReportView(){
   if(REPORT_VIEW==='ka'){ renderKeyArrivalsReport(body); mobileFilterCollapse(body); return; }
   if(REPORT_VIEW==='me'){ renderMarkdownEosReport(body); mobileFilterCollapse(body); return; }
   if(REPORT_VIEW==='otb'){ renderOtbReport(body); mobileFilterCollapse(body); return; }
+  if(REPORT_VIEW==='sa'){ renderStockAvailability(body); mobileFilterCollapse(body); return; }
 }
 // Placeholders until the full reports are built (next phases).
 function reportPlaceholder(body,title,desc){ body.innerHTML='<div style="padding:28px;text-align:center;color:#666">'

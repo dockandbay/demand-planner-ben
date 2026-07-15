@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.536 - New "Stock Availability" report + "SA" drawer; remove legacy Help button
+
+- New **REPORTS ▸ Stock Availability** report: country pills, all SKUs grouped by category, Status/Type/
+  Launch/Disc (like the buy plan), SOH 3PL / SOH FBA / SOH AWD (AWD US-only), and the next 2 inbound
+  deliveries to that market (qty · date · reference). SKU filter box + category select (buy-plan style).
+  Built entirely from client-side globals (SKUM/SKUI/SKUOI/awdOf) — no new endpoint.
+- New **"SA"** button top-right next to the "?" — pops the same report out as a **half-screen right drawer**.
+- Removed the legacy top-nav **Help** button; ported access into the "?" popup via a "What to do & when
+  (full guide)" link (opens the same guide).
+- NOTE: the SA button/report live on the artifact views (DEMAND/BUY/FBA/REPORTS); it isn't on the SUPPLY
+  harness nav yet — flag if you want it there too.
+
 ## v25.535 - Supplier portal: "Download shipment labels" under a PO's Barcodes & Labels
 
 Added a **Download shipment labels** button to each PO's Barcodes & Labels sub-tab on the supplier portal
