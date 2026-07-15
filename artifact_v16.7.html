@@ -7607,6 +7607,11 @@ function renderStockAvailability(container){ if(!container)return;
   // column headers stick just BELOW the sticky filter bar (measure its height so they don't overlap)
   var _fb=container.querySelector('.sa-filter'), _ft=_fb?_fb.offsetHeight:0;
   container.querySelectorAll('.sa-report thead th').forEach(function(th){ th.style.top=_ft+'px'; });
+  // In the reports tab (#report-body) the PAGE owns the scroll, so the sticky <thead> never pins.
+  // The drawer works because #sa-drawer-body is a bounded overflow:auto box. Give .sa-report the same
+  // bounded-scroller treatment when we're NOT in the drawer so filter + column headers pin identically.
+  if(container.id!=='sa-drawer-body'){ var _rep=container.querySelector('.sa-report');
+    if(_rep){ _rep.style.maxHeight='calc(100dvh - 150px)'; _rep.style.overflow='auto'; } }
   // inbound reference → open that purchase order (switches to SUPPLY ▸ Purchase Orders)
   container.querySelectorAll('.sa-poref').forEach(function(a){ a.onclick=function(e){ e.preventDefault(); var po=a.dataset.po; if(!po)return; if(typeof closeSADrawer==='function')closeSADrawer(); location.hash='#/supply/purchase-orders/'+encodeURIComponent(po); }; });
 }

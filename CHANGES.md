@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.543 - SA report (reports tab): make column headers actually stick
+
+In the REPORTS tab the page owns the scroll, so the SA table's sticky `<thead>` never pinned
+(only the drawer worked, because `#sa-drawer-body` is a bounded overflow box). Fixed by giving
+`.sa-report` its own bounded scroller (`max-height:calc(100dvh - 150px);overflow:auto`) when it's
+not in the drawer — so the filter bar + column headers (SKU / Status / Type / Launch / Disc /
+SOH 3PL / SOH FBA / Next inbound / 2nd inbound) pin identically in both places.
+
+Files: artifact_v16.7.html. No migrations, no new env vars.
+
 ## v25.541 - SA report: sticky filter + column headers; clickable inbound reference
 
 The market pills + SKU/category filter bar and the column-header row are now sticky in the SA report/drawer
