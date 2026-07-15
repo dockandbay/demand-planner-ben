@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.534 - Fix: US AWD pill didn't appear on a country switch (pill bar wasn't rebuilt)
+
+The BUY/FBA filter-pill bar (#bup) was only built by initUI (on view-switch); the country pill click calls
+render() (table only), so switching to US never re-evaluated the market-dependent "AWD · FBA <3wk" pill.
+Extracted the pill build into buildBuPills() and now call it on country change (and from initUI). So the AWD
+pill appears the moment US is selected — whether via the country pill or #/fba/us.
+
 ## v25.533 - Fix: per-country BUY/FBA URLs never switched market (so #/fba/us showed UK → no AWD pill)
 
 The v25.528 router called a bare `setFilters(...)` to apply the market from `#/fba/us` etc., but the BUY/FBA

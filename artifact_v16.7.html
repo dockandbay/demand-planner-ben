@@ -1516,6 +1516,23 @@ function bpRenderCatControl(){
     return '<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 7px;font-size:10px;border-radius:4px;background:#e8e8f4;color:#3b0764">'+c+'<span data-cat="'+c+'" style="cursor:pointer;font-weight:700">\u2715</span></span>';
   }).join('');
 }
+// Build the BUY/FBA filter-pill bar (#bup). Extracted so it can be rebuilt on a COUNTRY change too — some
+// pills are market-dependent (e.g. the US-only "AWD · FBA <3wk" filter), and a country switch only re-renders
+// the table (render()), not the pills.
+function buildBuPills(){
+  var bup=document.getElementById('bup'); if(!bup)return; bup.innerHTML='';
+  var BU_PILLS=(BP_VIEW==='fba')
+    ? [['All','ALL'],['Transfer FBA','TRFFBA'],['Transfer FBA (non GRS)','TRFFBA_NG']].concat(String(CUR).toUpperCase()==='US'?[['AWD · FBA <3wk','AWDLOW']]:[])   // US only: AWD on hand + FBA under 3 weeks
+    : [['All','ALL'],['Urgent','URGENT'],['Buy 3PL','3PL'],['Buy FBA','FBA'],['First Buy','FIRST'],['Transfer','TRF']];
+  if(!BU_PILLS.some(function(p){return p[1]===BU_SEL;}))BU_SEL=(BP_VIEW==='fba')?'TRFFBA':'ALL';   // FBA view defaults to Transfer FBA
+  BU_PILLS.forEach(function(pr){ var lbl=pr[0],val=pr[1];
+    var b=mk('button','pill'+(val===BU_SEL?' active':''),lbl);
+    b.onclick=function(){ BU_SEL=val;
+      bup.querySelectorAll('button').forEach(function(btn){ var a=btn.textContent===lbl; btn.classList.toggle('active',a); btn.style.opacity=a?'1':'.55'; });
+      render(); };
+    if(val!==BU_SEL)b.style.opacity='.55';
+    bup.appendChild(b); });
+}
 function initUI(){
   const cp=document.getElementById('ctr');
   const FLAGS={'UK':'\u{1F1EC}\u{1F1E7}','US':'\u{1F1FA}\u{1F1F8}','EU':'\u{1F1EA}\u{1F1FA}','AU':'\u{1F1E6}\u{1F1FA}','CA':'\u{1F1E8}\u{1F1E6}'};
@@ -1523,6 +1540,7 @@ function initUI(){
     const b=mk('button','pill'+(m===CUR?' active':''),(FLAGS[m]||'')+' '+m);
     b.onclick=()=>{CUR=m;PMKT=m;cp.querySelectorAll('.pill').forEach(p=>p.classList.remove('active'));b.classList.add('active');
       if((VIEW_MODE==='buy'||VIEW_MODE==='fba')&&window.writeHash)window.writeHash([VIEW_MODE,m.toLowerCase()]);   // deep-linkable per-country URL e.g. #/fba/us, #/buy/uk
+      buildBuPills();   // market-dependent pills (e.g. US AWD filter) must refresh on country change
       render();};
     cp.appendChild(b);
   });
@@ -1569,26 +1587,7 @@ function initUI(){
     };
     csp.appendChild(b);
   });
-  // Buy filter pills: All / Urgent / Buy 3PL / Buy FBA
-  const bup=document.getElementById('bup');
-  var BU_PILLS=(BP_VIEW==='fba')
-    ? [['All','ALL'],['Transfer FBA','TRFFBA'],['Transfer FBA (non GRS)','TRFFBA_NG']].concat(String(CUR).toUpperCase()==='US'?[['AWD · FBA <3wk','AWDLOW']]:[])   // US only: AWD on hand + FBA under 3 weeks cover
-    : [['All','ALL'],['Urgent','URGENT'],['Buy 3PL','3PL'],['Buy FBA','FBA'],['First Buy','FIRST'],['Transfer','TRF']];
-  if(!BU_PILLS.some(p=>p[1]===BU_SEL))BU_SEL=(BP_VIEW==='fba')?'TRFFBA':'ALL'; // FBA view defaults to Transfer FBA
-  BU_PILLS.forEach(([lbl,val])=>{
-    const b=mk('button','pill'+(val===BU_SEL?' active':''),lbl);
-    b.onclick=()=>{
-      BU_SEL=val;
-      bup.querySelectorAll('button').forEach(btn=>{
-        const isActive=btn.textContent===lbl;
-        btn.classList.toggle('active',isActive);
-        btn.style.opacity=isActive?'1':'.55';
-      });
-      render();
-    };
-    if(val!==BU_SEL)b.style.opacity='.55';
-    bup.appendChild(b);
-  });
+  buildBuPills();   // BUY/FBA filter pills (rebuilt on country change too — see buildBuPills)
   // FBA transfer sizing pills: Full (whole cartons, default) / Partial — FBA view only
   const cartp=document.getElementById('cartp'), cartpWrap=document.getElementById('cartp-wrap');
   if(cartp){ cartp.innerHTML='';
