@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.537 - Fix: false "Unpaid payment" PO action for not-yet-due invoice balances
+
+The PO-level "Unpaid payment" action fired on `is_final && balance_owing>0` regardless of due date, so any
+in-flight PO with a recorded invoice and a future-due balance (e.g. PO-55UKLX2) showed the action even though
+the PAYMENTS tab correctly showed nothing to do (it only flags OVERDUE payments, and excludes unpaid_payment
+from its count). Dropped the invoice-balance clause: unpaid_payment now flags only an owed start deposit; a
+balance becomes an action once overdue (via payment_overdue), matching the PAYMENTS tab.
+
 ## v25.536 - New "Stock Availability" report + "SA" drawer; remove legacy Help button
 
 - New **REPORTS ▸ Stock Availability** report: country pills, all SKUs grouped by category, Status/Type/

@@ -1316,9 +1316,11 @@
     // of due date: either the invoice total is confirmed and a balance is still owing, or a starting deposit
     // is due (term deposit not yet assigned and not covered by a deposit pool). Excludes complete POs.
     unpaid_payment:function(r){ if(r.progress==='complete')return false;
-      var startDepDue=Number(r.start_calc)>0.009 && r.start_assigned==null && !r.deposit_ref;
-      var invoiceUnpaid=r.is_final && Number(r.balance_owing)>0.01;
-      return startDepDue || invoiceUnpaid; },
+      // Start deposit owed but neither paid/assigned nor covered by a deposit pool. A final-invoice BALANCE
+      // that is merely "still owing" is NOT flagged here — it only becomes an action once its due date passes
+      // (handled by payment_overdue + the PAYMENTS tab). Flagging every not-yet-due balance over-counted the
+      // PO badge vs the PAYMENTS tab (e.g. PO-55UKLX2: invoiced, balance not yet due → tab shows no action).
+      return Number(r.start_calc)>0.009 && r.start_assigned==null && !r.deposit_ref; },
     // "Late - should be Completed": the COMPLETION date (checkin = delivery + 7, the Fulfil/Cin7 completion) has
     // passed but the PO isn't marked complete yet. (Was wrongly keyed on the production-end date.)
     late:function(r){ var t=new Date().toISOString().slice(0,10); return r.progress!=='complete' && r.checkin && r.checkin<t; },
@@ -1382,7 +1384,7 @@
   // Inline action indicator: red Ⓐ (120ms tooltip explaining the rule) + snooze 1/3/7d (or wake), keyed like the badge.
   var ACT_HELP={
     payment_overdue:'Payment overdue — a payment’s due date has passed and it’s still unpaid. Due dates come from the supplier’s deposit / completion / balance terms.',
-    unpaid_payment:'Unpaid payment — money is owed now: either the start deposit is due (not assigned / no deposit pool) or the invoice is final with a balance still owing. Excludes completed POs.',
+    unpaid_payment:'Unpaid payment — a start deposit is owed (not assigned and not covered by a deposit pool). A not-yet-due invoice balance is not flagged here; once its due date passes it shows as Payment overdue. Excludes completed POs.',
     late:'Late — should be completed: the completion date (delivery + 7, the Fulfil/Cin7 check-in) has passed but the PO isn’t marked complete.',
     production:'Late — should have shipped: the PO is still in PRODUCTION and its ship date has passed.',
     unassigned_shipment:'No shipment assigned — this PO isn’t on a shipment yet (and isn’t FOB / pickup).',
