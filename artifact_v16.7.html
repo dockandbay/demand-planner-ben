@@ -7559,7 +7559,7 @@ function saInbCell(x){ if(!x)return '<td class="sa-inb" style="text-align:right;
   return '<td class="sa-inb" style="text-align:right;white-space:nowrap;line-height:1.35">'
     +'<div style="font-weight:700">'+saFmt(x.qty)+'</div>'
     +'<div style="font-size:9.5px;color:#666">'+(x.eta?saDate(x.eta):'no date')+'</div>'
-    +'<div style="font-size:9.5px;color:#94a3b8">'+(x.ref?saEsc(x.ref):'—')+'</div></td>'; }
+    +'<div style="font-size:9.5px">'+(x.ref?'<a class="sa-poref" data-po="'+saEsc(x.ref)+'" title="Open '+saEsc(x.ref)+'" style="color:#1d4ed8;text-decoration:underline;cursor:pointer">'+saEsc(x.ref)+'</a>':'<span style="color:#94a3b8">—</span>')+'</div></td>'; }
 function saTableHTML(rows,awCol){ var ncols=awCol?10:9;
   if(!rows.length)return '<div class="count" style="padding:10px;color:#888">No SKUs match.</div>';
   var h='<div style="overflow:auto"><table><thead><tr>'
@@ -7593,8 +7593,9 @@ function renderStockAvailability(container){ if(!container)return;
     +'.sa-report th.sku{z-index:4;background:#f3f3f1}.sa-report td.sku{z-index:2;background:#fff;font-weight:600;border-right:1px solid #e5e5e5}'
     +'.sa-report th.soh,.sa-report td.soh{width:58px;min-width:58px;max-width:58px}'   /* SOH cols: just fit the heading */
     +'.sa-report tr.sa-cat td{background:#e8e8e6;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#333;text-align:left;border-top:2px solid #bbb}'
+    +'.sa-report .sa-filter{position:sticky;top:0;z-index:6;background:#fff;padding:8px 0;margin:0;border-bottom:1px solid #eee}'   /* keep pills + filters in view while scrolling */
     +'</style>'
-    +'<div class="sa-report"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">'
+    +'<div class="sa-report"><div class="sa-filter" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
       +'<span style="font-size:11px;font-weight:700;letter-spacing:.04em;color:#888;margin-right:2px">MARKET</span>'+pills
       +'<span style="width:1px;height:16px;background:#e0e0e0;margin:0 4px"></span>'
       +'<input class="sa-q" placeholder="Filter by SKU(s) — space/comma separated…" value="'+saEsc(SA_Q||'')+'" style="font-size:11px;padding:3px 8px;border:1px solid #d0d0d0;border-radius:4px;width:280px">'
@@ -7604,6 +7605,11 @@ function renderStockAvailability(container){ if(!container)return;
   container.querySelectorAll('.sa-mkt').forEach(function(b){ b.onclick=function(){ SA_CUR=b.dataset.m; renderStockAvailability(container); }; });
   var cs=container.querySelector('.sa-cat'); if(cs)cs.onchange=function(){ SA_CAT=this.value; renderStockAvailability(container); };
   var qi=container.querySelector('.sa-q'); if(qi)qi.oninput=function(){ SA_Q=this.value; var foc=document.activeElement===qi; renderStockAvailability(container); if(foc){ var n=container.querySelector('.sa-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } } };
+  // column headers stick just BELOW the sticky filter bar (measure its height so they don't overlap)
+  var _fb=container.querySelector('.sa-filter'), _ft=_fb?_fb.offsetHeight:0;
+  container.querySelectorAll('.sa-report thead th').forEach(function(th){ th.style.top=_ft+'px'; });
+  // inbound reference → open that purchase order (switches to SUPPLY ▸ Purchase Orders)
+  container.querySelectorAll('.sa-poref').forEach(function(a){ a.onclick=function(e){ e.preventDefault(); var po=a.dataset.po; if(!po)return; if(typeof closeSADrawer==='function')closeSADrawer(); location.hash='#/supply/purchase-orders/'+encodeURIComponent(po); }; });
 }
 // SA drawer (half-screen pop-out) — reuses the same report component
 // Ensure the drawer + backdrop exist and live directly under <body> (escapes #app's per-view show/hide +

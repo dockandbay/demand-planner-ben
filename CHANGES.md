@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.541 - SA report: sticky filter + column headers; clickable inbound reference
+
+The market pills + SKU/category filter bar and the column-header row are now sticky in the SA report/drawer
+(headers sit just below the filter bar, measured so they don't overlap). The inbound REFERENCE is now a link
+— click it to open that purchase order (switches to SUPPLY ▸ Purchase Orders).
+
 ## v25.540 - SA drawer opens reliably + SKU wraps at 25ch
 
 SA drawer now ensures itself under <body> (create-if-missing) so it opens on the current page every time -
