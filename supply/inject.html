@@ -285,7 +285,8 @@
 #supply-root .opapprove:hover{color:#15803d}
 /* mobile full-screen sheet for an opened PO / shipment (applied via JS only on phones) */
 #mob-sheet-ov{display:none;position:fixed;inset:0;z-index:6000;background:#fff;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;box-sizing:border-box}
-#mob-sheet-ov .mob-back{position:sticky;top:0;z-index:3;display:block;width:100%;box-sizing:border-box;padding:13px 14px;border:none;border-bottom:1px solid #e5e7eb;background:#0f172a;color:#fff;font-weight:700;font-size:14px;text-align:left;cursor:pointer;font-family:inherit}
+#mob-sheet-ov .mob-back{position:sticky;top:0;z-index:3;display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;box-sizing:border-box;padding:13px 14px;border:none;border-bottom:1px solid #e5e7eb;background:#0f172a;color:#fff;font-weight:700;font-size:14px;text-align:left;cursor:pointer;font-family:inherit}
+#mob-sheet-ov .mob-back .mob-back-ref{font-size:13px;font-weight:700;color:#93c5fd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55%}
 #mob-sheet-ov .mob-sheet-body{padding:10px 12px 48px;box-sizing:border-box;max-width:100vw}
 /* inside the full-screen sheet the PO/shipment sub-tab strip (nav-3) WRAPS so every tab is visible, and it
    STICKS just below the sticky back-header so PAYMENTS/DATES/SHIPMENTS stay reachable while scrolling. */
@@ -1989,13 +1990,15 @@
   // then move it back on close. getElementById/querySelector on #podet-* still work wherever the node lives.
   var _mobActiveTd=null;
   function restoreMob(td){ if(!td||!td._mobHolder)return; var h=td._mobHolder; while(h.firstChild)td.appendChild(h.firstChild); td._mobHolder=null; }
-  function applyMobSheet(ex, opening, closeFn){ var td=ex&&ex.querySelector('td'); if(!td)return;
+  function applyMobSheet(ex, opening, closeFn, label){ var td=ex&&ex.querySelector('td'); if(!td)return;
     var ov=document.getElementById('mob-sheet-ov');
     if(opening && isPhone()){
       if(_mobActiveTd && _mobActiveTd!==td){ restoreMob(_mobActiveTd); }   // only one sheet at a time
       if(!ov){ ov=document.createElement('div'); ov.id='mob-sheet-ov'; (document.getElementById('supply-root')||document.body).appendChild(ov); }   // inside #supply-root so its CSS still applies
       ov.innerHTML='';
-      var bk=document.createElement('button'); bk.className='mob-back'; bk.textContent='← Back to list'; bk.onclick=function(e){ e.stopPropagation(); closeFn(); }; ov.appendChild(bk);
+      var bk=document.createElement('button'); bk.className='mob-back';
+      bk.innerHTML='<span>← Back to list</span>'+(label?'<span class="mob-back-ref">'+esc(label)+'</span>':'');   // show which PO / shipment this sheet is
+      bk.onclick=function(e){ e.stopPropagation(); closeFn(); }; ov.appendChild(bk);
       var holder=document.createElement('div'); holder.className='mob-sheet-body';
       while(td.firstChild){ holder.appendChild(td.firstChild); }   // move #podet-* (and its future innerHTML) into the overlay
       ov.appendChild(holder); td._mobHolder=holder; _mobActiveTd=td;
@@ -2033,7 +2036,7 @@
   function bindExpand(){ document.querySelectorAll('#supply-root .po-exp[data-po]').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(){
     var i=b.dataset.i, ex=document.getElementById('poexp-'+i), open=ex.style.display!=='none';
     ex.style.display=open?'none':''; b.classList.toggle('open',!open); var _or=b.closest('tr'); if(_or)_or.classList.toggle('row-open',!open);
-    applyMobSheet(ex, !open, function(){ b.click(); });
+    applyMobSheet(ex, !open, function(){ b.click(); }, b.dataset.po);
     if(typeof writeHash==='function'){ if(open){ writeHash(['supply','purchase-orders']); }   // collapsed → back to the grid URL
       else { var _at=document.querySelector('#podet-'+i+' .potab.active'); writePoTabHash(b.dataset.po, _at?_at.dataset.pt:(_pendingPOTab||'pay')); } }   // open → URL reflects the PO + active sub-tab
     if(!open && !ex.dataset.loaded){ ex.dataset.loaded='1'; var wt=_pendingPOTab; _pendingPOTab=null; loadPoDetail(b.dataset.po,i,wt); } }; }); }
@@ -3829,7 +3832,7 @@
   function bindShipExpand(){ document.querySelectorAll('#supply-root .po-exp[data-ref]').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(){
     var i=b.dataset.i, ex=document.getElementById('shipexp-'+i), open=ex.style.display!=='none';
     ex.style.display=open?'none':''; b.classList.toggle('open',!open); var _or=b.closest('tr'); if(_or)_or.classList.toggle('row-open',!open);
-    applyMobSheet(ex, !open, function(){ b.click(); });
+    applyMobSheet(ex, !open, function(){ b.click(); }, b.dataset.ref);
     if(typeof writeHash==='function')writeHash(['supply','purchase-orders','shipments']);   // shipments now lives under PURCHASE ORDERS
     if(!open && !ex.dataset.loaded){ ex.dataset.loaded='1'; shipExpand(b.dataset.ref, i); } }; }); }
   // Expand: editable shipment header + date overrides, plus the POs aboard with master / unassign.

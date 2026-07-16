@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.547 - Mobile PO/shipment sheet: show the PO (or shipment) ref in the back bar
+
+The mobile full-screen detail sheet header only said "← Back to list". Added the PO number (or
+shipment ref) on the right of that dark bar so you can see which record you're in. Passed through
+`applyMobSheet(…, label)` from both call sites (PO expand → `data-po`, shipment expand → `data-ref`);
+the bar is now a flex row (back text left, ref right, ellipsised on very long refs).
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.546 - DEMAND: drop the status-footer info text
 
 Removed the on-load "Inputs loaded live from Supabase (forecast_inputs)" status message and the
