@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.549 - Mobile: cell/assign pickers render as a bottom sheet (no more clipping behind the grid)
+
+The PO/shipments grid "assign" pickers (supplier, branch, production, batch, country, shipment, deposit,
+crossdock/SKU add) opened as a small positioned dropdown. On phones that dropdown clipped / rendered
+behind the grid (iOS `position:fixed` glitches during momentum scroll) so only a few options showed.
+On phones (`isPhone()`), `placePop` now renders the popover as a full-width **bottom sheet** with a
+tap-to-close backdrop, ~80vh tall, bigger tap targets, 16px search box (no zoom). Desktop unchanged.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.548 - Escalate email = magic-link method (best-effort); no mobile zoom
 
 **Escalate "Load failed" fix.** Escalation emails now go through a shared `sendResendEmail()` helper —
