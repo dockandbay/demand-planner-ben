@@ -3,6 +3,20 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.556 - Payment-issue actions: surface on completed POs from Production 55 onwards
+
+The "Payment invalid" action (payment amount set with no payment date) now:
+- also covers the **Final invoice amount set with no Final payment due** case (`supplier_invoice_total`>0 &
+  `balance_due_date_overide` NULL) — matching the PAYMENTS-tab red flag added in v25.553, so it shows as a
+  real action, not just an inline highlight;
+- still raises on all non-complete POs, and now ALSO on **completed POs whose prod_no ≥ 55** (Production 55
+  onwards). Completed POs from Production 54 or earlier (or non-numeric prod_no) stay suppressed.
+
+Live check at build time: 2 non-complete + 0 complete-prod55 currently match; 5 older completed POs are
+correctly excluded.
+
+Files: server.mjs. No migrations, no new env vars.
+
 ## v25.555 - Cin7 push result: show TOTAL COST + TOTAL UNITS
 
 The Cin7 line push (Update/Create Cin7 PO) result now shows a line under the "✓ Cin7 PO updated — N

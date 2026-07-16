@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.555';
+const APP_VERSION = 'v25.556';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2448,11 +2448,16 @@ app.get('/api/supply/:section', async (req, res) => {
           SELECT 'high','Payment invalid', po,
             'A payment amount is set with no payment date — add the date in the PO''s PLAN', 'gotopo','po','', po
             FROM planner.purchase_orders
-            WHERE coalesce(status,'') NOT ILIKE '%complete%' AND (
+            -- Complete POs normally raise no actions, but payment issues still matter — surface them for
+            -- completed POs from Production 55 onwards (prod_no >= 55), not earlier productions.
+            WHERE (coalesce(status,'') NOT ILIKE '%complete%'
+                   OR (prod_no ~ '^[0-9]+$' AND prod_no::int >= 55)) AND (
               (coalesce(pay_start_deposit_assigned,0)>0 AND pay_start_deposit_date IS NULL) OR
               (coalesce(pay_completion_assigned,0)>0 AND pay_completion_date IS NULL) OR
               (coalesce(pay_balance_1_amount,0)>0 AND pay_balance_1_date IS NULL) OR
-              (coalesce(pay_balance_2_amount,0)>0 AND pay_balance_2_date IS NULL) )
+              (coalesce(pay_balance_2_amount,0)>0 AND pay_balance_2_date IS NULL) OR
+              -- Final invoice amount entered but no Final payment due (balance_due_date_overide) — same rule as the PAYMENTS-tab red flag
+              (coalesce(supplier_invoice_total,0)>0 AND balance_due_date_overide IS NULL) )
           UNION ALL
           SELECT 'amber','Over 20 pallets', z.po,
             'Estimated '||round(z.pal,1)||' pallets (>20 = over one container) — rebalance across this production''s POs',
