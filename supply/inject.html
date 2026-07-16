@@ -541,6 +541,11 @@
   // normalise for matching: lowercase + drop spaces and the "└" tree char, so a search matches regardless of them
   function nrm(s){ return String(s==null?'':s).toLowerCase().replace(/[\s└]+/g,''); }
   function filt(rows,q){ q=nrm(q); if(!q)return rows; return rows.filter(function(r){return Object.keys(r).some(function(k){return nrm(r[k]).indexOf(q)>=0;});}); }
+  // Fuzzy fallback when the full query matches nothing (e.g. pasted "Edit Bill PO-56UKLX3-AIR" from Xero):
+  // split into words and match on the most PO-like token (contains a digit, then longest). Returns [] if none hit.
+  function fuzzyFilt(rows,q){ var toks=String(q==null?'':q).split(/[\s,;|]+/).map(function(t){return t.trim();}).filter(function(t){return t.length>=3;});
+    if(!toks.length)return []; toks.sort(function(a,b){ var da=/\d/.test(a)?1:0, db=/\d/.test(b)?1:0; if(da!==db)return db-da; return b.length-a.length; });
+    for(var i=0;i<toks.length;i++){ var m=filt(rows,toks[i]); if(m.length)return m; } return []; }
   // debounce: coalesce rapid keystrokes into one call after `ms` of quiet
   function debounce(fn,ms){ var t; return function(){ var a=arguments, c=this; clearTimeout(t); t=setTimeout(function(){ fn.apply(c,a); }, ms||220); }; }
   // effective search query: normalise, then ignore <2 chars and the universal "PO"/"PO-" prefix (matches every PO)
@@ -1551,10 +1556,11 @@
       if(state.batch && String(r.batch_id)!==state.batch)return false;
       return true; }); }
     // a text search overrides the status/action/country filters — search across ALL POs
-    function view(){ var q=effQ(state.q); var f=q ? filt(rows,q) : cur();
+    function view(){ var q=effQ(state.q); var f=q ? filt(rows,q) : cur(); var fuzzy=false;
+      if(q && !f.length){ var ff=fuzzyFilt(rows,state.q); if(ff.length){ f=ff; fuzzy=true; } }   // nothing on the exact search → fuzzy fallback on the best token
       _poShowClient=!!(state.ctry&&state.ctry['OTHER']);   // OTHER pill (incl. Direct-to-Client) → reveal Client name + sales ref columns
       var shown=(_poShowAll||f.length<=PO_CAP)?f:f.slice(0,PO_CAP);
-      document.getElementById('sup-count').textContent=(shown.length<f.length?shown.length+' of ':'')+f.length+' / '+rows.length+' POs'+(q?' (search — all statuses)':'');
+      document.getElementById('sup-count').textContent=(shown.length<f.length?shown.length+' of ':'')+f.length+' / '+rows.length+' POs'+(q?(fuzzy?' (fuzzy match)':' (search — all statuses)'):'');
       document.getElementById('sup-grid').innerHTML=poTable(shown,q?'status':state.grp)   // a search spans all statuses → always group the results under status sub-labels (Production ▸ Ready to ship ▸ Future ▸ Shipping ▸ Complete)
         +(shown.length<f.length?'<div style="margin:8px 0;text-align:center"><button class="save-btn light" id="po-showall">Show all '+f.length+' &darr;</button></div>':'');
       var sa=document.getElementById('po-showall'); if(sa)sa.onclick=function(){ _poShowAll=true; view(); };

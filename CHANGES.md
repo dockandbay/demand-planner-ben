@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.557 - PO search: fuzzy fallback when the exact query matches nothing
+
+The PO search normalises the whole query into one token, so pasting e.g. "Edit Bill PO-56UKLX3-AIR"
+(copied from Xero) matched nothing. Added a fallback: when the exact search returns 0, split the query
+into words and match on the most PO-like token (one containing a digit, then longest), so it still finds
+PO-56UKLX3-AIR. The count shows "(fuzzy match)" when this kicks in. Exact search behaviour unchanged when
+it already hits.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.556 - Payment-issue actions: surface on completed POs from Production 55 onwards
 
 The "Payment invalid" action (payment amount set with no payment date) now:
