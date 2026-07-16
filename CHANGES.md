@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.558 - "Awaiting supplier confirmation" not required once SHIPPING/DELIVERED
+
+The "Awaiting supplier confirmation" action (and the PO-level badge + the metrics-summary count) no longer
+fires for POs that are SHIPPING or DELIVERED — by then the order is on the water so chasing confirmation is
+moot. READY TO SHIP still chases it; COMPLETE/FUTURE already excluded. Applied in three places: the actions
+query, the client PO_ACTCOND.po_not_approved badge, and the awaiting_confirmation KPI.
+
+Files: server.mjs, supply/inject.html. No migrations, no new env vars.
+
 ## v25.557 - PO search: fuzzy fallback when the exact query matches nothing
 
 The PO search normalises the whole query into one token, so pasting e.g. "Edit Bill PO-56UKLX3-AIR"

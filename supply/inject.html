@@ -1379,7 +1379,7 @@
     // Direct to Client details not yet approved — only for Direct-to-Client POs with a client sales ref
     dtc_not_approved:function(r){ return r.progress!=='complete' && poIsDtc(r) && !r.dtc_accepted_at; },
     // production requires supplier confirmation and the supplier hasn't confirmed the PO yet
-    po_not_approved:function(r){ return r.progress!=='complete' && !!r.require_confirmation && !r.supplier_confirmed; },
+    po_not_approved:function(r){ return r.progress!=='complete' && !/^shipping|deliver/i.test(r.status||'') && !!r.require_confirmation && !r.supplier_confirmed; },   // once shipping/delivered, supplier confirmation is moot (READY TO SHIP still chases it)
     // Pre-shipment documents overdue: PRODUCTION/ready-to-ship, production end passed, required branch doc missing, not waived.
     preship:function(r){ if(!(r.status==='PRODUCTION'||r.production_status==='ready_to_ship')||r.preship_not_required)return false;
       var t=new Date().toISOString().slice(0,10); if(!(r.prod_end&&r.prod_end<t))return false;

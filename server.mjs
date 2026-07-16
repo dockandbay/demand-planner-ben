@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.557';
+const APP_VERSION = 'v25.558';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1479,7 +1479,7 @@ app.get('/api/supply/:section', async (req, res) => {
             round(coalesce(sum(${VAL}) FILTER (WHERE status ILIKE 'production%'),0)::numeric) value_in_production,
             coalesce(sum(${UNITS}) FILTER (WHERE status ILIKE 'shipping%'),0)::bigint units_inbound,
             round(coalesce(sum(${VAL}) FILTER (WHERE status ILIKE 'shipping%'),0)::numeric) value_in_transit,
-            count(*) FILTER (WHERE status NOT ILIKE '%complete%'
+            count(*) FILTER (WHERE status NOT ILIKE '%complete%' AND status NOT ILIKE 'ship%' AND status NOT ILIKE '%deliver%'
               AND coalesce((SELECT pn.require_supplier_confirmation FROM planner.prod_numbers pn WHERE pn.prod_no=p.prod_no),false)
               AND p.supplier_confirmed_at IS NULL)::int awaiting_confirmation
           FROM planner.purchase_orders p`))[0];
@@ -2303,6 +2303,7 @@ app.get('/api/supply/:section', async (req, res) => {
             FROM planner.purchase_orders
             WHERE supplier_confirmed_at IS NULL AND coalesce(supplier_name,'')<>''
               AND coalesce(status,'') NOT ILIKE '%complete%' AND coalesce(status,'') NOT ILIKE '%future%'
+              AND coalesce(status,'') NOT ILIKE 'ship%' AND coalesce(status,'') NOT ILIKE '%deliver%'   -- once shipping/delivered, supplier confirmation is moot
               AND coalesce((SELECT pn.require_supplier_confirmation FROM planner.prod_numbers pn WHERE pn.prod_no=purchase_orders.prod_no),false)
               AND EXISTS (SELECT 1 FROM planner.purchase_order_lines l WHERE l.po=purchase_orders.po AND coalesce(l.qty,0)>0)
           UNION ALL
