@@ -2311,7 +2311,7 @@
           '<input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="inv-parse-file" data-po="'+esc(r.po)+'" style="font-size:11px">'
           +' <button class="save-btn inv-parse-go" data-po="'+esc(r.po)+'">Parse invoice</button>'
           +'<div class="inv-parse-out" data-po="'+esc(r.po)+'" style="margin-top:6px"></div>')
-      +cliRow('<b>Final payment due</b>', dateField(r.final_payment_due,{attrs:'data-ep="'+ep+'" data-field="balance_due_date_overide"', cls:'txtin', width:'130px'})+' <span class="mut tiny">blank = calculated balance due date</span>')
+      +cliRow('<b>Final payment due</b>', dateField(r.final_payment_due,{attrs:'data-ep="'+ep+'" data-field="balance_due_date_overide"', cls:'txtin', width:'130px'})+' <span class="mut tiny">blank = calculated balance due date</span>'+'<span class="fpd-warn" style="display:none;color:#b91c1c;font-weight:700;margin-left:8px">⚠ add a payment due date</span>')
       +cliRow('Value used', '<b>'+money(r.value_used)+'</b>'+(r.is_final?' <span class="tool-badge bg-green">final</span>':''))
       +cliRow('<b>Total amount due</b>', '<b'+(totalDue>0.02?' style="color:#991b1b"':'')+'>'+money(totalDue)+'</b> <span class="mut tiny">remaining'+(paid>0.01?' · '+money(paid)+' paid':'')+'</span>')
       +'</div>'
@@ -2607,6 +2607,13 @@
         .then(function(j){ if(j&&j.error)throw new Error(j.error); if(poBy[po])poBy[po][inp.dataset.field]=inp.value;
           if(inp.dataset.field==='balance_due_date_overide'){ invalidateDerived(); poRefetchPanel(po,i); } })   // recompute balance due + cash flow
         .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; });
+    // Final invoice amount entered but no Final payment due → flag the due-date field red, live as you type.
+    (function(){ var scope=document.getElementById('podet-'+i); if(!scope)return;
+      var amt=scope.querySelector('.payin[data-field="supplier_invoice_total"]');
+      var due=scope.querySelector('[data-field="balance_due_date_overide"]');
+      var warn=scope.querySelector('.fpd-warn');
+      function sync(){ if(!amt||!due)return; var bad=String(amt.value||'').trim()!=='' && String(due.value||'').trim()===''; due.classList.toggle('err',bad); if(warn)warn.style.display=bad?'':'none'; }
+      if(amt)amt.addEventListener('input',sync); if(due)due.addEventListener('input',sync); sync(); })();
     // Direct-to-Client tags (Key account / Custom checkboxes)
     document.querySelectorAll('#podet-'+i+' .dtc-tag').forEach(function(cb){ cb.onchange=function(){ var b={}; b[cb.dataset.field]=cb.checked;
       shipPost('/api/supply/po/'+encodeURIComponent(po),b,function(){ if(poBy[po])poBy[po][cb.dataset.field]=cb.checked; }); }; });

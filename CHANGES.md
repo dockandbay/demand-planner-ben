@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.553 - Payments: flag missing Final payment due when a Final invoice amount is set
+
+In PO ▸ Payments, if a Final invoice amount is entered but Final payment due is blank, the due-date
+field now goes red with a "⚠ add a payment due date" note. It updates live (on `input`) as you type the
+amount — no save/refresh needed — and clears the moment a due date is entered.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.552 - Docs: background upload + editable type; Invoice tab shows only invoice docs
 
 **Background upload.** All PO document uploads (DOCUMENTS tab, shipment pre-ship docs, Client/FBA attach)
