@@ -3,6 +3,26 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.552 - Docs: background upload + editable type; Invoice tab shows only invoice docs
+
+**Background upload.** All PO document uploads (DOCUMENTS tab, shipment pre-ship docs, Client/FBA attach)
+now go through a `bgUpload()` helper: a body-level toast reports progress/result so it works even after you
+switch tabs (the fetch keeps running), the file input clears so you can re-pick, and the response is read
+as text then JSON-parsed defensively — a size-limit reply ("Request Entity Too Large") now shows a clean
+"file too large" message instead of the "Unexpected token 'R'…" JSON crash. Sandbox JSON body limit
+raised 12mb→25mb (⚠ Diviyaj: Vercel caps request bodies at ~4.5MB regardless — large uploads need
+direct-to-storage on live; noted in server.mjs).
+
+**Editable document type.** DOCUMENTS tab Type column is now an inline dropdown (Commercial Invoice /
+Packing List / Pallet Details / Barcodes & Labels / Client·FBA / Other). Changing it saves immediately
+(`/api/supply/po-doc-category`) and silently refreshes the panel (keeps the open sub-tab).
+
+**Payments ▸ Invoice tab** now lists only documents typed as an invoice (category `invoice`/
+`commercial_invoice`) instead of every non-client doc — so e.g. a "Pallet Details" file no longer shows
+there. Set the right type in the DOCUMENTS tab and the invoice list reflects it.
+
+Files: server.mjs, supply/inject.html. No migrations, no new env vars.
+
 ## v25.551 - ERP deviations: a 0-qty plan line is NOT a deviation vs "not in ERP"
 
 A line with plan qty 0 and no ERP counterpart was flagged as an ERP deviation ("0 → not in ERP"),

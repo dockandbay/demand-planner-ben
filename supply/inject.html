@@ -469,6 +469,9 @@
     config:'<b>SUPPLY ▸ Config.</b> Reference data, one table per sub-tab: import tax, freight rates, import duty, branches (lead times), suppliers (payment terms + production lead time), batches, productions (source table) and the full products master. Editable inline where it makes sense; productions &amp; products are read-only source views.'
   };
   var PO_STATUSES=['FUTURE','PRODUCTION','READY TO SHIP','SHIPPING','DELIVERED','COMPLETE'];
+  // PO ▸ DOCUMENTS type list [value,label]. 'invoice' is what the Payments ▸ Invoice tab shows.
+  var PO_DOC_TYPES=[['invoice','Commercial Invoice'],['packing_list','Packing List'],['pallet_details','Pallet Details'],['labels','Barcodes / Labels'],['client','Client / FBA doc'],['document','Other / general']];
+  var PO_DOC_INVOICE=['invoice','commercial_invoice'];   // categories the Payments ▸ Invoice tab surfaces
   function statusBg(s){ var u=String(s||'').toUpperCase();
     if(u.indexOf('FUTURE')>=0)return 'bg-neutral'; if(u.indexOf('PRODUCTION')>=0)return 'bg-amber';
     if(u.indexOf('SHIP')>=0||u.indexOf('READY')>=0)return 'bg-red';
@@ -1038,6 +1041,30 @@
   function fetchShipmentsFull(cb){ if(shipFull)return cb(shipFull);
     fetch('/api/supply/shipments').then(function(r){return r.json();}).then(function(d){ shipFull=d.shipments||[]; cb(shipFull); }).catch(function(){cb([]);}); }
   function closeShPop(){ var p=document.getElementById('shpop'); if(p){ if(p._mo){try{p._mo.disconnect();}catch(e){}} if(p._bd&&p._bd.parentNode){p._bd.parentNode.removeChild(p._bd);} p.parentNode.removeChild(p); } document.removeEventListener('mousedown',shPopOutside,true); }
+  // ── Background document upload ────────────────────────────────────────────────────────────────────
+  // A small body-level toast so progress/result shows even after you switch tabs (the fetch keeps running
+  // regardless). Response body is read as TEXT then JSON-parsed defensively — a proxy/serverless size
+  // limit returns plain text ("Request Entity Too Large"), which used to blow up r.json() with the
+  // "Unexpected token 'R'…" error. Now that surfaces as a clean "file too large" message instead.
+  function uploadToast(msg){ var d=document.createElement('div');
+    d.style.cssText='position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:2147482000;background:#0f172a;color:#fff;font:600 13px system-ui;padding:10px 16px;border-radius:8px;box-shadow:0 6px 22px rgba(0,0,0,.3);max-width:92vw;text-align:center';
+    d.textContent=msg; document.body.appendChild(d);
+    function rm(){ if(d.parentNode)d.parentNode.removeChild(d); }
+    return { done:function(m){ d.style.background='#166534'; d.textContent=m; setTimeout(rm,2500); },
+             fail:function(m){ d.style.background='#b91c1c'; d.textContent=m; setTimeout(rm,8000); } }; }
+  function bgUpload(url, payload, label, onDone){ var t=uploadToast('⬆ Uploading '+label+'…');
+    fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)})
+      .then(function(r){ return r.text().then(function(txt){
+        var j=null; try{ j=txt?JSON.parse(txt):{}; }catch(e){ j=null; }
+        if(!r.ok || j===null){
+          var msg=(j&&j.error) ? j.error
+            : (r.status===413 || /entity too large|request en/i.test(txt)) ? 'File too large to upload (server size limit). Compress or split it, then try again.'
+            : ('Upload failed ('+r.status+')');
+          throw new Error(msg); }
+        if(j&&j.error) throw new Error(j.error);
+        return j; }); })
+      .then(function(j){ t.done('✓ '+label+' uploaded'); try{ onDone&&onDone(j); }catch(e){} })
+      .catch(function(e){ t.fail('✗ '+label+': '+(e.message||e)); }); }
   // append a popover near its anchor, flipping it ABOVE the anchor when it would overflow the bottom of the
   // viewport (so a row near the bottom of the screen still gets a usable, fully-visible popup).
   function placePop(pop, rc){
@@ -2269,7 +2296,7 @@
       +cliRow('<b>Credit amount</b> <span class="mut tiny">added to invoice · paid in the balance</span>', payIn(ep,'credit_amount',r.credit_amount,false,false,'style="width:90px;text-align:left"'))
       // Supplier-submitted invoice total (from the portal) — shown right next to the Final invoice amount so it
       // can be reviewed and applied. "Apply → final" writes it into supplier_invoice_total; the doc downloads here.
-      +(function(){ var si=d&&d.sup_invoice, docs=(d&&d.sup_docs)||[]; var out='';
+      +(function(){ var si=d&&d.sup_invoice, docs=((d&&d.sup_docs)||[]).filter(function(x){return PO_DOC_INVOICE.indexOf(String(x.category||''))>=0;}); var out='';   // Invoice tab = actual invoice docs only (set a doc's Type in the DOCUMENTS tab)
         if(si && si.status!=='dismissed'){ var sv=Number(si.value), fv=(r.final_invoice!=null?Number(r.final_invoice):null);
           var pend=(si.status==='pending'), applied=(si.status==='applied'), differs=(fv!=null&&Math.abs(sv-fv)>0.01), canApply=(fv==null||differs);
           var tag= pend?'<span class="tool-badge bg-amber">⏳ new — awaiting review</span>'
@@ -2552,24 +2579,25 @@
     document.querySelectorAll('#podet-'+i+' .dep-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openDepPick(b.dataset.po,b,function(){ poRefetchPanel(po,i); }); }; });
     // Client/FBA file attachment upload (#12) — base64 into portal_attachments with category='client'
     document.querySelectorAll('#podet-'+i+' .cli-attach').forEach(function(inp){ inp.onchange=function(){ var f=inp.files&&inp.files[0]; if(!f)return;
-      var rd=new FileReader(); rd.onload=function(){ inp.disabled=true;
-        fetch('/api/supply/portal-upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:inp.dataset.po,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),category:'client',uploaded_by:'client-tab'})})
-          .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); poRefetchPanel(po,i); })
-          .catch(function(e){ inp.disabled=false; alert('Upload failed: '+(e.message||e)); }); };
+      var rd=new FileReader(); rd.onload=function(){ inp.value='';   // clear so the same file can be re-picked; upload runs in the background
+        bgUpload('/api/supply/portal-upload',{po:inp.dataset.po,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),category:'client',uploaded_by:'client-tab'}, f.name, function(){ poRefetchPanel(po,i); }); };
       rd.readAsDataURL(f); }; });
     document.querySelectorAll('#podet-'+i+' .po-go-ship').forEach(function(b){ b.onclick=function(){ if(b.dataset.ref)gotoShipment(b.dataset.ref); }; });
     // DOCUMENTS tab: delete any doc / upload a doc (held in the DB)
     document.querySelectorAll('#podet-'+i+' .podoc-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete document “'+(b.dataset.name||'')+'” from PO '+b.dataset.po+'? This cannot be undone.'))return; b.disabled=true;
       fetch('/api/supply/po-doc-delete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:b.dataset.id})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); poRefetchPanel(po,i); }).catch(function(e){ b.disabled=false; alert('Delete failed: '+(e.message||e)); }); }; });
-    document.querySelectorAll('#podet-'+i+' .podoc-up').forEach(function(b){ b.onclick=function(){ var inp=document.querySelector('#podet-'+i+' .podoc-file[data-po="'+CSS.escape(b.dataset.po)+'"]'); var f=inp&&inp.files&&inp.files[0]; if(!f){alert('Choose a file to upload.');return;} b.disabled=true;
-      var rd=new FileReader(); rd.onload=function(){ fetch('/api/supply/po-doc-upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:b.dataset.po,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),uploaded_by:'admin'})})
-        .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); poRefetchPanel(po,i); }).catch(function(e){ b.disabled=false; alert('Upload failed: '+(e.message||e)); }); };
+    document.querySelectorAll('#podet-'+i+' .podoc-up').forEach(function(b){ b.onclick=function(){ var inp=document.querySelector('#podet-'+i+' .podoc-file[data-po="'+CSS.escape(b.dataset.po)+'"]'); var f=inp&&inp.files&&inp.files[0]; if(!f){alert('Choose a file to upload.');return;}
+      var rd=new FileReader(); rd.onload=function(){ if(inp)inp.value='';
+        bgUpload('/api/supply/po-doc-upload',{po:b.dataset.po,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),uploaded_by:'admin'}, f.name, function(){ poRefetchPanel(po,i); }); };
       rd.readAsDataURL(f); }; });
+    // DOCUMENTS tab: inline document-type change → saves immediately, silent panel refresh (updates the Invoice tab filter too)
+    document.querySelectorAll('#podet-'+i+' .podoc-type').forEach(function(s){ s.onchange=function(){ var id=s.dataset.id, cat=s.value; s.disabled=true;
+      fetch('/api/supply/po-doc-category',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:id,category:cat})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); poRefetchPanel(po,i); }).catch(function(e){ s.disabled=false; alert('Could not change document type: '+(e.message||e)); }); }; });
     // SHIPMENTS tab: category-specific pre-shipment doc uploads (carton/pallet barcodes, IDN pallet labels)
     document.querySelectorAll('#podet-'+i+' .shdoc-up').forEach(function(b){ b.onclick=function(){ var cat=b.dataset.category;
-      var inp=document.querySelector('#podet-'+i+' .shdoc-file[data-po="'+CSS.escape(b.dataset.po)+'"][data-category="'+cat+'"]'); var f=inp&&inp.files&&inp.files[0]; if(!f){alert('Choose a file to upload.');return;} b.disabled=true;
-      var rd=new FileReader(); rd.onload=function(){ fetch('/api/supply/po-doc-upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:b.dataset.po,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),uploaded_by:'admin',category:cat})})
-        .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); poRefetchPanel(po,i); }).catch(function(e){ b.disabled=false; alert('Upload failed: '+(e.message||e)); }); };
+      var inp=document.querySelector('#podet-'+i+' .shdoc-file[data-po="'+CSS.escape(b.dataset.po)+'"][data-category="'+cat+'"]'); var f=inp&&inp.files&&inp.files[0]; if(!f){alert('Choose a file to upload.');return;}
+      var rd=new FileReader(); rd.onload=function(){ if(inp)inp.value='';
+        bgUpload('/api/supply/po-doc-upload',{po:b.dataset.po,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),uploaded_by:'admin',category:cat}, f.name, function(){ poRefetchPanel(po,i); }); };
       rd.readAsDataURL(f); }; });
     // free-text client fields — save verbatim (commas allowed) on blur
     document.querySelectorAll('#podet-'+i+' .txtin').forEach(function(inp){ inp.onchange=function(){
@@ -2754,8 +2782,11 @@
   function docsPanel(po,d){ var docs=(d&&d.all_docs)||[];
     function fsize(b){ b=Number(b)||0; return b>=1048576?(b/1048576).toFixed(1)+' MB':b>=1024?Math.round(b/1024)+' KB':(b?b+' B':''); }
     var rows=docs.length?docs.map(function(x){ var url='/api/supply/portal-attachment/'+esc(x.id);
+      var cur=String(x.category||'document'); var known=PO_DOC_TYPES.some(function(t){return t[0]===cur;});
       return '<tr><td class="l"><a href="'+url+'" target="_blank" rel="noopener">'+esc(x.filename||'file')+'</a></td>'
-        +'<td class="l"><span class="tool-badge bg-neutral">'+esc(x.category||'')+'</span></td>'
+        +'<td class="l"><select class="fci podoc-type" data-id="'+esc(x.id)+'" title="change document type (saves immediately)" style="font-size:11px">'
+          +PO_DOC_TYPES.map(function(t){return '<option value="'+t[0]+'"'+(cur===t[0]?' selected':'')+'>'+esc(t[1])+'</option>';}).join('')
+          +(known?'':'<option value="'+esc(cur)+'" selected>'+esc(cur)+'</option>')+'</select></td>'
         +'<td class="l">'+esc(x.uploaded_at||'')+'</td><td class="l">'+esc(x.uploaded_by||'')+'</td><td class="l">'+esc(fsize(x.byte_size))+'</td>'
         +'<td class="l" style="white-space:nowrap"><a class="lnk-btn" href="'+url+'" target="_blank" rel="noopener">⤓ download</a> &nbsp; <button class="lnk-btn podoc-del" data-id="'+esc(x.id)+'" data-po="'+esc(po)+'" data-name="'+esc(x.filename||'')+'" style="color:#b91c1c">✕ delete</button></td></tr>';
     }).join(''):'<tr><td colspan="6" class="count">No documents held for this PO yet.</td></tr>';

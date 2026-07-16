@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.551';
+const APP_VERSION = 'v25.552';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -434,7 +434,7 @@ async function buildFBADIMS() {
 }
 
 const app = express();
-app.use(express.json({ limit: '12mb' }));   // 12mb: portal invoice uploads arrive as base64 JSON
+app.use(express.json({ limit: '25mb' }));   // 25mb: document/invoice uploads arrive as base64 JSON (~33% inflation). NOTE for Diviyaj: Vercel serverless caps the request body at ~4.5MB regardless — large doc uploads need direct-to-storage (Supabase signed URL) on live; this limit only helps local/self-hosted.
 
 // gzip large JSON responses (built-in zlib — no dependency). The PO grid payload is ~3.6MB of JSON;
 // gzip cuts it ~10x over the wire. Only kicks in when the client accepts gzip and the body is worth it.
@@ -3307,6 +3307,13 @@ app.post('/api/supply/po-doc-delete', async (req, res) => {
   const id = req.body && req.body.id;
   if (!id) return res.status(400).json({ error: 'id required' });
   try { const r = await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1`, [id]); res.json({ ok: true, deleted: r.rowCount }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// PO ▸ DOCUMENTS tab: change a document's type/category inline (drives which tab surfaces it, e.g. Payments ▸ Invoice).
+app.post('/api/supply/po-doc-category', async (req, res) => {
+  const { id, category } = req.body || {};
+  if (!id || !category) return res.status(400).json({ error: 'id and category required' });
+  try { const r = await pool.query(`UPDATE planner.portal_attachments SET category=$2 WHERE id=$1 RETURNING id`, [id, String(category)]); res.json({ ok: true, updated: r.rowCount }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Admin PO ▸ DOCUMENTS tab: upload a document against a PO (held in the DB, like all other uploads).
