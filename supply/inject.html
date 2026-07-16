@@ -1091,8 +1091,10 @@
     setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
     function set(ref){ fetch('/api/supply/po/'+encodeURIComponent(po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({deposit_ref:ref})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ alert(j.error); return; } closeShPop(); done&&done(po); }).catch(function(e){alert('Failed: '+(e.message||e));}); }
     fetchDepositsFull(function(deps){
+      var _cur=String((poBy[po]||{}).deposit_ref||'');   // current assignment (a real ref, the NO DEPOSIT sentinel, or blank)
       function render(q){ q=(q||'').trim().toLowerCase(); var html='';
-        html+='<div class="shpop-opt unassign" data-none="1">— No deposit</div>';
+        if(_cur) html+='<div class="shpop-opt unassign" data-clear="1">✕ Unassign (clear)</div>';   // revert to blank → back to "assign deposit…"
+        html+='<div class="shpop-opt unassign" data-none="1">— No deposit needed</div>';
         var ms=deps.filter(function(d){return !q||((d.reference||'')+' '+(d.supplier_name||'')).toLowerCase().indexOf(q)>=0;});
         ms.sort(function(a,b){ return (depIssue(a)?1:0)-(depIssue(b)?1:0); });   // assignable (matching) deposits first
         ms.slice(0,q?40:12).forEach(function(d){ var issue=depIssue(d), bad=!!issue;   // region OR supplier mismatch → show but block
@@ -1101,7 +1103,7 @@
           html+='<div class="shpop-opt'+(bad?' dep-blocked':'')+'"'+(bad?' title="'+reason+'" style="opacity:.45;cursor:not-allowed"':' data-ref="'+esc(d.reference)+'"')+'>'+esc(d.reference)+' <span class="mut tiny">'+esc(d.supplier_name||'')+(d.deposit_remaining!=null?' · '+money(d.deposit_remaining)+' left':'')+flag+'</span></div>'; });
         if(!q&&deps.length>12)html+='<div class="mut tiny" style="padding:5px 10px">'+(deps.length-12)+' more — type to search…</div>';
         var list=document.getElementById('shpop-list'); list.innerHTML=html;
-        list.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ if(o.classList.contains('dep-blocked'))return; set(o.dataset.none?'NO DEPOSIT':o.dataset.ref); }; });
+        list.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ if(o.classList.contains('dep-blocked'))return; set(o.dataset.clear?'':(o.dataset.none?'NO DEPOSIT':o.dataset.ref)); }; });
       }
       render(''); pop.querySelector('.shpop-q').oninput=function(){render(this.value);}; pop.querySelector('.shpop-q').focus();
     }); }

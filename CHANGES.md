@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.550 - Assign-deposit picker: add "Unassign (clear)" option
+
+The deposit picker only had "— No deposit", which writes the `NO DEPOSIT` sentinel (means "this PO
+needs none") — there was no way to clear an existing assignment back to blank. Added a distinct
+"✕ Unassign (clear)" option (sets `deposit_ref` to empty), shown only when the PO currently has
+something assigned; it reverts the PO to the "assign deposit…" needs-assign state. Relabelled the
+sentinel option to "— No deposit needed" to make the two intents clear.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.549 - Mobile: cell/assign pickers render as a bottom sheet (no more clipping behind the grid)
 
 The PO/shipments grid "assign" pickers (supplier, branch, production, batch, country, shipment, deposit,
