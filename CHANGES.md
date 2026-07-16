@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.554 - Shipment drawer ▸ POs aboard: show Client name + sales ref for direct-to-client
+
+Added a "Client" column to the POs-aboard table in the shipment drawer. For any PO carrying a client /
+client sales ref (i.e. direct-to-client orders) it shows the client name and the sales ref stacked on
+two rows in one cell; other POs show "—". shipment-detail endpoint now returns client / sales_order_ref /
+branch.
+
+Files: server.mjs, supply/inject.html. No migrations, no new env vars.
+
 ## v25.553 - Payments: flag missing Final payment due when a Final invoice amount is set
 
 In PO ▸ Payments, if a Final invoice amount is entered but Final payment due is blank, the due-date

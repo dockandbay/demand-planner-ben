@@ -3940,11 +3940,16 @@
     Promise.all([fetch('/api/supply/shipment-detail/'+encodeURIComponent(ref)).then(function(r){return r.json();}),
       fetch('/api/supply/shipment-crossdock/'+encodeURIComponent(ref)).then(function(r){return r.json();}).catch(function(){return [];})])
       .then(function(R){ var rows=R[0]||[], xd=R[1]||[]; var t='<div class="sect-h">POs aboard ('+rows.length+') — ★ marks the master (consolidation) PO</div>';
-        t+='<div class="tw"><table><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th class="l">Status</th><th>Units</th><th>Value</th><th class="l">Master</th><th class="l"></th></tr></thead><tbody>';
-        t+=rows.map(function(p){ return '<tr><td class="l"><button class="lnk-btn ship-po-link" data-po="'+esc(p.po)+'" title="open this PO’s payment plan"><b>'+esc(p.po)+'</b></button></td><td class="l">'+esc(p.supplier_name||'')+'</td><td class="l">'+esc(p.status||'')+'</td><td>'+units(p.units)+'</td><td>'+money(p.value)+'</td>'
+        t+='<div class="tw"><table><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th class="l">Client</th><th class="l">Status</th><th>Units</th><th>Value</th><th class="l">Master</th><th class="l"></th></tr></thead><tbody>';
+        t+=rows.map(function(p){
+          // Client cell: name + sales ref on 2 rows, for direct-to-client orders (any PO carrying a client / sales ref)
+          var clientCell=(p.client||p.sales_order_ref)
+            ? '<div style="line-height:1.3">'+(p.client?'<div>'+esc(p.client)+'</div>':'')+(p.sales_order_ref?'<div class="mut tiny">'+esc(p.sales_order_ref)+'</div>':'')+'</div>'
+            : '<span class="mut">—</span>';
+          return '<tr><td class="l"><button class="lnk-btn ship-po-link" data-po="'+esc(p.po)+'" title="open this PO’s payment plan"><b>'+esc(p.po)+'</b></button></td><td class="l">'+esc(p.supplier_name||'')+'</td><td class="l">'+clientCell+'</td><td class="l">'+esc(p.status||'')+'</td><td>'+units(p.units)+'</td><td>'+money(p.value)+'</td>'
           +'<td class="l">'+(p.is_master?'<span class="tool-badge bg-green">★ master</span>':'<button class="lnk-btn" data-act="master" data-po="'+esc(p.po)+'">make master</button>')+'</td>'
           +'<td class="l"><button class="lnk-btn" data-act="unassign" data-po="'+esc(p.po)+'">unassign</button></td></tr>'; }).join('')
-          +(rows.length?'':'<tr><td colspan="7" class="l mut">No POs assigned yet — add one below.</td></tr>')+'</tbody></table></div>';
+          +(rows.length?'':'<tr><td colspan="8" class="l mut">No POs assigned yet — add one below.</td></tr>')+'</tbody></table></div>';
         // add a PO to this shipment directly (search the active-PO list, then assign)
         t+='<div style="margin-top:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">'
           +'<span class="mut tiny">Add a PO to this shipment:</span>'
