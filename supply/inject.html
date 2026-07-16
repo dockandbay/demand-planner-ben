@@ -1888,7 +1888,10 @@
       msg.textContent='Sending to Cin7…';
       fetch('/api/supply/po/'+encodeURIComponent(po)+'/cin7-lines',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({completion_date:comp})}).then(function(r){return r.json();}).then(function(j){
         if(j&&j.error){ msg.innerHTML='<span style="color:#dc2626">'+esc(j.error)+'</span>'+cin7TraceHtml(j.cin7_trace); return; }
-        msg.innerHTML='<span style="color:#166534;font-weight:700">✓ Cin7 PO '+(j.mode==='created'?'created':'updated')+'</span> — '+esc(j.lines)+' line(s)'+(j.approved?' ('+esc(j.approved)+' at approved supplier price)':'')+cin7ValMsg(j.validation)+(j.erp_mirror_updated?' · ERP mirror synced':'')+cin7TraceHtml(j.cin7_trace);
+        var _tc=(Number(j.total_cost)||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+        msg.innerHTML='<span style="color:#166534;font-weight:700">✓ Cin7 PO '+(j.mode==='created'?'created':'updated')+'</span> — '+esc(j.lines)+' line(s)'+(j.approved?' ('+esc(j.approved)+' at approved supplier price)':'')+cin7ValMsg(j.validation)+(j.erp_mirror_updated?' · ERP mirror synced':'')
+          +'<div style="margin-top:4px;font-weight:700">TOTAL COST: '+esc(j.currency||'')+' '+_tc+' &nbsp;·&nbsp; TOTAL UNITS: '+units(j.total_units)+'</div>'
+          +cin7TraceHtml(j.cin7_trace);
         invalidateDerived(); delete cache['purchase-orders']; selectSection('purchase-orders');   // clear the ERP drift flags in real time
       }).catch(function(e){ msg.innerHTML='<span style="color:#dc2626">Failed: '+esc(e.message||e)+'</span>'; }); };
   }

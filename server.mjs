@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.554';
+const APP_VERSION = 'v25.555';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -4327,7 +4327,12 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
       if (edd) await pool.query(`UPDATE planner.erp_purchase_orders SET final_delivery_date=$2::date, synced_at=now() WHERE po=$1`, [po, completion]);
       mirrored = true;
     } catch (e) { /* non-fatal — Cin7 write already succeeded */ }
+    // PO totals for the UI (the PO's own order-plan lines — excludes the $0 crossdock extras carried on a master).
+    const ownLines = lines.filter(l => !l.crossdock);
+    const total_units = ownLines.reduce((s, l) => s + (Number(l.qty) || 0), 0);
+    const total_cost = ownLines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.price) || 0), 0);
     res.json({ ok: true, mode, cin7_id: newId, cin7_member_id: memberId || null, cin7_branch_id: branchId || null, lines: lines.length, approved: lines.filter(l => l.approved_price).length, erp_mirror_updated: mirrored, validation, cin7_trace: trace,
+      total_units, total_cost: Math.round(total_cost * 100) / 100, currency: poRow.currency || 'USD',
       link: newId ? 'https://go.cin7.com/Cloud/TransactionEntry/TransactionEntry.aspx?idCustomerAppsLink=951111&OrderId=' + encodeURIComponent(newId) : null });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

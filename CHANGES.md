@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.555 - Cin7 push result: show TOTAL COST + TOTAL UNITS
+
+The Cin7 line push (Update/Create Cin7 PO) result now shows a line under the "✓ Cin7 PO updated — N
+line(s)" message: "TOTAL COST: <currency> x,xxx.xx · TOTAL UNITS: n,nnn". Totals are computed from the
+PO's own order-plan lines (qty × pushed price / Σ qty), excluding the $0 crossdock extras carried on a
+master shipment. Cost is in the supplier's currency. Endpoint now returns total_units / total_cost / currency.
+
+Files: server.mjs, supply/inject.html. No migrations, no new env vars.
+
 ## v25.554 - Shipment drawer ▸ POs aboard: show Client name + sales ref for direct-to-client
 
 Added a "Client" column to the POs-aboard table in the shipment drawer. For any PO carrying a client /
