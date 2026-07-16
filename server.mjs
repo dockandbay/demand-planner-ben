@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.550';
+const APP_VERSION = 'v25.551';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1736,7 +1736,7 @@ app.get('/api/supply/:section', async (req, res) => {
             -- when the user pushes an update — see erp_cost=cost_price on the push). COMPLETE POs are ignored.
             (CASE WHEN coalesce(status,'') ILIKE '%complete%' THEN 0 ELSE
               (SELECT count(*) FROM planner.purchase_order_lines l LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
-                 WHERE l.po=calc4.po AND l.qty IS DISTINCT FROM el.qty) END)::int erp_pending,
+                 WHERE l.po=calc4.po AND coalesce(l.qty,0) IS DISTINCT FROM coalesce(el.qty,0)) END)::int erp_pending,   -- 0 plan == absent from ERP (both nothing) → not a deviation
             (SELECT count(*) FROM planner.purchase_order_lines l JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku WHERE l.po=calc4.po)::int erp_in,
             (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=calc4.po)::int erp_total,
             -- ERP date misalignment: our calculated "completed at warehouse" date (eff_checkin) vs the
@@ -1869,7 +1869,7 @@ app.get('/api/supply/:section', async (req, res) => {
           FROM planner.flexport_shipments ORDER BY arrival_date DESC NULLS LAST`));
       case 'order-plan':  // enriched lines for the side-by-side grid (filter/group/pivot client-side)
         return res.json(await q(`SELECT l.po, l.sku, l.qty, el.qty erp_qty,
-          (l.qty IS DISTINCT FROM el.qty) pending, to_char(pol.proposed_at,'YYYY-MM-DD') proposed_at,
+          (coalesce(l.qty,0) IS DISTINCT FROM coalesce(el.qty,0)) pending, to_char(pol.proposed_at,'YYYY-MM-DD') proposed_at,   -- 0 plan == absent from ERP → not pending
           l.cost_price, l.carton_qty, l.partial_carton_approved, l.full_carton_check,
           pol.supplier_risk_approved, pol.discontinue_approved,
           coalesce(p.prod_no,'') prod_no, coalesce(p.status,'') status, coalesce(p.starred,false) starred,
@@ -4676,7 +4676,7 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
     const [lines, deposit, payments, flexport, supInv, supDocs, notes, subs, lineCosts, supComp, xdShip, addCosts, poMeta] = await Promise.all([
       pool.query(`SELECT l.sku,l.qty,l.carton_qty,l.full_carton_check,l.cost_price,
                     el.qty erp_qty, el.cost erp_cost,
-                    (l.qty IS DISTINCT FROM el.qty) qty_pending,
+                    (coalesce(l.qty,0) IS DISTINCT FROM coalesce(el.qty,0)) qty_pending,   -- 0 plan == absent from ERP → not a deviation
                     (l.cost_price IS DISTINCT FROM el.cost) cost_pending
                   FROM planner.v_purchase_order_lines l
                   LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku

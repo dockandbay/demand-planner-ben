@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.551 - ERP deviations: a 0-qty plan line is NOT a deviation vs "not in ERP"
+
+A line with plan qty 0 and no ERP counterpart was flagged as an ERP deviation ("0 → not in ERP"),
+because `l.qty IS DISTINCT FROM el.qty` treats `0 IS DISTINCT FROM NULL` as true. But 0 and
+absent-from-ERP are the same (nothing to push). Changed the quantity comparison to
+`coalesce(l.qty,0) IS DISTINCT FROM coalesce(el.qty,0)` in the three display/count spots: the PO grid
+`erp_pending` count, the order-plan grid `pending` flag, and the po-detail `qty_pending` (drives the
+ORDER PLAN ▸ ERP-deviations box). Genuine new lines (qty>0, not in ERP) still flag as "N → not in ERP".
+The PO-level deviation *action* already excluded this case (its HAVING requires ≥1 line present in ERP).
+Example: PO-1725132 / GIFT-BOX-HOME-CACTMNTN no longer shows as a deviation.
+
+Files: server.mjs. No migrations, no new env vars.
+
 ## v25.550 - Assign-deposit picker: add "Unassign (clear)" option
 
 The deposit picker only had "— No deposit", which writes the `NO DEPOSIT` sentinel (means "this PO
