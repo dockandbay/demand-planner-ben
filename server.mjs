@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.547';
+const APP_VERSION = 'v25.548';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2931,14 +2931,22 @@ function escLink(kind, ref, audience) {
   if (kind === 'sample') return PLANNER_URL + '/#/supply/samples';
   return PLANNER_URL + '/#/supply/purchase-orders/plan/' + encodeURIComponent(ref);
 }
-async function escalateSend(r) { const to = r.emails;
-  if (!process.env.RESEND_API_KEY) { console.log('[escalate] no RESEND_API_KEY — would email ' + to.join(', ')); return { sandbox: true }; }
-  const resp = await fetch('https://api.resend.com/emails', { method: 'POST',
-    headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', to, subject: r.subject, html: r.html }) });
-  if (!resp.ok) { const t = await resp.text().catch(() => ''); throw new Error('email send failed: ' + t.slice(0, 200)); }
-  return { sent: to.length };
+// Shared Resend sender — the SAME best-effort method the supplier magic-link uses (sendMagicEmail):
+// swallow any failure and log it, NEVER throw. Email is best-effort; a Resend hiccup / unverified domain
+// must not fail the user's action (that's what made Escalate show "Load failed"). Returns a result object.
+async function sendResendEmail({ to, subject, html }) {
+  const list = Array.isArray(to) ? to : [to];
+  if (!process.env.RESEND_API_KEY) { console.log('[email] no RESEND_API_KEY — would email ' + list.join(', ') + ' :: ' + subject); return { sandbox: true, sent: 0 }; }
+  try {
+    const resp = await fetch('https://api.resend.com/emails', { method: 'POST',
+      headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', to: list, subject, html }) });
+    if (!resp.ok) { const t = await resp.text().catch(() => ''); console.error('[email] Resend error ' + resp.status + ': ' + t.slice(0, 200)); return { sent: 0, error: 'resend ' + resp.status }; }
+    return { sent: list.length };
+  } catch (e) { console.error('[email] Resend failed:', e.message); return { sent: 0, error: e.message }; }
 }
+// Escalation email now goes through the shared best-effort sender (like the magic link) — never throws.
+async function escalateSend(r) { return sendResendEmail({ to: r.emails, subject: r.subject, html: r.html }); }
 async function escalateCore({ initiator, kind, ref, message, user, supplierId, setEscalated, postNote }) {
   kind = ['po', 'shipment', 'sample'].includes(kind) ? kind : 'po';
   ref = String(ref || '').trim(); message = String(message || '').trim();
@@ -2991,7 +2999,7 @@ async function escalateCore({ initiator, kind, ref, message, user, supplierId, s
     + '<blockquote style="border-left:3px solid #cbd5e1;margin:0;padding:4px 12px;color:#334155;white-space:pre-wrap">' + _eh(message) + '</blockquote>'
     + '<p>Link: <a href="' + link + '">' + link + '</a></p>';
   const sent = await escalateSend({ emails, subject, html });
-  return { ok: true, sent: sent.sent || 0, emails, sandbox: !!sent.sandbox, link };
+  return { ok: true, sent: sent.sent || 0, emails, sandbox: !!sent.sandbox, emailError: sent.error || null, link };
 }
 app.post('/api/supply/escalate', async (req, res) => {
   const b = req.body || {};
@@ -6192,17 +6200,9 @@ const portalSuppliers = (email) => pool.query(
   `SELECT supplier_id, supplier_name FROM planner.supplier_portal_users WHERE lower(email)=lower($1) AND active=true AND coalesce(supplier_name,'')<>''`,
   [email]).then(r => r.rows);
 async function sendMagicEmail(email, url) {
-  if (process.env.RESEND_API_KEY) {
-    try {
-      await fetch('https://api.resend.com/emails', {
-        method: 'POST', headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', to: [email],
-          subject: 'Your Dock & Bay supplier portal link',
-          html: `<p>Hi,</p><p>Here's your link to the Dock &amp; Bay supplier portal (valid 7 days):</p><p><a href="${url}">${url}</a></p><p>If you didn't request this, you can ignore this email.</p>` }) });
-      return;
-    } catch (e) { console.error('[portal email] Resend failed:', e.message); }
-  }
-  console.log('[portal email] (no RESEND_API_KEY) magic link for ' + email + ':\n  ' + url);   // dev fallback
+  // Uses the shared best-effort Resend sender (same method escalation now uses).
+  await sendResendEmail({ to: email, subject: 'Your Dock & Bay supplier portal link',
+    html: `<p>Hi,</p><p>Here's your link to the Dock &amp; Bay supplier portal (valid 7 days):</p><p><a href="${url}">${url}</a></p><p>If you didn't request this, you can ignore this email.</p>` });
 }
 // ── DEMAND ▸ KPIs ▸ In Stock rate ────────────────────────────────────────────────────────────────────────
 // For each market × channel: of the ACTIVE products available in that channel, how many have > threshold units

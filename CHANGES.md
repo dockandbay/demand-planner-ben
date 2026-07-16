@@ -3,6 +3,22 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.548 - Escalate email = magic-link method (best-effort); no mobile zoom
+
+**Escalate "Load failed" fix.** Escalation emails now go through a shared `sendResendEmail()` helper —
+the SAME best-effort method the supplier magic-link uses: it swallows any Resend failure (logs it) and
+NEVER throws. Previously `escalateSend` threw on any non-2xx from Resend, which bubbled up and failed the
+whole escalate action (surfacing as "Escalate failed: Load failed"). Now the timeline note + escalated
+status are posted regardless, the user gets ✓, and any send problem is logged server-side + returned as
+`emailError` (non-fatal). `sendMagicEmail` refactored onto the same helper so both are one method.
+NOTE: deliverability still depends on Resend config on live (RESEND_API_KEY + verified PORTAL_FROM domain) —
+that's Diviyaj's env, unchanged here.
+
+**No mobile zoom.** Added `maximum-scale=1, user-scalable=no` to the viewport meta on the main app and
+the supplier portal, so tapping an input/select no longer triggers iOS focus-zoom and pinch-zoom is off.
+
+Files: server.mjs, artifact_v16.7.html, supply/portal.html. No migrations, no new env vars.
+
 ## v25.547 - Mobile PO/shipment sheet: show the PO (or shipment) ref in the back bar
 
 The mobile full-screen detail sheet header only said "← Back to list". Added the PO number (or
