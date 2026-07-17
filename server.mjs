@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.572';
+const APP_VERSION = 'v25.573';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2940,7 +2940,9 @@ const PORTAL_URL = (process.env.PORTAL_URL || 'https://suppliers.dockandbay.com/
 function _eh(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 function _emails(s) { return String(s || '').split(/[,;\s]+/).map(x => x.trim()).filter(x => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x)); }
 function escLink(kind, ref, audience) {
-  if (audience === 'portal') return PORTAL_URL;   // portal has no per-record deep link — ref is in the subject
+  // Supplier portal deep link — opens the PO (portal PO card defaults to its TIMELINE tab). Shipment/sample
+  // portal escalations have no per-record portal view, so fall back to the portal root.
+  if (audience === 'portal') return PORTAL_URL + (kind === 'po' ? ('?po=' + encodeURIComponent(ref)) : '');
   if (kind === 'shipment') return PLANNER_URL + '/#/supply/purchase-orders/shipments/' + encodeURIComponent(ref);
   if (kind === 'sample') return PLANNER_URL + '/#/supply/samples';
   return PLANNER_URL + '/#/supply/purchase-orders/plan/' + encodeURIComponent(ref);
@@ -3009,9 +3011,10 @@ async function escalateCore({ initiator, kind, ref, message, user, supplierId, s
   if (!emails.length) return { ok: true, sent: 0, emails: [], note: 'no recipients configured for this route' };
   const link = escLink(kind, ref, audience);
   const subject = 'horizon escalation - ' + ref;
-  const html = '<p><b>' + _eh(user || 'A user') + '</b> has escalated this message:</p>'
+  const kindWord = kind === 'shipment' ? 'shipment' : kind === 'sample' ? 'sample' : 'PO';
+  const html = '<p><b>' + _eh(user || 'A user') + '</b> has escalated this message on ' + kindWord + ' <b>' + _eh(ref) + '</b>:</p>'
     + '<blockquote style="border-left:3px solid #cbd5e1;margin:0;padding:4px 12px;color:#334155;white-space:pre-wrap">' + _eh(message) + '</blockquote>'
-    + '<p>Link: <a href="' + link + '">' + link + '</a></p>';
+    + '<p><a href="' + link + '">Open ' + _eh(ref) + ' &rarr;</a></p>';
   const sent = await escalateSend({ emails, subject, html });
   return { ok: true, sent: sent.sent || 0, emails, sandbox: !!sent.sandbox, emailError: sent.error || null, link };
 }

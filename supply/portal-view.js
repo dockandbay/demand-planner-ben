@@ -503,6 +503,9 @@
     var PORTAL_PO_Q='';   // Purchase Orders search (overrides the status pills)
     var PORTAL_PO_PROD='', PORTAL_PO_CTRY='', PORTAL_PO_BR='';   // Purchase Orders dropdown filters (Production / Country / Branch)
     var PORTAL_PO_EXC=false;   // "show all exceptions" pill — POs with ≥1 open action, across all statuses
+    // Deep link (?po=PO-…) — e.g. from an escalation email: open that PO on the Purchase Orders tab (its card
+    // defaults to the TIMELINE sub-tab). Filter the grid to it so it's rendered even past the row cap.
+    try{ var _dpPo=new URLSearchParams(location.search||'').get('po'); if(_dpPo){ PORTAL_TAB='pos'; _ppOpenPO=_dpPo; PORTAL_PO_Q=_dpPo; } }catch(e){}
     var PORTAL_BC_BATCH='';   // Barcodes tab: selected batch id
     var PORTAL_BC_Q='';       // Barcodes tab: per-SKU filter text
     var _bcRowsCache={};      // Barcodes tab: batch → fetched label-data rows (avoid refetch on filter/re-render)

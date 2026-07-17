@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.573 - Escalation email: deep link to the PO + clearer wording
+
+- The email link for a PO escalation now deep-links to the supplier portal **PO card** (`/portal?po=<ref>`),
+  which opens on its **TIMELINE** tab. Portal reads `?po=` on load → opens + filters to that PO. (Shipment/
+  sample portal escalations still land on the portal root.)
+- Wording now reads "**ben@ has escalated this message on PO <ref>:**" (was "A user has escalated this
+  message:"), and the link renders as "Open <ref> →" instead of a raw URL.
+
+⚠ Deep link works when the supplier has an active portal session; if they must log in via magic link first,
+the `?po=` may be dropped on the auth redirect (they'll land on the portal root). Non-blocking.
+
+Files: server.mjs, supply/portal-view.js. No migrations, no new env vars.
+
 ## v25.572 - Shipment drawer: clickable Flexport reference
 
 The shipment drawer's Carrier ref is an editable field (no link). Added a dedicated **Flexport** field in the
