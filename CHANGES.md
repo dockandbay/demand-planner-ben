@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.563 - Assign-shipment picker: token-tolerant search
+
+The assign-PO-to-shipment search now matches on each word of the query (AND) rather than the whole string,
+so a stray trailing token like "PO-56AULX1 1" still finds PO-56AULX1 (both the shipment list and the
+"becomes master" PO list). Added a shared `tokMatch()` helper.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.562 - Supplier portal: exclude prod ≤54 from actions + "Show all exceptions" pill
 
 Supplier portal Purchase Orders:

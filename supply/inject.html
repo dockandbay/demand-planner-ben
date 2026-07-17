@@ -546,6 +546,9 @@
   function fuzzyFilt(rows,q){ var toks=String(q==null?'':q).split(/[\s,;|]+/).map(function(t){return t.trim();}).filter(function(t){return t.length>=3;});
     if(!toks.length)return []; toks.sort(function(a,b){ var da=/\d/.test(a)?1:0, db=/\d/.test(b)?1:0; if(da!==db)return db-da; return b.length-a.length; });
     for(var i=0;i<toks.length;i++){ var m=filt(rows,toks[i]); if(m.length)return m; } return []; }
+  // token match: every whitespace/comma-separated word of q must appear in `hay` (so a stray trailing token
+  // like "PO-56AULX1 1" still matches PO-56AULX1). Empty q → true.
+  function tokMatch(hay,q){ hay=String(hay==null?'':hay).toLowerCase(); return String(q==null?'':q).toLowerCase().split(/[\s,;|]+/).filter(Boolean).every(function(t){return hay.indexOf(t)>=0;}); }
   // debounce: coalesce rapid keystrokes into one call after `ms` of quiet
   function debounce(fn,ms){ var t; return function(){ var a=arguments, c=this; clearTimeout(t); t=setTimeout(function(){ fn.apply(c,a); }, ms||220); }; }
   // effective search query: normalise, then ignore <2 chars and the universal "PO"/"PO-" prefix (matches every PO)
@@ -1226,11 +1229,11 @@
         // default (no typing) = shipments to the SAME COUNTRY as this PO; typing searches the full list.
         if(!q&&poCtry)html+='<div class="mut tiny" style="padding:3px 10px">Shipments to '+esc(poCtry)+' — type to search all</div>';
         var ms=ships.filter(function(s){ if(s.shipment_ref===po)return false;
-          return q ? (s.shipment_ref+' '+(s.master_po||'')+' '+(s.market||'')+' '+(s.flex_id||'')+' '+(s.carrier_ref||'')).toLowerCase().indexOf(q)>=0   // also match Flexport id / carrier ref
+          return q ? tokMatch(s.shipment_ref+' '+(s.master_po||'')+' '+(s.market||'')+' '+(s.flex_id||'')+' '+(s.carrier_ref||''), q)   // match each token (also Flexport id / carrier ref); tolerates stray trailing tokens
                    : (!poCtry || (s.market||'').toUpperCase()===poCtry); });
         ms.slice(0,q?25:12).forEach(function(s){ var flex=s.flex_id||s.carrier_ref||''; html+='<div class="shpop-opt" data-ship="'+esc(s.shipment_ref)+'">→ '+esc(s.shipment_ref)+' <span class="mut tiny">'+(s.market?esc(s.market)+' · ':'')+'master '+esc(s.master_po||'?')+(flex?' · FLEX '+esc(flex):'')+(s.departure?' · ship '+fd(s.departure):'')+'</span></div>'; });
         if(!q&&!ms.length)html+='<div class="mut tiny" style="padding:5px 10px">No '+esc(poCtry||'')+' shipments — type to search all.</div>';
-        if(q){ Object.keys(poBy).filter(function(p){return p!==po&&!refs[p]&&p.toLowerCase().indexOf(q)>=0;}).slice(0,12).forEach(function(p){ html+='<div class="shpop-opt" data-pomaster="'+esc(p)+'">→ '+esc(p)+' <span class="mut tiny">becomes master if chosen</span></div>'; }); }
+        if(q){ Object.keys(poBy).filter(function(p){return p!==po&&!refs[p]&&tokMatch(p,q);}).slice(0,12).forEach(function(p){ html+='<div class="shpop-opt" data-pomaster="'+esc(p)+'">→ '+esc(p)+' <span class="mut tiny">becomes master if chosen</span></div>'; }); }
         else if(ms.length>12)html+='<div class="mut tiny" style="padding:5px 10px">'+(ms.length-12)+' more '+esc(poCtry||'')+' — type to search all…</div>';
         var list=document.getElementById('shpop-list'); list.innerHTML=html;
         list.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){
