@@ -3429,12 +3429,14 @@
       var c_ref = locked?'<td class="l">'+txt(d.reference)+'</td>':'<td class="l">'+editCell(ep,'reference',d.reference,'txt')+'</td>';
       var c_sup = locked?'<td class="l">'+txt(d.supplier_name)+'</td>':'<td class="l">'+supSel(ep,d.supplier_name)+'</td>';
       var DEP_MKTS=['UK','AU','EU','US','CA'];   // deposit region — drives which POs can use it (AU is isolated)
-      var c_ctry= locked?'<td class="l">'+txt(d.country)+'</td>':'<td class="l"><select class="fci" data-ep="'+esc(ep)+'" data-field="country"><option value=""></option>'+DEP_MKTS.map(function(mk){return '<option'+(String(d.country||'').toUpperCase()===mk?' selected':'')+'>'+mk+'</option>';}).join('')+'</select></td>';
+      var ctryBlank=!String(d.country||'').trim(), fxBlank=(d.xero_fx==null||String(d.xero_fx).trim()===''); // flag missing region / FX rate
+      var _redTd=' style="background:#fee2e2"';   // highlight a blank required cell
+      var c_ctry= locked?'<td class="l"'+(ctryBlank?_redTd:'')+'>'+txt(d.country)+'</td>':'<td class="l"'+(ctryBlank?_redTd:'')+'><select class="fci" data-ep="'+esc(ep)+'" data-field="country"><option value=""></option>'+DEP_MKTS.map(function(mk){return '<option'+(String(d.country||'').toUpperCase()===mk?' selected':'')+'>'+mk+'</option>';}).join('')+'</select></td>';
       var c_prod= locked?'<td class="l">'+txt(d.prod_no)+'</td>'
         :'<td class="l"><button class="cell-pick dep-prod-pick" data-id="'+d.id+'" title="pick an active production">'+(d.prod_no?esc(d.prod_no):'<span class="mut">— set</span>')+' ▾</button></td>';
       var c_xero= locked?'<td class="l">'+txt(d.xero_account_code)+'</td>':'<td class="l">'+editCell(ep,'xero_account_code',d.xero_account_code,'txt')+'</td>';
       var c_amt = locked?'<td>'+txt(d.amount)+'</td>':'<td>'+editCell(ep,'amount',d.amount)+'</td>';
-      var c_fx  = locked?'<td>'+txt(d.xero_fx)+'</td>':'<td>'+editCell(ep,'xero_fx',d.xero_fx)+'</td>';
+      var c_fx  = locked?'<td'+(fxBlank?_redTd:'')+'>'+txt(d.xero_fx)+'</td>':'<td'+(fxBlank?_redTd:'')+'>'+editCell(ep,'xero_fx',d.xero_fx)+'</td>';
       var c_due = locked?'<td class="l" style="width:120px">'+txt(d.date_due,true)+'</td>':'<td class="l" style="width:120px">'+editCell(ep,'date_due',d.date_due,'date','style="width:118px"')+'</td>';
       // likely pay: only meaningful while unpaid — once paid, show a dash in the locked view
       var c_likely = locked?'<td class="l" style="width:120px">'+(d.date_paid?'<span class="mut">—</span>':txt(d.date_likely_pay,true))+'</td>':'<td class="l" style="width:120px">'+editCell(ep,'date_likely_pay',d.date_likely_pay,'date','style="width:118px"')+'</td>';

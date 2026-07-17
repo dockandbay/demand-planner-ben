@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.568 - Deposits: highlight blank FX / Country cells red
+
+On the deposit register, the FX (Xero FX) and Country cells now show a red background when blank — a quick
+visual prompt to fill them. Applies in both the locked and edit views.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.567 - Shipment completion override now flows to the PO (self-master + no +7)
 
 Fix: a PO wasn't inheriting a completion override set on its (self-master) shipment — it kept showing the
