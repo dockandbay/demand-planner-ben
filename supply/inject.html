@@ -4088,7 +4088,7 @@
     if(!el){ el=document.createElement('div'); el.id='perm-banner'; el.style.cssText='background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:7px 12px;border-radius:6px;margin:0 0 10px;font-size:12px;font-weight:700'; var content=document.getElementById('supply-content'); root.insertBefore(el, content||root.firstChild); }
     el.style.display='block'; el.textContent='👁 Read-only access — you don’t have '+(inConfig?'CONFIG':'SUPPLY')+' edit rights here. Edits are rejected; ask an admin (CONFIG ▸ Permissions).'; }
   function renderConfig(d){ var c=document.getElementById('supply-content'); var sizes=d.sizes||[];
-    var SUBS=[['general','General settings'],['tax','Import tax'],['freight','Freight rates'],['duty','Import duty'],['branches','Branches'],['consignees','Consignees'],['suppliers','Suppliers'],['keyaccounts','Key accounts'],['batches','Batches'],['productions','Productions'],['products','Products'],['mfgbom','Manufacturing BOM'],['portalusers','Portal users'],['portal','Portal'],['forecast-export','Forecast export']];
+    var SUBS=[['general','General settings'],['portalusers','Portal users'],['portal','Portal'],['tax','Import tax'],['freight','Freight rates'],['duty','Import duty'],['branches','Branches'],['consignees','Consignees'],['suppliers','Suppliers'],['keyaccounts','Key accounts'],['batches','Batches'],['productions','Productions'],['products','Products'],['mfgbom','Manufacturing BOM'],['forecast-export','Forecast export']];
     if(ME&&ME.is_admin)SUBS=SUBS.concat([['permissions','Permissions']]);   // admin-only tab
     if(CONFIG_SUB==='permissions'&&!(ME&&ME.is_admin))CONFIG_SUB='tax';   // guard: non-admins can't land on Permissions
     function reload(){ delete cache['config']; selectSection('config'); }   // refresh after a rate add (keeps sub-tab)
@@ -6051,7 +6051,8 @@
   function ensureConfigButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('config-btn'))return;
     var btn=document.createElement('button'); btn.id='config-btn'; btn.className='view-toggle config-toggle'; btn.textContent='CONFIG';
     var spacer=row.querySelector('div[style*="flex:1"]'); if(spacer)row.insertBefore(btn,spacer); else row.appendChild(btn);
-    btn.onclick=enterConfig; }
+    btn.onclick=function(){ CONFIG_SUB='general'; enterConfig(); };   // clicking the CONFIG menu always lands on General settings (deep-links via hash still honour their sub-tab)
+    }
 
   // Decoupled builders — SUPPLY works even if the nav can't be augmented.
   function ensureRoot(){ if(document.getElementById('supply-root'))return;

@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.576 - CONFIG: Portal + Portal Users next to General; default to General on menu click
+
+Reordered the CONFIG sub-tabs so **Portal users** and **Portal** sit right after **General settings**.
+Clicking the CONFIG top-menu now always lands on **General settings** (was: last-viewed sub-tab); hash
+deep-links (e.g. #/config/portal) still open their specific sub-tab.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.575 - Portal Users: fix mobile squish (table now scrolls horizontally)
 
 The v25.574 table was still forced to screen width because the global `#supply-root table{width:100%}`
