@@ -4204,16 +4204,22 @@
     // access are editable; supplier uses the standard search-dropdown picker.
     var PU_ROWS={}, PU_EDIT={};
     function puActive(u){ return !(u.active===false || u.active==='false'); }
+    // NB: selectors are ID-scoped (#supply-root table.pu-tbl) to beat the global `#supply-root table{width:100%}`
+    // rule — otherwise the table is forced to screen width and squishes instead of scrolling.
     var PU_CSS='<style>'
-      +'.pu-tw{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}'
-      +'.pu-tbl{border-collapse:separate;border-spacing:0;width:max-content;font-size:12px}'
-      +'.pu-tbl th,.pu-tbl td{padding:6px 9px;border-bottom:1px solid #f1f1f1;text-align:left;vertical-align:top;white-space:nowrap}'
-      +'.pu-tbl thead th{background:#f3f3f1;font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;color:#555}'
-      +'.pu-tbl .pu-c1{position:sticky;left:0;background:#fff;z-index:2;box-shadow:2px 0 6px rgba(0,0,0,.08);min-width:200px;max-width:240px;white-space:normal}'
-      +'.pu-tbl thead .pu-c1{z-index:3;background:#f3f3f1}'
-      +'.pu-tbl .pu-email{font-weight:700;word-break:break-all;line-height:1.2}'
-      +'.pu-tbl .pu-btns{margin-top:6px;display:flex;gap:5px;flex-wrap:wrap}'
-      +'.pu-tbl .pu-btns .save-btn{font-size:11px;padding:3px 9px}'
+      +'#supply-root .pu-tw{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}'
+      +'#supply-root table.pu-tbl{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%;font-size:12px}'
+      +'#supply-root table.pu-tbl th,#supply-root table.pu-tbl td{padding:6px 10px;border-bottom:1px solid #f1f1f1;text-align:left;vertical-align:top;white-space:nowrap}'
+      +'#supply-root table.pu-tbl thead th{background:#f3f3f1;font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;color:#555}'
+      +'#supply-root table.pu-tbl td:nth-child(2),#supply-root table.pu-tbl th:nth-child(2){min-width:170px}'   /* Supplier */
+      +'#supply-root table.pu-tbl td:nth-child(3),#supply-root table.pu-tbl th:nth-child(3){min-width:150px}'   /* Contact */
+      +'#supply-root table.pu-tbl td:nth-child(4),#supply-root table.pu-tbl th:nth-child(4){min-width:100px}'   /* Access */
+      +'#supply-root table.pu-tbl td:nth-child(7),#supply-root table.pu-tbl th:nth-child(7){min-width:110px}'   /* Login */
+      +'#supply-root table.pu-tbl .pu-c1{position:sticky;left:0;z-index:2;background:#fff;box-shadow:2px 0 6px rgba(0,0,0,.08);min-width:190px;max-width:220px;white-space:normal}'
+      +'#supply-root table.pu-tbl thead .pu-c1{z-index:3;background:#f3f3f1}'
+      +'#supply-root table.pu-tbl .pu-email{font-weight:700;word-break:break-all;line-height:1.2}'
+      +'#supply-root table.pu-tbl .pu-btns{margin-top:6px;display:flex;gap:5px;flex-wrap:wrap}'
+      +'#supply-root table.pu-tbl .pu-btns .save-btn{font-size:11px;padding:3px 9px}'
       +'</style>';
     function puRow(u){ var editing=!!PU_EDIT[u.id];
       var acts = editing

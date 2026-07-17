@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.575 - Portal Users: fix mobile squish (table now scrolls horizontally)
+
+The v25.574 table was still forced to screen width because the global `#supply-root table{width:100%}`
+rule out-specificity'd the `.pu-tbl{width:max-content}` style. Re-scoped the Portal Users CSS to
+`#supply-root table.pu-tbl` (same pattern as the PO/shipment grids) so width:max-content wins, and added
+column min-widths — the table now expands past the screen and scrolls across, with the Email column pinned.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.574 - Portal Users page: mobile-friendly rebuild
 
 Rebuilt CONFIG ▸ Portal Users for mobile:
