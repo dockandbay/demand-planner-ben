@@ -2550,7 +2550,7 @@
         : ((n.id===recentOwnId)?'<button class="save-btn light po-esc" data-po="'+esc(po)+'" data-msg="'+esc(n.body)+'" title="Escalate this message to the supplier by email" style="color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'');
       return '<div style="font-size:11px;margin:3px 0;max-width:640px;padding:5px 8px;background:'+(sup?(n.read?'#f1f5f9':'#fff7ed'):'#eef2ff')+';border:1px solid '+(sup&&!n.read?'#fdba74':'#e5e7eb')+';border-radius:5px;display:flex;gap:10px;align-items:flex-start">'
         +(ctrl?'<div style="flex:0 0 auto;display:flex;flex-direction:column;gap:3px;align-items:flex-start;min-width:78px">'+ctrl+'</div>':'')
-        +'<div style="flex:1"><span class="mut tiny">'+esc(n.created_at)+' · '+(sup?'supplier':'Dock &amp; Bay')+(n.author_email?' ('+esc(shortUser(n.author_email))+')':'')+'</span>'+(sup&&!n.read?' <span class="ex-badge">new</span>':'')+'<br><span style="color:#1a1a1a">'+esc(n.body)+'</span></div>'
+        +'<div style="flex:1"><span class="mut tiny">'+esc(n.created_at)+' · '+(sup?('supplier'+(n.author_email?' ('+esc(shortUser(n.author_email))+')':'')):(n.author_email&&n.author_email!=='Dock & Bay'?esc(shortUser(n.author_email)):'Dock &amp; Bay'))+'</span>'+(sup&&!n.read?' <span class="ex-badge">new</span>':'')+'<br><span style="color:#1a1a1a">'+esc(n.body)+'</span></div>'
         +'</div>'; }).join(''):'<div class="mut tiny">No timeline notes yet.</div>';
     var compose='<div style="margin-top:8px;display:flex;gap:6px;align-items:flex-start"><textarea class="po-note-body fci" data-po="'+esc(po)+'" rows="2" placeholder="Add a note for the supplier…" style="flex:1;min-height:34px;max-width:480px;text-align:left"></textarea><button class="save-btn po-note-post" data-po="'+esc(po)+'" style="flex:0 0 auto">Post to supplier</button></div>'
       +'<div class="mut tiny" style="margin:4px 2px">Posting appears in the supplier&rsquo;s portal timeline. Unread supplier replies show as an action.</div>';
@@ -2735,7 +2735,7 @@
           .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; });
     // timeline — post a note (notifies the supplier) / toggle read-unread on a supplier note
     document.querySelectorAll('#podet-'+i+' .po-note-post').forEach(function(b){ b.onclick=function(){ var ta=document.querySelector('#podet-'+i+' .po-note-body[data-po="'+CSS.escape(b.dataset.po)+'"]'); var v=(ta&&ta.value||'').trim(); if(!v)return; b.disabled=true;
-      fetch('/api/supply/portal-note',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:b.dataset.po,body:v,author_kind:'internal',author_email:'Dock & Bay'})}).then(function(r){return r.json();})
+      fetch('/api/supply/portal-note',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:b.dataset.po,body:v,author_kind:'internal',author_email:(ME&&ME.email)||'Dock & Bay'})}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error); poRefetchPanel(po,i); })
         .catch(function(e){ b.disabled=false; alert('Could not post: '+(e.message||e)); }); }; });
     document.querySelectorAll('#podet-'+i+' .note-read').forEach(function(b){ b.onclick=function(){ var read=b.dataset.read!=='1'; b.disabled=true;
@@ -3664,14 +3664,14 @@
           :((admin&&n.id===recentOwnId)?'<button class="save-btn light sp-esc" data-ref="'+esc(ref)+'" data-msg="'+esc(n.body)+'" title="Escalate this message to the supplier by email" style="flex:0 0 auto;color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'');
         return '<div class="tiny" style="margin:2px 0;max-width:640px;display:flex;gap:10px;align-items:flex-start'+(nu?';background:#fff7ed;border:1px solid #fdba74;border-radius:5px;padding:3px 6px':'')+'">'
           +(ctrl?'<div style="flex:0 0 auto;min-width:70px">'+ctrl+'</div>':'')
-          +'<div style="flex:1">'+'<span class="mut">'+esc(n.created_at)+' · '+(sup?'Supplier':'D&amp;B')+'</span>'+(nu?' <span class="ex-badge">new</span>':'')+' — '+esc(n.body)+'</div>'
+          +'<div style="flex:1">'+'<span class="mut">'+esc(n.created_at)+' · '+(sup?'Supplier':(n.author_email&&n.author_email!=='Dock & Bay'?esc(shortUser(n.author_email)):'D&amp;B'))+'</span>'+(nu?' <span class="ex-badge">new</span>':'')+' — '+esc(n.body)+'</div>'
           +'</div>'; }).join(''):'<div class="mut tiny">No timeline entries yet.</div>';
       var compose='<div style="font-weight:600;font-size:12px;margin-bottom:4px">Add timeline note</div>'
         +'<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:10px"><textarea class="fci sp-note-in" rows="3" placeholder="Add a note to the timeline… (multiple lines OK)" style="flex:1;max-width:560px;min-height:58px;text-align:left;resize:vertical;line-height:1.4"></textarea><button class="save-btn sp-note-post" style="flex:0 0 auto">Post</button></div>';
       box.innerHTML=compose+'<div class="tiny" style="font-weight:600;margin-bottom:3px">Timeline</div>'+list;
       if(admin)shSetUnread(ref,unread);
       box.querySelector('.sp-note-post').onclick=function(){ var inp=box.querySelector('.sp-note-in'); var v=(inp.value||'').trim(); if(!v)return;
-        shipPost(postEp,{shipment_ref:ref,author_kind:authorKind||'internal',body:v},function(){ loadShipTimeline(ref,authorKind,getBase,postEp); }); };
+        shipPost(postEp,{shipment_ref:ref,author_kind:authorKind||'internal',body:v,author_email:(ME&&ME.email)||undefined},function(){ loadShipTimeline(ref,authorKind,getBase,postEp); }); };
       box.querySelectorAll('.sp-note-read').forEach(function(btn){ btn.onclick=function(){ var read=btn.dataset.read!=='1'; btn.disabled=true;
         fetch('/api/supply/shipment-note-read/'+btn.dataset.id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({read:read})})
           .then(function(r){return r.json();}).then(function(){ loadShipTimeline(ref,authorKind,getBase,postEp); }).catch(function(){ btn.disabled=false; }); }; });

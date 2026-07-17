@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.577 - Timeline: internal notes show the author (ben@), not "Dock & Bay"
+
+Admin PO + shipment timelines now attribute internal notes to the author's shortened email (e.g. ben@)
+instead of the generic "Dock & Bay" / "D&B". Two parts: the poster now passes the current user (ME.email)
+so the server records who wrote it even when the SSO layer doesn't resolve authUser on that request; and
+the display shows shortUser(author_email) for internal notes (falls back to Dock & Bay/D&B when no author
+is stored, e.g. older/system notes). Supplier-facing portal still shows "Dock & Bay" (unchanged).
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.576 - CONFIG: Portal + Portal Users next to General; default to General on menu click
 
 Reordered the CONFIG sub-tabs so **Portal users** and **Portal** sit right after **General settings**.
