@@ -171,8 +171,14 @@
       ['SHIPS WITH SUPPLIER',d.ships_with_supplier],['SHIPS WITH PO',d.ships_with_po],
       ['DESTINATION BRANCH',d.dest_branch],['DESTINATION COUNTRY',d.dest_country],
       ['CLIENT NAME',d.client],['CLIENT SALES ORDER REF',d.sales_order_ref]];
-    rows.forEach(function(rw){ el.push(svgText(lx,y,rw[0],{size:14,fill:'#222'}));
-      var val=String(rw[1]==null?'':rw[1]).trim()||'—'; wrapLines(val,22).slice(0,2).forEach(function(ln,li){ el.push(svgText(vx,y+li*19,ln,{size:16,bold:true})); }); y+=58; });
+    var boxTop=null, boxBot=null;
+    rows.forEach(function(rw,idx){
+      var big=(idx<2);                       // SOURCE SUPPLIER + PRODUCTION REFERENCE → +3pt
+      var swRow=(idx===2||idx===3);          // SHIPS WITH SUPPLIER + SHIPS WITH PO → boxed, value not bold
+      if(swRow){ if(boxTop===null)boxTop=y-26; boxBot=y+18; }
+      el.push(svgText(lx,y,rw[0],{size:big?17:14,fill:'#222'}));
+      var val=String(rw[1]==null?'':rw[1]).trim()||'—'; wrapLines(val,22).slice(0,2).forEach(function(ln,li){ el.push(svgText(vx,y+li*19,ln,{size:big?19:16,bold:!swRow})); }); y+=58; });
+    if(boxTop!==null) el.unshift('<rect x="34" y="'+boxTop+'" width="'+(W-68)+'" height="'+(boxBot-boxTop)+'" rx="7" fill="none" stroke="#111" stroke-width="1.5"/>');
     y+=28; el.push(svgText(lx,y,'CARTON / PALLET COUNT',{size:13,fill:'#222'})); el.push(svgText(vx,y,'___________ of ___________',{size:14}));
     return '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">'+fontCss(opts)+'<rect width="'+W+'" height="'+H+'" fill="#fff"/>'+el.join('')+'</svg>'; }
   // SHIPS-WITH label → A4 print mould (4-up, carton size), one PDF

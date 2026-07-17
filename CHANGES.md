@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.559 - Ships With label: bigger source/production text + boxed ships-with rows
+
+Reformatted the SHIPS WITH master label (buildShipsWithSVG, both admin inject.html + portal
+portal-view.js): SOURCE SUPPLIER and PRODUCTION REFERENCE rows +3pt (label 14→17, value 16→19);
+SHIPS WITH SUPPLIER + SHIPS WITH PO now sit inside their own bordered box, with their values in
+regular weight (not bold). Everything else unchanged. Reviewed via demo first.
+
+Files: supply/inject.html, supply/portal-view.js. No migrations, no new env vars.
+
 ## v25.558 - "Awaiting supplier confirmation" not required once SHIPPING/DELIVERED
 
 The "Awaiting supplier confirmation" action (and the PO-level badge + the metrics-summary count) no longer
