@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.569 - Deposit picker: fresh list, fail-open region, always-available unassign
+
+Fixes a valid AU deposit showing greyed ("✗ ? region") and no way to unassign, both traced to a stale
+cached deposit list (country arrived blank) + the region check treating unknown country as non-AU:
+- The picker now pulls a **fresh deposit list** each open (`depFull` reset) so country/supplier/paid are current.
+- Region block only fires on a **definite** AU-vs-non-AU mismatch with BOTH countries known — a blank/unknown
+  country no longer greys a deposit (the server still enforces region/supplier on save).
+- **"✕ Unassign deposit"** is now always shown at the top of the picker (was hidden unless the PO's current
+  deposit was known), and names the current ref.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.568 - Deposits: highlight blank FX / Country cells red
 
 On the deposit register, the FX (Xero FX) and Country cells now show a red background when blank — a quick

@@ -1116,10 +1116,16 @@
     fetch('/api/supply/deposits').then(function(r){return r.json();}).then(function(d){ depFull=(d||[]).filter(function(x){return x.is_deposit&&x.reference;}); cb(depFull); }).catch(function(){cb([]);}); }
   function isAU(c){ return String(c||'').trim().toUpperCase()==='AU'; }   // AU deposits/POs are region-isolated from everything else
   function openDepPick(po,anchor,done){ closeShPop();
-    var poAU=isAU((poBy[po]||{}).country);   // this PO's region (AU vs not) — deposits must match
+    var poCtry=String((poBy[po]||{}).country||'').trim().toUpperCase();   // this PO's region
     var poSup=String((poBy[po]||{}).supplier_name||'').trim().toLowerCase();   // this PO's supplier — deposits must match
-    // a deposit is assignable only if it matches the PO on BOTH region and supplier; returns '' (ok) or the reason
-    function depIssue(d){ if(isAU(d.country)!==poAU) return 'region'; if(poSup && String(d.supplier_name||'').trim().toLowerCase()!==poSup) return 'supplier'; return ''; }
+    // A deposit is blocked only on a DEFINITE mismatch: region (AU is isolated) needs BOTH countries known and
+    // differing in AU-ness — a blank/unknown country no longer greys a valid deposit (that was caused by a stale
+    // cached deposit list showing no country). Supplier only blocks when both are known and differ. The server
+    // re-checks on save, so failing open here is safe.
+    function depIssue(d){ var dCtry=String(d.country||'').trim().toUpperCase();
+      if(dCtry && poCtry && (dCtry==='AU')!==(poCtry==='AU')) return 'region';
+      if(poSup && String(d.supplier_name||'').trim().toLowerCase()!==poSup) return 'supplier'; return ''; }
+    depFull=null;   // always pull a FRESH deposit list (country/paid/supplier may have changed since first load)
     var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop';
     pop.innerHTML='<div class="shpop-h">Deposit for <b>'+esc(po)+'</b></div><input class="shpop-q" placeholder="search reference / supplier…"><div id="shpop-list"><div class="count" style="padding:8px">Loading…</div></div>';
     placePop(pop, anchor.getBoundingClientRect());
@@ -1128,7 +1134,7 @@
     fetchDepositsFull(function(deps){
       var _cur=String((poBy[po]||{}).deposit_ref||'');   // current assignment (a real ref, the NO DEPOSIT sentinel, or blank)
       function render(q){ q=(q||'').trim().toLowerCase(); var html='';
-        if(_cur) html+='<div class="shpop-opt unassign" data-clear="1">✕ Unassign (clear)</div>';   // revert to blank → back to "assign deposit…"
+        html+='<div class="shpop-opt unassign" data-clear="1">✕ Unassign deposit'+(_cur&&_cur.toUpperCase()!=='NO DEPOSIT'?' ('+esc(_cur)+')':'')+'</div>';   // always available — clears back to "assign deposit…"
         html+='<div class="shpop-opt unassign" data-none="1">— No deposit needed</div>';
         var ms=deps.filter(function(d){return !q||((d.reference||'')+' '+(d.supplier_name||'')).toLowerCase().indexOf(q)>=0;});
         ms.sort(function(a,b){ return (depIssue(a)?1:0)-(depIssue(b)?1:0); });   // assignable (matching) deposits first
