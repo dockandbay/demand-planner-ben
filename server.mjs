@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.569';
+const APP_VERSION = 'v25.570';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1739,7 +1739,7 @@ app.get('/api/supply/:section', async (req, res) => {
             -- fed by n8n). erp_in/erp_total drive the 3-state badge (✓ match / ⚠ drift / ✗ not in ERP).
             -- ERP deviation = QUANTITY only. Price differences are NEVER an exception (cost still rides along
             -- when the user pushes an update — see erp_cost=cost_price on the push). COMPLETE POs are ignored.
-            (CASE WHEN coalesce(status,'') ILIKE '%complete%' THEN 0 ELSE
+            (CASE WHEN coalesce(status,'') ILIKE '%complete%' OR coalesce(branch,'') ILIKE '%manufactur%' THEN 0 ELSE  -- Manufacturing = FOB → no ERP deviation
               (SELECT count(*) FROM planner.purchase_order_lines l LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
                  WHERE l.po=calc4.po AND coalesce(l.qty,0) IS DISTINCT FROM coalesce(el.qty,0)) END)::int erp_pending,   -- 0 plan == absent from ERP (both nothing) → not a deviation
             (SELECT count(*) FROM planner.purchase_order_lines l JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku WHERE l.po=calc4.po)::int erp_in,
@@ -2383,6 +2383,7 @@ app.get('/api/supply/:section', async (req, res) => {
             count(*)||' line(s) edited, not yet uploaded to the ERP', 'upload','po','', l.po
             FROM planner.purchase_order_lines l LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
             JOIN planner.purchase_orders p ON p.po=l.po AND coalesce(p.status,'') NOT ILIKE '%complete%'  -- ignore COMPLETE POs
+              AND coalesce(p.branch,'') NOT ILIKE '%manufactur%'  -- Manufacturing = FOB, not pushed to Cin7 → no ERP deviation exception
             WHERE l.qty IS DISTINCT FROM el.qty  -- focus: SKU + QUANTITY (cost drift handled in the PO order-plan panel)
             GROUP BY l.po HAVING count(*) FILTER (WHERE el.qty IS NOT NULL)>0  -- has ≥1 line in the ERP mirror (else "not in ERP" below)
           UNION ALL
@@ -2392,6 +2393,7 @@ app.get('/api/supply/:section', async (req, res) => {
             JOIN planner.purchase_orders p ON p.po=l.po
             LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
             WHERE coalesce(p.status,'') NOT ILIKE '%complete%'
+              AND coalesce(p.branch,'') NOT ILIKE '%manufactur%'  -- Manufacturing = FOB, not pushed to Cin7 → not an exception
             GROUP BY l.po HAVING count(*) FILTER (WHERE el.qty IS NOT NULL)=0
           -- (removed) "Production check-in" time-based nag — supplier production status is now a field on
           -- PO ▸ PLAN ▸ DATES + the supplier portal, with a logic-based exception flagged there (not here).

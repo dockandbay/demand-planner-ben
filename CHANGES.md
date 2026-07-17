@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.570 - Manufacturing (FOB) POs raise no ERP deviation exceptions
+
+Manufacturing-branch POs are FOB — collected at the factory, not pushed to Cin7 — so they no longer raise
+ERP-deviation exceptions. Excluded the Manufacturing branch from: the grid `erp_pending` ⚠ count, the
+"Order-plan change pending ERP push" and "PO not in ERP" actions, and the ORDER PLAN ▸ ERP-deviations box.
+The Cin7 push button stays available in the ERP tab (you *can* still upload if you want to).
+
+Files: server.mjs, supply/inject.html. No migrations, no new env vars.
+
 ## v25.569 - Deposit picker: fresh list, fail-open region, always-available unassign
 
 Fixes a valid AU deposit showing greyed ("✗ ? region") and no way to unassign, both traced to a stale

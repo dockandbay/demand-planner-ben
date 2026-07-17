@@ -2491,6 +2491,7 @@
     // SKU column ~45ch, nowrap, so long SKUs show in full. Plain scroll wrapper (NOT .tw — that forces
     // min-width:100% inside the expanded row and re-fattens the table).
     var erpDevBlock=(function(){
+      if(/manufactur/i.test((poBy[po]||{}).branch||''))return '';   // Manufacturing = FOB, not pushed to Cin7 → no ERP deviation exception (upload still available in the ERP tab)
       var dev=erpDevLines(lines,erpMeta);
       if(!dev.length)return '';
       var red='color:#b91c1c;font-weight:600';
