@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.566 - ASN pallet labels: drop redundant "PO" prefix
+
+The PO line on the ASN label showed "PO PO-55AUWK3" (refs already start with "PO-"). Now shows just the
+ref, e.g. "PO-55AUWK3".
+
+Files: asnpdf.mjs. No migrations, no new env vars.
+
 ## v25.565 - Shipment: completion-date override now available for Flexport shipments
 
 The shipment detail "Completion" date was hidden behind the Flexport lock along with departure/landing/

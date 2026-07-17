@@ -1,6 +1,6 @@
 // asnpdf.mjs — minimal, dependency-free PDF generator for ASN pallet labels.
 // One A4 LANDSCAPE page per ASN (1 ASN per pallet): large centred text —
-//   line 1: DOCK & BAY PTY LTD   line 2: PO <po>   line 3: ASN# <asn>   line 4: PALLET <n>
+//   line 1: DOCK & BAY PTY LTD   line 2: <po>   line 3: ASN# <asn>   line 4: PALLET <n>
 // Uses the built-in Helvetica-Bold font (no embedding). Returns a Buffer.
 
 function esc(s) { return String(s).replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)'); }
@@ -14,10 +14,10 @@ export function buildAsnLabelsPdf(company, asns, po) {
   const pageContent = list.map((asn, i) => {
     const lines = [
       { t: company || 'DOCK & BAY PTY LTD', s: 40, y: H - 120 },
-      { t: 'PO ' + (po || ''), s: 34, y: H - 185 },
+      { t: String(po || ''), s: 34, y: H - 185, po: true },
       { t: 'ASN# ' + (asn || ''), s: 66, y: H - 330 },
       { t: 'PALLET ' + (i + 1), s: 54, y: H - 470 },
-    ].filter((ln) => ln.t.trim() !== 'PO' || po);   // drop the PO line if no PO supplied
+    ].filter((ln) => !ln.po || po);   // drop the PO line if no PO supplied
     return lines.map((ln) => 'BT /F1 ' + ln.s + ' Tf ' + centreX(ln.t, ln.s, W).toFixed(1) + ' ' + ln.y + ' Td (' + esc(ln.t) + ') Tj ET').join('\n') + '\n';
   });
 
