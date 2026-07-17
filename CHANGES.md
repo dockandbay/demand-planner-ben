@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.572 - Shipment drawer: clickable Flexport reference
+
+The shipment drawer's Carrier ref is an editable field (no link). Added a dedicated **Flexport** field in the
+drawer header showing the flex id / carrier ref as a clickable link to app.flexport.com, whenever a Flexport
+reference is present.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.571 - Add UPS to shipment carrier options
 
 Added "UPS" to the shipment carrier dropdown (carrierSel) and the carrier datalist.

@@ -3944,6 +3944,7 @@
       +'<div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px 0;margin-bottom:10px">'
       +fld('Carrier', carrierSel(ep,s.carrier,s.mode_eff==='fob'))
       +fld('Carrier ref', carrierRefInput(ep,s.carrier_ref,s.mode_eff==='fob'))
+      +(function(){ var fid=s.flex_id||s.carrier_ref||'', u=flexUrl(fid); return u?fld('Flexport', '<a href="'+u+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;white-space:nowrap;font-weight:700;padding:4px 0;display:inline-block" title="open '+esc(fid)+' in Flexport">'+esc(fid)+' ↗</a>'):''; })()
       +fld('Status'+(s.status_auto?' (auto)':''), shipStatusSel(ep,s.status))
       +dateFld('Departure','departure_date',s.ov_departure,s.departure,s.departure_src)
       +dateFld('Landing','landing_date',s.ov_landing,s.landing,s.landing_src)
