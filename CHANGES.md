@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.560 - Shipments grid: show client name under branch for Direct to Client
+
+In PURCHASE ORDERS ▸ Shipments, when a shipment's branch is "Direct to Client" the master PO's client
+name now shows on a second line under the branch. shipments query exposes `master_client` (from the
+master PO's client field via the existing master-PO lateral join). Non-DTC / no-client rows unchanged.
+
+Files: server.mjs, supply/inject.html. No migrations, no new env vars.
+
 ## v25.559 - Ships With label: bigger source/production text + boxed ships-with rows
 
 Reformatted the SHIPS WITH master label (buildShipsWithSVG, both admin inject.html + portal

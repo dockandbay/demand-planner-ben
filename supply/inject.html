@@ -3874,7 +3874,7 @@
         +'<td class="l">'+shipStatusSel(ep,s.status)+'</td>'
         +'<td class="l">'+modeSel(ep,s.mode_eff)+'</td>'
         +'<td class="l">'+(s.market?esc(s.market):'<span class="mut">—</span>')+'</td>'
-        +'<td class="l">'+(s.branch?esc(s.branch):'<span class="mut">—</span>')+'</td>'
+        +'<td class="l">'+(s.branch?esc(s.branch):'<span class="mut">—</span>')+((/direct to client/i.test(s.branch||'')&&s.master_client)?'<div class="mut tiny">'+esc(s.master_client)+'</div>':'')+'</td>'
         +'<td>'+esc(s.po_count)+'</td><td>'+esc(s.suppliers)+'</td><td'+((s.over_pallets&&!shipComplete(s)&&!shipShipping(s))?' style="color:#dc2626;font-weight:700" title="over one 20-pallet container — split the shipment"':'')+'>'+esc(s.pallets||0)+'</td>'
         +'<td class="l">'+carrierSel(ep,s.carrier,s.mode_eff==='fob')+'</td>'
         +'<td class="l">'+carrierRefInput(ep,s.carrier_ref,s.mode_eff==='fob')+fxl+'</td>'

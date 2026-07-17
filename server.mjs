@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.559';
+const APP_VERSION = 'v25.560';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1946,6 +1946,7 @@ app.get('/api/supply/:section', async (req, res) => {
             coalesce(nullif(sh.branch,''), nullif(mp.mp_branch,''), '') branch,
             CASE WHEN nullif(sh.branch,'') IS NOT NULL THEN 'S' WHEN nullif(mp.mp_branch,'') IS NOT NULL THEN 'calc' END branch_src,
             coalesce(sh.country_code,'') ov_country, coalesce(sh.branch,'') ov_branch,
+            coalesce(mp.mp_client,'') master_client,   -- master PO's client name (shown under branch for Direct to Client)
             fx.total_freight_cost flex_cost, sh.cost_manual cost_manual,
             (SELECT json_agg(json_build_object('cap', fr.pallets, 'cost', fr.cost, 'sz', fr.container_size)) FROM planner.freight_rates fr
               WHERE upper(fr.destination)=coalesce(nullif(coalesce(nullif(upper(sh.country_code),''), nullif(mp.mp_country,'')),''),'UK') AND coalesce(fr.pallets,0)>0 AND fr.cost IS NOT NULL) sea_tiers,
@@ -1998,7 +1999,7 @@ app.get('/api/supply/:section', async (req, res) => {
                    CASE WHEN pe IS NOT NULL THEN (pe + interval '7 days'
                       + ((CASE WHEN coalesce(lower(sh.mode), CASE WHEN fx.mode ILIKE 'air%' THEN 'air' ELSE 'sea' END)='air'
                                THEN coalesce(mb.air_lead_time_days,0) ELSE coalesce(mb.sea_lead_time_days,0) END)||' days')::interval)::date END delivery_calc,
-                   coalesce(m.branch,'') mp_branch,
+                   coalesce(m.branch,'') mp_branch, coalesce(m.client,'') mp_client,
                    upper(coalesce(nullif(m.country_code,''), mb.country_code, '')) mp_country
             FROM planner.purchase_orders m
             LEFT JOIN planner.suppliers ms ON ms.id=m.supplier_id
