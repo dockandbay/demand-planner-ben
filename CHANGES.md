@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.562 - Supplier portal: exclude prod ≤54 from actions + "Show all exceptions" pill
+
+Supplier portal Purchase Orders:
+- Action notifications (top PO badge + per-PO MANAGE badge) now ignore productions **54 and earlier** —
+  only prod_no ≥ 55 raises actions. (Stale completed old-production POs were inflating the count, e.g.
+  weireken had prod 40/46/49/51/53 completed POs contributing.)
+- New **"⚠ Show all exceptions"** pill on the PO filter bar — shows every PO with ≥1 open action across
+  ALL statuses (overrides the status pills, like search does), so the top-badge count is easy to reconcile.
+- Refactored the per-PO action tally into a single shared `poActionCount()` used by the row badge, the top
+  badge and the new filter (previously duplicated in two places).
+
+Files: supply/portal-view.js. No migrations, no new env vars.
+
 ## v25.561 - Assign-shipment picker: search by Flexport reference
 
 The "assign PO to shipment" search now also matches on the shipment's Flexport id / carrier ref (not just

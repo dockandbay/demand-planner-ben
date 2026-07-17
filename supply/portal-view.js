@@ -19,6 +19,8 @@
   // once a PO is shipping / shipped / delivered / complete, production is done → DTC approval is no longer an action
   function ppShipped(p){ return /ship|deliver|complete/i.test((p&&p.status)||'') || (p&&p.production_status)==='shipped'; }
   function dtcActionDue(p){ return ppIsDtc(p) && !(p&&p.dtc_accepted_at) && !ppShipped(p); }
+  // Action notifications only apply from production 55 onward — productions 54 and earlier raise nothing.
+  function prodActionable(p){ var pn=parseInt(p&&p.prod_no,10); return !(isFinite(pn) && pn<=54); }
   // FOB pickup — mirrors the main app's isFOBdest: no shipment AND (Manufacturing branch OR a destination that
   // isn't one of our import warehouses UK/US/EU/AU/CA). Used to badge FOB POs on the portal grid.
   function ppIsFOB(p){ if(!p)return false; if(p.shipment)return false; if(/manufactur/i.test(p.branch||''))return true; var c=(p.country||'').trim(); if(!c)return false; return !/^(UK|US|EU|AU|CA)/i.test(c); }   // blank destination = not yet set, NOT FOB
@@ -500,6 +502,7 @@
     var PORTAL_PROD_BATCH='';   // PRODUCTIONS tab: selected batch id
     var PORTAL_PO_Q='';   // Purchase Orders search (overrides the status pills)
     var PORTAL_PO_PROD='', PORTAL_PO_CTRY='', PORTAL_PO_BR='';   // Purchase Orders dropdown filters (Production / Country / Branch)
+    var PORTAL_PO_EXC=false;   // "show all exceptions" pill — POs with ≥1 open action, across all statuses
     var PORTAL_BC_BATCH='';   // Barcodes tab: selected batch id
     var PORTAL_BC_Q='';       // Barcodes tab: per-SKU filter text
     var _bcRowsCache={};      // Barcodes tab: batch → fetched label-data rows (avoid refetch on filter/re-render)
@@ -858,6 +861,16 @@
       var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab pptab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'">'+t[1]+badge(t[3])+'</button>';}).join('')+'</div>';
       var panels=tabs.map(function(t,ti){return '<div class="pptab-panel" data-pt="'+t[0]+'"'+(ti===0?'':' style="display:none"')+'>'+t[2]+'</div>';}).join('');
       return '<div class="ppx" style="padding:4px 2px;max-width:none;text-align:left">'+bar+panels+'</div>'; }
+    // Shared per-PO open-action count (row badge + top PO badge + "show all exceptions" filter all use this).
+    // Productions 54 and earlier raise nothing. Mirrors the SHIPMENTS-tab rules (no "no shipment yet" term).
+    function poActionCount(p){ if(!prodActionable(p))return 0; var po=p.po, D=_ppData||{};
+      var sb=(D.subsByPo&&D.subsByPo[po])||[], nts=(D.notesByPo&&D.notesByPo[po])||[];
+      var unreadInt=nts.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
+      var today=new Date().toISOString().slice(0,10);
+      var cdS=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean), xdm=(D.xdByPo&&D.xdByPo[po])||{};
+      var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
+      var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end, sb):'';
+      return (invoiceDue(p,sb)?1:0)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcActionDue(p)?1:0)+(poCdMissing(p,sb)?1:0); }
     function ppPOs(pos, data){ var lb=data.lb||{}, notesByPo=data.notesByPo||{}, subsByPo=data.subsByPo||{}, costsByPo=data.costsByPo||{}, supSkus=data.supSkus||[], xdByPo=data.xdByPo||{}, addByPo=data.addByPo||{};
       if(!pos.length)return '<div class="count">No purchase orders for this supplier.</div>';
       var today=new Date().toISOString().slice(0,10);
@@ -875,8 +888,7 @@
           var cdS=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean), xdm=xdByPo[p.po]||{};
           var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
           var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end, sb):'';
-          var dtcPend=dtcActionDue(p);
-          var act=(invoiceDue(p,sb)?1:0)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0)+(poCdMissing(p,sb)?1:0);   // no-shipment-yet is NOT an action (matches the SHIPMENTS sub-tab + the top PO badge)
+          var act=poActionCount(p);   // shared count (excludes productions ≤54; no "no shipment yet" term)
           var cdVal=poCdVal(p, sb);
           var cdGrid=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
           return _grpHdr+'<tr class="pp-row" data-grp="'+esc(_gkey)+'"><td class="l"><button class="save-btn pp-exp" data-i="'+i+'" data-po="'+esc(p.po)+'"><span class="mng-txt">MANAGE</span>'+(act>0?' <span class="ex-badge" title="'+act+' action'+(act>1?'s':'')+' needed">'+act+'</span>':'')+'</button></td>'
@@ -1182,16 +1194,8 @@
           function ppBadgeHtml(n){ return n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
           // Purchase Orders top-menu badge = open supplier ACTIONS across all POs. Deliberately EXCLUDES the
           // per-PO "no shipment yet" term (a passive state, not an action — it would show ~1 per in-production PO).
-          function setPosBadge(){ var today=new Date().toISOString().slice(0,10);
-            var n=((_ppData&&_ppData.pos)||[]).reduce(function(a,p){ var po=p.po;
-              var sb=(_ppData.subsByPo&&_ppData.subsByPo[po])||[], nts=(_ppData.notesByPo&&_ppData.notesByPo[po])||[];
-              var unreadInt=nts.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
-              var cdS=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean), xdm=(_ppData.xdByPo&&_ppData.xdByPo[po])||{};
-              var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
-              var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end, sb):'';
-              var dtcPend=dtcActionDue(p);
-              return a+(invoiceDue(p,sb)?1:0)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0)+(poCdMissing(p,sb)?1:0);
-            },0);
+          function setPosBadge(){
+            var n=((_ppData&&_ppData.pos)||[]).reduce(function(a,p){ return a+poActionCount(p); },0);   // shared count (excludes productions ≤54)
             var b=document.getElementById('pp-pos-badge'); if(b)b.innerHTML=ppBadgeHtml(n); }
           // Shipment action count = FOB production-end pending (not submitted / rejected) + unread Dock&Bay notes.
           function shipActCount(s){ if(!s)return 0;
@@ -1464,15 +1468,17 @@
               +_fSel('pp-po-prod',PORTAL_PO_PROD,'All productions',_prods)
               +_fSel('pp-po-ctry',PORTAL_PO_CTRY,'All countries',_ctrys)
               +_fSel('pp-po-br',PORTAL_PO_BR,'All branches',_brs)
+              +'<span class="pill'+(PORTAL_PO_EXC?' active':'')+'" data-poexc="1" style="'+(PORTAL_PO_EXC?'background:#dc2626;color:#fff;border-color:#dc2626':'color:#dc2626')+'" title="show every PO with an open action, across all statuses">⚠ Show all exceptions</span>'
               +'<span class="pill-lbl">Status</span>'
-              +(ordered.length?ordered.map(function(s){return '<span class="pill'+(PORTAL_PO_ST[s]?' active':'')+(pq?' ':'')+'" data-st="'+esc(s)+'"'+(pq?' style="opacity:.4"':'')+'>'+esc(s)+'</span>';}).join(''):'<span class="mut tiny">no orders</span>')
-              +(pq?'<span class="mut tiny">search overrides status</span>':'')+'</div>';
+              +(ordered.length?ordered.map(function(s){var dim=(pq||PORTAL_PO_EXC);return '<span class="pill'+(PORTAL_PO_ST[s]?' active':'')+(dim?' ':'')+'" data-st="'+esc(s)+'"'+(dim?' style="opacity:.4"':'')+'>'+esc(s)+'</span>';}).join(''):'<span class="mut tiny">no orders</span>')
+              +(pq?'<span class="mut tiny">search overrides status</span>':(PORTAL_PO_EXC?'<span class="mut tiny">showing exceptions — all statuses</span>':''))+'</div>';
             // a PO/client search OVERRIDES the status pills; the dropdown filters (production / country / branch) always AND on top
             var shown=_ppData.pos.filter(function(p){
               if(PORTAL_PO_PROD && (p.prod_no==null?'':String(p.prod_no).trim())!==PORTAL_PO_PROD) return false;
               if(PORTAL_PO_CTRY && (p.country||'').trim()!==PORTAL_PO_CTRY) return false;
               if(PORTAL_PO_BR && (p.branch||'').trim()!==PORTAL_PO_BR) return false;
               if(pq) return nrm(p.po).indexOf(pq)>=0 || nrm(p.client).indexOf(pq)>=0 || nrm(p.shipment).indexOf(pq)>=0 || nrm(p.prod_no).indexOf(pq)>=0;
+              if(PORTAL_PO_EXC) return poActionCount(p)>0;   // exceptions filter overrides the status pills (all statuses)
               return PORTAL_PO_ST[(p.status||'').toUpperCase()]; });
             var poCapped=(!_ppShowAllPO && shown.length>PP_CAP), poRender=poCapped?shown.slice(0,PP_CAP):shown;
             body.innerHTML=pillBar+'<div class="count" style="margin:2px 0 8px">'+(poCapped?poRender.length+' of ':'')+shown.length+' of '+_ppData.pos.length+' purchase orders</div>'+ppPOs(poRender,_ppData)
@@ -1480,6 +1486,7 @@
             bindPortalScrollPin();   // pin expanded PO detail(s) to the left while the grid scrolls sideways
             var ppsa=body.querySelector('.pp-showall'); if(ppsa)ppsa.onclick=function(){ _ppShowAllPO=true; renderPP(); };
             body.querySelectorAll('.pill[data-st]').forEach(function(p){ p.onclick=function(){ var s=p.dataset.st; PORTAL_PO_ST[s]=!PORTAL_PO_ST[s]; _ppShowAllPO=false; renderPP(); }; });
+            var _exc=body.querySelector('.pill[data-poexc]'); if(_exc)_exc.onclick=function(){ PORTAL_PO_EXC=!PORTAL_PO_EXC; _ppShowAllPO=false; renderPP(); };
             var _pr=body.querySelector('.pp-po-prod'); if(_pr)_pr.onchange=function(){ PORTAL_PO_PROD=this.value; _ppShowAllPO=false; renderPP(); };
             var _ct=body.querySelector('.pp-po-ctry'); if(_ct)_ct.onchange=function(){ PORTAL_PO_CTRY=this.value; _ppShowAllPO=false; renderPP(); };
             var _br=body.querySelector('.pp-po-br'); if(_br)_br.onchange=function(){ PORTAL_PO_BR=this.value; _ppShowAllPO=false; renderPP(); };
