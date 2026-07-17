@@ -3638,7 +3638,7 @@
       render(''); pop.querySelector('.shpop-q').oninput=function(){render(this.value);}; pop.querySelector('.shpop-q').focus(); }); }
 
   // ---- SHIPMENTS (real planner.shipments records; dates OVERRIDE the POs aboard) ----
-  var CARRIERS=['Flexport','DHL','FedEx','Sea freight','Air freight','Other'];
+  var CARRIERS=['Flexport','DHL','FedEx','UPS','Sea freight','Air freight','Other'];
   function shipReload(){ delete cache['shipments']; showPoSub('shipments'); }
   function shipPost(ep,body,cb){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
     .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); cb&&cb(j); })
@@ -3847,7 +3847,7 @@
     if(s.over_pallets && !shipShipping(s))r.push('Estimated cargo '+(s.pallets||0)+' pallets — over one 20-pallet container; split the shipment');
     return r.join(' · '); }
   function shipExShort(s){ return s.no_pos?'unlinked':s.no_flex_match?'no Flexport match':s.over_pallets?'>20 pallets':''; }
-  function carrierSel(ep,val,dis){ var O=['Flexport','DHL','Fedex','FOB','Other'], v=val||'', has=O.indexOf(v)>=0;
+  function carrierSel(ep,val,dis){ var O=['Flexport','DHL','Fedex','UPS','FOB','Other'], v=val||'', has=O.indexOf(v)>=0;
     return '<select class="fci" data-ep="'+ep+'" data-field="carrier"'+(dis?' disabled title="FOB — carrier handled by the client\'s forwarder"':'')+' style="min-width:96px'+(dis?';opacity:.45;background:#f1f1f1':'')+'"><option value=""'+(v?'':' selected')+'>—</option>'
       +(v&&!has?'<option selected>'+esc(v)+'</option>':'')+O.map(function(o){return '<option'+(o===v?' selected':'')+'>'+o+'</option>';}).join('')+'</select>'; }
   function carrierRefInput(ep,val,dis){ return '<input class="fci txt" data-ep="'+ep+'" data-field="carrier_ref" value="'+esc(val||'')+'"'+(dis?' disabled':'')+' style="min-width:120px'+(dis?';opacity:.45;background:#f1f1f1':'')+'">'; }

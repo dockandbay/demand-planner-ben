@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.571 - Add UPS to shipment carrier options
+
+Added "UPS" to the shipment carrier dropdown (carrierSel) and the carrier datalist.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.570 - Manufacturing (FOB) POs raise no ERP deviation exceptions
 
 Manufacturing-branch POs are FOB — collected at the factory, not pushed to Cin7 — so they no longer raise
