@@ -3906,15 +3906,20 @@
     var fld=function(lbl,inp){ return '<div style="margin-right:16px"><div class="mut tiny">'+lbl+'</div>'+inp+'</div>'; };
     var locked=!!s.flex_matched;   // linked to Flexport → dates are authoritative, not overridable here
     // a date field: override input (or "from Flexport" when locked) + the FINAL effective date and its source
-    var dateFld=function(lbl,field,ovVal,finalVal,src){
+    var dateFld=function(lbl,field,ovVal,finalVal,src,opts){ opts=opts||{};
       // override picker pre-fills with the current FINAL date for this stage (which already chains off the
       // previous override / calc) — so opening it defaults to the previous override or the calculated date,
       // not today. Nothing saves unless the value is actually changed.
-      var inp=locked?'<div class="mut tiny" style="padding:4px 0">from Flexport</div>':editCell(ep,field,ovVal||finalVal||'','date');
+      // opts.forceEdit: keep the override editable even when Flexport-locked (used for Completion — Flexport
+      // has no completion/received date, it's arrival+7, so it must stay overridable). opts.blankStart:
+      // pre-fill with ONLY the existing override (blank until the user sets one).
+      var canEdit=opts.forceEdit||!locked;
+      var prefill=opts.blankStart?(ovVal||''):(ovVal||finalVal||'');
+      var inp=canEdit?editCell(ep,field,prefill,'date'):'<div class="mut tiny" style="padding:4px 0">from Flexport</div>';
       return '<div style="margin-right:16px;min-width:130px">'
         +'<div class="mut tiny" style="text-transform:uppercase;letter-spacing:.04em">'+lbl+'</div>'
         +'<div style="font-weight:700;font-size:15px;margin:2px 0 4px">'+(finalVal?shipDate(finalVal,src):'<span class="mut">—</span>')+'</div>'
-        +(locked?inp:'<div class="mut tiny">override</div>'+inp)+'</div>'; };
+        +(canEdit?'<div class="mut tiny">override</div>'+inp:inp)+'</div>'; };
     // destination = shipment override ▸ master PO (calc). Same layout as the dates (bold final + override below).
     var COPT=['','UK','US','EU','AU','CA','DIRECT'];
     var destFld=function(lbl,finalVal,src,inp){
@@ -3925,7 +3930,7 @@
     function flexRef(fid){ var u=flexUrl(fid); return u?'<a href="'+u+'" target="_blank" rel="noopener" style="color:#0369a1;font-weight:700;text-decoration:underline">'+esc(fid)+' ↗</a>':esc(fid); }
     var head='<div class="sect-h">Shipment details</div>'
       +(locked
-        ? '<div class="tiny" style="margin-bottom:8px;color:#0369a1">🔗 Linked to Flexport ('+flexRef(s.flex_id)+') — dates come from the Flexport feed and can’t be overridden here.</div>'
+        ? '<div class="tiny" style="margin-bottom:8px;color:#0369a1">🔗 Linked to Flexport ('+flexRef(s.flex_id)+') — departure / landing / arrival come from the Flexport feed. The <b>completion</b> date (goods received) isn’t a Flexport field, so it stays overridable below (blank = arrival + 7 days).</div>'
         : '<div class="mut tiny" style="margin-bottom:8px">Overrides take precedence over the POs aboard. <b>final</b> shows the date used and its source — <span class="src m">S</span> shipment override, <span class="src fx">FLEX</span> Flexport.</div>')
       +'<div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px 0;margin-bottom:10px">'
       +fld('Carrier', carrierSel(ep,s.carrier,s.mode_eff==='fob'))
@@ -3934,7 +3939,7 @@
       +dateFld('Departure','departure_date',s.ov_departure,s.departure,s.departure_src)
       +dateFld('Landing','landing_date',s.ov_landing,s.landing,s.landing_src)
       +dateFld('Arrival','arrival_date',s.ov_arrival,s.arrival,s.arrival_src)
-      +dateFld('Completion','delivery_date',s.ov_delivery,s.completion,s.completion_src)
+      +dateFld('Completion','delivery_date',s.ov_delivery,s.completion,s.completion_src,{forceEdit:true,blankStart:true})
       +destFld('Ship to', s.market, s.market_src, '<select class="fci shipdest" data-field="country_code">'+COPT.map(function(o){return '<option value="'+o+'"'+(o===(s.ov_country||'')?' selected':'')+'>'+(o||'inherit')+'</option>';}).join('')+'</select>')
       +destFld('Branch', s.branch, s.branch_src, '<input class="fci txt shipdest" data-field="branch" list="branchlist" value="'+esc(s.ov_branch||'')+'" placeholder="inherit from PO" style="min-width:130px">')
       +'</div>'

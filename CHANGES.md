@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.565 - Shipment: completion-date override now available for Flexport shipments
+
+The shipment detail "Completion" date was hidden behind the Flexport lock along with departure/landing/
+arrival. But completion (goods received) isn't a Flexport field — it's arrival + 7 days — so it now stays
+overridable even for Flexport-linked shipments. The override starts blank (blank = arrival + 7); setting it
+becomes the shipment's completion date (writes `delivery_date`). Locked banner reworded to explain.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.564 - ASN pallet labels: add the PO number
 
 Each ASN pallet label page now shows a "PO <po>" line under the company name (above ASN# / PALLET).
