@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.563';
+const APP_VERSION = 'v25.564';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -3259,7 +3259,7 @@ app.get('/api/asn-labels/:po', async (req, res) => {
     const r = (await pool.query('SELECT asn_numbers FROM planner.purchase_orders WHERE po=$1', [po])).rows[0];
     const asns = String((r && r.asn_numbers) || '').split(',').map((s) => s.trim()).filter(Boolean);
     if (!asns.length) return res.status(400).json({ error: 'No ASN numbers entered for ' + po });
-    const buf = buildAsnLabelsPdf('DOCK & BAY PTY LTD', asns);
+    const buf = buildAsnLabelsPdf('DOCK & BAY PTY LTD', asns, po);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', "attachment; filename*=UTF-8''" + encodeURIComponent('ASN Pallet Labels - ' + po + '.pdf'));
     res.send(buf);
@@ -3272,7 +3272,7 @@ app.get('/api/portal/asn-labels/:po', async (req, res) => {
     const r = (await pool.query('SELECT asn_numbers FROM planner.purchase_orders WHERE po=$1', [po])).rows[0];
     const asns = String((r && r.asn_numbers) || '').split(',').map((s) => s.trim()).filter(Boolean);
     if (!asns.length) return res.status(400).json({ error: 'No ASN numbers for ' + po });
-    const buf = buildAsnLabelsPdf('DOCK & BAY PTY LTD', asns);
+    const buf = buildAsnLabelsPdf('DOCK & BAY PTY LTD', asns, po);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', "attachment; filename*=UTF-8''" + encodeURIComponent('ASN Pallet Labels - ' + po + '.pdf'));
     res.send(buf);
