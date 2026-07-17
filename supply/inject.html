@@ -4199,20 +4199,80 @@
       return '<div class="sect-h">Productions <span class="mut tiny">(source <code>prod_numbers</code> table — a new production is registered here; the PRODUCTIONS tab rolls these up by PO)</span> <button class="tool-badge bg-blue" id="prod-new" style="cursor:pointer;border:none;margin-left:8px">+ Production</button></div>'
         +editTbl('productions', rows, PROD_COLS, {key:'id', maxw:1200})
         +'<div class="count">'+(rows||[]).length+' productions</div>'; }
-    function portalUsersTbl(rows){
-      var body=(rows||[]).map(function(u){ var ep='/api/supply/portal-user/'+u.id;
-        return '<tr><td class="l">'+editCell(ep,'email',u.email,'txt')+'</td>'
-          +'<td class="l">'+combo(ep,'supplier_name',u.supplier_name,'supplierlist')+'</td>'
-          +'<td class="l">'+editCell(ep,'contact_name',u.contact_name,'txt')+'</td>'
-          +'<td class="l"><select class="fci" data-ep="'+ep+'" data-field="active"><option value="true"'+(u.active?' selected':'')+'>Active</option><option value="false"'+(!u.active?' selected':'')+'>Inactive</option></select></td>'
-          +'<td class="l"><span class="mut tiny">'+(u.live_sessions?u.live_sessions+' live':'—')+'</span></td>'
-          +'<td class="l"><button class="pu-act" data-sup="'+esc(u.supplier_name||'')+'" data-sid="'+esc(u.supplier_id||'')+'" title="Open actions for this supplier — click to view + send a reminder" style="cursor:pointer;border:1px solid #e2e8f0;background:#f8fafc;border-radius:10px;font-size:11px;font-weight:700;padding:2px 10px;min-width:22px">·</button></td>'
-          +'<td class="l"><button class="tool-badge bg-blue pu-magic" data-id="'+u.id+'" style="cursor:pointer;border:none">Magic link</button> '
-            +'<button class="pu-del" data-id="'+u.id+'" title="Remove" style="cursor:pointer;border:1px solid #fecaca;background:#fff5f5;color:#b91c1c;border-radius:4px;font-size:11px;padding:3px 9px">Remove</button></td></tr>'; }).join('');
-      return lookupDatalists()
+    // Portal users — mobile-friendly: sticky Email column (with the row's Edit/Save/Cancel/Delete buttons),
+    // the rest horizontally scrollable (not squished). Rows are read-only until Edit; only supplier / contact /
+    // access are editable; supplier uses the standard search-dropdown picker.
+    var PU_ROWS={}, PU_EDIT={};
+    function puActive(u){ return !(u.active===false || u.active==='false'); }
+    var PU_CSS='<style>'
+      +'.pu-tw{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}'
+      +'.pu-tbl{border-collapse:separate;border-spacing:0;width:max-content;font-size:12px}'
+      +'.pu-tbl th,.pu-tbl td{padding:6px 9px;border-bottom:1px solid #f1f1f1;text-align:left;vertical-align:top;white-space:nowrap}'
+      +'.pu-tbl thead th{background:#f3f3f1;font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;color:#555}'
+      +'.pu-tbl .pu-c1{position:sticky;left:0;background:#fff;z-index:2;box-shadow:2px 0 6px rgba(0,0,0,.08);min-width:200px;max-width:240px;white-space:normal}'
+      +'.pu-tbl thead .pu-c1{z-index:3;background:#f3f3f1}'
+      +'.pu-tbl .pu-email{font-weight:700;word-break:break-all;line-height:1.2}'
+      +'.pu-tbl .pu-btns{margin-top:6px;display:flex;gap:5px;flex-wrap:wrap}'
+      +'.pu-tbl .pu-btns .save-btn{font-size:11px;padding:3px 9px}'
+      +'</style>';
+    function puRow(u){ var editing=!!PU_EDIT[u.id];
+      var acts = editing
+        ? '<button class="save-btn pu-save" data-id="'+u.id+'" style="background:#16a34a;color:#fff;border-color:#15803d">Save</button><button class="save-btn light pu-cancel-edit" data-id="'+u.id+'">Cancel</button>'
+        : '<button class="save-btn light pu-edit" data-id="'+u.id+'">Edit</button><button class="save-btn pu-del" data-id="'+u.id+'" title="Remove this portal user" style="color:#b91c1c;border-color:#fca5a5">Delete</button>';
+      var supCell = editing
+        ? '<button class="cell-pick pu-sup" data-id="'+u.id+'" data-val="'+esc(u.supplier_name||'')+'">'+(u.supplier_name?esc(u.supplier_name):'<span class="mut">— pick</span>')+' ▾</button>'
+        : (u.supplier_name?esc(u.supplier_name):'<span class="mut">—</span>');
+      var contactCell = editing
+        ? '<input class="fci txt pu-contact" data-id="'+u.id+'" value="'+esc(u.contact_name||'')+'" placeholder="contact" style="width:150px">'
+        : (u.contact_name?esc(u.contact_name):'<span class="mut">—</span>');
+      var accessCell = editing
+        ? '<select class="fci pu-active" data-id="'+u.id+'"><option value="true"'+(puActive(u)?' selected':'')+'>Active</option><option value="false"'+(!puActive(u)?' selected':'')+'>Inactive</option></select>'
+        : (puActive(u)?'<span class="tool-badge bg-green">Active</span>':'<span class="tool-badge bg-neutral">Inactive</span>');
+      return '<tr data-id="'+u.id+'">'
+        +'<td class="l pu-c1"><div class="pu-email">'+esc(u.email||'')+'</div><div class="pu-btns">'+acts+'</div></td>'
+        +'<td class="l">'+supCell+'</td>'
+        +'<td class="l">'+contactCell+'</td>'
+        +'<td class="l">'+accessCell+'</td>'
+        +'<td class="l"><span class="mut tiny">'+(u.live_sessions?u.live_sessions+' live':'—')+'</span></td>'
+        +'<td class="l"><button class="pu-act" data-sup="'+esc(u.supplier_name||'')+'" data-sid="'+esc(u.supplier_id||'')+'" title="Open actions for this supplier — click to view + send a reminder" style="cursor:pointer;border:1px solid #e2e8f0;background:#f8fafc;border-radius:10px;font-size:11px;font-weight:700;padding:2px 10px;min-width:22px">·</button></td>'
+        +'<td class="l"><button class="tool-badge bg-blue pu-magic" data-id="'+u.id+'" style="cursor:pointer;border:none">Magic link</button></td></tr>'; }
+    // search-dropdown supplier picker (same shpop UX as the grid cell pickers) — sets the pending value only; Save commits.
+    function openPuSup(btn){ closeShPop();
+      var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop';
+      pop.innerHTML='<div class="shpop-h">Set supplier</div><input class="shpop-q" placeholder="search supplier…"><div id="shpop-list"></div>';
+      placePop(pop, btn.getBoundingClientRect()); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
+      var list=(supplierList||[]).slice().sort();
+      function render(q){ q=(q||'').trim().toLowerCase(); var ms=list.filter(function(n){return !q||n.toLowerCase().indexOf(q)>=0;});
+        var html=ms.slice(0,q?60:15).map(function(n){return '<div class="shpop-opt" data-v="'+esc(n)+'">'+esc(n)+'</div>';}).join('')||'<div class="count" style="padding:8px">no match</div>';
+        if(!q&&list.length>15)html+='<div class="mut tiny" style="padding:5px 10px">'+(list.length-15)+' more — type to search…</div>';
+        var l=document.getElementById('shpop-list'); l.innerHTML=html;
+        l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ btn.dataset.val=o.dataset.v; btn.innerHTML=esc(o.dataset.v)+' ▾'; closeShPop(); }; }); }
+      render(''); pop.querySelector('.shpop-q').oninput=function(){render(this.value);}; pop.querySelector('.shpop-q').focus(); }
+    function puReRow(id){ var tr=document.querySelector('#pu-tbody tr[data-id="'+id+'"]'); if(!tr||!PU_ROWS[id])return;
+      var tmp=document.createElement('tbody'); tmp.innerHTML=puRow(PU_ROWS[id]); var nr=tmp.firstChild; tr.parentNode.replaceChild(nr,tr); puWireRow(nr); }
+    function puWireRow(tr){ var id=tr.getAttribute('data-id'); if(!id)return;
+      var q=function(sel){ return tr.querySelector(sel); }; var b;
+      if(b=q('.pu-edit'))b.onclick=function(){ PU_EDIT[id]=1; puReRow(id); };
+      if(b=q('.pu-cancel-edit'))b.onclick=function(){ delete PU_EDIT[id]; puReRow(id); };
+      if(b=q('.pu-sup'))b.onclick=function(e){ e.stopPropagation(); openPuSup(b); };
+      if(b=q('.pu-save'))b.onclick=function(){ var btn=this; var sup=(q('.pu-sup')&&q('.pu-sup').dataset.val)||''; var ct=(q('.pu-contact')&&q('.pu-contact').value||'').trim(); var act=(q('.pu-active')&&q('.pu-active').value)==='true';
+        if(!sup){ alert('Pick a supplier.'); return; } btn.disabled=true; btn.textContent='Saving…';
+        fetch('/api/supply/portal-user/'+id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({supplier_name:sup,contact_name:ct||null,active:act})}).then(function(r){return r.json();})
+          .then(function(j){ if(j&&j.error){ btn.disabled=false; btn.textContent='Save'; alert('Save failed: '+j.error); return; }
+            var u=PU_ROWS[id]||{}; u.supplier_name=sup; u.contact_name=ct||null; u.active=act; PU_ROWS[id]=u; delete PU_EDIT[id]; puReRow(id); })
+          .catch(function(e){ btn.disabled=false; btn.textContent='Save'; alert('Save failed: '+(e.message||e)); }); };
+      if(b=q('.pu-del'))b.onclick=function(){ if(!confirm('Remove this portal user? Their access is revoked.'))return; shipPost('/api/supply/portal-user/'+id,{_delete:true},showSub); };
+      if(b=q('.pu-magic'))b.onclick=function(){ var mb=this; fetch('/api/supply/portal-magic/'+id,{method:'POST'}).then(function(r){return r.json();}).then(function(j){ if(j.error)return alert(j.error);
+        var ok=function(){ var o=mb.textContent; mb.textContent='✓ Copied'; setTimeout(function(){ mb.textContent=o; },1500); };
+        if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(j.url).then(ok,function(){ legacyCopy(j.url); ok(); }); } else { legacyCopy(j.url); ok(); } }); };
+      // .pu-act (open-actions) is wired after the async signal load below.
+    }
+    function portalUsersTbl(rows){ PU_ROWS={}; PU_EDIT={}; (rows||[]).forEach(function(u){ PU_ROWS[u.id]=u; });
+      var body=(rows||[]).map(puRow).join('');
+      return lookupDatalists()+PU_CSS
         +'<div class="sect-h">Portal users <span class="mut tiny">(approved supplier logins — each email is mapped to one supplier and sees only that supplier\'s data in the portal)</span> <button class="tool-badge bg-blue" id="pu-new" style="cursor:pointer;border:none;margin-left:8px">+ Portal user</button></div>'
-        +'<div class="tw" style="max-width:1080px"><table><thead><tr><th class="l">Email</th><th class="l" style="min-width:170px">Supplier</th><th class="l">Contact</th><th class="l">Access</th><th class="l">Sessions</th><th class="l">Open actions</th><th class="l"></th></tr></thead><tbody id="pu-tbody">'+(body||'<tr class="pu-empty"><td colspan="7" class="l mut">No portal users yet.</td></tr>')+'</tbody></table></div>'
-        +'<div class="mut tiny" style="margin-top:6px">Magic link is a dev stub — it returns the login URL (valid 7 days) and copies it to your clipboard. Real email delivery is wired for production by Diviyaj.</div>'; }
+        +'<div class="pu-tw"><table class="pu-tbl"><thead><tr><th class="l pu-c1">Email</th><th class="l">Supplier</th><th class="l">Contact</th><th class="l">Access</th><th class="l">Sessions</th><th class="l">Actions</th><th class="l">Login</th></tr></thead><tbody id="pu-tbody">'+(body||'<tr class="pu-empty"><td colspan="7" class="l mut">No portal users yet.</td></tr>')+'</tbody></table></div>'
+        +'<div class="mut tiny" style="margin-top:6px">Tap <b>Edit</b> on a row to change supplier / contact / access, then <b>Save</b>. Magic link returns the 7-day login URL (dev stub — real email is Diviyaj\'s prod wiring).</div>'; }
     // Compute each supplier's open portal actions (same conditions the supplier's own portal shows), keyed by supplier name.
     function supPortalActions(pos, sig, xd, samples){
       var today=new Date().toISOString().slice(0,10);
@@ -4355,7 +4415,8 @@
             shipPost('/api/supply/production-create',{prod_no:nm.trim()},showSub); }; }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); }
       else if(CONFIG_SUB==='portalusers'){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/portal-users').then(function(r){return r.json();}).then(function(rows){
-          fetchLookups(function(){ b.innerHTML=portalUsersTbl(rows); bindEdits();
+          fetchLookups(function(){ b.innerHTML=portalUsersTbl(rows);
+            b.querySelectorAll('#pu-tbody tr[data-id]').forEach(puWireRow);   // per-row edit/save/cancel/delete/magic/supplier-picker
             // open-action counts per supplier row (+ drawer + send-reminder), loaded after the table paints
             Promise.all([fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/portal-signals').then(function(r){return r.json();}).catch(function(){return {};}), fetch('/api/supply/crossdock-shipments').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/samples').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/suppliers').then(function(r){return r.json();}).catch(function(){return [];})]).then(function(ar){
               var acts=supPortalActions(ar[0]||[], ar[1]||{}, ar[2]||[], ar[3]||[]); var supId={}; (ar[4]||[]).forEach(function(s){supId[s.name]=s.id;});
@@ -4366,24 +4427,19 @@
             document.getElementById('pu-new').onclick=function(){ var tb=document.getElementById('pu-tbody'); if(!tb||tb.querySelector('.pu-newrow'))return;
               var em0=tb.querySelector('.pu-empty'); if(em0)em0.remove();
               var tr=document.createElement('tr'); tr.className='pu-newrow';
-              tr.innerHTML='<td class="l"><input class="fci txt pu-nemail" type="email" placeholder="email@supplier.com" style="width:200px"></td>'
-                +'<td class="l"><input class="fci txt pu-nsup" list="supplierlist" placeholder="search supplier…" style="width:170px"></td>'
+              tr.innerHTML='<td class="l pu-c1"><input class="fci txt pu-nemail" type="email" placeholder="email@supplier.com" style="width:180px"><div class="pu-btns"><button class="save-btn pu-add" style="background:#16a34a;color:#fff;border-color:#15803d">Add</button><button class="save-btn light pu-cancel">Cancel</button></div><div class="pu-err" style="color:#dc2626;font-size:11px;margin-top:2px"></div></td>'
+                +'<td class="l"><button class="cell-pick pu-nsup" data-val=""><span class="mut">— pick supplier</span> ▾</button></td>'
                 +'<td class="l"><input class="fci txt pu-ncontact" placeholder="contact (optional)" style="width:140px"></td>'
-                +'<td class="l"><span class="mut tiny">—</span></td><td class="l"></td><td class="l"></td>'
-                +'<td class="l"><button class="save-btn pu-add" style="background:#16a34a;color:#fff;border-color:#15803d">Add</button> <button class="save-btn light pu-cancel">Cancel</button><div class="pu-err" style="color:#dc2626;font-size:11px;margin-top:2px"></div></td>';
+                +'<td class="l"><span class="mut tiny">—</span></td><td class="l"></td><td class="l"></td>';
               tb.insertBefore(tr, tb.firstChild); tr.querySelector('.pu-nemail').focus();
+              tr.querySelector('.pu-nsup').onclick=function(e){ e.stopPropagation(); openPuSup(this); };
               tr.querySelector('.pu-cancel').onclick=function(){ tr.remove(); };
-              tr.querySelector('.pu-add').onclick=function(){ var btn=this; var em=(tr.querySelector('.pu-nemail').value||'').trim(), sup=(tr.querySelector('.pu-nsup').value||'').trim(), ct=(tr.querySelector('.pu-ncontact').value||'').trim(), err=tr.querySelector('.pu-err'); err.textContent='';
+              tr.querySelector('.pu-add').onclick=function(){ var btn=this; var em=(tr.querySelector('.pu-nemail').value||'').trim(), sup=(tr.querySelector('.pu-nsup').dataset.val||'').trim(), ct=(tr.querySelector('.pu-ncontact').value||'').trim(), err=tr.querySelector('.pu-err'); err.textContent='';
                 if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){ err.textContent='Enter a valid email address.'; tr.querySelector('.pu-nemail').focus(); return; }
-                if(!sup){ err.textContent='Select a supplier from the list.'; tr.querySelector('.pu-nsup').focus(); return; }
-                if((supplierList||[]).length && supplierList.indexOf(sup)<0){ err.textContent='“'+sup+'” isn’t in the supplier list — pick one.'; tr.querySelector('.pu-nsup').focus(); return; }
+                if(!sup){ err.textContent='Pick a supplier.'; return; }
                 btn.disabled=true; fetch('/api/supply/portal-user-create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:em,supplier_name:sup,contact_name:ct||null})}).then(function(r){return r.json();})
                   .then(function(j){ if(j&&j.error){ err.textContent=j.error; btn.disabled=false; return; } showSub(); })
                   .catch(function(e){ err.textContent=(e&&e.message)||'failed'; btn.disabled=false; }); }; };
-            b.querySelectorAll('.pu-magic').forEach(function(btn){ btn.onclick=function(){ fetch('/api/supply/portal-magic/'+btn.dataset.id,{method:'POST'}).then(function(r){return r.json();}).then(function(j){ if(j.error)return alert(j.error);
-              var ok=function(){ var o=btn.textContent; btn.textContent='✓ Copied'; setTimeout(function(){ btn.textContent=o; },1500); };   // copy silently, flash the button — no popups
-              if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(j.url).then(ok,function(){ legacyCopy(j.url); ok(); }); } else { legacyCopy(j.url); ok(); } }); }; });
-            b.querySelectorAll('.pu-del').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Remove this portal user? Their access is revoked.'))return; shipPost('/api/supply/portal-user/'+btn.dataset.id,{_delete:true},showSub); }; });
           }); }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); }
       else if(CONFIG_SUB==='consignees'){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/consignees').then(function(r){return r.json();}).then(function(rows){

@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.574 - Portal Users page: mobile-friendly rebuild
+
+Rebuilt CONFIG ▸ Portal Users for mobile:
+- Table no longer squished — it's a horizontal scroller (`width:max-content`) with a **sticky Email column**
+  (col 1) that also holds the row's **Edit / Save / Cancel / Delete** buttons.
+- Rows are **read-only until Edit**; only **Supplier / Contact / Access** are editable (email is the fixed
+  identity). Save commits all three at once; Cancel reverts.
+- **Supplier** now uses the standard **search-dropdown picker** (shpop cell-pick) instead of a native
+  datalist combo — same for the "+ Portal user" add row.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.573 - Escalation email: deep link to the PO + clearer wording
 
 - The email link for a PO escalation now deep-links to the supplier portal **PO card** (`/portal?po=<ref>`),
