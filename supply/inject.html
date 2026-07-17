@@ -1226,9 +1226,9 @@
         // default (no typing) = shipments to the SAME COUNTRY as this PO; typing searches the full list.
         if(!q&&poCtry)html+='<div class="mut tiny" style="padding:3px 10px">Shipments to '+esc(poCtry)+' — type to search all</div>';
         var ms=ships.filter(function(s){ if(s.shipment_ref===po)return false;
-          return q ? (s.shipment_ref+' '+(s.master_po||'')+' '+(s.market||'')).toLowerCase().indexOf(q)>=0
+          return q ? (s.shipment_ref+' '+(s.master_po||'')+' '+(s.market||'')+' '+(s.flex_id||'')+' '+(s.carrier_ref||'')).toLowerCase().indexOf(q)>=0   // also match Flexport id / carrier ref
                    : (!poCtry || (s.market||'').toUpperCase()===poCtry); });
-        ms.slice(0,q?25:12).forEach(function(s){ html+='<div class="shpop-opt" data-ship="'+esc(s.shipment_ref)+'">→ '+esc(s.shipment_ref)+' <span class="mut tiny">'+(s.market?esc(s.market)+' · ':'')+'master '+esc(s.master_po||'?')+(s.departure?' · ship '+fd(s.departure):'')+'</span></div>'; });
+        ms.slice(0,q?25:12).forEach(function(s){ var flex=s.flex_id||s.carrier_ref||''; html+='<div class="shpop-opt" data-ship="'+esc(s.shipment_ref)+'">→ '+esc(s.shipment_ref)+' <span class="mut tiny">'+(s.market?esc(s.market)+' · ':'')+'master '+esc(s.master_po||'?')+(flex?' · FLEX '+esc(flex):'')+(s.departure?' · ship '+fd(s.departure):'')+'</span></div>'; });
         if(!q&&!ms.length)html+='<div class="mut tiny" style="padding:5px 10px">No '+esc(poCtry||'')+' shipments — type to search all.</div>';
         if(q){ Object.keys(poBy).filter(function(p){return p!==po&&!refs[p]&&p.toLowerCase().indexOf(q)>=0;}).slice(0,12).forEach(function(p){ html+='<div class="shpop-opt" data-pomaster="'+esc(p)+'">→ '+esc(p)+' <span class="mut tiny">becomes master if chosen</span></div>'; }); }
         else if(ms.length>12)html+='<div class="mut tiny" style="padding:5px 10px">'+(ms.length-12)+' more '+esc(poCtry||'')+' — type to search all…</div>';

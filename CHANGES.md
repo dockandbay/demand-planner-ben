@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.561 - Assign-shipment picker: search by Flexport reference
+
+The "assign PO to shipment" search now also matches on the shipment's Flexport id / carrier ref (not just
+shipment ref / master PO / market), and each result line shows "· FLEX <id>". So typing a Flexport
+reference surfaces the shipment and its master PO.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.560 - Shipments grid: show client name under branch for Direct to Client
 
 In PURCHASE ORDERS ▸ Shipments, when a shipment's branch is "Direct to Client" the master PO's client
