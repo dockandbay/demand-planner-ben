@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.566';
+const APP_VERSION = 'v25.567';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1555,7 +1555,9 @@ app.get('/api/supply/:section', async (req, res) => {
             LEFT JOIN planner.suppliers s ON s.id=po.supplier_id
             LEFT JOIN planner.branches b ON b.name=po.branch
             LEFT JOIN planner.erp_purchase_orders erp ON erp.po=po.po
-            LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
+            -- Pick up a self-master shipment row (shipment_ref = the PO) even when the PO's shipment_ref column
+            -- wasn't set — otherwise a completion override on that shipment never reaches the PO (was showing the calc).
+            LEFT JOIN planner.shipments sh ON sh.shipment_ref = coalesce(nullif(po.shipment_ref,''), po.po)
             LEFT JOIN planner.import_tax_rates tr ON tr.country=coalesce(nullif(po.country_code,''), b.country_code)
             LEFT JOIN LATERAL (SELECT sum(l.qty * coalesce(
                 (SELECT plc.final_cost FROM planner.portal_line_costs plc WHERE plc.po=l.po AND plc.sku=l.sku AND plc.confirmed_at IS NOT NULL AND plc.final_cost IS NOT NULL),
@@ -1638,7 +1640,10 @@ app.get('/api/supply/:section', async (req, res) => {
               -- completion = delivery + 7d warehouse check-in — EXCEPT direct-to-client is FOB (no warehouse
               -- leg) → completion = delivery, UNLESS the PO is a child of a consolidated shipment (then we
               -- crossdock via the warehouse, so the +7 applies). A self-master/no shipment stays FOB.
-              CASE WHEN eff_delivery IS NOT NULL THEN (eff_delivery
+              -- An EXPLICIT shipment completion override (shipments.delivery_date = sh_delivery) IS the
+              -- completion date, so it lands exactly (no +7) — matches the shipment drawer's "Completion" field.
+              CASE WHEN sh_delivery IS NOT NULL THEN sh_delivery
+                   WHEN eff_delivery IS NOT NULL THEN (eff_delivery
                 + (CASE WHEN upper(coalesce(nullif(country_code,''), branch_country, ''))='DIRECT'
                           AND coalesce(nullif(shipment_ref,''), po)=po
                         THEN 0 ELSE 7 END||' days')::interval)::date END eff_checkin,

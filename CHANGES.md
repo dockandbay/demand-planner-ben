@@ -3,6 +3,21 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.567 - Shipment completion override now flows to the PO (self-master + no +7)
+
+Fix: a PO wasn't inheriting a completion override set on its (self-master) shipment — it kept showing the
+calculated date. Two causes, both fixed in the purchase-orders date calc:
+1. The shipment join was strict (`sh.shipment_ref = po.shipment_ref`); a self-master shipment row keyed by
+   the PO ref was missed when the PO's shipment_ref column was blank. Now joins on
+   `coalesce(nullif(po.shipment_ref,''), po.po)` so the PO picks up its own self-master shipment. (3 live POs
+   were in this state.)
+2. An explicit shipment completion override (`shipments.delivery_date` = sh_delivery) now lands on the PO's
+   completion EXACTLY — the +7 warehouse check-in is skipped, since the override already represents the
+   received date (matches the shipment drawer's "Completion" field). e.g. PO-55AUWK3: completion now 27-Aug
+   (was 11-Aug / would've been 3-Sep with +7).
+
+Files: server.mjs. No migrations, no new env vars.
+
 ## v25.566 - ASN pallet labels: drop redundant "PO" prefix
 
 The PO line on the ASN label showed "PO PO-55AUWK3" (refs already start with "PO-"). Now shows just the
