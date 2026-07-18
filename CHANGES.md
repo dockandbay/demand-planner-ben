@@ -3,6 +3,48 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.592 - ORDER PLAN xlsx: SIZE falls back to short size when size_long is empty
+
+The SUPPLY ▸ ORDER PLAN report's SIZE column already maps size_long (v25.231). It reads blank on LIVE only
+because planner.products.size_long is not populated there (0/2737 rows) — the n8n Airtable sync doesn't
+map sku_child.size_long, and the one-off seed (migration 095_seed) was never run on live. This change adds
+a graceful fallback (size_long → size_short) so SIZE is never blank.
+⚠️ Diviyaj: to get the long description on live, (a) run migrations/095_product_size_long_seed.sql (one-off
+backfill) and (b) map Airtable sku_child.size_long → planner.products.size_long in the n8n product sync.
+
+Files: supply/inject.html. No migrations (095 already authored), no new env vars.
+
+## v25.591 - Actions page: single "Snooze ▾" button with 1/3/7-day popup
+
+Replaced the row of Snooze 1d/3d/7d/∞ buttons on #/supply/actions with one "Snooze ▾" button that opens a
+popup (1 day / 3 days / 7 days / Indefinitely), mirroring the PO-grid snooze menu. Snoozes now also
+attribute to the signed-in user optimistically. Lifecycle POST refactored into a shared actLifeSet().
+
+Files: supply/inject.html. No migrations, no new env vars.
+
+## v25.590 - PO copy-hint tooltip no longer overlaps the action-items tooltip
+
+The "double-click to copy PO reference" native tooltip moved from the whole PO cell onto just the PO text,
+so hovering the action-items badge beside it shows only the badge's own tooltip (no overlap).
+
+Files: supply/inject.html. No migrations, no new env vars.
+
+## v25.589 - Snooze labels always attribute the user ("Snoozed by ben@ → …")
+
+The PO-grid + shipment action-item snooze markers (and their popovers/tooltips) now always show who
+snoozed — new snzBy() helper falls back to the signed-in user (ME.email) when the stored snoozed_by is
+missing (e.g. rows snoozed before attribution was captured). Reads "Snoozed by ben@ → 19-Jul-26".
+
+Files: supply/inject.html. No migrations, no new env vars.
+
+## v25.588 - Shipment drawer date edits silently refresh the POs aboard
+
+Editing a departure/landing/arrival/completion date in the shipment DRAWER (opened from PURCHASE ORDERS)
+now silently refreshes each PO aboard — the grid row and any open PO panel pick up the new Ship/Arrival/
+Completion dates immediately (shipment dates authoritatively override PO dates). No manual reload.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.587 - Shipments: carrier-aware tracking link (not always Flexport)
 
 The shipment tracking ↗ (grid + drawer) now links to the actual carrier: Flexport → Flexport, DHL/UPS/FedEx

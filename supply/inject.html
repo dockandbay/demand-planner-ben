@@ -666,7 +666,14 @@
         // drawer or grid row so the chained Ship/Arrival/Completion "final" dates recompute — they're display-only
         // text, not .fci inputs, so the duplicate-control sync above can't touch them.
         var _sm=/^\/api\/supply\/shipment\/([^\/]+)$/.exec(ep);
-        if(_sm && typeof _shipPatchRow==='function'){ try{ _shipPatchRow(decodeURIComponent(_sm[1])); }catch(e){} } })
+        if(_sm){ var _sref=decodeURIComponent(_sm[1]);
+          if(typeof _shipPatchRow==='function'){ try{ _shipPatchRow(_sref); }catch(e){} }
+          // Shipment dates authoritatively override the PO dates aboard. When a departure/landing/arrival/completion
+          // is edited in the shipment DRAWER (opened from PURCHASE ORDERS), silently refresh each PO aboard so the
+          // grid row + any open PO panel pick up the new Ship/Arrival/Completion dates — no manual reload needed.
+          if(current==='purchase-orders'){ var _seen={};
+            document.querySelectorAll('#shipdet-DRAWER .ship-po-link[data-po]').forEach(function(b){ var p=b.dataset.po; if(!p||_seen[p])return; _seen[p]=1;
+              try{ if(window.__poRowRefresh)window.__poRowRefresh(p); if(window.__poPanelRefresh)window.__poPanelRefresh(p); }catch(e){} }); } } })
       .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; }); bindDatePickers(); }
 
   function renderGeneric(key,rows){ var c=document.getElementById('supply-content');
@@ -825,20 +832,36 @@
           ? '<span class="tool-badge bg-neutral">'+esc(r.status)+(r.snooze_until?' → '+esc(r.snooze_until):'')+'</span>'
             +((r.snoozed_by||r.snoozed_at)?'<span class="mut tiny">'+esc(r.status==='snoozed'?'snoozed':r.status)+' by '+esc(shortUser(r.snoozed_by)||'—')+(r.snoozed_at?' on '+esc(r.snoozed_at):'')+'</span>':'')
             +'<button class="save-btn light act-life" data-id="'+r._id+'" data-st="open">↩ Restore</button>'
-          : '<button class="save-btn light act-life" data-id="'+r._id+'" data-st="dismissed">Dismiss</button><button class="save-btn light act-life" data-id="'+r._id+'" data-st="snoozed" data-days="1">Snooze 1d</button><button class="save-btn light act-life" data-id="'+r._id+'" data-st="snoozed" data-days="3">Snooze 3d</button><button class="save-btn light act-life" data-id="'+r._id+'" data-st="snoozed" data-days="7">Snooze 7d</button><button class="save-btn light act-life" data-id="'+r._id+'" data-st="snoozed" data-days="-1" title="snooze indefinitely">Snooze ∞</button>')
+          : '<button class="save-btn light act-life" data-id="'+r._id+'" data-st="dismissed">Dismiss</button><button class="save-btn light act-snz-menu" data-id="'+r._id+'" title="snooze this action">Snooze ▾</button>')
         +'</div>'; }
     return '<div class="card '+esc(r.severity||'low')+'" id="actcard-'+r._id+'"><div class="t">'+refHtml+' <span class="tool-badge '+(r.severity==='high'?'bg-red':r.severity==='low'?'bg-neutral':'bg-amber')+'">'+esc(r.type)+'</span></div><div class="d">'+esc(r.detail||'')+'</div>'+(fix?'<div style="margin-top:6px">'+fix+'</div>':'')+(fix2?'<div style="margin-top:6px">'+fix2+'</div>':'')+life+'</div>'; }
+  // Persist an Actions-page lifecycle change (dismiss / snooze / open) + update the card in place.
+  function actLifeSet(r,ns,days,cb){ if(!r||!r.key)return; var ind=(parseInt(days,10)<0);
+    fetch('/api/supply/actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:r.key,status:ns,snooze_days:(ind?7:(days||7)),indefinite:ind})})
+      .then(function(x){return x.json();}).then(function(j){ if(j&&j.error)throw 0;
+        r.status=(ns==='open'?'open':ns);
+        if(ns==='snoozed'){ if(ind){ r.snooze_until=null; } else { var d=new Date(); d.setDate(d.getDate()+(parseInt(days,10)||7)); r.snooze_until=d.toISOString().slice(0,10); } r.snoozed_by=(window.ME&&ME.email)||r.snoozed_by; } else r.snooze_until=null;
+        if(cb)cb(); })
+      .catch(function(){ alert('Could not update action state'); }); }
+  // Snooze menu popped from the single Actions-page "Snooze ▾" button (1/3/7 days + indefinitely).
+  function openActSnzMenu(btn,r,after){ var ex=document.getElementById('snz-menu'); if(ex)ex.remove();
+    var m=document.createElement('div'); m.id='snz-menu'; m.style.cssText='position:absolute;z-index:200002;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 6px 20px rgba(15,23,42,.18);padding:4px;font-size:12px;min-width:96px';
+    m.innerHTML='<div style="font-weight:700;color:#64748b;font-size:10px;padding:2px 10px 4px">Snooze</div>'+[[1,'1 day'],[3,'3 days'],[7,'7 days'],[-1,'Indefinitely']].map(function(o){return '<div class="snz-opt" data-d="'+o[0]+'" style="padding:5px 12px;cursor:pointer;border-radius:4px">'+o[1]+'</div>';}).join('');
+    document.body.appendChild(m);
+    var rc=btn.getBoundingClientRect(); m.style.left=(window.scrollX+Math.min(rc.left,window.innerWidth-140))+'px'; m.style.top=(window.scrollY+rc.bottom+3)+'px';
+    function close(){ m.remove(); document.removeEventListener('mousedown',out,true); }
+    function out(e){ if(!m.contains(e.target)&&e.target!==btn)close(); }
+    setTimeout(function(){ document.addEventListener('mousedown',out,true); },0);
+    m.querySelectorAll('.snz-opt').forEach(function(o){ o.onmouseenter=function(){o.style.background='#eff6ff';}; o.onmouseleave=function(){o.style.background='';};
+      o.onclick=function(){ close(); btn.disabled=true; actLifeSet(r,'snoozed',parseInt(o.dataset.d,10),after); }; }); }
   function bindLifecycle(statBar,sevBar,view){
+    var refresh=function(){ statBar(); sevBar(); view(); };
     document.querySelectorAll('#act-grid .act-life').forEach(function(b){ b.onclick=function(){
       var id=b.dataset.id, r=actRows[id]; if(!r||!r.key)return; var ns=b.dataset.st; b.disabled=true;
-      var _ind=parseInt(b.dataset.days,10)<0;   // Snooze ∞ → indefinite (no expiry)
-      fetch('/api/supply/actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:r.key,status:ns,snooze_days:(_ind?7:(b.dataset.days||7)),indefinite:_ind})})
-        .then(function(x){return x.json();}).then(function(j){ if(j&&j.error)throw 0;
-          r.status=(ns==='open'?'open':ns);
-          if(ns==='snoozed'){ if(_ind){ r.snooze_until=null; } else { var d=new Date(); d.setDate(d.getDate()+(parseInt(b.dataset.days,10)||7)); r.snooze_until=d.toISOString().slice(0,10); } } else r.snooze_until=null;
-          statBar(); sevBar(); view(); })
-        .catch(function(){ b.disabled=false; alert('Could not update action state'); });
-      };
+      actLifeSet(r,ns,(b.dataset.days||7),refresh); };
+    });
+    document.querySelectorAll('#act-grid .act-snz-menu').forEach(function(b){ b.onclick=function(e){ e.stopPropagation();
+      var r=actRows[b.dataset.id]; if(!r||!r.key)return; openActSnzMenu(b,r,refresh); };
     });
   }
   function applyBtn(id){ return '<button class="save-btn act-apply" data-id="'+id+'" disabled>Apply</button>'; }
@@ -1427,6 +1450,9 @@
   function snzActive(s){ var t=new Date().toISOString().slice(0,10); return !!(s&&s.status==='snoozed'&&(!s.snooze_until||s.snooze_until>=t)); }
   var _SNZMON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   function snzUntil(s){ if(!s||!s.snooze_until)return 'indefinitely'; var p=String(s.snooze_until).slice(0,10).split('-'); if(p.length<3)return String(s.snooze_until); return p[2]+'-'+(_SNZMON[(+p[1])-1]||'?')+'-'+p[0].slice(2); }  // 2026-07-14 → 14-Jul-26
+  // "by <user>" suffix for a snooze label. Falls back to the signed-in user (ME.email) when the stored
+  // snoozed_by is missing (e.g. rows snoozed before attribution was captured), so it always reads "by ben@".
+  function snzBy(s){ var u=(s&&s.snoozed_by)||(window.ME&&ME.email)||''; return u?' by '+esc(shortUser(u)):''; }
   function poActSnoozed(po,cond){ return snzActive(_poActState[poActKey(po,cond)]); }
   var _cssEsc=function(x){ return (window.CSS&&CSS.escape)?CSS.escape(x):String(x).replace(/["\\]/g,'\\$&'); };
   // Silent in-place refresh after a snooze/wake: re-render the affected markers + recompute the PO-ref badge count.
@@ -1468,9 +1494,9 @@
   function actMark(po,code){
     var help=ACT_HELP[code]||'Action required.', s=_poActState[poActKey(po,code)]||{}, sn=poActSnoozed(po,code);
     // The Ⓐ stays visible even when snoozed (muted); the count badges drop it, but the marker still reads "Snoozed".
-    var A='<span class="act-mk" data-po="'+esc(po)+'" data-note="'+esc(help)+(sn?' — currently snoozed until '+esc(snzUntil(s))+(s.snoozed_by?' by '+esc(shortUser(s.snoozed_by)):'')+(s.snoozed_at?' on '+esc(s.snoozed_at):''):'')+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:'+(sn?'#f3a3a3':'#dc2626')+';color:#fff;font-weight:800;font-size:10px;cursor:help;vertical-align:middle;margin-left:5px">A</span>';
+    var A='<span class="act-mk" data-po="'+esc(po)+'" data-note="'+esc(help)+(sn?' — currently snoozed until '+esc(snzUntil(s))+snzBy(s)+(s.snoozed_at?' on '+esc(s.snoozed_at):''):'')+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:'+(sn?'#f3a3a3':'#dc2626')+';color:#fff;font-weight:800;font-size:10px;cursor:help;vertical-align:middle;margin-left:5px">A</span>';
     var snz=sn
-      ? ' <span class="mut tiny" style="white-space:nowrap">Snoozed'+(s.snoozed_by?' by '+esc(shortUser(s.snoozed_by)):'')+' → '+esc(snzUntil(s))+' <button class="act-snz" data-po="'+esc(po)+'" data-code="'+esc(code)+'" data-d="0" style="border:none;background:none;color:#1d4ed8;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">wake</button></span>'
+      ? ' <span class="mut tiny" style="white-space:nowrap">Snoozed'+snzBy(s)+' → '+esc(snzUntil(s))+' <button class="act-snz" data-po="'+esc(po)+'" data-code="'+esc(code)+'" data-d="0" style="border:none;background:none;color:#1d4ed8;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">wake</button></span>'
       : ' <button class="act-snz-btn" data-po="'+esc(po)+'" data-code="'+esc(code)+'" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:4px;font-size:10px;padding:1px 6px;margin-left:4px;cursor:pointer">SNOOZE ▾</button>';
     return '<span class="act-wrap" data-mk="'+esc(po)+'|'+esc(code)+'">'+A+snz+'</span>'; }
   // Snooze menu popped from a SNOOZE button (1/3/7 days).
@@ -1635,7 +1661,7 @@
         if(wasOpen){ newMain.classList.add('row-open'); var eb=newMain.querySelector('.po-exp'); if(eb)eb.classList.add('open'); }
         bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindDepPick(patchPoRow); bindPoStars(); bindPoNotes(); bindPoActBadge(); bindSetShipping(); bindPoCopy(); bindPoScrollPin();
       }).catch(function(){}); }
-    try{ window.__poRowRefresh=silentRowRefresh; }catch(e){}
+    try{ window.__poRowRefresh=silentRowRefresh; window.__poPanelRefresh=refreshOpenPanel; }catch(e){}
     // Patch ONE PO row in place (no grid re-render / flash) after an assign. In shipment-grouped mode the row
     // would ideally move to its new shipment group, but a full regroup collapses any open PO detail and loses
     // the user's place — so we patch the row in place instead (its shipment cell updates); the regroup happens
@@ -1956,7 +1982,9 @@
     // most relevant detail sub-tab (payment→PAYMENTS, date→DATES, shipping→SHIPMENTS).
     var _acts=poActions(r);
     var actFlag=_acts.length?' <button class="po-act-badge ex-badge" style="cursor:pointer;border:none" data-po="'+esc(r.po)+'" data-tab="'+(PO_ACT_TAB[_acts[0]]||'')+'" data-allacts="'+esc(poActionsAll(r).join(','))+'" data-note="'+esc(_acts.length+' action item'+(_acts.length>1?'s':'')+' — '+_acts.map(function(k){return PO_ACT_LABEL[k]||k;}).join('; ')+' (click to snooze / open)')+'">'+_acts.length+'</button>':'';
-    var pocell=indent?'<td class="l po-child po-numcell" data-po="'+esc(r.po)+'" title="double-click to copy PO reference"><span class="ind"></span><b>'+esc(r.po)+'</b>'+actFlag+'</td>':'<td class="l po-numcell" data-po="'+esc(r.po)+'" title="double-click to copy PO reference"><b>'+esc(r.po)+'</b>'+actFlag+'</td>';
+    // the "double-click to copy" hint lives on the PO text only (not the whole cell), so hovering the action-item
+    // badge beside it doesn't pop this native tooltip on top of the badge's own action-items tooltip.
+    var pocell=indent?'<td class="l po-child po-numcell" data-po="'+esc(r.po)+'"><span class="ind"></span><b title="double-click to copy PO reference">'+esc(r.po)+'</b>'+actFlag+'</td>':'<td class="l po-numcell" data-po="'+esc(r.po)+'"><b title="double-click to copy PO reference">'+esc(r.po)+'</b>'+actFlag+'</td>';
     // ERP cell — compact badge-style buttons (same look as the "✓ in sync" badge) → keeps the column narrow.
     // Labels collapse to a single action: Update lines / Update date / Update both. All open the same ERP modal.
     var erpStyle='cursor:pointer;border:none';
@@ -2148,7 +2176,7 @@
     pop.innerHTML='<div style="font-weight:700;margin-bottom:4px">'+esc(po)+' — action items</div>'
       +conds.map(function(k){ var sn=poActSnoozed(po,k), s=_poActState[poActKey(po,k)]||{};
         return '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-top:1px solid #f1f5f9">'
-          +'<span style="flex:1">'+esc(PO_ACT_LABEL[k]||k)+(sn?'<br><span class="mut tiny">snoozed → '+esc(snzUntil(s))+(s.snoozed_by?' by '+esc(shortUser(s.snoozed_by)):'')+(s.snoozed_at?' on '+esc(s.snoozed_at):'')+'</span>':'')+'</span>'
+          +'<span style="flex:1">'+esc(PO_ACT_LABEL[k]||k)+(sn?'<br><span class="mut tiny">snoozed → '+esc(snzUntil(s))+snzBy(s)+(s.snoozed_at?' on '+esc(s.snoozed_at):'')+'</span>':'')+'</span>'
           +(sn?'<button class="save-btn light pap-un" data-k="'+esc(k)+'">wake</button>'
               :'<button class="save-btn light pap-snz" data-po="'+esc(po)+'" data-code="'+esc(k)+'">SNOOZE ▾</button>')
           +'<button class="lnk-btn pap-go" data-k="'+esc(k)+'" data-tab="'+(PO_ACT_TAB[k]||'')+'">open ↗</button></div>'; }).join('')
@@ -3176,7 +3204,7 @@
         grid.push(metaRow('DTC sales order ref', function(po){return pmeta[po].so;}));                              // row 8
         grid.push(boldL(['SKU','EAN','Carton qty','Release window','Product title','Size','Colour']).concat(pos.map(function(){return {v:'QTY', s:7};})));   // row 9: SKU header — bold; qty cols = QTY
         skus.forEach(function(sku){ var a=skuAttr[sku]||{};
-          grid.push([sku, a.ean||'', a.cq||'', (skuRW[sku]||''), a.title||'', a.size_long||'', a.colour||'']
+          grid.push([sku, a.ean||'', a.cq||'', (skuRW[sku]||''), a.title||'', a.size_long||a.size||'', a.colour||'']
             .concat(pos.map(function(po){ var q=qmap[sku+'|'+po]; return ctr(q?q:''); }))); });                     // qty cells centred
         // column widths: A-G sized to their text; H+ (qty/PO columns) ~50% wider than the 8.43 default
         var colDefs=[30,15,10,18,34,26,18].map(function(w,i){ return {min:i+1,max:i+1,width:w}; });
@@ -3875,7 +3903,7 @@
     pop.innerHTML='<div style="font-weight:700;margin-bottom:4px">'+esc(ref)+' — action items</div>'
       +conds.map(function(k){ var sn=shipActSnoozed(ref,k), s=_poActState[shipActKey(ref,k)]||{};
         return '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-top:1px solid #f1f5f9">'
-          +'<span style="flex:1">'+esc(SHIP_ACT_LABEL[k]||k)+(sn?'<br><span class="mut tiny">snoozed → '+esc(snzUntil(s))+(s.snoozed_by?' by '+esc(shortUser(s.snoozed_by)):'')+(s.snoozed_at?' on '+esc(s.snoozed_at):'')+'</span>':'')+'</span>'
+          +'<span style="flex:1">'+esc(SHIP_ACT_LABEL[k]||k)+(sn?'<br><span class="mut tiny">snoozed → '+esc(snzUntil(s))+snzBy(s)+(s.snoozed_at?' on '+esc(s.snoozed_at):'')+'</span>':'')+'</span>'
           +(sn?'<button class="save-btn light sap-un" data-k="'+esc(k)+'">wake</button>'
               :'<button class="save-btn light sap-snz" data-ref="'+esc(ref)+'" data-code="'+esc(k)+'">SNOOZE ▾</button>')
           +'</div>'; }).join('')
@@ -3893,7 +3921,7 @@
   function shipActMark(ref,code){ var s=_poActState[shipActKey(ref,code)]||{}, sn=shipActSnoozed(ref,code), lbl=SHIP_ACT_LABEL[code]||code;
     var A='<span title="'+esc(lbl)+(sn?' — snoozed until '+esc(snzUntil(s)):'')+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:'+(sn?'#f3a3a3':'#dc2626')+';color:#fff;font-weight:800;font-size:10px;flex:0 0 auto;margin-right:6px">A</span>';
     var snz=sn
-      ? '<span class="mut tiny" style="white-space:nowrap">Snoozed'+(s.snoozed_by?' by '+esc(shortUser(s.snoozed_by)):'')+' → '+esc(snzUntil(s))+' <button class="ship-act-snz" data-ref="'+esc(ref)+'" data-code="'+esc(code)+'" data-d="0" style="border:none;background:none;color:#1d4ed8;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">wake</button></span>'
+      ? '<span class="mut tiny" style="white-space:nowrap">Snoozed'+snzBy(s)+' → '+esc(snzUntil(s))+' <button class="ship-act-snz" data-ref="'+esc(ref)+'" data-code="'+esc(code)+'" data-d="0" style="border:none;background:none;color:#1d4ed8;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">wake</button></span>'
       : '<button class="ship-act-snz-btn" data-ref="'+esc(ref)+'" data-code="'+esc(code)+'" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:4px;font-size:10px;padding:1px 6px;margin-left:8px;cursor:pointer;flex:0 0 auto">SNOOZE ▾</button>';
     return '<div class="ship-act-row" data-mk="'+esc(ref)+'|'+esc(code)+'" style="display:flex;align-items:center;padding:2px 0;font-size:12px">'+A+'<span style="font-weight:600;color:#b91c1c">'+esc(lbl)+'</span>'+snz+'</div>'; }
   // Banner of a panel's actions (all conditions — snoozed ones show muted with a wake link, matching POs).
