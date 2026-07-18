@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.579';
+const APP_VERSION = 'v25.580';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1876,7 +1876,7 @@ app.get('/api/supply/:section', async (req, res) => {
         return res.json(await q(`SELECT l.po, l.sku, l.qty, el.qty erp_qty,
           (coalesce(l.qty,0) IS DISTINCT FROM coalesce(el.qty,0)) pending, to_char(pol.proposed_at,'YYYY-MM-DD') proposed_at,   -- 0 plan == absent from ERP → not pending
           l.cost_price, l.carton_qty, l.partial_carton_approved, l.full_carton_check,
-          pol.supplier_risk_approved, pol.discontinue_approved,
+          pol.supplier_risk_approved, pol.discontinue_approved, pol.country_risk_approved,
           coalesce(p.prod_no,'') prod_no, coalesce(p.status,'') status, coalesce(p.starred,false) starred,
           coalesce(p.preship_not_required,false) preship_not_required,
           (SELECT string_agg(DISTINCT category,',') FROM planner.portal_attachments a WHERE a.po=p.po) doc_cats,
@@ -4000,7 +4000,7 @@ app.post('/api/supply/buyplan-skus', async (req, res) => {
 // supplier → supplier_risk_approved, discontinue → discontinue_approved.
 app.post('/api/supply/po-line/:po_sku/approve', (req, res) => {
   const field = (req.body && req.body.field) || 'partial';
-  const col = { partial: 'partial_carton_approved', supplier: 'supplier_risk_approved', discontinue: 'discontinue_approved' }[field];
+  const col = { partial: 'partial_carton_approved', supplier: 'supplier_risk_approved', discontinue: 'discontinue_approved', country: 'country_risk_approved' }[field];
   if (!col) return res.status(400).json({ error: 'unknown approve field' });
   const val = req.body && req.body.approved;
   return patch(res, 'planner.purchase_order_lines', 'po_sku', req.params.po_sku, { [col]: 'boolean' }, { [col]: val });
@@ -4716,7 +4716,8 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
                     (EXISTS (SELECT 1 FROM planner.purchase_orders pp LEFT JOIN planner.branches bb ON bb.name=pp.branch
                        WHERE pp.po=l.po AND upper(coalesce(nullif(pp.country_code,''), bb.country_code,'')) IN ('UK','US','EU','AU','CA')
                          AND NOT EXISTS (SELECT 1 FROM planner.v_product_availability va
-                            WHERE va.sku=l.sku AND upper(va.country)=upper(coalesce(nullif(pp.country_code,''), bb.country_code,'')) AND va.is_available))) not_avail_market
+                            WHERE va.sku=l.sku AND upper(va.country)=upper(coalesce(nullif(pp.country_code,''), bb.country_code,'')) AND va.is_available))) not_avail_market,
+                    coalesce((SELECT pol2.country_risk_approved FROM planner.purchase_order_lines pol2 WHERE pol2.po_sku=l.po_sku),false) country_risk_approved
                   FROM planner.v_purchase_order_lines l
                   LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
                   WHERE l.po=$1 ORDER BY l.sku`, [po]),

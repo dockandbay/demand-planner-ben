@@ -2925,8 +2925,13 @@
     function discMismatch(l){ var dd=pickDisc(l.country,skuAttr[l.sku]||{}); return !!(dd && l.delivery && String(l.delivery)>String(dd)); }
     function lineSupRisk(l){ return !poLocked(l) && Number(l.qty)>0 && supMismatch(l) && !l.supplier_risk_approved; }
     function lineDisc(l){ return !/complete/i.test(l.status||'') && Number(l.qty)>0 && discMismatch(l) && !l.discontinue_approved; }
-    // not released in the PO's market — availability is authoritative (launch date ignored)
-    function lineNotInMarket(l){ return !/complete/i.test(l.status||'') && Number(l.qty)>0 && !!l.not_avail_market; }
+    // COUNTRY RISK: SKU not available in the PO's market (availability authoritative; launch date ignored) — until approved.
+    function lineCountryRisk(l){ return !/complete/i.test(l.status||'') && Number(l.qty)>0 && !!l.not_avail_market && !l.country_risk_approved; }
+    // Persistence: while an exception filter is on, a line the user APPROVES this session stays in view (until a
+    // page refresh / re-nav rebuilds opBuild) so they can undo — instead of instantly filtering out.
+    var _opStay={partial:new Set(),supplier:new Set(),discontinue:new Set(),country:new Set()};
+    function opKey(l){ return l.po+'|'+l.sku; }
+    function undoX(k,f){ return ' <button class="opundo" data-ap="'+esc(k)+'" data-field="'+f+'" title="undo this approval" style="border:1px solid #cbd5e1;background:#fff;color:#64748b;border-radius:3px;font-size:9px;line-height:1;padding:1px 4px;margin-left:2px;cursor:pointer">✕</button>'; }
     if(_pendingOP){ st.partials=!!_pendingOP.partials; st.suprisk=!!_pendingOP.suprisk; st.disc=!!_pendingOP.disc; if(_pendingOP.po)st.poq=String(_pendingOP.po).toLowerCase();
       st.statuses=new Set(pillStatuses);   // show all (non-complete) statuses so the flagged lines aren't hidden by the status filter
       _pendingOP=null; }
@@ -2949,7 +2954,7 @@
         +'<span class="pill'+(st.erpdiff?' active':'')+'" id="op-erp">⚠ Update ERP <span id="op-erp-n" style="color:#dc2626;font-weight:700"></span></span>'
         +'<span class="pill'+(st.suprisk?' active':'')+'" id="op-suprisk" title="lines ordered against a supplier not in the SKU\'s allowed multi-supplier list">⚠ Supplier risk <span id="op-suprisk-n" style="color:#dc2626;font-weight:700"></span></span>'
         +'<span class="pill'+(st.disc?' active':'')+'" id="op-disc" title="lines forecast to arrive after the product\'s discontinue date">⚠ Discontinued <span id="op-disc-n" style="color:#dc2626;font-weight:700"></span></span>'
-        +'<span class="pill'+(st.notmkt?' active':'')+'" id="op-notmkt" title="SKU not released in the PO\'s destination market — no availability there (launch date ignored)">✗ Not in market <span id="op-notmkt-n" style="color:#dc2626;font-weight:700"></span></span>'
+        +'<span class="pill'+(st.notmkt?' active':'')+'" id="op-notmkt" title="Country risk — SKU not released in the PO\'s destination market (no availability there; launch date ignored). Review &amp; approve like supplier risk.">⚠ Country risk <span id="op-notmkt-n" style="color:#dc2626;font-weight:700"></span></span>'
         +'<span class="pill po-focus'+(st.focus?' active':'')+'" id="op-focus" style="margin-left:14px" title="show only starred (Focus) POs that are still active / in progress">★ Focus</span>'
         +'<span style="margin-left:14px;font-size:9px;line-height:1.2;color:#64748b" title="In a quantity cell you can type shortcuts instead of a plain number:\n• 4c = 4 cartons = 4 × the SKU\'s carton qty (e.g. carton 12 → 48)\n• 150r = round 150 UP to the nearest full carton (e.g. carton 12 → 156)">💡 in a cell: <b>4c</b> = 4 cartons · <b>150r</b> = round up to carton</span></div>'
       +'</div>'   // /#op-filters
@@ -2969,7 +2974,7 @@
       else if(poqOn){ if(!pt.length)return false;   // typed a PO search but under 3 chars → no results (don't fall back to showing everything)
         if(!pt.some(function(t){return nrm(l.po).indexOf(t)>=0;}))return false; }
       else { if(!st.statuses.has(l.status))return false; if(!(allC||st.countries.has(l.country)))return false; }
-      return (st.prod==='All'||l.prod_no===st.prod)&&(st.batch==='All'||l.batch_id===st.batch)&&(st.supplier==='All'||l.supplier_name===st.supplier)&&(skipCat||st.cat==='All'||l.category===st.cat)&&(st.rw==='All'||skuRW[l.sku]===st.rw)&&(!st.partials||isUnapprovedPartial(l))&&(!st.erpdiff||erpDiff(l))&&(!st.suprisk||lineSupRisk(l))&&(!st.disc||lineDisc(l))&&(!st.notmkt||lineNotInMarket(l))&&qMatch(l.sku); }); }
+      return (st.prod==='All'||l.prod_no===st.prod)&&(st.batch==='All'||l.batch_id===st.batch)&&(st.supplier==='All'||l.supplier_name===st.supplier)&&(skipCat||st.cat==='All'||l.category===st.cat)&&(st.rw==='All'||skuRW[l.sku]===st.rw)&&(!st.partials||isUnapprovedPartial(l)||_opStay.partial.has(opKey(l)))&&(!st.erpdiff||erpDiff(l))&&(!st.suprisk||lineSupRisk(l)||_opStay.supplier.has(opKey(l)))&&(!st.disc||lineDisc(l)||_opStay.discontinue.has(opKey(l)))&&(!st.notmkt||lineCountryRisk(l)||_opStay.country.has(opKey(l)))&&qMatch(l.sku); }); }
     function rowsFor(cl){ var set={},list=[]; cl.forEach(function(l){if(!set[l.sku]){set[l.sku]=1;list.push(l.sku);}});
       function addMaster(reqCat){ skuMaster.forEach(function(s){ if(set[s.sku])return;
         if(reqCat&&s.category!==st.cat)return; if(st.cat!=='All'&&s.category!==st.cat)return;
@@ -2989,7 +2994,7 @@
     function updateActionCounts(){ var pc=poCount(isUnapprovedPartial), ec=poCount(erpDiff);
       var pn=document.getElementById('op-partials-n'); if(pn)pn.textContent=pc?('('+pc+')'):'';
       var en=document.getElementById('op-erp-n'); if(en)en.textContent=ec?('('+ec+')'):'';
-      var sc=poCount(lineSupRisk), dc=poCount(lineDisc), nc=poCount(lineNotInMarket);
+      var sc=poCount(lineSupRisk), dc=poCount(lineDisc), nc=poCount(lineCountryRisk);
       var sn=document.getElementById('op-suprisk-n'); if(sn)sn.textContent=sc?('('+sc+')'):'';
       var dn=document.getElementById('op-disc-n'); if(dn)dn.textContent=dc?('('+dc+')'):'';
       var nn=document.getElementById('op-notmkt-n'); if(nn)nn.textContent=nc?('('+nc+')'):''; }
@@ -3048,18 +3053,27 @@
       var pend=lines.some(function(x){return x.po===po&&Number(x.qty)!==Number(x.erp_qty==null?x.qty:x.erp_qty);});
       b.style.display=pend?'inline-block':'none'; b.classList.toggle('has',pend);
       b.onclick=function(){ gotoPO(po,'oplan'); }; }); }   // redirect to PURCHASE ORDERS ▸ that PO ▸ ORDER PLAN sub-tab (where ERP push lives), instead of the inline upload modal
-    function bindApprove(){ document.querySelectorAll('#op-grid .opapprove').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var psku=b.dataset.ap;
-      fetch('/api/supply/po-line/'+encodeURIComponent(psku)+'/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({approved:true})}).then(function(r){return r.json();}).then(function(){var l=lines.find(function(x){return (x.po+'|'+x.sku)===psku;}); if(l)l.full_carton_check='OK Partial'; viewKeep();}); }; });
+    // apply an approval flag to the local line object (so the view updates without a refetch)
+    function opSetLocal(l,field,on){ if(!l)return;
+      if(field==='partial')l.full_carton_check=on?'OK Partial':'⚠ partial';
+      else if(field==='supplier')l.supplier_risk_approved=on;
+      else if(field==='discontinue')l.discontinue_approved=on;
+      else if(field==='country')l.country_risk_approved=on; }
+    function opApprove(psku,field,on,cb){ return fetch('/api/supply/po-line/'+encodeURIComponent(psku)+'/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({approved:on,field:field})}).then(function(r){return r.json();}).then(function(){ var l=lines.find(function(x){return opKey(x)===psku;}); opSetLocal(l,field,on); if(on){_opStay[field].add(psku);} cb&&cb(l); }); }
+    function bindApprove(){
+      document.querySelectorAll('#op-grid .opapprove').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); opApprove(b.dataset.ap,'partial',true,function(){viewKeep();}); }; });
+      document.querySelectorAll('#op-grid .opapprove-sup').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); opApprove(b.dataset.ap,'supplier',true,function(){viewKeep();}); }; });
+      document.querySelectorAll('#op-grid .opapprove-disc').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); opApprove(b.dataset.ap,'discontinue',true,function(){viewKeep();}); }; });
+      document.querySelectorAll('#op-grid .opapprove-ctry').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); opApprove(b.dataset.ap,'country',true,function(){viewKeep();}); }; });
+      // ✕ undo an approval — reverts the flag and keeps the line in view (it becomes an open exception again)
+      document.querySelectorAll('#op-grid .opundo').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var psku=b.dataset.ap, field=b.dataset.field;
+        opApprove(psku,field,false,function(){ _opStay[field].delete(psku); viewKeep(); }); }; });
       // "Approve all partials" for a whole PO column (header button)
       document.querySelectorAll('#op-grid .op-approve-all').forEach(function(b){ b.onclick=function(e){ e.stopPropagation();
         var po=b.dataset.po, ps=lines.filter(function(l){return l.po===po && isUnapprovedPartial(l);}); if(!ps.length)return;
         b.disabled=true; b.textContent='…';
-        Promise.all(ps.map(function(l){ return fetch('/api/supply/po-line/'+encodeURIComponent(l.po+'|'+l.sku)+'/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({approved:true})}).then(function(r){return r.json();}).then(function(){ l.full_carton_check='OK Partial'; }); }))
-          .then(function(){ viewKeep(); }).catch(function(){ alert('Some partials failed to approve.'); viewKeep(); }); }; });
-      function approveExc(cls,field,set){ document.querySelectorAll('#op-grid .'+cls).forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var psku=b.dataset.ap;
-        fetch('/api/supply/po-line/'+encodeURIComponent(psku)+'/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({approved:true,field:field})}).then(function(r){return r.json();}).then(function(){var l=lines.find(function(x){return (x.po+'|'+x.sku)===psku;}); if(l)set(l); viewKeep();}); }; }); }
-      approveExc('opapprove-sup','supplier',function(l){l.supplier_risk_approved=true;});
-      approveExc('opapprove-disc','discontinue',function(l){l.discontinue_approved=true;}); }
+        Promise.all(ps.map(function(l){ return opApprove(opKey(l),'partial',true); }))
+          .then(function(){ viewKeep(); }).catch(function(){ alert('Some partials failed to approve.'); viewKeep(); }); }; }); }
     function togglebar(id,opts,setv){ document.getElementById(id).onclick=function(e){var t=e.target; if(t.dataset.all)setv=new Set(opts); else if(t.dataset.v!=null){if(setv.has(t.dataset.v))setv.delete(t.dataset.v);else setv.add(t.dataset.v);} else return; if(id==='op-status')st.statuses=setv; else st.countries=setv; document.getElementById(id).innerHTML=pillsHTML(opts,setv,id==='op-country'); viewReset(); }; }
     togglebar('op-status',pillStatuses,st.statuses); togglebar('op-country',countries,st.countries);
     c.querySelectorAll('[data-sc]').forEach(function(p){p.onclick=function(){st.scope=p.dataset.sc; c.querySelectorAll('[data-sc]').forEach(function(x){x.classList.toggle('active',x===p);}); viewReset();};});
@@ -3140,11 +3154,14 @@
     function renderChanges(){ var box=document.getElementById('op-changes'); if(!box)return;
       var unconf=plc.filter(function(x){return x.unconfirmed;});
       if(!unconf.length){ box.innerHTML=''; return; }
-      // slim banner — the changes show inline in the grid cells (amber qty ✓ confirm); this gives the count + bulk accept
-      box.innerHTML='<div style="margin:4px 0 10px;padding:7px 11px;background:#fff7ed;border:1px solid #fdba74;border-radius:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+      // banner — count + the actual PO(s) as clickable links that filter the grid to them, + bulk accept
+      var upos=Array.from(new Set(unconf.map(function(x){return x.po;}))).sort();
+      box.innerHTML='<div style="margin:4px 0 10px;padding:7px 11px;background:#fff7ed;border:1px solid #fdba74;border-radius:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
         +'<span style="font-weight:700;color:#92400e">⚠ '+unconf.length+' supplier change'+(unconf.length>1?'s':'')+' awaiting approval</span>'
-        +'<span class="mut tiny">confirm inline in the grid (amber <b>✓</b> in the cell), or</span>'
+        +'<span class="mut tiny">on:</span>'+upos.map(function(p){return ' <button class="lnk-btn op-chg-po" data-po="'+esc(p)+'" title="filter the order plan to '+esc(p)+'" style="color:#1d4ed8;text-decoration:underline;font-weight:600;background:none;border:none;padding:0;cursor:pointer">'+esc(p)+'</button>';}).join(',')
+        +' <span class="mut tiny">— click a PO to review, confirm inline (amber <b>✓</b>), or</span>'
         +'<button class="save-btn op-chg-acc-all">Accept all</button></div>';
+      box.querySelectorAll('.op-chg-po').forEach(function(b){ b.onclick=function(){ st.poq=String(b.dataset.po||'').toLowerCase(); var pin=document.getElementById('op-po'); if(pin)pin.value=b.dataset.po; viewReset(); }; });
       box.querySelector('.op-chg-acc-all').onclick=function(){ if(!confirm('Accept all '+unconf.length+' supplier change'+(unconf.length>1?'s':'')+'?'))return;
         var pos=Array.from(new Set(unconf.map(function(x){return x.po;})));
         Promise.all(pos.map(function(po){ return fetch('/api/supply/po-line-accept',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,all:true})}).then(function(r){return r.json();}); }))
@@ -3173,7 +3190,7 @@
     if(!skuList.length){ if(cn)cn.textContent='0 SKUs'; return '<div class="count">No SKUs for this filter (pick a Category for \"All in category\").</div>'; }
     var pos=[],psn={},cell={},meta={};
     rows.forEach(function(l){ if(!psn[l.po]){psn[l.po]=1;pos.push(l.po);meta[l.po]={s:l.supplier_name,co:l.country,ps:l.prod_start,pe:l.prod_end,sd:l.ship_date,dl:l.delivery};}
-      cell[l.po+'|'+l.sku]={q:l.qty,eq:(l.erp_qty==null?l.qty:l.erp_qty),c:Number(l.cost_price)||0,pq:Number(l.pallet_qty)||0,fcc:(l.full_carton_check||''),sra:!!l.supplier_risk_approved,dca:!!l.discontinue_approved,nm:!!l.not_avail_market}; });
+      cell[l.po+'|'+l.sku]={q:l.qty,eq:(l.erp_qty==null?l.qty:l.erp_qty),c:Number(l.cost_price)||0,pq:Number(l.pallet_qty)||0,fcc:(l.full_carton_check||''),sra:!!l.supplier_risk_approved,dca:!!l.discontinue_approved,nm:!!l.not_avail_market,cra:!!l.country_risk_approved}; });
     pos.sort().reverse();   // purchase orders across the top, descending (newest first)
     var poTotal=pos.length, poCapped=(!showAllPos && poTotal>OP_POCAP);
     if(poCapped)pos=pos.slice(0,OP_POCAP);   // render only the first N PO columns until "show all"
@@ -3221,17 +3238,19 @@
           var ttl=(ch.amended_qty!=null&&ch.amended_qty!==''?'qty '+units(ch.amended_qty):'')+(ch.actual_cost!=null&&ch.actual_cost!==''?(ch.amended_qty!=null?' · ':'')+'cost $'+money(ch.actual_cost):'');
           tdc=' class="chgcell"'; badge=' <button class="opconfirm" data-ps="'+esc(po+'|'+sku)+'" title="supplier change — '+esc(ttl)+' · click to confirm" style="cursor:pointer;border:1px solid #f59e0b;background:#fef3c7;color:#92400e;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;white-space:nowrap">'+pq+' ✓</button>'; }
         else if(fcc.indexOf('⚠')>=0){ tdc=' class="pcell"'; badge=' <button class="pbtn opapprove" data-ap="'+esc(po+'|'+sku)+'" data-tip="Partial carton: this quantity isn\'t a whole number of cartons for the SKU (carton qty '+(a.cq||'?')+'). Click ✓ to approve ordering a partial carton." title="approve partial carton qty">p ✓</button>'; }
-        else if(fcc.indexOf('OK Partial')>=0){ tdc=' class="pcellok"'; badge=' <span class="tool-badge bg-green" data-tip="Partial carton — approved. This line intentionally orders a non-whole number of cartons." title="partial approved">p✓</span>'; }
+        else if(fcc.indexOf('OK Partial')>=0){ tdc=' class="pcellok"'; badge=' <span class="tool-badge bg-green" data-tip="Partial carton — approved. This line intentionally orders a non-whole number of cartons." title="partial approved">p✓</span>'+undoX(po+'|'+sku,'partial'); }
         if(cc && q>0){   // exception flags: supplier risk + discontinued (approve like partials)
           var allowed=(a.sm||'').split(',').map(function(s){return s.trim().toLowerCase();}).filter(Boolean), psup=(meta[po].s||'').trim().toLowerCase();
           if(allowed.length && psup && allowed.indexOf(psup)<0){
-            if(cc.sra) badge+=' <span class="tool-badge bg-green" title="supplier risk approved">s✓</span>';
+            if(cc.sra) badge+=' <span class="tool-badge bg-green" title="supplier risk approved">s✓</span>'+undoX(po+'|'+sku,'supplier');
             else { if(!tdc)tdc=' class="pcell"'; badge+=' <button class="pbtn opapprove-sup" data-ap="'+esc(po+'|'+sku)+'" title="supplier '+esc(meta[po].s||'')+' not in allowed list ['+esc(a.sm||'')+'] — review &amp; approve" style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;white-space:nowrap">s ⚠</button>'; } }
           var dd=pickDisc(meta[po].co,a), arr=meta[po].dl;
           if(dd && arr && String(arr)>String(dd)){
-            if(cc.dca) badge+=' <span class="tool-badge bg-green" title="discontinue approved">d✓</span>';
+            if(cc.dca) badge+=' <span class="tool-badge bg-green" title="discontinue approved">d✓</span>'+undoX(po+'|'+sku,'discontinue');
             else { if(!tdc)tdc=' class="pcell"'; badge+=' <button class="pbtn opapprove-disc" data-ap="'+esc(po+'|'+sku)+'" title="arrives '+fd(arr)+' after discontinue '+fd(dd)+' — review &amp; approve" style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;white-space:nowrap">d ⚠</button>'; } } }
-        if(cc && cc.nm && q>0){ if(!tdc)tdc=' class="pcell"'; badge+=' <span class="tool-badge" title="SKU not released in '+esc((meta[po].co||'').toUpperCase())+' — no availability there (launch date ignored)" style="background:#fee2e2;color:#b91c1c;font-size:8px;font-weight:700">✗ mkt</span>'; }
+        // COUNTRY RISK: SKU not released in the PO's market → approve (c ⚠) / approved (c✓ + undo)
+        if(cc && cc.nm && q>0){ if(cc.cra) badge+=' <span class="tool-badge bg-green" title="country risk approved — reviewed producing for a market where the SKU isn&#39;t released">c✓</span>'+undoX(po+'|'+sku,'country');
+          else { if(!tdc)tdc=' class="pcell"'; badge+=' <button class="pbtn opapprove-ctry" data-ap="'+esc(po+'|'+sku)+'" title="SKU not released in '+esc((meta[po].co||'').toUpperCase())+' — no availability there (launch date ignored). Review &amp; approve." style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;white-space:nowrap">c ⚠</button>'; } }
         tds+='<td'+tdc+' style="min-width:'+POW+';width:'+POW+';text-align:center'+(discPast&&!tdc?';background:'+rowBg:'')+'"><input class="qtycell'+(q?'':' z')+'" data-po="'+esc(po)+'" data-sku="'+esc(sku)+'" data-erp="'+eq+'" value="'+(q||'')+'">'+badge+'</td>';});
       h+='<tr><td class="l" style="'+fzc('sku',rowBg,2)+'"><button class="op-plan" data-sku="'+esc(sku)+'" title="show the buy plan for this SKU (pick country in the popup)" style="font-size:8px;font-weight:700;padding:0 4px;margin-right:5px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer;vertical-align:middle">PLAN</button>'+esc(sku)+'</td>'
         +'<td style="'+fzc('cq',rowBg,2)+';text-align:right"><span class="tiny">'+(a.cq?esc(a.cq):'')+'</span></td>'

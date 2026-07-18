@@ -3,6 +3,20 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.580 - Order Plan: Country risk approval, persistent approvals + undo, supplier-change PO links
+
+**Country risk** is now a first-class risk on SUPPLY ▸ Order Plan (like partials / supplier risk):
+- Pill renamed "⚠ Country risk"; cell shows an approve button (c ⚠) → approved (c✓). Approval writes
+  `purchase_order_lines.country_risk_approved` (migration 118) via the existing approve endpoint (field=country).
+**Approvals persist in view + undo:** approving a partial / supplier-risk / discontinued / country-risk line no
+longer instantly filters it out — it stays visible (per-session, until a page refresh) so you can review/undo,
+via a new ✕ next to the p✓ / s✓ / d✓ / c✓ badges (undo posts approved=false and re-opens the exception).
+**Supplier-change banner** now lists the actual PO(s) as clickable links that filter the order plan to them
+(was just a count with no way to see which PO).
+
+Files: server.mjs, supply/inject.html, migrations/118_po_line_country_risk_approved.sql.
+⚠ Migration 118 (adds `country_risk_approved` bool default false) — Diviyaj to run on live.
+
 ## v25.579 - Order Plan: flag SKUs produced for a market they aren't released in
 
 New "not released in market" exception on both order plans. A PO line is flagged when the SKU has **no
