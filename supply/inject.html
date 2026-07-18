@@ -3262,7 +3262,7 @@
   // undoCls = 'opundo' (grid) or 'oprisk-undo' (PO panel); both data-ap + data-ps are set so either handler works.
   function apprBadge(kind,title,field,psku,undoCls){ return ' <span class="opappr" style="position:relative;display:inline-block">'
     +'<span class="tool-badge bg-green" title="'+title+' approved">'+kind+'✓</span>'
-    +'<button class="'+undoCls+'" data-ap="'+esc(psku)+'" data-ps="'+esc(psku)+'" data-field="'+field+'" title="undo '+title+' approval" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(185,28,28,.94);color:#fff;border:none;border-radius:3px;font-size:9px;font-weight:700;line-height:1;cursor:pointer">✕</button></span>'; }
+    +'<button class="'+undoCls+'" data-ap="'+esc(psku)+'" data-ps="'+esc(psku)+'" data-field="'+field+'" title="undo '+title+' approval" style="position:absolute;inset:0;align-items:center;justify-content:center;background:rgba(185,28,28,.94);color:#fff;border:none;border-radius:3px;font-size:9px;font-weight:700;line-height:1;cursor:pointer">✕</button></span>'; }
   function pivot(rows, skuList, skuCat, plcMap, skuAttr, skuRW, showAllPos){ plcMap=plcMap||{}; skuAttr=skuAttr||{}; skuRW=skuRW||{}; var cn=document.getElementById('op-count');
     if(!skuList.length){ if(cn)cn.textContent='0 SKUs'; return '<div class="count">No SKUs for this filter (pick a Category for \"All in category\").</div>'; }
     var pos=[],psn={},cell={},meta={};

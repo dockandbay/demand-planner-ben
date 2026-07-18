@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.594 - Order Plan: fix hover-✕ to undo an approved partial/supplier/disc/country risk
+
+The undo ✕ overlay never appeared on hover: the badge button carried an inline `display:none`, which beats
+the stylesheet's `.opappr:hover .opundo{display:flex}` (no !important). Removed the inline `display:none` so
+the default-hide comes from CSS and the hover reveal works again — in both the Order Plan grid (opundo) and
+the PO panel (oprisk-undo).
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.593 - SUPPLY ▸ Actions card polish (one-line buttons, green Upload, current status)
 
 - The fix button(s) and the Dismiss / Snooze ▾ lifecycle controls now share one flex-wrap row (same line
