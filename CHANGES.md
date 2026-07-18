@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.610 - FOB has no landed costs (freight / duty / tax = 0), incl. FOB-mode shipments
+
+Clarified rule: anything FOB carries no landed costs. Previously `isFOBdest` treated a PO as FOB only when it
+had NO shipment (+ manufacturing/non-market destination) — so a PO on a **FOB-mode shipment** (e.g.
+PO-1731753: Direct to Client / AU / shipment mode = fob) still computed freight + import duty + tax. Now:
+- PO query returns `ship_mode`; `isFOBdest` treats a FOB-mode shipment as FOB → Landed cost panel shows
+  freight / duty / tax = 0 (goods only).
+- Cash flow skips freight/duty/tax posts for FOB shipments too (mirrors the landed-cost view).
+
+Files: server.mjs, supply/inject.html. No migrations, no new env vars.
+
 ## v25.609 - Order Plan: Est. cost defaults to products supplier cost when a line has no price
 
 Added `cost` / `cost_lx` / `cost_xr` to planner.products (migration 119) and loaded them from Airtable

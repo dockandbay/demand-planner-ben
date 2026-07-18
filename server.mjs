@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.609';
+const APP_VERSION = 'v25.610';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -798,8 +798,9 @@ async function cashflowResponse(pos, q) {
     if (p.shipment) {
       if (seenShip[p.shipment]) continue;                       // one set of lines per shipment
       seenShip[p.shipment] = true;
-      const members = byShip[p.shipment] || [p];
       const fr = shipFreight[p.shipment] || { cost: null, src: '' };
+      if (fr.src === 'FOB') continue;   // FOB shipment → no freight / duty / tax posts (goods value flows via the payment plan). Mirrors the PLAN landed-cost view.
+      const members = byShip[p.shipment] || [p];
       const duty = members.reduce((s, m) => s + num(m.est_duty), 0);
       const tax = members.reduce((s, m) => s + num(m.est_tax), 0);
       const dutyDue = isUSA(p.country) ? addDays(land, 7) : land;
@@ -1712,6 +1713,8 @@ app.get('/api/supply/:section', async (req, res) => {
             to_char(balance_due_date_overide,'YYYY-MM-DD') final_payment_due,   -- the "final payment due" override (priority for balance due)
             credit_days, credit_type,
             coalesce(deposit_ref,'') deposit_ref, coalesce(nullif(shipment_ref,''), (SELECT s.shipment_ref FROM planner.shipments s WHERE s.master_po=calc4.po LIMIT 1), '') shipment,
+            -- mode of the assigned shipment (fob/air/sea) — FOB shipments carry no freight/duty/tax (landed cost = goods only)
+            lower(coalesce((SELECT s.mode FROM planner.shipments s WHERE s.shipment_ref = coalesce(nullif(shipment_ref,''), (SELECT s2.shipment_ref FROM planner.shipments s2 WHERE s2.master_po=calc4.po LIMIT 1)) LIMIT 1),'')) ship_mode,
             coalesce(sh_carrier,'') ship_carrier, coalesce(sh_carrier_ref,'') ship_carrier_ref,
             coalesce(client,'') client, coalesce(client_requirements,'') client_requirements,
             coalesce(sales_order_ref,'') sales_order_ref, coalesce(client_po_ref,'') client_po_ref,

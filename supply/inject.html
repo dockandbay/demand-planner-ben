@@ -2367,7 +2367,8 @@
   // FOB pickup = the goods don't land into one of our import warehouses (UK/US/EU/AU/CA) AND no shipment is
   // assigned yet. DIRECT / "Direct to Client" / blank destinations are pickup → no freight or import.
   // Once a shipment is assigned it takes priority (it carries the real destination + mode, incl. fob $0).
-  function isFOBdest(r){ if(r.shipment)return false; if(/manufactur/i.test(r.branch||''))return true; return !/^(UK|US|EU|AU|CA)/i.test((r.country||'').trim()); }
+  function isFOBdest(r){ if(String(r.ship_mode||'').toLowerCase()==='fob')return true;   // on a FOB-mode shipment → FOB (no freight / duty / tax, even though a shipment is assigned)
+    if(r.shipment)return false; if(/manufactur/i.test(r.branch||''))return true; return !/^(UK|US|EU|AU|CA)/i.test((r.country||'').trim()); }
   // shared exceptions/actions for a PO — drives both the PLAN tab badges and the grid PO-ref flag.
   // d (po-detail) is optional; the supplier-invoice discrepancy only resolves once it's loaded.
   function poExceptions(r,d){ if(!r)return {pay:[],dates:[],client:[],landed:[],timeline:[],oplan:[],all:[]};
@@ -2612,7 +2613,7 @@
     var isUS=/^US/i.test(r.country||''), hasShip=!!r.shipment;
     var isFOB=isFOBdest(r);   // no import-warehouse destination + no shipment = FOB pickup (shipment takes priority once assigned)
     var frEst, frNote;
-    if(isFOB){ frEst=0; frNote='FOB pickup — no destination warehouse'; }
+    if(isFOB){ frEst=0; frNote=(String(r.ship_mode||'').toLowerCase()==='fob'?'FOB shipment — collected at factory (no freight / duty / tax)':'FOB pickup — no destination warehouse'); }
     else if(r.flex_quote!=null){ frEst=Number(r.flex_quote); frNote='Flexport quote'; }
     else { var se=seaEst(r.sea_tiers, r.pallets); if(se){ frEst=se.cost; frNote='~sea · '+(r.pallets||0)+' pallets = '+(comboTxt(se.combo)||'—'); } else { frEst=null; frNote='no sea rate for '+esc(r.country||'?'); } }
     var freightDue=r.delivery?addDaysISO(r.delivery,14):null;        // freight due = delivery + 14
