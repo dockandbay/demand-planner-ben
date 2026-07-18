@@ -289,10 +289,12 @@
 #supply-root .bc-mono{font-family:ui-monospace,Menlo,monospace}
 #supply-root tr.batchrow td{background:#eef2ff!important;font-weight:600;border-top:1px solid #c7d2fe;text-align:left;white-space:normal}
 #supply-root tr.cat-hdr td{background:#e8e8e6;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#333;padding:3px 8px;text-align:left;border-top:2px solid #bbb}
-#supply-root .opapprove:hover{color:#15803d}
-/* unapproved risk badges (supplier / discontinued / country) — clear hover feedback that they're clickable */
-#supply-root .opapprove-sup,#supply-root .opapprove-disc,#supply-root .opapprove-ctry{transition:background .1s,border-color .1s,box-shadow .1s}
-#supply-root .opapprove-sup:hover,#supply-root .opapprove-disc:hover,#supply-root .opapprove-ctry:hover{background:#fca5a5!important;border-color:#dc2626!important;color:#7f1d1d!important;box-shadow:0 0 0 2px rgba(220,38,38,.2)}
+/* Unapproved risk badge (partial / supplier / discontinued / country) — one shared look: RED "letter ⚠" alert
+   by default; on hover it previews the approved state (GREEN "letter ✓") so it's obviously clickable-to-approve. */
+#supply-root .oprisk-badge{display:inline-block;background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:3px;font-size:9px;font-weight:700;line-height:1.4;padding:1px 5px;margin-left:2px;white-space:nowrap;cursor:pointer;font-family:inherit;transition:background .1s,color .1s,border-color .1s}
+#supply-root .oprisk-badge::after{content:" ⚠"}
+#supply-root .oprisk-badge:hover{background:#16a34a;border-color:#16a34a;color:#fff}
+#supply-root .oprisk-badge:hover::after{content:" ✓"}
 /* undo-approval ✕ overlays the ✓ badge on hover (no layout shift) */
 #supply-root .opappr .opundo,#supply-root .opappr .oprisk-undo{display:none}
 #supply-root .opappr:hover .opundo,#supply-root .opappr:hover .oprisk-undo{display:flex}
@@ -2507,7 +2509,7 @@
     var RFIELD={p:'partial',s:'supplier',d:'discontinue',c:'country'};
     function rBadge(kind,label,unap,ap,psku){
       if(ap) return apprBadge(kind,label,RFIELD[kind],psku,'oprisk-undo');
-      if(unap) return ' <button class="oprisk-approve" data-ps="'+esc(psku)+'" data-field="'+RFIELD[kind]+'" title="'+label+' — review &amp; approve" style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;cursor:pointer">'+kind+' ⚠</button>';
+      if(unap) return ' <button class="oprisk-badge oprisk-approve" data-ps="'+esc(psku)+'" data-field="'+RFIELD[kind]+'" title="'+label+' — review &amp; approve">'+kind+'</button>';
       return ''; }
     function riskBadges(l){ if(!l)return ''; var psku=po+'|'+l.sku, out='';
       var pUnap=(l.full_carton_check||'').indexOf('⚠')>=0, pAp=!pUnap&&((l.full_carton_check||'').indexOf('OK Partial')>=0||l.partial_carton_approved);
@@ -3314,20 +3316,20 @@
           var pq=(ch.amended_qty!=null&&ch.amended_qty!=='')?units(ch.amended_qty):'✓';
           var ttl=(ch.amended_qty!=null&&ch.amended_qty!==''?'qty '+units(ch.amended_qty):'')+(ch.actual_cost!=null&&ch.actual_cost!==''?(ch.amended_qty!=null?' · ':'')+'cost $'+money(ch.actual_cost):'');
           tdc=' class="chgcell"'; badge=' <button class="opconfirm" data-ps="'+esc(po+'|'+sku)+'" title="supplier change — '+esc(ttl)+' · click to confirm" style="cursor:pointer;border:1px solid #f59e0b;background:#fef3c7;color:#92400e;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;white-space:nowrap">'+pq+' ✓</button>'; }
-        else if(fcc.indexOf('⚠')>=0){ tdc=' class="pcell"'; badge=' <button class="pbtn opapprove" data-ap="'+esc(po+'|'+sku)+'" data-tip="Partial carton: this quantity isn\'t a whole number of cartons for the SKU (carton qty '+(a.cq||'?')+'). Click ✓ to approve ordering a partial carton." title="approve partial carton qty">p ✓</button>'; }
+        else if(fcc.indexOf('⚠')>=0){ tdc=' class="pcell"'; badge=' <button class="oprisk-badge opapprove" data-ap="'+esc(po+'|'+sku)+'" data-tip="Partial carton: this quantity isn\'t a whole number of cartons for the SKU (carton qty '+(a.cq||'?')+'). Click to approve ordering a partial carton." title="approve partial carton qty">p</button>'; }
         else if(fcc.indexOf('OK Partial')>=0){ tdc=' class="pcellok"'; badge=apprBadge('p','Partial carton','partial',po+'|'+sku,'opundo'); }
         if(cc && q>0){   // exception flags: supplier risk + discontinued (approve like partials)
           var allowed=(a.sm||'').split(',').map(function(s){return s.trim().toLowerCase();}).filter(Boolean), psup=(meta[po].s||'').trim().toLowerCase();
           if(allowed.length && psup && allowed.indexOf(psup)<0){
             if(cc.sra) badge+=apprBadge('s','Supplier risk','supplier',po+'|'+sku,'opundo');
-            else { if(!tdc)tdc=' class="pcell"'; badge+=' <button class="pbtn opapprove-sup" data-ap="'+esc(po+'|'+sku)+'" title="supplier '+esc(meta[po].s||'')+' not in allowed list ['+esc(a.sm||'')+'] — review &amp; approve" style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;white-space:nowrap">s ⚠</button>'; } }
+            else { if(!tdc)tdc=' class="pcell"'; badge+=' <button class="oprisk-badge opapprove-sup" data-ap="'+esc(po+'|'+sku)+'" title="supplier '+esc(meta[po].s||'')+' not in allowed list ['+esc(a.sm||'')+'] — review &amp; approve">s</button>'; } }
           var dd=pickDisc(meta[po].co,a), arr=meta[po].dl;
           if(dd && arr && String(arr)>String(dd)){
             if(cc.dca) badge+=apprBadge('d','Discontinued','discontinue',po+'|'+sku,'opundo');
-            else { if(!tdc)tdc=' class="pcell"'; badge+=' <button class="pbtn opapprove-disc" data-ap="'+esc(po+'|'+sku)+'" title="arrives '+fd(arr)+' after discontinue '+fd(dd)+' — review &amp; approve" style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;white-space:nowrap">d ⚠</button>'; } } }
+            else { if(!tdc)tdc=' class="pcell"'; badge+=' <button class="oprisk-badge opapprove-disc" data-ap="'+esc(po+'|'+sku)+'" title="arrives '+fd(arr)+' after discontinue '+fd(dd)+' — review &amp; approve">d</button>'; } } }
         // COUNTRY RISK: SKU not released in the PO's market → approve (c ⚠) / approved (c✓ + undo)
         if(cc && cc.nm && q>0){ if(cc.cra) badge+=apprBadge('c','Country risk','country',po+'|'+sku,'opundo');
-          else { if(!tdc)tdc=' class="pcell"'; badge+=' <button class="pbtn opapprove-ctry" data-ap="'+esc(po+'|'+sku)+'" data-tip="Country risk: '+esc((meta[po].co||'').toUpperCase())+' has no availability for this SKU (launch date ignored) — you\'re producing it for a market where it isn\'t released. Click to review &amp; approve." style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;white-space:nowrap">c ⚠</button>'; } }
+          else { if(!tdc)tdc=' class="pcell"'; badge+=' <button class="oprisk-badge opapprove-ctry" data-ap="'+esc(po+'|'+sku)+'" data-tip="Country risk: '+esc((meta[po].co||'').toUpperCase())+' has no availability for this SKU (launch date ignored) — you\'re producing it for a market where it isn\'t released. Click to review &amp; approve.">c</button>'; } }
         tds+='<td'+tdc+' style="min-width:'+POW+';width:'+POW+';text-align:center'+(discPast&&!tdc?';background:'+rowBg:'')+'"><input class="qtycell'+(q?'':' z')+'" data-po="'+esc(po)+'" data-sku="'+esc(sku)+'" data-erp="'+eq+'" value="'+(q||'')+'">'+badge+'</td>';});
       h+='<tr><td class="l" style="'+fzc('sku',rowBg,2)+'"><button class="op-plan" data-sku="'+esc(sku)+'" title="show the buy plan for this SKU (pick country in the popup)" style="font-size:8px;font-weight:700;padding:0 4px;margin-right:5px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer;vertical-align:middle">PLAN</button>'+esc(sku)+'</td>'
         +'<td style="'+fzc('cq',rowBg,2)+';text-align:right"><span class="tiny">'+(a.cq?esc(a.cq):'')+'</span></td>'

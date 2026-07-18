@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.596 - Order Plan: unapproved risk badges are red alerts, hover previews green approve
+
+Unified all four unapproved risk badges (partial / supplier / discontinued / country) onto one shared
+`.oprisk-badge` style: **RED "letter ⚠" alert by default**, and on hover it previews the approved state —
+**GREEN "letter ✓"** — so it's obvious clicking will approve. Previously the partial badge was a green tick
+even when unapproved (looked already-approved). Applied in both the SUPPLY ▸ Order Plan grid and the per-PO
+Order Plan panel. Approved badges are unchanged (green "letter✓" with the hover-✕ to undo).
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.595 - Order Plan: risk-badge hover feedback + removed "Update ERP" pill
 
 - Unapproved supplier / discontinued / country risk badges (s ⚠ / d ⚠ / c ⚠) now show a clear hover state
