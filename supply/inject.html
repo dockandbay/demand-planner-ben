@@ -806,7 +806,7 @@
     if(r.fix==='date'){ fix='<span class="tiny mut">fix date</span> <input class="fci dt act-in" type="date" data-id="'+r._id+'"> '+applyBtn(r._id); }
     else if(r.fix==='shipment'){ fix='<span class="tiny mut">assign shipment</span> <input class="fci txt act-in" list="shiplist" placeholder="pick / type…" data-id="'+r._id+'"> '+applyBtn(r._id); }
     else if(r.fix==='supplier'){ fix='<span class="tiny mut">set supplier</span> <input class="fci txt act-in" list="supplierlist" placeholder="pick supplier…" data-id="'+r._id+'"> '+applyBtn(r._id); }
-    else if(r.fix==='upload'){ fix='<button class="save-btn act-up" data-id="'+r._id+'" data-po="'+esc(r.ref||r.target_key||'')+'">⬆ Upload to ERP</button>'; }
+    else if(r.fix==='upload'){ fix='<button class="save-btn act-up" data-id="'+r._id+'" data-po="'+esc(r.ref||r.target_key||'')+'" style="background:#16a34a;color:#fff;border-color:#16a34a">⬆ Upload to ERP</button>'; }
     else if(r.fix==='arrived'){ fix='<button class="save-btn act-arrived" data-id="'+r._id+'">✓ Mark arrived</button>'; }
     else if(r.fix==='podeliver'){ fix='<button class="save-btn act-podeliver" data-id="'+r._id+'">✓ Mark PO delivered</button>'; }
     else if(r.fix==='prodstatus'){ fix='<span class="tiny mut">supplier status</span> <select class="fci act-in" data-id="'+r._id+'"><option value="">—</option>'+prodStatusOpts('')+'</select> '+applyBtn(r._id); }
@@ -818,23 +818,25 @@
     else if(r.fix==='gotoitem'){ var ilbl=r.gotarget==='dep'?'Open deposit ▸':r.gotarget==='other'?'Open other payments ▸':'Open PO ▸ Payments'; fix='<button class="save-btn light act-gotoitem" data-go="'+esc(r.gotarget||'po')+'" data-k="'+esc(r.target_key||r.ref)+'">'+ilbl+'</button>'; }
     else if(r.fix==='gotomfg'){ fix='<button class="save-btn light act-gotomfg">Open Manufacturing ▸</button>'; }
     // Date conflict has TWO valid fixes: correct the date (above), OR advance the PO status (own line below).
-    if(r.type==='Date conflict'){ fix2='<span class="tiny mut">or set status</span> <select class="fci act-postatus" data-po="'+esc(r.target_key||r.ref)+'" data-id="'+r._id+'"><option value="">—</option>'+PO_STATUSES.map(function(stx){return '<option>'+esc(stx)+'</option>';}).join('')+'</select>'; }
+    if(r.type==='Date conflict'){ var _curSt=(String(r.detail||'').match(/\(status\s+([^)]+)\)/i)||[])[1]||'';   // detail embeds "(status SHIPPING)" — pre-select it so the dropdown shows the PO's current status, not blank
+      fix2='<span class="tiny mut">or set status</span> <select class="fci act-postatus" data-po="'+esc(r.target_key||r.ref)+'" data-id="'+r._id+'">'+(_curSt?'':'<option value="">—</option>')+PO_STATUSES.map(function(stx){return '<option'+(stx===_curSt?' selected':'')+'>'+esc(stx)+'</option>';}).join('')+'</select>'; }
     // clickable ref → open the PO (expanded) or the shipment, based on the action's target
     var key=r.target_key||r.ref, ref=esc(r.ref||'');
     var refHtml = r.target==='po' ? '<button class="lnk-btn act-go" data-go="po" data-k="'+esc(key)+'" data-tab="'+esc(poTabForAction(r.type)||'')+'">'+ref+'</button>'
                 : r.target==='shipment' ? '<button class="lnk-btn act-go" data-go="ship" data-k="'+esc(key)+'">'+ref+'</button>'
                 : ref;
-    // lifecycle: dismiss / snooze / done (handled but kept visible via the status pills); restore reopens
+    // lifecycle: dismiss / snooze / done (handled but kept visible via the status pills); restore reopens.
+    // Rendered inline (no wrapper) so it sits on the SAME row as the fix button(s) below, wrapping only if needed.
     var life='';
     if(r.key){ var resolved=(r.status&&r.status!=='open');
-      life='<div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">'
-        +(resolved
+      life=(resolved
           ? '<span class="tool-badge bg-neutral">'+esc(r.status)+(r.snooze_until?' → '+esc(r.snooze_until):'')+'</span>'
             +((r.snoozed_by||r.snoozed_at)?'<span class="mut tiny">'+esc(r.status==='snoozed'?'snoozed':r.status)+' by '+esc(shortUser(r.snoozed_by)||'—')+(r.snoozed_at?' on '+esc(r.snoozed_at):'')+'</span>':'')
             +'<button class="save-btn light act-life" data-id="'+r._id+'" data-st="open">↩ Restore</button>'
-          : '<button class="save-btn light act-life" data-id="'+r._id+'" data-st="dismissed">Dismiss</button><button class="save-btn light act-snz-menu" data-id="'+r._id+'" title="snooze this action">Snooze ▾</button>')
-        +'</div>'; }
-    return '<div class="card '+esc(r.severity||'low')+'" id="actcard-'+r._id+'"><div class="t">'+refHtml+' <span class="tool-badge '+(r.severity==='high'?'bg-red':r.severity==='low'?'bg-neutral':'bg-amber')+'">'+esc(r.type)+'</span></div><div class="d">'+esc(r.detail||'')+'</div>'+(fix?'<div style="margin-top:6px">'+fix+'</div>':'')+(fix2?'<div style="margin-top:6px">'+fix2+'</div>':'')+life+'</div>'; }
+          : '<button class="save-btn light act-life" data-id="'+r._id+'" data-st="dismissed">Dismiss</button><button class="save-btn light act-snz-menu" data-id="'+r._id+'" title="snooze this action">Snooze ▾</button>'); }
+    // one flex-wrap row: fix button(s) + any secondary fix + the Dismiss/Snooze (or resolved) lifecycle controls
+    var actRow=[fix,fix2,life].filter(Boolean).join('');
+    return '<div class="card '+esc(r.severity||'low')+'" id="actcard-'+r._id+'"><div class="t">'+refHtml+' <span class="tool-badge '+(r.severity==='high'?'bg-red':r.severity==='low'?'bg-neutral':'bg-amber')+'">'+esc(r.type)+'</span></div><div class="d">'+esc(r.detail||'')+'</div>'+(actRow?'<div style="margin-top:6px;display:flex;gap:6px 8px;align-items:center;flex-wrap:wrap">'+actRow+'</div>':'')+'</div>'; }
   // Persist an Actions-page lifecycle change (dismiss / snooze / open) + update the card in place.
   function actLifeSet(r,ns,days,cb){ if(!r||!r.key)return; var ind=(parseInt(days,10)<0);
     fetch('/api/supply/actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:r.key,status:ns,snooze_days:(ind?7:(days||7)),indefinite:ind})})

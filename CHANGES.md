@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.593 - SUPPLY ▸ Actions card polish (one-line buttons, green Upload, current status)
+
+- The fix button(s) and the Dismiss / Snooze ▾ lifecycle controls now share one flex-wrap row (same line
+  where they fit) instead of stacking on separate lines.
+- "⬆ Upload to ERP" is now green (#16a34a) to stand out as the primary/positive action.
+- Date conflict "or set status" dropdown pre-selects the PO's current status (parsed from the detail) instead
+  of defaulting to blank.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.592 - ORDER PLAN xlsx: SIZE falls back to short size when size_long is empty
 
 The SUPPLY ▸ ORDER PLAN report's SIZE column already maps size_long (v25.231). It reads blank on LIVE only
