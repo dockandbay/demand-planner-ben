@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.605 - Crossdock picker: client name in brackets on the "applied to" note
+
+Each "applied to PO-xxx <status>" note in the crossdock dropdown now appends the client name in brackets when
+the PO is direct-to-client — e.g. "applied to PO-1693118 production (Until)". FBA/non-client POs show no brackets.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.604 - Crossdock picker: single natural-sorted list (no "used first")
 
 The crossdock dropdown no longer hoists on-hand/applied SKUs to the top in a separate group — it's now ONE

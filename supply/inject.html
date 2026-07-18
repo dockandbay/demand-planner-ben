@@ -1250,14 +1250,14 @@
     placePop(pop, btn.getBoundingClientRect()); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
     // notes for a crossdock SKU in this 3PL: "N on hand in <CO> 3PL" + one "applied to PO-xxx <status>" per PO.
     function noteFor(m){ var p=[]; if(m.oh>0)p.push(units(m.oh)+' on hand in '+co+' 3PL');
-      m.pos.forEach(function(x){ p.push('applied to '+x.po+(x.status?' '+x.status.toLowerCase():'')); }); return p; }
+      m.pos.forEach(function(x){ p.push('applied to '+x.po+(x.status?' '+x.status.toLowerCase():'')+(x.client?' ('+x.client+')':'')); }); return p; }
     function build(rep){
-      var m={};   // sku -> {oh, pos:[{po,status}]} for THIS country's 3PL
+      var m={};   // sku -> {oh, pos:[{po,status,client}]} for THIS country's 3PL
       function ensure(sku){ return m[sku]||(m[sku]={oh:0,pos:[]}); }
-      function addPo(sku,po){ if(!po)return; var x=ensure(sku); if(x.pos.some(function(p){return p.po===po;}))return; x.pos.push({po:po,status:String((poBy[po]||{}).status||'')}); }
+      function addPo(sku,po,client){ if(!po)return; var x=ensure(sku); if(x.pos.some(function(p){return p.po===po;}))return; x.pos.push({po:po,status:String((poBy[po]||{}).status||''),client:String(client||(poBy[po]||{}).client||'')}); }
       if(wh){ (rep.rows||[]).forEach(function(r){ if(r.wh!==wh)return; var x=ensure(r.sku); x.oh+=Number(r.on_hand)||0;
-          (r.sources||[]).forEach(function(s){ if(s.type==='crossdock_po') addPo(r.sku, s.po); }); });
-        (rep.expected||[]).forEach(function(e){ if(String(e.country||'').toUpperCase()!==co)return; addPo(e.sku, e.po); }); }
+          (r.sources||[]).forEach(function(s){ if(s.type==='crossdock_po') addPo(r.sku, s.po, s.client); }); });
+        (rep.expected||[]).forEach(function(e){ if(String(e.country||'').toUpperCase()!==co)return; addPo(e.sku, e.po, e.client); }); }
       // Natural (numeric-aware) sort so CROSSDOCK-2 sits before CROSSDOCK-10 (not 1,10,11,2…).
       function natCmp(a,b){ return String(a).localeCompare(String(b), undefined, {numeric:true, sensitivity:'base'}); }
       // ONE flat list in numeric/alphabetical order — the on-hand / applied SKUs are NOT hoisted to the top; they
