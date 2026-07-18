@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.602 - Purchase Orders status pills: Production / Shipping split, "All" removed
+
+Reworked the PO grid status pills:
+- Split "In progress" into **Production** (PRODUCTION + READY TO SHIP + any other in-progress) and **Shipping**
+  (SHIPPING + DELIVERED). Future and Complete unchanged.
+- Removed the **All** pill — the pills are now toggleable; clicking the active pill deselects it, and no pill
+  selected = all statuses.
+- Default status filter moved from In progress → **Production** (all 4 state seeds).
+- Mobile: compacted the status pills (smaller padding + tighter gaps) so they fit on a single row.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.601 - "Includes crossdock" filter now respects the status sub-filter (defaults to In progress)
 
 Changed v25.600 so the "Includes crossdock" exception option falls through to the normal status filter instead
