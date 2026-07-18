@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.581 - PO ▸ Order Plan panel: partial / supplier / discontinued / country risk flags
+
+The per-PO Order Plan sub-tab now shows the same risk flags as the SUPPLY ▸ Order Plan grid — a small
+badge next to each SKU for each applicable risk: **p** (partial carton), **s** (supplier risk), **d**
+(discontinued), **c** (country risk). Unapproved = red badge + click to approve; approved = green ✓ with a
+✕ to undo. Uses the shared approve endpoint (field partial/supplier/discontinue/country) + silent panel
+refresh. po-detail line query enriched with the approval flags + allowed suppliers + per-country discontinue
+dates. **Direct-to-Client POs are excluded from country risk** (a bespoke client order doesn't depend on
+retail-market availability) — applied to both the panel and the grid.
+
+Files: server.mjs, supply/inject.html. Migration 118 (from v25.580) still required. No new env vars.
+
 ## v25.580 - Order Plan: Country risk approval, persistent approvals + undo, supplier-change PO links
 
 **Country risk** is now a first-class risk on SUPPLY ▸ Order Plan (like partials / supplier risk):

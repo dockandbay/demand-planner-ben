@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.580';
+const APP_VERSION = 'v25.581';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1885,7 +1885,8 @@ app.get('/api/supply/:section', async (req, res) => {
           coalesce(nullif(p.country_code,''), b.country_code, '') country,
           -- EXCEPTION: producing a SKU for a market where it isn't RELEASED. Availability (v_product_availability,
           -- is_available) is authoritative — launch dates are always populated so they're ignored. Blank market → no flag.
-          (upper(coalesce(nullif(p.country_code,''), b.country_code,'')) IN ('UK','US','EU','AU','CA') AND NOT EXISTS (
+          (coalesce(p.branch,'') NOT ILIKE '%direct to client%'
+             AND upper(coalesce(nullif(p.country_code,''), b.country_code,'')) IN ('UK','US','EU','AU','CA') AND NOT EXISTS (
              SELECT 1 FROM planner.v_product_availability va
              WHERE va.sku=l.sku AND upper(va.country)=upper(coalesce(nullif(p.country_code,''), b.country_code,'')) AND va.is_available)) not_avail_market,
           coalesce(p.client,'') client, coalesce(p.sales_order_ref,'') sales_order_ref, coalesce(p.branch,'') branch,
@@ -4712,14 +4713,23 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
                     el.qty erp_qty, el.cost erp_cost,
                     (coalesce(l.qty,0) IS DISTINCT FROM coalesce(el.qty,0)) qty_pending,   -- 0 plan == absent from ERP → not a deviation
                     (l.cost_price IS DISTINCT FROM el.cost) cost_pending,
-                    -- EXCEPTION: SKU not RELEASED in this PO's market (availability is authoritative; launch dates ignored)
+                    -- EXCEPTION: SKU not RELEASED in this PO's market (availability authoritative; launch ignored).
+                    -- Direct-to-Client POs are excluded — a bespoke client order doesn't depend on retail-market availability.
                     (EXISTS (SELECT 1 FROM planner.purchase_orders pp LEFT JOIN planner.branches bb ON bb.name=pp.branch
-                       WHERE pp.po=l.po AND upper(coalesce(nullif(pp.country_code,''), bb.country_code,'')) IN ('UK','US','EU','AU','CA')
+                       WHERE pp.po=l.po AND coalesce(pp.branch,'') NOT ILIKE '%direct to client%'
+                         AND upper(coalesce(nullif(pp.country_code,''), bb.country_code,'')) IN ('UK','US','EU','AU','CA')
                          AND NOT EXISTS (SELECT 1 FROM planner.v_product_availability va
                             WHERE va.sku=l.sku AND upper(va.country)=upper(coalesce(nullif(pp.country_code,''), bb.country_code,'')) AND va.is_available))) not_avail_market,
-                    coalesce((SELECT pol2.country_risk_approved FROM planner.purchase_order_lines pol2 WHERE pol2.po_sku=l.po_sku),false) country_risk_approved
+                    coalesce(pol.partial_carton_approved,false) partial_carton_approved,
+                    coalesce(pol.supplier_risk_approved,false) supplier_risk_approved,
+                    coalesce(pol.discontinue_approved,false) discontinue_approved,
+                    coalesce(pol.country_risk_approved,false) country_risk_approved,
+                    coalesce(sl.supplier_multiple_all,'') sm,
+                    nullif(sl.discontinue_date_final,'') dis, nullif(sl.discontinue_date_au_final,'') dis_au, nullif(sl.discontinue_date_ca,'') dis_ca
                   FROM planner.v_purchase_order_lines l
                   LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
+                  LEFT JOIN planner.purchase_order_lines pol ON pol.po_sku=l.po_sku
+                  LEFT JOIN planner.products sl ON sl.sku=l.sku
                   WHERE l.po=$1 ORDER BY l.sku`, [po]),
       pool.query(`SELECT d.reference,d.supplier_name,d.amount,d.xero_fx,
                     to_char(d.date_paid,'YYYY-MM-DD') date_paid,d.deposit_used,d.deposit_remaining

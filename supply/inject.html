@@ -2455,7 +2455,24 @@
   function orderPlanPanel(po,lines,costs,addc,erpMeta,xdLines){ costs=costs||{}; addc=addc||[]; erpMeta=erpMeta||{}; xdLines=xdLines||[];
     var editing=(OP_EDIT===po);
     var totQ=0, totC=0, lineSkus={}, unconf=0; (lines||[]).forEach(function(l){lineSkus[l.sku]=1;});
-    function row(sku,orderQty,est,lcr,added,naMkt){ lcr=lcr||{};
+    // per-line risk flags (same set as SUPPLY ▸ Order Plan): partial / supplier risk / discontinued / country risk.
+    var _pm=poBy[po]||{}, _poSup=String(_pm.supplier_name||'').trim().toLowerCase(), _poCtry=(_pm.country||''), _poDeliv=(_pm.delivery||_pm.checkin||''), _poLocked=/complete|shipping|deliver/i.test(_pm.status||'');
+    var RFIELD={p:'partial',s:'supplier',d:'discontinue',c:'country'};
+    function rBadge(kind,label,unap,ap,psku){
+      if(ap) return ' <span class="tool-badge bg-green" title="'+label+' approved">'+kind+'✓</span><button class="oprisk-undo lnk-btn" data-ps="'+esc(psku)+'" data-field="'+RFIELD[kind]+'" title="undo approval" style="color:#64748b;border:1px solid #cbd5e1;border-radius:3px;font-size:9px;line-height:1;padding:0 4px;margin-left:1px;cursor:pointer;background:#fff">✕</button>';
+      if(unap) return ' <button class="oprisk-approve" data-ps="'+esc(psku)+'" data-field="'+RFIELD[kind]+'" title="'+label+' — review &amp; approve" style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;cursor:pointer">'+kind+' ⚠</button>';
+      return ''; }
+    function riskBadges(l){ if(!l)return ''; var psku=po+'|'+l.sku, out='';
+      var pUnap=(l.full_carton_check||'').indexOf('⚠')>=0, pAp=!pUnap&&((l.full_carton_check||'').indexOf('OK Partial')>=0||l.partial_carton_approved);
+      out+=rBadge('p','Partial carton',pUnap,pAp,psku);
+      var allowed=String(l.sm||'').split(',').map(function(s){return s.trim().toLowerCase();}).filter(Boolean);
+      var sMis=!_poLocked && allowed.length>0 && !!_poSup && allowed.indexOf(_poSup)<0;
+      out+=rBadge('s','Supplier risk (supplier not in the SKU’s allowed list)',sMis&&!l.supplier_risk_approved,sMis&&l.supplier_risk_approved,psku);
+      var dd=pickDisc(_poCtry,{dis:l.dis,disAu:l.dis_au,disCa:l.dis_ca}), dMis=!_poLocked && !!dd && !!_poDeliv && String(_poDeliv)>String(dd);
+      out+=rBadge('d','Discontinued (arrives after the discontinue date)',dMis&&!l.discontinue_approved,dMis&&l.discontinue_approved,psku);
+      out+=rBadge('c','Country risk (SKU not released in '+((_poCtry||'').toUpperCase())+')',l.not_avail_market&&!l.country_risk_approved,l.not_avail_market&&l.country_risk_approved,psku);
+      return out; }
+    function row(sku,orderQty,est,lcr,added,lineObj){ lcr=lcr||{};
       var sup=(lcr.actual_cost!=null&&lcr.actual_cost!=='')?Number(lcr.actual_cost):null;
       var fin=(lcr.final_cost!=null&&lcr.final_cost!=='')?Number(lcr.final_cost):null;
       var aq=(lcr.amended_qty!=null&&lcr.amended_qty!=='')?Number(lcr.amended_qty):null;
@@ -2472,7 +2489,7 @@
       else { var qdiff=(aq!=null&&oq!=null&&aq!==oq); qtyCell=units(oq)+(qdiff?' <span style="background:#fef3c7;color:#92400e;font-weight:700;padding:0 4px;border-radius:3px" title="supplier amended the quantity">→ '+units(aq)+' ⚠</span>':''); }
       var confCell = lcr.unconfirmed ? '<button class="save-btn op-accept" data-po="'+esc(po)+'" data-sku="'+esc(sku)+'" title="confirm this supplier change">Accept</button>'
         : (hasSub&&lcr.confirmed ? '<span class="tool-badge bg-green" title="confirmed">✓</span>' : '<span class="mut tiny">—</span>');
-      return '<tr'+(lcr.unconfirmed?' style="background:#fff7ed"':'')+'><td class="l">'+esc(sku)+(naMkt?' <span class="tool-badge" style="background:#fee2e2;color:#b91c1c;font-size:8px" title="Not released in this PO&#39;s market — the SKU has no availability there (launch date ignored). You&#39;re producing it for a market where it isn&#39;t live.">✗ not in market</span>':'')+'</td>'
+      return '<tr'+(lcr.unconfirmed?' style="background:#fff7ed"':'')+'><td class="l">'+esc(sku)+riskBadges(lineObj)+'</td>'
         +'<td style="text-align:right">'+qtyCell+'</td>'
         +'<td style="text-align:right">'+(est!=null?'$'+money(est):'<span class="mut">—</span>')+'</td>'
         +'<td style="text-align:right">'+(sup!=null?('<span'+(disc?' style="background:#fef3c7;color:#92400e;font-weight:700;padding:0 4px;border-radius:3px" title="differs from estimate"':'')+'>$'+money(sup)+(disc?' ⚠':'')+'</span>'):'<span class="mut">—</span>')+'</td>'
@@ -2480,15 +2497,13 @@
         +'<td style="text-align:right" class="op-lt" data-sku="'+esc(sku)+'"><b>$'+money(lt)+'</b></td>'
         +'<td class="l" style="white-space:nowrap">'+confCell+'</td></tr>';
     }
-    var rows=(lines||[]).map(function(l){ return row(l.sku, l.qty, (l.cost_price!=null&&l.cost_price!=='')?Number(l.cost_price):null, costs[l.sku], false, l.not_avail_market); }).join('');
+    var rows=(lines||[]).map(function(l){ return row(l.sku, l.qty, (l.cost_price!=null&&l.cost_price!=='')?Number(l.cost_price):null, costs[l.sku], false, l); }).join('');
     Object.keys(costs).forEach(function(sku){ var c=costs[sku]; if(c&&c.is_added&&!lineSkus[sku]) rows+=row(sku, null, null, c, true); });
     if(!rows) rows='<tr><td colspan="7" class="mut">no lines</td></tr>';
     var banner = unconf>0 ? '<div style="margin:4px 0 8px;padding:7px 11px;background:#fff7ed;border:1px solid #fdba74;border-radius:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
         +'<span style="font-weight:700;color:#92400e">⚠ '+unconf+' unconfirmed supplier change'+(unconf>1?'s':'')+'</span>'
         +'<button class="save-btn op-accept-all" data-po="'+esc(po)+'">Accept all changes</button></div>' : '';
-    // "not released in this market" exception banner — SKUs produced for a market they aren't live in
-    var naMkt=(lines||[]).filter(function(l){return l.not_avail_market;}); var _mk=((poBy[po]||{}).country||'').toUpperCase();
-    if(naMkt.length) banner += '<div style="margin:4px 0 8px;padding:7px 11px;background:#fef2f2;border:1px solid #fca5a5;border-radius:6px"><span style="font-weight:700;color:#b91c1c">✗ '+naMkt.length+' SKU'+(naMkt.length>1?'s':'')+' not released in '+(_mk||'this PO&#39;s market')+'</span> <span class="mut tiny">— no availability there (launch date ignored). Producing for a market where the SKU isn&#39;t live: '+naMkt.map(function(l){return esc(l.sku);}).join(', ')+'</span></div>';
+    // per-line risk flags (p/s/d/c badges next to each SKU) replace the old single-market banner.
     // ERP deviations for THIS PO — QUANTITY only (price is never an exception; cost still rides along on push).
     // COMPLETE POs raise nothing. Outline = light yellow exception box. Table sizes to content (not full width);
     // SKU column ~45ch, nowrap, so long SKUs show in full. Plain scroll wrapper (NOT .tw — that forces
@@ -2784,6 +2799,11 @@
       Promise.all(jobs.map(function(j){ return fetch('/api/supply/po-line/'+encodeURIComponent(po2+'|'+j.sku),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po2,sku:j.sku,qty:j.qty,who:'PO PLAN'})}).then(function(r){return r.json();}).then(function(x){ if(x&&x.error)throw new Error(x.error); }); }))
         .then(function(){ OP_EDIT=null; invalidateDerived(); poRefetchPanel(po,i); })
         .catch(function(e){ b.disabled=false; b.textContent='✓ Save'; alert('Save failed: '+(e.message||e)); }); }; });
+    // ORDER PLAN panel risk flags — approve / undo (partial / supplier / discontinue / country), then silent panel refresh
+    function _poRiskPost(psku,field,on,btn){ if(btn)btn.disabled=true;
+      fetch('/api/supply/po-line/'+encodeURIComponent(psku)+'/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({approved:on,field:field})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); }).catch(function(e){ if(btn)btn.disabled=false; alert('Failed: '+(e.message||e)); }); }
+    document.querySelectorAll('#podet-'+i+' .oprisk-approve').forEach(function(b){ b.onclick=function(){ _poRiskPost(b.dataset.ps,b.dataset.field,true,b); }; });
+    document.querySelectorAll('#podet-'+i+' .oprisk-undo').forEach(function(b){ b.onclick=function(){ _poRiskPost(b.dataset.ps,b.dataset.field,false,b); }; });
     document.querySelectorAll('#podet-'+i+' .op-erp-up-panel').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po); }; });
     document.querySelectorAll('#podet-'+i+' .op-cin7-full').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po, true); }; });   // open the Cin7 pop, force the full-override push (result + any price discrepancies show IN the pop)
     document.querySelectorAll('#podet-'+i+' .erp-up-dates').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po); }; });
