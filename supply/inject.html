@@ -1229,17 +1229,41 @@
     render(''); var qi=pop.querySelector('.shpop-q'); if(qi){ qi.oninput=function(){render(this.value);}; qi.focus(); } }
   // Crossdock SKU add — same searchable popover UX as the batch/branch cell picker, but multi-add: picking a
   // SKU calls onPick(sku) (the caller appends + saves the comma list). Excludes already-selected SKUs.
-  function openXdPick(btn, curList, onPick){ closeShPop();
-    var list=crossdockList.filter(function(s){return curList.indexOf(s)<0;}).slice().sort();
+  // Country-aware: for a UK/US/EU/AU PO it surfaces the crossdock-report SKUs sitting in THAT country's 3PL
+  // (on-hand or applied to open POs), with qty, so you pick what's actually there. OT ship-to → warning.
+  var _xdReport=null;
+  var XD_WH_BY_CO={UK:'uk_3pl',US:'us_3pl',EU:'eu_3pl',AU:'au_3pl'};
+  function loadXdReport(cb){ if(_xdReport){cb(_xdReport);return;}
+    fetch('/api/supply/crossdock-report').then(function(r){return r.json();}).then(function(j){ _xdReport=(j&&j.rows)?j:{rows:[],expected:[]}; cb(_xdReport); }).catch(function(){ _xdReport={rows:[],expected:[]}; cb(_xdReport); }); }
+  function openXdPick(btn, curList, onPick, country){ closeShPop();
+    var co=String(country||'').toUpperCase(), wh=XD_WH_BY_CO[co];
+    var full=crossdockList.filter(function(s){return curList.indexOf(s)<0;}).slice().sort();
+    var warn = cgridLabel(country)==='OT'
+      ? '<div style="margin:4px 6px 2px;padding:6px 9px;background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;border-radius:5px;font-size:11px;line-height:1.35">⚠ Ship-to is <b>Other</b> — set the PO&rsquo;s Ship-to to the actual delivery country (UK / US / EU / AU / CA) so crossdock routes to the right 3PL.</div>'
+      : (co==='CA' ? '<div class="mut tiny" style="margin:4px 8px">No CA 3PL in the crossdock report — showing all crossdock SKUs.</div>' : '');
     var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop';
-    pop.innerHTML='<div class="shpop-h">Add crossdock SKU</div><input class="shpop-q" placeholder="search CROSSDOCK / PREORDER SKU…"><div id="shpop-list"></div>';
+    pop.innerHTML='<div class="shpop-h">Add crossdock SKU'+(wh?' <span class="mut tiny">— '+esc(co)+' 3PL on-hand / applied</span>':'')+'</div>'+warn+'<input class="shpop-q" placeholder="search CROSSDOCK / PREORDER SKU…"><div id="shpop-list"><div class="count" style="padding:8px">'+(wh?'Loading '+esc(co)+' 3PL…':'')+'</div></div>';
     placePop(pop, btn.getBoundingClientRect()); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
-    function render(q){ q=(q||'').trim().toLowerCase(); var ms=list.filter(function(n){return !q||n.toLowerCase().indexOf(q)>=0;});
-      var html=ms.slice(0,q?80:20).map(function(n){return '<div class="shpop-opt" data-v="'+esc(n)+'">'+esc(n)+'</div>';}).join('')||'<div class="count" style="padding:8px">no matching SKU</div>';
-      if(!q&&list.length>20)html+='<div class="mut tiny" style="padding:5px 10px">'+(list.length-20)+' more — type to search…</div>';
-      var l=document.getElementById('shpop-list'); l.innerHTML=html;
-      l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ closeShPop(); onPick(o.dataset.v); }; }); }
-    render(''); pop.querySelector('.shpop-q').oninput=function(){render(this.value);}; pop.querySelector('.shpop-q').focus(); }
+    function annot(m){ var p=[]; if(m.oh>0)p.push('on hand '+units(m.oh)); if(m.applied>0)p.push('applied '+units(m.applied)); else if(m.assigned)p.push('applied'); return p.join(' · '); }
+    function build(rep){
+      var m={};   // sku -> {oh, applied, assigned} for THIS country's 3PL
+      if(wh){ (rep.rows||[]).forEach(function(r){ if(r.wh!==wh)return; (m[r.sku]||(m[r.sku]={oh:0,applied:0,assigned:false})).oh+=Number(r.on_hand)||0; });
+        (rep.expected||[]).forEach(function(e){ if(String(e.country||'').toUpperCase()!==co)return; var x=(m[e.sku]||(m[e.sku]={oh:0,applied:0,assigned:false})); x.assigned=true; x.applied+=Number(e.shipped)||0; }); }
+      var relevant=Object.keys(m).filter(function(s){return curList.indexOf(s)<0 && (m[s].oh>0||m[s].applied>0||m[s].assigned);}).sort();
+      function render(q){ q=(q||'').trim().toLowerCase();
+        var rel=relevant.filter(function(n){return !q||n.toLowerCase().indexOf(q)>=0;}), relSet={}; rel.forEach(function(n){relSet[n]=1;});
+        var others=full.filter(function(n){return !relSet[n] && (!q||n.toLowerCase().indexOf(q)>=0);});
+        var html='';
+        if(wh){ html+= rel.length
+          ? ('<div class="mut tiny" style="padding:4px 10px;font-weight:700;color:#0369a1">In '+esc(co)+' 3PL ('+rel.length+')</div>'
+             + rel.slice(0,q?80:30).map(function(n){return '<div class="shpop-opt" data-v="'+esc(n)+'"><b>'+esc(n)+'</b> <span class="mut tiny">'+esc(annot(m[n]))+'</span></div>';}).join(''))
+          : '<div class="mut tiny" style="padding:5px 10px">No on-hand or applied crossdock in the '+esc(co)+' 3PL'+(q?' matching':'')+'.</div>'; }
+        html+='<div class="mut tiny" style="padding:4px 10px;font-weight:700;color:#64748b'+(wh?';border-top:1px solid #eee':'')+'">'+(wh?'All crossdock SKUs':'Crossdock SKUs')+'</div>';
+        html+= others.length ? others.slice(0,q?80:20).map(function(n){return '<div class="shpop-opt" data-v="'+esc(n)+'">'+esc(n)+'</div>';}).join('') : '<div class="count" style="padding:8px">no matching SKU</div>';
+        var l=document.getElementById('shpop-list'); if(!l)return; l.innerHTML=html;
+        l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ closeShPop(); onPick(o.dataset.v); }; }); }
+      render(''); var qi=pop.querySelector('.shpop-q'); if(qi){ qi.oninput=function(){render(this.value);}; qi.focus(); } }
+    if(wh) loadXdReport(build); else build({rows:[],expected:[]}); }
   // ORDER PLAN add-SKU picker — same searchable popover UX as the batch/crossdock cell picker, scoped to the
   // PO's supplier SKUs. On pick calls onPick(sku). Fetches (and caches in OP_SKUS) the supplier list on demand.
   function openOpSkuPick(btn, po, onPick){ closeShPop();
@@ -2351,6 +2375,10 @@
       +cliRow('Dispatch order ref',txtIn(ep,'dispatch_order_ref',r.dispatch_order_ref,220))
       +cliRow('Final delivery address <span class="mut tiny">(shown on crossdock labels)</span>',txtIn(ep,'final_delivery_address',r.final_delivery_address,440,true))
       +cliRow('Crossdock SKUs <span class="mut tiny">(CROSSDOCK/PREORDER)</span>',crossdockPicker(r.po,xdList))
+      // Crossdock destination exception: crossdock SKUs must ship to a real market (UK/US/EU/AU/CA). If this PO
+      // carries crossdock SKUs but its ship-to resolves to OT (DIRECT / other non-market), flag it here.
+      +(function(){ if(!xdList.length || cgridLabel(r.country)!=='OT')return '';
+        return '<div class="cli-xd-exc" style="margin:6px 0 4px;background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;border-radius:6px;padding:8px 11px;font-size:12px;line-height:1.45"><b>⚠ Crossdock destination exception</b><br>This PO carries crossdock SKUs but its ship-to is <b>'+esc(r.country||'—')+'</b> (Other). Crossdock must go to a real delivery market — set the Ship-to country to the actual <b>delivery country (UK, US, EU, AU or CA)</b>, not the generic “Other”.</div>'; })()
       +(function(){ var xs=(d&&d.crossdock_shipped)||[]; if(!xs.length)return '';
         return cliRow('Crossdock shipped <span class="mut tiny">(qty entered by supplier in portal)</span>', xs.map(function(x){return esc(x.sku)+': <b>'+(x.qty!=null&&x.qty!==''?units(x.qty):'—')+'</b>';}).join(' &nbsp;·&nbsp; ')); })()
       +cliRow('Labels <span class="mut tiny">(A4 print mould)</span>',
@@ -2742,7 +2770,7 @@
       saveXd(cur.filter(function(s){return s!==b.dataset.sku;})); }; });
     document.querySelectorAll('#podet-'+i+' .xd-addbtn').forEach(function(b){ b.onclick=function(e){ e.stopPropagation();
       var pick=b.closest('.xd-pick'); var cur=Array.prototype.map.call(pick.querySelectorAll('.chip'),function(c){return c.dataset.sku;});
-      openXdPick(b, cur, function(sku){ if(cur.indexOf(sku)<0){ cur.push(sku); saveXd(cur); } }); }; });
+      openXdPick(b, cur, function(sku){ if(cur.indexOf(sku)<0){ cur.push(sku); saveXd(cur); } }, (poBy[po]||{}).country); }; });
     // supplier invoice — Approve (apply value → Final Invoice Amount) / Reject
     document.querySelectorAll('#podet-'+i+' .inv-approve').forEach(function(b){ b.onclick=function(){ b.disabled=true;
       fetch('/api/supply/submission/'+b.dataset.id+'/apply',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({by:'PO PLAN'})}).then(function(r){return r.json();})

@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.599 - Crossdock: country-aware add dropdown + OT destination exception (Client/FBA tab)
+
+PURCHASE ORDERS ▸ Plan ▸ Client/FBA:
+- **Country-aware crossdock picker.** The "＋ add crossdock SKU" dropdown now looks up the CROSSDOCK report for
+  the PO's ship-to country's 3PL (UK→uk_3pl, US→us_3pl, EU→eu_3pl, AU→au_3pl) and lists the crossdock SKUs
+  actually sitting there — on-hand (from inventory) or applied to open POs — with the qty, above the full
+  crossdock SKU list. CA has no 3PL in the report, so it shows the full list with a note.
+- **OT warnings.** If the PO's ship-to resolves to OT (DIRECT / other non-market): (a) a red exception banner
+  under the Crossdock SKUs row, and (b) a warning at the top of the add-dropdown — both say to set the Ship-to
+  to the real delivery country (UK/US/EU/AU/CA), not the generic "Other".
+
+Files: supply/inject.html. No migrations, no new env vars. (Reads the existing /api/supply/crossdock-report.)
+
 ## v25.598 - Order Plan: PO search overrides pills + supplier-change badge hover/tooltip
 
 - A PO text search now OVERRIDES the action-item pills — clicking a PO in the "⚠ N supplier changes awaiting
