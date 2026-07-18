@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.611';
+const APP_VERSION = 'v25.612';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1562,8 +1562,15 @@ app.get('/api/supply/:section', async (req, res) => {
             LEFT JOIN planner.import_tax_rates tr ON tr.country=coalesce(nullif(po.country_code,''), b.country_code)
             LEFT JOIN LATERAL (SELECT sum(l.qty * coalesce(
                 (SELECT plc.final_cost FROM planner.portal_line_costs plc WHERE plc.po=l.po AND plc.sku=l.sku AND plc.confirmed_at IS NOT NULL AND plc.final_cost IS NOT NULL),
-                l.cost_price)) line_value
-              FROM planner.purchase_order_lines l WHERE l.po=po.po) lv ON true
+                l.cost_price,
+                -- estimate: default to the products cost for the PO's supplier (cost_<code>) then general cost,
+                -- so the goods value / landed cost isn't 0 when lines have no negotiated price yet.
+                CASE lower((SELECT s.code FROM planner.suppliers s WHERE s.id=po.supplier_id OR s.name=po.supplier_name LIMIT 1))
+                  WHEN 'lx' THEN pr.cost_lx WHEN 'xr' THEN pr.cost_xr END,
+                pr.cost)) line_value
+              FROM planner.purchase_order_lines l
+              LEFT JOIN planner.products pr ON pr.sku=l.sku
+              WHERE l.po=po.po) lv ON true
             LEFT JOIN LATERAL (SELECT f.* FROM planner.flexport_shipments f
               WHERE f.flex_id=po.flexport_reference OR f.shipment_name=po.po OR f.shipment_name=po.shipment_ref
               ORDER BY (f.flex_id=po.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true

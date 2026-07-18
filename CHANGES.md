@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.612 - PO value / landed Goods use the estimated supplier cost when lines have no price
+
+`value_used` (the PO order value, = landed-cost "Goods", and drives payments) was Σ(qty × coalesce(final_cost,
+cost_price)) — so it was 0 when a PO's lines had no negotiated price (e.g. PO-1631902). Extended the fallback
+to the products cost for the PO's supplier (cost_<code>, then general cost), matching the order-plan Est. cost.
+So the goods value / landed cost / payment plan now reflect the estimate instead of 0. POs with a real
+cost_price are unchanged (actual price still wins).
+
+Files: server.mjs. No migrations, no new env vars.
+
 ## v25.611 - Fix ship_mode resolution (v25.610 returned blank for all POs)
 
 The `ship_mode` subquery added in v25.610 resolved to blank for every PO, so FOB-mode shipments still weren't
