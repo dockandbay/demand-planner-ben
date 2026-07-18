@@ -2492,7 +2492,8 @@
       else { var qdiff=(aq!=null&&oq!=null&&aq!==oq); qtyCell=units(oq)+(qdiff?' <span style="background:#fef3c7;color:#92400e;font-weight:700;padding:0 4px;border-radius:3px" title="supplier amended the quantity">→ '+units(aq)+' ⚠</span>':''); }
       var confCell = lcr.unconfirmed ? '<button class="save-btn op-accept" data-po="'+esc(po)+'" data-sku="'+esc(sku)+'" title="confirm this supplier change">Accept</button>'
         : (hasSub&&lcr.confirmed ? '<span class="tool-badge bg-green" title="confirmed">✓</span>' : '<span class="mut tiny">—</span>');
-      return '<tr'+(lcr.unconfirmed?' style="background:#fff7ed"':'')+'><td class="l">'+esc(sku)+riskBadges(lineObj)+'</td>'
+      return '<tr'+(lcr.unconfirmed?' style="background:#fff7ed"':'')+'><td class="l">'+esc(sku)+'</td>'
+        +'<td class="l" style="white-space:nowrap">'+(riskBadges(lineObj)||'<span class="mut">—</span>')+'</td>'
         +'<td style="text-align:right">'+qtyCell+'</td>'
         +'<td style="text-align:right">'+(est!=null?'$'+money(est):'<span class="mut">—</span>')+'</td>'
         +'<td style="text-align:right">'+(sup!=null?('<span'+(disc?' style="background:#fef3c7;color:#92400e;font-weight:700;padding:0 4px;border-radius:3px" title="differs from estimate"':'')+'>$'+money(sup)+(disc?' ⚠':'')+'</span>'):'<span class="mut">—</span>')+'</td>'
@@ -2502,7 +2503,7 @@
     }
     var rows=(lines||[]).map(function(l){ return row(l.sku, l.qty, (l.cost_price!=null&&l.cost_price!=='')?Number(l.cost_price):null, costs[l.sku], false, l); }).join('');
     Object.keys(costs).forEach(function(sku){ var c=costs[sku]; if(c&&c.is_added&&!lineSkus[sku]) rows+=row(sku, null, null, c, true); });
-    if(!rows) rows='<tr><td colspan="7" class="mut">no lines</td></tr>';
+    if(!rows) rows='<tr><td colspan="8" class="mut">no lines</td></tr>';
     var banner = unconf>0 ? '<div style="margin:4px 0 8px;padding:7px 11px;background:#fff7ed;border:1px solid #fdba74;border-radius:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
         +'<span style="font-weight:700;color:#92400e">⚠ '+unconf+' unconfirmed supplier change'+(unconf>1?'s':'')+'</span>'
         +'<button class="save-btn op-accept-all" data-po="'+esc(po)+'">Accept all changes</button></div>' : '';
@@ -2525,17 +2526,19 @@
         +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:5px;flex-wrap:wrap"><span style="font-weight:700;color:#854d0e">⚠ ERP deviations — '+dev.length+' line'+(dev.length>1?'s':'')+' differ from Fulfil/Cin7 <span class="mut tiny" style="font-weight:400">(quantity)</span></span><button class="save-btn op-erp-up-panel" data-po="'+esc(po)+'" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5">⬆ Upload to ERP</button>'+actMark(po,'erp_lines')+' <span class="mut tiny">prices are pushed with the update too</span></div>'
         +'<div style="overflow-x:auto"><table class="erp-dev-tbl" style="width:auto;border-collapse:collapse;font-size:11px;border:1px solid #e0e0e0;border-radius:6px;background:#fff"><thead><tr><th class="l" style="min-width:45ch;padding:4px 12px">SKU</th><th class="l" style="text-align:right;padding:4px 12px">Qty (plan → ERP)</th></tr></thead><tbody>'+trs+'</tbody></table></div></div>'; })();
     var copyData=encodeURIComponent((lines||[]).map(function(l){return l.sku+'\t'+(Number(l.qty)||0);}).join('\n'));
-    var addRowHtml=editing?'<tr class="op-addrow"><td class="l"><input class="op-add-sku" data-po="'+esc(po)+'" readonly placeholder="click to pick SKU…" style="width:220px;cursor:pointer;background:#fff" autocomplete="off"></td><td style="text-align:right"><input class="op-add-qty" placeholder="qty" style="width:74px;text-align:right" inputmode="numeric"></td><td colspan="5" class="mut tiny">new line — added as proposed (not in ERP until you Upload)</td></tr>':'';
+    var addRowHtml=editing?'<tr class="op-addrow"><td class="l"><input class="op-add-sku" data-po="'+esc(po)+'" readonly placeholder="click to pick SKU…" style="width:220px;cursor:pointer;background:#fff" autocomplete="off"></td><td class="l"></td><td style="text-align:right"><input class="op-add-qty" placeholder="qty" style="width:74px;text-align:right" inputmode="numeric"></td><td colspan="5" class="mut tiny">new line — added as proposed (not in ERP until you Upload)</td></tr>':'';
     var opBtns=editing
       ? '<button class="lnk-btn op-add-row" data-po="'+esc(po)+'" style="margin-left:8px">＋ Add SKU</button> <button class="save-btn op-save" data-po="'+esc(po)+'" style="margin-left:4px;background:#dcfce7;border:1px solid #16a34a;color:#166534;font-weight:700">✓ Save</button> <button class="save-btn light op-cancel">Cancel</button>'
       : '<button class="save-btn op-edit" data-po="'+esc(po)+'" style="margin-left:8px">✎ Edit qty / add SKU</button> <button class="save-btn light op-copy" data-copy="'+copyData+'" style="margin-left:4px" title="copy this PO&rsquo;s SKUs + quantities to the clipboard (tab-separated)">⧉ Copy SKU + Qty</button> <button class="save-btn op-cin7-full" data-po="'+esc(po)+'" style="margin-left:4px;background:#0a8;color:#fff;border-color:#0a8" title="push ALL of this PO&rsquo;s SKUs, quantities and prices to Cin7 — full override for exact alignment (live write)">⬆ Push to Cin7 (full)</button>';
+    var _csv='SKU,Qty\n'+(lines||[]).map(function(l){ return '"'+String(l.sku).replace(/"/g,'""')+'",'+(Number(l.qty)||0); }).join('\n');
     return '<div class="sect-h">Order plan — agree the final cost price per line '
       +'<button class="lnk-btn op-goto" data-po="'+esc(po)+'" style="margin-left:8px" title="open the full ORDER PLAN filtered to this PO">↗ open in full order plan</button>'
+      +' <button class="save-btn light op-csv" data-po="'+esc(po)+'" data-csv="'+encodeURIComponent(_csv)+'" title="download SKU + Qty as CSV">⤓ CSV</button>'
       +opBtns
       +'<div class="mut tiny" style="font-weight:400">supplier prices &amp; amendments flow in from the portal; ⚠ = differs from estimate / qty amended · <b>Accept</b> confirms a change · set a final price to override'+(editing?' · <b style="color:#166534">editing quantities — change values, add SKUs below, then Save</b>':'')+'</div></div>'
       +erpDevBlock
       +banner
-      +'<div class="tw" style="max-width:1000px"><table style="width:max-content"><thead><tr><th class="l">SKU</th><th style="text-align:right">Qty</th><th style="text-align:right">Est. cost</th><th style="text-align:right">Supplier submitted</th><th style="text-align:right">Final price</th><th style="text-align:right">Line item total cost</th><th class="l" style="min-width:90px;white-space:nowrap">Confirm</th></tr></thead><tbody class="op-tbody">'
+      +'<div class="tw" style="max-width:1000px"><table style="width:max-content"><thead><tr><th class="l">SKU</th><th class="l" title="partial (p) / supplier risk (s) / discontinued (d) / country risk (c) — ⚠ needs review, ✓ approved">Exceptions</th><th style="text-align:right">Qty</th><th style="text-align:right">Est. cost</th><th style="text-align:right">Supplier submitted</th><th style="text-align:right">Final price</th><th style="text-align:right">Line item total cost</th><th class="l" style="min-width:90px;white-space:nowrap">Confirm</th></tr></thead><tbody class="op-tbody">'
       +rows
       +addRowHtml
       +'<tr class="op-total" style="font-weight:700;border-top:2px solid #999"><td class="l">TOTAL</td><td style="text-align:right" class="op-totq">'+units(totQ)+'</td><td></td><td></td><td style="text-align:right">FINAL</td><td style="text-align:right" class="op-totc">$'+money(totC)+'</td><td></td></tr>'
@@ -2805,6 +2808,7 @@
     // ORDER PLAN panel risk flags — approve / undo (partial / supplier / discontinue / country), then silent panel refresh
     function _poRiskPost(psku,field,on,btn){ if(btn)btn.disabled=true;
       fetch('/api/supply/po-line/'+encodeURIComponent(psku)+'/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({approved:on,field:field})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); }).catch(function(e){ if(btn)btn.disabled=false; alert('Failed: '+(e.message||e)); }); }
+    document.querySelectorAll('#podet-'+i+' .op-csv').forEach(function(b){ b.onclick=function(){ var csv=decodeURIComponent(b.dataset.csv||''); var blob=new Blob([csv],{type:'text/csv;charset=utf-8'}); var url=URL.createObjectURL(blob); var a=document.createElement('a'); a.href=url; a.download='OrderPlan-'+String(b.dataset.po||'PO')+'.csv'; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(function(){URL.revokeObjectURL(url);},1000); }; });
     document.querySelectorAll('#podet-'+i+' .oprisk-approve').forEach(function(b){ b.onclick=function(){ _poRiskPost(b.dataset.ps,b.dataset.field,true,b); }; });
     document.querySelectorAll('#podet-'+i+' .oprisk-undo').forEach(function(b){ b.onclick=function(){ _poRiskPost(b.dataset.ps,b.dataset.field,false,b); }; });
     document.querySelectorAll('#podet-'+i+' .op-erp-up-panel').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po); }; });

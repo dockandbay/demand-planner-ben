@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.585 - PO ▸ Order Plan panel: Exceptions column + CSV download
+
+- Risk flags (p/s/d/c) moved out of the SKU cell into their own **Exceptions** column right after SKU
+  (approve / undo work the same there). "—" when a line has none.
+- New **⤓ CSV** button downloads the PO's order plan as SKU,Qty (file OrderPlan-<po>.csv).
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.584 - Order Plan: undo ✕ shows on hover (not a permanent button)
 
 The undo-approval ✕ next to p✓ / s✓ / d✓ / c✓ (grid and PO panel) is now hidden by default and appears only
