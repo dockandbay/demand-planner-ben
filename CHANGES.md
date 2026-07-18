@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.584 - Order Plan: undo ✕ shows on hover (not a permanent button)
+
+The undo-approval ✕ next to p✓ / s✓ / d✓ / c✓ (grid and PO panel) is now hidden by default and appears only
+when you hover the cell / row — less clutter. CSS only; same undo behaviour.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.583 - Order Plan: risk pills now span all statuses (count == view)
 
 An action-item risk pill (Unapproved partials / Update ERP / Supplier risk / Discontinued / Country risk)

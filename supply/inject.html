@@ -290,6 +290,9 @@
 #supply-root tr.batchrow td{background:#eef2ff!important;font-weight:600;border-top:1px solid #c7d2fe;text-align:left;white-space:normal}
 #supply-root tr.cat-hdr td{background:#e8e8e6;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#333;padding:3px 8px;text-align:left;border-top:2px solid #bbb}
 #supply-root .opapprove:hover{color:#15803d}
+/* undo-approval ✕ (grid .opundo / PO-panel .oprisk-undo) is hidden until you hover the cell/row, then appears */
+#supply-root .opundo,#supply-root .oprisk-undo{display:none}
+#supply-root td:hover .opundo,#supply-root td:hover .oprisk-undo,#supply-root tr:hover .oprisk-undo{display:inline-block}
 /* mobile full-screen sheet for an opened PO / shipment (applied via JS only on phones) */
 #mob-sheet-ov{display:none;position:fixed;inset:0;z-index:6000;background:#fff;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;box-sizing:border-box}
 #mob-sheet-ov .mob-back{position:sticky;top:0;z-index:3;display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;box-sizing:border-box;padding:13px 14px;border:none;border-bottom:1px solid #e5e7eb;background:#0f172a;color:#fff;font-weight:700;font-size:14px;text-align:left;cursor:pointer;font-family:inherit}
