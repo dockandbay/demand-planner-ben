@@ -3,6 +3,20 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.609 - Order Plan: Est. cost defaults to products supplier cost when a line has no price
+
+Added `cost` / `cost_lx` / `cost_xr` to planner.products (migration 119) and loaded them from Airtable
+sku_child (SKU_CHILD-WORKING) into sandbox + live (all 1693 SKUs; cost/cost_lx/cost_xr populated). Convention:
+a supplier's price column is `cost_<lowercased suppliers.code>` (Lixin LX→cost_lx, XR Textile XR→cost_xr), so
+new suppliers auto-map. The per-PO ORDER PLAN Est. cost now falls back to that column (else the general `cost`)
+when the line has no cost_price — server returns per-line `sku_cost`; client uses it as the display fallback.
+Also loaded size_long into live (partial; the rest + ongoing sync is n8n's job — see deploy note).
+
+⚠ Diviyaj: n8n products sync must map sku_child → products for cost, cost_lx, cost_xr AND size_long going
+forward, and must handle CSV/Excel quoting on size_long (the `"` inch mark comes through Excel as doubled `""`).
+
+Files: server.mjs, supply/inject.html, migrations/119_product_supplier_costs.sql. No new env vars.
+
 ## v25.608 - Order Plan edit: paste SKU/qty block from Excel / Sheets
 
 In PURCHASE ORDERS ▸ Plan ▸ Order Plan, "✎ Edit qty / add SKU" mode now has a "⧉ Paste SKU,Qty" button. It

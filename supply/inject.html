@@ -2688,7 +2688,9 @@
         +'<td style="text-align:right" class="op-lt" data-sku="'+esc(sku)+'"><b>$'+money(lt)+'</b></td>'
         +'<td class="l" style="white-space:nowrap">'+confCell+'</td></tr>';
     }
-    var rows=(lines||[]).map(function(l){ return row(l.sku, l.qty, (l.cost_price!=null&&l.cost_price!=='')?Number(l.cost_price):null, costs[l.sku], false, l); }).join('');
+    // Est. cost = the line's own cost_price, else the products default cost for the PO's supplier (sku_cost).
+    var rows=(lines||[]).map(function(l){ var ec=(l.cost_price!=null&&l.cost_price!=='')?Number(l.cost_price):((l.sku_cost!=null&&l.sku_cost!=='')?Number(l.sku_cost):null);
+      return row(l.sku, l.qty, ec, costs[l.sku], false, l); }).join('');
     Object.keys(costs).forEach(function(sku){ var c=costs[sku]; if(c&&c.is_added&&!lineSkus[sku]) rows+=row(sku, null, null, c, true); });
     if(!rows) rows='<tr><td colspan="8" class="mut">no lines</td></tr>';
     var banner = unconf>0 ? '<div style="margin:4px 0 8px;padding:7px 11px;background:#fff7ed;border:1px solid #fdba74;border-radius:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">'

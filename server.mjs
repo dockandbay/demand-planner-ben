@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.608';
+const APP_VERSION = 'v25.609';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -4806,7 +4806,15 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
                     coalesce(pol.discontinue_approved,false) discontinue_approved,
                     coalesce(pol.country_risk_approved,false) country_risk_approved,
                     coalesce(sl.supplier_multiple_all,'') sm,
-                    nullif(sl.discontinue_date_final,'') dis, nullif(sl.discontinue_date_au_final,'') dis_au, nullif(sl.discontinue_date_ca,'') dis_ca
+                    nullif(sl.discontinue_date_final,'') dis, nullif(sl.discontinue_date_au_final,'') dis_au, nullif(sl.discontinue_date_ca,'') dis_ca,
+                    -- default unit cost from planner.products for the PO's supplier (cost_<lowercased supplier code>,
+                    -- e.g. LX to cost_lx, XR to cost_xr), falling back to the general cost. Used as the order-plan Est.
+                    -- cost when the line itself has no cost_price. (New suppliers auto-map via their code.)
+                    coalesce(
+                      CASE lower((SELECT s.code FROM planner.suppliers s JOIN planner.purchase_orders pp
+                                    ON (s.id=pp.supplier_id OR s.name=pp.supplier_name) WHERE pp.po=l.po LIMIT 1))
+                        WHEN 'lx' THEN sl.cost_lx WHEN 'xr' THEN sl.cost_xr END,
+                      sl.cost) sku_cost
                   FROM planner.v_purchase_order_lines l
                   LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
                   LEFT JOIN planner.purchase_order_lines pol ON pol.po_sku=l.po_sku
