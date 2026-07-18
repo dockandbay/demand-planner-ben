@@ -644,6 +644,14 @@
     return '<input class="'+cls+'" list="deprefs" placeholder="'+(needed?'assign deposit…':'no deposit')+'" data-ep="'+esc(ep)+'" data-field="deposit_ref" value="'+esc(val==null?'':val)+'">'; }
   var PO_COUNTRIES=[['UK','UK'],['US','US'],['AU','AU'],['EU','EU'],['CA','CA'],['DIRECT','Direct to Client']];
   function clabel(c){ return c==='DIRECT'?'Direct':(c||''); }
+  // Shared status grouping used by BOTH the PURCHASE ORDERS grid and the ORDER PLAN grid so the pill options match.
+  // Production = PRODUCTION + READY TO SHIP (+ any other in-progress); Shipping = SHIPPING + DELIVERED.
+  var STATUS_PILLS=[['production','Production'],['shipping','Shipping'],['future','Future'],['complete','Complete']];
+  function stGroup(status){ var s=String(status||'').toUpperCase();
+    if(s.indexOf('COMPLETE')>=0)return 'complete';
+    if(s.indexOf('FUTURE')>=0)return 'future';
+    if(/SHIPPING|DELIVER/.test(s))return 'shipping';
+    return 'production'; }
   // grid Ship-to display: the five majors show as-is; anything else (DIRECT / other) shows as "OT" (OTHER)
   function cgridLabel(c){ if(!c)return ''; c=String(c).toUpperCase(); return ['UK','US','AU','EU','CA'].indexOf(c)>=0?c:'OT'; }
   function countrySel(ep,val,pay,cls){ var opts='<option value=""'+(val?'':' selected')+'>— (use branch)</option>';
@@ -1566,27 +1574,24 @@
   var _poState=null;   // PURCHASE ORDERS filter state — persisted across edit-triggered reloads so the filter survives
   function poInner(rows,c){
     if(!_poActStateLoaded){ loadPoActState(function(){ try{view();}catch(e){} }); }   // snooze map → re-render once loaded
-    // Status pills: In progress is split into Production (PRODUCTION + READY TO SHIP) and Shipping (SHIPPING +
-    // DELIVERED). No "All" pill — deselecting the active pill (state.f='') shows everything.
-    var FILTERS=[['production','Production'],['shipping','Shipping'],['future','Future'],['complete','Complete']];
-    function statusMatch(r){ var f=state.f; if(!f)return true;   // no pill selected = All
-      if(f==='complete')return r.progress==='complete';
-      if(f==='future')return r.progress==='future';
-      var shipping=/shipping|deliver/i.test(r.status||'');   // SHIPPING / DELIVERED
-      if(f==='shipping')return r.progress==='in_progress' && shipping;
-      if(f==='production')return r.progress==='in_progress' && !shipping;   // PRODUCTION / READY TO SHIP (+ any other in-progress)
-      return true; }
+    // Status pills — MULTI-SELECT (state.f is a set of selected groups). No pill selected = All. Same 4 options
+    // as the ORDER PLAN grid (shared STATUS_PILLS / stGroup).
+    var FILTERS=STATUS_PILLS;
+    function statusMatch(r){ var f=state.f||{}; var any=false; for(var k in f){ if(f[k]){any=true;break;} }
+      if(!any)return true;   // nothing selected = all statuses
+      return !!f[stGroup(r.status)]; }
     var ACTP=[['payment_overdue','Payment overdue'],['unpaid_payment','Unpaid payments'],['late','Late - should be Completed'],['unassigned_shipment','Unassigned shipment'],['production','Late - should have Shipped'],['dtc_not_approved','Direct to Client not approved'],['po_not_approved','Purchase Order not approved']];
     var CTRYP=[['UK','UK'],['US','US'],['AU','AU'],['EU','EU'],['CA','CA'],['OTHER','OTHER']];
     var CFLAG={UK:'🇬🇧',US:'🇺🇸',AU:'🇦🇺',EU:'🇪🇺',CA:'🇨🇦',OTHER:'📦'};
     var GRP=[['none','None'],['production','Production'],['shipment','Master shipment']];
     // persist filters across edit reloads; reset to a clean view only when navigating to a specific PO
-    if(_pendingPO){ _poState={f:'production',q:_pendingPO,act:{},ctry:{},grp:'production',sup:'',prod:'',batch:'',branch:''}; }   // seed only the SEARCH with the PO # — a text search spans ALL statuses/recency (filt), so it finds even a years-old completed PO WITHOUT forcing the 'all' filter. (The old 'all' seed used to stick, so after such a search the grid showed unfiltered instead of defaulting back to In progress once the search was cleared.)
-    else if(!_poState){ _poState={f:'production',q:'',act:{},ctry:{},grp:'production',sup:'',prod:'',batch:'',branch:''}; }
+    if(_pendingPO){ _poState={f:{production:1},q:_pendingPO,act:{},ctry:{},grp:'production',sup:'',prod:'',batch:'',branch:''}; }   // seed only the SEARCH with the PO # — a text search spans ALL statuses/recency (filt), so it finds even a years-old completed PO WITHOUT forcing the 'all' filter. (The old 'all' seed used to stick, so after such a search the grid showed unfiltered instead of defaulting back to In progress once the search was cleared.)
+    else if(!_poState){ _poState={f:{production:1},q:'',act:{},ctry:{},grp:'production',sup:'',prod:'',batch:'',branch:''}; }
     if(_poState.prod==null)_poState.prod=''; if(_poState.batch==null)_poState.batch='';
     if(_poState.recent==null)_poState.recent=true;   // completed POs default to last 12 months only (perf)
     if(_poState.focus==null)_poState.focus=false;   // ⭐ Focus filter (starred + active only)
     var state=_poState;
+    if(typeof state.f==='string')state.f = state.f && state.f!=='all' ? (function(o){o[state.f]=1;return o;})({}) : {};   // migrate any persisted single-string filter to the multi-select set
     var PO_CAP=250, _poShowAll=false;   // cap rendered rows; "show all" reveals the rest
     var RECENT_CUT=(function(){var x=new Date();x.setMonth(x.getMonth()-12);return x.toISOString().slice(0,10);})();
     function actCount(k){ return rows.filter(PO_ACTCOND[k]).length; }
@@ -1611,7 +1616,7 @@
     var SEL_ON=';background:#0f172a;color:#fff;border-color:#0f172a;font-weight:700';
     var _excOn=Object.keys(state.act||{}).some(function(k){return state.act[k];});
     c.innerHTML=annot('purchase-orders')+poSubNav()
-      +'<div class="bar" id="po-prog">'+FILTERS.map(function(f){return '<span class="pill'+(f[0]===state.f?' active':'')+'" data-f="'+f[0]+'">'+f[1]+'</span>';}).join('')
+      +'<div class="bar" id="po-prog">'+FILTERS.map(function(f){return '<span class="pill'+(state.f&&state.f[f[0]]?' active':'')+'" data-f="'+f[0]+'">'+f[1]+'</span>';}).join('')
       +'<span class="pill po-recent'+(state.recent?' active':'')+'" data-recent title="when on, Completed shows only POs completed in the last 12 months (faster)">📅 Last 12m</span>'
       +'<span class="pill po-focus'+(state.focus?' active':'')+'" data-focus title="show only starred POs (active only — completed are hidden)">★ Focus</span>'
       +'<input class="flt" id="sup-search" placeholder="Filter PO / supplier…" value="'+esc(state.q||'')+'" style="background:#eff6ff;border-color:#93c5fd"><span class="count" id="sup-count"></span>'
@@ -1748,9 +1753,8 @@
       }).catch(function(){ refreshGrid(); }); }
     _poRefresh=refreshGrid; _poPatchRow=patchPoRow;
     c.querySelectorAll('#po-prog .pill:not(.po-recent):not(.po-focus)').forEach(function(p){p.onclick=function(){
-      var was=(state.f===p.dataset.f);   // clicking the active pill deselects it → no pill = All
-      c.querySelectorAll('#po-prog .pill:not(.po-recent):not(.po-focus)').forEach(function(x){x.classList.remove('active');});
-      if(was){ state.f=''; } else { p.classList.add('active'); state.f=p.dataset.f; }
+      if(!state.f||typeof state.f!=='object')state.f={};   // MULTI-SELECT: toggle this status in/out of the set (none = All)
+      var k=p.dataset.f; if(state.f[k]){ delete state.f[k]; p.classList.remove('active'); } else { state.f[k]=1; p.classList.add('active'); }
       _poShowAll=false;view();};});
     var _rp=c.querySelector('#po-prog .po-recent'); if(_rp)_rp.onclick=function(){ state.recent=!state.recent; _rp.classList.toggle('active',state.recent); _poShowAll=false; view(); };
     var _fp=c.querySelector('#po-prog .po-focus'); if(_fp)_fp.onclick=function(){ state.focus=!state.focus; _fp.classList.toggle('active',state.focus); _poShowAll=false; view(); };
@@ -1862,7 +1866,7 @@
       fetch('/api/supply/po-import-cin7',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({reference:r,confirm:true})}).then(function(x){return x.json();}).then(function(j){
         if(j&&j.error){ prev.innerHTML='<span style="color:#dc2626">'+esc(j.error)+'</span>'; goBtn.disabled=false; goBtn.textContent='Import'; return; }
         bg.parentNode.removeChild(bg); invalidateDerived(); delete cache['purchase-orders'];
-        var impPo=(j&&j.po)||r; _poState={f:'production',q:impPo,act:{},ctry:{},grp:'production',sup:'',prod:'',batch:'',branch:''};   // drop the imported PO into the search so the grid auto-filters to it
+        var impPo=(j&&j.po)||r; _poState={f:{production:1},q:impPo,act:{},ctry:{},grp:'production',sup:'',prod:'',batch:'',branch:''};   // drop the imported PO into the search so the grid auto-filters to it
         selectSection('purchase-orders'); }).catch(function(e){ prev.innerHTML='<span style="color:#dc2626">Failed: '+esc(e.message||e)+'</span>'; goBtn.disabled=false; goBtn.textContent='Import'; }); };
     bg.onclick=function(e){ if(e.target===bg)bg.parentNode.removeChild(bg); };
     document.getElementById('po-imp-cancel').onclick=function(){ bg.parentNode.removeChild(bg); };
@@ -1899,7 +1903,7 @@
       fetch('/api/supply/po-create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();}).then(function(j){
         if(j&&j.error){ msg.textContent=j.error; go.disabled=false; go.textContent='Create PO'; return; }
         bg.parentNode.removeChild(bg); invalidateDerived(); delete cache['purchase-orders'];
-        _poState={f:'production',q:po,act:{},ctry:{},grp:'production',sup:'',prod:'',batch:'',branch:''};   // drop the new PO into the search so the grid filters to it
+        _poState={f:{production:1},q:po,act:{},ctry:{},grp:'production',sup:'',prod:'',batch:'',branch:''};   // drop the new PO into the search so the grid filters to it
         selectSection('purchase-orders');
       }).catch(function(e){ msg.textContent='Failed: '+(e.message||e); go.disabled=false; go.textContent='Create PO'; }); };
   }
@@ -3039,13 +3043,17 @@
     // COMPLETE POs (1000+ from the ERP history) are excluded from the status pills + "All" — including them
     // in an all-SKUs pivot explodes it (crashes). They surface only via a PO search in the PO box (≥5 chars),
     // which overrides the status filter.
-    var pillStatuses=statuses.filter(function(s){return !/complete/i.test(s);});
+    // Grouped status options shared with the PURCHASE ORDERS grid (Production / Shipping / Future). COMPLETE is
+    // intentionally left off — an all-SKUs pivot over 1000+ complete POs would explode; complete POs surface via a PO search.
+    var OP_ST=STATUS_PILLS.filter(function(g){ return g[0]!=='complete' && lines.some(function(l){return stGroup(l.status)===g[0];}); });
+    var OP_ST_KEYS=OP_ST.map(function(g){return g[0];});
+    function opStatusPills(setv){ return OP_ST.map(function(g){return '<span class="pill'+(setv.has(g[0])?' active':'')+'" data-v="'+g[0]+'">'+esc(g[1])+'</span>';}).join('')+'<span class="pill" data-all="1">All</span>'; }
     var cats=Array.from(new Set(skuMaster.map(function(s){return s.category;}).concat(lines.map(function(l){return l.category;})).filter(Boolean))).sort();
     var rws=Array.from(new Set(skuMaster.map(function(s){return s.release_window;}).filter(Boolean))).sort();
     var skuCat={},skuRW={},skuAttr={}; skuMaster.forEach(function(s){skuCat[s.sku]=s.category;skuRW[s.sku]=s.release_window;
       skuAttr[s.sku]={sup:s.supplier||'',cq:s.carton_qty||'',dis:s.discontinue||'',disAu:s.discontinue_au||'',disCa:s.discontinue_ca||'',sm:s.supplier_multiple_all||'',ean:s.product_ean||'',title:s.product_name||'',size:s.size||'',size_long:s.size_long||'',colour:s.colour_long||''};});
     lines.forEach(function(l){if(l.category)skuCat[l.sku]=l.category; if(l.release_window)skuRW[l.sku]=l.release_window;});
-    var defS=statuses.filter(function(s){return /production/i.test(s);}); if(!defS.length)defS=statuses.slice(0,1);
+    var defS=OP_ST_KEYS.indexOf('production')>=0?['production']:OP_ST_KEYS.slice(0,1);   // default to Production (same as the PO grid)
     var st={statuses:new Set(defS),countries:new Set(),prod:'All',cat:'All',batch:'All',supplier:'All',q:'',poq:'',scope:'ordered',rw:'All',partials:false,erpdiff:false,suprisk:false,disc:false,notmkt:false,focus:false};   // countries: empty = all (like PURCHASE ORDERS)
     // action sets (exclude complete POs): unapproved partial cartons, and lines whose planned qty differs from the ERP
     // Once a PO has shipped/delivered/completed the plan is locked — no partials / supplier-risk to action.
@@ -3065,7 +3073,7 @@
     var _opStay={partial:new Set(),supplier:new Set(),discontinue:new Set(),country:new Set()};
     function opKey(l){ return l.po+'|'+l.sku; }
     if(_pendingOP){ st.partials=!!_pendingOP.partials; st.suprisk=!!_pendingOP.suprisk; st.disc=!!_pendingOP.disc; if(_pendingOP.po)st.poq=String(_pendingOP.po).toLowerCase();
-      st.statuses=new Set(pillStatuses);   // show all (non-complete) statuses so the flagged lines aren't hidden by the status filter
+      st.statuses=new Set(OP_ST_KEYS);   // show all (non-complete) status groups so the flagged lines aren't hidden by the status filter
       _pendingOP=null; }
     function pillsHTML(opts,setv,noAll){ return opts.map(function(o){return '<span class="pill'+(setv.has(o)?' active':'')+'" data-v="'+esc(o)+'">'+esc(o)+'</span>';}).join('')+(noAll?'':'<span class="pill" data-all="1">All</span>'); }
     function sel(id,label,opts,val){return '<span class="pill-lbl">'+label+'</span><select class="flt'+(val&&val!=='All'?' sel-on':'')+'" id="'+id+'" style="width:auto;padding:3px 6px"><option>All</option>'+opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>';}
@@ -3073,7 +3081,7 @@
     c.innerHTML=annot('order-plan')
       +'<div class="bar op-filt-head"><button class="save-btn op-filt-toggle" id="op-filt-toggle">⚙ Filters</button><button class="save-btn op-dl-top" id="op-dl-top" style="background:#2563eb;color:#fff;border-color:#2563eb" title="Download XLSX report">⤓ Download report</button><span class="count" id="op-count" style="margin-left:8px"></span></div>'
       +'<div id="op-filters">'
-      +'<div class="bar"><span class="pill-lbl">Status</span><span id="op-status">'+pillsHTML(pillStatuses,st.statuses)+'</span><span class="mut tiny op-hint" style="margin-left:6px">completed POs: search a PO number below</span>'
+      +'<div class="bar"><span class="pill-lbl">Status</span><span id="op-status">'+opStatusPills(st.statuses)+'</span><span class="mut tiny op-hint" style="margin-left:6px">completed POs: search a PO number below</span>'
         +'<span class="op-po-grp" style="margin-left:12px"><span class="pill-lbl">PO(s)</span><input class="flt" id="op-po" placeholder="PO number(s) — space / comma…" title="one or more PO numbers, separated by space, comma or line break — overrides the status &amp; country filters" style="width:240px;background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8" value="'+esc(st.poq||'')+'"></span></div>'
       +'<div class="bar"><span class="pill-lbl">Country</span><span id="op-country">'+pillsHTML(countries,st.countries,true)+'</span>'
         +'<span style="margin-left:12px"></span>'+sel('op-prod','PROD#',prods,st.prod)+sel('op-batch','Batch',batches,st.batch)+sel('op-supplier','Supplier',suppliers,st.supplier)+'</div>'
@@ -3105,7 +3113,7 @@
       else if(poqOn){ if(!pt.length)return false;   // typed a PO search but under 3 chars → no results (don't fall back to showing everything)
         if(!pt.some(function(t){return nrm(l.po).indexOf(t)>=0;}))return false; }
       else if(st.partials||st.erpdiff||st.suprisk||st.disc||st.notmkt){ if(!(allC||st.countries.has(l.country)))return false; }   // an action-item risk pill spans ALL active statuses (its count is computed across statuses too) — otherwise the count and the view disagree
-      else { if(!st.statuses.has(l.status))return false; if(!(allC||st.countries.has(l.country)))return false; }
+      else { if(!st.statuses.has(stGroup(l.status)))return false; if(!(allC||st.countries.has(l.country)))return false; }
       // A PO text search (poqOn) OVERRIDES the action-item pills — you asked to see that exact PO regardless of
       // which risk pill happens to be active, so the pill restrictions below are skipped while searching a PO.
       return (st.prod==='All'||l.prod_no===st.prod)&&(st.batch==='All'||l.batch_id===st.batch)&&(st.supplier==='All'||l.supplier_name===st.supplier)&&(skipCat||st.cat==='All'||l.category===st.cat)&&(st.rw==='All'||skuRW[l.sku]===st.rw)&&(poqOn||((!st.partials||isUnapprovedPartial(l)||_opStay.partial.has(opKey(l)))&&(!st.erpdiff||erpDiff(l))&&(!st.suprisk||lineSupRisk(l)||_opStay.supplier.has(opKey(l)))&&(!st.disc||lineDisc(l)||_opStay.discontinue.has(opKey(l)))&&(!st.notmkt||lineCountryRisk(l)||_opStay.country.has(opKey(l)))))&&qMatch(l.sku); }); }
@@ -3207,8 +3215,8 @@
         b.disabled=true; b.textContent='…';
         Promise.all(ps.map(function(l){ return opApprove(opKey(l),'partial',true); }))
           .then(function(){ viewKeep(); }).catch(function(){ alert('Some partials failed to approve.'); viewKeep(); }); }; }); }
-    function togglebar(id,opts,setv){ document.getElementById(id).onclick=function(e){var t=e.target; if(t.dataset.all)setv=new Set(opts); else if(t.dataset.v!=null){if(setv.has(t.dataset.v))setv.delete(t.dataset.v);else setv.add(t.dataset.v);} else return; if(id==='op-status')st.statuses=setv; else st.countries=setv; document.getElementById(id).innerHTML=pillsHTML(opts,setv,id==='op-country'); viewReset(); }; }
-    togglebar('op-status',pillStatuses,st.statuses); togglebar('op-country',countries,st.countries);
+    function togglebar(id,opts,setv){ document.getElementById(id).onclick=function(e){var t=e.target; if(t.dataset.all)setv=new Set(opts); else if(t.dataset.v!=null){if(setv.has(t.dataset.v))setv.delete(t.dataset.v);else setv.add(t.dataset.v);} else return; if(id==='op-status'){st.statuses=setv; document.getElementById(id).innerHTML=opStatusPills(setv);} else {st.countries=setv; document.getElementById(id).innerHTML=pillsHTML(opts,setv,true);} viewReset(); }; }
+    togglebar('op-status',OP_ST_KEYS,st.statuses); togglebar('op-country',countries,st.countries);
     c.querySelectorAll('[data-sc]').forEach(function(p){p.onclick=function(){st.scope=p.dataset.sc; c.querySelectorAll('[data-sc]').forEach(function(x){x.classList.toggle('active',x===p);}); viewReset();};});
     // Action-item pills are SINGLE-select: clicking one clears the others (click again to turn it off).
     var OP_EXCL={partials:'op-partials',suprisk:'op-suprisk',disc:'op-disc',notmkt:'op-notmkt'};

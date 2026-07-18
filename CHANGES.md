@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.606 - Status pills multi-select + shared between PO grid and Order Plan grid
+
+- PURCHASE ORDERS grid status pills are now **multi-select** — e.g. Production + Shipping can both be on
+  (state.f is a set; none selected = all). Toggling a pill adds/removes that status group.
+- The ORDER PLAN grid now uses the **same grouped status options** (shared STATUS_PILLS / stGroup):
+  Production (PRODUCTION + READY TO SHIP), Shipping (SHIPPING + DELIVERED), Future. (It was raw statuses before.)
+  COMPLETE stays off the Order Plan pills — an all-SKUs pivot over 1000+ complete POs would explode; complete
+  POs still surface via a PO search there. Both grids default to Production.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.605 - Crossdock picker: client name in brackets on the "applied to" note
 
 Each "applied to PO-xxx <status>" note in the crossdock dropdown now appends the client name in brackets when
