@@ -486,7 +486,7 @@
   var _shipPatchRow=null;  // set by the shipments grid to patch a SINGLE shipment row + its open expand in place
   var _sampleReload=null;  // set by the Samples grid so detail-panel actions can refresh it
   // a write to a PO / shipment / deposit changes the derived views — drop their caches so they re-fetch fresh
-  function invalidateDerived(){ ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments'].forEach(function(k){delete cache[k];}); }
+  function invalidateDerived(){ ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments','manufacturing'].forEach(function(k){delete cache[k];}); try{ if(typeof _navCounts!=='undefined')_navCounts.manufacturing=undefined; }catch(e){} }   // 'manufacturing' + its nav badge recompute after a PO/order-plan edit (finished-good qty drives component demand) → tab updates silently, no hard refresh
 
   function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function shortUser(s){return String(s==null?'':s).replace(/@dockandbay\.com\b/gi,'@');}  // ben@dockandbay.com → ben@ (display only)

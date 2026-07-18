@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.578 - Manufacturing tab updates silently after a PO/order-plan edit
+
+`invalidateDerived()` now also clears the `manufacturing` cache (and its nav-badge count), so after editing
+a finished-good PO's order-plan quantities the Manufacturing tab recomputes on next view — no hard refresh
+needed. (Finished-good qty drives component demand, so it was going stale.)
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.577 - Timeline: internal notes show the author (ben@), not "Dock & Bay"
 
 Admin PO + shipment timelines now attribute internal notes to the author's shortened email (e.g. ben@)
