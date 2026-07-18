@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.601 - "Includes crossdock" filter now respects the status sub-filter (defaults to In progress)
+
+Changed v25.600 so the "Includes crossdock" exception option falls through to the normal status filter instead
+of spanning all statuses — so it defaults to In progress (switch the status filter to All/Complete to see the rest).
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.600 - Purchase Orders grid: "Includes crossdock" exception filter
 
 Added an "Includes crossdock (N)" option to the ⚠ All exceptions… dropdown on the PURCHASE ORDERS grid —

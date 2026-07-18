@@ -1634,11 +1634,9 @@
       if(state.focus){ if(!r.starred || r.progress==='complete')return false; }   // Focus = starred + active only (overrides status)
       else if(state.erp){ if(!poErpMisaligned(r))return false; }          // NEEDS ERP spans all statuses (like ACTION ITEMS)
       else if(state.hasact){ if(!hasActions(r))return false; }            // ACTION ITEMS filter spans all statuses
-      else if(state.act.has_crossdock){ if(!hasCrossdock(r))return false; }   // "Includes crossdock" spans ALL statuses (most crossdock POs are complete)
-      else if(!(state.f==='all'||r.progress===state.f))return false;
-      // completed POs: default to those completed in the last 12 months (toggle off for all-time) — but not when
-      // filtering by crossdock, where you want every crossdock PO regardless of age.
-      if(!state.act.has_crossdock && state.recent && r.progress==='complete' && !((r.checkin||'')>=RECENT_CUT))return false;
+      else if(!(state.f==='all'||r.progress===state.f))return false;      // "Includes crossdock" falls through here too → respects the status sub-filter (defaults to In progress)
+      // completed POs: default to those completed in the last 12 months (toggle off for all-time)
+      if(state.recent && r.progress==='complete' && !((r.checkin||'')>=RECENT_CUT))return false;
       for(var k in state.act){ if(state.act[k] && !excMatch(k,r))return false; }
       if(anyCtry() && !ctryMatch(r))return false;   // country pills: OR within, AND with the rest (OTHER = non-major)
       if(state.sup && r.supplier_name!==state.sup)return false;
