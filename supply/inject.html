@@ -2992,6 +2992,7 @@
       if(st.focus){ if(!l.starred || /complete/i.test(l.status||''))return false; }   // Focus = starred + active only (overrides status / PO box)
       else if(poqOn){ if(!pt.length)return false;   // typed a PO search but under 3 chars → no results (don't fall back to showing everything)
         if(!pt.some(function(t){return nrm(l.po).indexOf(t)>=0;}))return false; }
+      else if(st.partials||st.erpdiff||st.suprisk||st.disc||st.notmkt){ if(!(allC||st.countries.has(l.country)))return false; }   // an action-item risk pill spans ALL active statuses (its count is computed across statuses too) — otherwise the count and the view disagree
       else { if(!st.statuses.has(l.status))return false; if(!(allC||st.countries.has(l.country)))return false; }
       return (st.prod==='All'||l.prod_no===st.prod)&&(st.batch==='All'||l.batch_id===st.batch)&&(st.supplier==='All'||l.supplier_name===st.supplier)&&(skipCat||st.cat==='All'||l.category===st.cat)&&(st.rw==='All'||skuRW[l.sku]===st.rw)&&(!st.partials||isUnapprovedPartial(l)||_opStay.partial.has(opKey(l)))&&(!st.erpdiff||erpDiff(l))&&(!st.suprisk||lineSupRisk(l)||_opStay.supplier.has(opKey(l)))&&(!st.disc||lineDisc(l)||_opStay.discontinue.has(opKey(l)))&&(!st.notmkt||lineCountryRisk(l)||_opStay.country.has(opKey(l)))&&qMatch(l.sku); }); }
     function rowsFor(cl){ var set={},list=[]; cl.forEach(function(l){if(!set[l.sku]){set[l.sku]=1;list.push(l.sku);}});

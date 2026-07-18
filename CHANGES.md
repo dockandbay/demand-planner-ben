@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.583 - Order Plan: risk pills now span all statuses (count == view)
+
+An action-item risk pill (Unapproved partials / Update ERP / Supplier risk / Discontinued / Country risk)
+now shows its lines across ALL active statuses, instead of AND-ing with the status filter. The pill counts
+are already computed across statuses, so "Supplier risk (8)" but an empty view happened when those POs
+weren't in the selected status (e.g. FUTURE / READY TO SHIP while the default is PRODUCTION). Now count and
+view agree. Country/prod/batch/supplier/search filters still apply; the status pills resume when no risk pill
+is active.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.582 - Order Plan grid: fix blank grid + broken approve; fast country tooltip; single-select pills
 
 - **Fix (regression):** the SUPPLY ▸ Order Plan grid rendered blank / approvals didn't work because `undoX`
