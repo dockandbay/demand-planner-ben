@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.604 - Crossdock picker: single natural-sorted list (no "used first")
+
+The crossdock dropdown no longer hoists on-hand/applied SKUs to the top in a separate group — it's now ONE
+flat list. SKUs are sorted numerically/naturally (CROSSDOCK-1, -2, -9, -10, -11 — not 1,10,11,2…), and each
+SKU still carries its on-hand / applied notes inline.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.603 - Crossdock picker: descriptive per-SKU notes (on-hand + applied POs with status)
 
 The country-aware crossdock dropdown now shows readable notes under each SKU instead of terse "on hand N ·

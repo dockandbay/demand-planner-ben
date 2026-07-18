@@ -1258,17 +1258,18 @@
       if(wh){ (rep.rows||[]).forEach(function(r){ if(r.wh!==wh)return; var x=ensure(r.sku); x.oh+=Number(r.on_hand)||0;
           (r.sources||[]).forEach(function(s){ if(s.type==='crossdock_po') addPo(r.sku, s.po); }); });
         (rep.expected||[]).forEach(function(e){ if(String(e.country||'').toUpperCase()!==co)return; addPo(e.sku, e.po); }); }
-      var relevant=Object.keys(m).filter(function(s){return curList.indexOf(s)<0 && (m[s].oh>0||m[s].pos.length);}).sort();
+      // Natural (numeric-aware) sort so CROSSDOCK-2 sits before CROSSDOCK-10 (not 1,10,11,2…).
+      function natCmp(a,b){ return String(a).localeCompare(String(b), undefined, {numeric:true, sensitivity:'base'}); }
+      // ONE flat list in numeric/alphabetical order — the on-hand / applied SKUs are NOT hoisted to the top; they
+      // just carry their notes inline. Includes any report SKU that isn't in the master crossdock list.
+      var union={}; full.forEach(function(n){union[n]=1;}); if(wh)Object.keys(m).forEach(function(n){ if(curList.indexOf(n)<0)union[n]=1; });
+      var allList=Object.keys(union).sort(natCmp);
       function render(q){ q=(q||'').trim().toLowerCase();
-        var rel=relevant.filter(function(n){return !q||n.toLowerCase().indexOf(q)>=0;}), relSet={}; rel.forEach(function(n){relSet[n]=1;});
-        var others=full.filter(function(n){return !relSet[n] && (!q||n.toLowerCase().indexOf(q)>=0);});
-        var html='';
-        if(wh){ html+= rel.length
-          ? ('<div class="mut tiny" style="padding:4px 10px;font-weight:700;color:#0369a1">In '+esc(co)+' 3PL ('+rel.length+')</div>'
-             + rel.slice(0,q?80:30).map(function(n){ var notes=noteFor(m[n]); return '<div class="shpop-opt" data-v="'+esc(n)+'"><b>'+esc(n)+'</b>'+(notes.length?'<div class="mut tiny" style="line-height:1.35;margin-top:1px">'+notes.map(esc).join(' &middot; ')+'</div>':'')+'</div>'; }).join(''))
-          : '<div class="mut tiny" style="padding:5px 10px">No on-hand or applied crossdock in the '+esc(co)+' 3PL'+(q?' matching':'')+'.</div>'; }
-        html+='<div class="mut tiny" style="padding:4px 10px;font-weight:700;color:#64748b'+(wh?';border-top:1px solid #eee':'')+'">'+(wh?'All crossdock SKUs':'Crossdock SKUs')+'</div>';
-        html+= others.length ? others.slice(0,q?80:20).map(function(n){return '<div class="shpop-opt" data-v="'+esc(n)+'">'+esc(n)+'</div>';}).join('') : '<div class="count" style="padding:8px">no matching SKU</div>';
+        var ms=allList.filter(function(n){return !q||n.toLowerCase().indexOf(q)>=0;});
+        var html= ms.length ? ms.slice(0,q?120:60).map(function(n){ var x=wh?m[n]:null, notes=x?noteFor(x):[];
+            return '<div class="shpop-opt" data-v="'+esc(n)+'"><b>'+esc(n)+'</b>'+(notes.length?'<div class="mut tiny" style="line-height:1.35;margin-top:1px">'+notes.map(esc).join(' &middot; ')+'</div>':'')+'</div>'; }).join('')
+          : '<div class="count" style="padding:8px">no matching SKU</div>';
+        if(!q && allList.length>60)html+='<div class="mut tiny" style="padding:5px 10px">'+(allList.length-60)+' more — type to search…</div>';
         var l=document.getElementById('shpop-list'); if(!l)return; l.innerHTML=html;
         l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ closeShPop(); onPick(o.dataset.v); }; }); }
       render(''); var qi=pop.querySelector('.shpop-q'); if(qi){ qi.oninput=function(){render(this.value);}; qi.focus(); } }
