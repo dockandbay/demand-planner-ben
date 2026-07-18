@@ -290,6 +290,9 @@
 #supply-root tr.batchrow td{background:#eef2ff!important;font-weight:600;border-top:1px solid #c7d2fe;text-align:left;white-space:normal}
 #supply-root tr.cat-hdr td{background:#e8e8e6;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#333;padding:3px 8px;text-align:left;border-top:2px solid #bbb}
 #supply-root .opapprove:hover{color:#15803d}
+/* unapproved risk badges (supplier / discontinued / country) — clear hover feedback that they're clickable */
+#supply-root .opapprove-sup,#supply-root .opapprove-disc,#supply-root .opapprove-ctry{transition:background .1s,border-color .1s,box-shadow .1s}
+#supply-root .opapprove-sup:hover,#supply-root .opapprove-disc:hover,#supply-root .opapprove-ctry:hover{background:#fca5a5!important;border-color:#dc2626!important;color:#7f1d1d!important;box-shadow:0 0 0 2px rgba(220,38,38,.2)}
 /* undo-approval ✕ overlays the ✓ badge on hover (no layout shift) */
 #supply-root .opappr .opundo,#supply-root .opappr .oprisk-undo{display:none}
 #supply-root .opappr:hover .opundo,#supply-root .opappr:hover .oprisk-undo{display:flex}
@@ -3018,7 +3021,6 @@
         +'<button class="save-btn" id="op-dl" style="margin-left:auto;background:#2563eb;color:#fff;border-color:#2563eb" title="Download XLSX — SKUs (rows) × purchase orders (columns) × quantities, for the current view">⤓ Download report</button></div>'
       +'<div class="bar"><span class="pill-lbl">Action items</span>'
         +'<span class="pill'+(st.partials?' active':'')+'" id="op-partials">⚠ Unapproved partials <span id="op-partials-n" style="color:#dc2626;font-weight:700"></span></span>'
-        +'<span class="pill'+(st.erpdiff?' active':'')+'" id="op-erp">⚠ Update ERP <span id="op-erp-n" style="color:#dc2626;font-weight:700"></span></span>'
         +'<span class="pill'+(st.suprisk?' active':'')+'" id="op-suprisk" title="lines ordered against a supplier not in the SKU\'s allowed multi-supplier list">⚠ Supplier risk <span id="op-suprisk-n" style="color:#dc2626;font-weight:700"></span></span>'
         +'<span class="pill'+(st.disc?' active':'')+'" id="op-disc" title="lines forecast to arrive after the product\'s discontinue date">⚠ Discontinued <span id="op-disc-n" style="color:#dc2626;font-weight:700"></span></span>'
         +'<span class="pill'+(st.notmkt?' active':'')+'" id="op-notmkt" title="Country risk — SKU not released in the PO\'s destination market (no availability there; launch date ignored). Review &amp; approve like supplier risk.">⚠ Country risk <span id="op-notmkt-n" style="color:#dc2626;font-weight:700"></span></span>'
@@ -3059,9 +3061,8 @@
       return list; }
     // pill counters show the number of ORDERS (distinct POs) impacted, not the number of SKU lines
     function poCount(fn){ var s={}; lines.forEach(function(l){ if(fn(l))s[l.po]=1; }); return Object.keys(s).length; }
-    function updateActionCounts(){ var pc=poCount(isUnapprovedPartial), ec=poCount(erpDiff);
+    function updateActionCounts(){ var pc=poCount(isUnapprovedPartial);
       var pn=document.getElementById('op-partials-n'); if(pn)pn.textContent=pc?('('+pc+')'):'';
-      var en=document.getElementById('op-erp-n'); if(en)en.textContent=ec?('('+ec+')'):'';
       var sc=poCount(lineSupRisk), dc=poCount(lineDisc), nc=poCount(lineCountryRisk);
       var sn=document.getElementById('op-suprisk-n'); if(sn)sn.textContent=sc?('('+sc+')'):'';
       var dn=document.getElementById('op-disc-n'); if(dn)dn.textContent=dc?('('+dc+')'):'';
@@ -3146,11 +3147,10 @@
     togglebar('op-status',pillStatuses,st.statuses); togglebar('op-country',countries,st.countries);
     c.querySelectorAll('[data-sc]').forEach(function(p){p.onclick=function(){st.scope=p.dataset.sc; c.querySelectorAll('[data-sc]').forEach(function(x){x.classList.toggle('active',x===p);}); viewReset();};});
     // Action-item pills are SINGLE-select: clicking one clears the others (click again to turn it off).
-    var OP_EXCL={partials:'op-partials',erpdiff:'op-erp',suprisk:'op-suprisk',disc:'op-disc',notmkt:'op-notmkt'};
+    var OP_EXCL={partials:'op-partials',suprisk:'op-suprisk',disc:'op-disc',notmkt:'op-notmkt'};
     function opExcl(which){ var was=st[which]; Object.keys(OP_EXCL).forEach(function(k){st[k]=false;}); st[which]=!was;
       Object.keys(OP_EXCL).forEach(function(k){ var el=document.getElementById(OP_EXCL[k]); if(el)el.classList.toggle('active',st[k]); }); viewReset(); }
     document.getElementById('op-partials').onclick=function(){opExcl('partials');};
-    document.getElementById('op-erp').onclick=function(){opExcl('erpdiff');};
     document.getElementById('op-suprisk').onclick=function(){opExcl('suprisk');};
     document.getElementById('op-disc').onclick=function(){opExcl('disc');};
     document.getElementById('op-notmkt').onclick=function(){opExcl('notmkt');};

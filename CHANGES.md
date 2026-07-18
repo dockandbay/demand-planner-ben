@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.595 - Order Plan: risk-badge hover feedback + removed "Update ERP" pill
+
+- Unapproved supplier / discontinued / country risk badges (s ⚠ / d ⚠ / c ⚠) now show a clear hover state
+  (darker red fill + ring) so it's obvious they're clickable — previously only the partial badge reacted.
+- Removed the "⚠ Update ERP" action-item pill from the ORDER PLAN filter bar (plus its OP_EXCL entry, click
+  binding and count). ERP deviations are still surfaced/uploadable from the per-PO Order Plan panel.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.594 - Order Plan: fix hover-✕ to undo an approved partial/supplier/disc/country risk
 
 The undo ✕ overlay never appeared on hover: the badge button carried an inline `display:none`, which beats
