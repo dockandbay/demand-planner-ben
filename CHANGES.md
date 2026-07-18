@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.611 - Fix ship_mode resolution (v25.610 returned blank for all POs)
+
+The `ship_mode` subquery added in v25.610 resolved to blank for every PO, so FOB-mode shipments still weren't
+detected. Replaced it with the already-joined `sh_mode` column (from the self-master shipment join) — now
+resolves correctly (e.g. PO-1701758 → fob; live distribution fob/air/sea, not all-blank). So a FOB-mode
+shipment now properly zeroes freight/duty/tax in the landed-cost panel + cash flow.
+
+Files: server.mjs. No migrations, no new env vars.
+
 ## v25.610 - FOB has no landed costs (freight / duty / tax = 0), incl. FOB-mode shipments
 
 Clarified rule: anything FOB carries no landed costs. Previously `isFOBdest` treated a PO as FOB only when it
