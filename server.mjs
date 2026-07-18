@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.578';
+const APP_VERSION = 'v25.579';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1883,6 +1883,11 @@ app.get('/api/supply/:section', async (req, res) => {
           coalesce(p.batch_id,'') batch_id,
           coalesce(p.supplier_name,'') supplier_name, coalesce(p.shipment_ref,'') shipment_ref,
           coalesce(nullif(p.country_code,''), b.country_code, '') country,
+          -- EXCEPTION: producing a SKU for a market where it isn't RELEASED. Availability (v_product_availability,
+          -- is_available) is authoritative — launch dates are always populated so they're ignored. Blank market → no flag.
+          (upper(coalesce(nullif(p.country_code,''), b.country_code,'')) IN ('UK','US','EU','AU','CA') AND NOT EXISTS (
+             SELECT 1 FROM planner.v_product_availability va
+             WHERE va.sku=l.sku AND upper(va.country)=upper(coalesce(nullif(p.country_code,''), b.country_code,'')) AND va.is_available)) not_avail_market,
           coalesce(p.client,'') client, coalesce(p.sales_order_ref,'') sales_order_ref, coalesce(p.branch,'') branch,
           coalesce(sl.category,'') category, coalesce(sl.release_window,'') release_window, sl.pallet_qty,
           to_char(p.start_production,'YYYY-MM-DD') prod_start,
@@ -4706,7 +4711,12 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
       pool.query(`SELECT l.sku,l.qty,l.carton_qty,l.full_carton_check,l.cost_price,
                     el.qty erp_qty, el.cost erp_cost,
                     (coalesce(l.qty,0) IS DISTINCT FROM coalesce(el.qty,0)) qty_pending,   -- 0 plan == absent from ERP → not a deviation
-                    (l.cost_price IS DISTINCT FROM el.cost) cost_pending
+                    (l.cost_price IS DISTINCT FROM el.cost) cost_pending,
+                    -- EXCEPTION: SKU not RELEASED in this PO's market (availability is authoritative; launch dates ignored)
+                    (EXISTS (SELECT 1 FROM planner.purchase_orders pp LEFT JOIN planner.branches bb ON bb.name=pp.branch
+                       WHERE pp.po=l.po AND upper(coalesce(nullif(pp.country_code,''), bb.country_code,'')) IN ('UK','US','EU','AU','CA')
+                         AND NOT EXISTS (SELECT 1 FROM planner.v_product_availability va
+                            WHERE va.sku=l.sku AND upper(va.country)=upper(coalesce(nullif(pp.country_code,''), bb.country_code,'')) AND va.is_available))) not_avail_market
                   FROM planner.v_purchase_order_lines l
                   LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
                   WHERE l.po=$1 ORDER BY l.sku`, [po]),

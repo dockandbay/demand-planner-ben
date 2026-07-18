@@ -2455,7 +2455,7 @@
   function orderPlanPanel(po,lines,costs,addc,erpMeta,xdLines){ costs=costs||{}; addc=addc||[]; erpMeta=erpMeta||{}; xdLines=xdLines||[];
     var editing=(OP_EDIT===po);
     var totQ=0, totC=0, lineSkus={}, unconf=0; (lines||[]).forEach(function(l){lineSkus[l.sku]=1;});
-    function row(sku,orderQty,est,lcr,added){ lcr=lcr||{};
+    function row(sku,orderQty,est,lcr,added,naMkt){ lcr=lcr||{};
       var sup=(lcr.actual_cost!=null&&lcr.actual_cost!=='')?Number(lcr.actual_cost):null;
       var fin=(lcr.final_cost!=null&&lcr.final_cost!=='')?Number(lcr.final_cost):null;
       var aq=(lcr.amended_qty!=null&&lcr.amended_qty!=='')?Number(lcr.amended_qty):null;
@@ -2472,7 +2472,7 @@
       else { var qdiff=(aq!=null&&oq!=null&&aq!==oq); qtyCell=units(oq)+(qdiff?' <span style="background:#fef3c7;color:#92400e;font-weight:700;padding:0 4px;border-radius:3px" title="supplier amended the quantity">→ '+units(aq)+' ⚠</span>':''); }
       var confCell = lcr.unconfirmed ? '<button class="save-btn op-accept" data-po="'+esc(po)+'" data-sku="'+esc(sku)+'" title="confirm this supplier change">Accept</button>'
         : (hasSub&&lcr.confirmed ? '<span class="tool-badge bg-green" title="confirmed">✓</span>' : '<span class="mut tiny">—</span>');
-      return '<tr'+(lcr.unconfirmed?' style="background:#fff7ed"':'')+'><td class="l">'+esc(sku)+'</td>'
+      return '<tr'+(lcr.unconfirmed?' style="background:#fff7ed"':'')+'><td class="l">'+esc(sku)+(naMkt?' <span class="tool-badge" style="background:#fee2e2;color:#b91c1c;font-size:8px" title="Not released in this PO&#39;s market — the SKU has no availability there (launch date ignored). You&#39;re producing it for a market where it isn&#39;t live.">✗ not in market</span>':'')+'</td>'
         +'<td style="text-align:right">'+qtyCell+'</td>'
         +'<td style="text-align:right">'+(est!=null?'$'+money(est):'<span class="mut">—</span>')+'</td>'
         +'<td style="text-align:right">'+(sup!=null?('<span'+(disc?' style="background:#fef3c7;color:#92400e;font-weight:700;padding:0 4px;border-radius:3px" title="differs from estimate"':'')+'>$'+money(sup)+(disc?' ⚠':'')+'</span>'):'<span class="mut">—</span>')+'</td>'
@@ -2480,12 +2480,15 @@
         +'<td style="text-align:right" class="op-lt" data-sku="'+esc(sku)+'"><b>$'+money(lt)+'</b></td>'
         +'<td class="l" style="white-space:nowrap">'+confCell+'</td></tr>';
     }
-    var rows=(lines||[]).map(function(l){ return row(l.sku, l.qty, (l.cost_price!=null&&l.cost_price!=='')?Number(l.cost_price):null, costs[l.sku], false); }).join('');
+    var rows=(lines||[]).map(function(l){ return row(l.sku, l.qty, (l.cost_price!=null&&l.cost_price!=='')?Number(l.cost_price):null, costs[l.sku], false, l.not_avail_market); }).join('');
     Object.keys(costs).forEach(function(sku){ var c=costs[sku]; if(c&&c.is_added&&!lineSkus[sku]) rows+=row(sku, null, null, c, true); });
     if(!rows) rows='<tr><td colspan="7" class="mut">no lines</td></tr>';
     var banner = unconf>0 ? '<div style="margin:4px 0 8px;padding:7px 11px;background:#fff7ed;border:1px solid #fdba74;border-radius:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
         +'<span style="font-weight:700;color:#92400e">⚠ '+unconf+' unconfirmed supplier change'+(unconf>1?'s':'')+'</span>'
         +'<button class="save-btn op-accept-all" data-po="'+esc(po)+'">Accept all changes</button></div>' : '';
+    // "not released in this market" exception banner — SKUs produced for a market they aren't live in
+    var naMkt=(lines||[]).filter(function(l){return l.not_avail_market;}); var _mk=((poBy[po]||{}).country||'').toUpperCase();
+    if(naMkt.length) banner += '<div style="margin:4px 0 8px;padding:7px 11px;background:#fef2f2;border:1px solid #fca5a5;border-radius:6px"><span style="font-weight:700;color:#b91c1c">✗ '+naMkt.length+' SKU'+(naMkt.length>1?'s':'')+' not released in '+(_mk||'this PO&#39;s market')+'</span> <span class="mut tiny">— no availability there (launch date ignored). Producing for a market where the SKU isn&#39;t live: '+naMkt.map(function(l){return esc(l.sku);}).join(', ')+'</span></div>';
     // ERP deviations for THIS PO — QUANTITY only (price is never an exception; cost still rides along on push).
     // COMPLETE POs raise nothing. Outline = light yellow exception box. Table sizes to content (not full width);
     // SKU column ~45ch, nowrap, so long SKUs show in full. Plain scroll wrapper (NOT .tw — that forces
@@ -2910,7 +2913,7 @@
       skuAttr[s.sku]={sup:s.supplier||'',cq:s.carton_qty||'',dis:s.discontinue||'',disAu:s.discontinue_au||'',disCa:s.discontinue_ca||'',sm:s.supplier_multiple_all||'',ean:s.product_ean||'',title:s.product_name||'',size:s.size||'',size_long:s.size_long||'',colour:s.colour_long||''};});
     lines.forEach(function(l){if(l.category)skuCat[l.sku]=l.category; if(l.release_window)skuRW[l.sku]=l.release_window;});
     var defS=statuses.filter(function(s){return /production/i.test(s);}); if(!defS.length)defS=statuses.slice(0,1);
-    var st={statuses:new Set(defS),countries:new Set(),prod:'All',cat:'All',batch:'All',supplier:'All',q:'',poq:'',scope:'ordered',rw:'All',partials:false,erpdiff:false,suprisk:false,disc:false,focus:false};   // countries: empty = all (like PURCHASE ORDERS)
+    var st={statuses:new Set(defS),countries:new Set(),prod:'All',cat:'All',batch:'All',supplier:'All',q:'',poq:'',scope:'ordered',rw:'All',partials:false,erpdiff:false,suprisk:false,disc:false,notmkt:false,focus:false};   // countries: empty = all (like PURCHASE ORDERS)
     // action sets (exclude complete POs): unapproved partial cartons, and lines whose planned qty differs from the ERP
     // Once a PO has shipped/delivered/completed the plan is locked — no partials / supplier-risk to action.
     function poLocked(l){ return /complete|shipping|deliver/i.test(l.status||''); }
@@ -2922,6 +2925,8 @@
     function discMismatch(l){ var dd=pickDisc(l.country,skuAttr[l.sku]||{}); return !!(dd && l.delivery && String(l.delivery)>String(dd)); }
     function lineSupRisk(l){ return !poLocked(l) && Number(l.qty)>0 && supMismatch(l) && !l.supplier_risk_approved; }
     function lineDisc(l){ return !/complete/i.test(l.status||'') && Number(l.qty)>0 && discMismatch(l) && !l.discontinue_approved; }
+    // not released in the PO's market — availability is authoritative (launch date ignored)
+    function lineNotInMarket(l){ return !/complete/i.test(l.status||'') && Number(l.qty)>0 && !!l.not_avail_market; }
     if(_pendingOP){ st.partials=!!_pendingOP.partials; st.suprisk=!!_pendingOP.suprisk; st.disc=!!_pendingOP.disc; if(_pendingOP.po)st.poq=String(_pendingOP.po).toLowerCase();
       st.statuses=new Set(pillStatuses);   // show all (non-complete) statuses so the flagged lines aren't hidden by the status filter
       _pendingOP=null; }
@@ -2944,6 +2949,7 @@
         +'<span class="pill'+(st.erpdiff?' active':'')+'" id="op-erp">⚠ Update ERP <span id="op-erp-n" style="color:#dc2626;font-weight:700"></span></span>'
         +'<span class="pill'+(st.suprisk?' active':'')+'" id="op-suprisk" title="lines ordered against a supplier not in the SKU\'s allowed multi-supplier list">⚠ Supplier risk <span id="op-suprisk-n" style="color:#dc2626;font-weight:700"></span></span>'
         +'<span class="pill'+(st.disc?' active':'')+'" id="op-disc" title="lines forecast to arrive after the product\'s discontinue date">⚠ Discontinued <span id="op-disc-n" style="color:#dc2626;font-weight:700"></span></span>'
+        +'<span class="pill'+(st.notmkt?' active':'')+'" id="op-notmkt" title="SKU not released in the PO\'s destination market — no availability there (launch date ignored)">✗ Not in market <span id="op-notmkt-n" style="color:#dc2626;font-weight:700"></span></span>'
         +'<span class="pill po-focus'+(st.focus?' active':'')+'" id="op-focus" style="margin-left:14px" title="show only starred (Focus) POs that are still active / in progress">★ Focus</span>'
         +'<span style="margin-left:14px;font-size:9px;line-height:1.2;color:#64748b" title="In a quantity cell you can type shortcuts instead of a plain number:\n• 4c = 4 cartons = 4 × the SKU\'s carton qty (e.g. carton 12 → 48)\n• 150r = round 150 UP to the nearest full carton (e.g. carton 12 → 156)">💡 in a cell: <b>4c</b> = 4 cartons · <b>150r</b> = round up to carton</span></div>'
       +'</div>'   // /#op-filters
@@ -2963,7 +2969,7 @@
       else if(poqOn){ if(!pt.length)return false;   // typed a PO search but under 3 chars → no results (don't fall back to showing everything)
         if(!pt.some(function(t){return nrm(l.po).indexOf(t)>=0;}))return false; }
       else { if(!st.statuses.has(l.status))return false; if(!(allC||st.countries.has(l.country)))return false; }
-      return (st.prod==='All'||l.prod_no===st.prod)&&(st.batch==='All'||l.batch_id===st.batch)&&(st.supplier==='All'||l.supplier_name===st.supplier)&&(skipCat||st.cat==='All'||l.category===st.cat)&&(st.rw==='All'||skuRW[l.sku]===st.rw)&&(!st.partials||isUnapprovedPartial(l))&&(!st.erpdiff||erpDiff(l))&&(!st.suprisk||lineSupRisk(l))&&(!st.disc||lineDisc(l))&&qMatch(l.sku); }); }
+      return (st.prod==='All'||l.prod_no===st.prod)&&(st.batch==='All'||l.batch_id===st.batch)&&(st.supplier==='All'||l.supplier_name===st.supplier)&&(skipCat||st.cat==='All'||l.category===st.cat)&&(st.rw==='All'||skuRW[l.sku]===st.rw)&&(!st.partials||isUnapprovedPartial(l))&&(!st.erpdiff||erpDiff(l))&&(!st.suprisk||lineSupRisk(l))&&(!st.disc||lineDisc(l))&&(!st.notmkt||lineNotInMarket(l))&&qMatch(l.sku); }); }
     function rowsFor(cl){ var set={},list=[]; cl.forEach(function(l){if(!set[l.sku]){set[l.sku]=1;list.push(l.sku);}});
       function addMaster(reqCat){ skuMaster.forEach(function(s){ if(set[s.sku])return;
         if(reqCat&&s.category!==st.cat)return; if(st.cat!=='All'&&s.category!==st.cat)return;
@@ -2983,9 +2989,10 @@
     function updateActionCounts(){ var pc=poCount(isUnapprovedPartial), ec=poCount(erpDiff);
       var pn=document.getElementById('op-partials-n'); if(pn)pn.textContent=pc?('('+pc+')'):'';
       var en=document.getElementById('op-erp-n'); if(en)en.textContent=ec?('('+ec+')'):'';
-      var sc=poCount(lineSupRisk), dc=poCount(lineDisc);
+      var sc=poCount(lineSupRisk), dc=poCount(lineDisc), nc=poCount(lineNotInMarket);
       var sn=document.getElementById('op-suprisk-n'); if(sn)sn.textContent=sc?('('+sc+')'):'';
-      var dn=document.getElementById('op-disc-n'); if(dn)dn.textContent=dc?('('+dc+')'):''; }
+      var dn=document.getElementById('op-disc-n'); if(dn)dn.textContent=dc?('('+dc+')'):'';
+      var nn=document.getElementById('op-notmkt-n'); if(nn)nn.textContent=nc?('('+nc+')'):''; }
     var _opShowAllPos=false;
     function viewReset(){ _opShowAllPos=false; view(); }   // any filter/search change re-caps the PO columns
     function view(){ var cl=curLines(); var poCl=curLines(true); document.getElementById('op-grid').innerHTML=pivot(poCl,rowsFor(cl),skuCat,plcMap,skuAttr,skuRW,_opShowAllPos); bindQty(); bindUploads(); bindApprove(); bindConfirm(); bindPoLinks(); bindOpTips(); updateActionCounts();
@@ -3060,6 +3067,7 @@
     document.getElementById('op-erp').onclick=function(){st.erpdiff=!st.erpdiff; this.classList.toggle('active',st.erpdiff); viewReset();};
     document.getElementById('op-suprisk').onclick=function(){st.suprisk=!st.suprisk; this.classList.toggle('active',st.suprisk); viewReset();};
     document.getElementById('op-disc').onclick=function(){st.disc=!st.disc; this.classList.toggle('active',st.disc); viewReset();};
+    document.getElementById('op-notmkt').onclick=function(){st.notmkt=!st.notmkt; this.classList.toggle('active',st.notmkt); viewReset();};
     document.getElementById('op-focus').onclick=function(){st.focus=!st.focus; this.classList.toggle('active',st.focus); viewReset();};
     document.getElementById('op-cat').onchange=function(){st.cat=this.value;markSel(this);viewReset();};
     document.getElementById('op-rw').onchange=function(){st.rw=this.value;markSel(this);viewReset();};
@@ -3165,7 +3173,7 @@
     if(!skuList.length){ if(cn)cn.textContent='0 SKUs'; return '<div class="count">No SKUs for this filter (pick a Category for \"All in category\").</div>'; }
     var pos=[],psn={},cell={},meta={};
     rows.forEach(function(l){ if(!psn[l.po]){psn[l.po]=1;pos.push(l.po);meta[l.po]={s:l.supplier_name,co:l.country,ps:l.prod_start,pe:l.prod_end,sd:l.ship_date,dl:l.delivery};}
-      cell[l.po+'|'+l.sku]={q:l.qty,eq:(l.erp_qty==null?l.qty:l.erp_qty),c:Number(l.cost_price)||0,pq:Number(l.pallet_qty)||0,fcc:(l.full_carton_check||''),sra:!!l.supplier_risk_approved,dca:!!l.discontinue_approved}; });
+      cell[l.po+'|'+l.sku]={q:l.qty,eq:(l.erp_qty==null?l.qty:l.erp_qty),c:Number(l.cost_price)||0,pq:Number(l.pallet_qty)||0,fcc:(l.full_carton_check||''),sra:!!l.supplier_risk_approved,dca:!!l.discontinue_approved,nm:!!l.not_avail_market}; });
     pos.sort().reverse();   // purchase orders across the top, descending (newest first)
     var poTotal=pos.length, poCapped=(!showAllPos && poTotal>OP_POCAP);
     if(poCapped)pos=pos.slice(0,OP_POCAP);   // render only the first N PO columns until "show all"
@@ -3223,6 +3231,7 @@
           if(dd && arr && String(arr)>String(dd)){
             if(cc.dca) badge+=' <span class="tool-badge bg-green" title="discontinue approved">d✓</span>';
             else { if(!tdc)tdc=' class="pcell"'; badge+=' <button class="pbtn opapprove-disc" data-ap="'+esc(po+'|'+sku)+'" title="arrives '+fd(arr)+' after discontinue '+fd(dd)+' — review &amp; approve" style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;white-space:nowrap">d ⚠</button>'; } } }
+        if(cc && cc.nm && q>0){ if(!tdc)tdc=' class="pcell"'; badge+=' <span class="tool-badge" title="SKU not released in '+esc((meta[po].co||'').toUpperCase())+' — no availability there (launch date ignored)" style="background:#fee2e2;color:#b91c1c;font-size:8px;font-weight:700">✗ mkt</span>'; }
         tds+='<td'+tdc+' style="min-width:'+POW+';width:'+POW+';text-align:center'+(discPast&&!tdc?';background:'+rowBg:'')+'"><input class="qtycell'+(q?'':' z')+'" data-po="'+esc(po)+'" data-sku="'+esc(sku)+'" data-erp="'+eq+'" value="'+(q||'')+'">'+badge+'</td>';});
       h+='<tr><td class="l" style="'+fzc('sku',rowBg,2)+'"><button class="op-plan" data-sku="'+esc(sku)+'" title="show the buy plan for this SKU (pick country in the popup)" style="font-size:8px;font-weight:700;padding:0 4px;margin-right:5px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer;vertical-align:middle">PLAN</button>'+esc(sku)+'</td>'
         +'<td style="'+fzc('cq',rowBg,2)+';text-align:right"><span class="tiny">'+(a.cq?esc(a.cq):'')+'</span></td>'

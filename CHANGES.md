@@ -3,6 +3,22 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.579 - Order Plan: flag SKUs produced for a market they aren't released in
+
+New "not released in market" exception on both order plans. A PO line is flagged when the SKU has **no
+availability** in the PO's destination market (UK/US/EU/AU/CA) — availability (`v_product_availability`,
+`is_available`) is authoritative; launch dates are ignored (they're always populated). Non-standard markets
+(OT/DIRECT/blank) are never flagged.
+- **PURCHASE ORDERS ▸ Order Plan** (per-PO panel): a red "✗ not in market" badge on each affected SKU + a
+  summary banner listing them.
+- **SUPPLY ▸ Order Plan** (grid): a red "✗ mkt" marker on the affected cell + a new "✗ Not in market"
+  filter pill with a PO count.
+Server: `not_avail_market` added to the order-plan and po-detail line queries.
+
+e.g. GIFT-BOX-HOME-CHRYBMB on PO-56AULX2-BUNDLE (AU) — not available in AU → flagged.
+
+Files: server.mjs, supply/inject.html. No migrations, no new env vars.
+
 ## v25.578 - Manufacturing tab updates silently after a PO/order-plan edit
 
 `invalidateDerived()` now also clears the `manufacturing` cache (and its nav-badge count), so after editing
