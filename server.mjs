@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.606';
+const APP_VERSION = 'v25.607';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -4088,6 +4088,48 @@ function cin7Fetch(url, opts) {
 }
 // Update the Cin7 PO's EstimatedDeliveryDate to the planner's Completion date (#14). LIVE write to Cin7 —
 // gated: requires Cin7 creds (see cin7Auth). Safe no-op (501) when the credential is absent.
+// MERGE PO 2 (from) into PO 1 (into): fold PO 2's SKU lines into PO 1 (matching SKUs sum their qty, new SKUs
+// copy across with their cost), then delete PO 2 entirely (mirrors /delete). Only SKU + qty (+cost so the line
+// stays valued) merge — supplier / dates / client / crossdock etc. are NOT merged. Guarded by `confirm`.
+app.post('/api/supply/po/merge', async (req, res) => {
+  const b = req.body || {}, into = (b.into || '').trim(), from = (b.from || '').trim();
+  if (!into || !from) return res.status(400).json({ error: 'into + from PO required' });
+  if (into === from) return res.status(400).json({ error: 'choose two different POs' });
+  if (!b.confirm) return res.status(400).json({ error: 'confirmation required' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const chk = await client.query('SELECT po FROM planner.purchase_orders WHERE po = ANY($1)', [[into, from]]);
+    const have = new Set(chk.rows.map(r => r.po));
+    if (!have.has(into)) { await client.query('ROLLBACK'); return res.status(404).json({ error: `PO 1 (${into}) not found` }); }
+    if (!have.has(from)) { await client.query('ROLLBACK'); return res.status(404).json({ error: `PO 2 (${from}) not found` }); }
+    const fromLines = (await client.query('SELECT sku, coalesce(qty,0) qty, cost_price FROM planner.purchase_order_lines WHERE po=$1', [from])).rows;
+    let summed = 0, copied = 0;
+    for (const l of fromLines) {
+      const key = into + '|' + l.sku;
+      const upd = await client.query('UPDATE planner.purchase_order_lines SET qty = coalesce(qty,0) + $2, proposed_at = now() WHERE po_sku=$1', [key, l.qty]);
+      if (upd.rowCount > 0) { summed++; }
+      else {
+        await client.query(`INSERT INTO planner.purchase_order_lines (po_sku, po, sku, qty, cost_price, proposed_at)
+          VALUES ($1,$2,$3,$4,$5, now())
+          ON CONFLICT (po_sku) DO UPDATE SET qty = coalesce(planner.purchase_order_lines.qty,0) + excluded.qty, proposed_at = now()`,
+          [key, into, l.sku, l.qty, l.cost_price]);
+        copied++;
+      }
+    }
+    // delete PO 2 (same set of tables as /api/supply/po/:po/delete)
+    await client.query('DELETE FROM planner.purchase_order_lines WHERE po=$1', [from]);
+    await client.query('DELETE FROM planner.erp_purchase_order_lines WHERE po=$1', [from]);
+    await client.query('DELETE FROM planner.erp_purchase_orders WHERE po=$1', [from]);
+    await client.query('DELETE FROM planner.portal_attachments WHERE po=$1', [from]);
+    await client.query('DELETE FROM planner.supplier_submissions WHERE po=$1', [from]);
+    await client.query('DELETE FROM planner.supplier_notes WHERE po=$1', [from]);
+    await client.query('DELETE FROM planner.purchase_orders WHERE po=$1', [from]);
+    await client.query('COMMIT');
+    res.json({ ok: true, into, from, lines: fromLines.length, summed, copied });
+  } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
 app.post('/api/supply/po/:po/cin7-date', async (req, res) => {
   const po = req.params.po;
   const completion = ((req.body && req.body.completion_date) || '').trim();

@@ -1627,6 +1627,7 @@
           +'<button class="save-btn" id="po-new" style="'+lb+'">+ New PO</button>'
           +'<button class="save-btn" id="po-upload" style="'+lb+'">⬆ Upload POs</button>'
           +'<button class="save-btn" id="po-import-cin7" style="'+lb+'" title="import a purchase order from Cin7 by its PO number — brings in supplier, branch, SKUs &amp; quantities">⬆ Import PO from Cin7</button>'
+          +'<button class="save-btn" id="po-merge" style="'+lb+'" title="merge one PO&rsquo;s SKUs &amp; quantities into another, then delete the merged-from PO">⛙ Merge PO&rsquo;s</button>'
           +'<button class="save-btn" id="po-csv" style="'+lb+'">⬇ CSV for Fulfil</button>'
           +'<button class="save-btn" id="po-cin7-dates" style="'+lb+'" title="push the planner completion date to Cin7 EstimatedDeliveryDate for every ACTIVE PO whose date differs from Cin7 — complete POs are skipped (live write)">📅 Sync Cin7 dates</button>'
           +'</div>'; })()
@@ -1799,6 +1800,7 @@
     document.getElementById('po-new').onclick=openPoCreate;
     document.getElementById('po-upload').onclick=openPoUpload;
     var _impBtn=document.getElementById('po-import-cin7'); if(_impBtn)_impBtn.onclick=openPoImportCin7;
+    var _mrgBtn=document.getElementById('po-merge'); if(_mrgBtn)_mrgBtn.onclick=openPoMerge;
     // BULK Cin7 date sync — every ACTIVE PO whose completed-at-warehouse date differs from Cin7 (same condition as
     // the row "⚠ Date ≠ ERP" button); complete POs are excluded (poComplete). Live write → strong confirm.
     document.getElementById('po-cin7-dates').onclick=function(){ var btn=this;
@@ -1871,6 +1873,52 @@
     bg.onclick=function(e){ if(e.target===bg)bg.parentNode.removeChild(bg); };
     document.getElementById('po-imp-cancel').onclick=function(){ bg.parentNode.removeChild(bg); };
     setTimeout(function(){ ref.focus(); },0);
+  }
+  // MERGE two POs: PO 2's SKUs + quantities fold into PO 1 (matching SKUs sum, new SKUs copy over), then PO 2
+  // is deleted. Nothing else (supplier / dates / client / …) is merged. A confirm tick guards the deletion.
+  function openPoMerge(){ var bg=document.createElement('div'); bg.className='pomodal-bg';
+    var ist='font-size:13px;padding:5px 8px;border:1px solid #d0d0d0;border-radius:6px;width:100%;box-sizing:border-box;text-align:left';
+    bg.innerHTML='<div class="pomodal" style="width:470px">'+lookupDatalists()
+      +'<div style="font-weight:700;font-size:15px;margin-bottom:4px">Merge purchase orders</div>'
+      +'<div class="mut tiny" style="margin-bottom:10px">Folds <b>PO 2</b>&rsquo;s SKUs &amp; quantities into <b>PO 1</b> — matching SKUs have their quantities added, new SKUs are copied over. No other details are merged. <b>PO 2 is then permanently deleted.</b></div>'
+      +'<div style="margin-bottom:9px"><div class="mut tiny" style="margin-bottom:2px">PO 1 — keep &amp; merge into</div><input id="mrg-into" list="polist" placeholder="search PO…" style="'+ist+'"></div>'
+      +'<div style="margin-bottom:9px"><div class="mut tiny" style="margin-bottom:2px">PO 2 — merge from, then delete</div><input id="mrg-from" list="polist" placeholder="search PO…" style="'+ist+'"></div>'
+      +'<div id="mrg-prev" style="margin:6px 0;font-size:12px">&nbsp;</div>'
+      +'<label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;margin:6px 0;cursor:pointer"><input type="checkbox" id="mrg-confirm" style="margin-top:2px"><span>I confirm <b id="mrg-cfrom">PO 2</b> will be <b style="color:#b91c1c">permanently deleted</b> after its SKUs &amp; quantities merge into <b id="mrg-cinto">PO 1</b>.</span></label>'
+      +'<div id="mrg-msg" style="color:#dc2626;font-size:12px;min-height:14px;margin:2px 0"></div>'
+      +'<div style="display:flex;justify-content:flex-end;gap:6px;margin-top:4px"><button class="save-btn light" id="mrg-cancel">Cancel</button><button class="save-btn dark" id="mrg-go" disabled>Merge &amp; delete PO 2</button></div></div>';
+    document.body.appendChild(bg);
+    var into=document.getElementById('mrg-into'), from=document.getElementById('mrg-from'), prev=document.getElementById('mrg-prev'),
+        cf=document.getElementById('mrg-confirm'), go=document.getElementById('mrg-go'), msg=document.getElementById('mrg-msg');
+    function close(){ if(bg.parentNode)bg.parentNode.removeChild(bg); }
+    bg.onclick=function(e){ if(e.target===bg)close(); };
+    document.getElementById('mrg-cancel').onclick=close;
+    var _pd={};   // po -> lines cache
+    function loadLines(po,cb){ if(_pd[po]){cb(_pd[po]);return;} fetch('/api/supply/po-detail/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(d){ _pd[po]=(d&&d.lines)||[]; cb(_pd[po]); }).catch(function(){ _pd[po]=[]; cb([]); }); }
+    function known(v){ return v && (!poLookupList.length || poLookupList.indexOf(v)>=0); }
+    function valid(){ var a=(into.value||'').trim(), b=(from.value||'').trim(); return a&&b&&a!==b&&known(a)&&known(b); }
+    function refresh(){ var a=(into.value||'').trim(), b=(from.value||'').trim();
+      document.getElementById('mrg-cfrom').textContent=b||'PO 2'; document.getElementById('mrg-cinto').textContent=a||'PO 1';
+      go.disabled=!(valid()&&cf.checked); msg.textContent='';
+      if(a&&b&&a===b){ prev.innerHTML='<span style="color:#dc2626">Pick two different POs.</span>'; return; }
+      if(!valid()){ prev.innerHTML='&nbsp;'; return; }
+      prev.textContent='Loading…';
+      loadLines(a,function(la){ loadLines(b,function(lb){
+        var aset={}; la.forEach(function(l){aset[l.sku]=1;}); var overlap=0, add=0;
+        lb.forEach(function(l){ if(aset[l.sku])overlap++; else add++; });
+        prev.innerHTML='<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:8px">'
+          +'<div><b>'+esc(a)+'</b> has '+la.length+' SKU line(s) · <b>'+esc(b)+'</b> has '+lb.length+' SKU line(s)</div>'
+          +'<div class="mut tiny" style="margin-top:3px">After merge: <b>'+overlap+'</b> SKU(s) have their qty added, <b>'+add+'</b> new SKU(s) copied into '+esc(a)+'. '+esc(b)+' is deleted.</div></div>'; }); }); }
+    into.oninput=refresh; from.oninput=refresh; cf.onchange=refresh;
+    go.onclick=function(){ if(!(valid()&&cf.checked))return; var a=into.value.trim(), b=from.value.trim();
+      go.disabled=true; go.textContent='Merging…';
+      fetch('/api/supply/po/merge',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({into:a,from:b,confirm:true})})
+        .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error);
+          close(); invalidateDerived(); delete cache['purchase-orders'];
+          _poState={f:{production:1},q:a,act:{},ctry:{},grp:'production',sup:'',prod:'',batch:'',branch:''};   // land on the merged PO
+          selectSection('purchase-orders'); })
+        .catch(function(e){ msg.textContent=(e.message||e); go.disabled=false; go.textContent='Merge & delete PO 2'; }); };
+    setTimeout(function(){ into.focus(); },0);
   }
   // Single "New PO" form: PO number (PO- prefilled), supplier (search dropdown), branch, production start,
   // production number, batch number. One POST to /api/supply/po-create.

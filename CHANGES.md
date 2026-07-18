@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.607 - New feature: Merge PO's (PURCHASE ORDERS ▸ Import/Export)
+
+Added a "⛙ Merge PO's" button in the PO grid's Import/Export bar. It opens a modal to pick PO 1 (keep) and
+PO 2 (merge from): PO 2's SKU lines fold into PO 1 — matching SKUs have their quantities added, new SKUs are
+copied over (with cost so the line stays valued). Nothing else (supplier / dates / client / crossdock / …) is
+merged. PO 2 is then permanently deleted — guarded by a confirmation tick box. The modal previews how many
+SKUs will be summed vs copied before you commit.
+
+New endpoint POST /api/supply/po/merge {into, from, confirm} (transactional; deletes PO 2 across the same
+tables as the PO delete). Tested end-to-end in sandbox (sum + copy + delete verified).
+
+Files: server.mjs, supply/inject.html. No migrations, no new env vars.
+
 ## v25.606 - Status pills multi-select + shared between PO grid and Order Plan grid
 
 - PURCHASE ORDERS grid status pills are now **multi-select** — e.g. Production + Shipping can both be on
