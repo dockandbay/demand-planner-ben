@@ -1874,6 +1874,35 @@
     document.getElementById('po-imp-cancel').onclick=function(){ bg.parentNode.removeChild(bg); };
     setTimeout(function(){ ref.focus(); },0);
   }
+  // ORDER PLAN paste: paste a 2-column SKU / qty block from Excel or Sheets. SKUs not in our list are skipped;
+  // a SKU already on the PO has its qty overridden; new valid SKUs are added (proposed). Validation is server-side.
+  function openOpPaste(po,i){ var bg=document.createElement('div'); bg.className='pomodal-bg';
+    bg.innerHTML='<div class="pomodal" style="width:470px">'
+      +'<div style="font-weight:700;font-size:15px;margin-bottom:4px">Paste SKUs &amp; quantities — '+esc(po)+'</div>'
+      +'<div class="mut tiny" style="margin-bottom:8px">Paste two columns from Excel / Google Sheets — <b>SKU</b> then <b>Qty</b>, one row each (tab or comma separated). SKUs not in our SKU list are skipped; a SKU already on the PO has its qty <b>overridden</b>; new valid SKUs are added as proposed.</div>'
+      +'<textarea id="oppaste-txt" placeholder="TOWLB-CAB-XL-GREY&#9;120&#10;EYEMASK-DES-FLIGHTS&#9;60" style="width:100%;height:170px;box-sizing:border-box;font-family:ui-monospace,Menlo,monospace;font-size:12px;padding:6px;border:1px solid #d0d0d0;border-radius:6px;text-align:left;white-space:pre;overflow:auto"></textarea>'
+      +'<div id="oppaste-prev" class="mut tiny" style="margin:6px 0;min-height:14px"></div>'
+      +'<div id="oppaste-msg" style="color:#dc2626;font-size:12px;min-height:14px"></div>'
+      +'<div style="display:flex;justify-content:flex-end;gap:6px;margin-top:4px"><button class="save-btn light" id="oppaste-cancel">Cancel</button><button class="save-btn dark" id="oppaste-go" disabled>Add / update lines</button></div></div>';
+    document.body.appendChild(bg);
+    var txt=document.getElementById('oppaste-txt'), prev=document.getElementById('oppaste-prev'), msg=document.getElementById('oppaste-msg'), go=document.getElementById('oppaste-go');
+    function close(){ if(bg.parentNode)bg.parentNode.removeChild(bg); }
+    bg.onclick=function(e){ if(e.target===bg)close(); };
+    document.getElementById('oppaste-cancel').onclick=close;
+    function parse(){ return String(txt.value||'').split(/\r?\n/).map(function(ln){ var p=ln.split(/\t|,/); return {sku:(p[0]||'').trim(), qty:(p[1]||'').trim()}; }).filter(function(r){ return r.sku; }); }
+    function refresh(){ var rows=parse(); go.disabled=!rows.length; msg.textContent='';
+      prev.textContent = rows.length ? (rows.length+' row(s) detected') : 'Paste rows above…'; }
+    txt.oninput=refresh; refresh();
+    go.onclick=function(){ var rows=parse(); if(!rows.length)return; go.disabled=true; go.textContent='Adding…';
+      fetch('/api/supply/po-lines-paste',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po, rows:rows, who:'PO PLAN paste'})})
+        .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error);
+          close(); OP_EDIT=null; invalidateDerived(); poRefetchPanel(po,i);
+          var parts=[]; if(j.added)parts.push(j.added+' added'); if(j.updated)parts.push(j.updated+' updated/overridden'); var sk=(j.skipped||[]), bq=(j.badQty||[]);
+          if(sk.length)parts.push(sk.length+' skipped (not in SKU list)'); if(bq.length)parts.push(bq.length+' skipped (no qty)');
+          if(sk.length||bq.length){ alert('Paste complete — '+(parts.join(', ')||'nothing changed')+'.'+(sk.length?'\n\nNot in our SKU list (skipped):\n'+sk.join(', '):'')+(bq.length?'\n\nMissing/invalid qty (skipped):\n'+bq.join(', '):'')); } })
+        .catch(function(e){ msg.textContent=(e.message||e); go.disabled=false; go.textContent='Add / update lines'; }); };
+    setTimeout(function(){ txt.focus(); },0);
+  }
   // MERGE two POs: PO 2's SKUs + quantities fold into PO 1 (matching SKUs sum, new SKUs copy over), then PO 2
   // is deleted. Nothing else (supplier / dates / client / …) is merged. A confirm tick guards the deletion.
   function openPoMerge(){ var bg=document.createElement('div'); bg.className='pomodal-bg';
@@ -2686,7 +2715,7 @@
     var copyData=encodeURIComponent((lines||[]).map(function(l){return l.sku+'\t'+(Number(l.qty)||0);}).join('\n'));
     var addRowHtml=editing?'<tr class="op-addrow"><td class="l"><input class="op-add-sku" data-po="'+esc(po)+'" readonly placeholder="click to pick SKU…" style="width:220px;cursor:pointer;background:#fff" autocomplete="off"></td><td class="l"></td><td style="text-align:right"><input class="op-add-qty" placeholder="qty" style="width:74px;text-align:right" inputmode="numeric"></td><td colspan="5" class="mut tiny">new line — added as proposed (not in ERP until you Upload)</td></tr>':'';
     var opBtns=editing
-      ? '<button class="lnk-btn op-add-row" data-po="'+esc(po)+'" style="margin-left:8px">＋ Add SKU</button> <button class="save-btn op-save" data-po="'+esc(po)+'" style="margin-left:4px;background:#dcfce7;border:1px solid #16a34a;color:#166534;font-weight:700">✓ Save</button> <button class="save-btn light op-cancel">Cancel</button>'
+      ? '<button class="lnk-btn op-add-row" data-po="'+esc(po)+'" style="margin-left:8px">＋ Add SKU</button> <button class="save-btn op-paste" data-po="'+esc(po)+'" style="margin-left:4px;background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8" title="paste a SKU + qty block from Excel / Google Sheets (2 columns)">⧉ Paste SKU,Qty</button> <button class="save-btn op-save" data-po="'+esc(po)+'" style="margin-left:4px;background:#dcfce7;border:1px solid #16a34a;color:#166534;font-weight:700">✓ Save</button> <button class="save-btn light op-cancel">Cancel</button>'
       : '<button class="save-btn op-edit" data-po="'+esc(po)+'" style="margin-left:8px">✎ Edit qty / add SKU</button> <button class="save-btn light op-copy" data-copy="'+copyData+'" style="margin-left:4px" title="copy this PO&rsquo;s SKUs + quantities to the clipboard (tab-separated)">⧉ Copy SKU + Qty</button> <button class="save-btn op-cin7-full" data-po="'+esc(po)+'" style="margin-left:4px;background:#0a8;color:#fff;border-color:#0a8" title="push ALL of this PO&rsquo;s SKUs, quantities and prices to Cin7 — full override for exact alignment (live write)">⬆ Push to Cin7 (full)</button>';
     var _csv='SKU,Qty\n'+(lines||[]).map(function(l){ return '"'+String(l.sku).replace(/"/g,'""')+'",'+(Number(l.qty)||0); }).join('\n');
     return '<div class="sect-h">Order plan — agree the final cost price per line '
@@ -2955,6 +2984,7 @@
       var tr=document.createElement('tr'); tr.className='op-addrow';
       tr.innerHTML='<td class="l"><input class="op-add-sku" data-po="'+esc(b.dataset.po)+'" readonly placeholder="click to pick SKU…" style="width:220px;cursor:pointer;background:#fff" autocomplete="off"></td><td style="text-align:right"><input class="op-add-qty" placeholder="qty" style="width:74px;text-align:right" inputmode="numeric"></td><td colspan="5" class="mut tiny">new line — added as proposed (not in ERP until you Upload)</td>';
       tb.insertBefore(tr, tb.querySelector('.op-total')); bindOpAddSku(tr); var f=tr.querySelector('.op-add-sku'); if(f)f.click(); }; });
+    document.querySelectorAll('#podet-'+i+' .op-paste').forEach(function(b){ b.onclick=function(){ openOpPaste(b.dataset.po, i); }; });
     document.querySelectorAll('#podet-'+i+' .op-save').forEach(function(b){ b.onclick=function(){ var box=document.getElementById('podet-'+i); if(!box)return; var po2=b.dataset.po, jobs=[];
       box.querySelectorAll('.op-eq').forEach(function(inp){ var v=inp.value.trim(); if(v===''||v===inp.dataset.orig)return; var n=parseInt(v.replace(/[^0-9-]/g,''),10); if(isNaN(n))return; jobs.push({sku:inp.dataset.sku,qty:n}); });
       box.querySelectorAll('.op-addrow').forEach(function(tr){ var sk=((tr.querySelector('.op-add-sku')||{}).value||'').trim().toUpperCase(); var qv=(tr.querySelector('.op-add-qty')||{}).value; var n=parseInt(String(qv||'').replace(/[^0-9-]/g,''),10); if(sk&&!isNaN(n)) jobs.push({sku:sk,qty:n}); });

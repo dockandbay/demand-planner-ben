@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.607';
+const APP_VERSION = 'v25.608';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -4127,6 +4127,45 @@ app.post('/api/supply/po/merge', async (req, res) => {
     await client.query('DELETE FROM planner.purchase_orders WHERE po=$1', [from]);
     await client.query('COMMIT');
     res.json({ ok: true, into, from, lines: fromLines.length, summed, copied });
+  } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
+// BULK paste SKU/qty rows into a PO's order plan (Excel / Sheets paste). Each row is validated against our SKU
+// list (planner.products ∪ sku_labels, case-insensitive → canonical SKU). Unknown SKUs are skipped. Existing
+// SKUs on the PO have their qty overridden; new valid SKUs are added (proposed). qty 0 removes the line.
+app.post('/api/supply/po-lines-paste', async (req, res) => {
+  const b = req.body || {}, po = (b.po || '').trim(), rows = Array.isArray(b.rows) ? b.rows : [];
+  const who = b.who || authUser(req) || 'PO PLAN paste';
+  if (!po) return res.status(400).json({ error: 'po required' });
+  if (!rows.length) return res.status(400).json({ error: 'no rows to import' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    if (!(await client.query('SELECT 1 FROM planner.purchase_orders WHERE po=$1', [po])).rowCount) {
+      await client.query('ROLLBACK'); return res.status(404).json({ error: `PO ${po} not found` });
+    }
+    let added = 0, updated = 0; const skipped = [], badQty = [];
+    for (const r of rows) {
+      const raw = String(r.sku || '').trim();
+      if (!raw) continue;
+      const qty = parseInt(String(r.qty == null ? '' : r.qty).replace(/[^0-9-]/g, ''), 10);
+      if (isNaN(qty)) { badQty.push(raw); continue; }
+      const m = await client.query(
+        `SELECT sku FROM planner.products WHERE upper(sku)=upper($1)
+         UNION SELECT sku FROM planner.sku_labels WHERE upper(sku)=upper($1) LIMIT 1`, [raw]);
+      if (!m.rowCount) { skipped.push(raw); continue; }
+      const sku = m.rows[0].sku, key = po + '|' + sku;
+      const exists = (await client.query('SELECT 1 FROM planner.purchase_order_lines WHERE po_sku=$1', [key])).rowCount;
+      if (qty === 0) { if (exists) { await client.query('DELETE FROM planner.purchase_order_lines WHERE po_sku=$1', [key]); updated++; } continue; }
+      await client.query(
+        `INSERT INTO planner.purchase_order_lines (po_sku, po, sku, qty, proposed_at, proposed_by)
+         VALUES ($1,$2,$3,$4, now(), $5)
+         ON CONFLICT (po_sku) DO UPDATE SET qty=excluded.qty, proposed_at=now(), proposed_by=excluded.proposed_by`,
+        [key, po, sku, qty, who]);
+      if (exists) updated++; else added++;
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true, po, added, updated, skipped, badQty });
   } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });

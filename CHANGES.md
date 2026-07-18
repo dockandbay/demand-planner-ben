@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.608 - Order Plan edit: paste SKU/qty block from Excel / Sheets
+
+In PURCHASE ORDERS ▸ Plan ▸ Order Plan, "✎ Edit qty / add SKU" mode now has a "⧉ Paste SKU,Qty" button. It
+opens a textarea to paste two columns (SKU, Qty) from Excel / Google Sheets (tab or comma separated). Server
+validates each SKU against our list (planner.products ∪ sku_labels, case-insensitive): unknown SKUs are
+skipped, SKUs already on the PO have their qty overridden, new valid SKUs are added (proposed). qty 0 removes
+a line. A summary alert lists anything skipped (unknown SKU / missing qty).
+
+New endpoint POST /api/supply/po-lines-paste {po, rows:[{sku,qty}]}. Tested (override + add + skip-unknown +
+skip-no-qty verified in sandbox).
+
+Files: server.mjs, supply/inject.html. No migrations, no new env vars.
+
 ## v25.607 - New feature: Merge PO's (PURCHASE ORDERS ▸ Import/Export)
 
 Added a "⛙ Merge PO's" button in the PO grid's Import/Export bar. It opens a modal to pick PO 1 (keep) and
