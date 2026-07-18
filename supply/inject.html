@@ -290,9 +290,9 @@
 #supply-root tr.batchrow td{background:#eef2ff!important;font-weight:600;border-top:1px solid #c7d2fe;text-align:left;white-space:normal}
 #supply-root tr.cat-hdr td{background:#e8e8e6;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#333;padding:3px 8px;text-align:left;border-top:2px solid #bbb}
 #supply-root .opapprove:hover{color:#15803d}
-/* undo-approval ✕ (grid .opundo / PO-panel .oprisk-undo) is hidden until you hover the cell/row, then appears */
-#supply-root .opundo,#supply-root .oprisk-undo{display:none}
-#supply-root td:hover .opundo,#supply-root td:hover .oprisk-undo,#supply-root tr:hover .oprisk-undo{display:inline-block}
+/* undo-approval ✕ overlays the ✓ badge on hover (no layout shift) */
+#supply-root .opappr .opundo,#supply-root .opappr .oprisk-undo{display:none}
+#supply-root .opappr:hover .opundo,#supply-root .opappr:hover .oprisk-undo{display:flex}
 /* mobile full-screen sheet for an opened PO / shipment (applied via JS only on phones) */
 #mob-sheet-ov{display:none;position:fixed;inset:0;z-index:6000;background:#fff;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;box-sizing:border-box}
 #mob-sheet-ov .mob-back{position:sticky;top:0;z-index:3;display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;box-sizing:border-box;padding:13px 14px;border:none;border-bottom:1px solid #e5e7eb;background:#0f172a;color:#fff;font-weight:700;font-size:14px;text-align:left;cursor:pointer;font-family:inherit}
@@ -2462,7 +2462,7 @@
     var _pm=poBy[po]||{}, _poSup=String(_pm.supplier_name||'').trim().toLowerCase(), _poCtry=(_pm.country||''), _poDeliv=(_pm.delivery||_pm.checkin||''), _poLocked=/complete|shipping|deliver/i.test(_pm.status||'');
     var RFIELD={p:'partial',s:'supplier',d:'discontinue',c:'country'};
     function rBadge(kind,label,unap,ap,psku){
-      if(ap) return ' <span class="tool-badge bg-green" title="'+label+' approved">'+kind+'✓</span><button class="oprisk-undo lnk-btn" data-ps="'+esc(psku)+'" data-field="'+RFIELD[kind]+'" title="undo approval" style="color:#64748b;border:1px solid #cbd5e1;border-radius:3px;font-size:9px;line-height:1;padding:0 4px;margin-left:1px;cursor:pointer;background:#fff">✕</button>';
+      if(ap) return apprBadge(kind,label,RFIELD[kind],psku,'oprisk-undo');
       if(unap) return ' <button class="oprisk-approve" data-ps="'+esc(psku)+'" data-field="'+RFIELD[kind]+'" title="'+label+' — review &amp; approve" style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;cursor:pointer">'+kind+' ⚠</button>';
       return ''; }
     function riskBadges(l){ if(!l)return ''; var psku=po+'|'+l.sku, out='';
@@ -3217,8 +3217,11 @@
   // pick the discontinue date for a destination: AU/CA have their own, else the global final.
   function pickDisc(co,a){ co=(co||'').toUpperCase(); a=a||{}; if(co==='AU'&&a.disAu)return a.disAu; if(co==='CA'&&a.disCa)return a.disCa; return a.dis||''; }
   var OP_POCAP=40;   // cap rendered PO columns (wide pivots are the main slowdown); "show all" reveals the rest
-  // undo-approval ✕ (module scope so pivot() can use it) — reverts a partial/supplier/discontinue/country approval
-  function undoX(k,f){ return ' <button class="opundo" data-ap="'+esc(k)+'" data-field="'+f+'" title="undo this approval" style="border:1px solid #cbd5e1;background:#fff;color:#64748b;border-radius:3px;font-size:9px;line-height:1;padding:1px 4px;margin-left:2px;cursor:pointer">✕</button>'; }
+  // Approved-exception badge (kind ✓) with an undo ✕ that OVERLAYS the badge on hover (no layout shift).
+  // undoCls = 'opundo' (grid) or 'oprisk-undo' (PO panel); both data-ap + data-ps are set so either handler works.
+  function apprBadge(kind,title,field,psku,undoCls){ return ' <span class="opappr" style="position:relative;display:inline-block">'
+    +'<span class="tool-badge bg-green" title="'+title+' approved">'+kind+'✓</span>'
+    +'<button class="'+undoCls+'" data-ap="'+esc(psku)+'" data-ps="'+esc(psku)+'" data-field="'+field+'" title="undo '+title+' approval" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(185,28,28,.94);color:#fff;border:none;border-radius:3px;font-size:9px;font-weight:700;line-height:1;cursor:pointer">✕</button></span>'; }
   function pivot(rows, skuList, skuCat, plcMap, skuAttr, skuRW, showAllPos){ plcMap=plcMap||{}; skuAttr=skuAttr||{}; skuRW=skuRW||{}; var cn=document.getElementById('op-count');
     if(!skuList.length){ if(cn)cn.textContent='0 SKUs'; return '<div class="count">No SKUs for this filter (pick a Category for \"All in category\").</div>'; }
     var pos=[],psn={},cell={},meta={};
@@ -3271,18 +3274,18 @@
           var ttl=(ch.amended_qty!=null&&ch.amended_qty!==''?'qty '+units(ch.amended_qty):'')+(ch.actual_cost!=null&&ch.actual_cost!==''?(ch.amended_qty!=null?' · ':'')+'cost $'+money(ch.actual_cost):'');
           tdc=' class="chgcell"'; badge=' <button class="opconfirm" data-ps="'+esc(po+'|'+sku)+'" title="supplier change — '+esc(ttl)+' · click to confirm" style="cursor:pointer;border:1px solid #f59e0b;background:#fef3c7;color:#92400e;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;white-space:nowrap">'+pq+' ✓</button>'; }
         else if(fcc.indexOf('⚠')>=0){ tdc=' class="pcell"'; badge=' <button class="pbtn opapprove" data-ap="'+esc(po+'|'+sku)+'" data-tip="Partial carton: this quantity isn\'t a whole number of cartons for the SKU (carton qty '+(a.cq||'?')+'). Click ✓ to approve ordering a partial carton." title="approve partial carton qty">p ✓</button>'; }
-        else if(fcc.indexOf('OK Partial')>=0){ tdc=' class="pcellok"'; badge=' <span class="tool-badge bg-green" data-tip="Partial carton — approved. This line intentionally orders a non-whole number of cartons." title="partial approved">p✓</span>'+undoX(po+'|'+sku,'partial'); }
+        else if(fcc.indexOf('OK Partial')>=0){ tdc=' class="pcellok"'; badge=apprBadge('p','Partial carton','partial',po+'|'+sku,'opundo'); }
         if(cc && q>0){   // exception flags: supplier risk + discontinued (approve like partials)
           var allowed=(a.sm||'').split(',').map(function(s){return s.trim().toLowerCase();}).filter(Boolean), psup=(meta[po].s||'').trim().toLowerCase();
           if(allowed.length && psup && allowed.indexOf(psup)<0){
-            if(cc.sra) badge+=' <span class="tool-badge bg-green" title="supplier risk approved">s✓</span>'+undoX(po+'|'+sku,'supplier');
+            if(cc.sra) badge+=apprBadge('s','Supplier risk','supplier',po+'|'+sku,'opundo');
             else { if(!tdc)tdc=' class="pcell"'; badge+=' <button class="pbtn opapprove-sup" data-ap="'+esc(po+'|'+sku)+'" title="supplier '+esc(meta[po].s||'')+' not in allowed list ['+esc(a.sm||'')+'] — review &amp; approve" style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;white-space:nowrap">s ⚠</button>'; } }
           var dd=pickDisc(meta[po].co,a), arr=meta[po].dl;
           if(dd && arr && String(arr)>String(dd)){
-            if(cc.dca) badge+=' <span class="tool-badge bg-green" title="discontinue approved">d✓</span>'+undoX(po+'|'+sku,'discontinue');
+            if(cc.dca) badge+=apprBadge('d','Discontinued','discontinue',po+'|'+sku,'opundo');
             else { if(!tdc)tdc=' class="pcell"'; badge+=' <button class="pbtn opapprove-disc" data-ap="'+esc(po+'|'+sku)+'" title="arrives '+fd(arr)+' after discontinue '+fd(dd)+' — review &amp; approve" style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;white-space:nowrap">d ⚠</button>'; } } }
         // COUNTRY RISK: SKU not released in the PO's market → approve (c ⚠) / approved (c✓ + undo)
-        if(cc && cc.nm && q>0){ if(cc.cra) badge+=' <span class="tool-badge bg-green" data-tip="Country risk approved — reviewed producing for a market where the SKU isn\'t released.">c✓</span>'+undoX(po+'|'+sku,'country');
+        if(cc && cc.nm && q>0){ if(cc.cra) badge+=apprBadge('c','Country risk','country',po+'|'+sku,'opundo');
           else { if(!tdc)tdc=' class="pcell"'; badge+=' <button class="pbtn opapprove-ctry" data-ap="'+esc(po+'|'+sku)+'" data-tip="Country risk: '+esc((meta[po].co||'').toUpperCase())+' has no availability for this SKU (launch date ignored) — you\'re producing it for a market where it isn\'t released. Click to review &amp; approve." style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;white-space:nowrap">c ⚠</button>'; } }
         tds+='<td'+tdc+' style="min-width:'+POW+';width:'+POW+';text-align:center'+(discPast&&!tdc?';background:'+rowBg:'')+'"><input class="qtycell'+(q?'':' z')+'" data-po="'+esc(po)+'" data-sku="'+esc(sku)+'" data-erp="'+eq+'" value="'+(q||'')+'">'+badge+'</td>';});
       h+='<tr><td class="l" style="'+fzc('sku',rowBg,2)+'"><button class="op-plan" data-sku="'+esc(sku)+'" title="show the buy plan for this SKU (pick country in the popup)" style="font-size:8px;font-weight:700;padding:0 4px;margin-right:5px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer;vertical-align:middle">PLAN</button>'+esc(sku)+'</td>'

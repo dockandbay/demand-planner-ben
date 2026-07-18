@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.586 - Order Plan: undo ✕ overlays the ✓ badge (no column shift)
+
+Reworked the hover-undo so the ✕ sits ON TOP of the p✓ / s✓ / d✓ / c✓ badge (absolute overlay revealed on
+hover) instead of appearing beside it — so hovering no longer widens the cell / shifts the column. Grid + PO
+panel; shared apprBadge() helper.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.585 - PO ▸ Order Plan panel: Exceptions column + CSV download
 
 - Risk flags (p/s/d/c) moved out of the SKU cell into their own **Exceptions** column right after SKU
