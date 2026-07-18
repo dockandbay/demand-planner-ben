@@ -529,6 +529,17 @@
     return ' <span style="display:inline-block;font-size:9px;font-weight:700;padding:0 4px;border-radius:6px;background:'+bg+';color:'+fg+'" title="days until '+(label||'production end')+' ('+m[1]+')">'+days+'d</span>'; }
   function flexNum(fid){ var m=String(fid||'').match(/\d+/); return m?m[0]:''; }   // Flexport shipment id → numeric part for the URL
   function flexUrl(fid){ var n=flexNum(fid); return n?'https://app.flexport.com/shipments/'+n:''; }
+  // Tracking URL for a shipment's carrier + reference. Flexport → Flexport; DHL/UPS/FedEx → their trackers;
+  // any other carrier → '' (no link). ref = carrier_ref (tracking no.) or flex id.
+  function carrierTrackUrl(carrier,ref){ var c=String(carrier||'').toLowerCase(), r=String(ref||'').trim();
+    if(/flex/.test(c)) return flexUrl(ref);
+    if(!r) return ''; var e=encodeURIComponent(r);
+    if(/dhl/.test(c)) return 'https://www.dhl.com/en/express/tracking.html?AWB='+e+'&brand=DHL';
+    if(/ups/.test(c)) return 'https://www.ups.com/track?loc=en_US&tracknum='+e;
+    if(/fedex|fed ?ex/.test(c)) return 'https://www.fedex.com/fedextrack/?trknbr='+e;
+    return ''; }
+  // little ↗ tracking link for a carrier (empty string if the carrier has no tracker)
+  function carrierTrackTag(carrier,ref){ var u=carrierTrackUrl(carrier,ref); return u?' <a href="'+u+'" target="_blank" rel="noopener" class="mut" title="track with '+esc(carrier||'carrier')+' ↗" style="text-decoration:none">↗</a>':''; }
   // FLEX source badge that links to the Flexport shipment when a flex id is known; otherwise the plain badge
   function srctagLink(s,r){ if(s==='FLEX'&&r&&r.flex_id){ var u=flexUrl(r.flex_id); if(u)return '<a href="'+u+'" target="_blank" rel="noopener" class="src fx" style="text-decoration:none" title="open '+esc(r.flex_id)+' in Flexport ↗">FLEX ↗</a>'; } return srctag(s); }
   function annot(k){return '';}   // section description boxes removed (Ben) — ANNOT kept for reference only
@@ -3943,7 +3954,7 @@
   function shipRowHtml(s,i){ shipBy[s.shipment_ref]=s; var ep='/api/supply/shipment/'+encodeURIComponent(s.shipment_ref);
     var mast=(s.master_po&&s.master_po!==s.shipment_ref)?(' <span class="mut tiny">★'+esc(s.master_po)+'</span>'):'';
     var alert=shipActBadge(s);   // snoozable "A" count badge (supersedes the old inline ⚠ exception tag)
-    var fxl=s.flex_id?(' <a href="https://app.flexport.com/shipments/'+((String(s.carrier_ref||s.flex_id).match(/\d+/)||[''])[0])+'" target="_blank" rel="noopener" class="mut" title="open in Flexport" style="text-decoration:none">↗</a>'):'';
+    var fxl=carrierTrackTag(s.carrier, s.carrier_ref||s.flex_id);   // ↗ tracking link — Flexport / DHL / UPS / FedEx; blank for other carriers
     return '<tr><td class="l"><button class="planbtn po-exp" data-ref="'+esc(s.shipment_ref)+'" data-i="'+i+'">PLAN</button><button class="fav-star'+(s.escalated?' esc':(s.starred?' on':''))+'" data-star-ref="'+esc(s.shipment_ref)+'" title="'+(s.escalated?'Escalated — shown in Focus':'Focus / favourite')+'">'+((s.escalated||s.starred)?'★':'☆')+'</button> <span class="sh-unread" data-ref="'+esc(s.shipment_ref)+'">'+shUnreadBadge(s.unread_notes)+'</span>'+(s.pending_charges>0?' <span class="ex-badge" style="background:#16a34a" title="'+s.pending_charges+' freight charge(s) to review — open ▸ Charges">'+s.pending_charges+'</span>':'')+'</td>'
         +'<td class="l sh-refcell"><b>'+esc(s.shipment_ref)+'</b>'+mast+alert+'</td>'
         +'<td class="l">'+(s.escalated?'<span class="tool-badge bg-red" title="escalated by the supplier in the portal">⚑ ESCALATED</span>':'<span class="mut">—</span>')+'</td>'
@@ -4008,7 +4019,7 @@
       +'<div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px 0;margin-bottom:10px">'
       +fld('Carrier', carrierSel(ep,s.carrier,s.mode_eff==='fob'))
       +fld('Carrier ref', carrierRefInput(ep,s.carrier_ref,s.mode_eff==='fob'))
-      +(function(){ var fid=s.flex_id||s.carrier_ref||'', u=flexUrl(fid); return u?fld('Flexport', '<a href="'+u+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;white-space:nowrap;font-weight:700;padding:4px 0;display:inline-block" title="open '+esc(fid)+' in Flexport">'+esc(fid)+' ↗</a>'):''; })()
+      +(function(){ var ref=s.carrier_ref||s.flex_id||'', u=carrierTrackUrl(s.carrier, ref); if(!u)return ''; var lbl=/flex/i.test(s.carrier||'')?'Flexport':(s.carrier||'Tracking'); return fld(lbl, '<a href="'+u+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;white-space:nowrap;font-weight:700;padding:4px 0;display:inline-block" title="track '+esc(ref)+' with '+esc(lbl)+' ↗">'+esc(ref)+' ↗</a>'); })()
       +fld('Status'+(s.status_auto?' (auto)':''), shipStatusSel(ep,s.status))
       +dateFld('Departure','departure_date',s.ov_departure,s.departure,s.departure_src)
       +dateFld('Landing','landing_date',s.ov_landing,s.landing,s.landing_src)

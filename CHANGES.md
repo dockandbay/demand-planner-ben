@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.587 - Shipments: carrier-aware tracking link (not always Flexport)
+
+The shipment tracking ↗ (grid + drawer) now links to the actual carrier: Flexport → Flexport, DHL/UPS/FedEx
+→ their tracking pages (using the carrier ref), and shows no link for any other carrier. New carrierTrackUrl()
+/ carrierTrackTag() helpers.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.586 - Order Plan: undo ✕ overlays the ✓ badge (no column shift)
 
 Reworked the hover-undo so the ✕ sits ON TOP of the p✓ / s✓ / d✓ / c✓ badge (absolute overlay revealed on
