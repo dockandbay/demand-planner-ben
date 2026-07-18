@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.597 - Order Plan: supplier/discontinued risk tooltips match country risk (fast + same format)
+
+Supplier-risk and discontinued badges used the native `title` (slow ~1s, different look). Switched them to
+the fast custom `data-tip` tooltip (120ms, `bindOpTips`) — same format as country risk. Also dropped the
+redundant native `title` on the partial badge (it already had a data-tip). All four grid risk badges now show
+the same fast, consistent hover explanation.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.596 - Order Plan: unapproved risk badges are red alerts, hover previews green approve
 
 Unified all four unapproved risk badges (partial / supplier / discontinued / country) onto one shared

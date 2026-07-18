@@ -3316,17 +3316,17 @@
           var pq=(ch.amended_qty!=null&&ch.amended_qty!=='')?units(ch.amended_qty):'✓';
           var ttl=(ch.amended_qty!=null&&ch.amended_qty!==''?'qty '+units(ch.amended_qty):'')+(ch.actual_cost!=null&&ch.actual_cost!==''?(ch.amended_qty!=null?' · ':'')+'cost $'+money(ch.actual_cost):'');
           tdc=' class="chgcell"'; badge=' <button class="opconfirm" data-ps="'+esc(po+'|'+sku)+'" title="supplier change — '+esc(ttl)+' · click to confirm" style="cursor:pointer;border:1px solid #f59e0b;background:#fef3c7;color:#92400e;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;white-space:nowrap">'+pq+' ✓</button>'; }
-        else if(fcc.indexOf('⚠')>=0){ tdc=' class="pcell"'; badge=' <button class="oprisk-badge opapprove" data-ap="'+esc(po+'|'+sku)+'" data-tip="Partial carton: this quantity isn\'t a whole number of cartons for the SKU (carton qty '+(a.cq||'?')+'). Click to approve ordering a partial carton." title="approve partial carton qty">p</button>'; }
+        else if(fcc.indexOf('⚠')>=0){ tdc=' class="pcell"'; badge=' <button class="oprisk-badge opapprove" data-ap="'+esc(po+'|'+sku)+'" data-tip="Partial carton: this quantity isn\'t a whole number of cartons for the SKU (carton qty '+(a.cq||'?')+'). Click to approve ordering a partial carton.">p</button>'; }
         else if(fcc.indexOf('OK Partial')>=0){ tdc=' class="pcellok"'; badge=apprBadge('p','Partial carton','partial',po+'|'+sku,'opundo'); }
         if(cc && q>0){   // exception flags: supplier risk + discontinued (approve like partials)
           var allowed=(a.sm||'').split(',').map(function(s){return s.trim().toLowerCase();}).filter(Boolean), psup=(meta[po].s||'').trim().toLowerCase();
           if(allowed.length && psup && allowed.indexOf(psup)<0){
             if(cc.sra) badge+=apprBadge('s','Supplier risk','supplier',po+'|'+sku,'opundo');
-            else { if(!tdc)tdc=' class="pcell"'; badge+=' <button class="oprisk-badge opapprove-sup" data-ap="'+esc(po+'|'+sku)+'" title="supplier '+esc(meta[po].s||'')+' not in allowed list ['+esc(a.sm||'')+'] — review &amp; approve">s</button>'; } }
+            else { if(!tdc)tdc=' class="pcell"'; badge+=' <button class="oprisk-badge opapprove-sup" data-ap="'+esc(po+'|'+sku)+'" data-tip="Supplier risk: '+esc(meta[po].s||'')+' is not in this SKU\'s allowed supplier list ['+esc(a.sm||'')+'] — you\'re ordering against an unapproved supplier. Click to review & approve.">s</button>'; } }
           var dd=pickDisc(meta[po].co,a), arr=meta[po].dl;
           if(dd && arr && String(arr)>String(dd)){
             if(cc.dca) badge+=apprBadge('d','Discontinued','discontinue',po+'|'+sku,'opundo');
-            else { if(!tdc)tdc=' class="pcell"'; badge+=' <button class="oprisk-badge opapprove-disc" data-ap="'+esc(po+'|'+sku)+'" title="arrives '+fd(arr)+' after discontinue '+fd(dd)+' — review &amp; approve">d</button>'; } } }
+            else { if(!tdc)tdc=' class="pcell"'; badge+=' <button class="oprisk-badge opapprove-disc" data-ap="'+esc(po+'|'+sku)+'" data-tip="Discontinued: forecast to arrive '+fd(arr)+', after the discontinue date '+fd(dd)+' — review & approve. Click to approve.">d</button>'; } } }
         // COUNTRY RISK: SKU not released in the PO's market → approve (c ⚠) / approved (c✓ + undo)
         if(cc && cc.nm && q>0){ if(cc.cra) badge+=apprBadge('c','Country risk','country',po+'|'+sku,'opundo');
           else { if(!tdc)tdc=' class="pcell"'; badge+=' <button class="oprisk-badge opapprove-ctry" data-ap="'+esc(po+'|'+sku)+'" data-tip="Country risk: '+esc((meta[po].co||'').toUpperCase())+' has no availability for this SKU (launch date ignored) — you\'re producing it for a market where it isn\'t released. Click to review &amp; approve.">c</button>'; } }
