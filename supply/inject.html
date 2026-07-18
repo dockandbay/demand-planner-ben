@@ -2951,7 +2951,6 @@
     // page refresh / re-nav rebuilds opBuild) so they can undo — instead of instantly filtering out.
     var _opStay={partial:new Set(),supplier:new Set(),discontinue:new Set(),country:new Set()};
     function opKey(l){ return l.po+'|'+l.sku; }
-    function undoX(k,f){ return ' <button class="opundo" data-ap="'+esc(k)+'" data-field="'+f+'" title="undo this approval" style="border:1px solid #cbd5e1;background:#fff;color:#64748b;border-radius:3px;font-size:9px;line-height:1;padding:1px 4px;margin-left:2px;cursor:pointer">✕</button>'; }
     if(_pendingOP){ st.partials=!!_pendingOP.partials; st.suprisk=!!_pendingOP.suprisk; st.disc=!!_pendingOP.disc; if(_pendingOP.po)st.poq=String(_pendingOP.po).toLowerCase();
       st.statuses=new Set(pillStatuses);   // show all (non-complete) statuses so the flagged lines aren't hidden by the status filter
       _pendingOP=null; }
@@ -3097,11 +3096,15 @@
     function togglebar(id,opts,setv){ document.getElementById(id).onclick=function(e){var t=e.target; if(t.dataset.all)setv=new Set(opts); else if(t.dataset.v!=null){if(setv.has(t.dataset.v))setv.delete(t.dataset.v);else setv.add(t.dataset.v);} else return; if(id==='op-status')st.statuses=setv; else st.countries=setv; document.getElementById(id).innerHTML=pillsHTML(opts,setv,id==='op-country'); viewReset(); }; }
     togglebar('op-status',pillStatuses,st.statuses); togglebar('op-country',countries,st.countries);
     c.querySelectorAll('[data-sc]').forEach(function(p){p.onclick=function(){st.scope=p.dataset.sc; c.querySelectorAll('[data-sc]').forEach(function(x){x.classList.toggle('active',x===p);}); viewReset();};});
-    document.getElementById('op-partials').onclick=function(){st.partials=!st.partials; this.classList.toggle('active',st.partials); viewReset();};
-    document.getElementById('op-erp').onclick=function(){st.erpdiff=!st.erpdiff; this.classList.toggle('active',st.erpdiff); viewReset();};
-    document.getElementById('op-suprisk').onclick=function(){st.suprisk=!st.suprisk; this.classList.toggle('active',st.suprisk); viewReset();};
-    document.getElementById('op-disc').onclick=function(){st.disc=!st.disc; this.classList.toggle('active',st.disc); viewReset();};
-    document.getElementById('op-notmkt').onclick=function(){st.notmkt=!st.notmkt; this.classList.toggle('active',st.notmkt); viewReset();};
+    // Action-item pills are SINGLE-select: clicking one clears the others (click again to turn it off).
+    var OP_EXCL={partials:'op-partials',erpdiff:'op-erp',suprisk:'op-suprisk',disc:'op-disc',notmkt:'op-notmkt'};
+    function opExcl(which){ var was=st[which]; Object.keys(OP_EXCL).forEach(function(k){st[k]=false;}); st[which]=!was;
+      Object.keys(OP_EXCL).forEach(function(k){ var el=document.getElementById(OP_EXCL[k]); if(el)el.classList.toggle('active',st[k]); }); viewReset(); }
+    document.getElementById('op-partials').onclick=function(){opExcl('partials');};
+    document.getElementById('op-erp').onclick=function(){opExcl('erpdiff');};
+    document.getElementById('op-suprisk').onclick=function(){opExcl('suprisk');};
+    document.getElementById('op-disc').onclick=function(){opExcl('disc');};
+    document.getElementById('op-notmkt').onclick=function(){opExcl('notmkt');};
     document.getElementById('op-focus').onclick=function(){st.focus=!st.focus; this.classList.toggle('active',st.focus); viewReset();};
     document.getElementById('op-cat').onchange=function(){st.cat=this.value;markSel(this);viewReset();};
     document.getElementById('op-rw').onchange=function(){st.rw=this.value;markSel(this);viewReset();};
@@ -3206,6 +3209,8 @@
   // pick the discontinue date for a destination: AU/CA have their own, else the global final.
   function pickDisc(co,a){ co=(co||'').toUpperCase(); a=a||{}; if(co==='AU'&&a.disAu)return a.disAu; if(co==='CA'&&a.disCa)return a.disCa; return a.dis||''; }
   var OP_POCAP=40;   // cap rendered PO columns (wide pivots are the main slowdown); "show all" reveals the rest
+  // undo-approval ✕ (module scope so pivot() can use it) — reverts a partial/supplier/discontinue/country approval
+  function undoX(k,f){ return ' <button class="opundo" data-ap="'+esc(k)+'" data-field="'+f+'" title="undo this approval" style="border:1px solid #cbd5e1;background:#fff;color:#64748b;border-radius:3px;font-size:9px;line-height:1;padding:1px 4px;margin-left:2px;cursor:pointer">✕</button>'; }
   function pivot(rows, skuList, skuCat, plcMap, skuAttr, skuRW, showAllPos){ plcMap=plcMap||{}; skuAttr=skuAttr||{}; skuRW=skuRW||{}; var cn=document.getElementById('op-count');
     if(!skuList.length){ if(cn)cn.textContent='0 SKUs'; return '<div class="count">No SKUs for this filter (pick a Category for \"All in category\").</div>'; }
     var pos=[],psn={},cell={},meta={};
@@ -3269,8 +3274,8 @@
             if(cc.dca) badge+=' <span class="tool-badge bg-green" title="discontinue approved">d✓</span>'+undoX(po+'|'+sku,'discontinue');
             else { if(!tdc)tdc=' class="pcell"'; badge+=' <button class="pbtn opapprove-disc" data-ap="'+esc(po+'|'+sku)+'" title="arrives '+fd(arr)+' after discontinue '+fd(dd)+' — review &amp; approve" style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;white-space:nowrap">d ⚠</button>'; } } }
         // COUNTRY RISK: SKU not released in the PO's market → approve (c ⚠) / approved (c✓ + undo)
-        if(cc && cc.nm && q>0){ if(cc.cra) badge+=' <span class="tool-badge bg-green" title="country risk approved — reviewed producing for a market where the SKU isn&#39;t released">c✓</span>'+undoX(po+'|'+sku,'country');
-          else { if(!tdc)tdc=' class="pcell"'; badge+=' <button class="pbtn opapprove-ctry" data-ap="'+esc(po+'|'+sku)+'" title="SKU not released in '+esc((meta[po].co||'').toUpperCase())+' — no availability there (launch date ignored). Review &amp; approve." style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;white-space:nowrap">c ⚠</button>'; } }
+        if(cc && cc.nm && q>0){ if(cc.cra) badge+=' <span class="tool-badge bg-green" data-tip="Country risk approved — reviewed producing for a market where the SKU isn\'t released.">c✓</span>'+undoX(po+'|'+sku,'country');
+          else { if(!tdc)tdc=' class="pcell"'; badge+=' <button class="pbtn opapprove-ctry" data-ap="'+esc(po+'|'+sku)+'" data-tip="Country risk: '+esc((meta[po].co||'').toUpperCase())+' has no availability for this SKU (launch date ignored) — you\'re producing it for a market where it isn\'t released. Click to review &amp; approve." style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;white-space:nowrap">c ⚠</button>'; } }
         tds+='<td'+tdc+' style="min-width:'+POW+';width:'+POW+';text-align:center'+(discPast&&!tdc?';background:'+rowBg:'')+'"><input class="qtycell'+(q?'':' z')+'" data-po="'+esc(po)+'" data-sku="'+esc(sku)+'" data-erp="'+eq+'" value="'+(q||'')+'">'+badge+'</td>';});
       h+='<tr><td class="l" style="'+fzc('sku',rowBg,2)+'"><button class="op-plan" data-sku="'+esc(sku)+'" title="show the buy plan for this SKU (pick country in the popup)" style="font-size:8px;font-weight:700;padding:0 4px;margin-right:5px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer;vertical-align:middle">PLAN</button>'+esc(sku)+'</td>'
         +'<td style="'+fzc('cq',rowBg,2)+';text-align:right"><span class="tiny">'+(a.cq?esc(a.cq):'')+'</span></td>'

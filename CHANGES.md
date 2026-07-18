@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.582 - Order Plan grid: fix blank grid + broken approve; fast country tooltip; single-select pills
+
+- **Fix (regression):** the SUPPLY ▸ Order Plan grid rendered blank / approvals didn't work because `undoX`
+  was defined inside `opBuild` but called from the module-level `pivot()` → ReferenceError crashed the render
+  (and the approve buttons never bound). Moved `undoX` to module scope. Both symptoms fixed.
+- **Country-risk tooltip** now uses the grid's fast `data-tip` (≈120ms hover) instead of the slow native
+  `title`, and spells out the reason.
+- **Action-item pills are now single-select** (Unapproved partials / Update ERP / Supplier risk / Discontinued
+  / Country risk) — clicking one clears the others; click again to turn it off. Focus stays independent.
+
+Files: supply/inject.html. No migrations (118 from v25.580 still applies), no new env vars.
+
 ## v25.581 - PO ▸ Order Plan panel: partial / supplier / discontinued / country risk flags
 
 The per-PO Order Plan sub-tab now shows the same risk flags as the SUPPLY ▸ Order Plan grid — a small
