@@ -1248,19 +1248,24 @@
     var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop';
     pop.innerHTML='<div class="shpop-h">Add crossdock SKU'+(wh?' <span class="mut tiny">— '+esc(co)+' 3PL on-hand / applied</span>':'')+'</div>'+warn+'<input class="shpop-q" placeholder="search CROSSDOCK / PREORDER SKU…"><div id="shpop-list"><div class="count" style="padding:8px">'+(wh?'Loading '+esc(co)+' 3PL…':'')+'</div></div>';
     placePop(pop, btn.getBoundingClientRect()); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
-    function annot(m){ var p=[]; if(m.oh>0)p.push('on hand '+units(m.oh)); if(m.applied>0)p.push('applied '+units(m.applied)); else if(m.assigned)p.push('applied'); return p.join(' · '); }
+    // notes for a crossdock SKU in this 3PL: "N on hand in <CO> 3PL" + one "applied to PO-xxx <status>" per PO.
+    function noteFor(m){ var p=[]; if(m.oh>0)p.push(units(m.oh)+' on hand in '+co+' 3PL');
+      m.pos.forEach(function(x){ p.push('applied to '+x.po+(x.status?' '+x.status.toLowerCase():'')); }); return p; }
     function build(rep){
-      var m={};   // sku -> {oh, applied, assigned} for THIS country's 3PL
-      if(wh){ (rep.rows||[]).forEach(function(r){ if(r.wh!==wh)return; (m[r.sku]||(m[r.sku]={oh:0,applied:0,assigned:false})).oh+=Number(r.on_hand)||0; });
-        (rep.expected||[]).forEach(function(e){ if(String(e.country||'').toUpperCase()!==co)return; var x=(m[e.sku]||(m[e.sku]={oh:0,applied:0,assigned:false})); x.assigned=true; x.applied+=Number(e.shipped)||0; }); }
-      var relevant=Object.keys(m).filter(function(s){return curList.indexOf(s)<0 && (m[s].oh>0||m[s].applied>0||m[s].assigned);}).sort();
+      var m={};   // sku -> {oh, pos:[{po,status}]} for THIS country's 3PL
+      function ensure(sku){ return m[sku]||(m[sku]={oh:0,pos:[]}); }
+      function addPo(sku,po){ if(!po)return; var x=ensure(sku); if(x.pos.some(function(p){return p.po===po;}))return; x.pos.push({po:po,status:String((poBy[po]||{}).status||'')}); }
+      if(wh){ (rep.rows||[]).forEach(function(r){ if(r.wh!==wh)return; var x=ensure(r.sku); x.oh+=Number(r.on_hand)||0;
+          (r.sources||[]).forEach(function(s){ if(s.type==='crossdock_po') addPo(r.sku, s.po); }); });
+        (rep.expected||[]).forEach(function(e){ if(String(e.country||'').toUpperCase()!==co)return; addPo(e.sku, e.po); }); }
+      var relevant=Object.keys(m).filter(function(s){return curList.indexOf(s)<0 && (m[s].oh>0||m[s].pos.length);}).sort();
       function render(q){ q=(q||'').trim().toLowerCase();
         var rel=relevant.filter(function(n){return !q||n.toLowerCase().indexOf(q)>=0;}), relSet={}; rel.forEach(function(n){relSet[n]=1;});
         var others=full.filter(function(n){return !relSet[n] && (!q||n.toLowerCase().indexOf(q)>=0);});
         var html='';
         if(wh){ html+= rel.length
           ? ('<div class="mut tiny" style="padding:4px 10px;font-weight:700;color:#0369a1">In '+esc(co)+' 3PL ('+rel.length+')</div>'
-             + rel.slice(0,q?80:30).map(function(n){return '<div class="shpop-opt" data-v="'+esc(n)+'"><b>'+esc(n)+'</b> <span class="mut tiny">'+esc(annot(m[n]))+'</span></div>';}).join(''))
+             + rel.slice(0,q?80:30).map(function(n){ var notes=noteFor(m[n]); return '<div class="shpop-opt" data-v="'+esc(n)+'"><b>'+esc(n)+'</b>'+(notes.length?'<div class="mut tiny" style="line-height:1.35;margin-top:1px">'+notes.map(esc).join(' &middot; ')+'</div>':'')+'</div>'; }).join(''))
           : '<div class="mut tiny" style="padding:5px 10px">No on-hand or applied crossdock in the '+esc(co)+' 3PL'+(q?' matching':'')+'.</div>'; }
         html+='<div class="mut tiny" style="padding:4px 10px;font-weight:700;color:#64748b'+(wh?';border-top:1px solid #eee':'')+'">'+(wh?'All crossdock SKUs':'Crossdock SKUs')+'</div>';
         html+= others.length ? others.slice(0,q?80:20).map(function(n){return '<div class="shpop-opt" data-v="'+esc(n)+'">'+esc(n)+'</div>';}).join('') : '<div class="count" style="padding:8px">no matching SKU</div>';

@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.603 - Crossdock picker: descriptive per-SKU notes (on-hand + applied POs with status)
+
+The country-aware crossdock dropdown now shows readable notes under each SKU instead of terse "on hand N ·
+applied N": "N on hand in <CO> 3PL" and one "applied to PO-xxxxxx <status>" line per PO the crossdock is
+applied to (status = shipping / production / … from poBy). SKUs stay in alphabetical order.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.602 - Purchase Orders status pills: Production / Shipping split, "All" removed
 
 Reworked the PO grid status pills:
