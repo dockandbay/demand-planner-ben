@@ -295,6 +295,10 @@
 #supply-root .oprisk-badge::after{content:" ⚠"}
 #supply-root .oprisk-badge:hover{background:#16a34a;border-color:#16a34a;color:#fff}
 #supply-root .oprisk-badge:hover::after{content:" ✓"}
+/* supplier-submitted change badge (amber "qty ✓") — same interaction language: AMBER by default, GREEN on hover
+   to preview the confirmed state; fast data-tip tooltip like the risk badges. */
+#supply-root .opconfirm{display:inline-block;cursor:pointer;border:1px solid #f59e0b;background:#fef3c7;color:#92400e;border-radius:3px;font-size:9px;font-weight:700;line-height:1.4;padding:1px 4px;margin-left:2px;white-space:nowrap;font-family:inherit;transition:background .1s,color .1s,border-color .1s}
+#supply-root .opconfirm:hover{background:#16a34a;border-color:#16a34a;color:#fff}
 /* undo-approval ✕ overlays the ✓ badge on hover (no layout shift) */
 #supply-root .opappr .opundo,#supply-root .opappr .oprisk-undo{display:none}
 #supply-root .opappr:hover .opundo,#supply-root .opappr:hover .oprisk-undo{display:flex}
@@ -3046,7 +3050,9 @@
         if(!pt.some(function(t){return nrm(l.po).indexOf(t)>=0;}))return false; }
       else if(st.partials||st.erpdiff||st.suprisk||st.disc||st.notmkt){ if(!(allC||st.countries.has(l.country)))return false; }   // an action-item risk pill spans ALL active statuses (its count is computed across statuses too) — otherwise the count and the view disagree
       else { if(!st.statuses.has(l.status))return false; if(!(allC||st.countries.has(l.country)))return false; }
-      return (st.prod==='All'||l.prod_no===st.prod)&&(st.batch==='All'||l.batch_id===st.batch)&&(st.supplier==='All'||l.supplier_name===st.supplier)&&(skipCat||st.cat==='All'||l.category===st.cat)&&(st.rw==='All'||skuRW[l.sku]===st.rw)&&(!st.partials||isUnapprovedPartial(l)||_opStay.partial.has(opKey(l)))&&(!st.erpdiff||erpDiff(l))&&(!st.suprisk||lineSupRisk(l)||_opStay.supplier.has(opKey(l)))&&(!st.disc||lineDisc(l)||_opStay.discontinue.has(opKey(l)))&&(!st.notmkt||lineCountryRisk(l)||_opStay.country.has(opKey(l)))&&qMatch(l.sku); }); }
+      // A PO text search (poqOn) OVERRIDES the action-item pills — you asked to see that exact PO regardless of
+      // which risk pill happens to be active, so the pill restrictions below are skipped while searching a PO.
+      return (st.prod==='All'||l.prod_no===st.prod)&&(st.batch==='All'||l.batch_id===st.batch)&&(st.supplier==='All'||l.supplier_name===st.supplier)&&(skipCat||st.cat==='All'||l.category===st.cat)&&(st.rw==='All'||skuRW[l.sku]===st.rw)&&(poqOn||((!st.partials||isUnapprovedPartial(l)||_opStay.partial.has(opKey(l)))&&(!st.erpdiff||erpDiff(l))&&(!st.suprisk||lineSupRisk(l)||_opStay.supplier.has(opKey(l)))&&(!st.disc||lineDisc(l)||_opStay.discontinue.has(opKey(l)))&&(!st.notmkt||lineCountryRisk(l)||_opStay.country.has(opKey(l)))))&&qMatch(l.sku); }); }
     function rowsFor(cl){ var set={},list=[]; cl.forEach(function(l){if(!set[l.sku]){set[l.sku]=1;list.push(l.sku);}});
       function addMaster(reqCat){ skuMaster.forEach(function(s){ if(set[s.sku])return;
         if(reqCat&&s.category!==st.cat)return; if(st.cat!=='All'&&s.category!==st.cat)return;
@@ -3235,7 +3241,10 @@
         +'<span class="mut tiny">on:</span>'+upos.map(function(p){return ' <button class="lnk-btn op-chg-po" data-po="'+esc(p)+'" title="filter the order plan to '+esc(p)+'" style="color:#1d4ed8;text-decoration:underline;font-weight:600;background:none;border:none;padding:0;cursor:pointer">'+esc(p)+'</button>';}).join(',')
         +' <span class="mut tiny">— click a PO to review, confirm inline (amber <b>✓</b>), or</span>'
         +'<button class="save-btn op-chg-acc-all">Accept all</button></div>';
-      box.querySelectorAll('.op-chg-po').forEach(function(b){ b.onclick=function(){ st.poq=String(b.dataset.po||'').toLowerCase(); var pin=document.getElementById('op-po'); if(pin)pin.value=b.dataset.po; viewReset(); }; });
+      box.querySelectorAll('.op-chg-po').forEach(function(b){ b.onclick=function(){
+        ['partials','erpdiff','suprisk','disc','notmkt'].forEach(function(k){ st[k]=false; });   // PO search overrides the pills — clear them so the highlighted state matches the (unfiltered) view
+        ['op-partials','op-suprisk','op-disc','op-notmkt'].forEach(function(id){ var el=document.getElementById(id); if(el)el.classList.remove('active'); });
+        st.poq=String(b.dataset.po||'').toLowerCase(); var pin=document.getElementById('op-po'); if(pin)pin.value=b.dataset.po; viewReset(); }; });
       box.querySelector('.op-chg-acc-all').onclick=function(){ if(!confirm('Accept all '+unconf.length+' supplier change'+(unconf.length>1?'s':'')+'?'))return;
         var pos=Array.from(new Set(unconf.map(function(x){return x.po;})));
         Promise.all(pos.map(function(po){ return fetch('/api/supply/po-line-accept',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,all:true})}).then(function(r){return r.json();}); }))
@@ -3313,9 +3322,10 @@
         var ch=plcMap[po+'|'+sku];
         var badge='', tdc='';
         if(ch && ch.unconfirmed){   // supplier change → confirm button (priority over the partial-approve button)
-          var pq=(ch.amended_qty!=null&&ch.amended_qty!=='')?units(ch.amended_qty):'✓';
-          var ttl=(ch.amended_qty!=null&&ch.amended_qty!==''?'qty '+units(ch.amended_qty):'')+(ch.actual_cost!=null&&ch.actual_cost!==''?(ch.amended_qty!=null?' · ':'')+'cost $'+money(ch.actual_cost):'');
-          tdc=' class="chgcell"'; badge=' <button class="opconfirm" data-ps="'+esc(po+'|'+sku)+'" title="supplier change — '+esc(ttl)+' · click to confirm" style="cursor:pointer;border:1px solid #f59e0b;background:#fef3c7;color:#92400e;border-radius:3px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;white-space:nowrap">'+pq+' ✓</button>'; }
+          var _aq=(ch.amended_qty!=null&&ch.amended_qty!=='')?units(ch.amended_qty):null;
+          var pq=(_aq!=null)?_aq:'✓';
+          var _tip='Supplier submitted change: '+(_aq!=null?('qty '+_aq+(q?' (plan currently '+units(q)+')':'')):'')+((ch.actual_cost!=null&&ch.actual_cost!=='')?((_aq!=null?' · ':'')+'cost $'+money(ch.actual_cost)):'')+' — click to confirm and update the plan.';
+          tdc=' class="chgcell"'; badge=' <button class="opconfirm" data-ps="'+esc(po+'|'+sku)+'" data-tip="'+esc(_tip)+'">'+pq+' ✓</button>'; }
         else if(fcc.indexOf('⚠')>=0){ tdc=' class="pcell"'; badge=' <button class="oprisk-badge opapprove" data-ap="'+esc(po+'|'+sku)+'" data-tip="Partial carton: this quantity isn\'t a whole number of cartons for the SKU (carton qty '+(a.cq||'?')+'). Click to approve ordering a partial carton.">p</button>'; }
         else if(fcc.indexOf('OK Partial')>=0){ tdc=' class="pcellok"'; badge=apprBadge('p','Partial carton','partial',po+'|'+sku,'opundo'); }
         if(cc && q>0){   // exception flags: supplier risk + discontinued (approve like partials)

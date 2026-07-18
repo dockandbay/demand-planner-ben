@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.598 - Order Plan: PO search overrides pills + supplier-change badge hover/tooltip
+
+- A PO text search now OVERRIDES the action-item pills — clicking a PO in the "⚠ N supplier changes awaiting
+  approval" banner (or typing a PO) shows that PO's full lines regardless of which risk pill is active. The
+  banner-link click also clears the pills' highlighted state so the UI matches the (unfiltered) view.
+- The supplier-submitted change badge (amber "qty ✓") now behaves like the other exception badges: AMBER by
+  default, GREEN on hover (previews the confirmed state), with the fast 120ms data-tip tooltip instead of the
+  slow native title. Tooltip now reads "Supplier submitted change: qty X (plan currently Y) … click to confirm".
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.597 - Order Plan: supplier/discontinued risk tooltips match country risk (fast + same format)
 
 Supplier-risk and discontinued badges used the native `title` (slow ~1s, different look). Switched them to
