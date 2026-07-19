@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.639 - Suppliers: restore TE-ID field label (only GRS removed)
+
+- Reverted the TE-ID field back to its original label/help; the card IDs line no longer
+  shows TE-ID. Net effect vs v25.634: only the GRS reg number was removed.
+
 ## v25.638 - Suppliers: drop grs_number (GRS reg no. = TE-ID)
 
 - The GRS registration number is the same value as the Textile Exchange ID, so the

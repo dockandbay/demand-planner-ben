@@ -4745,7 +4745,7 @@
               +'<div style="margin-bottom:4px">'+kindBadge(r.kind)+' <span class="mut tiny">'+esc(fieldOf(r,'default_currency')||'USD')+(r.country?' · '+esc(r.country):'')+'</span></div>'
               +metaRow('Terms', terms)+metaRow('Lead', lead)+metaRow('Contact', [r.contact_name,r.email].filter(Boolean).join(' · '))
               +(r.export_port?metaRow('Export port', r.export_port):'')
-              +(function(){ var ids=[]; if(r.cin7_member_id)ids.push('Cin7 '+r.cin7_member_id); if(r.fulfil_id)ids.push('Fulfil '+r.fulfil_id); if(r.te_id)ids.push('TE-ID '+r.te_id); return ids.length?metaRow('IDs', ids.join(' · ')):''; })()
+              +(function(){ var ids=[]; if(r.cin7_member_id)ids.push('Cin7 '+r.cin7_member_id); if(r.fulfil_id)ids.push('Fulfil '+r.fulfil_id); return ids.length?metaRow('IDs', ids.join(' · ')):''; })()
               +'</div>'; }
           function listHtml(){ var f=sq?rows.filter(function(x){return String(JSON.stringify(x)||'').toLowerCase().indexOf(sq)>=0;}):rows;
             var cards=f.length?('<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-top:12px">'+f.map(cardHtml).join('')+'</div>'):'<div class="count" style="padding:10px 2px">No suppliers'+(sq?' match your search':' yet')+'.</div>';
@@ -4782,7 +4782,7 @@
               +'<div style="border-top:1px solid #eef2f7;margin:2px 0 14px"></div>'
               +'<div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:10px">Compliance &amp; ERP IDs</div>'
               +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">'
-              +lblBlk('GRS reg. no. / Textile Exchange ID (TE-ID)','Same value — prints under the company name on the tax invoice.', inp('te_id', fieldOf(r,'te_id'),'240px'))
+              +lblBlk('Textile Exchange ID (TE-ID)','GRS/TE compliance ID, shown under the company name.', inp('te_id', fieldOf(r,'te_id'),'200px'))
               +lblBlk('Incoterm','Delivery term on the invoice (default FOB).', inp('incoterm', fieldOf(r,'incoterm'),'120px'))
               +lblBlk('Cin7 member ID','', inp('cin7_member_id', fieldOf(r,'cin7_member_id'),'200px'))
               +lblBlk('Fulfil ERP ID','', inp('fulfil_id', fieldOf(r,'fulfil_id'),'200px'))
