@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.637 - Manufacturing BOM: card UX + searchable SKU dropdown
+
+- Rebuilt to match Suppliers / Key accounts: a **card list** (one card per bundle, shows
+  parent + name, components with names and ×qty) + a **grouped edit form** (parent SKU,
+  component rows with add/remove, Save/Cancel/Back). New-bundle flow via the same form.
+- SKU inputs are now a proper **searchable dropdown** (filters on SKU + product name as
+  you type; click to pick) instead of a native datalist. Entries validated against the
+  product list. Save diffs the component set (upsert changed/new, delete removed).
+
 ## v25.636 - Manufacturing BOM: SKUs picked from the product list (not free text)
 
 - The new-component, new-bundle-parent and first-component inputs are now datalist

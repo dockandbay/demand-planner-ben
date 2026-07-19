@@ -58,6 +58,12 @@
 #supply-root #rep-subnav,#supply-root #config-subs,#supply-root #prod-subtabs,#supply-root .po-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 12px}
 /* CONFIG level-3 nav (members of the "Supply chain" tab): a lighter, indented strip under the level-2 row */
 #supply-root #config-subs-l3{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f8fbff;border:1px solid #e5eefb;border-radius:6px;padding:2px 5px;margin:-6px 0 12px 16px}
+/* Searchable SKU dropdown (Manufacturing BOM): input + filtering popover, picks from the product list */
+#supply-root .skusel-drop{display:none;position:absolute;z-index:60;left:0;top:100%;min-width:260px;max-width:380px;max-height:240px;overflow:auto;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 6px 18px rgba(15,23,42,.14);margin-top:2px}
+#supply-root .skusel-drop.open{display:block}
+#supply-root .skusel-opt{padding:5px 9px;font-size:12px;cursor:pointer;white-space:nowrap}
+#supply-root .skusel-opt:hover{background:#eff6ff}
+#supply-root .skusel-opt .mut{color:#94a3b8}
 /* keep each tab's label + its action-count badge on one line (never wrap the badge below the header) */
 #supply-root #prod-subtabs .rtab,#supply-root .po-subnav .rtab{white-space:nowrap}
 #supply-root #prod-subtabs .rtab .ex-badge,#supply-root .po-subnav .rtab .ex-badge{display:inline-block;vertical-align:middle}
@@ -5106,49 +5112,96 @@
         Promise.all([fetch('/api/supply/manufacturing-bom').then(function(r){return r.json();}),
                      fetch('/api/supply/skus').then(function(r){return r.json();}).catch(function(){return [];})])
           .then(function(R){ var rows=Array.isArray(R[0])?R[0]:[]; var skus=(Array.isArray(R[1])?R[1]:[]).filter(function(s){return s&&s.sku;});
-          var skuSet={}; skus.forEach(function(s){ skuSet[String(s.sku).trim().toUpperCase()]=1; });
+          var skuSet={}, skuName={}; skus.forEach(function(s){ var u=String(s.sku).trim().toUpperCase(); skuSet[u]=1; skuName[u]=s.name||s.product_name||''; });
           function validSku(v){ return !!skuSet[String(v||'').trim().toUpperCase()]; }
-          var skuDl='<datalist id="bomskulist">'+skus.map(function(s){return '<option value="'+esc(s.sku)+'">'+esc(s.name||s.product_name||'')+'</option>';}).join('')+'</datalist>';
+          function nameOf(v){ return skuName[String(v||'').trim().toUpperCase()]||''; }
           var byP={}; rows.forEach(function(x){(byP[x.parent_sku]=byP[x.parent_sku]||[]).push(x);});
-          var parents=Object.keys(byP).sort();
+          var kq='', editParent=null;   // list mode; '__new__' = create; else a parent SKU
           function bomSave(parent,comp,qty){ return fetch('/api/supply/manufacturing-bom-save',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({parent_sku:parent,component_sku:comp,qty:qty})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); return j; }); }
           function bomDel(parent,comp){ return fetch('/api/supply/manufacturing-bom-delete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({parent_sku:parent,component_sku:comp})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); return j; }); }
-          b.innerHTML=skuDl+'<div class="sect-h">Manufacturing BOM <span class="mut tiny">(finished / bundle product → components × per-unit qty. SKUs are picked from the product list. Edit a qty and Save, add components, delete a row, or delete an entire bundle.)</span></div>'
-            +(parents.length?parents.map(function(p){ return '<div class="bom-grp" data-parent="'+esc(p)+'" style="margin-bottom:14px;max-width:640px;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px">'
-              +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><div style="font-weight:700">'+esc(p)+' <span class="mut tiny" style="font-weight:400">('+byP[p].length+' component'+(byP[p].length===1?'':'s')+')</span></div>'
-                +'<button class="lnk-btn bom-delbundle" style="color:#b91c1c;font-size:11px">🗑 Delete entire bundle</button></div>'
-              +'<div class="tw"><table><thead><tr><th class="l">Component SKU</th><th>Qty / unit</th><th class="l">Actions</th></tr></thead><tbody>'
-              +byP[p].map(function(x){return '<tr data-comp="'+esc(x.component_sku)+'"><td class="l">'+esc(x.component_sku)+'</td>'
-                +'<td><input type="number" min="0" step="1" class="flt bom-qty" value="'+esc(String(x.qty))+'" data-orig="'+esc(String(x.qty))+'" style="width:80px;text-align:right"></td>'
-                +'<td class="l" style="white-space:nowrap"><button class="lnk-btn bom-save" disabled style="opacity:.4">Save</button> &nbsp;<button class="lnk-btn bom-del" style="color:#b91c1c">Delete</button></td></tr>';}).join('')
-              +'<tr class="bom-addrow" style="background:#f8fafc"><td class="l"><input class="flt bom-ncomp" list="bomskulist" placeholder="pick component SKU…" style="width:190px"></td>'
-                +'<td><input type="number" min="0" step="1" class="flt bom-nqty" placeholder="qty" style="width:80px;text-align:right"></td>'
-                +'<td class="l"><button class="lnk-btn bom-add">＋ Add</button></td></tr>'
-              +'</tbody></table></div></div>'; }).join('')
-              :'<div class="count">No BOM rows yet — create the first bundle below.</div>')
-            +'<div style="margin-top:8px;max-width:640px;border:1px dashed #cbd5e1;border-radius:8px;padding:10px 12px;background:#f8fafc">'
-              +'<div style="font-weight:700;margin-bottom:4px">＋ New bundle</div>'
-              +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
-                +'<input class="flt bom-nparent" list="bomskulist" placeholder="pick finished / bundle SKU…" style="width:210px">'
-                +'<input class="flt bom-nbcomp" list="bomskulist" placeholder="pick first component SKU…" style="width:190px">'
-                +'<input type="number" min="0" step="1" class="flt bom-nbqty" placeholder="qty" style="width:80px;text-align:right">'
-                +'<button class="lnk-btn bom-newbundle">Create bundle</button></div></div>';
-          // edit qty → enable Save; Save → upsert
-          b.querySelectorAll('.bom-qty').forEach(function(inp){ inp.oninput=function(){ var sv=inp.closest('tr').querySelector('.bom-save'); var dirty=inp.value!==inp.dataset.orig; sv.disabled=!dirty; sv.style.opacity=dirty?'1':'.4'; }; });
-          b.querySelectorAll('.bom-save').forEach(function(btn){ btn.onclick=function(){ var tr=btn.closest('tr'), grp=btn.closest('.bom-grp'); var qty=Number(tr.querySelector('.bom-qty').value);
-            btn.disabled=true; btn.textContent='…'; bomSave(grp.dataset.parent,tr.dataset.comp,qty).then(function(){ btn.textContent='✓ Saved'; tr.querySelector('.bom-qty').dataset.orig=String(qty); setTimeout(function(){btn.textContent='Save';btn.style.opacity='.4';},1200); }).catch(function(e){ btn.disabled=false; btn.textContent='Save'; alert('Could not save: '+(e.message||e)); }); }; });
-          b.querySelectorAll('.bom-del').forEach(function(btn){ btn.onclick=function(){ var tr=btn.closest('tr'), grp=btn.closest('.bom-grp'); if(!confirm('Delete '+tr.dataset.comp+' from '+grp.dataset.parent+'?'))return;
-            bomDel(grp.dataset.parent,tr.dataset.comp).then(function(){ showSub(); }).catch(function(e){ alert('Could not delete: '+(e.message||e)); }); }; });
-          b.querySelectorAll('.bom-delbundle').forEach(function(btn){ btn.onclick=function(){ var grp=btn.closest('.bom-grp'), parent=grp.dataset.parent;
-            if(!confirm('Delete the ENTIRE bundle "'+parent+'" and all its components? This cannot be undone.'))return;
-            btn.disabled=true; bomDel(parent,'').then(function(){ showSub(); }).catch(function(e){ btn.disabled=false; alert('Could not delete bundle: '+(e.message||e)); }); }; });
-          b.querySelectorAll('.bom-add').forEach(function(btn){ btn.onclick=function(){ var tr=btn.closest('tr'), grp=btn.closest('.bom-grp'); var comp=tr.querySelector('.bom-ncomp').value.trim(), qty=Number(tr.querySelector('.bom-nqty').value);
-            if(!comp){alert('Enter a component SKU');return;} if(!validSku(comp)){alert('“'+comp+'” isn’t a product SKU — pick one from the list.');return;} if(!(qty>0)){alert('Enter a qty > 0');return;}
-            btn.disabled=true; bomSave(grp.dataset.parent,comp,qty).then(function(){ showSub(); }).catch(function(e){ btn.disabled=false; alert('Could not add: '+(e.message||e)); }); }; });
-          var nb=b.querySelector('.bom-newbundle'); if(nb)nb.onclick=function(){ var pr=b.querySelector('.bom-nparent').value.trim(), comp=b.querySelector('.bom-nbcomp').value.trim(), qty=Number(b.querySelector('.bom-nbqty').value);
-            if(!pr){alert('Enter a finished / bundle SKU');return;} if(!validSku(pr)){alert('“'+pr+'” isn’t a product SKU — pick the finished/bundle SKU from the list.');return;}
-            if(!comp){alert('Enter a first component SKU');return;} if(!validSku(comp)){alert('“'+comp+'” isn’t a product SKU — pick one from the list.');return;} if(!(qty>0)){alert('Enter a qty > 0');return;}
-            nb.disabled=true; bomSave(pr,comp,qty).then(function(){ showSub(); }).catch(function(e){ nb.disabled=false; alert('Could not create: '+(e.message||e)); }); };
+          function reload(){ b.innerHTML='<div class="count">Loading…</div>'; fetch('/api/supply/manufacturing-bom').then(function(r){return r.json();}).then(function(rw){ rows=Array.isArray(rw)?rw:[]; byP={}; rows.forEach(function(x){(byP[x.parent_sku]=byP[x.parent_sku]||[]).push(x);}); editParent=null; draw(); }); }
+          // ── searchable SKU dropdown (input + filtering popover; picks from the product list) ──
+          function skuSelHtml(extraCls,val,w){ return '<div class="skusel" style="position:relative;display:inline-block">'
+            +'<input class="fci skusel-inp'+(extraCls?(' '+extraCls):'')+'" value="'+esc(val||'')+'" placeholder="search SKU / name…" autocomplete="off" style="width:'+(w||'240px')+'">'
+            +'<div class="skusel-drop"></div></div>'; }
+          function wireSkuSel(root){ (root||b).querySelectorAll('.skusel').forEach(function(box){ if(box._wired)return; box._wired=1;
+            var inp=box.querySelector('.skusel-inp'), drop=box.querySelector('.skusel-drop');
+            function render(){ var q=inp.value.trim().toLowerCase();
+              var ms=skus.filter(function(s){ return !q || (s.sku+' '+(s.name||s.product_name||'')).toLowerCase().indexOf(q)>=0; }).slice(0,60);
+              drop.innerHTML=ms.length?ms.map(function(s){return '<div class="skusel-opt" data-sku="'+esc(s.sku)+'"><b>'+esc(s.sku)+'</b> <span class="mut">'+esc(s.name||s.product_name||'')+'</span></div>';}).join(''):'<div class="skusel-opt mut" style="cursor:default">no SKU matches</div>';
+              drop.querySelectorAll('.skusel-opt[data-sku]').forEach(function(o){ o.onmousedown=function(e){ e.preventDefault(); inp.value=o.dataset.sku; drop.classList.remove('open'); inp.style.borderColor=''; }; }); }
+            inp.onfocus=function(){ render(); drop.classList.add('open'); };
+            inp.oninput=function(){ render(); drop.classList.add('open'); inp.style.borderColor=validSku(inp.value)||!inp.value?'':'#f59e0b'; };
+            inp.onblur=function(){ setTimeout(function(){ drop.classList.remove('open'); },160); };
+          }); }
+          // ── CARD LIST ──
+          function cardHtml(p){ var comps=byP[p]||[], pnm=nameOf(p);
+            return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;background:#fff;box-shadow:0 1px 2px rgba(15,23,42,.04)">'
+              +'<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px"><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14px;word-break:break-word">'+esc(p)+'</div>'+(pnm?'<div class="mut tiny">'+esc(pnm)+'</div>':'')+'</div>'
+              +'<button class="bom-edit" data-p="'+esc(p)+'" style="cursor:pointer;border:1px solid #cbd5e1;background:#f8fafc;padding:3px 12px;border-radius:5px;font-size:11px;white-space:nowrap">Edit</button>'
+              +' <button class="bom-delb" data-p="'+esc(p)+'" style="cursor:pointer;border:1px solid #fecaca;background:#fef2f2;color:#b91c1c;padding:3px 10px;border-radius:5px;font-size:11px;white-space:nowrap">Delete</button></div>'
+              +'<div class="mut tiny" style="text-transform:uppercase;letter-spacing:.3px;font-weight:700;margin-bottom:3px">'+comps.length+' component'+(comps.length===1?'':'s')+'</div>'
+              +'<div style="display:flex;flex-direction:column;gap:2px">'+comps.map(function(x){ var cn=nameOf(x.component_sku);
+                  return '<div style="font-size:12px;display:flex;justify-content:space-between;gap:8px"><span style="min-width:0;word-break:break-word">'+esc(x.component_sku)+(cn?' <span class="mut tiny">'+esc(cn)+'</span>':'')+'</span><span style="font-weight:700;white-space:nowrap">×'+esc(String(x.qty))+'</span></div>'; }).join('')+'</div></div>'; }
+          function listHtml(){ var ps=Object.keys(byP).sort();
+            var f=kq?ps.filter(function(p){ return (p+' '+nameOf(p)+' '+(byP[p]||[]).map(function(x){return x.component_sku+' '+nameOf(x.component_sku);}).join(' ')).toLowerCase().indexOf(kq)>=0; }):ps;
+            var cards=f.length?('<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;margin-top:12px">'+f.map(cardHtml).join('')+'</div>'):'<div class="count" style="padding:10px 2px">No BOM bundles'+(kq?' match your search':' yet')+'.</div>';
+            return '<div class="sect-h">Manufacturing BOM <span class="mut tiny">(finished / bundle product → components × per-unit qty; SKUs are picked from the product list)</span> <button class="tool-badge bg-blue" id="bom-new" style="cursor:pointer;border:none;margin-left:8px">+ New bundle</button></div>'
+              +'<div class="bar"><input class="flt" id="bom-q" placeholder="Search bundle / component SKU / name…" value="'+esc(kq)+'" style="width:320px;background:#eff6ff;border-color:#93c5fd"><span class="count" style="margin-left:8px">'+f.length+(kq?' / '+ps.length:'')+' bundle'+(f.length===1?'':'s')+'</span></div>'+cards; }
+          // ── EDIT FORM ──
+          function compRow(sku,qty){ return '<div class="bomc-row" style="display:flex;gap:8px;align-items:center;margin-bottom:8px">'
+            +skuSelHtml('bomc-sku',sku,'260px')
+            +'<input type="number" min="0" step="1" class="fci bomc-qty" value="'+esc(qty==null||qty===''?'':String(qty))+'" placeholder="qty" style="width:80px;text-align:right">'
+            +'<button class="bomc-rm" title="remove component" style="cursor:pointer;border:none;background:transparent;color:#b91c1c;font-size:15px;line-height:1">✕</button></div>'; }
+          function editHtml(p){ var isNew=(p==='__new__'); var comps=isNew?[{}]:(byP[p]||[]);
+            return '<div class="sect-h" style="display:flex;align-items:center;gap:10px"><button id="bom-back" style="cursor:pointer;border:1px solid #cbd5e1;background:#f8fafc;padding:3px 11px;border-radius:5px;font-size:11px">← Back</button> '+(isNew?'New bundle':'Edit bundle')+'</div>'
+              +'<div style="max-width:720px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;padding:16px 18px">'
+              +'<div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:6px">Finished / bundle SKU</div>'
+              +(isNew?'<div class="bom-parent" style="margin-bottom:14px">'+skuSelHtml('','','300px')+'</div>'
+                     :'<div style="margin-bottom:14px;font-weight:700;font-size:14px">'+esc(p)+(nameOf(p)?' <span class="mut tiny" style="font-weight:400">'+esc(nameOf(p))+'</span>':'')+'</div>')
+              +'<div style="border-top:1px solid #eef2f7;margin:0 0 12px"></div>'
+              +'<div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:8px">Components <span class="mut tiny">(per finished unit)</span></div>'
+              +'<div id="bomc-list">'+comps.map(function(x){return compRow(x.component_sku||'', x.qty==null?'':x.qty);}).join('')+'</div>'
+              +'<button id="bomc-add" style="cursor:pointer;border:1px dashed #cbd5e1;background:#f8fafc;padding:5px 12px;border-radius:6px;font-size:12px;margin-top:4px">＋ Add component</button>'
+              +'<div style="display:flex;gap:8px;margin-top:16px;padding-top:12px;border-top:1px solid #eef2f7"><button id="bom-save" style="cursor:pointer;border:none;background:#2563eb;color:#fff;padding:6px 18px;border-radius:6px;font-size:12px;font-weight:600">Save changes</button>'
+              +'<button id="bom-cancel" style="cursor:pointer;border:1px solid #cbd5e1;background:#fff;padding:6px 14px;border-radius:6px;font-size:12px">Cancel</button>'
+              +'<span id="bom-msg" class="mut tiny" style="align-self:center;margin-left:6px"></span></div></div>'; }
+          function doSave(){ var isNew=(editParent==='__new__');
+            var parent=isNew?(b.querySelector('.bom-parent .skusel-inp').value.trim()):editParent;
+            var msg=document.getElementById('bom-msg'), saveBtn=document.getElementById('bom-save');
+            function bad(t){ msg.innerHTML='<span style="color:#dc2626">'+esc(t)+'</span>'; }
+            if(!parent){ bad('Pick a finished / bundle SKU.'); return; }
+            if(!validSku(parent)){ bad('“'+parent+'” isn’t a product SKU — pick it from the list.'); return; }
+            if(isNew && byP[parent]){ bad('Bundle “'+parent+'” already exists — edit it from the list.'); return; }
+            var rowEls=Array.prototype.slice.call(b.querySelectorAll('.bomc-row')), comps=[], seen={};
+            for(var i=0;i<rowEls.length;i++){ var sku=rowEls[i].querySelector('.skusel-inp').value.trim(), qty=Number(rowEls[i].querySelector('.bomc-qty').value);
+              if(!sku && !(qty>0)) continue;   // skip fully-blank rows
+              if(!validSku(sku)){ bad('“'+sku+'” isn’t a product SKU — pick it from the list.'); return; }
+              if(!(qty>0)){ bad('Enter a qty > 0 for '+sku+'.'); return; }
+              var u=sku.toUpperCase(); if(seen[u]){ bad(sku+' is listed twice.'); return; } seen[u]=1; comps.push({sku:sku,qty:qty}); }
+            if(!comps.length){ bad('Add at least one component.'); return; }
+            var origSkus=isNew?[]:(byP[editParent]||[]).map(function(x){return x.component_sku;});
+            var newSet={}; comps.forEach(function(c){newSet[c.sku.toUpperCase()]=1;});
+            var ops=comps.map(function(c){return bomSave(parent,c.sku,c.qty);});
+            origSkus.forEach(function(os){ if(!newSet[os.toUpperCase()]) ops.push(bomDel(parent,os)); });
+            saveBtn.disabled=true; msg.textContent='Saving…';
+            Promise.all(ops).then(function(){ reload(); }).catch(function(e){ saveBtn.disabled=false; bad('Save failed: '+(e.message||e)); }); }
+          function draw(){
+            if(editParent!=null){ b.innerHTML=editHtml(editParent); wireSkuSel(b);
+              document.getElementById('bom-back').onclick=document.getElementById('bom-cancel').onclick=function(){ editParent=null; draw(); };
+              function rm(){ this.closest('.bomc-row').remove(); }
+              b.querySelectorAll('.bomc-rm').forEach(function(x){x.onclick=rm;});
+              document.getElementById('bomc-add').onclick=function(){ var list=document.getElementById('bomc-list'); var w=document.createElement('div'); w.innerHTML=compRow('',''); var node=w.firstChild; list.appendChild(node); wireSkuSel(list); node.querySelector('.bomc-rm').onclick=rm; var si=node.querySelector('.skusel-inp'); if(si)si.focus(); };
+              document.getElementById('bom-save').onclick=doSave;
+              return; }
+            b.innerHTML=listHtml();
+            document.getElementById('bom-new').onclick=function(){ editParent='__new__'; draw(); };
+            var q=document.getElementById('bom-q'); if(q)q.oninput=function(){ kq=this.value.trim().toLowerCase(); var c=this.selectionStart; draw(); var q2=document.getElementById('bom-q'); if(q2){q2.focus(); try{q2.setSelectionRange(c,c);}catch(e){}} };
+            b.querySelectorAll('.bom-edit').forEach(function(btn){ btn.onclick=function(){ editParent=btn.dataset.p; draw(); }; });
+            b.querySelectorAll('.bom-delb').forEach(function(btn){ btn.onclick=function(){ var p=btn.dataset.p; if(!confirm('Delete the ENTIRE bundle "'+p+'" and all its components? This cannot be undone.'))return;
+              btn.disabled=true; bomDel(p,'').then(function(){ delete byP[p]; draw(); }).catch(function(e){ btn.disabled=false; alert('Delete failed: '+(e.message||e)); }); }; });
+          }
+          draw();
         }).catch(function(e){ b.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>'; }); }
       else if(CONFIG_SUB==='products'){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/products-all').then(function(r){return r.json();}).then(function(d){ if(d&&d.error){b.innerHTML='<div class="count">'+esc(d.error)+'</div>';return;}
