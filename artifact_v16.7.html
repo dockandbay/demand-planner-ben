@@ -9421,68 +9421,27 @@ var WEATHER_LOADING=false;
 var WX_RAW=null; // {city: {forecast: [{date,tmax,tmin,precip,wc}], monthly: {YYYY-MM:{...}}, country, lat, lon, fetched_at}}
 var WX_FETCH_PROMISE=null; // dedupe concurrent fetches
 
-// Fetch all 14 weather_cache rows via Anthropic API + Airtable MCP. Returns parsed WX_RAW shape.
-async function fetchWeatherCacheViaMCP(){
+// Fetch all weather_cache rows from Supabase via /api/weather (moved off Airtable MCP). Returns WX_RAW shape.
+async function fetchWeatherCacheViaMCP(){   // name kept so callers are untouched; now reads Supabase, not MCP
   if(WX_RAW)return WX_RAW;
   if(WX_FETCH_PROMISE)return WX_FETCH_PROMISE;
   WX_FETCH_PROMISE=(async function(){
-    var prompt='Use the Airtable list_records_for_table tool to fetch ALL records from base appT5GoPc8M3iEDdh table tblkKbSyt42bUxIs0 (weather_cache).'
-      +' Include these fieldIds: fld3E1MKCVc9p6YXR (city), fldkZ3MlSgbQ2Wi3a (country), fldTM9tDmdyUXFf6o (lat), fldu11HNcpkbE816T (lng),'
-      +' fldGLHfRD1nANZs7z (forecast_json), fldhmSZnjhWu5R99p (history_json), flddETLpR2Q76yKNi (last_fetched).'
-      +' Just call the tool and return the result. Do not write prose.';
-    var resp=await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        model:'claude-sonnet-4-20250514',
-        max_tokens:16000,
-        messages:[{role:'user',content:prompt}],
-        mcp_servers:[{type:'url',url:'https://mcp.airtable.com/mcp',name:'airtable-mcp'}]
-      })
-    });
-    if(!resp.ok)throw new Error('Anthropic API HTTP '+resp.status);
+    var resp=await fetch('/api/weather');
+    if(!resp.ok)throw new Error('Weather HTTP '+resp.status);
     var data=await resp.json();
-    // Find the mcp_tool_result block(s) containing weather_cache records
-    var toolResults=(data.content||[]).filter(function(b){return b.type==='mcp_tool_result';});
-    if(!toolResults.length)throw new Error('No mcp_tool_result in API response');
-    var allRecords=[];
-    for(var i=0;i<toolResults.length;i++){
-      var tr=toolResults[i];
-      var blocks=(tr.content||[]);
-      for(var j=0;j<blocks.length;j++){
-        var txt=blocks[j].text||'';
-        try{
-          var parsed=JSON.parse(txt);
-          var recs=parsed.records||parsed||[];
-          if(Array.isArray(recs))allRecords=allRecords.concat(recs);
-          else if(recs.records)allRecords=allRecords.concat(recs.records);
-        }catch(e){/* ignore non-JSON */}
-      }
-    }
-    if(!allRecords.length)throw new Error('Parsed 0 records from MCP response');
-    // Transform to keyed-by-city map
+    if(data&&data.error)throw new Error(data.error);
+    var recs=(data&&data.cities)||[];
+    if(!recs.length)throw new Error('No weather data cached yet — the weather refresh hasn’t populated Supabase.');
     var out={};
-    allRecords.forEach(function(r){
-      var c=r.cellValuesByFieldId||r.fields||{};
-      var city=c.fld3E1MKCVc9p6YXR;
-      if(!city)return;
-      var cc=c.fldkZ3MlSgbQ2Wi3a;
-      var country=(cc&&cc.name)||cc||'';
-      var fcArr=[],histObj={};
-      try{fcArr=JSON.parse(c.fldGLHfRD1nANZs7z||'[]');}catch(e){}
-      try{histObj=JSON.parse(c.fldhmSZnjhWu5R99p||'{}');}catch(e){}
-      // Transform forecast: [{date,tmax,tmin,precip,wc}] → parallel arrays
+    recs.forEach(function(r){
+      var city=r.city; if(!city)return;
+      var fcArr=r.forecast_json; if(typeof fcArr==='string'){try{fcArr=JSON.parse(fcArr);}catch(e){fcArr=[];}} if(!Array.isArray(fcArr))fcArr=[];
+      var histObj=r.history_json; if(typeof histObj==='string'){try{histObj=JSON.parse(histObj);}catch(e){histObj={};}} if(!histObj||typeof histObj!=='object')histObj={};
       var time=[],tmax=[],tmin=[],precip=[];
       fcArr.forEach(function(d){time.push(d.date);tmax.push(d.tmax);tmin.push(d.tmin);precip.push(d.precip);});
-      // Transform history: YYYY_MM keys → YYYY-MM keys
-      var monthly={};
-      Object.keys(histObj).forEach(function(k){monthly[k.replace('_','-')]=histObj[k];});
-      out[city]={
-        country:country,lat:c.fldTM9tDmdyUXFf6o,lon:c.fldu11HNcpkbE816T,
-        forecast:{time:time,tmax:tmax,tmin:tmin,precip:precip},
-        monthly:monthly,
-        fetched_at:c.flddETLpR2Q76yKNi
-      };
+      // history keys are stored YYYY_MM → present as YYYY-MM
+      var monthly={}; Object.keys(histObj).forEach(function(k){monthly[k.replace('_','-')]=histObj[k];});
+      out[city]={country:r.country||'',lat:r.lat,lon:r.lng,forecast:{time:time,tmax:tmax,tmin:tmin,precip:precip},monthly:monthly,fetched_at:r.last_fetched};
     });
     WX_RAW=out;
     return out;

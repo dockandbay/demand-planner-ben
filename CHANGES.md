@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.656 - Weather off Airtable MCP -> Supabase
+
+- New planner.weather_cache table (migration 122) + GET /api/weather endpoint. The DEMAND Weather
+  panel reads Supabase instead of calling Airtable via the Anthropic MCP; the Airtable-MCP call was
+  removed from fetchWeatherCacheViaMCP. Sandbox seeded with a London row (smoke test).
+- Diviyaj: run migration 122 on live + REPOINT the weather refresh job (GAS -> Airtable) to write
+  planner.weather_cache. See DEPLOY_2026-07-19_weather-supabase.md. Also confirm preorder/key-account n8n
+  before we drop their client Airtable-MCP refresh (left in place for now).
+
 ## v25.655 - Auto Forecast / Key Arrivals: guard against partial API responses (bug fix)
 
 - draw() now bails to an error message if the response is missing months/payments/assumptions

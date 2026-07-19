@@ -1003,6 +1003,16 @@ async function expediteActions() {
 // Lightweight, always-fresh version probe — the client polls this to detect a new deploy while a tab is
 // left open (the app is a SPA, so an open tab keeps running its booted version until reloaded).
 app.get('/api/version', async (_req, res) => { res.set('Cache-Control', 'no-store').json({ version: APP_VERSION, data: await freshnessCached() }); });
+// Weather cache (moved off Airtable → planner.weather_cache). The DEMAND ▸ Actions ▸ Weather panel reads
+// this instead of calling Airtable via the Anthropic MCP. Rows are refreshed by the weather job (see Diviyaj note).
+app.get('/api/weather', async (_req, res) => {
+  try {
+    const rows = (await pool.query(`SELECT city, coalesce(country,'') country, lat, lng,
+      forecast_json, history_json, to_char(last_fetched,'YYYY-MM-DD"T"HH24:MI:SS"Z"') last_fetched
+      FROM planner.weather_cache ORDER BY city`)).rows;
+    res.set('Cache-Control', 'no-store').json({ cities: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/api/health', async (_req, res) => {
   try {
     const [DATA, FC, FO, SKU, CATS, SUBS, BI, PC] = await Promise.all([
