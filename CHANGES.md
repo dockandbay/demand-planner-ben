@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.651 - Prune confirmed dead code (DEMAND app)
+
+- Removed the phantom `#help-btn` relocation refs (3 spots) — the element never existed
+  (real help button is `#ctx-help-btn`, untouched).
+- Removed the empty `#buy-tools` tool-bar placeholder + its swap logic (`_isBuyLike`, `_bt`)
+  — never populated. No behaviour change.
+- (The old DEMAND menu-bar items — AI Insights / Help / Weather / Insights — are NOT dead;
+  they're already integrated into the current nav + DEMAND ▸ Actions sub-tabs.)
+
 ## v25.650 - Consolidate CSV / export helpers (refactor #6)
 
 - Single CSV-string builder (`rowsToCsvStr`), one download impl (`downloadCsvStr`), one

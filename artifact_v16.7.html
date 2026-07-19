@@ -625,7 +625,6 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
     <div class="tool-bar" id="plan-tools" role="group" aria-label="AI tools">
       <button class="tool-btn" id="insights-btn" title="Get AI insights"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 1 4 12.7c-.7.5-1 1.3-1 2.1V18H9v-1.2c0-.8-.3-1.6-1-2.1A7 7 0 0 1 12 2z"/></svg>AI Insights</button>
     </div>
-    <div class="tool-bar" id="buy-tools" role="group" aria-label="Buy plan tools" style="display:none"></div>
   </div>
   <div id="ctabs-row" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
     <span class="pill-lbl">Country</span>
@@ -6805,16 +6804,13 @@ function render(){
   document.querySelectorAll('.view-toggle').forEach(function(b){
     b.classList.toggle('active',b.dataset.view===VIEW_MODE);
   });
-  // Swap the top-right tool-bar: demand-planner tools (AI insights / Save Forecasts) on PLAN only,
-  // buy actions on BUY/FBA. REPORTS (exec) gets neither — the AI toolbar belongs to planning.
-  var _isBuyLike=(VIEW_MODE==='buy'||VIEW_MODE==='fba');
-  var _pt=document.getElementById('plan-tools'),_bt=document.getElementById('buy-tools');
+  // Show the top-right AI tool-bar (Insights) on the PLAN/DEMAND view only; REPORTS/BUY/FBA get none.
+  var _pt=document.getElementById('plan-tools');
   if(_pt)_pt.style.display=(VIEW_MODE==='planning')?'':'none';
-  if(_bt)_bt.style.display=_isBuyLike?'':'none';  // BP.render() then hides it on the FBA view specifically
   // leaving DEMAND — return the relocated tools to the main bar, then tear down the sub-tab bar + body
   if(VIEW_MODE!=='planning'){
     var vtr=document.getElementById('view-tabs-row');
-    ['plan-tools','help-btn'].forEach(function(id){ var el=document.getElementById(id); if(el&&vtr&&el.parentNode!==vtr) vtr.appendChild(el); });
+    ['plan-tools'].forEach(function(id){ var el=document.getElementById(id); if(el&&vtr&&el.parentNode!==vtr) vtr.appendChild(el); });
     // return the relocated status note (#st) + version (#ver) to their bar before tearing down the sub-nav
     var _sb=document.getElementById('statusbar');
     ['st','ver'].forEach(function(id){ var el=document.getElementById(id); if(_sb&&el&&el.parentNode!==_sb){ if(id==='st'){el.removeAttribute('style');el.className='status';} else {el.style.cssText='font-size:10px;color:#bbb;margin-left:auto';} _sb.appendChild(el); } });
@@ -6996,20 +6992,19 @@ function renderDemandTabs(){
   var _sb=document.getElementById('statusbar');
   var _vtr=document.getElementById('view-tabs-row');
   // Park relocated nodes back to their homes BEFORE we wipe innerHTML below, so the nodes survive:
-  //   status note/version (#st,#ver) → #statusbar ; AI tools + help (#plan-tools,#help-btn) → the main tab row.
+  //   status note/version (#st,#ver) → #statusbar ; AI tools (#plan-tools) → the main tab row.
   // (Without this the innerHTML reset destroys whatever was appended last render — which is what made the
   //  AI-tools toolbar incl. Save Forecasts disappear after the first re-render.)
   ['st','ver'].forEach(function(id){ var el=document.getElementById(id); if(_sb&&el&&el.parentNode!==_sb){ el.removeAttribute('style'); if(id==='st')el.className='status'; _sb.appendChild(el); } });
-  ['plan-tools','help-btn'].forEach(function(id){ var el=document.getElementById(id); if(_vtr&&el&&el.parentNode!==_vtr) _vtr.appendChild(el); });
+  ['plan-tools'].forEach(function(id){ var el=document.getElementById(id); if(_vtr&&el&&el.parentNode!==_vtr) _vtr.appendChild(el); });
   if(!bar){ bar=document.createElement('div'); bar.id='demand-tabs';
     bar.style.cssText='display:flex;gap:2px;align-items:center;margin:2px 0 10px;border-bottom:1px solid #e0e0e0;flex-wrap:wrap';   // match SUPPLY #supply-subnav exactly
     // sit directly below the main tabs but ABOVE the filters (same header column, right after the tab row)
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
   bar.innerHTML=DEMAND_TABS.map(function(t){return '<button class="dnav'+(t[0]===DEMAND_VIEW?' active':'')+'" data-d="'+t[0]+'">'+t[1]+'</button>';}).join('');
   bar.querySelectorAll('.dnav').forEach(function(b){ b.onclick=function(){ DEMAND_VIEW=b.dataset.d; if(window.writeHash)window.writeHash(['demand',DEMAND_VIEW]); render(); }; });
-  // relocate the demand-plan AI tool-bar + help into this secondary menu (moved back on teardown)
+  // relocate the demand-plan AI tool-bar into this secondary menu (moved back on teardown)
   var pt=document.getElementById('plan-tools'); if(pt)bar.appendChild(pt);
-  var hb=document.getElementById('help-btn'); if(hb)bar.appendChild(hb);
   // relocate the status note (#st) + last-updated/version (#ver) onto this nav row, right-aligned (all DEMAND pages)
   var _st=document.getElementById('st');
   if(_st){ _st.className=''; _st.style.cssText='font-size:11px;color:#888;margin-left:auto;flex:0 0 auto;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:46%'; bar.appendChild(_st); }
