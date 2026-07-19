@@ -490,10 +490,15 @@
   #supply-root .pptab-panel{max-width:100vw;overflow-x:auto;-webkit-overflow-scrolling:touch;box-sizing:border-box}
   /* detail cell flush to the left edge — drop the inherited tbody-td horizontal padding so there's no indent */
   #supply-root table.pp-tbl tr[id^="pp-"]>td{padding-left:0;padding-right:0}
-  /* TIMELINE: fit to exactly one screen width — never scroll sideways. Long note text wraps instead of pushing
-     the panel wide (order-plan etc. keep their overflow-x:auto for wide tables). */
+  /* TIMELINE: fit to exactly one screen width — never scroll sideways. Flex items default to min-width:auto and
+     refuse to shrink below their content (forcing the panel wide → clipped by overflow:hidden); min-width:0 lets
+     them shrink so long note text wraps instead. Inline min-width (e.g. the 78px control column) still wins.
+     Order-plan etc. keep overflow-x:auto for their wide tables. */
   #supply-root .pptab-panel[data-pt="timeline"]{overflow-x:hidden}
-  #supply-root .pptab-panel[data-pt="timeline"] *{max-width:100%!important;overflow-wrap:anywhere}
+  #supply-root .pptab-panel[data-pt="timeline"] div{max-width:100%;min-width:0}
+  #supply-root .pptab-panel[data-pt="timeline"] div,
+  #supply-root .pptab-panel[data-pt="timeline"] span,
+  #supply-root .pptab-panel[data-pt="timeline"] textarea{overflow-wrap:anywhere}
   /* stop iOS inflating large text; trim oversized headings */
   #supply-root .sect-h{font-size:11px}
   #supply-root .ppx-h{font-size:12px}
