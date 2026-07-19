@@ -4717,7 +4717,11 @@
           b.innerHTML='<div class="annot"><b>CONFIG ▸ General settings.</b> Email recipients for <b>escalations</b> raised on a timeline message. When a <b>supplier</b> escalates, it goes to the list below that matches the context; when <b>Dock &amp; Bay</b> escalates, it goes to that supplier’s portal user(s). Comma-separate multiple addresses.</div>'
             +'<div class="sect-h">Escalation email recipients</div>'
             +'<div style="max-width:720px">'+FIELDS.map(function(f){ return '<div style="margin:0 0 12px"><div style="font-weight:600;font-size:13px">'+esc(f[1])+'</div><div class="mut tiny" style="margin:1px 0 4px">'+f[2]+'</div>'
-              +'<input class="fci gs-set" data-key="'+f[0]+'" value="'+esc(s[f[0]]||'')+'" placeholder="email@dockandbay.com, other@dockandbay.com" style="width:100%;box-sizing:border-box;text-align:left"></div>'; }).join('')+'</div>';
+              +'<input class="fci gs-set" data-key="'+f[0]+'" value="'+esc(s[f[0]]||'')+'" placeholder="email@dockandbay.com, other@dockandbay.com" style="width:100%;box-sizing:border-box;text-align:left"></div>'; }).join('')+'</div>'
+            +'<div class="sect-h" style="margin-top:18px">Finance</div>'
+            +'<div style="max-width:720px"><div style="margin:0 0 12px"><div style="font-weight:600;font-size:13px">USD → GBP exchange rate</div>'
+              +'<div class="mut tiny" style="margin:1px 0 4px">Used for the GBP columns in the Cash Flow &amp; Auto Forecast reports (GBP = USD ÷ this rate). Takes effect on the next page reload.</div>'
+              +'<input class="fci gs-set" data-key="usd_gbp_rate" value="'+esc(s.usd_gbp_rate||'')+'" placeholder="1.34" inputmode="decimal" style="width:120px;box-sizing:border-box;text-align:left"></div></div>';
           b.querySelectorAll('.gs-set').forEach(function(inp){ inp.onchange=function(){ inp.style.borderColor='#d0d0d0';
             fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:inp.dataset.key,value:inp.value})})
               .then(function(r){return r.json();}).then(function(j){ inp.style.borderColor=(j&&j.error)?'#dc2626':'#16a34a'; setTimeout(function(){inp.style.borderColor='';},900); })

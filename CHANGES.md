@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.648 - GBP rate configurable in CONFIG ▸ General settings (refactor quick-win)
+
+- The USD→GBP rate (was hardcoded 1.34 in two client files: CF_GBP / AF_GBP) is now a
+  single setting in CONFIG ▸ General settings → Finance (app_settings.usd_gbp_rate).
+- Server injects the configured rate into both clients' CF_GBP/AF_GBP at serve time
+  (same mechanism as APP_VERSION); fallback 1.34 if unset/invalid. Takes effect on reload.
+
 ## v25.647 - Mobile drawer: Config sub-nav shows on first tap (poll until ready)
 
 - The drawer rebuilt after a fixed 60ms to reveal a view's sub-nav; CONFIG loads its nav

@@ -69,13 +69,17 @@ function loadHTML() {
 const HTML = loadHTML();
 // SUPPLY tab (Production Planner) UI — injected before </body>. Optional; empty if file absent.
 function loadInject() { try { return readFileSync(new URL('./supply/inject.html', import.meta.url), 'utf8'); } catch { return ''; } }
+// USD→GBP rate for the report GBP columns — configurable in CONFIG ▸ General settings (app_settings.usd_gbp_rate);
+// injected into both clients' CF_GBP/AF_GBP literals at serve time. Fallback 1.34 if unset/invalid.
+async function gbpRate() { try { const r = await pool.query(`SELECT value FROM planner.app_settings WHERE key='usd_gbp_rate'`);
+  const v = parseFloat(r.rows[0] && r.rows[0].value); return (isFinite(v) && v > 0) ? v : 1.34; } catch { return 1.34; } }
 const SUPPLY_INJECT = loadInject();
 // Dev convenience: re-read the artefact + supply inject on each page load so edits show on a refresh WITHOUT
 // restarting the server (the boot-time consts above are kept for server-side global parsing + prod speed).
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.647';
+const APP_VERSION = 'v25.648';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -527,9 +531,9 @@ app.use(async (req, res, next) => {
 app.get('/', async (_req, res) => {
   try {
     // Fetch every live global in parallel, then splice sequentially (string ops on one buffer).
-    const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts, FBADIMS, SA_EXTRA] = await Promise.all([
+    const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts, FBADIMS, SA_EXTRA, GBP_RATE] = await Promise.all([
       buildDATA(), buildFC_CURRENT(), buildFC_OUTPUTS(), buildSKURAW(),
-      buildCATS_META(), buildSUBS_META(), buildBI_RULES(), buildPROD_CONST(), freshness(), buildFBADIMS(), buildSAEXTRA(),
+      buildCATS_META(), buildSUBS_META(), buildBI_RULES(), buildPROD_CONST(), freshness(), buildFBADIMS(), buildSAEXTRA(), gbpRate(),
     ]);
     let html = DEV ? loadHTML() : HTML;
     html = replaceGlobal(html, 'DATA', JSON.stringify(DATA));
@@ -565,6 +569,8 @@ app.get('/', async (_req, res) => {
     const FBADIMS_JS = '<script>window.FBA_DIMS=' + JSON.stringify(FBADIMS) + ';</script>';
     const injectTail = FBADIMS_JS + FIT + (DEV ? loadInject() : SUPPLY_INJECT).split('__APP_VERSION__').join(APP_VERSION) + '</body>';
     html = html.replace('</body>', () => injectTail);
+    // Inject the configured USD→GBP rate into both clients (CF_GBP in inject.html, AF_GBP in the artefact).
+    html = html.replace(/var CF_GBP\s*=\s*[\d.]+/, 'var CF_GBP=' + GBP_RATE).replace(/var AF_GBP\s*=\s*[\d.]+/, 'var AF_GBP=' + GBP_RATE);
     if (IS_SANDBOX) {
       html = html.replace(/<body[^>]*>/, m => m + SANDBOX_BANNER);   // orange "SANDBOX ONLY" strip — never on prod
       html = html.replace(/<link rel="icon"[^>]*>/, '<link rel="icon" type="image/svg+xml" href="/favicon-sbx.svg?v=' + APP_VERSION + '">');   // orange-bordered favicon on sandbox
