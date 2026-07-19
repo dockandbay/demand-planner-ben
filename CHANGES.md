@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.629 - PO detail: remove "Linked Records" sub-tab
+
+- Dropped the LINKED RECORDS tab from the PO detail panel (drawer + grid) — it added no
+  useful info. Removed the unused linkedH/blk helper. Old #.../linked/<PO> deep links
+  degrade gracefully to the default tab.
+
 ## v25.628 - What's Next: PO popout drawer (reusable)
 
 - In the What's Next report, clicking a **PO** now opens a right-side **popout drawer**

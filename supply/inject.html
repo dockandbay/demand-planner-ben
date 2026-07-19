@@ -3049,17 +3049,16 @@
     return '<div class="sect-h">Documents <span class="mut tiny">(every file held for this PO — invoices, supplier uploads, client/FBA docs)</span></div>'
       +'<div class="tw" style="max-width:900px"><table><thead><tr><th class="l">File</th><th class="l">Type</th><th class="l">Uploaded</th><th class="l">By</th><th class="l">Size</th><th class="l">Actions</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
       +'<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><label class="tiny">Upload a document<br><input type="file" class="podoc-file" data-po="'+esc(po)+'" style="font-size:11px"></label><button class="save-btn podoc-up" data-po="'+esc(po)+'">⬆ Upload</button></div>'; }
-  function poDetailHTML(po,d,i){ function blk(t,rows){return '<div class="sect-h">'+t+' ('+rows.length+')</div>'+(rows.length?tableHTML(rows):'<div class="count">none linked</div>');}
+  function poDetailHTML(po,d,i){
     var p=payPanel(poBy[po],d);
     if(!p||typeof p==='string') return '<div class="count">No PO data.</div>';
     var erpMeta={complete:d.erp_complete};
     // ERP order-plan deviation is now ONE action (erp_lines, mirrored into ex.oplan) — not one-per-line.
     var oplanH=orderPlanPanel(po,d.lines,d.line_costs,d.additional_costs,erpMeta,d.crossdock_lines);
     var timelineH=timelinePanel(po,d);
-    var linkedH='<div class="sect-h">Linked records across tables</div>'+blk('Deposit',d.deposit)+blk('Payments',d.payments)+blk('Flexport',d.flexport);
     var masterH=poMasterPanel(po), shipH=poShipPanel(po,d);
     var docsH=docsPanel(po,d);
-    var tabs=[['pay','PAYMENTS',p.pay,p.ex.pay],['dates','DATES',p.dates,p.ex.dates],['client','CLIENT/FBA',p.client,p.ex.client],['oplan','ORDER PLAN',oplanH,(p.ex.oplan||0)],['shipments','SHIPMENTS',shipH,(p.ex.ship||0)],['documents','DOCUMENTS',docsH,0],['masterdata','MASTER DATA',masterH,(p.ex.master||0)],['landed','LANDED COSTS',p.landed,p.ex.landed],['timeline','TIMELINE',timelineH,p.ex.timeline],['linked','LINKED RECORDS',linkedH,0]];
+    var tabs=[['pay','PAYMENTS',p.pay,p.ex.pay],['dates','DATES',p.dates,p.ex.dates],['client','CLIENT/FBA',p.client,p.ex.client],['oplan','ORDER PLAN',oplanH,(p.ex.oplan||0)],['shipments','SHIPMENTS',shipH,(p.ex.ship||0)],['documents','DOCUMENTS',docsH,0],['masterdata','MASTER DATA',masterH,(p.ex.master||0)],['landed','LANDED COSTS',p.landed,p.ex.landed],['timeline','TIMELINE',timelineH,p.ex.timeline]];
     function badge(n){ return n>0?' <span class="ex-badge" title="'+n+' exception'+(n>1?'s':'')+' / action'+(n>1?'s':'')+'">'+n+'</span>':''; }
     var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab potab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'" data-po="'+esc(po)+'">'+t[1]+badge(t[3])+'</button>';}).join('')+'</div>';
     var panels=tabs.map(function(t,ti){return '<div class="potab-panel" data-pt="'+t[0]+'"'+(ti===0?'':' style="display:none"')+'>'+t[2]+'</div>';}).join('');
