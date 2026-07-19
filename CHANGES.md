@@ -3,6 +3,26 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.672 - Refactor #9: config showSub() dispatch map (was a 16-branch if/else)
+
+- Replaced the ~530-line `if/else if(CONFIG_SUB===...)` chain in renderConfig.showSub() with a `SUBS{}` dispatch
+  map (one named handler per sub-tab). Handler bodies byte-identical (scripted split on the 16 markers) — pure
+  structural change; verified by syntax + 16 keys + config endpoints 200. No behaviour change.
+
+## v25.671 - Portal: expanded PO row highlights light yellow (row-open), matching the main supply grid.
+
+## v25.670 - Portal: app-version tag in the header (diagnostic to confirm which build a device is running).
+
+## v25.669 - Portal: supplier-action confirm box wraps (text block + button on its own line, box-sizing:border-box);
+removed the "search overrides status" hint and the "N of M purchase orders" count line.
+
+## v25.668 - Portal mobile: Timeline caps every element to one width (border-box/min-width:0/max-width); removed
+the "Status" label before the PO status pills (main portal + admin preview).
+
+## v25.663–667 - Portal mobile layout: sub-tab panels scroll within the viewport (663); expanded detail panel
+flush-left, single `<td colspan=20>` (664); Timeline fits one screen width via overflow-x:hidden + flex min-width:0
++ border-box (665–667). CSS-only.
+
 ## v25.662 - Portal "Amount due" = order value − amount actually paid (unpaid deposit stays owed)
 
 - The portal's Amount due used balance_owing, which nets off the SCHEDULED start-deposit + completion even when
