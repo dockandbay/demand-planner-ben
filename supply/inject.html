@@ -5103,12 +5103,17 @@
                 .catch(function(e){ btn.disabled=false; btn.textContent=o; msg.innerHTML='<span style="color:#b91c1c">Email failed: '+esc(e.message||e)+'</span>'; }); }); }; });
         }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); }
       else if(CONFIG_SUB==='mfgbom'){ b.innerHTML='<div class="count">Loading…</div>';
-        fetch('/api/supply/manufacturing-bom').then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
+        Promise.all([fetch('/api/supply/manufacturing-bom').then(function(r){return r.json();}),
+                     fetch('/api/supply/skus').then(function(r){return r.json();}).catch(function(){return [];})])
+          .then(function(R){ var rows=Array.isArray(R[0])?R[0]:[]; var skus=(Array.isArray(R[1])?R[1]:[]).filter(function(s){return s&&s.sku;});
+          var skuSet={}; skus.forEach(function(s){ skuSet[String(s.sku).trim().toUpperCase()]=1; });
+          function validSku(v){ return !!skuSet[String(v||'').trim().toUpperCase()]; }
+          var skuDl='<datalist id="bomskulist">'+skus.map(function(s){return '<option value="'+esc(s.sku)+'">'+esc(s.name||s.product_name||'')+'</option>';}).join('')+'</datalist>';
           var byP={}; rows.forEach(function(x){(byP[x.parent_sku]=byP[x.parent_sku]||[]).push(x);});
           var parents=Object.keys(byP).sort();
           function bomSave(parent,comp,qty){ return fetch('/api/supply/manufacturing-bom-save',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({parent_sku:parent,component_sku:comp,qty:qty})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); return j; }); }
           function bomDel(parent,comp){ return fetch('/api/supply/manufacturing-bom-delete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({parent_sku:parent,component_sku:comp})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); return j; }); }
-          b.innerHTML='<div class="sect-h">Manufacturing BOM <span class="mut tiny">(finished / bundle product → components × per-unit qty. Edit a qty and Save, add components, delete a row, or delete an entire bundle.)</span></div>'
+          b.innerHTML=skuDl+'<div class="sect-h">Manufacturing BOM <span class="mut tiny">(finished / bundle product → components × per-unit qty. SKUs are picked from the product list. Edit a qty and Save, add components, delete a row, or delete an entire bundle.)</span></div>'
             +(parents.length?parents.map(function(p){ return '<div class="bom-grp" data-parent="'+esc(p)+'" style="margin-bottom:14px;max-width:640px;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px">'
               +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><div style="font-weight:700">'+esc(p)+' <span class="mut tiny" style="font-weight:400">('+byP[p].length+' component'+(byP[p].length===1?'':'s')+')</span></div>'
                 +'<button class="lnk-btn bom-delbundle" style="color:#b91c1c;font-size:11px">🗑 Delete entire bundle</button></div>'
@@ -5116,7 +5121,7 @@
               +byP[p].map(function(x){return '<tr data-comp="'+esc(x.component_sku)+'"><td class="l">'+esc(x.component_sku)+'</td>'
                 +'<td><input type="number" min="0" step="1" class="flt bom-qty" value="'+esc(String(x.qty))+'" data-orig="'+esc(String(x.qty))+'" style="width:80px;text-align:right"></td>'
                 +'<td class="l" style="white-space:nowrap"><button class="lnk-btn bom-save" disabled style="opacity:.4">Save</button> &nbsp;<button class="lnk-btn bom-del" style="color:#b91c1c">Delete</button></td></tr>';}).join('')
-              +'<tr class="bom-addrow" style="background:#f8fafc"><td class="l"><input class="flt bom-ncomp" placeholder="new component SKU…" style="width:190px"></td>'
+              +'<tr class="bom-addrow" style="background:#f8fafc"><td class="l"><input class="flt bom-ncomp" list="bomskulist" placeholder="pick component SKU…" style="width:190px"></td>'
                 +'<td><input type="number" min="0" step="1" class="flt bom-nqty" placeholder="qty" style="width:80px;text-align:right"></td>'
                 +'<td class="l"><button class="lnk-btn bom-add">＋ Add</button></td></tr>'
               +'</tbody></table></div></div>'; }).join('')
@@ -5124,8 +5129,8 @@
             +'<div style="margin-top:8px;max-width:640px;border:1px dashed #cbd5e1;border-radius:8px;padding:10px 12px;background:#f8fafc">'
               +'<div style="font-weight:700;margin-bottom:4px">＋ New bundle</div>'
               +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
-                +'<input class="flt bom-nparent" placeholder="finished / bundle SKU…" style="width:210px">'
-                +'<input class="flt bom-nbcomp" placeholder="first component SKU…" style="width:190px">'
+                +'<input class="flt bom-nparent" list="bomskulist" placeholder="pick finished / bundle SKU…" style="width:210px">'
+                +'<input class="flt bom-nbcomp" list="bomskulist" placeholder="pick first component SKU…" style="width:190px">'
                 +'<input type="number" min="0" step="1" class="flt bom-nbqty" placeholder="qty" style="width:80px;text-align:right">'
                 +'<button class="lnk-btn bom-newbundle">Create bundle</button></div></div>';
           // edit qty → enable Save; Save → upsert
@@ -5138,10 +5143,11 @@
             if(!confirm('Delete the ENTIRE bundle "'+parent+'" and all its components? This cannot be undone.'))return;
             btn.disabled=true; bomDel(parent,'').then(function(){ showSub(); }).catch(function(e){ btn.disabled=false; alert('Could not delete bundle: '+(e.message||e)); }); }; });
           b.querySelectorAll('.bom-add').forEach(function(btn){ btn.onclick=function(){ var tr=btn.closest('tr'), grp=btn.closest('.bom-grp'); var comp=tr.querySelector('.bom-ncomp').value.trim(), qty=Number(tr.querySelector('.bom-nqty').value);
-            if(!comp){alert('Enter a component SKU');return;} if(!(qty>0)){alert('Enter a qty > 0');return;}
+            if(!comp){alert('Enter a component SKU');return;} if(!validSku(comp)){alert('“'+comp+'” isn’t a product SKU — pick one from the list.');return;} if(!(qty>0)){alert('Enter a qty > 0');return;}
             btn.disabled=true; bomSave(grp.dataset.parent,comp,qty).then(function(){ showSub(); }).catch(function(e){ btn.disabled=false; alert('Could not add: '+(e.message||e)); }); }; });
           var nb=b.querySelector('.bom-newbundle'); if(nb)nb.onclick=function(){ var pr=b.querySelector('.bom-nparent').value.trim(), comp=b.querySelector('.bom-nbcomp').value.trim(), qty=Number(b.querySelector('.bom-nbqty').value);
-            if(!pr){alert('Enter a finished / bundle SKU');return;} if(!comp){alert('Enter a first component SKU');return;} if(!(qty>0)){alert('Enter a qty > 0');return;}
+            if(!pr){alert('Enter a finished / bundle SKU');return;} if(!validSku(pr)){alert('“'+pr+'” isn’t a product SKU — pick the finished/bundle SKU from the list.');return;}
+            if(!comp){alert('Enter a first component SKU');return;} if(!validSku(comp)){alert('“'+comp+'” isn’t a product SKU — pick one from the list.');return;} if(!(qty>0)){alert('Enter a qty > 0');return;}
             nb.disabled=true; bomSave(pr,comp,qty).then(function(){ showSub(); }).catch(function(e){ nb.disabled=false; alert('Could not create: '+(e.message||e)); }); };
         }).catch(function(e){ b.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>'; }); }
       else if(CONFIG_SUB==='products'){ b.innerHTML='<div class="count">Loading…</div>';

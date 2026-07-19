@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.636 - Manufacturing BOM: SKUs picked from the product list (not free text)
+
+- The new-component, new-bundle-parent and first-component inputs are now datalist
+  pickers sourced from /api/supply/skus (autocomplete on SKU + product name).
+- Adding a component or creating a bundle now validates the SKU exists in the product
+  list and blocks free-text entries that don't match.
+
 ## v25.635 - Export port: supplier field + shipment override (auto-inherits)
 
 - New supplier field **Export port** (default port of loading) in CONFIG ▸ Suppliers.
