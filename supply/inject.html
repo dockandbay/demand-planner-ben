@@ -298,7 +298,6 @@
 #scenario-root .fm-ov .fm-in{width:28px;min-width:28px}
 #scenario-root .fm-in:focus{outline:none;border-bottom-color:#1d4ed8;color:#1d4ed8;background:#f8fafc}
 #scenario-root .fm-in::placeholder{color:#cbd5e1}
-#scenario-root tr.fm-catrow td{border-top:1px solid #e2e8f0;background:#fafafa}
 #supply-root .count{color:#999;font-size:11px}
 #supply-root .swatch{width:24px;height:24px;border-radius:4px;object-fit:cover;border:1px solid #eee;vertical-align:middle}
 #supply-root .bc-lbl{font-size:10px;font-weight:700;border:1px solid #93c5fd;background:#eff6ff;color:#1d4ed8;border-radius:3px;cursor:pointer;padding:1px 6px;margin-right:3px;font-family:inherit}
@@ -6862,8 +6861,8 @@
       h+='<tr class="total-row"><td class="l" colspan="3">TOTAL</td><td>'+units(t.fba)+'</td><td>'+(awdOn?units(t.awd):'n/a')+'</td><td>'+units(t.three_pl)+'</td><td>'+units(t.total)+'</td></tr>';
       document.getElementById('pd-grid').innerHTML=h+'</tbody></table></div>'; }
     run(); }
-  // FINANCIAL FORECAST MODEL — quarterly FY Mar–Feb, per category × market, % growth + price change on
-  // last-year actuals; persists to planner.financial_model.
+  // FINANCIAL FORECAST MODEL — exec-summary style, subcategory × period, % growth + price change on
+  // last-year actuals; persists via /api/scenario/fin-overlay (planner.scenario_fin_overlay).
   var FIN_FYS=['FY27','FY26'], FIN_COS=['UK','US','EU','AU','CA'];
   function fmInt(v){ return Math.round(Number(v)||0).toLocaleString(); }   // integer £, no decimals
   // ── Financial Forecast Model — EXACT exec-summary look (channel→country rows, YoY badges, year cards)

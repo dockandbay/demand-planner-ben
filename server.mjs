@@ -5292,93 +5292,9 @@ app.post('/api/scenario/b2b', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Financial Forecast Model — quarterly (FY Mar–Feb) per category × market. Returns last-year actual
-// units/revenue per quarter (from category_sales_summary) joined with saved growth/price overrides.
-// FY27 models on FY26 actuals (Mar25–Feb26); FY26 models on FY25 actuals (Mar24–Feb25).
-app.get('/api/scenario/fin-model', async (req, res) => {
-  const fy = (req.query.fy || 'FY27').toUpperCase();
-  const country = (req.query.country || 'UK').toUpperCase();
-  const endYr = 2000 + parseInt(fy.replace('FY', ''), 10);     // FY27 → 2027
-  if (isNaN(endYr)) return res.status(400).json({ error: 'bad fy' });
-  const lyStart = (endYr - 2) + '-03-01';                       // LY = prior FY: Mar (endYr-2)
-  const lyEnd = (endYr - 1) + '-02-01';                         // … through Feb (endYr-1)
-  try {
-    // quarter from month within a Mar-start FY: Mar→Q1 … Dec/Jan/Feb→Q4
-    const ly = await pool.query(`
-      SELECT category,
-        (floor((((extract(month from month)::int + 9) % 12))/3)+1)::int quarter,
-        sum(units)::bigint u, sum(revenue)::numeric r
-      FROM planner.category_sales_summary
-      WHERE upper(country)=$1 AND month >= $2::date AND month <= $3::date AND category IS NOT NULL
-      GROUP BY category, quarter`, [country, lyStart, lyEnd]);
-    const ovr = await pool.query(`SELECT category, quarter, growth_pct, price_change_pct, coalesce(notes,'') notes
-      FROM planner.financial_model WHERE fy=$1 AND country=$2`, [fy, country]);
-    const cats = {};
-    const blank = () => ({ ly: [{u:0,r:0},{u:0,r:0},{u:0,r:0},{u:0,r:0}], ovr: [{growth:null,price:null,notes:''},{growth:null,price:null,notes:''},{growth:null,price:null,notes:''},{growth:null,price:null,notes:''}] });
-    for (const x of ly.rows) { (cats[x.category] || (cats[x.category] = blank())).ly[x.quarter - 1] = { u: Number(x.u), r: Number(x.r) }; }
-    for (const o of ovr.rows) { const c = cats[o.category] || (cats[o.category] = blank()); c.ovr[o.quarter - 1] = { growth: o.growth_pct == null ? null : Number(o.growth_pct), price: o.price_change_pct == null ? null : Number(o.price_change_pct), notes: o.notes }; }
-    const rows = Object.keys(cats).sort().map(cat => ({ category: cat, ly: cats[cat].ly, ovr: cats[cat].ovr }));
-    res.json({ fy, country, ly_label: 'FY' + (endYr - 1).toString().slice(2), rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.post('/api/scenario/fin-model', async (req, res) => {
-  const b = req.body || {};
-  if (!b.fy || !b.category || !b.country || !b.quarter) return res.status(400).json({ error: 'fy, category, country, quarter required' });
-  const num = v => (v === '' || v == null ? null : v);
-  try {
-    await pool.query(`INSERT INTO planner.financial_model (fy,category,country,quarter,growth_pct,price_change_pct,notes)
-      VALUES ($1,$2,$3,$4,$5,$6,$7)
-      ON CONFLICT (fy,category,country,quarter) DO UPDATE SET
-        growth_pct=excluded.growth_pct, price_change_pct=excluded.price_change_pct, notes=excluded.notes, updated_at=now()`,
-      [b.fy, b.category, b.country, b.quarter, num(b.growth_pct), num(b.price_change_pct), b.notes || null]);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-// Import growth % from the demand-plan category forecast: per category × quarter, growth =
-// (this-FY units / last-FY actual units − 1)×100, where this-FY units = actuals where the month has
-// passed, else the saved SKU forecast (forecast_outputs aggregated to category × country × quarter).
-app.post('/api/scenario/fin-model-import', async (req, res) => {
-  const b = req.body || {};
-  const fy = (b.fy || 'FY27').toUpperCase();
-  const country = (b.country || 'UK').toUpperCase();
-  const endYr = 2000 + parseInt(fy.replace('FY', ''), 10);
-  if (isNaN(endYr)) return res.status(400).json({ error: 'bad fy' });
-  const fyStart = (endYr - 1) + '-03-01', fyEnd = endYr + '-02-01';
-  const lyStart = (endYr - 2) + '-03-01', lyEnd = (endYr - 1) + '-02-01';
-  const QEXP = `(floor((((extract(month from month)::int + 9) % 12))/3)+1)::int`;
-  try {
-    const lastAct = (await pool.query(`SELECT max(month) m FROM planner.sales_actuals`)).rows[0].m;
-    const [actThis, fcThis, lyR] = await Promise.all([
-      pool.query(`SELECT category, ${QEXP} quarter, sum(units)::numeric u FROM planner.category_sales_summary
-        WHERE upper(country)=$1 AND month >= $2::date AND month <= $3::date GROUP BY category, quarter`,
-        [country, fyStart, lastAct]),
-      pool.query(`SELECT p.category, (floor((((extract(month from fo.month)::int + 9) % 12))/3)+1)::int quarter, sum(fo.units)::numeric u
-        FROM planner.forecast_outputs fo JOIN planner.products p ON p.sku=fo.sku
-        WHERE upper(split_part(fo.warehouse,'_',1))=$1 AND fo.month > $2::date AND fo.month <= $3::date
-        GROUP BY p.category, quarter`, [country, lastAct, fyEnd]),
-      pool.query(`SELECT category, ${QEXP} quarter, sum(units)::numeric u FROM planner.category_sales_summary
-        WHERE upper(country)=$1 AND month >= $2::date AND month <= $3::date GROUP BY category, quarter`,
-        [country, lyStart, lyEnd]),
-    ]);
-    const thisFY = {}, ly = {};
-    const add = (o, cat, q, u) => { (o[cat] || (o[cat] = [0, 0, 0, 0]))[q - 1] += Number(u); };
-    actThis.rows.forEach(r => add(thisFY, r.category, r.quarter, r.u));
-    fcThis.rows.forEach(r => add(thisFY, r.category, r.quarter, r.u));
-    lyR.rows.forEach(r => add(ly, r.category, r.quarter, r.u));
-    let updated = 0;
-    for (const cat of Object.keys(ly)) {
-      for (let q = 0; q < 4; q++) {
-        const l = ly[cat][q]; if (!(l > 0)) continue;
-        const g = Math.round(((thisFY[cat] || [0,0,0,0])[q] / l - 1) * 100);
-        await pool.query(`INSERT INTO planner.financial_model (fy,category,country,quarter,growth_pct)
-          VALUES ($1,$2,$3,$4,$5) ON CONFLICT (fy,category,country,quarter)
-          DO UPDATE SET growth_pct=excluded.growth_pct, updated_at=now()`, [fy, cat, country, q + 1, g]);
-        updated++;
-      }
-    }
-    res.json({ ok: true, updated });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
+// (Removed dead /api/scenario/fin-model GET/POST/import — old FY×category×quarter model on
+//  planner.financial_model, superseded by fin-overlay below. Code archived in
+//  archive/financial-model-routes.mjs.txt for revert. Table not dropped. v25.653)
 
 // Financial Forecast scenario overlays (exec-summary-style view): growth % + price % per channel × country.
 app.get('/api/scenario/fin-overlay', async (req, res) => {
@@ -7506,38 +7422,7 @@ app.post('/api/portal/dtc-accept', portalAuth, async (req, res) => {
     await pool.query(`UPDATE planner.purchase_orders SET dtc_accepted_at=now(), dtc_accepted_by=$2 WHERE po=$1`, [po, req.portal.email||'supplier']);
     res.json({ ok:true }); } catch(e){ res.status(500).json({ error: e.message }); } });
 
-// Everything the supplier sees — scoped server-side to their supplier(s).
-app.get('/api/portal/data', portalAuth, async (req, res) => {
-  try {
-    const names = req.portal.suppliers, ids = req.portal.supplierIds;
-    const pos = (await pool.query(
-      `SELECT po.po, coalesce(po.status,'') status, coalesce(po.client,'') client, po.shipment_ref,
-              po.supplier_ship_date, po.end_production_overide, po.supplier_invoice_total,
-              coalesce(po.crossdock_skus,'') crossdock_skus, coalesce(po.supplier_name,'') supplier_name,
-              -- the assigned shipment is consolidated under ANOTHER supplier's master PO → supplier needs shipment labels
-              (coalesce(po.shipment_ref,'')<>'' AND coalesce((SELECT m.supplier_name FROM planner.purchase_orders m
-                 WHERE m.po = coalesce((SELECT s.master_po FROM planner.shipments s WHERE s.shipment_ref=po.shipment_ref), po.shipment_ref)),'')
-                 NOT IN ('', coalesce(po.supplier_name,''))) ship_other_supplier
-       FROM planner.purchase_orders po WHERE po.supplier_name = ANY($1) ORDER BY po.po`, [names])).rows;
-    const poList = pos.map(p => p.po);
-    const grab = (sql) => poList.length ? pool.query(sql, [poList]).then(r => r.rows) : Promise.resolve([]);
-    const [lines, lcs, xds, adds, notes, subs, supSkus] = await Promise.all([
-      grab(`SELECT pol.po, pol.sku, pol.qty, pol.cost_price, coalesce(p.product_name_final,p.product_name,'') product_name
-            FROM planner.purchase_order_lines pol LEFT JOIN planner.products p ON p.sku=pol.sku WHERE pol.po = ANY($1) ORDER BY pol.po, pol.sku`),
-      grab(`SELECT po, sku, actual_cost, amended_qty, is_added, final_cost, confirmed_at FROM planner.portal_line_costs WHERE po = ANY($1)`),
-      grab(`SELECT po, sku, qty FROM planner.crossdock_shipments WHERE po = ANY($1)`),
-      grab(`SELECT id, po, coalesce(description,'') description, qty, price FROM planner.portal_additional_costs WHERE po = ANY($1) ORDER BY id`),
-      ids.length ? pool.query(`SELECT id, po, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at FROM planner.supplier_notes WHERE supplier_id = ANY($1) ORDER BY created_at`, [ids]).then(r => r.rows) : Promise.resolve([]),
-      ids.length ? pool.query(`SELECT id, po, kind, value, status, attachment_id, to_char(submitted_at,'YYYY-MM-DD') submitted_at FROM planner.supplier_submissions WHERE supplier_id = ANY($1) ORDER BY submitted_at DESC`, [ids]).then(r => r.rows) : Promise.resolve([]),
-      pool.query(`SELECT sku, coalesce(product_name,'') product_name FROM planner.products WHERE coalesce(sku,'')<>'' AND (${names.map((_, i) => `coalesce(supplier_multiple_all,'') ILIKE '%'||$${i + 1}||'%'`).join(' OR ') || 'false'}) ORDER BY sku`, names).then(r => r.rows).catch(() => []),
-    ]);
-    const by = (rows, k) => rows.reduce((m, r) => { (m[r[k]] = m[r[k]] || []).push(r); return m; }, {});
-    const lcByPo = {}; lcs.forEach(x => { (lcByPo[x.po] = lcByPo[x.po] || {})[x.sku] = x; });
-    const xdByPo = {}; xds.forEach(x => { (xdByPo[x.po] = xdByPo[x.po] || {})[x.sku] = x.qty; });
-    res.json({ suppliers: names, pos, lines: by(lines, 'po'), lineCosts: lcByPo, crossdock: xdByPo,
-      additionalCosts: by(adds, 'po'), notes: by(notes, 'po'), submissions: by(subs, 'po'), supplierSkus: supSkus });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
+// (Removed dead /api/portal/data — old supplier loader, superseded by /api/portal/bootstrap. Zero callers. v25.653)
 
 // Label/barcode assets for the portal (static fonts/logos — same files as the admin asset route).
 app.get('/api/portal/asset/:name', (req, res) => {

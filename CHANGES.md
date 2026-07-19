@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.653 - Remove old Financial Model routes, portal loader, reportPlaceholder
+
+- Removed the old **/api/scenario/fin-model** (GET/POST/import) — FY×category×quarter model on
+  planner.financial_model, superseded by fin-overlay. **Code archived** in
+  archive/financial-model-routes.mjs.txt for revert; the table was NOT dropped.
+  (The SCENARIO ▸ Financial Forecast Model tab is unaffected — it uses fin-overlay.)
+- Removed dead **/api/portal/data** (old supplier loader; portal uses /api/portal/bootstrap).
+- Removed dead **reportPlaceholder** (artifact) + dead **.fm-catrow** CSS (inject) + fixed a
+  stale renderFinModel comment.
+- Diviyaj note: planner.financial_model is now unused (kept for revert) — drop later if desired.
+
 ## v25.652 - Full dead-code sweep (server + both apps)
 
 - **server.mjs**: removed 4 superseded routes (freight-rate/:id, freight-rate-create,

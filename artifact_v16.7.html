@@ -7590,9 +7590,7 @@ function renderReportView(){
   if(REPORT_VIEW==='sa'){ renderStockAvailability(body); mobileFilterCollapse(body); return; }
 }
 // Placeholders until the full reports are built (next phases).
-function reportPlaceholder(body,title,desc){ body.innerHTML='<div style="padding:28px;text-align:center;color:#666">'
-  +'<div style="font-size:15px;font-weight:600;color:#333;margin-bottom:6px">'+title+'</div>'
-  +'<div style="font-size:12px;max-width:560px;margin:0 auto">'+desc+'</div></div>'; }
+// (Removed dead reportPlaceholder — a centred title/desc stub for unbuilt report tabs, never called. v25.653)
 function smPills(name,opts){ return opts.map(function(o){var on=(o[0]===SM[name]); return '<button class="view-toggle sm-'+name+(on?' active':'')+'"'+(on?' style="background:#000;color:#fff;border-color:#000;font-weight:700"':'')+' data-v="'+o[0]+'">'+o[1]+'</button>';}).join(''); }
 function renderSlowMovingReport(body){
   var draw=function(rows){
