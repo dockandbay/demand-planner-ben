@@ -495,15 +495,10 @@
      them shrink so long note text wraps instead. Inline min-width (e.g. the 78px control column) still wins.
      Order-plan etc. keep overflow-x:auto for their wide tables. */
   #supply-root .pptab-panel[data-pt="timeline"]{overflow-x:hidden}
-  /* box-sizing:border-box so a padded box (the yellow "Please confirm" / "Production status" boxes have
-     padding:8px 11px) stays within 100% instead of overflowing by its padding and getting clipped. */
-  #supply-root .pptab-panel[data-pt="timeline"] div{max-width:100%;min-width:0;box-sizing:border-box}
-  #supply-root .pptab-panel[data-pt="timeline"] select,
-  #supply-root .pptab-panel[data-pt="timeline"] input,
-  #supply-root .pptab-panel[data-pt="timeline"] textarea{max-width:100%;box-sizing:border-box}
-  #supply-root .pptab-panel[data-pt="timeline"] div,
-  #supply-root .pptab-panel[data-pt="timeline"] span,
-  #supply-root .pptab-panel[data-pt="timeline"] textarea{overflow-wrap:anywhere}
+  /* Fit-to-one-width for EVERY element in the Timeline: cap at the panel width, border-box so padding is internal
+     (the yellow "Please confirm" / "Production status" boxes have padding:8px 11px), min-width:0 so flex items
+     shrink, and wrap long words. Inline min-width (e.g. the 78px note control column) still wins. */
+  #supply-root .pptab-panel[data-pt="timeline"] *{max-width:100%;min-width:0;box-sizing:border-box;overflow-wrap:anywhere}
   /* stop iOS inflating large text; trim oversized headings */
   #supply-root .sect-h{font-size:11px}
   #supply-root .ppx-h{font-size:12px}
@@ -1502,7 +1497,6 @@
               +_fSel('pp-po-ctry',PORTAL_PO_CTRY,'All countries',_ctrys)
               +_fSel('pp-po-br',PORTAL_PO_BR,'All branches',_brs)
               +'<span class="pill'+(PORTAL_PO_EXC?' active':'')+'" data-poexc="1" style="'+(PORTAL_PO_EXC?'background:#dc2626;color:#fff;border-color:#dc2626':'color:#dc2626')+'" title="show every PO with an open action, across all statuses">⚠ Show all exceptions</span>'
-              +'<span class="pill-lbl">Status</span>'
               +(ordered.length?ordered.map(function(s){var dim=(pq||PORTAL_PO_EXC);return '<span class="pill'+(PORTAL_PO_ST[s]?' active':'')+(dim?' ':'')+'" data-st="'+esc(s)+'"'+(dim?' style="opacity:.4"':'')+'>'+esc(s)+'</span>';}).join(''):'<span class="mut tiny">no orders</span>')
               +(pq?'<span class="mut tiny">search overrides status</span>':(PORTAL_PO_EXC?'<span class="mut tiny">showing exceptions — all statuses</span>':''))+'</div>';
             // a PO/client search OVERRIDES the status pills; the dropdown filters (production / country / branch) always AND on top
