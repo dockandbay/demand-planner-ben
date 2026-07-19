@@ -110,6 +110,7 @@
 #supply-root #shipdrawer-bg.open,#supply-root #podrawer-bg.open{background:rgba(15,23,42,.32)}
 #supply-root #shipdrawer,#supply-root #podrawer{position:absolute;top:0;right:0;height:100%;width:min(920px,94vw);background:#fff;box-shadow:-8px 0 28px rgba(15,23,42,.18);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1)}
 #supply-root #shipdrawer-bg.open #shipdrawer,#supply-root #podrawer-bg.open #podrawer{transform:translateX(0)}
+#supply-root #podrawer-bg{z-index:100002}   /* above the consolidation modal (z100001) so a PO opened from it is visible */
 #supply-root .shipdrawer-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 18px;border-bottom:1px solid #e6ebf2;background:#f8fafc;flex:0 0 auto}
 #supply-root .shipdrawer-title{font-size:15px;font-weight:700;color:#0f172a}
 #supply-root .shipdrawer-x{background:transparent;border:none;font-size:18px;line-height:1;cursor:pointer;color:#64748b;padding:4px 8px;font-family:inherit}
@@ -1441,10 +1442,10 @@
       h+='<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">';
       h+='<table class="consol-tbl" style="width:100%;min-width:660px;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;border-bottom:1px solid #e2e8f0">'
         +'<th style="padding:4px 6px"><input type="checkbox" id="consol-all"></th><th style="padding:4px 6px">PO</th><th style="padding:4px 6px">Pallets</th><th style="padding:4px 6px">Prod</th><th style="padding:4px 6px">Supplier</th><th style="padding:4px 6px">Client</th><th style="padding:4px 6px">Completes</th><th style="padding:4px 6px">Δ days</th><th style="padding:4px 6px">Current shipment</th></tr></thead><tbody>';
-      h+='<tr class="anchor"><td style="padding:4px 6px"><input type="checkbox" checked disabled></td><td style="padding:4px 6px;white-space:nowrap"><b>'+esc(A.po)+'</b> <span class="mut tiny">anchor</span></td>'+palCell(A.pallets,true)+'<td style="padding:4px 6px">'+(A.prod_no?'P'+esc(A.prod_no):'')+'</td><td style="padding:4px 6px">'+esc(A.supplier||'')+'</td><td style="padding:4px 6px">'+esc(A.client||'')+'</td><td style="padding:4px 6px;white-space:nowrap">'+esc(cdate(A.completion))+'</td><td style="padding:4px 6px">0</td><td style="padding:4px 6px">'+esc(A.shipment_ref||'—')+'</td></tr>';
+      h+='<tr class="anchor"><td style="padding:4px 6px"><input type="checkbox" checked disabled></td><td style="padding:4px 6px;white-space:nowrap"><b class="consol-po" data-po="'+esc(A.po)+'" style="color:#1d4ed8;cursor:pointer" title="open '+esc(A.po)+' in a popout">'+esc(A.po)+'</b> <span class="mut tiny">anchor</span></td>'+palCell(A.pallets,true)+'<td style="padding:4px 6px">'+(A.prod_no?'P'+esc(A.prod_no):'')+'</td><td style="padding:4px 6px">'+esc(A.supplier||'')+'</td><td style="padding:4px 6px">'+esc(A.client||'')+'</td><td style="padding:4px 6px;white-space:nowrap">'+esc(cdate(A.completion))+'</td><td style="padding:4px 6px">0</td><td style="padding:4px 6px">'+esc(A.shipment_ref||'—')+'</td></tr>';
       cs.forEach(function(c){ var dd=c.delta_days;
         h+='<tr><td style="padding:4px 6px"><input type="checkbox" class="consol-ck" data-po="'+esc(c.po)+'" data-pal="'+(c.pallets||0)+'"'+(rec[c.po]?' checked':'')+'></td>'
-          +'<td style="padding:4px 6px;white-space:nowrap">'+esc(c.po)+'</td>'+palCell(c.pallets,false)+'<td style="padding:4px 6px">'+(c.prod_no?'P'+esc(c.prod_no):'')+'</td><td style="padding:4px 6px">'+esc(c.supplier||'')+'</td><td style="padding:4px 6px">'+esc(c.client||'')+'</td>'
+          +'<td style="padding:4px 6px;white-space:nowrap"><span class="consol-po" data-po="'+esc(c.po)+'" style="color:#1d4ed8;cursor:pointer;font-weight:600" title="open '+esc(c.po)+' in a popout">'+esc(c.po)+'</span></td>'+palCell(c.pallets,false)+'<td style="padding:4px 6px">'+(c.prod_no?'P'+esc(c.prod_no):'')+'</td><td style="padding:4px 6px">'+esc(c.supplier||'')+'</td><td style="padding:4px 6px">'+esc(c.client||'')+'</td>'
           +'<td style="padding:4px 6px;white-space:nowrap">'+esc(cdate(c.completion))+'</td><td style="padding:4px 6px">'+(dd>0?'+':'')+dd+'</td>'
           +'<td style="padding:4px 6px">'+(c.shipment_ref?esc(c.shipment_ref)+(c.is_master?' <span class="mut tiny">(master)</span>':''):'<span class="mut tiny">unassigned</span>')+'</td></tr>';
       });
@@ -1454,6 +1455,7 @@
         +'<div id="consol-tot" style="font-size:12px"></div><span style="margin-left:auto"></span>'
         +'<button class="save-btn light" id="consol-cancel">Cancel</button><button class="save-btn dark" id="consol-go" style="margin-left:6px">Assign to shipment</button></div>';
       body.innerHTML=h;
+      body.querySelectorAll('.consol-po').forEach(function(el){ el.onclick=function(ev){ ev.stopPropagation(); openPODrawer(el.dataset.po,'dates'); }; });   // PO → popout drawer (over the modal)
       function totals(){ var t=A.pallets||0, n=1; body.querySelectorAll('.consol-ck').forEach(function(ck){ if(ck.checked){ t+=Number(ck.dataset.pal)||0; n++; } }); t=Math.round(t*10)/10;
         document.getElementById('consol-tot').innerHTML='<b>'+n+'</b> POs · <b>'+t+'</b> pallets — '+planTxt(t); }
       body.querySelectorAll('.consol-ck').forEach(function(ck){ ck.onchange=totals; });

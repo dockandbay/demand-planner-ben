@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.644 - Consolidation panel: PO numbers open the popout PO drawer
+
+- In the "Analyse consolidation" panel, the anchor + candidate PO numbers are now clickable
+  and open the reusable PO popout drawer (raised above the modal so it's visible). Clicking
+  the PO text doesn't toggle its row checkbox.
+
 ## v25.643 - Cash flow report: Email button next to CSV (All transactions + Stock arrivals)
 
 - Added a ✉ Email button beside the ⬇ CSV download for both All transactions and Stock
