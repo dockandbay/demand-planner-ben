@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.627 - Auto Forecast: coded transaction reference + group by supplier
+
+- Transaction-detail Reference is now a code: **FC-<country>-<order-month-num>-<supplier
+  code>** (e.g. FC-US-01-XR). Supplier code from planner.suppliers.code (falls back to a
+  3-letter name slug if a supplier has no code).
+- Forecast now aggregates **1 row per supplier**, not per subcategory:
+  - "Units to order" table is a single Supplier column (summed across subcats + markets).
+  - Transaction rows are deduped per supplier: one row per reference|type|month
+    (amounts summed).
+
 ## v25.626 - Auto Forecast: split Copy into Copy (USD) / Copy (GBP)
 
 - Payments plan toolbar now has separate **Copy (USD)** and **Copy (GBP)** buttons

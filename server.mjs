@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.626';
+const APP_VERSION = 'v25.627';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -5469,12 +5469,13 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
     const allMonths=[]; { let m=dataMin; while(m<=dataMax){ allMonths.push(m); m=afAddMonths(m,1); } }
     const leadCol={uk:'china_to_uk_lead_time_weeks',us:'china_to_us_lead_time_weeks',eu:'china_to_eu_lead_time_weeks',au:'china_to_au_lead_time_weeks'};
     // one combined pass per market then aggregate the output tables
-    const unitsBy={}, supplierBy={};                       // subcat -> {month->units, total}, subcat->supplier
+    const unitsBy={};                                     // supplier -> {month->units, total}
     const pay={deposit:{},completion:{},balance:{},freight:{}}; // bucket -> month -> amount
     const addPay=(b,mo,v)=>{ if(win.indexOf(mo)<0||!(v>0))return; (pay[b][mo]=(pay[b][mo]||0)+v); };
-    const txns=[];   // transaction-level detail (mirrors the win-window/>0 filter used for the summary)
-    const addTxn=(ref,type,mo,v,mk2,sup)=>{ if(win.indexOf(mo)<0||!(v>0))return;
-      txns.push({reference:ref, type, amount_usd:Math.round(v*100)/100, date:mo+'-01', country:(mk2||'').toUpperCase(), supplier:sup||'—', month:mo}); };
+    const txMap={};  // transaction detail, aggregated 1 row per supplier: key = reference|type|month
+    const addTxn=(ref,type,mo,v,mk2,sup)=>{ if(win.indexOf(mo)<0||!(v>0))return; const k=ref+'|'+type+'|'+mo;
+      if(!txMap[k])txMap[k]={reference:ref, type, amount_usd:0, date:mo+'-01', country:(mk2||'').toUpperCase(), supplier:sup||'—', month:mo};
+      txMap[k].amount_usd+=v; };
     let truncated=false;
     for(const mk of markets){
       const lc=leadCol[mk];
@@ -5503,7 +5504,7 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
           JOIN planner.products pr ON pr.sku=l.sku
           WHERE pr.subcategory IS NOT NULL AND coalesce(po.supplier_name,'')<>'' GROUP BY 1,2) q WHERE rn=1`)).rows
         .forEach(r=> supName[r.s]=r.nm);
-      const terms=(await pool.query(`SELECT name,start_deposit_pct,completion_pct,balance_pct,production_days,credit_days FROM planner.suppliers`)).rows
+      const terms=(await pool.query(`SELECT name,code,start_deposit_pct,completion_pct,balance_pct,production_days,credit_days FROM planner.suppliers`)).rows
         .reduce((a,t)=>{a[t.name]=t;return a;},{});
       for(const s of Object.keys(demand)){
         const lm=leadM[s]||2, c=unitCost[s]||0, nm=supName[s]||'—';
@@ -5517,7 +5518,7 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
           if(arrive<=0) continue;
           const om=afAddMonths(m,-lm);                       // order month
           if(win.indexOf(om)>=0){
-            const u=unitsBy[s]||(unitsBy[s]={t:0}); u[om]=(u[om]||0)+arrive; u.t+=arrive; supplierBy[s]=nm;
+            const u=unitsBy[nm]||(unitsBy[nm]={t:0}); u[om]=(u[om]||0)+arrive; u.t+=arrive;   // 1 row per supplier (summed across subcats + markets)
           } else if(om<win[0]) { /* ordered already / in past — skip display */ }
           else truncated=true;
           const val=arrive*c;
@@ -5528,7 +5529,9 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
           addPay('completion', _comM, _com);
           addPay('balance', _balM, _bal);
           addPay('freight', m, _frt);
-          const _ref=s+' · ord '+om;   // projected order = subcategory + order month (ties its 4 payment legs together)
+          // reference code: FC-<COUNTRY>-<order-month-num>-<supplier code>  (e.g. FC-US-01-XR)
+          const _sc=(t.code||'').trim()||nm.replace(/[^A-Za-z0-9]/g,'').slice(0,3).toUpperCase()||'??';
+          const _ref='FC-'+mk.toUpperCase()+'-'+(om.split('-')[1]||'')+'-'+_sc;
           addTxn(_ref,'Starting deposit',om,_dep,mk,nm);
           addTxn(_ref,'Completion deposit',_comM,_com,mk,nm);
           addTxn(_ref,'Balance payment',_balM,_bal,mk,nm);
@@ -5536,11 +5539,12 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
         }
       }
     }
-    const unitRows=Object.keys(unitsBy).filter(s=>unitsBy[s].t>0).sort().map(s=>({
-      subcat:s, supplier:supplierBy[s]||'—', months:win.map(m=>Math.round(unitsBy[s][m]||0)), total:Math.round(unitsBy[s].t) }));
+    const unitRows=Object.keys(unitsBy).filter(nm=>unitsBy[nm].t>0).sort().map(nm=>({
+      supplier:nm, months:win.map(m=>Math.round(unitsBy[nm][m]||0)), total:Math.round(unitsBy[nm].t) }));
     const payRow=b=>win.map(m=>Math.round(pay[b][m]||0));
     const dep=payRow('deposit'),comp=payRow('completion'),bal=payRow('balance'),frt=payRow('freight');
     const total=win.map((m,i)=>dep[i]+comp[i]+bal[i]+frt[i]);
+    const txns=Object.values(txMap).map(t=>({...t, amount_usd:Math.round(t.amount_usd*100)/100}));
     txns.sort((a,b)=> a.date<b.date?-1 : a.date>b.date?1 : (a.reference<b.reference?-1 : a.reference>b.reference?1 : 0));
     res.json({ months:win, units:unitRows,
       payments:{deposit:dep,completion:comp,balance:bal,freight:frt,total},

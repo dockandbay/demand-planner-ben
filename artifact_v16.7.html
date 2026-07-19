@@ -7894,18 +7894,18 @@ function renderAutoForecastReport(body){
     if(!d||d.error){ content.innerHTML='<div style="color:#b91c1c">Could not load: '+((d&&d.error)||'no response')+'</div>'; return; }
     var mo=d.months, th=mo.map(function(m){return '<th style="text-align:right;padding:4px 6px;font-size:10px;white-space:nowrap">'+afMonthLabel(m)+'</th>';}).join('');
     // Units to order
-    var u='<div style="font-weight:700;font-size:13px;margin:6px 0 4px">Units to order — by subcategory · primary supplier</div>'
+    var u='<div style="font-weight:700;font-size:13px;margin:6px 0 4px">Units to order — by supplier</div>'
       +'<div style="overflow-x:auto"><table class="tw" style="font-size:11px;min-width:900px"><thead><tr>'
-      +'<th style="text-align:left;padding:4px 6px">Subcategory</th><th style="text-align:left;padding:4px 6px">Supplier</th>'
+      +'<th style="text-align:left;padding:4px 6px">Supplier</th>'
       +th+'<th style="text-align:right;padding:4px 6px;border-left:2px solid #ccc">12-mo</th></tr></thead><tbody>';
     var colTot=mo.map(function(){return 0;}), grand=0;
     d.units.forEach(function(r){
-      u+='<tr><td style="padding:3px 6px;font-weight:600">'+r.subcat+'</td><td style="padding:3px 6px;color:#666">'+r.supplier+'</td>'
+      u+='<tr><td style="padding:3px 6px;font-weight:600">'+r.supplier+'</td>'
         +r.months.map(function(v,i){ colTot[i]+=v; return '<td style="text-align:right;padding:3px 6px;color:'+(v?'#111':'#ddd')+'">'+(v?v.toLocaleString():'–')+'</td>';}).join('')
         +'<td style="text-align:right;padding:3px 6px;font-weight:700;border-left:2px solid #ccc">'+r.total.toLocaleString()+'</td></tr>';
       grand+=r.total;
     });
-    u+='<tr style="border-top:2px solid #999;font-weight:700;background:#fafafa"><td style="padding:4px 6px" colspan="2">TOTAL UNITS</td>'
+    u+='<tr style="border-top:2px solid #999;font-weight:700;background:#fafafa"><td style="padding:4px 6px">TOTAL UNITS</td>'
       +colTot.map(function(v){return '<td style="text-align:right;padding:4px 6px">'+(v?v.toLocaleString():'–')+'</td>';}).join('')
       +'<td style="text-align:right;padding:4px 6px;border-left:2px solid #ccc">'+grand.toLocaleString()+'</td></tr></tbody></table></div>';
     // Payments plan — whole numbers (not 174k), with a matching GBP summary + CSV/copy export.
