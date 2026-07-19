@@ -56,6 +56,8 @@
 #supply-root #po-prog .pill,#supply-root #po-act .pill,#supply-root #po-ctry .pill{padding:2px 7px}
 /* level-3 sub-navs (REPORTS, CONFIG): underline tabs like the level-1/2 menus, in light blue */
 #supply-root #rep-subnav,#supply-root #config-subs,#supply-root #prod-subtabs,#supply-root .po-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 12px}
+/* non-clickable "Supply chain" group heading inside the CONFIG sub-nav: a small divider + label preceding its member tabs */
+#supply-root #config-subs .cs-group{display:inline-flex;align-items:center;margin-left:6px;padding:2px 8px 2px 10px;border-left:2px solid #bfdbfe;color:#1e40af;font-size:10px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;cursor:default;user-select:none}
 /* keep each tab's label + its action-count badge on one line (never wrap the badge below the header) */
 #supply-root #prod-subtabs .rtab,#supply-root .po-subnav .rtab{white-space:nowrap}
 #supply-root #prod-subtabs .rtab .ex-badge,#supply-root .po-subnav .rtab .ex-badge{display:inline-block;vertical-align:middle}
@@ -4369,7 +4371,10 @@
     if(!el){ el=document.createElement('div'); el.id='perm-banner'; el.style.cssText='background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:7px 12px;border-radius:6px;margin:0 0 10px;font-size:12px;font-weight:700'; var content=document.getElementById('supply-content'); root.insertBefore(el, content||root.firstChild); }
     el.style.display='block'; el.textContent='👁 Read-only access — you don’t have '+(inConfig?'CONFIG':'SUPPLY')+' edit rights here. Edits are rejected; ask an admin (CONFIG ▸ Permissions).'; }
   function renderConfig(d){ var c=document.getElementById('supply-content'); var sizes=d.sizes||[];
-    var SUBS=[['general','General settings'],['portalusers','Portal users'],['portal','Portal'],['tax','Import tax'],['freight','Freight rates'],['duty','Import duty'],['branches','Branches'],['consignees','Consignees'],['suppliers','Suppliers'],['keyaccounts','Key accounts'],['batches','Batches'],['productions','Productions'],['products','Products'],['mfgbom','Manufacturing BOM'],['forecast-export','Exports & uploads']];
+    // top-level tabs first, then a contiguous "Supply chain" group (rendered under a non-clickable heading chip)
+    var SC_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom'];
+    var SUBS=[['general','General settings'],['portalusers','Portal users'],['portal','Portal'],['keyaccounts','Key accounts'],['products','Products'],['forecast-export','Exports & uploads'],
+      ['duty','Import duty'],['freight','Freight rates'],['tax','Import tax'],['suppliers','Suppliers'],['branches','Branches'],['consignees','Consignees'],['batches','Batches'],['productions','Productions'],['mfgbom','Manufacturing BOM']];
     if(ME&&ME.is_admin)SUBS=SUBS.concat([['permissions','Permissions']]);   // admin-only tab
     if(CONFIG_SUB==='permissions'&&!(ME&&ME.is_admin))CONFIG_SUB='tax';   // guard: non-admins can't land on Permissions
     function reload(){ delete cache['config']; selectSection('config'); }   // refresh after a rate add (keeps sub-tab)
@@ -4639,7 +4644,7 @@
       // width:max-content overrides the #supply-root table{width:100%} so the table sizes to its columns and scrolls wide
       return '<div class="tw" style="max-height:68vh;overflow:auto"><table style="font-size:11px;border-collapse:separate;border-spacing:0;width:max-content"><thead>'+head+'</thead><tbody>'+body+'</tbody></table></div>'; }
     c.innerHTML=annot('config')+dl('szlist',sizes)
-      +'<div id="config-subs">'+SUBS.map(function(s){return '<span class="rtab'+(s[0]===CONFIG_SUB?' active':'')+'" data-cs="'+s[0]+'">'+esc(s[1])+'</span>';}).join('')+'</div>'
+      +'<div id="config-subs">'+SUBS.map(function(s){var pre=(s[0]===SC_KEYS[0]?'<span class="cs-group">Supply chain</span>':'');return pre+'<span class="rtab'+(s[0]===CONFIG_SUB?' active':'')+'" data-cs="'+s[0]+'">'+esc(s[1])+'</span>';}).join('')+'</div>'
       +'<div id="config-body"><div class="count">Loading…</div></div>';
     c.querySelectorAll('#config-subs .rtab').forEach(function(p){p.onclick=function(){CONFIG_SUB=p.dataset.cs;syncHash();c.querySelectorAll('#config-subs .rtab').forEach(function(x){x.classList.toggle('active',x===p);});showSub();};});
     function showSub(){ var b=document.getElementById('config-body');

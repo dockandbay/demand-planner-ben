@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.622 - Config: "Supply chain" grouped heading in the sub-nav
+
+- The CONFIG sub-nav now groups the operational config tabs under a non-clickable
+  **Supply chain** heading chip: Import duty, Freight rates, Import tax, Suppliers,
+  Branches, Consignees, Batches, Productions, Manufacturing BOM.
+- Top-level tabs (General settings, Portal users, Portal, Key accounts, Products,
+  Exports & uploads, and admin-only Permissions) stay ungrouped before it.
+- Pure UI reorder — no behaviour, endpoint, or schema change. Heading is a styled
+  `.cs-group` span (left divider + uppercase label); it is not a `.rtab` so it's
+  inert on click.
+
 ## v25.621 - Config: "Exports & uploads" tab + email-export buttons for 3 reports
 
 - Renamed the config tab "Forecast export" → "Exports & uploads".
