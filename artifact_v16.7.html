@@ -7814,7 +7814,7 @@ function renderAutoForecastReport(body){
   body.querySelectorAll('.af-num').forEach(function(el){ el.onchange=function(){ var v=el.value.trim(); if(el.dataset.k==='cover') AF_COVER=Math.max(1,Math.min(12,Number(v)||2)); else AF_FREIGHT=Math.max(0,Number(v)||0); renderAutoForecastReport(body); }; });
   var content=body.querySelector('#af-content');
   var draw=function(d){
-    if(!d||d.error){ content.innerHTML='<div style="color:#b91c1c">Could not load: '+((d&&d.error)||'no response')+'</div>'; return; }
+    if(!d||d.error||!d.months||!d.payments||!d.assumptions){ content.innerHTML='<div style="color:#b91c1c">Could not load: '+((d&&d.error)||'incomplete response')+'</div>'; return; }
     var mo=d.months, th=mo.map(function(m){return '<th style="text-align:right;padding:4px 6px;font-size:10px;white-space:nowrap">'+afMonthLabel(m)+'</th>';}).join('');
     // Units to order
     var u='<div style="font-weight:700;font-size:13px;margin:6px 0 4px">Units to order — by supplier</div>'
@@ -7894,7 +7894,7 @@ function renderKeyArrivalsReport(body){
   var UC={critical:'#b91c1c',tight:'#ea580c',ok:'#15803d',none:'#9ca3af'};
   var UL={critical:'CRITICAL',tight:'tight',ok:'ok',none:'n/a'};
   var draw=function(d){
-    if(!d||d.error){ body.querySelector('#ka-content').innerHTML='<div style="color:#b91c1c">Could not load: '+((d&&d.error)||'no response')+'</div>'; return; }
+    if(!d||d.error||!Array.isArray(d.arrivals)){ body.querySelector('#ka-content').innerHTML='<div style="color:#b91c1c">Could not load: '+((d&&d.error)||'incomplete response')+'</div>'; return; }
     var WK=[['1','1 wk'],['2','2 wk'],['4','4 wk'],['all','All upcoming']];
     var MK=[['all','All'],['uk','UK'],['us','US'],['eu','EU'],['au','AU']];
     var RK=[['critical','Critical'],['tight','Tight'],['all','All']];

@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.655 - Auto Forecast / Key Arrivals: guard against partial API responses (bug fix)
+
+- draw() now bails to an error message if the response is missing months/payments/assumptions
+  (AF) or arrivals (Key Arrivals), instead of throwing and leaving the panel on "Loading…".
+
 ## v25.654 - Fix supplier-portal payment figures to match admin (bug fix)
 
 - The portal (POS_SQL_PORTAL) showed different payment figures than the admin view. Three fixes:
