@@ -4723,7 +4723,9 @@
         syncHash(); drawNav(); showSub(); };}); }
     drawNav();
     function showSub(){ var b=document.getElementById('config-body');
-      if(CONFIG_SUB==='general'){ b.innerHTML='<div class="count">Loading…</div>';
+      // CONFIG sub-tabs: a dispatch map (one handler per sub) instead of a 16-branch if/else chain.
+      var SUBS={};
+      SUBS['general']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/app-settings').then(function(r){return r.json();}).then(function(s){ s=s||{};
           var FIELDS=[['escalation_supply_chain','Supply chain','Default recipients for escalations (any PO/shipment that isn’t Direct-to-Client).'],
             ['escalation_dtc','Direct to Client','Used when the PO branch is Direct to Client / JLEW / NEXT.'],
@@ -4741,23 +4743,23 @@
             fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:inp.dataset.key,value:inp.value})})
               .then(function(r){return r.json();}).then(function(j){ inp.style.borderColor=(j&&j.error)?'#dc2626':'#16a34a'; setTimeout(function(){inp.style.borderColor='';},900); })
               .catch(function(){ inp.style.borderColor='#dc2626'; }); }; });
-        }).catch(function(e){ b.innerHTML='<div class="count" style="color:#dc2626">'+esc(String(e))+'</div>'; }); }
-      else if(CONFIG_SUB==='tax'){ b.innerHTML=taxTbl(); bindEdits(); }
-      else if(CONFIG_SUB==='freight'){ b.innerHTML=frTbl(); bindEdits();   // bindEdits wires the air-tier rate inputs (.fci)
+        }).catch(function(e){ b.innerHTML='<div class="count" style="color:#dc2626">'+esc(String(e))+'</div>'; }); };
+      SUBS['tax']=function(){ b.innerHTML=taxTbl(); bindEdits(); };
+      SUBS['freight']=function(){ b.innerHTML=frTbl(); bindEdits();   // bindEdits wires the air-tier rate inputs (.fci)
         b.querySelectorAll('.fr-cell').forEach(function(inp){ inp.onchange=function(){ var v=inp.value.trim().replace(/[$,\s]/g,''); inp.style.borderColor='#d0d0d0';
           fetch('/api/supply/freight-upsert',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({destination:inp.dataset.country,container_size:inp.dataset.sz,cost:v})})
             .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw 0; inp.style.borderColor='#16a34a'; delete cache['config']; invalidateDerived(); }).catch(function(){ inp.style.borderColor='#dc2626'; }); }; });
         b.querySelectorAll('.fr-pal').forEach(function(inp){ inp.onchange=function(){ var v=inp.value.trim().replace(/[^0-9]/g,''); inp.style.borderColor='#d0d0d0';
           fetch('/api/supply/freight-pallets',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({container_size:inp.dataset.sz,pallets:v})})
             .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw 0; inp.style.borderColor='#16a34a'; delete cache['config']; invalidateDerived(); }).catch(function(){ inp.style.borderColor='#dc2626'; }); }; });
-        document.getElementById('fr-addsz').onclick=function(){ var nm=prompt('New container size (e.g. 45HC):'); if(!nm||!nm.trim())return; shipPost('/api/supply/freight-upsert',{destination:'UK',container_size:nm.trim(),cost:''},reload); }; }
-      else if(CONFIG_SUB==='duty'){ b.innerHTML=dtTbl();
+        document.getElementById('fr-addsz').onclick=function(){ var nm=prompt('New container size (e.g. 45HC):'); if(!nm||!nm.trim())return; shipPost('/api/supply/freight-upsert',{destination:'UK',container_size:nm.trim(),cost:''},reload); }; };
+      SUBS['duty']=function(){ b.innerHTML=dtTbl();
         b.querySelectorAll('.duty-cell').forEach(function(inp){ inp.onchange=function(){ var v=inp.value.trim().replace(/[%\s]/g,''); inp.style.borderColor='#d0d0d0';
           fetch('/api/supply/duty-upsert',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({category:inp.dataset.cat,country:inp.dataset.country,duty_pct:v})})
             .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw 0; inp.style.borderColor='#16a34a'; delete cache['config']; invalidateDerived(); }).catch(function(){ inp.style.borderColor='#dc2626'; }); }; });
-        document.getElementById('dt-addcat').onclick=function(){ var nm=prompt('New category name:'); if(!nm||!nm.trim())return; shipPost('/api/supply/duty-upsert',{category:nm.trim(),country:'UK',duty_pct:''},reload); }; }
-      else if(CONFIG_SUB==='branches'){ b.innerHTML=brTbl(); bindEdits(); }
-      else if(CONFIG_SUB==='suppliers'){ b.innerHTML='<div class="count">Loading…</div>';
+        document.getElementById('dt-addcat').onclick=function(){ var nm=prompt('New category name:'); if(!nm||!nm.trim())return; shipPost('/api/supply/duty-upsert',{category:nm.trim(),country:'UK',duty_pct:''},reload); }; };
+      SUBS['branches']=function(){ b.innerHTML=brTbl(); bindEdits(); };
+      SUBS['suppliers']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/suppliers').then(function(r){return r.json();}).then(function(rows){
           // Suppliers have ~13 fields (identity + payment terms + contact) — a scannable CARD LIST + a grouped
           // full-width EDIT FORM, via the shared cardEditor(). The %-sum live indicator is a wireEdit hook.
@@ -4849,8 +4851,8 @@
               b.querySelectorAll('.sup-in[data-f="start_deposit_pct"],.sup-in[data-f="completion_pct"],.sup-in[data-f="balance_pct"]').forEach(function(i){ i.oninput=updPctSum; }); },
             wireList:function(){ var nb=document.getElementById('sup-new'); if(nb)nb.onclick=function(){ var nm=prompt('New supplier name:'); if(!nm||!nm.trim())return; var cd=prompt('Supplier code (2 letters, optional):')||'';
               shipPost('/api/supply/supplier-create',{name:nm.trim(),code:cd.trim()||null},showSub); }; } });
-        }); }
-      else if(CONFIG_SUB==='keyaccounts'){ b.innerHTML='<div class="count">Loading…</div>';
+        }); };
+      SUBS['keyaccounts']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/key-accounts').then(function(r){return r.json();}).then(function(rows){
           // Key accounts have ~15 fields (address, requirements + 5 pack/label toggles each with notes) — a scannable
           // CARD LIST + a grouped full-width EDIT FORM (one row at a time), via the shared cardEditor().
@@ -4920,17 +4922,17 @@
                   for(var i=rows.length-1;i>=0;i--){ if(String(rows[i].id)===String(btn.dataset.k))rows.splice(i,1); } invalidateDerived(); api.draw(); })
                   .catch(function(e){ btn.disabled=false; btn.textContent='Delete'; alert('Delete failed: '+(e&&e.message||e)); }); }; });
             } });
-        }); }
-      else if(CONFIG_SUB==='batches'){ b.innerHTML='<div class="count">Loading…</div>';
+        }); };
+      SUBS['batches']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/batches').then(function(r){return r.json();}).then(function(rows){ b.innerHTML=batchTbl(rows); bindEdits();
           document.getElementById('batch-new').onclick=function(){ var nm=prompt('New batch name:'); if(!nm||!nm.trim())return;
-            shipPost('/api/supply/batch-create',{batch:nm.trim()},showSub); }; }); }
-      else if(CONFIG_SUB==='productions'){ b.innerHTML='<div class="count">Loading…</div>';
+            shipPost('/api/supply/batch-create',{batch:nm.trim()},showSub); }; }); };
+      SUBS['productions']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/prod-numbers').then(function(r){return r.json();}).then(function(rows){ b.innerHTML=prodNumTbl(rows);
           wireEditTbl('productions', function(k){return '/api/supply/prod-number/'+k;}, showSub);
           document.getElementById('prod-new').onclick=function(){ var nm=prompt('New production number (e.g. P67):'); if(!nm||!nm.trim())return;
-            shipPost('/api/supply/production-create',{prod_no:nm.trim()},showSub); }; }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); }
-      else if(CONFIG_SUB==='portalusers'){ b.innerHTML='<div class="count">Loading…</div>';
+            shipPost('/api/supply/production-create',{prod_no:nm.trim()},showSub); }; }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); };
+      SUBS['portalusers']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/portal-users').then(function(r){return r.json();}).then(function(rows){
           fetchLookups(function(){ b.innerHTML=portalUsersTbl(rows);
             b.querySelectorAll('#pu-tbody tr[data-id]').forEach(puWireRow);   // per-row edit/save/cancel/delete/magic/supplier-picker
@@ -4957,8 +4959,8 @@
                 btn.disabled=true; fetch('/api/supply/portal-user-create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:em,supplier_name:sup,contact_name:ct||null})}).then(function(r){return r.json();})
                   .then(function(j){ if(j&&j.error){ err.textContent=j.error; btn.disabled=false; return; } showSub(); })
                   .catch(function(e){ err.textContent=(e&&e.message)||'failed'; btn.disabled=false; }); }; };
-          }); }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); }
-      else if(CONFIG_SUB==='consignees'){ b.innerHTML='<div class="count">Loading…</div>';
+          }); }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); };
+      SUBS['consignees']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/consignees').then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
           // Card list + grouped edit form (like Suppliers / Key accounts). Consignee/notify-party addresses per
           // delivery country for the Commercial / Tax Invoice; any country not listed falls back to UK.
@@ -5005,8 +5007,8 @@
               b.querySelectorAll('.cn-del').forEach(function(btn){ btn.onclick=function(){ var ct=btn.dataset.c; if(!confirm('Remove '+ct+'? That country will fall back to UK.'))return;
                 btn.disabled=true; fetch('/api/consignee/'+encodeURIComponent(ct)+'/delete',{method:'POST'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); for(var i=rows.length-1;i>=0;i--){ if(rows[i].country===ct)rows.splice(i,1); } invalidateDerived(); api.draw(); }).catch(function(e){ btn.disabled=false; alert('Remove failed: '+(e&&e.message||e)); }); }; });
             } });
-        }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); }
-      else if(CONFIG_SUB==='permissions'){ b.innerHTML='<div class="count">Loading…</div>';
+        }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); };
+      SUBS['permissions']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/config/permissions').then(function(r){return r.json();}).then(function(rows){
           if(rows&&rows.error){ b.innerHTML='<div class="count" style="color:#dc2626">'+esc(rows.error)+'</div>'; return; }
           function chk(email,field,val){ return '<input type="checkbox" class="pm-chk" data-em="'+esc(email)+'" data-f="'+field+'"'+(val?' checked':'')+'>'; }
@@ -5033,8 +5035,8 @@
           document.getElementById('pm-add').onclick=function(){ var em=(document.getElementById('pm-nemail').value||'').trim(); var err=b.querySelector('.pm-err'); err.textContent='';
             if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){ err.textContent='Enter a valid email.'; return; }
             save({email:em,supply_edit:document.getElementById('pm-nsupply').checked,demand_edit:document.getElementById('pm-ndemand').checked,is_admin:document.getElementById('pm-nadmin').checked},function(j){ if(j&&j.error){ err.textContent=j.error; return; } showSub(); }); };
-        }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); }
-      else if(CONFIG_SUB==='portal'){ b.innerHTML='<div class="count">Loading…</div>';
+        }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); };
+      SUBS['portal']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/suppliers').then(function(r){return r.json();}).then(function(sups){
           var supById={}; sups.forEach(function(s){supById[s.name]=s.id;});
           if(_pendingPortalSup){ var _want=_pendingPortalSup.toLowerCase(); _pendingPortalSup=null; var _mm=sups.filter(function(s){return (s.name||'').toLowerCase()===_want;})[0]; if(_mm)PORTAL_SUP=_mm.name; }   // #/config/portal/<name> deep link
@@ -5081,8 +5083,8 @@
             }); }
           document.getElementById('pp-sup').onchange=function(){ PORTAL_SUP=this.value; syncHash(); mountFor(this.value); };
           if(PORTAL_SUP)mountFor(PORTAL_SUP);
-        }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); }
-      else if(CONFIG_SUB==='export-uploads'){ b.innerHTML='<div class="count">Loading…</div>';
+        }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); };
+      SUBS['export-uploads']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         Promise.all([fetch('/api/forecast/export-settings').then(function(r){return r.json();}),
                      fetch('/api/app-settings').then(function(r){return r.json();}).catch(function(){return {};})]).then(function(_res){ var rows=_res[0]||[], _appset=_res[1]||{};
           var head='<div class="sect-h">Forecast export by country <span class="mut tiny">— per-country CSV (all SKUs × month · DTC / FBA / B2B) for the next 12 months. Email it to the country contact and/or upload to DriveHQ.</span></div>';
@@ -5138,8 +5140,8 @@
             msg.textContent='Building + emailing '+ek+'…';
             buildRxCsv(ek,function(csvStr,fn,err){ if(err||csvStr==null){ msg.innerHTML='<span style="color:#b91c1c">Could not build CSV: '+esc(err&&err.message||err||'error')+'</span>'; return; }
               postEmailCsv(btn,ek,csvStr,fn,msg); }); }; });
-        }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); }
-      else if(CONFIG_SUB==='mfgbom'){ b.innerHTML='<div class="count">Loading…</div>';
+        }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); };
+      SUBS['mfgbom']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         Promise.all([fetch('/api/supply/manufacturing-bom').then(function(r){return r.json();}),
                      fetch('/api/supply/skus').then(function(r){return r.json();}).catch(function(){return [];})])
           .then(function(R){ var rows=Array.isArray(R[0])?R[0]:[]; var skus=(Array.isArray(R[1])?R[1]:[]).filter(function(s){return s&&s.sku;});
@@ -5231,8 +5233,8 @@
               b.querySelectorAll('.bom-delb').forEach(function(btn){ btn.onclick=function(){ var p=btn.dataset.p; if(!confirm('Delete the ENTIRE bundle "'+p+'" and all its components? This cannot be undone.'))return;
                 btn.disabled=true; bomDel(p,'').then(function(){ delete byP[p]; api.draw(); }).catch(function(e){ btn.disabled=false; alert('Delete failed: '+(e.message||e)); }); }; });
             } });
-        }).catch(function(e){ b.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>'; }); }
-      else if(CONFIG_SUB==='products'){ b.innerHTML='<div class="count">Loading…</div>';
+        }).catch(function(e){ b.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>'; }); };
+      SUBS['products']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/products-all').then(function(r){return r.json();}).then(function(d){ if(d&&d.error){b.innerHTML='<div class="count">'+esc(d.error)+'</div>';return;}
           var cols=d.columns||[], all=d.rows||[];
           var rws=Array.from(new Set(all.map(function(r){return r.release_window;}).filter(Boolean))).sort();
@@ -5252,7 +5254,8 @@
             document.getElementById('prod-tbl').innerHTML=productsTable(shownCols,rows);
             document.getElementById('prod-count').textContent=rows.length+' / '+all.length+' products · '+shownCols.length+(colToks.length?' / '+cols.length:'')+' fields'; }
           document.getElementById('prod-q').oninput=draw; document.getElementById('prod-cols').oninput=draw; document.getElementById('prod-rw').onchange=draw; draw();
-        }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); }
+        }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); };
+      (SUBS[CONFIG_SUB]||function(){})();
     }
     showSub();
   }
