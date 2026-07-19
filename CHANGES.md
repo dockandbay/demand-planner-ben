@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.640 - Config ▸ Consignees: card list + grouped edit form
+
+- Rebuilt like Suppliers / Key accounts: a card list (country + consignee / notify-party
+  / port of discharge) with search + "+ Add country", and a full-width edit form
+  (Consignee, Notify party side-by-side + Port of discharge). Add prompts for a country
+  code and opens straight into its edit form. Same endpoints.
+
 ## v25.639 - Suppliers: restore TE-ID field label (only GRS removed)
 
 - Reverted the TE-ID field back to its original label/help; the card IDs line no longer
