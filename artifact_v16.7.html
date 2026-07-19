@@ -7925,9 +7925,28 @@ function renderAutoForecastReport(body){
       [['USD',1],['GBP',AF_GBP]].forEach(function(cd){ PAY_ROWS.forEach(function(r){ var arr=r[1], t=arr.reduce(function(a,b){return a+b;},0);
         rows.push([cd[0],r[0]].concat(arr.map(function(v){return Math.round(v/cd[1]);})).concat([Math.round(t/cd[1])])); }); });
       return rows; };
-    var pay='<div style="display:flex;gap:6px;align-items:center;margin:16px 0 0"><span style="font-size:11px;font-weight:700;color:#888">PAYMENTS PLAN</span>'
+    // single-currency summary matrix: Payment, [months…], 12-mo (whole numbers)
+    var afPayCur=function(div){ var hdr=['Payment'].concat(mo.map(afMonthLabel)).concat(['12-mo']); var rows=[hdr];
+      PAY_ROWS.forEach(function(r){ var arr=r[1], t=arr.reduce(function(a,b){return a+b;},0);
+        rows.push([r[0]].concat(arr.map(function(v){return Math.round(v/div);})).concat([Math.round(t/div)])); });
+      return rows; };
+    // transaction-level detail — one row per payment leg (mmm-yy month, USD + GBP)
+    var afMonMY=function(ym){ return afMonthLabel(ym).replace(' ','-'); };
+    var afTxnRows=function(){ var hdr=['Reference','Type','Amount USD','Date','Country','Supplier','Month','Amount GBP']; var rows=[hdr];
+      (d.transactions||[]).forEach(function(t){ var usd=Math.round((+t.amount_usd||0)*100)/100;
+        rows.push([t.reference,t.type,usd.toFixed(2),t.date,t.country,t.supplier,afMonMY(t.month),(Math.round(usd/AF_GBP*100)/100).toFixed(2)]); });
+      return rows; };
+    var afToCsv=function(rows){ return rows.map(function(r){return r.map(function(c){var s=String(c==null?'':c); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}).join(',');}).join('\n'); };
+    var afDl=function(csv,fn){ var blob=new Blob([csv],{type:'text/csv;charset=utf-8'}), url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download=fn; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(function(){URL.revokeObjectURL(url);},1000); };
+    var afFlash=function(btn){ var o=btn.textContent; btn.textContent='✓'; setTimeout(function(){btn.textContent=o;},1200); };
+    var pay='<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:16px 0 0"><span style="font-size:11px;font-weight:700;color:#888">PAYMENTS PLAN</span>'
       +'<button class="view-toggle" id="af-pay-copy" style="font-size:11px">⧉ Copy</button>'
-      +'<button class="view-toggle" id="af-pay-csv" style="font-size:11px">⬇ CSV</button></div>'
+      +'<button class="view-toggle" id="af-pay-csv" style="font-size:11px">⬇ CSV (USD)</button>'
+      +'<button class="view-toggle" id="af-pay-csv-gbp" style="font-size:11px">⬇ CSV (GBP)</button>'
+      +'<span style="width:1px;height:16px;background:#ddd;margin:0 4px"></span>'
+      +'<span style="font-size:11px;font-weight:700;color:#888">TRANSACTIONS</span>'
+      +'<button class="view-toggle" id="af-txn-copy" style="font-size:11px">⧉ Copy</button>'
+      +'<button class="view-toggle" id="af-txn-csv" style="font-size:11px">⬇ CSV</button></div>'
       +payTbl('USD',1)+payTbl('GBP',AF_GBP);
     var a=d.assumptions;
     var note='<div style="font-size:11px;color:#888;margin-top:12px;line-height:1.5">'
@@ -7938,8 +7957,11 @@ function renderAutoForecastReport(body){
     content.innerHTML=u+pay+note;
     var cpBtn=content.querySelector('#af-pay-copy'); if(cpBtn)cpBtn.onclick=function(){ var tsv=afPayMatrix().map(function(r){return r.join('\t');}).join('\n');
       navigator.clipboard.writeText(tsv).then(function(){var o=cpBtn.textContent;cpBtn.textContent='✓ Copied';setTimeout(function(){cpBtn.textContent=o;},1400);}).catch(function(){alert('Copy blocked by the browser.');}); };
-    var csBtn=content.querySelector('#af-pay-csv'); if(csBtn)csBtn.onclick=function(){ var csv=afPayMatrix().map(function(r){return r.map(function(c){var s=String(c==null?'':c); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}).join(',');}).join('\n');
-      var blob=new Blob([csv],{type:'text/csv;charset=utf-8'}), url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download='auto_forecast_payments_plan.csv'; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(function(){URL.revokeObjectURL(url);},1000); };
+    var csBtn=content.querySelector('#af-pay-csv'); if(csBtn)csBtn.onclick=function(){ afDl(afToCsv(afPayCur(1)),'auto_forecast_payments_plan_USD.csv'); afFlash(csBtn); };
+    var csGbp=content.querySelector('#af-pay-csv-gbp'); if(csGbp)csGbp.onclick=function(){ afDl(afToCsv(afPayCur(AF_GBP)),'auto_forecast_payments_plan_GBP.csv'); afFlash(csGbp); };
+    var txCp=content.querySelector('#af-txn-copy'); if(txCp)txCp.onclick=function(){ var tsv=afTxnRows().map(function(r){return r.join('\t');}).join('\n');
+      navigator.clipboard.writeText(tsv).then(function(){var o=txCp.textContent;txCp.textContent='✓ Copied';setTimeout(function(){txCp.textContent=o;},1400);}).catch(function(){alert('Copy blocked by the browser.');}); };
+    var txCsv=content.querySelector('#af-txn-csv'); if(txCsv)txCsv.onclick=function(){ afDl(afToCsv(afTxnRows()),'auto_forecast_transactions.csv'); afFlash(txCsv); };
   };
   var key=AF_MARKET+'|'+AF_COVER+'|'+AF_FREIGHT;
   if(AF_CACHE[key]) return draw(AF_CACHE[key]);

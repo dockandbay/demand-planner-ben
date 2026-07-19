@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.622';
+const APP_VERSION = 'v25.623';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -5472,6 +5472,9 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
     const unitsBy={}, supplierBy={};                       // subcat -> {month->units, total}, subcat->supplier
     const pay={deposit:{},completion:{},balance:{},freight:{}}; // bucket -> month -> amount
     const addPay=(b,mo,v)=>{ if(win.indexOf(mo)<0||!(v>0))return; (pay[b][mo]=(pay[b][mo]||0)+v); };
+    const txns=[];   // transaction-level detail (mirrors the win-window/>0 filter used for the summary)
+    const addTxn=(ref,type,mo,v,mk2,sup)=>{ if(win.indexOf(mo)<0||!(v>0))return;
+      txns.push({reference:ref, type, amount_usd:Math.round(v*100)/100, date:mo+'-01', country:(mk2||'').toUpperCase(), supplier:sup||'—', month:mo}); };
     let truncated=false;
     for(const mk of markets){
       const lc=leadCol[mk];
@@ -5518,10 +5521,18 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
           } else if(om<win[0]) { /* ordered already / in past — skip display */ }
           else truncated=true;
           const val=arrive*c;
-          addPay('deposit', om, val*Number(t.start_deposit_pct||0)/100);
-          addPay('completion', afAddMonths(om, Math.round((t.production_days||0)/30)), val*Number(t.completion_pct||0)/100);
-          addPay('balance', afAddMonths(m, Math.round((t.credit_days||0)/30)), val*Number(t.balance_pct||0)/100);
-          addPay('freight', m, val*FREIGHT);
+          const _dep=val*Number(t.start_deposit_pct||0)/100, _com=val*Number(t.completion_pct||0)/100,
+                _bal=val*Number(t.balance_pct||0)/100, _frt=val*FREIGHT;
+          const _comM=afAddMonths(om, Math.round((t.production_days||0)/30)), _balM=afAddMonths(m, Math.round((t.credit_days||0)/30));
+          addPay('deposit', om, _dep);
+          addPay('completion', _comM, _com);
+          addPay('balance', _balM, _bal);
+          addPay('freight', m, _frt);
+          const _ref=s+' · ord '+om;   // projected order = subcategory + order month (ties its 4 payment legs together)
+          addTxn(_ref,'Starting deposit',om,_dep,mk,nm);
+          addTxn(_ref,'Completion deposit',_comM,_com,mk,nm);
+          addTxn(_ref,'Balance payment',_balM,_bal,mk,nm);
+          addTxn(_ref,'Freight + duty',m,_frt,mk,nm);
         }
       }
     }
@@ -5530,8 +5541,10 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
     const payRow=b=>win.map(m=>Math.round(pay[b][m]||0));
     const dep=payRow('deposit'),comp=payRow('completion'),bal=payRow('balance'),frt=payRow('freight');
     const total=win.map((m,i)=>dep[i]+comp[i]+bal[i]+frt[i]);
+    txns.sort((a,b)=> a.date<b.date?-1 : a.date>b.date?1 : (a.reference<b.reference?-1 : a.reference>b.reference?1 : 0));
     res.json({ months:win, units:unitRows,
       payments:{deposit:dep,completion:comp,balance:bal,freight:frt,total},
+      transactions:txns,
       assumptions:{cover_months:COVER,freight_pct:FREIGHT,truncated} });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

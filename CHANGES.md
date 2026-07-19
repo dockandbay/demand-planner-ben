@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.623 - Auto Forecast: GBP payments CSV + transaction-level detail export
+
+- Payments plan toolbar now has **CSV (USD)** and **CSV (GBP)** for the summary matrix
+  (was a single combined file), plus a new **TRANSACTIONS** group with Copy + CSV.
+- Transaction detail = one row per projected payment leg with columns: Reference
+  (subcategory · order month), Type (Starting deposit / Completion deposit / Balance
+  payment / Freight + duty), Amount USD, Date (1st of month), Country, Supplier,
+  Month (mmm-yy), Amount GBP (USD ÷ 1.34).
+- Server `/api/scenario/auto-forecast` now returns a `transactions[]` array (same
+  window/>0 filter as the summary). No schema change.
+
 ## v25.622 - Config: "Supply chain" grouped heading in the sub-nav
 
 - The CONFIG sub-nav now groups the operational config tabs under a non-clickable
