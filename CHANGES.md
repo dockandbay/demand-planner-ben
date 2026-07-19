@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.616 - Cash Flow: reworked "all transactions" export + fast tooltips
+
+Cash Flow report:
+- "Download all transactions" (copy + CSV) columns reordered/reformatted: Reference, Type, Amount_USD (2dp),
+  Date, Paid Status (TRUE/FALSE), Market, Production Deposit (the payment's deposit reference), Class, Supplier,
+  Direct to Client? (TRUE when the PO branch is Direct to Client / UK B2B JLEW / UK B2B NEXT), Month (mmm-yy).
+- Server cashflow lines now carry deposit_ref + branch (from the referenced PO) to feed the two new columns.
+- All buttons/icons on the page now use the fast 120ms tooltip (bindFastTips).
+
+Files: server.mjs, supply/inject.html. No migrations, no new env vars.
+
 ## v25.615 - Payments Due sub-tab: overdue-payments counter badge
 
 The PURCHASE ORDERS ▸ Payments Due sub-menu tab now shows a red counter badge = the number of OVERDUE payments

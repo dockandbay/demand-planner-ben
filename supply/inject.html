@@ -5084,12 +5084,21 @@
       Kind:x.date_kind, Basis:x.basis, Class:(x.estimate?'estimate':'committed'),
       Due:x.due||'', Paid_date:x.paid_date||'', Likely:x.likely_date||'' }; }); }
     function cfTag(){ return _cfState.month?cfMonthLabel(_cfState.month):'all months'; }
-    // ALL transactions (every line, ignores the on-screen filters)
+    // ALL transactions (every line, ignores the on-screen filters) — Ben's column order/format.
+    function cfMonthShort(m){ if(!m||m==='—')return 'Undated'; if(m==='aged')return 'Aged'; var p=String(m).split('-'); return (MON[+p[1]-1]||'?')+'-'+String(p[0]).slice(2); }   // 2026-07 → Jul-26
+    function cfDtc(b){ return /direct to client|jlew|next/i.test(String(b||'')); }   // branch = Direct to Client / UK * JLEW / UK * NEXT
     function cfAllRows(){ return d.lines.map(function(x){ return {
-      Date:x.date||'', Month:cfMonthLabel(x.month), Type:x.type, Reference:x.ref||'', Supplier:x.supplier||'',
-      Market:x.country||'', Amount_USD:x.amount, Status:(x.paid?'Paid':x.overdue?'Overdue':'Due'),
-      Kind:x.date_kind, Basis:x.basis, Class:(x.estimate?'estimate':'committed'),
-      Due:x.due||'', Paid_date:x.paid_date||'', Likely:x.likely_date||'' }; }); }
+      Reference:x.ref||'',
+      Type:x.type,
+      Amount_USD:Number(x.amount||0).toFixed(2),
+      Date:x.date||'',
+      'Paid Status':(x.paid?'TRUE':'FALSE'),
+      Market:x.country||'',
+      'Production Deposit':x.deposit_ref||'',
+      Class:(x.estimate?'estimate':'committed'),
+      Supplier:x.supplier||'',
+      'Direct to Client?':(cfDtc(x.branch)?'TRUE':'FALSE'),
+      Month:cfMonthShort(x.month) }; }); }
     // monthly summary: paid vs unpaid (unpaid split committed / estimate) — all transactions
     function cfSummaryRows(){ var mg={},mo=[]; d.lines.forEach(function(x){ var m=x.month||'—'; if(!mg[m]){mg[m]={paid:0,uc:0,ue:0};mo.push(m);}
         if(x.paid)mg[m].paid+=x.amount; else if(x.estimate)mg[m].ue+=x.amount; else mg[m].uc+=x.amount; });
@@ -5109,6 +5118,7 @@
     c.querySelectorAll('.pill[data-bs]').forEach(function(p){p.onclick=function(){_cfState.basis=p.dataset.bs;c.querySelectorAll('.pill[data-bs]').forEach(function(x){x.classList.toggle('active',x===p);});draw();};});
     c.querySelector('#cf-country').onchange=function(){_cfState.country=this.value;draw();};
     c.querySelector('#cf-q').oninput=function(){_cfState.q=this.value;draw();};
+    bindFastTips(c);   // fast 120ms tooltips on all cash-flow buttons/icons
     draw(); }
 
   // OTHER PAYMENTS + PAYMENTS REPORT now live as sub-tabs under PRODUCTIONS (renderProductions). Both render

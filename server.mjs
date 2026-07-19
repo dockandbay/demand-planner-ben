@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.615';
+const APP_VERSION = 'v25.616';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -750,13 +750,17 @@ async function cashflowResponse(pos, q) {
       amount: Math.round(num(o.amount)), paid: !!o.paid_date, estimate: !!o.estimate, basis: o.basis || 'po',
       src: o.src || '', due, paid_date: o.paid_date || null, date, date_kind: kind,
       month: date ? date.slice(0, 7) : '—', overdue, likely_date: lk,
+      // deposit reference for this payment (the PO's deposit_ref, else a deposit-pool line's own reference),
+      // and the referenced PO's branch (drives the Direct-to-Client flag in the export).
+      deposit_ref: (poMeta[o.ref] ? (poMeta[o.ref].deposit_ref || '') : ((o.basis || 'po') === 'register' ? (o.ref || '') : '')),
+      branch: (poMeta[o.ref] ? (poMeta[o.ref].branch || '') : ''),
     });
   };
 
   const complete = (p) => (p.progress === 'complete');
   // group shipment-assigned POs for freight/duty/tax sizing
-  const byShip = {};
-  pos.forEach(p => { if (p.shipment) (byShip[p.shipment] = byShip[p.shipment] || []).push(p); });
+  const byShip = {}, poMeta = {};
+  pos.forEach(p => { poMeta[p.po] = p; if (p.shipment) (byShip[p.shipment] = byShip[p.shipment] || []).push(p); });
 
   for (const p of pos) {
     const hasRef = (p.deposit_ref || '') !== '';
