@@ -632,7 +632,7 @@
           +'<td style="text-align:right" class="pp-lt" data-sku="'+esc(sku)+'">$'+money(lt)+'</td>'
           +'<td class="l">'+(added?'<button class="lnk-btn pp-rm" data-po="'+po+'" data-sku="'+esc(sku)+'" title="remove this added SKU" style="color:#b91c1c">✕</button>':'')+'</td></tr>';
       }
-      var rws=lines.map(function(l){ return planRow(l.sku, l.qty, (l.cost_price!=null&&l.cost_price!=='')?Number(l.cost_price):null, costs[l.sku], false); }).join('');
+      var rws=lines.map(function(l){ return planRow(l.sku, l.qty, (l.cost_price!=null&&l.cost_price!=='')?Number(l.cost_price):((l.sku_cost!=null&&l.sku_cost!=='')?Number(l.sku_cost):null), costs[l.sku], false); }).join('');
       Object.keys(costs).forEach(function(sku){ var c=costs[sku]; if(c&&c.is_added&&!lineSkus[sku]) rws+=planRow(sku, null, null, c, true); });
       if(!rws) rws='<tr><td colspan="6" class="mut">no lines</td></tr>';
       var dlId='ppsku-'+i;
@@ -1645,7 +1645,7 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                   var act=(c.actual_cost!=null&&c.actual_cost!=='')?Number(c.actual_cost):null;
                   var qn=(aq!=null?aq:(Number(orderQty)||0)), price=(act!=null?act:(est!=null?est:0));
                   out.push([csvCell(sku),qn,est!=null?est:'',act!=null?act:'',(qn*price)].join(',')); }
-                lines.forEach(function(l){ lineSkus[l.sku]=1; pushRow(l.sku, l.qty, (l.cost_price!=null&&l.cost_price!=='')?Number(l.cost_price):null); });
+                lines.forEach(function(l){ lineSkus[l.sku]=1; pushRow(l.sku, l.qty, (l.cost_price!=null&&l.cost_price!=='')?Number(l.cost_price):((l.sku_cost!=null&&l.sku_cost!=='')?Number(l.sku_cost):null)); });
                 Object.keys(costs).forEach(function(sku){ var c=costs[sku]; if(c&&c.is_added&&!lineSkus[sku]) pushRow(sku, null, null); });
                 var blob=new Blob([out.join('\n')],{type:'text/csv'}), url=URL.createObjectURL(blob);
                 var a=document.createElement('a'); a.href=url; a.download=po+'-order-plan.csv'; document.body.appendChild(a); a.click();

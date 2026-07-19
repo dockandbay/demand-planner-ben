@@ -7003,8 +7003,17 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
     const poList = pos.map(p => p.po);
     const grab = (sql) => poList.length ? q(sql, [poList]) : Promise.resolve([]);
     const [lines, deps, lc, xd, ac, notes, subs, supSkus] = await Promise.all([
-      grab(`SELECT l.po, l.sku, l.qty, l.erp_qty, l.cost_price, l.carton_qty
-            FROM planner.purchase_order_lines l WHERE l.po = ANY($1) ORDER BY l.po, l.sku`),
+      grab(`SELECT l.po, l.sku, l.qty, l.erp_qty, l.cost_price, l.carton_qty,
+              -- product default cost for the PO's supplier (cost_<code>, e.g. LX→cost_lx), fallback general cost.
+              -- The order-plan Est. cost when the line has no negotiated cost_price — mirrors admin (po-detail sku_cost).
+              coalesce(
+                CASE lower((SELECT s.code FROM planner.suppliers s JOIN planner.purchase_orders pp
+                              ON (s.id=pp.supplier_id OR s.name=pp.supplier_name) WHERE pp.po=l.po LIMIT 1))
+                  WHEN 'lx' THEN pr.cost_lx WHEN 'xr' THEN pr.cost_xr END,
+                pr.cost) sku_cost
+            FROM planner.purchase_order_lines l
+            LEFT JOIN planner.products pr ON pr.sku=l.sku
+            WHERE l.po = ANY($1) ORDER BY l.po, l.sku`),
       names.length ? q(`
             WITH draw AS (SELECT po.deposit_ref, sum(coalesce(po.pay_start_deposit_assigned,0)) used
               FROM planner.purchase_orders po WHERE po.deposit_ref IS NOT NULL GROUP BY po.deposit_ref),

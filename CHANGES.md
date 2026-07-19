@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.661 - Portal order-plan Est. cost now falls back to product cost (parity with admin)
+
+- The supplier portal showed a blank Est. cost on lines with no negotiated `cost_price` (e.g. PO-57UKLX1),
+  even though the PO value now uses the product cost fallback. Fixed: the portal bootstrap line query returns
+  `sku_cost` (product `cost_<supplier-code>` → general `cost`, the same expression admin's PO-detail uses),
+  and portal-view.js falls back to it for Est. cost in both the plan table and the CSV export.
+- Est. cost precedence now matches admin exactly: line `cost_price` ▸ product `cost_<code>` ▸ product `cost`.
+- No schema change; no migration.
+
 ## v25.660 - Refactor: shared PO-finance view (admin + portal read one source; drift eliminated)
 
 - New Postgres view **planner.v_po_finance** (migration 123) = the canonical per-PO payment/date core
