@@ -4731,6 +4731,7 @@
               +'<button class="sup-edit" data-k="'+id+'" style="cursor:pointer;border:1px solid #cbd5e1;background:#f8fafc;padding:3px 12px;border-radius:5px;font-size:11px;white-space:nowrap">Edit</button></div>'
               +'<div style="margin-bottom:4px">'+kindBadge(r.kind)+' <span class="mut tiny">'+esc(fieldOf(r,'default_currency')||'USD')+(r.country?' · '+esc(r.country):'')+'</span></div>'
               +metaRow('Terms', terms)+metaRow('Lead', lead)+metaRow('Contact', [r.contact_name,r.email].filter(Boolean).join(' · '))
+              +(function(){ var ids=[]; if(r.cin7_member_id)ids.push('Cin7 '+r.cin7_member_id); if(r.fulfil_id)ids.push('Fulfil '+r.fulfil_id); if(r.grs_number)ids.push('GRS '+r.grs_number); return ids.length?metaRow('IDs', ids.join(' · ')):''; })()
               +'</div>'; }
           function listHtml(){ var f=sq?rows.filter(function(x){return String(JSON.stringify(x)||'').toLowerCase().indexOf(sq)>=0;}):rows;
             var cards=f.length?('<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-top:12px">'+f.map(cardHtml).join('')+'</div>'):'<div class="count" style="padding:10px 2px">No suppliers'+(sq?' match your search':' yet')+'.</div>';
@@ -4750,6 +4751,27 @@
               +lblBlk('Code','2-letter code — drives the cost_<code> price column.', inp('code', fieldOf(r,'code'),'120px','LX'))
               +lblBlk('Kind','', seln('kind', fieldOf(r,'kind')||'supplier', KINDS))
               +lblBlk('Country','', inp('country', fieldOf(r,'country'),'160px'))
+              +'</div>'
+              +'<div style="border-top:1px solid #eef2f7;margin:2px 0 14px"></div>'
+              +'<div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:2px">Company &amp; address</div>'
+              +'<div class="mut tiny" style="margin-bottom:10px">Prints on the Commercial / Tax Invoice &amp; Packing List (seller block).</div>'
+              +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">'
+              +lblBlk('Full company name','Header / seller name on the invoice.', inp('business_name', fieldOf(r,'business_name')))
+              +lblBlk('Phone','', inp('phone', fieldOf(r,'phone'),'200px'))
+              +lblBlk('Address line 1','', inp('address_1', fieldOf(r,'address_1')))
+              +lblBlk('Address line 2','', inp('address_2', fieldOf(r,'address_2')))
+              +lblBlk('City','', inp('city', fieldOf(r,'city'),'200px'))
+              +lblBlk('State / province','', inp('state', fieldOf(r,'state'),'200px'))
+              +lblBlk('Postcode','', inp('postcode', fieldOf(r,'postcode'),'160px'))
+              +'</div>'
+              +'<div style="border-top:1px solid #eef2f7;margin:2px 0 14px"></div>'
+              +'<div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:10px">Compliance &amp; ERP IDs</div>'
+              +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">'
+              +lblBlk('GRS registration no.','Prints on the tax invoice (the "contract number").', inp('grs_number', fieldOf(r,'grs_number')))
+              +lblBlk('Textile Exchange ID (TE-ID)','GRS/TE compliance ID, shown under the company name.', inp('te_id', fieldOf(r,'te_id'),'200px'))
+              +lblBlk('Incoterm','Delivery term on the invoice (default FOB).', inp('incoterm', fieldOf(r,'incoterm'),'120px'))
+              +lblBlk('Cin7 member ID','', inp('cin7_member_id', fieldOf(r,'cin7_member_id'),'200px'))
+              +lblBlk('Fulfil ERP ID','', inp('fulfil_id', fieldOf(r,'fulfil_id'),'200px'))
               +'</div>'
               +'<div style="border-top:1px solid #eef2f7;margin:2px 0 14px"></div>'
               +'<div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:2px">Payment terms</div>'

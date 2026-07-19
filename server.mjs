@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.633';
+const APP_VERSION = 'v25.634';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1483,7 +1483,9 @@ app.get('/api/supply/:section', async (req, res) => {
       case 'suppliers':
         return res.json(await q(`SELECT id,code,name,kind,default_currency,
           start_deposit_pct,completion_pct,balance_pct,credit_days,credit_type,
-          credit_fee_on_balance_pct,production_days,country,contact_name,email
+          credit_fee_on_balance_pct,production_days,country,contact_name,email,
+          business_name,address_1,address_2,city,state,postcode,phone,
+          grs_number,te_id,incoterm,cin7_member_id,fulfil_id
           FROM planner.suppliers ORDER BY kind,name`));
       case 'key-accounts':
         return res.json(await q(`SELECT * FROM planner.key_accounts ORDER BY name`));
@@ -2778,7 +2780,10 @@ app.post('/api/supply/supplier/:id', (req, res) =>
     { code: 'text', name: 'text', kind: 'text', default_currency: 'text',
       start_deposit_pct: 'numeric', completion_pct: 'numeric', balance_pct: 'numeric',
       credit_days: 'int', credit_type: 'text', credit_fee_on_balance_pct: 'numeric',
-      production_days: 'int', country: 'text', contact_name: 'text', email: 'text' }, req.body, 'bigint'));
+      production_days: 'int', country: 'text', contact_name: 'text', email: 'text',
+      // company / address / phone (tax-invoice), compliance IDs + ERP linkage
+      business_name: 'text', address_1: 'text', address_2: 'text', city: 'text', state: 'text', postcode: 'text', phone: 'text',
+      grs_number: 'text', te_id: 'text', incoterm: 'text', cin7_member_id: 'text', fulfil_id: 'text' }, req.body, 'bigint'));
 app.post('/api/supply/supplier-create', async (req, res) => {
   const b = req.body || {}, name = (b.name || '').trim();
   if (!name) return res.status(400).json({ error: 'supplier name required' });

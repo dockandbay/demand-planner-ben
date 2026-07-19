@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.634 - Suppliers: invoice company/address/phone + GRS no. + Cin7/Fulfil IDs editable
+
+- Surfaced supplier tax-invoice fields in CONFIG ▸ Suppliers (new "Company & address" +
+  "Compliance & ERP IDs" sections): Full company name, Phone, Address 1/2, City, State,
+  Postcode, GRS registration no. (the "contract number"), Textile Exchange ID, Incoterm,
+  Cin7 member ID, and a new Fulfil ERP ID. Cards show a compact IDs line.
+- invoice.mjs now prints the GRS registration number in the seller block (company name,
+  address, phone were already wired but had no UI to enter them).
+- MIGRATION 120_supplier_grs_fulfil.sql: adds suppliers.grs_number + suppliers.fulfil_id
+  (business_name/address_1-2/city/state/postcode/phone/te_id/incoterm/cin7_member_id
+  already existed). Applied to sandbox; **Diviyaj: run 120 on live.**
+- Suppliers list endpoint + update whitelist extended to these columns.
+
 ## v25.633 - Config ▸ Suppliers: card list + grouped edit form (matches Key accounts)
 
 - Replaced the 13-column inline-edit table with a card list (name + code, kind badge,
