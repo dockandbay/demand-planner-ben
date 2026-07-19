@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.618';
+const APP_VERSION = 'v25.619';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -751,7 +751,7 @@ async function cashflowResponse(pos, q) {
     const _dref = (poMeta[o.ref] ? (poMeta[o.ref].deposit_ref || '') : ((o.basis || 'po') === 'register' ? (o.ref || '') : ''));
     lines.push({
       key: o.key, type: o.type, ref: o.ref, supplier: o.supplier || '', country: o.country || '',
-      amount: Math.round(num(o.amount)), paid: !!o.paid_date, estimate: !!o.estimate, basis: o.basis || 'po',
+      amount: Math.round(num(o.amount) * 100) / 100, paid: !!o.paid_date, estimate: !!o.estimate, basis: o.basis || 'po',
       src: o.src || '', due, paid_date: o.paid_date || null, date, date_kind: kind,
       month: date ? date.slice(0, 7) : '—', overdue, likely_date: lk,
       // deposit reference for this payment (the PO's deposit_ref, else a deposit-pool line's own reference),
@@ -851,7 +851,7 @@ async function cashflowResponse(pos, q) {
   };
   const arrivals = pos.filter(p => num(p.value_used) > 0.009 && p.checkin).map(p => {
     const duty = isFobPO(p) ? 0 : num(p.est_duty);
-    return { po: p.po, amount_usd: Math.round(num(p.value_used) + duty), delivery: p.checkin, branch: p.branch || '' };
+    return { po: p.po, amount_usd: Math.round((num(p.value_used) + duty) * 100) / 100, delivery: p.checkin, branch: p.branch || '' };
   }).sort((a, b) => (a.delivery || '9999').localeCompare(b.delivery || '9999'));
   return { today, lines, arrivals };
 }

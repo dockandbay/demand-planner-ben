@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.619 - Cash Flow: real cents on USD amounts (not rounded to whole dollars)
+
+Cashflow line amounts + stock-arrivals amounts now keep 2dp (were Math.round to integer), so the all-
+transactions and stock-arrivals exports show real cents instead of .00. On-screen money() already renders 2dp,
+so the display picks up the cents too (no width change).
+
+Files: server.mjs. No migrations, no new env vars.
+
 ## v25.618 - Cash Flow: Stock arrivals export, GBP rate 1.34, column tidy-ups
 
 - New "Stock arrivals" download (copy + CSV): PO Number, Amount (USD) = goods + import duty per PO (FOB → no
