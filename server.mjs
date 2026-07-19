@@ -1013,6 +1013,17 @@ app.get('/api/weather', async (_req, res) => {
     res.set('Cache-Control', 'no-store').json({ cities: rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Preorders + key-account order forecasts (moved off Airtable → Supabase). The BUY plan reads this instead
+// of calling Airtable via the MCP. Tables are kept current by n8n (see Diviyaj note).
+app.get('/api/preorders-ka', async (_req, res) => {
+  try {
+    const [pre, ka] = await Promise.all([
+      pool.query(`SELECT sku, quantity qty, warehouse wh, to_char(ship_date,'YYYY-MM-DD') date FROM planner.preorders WHERE coalesce(sku,'')<>''`),
+      pool.query(`SELECT sku, quantity qty, warehouse wh, to_char(ship_date,'YYYY-MM-DD') date FROM planner.key_account_forecasts WHERE coalesce(sku,'')<>''`),
+    ]);
+    res.set('Cache-Control', 'no-store').json({ preorder: pre.rows, ka: ka.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/api/health', async (_req, res) => {
   try {
     const [DATA, FC, FO, SKU, CATS, SUBS, BI, PC] = await Promise.all([

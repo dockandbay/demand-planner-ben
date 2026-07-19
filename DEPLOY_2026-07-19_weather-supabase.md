@@ -21,8 +21,18 @@ Until it runs against Supabase, the panel will show "No weather data cached yet.
 - `forecast_json` = array of `{date,tmax,tmin,precip,wc}`; `history_json` = object keyed `YYYY_MM` →
   `{warmDays,hotDays,wetDays,heatWaves,totalPrecip,avgTmax}`.
 
-## Please confirm (preorders / key-account forecasts)
-The DEMAND app still refreshes **preorders** and **key-account orders** client-side via Airtable MCP
-(`mcpListRecords`). Ben believes these already live in Supabase (`planner.preorders`,
-`planner.key_account_forecasts`) and are n8n-fed. **Please confirm n8n keeps those tables current.** Once
-confirmed, we'll drop the client Airtable-MCP refresh too (left in place for now to avoid data loss).
+## Preorders / key-account forecasts — now Supabase-fed (v25.657)
+The DEMAND buy plan now reads **preorders** and **key-account orders** from Supabase via the new
+`GET /api/preorders-ka` (tables `planner.preorders` + `planner.key_account_forecasts`). The client-side
+Airtable-MCP refresh (`mcpListRecords` + `PKA_TABLES`) was **removed** — so **all Airtable MCP is now gone
+from the app** (weather + preorders + key accounts).
+
+- The two tables already held the current Airtable data (loaded 2026-06-10 from the same source; count-matched
+  119 preorders / 66 key-account rows). `loaded_at` refreshed to now in sandbox.
+- **Action for Diviyaj:** enact the **Airtable → Supabase n8n flow** for these two tables so they stay current
+  going forward (it hadn't run since 2026-06-10). Source: base `appT5GoPc8M3iEDdh`,
+  preorder table `tblxucncnqkzOBpPQ` → `planner.preorders (reference,sku,warehouse,ship_date,quantity)`;
+  key-account table `tblwVIyFEfRGxf4RK` → `planner.key_account_forecasts (client,sku,warehouse,ship_date,quantity)`.
+  Field maps: preorder ref=`fldxBU4CAkykNPucG` sku=`fldJRniVfgUhaYSNX` wh=`fldwuaxMcBzOEsWK6` date=`fld1ALUE3nWkPduFt`
+  qty=`fldVn7Z0HCuJwgV48`; ka client=`fldsojBjYt62TiiKW` sku=`fldFMZIrBeSym6tMJ` wh=`fldIQSP7DekMKS4rI`
+  date=`fldCnj645uhMASM9i` qty=`fldGOy9IJLO0mIRMN`.

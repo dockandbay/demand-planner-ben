@@ -8234,48 +8234,22 @@ function buildLiveDemand(){
 // Reads the Preorder + Key account FC tables live via the Airtable MCP server (same
 // Anthropic-API-with-MCP path saveForecasts uses), rebuilds each market's pka, and
 // re-renders so buildLiveDemand re-folds it into committed B2B demand.
-var PKA_TABLES={
-  preorder:{id:'tblxucncnqkzOBpPQ',sku:'fldJRniVfgUhaYSNX',qty:'fldVn7Z0HCuJwgV48',wh:'fldwuaxMcBzOEsWK6',date:'fld1ALUE3nWkPduFt'},
-  ka:{id:'tblwVIyFEfRGxf4RK',sku:'fldFMZIrBeSym6tMJ',qty:'fldGOy9IJLO0mIRMN',wh:'fldIQSP7DekMKS4rI',date:'fldCnj645uhMASM9i'}
-};
-async function mcpListRecords(tableId,fieldIds){
-  var msg='List ALL records now. baseId=appT5GoPc8M3iEDdh tableId='+tableId+' pageSize=200 fieldIds='+JSON.stringify(fieldIds)+'. Call list_records_for_table immediately and return only tool results.';
-  var base={model:'claude-haiku-4-5-20251001',max_tokens:8192,system:'You are a tool executor. Call list_records_for_table immediately with the exact arguments provided. No commentary.',mcp_servers:[{type:'url',url:'https://mcp.airtable.com/mcp',name:'airtable'}]};
-  var messages=[{role:'user',content:msg}];
-  var resp=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({},base,{messages:messages}))});
-  var data=await resp.json();if(data.error)throw new Error(data.error.message||JSON.stringify(data.error));
-  var recs=[],turn=0;
-  while(turn<5){
-    turn++;
-    (data.content||[]).forEach(function(blk){
-      if(blk.type==='mcp_tool_result'){
-        var c=blk.content,txt=Array.isArray(c)?((c[0]&&c[0].text)||''):(typeof c==='string'?c:'');
-        if(txt){try{var j=JSON.parse(txt);if(j&&j.records)recs=recs.concat(j.records);else if(Array.isArray(j))recs=recs.concat(j);}catch(e){}}
-      }
-    });
-    if(data.stop_reason!=='tool_use')break;
-    var tu=(data.content||[]).filter(function(b){return b.type==='mcp_tool_use';});
-    if(!tu.length)break;
-    messages.push({role:'assistant',content:data.content});
-    messages.push({role:'user',content:tu.map(function(b){return {type:'tool_result',tool_use_id:b.id,content:'ok'};})});
-    var r2=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({},base,{messages:messages}))});
-    data=await r2.json();if(data.error)throw new Error(data.error.message||JSON.stringify(data.error));
-  }
-  return recs;
-}
+// (Removed PKA_TABLES + mcpListRecords — preorders/key-account orders now come from Supabase via
+//  /api/preorders-ka, not Airtable MCP. v25.657)
 async function refreshBuyData(){
   var stEl=document.getElementById('bpst');
   function s(m){if(stEl)stEl.textContent=m;}
   var btn=document.getElementById('bp-refresh');if(btn)btn.disabled=true;
   try{
-    s('Refreshing Preorder & Key account orders from Airtable...');
-    var P=PKA_TABLES.preorder,K=PKA_TABLES.ka;
-    var pre=await mcpListRecords(P.id,[P.sku,P.qty,P.wh,P.date]);
-    var ka=await mcpListRecords(K.id,[K.sku,K.qty,K.wh,K.date]);
+    s('Refreshing Preorder & Key account orders from Supabase...');
+    var _resp=await fetch('/api/preorders-ka');
+    if(!_resp.ok)throw new Error('HTTP '+_resp.status);
+    var _pk=await _resp.json();
+    if(_pk&&_pk.error)throw new Error(_pk.error);
     var map={};
     function add(sku,co,ym,q){if(!sku||!co||!q)return;if(!ym)ym=LIVE_FC_MONTHS[0];if(!map[sku])map[sku]={};if(!map[sku][co])map[sku][co]={};map[sku][co][ym]=(map[sku][co][ym]||0)+q;}
-    function ingest(recs,F){(recs||[]).forEach(function(r){var cv=r.cellValuesByFieldId||r.fields||{};var sv=cv[F.sku];var sku=Array.isArray(sv)?(sv[0]&&(sv[0].name||sv[0].id)):sv;var q=Number(cv[F.qty]||0);var wv=cv[F.wh];var wh=wv&&wv.name?wv.name:wv;var co=wh?String(wh).split('_')[0].toUpperCase():null;var dv=cv[F.date];var ym=dv?String(dv).slice(0,7).replace('-','_'):null;add(sku,co,ym,q);});}
-    ingest(pre,P);ingest(ka,K);
+    function ingest(recs){(recs||[]).forEach(function(r){var sku=r.sku;var q=Number(r.qty||0);var wh=r.wh;var co=wh?String(wh).split('_')[0].toUpperCase():null;var ym=r.date?String(r.date).slice(0,7).replace('-','_'):null;add(sku,co,ym,q);});}
+    ingest(_pk.preorder);ingest(_pk.ka);
     // Clear existing pka everywhere, then write the freshly fetched set (refresh is authoritative)
     Object.keys(BP_DATA.products).forEach(function(sku){var mk=BP_DATA.products[sku].mkts;if(!mk)return;Object.keys(mk).forEach(function(co){if(mk[co].pka)delete mk[co].pka;});});
     var matched=0,unmatched=[];

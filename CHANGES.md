@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.657 - Preorders/key-account off Airtable MCP -> Supabase (all Airtable MCP now removed)
+
+- New GET /api/preorders-ka (reads planner.preorders + planner.key_account_forecasts). The BUY plan
+  refresh now fetches Supabase instead of Airtable via mcpListRecords; PKA_TABLES + mcpListRecords removed.
+  This removes the LAST Airtable-MCP call from the app.
+- Tables already held the current Airtable data (count-matched 119/66, same source); loaded_at refreshed.
+- Diviyaj: enact the Airtable->Supabase n8n flow for these two tables (see DEPLOY note; last loaded 2026-06-10).
+
 ## v25.656 - Weather off Airtable MCP -> Supabase
 
 - New planner.weather_cache table (migration 122) + GET /api/weather endpoint. The DEMAND Weather
