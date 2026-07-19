@@ -3,6 +3,21 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.660 - Refactor: shared PO-finance view (admin + portal read one source; drift eliminated)
+
+- New Postgres view **planner.v_po_finance** (migration 123) = the canonical per-PO payment/date core
+  (the admin base..calc4 chain, own dates, no supplier filter, no mastering).
+- Admin purchase-orders/cashflow query now reads the view + layers shipment MASTERING, landed-cost, ERP and
+  action flags on top. Verified byte-identical to the old query across all 1371 sandbox POs / every column.
+- Supplier portal (POS_SQL_PORTAL) now selects a supplier-scoped subset of the SAME view instead of a
+  second hand-maintained copy of the CTE. This retires the admin↔portal drift class permanently.
+- Fixes 308 previously-wrong portal payment values (top supplier alone): the portal now applies the
+  deposit-ref draw cap and the richer line-value (confirmed portal costs + product cost_<code> fallback)
+  that admin always used. Portal payment columns now match admin exactly (0 drift, proven via SQL).
+- ⚠️ **Migration 123 is a hard dependency** — the app 500s on purchase-orders/portal until the view exists.
+  No app-logic change beyond the rewire; supersedes the earlier surgical portal patch (that logic now lives
+  in the shared view). See DEPLOY_2026-07-19_po-finance-view.md.
+
 ## v25.659 - Refactor: Suppliers + Manufacturing BOM onto cardEditor() (all 4 config editors unified)
 
 - Suppliers migrated onto the shared cardEditor(); the live payment %-sum indicator is a wireEdit hook.
