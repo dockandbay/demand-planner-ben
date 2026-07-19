@@ -70,6 +70,9 @@ body{font-family:system-ui,-apple-system,sans-serif;font-size:12px;color:#1a1a1a
 #hz-drawer .hz-item{display:block;width:100%;text-align:left;background:transparent;border:none;color:#e2e8f0;padding:10px 18px;font-size:14px;font-family:inherit;cursor:pointer;border-left:3px solid transparent}
 #hz-drawer .hz-item:hover{background:#1e293b}
 #hz-drawer .hz-item.active{background:#1e293b;border-left-color:#38bdf8;color:#fff;font-weight:600}
+/* sub-nav items nested under their active parent (Supply sections / Demand tabs / Scenario / Config) */
+#hz-drawer .hz-item.hz-sub{padding-left:34px;font-size:13px;color:#cbd5e1;margin-left:14px;border-left:2px solid #334155}
+#hz-drawer .hz-item.hz-sub.active{border-left-color:#38bdf8;color:#fff}
 #hz-drawer .hz-close{float:right;background:transparent;border:none;color:#94a3b8;font-size:20px;cursor:pointer;padding:0 16px}
 .catpill{font-size:9px !important;padding:2px 6px !important}
 .cat-opt:hover{background:#f5f5f5}
@@ -10237,6 +10240,7 @@ var _rfBtn=document.getElementById('rf'); if(_rfBtn)_rfBtn.onclick=function(){
   var burger=document.getElementById('hz-burger'), drawer=document.getElementById('hz-drawer'), backdrop=document.getElementById('hz-backdrop');
   if(!burger||!drawer||!backdrop)return;
   function item(label,active,onClick){ var b=document.createElement('button'); b.className='hz-item'+(active?' active':''); b.textContent=label; b.onclick=onClick; return b; }
+  function subItem(label,active,onClick){ var b=item(label,active,onClick); b.className+=' hz-sub'; return b; }
   function lbl(t){ var d=document.createElement('div'); d.className='hz-sec-lbl'; d.textContent=t; return d; }
   function close(){ drawer.classList.remove('open'); backdrop.classList.remove('open'); }
   function open(){ build(); drawer.classList.add('open'); backdrop.classList.add('open'); }
@@ -10258,30 +10262,18 @@ var _rfBtn=document.getElementById('rf'); if(_rfBtn)_rfBtn.onclick=function(){
         clearSearch(); vb.click();
         if(isSup || isScen || isCfg || vb.dataset.view==='planning'){ setTimeout(build,60); } else { close(); }   // reveal that view's sub-nav in place
       }));
+      // nest the active view's sub-nav directly UNDER its button (indented), rather than at the bottom of the drawer
+      if(active && isSup){ var nav=window.__supplyNav;
+        if(nav && nav.sections){ var cur=nav.current&&nav.current();
+          nav.sections.forEach(function(s){ drawer.appendChild(subItem(s[1], s[0]===cur, function(){ clearSearch(); nav.select(s[0]); close(); })); }); }
+      } else if(active && vb.dataset.view==='planning'){   // DEMAND: Plan / KPIs / Targets / Actions / Calendar
+        Array.prototype.slice.call(document.querySelectorAll('#demand-tabs .dnav')).forEach(function(db){ drawer.appendChild(subItem(db.textContent.trim(), db.classList.contains('active'), function(){ db.click(); close(); })); });
+      } else if(active && isScen){   // SCENARIO sub-nav
+        Array.prototype.slice.call(document.querySelectorAll('#scenario-subnav .stab')).forEach(function(sb){ drawer.appendChild(subItem(sb.textContent.trim(), sb.classList.contains('active'), function(){ sb.click(); close(); })); });
+      } else if(active && isCfg){   // CONFIG sub-nav
+        Array.prototype.slice.call(document.querySelectorAll('#config-subs .rtab')).forEach(function(cb){ drawer.appendChild(subItem(cb.textContent.trim(), cb.classList.contains('active'), function(){ cb.click(); close(); })); });
+      }
     });
-    var nav=window.__supplyNav;
-    if(supplyActive && nav && nav.sections){
-      drawer.appendChild(lbl('Supply sections'));
-      var cur=nav.current&&nav.current();
-      nav.sections.forEach(function(s){
-        drawer.appendChild(item(s[1], s[0]===cur, function(){ clearSearch(); nav.select(s[0]); close(); }));
-      });
-    } else if(demandActive){
-      // mirror the DEMAND second-level nav (Plan / KPIs / Targets / Actions / Calendar)
-      var dtabs=Array.prototype.slice.call(document.querySelectorAll('#demand-tabs .dnav'));
-      if(dtabs.length){ drawer.appendChild(lbl('Demand planner'));
-        dtabs.forEach(function(db){ drawer.appendChild(item(db.textContent.trim(), db.classList.contains('active'), function(){ db.click(); close(); })); }); }
-    } else if(scenActive){
-      // mirror the SCENARIO second-level nav (Prime Day / B2B / Financial Forecast / PO Stock Priority)
-      var stabs=Array.prototype.slice.call(document.querySelectorAll('#scenario-subnav .stab'));
-      if(stabs.length){ drawer.appendChild(lbl('Scenario'));
-        stabs.forEach(function(sb){ drawer.appendChild(item(sb.textContent.trim(), sb.classList.contains('active'), function(){ sb.click(); close(); })); }); }
-    } else if(configActive){
-      // mirror the CONFIG sub-nav (Tax / Freight / Duty / Branches / Suppliers / … / Permissions)
-      var ctabs=Array.prototype.slice.call(document.querySelectorAll('#config-subs .rtab'));
-      if(ctabs.length){ drawer.appendChild(lbl('Config'));
-        ctabs.forEach(function(cb){ drawer.appendChild(item(cb.textContent.trim(), cb.classList.contains('active'), function(){ cb.click(); close(); })); }); }
-    }
   }
   burger.onclick=function(){ drawer.classList.contains('open')?close():open(); };
   backdrop.onclick=close;

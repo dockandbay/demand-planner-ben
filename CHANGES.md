@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.645 - Mobile drawer: nest sub-nav under its parent view (not at the bottom)
+
+- The mobile hamburger drawer now renders each active view's sub-nav (Supply sections /
+  Demand tabs / Scenario / Config) indented directly under its parent button, instead of
+  as a separate "Supply sections" block at the bottom of the drawer.
+
 ## v25.644 - Consolidation panel: PO numbers open the popout PO drawer
 
 - In the "Analyse consolidation" panel, the anchor + candidate PO numbers are now clickable
