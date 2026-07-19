@@ -1,11 +1,12 @@
 {
   "name": "dock-bay-demand-planner",
-  "version": "25.648.0",
+  "version": "25.649.0",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node tests/portal-inplace.cjs"
+    "test": "node tests/portal-inplace.cjs",
+    "bump": "npm version minor --no-git-tag-version"
   },
   "dependencies": {
     "dotenv": "^17.4.2",

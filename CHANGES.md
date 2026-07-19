@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.649 - Version single-sourced from package.json (refactor quick-win)
+
+- APP_VERSION now derives from package.json's "version" at boot (v25.649 ← 25.649.0),
+  instead of a hand-edited literal. One fewer file to bump per change.
+- Added `npm run bump` (npm version minor --no-git-tag-version). Bump flow is now:
+  `npm run bump` + a CHANGES.md entry.
+
 ## v25.648 - GBP rate configurable in CONFIG ▸ General settings (refactor quick-win)
 
 - The USD→GBP rate (was hardcoded 1.34 in two client files: CF_GBP / AF_GBP) is now a
