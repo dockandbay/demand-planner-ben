@@ -578,7 +578,16 @@ app.get('/', async (_req, res) => {
       html = html.replace(/<body[^>]*>/, m => m + SANDBOX_BANNER);   // orange "SANDBOX ONLY" strip — never on prod
       html = html.replace(/<link rel="icon"[^>]*>/, '<link rel="icon" type="image/svg+xml" href="/favicon-sbx.svg?v=' + APP_VERSION + '">');   // orange-bordered favicon on sandbox
     }
-    res.set('content-type', 'text/html').set('Cache-Control', 'no-store').send(html);
+    // gzip the (large, live-data-injected) HTML over the wire — ~6.3MB → ~1MB. The JSON middleware only wraps
+    // res.json, so the main page was going out uncompressed. Prod/Vercel may also compress at the edge; harmless.
+    res.set('content-type', 'text/html').set('Cache-Control', 'no-store').set('Vary', 'Accept-Encoding');
+    if (/\bgzip\b/.test(_req.headers['accept-encoding'] || '')) {
+      zlib.gzip(html, (err, buf) => {
+        if (err) return res.send(html);
+        res.setHeader('Content-Encoding', 'gzip');
+        res.end(buf);
+      });
+    } else res.send(html);
   } catch (e) {
     res.status(500).send('inject failed: ' + e.message);
   }

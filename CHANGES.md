@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.674 - gzip the main HTML response (6.3MB -> ~1MB over the wire)
+
+- The gzip middleware only wrapped res.json (API payloads); the main DEMAND page (~6.3MB of live-injected data)
+  was served UNCOMPRESSED. Now gzip it when the client accepts — 6.35MB -> 1.06MB over the wire (~6x), data
+  verified intact. Big initial-load win on the sandbox/tunnel; Vercel may also compress at the edge (harmless).
+- Diviyaj: server.mjs change (harness). No behaviour change; content is identical after decode.
+
 ## v25.673 - Slim artifact: stub server-injected data blobs (5.06MB -> 2.42MB)
 
 - The artifact baked ~2.6MB of stale data literals (_SKU_RAW 1.7MB, FC_OUTPUTS 0.5MB, DATA 0.28MB, PROD_CONST
