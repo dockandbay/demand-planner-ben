@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.647 - Mobile drawer: Config sub-nav shows on first tap (poll until ready)
+
+- The drawer rebuilt after a fixed 60ms to reveal a view's sub-nav; CONFIG loads its nav
+  via a fetch, so the sub-items were missing on the first tap. Now it polls (up to ~1.4s)
+  until the sub-nav has rendered, so Supply/Config/Scenario/Demand sub-items appear
+  immediately on the first click.
+
 ## v25.646 - Revert config-page mobile nav to horizontal strip
 
 - Reverted the v25.641 config-page mobile vertical-drawer nav (the real fix was the

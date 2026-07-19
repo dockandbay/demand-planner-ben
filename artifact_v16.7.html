@@ -10260,7 +10260,13 @@ var _rfBtn=document.getElementById('rf'); if(_rfBtn)_rfBtn.onclick=function(){
       if(vb.dataset.view==='planning' && active)demandActive=true;
       drawer.appendChild(item(vb.textContent.trim(), active, function(){
         clearSearch(); vb.click();
-        if(isSup || isScen || isCfg || vb.dataset.view==='planning'){ setTimeout(build,60); } else { close(); }   // reveal that view's sub-nav in place
+        // reveal that view's sub-nav in place — poll until it's rendered (CONFIG loads its nav via a fetch,
+        // so a fixed delay missed it on the first tap and the sub-items didn't show).
+        if(isSup){ waitBuild(function(){ return !!(window.__supplyNav && window.__supplyNav.sections && window.__supplyNav.sections.length); }); }
+        else if(isCfg){ waitBuild(function(){ return document.querySelectorAll('#config-subs .rtab').length>0; }); }
+        else if(isScen){ waitBuild(function(){ return document.querySelectorAll('#scenario-subnav .stab').length>0; }); }
+        else if(vb.dataset.view==='planning'){ waitBuild(function(){ return document.querySelectorAll('#demand-tabs .dnav').length>0; }); }
+        else { close(); }
       }));
       // nest the active view's sub-nav directly UNDER its button (indented), rather than at the bottom of the drawer
       if(active && isSup){ var nav=window.__supplyNav;
@@ -10275,6 +10281,9 @@ var _rfBtn=document.getElementById('rf'); if(_rfBtn)_rfBtn.onclick=function(){
       }
     });
   }
+  // rebuild the drawer now, then keep rebuilding (up to ~1.4s) until the just-activated view's sub-nav has
+  // rendered — so the nested sub-items appear on the FIRST tap even when they load asynchronously (CONFIG).
+  function waitBuild(ready){ var n=0; (function tick(){ if(!drawer.classList.contains('open'))return; build(); if(!ready()&&n++<22){ setTimeout(tick,60); } })(); }
   burger.onclick=function(){ drawer.classList.contains('open')?close():open(); };
   backdrop.onclick=close;
 
