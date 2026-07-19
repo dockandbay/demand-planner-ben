@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.638 - Suppliers: drop grs_number (GRS reg no. = TE-ID)
+
+- The GRS registration number is the same value as the Textile Exchange ID, so the
+  separate grs_number field is removed. The TE-ID field is relabelled "GRS reg. no. /
+  Textile Exchange ID (TE-ID)" and prints under the company name on the tax invoice
+  (unchanged behaviour). Card IDs line now shows TE-ID instead of GRS.
+- Migration 120 no longer adds grs_number (only fulfil_id); column dropped from sandbox.
+  Reverts the grs_number parts of v25.634.
+
 ## v25.637 - Manufacturing BOM: card UX + searchable SKU dropdown
 
 - Rebuilt to match Suppliers / Key accounts: a **card list** (one card per bundle, shows

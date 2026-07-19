@@ -28,8 +28,7 @@ function hsFor(p, country) { return p['hscode_' + country.toLowerCase()] || p.hs
 function isGrsApproved(p) { return String(p.grs_approved || '').trim() === '1 checked out of 1'; }
 function supplierBlock(s) {
   return [s.business_name || s.name, s.address_1, s.address_2, [s.city, s.state, s.postcode].filter(Boolean).join(', '),
-          s.country, s.grs_number && ('GRS Registration No: ' + s.grs_number),
-          s.contact_name && ('Attn: ' + s.contact_name), s.email, s.phone].filter(Boolean).join('\n');
+          s.country, s.contact_name && ('Attn: ' + s.contact_name), s.email, s.phone].filter(Boolean).join('\n');
 }
 function ymd(d) { if (!d) return ''; const t = new Date(d); return isNaN(t) ? '' : t.toISOString().slice(0, 10); }
 
