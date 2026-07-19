@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.675 - Cache built page data (20s TTL): repeat loads ~1050ms -> ~150ms
+
+- The page build (~12 Supabase queries) is ~85% of a serve (~870ms) and reran on EVERY load. Now the built data
+  globals are cached for 20s (DATA only, NOT the HTML — so DEV live-editing still works: the file is re-read +
+  re-injected each request). Repeat loads within the window skip the build: ~1050ms -> ~150ms (~7x).
+- Invalidated on forecast saves (/api/save-forecasts, /api/save-sku-forecasts) so an edit shows on next load.
+  Source data is ETL-fed (frozen per open tab), so 20s staleness is safe. Server-only change (harness).
+
 ## v25.674 - gzip the main HTML response (6.3MB -> ~1MB over the wire)
 
 - The gzip middleware only wrapped res.json (API payloads); the main DEMAND page (~6.3MB of live-injected data)

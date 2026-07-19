@@ -531,13 +531,23 @@ app.use(async (req, res, next) => {
   } catch (e) { return next(); }   // the guard must never break a request itself
 });
 
+// Short-TTL cache of the built data globals. The build (~12 Supabase queries) is ~85% of a page serve (~870ms);
+// it reruns on every load. The source data is ETL-fed (frozen for an open tab anyway), so caching the built
+// values for a few seconds coalesces bursts (refresh, multiple tabs, the auto-update reload) → repeat loads skip
+// the build. We cache DATA only, NOT the HTML, so DEV live-editing still works (the file is re-read + re-injected
+// each request). Invalidated on forecast saves so an edit shows on the next load.
+let _dataCache = null;
+const DATA_TTL_MS = 20000;
 app.get('/', async (_req, res) => {
   try {
-    // Fetch every live global in parallel, then splice sequentially (string ops on one buffer).
-    const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts, FBADIMS, SA_EXTRA, GBP_RATE] = await Promise.all([
+    // Fetch every live global in parallel, then splice sequentially (string ops on one buffer). Short-TTL cached.
+    let _vals;
+    if (_dataCache && Date.now() - _dataCache.at < DATA_TTL_MS) _vals = _dataCache.vals;
+    else { _vals = await Promise.all([
       buildDATA(), buildFC_CURRENT(), buildFC_OUTPUTS(), buildSKURAW(),
       buildCATS_META(), buildSUBS_META(), buildBI_RULES(), buildPROD_CONST(), freshness(), buildFBADIMS(), buildSAEXTRA(), gbpRate(),
-    ]);
+    ]); _dataCache = { at: Date.now(), vals: _vals }; }
+    const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts, FBADIMS, SA_EXTRA, GBP_RATE] = _vals;
     let html = DEV ? loadHTML() : HTML;
     html = replaceGlobal(html, 'DATA', JSON.stringify(DATA));
     html = replaceGlobal(html, 'FC_CURRENT', JSON.stringify(FC_CURRENT));
@@ -627,6 +637,7 @@ app.post('/api/save-forecasts', async (req, res) => {
        VALUES ('ui_save_forecasts','success',$1,$2)`,
       [upserts + deletes, `${upserts} upsert / ${deletes} clear by ${who || 'unknown'}`]);
     await client.query('COMMIT');
+    _dataCache = null;   // a forecast edit changes FC_CURRENT — force a fresh build on the next page load
     res.json({ saved: upserts + deletes, upserts, deletes });
   } catch (e) {
     await client.query('ROLLBACK');
@@ -663,6 +674,7 @@ app.post('/api/save-sku-forecasts', async (req, res) => {
        VALUES ('ui_save_sku_forecasts','success',$1,$2)`,
       [n, `${n} SKU cells by ${who || 'unknown'}`]);
     await client.query('COMMIT');
+    _dataCache = null;   // SKU-forecast edit changes FC_OUTPUTS — invalidate the page-data cache
     res.json({ saved: n });
   } catch (e) {
     await client.query('ROLLBACK');
