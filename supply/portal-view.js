@@ -462,6 +462,7 @@
 /* Production sub-heading row spanning the portal PO grid. NOT position:sticky — a sticky <td> drops its
    background in Chrome (border-collapse), which left this banner white; a normal full-width row paints grey. */
 #supply-root table.pp-tbl tr.pp-grp td{background:#e5e7eb;color:#374151;font-weight:700;font-size:11px;padding:6px 10px;text-align:left;letter-spacing:.03em;text-transform:uppercase;border-top:2px solid #cbd5e1;border-bottom:1px solid #cbd5e1}
+#supply-root table.pp-tbl tr.pp-row.row-open>td{background:#FDFBD4!important}   /* expanded PO row highlight — matches the main supply grid */
 /* Mobile: turn the portal sub-menu (tab strip) into a full-width horizontally-scrollable row so all tabs
    stay reachable instead of wrapping/overlapping. */
 @media (max-width:640px){
@@ -1522,7 +1523,8 @@
             body.querySelectorAll('.pp-exp').forEach(function(btn){ btn.onclick=function(){ var i=btn.dataset.i, ex=document.getElementById('pp-'+i); if(!ex)return;
               if(!ex.dataset.built){ ex.dataset.built='1'; var po=ex.dataset.po, p=_ppData.pos.filter(function(x){return x.po===po;})[0], cell=ex.children[0];
                 if(p&&cell){ cell.innerHTML=ppExpand(p,_ppData.lb[po]||[],_ppData.notesByPo[po]||[],_ppData.subsByPo[po]||[],i,_ppData.costsByPo[po]||{},_ppData.supSkus||[],_ppData.xdByPo[po]||{},_ppData.addByPo[po]||[]); wireDetail(cell); } }
-              ex.style.display=(ex.style.display!=='none')?'none':''; if(ex.style.display!=='none'&&!ex.dataset.fcLoaded){ ex.dataset.fcLoaded='1'; loadFreightCharges(ex); }
+              ex.style.display=(ex.style.display!=='none')?'none':''; var _poOpen=ex.style.display!=='none'; var _poRow=btn.closest('.pp-row'); if(_poRow)_poRow.classList.toggle('row-open',_poOpen);   // highlight the open PO row (light yellow, like the main supply grid)
+              if(_poOpen&&!ex.dataset.fcLoaded){ ex.dataset.fcLoaded='1'; loadFreightCharges(ex); }
               applyPortalPin(); }; });   // align the just-opened detail to the current horizontal scroll
             // production grouping rows expand / collapse their POs (default expanded) — collapse hides the group's
             // PO rows + any open detail cards; expand shows the PO rows again (detail cards stay closed)
