@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.633 - Config ▸ Suppliers: card list + grouped edit form (matches Key accounts)
+
+- Replaced the 13-column inline-edit table with a card list (name + code, kind badge,
+  currency/country, terms & lead summary, contact) and a grouped full-width edit form
+  (Identity · Payment terms · Contact). Live "Deposit+Completion+Balance = X%" check.
+- Same endpoints/fields; removed unused SUP_COLS/supTbl.
+
 ## v25.632 - What's Next: horizontal scroll + sticky PO column (mobile)
 
 - The forward-calendar tables now size to content and scroll horizontally instead of

@@ -4500,16 +4500,7 @@
         +'<td class="l">'+editCell(ep,'shipping_notes',r.shipping_notes,'txt')+'</td></tr>';}).join('');
       return '<div class="sect-h">Branches — shipping lead times <span class="mut tiny">(sea lead drives a PO\'s delivery date: ship + sea days)</span></div>'
         +'<div class="tw" style="max-width:760px"><table><thead><tr><th class="l">Branch</th><th class="l">Country</th><th class="l">Sea lead (days)</th><th class="l">Air lead (days)</th><th class="l">Notes</th></tr></thead><tbody>'+rows+'</tbody></table></div>'; }
-    var SUP_COLS=[{f:'code',h:'Code'},{f:'name',h:'Name',w:130},
-      {f:'kind',h:'Kind',t:'select',opts:['supplier','freight','internal','other']},
-      {f:'default_currency',h:'Cur',t:'select',opts:['USD','GBP','EUR','AUD','CAD']},
-      {f:'start_deposit_pct',h:'Start%',t:'num'},{f:'completion_pct',h:'Comp%',t:'num'},{f:'balance_pct',h:'Bal%',t:'num'},
-      {f:'credit_days',h:'Credit d',t:'num'},{f:'credit_type',h:'Credit type'},{f:'production_days',h:'Prod d',t:'num'},
-      {f:'country',h:'Country'},{f:'contact_name',h:'Contact'},{f:'email',h:'Email',w:150}];
-    function supTbl(rows){
-      return '<div class="sect-h">Suppliers — payment terms drive every payment calc <span class="mut tiny">(<b>Prod d</b> = production lead time; a PO\'s production-end date = start + this, unless overridden)</span> <button class="tool-badge bg-blue" id="sup-new" style="cursor:pointer;border:none;margin-left:8px">+ Supplier</button></div>'
-        +editTbl('suppliers', rows, SUP_COLS, {key:'id'}); }
-    // (Key accounts now use a dedicated card list + edit form — see the CONFIG_SUB==='keyaccounts' block — not editTbl.)
+    // (Suppliers + Key accounts now use dedicated card lists + edit forms — see their CONFIG_SUB blocks — not editTbl.)
     var PROD_COLS=[{f:'prod_no',h:'Production #',w:96},{f:'status',h:'Status',t:'select',opts:['','ACTIVE','CLOSED']},
       {f:'require_supplier_confirmation',h:'Require supplier confirmation',t:'bool',w:120},
       {f:'po_count',h:'POs',ro:true},{f:'suppliers',h:'Suppliers',ro:true},
@@ -4722,10 +4713,87 @@
         document.getElementById('dt-addcat').onclick=function(){ var nm=prompt('New category name:'); if(!nm||!nm.trim())return; shipPost('/api/supply/duty-upsert',{category:nm.trim(),country:'UK',duty_pct:''},reload); }; }
       else if(CONFIG_SUB==='branches'){ b.innerHTML=brTbl(); bindEdits(); }
       else if(CONFIG_SUB==='suppliers'){ b.innerHTML='<div class="count">Loading…</div>';
-        fetch('/api/supply/suppliers').then(function(r){return r.json();}).then(function(rows){ b.innerHTML=supTbl(rows);
-          wireEditTbl('suppliers', function(k){return '/api/supply/supplier/'+k;}, showSub);
-          document.getElementById('sup-new').onclick=function(){ var nm=prompt('New supplier name:'); if(!nm||!nm.trim())return; var cd=prompt('Supplier code (2 letters, optional):')||'';
-            shipPost('/api/supply/supplier-create',{name:nm.trim(),code:cd.trim()||null},showSub); }; }); }
+        fetch('/api/supply/suppliers').then(function(r){return r.json();}).then(function(rows){
+          // Suppliers have ~13 fields (identity + payment terms + contact). Same treatment as Key accounts:
+          // a scannable CARD LIST + a grouped full-width EDIT FORM. Same endpoints/fields as the old editTbl.
+          var sq='', editId=null;
+          var KINDS=['supplier','freight','internal','other'], CURS=['USD','GBP','EUR','AUD','CAD'];
+          function fieldOf(r,f){ return r[f]==null?'':r[f]; }
+          function pct(v){ return (v==null||v==='')?'–':(''+v).replace(/[^0-9.\-]/g,'')+'%'; }
+          function days(v){ return (v==null||v==='')?'–':(''+v).replace(/[^0-9.\-]/g,'')+'d'; }
+          function kindBadge(k){ k=String(k||'supplier'); var bg={supplier:'bg-blue',freight:'bg-amber',internal:'bg-neutral',other:'bg-neutral'}[k]||'bg-neutral'; return '<span class="tool-badge '+bg+'">'+esc(k)+'</span>'; }
+          function metaRow(lbl,val){ return '<div style="display:flex;gap:6px;font-size:12px;margin-top:2px"><span class="mut tiny" style="min-width:70px;text-transform:uppercase;letter-spacing:.3px;font-weight:700;padding-top:1px">'+esc(lbl)+'</span><span style="color:'+(val?'#1f2937':'#9ca3af')+'">'+(val?esc(val):'—')+'</span></div>'; }
+          function cardHtml(r){ var id=esc(String(r.id));
+            var terms='Deposit '+pct(r.start_deposit_pct)+' · Completion '+pct(r.completion_pct)+' · Balance '+pct(r.balance_pct);
+            var lead='Production '+days(r.production_days)+' · Credit '+days(r.credit_days)+(r.credit_type?' ('+esc(r.credit_type)+')':'');
+            return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;background:#fff;box-shadow:0 1px 2px rgba(15,23,42,.04)">'
+              +'<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px"><div style="flex:1;min-width:0"><span style="font-weight:700;font-size:14px;word-break:break-word">'+esc(r.name||'—')+'</span>'+(r.code?' <span class="mut tiny" style="font-weight:700">'+esc(r.code)+'</span>':'')+'</div>'
+              +'<button class="sup-edit" data-k="'+id+'" style="cursor:pointer;border:1px solid #cbd5e1;background:#f8fafc;padding:3px 12px;border-radius:5px;font-size:11px;white-space:nowrap">Edit</button></div>'
+              +'<div style="margin-bottom:4px">'+kindBadge(r.kind)+' <span class="mut tiny">'+esc(fieldOf(r,'default_currency')||'USD')+(r.country?' · '+esc(r.country):'')+'</span></div>'
+              +metaRow('Terms', terms)+metaRow('Lead', lead)+metaRow('Contact', [r.contact_name,r.email].filter(Boolean).join(' · '))
+              +'</div>'; }
+          function listHtml(){ var f=sq?rows.filter(function(x){return String(JSON.stringify(x)||'').toLowerCase().indexOf(sq)>=0;}):rows;
+            var cards=f.length?('<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-top:12px">'+f.map(cardHtml).join('')+'</div>'):'<div class="count" style="padding:10px 2px">No suppliers'+(sq?' match your search':' yet')+'.</div>';
+            return '<div class="sect-h">Suppliers — payment terms drive every payment calc <span class="mut tiny">(<b>Prod</b> = production lead time; a PO&rsquo;s production-end date = start + this, unless overridden)</span> <button class="tool-badge bg-blue" id="sup-new" style="cursor:pointer;border:none;margin-left:8px">+ Supplier</button></div>'
+              +'<div class="bar"><input class="flt" id="sup-q" placeholder="Search name / code / contact / country…" value="'+esc(sq)+'" style="width:300px;background:#eff6ff;border-color:#93c5fd"><span class="count" style="margin-left:8px">'+f.length+(sq?' / '+rows.length:'')+' supplier'+(f.length===1?'':'s')+'</span></div>'
+              +cards; }
+          function inp(f,val,w,ph){ return '<input class="sup-in" data-f="'+f+'" value="'+esc(val==null?'':val)+'" placeholder="'+esc(ph||'')+'" style="width:'+(w||'100%')+';box-sizing:border-box;padding:6px 9px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px">'; }
+          function seln(f,val,opts){ var ov=String(val==null?'':val); return '<select class="sup-in" data-f="'+f+'" style="padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px">'+opts.map(function(o){return '<option'+(ov.toLowerCase()===String(o).toLowerCase()?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>'; }
+          function lblBlk(lbl,help,field){ return '<div style="margin:0 0 12px"><div style="font-weight:600;font-size:12px;margin-bottom:'+(help?'1px':'4px')+'">'+esc(lbl)+'</div>'+(help?'<div class="mut tiny" style="margin-bottom:4px">'+esc(help)+'</div>':'')+field+'</div>'; }
+          function numBlk(lbl,f,val,suffix){ return '<div><div style="font-weight:600;font-size:11px;margin-bottom:3px">'+esc(lbl)+'</div><div style="display:flex;align-items:center;gap:4px"><input class="sup-in" data-f="'+f+'" value="'+esc(val==null?'':val)+'" inputmode="decimal" style="width:66px;box-sizing:border-box;padding:5px 7px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;text-align:right">'+(suffix?'<span class="mut tiny">'+esc(suffix)+'</span>':'')+'</div></div>'; }
+          function editHtml(r){ var id=esc(String(r.id));
+            return '<div class="sect-h" style="display:flex;align-items:center;gap:10px"><button id="sup-back" style="cursor:pointer;border:1px solid #cbd5e1;background:#f8fafc;padding:3px 11px;border-radius:5px;font-size:11px">← Back</button> Edit supplier</div>'
+              +'<div style="max-width:860px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;padding:16px 18px">'
+              +'<div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:10px">Identity</div>'
+              +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px">'
+              +lblBlk('Name','', inp('name', fieldOf(r,'name')))
+              +lblBlk('Code','2-letter code — drives the cost_<code> price column.', inp('code', fieldOf(r,'code'),'120px','LX'))
+              +lblBlk('Kind','', seln('kind', fieldOf(r,'kind')||'supplier', KINDS))
+              +lblBlk('Country','', inp('country', fieldOf(r,'country'),'160px'))
+              +'</div>'
+              +'<div style="border-top:1px solid #eef2f7;margin:2px 0 14px"></div>'
+              +'<div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:2px">Payment terms</div>'
+              +'<div class="mut tiny" id="sup-pctsum" style="margin-bottom:10px"></div>'
+              +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:12px;margin-bottom:14px">'
+              +numBlk('Start deposit','start_deposit_pct',fieldOf(r,'start_deposit_pct'),'%')
+              +numBlk('Completion','completion_pct',fieldOf(r,'completion_pct'),'%')
+              +numBlk('Balance','balance_pct',fieldOf(r,'balance_pct'),'%')
+              +numBlk('Production','production_days',fieldOf(r,'production_days'),'days')
+              +numBlk('Credit','credit_days',fieldOf(r,'credit_days'),'days')
+              +'<div><div style="font-weight:600;font-size:11px;margin-bottom:3px">Credit type</div>'+inp('credit_type',fieldOf(r,'credit_type'),'120px')+'</div>'
+              +'<div><div style="font-weight:600;font-size:11px;margin-bottom:3px">Currency</div>'+seln('default_currency',fieldOf(r,'default_currency')||'USD',CURS)+'</div>'
+              +'</div>'
+              +'<div style="border-top:1px solid #eef2f7;margin:2px 0 14px"></div>'
+              +'<div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:10px">Contact</div>'
+              +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">'
+              +lblBlk('Contact name','', inp('contact_name', fieldOf(r,'contact_name')))
+              +lblBlk('Email','', inp('email', fieldOf(r,'email')))
+              +'</div>'
+              +'<div style="display:flex;gap:8px;margin-top:8px;padding-top:12px;border-top:1px solid #eef2f7"><button id="sup-save" data-k="'+id+'" style="cursor:pointer;border:none;background:#2563eb;color:#fff;padding:6px 18px;border-radius:6px;font-size:12px;font-weight:600">Save changes</button>'
+              +'<button id="sup-cancel" style="cursor:pointer;border:1px solid #cbd5e1;background:#fff;padding:6px 14px;border-radius:6px;font-size:12px">Cancel</button>'
+              +'<span id="sup-msg" class="mut tiny" style="align-self:center;margin-left:6px"></span></div></div>'; }
+          function updPctSum(){ var el=document.getElementById('sup-pctsum'); if(!el)return; var s=0; ['start_deposit_pct','completion_pct','balance_pct'].forEach(function(f){ var i=b.querySelector('.sup-in[data-f="'+f+'"]'); if(i)s+=parseFloat(i.value)||0; });
+            s=Math.round(s*100)/100; el.innerHTML='Deposit + Completion + Balance = <b style="color:'+(s===100?'#16a34a':'#b45309')+'">'+s+'%</b>'+(s===100?'':' — should total 100%'); }
+          function draw(){ var r=(editId!=null)&&rows.filter(function(x){return String(x.id)===String(editId);})[0];
+            if(r){ b.innerHTML=editHtml(r); updPctSum();
+              b.querySelectorAll('.sup-in[data-f="start_deposit_pct"],.sup-in[data-f="completion_pct"],.sup-in[data-f="balance_pct"]').forEach(function(i){ i.oninput=updPctSum; });
+              document.getElementById('sup-back').onclick=document.getElementById('sup-cancel').onclick=function(){ editId=null; draw(); };
+              document.getElementById('sup-save').onclick=function(){ var btn=this, body={};
+                b.querySelectorAll('.sup-in').forEach(function(inp){ body[inp.dataset.f]=inp.value; });
+                btn.disabled=true; var msg=document.getElementById('sup-msg'); msg.textContent='Saving…';
+                fetch('/api/supply/supplier/'+encodeURIComponent(btn.dataset.k),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
+                  .then(function(rp){return rp.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error);
+                    var lr=rows.filter(function(x){return String(x.id)===String(btn.dataset.k);})[0]; if(lr)Object.keys(body).forEach(function(k){ lr[k]=body[k]; });
+                    invalidateDerived(); editId=null; draw(); })
+                  .catch(function(e){ btn.disabled=false; msg.innerHTML='<span style="color:#dc2626">Save failed: '+esc(e.message||e)+'</span>'; }); };
+              return; }
+            b.innerHTML=listHtml();
+            document.getElementById('sup-new').onclick=function(){ var nm=prompt('New supplier name:'); if(!nm||!nm.trim())return; var cd=prompt('Supplier code (2 letters, optional):')||'';
+              shipPost('/api/supply/supplier-create',{name:nm.trim(),code:cd.trim()||null},showSub); };
+            document.getElementById('sup-q').oninput=function(){ sq=this.value.trim().toLowerCase(); var cur=this.selectionStart; draw(); var q=document.getElementById('sup-q'); if(q){ q.focus(); try{q.setSelectionRange(cur,cur);}catch(e){} } };
+            b.querySelectorAll('.sup-edit').forEach(function(btn){ btn.onclick=function(){ editId=btn.dataset.k; draw(); }; });
+          }
+          draw(); }); }
       else if(CONFIG_SUB==='keyaccounts'){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/key-accounts').then(function(r){return r.json();}).then(function(rows){
           b.innerHTML='<div class="sect-h">Key accounts — client packing / labelling, requirements &amp; delivery address <span class="mut tiny">(defaulted onto a PO&rsquo;s Direct-to-Client details when the client is picked)</span> <button class="tool-badge bg-blue" id="ka-new" style="cursor:pointer;border:none;margin-left:8px">+ Key account</button></div>'
