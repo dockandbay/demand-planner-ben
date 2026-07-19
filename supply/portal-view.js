@@ -495,7 +495,12 @@
      them shrink so long note text wraps instead. Inline min-width (e.g. the 78px control column) still wins.
      Order-plan etc. keep overflow-x:auto for their wide tables. */
   #supply-root .pptab-panel[data-pt="timeline"]{overflow-x:hidden}
-  #supply-root .pptab-panel[data-pt="timeline"] div{max-width:100%;min-width:0}
+  /* box-sizing:border-box so a padded box (the yellow "Please confirm" / "Production status" boxes have
+     padding:8px 11px) stays within 100% instead of overflowing by its padding and getting clipped. */
+  #supply-root .pptab-panel[data-pt="timeline"] div{max-width:100%;min-width:0;box-sizing:border-box}
+  #supply-root .pptab-panel[data-pt="timeline"] select,
+  #supply-root .pptab-panel[data-pt="timeline"] input,
+  #supply-root .pptab-panel[data-pt="timeline"] textarea{max-width:100%;box-sizing:border-box}
   #supply-root .pptab-panel[data-pt="timeline"] div,
   #supply-root .pptab-panel[data-pt="timeline"] span,
   #supply-root .pptab-panel[data-pt="timeline"] textarea{overflow-wrap:anywhere}
