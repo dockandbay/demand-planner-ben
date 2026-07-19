@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.659 - Refactor: Suppliers + Manufacturing BOM onto cardEditor() (all 4 config editors unified)
+
+- Suppliers migrated onto the shared cardEditor(); the live payment %-sum indicator is a wireEdit hook.
+  Behaviour identical (same endpoints, no delete, prompt-based +Supplier create).
+- Manufacturing BOM migrated too — it's structurally different (grouped byP data, __new__ create mode,
+  a custom multi-op diff save, whole-bundle delete, searchable SKU picker). Added one small generic
+  capability to the helper: an optional `onSave(id,api)` override so an editor can drive its own save
+  while still reusing the list<->edit toggle, caret-preserving search and back/cancel wiring. mfgbom's
+  doSave/reload now take the current id + api instead of an outer editParent var. Behaviour identical.
+- All four config editors (Key accounts, Consignees, Suppliers, Manufacturing BOM) now share one helper.
+- No server/API/schema change; no migration. Internal-only.
+
 ## v25.658 - Refactor: shared cardEditor() helper (Key accounts + Consignees migrated)
 
 - New module-level cardEditor(cfg) in supply/inject.html: owns the identical config-editor plumbing

@@ -3965,14 +3965,15 @@
         if(back)back.onclick=function(){ editId=null; draw(); };
         if(cancel)cancel.onclick=function(){ editId=null; draw(); };
         var sv=document.getElementById(IDS.save);
-        if(sv)sv.onclick=function(){ var btn=this, body={}; b.querySelectorAll('.'+cfg.inClass).forEach(function(inp){ body[inp.dataset.f]=inp.value; });
-          var id=btn.dataset[A]; if(cfg.coerce)body=cfg.coerce(body,id);
-          btn.disabled=true; var msg=IDS.msg&&document.getElementById(IDS.msg); if(msg)msg.textContent='Saving…';
-          fetch(cfg.saveUrl(id),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
-            .then(function(rp){return rp.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error);
-              var lr=findRow(id); if(lr){ if(cfg.patch)cfg.patch(lr,body); else Object.keys(body).forEach(function(k){ lr[k]=body[k]; }); }
-              invalidateDerived(); editId=null; draw(); })
-            .catch(function(e){ btn.disabled=false; if(msg)msg.innerHTML='<span style="color:#dc2626">Save failed: '+esc(e.message||e)+'</span>'; }); };
+        if(sv){ if(cfg.onSave) sv.onclick=function(){ cfg.onSave(editId,api); };   // editor drives its own save (custom diff/multi-op)
+          else sv.onclick=function(){ var btn=this, body={}; b.querySelectorAll('.'+cfg.inClass).forEach(function(inp){ body[inp.dataset.f]=inp.value; });
+            var id=btn.dataset[A]; if(cfg.coerce)body=cfg.coerce(body,id);
+            btn.disabled=true; var msg=IDS.msg&&document.getElementById(IDS.msg); if(msg)msg.textContent='Saving…';
+            fetch(cfg.saveUrl(id),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
+              .then(function(rp){return rp.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error);
+                var lr=findRow(id); if(lr){ if(cfg.patch)cfg.patch(lr,body); else Object.keys(body).forEach(function(k){ lr[k]=body[k]; }); }
+                invalidateDerived(); editId=null; draw(); })
+              .catch(function(e){ btn.disabled=false; if(msg)msg.innerHTML='<span style="color:#dc2626">Save failed: '+esc(e.message||e)+'</span>'; }); }; }
         if(cfg.wireEdit)cfg.wireEdit(r,api);
         return; }
       b.innerHTML=cfg.listHtml(q);
@@ -4758,9 +4759,8 @@
       else if(CONFIG_SUB==='branches'){ b.innerHTML=brTbl(); bindEdits(); }
       else if(CONFIG_SUB==='suppliers'){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/suppliers').then(function(r){return r.json();}).then(function(rows){
-          // Suppliers have ~13 fields (identity + payment terms + contact). Same treatment as Key accounts:
-          // a scannable CARD LIST + a grouped full-width EDIT FORM. Same endpoints/fields as the old editTbl.
-          var sq='', editId=null;
+          // Suppliers have ~13 fields (identity + payment terms + contact) — a scannable CARD LIST + a grouped
+          // full-width EDIT FORM, via the shared cardEditor(). The %-sum live indicator is a wireEdit hook.
           var KINDS=['supplier','freight','internal','other'], CURS=['USD','GBP','EUR','AUD','CAD'];
           function fieldOf(r,f){ return r[f]==null?'':r[f]; }
           function pct(v){ return (v==null||v==='')?'–':(''+v).replace(/[^0-9.\-]/g,'')+'%'; }
@@ -4778,7 +4778,7 @@
               +(r.export_port?metaRow('Export port', r.export_port):'')
               +(function(){ var ids=[]; if(r.cin7_member_id)ids.push('Cin7 '+r.cin7_member_id); if(r.fulfil_id)ids.push('Fulfil '+r.fulfil_id); return ids.length?metaRow('IDs', ids.join(' · ')):''; })()
               +'</div>'; }
-          function listHtml(){ var f=sq?rows.filter(function(x){return String(JSON.stringify(x)||'').toLowerCase().indexOf(sq)>=0;}):rows;
+          function listHtml(sq){ var f=sq?rows.filter(function(x){return String(JSON.stringify(x)||'').toLowerCase().indexOf(sq)>=0;}):rows;
             var cards=f.length?('<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-top:12px">'+f.map(cardHtml).join('')+'</div>'):'<div class="count" style="padding:10px 2px">No suppliers'+(sq?' match your search':' yet')+'.</div>';
             return '<div class="sect-h">Suppliers — payment terms drive every payment calc <span class="mut tiny">(<b>Prod</b> = production lead time; a PO&rsquo;s production-end date = start + this, unless overridden)</span> <button class="tool-badge bg-blue" id="sup-new" style="cursor:pointer;border:none;margin-left:8px">+ Supplier</button></div>'
               +'<div class="bar"><input class="flt" id="sup-q" placeholder="Search name / code / contact / country…" value="'+esc(sq)+'" style="width:300px;background:#eff6ff;border-color:#93c5fd"><span class="count" style="margin-left:8px">'+f.length+(sq?' / '+rows.length:'')+' supplier'+(f.length===1?'':'s')+'</span></div>'
@@ -4841,26 +4841,15 @@
               +'<span id="sup-msg" class="mut tiny" style="align-self:center;margin-left:6px"></span></div></div>'; }
           function updPctSum(){ var el=document.getElementById('sup-pctsum'); if(!el)return; var s=0; ['start_deposit_pct','completion_pct','balance_pct'].forEach(function(f){ var i=b.querySelector('.sup-in[data-f="'+f+'"]'); if(i)s+=parseFloat(i.value)||0; });
             s=Math.round(s*100)/100; el.innerHTML='Deposit + Completion + Balance = <b style="color:'+(s===100?'#16a34a':'#b45309')+'">'+s+'%</b>'+(s===100?'':' — should total 100%'); }
-          function draw(){ var r=(editId!=null)&&rows.filter(function(x){return String(x.id)===String(editId);})[0];
-            if(r){ b.innerHTML=editHtml(r); updPctSum();
-              b.querySelectorAll('.sup-in[data-f="start_deposit_pct"],.sup-in[data-f="completion_pct"],.sup-in[data-f="balance_pct"]').forEach(function(i){ i.oninput=updPctSum; });
-              document.getElementById('sup-back').onclick=document.getElementById('sup-cancel').onclick=function(){ editId=null; draw(); };
-              document.getElementById('sup-save').onclick=function(){ var btn=this, body={};
-                b.querySelectorAll('.sup-in').forEach(function(inp){ body[inp.dataset.f]=inp.value; });
-                btn.disabled=true; var msg=document.getElementById('sup-msg'); msg.textContent='Saving…';
-                fetch('/api/supply/supplier/'+encodeURIComponent(btn.dataset.k),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
-                  .then(function(rp){return rp.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error);
-                    var lr=rows.filter(function(x){return String(x.id)===String(btn.dataset.k);})[0]; if(lr)Object.keys(body).forEach(function(k){ lr[k]=body[k]; });
-                    invalidateDerived(); editId=null; draw(); })
-                  .catch(function(e){ btn.disabled=false; msg.innerHTML='<span style="color:#dc2626">Save failed: '+esc(e.message||e)+'</span>'; }); };
-              return; }
-            b.innerHTML=listHtml();
-            document.getElementById('sup-new').onclick=function(){ var nm=prompt('New supplier name:'); if(!nm||!nm.trim())return; var cd=prompt('Supplier code (2 letters, optional):')||'';
-              shipPost('/api/supply/supplier-create',{name:nm.trim(),code:cd.trim()||null},showSub); };
-            document.getElementById('sup-q').oninput=function(){ sq=this.value.trim().toLowerCase(); var cur=this.selectionStart; draw(); var q=document.getElementById('sup-q'); if(q){ q.focus(); try{q.setSelectionRange(cur,cur);}catch(e){} } };
-            b.querySelectorAll('.sup-edit').forEach(function(btn){ btn.onclick=function(){ editId=btn.dataset.k; draw(); }; });
-          }
-          draw(); }); }
+          cardEditor({ mount:b, rows:rows, idOf:function(r){return r.id;}, inClass:'sup-in', searchId:'sup-q',
+            listHtml:listHtml, editHtml:editHtml, editSel:'.sup-edit', idAttr:'k',
+            ids:{save:'sup-save',back:'sup-back',cancel:'sup-cancel',msg:'sup-msg'},
+            saveUrl:function(id){ return '/api/supply/supplier/'+encodeURIComponent(id); },
+            wireEdit:function(){ updPctSum();
+              b.querySelectorAll('.sup-in[data-f="start_deposit_pct"],.sup-in[data-f="completion_pct"],.sup-in[data-f="balance_pct"]').forEach(function(i){ i.oninput=updPctSum; }); },
+            wireList:function(){ var nb=document.getElementById('sup-new'); if(nb)nb.onclick=function(){ var nm=prompt('New supplier name:'); if(!nm||!nm.trim())return; var cd=prompt('Supplier code (2 letters, optional):')||'';
+              shipPost('/api/supply/supplier-create',{name:nm.trim(),code:cd.trim()||null},showSub); }; } });
+        }); }
       else if(CONFIG_SUB==='keyaccounts'){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/key-accounts').then(function(r){return r.json();}).then(function(rows){
           // Key accounts have ~15 fields (address, requirements + 5 pack/label toggles each with notes) — a scannable
@@ -5158,10 +5147,10 @@
           function validSku(v){ return !!skuSet[String(v||'').trim().toUpperCase()]; }
           function nameOf(v){ return skuName[String(v||'').trim().toUpperCase()]||''; }
           var byP={}; rows.forEach(function(x){(byP[x.parent_sku]=byP[x.parent_sku]||[]).push(x);});
-          var kq='', editParent=null;   // list mode; '__new__' = create; else a parent SKU
+          // via shared cardEditor(); the "id" is a parent SKU ('__new__' = create). Custom multi-op save = onSave.
           function bomSave(parent,comp,qty){ return fetch('/api/supply/manufacturing-bom-save',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({parent_sku:parent,component_sku:comp,qty:qty})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); return j; }); }
           function bomDel(parent,comp){ return fetch('/api/supply/manufacturing-bom-delete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({parent_sku:parent,component_sku:comp})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); return j; }); }
-          function reload(){ b.innerHTML='<div class="count">Loading…</div>'; fetch('/api/supply/manufacturing-bom').then(function(r){return r.json();}).then(function(rw){ rows=Array.isArray(rw)?rw:[]; byP={}; rows.forEach(function(x){(byP[x.parent_sku]=byP[x.parent_sku]||[]).push(x);}); editParent=null; draw(); }); }
+          function reload(api){ b.innerHTML='<div class="count">Loading…</div>'; fetch('/api/supply/manufacturing-bom').then(function(r){return r.json();}).then(function(rw){ rows=Array.isArray(rw)?rw:[]; byP={}; rows.forEach(function(x){(byP[x.parent_sku]=byP[x.parent_sku]||[]).push(x);}); if(api)api.list(); }); }
           // ── searchable SKU dropdown (input + filtering popover; picks from the product list) ──
           function skuSelHtml(extraCls,val,w){ return '<div class="skusel" style="position:relative;display:inline-block">'
             +'<input class="fci skusel-inp'+(extraCls?(' '+extraCls):'')+'" value="'+esc(val||'')+'" placeholder="search SKU / name…" autocomplete="off" style="width:'+(w||'240px')+'">'
@@ -5185,7 +5174,7 @@
               +'<div class="mut tiny" style="text-transform:uppercase;letter-spacing:.3px;font-weight:700;margin-bottom:3px">'+comps.length+' component'+(comps.length===1?'':'s')+'</div>'
               +'<div style="display:flex;flex-direction:column;gap:2px">'+comps.map(function(x){ var cn=nameOf(x.component_sku);
                   return '<div style="font-size:12px;display:flex;justify-content:space-between;gap:8px"><span style="min-width:0;word-break:break-word">'+esc(x.component_sku)+(cn?' <span class="mut tiny">'+esc(cn)+'</span>':'')+'</span><span style="font-weight:700;white-space:nowrap">×'+esc(String(x.qty))+'</span></div>'; }).join('')+'</div></div>'; }
-          function listHtml(){ var ps=Object.keys(byP).sort();
+          function listHtml(kq){ var ps=Object.keys(byP).sort();
             var f=kq?ps.filter(function(p){ return (p+' '+nameOf(p)+' '+(byP[p]||[]).map(function(x){return x.component_sku+' '+nameOf(x.component_sku);}).join(' ')).toLowerCase().indexOf(kq)>=0; }):ps;
             var cards=f.length?('<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;margin-top:12px">'+f.map(cardHtml).join('')+'</div>'):'<div class="count" style="padding:10px 2px">No BOM bundles'+(kq?' match your search':' yet')+'.</div>';
             return '<div class="sect-h">Manufacturing BOM <span class="mut tiny">(finished / bundle product → components × per-unit qty; SKUs are picked from the product list)</span> <button class="tool-badge bg-blue" id="bom-new" style="cursor:pointer;border:none;margin-left:8px">+ New bundle</button></div>'
@@ -5208,8 +5197,8 @@
               +'<div style="display:flex;gap:8px;margin-top:16px;padding-top:12px;border-top:1px solid #eef2f7"><button id="bom-save" style="cursor:pointer;border:none;background:#2563eb;color:#fff;padding:6px 18px;border-radius:6px;font-size:12px;font-weight:600">Save changes</button>'
               +'<button id="bom-cancel" style="cursor:pointer;border:1px solid #cbd5e1;background:#fff;padding:6px 14px;border-radius:6px;font-size:12px">Cancel</button>'
               +'<span id="bom-msg" class="mut tiny" style="align-self:center;margin-left:6px"></span></div></div>'; }
-          function doSave(){ var isNew=(editParent==='__new__');
-            var parent=isNew?(b.querySelector('.bom-parent .skusel-inp').value.trim()):editParent;
+          function doSave(ep, api){ var isNew=(ep==='__new__');
+            var parent=isNew?(b.querySelector('.bom-parent .skusel-inp').value.trim()):ep;
             var msg=document.getElementById('bom-msg'), saveBtn=document.getElementById('bom-save');
             function bad(t){ msg.innerHTML='<span style="color:#dc2626">'+esc(t)+'</span>'; }
             if(!parent){ bad('Pick a finished / bundle SKU.'); return; }
@@ -5222,28 +5211,26 @@
               if(!(qty>0)){ bad('Enter a qty > 0 for '+sku+'.'); return; }
               var u=sku.toUpperCase(); if(seen[u]){ bad(sku+' is listed twice.'); return; } seen[u]=1; comps.push({sku:sku,qty:qty}); }
             if(!comps.length){ bad('Add at least one component.'); return; }
-            var origSkus=isNew?[]:(byP[editParent]||[]).map(function(x){return x.component_sku;});
+            var origSkus=isNew?[]:(byP[ep]||[]).map(function(x){return x.component_sku;});
             var newSet={}; comps.forEach(function(c){newSet[c.sku.toUpperCase()]=1;});
             var ops=comps.map(function(c){return bomSave(parent,c.sku,c.qty);});
             origSkus.forEach(function(os){ if(!newSet[os.toUpperCase()]) ops.push(bomDel(parent,os)); });
             saveBtn.disabled=true; msg.textContent='Saving…';
-            Promise.all(ops).then(function(){ reload(); }).catch(function(e){ saveBtn.disabled=false; bad('Save failed: '+(e.message||e)); }); }
-          function draw(){
-            if(editParent!=null){ b.innerHTML=editHtml(editParent); wireSkuSel(b);
-              document.getElementById('bom-back').onclick=document.getElementById('bom-cancel').onclick=function(){ editParent=null; draw(); };
+            Promise.all(ops).then(function(){ reload(api); }).catch(function(e){ saveBtn.disabled=false; bad('Save failed: '+(e.message||e)); }); }
+          cardEditor({ mount:b, rows:[], idOf:function(r){return r;}, searchId:'bom-q',
+            listHtml:listHtml, editHtml:editHtml, editSel:'.bom-edit', idAttr:'p',
+            ids:{save:'bom-save',back:'bom-back',cancel:'bom-cancel',msg:'bom-msg'},
+            editStub:function(id){ return id; },   // the "row" for the edit form is just the parent SKU / '__new__'
+            onSave:doSave,
+            wireEdit:function(r,api){ wireSkuSel(b);
               function rm(){ this.closest('.bomc-row').remove(); }
               b.querySelectorAll('.bomc-rm').forEach(function(x){x.onclick=rm;});
-              document.getElementById('bomc-add').onclick=function(){ var list=document.getElementById('bomc-list'); var w=document.createElement('div'); w.innerHTML=compRow('',''); var node=w.firstChild; list.appendChild(node); wireSkuSel(list); node.querySelector('.bomc-rm').onclick=rm; var si=node.querySelector('.skusel-inp'); if(si)si.focus(); };
-              document.getElementById('bom-save').onclick=doSave;
-              return; }
-            b.innerHTML=listHtml();
-            document.getElementById('bom-new').onclick=function(){ editParent='__new__'; draw(); };
-            var q=document.getElementById('bom-q'); if(q)q.oninput=function(){ kq=this.value.trim().toLowerCase(); var c=this.selectionStart; draw(); var q2=document.getElementById('bom-q'); if(q2){q2.focus(); try{q2.setSelectionRange(c,c);}catch(e){}} };
-            b.querySelectorAll('.bom-edit').forEach(function(btn){ btn.onclick=function(){ editParent=btn.dataset.p; draw(); }; });
-            b.querySelectorAll('.bom-delb').forEach(function(btn){ btn.onclick=function(){ var p=btn.dataset.p; if(!confirm('Delete the ENTIRE bundle "'+p+'" and all its components? This cannot be undone.'))return;
-              btn.disabled=true; bomDel(p,'').then(function(){ delete byP[p]; draw(); }).catch(function(e){ btn.disabled=false; alert('Delete failed: '+(e.message||e)); }); }; });
-          }
-          draw();
+              document.getElementById('bomc-add').onclick=function(){ var list=document.getElementById('bomc-list'); var w=document.createElement('div'); w.innerHTML=compRow('',''); var node=w.firstChild; list.appendChild(node); wireSkuSel(list); node.querySelector('.bomc-rm').onclick=rm; var si=node.querySelector('.skusel-inp'); if(si)si.focus(); }; },
+            wireList:function(api){
+              var nb=document.getElementById('bom-new'); if(nb)nb.onclick=function(){ api.edit('__new__'); };
+              b.querySelectorAll('.bom-delb').forEach(function(btn){ btn.onclick=function(){ var p=btn.dataset.p; if(!confirm('Delete the ENTIRE bundle "'+p+'" and all its components? This cannot be undone.'))return;
+                btn.disabled=true; bomDel(p,'').then(function(){ delete byP[p]; api.draw(); }).catch(function(e){ btn.disabled=false; alert('Delete failed: '+(e.message||e)); }); }; });
+            } });
         }).catch(function(e){ b.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>'; }); }
       else if(CONFIG_SUB==='products'){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/products-all').then(function(r){return r.json();}).then(function(d){ if(d&&d.error){b.innerHTML='<div class="count">'+esc(d.error)+'</div>';return;}
