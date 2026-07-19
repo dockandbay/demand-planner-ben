@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.630 - PO detail: consolidate sub-tabs (Landed→Payments, Docs→Master Data)
+
+- LANDED COSTS moved under the **PAYMENTS** tab (below the payment schedule, divider
+  between). Landed-cost exceptions now fold into the PAYMENTS badge count.
+- DOCUMENTS moved under **MASTER DATA**, tab renamed **MASTER DATA & DOCS**.
+- PO detail now has 7 tabs (was 9): Payments · Dates · Client/FBA · Order Plan ·
+  Shipments · Master Data & Docs · Timeline. Old #.../landed|documents/<PO> deep links
+  degrade gracefully to the default tab.
+
 ## v25.629 - PO detail: remove "Linked Records" sub-tab
 
 - Dropped the LINKED RECORDS tab from the PO detail panel (drawer + grid) — it added no
