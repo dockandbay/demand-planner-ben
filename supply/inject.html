@@ -4375,9 +4375,10 @@
     // when active, expands a level-3 row of its member config tabs.
     var SC_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom'];
     var SC_LABEL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'Manufacturing BOM'};
-    var L2=[['general','General settings'],['portalusers','Portal users'],['portal','Portal'],['keyaccounts','Key accounts'],['products','Products'],['forecast-export','Exports & uploads']];
+    var L2=[['general','General settings'],['portalusers','Portal users'],['portal','Portal'],['keyaccounts','Key accounts'],['products','Products'],['export-uploads','Exports & uploads']];
     if(ME&&ME.is_admin)L2.push(['permissions','Permissions']);   // admin-only tab
     L2.push(['supplychain','Supply chain']);                     // expands to the level-3 row below
+    if(CONFIG_SUB==='forecast-export')CONFIG_SUB='export-uploads';   // legacy slug redirect
     if(CONFIG_SUB==='permissions'&&!(ME&&ME.is_admin))CONFIG_SUB='general';   // guard: non-admins can't land on Permissions
     function reload(){ delete cache['config']; selectSection('config'); }   // refresh after a rate add (keeps sub-tab)
     // Generic Edit/Save row table: read-only cells + an Edit button per row; Edit swaps that row's cells to inputs
@@ -4842,7 +4843,7 @@
           document.getElementById('pp-sup').onchange=function(){ PORTAL_SUP=this.value; syncHash(); mountFor(this.value); };
           if(PORTAL_SUP)mountFor(PORTAL_SUP);
         }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); }
-      else if(CONFIG_SUB==='forecast-export'){ b.innerHTML='<div class="count">Loading…</div>';
+      else if(CONFIG_SUB==='export-uploads'){ b.innerHTML='<div class="count">Loading…</div>';
         Promise.all([fetch('/api/forecast/export-settings').then(function(r){return r.json();}),
                      fetch('/api/app-settings').then(function(r){return r.json();}).catch(function(){return {};})]).then(function(_res){ var rows=_res[0]||[], _appset=_res[1]||{};
           var head='<div class="sect-h">Forecast export by country <span class="mut tiny">— per-country CSV (all SKUs × month · DTC / FBA / B2B) for the next 12 months. Email it to the country contact and/or upload to DriveHQ.</span></div>';
@@ -4856,11 +4857,11 @@
                 +'<button class="save-btn fx-drive-btn" data-c="'+c+'">⬆ DriveHQ</button></td></tr>'; }).join('')
             +'</tbody></table></div>';
           // ── Report exports — email a report CSV to a saved recipient ──
-          var RX=[['cf_transactions','Cash Flow Transactions','all cash-flow transactions'],['cf_arrivals','Cash Flow Stock Arrivals','stock arrivals (goods + duty per PO)'],['auto_forecast','Auto Forecast','payments plan — cash out by month (USD + GBP)']];
-          var rxHead='<div class="sect-h" style="margin-top:22px">Report exports — email <span class="mut tiny">— set a recipient and email the current CSV (same data as the on-screen export).</span></div>';
+          var RX=[['cf_transactions','Cash Flow Transactions','all cash-flow transactions','#/supply/reports/cashflow'],['cf_arrivals','Cash Flow Stock Arrivals','stock arrivals (goods + duty per PO)','#/supply/reports/cashflow'],['auto_forecast','Auto Forecast','payments plan — cash out by month (USD + GBP)','#/reports/af']];
+          var rxHead='<div class="sect-h" style="margin-top:22px">Report exports — email <span class="mut tiny">— set a recipient and email the current CSV (same data as the on-screen export). Report names link to the source page.</span></div>';
           var rxTbl='<div class="tw" style="max-width:820px"><table><thead><tr><th class="l">Report</th><th class="l">Email to</th><th class="l">Action</th></tr></thead><tbody>'
             +RX.map(function(x){ var ek=x[0], em=esc(_appset['export_email_'+ek]||'');
-              return '<tr><td class="l"><b>'+esc(x[1])+'</b><div class="mut tiny">'+esc(x[2])+'</div></td>'
+              return '<tr><td class="l"><b><a href="'+esc(x[3])+'" style="color:#2563eb;text-decoration:none" title="Open '+esc(x[1])+'">'+esc(x[1])+' ↗</a></b><div class="mut tiny">'+esc(x[2])+'</div></td>'
                 +'<td class="l"><input class="fci txt rx-email" data-ek="'+ek+'" value="'+em+'" placeholder="finance email…" style="width:250px"></td>'
                 +'<td class="l" style="white-space:nowrap"><button class="save-btn rx-csv" data-ek="'+ek+'">⬇ CSV</button> <button class="save-btn rx-email-btn" data-ek="'+ek+'">✉ Email</button></td></tr>'; }).join('')
             +'</tbody></table></div>';

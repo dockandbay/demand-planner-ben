@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.625 - Config: rename slug to export-uploads + link report exports to source pages
+
+- CONFIG "Exports & uploads" tab slug renamed `forecast-export` → `export-uploads`
+  (URL is now #/config/export-uploads). Legacy #/config/forecast-export auto-redirects.
+- In "Report exports — email", each report name is now a hyperlink (↗) to its source
+  page: Cash Flow Transactions + Stock Arrivals → #/supply/reports/cashflow;
+  Auto Forecast → #/reports/af.
+- Pure UI/routing change — no behaviour, endpoint, or schema change.
+
 ## v25.624 - Config: "Supply chain" as a level-2 tab that expands a level-3 row
 
 - Replaced the v25.622 grouped-heading approach. CONFIG now has a normal level-2 nav
