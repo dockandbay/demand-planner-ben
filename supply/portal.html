@@ -70,6 +70,7 @@
   function showPortal(me){
     var sup=(me.suppliers||[]).join(', ')||'Supplier';
     root.innerHTML='<header class="pv-top"><h1>Dock &amp; Bay</h1><span class="sup">'+esc(sup)+'</span><span class="sp"></span>'
+      +'<span style="font-size:10px;opacity:.5;margin-right:10px" title="app version — tell Ben this if something looks stale">__APP_VERSION__</span>'
       +'<button class="pv-btn ghost" id="logout">Sign out</button></header><div id="pv-wrap"><div id="pv"></div></div>';
     document.getElementById('logout').onclick=function(){ api('/api/portal/logout',{}).then(showLogin); };
     var s=document.createElement('script'); s.src='/portal-view.js?v='+Date.now();   // cache-bust: always fetch the latest portal-view.js (tunnels/proxies were serving stale CSS + JS)
