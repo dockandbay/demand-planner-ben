@@ -7920,11 +7920,6 @@ function renderAutoForecastReport(body){
       +'<div style="overflow-x:auto"><table class="tw" style="font-size:11px;min-width:900px"><thead><tr><th style="text-align:left;padding:4px 6px">Payment</th>'
       +th+'<th style="text-align:right;padding:4px 6px;border-left:2px solid #ccc">12-mo</th></tr></thead><tbody>'
       +PAY_ROWS.map(function(r){return prow(r[0],r[1],r[0].indexOf('TOTAL')===0,div);}).join('')+'</tbody></table></div>'; };
-    // export matrix: Currency, Payment, [months…], 12-mo — USD then GBP (whole numbers)
-    var afPayMatrix=function(){ var hdr=['Currency','Payment'].concat(mo.map(afMonthLabel)).concat(['12-mo']); var rows=[hdr];
-      [['USD',1],['GBP',AF_GBP]].forEach(function(cd){ PAY_ROWS.forEach(function(r){ var arr=r[1], t=arr.reduce(function(a,b){return a+b;},0);
-        rows.push([cd[0],r[0]].concat(arr.map(function(v){return Math.round(v/cd[1]);})).concat([Math.round(t/cd[1])])); }); });
-      return rows; };
     // single-currency summary matrix: Payment, [months…], 12-mo (whole numbers)
     var afPayCur=function(div){ var hdr=['Payment'].concat(mo.map(afMonthLabel)).concat(['12-mo']); var rows=[hdr];
       PAY_ROWS.forEach(function(r){ var arr=r[1], t=arr.reduce(function(a,b){return a+b;},0);
@@ -7940,7 +7935,8 @@ function renderAutoForecastReport(body){
     var afDl=function(csv,fn){ var blob=new Blob([csv],{type:'text/csv;charset=utf-8'}), url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download=fn; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(function(){URL.revokeObjectURL(url);},1000); };
     var afFlash=function(btn){ var o=btn.textContent; btn.textContent='✓'; setTimeout(function(){btn.textContent=o;},1200); };
     var pay='<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:16px 0 0"><span style="font-size:11px;font-weight:700;color:#888">PAYMENTS PLAN</span>'
-      +'<button class="view-toggle" id="af-pay-copy" style="font-size:11px">⧉ Copy</button>'
+      +'<button class="view-toggle" id="af-pay-copy" style="font-size:11px">⧉ Copy (USD)</button>'
+      +'<button class="view-toggle" id="af-pay-copy-gbp" style="font-size:11px">⧉ Copy (GBP)</button>'
       +'<button class="view-toggle" id="af-pay-csv" style="font-size:11px">⬇ CSV (USD)</button>'
       +'<button class="view-toggle" id="af-pay-csv-gbp" style="font-size:11px">⬇ CSV (GBP)</button>'
       +'<span style="width:1px;height:16px;background:#ddd;margin:0 4px"></span>'
@@ -7955,8 +7951,10 @@ function renderAutoForecastReport(body){
       +'(deposit at order · completion at order+production days · balance at arrival+credit days). Freight+duty estimated at '+Math.round(a.freight_pct*100)+'% of cost (flat uplift — precise landed cost is on the PO view).'
       +(a.truncated?' <span style="color:#b45309">Some orders fall outside the 12-month window and are not shown.</span>':'')+'</div>';
     content.innerHTML=u+pay+note;
-    var cpBtn=content.querySelector('#af-pay-copy'); if(cpBtn)cpBtn.onclick=function(){ var tsv=afPayMatrix().map(function(r){return r.join('\t');}).join('\n');
-      navigator.clipboard.writeText(tsv).then(function(){var o=cpBtn.textContent;cpBtn.textContent='✓ Copied';setTimeout(function(){cpBtn.textContent=o;},1400);}).catch(function(){alert('Copy blocked by the browser.');}); };
+    var afCopyCur=function(btn,div){ var tsv=afPayCur(div).map(function(r){return r.join('\t');}).join('\n');
+      navigator.clipboard.writeText(tsv).then(function(){var o=btn.textContent;btn.textContent='✓ Copied';setTimeout(function(){btn.textContent=o;},1400);}).catch(function(){alert('Copy blocked by the browser.');}); };
+    var cpBtn=content.querySelector('#af-pay-copy'); if(cpBtn)cpBtn.onclick=function(){ afCopyCur(cpBtn,1); };
+    var cpGbp=content.querySelector('#af-pay-copy-gbp'); if(cpGbp)cpGbp.onclick=function(){ afCopyCur(cpGbp,AF_GBP); };
     var csBtn=content.querySelector('#af-pay-csv'); if(csBtn)csBtn.onclick=function(){ afDl(afToCsv(afPayCur(1)),'auto_forecast_payments_plan_USD.csv'); afFlash(csBtn); };
     var csGbp=content.querySelector('#af-pay-csv-gbp'); if(csGbp)csGbp.onclick=function(){ afDl(afToCsv(afPayCur(AF_GBP)),'auto_forecast_payments_plan_GBP.csv'); afFlash(csGbp); };
     var txCp=content.querySelector('#af-txn-copy'); if(txCp)txCp.onclick=function(){ var tsv=afTxnRows().map(function(r){return r.join('\t');}).join('\n');

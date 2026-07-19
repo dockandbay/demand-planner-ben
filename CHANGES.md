@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.626 - Auto Forecast: split Copy into Copy (USD) / Copy (GBP)
+
+- Payments plan toolbar now has separate **Copy (USD)** and **Copy (GBP)** buttons
+  (each copies its single-currency matrix), matching the CSV (USD)/(GBP) buttons.
+- Removed the unused combined-matrix helper.
+
 ## v25.625 - Config: rename slug to export-uploads + link report exports to source pages
 
 - CONFIG "Exports & uploads" tab slug renamed `forecast-export` → `export-uploads`
