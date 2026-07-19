@@ -486,8 +486,10 @@
   /* PO-detail PANELS (Timeline / Order Plan / …): bound each panel to the viewport and let its wide content
      scroll sideways WITHIN the panel. The .ppx is JS-pinned to the left of the full-grid-width cell, so without
      this the right of a wide panel is unreachable — grid-scroll just re-pins .ppx back to the left. */
-  #supply-root table.pp-tbl .ppx{width:100vw;max-width:100vw;box-sizing:border-box}
+  #supply-root table.pp-tbl .ppx{width:100vw;max-width:100vw;box-sizing:border-box;padding-left:0!important;padding-right:0!important}
   #supply-root .pptab-panel{max-width:100vw;overflow-x:auto;-webkit-overflow-scrolling:touch;box-sizing:border-box}
+  /* detail cell flush to the left edge — drop the inherited tbody-td horizontal padding so there's no indent */
+  #supply-root table.pp-tbl tr[id^="pp-"]>td{padding-left:0;padding-right:0}
   /* stop iOS inflating large text; trim oversized headings */
   #supply-root .sect-h{font-size:11px}
   #supply-root .ppx-h{font-size:12px}
@@ -894,7 +896,7 @@
             ? '<tr class="pp-grp" data-grp="'+esc(_gkey)+'"><td colspan="20" style="cursor:pointer;user-select:none" title="click to expand / collapse this production"><span class="pp-grp-car">▾</span> '+(_gk?('P# '+esc(_gk)):'No production number')+' — '+_gcnt+" PO"+(_gcnt>1?"'s":"")+'</td></tr>'
             : '';
           // lazy: the heavy expanded card (all sub-tabs) is built on first expand, not upfront (see .pp-exp handler)
-          var det='<tr id="pp-'+i+'" data-po="'+esc(p.po)+'" data-grp="'+esc(_gkey)+'" style="display:none"><td></td><td colspan="19"><div class="count">Loading…</div></td></tr>';
+          var det='<tr id="pp-'+i+'" data-po="'+esc(p.po)+'" data-grp="'+esc(_gkey)+'" style="display:none"><td colspan="20"><div class="count">Loading…</div></td></tr>';   // single flush cell (no leading empty td) so the detail panel isn't indented by the MANAGE column
           var sb=subsByPo[p.po]||[]; var nts=notesByPo[p.po]||[]; var unreadInt=nts.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
           var cdS=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean), xdm=xdByPo[p.po]||{};
           var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
@@ -1510,7 +1512,7 @@
             var pqi=body.querySelector('.pp-po-q'); if(pqi)pqi.oninput=debounce(function(){ PORTAL_PO_Q=pqi.value; _ppShowAllPO=false; var foc=document.activeElement===pqi; renderPP(); if(foc){ var n=body.querySelector('.pp-po-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } } },350);
             if(_ppOpenPO){ var _ob=body.querySelector('.pp-exp[data-po="'+((window.CSS&&CSS.escape)?CSS.escape(_ppOpenPO):_ppOpenPO)+'"]'); _ppOpenPO=null; if(_ob)setTimeout(function(){_ob.click();},0); }   // came from a Shipment Plan PO link → auto-open it
             body.querySelectorAll('.pp-exp').forEach(function(btn){ btn.onclick=function(){ var i=btn.dataset.i, ex=document.getElementById('pp-'+i); if(!ex)return;
-              if(!ex.dataset.built){ ex.dataset.built='1'; var po=ex.dataset.po, p=_ppData.pos.filter(function(x){return x.po===po;})[0], cell=ex.children[1];
+              if(!ex.dataset.built){ ex.dataset.built='1'; var po=ex.dataset.po, p=_ppData.pos.filter(function(x){return x.po===po;})[0], cell=ex.children[0];
                 if(p&&cell){ cell.innerHTML=ppExpand(p,_ppData.lb[po]||[],_ppData.notesByPo[po]||[],_ppData.subsByPo[po]||[],i,_ppData.costsByPo[po]||{},_ppData.supSkus||[],_ppData.xdByPo[po]||{},_ppData.addByPo[po]||[]); wireDetail(cell); } }
               ex.style.display=(ex.style.display!=='none')?'none':''; if(ex.style.display!=='none'&&!ex.dataset.fcLoaded){ ex.dataset.fcLoaded='1'; loadFreightCharges(ex); }
               applyPortalPin(); }; });   // align the just-opened detail to the current horizontal scroll
@@ -1526,7 +1528,7 @@
               applyPortalPin(); }; });
             // re-render ONE PO's expanded detail in place (no full reload, so MANAGE + the open tab stay put)
             function rerenderRow(row,po,keepPt){ if(!row)return; var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; if(!p)return;
-              var i=row.id.replace('pp-',''), cell=row.children[1]; if(!cell)return;
+              var i=row.id.replace('pp-',''), cell=row.children[0]; if(!cell)return;
               var cur=cell.querySelector('.pptab.active'); var want=keepPt||(cur&&cur.dataset.pt)||'orderplan';   // keep the tab the user was on
               cell.innerHTML=ppExpand(p,_ppData.lb[po]||[],_ppData.notesByPo[po]||[],_ppData.subsByPo[po]||[],i,_ppData.costsByPo[po]||{},_ppData.supSkus||[],_ppData.xdByPo[po]||{},_ppData.addByPo[po]||[]);
               wireDetail(cell); var t=cell.querySelector('.pptab[data-pt="'+want+'"]'); if(t)t.onclick(); }
