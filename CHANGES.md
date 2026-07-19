@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.673 - Slim artifact: stub server-injected data blobs (5.06MB -> 2.42MB)
+
+- The artifact baked ~2.6MB of stale data literals (_SKU_RAW 1.7MB, FC_OUTPUTS 0.5MB, DATA 0.28MB, PROD_CONST
+  0.16MB, FC_CURRENT/CATS_META/SUBS_META/BI_RULES/_SA_EXTRA/SAVED_INPUTS) that the server OVERWRITES with live
+  Supabase data on every serve (replaceGlobal). Stubbed each to {} — the source file is now half the size.
+- Behaviour-transparent: verified the served page still carries live data (_SKU_RAW 2MB, DATA 178KB, etc.),
+  and the artifact is only ever served through the injecting route (never raw). No client change; serve time
+  unchanged (it was always DB-build-bound), source read is smaller. SUB_SHARES + BP_DATA left (not server-fed).
+
 ## v25.672 - Refactor #9: config showSub() dispatch map (was a 16-branch if/else)
 
 - Replaced the ~530-line `if/else if(CONFIG_SUB===...)` chain in renderConfig.showSub() with a `SUBS{}` dispatch
