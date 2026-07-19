@@ -483,6 +483,11 @@
   #supply-root .po-subnav{position:sticky;left:0;top:0;z-index:5;width:100vw;max-width:100vw;box-sizing:border-box;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch}
   #supply-root .po-subnav::-webkit-scrollbar{height:0}
   #supply-root .po-subnav .rtab{flex:0 0 auto;white-space:nowrap}
+  /* PO-detail PANELS (Timeline / Order Plan / …): bound each panel to the viewport and let its wide content
+     scroll sideways WITHIN the panel. The .ppx is JS-pinned to the left of the full-grid-width cell, so without
+     this the right of a wide panel is unreachable — grid-scroll just re-pins .ppx back to the left. */
+  #supply-root table.pp-tbl .ppx{width:100vw;max-width:100vw;box-sizing:border-box}
+  #supply-root .pptab-panel{max-width:100vw;overflow-x:auto;-webkit-overflow-scrolling:touch;box-sizing:border-box}
   /* stop iOS inflating large text; trim oversized headings */
   #supply-root .sect-h{font-size:11px}
   #supply-root .ppx-h{font-size:12px}
