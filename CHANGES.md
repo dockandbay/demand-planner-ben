@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.614 - Payments Report: Xero copy icon + copy-to-email icon
+
+Replaced the ⧉ (copy Xero bill details) glyph with a small Xero logo mark (blue circle + white x), and the
+⎘ (copy payment summary) glyph with an envelope "copy to email" icon (purple). Behaviour unchanged.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.613 - Payments Report: fast (120ms) tooltips on the icons
 
 The copy / Xero / payment-summary icons on PURCHASE ORDERS ▸ Payments Report used the native title (slow ~1s).

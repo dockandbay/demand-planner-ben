@@ -5344,8 +5344,10 @@
         +'<div class="sect-h" style="margin-top:2px">Payments in this run ('+(r.lines||[]).length+')</div>'
         +'<table style="font-size:11px"><thead><tr><th class="l">Reference</th><th>Amount (USD)</th><th class="l">Type</th><th class="l">Production</th><th class="l">Deposit ref</th></tr></thead><tbody>'+lines+'</tbody></table></div></td></tr>';
       var hasBill=(r.lines||[]).some(function(l){return l.source!=='other';});   // bill = everything except "other"
-      var xbBtns=hasBill?' <button class="lnk-btn pay-xero-dl" data-i="'+i+'" title="Download Xero bill details">⬇</button> <button class="lnk-btn pay-xero-copy" data-i="'+i+'" title="Download Xero bill details (copy to clipboard)">⧉</button>':'';
-      xbBtns+=((r.lines||[]).length?' <button class="lnk-btn pay-sum-copy" data-i="'+i+'" title="Copy payment summary (supplier, amount, reference + line table) to clipboard" style="color:#7c3aed;font-weight:700">⎘</button>':'');
+      var xeroIco='<svg width="13" height="13" viewBox="0 0 32 32" style="vertical-align:middle"><circle cx="16" cy="16" r="16" fill="#13B5EA"/><text x="16" y="23" font-size="21" font-weight="700" text-anchor="middle" fill="#fff" font-family="Arial,Helvetica,sans-serif">x</text></svg>';
+      var emailIco='<svg width="15" height="12" viewBox="0 0 24 20" style="vertical-align:middle"><rect x="1.5" y="2" width="21" height="16" rx="2.5" fill="none" stroke="#7c3aed" stroke-width="2.2"/><path d="M2.5 4L12 11.5 21.5 4" fill="none" stroke="#7c3aed" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      var xbBtns=hasBill?' <button class="lnk-btn pay-xero-dl" data-i="'+i+'" title="Download Xero bill details">⬇</button> <button class="lnk-btn pay-xero-copy" data-i="'+i+'" title="Copy Xero bill details to the clipboard">'+xeroIco+'</button>':'';
+      xbBtns+=((r.lines||[]).length?' <button class="lnk-btn pay-sum-copy" data-i="'+i+'" title="Copy payment summary for email (supplier, amount, reference + line table)" style="color:#7c3aed;font-weight:700">'+emailIco+'</button>':'');
       return '<tr><td class="l" style="white-space:nowrap"><button class="planbtn pay-exp" data-i="'+i+'">▸</button>'+xbBtns+'</td>'
         +'<td class="l">'+esc(fd(r.dt))+'</td><td class="l">'+esc(r.supplier)+'</td>'
         +'<td><b>'+money(r.total)+'</b></td><td class="l">'+r.base_ccy+'</td>'
