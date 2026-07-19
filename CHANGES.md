@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.624 - Config: "Supply chain" as a level-2 tab that expands a level-3 row
+
+- Replaced the v25.622 grouped-heading approach. CONFIG now has a normal level-2 nav
+  (General settings · Portal users · Portal · Key accounts · Products · Exports & uploads
+  · Permissions · **Supply chain**), matching every other page.
+- Clicking **Supply chain** activates it and reveals an indented level-3 strip:
+  Import duty · Freight rates · Import tax · Suppliers · Branches · Consignees ·
+  Batches · Productions · Manufacturing BOM (opens on Import duty by default).
+- Deep links to a member tab (e.g. #/config/duty) auto-expand the level-3 row.
+- Pure UI/nav change — no behaviour, endpoint, or schema change.
+
 ## v25.623 - Auto Forecast: GBP payments CSV + transaction-level detail export
 
 - Payments plan toolbar now has **CSV (USD)** and **CSV (GBP)** for the summary matrix
