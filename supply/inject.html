@@ -99,11 +99,11 @@
 #supply-root .rtab{background:transparent;border:none;padding:6px 14px;font-size:12px;font-weight:500;cursor:pointer;color:#7c93b8;border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit}
 #supply-root .rtab:hover{color:#2563eb}
 #supply-root .rtab.active{color:#2563eb;border-bottom-color:#3b82f6;font-weight:600}
-/* Shipment drawer — right-side slide-in popout (open a shipment without leaving PURCHASE ORDERS) */
-#supply-root #shipdrawer-bg{position:fixed;inset:0;z-index:6100;background:rgba(15,23,42,0);transition:background .18s ease}   /* above the mobile PO sheet (#mob-sheet-ov, z6000) so the drawer opens on top of it */
-#supply-root #shipdrawer-bg.open{background:rgba(15,23,42,.32)}
-#supply-root #shipdrawer{position:absolute;top:0;right:0;height:100%;width:min(920px,94vw);background:#fff;box-shadow:-8px 0 28px rgba(15,23,42,.18);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1)}
-#supply-root #shipdrawer-bg.open #shipdrawer{transform:translateX(0)}
+/* Shipment / PO drawer — right-side slide-in popout (open a shipment or PO without leaving the current page) */
+#supply-root #shipdrawer-bg,#supply-root #podrawer-bg{position:fixed;inset:0;z-index:6100;background:rgba(15,23,42,0);transition:background .18s ease}   /* above the mobile PO sheet (#mob-sheet-ov, z6000) so the drawer opens on top of it */
+#supply-root #shipdrawer-bg.open,#supply-root #podrawer-bg.open{background:rgba(15,23,42,.32)}
+#supply-root #shipdrawer,#supply-root #podrawer{position:absolute;top:0;right:0;height:100%;width:min(920px,94vw);background:#fff;box-shadow:-8px 0 28px rgba(15,23,42,.18);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1)}
+#supply-root #shipdrawer-bg.open #shipdrawer,#supply-root #podrawer-bg.open #podrawer{transform:translateX(0)}
 #supply-root .shipdrawer-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 18px;border-bottom:1px solid #e6ebf2;background:#f8fafc;flex:0 0 auto}
 #supply-root .shipdrawer-title{font-size:15px;font-weight:700;color:#0f172a}
 #supply-root .shipdrawer-x{background:transparent;border:none;font-size:18px;line-height:1;cursor:pointer;color:#64748b;padding:4px 8px;font-family:inherit}
@@ -115,9 +115,9 @@
 @media (max-width:700px){
   #supply-root #sup-count{display:none}            /* PO count line — hide on mobile */
   #supply-root .po-erp-match{display:none}         /* ERP-match summary — hide on mobile */
-  #supply-root #shipdrawer-bg{background:transparent!important}
-  #supply-root #shipdrawer{top:0;right:0;left:0;width:100vw;height:100vh;height:100dvh;box-shadow:none;transform:translateY(100%);transition:transform .24s cubic-bezier(.4,0,.2,1)}
-  #supply-root #shipdrawer-bg.open #shipdrawer{transform:translateY(0)}
+  #supply-root #shipdrawer-bg,#supply-root #podrawer-bg{background:transparent!important}
+  #supply-root #shipdrawer,#supply-root #podrawer{top:0;right:0;left:0;width:100vw;height:100vh;height:100dvh;box-shadow:none;transform:translateY(100%);transition:transform .24s cubic-bezier(.4,0,.2,1)}
+  #supply-root #shipdrawer-bg.open #shipdrawer,#supply-root #podrawer-bg.open #podrawer{transform:translateY(0)}
   #supply-root .shipdrawer-head{padding:13px 14px;background:#0f172a;border-bottom:none;position:sticky;top:0;z-index:3}
   #supply-root .shipdrawer-title{color:#fff;font-size:15px}
   #supply-root .shipdrawer-x{color:#fff;font-size:22px;padding:6px 10px}
@@ -1052,12 +1052,12 @@
           +'<span class="count" style="margin-left:auto">'+(ovd.length?'<b style="color:#b91c1c">'+ovd.length+' overdue</b> · ':'')+total+' upcoming</span></div>'
         +ovdSection
         +sections
-        +'<div class="mut tiny" style="margin-top:8px">Forward calendar by date — production <b>completing</b> (per PO), then <b>shipping</b> &amp; <b>arriving</b> grouped by <b>🚢 master shipment</b> (expand ▸ to see the POs on it). Shipment dates override the PO. <b style="color:#d97706">Orange</b> = within 7 days. Click a PO to open it; click a shipment row to open the shipment; Flexport ↗ opens Flexport.</div>';
+        +'<div class="mut tiny" style="margin-top:8px">Forward calendar by date — production <b>completing</b> (per PO), then <b>shipping</b> &amp; <b>arriving</b> grouped by <b>🚢 master shipment</b> (expand ▸ to see the POs on it). Shipment dates override the PO. <b style="color:#d97706">Orange</b> = within 7 days. Click a PO or shipment to open it in a <b>popout drawer</b> (no page change); Flexport ↗ opens Flexport.</div>';
       c.querySelectorAll('.bar .pill[data-m]').forEach(function(b){b.onclick=function(){_up.mkt=b.dataset.m;view();};});
       c.querySelectorAll('.bar .pill[data-w]').forEach(function(b){b.onclick=function(){_up.wk=b.dataset.w;view();};});
       c.querySelectorAll('.up-exp').forEach(function(b){b.onclick=function(ev){ev.stopPropagation();var ex=document.getElementById('upexp-'+b.dataset.id);if(!ex)return;var open=ex.style.display!=='none';ex.style.display=open?'none':'';b.textContent=open?'▸':'▾';};});
-      c.querySelectorAll('.up-row, .up-detpo').forEach(function(b){b.onclick=function(ev){if(ev.target.closest('a'))return;gotoPO(b.dataset.po,'dates');};});
-      c.querySelectorAll('.po-jump').forEach(function(a){a.onclick=function(ev){ev.stopPropagation();gotoPO(a.dataset.po,'dates');};});
+      c.querySelectorAll('.up-row, .up-detpo').forEach(function(b){b.onclick=function(ev){if(ev.target.closest('a'))return;openPODrawer(b.dataset.po,'dates');};});
+      c.querySelectorAll('.po-jump').forEach(function(a){a.onclick=function(ev){ev.stopPropagation();openPODrawer(a.dataset.po,'dates');};});
       c.querySelectorAll('.up-shiprow').forEach(function(b){b.onclick=function(ev){if(ev.target.closest('a')||ev.target.closest('button'))return;gotoShipment(b.dataset.ref);};});
     };
     view(); }
@@ -4338,6 +4338,35 @@
   function closeShipDrawer(silent){ var bg=document.getElementById('shipdrawer-bg'); if(bg&&bg.parentNode)bg.parentNode.removeChild(bg);
     if(!silent && _shipPatchRow===refreshShipDrawer){ _shipPatchRow=_shipDrawerPrevPatch; _shipDrawerPrevPatch=null; } }
   function gotoShipmentPage(ref){ _pendingShip=ref; showPoSub('shipments'); }   // "Full page ↗" — jump to the full Shipments tab + expand
+  // open a PO from elsewhere: right-side drawer popout (stays on the current page), reusing the full PO detail
+  // panel (all tabs) via loadPoDetail(po,'DRAWER',…). "Full page ↗" jumps to the PLAN page via gotoPO.
+  // Mirrors openShipDrawer. Reusable anywhere we'd otherwise hyperlink to the PO grid.
+  var _poDrawerPrevPatch=null, _poDrawerPrevRefresh=null;
+  function openPODrawer(po,tab){ if(!po)return; tab=tab||'dates';
+    closePODrawer(true);   // drop any existing PO drawer (silent: keep saved patch to restore later)
+    var root=document.getElementById('supply-root')||document.body;
+    var bg=document.createElement('div'); bg.id='podrawer-bg';
+    bg.innerHTML='<div id="podrawer"><div class="shipdrawer-head"><div class="shipdrawer-title">PO '+esc(po)+'</div>'
+      +'<div><button class="lnk-btn shipdrawer-full" title="open the full PO page for this PO">Full page ↗</button>'
+      +'<button class="shipdrawer-x" title="close">✕</button></div></div>'
+      +'<div class="shipdrawer-body"><div id="podet-DRAWER" class="count">Loading…</div></div></div>';
+    root.appendChild(bg);
+    requestAnimationFrame(function(){ bg.classList.add('open'); });
+    bg.addEventListener('mousedown',function(e){ if(e.target===bg)closePODrawer(); });
+    bg.querySelector('.shipdrawer-x').onclick=function(){ closePODrawer(); };
+    bg.querySelector('.shipdrawer-full').onclick=function(){ closePODrawer(); gotoPO(po,tab); };
+    // while the drawer is open, in-place refreshes (after an edit/assign) target the drawer, not a grid row that
+    // may not exist on this page (e.g. the What's Next report).
+    _poDrawerPrevPatch=_poPatchRow; _poDrawerPrevRefresh=_poRefresh;
+    _poPatchRow=function(){ poRefetchPanel(po,'DRAWER'); };
+    _poRefresh=function(){ poRefetchPanel(po,'DRAWER'); };
+    // ensure poBy[po] exists (poDetailHTML reads it) — refetch the PO list if this page never loaded it
+    if(poBy[po]) loadPoDetail(po,'DRAWER',tab);
+    else fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(rows){ (rows||[]).forEach(function(x){poBy[x.po]=x;}); cache['purchase-orders']=rows; loadPoDetail(po,'DRAWER',tab); })
+      .catch(function(e){ var b=document.getElementById('podet-DRAWER'); if(b)b.innerHTML='<span style="color:#dc2626">Could not load PO: '+esc(e.message||e)+'</span>'; });
+  }
+  function closePODrawer(silent){ var bg=document.getElementById('podrawer-bg'); if(bg&&bg.parentNode)bg.parentNode.removeChild(bg);
+    if(!silent){ _poPatchRow=_poDrawerPrevPatch; _poRefresh=_poDrawerPrevRefresh; _poDrawerPrevPatch=null; _poDrawerPrevRefresh=null; } }
   function unassignedTable(un){ if(!un.length)return '<div class="count">None — every active PO is on a shipment 🎉</div>';
     var h='<div class="tw"><table><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th class="l">Status</th><th class="l">PROD#</th><th class="l">Assign to shipment</th><th class="l"></th></tr></thead><tbody>';
     h+=un.map(function(p){

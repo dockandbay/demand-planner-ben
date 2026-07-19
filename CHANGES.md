@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.628 - What's Next: PO popout drawer (reusable)
+
+- In the What's Next report, clicking a **PO** now opens a right-side **popout drawer**
+  with the full PO detail (all tabs: Payments, Dates, Order Plan, Shipments, Landed
+  Costs, Timeline, …) instead of navigating to the PO grid page. Clicking a **shipment**
+  row still opens the existing shipment drawer.
+- New reusable `openPODrawer(po, tab)` mirrors `openShipDrawer`: reuses loadPoDetail into
+  #podet-DRAWER, ensures poBy is loaded, routes in-place edit refreshes to the drawer,
+  and "Full page ↗" jumps to the full PO page. Drawer CSS generalised to cover both.
+- Only the What's Next links were switched (per Ben — other PO links change case by case).
+
 ## v25.627 - Auto Forecast: coded transaction reference + group by supplier
 
 - Transaction-detail Reference is now a code: **FC-<country>-<order-month-num>-<supplier
