@@ -4245,6 +4245,13 @@
       +dateFld('Completion','delivery_date',s.ov_delivery,s.completion,s.completion_src,{forceEdit:true,blankStart:true})
       +destFld('Ship to', s.market, s.market_src, '<select class="fci shipdest" data-field="country_code">'+COPT.map(function(o){return '<option value="'+o+'"'+(o===(s.ov_country||'')?' selected':'')+'>'+(o||'inherit')+'</option>';}).join('')+'</select>')
       +destFld('Branch', s.branch, s.branch_src, '<input class="fci txt shipdest" data-field="branch" list="branchlist" value="'+esc(s.ov_branch||'')+'" placeholder="inherit from PO" style="min-width:130px">')
+      +(function(){ var eff=s.export_port||'', ov=s.ov_export_port||'', def=s.export_port_default||'';
+        var srcTag=ov?'<span class="src m">S</span>':(eff?'<span class="mut tiny">from supplier</span>':'');
+        return '<div style="margin-right:16px;min-width:150px"><div class="mut tiny" style="text-transform:uppercase;letter-spacing:.04em">Export port</div>'
+          +'<div style="font-weight:700;font-size:15px;margin:2px 0 4px">'+(eff?esc(eff)+' '+srcTag:'<span class="mut">—</span>')+'</div>'
+          +'<div class="mut tiny">override (blank = supplier default)</div>'
+          +'<input class="fci txt shipdest" data-field="export_port" value="'+esc(ov)+'" placeholder="'+esc(def||'supplier default')+'" style="min-width:150px">'
+          +'</div>'; })()
       +'</div>'
       +(function(){ var fr=shipFreight(s), m=s.mode_eff;
         var se=seaEst(s.sea_tiers,s.pallets);
@@ -4731,6 +4738,7 @@
               +'<button class="sup-edit" data-k="'+id+'" style="cursor:pointer;border:1px solid #cbd5e1;background:#f8fafc;padding:3px 12px;border-radius:5px;font-size:11px;white-space:nowrap">Edit</button></div>'
               +'<div style="margin-bottom:4px">'+kindBadge(r.kind)+' <span class="mut tiny">'+esc(fieldOf(r,'default_currency')||'USD')+(r.country?' · '+esc(r.country):'')+'</span></div>'
               +metaRow('Terms', terms)+metaRow('Lead', lead)+metaRow('Contact', [r.contact_name,r.email].filter(Boolean).join(' · '))
+              +(r.export_port?metaRow('Export port', r.export_port):'')
               +(function(){ var ids=[]; if(r.cin7_member_id)ids.push('Cin7 '+r.cin7_member_id); if(r.fulfil_id)ids.push('Fulfil '+r.fulfil_id); if(r.grs_number)ids.push('GRS '+r.grs_number); return ids.length?metaRow('IDs', ids.join(' · ')):''; })()
               +'</div>'; }
           function listHtml(){ var f=sq?rows.filter(function(x){return String(JSON.stringify(x)||'').toLowerCase().indexOf(sq)>=0;}):rows;
@@ -4763,6 +4771,7 @@
               +lblBlk('City','', inp('city', fieldOf(r,'city'),'200px'))
               +lblBlk('State / province','', inp('state', fieldOf(r,'state'),'200px'))
               +lblBlk('Postcode','', inp('postcode', fieldOf(r,'postcode'),'160px'))
+              +lblBlk('Export port','Default port of loading — a shipment inherits this and can override it.', inp('export_port', fieldOf(r,'export_port'),'200px'))
               +'</div>'
               +'<div style="border-top:1px solid #eef2f7;margin:2px 0 14px"></div>'
               +'<div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:10px">Compliance &amp; ERP IDs</div>'

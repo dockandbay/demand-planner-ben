@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.634';
+const APP_VERSION = 'v25.635';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -1485,7 +1485,7 @@ app.get('/api/supply/:section', async (req, res) => {
           start_deposit_pct,completion_pct,balance_pct,credit_days,credit_type,
           credit_fee_on_balance_pct,production_days,country,contact_name,email,
           business_name,address_1,address_2,city,state,postcode,phone,
-          grs_number,te_id,incoterm,cin7_member_id,fulfil_id
+          grs_number,te_id,incoterm,cin7_member_id,fulfil_id,export_port
           FROM planner.suppliers ORDER BY kind,name`));
       case 'key-accounts':
         return res.json(await q(`SELECT * FROM planner.key_accounts ORDER BY name`));
@@ -1991,6 +1991,10 @@ app.get('/api/supply/:section', async (req, res) => {
             coalesce(nullif(sh.branch,''), nullif(mp.mp_branch,''), '') branch,
             CASE WHEN nullif(sh.branch,'') IS NOT NULL THEN 'S' WHEN nullif(mp.mp_branch,'') IS NOT NULL THEN 'calc' END branch_src,
             coalesce(sh.country_code,'') ov_country, coalesce(sh.branch,'') ov_branch,
+            -- export port: shipment override ▸ master-PO supplier default (auto-updates when the supplier changes)
+            coalesce(nullif(sh.export_port,''), nullif(mp.mp_export_port,''), '') export_port,
+            coalesce(sh.export_port,'') ov_export_port, coalesce(mp.mp_export_port,'') export_port_default,
+            CASE WHEN nullif(sh.export_port,'') IS NOT NULL THEN 'S' WHEN nullif(mp.mp_export_port,'') IS NOT NULL THEN 'SUP' END export_port_src,
             coalesce(mp.mp_client,'') master_client,   -- master PO's client name (shown under branch for Direct to Client)
             fx.total_freight_cost flex_cost, sh.cost_manual cost_manual,
             (SELECT json_agg(json_build_object('cap', fr.pallets, 'cost', fr.cost, 'sz', fr.container_size)) FROM planner.freight_rates fr
@@ -2045,6 +2049,7 @@ app.get('/api/supply/:section', async (req, res) => {
                       + ((CASE WHEN coalesce(lower(sh.mode), CASE WHEN fx.mode ILIKE 'air%' THEN 'air' ELSE 'sea' END)='air'
                                THEN coalesce(mb.air_lead_time_days,0) ELSE coalesce(mb.sea_lead_time_days,0) END)||' days')::interval)::date END delivery_calc,
                    coalesce(m.branch,'') mp_branch, coalesce(m.client,'') mp_client,
+                   coalesce(ms.export_port,'') mp_export_port,   -- master PO supplier's default export port
                    upper(coalesce(nullif(m.country_code,''), mb.country_code, '')) mp_country
             FROM planner.purchase_orders m
             LEFT JOIN planner.suppliers ms ON ms.id=m.supplier_id
@@ -2783,7 +2788,7 @@ app.post('/api/supply/supplier/:id', (req, res) =>
       production_days: 'int', country: 'text', contact_name: 'text', email: 'text',
       // company / address / phone (tax-invoice), compliance IDs + ERP linkage
       business_name: 'text', address_1: 'text', address_2: 'text', city: 'text', state: 'text', postcode: 'text', phone: 'text',
-      grs_number: 'text', te_id: 'text', incoterm: 'text', cin7_member_id: 'text', fulfil_id: 'text' }, req.body, 'bigint'));
+      grs_number: 'text', te_id: 'text', incoterm: 'text', cin7_member_id: 'text', fulfil_id: 'text', export_port: 'text' }, req.body, 'bigint'));
 app.post('/api/supply/supplier-create', async (req, res) => {
   const b = req.body || {}, name = (b.name || '').trim();
   if (!name) return res.status(400).json({ error: 'supplier name required' });
@@ -5050,6 +5055,7 @@ const SHIP_FIELDS = {
   cost_manual: 'numeric', tracked_delivery_date: 'date', tracked_source: 'text',
   departure_date: 'date', landing_date: 'date', delivery_date: 'date', arrival_date: 'date',
   branch: 'text', country_code: 'text',   // shipment-level destination override (inherits from master PO)
+  export_port: 'text',   // override; blank = inherit the master PO supplier's export_port
 };
 app.post('/api/supply/shipment/:ref', async (req, res) => {
   const ref = req.params.ref;

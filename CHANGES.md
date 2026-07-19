@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.635 - Export port: supplier field + shipment override (auto-inherits)
+
+- New supplier field **Export port** (default port of loading) in CONFIG ▸ Suppliers.
+- Shipment detail now has an **Export port** field: effective = shipment override ▸ master
+  PO supplier's export port (auto-updates with the supplier). Blank override = inherit;
+  type to override. Text field, saves like the Ship-to / Branch overrides.
+- MIGRATION 121_export_port.sql: adds suppliers.export_port + shipments.export_port.
+  Applied to sandbox; **Diviyaj: run 121 on live.**
+
 ## v25.634 - Suppliers: invoice company/address/phone + GRS no. + Cin7/Fulfil IDs editable
 
 - Surfaced supplier tax-invoice fields in CONFIG ▸ Suppliers (new "Company & address" +
