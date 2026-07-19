@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.621 - Config: "Exports & uploads" tab + email-export buttons for 3 reports
+
+- Renamed the config tab "Forecast export" → "Exports & uploads".
+- Added a "Report exports — email" section with 3 rows (Cash Flow Transactions, Cash Flow Stock Arrivals,
+  Auto Forecast payments plan): a saved recipient email + ⬇ CSV + ✉ Email per report. The client builds the
+  CSV (same format as the on-screen export) and POSTs it to /api/export/email-csv; the server emails it to the
+  saved recipient (server-controlled). Recipients stored in app_settings (export_email_<key>).
+- Extracted the cash-flow CSV row builders (cfTxRows/cfArrRows) to module scope so the Cash Flow page and the
+  config share them.
+
+Files: server.mjs, supply/inject.html. No migrations, no new env vars (uses existing RESEND setup).
+
 ## v25.620 - Auto Forecast report: month-window fix + whole numbers + GBP + CSV/copy
 
 REPORTS ▸ Auto Forecast (artifact):

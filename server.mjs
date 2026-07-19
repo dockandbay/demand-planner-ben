@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.620';
+const APP_VERSION = 'v25.621';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -7060,6 +7060,31 @@ async function emailForecastCountry(country) {
 }
 app.post('/api/forecast/email/:country', async (req, res) => { try { res.json(await emailForecastCountry(req.params.country)); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/forecast/email-all', async (req, res) => { try { const out = []; for (const c of FC_EXPORT_COUNTRIES) out.push(await emailForecastCountry(c)); res.json({ ok: true, results: out }); } catch (e) { res.status(500).json({ error: e.message }); } });
+// Email a report CSV (built client-side, sent here) to the recipient SAVED for that report key (app_settings
+// export_email_<key>). The client supplies the CSV; the recipient is server-controlled (not client-supplied).
+app.post('/api/export/email-csv', async (req, res) => {
+  const b = req.body || {};
+  const KEYS = { cf_transactions: 'Cash Flow Transactions', cf_arrivals: 'Cash Flow Stock Arrivals', auto_forecast: 'Auto Forecast — payments plan' };
+  const key = (b.key || '').trim();
+  if (!KEYS[key]) return res.status(400).json({ error: 'unknown export key' });
+  const csv = String(b.csv || '');
+  if (!csv.trim()) return res.status(400).json({ error: 'no CSV content' });
+  try {
+    const s = (await pool.query(`SELECT value FROM planner.app_settings WHERE key=$1`, ['export_email_' + key])).rows[0];
+    const email = s && String(s.value || '').trim();
+    if (!email) return res.json({ ok: false, reason: 'no recipient email set for this report' });
+    const filename = String(b.filename || (key + '.csv')).replace(/[^A-Za-z0-9._-]+/g, '_');
+    if (!process.env.RESEND_API_KEY) return res.json({ ok: false, reason: 'RESEND_API_KEY not set (email stubbed)', would_send_to: email });
+    const r = await fetch('https://api.resend.com/emails', { method: 'POST',
+      headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', to: [email],
+        subject: 'Dock & Bay — ' + KEYS[key] + ' (' + new Date().toISOString().slice(0, 10) + ')',
+        html: '<p>Attached is the latest <b>' + KEYS[key] + '</b> export from the Demand Planner.</p>',
+        attachments: [{ filename, content: Buffer.from(csv).toString('base64') }] }) });
+    if (!r.ok) return res.json({ ok: false, reason: 'Resend error ' + r.status + ': ' + (await r.text()).slice(0, 200) });
+    res.json({ ok: true, sent_to: email });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // upload one country's CSV to DriveHQ over WebDAV (HTTP PUT, Basic auth) — gated on WEBDAV_BASE/DRIVEHQ_USER/PASS.
 // Mirrors the Apps Script routine: PUT {base}/{TARGET_FOLDER}/{filename}. Fixed filename → overwrites in place.
 async function drivehqForecastCountry(country) {
