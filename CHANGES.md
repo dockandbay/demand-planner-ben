@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.658 - Refactor: shared cardEditor() helper (Key accounts + Consignees migrated)
+
+- New module-level cardEditor(cfg) in supply/inject.html: owns the identical config-editor plumbing
+  (caret-preserving search, list<->edit toggle, collect->POST->patch->back, edit/back/cancel/edit-button
+  wiring). Bespoke bits (cardHtml/editHtml, endpoints, coercion, +new/delete, add-then-edit) are cfg callbacks.
+- Migrated Key accounts and Consignees onto it — behaviour identical (same endpoints, pack_* boolean
+  coercion on KA local-row patch, consignee add-then-edit, delete). Local row arrays now mutated in place
+  (splice) so the helper's captured reference stays in sync.
+- No server/API/schema change; no migration. Internal-only dedup.
+- Not yet migrated (deferred for a click-test checkpoint): Suppliers (live %-sum) and Manufacturing BOM
+  (dynamic component rows + SKU picker) still use their own draw loops.
+
 ## v25.657 - Preorders/key-account off Airtable MCP -> Supabase (all Airtable MCP now removed)
 
 - New GET /api/preorders-ka (reads planner.preorders + planner.key_account_forecasts). The BUY plan

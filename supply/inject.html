@@ -3933,6 +3933,56 @@
   function shipPost(ep,body,cb){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
     .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); cb&&cb(j); })
     .catch(function(e){ alert('Failed: '+(e.message||e)); }); }
+  // Shared config card-editor. Collapses the identical list/search/edit/save plumbing behind the config editors
+  // (Key accounts, Consignees, …): a searchable CARD LIST + a one-at-a-time grouped EDIT FORM. Only the bespoke
+  // parts are cfg callbacks — everything else (caret-preserving search, list↔edit toggle, collect→POST→patch→back)
+  // is owned here. cfg:
+  //   mount            container el
+  //   rows             record array (mutated in place on save/delete)
+  //   idOf(r)          stable id string for a row (id, country, …)
+  //   inClass          css class on every editable input in the edit form (e.g. 'ka-in')
+  //   searchId         id of the search <input> rendered inside listHtml (for caret-preserving rewire)
+  //   listHtml(q)      full list markup (header + search bar + cards); filters on q internally
+  //   editHtml(r)      full edit-form markup; save/back/cancel carry the ids below
+  //   editSel          selector for per-card Edit buttons; their dataset[idAttr] holds the id
+  //   idAttr           dataset key holding the id on edit + save buttons (default 'k')
+  //   ids {save,back,cancel,msg}   element ids used inside editHtml
+  //   saveUrl(id)      POST target for a save
+  //   coerce(body,id)  optional: transform the collected POST body (default identity)
+  //   patch(row,body)  optional: apply the saved body onto the local row (default: assign each key)
+  //   editStub(id)     optional: synthesise an edit-form row when id isn't in rows yet (add-then-edit)
+  //   wireList(api)    optional: wire list-only controls (+new / delete) after the list renders
+  //   wireEdit(r,api)  optional: wire extra edit-form behaviour (%-sum, sku picker) after the form renders
+  // Returns an api {edit(id), list(), draw(), findRow(id)} so wireList/wireEdit can drive it.
+  function cardEditor(cfg){
+    var b=cfg.mount, editId=null, q='', A=cfg.idAttr||'k', IDS=cfg.ids||{};
+    function findRow(id){ for(var i=0;i<cfg.rows.length;i++){ if(String(cfg.idOf(cfg.rows[i]))===String(id))return cfg.rows[i]; } return null; }
+    var api={ edit:function(id){editId=id;draw();}, list:function(){editId=null;draw();}, draw:function(){draw();}, findRow:findRow };
+    function draw(){
+      var r=(editId!=null)?(findRow(editId)||(cfg.editStub?cfg.editStub(editId):null)):null;
+      if(r){ b.innerHTML=cfg.editHtml(r);
+        var back=document.getElementById(IDS.back), cancel=document.getElementById(IDS.cancel);
+        if(back)back.onclick=function(){ editId=null; draw(); };
+        if(cancel)cancel.onclick=function(){ editId=null; draw(); };
+        var sv=document.getElementById(IDS.save);
+        if(sv)sv.onclick=function(){ var btn=this, body={}; b.querySelectorAll('.'+cfg.inClass).forEach(function(inp){ body[inp.dataset.f]=inp.value; });
+          var id=btn.dataset[A]; if(cfg.coerce)body=cfg.coerce(body,id);
+          btn.disabled=true; var msg=IDS.msg&&document.getElementById(IDS.msg); if(msg)msg.textContent='Saving…';
+          fetch(cfg.saveUrl(id),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
+            .then(function(rp){return rp.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error);
+              var lr=findRow(id); if(lr){ if(cfg.patch)cfg.patch(lr,body); else Object.keys(body).forEach(function(k){ lr[k]=body[k]; }); }
+              invalidateDerived(); editId=null; draw(); })
+            .catch(function(e){ btn.disabled=false; if(msg)msg.innerHTML='<span style="color:#dc2626">Save failed: '+esc(e.message||e)+'</span>'; }); };
+        if(cfg.wireEdit)cfg.wireEdit(r,api);
+        return; }
+      b.innerHTML=cfg.listHtml(q);
+      var s=document.getElementById(cfg.searchId);
+      if(s)s.oninput=function(){ q=this.value.trim().toLowerCase(); var cur=this.selectionStart; draw(); var q2=document.getElementById(cfg.searchId); if(q2){ q2.focus(); try{q2.setSelectionRange(cur,cur);}catch(e){} } };
+      b.querySelectorAll(cfg.editSel).forEach(function(btn){ btn.onclick=function(){ editId=btn.dataset[A]; draw(); }; });
+      if(cfg.wireList)cfg.wireList(api);
+    }
+    draw(); return api;
+  }
   function renderShipments(data){ var c=document.getElementById('supply-content'); fetchLookups(function(){ shipInner(data,c); }); }
   // (admin Shipment Plan sub-tab removed — that's portal-only; the per-shipment timeline lives in the shipment-row expand)
   // (the old admin Shipment Plan view was removed in v20.365 — Shipment Plan is supplier-portal only now)
@@ -4813,12 +4863,8 @@
           draw(); }); }
       else if(CONFIG_SUB==='keyaccounts'){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/key-accounts').then(function(r){return r.json();}).then(function(rows){
-          b.innerHTML='<div class="sect-h">Key accounts — client packing / labelling, requirements &amp; delivery address <span class="mut tiny">(defaulted onto a PO&rsquo;s Direct-to-Client details when the client is picked)</span> <button class="tool-badge bg-blue" id="ka-new" style="cursor:pointer;border:none;margin-left:8px">+ Key account</button></div>'
-            +'<div class="bar"><input class="flt" id="ka-q" placeholder="Search name / requirements / address / notes…" style="width:300px;background:#eff6ff;border-color:#93c5fd"><span class="count" id="ka-count" style="margin-left:8px"></span></div><div id="ka-tblwrap"></div>';
-          // Key accounts have ~15 fields (address, requirements + 5 pack/label toggles each with notes). The old
-          // 15-column inline-edit table was unusable on edit; instead: a scannable CARD LIST + a grouped full-width
-          // EDIT FORM (one row at a time). Same endpoints/fields as before.
-          var kq='', editId=null;
+          // Key accounts have ~15 fields (address, requirements + 5 pack/label toggles each with notes) — a scannable
+          // CARD LIST + a grouped full-width EDIT FORM (one row at a time), via the shared cardEditor().
           var PACK=[['pack_polybags','pack_polybags_notes','Polybags'],
             ['pack_dnb_barcodes','pack_dnb_barcodes_notes','D&B barcodes'],
             ['pack_rfid_barcodes','pack_rfid_barcodes_notes','RFID barcodes'],
@@ -4838,7 +4884,7 @@
               +block('Delivery address', fieldOf(r,'address'))
               +'<div style="margin-top:6px"></div>'+block('Client requirements', fieldOf(r,'client_requirements'))
               +chips(r)+'</div>'; }
-          function listHtml(){ var f=kq?rows.filter(function(x){return String(JSON.stringify(x)||'').toLowerCase().indexOf(kq)>=0;}):rows;
+          function listHtml(kq){ var f=kq?rows.filter(function(x){return String(JSON.stringify(x)||'').toLowerCase().indexOf(kq)>=0;}):rows;
             var cards=f.length?('<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-top:12px">'+f.map(cardHtml).join('')+'</div>'):'<div class="count" style="padding:10px 2px">No key accounts'+(kq?' match your search':' yet')+'.</div>';
             return '<div class="sect-h">Key accounts — client packing / labelling, requirements &amp; delivery address <span class="mut tiny">(defaulted onto a PO&rsquo;s Direct-to-Client details when the client is picked)</span> <button class="tool-badge bg-blue" id="ka-new" style="cursor:pointer;border:none;margin-left:8px">+ Key account</button></div>'
               +'<div class="bar"><input class="flt" id="ka-q" placeholder="Search name / requirements / address / notes…" value="'+esc(kq)+'" style="width:300px;background:#eff6ff;border-color:#93c5fd"><span class="count" id="ka-count" style="margin-left:8px">'+f.length+(kq?' / '+rows.length:'')+' key account'+(f.length===1?'':'s')+'</span></div>'
@@ -4871,30 +4917,21 @@
               +'<div style="display:flex;gap:8px;margin-top:8px;padding-top:12px;border-top:1px solid #eef2f7"><button id="ka-save" data-k="'+id+'" style="cursor:pointer;border:none;background:#2563eb;color:#fff;padding:6px 18px;border-radius:6px;font-size:12px;font-weight:600">Save changes</button>'
               +'<button id="ka-cancel" style="cursor:pointer;border:1px solid #cbd5e1;background:#fff;padding:6px 14px;border-radius:6px;font-size:12px">Cancel</button>'
               +'<span id="ka-msg" class="mut tiny" style="align-self:center;margin-left:6px"></span></div></div>'; }
-          function draw(){ var r=(editId!=null)&&rows.filter(function(x){return String(x.id)===String(editId);})[0];
-            if(r){ b.innerHTML=editHtml(r);
-              document.getElementById('ka-back').onclick=document.getElementById('ka-cancel').onclick=function(){ editId=null; draw(); };
-              document.getElementById('ka-save').onclick=function(){ var btn=this, body={};
-                b.querySelectorAll('.ka-in').forEach(function(inp){ body[inp.dataset.f]=inp.value; });
-                btn.disabled=true; var msg=document.getElementById('ka-msg'); msg.textContent='Saving…';
-                fetch('/api/supply/key-account/'+encodeURIComponent(btn.dataset.k),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
-                  .then(function(rp){return rp.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error);
-                    var lr=rows.filter(function(x){return String(x.id)===String(btn.dataset.k);})[0]; if(lr)Object.keys(body).forEach(function(k){ lr[k]=(k.indexOf('pack_')===0&&k.slice(-6)!=='_notes')?(body[k]==='true'):body[k]; });
-                    invalidateDerived(); editId=null; draw(); })
-                  .catch(function(e){ btn.disabled=false; msg.innerHTML='<span style="color:#dc2626">Save failed: '+esc(e.message||e)+'</span>'; }); };
-              return; }
-            b.innerHTML=listHtml();
-            document.getElementById('ka-new').onclick=function(){ var nm=prompt('New key account name (client):'); if(!nm||!nm.trim())return;
-              shipPost('/api/supply/key-account-create',{name:nm.trim()},showSub); };
-            document.getElementById('ka-q').oninput=function(){ kq=this.value.trim().toLowerCase(); var cur=this.selectionStart; draw(); var q=document.getElementById('ka-q'); if(q){ q.focus(); try{q.setSelectionRange(cur,cur);}catch(e){} } };
-            b.querySelectorAll('.ka-edit').forEach(function(btn){ btn.onclick=function(){ editId=btn.dataset.k; draw(); }; });
-            b.querySelectorAll('.ka-del').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Delete "'+(btn.dataset.name||btn.dataset.k)+'"? This cannot be undone.'))return;
-              btn.textContent='…'; btn.disabled=true;
-              fetch('/api/supply/key-account/'+encodeURIComponent(btn.dataset.k)+'/delete',{method:'POST'}).then(function(rp){return rp.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error);
-                rows=rows.filter(function(x){return String(x.id)!==String(btn.dataset.k);}); invalidateDerived(); draw(); })
-                .catch(function(e){ btn.disabled=false; btn.textContent='Delete'; alert('Delete failed: '+(e&&e.message||e)); }); }; });
-          }
-          draw(); }); }
+          cardEditor({ mount:b, rows:rows, idOf:function(r){return r.id;}, inClass:'ka-in', searchId:'ka-q',
+            listHtml:listHtml, editHtml:editHtml, editSel:'.ka-edit', idAttr:'k',
+            ids:{save:'ka-save',back:'ka-back',cancel:'ka-cancel',msg:'ka-msg'},
+            saveUrl:function(id){ return '/api/supply/key-account/'+encodeURIComponent(id); },
+            patch:function(lr,body){ Object.keys(body).forEach(function(k){ lr[k]=(k.indexOf('pack_')===0&&k.slice(-6)!=='_notes')?(body[k]==='true'):body[k]; }); },
+            wireList:function(api){
+              var nb=document.getElementById('ka-new'); if(nb)nb.onclick=function(){ var nm=prompt('New key account name (client):'); if(!nm||!nm.trim())return;
+                shipPost('/api/supply/key-account-create',{name:nm.trim()},showSub); };
+              b.querySelectorAll('.ka-del').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Delete "'+(btn.dataset.name||btn.dataset.k)+'"? This cannot be undone.'))return;
+                btn.textContent='…'; btn.disabled=true;
+                fetch('/api/supply/key-account/'+encodeURIComponent(btn.dataset.k)+'/delete',{method:'POST'}).then(function(rp){return rp.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error);
+                  for(var i=rows.length-1;i>=0;i--){ if(String(rows[i].id)===String(btn.dataset.k))rows.splice(i,1); } invalidateDerived(); api.draw(); })
+                  .catch(function(e){ btn.disabled=false; btn.textContent='Delete'; alert('Delete failed: '+(e&&e.message||e)); }); }; });
+            } });
+        }); }
       else if(CONFIG_SUB==='batches'){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/batches').then(function(r){return r.json();}).then(function(rows){ b.innerHTML=batchTbl(rows); bindEdits();
           document.getElementById('batch-new').onclick=function(){ var nm=prompt('New batch name:'); if(!nm||!nm.trim())return;
@@ -4936,7 +4973,6 @@
         fetch('/api/consignees').then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
           // Card list + grouped edit form (like Suppliers / Key accounts). Consignee/notify-party addresses per
           // delivery country for the Commercial / Tax Invoice; any country not listed falls back to UK.
-          var cq='', editCtry=null;
           function fieldOf(r,f){ return r[f]==null?'':r[f]; }
           function rowFor(ct){ return rows.filter(function(x){return x.country===ct;})[0]; }
           function block(lbl,val){ val=String(val==null?'':val); return '<div style="margin:0 0 2px"><div class="mut tiny" style="text-transform:uppercase;letter-spacing:.3px;font-weight:700">'+esc(lbl)+'</div>'
@@ -4950,7 +4986,7 @@
               +'<div style="margin-top:6px"></div>'+block('Notify party', fieldOf(r,'notify_party'))
               +'<div style="margin-top:6px"></div>'+block('Port of discharge', fieldOf(r,'port_of_discharge'))
               +'</div>'; }
-          function listHtml(){ var f=cq?rows.filter(function(x){return String(JSON.stringify(x)||'').toLowerCase().indexOf(cq)>=0;}):rows;
+          function listHtml(cq){ var f=cq?rows.filter(function(x){return String(JSON.stringify(x)||'').toLowerCase().indexOf(cq)>=0;}):rows;
             var cards=f.length?('<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-top:12px">'+f.map(cardHtml).join('')+'</div>'):'<div class="count" style="padding:10px 2px">No consignees'+(cq?' match your search':' yet — add one (UK is the fallback)')+'.</div>';
             return '<div class="sect-h">Consignees <span class="mut tiny">(consignee &amp; notify-party addresses per delivery country for the Commercial / Tax Invoice — any country not listed falls back to UK)</span> <button class="tool-badge bg-blue" id="cn-add" style="cursor:pointer;border:none;margin-left:8px">+ Add country</button></div>'
               +'<div class="bar"><input class="flt" id="cn-q" placeholder="Search country / consignee / notify / port…" value="'+esc(cq)+'" style="width:320px;background:#eff6ff;border-color:#93c5fd"><span class="count" style="margin-left:8px">'+f.length+(cq?' / '+rows.length:'')+' consignee'+(f.length===1?'':'s')+'</span></div>'+cards; }
@@ -4967,28 +5003,19 @@
               +'<div style="display:flex;gap:8px;margin-top:4px;padding-top:12px;border-top:1px solid #eef2f7"><button id="cn-save" data-c="'+ct+'" style="cursor:pointer;border:none;background:#2563eb;color:#fff;padding:6px 18px;border-radius:6px;font-size:12px;font-weight:600">Save changes</button>'
               +'<button id="cn-cancel" style="cursor:pointer;border:1px solid #cbd5e1;background:#fff;padding:6px 14px;border-radius:6px;font-size:12px">Cancel</button>'
               +'<span id="cn-msg" class="mut tiny" style="align-self:center;margin-left:6px"></span></div></div>'; }
-          function reload(cb){ fetch('/api/consignees').then(function(r){return r.json();}).then(function(rw){ rows=Array.isArray(rw)?rw:[]; if(cb)cb(); else { editCtry=null; draw(); } }); }
-          function draw(){ var r=(editCtry!=null)&&(rowFor(editCtry)||{country:editCtry});
-            if(r){ b.innerHTML=editHtml(r);
-              document.getElementById('cn-back').onclick=document.getElementById('cn-cancel').onclick=function(){ editCtry=null; draw(); };
-              document.getElementById('cn-save').onclick=function(){ var btn=this, payload={country:btn.dataset.c};
-                b.querySelectorAll('.cn-in').forEach(function(inp){ payload[inp.dataset.f]=inp.value; });
-                btn.disabled=true; var msg=document.getElementById('cn-msg'); msg.textContent='Saving…';
-                fetch('/api/consignee',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)})
-                  .then(function(rp){return rp.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error);
-                    var lr=rowFor(btn.dataset.c); if(lr){ lr.consignee=payload.consignee; lr.notify_party=payload.notify_party; lr.port_of_discharge=payload.port_of_discharge; } invalidateDerived(); editCtry=null; draw(); })
-                  .catch(function(e){ btn.disabled=false; msg.innerHTML='<span style="color:#dc2626">Save failed: '+esc(e.message||e)+'</span>'; }); };
-              return; }
-            b.innerHTML=listHtml();
-            document.getElementById('cn-add').onclick=function(){ var ct=(prompt('Delivery country code (e.g. CA):')||'').trim().toUpperCase(); if(!ct)return;
-              if(rowFor(ct)){ editCtry=ct; draw(); return; }
-              fetch('/api/consignee',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({country:ct})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ alert(j.error); return; } reload(function(){ editCtry=ct; draw(); }); }).catch(function(e){ alert('Failed: '+(e.message||e)); }); };
-            document.getElementById('cn-q').oninput=function(){ cq=this.value.trim().toLowerCase(); var c=this.selectionStart; draw(); var q=document.getElementById('cn-q'); if(q){ q.focus(); try{q.setSelectionRange(c,c);}catch(e){} } };
-            b.querySelectorAll('.cn-edit').forEach(function(btn){ btn.onclick=function(){ editCtry=btn.dataset.c; draw(); }; });
-            b.querySelectorAll('.cn-del').forEach(function(btn){ btn.onclick=function(){ var ct=btn.dataset.c; if(!confirm('Remove '+ct+'? That country will fall back to UK.'))return;
-              btn.disabled=true; fetch('/api/consignee/'+encodeURIComponent(ct)+'/delete',{method:'POST'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); rows=rows.filter(function(x){return x.country!==ct;}); invalidateDerived(); draw(); }).catch(function(e){ btn.disabled=false; alert('Remove failed: '+(e&&e.message||e)); }); }; });
-          }
-          draw();
+          cardEditor({ mount:b, rows:rows, idOf:function(r){return r.country;}, inClass:'cn-in', searchId:'cn-q',
+            listHtml:listHtml, editHtml:editHtml, editSel:'.cn-edit', idAttr:'c',
+            ids:{save:'cn-save',back:'cn-back',cancel:'cn-cancel',msg:'cn-msg'},
+            saveUrl:function(){ return '/api/consignee'; }, coerce:function(body,id){ body.country=id; return body; },
+            editStub:function(id){ return {country:id}; },
+            wireList:function(api){
+              var ab=document.getElementById('cn-add'); if(ab)ab.onclick=function(){ var ct=(prompt('Delivery country code (e.g. CA):')||'').trim().toUpperCase(); if(!ct)return;
+                if(rowFor(ct)){ api.edit(ct); return; }
+                fetch('/api/consignee',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({country:ct})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ alert(j.error); return; }
+                  fetch('/api/consignees').then(function(r){return r.json();}).then(function(rw){ rw=Array.isArray(rw)?rw:[]; rows.length=0; for(var i=0;i<rw.length;i++)rows.push(rw[i]); api.edit(ct); }); }).catch(function(e){ alert('Failed: '+(e.message||e)); }); };
+              b.querySelectorAll('.cn-del').forEach(function(btn){ btn.onclick=function(){ var ct=btn.dataset.c; if(!confirm('Remove '+ct+'? That country will fall back to UK.'))return;
+                btn.disabled=true; fetch('/api/consignee/'+encodeURIComponent(ct)+'/delete',{method:'POST'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); for(var i=rows.length-1;i>=0;i--){ if(rows[i].country===ct)rows.splice(i,1); } invalidateDerived(); api.draw(); }).catch(function(e){ btn.disabled=false; alert('Remove failed: '+(e&&e.message||e)); }); }; });
+            } });
         }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); }
       else if(CONFIG_SUB==='permissions'){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/config/permissions').then(function(r){return r.json();}).then(function(rows){
