@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.617 - Cash Flow export: add Amount GBP + UK Deposit Ref columns
+
+Two more columns on the "all transactions" export: "Amount GBP" (USD ÷ 1.3, 2dp) next to Amount_USD, and
+"UK Deposit Ref" (the deposit's production number) next to Production Deposit. Server cashflow lines now carry
+uk_deposit_ref (deposit reference → deposits.prod_no).
+
+Files: server.mjs, supply/inject.html. No migrations, no new env vars.
+
 ## v25.616 - Cash Flow: reworked "all transactions" export + fast tooltips
 
 Cash Flow report:

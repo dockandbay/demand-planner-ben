@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.616';
+const APP_VERSION = 'v25.617';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -699,9 +699,12 @@ async function cashflowResponse(pos, q) {
   // referenced-deposit pools (one cash line per reference; replaces the PO's own deposit line)
   const depPools = await q(`
     SELECT reference, round(sum(coalesce(amount,0)),2) amount, max(supplier_name) supplier, max(country) country,
+      max(coalesce(prod_no,'')) prod_no,
       to_char(max(date_paid),'YYYY-MM-DD') date_paid, bool_and(date_paid IS NOT NULL) all_paid,
       to_char(min(date_due),'YYYY-MM-DD') date_due, to_char(min(date_likely_pay),'YYYY-MM-DD') date_likely_pay
     FROM planner.deposits WHERE is_deposit AND coalesce(reference,'') <> '' GROUP BY reference`);
+  // deposit reference → its production number (for the export's "UK Deposit Ref" column).
+  const depProdByRef = {}; depPools.forEach(d => { if (d.reference) depProdByRef[d.reference] = d.prod_no || ''; });
   // "Other payments" — sundry register rows (is_deposit=false): freight/fees/etc. entered directly.
   const otherPays = await q(`
     SELECT id, coalesce(reference,'') reference, coalesce(description,'') description, supplier_name, country,
@@ -745,14 +748,16 @@ async function cashflowResponse(pos, q) {
     const overdue = !o.paid_date && due && due < today;
     // cash flow is timed on the DUE date, unless a likely date is applied → then the likely date (whenever set, not just overdue)
     if (!o.paid_date && lk) { date = lk; kind = 'likely'; }
+    const _dref = (poMeta[o.ref] ? (poMeta[o.ref].deposit_ref || '') : ((o.basis || 'po') === 'register' ? (o.ref || '') : ''));
     lines.push({
       key: o.key, type: o.type, ref: o.ref, supplier: o.supplier || '', country: o.country || '',
       amount: Math.round(num(o.amount)), paid: !!o.paid_date, estimate: !!o.estimate, basis: o.basis || 'po',
       src: o.src || '', due, paid_date: o.paid_date || null, date, date_kind: kind,
       month: date ? date.slice(0, 7) : '—', overdue, likely_date: lk,
       // deposit reference for this payment (the PO's deposit_ref, else a deposit-pool line's own reference),
-      // and the referenced PO's branch (drives the Direct-to-Client flag in the export).
-      deposit_ref: (poMeta[o.ref] ? (poMeta[o.ref].deposit_ref || '') : ((o.basis || 'po') === 'register' ? (o.ref || '') : '')),
+      // its production number, and the referenced PO's branch (drives the Direct-to-Client flag in the export).
+      deposit_ref: _dref,
+      uk_deposit_ref: depProdByRef[_dref] || '',
       branch: (poMeta[o.ref] ? (poMeta[o.ref].branch || '') : ''),
     });
   };

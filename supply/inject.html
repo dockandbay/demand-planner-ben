@@ -5087,14 +5087,16 @@
     // ALL transactions (every line, ignores the on-screen filters) — Ben's column order/format.
     function cfMonthShort(m){ if(!m||m==='—')return 'Undated'; if(m==='aged')return 'Aged'; var p=String(m).split('-'); return (MON[+p[1]-1]||'?')+'-'+String(p[0]).slice(2); }   // 2026-07 → Jul-26
     function cfDtc(b){ return /direct to client|jlew|next/i.test(String(b||'')); }   // branch = Direct to Client / UK * JLEW / UK * NEXT
-    function cfAllRows(){ return d.lines.map(function(x){ return {
+    function cfAllRows(){ return d.lines.map(function(x){ var usd=Number(x.amount||0); return {
       Reference:x.ref||'',
       Type:x.type,
-      Amount_USD:Number(x.amount||0).toFixed(2),
+      Amount_USD:usd.toFixed(2),
+      'Amount GBP':(usd/1.3).toFixed(2),   // USD → GBP at 1.3
       Date:x.date||'',
       'Paid Status':(x.paid?'TRUE':'FALSE'),
       Market:x.country||'',
       'Production Deposit':x.deposit_ref||'',
+      'UK Deposit Ref':x.uk_deposit_ref||'',   // the deposit's production number
       Class:(x.estimate?'estimate':'committed'),
       Supplier:x.supplier||'',
       'Direct to Client?':(cfDtc(x.branch)?'TRUE':'FALSE'),
