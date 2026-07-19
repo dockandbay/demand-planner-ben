@@ -382,12 +382,7 @@
   #supply-root .po-filt-toggle{display:inline-block}
   #supply-content:not(.filters-open) #po-ctry,#supply-content:not(.filters-open) #po-act{display:none}
   /* sub-tab strips swipe horizontally rather than wrapping */
-  #rep-subnav,#supply-root #prod-subtabs,#supply-root .po-subnav{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch}
-  /* CONFIG nav becomes a vertical drawer on mobile: full-width main rows, level-3 nested + indented under Supply chain */
-  #supply-root #config-subs{flex-direction:column;align-items:stretch;overflow:visible}
-  #supply-root #config-subs>.rtab{width:100%;box-sizing:border-box;padding:9px 12px;border-radius:5px}
-  #supply-root #config-subs #config-subs-l3{display:flex;flex-direction:column;align-items:stretch;flex-wrap:nowrap;overflow:visible;width:auto;box-sizing:border-box;margin:2px 0 4px 12px;padding:2px 0 2px 6px;background:transparent;border:none;border-left:2px solid #dbeafe;border-radius:0}
-  #supply-root #config-subs #config-subs-l3>.rtab{width:100%;box-sizing:border-box;padding:8px 12px;border-radius:5px}
+  #rep-subnav,#supply-root #prod-subtabs,#supply-root #config-subs,#supply-root #config-subs-l3,#supply-root .po-subnav{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch}
   #supply-root .tw{max-height:70vh;-webkit-overflow-scrolling:touch}
   #supply-root .save-btn,#supply-root .pill{padding:6px 10px;font-size:11px}
   #supply-root #po-prog>*,#supply-root #po-act>*,#supply-root #po-ctry>*{margin:3px 4px 3px 0}
@@ -4702,14 +4697,10 @@
       +'<div id="config-nav"></div>'
       +'<div id="config-body"><div class="count">Loading…</div></div>';
     function navHtml(){ var inSC=SC_KEYS.indexOf(CONFIG_SUB)>=0;
-      var mob=!!(window.matchMedia&&window.matchMedia('(max-width:700px)').matches);
-      var l3=inSC?'<div id="config-subs-l3">'+SC_KEYS.map(function(k){ return '<span class="rtab'+(k===CONFIG_SUB?' active':'')+'" data-cs="'+k+'">'+esc(SC_LABEL[k])+'</span>'; }).join('')+'</div>':'';
       var l2='<div id="config-subs">'+L2.map(function(s){ var act=(s[0]===CONFIG_SUB)||(s[0]==='supplychain'&&inSC);
-        var tab='<span class="rtab'+(act?' active':'')+'" data-cs="'+s[0]+'">'+esc(s[1])+'</span>';
-        if(mob&&s[0]==='supplychain') tab+=l3;   // mobile drawer: nest the level-3 options directly under Supply chain
-        return tab; }).join('')+'</div>';
-      return mob ? l2 : (l2+l3);   // desktop keeps the level-3 strip below the whole bar
-    }
+        return '<span class="rtab'+(act?' active':'')+'" data-cs="'+s[0]+'">'+esc(s[1])+'</span>'; }).join('')+'</div>';
+      var l3=inSC?'<div id="config-subs-l3">'+SC_KEYS.map(function(k){ return '<span class="rtab'+(k===CONFIG_SUB?' active':'')+'" data-cs="'+k+'">'+esc(SC_LABEL[k])+'</span>'; }).join('')+'</div>':'';
+      return l2+l3; }
     function drawNav(){ var nv=document.getElementById('config-nav'); nv.innerHTML=navHtml();
       nv.querySelectorAll('.rtab').forEach(function(p){ p.onclick=function(){ var k=p.dataset.cs;
         if(k==='supplychain'){ if(SC_KEYS.indexOf(CONFIG_SUB)<0)CONFIG_SUB=SC_KEYS[0]; }   // open → default to first member

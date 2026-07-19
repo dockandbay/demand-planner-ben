@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.646 - Revert config-page mobile nav to horizontal strip
+
+- Reverted the v25.641 config-page mobile vertical-drawer nav (the real fix was the
+  hamburger drawer in v25.645). CONFIG nav is back to the horizontal-scroll strip on
+  mobile. Supply chain stays second in the bar (that reorder is kept).
+
 ## v25.645 - Mobile drawer: nest sub-nav under its parent view (not at the bottom)
 
 - The mobile hamburger drawer now renders each active view's sub-nav (Supply sections /
