@@ -708,16 +708,16 @@
       //      Lives at the top of the TIMELINE tab; an unconfirmed order is then an open action item. ----
       var needConfirm=!!p.require_confirmation;
       var confirmed=!!p.supplier_confirmed;
-      var confirmBar=needConfirm?('<div style="margin:0 0 10px;padding:8px 11px;border-radius:6px;font-size:12px;'+(confirmed?'background:#dcfce7;border:1px solid #86efac':'background:#fef3c7;border:1px solid #fcd34d')+'">'
+      var confirmBar=needConfirm?('<div style="margin:0 0 10px;padding:8px 11px;border-radius:6px;font-size:12px;box-sizing:border-box;'+(confirmed?'background:#dcfce7;border:1px solid #86efac':'background:#fef3c7;border:1px solid #fcd34d')+'">'
         +(confirmed
-          ? '✓ <b>Order confirmed</b> on '+esc(p.supplier_confirmed)+(p.supplier_confirmed_by?' · '+esc(p.supplier_confirmed_by):'')+' &nbsp; <button class="save-btn light pp-confirm" data-po="'+po+'" data-v="0">Withdraw confirmation</button>'
-          : '⏳ <b>Please confirm this order.</b> Review the SKUs &amp; quantities (ORDER PLAN tab) and the dates, amend anything that\'s wrong, then confirm. &nbsp; <button class="save-btn pp-confirm" data-po="'+po+'" data-v="1" style="background:#16a34a;color:#fff;border-color:#16a34a">✓ Confirm order</button>')
+          ? '<div style="margin-bottom:8px">✓ <b>Order confirmed</b> on '+esc(p.supplier_confirmed)+(p.supplier_confirmed_by?' · '+esc(p.supplier_confirmed_by):'')+'</div><button class="save-btn light pp-confirm" data-po="'+po+'" data-v="0">Withdraw confirmation</button>'
+          : '<div style="margin-bottom:8px">⏳ <b>Please confirm this order.</b> Review the SKUs &amp; quantities (ORDER PLAN tab) and the dates, amend anything that\'s wrong, then confirm.</div><button class="save-btn pp-confirm" data-po="'+po+'" data-v="1" style="background:#16a34a;color:#fff;border-color:#16a34a">✓ Confirm order</button>')
         +'</div>'):'';
       // ---- TIMELINE: production status + status + notes (Dock & Bay notes show as 'new' until you mark them read) ----
       var unreadInt=notes.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
       var prodExc=needConfirm?prodAttention(p.production_status, p.prod_start, p.prod_end, subs):'';
       var cdVal=poCdVal(p, subs), cdMiss=poCdMissing(p, subs);
-      var prodBlock='<div style="margin-bottom:10px;padding:8px 11px;border-radius:6px;font-size:12px;'+((prodExc||cdMiss)?'background:#fef3c7;border:1px solid #fcd34d':'background:#f1f5f9;border:1px solid #e5e7eb')+'">'
+      var prodBlock='<div style="margin-bottom:10px;padding:8px 11px;border-radius:6px;font-size:12px;box-sizing:border-box;'+((prodExc||cdMiss)?'background:#fef3c7;border:1px solid #fcd34d':'background:#f1f5f9;border:1px solid #e5e7eb')+'">'
         +'<b>Production status</b> &nbsp; '+prodStatusSel(p.po, p.production_status||'')
         +'<div style="margin-top:8px"><b>Completion date</b> &nbsp; <input type="date" class="pp-cd-grid" data-po="'+esc(p.po)+'" value="'+esc(cdVal)+'" title="your production completion date — submitted for Dock &amp; Bay approval; kept in sync with the purchase order grid" style="width:150px;cursor:pointer;text-align:left;font:inherit;font-size:12px;padding:4px 6px;border:1px solid '+(cdMiss?'#dc2626':'#93c5fd')+';border-radius:4px;background:'+(cdMiss?'#fef2f2':'#eff6ff')+';color:#1d4ed8">'
         +(cdMiss?' <span style="background:#dc2626;color:#fff;border-radius:4px;font-size:10px;font-weight:700;padding:2px 7px">⚠ Must enter completion date</span>':'')+'</div>'
@@ -1498,7 +1498,7 @@
               +_fSel('pp-po-br',PORTAL_PO_BR,'All branches',_brs)
               +'<span class="pill'+(PORTAL_PO_EXC?' active':'')+'" data-poexc="1" style="'+(PORTAL_PO_EXC?'background:#dc2626;color:#fff;border-color:#dc2626':'color:#dc2626')+'" title="show every PO with an open action, across all statuses">⚠ Show all exceptions</span>'
               +(ordered.length?ordered.map(function(s){var dim=(pq||PORTAL_PO_EXC);return '<span class="pill'+(PORTAL_PO_ST[s]?' active':'')+(dim?' ':'')+'" data-st="'+esc(s)+'"'+(dim?' style="opacity:.4"':'')+'>'+esc(s)+'</span>';}).join(''):'<span class="mut tiny">no orders</span>')
-              +(pq?'<span class="mut tiny">search overrides status</span>':(PORTAL_PO_EXC?'<span class="mut tiny">showing exceptions — all statuses</span>':''))+'</div>';
+              +(PORTAL_PO_EXC?'<span class="mut tiny">showing exceptions — all statuses</span>':'')+'</div>';
             // a PO/client search OVERRIDES the status pills; the dropdown filters (production / country / branch) always AND on top
             var shown=_ppData.pos.filter(function(p){
               if(PORTAL_PO_PROD && (p.prod_no==null?'':String(p.prod_no).trim())!==PORTAL_PO_PROD) return false;
@@ -1508,7 +1508,7 @@
               if(PORTAL_PO_EXC) return poActionCount(p)>0;   // exceptions filter overrides the status pills (all statuses)
               return PORTAL_PO_ST[(p.status||'').toUpperCase()]; });
             var poCapped=(!_ppShowAllPO && shown.length>PP_CAP), poRender=poCapped?shown.slice(0,PP_CAP):shown;
-            body.innerHTML=pillBar+'<div class="count" style="margin:2px 0 8px">'+(poCapped?poRender.length+' of ':'')+shown.length+' of '+_ppData.pos.length+' purchase orders</div>'+ppPOs(poRender,_ppData)
+            body.innerHTML=pillBar+ppPOs(poRender,_ppData)
               +(poCapped?'<div style="margin:8px 0;text-align:center"><button class="save-btn pp-showall">Show all '+shown.length+' &darr;</button></div>':'');
             bindPortalScrollPin();   // pin expanded PO detail(s) to the left while the grid scrolls sideways
             var ppsa=body.querySelector('.pp-showall'); if(ppsa)ppsa.onclick=function(){ _ppShowAllPO=true; renderPP(); };
