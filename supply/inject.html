@@ -5152,14 +5152,12 @@
               .then(function(r){return r.json();}).then(function(){ inp.style.borderColor='#16a34a'; }).catch(function(){ inp.style.borderColor='#dc2626'; }); }; });
           b.querySelectorAll('.rx-csv').forEach(function(btn){ btn.onclick=function(){ var o=btn.textContent; btn.disabled=true; btn.textContent='…';
             buildRxCsv(btn.dataset.ek,function(csvStr,fn,err){ btn.disabled=false; btn.textContent=o; if(err||csvStr==null){ alert('Could not build CSV: '+(err&&err.message||err||'error')); return; }
-              var blob=new Blob([csvStr],{type:'text/csv;charset=utf-8'}), url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download=fn; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(function(){URL.revokeObjectURL(url);},1000); }); }; });
+              downloadCsvStr(csvStr,fn); }); }; });
           b.querySelectorAll('.rx-email-btn').forEach(function(btn){ btn.onclick=function(){ var ek=btn.dataset.ek, inp=b.querySelector('.rx-email[data-ek="'+ek+'"]'), to=(inp&&inp.value||'').trim();
             if(!to){ msg.innerHTML='<span style="color:#b91c1c">Set a recipient email for this report first.</span>'; if(inp)inp.focus(); return; }
-            msg.textContent='Building + emailing '+ek+'…'; var o=btn.textContent; btn.disabled=true; btn.textContent='…';
-            buildRxCsv(ek,function(csvStr,fn,err){ if(err||csvStr==null){ btn.disabled=false; btn.textContent=o; msg.innerHTML='<span style="color:#b91c1c">Could not build CSV: '+esc(err&&err.message||err||'error')+'</span>'; return; }
-              fetch('/api/export/email-csv',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:ek,csv:csvStr,filename:fn})})
-                .then(function(r){return r.json();}).then(function(j){ btn.disabled=false; btn.textContent=o; msg.innerHTML=(j.ok?'✓ Emailed to '+esc(j.sent_to):'• '+esc(j.reason||j.error||'failed')+(j.would_send_to?' → '+esc(j.would_send_to):'')); })
-                .catch(function(e){ btn.disabled=false; btn.textContent=o; msg.innerHTML='<span style="color:#b91c1c">Email failed: '+esc(e.message||e)+'</span>'; }); }); }; });
+            msg.textContent='Building + emailing '+ek+'…';
+            buildRxCsv(ek,function(csvStr,fn,err){ if(err||csvStr==null){ msg.innerHTML='<span style="color:#b91c1c">Could not build CSV: '+esc(err&&err.message||err||'error')+'</span>'; return; }
+              postEmailCsv(btn,ek,csvStr,fn,msg); }); }; });
         }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); }
       else if(CONFIG_SUB==='mfgbom'){ b.innerHTML='<div class="count">Loading…</div>';
         Promise.all([fetch('/api/supply/manufacturing-bom').then(function(r){return r.json();}),
@@ -5362,6 +5360,18 @@
   function rowsToCsvStr(rows,labels){ if(!rows||!rows.length)return ''; var cols=Object.keys(rows[0]);
     var e1=function(v){v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
     return [cols.map(function(c){return e1((labels&&labels[c])||c);}).join(',')].concat(rows.map(function(r){return cols.map(function(c){return e1(r[c]);}).join(',');})).join('\n'); }
+  // Download a ready-built CSV string as a file (single Blob-download impl, with cleanup).
+  function downloadCsvStr(csvStr,name){ var blob=new Blob([csvStr],{type:'text/csv;charset=utf-8'}), url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download=name; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(function(){URL.revokeObjectURL(url);},1000); }
+  // Email a report CSV to its saved recipient (CONFIG ▸ Exports & uploads → export_email_<key>). Shared by the
+  // cash-flow report buttons and the config Report-exports panel. msg = optional status element (else alert()).
+  function postEmailCsv(btn,key,csvStr,filename,msg){ var o=btn.innerHTML; btn.disabled=true; btn.textContent='…';
+    return fetch('/api/export/email-csv',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:key,csv:csvStr,filename:filename})})
+      .then(function(r){return r.json();}).then(function(j){ btn.disabled=false;
+        if(j&&j.ok){ btn.innerHTML='✓ Sent'; setTimeout(function(){btn.innerHTML=o;},1600); if(msg)msg.innerHTML='✓ Emailed to '+esc(j.sent_to); }
+        else { btn.innerHTML=o; var reason=(j&&(j.reason||j.error))||'Could not email';
+          if(msg)msg.innerHTML='<span style="color:#b91c1c">• '+esc(reason)+(j&&j.would_send_to?' → '+esc(j.would_send_to):'')+'</span>';
+          else alert(reason+(j&&j.would_send_to?'\n(recipient on file: '+j.would_send_to+')':'\nSet a recipient in CONFIG ▸ Exports & uploads.')); } })
+      .catch(function(e){ btn.disabled=false; btn.innerHTML=o; if(msg)msg.innerHTML='<span style="color:#b91c1c">Email failed: '+esc(e.message||e)+'</span>'; else alert('Email failed: '+(e.message||e)); }); }
   // all filters EXCEPT month (month is applied to the list only, so the summary strip stays a forward overview)
   function cfFilter(lines){ var s=_cfState;
     return lines.filter(function(x){
@@ -5481,12 +5491,7 @@
     c.querySelector('#cf-arr-copy').onclick=function(){ copyRows(cfArrivalsRows(),'Stock arrivals'); };
     c.querySelector('#cf-arr-csv').onclick=function(){ csv(cfArrivalsRows(),'stock_arrivals.csv'); };
     // Email a report CSV to the saved recipient (CONFIG ▸ Exports & uploads → export_email_<key>)
-    function cfEmail(btn,key,rowsFn,fn){ var o=btn.innerHTML; btn.disabled=true; btn.textContent='…';
-      fetch('/api/export/email-csv',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:key,csv:rowsToCsvStr(rowsFn()),filename:fn})})
-        .then(function(r){return r.json();}).then(function(j){ btn.disabled=false;
-          if(j&&j.ok){ btn.innerHTML='✓ Sent'; setTimeout(function(){btn.innerHTML=o;},1600); }
-          else { btn.innerHTML=o; alert((j&&(j.reason||j.error)?(j.reason||j.error):'Could not email')+(j&&j.would_send_to?'\n(recipient on file: '+j.would_send_to+')':'\nSet a recipient in CONFIG ▸ Exports & uploads.')); } })
-        .catch(function(e){ btn.disabled=false; btn.innerHTML=o; alert('Email failed: '+(e.message||e)); }); }
+    function cfEmail(btn,key,rowsFn,fn){ postEmailCsv(btn,key,rowsToCsvStr(rowsFn()),fn); }
     c.querySelector('#cf-email-all').onclick=function(){ cfEmail(this,'cf_transactions',cfAllRows,'cash_flow_all_transactions.csv'); };
     c.querySelector('#cf-email-arr').onclick=function(){ cfEmail(this,'cf_arrivals',cfArrivalsRows,'stock_arrivals.csv'); };
     c.querySelector('#cf-month').onchange=function(){_cfState.month=this.value;draw();};
@@ -6222,11 +6227,7 @@
     prod_start:'Start date',prod_end:'End date',ship:'Ship date',delivery:'Delivery date',checkin:'Completion date',
     value_used:'Value',value_est:'Value (est)',pallets:'Pallets',prod_no:'Production #',batch_id:'Batch',
     deposit_ref:'Deposit ref',start_date:'Deposit paid date',completion_date:'Completion payment date'};
-  function csv(rows,name,labels){ if(!rows.length)return; var cols=Object.keys(rows[0]);
-    var esc1=function(v){v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
-    var hdr=cols.map(function(c){return esc1((labels&&labels[c])||c);});
-    var lines=[hdr.join(',')].concat(rows.map(function(r){return cols.map(function(c){return esc1(r[c]);}).join(',');}));
-    var blob=new Blob([lines.join('\n')],{type:'text/csv'}); var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); }
+  function csv(rows,name,labels){ if(!rows||!rows.length)return; downloadCsvStr(rowsToCsvStr(rows,labels),name); }
   // Copy straight to clipboard (no overlay) + a short confirmation alert. Fallback to hidden textarea.
   function legacyCopy(text){ var ta=document.createElement('textarea'); ta.value=text; ta.style.cssText='position:fixed;left:-9999px;top:0'; document.body.appendChild(ta); ta.focus(); ta.select(); try{document.execCommand('copy');}catch(e){} ta.remove(); }
   function copyText(text,label){ var done=function(){ alert((label||'Data')+' copied to clipboard ✓'); };

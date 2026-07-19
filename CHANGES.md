@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.650 - Consolidate CSV / export helpers (refactor #6)
+
+- Single CSV-string builder (`rowsToCsvStr`), one download impl (`downloadCsvStr`), one
+  email-POST impl (`postEmailCsv`) shared by the cash-flow report buttons and the config
+  Report-exports panel.
+- Removed the duplicated escaper in `csv()` (now delegates to rowsToCsvStr+downloadCsvStr),
+  the duplicate Blob-download in the config CSV button, and the duplicated email-POST in
+  `cfEmail` + `rx-email-btn`. Behaviour unchanged; ~30 lines of duplication gone.
+- (`afPayCsvStr` already used rowsToCsvStr; `copyRows`/TSV left as its own single-purpose helper.)
+
 ## v25.649 - Version single-sourced from package.json (refactor quick-win)
 
 - APP_VERSION now derives from package.json's "version" at boot (v25.649 ← 25.649.0),
