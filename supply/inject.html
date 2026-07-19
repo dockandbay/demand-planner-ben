@@ -201,6 +201,12 @@
 #supply-root table.sh-tbl thead th:nth-child(2),
 #supply-root table.sh-tbl tbody tr:not(.exp-row):not(.grp-row) td:nth-child(2){position:sticky;left:78px;z-index:2;background:#fff;box-shadow:1px 0 0 #e0e0e0}
 #supply-root table.sh-tbl thead th:first-child,#supply-root table.sh-tbl thead th:nth-child(2){z-index:3;background:#f3f3f1}
+/* What's Next report: size tables to content (scroll horizontally instead of squishing) + freeze column 1 (PO / shipment) */
+#supply-root table.up-tbl{width:max-content;min-width:100%}
+#supply-root table.up-tbl > thead > tr > th:first-child,
+#supply-root table.up-tbl > tbody > tr:not(.exp-row) > td:first-child{position:sticky;left:0;z-index:2;background:#fff;white-space:nowrap;box-shadow:1px 0 0 #e0e0e0}
+#supply-root table.up-tbl > thead > tr > th:first-child{z-index:3;background:#f3f3f1}
+#supply-root table.up-tbl > tbody > tr.up-shiprow > td:first-child{background:#f8fafc}
 #supply-root .sh-filt-row{display:contents}   /* transparent on desktop; becomes a flex row on mobile */
 #supply-root .pay-tbl .fci.dt{width:96px}#supply-root .pay-tbl .pctin{width:38px;text-align:right}
 /* PLAN expand panel: never clip the column-1 labels (Production start, Start deposit, …) — give them room.
@@ -1002,16 +1008,17 @@
         return out; }
       function poLink(po){ return '<a class="po-jump" data-po="'+esc(po)+'" style="color:#1d4ed8;font-weight:600;text-decoration:none;cursor:pointer" title="open this PO on its Dates tab">'+esc(po)+'</a>'; }
       function poRow(e,cls){ var b=bd(e.date); return '<tr class="'+(cls||'up-row')+'" data-po="'+esc(e.po)+'" style="cursor:pointer">'
+        +'<td class="l" style="white-space:nowrap">'+poLink(e.po)+'</td>'
         +'<td class="l" style="white-space:nowrap;font-weight:600;color:'+b.c+'">'+fd(e.date)+'</td>'
         +'<td class="l" style="color:'+b.m+';white-space:nowrap">in '+b.dd+'d</td>'
-        +'<td class="l">'+poLink(e.po)+'</td><td class="l">'+esc(e.supplier||'—')+'</td>'
+        +'<td class="l">'+esc(e.supplier||'—')+'</td>'
         +'<td class="l">'+esc(e.market||'')+'</td><td>'+units(e.units)+'</td><td>'+csymFor(e.market)+fmInt(e.val)+'</td>'
         +'<td class="l">'+flexLink(e.flex)+'</td></tr>'; }
       function shipRow(g,id){ var b=bd(g.date), s=Object.keys(g.sup);
         return '<tr class="up-shiprow" data-ref="'+esc(g.ship)+'" style="cursor:pointer;background:#f8fafc">'
+          +'<td class="l" style="white-space:nowrap"><button class="planbtn up-exp" data-id="'+id+'">▸</button> <b>🚢 '+esc(g.ship)+'</b> <span class="mut tiny">'+g.items.length+' PO</span></td>'
           +'<td class="l" style="white-space:nowrap;font-weight:600;color:'+b.c+'">'+fd(g.date)+'</td>'
           +'<td class="l" style="color:'+b.m+';white-space:nowrap">in '+b.dd+'d</td>'
-          +'<td class="l"><button class="planbtn up-exp" data-id="'+id+'">▸</button> <b>🚢 '+esc(g.ship)+'</b> <span class="mut tiny">'+g.items.length+' PO</span></td>'
           +'<td class="l">'+esc(s.length>1?s.length+' suppliers':(s[0]||'—'))+'</td>'
           +'<td class="l">'+esc(g.market||'')+'</td><td>'+units(g.units)+'</td><td>'+csymFor(g.market)+fmInt(g.val)+'</td>'
           +'<td class="l">'+flexLink(g.flex)+'</td></tr>'
@@ -1032,19 +1039,19 @@
         .sort(function(a,b){return (b.overdue.days||0)-(a.overdue.days||0);});
       var ovdRows=ovd.map(function(p){ var o=p.overdue;
         return '<tr class="up-row" data-po="'+esc(p.po)+'" style="cursor:pointer">'
+          +'<td class="l" style="white-space:nowrap">'+poLink(p.po)+(p.shipment_ref&&p.shipment_ref!==p.po?' <span class="mut tiny">🚢 '+esc(p.shipment_ref)+'</span>':'')+'</td>'
           +'<td class="l" style="white-space:nowrap;font-weight:600;color:#b91c1c">'+fd(o.date)+'</td>'
           +'<td class="l" style="color:#b91c1c;white-space:nowrap;font-weight:700">'+o.days+'d late</td>'
-          +'<td class="l">'+poLink(p.po)+(p.shipment_ref&&p.shipment_ref!==p.po?' <span class="mut tiny">🚢 '+esc(p.shipment_ref)+'</span>':'')+'</td>'
           +'<td class="l"><span class="tool-badge bg-red">'+esc(o.type)+'</span></td>'
           +'<td class="l">'+esc(p.supplier||'—')+'</td><td class="l">'+esc(p.market||'')+'</td>'
           +'<td>'+units(p.units)+'</td><td>'+csymFor(p.market)+fmInt(p.val)+'</td>'
           +'<td class="l">'+flexLink(p.flex)+'</td></tr>'; }).join('');
       var ovdSection='<div class="sect-h" style="color:#b91c1c;font-size:12px;margin-top:6px">⚠ Overdue ('+ovd.length+') — milestone date passed, not yet done</div>'
-        +(ovd.length?'<div class="tw"><table><thead><tr><th class="l">Was due</th><th class="l">Late</th><th class="l">PO / shipment</th><th class="l">Waiting on</th><th class="l">Supplier</th><th class="l">Mkt</th><th>Units</th><th>Value</th><th class="l">Flexport</th></tr></thead><tbody>'+ovdRows+'</tbody></table></div>':'<div class="count" style="padding:4px 2px">nothing overdue 🎉</div>');
+        +(ovd.length?'<div class="tw"><table class="up-tbl"><thead><tr><th class="l">PO / shipment</th><th class="l">Was due</th><th class="l">Late</th><th class="l">Waiting on</th><th class="l">Supplier</th><th class="l">Mkt</th><th>Units</th><th>Value</th><th class="l">Flexport</th></tr></thead><tbody>'+ovdRows+'</tbody></table></div>':'<div class="count" style="padding:4px 2px">nothing overdue 🎉</div>');
       var total=0;
       var sections=TYPES.map(function(t){ var r=buildRows(t[0],evs(t[0]),t[0]); total+=r.n;
         return '<div class="sect-h" style="color:'+t[2]+';font-size:12px;margin-top:14px">'+t[1]+' ('+r.n+')</div>'
-          +(r.n?'<div class="tw"><table><thead><tr><th class="l">Date</th><th class="l">When</th><th class="l">PO / shipment</th><th class="l">Supplier</th><th class="l">Mkt</th><th>Units</th><th>Value</th><th class="l">Flexport</th></tr></thead><tbody>'+r.html+'</tbody></table></div>':'<div class="count" style="padding:4px 2px">none in this window</div>'); }).join('');
+          +(r.n?'<div class="tw"><table class="up-tbl"><thead><tr><th class="l">PO / shipment</th><th class="l">Date</th><th class="l">When</th><th class="l">Supplier</th><th class="l">Mkt</th><th>Units</th><th>Value</th><th class="l">Flexport</th></tr></thead><tbody>'+r.html+'</tbody></table></div>':'<div class="count" style="padding:4px 2px">none in this window</div>'); }).join('');
       c.innerHTML=annot('upcoming')
         +'<div class="bar"><span class="pill-lbl">Market</span><span class="pill'+(_up.mkt==='all'?' active':'')+'" data-m="all">All</span>'
           +mkts.map(function(m){return '<span class="pill'+(_up.mkt===m?' active':'')+'" data-m="'+esc(m)+'">'+esc(m)+'</span>';}).join('')

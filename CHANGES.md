@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.632 - What's Next: horizontal scroll + sticky PO column (mobile)
+
+- The forward-calendar tables now size to content and scroll horizontally instead of
+  squishing into one screen width (new .up-tbl: width:max-content;min-width:100%).
+- Column 1 is now **PO / shipment** (moved from Date) and is **sticky** while scrolling —
+  header + rows, with the shipment rows keeping their tint. Applies to Overdue and all
+  three sections (Completing / Shipping / Arriving).
+
 ## v25.631 - Config ▸ Key accounts: card list + grouped edit form (UX rebuild)
 
 - Replaced the unusable 15-column inline-edit table with a proper layout:
