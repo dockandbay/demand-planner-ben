@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.641';
+const APP_VERSION = 'v25.642';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -2564,6 +2564,7 @@ app.get('/api/supply/:section', async (req, res) => {
                        coalesce(po.end_production_overide, po.start_production + (coalesce(sup.production_days,0)||' days')::interval) + interval '7 days')::date ship_date,
               coalesce(sh.delivery_date, sh.arrival_date, sh.landing_date, po.delivery_date_overide, po.landing_date_overide)::date arr_known,
               po.supplier_ship_date sup_ship, sh.departure_date sh_dep, coalesce(sh.status,'') sh_status,
+              lower(coalesce(sh.mode,'')) sh_mode, coalesce(po.branch,'') branch, coalesce(fxs.fxmode,'') fxmode,
               b.sea_lead_time_days sea_lead,
               coalesce(po.supplier_invoice_total,
                        (SELECT sum(l.qty*coalesce(l.cost_price,0)) FROM planner.purchase_order_lines l WHERE l.po=po.po),
@@ -2574,7 +2575,7 @@ app.get('/api/supply/:section', async (req, res) => {
             LEFT JOIN planner.suppliers sup ON sup.id=po.supplier_id
             LEFT JOIN planner.branches b ON b.name=po.branch
             LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
-            LEFT JOIN LATERAL (SELECT f.flex_id FROM planner.flexport_shipments f
+            LEFT JOIN LATERAL (SELECT f.flex_id, f.mode fxmode FROM planner.flexport_shipments f
               WHERE f.flex_id=po.flexport_reference OR f.shipment_name=po.po OR f.shipment_name=po.shipment_ref
               ORDER BY (f.flex_id=po.flexport_reference) DESC NULLS LAST LIMIT 1) fxs ON true
             WHERE coalesce(po.status,'') NOT ILIKE '%complete%')
@@ -2584,6 +2585,11 @@ app.get('/api/supply/:section', async (req, res) => {
             to_char(ship_date,'YYYY-MM-DD') ship_date,
             to_char(coalesce(arr_known, ship_date + (coalesce(sea_lead,0)||' days')::interval),'YYYY-MM-DD') arrival,
             (arr_known IS NOT NULL) arrival_known, units, round(val)::int val, flex,
+            -- shipping method indicator: fob (pickup / mode=fob) ▸ air (shipment or flexport air) ▸ sea (default)
+            CASE WHEN sh_mode='fob' THEN 'fob'
+                 WHEN shipment_ref='' AND (branch ILIKE '%manufactur%' OR market NOT IN ('UK','US','EU','AU','CA')) THEN 'fob'
+                 WHEN sh_mode LIKE 'air%' OR fxmode ILIKE 'air%' THEN 'air'
+                 ELSE 'sea' END mode,
             -- planned-vs-confirmed inputs for the OVERDUE check (a passed planned date with no confirmation)
             to_char(coalesce(sup_ship, prod_end + interval '7 days'),'YYYY-MM-DD') planned_ship,
             (sh_dep IS NOT NULL) departed,
@@ -2626,7 +2632,7 @@ app.get('/api/supply/:section', async (req, res) => {
           else if (r.planned_ship && r.planned_ship < today && !departed && !arrived) overdue = { type: 'Shipping', date: r.planned_ship };
           else if (r.eta && r.eta < today && !arrived) overdue = { type: 'Arriving', date: r.eta };
           if (overdue) overdue.days = -dleft(overdue.date);
-          return { po: r.po, supplier: r.supplier, market: r.market, units: r.units, val: r.val,
+          return { po: r.po, supplier: r.supplier, market: r.market, units: r.units, val: r.val, mode: r.mode || 'sea',
             shipment_ref: r.shipment_ref, flex: r.flex || '', production_status: r.production_status, prod_conf_age: r.prod_conf_age,
             stage: st, next_date: nextDate, next_days: d, health, overdue,
             prod_start: r.prod_start, prod_end: r.prod_end, ship_date: r.ship_date, arrival: r.arrival, arrival_known: r.arrival_known };

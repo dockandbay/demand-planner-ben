@@ -207,6 +207,10 @@
 #supply-root table.sh-tbl thead th:nth-child(2),
 #supply-root table.sh-tbl tbody tr:not(.exp-row):not(.grp-row) td:nth-child(2){position:sticky;left:78px;z-index:2;background:#fff;box-shadow:1px 0 0 #e0e0e0}
 #supply-root table.sh-tbl thead th:first-child,#supply-root table.sh-tbl thead th:nth-child(2){z-index:3;background:#f3f3f1}
+/* What's Next: shipping-method chip + collapsible section headers */
+#supply-root .up-mode{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:9px;white-space:nowrap;margin-left:5px;vertical-align:middle}
+#supply-root .up-sec-h:hover{opacity:.82}
+#supply-root .up-sec-h .up-chev{width:11px;display:inline-block;text-align:center}
 /* What's Next report: size tables to content (scroll horizontally instead of squishing) + freeze column 1 (PO / shipment) */
 #supply-root table.up-tbl{width:max-content;min-width:100%}
 #supply-root table.up-tbl > thead > tr > th:first-child,
@@ -997,7 +1001,7 @@
     view(); }
   function csymFor(m){ return m==='US'?'$':m==='EU'?'€':m==='AU'?'A$':m==='CA'?'C$':'£'; }
   // ---- WHAT'S NEXT: forward calendar of upcoming milestones (completing / shipping / arriving) by date ----
-  var _up={mkt:'all',wk:'4'};
+  var _up={mkt:'all',wk:'4',col:{}};   // col = per-section collapse state (Overdue / Completing / Shipping / Arriving)
   function renderUpcoming(d){ var c=document.getElementById('rep-body')||document.getElementById('supply-content'); var pos=d.pos||[], today=d.today;
     var TYPES=[['completing','📦 Completing soon','#7c3aed'],['shipping','🚢 Shipping soon','#0369a1'],['arriving','📥 Arriving soon','#15803d']];
     var OVD={awaiting:'Start production',in_production:'Completing',prod_complete:'Shipping',in_transit:'Arriving',arriving:'Arriving'};  // overdue milestone by stage
@@ -1009,17 +1013,22 @@
       function bd(date){ var dd=Math.round((Date.parse(date)-Date.parse(today))/86400000); return {dd:dd,c:dd<=7?'#d97706':'#333',m:dd<=7?'#d97706':'#888'}; }
       function flexLink(fid){ if(!fid)return '<span class="mut tiny">—</span>'; var n=String(fid).replace(/\D/g,'');
         return n?'<a href="https://app.flexport.com/shipments/'+n+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;white-space:nowrap">'+esc(fid)+' ↗</a>':esc(fid); }
+      // shipping-method indicator chip (air / sea / fob)
+      function modeChip(m){ m=String(m||'').toLowerCase(); var mp={air:['✈ Air','#dbeafe','#1e40af'],sea:['🚢 Sea','#ccfbf1','#0f766e'],fob:['FOB','#f1f5f9','#475569']}; var x=mp[m]; return x?'<span class="up-mode" style="background:'+x[1]+';color:'+x[2]+'">'+x[0]+'</span>':''; }
+      // collapsible section wrapper — header (chevron + title) toggles the body; state kept in _up.col
+      function secWrap(key,headerHtml,body,mt){ var col=!!_up.col[key];
+        return '<div class="up-sec" data-sec="'+esc(key)+'"><div class="up-sec-h sect-h" data-sec="'+esc(key)+'" style="margin-top:'+mt+'px;cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none"><span class="up-chev" style="font-size:10px;color:#94a3b8">'+(col?'▸':'▾')+'</span>'+headerHtml+'</div><div class="up-sec-body"'+(col?' style="display:none"':'')+'>'+body+'</div></div>'; }
       function evs(type){ var out=[]; pos.forEach(function(p){
           if(_up.mkt!=='all'&&p.market!==_up.mkt)return;
           var date=type==='completing'?p.prod_end:type==='shipping'?p.ship_date:p.arrival;
           if(!date||date<today||date>cap)return;
           if(type==='completing'&&(p.production_status==='ready_to_ship'||p.production_status==='shipped'))return;  // already past this milestone
           if(type==='shipping'&&p.production_status==='shipped')return;
-          out.push({po:p.po,supplier:p.supplier,market:p.market,units:p.units,val:p.val,date:date,ship:p.shipment_ref||'',flex:p.flex||''}); });
+          out.push({po:p.po,supplier:p.supplier,market:p.market,units:p.units,val:p.val,date:date,ship:p.shipment_ref||'',flex:p.flex||'',mode:p.mode||'sea'}); });
         return out; }
       function poLink(po){ return '<a class="po-jump" data-po="'+esc(po)+'" style="color:#1d4ed8;font-weight:600;text-decoration:none;cursor:pointer" title="open this PO on its Dates tab">'+esc(po)+'</a>'; }
       function poRow(e,cls){ var b=bd(e.date); return '<tr class="'+(cls||'up-row')+'" data-po="'+esc(e.po)+'" style="cursor:pointer">'
-        +'<td class="l" style="white-space:nowrap">'+poLink(e.po)+'</td>'
+        +'<td class="l" style="white-space:nowrap">'+poLink(e.po)+modeChip(e.mode)+'</td>'
         +'<td class="l" style="white-space:nowrap;font-weight:600;color:'+b.c+'">'+fd(e.date)+'</td>'
         +'<td class="l" style="color:'+b.m+';white-space:nowrap">in '+b.dd+'d</td>'
         +'<td class="l">'+esc(e.supplier||'—')+'</td>'
@@ -1027,7 +1036,7 @@
         +'<td class="l">'+flexLink(e.flex)+'</td></tr>'; }
       function shipRow(g,id){ var b=bd(g.date), s=Object.keys(g.sup);
         return '<tr class="up-shiprow" data-ref="'+esc(g.ship)+'" style="cursor:pointer;background:#f8fafc">'
-          +'<td class="l" style="white-space:nowrap"><button class="planbtn up-exp" data-id="'+id+'">▸</button> <b>🚢 '+esc(g.ship)+'</b> <span class="mut tiny">'+g.items.length+' PO</span></td>'
+          +'<td class="l" style="white-space:nowrap"><button class="planbtn up-exp" data-id="'+id+'">▸</button> <b>🚢 '+esc(g.ship)+'</b> <span class="mut tiny">'+g.items.length+' PO</span>'+modeChip(g.mode)+'</td>'
           +'<td class="l" style="white-space:nowrap;font-weight:600;color:'+b.c+'">'+fd(g.date)+'</td>'
           +'<td class="l" style="color:'+b.m+';white-space:nowrap">in '+b.dd+'d</td>'
           +'<td class="l">'+esc(s.length>1?s.length+' suppliers':(s[0]||'—'))+'</td>'
@@ -1035,12 +1044,12 @@
           +'<td class="l">'+flexLink(g.flex)+'</td></tr>'
           +'<tr class="exp-row" id="upexp-'+id+'" style="display:none"><td colspan="8"><div style="padding:2px 2px 2px 24px">'
           +'<table style="font-size:11px;width:auto"><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th>Units</th><th>Value</th><th class="l">Flexport</th></tr></thead><tbody>'
-          +g.items.map(function(e){ return '<tr class="up-detpo" data-po="'+esc(e.po)+'" style="cursor:pointer"><td class="l">'+poLink(e.po)+'</td><td class="l">'+esc(e.supplier||'—')+'</td><td>'+units(e.units)+'</td><td>'+csymFor(e.market)+fmInt(e.val)+'</td><td class="l">'+flexLink(e.flex)+'</td></tr>'; }).join('')
+          +g.items.map(function(e){ return '<tr class="up-detpo" data-po="'+esc(e.po)+'" style="cursor:pointer"><td class="l">'+poLink(e.po)+modeChip(e.mode)+'</td><td class="l">'+esc(e.supplier||'—')+'</td><td>'+units(e.units)+'</td><td>'+csymFor(e.market)+fmInt(e.val)+'</td><td class="l">'+flexLink(e.flex)+'</td></tr>'; }).join('')
           +'</tbody></table></div></td></tr>'; }
       // shipping & arriving group by master shipment (a shipment moves as one); completing stays per-PO
       function buildRows(type,list,secKey){ if(type==='completing'){ list.sort(byDate); return {n:list.length,html:list.map(function(e){return poRow(e);}).join('')}; }
         var groups={}, rows=[];
-        list.forEach(function(e){ if(e.ship){ var g=groups[e.ship]; if(!g){g=groups[e.ship]={ship:e.ship,date:e.date,units:0,val:0,market:e.market,items:[],sup:{},flex:''};rows.push({date:e.date,g:g});} g.units+=e.units;g.val+=e.val;g.items.push(e);if(e.supplier)g.sup[e.supplier]=1;if(!g.flex&&e.flex)g.flex=e.flex;if(e.date<g.date)g.date=e.date; }
+        list.forEach(function(e){ if(e.ship){ var g=groups[e.ship]; if(!g){g=groups[e.ship]={ship:e.ship,date:e.date,units:0,val:0,market:e.market,items:[],sup:{},flex:'',mode:e.mode||''};rows.push({date:e.date,g:g});} g.units+=e.units;g.val+=e.val;g.items.push(e);if(e.supplier)g.sup[e.supplier]=1;if(!g.flex&&e.flex)g.flex=e.flex;if(!g.mode&&e.mode)g.mode=e.mode;if(e.date<g.date)g.date=e.date; }
           else rows.push({date:e.date,e:e}); });
         rows.sort(byDate); var i=0;
         return {n:rows.length,html:rows.map(function(r){return r.g?shipRow(r.g,secKey+'-'+(i++)):poRow(r.e);}).join('')}; }
@@ -1050,19 +1059,19 @@
         .sort(function(a,b){return (b.overdue.days||0)-(a.overdue.days||0);});
       var ovdRows=ovd.map(function(p){ var o=p.overdue;
         return '<tr class="up-row" data-po="'+esc(p.po)+'" style="cursor:pointer">'
-          +'<td class="l" style="white-space:nowrap">'+poLink(p.po)+(p.shipment_ref&&p.shipment_ref!==p.po?' <span class="mut tiny">🚢 '+esc(p.shipment_ref)+'</span>':'')+'</td>'
+          +'<td class="l" style="white-space:nowrap">'+poLink(p.po)+(p.shipment_ref&&p.shipment_ref!==p.po?' <span class="mut tiny">🚢 '+esc(p.shipment_ref)+'</span>':'')+modeChip(p.mode)+'</td>'
           +'<td class="l" style="white-space:nowrap;font-weight:600;color:#b91c1c">'+fd(o.date)+'</td>'
           +'<td class="l" style="color:#b91c1c;white-space:nowrap;font-weight:700">'+o.days+'d late</td>'
           +'<td class="l"><span class="tool-badge bg-red">'+esc(o.type)+'</span></td>'
           +'<td class="l">'+esc(p.supplier||'—')+'</td><td class="l">'+esc(p.market||'')+'</td>'
           +'<td>'+units(p.units)+'</td><td>'+csymFor(p.market)+fmInt(p.val)+'</td>'
           +'<td class="l">'+flexLink(p.flex)+'</td></tr>'; }).join('');
-      var ovdSection='<div class="sect-h" style="color:#b91c1c;font-size:12px;margin-top:6px">⚠ Overdue ('+ovd.length+') — milestone date passed, not yet done</div>'
-        +(ovd.length?'<div class="tw"><table class="up-tbl"><thead><tr><th class="l">PO / shipment</th><th class="l">Was due</th><th class="l">Late</th><th class="l">Waiting on</th><th class="l">Supplier</th><th class="l">Mkt</th><th>Units</th><th>Value</th><th class="l">Flexport</th></tr></thead><tbody>'+ovdRows+'</tbody></table></div>':'<div class="count" style="padding:4px 2px">nothing overdue 🎉</div>');
+      var ovdBody=(ovd.length?'<div class="tw"><table class="up-tbl"><thead><tr><th class="l">PO / shipment</th><th class="l">Was due</th><th class="l">Late</th><th class="l">Waiting on</th><th class="l">Supplier</th><th class="l">Mkt</th><th>Units</th><th>Value</th><th class="l">Flexport</th></tr></thead><tbody>'+ovdRows+'</tbody></table></div>':'<div class="count" style="padding:4px 2px">nothing overdue 🎉</div>');
+      var ovdSection=secWrap('overdue','<span style="color:#b91c1c;font-size:12px">⚠ Overdue ('+ovd.length+') — milestone date passed, not yet done</span>', ovdBody, 6);
       var total=0;
       var sections=TYPES.map(function(t){ var r=buildRows(t[0],evs(t[0]),t[0]); total+=r.n;
-        return '<div class="sect-h" style="color:'+t[2]+';font-size:12px;margin-top:14px">'+t[1]+' ('+r.n+')</div>'
-          +(r.n?'<div class="tw"><table class="up-tbl"><thead><tr><th class="l">PO / shipment</th><th class="l">Date</th><th class="l">When</th><th class="l">Supplier</th><th class="l">Mkt</th><th>Units</th><th>Value</th><th class="l">Flexport</th></tr></thead><tbody>'+r.html+'</tbody></table></div>':'<div class="count" style="padding:4px 2px">none in this window</div>'); }).join('');
+        var body=(r.n?'<div class="tw"><table class="up-tbl"><thead><tr><th class="l">PO / shipment</th><th class="l">Date</th><th class="l">When</th><th class="l">Supplier</th><th class="l">Mkt</th><th>Units</th><th>Value</th><th class="l">Flexport</th></tr></thead><tbody>'+r.html+'</tbody></table></div>':'<div class="count" style="padding:4px 2px">none in this window</div>');
+        return secWrap(t[0],'<span style="color:'+t[2]+';font-size:12px">'+t[1]+' ('+r.n+')</span>', body, 14); }).join('');
       c.innerHTML=annot('upcoming')
         +'<div class="bar"><span class="pill-lbl">Market</span><span class="pill'+(_up.mkt==='all'?' active':'')+'" data-m="all">All</span>'
           +mkts.map(function(m){return '<span class="pill'+(_up.mkt===m?' active':'')+'" data-m="'+esc(m)+'">'+esc(m)+'</span>';}).join('')
@@ -1077,6 +1086,8 @@
       c.querySelectorAll('.up-row, .up-detpo').forEach(function(b){b.onclick=function(ev){if(ev.target.closest('a'))return;openPODrawer(b.dataset.po,'dates');};});
       c.querySelectorAll('.po-jump').forEach(function(a){a.onclick=function(ev){ev.stopPropagation();openPODrawer(a.dataset.po,'dates');};});
       c.querySelectorAll('.up-shiprow').forEach(function(b){b.onclick=function(ev){if(ev.target.closest('a')||ev.target.closest('button'))return;gotoShipment(b.dataset.ref);};});
+      c.querySelectorAll('.up-sec-h').forEach(function(h){ h.onclick=function(){ var k=h.dataset.sec; _up.col[k]=!_up.col[k];
+        var body=h.parentNode.querySelector('.up-sec-body'), chev=h.querySelector('.up-chev'); if(body)body.style.display=_up.col[k]?'none':''; if(chev)chev.textContent=_up.col[k]?'▸':'▾'; }; });
     };
     view(); }
   function renderPO(rows){ var c=document.getElementById('supply-content'); fetchLookups(function(){ poInner(rows,c); }); }

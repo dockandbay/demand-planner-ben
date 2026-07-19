@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.642 - What's Next: collapsible sections + shipping-method chip
+
+- Each major grouping (Overdue / Completing / Shipping / Arriving) now has a clickable
+  header with a ▸/▾ chevron to expand/minimise it. State persists across filter changes.
+- New shipping-method chip on every row (and shipment group): ✈ Air / 🚢 Sea / FOB.
+  Server adds `mode` to /upcoming: fob (pickup / mode=fob) ▸ air (shipment/flexport air) ▸
+  sea (default).
+
 ## v25.641 - Config nav: Supply chain 2nd + mobile drawer with nested sub-options
 
 - "Supply chain" now sits second in the CONFIG nav (next to General settings).
