@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.0 - Release: packaged for deploy (live baseline v25.569 -> v26.0)
+
+- Version bump to v26.0 and full deploy package: DEPLOY_2026-07-19_v26.md. Run migrations 120-123 on live
+  (120-123 confirmed NOT yet applied; up to 119 is live). Artifact ships empty data placeholders the harness
+  injects (server.mjs replaceGlobal) — must verify populated after deploy. n8n: weather + preorder/ka Airtable->
+  Supabase flows; MQ Print (Sherry) rename in Cin7/Fulfil. exceljs already live; no new env vars.
+
 ## v25.676 - Buy plan: cover + FBA-min + supplier from authoritative products fields; stub BP_DATA (artifact 2.4->0.77MB)
 
 - buildPROD_CONST now reads from planner.products (was: FBA/3PL cover re-derived from category_target_cover BY
