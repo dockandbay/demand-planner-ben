@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.662 - Portal "Amount due" = order value − amount actually paid (unpaid deposit stays owed)
+
+- The portal's Amount due used balance_owing, which nets off the SCHEDULED start-deposit + completion even when
+  they haven't been paid — so a PO with nothing paid showed less than its full value (e.g. PO-57UKLX1: due showed
+  £64,698 of a £129,396 order). Paid + due didn't reconcile to the total.
+- Now Amount due = order value (value_used) − amount actually paid, where "paid" = milestones with a recorded paid
+  date (same definition the "Amount paid" card already used). So paid + due always equals the order value, and a
+  scheduled-but-unpaid deposit/completion stays owed. Fixed in both the PO grid and the Payments-tab summary.
+- Portal-only (client-side, portal-view.js). No change to planner.v_po_finance / admin / cash flow — admin's
+  "Balance" remains the balance milestone as before.
+- Note: a deposit drawn from a pool but with no recorded paid date counts as still-due under this rule.
+
 ## v25.661 - Portal order-plan Est. cost now falls back to product cost (parity with admin)
 
 - The supplier portal showed a blank Est. cost on lines with no negotiated `cost_price` (e.g. PO-57UKLX1),

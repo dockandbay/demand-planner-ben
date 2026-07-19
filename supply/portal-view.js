@@ -837,7 +837,10 @@
       var _pd=function(v){ return v?esc(fd(v)):'<span class="mut">—</span>'; };
       var startAmt=(p.start_assigned!=null?p.start_assigned:p.start_dep), compAmt=(p.completion_assigned!=null?p.completion_assigned:p.completion), balAmt=p.balance_1_amount;
       var paidTot=(p.start_date?Number(startAmt)||0:0)+(p.completion_date?Number(compAmt)||0:0)+(p.balance_1_date?Number(balAmt)||0:0);
-      var dueTot=(p.balance_owing!=null?Number(p.balance_owing):null);
+      // Amount due = order value − amounts actually PAID (paidTot counts only milestones with a recorded paid date),
+      // so paid + due = the full order value. A scheduled-but-unpaid deposit/completion is still owed — the old
+      // balance_owing netted those off even when unpaid, understating what the supplier is still due.
+      var dueTot=(p.value_used!=null?Number(p.value_used)-paidTot:null);
       var _prow=function(lbl,amt,dt,ref){ return '<tr><td class="l" style="padding:4px 16px 4px 0;white-space:nowrap">'+lbl+'</td><td class="l" style="padding:4px 16px 4px 0"><b>'+_pm(amt)+'</b></td><td class="l" style="padding:4px 16px 4px 0">'+_pd(dt)+'</td><td class="l" style="padding:4px 0">'+(ref?esc(ref):'<span class="mut">—</span>')+'</td></tr>'; };
       var payments='<div class="sect-h">Payments</div>'
         +'<table style="font-size:12px;border-collapse:collapse;text-align:left;table-layout:fixed;width:600px;max-width:100%">'
@@ -894,6 +897,12 @@
           var act=poActionCount(p);   // shared count (excludes productions ≤54; no "no shipment yet" term)
           var cdVal=poCdVal(p, sb);
           var cdGrid=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
+          // Amount due (outstanding) = order value − amounts actually PAID (milestone with a recorded paid date),
+          // so paid + due = the full order value. A scheduled-but-unpaid deposit/completion stays owed (mirrors the
+          // Payments-tab summary; the old balance_owing netted them off even when unpaid).
+          var _gSa=(p.start_assigned!=null?p.start_assigned:p.start_dep), _gCa=(p.completion_assigned!=null?p.completion_assigned:p.completion);
+          var _gPaid=(p.start_date?Number(_gSa)||0:0)+(p.completion_date?Number(_gCa)||0:0)+(p.balance_1_date?Number(p.balance_1_amount)||0:0);
+          var _gDue=(p.value_used!=null?Number(p.value_used)-_gPaid:null);
           return _grpHdr+'<tr class="pp-row" data-grp="'+esc(_gkey)+'"><td class="l"><button class="save-btn pp-exp" data-i="'+i+'" data-po="'+esc(p.po)+'"><span class="mng-txt">MANAGE</span>'+(act>0?' <span class="ex-badge" title="'+act+' action'+(act>1?'s':'')+' needed">'+act+'</span>':'')+'</button></td>'
             +'<td class="l"><b>'+esc(p.po)+'</b></td>'
             +'<td class="l" style="width:38px;min-width:38px;white-space:nowrap">'+(p.prod_no?esc(p.prod_no):'<span class="mut">—</span>')+'</td>'
@@ -910,7 +919,7 @@
             +'<td style="text-align:right">'+ppPay(p.start_assigned!=null?p.start_assigned:p.start_dep, p.start_date)+'</td>'
             +'<td style="text-align:right">'+ppPay(p.completion_assigned!=null?p.completion_assigned:p.completion, p.completion_date)+'</td>'
             +'<td style="text-align:right">'+ppPay(p.balance_1_amount, p.balance_1_date)+'</td>'
-            +'<td style="text-align:right">'+(p.balance_owing!=null?'$'+units(p.balance_owing):'<span class="mut">—</span>')+'</td>'
+            +'<td style="text-align:right">'+(_gDue!=null?'$'+units(_gDue):'<span class="mut">—</span>')+'</td>'
             +'<td class="l">'+dcell(p.balance_due)+'</td><td class="l">'+(p.deposit_ref?esc(p.deposit_ref):'<span class="mut">—</span>')+'</td></tr>'+det; }).join('')
         +'</tbody></table></div>'; }
     function ppDeposits(deps){ var paid=0,used=0,rem=0,seenRef={}; deps.forEach(function(d,di){ if(!d.is_deposit)return; paid+=Number(d.amount)||0; var k=d.reference||('__'+di); if(seenRef[k])return; seenRef[k]=1; used+=Number(d.deposit_used)||0; rem+=Number(d.deposit_remaining)||0; });
