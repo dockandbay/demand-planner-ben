@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.643 - Cash flow report: Email button next to CSV (All transactions + Stock arrivals)
+
+- Added a ✉ Email button beside the ⬇ CSV download for both All transactions and Stock
+  arrivals. Emails the same CSV to the recipient saved in CONFIG ▸ Exports & uploads
+  (export_email_cf_transactions / _cf_arrivals) via /api/export/email-csv. If no recipient
+  is set (or Resend isn't configured), it says so.
+
 ## v25.642 - What's Next: collapsible sections + shipping-method chip
 
 - Each major grouping (Overdue / Completing / Shipping / Arriving) now has a clickable

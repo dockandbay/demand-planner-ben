@@ -5451,9 +5451,11 @@
       +'<span class="tiny mut">All transactions:</span>'
       +'<button class="save-btn" id="cf-copy-all" title="Copy every cash-flow transaction to the clipboard">⧉</button>'
       +'<button class="save-btn" id="cf-csv-all" style="background:#dcfce7;color:#166534;border-color:#16a34a" title="Download every cash-flow transaction as CSV">⬇ CSV</button>'
+      +'<button class="save-btn" id="cf-email-all" style="background:#dbeafe;color:#1e40af;border-color:#93c5fd" title="Email the all-transactions CSV to the saved recipient (set in CONFIG ▸ Exports & uploads)">✉ Email</button>'
       +'<span class="tiny mut" style="margin-left:6px">Stock arrivals:</span>'
       +'<button class="save-btn" id="cf-arr-copy" title="Copy Stock arrivals (goods + import duty per PO, dated on completion) to the clipboard">⧉</button>'
       +'<button class="save-btn" id="cf-arr-csv" style="background:#dcfce7;color:#166534;border-color:#16a34a" title="Download Stock arrivals as CSV (goods + import duty per PO, dated on completion)">⬇ CSV</button>'
+      +'<button class="save-btn" id="cf-email-arr" style="background:#dbeafe;color:#1e40af;border-color:#93c5fd" title="Email the Stock arrivals CSV to the saved recipient (set in CONFIG ▸ Exports & uploads)">✉ Email</button>'
       +'<span class="tiny mut" style="margin-left:6px">This view:</span>'
       +'<button class="save-btn" id="cf-copy" title="Copy the filtered lines to the clipboard">⧉</button>'
       +'<button class="save-btn" id="cf-csv" title="Download the filtered lines as a CSV">⬇ CSV</button>'
@@ -5481,6 +5483,15 @@
     c.querySelector('#cf-csv-all').onclick=function(){ csv(cfAllRows(),'cash_flow_all_transactions.csv'); };
     c.querySelector('#cf-arr-copy').onclick=function(){ copyRows(cfArrivalsRows(),'Stock arrivals'); };
     c.querySelector('#cf-arr-csv').onclick=function(){ csv(cfArrivalsRows(),'stock_arrivals.csv'); };
+    // Email a report CSV to the saved recipient (CONFIG ▸ Exports & uploads → export_email_<key>)
+    function cfEmail(btn,key,rowsFn,fn){ var o=btn.innerHTML; btn.disabled=true; btn.textContent='…';
+      fetch('/api/export/email-csv',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:key,csv:rowsToCsvStr(rowsFn()),filename:fn})})
+        .then(function(r){return r.json();}).then(function(j){ btn.disabled=false;
+          if(j&&j.ok){ btn.innerHTML='✓ Sent'; setTimeout(function(){btn.innerHTML=o;},1600); }
+          else { btn.innerHTML=o; alert((j&&(j.reason||j.error)?(j.reason||j.error):'Could not email')+(j&&j.would_send_to?'\n(recipient on file: '+j.would_send_to+')':'\nSet a recipient in CONFIG ▸ Exports & uploads.')); } })
+        .catch(function(e){ btn.disabled=false; btn.innerHTML=o; alert('Email failed: '+(e.message||e)); }); }
+    c.querySelector('#cf-email-all').onclick=function(){ cfEmail(this,'cf_transactions',cfAllRows,'cash_flow_all_transactions.csv'); };
+    c.querySelector('#cf-email-arr').onclick=function(){ cfEmail(this,'cf_arrivals',cfArrivalsRows,'stock_arrivals.csv'); };
     c.querySelector('#cf-month').onchange=function(){_cfState.month=this.value;draw();};
     c.querySelectorAll('.pill[data-tt]').forEach(function(p){p.onclick=function(){var t=p.dataset.tt;_cfState.types[t]=!_cfState.types[t];p.classList.toggle('active',_cfState.types[t]);draw();};});
     c.querySelectorAll('.pill[data-st]').forEach(function(p){p.onclick=function(){_cfState.status=p.dataset.st;c.querySelectorAll('.pill[data-st]').forEach(function(x){x.classList.toggle('active',x===p);});draw();};});
