@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.631 - Config ▸ Key accounts: card list + grouped edit form (UX rebuild)
+
+- Replaced the unusable 15-column inline-edit table with a proper layout:
+  - **List**: responsive cards showing name, delivery address, client requirements and
+    green chips for the enabled packing/labelling options (• = has notes).
+  - **Edit**: a full-width grouped form (Account · Delivery & requirements · Packing &
+    labelling) with each packing option as a toggle + notes box, plus pallet/other notes.
+    Save/Cancel, in-place list update on save, no horizontal scroll.
+- Same endpoints/fields; removed the now-unused KA_COLS.
+
 ## v25.630 - PO detail: consolidate sub-tabs (Landed→Payments, Docs→Master Data)
 
 - LANDED COSTS moved under the **PAYMENTS** tab (below the payment schedule, divider
