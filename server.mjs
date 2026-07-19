@@ -78,11 +78,14 @@ const SUPPLY_INJECT = loadInject();
 // restarting the server (the boot-time consts above are kept for server-side global parsing + prod speed).
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
-// App version — single source of truth is package.json ("version": "25.649.0"); APP_VERSION derives from it
-// ("v25.649"). Bump on every change (Ben's rule): `npm run bump` updates package.json + CHANGES.md by hand.
+// App version — single source of truth is package.json ("version": "26.1.0"); APP_VERSION derives from it.
+// Display = v{major}.{minor zero-padded to 3} (+ .{patch} if non-zero): 26.1.0 -> "v26.001", 25.676.0 -> "v25.676".
+// Bump on every change (Ben's rule): `npm version minor` -> next v26 is v26.002, v26.003, …
 const APP_VERSION = (() => { try {
   const v = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version || '0.0.0';
-  return 'v' + v.replace(/\.0+$/, ''); } catch { return 'v0'; } })();
+  const [maj, min, pat] = v.split('.');
+  return 'v' + maj + '.' + String(min || '0').padStart(3, '0') + (pat && pat !== '0' ? '.' + pat : '');
+} catch { return 'v0'; } })();
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {

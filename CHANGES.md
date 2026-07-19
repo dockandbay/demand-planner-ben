@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.001 - Version scheme: v26 minors are zero-padded 3-digit (v26.001, v26.002, …)
+
+- APP_VERSION derive now formats as v{major}.{minor padded to 3}: package.json 26.1.0 -> "v26.001". v25 display
+  unchanged (25.676 -> v25.676). npm version minor advances 26.1.0->26.2.0 -> v26.002.
+
 ## v26.0 - Release: packaged for deploy (live baseline v25.569 -> v26.0)
 
 - Version bump to v26.0 and full deploy package: DEPLOY_2026-07-19_v26.md. Run migrations 120-123 on live
