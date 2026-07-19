@@ -6243,7 +6243,8 @@ const POS_SQL_PORTAL = `
     FROM planner.purchase_orders po
     LEFT JOIN planner.suppliers s ON s.id=po.supplier_id
     LEFT JOIN planner.branches b ON b.name=po.branch
-    LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
+    -- self-master join (coalesce to po.po) so a completion/date override on the PO's own shipment reaches it — matches admin.
+    LEFT JOIN planner.shipments sh ON sh.shipment_ref = coalesce(nullif(po.shipment_ref,''), po.po)
     LEFT JOIN LATERAL (SELECT sum(l.qty*l.cost_price) line_value FROM planner.purchase_order_lines l WHERE l.po=po.po) lv ON true
     LEFT JOIN LATERAL (SELECT f.* FROM planner.flexport_shipments f
       WHERE f.flex_id=po.flexport_reference OR f.shipment_name=po.po OR f.shipment_name=po.shipment_ref
@@ -6253,7 +6254,13 @@ const POS_SQL_PORTAL = `
     SELECT *,
       round(val*sp/100,2) start_calc,
       coalesce(pay_start_deposit_assigned, round(val*sp/100,2)) start_paid,
-      round((sp+cp)/100*val - coalesce(pay_start_deposit_assigned, val*sp/100),2) completion_calc,
+      -- completion term + rolled-in start shortfall, ONLY when there's a completion milestone (cp>0),
+      -- capped at the remaining owed — mirrors the admin calc so the portal shows the same figure.
+      CASE WHEN cp > 0 THEN LEAST(
+        round((sp+cp)/100*val - coalesce(pay_start_deposit_assigned, round(val*sp/100,2)), 2),
+        GREATEST(round(val + coalesce(credit_amount,0) - coalesce(pay_start_deposit_assigned, round(val*sp/100,2))
+          - coalesce(pay_balance_1_amount,0) - coalesce(pay_balance_2_amount,0), 2), 0)
+      ) ELSE 0 END completion_calc,
       coalesce(end_production_overide, CASE WHEN start_production IS NOT NULL AND production_days IS NOT NULL
         THEN (start_production + (production_days||' days')::interval)::date END) eff_prod_end
     FROM base
@@ -6278,7 +6285,7 @@ const POS_SQL_PORTAL = `
     sp start_pct, cp completion_pct, greatest(100-sp-cp,0) balance_pct,
     start_paid start_dep,
     CASE WHEN val>0 THEN coalesce(pay_completion_assigned, completion_calc) END completion,
-    CASE WHEN val>0 THEN round(val - start_paid - coalesce(pay_completion_assigned, completion_calc),2) END balance_owing,
+    CASE WHEN val>0 THEN round(val + coalesce(credit_amount,0) - start_paid - coalesce(pay_completion_assigned, completion_calc),2) END balance_owing,
     start_calc, round(pay_start_deposit_assigned,2) start_assigned, to_char(pay_start_deposit_date,'YYYY-MM-DD') start_date,
     completion_calc, round(pay_completion_assigned,2) completion_assigned, to_char(pay_completion_date,'YYYY-MM-DD') completion_date,
     round(pay_balance_1_amount,2) balance_1_amount, to_char(pay_balance_1_date,'YYYY-MM-DD') balance_1_date,

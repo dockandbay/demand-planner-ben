@@ -3,6 +3,20 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.654 - Fix supplier-portal payment figures to match admin (bug fix)
+
+- The portal (POS_SQL_PORTAL) showed different payment figures than the admin view. Three fixes:
+  1. **completion_calc** now has the `cp>0` guard + `LEAST(...)` cap, mirroring admin — kills the
+     phantom completion for suppliers on start/balance-only terms (e.g. 30/70). Footprint:
+     **111 POs** had a phantom completion; all now 0.
+  2. **balance_owing** now adds `+ coalesce(credit_amount,0)` (admin already did) — the portal was
+     understating the balance when a PO carried an invoice credit/charge.
+  3. **shipment join** now uses `coalesce(nullif(shipment_ref,''), po)` so a completion/date override
+     on a self-master shipment reaches the PO (matches admin).
+- Residual (edge case): the portal still uses a term-based start deposit rather than admin's
+  deposit-pool-availability-aware draw; a PO whose deposit pool ran short can differ slightly. The
+  durable fix is the shared v_po_finance view (refactor #11) — this patch fixes the material bug now.
+
 ## v25.653 - Remove old Financial Model routes, portal loader, reportPlaceholder
 
 - Removed the old **/api/scenario/fin-model** (GET/POST/import) — FY×category×quarter model on
