@@ -2294,6 +2294,13 @@
     var r=el.getBoundingClientRect(), w=_noteTip.offsetWidth||200;
     _noteTip.style.left=Math.max(6,Math.min(r.left, window.innerWidth-w-8))+'px'; _noteTip.style.top=(r.bottom+5)+'px'; }
   function hideNoteTip(){ if(_noteTip)_noteTip.style.display='none'; }
+  // Fast tooltips for a whole container: intercept any element's native `title` (slow ~1s) on first hover,
+  // move it to data-note, and show the shared 120ms noteTip instead. Delegated → covers re-rendered content.
+  function bindFastTips(root){ if(!root||root._ftips)return; root._ftips=1; var t;
+    root.addEventListener('mouseover',function(e){ var el=e.target.closest&&e.target.closest('[title],[data-note]'); if(!el||!root.contains(el))return;
+      if(el.hasAttribute('title')){ var tt=el.getAttribute('title')||''; el.removeAttribute('title'); if(tt&&!el.getAttribute('data-note'))el.setAttribute('data-note',tt); }
+      if(!el.getAttribute('data-note'))return; clearTimeout(t); t=setTimeout(function(){ noteTip(el); },120); });
+    root.addEventListener('mouseout',function(e){ var el=e.target.closest&&e.target.closest('[data-note]'); if(!el)return; clearTimeout(t); hideNoteTip(); }); }
   // purple "N" badge → expand the PO on the MASTER DATA tab (where the Notes live)
   function bindPoNotes(){ document.querySelectorAll('#supply-root .po-note-badge[data-po]').forEach(function(b){ if(b._b)return; b._b=1;
     b.addEventListener('mouseenter',function(){ b._t=setTimeout(function(){ noteTip(b); },120); });
@@ -5207,6 +5214,7 @@
       // date filter: type a date (or partial, e.g. 2026-06) into From / To — no date picker
       b.innerHTML='<div class="bar"><span class="pill-lbl">Date</span><span class="tiny mut">from</span> <input class="flt" id="pay-from" placeholder="YYYY-MM-DD" value="'+esc(PAY_FROM)+'" style="width:118px"> <span class="tiny mut">to</span> <input class="flt" id="pay-to" placeholder="YYYY-MM-DD" value="'+esc(PAY_TO)+'" style="width:118px"> <button class="save-btn light" id="pay-clear">Clear</button>'
         +'<span class="pill-lbl" style="margin-left:14px">Search</span><input class="flt" id="pay-q" placeholder="supplier / amount…" value="'+esc(PAY_Q)+'" style="width:180px;background:#eff6ff;border-color:#93c5fd" title="search by supplier name or amount — overrides the date filter (spans all history)"> <span class="tiny mut">supplier or amount (spans all dates)</span></div><div id="pay-rep"></div>';
+      bindFastTips(b);   // fast (120ms) tooltips on all payments-report icons — delegated, covers re-rendered rows
       function draw(){ var q=(PAY_Q||'').trim().toLowerCase();
         var f=rows.filter(function(r){
           if(q){ var sup=String(r.supplier||'').toLowerCase(); if(sup.indexOf(q)>=0) return true;   // search overrides the date filter → all history

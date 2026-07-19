@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.613 - Payments Report: fast (120ms) tooltips on the icons
+
+The copy / Xero / payment-summary icons on PURCHASE ORDERS ▸ Payments Report used the native title (slow ~1s).
+New reusable bindFastTips(container) intercepts any element's title on hover and shows the shared 120ms
+noteTip instead — delegated on the report container, so it covers the re-rendered rows too.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.612 - PO value / landed Goods use the estimated supplier cost when lines have no price
 
 `value_used` (the PO order value, = landed-cost "Goods", and drives payments) was Σ(qty × coalesce(final_cost,
