@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.641 - Config nav: Supply chain 2nd + mobile drawer with nested sub-options
+
+- "Supply chain" now sits second in the CONFIG nav (next to General settings).
+- On mobile the CONFIG nav is a vertical drawer: main options stack full-width, and the
+  Supply chain level-3 options nest indented directly under it (with a left guide line)
+  instead of a horizontal-scroll strip. Desktop unchanged (level-3 strip below the bar).
+
 ## v25.640 - Config ▸ Consignees: card list + grouped edit form
 
 - Rebuilt like Suppliers / Key accounts: a card list (country + consignee / notify-party
