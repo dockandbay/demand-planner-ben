@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.620 - Auto Forecast report: month-window fix + whole numbers + GBP + CSV/copy
+
+REPORTS ▸ Auto Forecast (artifact):
+- Fixed the payments-plan window: it started at a hardcoded 2026-06 even after we'd passed it. Now starts at
+  the CURRENT month (clamped to the forecast data range), end = last forecast month. (server auto-forecast.)
+- Payments plan shown in whole numbers (was "174k").
+- Added a matching "Payments plan — cash out by month (GBP)" summary (USD ÷ 1.34).
+- Added Copy + CSV export of the payments plan (USD + GBP, whole numbers).
+
+Files: server.mjs, artifact_v16.7.html. No migrations, no new env vars.
+
 ## v25.619 - Cash Flow: real cents on USD amounts (not rounded to whole dollars)
 
 Cashflow line amounts + stock-arrivals amounts now keep 2dp (were Math.round to integer), so the all-

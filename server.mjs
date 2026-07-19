@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.619';
+const APP_VERSION = 'v25.620';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -5459,8 +5459,12 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
   const COVER = Math.max(1, Math.min(12, parseInt(req.query.cover,10) || AF_COVER_MONTHS));   // cover-target months (1–12)
   const FREIGHT = (req.query.freight!=null && req.query.freight!=='' && isFinite(+req.query.freight)) ? Math.max(0, +req.query.freight/100) : AF_FREIGHT_PCT;
   try {
-    const dataMin='2026-06', dataMax='2027-12';
-    // display window = 12 months from the earliest forecast month
+    // window START = the CURRENT month (don't plan months already in the past), clamped to the forecast data
+    // range; END = the last forecast month. (Was hardcoded 2026-06, which went stale once we passed it.)
+    const _fr = (await pool.query(`SELECT to_char(min(month),'YYYY-MM') mn, to_char(max(month),'YYYY-MM') mx FROM planner.forecast_outputs`)).rows[0] || {};
+    const _fMin = _fr.mn || '2026-06', _fMax = _fr.mx || '2027-12', _now = new Date().toISOString().slice(0, 7);
+    const dataMin = (_now > _fMin ? _now : _fMin), dataMax = (dataMin > _fMax ? dataMin : _fMax);
+    // display window = 12 months from the window start (current month)
     const win=[]; for(let i=0;i<12;i++) win.push(afAddMonths(dataMin,i));
     const allMonths=[]; { let m=dataMin; while(m<=dataMax){ allMonths.push(m); m=afAddMonths(m,1); } }
     const leadCol={uk:'china_to_uk_lead_time_weeks',us:'china_to_us_lead_time_weeks',eu:'china_to_eu_lead_time_weeks',au:'china_to_au_lead_time_weeks'};

@@ -7875,6 +7875,8 @@ function renderOtbReport(body){
 }
 function afMonthLabel(ym){ var p=ym.split('-'); var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+p[1]-1]; return mn+' '+p[0].slice(2); }
 function afK(n){ return n? (Math.round(n/100)/10).toLocaleString(undefined,{minimumFractionDigits:1,maximumFractionDigits:1})+'k' : '–'; }
+function afN(n){ return n? Math.round(n).toLocaleString() : '–'; }   // whole number with thousands separators
+var AF_GBP=1.34;   // USD → GBP rate for the payments plan GBP summary
 function renderAutoForecastReport(body){
   var MKTS=[['all','All'],['uk','UK'],['us','US'],['eu','EU'],['au','AU']];
   var afInp=function(k,lbl,val,suf){ return '<label style="font-size:11px;color:#555;display:inline-flex;align-items:center;gap:3px">'+lbl
@@ -7906,18 +7908,27 @@ function renderAutoForecastReport(body){
     u+='<tr style="border-top:2px solid #999;font-weight:700;background:#fafafa"><td style="padding:4px 6px" colspan="2">TOTAL UNITS</td>'
       +colTot.map(function(v){return '<td style="text-align:right;padding:4px 6px">'+(v?v.toLocaleString():'–')+'</td>';}).join('')
       +'<td style="text-align:right;padding:4px 6px;border-left:2px solid #ccc">'+grand.toLocaleString()+'</td></tr></tbody></table></div>';
-    // Payments plan
+    // Payments plan — whole numbers (not 174k), with a matching GBP summary + CSV/copy export.
     var p=d.payments;
-    var prow=function(lbl,arr,bold){ var t=arr.reduce(function(a,b){return a+b;},0);
+    var PAY_ROWS=[['Starting deposits',p.deposit],['Completion deposits',p.completion],['Balance payments',p.balance],['Freight + duty (est)',p.freight],['TOTAL CASH OUT',p.total]];
+    var prow=function(lbl,arr,bold,div){ div=div||1; var t=arr.reduce(function(a,b){return a+b;},0);
       return '<tr'+(bold?' style="border-top:2px solid #999;font-weight:700;background:#fafafa"':'')+'>'
         +'<td style="padding:3px 6px'+(bold?'':';color:#444')+'">'+lbl+'</td>'
-        +arr.map(function(v){return '<td style="text-align:right;padding:3px 6px;color:'+(v?'#111':'#ddd')+'">'+afK(v)+'</td>';}).join('')
-        +'<td style="text-align:right;padding:3px 6px;font-weight:700;border-left:2px solid #ccc">'+afK(t)+'</td></tr>'; };
-    var pay='<div style="font-weight:700;font-size:13px;margin:18px 0 4px">Payments plan — cash out by month (USD)</div>'
+        +arr.map(function(v){return '<td style="text-align:right;padding:3px 6px;color:'+(v?'#111':'#ddd')+'">'+afN(v/div)+'</td>';}).join('')
+        +'<td style="text-align:right;padding:3px 6px;font-weight:700;border-left:2px solid #ccc">'+afN(t/div)+'</td></tr>'; };
+    var payTbl=function(cur,div){ return '<div style="font-weight:700;font-size:13px;margin:18px 0 4px">Payments plan — cash out by month ('+cur+')</div>'
       +'<div style="overflow-x:auto"><table class="tw" style="font-size:11px;min-width:900px"><thead><tr><th style="text-align:left;padding:4px 6px">Payment</th>'
       +th+'<th style="text-align:right;padding:4px 6px;border-left:2px solid #ccc">12-mo</th></tr></thead><tbody>'
-      +prow('Starting deposits',p.deposit)+prow('Completion deposits',p.completion)+prow('Balance payments',p.balance)
-      +prow('Freight + duty (est)',p.freight)+prow('TOTAL CASH OUT',p.total,true)+'</tbody></table></div>';
+      +PAY_ROWS.map(function(r){return prow(r[0],r[1],r[0].indexOf('TOTAL')===0,div);}).join('')+'</tbody></table></div>'; };
+    // export matrix: Currency, Payment, [months…], 12-mo — USD then GBP (whole numbers)
+    var afPayMatrix=function(){ var hdr=['Currency','Payment'].concat(mo.map(afMonthLabel)).concat(['12-mo']); var rows=[hdr];
+      [['USD',1],['GBP',AF_GBP]].forEach(function(cd){ PAY_ROWS.forEach(function(r){ var arr=r[1], t=arr.reduce(function(a,b){return a+b;},0);
+        rows.push([cd[0],r[0]].concat(arr.map(function(v){return Math.round(v/cd[1]);})).concat([Math.round(t/cd[1])])); }); });
+      return rows; };
+    var pay='<div style="display:flex;gap:6px;align-items:center;margin:16px 0 0"><span style="font-size:11px;font-weight:700;color:#888">PAYMENTS PLAN</span>'
+      +'<button class="view-toggle" id="af-pay-copy" style="font-size:11px">⧉ Copy</button>'
+      +'<button class="view-toggle" id="af-pay-csv" style="font-size:11px">⬇ CSV</button></div>'
+      +payTbl('USD',1)+payTbl('GBP',AF_GBP);
     var a=d.assumptions;
     var note='<div style="font-size:11px;color:#888;margin-top:12px;line-height:1.5">'
       +'<b>Model:</b> buy = forward-cover netting on the saved SKU forecast ('+a.cover_months+'-month cover target, net of current on-hand stock); '
@@ -7925,6 +7936,10 @@ function renderAutoForecastReport(body){
       +'(deposit at order · completion at order+production days · balance at arrival+credit days). Freight+duty estimated at '+Math.round(a.freight_pct*100)+'% of cost (flat uplift — precise landed cost is on the PO view).'
       +(a.truncated?' <span style="color:#b45309">Some orders fall outside the 12-month window and are not shown.</span>':'')+'</div>';
     content.innerHTML=u+pay+note;
+    var cpBtn=content.querySelector('#af-pay-copy'); if(cpBtn)cpBtn.onclick=function(){ var tsv=afPayMatrix().map(function(r){return r.join('\t');}).join('\n');
+      navigator.clipboard.writeText(tsv).then(function(){var o=cpBtn.textContent;cpBtn.textContent='✓ Copied';setTimeout(function(){cpBtn.textContent=o;},1400);}).catch(function(){alert('Copy blocked by the browser.');}); };
+    var csBtn=content.querySelector('#af-pay-csv'); if(csBtn)csBtn.onclick=function(){ var csv=afPayMatrix().map(function(r){return r.map(function(c){var s=String(c==null?'':c); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}).join(',');}).join('\n');
+      var blob=new Blob([csv],{type:'text/csv;charset=utf-8'}), url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download='auto_forecast_payments_plan.csv'; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(function(){URL.revokeObjectURL(url);},1000); };
   };
   var key=AF_MARKET+'|'+AF_COVER+'|'+AF_FREIGHT;
   if(AF_CACHE[key]) return draw(AF_CACHE[key]);
