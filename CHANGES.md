@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.676 - Buy plan: cover + FBA-min + supplier from authoritative products fields; stub BP_DATA (artifact 2.4->0.77MB)
+
+- buildPROD_CONST now reads from planner.products (was: FBA/3PL cover re-derived from category_target_cover BY
+  CATEGORY — which fell to a default for the 101 null-category SKUs; and fm from a stale baked map that had gone
+  empty since v25.673). Now: t3/tf <- target_cover_weeks_{co}_{3pl,fba} (default 4); fm <- fba_transfer_min_units_{co}
+  (default 2); supp <- main_supplier_final. Cover cells can be text ("15, 15") -> take the first number.
+- Verified vs LIVE: 0 change for the 615 categorised SKUs (products field == category-derived); FIXES the ~101
+  null-category SKUs (e.g. DOGTWL now gets FBA cover 12, not a default). Removed dead BAKED_FM.
+- With cover/fm now authoritative from PROD_CONST, the baked BP_DATA (1.7MB) is fully redundant (the buildLiveBpOverlay
+  already rebuilds products from live SKUM+PROD_CONST at load) -> stubbed it. Artifact 5.07MB (pre-refactor) -> 0.77MB.
+- Diviyaj: server.mjs (harness) change. NEEDS Ben buy-plan verification. MOQ still 100% null in products -> defaults to 1.
+
 ## v25.675 - Cache built page data (20s TTL): repeat loads ~1050ms -> ~150ms
 
 - The page build (~12 Supabase queries) is ~85% of a serve (~870ms) and reran on EVERY load. Now the built data

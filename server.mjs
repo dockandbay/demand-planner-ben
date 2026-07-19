@@ -377,50 +377,39 @@ function extractBaked(name) {
   }
   try { return JSON.parse(HTML.slice(start, i)); } catch { return null; }
 }
-// `fm` (a per-SKU buy parameter) isn't cleanly stored in Supabase — carry the baked values.
-const BAKED_FM = (() => {
-  const pc = extractBaked('PROD_CONST') || {};
-  const o = {};
-  for (const sku of Object.keys(pc)) if (pc[sku] && pc[sku].fm) o[sku] = pc[sku].fm;
-  return o;
-})();
+// (Removed BAKED_FM — `fm` now comes from products.fba_transfer_min_units_* in buildPROD_CONST, not a baked map.)
 
 // PROD_CONST: per-SKU buy constants for the BUY view. {sku:{cp,moq,supp,lt,t3,tf,fm,l3}}
 //   cp/moq/supp -> products; lt -> 3PL->FBA transfer weeks; l3[co] -> china_to_{co} (resolved
 //   total lead time); t3[co]/tf[co] -> target cover for {co}_3pl / {co}_fba (category default,
 //   per-SKU override wins); fm[co] -> baked (not in Supabase). Live so lead/cover/moq stay current.
 async function buildPROD_CONST() {
-  const [prods, cover, ovr] = await Promise.all([
-    pool.query(`SELECT sku, coalesce(nullif(case_pack_size,0)::int, nullif(carton_qty,'')::numeric::int) cp, moq, supplier supp, category,
-                       transfer_3pl_to_fba_lead_time_weeks lt,
-                       china_to_uk_lead_time_weeks uk, china_to_us_lead_time_weeks us,
-                       china_to_eu_lead_time_weeks eu, china_to_au_lead_time_weeks au,
-                       china_to_ca_lead_time_weeks ca
-                FROM planner.products WHERE in_planning_scope`),
-    pool.query(`SELECT category, warehouse, target_cover_weeks::float w FROM planner.category_target_cover`),
-    pool.query(`SELECT sku, warehouse, target_cover_weeks::float w FROM planner.product_target_cover_override`),
-  ]);
-  const catCover = {};
-  for (const r of cover.rows) (catCover[r.category] || (catCover[r.category] = {}))[r.warehouse] = r.w;
-  const skuOvr = {};
-  for (const r of ovr.rows) (skuOvr[r.sku] || (skuOvr[r.sku] = {}))[r.warehouse] = r.w;
+  // Every buy param comes from the authoritative planner.products columns. (Was: cover re-derived from
+  // category_target_cover BY CATEGORY — which fell to a default for the 101 null-category SKUs; and fm from a
+  // stale baked map.) cp/moq/supp/lt/l3 as before; t3[co]/tf[co] <- target_cover_weeks_{co}_{3pl,fba} (default 4);
+  // fm[co] <- fba_transfer_min_units_{co} (default 2); supp <- main_supplier_final. Some cover cells are text
+  // ("15, 15") so take the first number. Verified vs live: 0 change for categorised SKUs; fixes the null-category ones.
+  const { rows } = await pool.query(`SELECT sku,
+      coalesce(nullif(case_pack_size,0)::int, nullif(carton_qty,'')::numeric::int) cp, moq,
+      coalesce(main_supplier_final, supplier) supp,
+      transfer_3pl_to_fba_lead_time_weeks lt,
+      china_to_uk_lead_time_weeks l3_uk, china_to_us_lead_time_weeks l3_us, china_to_eu_lead_time_weeks l3_eu,
+      china_to_au_lead_time_weeks l3_au, china_to_ca_lead_time_weeks l3_ca,
+      target_cover_weeks_uk_3pl t3_uk, target_cover_weeks_us_3pl t3_us, target_cover_weeks_eu_3pl t3_eu, target_cover_weeks_au_3pl t3_au,
+      target_cover_weeks_uk_fba tf_uk, target_cover_weeks_us_fba tf_us, target_cover_weeks_eu_fba tf_eu, target_cover_weeks_au_fba tf_au, target_cover_weeks_ca_fba tf_ca,
+      fba_transfer_min_units_uk fm_uk, fba_transfer_min_units_us fm_us, fba_transfer_min_units_eu fm_eu, fba_transfer_min_units_au fm_au, fba_transfer_min_units_ca fm_ca
+    FROM planner.products WHERE in_planning_scope`);
+  const num1 = v => { if (v == null) return null; const m = String(v).match(/-?\d+(\.\d+)?/); return m ? Number(m[0]) : null; };
   const out = {};
-  for (const p of prods.rows) {
-    const cc = catCover[p.category] || {}, ov = skuOvr[p.sku] || {};
-    const coverFor = wh => ov[wh] ?? cc[wh] ?? null;
-    const t3 = {}, tf = {}, l3 = {};
+  for (const p of rows) {
+    const t3 = {}, tf = {}, l3 = {}, fm = {};
     for (const co of ['uk', 'us', 'eu', 'au', 'ca']) {
-      if (p[co] != null) l3[co] = Math.round(Number(p[co]));
-      const c3 = coverFor(co + '_3pl'); if (c3 != null) t3[co] = c3;
-      const cf = coverFor(co + '_fba'); if (cf != null) tf[co] = cf;
+      if (p['l3_' + co] != null) l3[co] = Math.round(Number(p['l3_' + co]));
+      if (co !== 'ca') t3[co] = num1(p['t3_' + co]) ?? 4;   // no CA 3PL warehouse
+      tf[co] = num1(p['tf_' + co]) ?? 4;
+      fm[co] = num1(p['fm_' + co]) ?? 2;
     }
-    out[p.sku] = {
-      cp: p.cp ?? null,
-      moq: p.moq ?? 1,
-      supp: p.supp ?? null,
-      lt: p.lt != null ? Number(p.lt) : 2,
-      t3, tf, fm: BAKED_FM[p.sku] || {}, l3,
-    };
+    out[p.sku] = { cp: p.cp ?? null, moq: p.moq ?? 1, supp: p.supp ?? null, lt: p.lt != null ? Number(p.lt) : 2, t3, tf, fm, l3 };
   }
   return out;
 }
