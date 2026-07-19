@@ -493,8 +493,8 @@ app.use((req, res, next) => {
 // Reads (GET/HEAD) are always open. Never gated here: the supplier portal (/api/portal/* — its own
 // magic-link auth), SCENARIO (open to all), /api/me, /api/ai, and the permissions API (self-checks admin).
 const CONFIG_WRITE = [   // config reference-data writes — editable by anyone with SUPPLY *or* DEMAND edit
-  /^\/api\/supply\/tax-rate\//, /^\/api\/supply\/freight-rate/, /^\/api\/supply\/freight-upsert$/,
-  /^\/api\/supply\/freight-pallets$/, /^\/api\/supply\/air-rate\//, /^\/api\/supply\/duty-rate/,
+  /^\/api\/supply\/tax-rate\//, /^\/api\/supply\/freight-upsert$/,
+  /^\/api\/supply\/freight-pallets$/, /^\/api\/supply\/air-rate\//,
   /^\/api\/supply\/duty-upsert$/, /^\/api\/supply\/branch\//, /^\/api\/supply\/supplier\//,
   /^\/api\/supply\/supplier-create$/, /^\/api\/supply\/key-account/, /^\/api\/supply\/batch\//,
   /^\/api\/supply\/batch-create$/, /^\/api\/supply\/production-create$/, /^\/api\/supply\/prod-number\//,
@@ -2758,30 +2758,8 @@ app.post('/api/supply/tax-rate/:country', async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.post('/api/supply/freight-rate/:id', (req, res) =>
-  patch(res, 'planner.freight_rates', 'id', req.params.id,
-    { destination: 'text', container_size: 'text', cost: 'numeric', currency: 'text', notes: 'text' },
-    req.body, 'bigint'));
-app.post('/api/supply/freight-rate-create', async (req, res) => {
-  const b = req.body || {};
-  try {
-    const r = await pool.query(`INSERT INTO planner.freight_rates (destination, container_size, cost, currency)
-      VALUES ($1,$2,$3,coalesce($4,'USD')) RETURNING id`,
-      [b.destination || null, b.container_size || null, b.cost === '' || b.cost == null ? null : b.cost, b.currency || null]);
-    res.json({ ok: true, id: r.rows[0].id });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.post('/api/supply/duty-rate/:id', (req, res) =>
-  patch(res, 'planner.duty_rates', 'id', req.params.id,
-    { category: 'text', country: 'text', duty_pct: 'numeric', notes: 'text' }, req.body, 'bigint'));
-app.post('/api/supply/duty-rate-create', async (req, res) => {
-  const b = req.body || {};
-  try {
-    const r = await pool.query(`INSERT INTO planner.duty_rates (category, country, duty_pct) VALUES ($1,$2,$3) RETURNING id`,
-      [b.category || null, b.country || null, b.duty_pct === '' || b.duty_pct == null ? null : b.duty_pct]);
-    res.json({ ok: true, id: r.rows[0].id });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
+// (Removed dead routes freight-rate/:id, freight-rate-create, duty-rate/:id, duty-rate-create —
+//  superseded by the pivot endpoints freight-upsert / freight-pallets / duty-upsert. v25.652)
 // Branches (lead-time table) — edit by name (upsert), and create. Drives PO ship/landing dates.
 app.post('/api/supply/branch/:name', async (req, res) => {
   const b = req.body || {}, allowed = { country_code: 'text', sea_lead_time_days: 'int', air_lead_time_days: 'int', shipping_notes: 'text' };

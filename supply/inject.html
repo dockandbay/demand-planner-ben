@@ -184,8 +184,6 @@
 /* size the PO table to its content so columns stop fighting for width (scrolls instead of squishing) */
 #supply-root table.po-tbl{width:max-content;min-width:100%}
 #supply-root table.bc-tbl{width:max-content;min-width:100%}   /* size to content (don't let width:100% fatten thin columns like GRS); scrolls if wide */
-#supply-root table.pp-tbl thead th{white-space:normal;vertical-align:middle;line-height:1.2}   /* portal grid: wrapping headers, vertically centred (no max-width — it was clipping the date column) */
-#supply-root table.pp-tbl{width:max-content;min-width:100%}   /* size to content (overrides table{width:100%}) so cell min-widths hold — the date column stops clipping */
 #supply-root table.po-tbl .fci.dt{width:84px}#supply-root table.po-tbl .fci.txt{width:96px}
 /* freeze column 1 (PLAN) + column 2 (PO) on horizontal scroll (exclude expand + group-header rows) */
 #supply-root table.po-tbl thead th:first-child,
@@ -659,10 +657,8 @@
     var bg=PO_STATUS_BG[String(val||'').toUpperCase()]||STBG[statusBg(val)]||STBG['bg-blue'];
     return '<select class="fci" style="background:'+bg[0]+';color:'+bg[1]+';border-color:'+bg[0]+'" data-ep="'+esc(ep)+'" data-field="status">'+opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>'; }
   // needed = supplier terms require a start deposit; empty + needed → light red; not needed → "no deposit" default
-  function depSel(ep,val,needed){ var empty=!val; var cls='fci txt'+(needed&&empty?' needdep':'');
-    return '<input class="'+cls+'" list="deprefs" placeholder="'+(needed?'assign deposit…':'no deposit')+'" data-ep="'+esc(ep)+'" data-field="deposit_ref" value="'+esc(val==null?'':val)+'">'; }
   var PO_COUNTRIES=[['UK','UK'],['US','US'],['AU','AU'],['EU','EU'],['CA','CA'],['DIRECT','Direct to Client']];
-  function clabel(c){ return c==='DIRECT'?'Direct':(c||''); }
+  // (Removed dead depSel + clabel — unused. v25.652)
   // Shared status grouping used by BOTH the PURCHASE ORDERS grid and the ORDER PLAN grid so the pill options match.
   // Production = PRODUCTION + READY TO SHIP (+ any other in-progress); Shipping = SHIPPING + DELIVERED.
   var STATUS_PILLS=[['production','Production'],['shipping','Shipping'],['future','Future'],['complete','Complete']];
@@ -1201,7 +1197,6 @@
   var depFull=null;
   function fetchDepositsFull(cb){ if(depFull)return cb(depFull);
     fetch('/api/supply/deposits').then(function(r){return r.json();}).then(function(d){ depFull=(d||[]).filter(function(x){return x.is_deposit&&x.reference;}); cb(depFull); }).catch(function(){cb([]);}); }
-  function isAU(c){ return String(c||'').trim().toUpperCase()==='AU'; }   // AU deposits/POs are region-isolated from everything else
   function openDepPick(po,anchor,done){ closeShPop();
     var poCtry=String((poBy[po]||{}).country||'').trim().toUpperCase();   // this PO's region
     var poSup=String((poBy[po]||{}).supplier_name||'').trim().toLowerCase();   // this PO's supplier — deposits must match
@@ -1627,7 +1622,6 @@
     // PO_ACTCOND). excMatch resolves both the real action conditions and this extra crossdock filter.
     function hasCrossdock(r){ return !!String(r.crossdock_skus||'').trim(); }
     function excMatch(k,r){ if(k==='has_crossdock')return hasCrossdock(r); var fn=PO_ACTCOND[k]; return fn?fn(r):true; }
-    function ctryCount(c){ return rows.filter(function(r){return r.country===c;}).length; }
     // unified "has any open action item" — same as the red badge next to each PO ref (poExceptions)
     function hasActions(r){ return poActions(r).length>0; }   // snooze-aware, mirrors the red PO-ref badge
     function actItemsCount(){ return rows.filter(hasActions).length; }
@@ -2124,14 +2118,7 @@
   }
   // a COMPLETE PO's dates are settled — don't flag an ERP date discrepancy on it (the date no longer needs pushing)
   function poComplete(r){ return r.progress==='complete' || r.status==='COMPLETE'; }
-  function poErpRecon(rows){ // ERP reconciliation summary across the visible POs
-    var absent=0,drift=0,match=0,nolines=0,datedrift=0;
-    rows.forEach(function(r){ if(r.erp_date_pending>0&&!poComplete(r))datedrift++; if(!(r.erp_total>0))nolines++; else if(!(r.erp_in>0))absent++; else if(r.erp_pending>0)drift++; else match++; });
-    return '<div class="count po-erp-match" style="margin-bottom:6px">ERP match: <b style="color:#15803d">'+match+' ✓ in sync</b>'
-      +(drift?' · <b style="color:#b45309">'+drift+' ⚠ qty/cost drift</b>':'')
-      +(datedrift?' · <b style="color:#b45309">'+datedrift+' ⚠ date ≠ ERP</b>':'')
-      +(absent?' · <b style="color:#b91c1c">'+absent+' ✗ not in ERP</b>':'')
-      +(nolines?' · <span class="mut">'+nolines+' no lines yet</span>':'')+'</div>'; }
+  // (Removed dead poErpRecon — ERP reconciliation summary, no caller. v25.652)
   function poRowHtml(r,i,indent,g){ var ep='/api/supply/po/'+encodeURIComponent(r.po); poBy[r.po]=r;
     var ga=(g!=null?' data-g="'+g+'"':'');
     var valnote=r.value_from_lines?'<span class="src fx" title="Σ qty×cost from order plan">∑</span>':'<span class="mut tiny" title="stored estimate (no lines yet)">est</span>';
@@ -3853,15 +3840,7 @@
       document.getElementById('rb-apply').onclick=function(){ var ab=document.getElementById('rb-apply'); ab.disabled=true; ab.textContent='…';
         fetch('/api/supply/rebalance-apply/'+encodeURIComponent(po),{method:'POST'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); bg.remove(); invalidateDerived(); alert('Rebalanced — '+j.applied+' line change(s) applied (proposed).'); delete cache['actions']; selectSection('actions'); }).catch(function(e){ ab.disabled=false; ab.textContent='Apply rebalance'; alert('Apply failed: '+(e.message||e)); }); };
     }).catch(function(e){ box.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>'; }); }
-  function openDepProdPick(ref, anchor){ closeShPop(); if(!ref){alert('Give the deposit a reference first');return;}
-    var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop';
-    var rc=anchor.getBoundingClientRect(); pop.style.cssText='position:fixed;z-index:100000;top:'+(rc.bottom+4)+'px;left:'+Math.max(8,Math.min(rc.left,window.innerWidth-312))+'px';
-    pop.innerHTML='<div class="shpop-h">Assign <b>'+esc(ref)+'</b> to production</div><input class="shpop-q" placeholder="search PROD# / supplier…"><div id="shpop-list"></div>';
-    document.body.appendChild(pop); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
-    function render(q){ q=(q||'').trim().toLowerCase(); var ms=_prodList.filter(function(p){return !q||((p.prod_no||'')+' '+(p.supplier||'')).toLowerCase().indexOf(q)>=0;});
-      document.getElementById('shpop-list').innerHTML=ms.slice(0,q?50:16).map(function(p){return '<div class="shpop-opt" data-prod="'+esc(p.prod_no)+'" data-sup="'+esc(p.supplier)+'">'+esc(p.prod_no)+' · '+esc(p.supplier)+' <span class="mut tiny">'+units(p.units)+'u</span></div>';}).join('')||'<div class="count" style="padding:8px">no match</div>';
-      document.querySelectorAll('#shpop-list .shpop-opt').forEach(function(o){ o.onclick=function(){ shipPost('/api/supply/production-deposit',{prod_no:o.dataset.prod,supplier_name:o.dataset.sup,deposit_ref:ref,assign:true},function(){ closeShPop(); prodTab='deposits'; delete cache['productions']; selectSection('productions'); }); }; }); }
-    render(''); pop.querySelector('.shpop-q').oninput=function(){render(this.value);}; pop.querySelector('.shpop-q').focus(); }
+  // (Removed dead openDepProdPick — superseded by openDepProdNoPick. v25.652)
   // Set a deposit's PROD# via a searchable dropdown over the ACTIVE productions in the CONFIG > Productions
   // table (planner.prod_numbers). Saves the deposit's prod_no field. Active list cached after first load.
   var _depProdsCache=null;
@@ -4153,12 +4132,7 @@
   // a completed shipment has no open exceptions; ">20 pallets" only matters BEFORE it ships (can't split once shipping/complete)
   // ">20 pallets" only matters before it ships; "unlinked" = no POs; "no Flexport match" = has a Flexport ref that doesn't match
   function shipIsExc(s){ if(shipComplete(s))return false; return !!s.no_pos || !!s.no_flex_match || (!!s.over_pallets && !shipShipping(s)); }
-  function shipExReason(s){ var r=[];
-    if(s.no_pos)r.push('No purchase orders linked to this shipment');
-    if(s.no_flex_match)r.push('Has a Flexport reference but no matching Flexport shipment');
-    if(s.over_pallets && !shipShipping(s))r.push('Estimated cargo '+(s.pallets||0)+' pallets — over one 20-pallet container; split the shipment');
-    return r.join(' · '); }
-  function shipExShort(s){ return s.no_pos?'unlinked':s.no_flex_match?'no Flexport match':s.over_pallets?'>20 pallets':''; }
+  // (Removed dead shipExReason + shipExShort — unused shipment-exception text builders. v25.652)
   function carrierSel(ep,val,dis){ var O=['Flexport','DHL','Fedex','UPS','FOB','Other'], v=val||'', has=O.indexOf(v)>=0;
     return '<select class="fci" data-ep="'+ep+'" data-field="carrier"'+(dis?' disabled title="FOB — carrier handled by the client\'s forwarder"':'')+' style="min-width:96px'+(dis?';opacity:.45;background:#f1f1f1':'')+'"><option value=""'+(v?'':' selected')+'>—</option>'
       +(v&&!has?'<option selected>'+esc(v)+'</option>':'')+O.map(function(o){return '<option'+(o===v?' selected':'')+'>'+o+'</option>';}).join('')+'</select>'; }
@@ -4403,16 +4377,7 @@
   }
   function closePODrawer(silent){ var bg=document.getElementById('podrawer-bg'); if(bg&&bg.parentNode)bg.parentNode.removeChild(bg);
     if(!silent){ _poPatchRow=_poDrawerPrevPatch; _poRefresh=_poDrawerPrevRefresh; _poDrawerPrevPatch=null; _poDrawerPrevRefresh=null; } }
-  function unassignedTable(un){ if(!un.length)return '<div class="count">None — every active PO is on a shipment 🎉</div>';
-    var h='<div class="tw"><table><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th class="l">Status</th><th class="l">PROD#</th><th class="l">Assign to shipment</th><th class="l"></th></tr></thead><tbody>';
-    h+=un.map(function(p){
-      return '<tr><td class="l"><b>'+esc(p.po)+'</b></td><td class="l">'+esc(p.supplier_name||'')+'</td><td class="l">'+esc(p.status||'')+'</td><td class="l">'+esc(p.prod_no||'')+'</td>'
-        +'<td class="l"><input class="fci txt asg-ref" list="shiplist" placeholder="pick / type…" data-po="'+esc(p.po)+'" value=""></td>'
-        +'<td class="l"><button class="lnk-btn asg-go" data-po="'+esc(p.po)+'">assign</button></td></tr>';}).join('');
-    return h+'</tbody></table></div>'; }
-  function bindAssign(){ document.querySelectorAll('#supply-root .asg-go').forEach(function(btn){ if(btn._b)return; btn._b=1; btn.onclick=function(){
-    var po=btn.dataset.po, inp=document.querySelector('#supply-root .asg-ref[data-po="'+po.replace(/"/g,'\\"')+'"]'), ref=inp&&inp.value.trim();
-    if(!ref){ inp&&inp.focus(); return; } shipPost('/api/supply/shipment/'+encodeURIComponent(ref)+'/assign',{po:po,assign:true},shipReload); }; }); }
+  // (Removed dead unassignedTable + bindAssign — superseded by the shipments-assign flow. v25.652)
 
   // ---- SETTINGS (landed-cost rate cards: import tax by country, freight by lane × size) ----
   // ---- CONFIG: reference data, one editable table per sub-tab ----
@@ -5477,13 +5442,7 @@
     // ALL transactions + STOCK ARRIVALS — module-level builders (shared with the config email-export).
     function cfAllRows(){ return cfTxRows(d); }
     function cfArrivalsRows(){ return cfArrRows(d); }
-    // monthly summary: paid vs unpaid (unpaid split committed / estimate) — all transactions
-    function cfSummaryRows(){ var mg={},mo=[]; d.lines.forEach(function(x){ var m=x.month||'—'; if(!mg[m]){mg[m]={paid:0,uc:0,ue:0};mo.push(m);}
-        if(x.paid)mg[m].paid+=x.amount; else if(x.estimate)mg[m].ue+=x.amount; else mg[m].uc+=x.amount; });
-      mo.sort(function(a,b){if(a==='—')return 1;if(b==='—')return -1;return a<b?-1:1;});
-      return mo.map(function(m){ var g=mg[m]; return {Month:cfMonthLabel(m), Month_key:m, Paid_USD:Math.round(g.paid),
-        Unpaid_USD:Math.round(g.uc+g.ue), Unpaid_committed_USD:Math.round(g.uc), Unpaid_estimate_USD:Math.round(g.ue),
-        Total_USD:Math.round(g.paid+g.uc+g.ue)}; }); }
+    // (Removed dead cfSummaryRows — unused monthly paid/unpaid summary builder. v25.652)
     c.querySelector('#cf-copy').onclick=function(){ copyRows(cfExportRows(),'Cash flow ('+cfTag()+')'); };
     c.querySelector('#cf-csv').onclick=function(){ csv(cfExportRows(),'cash_flow_'+(_cfState.month||'all')+'.csv'); };
     c.querySelector('#cf-copy-all').onclick=function(){ copyRows(cfAllRows(),'Cash flow — all transactions'); };
@@ -5775,36 +5734,7 @@
       el.classList.add('saved');
       fetch('/api/supply/payment-fx',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({run_date:dt,supplier:sup,paid_currency:ccy,paid_amount:amt})})
         .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); setTimeout(function(){el.classList.remove('saved');},1000); }).catch(function(){el.classList.remove('saved');el.classList.add('err');}); }; }); }
-  function payRegister(data,c){
-    var meta={}; (data.meta||[]).forEach(function(m){meta[m.run_date]=m;});
-    var groups={},order=[]; data.txns.forEach(function(t){var d=t.run_date||'(unbatched)'; if(!groups[d]){groups[d]=[];order.push(d);} groups[d].push(t);});
-    var h='<div class="bar"><span class="count">'+order.length+' payment runs · '+data.txns.length+' transactions · run header (bank/ccy/amt/FX) editable</span><span style="margin-left:auto"><button class="save-btn" id="pay-xero">Export for Xero</button></span></div>';
-    h+='<div class="tw"><table><thead><tr><th class="l">Run / payment</th><th class="l">Type</th><th class="l">Supplier</th><th>Amount</th><th class="l">Date</th><th class="l">Deposit ref</th></tr></thead><tbody>';
-    order.forEach(function(d,ridx){ var legs=groups[d]; var total=legs.reduce(function(a,t){return a+(Number(t.transaction_amount)||0);},0);
-      var m=meta[d]||{}, ep='/api/supply/run-meta/'+encodeURIComponent(d); var sup={}; legs.forEach(function(t){if(t.transaction_supplier)sup[t.transaction_supplier]=1;});
-      var usd=(m.bank_amount&&m.fx_rate)?Number(m.bank_amount)*Number(m.fx_rate):null;
-      var match=usd!=null?(Math.abs(usd-total)/(total||1)<0.01):null;
-      var dr='data-run="'+ridx+'"';
-      h+='<tr class="batchrow"><td class="l" colspan="6"><b>RUN · '+esc(fd(d))+'</b> <span class="tiny mut">'+legs.length+' payments · '+Object.keys(sup).length+' suppliers · legs $'+money(total)+'</span>'
-        +' &nbsp;bank '+editCell(ep,'bank',m.bank||'','txt')+' &nbsp;ccy '+editCell(ep,'paid_currency',m.paid_currency||'','txt')
-        +' &nbsp;bank amt '+editCell(ep,'bank_amount',m.bank_amount==null?'':m.bank_amount,'',dr)+' &nbsp;FX '+editCell(ep,'fx_rate',m.fx_rate==null?'':m.fx_rate,'',dr)
-        +' &rarr; <b><span id="usd-'+ridx+'" data-legs="'+total+'">'+(usd!=null?'$'+money(usd):'—')+'</span></b> '
-        +'<span class="tool-badge '+(usd==null?'bg-neutral':(match?'bg-green':'bg-amber'))+'" id="usdbadge-'+ridx+'">'+(usd==null?'enter bank+FX':(match?'matches legs ✓':'check'))+'</span></td></tr>';
-      legs.forEach(function(t){var tep='/api/supply/payment-txn/'+t.id;
-        h+='<tr><td class="l" style="padding-left:22px">'+esc(t.transaction_reference||'')+'</td><td class="l"><span class="tool-badge bg-blue">'+esc(t.transaction_type||'')+'</span></td><td class="l">'+esc(t.transaction_supplier||'')+'</td>'
-          +'<td>'+editCell(tep,'transaction_amount',t.transaction_amount)+'</td><td class="l">'+editCell(tep,'payment_date',t.run_date,'date')+'</td><td class="l">'+esc(t.deposit_ref||'')+'</td></tr>';}); });
-    c.innerHTML=h+'</tbody></table></div>'; bindEdits(); bindRunRecalc();
-    var xb=document.getElementById('pay-xero'); if(xb)xb.onclick=function(){ csv(data.txns.map(function(t){var m=meta[t.run_date]||{};return {run_date:t.run_date,bank:m.bank||'',paid_currency:m.paid_currency||'',fx_rate:m.fx_rate||'',type:t.transaction_type,supplier:t.transaction_supplier,amount:t.transaction_amount,deposit_ref:t.deposit_ref};}),'payments_xero.csv'); }; }
-  function bindRunRecalc(){ document.querySelectorAll('#supply-root input[data-run]').forEach(function(inp){ inp.addEventListener('input',function(){
-    var r=inp.getAttribute('data-run');
-    var amt=document.querySelector('#supply-root input[data-run="'+r+'"][data-field="bank_amount"]');
-    var fx=document.querySelector('#supply-root input[data-run="'+r+'"][data-field="fx_rate"]');
-    var span=document.getElementById('usd-'+r), badge=document.getElementById('usdbadge-'+r); if(!span||!badge)return;
-    var a=parseFloat(amt&&amt.value), f=parseFloat(fx&&fx.value), legs=parseFloat(span.dataset.legs)||0;
-    if(!isNaN(a)&&!isNaN(f)){ var usd=a*f; span.textContent='$'+money(usd); var mt=Math.abs(usd-legs)/(legs||1)<0.01;
-      badge.textContent=mt?'matches legs ✓':'check'; badge.className='tool-badge '+(mt?'bg-green':'bg-amber'); }
-    else { span.textContent='—'; badge.textContent='enter bank+FX'; badge.className='tool-badge bg-neutral'; }
-  }); }); }
+  // (Removed dead payRegister + bindRunRecalc — old payment-runs register, superseded by renderPaymentsReport. v25.652)
 
   function renderDeposits(rows){ var c=document.getElementById('supply-content');
     fetchLookups(function(){ depInner(rows,c); }); }
@@ -5855,8 +5785,7 @@
     bits+='01010';
     for(i=7;i<=12;i++) bits+=R[d[i]];
     return bits+'101'; }
-  function lblDims(r){ if(r.uk_carton_l&&r.uk_carton_w&&r.uk_carton_h)return r.uk_carton_l+'×'+r.uk_carton_w+'×'+r.uk_carton_h+' cm'+(r.uk_carton_wt?' · '+r.uk_carton_wt+' kg':''); return ''; }
-  function lblRRP(r){ var p=[]; if(r.uk_rt!=null&&r.uk_rt!=='')p.push('£'+money(r.uk_rt)); if(r.us_rt!=null&&r.us_rt!=='')p.push('$'+money(r.us_rt)); if(r.eu_rt!=null&&r.eu_rt!=='')p.push('€'+money(r.eu_rt)); return p.join('   '); }
+  // (Removed dead lblDims + lblRRP — leftover label-field builders. v25.652)
   function svgText(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-family="'+(o.mono?'monospace':"'Gotham',Arial,Helvetica,sans-serif")+'" font-size="'+(o.size||11)+'"'+(o.bold?' font-weight="700"':'')+' fill="'+(o.fill||'#111')+'"'+(o.anchor?' text-anchor="'+o.anchor+'"':'')+(o.ls?' letter-spacing="'+o.ls+'"':'')+'>'+esc(s)+'</text>'; }
   // @font-face block embedding the Gotham TTFs (data URIs) so the rasterised label/PNG/PDF uses the brand font
   function fontCss(opts){ if(!opts||!opts.fontBook)return ''; function ff(w,u){ return u?"@font-face{font-family:'Gotham';font-style:normal;font-weight:"+w+";src:url("+u+") format('truetype');}":''; }

@@ -3,6 +3,26 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.652 - Full dead-code sweep (server + both apps)
+
+- **server.mjs**: removed 4 superseded routes (freight-rate/:id, freight-rate-create,
+  duty-rate/:id, duty-rate-create — the UI uses freight-upsert/freight-pallets/duty-upsert)
+  + their orphaned auth-allowlist entries. Zero unused module-level functions found.
+- **artifact_v16.7.html** (DEMAND): removed 16 unused functions (weather/alert legacy —
+  fetchForecast, fetchHistory, aggregateMonthly, loadAlertState, saveAlertState; plus
+  safeSend, showCsvOverlay, calcBaseline, applyRec, skuForecast, skuFcv, sumRT,
+  togglePlanActive, daMedian, afK, and a duplicate fmtDate) + 2 phantom ID refs
+  (set-leadtime/set-trfflag).
+- **supply/inject.html** (SUPPLY): removed 15 unused functions (payRegister+bindRunRecalc,
+  unassignedTable+bindAssign, poErpRecon, openDepProdPick, shipExReason, shipExShort,
+  cfSummaryRows, depSel, clabel, isAU, ctryCount, lblDims, lblRRP) + dead .pp-tbl CSS.
+- All confirmed dead (grep-verified single occurrence / superseded). No behaviour change.
+
+## Pending Ben's OK (looked dead, not yet removed):
+##  - server: /api/scenario/fin-model (GET/POST/import) — old Financial Model; SCENARIO now uses fin-overlay.
+##  - server: /api/portal/data — portal now bootstraps via /api/portal/bootstrap.
+##  - artifact: reportPlaceholder (maybe an intended stub); inject: .fm-catrow CSS.
+
 ## v25.651 - Prune confirmed dead code (DEMAND app)
 
 - Removed the phantom `#help-btn` relocation refs (3 spots) — the element never existed

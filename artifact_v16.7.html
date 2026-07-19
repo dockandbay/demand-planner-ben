@@ -814,14 +814,7 @@ function applyTierW(){
 }
 function resetTierW(){TIER_W.A=3;TIER_W.B=2;TIER_W.C=1;syncTierW();if(typeof reset3plCache==='function')reset3plCache();if(typeof render==='function')render();}
 function esc(s){return s.replace(/\\/g,'\\\\').replace(/"/g,'\\"').replace(/'/g,"\\'");}
-function safeSend(msg){
-  if(typeof sendPrompt==='function'){sendPrompt(msg);}
-  else{
-    var out=document.getElementById('st');
-    if(out){out.textContent='Copy this message to Claude: '+msg.slice(0,120)+'...';}
-    console.log('sendPrompt payload:',msg);
-  }
-}
+// (Removed dead safeSend — leftover Claude-artifact postMessage helper, unused on the Vercel host. v25.652)
 const BASE='appT5GoPc8M3iEDdh',TBL='tblISXekbRRv5ZD32';
 // Paste your Apps Script web app URL here after deploying forecast_save_webapp.gs
 var SAVE_WEBAPP_URL=localStorage.getItem('db_save_url')||'https://script.google.com/macros/s/AKfycby1EWakgVOEcwJfOulvQGRVKPTgN_nh1Gyb14mngWwW9_L6qcjEfRTopp_dLfMv3h4_/exec';
@@ -1253,7 +1246,7 @@ function mk(tag,cls,txt){const e=document.createElement(tag);e.className=cls;if(
 function stCls(st){return st==='ACTIVE'?'s-act':st==='FUTURE'?'s-fut':'s-dis';}
 function tiCls(t){return t==='A'?'ta':t==='B'?'tb':'tc';}
 function getSt(ms,mkt){return(ms&&ms[mkt]&&ms[mkt].st)||'ACTIVE';}
-function fmtDate(d){if(!d)return'';const p=d.slice(0,10).split('-');return`${p[2]}/${p[1]}/${String(p[0]).slice(2)}`;}
+// (Removed dead duplicate fmtDate — shadowed by the weather-panel fmtDate below. v25.652)
 function dateDMY(d){if(!d||typeof d!=='string')return'';var s=d.slice(0,10),p=s.split('-');if(p.length<3)return s;var mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];return p[2]+'-'+(mo[parseInt(p[1],10)-1]||p[1])+'-'+(p[0].length===4?p[0].slice(2):p[0]);}  // dd-mmm-yy (BUY/FBA grid dates)
 
 // Compute buy qtys for a SKU+market (sum over BUY_KEYS)
@@ -1666,10 +1659,6 @@ function render(){
         +'<th class="r" style="min-width:60px" id="trfh2"></th>';
     _hdr.innerHTML=_lead+_trail+'</tr>';
   }
-  // Lead-time and 3PL transfer-flag settings are BUY-only; hide them on the FBA view.
-  var _lt=document.getElementById('set-leadtime'),_tf=document.getElementById('set-trfflag');
-  if(_lt)_lt.style.display=(BP_VIEW==='fba')?'none':'inline-flex';
-  if(_tf)_tf.style.display=(BP_VIEW==='fba')?'none':'inline-flex';
   var _dl=document.getElementById('fba-dl-btn');
   if(_dl)_dl.style.display=(BP_VIEW==='fba')?'':'none';
   var _cr=document.getElementById('fba-create-btn');
@@ -1846,26 +1835,7 @@ function getFilteredVis(ignoreBuy){
   }).sort((a,b)=>String(a.s).localeCompare(String(b.s)));
 }
 
-function showCsvOverlay(csv,title){
-  let ov=document.getElementById('csv-overlay');
-  if(!ov){
-    ov=document.createElement('div');
-    ov.id='csv-overlay';
-    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center';
-    ov.innerHTML=`<div style="background:#fff;border-radius:8px;padding:20px;width:800px;max-width:90vw;max-height:80vh;display:flex;flex-direction:column;gap:10px">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <span id="csv-title" style="font-weight:600;font-size:13px">Copy &amp; Paste into Sheets / Excel</span>
-        <button onclick="document.getElementById('csv-overlay').remove()" style="border:none;background:#f3f3f1;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:12px">✕ Close</button>
-      </div>
-      <textarea id="csv-ta" style="flex:1;min-height:300px;font-family:monospace;font-size:11px;border:1px solid #d0d0d0;border-radius:4px;padding:8px;resize:vertical" readonly></textarea>
-      <button onclick="document.getElementById('csv-ta').select();document.execCommand('copy');this.textContent='✓ Copied!';setTimeout(()=>this.textContent='Copy to Clipboard',1500)" style="background:#1d4ed8;color:#fff;border:none;border-radius:4px;padding:6px 14px;cursor:pointer;font-size:12px;font-weight:500">Copy to Clipboard</button>
-    </div>`;
-    document.body.appendChild(ov);
-  }
-  document.getElementById('csv-title').textContent=title||'Copy & Paste into Sheets / Excel';
-  document.getElementById('csv-ta').value=csv;
-  document.getElementById('csv-overlay').style.display='flex';
-}
+// (Removed dead showCsvOverlay — export uses buildXlsx/downloadReport now. v25.652)
 
 // ---- minimal XLSX builder (no library): OOXML parts zipped STORE (CRC32, no compression) ----
 function _xlsxEsc(s){ return String(s==null?'':s).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
@@ -3148,7 +3118,7 @@ function renderRevLine(revVal,lyRev,asp){
 function sumU(a,y){let u=0;for(let m=1;m<=12;m++){const k=ym(y,m);if(a[k])u+=a[k][0];}return u}
 function sumR(a,y){let r=0;for(let m=1;m<=12;m++){const k=ym(y,m);if(a[k])r+=a[k][1];}return r}
 function sumUT(a,y,t){let u=0;for(let m=1;m<=t;m++){const k=ym(y,m);if(a[k])u+=a[k][0];}return u}
-function sumRT(a,y,t){let r=0;for(let m=1;m<=t;m++){const k=ym(y,m);if(a[k])r+=a[k][1];}return r}
+// (Removed dead sumRT — unused revenue partial-total twin of sumUT. v25.652)
 // ── Fiscal year (Mar–Feb) helpers ─────────────────────────────────────────────
 // FY starting March of `startY` runs Mar startY .. Feb (startY+1). Labelled "FYxx/yy".
 function fyMonths(startY){var o=[];for(var m=3;m<=12;m++)o.push(ym(startY,m));o.push(ym(startY+1,1));o.push(ym(startY+1,2));return o;}
@@ -3302,31 +3272,7 @@ function curMonthForecast(s,co,ch){
 }
 // Used as the reference point for confidence option calculations so HIGH/MED/LOW
 // stay consistent regardless of what overrides are currently applied.
-function calcBaseline(s,co,ch){
-  const a=ga(co,ch,s),fu={};
-  FM_CALC.forEach(function(fym){
-    const{y,mo}=pa(fym);
-    if(ACTUAL_MONTHS.indexOf(fym)>=0){fu[fym]=a[fym]?a[fym][0]:0;return;}
-    const prevAct=a[ym(y-1,mo)]?a[ym(y-1,mo)][0]:0;
-    const prevAct26=a[ym(2026,mo)]?a[ym(2026,mo)][0]:0;
-    // 2027 base: when the matching 2026 month is CUR_MONTH (partial), use the
-    // full-month forecast instead of MTD actuals — see calc() for rationale.
-    var base;
-    if(y===2027){
-      var ref26=ym(2026,mo);
-      if(ref26===CUR_MONTH){base=curMonthForecast(s,co,ch);}
-      else{base=fu[ref26]||prevAct26||0;}
-    } else if(y===2028){
-      base=fu[ym(2027,mo)]||0;
-    } else if(y===2029){
-      base=fu[ym(2028,mo)]||0;
-    } else {
-      base=prevAct;
-    }
-    fu[fym]=Math.max(0,base);
-  });
-  return fu;
-}
+// (Removed dead calcBaseline — leftover forecasting helper, no caller. v25.652)
 
 function recCalc(s,co,ch){
   const a=ga(co,ch,s);
@@ -3435,17 +3381,7 @@ function refreshRow(s,co,ch){
   }catch(e){}
 }
 
-function applyRec(s,co,ch,pct,overrideAll){
-  const ps=disp(String(pct));
-  F26.forEach(function(fym){
-    const ik=s+'|'+co+'|'+ch+'|'+fym;
-    if(!overrideAll&&IV[ik]!=null&&IV[ik]!=='')return;
-    IV[ik]=String(pct);
-    const inp=document.querySelector('input[data-k="'+esc(ik)+'"]');
-    if(inp){inp.value=ps;inp.className='fci pct';}
-  });
-  refreshRow(s,co,ch);
-}
+// (Removed dead applyRec — superseded by the confidence-popup apply flow. v25.652)
 
 
 // ─── Business Intelligence rules (loaded from Airtable via bi_rules.json) ───
@@ -4808,12 +4744,7 @@ function inbDiv(inb, entries, color){
 // Compute SKU forecast for a given month using subcat growth assumption
 // SKU share = SKU's LY contribution to subcat LY total
 // Then apply subcat growth factor for the month
-function skuForecast(sku,co,ch,fym,subcatTotal,skuLYShare){
-  // subcatTotal = the subcat-level forecast for this month (from calc())
-  // skuLYShare = this SKU's share of LY actuals in this subcat
-  if(subcatTotal<=0||skuLYShare<=0)return 0;
-  return Math.round(subcatTotal*skuLYShare);
-}
+// (Removed dead skuForecast — SKU forecasting now via skuOutFC/FC_OUTPUTS. v25.652)
 // SKU-level loaded forecast from forecast_outputs (in-memory working store).
 // Returns the unit value for a month, or null if this SKU/wh/channel has no loaded forecast.
 function skuOutFC(sku,co,ch,m){var o=FC_OUTPUTS[sku+'|'+skuWh(co,ch)+'|'+ch];return(o&&o[m]!=null)?o[m]:null;}
@@ -4854,11 +4785,7 @@ function skuNav(inp,parentKey){
 // Override stored in FC_OUTPUTS as ABSOLUTE units (buy-plan safe). Bare number =
 // fixed units; "+X%"/"X%" = growth on LY (resolved to units on entry). Cleared
 // override -> forecast falls back to LY (flat -> +0%), not the cascade.
-function skuFcv(storedRaw, ly){
-  if(storedRaw==null||storedRaw==='')return Math.round(ly||0);
-  var n=parseInt(String(storedRaw).replace(/[^0-9-]/g,''),10);
-  return isNaN(n)?Math.round(ly||0):n;
-}
+// (Removed dead skuFcv — unused. v25.652)
 function skuYoY(fc, ly){ if(ly>0)return Math.round((fc-ly)/ly*100); return fc>0?100:0; }
 function skuYoYStr(fc, ly){var y=skuYoY(fc,ly);return (y>=0?'+':'')+y+'%';}
 function skuYoYCls(fc, ly){var y=skuYoY(fc,ly);return y>0?'gp':y<0?'rp':'fp';}
@@ -6766,7 +6693,7 @@ function setPlanActiveMode(mode){
   renderMain();
 }
 // Back-compat wrapper for any old call sites that still toggle the legacy single button.
-function togglePlanActive(){setPlanActiveMode(SKU_FILTER.active?'all':'active');}
+// (Removed dead togglePlanActive — toggle drives setPlanActiveMode directly. v25.652)
 function setPlanTier(t){
   SKU_FILTER.tier=t;
   document.querySelectorAll('#plan-tier-pills .ptier').forEach(function(b){
@@ -7121,7 +7048,7 @@ function daJumpToPlan(arg){
 // These reuse the live forecast engine (DATA / calc / fyU / fyR / fyTot / getASP)
 // to surface items the server can't compute. Each returns cards in the same shape
 // as /api/demand-actions ({key,type,cat,market,severity,detail,impact,status[,sku]}).
-function daMedian(arr){ if(!arr.length)return null; var s=arr.slice().sort(function(a,b){return a-b;}); var n=s.length; return n%2?s[(n-1)/2]:(s[n/2-1]+s[n/2])/2; }
+// (Removed dead daMedian — never wired. v25.652)
 var _DA_FU_CACHE={}; // s|co|ch -> calc().fu (session cache; cleared when forecasts change)
 function daRowFu(row){ var k=row.s+'|'+row.co+'|'+row.ch; if(!_DA_FU_CACHE[k])_DA_FU_CACHE[k]=calc(row.s,row.co,row.ch).fu; return _DA_FU_CACHE[k]; }
 // Forecast-vs-trend (INSIGHTS): per top-level category, compare this year's FORECAST growth to the
@@ -7872,7 +7799,7 @@ function renderOtbReport(body){
   fetch('/api/scenario/otb?market='+OTB.market+'&months='+OTB.months+'&defcover='+OTB.defcover).then(function(r){return r.json();}).then(function(d){ if(d.error){body.innerHTML='<div style="padding:18px;color:#b91c1c">Could not load: '+d.error+'</div>';return;} OTB_CACHE[key]=d; draw(d); }).catch(function(e){ body.innerHTML='<div style="padding:18px;color:#b91c1c">'+e+'</div>'; });
 }
 function afMonthLabel(ym){ var p=ym.split('-'); var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+p[1]-1]; return mn+' '+p[0].slice(2); }
-function afK(n){ return n? (Math.round(n/100)/10).toLocaleString(undefined,{minimumFractionDigits:1,maximumFractionDigits:1})+'k' : '–'; }
+// (Removed dead afK — superseded by afN in the payments plan. v25.652)
 function afN(n){ return n? Math.round(n).toLocaleString() : '–'; }   // whole number with thousands separators
 var AF_GBP=1.34;   // USD → GBP rate for the payments plan GBP summary
 function renderAutoForecastReport(body){
@@ -9476,15 +9403,7 @@ function scanAnomalyAlerts(){
   return out;
 }
 
-async function loadAlertState(){
-  try{
-    var d=await window.storage.get('alerts_dismissed');
-    return {dismissed:d?JSON.parse(d.value):{}};
-  }catch(e){return {dismissed:{}};}
-}
-async function saveAlertState(st){
-  try{await window.storage.set('alerts_dismissed',JSON.stringify(st.dismissed),false);}catch(e){}
-}
+// (Removed dead loadAlertState / saveAlertState — orphaned alert-dismissed persistence. v25.652)
 
 
 // ─── Weather Outlook (runtime fetch via Anthropic API + Airtable MCP) ───
@@ -9575,48 +9494,8 @@ async function fetchWeatherCacheViaMCP(){
 }
 
 // Sync fetch functions kept as wrappers for any code that still calls them
-function fetchForecast(city){
-  var e=WX_RAW&&WX_RAW[city.n];
-  return e?e.forecast:{time:[],tmax:[],tmin:[],precip:[]};
-}
-function fetchHistory(city){
-  // Returns daily-shape placeholder; downstream uses h.monthly instead.
-  return {time:[],tmax:[],tmin:[],precip:[]};
-}
-
-// detectWeatherAlerts is kept as-is (operates on forecast.time/.tmax/.precip arrays)
-
-// aggregateMonthly is kept for completeness — pre-aggregated data is used directly.
-function aggregateMonthly(series){
-  var byMonth={};
-  series.time.forEach(function(t,i){
-    var ym=t.slice(0,7);
-    if(!byMonth[ym])byMonth[ym]={warmDays:0,hotDays:0,wetDays:0,heatWaves:0,totalPrecip:0,sumTmax:0,n:0,maxTmax:-99};
-    var b=byMonth[ym];
-    var tmax=series.tmax[i],precip=series.precip[i];
-    b.n++;
-    if(tmax!=null){
-      b.sumTmax+=tmax;
-      if(tmax>b.maxTmax)b.maxTmax=tmax;
-      if(tmax>=25)b.warmDays++;
-      if(tmax>=30)b.hotDays++;
-    }
-    if(precip!=null&&precip>=1)b.wetDays++;
-    if(precip!=null)b.totalPrecip+=precip;
-  });
-  var run=0;
-  series.time.forEach(function(t,i){
-    var ym=t.slice(0,7);
-    var tmax=series.tmax[i];
-    if(tmax!=null&&tmax>=30)run++;
-    else{if(run>=3&&byMonth[ym])byMonth[ym].heatWaves++;run=0;}
-  });
-  Object.keys(byMonth).forEach(function(k){
-    var b=byMonth[k];
-    b.avgTmax=b.n>0?b.sumTmax/b.n:0;
-  });
-  return byMonth;
-}
+// (Removed dead helpers fetchForecast / fetchHistory / aggregateMonthly — superseded by the
+//  pre-aggregated weather cache path. v25.652)
 
 // Detect upcoming notable weather from forecast (next 16 days)
 function detectWeatherAlerts(forecast,cityName){
