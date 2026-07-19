@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.615 - Payments Due sub-tab: overdue-payments counter badge
+
+The PURCHASE ORDERS ▸ Payments Due sub-menu tab now shows a red counter badge = the number of OVERDUE payments
+(unpaid, past due date — PO completion/balance milestones + deposits/other). Prefetched in the background so
+it shows from any sub-tab, refreshes when the tab renders, and recomputes after a payment edit. New
+paymentsDueOverdueCount() mirrors the tab's r.overdue rule; navBadge() gained an optional noun for the tooltip.
+
+Files: supply/inject.html. No migrations, no new env vars.
+
 ## v25.614 - Payments Report: Xero copy icon + copy-to-email icon
 
 Replaced the ⧉ (copy Xero bill details) glyph with a small Xero logo mark (blue circle + white x), and the
