@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v25.618 - Cash Flow: Stock arrivals export, GBP rate 1.34, column tidy-ups
+
+- New "Stock arrivals" download (copy + CSV): PO Number, Amount (USD) = goods + import duty per PO (FOB → no
+  duty), Delivery Date = the PO's COMPLETED (check-in) date (actual or forecast), Direct to Client? ("Direct"
+  when branch is Direct to Client / JLEW / NEXT), Amount (GBP). Server returns a per-PO `arrivals` dataset.
+- GBP conversion rate changed 1.3 → **1.34** (all-transactions Amount GBP + Stock arrivals Amount (GBP)).
+- All-transactions export: moved "Amount GBP" + "UK Deposit Ref" to the END (after Month).
+- Removed the "Monthly paid/unpaid" copy/CSV buttons.
+
+Files: server.mjs, supply/inject.html. No migrations, no new env vars.
+
 ## v25.617 - Cash Flow export: add Amount GBP + UK Deposit Ref columns
 
 Two more columns on the "all transactions" export: "Amount GBP" (USD ÷ 1.3, 2dp) next to Amount_USD, and

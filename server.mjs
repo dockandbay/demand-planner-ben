@@ -75,7 +75,7 @@ const SUPPLY_INJECT = loadInject();
 // Prod (NODE_ENV=production, e.g. Vercel) keeps using the cached copies.
 const DEV = process.env.NODE_ENV !== 'production';
 // App version — bump on every change so we can revert (Ben's rule). Shown in the SUPPLY panel.
-const APP_VERSION = 'v25.617';
+const APP_VERSION = 'v25.618';
 
 // Replace the value of a top-level `let/const/var NAME = <literal>;` by balancing brackets.
 function replaceGlobal(html, name, jsonText) {
@@ -841,7 +841,19 @@ async function cashflowResponse(pos, q) {
       due: o.date_due, likely: o.date_likely_pay, paid_date: o.date_paid, basis: 'other' });
   }
   lines.sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999') || a.type.localeCompare(b.type));
-  return { today, lines };
+  // STOCK ARRIVALS: per-PO goods value + import duty, dated on the PO's COMPLETED (check-in) date — actual or
+  // forecast. FOB carries no duty (mirrors the landed-cost rule). Feeds the "Stock arrivals" export.
+  const isFobPO = (p) => {
+    if (String(p.ship_mode || '').toLowerCase() === 'fob') return true;
+    if (p.shipment) return false;
+    if (/manufactur/i.test(p.branch || '')) return true;
+    return !/^(UK|US|EU|AU|CA)/i.test(String(p.country || '').trim());
+  };
+  const arrivals = pos.filter(p => num(p.value_used) > 0.009 && p.checkin).map(p => {
+    const duty = isFobPO(p) ? 0 : num(p.est_duty);
+    return { po: p.po, amount_usd: Math.round(num(p.value_used) + duty), delivery: p.checkin, branch: p.branch || '' };
+  }).sort((a, b) => (a.delivery || '9999').localeCompare(b.delivery || '9999'));
+  return { today, lines, arrivals };
 }
 
 // Expedite recommendations for SUPPLY ▸ Actions: when a SKU on an open, not-yet-shipped PO will stock out

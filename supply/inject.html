@@ -5070,9 +5070,9 @@
       +'<span class="tiny mut">All transactions:</span>'
       +'<button class="save-btn" id="cf-copy-all" title="Copy every cash-flow transaction to the clipboard">⧉</button>'
       +'<button class="save-btn" id="cf-csv-all" style="background:#dcfce7;color:#166534;border-color:#16a34a" title="Download every cash-flow transaction as CSV">⬇ CSV</button>'
-      +'<span class="tiny mut" style="margin-left:6px">Monthly paid/unpaid:</span>'
-      +'<button class="save-btn" id="cf-sum-copy" title="Copy the monthly paid/unpaid summary">⧉</button>'
-      +'<button class="save-btn" id="cf-sum-csv" style="background:#dcfce7;color:#166534;border-color:#16a34a" title="Download the monthly paid/unpaid summary CSV">⬇ CSV</button>'
+      +'<span class="tiny mut" style="margin-left:6px">Stock arrivals:</span>'
+      +'<button class="save-btn" id="cf-arr-copy" title="Copy Stock arrivals (goods + import duty per PO, dated on completion) to the clipboard">⧉</button>'
+      +'<button class="save-btn" id="cf-arr-csv" style="background:#dcfce7;color:#166534;border-color:#16a34a" title="Download Stock arrivals as CSV (goods + import duty per PO, dated on completion)">⬇ CSV</button>'
       +'<span class="tiny mut" style="margin-left:6px">This view:</span>'
       +'<button class="save-btn" id="cf-copy" title="Copy the filtered lines to the clipboard">⧉</button>'
       +'<button class="save-btn" id="cf-csv" title="Download the filtered lines as a CSV">⬇ CSV</button>'
@@ -5091,16 +5091,23 @@
       Reference:x.ref||'',
       Type:x.type,
       Amount_USD:usd.toFixed(2),
-      'Amount GBP':(usd/1.3).toFixed(2),   // USD → GBP at 1.3
       Date:x.date||'',
       'Paid Status':(x.paid?'TRUE':'FALSE'),
       Market:x.country||'',
       'Production Deposit':x.deposit_ref||'',
-      'UK Deposit Ref':x.uk_deposit_ref||'',   // the deposit's production number
       Class:(x.estimate?'estimate':'committed'),
       Supplier:x.supplier||'',
       'Direct to Client?':(cfDtc(x.branch)?'TRUE':'FALSE'),
-      Month:cfMonthShort(x.month) }; }); }
+      Month:cfMonthShort(x.month),
+      'Amount GBP':(usd/1.34).toFixed(2),   // USD → GBP at 1.34 (at the end, after Month)
+      'UK Deposit Ref':x.uk_deposit_ref||'' }; }); }   // the deposit's production number
+    // STOCK ARRIVALS: goods + import duty per PO, dated on the PO's COMPLETED date. GBP at 1.34.
+    function cfArrivalsRows(){ return (d.arrivals||[]).map(function(a){ var usd=Number(a.amount_usd||0); return {
+      'PO Number':a.po||'',
+      'Amount (USD)':usd.toFixed(2),
+      'Delivery Date':a.delivery||'',
+      'Direct to Client?':(cfDtc(a.branch)?'Direct':''),
+      'Amount (GBP)':(usd/1.34).toFixed(2) }; }); }
     // monthly summary: paid vs unpaid (unpaid split committed / estimate) — all transactions
     function cfSummaryRows(){ var mg={},mo=[]; d.lines.forEach(function(x){ var m=x.month||'—'; if(!mg[m]){mg[m]={paid:0,uc:0,ue:0};mo.push(m);}
         if(x.paid)mg[m].paid+=x.amount; else if(x.estimate)mg[m].ue+=x.amount; else mg[m].uc+=x.amount; });
@@ -5112,8 +5119,8 @@
     c.querySelector('#cf-csv').onclick=function(){ csv(cfExportRows(),'cash_flow_'+(_cfState.month||'all')+'.csv'); };
     c.querySelector('#cf-copy-all').onclick=function(){ copyRows(cfAllRows(),'Cash flow — all transactions'); };
     c.querySelector('#cf-csv-all').onclick=function(){ csv(cfAllRows(),'cash_flow_all_transactions.csv'); };
-    c.querySelector('#cf-sum-copy').onclick=function(){ copyRows(cfSummaryRows(),'Cash flow — monthly paid/unpaid'); };
-    c.querySelector('#cf-sum-csv').onclick=function(){ csv(cfSummaryRows(),'cash_flow_monthly_summary.csv'); };
+    c.querySelector('#cf-arr-copy').onclick=function(){ copyRows(cfArrivalsRows(),'Stock arrivals'); };
+    c.querySelector('#cf-arr-csv').onclick=function(){ csv(cfArrivalsRows(),'stock_arrivals.csv'); };
     c.querySelector('#cf-month').onchange=function(){_cfState.month=this.value;draw();};
     c.querySelectorAll('.pill[data-tt]').forEach(function(p){p.onclick=function(){var t=p.dataset.tt;_cfState.types[t]=!_cfState.types[t];p.classList.toggle('active',_cfState.types[t]);draw();};});
     c.querySelectorAll('.pill[data-st]').forEach(function(p){p.onclick=function(){_cfState.status=p.dataset.st;c.querySelectorAll('.pill[data-st]').forEach(function(x){x.classList.toggle('active',x===p);});draw();};});
