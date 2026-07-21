@@ -7448,7 +7448,7 @@ var EXPANDED_CHANNELS=new Set(); // which channel rows are expanded
 // ─── REPORTS area: sub-tab shell ──────────────────────────────────────────
 // REPORT view hosts several reports under a sub-tab bar. Exec Summary is the existing report;
 // Slow Moving and Auto Forecast are the new ones.
-var REPORT_TABS=[['ex','Exec Summary'],['slow','Slow Moving'],['af','Auto Forecast'],['ka','Key Arrivals'],['me','Markdown & EOS'],['otb','Open-to-Buy'],['sa','Stock Availability']];
+var REPORT_TABS=[['ex','Exec Summary'],['slow','Slow Moving'],['af','Auto Forecast'],['ka','Key Arrivals'],['me','Markdown & EOS'],['otb','Open-to-Buy'],['sa','Stock Availability'],['tpl','3PL Invoice']];
 // Mobile: collapse a view's leading filter bar(s) behind a consistent "⚙ Filters" button. Generic + idempotent —
 // grabs the leading child DIVs that hold filter controls (before the first table / KPI / content block) and tucks
 // them into a collapsible panel with a toggle. No-op on desktop and when there are no leading filter rows.
@@ -7616,6 +7616,87 @@ function renderReportView(){
   if(REPORT_VIEW==='me'){ renderMarkdownEosReport(body); mobileFilterCollapse(body); return; }
   if(REPORT_VIEW==='otb'){ renderOtbReport(body); mobileFilterCollapse(body); return; }
   if(REPORT_VIEW==='sa'){ renderStockAvailability(body); mobileFilterCollapse(body); return; }
+  if(REPORT_VIEW==='tpl'){ render3plInvoice(body); return; }
+}
+// REPORTS ▸ 3PL Invoice — per-3PL (UK ILG / US Geneva / EU iFulfilment / AU Coghlans) monthly invoice files +
+// account config. Upload/list/delete invoice files for a chosen month; edit per-3PL storage/other cost accounts;
+// view the region×channel account map. Parse + Cin7 order matching land in a later phase.
+var TPL3=[['uk_ilg','UK — ILG'],['us_geneva','US — Geneva'],['eu_ifulfilment','EU — iFulfilment'],['au_coghlans','AU — Coghlans']];
+var TPL3_STATE={tpl:'uk_ilg',period:'',mode:'invoices'};
+function render3plInvoice(body){
+  function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  function su(x){ x=String(x||''); return /@dockandbay\.com$/i.test(x)?x.split('@')[0]+'@':x; }   // ben@dockandbay.com → ben@
+  function lastMonth(){ var d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return d.toISOString().slice(0,7); }
+  function kb(n){ n=Number(n)||0; return n>=1048576?(n/1048576).toFixed(1)+' MB':n>=1024?(n/1024).toFixed(0)+' KB':n+' B'; }
+  if(!TPL3_STATE.period)TPL3_STATE.period=lastMonth();
+  var host=body;
+  function shell(){
+    var tabs=TPL3.map(function(t){return '<button class="view-toggle rtab'+(t[0]===TPL3_STATE.tpl?' active':'')+'" data-tpl="'+t[0]+'" style="font-size:11px">'+e(t[1])+'</button>';}).join('');
+    var modes=[['invoices','Invoices'],['config','Config / Accounts']].map(function(m){return '<button class="pill catpill'+(m[0]===TPL3_STATE.mode?' active':'')+'" data-mode="'+m[0]+'">'+m[1]+'</button>';}).join('');
+    host.innerHTML='<div style="padding:4px 2px 10px">'
+      +'<div style="font-weight:700;font-size:15px;margin-bottom:2px">3PL Invoice</div>'
+      +'<div style="font-size:12px;color:#666;margin-bottom:10px">Upload each 3PL’s monthly invoice and manage the account mapping. <span style="color:#94a3b8">Parsing &amp; Cin7 order-matching come in a later phase.</span></div>'
+      +'<div style="display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid #e0e0e0;margin-bottom:10px">'+tabs+'</div>'
+      +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'+modes
+        +'<span style="width:1px;height:16px;background:#e0e0e0;margin:0 4px"></span>'
+        +'<label style="font-size:12px;color:#475569">Month <input type="month" id="tpl-period" value="'+e(TPL3_STATE.period)+'" style="font-size:12px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;margin-left:4px"></label>'
+      +'</div><div id="tpl-body"><div style="color:#94a3b8;font-size:12px">Loading…</div></div></div>';
+    host.querySelectorAll('.rtab[data-tpl]').forEach(function(b){ b.onclick=function(){ TPL3_STATE.tpl=b.dataset.tpl; shell(); load(); }; });
+    host.querySelectorAll('.catpill[data-mode]').forEach(function(b){ b.onclick=function(){ TPL3_STATE.mode=b.dataset.mode; shell(); load(); }; });
+    var pe=host.querySelector('#tpl-period'); if(pe)pe.onchange=function(){ TPL3_STATE.period=pe.value; load(); };
+  }
+  function load(){ var b=host.querySelector('#tpl-body'); if(!b)return; b.innerHTML='<div style="color:#94a3b8;font-size:12px">Loading…</div>';
+    fetch('/api/supply/tpl/data?tpl='+encodeURIComponent(TPL3_STATE.tpl)+'&period='+encodeURIComponent(TPL3_STATE.mode==='invoices'?TPL3_STATE.period:''))
+      .then(function(r){return r.json();}).then(function(d){ if(!d||!d.ok)throw new Error((d&&d.error)||'load failed');
+        if(TPL3_STATE.mode==='config')drawConfig(b,d); else drawInvoices(b,d); })
+      .catch(function(err){ b.innerHTML='<div style="color:#dc2626;font-size:12px">Failed: '+e(err.message||err)+'</div>'; }); }
+  function drawInvoices(b,d){
+    var files=d.files||[];
+    var rows=files.length?files.map(function(f){ return '<tr><td class="l" style="padding:5px 10px"><a href="/api/supply/tpl/file/'+f.id+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline">'+e(f.filename)+'</a></td>'
+      +'<td class="l" style="padding:5px 10px;white-space:nowrap">'+kb(f.byte_size)+'</td>'
+      +'<td class="l" style="padding:5px 10px;white-space:nowrap">'+(f.uploaded_by?e(su(f.uploaded_by)):'—')+'</td>'
+      +'<td class="l" style="padding:5px 10px;white-space:nowrap">'+e(f.uploaded_at||'')+'</td>'
+      +'<td class="l" style="padding:5px 10px"><span style="font-size:10px;background:#eef2f7;color:#475569;border-radius:5px;padding:1px 7px">'+e(f.parse_status||'uploaded')+'</span></td>'
+      +'<td class="l" style="padding:5px 10px"><a class="tpl-del" data-id="'+f.id+'" title="delete" style="color:#dc2626;cursor:pointer">✕</a></td></tr>'; }).join('')
+      :'<tr><td colspan="6" style="padding:14px 10px;color:#94a3b8;font-size:12px;text-align:center">No invoice files for '+e(TPL3_STATE.period)+' yet — upload one below.</td></tr>';
+    b.innerHTML='<div style="border:1px dashed #cbd5e1;border-radius:8px;padding:12px 14px;margin-bottom:14px;background:#f8fafc">'
+        +'<div style="font-size:12px;font-weight:700;color:#334155;margin-bottom:6px">Upload invoice for '+e(TPL3.filter(function(t){return t[0]===TPL3_STATE.tpl;})[0][1])+' · '+e(TPL3_STATE.period)+'</div>'
+        +'<input type="file" id="tpl-file" style="font-size:12px"> <button id="tpl-up" class="save-btn" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Upload</button>'
+        +'<span id="tpl-upmsg" style="font-size:12px;margin-left:10px"></span></div>'
+      +'<div class="tw"><table style="border-collapse:collapse;font-size:12px;width:100%;max-width:820px"><thead><tr style="background:#e9eef5;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#475569">'
+        +['File','Size','By','Uploaded','Status',''].map(function(h){return '<th class="l" style="padding:5px 10px;text-align:left">'+h+'</th>';}).join('')+'</tr></thead><tbody>'+rows+'</tbody></table></div>';
+    var fi=b.querySelector('#tpl-file'), up=b.querySelector('#tpl-up'), msg=b.querySelector('#tpl-upmsg');
+    up.onclick=function(){ var f=fi&&fi.files&&fi.files[0]; if(!f){ msg.style.color='#dc2626'; msg.textContent='Choose a file first.'; return; }
+      up.disabled=true; msg.style.color='#64748b'; msg.textContent='Uploading…'; var rd=new FileReader();
+      rd.onload=function(){ fetch('/api/supply/tpl/upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({tpl:TPL3_STATE.tpl,period:TPL3_STATE.period,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),uploaded_by:(window.ME&&ME.email)||''})})
+        .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); load(); }).catch(function(err){ msg.style.color='#dc2626'; msg.textContent='Failed: '+(err.message||err); up.disabled=false; }); };
+      rd.readAsDataURL(f); };
+    b.querySelectorAll('.tpl-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this invoice file?'))return; fetch('/api/supply/tpl/file/'+a.dataset.id+'/delete',{method:'POST'}).then(function(r){return r.json();}).then(function(){ load(); }); }; });
+  }
+  function drawConfig(b,d){
+    var cost=d.cost_accounts||[], map=d.account_map||[];
+    function costRow(ct){ var r=cost.filter(function(x){return x.cost_type===ct;})[0]||{account_code:'',account_name:''};
+      return '<tr><td class="l" style="padding:5px 10px;font-weight:600;text-transform:capitalize">'+ct+'</td>'
+        +'<td class="l" style="padding:5px 10px"><input class="tpl-ca" data-ct="'+ct+'" data-f="account_code" value="'+e(r.account_code)+'" placeholder="account code" style="width:120px;padding:4px 7px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px"></td>'
+        +'<td class="l" style="padding:5px 10px"><input class="tpl-ca" data-ct="'+ct+'" data-f="account_name" value="'+e(r.account_name)+'" placeholder="account name" style="width:260px;padding:4px 7px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px"></td></tr>'; }
+    var mapRows=map.map(function(m){ return '<tr><td class="l" style="padding:4px 9px;font-weight:600;white-space:nowrap">'+e(m.label)+'</td>'
+      +'<td class="l" style="padding:4px 9px">'+e(m.region)+'</td><td class="l" style="padding:4px 9px">'+e(m.channel)+'</td>'
+      +'<td class="l" style="padding:4px 9px">'+e(m.cogs_account)+'</td><td class="l" style="padding:4px 9px">'+e(m.sales_account)+'</td>'
+      +'<td class="l" style="padding:4px 9px">'+e(m.fulfilment_account)+'</td><td class="l" style="padding:4px 9px">'+e(m.cost_of_sales_account)+'</td></tr>'; }).join('');
+    b.innerHTML='<div style="font-size:13px;font-weight:700;margin-bottom:4px">'+e(TPL3.filter(function(t){return t[0]===TPL3_STATE.tpl;})[0][1])+' — storage &amp; other cost accounts</div>'
+      +'<div style="font-size:11px;color:#94a3b8;margin-bottom:8px">Xero account for this 3PL’s storage and other (non-order) charges. Saved on change.</div>'
+      +'<div class="tw" style="margin-bottom:22px"><table style="border-collapse:collapse;font-size:12px"><thead><tr style="background:#e9eef5;font-size:10px;text-transform:uppercase;color:#475569">'
+        +['Cost type','Account code','Account name'].map(function(h){return '<th class="l" style="padding:5px 10px;text-align:left">'+h+'</th>';}).join('')+'</tr></thead><tbody>'+costRow('storage')+costRow('other')+'</tbody></table></div>'
+      +'<div style="font-size:13px;font-weight:700;margin-bottom:4px">Account map <span style="font-weight:400;color:#94a3b8;font-size:11px">(region × channel → COGS / Sales / Fulfilment / Cost of Sales — read-only)</span></div>'
+      +'<div class="tw" style="max-height:52vh;overflow:auto"><table style="border-collapse:collapse;font-size:11px;width:max-content"><thead><tr style="background:#e9eef5;position:sticky;top:0;font-size:10px;text-transform:uppercase;color:#475569">'
+        +['Label','Region','Channel','COGS','Sales','Fulfilment','Cost of Sales'].map(function(h){return '<th class="l" style="padding:5px 9px;text-align:left;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'+mapRows+'</tbody></table></div>';
+    b.querySelectorAll('.tpl-ca').forEach(function(inp){ inp.onchange=function(){ var ct=inp.dataset.ct;
+      var code=b.querySelector('.tpl-ca[data-ct="'+ct+'"][data-f="account_code"]').value, name=b.querySelector('.tpl-ca[data-ct="'+ct+'"][data-f="account_name"]').value;
+      inp.style.borderColor='#94a3b8';
+      fetch('/api/supply/tpl/cost-account',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({tpl:TPL3_STATE.tpl,cost_type:ct,account_code:code,account_name:name})})
+        .then(function(r){return r.json();}).then(function(j){ inp.style.borderColor=(j&&j.error)?'#dc2626':'#16a34a'; setTimeout(function(){inp.style.borderColor='#cbd5e1';},900); }); }; });
+  }
+  shell(); load();
 }
 // Placeholders until the full reports are built (next phases).
 // (Removed dead reportPlaceholder — a centred title/desc stub for unbuilt report tabs, never called. v25.653)

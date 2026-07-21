@@ -3684,6 +3684,59 @@ app.get('/api/supply/portal-attachment/:id', async (req, res) => {
     res.send(r.data);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// ── 3PL Invoice (REPORTS ▸ 3PL Invoice) ─────────────────────────────────────
+// 3PLs: uk_ilg | us_geneva | eu_ifulfilment (=Blade) | au_coghlans. Phase 1: uploaded invoice files per
+// 3PL+month, per-3PL storage/other cost-account config, and the region×channel account map (read-only).
+const TPL_KEYS = ['uk_ilg', 'us_geneva', 'eu_ifulfilment', 'au_coghlans'];
+app.get('/api/supply/tpl/data', async (req, res) => {
+  const tpl = String(req.query.tpl || ''), period = String(req.query.period || '');
+  if (!TPL_KEYS.includes(tpl)) return res.status(400).json({ error: 'bad tpl' });
+  try {
+    const files = (await pool.query(`SELECT id, filename, content_type, byte_size, uploaded_by,
+      to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at, parse_status
+      FROM planner.tpl_invoice_files WHERE tpl=$1 AND ($2='' OR period=$2) ORDER BY uploaded_at DESC`, [tpl, period])).rows;
+    const cost = (await pool.query(`SELECT cost_type, coalesce(account_code,'') account_code, coalesce(account_name,'') account_name
+      FROM planner.tpl_cost_accounts WHERE tpl=$1 ORDER BY cost_type`, [tpl])).rows;
+    const map = (await pool.query(`SELECT label, coalesce(region,'') region, coalesce(channel,'') channel,
+      coalesce(cogs_account,'') cogs_account, coalesce(sales_account,'') sales_account,
+      coalesce(fulfilment_account,'') fulfilment_account, coalesce(cost_of_sales_account,'') cost_of_sales_account
+      FROM planner.tpl_account_map ORDER BY region NULLS LAST, channel NULLS LAST, label`)).rows;
+    res.json({ ok: true, files, cost_accounts: cost, account_map: map });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/tpl/upload', async (req, res) => {
+  const b = req.body || {};
+  if (!TPL_KEYS.includes(b.tpl) || !b.period || !b.data_base64) return res.status(400).json({ error: 'tpl, period and data_base64 required' });
+  try {
+    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    const r = await pool.query(`INSERT INTO planner.tpl_invoice_files (tpl, period, filename, content_type, content, byte_size, uploaded_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+      [b.tpl, b.period, b.filename || 'invoice', b.mime || 'application/octet-stream', buf, buf.length, b.uploaded_by || null]);
+    res.json({ ok: true, id: r.rows[0].id, byte_size: buf.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/tpl/file/:id', async (req, res) => {
+  try { const r = (await pool.query(`SELECT filename, content_type, content FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
+    if (!r) return res.status(404).send('not found');
+    res.setHeader('Content-Type', r.content_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'attachment; filename="' + (r.filename || 'invoice').replace(/"/g, '') + '"');
+    res.send(r.content);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/tpl/file/:id/delete', async (req, res) => {
+  try { await pool.query(`DELETE FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/tpl/cost-account', async (req, res) => {
+  const b = req.body || {};
+  if (!TPL_KEYS.includes(b.tpl) || !['storage', 'other'].includes(b.cost_type)) return res.status(400).json({ error: 'bad tpl/cost_type' });
+  try {
+    await pool.query(`INSERT INTO planner.tpl_cost_accounts (tpl, cost_type, account_code, account_name) VALUES ($1,$2,$3,$4)
+      ON CONFLICT (tpl, cost_type) DO UPDATE SET account_code=excluded.account_code, account_name=excluded.account_name`,
+      [b.tpl, b.cost_type, (b.account_code || '').trim() || null, (b.account_name || '').trim() || null]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // Full snooze/dismiss state map (used by the PO grid so its badges/counter respect snooze).
 app.get('/api/supply/actions/state', async (req, res) => {
   try {

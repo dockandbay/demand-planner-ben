@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.011 - REPORTS ▸ 3PL Invoice (phase 1): upload + accounts config
+
+- New REPORTS tab **3PL Invoice** with per-3PL sub-tabs (UK ILG / US Geneva / EU iFulfilment / AU Coghlans) and a
+  month picker (defaults to last month). Two modes:
+  - **Invoices** — upload / list / download / delete the month's invoice file(s) per 3PL (bytea in
+    tpl_invoice_files); shows size, uploader, timestamp, parse status.
+  - **Config / Accounts** — edit the per-3PL storage/other Xero cost accounts (saves on change); view the
+    region × channel account map (COGS/Sales/Fulfilment/Cost-of-Sales, read-only) seeded from mig 124.
+- Server: /api/supply/tpl/data, /tpl/upload, /tpl/file/:id (download), /tpl/file/:id/delete, /tpl/cost-account.
+- Uses migration **124** (already applied to sandbox; Diviyaj: run 124 on live). Parse + Cin7 order matching = phase 2.
+
 ## v26.010 - Suggestion Box: "going live" email on complete
 
 - Marking a suggestion **Complete** now emails the submitter ("This feature is going live") and cc's
