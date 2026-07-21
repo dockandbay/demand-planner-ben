@@ -74,6 +74,7 @@ body{font-family:system-ui,-apple-system,sans-serif;font-size:12px;color:#1a1a1a
 #hz-drawer .hz-item.hz-sub{padding-left:34px;font-size:13px;color:#cbd5e1;margin-left:14px;border-left:2px solid #334155}
 #hz-drawer .hz-item.hz-sub.active{border-left-color:#38bdf8;color:#fff}
 #hz-drawer .hz-close{float:right;background:transparent;border:none;color:#94a3b8;font-size:20px;cursor:pointer;padding:0 16px}
+#hz-drawer .hz-badge{display:inline-block;margin-left:8px;background:#dc2626;color:#fff;font-size:10px;font-weight:700;border-radius:9px;min-width:16px;height:16px;line-height:16px;text-align:center;padding:0 4px;vertical-align:middle}
 .catpill{font-size:9px !important;padding:2px 6px !important}
 .cat-opt:hover{background:#f5f5f5}
 .pill-lbl{font-size:11px;color:#444;white-space:nowrap;width:64px;flex-shrink:0;font-weight:600;letter-spacing:.02em}
@@ -10112,7 +10113,17 @@ var _rfBtn=document.getElementById('rf'); if(_rfBtn)_rfBtn.onclick=function(){
         Array.prototype.slice.call(document.querySelectorAll('#config-subs .rtab')).forEach(function(cb){ drawer.appendChild(subItem(cb.textContent.trim(), cb.classList.contains('active'), function(){ cb.click(); close(); })); });
       }
     });
+    // Quick actions — mirror the desktop top-bar buttons that aren't views (Stock Availability + Messages bell),
+    // so phone users get them too, with the unread-messages count that was previously desktop-only.
+    drawer.appendChild(lbl('Quick actions'));
+    if(typeof openSADrawer==='function') drawer.appendChild(item('📊  Stock Availability (SA)', false, function(){ close(); openSADrawer(); }));
+    var msgN=(window.HZ_BELL&&window.HZ_BELL.count)?(window.HZ_BELL.count()||0):0;
+    var msg=item('✉  Messages', false, function(){ close(); if(window.HZ_BELL&&window.HZ_BELL.toggle)window.HZ_BELL.toggle(); });
+    if(msgN>0){ var bdg=document.createElement('span'); bdg.className='hz-badge'; bdg.textContent=msgN>99?'99+':String(msgN); msg.appendChild(bdg); }
+    drawer.appendChild(msg);
   }
+  // keep the drawer's Messages count fresh: when the bell's poll updates the count and the drawer is open, rebuild.
+  window.__tlOnCount=function(){ if(drawer.classList.contains('open'))build(); };
   // rebuild the drawer now, then keep rebuilding (up to ~1.4s) until the just-activated view's sub-nav has
   // rendered — so the nested sub-items appear on the FIRST tap even when they load asynchronously (CONFIG).
   function waitBuild(ready){ var n=0; (function tick(){ if(!drawer.classList.contains('open'))return; build(); if(!ready()&&n++<22){ setTimeout(tick,60); } })(); }

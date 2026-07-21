@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.006 - Messages bell → top bar next to SA; SA + Messages (with counts) in the mobile menu
+
+- The ✉ timeline-messages bell moved out of the SUPPLY sub-nav into the top bar (#view-tabs-row) next to the SA
+  button, so unread supplier notes are visible on EVERY view (DEMAND/SUPPLY/BUY/FBA/REPORTS), not just SUPPLY.
+  Dropdown is now a fixed element on <body>. Clicking a message from a non-SUPPLY view reveals SUPPLY ▸ Purchase
+  Orders first, then opens that PO's Timeline drawer.
+- Mobile hamburger menu gains a "Quick actions" section with Stock Availability (SA) and Messages — and the unread
+  Messages count now shows on mobile (a red badge), which was previously desktop-only. Count stays live via a
+  bridge (window.HZ_BELL / window.__tlOnCount).
+
 ## v26.005 - DEMAND ▸ Key Accts: inline key-account forecast spreadsheet
 
 - New DEMAND sub-tab "Key Accts" (next to Plan). Spreadsheet-style inline editor for key_account_forecasts:

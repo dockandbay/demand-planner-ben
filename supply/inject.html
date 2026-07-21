@@ -22,13 +22,14 @@
 #supply-root .ver{margin-left:auto;color:#aaa;font-size:10px}
 /* Timeline notifications — top-bar messages bell + unread counter + pop-down drawer */
 #supply-root #supply-subnav{position:relative}
-#supply-root .tl-bell{margin-left:auto;position:relative;background:none;border:none;cursor:pointer;font-size:16px;color:#475569;padding:2px 8px;line-height:1}
-#supply-root .tl-bell:hover{color:#1a1a1a}
-#supply-root #supply-subnav .ver{margin-left:10px}
-#supply-root #tl-count{position:absolute;top:-4px;right:1px;background:#dc2626;color:#fff;font-size:9px;font-weight:700;border-radius:8px;min-width:15px;height:15px;line-height:15px;text-align:center;padding:0 3px;display:none}
-#supply-root #tl-count.on{display:inline-block}
-#supply-root #tl-drop{position:absolute;top:34px;right:6px;width:370px;max-width:94vw;max-height:72vh;overflow-y:auto;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 12px 34px rgba(15,23,42,.24);z-index:100050;display:none}
-#supply-root #tl-drop.open{display:block}
+/* Timeline messages bell — lives in the top bar (#view-tabs-row) next to SA, visible on every view. v26.006 */
+#view-tabs-row .tl-bell{position:relative;background:none;border:none;cursor:pointer;font-size:15px;color:#cbd5e1;padding:2px 7px;line-height:1;flex:0 0 auto;margin-right:2px}
+#view-tabs-row .tl-bell:hover{color:#fff}
+#supply-root #supply-subnav .ver{margin-left:auto}
+#tl-count{position:absolute;top:-5px;right:-2px;background:#dc2626;color:#fff;font-size:9px;font-weight:700;border-radius:8px;min-width:15px;height:15px;line-height:15px;text-align:center;padding:0 3px;display:none}
+#tl-count.on{display:inline-block}
+#tl-drop{position:fixed;top:52px;right:12px;width:370px;max-width:94vw;max-height:72vh;overflow-y:auto;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 12px 34px rgba(15,23,42,.24);z-index:100050;display:none}
+#tl-drop.open{display:block}
 #supply-root .tl-item{padding:9px 12px;border-bottom:1px solid #f1f5f9}
 #supply-root .tl-item:last-child{border-bottom:none}
 #supply-root .tl-po{font-weight:700;color:#1d4ed8;cursor:pointer}
@@ -4428,7 +4429,8 @@
   var _poDrawerPrevPatch=null, _poDrawerPrevRefresh=null;
   // ── Timeline notifications (top-bar ✉ messages bell) ── unread supplier PO-timeline notes; mark-read / snooze / open PO▸Timeline.
   var TL_NOTIFS=[];
-  function tlSetCount(n){ var c=document.getElementById('tl-count'); if(!c)return; c.textContent=n>99?'99+':String(n); c.className=n>0?'on':''; }
+  function tlSetCount(n){ var c=document.getElementById('tl-count'); if(c){ c.textContent=n>99?'99+':String(n); c.className=n>0?'on':''; }
+    if(typeof window.__tlOnCount==='function')try{window.__tlOnCount(n);}catch(e){} }   // let the mobile drawer mirror the count
   function loadTlNotifs(cb){ fetch('/api/supply/timeline-notifications').then(function(r){return r.json();}).then(function(rows){ TL_NOTIFS=Array.isArray(rows)?rows:[]; tlSetCount(TL_NOTIFS.length); var d=document.getElementById('tl-drop'); if(d&&d.classList.contains('open'))renderTlDrop(); if(cb)cb(); }).catch(function(){}); }
   function tlItemHtml(n){ var body=String(n.body||''); if(body.length>240)body=body.slice(0,240)+'…';
     return '<div class="tl-item" data-id="'+esc(String(n.id))+'"><div><span class="tl-po" data-po="'+esc(n.po||'')+'">'+esc(n.po||'—')+'</span>'+(n.supplier_name?' <span class="mut tiny">'+esc(n.supplier_name)+'</span>':'')+'<span class="mut tiny" style="float:right">'+esc(n.created_at||'')+'</span></div>'
@@ -4437,7 +4439,9 @@
   function renderTlDrop(){ var d=document.getElementById('tl-drop'); if(!d)return;
     d.innerHTML='<div style="padding:9px 12px;border-bottom:1px solid #e5e7eb;font-weight:700;font-size:12px">Timeline messages'+(TL_NOTIFS.length?' <span class="mut tiny">('+TL_NOTIFS.length+' unread)</span>':'')+'</div>'
       +(TL_NOTIFS.length?TL_NOTIFS.map(tlItemHtml).join(''):'<div class="count" style="padding:16px 12px">No unread timeline messages 🎉</div>');
-    d.querySelectorAll('.tl-po').forEach(function(el){ el.onclick=function(){ var po=el.dataset.po; if(!po)return; closeTlDropdown(); if(typeof openPODrawer==='function')openPODrawer(po,'timeline'); }; });
+    d.querySelectorAll('.tl-po').forEach(function(el){ el.onclick=function(){ var po=el.dataset.po; if(!po)return; closeTlDropdown();
+      var sr=document.getElementById('supply-root'); if((!sr||sr.style.display==='none')&&typeof showSupply==='function'){ showSupply(true); if(typeof selectSection==='function')selectSection('purchase-orders'); }   // clicked from DEMAND/BUY/etc → reveal SUPPLY so the PO drawer is visible
+      if(typeof openPODrawer==='function')openPODrawer(po,'timeline'); }; });
     d.querySelectorAll('.tl-read').forEach(function(b){ b.onclick=function(){ tlAct(b.dataset.id,'read',b); }; });
     d.querySelectorAll('.tl-snooze').forEach(function(b){ b.onclick=function(){ tlAct(b.dataset.id,'snooze',b); }; }); }
   function tlAct(id,kind,btn){ if(btn)btn.disabled=true;
@@ -4451,6 +4455,7 @@
     d.classList.add('open'); renderTlDrop(); loadTlNotifs(); setTimeout(function(){ document.addEventListener('mousedown', tlOutside); },0); }
   function tlOutside(e){ var d=document.getElementById('tl-drop'), bell=document.getElementById('tl-bell'); if(d&&!d.contains(e.target)&&!(bell&&bell.contains(e.target)))closeTlDropdown(); }
   function closeTlDropdown(){ var d=document.getElementById('tl-drop'); if(d)d.classList.remove('open'); document.removeEventListener('mousedown', tlOutside); }
+  try{ window.HZ_BELL={ toggle:toggleTlDropdown, load:loadTlNotifs, count:function(){return TL_NOTIFS.length;} }; }catch(e){}   // bridge for the app-level mobile drawer (SA + Messages)
   function openPODrawer(po,tab){ if(!po)return; tab=tab||'dates';
     closePODrawer(true);   // drop any existing PO drawer (silent: keep saved patch to restore later)
     var root=document.getElementById('supply-root')||document.body;
@@ -6726,20 +6731,24 @@
     var app=document.getElementById('app')||document.body; if(!app)return;
     var rootEl=document.createElement('div'); rootEl.id='supply-root';
     rootEl.innerHTML='<div id="supply-subnav">'+SECTIONS.map(function(s){return '<button class="stab" data-k="'+s[0]+'">'+s[1]+'</button>';}).join('')
-      +'<button id="tl-bell" class="tl-bell" title="Timeline messages — unread supplier notes">✉<span id="tl-count"></span></button>'
-      +'<div id="tl-drop"></div>'
       +'<span class="ver">HORIZON __APP_VERSION__</span></div>'
       +'<select id="supply-nav-sel" aria-label="Section">'+SECTIONS.map(function(s){return '<option value="'+s[0]+'">'+s[1]+'</option>';}).join('')+'</select>'
       +'<div id="supply-content"></div>';
     app.appendChild(rootEl);
     rootEl.querySelectorAll('.stab').forEach(function(b){b.onclick=function(){selectSection(b.dataset.k);};});
-    var _bell=rootEl.querySelector('#tl-bell'); if(_bell)_bell.onclick=function(e){ e.stopPropagation(); toggleTlDropdown(); };
-    loadTlNotifs(); if(!window.__tlPoll)window.__tlPoll=setInterval(function(){ loadTlNotifs(); }, 60000);   // messages bell: initial + 60s poll
     var _navSel=rootEl.querySelector('#supply-nav-sel'); if(_navSel)_navSel.onchange=function(){selectSection(this.value);};
     fetch('/api/supply/samples').then(function(r){return r.json();}).then(function(d){ if(Array.isArray(d)){ cache['samples']=d; samplesNavBadge(d); } }).catch(function(){}); }
   function samplesNavBadge(rows){ var n=(rows||[]).reduce(function(a,r){return a+(r.unread_notes||0);},0);   // total unread supplier notes
     var btn=document.querySelector('#supply-subnav .stab[data-k="samples"]'); if(btn)btn.innerHTML='SAMPLES'+(n>0?' <span class="ex-badge">'+n+'</span>':'');
     var opt=document.querySelector('#supply-nav-sel option[value="samples"]'); if(opt)opt.textContent='SAMPLES'+(n>0?' ('+n+')':''); }
+  // Timeline messages bell → top bar (#view-tabs-row) next to SA. Lives outside #supply-root so it's visible on
+  // every view; the dropdown is a fixed-position element on <body>. Polls unread supplier notes every 60s.
+  function ensureBellButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('tl-bell'))return;
+    var bell=document.createElement('button'); bell.id='tl-bell'; bell.className='tl-bell'; bell.title='Timeline messages — unread supplier notes'; bell.innerHTML='✉<span id="tl-count"></span>';
+    var sa=document.getElementById('sa-drawer-btn'); if(sa)row.insertBefore(bell,sa); else { var sp=row.querySelector('div[style*="flex:1"]'); if(sp&&sp.nextSibling)row.insertBefore(bell,sp.nextSibling); else row.appendChild(bell); }
+    bell.onclick=function(e){ e.stopPropagation(); toggleTlDropdown(); };
+    if(!document.getElementById('tl-drop')){ var d=document.createElement('div'); d.id='tl-drop'; document.body.appendChild(d); }
+    loadTlNotifs(); if(!window.__tlPoll)window.__tlPoll=setInterval(function(){ loadTlNotifs(); }, 60000); }
   function ensureNavButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('supply-btn'))return;
     var navwrap=row.parentElement; if(navwrap&&!navwrap.id)navwrap.id='dab-navwrap';
     var btn=document.createElement('button'); btn.id='supply-btn'; btn.className='view-toggle supply-toggle'; btn.textContent='SUPPLY';
@@ -7270,7 +7279,7 @@
     var t='SUPPLY', h=raw, m=raw.match(/^<b>([^<]*)<\/b>\s*([\s\S]*)$/);
     if(m){ t=m[1].replace(/[.\s]+$/,''); h=m[2]; }
     return {t:t, h:h||'This SUPPLY section.'}; };
-  function boot(){ try{ if(ME===null)fetchMe(); ensureRoot(); ensureNavButton(); ensureScenarioRoot(); ensureScenarioButton(); ensureConfigButton();
+  function boot(){ try{ if(ME===null)fetchMe(); ensureRoot(); ensureNavButton(); ensureBellButton(); ensureScenarioRoot(); ensureScenarioButton(); ensureConfigButton();
     if(!_routed){ _routed=true; try{ if(/^#\/?(supply|config|scenario|demand|reports|buy|fba|planning|exec)(\/|$)/.test(location.hash)) applyRoute();
       else { location.hash='#/supply/purchase-orders'; applyRoute(); } }catch(e){} }   // deep-link on first load; no hash → default landing = SUPPLY ▸ Purchase Orders
   }catch(e){ if(window.console)console.log('[SUPPLY] boot error',e&&e.message); } }
