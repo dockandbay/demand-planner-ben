@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.008 - Samples: dynamic carrier tracking links (DHL / FedEx / UPS / SF Express)
+
+- When a carrier + tracking code are entered on a sample, the tracking number becomes a clickable ↗ link to the
+  carrier's tracking page. Added SF Express to the shared carrierTrackUrl helper (alongside DHL/UPS/FedEx). Links
+  appear on the SUPPLY samples grid + detail, and on the supplier portal (sample row + editable card).
+- Carrier fields now offer a datalist of DHL / FedEx / UPS / SF Express (still free-text) so values match the
+  trackers. Portal got its own carrierTrackUrl/carrierTrackLink helper (separate file).
+
 ## v26.007 - Fix timeline dropdown styling after top-bar move
 
 - The messages dropdown lives on <body> now, so its item styles (.tl-item/.tl-po/.tl-body/.tl-acts/.mut/.tiny)

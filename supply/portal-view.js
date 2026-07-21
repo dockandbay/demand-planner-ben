@@ -12,6 +12,14 @@
   var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   function fd(s){ if(!s)return ''; var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(s)); return m?(m[3]+'-'+MON[+m[2]-1]+'-'+m[1].slice(2)):String(s); }
   function dcell(v){return v?esc(fd(v)):'<span class="mut tiny">—</span>';}
+  // Dynamic tracking URL for a carrier + code (DHL / FedEx / UPS / SF Express); '' when the carrier has no tracker.
+  function carrierTrackUrl(carrier,code){ var c=String(carrier||'').toLowerCase(), r=String(code||'').trim(); if(!r)return ''; var e=encodeURIComponent(r);
+    if(/dhl/.test(c)) return 'https://www.dhl.com/en/express/tracking.html?AWB='+e+'&brand=DHL';
+    if(/ups/.test(c)) return 'https://www.ups.com/track?loc=en_US&tracknum='+e;
+    if(/fedex|fed ?ex/.test(c)) return 'https://www.fedex.com/fedextrack/?trknbr='+e;
+    if(/sf ?express|sf-express|shunfeng|顺丰|順豐/.test(c)) return 'https://www.sf-international.com/us/en/dynamic_function/waybill/#search/bill-number/'+e;
+    return ''; }
+  function carrierTrackLink(carrier,code){ var u=carrierTrackUrl(carrier,code); return u?'<a href="'+u+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;font-weight:700" title="track with '+esc(carrier||'carrier')+' ↗">'+esc(code)+' ↗</a>':esc(code); }
   // Direct-to-Client details apply when the PO branch is Direct to Client (incl. B2B JLEW/NEXT) OR a
   // client sales ref is set — otherwise the DtC tab + approval workflow do not show.
   function ppIsDtc(p){ var b=(p&&p.branch||'').toLowerCase();
@@ -1186,8 +1194,8 @@
                 +'<div>'+lbl('Status')+'<select class="fci samp-prod" data-id="'+s.id+'" style="width:150px;font-size:12px'+((sampStMissing(s)||sampDateConflict(s))?';border:1px solid #dc2626;background:#fef2f2':'')+'"><option value="">—</option>'+PROD_STATUS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===(s.production_status||'')?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'+(sampStMissing(s)?'<div style="margin-top:3px"><span style="background:#dc2626;color:#fff;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px">⚠ Must enter status</span></div>':'')+'</div>'
                 +'<div>'+lbl('Expected completion')+'<input type="date" class="fci samp-exp" value="'+esc(s.supplier_expected||'')+'" style="width:150px'+((sampCdMissing(s)||sampDateConflict(s))?';border:1px solid #dc2626;background:#fef2f2':'')+'">'+(sampCdMissing(s)?'<div style="margin-top:3px"><span style="background:#dc2626;color:#fff;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px">⚠ Must enter completion date</span></div>':'')+'</div>'
                 +(sampDateConflict(s)?'<div style="flex-basis:100%"><span style="background:#dc2626;color:#fff;border-radius:4px;font-size:10px;font-weight:700;padding:2px 7px">⚠ Expected completion date has passed but status is still "In production" — please update</span></div>':'')
-                +'<div>'+lbl('Tracking code')+'<input class="fci txt samp-trk" value="'+esc(s.tracking_code||'')+'" style="width:170px" placeholder="tracking…"></div>'
-                +'<div>'+lbl('Carrier')+'<input class="fci txt samp-car" value="'+esc(s.carrier||'')+'" style="width:120px" placeholder="carrier…"></div>'
+                +'<div>'+lbl('Tracking code')+'<input class="fci txt samp-trk" value="'+esc(s.tracking_code||'')+'" style="width:170px" placeholder="tracking…">'+(carrierTrackUrl(s.carrier,s.tracking_code)?'<div class="tiny" style="margin-top:3px">'+carrierTrackLink(s.carrier,s.tracking_code)+'</div>':'')+'</div>'
+                +'<div>'+lbl('Carrier')+'<input class="fci txt samp-car" list="pp-samp-carrierlist" value="'+esc(s.carrier||'')+'" style="width:120px" placeholder="carrier…"><datalist id="pp-samp-carrierlist"><option value="DHL"><option value="FedEx"><option value="UPS"><option value="SF Express"></datalist></div>'
                 +'<button class="save-btn samp-save">Save</button></div>'
               +'<div style="margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px">'+lbl('Charges')+charges
                 +'<div style="display:flex;gap:8px;align-items:flex-end;margin-top:6px;flex-wrap:wrap"><div><div class="mut tiny">Freight</div><input class="fci samp-cf" style="width:80px" placeholder="0.00"></div><div><div class="mut tiny">Product</div><input class="fci samp-cp" style="width:80px" placeholder="0.00"></div><div><div class="mut tiny">Note</div><input class="fci txt samp-cd" style="width:180px" placeholder="optional"></div><button class="save-btn samp-charge">Create charge</button></div></div>'
@@ -1244,7 +1252,7 @@
               +'<td class="l">'+esc(s.recipient_company||'')+(s.recipient_name?' <span class="mut tiny">'+esc(s.recipient_name)+'</span>':'')+'</td>'
               +'<td class="l">'+(s.completion_required?fd(s.completion_required):'<span class="mut">—</span>')+'</td>'
               +'<td class="l"><b>'+units+'</b> <span class="mut tiny">· '+nsku+' SKU'+(nsku===1?'':'s')+'</span></td>'
-              +'<td class="l">'+(s.tracking_code?esc(s.tracking_code):'<span class="mut">—</span>')+'</td></tr>'
+              +'<td class="l">'+(s.tracking_code?carrierTrackLink(s.carrier,s.tracking_code):'<span class="mut">—</span>')+'</td></tr>'
               +'<tr class="ps-exp" id="ps-exp-'+i+'" style="display:none"><td colspan="7"><div class="ps-det" data-id="'+s.id+'"></div></td></tr>'; }
           function ppSamples(samples){
             var F=[['open','Open'],['unaccepted','Not yet accepted'],['closed','Closed'],['all','All']];
