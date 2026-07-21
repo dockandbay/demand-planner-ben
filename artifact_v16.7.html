@@ -10121,6 +10121,7 @@ var _rfBtn=document.getElementById('rf'); if(_rfBtn)_rfBtn.onclick=function(){
     var msg=item('✉  Messages', false, function(){ close(); if(window.HZ_BELL&&window.HZ_BELL.toggle)window.HZ_BELL.toggle(); });
     if(msgN>0){ var bdg=document.createElement('span'); bdg.className='hz-badge'; bdg.textContent=msgN>99?'99+':String(msgN); msg.appendChild(bdg); }
     drawer.appendChild(msg);
+    if(window.HZ_SUGGEST&&window.HZ_SUGGEST.open) drawer.appendChild(item('💡  Suggestion box', false, function(){ close(); window.HZ_SUGGEST.open(); }));
   }
   // keep the drawer's Messages count fresh: when the bell's poll updates the count and the drawer is open, rebuild.
   window.__tlOnCount=function(){ if(drawer.classList.contains('open'))build(); };

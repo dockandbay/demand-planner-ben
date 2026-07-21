@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.009 - Suggestion Box (top-bar submit + CONFIG triage)
+
+- New 💡 **Suggestion box** button in the top bar (next to the bell) and in the mobile menu → opens a submit modal
+  (suggestion text + optional area). Captures the submitter's email + timestamp and returns a stable reference
+  (**SUG-0001**, …) shown on submit so it can be quoted later.
+- New **CONFIG ▸ Suggestions** tab: table of every suggestion with ref / text / area / who / when, a status chip, a
+  status selector (New → Complete / Future / Deferred), status filter pills with counts, and delete.
+- Migration **126_suggestions.sql** (planner.suggestions + a ref sequence). ⚠️ Diviyaj: run mig 126 on live.
+
 ## v26.008 - Samples: dynamic carrier tracking links (DHL / FedEx / UPS / SF Express)
 
 - When a carrier + tracking code are entered on a sample, the tracking number becomes a clickable ↗ link to the

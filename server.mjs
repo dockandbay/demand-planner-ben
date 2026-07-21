@@ -1490,6 +1490,11 @@ app.get('/api/supply/:section', async (req, res) => {
       case 'ka-forecasts':   // DEMAND ▸ Key Accounts Forecast — inline-editable rows (client + SKU + country/wh + ship date + qty)
         return res.json(await q(`SELECT id, coalesce(client,'') client, coalesce(sku,'') sku, coalesce(warehouse,'') warehouse,
           to_char(ship_date,'YYYY-MM-DD') ship_date, quantity FROM planner.key_account_forecasts ORDER BY warehouse, client, sku`));
+      case 'suggestions':   // Suggestion Box — submitted from the top bar, triaged in CONFIG ▸ Suggestions
+        return res.json(await q(`SELECT id, ref, body, coalesce(area,'') area, coalesce(created_by,'') created_by,
+          to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, status, coalesce(status_by,'') status_by,
+          to_char(status_at,'YYYY-MM-DD HH24:MI') status_at
+          FROM planner.suggestions ORDER BY (status='new') DESC, created_at DESC`));
       case 'timeline-notifications':   // top-bar ✉ bell: unread SUPPLIER PO-timeline notes (newest first), minus snoozed (supply_action_state key 'tlnote|<id>')
         return res.json(await q(`
           SELECT sn.id, sn.po, coalesce(po.supplier_name,'') supplier_name, sn.body,
@@ -3078,6 +3083,28 @@ app.post('/api/supply/ka-forecast', async (req, res) => {
 });
 app.post('/api/supply/ka-forecast/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.key_account_forecasts WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Suggestion Box — submit a new suggestion (returns its assigned reference) and triage its status.
+app.post('/api/supply/suggestion', async (req, res) => {
+  const b = req.body || {};
+  const body = (b.body || '').trim(), area = (b.area || '').trim() || null, by = (b.created_by || '').trim() || null;
+  if (!body) return res.status(400).json({ error: 'Suggestion text is required.' });
+  try {
+    const r = await pool.query(`INSERT INTO planner.suggestions (body, area, created_by) VALUES ($1,$2,$3) RETURNING id, ref`, [body, area, by]);
+    res.json({ ok: true, id: r.rows[0].id, ref: r.rows[0].ref });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/suggestion/:id/status', async (req, res) => {
+  const b = req.body || {}, status = (b.status || '').trim(), by = (b.status_by || '').trim() || null;
+  if (!['new', 'complete', 'future', 'deferred'].includes(status)) return res.status(400).json({ error: 'Bad status.' });
+  try {
+    await pool.query(`UPDATE planner.suggestions SET status=$2, status_by=$3, status_at=now() WHERE id=$1`, [req.params.id, status, by]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/suggestion/:id/delete', async (req, res) => {
+  try { await pool.query(`DELETE FROM planner.suggestions WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/note-read/:id', async (req, res) => {
