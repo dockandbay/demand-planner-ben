@@ -30,14 +30,19 @@
 #tl-count.on{display:inline-block}
 #tl-drop{position:fixed;top:52px;right:12px;width:370px;max-width:94vw;max-height:72vh;overflow-y:auto;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 12px 34px rgba(15,23,42,.24);z-index:100050;display:none}
 #tl-drop.open{display:block}
-#supply-root .tl-item{padding:9px 12px;border-bottom:1px solid #f1f5f9}
-#supply-root .tl-item:last-child{border-bottom:none}
-#supply-root .tl-po{font-weight:700;color:#1d4ed8;cursor:pointer}
-#supply-root .tl-po:hover{text-decoration:underline}
-#supply-root .tl-body{color:#334155;margin:3px 0;white-space:pre-wrap;word-break:break-word;font-size:12px}
-#supply-root .tl-acts{display:flex;gap:8px;margin-top:4px}
-#supply-root .tl-acts button{font-size:11px;padding:2px 9px;border:1px solid #cbd5e1;background:#f8fafc;border-radius:5px;cursor:pointer}
-#supply-root .tl-acts button:hover{background:#eef2f7}
+/* dropdown content — scoped to #tl-drop (it now lives on <body>, not under #supply-root). v26.007 */
+#tl-drop{font-size:12px;color:#1a1a1a;line-height:1.4}
+#tl-drop .mut{color:#888}
+#tl-drop .tiny{font-size:9.5px}
+#tl-drop .count{color:#999;font-size:11px}
+#tl-drop .tl-item{padding:9px 12px;border-bottom:1px solid #f1f5f9}
+#tl-drop .tl-item:last-child{border-bottom:none}
+#tl-drop .tl-po{font-weight:700;color:#1d4ed8;cursor:pointer}
+#tl-drop .tl-po:hover{text-decoration:underline}
+#tl-drop .tl-body{color:#334155;margin:3px 0;white-space:pre-wrap;word-break:break-word;font-size:12px}
+#tl-drop .tl-acts{display:flex;gap:8px;margin-top:4px}
+#tl-drop .tl-acts button{font-size:11px;padding:2px 9px;border:1px solid #cbd5e1;background:#f8fafc;border-radius:5px;cursor:pointer;font-family:inherit;color:#1a1a1a}
+#tl-drop .tl-acts button:hover{background:#eef2f7}
 #supply-root .annot{background:#0f172a;color:#cbd5e1;font-size:11px;border-radius:6px;padding:8px 12px;margin:0 0 10px;line-height:1.5}
 #supply-root .annot b{color:#7dd3fc}
 #supply-root .bar{display:flex;align-items:center;margin-bottom:8px;flex-wrap:wrap}

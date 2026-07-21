@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.007 - Fix timeline dropdown styling after top-bar move
+
+- The messages dropdown lives on <body> now, so its item styles (.tl-item/.tl-po/.tl-body/.tl-acts/.mut/.tiny)
+  lost their #supply-root scope and rendered unstyled. Re-scoped those rules to #tl-drop. Restores PO link colour,
+  message spacing, muted supplier/date text, and the Mark-read/Snooze button styling.
+
 ## v26.006 - Messages bell → top bar next to SA; SA + Messages (with counts) in the mobile menu
 
 - The ✉ timeline-messages bell moved out of the SUPPLY sub-nav into the top bar (#view-tabs-row) next to the SA
