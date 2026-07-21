@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.002 - Timeline notifications bell + egress: widen built-data cache to 5min
+
+- New top-bar messages bell (SUPPLY): unread SUPPLIER PO-timeline notes with an unread counter + pop-down drawer
+  (newest first). Each item shows the PO (click -> opens PO > Timeline drawer), Mark read, and Snooze (7-day, via
+  supply_action_state key tlnote|<id>). Server: timeline-notifications case; mark-read/snooze reuse existing endpoints.
+- Egress: DATA_TTL_MS 20s -> 5min. Each cold page build pulls ~2-3MB from Supabase; a wider window sharply cuts DB
+  egress on the (long-running) sandbox server. Invalidated on forecast saves so edits still show immediately.
+
 ## v26.001 - Version scheme: v26 minors are zero-padded 3-digit (v26.001, v26.002, …)
 
 - APP_VERSION derive now formats as v{major}.{minor padded to 3}: package.json 26.1.0 -> "v26.001". v25 display

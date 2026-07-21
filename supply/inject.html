@@ -20,6 +20,23 @@
 #supply-root .stab:hover{color:#1a1a1a}
 #supply-root .stab.active{color:#1a1a1a;border-bottom-color:#1a1a1a;font-weight:600}
 #supply-root .ver{margin-left:auto;color:#aaa;font-size:10px}
+/* Timeline notifications — top-bar messages bell + unread counter + pop-down drawer */
+#supply-root #supply-subnav{position:relative}
+#supply-root .tl-bell{margin-left:auto;position:relative;background:none;border:none;cursor:pointer;font-size:16px;color:#475569;padding:2px 8px;line-height:1}
+#supply-root .tl-bell:hover{color:#1a1a1a}
+#supply-root #supply-subnav .ver{margin-left:10px}
+#supply-root #tl-count{position:absolute;top:-4px;right:1px;background:#dc2626;color:#fff;font-size:9px;font-weight:700;border-radius:8px;min-width:15px;height:15px;line-height:15px;text-align:center;padding:0 3px;display:none}
+#supply-root #tl-count.on{display:inline-block}
+#supply-root #tl-drop{position:absolute;top:34px;right:6px;width:370px;max-width:94vw;max-height:72vh;overflow-y:auto;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 12px 34px rgba(15,23,42,.24);z-index:100050;display:none}
+#supply-root #tl-drop.open{display:block}
+#supply-root .tl-item{padding:9px 12px;border-bottom:1px solid #f1f5f9}
+#supply-root .tl-item:last-child{border-bottom:none}
+#supply-root .tl-po{font-weight:700;color:#1d4ed8;cursor:pointer}
+#supply-root .tl-po:hover{text-decoration:underline}
+#supply-root .tl-body{color:#334155;margin:3px 0;white-space:pre-wrap;word-break:break-word;font-size:12px}
+#supply-root .tl-acts{display:flex;gap:8px;margin-top:4px}
+#supply-root .tl-acts button{font-size:11px;padding:2px 9px;border:1px solid #cbd5e1;background:#f8fafc;border-radius:5px;cursor:pointer}
+#supply-root .tl-acts button:hover{background:#eef2f7}
 #supply-root .annot{background:#0f172a;color:#cbd5e1;font-size:11px;border-radius:6px;padding:8px 12px;margin:0 0 10px;line-height:1.5}
 #supply-root .annot b{color:#7dd3fc}
 #supply-root .bar{display:flex;align-items:center;margin-bottom:8px;flex-wrap:wrap}
@@ -4402,6 +4419,31 @@
   // panel (all tabs) via loadPoDetail(po,'DRAWER',…). "Full page ↗" jumps to the PLAN page via gotoPO.
   // Mirrors openShipDrawer. Reusable anywhere we'd otherwise hyperlink to the PO grid.
   var _poDrawerPrevPatch=null, _poDrawerPrevRefresh=null;
+  // ── Timeline notifications (top-bar ✉ messages bell) ── unread supplier PO-timeline notes; mark-read / snooze / open PO▸Timeline.
+  var TL_NOTIFS=[];
+  function tlSetCount(n){ var c=document.getElementById('tl-count'); if(!c)return; c.textContent=n>99?'99+':String(n); c.className=n>0?'on':''; }
+  function loadTlNotifs(cb){ fetch('/api/supply/timeline-notifications').then(function(r){return r.json();}).then(function(rows){ TL_NOTIFS=Array.isArray(rows)?rows:[]; tlSetCount(TL_NOTIFS.length); var d=document.getElementById('tl-drop'); if(d&&d.classList.contains('open'))renderTlDrop(); if(cb)cb(); }).catch(function(){}); }
+  function tlItemHtml(n){ var body=String(n.body||''); if(body.length>240)body=body.slice(0,240)+'…';
+    return '<div class="tl-item" data-id="'+esc(String(n.id))+'"><div><span class="tl-po" data-po="'+esc(n.po||'')+'">'+esc(n.po||'—')+'</span>'+(n.supplier_name?' <span class="mut tiny">'+esc(n.supplier_name)+'</span>':'')+'<span class="mut tiny" style="float:right">'+esc(n.created_at||'')+'</span></div>'
+      +'<div class="tl-body">'+esc(body)+'</div>'
+      +'<div class="tl-acts"><button class="tl-read" data-id="'+esc(String(n.id))+'">✓ Mark read</button><button class="tl-snooze" data-id="'+esc(String(n.id))+'">⏰ Snooze</button></div></div>'; }
+  function renderTlDrop(){ var d=document.getElementById('tl-drop'); if(!d)return;
+    d.innerHTML='<div style="padding:9px 12px;border-bottom:1px solid #e5e7eb;font-weight:700;font-size:12px">Timeline messages'+(TL_NOTIFS.length?' <span class="mut tiny">('+TL_NOTIFS.length+' unread)</span>':'')+'</div>'
+      +(TL_NOTIFS.length?TL_NOTIFS.map(tlItemHtml).join(''):'<div class="count" style="padding:16px 12px">No unread timeline messages 🎉</div>');
+    d.querySelectorAll('.tl-po').forEach(function(el){ el.onclick=function(){ var po=el.dataset.po; if(!po)return; closeTlDropdown(); if(typeof openPODrawer==='function')openPODrawer(po,'timeline'); }; });
+    d.querySelectorAll('.tl-read').forEach(function(b){ b.onclick=function(){ tlAct(b.dataset.id,'read',b); }; });
+    d.querySelectorAll('.tl-snooze').forEach(function(b){ b.onclick=function(){ tlAct(b.dataset.id,'snooze',b); }; }); }
+  function tlAct(id,kind,btn){ if(btn)btn.disabled=true;
+    var ep = kind==='read' ? '/api/supply/note-read/'+encodeURIComponent(id) : '/api/supply/actions/state';
+    var body = kind==='read' ? {} : {key:'tlnote|'+id, status:'snoozed', snooze_days:7};
+    fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
+      .then(function(){ TL_NOTIFS=TL_NOTIFS.filter(function(n){return String(n.id)!==String(id);}); tlSetCount(TL_NOTIFS.length); renderTlDrop(); })
+      .catch(function(){ if(btn)btn.disabled=false; }); }
+  function toggleTlDropdown(){ var d=document.getElementById('tl-drop'); if(!d)return;
+    if(d.classList.contains('open')){ closeTlDropdown(); return; }
+    d.classList.add('open'); renderTlDrop(); loadTlNotifs(); setTimeout(function(){ document.addEventListener('mousedown', tlOutside); },0); }
+  function tlOutside(e){ var d=document.getElementById('tl-drop'), bell=document.getElementById('tl-bell'); if(d&&!d.contains(e.target)&&!(bell&&bell.contains(e.target)))closeTlDropdown(); }
+  function closeTlDropdown(){ var d=document.getElementById('tl-drop'); if(d)d.classList.remove('open'); document.removeEventListener('mousedown', tlOutside); }
   function openPODrawer(po,tab){ if(!po)return; tab=tab||'dates';
     closePODrawer(true);   // drop any existing PO drawer (silent: keep saved patch to restore later)
     var root=document.getElementById('supply-root')||document.body;
@@ -6676,11 +6718,16 @@
   function ensureRoot(){ if(document.getElementById('supply-root'))return;
     var app=document.getElementById('app')||document.body; if(!app)return;
     var rootEl=document.createElement('div'); rootEl.id='supply-root';
-    rootEl.innerHTML='<div id="supply-subnav">'+SECTIONS.map(function(s){return '<button class="stab" data-k="'+s[0]+'">'+s[1]+'</button>';}).join('')+'<span class="ver">HORIZON __APP_VERSION__</span></div>'
+    rootEl.innerHTML='<div id="supply-subnav">'+SECTIONS.map(function(s){return '<button class="stab" data-k="'+s[0]+'">'+s[1]+'</button>';}).join('')
+      +'<button id="tl-bell" class="tl-bell" title="Timeline messages — unread supplier notes">✉<span id="tl-count"></span></button>'
+      +'<div id="tl-drop"></div>'
+      +'<span class="ver">HORIZON __APP_VERSION__</span></div>'
       +'<select id="supply-nav-sel" aria-label="Section">'+SECTIONS.map(function(s){return '<option value="'+s[0]+'">'+s[1]+'</option>';}).join('')+'</select>'
       +'<div id="supply-content"></div>';
     app.appendChild(rootEl);
     rootEl.querySelectorAll('.stab').forEach(function(b){b.onclick=function(){selectSection(b.dataset.k);};});
+    var _bell=rootEl.querySelector('#tl-bell'); if(_bell)_bell.onclick=function(e){ e.stopPropagation(); toggleTlDropdown(); };
+    loadTlNotifs(); if(!window.__tlPoll)window.__tlPoll=setInterval(function(){ loadTlNotifs(); }, 60000);   // messages bell: initial + 60s poll
     var _navSel=rootEl.querySelector('#supply-nav-sel'); if(_navSel)_navSel.onchange=function(){selectSection(this.value);};
     fetch('/api/supply/samples').then(function(r){return r.json();}).then(function(d){ if(Array.isArray(d)){ cache['samples']=d; samplesNavBadge(d); } }).catch(function(){}); }
   function samplesNavBadge(rows){ var n=(rows||[]).reduce(function(a,r){return a+(r.unread_notes||0);},0);   // total unread supplier notes

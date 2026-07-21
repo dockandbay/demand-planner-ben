@@ -529,7 +529,7 @@ app.use(async (req, res, next) => {
 // the build. We cache DATA only, NOT the HTML, so DEV live-editing still works (the file is re-read + re-injected
 // each request). Invalidated on forecast saves so an edit shows on the next load.
 let _dataCache = null;
-const DATA_TTL_MS = 20000;
+const DATA_TTL_MS = 300000;   // 5 min — each cold build pulls ~2-3MB from Supabase; a wider window sharply cuts DB egress. Invalidated on forecast saves so edits still show immediately.
 app.get('/', async (_req, res) => {
   try {
     // Fetch every live global in parallel, then splice sequentially (string ops on one buffer). Short-TTL cached.
@@ -1487,6 +1487,16 @@ app.get('/api/supply/:section', async (req, res) => {
   const q = (sql) => pool.query(sql).then(r => r.rows);
   try {
     switch (req.params.section) {
+      case 'timeline-notifications':   // top-bar ✉ bell: unread SUPPLIER PO-timeline notes (newest first), minus snoozed (supply_action_state key 'tlnote|<id>')
+        return res.json(await q(`
+          SELECT sn.id, sn.po, coalesce(po.supplier_name,'') supplier_name, sn.body,
+                 to_char(sn.created_at,'YYYY-MM-DD HH24:MI') created_at
+          FROM planner.supplier_notes sn
+          LEFT JOIN planner.purchase_orders po ON po.po = sn.po
+          LEFT JOIN planner.supply_action_state s ON s.action_key = 'tlnote|'||sn.id
+                 AND s.status='snoozed' AND (s.snooze_until IS NULL OR s.snooze_until >= current_date)
+          WHERE sn.author_kind='supplier' AND sn.read_at IS NULL AND s.action_key IS NULL
+          ORDER BY sn.created_at DESC`));
       case 'samples':   // SUPPLY ▸ Samples grid — all sample requests + open/overdue/charge flags
         return res.json(await q(`SELECT s.id, s.ref, coalesce(s.supplier_name,'') supplier_name,
           coalesce(s.recipient_company,'') recipient_company,
