@@ -1487,6 +1487,9 @@ app.get('/api/supply/:section', async (req, res) => {
   const q = (sql) => pool.query(sql).then(r => r.rows);
   try {
     switch (req.params.section) {
+      case 'ka-forecasts':   // DEMAND ▸ Key Accounts Forecast — inline-editable rows (client + SKU + country/wh + ship date + qty)
+        return res.json(await q(`SELECT id, coalesce(client,'') client, coalesce(sku,'') sku, coalesce(warehouse,'') warehouse,
+          to_char(ship_date,'YYYY-MM-DD') ship_date, quantity FROM planner.key_account_forecasts ORDER BY warehouse, client, sku`));
       case 'timeline-notifications':   // top-bar ✉ bell: unread SUPPLIER PO-timeline notes (newest first), minus snoozed (supply_action_state key 'tlnote|<id>')
         return res.json(await q(`
           SELECT sn.id, sn.po, coalesce(po.supplier_name,'') supplier_name, sn.body,
@@ -3056,6 +3059,27 @@ app.post('/api/supply/po-line-accept', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // PO PLAN Timeline: mark a supplier note read / unread (toggle).
+// DEMAND ▸ Key Accounts Forecast inline editor — upsert a row (insert when no id, else update) direct to Supabase.
+app.post('/api/supply/ka-forecast', async (req, res) => {
+  const b = req.body || {};
+  const client = (b.client || '').trim(), sku = (b.sku || '').trim(), warehouse = (b.warehouse || '').trim();
+  const ship = (b.ship_date || '').trim() || null;
+  const qty = (b.quantity === '' || b.quantity == null) ? null : parseInt(b.quantity, 10);
+  try {
+    if (b.id) {
+      await pool.query(`UPDATE planner.key_account_forecasts SET client=$2, sku=$3, warehouse=$4, ship_date=$5::date, quantity=$6, source='manual' WHERE id=$1`,
+        [b.id, client, sku, warehouse, ship, qty]);
+      return res.json({ ok: true, id: b.id });
+    }
+    const r = await pool.query(`INSERT INTO planner.key_account_forecasts (client, sku, warehouse, ship_date, quantity, source, loaded_at)
+      VALUES ($1,$2,$3,$4::date,$5,'manual',now()) RETURNING id`, [client, sku, warehouse, ship, qty]);
+    res.json({ ok: true, id: r.rows[0].id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/ka-forecast/:id/delete', async (req, res) => {
+  try { await pool.query(`DELETE FROM planner.key_account_forecasts WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.post('/api/supply/note-read/:id', async (req, res) => {
   try {
     const read = !(req.body && req.body.read === false);
