@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.010 - Suggestion Box: "going live" email on complete
+
+- Marking a suggestion **Complete** now emails the submitter ("This feature is going live") and cc's
+  sarah@ / ben@ / diviyaj@ (dockandbay.com). Fires only on the transition INTO complete (re-saving complete won't
+  re-notify); skips if the submitter has no email. Uses the existing best-effort Resend sender (sandbox has no
+  RESEND_API_KEY → logs only, sends nothing). CONFIG shows a green confirmation when the email goes out.
+- sendResendEmail gained optional `cc` support.
+
 ## v26.009 - Suggestion Box (top-bar submit + CONFIG triage)
 
 - New 💡 **Suggestion box** button in the top bar (next to the bell) and in the mobile menu → opens a submit modal

@@ -4808,7 +4808,7 @@
         var SS=[['new','New','#2563eb','#eff6ff'],['complete','Complete','#16a34a','#f0fdf4'],['future','Future','#7c3aed','#f5f3ff'],['deferred','Deferred','#b45309','#fffbeb']];
         var SMAP={}; SS.forEach(function(s){SMAP[s[0]]=s;});
         var stFilt='all';
-        function draw(rows){
+        function draw(rows,flash){
           var counts={all:rows.length}; SS.forEach(function(s){counts[s[0]]=0;}); rows.forEach(function(r){counts[r.status]=(counts[r.status]||0)+1;});
           var f=(stFilt==='all')?rows:rows.filter(function(r){return r.status===stFilt;});
           var pills='<div class="bar" style="gap:6px"><span class="pill-lbl">Status</span>'
@@ -4825,11 +4825,13 @@
             +'<td class="l" style="white-space:nowrap">'+statusSel(r)+'</td>'
             +'<td class="l"><a class="sug-del mut" data-id="'+r.id+'" title="delete" style="color:#dc2626;cursor:pointer">×</a></td></tr>'; }).join('')
             ||'<tr><td colspan="8" class="count">No '+(stFilt==='all'?'':stFilt+' ')+'suggestions.</td></tr>';
-          b.innerHTML='<div class="annot"><b>CONFIG ▸ Suggestions.</b> Everything submitted from the top-bar 💡 <b>Suggestion box</b>. Each has a reference (<b>SUG-nnnn</b>) you can quote in chat. Set a status: <b>Complete</b> when done, <b>Future</b> for the backlog, <b>Deferred</b> to park it.</div>'
+          b.innerHTML='<div class="annot"><b>CONFIG ▸ Suggestions.</b> Everything submitted from the top-bar 💡 <b>Suggestion box</b>. Each has a reference (<b>SUG-nnnn</b>) you can quote in chat. Set a status: <b>Complete</b> when done (emails the submitter "this feature is going live", cc sarah/ben/diviyaj), <b>Future</b> for the backlog, <b>Deferred</b> to park it.</div>'
+            +(flash?'<div style="background:#f0fdf4;border:1px solid #16a34a;color:#166534;font-size:12px;border-radius:6px;padding:7px 11px;margin-bottom:10px">'+esc(flash)+'</div>':'')
             +pills+'<div class="tw"><table class="samp-tbl" style="font-size:12px"><thead><tr><th class="l">Ref</th><th class="l">Suggestion</th><th class="l">Area</th><th class="l">By</th><th class="l">When</th><th class="l">Status</th><th class="l">Set status</th><th></th></tr></thead><tbody>'+body+'</tbody></table></div>';
           b.querySelectorAll('.sug-filt').forEach(function(p){ p.onclick=function(){ stFilt=p.dataset.s; draw(rows); }; });
           b.querySelectorAll('.sug-st').forEach(function(sel){ sel.onchange=function(){ var id=sel.dataset.id, ns=sel.value;
-            shipPost('/api/supply/suggestion/'+id+'/status',{status:ns,status_by:(window.ME&&ME.email)||''},function(j){ if(j&&j.error){alert(j.error);return;} var r=rows.filter(function(x){return String(x.id)===String(id);})[0]; if(r)r.status=ns; draw(rows); }); }; });
+            shipPost('/api/supply/suggestion/'+id+'/status',{status:ns,status_by:(window.ME&&ME.email)||''},function(j){ if(j&&j.error){alert(j.error);return;} var r=rows.filter(function(x){return String(x.id)===String(id);})[0]; if(r)r.status=ns;
+              var fl=(ns==='complete'&&j&&j.emailed&&r&&r.created_by)?('📧 "This feature is going live" emailed to '+shortUser(r.created_by)+' (cc sarah@, ben@, diviyaj@)'):''; draw(rows,fl); }); }; });
           b.querySelectorAll('.sug-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this suggestion?'))return; shipPost('/api/supply/suggestion/'+a.dataset.id+'/delete',{},function(){ SUBS['suggestions'](); }); }; });
         }
         fetch('/api/supply/suggestions').then(function(r){return r.json();}).then(function(rows){ draw(Array.isArray(rows)?rows:[]); })

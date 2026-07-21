@@ -2900,13 +2900,16 @@ function escLink(kind, ref, audience) {
 // Shared Resend sender — the SAME best-effort method the supplier magic-link uses (sendMagicEmail):
 // swallow any failure and log it, NEVER throw. Email is best-effort; a Resend hiccup / unverified domain
 // must not fail the user's action (that's what made Escalate show "Load failed"). Returns a result object.
-async function sendResendEmail({ to, subject, html }) {
+async function sendResendEmail({ to, subject, html, cc }) {
   const list = Array.isArray(to) ? to : [to];
-  if (!process.env.RESEND_API_KEY) { console.log('[email] no RESEND_API_KEY — would email ' + list.join(', ') + ' :: ' + subject); return { sandbox: true, sent: 0 }; }
+  const cclist = cc ? (Array.isArray(cc) ? cc : [cc]).filter(Boolean) : [];
+  if (!process.env.RESEND_API_KEY) { console.log('[email] no RESEND_API_KEY — would email ' + list.join(', ') + (cclist.length ? ' (cc ' + cclist.join(', ') + ')' : '') + ' :: ' + subject); return { sandbox: true, sent: 0 }; }
   try {
+    const payload = { from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', to: list, subject, html };
+    if (cclist.length) payload.cc = cclist;
     const resp = await fetch('https://api.resend.com/emails', { method: 'POST',
       headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', to: list, subject, html }) });
+      body: JSON.stringify(payload) });
     if (!resp.ok) { const t = await resp.text().catch(() => ''); console.error('[email] Resend error ' + resp.status + ': ' + t.slice(0, 200)); return { sent: 0, error: 'resend ' + resp.status }; }
     return { sent: list.length };
   } catch (e) { console.error('[email] Resend failed:', e.message); return { sent: 0, error: e.message }; }
@@ -3099,8 +3102,20 @@ app.post('/api/supply/suggestion/:id/status', async (req, res) => {
   const b = req.body || {}, status = (b.status || '').trim(), by = (b.status_by || '').trim() || null;
   if (!['new', 'complete', 'future', 'deferred'].includes(status)) return res.status(400).json({ error: 'Bad status.' });
   try {
+    // Detect a transition INTO 'complete' (so re-saving 'complete' doesn't re-notify), and grab who to email.
+    const prev = (await pool.query(`SELECT ref, body, coalesce(created_by,'') created_by, status FROM planner.suggestions WHERE id=$1`, [req.params.id])).rows[0];
     await pool.query(`UPDATE planner.suggestions SET status=$2, status_by=$3, status_at=now() WHERE id=$1`, [req.params.id, status, by]);
-    res.json({ ok: true });
+    let emailed = false;
+    if (prev && status === 'complete' && prev.status !== 'complete' && /@/.test(prev.created_by)) {
+      const CC = ['sarah@dockandbay.com', 'ben@dockandbay.com', 'diviyaj@dockandbay.com'].filter(e => e.toLowerCase() !== prev.created_by.toLowerCase());
+      const html = `<p>Good news — a suggestion you submitted is going live.</p>`
+        + `<p><b>This feature is going live.</b></p>`
+        + `<p style="color:#475569"><b>${prev.ref}</b>: ${String(prev.body).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]))}</p>`
+        + `<p style="color:#94a3b8;font-size:12px">Thanks for the idea — HORIZON Suggestion Box.</p>`;
+      const r = await sendResendEmail({ to: prev.created_by, cc: CC, subject: `Your suggestion ${prev.ref} is going live 🎉`, html });
+      emailed = !!(r && (r.sent || r.sandbox));
+    }
+    res.json({ ok: true, emailed });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/suggestion/:id/delete', async (req, res) => {
