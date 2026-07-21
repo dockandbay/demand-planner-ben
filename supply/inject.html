@@ -416,7 +416,7 @@
   #supply-root table.po-tbl tbody tr:not(.exp-row):not(.grp-row) td:first-child{width:50px;min-width:50px;max-width:50px;padding-right:2px}
   #supply-root table.po-tbl thead th:nth-child(2),
   #supply-root table.po-tbl tbody tr:not(.exp-row):not(.grp-row) td:nth-child(2){left:50px}
-  #supply-root .po-tbl .po-numcell{padding-left:2px}
+  #supply-root .po-tbl .po-numcell{padding-left:2px;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}   /* let long-press-to-copy own the gesture (no native text-selection callout) */
   #supply-root .po-tbl .fav-star{margin-left:2px}
   /* SHIPMENTS grid: same treatment — "P" button, tight cells, wrap the ref after ~15 chars, frozen ref column */
   #supply-root .po-exp[data-ref]{font-size:0;padding:5px 6px}
@@ -2159,7 +2159,7 @@
     var actFlag=_acts.length?' <button class="po-act-badge ex-badge" style="cursor:pointer;border:none" data-po="'+esc(r.po)+'" data-tab="'+(PO_ACT_TAB[_acts[0]]||'')+'" data-allacts="'+esc(poActionsAll(r).join(','))+'" data-note="'+esc(_acts.length+' action item'+(_acts.length>1?'s':'')+' — '+_acts.map(function(k){return PO_ACT_LABEL[k]||k;}).join('; ')+' (click to snooze / open)')+'">'+_acts.length+'</button>':'';
     // the "double-click to copy" hint lives on the PO text only (not the whole cell), so hovering the action-item
     // badge beside it doesn't pop this native tooltip on top of the badge's own action-items tooltip.
-    var pocell=indent?'<td class="l po-child po-numcell" data-po="'+esc(r.po)+'"><span class="ind"></span><b title="double-click to copy PO reference">'+esc(r.po)+'</b>'+actFlag+'</td>':'<td class="l po-numcell" data-po="'+esc(r.po)+'"><b title="double-click to copy PO reference">'+esc(r.po)+'</b>'+actFlag+'</td>';
+    var pocell=indent?'<td class="l po-child po-numcell" data-po="'+esc(r.po)+'"><span class="ind"></span><b title="double-click (or long-press on mobile) to copy PO reference">'+esc(r.po)+'</b>'+actFlag+'</td>':'<td class="l po-numcell" data-po="'+esc(r.po)+'"><b title="double-click (or long-press on mobile) to copy PO reference">'+esc(r.po)+'</b>'+actFlag+'</td>';
     // ERP cell — compact badge-style buttons (same look as the "✓ in sync" badge) → keeps the column narrow.
     // Labels collapse to a single action: Update lines / Update date / Update both. All open the same ERP modal.
     var erpStyle='cursor:pointer;border:none';
@@ -2303,7 +2303,14 @@
   function bindPoCopy(){ var g=document.getElementById('sup-grid'); if(!g||g._pocopy)return; g._pocopy=1;
     g.addEventListener('dblclick',function(e){ var td=e.target.closest&&e.target.closest('.po-numcell'); if(!td||!td.dataset.po)return;
       try{ var sel=window.getSelection&&window.getSelection(); if(sel&&sel.removeAllRanges)sel.removeAllRanges(); }catch(_){}   // clear the browser's dblclick text-selection
-      copyPoRef(td.dataset.po, td); }); }
+      copyPoRef(td.dataset.po, td); });
+    // Mobile: long-press (~500ms hold) a PO cell → same copy + "Copied" tooltip (double-click isn't a touch gesture).
+    var lpT=null, lpFired=false, lpClear=function(){ if(lpT){clearTimeout(lpT);lpT=null;} };
+    g.addEventListener('touchstart',function(e){ var td=e.target.closest&&e.target.closest('.po-numcell'); if(!td||!td.dataset.po)return;
+      lpFired=false; lpClear(); lpT=setTimeout(function(){ lpFired=true; copyPoRef(td.dataset.po, td); try{ if(navigator.vibrate)navigator.vibrate(15); }catch(_){} }, 500); },{passive:true});
+    g.addEventListener('touchmove',lpClear,{passive:true});
+    g.addEventListener('touchcancel',lpClear,{passive:true});
+    g.addEventListener('touchend',function(e){ if(lpFired&&e.cancelable)e.preventDefault(); lpClear(); }); }
   // Pin the expanded PO detail panel(s) to the left as the wide grid scrolls sideways. transform:translateX is
   // compositor-only (no layout/paint); the handler is passive + rAF-coalesced, so it's imperceptible.
   function poGridTw(){ var tbl=document.querySelector('#supply-content table.po-tbl'); return tbl&&tbl.closest('.tw'); }
