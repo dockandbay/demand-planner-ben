@@ -6734,7 +6734,8 @@ function render(){
     var bw=document.getElementById('buy-wrap'); if(bw)bw.remove();
     var body=document.getElementById('demand-body');
     if(!body){ body=document.createElement('div'); body.id='demand-body'; document.querySelector('.wrap').appendChild(body); }
-    if(DEMAND_VIEW==='targets') renderTargetsView(body);
+    if(DEMAND_VIEW==='keyaccounts') renderKeyAccountsView(body);
+    else if(DEMAND_VIEW==='targets') renderTargetsView(body);
     else if(DEMAND_VIEW==='calendar') renderCalendarView(body);
     else if(DEMAND_VIEW==='kpis') renderKpisView(body);
     else renderDemandActionsView(body);
@@ -6747,6 +6748,60 @@ function render(){
 }
 // DEMAND ▸ KPIs — level-3 sub-nav (In Stock | Slow moving | Inventory). In Stock = % of active SKUs per
 // market×channel with on-hand stock above a (per-channel toggleable) threshold; plus the A-player subset.
+// ── DEMAND ▸ Key Accounts Forecast — inline spreadsheet of per-country key-account SKU forecasts, saved straight
+// to planner.key_account_forecasts (replaces the old n8n Airtable flow). SKU is a type-to-search dropdown from SKUM.
+function renderKeyAccountsView(body){
+  function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  var WH=[['uk_3pl','UK'],['us_3pl','US'],['eu_3pl','EU'],['au_3pl','AU'],['ca_3pl','CA']];
+  var SKUS=Object.keys(SKUM).sort();
+  var rows=[];
+  body.innerHTML='<div style="padding:6px 2px 12px"><div style="font-weight:700;font-size:15px">Key Accounts Forecast</div>'
+    +'<div style="font-size:12px;color:#666;margin:2px 0 12px">Per-country key-account SKU forecasts — edit inline (saves straight to the database). Type to search a SKU.</div>'
+    +'<div id="kafc" style="overflow-x:auto"><div style="color:#888;font-size:12px">Loading…</div></div></div>';
+  var host=body.querySelector('#kafc');
+  fetch('/api/supply/ka-forecasts').then(function(r){return r.json();}).then(function(d){ rows=Array.isArray(d)?d:[]; draw(); })
+    .catch(function(err){ host.innerHTML='<div style="color:#dc2626;font-size:12px">Failed to load: '+e(err&&err.message||err)+'</div>'; });
+  function rowHtml(r){ r=r||{}; var nm=(r.sku&&SKUM[r.sku])?(SKUM[r.sku].n||''):'';
+    return '<tr data-id="'+e(r.id||'')+'">'
+      +'<td class="kac"><input class="ka-f ka-client" data-f="client" value="'+e(r.client)+'" placeholder="client / account"></td>'
+      +'<td class="kac" style="position:relative"><input class="ka-f ka-sku" data-f="sku" value="'+e(r.sku)+'" placeholder="search SKU…" autocomplete="off"><div class="ka-skuname">'+e(nm)+'</div><div class="ka-skudrop"></div></td>'
+      +'<td class="kac"><select class="ka-f ka-wh" data-f="warehouse">'+WH.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===(r.warehouse||'uk_3pl')?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></td>'
+      +'<td class="kac"><input type="date" class="ka-f ka-date" data-f="ship_date" value="'+e(r.ship_date)+'"></td>'
+      +'<td class="kac"><input class="ka-f ka-qty" data-f="quantity" inputmode="numeric" value="'+e(r.quantity)+'" style="width:80px;text-align:right"></td>'
+      +'<td class="kac"><button class="ka-del" title="delete this row">✕</button></td></tr>'; }
+  function draw(){
+    host.innerHTML='<style>#kafc table{border-collapse:collapse;font-size:12px;min-width:660px}#kafc th{text-align:left;padding:5px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#666;border-bottom:1px solid #ddd;white-space:nowrap}'
+      +'#kafc td.kac{padding:3px 6px;border-bottom:1px solid #f1f1f1;vertical-align:top}#kafc .ka-f{padding:4px 6px;border:1px solid #cbd5e1;border-radius:4px;font-size:12px;font-family:inherit;box-sizing:border-box}'
+      +'#kafc .ka-client,#kafc .ka-sku{width:100%;min-width:150px}#kafc .ka-skuname{font-size:10px;color:#999;padding:1px 2px;max-width:230px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+      +'#kafc .ka-del{border:none;background:transparent;color:#b91c1c;cursor:pointer;font-size:14px}#kafc .ka-skudrop{position:absolute;z-index:60;left:0;top:100%;width:300px;max-height:220px;overflow-y:auto;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 8px 22px rgba(15,23,42,.18);display:none}'
+      +'#kafc .ka-skudrop.open{display:block}#kafc .ka-opt{padding:5px 8px;font-size:11px;cursor:pointer}#kafc .ka-opt:hover{background:#eff6ff}#kafc #ka-msg{color:#16a34a;font-size:11px;margin-left:10px}</style>'
+      +'<table><thead><tr>'+['Client','SKU','Country','Ship date','Qty',''].map(function(h){return '<th>'+h+'</th>';}).join('')+'</tr></thead>'
+      +'<tbody>'+rows.map(rowHtml).join('')+'</tbody></table>'
+      +'<div style="margin-top:10px"><button id="ka-add" style="border:1px solid #cbd5e1;background:#f8fafc;padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer">+ Add row</button><span id="ka-msg"></span></div>';
+    host.querySelectorAll('tbody tr').forEach(wireRow);
+    host.querySelector('#ka-add').onclick=function(){ var tb=host.querySelector('tbody'); var tmp=document.createElement('tbody'); tmp.innerHTML=rowHtml({warehouse:'uk_3pl'}); var tr=tmp.firstChild; tb.appendChild(tr); wireRow(tr); var ci=tr.querySelector('.ka-client'); if(ci)ci.focus(); };
+  }
+  function flash(m){ var el=host.querySelector('#ka-msg'); if(el){ el.textContent=m; clearTimeout(el._t); el._t=setTimeout(function(){el.textContent='';},1500); } }
+  function collect(tr){ var o={id:tr.dataset.id||''}; tr.querySelectorAll('.ka-f').forEach(function(f){ o[f.dataset.f]=f.value; }); return o; }
+  function save(tr){ var o=collect(tr); if(!o.sku&&!o.client&&!o.quantity)return;   // don't persist a fully-blank row
+    fetch('/api/supply/ka-forecast',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(o)}).then(function(r){return r.json();})
+      .then(function(j){ if(j&&j.error)throw new Error(j.error); if(j&&j.id&&!tr.dataset.id)tr.dataset.id=j.id; flash('Saved ✓'); }).catch(function(){ flash('Save failed'); }); }
+  function closeDrop(){ host.querySelectorAll('.ka-skudrop.open').forEach(function(d){ d.classList.remove('open'); }); }
+  function showDrop(input,tr,nameEl){ var q=input.value.trim().toLowerCase(); var d=input.closest('td').querySelector('.ka-skudrop'); if(!d)return;
+    var ms=SKUS.filter(function(s){ return !q || s.toLowerCase().indexOf(q)>=0 || ((SKUM[s].n||'').toLowerCase().indexOf(q)>=0); }).slice(0,40);
+    d.innerHTML=ms.length?ms.map(function(s){return '<div class="ka-opt" data-sku="'+e(s)+'"><b>'+e(s)+'</b> <span style="color:#999">'+e(SKUM[s].n||'')+'</span></div>';}).join(''):'<div class="ka-opt" style="color:#999;cursor:default">no matches</div>';
+    d.classList.add('open');
+    d.querySelectorAll('.ka-opt[data-sku]').forEach(function(o){ o.onmousedown=function(ev){ ev.preventDefault(); input.value=o.dataset.sku; if(nameEl)nameEl.textContent=(SKUM[o.dataset.sku]&&SKUM[o.dataset.sku].n)||''; d.classList.remove('open'); save(tr); }; }); }
+  function wireRow(tr){
+    tr.querySelectorAll('.ka-f').forEach(function(f){ if(f.classList.contains('ka-sku'))return; f.onchange=function(){ save(tr); }; });
+    var skuIn=tr.querySelector('.ka-sku'), nameEl=tr.querySelector('.ka-skuname');
+    skuIn.oninput=function(){ showDrop(skuIn,tr,nameEl); };
+    skuIn.onfocus=function(){ showDrop(skuIn,tr,nameEl); };
+    skuIn.onblur=function(){ setTimeout(closeDrop,160); if(nameEl)nameEl.textContent=(SKUM[skuIn.value]&&SKUM[skuIn.value].n)||''; save(tr); };
+    tr.querySelector('.ka-del').onclick=function(){ var id=tr.dataset.id;
+      if(id){ if(!confirm('Delete this forecast row?'))return; fetch('/api/supply/ka-forecast/'+encodeURIComponent(id)+'/delete',{method:'POST'}).then(function(r){return r.json();}).then(function(){ tr.remove(); flash('Deleted'); }); }
+      else tr.remove(); }; }
+}
 function renderKpisView(body){
   var subTabs=[['instock','In Stock'],['slowmoving','Slow moving'],['inventory','Inventory cover'],['stockout','Stockout risk'],['discontinued','Discontinued'],['accuracy','Forecast accuracy']];
   var nav='<div style="display:flex;gap:2px;margin:2px 0 12px;border-bottom:1px solid #e0e0e0;flex-wrap:wrap">'
@@ -6885,7 +6940,7 @@ function renderAccuracyView(kb,body){
   }).catch(function(){ kb.innerHTML='<div style="color:#dc2626;font-size:12px">Failed to load.</div>'; });
 }
 // ─── DEMAND sub-tabs (PLAN / KPIs / TARGETS / ACTIONS / CALENDAR) ───────────────────────────
-var DEMAND_TABS=[['plan','Plan'],['kpis','KPIs'],['targets','Targets'],['actions','Actions'],['calendar','Calendar']];
+var DEMAND_TABS=[['plan','Plan'],['keyaccounts','Key Accts'],['kpis','KPIs'],['targets','Targets'],['actions','Actions'],['calendar','Calendar']];
 function renderDemandTabs(){
   var bar=document.getElementById('demand-tabs');
   var _sb=document.getElementById('statusbar');

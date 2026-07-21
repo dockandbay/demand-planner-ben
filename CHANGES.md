@@ -3,6 +3,24 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.005 - DEMAND ▸ Key Accts: inline key-account forecast spreadsheet
+
+- New DEMAND sub-tab "Key Accts" (next to Plan). Spreadsheet-style inline editor for key_account_forecasts:
+  Client, SKU (type-to-search dropdown of the product master, name shown), Country/warehouse (UK/US/EU/AU/CA 3PL),
+  Ship date, Qty, per-row delete, and + Add row. Edits save straight to the DB on change/blur via the v26.004
+  endpoints (skips fully-blank rows). Replaces the n8n Airtable->Supabase key-accounts sync with direct entry.
+
+## v26.004 - Key Accounts Forecast backend: id PK (mig 125) + CRUD endpoints
+
+- Migration 125: key_account_forecasts gains an `id` identity PK + `source` (default 'manual').
+- Server: GET /api/supply/ka-forecasts (list), POST /api/supply/ka-forecast (upsert by id),
+  POST /api/supply/ka-forecast/:id/delete. Feeds the v26.005 DEMAND ▸ Key Accts editor.
+
+## v26.003 - Mobile: long-press PO number to copy
+
+- On the purchase-order grid, a long-press (500ms) on the PO number copies the PO reference to the clipboard
+  with a small "Copied" tooltip + haptic vibrate. Tooltip hint now reads "double-click (or long-press on mobile)".
+
 ## v26.002 - Timeline notifications bell + egress: widen built-data cache to 5min
 
 - New top-bar messages bell (SUPPLY): unread SUPPLIER PO-timeline notes with an unread counter + pop-down drawer
