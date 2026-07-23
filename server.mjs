@@ -3135,7 +3135,7 @@ const _prodCatCode = (name, code) => { code = (code || '').trim(); if (code) ret
 app.get('/api/product/items', async (_req, res) => {
   try {
     const r = await pool.query(`SELECT i.id, i.ref, coalesce(i.season,'') season, coalesce(i.category,'') category,
-      coalesce(i.colour_name,'') colour_name, i.status, (i.swatch IS NOT NULL) has_swatch,
+      coalesce(i.colour_name,'') colour_name, coalesce(i.supplier,'') supplier, coalesce(i.description,'') description, i.status, (i.swatch IS NOT NULL) has_swatch,
       to_char(i.updated_at,'YYYY-MM-DD HH24:MI') updated_at,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id)::int sizes,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approval_status='approved')::int sizes_approved
@@ -3148,6 +3148,7 @@ app.get('/api/product/item/:ref', async (req, res) => {
   try {
     const item = (await pool.query(`SELECT id, ref, coalesce(season,'') season, coalesce(category,'') category,
       coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(description,'') description,
+      coalesce(supplier,'') supplier, coalesce(supplier_code,'') supplier_code,
       status, (swatch IS NOT NULL) has_swatch, coalesce(created_by,'') created_by,
       to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at
       FROM planner.product_dev_items WHERE ref=$1`, [ref])).rows[0];
@@ -3166,15 +3167,19 @@ app.get('/api/product/swatch/:ref', async (req, res) => {
 app.post('/api/product/item', async (req, res) => {
   const b = req.body || {}, season = (b.season || '').trim(), category = (b.category || '').trim();
   if (!season || !category) return res.status(400).json({ error: 'season and category required' });
+  const supplier = (b.supplier || '').trim();
   const client = await pool.connect();
   try {
     const catRow = (await client.query(`SELECT code FROM planner.categories WHERE category=$1`, [category])).rows[0];
     const code = _prodCatCode(category, catRow && catRow.code);
+    let supCode = null;
+    if (supplier) { const sr = (await client.query(`SELECT code FROM planner.suppliers WHERE name=$1`, [supplier])).rows[0];
+      supCode = (sr && sr.code && sr.code.trim()) ? sr.code.trim().toUpperCase() : supplier.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3); }
     await client.query('BEGIN');
     const seq = (await client.query(`SELECT coalesce(max(seq_in_group),0)+1 n FROM planner.product_dev_items WHERE season=$1 AND category_code=$2`, [season, code])).rows[0].n;
-    const ref = season + '-' + code + '-' + String(seq).padStart(2, '0');
-    const ins = await client.query(`INSERT INTO planner.product_dev_items (ref, season, category, category_code, seq_in_group, colour_name, description, created_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, [ref, season, category, code, seq, (b.colour_name || '').trim() || null, (b.description || '').trim() || null, (b.created_by || '').trim() || null]);
+    const ref = season + '-' + code + (supCode ? '-' + supCode : '') + '-' + String(seq).padStart(2, '0');
+    const ins = await client.query(`INSERT INTO planner.product_dev_items (ref, season, category, category_code, seq_in_group, colour_name, description, supplier, supplier_code, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, [ref, season, category, code, seq, (b.colour_name || '').trim() || null, (b.description || '').trim() || null, supplier || null, supCode, (b.created_by || '').trim() || null]);
     const id = ins.rows[0].id, sizes = Array.isArray(b.sizes) ? b.sizes : [];
     for (let k = 0; k < sizes.length; k++) { const sl = String(sizes[k] || '').trim(); if (sl) await client.query(`INSERT INTO planner.product_dev_sizes (item_id, size_label, sort) VALUES ($1,$2,$3)`, [id, sl, k]); }
     await client.query('COMMIT');
@@ -3182,9 +3187,21 @@ app.post('/api/product/item', async (req, res) => {
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
-app.post('/api/product/item/:ref', (req, res) =>
-  patch(res, 'planner.product_dev_items', 'ref', req.params.ref,
-    { colour_name: 'text', description: 'text', status: 'text', season: 'text', category: 'text' }, req.body, 'text'));
+app.post('/api/product/item/:ref', async (req, res) => {
+  const b = req.body || {}, ref = req.params.ref, sets = [], vals = []; let i = 1;
+  const allow = { colour_name: 'text', description: 'text', status: 'text', season: 'text', category: 'text' };
+  for (const k of Object.keys(allow)) { if (k in b) { sets.push(`${k}=$${i}`); vals.push(b[k] === '' ? null : b[k]); i++; } }
+  try {
+    if ('supplier' in b) { const sup = (b.supplier || '').trim() || null; let supCode = null;
+      if (sup) { const sr = (await pool.query(`SELECT code FROM planner.suppliers WHERE name=$1`, [sup])).rows[0];
+        supCode = (sr && sr.code && sr.code.trim()) ? sr.code.trim().toUpperCase() : sup.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3); }
+      sets.push(`supplier=$${i}`); vals.push(sup); i++; sets.push(`supplier_code=$${i}`); vals.push(supCode); i++; }
+    if (!sets.length) return res.json({ ok: true });
+    vals.push(ref);
+    await pool.query(`UPDATE planner.product_dev_items SET ${sets.join(',')}, updated_at=now() WHERE ref=$${i}`, vals);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.post('/api/product/item/:ref/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.product_dev_items WHERE ref=$1`, [req.params.ref]); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }

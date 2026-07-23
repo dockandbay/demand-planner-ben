@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.015 - Product: supplier (in ref) + grid filters/search
+
+- **Supplier** added to product master data — picked via the same supplier search-dropdown as the PO grid (on the
+  New-product form and the Master-data tab). Its short code is embedded in the reference:
+  **SEASON-CATEGORYCODE-SUPPLIERCODE-NN** (e.g. SS27-TOWLB-BL-01). Editing the supplier later updates the field
+  but the ref keeps its original minted code. Migration **129** (Diviyaj: run on live).
+- **Product grid filters:** Season, Status (**defaults to "Not approved"** = anything not yet Approved), and a
+  Search box across ref / colour way / supplier / description.
+
 ## v26.014 - Product: multi-create by comma + left-align default
 
 - "+ New product" now creates **multiple products at once** when the colour way is comma-separated (one product
