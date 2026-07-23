@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.043 - Portal add-sample form: tidy field widths
+
+- PRODUCT ▸ Sample ▸ Add sample: "Sample date" is now sized to the date + picker (not full width).
+- "Description" renamed to "Description and notes" with a label, and no longer full page width.
+- Fixed **"Server error (404)" when submitting sample photos in the portal preview** — the preview pointed at
+  `/api/product/sample-photo` (which took the id in the path); added a body-based admin route to match the
+  portal shape. (The real supplier portal was unaffected.)
+
 ## v26.042 - Sample SKU picker: richer search, supplier scope in admin, free-text option
 
 - **SKU search now matches season/release window** (e.g. "SS27") as well as SKU, colour and product name

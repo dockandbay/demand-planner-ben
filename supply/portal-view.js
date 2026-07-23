@@ -1467,10 +1467,10 @@
                 +'<div class="pp-sample-form" style="display:none;border:1px dashed #cbd5e1;border-radius:8px;padding:11px 13px;margin-top:10px;background:#f8fafc">'
                 +'<div style="font-weight:700;font-size:12px;margin-bottom:8px">Add a new sample version</div>'
                 +'<div style="margin-bottom:8px"><label style="font-size:12px">Reference <input class="fci" value="'+esc(nextRef)+'" readonly style="width:220px;text-align:left;background:#eef2f7;margin-left:4px" title="auto-generated"></label></div>'
-                +'<div style="margin-bottom:7px"><label style="font-size:12px">Sample date <input type="date" class="fci ps2-date" value="'+today+'" style="text-align:left;margin-left:4px"></label></div>'
+                +'<div style="margin-bottom:7px"><label style="font-size:12px">Sample date <input type="date" class="fci ps2-date" value="'+today+'" style="width:150px;text-align:left;margin-left:4px"></label></div>'
                 +'<label style="display:block;font-size:12px;margin-bottom:5px;cursor:pointer"><input type="checkbox" class="ps2-col" style="vertical-align:middle;margin-right:6px">I verify that I have colour checked every colour to match Pantone in design</label>'
                 +'<label style="display:block;font-size:12px;margin-bottom:7px;cursor:pointer"><input type="checkbox" class="ps2-qual" style="vertical-align:middle;margin-right:6px">I verify I have quality checked sample matches design and quality standards</label>'
-                +'<textarea class="fci ps2-desc" rows="2" placeholder="description…" style="width:100%;text-align:left;box-sizing:border-box"></textarea>'
+                +'<div><label style="font-size:12px;display:block;margin-bottom:2px">Description and notes</label><textarea class="fci ps2-desc" rows="2" placeholder="description and notes…" style="width:320px;max-width:100%;text-align:left;box-sizing:border-box"></textarea></div>'
                 +'<div style="margin-top:7px"><label style="font-size:12px">Photos <input type="file" class="ps2-photos" accept="image/*" multiple style="font-size:12px"></label></div>'
                 +'<div style="margin-top:9px"><button class="save-btn ps2-save" data-ref="'+esc(ref)+'">Submit sample version</button> <span class="ps2-msg" style="font-size:12px;margin-left:6px"></span></div></div></div>';
               box.querySelectorAll('.pp-samp-label').forEach(function(lb){ lb.onclick=function(){ dlSampleLabel(lb.dataset.ref); }; });

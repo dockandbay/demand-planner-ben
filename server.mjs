@@ -3424,6 +3424,11 @@ app.post('/api/product/sample/:id/delete', async (req, res) => {
     await pool.query(`DELETE FROM planner.portal_attachments WHERE po=$1 AND category='product_sample'`, ['PSAMPLE-' + req.params.id]); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+app.post('/api/product/sample-photo', async (req, res) => {   // body-based (sample_id in body) — matches the portal shape; used by the admin "preview as supplier"
+  const b = req.body || {}, id = b.sample_id;
+  if (!id || !b.data_base64) return res.status(400).json({ error: 'sample_id + data_base64 required' });
+  try { res.json({ ok: true, id: await insertProductSamplePhoto(id, b, (b.uploaded_by || '').trim() || null) }); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/product/sample/:id/photo', async (req, res) => {
   if (!(req.body && req.body.data_base64)) return res.status(400).json({ error: 'data_base64 required' });
   try { res.json({ ok: true, id: await insertProductSamplePhoto(req.params.id, req.body, (req.body.uploaded_by || '').trim() || null) }); }
