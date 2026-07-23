@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.014 - Product: multi-create by comma + left-align default
+
+- "+ New product" now creates **multiple products at once** when the colour way is comma-separated (one product
+  per colour, same season/category/sizes); created sequentially so the per-group ref counter stays clean.
+- Everything in the Product module is **left-aligned** (grid + add form + tabs), per the standing default.
+
 ## v26.013 - PRODUCT module (Phase 1): product-development management
 
 - New top-level **Product** menu (gated by a new **'product'** permission, or admin; hidden otherwise) with

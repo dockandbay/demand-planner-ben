@@ -17,6 +17,8 @@
 #app.config-mode #supply-subnav,#app.config-mode #supply-nav-sel{display:none!important}
 /* PRODUCT — its own top-level surface, mirrors SUPPLY (migration 128 / v26.013) */
 #product-root{display:none;font-size:12px;color:#1a1a1a;padding-top:4px}
+/* Left-align everything in the Product module (Ben's standing default). */
+#product-root,#product-root th,#product-root td,#product-root input,#product-root select,#product-root textarea,#product-root .prow,#product-root .pg-card{text-align:left}
 #app.product-active > *:not(#dab-navwrap):not(#product-root){display:none!important}
 #app.product-active #dab-navwrap > *:not(#view-tabs-row){display:none!important}
 #app.product-active #view-tabs-row .tool-bar{display:none!important}
@@ -7483,17 +7485,27 @@
     c.innerHTML='<div style="max-width:560px"><div style="font-size:15px;font-weight:700;margin-bottom:12px">New product development</div>'
       +pRow('Season','<select class="fci" id="pn-season">'+seasons.map(function(s){return '<option value="'+esc(s.code)+'">'+esc(s.code)+(s.label?' — '+esc(s.label):'')+'</option>';}).join('')+'</select>')
       +pRow('Category','<select class="fci" id="pn-cat">'+(cfg.categories||[]).map(function(x){return '<option value="'+esc(x.category)+'">'+esc(x.category)+(x.code?' ('+esc(x.code)+')':'')+'</option>';}).join('')+'</select>')
-      +pRow('Colour way name','<input class="fci" id="pn-colour" style="width:280px" placeholder="e.g. Ibiza Glow">')
+      +pRow('Colour way name','<input class="fci" id="pn-colour" style="width:360px" placeholder="e.g. Ibiza Glow — comma-separate to create several at once"><div style="color:#94a3b8;font-size:11px;margin-top:2px">Multiple colour ways separated by commas each create their own product (same season, category &amp; sizes).</div>')
       +pRow('Sizes','<input class="fci" id="pn-sizes" style="width:280px" placeholder="comma-separated, e.g. S, M, L, XL">')
       +pRow('Description','<textarea class="fci" id="pn-desc" rows="3" style="width:100%" placeholder="detailed description…"></textarea>')
       +'<div style="margin-top:12px"><button class="save-btn" id="pn-save" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Create</button> <button class="save-btn light" id="pn-cancel">Cancel</button> <span id="pn-msg" style="font-size:12px;margin-left:8px"></span></div></div>';
     document.getElementById('pn-cancel').onclick=function(){ selectProductSub('plan'); };
-    document.getElementById('pn-save').onclick=function(){ var msg=document.getElementById('pn-msg');
+    document.getElementById('pn-save').onclick=function(){ var btn=this, msg=document.getElementById('pn-msg');
       var season=document.getElementById('pn-season').value, cat=document.getElementById('pn-cat').value;
       if(!season||!cat){ msg.style.color='#dc2626'; msg.textContent='Season and category required.'; return; }
       var sizes=document.getElementById('pn-sizes').value.split(',').map(function(s){return s.trim();}).filter(Boolean);
-      this.disabled=true; msg.style.color='#64748b'; msg.textContent='Creating…';
-      shipPost('/api/product/item',{season:season,category:cat,colour_name:document.getElementById('pn-colour').value,description:document.getElementById('pn-desc').value,sizes:sizes,created_by:(window.ME&&ME.email)||''},function(j){ if(j&&j.error){ msg.style.color='#dc2626'; msg.textContent=j.error; document.getElementById('pn-save').disabled=false; return; } _prodDetailTab='master'; renderProductDetail(j.ref); }); }; }); }
+      var desc=document.getElementById('pn-desc').value;
+      var colours=document.getElementById('pn-colour').value.split(',').map(function(s){return s.trim();}).filter(Boolean);
+      if(!colours.length)colours=[''];   // no colour → still create one product
+      btn.disabled=true; msg.style.color='#64748b'; msg.textContent=colours.length>1?('Creating '+colours.length+' products…'):'Creating…';
+      var created=[], i=0;
+      // sequential (not parallel) so the per-(season,category) counter increments cleanly without a race
+      (function next(){
+        if(i>=colours.length){ if(created.length===1){ _prodDetailTab='master'; renderProductDetail(created[0]); } else { selectProductSub('plan'); } return; }
+        shipPost('/api/product/item',{season:season,category:cat,colour_name:colours[i],description:desc,sizes:sizes,created_by:(window.ME&&ME.email)||''},function(j){
+          if(j&&j.error){ msg.style.color='#dc2626'; msg.textContent='Failed on “'+(colours[i]||'(no colour)')+'”: '+j.error; btn.disabled=false; return; }
+          if(j&&j.ref)created.push(j.ref); i++; msg.textContent='Created '+created.length+' of '+colours.length+'…'; next(); });
+      })(); }; }); }
   function renderProductDetail(ref){ var c=document.getElementById('product-content'); c.innerHTML='<div style="color:#94a3b8">Loading…</div>';
     fetch('/api/product/item/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ if(!d||d.error||!d.item){ c.innerHTML='<div style="color:#dc2626">Not found</div>'; return; }
       _prodDetail=d; renderProdDetailShell(c,d); }).catch(function(e){ c.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
