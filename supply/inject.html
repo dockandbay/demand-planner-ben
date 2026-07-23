@@ -6646,8 +6646,10 @@
 
   // ── SUPPLY ▸ SAMPLES ────────────────────────────────────────────────────────────
   var SAMPLE_PURPOSES=['sales','product','photography','marketing','operations'];
+  // shared status-chip renderer — one consistent look (size/radius/weight) across Samples + Product
+  function hzChip(bg,fg,t){ return '<span style="display:inline-block;font-size:10px;font-weight:700;color:'+fg+';background:'+bg+';border-radius:4px;padding:1px 7px;white-space:nowrap">'+t+'</span>'; }
   function sampleStatusChip(s){ var m={'Awaiting supplier':['#fef3c7','#92710a'],'Change requested':['#fee2e2','#b91c1c'],'In production':['#dbeafe','#1d4ed8'],'Charge to review':['#fee2e2','#b91c1c'],'Shipped':['#dcfce7','#166534'],'Complete':['#e2e8f0','#475569'],'Cancelled':['#f1f5f9','#94a3b8']};
-    var col=m[s]||['#e2e8f0','#475569']; return '<span class="tool-badge" style="background:'+col[0]+';color:'+col[1]+';font-weight:700;white-space:nowrap">'+esc(s||'')+'</span>'; }
+    var col=m[s]||['#e2e8f0','#475569']; return hzChip(col[0],col[1],esc(s||'')); }
   function sampleChargeChip(s){ var m={pending:['#fef3c7','#92710a'],accepted:['#dcfce7','#166534'],rejected:['#f1f5f9','#94a3b8']}; var c=m[s]||['#e2e8f0','#475569']; return '<span class="tool-badge" style="background:'+c[0]+';color:'+c[1]+'">'+esc(s)+'</span>'; }
   function renderSamples(data){ var c=document.getElementById('supply-content'); fetchLookups(function(){ samplesInner(data,c); }); }
   function samplesInner(rows,c){
@@ -6662,7 +6664,7 @@
       var ch=r.pending_charges>0?'<span class="ex-badge" title="'+r.pending_charges+' charge(s) to review">'+r.pending_charges+'</span>':'';
       var acc=Number(r.accepted_charge)>0?'<span style="color:#166534;font-weight:600">'+money(r.accepted_charge)+' accepted</span>':'';
       var chCell=[ch,acc].filter(Boolean).join(' ')||'<span class="mut">—</span>';
-      var un=r.unread_notes>0?' <span class="ex-badge" style="background:#f59e0b" title="'+r.unread_notes+' new supplier note(s) on the timeline">'+r.unread_notes+'</span>':'';
+      var un=r.unread_notes>0?' <span class="ex-badge" title="'+r.unread_notes+' new supplier note(s) on the timeline">'+r.unread_notes+'</span>':'';
       var reqDate=r.completion_required?('<span'+(r.overdue?' style="color:#dc2626;font-weight:700"':'')+'>'+fd(r.completion_required)+'</span>'):'<span class="mut">—</span>';
       return '<tr><td class="l"><button class="planbtn samp-exp" data-id="'+r.id+'" data-i="'+i+'">PLAN</button>'+un+'</td>'
         +'<td class="l"><b>'+esc(r.ref||'')+'</b></td>'
@@ -6704,7 +6706,7 @@
         +'<div style="margin-top:12px;border-top:1px solid #eef2f7;padding-top:10px"><button class="save-btn sf-save" style="background:#16a34a;border-color:#15803d;color:#fff;font-weight:700">Create sample request</button> <button class="save-btn light sf-cancel">Cancel</button></div></div>';
       var lines=[];
       function renderLines(){ var w=box.querySelector('.sf-lines'); if(!lines.length){ w.innerHTML='<div class="mut tiny" style="padding:2px 0">No SKUs added yet — search above, or paste from a spreadsheet.</div>'; return; }
-        w.innerHTML=lines.map(function(l,i){return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:3px"><input class="fci txt sf-lsku" data-i="'+i+'" placeholder="SKU" value="'+esc(l.sku)+'" style="width:200px">'+(l.dev?' <span class="tool-badge bg-blue" style="font-size:9px">dev</span>':'')+'<input class="fci sf-lqty" data-i="'+i+'" placeholder="qty" value="'+esc(l.qty)+'" style="width:60px;text-align:right"> <a class="sf-lrm" data-i="'+i+'" style="color:#dc2626;cursor:pointer">×</a></div>';}).join('');
+        w.innerHTML=lines.map(function(l,i){return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:3px"><input class="fci txt sf-lsku" data-i="'+i+'" placeholder="SKU" value="'+esc(l.sku)+'" style="width:200px">'+(l.dev?' <span class="tool-badge bg-blue" style="font-size:9px">dev</span>':'')+'<input class="fci sf-lqty" data-i="'+i+'" placeholder="qty" value="'+esc(l.qty)+'" style="width:60px;text-align:left"> <a class="sf-lrm" data-i="'+i+'" style="color:#dc2626;cursor:pointer">×</a></div>';}).join('');
         w.querySelectorAll('.sf-lsku').forEach(function(x){x.onchange=function(){lines[x.dataset.i].sku=x.value;};});
         w.querySelectorAll('.sf-lqty').forEach(function(x){x.onchange=function(){lines[x.dataset.i].qty=x.value;};});
         w.querySelectorAll('.sf-lrm').forEach(function(x){x.onclick=function(){lines.splice(x.dataset.i,1);renderLines();};}); }
@@ -6714,8 +6716,8 @@
       var ssr=box.querySelector('.sf-skusearch'); if(ssr)ssr.oninput=debounce(function(){ var q=ssr.value.trim(), sup=box.querySelector('.sf-supplier').value.trim(), rb=box.querySelector('.sf-skuresults');
         if(q.length<2){ rb.innerHTML=''; return; }
         fetch('/api/product/skus?dev=1&supplier='+encodeURIComponent(sup)+'&q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
-          var list=(rows.length?'<div style="border:1px solid #cbd5e1;border-radius:6px;max-height:200px;overflow:auto;background:#fff">'+rows.map(function(k){return '<div style="display:flex;gap:7px;align-items:center;padding:3px 8px;border-bottom:1px solid #f1f5f9;font-size:12px"><input type="checkbox" class="sf-skcb" value="'+esc(k.sku)+'" data-dev="'+(k.dev?1:'')+'"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(k.sku)+'</b>'+(k.dev?' <span class="tool-badge bg-blue" style="font-size:9px">dev</span>':'')+'<span class="mut tiny" style="flex:1;min-width:0">'+esc(k.description||'')+(k.release_window&&!k.dev?' · '+esc(k.release_window):'')+'</span><input class="fci sf-skqty" data-sku="'+esc(k.sku)+'" placeholder="qty" style="width:52px;text-align:right"></div>';}).join('')+'</div><button class="save-btn light sf-skadd" style="margin-top:4px">+ Add selected</button>':'<div class="mut tiny">No matches.</div>')
-            +'<div style="display:flex;gap:6px;align-items:center;margin-top:6px;padding-top:6px;border-top:1px dashed #e5e7eb"><span class="mut tiny">Not listed?</span><input class="fci txt sf-ftsku" value="'+esc(q)+'" placeholder="type SKU" style="width:180px"><input class="fci sf-ftqty" placeholder="qty" style="width:52px;text-align:right"><button class="save-btn light sf-ftadd">+ Add as free text</button></div>';
+          var list=(rows.length?'<div style="border:1px solid #cbd5e1;border-radius:6px;max-height:200px;overflow:auto;background:#fff">'+rows.map(function(k){return '<div style="display:flex;gap:7px;align-items:center;padding:3px 8px;border-bottom:1px solid #f1f5f9;font-size:12px"><input type="checkbox" class="sf-skcb" value="'+esc(k.sku)+'" data-dev="'+(k.dev?1:'')+'"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(k.sku)+'</b>'+(k.dev?' <span class="tool-badge bg-blue" style="font-size:9px">dev</span>':'')+'<span class="mut tiny" style="flex:1;min-width:0">'+esc(k.description||'')+(k.release_window&&!k.dev?' · '+esc(k.release_window):'')+'</span><input class="fci sf-skqty" data-sku="'+esc(k.sku)+'" placeholder="qty" style="width:52px;text-align:left"></div>';}).join('')+'</div><button class="save-btn light sf-skadd" style="margin-top:4px">+ Add selected</button>':'<div class="mut tiny">No matches.</div>')
+            +'<div style="display:flex;gap:6px;align-items:center;margin-top:6px;padding-top:6px;border-top:1px dashed #e5e7eb"><span class="mut tiny">Not listed?</span><input class="fci txt sf-ftsku" value="'+esc(q)+'" placeholder="type SKU" style="width:180px"><input class="fci sf-ftqty" placeholder="qty" style="width:52px;text-align:left"><button class="save-btn light sf-ftadd">+ Add as free text</button></div>';
           rb.innerHTML=list;
           var sk=rb.querySelector('.sf-skadd'); if(sk)sk.onclick=function(){ var any=false; rb.querySelectorAll('.sf-skcb:checked').forEach(function(c){ var qi=rb.querySelector('.sf-skqty[data-sku="'+(window.CSS&&CSS.escape?CSS.escape(c.value):c.value)+'"]'); lines.push({sku:c.value,qty:(qi&&Number(qi.value))||1,dev:!!c.dataset.dev}); any=true; }); if(any){ rb.innerHTML=''; ssr.value=''; renderLines(); } };
           rb.querySelector('.sf-ftadd').onclick=function(){ var s=rb.querySelector('.sf-ftsku').value.trim(); if(!s)return; var qv=rb.querySelector('.sf-ftqty').value; lines.push({sku:s,qty:Number(qv)||1}); rb.innerHTML=''; ssr.value=''; renderLines(); };
@@ -6753,7 +6755,7 @@
       var bar='<div class="bar">'+FILT.map(function(x){return '<span class="pill'+(x[0]===st.f?' active':'')+'" data-f="'+x[0]+'">'+x[1]+'</span>';}).join('')
         +'<button class="save-btn" id="samp-new" style="margin-left:6px;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd">+ New sample</button>'
         +'<input class="flt" id="samp-q" placeholder="Filter ref / supplier / recipient…" value="'+esc(st.q)+'"><span class="count">'+f.length+' / '+rows.length+'</span></div>';
-      var tbl='<div class="tw"><table class="samp-tbl samp-grid"><thead><tr><th></th><th>Ref</th><th>Status</th><th>Supplier</th><th>Recipient</th><th>Ship to</th><th>Required</th><th>Supplier exp.</th><th>Units</th><th>Tracking</th><th>Charges</th></tr></thead><tbody>'
+      var tbl='<div class="tw"><table class="samp-tbl samp-grid"><thead><tr><th></th><th>Ref</th><th>Status</th><th>Supplier</th><th>Recipient</th><th>Ship to</th><th>Completion req.</th><th>Supplier ETA</th><th>Units</th><th>Tracking</th><th>Charges</th></tr></thead><tbody>'
         +(f.length?f.map(rowHTML).join(''):'<tr><td colspan="11" class="count">No '+st.f+' samples.</td></tr>')+'</tbody></table></div>';
       c.innerHTML=lookupDatalists()+'<datalist id="samp-carrierlist"><option value="DHL"><option value="FedEx"><option value="UPS"><option value="Flexport"><option value="SF Express"><option value="Other"></datalist><div id="samp-form"></div>'+bar+tbl;
       c.querySelectorAll('.bar .pill').forEach(function(p){p.onclick=function(){st.f=p.dataset.f;view();};});
@@ -7572,7 +7574,7 @@
     row.querySelectorAll('.view-toggle:not(.product-toggle)').forEach(function(b){ b.addEventListener('click',function(){ hideProduct(); }); });
     loadProductUnread(); if(!window.__prodUnreadPoll)window.__prodUnreadPoll=setInterval(loadProductUnread,60000); }
   function loadProductUnread(){ if(!prodCan())return; fetch('/api/product/unread').then(function(r){return r.json();}).then(function(j){ var b=document.getElementById('product-unread'); if(!b)return; var n=(j&&j.count)||0; b.textContent=n>0?(n>99?'99+':String(n)):''; b.style.display=n>0?'inline-block':'none'; }).catch(function(){}); }
-  function prodStatusChip(s){ var m={in_development:['In development','#b45309','#fffbeb'],approved:['Approved','#16a34a','#f0fdf4'],dropped:['Dropped','#b91c1c','#fef2f2']}; var x=m[s]||m.in_development; return '<span style="font-size:9px;font-weight:700;color:'+x[1]+';background:'+x[2]+';border-radius:4px;padding:1px 6px">'+x[0]+'</span>'; }
+  function prodStatusChip(s){ var m={in_development:['In development','#b45309','#fffbeb'],approved:['Approved','#16a34a','#f0fdf4'],dropped:['Dropped','#b91c1c','#fef2f2']}; var x=m[s]||m.in_development; return hzChip(x[2],x[1],x[0]); }
   // Inline cell picker for the product grid (same popup UX as the PO grid's supplier/branch picker) — edits are
   // bound straight to the master-data fields via /api/product/item/<ref>. kind = supplier | season | category.
   function prodPickBtn(ref,field,val,kind){ return '<button class="cell-pick prod-cell-pick" data-ref="'+esc(ref)+'" data-field="'+field+'" data-kind="'+kind+'" title="'+esc(val||'')+'">'+(val?esc(val):'<span class="mut">— <span style="background:#fee2e2;color:#991b1b;font-weight:700;border-radius:3px;padding:0 3px">set</span></span>')+' ▾</button>'; }
@@ -7607,9 +7609,9 @@
       function tbl(title,dimLabel,rows){ var head=['Products','Sample versions','Approved','Avg samples to approve','Avg days to approve'];
         return '<div style="margin-top:18px"><div style="font-weight:700;font-size:13px;margin-bottom:6px">'+title+'</div>'
           +'<table style="border-collapse:collapse;font-size:12px"><thead><tr><th style="text-align:left;padding:5px 14px 5px 0;border-bottom:2px solid #e5e7eb">'+dimLabel+'</th>'
-          +head.map(function(h){return '<th style="text-align:right;padding:5px 14px;border-bottom:2px solid #e5e7eb;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+          +head.map(function(h){return '<th style="text-align:left;padding:5px 14px;border-bottom:2px solid #e5e7eb;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
           +((rows&&rows.length)?rows.map(function(g){return '<tr><td style="padding:4px 14px 4px 0;border-bottom:1px solid #f1f5f9">'+esc(g.key)+'</td>'
-            +[g.products,g.samples,g.approved,num(g.avg_samples),(g.avg_days==null?'—':g.avg_days+'d')].map(function(v){return '<td style="text-align:right;padding:4px 14px;border-bottom:1px solid #f1f5f9">'+v+'</td>';}).join('')+'</tr>';}).join(''):'<tr><td colspan="6" style="padding:6px 0;color:#94a3b8">No data.</td></tr>')
+            +[g.products,g.samples,g.approved,num(g.avg_samples),(g.avg_days==null?'—':g.avg_days+'d')].map(function(v){return '<td style="text-align:left;padding:4px 14px;border-bottom:1px solid #f1f5f9">'+v+'</td>';}).join('')+'</tr>';}).join(''):'<tr><td colspan="6" style="padding:6px 0;color:#94a3b8">No data.</td></tr>')
           +'</tbody></table></div>'; }
       c.innerHTML='<div style="font-weight:700;font-size:13px;margin-bottom:8px">Overview</div><div style="display:flex;gap:10px;flex-wrap:wrap">'
           +card('Products',o.products||0)+card('Sample versions',o.samples||0)+card('Approved',o.approved||0)
@@ -7624,7 +7626,7 @@
       var seasons=[]; rows.forEach(function(r){ if(r.season&&seasons.indexOf(r.season)<0)seasons.push(r.season); }); seasons.sort();
       var STAT=[['unapproved','Not approved'],['','All'],['in_development','In development'],['approved','Approved'],['dropped','Dropped']];
       var fb=document.getElementById('pg-filters');
-      fb.innerHTML='<button class="save-btn" id="pg-new" style="background:#2563eb;color:#fff;border-color:#1d4ed8">+ New product</button>'
+      fb.innerHTML='<button class="save-btn" id="pg-new" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd">+ New product</button>'
         +'<span style="display:flex;align-items:center;gap:5px"><span style="color:#64748b;font-size:11px">Season</span><select class="fci" id="pg-season" style="text-align:left"><option value="">All</option>'+seasons.map(function(s){return '<option value="'+esc(s)+'"'+(s===_prodFilt.season?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>'
         +'<span style="display:flex;align-items:center;gap:5px"><span style="color:#64748b;font-size:11px">Status</span><select class="fci" id="pg-status" style="text-align:left">'+STAT.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===_prodFilt.status?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></span>'
         +'<input class="fci" id="pg-q" value="'+esc(_prodFilt.q)+'" placeholder="search ref / colour / supplier / description…" style="width:300px;text-align:left">'
@@ -7643,7 +7645,7 @@
         if(!rows.length){ g.innerHTML='<div style="color:#94a3b8;padding:16px 2px">No product development items yet — click “+ New product”.</div>'; return; }
         if(!f.length){ g.innerHTML='<div style="color:#94a3b8;padding:16px 2px">No items match these filters.</div>'; return; }
         g.innerHTML='<div class="tw"><table class="pg-tbl"><thead><tr>'
-          +['','Ref','Category','Season','Supplier','Sizes','Status','Sample shipment'].map(function(h){return '<th>'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+          +['','Ref','Category','Season','Supplier','Sizes approved','Status','Sample shipment'].map(function(h){return '<th>'+h+'</th>';}).join('')+'</tr></thead><tbody>'
           +f.map(function(r,i){
             var sw=r.has_swatch?'<img class="pg-swatch2" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at)+'">':'<span class="pg-swatch2 none">n/a</span>';
             return '<tr>'

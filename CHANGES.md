@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.055 - UI consistency pass 2: badges, chips, buttons, alignment, headers
+
+- **D — notification badges:** the Samples grid "unread notes" badge is now the standard **red** `.ex-badge`
+  (was amber), matching Product/PO.
+- **E — one status chip:** shared `hzChip()` renderer; `sampleStatusChip` + `prodStatusChip` now identical in
+  size/radius/weight.
+- **F — "+ New product"** restyled to the light-blue "New PO"/"New sample" look.
+- **Number columns left-aligned** on the Product Reports tables + the Samples SKU-entry qty inputs
+  (the Samples/Product grids were already left-aligned). *(PO / cash-flow / payments tables left as-is —
+  can extend if wanted.)*
+- **H — clearer headers:** Product grid "Sizes" → "Sizes approved"; Samples grid "Required" → "Completion req.",
+  "Supplier exp." → "Supplier ETA".
+
 ## v26.054 - UI consistency: PLAN buttons + PO-style sub-tabs (Samples/Product)
 
 Design-consistency pass (approved items A + B):
