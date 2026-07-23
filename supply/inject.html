@@ -224,9 +224,10 @@
 #supply-root .save-btn.dark{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
 #supply-root .tw{overflow:auto;border:1px solid #e0e0e0;border-radius:6px;background:#fff;margin-bottom:10px;max-height:calc(100vh - 210px)}
 #supply-root table{border-collapse:collapse;font-size:11px;width:100%}
-#supply-root thead th{background:#f3f3f1;padding:5px 8px;font-weight:600;font-size:9.5px;color:#444;border-bottom:1px solid #d5d5d5;text-align:right;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;position:sticky;top:0;z-index:1}
+/* All grid cells left-align by default (Ben's preference: number columns left, not right). .l is now a no-op but kept for existing markup. */
+#supply-root thead th{background:#f3f3f1;padding:5px 8px;font-weight:600;font-size:9.5px;color:#444;border-bottom:1px solid #d5d5d5;text-align:left;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;position:sticky;top:0;z-index:1}
 #supply-root thead th.l{text-align:left}
-#supply-root tbody td{padding:4px 8px;text-align:right;border-bottom:1px solid #f1f1f1;font-variant-numeric:tabular-nums;white-space:nowrap}
+#supply-root tbody td{padding:4px 8px;text-align:left;border-bottom:1px solid #f1f1f1;font-variant-numeric:tabular-nums;white-space:nowrap}
 #supply-root tbody td.l{text-align:left}
 /* DATES tab: fixed layout so the table can never exceed its wrapper (no horizontal scroll); all cells wrap
    so the long production-status alert flows onto multiple lines instead of stretching the table. */

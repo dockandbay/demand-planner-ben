@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.057 - Left-align number columns across all supply grids
+
+Broad alignment sweep: the `#supply-root` grids defaulted every cell to right-aligned (with `.l` = left for
+text columns). Flipped the base `thead th` / `tbody td` default to **left**, so number columns across the
+whole SUPPLY area — Purchase Orders, Cash Flow, Payments Due, Payments Report, Shipments, Deposits,
+Productions, Order Plan — now left-align (matching Ben's preference). Text columns unchanged; `.l` kept as a
+harmless no-op. (Scenario / financial-model tables under `#scenario-root` are a separate analytical module,
+left as-is unless you want them flipped too.)
+
 ## v26.056 - Samples detail → tabbed like the PO detail (G)
 
 Admin SUPPLY ▸ Samples expanded detail was one long flat card; restructured into the PO-detail tab pattern
