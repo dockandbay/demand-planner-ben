@@ -1730,10 +1730,12 @@ app.get('/api/supply/:section', async (req, res) => {
             (coalesce(status,'') NOT ILIKE '%complete%' AND coalesce(shipment_ref,'')=''
                AND coalesce(branch,'') NOT ILIKE '%manufactur%'
                AND upper(coalesce(nullif(country_code,''), branch_country, '')) IN ('UK','US','EU','AU','CA')) unassigned_shipment,
-            (coalesce(status,'') NOT ILIKE '%complete%' AND (
-               (start_production < current_date AND pay_start_deposit_assigned IS NULL AND coalesce(deposit_ref,'')='' AND start_calc > 0)
-               OR (eff_prod_end < current_date AND pay_completion_assigned IS NULL AND completion_calc > 0)
-               OR (bal_due_date < current_date AND pay_balance_1_amount IS NULL
+            -- payment_overdue applies to COMPLETE POs too (an owed payment shouldn't hide behind COMPLETE);
+            -- old payments are cut off at 2026-01-01 (matches the Payments Due report's PDUE_MIN_DUE).
+            ((
+               (start_production >= DATE '2026-01-01' AND start_production < current_date AND pay_start_deposit_assigned IS NULL AND coalesce(deposit_ref,'')='' AND start_calc > 0)
+               OR (eff_prod_end >= DATE '2026-01-01' AND eff_prod_end < current_date AND pay_completion_assigned IS NULL AND completion_calc > 0)
+               OR (bal_due_date >= DATE '2026-01-01' AND bal_due_date < current_date AND pay_balance_1_amount IS NULL
                    AND round(val + coalesce(credit_amount,0) - start_paid - coalesce(pay_completion_assigned, completion_calc),2) > 0.01))) payment_overdue,
             (coalesce(status,'') ILIKE '%production%') is_production,
             -- pallet estimate (Σ line qty ÷ sku pallet_qty); 20 pallets = one container

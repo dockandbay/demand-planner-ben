@@ -2503,10 +2503,12 @@
     // (set from the due cell) must also drop them from the PAYMENTS tab count — not just the PO-ref badge.
     var _payOverSnz=(!_poShowSnoozed && poActSnoozed(r.po,'payment_overdue'));
     // only overdue if there's actually an amount for that milestone (a 0% deposit is never "overdue")
+    // Overdue payments surface even on COMPLETE POs (an owed payment shouldn't hide) — but only if due on/after
+    // PDUE_MIN_DUE (old payments excluded). Non-payment freight/date actions keep the `open` (not-complete) gate.
     if(!_payOverSnz){
-      if(open && totalDue>0.02 && r.start_due && r.start_due<today && startUnpaid && n(r.start_calc)>0.009) pay.push('Start deposit overdue ('+fd(r.start_due)+')');
-      if(open && totalDue>0.02 && r.completion_due && r.completion_due<today && compUnpaid && n(r.completion_calc)>0.009) pay.push('Completion payment overdue ('+fd(r.completion_due)+')');
-      if(open && r.balance_due && r.balance_due<today && totalDue>0.02) pay.push('Balance overdue ('+fd(r.balance_due)+')');
+      if(totalDue>0.02 && r.start_due && r.start_due>=PDUE_MIN_DUE && r.start_due<today && startUnpaid && n(r.start_calc)>0.009) pay.push('Start deposit overdue ('+fd(r.start_due)+')');
+      if(totalDue>0.02 && r.completion_due && r.completion_due>=PDUE_MIN_DUE && r.completion_due<today && compUnpaid && n(r.completion_calc)>0.009) pay.push('Completion payment overdue ('+fd(r.completion_due)+')');
+      if(r.balance_due && r.balance_due>=PDUE_MIN_DUE && r.balance_due<today && totalDue>0.02) pay.push('Balance overdue ('+fd(r.balance_due)+')');
     }
     // supplier-submitted invoice awaiting approve/reject (actionable on any PO — shows on the grid flag and the PAYMENTS badge)
     if(r.sup_invoice_pending!=null) pay.push('Supplier invoice '+money(r.sup_invoice_pending)+' awaiting approve/reject');

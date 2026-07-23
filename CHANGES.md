@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.045 - Payment-overdue flag + PAYMENTS badge now cover COMPLETE POs
+
+Same fix as v26.044, applied to the PO grid's action flags (not just the Payments Due report):
+- The **"Payment overdue" PO filter** (server `payment_overdue` flag) no longer excludes COMPLETE POs —
+  an overdue, unpaid milestone flags regardless of status, with the 2026-01-01 cutoff. So e.g.
+  PO-55USXR-FBA1 (COMPLETE, balance due 15 Jul, unpaid) now matches the filter.
+- The **PAYMENTS sub-tab (n) badge** on the PO grid now counts overdue payments on COMPLETE POs too
+  (dropped the not-complete `open` gate for the three payment items; kept it for freight/date actions).
+- A genuinely paid balance on a COMPLETE PO still doesn't flag (verified: PO-55UKXR3-AIR, balance recorded → no flag).
+
 ## v26.044 - Payments Due: include COMPLETE POs; hide pre-2026 payments
 
 - Payments Due (and its overdue badge) no longer skip POs marked **COMPLETE** — an unpaid milestone
