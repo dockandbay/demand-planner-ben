@@ -2692,7 +2692,7 @@ app.post('/api/supply/supplier/:id', (req, res) =>
       production_days: 'int', country: 'text', contact_name: 'text', email: 'text',
       // company / address / phone (tax-invoice), compliance IDs + ERP linkage
       business_name: 'text', address_1: 'text', address_2: 'text', city: 'text', state: 'text', postcode: 'text', phone: 'text',
-      te_id: 'text', incoterm: 'text', cin7_member_id: 'text', fulfil_id: 'text', export_port: 'text',
+      te_id: 'text', incoterm: 'text', cin7_member_id: 'bigint', fulfil_id: 'text', export_port: 'text',
       include_product_dev: 'boolean' }, req.body, 'bigint'));
 app.post('/api/supply/supplier-create', async (req, res) => {
   const b = req.body || {}, name = (b.name || '').trim();
