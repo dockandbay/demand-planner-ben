@@ -3,6 +3,30 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.038 - Sample shipments: mixed contents (dev samples + bulk SKUs), many-to-many, multi-select
+
+Reworks Phase B (v26.037) per Ben's follow-ups. A **sample shipment** (SSHIP-nnnn) is a parcel a
+supplier sends us; it can now carry a mix of **product-development sample versions** AND **bulk SKUs**
+(from the products table), each with a quantity. Links are many-to-many — a sample/SKU can ride multiple
+shipments, and a shipment holds many items. Removes the old "a sample can only be on one shipment" rule.
+
+- **New portal tab "Sample Shipments"** (supplier-facing hub): create shipments, set carrier + tracking
+  (with dynamic carrier tracking link), and add contents via a rich multi-select picker — one list of
+  *open* product-dev samples (products still in development, searchable) and one searchable list of the
+  supplier's own SKUs (scoped via products.supplier_multiple_all) with a qty per SKU. Multi-select adds
+  many items at once. Per-item ✕ removes; per-SKU qty edits inline; delete-shipment.
+- **Add from both sides:** also from PRODUCT ▸ Samples (portal), each sample can be added to a new/existing
+  shipment (now repeatable), and shows every shipment it's on with a remove (✕). Carrier/tracking edited
+  only in the Sample Shipments tab (single source per shipment).
+- **Main PRODUCT grid (app):** new "Sample shipment" column shows carrier + tracking (dynamic link) of any
+  linked sample shipment(s) per product. Admin Samples tab lists all linked shipments per sample version.
+
+Migrations (run on live by Diviyaj): **133_product_sample_shipment_links.sql** (dev sample ↔ shipment m2m,
+migrates existing single links), **134_sample_shipment_skus.sql** (shipment ↔ SKU + qty). No new env vars.
+New endpoints: /api/{portal,product}/product-open-samples, product-skus, product-sample-remove,
+product-sample-shipment/:id/delete, product-sample-shipment-sku[-remove]; product-sample-add now takes
+sample_ids[] + shipment_id.
+
 ## v26.033 - Fix portal product timeline error + mobile sub-tabs fit
 
 - Fixed "Failed: The string did not match the expected pattern" when opening a product Timeline in the portal

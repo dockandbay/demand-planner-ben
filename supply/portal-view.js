@@ -552,7 +552,7 @@
     var PORTAL_PROD_Q='', PORTAL_PROD_SEASON='', PORTAL_PROD_STATUS='in_development';   // Product grid: search + season + status (default: in development)
     var _invFiles={};     // base64 of the last parsed invoice file, per PO (for the Apply step)
     var rootEl=opts.root; if(!rootEl.closest('#supply-root')){rootEl.id='supply-root';} rootEl.style.display='block';
-    rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders <span id="pp-pos-badge"></span></span><span class="rtab" data-pt="shipmentplan">Shipment Plan <span id="pp-ship-badge"></span></span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="productions">Productions</span><span class="rtab" data-pt="samples">Samples <span id="pp-samp-badge"></span></span><span class="rtab" data-pt="product" id="pp-prod-tab" style="display:none">Product <span id="pp-prod-badge"></span></span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
+    rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders <span id="pp-pos-badge"></span></span><span class="rtab" data-pt="shipmentplan">Shipment Plan <span id="pp-ship-badge"></span></span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="productions">Productions</span><span class="rtab" data-pt="samples">Samples <span id="pp-samp-badge"></span></span><span class="rtab" data-pt="product" id="pp-prod-tab" style="display:none">Product <span id="pp-prod-badge"></span></span><span class="rtab" data-pt="sampleshipments">Sample Shipments</span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
     var tabsEl=document.getElementById('pp-tabs'), body=document.getElementById('pp-body');
     // download a generated invoice as a real file (fetch -> blob) rather than opening a tab — works on the
     // portal host where /api/invoice/* isn't routed (uses the /api/portal/* endpoints via EP).
@@ -1419,15 +1419,10 @@
                   +'<button class="save-btn pp-samp-label" data-ref="'+esc(s.ref)+'" style="margin-left:auto">⤓ Download label</button></div>'
                   +(s.description?'<div style="margin:4px 0;white-space:pre-wrap">'+esc(s.description)+'</div>':'')
                   +(ph?'<div style="margin-top:4px">'+ph+'</div>':'')
-                  +(s.shipment_ref
-                    ? '<div style="margin-top:7px;padding:8px 10px;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px"><div style="margin-bottom:5px">📦 Sample shipment <b>'+esc(s.shipment_ref)+'</b></div>'
-                      +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">'
-                      +'<label style="font-size:11px">Carrier<br><select class="fci pss-car" data-ship="'+s.sample_shipment_id+'" style="text-align:left">'+['DHL','FedEx','UPS','SF Express','Other'].map(function(o){return '<option'+(o===s.shipment_carrier?' selected':'')+'>'+o+'</option>';}).join('')+'</select></label>'
-                      +'<label style="font-size:11px">Tracking<br><input class="fci pss-trk" data-ship="'+s.sample_shipment_id+'" value="'+esc(s.shipment_tracking)+'" placeholder="tracking…" style="width:150px;text-align:left"></label>'
-                      +'<button class="save-btn pss-save" data-ship="'+s.sample_shipment_id+'">Save</button>'
-                      +(s.shipment_tracking?'<span style="align-self:center;font-size:12px">'+carrierTrackLink(s.shipment_carrier,s.shipment_tracking)+'</span>':'')
-                      +'</div></div>'
-                    : '<div style="margin-top:7px"><button class="save-btn pp-samp-ship" data-id="'+s.id+'" style="font-size:11px">＋ Add to sample shipment</button></div>')
+                  +'<div style="margin-top:7px">'
+                  +((s.shipments||[]).length?'<div style="display:flex;flex-direction:column;gap:5px;margin-bottom:6px">'+(s.shipments||[]).map(function(sh){return '<div style="padding:6px 9px;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">📦 <b>'+esc(sh.ref)+'</b>'+(sh.carrier?'<span class="mut tiny">'+esc(sh.carrier)+'</span>':'')+(sh.tracking?'<span style="font-size:12px">'+carrierTrackLink(sh.carrier,sh.tracking)+'</span>':'')+'<a class="pp-samp-unship" data-sample="'+s.id+'" data-ship="'+sh.id+'" title="remove from this shipment" style="color:#dc2626;cursor:pointer;margin-left:auto">✕</a></div>';}).join('')+'</div>':'')
+                  +'<button class="save-btn pp-samp-ship" data-id="'+s.id+'" data-linked="'+(s.shipments||[]).map(function(x){return x.id;}).join(',')+'" style="font-size:11px">＋ Add to a sample shipment</button>'
+                  +' <span class="mut tiny">carrier &amp; tracking are set in the Sample Shipments tab</span></div>'
                   +'</div>'; }).join('')||'<div class="mut" style="padding:4px 0;text-align:left">No sample versions yet.</div>';
               box.innerHTML='<div style="text-align:left"><div style="font-weight:700;font-size:13px;margin-bottom:6px">Sample versions</div>'+rows
                 +'<div style="margin-top:8px"><button class="save-btn pp-add-sample" style="background:#16a34a;color:#fff;border-color:#15803d">+ Add sample</button></div>'
@@ -1441,13 +1436,12 @@
                 +'<div style="margin-top:7px"><label style="font-size:12px">Photos <input type="file" class="ps2-photos" accept="image/*" multiple style="font-size:12px"></label></div>'
                 +'<div style="margin-top:9px"><button class="save-btn ps2-save" data-ref="'+esc(ref)+'">Submit sample version</button> <span class="ps2-msg" style="font-size:12px;margin-left:6px"></span></div></div></div>';
               box.querySelectorAll('.pp-samp-label').forEach(function(lb){ lb.onclick=function(){ dlSampleLabel(lb.dataset.ref); }; });
-              box.querySelectorAll('.pss-save').forEach(function(b){ b.onclick=function(){ var sid=b.dataset.ship, cs=box.querySelector('.pss-car[data-ship="'+sid+'"]'), ts=box.querySelector('.pss-trk[data-ship="'+sid+'"]');
-                postJSON(EP.productSampleShipmentUpdateBase+sid,{carrier:cs?cs.value:'',tracking_code:ts?ts.value:''},function(j){ if(j&&j.error){alert(j.error);return;} ppProdSamples(box,ref); }); }; });
-              box.querySelectorAll('.pp-samp-ship').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var host=b.parentNode, sampleId=b.dataset.id; host.innerHTML='<span class="mut tiny">Loading shipments…</span>';
-                fetch(EP.productSampleShipments+'?supplier='+encodeURIComponent(STATE.supplierName||'')).then(function(r){return r.json();}).then(function(ships){ ships=Array.isArray(ships)?ships:[];
-                  host.innerHTML='<div style="border:1px solid #cbd5e1;border-radius:6px;padding:8px;font-size:12px;max-width:320px"><div style="font-weight:600;margin-bottom:6px">Add this sample to a shipment</div>'
+              box.querySelectorAll('.pp-samp-unship').forEach(function(a){ a.onclick=function(){ if(!confirm('Remove this sample from the shipment?'))return; postJSON(EP.productSampleRemove,{sample_id:a.dataset.sample,shipment_id:a.dataset.ship},function(j){ if(j&&j.error){alert(j.error);return;} ppProdSamples(box,ref); }); }; });
+              box.querySelectorAll('.pp-samp-ship').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var host=b.parentNode, sampleId=b.dataset.id, linked=(b.dataset.linked||'').split(',').filter(Boolean); host.innerHTML='<span class="mut tiny">Loading shipments…</span>';
+                fetch(EP.productSampleShipments+'?supplier='+encodeURIComponent(STATE.supplierName||'')).then(function(r){return r.json();}).then(function(ships){ ships=(Array.isArray(ships)?ships:[]).filter(function(sh){return linked.indexOf(String(sh.id))<0;});
+                  host.innerHTML='<div style="border:1px solid #cbd5e1;border-radius:6px;padding:8px;font-size:12px;max-width:340px"><div style="font-weight:600;margin-bottom:6px">Add this sample to a shipment</div>'
                     +'<button class="save-btn pss-new" style="background:#16a34a;color:#fff;border-color:#15803d">＋ New shipment</button>'
-                    +(ships.length?'<div style="margin:7px 0 2px;color:#64748b">or add to an existing one:</div>'+ships.map(function(sh){return '<div class="pss-existing" data-ship="'+sh.id+'" style="padding:6px;cursor:pointer;border-top:1px solid #f1f1f1">'+esc(sh.ref)+(sh.carrier?' · '+esc(sh.carrier):'')+(sh.tracking_code?' · '+esc(sh.tracking_code):'')+'</div>';}).join(''):'')
+                    +(ships.length?'<div style="margin:7px 0 2px;color:#64748b">or add to an existing one:</div>'+ships.map(function(sh){return '<div class="pss-existing" data-ship="'+sh.id+'" style="padding:6px;cursor:pointer;border-top:1px solid #f1f1f1">'+esc(sh.ref)+(sh.carrier?' · '+esc(sh.carrier):'')+(sh.tracking_code?' · '+esc(sh.tracking_code):'')+'</div>';}).join(''):'<div class="mut tiny" style="margin-top:6px">(no other shipments yet)</div>')
                     +'</div>';
                   host.querySelector('.pss-new').onclick=function(){ postJSON(EP.productSampleShipmentCreate,{supplier:STATE.supplierName},function(j){ if(j&&j.error){alert(j.error);return;} if(!j||!j.id)return; postJSON(EP.productSampleAdd,{sample_id:sampleId,shipment_id:j.id},function(k){ if(k&&k.error){alert(k.error);return;} ppProdSamples(box,ref); }); }); };
                   host.querySelectorAll('.pss-existing').forEach(function(o){ o.onclick=function(){ postJSON(EP.productSampleAdd,{sample_id:sampleId,shipment_id:o.dataset.ship},function(k){ if(k&&k.error){alert(k.error);return;} ppProdSamples(box,ref); }); }; });
@@ -1461,6 +1455,68 @@
                   var files=box.querySelector('.ps2-photos').files, i=0;
                   (function up(){ if(i>=files.length){ ppProdSamples(box,ref); return; } var f=files[i++]; if(f.size>10*1024*1024){ up(); return; } var rd=new FileReader(); rd.onload=function(){ postJSON(EP.productSamplePhoto,{sample_id:j.id,filename:f.name,mime:f.type||'image/jpeg',data_base64:String(rd.result)},function(){ up(); }); }; rd.readAsDataURL(f); })(); }); };
             }).catch(function(e){ box.innerHTML='<div style="color:#dc2626;text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
+          // ── SAMPLE SHIPMENTS hub — a supplier assembles a parcel of mixed contents (dev samples + bulk SKUs) ──
+          function ppSampleShipments(body){ body.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
+            fetch(EP.productSampleShipments+'?supplier='+encodeURIComponent(STATE.supplierName||'')).then(function(r){return r.json();}).then(function(ships){ ships=Array.isArray(ships)?ships:[];
+              var CARR=['','DHL','FedEx','UPS','SF Express','Other'];
+              var cards=ships.map(function(sh){
+                var samp=(sh.samples||[]).map(function(x){return '<span style="display:inline-flex;align-items:center;gap:4px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:12px;padding:2px 8px;margin:2px;font-size:11px"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(x.ref)+'</b>'+(x.colour_name?' · '+esc(x.colour_name):'')+'<a class="ssh-rmsamp" data-ship="'+sh.id+'" data-sample="'+x.id+'" title="remove" style="color:#dc2626;cursor:pointer">✕</a></span>';}).join('');
+                var skus=(sh.skus||[]).map(function(x){return '<div style="display:flex;gap:8px;align-items:center;padding:3px 0;border-bottom:1px solid #f4f4f5"><b style="font-family:ui-monospace,Menlo,monospace;font-size:12px">'+esc(x.sku)+'</b><span class="mut tiny" style="flex:1;min-width:0">'+esc(x.description||'')+'</span><input class="fci ssh-qty" data-ship="'+sh.id+'" data-sku="'+esc(x.sku)+'" value="'+(x.qty==null?'':x.qty)+'" placeholder="qty" style="width:64px;text-align:left" inputmode="numeric"><a class="ssh-rmsku" data-ship="'+sh.id+'" data-sku="'+esc(x.sku)+'" title="remove" style="color:#dc2626;cursor:pointer">✕</a></div>';}).join('');
+                return '<div class="ssh-card" data-ship="'+sh.id+'" style="border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:10px;text-align:left">'
+                  +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><b style="font-family:ui-monospace,Menlo,monospace;font-size:14px">'+esc(sh.ref)+'</b><span class="mut tiny">'+esc(sh.created_at||'')+'</span>'
+                  +'<a class="ssh-del" data-ship="'+sh.id+'" title="delete this shipment" style="color:#dc2626;cursor:pointer;margin-left:auto">🗑 delete</a></div>'
+                  +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:8px">'
+                  +'<label style="font-size:11px">Carrier<br><select class="fci ssh-car" data-ship="'+sh.id+'" style="text-align:left">'+CARR.map(function(o){return '<option value="'+o+'"'+(o===sh.carrier?' selected':'')+'>'+(o||'—')+'</option>';}).join('')+'</select></label>'
+                  +'<label style="font-size:11px">Tracking<br><input class="fci ssh-trk" data-ship="'+sh.id+'" value="'+esc(sh.tracking_code||'')+'" placeholder="tracking…" style="width:160px;text-align:left"></label>'
+                  +'<button class="save-btn ssh-save" data-ship="'+sh.id+'">Save</button>'
+                  +(sh.tracking_code?'<span style="align-self:center;font-size:12px">'+carrierTrackLink(sh.carrier,sh.tracking_code)+'</span>':'')+'</div>'
+                  +'<div style="margin-top:10px"><div class="mut tiny" style="margin-bottom:3px">Product development samples</div>'+(samp||'<span class="mut tiny">none</span>')+'</div>'
+                  +'<div style="margin-top:8px"><div class="mut tiny" style="margin-bottom:3px">Bulk SKUs</div>'+(skus||'<span class="mut tiny">none</span>')+'</div>'
+                  +'<div style="margin-top:9px"><button class="save-btn ssh-add" data-ship="'+sh.id+'" style="background:#2563eb;color:#fff;border-color:#1d4ed8">＋ Add contents</button></div>'
+                  +'<div class="ssh-picker" data-ship="'+sh.id+'" style="display:none;margin-top:9px"></div></div>'; }).join('')
+                  ||'<div class="mut" style="padding:10px 2px;text-align:left">No sample shipments yet — create one to bundle samples and SKUs into a parcel.</div>';
+              body.innerHTML='<div style="text-align:left;max-width:720px"><div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><div style="font-weight:700;font-size:14px">Sample shipments</div>'
+                +'<button class="save-btn ssh-new" style="background:#16a34a;color:#fff;border-color:#15803d;margin-left:auto">＋ New sample shipment</button></div>'
+                +'<div class="mut tiny" style="margin-bottom:10px">A shipment is a parcel you send us. Add product-development samples and/or bulk SKUs, then set the carrier &amp; tracking.</div>'+cards+'</div>';
+              body.querySelector('.ssh-new').onclick=function(){ postJSON(EP.productSampleShipmentCreate,{supplier:STATE.supplierName},function(j){ if(j&&j.error){alert(j.error);return;} ppSampleShipments(body); }); };
+              body.querySelectorAll('.ssh-save').forEach(function(b){ b.onclick=function(){ var id=b.dataset.ship, cs=body.querySelector('.ssh-car[data-ship="'+id+'"]'), ts=body.querySelector('.ssh-trk[data-ship="'+id+'"]');
+                postJSON(EP.productSampleShipmentUpdateBase+id,{carrier:cs?cs.value:'',tracking_code:ts?ts.value:''},function(j){ if(j&&j.error){alert(j.error);return;} ppSampleShipments(body); }); }; });
+              body.querySelectorAll('.ssh-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this sample shipment? Its contents links are removed (the samples/SKUs themselves are kept).'))return; postJSON(EP.productSampleShipmentDeleteBase+a.dataset.ship+'/delete',{},function(j){ if(j&&j.error){alert(j.error);return;} ppSampleShipments(body); }); }; });
+              body.querySelectorAll('.ssh-rmsamp').forEach(function(a){ a.onclick=function(){ postJSON(EP.productSampleRemove,{shipment_id:a.dataset.ship,sample_id:a.dataset.sample},function(j){ if(j&&j.error){alert(j.error);return;} ppSampleShipments(body); }); }; });
+              body.querySelectorAll('.ssh-rmsku').forEach(function(a){ a.onclick=function(){ postJSON(EP.productSampleShipmentSkuRemove,{shipment_id:a.dataset.ship,sku:a.dataset.sku},function(j){ if(j&&j.error){alert(j.error);return;} ppSampleShipments(body); }); }; });
+              body.querySelectorAll('.ssh-qty').forEach(function(inp){ inp.onchange=function(){ postJSON(EP.productSampleShipmentSkuAdd,{shipment_id:inp.dataset.ship,sku:inp.dataset.sku,qty:inp.value},function(j){ if(j&&j.error)alert(j.error); }); }; });
+              body.querySelectorAll('.ssh-add').forEach(function(b){ b.onclick=function(){ var id=b.dataset.ship, pk=body.querySelector('.ssh-picker[data-ship="'+id+'"]'); if(pk.style.display!=='none'){ pk.style.display='none'; return; } pk.style.display=''; sshPicker(pk,id,function(){ ppSampleShipments(body); }); }; });
+            }).catch(function(e){ body.innerHTML='<div style="color:#dc2626;text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
+          // rich multi-select "add contents" panel — pick open dev samples and/or bulk SKUs, add many at once
+          function sshPicker(host, shipId, onDone){ host.innerHTML='<div class="mut tiny">Loading…</div>';
+            var supQ=STATE.supplierName?'&supplier='+encodeURIComponent(STATE.supplierName):'';
+            fetch(EP.productOpenSamples+(supQ?'?'+supQ.slice(1):'')).then(function(r){return r.json();}).then(function(samples){ samples=Array.isArray(samples)?samples:[];
+              host.innerHTML='<div style="border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;background:#f8fafc">'
+                +'<div style="font-weight:700;font-size:12px;margin-bottom:6px">Add to this shipment</div>'
+                +'<div style="font-size:11px;color:#64748b;margin-bottom:3px">Product development samples <span class="mut">(products still in development)</span></div>'
+                +'<input class="fci ssh-pk-sq" placeholder="filter samples…" style="width:100%;text-align:left;margin-bottom:5px">'
+                +'<div class="ssh-pk-slist" style="max-height:150px;overflow:auto;border:1px solid #eef2f7;border-radius:6px;padding:4px 6px;background:#fff">'
+                +(samples.length?samples.map(function(s){return '<label class="ssh-pk-srow" data-hay="'+esc(((s.ref||'')+' '+(s.colour_name||'')).toLowerCase())+'" style="display:flex;gap:7px;align-items:center;padding:3px 2px;cursor:pointer;font-size:12px"><input type="checkbox" class="ssh-pk-scb" value="'+s.id+'"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.ref)+'</b>'+(s.colour_name?'<span class="mut tiny">'+esc(s.colour_name)+'</span>':'')+'</label>';}).join(''):'<div class="mut tiny" style="padding:4px">no open product samples</div>')
+                +'</div>'
+                +'<div style="font-size:11px;color:#64748b;margin:9px 0 3px">Bulk SKUs <span class="mut">(your products)</span></div>'
+                +'<input class="fci ssh-pk-kq" placeholder="search SKU / description…" style="width:100%;text-align:left;margin-bottom:5px">'
+                +'<div class="ssh-pk-klist" style="max-height:170px;overflow:auto;border:1px solid #eef2f7;border-radius:6px;padding:4px 6px;background:#fff"><div class="mut tiny" style="padding:4px">type to search your SKUs…</div></div>'
+                +'<div style="margin-top:10px;display:flex;gap:8px;align-items:center"><button class="save-btn ssh-pk-add" style="background:#16a34a;color:#fff;border-color:#15803d">Add selected</button><button class="save-btn ssh-pk-cancel light">Cancel</button><span class="ssh-pk-msg mut tiny"></span></div></div>';
+              var sq=host.querySelector('.ssh-pk-sq'); if(sq)sq.oninput=function(){ var q=this.value.toLowerCase(); host.querySelectorAll('.ssh-pk-srow').forEach(function(r){ r.style.display=(!q||r.dataset.hay.indexOf(q)>=0)?'':'none'; }); };
+              var kq=host.querySelector('.ssh-pk-kq'), klist=host.querySelector('.ssh-pk-klist'), kt=null;
+              function loadSkus(q){ klist.innerHTML='<div class="mut tiny" style="padding:4px">searching…</div>';
+                fetch(EP.productSkus+'?q='+encodeURIComponent(q||'')+supQ).then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
+                  klist.innerHTML=rows.length?rows.map(function(k){return '<div class="ssh-pk-krow" style="display:flex;gap:7px;align-items:center;padding:3px 2px;font-size:12px"><input type="checkbox" class="ssh-pk-kcb" value="'+esc(k.sku)+'"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(k.sku)+'</b><span class="mut tiny" style="flex:1;min-width:0">'+esc(k.description||'')+'</span><input class="fci ssh-pk-kqty" data-sku="'+esc(k.sku)+'" placeholder="qty" style="width:60px;text-align:left" inputmode="numeric"></div>';}).join(''):'<div class="mut tiny" style="padding:4px">no matches</div>'; }); }
+              if(kq)kq.oninput=function(){ var v=this.value; if(kt)clearTimeout(kt); kt=setTimeout(function(){ loadSkus(v); },250); };
+              host.querySelector('.ssh-pk-cancel').onclick=function(){ host.style.display='none'; host.innerHTML=''; };
+              host.querySelector('.ssh-pk-add').onclick=function(){ var msg=host.querySelector('.ssh-pk-msg');
+                var sampleIds=Array.prototype.map.call(host.querySelectorAll('.ssh-pk-scb:checked'),function(c){return c.value;});
+                var skus=Array.prototype.map.call(host.querySelectorAll('.ssh-pk-kcb:checked'),function(c){ var qi=host.querySelector('.ssh-pk-kqty[data-sku="'+(window.CSS&&CSS.escape?CSS.escape(c.value):c.value)+'"]'); return {sku:c.value,qty:qi&&qi.value?qi.value:null}; });
+                if(!sampleIds.length&&!skus.length){ msg.style.color='#dc2626'; msg.textContent='Select at least one item.'; return; }
+                msg.style.color='#64748b'; msg.textContent='Adding…';
+                function afterSamples(){ if(!skus.length){ onDone&&onDone(); return; } postJSON(EP.productSampleShipmentSkuAdd,{shipment_id:shipId,skus:skus},function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;return;} onDone&&onDone(); }); }
+                if(sampleIds.length){ postJSON(EP.productSampleAdd,{shipment_id:shipId,sample_ids:sampleIds},function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;return;} afterSamples(); }); } else afterSamples(); };
+            }).catch(function(e){ host.innerHTML='<div style="color:#dc2626">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
           function ppProdTimeline(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
             fetch(EP.productNotesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){ shortNotes(notes); notes=Array.isArray(notes)?notes:[];
               var unread=notes.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
@@ -1480,6 +1536,7 @@
             tabsEl.querySelectorAll('.rtab').forEach(function(t){t.classList.toggle('active',t.dataset.pt===PORTAL_TAB);});
             setSampBadge(); setPosBadge(); setShipBadge(); setProdBadge();
             if(PORTAL_TAB==='product'){ body.innerHTML=ppProducts(_ppData.products||[]); wireProducts(); return; }
+            if(PORTAL_TAB==='sampleshipments'){ ppSampleShipments(body); return; }
             if(PORTAL_TAB==='samples'){ body.innerHTML=ppSamples(_ppData.samples||[]); wireSamples(); return; }
             if(PORTAL_TAB==='shipmentplan'){
               var today=new Date().toISOString().slice(0,10);

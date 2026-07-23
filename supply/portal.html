@@ -68,7 +68,8 @@
     dtcAccept:'/api/portal/dtc-accept',
     productNotesBase:'/api/portal/product-notes/', productNote:'/api/portal/product-note', productNotesRead:'/api/portal/product-notes-read', productSwatchBase:'/api/product/swatch/',
     productSamplesBase:'/api/portal/product-samples/', productSample:'/api/portal/product-sample', productSamplePhoto:'/api/portal/product-sample-photo', attachImgBase:'/api/supply/portal-attachment/',
-    productSampleShipments:'/api/portal/product-sample-shipments', productSampleShipmentCreate:'/api/portal/product-sample-shipment', productSampleShipmentUpdateBase:'/api/portal/product-sample-shipment/', productSampleAdd:'/api/portal/product-sample-add' };
+    productSampleShipments:'/api/portal/product-sample-shipments', productSampleShipmentCreate:'/api/portal/product-sample-shipment', productSampleShipmentUpdateBase:'/api/portal/product-sample-shipment/', productSampleShipmentDeleteBase:'/api/portal/product-sample-shipment/', productSampleAdd:'/api/portal/product-sample-add', productSampleRemove:'/api/portal/product-sample-remove',
+    productOpenSamples:'/api/portal/product-open-samples', productSkus:'/api/portal/product-skus', productSampleShipmentSkuAdd:'/api/portal/product-sample-shipment-sku', productSampleShipmentSkuRemove:'/api/portal/product-sample-shipment-sku-remove' };
 
   function showPortal(me){
     var sup=(me.suppliers||[]).join(', ')||'Supplier';
