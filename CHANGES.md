@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.018 - Product grid + add-form polish
+
+- **Add-product form:** Season / Category / Supplier are now type-to-search **datalist inputs** (same style as
+  "add branch" in the PO grid) instead of plain dropdowns. Seasons show just the code (SS27, AW28…).
+- **Product grid** re-styled to match the **PO grid** (dense .tw / pg-tbl table): columns Ref / Colour / Category /
+  Season / Supplier / Sizes / Status, with the swatch + Plan button together in the first column.
+- **Mobile:** swatch is tiny and sits on the left next to the Plan button; the Plan button becomes a black **"P"**.
+
 ## v26.017 - Product samples: supplier-submitted sample versions (Phase A)
 
 - On a Product item in the **supplier portal**, a new **Sample** sub-tab lets the supplier submit **sample versions**
