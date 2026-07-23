@@ -3,6 +3,34 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.032 - Per-user landing page + no DEMAND→SUPPLY flash on load
+
+- Server injects the user's landing slug (window.__HZ_LANDING) and hides #app until the router lands — a plain load
+  goes straight to the target page (default SUPPLY ▸ Purchase Orders); no DEMAND flicker. Sandbox → supply/purchase-orders.
+- Per-user default **landing page** — landing_page on app_permissions (migration 131), set in CONFIG ▸ Permissions
+  (dropdown of the main slugs). /api/me returns it; boot routes to it.
+- CONFIG ▸ Permissions gains the missing **PRODUCT** capability checkbox.
+
+## v26.031 - Remove portal-preview banner; "Total shipment dimensions"
+
+- Removed the blue "Previewing the portal as…" banner. Renamed the DTC "Dimensions" field to "Total shipment
+  dimensions" (portal entry + PO ▸ CLIENT/FBA display).
+
+## v26.030 - Portal Product: timeline read/unread + grid filters
+
+- Timeline shows NEW badge + unread count (header + Timeline sub-tab badge), marks read on open. Product grid gains
+  season / status (default In development) / search filters.
+
+## v26.029 - Portal product sub-tabs sticky; mobile CONFIG drawer fix
+
+- Portal product sub-tabs use the sticky .po-subnav bar (fixed like PO). Mobile CONFIG drawer sub-items render from
+  a __configNav bridge (immediately, not blocked by a slow CONFIG load).
+
+## v26.028 - Portal Product tab: scrollable grid + Master data/Documents tabs
+
+- Scrollable grid with sticky View+swatch+ref/colour first column; added Master data + Documents sub-tabs; "Add
+  sample" behind a pop-down button.
+
 ## v26.027 - Portal preview: Product tab + suppliers flag; mobile Samples scroll
 
 - /api/supply/suppliers now returns include_product_dev — so the CONFIG supplier editor shows the saved Yes/No,
