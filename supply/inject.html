@@ -5209,10 +5209,14 @@
         fetch('/api/config/permissions').then(function(r){return r.json();}).then(function(rows){
           if(rows&&rows.error){ b.innerHTML='<div class="count" style="color:#dc2626">'+esc(rows.error)+'</div>'; return; }
           function chk(email,field,val){ return '<input type="checkbox" class="pm-chk" data-em="'+esc(email)+'" data-f="'+field+'"'+(val?' checked':'')+'>'; }
+          var LAND_OPTS=[['supply/purchase-orders','SUPPLY ▸ Purchase Orders'],['supply/actions','SUPPLY ▸ Actions'],['demand','DEMAND'],['buy','BUY'],['fba','FBA'],['reports','REPORTS'],['product/plan','PRODUCT'],['config','CONFIG'],['scenario','SCENARIO']];
+          function landSel(val){ var v=val||'supply/purchase-orders'; return '<select class="pm-land" style="font-size:11px;padding:2px 5px;border:1px solid #cbd5e1;border-radius:4px">'+LAND_OPTS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===v?' selected':'')+'>'+esc(o[1])+'</option>';}).join('')+'</select>'; }
           var body=(rows||[]).map(function(r){ return '<tr data-em="'+esc(r.email)+'"><td class="l">'+esc(r.email)+'</td>'
               +'<td class="l" style="text-align:center">'+chk(r.email,'supply_edit',r.supply_edit)+'</td>'
               +'<td class="l" style="text-align:center">'+chk(r.email,'demand_edit',r.demand_edit)+'</td>'
+              +'<td class="l" style="text-align:center">'+chk(r.email,'product_edit',r.product_edit)+'</td>'
               +'<td class="l" style="text-align:center">'+chk(r.email,'is_admin',r.is_admin)+'</td>'
+              +'<td class="l">'+landSel(r.landing_page)+'</td>'
               +'<td class="l"><span class="mut tiny">'+esc(r.updated_at||'')+(r.updated_by?' · '+esc(r.updated_by):'')+'</span></td>'
               +'<td class="l"><button class="pm-del" data-em="'+esc(r.email)+'" style="cursor:pointer;border:1px solid #fecaca;background:#fff5f5;color:#b91c1c;border-radius:4px;font-size:11px;padding:3px 9px">Remove</button></td></tr>'; }).join('');
           b.innerHTML='<div class="annot"><b>CONFIG ▸ Permissions.</b> Access is <b>read-only for everyone</b> by default. Grant <b>SUPPLY</b> and/or <b>DEMAND</b> edit rights per email (the Gmail login). <b>Admin</b> can use this panel. FBA stays read-only (bar its Override column); SCENARIO is open to all; anyone with SUPPLY or DEMAND edit can edit the rest of Config. <span class="mut">Live only — your sandbox is always full-access.</span></div>'
@@ -5220,18 +5224,22 @@
             +'<div class="bar" style="gap:8px"><input class="flt" id="pm-nemail" type="email" placeholder="email@dockandbay.com" style="width:240px">'
               +'<label style="font-size:12px"><input type="checkbox" id="pm-nsupply" checked> SUPPLY</label>'
               +'<label style="font-size:12px"><input type="checkbox" id="pm-ndemand" checked> DEMAND</label>'
+              +'<label style="font-size:12px"><input type="checkbox" id="pm-nproduct"> PRODUCT</label>'
               +'<label style="font-size:12px"><input type="checkbox" id="pm-nadmin"> Admin</label>'
               +'<button class="tool-badge bg-blue" id="pm-add" style="cursor:pointer;border:none">+ Grant access</button>'
               +'<span class="pm-err" style="color:#dc2626;font-size:12px"></span></div>'
-            +'<div class="tw" style="max-width:820px"><table><thead><tr><th class="l" style="min-width:220px">Email</th><th class="l">SUPPLY edit</th><th class="l">DEMAND edit</th><th class="l">Admin</th><th class="l">Updated</th><th class="l"></th></tr></thead><tbody id="pm-tbody">'+(body||'<tr><td colspan="6" class="l mut">No one granted — everyone is read-only.</td></tr>')+'</tbody></table></div>';
+            +'<div class="tw" style="max-width:940px"><table><thead><tr><th class="l" style="min-width:220px">Email</th><th class="l">SUPPLY edit</th><th class="l">DEMAND edit</th><th class="l">PRODUCT</th><th class="l">Admin</th><th class="l">Landing page</th><th class="l">Updated</th><th class="l"></th></tr></thead><tbody id="pm-tbody">'+(body||'<tr><td colspan="8" class="l mut">No one granted — everyone is read-only.</td></tr>')+'</tbody></table></div>';
           function save(payload,cb){ fetch('/api/config/permissions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(function(r){return r.json();}).then(function(j){ if(cb)cb(j); }).catch(function(e){ if(cb)cb({error:(e&&e.message)||'failed'}); }); }
-          b.querySelectorAll('.pm-chk').forEach(function(cb){ cb.onchange=function(){ var tr=cb.closest('tr'); var payload={email:cb.dataset.em,
-              supply_edit:tr.querySelector('.pm-chk[data-f="supply_edit"]').checked, demand_edit:tr.querySelector('.pm-chk[data-f="demand_edit"]').checked, is_admin:tr.querySelector('.pm-chk[data-f="is_admin"]').checked };
-            cb.disabled=true; save(payload,function(j){ cb.disabled=false; if(j&&j.error){ alert(j.error); showSub(); } }); }; });
+          function rowPayload(tr){ return { email:tr.dataset.em,
+            supply_edit:tr.querySelector('.pm-chk[data-f="supply_edit"]').checked, demand_edit:tr.querySelector('.pm-chk[data-f="demand_edit"]').checked,
+            product_edit:tr.querySelector('.pm-chk[data-f="product_edit"]').checked, is_admin:tr.querySelector('.pm-chk[data-f="is_admin"]').checked,
+            landing_page:(tr.querySelector('.pm-land')||{}).value||'' }; }
+          b.querySelectorAll('.pm-chk').forEach(function(cb){ cb.onchange=function(){ var tr=cb.closest('tr'); cb.disabled=true; save(rowPayload(tr),function(j){ cb.disabled=false; if(j&&j.error){ alert(j.error); showSub(); } }); }; });
+          b.querySelectorAll('.pm-land').forEach(function(sel){ sel.onchange=function(){ save(rowPayload(sel.closest('tr')),function(j){ if(j&&j.error){ alert(j.error); showSub(); } }); }; });
           b.querySelectorAll('.pm-del').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Remove '+btn.dataset.em+'? They revert to read-only everywhere.'))return; fetch('/api/config/permissions/'+encodeURIComponent(btn.dataset.em),{method:'DELETE'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)return alert(j.error); showSub(); }); }; });
           document.getElementById('pm-add').onclick=function(){ var em=(document.getElementById('pm-nemail').value||'').trim(); var err=b.querySelector('.pm-err'); err.textContent='';
             if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){ err.textContent='Enter a valid email.'; return; }
-            save({email:em,supply_edit:document.getElementById('pm-nsupply').checked,demand_edit:document.getElementById('pm-ndemand').checked,is_admin:document.getElementById('pm-nadmin').checked},function(j){ if(j&&j.error){ err.textContent=j.error; return; } showSub(); }); };
+            save({email:em,supply_edit:document.getElementById('pm-nsupply').checked,demand_edit:document.getElementById('pm-ndemand').checked,product_edit:document.getElementById('pm-nproduct').checked,is_admin:document.getElementById('pm-nadmin').checked},function(j){ if(j&&j.error){ err.textContent=j.error; return; } showSub(); }); };
         }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); };
       SUBS['portal']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/suppliers').then(function(r){return r.json();}).then(function(sups){
@@ -7691,8 +7699,10 @@
     }).catch(function(e){ body.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
   function boot(){ try{ if(ME===null)fetchMe(); ensureRoot(); ensureNavButton(); ensureBellButton(); ensureSuggestButton(); ensureScenarioRoot(); ensureScenarioButton(); ensureConfigButton(); ensureProductButton();
     if(!_routed){ _routed=true; try{ if(/^#\/?(supply|config|scenario|demand|reports|buy|fba|planning|exec)(\/|$)/.test(location.hash)) applyRoute();
-      else { location.hash='#/supply/purchase-orders'; applyRoute(); } }catch(e){} }   // deep-link on first load; no hash → default landing = SUPPLY ▸ Purchase Orders
-  }catch(e){ if(window.console)console.log('[SUPPLY] boot error',e&&e.message); } }
+      else { var _land=(window.__HZ_LANDING||'supply/purchase-orders').replace(/^#?\/?/,''); location.hash='#/'+_land; applyRoute(); }   // no hash → per-user landing slug (server-injected), default SUPPLY ▸ Purchase Orders
+      var _a=document.getElementById('app'); if(_a)_a.style.visibility='';   // reveal once routed (server hid it to avoid the DEMAND→SUPPLY flash)
+    }catch(e){ var _ar=document.getElementById('app'); if(_ar)_ar.style.visibility=''; } }
+  }catch(e){ var _a2=document.getElementById('app'); if(_a2)_a2.style.visibility=''; if(window.console)console.log('[SUPPLY] boot error',e&&e.message); } }
   if(window.console)console.log('[SUPPLY] inject __APP_VERSION__ executing');
   boot(); document.addEventListener('DOMContentLoaded',boot); window.addEventListener('load',boot);
   setTimeout(boot,600); setTimeout(boot,1800); setTimeout(boot,4000);

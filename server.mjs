@@ -574,7 +574,11 @@ app.get('/', async (_req, res) => {
     // String.replace would otherwise interpret as special patterns ("text after the match"),
     // corrupting the script. A replacer function disables all `$` substitution.
     const FBADIMS_JS = '<script>window.FBA_DIMS=' + JSON.stringify(FBADIMS) + ';</script>';
-    const injectTail = FBADIMS_JS + FIT + (DEV ? loadInject() : SUPPLY_INJECT).split('__APP_VERSION__').join(APP_VERSION) + '</body>';
+    // Per-user landing slug + hide #app until the router lands, so a plain load goes straight to the user's page
+    // (default SUPPLY ▸ Purchase Orders) with no DEMAND→SUPPLY flash. inject.html reveals #app once routed.
+    let _land = 'supply/purchase-orders'; try { _land = (await permsFor(_req)).landing_page || _land; } catch (_) {}
+    const LANDING_JS = '<script>window.__HZ_LANDING=' + JSON.stringify(_land) + ';(function(){var a=document.getElementById("app");if(a&&!location.hash)a.style.visibility="hidden";setTimeout(function(){var b=document.getElementById("app");if(b)b.style.visibility="";},3000);})();</script>';
+    const injectTail = LANDING_JS + FBADIMS_JS + FIT + (DEV ? loadInject() : SUPPLY_INJECT).split('__APP_VERSION__').join(APP_VERSION) + '</body>';
     html = html.replace('</body>', () => injectTail);
     // Inject the configured USD→GBP rate into both clients (CF_GBP in inject.html, AF_GBP in the artefact).
     html = html.replace(/var CF_GBP\s*=\s*[\d.]+/, 'var CF_GBP=' + GBP_RATE).replace(/var AF_GBP\s*=\s*[\d.]+/, 'var AF_GBP=' + GBP_RATE);
@@ -3415,24 +3419,24 @@ async function notePoEdited(db, po, user) {
 // planner.app_permissions is read-only everywhere.
 async function permsFor(req) {
   const email = authUser(req);
-  if (!email) return { email: null, live: false, supply_edit: true, demand_edit: true, product_edit: true, is_admin: true };
+  if (!email) return { email: null, live: false, supply_edit: true, demand_edit: true, product_edit: true, is_admin: true, landing_page: 'supply/purchase-orders' };
   const e = email.toLowerCase();
   let row = null;
-  try { row = (await pool.query('SELECT supply_edit, demand_edit, product_edit, is_admin FROM planner.app_permissions WHERE lower(email)=$1', [e])).rows[0] || null; } catch (_) {}
-  return { email: e, live: true, supply_edit: !!(row && row.supply_edit), demand_edit: !!(row && row.demand_edit), product_edit: !!(row && row.product_edit), is_admin: !!(row && row.is_admin) };
+  try { row = (await pool.query('SELECT supply_edit, demand_edit, product_edit, is_admin, landing_page FROM planner.app_permissions WHERE lower(email)=$1', [e])).rows[0] || null; } catch (_) {}
+  return { email: e, live: true, supply_edit: !!(row && row.supply_edit), demand_edit: !!(row && row.demand_edit), product_edit: !!(row && row.product_edit), is_admin: !!(row && row.is_admin), landing_page: (row && row.landing_page) || 'supply/purchase-orders' };
 }
 // What the client asks on load to decide what to enable (read-only UI otherwise).
 app.get('/api/me', async (req, res) => { try { res.json(await permsFor(req)); } catch (e) { res.status(500).json({ error: e.message }); } });
 // Permissions admin — ADMIN-ONLY (sandbox counts as admin so Ben can build/test locally).
 app.get('/api/config/permissions', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
-  try { const r = await pool.query('SELECT email, supply_edit, demand_edit, product_edit, is_admin, to_char(updated_at,\'YYYY-MM-DD HH24:MI\') updated_at, updated_by FROM planner.app_permissions ORDER BY email'); res.json(r.rows); }
+  try { const r = await pool.query('SELECT email, supply_edit, demand_edit, product_edit, is_admin, coalesce(landing_page,\'\') landing_page, to_char(updated_at,\'YYYY-MM-DD HH24:MI\') updated_at, updated_by FROM planner.app_permissions ORDER BY email'); res.json(r.rows); }
   catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/config/permissions', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
   const b = req.body || {}; const email = String(b.email || '').trim().toLowerCase();
   if (!email || email.indexOf('@') < 0) return res.status(400).json({ error: 'valid email required' });
-  try { await pool.query(`INSERT INTO planner.app_permissions (email, supply_edit, demand_edit, product_edit, is_admin, updated_at, updated_by)
-      VALUES ($1,$2,$3,$4,$5,now(),$6) ON CONFLICT (email) DO UPDATE SET supply_edit=excluded.supply_edit, demand_edit=excluded.demand_edit, product_edit=excluded.product_edit, is_admin=excluded.is_admin, updated_at=now(), updated_by=excluded.updated_by`,
-      [email, !!b.supply_edit, !!b.demand_edit, !!b.product_edit, !!b.is_admin, me.email || 'sandbox']);
+  try { await pool.query(`INSERT INTO planner.app_permissions (email, supply_edit, demand_edit, product_edit, is_admin, landing_page, updated_at, updated_by)
+      VALUES ($1,$2,$3,$4,$5,$6,now(),$7) ON CONFLICT (email) DO UPDATE SET supply_edit=excluded.supply_edit, demand_edit=excluded.demand_edit, product_edit=excluded.product_edit, is_admin=excluded.is_admin, landing_page=excluded.landing_page, updated_at=now(), updated_by=excluded.updated_by`,
+      [email, !!b.supply_edit, !!b.demand_edit, !!b.product_edit, !!b.is_admin, (b.landing_page || '').trim() || null, me.email || 'sandbox']);
     res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.delete('/api/config/permissions/:email', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
   const email = String(req.params.email || '').trim().toLowerCase(); if (!email) return res.status(400).json({ error: 'email required' });
