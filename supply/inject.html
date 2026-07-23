@@ -34,8 +34,9 @@
 #product-root .save-btn.light{background:#fff}
 #product-root .save-btn:hover{background:#eef2f7}
 #product-root .pd-tabs{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 12px}
-#product-root .pd-tab{background:none;border:none;padding:5px 12px;font-size:12px;font-weight:600;color:#475569;cursor:pointer;font-family:inherit;border-radius:5px}
-#product-root .pd-tab.active{background:#2563eb;color:#fff}
+#product-root .pd-tab{background:transparent;border:none;padding:6px 14px;font-size:12px;font-weight:500;cursor:pointer;color:#7c93b8;border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit}
+#product-root .pd-tab:hover{color:#2563eb}
+#product-root .pd-tab.active{color:#2563eb;border-bottom-color:#3b82f6;font-weight:600}
 #product-root .pg-detrow > td{background:#fff;border-bottom:2px solid #dbeafe;padding:12px 10px}
 /* highlight the expanded row light yellow (like the PO grid) — beats the sticky/hover bg */
 #product-root table.pg-tbl tr.pg-openrow > td{background:#fffbeb}
@@ -7499,7 +7500,7 @@
   // Inline cell picker for the product grid (same popup UX as the PO grid's supplier/branch picker) — edits are
   // bound straight to the master-data fields via /api/product/item/<ref>. kind = supplier | season | category.
   function prodPickBtn(ref,field,val,kind){ return '<button class="cell-pick prod-cell-pick" data-ref="'+esc(ref)+'" data-field="'+field+'" data-kind="'+kind+'" title="'+esc(val||'')+'">'+(val?esc(val):'<span class="mut">— <span style="background:#fee2e2;color:#991b1b;font-weight:700;border-radius:3px;padding:0 3px">set</span></span>')+' ▾</button>'; }
-  function openProdCellPick(btn){ closeShPop(); loadProdCfg(function(cfg){ ensureSuppliers(function(){
+  function openProdCellPick(btn,onSaved){ closeShPop(); loadProdCfg(function(cfg){ ensureSuppliers(function(){
     var kind=btn.dataset.kind, ref=btn.dataset.ref, lbl=(kind==='supplier'?'supplier':kind);
     var list = kind==='supplier' ? (supplierList||[]).slice().sort().map(function(n){return {v:n,l:n};})
       : kind==='season' ? (cfg.seasons||[]).filter(function(s){return s.active!==false;}).map(function(s){return {v:s.code,l:s.code};})
@@ -7507,7 +7508,7 @@
     var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop';
     pop.innerHTML='<div class="shpop-h">Set '+esc(lbl)+' for <b>'+esc(ref)+'</b></div><input class="shpop-q" placeholder="search '+esc(lbl)+'…"><div id="shpop-list"></div>';
     placePop(pop, btn.getBoundingClientRect()); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
-    function set(val){ var body={}; body[btn.dataset.field]=val; shipPost('/api/product/item/'+encodeURIComponent(ref),body,function(j){ if(j&&j.error){alert('Failed: '+j.error);return;} closeShPop(); _prodCfg=null; renderProductPlan(document.getElementById('product-content')); }); }
+    function set(val){ var body={}; body[btn.dataset.field]=val; shipPost('/api/product/item/'+encodeURIComponent(ref),body,function(j){ if(j&&j.error){alert('Failed: '+j.error);return;} closeShPop(); _prodCfg=null; if(typeof onSaved==='function')onSaved(); else renderProductPlan(document.getElementById('product-content')); }); }
     function render(q){ q=(q||'').trim().toLowerCase(); var html='<div class="shpop-opt unassign" data-clear="1">— Clear</div>';
       list.filter(function(n){return !q||n.l.toLowerCase().indexOf(q)>=0;}).slice(0,q?80:20).forEach(function(n){ html+='<div class="shpop-opt" data-v="'+esc(n.v)+'">'+esc(n.l)+'</div>'; });
       var l=document.getElementById('shpop-list'); l.innerHTML=html;
@@ -7645,7 +7646,7 @@
     body.innerHTML=prodSupList()+'<div style="max-width:660px">'
       +pRow('Season','<select class="fci pm-field pm-fld" data-f="season" id="pm-season">'+seasonOpts+'</select>')
       +pRow('Category','<select class="fci pm-field pm-fld" data-f="category" id="pm-cat">'+catOpts+'</select>')
-      +pRow('Supplier','<input class="fci pm-field pm-fld" data-f="supplier" id="pm-sup" list="prod-suplist" value="'+esc(it.supplier)+'" placeholder="search supplier…"><span style="color:#94a3b8;font-size:11px;margin-left:6px">ref keeps its original code'+(it.supplier_code?' ('+esc(it.supplier_code)+')':'')+'</span>')
+      +pRow('Supplier','<span class="pm-sup-pick" style="display:inline-block;min-width:200px;border:1px solid #cbd5e1;border-radius:5px;padding:4px 8px">'+prodPickBtn(it.ref,'supplier',it.supplier,'supplier')+'</span> <span style="color:#94a3b8;font-size:11px;margin-left:6px">ref keeps its original code'+(it.supplier_code?' ('+esc(it.supplier_code)+')':'')+'</span>')
       +pRow('Colour way','<input class="fci pm-field pm-fld" data-f="colour_name" id="pm-colour" value="'+esc(it.colour_name)+'">')
       +pRow('Status','<select class="fci pm-field pm-fld" data-f="status" id="pm-status">'+statOpts+'</select>')
       +pRow('Description','<textarea class="fci pm-fld" data-f="description" id="pm-desc" rows="3" style="width:100%;max-width:620px;box-sizing:border-box">'+esc(it.description)+'</textarea>')
@@ -7660,6 +7661,7 @@
       +'</div>';
     body.querySelectorAll('.pm-fld').forEach(function(el){ el.onchange=function(){ var msg=body.querySelector('#pm-msg'); if(msg){msg.style.color='#64748b';msg.textContent='Saving…';}
       var payload={}; payload[el.dataset.f]=el.value; shipPost('/api/product/item/'+encodeURIComponent(it.ref),payload,function(j){ if(msg){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;} else { msg.style.color='#16a34a'; msg.textContent='Saved ✓'; setTimeout(function(){ if(msg)msg.textContent=''; },1200); } } _prodCfg=null; }); }; });
+    var _spk=body.querySelector('.pm-sup-pick .prod-cell-pick'); if(_spk)_spk.onclick=function(e){ e.stopPropagation(); openProdCellPick(_spk,function(){ renderProductDetail(it.ref); }); };
     body.querySelector('#pm-del').onclick=function(){ if(!confirm('Delete '+it.ref+'? This removes its sizes, documents and timeline.'))return; shipPost('/api/product/item/'+encodeURIComponent(it.ref)+'/delete',{},function(){ selectProductSub('plan'); }); };
     body.querySelector('#pm-addsz').onclick=function(){ var v=body.querySelector('#pm-newsz').value.trim(); if(!v)return; shipPost('/api/product/size',{ref:it.ref,size_label:v},function(){ renderProductDetail(it.ref); }); };
     body.querySelectorAll('.pm-sz').forEach(function(el){ el.onchange=function(){ var b={}; b[el.dataset.f]=el.value; shipPost('/api/product/size/'+el.dataset.id,b,function(){}); }; });
