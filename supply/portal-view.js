@@ -1418,7 +1418,17 @@
                   +'<span style="font-size:10px">'+(s.colour_verified?'<span style="color:#16a34a">✓ colour</span>':'<span class="mut">colour?</span>')+' &nbsp; '+(s.quality_verified?'<span style="color:#16a34a">✓ quality</span>':'<span class="mut">quality?</span>')+'</span>'
                   +'<button class="save-btn pp-samp-label" data-ref="'+esc(s.ref)+'" style="margin-left:auto">⤓ Download label</button></div>'
                   +(s.description?'<div style="margin:4px 0;white-space:pre-wrap">'+esc(s.description)+'</div>':'')
-                  +(ph?'<div style="margin-top:4px">'+ph+'</div>':'')+'</div>'; }).join('')||'<div class="mut" style="padding:4px 0;text-align:left">No sample versions yet.</div>';
+                  +(ph?'<div style="margin-top:4px">'+ph+'</div>':'')
+                  +(s.shipment_ref
+                    ? '<div style="margin-top:7px;padding:8px 10px;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px"><div style="margin-bottom:5px">📦 Sample shipment <b>'+esc(s.shipment_ref)+'</b></div>'
+                      +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">'
+                      +'<label style="font-size:11px">Carrier<br><select class="fci pss-car" data-ship="'+s.sample_shipment_id+'" style="text-align:left">'+['DHL','FedEx','UPS','SF Express','Other'].map(function(o){return '<option'+(o===s.shipment_carrier?' selected':'')+'>'+o+'</option>';}).join('')+'</select></label>'
+                      +'<label style="font-size:11px">Tracking<br><input class="fci pss-trk" data-ship="'+s.sample_shipment_id+'" value="'+esc(s.shipment_tracking)+'" placeholder="tracking…" style="width:150px;text-align:left"></label>'
+                      +'<button class="save-btn pss-save" data-ship="'+s.sample_shipment_id+'">Save</button>'
+                      +(s.shipment_tracking?'<span style="align-self:center;font-size:12px">'+carrierTrackLink(s.shipment_carrier,s.shipment_tracking)+'</span>':'')
+                      +'</div></div>'
+                    : '<div style="margin-top:7px"><button class="save-btn pp-samp-ship" data-id="'+s.id+'" style="font-size:11px">＋ Add to sample shipment</button></div>')
+                  +'</div>'; }).join('')||'<div class="mut" style="padding:4px 0;text-align:left">No sample versions yet.</div>';
               box.innerHTML='<div style="text-align:left"><div style="font-weight:700;font-size:13px;margin-bottom:6px">Sample versions</div>'+rows
                 +'<div style="margin-top:8px"><button class="save-btn pp-add-sample" style="background:#16a34a;color:#fff;border-color:#15803d">+ Add sample</button></div>'
                 +'<div class="pp-sample-form" style="display:none;border:1px dashed #cbd5e1;border-radius:8px;padding:11px 13px;margin-top:10px;background:#f8fafc">'
@@ -1431,6 +1441,17 @@
                 +'<div style="margin-top:7px"><label style="font-size:12px">Photos <input type="file" class="ps2-photos" accept="image/*" multiple style="font-size:12px"></label></div>'
                 +'<div style="margin-top:9px"><button class="save-btn ps2-save" data-ref="'+esc(ref)+'">Submit sample version</button> <span class="ps2-msg" style="font-size:12px;margin-left:6px"></span></div></div></div>';
               box.querySelectorAll('.pp-samp-label').forEach(function(lb){ lb.onclick=function(){ dlSampleLabel(lb.dataset.ref); }; });
+              box.querySelectorAll('.pss-save').forEach(function(b){ b.onclick=function(){ var sid=b.dataset.ship, cs=box.querySelector('.pss-car[data-ship="'+sid+'"]'), ts=box.querySelector('.pss-trk[data-ship="'+sid+'"]');
+                postJSON(EP.productSampleShipmentUpdateBase+sid,{carrier:cs?cs.value:'',tracking_code:ts?ts.value:''},function(j){ if(j&&j.error){alert(j.error);return;} ppProdSamples(box,ref); }); }; });
+              box.querySelectorAll('.pp-samp-ship').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var host=b.parentNode, sampleId=b.dataset.id; host.innerHTML='<span class="mut tiny">Loading shipments…</span>';
+                fetch(EP.productSampleShipments+'?supplier='+encodeURIComponent(STATE.supplierName||'')).then(function(r){return r.json();}).then(function(ships){ ships=Array.isArray(ships)?ships:[];
+                  host.innerHTML='<div style="border:1px solid #cbd5e1;border-radius:6px;padding:8px;font-size:12px;max-width:320px"><div style="font-weight:600;margin-bottom:6px">Add this sample to a shipment</div>'
+                    +'<button class="save-btn pss-new" style="background:#16a34a;color:#fff;border-color:#15803d">＋ New shipment</button>'
+                    +(ships.length?'<div style="margin:7px 0 2px;color:#64748b">or add to an existing one:</div>'+ships.map(function(sh){return '<div class="pss-existing" data-ship="'+sh.id+'" style="padding:6px;cursor:pointer;border-top:1px solid #f1f1f1">'+esc(sh.ref)+(sh.carrier?' · '+esc(sh.carrier):'')+(sh.tracking_code?' · '+esc(sh.tracking_code):'')+'</div>';}).join(''):'')
+                    +'</div>';
+                  host.querySelector('.pss-new').onclick=function(){ postJSON(EP.productSampleShipmentCreate,{supplier:STATE.supplierName},function(j){ if(j&&j.error){alert(j.error);return;} if(!j||!j.id)return; postJSON(EP.productSampleAdd,{sample_id:sampleId,shipment_id:j.id},function(k){ if(k&&k.error){alert(k.error);return;} ppProdSamples(box,ref); }); }); };
+                  host.querySelectorAll('.pss-existing').forEach(function(o){ o.onclick=function(){ postJSON(EP.productSampleAdd,{sample_id:sampleId,shipment_id:o.dataset.ship},function(k){ if(k&&k.error){alert(k.error);return;} ppProdSamples(box,ref); }); }; });
+                }).catch(function(){ host.innerHTML='<span style="color:#dc2626">Could not load shipments</span>'; }); }; });
               var _addb=box.querySelector('.pp-add-sample'), _form=box.querySelector('.pp-sample-form'); if(_addb)_addb.onclick=function(){ _form.style.display=(_form.style.display!=='none')?'none':''; };   // no auto-focus on the date input (it auto-opens the mobile picker); date defaults to today, opens on tap
               var sv=box.querySelector('.ps2-save'); sv.onclick=function(){ var msg=box.querySelector('.ps2-msg');
                 var col=box.querySelector('.ps2-col').checked, qual=box.querySelector('.ps2-qual').checked;

@@ -3280,6 +3280,24 @@ app.post('/api/product/notes-read', async (req, res) => {   // mark this product
   try { await pool.query(`UPDATE planner.supplier_notes SET read_at=now() WHERE po=$1 AND author_kind='internal' AND read_at IS NULL`, [ref]); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Product sample shipments — admin/preview mirror of the portal endpoints (supplier passed in body/query).
+app.get('/api/product/sample-shipments', async (req, res) => { const sup = (req.query.supplier || '').trim();
+  try { res.json((await pool.query(`SELECT id, ref, coalesce(carrier,'') carrier, coalesce(tracking_code,'') tracking_code,
+    to_char(created_at,'YYYY-MM-DD HH24:MI') created_at FROM planner.product_sample_shipments WHERE ($1='' OR supplier=$1) ORDER BY created_at DESC`, [sup])).rows); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/product/sample-shipment', async (req, res) => { const b = req.body || {};
+  try { const r = await pool.query(`INSERT INTO planner.product_sample_shipments (supplier, carrier, tracking_code, created_by) VALUES ($1,$2,$3,$4) RETURNING id, ref`,
+    [(b.supplier || '').trim() || null, (b.carrier || '').trim() || null, (b.tracking_code || '').trim() || null, (b.created_by || '').trim() || null]);
+    res.json({ ok: true, id: r.rows[0].id, ref: r.rows[0].ref }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/product/sample-shipment/:id', async (req, res) => { const b = req.body || {};
+  try { await pool.query(`UPDATE planner.product_sample_shipments SET carrier=$2, tracking_code=$3, updated_at=now() WHERE id=$1`,
+    [req.params.id, (b.carrier || '').trim() || null, (b.tracking_code || '').trim() || null]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/product/sample-add', async (req, res) => { const b = req.body || {};
+  if (!b.sample_id || !b.shipment_id) return res.status(400).json({ error: 'sample_id + shipment_id required' });
+  try { const sr = (await pool.query(`SELECT sample_shipment_id FROM planner.product_dev_samples WHERE id=$1`, [b.sample_id])).rows[0];
+    if (sr && sr.sample_shipment_id) return res.status(400).json({ error: 'This sample is already on a shipment.' });
+    await pool.query(`UPDATE planner.product_dev_samples SET sample_shipment_id=$2 WHERE id=$1 AND sample_shipment_id IS NULL`, [b.sample_id, b.shipment_id]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/product/notes-read-supplier', async (req, res) => {   // D&B side: mark SUPPLIER notes read (clears the main-app unread badge + ✉ bell)
   const ref = ((req.body || {}).ref || '').trim();
   if (!ref) return res.status(400).json({ error: 'ref required' });
@@ -3323,10 +3341,13 @@ app.post('/api/product/category-code', async (req, res) => {
 });
 // ── Product SAMPLE VERSIONS (v1/v2…) — supplier-created in the portal; visible in the main app (migration 130) ──
 async function productSampleList(itemRef) {
-  const rows = (await pool.query(`SELECT id, version, (item_ref||'_v'||version) ref, to_char(sample_date,'YYYY-MM-DD') sample_date,
-    colour_verified, quality_verified, coalesce(description,'') description, coalesce(created_by,'') created_by,
-    to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, sample_shipment_id
-    FROM planner.product_dev_samples WHERE item_ref=$1 ORDER BY version`, [itemRef])).rows;
+  const rows = (await pool.query(`SELECT ps.id, ps.version, (ps.item_ref||'_v'||ps.version) ref, to_char(ps.sample_date,'YYYY-MM-DD') sample_date,
+    ps.colour_verified, ps.quality_verified, coalesce(ps.description,'') description, coalesce(ps.created_by,'') created_by,
+    to_char(ps.created_at,'YYYY-MM-DD HH24:MI') created_at, ps.sample_shipment_id,
+    sh.ref shipment_ref, coalesce(sh.carrier,'') shipment_carrier, coalesce(sh.tracking_code,'') shipment_tracking
+    FROM planner.product_dev_samples ps
+    LEFT JOIN planner.product_sample_shipments sh ON sh.id = ps.sample_shipment_id
+    WHERE ps.item_ref=$1 ORDER BY ps.version`, [itemRef])).rows;
   if (rows.length) {
     const keys = rows.map(r => 'PSAMPLE-' + r.id);
     const ph = (await pool.query(`SELECT po, id, filename FROM planner.portal_attachments WHERE po = ANY($1) AND category='product_sample' ORDER BY uploaded_at`, [keys])).rows;
@@ -7571,6 +7592,32 @@ app.post('/api/portal/product-sample-photo', portalAuth, async (req, res) => { c
   try { const sr = (await pool.query(`SELECT item_ref FROM planner.product_dev_samples WHERE id=$1`, [id])).rows[0];
     if (!sr || !(await portalOwnsProduct(req, sr.item_ref))) return res.status(403).json({ error: 'not your sample' });
     res.json({ ok: true, id: await insertProductSamplePhoto(id, b, req.portal.email || null) }); } catch (e) { res.status(500).json({ error: e.message }); } });
+// PRODUCT SAMPLE SHIPMENTS (portal, supplier-scoped) — bundle sample versions onto a shipment (migration 132)
+async function portalOwnsSampleShipment(req, id) { if (!id || !req.portal.suppliers.length) return false;
+  return (await pool.query(`SELECT 1 FROM planner.product_sample_shipments WHERE id=$1 AND supplier = ANY($2)`, [id, req.portal.suppliers])).rowCount > 0; }
+app.get('/api/portal/product-sample-shipments', portalAuth, async (req, res) => {
+  try { res.json((await pool.query(`SELECT id, ref, coalesce(carrier,'') carrier, coalesce(tracking_code,'') tracking_code,
+    to_char(created_at,'YYYY-MM-DD HH24:MI') created_at FROM planner.product_sample_shipments WHERE supplier = ANY($1) ORDER BY created_at DESC`, [req.portal.suppliers])).rows); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/portal/product-sample-shipment', portalAuth, async (req, res) => {   // create a new (empty) sample shipment
+  try { const sup = (req.portal.suppliers || [])[0] || null;
+    const r = await pool.query(`INSERT INTO planner.product_sample_shipments (supplier, carrier, tracking_code, created_by) VALUES ($1,$2,$3,$4) RETURNING id, ref`,
+      [sup, ((req.body || {}).carrier || '').trim() || null, ((req.body || {}).tracking_code || '').trim() || null, req.portal.email || null]);
+    res.json({ ok: true, id: r.rows[0].id, ref: r.rows[0].ref }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/portal/product-sample-shipment/:id', portalAuth, async (req, res) => {   // update carrier / tracking
+  const id = req.params.id, b = req.body || {};
+  if (!(await portalOwnsSampleShipment(req, id))) return res.status(403).json({ error: 'not your shipment' });
+  try { await pool.query(`UPDATE planner.product_sample_shipments SET carrier=$2, tracking_code=$3, updated_at=now() WHERE id=$1`,
+    [id, (b.carrier || '').trim() || null, (b.tracking_code || '').trim() || null]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/portal/product-sample-add', portalAuth, async (req, res) => {   // add a sample version to a shipment — ONCE
+  const b = req.body || {}, sampleId = b.sample_id, shipId = b.shipment_id;
+  if (!sampleId || !shipId) return res.status(400).json({ error: 'sample_id + shipment_id required' });
+  try { const sr = (await pool.query(`SELECT item_ref, sample_shipment_id FROM planner.product_dev_samples WHERE id=$1`, [sampleId])).rows[0];
+    if (!sr || !(await portalOwnsProduct(req, sr.item_ref))) return res.status(403).json({ error: 'not your sample' });
+    if (!(await portalOwnsSampleShipment(req, shipId))) return res.status(403).json({ error: 'not your shipment' });
+    if (sr.sample_shipment_id) return res.status(400).json({ error: 'This sample is already on a shipment.' });   // add once only
+    await pool.query(`UPDATE planner.product_dev_samples SET sample_shipment_id=$2 WHERE id=$1 AND sample_shipment_id IS NULL`, [sampleId, shipId]);
+    res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
 
 // ── PORTAL SAMPLES (supplier-scoped) ──────────────────────────────────────────
 async function portalOwnsSample(req, id){ if(!id)return null;
