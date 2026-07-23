@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.049 - Payments Due "pay" persists on screen + comma amounts + timeline "unread"
+
+- **Payments Due "pay" button** now fills the row's amount + date and saves via the same path as typing, so
+  the row **stays on screen** (no auto re-filter out) until a manual refresh — matching manual entry.
+- **Comma-formatted amounts** ("2,192.25") now save everywhere — `patch()` strips thousands separators before
+  the `::numeric` cast (previously only "2192.25" worked). Verified round-trip.
+- **PRODUCT timeline**: an unread supplier note now reads **"unread"** (red badge) instead of "NEW".
+
 ## v26.048 - PRODUCT notification badges render as red badges (CSS scope fix)
 
 - `.ex-badge` was only styled under `#supply-root`; the PRODUCT module lives under `#product-root`, so its

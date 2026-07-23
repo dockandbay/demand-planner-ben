@@ -5824,15 +5824,13 @@
         if(g==='po')gotoPO(x.dataset.k,'pay'); else if(g==='dep')gotoDeposit(x.dataset.k); else gotoOther(); }; });
       document.querySelectorAll('#pdue-bar .pill[data-ps]').forEach(function(p){p.onclick=function(){PDUE_STATE.status=p.dataset.ps;draw();};});
       document.getElementById('pdue-sup').onchange=function(){PDUE_STATE.supplier=this.value;draw();};
-      // green "pay" → set the milestone amount to the due amount + payment date to today (local tz), then redraw
-      document.querySelectorAll('#pdue-wrap .pdue-pay').forEach(function(b){ b.onclick=function(){ b.disabled=true; var t=b.textContent; b.textContent='…';
-        var body={}; body[b.dataset.af]=b.dataset.amt; body[b.dataset.df]=localToday();
-        fetch(b.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
-          .then(function(j){ if(j&&j.error)throw new Error(j.error);
-            var rr=rows.filter(function(x){return x.ep===b.dataset.ep && x.dt_field===b.dataset.df;})[0];
-            if(rr){ rr.dt_val=localToday(); rr.amt_val=b.dataset.amt; rr.paid=true; rr.overdue=false; }
-            invalidateDerived(); draw(); })
-          .catch(function(e){ b.disabled=false; b.textContent=t; alert('Failed: '+(e.message||e)); }); }; }); }
+      // green "pay" → fill the row's amount (= due) + payment date (today, local tz) and save via the same path as
+      // typing, so the row STAYS on screen (no re-filter) until the next manual refresh — matching manual entry.
+      document.querySelectorAll('#pdue-wrap .pdue-pay').forEach(function(b){ b.onclick=function(){ var tr=b.closest('tr'); if(!tr)return;
+        var amtInp=tr.querySelector('.fci[data-field="'+b.dataset.af+'"]'), dtInp=tr.querySelector('.fci[data-field="'+b.dataset.df+'"]');
+        if(amtInp){ amtInp.value=b.dataset.amt; amtInp.dispatchEvent(new Event('change')); }
+        if(dtInp){ dtInp.value=localToday(); dtInp.dispatchEvent(new Event('change')); }
+        b.disabled=true; b.textContent='✓'; }; }); }
     draw(); }
   function renderPaymentsReport(b){ b.innerHTML='<div class="count">Loading…</div>';
     fetch('/api/supply/payments-report').then(function(r){return r.json();}).then(function(rows){
@@ -7748,7 +7746,7 @@
     fetch('/api/product/notes/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){ notes=Array.isArray(notes)?notes:[];
       var unreadSup=notes.filter(function(n){return n.author_kind==='supplier'&&!n.read;}).length;
       var list=notes.slice().reverse().map(function(n){ var sup=n.author_kind==='supplier'; var who=sup?'supplier':(n.author_email?shortUser(n.author_email):'Dock & Bay'); var isNew=(sup&&!n.read);
-        return '<div style="padding:7px 0;border-bottom:1px solid #f1f1f1'+(isNew?';background:#fffbeb':'')+'"><div style="color:#94a3b8;font-size:11px">'+esc(n.created_at||'')+' · '+esc(who)+(isNew?' <span class="ex-badge">NEW</span>':'')+'</div><div style="white-space:pre-wrap">'+esc(n.body||'')+'</div></div>'; }).join('')||'<div style="color:#94a3b8;padding:6px 0">No timeline entries yet.</div>';
+        return '<div style="padding:7px 0;border-bottom:1px solid #f1f1f1'+(isNew?';background:#fffbeb':'')+'"><div style="color:#94a3b8;font-size:11px">'+esc(n.created_at||'')+' · '+esc(who)+(isNew?' <span class="ex-badge" style="width:auto;padding:0 6px">unread</span>':'')+'</div><div style="white-space:pre-wrap">'+esc(n.body||'')+'</div></div>'; }).join('')||'<div style="color:#94a3b8;padding:6px 0">No timeline entries yet.</div>';
       body.innerHTML='<div style="max-width:640px"><div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:10px"><textarea class="fci" id="pt-in" rows="2" placeholder="Add a note…" style="flex:1"></textarea><button class="save-btn" id="pt-post" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Post</button><button class="save-btn light" id="pt-esc" title="escalate to the product-development team" style="color:#b45309">⚑ Escalate</button></div><div>'+list+'</div></div>';
       if(unreadSup>0){ shipPost('/api/product/notes-read-supplier',{ref:ref},function(){ if(typeof loadProductUnread==='function')loadProductUnread(); }); }   // D&B has now seen them → clear the unread badges
       body.querySelector('#pt-post').onclick=function(){ var t=body.querySelector('#pt-in').value.trim(); if(!t)return; shipPost('/api/product/note',{ref:ref,body:t,author_email:(window.ME&&ME.email)||''},function(){ renderProdTimeline(body,ref); }); };

@@ -2596,7 +2596,10 @@ async function patch(res, table, keyCol, keyVal, allowed, body, keyType) {
   for (const k of Object.keys(body || {})) {
     if (!allowed[k]) continue;
     sets.push(`${k}=$${i++}::${allowed[k]}`);
-    vals.push(body[k] === '' ? null : body[k]);
+    let _v = body[k] === '' ? null : body[k];
+    // numeric fields: tolerate thousands separators ("2,192.25" → "2192.25") so a comma-formatted amount saves
+    if (allowed[k] === 'numeric' && typeof _v === 'string') { _v = _v.replace(/,/g, '').trim(); if (_v === '') _v = null; }
+    vals.push(_v);
   }
   if (!sets.length) return res.status(400).json({ error: 'no editable fields' });
   vals.push(keyVal);
