@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.051 - "Assign deposit" no longer red once a PO is fully paid
+
+- The deposit picker only shows the red "— assign" prompt when a start deposit is genuinely still needed
+  (supplier start% > 0 AND the PO still owes money). Once a PO is fully paid, it shows the neutral grey
+  "no deposit" instead of red (e.g. PO-54USMQ1-FEB, paid in full via the balance). New `poFullyPaid()` gate.
+
 ## v26.050 - Payments Due + Payments Report PO links open the popout drawer
 
 - The PO-number links on both the **Payments Due** and **Payments Report** reports now open the PO in the
