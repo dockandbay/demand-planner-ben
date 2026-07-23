@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.050 - Payments Due + Payments Report PO links open the popout drawer
+
+- The PO-number links on both the **Payments Due** and **Payments Report** reports now open the PO in the
+  existing right-side **popout drawer** (on the PAYMENTS sub-tab), instead of navigating away to the
+  Purchase Orders tab. Rewired the links to `openPODrawer(po,'pay')`; no new UI.
+
 ## v26.049 - Payments Due "pay" persists on screen + comma amounts + timeline "unread"
 
 - **Payments Due "pay" button** now fills the row's amount + date and saves via the same path as typing, so

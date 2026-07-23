@@ -5821,7 +5821,7 @@
       document.getElementById('pdue-wrap').innerHTML=h+'</tbody></table></div>';
       bindEdits();
       document.querySelectorAll('#pdue-wrap .pdue-ref').forEach(function(x){ x.onclick=function(){ var g=x.dataset.go;
-        if(g==='po')gotoPO(x.dataset.k,'pay'); else if(g==='dep')gotoDeposit(x.dataset.k); else gotoOther(); }; });
+        if(g==='po')openPODrawer(x.dataset.k,'pay'); else if(g==='dep')gotoDeposit(x.dataset.k); else gotoOther(); }; });
       document.querySelectorAll('#pdue-bar .pill[data-ps]').forEach(function(p){p.onclick=function(){PDUE_STATE.status=p.dataset.ps;draw();};});
       document.getElementById('pdue-sup').onchange=function(){PDUE_STATE.supplier=this.value;draw();};
       // green "pay" → fill the row's amount (= due) + payment date (today, local tz) and save via the same path as
@@ -5983,7 +5983,7 @@
       +'</tbody></table></div>'; }
   function bindPayFx(b){
     b.querySelectorAll('.pay-exp').forEach(function(btn){ btn.onclick=function(){ var ex=document.getElementById('payexp-'+btn.dataset.i); if(!ex)return; var open=ex.style.display!=='none'; ex.style.display=open?'none':''; btn.textContent=open?'▸':'▾'; }; });
-    b.querySelectorAll('.pr-ref').forEach(function(x){ x.onclick=function(){ var g=x.dataset.go; if(g==='po')gotoPO(x.dataset.k); else if(g==='dep')gotoDeposit(x.dataset.k); else if(g==='other')gotoOther(); }; });
+    b.querySelectorAll('.pr-ref').forEach(function(x){ x.onclick=function(){ var g=x.dataset.go; if(g==='po')openPODrawer(x.dataset.k,'pay'); else if(g==='dep')gotoDeposit(x.dataset.k); else if(g==='other')gotoOther(); }; });
     // bank-amount box: show with thousands separators; reformat on blur, strip commas before saving
     b.querySelectorAll('.pfx-amt').forEach(function(el){ el.onblur=function(){ if(el.value.trim()!=='') el.value=fmtAmt(el.value); }; });
     b.querySelectorAll('.pfx-ccy, .pfx-amt').forEach(function(el){ el.onchange=function(){
