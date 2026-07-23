@@ -2480,6 +2480,9 @@
   function payBadge(label,cls){ return '<span class="tool-badge '+cls+'">'+label+'</span>'; }
   // "pay »" quick-fill: when a milestone is owed + unpaid, one click fills its Amount box with the calc figure
   // and its Date paid with today, then saves both. (af/df = the amount + date field names on the PO.)
+  // "today" in the USER's local timezone (not UTC) — used when recording a payment date, so an AU user at
+  // 24 Jul local doesn't get 23 Jul (UTC). Date-only string YYYY-MM-DD.
+  function localToday(){ var d=new Date(); return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10); }
   function payFillBtn(af,df,calc,label){ if(!(Number(calc)>0.009)) return '';
     return ' <button class="pbtn pay-fill" data-af="'+af+'" data-df="'+df+'" data-calc="'+esc(calc)+'" title="fill the amount with the calc figure and the date with today">'+(label||'pay')+' &raquo;</button>'; }
   // free-text PO field saver (no comma-stripping, unlike .payin) — saves on blur via .txtin
@@ -2945,7 +2948,7 @@
         .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; });
     // "pay »" quick-fill — record the calc amount + today's date for this milestone in one save, then refresh
     document.querySelectorAll('#podet-'+i+' .pay-fill').forEach(function(b){ b.onclick=function(){ var orig=b.innerHTML; b.disabled=true; b.textContent='…';
-      var today=new Date().toISOString().slice(0,10); var body={}; body[b.dataset.af]=b.dataset.calc; body[b.dataset.df]=today;
+      var today=localToday(); var body={}; body[b.dataset.af]=b.dataset.calc; body[b.dataset.df]=today;
       fetch('/api/supply/po/'+encodeURIComponent(po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); })
         .catch(function(e){ b.disabled=false; b.innerHTML=orig; alert('Failed: '+(e.message||e)); }); }; });
@@ -5808,14 +5811,25 @@
             +'<td>'+money(r.due_amt)+'</td>'
             +'<td class="l">'+dueCell+'</td>'
             +'<td>'+editCell(r.ep,r.amt_field,r.amt_val)+'</td>'
-            +'<td class="l">'+editCell(r.ep,r.dt_field,r.dt_val,'date')+'</td></tr>'; }); });
+            +'<td class="l">'+editCell(r.ep,r.dt_field,r.dt_val,'date')
+              +(!r.paid?' <button class="save-btn pdue-pay" data-ep="'+esc(r.ep)+'" data-af="'+esc(r.amt_field)+'" data-amt="'+esc(r.due_amt)+'" data-df="'+esc(r.dt_field)+'" style="background:#16a34a;color:#fff;border-color:#15803d;padding:2px 9px;font-size:11px" title="mark paid — set amount to '+money(r.due_amt)+' and date to today ('+localToday()+')">pay</button>':'')
+              +'</td></tr>'; }); });
       h+='<tr class="batchrow"><td class="l" colspan="2"><b>TOTAL DUE</b></td><td><b>'+money(grand)+'</b></td><td colspan="3"></td></tr>';
       document.getElementById('pdue-wrap').innerHTML=h+'</tbody></table></div>';
       bindEdits();
       document.querySelectorAll('#pdue-wrap .pdue-ref').forEach(function(x){ x.onclick=function(){ var g=x.dataset.go;
         if(g==='po')gotoPO(x.dataset.k,'pay'); else if(g==='dep')gotoDeposit(x.dataset.k); else gotoOther(); }; });
       document.querySelectorAll('#pdue-bar .pill[data-ps]').forEach(function(p){p.onclick=function(){PDUE_STATE.status=p.dataset.ps;draw();};});
-      document.getElementById('pdue-sup').onchange=function(){PDUE_STATE.supplier=this.value;draw();}; }
+      document.getElementById('pdue-sup').onchange=function(){PDUE_STATE.supplier=this.value;draw();};
+      // green "pay" → set the milestone amount to the due amount + payment date to today (local tz), then redraw
+      document.querySelectorAll('#pdue-wrap .pdue-pay').forEach(function(b){ b.onclick=function(){ b.disabled=true; var t=b.textContent; b.textContent='…';
+        var body={}; body[b.dataset.af]=b.dataset.amt; body[b.dataset.df]=localToday();
+        fetch(b.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
+          .then(function(j){ if(j&&j.error)throw new Error(j.error);
+            var rr=rows.filter(function(x){return x.ep===b.dataset.ep && x.dt_field===b.dataset.df;})[0];
+            if(rr){ rr.dt_val=localToday(); rr.amt_val=b.dataset.amt; rr.paid=true; rr.overdue=false; }
+            invalidateDerived(); draw(); })
+          .catch(function(e){ b.disabled=false; b.textContent=t; alert('Failed: '+(e.message||e)); }); }; }); }
     draw(); }
   function renderPaymentsReport(b){ b.innerHTML='<div class="count">Loading…</div>';
     fetch('/api/supply/payments-report').then(function(r){return r.json();}).then(function(rows){

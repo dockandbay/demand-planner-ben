@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.047 - Payment dates use local timezone + "pay" button on Payments Due
+
+- Recording a payment ("pay »" in a PO's PAYMENTS plan) now sets the date to **today in the user's local
+  timezone**, not UTC — so an Australia user at 24 Jul local no longer gets 23 Jul. New `localToday()` helper.
+- **Payments Due report**: added a green **"pay"** button in the last column — sets the milestone amount to
+  the amount due and the payment date to today (local), then removes it from the outstanding list.
+
 ## v26.046 - PO-ref badge now counts ALL sub-tab notifications (not just "actions")
 
 The counter next to a PO number only counted formal "action items" (`poActions`), while the detail
