@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.017 - Product samples: supplier-submitted sample versions (Phase A)
+
+- On a Product item in the **supplier portal**, a new **Sample** sub-tab lets the supplier submit **sample versions**
+  (v1, v2… per product): a date (defaults today), the two **mandatory** verification tick-boxes ("colour checked
+  to Pantone", "quality checked to design/standards" — both required to submit), a description, and photo uploads.
+- Submitting posts a supplier timeline note ("Sample v1 submitted (colour + quality verified)") → shows on the
+  product timeline + the admin ✉ bell.
+- **Main app:** the product detail gains a **Samples** tab showing each version with its verification ticks, date,
+  description and photos (admin can delete a version).
+- Migration **130** (product_dev_samples; photos reuse portal_attachments category='product_sample').
+- Phase B (next): link a sample version to a samples shipment + product-samples on a shipment.
+
 ## v26.016 - Product Phase 2: supplier-portal Product tab + auto timeline note on create
 
 - Suppliers flagged "include for product development" get a **Product** tab in the portal showing the product-dev

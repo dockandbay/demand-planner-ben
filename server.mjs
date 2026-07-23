@@ -3296,6 +3296,55 @@ app.post('/api/product/category-code', async (req, res) => {
   if (!category) return res.status(400).json({ error: 'category required' });
   try { await pool.query(`UPDATE planner.categories SET code=$2 WHERE category=$1`, [category, (b.code || '').trim().toUpperCase() || null]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// ── Product SAMPLE VERSIONS (v1/v2…) — supplier-created in the portal; visible in the main app (migration 130) ──
+async function productSampleList(itemRef) {
+  const rows = (await pool.query(`SELECT id, version, ('v'||version) ref, to_char(sample_date,'YYYY-MM-DD') sample_date,
+    colour_verified, quality_verified, coalesce(description,'') description, coalesce(created_by,'') created_by,
+    to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, sample_shipment_id
+    FROM planner.product_dev_samples WHERE item_ref=$1 ORDER BY version`, [itemRef])).rows;
+  if (rows.length) {
+    const keys = rows.map(r => 'PSAMPLE-' + r.id);
+    const ph = (await pool.query(`SELECT po, id, filename FROM planner.portal_attachments WHERE po = ANY($1) AND category='product_sample' ORDER BY uploaded_at`, [keys])).rows;
+    const byKey = {}; ph.forEach(p => { (byKey[p.po] = byKey[p.po] || []).push({ id: p.id, filename: p.filename }); });
+    rows.forEach(r => { r.photos = byKey['PSAMPLE-' + r.id] || []; });
+  }
+  return rows;
+}
+async function createProductSample(b, by) {
+  const itemRef = (b.item_ref || '').trim();
+  if (!itemRef) throw new Error('item_ref required');
+  if (!(b.colour_verified && b.quality_verified)) throw new Error('both verification checkboxes are required');
+  const v = (await pool.query(`SELECT coalesce(max(version),0)+1 n FROM planner.product_dev_samples WHERE item_ref=$1`, [itemRef])).rows[0].n;
+  const r = await pool.query(`INSERT INTO planner.product_dev_samples (item_ref, version, sample_date, colour_verified, quality_verified, description, created_by)
+    VALUES ($1,$2,$3,true,true,$4,$5) RETURNING id`, [itemRef, v, (b.sample_date || '').trim() || null, (b.description || '').trim() || null, by || null]);
+  // supplier note → shows on the product timeline + the admin ✉ bell
+  await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'supplier',$3)`, [itemRef, by || null, 'Sample v' + v + ' submitted (colour + quality verified)']);
+  return { id: r.rows[0].id, version: v, ref: 'v' + v };
+}
+async function insertProductSamplePhoto(sampleId, b, by) {
+  const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+  if (buf.length > 10 * 1024 * 1024) throw new Error('photo exceeds 10MB');
+  const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, uploaded_by, category)
+    VALUES ($1,$2,$3,$4,$5,$6,'product_sample') RETURNING id`, ['PSAMPLE-' + sampleId, b.filename || 'photo', b.mime || 'image/jpeg', buf.length, buf, by || null]);
+  return r.rows[0].id;
+}
+app.get('/api/product/samples/:ref', async (req, res) => {
+  try { res.json(await productSampleList(decodeURIComponent(req.params.ref))); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/sample', async (req, res) => {
+  try { res.json({ ok: true, ...(await createProductSample(req.body || {}, ((req.body || {}).created_by || '').trim() || shortUser(authUser(req)) || null)) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/product/sample/:id/delete', async (req, res) => {
+  try { await pool.query(`DELETE FROM planner.product_dev_samples WHERE id=$1`, [req.params.id]);
+    await pool.query(`DELETE FROM planner.portal_attachments WHERE po=$1 AND category='product_sample'`, ['PSAMPLE-' + req.params.id]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/sample/:id/photo', async (req, res) => {
+  if (!(req.body && req.body.data_base64)) return res.status(400).json({ error: 'data_base64 required' });
+  try { res.json({ ok: true, id: await insertProductSamplePhoto(req.params.id, req.body, (req.body.uploaded_by || '').trim() || null) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.post('/api/supply/note-read/:id', async (req, res) => {
   try {
     const read = !(req.body && req.body.read === false);
@@ -7485,6 +7534,18 @@ app.post('/api/portal/product-notes-read', portalAuth, async (req, res) => { con
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
   try { await pool.query(`UPDATE planner.supplier_notes SET read_at=now() WHERE po=$1 AND author_kind='internal' AND read_at IS NULL`, [ref]); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); } });
+// PORTAL product-sample versions (supplier-created, scoped to their assigned products)
+app.get('/api/portal/product-samples/:ref', portalAuth, async (req, res) => { const ref = decodeURIComponent(req.params.ref || '');
+  if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
+  try { res.json(await productSampleList(ref)); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/portal/product-sample', portalAuth, async (req, res) => { const b = req.body || {}, ref = (b.item_ref || '').trim();
+  if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
+  try { res.json({ ok: true, ...(await createProductSample(b, req.portal.email || null)) }); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/api/portal/product-sample-photo', portalAuth, async (req, res) => { const b = req.body || {}, id = b.sample_id;
+  if (!b.data_base64 || !id) return res.status(400).json({ error: 'sample_id + data_base64 required' });
+  try { const sr = (await pool.query(`SELECT item_ref FROM planner.product_dev_samples WHERE id=$1`, [id])).rows[0];
+    if (!sr || !(await portalOwnsProduct(req, sr.item_ref))) return res.status(403).json({ error: 'not your sample' });
+    res.json({ ok: true, id: await insertProductSamplePhoto(id, b, req.portal.email || null) }); } catch (e) { res.status(500).json({ error: e.message }); } });
 
 // ── PORTAL SAMPLES (supplier-scoped) ──────────────────────────────────────────
 async function portalOwnsSample(req, id){ if(!id)return null;

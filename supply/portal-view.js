@@ -1346,7 +1346,38 @@
               +'</tbody></table></div>'; }
           function wireProducts(){ var body=document.getElementById('pp-body');
             body.querySelectorAll('.pp-prod-open').forEach(function(b){ b.onclick=function(){ var i=b.dataset.i, ex=document.getElementById('pp-prod-exp-'+i), open=ex.style.display!=='none';
-              ex.style.display=open?'none':''; if(!open && !ex.dataset.loaded){ ex.dataset.loaded='1'; ppProdTimeline(ex.querySelector('.pp-prod-det'), b.dataset.ref); } }; }); }
+              ex.style.display=open?'none':''; if(!open && !ex.dataset.loaded){ ex.dataset.loaded='1'; ppProdDetail(ex.querySelector('.pp-prod-det'), b.dataset.ref); } }; }); }
+          function ppProdDetail(box, ref){ var tabs=[['samples','Sample'],['timeline','Timeline']], cur='samples';
+            box.innerHTML='<div style="display:flex;gap:2px;border-bottom:1px solid #e5e7eb;margin-bottom:10px;text-align:left">'+tabs.map(function(t){return '<button class="rtab pd2-tab" data-t="'+t[0]+'" style="background:none;border:none;border-bottom:3px solid transparent;padding:7px 12px;font-size:13px;cursor:pointer;color:#64748b">'+t[1]+'</button>';}).join('')+'</div><div class="pd2-body"></div>';
+            var bd=box.querySelector('.pd2-body');
+            function sel(t){ cur=t; box.querySelectorAll('.pd2-tab').forEach(function(b){ var on=b.dataset.t===t; b.style.color=on?'#0f172a':'#64748b'; b.style.borderBottomColor=on?'#2563eb':'transparent'; b.style.fontWeight=on?'700':'400'; });
+              if(t==='timeline')ppProdTimeline(bd,ref); else ppProdSamples(bd,ref); }
+            box.querySelectorAll('.pd2-tab').forEach(function(b){ b.onclick=function(){ sel(b.dataset.t); }; }); sel('samples'); }
+          function ppProdSamples(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
+            fetch(EP.productSamplesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(list){ list=Array.isArray(list)?list:[];
+              var today=new Date().toISOString().slice(0,10);
+              var rows=list.map(function(s){ var ph=(s.photos||[]).map(function(p){return '<a href="'+(EP.attachImgBase||'/api/supply/portal-attachment/')+p.id+'" target="_blank" rel="noopener"><img src="'+(EP.attachImgBase||'/api/supply/portal-attachment/')+p.id+'" style="width:52px;height:52px;object-fit:cover;border-radius:5px;border:1px solid #e5e7eb;margin:2px"></a>';}).join('');
+                return '<div style="border:1px solid #eef2f7;border-radius:8px;padding:9px 11px;margin-bottom:8px;text-align:left"><div style="display:flex;align-items:center;gap:8px"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.ref)+'</b><span class="mut tiny">'+esc(s.sample_date||'')+'</span>'
+                  +'<span style="margin-left:auto;font-size:10px">'+(s.colour_verified?'<span style="color:#16a34a">✓ colour</span>':'<span class="mut">colour?</span>')+' &nbsp; '+(s.quality_verified?'<span style="color:#16a34a">✓ quality</span>':'<span class="mut">quality?</span>')+'</span></div>'
+                  +(s.description?'<div style="margin:4px 0;white-space:pre-wrap">'+esc(s.description)+'</div>':'')
+                  +(ph?'<div style="margin-top:4px">'+ph+'</div>':'')+'</div>'; }).join('')||'<div class="mut" style="padding:4px 0;text-align:left">No sample versions yet.</div>';
+              box.innerHTML='<div style="text-align:left"><div style="font-weight:700;font-size:13px;margin-bottom:6px">Sample versions</div>'+rows
+                +'<div style="border:1px dashed #cbd5e1;border-radius:8px;padding:11px 13px;margin-top:10px;background:#f8fafc">'
+                +'<div style="font-weight:700;font-size:12px;margin-bottom:8px">Add a new sample version</div>'
+                +'<div style="margin-bottom:7px"><label style="font-size:12px">Sample date <input type="date" class="fci ps2-date" value="'+today+'" style="text-align:left;margin-left:4px"></label></div>'
+                +'<label style="display:block;font-size:12px;margin-bottom:5px;cursor:pointer"><input type="checkbox" class="ps2-col" style="vertical-align:middle;margin-right:6px">I verify that I have colour checked every colour to match Pantone in design</label>'
+                +'<label style="display:block;font-size:12px;margin-bottom:7px;cursor:pointer"><input type="checkbox" class="ps2-qual" style="vertical-align:middle;margin-right:6px">I verify I have quality checked sample matches design and quality standards</label>'
+                +'<textarea class="fci ps2-desc" rows="2" placeholder="description…" style="width:100%;text-align:left;box-sizing:border-box"></textarea>'
+                +'<div style="margin-top:7px"><label style="font-size:12px">Photos <input type="file" class="ps2-photos" accept="image/*" multiple style="font-size:12px"></label></div>'
+                +'<div style="margin-top:9px"><button class="save-btn ps2-save" data-ref="'+esc(ref)+'">Submit sample version</button> <span class="ps2-msg" style="font-size:12px;margin-left:6px"></span></div></div></div>';
+              var sv=box.querySelector('.ps2-save'); sv.onclick=function(){ var msg=box.querySelector('.ps2-msg');
+                var col=box.querySelector('.ps2-col').checked, qual=box.querySelector('.ps2-qual').checked;
+                if(!col||!qual){ msg.style.color='#dc2626'; msg.textContent='Please tick both verification boxes.'; return; }
+                sv.disabled=true; msg.style.color='#64748b'; msg.textContent='Submitting…';
+                postJSON(EP.productSample,{item_ref:ref,sample_date:box.querySelector('.ps2-date').value,colour_verified:true,quality_verified:true,description:box.querySelector('.ps2-desc').value},function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;sv.disabled=false;return;}
+                  var files=box.querySelector('.ps2-photos').files, i=0;
+                  (function up(){ if(i>=files.length){ ppProdSamples(box,ref); return; } var f=files[i++]; if(f.size>10*1024*1024){ up(); return; } var rd=new FileReader(); rd.onload=function(){ postJSON(EP.productSamplePhoto,{sample_id:j.id,filename:f.name,mime:f.type||'image/jpeg',data_base64:String(rd.result)},function(){ up(); }); }; rd.readAsDataURL(f); })(); }); };
+            }).catch(function(e){ box.innerHTML='<div style="color:#dc2626;text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
           function ppProdTimeline(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
             fetch(EP.productNotesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){ shortNotes(notes); notes=Array.isArray(notes)?notes:[];
               var list=(notes.length?tlDesc(notes).map(function(n){ var sup=(n.author_kind!=='internal'); return '<div style="padding:7px 0;border-bottom:1px solid #f1f1f1;text-align:left"><div class="mut tiny">'+esc(n.created_at||'')+' · '+(sup?'you':'Dock &amp; Bay')+(sup||n.read?'':' <span class="ex-badge">new</span>')+'</div><div style="white-space:pre-wrap">'+esc(n.body||'')+'</div></div>'; }).join(''):'<div class="mut" style="padding:6px 0;text-align:left">No messages yet.</div>');
