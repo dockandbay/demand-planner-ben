@@ -38,18 +38,28 @@
 #product-root .pd-tab.active{color:#0f172a;border-bottom-color:#2563eb}
 #product-root .prow{display:flex;gap:10px;align-items:flex-start;padding:6px 0;border-bottom:1px solid #f4f4f5}
 #product-root .prow .pl{flex:0 0 160px;color:#555;font-size:12px;padding-top:4px}
-/* Product grid — PO-grid style table */
-#product-root table.pg-tbl{border-collapse:collapse;font-size:12px;width:100%}
-#product-root table.pg-tbl th{text-align:left;padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#64748b;background:#e9eef5;white-space:nowrap;position:sticky;top:0}
-#product-root table.pg-tbl td{text-align:left;padding:5px 10px;border-bottom:1px solid #f1f1f1;white-space:nowrap}
+#product-root .tw{overflow-x:auto;-webkit-overflow-scrolling:touch}
+/* Product grid — PO-grid style table; sizes to content and scrolls sideways (the .tw wrapper is overflow-x:auto) */
+#product-root table.pg-tbl{border-collapse:separate;border-spacing:0;font-size:12px;width:max-content;min-width:100%}
+#product-root table.pg-tbl th{text-align:left;padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#64748b;background:#e9eef5;white-space:nowrap;position:sticky;top:0;z-index:1}
+#product-root table.pg-tbl td{text-align:left;padding:5px 10px;border-bottom:1px solid #f1f1f1;white-space:nowrap;background:#fff}
 #product-root table.pg-tbl tr:hover td{background:#f8fbff}
+/* freeze the first two columns (swatch+P, and Ref/colour) while the rest scrolls */
+#product-root table.pg-tbl td:nth-child(1),#product-root table.pg-tbl th:nth-child(1){position:sticky;left:0;z-index:2;min-width:82px;max-width:82px}
+#product-root table.pg-tbl th:nth-child(1){z-index:3}
+#product-root table.pg-tbl td:nth-child(2),#product-root table.pg-tbl th:nth-child(2){position:sticky;left:82px;z-index:2;box-shadow:2px 0 4px -2px rgba(15,23,42,.15)}
+#product-root table.pg-tbl th:nth-child(2){z-index:3}
 #product-root .pg-swatch2{width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;vertical-align:middle}
 #product-root .pg-swatch2.none{display:inline-flex;align-items:center;justify-content:center;color:#cbd5e1;font-size:8px;background:#f1f5f9}
 #product-root .pg-plan{cursor:pointer;border:1px solid #cbd5e1;background:#f8fafc;border-radius:6px;padding:4px 10px;font-size:12px;font-family:inherit;color:#1a1a1a}
+#product-root .pg-ref{font-weight:700;font-family:ui-monospace,Menlo,monospace}
+#product-root .pg-colour{font-weight:400;font-size:10px;color:#94a3b8;margin-top:1px}
 #product-root .pln-p{display:none}
 @media(max-width:640px){
   #product-root .pg-swatch2{width:26px;height:26px}
   #product-root table.pg-tbl td,#product-root table.pg-tbl th{padding:5px 6px}
+  #product-root table.pg-tbl td:nth-child(1),#product-root table.pg-tbl th:nth-child(1){min-width:64px;max-width:64px}
+  #product-root table.pg-tbl td:nth-child(2),#product-root table.pg-tbl th:nth-child(2){left:64px}
   #product-root .pln-full{display:none}
   #product-root .pln-p{display:inline}
   #product-root .pg-plan{background:#0f172a;color:#fff;border-color:#0f172a;font-weight:700;padding:5px 9px}
@@ -7506,13 +7516,12 @@
         if(!rows.length){ g.innerHTML='<div style="color:#94a3b8;padding:16px 2px">No product development items yet — click “+ New product”.</div>'; return; }
         if(!f.length){ g.innerHTML='<div style="color:#94a3b8;padding:16px 2px">No items match these filters.</div>'; return; }
         g.innerHTML='<div class="tw"><table class="pg-tbl"><thead><tr>'
-          +['','Ref','Colour','Category','Season','Supplier','Sizes','Status'].map(function(h){return '<th>'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+          +['','Ref','Category','Season','Supplier','Sizes','Status'].map(function(h){return '<th>'+h+'</th>';}).join('')+'</tr></thead><tbody>'
           +f.map(function(r){
             var sw=r.has_swatch?'<img class="pg-swatch2" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at)+'">':'<span class="pg-swatch2 none">n/a</span>';
             return '<tr>'
               +'<td><span style="display:inline-flex;align-items:center;gap:7px">'+sw+'<button class="pg-plan pg-open" data-ref="'+esc(r.ref)+'"><span class="pln-full">Plan ▸</span><span class="pln-p">P</span></button></span></td>'
-              +'<td style="font-weight:700;font-family:ui-monospace,Menlo,monospace">'+esc(r.ref)+'</td>'
-              +'<td>'+esc(r.colour_name||'—')+'</td>'
+              +'<td><div class="pg-ref">'+esc(r.ref)+'</div>'+(r.colour_name?'<div class="pg-colour">'+esc(r.colour_name)+'</div>':'')+'</td>'
               +'<td>'+esc(r.category||'')+'</td>'
               +'<td>'+esc(r.season||'')+'</td>'
               +'<td>'+esc(r.supplier||'')+'</td>'
