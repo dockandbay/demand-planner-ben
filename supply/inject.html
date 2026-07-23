@@ -22,9 +22,11 @@
 #app.product-active > *:not(#dab-navwrap):not(#product-root){display:none!important}
 #app.product-active #dab-navwrap > *:not(#view-tabs-row){display:none!important}
 #app.product-active #view-tabs-row .tool-bar{display:none!important}
-#product-root #product-subnav{display:flex;gap:2px;border-bottom:1px solid #e0e0e0;margin:2px 0 12px;align-items:center;flex-wrap:wrap}
-#product-root #product-subnav .stab{background:none;border:none;padding:6px 14px;font-size:12px;font-weight:600;color:#64748b;cursor:pointer;border-bottom:2px solid transparent}
-#product-root #product-subnav .stab.active{color:#0f172a;border-bottom-color:#2563eb}
+/* product top sub-nav (Plan / Reports) — matches the PO-detail subnav (.po-subnav / .rtab) */
+#product-root #product-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:2px 0 12px}
+#product-root #product-subnav .stab{background:transparent;border:none;padding:6px 14px;font-size:12px;font-weight:500;color:#7c93b8;cursor:pointer;border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit}
+#product-root #product-subnav .stab:hover{color:#2563eb}
+#product-root #product-subnav .stab.active{color:#2563eb;border-bottom-color:#3b82f6;font-weight:600}
 #product-root .pg-card{border:1px solid #e5e7eb;border-radius:10px;background:#fff;overflow:hidden;cursor:pointer;transition:box-shadow .12s}
 #product-root .pg-card:hover{box-shadow:0 6px 18px rgba(15,23,42,.12)}
 #product-root .pg-swatch{width:100%;height:120px;object-fit:cover;background:#f1f5f9;display:block}
@@ -57,20 +59,18 @@
 #product-root table.pg-tbl th:nth-child(2){z-index:3}
 #product-root .pg-swatch2{width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;vertical-align:middle}
 #product-root .pg-swatch2.none{display:inline-flex;align-items:center;justify-content:center;color:#cbd5e1;font-size:8px;background:#f1f5f9}
-#product-root .pg-plan{cursor:pointer;border:1px solid #1d4ed8;background:#1d4ed8;color:#fff;border-radius:6px;padding:4px 10px;font-size:12px;font-family:inherit;font-weight:700}
+/* PLAN button — mirror the #supply-root .planbtn look so the PRODUCT grid matches the PO grid */
+#product-root .planbtn{background:#1a1a1a;color:#fff;border:none;border-radius:4px;padding:2px 7px;font-size:9px;font-weight:700;letter-spacing:.05em;cursor:pointer;font-family:inherit}
+#product-root .planbtn:hover{background:#3730a3}#product-root .planbtn.open{background:#3730a3}
 #product-root .cell-pick{background:none;border:none;cursor:pointer;font:inherit;color:#1a1a1a;padding:0;text-align:left}
 #product-root .cell-pick:hover{color:#1d4ed8}
 #product-root .pg-ref{font-weight:700;font-family:ui-monospace,Menlo,monospace}
 #product-root .pg-colour{font-weight:400;font-size:10px;color:#94a3b8;margin-top:1px}
-#product-root .pln-p{display:none}
 @media(max-width:640px){
   #product-root .pg-swatch2{width:26px;height:26px}
   #product-root table.pg-tbl td,#product-root table.pg-tbl th{padding:5px 6px}
   #product-root table.pg-tbl td:nth-child(1),#product-root table.pg-tbl th:nth-child(1){min-width:64px;max-width:64px}
   #product-root table.pg-tbl td:nth-child(2),#product-root table.pg-tbl th:nth-child(2){left:64px}
-  #product-root .pln-full{display:none}
-  #product-root .pln-p{display:inline}
-  #product-root .pg-plan{background:#0f172a;color:#fff;border-color:#0f172a;font-weight:700;padding:5px 9px}
 }
 #supply-subnav{display:flex;gap:2px;border-bottom:1px solid #e0e0e0;margin:2px 0 10px;align-items:center;flex-wrap:wrap}
 #supply-root .stab{background:transparent;border:none;padding:6px 13px;font-size:12px;font-weight:500;cursor:pointer;color:#888;border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit}
@@ -6664,7 +6664,7 @@
       var chCell=[ch,acc].filter(Boolean).join(' ')||'<span class="mut">—</span>';
       var un=r.unread_notes>0?' <span class="ex-badge" style="background:#f59e0b" title="'+r.unread_notes+' new supplier note(s) on the timeline">'+r.unread_notes+'</span>':'';
       var reqDate=r.completion_required?('<span'+(r.overdue?' style="color:#dc2626;font-weight:700"':'')+'>'+fd(r.completion_required)+'</span>'):'<span class="mut">—</span>';
-      return '<tr><td class="l"><button class="planbtn samp-exp" data-id="'+r.id+'" data-i="'+i+'">View</button>'+un+'</td>'
+      return '<tr><td class="l"><button class="planbtn samp-exp" data-id="'+r.id+'" data-i="'+i+'">PLAN</button>'+un+'</td>'
         +'<td class="l"><b>'+esc(r.ref||'')+'</b></td>'
         +'<td class="l">'+sampleStatusChip(r.status_calc)+(r.production_status?'<div class="mut tiny" style="margin-top:2px">✓ '+esc(prodStatusLabel(r.production_status))+'</div>':'')+'</td>'
         +'<td class="l">'+esc(r.supplier_name||'—')+'</td>'
@@ -7647,7 +7647,7 @@
           +f.map(function(r,i){
             var sw=r.has_swatch?'<img class="pg-swatch2" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at)+'">':'<span class="pg-swatch2 none">n/a</span>';
             return '<tr>'
-              +'<td><span style="display:inline-flex;align-items:center;gap:7px">'+sw+'<button class="pg-plan pg-open" data-ref="'+esc(r.ref)+'" data-i="'+i+'"><span class="pln-full">Plan ▸</span><span class="pln-p">P</span></button></span></td>'
+              +'<td><span style="display:inline-flex;align-items:center;gap:7px">'+sw+'<button class="planbtn pg-open" data-ref="'+esc(r.ref)+'" data-i="'+i+'">PLAN</button></span></td>'
               +'<td><div class="pg-ref">'+esc(r.ref)+(r.unread_supplier?' <span class="ex-badge" title="'+r.unread_supplier+' new supplier message(s)">'+r.unread_supplier+'</span>':'')+'</div>'+(r.colour_name?'<div class="pg-colour">'+esc(r.colour_name)+'</div>':'')+'</td>'
               +'<td>'+prodPickBtn(r.ref,'category',r.category,'category')+'</td>'
               +'<td>'+prodPickBtn(r.ref,'season',r.season,'season')+'</td>'

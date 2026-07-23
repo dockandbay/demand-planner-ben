@@ -1290,7 +1290,7 @@
             var b=document.getElementById('pp-ship-badge'); if(b)b.innerHTML=ppBadgeHtml(n); }
           function ppSampleRow(s,i){
             var units=(s.lines||[]).reduce(function(a,l){return a+(Number(l.qty)||0);},0), nsku=(s.lines||[]).length;
-            return '<tr><td class="l"><button class="planbtn ps-manage" data-id="'+s.id+'" data-i="'+i+'">Manage</button><span class="ps-rowbadge" data-id="'+s.id+'">'+sampRowBadgeHtml(s)+'</span></td>'
+            return '<tr><td class="l"><button class="planbtn ps-manage" data-id="'+s.id+'" data-i="'+i+'">PLAN</button><span class="ps-rowbadge" data-id="'+s.id+'">'+sampRowBadgeHtml(s)+'</span></td>'
               +'<td class="l"><b>'+esc(s.ref)+'</b></td>'
               +'<td class="l">'+sampChip(s.status_calc)+'</td>'
               +'<td class="l">'+esc(s.recipient_company||'')+(s.recipient_name?' <span class="mut tiny">'+esc(s.recipient_name)+'</span>':'')+'</td>'
@@ -1412,7 +1412,7 @@
               +f.map(function(p,i){ var badge=p.unread_dnb?' <span style="background:#f59e0b;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+p.unread_dnb+'</span>':'';
                 var sw=p.has_swatch?'<img src="'+(EP.productSwatchBase||'/api/product/swatch/')+encodeURIComponent(p.ref)+'?t='+encodeURIComponent(p.updated_at||'')+'" style="width:34px;height:34px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;flex:0 0 auto">':'<span style="width:34px;height:34px;border-radius:6px;border:1px dashed #cbd5e1;flex:0 0 auto"></span>';
                 return '<tr><td><div style="display:flex;align-items:center;gap:8px">'+sw
-                    +'<button class="save-btn pp-prod-open" data-ref="'+esc(p.ref)+'" data-i="'+i+'" style="flex:0 0 auto">View</button>'
+                    +'<button class="planbtn pp-prod-open" data-ref="'+esc(p.ref)+'" data-i="'+i+'" style="flex:0 0 auto">PLAN</button>'
                     +'<div style="min-width:0"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(p.ref)+'</b>'+badge+(p.colour_name?'<div style="font-size:10px;color:#94a3b8">'+esc(p.colour_name)+'</div>':'')+'</div></div></td>'
                   +'<td>'+esc(p.category||'')+'</td><td>'+esc(p.season||'')+'</td><td>'+p.sizes+'</td><td>'+esc(prodStatusLabel(p.status))+'</td></tr>'; }).join('')
               +'</tbody></table></div>'

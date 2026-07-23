@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.054 - UI consistency: PLAN buttons + PO-style sub-tabs (Samples/Product)
+
+Design-consistency pass (approved items A + B):
+- **All grid "open" buttons → `PLAN`** in the PO `.planbtn` style: admin Samples ("View"→PLAN), admin
+  Product ("Plan ▸/P"→PLAN), portal Samples ("Manage"→PLAN), portal Product ("View"→PLAN). Mirrored the
+  `.planbtn` style under `#product-root` (was only `#supply-root`); removed the old `.pg-plan`/`.pln-*` CSS.
+- **All sub-tabs match the PO-detail subnav** (`.po-subnav`/`.rtab` light-blue chip row). The PRODUCT top
+  nav (Plan/Reports) was a plain underline (`.stab`) — restyled to match. (Product *detail* tabs and the
+  portal product detail already used that style.)
+
 ## v26.053 - PRODUCT ▸ Reports built + development-start override
 
 Built the Product Reports tab (was a placeholder):
