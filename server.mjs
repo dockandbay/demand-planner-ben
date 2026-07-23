@@ -3225,11 +3225,12 @@ app.post('/api/product/size/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.product_dev_sizes WHERE id=$1`, [req.params.id]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/swatch', async (req, res) => {
-  const b = req.body || {}, ref = (b.ref || '').trim();
+  const b = req.body || {}, ref = (b.ref || '').trim(), mime = b.mime || 'image/png';
   if (!ref || !b.data_base64) return res.status(400).json({ error: 'ref and data_base64 required' });
+  if (['image/png', 'image/jpeg'].indexOf(mime) < 0) return res.status(415).json({ error: 'swatch must be a JPG or PNG' });
   try { const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
-    if (buf.length > 10 * 1024 * 1024) return res.status(413).json({ error: 'swatch exceeds 10MB' });
-    await pool.query(`UPDATE planner.product_dev_items SET swatch=$2, swatch_mime=$3, updated_at=now() WHERE ref=$1`, [ref, buf, b.mime || 'image/png']);
+    if (buf.length > 2 * 1024 * 1024) return res.status(413).json({ error: 'swatch exceeds 2MB' });
+    await pool.query(`UPDATE planner.product_dev_items SET swatch=$2, swatch_mime=$3, updated_at=now() WHERE ref=$1`, [ref, buf, mime]);
     res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/doc', async (req, res) => {
