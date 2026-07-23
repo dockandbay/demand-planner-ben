@@ -3,6 +3,22 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.013 - PRODUCT module (Phase 1): product-development management
+
+- New top-level **Product** menu (gated by a new **'product'** permission, or admin; hidden otherwise) with
+  **Plan** / **Reports** sub-nav (Reports = placeholder).
+- **Product grid (Plan):** cards with swatch thumbnail, ref, colour, category/season, size-approval count + status;
+  "+ New product" and a **Plan ▸** button into each item.
+- **Reference** = SEASON-CATEGORYCODE-NN, numbered **per season+category** (e.g. SS27-TOWLB-01). Category code from
+  CONFIG (auto-derived from the name if blank).
+- **Detail tabs** (PO-style): **Master data** (season, category, colour, status, description, size variants each with
+  internal D&B approval status, + swatch upload), **Timeline** (notes + escalate → product-dev email list),
+  **Documents** (upload/list/delete, ≤10MB).
+- **CONFIG ▸ Product:** manage Seasons (code/label/sort/active) and category codes.
+- **Supplier grid:** new **"Include for product development"** flag (drives portal visibility in Phase 2).
+- **Permissions:** `product_edit` added to app_permissions + CONFIG ▸ Permissions; server guard for `/api/product/*`.
+- Migration **128** (Diviyaj: run on live). Phase 2 = supplier-portal Product tab for flagged suppliers.
+
 ## v26.012 - DTC shipment data (supplier-entered) + timeline snooze options
 
 - **DTC shipment data** (Direct to Client / B2B JLEW / B2B NEXT POs): supplier enters carton count, cargo volume

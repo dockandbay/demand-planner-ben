@@ -505,6 +505,7 @@ function requiredCap(method, p) {
   if (p === '/api/consignee' || p.startsWith('/api/consignee/')) return 'config'; // CONFIG ▸ Consignees
   if (p === '/api/app-settings') return 'config';            // CONFIG ▸ General settings
   if (CONFIG_WRITE.some((re) => re.test(p))) return 'config'; // config reference data → supply OR demand
+  if (p.startsWith('/api/product/')) return 'product';        // PRODUCT module writes → 'product' capability
   if (p.startsWith('/api/supply/')) return 'supply';          // everything else under supply = SUPPLY feature
   return null;   // unknown non-supply write → fail-open (don't block routes we haven't classified)
 }
@@ -516,9 +517,10 @@ app.use(async (req, res, next) => {
     if (!me.live) return next();   // sandbox / no auth proxy → full access
     const ok = cap === 'demand' ? me.demand_edit
              : cap === 'supply' ? me.supply_edit
+             : cap === 'product' ? (me.product_edit || me.is_admin)
              : cap === 'config' ? (me.supply_edit || me.demand_edit) : true;
     if (ok) return next();
-    const label = cap === 'demand' ? 'DEMAND' : cap === 'config' ? 'CONFIG' : 'SUPPLY';
+    const label = cap === 'demand' ? 'DEMAND' : cap === 'config' ? 'CONFIG' : cap === 'product' ? 'PRODUCT' : 'SUPPLY';
     return res.status(403).json({ error: 'Read-only access — you don’t have ' + label + ' edit rights. Ask an admin (CONFIG ▸ Permissions).', code: 'readonly', cap });
   } catch (e) { return next(); }   // the guard must never break a request itself
 });
@@ -2690,7 +2692,8 @@ app.post('/api/supply/supplier/:id', (req, res) =>
       production_days: 'int', country: 'text', contact_name: 'text', email: 'text',
       // company / address / phone (tax-invoice), compliance IDs + ERP linkage
       business_name: 'text', address_1: 'text', address_2: 'text', city: 'text', state: 'text', postcode: 'text', phone: 'text',
-      te_id: 'text', incoterm: 'text', cin7_member_id: 'text', fulfil_id: 'text', export_port: 'text' }, req.body, 'bigint'));
+      te_id: 'text', incoterm: 'text', cin7_member_id: 'text', fulfil_id: 'text', export_port: 'text',
+      include_product_dev: 'boolean' }, req.body, 'bigint'));
 app.post('/api/supply/supplier-create', async (req, res) => {
   const b = req.body || {}, name = (b.name || '').trim();
   if (!name) return res.status(400).json({ error: 'supplier name required' });
@@ -3122,6 +3125,155 @@ app.post('/api/supply/suggestion/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.suggestions WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// ════════════════════════════════════════════════════════════════════════════
+// PRODUCT module — product-development management (migration 128). Reads are open (GET); writes require the
+// 'product' capability (or admin). Documents reuse portal_attachments (category='product', keyed by product ref);
+// timeline reuses supplier_notes keyed by the product ref; swatch is a bytea on the item.
+// ════════════════════════════════════════════════════════════════════════════
+const _prodCatCode = (name, code) => { code = (code || '').trim(); if (code) return code.toUpperCase();
+  return String(name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5) || 'PROD'; };
+app.get('/api/product/items', async (_req, res) => {
+  try {
+    const r = await pool.query(`SELECT i.id, i.ref, coalesce(i.season,'') season, coalesce(i.category,'') category,
+      coalesce(i.colour_name,'') colour_name, i.status, (i.swatch IS NOT NULL) has_swatch,
+      to_char(i.updated_at,'YYYY-MM-DD HH24:MI') updated_at,
+      (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id)::int sizes,
+      (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approval_status='approved')::int sizes_approved
+      FROM planner.product_dev_items i ORDER BY i.created_at DESC`);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/product/item/:ref', async (req, res) => {
+  const ref = req.params.ref;
+  try {
+    const item = (await pool.query(`SELECT id, ref, coalesce(season,'') season, coalesce(category,'') category,
+      coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(description,'') description,
+      status, (swatch IS NOT NULL) has_swatch, coalesce(created_by,'') created_by,
+      to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at
+      FROM planner.product_dev_items WHERE ref=$1`, [ref])).rows[0];
+    if (!item) return res.status(404).json({ error: 'not found' });
+    const sizes = (await pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort FROM planner.product_dev_sizes WHERE item_id=$1 ORDER BY sort, id`, [item.id])).rows;
+    const docs = (await pool.query(`SELECT id, filename, mime, byte_size, coalesce(uploaded_by,'') uploaded_by, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments WHERE po=$1 AND category='product' ORDER BY uploaded_at DESC`, [ref])).rows;
+    res.json({ item, sizes, docs });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/product/swatch/:ref', async (req, res) => {
+  try { const r = (await pool.query(`SELECT swatch, swatch_mime FROM planner.product_dev_items WHERE ref=$1`, [req.params.ref])).rows[0];
+    if (!r || !r.swatch) return res.status(404).end();
+    res.setHeader('Content-Type', r.swatch_mime || 'image/png'); res.setHeader('Cache-Control', 'no-cache'); res.end(r.swatch);
+  } catch (e) { res.status(500).end(); }
+});
+app.post('/api/product/item', async (req, res) => {
+  const b = req.body || {}, season = (b.season || '').trim(), category = (b.category || '').trim();
+  if (!season || !category) return res.status(400).json({ error: 'season and category required' });
+  const client = await pool.connect();
+  try {
+    const catRow = (await client.query(`SELECT code FROM planner.categories WHERE category=$1`, [category])).rows[0];
+    const code = _prodCatCode(category, catRow && catRow.code);
+    await client.query('BEGIN');
+    const seq = (await client.query(`SELECT coalesce(max(seq_in_group),0)+1 n FROM planner.product_dev_items WHERE season=$1 AND category_code=$2`, [season, code])).rows[0].n;
+    const ref = season + '-' + code + '-' + String(seq).padStart(2, '0');
+    const ins = await client.query(`INSERT INTO planner.product_dev_items (ref, season, category, category_code, seq_in_group, colour_name, description, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, [ref, season, category, code, seq, (b.colour_name || '').trim() || null, (b.description || '').trim() || null, (b.created_by || '').trim() || null]);
+    const id = ins.rows[0].id, sizes = Array.isArray(b.sizes) ? b.sizes : [];
+    for (let k = 0; k < sizes.length; k++) { const sl = String(sizes[k] || '').trim(); if (sl) await client.query(`INSERT INTO planner.product_dev_sizes (item_id, size_label, sort) VALUES ($1,$2,$3)`, [id, sl, k]); }
+    await client.query('COMMIT');
+    res.json({ ok: true, ref, id });
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
+app.post('/api/product/item/:ref', (req, res) =>
+  patch(res, 'planner.product_dev_items', 'ref', req.params.ref,
+    { colour_name: 'text', description: 'text', status: 'text', season: 'text', category: 'text' }, req.body, 'text'));
+app.post('/api/product/item/:ref/delete', async (req, res) => {
+  try { await pool.query(`DELETE FROM planner.product_dev_items WHERE ref=$1`, [req.params.ref]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/size', async (req, res) => {
+  const b = req.body || {}, ref = (b.ref || '').trim(), label = (b.size_label || '').trim();
+  if (!ref || !label) return res.status(400).json({ error: 'ref and size_label required' });
+  try { const it = (await pool.query(`SELECT id FROM planner.product_dev_items WHERE ref=$1`, [ref])).rows[0]; if (!it) return res.status(404).json({ error: 'item not found' });
+    const so = (await pool.query(`SELECT coalesce(max(sort),0)+1 n FROM planner.product_dev_sizes WHERE item_id=$1`, [it.id])).rows[0].n;
+    const r = await pool.query(`INSERT INTO planner.product_dev_sizes (item_id, size_label, sort) VALUES ($1,$2,$3) RETURNING id`, [it.id, label, so]);
+    res.json({ ok: true, id: r.rows[0].id }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/size/:id', (req, res) =>
+  patch(res, 'planner.product_dev_sizes', 'id', req.params.id, { size_label: 'text', approval_status: 'text' }, req.body, 'bigint'));
+app.post('/api/product/size/:id/delete', async (req, res) => {
+  try { await pool.query(`DELETE FROM planner.product_dev_sizes WHERE id=$1`, [req.params.id]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/swatch', async (req, res) => {
+  const b = req.body || {}, ref = (b.ref || '').trim();
+  if (!ref || !b.data_base64) return res.status(400).json({ error: 'ref and data_base64 required' });
+  try { const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (buf.length > 10 * 1024 * 1024) return res.status(413).json({ error: 'swatch exceeds 10MB' });
+    await pool.query(`UPDATE planner.product_dev_items SET swatch=$2, swatch_mime=$3, updated_at=now() WHERE ref=$1`, [ref, buf, b.mime || 'image/png']);
+    res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/doc', async (req, res) => {
+  const b = req.body || {}, ref = (b.ref || '').trim();
+  if (!ref || !b.data_base64) return res.status(400).json({ error: 'ref and data_base64 required' });
+  try { const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (buf.length > 10 * 1024 * 1024) return res.status(413).json({ error: 'file exceeds 10MB' });
+    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, uploaded_by, category) VALUES ($1,$2,$3,$4,$5,$6,'product') RETURNING id`,
+      [ref, b.filename || 'document', b.mime || 'application/octet-stream', buf.length, buf, (b.uploaded_by || '').trim() || null]);
+    res.json({ ok: true, id: r.rows[0].id, byte_size: buf.length }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/product/doc/:id', async (req, res) => {
+  try { const r = (await pool.query(`SELECT filename, mime, data FROM planner.portal_attachments WHERE id=$1 AND category='product'`, [req.params.id])).rows[0];
+    if (!r) return res.status(404).send('not found');
+    res.setHeader('Content-Type', r.mime || 'application/octet-stream'); res.setHeader('Content-Disposition', 'attachment; filename="' + (r.filename || 'document').replace(/"/g, '') + '"'); res.send(r.data);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/doc/:id/delete', async (req, res) => {
+  try { await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1 AND category='product'`, [req.params.id]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/product/notes/:ref', async (req, res) => {
+  try { const r = await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
+    to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read FROM planner.supplier_notes WHERE po=$1 ORDER BY created_at`, [req.params.ref]);
+    res.json(r.rows); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/note', async (req, res) => {
+  const b = req.body || {}, ref = (b.ref || '').trim();
+  if (!ref || !String(b.body || '').trim()) return res.status(400).json({ error: 'ref and body required' });
+  try { await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'internal',$3)`, [ref, internalAuthor(req, b.author_email), String(b.body).trim()]);
+    res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/escalate', async (req, res) => {
+  const b = req.body || {}, ref = (b.ref || '').trim(), message = String(b.message || '').trim();
+  if (!ref || !message) return res.status(400).json({ error: 'ref + message required' });
+  try {
+    const user = shortUser(authUser(req)) || b.user || 'A user';
+    await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'internal',$3)`, [ref, authUser(req) || null, user + ' escalated: ' + message]).catch(() => {});
+    const s = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='escalation_product_dev'`)).rows[0];
+    const emails = _emails(s ? s.value : '');
+    if (!emails.length) return res.json({ ok: true, sent: 0, emails: [], note: 'no product-dev recipients configured (CONFIG ▸ General ▸ Product development)' });
+    const html = '<p><b>' + _eh(user) + '</b> escalated product <b>' + _eh(ref) + '</b>:</p><blockquote style="border-left:3px solid #cbd5e1;margin:0;padding:4px 12px;color:#334155;white-space:pre-wrap">' + _eh(message) + '</blockquote>';
+    const sent = await sendResendEmail({ to: emails, subject: 'horizon escalation - ' + ref, html });
+    res.json({ ok: true, sent: sent.sent || 0, emails, sandbox: !!sent.sandbox });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/product/config', async (_req, res) => {
+  try { const seasons = (await pool.query(`SELECT code, coalesce(label,'') label, active, sort FROM planner.seasons ORDER BY sort, code`)).rows;
+    const categories = (await pool.query(`SELECT category, coalesce(code,'') code FROM planner.categories WHERE coalesce(is_active,true) ORDER BY category`)).rows;
+    res.json({ seasons, categories }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/season', async (req, res) => {
+  const b = req.body || {}, code = (b.code || '').trim().toUpperCase();
+  if (!code) return res.status(400).json({ error: 'code required' });
+  try { await pool.query(`INSERT INTO planner.seasons (code, label, active, sort) VALUES ($1,$2,$3,$4)
+    ON CONFLICT (code) DO UPDATE SET label=excluded.label, active=excluded.active, sort=excluded.sort`,
+    [code, (b.label || '').trim() || null, b.active == null ? true : !!b.active, b.sort == null ? null : parseInt(b.sort, 10)]);
+    res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/season/:code/delete', async (req, res) => {
+  try { await pool.query(`DELETE FROM planner.seasons WHERE code=$1`, [req.params.code]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/category-code', async (req, res) => {
+  const b = req.body || {}, category = (b.category || '').trim();
+  if (!category) return res.status(400).json({ error: 'category required' });
+  try { await pool.query(`UPDATE planner.categories SET code=$2 WHERE category=$1`, [category, (b.code || '').trim().toUpperCase() || null]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.post('/api/supply/note-read/:id', async (req, res) => {
   try {
     const read = !(req.body && req.body.read === false);
@@ -3190,24 +3342,24 @@ async function notePoEdited(db, po, user) {
 // planner.app_permissions is read-only everywhere.
 async function permsFor(req) {
   const email = authUser(req);
-  if (!email) return { email: null, live: false, supply_edit: true, demand_edit: true, is_admin: true };
+  if (!email) return { email: null, live: false, supply_edit: true, demand_edit: true, product_edit: true, is_admin: true };
   const e = email.toLowerCase();
   let row = null;
-  try { row = (await pool.query('SELECT supply_edit, demand_edit, is_admin FROM planner.app_permissions WHERE lower(email)=$1', [e])).rows[0] || null; } catch (_) {}
-  return { email: e, live: true, supply_edit: !!(row && row.supply_edit), demand_edit: !!(row && row.demand_edit), is_admin: !!(row && row.is_admin) };
+  try { row = (await pool.query('SELECT supply_edit, demand_edit, product_edit, is_admin FROM planner.app_permissions WHERE lower(email)=$1', [e])).rows[0] || null; } catch (_) {}
+  return { email: e, live: true, supply_edit: !!(row && row.supply_edit), demand_edit: !!(row && row.demand_edit), product_edit: !!(row && row.product_edit), is_admin: !!(row && row.is_admin) };
 }
 // What the client asks on load to decide what to enable (read-only UI otherwise).
 app.get('/api/me', async (req, res) => { try { res.json(await permsFor(req)); } catch (e) { res.status(500).json({ error: e.message }); } });
 // Permissions admin — ADMIN-ONLY (sandbox counts as admin so Ben can build/test locally).
 app.get('/api/config/permissions', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
-  try { const r = await pool.query('SELECT email, supply_edit, demand_edit, is_admin, to_char(updated_at,\'YYYY-MM-DD HH24:MI\') updated_at, updated_by FROM planner.app_permissions ORDER BY email'); res.json(r.rows); }
+  try { const r = await pool.query('SELECT email, supply_edit, demand_edit, product_edit, is_admin, to_char(updated_at,\'YYYY-MM-DD HH24:MI\') updated_at, updated_by FROM planner.app_permissions ORDER BY email'); res.json(r.rows); }
   catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/config/permissions', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
   const b = req.body || {}; const email = String(b.email || '').trim().toLowerCase();
   if (!email || email.indexOf('@') < 0) return res.status(400).json({ error: 'valid email required' });
-  try { await pool.query(`INSERT INTO planner.app_permissions (email, supply_edit, demand_edit, is_admin, updated_at, updated_by)
-      VALUES ($1,$2,$3,$4,now(),$5) ON CONFLICT (email) DO UPDATE SET supply_edit=excluded.supply_edit, demand_edit=excluded.demand_edit, is_admin=excluded.is_admin, updated_at=now(), updated_by=excluded.updated_by`,
-      [email, !!b.supply_edit, !!b.demand_edit, !!b.is_admin, me.email || 'sandbox']);
+  try { await pool.query(`INSERT INTO planner.app_permissions (email, supply_edit, demand_edit, product_edit, is_admin, updated_at, updated_by)
+      VALUES ($1,$2,$3,$4,$5,now(),$6) ON CONFLICT (email) DO UPDATE SET supply_edit=excluded.supply_edit, demand_edit=excluded.demand_edit, product_edit=excluded.product_edit, is_admin=excluded.is_admin, updated_at=now(), updated_by=excluded.updated_by`,
+      [email, !!b.supply_edit, !!b.demand_edit, !!b.product_edit, !!b.is_admin, me.email || 'sandbox']);
     res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.delete('/api/config/permissions/:email', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
   const email = String(req.params.email || '').trim().toLowerCase(); if (!email) return res.status(400).json({ error: 'email required' });

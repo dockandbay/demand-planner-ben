@@ -10165,7 +10165,7 @@ var _rfBtn=document.getElementById('rf'); if(_rfBtn)_rfBtn.onclick=function(){
     var views=Array.prototype.slice.call(document.querySelectorAll('#view-tabs-row .view-toggle'));
     var supplyActive=false, demandActive=false, scenActive=false, configActive=false;
     views.forEach(function(vb){
-      if(!vb.dataset.view && vb.id!=='supply-btn' && vb.id!=='scenario-btn' && vb.id!=='config-btn')return;   // skip tools/help, keep view + SUPPLY + SCENARIO + CONFIG buttons
+      if(!vb.dataset.view && vb.id!=='supply-btn' && vb.id!=='scenario-btn' && vb.id!=='config-btn' && vb.id!=='product-btn')return;   // skip tools/help, keep view + SUPPLY + SCENARIO + CONFIG + PRODUCT buttons
       var isSup=vb.id==='supply-btn', isScen=vb.id==='scenario-btn', isCfg=vb.id==='config-btn';
       var active=vb.classList.contains('active');
       if(isSup && active)supplyActive=true;

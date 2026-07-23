@@ -15,6 +15,27 @@
 #app.supply-active #view-tabs-row .tool-bar{display:none!important}
 /* CONFIG is now a top-level view: it reuses the SUPPLY render surface but hides the SUPPLY section sub-nav */
 #app.config-mode #supply-subnav,#app.config-mode #supply-nav-sel{display:none!important}
+/* PRODUCT — its own top-level surface, mirrors SUPPLY (migration 128 / v26.013) */
+#product-root{display:none;font-size:12px;color:#1a1a1a;padding-top:4px}
+#app.product-active > *:not(#dab-navwrap):not(#product-root){display:none!important}
+#app.product-active #dab-navwrap > *:not(#view-tabs-row){display:none!important}
+#app.product-active #view-tabs-row .tool-bar{display:none!important}
+#product-root #product-subnav{display:flex;gap:2px;border-bottom:1px solid #e0e0e0;margin:2px 0 12px;align-items:center;flex-wrap:wrap}
+#product-root #product-subnav .stab{background:none;border:none;padding:6px 14px;font-size:12px;font-weight:600;color:#64748b;cursor:pointer;border-bottom:2px solid transparent}
+#product-root #product-subnav .stab.active{color:#0f172a;border-bottom-color:#2563eb}
+#product-root .pg-card{border:1px solid #e5e7eb;border-radius:10px;background:#fff;overflow:hidden;cursor:pointer;transition:box-shadow .12s}
+#product-root .pg-card:hover{box-shadow:0 6px 18px rgba(15,23,42,.12)}
+#product-root .pg-swatch{width:100%;height:120px;object-fit:cover;background:#f1f5f9;display:block}
+#product-root .pg-swatch.none{display:flex;align-items:center;justify-content:center;color:#cbd5e1;font-size:11px}
+#product-root .fci{padding:5px 8px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px;font-family:inherit;box-sizing:border-box}
+#product-root .save-btn{border:1px solid #cbd5e1;background:#f8fafc;padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit;color:#1a1a1a}
+#product-root .save-btn.light{background:#fff}
+#product-root .save-btn:hover{background:#eef2f7}
+#product-root .pd-tabs{display:flex;gap:2px;border-bottom:1px solid #e0e0e0;margin-bottom:12px;flex-wrap:wrap}
+#product-root .pd-tab{background:none;border:none;border-bottom:2px solid transparent;padding:6px 12px;font-size:12px;font-weight:600;color:#64748b;cursor:pointer;font-family:inherit}
+#product-root .pd-tab.active{color:#0f172a;border-bottom-color:#2563eb}
+#product-root .prow{display:flex;gap:10px;align-items:flex-start;padding:6px 0;border-bottom:1px solid #f4f4f5}
+#product-root .prow .pl{flex:0 0 160px;color:#555;font-size:12px;padding-top:4px}
 #supply-subnav{display:flex;gap:2px;border-bottom:1px solid #e0e0e0;margin:2px 0 10px;align-items:center;flex-wrap:wrap}
 #supply-root .stab{background:transparent;border:none;padding:6px 13px;font-size:12px;font-weight:500;cursor:pointer;color:#888;border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit}
 #supply-root .stab:hover{color:#1a1a1a}
@@ -4534,7 +4555,7 @@
     var SC_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom'];
     var SC_LABEL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'Manufacturing BOM'};
     // Supply chain sits second (next to General settings); it expands to the level-3 members below / nested.
-    var L2=[['general','General settings'],['supplychain','Supply chain'],['portalusers','Portal users'],['portal','Portal'],['keyaccounts','Key accounts'],['products','Products'],['export-uploads','Exports & uploads'],['suggestions','Suggestions']];
+    var L2=[['general','General settings'],['supplychain','Supply chain'],['portalusers','Portal users'],['portal','Portal'],['keyaccounts','Key accounts'],['products','Products'],['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']];
     if(ME&&ME.is_admin)L2.push(['permissions','Permissions']);   // admin-only tab
     if(CONFIG_SUB==='forecast-export')CONFIG_SUB='export-uploads';   // legacy slug redirect
     if(CONFIG_SUB==='permissions'&&!(ME&&ME.is_admin))CONFIG_SUB='general';   // guard: non-admins can't land on Permissions
@@ -4822,6 +4843,30 @@
               .then(function(r){return r.json();}).then(function(j){ inp.style.borderColor=(j&&j.error)?'#dc2626':'#16a34a'; setTimeout(function(){inp.style.borderColor='';},900); })
               .catch(function(){ inp.style.borderColor='#dc2626'; }); }; });
         }).catch(function(e){ b.innerHTML='<div class="count" style="color:#dc2626">'+esc(String(e))+'</div>'; }); };
+      SUBS['productcfg']=function(){ b.innerHTML='<div class="count">Loading…</div>';
+        fetch('/api/product/config').then(function(r){return r.json();}).then(function(d){ d=d||{seasons:[],categories:[]};
+          function draw(){
+            var seasonRows=(d.seasons||[]).map(function(s){ return '<tr data-code="'+esc(s.code)+'"><td class="l" style="padding:4px 8px;font-weight:700;font-family:ui-monospace,Menlo,monospace">'+esc(s.code)+'</td>'
+              +'<td class="l" style="padding:4px 8px"><input class="fci pcfg-s" data-code="'+esc(s.code)+'" data-f="label" value="'+esc(s.label)+'" style="width:220px;padding:4px 7px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px"></td>'
+              +'<td class="l" style="padding:4px 8px"><input class="fci pcfg-s" data-code="'+esc(s.code)+'" data-f="sort" value="'+esc(s.sort==null?'':s.sort)+'" style="width:50px;padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px;text-align:right"></td>'
+              +'<td class="l" style="padding:4px 8px"><select class="fci pcfg-s" data-code="'+esc(s.code)+'" data-f="active" style="padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px"><option value="true"'+(s.active!==false?' selected':'')+'>Active</option><option value="false"'+(s.active===false?' selected':'')+'>Inactive</option></select></td>'
+              +'<td class="l" style="padding:4px 8px"><a class="pcfg-sdel" data-code="'+esc(s.code)+'" style="color:#dc2626;cursor:pointer">✕</a></td></tr>'; }).join('');
+            var catRows=(d.categories||[]).map(function(c2){ return '<tr><td class="l" style="padding:4px 8px">'+esc(c2.category)+'</td>'
+              +'<td class="l" style="padding:4px 8px"><input class="fci pcfg-c" data-cat="'+esc(c2.category)+'" value="'+esc(c2.code)+'" placeholder="(auto)" style="width:110px;padding:4px 7px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px;text-transform:uppercase"></td></tr>'; }).join('');
+            b.innerHTML='<div class="annot"><b>CONFIG ▸ Product.</b> Manage <b>Seasons</b> (the code is used in each product reference, e.g. <b>SS27</b>-TOWLB-01) and the short <b>category codes</b>. Blank category code → auto-derived from the name. Changes save on edit.</div>'
+              +'<div class="sect-h">Seasons <button class="save-btn" id="pcfg-snew" style="margin-left:8px;font-size:11px;padding:3px 10px">+ Add season</button></div>'
+              +'<div class="tw" style="margin-bottom:20px"><table class="samp-tbl" style="font-size:12px"><thead><tr><th class="l">Code</th><th class="l">Label</th><th class="l">Sort</th><th class="l">Active</th><th></th></tr></thead><tbody>'+(seasonRows||'<tr><td colspan="5" class="count">no seasons</td></tr>')+'</tbody></table></div>'
+              +'<div class="sect-h">Category codes</div>'
+              +'<div class="tw"><table class="samp-tbl" style="font-size:12px"><thead><tr><th class="l">Category</th><th class="l">Code</th></tr></thead><tbody>'+catRows+'</tbody></table></div>';
+            b.querySelector('#pcfg-snew').onclick=function(){ var code=(prompt('New season code (e.g. SS29):')||'').trim().toUpperCase(); if(!code)return; shipPost('/api/product/season',{code:code,active:true},function(){ d.seasons.push({code:code,label:'',active:true,sort:null}); draw(); }); };
+            b.querySelectorAll('.pcfg-s').forEach(function(el){ el.onchange=function(){ var code=el.dataset.code, row=(d.seasons||[]).filter(function(x){return x.code===code;})[0]||{code:code};
+              row[el.dataset.f]= el.dataset.f==='active'?(el.value==='true'):(el.dataset.f==='sort'?(el.value===''?null:parseInt(el.value,10)):el.value);
+              shipPost('/api/product/season',{code:code,label:row.label,active:row.active,sort:row.sort},function(){}); }; });
+            b.querySelectorAll('.pcfg-sdel').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete season '+a.dataset.code+'?'))return; shipPost('/api/product/season/'+encodeURIComponent(a.dataset.code)+'/delete',{},function(){ d.seasons=(d.seasons||[]).filter(function(x){return x.code!==a.dataset.code;}); draw(); }); }; });
+            b.querySelectorAll('.pcfg-c').forEach(function(el){ el.onchange=function(){ shipPost('/api/product/category-code',{category:el.dataset.cat,code:el.value},function(){}); }; });
+          }
+          draw();
+        }).catch(function(e){ b.innerHTML='<div class="count" style="color:#dc2626">'+esc(String(e))+'</div>'; }); };
       SUBS['suggestions']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         var SS=[['new','New','#2563eb','#eff6ff'],['complete','Complete','#16a34a','#f0fdf4'],['future','Future','#7c3aed','#f5f3ff'],['deferred','Deferred','#b45309','#fffbeb']];
         var SMAP={}; SS.forEach(function(s){SMAP[s[0]]=s;});
@@ -4947,6 +4992,12 @@
               +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">'
               +lblBlk('Contact name','', inp('contact_name', fieldOf(r,'contact_name')))
               +lblBlk('Email','', inp('email', fieldOf(r,'email')))
+              +'</div>'
+              +'<div style="border-top:1px solid #eef2f7;margin:2px 0 14px"></div>'
+              +'<div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:10px">Product development</div>'
+              +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">'
+              +lblBlk('Include for product development','shows the Product tab in this supplier’s portal',
+                 '<select class="sup-in" data-f="include_product_dev" style="padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;width:90px"><option value="false"'+(fieldOf(r,'include_product_dev')?'':' selected')+'>No</option><option value="true"'+(fieldOf(r,'include_product_dev')?' selected':'')+'>Yes</option></select>')
               +'</div>'
               +'<div style="display:flex;gap:8px;margin-top:8px;padding-top:12px;border-top:1px solid #eef2f7"><button id="sup-save" data-k="'+id+'" style="cursor:pointer;border:none;background:#2563eb;color:#fff;padding:6px 18px;border-radius:6px;font-size:12px;font-weight:600">Save changes</button>'
               +'<button id="sup-cancel" style="cursor:pointer;border:1px solid #cbd5e1;background:#fff;padding:6px 14px;border-radius:6px;font-size:12px">Cancel</button>'
@@ -7372,7 +7423,133 @@
     var t='SUPPLY', h=raw, m=raw.match(/^<b>([^<]*)<\/b>\s*([\s\S]*)$/);
     if(m){ t=m[1].replace(/[.\s]+$/,''); h=m[2]; }
     return {t:t, h:h||'This SUPPLY section.'}; };
-  function boot(){ try{ if(ME===null)fetchMe(); ensureRoot(); ensureNavButton(); ensureBellButton(); ensureSuggestButton(); ensureScenarioRoot(); ensureScenarioButton(); ensureConfigButton();
+  // ════════ PRODUCT module (top-level; migration 128) ════════
+  var PRODUCT_SUB='plan', _prodCfg=null, _prodDetail=null, _prodDetailTab='master';
+  function prodCan(){ return !window.ME || ME.is_admin || ME.product_edit || ME.live===false; }
+  function ensureProductRoot(){ if(document.getElementById('product-root'))return;
+    var app=document.getElementById('app')||document.body; if(!app)return;
+    var el=document.createElement('div'); el.id='product-root';
+    el.innerHTML='<div id="product-subnav"><button class="stab" data-k="plan">PLAN</button><button class="stab" data-k="reports">REPORTS</button><span class="ver" style="margin-left:auto;color:#94a3b8;font-size:10px">HORIZON __APP_VERSION__</span></div><div id="product-content"></div>';
+    app.appendChild(el);
+    el.querySelectorAll('.stab').forEach(function(b){ b.onclick=function(){ selectProductSub(b.dataset.k); }; }); }
+  function showProduct(){ ensureProductRoot(); if(typeof hideSupply==='function')hideSupply(); if(typeof hideScenario==='function')hideScenario();
+    var app=document.getElementById('app'); if(app){ app.classList.add('product-active'); app.classList.remove('supply-active'); app.classList.remove('config-mode'); }
+    document.body.classList.remove('supply-on');
+    var r=document.getElementById('product-root'); if(r)r.style.display='block';
+    document.querySelectorAll('#view-tabs-row .view-toggle').forEach(function(b){b.classList.remove('active');});
+    var pb=document.getElementById('product-btn'); if(pb)pb.classList.add('active'); }
+  function hideProduct(){ var app=document.getElementById('app'); if(app)app.classList.remove('product-active');
+    var r=document.getElementById('product-root'); if(r)r.style.display='none';
+    var pb=document.getElementById('product-btn'); if(pb)pb.classList.remove('active'); }
+  function selectProductSub(k){ PRODUCT_SUB=k;
+    document.querySelectorAll('#product-subnav .stab').forEach(function(b){b.classList.toggle('active',b.dataset.k===k);});
+    var c=document.getElementById('product-content'); if(!c)return;
+    if(k==='reports') return renderProductReports(c);
+    renderProductPlan(c); }
+  function ensureProductButton(){ var row=document.getElementById('view-tabs-row'); if(!row)return;
+    var existing=document.getElementById('product-btn');
+    if(existing){ existing.style.display=prodCan()?'':'none'; return; }
+    if(!prodCan())return;
+    var btn=document.createElement('button'); btn.id='product-btn'; btn.className='view-toggle product-toggle'; btn.textContent='PRODUCT';
+    var cfg=document.getElementById('config-btn'), spacer=row.querySelector('div[style*="flex:1"]');
+    if(cfg)row.insertBefore(btn,cfg); else if(spacer)row.insertBefore(btn,spacer); else row.appendChild(btn);
+    btn.onclick=function(){ showProduct(); selectProductSub(PRODUCT_SUB||'plan'); };
+    row.querySelectorAll('.view-toggle:not(.product-toggle)').forEach(function(b){ b.addEventListener('click',function(){ hideProduct(); }); }); }
+  function prodStatusChip(s){ var m={in_development:['In development','#b45309','#fffbeb'],approved:['Approved','#16a34a','#f0fdf4'],dropped:['Dropped','#b91c1c','#fef2f2']}; var x=m[s]||m.in_development; return '<span style="font-size:9px;font-weight:700;color:'+x[1]+';background:'+x[2]+';border-radius:4px;padding:1px 6px">'+x[0]+'</span>'; }
+  function loadProdCfg(cb){ if(_prodCfg)return cb(_prodCfg); fetch('/api/product/config').then(function(r){return r.json();}).then(function(d){ _prodCfg=d||{seasons:[],categories:[]}; cb(_prodCfg); }).catch(function(){ cb({seasons:[],categories:[]}); }); }
+  function pRow(l,f){ return '<div class="prow"><div class="pl">'+l+'</div><div style="flex:1">'+f+'</div></div>'; }
+  function renderProductReports(c){ c.innerHTML='<div style="padding:20px 2px;color:#94a3b8;font-size:13px">Product reports — <b>coming soon</b>. (Placeholder; report content TBD.)</div>'; }
+  function renderProductPlan(c){
+    c.innerHTML='<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><div style="font-size:15px;font-weight:700">Product development</div><button class="save-btn" id="pg-new" style="background:#2563eb;color:#fff;border-color:#1d4ed8">+ New product</button><span id="pg-count" style="color:#94a3b8;font-size:11px"></span></div><div id="pg-grid"><div style="color:#94a3b8">Loading…</div></div>';
+    document.getElementById('pg-new').onclick=openProductNew;
+    fetch('/api/product/items').then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
+      document.getElementById('pg-count').textContent=rows.length+' item'+(rows.length===1?'':'s');
+      var g=document.getElementById('pg-grid');
+      if(!rows.length){ g.innerHTML='<div style="color:#94a3b8;padding:16px 2px">No product development items yet — click “+ New product”.</div>'; return; }
+      g.innerHTML='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px">'+rows.map(function(r){
+        var sw=r.has_swatch?'<img class="pg-swatch" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at)+'">':'<div class="pg-swatch none">no swatch</div>';
+        return '<div class="pg-card" data-ref="'+esc(r.ref)+'">'+sw+'<div style="padding:9px 11px">'
+          +'<div style="font-weight:700;font-family:ui-monospace,Menlo,monospace;font-size:12px">'+esc(r.ref)+'</div>'
+          +'<div style="font-size:12px;margin:2px 0">'+esc(r.colour_name||'—')+'</div>'
+          +'<div style="color:#94a3b8;font-size:11px">'+esc(r.category||'')+(r.season?' · '+esc(r.season):'')+'</div>'
+          +'<div style="color:#94a3b8;font-size:11px;margin-top:3px">'+r.sizes_approved+'/'+r.sizes+' sizes '+prodStatusChip(r.status)+'</div>'
+          +'<button class="save-btn pg-open" data-ref="'+esc(r.ref)+'" style="margin-top:7px">Plan ▸</button></div></div>';
+      }).join('')+'</div>';
+      g.querySelectorAll('.pg-open').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); _prodDetailTab='master'; renderProductDetail(b.dataset.ref); }; });
+      g.querySelectorAll('.pg-card').forEach(function(cd){ cd.onclick=function(){ _prodDetailTab='master'; renderProductDetail(cd.dataset.ref); }; });
+    }).catch(function(e){ document.getElementById('pg-grid').innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
+  function openProductNew(){ loadProdCfg(function(cfg){ var c=document.getElementById('product-content');
+    var seasons=(cfg.seasons||[]).filter(function(s){return s.active!==false;});
+    c.innerHTML='<div style="max-width:560px"><div style="font-size:15px;font-weight:700;margin-bottom:12px">New product development</div>'
+      +pRow('Season','<select class="fci" id="pn-season">'+seasons.map(function(s){return '<option value="'+esc(s.code)+'">'+esc(s.code)+(s.label?' — '+esc(s.label):'')+'</option>';}).join('')+'</select>')
+      +pRow('Category','<select class="fci" id="pn-cat">'+(cfg.categories||[]).map(function(x){return '<option value="'+esc(x.category)+'">'+esc(x.category)+(x.code?' ('+esc(x.code)+')':'')+'</option>';}).join('')+'</select>')
+      +pRow('Colour way name','<input class="fci" id="pn-colour" style="width:280px" placeholder="e.g. Ibiza Glow">')
+      +pRow('Sizes','<input class="fci" id="pn-sizes" style="width:280px" placeholder="comma-separated, e.g. S, M, L, XL">')
+      +pRow('Description','<textarea class="fci" id="pn-desc" rows="3" style="width:100%" placeholder="detailed description…"></textarea>')
+      +'<div style="margin-top:12px"><button class="save-btn" id="pn-save" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Create</button> <button class="save-btn light" id="pn-cancel">Cancel</button> <span id="pn-msg" style="font-size:12px;margin-left:8px"></span></div></div>';
+    document.getElementById('pn-cancel').onclick=function(){ selectProductSub('plan'); };
+    document.getElementById('pn-save').onclick=function(){ var msg=document.getElementById('pn-msg');
+      var season=document.getElementById('pn-season').value, cat=document.getElementById('pn-cat').value;
+      if(!season||!cat){ msg.style.color='#dc2626'; msg.textContent='Season and category required.'; return; }
+      var sizes=document.getElementById('pn-sizes').value.split(',').map(function(s){return s.trim();}).filter(Boolean);
+      this.disabled=true; msg.style.color='#64748b'; msg.textContent='Creating…';
+      shipPost('/api/product/item',{season:season,category:cat,colour_name:document.getElementById('pn-colour').value,description:document.getElementById('pn-desc').value,sizes:sizes,created_by:(window.ME&&ME.email)||''},function(j){ if(j&&j.error){ msg.style.color='#dc2626'; msg.textContent=j.error; document.getElementById('pn-save').disabled=false; return; } _prodDetailTab='master'; renderProductDetail(j.ref); }); }; }); }
+  function renderProductDetail(ref){ var c=document.getElementById('product-content'); c.innerHTML='<div style="color:#94a3b8">Loading…</div>';
+    fetch('/api/product/item/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ if(!d||d.error||!d.item){ c.innerHTML='<div style="color:#dc2626">Not found</div>'; return; }
+      _prodDetail=d; renderProdDetailShell(c,d); }).catch(function(e){ c.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
+  function renderProdDetailShell(c,d){ var it=d.item;
+    var sw=it.has_swatch?'<img src="/api/product/swatch/'+encodeURIComponent(it.ref)+'?t='+encodeURIComponent(it.updated_at)+'" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">':'<div style="width:64px;height:64px;border-radius:8px;border:1px dashed #cbd5e1;display:flex;align-items:center;justify-content:center;color:#cbd5e1;font-size:9px">no swatch</div>';
+    var tabs=[['master','Master data'],['timeline','Timeline'],['documents','Documents']];
+    c.innerHTML='<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px"><button class="save-btn light" id="pd-back">← Back</button>'+sw
+      +'<div><div style="font-weight:700;font-family:ui-monospace,Menlo,monospace">'+esc(it.ref)+'</div><div style="color:#94a3b8;font-size:11px">'+esc(it.colour_name||'—')+' · '+esc(it.category||'')+(it.season?' · '+esc(it.season):'')+'</div></div>'
+      +'<span style="margin-left:auto">'+prodStatusChip(it.status)+'</span></div>'
+      +'<div class="pd-tabs">'+tabs.map(function(t){return '<button class="pd-tab'+(t[0]===_prodDetailTab?' active':'')+'" data-t="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div><div id="pd-body"></div>';
+    document.getElementById('pd-back').onclick=function(){ selectProductSub('plan'); };
+    c.querySelectorAll('.pd-tab').forEach(function(b){ b.onclick=function(){ _prodDetailTab=b.dataset.t; renderProdDetailShell(c,_prodDetail); }; });
+    var body=document.getElementById('pd-body');
+    if(_prodDetailTab==='timeline')return renderProdTimeline(body,it.ref);
+    if(_prodDetailTab==='documents')return renderProdDocs(body,d);
+    renderProdMaster(body,d); }
+  function renderProdMaster(body,d){ var it=d.item; loadProdCfg(function(cfg){
+    var seasons=(cfg.seasons||[]), cats=(cfg.categories||[]);
+    function selOf(id,val,opts,valKey,lblFn){ return '<select class="fci" id="'+id+'">'+opts.map(function(o){ var v=valKey?o[valKey]:o; return '<option value="'+esc(v)+'"'+(String(v)===String(val)?' selected':'')+'>'+esc(lblFn?lblFn(o):v)+'</option>'; }).join('')+'</select>'; }
+    var sizeRows=(d.sizes||[]).map(function(s){ return '<tr data-id="'+s.id+'"><td style="padding:3px 8px 3px 0"><input class="fci pm-sz" data-id="'+s.id+'" data-f="size_label" value="'+esc(s.size_label)+'" style="width:120px"></td>'
+      +'<td style="padding:3px 8px"><select class="fci pm-sz" data-id="'+s.id+'" data-f="approval_status"><option value="pending"'+(s.approval_status==='pending'?' selected':'')+'>Pending</option><option value="approved"'+(s.approval_status==='approved'?' selected':'')+'>Approved</option><option value="rejected"'+(s.approval_status==='rejected'?' selected':'')+'>Rejected</option></select></td>'
+      +'<td style="padding:3px 8px"><a class="pm-sz-del" data-id="'+s.id+'" style="color:#dc2626;cursor:pointer">✕</a></td></tr>'; }).join('');
+    body.innerHTML='<div style="display:flex;gap:28px;flex-wrap:wrap"><div style="flex:1 1 380px;min-width:320px">'
+      +pRow('Season',selOf('pm-season',it.season,seasons,'code',function(o){return o.code+(o.label?' — '+o.label:'');}))
+      +pRow('Category',selOf('pm-cat',it.category,cats,'category',function(o){return o.category+(o.code?' ('+o.code+')':'');}))
+      +pRow('Colour way','<input class="fci" id="pm-colour" value="'+esc(it.colour_name)+'" style="width:280px">')
+      +pRow('Status','<select class="fci" id="pm-status"><option value="in_development"'+(it.status==='in_development'?' selected':'')+'>In development</option><option value="approved"'+(it.status==='approved'?' selected':'')+'>Approved</option><option value="dropped"'+(it.status==='dropped'?' selected':'')+'>Dropped</option></select>')
+      +pRow('Description','<textarea class="fci" id="pm-desc" rows="4" style="width:100%">'+esc(it.description)+'</textarea>')
+      +'<div style="margin-top:8px"><button class="save-btn" id="pm-save" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Save master data</button> <button class="save-btn light" id="pm-del" style="color:#dc2626">Delete product</button> <span id="pm-msg" style="font-size:12px;margin-left:8px"></span></div>'
+      +'</div><div style="flex:0 0 300px">'
+      +'<div style="font-weight:700;font-size:13px;margin-bottom:6px">Size variants <span style="color:#94a3b8;font-weight:400;font-size:11px">(approval = internal D&amp;B sign-off)</span></div>'
+      +'<table style="border-collapse:collapse;font-size:12px"><tbody>'+(sizeRows||'<tr><td style="color:#94a3b8;padding:4px 0">no sizes</td></tr>')+'</tbody></table>'
+      +'<div style="margin-top:8px"><input class="fci" id="pm-newsz" placeholder="add size…" style="width:130px"> <button class="save-btn" id="pm-addsz">+ Add size</button></div>'
+      +'<div style="font-weight:700;font-size:13px;margin:16px 0 6px">Swatch image</div><input type="file" id="pm-swatch" accept="image/*" style="font-size:12px"> <button class="save-btn" id="pm-swatch-up">Upload swatch</button><span id="pm-sw-msg" style="font-size:11px;margin-left:6px"></span>'
+      +'</div></div>';
+    body.querySelector('#pm-save').onclick=function(){ var msg=body.querySelector('#pm-msg'); msg.style.color='#64748b'; msg.textContent='Saving…';
+      shipPost('/api/product/item/'+encodeURIComponent(it.ref),{season:body.querySelector('#pm-season').value,category:body.querySelector('#pm-cat').value,colour_name:body.querySelector('#pm-colour').value,status:body.querySelector('#pm-status').value,description:body.querySelector('#pm-desc').value},function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;return;} msg.style.color='#16a34a'; msg.textContent='Saved ✓'; _prodCfg=null; }); };
+    body.querySelector('#pm-del').onclick=function(){ if(!confirm('Delete '+it.ref+'? This removes its sizes, documents and timeline.'))return; shipPost('/api/product/item/'+encodeURIComponent(it.ref)+'/delete',{},function(){ selectProductSub('plan'); }); };
+    body.querySelector('#pm-addsz').onclick=function(){ var v=body.querySelector('#pm-newsz').value.trim(); if(!v)return; shipPost('/api/product/size',{ref:it.ref,size_label:v},function(){ renderProductDetail(it.ref); }); };
+    body.querySelectorAll('.pm-sz').forEach(function(el){ el.onchange=function(){ var b={}; b[el.dataset.f]=el.value; shipPost('/api/product/size/'+el.dataset.id,b,function(){}); }; });
+    body.querySelectorAll('.pm-sz-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Remove this size?'))return; shipPost('/api/product/size/'+a.dataset.id+'/delete',{},function(){ renderProductDetail(it.ref); }); }; });
+    body.querySelector('#pm-swatch-up').onclick=function(){ var f=body.querySelector('#pm-swatch').files[0]; var m=body.querySelector('#pm-sw-msg'); if(!f){m.style.color='#dc2626';m.textContent='choose a file';return;} if(f.size>10*1024*1024){m.style.color='#dc2626';m.textContent='max 10MB';return;} m.style.color='#64748b'; m.textContent='uploading…'; var rd=new FileReader(); rd.onload=function(){ shipPost('/api/product/swatch',{ref:it.ref,mime:f.type||'image/png',data_base64:String(rd.result)},function(j){ if(j&&j.error){m.style.color='#dc2626';m.textContent=j.error;return;} renderProductDetail(it.ref); }); }; rd.readAsDataURL(f); }; }); }
+  function renderProdDocs(body,d){ var ref=d.item.ref; var docs=d.docs||[];
+    body.innerHTML='<div style="border:1px dashed #cbd5e1;border-radius:8px;padding:12px 14px;margin-bottom:14px;background:#f8fafc"><div style="font-weight:700;font-size:12px;margin-bottom:6px">Upload document <span style="color:#94a3b8;font-weight:400">(≤10MB)</span></div><input type="file" id="pdoc-file" style="font-size:12px"> <button class="save-btn" id="pdoc-up" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Upload</button> <span id="pdoc-msg" style="font-size:12px;margin-left:6px"></span></div>'
+      +'<table style="border-collapse:collapse;font-size:12px;width:100%;max-width:640px"><tbody>'+(docs.length?docs.map(function(x){ return '<tr><td style="padding:5px 8px"><a href="/api/product/doc/'+x.id+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline">'+esc(x.filename)+'</a></td><td style="padding:5px 8px;color:#94a3b8;white-space:nowrap">'+Math.max(1,Math.round((x.byte_size||0)/1024))+' KB</td><td style="padding:5px 8px;color:#94a3b8;white-space:nowrap">'+esc(x.uploaded_at||'')+'</td><td style="padding:5px 8px"><a class="pdoc-del" data-id="'+x.id+'" style="color:#dc2626;cursor:pointer">✕</a></td></tr>'; }).join(''):'<tr><td style="color:#94a3b8;padding:8px 2px">No documents yet.</td></tr>')+'</tbody></table>';
+    body.querySelector('#pdoc-up').onclick=function(){ var f=body.querySelector('#pdoc-file').files[0]; var m=body.querySelector('#pdoc-msg'); if(!f){m.style.color='#dc2626';m.textContent='choose a file';return;} if(f.size>10*1024*1024){m.style.color='#dc2626';m.textContent='max 10MB';return;} m.style.color='#64748b'; m.textContent='uploading…'; var rd=new FileReader(); rd.onload=function(){ shipPost('/api/product/doc',{ref:ref,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),uploaded_by:(window.ME&&ME.email)||''},function(j){ if(j&&j.error){m.style.color='#dc2626';m.textContent=j.error;return;} renderProductDetail(ref); }); }; rd.readAsDataURL(f); };
+    body.querySelectorAll('.pdoc-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this document?'))return; shipPost('/api/product/doc/'+a.dataset.id+'/delete',{},function(){ renderProductDetail(ref); }); }; }); }
+  function renderProdTimeline(body,ref){ body.innerHTML='<div style="color:#94a3b8">Loading…</div>';
+    fetch('/api/product/notes/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){ notes=Array.isArray(notes)?notes:[];
+      var list=notes.slice().reverse().map(function(n){ var who=n.author_kind==='supplier'?'supplier':(n.author_email?shortUser(n.author_email):'Dock & Bay');
+        return '<div style="padding:7px 0;border-bottom:1px solid #f1f1f1"><div style="color:#94a3b8;font-size:11px">'+esc(n.created_at||'')+' · '+esc(who)+'</div><div style="white-space:pre-wrap">'+esc(n.body||'')+'</div></div>'; }).join('')||'<div style="color:#94a3b8;padding:6px 0">No timeline entries yet.</div>';
+      body.innerHTML='<div style="max-width:640px"><div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:10px"><textarea class="fci" id="pt-in" rows="2" placeholder="Add a note…" style="flex:1"></textarea><button class="save-btn" id="pt-post" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Post</button><button class="save-btn light" id="pt-esc" title="escalate to the product-development team" style="color:#b45309">⚑ Escalate</button></div><div>'+list+'</div></div>';
+      body.querySelector('#pt-post').onclick=function(){ var t=body.querySelector('#pt-in').value.trim(); if(!t)return; shipPost('/api/product/note',{ref:ref,body:t,author_email:(window.ME&&ME.email)||''},function(){ renderProdTimeline(body,ref); }); };
+      body.querySelector('#pt-esc').onclick=function(){ var t=body.querySelector('#pt-in').value.trim(); if(!t){ alert('Type the escalation message in the note box first.'); return; } if(!confirm('Escalate '+ref+' to the product-development team?'))return; shipPost('/api/product/escalate',{ref:ref,message:t},function(j){ if(j&&j.error){alert(j.error);return;} alert(j&&j.sent?('Escalated — emailed '+j.emails.join(', ')):(j&&j.note)||'Escalated (no recipients configured).'); renderProdTimeline(body,ref); }); };
+    }).catch(function(e){ body.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
+  function boot(){ try{ if(ME===null)fetchMe(); ensureRoot(); ensureNavButton(); ensureBellButton(); ensureSuggestButton(); ensureScenarioRoot(); ensureScenarioButton(); ensureConfigButton(); ensureProductButton();
     if(!_routed){ _routed=true; try{ if(/^#\/?(supply|config|scenario|demand|reports|buy|fba|planning|exec)(\/|$)/.test(location.hash)) applyRoute();
       else { location.hash='#/supply/purchase-orders'; applyRoute(); } }catch(e){} }   // deep-link on first load; no hash → default landing = SUPPLY ▸ Purchase Orders
   }catch(e){ if(window.console)console.log('[SUPPLY] boot error',e&&e.message); } }
