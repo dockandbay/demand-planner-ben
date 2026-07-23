@@ -6783,7 +6783,7 @@
     }).catch(function(){}); }
   function loadSampleDetail(id,i){ var box=document.getElementById('sampdet-'+i);
     fetch('/api/supply/sample-detail/'+id).then(function(r){return r.json();}).then(function(d){ if(!d||d.error){box.innerHTML='<div style="color:#dc2626">'+esc((d&&d.error)||'load failed')+'</div>';return;}
-      var s=d.sample, ep='/api/supply/sample/'+id, editing=false;
+      var s=d.sample, ep='/api/supply/sample/'+id, editing=false, curTab=(box._sampTab||'details');
       var slines=(d.lines||[]).map(function(l){return {sku:l.sku,qty:l.qty};});
       var PURP=['sales','product','photography','marketing','operations'];
       function fld(f,val,w,ph){ return '<span style="display:inline-block;margin:0 6px 5px 0;vertical-align:top"><span style="display:block;font-size:9px;text-transform:uppercase;letter-spacing:.03em;color:#94a3b8;margin-bottom:1px">'+esc(ph||f)+'</span><input class="fci txt samp-fld" data-field="'+f+'" value="'+esc(val||'')+'" style="width:'+(w||150)+'px"></span>'; }
@@ -6793,7 +6793,7 @@
         w.querySelectorAll('.sl-rm').forEach(function(x){x.onclick=function(){slines.splice(x.dataset.k,1);renderSlines();};}); }
       function paint(){
         var charges=(d.charges||[]).map(function(ch){ var tot=(Number(ch.freight_cost)||0)+(Number(ch.product_cost)||0);
-          return '<tr><td class="l">'+sampleChargeChip(ch.status)+'</td><td>'+money(ch.freight_cost)+'</td><td>'+money(ch.product_cost)+'</td><td><b>'+money(tot)+'</b></td><td class="l">'+esc(ch.description||'')+'</td><td class="l">'+(ch.status==='pending'?'<button class="save-btn samp-charge-acc" data-id="'+ch.id+'" style="background:#bbf7d0;border:1px solid #16a34a;color:#166534;font-weight:700">Accept → Other Payments</button> <button class="save-btn light samp-charge-rej" data-id="'+ch.id+'">Reject</button>':'')+'</td></tr>'; }).join('')||'<tr><td colspan="6" class="mut">no charges</td></tr>';
+          return '<tr><td class="l">'+sampleChargeChip(ch.status)+'</td><td class="l">'+money(ch.freight_cost)+'</td><td class="l">'+money(ch.product_cost)+'</td><td class="l"><b>'+money(tot)+'</b></td><td class="l">'+esc(ch.description||'')+'</td><td class="l">'+(ch.status==='pending'?'<button class="save-btn samp-charge-acc" data-id="'+ch.id+'" style="background:#bbf7d0;border:1px solid #16a34a;color:#166534;font-weight:700">Accept → Other Payments</button> <button class="save-btn light samp-charge-rej" data-id="'+ch.id+'">Reject</button>':'')+'</td></tr>'; }).join('')||'<tr><td colspan="6" class="mut">no charges</td></tr>';
         var addr=[s.address_line1,s.address_line2,[s.city,s.region].filter(Boolean).join(' '),[s.postcode,s.country].filter(Boolean).join(' ')].filter(Boolean).join(', ');
         function L(t){ return '<div style="font-size:9px;text-transform:uppercase;letter-spacing:.03em;color:#94a3b8;margin-top:8px">'+t+'</div>'; }
         var recip = editing
@@ -6825,9 +6825,13 @@
           : sampleStatusChip(s.status_calc||s.status);
         var actBtn = editing ? '<button class="save-btn samp-done" style="background:#2563eb;color:#fff;border-color:#1d4ed8">✓ Done</button>'
                              : '<button class="save-btn samp-edit">Edit</button>';
-        box.innerHTML='<div style="display:flex;gap:24px;flex-wrap:wrap">'
+        // tabbed detail — mirrors the PO detail (.po-subnav / .rtab + panels), with per-tab counts
+        function bdge(n){ return n>0?' <span class="ex-badge">'+n+'</span>':''; }
+        var pend=(d.charges||[]).filter(function(c){return c.status==='pending';}).length, natt=(d.attachments||[]).length, nsku=(d.lines||[]).length;
+        function tb(k,label){ return '<button class="rtab samp-tab'+(curTab===k?' active':'')+'" data-st="'+k+'">'+label+'</button>'; }
+        function panel(k,html){ return '<div class="samp-panel" data-st="'+k+'"'+(curTab===k?'':' style="display:none"')+'>'+html+'</div>'; }
+        var detailsPanel='<div style="display:flex;gap:24px;flex-wrap:wrap">'
           +'<div style="min-width:250px"><div class="sect-h">Recipient &amp; address</div>'+recip+L('Purpose')+purpose+L('Notes')+notes+'</div>'
-          +'<div style="min-width:220px"><div class="sect-h">SKUs</div>'+skus+'</div>'
           +'<div style="min-width:240px"><div class="sect-h">Fulfilment</div>'
             +'<div class="cli-row"><div class="cli-lbl">Requested Completion Date</div><div class="cli-val">'+completion+'</div></div>'
             +'<div class="cli-row"><div class="cli-lbl">Tracking</div><div class="cli-val">'+tracking+'</div></div>'
@@ -6835,13 +6839,19 @@
             +'<div class="cli-row"><div class="cli-lbl">Status</div><div class="cli-val">'+statusCtl+'</div></div>'
             +'<div class="tiny mut" style="margin-top:4px">Supplier accepted: '+(s.accepted_at?fd(s.accepted_at):'—')+'</div>'
             +'<div class="tiny mut">Supplier expected: '+(s.supplier_expected?fd(s.supplier_expected):'—')+'</div>'
-            +'<div style="margin-top:8px">'+actBtn+' <button class="save-btn light samp-del" data-id="'+id+'" style="color:#dc2626">Delete</button></div></div>'
-          +'</div>'
-          +'<div class="sect-h" style="margin-top:10px">Attachments</div>'
-          +'<div class="tiny" style="margin-bottom:4px">'+((d.attachments||[]).map(function(a){return '<span style="display:inline-block;margin:0 12px 4px 0"><a href="/api/supply/portal-attachment/'+a.id+'" target="_blank" rel="noopener">'+esc(a.filename||'file')+'</a> <a class="samp-att-rm" data-aid="'+a.id+'" title="remove" style="color:#dc2626;cursor:pointer">×</a></span>';}).join('')||'<span class="mut">none</span>')+'</div>'
-          +'<div><input type="file" class="samp-att-file" style="font-size:11px"> <button class="save-btn samp-att-up">Upload attachment</button></div>'
-          +'<div class="sect-h" style="margin-top:10px">Charges</div><div class="tw"><table><thead><tr><th class="l">Status</th><th>Freight</th><th>Product</th><th>Total</th><th class="l">Description</th><th class="l"></th></tr></thead><tbody>'+charges+'</tbody></table></div>'
-          +'<div class="sect-h" style="margin-top:10px">Timeline</div><div class="sp-timeline" data-ref="'+esc(s.ref)+'"></div>';
+            +'<div style="margin-top:10px">'+actBtn+' <button class="save-btn light samp-del" data-id="'+id+'" style="color:#dc2626">Delete</button></div></div>'
+          +'</div>';
+        var contentsPanel='<div class="sect-h">SKUs</div>'+skus;
+        var attachPanel='<div class="tiny" style="margin-bottom:6px">'+((d.attachments||[]).map(function(a){return '<span style="display:inline-block;margin:0 12px 4px 0"><a href="/api/supply/portal-attachment/'+a.id+'" target="_blank" rel="noopener">'+esc(a.filename||'file')+'</a> <a class="samp-att-rm" data-aid="'+a.id+'" title="remove" style="color:#dc2626;cursor:pointer">×</a></span>';}).join('')||'<span class="mut">no attachments yet</span>')+'</div>'
+          +'<div><input type="file" class="samp-att-file" style="font-size:11px"> <button class="save-btn samp-att-up">Upload attachment</button></div>';
+        var chargesPanel='<div class="tw"><table><thead><tr><th class="l">Status</th><th class="l">Freight</th><th class="l">Product</th><th class="l">Total</th><th class="l">Description</th><th class="l"></th></tr></thead><tbody>'+charges+'</tbody></table></div>';
+        box.innerHTML='<div class="po-subnav samp-subnav" style="margin-bottom:12px">'
+            +tb('details','Details')+tb('contents','Contents'+bdge(nsku))+tb('charges','Charges'+bdge(pend))+tb('attachments','Attachments'+bdge(natt))+tb('timeline','Timeline')+'</div>'
+          +panel('details',detailsPanel)+panel('contents',contentsPanel)+panel('charges',chargesPanel)+panel('attachments',attachPanel)
+          +panel('timeline','<div class="sp-timeline" data-ref="'+esc(s.ref)+'"></div>');
+        box.querySelectorAll('.samp-tab').forEach(function(t){ t.onclick=function(){ curTab=t.dataset.st; box._sampTab=curTab;
+          box.querySelectorAll('.samp-tab').forEach(function(x){x.classList.toggle('active',x===t);});
+          box.querySelectorAll('.samp-panel').forEach(function(p){p.style.display=(p.dataset.st===curTab)?'':'none';}); }; });
         var eb=box.querySelector('.samp-edit'); if(eb)eb.onclick=function(){ editing=true; paint(); };
         var db=box.querySelector('.samp-done'); if(db)db.onclick=function(){ db.disabled=true;   // ✓ Done also persists the SKU lines (fields already auto-save on change)
           shipPost('/api/supply/sample/'+id+'/lines',{lines:slines.filter(function(l){return l.sku&&String(l.sku).trim();}).map(function(l){return {sku:String(l.sku).trim(),qty:Number(l.qty)||0};})},function(){ editing=false; if(_sampleReload)_sampleReload(); }); };

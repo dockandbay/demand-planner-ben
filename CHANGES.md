@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.056 - Samples detail → tabbed like the PO detail (G)
+
+Admin SUPPLY ▸ Samples expanded detail was one long flat card; restructured into the PO-detail tab pattern
+(`.po-subnav` / `.rtab` + panels): **Details** (recipient/address, purpose, notes, fulfilment, edit/delete),
+**Contents** (SKUs), **Charges**, **Attachments**, **Timeline** — with per-tab count badges (SKUs, pending
+charges, attachments). Active tab persists across the Edit re-render. Charges mini-table left-aligned.
+
 ## v26.055 - UI consistency pass 2: badges, chips, buttons, alignment, headers
 
 - **D — notification badges:** the Samples grid "unread notes" badge is now the standard **red** `.ex-badge`
