@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.027 - Portal preview: Product tab + suppliers flag; mobile Samples scroll
+
+- /api/supply/suppliers now returns include_product_dev — so the CONFIG supplier editor shows the saved Yes/No,
+  and the CONFIG portal PREVIEW can tell a supplier is flagged. Preview now builds productEnabled + products, so
+  the Product tab shows there (it already worked in the real portal via bootstrap). Ballast now shows Product.
+- Portal Samples table sizes to content so it scrolls sideways on mobile instead of cramming into one width.
+
 ## v26.026 - Fix supplier save (cin7_member_id type)
 
 - Saving a supplier failed ("column cin7_member_id is of type bigint but expression is of type text") — the patch

@@ -1548,7 +1548,8 @@ app.get('/api/supply/:section', async (req, res) => {
           start_deposit_pct,completion_pct,balance_pct,credit_days,credit_type,
           credit_fee_on_balance_pct,production_days,country,contact_name,email,
           business_name,address_1,address_2,city,state,postcode,phone,
-          te_id,incoterm,cin7_member_id,fulfil_id,export_port
+          te_id,incoterm,cin7_member_id,fulfil_id,export_port,
+          coalesce(include_product_dev,false) include_product_dev
           FROM planner.suppliers ORDER BY kind,name`));
       case 'key-accounts':
         return res.json(await q(`SELECT * FROM planner.key_accounts ORDER BY name`));
