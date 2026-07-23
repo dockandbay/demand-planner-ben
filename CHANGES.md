@@ -3,6 +3,29 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.040 - Fold sample shipments into the existing Samples feature (remove parallel tab)
+
+Reverses v26.038's mistake. A sample shipment IS a `sample_requests` record (the existing Samples
+feature) — it already carried bulk SKUs as line items; now it can also carry **product-development
+samples**. Removed the separate "Sample Shipments" tab and its parallel tables.
+
+- **Migration 133 replaced** (134 deleted): new `sample_request_dev_samples` (sample_request ↔ dev
+  sample, many-to-many); **drops** the unused `product_sample_shipments`/`_links`/`_skus` (never on live).
+- **Samples tab (portal):** each sample shipment card now shows **Contents** = Bulk SKUs (qty edit + ✕)
+  and Product development (✕), with a **＋ Add contents** rich multi-select picker — searchable open dev
+  samples + supplier-scoped SKU search with qty. New-shipment form drops the SKU paste box (rich picker
+  only); add contents on the card after creating.
+- **PRODUCT ▸ Samples (portal):** each sample shows which shipment(s) it's on (read-only); managed in Samples.
+- **Main PRODUCT grid + admin Samples tab:** "Sample shipment" column now reads the sample-request linkage.
+- **Consistent carrier dropdown** everywhere (shipments, samples grid, portal): DHL, FedEx, UPS, Flexport,
+  SF Express, Other. Flexport added to the portal dynamic-link resolver.
+- **SUPPLY ▸ Samples grid:** the Tracking cell is now a clickable dynamic carrier link; the table scrolls
+  horizontally on mobile with the **View + Ref** columns pinned (sticky), instead of squashing to one width.
+
+Endpoints: added /api/{supply,portal}/sample/:id/dev-samples (replace-all) + /api/portal/sample/:id/lines
+(replace-all; admin /api/supply/sample/:id/lines already existed). Removed all v26.038
+product-sample-shipment endpoints. Migration for Diviyaj: **133_sample_request_dev_samples.sql** (134 removed).
+
 ## v26.039 - Fix: PRODUCT menu "product0" + harden new sample-shipment GETs
 
 - **"product0" in the menu:** the PRODUCT top-bar button's unread badge stored `textContent="0"` even

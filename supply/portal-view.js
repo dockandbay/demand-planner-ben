@@ -18,6 +18,7 @@
     if(/ups/.test(c)) return 'https://www.ups.com/track?loc=en_US&tracknum='+e;
     if(/fedex|fed ?ex/.test(c)) return 'https://www.fedex.com/fedextrack/?trknbr='+e;
     if(/sf ?express|sf-express|shunfeng|顺丰|順豐/.test(c)) return 'https://www.sf-international.com/us/en/dynamic_function/waybill/#search/bill-number/'+e;
+    if(/flex/.test(c)){ var n=(r.match(/\d{6,}/)||[])[0]; return n?'https://app.flexport.com/shipments/'+n:''; }
     return ''; }
   function carrierTrackLink(carrier,code){ var u=carrierTrackUrl(carrier,code); return u?'<a href="'+u+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;font-weight:700" title="track with '+esc(carrier||'carrier')+' ↗">'+esc(code)+' ↗</a>':esc(code); }
   // Direct-to-Client details apply when the PO branch is Direct to Client (incl. B2B JLEW/NEXT) OR a
@@ -552,7 +553,7 @@
     var PORTAL_PROD_Q='', PORTAL_PROD_SEASON='', PORTAL_PROD_STATUS='in_development';   // Product grid: search + season + status (default: in development)
     var _invFiles={};     // base64 of the last parsed invoice file, per PO (for the Apply step)
     var rootEl=opts.root; if(!rootEl.closest('#supply-root')){rootEl.id='supply-root';} rootEl.style.display='block';
-    rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders <span id="pp-pos-badge"></span></span><span class="rtab" data-pt="shipmentplan">Shipment Plan <span id="pp-ship-badge"></span></span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="productions">Productions</span><span class="rtab" data-pt="samples">Samples <span id="pp-samp-badge"></span></span><span class="rtab" data-pt="product" id="pp-prod-tab" style="display:none">Product <span id="pp-prod-badge"></span></span><span class="rtab" data-pt="sampleshipments">Sample Shipments</span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
+    rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders <span id="pp-pos-badge"></span></span><span class="rtab" data-pt="shipmentplan">Shipment Plan <span id="pp-ship-badge"></span></span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="productions">Productions</span><span class="rtab" data-pt="samples">Samples <span id="pp-samp-badge"></span></span><span class="rtab" data-pt="product" id="pp-prod-tab" style="display:none">Product <span id="pp-prod-badge"></span></span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
     var tabsEl=document.getElementById('pp-tabs'), body=document.getElementById('pp-body');
     // download a generated invoice as a real file (fetch -> blob) rather than opening a tab — works on the
     // portal host where /api/invoice/* isn't routed (uses the /api/portal/* endpoints via EP).
@@ -1216,7 +1217,8 @@
               }).catch(function(){ el.innerHTML='<span class="mut tiny">—</span>'; }); }); }
           function ppSampleCard(s){
             function lbl(t){ return '<div style="font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:#94a3b8;font-weight:700;margin-bottom:3px">'+t+'</div>'; }
-            var skuList=(s.lines||[]).map(function(l){return '<div style="padding:1px 0;text-align:left"><b>'+units(l.qty)+'</b> × '+esc(l.sku)+'</div>';}).join('')||'<div class="mut tiny">no SKUs</div>';
+            var skuList=(s.lines||[]).map(function(l){return '<div class="samp-lrow" style="display:flex;gap:6px;align-items:center;padding:1px 0;text-align:left"><input class="fci samp-lqty" data-sku="'+esc(l.sku)+'" value="'+(l.qty==null?'':l.qty)+'" style="width:50px;text-align:left" inputmode="numeric" title="qty"><span style="flex:1;min-width:0">'+esc(l.sku)+'</span><a class="samp-lrm" data-sku="'+esc(l.sku)+'" title="remove" style="color:#dc2626;cursor:pointer">✕</a></div>';}).join('')||'<div class="mut tiny">no SKUs</div>';
+            var devList=(s.dev_samples||[]).map(function(d){return '<div style="display:flex;gap:6px;align-items:center;padding:1px 0;text-align:left"><b style="font-family:ui-monospace,Menlo,monospace;font-size:11px">'+esc(d.ref)+'</b>'+(d.colour_name?'<span class="mut tiny">'+esc(d.colour_name)+'</span>':'')+'<a class="samp-drm" data-id="'+d.id+'" title="remove" style="color:#dc2626;cursor:pointer;margin-left:auto">✕</a></div>';}).join('')||'<div class="mut tiny">none</div>';
             var addr=[s.address_line1,s.address_line2,[s.city,s.region,s.postcode].filter(Boolean).join(' '),s.country].filter(Boolean);
             var charges=(s.charges||[]).map(function(c){ var t=(Number(c.freight_cost)||0)+(Number(c.product_cost)||0); return '<div class="tiny" style="margin:2px 0">'+chgChip(c.status)+' &nbsp;freight '+money(c.freight_cost)+' + product '+money(c.product_cost)+' = <b>'+money(t)+'</b>'+(c.description?' · '+esc(c.description):'')+'</div>'; }).join('')||'<div class="mut tiny">none yet</div>';
             return '<div class="samp-card" data-id="'+s.id+'" data-ref="'+esc(s.ref)+'" style="border:1px solid #e5e7eb;border-radius:10px;padding:14px;margin-bottom:12px;background:#fff;text-align:left">'
@@ -1225,7 +1227,11 @@
                 +'<span class="mut tiny">Completion required: <b>'+(s.completion_required?fd(s.completion_required):'—')+'</b></span></div>'
               +'<div style="display:flex;gap:32px;flex-wrap:wrap">'
                 +'<div style="min-width:190px">'+lbl('Ship to')+'<div class="tiny" style="line-height:1.65"><b>'+esc(s.recipient_company||'—')+'</b>'+(s.recipient_name?'<br>'+esc(s.recipient_name):'')+(addr.length?'<br>'+addr.map(esc).join('<br>'):'')+(s.phone?'<br>☏ '+esc(s.phone):'')+'</div></div>'
-                +'<div style="min-width:190px">'+lbl('SKUs &amp; quantities')+'<div class="tiny" style="line-height:1.7">'+skuList+'</div></div>'
+                +'<div style="min-width:220px">'+lbl('Contents')
+                  +'<div class="tiny" style="line-height:1.7"><div style="font-weight:600;color:#64748b;margin-bottom:2px">Bulk SKUs</div>'+skuList
+                  +'<div style="font-weight:600;color:#64748b;margin:6px 0 2px">Product development</div>'+devList
+                  +'<button class="save-btn samp-add-contents" style="margin-top:7px;font-size:11px;background:#2563eb;color:#fff;border-color:#1d4ed8">＋ Add contents</button></div>'
+                  +'<div class="samp-picker" style="margin-top:7px"></div></div>'
                 +'<div style="min-width:190px">'+lbl('Purpose')+'<div class="tiny" style="margin-bottom:10px">'+esc((s.purpose||[]).join(', ')||'—')+'</div>'+lbl('Notes')+'<div class="tiny" style="white-space:pre-wrap;background:#f8fafc;border:1px solid #eef2f7;border-radius:6px;padding:7px 9px;min-width:170px;max-width:300px">'+(s.notes?esc(s.notes):'<span class="mut">—</span>')+'</div></div>'
               +'</div>'
               +'<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px">'
@@ -1233,7 +1239,7 @@
                 +'<div>'+lbl('Expected completion')+'<input type="date" class="fci samp-exp" value="'+esc(s.supplier_expected||'')+'" style="width:150px'+((sampCdMissing(s)||sampDateConflict(s))?';border:1px solid #dc2626;background:#fef2f2':'')+'">'+(sampCdMissing(s)?'<div style="margin-top:3px"><span style="background:#dc2626;color:#fff;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px">⚠ Must enter completion date</span></div>':'')+'</div>'
                 +(sampDateConflict(s)?'<div style="flex-basis:100%"><span style="background:#dc2626;color:#fff;border-radius:4px;font-size:10px;font-weight:700;padding:2px 7px">⚠ Expected completion date has passed but status is still "In production" — please update</span></div>':'')
                 +'<div>'+lbl('Tracking code')+'<input class="fci txt samp-trk" value="'+esc(s.tracking_code||'')+'" style="width:170px" placeholder="tracking…">'+(carrierTrackUrl(s.carrier,s.tracking_code)?'<div class="tiny" style="margin-top:3px">'+carrierTrackLink(s.carrier,s.tracking_code)+'</div>':'')+'</div>'
-                +'<div>'+lbl('Carrier')+'<input class="fci txt samp-car" list="pp-samp-carrierlist" value="'+esc(s.carrier||'')+'" style="width:120px" placeholder="carrier…"><datalist id="pp-samp-carrierlist"><option value="DHL"><option value="FedEx"><option value="UPS"><option value="SF Express"></datalist></div>'
+                +'<div>'+lbl('Carrier')+(function(){var CARR=['DHL','FedEx','UPS','Flexport','SF Express','Other'],cur=s.carrier||'';return '<select class="fci samp-car" style="width:130px"><option value="">—</option>'+CARR.map(function(o){return '<option'+(o===cur?' selected':'')+'>'+o+'</option>';}).join('')+((cur&&CARR.indexOf(cur)<0)?'<option selected>'+esc(cur)+'</option>':'')+'</select>';})()+'</div>'
                 +'<button class="save-btn samp-save">Save</button></div>'
               +'<div style="margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px">'+lbl('Charges')+charges
                 +'<div style="display:flex;gap:8px;align-items:flex-end;margin-top:6px;flex-wrap:wrap"><div><div class="mut tiny">Freight</div><input class="fci samp-cf" style="width:80px" placeholder="0.00"></div><div><div class="mut tiny">Product</div><input class="fci samp-cp" style="width:80px" placeholder="0.00"></div><div><div class="mut tiny">Note</div><input class="fci txt samp-cd" style="width:180px" placeholder="optional"></div><button class="save-btn samp-charge">Create charge</button></div></div>'
@@ -1303,6 +1309,13 @@
             var tbl=samples.length?(rows.length?'<div class="tw"><table style="width:max-content;min-width:100%"><thead><tr><th class="l"></th><th class="l">Ref</th><th class="l">Status</th><th class="l">Recipient</th><th class="l">Requested completion</th><th class="l">Units</th><th class="l">Tracking</th></tr></thead><tbody>'+rows.map(ppSampleRow).join('')+'</tbody></table></div>':'<div class="count">No samples match this filter.</div>'):'<div class="count">No sample requests yet.</div>';
             return bar+'<div id="samp-newform"></div>'+tbl; }
           function wireSampleCard(scope,id){
+            // Contents (bulk SKUs + product-development samples) — replace-all writes, then in-place refresh
+            function saveLines(lines){ var s=sampById(id); postJSON(EP.sampleContentsBase+id+'/lines',{lines:lines},function(j){ if(j&&j.error){alert(j.error);return;} if(s)s.lines=lines; refreshSampleCard(id); }); }
+            function saveDev(ids){ var s=sampById(id); postJSON(EP.sampleContentsBase+id+'/dev-samples',{dev_sample_ids:ids},function(j){ if(j&&j.error){alert(j.error);return;} if(s)s.dev_samples=(s.dev_samples||[]).filter(function(d){return ids.indexOf(String(d.id))>=0||ids.indexOf(d.id)>=0;}); refreshSampleCard(id); }); }
+            scope.querySelectorAll('.samp-lqty').forEach(function(inp){ inp.onchange=function(){ var s=sampById(id); var lines=(s.lines||[]).map(function(l){return {sku:l.sku,qty:l.sku===inp.dataset.sku?(Number(inp.value)||0):l.qty};}); saveLines(lines); }; });
+            scope.querySelectorAll('.samp-lrm').forEach(function(a){ a.onclick=function(){ var s=sampById(id); var lines=(s.lines||[]).filter(function(l){return l.sku!==a.dataset.sku;}).map(function(l){return {sku:l.sku,qty:l.qty};}); saveLines(lines); }; });
+            scope.querySelectorAll('.samp-drm').forEach(function(a){ a.onclick=function(){ var s=sampById(id); var ids=(s.dev_samples||[]).map(function(d){return String(d.id);}).filter(function(x){return x!==String(a.dataset.id);}); saveDev(ids); }; });
+            var addc=scope.querySelector('.samp-add-contents'); if(addc)addc.onclick=function(){ var pk=scope.querySelector('.samp-picker'); if(!pk)return; if(pk.style.display==='none'||!pk.innerHTML){ pk.style.display=''; sampContentsPicker(pk, sampById(id), function(){ reload(); }); } else { pk.style.display='none'; pk.innerHTML=''; } };
             var ac=scope.querySelector('.samp-accept'); if(ac)ac.onclick=function(){ ac.disabled=true; postJSON(EP.sampleAccept,{id:id},function(){ reload(); }); };
             var save=scope.querySelector('.samp-save'); if(save)save.onclick=function(){ var ps=scope.querySelector('.samp-prod'),ex=scope.querySelector('.samp-exp'),tk=scope.querySelector('.samp-trk'),cr=scope.querySelector('.samp-car');
               var ev=(ex&&ex.value)||null,pv=(ps&&ps.value)||null,tv=(tk&&tk.value)||null,cv=(cr&&cr.value)||null;
@@ -1336,14 +1349,13 @@
               +'<div style="display:flex;gap:8px;flex-wrap:wrap"><input class="fci txt snf-recipient_company" placeholder="Recipient company" style="width:200px"><input class="fci txt snf-first_name" placeholder="First name" style="width:120px"><input class="fci txt snf-last_name" placeholder="Last name" style="width:120px"><input class="fci txt snf-phone" placeholder="Phone" style="width:140px"></div>'
               +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px"><input class="fci txt snf-address_line1" placeholder="Address line 1" style="width:260px"><input class="fci txt snf-address_line2" placeholder="Line 2" style="width:160px"><input class="fci txt snf-city" placeholder="City" style="width:120px"><input class="fci txt snf-region" placeholder="Region" style="width:100px"><input class="fci txt snf-postcode" placeholder="Postcode" style="width:100px"><input class="fci txt snf-country" placeholder="Country" style="width:80px"></div>'
               +'<div style="margin-top:4px"><span class="mut tiny">Completion required </span><input type="date" class="fci snf-completion" style="width:150px"> &nbsp; '+purp+'</div>'
-              +'<div style="margin-top:4px"><div class="mut tiny">SKUs — paste <b>sku, qty</b> per line:</div><textarea class="fci snf-paste" rows="3" style="width:320px;text-align:left" placeholder="TOWLB-..., 2"></textarea></div>'
               +'<div style="margin-top:4px"><textarea class="fci snf-notes" rows="2" placeholder="Notes" style="width:320px;text-align:left"></textarea></div>'
+              +'<div class="mut tiny" style="margin-top:4px">Create the shipment, then add contents (SKUs + product-development samples) with <b>＋ Add contents</b> on the card.</div>'
               +'<div style="margin-top:8px"><button class="save-btn snf-save" style="background:#16a34a;color:#fff;border-color:#15803d">Create</button> <button class="save-btn snf-cancel">Cancel</button></div></div>';
             box.querySelector('.snf-cancel').onclick=function(){box.dataset.open='';box.innerHTML='';};
             box.querySelector('.snf-save').onclick=function(){ var btn=this; function V(k){var f=box.querySelector('.snf-'+k);return f?f.value.trim():'';}
               var purpose=Array.prototype.map.call(box.querySelectorAll('.snf-purpose:checked'),function(x){return x.value;});
-              var lines=[]; V('paste').split(/\n/).forEach(function(ln){var p=ln.split(/[,\t]/);var sku=(p[0]||'').trim();if(sku)lines.push({sku:sku,qty:Number((p[1]||'').trim())||0});});
-              btn.disabled=true; postJSON(EP.sampleCreate,{supplier_name:STATE.supplierName||null,recipient_company:V('recipient_company')||null,first_name:V('first_name')||null,last_name:V('last_name')||null,phone:V('phone')||null,address_line1:V('address_line1')||null,address_line2:V('address_line2')||null,city:V('city')||null,region:V('region')||null,postcode:V('postcode')||null,country:V('country')||null,completion_date_required:V('completion')||null,purpose:purpose,notes:V('notes')||null,lines:lines},function(){ reload(); }); }; }
+              btn.disabled=true; postJSON(EP.sampleCreate,{supplier_name:STATE.supplierName||null,recipient_company:V('recipient_company')||null,first_name:V('first_name')||null,last_name:V('last_name')||null,phone:V('phone')||null,address_line1:V('address_line1')||null,address_line2:V('address_line2')||null,city:V('city')||null,region:V('region')||null,postcode:V('postcode')||null,country:V('country')||null,completion_date_required:V('completion')||null,purpose:purpose,notes:V('notes')||null,lines:[]},function(){ reload(); }); }; }
           function wireSamples(){
             var nb=document.getElementById('samp-new-btn'); if(nb)nb.onclick=ppSampleNewForm;
             body.querySelectorAll('.ps-filt').forEach(function(p){ p.onclick=function(){ PORTAL_SAMP_F=p.dataset.f; renderPP(); }; });
@@ -1421,10 +1433,7 @@
                   +'<button class="save-btn pp-samp-label" data-ref="'+esc(s.ref)+'" style="margin-left:auto">⤓ Download label</button></div>'
                   +(s.description?'<div style="margin:4px 0;white-space:pre-wrap">'+esc(s.description)+'</div>':'')
                   +(ph?'<div style="margin-top:4px">'+ph+'</div>':'')
-                  +'<div style="margin-top:7px">'
-                  +((s.shipments||[]).length?'<div style="display:flex;flex-direction:column;gap:5px;margin-bottom:6px">'+(s.shipments||[]).map(function(sh){return '<div style="padding:6px 9px;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">📦 <b>'+esc(sh.ref)+'</b>'+(sh.carrier?'<span class="mut tiny">'+esc(sh.carrier)+'</span>':'')+(sh.tracking?'<span style="font-size:12px">'+carrierTrackLink(sh.carrier,sh.tracking)+'</span>':'')+'<a class="pp-samp-unship" data-sample="'+s.id+'" data-ship="'+sh.id+'" title="remove from this shipment" style="color:#dc2626;cursor:pointer;margin-left:auto">✕</a></div>';}).join('')+'</div>':'')
-                  +'<button class="save-btn pp-samp-ship" data-id="'+s.id+'" data-linked="'+(s.shipments||[]).map(function(x){return x.id;}).join(',')+'" style="font-size:11px">＋ Add to a sample shipment</button>'
-                  +' <span class="mut tiny">carrier &amp; tracking are set in the Sample Shipments tab</span></div>'
+                  +((s.shipments||[]).length?'<div style="margin-top:7px;display:flex;flex-direction:column;gap:5px">'+(s.shipments||[]).map(function(sh){return '<div style="padding:6px 9px;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">📦 <b>'+esc(sh.ref)+'</b>'+(sh.carrier?'<span class="mut tiny">'+esc(sh.carrier)+'</span>':'')+(sh.tracking?'<span style="font-size:12px">'+carrierTrackLink(sh.carrier,sh.tracking)+'</span>':'')+'</div>';}).join('')+'<div class="mut tiny">add this sample to a shipment in the <b>Samples</b> tab</div></div>':'')
                   +'</div>'; }).join('')||'<div class="mut" style="padding:4px 0;text-align:left">No sample versions yet.</div>';
               box.innerHTML='<div style="text-align:left"><div style="font-weight:700;font-size:13px;margin-bottom:6px">Sample versions</div>'+rows
                 +'<div style="margin-top:8px"><button class="save-btn pp-add-sample" style="background:#16a34a;color:#fff;border-color:#15803d">+ Add sample</button></div>'
@@ -1438,16 +1447,6 @@
                 +'<div style="margin-top:7px"><label style="font-size:12px">Photos <input type="file" class="ps2-photos" accept="image/*" multiple style="font-size:12px"></label></div>'
                 +'<div style="margin-top:9px"><button class="save-btn ps2-save" data-ref="'+esc(ref)+'">Submit sample version</button> <span class="ps2-msg" style="font-size:12px;margin-left:6px"></span></div></div></div>';
               box.querySelectorAll('.pp-samp-label').forEach(function(lb){ lb.onclick=function(){ dlSampleLabel(lb.dataset.ref); }; });
-              box.querySelectorAll('.pp-samp-unship').forEach(function(a){ a.onclick=function(){ if(!confirm('Remove this sample from the shipment?'))return; postJSON(EP.productSampleRemove,{sample_id:a.dataset.sample,shipment_id:a.dataset.ship},function(j){ if(j&&j.error){alert(j.error);return;} ppProdSamples(box,ref); }); }; });
-              box.querySelectorAll('.pp-samp-ship').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var host=b.parentNode, sampleId=b.dataset.id, linked=(b.dataset.linked||'').split(',').filter(Boolean); host.innerHTML='<span class="mut tiny">Loading shipments…</span>';
-                getJSON(EP.productSampleShipments+"?supplier="+encodeURIComponent(STATE.supplierName||"")).then(function(ships){ ships=(Array.isArray(ships)?ships:[]).filter(function(sh){return linked.indexOf(String(sh.id))<0;});
-                  host.innerHTML='<div style="border:1px solid #cbd5e1;border-radius:6px;padding:8px;font-size:12px;max-width:340px"><div style="font-weight:600;margin-bottom:6px">Add this sample to a shipment</div>'
-                    +'<button class="save-btn pss-new" style="background:#16a34a;color:#fff;border-color:#15803d">＋ New shipment</button>'
-                    +(ships.length?'<div style="margin:7px 0 2px;color:#64748b">or add to an existing one:</div>'+ships.map(function(sh){return '<div class="pss-existing" data-ship="'+sh.id+'" style="padding:6px;cursor:pointer;border-top:1px solid #f1f1f1">'+esc(sh.ref)+(sh.carrier?' · '+esc(sh.carrier):'')+(sh.tracking_code?' · '+esc(sh.tracking_code):'')+'</div>';}).join(''):'<div class="mut tiny" style="margin-top:6px">(no other shipments yet)</div>')
-                    +'</div>';
-                  host.querySelector('.pss-new').onclick=function(){ postJSON(EP.productSampleShipmentCreate,{supplier:STATE.supplierName},function(j){ if(j&&j.error){alert(j.error);return;} if(!j||!j.id)return; postJSON(EP.productSampleAdd,{sample_id:sampleId,shipment_id:j.id},function(k){ if(k&&k.error){alert(k.error);return;} ppProdSamples(box,ref); }); }); };
-                  host.querySelectorAll('.pss-existing').forEach(function(o){ o.onclick=function(){ postJSON(EP.productSampleAdd,{sample_id:sampleId,shipment_id:o.dataset.ship},function(k){ if(k&&k.error){alert(k.error);return;} ppProdSamples(box,ref); }); }; });
-                }).catch(function(){ host.innerHTML='<span style="color:#dc2626">Could not load shipments</span>'; }); }; });
               var _addb=box.querySelector('.pp-add-sample'), _form=box.querySelector('.pp-sample-form'); if(_addb)_addb.onclick=function(){ _form.style.display=(_form.style.display!=='none')?'none':''; };   // no auto-focus on the date input (it auto-opens the mobile picker); date defaults to today, opens on tap
               var sv=box.querySelector('.ps2-save'); sv.onclick=function(){ var msg=box.querySelector('.ps2-msg');
                 var col=box.querySelector('.ps2-col').checked, qual=box.querySelector('.ps2-qual').checked;
@@ -1457,48 +1456,19 @@
                   var files=box.querySelector('.ps2-photos').files, i=0;
                   (function up(){ if(i>=files.length){ ppProdSamples(box,ref); return; } var f=files[i++]; if(f.size>10*1024*1024){ up(); return; } var rd=new FileReader(); rd.onload=function(){ postJSON(EP.productSamplePhoto,{sample_id:j.id,filename:f.name,mime:f.type||'image/jpeg',data_base64:String(rd.result)},function(){ up(); }); }; rd.readAsDataURL(f); })(); }); };
             }).catch(function(e){ box.innerHTML='<div style="color:#dc2626;text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
-          // ── SAMPLE SHIPMENTS hub — a supplier assembles a parcel of mixed contents (dev samples + bulk SKUs) ──
-          function ppSampleShipments(body){ body.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
-            getJSON(EP.productSampleShipments+"?supplier="+encodeURIComponent(STATE.supplierName||"")).then(function(ships){ ships=Array.isArray(ships)?ships:[];
-              var CARR=['','DHL','FedEx','UPS','SF Express','Other'];
-              var cards=ships.map(function(sh){
-                var samp=(sh.samples||[]).map(function(x){return '<span style="display:inline-flex;align-items:center;gap:4px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:12px;padding:2px 8px;margin:2px;font-size:11px"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(x.ref)+'</b>'+(x.colour_name?' · '+esc(x.colour_name):'')+'<a class="ssh-rmsamp" data-ship="'+sh.id+'" data-sample="'+x.id+'" title="remove" style="color:#dc2626;cursor:pointer">✕</a></span>';}).join('');
-                var skus=(sh.skus||[]).map(function(x){return '<div style="display:flex;gap:8px;align-items:center;padding:3px 0;border-bottom:1px solid #f4f4f5"><b style="font-family:ui-monospace,Menlo,monospace;font-size:12px">'+esc(x.sku)+'</b><span class="mut tiny" style="flex:1;min-width:0">'+esc(x.description||'')+'</span><input class="fci ssh-qty" data-ship="'+sh.id+'" data-sku="'+esc(x.sku)+'" value="'+(x.qty==null?'':x.qty)+'" placeholder="qty" style="width:64px;text-align:left" inputmode="numeric"><a class="ssh-rmsku" data-ship="'+sh.id+'" data-sku="'+esc(x.sku)+'" title="remove" style="color:#dc2626;cursor:pointer">✕</a></div>';}).join('');
-                return '<div class="ssh-card" data-ship="'+sh.id+'" style="border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:10px;text-align:left">'
-                  +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><b style="font-family:ui-monospace,Menlo,monospace;font-size:14px">'+esc(sh.ref)+'</b><span class="mut tiny">'+esc(sh.created_at||'')+'</span>'
-                  +'<a class="ssh-del" data-ship="'+sh.id+'" title="delete this shipment" style="color:#dc2626;cursor:pointer;margin-left:auto">🗑 delete</a></div>'
-                  +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:8px">'
-                  +'<label style="font-size:11px">Carrier<br><select class="fci ssh-car" data-ship="'+sh.id+'" style="text-align:left">'+CARR.map(function(o){return '<option value="'+o+'"'+(o===sh.carrier?' selected':'')+'>'+(o||'—')+'</option>';}).join('')+'</select></label>'
-                  +'<label style="font-size:11px">Tracking<br><input class="fci ssh-trk" data-ship="'+sh.id+'" value="'+esc(sh.tracking_code||'')+'" placeholder="tracking…" style="width:160px;text-align:left"></label>'
-                  +'<button class="save-btn ssh-save" data-ship="'+sh.id+'">Save</button>'
-                  +(sh.tracking_code?'<span style="align-self:center;font-size:12px">'+carrierTrackLink(sh.carrier,sh.tracking_code)+'</span>':'')+'</div>'
-                  +'<div style="margin-top:10px"><div class="mut tiny" style="margin-bottom:3px">Product development samples</div>'+(samp||'<span class="mut tiny">none</span>')+'</div>'
-                  +'<div style="margin-top:8px"><div class="mut tiny" style="margin-bottom:3px">Bulk SKUs</div>'+(skus||'<span class="mut tiny">none</span>')+'</div>'
-                  +'<div style="margin-top:9px"><button class="save-btn ssh-add" data-ship="'+sh.id+'" style="background:#2563eb;color:#fff;border-color:#1d4ed8">＋ Add contents</button></div>'
-                  +'<div class="ssh-picker" data-ship="'+sh.id+'" style="display:none;margin-top:9px"></div></div>'; }).join('')
-                  ||'<div class="mut" style="padding:10px 2px;text-align:left">No sample shipments yet — create one to bundle samples and SKUs into a parcel.</div>';
-              body.innerHTML='<div style="text-align:left;max-width:720px"><div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><div style="font-weight:700;font-size:14px">Sample shipments</div>'
-                +'<button class="save-btn ssh-new" style="background:#16a34a;color:#fff;border-color:#15803d;margin-left:auto">＋ New sample shipment</button></div>'
-                +'<div class="mut tiny" style="margin-bottom:10px">A shipment is a parcel you send us. Add product-development samples and/or bulk SKUs, then set the carrier &amp; tracking.</div>'+cards+'</div>';
-              body.querySelector('.ssh-new').onclick=function(){ postJSON(EP.productSampleShipmentCreate,{supplier:STATE.supplierName},function(j){ if(j&&j.error){alert(j.error);return;} ppSampleShipments(body); }); };
-              body.querySelectorAll('.ssh-save').forEach(function(b){ b.onclick=function(){ var id=b.dataset.ship, cs=body.querySelector('.ssh-car[data-ship="'+id+'"]'), ts=body.querySelector('.ssh-trk[data-ship="'+id+'"]');
-                postJSON(EP.productSampleShipmentUpdateBase+id,{carrier:cs?cs.value:'',tracking_code:ts?ts.value:''},function(j){ if(j&&j.error){alert(j.error);return;} ppSampleShipments(body); }); }; });
-              body.querySelectorAll('.ssh-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this sample shipment? Its contents links are removed (the samples/SKUs themselves are kept).'))return; postJSON(EP.productSampleShipmentDeleteBase+a.dataset.ship+'/delete',{},function(j){ if(j&&j.error){alert(j.error);return;} ppSampleShipments(body); }); }; });
-              body.querySelectorAll('.ssh-rmsamp').forEach(function(a){ a.onclick=function(){ postJSON(EP.productSampleRemove,{shipment_id:a.dataset.ship,sample_id:a.dataset.sample},function(j){ if(j&&j.error){alert(j.error);return;} ppSampleShipments(body); }); }; });
-              body.querySelectorAll('.ssh-rmsku').forEach(function(a){ a.onclick=function(){ postJSON(EP.productSampleShipmentSkuRemove,{shipment_id:a.dataset.ship,sku:a.dataset.sku},function(j){ if(j&&j.error){alert(j.error);return;} ppSampleShipments(body); }); }; });
-              body.querySelectorAll('.ssh-qty').forEach(function(inp){ inp.onchange=function(){ postJSON(EP.productSampleShipmentSkuAdd,{shipment_id:inp.dataset.ship,sku:inp.dataset.sku,qty:inp.value},function(j){ if(j&&j.error)alert(j.error); }); }; });
-              body.querySelectorAll('.ssh-add').forEach(function(b){ b.onclick=function(){ var id=b.dataset.ship, pk=body.querySelector('.ssh-picker[data-ship="'+id+'"]'); if(pk.style.display!=='none'){ pk.style.display='none'; return; } pk.style.display=''; sshPicker(pk,id,function(){ ppSampleShipments(body); }); }; });
-            }).catch(function(e){ body.innerHTML='<div style="color:#dc2626;text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
-          // rich multi-select "add contents" panel — pick open dev samples and/or bulk SKUs, add many at once
-          function sshPicker(host, shipId, onDone){ host.innerHTML='<div class="mut tiny">Loading…</div>';
+          // ── SAMPLE SHIPMENT CONTENTS picker — add product-development samples and/or bulk SKUs to a sample shipment ──
+          // `sample` is the sample_request (has id, lines[], dev_samples[]); writes replace-all to the sample-request endpoints.
+          function sampContentsPicker(host, sample, onDone){ host.innerHTML='<div class="mut tiny">Loading…</div>';
             var supQ=STATE.supplierName?'&supplier='+encodeURIComponent(STATE.supplierName):'';
-            getJSON(EP.productOpenSamples+(supQ?'?'+supQ.slice(1):'')).then(function(samples){ samples=Array.isArray(samples)?samples:[];
-              host.innerHTML='<div style="border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;background:#f8fafc">'
-                +'<div style="font-weight:700;font-size:12px;margin-bottom:6px">Add to this shipment</div>'
+            var haveDev={}; (sample.dev_samples||[]).forEach(function(d){ haveDev[String(d.id)]=1; });
+            var haveSku={}; (sample.lines||[]).forEach(function(l){ haveSku[l.sku]=l; });
+            getJSON(EP.productOpenSamples+(supQ?'?'+supQ.slice(1):'')).then(function(samples){ samples=(Array.isArray(samples)?samples:[]).filter(function(s){return !haveDev[String(s.id)];});
+              host.innerHTML='<div style="border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;background:#f8fafc;text-align:left">'
+                +'<div style="font-weight:700;font-size:12px;margin-bottom:6px">Add contents to this shipment</div>'
                 +'<div style="font-size:11px;color:#64748b;margin-bottom:3px">Product development samples <span class="mut">(products still in development)</span></div>'
                 +'<input class="fci ssh-pk-sq" placeholder="filter samples…" style="width:100%;text-align:left;margin-bottom:5px">'
                 +'<div class="ssh-pk-slist" style="max-height:150px;overflow:auto;border:1px solid #eef2f7;border-radius:6px;padding:4px 6px;background:#fff">'
-                +(samples.length?samples.map(function(s){return '<label class="ssh-pk-srow" data-hay="'+esc(((s.ref||'')+' '+(s.colour_name||'')).toLowerCase())+'" style="display:flex;gap:7px;align-items:center;padding:3px 2px;cursor:pointer;font-size:12px"><input type="checkbox" class="ssh-pk-scb" value="'+s.id+'"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.ref)+'</b>'+(s.colour_name?'<span class="mut tiny">'+esc(s.colour_name)+'</span>':'')+'</label>';}).join(''):'<div class="mut tiny" style="padding:4px">no open product samples</div>')
+                +(samples.length?samples.map(function(s){return '<label class="ssh-pk-srow" data-hay="'+esc(((s.ref||'')+' '+(s.colour_name||'')).toLowerCase())+'" style="display:flex;gap:7px;align-items:center;padding:3px 2px;cursor:pointer;font-size:12px"><input type="checkbox" class="ssh-pk-scb" value="'+s.id+'"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.ref)+'</b>'+(s.colour_name?'<span class="mut tiny">'+esc(s.colour_name)+'</span>':'')+'</label>';}).join(''):'<div class="mut tiny" style="padding:4px">no open product samples to add</div>')
                 +'</div>'
                 +'<div style="font-size:11px;color:#64748b;margin:9px 0 3px">Bulk SKUs <span class="mut">(your products)</span></div>'
                 +'<input class="fci ssh-pk-kq" placeholder="search SKU / description…" style="width:100%;text-align:left;margin-bottom:5px">'
@@ -1507,17 +1477,19 @@
               var sq=host.querySelector('.ssh-pk-sq'); if(sq)sq.oninput=function(){ var q=this.value.toLowerCase(); host.querySelectorAll('.ssh-pk-srow').forEach(function(r){ r.style.display=(!q||r.dataset.hay.indexOf(q)>=0)?'':'none'; }); };
               var kq=host.querySelector('.ssh-pk-kq'), klist=host.querySelector('.ssh-pk-klist'), kt=null;
               function loadSkus(q){ klist.innerHTML='<div class="mut tiny" style="padding:4px">searching…</div>';
-                getJSON(EP.productSkus+"?q="+encodeURIComponent(q||"")+supQ).then(function(rows){ rows=Array.isArray(rows)?rows:[];
+                getJSON(EP.productSkus+"?q="+encodeURIComponent(q||"")+supQ).then(function(rows){ rows=(Array.isArray(rows)?rows:[]).filter(function(k){return !haveSku[k.sku];});
                   klist.innerHTML=rows.length?rows.map(function(k){return '<div class="ssh-pk-krow" style="display:flex;gap:7px;align-items:center;padding:3px 2px;font-size:12px"><input type="checkbox" class="ssh-pk-kcb" value="'+esc(k.sku)+'"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(k.sku)+'</b><span class="mut tiny" style="flex:1;min-width:0">'+esc(k.description||'')+'</span><input class="fci ssh-pk-kqty" data-sku="'+esc(k.sku)+'" placeholder="qty" style="width:60px;text-align:left" inputmode="numeric"></div>';}).join(''):'<div class="mut tiny" style="padding:4px">no matches</div>'; }); }
               if(kq)kq.oninput=function(){ var v=this.value; if(kt)clearTimeout(kt); kt=setTimeout(function(){ loadSkus(v); },250); };
               host.querySelector('.ssh-pk-cancel').onclick=function(){ host.style.display='none'; host.innerHTML=''; };
               host.querySelector('.ssh-pk-add').onclick=function(){ var msg=host.querySelector('.ssh-pk-msg');
-                var sampleIds=Array.prototype.map.call(host.querySelectorAll('.ssh-pk-scb:checked'),function(c){return c.value;});
-                var skus=Array.prototype.map.call(host.querySelectorAll('.ssh-pk-kcb:checked'),function(c){ var qi=host.querySelector('.ssh-pk-kqty[data-sku="'+(window.CSS&&CSS.escape?CSS.escape(c.value):c.value)+'"]'); return {sku:c.value,qty:qi&&qi.value?qi.value:null}; });
-                if(!sampleIds.length&&!skus.length){ msg.style.color='#dc2626'; msg.textContent='Select at least one item.'; return; }
+                var addDev=Array.prototype.map.call(host.querySelectorAll('.ssh-pk-scb:checked'),function(c){return c.value;});
+                var addSkus=Array.prototype.map.call(host.querySelectorAll('.ssh-pk-kcb:checked'),function(c){ var qi=host.querySelector('.ssh-pk-kqty[data-sku="'+(window.CSS&&CSS.escape?CSS.escape(c.value):c.value)+'"]'); return {sku:c.value,qty:qi&&qi.value?Number(qi.value)||0:0}; });
+                if(!addDev.length&&!addSkus.length){ msg.style.color='#dc2626'; msg.textContent='Select at least one item.'; return; }
                 msg.style.color='#64748b'; msg.textContent='Adding…';
-                function afterSamples(){ if(!skus.length){ onDone&&onDone(); return; } postJSON(EP.productSampleShipmentSkuAdd,{shipment_id:shipId,skus:skus},function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;return;} onDone&&onDone(); }); }
-                if(sampleIds.length){ postJSON(EP.productSampleAdd,{shipment_id:shipId,sample_ids:sampleIds},function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;return;} afterSamples(); }); } else afterSamples(); };
+                var devIds=(sample.dev_samples||[]).map(function(d){return String(d.id);}).concat(addDev);
+                var lines=(sample.lines||[]).map(function(l){return {sku:l.sku,qty:l.qty};}).concat(addSkus);
+                function afterDev(){ if(!addSkus.length){ onDone&&onDone(); return; } postJSON(EP.sampleContentsBase+sample.id+'/lines',{lines:lines},function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;return;} onDone&&onDone(); }); }
+                if(addDev.length){ postJSON(EP.sampleContentsBase+sample.id+'/dev-samples',{dev_sample_ids:devIds},function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;return;} afterDev(); }); } else afterDev(); };
             }).catch(function(e){ host.innerHTML='<div style="color:#dc2626">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
           function ppProdTimeline(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
             fetch(EP.productNotesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){ shortNotes(notes); notes=Array.isArray(notes)?notes:[];
@@ -1538,7 +1510,6 @@
             tabsEl.querySelectorAll('.rtab').forEach(function(t){t.classList.toggle('active',t.dataset.pt===PORTAL_TAB);});
             setSampBadge(); setPosBadge(); setShipBadge(); setProdBadge();
             if(PORTAL_TAB==='product'){ body.innerHTML=ppProducts(_ppData.products||[]); wireProducts(); return; }
-            if(PORTAL_TAB==='sampleshipments'){ ppSampleShipments(body); return; }
             if(PORTAL_TAB==='samples'){ body.innerHTML=ppSamples(_ppData.samples||[]); wireSamples(); return; }
             if(PORTAL_TAB==='shipmentplan'){
               var today=new Date().toISOString().slice(0,10);

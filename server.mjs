@@ -1519,6 +1519,7 @@ app.get('/api/supply/:section', async (req, res) => {
           coalesce(s.address_line1,'') address_line1, coalesce(s.address_line2,'') address_line2,
           coalesce(s.region,'') region, coalesce(s.postcode,'') postcode, coalesce(s.phone,'') phone, coalesce(s.notes,'') notes,
           coalesce((SELECT json_agg(json_build_object('sku',l.sku,'qty',l.qty) ORDER BY l.id) FROM planner.sample_request_lines l WHERE l.sample_id=s.id),'[]') lines,
+          coalesce((SELECT json_agg(json_build_object('id',ds.id,'ref',ds.item_ref||'_v'||ds.version,'item_ref',ds.item_ref,'colour_name',(SELECT coalesce(colour_name,'') FROM planner.product_dev_items i WHERE i.ref=ds.item_ref)) ORDER BY ds.item_ref,ds.version) FROM planner.sample_request_dev_samples ls JOIN planner.product_dev_samples ds ON ds.id=ls.dev_sample_id WHERE ls.sample_request_id=s.id),'[]') dev_samples,
           coalesce((SELECT json_agg(json_build_object('id',c.id,'freight_cost',c.freight_cost,'product_cost',c.product_cost,'status',c.status,'description',coalesce(c.description,'')) ORDER BY c.created_at) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref),'[]') charges,
           to_char(s.completion_date_required,'YYYY-MM-DD') completion_required,
           to_char(s.supplier_expected_completion,'YYYY-MM-DD') supplier_expected,
@@ -3150,10 +3151,10 @@ app.get('/api/product/items', async (_req, res) => {
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id)::int sizes,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approval_status='approved')::int sizes_approved,
       (SELECT count(*) FROM planner.supplier_notes n WHERE n.po=i.ref AND n.author_kind='supplier' AND n.read_at IS NULL)::int unread_supplier,
-      coalesce((SELECT json_agg(DISTINCT jsonb_build_object('ref',sh.ref,'carrier',coalesce(sh.carrier,''),'tracking',coalesce(sh.tracking_code,'')))
+      coalesce((SELECT json_agg(DISTINCT jsonb_build_object('ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,'')))
         FROM planner.product_dev_samples ps
-        JOIN planner.product_sample_shipment_links l ON l.sample_id=ps.id
-        JOIN planner.product_sample_shipments sh ON sh.id=l.shipment_id
+        JOIN planner.sample_request_dev_samples l ON l.dev_sample_id=ps.id
+        JOIN planner.sample_requests sr ON sr.id=l.sample_request_id
         WHERE ps.item_ref=i.ref),'[]'::json) shipments
       FROM planner.product_dev_items i ORDER BY i.created_at DESC`);
     res.json(r.rows);
@@ -3285,23 +3286,9 @@ app.post('/api/product/notes-read', async (req, res) => {   // mark this product
   try { await pool.query(`UPDATE planner.supplier_notes SET read_at=now() WHERE po=$1 AND author_kind='internal' AND read_at IS NULL`, [ref]); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
-// ── SAMPLE SHIPMENTS — shared helpers ─────────────────────────────────────────
-// A sample shipment (SSHIP-nnnn) carries MIXED contents: product-development sample
-// versions (product_sample_shipment_links, mig 133) + bulk SKUs (product_sample_shipment_skus,
-// mig 134), each many-to-many. `suppliers` = array to scope to (portal), or null for all (admin/all).
-async function sampleShipmentRows(suppliers) {
-  const scoped = Array.isArray(suppliers);
-  return (await pool.query(`SELECT s.id, s.ref, coalesce(s.supplier,'') supplier, coalesce(s.carrier,'') carrier,
-      coalesce(s.tracking_code,'') tracking_code, to_char(s.created_at,'YYYY-MM-DD HH24:MI') created_at,
-      coalesce((SELECT json_agg(json_build_object('id',ps.id,'item_ref',ps.item_ref,'ref',ps.item_ref||'_v'||ps.version,'version',ps.version,
-          'colour_name',(SELECT coalesce(colour_name,'') FROM planner.product_dev_items i WHERE i.ref=ps.item_ref)) ORDER BY ps.item_ref, ps.version)
-        FROM planner.product_sample_shipment_links l JOIN planner.product_dev_samples ps ON ps.id=l.sample_id WHERE l.shipment_id=s.id),'[]'::json) samples,
-      coalesce((SELECT json_agg(json_build_object('sku',k.sku,'qty',k.qty,
-          'description',(SELECT coalesce(p.product_name_final,p.product_name,'') FROM planner.products p WHERE p.sku=k.sku)) ORDER BY k.sku)
-        FROM planner.product_sample_shipment_skus k WHERE k.shipment_id=s.id),'[]'::json) skus
-      FROM planner.product_sample_shipments s ${scoped ? 'WHERE s.supplier = ANY($1)' : ''} ORDER BY s.created_at DESC`,
-    scoped ? [suppliers] : [])).rows;
-}
+// ── SAMPLE SHIPMENT CONTENTS — candidate lists for the "Add contents" picker ──
+// A sample shipment IS a sample_request; its contents are bulk-SKU lines (sample_request_lines)
+// + product-development sample versions (sample_request_dev_samples, mig 133).
 async function openSampleCandidates(suppliers) {   // dev-sample versions whose parent product is still in development ("open")
   const scoped = Array.isArray(suppliers);
   return (await pool.query(`SELECT ps.id, ps.item_ref, (ps.item_ref||'_v'||ps.version) ref, ps.version,
@@ -3317,48 +3304,24 @@ async function supplierSkuCandidates(suppliers, q) {   // bulk SKUs, scoped to a
   return (await pool.query(`SELECT p.sku, coalesce(p.product_name_final,p.product_name,'') description, coalesce(p.size_short,'') size, coalesce(p.colour_long,'') colour
     FROM planner.products p ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY p.sku LIMIT 300`, params)).rows;
 }
-async function addSamplesToShipment(shipId, sampleIds, by) {
-  for (const sid of sampleIds) if (sid) await pool.query(`INSERT INTO planner.product_sample_shipment_links (shipment_id, sample_id, created_by) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [shipId, sid, by || null]);
+async function setSampleDevSamples(sampleId, devIds, by) {   // replace-all the dev-sample links on a sample shipment
+  await pool.query(`DELETE FROM planner.sample_request_dev_samples WHERE sample_request_id=$1::bigint`, [sampleId]);
+  for (const d of (Array.isArray(devIds) ? devIds : [])) { if (!d) continue;
+    await pool.query(`INSERT INTO planner.sample_request_dev_samples (sample_request_id, dev_sample_id, created_by) VALUES ($1::bigint,$2,$3) ON CONFLICT DO NOTHING`, [sampleId, d, by || null]); }
 }
-async function addSkusToShipment(shipId, skus, by) {
-  for (const it of skus) { if (!it || !it.sku) continue;
-    await pool.query(`INSERT INTO planner.product_sample_shipment_skus (shipment_id, sku, qty, created_by) VALUES ($1,$2,$3,$4)
-      ON CONFLICT (shipment_id, sku) DO UPDATE SET qty=excluded.qty`, [shipId, String(it.sku), it.qty == null || it.qty === '' ? null : parseInt(it.qty, 10), by || null]); }
+async function setSampleLines(sampleId, lines) {   // replace-all the bulk-SKU lines on a sample shipment
+  await pool.query(`DELETE FROM planner.sample_request_lines WHERE sample_id=$1::bigint`, [sampleId]);
+  for (const l of (Array.isArray(lines) ? lines : [])) { if (!l || !l.sku) continue;
+    await pool.query(`INSERT INTO planner.sample_request_lines (sample_id, sku, qty) VALUES ($1::bigint,$2,$3)`, [sampleId, String(l.sku).trim(), Math.round(Number(l.qty) || 0)]); }
 }
-function bodySampleIds(b) { return b.sample_ids && Array.isArray(b.sample_ids) ? b.sample_ids : (b.sample_id ? [b.sample_id] : []); }
-function bodySkus(b) { return b.skus && Array.isArray(b.skus) ? b.skus : (b.sku ? [{ sku: b.sku, qty: b.qty }] : []); }
-
-// Product sample shipments — admin/preview mirror of the portal endpoints (supplier passed in body/query).
-app.get('/api/product/sample-shipments', async (req, res) => { const sup = (req.query.supplier || '').trim();
-  try { res.json(await sampleShipmentRows(sup ? [sup] : null)); } catch (e) { res.status(500).json({ error: e.message }); } });
+// Candidate lists (admin/preview — supplier passed as ?supplier=)
 app.get('/api/product/open-samples', async (req, res) => { const sup = (req.query.supplier || '').trim();
   try { res.json(await openSampleCandidates(sup ? [sup] : null)); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.get('/api/product/skus', async (req, res) => { const sup = (req.query.supplier || '').trim();
   try { res.json(await supplierSkuCandidates(sup ? [sup] : null, (req.query.q || '').trim())); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/product/sample-shipment', async (req, res) => { const b = req.body || {};
-  try { const r = await pool.query(`INSERT INTO planner.product_sample_shipments (supplier, carrier, tracking_code, created_by) VALUES ($1,$2,$3,$4) RETURNING id, ref`,
-    [(b.supplier || '').trim() || null, (b.carrier || '').trim() || null, (b.tracking_code || '').trim() || null, (b.created_by || '').trim() || null]);
-    res.json({ ok: true, id: r.rows[0].id, ref: r.rows[0].ref }); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/product/sample-shipment/:id', async (req, res) => { const b = req.body || {};
-  try { await pool.query(`UPDATE planner.product_sample_shipments SET carrier=$2, tracking_code=$3, updated_at=now() WHERE id=$1`,
-    [req.params.id, (b.carrier || '').trim() || null, (b.tracking_code || '').trim() || null]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/product/sample-shipment/:id/delete', async (req, res) => {
-  try { await pool.query(`DELETE FROM planner.product_sample_shipments WHERE id=$1`, [req.params.id]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/product/sample-add', async (req, res) => { const b = req.body || {}, ids = bodySampleIds(b);
-  if (!b.shipment_id || !ids.length) return res.status(400).json({ error: 'shipment_id + sample_id(s) required' });
-  try { await addSamplesToShipment(b.shipment_id, ids, (b.created_by || '').trim() || shortUser(authUser(req)) || null); res.json({ ok: true, added: ids.length }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/product/sample-remove', async (req, res) => { const b = req.body || {};
-  if (!b.shipment_id || !b.sample_id) return res.status(400).json({ error: 'shipment_id + sample_id required' });
-  try { await pool.query(`DELETE FROM planner.product_sample_shipment_links WHERE shipment_id=$1 AND sample_id=$2`, [b.shipment_id, b.sample_id]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/product/sample-shipment-sku', async (req, res) => { const b = req.body || {}, skus = bodySkus(b);
-  if (!b.shipment_id || !skus.length) return res.status(400).json({ error: 'shipment_id + sku(s) required' });
-  try { await addSkusToShipment(b.shipment_id, skus, (b.created_by || '').trim() || shortUser(authUser(req)) || null); res.json({ ok: true, added: skus.length }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/product/sample-shipment-sku-remove', async (req, res) => { const b = req.body || {};
-  if (!b.shipment_id || !b.sku) return res.status(400).json({ error: 'shipment_id + sku required' });
-  try { await pool.query(`DELETE FROM planner.product_sample_shipment_skus WHERE shipment_id=$1 AND sku=$2`, [b.shipment_id, String(b.sku)]); res.json({ ok: true }); }
+// Sample-shipment contents (admin/preview) — dev samples attach to a sample_request
+app.post('/api/supply/sample/:id/dev-samples', async (req, res) => {
+  try { await setSampleDevSamples(req.params.id, (req.body || {}).dev_sample_ids, shortUser(authUser(req)) || null); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/product/notes-read-supplier', async (req, res) => {   // D&B side: mark SUPPLIER notes read (clears the main-app unread badge + ✉ bell)
   const ref = ((req.body || {}).ref || '').trim();
@@ -3406,9 +3369,9 @@ async function productSampleList(itemRef) {
   const rows = (await pool.query(`SELECT ps.id, ps.version, (ps.item_ref||'_v'||ps.version) ref, to_char(ps.sample_date,'YYYY-MM-DD') sample_date,
     ps.colour_verified, ps.quality_verified, coalesce(ps.description,'') description, coalesce(ps.created_by,'') created_by,
     to_char(ps.created_at,'YYYY-MM-DD HH24:MI') created_at,
-    coalesce((SELECT json_agg(json_build_object('id',sh.id,'ref',sh.ref,'carrier',coalesce(sh.carrier,''),'tracking',coalesce(sh.tracking_code,'')) ORDER BY sh.created_at)
-      FROM planner.product_sample_shipment_links l JOIN planner.product_sample_shipments sh ON sh.id=l.shipment_id
-      WHERE l.sample_id=ps.id),'[]'::json) shipments
+    coalesce((SELECT json_agg(json_build_object('id',sr.id,'ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,'')) ORDER BY sr.created_at)
+      FROM planner.sample_request_dev_samples l JOIN planner.sample_requests sr ON sr.id=l.sample_request_id
+      WHERE l.dev_sample_id=ps.id),'[]'::json) shipments
     FROM planner.product_dev_samples ps
     WHERE ps.item_ref=$1 ORDER BY ps.version`, [itemRef])).rows;
   if (rows.length) {
@@ -7573,6 +7536,7 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
           ELSE 'Awaiting supplier'
         END status_calc,
         coalesce((SELECT json_agg(json_build_object('sku',l.sku,'qty',l.qty) ORDER BY l.id) FROM planner.sample_request_lines l WHERE l.sample_id=s.id),'[]') lines,
+          coalesce((SELECT json_agg(json_build_object('id',ds.id,'ref',ds.item_ref||'_v'||ds.version,'item_ref',ds.item_ref,'colour_name',(SELECT coalesce(colour_name,'') FROM planner.product_dev_items i WHERE i.ref=ds.item_ref)) ORDER BY ds.item_ref,ds.version) FROM planner.sample_request_dev_samples ls JOIN planner.product_dev_samples ds ON ds.id=ls.dev_sample_id WHERE ls.sample_request_id=s.id),'[]') dev_samples,
         coalesce((SELECT json_agg(json_build_object('id',c.id,'freight_cost',c.freight_cost,'product_cost',c.product_cost,'status',c.status,'description',coalesce(c.description,'')) ORDER BY c.created_at) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref),'[]') charges,
         (SELECT count(*) FROM planner.sample_notes n WHERE n.sample_id=s.id AND n.author_kind='internal' AND n.read_at IS NULL)::int unread_dnb,
         coalesce((SELECT json_agg(json_build_object('id',a.id,'filename',a.filename) ORDER BY a.uploaded_at) FROM planner.portal_attachments a WHERE a.category='sample' AND a.po=s.ref),'[]') attachments
@@ -7655,52 +7619,17 @@ app.post('/api/portal/product-sample-photo', portalAuth, async (req, res) => { c
   try { const sr = (await pool.query(`SELECT item_ref FROM planner.product_dev_samples WHERE id=$1`, [id])).rows[0];
     if (!sr || !(await portalOwnsProduct(req, sr.item_ref))) return res.status(403).json({ error: 'not your sample' });
     res.json({ ok: true, id: await insertProductSamplePhoto(id, b, req.portal.email || null) }); } catch (e) { res.status(500).json({ error: e.message }); } });
-// PRODUCT SAMPLE SHIPMENTS (portal, supplier-scoped) — bundle sample versions onto a shipment (migration 132)
-async function portalOwnsSampleShipment(req, id) { if (!id || !req.portal.suppliers.length) return false;
-  return (await pool.query(`SELECT 1 FROM planner.product_sample_shipments WHERE id=$1 AND supplier = ANY($2)`, [id, req.portal.suppliers])).rowCount > 0; }
-app.get('/api/portal/product-sample-shipments', portalAuth, async (req, res) => {
-  try { res.json(await sampleShipmentRows(req.portal.suppliers)); } catch (e) { res.status(500).json({ error: e.message }); } });
+// SAMPLE SHIPMENT CONTENTS (portal) — candidate lists + replace-all contents on a sample_request
 app.get('/api/portal/product-open-samples', portalAuth, async (req, res) => {   // in-development dev-sample candidates for the picker
   try { res.json(await openSampleCandidates(req.portal.suppliers)); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.get('/api/portal/product-skus', portalAuth, async (req, res) => {   // bulk-SKU candidates, scoped to this supplier
   try { res.json(await supplierSkuCandidates(req.portal.suppliers, (req.query.q || '').trim())); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/portal/product-sample-shipment', portalAuth, async (req, res) => {   // create a new (empty) sample shipment
-  try { const sup = (req.portal.suppliers || [])[0] || null;
-    const r = await pool.query(`INSERT INTO planner.product_sample_shipments (supplier, carrier, tracking_code, created_by) VALUES ($1,$2,$3,$4) RETURNING id, ref`,
-      [sup, ((req.body || {}).carrier || '').trim() || null, ((req.body || {}).tracking_code || '').trim() || null, req.portal.email || null]);
-    res.json({ ok: true, id: r.rows[0].id, ref: r.rows[0].ref }); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/portal/product-sample-shipment/:id', portalAuth, async (req, res) => {   // update carrier / tracking
-  const id = req.params.id, b = req.body || {};
-  if (!(await portalOwnsSampleShipment(req, id))) return res.status(403).json({ error: 'not your shipment' });
-  try { await pool.query(`UPDATE planner.product_sample_shipments SET carrier=$2, tracking_code=$3, updated_at=now() WHERE id=$1`,
-    [id, (b.carrier || '').trim() || null, (b.tracking_code || '').trim() || null]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/portal/product-sample-shipment/:id/delete', portalAuth, async (req, res) => {
-  const id = req.params.id; if (!(await portalOwnsSampleShipment(req, id))) return res.status(403).json({ error: 'not your shipment' });
-  try { await pool.query(`DELETE FROM planner.product_sample_shipments WHERE id=$1`, [id]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/portal/product-sample-add', portalAuth, async (req, res) => {   // add dev-sample version(s) to a shipment (many-to-many)
-  const b = req.body || {}, ids = bodySampleIds(b), shipId = b.shipment_id;
-  if (!shipId || !ids.length) return res.status(400).json({ error: 'shipment_id + sample_id(s) required' });
-  try { if (!(await portalOwnsSampleShipment(req, shipId))) return res.status(403).json({ error: 'not your shipment' });
-    for (const sid of ids) { const sr = (await pool.query(`SELECT item_ref FROM planner.product_dev_samples WHERE id=$1`, [sid])).rows[0];
-      if (!sr || !(await portalOwnsProduct(req, sr.item_ref))) return res.status(403).json({ error: 'not your sample' }); }
-    await addSamplesToShipment(shipId, ids, req.portal.email || null); res.json({ ok: true, added: ids.length }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/portal/product-sample-remove', portalAuth, async (req, res) => {
-  const b = req.body || {}; if (!b.shipment_id || !b.sample_id) return res.status(400).json({ error: 'shipment_id + sample_id required' });
-  if (!(await portalOwnsSampleShipment(req, b.shipment_id))) return res.status(403).json({ error: 'not your shipment' });
-  try { await pool.query(`DELETE FROM planner.product_sample_shipment_links WHERE shipment_id=$1 AND sample_id=$2`, [b.shipment_id, b.sample_id]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/portal/product-sample-shipment-sku', portalAuth, async (req, res) => {   // add bulk SKU(s) to a shipment
-  const b = req.body || {}, skus = bodySkus(b), shipId = b.shipment_id;
-  if (!shipId || !skus.length) return res.status(400).json({ error: 'shipment_id + sku(s) required' });
-  if (!(await portalOwnsSampleShipment(req, shipId))) return res.status(403).json({ error: 'not your shipment' });
-  try { await addSkusToShipment(shipId, skus, req.portal.email || null); res.json({ ok: true, added: skus.length }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/portal/product-sample-shipment-sku-remove', portalAuth, async (req, res) => {
-  const b = req.body || {}; if (!b.shipment_id || !b.sku) return res.status(400).json({ error: 'shipment_id + sku required' });
-  if (!(await portalOwnsSampleShipment(req, b.shipment_id))) return res.status(403).json({ error: 'not your shipment' });
-  try { await pool.query(`DELETE FROM planner.product_sample_shipment_skus WHERE shipment_id=$1 AND sku=$2`, [b.shipment_id, String(b.sku)]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/portal/sample/:id/lines', portalAuth, async (req, res) => {   // replace-all bulk-SKU lines
+  try { const s = await portalOwnsSample(req, req.params.id); if (!s) return res.status(403).json({ error: 'not your sample' });
+    await setSampleLines(req.params.id, (req.body || {}).lines); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/portal/sample/:id/dev-samples', portalAuth, async (req, res) => {   // replace-all product-development sample links
+  try { const s = await portalOwnsSample(req, req.params.id); if (!s) return res.status(403).json({ error: 'not your sample' });
+    await setSampleDevSamples(req.params.id, (req.body || {}).dev_sample_ids, req.portal.email || null); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
 
 // ── PORTAL SAMPLES (supplier-scoped) ──────────────────────────────────────────
 async function portalOwnsSample(req, id){ if(!id)return null;
