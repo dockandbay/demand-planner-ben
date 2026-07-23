@@ -831,7 +831,7 @@
           +'<label class="tiny">Carton count<br><input class="fci pp-dtc" data-po="'+po+'" data-f="cartons" value="'+esc(p.dtc_cartons!=null?p.dtc_cartons:'')+'" inputmode="numeric" style="width:100px;text-align:left"></label>'
           +'<label class="tiny">Cargo volume (CBM)<br><input class="fci pp-dtc" data-po="'+po+'" data-f="cbm" value="'+esc(p.dtc_cbm!=null?p.dtc_cbm:'')+'" inputmode="decimal" style="width:120px;text-align:left"></label>'
           +'<label class="tiny">Gross weight (kg)<br><input class="fci pp-dtc" data-po="'+po+'" data-f="gross_weight_kg" value="'+esc(p.dtc_weight!=null?p.dtc_weight:'')+'" inputmode="decimal" style="width:120px;text-align:left"></label>'
-          +'<label class="tiny">Dimensions<br><input class="fci pp-dtc" data-po="'+po+'" data-f="dimensions" value="'+esc(p.dtc_dimensions||'')+'" placeholder="e.g. per carton 60x40x40cm" style="width:230px;text-align:left"></label>'
+          +'<label class="tiny">Total shipment dimensions<br><input class="fci pp-dtc" data-po="'+po+'" data-f="dimensions" value="'+esc(p.dtc_dimensions||'')+'" placeholder="e.g. 120x100x80cm total" style="width:230px;text-align:left"></label>'
           +'<button class="save-btn pp-dtc-go" data-po="'+po+'">Save shipment details</button></div>'
           +(p.dtc_entered_at?'<div class="tiny mut" style="margin-top:4px">Last updated '+esc(p.dtc_entered_at)+'</div>':''); }
       if(cdSkus.length){ var xrows=cdSkus.map(function(s){ var q=xd[s];
