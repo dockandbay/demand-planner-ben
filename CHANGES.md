@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.046 - PO-ref badge now counts ALL sub-tab notifications (not just "actions")
+
+The counter next to a PO number only counted formal "action items" (`poActions`), while the detail
+sub-tab badges (PAYMENTS/DATES/TIMELINE/…) counted the richer `poExceptions` set. So a PO whose only
+notifications were a **pending supplier invoice**, a **pending completion date**, an **unread note**, or an
+**unconfirmed order-plan change** showed sub-tab badges but a blank PO-ref counter (e.g. PO-56UKLX5-AIR:
+3 sub-tab notifications, no PO-ref badge).
+
+- PO-ref badge now shows the **total sub-tab notifications** (`poExceptions().all`), so it matches the tabs.
+- Clicking a notification-only PO's badge (nothing snoozeable) now opens the PO to the relevant sub-tab
+  instead of an empty action popover.
+- The "Payment overdue"/action filters and snooze are unchanged (still keyed on the action set).
+
 ## v26.045 - Payment-overdue flag + PAYMENTS badge now cover COMPLETE POs
 
 Same fix as v26.044, applied to the PO grid's action flags (not just the Payments Due report):

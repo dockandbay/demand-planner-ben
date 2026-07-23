@@ -2231,7 +2231,13 @@
     // action-items counter: red badge with the count of open actions on this PO; click deep-links to the
     // most relevant detail sub-tab (payment→PAYMENTS, date→DATES, shipping→SHIPMENTS).
     var _acts=poActions(r);
-    var actFlag=_acts.length?' <button class="po-act-badge ex-badge" style="cursor:pointer;border:none" data-po="'+esc(r.po)+'" data-tab="'+(PO_ACT_TAB[_acts[0]]||'')+'" data-allacts="'+esc(poActionsAll(r).join(','))+'" data-note="'+esc(_acts.length+' action item'+(_acts.length>1?'s':'')+' — '+_acts.map(function(k){return PO_ACT_LABEL[k]||k;}).join('; ')+' (click to snooze / open)')+'">'+_acts.length+'</button>':'';
+    // PO-ref badge counts the TOTAL notifications shown across the detail sub-tabs (payments/dates/timeline/…),
+    // not just snoozeable "actions" — so it matches the sub-tab badges. e.g. a pending supplier invoice /
+    // completion date, an unread note, or an unconfirmed order-plan change all count even without a formal action.
+    var _exc=poExceptions(r), _notif=_exc.all.length;
+    var _firstTab=_acts.length?(PO_ACT_TAB[_acts[0]]||''):(_exc.pay.length?'pay':_exc.dates.length?'dates':_exc.timeline.length?'timeline':_exc.ship.length?'shipments':_exc.oplan.length?'oplan':_exc.client.length?'client':_exc.master.length?'masterdata':'');
+    var _noteTxt=_notif+' notification'+(_notif>1?'s':'')+(_acts.length?' — '+_acts.map(function(k){return PO_ACT_LABEL[k]||k;}).join('; '):'')+' (click to open)';
+    var actFlag=_notif?' <button class="po-act-badge ex-badge" style="cursor:pointer;border:none" data-po="'+esc(r.po)+'" data-tab="'+_firstTab+'" data-allacts="'+esc(poActionsAll(r).join(','))+'" data-note="'+esc(_noteTxt)+'">'+_notif+'</button>':'';
     // the "double-click to copy" hint lives on the PO text only (not the whole cell), so hovering the action-item
     // badge beside it doesn't pop this native tooltip on top of the badge's own action-items tooltip.
     var pocell=indent?'<td class="l po-child po-numcell" data-po="'+esc(r.po)+'"><span class="ind"></span><b title="double-click (or long-press on mobile) to copy PO reference">'+esc(r.po)+'</b>'+actFlag+'</td>':'<td class="l po-numcell" data-po="'+esc(r.po)+'"><b title="double-click (or long-press on mobile) to copy PO reference">'+esc(r.po)+'</b>'+actFlag+'</td>';
@@ -2437,13 +2443,15 @@
     var ex=document.getElementById('po-act-pop'); if(ex)ex.remove();
     var pop=document.createElement('div'); pop.id='po-act-pop';
     pop.style.cssText='position:absolute;z-index:200000;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 30px rgba(15,23,42,.18);padding:8px 10px;min-width:300px;font-size:12px';
-    pop.innerHTML='<div style="font-weight:700;margin-bottom:4px">'+esc(po)+' — action items</div>'
-      +conds.map(function(k){ var sn=poActSnoozed(po,k), s=_poActState[poActKey(po,k)]||{};
+    pop.innerHTML='<div style="font-weight:700;margin-bottom:4px">'+esc(po)+(conds.length?' — action items':' — notifications')+'</div>'
+      +(conds.length?conds.map(function(k){ var sn=poActSnoozed(po,k), s=_poActState[poActKey(po,k)]||{};
         return '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-top:1px solid #f1f5f9">'
           +'<span style="flex:1">'+esc(PO_ACT_LABEL[k]||k)+(sn?'<br><span class="mut tiny">snoozed → '+esc(snzUntil(s))+snzBy(s)+(s.snoozed_at?' on '+esc(s.snoozed_at):'')+'</span>':'')+'</span>'
           +(sn?'<button class="save-btn light pap-un" data-k="'+esc(k)+'">wake</button>'
               :'<button class="save-btn light pap-snz" data-po="'+esc(po)+'" data-code="'+esc(k)+'">SNOOZE ▾</button>')
           +'<button class="lnk-btn pap-go" data-k="'+esc(k)+'" data-tab="'+(PO_ACT_TAB[k]||'')+'">open ↗</button></div>'; }).join('')
+        // notification-only PO (pending invoice / completion date / unread note / order-plan change — nothing snoozeable): just offer "open"
+        : '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-top:1px solid #f1f5f9"><span style="flex:1">'+esc(b.dataset.note||'Open to review')+'</span><button class="lnk-btn pap-go" data-k="" data-tab="'+esc(b.dataset.tab||'')+'">open ↗</button></div>')
       +'<div style="text-align:right;margin-top:6px"><button class="save-btn light pap-close">close</button></div>';
     document.body.appendChild(pop);
     var rc=b.getBoundingClientRect(); pop.style.left=(window.scrollX+Math.min(rc.left,window.innerWidth-330))+'px'; pop.style.top=(window.scrollY+rc.bottom+4)+'px';
