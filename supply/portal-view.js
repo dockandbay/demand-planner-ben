@@ -504,6 +504,7 @@
   /* portal PRODUCT detail sub-tabs: fit all four across one screen (no scroll) on mobile */
   #supply-root .pp-prod-nav{overflow-x:visible!important;flex-wrap:nowrap}
   #supply-root .pp-prod-nav .rtab{flex:1 1 0;min-width:0;padding:8px 2px!important;font-size:11px!important;letter-spacing:0;text-align:center}
+  #supply-root #pp-prod-detail,#supply-root #pp-prod-detail *{max-width:100%!important;box-sizing:border-box;overflow-wrap:anywhere}
   /* PO-detail PANELS (Timeline / Order Plan / …): bound each panel to the viewport and let its wide content
      scroll sideways WITHIN the panel. The .ppx is JS-pinned to the left of the full-grid-width cell, so without
      this the right of a wide panel is unreachable — grid-scroll just re-pins .ppx back to the left. */
@@ -551,7 +552,7 @@
     var PORTAL_PROD_Q='', PORTAL_PROD_SEASON='', PORTAL_PROD_STATUS='in_development';   // Product grid: search + season + status (default: in development)
     var _invFiles={};     // base64 of the last parsed invoice file, per PO (for the Apply step)
     var rootEl=opts.root; if(!rootEl.closest('#supply-root')){rootEl.id='supply-root';} rootEl.style.display='block';
-    rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders <span id="pp-pos-badge"></span></span><span class="rtab" data-pt="shipmentplan">Shipment Plan <span id="pp-ship-badge"></span></span><span class="rtab" data-pt="barcodes">Barcodes</span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="productions">Productions</span><span class="rtab" data-pt="samples">Samples <span id="pp-samp-badge"></span></span><span class="rtab" data-pt="product" id="pp-prod-tab" style="display:none">Product <span id="pp-prod-badge"></span></span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
+    rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders <span id="pp-pos-badge"></span></span><span class="rtab" data-pt="shipmentplan">Shipment Plan <span id="pp-ship-badge"></span></span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="productions">Productions</span><span class="rtab" data-pt="samples">Samples <span id="pp-samp-badge"></span></span><span class="rtab" data-pt="product" id="pp-prod-tab" style="display:none">Product <span id="pp-prod-badge"></span></span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
     var tabsEl=document.getElementById('pp-tabs'), body=document.getElementById('pp-body');
     // download a generated invoice as a real file (fetch -> blob) rather than opening a tab — works on the
     // portal host where /api/invoice/* isn't routed (uses the /api/portal/* endpoints via EP).
@@ -1009,7 +1010,11 @@
       var sel='<div class="bar" style="gap:8px;align-items:center;flex-wrap:wrap"><span class="pill-lbl" style="width:auto">Batch</span>'
         +'<select class="fci pv-prod-batch" style="min-width:200px;text-align:left"><option value="">— choose a batch —</option>'
         +batches.map(function(b){return '<option value="'+esc(b)+'"'+(PORTAL_PROD_BATCH===b?' selected':'')+'>'+esc(b)+'</option>';}).join('')+'</select>'
-        +(PORTAL_PROD_BATCH?'<button class="save-btn pv-prod-dl" style="margin-left:auto">⤓ Download order plan (XLSX)</button>':'')+'</div>';
+        +(PORTAL_PROD_BATCH?'<span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="save-btn pv-prod-dl">⤓ Download order plan (XLSX)</button>'
+          +'<span style="position:relative;display:inline-block"><button class="save-btn pv-bc-dl">⤓ Download barcodes ▾</button>'
+          +'<span class="pv-bc-menu" style="display:none;position:absolute;right:0;top:100%;z-index:50;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:190px;text-align:left">'
+          +[['product','Product barcodes'],['carton','Carton barcodes'],['inner','Inner barcodes']].map(function(o,i){return '<div class="pv-bc-opt" data-k="'+o[0]+'" style="padding:9px 13px;cursor:pointer;font-size:12px'+(i?';border-top:1px solid #f1f1f1':'')+'">'+o[1]+'</div>';}).join('')
+          +'</span></span></span>':'')+'</div>';
       if(!batches.length) return sel+'<div class="count">No batches on your purchase orders yet.</div>';
       if(!PORTAL_PROD_BATCH) return sel+'<div class="count">Choose a batch to see its order plan.</div>';
       var bp=prodBatchPOs(); if(!bp.length) return sel+'<div class="count">No purchase orders in that batch.</div>';
@@ -1021,6 +1026,10 @@
           +d.poList.map(function(po){ var q=d.qmap[sku+'|'+po]; return '<td style="text-align:right">'+(q?units(q):'<span class="mut">—</span>')+'</td>'; }).join('')+'</tr>'; }).join('');
       return sel+'<div class="mut tiny" style="margin:2px 0 8px">'+bp.length+' PO'+(bp.length>1?'s':'')+' · '+d.skus.length+' SKU'+(d.skus.length>1?'s':'')+' in batch '+esc(PORTAL_PROD_BATCH)+'</div>'
         +'<div class="tw" style="max-height:calc(100vh - 220px)"><table class="pp-tbl"><thead><tr>'+th+'</tr></thead><tbody>'+body+'</tbody></table></div>'; }
+    function prodBatchBarcodeDl(kind,btn){ if(!PORTAL_PROD_BATCH)return; if(BC.placeholder){BC.note();return;} var orig=btn.textContent; btn.disabled=true; btn.textContent='Preparing…';
+      fetch(EP.labelData+'?batch='+encodeURIComponent(PORTAL_PROD_BATCH)+'&supplier='+encodeURIComponent(STATE.supplierName)).then(function(r){return r.json();}).then(function(rows){ btn.disabled=false; btn.textContent=orig;
+        if(rows&&rows.error){alert(rows.error);return;} if(!rows||!rows.length){alert('No '+kind+' barcodes found for batch '+PORTAL_PROD_BATCH);return;}
+        BC.sheets(rows,[kind],'batch_'+PORTAL_PROD_BATCH+'_'+kind+'_barcodes.zip',btn); }).catch(function(){alert('Could not load barcodes');btn.disabled=false;btn.textContent=orig;}); }
     function downloadProductionPlan(){
       var bp=prodBatchPOs(); if(!bp.length){ alert('No POs in that batch.'); return; }
       var d=prodPivotData(bp), poList=d.poList; if(!d.skus.length){ alert('No SKUs ordered in that batch.'); return; }
@@ -1364,11 +1373,12 @@
                 return '<tr><td><div style="display:flex;align-items:center;gap:8px">'+sw
                     +'<button class="save-btn pp-prod-open" data-ref="'+esc(p.ref)+'" data-i="'+i+'" style="flex:0 0 auto">View</button>'
                     +'<div style="min-width:0"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(p.ref)+'</b>'+badge+(p.colour_name?'<div style="font-size:10px;color:#94a3b8">'+esc(p.colour_name)+'</div>':'')+'</div></div></td>'
-                  +'<td>'+esc(p.category||'')+'</td><td>'+esc(p.season||'')+'</td><td>'+p.sizes+'</td><td>'+esc(prodStatusLabel(p.status))+'</td></tr>'
-                  +'<tr class="pp-prod-exp" id="pp-prod-exp-'+i+'" style="display:none"><td colspan="5" style="text-align:left"><div class="pp-prod-det" data-ref="'+esc(p.ref)+'"></div></td></tr>'; }).join('')
-              +'</tbody></table></div>';
-            host.querySelectorAll('.pp-prod-open').forEach(function(b){ b.onclick=function(){ var i=b.dataset.i, ex=document.getElementById('pp-prod-exp-'+i), open=ex.style.display!=='none';
-              ex.style.display=open?'none':''; if(!open && !ex.dataset.loaded){ ex.dataset.loaded='1'; ppProdDetail(ex.querySelector('.pp-prod-det'), b.dataset.ref); } }; }); }
+                  +'<td>'+esc(p.category||'')+'</td><td>'+esc(p.season||'')+'</td><td>'+p.sizes+'</td><td>'+esc(prodStatusLabel(p.status))+'</td></tr>'; }).join('')
+              +'</tbody></table></div>'
+              +'<div id="pp-prod-detail" style="display:none;margin-top:12px;text-align:left;max-width:100%;box-sizing:border-box"></div>';   // detail renders OUTSIDE the scrollable table → fits the phone width
+            host.querySelectorAll('.pp-prod-open').forEach(function(b){ b.onclick=function(){ var ref=b.dataset.ref, det=document.getElementById('pp-prod-detail');
+              if(det.dataset.ref===ref && det.style.display!=='none'){ det.style.display='none'; det.dataset.ref=''; return; }
+              det.dataset.ref=ref; det.style.display=''; ppProdDetail(det, ref); if(det.scrollIntoView)det.scrollIntoView({block:'nearest'}); }; }); }
           function wireProducts(){ var body=document.getElementById('pp-body');
             var ss=body.querySelector('.pp-prod-season'); if(ss)ss.onchange=function(){ PORTAL_PROD_SEASON=ss.value; drawProdGrid(); };
             var st=body.querySelector('.pp-prod-status'); if(st)st.onchange=function(){ PORTAL_PROD_STATUS=st.value; drawProdGrid(); };
@@ -1547,6 +1557,10 @@
             if(PORTAL_TAB==='productions'){ body.innerHTML=ppProductions();
               var pb=body.querySelector('.pv-prod-batch'); if(pb)pb.onchange=function(){ PORTAL_PROD_BATCH=this.value; renderPP(); };
               var pdl=body.querySelector('.pv-prod-dl'); if(pdl)pdl.onclick=function(){ downloadProductionPlan(); };
+              var bcBtn=body.querySelector('.pv-bc-dl'), bcMenu=body.querySelector('.pv-bc-menu');
+              if(bcBtn&&bcMenu){ bcBtn.onclick=function(e){ e.stopPropagation(); bcMenu.style.display=(bcMenu.style.display==='none'?'':'none'); };
+                document.addEventListener('click',function(){ if(bcMenu)bcMenu.style.display='none'; });
+                bcMenu.querySelectorAll('.pv-bc-opt').forEach(function(o){ o.onclick=function(e){ e.stopPropagation(); bcMenu.style.display='none'; prodBatchBarcodeDl(o.dataset.k, bcBtn); }; }); }
               return; }
             if(PORTAL_TAB==='barcodes'){
               // batches on this supplier's POs (distinct batch_id, sorted)
