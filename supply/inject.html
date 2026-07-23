@@ -6695,29 +6695,42 @@
         +R('Phone','<input class="fci txt sf-phone" style="width:180px">')
         +H('SKUs')
         +R('SKUs','<input class="fci txt sf-skusearch" placeholder="search this supplier’s SKUs — sku / product / colour / season (SS27)…" style="width:360px"><div class="sf-skuresults" style="margin:4px 0"></div>'
-          +'<div class="sf-lines"></div><button class="save-btn light sf-addline" style="margin-top:4px">+ line (free text)</button>'
-          +'<div class="mut tiny" style="margin-top:6px">or paste <b>sku, qty</b> per line:</div><textarea class="fci sf-paste" rows="3" style="width:320px;text-align:left" placeholder="TOWLB-..., 2"></textarea> <button class="save-btn light sf-parsepaste">Add pasted</button>')
+          +'<div class="sf-lines"></div>'
+          +'<div style="margin-top:6px"><button class="save-btn light sf-paste-open" title="paste sku, qty rows copied from a spreadsheet">⎘ Paste sku/qty from spreadsheet</button></div>')
         +H('Details')
         +R('Completion required', dateField('',{cls:'sf-completion', width:'130px'}))
         +R('Purpose',purp)
         +R('Notes','<textarea class="fci sf-notes" rows="2" style="width:320px;text-align:left"></textarea>')
         +'<div style="margin-top:12px;border-top:1px solid #eef2f7;padding-top:10px"><button class="save-btn sf-save" style="background:#16a34a;border-color:#15803d;color:#fff;font-weight:700">Create sample request</button> <button class="save-btn light sf-cancel">Cancel</button></div></div>';
-      var lines=[{sku:'',qty:''}];
-      function renderLines(){ var w=box.querySelector('.sf-lines'); w.innerHTML=lines.map(function(l,i){return '<div style="margin-bottom:3px"><input class="fci txt sf-lsku" data-i="'+i+'" placeholder="SKU" value="'+esc(l.sku)+'" style="width:200px"> <input class="fci sf-lqty" data-i="'+i+'" placeholder="qty" value="'+esc(l.qty)+'" style="width:60px;text-align:right"> <a class="sf-lrm" data-i="'+i+'" style="color:#dc2626;cursor:pointer">×</a></div>';}).join('');
+      var lines=[];
+      function renderLines(){ var w=box.querySelector('.sf-lines'); if(!lines.length){ w.innerHTML='<div class="mut tiny" style="padding:2px 0">No SKUs added yet — search above, or paste from a spreadsheet.</div>'; return; }
+        w.innerHTML=lines.map(function(l,i){return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:3px"><input class="fci txt sf-lsku" data-i="'+i+'" placeholder="SKU" value="'+esc(l.sku)+'" style="width:200px">'+(l.dev?' <span class="tool-badge bg-blue" style="font-size:9px">dev</span>':'')+'<input class="fci sf-lqty" data-i="'+i+'" placeholder="qty" value="'+esc(l.qty)+'" style="width:60px;text-align:right"> <a class="sf-lrm" data-i="'+i+'" style="color:#dc2626;cursor:pointer">×</a></div>';}).join('');
         w.querySelectorAll('.sf-lsku').forEach(function(x){x.onchange=function(){lines[x.dataset.i].sku=x.value;};});
         w.querySelectorAll('.sf-lqty').forEach(function(x){x.onchange=function(){lines[x.dataset.i].qty=x.value;};});
-        w.querySelectorAll('.sf-lrm').forEach(function(x){x.onclick=function(){lines.splice(x.dataset.i,1);if(!lines.length)lines.push({sku:'',qty:''});renderLines();};}); }
+        w.querySelectorAll('.sf-lrm').forEach(function(x){x.onclick=function(){lines.splice(x.dataset.i,1);renderLines();};}); }
       renderLines();
-      box.querySelector('.sf-addline').onclick=function(){ lines.push({sku:'',qty:''}); renderLines(); };
-      // supplier-scoped SKU search picker (same behaviour as the portal) — scoped to the form's chosen supplier
+      // SKU search (default) — searches this supplier's catalogue SKUs AND product-development items; anything not
+      // listed can be added as free text with a qty (no separate "+ line" button).
       var ssr=box.querySelector('.sf-skusearch'); if(ssr)ssr.oninput=debounce(function(){ var q=ssr.value.trim(), sup=box.querySelector('.sf-supplier').value.trim(), rb=box.querySelector('.sf-skuresults');
         if(q.length<2){ rb.innerHTML=''; return; }
-        fetch('/api/product/skus?supplier='+encodeURIComponent(sup)+'&q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
-          if(!rows.length){ rb.innerHTML='<div class="mut tiny">no matches (use “+ line (free text)” for anything not listed)</div>'; return; }
-          rb.innerHTML='<div style="border:1px solid #cbd5e1;border-radius:6px;max-height:180px;overflow:auto;background:#fff">'+rows.map(function(k){return '<div style="display:flex;gap:7px;align-items:center;padding:3px 8px;border-bottom:1px solid #f1f5f9;font-size:12px"><input type="checkbox" class="sf-skcb" value="'+esc(k.sku)+'"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(k.sku)+'</b><span class="mut tiny" style="flex:1;min-width:0">'+esc(k.description||'')+(k.release_window?' · '+esc(k.release_window):'')+'</span><input class="fci sf-skqty" data-sku="'+esc(k.sku)+'" placeholder="qty" style="width:52px;text-align:right"></div>';}).join('')+'</div><button class="save-btn light sf-skadd" style="margin-top:4px">+ Add selected</button>';
-          rb.querySelector('.sf-skadd').onclick=function(){ var any=false; rb.querySelectorAll('.sf-skcb:checked').forEach(function(c){ var qi=rb.querySelector('.sf-skqty[data-sku="'+(window.CSS&&CSS.escape?CSS.escape(c.value):c.value)+'"]'); var qty=(qi&&Number(qi.value))||1; if(lines.length===1&&!lines[0].sku)lines=[]; lines.push({sku:c.value,qty:qty}); any=true; }); if(any){ rb.innerHTML=''; ssr.value=''; renderLines(); } };
+        fetch('/api/product/skus?dev=1&supplier='+encodeURIComponent(sup)+'&q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
+          var list=(rows.length?'<div style="border:1px solid #cbd5e1;border-radius:6px;max-height:200px;overflow:auto;background:#fff">'+rows.map(function(k){return '<div style="display:flex;gap:7px;align-items:center;padding:3px 8px;border-bottom:1px solid #f1f5f9;font-size:12px"><input type="checkbox" class="sf-skcb" value="'+esc(k.sku)+'" data-dev="'+(k.dev?1:'')+'"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(k.sku)+'</b>'+(k.dev?' <span class="tool-badge bg-blue" style="font-size:9px">dev</span>':'')+'<span class="mut tiny" style="flex:1;min-width:0">'+esc(k.description||'')+(k.release_window&&!k.dev?' · '+esc(k.release_window):'')+'</span><input class="fci sf-skqty" data-sku="'+esc(k.sku)+'" placeholder="qty" style="width:52px;text-align:right"></div>';}).join('')+'</div><button class="save-btn light sf-skadd" style="margin-top:4px">+ Add selected</button>':'<div class="mut tiny">No matches.</div>')
+            +'<div style="display:flex;gap:6px;align-items:center;margin-top:6px;padding-top:6px;border-top:1px dashed #e5e7eb"><span class="mut tiny">Not listed?</span><input class="fci txt sf-ftsku" value="'+esc(q)+'" placeholder="type SKU" style="width:180px"><input class="fci sf-ftqty" placeholder="qty" style="width:52px;text-align:right"><button class="save-btn light sf-ftadd">+ Add as free text</button></div>';
+          rb.innerHTML=list;
+          var sk=rb.querySelector('.sf-skadd'); if(sk)sk.onclick=function(){ var any=false; rb.querySelectorAll('.sf-skcb:checked').forEach(function(c){ var qi=rb.querySelector('.sf-skqty[data-sku="'+(window.CSS&&CSS.escape?CSS.escape(c.value):c.value)+'"]'); lines.push({sku:c.value,qty:(qi&&Number(qi.value))||1,dev:!!c.dataset.dev}); any=true; }); if(any){ rb.innerHTML=''; ssr.value=''; renderLines(); } };
+          rb.querySelector('.sf-ftadd').onclick=function(){ var s=rb.querySelector('.sf-ftsku').value.trim(); if(!s)return; var qv=rb.querySelector('.sf-ftqty').value; lines.push({sku:s,qty:Number(qv)||1}); rb.innerHTML=''; ssr.value=''; renderLines(); };
         }).catch(function(){ rb.innerHTML='<div class="mut tiny" style="color:#dc2626">search failed</div>'; }); },300);
-      box.querySelector('.sf-parsepaste').onclick=function(){ var t=box.querySelector('.sf-paste').value; t.split(/\n/).forEach(function(ln){ var p=ln.split(/[,\t]/); var sku=(p[0]||'').trim(), qty=(p[1]||'').trim(); if(sku){ if(lines.length===1&&!lines[0].sku)lines=[]; lines.push({sku:sku,qty:qty}); } }); box.querySelector('.sf-paste').value=''; renderLines(); };
+      // Paste from spreadsheet → popup modal
+      function openPastePopup(onAdd){ var ex=document.getElementById('sf-paste-pop'); if(ex)ex.remove();
+        var ov=document.createElement('div'); ov.id='sf-paste-pop'; ov.style.cssText='position:fixed;inset:0;z-index:200000;background:rgba(15,23,42,.35);display:flex;align-items:center;justify-content:center';
+        ov.innerHTML='<div style="background:#fff;border-radius:10px;padding:16px 18px;width:440px;max-width:92vw;box-shadow:0 12px 40px rgba(15,23,42,.25)"><div style="font-weight:700;margin-bottom:5px">Paste SKUs from a spreadsheet</div><div class="mut tiny" style="margin-bottom:6px">One per line: <b>sku, qty</b> (comma or tab). Copy the two columns from Sheets/Excel and paste.</div><textarea id="sf-paste-ta" rows="8" style="width:100%;box-sizing:border-box;font:12px ui-monospace,Menlo,monospace;border:1px solid #d0d0d0;border-radius:6px;padding:8px" placeholder="TOWLB-..., 2"></textarea><div style="text-align:right;margin-top:10px"><button class="save-btn light" id="sf-paste-cancel">Cancel</button> <button class="save-btn" id="sf-paste-add" style="background:#16a34a;color:#fff;border-color:#15803d">Add</button></div></div>';
+        document.body.appendChild(ov); function close(){ ov.remove(); }
+        ov.addEventListener('mousedown',function(e){ if(e.target===ov)close(); });
+        document.getElementById('sf-paste-cancel').onclick=close; document.getElementById('sf-paste-ta').focus();
+        document.getElementById('sf-paste-add').onclick=function(){ var t=document.getElementById('sf-paste-ta').value, out=[];
+          t.split(/\n/).forEach(function(ln){ var p=ln.split(/[,\t]/); var sku=(p[0]||'').trim(), qty=(p[1]||'').trim(); if(sku)out.push({sku:sku,qty:Number(qty)||1}); });
+          close(); onAdd&&onAdd(out); }; }
+      box.querySelector('.sf-paste-open').onclick=function(){ openPastePopup(function(added){ added.forEach(function(l){ lines.push(l); }); renderLines(); }); };
       box.querySelector('.sf-cancel').onclick=function(){ box.dataset.open=''; box.innerHTML=''; };
       var as=box.querySelector('.sf-addrsearch'); as.oninput=debounce(function(){ var q=as.value.trim(); var mb=box.querySelector('.sf-addrmatches'); if(q.length<2){mb.innerHTML='';return;}
         fetch('/api/supply/sample-addresses?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(ms){ if(!ms||!ms.length){mb.innerHTML='<div class="mut tiny">no matches</div>';return;}

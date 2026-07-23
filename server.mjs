@@ -3302,13 +3302,24 @@ async function openSampleCandidates(suppliers) {   // dev-sample versions whose 
     WHERE i.status='in_development' ${scoped ? 'AND i.supplier = ANY($1)' : ''}
     ORDER BY i.updated_at DESC, ps.version DESC`, scoped ? [suppliers] : [])).rows;
 }
-async function supplierSkuCandidates(suppliers, q) {   // bulk SKUs, scoped to a supplier via products.supplier_multiple_all
+async function supplierSkuCandidates(suppliers, q, includeDev) {   // bulk SKUs, scoped to a supplier via products.supplier_multiple_all; optionally also product-development items
   const scoped = Array.isArray(suppliers); const params = []; const where = [];
   if (scoped) { params.push(suppliers); where.push(`EXISTS (SELECT 1 FROM unnest(string_to_array(coalesce(p.supplier_multiple_all,''),',')) sm WHERE btrim(sm) = ANY($${params.length}))`); }
   if (q) { params.push('%' + q + '%'); const p = '$' + params.length;
     where.push(`(p.sku ILIKE ${p} OR coalesce(p.product_name_final,p.product_name,'') ILIKE ${p} OR coalesce(p.colour_long,'') ILIKE ${p} OR coalesce(p.release_window,'') ILIKE ${p})`); }
-  return (await pool.query(`SELECT p.sku, coalesce(p.product_name_final,p.product_name,'') description, coalesce(p.size_short,'') size, coalesce(p.colour_long,'') colour, coalesce(p.release_window,'') release_window
+  const skuRows = (await pool.query(`SELECT p.sku, coalesce(p.product_name_final,p.product_name,'') description, coalesce(p.size_short,'') size, coalesce(p.colour_long,'') colour, coalesce(p.release_window,'') release_window, false dev
     FROM planner.products p ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY p.sku LIMIT 300`, params)).rows;
+  if (!includeDev) return skuRows;
+  // also search the PRODUCT development grid (planner.product_dev_items) — its ref acts as the "sku"
+  const dp = []; const dw = [`coalesce(i.status,'') <> 'dropped'`];
+  if (scoped) { dp.push(suppliers); dw.push(`i.supplier = ANY($${dp.length})`); }
+  if (q) { dp.push('%' + q + '%'); const p = '$' + dp.length;
+    dw.push(`(i.ref ILIKE ${p} OR coalesce(i.colour_name,'') ILIKE ${p} OR coalesce(i.description,'') ILIKE ${p} OR coalesce(i.season,'') ILIKE ${p} OR coalesce(i.category,'') ILIKE ${p})`); }
+  const devRows = (await pool.query(`SELECT i.ref sku,
+      (coalesce(i.colour_name,'') || CASE WHEN coalesce(i.season,'')<>'' THEN ' · '||i.season ELSE '' END || CASE WHEN coalesce(i.category,'')<>'' THEN ' · '||i.category ELSE '' END) description,
+      '' size, coalesce(i.colour_name,'') colour, coalesce(i.season,'') release_window, true dev
+    FROM planner.product_dev_items i WHERE ${dw.join(' AND ')} ORDER BY i.updated_at DESC LIMIT 50`, dp)).rows;
+  return devRows.concat(skuRows);   // dev items first
 }
 function qtyOrOne(v) { var q = Math.round(Number(v) || 0); return q < 1 ? 1 : q; }   // blank/0/NaN → 1
 async function setSampleDevSamples(sampleId, devs, by) {   // replace-all the dev-sample links on a sample shipment; devs = [{id,qty}] or [id]
@@ -3326,7 +3337,7 @@ async function setSampleLines(sampleId, lines) {   // replace-all the bulk-SKU l
 app.get('/api/product/open-samples', async (req, res) => { const sup = (req.query.supplier || '').trim();
   try { res.json(await openSampleCandidates(sup ? [sup] : null)); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.get('/api/product/skus', async (req, res) => { const sup = (req.query.supplier || '').trim();
-  try { res.json(await supplierSkuCandidates(sup ? [sup] : null, (req.query.q || '').trim())); } catch (e) { res.status(500).json({ error: e.message }); } });
+  try { res.json(await supplierSkuCandidates(sup ? [sup] : null, (req.query.q || '').trim(), !!req.query.dev)); } catch (e) { res.status(500).json({ error: e.message }); } });
 // Sample-shipment contents (admin/preview) — dev samples attach to a sample_request
 app.post('/api/supply/sample/:id/dev-samples', async (req, res) => { const b = req.body || {};
   try { await setSampleDevSamples(req.params.id, b.dev_samples || b.dev_sample_ids, shortUser(authUser(req)) || null); res.json({ ok: true }); }
@@ -7645,7 +7656,7 @@ app.post('/api/portal/product-sample-photo', portalAuth, async (req, res) => { c
 app.get('/api/portal/product-open-samples', portalAuth, async (req, res) => {   // in-development dev-sample candidates for the picker
   try { res.json(await openSampleCandidates(req.portal.suppliers)); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.get('/api/portal/product-skus', portalAuth, async (req, res) => {   // bulk-SKU candidates, scoped to this supplier
-  try { res.json(await supplierSkuCandidates(req.portal.suppliers, (req.query.q || '').trim())); } catch (e) { res.status(500).json({ error: e.message }); } });
+  try { res.json(await supplierSkuCandidates(req.portal.suppliers, (req.query.q || '').trim(), !!req.query.dev)); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample/:id/lines', portalAuth, async (req, res) => {   // replace-all bulk-SKU lines
   try { const s = await portalOwnsSample(req, req.params.id); if (!s) return res.status(403).json({ error: 'not your sample' });
     await setSampleLines(req.params.id, (req.body || {}).lines); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });

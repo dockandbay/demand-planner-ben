@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.052 - SAMPLES SKU entry redesign (search-first) + searches product-dev items
+
+Reworks the admin SAMPLES new-request SKU entry per Ben:
+- **Search is the default and only inline entry.** Removed the "+ line (free text)" button — if a SKU isn't in
+  the search results, a **free-text add** row (typed SKU + qty) is right there under the results.
+- **Paste from spreadsheet** moved out of the inline textarea into a **"⎘ Paste sku/qty from spreadsheet"**
+  button that opens a **popup** (textarea → parse → add).
+- **SKU search now also searches the PRODUCT development grid** (`planner.product_dev_items` by
+  ref/colour/description/season/category), tagged **dev**, alongside catalogue SKUs (`?dev=1` on
+  /api/{product,portal}/skus). Added lines keep the dev tag. The portal contents picker is unchanged
+  (it already has a dedicated dev-samples section).
+
 ## v26.051 - "Assign deposit" no longer red once a PO is fully paid
 
 - The deposit picker only shows the red "— assign" prompt when a start deposit is genuinely still needed
