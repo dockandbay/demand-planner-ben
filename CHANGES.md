@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.033 - Fix portal product timeline error + mobile sub-tabs fit
+
+- Fixed "Failed: The string did not match the expected pattern" when opening a product Timeline in the portal
+  preview: the mark-read call hit a non-existent route (404 HTML → Safari json() error). Added /api/product/notes-read,
+  pointed the preview at it, and hardened postJSON to tolerate empty/non-JSON responses.
+- Portal PRODUCT detail sub-tabs (Master data / Sample / Documents / Timeline) now fit one screen width on mobile
+  (≤640px) — they share the row equally instead of scrolling.
+
 ## v26.032 - Per-user landing page + no DEMAND→SUPPLY flash on load
 
 - Server injects the user's landing slug (window.__HZ_LANDING) and hides #app until the router lands — a plain load

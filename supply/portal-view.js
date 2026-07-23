@@ -501,6 +501,9 @@
   #supply-root .po-subnav{position:sticky;left:0;top:0;z-index:5;width:100vw;max-width:100vw;box-sizing:border-box;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch}
   #supply-root .po-subnav::-webkit-scrollbar{height:0}
   #supply-root .po-subnav .rtab{flex:0 0 auto;white-space:nowrap}
+  /* portal PRODUCT detail sub-tabs: fit all four across one screen (no scroll) on mobile */
+  #supply-root .pp-prod-nav{overflow-x:visible!important;flex-wrap:nowrap}
+  #supply-root .pp-prod-nav .rtab{flex:1 1 0;min-width:0;padding:8px 2px!important;font-size:11px!important;letter-spacing:0;text-align:center}
   /* PO-detail PANELS (Timeline / Order Plan / …): bound each panel to the viewport and let its wide content
      scroll sideways WITHIN the panel. The .ppx is JS-pinned to the left of the full-grid-width cell, so without
      this the right of a wide panel is unreachable — grid-scroll just re-pins .ppx back to the left. */
@@ -566,7 +569,9 @@
       var b=e.target.closest('.pp-ship-inv,.pp-po-inv'); if(!b)return; e.preventDefault();
       if(b.classList.contains('pp-ship-inv')) dlInvoice((EP.shipmentInvoice||'/api/invoice/shipment/')+encodeURIComponent(b.dataset.ref), b);
       else dlInvoice((EP.poInvoice||'/api/invoice/po/')+encodeURIComponent(b.dataset.po), b); }); }
-    function postJSON(ep,b2,cb){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b2)}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} cb&&cb(j); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); }); }
+    function postJSON(ep,b2,cb){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b2)})
+      .then(function(r){ return r.text().then(function(t){ try{ return t?JSON.parse(t):{}; }catch(_){ return r.ok?{}:{error:'Server error ('+r.status+')'}; } }); })   // tolerate empty / non-JSON (e.g. a 404 HTML page) — don't throw the cryptic Safari parse error
+      .then(function(j){ if(j&&j.error){alert(j.error);return;} cb&&cb(j); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); }); }
     // Should the INVOICE action fire for this PO? Rules (Ben): never on FUTURE POs; never once an invoice value is
     // submitted; only when the production END date is in the PAST — preferring the supplier-submitted end date
     // (completion_date submission), else the calculated prod_end; if there's no end date at all, don't show.
@@ -1371,7 +1376,7 @@
             drawProdGrid(); }
           function ppProdDetail(box, ref){ var _it=((_ppData&&_ppData.products)||[]).filter(function(x){return x.ref===ref;})[0]||{}; var _un=Number(_it.unread_dnb)||0;
             var tabs=[['master','Master data'],['samples','Sample'],['documents','Documents'],['timeline','Timeline'+(_un?' <span class="ex-badge">'+_un+'</span>':'')]];
-            box.innerHTML='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab pd2-tab'+(ti===0?' active':'')+'" data-t="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div><div class="pd2-body"></div>';
+            box.innerHTML='<div class="po-subnav pp-prod-nav">'+tabs.map(function(t,ti){return '<button class="rtab pd2-tab'+(ti===0?' active':'')+'" data-t="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div><div class="pd2-body"></div>';
             var bd=box.querySelector('.pd2-body');
             function sel(t){ box.querySelectorAll('.pd2-tab').forEach(function(b){ b.classList.toggle('active',b.dataset.t===t); });
               if(t==='timeline')ppProdTimeline(bd,ref); else if(t==='documents')ppProdDocs(bd,ref); else if(t==='master')ppProdMaster(bd,ref); else ppProdSamples(bd,ref); }

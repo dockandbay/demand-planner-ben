@@ -3267,6 +3267,12 @@ app.post('/api/product/note', async (req, res) => {
   try { await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'internal',$3)`, [ref, internalAuthor(req, b.author_email), String(b.body).trim()]);
     res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
+app.post('/api/product/notes-read', async (req, res) => {   // mark this product's internal (D&B) timeline notes read
+  const ref = ((req.body || {}).ref || '').trim();
+  if (!ref) return res.status(400).json({ error: 'ref required' });
+  try { await pool.query(`UPDATE planner.supplier_notes SET read_at=now() WHERE po=$1 AND author_kind='internal' AND read_at IS NULL`, [ref]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.post('/api/product/escalate', async (req, res) => {
   const b = req.body || {}, ref = (b.ref || '').trim(), message = String(b.message || '').trim();
   if (!ref || !message) return res.status(400).json({ error: 'ref + message required' });
