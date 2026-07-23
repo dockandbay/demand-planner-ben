@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.012 - DTC shipment data (supplier-entered) + timeline snooze options
+
+- **DTC shipment data** (Direct to Client / B2B JLEW / B2B NEXT POs): supplier enters carton count, cargo volume
+  (CBM), gross weight and dimensions under **portal ▸ SHIPMENT**. Saving posts a supplier PO timeline note
+  ("📦 Shipment details added/updated: …") which also lights the admin ✉ messages bell. The data shows admin-side
+  in **PURCHASE ORDERS ▸ PO ▸ CLIENT/FBA** under a "Shipment details" heading. A DTC PO gains a **+1 supplier
+  action** once its production-end date has passed with the data still empty. Migration **127** (Diviyaj: run on live).
+- **Timeline ✉ pop-down snooze** now offers **1d / 3d / 7d / ∞ (indefinite)** instead of a fixed 7-day snooze,
+  on desktop and mobile (server already supported indefinite = no-expiry).
+
 ## v26.011 - REPORTS ▸ 3PL Invoice (phase 1): upload + accounts config
 
 - New REPORTS tab **3PL Invoice** with per-3PL sub-tabs (UK ILG / US Geneva / EU iFulfilment / AU Coghlans) and a

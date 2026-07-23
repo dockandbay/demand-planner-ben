@@ -27,6 +27,9 @@
   // once a PO is shipping / shipped / delivered / complete, production is done → DTC approval is no longer an action
   function ppShipped(p){ return /ship|deliver|complete/i.test((p&&p.status)||'') || (p&&p.production_status)==='shipped'; }
   function dtcActionDue(p){ return ppIsDtc(p) && !(p&&p.dtc_accepted_at) && !ppShipped(p); }
+  // DTC shipment details (carton count / CBM / weight / dims) become a supplier action once production has ended
+  // and nothing's been entered yet (migration 127; entered under portal ▸ SHIPMENT).
+  function dtcShipDataDue(p){ return ppIsDtc(p) && !!(p&&p.prod_end) && p.prod_end<new Date().toISOString().slice(0,10) && !(p&&p.dtc_entered_at); }
   // Action notifications only apply from production 55 onward — productions 54 and earlier raise nothing.
   function prodActionable(p){ var pn=parseInt(p&&p.prod_no,10); return !(isFinite(pn) && pn<=54); }
   // FOB pickup — mirrors the main app's isFOBdest: no shipment AND (Manufacturing branch OR a destination that
@@ -812,6 +815,18 @@
           +'<div class="tiny mut" style="margin-top:4px">Submitting creates the shipment for this PO, saves the carrier &amp; tracking, and logs any freight charge for Dock &amp; Bay to review.</div>'
           +'</div>';
       shipment = shipLabelBtn + shipment;
+      // Direct-to-Client shipment details (carton count / CBM / gross weight / dimensions). Supplier-entered;
+      // saving posts a PO timeline note (→ D&B ✉ bell). Overdue badge once production has ended with data missing.
+      if(ppIsDtc(p)){ var _dtcToday=new Date().toISOString().slice(0,10), _dtcOverdue=(p.prod_end&&p.prod_end<_dtcToday&&!p.dtc_entered_at);
+        shipment += '<div class="sect-h" style="margin-top:16px">Shipment details'+(_dtcOverdue?' <span class="ex-badge" title="production has ended — please enter your shipment details">!</span>':'')+'</div>'
+          +'<div class="tiny'+(_dtcOverdue?'':' mut')+'" style="margin-bottom:6px'+(_dtcOverdue?';color:#92400e':'')+'">'+(_dtcOverdue?'⚠ Production has ended — please enter the shipment details for this direct-to-client order.':'Enter the carton count, cargo volume, gross weight and dimensions for this direct-to-client shipment.')+'</div>'
+          +'<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end">'
+          +'<label class="tiny">Carton count<br><input class="fci pp-dtc" data-po="'+po+'" data-f="cartons" value="'+esc(p.dtc_cartons!=null?p.dtc_cartons:'')+'" inputmode="numeric" style="width:100px;text-align:left"></label>'
+          +'<label class="tiny">Cargo volume (CBM)<br><input class="fci pp-dtc" data-po="'+po+'" data-f="cbm" value="'+esc(p.dtc_cbm!=null?p.dtc_cbm:'')+'" inputmode="decimal" style="width:120px;text-align:left"></label>'
+          +'<label class="tiny">Gross weight (kg)<br><input class="fci pp-dtc" data-po="'+po+'" data-f="gross_weight_kg" value="'+esc(p.dtc_weight!=null?p.dtc_weight:'')+'" inputmode="decimal" style="width:120px;text-align:left"></label>'
+          +'<label class="tiny">Dimensions<br><input class="fci pp-dtc" data-po="'+po+'" data-f="dimensions" value="'+esc(p.dtc_dimensions||'')+'" placeholder="e.g. per carton 60x40x40cm" style="width:230px;text-align:left"></label>'
+          +'<button class="save-btn pp-dtc-go" data-po="'+po+'">Save shipment details</button></div>'
+          +(p.dtc_entered_at?'<div class="tiny mut" style="margin-top:4px">Last updated '+esc(p.dtc_entered_at)+'</div>':''); }
       if(cdSkus.length){ var xrows=cdSkus.map(function(s){ var q=xd[s];
           return '<tr><td class="l">'+esc(s)+'</td><td style="text-align:right"><input class="fci pp-xqty" data-po="'+po+'" data-sku="'+esc(s)+'" value="'+(q!=null&&q!==''?esc(q):'')+'" placeholder="qty shipped" style="width:96px;text-align:right" inputmode="numeric"></td></tr>'; }).join('');
         shipment += '<div class="sect-h" style="margin-top:14px">Crossdock SKUs on this shipment'+(xdAction?' <span class="ex-badge" title="enter the quantity shipped for each crossdock SKU">'+xdMissing+'</span>':'')+'</div>'
@@ -1558,7 +1573,7 @@
               var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
               var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end, sb):'';
               var dtcPend=dtcActionDue(p);
-              return (invoiceDue(p,sb)?1:0)+((p.shipment||p.flexport_reference||sb.some(function(s){return s.kind==='tracking';}))?0:1)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0)+(poCdMissing(p,sb)?1:0); }
+              return (invoiceDue(p,sb)?1:0)+((p.shipment||p.flexport_reference||sb.some(function(s){return s.kind==='tracking';}))?0:1)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0)+(poCdMissing(p,sb)?1:0)+(dtcShipDataDue(p)?1:0); }
             // in-place row refresh after a write: re-render the open expanded cell + sync the MANAGE badge (no full reload)
             function refreshRow(row,po){ if(!row)return; var i=row.id.replace('pp-',''); rerenderRow(row,po);
               var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; var mb=document.querySelector('#supply-root .pp-exp[data-i="'+i+'"]')||document.querySelector('.pp-exp[data-i="'+i+'"]'); if(!mb||!p)return;
@@ -1741,6 +1756,14 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                   // update the PO card in place (shipment now linked); the new master shipment ref = the PO number
                   var done=function(){ var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; if(p){ if(!p.shipment)p.shipment=po; if(cc)p.ship_carrier=cc; if(t)p.ship_carrier_ref=t; } refreshRow(row,po); };
                   if(fc>0){ postJSON(EP.shipmentCharge,{shipment_ref:po,freight_cost:fc},function(){ done(); }); } else done(); }); }; });
+              scope.querySelectorAll('.pp-dtc-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po;
+                function v(f){ var el=scope.querySelector('.pp-dtc[data-po="'+CSS.escape(po)+'"][data-f="'+f+'"]'); return el?el.value.trim():''; }
+                var payload={po:po,cartons:v('cartons'),cbm:v('cbm'),gross_weight_kg:v('gross_weight_kg'),dimensions:v('dimensions'),entered_by:by};
+                btn.disabled=true; var row=btn.closest('tr[id^="pp-"]');
+                postJSON('/api/supply/dtc-shipment',payload,function(j){ if(j&&j.error){alert(j.error);btn.disabled=false;return;}
+                  var p=_ppData.pos.filter(function(x){return x.po===po;})[0];
+                  if(p){ p.dtc_cartons=payload.cartons===''?null:parseInt(payload.cartons,10); p.dtc_cbm=payload.cbm===''?null:Number(payload.cbm); p.dtc_weight=payload.gross_weight_kg===''?null:Number(payload.gross_weight_kg); p.dtc_dimensions=payload.dimensions; if(!p.dtc_entered_at)p.dtc_entered_at='just now'; }
+                  refreshRow(row,po); }); }; });
               scope.querySelectorAll('.pp-fchg-go').forEach(function(btn){ btn.onclick=function(){ var ref=btn.dataset.ref;
                 var ci=scope.querySelector('.pp-fcost[data-ref="'+CSS.escape(ref)+'"]'), ni=scope.querySelector('.pp-fnote[data-ref="'+CSS.escape(ref)+'"]');
                 var fc=ci?Number(ci.value)||0:0; if(fc<=0){ alert('Enter a freight amount.'); return; } btn.disabled=true;

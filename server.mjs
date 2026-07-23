@@ -3296,6 +3296,33 @@ app.get('/api/portal/asn-labels/:po', async (req, res) => {
     res.send(buf);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// DTC shipment details (supplier-entered in portal ▸ SHIPMENT). Upsert + a supplier timeline note so it shows on
+// the PO timeline and lights the admin ✉ bell. entered_by/entered_at are kept from the first entry; updated_at moves.
+app.post('/api/supply/dtc-shipment', async (req, res) => {
+  const b = req.body || {}, po = (b.po || '').trim();
+  if (!po) return res.status(400).json({ error: 'po required' });
+  const num = v => (v === '' || v == null) ? null : Number(v);
+  const cartons = (b.cartons === '' || b.cartons == null) ? null : parseInt(b.cartons, 10);
+  const cbm = num(b.cbm), wt = num(b.gross_weight_kg), dims = (b.dimensions || '').trim() || null, by = (b.entered_by || '').trim() || null;
+  try {
+    const existed = (await pool.query(`SELECT 1 FROM planner.dtc_shipment_details WHERE po=$1`, [po])).rowCount > 0;
+    await pool.query(`INSERT INTO planner.dtc_shipment_details (po, cartons, cbm, gross_weight_kg, dimensions, entered_by, entered_at, updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,now(),now())
+      ON CONFLICT (po) DO UPDATE SET cartons=excluded.cartons, cbm=excluded.cbm, gross_weight_kg=excluded.gross_weight_kg,
+        dimensions=excluded.dimensions, entered_by=coalesce(planner.dtc_shipment_details.entered_by, excluded.entered_by), updated_at=now()`,
+      [po, cartons, cbm, wt, dims, by]);
+    const parts = [];
+    if (cartons != null) parts.push(cartons + ' cartons');
+    if (cbm != null) parts.push(cbm + ' CBM');
+    if (wt != null) parts.push(wt + ' kg');
+    if (dims) parts.push(dims);
+    const noteBody = '📦 Shipment details ' + (existed ? 'updated' : 'added') + ': ' + (parts.join(' · ') || '(cleared)');
+    const sr = await pool.query(`SELECT s.id FROM planner.purchase_orders po JOIN planner.suppliers s ON s.name=po.supplier_name WHERE po.po=$1`, [po]);
+    const sid = (sr.rows[0] && sr.rows[0].id) || null;
+    await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body) VALUES ($1,$2,$3,'supplier',$4)`, [po, sid, by, noteBody]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.post('/api/supply/portal-note', async (req, res) => {
   const b = req.body || {};
   if (!b.po || !String(b.body || '').trim()) return res.status(400).json({ error: 'po and body required' });
@@ -4934,7 +4961,9 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
         AND coalesce(po.status,'') NOT ILIKE '%complete%'
         AND trim(s.sku)<>'' ORDER BY po.po, sku`, [po]).catch(() => ({ rows: [] }));
     const lc = {}; lineCosts.rows.forEach(r => { lc[r.sku] = r; });
-    res.json({ lines: lines.rows, deposit: deposit.rows, payments: payments.rows, flexport: flexport.rows,
+    const dtc = (await pool.query(`SELECT cartons, cbm, gross_weight_kg, dimensions, coalesce(entered_by,'') entered_by,
+      to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at FROM planner.dtc_shipment_details WHERE po=$1`, [po])).rows[0] || null;
+    res.json({ lines: lines.rows, deposit: deposit.rows, payments: payments.rows, flexport: flexport.rows, dtc,
       crossdock_lines: xdMaster.rows,
       sup_invoice: supInv.rows[0] || null,
       sup_docs: supDocs.rows.filter(x => x.category !== 'client'),
@@ -6287,8 +6316,13 @@ const POS_SQL_PORTAL = `
     coalesce(pack_dnb_carton,false) pack_dnb_carton, coalesce(pack_dnb_carton_notes,'') pack_dnb_carton_notes,
     coalesce(pack_client_carton,false) pack_client_carton, coalesce(pack_client_carton_notes,'') pack_client_carton_notes,
     coalesce(pack_pallet_notes,'') pack_pallet_notes, coalesce(pack_other_notes,'') pack_other_notes,
-    to_char(dtc_accepted_at,'YYYY-MM-DD HH24:MI') dtc_accepted_at, coalesce(dtc_accepted_by,'') dtc_accepted_by
-  FROM planner.v_po_finance calc4 WHERE supplier_name = ANY($1) ORDER BY po`;
+    to_char(dtc_accepted_at,'YYYY-MM-DD HH24:MI') dtc_accepted_at, coalesce(dtc_accepted_by,'') dtc_accepted_by,
+    -- DTC shipment details (supplier-entered in portal ▸ SHIPMENT; migration 127)
+    dsd.cartons dtc_cartons, dsd.cbm dtc_cbm, dsd.gross_weight_kg dtc_weight, coalesce(dsd.dimensions,'') dtc_dimensions,
+    to_char(dsd.updated_at,'YYYY-MM-DD HH24:MI') dtc_entered_at, coalesce(dsd.entered_by,'') dtc_entered_by
+  FROM planner.v_po_finance calc4
+  LEFT JOIN planner.dtc_shipment_details dsd ON dsd.po = calc4.po
+  WHERE supplier_name = ANY($1) ORDER BY po`;
 function loadPortalPage() { try { return readFileSync(new URL('./supply/portal.html', import.meta.url), 'utf8'); } catch { return '<!doctype html><meta charset=utf8>portal page missing'; } }
 const PORTAL_PAGE = DEV ? null : loadPortalPage();
 const portalToken = () => crypto.randomBytes(24).toString('hex');

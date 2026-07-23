@@ -40,9 +40,11 @@
 #tl-drop .tl-po{font-weight:700;color:#1d4ed8;cursor:pointer}
 #tl-drop .tl-po:hover{text-decoration:underline}
 #tl-drop .tl-body{color:#334155;margin:3px 0;white-space:pre-wrap;word-break:break-word;font-size:12px}
-#tl-drop .tl-acts{display:flex;gap:8px;margin-top:4px}
+#tl-drop .tl-acts{display:flex;gap:6px;margin-top:5px;flex-wrap:wrap;align-items:center}
 #tl-drop .tl-acts button{font-size:11px;padding:2px 9px;border:1px solid #cbd5e1;background:#f8fafc;border-radius:5px;cursor:pointer;font-family:inherit;color:#1a1a1a}
 #tl-drop .tl-acts button:hover{background:#eef2f7}
+#tl-drop .tl-acts .tl-snooze{padding:2px 8px;min-width:30px;text-align:center}
+#tl-drop .tl-snz-lbl{font-size:11px;color:#94a3b8;margin-left:4px}
 #supply-root .annot{background:#0f172a;color:#cbd5e1;font-size:11px;border-radius:6px;padding:8px 12px;margin:0 0 10px;line-height:1.5}
 #supply-root .annot b{color:#7dd3fc}
 #supply-root .bar{display:flex;align-items:center;margin-bottom:8px;flex-wrap:wrap}
@@ -2524,6 +2526,16 @@
       +cliRow('Pallet Packing requirements',txtIn(ep,'pack_pallet_notes',r.pack_pallet_notes,360,true))
       +cliRow('Other Packing &amp; Labelling requirements',txtIn(ep,'pack_other_notes',r.pack_other_notes,360,true))
       +cliRow('Supplier approval',(!poIsDtc(r)?'<span class="tool-badge bg-neutral">Not applicable</span> <span class="mut tiny">(approval only applies to Direct-to-Client orders with a client sales ref)</span>':(r.dtc_accepted_at?'<span class="tool-badge bg-green">✓ Approved</span> <span class="mut tiny">'+esc(r.dtc_accepted_at)+(r.dtc_accepted_by?' · '+esc(r.dtc_accepted_by):'')+'</span>':'<span class="tool-badge bg-amber">Awaiting supplier approval</span> <span class="mut tiny">(editing any field above re-requests approval)</span>'+(PO_ACTCOND.dtc_not_approved(r)?actMark(r.po,'dtc_not_approved'):''))))
+      +(poIsDtc(r)
+        ? '<div class="sect-h" style="margin-top:12px">Shipment details <span class="mut tiny">— entered by the supplier in the portal</span></div>'
+          +(d&&d.dtc
+            ? cliRow('Carton count', d.dtc.cartons!=null?esc(d.dtc.cartons):'<span class="mut">—</span>')
+              +cliRow('Cargo volume (CBM)', d.dtc.cbm!=null?esc(d.dtc.cbm)+' m³':'<span class="mut">—</span>')
+              +cliRow('Gross weight', d.dtc.gross_weight_kg!=null?esc(d.dtc.gross_weight_kg)+' kg':'<span class="mut">—</span>')
+              +cliRow('Dimensions', d.dtc.dimensions?esc(d.dtc.dimensions):'<span class="mut">—</span>')
+              +'<div class="mut tiny" style="margin:2px 2px 0">Entered '+esc(d.dtc.updated_at||'')+(d.dtc.entered_by?' · '+esc(shortUser(d.dtc.entered_by)):'')+'</div>'
+            : '<div class="mut tiny" style="padding:4px 2px">Not yet entered by the supplier.'+((r.prod_end&&r.prod_end<today)?' <span style="color:#b45309;font-weight:700">Production ended '+fd(r.prod_end)+' — overdue.</span>':'')+'</div>')
+        : '')
       +'</div>';
     var clientH='<div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start"><div style="flex:1 1 430px;min-width:360px">'
       +'<div class="sect-h">Client / FBA <span class="mut tiny">— who this PO is for; crossdock SKUs feed the supplier-portal label download</span></div>'
@@ -4441,7 +4453,13 @@
   function tlItemHtml(n){ var body=String(n.body||''); if(body.length>240)body=body.slice(0,240)+'…';
     return '<div class="tl-item" data-id="'+esc(String(n.id))+'"><div><span class="tl-po" data-po="'+esc(n.po||'')+'">'+esc(n.po||'—')+'</span>'+(n.supplier_name?' <span class="mut tiny">'+esc(n.supplier_name)+'</span>':'')+'<span class="mut tiny" style="float:right">'+esc(n.created_at||'')+'</span></div>'
       +'<div class="tl-body">'+esc(body)+'</div>'
-      +'<div class="tl-acts"><button class="tl-read" data-id="'+esc(String(n.id))+'">✓ Mark read</button><button class="tl-snooze" data-id="'+esc(String(n.id))+'">⏰ Snooze</button></div></div>'; }
+      +'<div class="tl-acts"><button class="tl-read" data-id="'+esc(String(n.id))+'">✓ Mark read</button>'
+      +'<span class="tl-snz-lbl">⏰ Snooze:</span>'
+      +'<button class="tl-snooze" data-id="'+esc(String(n.id))+'" data-days="1">1d</button>'
+      +'<button class="tl-snooze" data-id="'+esc(String(n.id))+'" data-days="3">3d</button>'
+      +'<button class="tl-snooze" data-id="'+esc(String(n.id))+'" data-days="7">7d</button>'
+      +'<button class="tl-snooze" data-id="'+esc(String(n.id))+'" data-indef="1" title="snooze indefinitely">∞</button>'
+      +'</div></div>'; }
   function renderTlDrop(){ var d=document.getElementById('tl-drop'); if(!d)return;
     d.innerHTML='<div style="padding:9px 12px;border-bottom:1px solid #e5e7eb;font-weight:700;font-size:12px">Timeline messages'+(TL_NOTIFS.length?' <span class="mut tiny">('+TL_NOTIFS.length+' unread)</span>':'')+'</div>'
       +(TL_NOTIFS.length?TL_NOTIFS.map(tlItemHtml).join(''):'<div class="count" style="padding:16px 12px">No unread timeline messages 🎉</div>');
@@ -4449,10 +4467,10 @@
       var sr=document.getElementById('supply-root'); if((!sr||sr.style.display==='none')&&typeof showSupply==='function'){ showSupply(true); if(typeof selectSection==='function')selectSection('purchase-orders'); }   // clicked from DEMAND/BUY/etc → reveal SUPPLY so the PO drawer is visible
       if(typeof openPODrawer==='function')openPODrawer(po,'timeline'); }; });
     d.querySelectorAll('.tl-read').forEach(function(b){ b.onclick=function(){ tlAct(b.dataset.id,'read',b); }; });
-    d.querySelectorAll('.tl-snooze').forEach(function(b){ b.onclick=function(){ tlAct(b.dataset.id,'snooze',b); }; }); }
-  function tlAct(id,kind,btn){ if(btn)btn.disabled=true;
+    d.querySelectorAll('.tl-snooze').forEach(function(b){ b.onclick=function(){ tlAct(b.dataset.id,'snooze',b,{days:b.dataset.days,indef:b.dataset.indef}); }; }); }
+  function tlAct(id,kind,btn,opts){ opts=opts||{}; if(btn)btn.disabled=true;
     var ep = kind==='read' ? '/api/supply/note-read/'+encodeURIComponent(id) : '/api/supply/actions/state';
-    var body = kind==='read' ? {} : {key:'tlnote|'+id, status:'snoozed', snooze_days:7};
+    var body = kind==='read' ? {} : {key:'tlnote|'+id, status:'snoozed', snooze_days:parseInt(opts.days,10)||7, indefinite:!!opts.indef};
     fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
       .then(function(){ TL_NOTIFS=TL_NOTIFS.filter(function(n){return String(n.id)!==String(id);}); tlSetCount(TL_NOTIFS.length); renderTlDrop(); })
       .catch(function(){ if(btn)btn.disabled=false; }); }
