@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.039 - Fix: PRODUCT menu "product0" + harden new sample-shipment GETs
+
+- **"product0" in the menu:** the PRODUCT top-bar button's unread badge stored `textContent="0"` even
+  while hidden, so the mobile nav (which mirrors the button's text) rendered "product" + "0". Now the
+  badge text is empty when the count is 0.
+- **Hardened the new sample-shipment GET fetches** (sample-shipments list, open-samples, SKU search,
+  product-samples) to tolerate a non-JSON/404 response instead of throwing Safari's cryptic
+  "SyntaxError: The string did not match the expected pattern" — same defensive parse as postJSON.
+
 ## v26.038 - Sample shipments: mixed contents (dev samples + bulk SKUs), many-to-many, multi-select
 
 Reworks Phase B (v26.037) per Ben's follow-ups. A **sample shipment** (SSHIP-nnnn) is a parcel a

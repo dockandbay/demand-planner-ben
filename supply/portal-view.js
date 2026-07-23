@@ -573,6 +573,8 @@
     function postJSON(ep,b2,cb){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b2)})
       .then(function(r){ return r.text().then(function(t){ try{ return t?JSON.parse(t):{}; }catch(_){ return r.ok?{}:{error:'Server error ('+r.status+')'}; } }); })   // tolerate empty / non-JSON (e.g. a 404 HTML page) — don't throw the cryptic Safari parse error
       .then(function(j){ if(j&&j.error){alert(j.error);return;} cb&&cb(j); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); }); }
+    // GET that tolerates empty / non-JSON (404 HTML etc.) — returns [] instead of throwing Safari's "did not match the expected pattern"
+    function getJSON(url){ return fetch(url).then(function(r){ return r.text().then(function(t){ try{ return t?JSON.parse(t):[]; }catch(_){ return []; } }); }); }
     // Should the INVOICE action fire for this PO? Rules (Ben): never on FUTURE POs; never once an invoice value is
     // submitted; only when the production END date is in the PAST — preferring the supplier-submitted end date
     // (completion_date submission), else the calculated prod_end; if there's no end date at all, don't show.
@@ -1410,7 +1412,7 @@
             x.font='400 20px system-ui,Arial'; x.fillStyle='#64748b'; x.fillText('Dock & Bay — product sample',400,320);
             c.toBlob(function(b){ if(!b){alert('Could not create label');return;} var a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download='sample_'+String(ref).replace(/[^A-Za-z0-9_-]/g,'_')+'.png'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(a.href);},2000); },'image/png'); }catch(e){ alert('Could not create label'); } }
           function ppProdSamples(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
-            fetch(EP.productSamplesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(list){ list=Array.isArray(list)?list:[];
+            getJSON(EP.productSamplesBase+encodeURIComponent(ref)).then(function(list){ list=Array.isArray(list)?list:[];
               var today=new Date().toISOString().slice(0,10);
               var nextV=list.reduce(function(m,s){return Math.max(m,s.version||0);},0)+1, nextRef=ref+'_v'+nextV;   // shown read-only on the add form
               var rows=list.slice().reverse().map(function(s){ var ph=(s.photos||[]).map(function(p){return '<a href="'+(EP.attachImgBase||'/api/supply/portal-attachment/')+p.id+'" target="_blank" rel="noopener"><img src="'+(EP.attachImgBase||'/api/supply/portal-attachment/')+p.id+'" style="width:52px;height:52px;object-fit:cover;border-radius:5px;border:1px solid #e5e7eb;margin:2px"></a>';}).join('');
@@ -1438,7 +1440,7 @@
               box.querySelectorAll('.pp-samp-label').forEach(function(lb){ lb.onclick=function(){ dlSampleLabel(lb.dataset.ref); }; });
               box.querySelectorAll('.pp-samp-unship').forEach(function(a){ a.onclick=function(){ if(!confirm('Remove this sample from the shipment?'))return; postJSON(EP.productSampleRemove,{sample_id:a.dataset.sample,shipment_id:a.dataset.ship},function(j){ if(j&&j.error){alert(j.error);return;} ppProdSamples(box,ref); }); }; });
               box.querySelectorAll('.pp-samp-ship').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var host=b.parentNode, sampleId=b.dataset.id, linked=(b.dataset.linked||'').split(',').filter(Boolean); host.innerHTML='<span class="mut tiny">Loading shipments…</span>';
-                fetch(EP.productSampleShipments+'?supplier='+encodeURIComponent(STATE.supplierName||'')).then(function(r){return r.json();}).then(function(ships){ ships=(Array.isArray(ships)?ships:[]).filter(function(sh){return linked.indexOf(String(sh.id))<0;});
+                getJSON(EP.productSampleShipments+"?supplier="+encodeURIComponent(STATE.supplierName||"")).then(function(ships){ ships=(Array.isArray(ships)?ships:[]).filter(function(sh){return linked.indexOf(String(sh.id))<0;});
                   host.innerHTML='<div style="border:1px solid #cbd5e1;border-radius:6px;padding:8px;font-size:12px;max-width:340px"><div style="font-weight:600;margin-bottom:6px">Add this sample to a shipment</div>'
                     +'<button class="save-btn pss-new" style="background:#16a34a;color:#fff;border-color:#15803d">＋ New shipment</button>'
                     +(ships.length?'<div style="margin:7px 0 2px;color:#64748b">or add to an existing one:</div>'+ships.map(function(sh){return '<div class="pss-existing" data-ship="'+sh.id+'" style="padding:6px;cursor:pointer;border-top:1px solid #f1f1f1">'+esc(sh.ref)+(sh.carrier?' · '+esc(sh.carrier):'')+(sh.tracking_code?' · '+esc(sh.tracking_code):'')+'</div>';}).join(''):'<div class="mut tiny" style="margin-top:6px">(no other shipments yet)</div>')
@@ -1457,7 +1459,7 @@
             }).catch(function(e){ box.innerHTML='<div style="color:#dc2626;text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
           // ── SAMPLE SHIPMENTS hub — a supplier assembles a parcel of mixed contents (dev samples + bulk SKUs) ──
           function ppSampleShipments(body){ body.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
-            fetch(EP.productSampleShipments+'?supplier='+encodeURIComponent(STATE.supplierName||'')).then(function(r){return r.json();}).then(function(ships){ ships=Array.isArray(ships)?ships:[];
+            getJSON(EP.productSampleShipments+"?supplier="+encodeURIComponent(STATE.supplierName||"")).then(function(ships){ ships=Array.isArray(ships)?ships:[];
               var CARR=['','DHL','FedEx','UPS','SF Express','Other'];
               var cards=ships.map(function(sh){
                 var samp=(sh.samples||[]).map(function(x){return '<span style="display:inline-flex;align-items:center;gap:4px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:12px;padding:2px 8px;margin:2px;font-size:11px"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(x.ref)+'</b>'+(x.colour_name?' · '+esc(x.colour_name):'')+'<a class="ssh-rmsamp" data-ship="'+sh.id+'" data-sample="'+x.id+'" title="remove" style="color:#dc2626;cursor:pointer">✕</a></span>';}).join('');
@@ -1490,7 +1492,7 @@
           // rich multi-select "add contents" panel — pick open dev samples and/or bulk SKUs, add many at once
           function sshPicker(host, shipId, onDone){ host.innerHTML='<div class="mut tiny">Loading…</div>';
             var supQ=STATE.supplierName?'&supplier='+encodeURIComponent(STATE.supplierName):'';
-            fetch(EP.productOpenSamples+(supQ?'?'+supQ.slice(1):'')).then(function(r){return r.json();}).then(function(samples){ samples=Array.isArray(samples)?samples:[];
+            getJSON(EP.productOpenSamples+(supQ?'?'+supQ.slice(1):'')).then(function(samples){ samples=Array.isArray(samples)?samples:[];
               host.innerHTML='<div style="border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;background:#f8fafc">'
                 +'<div style="font-weight:700;font-size:12px;margin-bottom:6px">Add to this shipment</div>'
                 +'<div style="font-size:11px;color:#64748b;margin-bottom:3px">Product development samples <span class="mut">(products still in development)</span></div>'
@@ -1505,7 +1507,7 @@
               var sq=host.querySelector('.ssh-pk-sq'); if(sq)sq.oninput=function(){ var q=this.value.toLowerCase(); host.querySelectorAll('.ssh-pk-srow').forEach(function(r){ r.style.display=(!q||r.dataset.hay.indexOf(q)>=0)?'':'none'; }); };
               var kq=host.querySelector('.ssh-pk-kq'), klist=host.querySelector('.ssh-pk-klist'), kt=null;
               function loadSkus(q){ klist.innerHTML='<div class="mut tiny" style="padding:4px">searching…</div>';
-                fetch(EP.productSkus+'?q='+encodeURIComponent(q||'')+supQ).then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
+                getJSON(EP.productSkus+"?q="+encodeURIComponent(q||"")+supQ).then(function(rows){ rows=Array.isArray(rows)?rows:[];
                   klist.innerHTML=rows.length?rows.map(function(k){return '<div class="ssh-pk-krow" style="display:flex;gap:7px;align-items:center;padding:3px 2px;font-size:12px"><input type="checkbox" class="ssh-pk-kcb" value="'+esc(k.sku)+'"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(k.sku)+'</b><span class="mut tiny" style="flex:1;min-width:0">'+esc(k.description||'')+'</span><input class="fci ssh-pk-kqty" data-sku="'+esc(k.sku)+'" placeholder="qty" style="width:60px;text-align:left" inputmode="numeric"></div>';}).join(''):'<div class="mut tiny" style="padding:4px">no matches</div>'; }); }
               if(kq)kq.oninput=function(){ var v=this.value; if(kt)clearTimeout(kt); kt=setTimeout(function(){ loadSkus(v); },250); };
               host.querySelector('.ssh-pk-cancel').onclick=function(){ host.style.display='none'; host.innerHTML=''; };
