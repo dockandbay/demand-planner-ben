@@ -606,7 +606,7 @@
   var STBG={'bg-neutral':['#f3f4f6','#4b5563'],'bg-amber':['#fef3c7','#92400e'],'bg-red':['#fee2e2','#991b1b'],'bg-green':['#dcfce7','#166534'],'bg-blue':['#dbeafe','#1e40af']};
   var cache={},current=null,depRefs=null,poBy={},shipBy={},batchList=[],prodList=[],shipList=[],supplierList=[],branchList=[],crossdockList=[],poLookupList=[];
   var _navToken=0;   // bumps on every section / PO sub-tab navigation; async renders check it so a slow fetch from a view you've left can't overwrite the newer one (fixes fast-clicking loading the wrong view)
-  var _pendingPO=null,_pendingPOTab=null,_pendingShip=null,_pendingOP=null,_pendingDep=null;   // cross-view navigation: expand this PO / shipment, pre-filter order plan / deposit register, after the target view renders
+  var _pendingPO=null,_pendingPOTab=null,_pendingShip=null,_pendingOP=null,_pendingDep=null,_pendingSampleRef=null;   // cross-view navigation: expand this PO / shipment, pre-filter order plan / deposit register, after the target view renders
   var _poRefresh=null;   // set by the PO grid to refresh itself in place (no full section reload) after an assign
   var _poShowClient=false;   // PO grid: show Client name + Client sales ref columns when the DIRECT pill is active
   var _poPatchRow=null;  // set by the PO grid to patch a SINGLE row in place (no grid re-render) after an assign
@@ -665,6 +665,8 @@
     return ''; }
   // little ↗ tracking link for a carrier (empty string if the carrier has no tracker)
   function carrierTrackTag(carrier,ref){ var u=carrierTrackUrl(carrier,ref); return u?' <a href="'+u+'" target="_blank" rel="noopener" class="mut" title="track with '+esc(carrier||'carrier')+' ↗" style="text-decoration:none">↗</a>':''; }
+  // full clickable tracking code (code + ↗) — dynamic carrier link; plain text if the carrier has no tracker
+  function carrierTrackLinkInj(carrier,code){ if(!code)return ''; var u=carrierTrackUrl(carrier,code); return u?'<a href="'+u+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;font-weight:600" title="track with '+esc(carrier||'carrier')+' ↗">'+esc(code)+' ↗</a>':esc(code); }
   // FLEX source badge that links to the Flexport shipment when a flex id is known; otherwise the plain badge
   function srctagLink(s,r){ if(s==='FLEX'&&r&&r.flex_id){ var u=flexUrl(r.flex_id); if(u)return '<a href="'+u+'" target="_blank" rel="noopener" class="src fx" style="text-decoration:none" title="open '+esc(r.flex_id)+' in Flexport ↗">FLEX ↗</a>'; } return srctag(s); }
   function annot(k){return '';}   // section description boxes removed (Ben) — ANNOT kept for reference only
@@ -1279,6 +1281,8 @@
   function gotoPO(po,tab){ _pendingPO=po; _pendingPOTab=tab||null; showPoSub('plan'); }
   function gotoOrderPlan(po){ _pendingOP={po:po}; selectSection('order-plan'); }   // → full ORDER PLAN, PO pre-filtered
   function gotoDeposit(ref){ _pendingDep=ref; showPoSub('deposits'); }   // → PURCHASE ORDERS ▸ Deposits, filtered to this ref
+  // → SUPPLY ▸ Samples, expand this sample request by ref (used from the PRODUCT grid / detail links + the #/supply/samples/<ref> deep link)
+  function gotoSample(ref){ if(!ref)return; _pendingSampleRef=String(ref); if(typeof hideProduct==='function')hideProduct(); if(typeof showSupply==='function')showSupply(true); selectSection('samples'); }
   function gotoOther(){ showPoSub('other'); }   // → PURCHASE ORDERS ▸ Other Payments
   function bindShipOpen(){ document.querySelectorAll('#supply-root .ship-open').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); gotoShipment(b.dataset.ref); }; }); }
   // after a view renders, expand the pending PO / shipment row (set by gotoPO / gotoShipment)
@@ -6459,6 +6463,7 @@
         else if(_s2 && PO_SUB_KEYS.indexOf(_s2)>=0){ showPoSub(_s2); }   // PURCHASE ORDERS umbrella sub-tab
         else { if(_s2)_pendingPO=_s2; showPoSub('plan'); } }   // just a PO → open it in PLAN, default tab
       else if(sec==='shipments'){ if(seg[2])_pendingShip=decodeURIComponent(seg[2]); showPoSub('shipments'); }   // legacy: shipments moved under purchase-orders
+      else if(sec==='samples'){ if(seg[2])_pendingSampleRef=decodeURIComponent(seg[2]); selectSection('samples'); }   // #/supply/samples/<ref> → open & expand that sample
       else selectSection(sec);
     } else if(seg[0]==='config'){ if(seg[1])CONFIG_SUB=seg[1]; if(seg[1]==='portal'&&seg[2])_pendingPortalSup=decodeURIComponent(seg[2]); if(typeof enterConfig==='function')enterConfig(); }
     else if(seg[0]==='scenario'){ if(typeof showScenario==='function'){ showScenario(); if(seg[1])scenSelect(seg[1]); } }
@@ -6654,7 +6659,7 @@
   function sampleChargeChip(s){ var m={pending:['#fef3c7','#92710a'],accepted:['#dcfce7','#166534'],rejected:['#f1f5f9','#94a3b8']}; var c=m[s]||['#e2e8f0','#475569']; return '<span class="tool-badge" style="background:'+c[0]+';color:'+c[1]+'">'+esc(s)+'</span>'; }
   function renderSamples(data){ var c=document.getElementById('supply-content'); fetchLookups(function(){ samplesInner(data,c); }); }
   function samplesInner(rows,c){
-    var st={f:'open',q:''};
+    var st={f:(_pendingSampleRef?'all':'open'),q:''};   // when deep-linking/navigating to a specific sample, show 'all' so it's not filtered out
     function cur(){ return rows.filter(function(r){ if(st.q){ var hay=((r.ref||'')+' '+(r.supplier_name||'')+' '+(r.recipient_company||'')+' '+(r.recipient_name||'')).toLowerCase(); if(hay.indexOf(st.q)<0)return false; }
       if(st.f==='all')return true; if(st.f==='unaccepted')return r.status_calc==='Awaiting supplier'||r.status_calc==='Change requested'; if(st.f==='closed')return !r.is_open; return r.is_open; }); }
     var FILT=[['open','Open'],['unaccepted','Not Accepted'],['closed','Closed'],['all','All']];
@@ -6667,7 +6672,7 @@
       var chCell=[ch,acc].filter(Boolean).join(' ')||'<span class="mut">—</span>';
       var un=r.unread_notes>0?' <span class="ex-badge" title="'+r.unread_notes+' new supplier note(s) on the timeline">'+r.unread_notes+'</span>':'';
       var reqDate=r.completion_required?('<span'+(r.overdue?' style="color:#dc2626;font-weight:700"':'')+'>'+fd(r.completion_required)+'</span>'):'<span class="mut">—</span>';
-      return '<tr><td class="l"><button class="planbtn samp-exp" data-id="'+r.id+'" data-i="'+i+'">PLAN</button>'+un+'</td>'
+      return '<tr><td class="l"><button class="planbtn samp-exp" data-id="'+r.id+'" data-ref="'+esc(r.ref||'')+'" data-i="'+i+'">PLAN</button>'+un+'</td>'
         +'<td class="l"><b>'+esc(r.ref||'')+'</b></td>'
         +'<td class="l">'+sampleStatusChip(r.status_calc)+(r.production_status?'<div class="mut tiny" style="margin-top:2px">✓ '+esc(prodStatusLabel(r.production_status))+'</div>':'')+'</td>'
         +'<td class="l">'+esc(r.supplier_name||'—')+'</td>'
@@ -6764,7 +6769,10 @@
       document.getElementById('samp-new').onclick=openSampleForm;
       c.querySelectorAll('.samp-exp').forEach(function(b){ b.onclick=function(){ var i=b.dataset.i, ex=document.getElementById('sampexp-'+i), open=ex.style.display!=='none';
         ex.style.display=open?'none':''; b.classList.toggle('open',!open);
+        try{ writeHash(!open && b.dataset.ref ? ['supply','samples',b.dataset.ref] : ['supply','samples']); }catch(e){}   // shareable slug for the open sample
         if(!open && !ex.dataset.loaded){ ex.dataset.loaded='1'; loadSampleDetail(b.dataset.id,i); } }; });
+      // cross-nav / deep link (#/supply/samples/<ref>): expand the requested sample once the grid is rendered
+      if(_pendingSampleRef){ var _pr=_pendingSampleRef; _pendingSampleRef=null; var _pb=c.querySelector('.samp-exp[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(_pr):_pr)+'"]'); if(_pb){ _pb.click(); try{ _pb.closest('tr').scrollIntoView({block:'center',behavior:'smooth'}); }catch(e){} } }
       samplesNavBadge(rows);
     }
     view();
@@ -6828,7 +6836,7 @@
                              : '<button class="save-btn samp-edit">Edit</button>';
         // tabbed detail — mirrors the PO detail (.po-subnav / .rtab + panels), with per-tab counts
         function bdge(n){ return n>0?' <span class="ex-badge">'+n+'</span>':''; }
-        var pend=(d.charges||[]).filter(function(c){return c.status==='pending';}).length, natt=(d.attachments||[]).length, nsku=(d.lines||[]).length;
+        var pend=(d.charges||[]).filter(function(c){return c.status==='pending';}).length, _unread=(d.notes||[]).filter(function(n){return n.author_kind==='supplier'&&!n.read;}).length;
         function tb(k,label){ return '<button class="rtab samp-tab'+(curTab===k?' active':'')+'" data-st="'+k+'">'+label+'</button>'; }
         function panel(k,html){ return '<div class="samp-panel" data-st="'+k+'"'+(curTab===k?'':' style="display:none"')+'>'+html+'</div>'; }
         var detailsPanel='<div style="display:flex;gap:24px;flex-wrap:wrap">'
@@ -6847,7 +6855,8 @@
           +'<div><input type="file" class="samp-att-file" style="font-size:11px"> <button class="save-btn samp-att-up">Upload attachment</button></div>';
         var chargesPanel='<div class="tw"><table><thead><tr><th class="l">Status</th><th class="l">Freight</th><th class="l">Product</th><th class="l">Total</th><th class="l">Description</th><th class="l"></th></tr></thead><tbody>'+charges+'</tbody></table></div>';
         box.innerHTML='<div class="po-subnav samp-subnav" style="margin-bottom:12px">'
-            +tb('details','Details')+tb('contents','Contents'+bdge(nsku))+tb('charges','Charges'+bdge(pend))+tb('attachments','Attachments'+bdge(natt))+tb('timeline','Timeline')+'</div>'
+            // badges only flag ACTIONS/exceptions (pending charges, unread notes) — not plain counts like #SKUs / #attachments
+            +tb('details','Details')+tb('contents','Contents')+tb('charges','Charges'+bdge(pend))+tb('attachments','Attachments')+tb('timeline','Timeline'+bdge(_unread))+'</div>'
           +panel('details',detailsPanel)+panel('contents',contentsPanel)+panel('charges',chargesPanel)+panel('attachments',attachPanel)
           +panel('timeline','<div class="sp-timeline" data-ref="'+esc(s.ref)+'"></div>');
         box.querySelectorAll('.samp-tab').forEach(function(t){ t.onclick=function(){ curTab=t.dataset.st; box._sampTab=curTab;
@@ -7667,7 +7676,7 @@
               +'<td>'+prodPickBtn(r.ref,'supplier',r.supplier,'supplier')+'</td>'
               +'<td>'+r.sizes_approved+'/'+r.sizes+'</td>'
               +'<td>'+prodStatusChip(r.status)+'</td>'
-              +'<td class="l">'+((r.shipments&&r.shipments.length)?r.shipments.map(function(sh){return '<div style="white-space:nowrap;font-size:11px">📦 <b>'+esc(sh.ref)+'</b>'+(sh.carrier?' · '+esc(sh.carrier):'')+(sh.tracking?' · '+esc(sh.tracking)+carrierTrackTag(sh.carrier,sh.tracking):'')+'</div>';}).join(''):'<span class="mut tiny">—</span>')+'</td></tr>'
+              +'<td class="l">'+(r.latest_shipment?('<div style="white-space:nowrap;font-size:11px">📦 <a class="samp-open" data-ref="'+esc(r.latest_shipment.ref)+'" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;font-weight:600" title="open this sample shipment">'+esc(r.latest_shipment.ref)+'</a>'+(r.latest_shipment.carrier?' <span class="mut tiny">'+esc(r.latest_shipment.carrier)+'</span>':'')+(r.latest_shipment.tracking?' · '+carrierTrackLinkInj(r.latest_shipment.carrier,r.latest_shipment.tracking):'')+'</div>'):'<span class="mut tiny">—</span>')+'</td></tr>'
               +'<tr class="pg-detrow" id="pgdet-'+i+'" style="display:none"><td colspan="8"><div class="pg-det"></div></td></tr>';
           }).join('')+'</tbody></table></div>';
         g.querySelectorAll('.pg-open').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var i=b.dataset.i, ref=b.dataset.ref, row=document.getElementById('pgdet-'+i), datarow=b.closest('tr'), open=row.style.display!=='none';
@@ -7676,6 +7685,7 @@
           if(open){ row.style.display='none'; row.querySelector('.pg-det').innerHTML=''; datarow.classList.remove('pg-openrow'); _prodDetailBox=null; try{writeHash(['product','plan']);}catch(_){} return; }
           row.style.display=''; datarow.classList.add('pg-openrow'); _prodDetailTab='master'; renderProductDetail(ref, row.querySelector('.pg-det')); }; });
         g.querySelectorAll('.prod-cell-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openProdCellPick(b); }; });
+        g.querySelectorAll('.samp-open').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); gotoSample(a.dataset.ref); }; });   // sample-shipment ref → SUPPLY ▸ Samples
         if(_pendingProdRef){ var _pr=_pendingProdRef; _pendingProdRef=null; var _pb=g.querySelector('.pg-open[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(_pr):_pr)+'"]'); if(_pb)_pb.click(); }
       }
       _prodDraw=draw;
@@ -7742,9 +7752,10 @@
             +'<a class="ps-adm-del" data-id="'+s.id+'" title="delete version" style="color:#dc2626;cursor:pointer;margin-left:8px">✕</a></div>'
             +(s.description?'<div style="margin:5px 0;white-space:pre-wrap;font-size:12px">'+esc(s.description)+'</div>':'')
             +(ph?'<div style="margin-top:5px">'+ph+'</div>':'')
-            +((s.shipments&&s.shipments.length)?'<div style="margin-top:6px;display:flex;flex-direction:column;gap:4px">'+s.shipments.map(function(sh){return '<div style="padding:6px 9px;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;font-size:12px">📦 Shipment <b>'+esc(sh.ref)+'</b>'+(sh.carrier?' · '+esc(sh.carrier):'')+(sh.tracking?' · '+esc(sh.tracking)+carrierTrackTag(sh.carrier,sh.tracking):'')+'</div>';}).join('')+'</div>':'')
+            +((s.shipments&&s.shipments.length)?'<div style="margin-top:6px;display:flex;flex-direction:column;gap:4px">'+s.shipments.map(function(sh){return '<div style="padding:6px 9px;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;font-size:12px">📦 Shipment <a class="samp-open" data-ref="'+esc(sh.ref)+'" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;font-weight:600" title="open this sample shipment">'+esc(sh.ref)+'</a>'+(sh.carrier?' · '+esc(sh.carrier):'')+(sh.tracking?' · '+carrierTrackLinkInj(sh.carrier,sh.tracking):'')+'</div>';}).join('')+'</div>':'')
             +'</div>'; }).join(''):'<div style="color:#94a3b8;padding:6px 2px">No sample versions submitted yet.</div>');
       body.querySelectorAll('.ps-adm-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this sample version?'))return; shipPost('/api/product/sample/'+a.dataset.id+'/delete',{},function(){ renderProdSamplesTab(body,ref); }); }; });
+      body.querySelectorAll('.samp-open').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); gotoSample(a.dataset.ref); }; });   // sample-shipment ref → SUPPLY ▸ Samples
     }).catch(function(e){ body.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
   function renderProdMaster(body,d){ var it=d.item; ensureSuppliers(function(){ loadProdCfg(function(cfg){
     var seasons=(cfg.seasons||[]), cats=(cfg.categories||[]);

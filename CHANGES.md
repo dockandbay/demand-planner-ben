@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.058 - Sample-shipment links on PRODUCT; samples deep-link slug; action-only detail badges
+
+- **PRODUCT grid "Sample shipment" column** now shows the **most recent** linked sample shipment: its ref as a
+  click-through link (→ SUPPLY ▸ Samples, expanded) + carrier + tracking code as a **dynamic carrier link**.
+  New `latest_shipment` on /api/product/items; `carrierTrackLinkInj()` helper; `gotoSample(ref)`.
+- **PRODUCT ▸ item ▸ Samples tab**: each sample version now shows its sample shipment(s) with **ref link-through
+  + carrier + tracking dynamic link** (was a plain ↗).
+- **SUPPLY ▸ Samples deep-link slug**: expanding a sample sets the URL to `#/supply/samples/<ref>` (shareable),
+  and that URL opens & expands the sample (forces the "all" filter so it's not hidden).
+- **Samples detail tab badges are action-only now**: the Contents/Attachments *count* badges were misleading
+  (a count isn't an exception) — removed. Kept **Charges** = pending count and **Timeline** = unread notes.
+
 ## v26.057 - Left-align number columns across all supply grids
 
 Broad alignment sweep: the `#supply-root` grids defaulted every cell to right-aligned (with `.l` = left for

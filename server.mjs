@@ -3160,7 +3160,12 @@ app.get('/api/product/items', async (_req, res) => {
         FROM planner.product_dev_samples ps
         JOIN planner.sample_request_dev_samples l ON l.dev_sample_id=ps.id
         JOIN planner.sample_requests sr ON sr.id=l.sample_request_id
-        WHERE ps.item_ref=i.ref),'[]'::json) shipments
+        WHERE ps.item_ref=i.ref),'[]'::json) shipments,
+      (SELECT jsonb_build_object('id',sr.id,'ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,''))
+        FROM planner.product_dev_samples ps
+        JOIN planner.sample_request_dev_samples l ON l.dev_sample_id=ps.id
+        JOIN planner.sample_requests sr ON sr.id=l.sample_request_id
+        WHERE ps.item_ref=i.ref ORDER BY sr.created_at DESC LIMIT 1) latest_shipment
       FROM planner.product_dev_items i ORDER BY i.created_at DESC`);
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
