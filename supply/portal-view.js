@@ -412,6 +412,12 @@
 #supply-root table.bc-tbl{width:max-content;min-width:100%}   /* size to content (don't let width:100% fatten thin columns like GRS); scrolls if wide */
 #supply-root table.pp-tbl thead th{white-space:normal;vertical-align:middle;line-height:1.2}   /* portal grid: wrapping headers, vertically centred (no max-width — it was clipping the date column) */
 #supply-root table.pp-tbl{width:max-content;min-width:100%}   /* size to content (overrides table{width:100%}) so cell min-widths hold — the date column stops clipping */
+/* portal Product grid: scrolls sideways; the first column (View + swatch + ref/colour) stays sticky on the left */
+#supply-root table.ppp-tbl{width:max-content;min-width:100%;border-collapse:separate;border-spacing:0;font-size:12px}
+#supply-root table.ppp-tbl th{background:#e9eef5;text-align:left;padding:6px 8px;white-space:nowrap;font-size:10px;text-transform:uppercase;color:#64748b}
+#supply-root table.ppp-tbl td{background:#fff;text-align:left;padding:6px 8px;border-bottom:1px solid #f1f1f1;white-space:nowrap}
+#supply-root table.ppp-tbl td:nth-child(1),#supply-root table.ppp-tbl th:nth-child(1){position:sticky;left:0;z-index:2;box-shadow:2px 0 4px -2px rgba(15,23,42,.15)}
+#supply-root table.ppp-tbl th:nth-child(1){z-index:3}
 #supply-root table.po-tbl .fci.dt{width:84px}#supply-root table.po-tbl .fci.txt{width:96px}
 #supply-root table.po-tbl thead th:first-child,
 #supply-root table.po-tbl tbody tr:not(.exp-row):not(.grp-row) td:first-child{position:sticky;left:0;z-index:2;background:#fff;box-sizing:border-box;width:54px;min-width:54px;max-width:54px}
@@ -1331,28 +1337,39 @@
           function prodStatusLabel(s){ return {in_development:'In development',approved:'Approved',dropped:'Dropped'}[s]||s; }
           function ppProducts(items){ items=items||[];
             if(!items.length) return '<div class="count" style="padding:16px 2px;text-align:left">No product development items assigned to you yet.</div>';
-            var th='text-align:left;padding:5px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#64748b;border-bottom:1px solid #e5e7eb;white-space:nowrap';
-            return '<div style="font-size:13px;color:#334155;margin-bottom:10px;text-align:left">Product development items Dock &amp; Bay is working on with you — open one to see its timeline and add comments.</div>'
-              +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;text-align:left"><thead><tr>'
-              +['Ref','Colour','Category','Season','Sizes','Status',''].map(function(h){return '<th style="'+th+'">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+            return '<div style="font-size:13px;color:#334155;margin-bottom:10px;text-align:left">Product development items Dock &amp; Bay is working on with you — open one to view its details, samples and timeline.</div>'
+              +'<div class="tw"><table class="ppp-tbl"><thead><tr>'
+              +['Product','Category','Season','Sizes','Status'].map(function(h){return '<th>'+h+'</th>';}).join('')+'</tr></thead><tbody>'
               +items.map(function(p,i){ var badge=p.unread_dnb?' <span style="background:#f59e0b;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+p.unread_dnb+'</span>':'';
-                var sw=p.has_swatch?'<img src="'+(EP.productSwatchBase||'/api/product/swatch/')+encodeURIComponent(p.ref)+'?t='+encodeURIComponent(p.updated_at||'')+'" style="width:28px;height:28px;object-fit:cover;border-radius:5px;border:1px solid #e5e7eb;vertical-align:middle;margin-right:6px">':'';
-                var td='text-align:left;padding:5px 8px;border-bottom:1px solid #f1f1f1';
-                return '<tr><td style="'+td+'">'+sw+'<b style="font-family:ui-monospace,Menlo,monospace">'+esc(p.ref)+'</b>'+badge+'</td>'
-                  +'<td style="'+td+'">'+esc(p.colour_name||'—')+'</td><td style="'+td+'">'+esc(p.category||'')+'</td><td style="'+td+'">'+esc(p.season||'')+'</td>'
-                  +'<td style="'+td+'">'+p.sizes+'</td><td style="'+td+'">'+esc(prodStatusLabel(p.status))+'</td>'
-                  +'<td style="'+td+'"><button class="save-btn pp-prod-open" data-ref="'+esc(p.ref)+'" data-i="'+i+'">View</button></td></tr>'
-                  +'<tr class="pp-prod-exp" id="pp-prod-exp-'+i+'" style="display:none"><td colspan="7" style="text-align:left"><div class="pp-prod-det" data-ref="'+esc(p.ref)+'"></div></td></tr>'; }).join('')
+                var sw=p.has_swatch?'<img src="'+(EP.productSwatchBase||'/api/product/swatch/')+encodeURIComponent(p.ref)+'?t='+encodeURIComponent(p.updated_at||'')+'" style="width:34px;height:34px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;flex:0 0 auto">':'<span style="width:34px;height:34px;border-radius:6px;border:1px dashed #cbd5e1;flex:0 0 auto"></span>';
+                return '<tr><td><div style="display:flex;align-items:center;gap:8px">'+sw
+                    +'<button class="save-btn pp-prod-open" data-ref="'+esc(p.ref)+'" data-i="'+i+'" style="flex:0 0 auto">View</button>'
+                    +'<div style="min-width:0"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(p.ref)+'</b>'+badge+(p.colour_name?'<div style="font-size:10px;color:#94a3b8">'+esc(p.colour_name)+'</div>':'')+'</div></div></td>'
+                  +'<td>'+esc(p.category||'')+'</td><td>'+esc(p.season||'')+'</td>'
+                  +'<td>'+p.sizes+'</td><td>'+esc(prodStatusLabel(p.status))+'</td></tr>'
+                  +'<tr class="pp-prod-exp" id="pp-prod-exp-'+i+'" style="display:none"><td colspan="5" style="text-align:left"><div class="pp-prod-det" data-ref="'+esc(p.ref)+'"></div></td></tr>'; }).join('')
               +'</tbody></table></div>'; }
           function wireProducts(){ var body=document.getElementById('pp-body');
             body.querySelectorAll('.pp-prod-open').forEach(function(b){ b.onclick=function(){ var i=b.dataset.i, ex=document.getElementById('pp-prod-exp-'+i), open=ex.style.display!=='none';
               ex.style.display=open?'none':''; if(!open && !ex.dataset.loaded){ ex.dataset.loaded='1'; ppProdDetail(ex.querySelector('.pp-prod-det'), b.dataset.ref); } }; }); }
-          function ppProdDetail(box, ref){ var tabs=[['samples','Sample'],['timeline','Timeline']], cur='samples';
-            box.innerHTML='<div style="display:flex;gap:2px;border-bottom:1px solid #e5e7eb;margin-bottom:10px;text-align:left">'+tabs.map(function(t){return '<button class="rtab pd2-tab" data-t="'+t[0]+'" style="background:none;border:none;border-bottom:3px solid transparent;padding:7px 12px;font-size:13px;cursor:pointer;color:#64748b">'+t[1]+'</button>';}).join('')+'</div><div class="pd2-body"></div>';
+          function ppProdDetail(box, ref){ var tabs=[['master','Master data'],['samples','Sample'],['documents','Documents'],['timeline','Timeline']];
+            box.innerHTML='<div style="display:flex;gap:2px;border-bottom:1px solid #e5e7eb;margin-bottom:10px;text-align:left;flex-wrap:wrap">'+tabs.map(function(t){return '<button class="rtab pd2-tab" data-t="'+t[0]+'" style="background:none;border:none;border-bottom:3px solid transparent;padding:7px 12px;font-size:13px;cursor:pointer;color:#64748b">'+t[1]+'</button>';}).join('')+'</div><div class="pd2-body"></div>';
             var bd=box.querySelector('.pd2-body');
-            function sel(t){ cur=t; box.querySelectorAll('.pd2-tab').forEach(function(b){ var on=b.dataset.t===t; b.style.color=on?'#0f172a':'#64748b'; b.style.borderBottomColor=on?'#2563eb':'transparent'; b.style.fontWeight=on?'700':'400'; });
-              if(t==='timeline')ppProdTimeline(bd,ref); else ppProdSamples(bd,ref); }
-            box.querySelectorAll('.pd2-tab').forEach(function(b){ b.onclick=function(){ sel(b.dataset.t); }; }); sel('samples'); }
+            function sel(t){ box.querySelectorAll('.pd2-tab').forEach(function(b){ var on=b.dataset.t===t; b.style.color=on?'#0f172a':'#64748b'; b.style.borderBottomColor=on?'#2563eb':'transparent'; b.style.fontWeight=on?'700':'400'; });
+              if(t==='timeline')ppProdTimeline(bd,ref); else if(t==='documents')ppProdDocs(bd,ref); else if(t==='master')ppProdMaster(bd,ref); else ppProdSamples(bd,ref); }
+            box.querySelectorAll('.pd2-tab').forEach(function(b){ b.onclick=function(){ sel(b.dataset.t); }; }); sel('master'); }
+          function ppProdMaster(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
+            fetch('/api/product/item/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ if(!d||!d.item){ box.innerHTML='<div class="mut" style="text-align:left">Not found.</div>'; return; } var it=d.item;
+              function row(l,v){ return '<div style="display:flex;gap:10px;padding:5px 0;border-bottom:1px solid #f4f4f5;text-align:left"><div style="flex:0 0 130px;color:#64748b">'+l+'</div><div style="flex:1;min-width:0">'+v+'</div></div>'; }
+              var sizes=(d.sizes||[]).map(function(s){ var ok=s.approval_status==='approved'; return '<span style="display:inline-block;border:1px solid #e5e7eb;border-radius:5px;padding:2px 8px;margin:2px;font-size:11px">'+esc(s.size_label)+' · <span style="color:'+(ok?'#16a34a':s.approval_status==='rejected'?'#dc2626':'#94a3b8')+'">'+esc(s.approval_status)+'</span></span>'; }).join('')||'<span class="mut">no sizes</span>';
+              var sw=it.has_swatch?'<img src="'+(EP.productSwatchBase||'/api/product/swatch/')+encodeURIComponent(ref)+'?t='+encodeURIComponent(it.updated_at||'')+'" style="width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">':'';
+              box.innerHTML='<div style="max-width:600px;text-align:left">'+(sw?'<div style="margin-bottom:8px">'+sw+'</div>':'')
+                +row('Reference','<b style="font-family:ui-monospace,Menlo,monospace">'+esc(it.ref)+'</b>')+row('Season',esc(it.season||'—'))+row('Category',esc(it.category||'—'))+row('Supplier',esc(it.supplier||'—'))+row('Colour way',esc(it.colour_name||'—'))+row('Status',esc(prodStatusLabel(it.status)))+row('Description','<span style="white-space:pre-wrap">'+esc(it.description||'—')+'</span>')+row('Size variants',sizes)+'</div>';
+            }).catch(function(e){ box.innerHTML='<div style="color:#dc2626;text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
+          function ppProdDocs(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
+            fetch('/api/product/item/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ var docs=(d&&d.docs)||[];
+              box.innerHTML='<div style="max-width:600px;text-align:left">'+(docs.length?docs.map(function(x){ return '<div style="padding:7px 0;border-bottom:1px solid #f1f1f1"><a href="/api/product/doc/'+x.id+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline">'+esc(x.filename)+'</a> <span class="mut tiny">'+Math.max(1,Math.round((x.byte_size||0)/1024))+' KB · '+esc(x.uploaded_at||'')+'</span></div>'; }).join(''):'<div class="mut" style="padding:6px 0">No documents.</div>')+'</div>';
+            }).catch(function(e){ box.innerHTML='<div style="color:#dc2626;text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
           function ppProdSamples(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
             fetch(EP.productSamplesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(list){ list=Array.isArray(list)?list:[];
               var today=new Date().toISOString().slice(0,10);
@@ -1362,7 +1379,8 @@
                   +(s.description?'<div style="margin:4px 0;white-space:pre-wrap">'+esc(s.description)+'</div>':'')
                   +(ph?'<div style="margin-top:4px">'+ph+'</div>':'')+'</div>'; }).join('')||'<div class="mut" style="padding:4px 0;text-align:left">No sample versions yet.</div>';
               box.innerHTML='<div style="text-align:left"><div style="font-weight:700;font-size:13px;margin-bottom:6px">Sample versions</div>'+rows
-                +'<div style="border:1px dashed #cbd5e1;border-radius:8px;padding:11px 13px;margin-top:10px;background:#f8fafc">'
+                +'<div style="margin-top:8px"><button class="save-btn pp-add-sample" style="background:#16a34a;color:#fff;border-color:#15803d">+ Add sample</button></div>'
+                +'<div class="pp-sample-form" style="display:none;border:1px dashed #cbd5e1;border-radius:8px;padding:11px 13px;margin-top:10px;background:#f8fafc">'
                 +'<div style="font-weight:700;font-size:12px;margin-bottom:8px">Add a new sample version</div>'
                 +'<div style="margin-bottom:7px"><label style="font-size:12px">Sample date <input type="date" class="fci ps2-date" value="'+today+'" style="text-align:left;margin-left:4px"></label></div>'
                 +'<label style="display:block;font-size:12px;margin-bottom:5px;cursor:pointer"><input type="checkbox" class="ps2-col" style="vertical-align:middle;margin-right:6px">I verify that I have colour checked every colour to match Pantone in design</label>'
@@ -1370,6 +1388,7 @@
                 +'<textarea class="fci ps2-desc" rows="2" placeholder="description…" style="width:100%;text-align:left;box-sizing:border-box"></textarea>'
                 +'<div style="margin-top:7px"><label style="font-size:12px">Photos <input type="file" class="ps2-photos" accept="image/*" multiple style="font-size:12px"></label></div>'
                 +'<div style="margin-top:9px"><button class="save-btn ps2-save" data-ref="'+esc(ref)+'">Submit sample version</button> <span class="ps2-msg" style="font-size:12px;margin-left:6px"></span></div></div></div>';
+              var _addb=box.querySelector('.pp-add-sample'), _form=box.querySelector('.pp-sample-form'); if(_addb)_addb.onclick=function(){ var open=_form.style.display!=='none'; _form.style.display=open?'none':''; if(!open){ var d=_form.querySelector('.ps2-date'); if(d)d.focus(); } };
               var sv=box.querySelector('.ps2-save'); sv.onclick=function(){ var msg=box.querySelector('.ps2-msg');
                 var col=box.querySelector('.ps2-col').checked, qual=box.querySelector('.ps2-qual').checked;
                 if(!col||!qual){ msg.style.color='#dc2626'; msg.textContent='Please tick both verification boxes.'; return; }
