@@ -545,6 +545,7 @@
     var _bcRowsCache={};      // Barcodes tab: batch → fetched label-data rows (avoid refetch on filter/re-render)
     var _ppShowAllPO=false, _ppShowAllSP=false;   // "show all" toggles for the capped PO / shipment grids
     var PORTAL_SAMP_F='open', PORTAL_SAMP_Q='';   // Samples grid filter + search (default: open)
+    var PORTAL_PROD_Q='', PORTAL_PROD_SEASON='', PORTAL_PROD_STATUS='in_development';   // Product grid: search + season + status (default: in development)
     var _invFiles={};     // base64 of the last parsed invoice file, per PO (for the Apply step)
     var rootEl=opts.root; if(!rootEl.closest('#supply-root')){rootEl.id='supply-root';} rootEl.style.display='block';
     rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders <span id="pp-pos-badge"></span></span><span class="rtab" data-pt="shipmentplan">Shipment Plan <span id="pp-ship-badge"></span></span><span class="rtab" data-pt="barcodes">Barcodes</span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="productions">Productions</span><span class="rtab" data-pt="samples">Samples <span id="pp-samp-badge"></span></span><span class="rtab" data-pt="product" id="pp-prod-tab" style="display:none">Product <span id="pp-prod-badge"></span></span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
@@ -1337,22 +1338,39 @@
           function prodStatusLabel(s){ return {in_development:'In development',approved:'Approved',dropped:'Dropped'}[s]||s; }
           function ppProducts(items){ items=items||[];
             if(!items.length) return '<div class="count" style="padding:16px 2px;text-align:left">No product development items assigned to you yet.</div>';
-            return '<div style="font-size:13px;color:#334155;margin-bottom:10px;text-align:left">Product development items Dock &amp; Bay is working on with you — open one to view its details, samples and timeline.</div>'
-              +'<div class="tw"><table class="ppp-tbl"><thead><tr>'
-              +['Product','Category','Season','Sizes','Status'].map(function(h){return '<th>'+h+'</th>';}).join('')+'</tr></thead><tbody>'
-              +items.map(function(p,i){ var badge=p.unread_dnb?' <span style="background:#f59e0b;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+p.unread_dnb+'</span>':'';
+            var seasons=[]; items.forEach(function(p){ if(p.season&&seasons.indexOf(p.season)<0)seasons.push(p.season); }); seasons.sort();
+            var STAT=[['','All'],['in_development','In development'],['approved','Approved'],['dropped','Dropped']];
+            return '<div style="font-size:13px;color:#334155;margin-bottom:8px;text-align:left">Product development items Dock &amp; Bay is working on with you — open one to view its details, samples and timeline.</div>'
+              +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;text-align:left">'
+              +'<span style="display:flex;align-items:center;gap:5px"><span style="color:#64748b;font-size:11px">Season</span><select class="fci pp-prod-season" style="text-align:left"><option value="">All</option>'+seasons.map(function(s){return '<option value="'+esc(s)+'"'+(s===PORTAL_PROD_SEASON?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>'
+              +'<span style="display:flex;align-items:center;gap:5px"><span style="color:#64748b;font-size:11px">Status</span><select class="fci pp-prod-status" style="text-align:left">'+STAT.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===PORTAL_PROD_STATUS?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></span>'
+              +'<input class="fci txt pp-prod-q" placeholder="search ref / colour / category / supplier…" value="'+esc(PORTAL_PROD_Q||'')+'" style="width:260px;text-align:left">'
+              +'<span class="pp-prod-count" style="color:#94a3b8;font-size:11px"></span></div>'
+              +'<div id="pp-prod-grid"></div>'; }
+          function drawProdGrid(){ var host=document.getElementById('pp-prod-grid'); if(!host)return;
+            var items=(_ppData&&_ppData.products)||[]; var q=(PORTAL_PROD_Q||'').toLowerCase();
+            var f=items.filter(function(p){ if(PORTAL_PROD_SEASON&&p.season!==PORTAL_PROD_SEASON)return false; if(PORTAL_PROD_STATUS&&p.status!==PORTAL_PROD_STATUS)return false;
+              if(q){ var hay=((p.ref||'')+' '+(p.colour_name||'')+' '+(p.category||'')+' '+(p.supplier||'')).toLowerCase(); if(hay.indexOf(q)<0)return false; } return true; });
+            var cnt=document.querySelector('.pp-prod-count'); if(cnt)cnt.textContent=f.length+' of '+items.length;
+            if(!f.length){ host.innerHTML='<div class="count" style="padding:14px 2px;text-align:left">No items match these filters.</div>'; return; }
+            host.innerHTML='<div class="tw"><table class="ppp-tbl"><thead><tr>'+['Product','Category','Season','Sizes','Status'].map(function(h){return '<th>'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+              +f.map(function(p,i){ var badge=p.unread_dnb?' <span style="background:#f59e0b;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+p.unread_dnb+'</span>':'';
                 var sw=p.has_swatch?'<img src="'+(EP.productSwatchBase||'/api/product/swatch/')+encodeURIComponent(p.ref)+'?t='+encodeURIComponent(p.updated_at||'')+'" style="width:34px;height:34px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;flex:0 0 auto">':'<span style="width:34px;height:34px;border-radius:6px;border:1px dashed #cbd5e1;flex:0 0 auto"></span>';
                 return '<tr><td><div style="display:flex;align-items:center;gap:8px">'+sw
                     +'<button class="save-btn pp-prod-open" data-ref="'+esc(p.ref)+'" data-i="'+i+'" style="flex:0 0 auto">View</button>'
                     +'<div style="min-width:0"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(p.ref)+'</b>'+badge+(p.colour_name?'<div style="font-size:10px;color:#94a3b8">'+esc(p.colour_name)+'</div>':'')+'</div></div></td>'
-                  +'<td>'+esc(p.category||'')+'</td><td>'+esc(p.season||'')+'</td>'
-                  +'<td>'+p.sizes+'</td><td>'+esc(prodStatusLabel(p.status))+'</td></tr>'
+                  +'<td>'+esc(p.category||'')+'</td><td>'+esc(p.season||'')+'</td><td>'+p.sizes+'</td><td>'+esc(prodStatusLabel(p.status))+'</td></tr>'
                   +'<tr class="pp-prod-exp" id="pp-prod-exp-'+i+'" style="display:none"><td colspan="5" style="text-align:left"><div class="pp-prod-det" data-ref="'+esc(p.ref)+'"></div></td></tr>'; }).join('')
-              +'</tbody></table></div>'; }
-          function wireProducts(){ var body=document.getElementById('pp-body');
-            body.querySelectorAll('.pp-prod-open').forEach(function(b){ b.onclick=function(){ var i=b.dataset.i, ex=document.getElementById('pp-prod-exp-'+i), open=ex.style.display!=='none';
+              +'</tbody></table></div>';
+            host.querySelectorAll('.pp-prod-open').forEach(function(b){ b.onclick=function(){ var i=b.dataset.i, ex=document.getElementById('pp-prod-exp-'+i), open=ex.style.display!=='none';
               ex.style.display=open?'none':''; if(!open && !ex.dataset.loaded){ ex.dataset.loaded='1'; ppProdDetail(ex.querySelector('.pp-prod-det'), b.dataset.ref); } }; }); }
-          function ppProdDetail(box, ref){ var tabs=[['master','Master data'],['samples','Sample'],['documents','Documents'],['timeline','Timeline']];
+          function wireProducts(){ var body=document.getElementById('pp-body');
+            var ss=body.querySelector('.pp-prod-season'); if(ss)ss.onchange=function(){ PORTAL_PROD_SEASON=ss.value; drawProdGrid(); };
+            var st=body.querySelector('.pp-prod-status'); if(st)st.onchange=function(){ PORTAL_PROD_STATUS=st.value; drawProdGrid(); };
+            var q=body.querySelector('.pp-prod-q'); if(q)q.oninput=function(){ PORTAL_PROD_Q=q.value; drawProdGrid(); };
+            drawProdGrid(); }
+          function ppProdDetail(box, ref){ var _it=((_ppData&&_ppData.products)||[]).filter(function(x){return x.ref===ref;})[0]||{}; var _un=Number(_it.unread_dnb)||0;
+            var tabs=[['master','Master data'],['samples','Sample'],['documents','Documents'],['timeline','Timeline'+(_un?' <span class="ex-badge">'+_un+'</span>':'')]];
             box.innerHTML='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab pd2-tab'+(ti===0?' active':'')+'" data-t="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div><div class="pd2-body"></div>';
             var bd=box.querySelector('.pd2-body');
             function sel(t){ box.querySelectorAll('.pd2-tab').forEach(function(b){ b.classList.toggle('active',b.dataset.t===t); });
@@ -1399,10 +1417,14 @@
             }).catch(function(e){ box.innerHTML='<div style="color:#dc2626;text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
           function ppProdTimeline(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
             fetch(EP.productNotesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){ shortNotes(notes); notes=Array.isArray(notes)?notes:[];
-              var list=(notes.length?tlDesc(notes).map(function(n){ var sup=(n.author_kind!=='internal'); return '<div style="padding:7px 0;border-bottom:1px solid #f1f1f1;text-align:left"><div class="mut tiny">'+esc(n.created_at||'')+' · '+(sup?'you':'Dock &amp; Bay')+(sup||n.read?'':' <span class="ex-badge">new</span>')+'</div><div style="white-space:pre-wrap">'+esc(n.body||'')+'</div></div>'; }).join(''):'<div class="mut" style="padding:6px 0;text-align:left">No messages yet.</div>');
-              box.innerHTML='<div style="max-width:640px;text-align:left"><div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:10px"><textarea class="fci pp-prod-note" rows="2" placeholder="Add a comment…" style="flex:1;text-align:left"></textarea><button class="save-btn pp-prod-post" data-ref="'+esc(ref)+'">Post</button></div><div>'+list+'</div></div>';
+              var unread=notes.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
+              var list=(notes.length?tlDesc(notes).map(function(n){ var sup=(n.author_kind!=='internal'); var isNew=(!sup&&!n.read);
+                return '<div style="padding:7px 0;border-bottom:1px solid #f1f1f1;text-align:left'+(isNew?';background:#fffbeb':'')+'"><div class="mut tiny">'+esc(n.created_at||'')+' · '+(sup?'you':'Dock &amp; Bay')+(isNew?' <span class="ex-badge">NEW</span>':(!sup?' <span style="color:#94a3b8">· read</span>':''))+'</div><div style="white-space:pre-wrap">'+esc(n.body||'')+'</div></div>'; }).join(''):'<div class="mut" style="padding:6px 0;text-align:left">No messages yet.</div>');
+              box.innerHTML='<div style="max-width:640px;text-align:left"><div style="font-weight:700;font-size:13px;margin-bottom:8px">Messages'+(unread?' <span class="ex-badge" title="unread messages from Dock &amp; Bay">'+unread+' unread</span>':' <span class="mut tiny">(all read)</span>')+'</div>'
+                +'<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:10px"><textarea class="fci pp-prod-note" rows="2" placeholder="Add a comment…" style="flex:1;text-align:left"></textarea><button class="save-btn pp-prod-post" data-ref="'+esc(ref)+'">Post</button></div><div>'+list+'</div></div>';
               var it=((_ppData&&_ppData.products)||[]).filter(function(x){return x.ref===ref;})[0];
-              if(it&&it.unread_dnb>0){ postJSON(EP.productNotesRead,{ref:ref},function(){ it.unread_dnb=0; setProdBadge(); }); }
+              if(unread>0){ postJSON(EP.productNotesRead,{ref:ref},function(){ if(it)it.unread_dnb=0; setProdBadge();
+                var tb=box.parentNode&&box.parentNode.querySelector('.pd2-tab[data-t="timeline"] .ex-badge'); if(tb&&tb.parentNode)tb.parentNode.removeChild(tb); }); }
               var pb=box.querySelector('.pp-prod-post'); if(pb)pb.onclick=function(){ var v=box.querySelector('.pp-prod-note').value.trim(); if(!v)return; postJSON(EP.productNote,{ref:ref,body:v},function(j){ if(j&&j.error){alert(j.error);return;} ppProdTimeline(box,ref); }); };
             }).catch(function(e){ box.innerHTML='<div style="color:#dc2626;text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
           function setProdBadge(){ var t=document.getElementById('pp-prod-tab'); if(t)t.style.display=_ppData&&_ppData.productEnabled?'':'none';
