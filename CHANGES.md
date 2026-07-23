@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.044 - Payments Due: include COMPLETE POs; hide pre-2026 payments
+
+- Payments Due (and its overdue badge) no longer skip POs marked **COMPLETE** — an unpaid milestone
+  (balance/completion) still surfaces so an owed payment can't hide behind a COMPLETE flag.
+  (Fixes: PO-55UKXR3-AIR's £2,192.25 balance due 27 Jul was invisible because the PO was COMPLETE.)
+- Added a cutoff: payments with a **due date before 2026-01-01 are excluded** (old/legacy payments).
+  Rows with no due date are still kept. Shared as `PDUE_MIN_DUE`.
+
 ## v26.043 - Portal add-sample form: tidy field widths
 
 - PRODUCT ▸ Sample ▸ Add sample: "Sample date" is now sized to the date + picker (not full width).

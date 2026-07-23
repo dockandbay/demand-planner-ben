@@ -3642,13 +3642,14 @@
   function navBadge(n,noun){ n=Number(n)||0; return n>0?' <span class="ex-badge" title="'+n+' '+(noun?esc(noun)+(n>1?'s':''):('item'+(n>1?'s':'')+' needing action'))+'">'+n+'</span>':''; }
   function updateNavBadges(){ document.querySelectorAll('#supply-content #prod-subtabs .rtab[data-posub]').forEach(function(sp){ var k=sp.dataset.posub; if(_NAVLBL[k]!==undefined) sp.innerHTML=_NAVLBL[k]+navBadge(_navCounts[k],_NAVNOUN[k]); }); }
   function poSubNav(){ return '<div id="prod-subtabs">'+PO_SUBS.map(function(t){ var bd=(_NAVLBL[t[0]]!==undefined)?navBadge(_navCounts[t[0]],_NAVNOUN[t[0]]):''; return '<span class="rtab'+(poSub===t[0]?' active':'')+'" data-posub="'+t[0]+'">'+t[1]+bd+'</span>'; }).join('')+'</div>'; }
-  // count of OVERDUE payments — mirrors buildPaymentsDue's r.overdue (unpaid, has a due date, due < today).
+  // count of OVERDUE payments — mirrors buildPaymentsDue's r.overdue (unpaid, has a due date, 2026-01-01 ≤ due < today).
+  var PDUE_MIN_DUE='2026-01-01';   // Payments Due cutoff: hide payments whose due date is before this (old/legacy)
   function paymentsDueOverdueCount(pos, deps){ var today=new Date().toISOString().slice(0,10), n=0;
-    (pos||[]).forEach(function(p){ if(p.progress==='complete'||!p.is_final)return;
-      if(Number(p.completion_calc)>0.009 && p.completion_due && !p.completion_date && p.completion_due<today)n++;
-      if(Number(p.balance_owing)>0.009 && p.balance_due && !p.balance_1_date && p.balance_due<today)n++; });
+    (pos||[]).forEach(function(p){ if(!p.is_final)return;
+      if(Number(p.completion_calc)>0.009 && p.completion_due && !p.completion_date && p.completion_due>=PDUE_MIN_DUE && p.completion_due<today)n++;
+      if(Number(p.balance_owing)>0.009 && p.balance_due && !p.balance_1_date && p.balance_due>=PDUE_MIN_DUE && p.balance_due<today)n++; });
     (deps||[]).forEach(function(d){ if(d.status==='closed')return; if(!(Number(d.amount)>0.009)&&!d.date_paid&&!d.date_due)return;
-      if(!d.date_paid && d.date_due && d.date_due<today)n++; });
+      if(!d.date_paid && d.date_due && d.date_due>=PDUE_MIN_DUE && d.date_due<today)n++; });
     return n; }
   // Populate the Shipments + Manufacturing counters in the background so their badges show from any sub-tab
   // (PLAN's count fills when the PO grid renders — it's the default tab). Runs once each; then cached.
@@ -5752,12 +5753,14 @@
     var today=new Date().toISOString().slice(0,10);
     var rows=[];
     // PO payments only surface once the FINAL INVOICE AMOUNT is confirmed (is_final) AND the milestone has a due date.
-    (pos||[]).forEach(function(p){ if(p.progress==='complete')return; if(!p.is_final)return; var ep='/api/supply/po/'+encodeURIComponent(p.po);
+    // Completed POs ARE included — an unpaid balance shouldn't hide behind a COMPLETE flag. Old payments are cut below.
+    (pos||[]).forEach(function(p){ if(!p.is_final)return; var ep='/api/supply/po/'+encodeURIComponent(p.po);
       if(Number(p.completion_calc)>0.009 && p.completion_due) rows.push({sup:p.supplier_name||'',type:'Completion',ref:p.po,due_amt:Number(p.completion_calc),due:p.completion_due,ep:ep,amt_field:'pay_completion_assigned',amt_val:p.completion_assigned,dt_field:'pay_completion_date',dt_val:p.completion_date,po:true});
       if(Number(p.balance_owing)>0.009 && p.balance_due) rows.push({sup:p.supplier_name||'',type:'Balance',ref:p.po,due_amt:Number(p.balance_owing),due:p.balance_due,ep:ep,amt_field:'pay_balance_1_amount',amt_val:p.balance_1_amount,dt_field:'pay_balance_1_date',dt_val:p.balance_1_date,po:true}); });
     (deps||[]).forEach(function(d){ if(d.status==='closed')return;
       if(!(Number(d.amount)>0.009) && !d.date_paid && !d.date_due) return;   // skip empty stubs
       rows.push({sup:d.supplier_name||'',type:d.is_deposit?'Deposit':'Other',ref:d.reference||d.description||('#'+d.id),due_amt:Number(d.amount)||0,due:d.date_due||'',ep:'/api/supply/deposit/'+encodeURIComponent(d.id),amt_field:'amount',amt_val:d.amount,dt_field:'date_paid',dt_val:d.date_paid,po:false}); });
+    rows=rows.filter(function(r){ return !(r.due && r.due<PDUE_MIN_DUE); });   // exclude old payments (due date before 2026-01-01); no-due-date rows are kept
     rows.forEach(function(r){ r.paid=!!r.dt_val; r.overdue=!r.paid && !!r.due && r.due<today; });
     _navCounts.paydue=rows.filter(function(r){return r.overdue;}).length; updateNavBadges();   // keep the sub-menu overdue counter fresh
     var sups=Array.from(new Set(rows.map(function(r){return r.sup;}))).filter(Boolean).sort();
