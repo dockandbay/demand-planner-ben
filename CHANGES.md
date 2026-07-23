@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.060 - Samples detail: exception on Details tab, fast tooltip, Contents merged in
+
+- The sample **exception badge** now surfaces inside the detail: the **Details tab shows a badge** when the
+  date is overdue, plus an inline "⚠ Overdue" flag under the completion/expected dates.
+- Exception-badge tooltip is now the **fast 120ms** popover (was the ~1s native title).
+- **Contents merged into the Details tab** (SKUs shown alongside recipient/fulfilment) — the separate
+  Contents tab is removed.
+- (Status-model simplification — PLANNED/SHIPPED/CANCELLED — pending Ben's confirmation, see chat.)
+
 ## v26.059 - Samples: exception notifications + snooze (mirrors the PO action model)
 
 - SUPPLY ▸ Samples rows now show a **red exception badge** with a count of active exceptions — currently

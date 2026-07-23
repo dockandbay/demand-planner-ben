@@ -6695,7 +6695,7 @@
     var FILT=[['open','Open'],['unaccepted','Not Accepted'],['closed','Closed'],['all','All']];
     function rowHTML(r,i){
       var _sa=sampActions(r);   // active (non-snoozed) exceptions → red count badge + snooze popover
-      var actFlag=_sa.length?' <button class="samp-act-badge ex-badge" style="cursor:pointer;border:none" data-ref="'+esc(r.ref||'')+'" data-allacts="'+esc(sampActionsAll(r).join(','))+'" title="'+esc(_sa.length+' exception'+(_sa.length>1?'s':'')+' — '+_sa.map(function(k){return (SAMP_ACT_LABEL[k]||k).split(' — ')[0];}).join('; ')+' (click to snooze)')+'">'+_sa.length+'</button>':'';
+      var actFlag=_sa.length?' <button class="samp-act-badge ex-badge" style="cursor:pointer;border:none" data-ref="'+esc(r.ref||'')+'" data-allacts="'+esc(sampActionsAll(r).join(','))+'" data-note="'+esc(_sa.length+' exception'+(_sa.length>1?'s':'')+' — '+_sa.map(function(k){return (SAMP_ACT_LABEL[k]||k).split(' — ')[0];}).join('; ')+' (click to snooze)')+'">'+_sa.length+'</button>':'';
       var _tu=(typeof carrierTrackUrl==='function')?carrierTrackUrl(r.carrier,r.tracking_code):'';
       var tr=r.tracking_code?((_tu?'<a href="'+_tu+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;font-weight:600">'+esc(r.tracking_code)+' ↗</a>':esc(r.tracking_code))+(r.carrier?' <span class="mut tiny">'+esc(r.carrier)+'</span>':'')):'<span class="mut">—</span>';
       var ch=r.pending_charges>0?'<span class="ex-badge" title="'+r.pending_charges+' charge(s) to review">'+r.pending_charges+'</span>':'';
@@ -6798,7 +6798,9 @@
       c.querySelectorAll('.bar .pill').forEach(function(p){p.onclick=function(){st.f=p.dataset.f;view();};});
       var sq=document.getElementById('samp-q'); sq.oninput=debounce(function(){st.q=sq.value.toLowerCase();view();},200);
       var ss=document.getElementById('samp-showsnz'); if(ss)ss.onchange=function(){ _poShowSnoozed=this.checked; view(); };
-      c.querySelectorAll('.samp-act-badge').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); sampActPopover(b); }; });
+      c.querySelectorAll('.samp-act-badge').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); sampActPopover(b); };
+        b.addEventListener('mouseenter',function(){ b._t=setTimeout(function(){ noteTip(b); },120); });   // fast 120ms tooltip (not the ~1s native title)
+        b.addEventListener('mouseleave',function(){ clearTimeout(b._t); hideNoteTip(); }); });
       document.getElementById('samp-new').onclick=openSampleForm;
       c.querySelectorAll('.samp-exp').forEach(function(b){ b.onclick=function(){ var i=b.dataset.i, ex=document.getElementById('sampexp-'+i), open=ex.style.display!=='none';
         ex.style.display=open?'none':''; b.classList.toggle('open',!open);
@@ -6871,6 +6873,8 @@
         // tabbed detail — mirrors the PO detail (.po-subnav / .rtab + panels), with per-tab counts
         function bdge(n){ return n>0?' <span class="ex-badge">'+n+'</span>':''; }
         var pend=(d.charges||[]).filter(function(c){return c.status==='pending';}).length, _unread=(d.notes||[]).filter(function(n){return n.author_kind==='supplier'&&!n.read;}).length;
+        var dateExc=(s.overdue && s.status!=='complete' && s.status!=='cancelled')?1:0;   // date exception → flag on the Details tab + inline
+        if(curTab==='contents')curTab='details';   // Contents merged into Details
         function tb(k,label){ return '<button class="rtab samp-tab'+(curTab===k?' active':'')+'" data-st="'+k+'">'+label+'</button>'; }
         function panel(k,html){ return '<div class="samp-panel" data-st="'+k+'"'+(curTab===k?'':' style="display:none"')+'>'+html+'</div>'; }
         var detailsPanel='<div style="display:flex;gap:24px;flex-wrap:wrap">'
@@ -6882,16 +6886,17 @@
             +'<div class="cli-row"><div class="cli-lbl">Status</div><div class="cli-val">'+statusCtl+'</div></div>'
             +'<div class="tiny mut" style="margin-top:4px">Supplier accepted: '+(s.accepted_at?fd(s.accepted_at):'—')+'</div>'
             +'<div class="tiny mut">Supplier expected: '+(s.supplier_expected?fd(s.supplier_expected):'—')+'</div>'
+            +(dateExc?'<div style="color:#dc2626;font-weight:700;font-size:11px;margin-top:4px">⚠ Overdue — completion / supplier-expected date has passed</div>':'')
             +'<div style="margin-top:10px">'+actBtn+' <button class="save-btn light samp-del" data-id="'+id+'" style="color:#dc2626">Delete</button></div></div>'
+          +'<div style="min-width:220px"><div class="sect-h">SKUs</div>'+skus+'</div>'
           +'</div>';
-        var contentsPanel='<div class="sect-h">SKUs</div>'+skus;
         var attachPanel='<div class="tiny" style="margin-bottom:6px">'+((d.attachments||[]).map(function(a){return '<span style="display:inline-block;margin:0 12px 4px 0"><a href="/api/supply/portal-attachment/'+a.id+'" target="_blank" rel="noopener">'+esc(a.filename||'file')+'</a> <a class="samp-att-rm" data-aid="'+a.id+'" title="remove" style="color:#dc2626;cursor:pointer">×</a></span>';}).join('')||'<span class="mut">no attachments yet</span>')+'</div>'
           +'<div><input type="file" class="samp-att-file" style="font-size:11px"> <button class="save-btn samp-att-up">Upload attachment</button></div>';
         var chargesPanel='<div class="tw"><table><thead><tr><th class="l">Status</th><th class="l">Freight</th><th class="l">Product</th><th class="l">Total</th><th class="l">Description</th><th class="l"></th></tr></thead><tbody>'+charges+'</tbody></table></div>';
         box.innerHTML='<div class="po-subnav samp-subnav" style="margin-bottom:12px">'
-            // badges only flag ACTIONS/exceptions (pending charges, unread notes) — not plain counts like #SKUs / #attachments
-            +tb('details','Details')+tb('contents','Contents')+tb('charges','Charges'+bdge(pend))+tb('attachments','Attachments')+tb('timeline','Timeline'+bdge(_unread))+'</div>'
-          +panel('details',detailsPanel)+panel('contents',contentsPanel)+panel('charges',chargesPanel)+panel('attachments',attachPanel)
+            // badges only flag ACTIONS/exceptions (date overdue, pending charges, unread notes) — not plain counts
+            +tb('details','Details'+bdge(dateExc))+tb('charges','Charges'+bdge(pend))+tb('attachments','Attachments')+tb('timeline','Timeline'+bdge(_unread))+'</div>'
+          +panel('details',detailsPanel)+panel('charges',chargesPanel)+panel('attachments',attachPanel)
           +panel('timeline','<div class="sp-timeline" data-ref="'+esc(s.ref)+'"></div>');
         box.querySelectorAll('.samp-tab').forEach(function(t){ t.onclick=function(){ curTab=t.dataset.st; box._sampTab=curTab;
           box.querySelectorAll('.samp-tab').forEach(function(x){x.classList.toggle('active',x===t);});
