@@ -3182,6 +3182,11 @@ app.post('/api/product/item', async (req, res) => {
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, [ref, season, category, code, seq, (b.colour_name || '').trim() || null, (b.description || '').trim() || null, supplier || null, supCode, (b.created_by || '').trim() || null]);
     const id = ins.rows[0].id, sizes = Array.isArray(b.sizes) ? b.sizes : [];
     for (let k = 0; k < sizes.length; k++) { const sl = String(sizes[k] || '').trim(); if (sl) await client.query(`INSERT INTO planner.product_dev_sizes (item_id, size_label, sort) VALUES ($1,$2,$3)`, [id, sl, k]); }
+    // Auto timeline note (author_kind='internal' = from D&B → shows as an UNREAD action for the supplier in the
+    // portal Product tab). Keyed by the product ref, same as the rest of the product timeline.
+    const who = shortUser((b.created_by || '').trim()) || 'A user';
+    await client.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'internal',$3)`,
+      [ref, (b.created_by || '').trim() || null, who + ' created a new product development item']);
     await client.query('COMMIT');
     res.json({ ok: true, ref, id });
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
@@ -7450,10 +7455,36 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
       const um = {}; un.forEach(r => { um[r.shipment_ref] = r.unread; });
       shipmentPlan.forEach(s => { if (s.shipment_ref) s.unread_dnb = um[s.shipment_ref] || 0; });
     }
+    // PRODUCT (supplier-assigned) — only surfaced when this supplier is flagged for product development.
+    const productEnabled = names.length ? (await q(`SELECT 1 FROM planner.suppliers WHERE name = ANY($1) AND include_product_dev LIMIT 1`, [names])).length > 0 : false;
+    const products = (productEnabled && names.length) ? await q(`
+      SELECT i.ref, coalesce(i.season,'') season, coalesce(i.category,'') category, coalesce(i.colour_name,'') colour_name,
+        coalesce(i.supplier,'') supplier, coalesce(i.description,'') description, i.status, (i.swatch IS NOT NULL) has_swatch,
+        to_char(i.updated_at,'YYYY-MM-DD HH24:MI') updated_at,
+        (SELECT count(*)::int FROM planner.product_dev_sizes s WHERE s.item_id=i.id) sizes,
+        (SELECT count(*)::int FROM planner.supplier_notes n WHERE n.po=i.ref AND n.author_kind='internal' AND n.read_at IS NULL) unread_dnb
+      FROM planner.product_dev_items i WHERE i.supplier = ANY($1) ORDER BY i.created_at DESC`, [names]) : [];
     res.json({ pos, lb, sdep: deps, sid: ids[0] || null, supplierName: names.join(', '),
-      notesByPo, subsByPo, costsByPo, supSkus, xdByPo, addByPo, approvedByPo, samples, payments, shipmentPlan });
+      notesByPo, subsByPo, costsByPo, supSkus, xdByPo, addByPo, approvedByPo, samples, payments, shipmentPlan, productEnabled, products });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// ── PORTAL PRODUCT (supplier-scoped): timeline view + comment on their assigned product-dev items ──
+async function portalOwnsProduct(req, ref) { if (!ref || !req.portal.suppliers.length) return false;
+  return (await pool.query(`SELECT 1 FROM planner.product_dev_items WHERE ref=$1 AND supplier = ANY($2)`, [ref, req.portal.suppliers])).rowCount > 0; }
+app.get('/api/portal/product-notes/:ref', portalAuth, async (req, res) => { const ref = decodeURIComponent(req.params.ref || '');
+  if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
+  try { res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
+    to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read FROM planner.supplier_notes WHERE po=$1 ORDER BY created_at`, [ref])).rows); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/portal/product-note', portalAuth, async (req, res) => { const b = req.body || {}, ref = (b.ref || '').trim();
+  if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
+  if (!String(b.body || '').trim()) return res.status(400).json({ error: 'body required' });
+  try { await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'supplier',$3)`, [ref, req.portal.email || null, String(b.body).trim()]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/portal/product-notes-read', portalAuth, async (req, res) => { const ref = ((req.body || {}).ref || '').trim();
+  if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
+  try { await pool.query(`UPDATE planner.supplier_notes SET read_at=now() WHERE po=$1 AND author_kind='internal' AND read_at IS NULL`, [ref]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
 
 // ── PORTAL SAMPLES (supplier-scoped) ──────────────────────────────────────────
 async function portalOwnsSample(req, id){ if(!id)return null;

@@ -541,7 +541,7 @@
     var PORTAL_SAMP_F='open', PORTAL_SAMP_Q='';   // Samples grid filter + search (default: open)
     var _invFiles={};     // base64 of the last parsed invoice file, per PO (for the Apply step)
     var rootEl=opts.root; if(!rootEl.closest('#supply-root')){rootEl.id='supply-root';} rootEl.style.display='block';
-    rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders <span id="pp-pos-badge"></span></span><span class="rtab" data-pt="shipmentplan">Shipment Plan <span id="pp-ship-badge"></span></span><span class="rtab" data-pt="barcodes">Barcodes</span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="productions">Productions</span><span class="rtab" data-pt="samples">Samples <span id="pp-samp-badge"></span></span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
+    rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders <span id="pp-pos-badge"></span></span><span class="rtab" data-pt="shipmentplan">Shipment Plan <span id="pp-ship-badge"></span></span><span class="rtab" data-pt="barcodes">Barcodes</span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="productions">Productions</span><span class="rtab" data-pt="samples">Samples <span id="pp-samp-badge"></span></span><span class="rtab" data-pt="product" id="pp-prod-tab" style="display:none">Product <span id="pp-prod-badge"></span></span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
     var tabsEl=document.getElementById('pp-tabs'), body=document.getElementById('pp-body');
     // download a generated invoice as a real file (fetch -> blob) rather than opening a tab — works on the
     // portal host where /api/invoice/* isn't routed (uses the /api/portal/* endpoints via EP).
@@ -1328,9 +1328,40 @@
             body.querySelectorAll('.ps-manage').forEach(function(b){ b.onclick=function(){ var i=b.dataset.i, ex=document.getElementById('ps-exp-'+i), open=ex.style.display!=='none';
               ex.style.display=open?'none':''; b.classList.toggle('open',!open);
               if(!open && !ex.dataset.loaded){ ex.dataset.loaded='1'; var det=ex.querySelector('.ps-det'); var s=(_ppData.samples||[]).filter(function(x){return String(x.id)===String(b.dataset.id);})[0]; if(s){ det.innerHTML=ppSampleCard(s); wireSampleCard(det, s.id); } } }; }); }
+          function prodStatusLabel(s){ return {in_development:'In development',approved:'Approved',dropped:'Dropped'}[s]||s; }
+          function ppProducts(items){ items=items||[];
+            if(!items.length) return '<div class="count" style="padding:16px 2px;text-align:left">No product development items assigned to you yet.</div>';
+            var th='text-align:left;padding:5px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#64748b;border-bottom:1px solid #e5e7eb;white-space:nowrap';
+            return '<div style="font-size:13px;color:#334155;margin-bottom:10px;text-align:left">Product development items Dock &amp; Bay is working on with you — open one to see its timeline and add comments.</div>'
+              +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;text-align:left"><thead><tr>'
+              +['Ref','Colour','Category','Season','Sizes','Status',''].map(function(h){return '<th style="'+th+'">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+              +items.map(function(p,i){ var badge=p.unread_dnb?' <span style="background:#f59e0b;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+p.unread_dnb+'</span>':'';
+                var sw=p.has_swatch?'<img src="'+(EP.productSwatchBase||'/api/product/swatch/')+encodeURIComponent(p.ref)+'?t='+encodeURIComponent(p.updated_at||'')+'" style="width:28px;height:28px;object-fit:cover;border-radius:5px;border:1px solid #e5e7eb;vertical-align:middle;margin-right:6px">':'';
+                var td='text-align:left;padding:5px 8px;border-bottom:1px solid #f1f1f1';
+                return '<tr><td style="'+td+'">'+sw+'<b style="font-family:ui-monospace,Menlo,monospace">'+esc(p.ref)+'</b>'+badge+'</td>'
+                  +'<td style="'+td+'">'+esc(p.colour_name||'—')+'</td><td style="'+td+'">'+esc(p.category||'')+'</td><td style="'+td+'">'+esc(p.season||'')+'</td>'
+                  +'<td style="'+td+'">'+p.sizes+'</td><td style="'+td+'">'+esc(prodStatusLabel(p.status))+'</td>'
+                  +'<td style="'+td+'"><button class="save-btn pp-prod-open" data-ref="'+esc(p.ref)+'" data-i="'+i+'">View</button></td></tr>'
+                  +'<tr class="pp-prod-exp" id="pp-prod-exp-'+i+'" style="display:none"><td colspan="7" style="text-align:left"><div class="pp-prod-det" data-ref="'+esc(p.ref)+'"></div></td></tr>'; }).join('')
+              +'</tbody></table></div>'; }
+          function wireProducts(){ var body=document.getElementById('pp-body');
+            body.querySelectorAll('.pp-prod-open').forEach(function(b){ b.onclick=function(){ var i=b.dataset.i, ex=document.getElementById('pp-prod-exp-'+i), open=ex.style.display!=='none';
+              ex.style.display=open?'none':''; if(!open && !ex.dataset.loaded){ ex.dataset.loaded='1'; ppProdTimeline(ex.querySelector('.pp-prod-det'), b.dataset.ref); } }; }); }
+          function ppProdTimeline(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
+            fetch(EP.productNotesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){ shortNotes(notes); notes=Array.isArray(notes)?notes:[];
+              var list=(notes.length?tlDesc(notes).map(function(n){ var sup=(n.author_kind!=='internal'); return '<div style="padding:7px 0;border-bottom:1px solid #f1f1f1;text-align:left"><div class="mut tiny">'+esc(n.created_at||'')+' · '+(sup?'you':'Dock &amp; Bay')+(sup||n.read?'':' <span class="ex-badge">new</span>')+'</div><div style="white-space:pre-wrap">'+esc(n.body||'')+'</div></div>'; }).join(''):'<div class="mut" style="padding:6px 0;text-align:left">No messages yet.</div>');
+              box.innerHTML='<div style="max-width:640px;text-align:left"><div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:10px"><textarea class="fci pp-prod-note" rows="2" placeholder="Add a comment…" style="flex:1;text-align:left"></textarea><button class="save-btn pp-prod-post" data-ref="'+esc(ref)+'">Post</button></div><div>'+list+'</div></div>';
+              var it=((_ppData&&_ppData.products)||[]).filter(function(x){return x.ref===ref;})[0];
+              if(it&&it.unread_dnb>0){ postJSON(EP.productNotesRead,{ref:ref},function(){ it.unread_dnb=0; setProdBadge(); }); }
+              var pb=box.querySelector('.pp-prod-post'); if(pb)pb.onclick=function(){ var v=box.querySelector('.pp-prod-note').value.trim(); if(!v)return; postJSON(EP.productNote,{ref:ref,body:v},function(j){ if(j&&j.error){alert(j.error);return;} ppProdTimeline(box,ref); }); };
+            }).catch(function(e){ box.innerHTML='<div style="color:#dc2626;text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
+          function setProdBadge(){ var t=document.getElementById('pp-prod-tab'); if(t)t.style.display=_ppData&&_ppData.productEnabled?'':'none';
+            var n=((_ppData&&_ppData.products)||[]).reduce(function(a,p){return a+(Number(p.unread_dnb)||0);},0);
+            var bg=document.getElementById('pp-prod-badge'); if(bg)bg.innerHTML=n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
           function renderPP(){ if(!_ppData)return; var body=document.getElementById('pp-body');
             tabsEl.querySelectorAll('.rtab').forEach(function(t){t.classList.toggle('active',t.dataset.pt===PORTAL_TAB);});
-            setSampBadge(); setPosBadge(); setShipBadge();
+            setSampBadge(); setPosBadge(); setShipBadge(); setProdBadge();
+            if(PORTAL_TAB==='product'){ body.innerHTML=ppProducts(_ppData.products||[]); wireProducts(); return; }
             if(PORTAL_TAB==='samples'){ body.innerHTML=ppSamples(_ppData.samples||[]); wireSamples(); return; }
             if(PORTAL_TAB==='shipmentplan'){
               var today=new Date().toISOString().slice(0,10);

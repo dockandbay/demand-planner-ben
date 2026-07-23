@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.016 - Product Phase 2: supplier-portal Product tab + auto timeline note on create
+
+- Suppliers flagged "include for product development" get a **Product** tab in the portal showing the product-dev
+  items **assigned to them** (item.supplier = the supplier). Each opens a timeline they can read + comment on;
+  unread Dock&Bay notes show as an amber badge (tab + row) and mark read on open.
+- Creating a product (main app) now auto-posts an internal timeline note **"<user> created a new product
+  development item"** — which surfaces as an unread action for the assigned supplier in their portal Product tab.
+- Server: bootstrap adds productEnabled + products (supplier-scoped, with unread counts); /api/portal/product-notes,
+  /product-note, /product-notes-read (all supplier-scoped).
+
 ## v26.015 - Product: supplier (in ref) + grid filters/search
 
 - **Supplier** added to product master data — picked via the same supplier search-dropdown as the PO grid (on the
