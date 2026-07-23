@@ -1403,13 +1403,20 @@
             fetch('/api/product/item/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ var docs=(d&&d.docs)||[];
               box.innerHTML='<div style="max-width:600px;text-align:left">'+(docs.length?docs.map(function(x){ return '<div style="padding:7px 0;border-bottom:1px solid #f1f1f1"><a href="/api/product/doc/'+x.id+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline">'+esc(x.filename)+'</a> <span class="mut tiny">'+Math.max(1,Math.round((x.byte_size||0)/1024))+' KB · '+esc(x.uploaded_at||'')+'</span></div>'; }).join(''):'<div class="mut" style="padding:6px 0">No documents.</div>')+'</div>';
             }).catch(function(e){ box.innerHTML='<div style="color:#dc2626;text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
+          function dlSampleLabel(ref){ try{ var c=document.createElement('canvas'); c.width=800; c.height=400; var x=c.getContext('2d');
+            x.fillStyle='#fff'; x.fillRect(0,0,800,400); x.strokeStyle='#0f172a'; x.lineWidth=4; x.strokeRect(20,20,760,360);
+            x.fillStyle='#0f172a'; x.textAlign='center'; x.font='700 34px system-ui,Arial'; x.fillText('SAMPLE',400,120);
+            x.font='700 52px ui-monospace,Menlo,monospace'; x.fillText(String(ref),400,230);
+            x.font='400 20px system-ui,Arial'; x.fillStyle='#64748b'; x.fillText('Dock & Bay — product sample',400,320);
+            c.toBlob(function(b){ if(!b){alert('Could not create label');return;} var a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download='sample_'+String(ref).replace(/[^A-Za-z0-9_-]/g,'_')+'.png'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(a.href);},2000); },'image/png'); }catch(e){ alert('Could not create label'); } }
           function ppProdSamples(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
             fetch(EP.productSamplesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(list){ list=Array.isArray(list)?list:[];
               var today=new Date().toISOString().slice(0,10);
               var nextV=list.reduce(function(m,s){return Math.max(m,s.version||0);},0)+1, nextRef=ref+'_v'+nextV;   // shown read-only on the add form
-              var rows=list.map(function(s){ var ph=(s.photos||[]).map(function(p){return '<a href="'+(EP.attachImgBase||'/api/supply/portal-attachment/')+p.id+'" target="_blank" rel="noopener"><img src="'+(EP.attachImgBase||'/api/supply/portal-attachment/')+p.id+'" style="width:52px;height:52px;object-fit:cover;border-radius:5px;border:1px solid #e5e7eb;margin:2px"></a>';}).join('');
-                return '<div style="border:1px solid #eef2f7;border-radius:8px;padding:9px 11px;margin-bottom:8px;text-align:left"><div style="display:flex;align-items:center;gap:8px"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.ref)+'</b><span class="mut tiny">'+esc(s.sample_date||'')+'</span>'
-                  +'<span style="margin-left:auto;font-size:10px">'+(s.colour_verified?'<span style="color:#16a34a">✓ colour</span>':'<span class="mut">colour?</span>')+' &nbsp; '+(s.quality_verified?'<span style="color:#16a34a">✓ quality</span>':'<span class="mut">quality?</span>')+'</span></div>'
+              var rows=list.slice().reverse().map(function(s){ var ph=(s.photos||[]).map(function(p){return '<a href="'+(EP.attachImgBase||'/api/supply/portal-attachment/')+p.id+'" target="_blank" rel="noopener"><img src="'+(EP.attachImgBase||'/api/supply/portal-attachment/')+p.id+'" style="width:52px;height:52px;object-fit:cover;border-radius:5px;border:1px solid #e5e7eb;margin:2px"></a>';}).join('');
+                return '<div style="border:1px solid #eef2f7;border-radius:8px;padding:9px 11px;margin-bottom:8px;text-align:left"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.ref)+'</b><span class="mut tiny">'+esc(s.sample_date||'')+'</span>'
+                  +'<span style="font-size:10px">'+(s.colour_verified?'<span style="color:#16a34a">✓ colour</span>':'<span class="mut">colour?</span>')+' &nbsp; '+(s.quality_verified?'<span style="color:#16a34a">✓ quality</span>':'<span class="mut">quality?</span>')+'</span>'
+                  +'<button class="save-btn pp-samp-label" data-ref="'+esc(s.ref)+'" style="margin-left:auto">⤓ Download label</button></div>'
                   +(s.description?'<div style="margin:4px 0;white-space:pre-wrap">'+esc(s.description)+'</div>':'')
                   +(ph?'<div style="margin-top:4px">'+ph+'</div>':'')+'</div>'; }).join('')||'<div class="mut" style="padding:4px 0;text-align:left">No sample versions yet.</div>';
               box.innerHTML='<div style="text-align:left"><div style="font-weight:700;font-size:13px;margin-bottom:6px">Sample versions</div>'+rows
@@ -1423,6 +1430,7 @@
                 +'<textarea class="fci ps2-desc" rows="2" placeholder="description…" style="width:100%;text-align:left;box-sizing:border-box"></textarea>'
                 +'<div style="margin-top:7px"><label style="font-size:12px">Photos <input type="file" class="ps2-photos" accept="image/*" multiple style="font-size:12px"></label></div>'
                 +'<div style="margin-top:9px"><button class="save-btn ps2-save" data-ref="'+esc(ref)+'">Submit sample version</button> <span class="ps2-msg" style="font-size:12px;margin-left:6px"></span></div></div></div>';
+              box.querySelectorAll('.pp-samp-label').forEach(function(lb){ lb.onclick=function(){ dlSampleLabel(lb.dataset.ref); }; });
               var _addb=box.querySelector('.pp-add-sample'), _form=box.querySelector('.pp-sample-form'); if(_addb)_addb.onclick=function(){ _form.style.display=(_form.style.display!=='none')?'none':''; };   // no auto-focus on the date input (it auto-opens the mobile picker); date defaults to today, opens on tap
               var sv=box.querySelector('.ps2-save'); sv.onclick=function(){ var msg=box.querySelector('.ps2-msg');
                 var col=box.querySelector('.ps2-col').checked, qual=box.querySelector('.ps2-qual').checked;

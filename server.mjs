@@ -3137,6 +3137,11 @@ app.post('/api/supply/suggestion/:id/delete', async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════
 const _prodCatCode = (name, code) => { code = (code || '').trim(); if (code) return code.toUpperCase();
   return String(name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5) || 'PROD'; };
+app.get('/api/product/unread', async (_req, res) => {   // total unread supplier notes across all product-dev items → PRODUCT top-menu badge
+  try { const r = await pool.query(`SELECT count(*)::int n FROM planner.supplier_notes n
+    WHERE n.author_kind='supplier' AND n.read_at IS NULL AND EXISTS (SELECT 1 FROM planner.product_dev_items i WHERE i.ref=n.po)`);
+    res.json({ count: r.rows[0].n }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/api/product/items', async (_req, res) => {
   try {
     const r = await pool.query(`SELECT i.id, i.ref, coalesce(i.season,'') season, coalesce(i.category,'') category,
@@ -3161,7 +3166,8 @@ app.get('/api/product/item/:ref', async (req, res) => {
     if (!item) return res.status(404).json({ error: 'not found' });
     const sizes = (await pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort FROM planner.product_dev_sizes WHERE item_id=$1 ORDER BY sort, id`, [item.id])).rows;
     const docs = (await pool.query(`SELECT id, filename, mime, byte_size, coalesce(uploaded_by,'') uploaded_by, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments WHERE po=$1 AND category='product' ORDER BY uploaded_at DESC`, [ref])).rows;
-    res.json({ item, sizes, docs });
+    const unread_supplier = (await pool.query(`SELECT count(*)::int n FROM planner.supplier_notes WHERE po=$1 AND author_kind='supplier' AND read_at IS NULL`, [ref])).rows[0].n;
+    res.json({ item, sizes, docs, unread_supplier });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/product/swatch/:ref', async (req, res) => {

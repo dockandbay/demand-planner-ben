@@ -7503,11 +7503,13 @@
     var existing=document.getElementById('product-btn');
     if(existing){ existing.style.display=prodCan()?'':'none'; return; }
     if(!prodCan())return;
-    var btn=document.createElement('button'); btn.id='product-btn'; btn.className='view-toggle product-toggle'; btn.textContent='PRODUCT';
+    var btn=document.createElement('button'); btn.id='product-btn'; btn.className='view-toggle product-toggle'; btn.innerHTML='PRODUCT<span id="product-unread" style="display:none;margin-left:5px;background:#dc2626;color:#fff;font-size:9px;font-weight:700;border-radius:8px;min-width:15px;height:15px;line-height:15px;text-align:center;padding:0 3px;vertical-align:1px"></span>';
     var cfg=document.getElementById('config-btn'), spacer=row.querySelector('div[style*="flex:1"]');
     if(cfg)row.insertBefore(btn,cfg); else if(spacer)row.insertBefore(btn,spacer); else row.appendChild(btn);
     btn.onclick=function(){ showProduct(); selectProductSub(PRODUCT_SUB||'plan'); };
-    row.querySelectorAll('.view-toggle:not(.product-toggle)').forEach(function(b){ b.addEventListener('click',function(){ hideProduct(); }); }); }
+    row.querySelectorAll('.view-toggle:not(.product-toggle)').forEach(function(b){ b.addEventListener('click',function(){ hideProduct(); }); });
+    loadProductUnread(); if(!window.__prodUnreadPoll)window.__prodUnreadPoll=setInterval(loadProductUnread,60000); }
+  function loadProductUnread(){ if(!prodCan())return; fetch('/api/product/unread').then(function(r){return r.json();}).then(function(j){ var b=document.getElementById('product-unread'); if(!b)return; var n=(j&&j.count)||0; b.textContent=n>99?'99+':String(n); b.style.display=n>0?'inline-block':'none'; }).catch(function(){}); }
   function prodStatusChip(s){ var m={in_development:['In development','#b45309','#fffbeb'],approved:['Approved','#16a34a','#f0fdf4'],dropped:['Dropped','#b91c1c','#fef2f2']}; var x=m[s]||m.in_development; return '<span style="font-size:9px;font-weight:700;color:'+x[1]+';background:'+x[2]+';border-radius:4px;padding:1px 6px">'+x[0]+'</span>'; }
   // Inline cell picker for the product grid (same popup UX as the PO grid's supplier/branch picker) — edits are
   // bound straight to the master-data fields via /api/product/item/<ref>. kind = supplier | season | category.
@@ -7623,7 +7625,8 @@
     fetch('/api/product/item/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ if(!d||d.error||!d.item){ box.innerHTML='<div style="color:#dc2626">Not found</div>'; return; }
       _prodDetail=d; renderProdDetailShell(box,d); }).catch(function(e){ box.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
   function renderProdDetailShell(c,d){ var it=d.item; var inline=(c!==document.getElementById('product-content'));
-    var tabs=[['master','Master data'],['samples','Samples'],['timeline','Timeline'],['documents','Documents']];
+    var _u=Number(d.unread_supplier)||0;
+    var tabs=[['master','Master data'],['samples','Samples'],['timeline','Timeline'+(_u?' <span class="ex-badge">'+_u+'</span>':'')],['documents','Documents']];
     // inline (expanded under the grid row) shows just the sub-tabs — no header; the grid row above already shows ref/colour/etc.
     var header=inline?'':('<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px"><button class="save-btn light" id="pd-back">← Back</button>'
       +(it.has_swatch?'<img src="/api/product/swatch/'+encodeURIComponent(it.ref)+'?t='+encodeURIComponent(it.updated_at)+'" style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">':'')
@@ -7695,7 +7698,7 @@
       var list=notes.slice().reverse().map(function(n){ var sup=n.author_kind==='supplier'; var who=sup?'supplier':(n.author_email?shortUser(n.author_email):'Dock & Bay'); var isNew=(sup&&!n.read);
         return '<div style="padding:7px 0;border-bottom:1px solid #f1f1f1'+(isNew?';background:#fffbeb':'')+'"><div style="color:#94a3b8;font-size:11px">'+esc(n.created_at||'')+' · '+esc(who)+(isNew?' <span class="ex-badge">NEW</span>':'')+'</div><div style="white-space:pre-wrap">'+esc(n.body||'')+'</div></div>'; }).join('')||'<div style="color:#94a3b8;padding:6px 0">No timeline entries yet.</div>';
       body.innerHTML='<div style="max-width:640px"><div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:10px"><textarea class="fci" id="pt-in" rows="2" placeholder="Add a note…" style="flex:1"></textarea><button class="save-btn" id="pt-post" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Post</button><button class="save-btn light" id="pt-esc" title="escalate to the product-development team" style="color:#b45309">⚑ Escalate</button></div><div>'+list+'</div></div>';
-      if(unreadSup>0){ shipPost('/api/product/notes-read-supplier',{ref:ref},function(){}); }   // D&B has now seen them → clear the unread badge (next grid render)
+      if(unreadSup>0){ shipPost('/api/product/notes-read-supplier',{ref:ref},function(){ if(typeof loadProductUnread==='function')loadProductUnread(); }); }   // D&B has now seen them → clear the unread badges
       body.querySelector('#pt-post').onclick=function(){ var t=body.querySelector('#pt-in').value.trim(); if(!t)return; shipPost('/api/product/note',{ref:ref,body:t,author_email:(window.ME&&ME.email)||''},function(){ renderProdTimeline(body,ref); }); };
       body.querySelector('#pt-esc').onclick=function(){ var t=body.querySelector('#pt-in').value.trim(); if(!t){ alert('Type the escalation message in the note box first.'); return; } if(!confirm('Escalate '+ref+' to the product-development team?'))return; shipPost('/api/product/escalate',{ref:ref,message:t},function(j){ if(j&&j.error){alert(j.error);return;} alert(j&&j.sent?('Escalated — emailed '+j.emails.join(', ')):(j&&j.note)||'Escalated (no recipients configured).'); renderProdTimeline(body,ref); }); };
     }).catch(function(e){ body.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
