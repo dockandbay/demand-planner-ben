@@ -7567,7 +7567,7 @@
             var sw=r.has_swatch?'<img class="pg-swatch2" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at)+'">':'<span class="pg-swatch2 none">n/a</span>';
             return '<tr>'
               +'<td><span style="display:inline-flex;align-items:center;gap:7px">'+sw+'<button class="pg-plan pg-open" data-ref="'+esc(r.ref)+'" data-i="'+i+'"><span class="pln-full">Plan ▸</span><span class="pln-p">P</span></button></span></td>'
-              +'<td><div class="pg-ref">'+esc(r.ref)+'</div>'+(r.colour_name?'<div class="pg-colour">'+esc(r.colour_name)+'</div>':'')+'</td>'
+              +'<td><div class="pg-ref">'+esc(r.ref)+(r.unread_supplier?' <span class="ex-badge" title="'+r.unread_supplier+' new supplier message(s)">'+r.unread_supplier+'</span>':'')+'</div>'+(r.colour_name?'<div class="pg-colour">'+esc(r.colour_name)+'</div>':'')+'</td>'
               +'<td>'+prodPickBtn(r.ref,'category',r.category,'category')+'</td>'
               +'<td>'+prodPickBtn(r.ref,'season',r.season,'season')+'</td>'
               +'<td>'+prodPickBtn(r.ref,'supplier',r.supplier,'supplier')+'</td>'
@@ -7691,9 +7691,11 @@
     body.querySelectorAll('.pdoc-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this document?'))return; shipPost('/api/product/doc/'+a.dataset.id+'/delete',{},function(){ renderProductDetail(ref); }); }; }); }
   function renderProdTimeline(body,ref){ body.innerHTML='<div style="color:#94a3b8">Loading…</div>';
     fetch('/api/product/notes/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){ notes=Array.isArray(notes)?notes:[];
-      var list=notes.slice().reverse().map(function(n){ var who=n.author_kind==='supplier'?'supplier':(n.author_email?shortUser(n.author_email):'Dock & Bay');
-        return '<div style="padding:7px 0;border-bottom:1px solid #f1f1f1"><div style="color:#94a3b8;font-size:11px">'+esc(n.created_at||'')+' · '+esc(who)+'</div><div style="white-space:pre-wrap">'+esc(n.body||'')+'</div></div>'; }).join('')||'<div style="color:#94a3b8;padding:6px 0">No timeline entries yet.</div>';
+      var unreadSup=notes.filter(function(n){return n.author_kind==='supplier'&&!n.read;}).length;
+      var list=notes.slice().reverse().map(function(n){ var sup=n.author_kind==='supplier'; var who=sup?'supplier':(n.author_email?shortUser(n.author_email):'Dock & Bay'); var isNew=(sup&&!n.read);
+        return '<div style="padding:7px 0;border-bottom:1px solid #f1f1f1'+(isNew?';background:#fffbeb':'')+'"><div style="color:#94a3b8;font-size:11px">'+esc(n.created_at||'')+' · '+esc(who)+(isNew?' <span class="ex-badge">NEW</span>':'')+'</div><div style="white-space:pre-wrap">'+esc(n.body||'')+'</div></div>'; }).join('')||'<div style="color:#94a3b8;padding:6px 0">No timeline entries yet.</div>';
       body.innerHTML='<div style="max-width:640px"><div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:10px"><textarea class="fci" id="pt-in" rows="2" placeholder="Add a note…" style="flex:1"></textarea><button class="save-btn" id="pt-post" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Post</button><button class="save-btn light" id="pt-esc" title="escalate to the product-development team" style="color:#b45309">⚑ Escalate</button></div><div>'+list+'</div></div>';
+      if(unreadSup>0){ shipPost('/api/product/notes-read-supplier',{ref:ref},function(){}); }   // D&B has now seen them → clear the unread badge (next grid render)
       body.querySelector('#pt-post').onclick=function(){ var t=body.querySelector('#pt-in').value.trim(); if(!t)return; shipPost('/api/product/note',{ref:ref,body:t,author_email:(window.ME&&ME.email)||''},function(){ renderProdTimeline(body,ref); }); };
       body.querySelector('#pt-esc').onclick=function(){ var t=body.querySelector('#pt-in').value.trim(); if(!t){ alert('Type the escalation message in the note box first.'); return; } if(!confirm('Escalate '+ref+' to the product-development team?'))return; shipPost('/api/product/escalate',{ref:ref,message:t},function(j){ if(j&&j.error){alert(j.error);return;} alert(j&&j.sent?('Escalated — emailed '+j.emails.join(', ')):(j&&j.note)||'Escalated (no recipients configured).'); renderProdTimeline(body,ref); }); };
     }).catch(function(e){ body.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }

@@ -3143,7 +3143,8 @@ app.get('/api/product/items', async (_req, res) => {
       coalesce(i.colour_name,'') colour_name, coalesce(i.supplier,'') supplier, coalesce(i.description,'') description, i.status, (i.swatch IS NOT NULL) has_swatch,
       to_char(i.updated_at,'YYYY-MM-DD HH24:MI') updated_at,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id)::int sizes,
-      (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approval_status='approved')::int sizes_approved
+      (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approval_status='approved')::int sizes_approved,
+      (SELECT count(*) FROM planner.supplier_notes n WHERE n.po=i.ref AND n.author_kind='supplier' AND n.read_at IS NULL)::int unread_supplier
       FROM planner.product_dev_items i ORDER BY i.created_at DESC`);
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -3273,6 +3274,12 @@ app.post('/api/product/notes-read', async (req, res) => {   // mark this product
   try { await pool.query(`UPDATE planner.supplier_notes SET read_at=now() WHERE po=$1 AND author_kind='internal' AND read_at IS NULL`, [ref]); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+app.post('/api/product/notes-read-supplier', async (req, res) => {   // D&B side: mark SUPPLIER notes read (clears the main-app unread badge + ✉ bell)
+  const ref = ((req.body || {}).ref || '').trim();
+  if (!ref) return res.status(400).json({ error: 'ref required' });
+  try { await pool.query(`UPDATE planner.supplier_notes SET read_at=now() WHERE po=$1 AND author_kind='supplier' AND read_at IS NULL`, [ref]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.post('/api/product/escalate', async (req, res) => {
   const b = req.body || {}, ref = (b.ref || '').trim(), message = String(b.message || '').trim();
   if (!ref || !message) return res.status(400).json({ error: 'ref + message required' });
@@ -3310,7 +3317,7 @@ app.post('/api/product/category-code', async (req, res) => {
 });
 // ── Product SAMPLE VERSIONS (v1/v2…) — supplier-created in the portal; visible in the main app (migration 130) ──
 async function productSampleList(itemRef) {
-  const rows = (await pool.query(`SELECT id, version, ('v'||version) ref, to_char(sample_date,'YYYY-MM-DD') sample_date,
+  const rows = (await pool.query(`SELECT id, version, (item_ref||'_v'||version) ref, to_char(sample_date,'YYYY-MM-DD') sample_date,
     colour_verified, quality_verified, coalesce(description,'') description, coalesce(created_by,'') created_by,
     to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, sample_shipment_id
     FROM planner.product_dev_samples WHERE item_ref=$1 ORDER BY version`, [itemRef])).rows;
@@ -3331,7 +3338,7 @@ async function createProductSample(b, by) {
     VALUES ($1,$2,$3,true,true,$4,$5) RETURNING id`, [itemRef, v, (b.sample_date || '').trim() || null, (b.description || '').trim() || null, by || null]);
   // supplier note → shows on the product timeline + the admin ✉ bell
   await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'supplier',$3)`, [itemRef, by || null, 'Sample v' + v + ' submitted (colour + quality verified)']);
-  return { id: r.rows[0].id, version: v, ref: 'v' + v };
+  return { id: r.rows[0].id, version: v, ref: itemRef + '_v' + v };
 }
 async function insertProductSamplePhoto(sampleId, b, by) {
   const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');

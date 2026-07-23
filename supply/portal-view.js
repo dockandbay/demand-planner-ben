@@ -1406,6 +1406,7 @@
           function ppProdSamples(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
             fetch(EP.productSamplesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(list){ list=Array.isArray(list)?list:[];
               var today=new Date().toISOString().slice(0,10);
+              var nextV=list.reduce(function(m,s){return Math.max(m,s.version||0);},0)+1, nextRef=ref+'_v'+nextV;   // shown read-only on the add form
               var rows=list.map(function(s){ var ph=(s.photos||[]).map(function(p){return '<a href="'+(EP.attachImgBase||'/api/supply/portal-attachment/')+p.id+'" target="_blank" rel="noopener"><img src="'+(EP.attachImgBase||'/api/supply/portal-attachment/')+p.id+'" style="width:52px;height:52px;object-fit:cover;border-radius:5px;border:1px solid #e5e7eb;margin:2px"></a>';}).join('');
                 return '<div style="border:1px solid #eef2f7;border-radius:8px;padding:9px 11px;margin-bottom:8px;text-align:left"><div style="display:flex;align-items:center;gap:8px"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.ref)+'</b><span class="mut tiny">'+esc(s.sample_date||'')+'</span>'
                   +'<span style="margin-left:auto;font-size:10px">'+(s.colour_verified?'<span style="color:#16a34a">✓ colour</span>':'<span class="mut">colour?</span>')+' &nbsp; '+(s.quality_verified?'<span style="color:#16a34a">✓ quality</span>':'<span class="mut">quality?</span>')+'</span></div>'
@@ -1415,13 +1416,14 @@
                 +'<div style="margin-top:8px"><button class="save-btn pp-add-sample" style="background:#16a34a;color:#fff;border-color:#15803d">+ Add sample</button></div>'
                 +'<div class="pp-sample-form" style="display:none;border:1px dashed #cbd5e1;border-radius:8px;padding:11px 13px;margin-top:10px;background:#f8fafc">'
                 +'<div style="font-weight:700;font-size:12px;margin-bottom:8px">Add a new sample version</div>'
+                +'<div style="margin-bottom:8px"><label style="font-size:12px">Reference <input class="fci" value="'+esc(nextRef)+'" readonly style="width:220px;text-align:left;background:#eef2f7;margin-left:4px" title="auto-generated"></label></div>'
                 +'<div style="margin-bottom:7px"><label style="font-size:12px">Sample date <input type="date" class="fci ps2-date" value="'+today+'" style="text-align:left;margin-left:4px"></label></div>'
                 +'<label style="display:block;font-size:12px;margin-bottom:5px;cursor:pointer"><input type="checkbox" class="ps2-col" style="vertical-align:middle;margin-right:6px">I verify that I have colour checked every colour to match Pantone in design</label>'
                 +'<label style="display:block;font-size:12px;margin-bottom:7px;cursor:pointer"><input type="checkbox" class="ps2-qual" style="vertical-align:middle;margin-right:6px">I verify I have quality checked sample matches design and quality standards</label>'
                 +'<textarea class="fci ps2-desc" rows="2" placeholder="description…" style="width:100%;text-align:left;box-sizing:border-box"></textarea>'
                 +'<div style="margin-top:7px"><label style="font-size:12px">Photos <input type="file" class="ps2-photos" accept="image/*" multiple style="font-size:12px"></label></div>'
                 +'<div style="margin-top:9px"><button class="save-btn ps2-save" data-ref="'+esc(ref)+'">Submit sample version</button> <span class="ps2-msg" style="font-size:12px;margin-left:6px"></span></div></div></div>';
-              var _addb=box.querySelector('.pp-add-sample'), _form=box.querySelector('.pp-sample-form'); if(_addb)_addb.onclick=function(){ var open=_form.style.display!=='none'; _form.style.display=open?'none':''; if(!open){ var d=_form.querySelector('.ps2-date'); if(d)d.focus(); } };
+              var _addb=box.querySelector('.pp-add-sample'), _form=box.querySelector('.pp-sample-form'); if(_addb)_addb.onclick=function(){ _form.style.display=(_form.style.display!=='none')?'none':''; };   // no auto-focus on the date input (it auto-opens the mobile picker); date defaults to today, opens on tap
               var sv=box.querySelector('.ps2-save'); sv.onclick=function(){ var msg=box.querySelector('.ps2-msg');
                 var col=box.querySelector('.ps2-col').checked, qual=box.querySelector('.ps2-qual').checked;
                 if(!col||!qual){ msg.style.color='#dc2626'; msg.textContent='Please tick both verification boxes.'; return; }
