@@ -6699,7 +6699,7 @@
     }
     function view(){ var f=cur();
       var bar='<div class="bar">'+FILT.map(function(x){return '<span class="pill'+(x[0]===st.f?' active':'')+'" data-f="'+x[0]+'">'+x[1]+'</span>';}).join('')
-        +'<button class="save-btn" id="samp-new" style="margin-left:6px">+ New sample</button>'
+        +'<button class="save-btn" id="samp-new" style="margin-left:6px;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd">+ New sample</button>'
         +'<input class="flt" id="samp-q" placeholder="Filter ref / supplier / recipient…" value="'+esc(st.q)+'"><span class="count">'+f.length+' / '+rows.length+'</span></div>';
       var tbl='<div class="tw"><table class="samp-tbl samp-grid"><thead><tr><th></th><th>Ref</th><th>Status</th><th>Supplier</th><th>Recipient</th><th>Ship to</th><th>Required</th><th>Supplier exp.</th><th>Units</th><th>Tracking</th><th>Charges</th></tr></thead><tbody>'
         +(f.length?f.map(rowHTML).join(''):'<tr><td colspan="11" class="count">No '+st.f+' samples.</td></tr>')+'</tbody></table></div>';

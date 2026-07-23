@@ -3,6 +3,24 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.041 - Sample shipments: perf (silent edits), add-contents on create, dev qty, auto-accept
+
+- **Performance:** accepting a request and adding/editing/removing contents no longer refetch the whole
+  portal bootstrap (~3s each). They now do a small contents-only refresh (`GET /api/{supply,portal}/sample/:id/contents`)
+  and update the card in place — silent, no full page refresh.
+- **Add contents on creation:** the new sample-shipment form now has the rich **＋ Add contents** picker
+  (collect-mode) so SKUs + dev samples can be added *while creating*, not only after.
+- **New-form fields:** **Status** (defaults to *Not started*) and **Expected completion** (blank) are on the
+  create form.
+- **Auto-accept:** a supplier-created sample request no longer lands in "Awaiting supplier" — it's accepted
+  on create (portal).
+- **Product-development picker = same as bulk SKUs:** dev-sample rows now have a **quantity** field and match
+  the SKU row layout (checkbox + label + qty), shown as a horizontal list; the card's Contents shows dev qty.
+- **Blank quantity defaults to 1** (SKUs and dev samples, all paths).
+- Admin **SUPPLY ▸ Samples**: "+ New sample" button restyled to the light-blue "New PO" look.
+
+Migration: 133 now also adds `qty` to `sample_request_dev_samples` (idempotent ALTER included).
+
 ## v26.040 - Fold sample shipments into the existing Samples feature (remove parallel tab)
 
 Reverses v26.038's mistake. A sample shipment IS a `sample_requests` record (the existing Samples

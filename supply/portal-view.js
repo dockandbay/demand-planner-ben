@@ -1218,7 +1218,7 @@
           function ppSampleCard(s){
             function lbl(t){ return '<div style="font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:#94a3b8;font-weight:700;margin-bottom:3px">'+t+'</div>'; }
             var skuList=(s.lines||[]).map(function(l){return '<div class="samp-lrow" style="display:flex;gap:6px;align-items:center;padding:1px 0;text-align:left"><input class="fci samp-lqty" data-sku="'+esc(l.sku)+'" value="'+(l.qty==null?'':l.qty)+'" style="width:50px;text-align:left" inputmode="numeric" title="qty"><span style="flex:1;min-width:0">'+esc(l.sku)+'</span><a class="samp-lrm" data-sku="'+esc(l.sku)+'" title="remove" style="color:#dc2626;cursor:pointer">✕</a></div>';}).join('')||'<div class="mut tiny">no SKUs</div>';
-            var devList=(s.dev_samples||[]).map(function(d){return '<div style="display:flex;gap:6px;align-items:center;padding:1px 0;text-align:left"><b style="font-family:ui-monospace,Menlo,monospace;font-size:11px">'+esc(d.ref)+'</b>'+(d.colour_name?'<span class="mut tiny">'+esc(d.colour_name)+'</span>':'')+'<a class="samp-drm" data-id="'+d.id+'" title="remove" style="color:#dc2626;cursor:pointer;margin-left:auto">✕</a></div>';}).join('')||'<div class="mut tiny">none</div>';
+            var devList=(s.dev_samples||[]).map(function(d){return '<div style="display:flex;gap:6px;align-items:center;padding:1px 0;text-align:left"><input class="fci samp-dqty" data-id="'+d.id+'" value="'+(d.qty==null?'':d.qty)+'" style="width:50px;text-align:left" inputmode="numeric" title="qty"><b style="font-family:ui-monospace,Menlo,monospace;font-size:11px">'+esc(d.ref)+'</b>'+(d.colour_name?'<span class="mut tiny" style="flex:1;min-width:0">'+esc(d.colour_name)+'</span>':'<span style="flex:1"></span>')+'<a class="samp-drm" data-id="'+d.id+'" title="remove" style="color:#dc2626;cursor:pointer">✕</a></div>';}).join('')||'<div class="mut tiny">none</div>';
             var addr=[s.address_line1,s.address_line2,[s.city,s.region,s.postcode].filter(Boolean).join(' '),s.country].filter(Boolean);
             var charges=(s.charges||[]).map(function(c){ var t=(Number(c.freight_cost)||0)+(Number(c.product_cost)||0); return '<div class="tiny" style="margin:2px 0">'+chgChip(c.status)+' &nbsp;freight '+money(c.freight_cost)+' + product '+money(c.product_cost)+' = <b>'+money(t)+'</b>'+(c.description?' · '+esc(c.description):'')+'</div>'; }).join('')||'<div class="mut tiny">none yet</div>';
             return '<div class="samp-card" data-id="'+s.id+'" data-ref="'+esc(s.ref)+'" style="border:1px solid #e5e7eb;border-radius:10px;padding:14px;margin-bottom:12px;background:#fff;text-align:left">'
@@ -1309,14 +1309,24 @@
             var tbl=samples.length?(rows.length?'<div class="tw"><table style="width:max-content;min-width:100%"><thead><tr><th class="l"></th><th class="l">Ref</th><th class="l">Status</th><th class="l">Recipient</th><th class="l">Requested completion</th><th class="l">Units</th><th class="l">Tracking</th></tr></thead><tbody>'+rows.map(ppSampleRow).join('')+'</tbody></table></div>':'<div class="count">No samples match this filter.</div>'):'<div class="count">No sample requests yet.</div>';
             return bar+'<div id="samp-newform"></div>'+tbl; }
           function wireSampleCard(scope,id){
-            // Contents (bulk SKUs + product-development samples) — replace-all writes, then in-place refresh
-            function saveLines(lines){ var s=sampById(id); postJSON(EP.sampleContentsBase+id+'/lines',{lines:lines},function(j){ if(j&&j.error){alert(j.error);return;} if(s)s.lines=lines; refreshSampleCard(id); }); }
-            function saveDev(ids){ var s=sampById(id); postJSON(EP.sampleContentsBase+id+'/dev-samples',{dev_sample_ids:ids},function(j){ if(j&&j.error){alert(j.error);return;} if(s)s.dev_samples=(s.dev_samples||[]).filter(function(d){return ids.indexOf(String(d.id))>=0||ids.indexOf(d.id)>=0;}); refreshSampleCard(id); }); }
-            scope.querySelectorAll('.samp-lqty').forEach(function(inp){ inp.onchange=function(){ var s=sampById(id); var lines=(s.lines||[]).map(function(l){return {sku:l.sku,qty:l.sku===inp.dataset.sku?(Number(inp.value)||0):l.qty};}); saveLines(lines); }; });
+            // Contents (bulk SKUs + product-development samples) — replace-all writes, then a light contents-only
+            // refresh (no full bootstrap reload) so the card updates silently.
+            function loadContents(cb){ getJSON(EP.sampleContentsBase+id+'/contents').then(function(c){ var s=sampById(id); if(s&&c&&!c.error){ s.lines=c.lines||[]; s.dev_samples=c.dev_samples||[]; } refreshSampleCard(id); cb&&cb(); }); }
+            function saveLines(lines,cb){ postJSON(EP.sampleContentsBase+id+'/lines',{lines:lines},function(j){ if(j&&j.error){alert(j.error);return;} loadContents(cb); }); }
+            function saveDev(devs,cb){ postJSON(EP.sampleContentsBase+id+'/dev-samples',{dev_samples:devs},function(j){ if(j&&j.error){alert(j.error);return;} loadContents(cb); }); }
+            scope.querySelectorAll('.samp-lqty').forEach(function(inp){ inp.onchange=function(){ var s=sampById(id); var lines=(s.lines||[]).map(function(l){return {sku:l.sku,qty:l.sku===inp.dataset.sku?(Number(inp.value)||1):l.qty};}); saveLines(lines); }; });
             scope.querySelectorAll('.samp-lrm').forEach(function(a){ a.onclick=function(){ var s=sampById(id); var lines=(s.lines||[]).filter(function(l){return l.sku!==a.dataset.sku;}).map(function(l){return {sku:l.sku,qty:l.qty};}); saveLines(lines); }; });
-            scope.querySelectorAll('.samp-drm').forEach(function(a){ a.onclick=function(){ var s=sampById(id); var ids=(s.dev_samples||[]).map(function(d){return String(d.id);}).filter(function(x){return x!==String(a.dataset.id);}); saveDev(ids); }; });
-            var addc=scope.querySelector('.samp-add-contents'); if(addc)addc.onclick=function(){ var pk=scope.querySelector('.samp-picker'); if(!pk)return; if(pk.style.display==='none'||!pk.innerHTML){ pk.style.display=''; sampContentsPicker(pk, sampById(id), function(){ reload(); }); } else { pk.style.display='none'; pk.innerHTML=''; } };
-            var ac=scope.querySelector('.samp-accept'); if(ac)ac.onclick=function(){ ac.disabled=true; postJSON(EP.sampleAccept,{id:id},function(){ reload(); }); };
+            scope.querySelectorAll('.samp-dqty').forEach(function(inp){ inp.onchange=function(){ var s=sampById(id); var devs=(s.dev_samples||[]).map(function(d){return {id:d.id,qty:String(d.id)===inp.dataset.id?(Number(inp.value)||1):d.qty};}); saveDev(devs); }; });
+            scope.querySelectorAll('.samp-drm').forEach(function(a){ a.onclick=function(){ var s=sampById(id); var devs=(s.dev_samples||[]).filter(function(d){return String(d.id)!==String(a.dataset.id);}).map(function(d){return {id:d.id,qty:d.qty};}); saveDev(devs); }; });
+            var addc=scope.querySelector('.samp-add-contents'); if(addc)addc.onclick=function(){ var pk=scope.querySelector('.samp-picker'); if(!pk)return;
+              if(pk.style.display==='none'||!pk.innerHTML){ pk.style.display=''; var s=sampById(id);
+                sampContentsPicker(pk, s, function(devs, skus){ var s2=sampById(id);
+                  var newDevs=(s2.dev_samples||[]).map(function(d){return {id:d.id,qty:d.qty};}).concat(devs);
+                  var newLines=(s2.lines||[]).map(function(l){return {sku:l.sku,qty:l.qty};}).concat(skus);
+                  function afterDev(){ if(!skus.length){ loadContents(); return; } saveLines(newLines); }
+                  if(devs.length){ postJSON(EP.sampleContentsBase+id+'/dev-samples',{dev_samples:newDevs},function(j){ if(j&&j.error){alert(j.error);return;} afterDev(); }); } else afterDev(); });
+              } else { pk.style.display='none'; pk.innerHTML=''; } };
+            var ac=scope.querySelector('.samp-accept'); if(ac)ac.onclick=function(){ ac.disabled=true; postJSON(EP.sampleAccept,{id:id},function(j){ if(j&&j.error){alert(j.error);ac.disabled=false;return;} var s=sampById(id); if(s){ s.accepted=true; s.change_requested=false; if(!s.tracking_code && s.status_calc!=='Shipped' && s.status_calc!=='Charge to review') s.status_calc='In production'; } refreshSampleCard(id); }); };
             var save=scope.querySelector('.samp-save'); if(save)save.onclick=function(){ var ps=scope.querySelector('.samp-prod'),ex=scope.querySelector('.samp-exp'),tk=scope.querySelector('.samp-trk'),cr=scope.querySelector('.samp-car');
               var ev=(ex&&ex.value)||null,pv=(ps&&ps.value)||null,tv=(tk&&tk.value)||null,cv=(cr&&cr.value)||null;
               postJSON(EP.sampleUpdate,{id:id,supplier_expected_completion:ev,tracking_code:tv,carrier:cv,production_status:pv},function(){ var s=sampById(id); if(s){s.supplier_expected=ev||'';s.production_status=pv||'';s.tracking_code=tv||'';s.carrier=cv||'';} refreshSampleCard(id); }); };
@@ -1345,17 +1355,34 @@
             }).catch(function(){}); }
           function ppSampleNewForm(){ var box=document.getElementById('samp-newform'); if(box.dataset.open==='1'){box.dataset.open='';box.innerHTML='';return;} box.dataset.open='1';
             var purp=['sales','product','photography','marketing','operations'].map(function(p){return '<label style="margin-right:10px;font-size:11px"><input type="checkbox" class="snf-purpose" value="'+p+'"> '+p+'</label>';}).join('');
+            var col={lines:[], dev_samples:[]};   // contents collected before the shipment exists
             box.innerHTML='<div style="border:1px solid #cbd5e1;border-radius:10px;padding:12px;margin-bottom:12px;background:#f8fafc"><div class="tiny" style="font-weight:700;margin-bottom:6px">New sample shipment</div>'
               +'<div style="display:flex;gap:8px;flex-wrap:wrap"><input class="fci txt snf-recipient_company" placeholder="Recipient company" style="width:200px"><input class="fci txt snf-first_name" placeholder="First name" style="width:120px"><input class="fci txt snf-last_name" placeholder="Last name" style="width:120px"><input class="fci txt snf-phone" placeholder="Phone" style="width:140px"></div>'
               +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px"><input class="fci txt snf-address_line1" placeholder="Address line 1" style="width:260px"><input class="fci txt snf-address_line2" placeholder="Line 2" style="width:160px"><input class="fci txt snf-city" placeholder="City" style="width:120px"><input class="fci txt snf-region" placeholder="Region" style="width:100px"><input class="fci txt snf-postcode" placeholder="Postcode" style="width:100px"><input class="fci txt snf-country" placeholder="Country" style="width:80px"></div>'
-              +'<div style="margin-top:4px"><span class="mut tiny">Completion required </span><input type="date" class="fci snf-completion" style="width:150px"> &nbsp; '+purp+'</div>'
-              +'<div style="margin-top:4px"><textarea class="fci snf-notes" rows="2" placeholder="Notes" style="width:320px;text-align:left"></textarea></div>'
-              +'<div class="mut tiny" style="margin-top:4px">Create the shipment, then add contents (SKUs + product-development samples) with <b>＋ Add contents</b> on the card.</div>'
-              +'<div style="margin-top:8px"><button class="save-btn snf-save" style="background:#16a34a;color:#fff;border-color:#15803d">Create</button> <button class="save-btn snf-cancel">Cancel</button></div></div>';
+              +'<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-top:6px">'
+                +'<label style="font-size:11px">Status<br><select class="fci snf-status" style="width:150px;text-align:left">'+PROD_STATUS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]==='not_started'?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></label>'
+                +'<label style="font-size:11px">Expected completion<br><input type="date" class="fci snf-expected" style="width:150px;text-align:left"></label>'
+                +'<label style="font-size:11px">Completion required<br><input type="date" class="fci snf-completion" style="width:150px;text-align:left"></label></div>'
+              +'<div style="margin-top:6px">'+purp+'</div>'
+              +'<div style="margin-top:6px"><textarea class="fci snf-notes" rows="2" placeholder="Notes" style="width:320px;text-align:left"></textarea></div>'
+              +'<div style="margin-top:8px;font-weight:700;font-size:12px;color:#64748b">Contents</div><div class="snf-contents" style="margin:3px 0"></div>'
+              +'<button class="save-btn snf-addc" style="font-size:11px;background:#2563eb;color:#fff;border-color:#1d4ed8">＋ Add contents</button><div class="snf-picker" style="margin-top:7px"></div>'
+              +'<div style="margin-top:10px"><button class="save-btn snf-save" style="background:#16a34a;color:#fff;border-color:#15803d">Create</button> <button class="save-btn snf-cancel">Cancel</button> <span class="snf-msg mut tiny"></span></div></div>';
+            function drawContents(){ var el=box.querySelector('.snf-contents');
+              var sk=col.lines.map(function(l,ix){return '<div style="display:flex;gap:6px;align-items:center;font-size:12px;padding:1px 0"><b>'+units(l.qty)+'</b> × '+esc(l.sku)+'<a class="snf-rmk" data-i="'+ix+'" style="color:#dc2626;cursor:pointer;margin-left:6px">✕</a></div>';}).join('');
+              var dv=col.dev_samples.map(function(d,ix){return '<div style="display:flex;gap:6px;align-items:center;font-size:12px;padding:1px 0"><b>'+units(d.qty)+'</b> × <b style="font-family:ui-monospace,Menlo,monospace">'+esc(d.ref||('#'+d.id))+'</b>'+(d.colour_name?' <span class="mut tiny">'+esc(d.colour_name)+'</span>':'')+'<a class="snf-rmd" data-i="'+ix+'" style="color:#dc2626;cursor:pointer;margin-left:6px">✕</a></div>';}).join('');
+              el.innerHTML=(sk||dv)?(sk+dv):'<span class="mut tiny">none yet — use ＋ Add contents</span>';
+              el.querySelectorAll('.snf-rmk').forEach(function(a){ a.onclick=function(){ col.lines.splice(+a.dataset.i,1); drawContents(); }; });
+              el.querySelectorAll('.snf-rmd').forEach(function(a){ a.onclick=function(){ col.dev_samples.splice(+a.dataset.i,1); drawContents(); }; }); }
+            drawContents();
+            box.querySelector('.snf-addc').onclick=function(){ var pk=box.querySelector('.snf-picker'); if(pk.style.display==='none'||!pk.innerHTML){ pk.style.display='';
+              sampContentsPicker(pk, col, function(devs, skus){ devs.forEach(function(d){ if(!col.dev_samples.some(function(x){return String(x.id)===String(d.id);}))col.dev_samples.push(d); });
+                skus.forEach(function(s){ if(!col.lines.some(function(x){return x.sku===s.sku;}))col.lines.push(s); }); drawContents(); }); } else { pk.style.display='none'; pk.innerHTML=''; } };
             box.querySelector('.snf-cancel').onclick=function(){box.dataset.open='';box.innerHTML='';};
-            box.querySelector('.snf-save').onclick=function(){ var btn=this; function V(k){var f=box.querySelector('.snf-'+k);return f?f.value.trim():'';}
+            box.querySelector('.snf-save').onclick=function(){ var btn=this, msg=box.querySelector('.snf-msg'); function V(k){var f=box.querySelector('.snf-'+k);return f?f.value.trim():'';}
               var purpose=Array.prototype.map.call(box.querySelectorAll('.snf-purpose:checked'),function(x){return x.value;});
-              btn.disabled=true; postJSON(EP.sampleCreate,{supplier_name:STATE.supplierName||null,recipient_company:V('recipient_company')||null,first_name:V('first_name')||null,last_name:V('last_name')||null,phone:V('phone')||null,address_line1:V('address_line1')||null,address_line2:V('address_line2')||null,city:V('city')||null,region:V('region')||null,postcode:V('postcode')||null,country:V('country')||null,completion_date_required:V('completion')||null,purpose:purpose,notes:V('notes')||null,lines:[]},function(){ reload(); }); }; }
+              btn.disabled=true; msg.textContent='Creating…';
+              postJSON(EP.sampleCreate,{supplier_name:STATE.supplierName||null,recipient_company:V('recipient_company')||null,first_name:V('first_name')||null,last_name:V('last_name')||null,phone:V('phone')||null,address_line1:V('address_line1')||null,address_line2:V('address_line2')||null,city:V('city')||null,region:V('region')||null,postcode:V('postcode')||null,country:V('country')||null,completion_date_required:V('completion')||null,supplier_expected_completion:V('expected')||null,production_status:V('status')||'not_started',purpose:purpose,notes:V('notes')||null,lines:col.lines,dev_samples:col.dev_samples},function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;btn.disabled=false;return;} reload(); }); }; }
           function wireSamples(){
             var nb=document.getElementById('samp-new-btn'); if(nb)nb.onclick=ppSampleNewForm;
             body.querySelectorAll('.ps-filt').forEach(function(p){ p.onclick=function(){ PORTAL_SAMP_F=p.dataset.f; renderPP(); }; });
@@ -1456,19 +1483,22 @@
                   var files=box.querySelector('.ps2-photos').files, i=0;
                   (function up(){ if(i>=files.length){ ppProdSamples(box,ref); return; } var f=files[i++]; if(f.size>10*1024*1024){ up(); return; } var rd=new FileReader(); rd.onload=function(){ postJSON(EP.productSamplePhoto,{sample_id:j.id,filename:f.name,mime:f.type||'image/jpeg',data_base64:String(rd.result)},function(){ up(); }); }; rd.readAsDataURL(f); })(); }); };
             }).catch(function(e){ box.innerHTML='<div style="color:#dc2626;text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
-          // ── SAMPLE SHIPMENT CONTENTS picker — add product-development samples and/or bulk SKUs to a sample shipment ──
-          // `sample` is the sample_request (has id, lines[], dev_samples[]); writes replace-all to the sample-request endpoints.
-          function sampContentsPicker(host, sample, onDone){ host.innerHTML='<div class="mut tiny">Loading…</div>';
+          // ── SAMPLE SHIPMENT CONTENTS picker — add product-development samples and/or bulk SKUs ──
+          // Renders a rich multi-select (dev samples + SKUs, both with a qty). Calls onAdd(devs, skus) with the
+          // NEW selections — devs=[{id,qty}], skus=[{sku,qty}] (qty defaults to 1). The caller persists/merges.
+          // `have` = {dev_samples:[], lines:[]} already on the shipment (excluded from the lists).
+          function sampContentsPicker(host, have, onAdd){ host.innerHTML='<div class="mut tiny">Loading…</div>';
             var supQ=STATE.supplierName?'&supplier='+encodeURIComponent(STATE.supplierName):'';
-            var haveDev={}; (sample.dev_samples||[]).forEach(function(d){ haveDev[String(d.id)]=1; });
-            var haveSku={}; (sample.lines||[]).forEach(function(l){ haveSku[l.sku]=l; });
+            var haveDev={}; ((have&&have.dev_samples)||[]).forEach(function(d){ haveDev[String(d.id)]=1; });
+            var haveSku={}; ((have&&have.lines)||[]).forEach(function(l){ haveSku[l.sku]=1; });
+            var qcell='style="width:52px;text-align:left" inputmode="numeric" placeholder="qty"';
             getJSON(EP.productOpenSamples+(supQ?'?'+supQ.slice(1):'')).then(function(samples){ samples=(Array.isArray(samples)?samples:[]).filter(function(s){return !haveDev[String(s.id)];});
               host.innerHTML='<div style="border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;background:#f8fafc;text-align:left">'
-                +'<div style="font-weight:700;font-size:12px;margin-bottom:6px">Add contents to this shipment</div>'
+                +'<div style="font-weight:700;font-size:12px;margin-bottom:6px">Add contents</div>'
                 +'<div style="font-size:11px;color:#64748b;margin-bottom:3px">Product development samples <span class="mut">(products still in development)</span></div>'
                 +'<input class="fci ssh-pk-sq" placeholder="filter samples…" style="width:100%;text-align:left;margin-bottom:5px">'
                 +'<div class="ssh-pk-slist" style="max-height:150px;overflow:auto;border:1px solid #eef2f7;border-radius:6px;padding:4px 6px;background:#fff">'
-                +(samples.length?samples.map(function(s){return '<label class="ssh-pk-srow" data-hay="'+esc(((s.ref||'')+' '+(s.colour_name||'')).toLowerCase())+'" style="display:flex;gap:7px;align-items:center;padding:3px 2px;cursor:pointer;font-size:12px"><input type="checkbox" class="ssh-pk-scb" value="'+s.id+'"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.ref)+'</b>'+(s.colour_name?'<span class="mut tiny">'+esc(s.colour_name)+'</span>':'')+'</label>';}).join(''):'<div class="mut tiny" style="padding:4px">no open product samples to add</div>')
+                +(samples.length?samples.map(function(s){return '<div class="ssh-pk-srow" data-hay="'+esc(((s.ref||'')+' '+(s.colour_name||'')).toLowerCase())+'" style="display:flex;gap:7px;align-items:center;padding:3px 2px;font-size:12px"><input type="checkbox" class="ssh-pk-scb" value="'+s.id+'" data-ref="'+esc(s.ref)+'" data-colour="'+esc(s.colour_name||'')+'"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.ref)+'</b>'+(s.colour_name?'<span class="mut tiny" style="flex:1;min-width:0">'+esc(s.colour_name)+'</span>':'<span style="flex:1"></span>')+'<input class="fci ssh-pk-sqty" data-id="'+s.id+'" '+qcell+'></div>';}).join(''):'<div class="mut tiny" style="padding:4px">no open product samples to add</div>')
                 +'</div>'
                 +'<div style="font-size:11px;color:#64748b;margin:9px 0 3px">Bulk SKUs <span class="mut">(your products)</span></div>'
                 +'<input class="fci ssh-pk-kq" placeholder="search SKU / description…" style="width:100%;text-align:left;margin-bottom:5px">'
@@ -1478,18 +1508,15 @@
               var kq=host.querySelector('.ssh-pk-kq'), klist=host.querySelector('.ssh-pk-klist'), kt=null;
               function loadSkus(q){ klist.innerHTML='<div class="mut tiny" style="padding:4px">searching…</div>';
                 getJSON(EP.productSkus+"?q="+encodeURIComponent(q||"")+supQ).then(function(rows){ rows=(Array.isArray(rows)?rows:[]).filter(function(k){return !haveSku[k.sku];});
-                  klist.innerHTML=rows.length?rows.map(function(k){return '<div class="ssh-pk-krow" style="display:flex;gap:7px;align-items:center;padding:3px 2px;font-size:12px"><input type="checkbox" class="ssh-pk-kcb" value="'+esc(k.sku)+'"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(k.sku)+'</b><span class="mut tiny" style="flex:1;min-width:0">'+esc(k.description||'')+'</span><input class="fci ssh-pk-kqty" data-sku="'+esc(k.sku)+'" placeholder="qty" style="width:60px;text-align:left" inputmode="numeric"></div>';}).join(''):'<div class="mut tiny" style="padding:4px">no matches</div>'; }); }
+                  klist.innerHTML=rows.length?rows.map(function(k){return '<div class="ssh-pk-krow" style="display:flex;gap:7px;align-items:center;padding:3px 2px;font-size:12px"><input type="checkbox" class="ssh-pk-kcb" value="'+esc(k.sku)+'" data-desc="'+esc(k.description||'')+'"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(k.sku)+'</b><span class="mut tiny" style="flex:1;min-width:0">'+esc(k.description||'')+'</span><input class="fci ssh-pk-kqty" data-sku="'+esc(k.sku)+'" '+qcell+'></div>';}).join(''):'<div class="mut tiny" style="padding:4px">no matches</div>'; }); }
               if(kq)kq.oninput=function(){ var v=this.value; if(kt)clearTimeout(kt); kt=setTimeout(function(){ loadSkus(v); },250); };
               host.querySelector('.ssh-pk-cancel').onclick=function(){ host.style.display='none'; host.innerHTML=''; };
               host.querySelector('.ssh-pk-add').onclick=function(){ var msg=host.querySelector('.ssh-pk-msg');
-                var addDev=Array.prototype.map.call(host.querySelectorAll('.ssh-pk-scb:checked'),function(c){return c.value;});
-                var addSkus=Array.prototype.map.call(host.querySelectorAll('.ssh-pk-kcb:checked'),function(c){ var qi=host.querySelector('.ssh-pk-kqty[data-sku="'+(window.CSS&&CSS.escape?CSS.escape(c.value):c.value)+'"]'); return {sku:c.value,qty:qi&&qi.value?Number(qi.value)||0:0}; });
-                if(!addDev.length&&!addSkus.length){ msg.style.color='#dc2626'; msg.textContent='Select at least one item.'; return; }
-                msg.style.color='#64748b'; msg.textContent='Adding…';
-                var devIds=(sample.dev_samples||[]).map(function(d){return String(d.id);}).concat(addDev);
-                var lines=(sample.lines||[]).map(function(l){return {sku:l.sku,qty:l.qty};}).concat(addSkus);
-                function afterDev(){ if(!addSkus.length){ onDone&&onDone(); return; } postJSON(EP.sampleContentsBase+sample.id+'/lines',{lines:lines},function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;return;} onDone&&onDone(); }); }
-                if(addDev.length){ postJSON(EP.sampleContentsBase+sample.id+'/dev-samples',{dev_sample_ids:devIds},function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;return;} afterDev(); }); } else afterDev(); };
+                function esq(v){ return window.CSS&&CSS.escape?CSS.escape(v):v; }
+                var devs=Array.prototype.map.call(host.querySelectorAll('.ssh-pk-scb:checked'),function(c){ var qi=host.querySelector('.ssh-pk-sqty[data-id="'+esq(c.value)+'"]'); return {id:c.value,qty:(qi&&Number(qi.value))||1,ref:c.dataset.ref,colour_name:c.dataset.colour}; });
+                var skus=Array.prototype.map.call(host.querySelectorAll('.ssh-pk-kcb:checked'),function(c){ var qi=host.querySelector('.ssh-pk-kqty[data-sku="'+esq(c.value)+'"]'); return {sku:c.value,qty:(qi&&Number(qi.value))||1,description:c.dataset.desc}; });
+                if(!devs.length&&!skus.length){ msg.style.color='#dc2626'; msg.textContent='Select at least one item.'; return; }
+                host.style.display='none'; host.innerHTML=''; onAdd&&onAdd(devs, skus); };
             }).catch(function(e){ host.innerHTML='<div style="color:#dc2626">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
           function ppProdTimeline(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
             fetch(EP.productNotesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){ shortNotes(notes); notes=Array.isArray(notes)?notes:[];
