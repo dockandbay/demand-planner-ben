@@ -3,6 +3,28 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.022 - Product grid: inline Season/Category/Supplier pickers + swatch UX
+
+- Season / Category / Supplier are **inline-editable in the grid** via the same search-popup as the PO grid's
+  supplier picker (search + Clear + list); edits bind straight to the master-data fields. Blue PLAN button.
+- Swatch: removed the Upload button — the chosen file uploads automatically; **JPG/PNG, ≤2MB** (client+server);
+  added a **paste-from-clipboard** zone.
+
+## v26.021 - PRODUCT ▸ PLAN polish (match SUPPLY ▸ PLAN)
+
+- Removed the "Product development" heading; filters + search + "+ New product" on one row (search → top bar on
+  mobile). Removed the duplicate inline detail header. Expanded row highlights light yellow. Master data is a
+  single column and **auto-saves inline** (no Save button).
+
+## v26.020 - Product: Plan expands inline (not a page swap) + deep-linkable hash
+
+- Clicking Plan expands the detail under the row with the light-blue sub-nav (like the PO grid). URL is now
+  #/product/plan and #/product/plan/<ref> (deep-linkable).
+
+## v26.019 - Product grid mobile: horizontal scroll + sticky columns
+
+- Grid scrolls sideways; swatch+P and Ref columns freeze; colourway sits under the ref (small, not bold).
+
 ## v26.018 - Product grid + add-form polish
 
 - **Add-product form:** Season / Category / Supplier are now type-to-search **datalist inputs** (same style as
