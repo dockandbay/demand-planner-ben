@@ -7500,7 +7500,7 @@
   // Inline cell picker for the product grid (same popup UX as the PO grid's supplier/branch picker) — edits are
   // bound straight to the master-data fields via /api/product/item/<ref>. kind = supplier | season | category.
   function prodPickBtn(ref,field,val,kind){ return '<button class="cell-pick prod-cell-pick" data-ref="'+esc(ref)+'" data-field="'+field+'" data-kind="'+kind+'" title="'+esc(val||'')+'">'+(val?esc(val):'<span class="mut">— <span style="background:#fee2e2;color:#991b1b;font-weight:700;border-radius:3px;padding:0 3px">set</span></span>')+' ▾</button>'; }
-  function openProdCellPick(btn,onSaved){ closeShPop(); loadProdCfg(function(cfg){ ensureSuppliers(function(){
+  function openProdCellPick(btn,onSaved,onPick){ closeShPop(); loadProdCfg(function(cfg){ ensureSuppliers(function(){
     var kind=btn.dataset.kind, ref=btn.dataset.ref, lbl=(kind==='supplier'?'supplier':kind);
     var list = kind==='supplier' ? (supplierList||[]).slice().sort().map(function(n){return {v:n,l:n};})
       : kind==='season' ? (cfg.seasons||[]).filter(function(s){return s.active!==false;}).map(function(s){return {v:s.code,l:s.code};})
@@ -7508,7 +7508,8 @@
     var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop';
     pop.innerHTML='<div class="shpop-h">Set '+esc(lbl)+' for <b>'+esc(ref)+'</b></div><input class="shpop-q" placeholder="search '+esc(lbl)+'…"><div id="shpop-list"></div>';
     placePop(pop, btn.getBoundingClientRect()); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
-    function set(val){ var body={}; body[btn.dataset.field]=val; shipPost('/api/product/item/'+encodeURIComponent(ref),body,function(j){ if(j&&j.error){alert('Failed: '+j.error);return;} closeShPop(); _prodCfg=null; if(typeof onSaved==='function')onSaved(); else renderProductPlan(document.getElementById('product-content')); }); }
+    function set(val){ if(typeof onPick==='function'){ closeShPop(); onPick(val); return; }   // select-only mode (e.g. the New-product form, no ref yet)
+      var body={}; body[btn.dataset.field]=val; shipPost('/api/product/item/'+encodeURIComponent(ref),body,function(j){ if(j&&j.error){alert('Failed: '+j.error);return;} closeShPop(); _prodCfg=null; if(typeof onSaved==='function')onSaved(); else renderProductPlan(document.getElementById('product-content')); }); }
     function render(q){ q=(q||'').trim().toLowerCase(); var html='<div class="shpop-opt unassign" data-clear="1">— Clear</div>';
       list.filter(function(n){return !q||n.l.toLowerCase().indexOf(q)>=0;}).slice(0,q?80:20).forEach(function(n){ html+='<div class="shpop-opt" data-v="'+esc(n.v)+'">'+esc(n.l)+'</div>'; });
       var l=document.getElementById('shpop-list'); l.innerHTML=html;
@@ -7581,17 +7582,18 @@
     c.innerHTML='<div style="max-width:560px">'+prodFormLists(cfg)+'<div style="font-size:15px;font-weight:700;margin-bottom:12px">New product development</div>'
       +pRow('Season','<input class="fci" id="pn-season" list="pn-seasonlist" style="width:200px" placeholder="search season… (e.g. SS27)">')
       +pRow('Category','<input class="fci" id="pn-cat" list="pn-catlist" style="width:280px" placeholder="search category…">')
-      +pRow('Supplier','<input class="fci" id="pn-sup" list="prod-suplist" style="width:280px" placeholder="search supplier… (code goes in the reference)">')
+      +pRow('Supplier','<span class="pn-sup-box" style="display:inline-block;min-width:220px;border:1px solid #cbd5e1;border-radius:5px;padding:4px 8px">'+prodPickBtn('','supplier','','supplier')+'</span> <span style="color:#94a3b8;font-size:11px;margin-left:6px">code goes in the reference</span>')
       +pRow('Colour way name','<input class="fci" id="pn-colour" style="width:360px" placeholder="e.g. Ibiza Glow — comma-separate to create several at once"><div style="color:#94a3b8;font-size:11px;margin-top:2px">Multiple colour ways separated by commas each create their own product (same season, category &amp; sizes).</div>')
       +pRow('Sizes','<input class="fci" id="pn-sizes" style="width:280px" placeholder="comma-separated, e.g. S, M, L, XL">')
       +pRow('Description','<textarea class="fci" id="pn-desc" rows="3" style="width:100%" placeholder="detailed description…"></textarea>')
       +'<div style="margin-top:12px"><button class="save-btn" id="pn-save" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Create</button> <button class="save-btn light" id="pn-cancel">Cancel</button> <span id="pn-msg" style="font-size:12px;margin-left:8px"></span></div></div>';
     document.getElementById('pn-cancel').onclick=function(){ selectProductSub('plan'); };
+    var pnSupplier=''; var _pns=c.querySelector('.pn-sup-box .prod-cell-pick'); if(_pns)_pns.onclick=function(e){ e.stopPropagation(); openProdCellPick(_pns,null,function(val){ pnSupplier=val||''; _pns.innerHTML = pnSupplier?esc(pnSupplier)+' ▾':'<span class="mut">— <span style="background:#fee2e2;color:#991b1b;font-weight:700;border-radius:3px;padding:0 3px">set</span></span> ▾'; }); };
     document.getElementById('pn-save').onclick=function(){ var btn=this, msg=document.getElementById('pn-msg');
       var season=document.getElementById('pn-season').value, cat=document.getElementById('pn-cat').value;
       if(!season||!cat){ msg.style.color='#dc2626'; msg.textContent='Season and category required.'; return; }
       var sizes=document.getElementById('pn-sizes').value.split(',').map(function(s){return s.trim();}).filter(Boolean);
-      var desc=document.getElementById('pn-desc').value, supplier=document.getElementById('pn-sup').value.trim();
+      var desc=document.getElementById('pn-desc').value, supplier=pnSupplier;
       var colours=document.getElementById('pn-colour').value.split(',').map(function(s){return s.trim();}).filter(Boolean);
       if(!colours.length)colours=[''];   // no colour → still create one product
       btn.disabled=true; msg.style.color='#64748b'; msg.textContent=colours.length>1?('Creating '+colours.length+' products…'):'Creating…';
