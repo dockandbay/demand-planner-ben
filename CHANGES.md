@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.023 - Buy plan: Buy FBA rounds to whole cartons
+
+- The **Buy FBA** column now rounds to full cartons: if the forward-window FBA need is **more than one carton**,
+  it rounds **up** to whole cartons (cp = units/carton from products); if it fits within a single carton (≤1),
+  Buy FBA shows **0** — that top-up is taken as a 3PL→FBA transfer instead. Applied in getBuyQtys() so the column,
+  the FBA filter, CSV export, the detail card, and Create-FBA-POs all use the same carton-rounded quantity.
+
 ## v26.022 - Product grid: inline Season/Category/Supplier pickers + swatch UX
 
 - Season / Category / Supplier are **inline-editable in the grid** via the same search-popup as the PO grid's

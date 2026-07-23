@@ -1239,6 +1239,11 @@ function getBuyQtys(sku,mkt){
     b3u+=proj[i].bQu||0;
     bf+=proj[i].fdQ||0;
   }
+  // Buy FBA is bought in WHOLE CARTONS: if the forward-window FBA need is MORE than one carton, round it UP to
+  // full cartons; if it fits within a single carton (≤1), that top-up is taken as a 3PL→FBA transfer instead, so
+  // Buy FBA shows 0. (cp = units per carton from planner.products; falls back to 1 when unknown.)
+  const _cpF=(pd.cp)||1;
+  if(bf>0){ const _ctF=Math.ceil(bf/_cpF); bf=_ctF>1?_ctF*_cpF:0; }
   const tx=(proj[START_IDX]&&proj[START_IDX].tx)||0; // recommended 3PL->FBA transfer NOW (M+0)
   return BUY_CACHE[cacheKey]={b3,b3u,bf,tx};
 }
