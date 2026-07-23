@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.059 - Samples: exception notifications + snooze (mirrors the PO action model)
+
+- SUPPLY ▸ Samples rows now show a **red exception badge** with a count of active exceptions — currently
+  **Date overdue** (completion/expected date passed while still active, e.g. SR-5), **Charge to review**, and
+  **Unread supplier note** — replacing the old passive ⚠ / separate badges.
+- **Snooze**: click the badge → popover to snooze each exception **7d / 30d / indefinitely** (or wake). Persists
+  via the shared `/api/supply/actions/state` API (keys `sampact|<ref>|<cond>`), reusing the PO snooze store.
+- **"show snoozed"** toggle added to the Samples filter bar (shared with the PO toggle) — surfaces snoozed
+  exceptions as active in the badges.
+
 ## v26.058 - Sample-shipment links on PRODUCT; samples deep-link slug; action-only detail badges
 
 - **PRODUCT grid "Sample shipment" column** now shows the **most recent** linked sample shipment: its ref as a
