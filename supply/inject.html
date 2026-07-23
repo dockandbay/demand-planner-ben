@@ -7599,7 +7599,24 @@
     return '<datalist id="pn-seasonlist">'+(cfg.seasons||[]).filter(function(s){return s.active!==false;}).map(function(s){return '<option value="'+esc(s.code)+'">';}).join('')+'</datalist>'
       +'<datalist id="pn-catlist">'+(cfg.categories||[]).map(function(x){return '<option value="'+esc(x.category)+'">';}).join('')+'</datalist>'+prodSupList(); }
   function pRow(l,f){ return '<div class="prow"><div class="pl">'+l+'</div><div style="flex:1">'+f+'</div></div>'; }
-  function renderProductReports(c){ c.innerHTML='<div style="padding:20px 2px;color:#94a3b8;font-size:13px">Product reports — <b>coming soon</b>. (Placeholder; report content TBD.)</div>'; }
+  function renderProductReports(c){ c.innerHTML='<div style="color:#94a3b8">Loading…</div>';
+    fetch('/api/product/reports').then(function(r){return r.json();}).then(function(d){ if(!d||d.error){ c.innerHTML='<div style="color:#dc2626">Failed: '+esc((d&&d.error)||'error')+'</div>'; return; }
+      var o=d.overall||{};
+      function card(lbl,val){ return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:9px 14px;min-width:120px"><div style="font-size:11px;color:#64748b">'+lbl+'</div><div style="font-size:20px;font-weight:700">'+val+'</div></div>'; }
+      function num(v){ return v==null?'—':v; }
+      function tbl(title,dimLabel,rows){ var head=['Products','Sample versions','Approved','Avg samples to approve','Avg days to approve'];
+        return '<div style="margin-top:18px"><div style="font-weight:700;font-size:13px;margin-bottom:6px">'+title+'</div>'
+          +'<table style="border-collapse:collapse;font-size:12px"><thead><tr><th style="text-align:left;padding:5px 14px 5px 0;border-bottom:2px solid #e5e7eb">'+dimLabel+'</th>'
+          +head.map(function(h){return '<th style="text-align:right;padding:5px 14px;border-bottom:2px solid #e5e7eb;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+          +((rows&&rows.length)?rows.map(function(g){return '<tr><td style="padding:4px 14px 4px 0;border-bottom:1px solid #f1f5f9">'+esc(g.key)+'</td>'
+            +[g.products,g.samples,g.approved,num(g.avg_samples),(g.avg_days==null?'—':g.avg_days+'d')].map(function(v){return '<td style="text-align:right;padding:4px 14px;border-bottom:1px solid #f1f5f9">'+v+'</td>';}).join('')+'</tr>';}).join(''):'<tr><td colspan="6" style="padding:6px 0;color:#94a3b8">No data.</td></tr>')
+          +'</tbody></table></div>'; }
+      c.innerHTML='<div style="font-weight:700;font-size:13px;margin-bottom:8px">Overview</div><div style="display:flex;gap:10px;flex-wrap:wrap">'
+          +card('Products',o.products||0)+card('Sample versions',o.samples||0)+card('Approved',o.approved||0)
+          +card('Avg samples to approve',num(o.avg_samples))+card('Avg days to approve',o.avg_days==null?'—':o.avg_days+'d')+'</div>'
+        +'<div class="mut tiny" style="margin-top:6px">“Avg samples/days to approve” are measured over <b>approved</b> products only. Time-to-approve runs from the product’s development-start date (the <i>Development started</i> override on Master data, else its creation date) to approval.</div>'
+        +tbl('By season','Season',d.bySeason)+tbl('By category','Category',d.byCategory)+tbl('By supplier','Supplier',d.bySupplier);
+    }).catch(function(e){ c.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
   var _prodFilt={season:'',status:'unapproved',q:''};
   function renderProductPlan(c){
     c.innerHTML='<div id="pg-filters" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px"></div><div id="pg-grid"><div style="color:#94a3b8">Loading…</div></div>';
@@ -7730,7 +7747,8 @@
       +pRow('Category','<select class="fci pm-field pm-fld" data-f="category" id="pm-cat">'+catOpts+'</select>')
       +pRow('Supplier','<span class="pm-sup-pick" style="display:inline-block;min-width:200px;border:1px solid #cbd5e1;border-radius:5px;padding:4px 8px">'+prodPickBtn(it.ref,'supplier',it.supplier,'supplier')+'</span> <span style="color:#94a3b8;font-size:11px;margin-left:6px">ref keeps its original code'+(it.supplier_code?' ('+esc(it.supplier_code)+')':'')+'</span>')
       +pRow('Colour way','<input class="fci pm-field pm-fld" data-f="colour_name" id="pm-colour" value="'+esc(it.colour_name)+'">')
-      +pRow('Status','<select class="fci pm-field pm-fld" data-f="status" id="pm-status">'+statOpts+'</select>')
+      +pRow('Status','<select class="fci pm-field pm-fld" data-f="status" id="pm-status">'+statOpts+'</select>'+(it.approved_at?' <span class="mut tiny" style="margin-left:6px">approved '+esc(it.approved_at)+'</span>':''))
+      +pRow('Development started','<input type="date" class="fci pm-fld" data-f="dev_start_override" value="'+esc(it.dev_start_override||'')+'" style="width:150px"> <span class="mut tiny">override — blank = created '+esc((it.created_at||'').slice(0,10))+' (used for time-to-approve)</span>')
       +pRow('Description','<textarea class="fci pm-fld" data-f="description" id="pm-desc" rows="3" style="width:100%;max-width:620px;box-sizing:border-box">'+esc(it.description)+'</textarea>')
       +'<div style="font-size:11px;color:#94a3b8;margin:2px 0 12px">Changes save automatically. <span id="pm-msg" style="margin-left:6px"></span></div>'
       +'<div style="font-weight:700;font-size:13px;margin:14px 0 6px">Size variants <span style="color:#94a3b8;font-weight:400;font-size:11px">(approval = internal D&amp;B sign-off)</span></div>'

@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.053 - PRODUCT ▸ Reports built + development-start override
+
+Built the Product Reports tab (was a placeholder):
+- **Overview** cards + **By season / By category / By supplier** tables, each showing: products, sample
+  versions, approved count, **avg samples to approve** (over approved products), **avg days to approve**.
+- **Time to approve** = development-start → approval. Approval time is now stamped (`approved_at`, set when a
+  product's status becomes "approved"; cleared if reverted). Development-start uses a new **"Development
+  started" override** on Master data (blank = the product's creation date) — for when created_at isn't accurate.
+- Migration **135_product_approved_at.sql**: adds `approved_at` + `dev_start_override` to product_dev_items.
+
+Verified end-to-end (approve → avg_days computed from the override; revert clears it).
+
 ## v26.052 - SAMPLES SKU entry redesign (search-first) + searches product-dev items
 
 Reworks the admin SAMPLES new-request SKU entry per Ben:

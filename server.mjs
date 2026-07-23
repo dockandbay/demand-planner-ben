@@ -3172,7 +3172,8 @@ app.get('/api/product/item/:ref', async (req, res) => {
       coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(description,'') description,
       coalesce(supplier,'') supplier, coalesce(supplier_code,'') supplier_code,
       status, (swatch IS NOT NULL) has_swatch, coalesce(created_by,'') created_by,
-      to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at
+      to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at,
+      to_char(dev_start_override,'YYYY-MM-DD') dev_start_override, to_char(approved_at,'YYYY-MM-DD HH24:MI') approved_at
       FROM planner.product_dev_items WHERE ref=$1`, [ref])).rows[0];
     if (!item) return res.status(404).json({ error: 'not found' });
     const sizes = (await pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort FROM planner.product_dev_sizes WHERE item_id=$1 ORDER BY sort, id`, [item.id])).rows;
@@ -3217,8 +3218,10 @@ app.post('/api/product/item', async (req, res) => {
 });
 app.post('/api/product/item/:ref', async (req, res) => {
   const b = req.body || {}, ref = req.params.ref, sets = [], vals = []; let i = 1;
-  const allow = { colour_name: 'text', description: 'text', status: 'text', season: 'text', category: 'text' };
-  for (const k of Object.keys(allow)) { if (k in b) { sets.push(`${k}=$${i}`); vals.push(b[k] === '' ? null : b[k]); i++; } }
+  const allow = { colour_name: 'text', description: 'text', status: 'text', season: 'text', category: 'text', dev_start_override: 'date' };
+  for (const k of Object.keys(allow)) { if (k in b) { sets.push(`${k}=$${i}${allow[k] === 'date' ? '::date' : ''}`); vals.push(b[k] === '' ? null : b[k]); i++; } }
+  // stamp / clear the approval time when status changes (drives Reports' time-to-approve)
+  if ('status' in b) sets.push(b.status === 'approved' ? 'approved_at=coalesce(approved_at, now())' : 'approved_at=NULL');
   try {
     if ('supplier' in b) { const sup = (b.supplier || '').trim() || null; let supCode = null;
       if (sup) { const sr = (await pool.query(`SELECT code FROM planner.suppliers WHERE name=$1`, [sup])).rows[0];
@@ -3233,6 +3236,27 @@ app.post('/api/product/item/:ref', async (req, res) => {
 app.post('/api/product/item/:ref/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.product_dev_items WHERE ref=$1`, [req.params.ref]); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+// PRODUCT ▸ Reports — counts + sample/approval metrics grouped by season, category, supplier.
+app.get('/api/product/reports', async (_req, res) => {
+  try {
+    const rows = (await pool.query(`SELECT
+        coalesce(nullif(i.season,''),'—') season, coalesce(nullif(i.category,''),'—') category, coalesce(nullif(i.supplier,''),'—') supplier,
+        i.status,
+        CASE WHEN i.status='approved' AND i.approved_at IS NOT NULL THEN (i.approved_at::date - coalesce(i.dev_start_override, i.created_at::date)) END approve_days,
+        (SELECT count(*) FROM planner.product_dev_samples s WHERE s.item_ref=i.ref)::int samples
+      FROM planner.product_dev_items i`)).rows;
+    const roll = (g, r) => { g.products++; g.samples += r.samples;
+      if (r.status === 'approved') { g.approved++; g._sampSum += r.samples; if (r.approve_days != null) { g._daySum += Number(r.approve_days); g._dayN++; } } };
+    const fin = (g) => ({ key: g.key, products: g.products, samples: g.samples, approved: g.approved,
+      avg_samples: g.approved ? Math.round(g._sampSum / g.approved * 10) / 10 : null,
+      avg_days: g._dayN ? Math.round(g._daySum / g._dayN * 10) / 10 : null });
+    const mk = () => ({ products: 0, samples: 0, approved: 0, _sampSum: 0, _daySum: 0, _dayN: 0 });
+    const groupBy = (keyFn) => { const m = {}; for (const r of rows) { const k = keyFn(r); (m[k] || (m[k] = Object.assign(mk(), { key: k }))); roll(m[k], r); }
+      return Object.values(m).map(fin).sort((a, b) => String(a.key).localeCompare(String(b.key))); };
+    const o = Object.assign(mk(), { key: 'overall' }); rows.forEach(r => roll(o, r));
+    res.json({ overall: fin(o), bySeason: groupBy(r => r.season), byCategory: groupBy(r => r.category), bySupplier: groupBy(r => r.supplier) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/size', async (req, res) => {
   const b = req.body || {}, ref = (b.ref || '').trim(), label = (b.size_label || '').trim();
