@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.048 - PRODUCT notification badges render as red badges (CSS scope fix)
+
+- `.ex-badge` was only styled under `#supply-root`; the PRODUCT module lives under `#product-root`, so its
+  grid-row unread counter and Timeline sub-tab count rendered as a bare "1". Added the same red-badge styling
+  for `#product-root` — the unread count now shows as a proper red (1) badge, matching the top-menu counter.
+  (Per-item: only products with unread supplier messages get the badge — e.g. SS27-TOWEL-BL-01, not BL-02.)
+
 ## v26.047 - Payment dates use local timezone + "pay" button on Payments Due
 
 - Recording a payment ("pay »" in a PO's PAYMENTS plan) now sets the date to **today in the user's local
