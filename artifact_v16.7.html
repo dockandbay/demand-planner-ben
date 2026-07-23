@@ -10182,7 +10182,7 @@ var _rfBtn=document.getElementById('rf'); if(_rfBtn)_rfBtn.onclick=function(){
         // reveal that view's sub-nav in place — poll until it's rendered (CONFIG loads its nav via a fetch,
         // so a fixed delay missed it on the first tap and the sub-items didn't show).
         if(isSup){ waitBuild(function(){ return !!(window.__supplyNav && window.__supplyNav.sections && window.__supplyNav.sections.length); }); }
-        else if(isCfg){ waitBuild(function(){ return document.querySelectorAll('#config-subs .rtab').length>0; }); }
+        else if(isCfg){ waitBuild(function(){ return !!(window.__configNav && window.__configNav.items && window.__configNav.items.length); }); }
         else if(isScen){ waitBuild(function(){ return document.querySelectorAll('#scenario-subnav .stab').length>0; }); }
         else if(vb.dataset.view==='planning'){ waitBuild(function(){ return document.querySelectorAll('#demand-tabs .dnav').length>0; }); }
         else { close(); }
@@ -10195,8 +10195,10 @@ var _rfBtn=document.getElementById('rf'); if(_rfBtn)_rfBtn.onclick=function(){
         Array.prototype.slice.call(document.querySelectorAll('#demand-tabs .dnav')).forEach(function(db){ drawer.appendChild(subItem(db.textContent.trim(), db.classList.contains('active'), function(){ db.click(); close(); })); });
       } else if(active && isScen){   // SCENARIO sub-nav
         Array.prototype.slice.call(document.querySelectorAll('#scenario-subnav .stab')).forEach(function(sb){ drawer.appendChild(subItem(sb.textContent.trim(), sb.classList.contains('active'), function(){ sb.click(); close(); })); });
-      } else if(active && isCfg){   // CONFIG sub-nav
-        Array.prototype.slice.call(document.querySelectorAll('#config-subs .rtab')).forEach(function(cb){ drawer.appendChild(subItem(cb.textContent.trim(), cb.classList.contains('active'), function(){ cb.click(); close(); })); });
+      } else if(active && isCfg){   // CONFIG sub-nav — from the __configNav bridge (renders immediately, even while CONFIG is still loading)
+        var cnav=window.__configNav;
+        if(cnav && cnav.items){ var ccur=cnav.current&&cnav.current();
+          cnav.items.forEach(function(s){ drawer.appendChild(subItem(s[1], s[0]===ccur, function(){ clearSearch(); cnav.select(s[0]); close(); })); }); }
       }
     });
     // Quick actions — mirror the desktop top-bar buttons that aren't views (Stock Availability + Messages bell),
