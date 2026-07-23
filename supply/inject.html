@@ -6664,7 +6664,8 @@
         +R('Postcode / Country','<input class="fci txt sf-postcode" placeholder="postcode" style="width:115px"> <input class="fci txt sf-country" placeholder="country" style="width:90px">')
         +R('Phone','<input class="fci txt sf-phone" style="width:180px">')
         +H('SKUs')
-        +R('SKUs','<div class="sf-lines"></div><button class="save-btn light sf-addline" style="margin-top:4px">+ line</button>'
+        +R('SKUs','<input class="fci txt sf-skusearch" placeholder="search this supplier’s SKUs — sku / product / colour / season (SS27)…" style="width:360px"><div class="sf-skuresults" style="margin:4px 0"></div>'
+          +'<div class="sf-lines"></div><button class="save-btn light sf-addline" style="margin-top:4px">+ line (free text)</button>'
           +'<div class="mut tiny" style="margin-top:6px">or paste <b>sku, qty</b> per line:</div><textarea class="fci sf-paste" rows="3" style="width:320px;text-align:left" placeholder="TOWLB-..., 2"></textarea> <button class="save-btn light sf-parsepaste">Add pasted</button>')
         +H('Details')
         +R('Completion required', dateField('',{cls:'sf-completion', width:'130px'}))
@@ -6678,6 +6679,14 @@
         w.querySelectorAll('.sf-lrm').forEach(function(x){x.onclick=function(){lines.splice(x.dataset.i,1);if(!lines.length)lines.push({sku:'',qty:''});renderLines();};}); }
       renderLines();
       box.querySelector('.sf-addline').onclick=function(){ lines.push({sku:'',qty:''}); renderLines(); };
+      // supplier-scoped SKU search picker (same behaviour as the portal) — scoped to the form's chosen supplier
+      var ssr=box.querySelector('.sf-skusearch'); if(ssr)ssr.oninput=debounce(function(){ var q=ssr.value.trim(), sup=box.querySelector('.sf-supplier').value.trim(), rb=box.querySelector('.sf-skuresults');
+        if(q.length<2){ rb.innerHTML=''; return; }
+        fetch('/api/product/skus?supplier='+encodeURIComponent(sup)+'&q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
+          if(!rows.length){ rb.innerHTML='<div class="mut tiny">no matches (use “+ line (free text)” for anything not listed)</div>'; return; }
+          rb.innerHTML='<div style="border:1px solid #cbd5e1;border-radius:6px;max-height:180px;overflow:auto;background:#fff">'+rows.map(function(k){return '<div style="display:flex;gap:7px;align-items:center;padding:3px 8px;border-bottom:1px solid #f1f5f9;font-size:12px"><input type="checkbox" class="sf-skcb" value="'+esc(k.sku)+'"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(k.sku)+'</b><span class="mut tiny" style="flex:1;min-width:0">'+esc(k.description||'')+(k.release_window?' · '+esc(k.release_window):'')+'</span><input class="fci sf-skqty" data-sku="'+esc(k.sku)+'" placeholder="qty" style="width:52px;text-align:right"></div>';}).join('')+'</div><button class="save-btn light sf-skadd" style="margin-top:4px">+ Add selected</button>';
+          rb.querySelector('.sf-skadd').onclick=function(){ var any=false; rb.querySelectorAll('.sf-skcb:checked').forEach(function(c){ var qi=rb.querySelector('.sf-skqty[data-sku="'+(window.CSS&&CSS.escape?CSS.escape(c.value):c.value)+'"]'); var qty=(qi&&Number(qi.value))||1; if(lines.length===1&&!lines[0].sku)lines=[]; lines.push({sku:c.value,qty:qty}); any=true; }); if(any){ rb.innerHTML=''; ssr.value=''; renderLines(); } };
+        }).catch(function(){ rb.innerHTML='<div class="mut tiny" style="color:#dc2626">search failed</div>'; }); },300);
       box.querySelector('.sf-parsepaste').onclick=function(){ var t=box.querySelector('.sf-paste').value; t.split(/\n/).forEach(function(ln){ var p=ln.split(/[,\t]/); var sku=(p[0]||'').trim(), qty=(p[1]||'').trim(); if(sku){ if(lines.length===1&&!lines[0].sku)lines=[]; lines.push({sku:sku,qty:qty}); } }); box.querySelector('.sf-paste').value=''; renderLines(); };
       box.querySelector('.sf-cancel').onclick=function(){ box.dataset.open=''; box.innerHTML=''; };
       var as=box.querySelector('.sf-addrsearch'); as.oninput=debounce(function(){ var q=as.value.trim(); var mb=box.querySelector('.sf-addrmatches'); if(q.length<2){mb.innerHTML='';return;}

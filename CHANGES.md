@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.042 - Sample SKU picker: richer search, supplier scope in admin, free-text option
+
+- **SKU search now matches season/release window** (e.g. "SS27") as well as SKU, colour and product name
+  (portal picker + admin). Results show the release window.
+- **Admin ▸ Samples new-request form** gains the same supplier-scoped SKU search-picker (with qty) as the
+  portal, scoped to the form's chosen supplier — alongside the existing free-text lines + paste.
+- **Free-text SKU entry** is now available inside the portal picker too (type any SKU code + qty), for SKUs
+  not in the searchable list.
+
 ## v26.041 - Sample shipments: perf (silent edits), add-contents on create, dev qty, auto-accept
 
 - **Performance:** accepting a request and adding/editing/removing contents no longer refetch the whole

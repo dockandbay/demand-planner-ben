@@ -3300,8 +3300,9 @@ async function openSampleCandidates(suppliers) {   // dev-sample versions whose 
 async function supplierSkuCandidates(suppliers, q) {   // bulk SKUs, scoped to a supplier via products.supplier_multiple_all
   const scoped = Array.isArray(suppliers); const params = []; const where = [];
   if (scoped) { params.push(suppliers); where.push(`EXISTS (SELECT 1 FROM unnest(string_to_array(coalesce(p.supplier_multiple_all,''),',')) sm WHERE btrim(sm) = ANY($${params.length}))`); }
-  if (q) { params.push('%' + q + '%'); where.push(`(p.sku ILIKE $${params.length} OR coalesce(p.product_name_final,p.product_name,'') ILIKE $${params.length})`); }
-  return (await pool.query(`SELECT p.sku, coalesce(p.product_name_final,p.product_name,'') description, coalesce(p.size_short,'') size, coalesce(p.colour_long,'') colour
+  if (q) { params.push('%' + q + '%'); const p = '$' + params.length;
+    where.push(`(p.sku ILIKE ${p} OR coalesce(p.product_name_final,p.product_name,'') ILIKE ${p} OR coalesce(p.colour_long,'') ILIKE ${p} OR coalesce(p.release_window,'') ILIKE ${p})`); }
+  return (await pool.query(`SELECT p.sku, coalesce(p.product_name_final,p.product_name,'') description, coalesce(p.size_short,'') size, coalesce(p.colour_long,'') colour, coalesce(p.release_window,'') release_window
     FROM planner.products p ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY p.sku LIMIT 300`, params)).rows;
 }
 function qtyOrOne(v) { var q = Math.round(Number(v) || 0); return q < 1 ? 1 : q; }   // blank/0/NaN → 1
