@@ -241,16 +241,20 @@ async function buildSKURAW() {
                 ) z WHERE wh IS NOT NULL GROUP BY sku, wh`),
     pool.query(`SELECT sku, country co, channel ch, to_char(month,'YYYY_MM') ym, units::int u
                 FROM planner.sales_actuals`),
-    pool.query(`SELECT sku, destination_warehouse wh, reference ref, quantity::int qty,
-                       to_char(estimated_delivery_date,'YYYY-MM-DD') eta, source_type type
-                FROM planner.inbound_shipments WHERE coalesce(received_quantity,0) < quantity
-                ORDER BY estimated_delivery_date`),
+    pool.query(`SELECT i.sku, i.destination_warehouse wh, i.reference ref, i.quantity::int qty,
+                       to_char(i.estimated_delivery_date,'YYYY-MM-DD') eta, i.source_type type,
+                       coalesce(su.name,'') supplier
+                FROM planner.inbound_shipments i
+                LEFT JOIN planner.purchase_orders po ON po.po = i.reference
+                LEFT JOIN planner.suppliers su ON su.id = po.supplier_id
+                WHERE coalesce(i.received_quantity,0) < i.quantity
+                ORDER BY i.estimated_delivery_date`),
     // Open POs counted in on-order but NOT yet in the inbound feed — shown as "on order / not shipped" line items
     // so the PLAN inbound list reconciles with the on-order total. Same warehouse mapping + dedup as the oo query.
     pool.query(`SELECT l.sku,
                   lower(coalesce(nullif(po.country_code,''), b.country_code)) || '_' ||
                     (CASE WHEN po.branch ILIKE '%fba%' THEN 'fba' ELSE '3pl' END) wh,
-                  po.po ref, l.qty::int qty, coalesce(po.status,'') status,
+                  po.po ref, l.qty::int qty, coalesce(po.status,'') status, coalesce(s.name,'') supplier,
                   -- estimated landing (delivery to warehouse), same calc as the SUPPLY PO view for an
                   -- unshipped PO: prod_end (override ▸ start + supplier days) + 7 (ship) + branch sea transit.
                   to_char((coalesce(po.end_production_overide,
@@ -284,14 +288,14 @@ async function buildSKURAW() {
   const i = {};
   for (const r of inbound.rows) {
     const k = r.sku + '|' + r.wh;
-    (i[k] || (i[k] = [])).push({ ref: r.ref || '', qty: r.qty || 0, eta: r.eta || null, type: r.type || 'supplier_china' });
+    (i[k] || (i[k] = [])).push({ ref: r.ref || '', qty: r.qty || 0, eta: r.eta || null, type: r.type || 'supplier_china', supplier: r.supplier || '' });
   }
   // Open POs not yet in the inbound feed — same key shape as `i`, tagged so the UI can label them "on order".
   const oi = {};
   for (const r of openpo.rows) {
     if (!r.wh) continue;
     const k = r.sku + '|' + r.wh;
-    (oi[k] || (oi[k] = [])).push({ ref: r.ref || '', qty: r.qty || 0, eta: r.eta || null, type: 'open_po', status: r.status || '' });
+    (oi[k] || (oi[k] = [])).push({ ref: r.ref || '', qty: r.qty || 0, eta: r.eta || null, type: 'open_po', status: r.status || '', supplier: r.supplier || '' });
   }
   return { p, s, i, oi };
 }
@@ -6747,7 +6751,7 @@ const POS_SQL_PORTAL = `
   FROM planner.v_po_finance calc4
   LEFT JOIN planner.dtc_shipment_details dsd ON dsd.po = calc4.po
   LEFT JOIN planner.key_accounts ka ON lower(trim(ka.name)) = lower(trim(calc4.client))
-  WHERE supplier_name = ANY($1) ORDER BY po`;
+  WHERE supplier_name = ANY($1) AND coalesce(status,'') NOT ILIKE '%future%' ORDER BY po`;   // FUTURE POs are hidden from the supplier portal
 function loadPortalPage() { try { return readFileSync(new URL('./supply/portal.html', import.meta.url), 'utf8'); } catch { return '<!doctype html><meta charset=utf8>portal page missing'; } }
 const PORTAL_PAGE = DEV ? null : loadPortalPage();
 const portalToken = () => crypto.randomBytes(24).toString('hex');

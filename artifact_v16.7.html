@@ -1090,10 +1090,10 @@ DATA=(DATA||[]).filter(function(r){
         if(!wh)return;
         var v=SKUI[sku+'|'+wh];
         if(v){ var arr=Array.isArray(v)?v:[v];
-          arr.forEach(function(s){md.inb.push({ref:s.ref||'',qty:s.qty||0,eta:s.eta||null,type:s.type||'supplier_china',wh:wh});}); }
+          arr.forEach(function(s){md.inb.push({ref:s.ref||'',qty:s.qty||0,eta:s.eta||null,type:s.type||'supplier_china',supplier:s.supplier||'',wh:wh});}); }
         // open POs not yet shipped/in the inbound feed — counted in On Order, shown here so the list reconciles
         var op=SKUOI[sku+'|'+wh];
-        if(op){ (Array.isArray(op)?op:[op]).forEach(function(s){md.inb.push({ref:s.ref||'',qty:s.qty||0,eta:s.eta||null,type:'open_po',status:s.status||'',wh:wh});}); }
+        if(op){ (Array.isArray(op)?op:[op]).forEach(function(s){md.inb.push({ref:s.ref||'',qty:s.qty||0,eta:s.eta||null,type:'open_po',status:s.status||'',supplier:s.supplier||'',wh:wh});}); }
       });
       // demand and pka are left alone — buildLiveDemand() rebuilds demand from FC_OUTPUTS
       // and the cascade. mtd_<mon> is left alone (will be 0 for current month until the
@@ -2554,8 +2554,8 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
         tg3:t3*wA2,tgF:tf*wF2,cv3:wA2>0?rc3/wA2:999,cvF:wF2>0?rcF/wF2:999,isDisc:false,
         bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],bPM:buyDisplay[i]?`arrives ${PROJ[Math.min(i+lm,PROJ.length-1)].lbl}`:'',
         fdQ:fbaBuyDisp[i]||0,tx:transferOut[i]||0,overdue:buyOverdue[i]||false,
-        inbLines3:remInb3.map(s=>`${s.ref} \u00b7 ${fmt(s.qty)} units \u00b7 ${s.eta} \u00b7 ${((s.type||'').startsWith('supplier'))?'supplier':((s.type||'').includes('transfer'))?'transfer':(s.type||'')}`),
-        inbLinesF:remInbF.map(s=>`${s.ref} \u00b7 ${fmt(s.qty)} units \u00b7 ${s.eta} \u00b7 ${((s.type||'').startsWith('supplier'))?'supplier':((s.type||'').includes('transfer'))?'transfer':(s.type||'')}`)};
+        inbLines3:remInb3.map(s=>`${s.ref} \u00b7 ${fmt(s.qty)} units \u00b7 ${dateDMY(s.eta)} \u00b7 ${s.supplier||(((s.type||'').startsWith('supplier'))?'supplier':((s.type||'').includes('transfer'))?'transfer':(s.type||''))}`),
+        inbLinesF:remInbF.map(s=>`${s.ref} \u00b7 ${fmt(s.qty)} units \u00b7 ${dateDMY(s.eta)} \u00b7 ${s.supplier||(((s.type||'').startsWith('supplier'))?'supplier':((s.type||'').includes('transfer'))?'transfer':(s.type||''))}`)};
     }
 
     const afterDisc=discCutoff&&key>=discCutoff;
@@ -2655,10 +2655,10 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     });
 
     const inbLines3=[
-      ...conf3.map(s=>`${s.ref} \u00b7 ${fmt(s.qty)} units \u00b7 ${s.eta} \u00b7 ${((s.type||'').startsWith('supplier'))?'supplier':((s.type||'').includes('transfer'))?'transfer':(s.type||'')}`),
+      ...conf3.map(s=>`${s.ref} \u00b7 ${fmt(s.qty)} units \u00b7 ${dateDMY(s.eta)} \u00b7 ${s.supplier||(((s.type||'').startsWith('supplier'))?'supplier':((s.type||'').includes('transfer'))?'transfer':(s.type||''))}`),
       ...(assumedQty3>0?[`Buy Plan Assumed \u00b7 ${fmt(assumedQty3)} units \u00b7 from ${buyFromLbl[i]||'order'}`]:[])
     ];
-    const inbLinesF=confF.map(s=>`${s.ref} \u00b7 ${fmt(s.qty)} units \u00b7 ${s.eta} \u00b7 ${((s.type||'').startsWith('supplier'))?'supplier':((s.type||'').includes('transfer'))?'transfer':(s.type||'')}`);
+    const inbLinesF=confF.map(s=>`${s.ref} \u00b7 ${fmt(s.qty)} units \u00b7 ${dateDMY(s.eta)} \u00b7 ${s.supplier||(((s.type||'').startsWith('supplier'))?'supplier':((s.type||'').includes('transfer'))?'transfer':(s.type||''))}`);
 
     // bPM for Buy 3PL tooltip: "arrives [arrivalMonth]"
     const arrivalLbl=buyDisplay[i]?PROJ[Math.min(i+lm,PROJ.length-1)].lbl:'';

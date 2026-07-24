@@ -1741,7 +1741,7 @@
               }
               return; }
             // POs tab — status pill filters; default to PRODUCTION + SHIPPING
-            var seen={}, present=[]; _ppData.pos.forEach(function(p){ var s=(p.status||'').toUpperCase(); if(s&&!seen[s]){seen[s]=1;present.push(s);} });
+            var seen={}, present=[]; _ppData.pos.forEach(function(p){ var s=(p.status||'').toUpperCase(); if(s==='FUTURE')return; if(s&&!seen[s]){seen[s]=1;present.push(s);} });   // FUTURE POs are hidden from the portal (no pill, not listed)
             var ordered=PO_STATUSES.filter(function(s){return seen[s];}).concat(present.filter(function(s){return PO_STATUSES.indexOf(s)<0;}));
             if(PORTAL_PO_ST===null)PORTAL_PO_ST={};
             ordered.forEach(function(s){ if(PORTAL_PO_ST[s]===undefined)PORTAL_PO_ST[s]=(s==='PRODUCTION'||s==='SHIPPING'); });
@@ -1760,6 +1760,7 @@
               +(PORTAL_PO_EXC?'<span class="mut tiny">showing exceptions — all statuses</span>':'')+'</div>';
             // a PO/client search OVERRIDES the status pills; the dropdown filters (production / country / branch) always AND on top
             var shown=_ppData.pos.filter(function(p){
+              if(/future/i.test(p.status||'')) return false;   // never show FUTURE POs in the portal
               if(PORTAL_PO_PROD && (p.prod_no==null?'':String(p.prod_no).trim())!==PORTAL_PO_PROD) return false;
               if(PORTAL_PO_CTRY && (p.country||'').trim()!==PORTAL_PO_CTRY) return false;
               if(PORTAL_PO_BR && (p.branch||'').trim()!==PORTAL_PO_BR) return false;

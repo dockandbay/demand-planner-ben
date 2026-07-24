@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.073 - Portal hides FUTURE POs; buy-plan inbound line shows dd-mmm-yy + supplier name
+
+- **Supplier portal** no longer shows **FUTURE** POs — excluded from the bootstrap query (all portal tabs) and
+  from the PO grid + its status pills client-side (also covers the admin preview). The FUTURE filter pill is
+  gone (the pill list is data-derived).
+- **Buy plan inbound lines** (PLAN popup) now show the ETA as **dd-mmm-yy** (via `dateDMY`) and the **supplier
+  name** instead of the generic "supplier"/"transfer" category word. Supplier is joined from the PO in the
+  inbound + open-PO feeds (`_SKU_RAW.i/.oi` now carry `supplier`); falls back to the category word when unknown.
+
 ## v26.072 - Start-deposit due = production start + 7 days; delete latest timeline message
 
 - **Start deposit due date** is now auto-calculated as **production start + 7 days** (was the exact production
