@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.074 - Buy plan: FBA Shortfall shown in whole cartons; demand-grid scrollbar gap
+
+- **FBA Shortfall** row in the SKU plan popup is now shown **rounded up to whole cartons** (using the SKU's
+  carton size `pd.cp`) — a shortfall is topped up in full cartons, matching the Buy FBA carton logic. (The
+  stock roll-forward still uses exact demand; only the displayed shortfall is carton-rounded.)
+- **Demand planner grid**: added a 16px bottom padding to the scroll container (`.tw`) so the horizontal
+  scrollbar sits below the data and no longer clips the last row (notably when filtered to a few SKUs).
+
 ## v26.073 - Portal hides FUTURE POs; buy-plan inbound line shows dd-mmm-yy + supplier name
 
 - **Supplier portal** no longer shows **FUTURE** POs — excluded from the bootstrap query (all portal tabs) and

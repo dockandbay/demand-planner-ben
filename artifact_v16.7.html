@@ -248,7 +248,7 @@ body{font-family:system-ui,-apple-system,sans-serif;font-size:12px;color:#1a1a1a
 .yr-arrow.dn .yr-arrow-r{color:#dc2626;opacity:.75}
 .yr-arrow-r-lbl{font-size:8.5px;color:#888;text-transform:uppercase;letter-spacing:.04em;font-weight:600}
 .status{font-size:11px;color:#888;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-.tw{overflow-x:auto;max-height:calc(100vh - 184px);overflow-y:auto;border:1px solid #e0e0e0;border-radius:6px}
+.tw{overflow-x:auto;max-height:calc(100vh - 184px);overflow-y:auto;border:1px solid #e0e0e0;border-radius:6px;padding-bottom:16px}   /* bottom gap so the horizontal scrollbar sits below the data and never clips the last row (esp. when filtered to few SKUs) */
 table{border-collapse:collapse;font-size:11px;table-layout:fixed}
 thead th{position:sticky;top:0;z-index:2;background:#f3f3f1;padding:3px 4px;font-weight:500;font-size:10px;color:#666;border-bottom:2px solid #d5d5d5;white-space:nowrap;overflow:hidden;text-align:right;vertical-align:bottom}
 thead th.lft{text-align:left}
@@ -2717,7 +2717,7 @@ function buildTable(proj,md,pd,is3,hasFBA){
     ,true));
     rows.push(dr('SOH FBA (closing)',proj,p=>p.isActual?`<td style="background:#f0fdf4;color:#166534;font-weight:700">${fmt(p.cF)}</td>`:c(fmt(p.cF),p.cF<0?'red':p.cvF<tf?'red':'grn')));
     rows.push(dr('FBA Target Units',proj,p=>c(fmt(Math.round(p.tgF)),'tgt')));
-    if(proj.some(p=>p.fSh>0))rows.push(dr('FBA Shortfall',proj,p=>p.fSh>0?c(fmt(p.fSh),'red'):c('\u2014','cv0')));
+    if(proj.some(p=>p.fSh>0))rows.push(dr('FBA Shortfall',proj,p=>{ if(!(p.fSh>0))return c('\u2014','cv0'); var _cp=(pd.cp)||1; var _fs=Math.ceil(p.fSh/_cp)*_cp; return c(fmt(_fs),'red'); }));   // shown rounded UP to whole cartons (topped up in full cartons)
   }
 
   // ── 3PL Stock ──
