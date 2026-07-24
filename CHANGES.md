@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.071 - ORDER PLAN exception counters (admin): top-nav tab + per-PO sub-tab
+
+Surfaces unapproved order-plan exceptions (partial cartons / supplier risk / discontinued arrival / country
+risk) where you can see them:
+- **Top-level ORDER PLAN menu tab** now shows a red counter of the **number of POs impacted** by any of these.
+- **Per-PO ORDER PLAN sub-tab** (in the PURCHASE ORDERS detail) shows a badge when that PO has any unapproved
+  exception — flows through the shared `poExceptions()` so the PO-ref aggregate badge stays consistent.
+- New endpoint `/api/supply/order-plan-exceptions` → `{count, byPo}`; gates mirror the ORDER PLAN grid
+  (partials + supplier-risk exclude complete/shipping/delivered; discontinued + country-risk exclude complete).
+  Fetched on load, refreshed on any PO/order-plan edit (`invalidateDerived`). No migration.
+
 ## v26.070 - Supplier portal: Direct-to-Client re-approval shows WHAT changed
 
 When a supplier has approved the Direct-to-Client details and D&B later edits them, the portal now shows the

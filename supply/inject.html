@@ -605,6 +605,7 @@
     if(u.indexOf('SHIP')>=0||u.indexOf('READY')>=0)return 'bg-red';
     if(u.indexOf('COMPLETE')>=0||u.indexOf('DELIVER')>=0)return 'bg-green'; return 'bg-blue'; }
   var STBG={'bg-neutral':['#f3f4f6','#4b5563'],'bg-amber':['#fef3c7','#92400e'],'bg-red':['#fee2e2','#991b1b'],'bg-green':['#dcfce7','#166534'],'bg-blue':['#dbeafe','#1e40af']};
+  var _opExc={count:0,byPo:{}};   // ORDER PLAN unapproved exceptions (partials/suprisk/disc/country) per PO → nav counter + sub-tab badge
   var cache={},current=null,depRefs=null,poBy={},shipBy={},batchList=[],prodList=[],shipList=[],supplierList=[],branchList=[],crossdockList=[],poLookupList=[];
   var _navToken=0;   // bumps on every section / PO sub-tab navigation; async renders check it so a slow fetch from a view you've left can't overwrite the newer one (fixes fast-clicking loading the wrong view)
   var _pendingPO=null,_pendingPOTab=null,_pendingShip=null,_pendingOP=null,_pendingDep=null,_pendingSampleRef=null;   // cross-view navigation: expand this PO / shipment, pre-filter order plan / deposit register, after the target view renders
@@ -614,7 +615,7 @@
   var _shipPatchRow=null;  // set by the shipments grid to patch a SINGLE shipment row + its open expand in place
   var _sampleReload=null;  // set by the Samples grid so detail-panel actions can refresh it
   // a write to a PO / shipment / deposit changes the derived views — drop their caches so they re-fetch fresh
-  function invalidateDerived(){ ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments','manufacturing'].forEach(function(k){delete cache[k];}); try{ if(typeof _navCounts!=='undefined'){_navCounts.manufacturing=undefined;_navCounts.paydue=undefined;} }catch(e){} }   // 'manufacturing' + 'paydue' nav badges recompute after a PO/order-plan/payment edit → tabs update on next nav; no hard refresh
+  function invalidateDerived(){ ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments','manufacturing'].forEach(function(k){delete cache[k];}); try{ if(typeof _navCounts!=='undefined'){_navCounts.manufacturing=undefined;_navCounts.paydue=undefined;} }catch(e){} try{ refreshOpExc(); }catch(e){} }   // 'manufacturing' + 'paydue' nav badges recompute after a PO/order-plan/payment edit → tabs update on next nav; no hard refresh
 
   function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function shortUser(s){return String(s==null?'':s).replace(/@dockandbay\.com\b/gi,'@');}  // ben@dockandbay.com → ben@ (display only)
@@ -2576,6 +2577,9 @@
     var _pse=r.require_confirmation?prodStatusException(r.status, r.prod_start, r.prod_end, today):''; if(_pse) dates.push('Production status: '+_pse);
     var timeline=[]; if(Number(r.unread_notes)>0) timeline.push(r.unread_notes+' unread supplier note'+(r.unread_notes>1?'s':''));
     var oplan=[]; if(Number(r.orderplan_unconfirmed)>0) oplan.push(r.orderplan_unconfirmed+' unconfirmed order-plan change'+(r.orderplan_unconfirmed>1?'s':''));
+    // unapproved order-plan exceptions for this PO (from /api/supply/order-plan-exceptions) → ORDER PLAN sub-tab badge
+    var _oe=(_opExc&&_opExc.byPo)?_opExc.byPo[r.po]:null;
+    if(_oe){ if(_oe.partials)oplan.push('Unapproved partial carton(s)'); if(_oe.suprisk)oplan.push('Supplier risk to approve'); if(_oe.disc)oplan.push('Discontinued arrival to approve'); if(_oe.country)oplan.push('Country risk to approve'); }
     // Pre-shipment docs (SHIPMENTS tab): overdue once production has ended (prod_end = override ▸ computed) and
     // the required branch document is missing. Rule 1 (AU Coghlans): ASN pallet labels.
     // Only PRODUCTION / ready-to-ship orders raise a pre-shipment-docs action; a "not required" tick suppresses it.
@@ -7092,7 +7096,18 @@
     app.appendChild(rootEl);
     rootEl.querySelectorAll('.stab').forEach(function(b){b.onclick=function(){selectSection(b.dataset.k);};});
     var _navSel=rootEl.querySelector('#supply-nav-sel'); if(_navSel)_navSel.onchange=function(){selectSection(this.value);};
-    fetch('/api/supply/samples').then(function(r){return r.json();}).then(function(d){ if(Array.isArray(d)){ cache['samples']=d; samplesNavBadge(d); } }).catch(function(){}); }
+    fetch('/api/supply/samples').then(function(r){return r.json();}).then(function(d){ if(Array.isArray(d)){ cache['samples']=d; samplesNavBadge(d); } }).catch(function(){});
+    refreshOpExc(); }
+  // ORDER PLAN exception counter (# POs impacted by unapproved partials / supplier-risk / discontinued / country-risk)
+  function orderPlanNavBadge(n){ var btn=document.querySelector('#supply-subnav .stab[data-k="order-plan"]'); if(btn)btn.innerHTML='ORDER PLAN'+(n>0?' <span class="ex-badge" title="'+n+' PO(s) with unapproved order-plan exceptions">'+n+'</span>':'');
+    var opt=document.querySelector('#supply-nav-sel option[value="order-plan"]'); if(opt)opt.textContent='ORDER PLAN'+(n>0?' ('+n+')':''); }
+  function refreshOpExc(){ fetch('/api/supply/order-plan-exceptions').then(function(r){return r.json();}).then(function(d){ if(!d||d.error)return;
+    _opExc={count:d.count||0,byPo:d.byPo||{}}; orderPlanNavBadge(_opExc.count);
+    // refresh the ORDER PLAN sub-tab badge on any open PO detail (in place)
+    document.querySelectorAll('[id^="podet-"]').forEach(function(pd){ var nav=pd.querySelector('.po-subnav'); if(!nav)return; var pt0=nav.querySelector('.potab[data-po]'); if(!pt0)return; var po=pt0.dataset.po, r=poBy[po]; if(!r)return;
+      var exc=poExceptions(r, pd._poDetail); nav.querySelectorAll('.potab').forEach(function(btn){ if(btn.dataset.pt!=='oplan')return; var n=exc.oplan.length, bd=btn.querySelector('.ex-badge');
+        if(n>0){ if(bd){bd.textContent=n;} else btn.insertAdjacentHTML('beforeend',' <span class="ex-badge" title="'+n+' order-plan exception'+(n>1?'s':'')+'">'+n+'</span>'); } else if(bd){bd.remove();} }); });
+  }).catch(function(){}); }
   function samplesNavBadge(rows){ var n=(rows||[]).reduce(function(a,r){return a+(r.unread_notes||0);},0);   // total unread supplier notes
     var btn=document.querySelector('#supply-subnav .stab[data-k="samples"]'); if(btn)btn.innerHTML='SAMPLES'+(n>0?' <span class="ex-badge">'+n+'</span>':'');
     var opt=document.querySelector('#supply-nav-sel option[value="samples"]'); if(opt)opt.textContent='SAMPLES'+(n>0?' ('+n+')':''); }

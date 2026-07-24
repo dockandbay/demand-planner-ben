@@ -2590,6 +2590,12 @@ app.get('/api/supply/:section', async (req, res) => {
         const air = await q(`SELECT id, min_kg, max_kg, rate_per_kg FROM planner.air_freight_rates ORDER BY min_kg`).catch(() => []);
         return res.json({ tax, freight, duty, branches, air, sizes: ['20ft','40ft','LCL'] });
       }
+      case 'order-plan-exceptions': {   // # POs with unapproved partial/supplier/discontinue/country exceptions → nav + sub-tab badges
+        const exr = (await pool.query(OP_EXC_SQL)).rows;
+        const byPo = {}, pos = new Set();
+        exr.forEach(x => { pos.add(x.po); (byPo[x.po] = byPo[x.po] || {})[x.typ] = true; });
+        return res.json({ count: pos.size, byPo });
+      }
       default:
         return res.status(404).json({ error: 'unknown section: ' + req.params.section });
     }
@@ -7145,6 +7151,46 @@ app.post('/api/supply/bi/erp-compare/ignore', async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// ORDER PLAN unapproved exceptions per PO (partials / supplier-risk / discontinued / country-risk). Drives the
+// ORDER PLAN top-nav counter (# POs impacted) + the per-PO ORDER PLAN sub-tab badge. Gates mirror the grid:
+// partials + supplier-risk exclude complete/shipping/delivered; discontinued + country-risk exclude complete only.
+const OP_EXC_SQL = `
+  SELECT DISTINCT po, typ FROM (
+    SELECT l.po, 'partials'::text typ
+      FROM planner.v_purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po
+      WHERE l.full_carton_check LIKE '%⚠%' AND coalesce(p.status,'') !~* '(complete|shipping|deliver)'
+    UNION ALL
+    SELECT l.po, 'suprisk'
+      FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po JOIN planner.products pr ON pr.sku=l.sku
+      WHERE coalesce(l.supplier_risk_approved,false)=false AND coalesce(l.qty,0)>0
+        AND coalesce(p.status,'') !~* '(complete|shipping|deliver)'
+        AND coalesce(pr.supplier_multiple_all,'')<>'' AND coalesce(p.supplier_name,'')<>''
+        AND NOT (lower(trim(p.supplier_name)) = ANY(SELECT lower(trim(x)) FROM unnest(string_to_array(pr.supplier_multiple_all, ',')) x))
+    UNION ALL
+    SELECT l.po, 'disc'
+      FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po
+      LEFT JOIN planner.branches b ON b.name=p.branch JOIN planner.products pr ON pr.sku=l.sku
+      LEFT JOIN LATERAL (SELECT f.landing_date FROM planner.flexport_shipments f
+        WHERE f.flex_id=p.flexport_reference OR f.shipment_name=p.po OR f.shipment_name=p.shipment_ref
+        ORDER BY (f.flex_id=p.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true
+      CROSS JOIN LATERAL (SELECT CASE upper(coalesce(nullif(p.country_code,''), b.country_code, ''))
+          WHEN 'AU' THEN pr.discontinue_date_au_final WHEN 'CA' THEN pr.discontinue_date_ca
+          ELSE pr.discontinue_date_final END disc) dsel
+      WHERE coalesce(l.discontinue_approved,false)=false AND coalesce(l.qty,0)>0
+        AND coalesce(p.status,'') NOT ILIKE '%complete%'
+        AND dsel.disc ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+        AND coalesce(to_char(p.delivery_date_overide,'YYYY-MM-DD'), to_char(p.landing_date_overide,'YYYY-MM-DD'), to_char(fx.landing_date,'YYYY-MM-DD')) > dsel.disc
+    UNION ALL
+    SELECT l.po, 'country'
+      FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po
+      LEFT JOIN planner.branches b ON b.name=p.branch
+      WHERE coalesce(l.country_risk_approved,false)=false AND coalesce(l.qty,0)>0
+        AND coalesce(p.status,'') NOT ILIKE '%complete%'
+        AND coalesce(p.branch,'') NOT ILIKE '%direct to client%'
+        AND upper(coalesce(nullif(p.country_code,''), b.country_code,'')) IN ('UK','US','EU','AU','CA')
+        AND NOT EXISTS (SELECT 1 FROM planner.v_product_availability va
+          WHERE va.sku=l.sku AND upper(va.country)=upper(coalesce(nullif(p.country_code,''), b.country_code,'')) AND va.is_available)
+  ) z`;
 // Apply a consolidation: re-point the merge shipment's POs onto the keep shipment, then mark applied.
 app.post('/api/supply/bi/apply-consolidate', async (req, res) => {
   const b = req.body || {};
