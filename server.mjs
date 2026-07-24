@@ -2614,6 +2614,7 @@ app.get('/api/supply/:section', async (req, res) => {
             UNION ALL SELECT created_at, 'deposit_added', 'Deposit '||coalesce(nullif(reference,''),'(unreferenced)')||' added', reference FROM planner.deposits WHERE created_at IS NOT NULL
             UNION ALL SELECT created_at, 'sample_created', 'Sample request SR-'||id||' created', 'SR-'||id FROM planner.sample_requests WHERE created_at IS NOT NULL
             UNION ALL SELECT submitted_at, 'supplier_submission', 'Supplier submitted '||kind||' on '||po, po FROM planner.supplier_submissions WHERE submitted_at IS NOT NULL
+            UNION ALL SELECT ran_at, 'erp_push', coalesce(nullif(message,''),'Line items updated to ERP'), '' FROM planner.etl_runs WHERE job='supply_erp_push' AND ran_at IS NOT NULL
           ) z ORDER BY at DESC NULLS LAST LIMIT 10`));
       default:
         return res.status(404).json({ error: 'unknown section: ' + req.params.section });

@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.082 - Recent changes drawer: add "updated line items to ERP"
+
+The 🕘 Recent changes drawer now also counts **ERP line-item pushes** as a major change (from
+`etl_runs` job `supply_erp_push`, ⬆️ icon) — e.g. "N line(s) staged to push to ERP … for PO-X". Sits in the
+same newest-first top-10 as the other events.
+
 ## v26.081 - Branch delivery notes → flow onto POs + portal
 
 New **Delivery notes** field on branches (CONFIG ▸ Branches, editable). It flows onto a PO as **Branch delivery
