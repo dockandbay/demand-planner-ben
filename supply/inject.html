@@ -5947,15 +5947,18 @@
     var bl=new Blob([xbToCsv(m)],{type:'text/csv'}); var u=URL.createObjectURL(bl); var a=document.createElement('a'); a.href=u; a.download=xbFilename(run); document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); }
   function xbCopy(run, ccy, amt, btn){ var m=xeroBillMatrix(run,ccy,amt); if(!m){alert('No payments in this run to export (other payments are excluded).');return;}
     var tsv=xbToTsv(m);   // TAB-separated so it pastes into separate Google Sheets columns
-    navigator.clipboard.writeText(tsv).then(function(){ if(btn){var o=btn.textContent; btn.textContent='✓'; setTimeout(function(){btn.textContent=o;},1200);} }).catch(function(){ alert('Copy failed — your browser blocked clipboard access.'); }); }
+    navigator.clipboard.writeText(tsv).catch(function(){ alert('Copy failed — your browser blocked clipboard access.'); }); }
   // Payment SUMMARY copy (TAB-separated): supplier + amount + payment reference, then the full line table
   // (Reference, Amount, Type, Production ref, Deposit ref) — ALL lines incl. "other". Pastes into Sheets.
   function xbSummaryTsv(run, ccy, amt){
     var altAmt=Number(String(amt==null?'':amt).replace(/,/g,''));
-    var payAmt=(ccy && ccy!=='USD' && altAmt>0) ? (fmtAmt(altAmt)+' '+ccy) : (fmtAmt(run.total)+' USD');
+    var useAlt=(ccy && ccy!=='USD' && altAmt>0);
+    var amtNum=useAlt?fmtAmt(altAmt):fmtAmt(run.total), amtCcy=useAlt?ccy:'USD';
+    var payAmt=amtNum+' '+amtCcy;
     var inv='SUPPLIER-PAYMENT-'+(run.supplier_code?run.supplier_code+'-':'')+run.dt;
     var clean=function(c){return String(c==null?'':c).replace(/[\t\n\r]/g,' ');};
-    var out=[['SUPPLIER',run.supplier].join('\t'),['Payment amount',payAmt].join('\t'),['Payment reference',inv].join('\t'),'',
+    var out=['See below payment detail for '+run.supplier+' of '+payAmt,'',
+      ['SUPPLIER',run.supplier].join('\t'),['Payment amount',payAmt].join('\t'),['Payment reference',inv].join('\t'),'',
       ['REFERENCE','AMOUNT','TYPE','PRODUCTION REF','DEPOSIT REF'].join('\t')];
     (run.lines||[]).forEach(function(l){ out.push([l.reference,l.amount,l.type,l.prod_no||'',l.deposit_ref||''].map(clean).join('\t')); });
     return out.join('\n');
@@ -5963,7 +5966,9 @@
   // HTML version of the summary — a basic inline-styled table that pastes neatly into Gmail (and Sheets).
   function xbSummaryHtml(run, ccy, amt){
     var altAmt=Number(String(amt==null?'':amt).replace(/,/g,''));
-    var payAmt=(ccy && ccy!=='USD' && altAmt>0) ? (fmtAmt(altAmt)+' '+ccy) : (fmtAmt(run.total)+' USD');
+    var useAlt=(ccy && ccy!=='USD' && altAmt>0);
+    var amtNum=useAlt?fmtAmt(altAmt):fmtAmt(run.total), amtCcy=useAlt?ccy:'USD';
+    var payAmt=amtNum+' '+amtCcy;
     var inv='SUPPLIER-PAYMENT-'+(run.supplier_code?run.supplier_code+'-':'')+run.dt;
     var cell='border:1px solid #cccccc;padding:4px 8px', hcell=cell+';background:#f2f2f2;text-align:left;font-weight:bold';
     var rows=(run.lines||[]).map(function(l){
@@ -5973,13 +5978,14 @@
         +'<td style="'+cell+'">'+esc(l.prod_no||'')+'</td>'
         +'<td style="'+cell+'">'+esc(l.deposit_ref||'')+'</td></tr>'; }).join('');
     return '<div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#111">'
+      +'<p style="margin:0 0 10px">See below payment detail for <b>'+esc(run.supplier)+'</b> of <b>'+esc(amtNum)+'</b> '+esc(amtCcy)+'</p>'
       +'<p style="margin:0 0 10px"><b>Supplier:</b> '+esc(run.supplier)+'<br><b>Payment amount:</b> '+esc(payAmt)+'<br><b>Payment reference:</b> '+esc(inv)+'</p>'
       +'<table style="border-collapse:collapse;font-size:13px"><thead><tr>'
       +'<th style="'+hcell+'">Reference</th><th style="'+hcell+';text-align:right">Amount</th><th style="'+hcell+'">Type</th><th style="'+hcell+'">Production ref</th><th style="'+hcell+'">Deposit ref</th>'
       +'</tr></thead><tbody>'+rows+'</tbody></table></div>';
   }
   function xbCopySummary(run, ccy, amt, btn){ if(!(run.lines||[]).length){alert('No payments in this run.');return;}
-    function done(){ if(btn){var o=btn.textContent; btn.textContent='✓'; setTimeout(function(){btn.textContent=o;},1200);} }
+    function done(){}   // no button state change — click just copies (Ben's request)
     function fail(){ alert('Copy failed — your browser blocked clipboard access.'); }
     var html=xbSummaryHtml(run,ccy,amt), text=xbSummaryTsv(run,ccy,amt);
     // write rich (text/html → Gmail / Sheets) + plain (TSV fallback); fall back to plain-text write if needed

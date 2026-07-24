@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.064 - Payments Report copy buttons: no button state change + email intro line
+
+- **Copy for email** and **Copy for Xero** buttons no longer swap to a ✓/✗ — a click just copies to the
+  clipboard, full stop (Ben's request). (They previously wiped their own SVG icon via `btn.textContent`,
+  which left the icon blank and the button looking dead — fixed.)
+- **Copy for email** now leads with a sentence before the details:
+  *"See below payment detail for **[supplier]** of **[amount]** USD"* — supplier and amount bold, amount =
+  that run's payment amount (bank amount + ccy if set, else USD total). Added to both the rich-HTML (Gmail)
+  and plain-text clipboard payloads.
+
 ## v26.063 - PRODUCT ▸ Master data: dates shown as dd-mmm-yy (app-consistent)
 
 On PRODUCT ▸ Master data, the "Development started ▸ blank = created …" hint and the Status "approved …"
