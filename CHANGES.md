@@ -3,6 +3,20 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.104 - Auto Forecast now measures the category-vs-SKU gap (fixes the empty forward view)
+
+The Auto Forecast report only read SKU-level forecasts (`forecast_outputs`), which tail off in the future
+(new SKUs not created yet, current ones discontinued) — so the forward view was nearly empty. It now
+computes the **buy = category (subcategory) forecast − Σ SKU forecasts**, floored at 0, per subcategory ×
+market × month:
+- Category forecast (units) comes from `planner.forecasts` (level='subcategory'); SKU forecast from
+  `forecast_outputs`. The gap is the top-up the SKU plan hasn't captured (e.g. Hair Wrap Nov-27: category
+  10,355, SKU 0 → buy 10,355).
+- Each month's gap is ordered at **demand month − lead time** (supplier production + China→market sea lead;
+  per-market). **Pure incremental** — no stock netting, no forward cover (per Ben).
+- Month window extended to cover the category horizon; removed the now-inert "cover target" control and
+  updated the model description on the report.
+
 ## v26.103 - Carton labels: hide the GRS logo when the SKU has no GRS material
 
 Carton labels only show the GRS logo when the SKU actually has a `grs_material` value (matches the

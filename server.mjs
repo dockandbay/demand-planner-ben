@@ -5825,7 +5825,8 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
   try {
     // window START = the CURRENT month (don't plan months already in the past), clamped to the forecast data
     // range; END = the last forecast month. (Was hardcoded 2026-06, which went stale once we passed it.)
-    const _fr = (await pool.query(`SELECT to_char(min(month),'YYYY-MM') mn, to_char(max(month),'YYYY-MM') mx FROM planner.forecast_outputs`)).rows[0] || {};
+    const _fr = (await pool.query(`SELECT to_char(min(month),'YYYY-MM') mn, to_char(max(month),'YYYY-MM') mx FROM (
+      SELECT month FROM planner.forecast_outputs UNION ALL SELECT month FROM planner.forecasts WHERE level='subcategory') z`)).rows[0] || {};
     const _fMin = _fr.mn || '2026-06', _fMax = _fr.mx || '2027-12', _now = new Date().toISOString().slice(0, 7);
     const dataMin = (_now > _fMin ? _now : _fMin), dataMax = (dataMin > _fMax ? dataMin : _fMax);
     // display window = 12 months from the window start (current month)
@@ -5843,20 +5844,23 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
     let truncated=false;
     for(const mk of markets){
       const lc=leadCol[mk];
-      const [dem,stk,lead,cost]=await Promise.all([
+      const [dem,cat,lead,cost]=await Promise.all([
+        // SKU forecast (units) aggregated to subcategory × market
         pool.query(`SELECT p.subcategory s, to_char(fo.month,'YYYY-MM') m, sum(fo.units)::numeric u
           FROM planner.forecast_outputs fo JOIN planner.products p ON p.sku=fo.sku
           WHERE split_part(fo.warehouse,'_',1)=$1 AND p.subcategory IS NOT NULL GROUP BY 1,2`,[mk]),
-        pool.query(`SELECT p.subcategory s, sum(i.available)::numeric u FROM planner.v_product_inventory i
-          JOIN planner.products p ON p.sku=i.sku WHERE split_part(i.warehouse,'_',1)=$1 AND p.subcategory IS NOT NULL GROUP BY 1`,[mk]),
+        // CATEGORY (subcategory) forecast (units) for this market — planner.forecasts level='subcategory'
+        pool.query(`SELECT subcategory s, to_char(month,'YYYY-MM') m, sum(units)::numeric u
+          FROM planner.forecasts WHERE level='subcategory' AND upper(country)=$1 GROUP BY 1,2`,[mk.toUpperCase()]),
+        // lead = supplier production lead + China→market sea lead (weeks → months)
         pool.query(`SELECT subcategory s, avg(coalesce(production_lead_time_weeks,0)+coalesce(${lc},0)) wk
           FROM planner.products WHERE subcategory IS NOT NULL GROUP BY 1`),
         pool.query(`SELECT pr.subcategory s, avg(l.cost_price) c FROM planner.purchase_order_lines l
           JOIN planner.products pr ON pr.sku=l.sku WHERE pr.subcategory IS NOT NULL AND l.cost_price>0 GROUP BY 1`),
       ]);
-      const demand={}, stock={}, leadM={}, unitCost={};
-      dem.rows.forEach(r=>{ (demand[r.s]||(demand[r.s]={}))[r.m]=Number(r.u); });
-      stk.rows.forEach(r=> stock[r.s]=Number(r.u));
+      const skuDem={}, catDem={}, leadM={}, unitCost={};
+      dem.rows.forEach(r=>{ (skuDem[r.s]||(skuDem[r.s]={}))[r.m]=Number(r.u); });
+      cat.rows.forEach(r=>{ (catDem[r.s]||(catDem[r.s]={}))[r.m]=Number(r.u); });
       lead.rows.forEach(r=> leadM[r.s]=Math.max(1,Math.round(Number(r.wk)/4.345)));   // weeks→months
       cost.rows.forEach(r=> unitCost[r.s]=Number(r.c));
       // primary supplier per subcat = volume-dominant supplier on its PO history
@@ -5870,20 +5874,20 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
         .forEach(r=> supName[r.s]=r.nm);
       const terms=(await pool.query(`SELECT name,code,start_deposit_pct,completion_pct,balance_pct,production_days,credit_days FROM planner.suppliers`)).rows
         .reduce((a,t)=>{a[t.name]=t;return a;},{});
-      for(const s of Object.keys(demand)){
+      // AUTO FORECAST = category (subcategory) forecast − SKU forecast, floored at 0 → the top-up the SKU-level
+      // plan hasn't captured yet (future/undiscontinued SKUs). Order each month's gap at (demand month − lead).
+      // Pure incremental demand: no stock netting, no forward cover (per Ben — buying is driven by lead time).
+      for(const s of Object.keys(catDem)){
         const lm=leadM[s]||2, c=unitCost[s]||0, nm=supName[s]||'—';
         const t=terms[nm]||{start_deposit_pct:30,completion_pct:0,balance_pct:70,production_days:60,credit_days:0};
-        let sb=stock[s]||0;
         for(let i=0;i<allMonths.length;i++){
-          const m=allMonths[i], d=demand[s][m]||0;
-          let cover=0; for(let k=1;k<=COVER;k++) cover+=(demand[s][allMonths[i+k]]||0);
-          const arrive=Math.max(0, cover+d-sb);
-          sb=sb+arrive-d;
+          const m=allMonths[i];
+          const arrive=Math.max(0, ((catDem[s]||{})[m]||0) - ((skuDem[s]||{})[m]||0));   // the gap = units to buy this month
           if(arrive<=0) continue;
-          const om=afAddMonths(m,-lm);                       // order month
+          const om=afAddMonths(m,-lm);                       // order month = demand month − lead
           if(win.indexOf(om)>=0){
             const u=unitsBy[nm]||(unitsBy[nm]={t:0}); u[om]=(u[om]||0)+arrive; u.t+=arrive;   // 1 row per supplier (summed across subcats + markets)
-          } else if(om<win[0]) { /* ordered already / in past — skip display */ }
+          } else if(om<win[0]) { /* order month already passed — skip display */ }
           else truncated=true;
           const val=arrive*c;
           const _dep=val*Number(t.start_deposit_pct||0)/100, _com=val*Number(t.completion_pct||0)/100,

@@ -7922,7 +7922,7 @@ function renderAutoForecastReport(body){
     +'<span style="display:inline-flex;gap:6px;align-items:center"><span style="font-size:11px;font-weight:700;color:#888;letter-spacing:.04em">MARKET</span>'
     +MKTS.map(function(m){return '<button class="view-toggle af-mkt'+(m[0]===AF_MARKET?' active':'')+'" data-mkt="'+m[0]+'">'+m[1]+'</button>';}).join('')+'</span>'
     +'<span style="display:inline-flex;gap:14px;align-items:center;padding:6px 10px;background:#f6f7f9;border-radius:6px">'
-    +afInp('cover','cover target',AF_COVER,'mo')+afInp('freight','freight+duty',AF_FREIGHT,'%')+'</span>'
+    +afInp('freight','freight+duty',AF_FREIGHT,'%')+'</span>'
     +'</div><div id="af-content" style="color:#666;font-size:12px;padding:8px">Loading…</div>';
   body.querySelectorAll('.af-mkt').forEach(function(b){ b.onclick=function(){ AF_MARKET=b.dataset.mkt; renderAutoForecastReport(body); }; });
   body.querySelectorAll('.af-num').forEach(function(el){ el.onchange=function(){ var v=el.value.trim(); if(el.dataset.k==='cover') AF_COVER=Math.max(1,Math.min(12,Number(v)||2)); else AF_FREIGHT=Math.max(0,Number(v)||0); renderAutoForecastReport(body); }; });
@@ -7983,8 +7983,8 @@ function renderAutoForecastReport(body){
       +payTbl('USD',1)+payTbl('GBP',AF_GBP);
     var a=d.assumptions;
     var note='<div style="font-size:11px;color:#888;margin-top:12px;line-height:1.5">'
-      +'<b>Model:</b> buy = forward-cover netting on the saved SKU forecast ('+a.cover_months+'-month cover target, net of current on-hand stock); '
-      +'order month = arrival − lead time (production + China→market shipping). Payments phased off each subcategory’s primary supplier’s terms '
+      +'<b>Model:</b> buy = <b>category (subcategory) forecast − SKU forecast</b>, floored at 0 — the top-up the SKU-level plan hasn’t captured yet (future / discontinued SKUs). '
+      +'order month = demand month − lead time (supplier production + China→market sea shipping). Payments phased off each subcategory’s primary supplier’s terms '
       +'(deposit at order · completion at order+production days · balance at arrival+credit days). Freight+duty estimated at '+Math.round(a.freight_pct*100)+'% of cost (flat uplift — precise landed cost is on the PO view).'
       +(a.truncated?' <span style="color:#b45309">Some orders fall outside the 12-month window and are not shown.</span>':'')+'</div>';
     content.innerHTML=u+pay+note;
