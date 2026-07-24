@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.096 - PO ▸ Payments: Credit amount now a standing row in the additional costs table
+
+- **Credit amount** is now a permanent first row inside the Additional costs list (writes to the
+  `credit_amount` PO field via the existing `.payin` save). The separate Credit amount row above was removed.
+- The additional-costs **Total** now includes the credit.
+
 ## v26.095 - PO ▸ Payments: additional costs moved under Credit amount, slimmed down
 
 - **Additional costs** section moved from below the Commercial Invoice button to directly **under the
