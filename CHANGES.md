@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.097 - PERF: PO grid edits no longer re-pull all ~1400 POs
+
+**Fixes the slow PO-grid editing reported over the last 48h.** Root cause: every grid-cell edit called
+`silentRowRefresh`, which re-fetched the **entire** `/api/supply/purchase-orders` payload (~4.3MB, 1.6–6.8s
+over 1375 POs) just to update the one edited row — and editing a shipment date fired that once **per PO on
+the shipment**. Recent per-row subselects (forwarder, order-plan exceptions, branch/shipment delivery notes)
+had inflated that query, so the always-there full refetch became painful.
+
+- New `GET /api/supply/po-row/:po` returns one PO's fully-computed grid row (same SQL as the grid, extracted
+  to a shared `PO_ROWS_SQL` const → zero drift). `silentRowRefresh` + `patchPoRow` now fetch **one row**.
+- Dropped a redundant second `invalidateDerived()` on each edit.
+- Debounced the exception-count refetch (`refreshOpExc`) to 600ms so rapid edits don't fire it per keystroke.
+
 ## v26.096 - PO ▸ Payments: Credit amount now a standing row in the additional costs table
 
 - **Credit amount** is now a permanent first row inside the Additional costs list (writes to the

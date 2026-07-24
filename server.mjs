@@ -1178,6 +1178,11 @@ app.post('/api/supply/additional-cost-approve', async (req, res) => {
   try { await pool.query('UPDATE planner.portal_additional_costs SET approved=$2 WHERE id=$1', [b.id, b.approved !== false]); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// One PO's fully-computed grid row (same SQL as the grid) — for in-place row refresh after an edit.
+app.get('/api/supply/po-row/:po', async (req, res) => {
+  try { res.json((await pool.query(PO_ROWS_SQL + ' WHERE calc4.po = $1', [req.params.po])).rows); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 // Crossdock rollup for one shipment: every crossdock SKU across the POs on the shipment, with qty + source PO/supplier/client.
 app.get('/api/supply/shipment-crossdock/:ref', async (req, res) => {
   try { res.json(await qp(`
@@ -1628,179 +1633,7 @@ app.get('/api/supply/:section', async (req, res) => {
         // Balance due: on-shipment → ship/departure + credit days; on-clearance → landing + credit days.
         // Landing imports from linked Flexport (FLEX) unless manually overridden (M).
         // 'cashflow' reuses this exact PO calc, then re-shapes the rows into dated payment line items.
-        const _pos = await q(`
-          -- Canonical per-PO payment/date core comes from the SHARED view planner.v_po_finance (migration 123),
-          -- so admin + supplier portal compute identical figures (no drift). Admin layers shipment MASTERING on
-          -- top: a PO on a shipment inherits the master PO's effective dates (m_* below). Landed-cost / ERP /
-          -- action-flag columns are added by the final SELECT off the view's base fields.
-          WITH mastered AS (
-            SELECT v.*, m.eff_delivery m_delivery, m.eff_checkin m_checkin, m.eff_ship m_ship,
-                   coalesce(nullif(sh2.master_po,''), v.shipment_ref) ship_master_po
-            FROM planner.v_po_finance v
-            LEFT JOIN planner.shipments sh2 ON sh2.shipment_ref = v.shipment_ref
-            LEFT JOIN planner.v_po_finance m ON m.po = coalesce(nullif(sh2.master_po,''), v.shipment_ref) AND m.po <> v.po
-          )
-                    SELECT po, supplier_name, status,
-            CASE WHEN coalesce(status,'') ILIKE '%complete%' THEN 'complete'
-                 WHEN coalesce(status,'') ILIKE '%future%' THEN 'future' ELSE 'in_progress' END progress,
-            -- effective status of the assigned shipment (mirrors the SHIPMENTS grid; all-complete override is
-            -- irrelevant here since a PO showing this is itself open). Used to offer "advance to SHIPPING".
-            CASE WHEN coalesce(shipment_ref,'')='' THEN NULL
-                 ELSE coalesce(
-                   CASE lower(nullif(sh_status_raw,'')) WHEN 'active' THEN 'Shipping' WHEN 'complete' THEN 'Completed'
-                        WHEN 'completed' THEN 'Completed' WHEN 'shipping' THEN 'Shipping' WHEN 'planned' THEN 'Planned'
-                        ELSE nullif(sh_status_raw,'') END,
-                   CASE WHEN coalesce(sh_arrival, sh_landing, flex_landing) < current_date THEN 'Completed'
-                        WHEN coalesce(sh_departure, flex_departure) <= current_date THEN 'Shipping'
-                        ELSE 'Planned' END) END ship_status,
-            to_char(start_production,'YYYY-MM-DD') prod_start,
-            to_char(eff_prod_end,'YYYY-MM-DD') prod_end,
-            CASE WHEN end_production_overide IS NOT NULL THEN 'M' WHEN prod_end_calc THEN 'calc' END prod_end_src,
-            to_char(coalesce(m_ship, eff_ship),'YYYY-MM-DD') ship, CASE WHEN m_ship IS NOT NULL THEN 'S' ELSE ship_src END ship_src,
-            to_char(coalesce(m_delivery, eff_delivery),'YYYY-MM-DD') delivery, CASE WHEN m_delivery IS NOT NULL THEN 'S' ELSE delivery_src END delivery_src,
-            to_char(coalesce(m_checkin, eff_checkin),'YYYY-MM-DD') checkin,
-            CASE WHEN m_delivery IS NOT NULL THEN ship_master_po END delivery_master_po,   -- set = these dates came from this shipment's master PO
-            -- raw overrides for the PLAN date editors (blank = use the calculated value)
-            to_char(end_production_overide,'YYYY-MM-DD') end_override,
-            to_char(supplier_ship_date,'YYYY-MM-DD') ship_override,
-            to_char(delivery_date_overide,'YYYY-MM-DD') delivery_override,
-            coalesce(is_master,false) is_master,
-            flexport_reference, flex_id, value_est, value_from_lines,
-            round(supplier_invoice_total,2) final_invoice, (supplier_invoice_total IS NOT NULL) is_final, round(val,2) value_used,
-            sp start_pct, cp completion_pct, greatest(100-sp-cp,0) balance_pct,
-            -- main-row figures: assigned amount if set, else the term calc
-            start_paid start_dep,
-            CASE WHEN val>0 THEN coalesce(pay_completion_assigned, completion_calc) END completion,
-            -- balance includes any credit_amount (a charge added to the invoice, settled in the balance)
-            CASE WHEN val>0 THEN round(val + coalesce(credit_amount,0) - start_paid - coalesce(pay_completion_assigned, completion_calc),2) END balance_owing,
-            round(coalesce(credit_amount,0),2) credit_amount,
-            -- PLAN-panel detail: per-milestone calc, override amount, override date
-            start_calc, round(pay_start_deposit_assigned,2) start_assigned, to_char(pay_start_deposit_date,'YYYY-MM-DD') start_date,
-            completion_calc, round(pay_completion_assigned,2) completion_assigned, to_char(pay_completion_date,'YYYY-MM-DD') completion_date,
-            round(pay_balance_1_amount,2) balance_1_amount, to_char(pay_balance_1_date,'YYYY-MM-DD') balance_1_date,
-            round(pay_balance_2_amount,2) balance_2_amount, to_char(pay_balance_2_date,'YYYY-MM-DD') balance_2_date,
-            round(catch_up,2) catch_up, round(deposit_avail,2) deposit_avail, deposit_fx, coalesce(notes,'') notes,
-            CASE WHEN start_calc > 0 THEN to_char((start_production + 7),'YYYY-MM-DD') END start_due,        -- start deposit due = production start + 7 days (no due date for a 0% milestone)
-            CASE WHEN completion_calc > 0 THEN to_char(eff_prod_end,'YYYY-MM-DD') END completion_due,
-            to_char(bal_due_date,'YYYY-MM-DD') balance_due,
-            to_char(balance_due_date_overide,'YYYY-MM-DD') final_payment_due,   -- the "final payment due" override (priority for balance due)
-            credit_days, credit_type,
-            coalesce(deposit_ref,'') deposit_ref, coalesce(nullif(shipment_ref,''), (SELECT s.shipment_ref FROM planner.shipments s WHERE s.master_po=calc4.po LIMIT 1), '') shipment,
-            coalesce((SELECT s.master_po FROM planner.shipments s WHERE s.shipment_ref=calc4.shipment_ref), nullif(calc4.shipment_ref,''), (SELECT s.master_po FROM planner.shipments s WHERE s.master_po=calc4.po LIMIT 1)) ships_with_master_po,
-            coalesce((SELECT po2.branch_delivery_notes FROM planner.purchase_orders po2 WHERE po2.po=calc4.po), (SELECT b2.delivery_notes FROM planner.branches b2 WHERE b2.name=calc4.branch), '') branch_delivery_notes,
-            -- once assigned to a shipment, the PO's delivery notes come FROM that shipment (effective: shipment override ▸ shipment master-PO branch notes)
-            coalesce((SELECT coalesce(nullif(s.delivery_notes,''),
-                (SELECT coalesce(nullif(m.branch_delivery_notes,''), mb.delivery_notes) FROM planner.purchase_orders m LEFT JOIN planner.branches mb ON mb.name=m.branch WHERE m.po=coalesce(nullif(s.master_po,''), s.shipment_ref)))
-              FROM planner.shipments s WHERE s.shipment_ref=calc4.shipment_ref), '') shipment_delivery_notes,
-            -- mode of the assigned shipment (fob/air/sea) — from the sh join above (self-master resolution).
-            -- FOB shipments carry no freight/duty/tax (landed cost = goods only).
-            lower(coalesce(sh_mode,'')) ship_mode,
-            coalesce(sh_carrier,'') ship_carrier, coalesce(sh_carrier_ref,'') ship_carrier_ref,
-            coalesce(client,'') client, coalesce(client_requirements,'') client_requirements,
-            coalesce(sales_order_ref,'') sales_order_ref, coalesce(client_po_ref,'') client_po_ref,
-            to_char(client_deadline_date,'YYYY-MM-DD') client_deadline, coalesce(asn_numbers,'') asn_numbers,
-            to_char(supplier_confirmed_at,'YYYY-MM-DD') supplier_confirmed, coalesce(supplier_confirmed_by,'') supplier_confirmed_by,
-            approved_lines,   -- snapshot of SKUs/qtys at supplier approval → CONFIG portal preview builds approvedByPo for the "changes since you approved" diff (parity with /api/portal/bootstrap)
-            coalesce(dispatch_order_ref,'') dispatch_order_ref, coalesce(final_delivery_address,'') final_delivery_address,
-            coalesce(crossdock_skus,'') crossdock_skus,
-            coalesce(dtc_custom,false) dtc_custom, coalesce(dtc_key_account,false) dtc_key_account,   -- Direct-to-Client tags
-            -- Forwarder contact details — read LIVE from the matching key account (by client name), not snapshotted
-            (SELECT coalesce(ka.forwarder_name,'')  FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) forwarder_name,
-            (SELECT coalesce(ka.forwarder_email,'') FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) forwarder_email,
-            (SELECT coalesce(ka.forwarder_phone,'') FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) forwarder_phone,
-            -- Packing & Labelling (migration 086) + Direct to Client details approval
-            coalesce(pack_polybags,false) pack_polybags, coalesce(pack_polybags_notes,'') pack_polybags_notes,
-            coalesce(pack_dnb_barcodes,false) pack_dnb_barcodes, coalesce(pack_dnb_barcodes_notes,'') pack_dnb_barcodes_notes,
-            coalesce(pack_rfid_barcodes,false) pack_rfid_barcodes, coalesce(pack_rfid_barcodes_notes,'') pack_rfid_barcodes_notes,
-            coalesce(pack_dnb_carton,false) pack_dnb_carton, coalesce(pack_dnb_carton_notes,'') pack_dnb_carton_notes,
-            coalesce(pack_client_carton,false) pack_client_carton, coalesce(pack_client_carton_notes,'') pack_client_carton_notes,
-            coalesce(pack_pallet_notes,'') pack_pallet_notes, coalesce(pack_other_notes,'') pack_other_notes,
-            to_char(dtc_accepted_at,'YYYY-MM-DD HH24:MI') dtc_accepted_at, coalesce(dtc_accepted_by,'') dtc_accepted_by,
-            (SELECT po2.dtc_approved_snapshot FROM planner.purchase_orders po2 WHERE po2.po=calc4.po) dtc_approved_snapshot,
-            coalesce(nullif(country_code,''), branch_country, '') country,
-            CASE WHEN nullif(country_code,'') IS NOT NULL THEN 'M' WHEN branch_country IS NOT NULL THEN 'branch' END country_src,
-            coalesce(country_code,'') country_override, coalesce(branch,'') branch,
-            coalesce(erp_po,'') erp, coalesce(prod_no,'') prod_no, coalesce(batch_id,'') batch_id,
-            coalesce((SELECT pn.require_supplier_confirmation FROM planner.prod_numbers pn WHERE pn.prod_no=calc4.prod_no),false) require_confirmation,
-            coalesce(starred,false) starred,   -- ⭐ Focus / favourite toggle (migration 082)
-            -- ERP sync: drift = planned qty/cost differs from the ERP MIRROR (planner.erp_purchase_order_lines,
-            -- fed by n8n). erp_in/erp_total drive the 3-state badge (✓ match / ⚠ drift / ✗ not in ERP).
-            -- ERP deviation = QUANTITY only. Price differences are NEVER an exception (cost still rides along
-            -- when the user pushes an update — see erp_cost=cost_price on the push). COMPLETE POs are ignored.
-            (CASE WHEN coalesce(status,'') ILIKE '%complete%' OR coalesce(branch,'') ILIKE '%manufactur%' THEN 0 ELSE  -- Manufacturing = FOB → no ERP deviation
-              (SELECT count(*) FROM planner.purchase_order_lines l LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
-                 WHERE l.po=calc4.po AND coalesce(l.qty,0) IS DISTINCT FROM coalesce(el.qty,0)) END)::int erp_pending,   -- 0 plan == absent from ERP (both nothing) → not a deviation
-            (SELECT count(*) FROM planner.purchase_order_lines l JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku WHERE l.po=calc4.po)::int erp_in,
-            (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=calc4.po)::int erp_total,
-            -- ERP date misalignment: our calculated "completed at warehouse" date (eff_checkin) vs the
-            -- ERP's final delivery date. 1 = differs MATERIALLY. Materiality = the day gap as a fraction of how
-            -- far away the date is (days from today to eff_checkin): only flag when the gap is >=10% of the
-            -- lead time. E.g. 2 days out of ~100 away = 2% → not flagged; 5 days out of 30 away = 17% → flagged.
-            to_char(erp_final_delivery_date,'YYYY-MM-DD') erp_final_delivery, coalesce(erp_po_id_src,'') erp_po_id, erp_present,
-            -- ERP completion-date drift: flag only if the gap (in days) is ≥ 5% of how far out the completion is,
-            -- with a hard minimum of 3 days. So a 1–2 day gap on a near-term PO no longer flags. Examples:
-            --   100 days out → ceil(5)=5-day threshold; 30 days out → ceil(1.5)=2 → floored to the 3-day minimum.
-            (CASE WHEN erp_final_delivery_date IS NOT NULL AND coalesce(m_checkin, eff_checkin) IS NOT NULL
-                  AND abs(coalesce(m_checkin, eff_checkin) - erp_final_delivery_date)
-                      >= GREATEST(ceil(0.05 * abs(coalesce(m_checkin, eff_checkin) - CURRENT_DATE)), 3)
-                  THEN 1 ELSE 0 END)::int erp_date_pending,
-            -- supplier production-confidence: confirmed status + days since last confirmation
-            coalesce(production_status,'') production_status,
-            (CURRENT_DATE - production_confirmed_at::date)::int prod_confirmed_age,
-            -- action-item flags (vs current_date), only for POs not complete
-            -- "late" = past the forecast delivery date AND not yet shipped. Once SHIPPING (in transit) or
-            -- DELIVERED/COMPLETE it's no longer an actionable late exception, so exclude those statuses.
-            (coalesce(status,'') NOT ILIKE '%complete%' AND coalesce(status,'') NOT ILIKE '%shipping%'
-               AND coalesce(status,'') NOT ILIKE '%deliver%' AND coalesce(m_delivery, eff_delivery) < current_date) is_late,
-            -- unassigned shipment: not complete, no shipment, and NOT FOB. FOB (mirrors isFOBdest) = a
-            -- manufacturing branch OR a non-major destination country → those never take a shipment, so
-            -- they must not raise an "unassigned shipment" action.
-            (coalesce(status,'') NOT ILIKE '%complete%' AND coalesce(shipment_ref,'')=''
-               AND coalesce(branch,'') NOT ILIKE '%manufactur%'
-               AND upper(coalesce(nullif(country_code,''), branch_country, '')) IN ('UK','US','EU','AU','CA')) unassigned_shipment,
-            -- payment_overdue applies to COMPLETE POs too (an owed payment shouldn't hide behind COMPLETE);
-            -- old payments are cut off at 2026-01-01 (matches the Payments Due report's PDUE_MIN_DUE).
-            ((
-               ((start_production + 7) >= DATE '2026-01-01' AND (start_production + 7) < current_date AND pay_start_deposit_assigned IS NULL AND coalesce(deposit_ref,'')='' AND start_calc > 0)
-               OR (eff_prod_end >= DATE '2026-01-01' AND eff_prod_end < current_date AND pay_completion_assigned IS NULL AND completion_calc > 0)
-               OR (bal_due_date >= DATE '2026-01-01' AND bal_due_date < current_date AND pay_balance_1_amount IS NULL
-                   AND round(val + coalesce(credit_amount,0) - start_paid - coalesce(pay_completion_assigned, completion_calc),2) > 0.01))) payment_overdue,
-            (coalesce(status,'') ILIKE '%production%') is_production,
-            -- pallet estimate (Σ line qty ÷ sku pallet_qty); 20 pallets = one container
-            (SELECT round(sum(l.qty::numeric/NULLIF(sl.pallet_qty,0)),1) FROM planner.purchase_order_lines l
-               LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=calc4.po) pallets,
-            -- manual "likely payment date" per milestone (cash flow report) — keyed dep|comp|bal|bal2:PO
-            (SELECT to_char(likely_date,'YYYY-MM-DD') FROM planner.payment_likely_dates WHERE line_key='dep:'||calc4.po) likely_start,
-            (SELECT to_char(likely_date,'YYYY-MM-DD') FROM planner.payment_likely_dates WHERE line_key='comp:'||calc4.po) likely_completion,
-            (SELECT to_char(likely_date,'YYYY-MM-DD') FROM planner.payment_likely_dates WHERE line_key='bal:'||calc4.po) likely_balance_1,
-            (SELECT to_char(likely_date,'YYYY-MM-DD') FROM planner.payment_likely_dates WHERE line_key='bal2:'||calc4.po) likely_balance_2,
-            -- supplier-portal: latest PENDING invoice value awaiting approve/reject, and unread supplier notes (Timeline action)
-            (SELECT round(value::numeric,2) FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='invoice_value' AND ss.status='pending'
-               ORDER BY ss.id DESC LIMIT 1) sup_invoice_pending,
-            (SELECT value FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='completion_date' AND ss.status='pending'
-               ORDER BY ss.id DESC LIMIT 1) sup_completion_pending,
-            (SELECT count(*) FROM planner.supplier_notes sn WHERE sn.po=calc4.po AND sn.author_kind='supplier' AND sn.read_at IS NULL)::int unread_notes,
-            (SELECT count(*) FROM planner.portal_line_costs plc WHERE plc.po=calc4.po
-               AND (plc.actual_cost IS NOT NULL OR plc.amended_qty IS NOT NULL OR plc.is_added=true)
-               AND (plc.confirmed_at IS NULL OR plc.confirmed_at < plc.submitted_at))::int orderplan_unconfirmed,
-            -- landed cost (est): goods + freight (Flexport quote ▸ rate card) + duty + import tax
-            coalesce(container_size,'') container_size,
-            round(coalesce(flex_quote, freight_rate),2) est_freight,
-            CASE WHEN flex_quote IS NOT NULL THEN 'FLEX' WHEN freight_rate IS NOT NULL THEN 'rate' END freight_src,
-            round(flex_quote,2) flex_quote,
-            -- sea rates for this PO's destination, so the PLAN can auto-estimate freight from pallets (cheapest combo, assume sea)
-            (SELECT json_agg(json_build_object('cap', fr.pallets, 'cost', fr.cost, 'sz', fr.container_size)) FROM planner.freight_rates fr
-              WHERE upper(fr.destination)=coalesce(nullif(upper(coalesce(nullif(country_code,''), branch_country)),''),'UK') AND coalesce(fr.pallets,0)>0 AND fr.cost IS NOT NULL) sea_tiers,
-            round(coalesce(duty,0),2) est_duty,
-            round((CASE WHEN tax_base_kind='goods' THEN val
-                        ELSE val + coalesce(duty,0) + coalesce(flex_quote, freight_rate, 0) END)
-                  * coalesce(tax_pct,0)/100,2) est_tax,
-            tax_pct,
-            round(val + coalesce(flex_quote, freight_rate, 0) + coalesce(duty,0)
-                  + (CASE WHEN tax_base_kind='goods' THEN val
-                          ELSE val + coalesce(duty,0) + coalesce(flex_quote, freight_rate, 0) END)
-                    * coalesce(tax_pct,0)/100, 2) landed_total
-          FROM mastered calc4 ORDER BY po`);
+        const _pos = await q(PO_ROWS_SQL + ' ORDER BY po');
         if (req.params.section === 'cashflow') return res.json(await cashflowResponse(_pos, q));
         return res.json(_pos);
       }
@@ -7261,6 +7094,182 @@ app.post('/api/supply/bi/erp-compare/ignore', async (req, res) => {
 // ORDER PLAN unapproved exceptions per PO (partials / supplier-risk / discontinued / country-risk). Drives the
 // ORDER PLAN top-nav counter (# POs impacted) + the per-PO ORDER PLAN sub-tab badge. Gates mirror the grid:
 // partials + supplier-risk exclude complete/shipping/delivered; discontinued + country-risk exclude complete only.
+// Shared PO grid-row query (WITH mastered ... FROM mastered calc4). Reused by the full grid endpoint
+// (+ ORDER BY po) and by /api/supply/po-row/:po (+ WHERE calc4.po=$1) so a single-cell edit refreshes ONE
+// row instead of re-pulling all ~1400 POs (multi-MB). Same SQL = zero drift.
+const PO_ROWS_SQL = `
+          -- Canonical per-PO payment/date core comes from the SHARED view planner.v_po_finance (migration 123),
+          -- so admin + supplier portal compute identical figures (no drift). Admin layers shipment MASTERING on
+          -- top: a PO on a shipment inherits the master PO's effective dates (m_* below). Landed-cost / ERP /
+          -- action-flag columns are added by the final SELECT off the view's base fields.
+          WITH mastered AS (
+            SELECT v.*, m.eff_delivery m_delivery, m.eff_checkin m_checkin, m.eff_ship m_ship,
+                   coalesce(nullif(sh2.master_po,''), v.shipment_ref) ship_master_po
+            FROM planner.v_po_finance v
+            LEFT JOIN planner.shipments sh2 ON sh2.shipment_ref = v.shipment_ref
+            LEFT JOIN planner.v_po_finance m ON m.po = coalesce(nullif(sh2.master_po,''), v.shipment_ref) AND m.po <> v.po
+          )
+                    SELECT po, supplier_name, status,
+            CASE WHEN coalesce(status,'') ILIKE '%complete%' THEN 'complete'
+                 WHEN coalesce(status,'') ILIKE '%future%' THEN 'future' ELSE 'in_progress' END progress,
+            -- effective status of the assigned shipment (mirrors the SHIPMENTS grid; all-complete override is
+            -- irrelevant here since a PO showing this is itself open). Used to offer "advance to SHIPPING".
+            CASE WHEN coalesce(shipment_ref,'')='' THEN NULL
+                 ELSE coalesce(
+                   CASE lower(nullif(sh_status_raw,'')) WHEN 'active' THEN 'Shipping' WHEN 'complete' THEN 'Completed'
+                        WHEN 'completed' THEN 'Completed' WHEN 'shipping' THEN 'Shipping' WHEN 'planned' THEN 'Planned'
+                        ELSE nullif(sh_status_raw,'') END,
+                   CASE WHEN coalesce(sh_arrival, sh_landing, flex_landing) < current_date THEN 'Completed'
+                        WHEN coalesce(sh_departure, flex_departure) <= current_date THEN 'Shipping'
+                        ELSE 'Planned' END) END ship_status,
+            to_char(start_production,'YYYY-MM-DD') prod_start,
+            to_char(eff_prod_end,'YYYY-MM-DD') prod_end,
+            CASE WHEN end_production_overide IS NOT NULL THEN 'M' WHEN prod_end_calc THEN 'calc' END prod_end_src,
+            to_char(coalesce(m_ship, eff_ship),'YYYY-MM-DD') ship, CASE WHEN m_ship IS NOT NULL THEN 'S' ELSE ship_src END ship_src,
+            to_char(coalesce(m_delivery, eff_delivery),'YYYY-MM-DD') delivery, CASE WHEN m_delivery IS NOT NULL THEN 'S' ELSE delivery_src END delivery_src,
+            to_char(coalesce(m_checkin, eff_checkin),'YYYY-MM-DD') checkin,
+            CASE WHEN m_delivery IS NOT NULL THEN ship_master_po END delivery_master_po,   -- set = these dates came from this shipment's master PO
+            -- raw overrides for the PLAN date editors (blank = use the calculated value)
+            to_char(end_production_overide,'YYYY-MM-DD') end_override,
+            to_char(supplier_ship_date,'YYYY-MM-DD') ship_override,
+            to_char(delivery_date_overide,'YYYY-MM-DD') delivery_override,
+            coalesce(is_master,false) is_master,
+            flexport_reference, flex_id, value_est, value_from_lines,
+            round(supplier_invoice_total,2) final_invoice, (supplier_invoice_total IS NOT NULL) is_final, round(val,2) value_used,
+            sp start_pct, cp completion_pct, greatest(100-sp-cp,0) balance_pct,
+            -- main-row figures: assigned amount if set, else the term calc
+            start_paid start_dep,
+            CASE WHEN val>0 THEN coalesce(pay_completion_assigned, completion_calc) END completion,
+            -- balance includes any credit_amount (a charge added to the invoice, settled in the balance)
+            CASE WHEN val>0 THEN round(val + coalesce(credit_amount,0) - start_paid - coalesce(pay_completion_assigned, completion_calc),2) END balance_owing,
+            round(coalesce(credit_amount,0),2) credit_amount,
+            -- PLAN-panel detail: per-milestone calc, override amount, override date
+            start_calc, round(pay_start_deposit_assigned,2) start_assigned, to_char(pay_start_deposit_date,'YYYY-MM-DD') start_date,
+            completion_calc, round(pay_completion_assigned,2) completion_assigned, to_char(pay_completion_date,'YYYY-MM-DD') completion_date,
+            round(pay_balance_1_amount,2) balance_1_amount, to_char(pay_balance_1_date,'YYYY-MM-DD') balance_1_date,
+            round(pay_balance_2_amount,2) balance_2_amount, to_char(pay_balance_2_date,'YYYY-MM-DD') balance_2_date,
+            round(catch_up,2) catch_up, round(deposit_avail,2) deposit_avail, deposit_fx, coalesce(notes,'') notes,
+            CASE WHEN start_calc > 0 THEN to_char((start_production + 7),'YYYY-MM-DD') END start_due,        -- start deposit due = production start + 7 days (no due date for a 0% milestone)
+            CASE WHEN completion_calc > 0 THEN to_char(eff_prod_end,'YYYY-MM-DD') END completion_due,
+            to_char(bal_due_date,'YYYY-MM-DD') balance_due,
+            to_char(balance_due_date_overide,'YYYY-MM-DD') final_payment_due,   -- the "final payment due" override (priority for balance due)
+            credit_days, credit_type,
+            coalesce(deposit_ref,'') deposit_ref, coalesce(nullif(shipment_ref,''), (SELECT s.shipment_ref FROM planner.shipments s WHERE s.master_po=calc4.po LIMIT 1), '') shipment,
+            coalesce((SELECT s.master_po FROM planner.shipments s WHERE s.shipment_ref=calc4.shipment_ref), nullif(calc4.shipment_ref,''), (SELECT s.master_po FROM planner.shipments s WHERE s.master_po=calc4.po LIMIT 1)) ships_with_master_po,
+            coalesce((SELECT po2.branch_delivery_notes FROM planner.purchase_orders po2 WHERE po2.po=calc4.po), (SELECT b2.delivery_notes FROM planner.branches b2 WHERE b2.name=calc4.branch), '') branch_delivery_notes,
+            -- once assigned to a shipment, the PO's delivery notes come FROM that shipment (effective: shipment override ▸ shipment master-PO branch notes)
+            coalesce((SELECT coalesce(nullif(s.delivery_notes,''),
+                (SELECT coalesce(nullif(m.branch_delivery_notes,''), mb.delivery_notes) FROM planner.purchase_orders m LEFT JOIN planner.branches mb ON mb.name=m.branch WHERE m.po=coalesce(nullif(s.master_po,''), s.shipment_ref)))
+              FROM planner.shipments s WHERE s.shipment_ref=calc4.shipment_ref), '') shipment_delivery_notes,
+            -- mode of the assigned shipment (fob/air/sea) — from the sh join above (self-master resolution).
+            -- FOB shipments carry no freight/duty/tax (landed cost = goods only).
+            lower(coalesce(sh_mode,'')) ship_mode,
+            coalesce(sh_carrier,'') ship_carrier, coalesce(sh_carrier_ref,'') ship_carrier_ref,
+            coalesce(client,'') client, coalesce(client_requirements,'') client_requirements,
+            coalesce(sales_order_ref,'') sales_order_ref, coalesce(client_po_ref,'') client_po_ref,
+            to_char(client_deadline_date,'YYYY-MM-DD') client_deadline, coalesce(asn_numbers,'') asn_numbers,
+            to_char(supplier_confirmed_at,'YYYY-MM-DD') supplier_confirmed, coalesce(supplier_confirmed_by,'') supplier_confirmed_by,
+            approved_lines,   -- snapshot of SKUs/qtys at supplier approval → CONFIG portal preview builds approvedByPo for the "changes since you approved" diff (parity with /api/portal/bootstrap)
+            coalesce(dispatch_order_ref,'') dispatch_order_ref, coalesce(final_delivery_address,'') final_delivery_address,
+            coalesce(crossdock_skus,'') crossdock_skus,
+            coalesce(dtc_custom,false) dtc_custom, coalesce(dtc_key_account,false) dtc_key_account,   -- Direct-to-Client tags
+            -- Forwarder contact details — read LIVE from the matching key account (by client name), not snapshotted
+            (SELECT coalesce(ka.forwarder_name,'')  FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) forwarder_name,
+            (SELECT coalesce(ka.forwarder_email,'') FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) forwarder_email,
+            (SELECT coalesce(ka.forwarder_phone,'') FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) forwarder_phone,
+            -- Packing & Labelling (migration 086) + Direct to Client details approval
+            coalesce(pack_polybags,false) pack_polybags, coalesce(pack_polybags_notes,'') pack_polybags_notes,
+            coalesce(pack_dnb_barcodes,false) pack_dnb_barcodes, coalesce(pack_dnb_barcodes_notes,'') pack_dnb_barcodes_notes,
+            coalesce(pack_rfid_barcodes,false) pack_rfid_barcodes, coalesce(pack_rfid_barcodes_notes,'') pack_rfid_barcodes_notes,
+            coalesce(pack_dnb_carton,false) pack_dnb_carton, coalesce(pack_dnb_carton_notes,'') pack_dnb_carton_notes,
+            coalesce(pack_client_carton,false) pack_client_carton, coalesce(pack_client_carton_notes,'') pack_client_carton_notes,
+            coalesce(pack_pallet_notes,'') pack_pallet_notes, coalesce(pack_other_notes,'') pack_other_notes,
+            to_char(dtc_accepted_at,'YYYY-MM-DD HH24:MI') dtc_accepted_at, coalesce(dtc_accepted_by,'') dtc_accepted_by,
+            (SELECT po2.dtc_approved_snapshot FROM planner.purchase_orders po2 WHERE po2.po=calc4.po) dtc_approved_snapshot,
+            coalesce(nullif(country_code,''), branch_country, '') country,
+            CASE WHEN nullif(country_code,'') IS NOT NULL THEN 'M' WHEN branch_country IS NOT NULL THEN 'branch' END country_src,
+            coalesce(country_code,'') country_override, coalesce(branch,'') branch,
+            coalesce(erp_po,'') erp, coalesce(prod_no,'') prod_no, coalesce(batch_id,'') batch_id,
+            coalesce((SELECT pn.require_supplier_confirmation FROM planner.prod_numbers pn WHERE pn.prod_no=calc4.prod_no),false) require_confirmation,
+            coalesce(starred,false) starred,   -- ⭐ Focus / favourite toggle (migration 082)
+            -- ERP sync: drift = planned qty/cost differs from the ERP MIRROR (planner.erp_purchase_order_lines,
+            -- fed by n8n). erp_in/erp_total drive the 3-state badge (✓ match / ⚠ drift / ✗ not in ERP).
+            -- ERP deviation = QUANTITY only. Price differences are NEVER an exception (cost still rides along
+            -- when the user pushes an update — see erp_cost=cost_price on the push). COMPLETE POs are ignored.
+            (CASE WHEN coalesce(status,'') ILIKE '%complete%' OR coalesce(branch,'') ILIKE '%manufactur%' THEN 0 ELSE  -- Manufacturing = FOB → no ERP deviation
+              (SELECT count(*) FROM planner.purchase_order_lines l LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
+                 WHERE l.po=calc4.po AND coalesce(l.qty,0) IS DISTINCT FROM coalesce(el.qty,0)) END)::int erp_pending,   -- 0 plan == absent from ERP (both nothing) → not a deviation
+            (SELECT count(*) FROM planner.purchase_order_lines l JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku WHERE l.po=calc4.po)::int erp_in,
+            (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=calc4.po)::int erp_total,
+            -- ERP date misalignment: our calculated "completed at warehouse" date (eff_checkin) vs the
+            -- ERP's final delivery date. 1 = differs MATERIALLY. Materiality = the day gap as a fraction of how
+            -- far away the date is (days from today to eff_checkin): only flag when the gap is >=10% of the
+            -- lead time. E.g. 2 days out of ~100 away = 2% → not flagged; 5 days out of 30 away = 17% → flagged.
+            to_char(erp_final_delivery_date,'YYYY-MM-DD') erp_final_delivery, coalesce(erp_po_id_src,'') erp_po_id, erp_present,
+            -- ERP completion-date drift: flag only if the gap (in days) is ≥ 5% of how far out the completion is,
+            -- with a hard minimum of 3 days. So a 1–2 day gap on a near-term PO no longer flags. Examples:
+            --   100 days out → ceil(5)=5-day threshold; 30 days out → ceil(1.5)=2 → floored to the 3-day minimum.
+            (CASE WHEN erp_final_delivery_date IS NOT NULL AND coalesce(m_checkin, eff_checkin) IS NOT NULL
+                  AND abs(coalesce(m_checkin, eff_checkin) - erp_final_delivery_date)
+                      >= GREATEST(ceil(0.05 * abs(coalesce(m_checkin, eff_checkin) - CURRENT_DATE)), 3)
+                  THEN 1 ELSE 0 END)::int erp_date_pending,
+            -- supplier production-confidence: confirmed status + days since last confirmation
+            coalesce(production_status,'') production_status,
+            (CURRENT_DATE - production_confirmed_at::date)::int prod_confirmed_age,
+            -- action-item flags (vs current_date), only for POs not complete
+            -- "late" = past the forecast delivery date AND not yet shipped. Once SHIPPING (in transit) or
+            -- DELIVERED/COMPLETE it's no longer an actionable late exception, so exclude those statuses.
+            (coalesce(status,'') NOT ILIKE '%complete%' AND coalesce(status,'') NOT ILIKE '%shipping%'
+               AND coalesce(status,'') NOT ILIKE '%deliver%' AND coalesce(m_delivery, eff_delivery) < current_date) is_late,
+            -- unassigned shipment: not complete, no shipment, and NOT FOB. FOB (mirrors isFOBdest) = a
+            -- manufacturing branch OR a non-major destination country → those never take a shipment, so
+            -- they must not raise an "unassigned shipment" action.
+            (coalesce(status,'') NOT ILIKE '%complete%' AND coalesce(shipment_ref,'')=''
+               AND coalesce(branch,'') NOT ILIKE '%manufactur%'
+               AND upper(coalesce(nullif(country_code,''), branch_country, '')) IN ('UK','US','EU','AU','CA')) unassigned_shipment,
+            -- payment_overdue applies to COMPLETE POs too (an owed payment shouldn't hide behind COMPLETE);
+            -- old payments are cut off at 2026-01-01 (matches the Payments Due report's PDUE_MIN_DUE).
+            ((
+               ((start_production + 7) >= DATE '2026-01-01' AND (start_production + 7) < current_date AND pay_start_deposit_assigned IS NULL AND coalesce(deposit_ref,'')='' AND start_calc > 0)
+               OR (eff_prod_end >= DATE '2026-01-01' AND eff_prod_end < current_date AND pay_completion_assigned IS NULL AND completion_calc > 0)
+               OR (bal_due_date >= DATE '2026-01-01' AND bal_due_date < current_date AND pay_balance_1_amount IS NULL
+                   AND round(val + coalesce(credit_amount,0) - start_paid - coalesce(pay_completion_assigned, completion_calc),2) > 0.01))) payment_overdue,
+            (coalesce(status,'') ILIKE '%production%') is_production,
+            -- pallet estimate (Σ line qty ÷ sku pallet_qty); 20 pallets = one container
+            (SELECT round(sum(l.qty::numeric/NULLIF(sl.pallet_qty,0)),1) FROM planner.purchase_order_lines l
+               LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=calc4.po) pallets,
+            -- manual "likely payment date" per milestone (cash flow report) — keyed dep|comp|bal|bal2:PO
+            (SELECT to_char(likely_date,'YYYY-MM-DD') FROM planner.payment_likely_dates WHERE line_key='dep:'||calc4.po) likely_start,
+            (SELECT to_char(likely_date,'YYYY-MM-DD') FROM planner.payment_likely_dates WHERE line_key='comp:'||calc4.po) likely_completion,
+            (SELECT to_char(likely_date,'YYYY-MM-DD') FROM planner.payment_likely_dates WHERE line_key='bal:'||calc4.po) likely_balance_1,
+            (SELECT to_char(likely_date,'YYYY-MM-DD') FROM planner.payment_likely_dates WHERE line_key='bal2:'||calc4.po) likely_balance_2,
+            -- supplier-portal: latest PENDING invoice value awaiting approve/reject, and unread supplier notes (Timeline action)
+            (SELECT round(value::numeric,2) FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='invoice_value' AND ss.status='pending'
+               ORDER BY ss.id DESC LIMIT 1) sup_invoice_pending,
+            (SELECT value FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='completion_date' AND ss.status='pending'
+               ORDER BY ss.id DESC LIMIT 1) sup_completion_pending,
+            (SELECT count(*) FROM planner.supplier_notes sn WHERE sn.po=calc4.po AND sn.author_kind='supplier' AND sn.read_at IS NULL)::int unread_notes,
+            (SELECT count(*) FROM planner.portal_line_costs plc WHERE plc.po=calc4.po
+               AND (plc.actual_cost IS NOT NULL OR plc.amended_qty IS NOT NULL OR plc.is_added=true)
+               AND (plc.confirmed_at IS NULL OR plc.confirmed_at < plc.submitted_at))::int orderplan_unconfirmed,
+            -- landed cost (est): goods + freight (Flexport quote ▸ rate card) + duty + import tax
+            coalesce(container_size,'') container_size,
+            round(coalesce(flex_quote, freight_rate),2) est_freight,
+            CASE WHEN flex_quote IS NOT NULL THEN 'FLEX' WHEN freight_rate IS NOT NULL THEN 'rate' END freight_src,
+            round(flex_quote,2) flex_quote,
+            -- sea rates for this PO's destination, so the PLAN can auto-estimate freight from pallets (cheapest combo, assume sea)
+            (SELECT json_agg(json_build_object('cap', fr.pallets, 'cost', fr.cost, 'sz', fr.container_size)) FROM planner.freight_rates fr
+              WHERE upper(fr.destination)=coalesce(nullif(upper(coalesce(nullif(country_code,''), branch_country)),''),'UK') AND coalesce(fr.pallets,0)>0 AND fr.cost IS NOT NULL) sea_tiers,
+            round(coalesce(duty,0),2) est_duty,
+            round((CASE WHEN tax_base_kind='goods' THEN val
+                        ELSE val + coalesce(duty,0) + coalesce(flex_quote, freight_rate, 0) END)
+                  * coalesce(tax_pct,0)/100,2) est_tax,
+            tax_pct,
+            round(val + coalesce(flex_quote, freight_rate, 0) + coalesce(duty,0)
+                  + (CASE WHEN tax_base_kind='goods' THEN val
+                          ELSE val + coalesce(duty,0) + coalesce(flex_quote, freight_rate, 0) END)
+                    * coalesce(tax_pct,0)/100, 2) landed_total
+          FROM mastered calc4`;
 const OP_EXC_SQL = `
   SELECT DISTINCT po, typ FROM (
     SELECT l.po, 'partials'::text typ

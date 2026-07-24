@@ -621,7 +621,8 @@
   var _shipPatchRow=null;  // set by the shipments grid to patch a SINGLE shipment row + its open expand in place
   var _sampleReload=null;  // set by the Samples grid so detail-panel actions can refresh it
   // a write to a PO / shipment / deposit changes the derived views — drop their caches so they re-fetch fresh
-  function invalidateDerived(){ ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments','manufacturing'].forEach(function(k){delete cache[k];}); try{ if(typeof _navCounts!=='undefined'){_navCounts.manufacturing=undefined;_navCounts.paydue=undefined;} }catch(e){} try{ refreshOpExc(); }catch(e){} }   // 'manufacturing' + 'paydue' nav badges recompute after a PO/order-plan/payment edit → tabs update on next nav; no hard refresh
+  var _opExcTimer=null;   // debounce the exception-count refetch so rapid grid edits don't fire it per keystroke
+  function invalidateDerived(){ ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments','manufacturing'].forEach(function(k){delete cache[k];}); try{ if(typeof _navCounts!=='undefined'){_navCounts.manufacturing=undefined;_navCounts.paydue=undefined;} }catch(e){} clearTimeout(_opExcTimer); _opExcTimer=setTimeout(function(){ try{ refreshOpExc(); }catch(e){} },600); }   // 'manufacturing' + 'paydue' nav badges recompute after a PO/order-plan/payment edit → tabs update on next nav; no hard refresh
 
   function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function shortUser(s){return String(s==null?'':s).replace(/@dockandbay\.com\b/gi,'@');}  // ben@dockandbay.com → ben@ (display only)
@@ -1877,10 +1878,12 @@
     // Silently sync ONE collapsed grid row after a field was edited in that PO's expansion sub-tabs (Dates,
     // Payments, …). Re-fetches the data (derived dates/values recompute server-side), then swaps only the main
     // <tr> — the open expansion <tr> (a separate sibling row) is left untouched, so the panel stays put.
-    function silentRowRefresh(po){ invalidateDerived(); delete cache['purchase-orders'];
-      fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(fresh){
-        if(!Array.isArray(fresh))return; rows.length=0; Array.prototype.push.apply(rows,fresh); rows.forEach(function(x){poBy[x.po]=x;});
-        var rr=poBy[po]; if(!rr)return;
+    function silentRowRefresh(po){
+      // Refresh just THIS PO's row (bindEdits already invalidated derived caches) — a single-PO fetch instead of
+      // re-pulling all ~1400 POs (was multi-MB / multi-second on every keystroke).
+      fetch('/api/supply/po-row/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(arr){
+        var rr=Array.isArray(arr)?arr[0]:null; if(!rr)return;
+        for(var _k=0;_k<rows.length;_k++){ if(rows[_k].po===po){ rows[_k]=rr; break; } } poBy[po]=rr;
         var key=(window.CSS&&CSS.escape)?CSS.escape(po):po;
         var expBtn=document.querySelector('#sup-grid .po-exp[data-po="'+key+'"]'); if(!expBtn)return;
         var mainTr=expBtn.closest('tr'); if(!mainTr)return;
@@ -1905,12 +1908,12 @@
       if(ex && ex.style.display!=='none' && ex.dataset.loaded){ poRefetchPanel(po, eb.dataset.i); } }
     function patchPoRow(po){ refreshOpenPanel(po);   // keep any open PO detail in sync with the assign (DATES etc.)
       if(state.grp==='shipment'){ silentRowRefresh(po); return; }
-      invalidateDerived(); delete cache['purchase-orders'];
-      fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(fresh){
-        if(Array.isArray(fresh)){ rows.length=0; Array.prototype.push.apply(rows, fresh); }
-        rows.forEach(function(x){poBy[x.po]=x;});
+      invalidateDerived();   // assign flow (infrequent) — refresh nav badges, then patch just this row
+      fetch('/api/supply/po-row/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(arr){
+        var r=Array.isArray(arr)?arr[0]:null;
+        if(r){ for(var _k=0;_k<rows.length;_k++){ if(rows[_k].po===po){ rows[_k]=r; break; } } poBy[po]=r; }
         var sel='#sup-grid .po-exp[data-po="'+((window.CSS&&CSS.escape)?CSS.escape(po):po)+'"]';
-        var btn=document.querySelector(sel), r=poBy[po];
+        var btn=document.querySelector(sel);
         if(!btn||!r){ view(); return; }
         var tr=btn.closest('tr'), tmp=document.createElement('tbody'); tmp.innerHTML=poRowHtml(r,btn.dataset.i,false,null);
         var exOpen=(function(){var e=document.getElementById('poexp-'+btn.dataset.i);return e&&e.style.display!=='none';})();
