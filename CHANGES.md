@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.100 - PO ▸ Payments: additional costs read-only with an "edit" link
+
+Additional cost lines (and the Credit amount row) now render as **greyed read-only values** with an **edit**
+link, instead of always-editable inputs. Clicking **edit** reveals the fields + **Save** / **cancel**; Save
+persists then re-renders read-only. Approve / remove / + Add cost unchanged.
+
 ## v26.099 - Document "submitted for approval" workflow (portal ⇄ admin)
 
 Supplier-initiated document approval on PO documents:

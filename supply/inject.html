@@ -2715,21 +2715,39 @@
       // ---- Additional costs (supplier-submitted: freight / tooling / surcharges) + a standing Credit amount row —
       // slimline; both add to the invoice. Credit writes to credit_amount (PO field); the rest are portal lines. ----
       +(function(){ var ac=(d&&d.additional_costs)||[]; var pon=esc(r.po);
+          // Rows show as GREYED read-only values with an "edit" link; clicking it reveals the inputs + Save (they
+          // are not always-editable). Approve / remove stay available in the read-only view.
           function acLine(a){ var line=(Number(a.qty)||0)*(Number(a.price)||0);
-            return '<div class="ac-line" style="display:flex;align-items:center;gap:5px;font-size:11px;padding:2px 0;border-bottom:1px solid #f1f5f9">'
-              +'<input class="fci ac-desc" data-id="'+a.id+'" value="'+esc(a.description||'')+'" placeholder="description" style="flex:1;min-width:110px;text-align:left;font-size:11px;padding:1px 4px">'
-              +'<input class="fci ac-qty" data-id="'+a.id+'" value="'+(a.qty!=null?esc(a.qty):'')+'" title="qty" style="width:42px;text-align:left;font-size:11px;padding:1px 4px" inputmode="numeric">'
-              +'<span class="mut">×</span>'
-              +'<input class="fci ac-price" data-id="'+a.id+'" value="'+(a.price!=null?esc(a.price):'')+'" title="price" style="width:58px;text-align:left;font-size:11px;padding:1px 4px" inputmode="decimal">'
-              +'<span style="width:74px;text-align:right;font-weight:600">'+money(line)+'</span>'
-              +(a.approved?'<span class="tool-badge bg-green" style="font-size:9px;padding:0 5px">✓</span> <button class="lnk-btn ac-unapprove" data-id="'+a.id+'" title="un-approve" style="font-size:10px">undo</button>':'<button class="save-btn ac-approve" data-id="'+a.id+'" style="font-size:10px;padding:1px 6px">Approve</button>')
-              +' <button class="lnk-btn ac-rm" data-id="'+a.id+'" title="remove" style="color:#b91c1c">✕</button>'
+            return '<div class="ac-line" data-id="'+a.id+'" style="display:flex;align-items:center;gap:5px;font-size:11px;padding:2px 0;border-bottom:1px solid #f1f5f9">'
+              +'<span class="ac-view" style="display:flex;align-items:center;gap:5px;flex:1">'
+                +'<span style="flex:1;min-width:110px;color:#64748b">'+(a.description?esc(a.description):'<span class="mut">(no description)</span>')+'</span>'
+                +'<span style="width:96px;text-align:right;color:#94a3b8">'+(a.qty!=null?esc(a.qty):'—')+' × '+(a.price!=null?esc(a.price):'—')+'</span>'
+                +'<span style="width:74px;text-align:right;font-weight:600;color:#334155">'+money(line)+'</span>'
+                +(a.approved?'<span class="tool-badge bg-green" style="font-size:9px;padding:0 5px">✓</span> <button class="lnk-btn ac-unapprove" data-id="'+a.id+'" title="un-approve" style="font-size:10px">undo</button>':'<button class="save-btn ac-approve" data-id="'+a.id+'" style="font-size:10px;padding:1px 6px">Approve</button>')
+                +' <button class="lnk-btn ac-edit-link" style="font-size:10px;color:#1d4ed8">edit</button>'
+                +' <button class="lnk-btn ac-rm" data-id="'+a.id+'" title="remove" style="color:#b91c1c">✕</button>'
+              +'</span>'
+              +'<span class="ac-edit" style="display:none;align-items:center;gap:5px;flex:1">'
+                +'<input class="fci ac-desc" data-id="'+a.id+'" value="'+esc(a.description||'')+'" placeholder="description" style="flex:1;min-width:110px;text-align:left;font-size:11px;padding:1px 4px">'
+                +'<input class="fci ac-qty" data-id="'+a.id+'" value="'+(a.qty!=null?esc(a.qty):'')+'" title="qty" style="width:42px;text-align:left;font-size:11px;padding:1px 4px" inputmode="numeric">'
+                +'<span class="mut">×</span>'
+                +'<input class="fci ac-price" data-id="'+a.id+'" value="'+(a.price!=null?esc(a.price):'')+'" title="price" style="width:58px;text-align:left;font-size:11px;padding:1px 4px" inputmode="decimal">'
+                +'<button class="save-btn ac-save" data-id="'+a.id+'" style="font-size:10px;padding:1px 8px">Save</button>'
+                +'<button class="lnk-btn ac-edit-cancel" style="font-size:10px">cancel</button>'
+              +'</span>'
               +'</div>'; }
-          // standing Credit amount row — always present, writes to the credit_amount PO field via the .payin binding
-          var creditRow='<div class="ac-line" style="display:flex;align-items:center;gap:5px;font-size:11px;padding:2px 0;border-bottom:1px solid #f1f5f9">'
+          // standing Credit amount row — same greyed / edit-link treatment; writes to the credit_amount PO field.
+          var creditRow='<div class="ac-line ac-credit" style="display:flex;align-items:center;gap:5px;font-size:11px;padding:2px 0;border-bottom:1px solid #f1f5f9">'
             +'<span style="flex:1;min-width:110px;font-weight:600">Credit amount <span class="mut tiny" style="font-weight:400">— added to invoice · paid in the balance</span></span>'
-            +payIn(ep,'credit_amount',r.credit_amount,false,false,'style="width:74px;text-align:right;font-size:11px;padding:1px 4px" title="credit amount"')
-            +'<span style="width:100px"></span>'
+            +'<span class="ac-view" style="display:flex;align-items:center;gap:6px">'
+              +'<span style="width:74px;text-align:right;color:#94a3b8">'+((r.credit_amount!=null&&r.credit_amount!=='')?money(r.credit_amount):'—')+'</span>'
+              +'<button class="lnk-btn ac-credit-edit" style="font-size:10px;color:#1d4ed8">edit</button>'
+            +'</span>'
+            +'<span class="ac-edit" style="display:none;align-items:center;gap:5px">'
+              +'<input class="fci ac-credit-in" value="'+esc(r.credit_amount==null?'':r.credit_amount)+'" style="width:74px;text-align:right;font-size:11px;padding:1px 4px" inputmode="decimal">'
+              +'<button class="save-btn ac-credit-save" data-ep="'+ep+'" style="font-size:10px;padding:1px 8px">Save</button>'
+              +'<button class="lnk-btn ac-credit-cancel" style="font-size:10px">cancel</button>'
+            +'</span>'
             +'</div>';
           var addTot=ac.reduce(function(s,a){return s+(Number(a.qty)||0)*(Number(a.price)||0);},0)+(Number(r.credit_amount)||0);
           return '<div style="margin:4px 0 6px;max-width:760px;border-top:1px solid #eef2f7;padding-top:5px">'
@@ -3074,8 +3092,11 @@
     // add/edit/remove endpoints the portal uses, plus an approve toggle. Any value edit resets approval (server-side).
     (function(){ var acScope=document.getElementById('podet-'+i); if(!acScope)return;
       function acPost(body){ return fetch('/api/supply/additional-cost',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); poRefetchPanel(po,i); }).catch(function(e){ alert('Failed: '+(e.message||e)); }); }
-      acScope.querySelectorAll('.ac-desc,.ac-qty,.ac-price').forEach(function(inp){ inp.onchange=function(){ var id=inp.dataset.id;
-        var desc=(acScope.querySelector('.ac-desc[data-id="'+id+'"]')||{}).value||'', q=(acScope.querySelector('.ac-qty[data-id="'+id+'"]')||{}).value||'', pr=(acScope.querySelector('.ac-price[data-id="'+id+'"]')||{}).value||'';
+      // read-only by default: "edit" reveals the inputs, "cancel" hides them, "Save" persists then re-renders
+      acScope.querySelectorAll('.ac-edit-link').forEach(function(b){ b.onclick=function(){ var ln=b.closest('.ac-line'); if(!ln)return; ln.querySelector('.ac-view').style.display='none'; var ed=ln.querySelector('.ac-edit'); ed.style.display='inline-flex'; var f=ed.querySelector('.ac-desc'); if(f)f.focus(); }; });
+      acScope.querySelectorAll('.ac-edit-cancel').forEach(function(b){ b.onclick=function(){ var ln=b.closest('.ac-line'); if(!ln)return; ln.querySelector('.ac-edit').style.display='none'; ln.querySelector('.ac-view').style.display='flex'; }; });
+      acScope.querySelectorAll('.ac-save').forEach(function(b){ b.onclick=function(){ var id=b.dataset.id, ln=b.closest('.ac-line');
+        var desc=(ln.querySelector('.ac-desc')||{}).value||'', q=(ln.querySelector('.ac-qty')||{}).value||'', pr=(ln.querySelector('.ac-price')||{}).value||''; b.disabled=true;
         acPost({id:id,description:desc,qty:q,price:pr,submitted_by:'D&B'}); }; });
       acScope.querySelectorAll('.ac-add').forEach(function(b){ b.onclick=function(){ var pp=b.dataset.po;
         var desc=(acScope.querySelector('.ac-ndesc')||{}).value||'', q=(acScope.querySelector('.ac-nqty')||{}).value||'', pr=(acScope.querySelector('.ac-nprice')||{}).value||'';
@@ -3085,6 +3106,12 @@
         fetch('/api/supply/additional-cost-remove',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:b.dataset.id})}).then(function(r){return r.json();}).then(function(){ poRefetchPanel(po,i); }); }; });
       acScope.querySelectorAll('.ac-approve,.ac-unapprove').forEach(function(b){ b.onclick=function(){ var ap=b.classList.contains('ac-approve'); b.disabled=true;
         fetch('/api/supply/additional-cost-approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:b.dataset.id,approved:ap})}).then(function(r){return r.json();}).then(function(){ poRefetchPanel(po,i); }); }; });
+      // standing Credit amount row — same greyed / edit-link / Save pattern (writes credit_amount on the PO)
+      acScope.querySelectorAll('.ac-credit-edit').forEach(function(b){ b.onclick=function(){ var ln=b.closest('.ac-line'); if(!ln)return; ln.querySelector('.ac-view').style.display='none'; var ed=ln.querySelector('.ac-edit'); ed.style.display='inline-flex'; var f=ed.querySelector('.ac-credit-in'); if(f)f.focus(); }; });
+      acScope.querySelectorAll('.ac-credit-cancel').forEach(function(b){ b.onclick=function(){ var ln=b.closest('.ac-line'); if(!ln)return; ln.querySelector('.ac-edit').style.display='none'; ln.querySelector('.ac-view').style.display='flex'; }; });
+      acScope.querySelectorAll('.ac-credit-save').forEach(function(b){ b.onclick=function(){ var ln=b.closest('.ac-line'), inp=ln.querySelector('.ac-credit-in'); b.disabled=true;
+        var v=String((inp&&inp.value)||'').replace(/,/g,'').trim();
+        fetch(b.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({credit_amount:v})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); }).catch(function(e){ b.disabled=false; alert('Failed: '+(e.message||e)); }); }; });
       // add row stays hidden until "+ Add cost"
       acScope.querySelectorAll('.ac-add-show').forEach(function(b){ b.onclick=function(){ var row=acScope.querySelector('.ac-add-row'); if(row){ row.style.display='inline-flex'; b.style.display='none'; var f=row.querySelector('.ac-ndesc'); if(f)f.focus(); } }; });
       acScope.querySelectorAll('.ac-add-cancel').forEach(function(b){ b.onclick=function(){ var row=acScope.querySelector('.ac-add-row'), show=acScope.querySelector('.ac-add-show'); if(row)row.style.display='none'; if(show)show.style.display=''; ['.ac-ndesc','.ac-nqty','.ac-nprice'].forEach(function(s){ var el=acScope.querySelector(s); if(el)el.value=''; }); }; });
