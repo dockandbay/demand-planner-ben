@@ -1545,6 +1545,8 @@ app.get('/api/supply/:section', async (req, res) => {
           (SELECT coalesce(sum(c.freight_cost+c.product_cost),0) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='accepted') accepted_charge,
           (SELECT count(*) FROM planner.sample_notes n WHERE n.sample_id=s.id AND n.author_kind='supplier' AND n.read_at IS NULL)::int unread_notes,
           coalesce(s.change_requested,false) change_requested,
+          coalesce(s.approved_lines,'{}'::jsonb) approved_lines,   -- snapshot at last accept → portal diffs vs current
+          (SELECT coalesce(jsonb_object_agg(sku,qty),'{}'::jsonb) FROM (SELECT sku, sum(qty) qty FROM planner.sample_request_lines WHERE sample_id=s.id GROUP BY sku) z) cur_lines,
           (upper(coalesce(s.status,'')) NOT IN ('SHIPPED','CANCELLED')) is_open,
           (s.completion_date_required IS NOT NULL AND upper(coalesce(s.status,'')) NOT IN ('SHIPPED','CANCELLED')
              AND (current_date > s.completion_date_required
@@ -6649,7 +6651,7 @@ app.post('/api/supply/sample/:id/lines', async (req, res) => {   // replace all 
   finally { client.release(); }
 });
 app.post('/api/supply/sample/:id/accept', async (req, res) => {   // supplier accepts the request
-  try { await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), change_requested=false, updated_at=now() WHERE id=$1::bigint`, [req.params.id]);
+  try { await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), change_requested=false, approved_lines=(SELECT jsonb_object_agg(sku,qty) FROM (SELECT sku, sum(qty) qty FROM planner.sample_request_lines WHERE sample_id=$1::bigint GROUP BY sku) z), updated_at=now() WHERE id=$1::bigint`, [req.params.id]);
     res.json({ ok:true }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/sample/:id/delete', async (req, res) => {
@@ -6671,7 +6673,7 @@ app.post('/api/supply/sample-note', async (req, res) => {
 // admin "preview as supplier" (the real portal uses the /api/portal/sample-* equivalents).
 app.post('/api/supply/sample-accept', async (req, res) => {
   const id = req.body && req.body.id; if(!id) return res.status(400).json({ error: 'id required' });
-  try { await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), change_requested=false, updated_at=now() WHERE id=$1::bigint`, [id]); res.json({ ok:true }); }
+  try { await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), change_requested=false, approved_lines=(SELECT jsonb_object_agg(sku,qty) FROM (SELECT sku, sum(qty) qty FROM planner.sample_request_lines WHERE sample_id=$1::bigint GROUP BY sku) z), updated_at=now() WHERE id=$1::bigint`, [id]); res.json({ ok:true }); }
   catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/supply/sample-update', async (req, res) => {
   const b = req.body || {}; if(!b.id) return res.status(400).json({ error: 'id required' });
@@ -7928,7 +7930,7 @@ app.post('/api/portal/sample-note-read/:id', portalAuth, async (req, res) => {  
   catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample-accept', portalAuth, async (req, res) => {
   try { const s = await portalOwnsSample(req, req.body && req.body.id); if(!s) return res.status(403).json({ error: 'not your sample' });
-    await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), change_requested=false, updated_at=now() WHERE id=$1::bigint`, [s.id]); res.json({ ok: true }); }
+    await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), change_requested=false, approved_lines=(SELECT jsonb_object_agg(sku,qty) FROM (SELECT sku, sum(qty) qty FROM planner.sample_request_lines WHERE sample_id=$1::bigint GROUP BY sku) z), updated_at=now() WHERE id=$1::bigint`, [s.id]); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample-update', portalAuth, async (req, res) => {   // supplier: expected completion / tracking / carrier
   const b = req.body || {};

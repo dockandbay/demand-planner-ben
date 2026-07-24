@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.092 - Samples: supplier confirm + re-confirm-on-change + highlight what changed
+
+Sample requests now have a proper approval loop in the portal sample card:
+- A yellow **Confirm sample request** banner (⏳) when it needs confirming; the existing accept/`change_requested`
+  plumbing already re-flags it when the SKUs change.
+- On a change it reads **"A change has been made. Please re-confirm…"** and shows a **changed-lines table**
+  (Was → Now) plus **highlights the changed SKU rows** in Contents.
+- New `approved_lines` snapshot (**migration 141**) stamped on accept (portal + admin endpoints); the samples
+  query exposes `approved_lines` + `cur_lines` for the diff.
+
 ## v26.091 - Step-2 invoice-mismatch warning is now LIVE
 
 The Step-2 red warning previously only compared a *submitted* invoice value; PO-55EUBL1 had none, so it never
