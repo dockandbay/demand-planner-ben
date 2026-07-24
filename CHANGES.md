@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.089 - Supplier portal PO: merge Order Plan + Invoice (2-step); Documents → Payments
+
+Restructured the supplier-portal PO tabs:
+- **ORDER PLAN** and **INVOICE & DOCUMENTS** merged into **ORDER PLAN & INVOICE**, shown as a 2-step flow —
+  **Step 1: Confirm order plan** (SKU · qty · your cost table, upload-to-autofill, download-to-CSV, Additional
+  costs, and a big **Total invoice amount** at the bottom); **Step 2: Confirm invoice amount** (defaulted to
+  the calculated total) with **SUBMIT TO DOCK & BAY FOR APPROVAL** and the **⤓ Download generated tax invoice**
+  button.
+- **Documents** moved from the old invoice tab to **PAYMENTS**, renamed **PAYMENTS & DOCUMENTS**.
+
+Note: Step-1 add-SKU still uses the existing search + qty + cost row (not yet the samples-style multi-select
+picker behind an Edit toggle) — deferred pending confirmation.
+
 ## v26.088 - Branch delivery notes: shipment is the source once assigned
 
 - **Shipment ▸ Shipment details ▸ Branch delivery notes** is now a plain editable text field pre-filled with

@@ -746,7 +746,7 @@
         +'<tr><td class="l"><input class="fci pp-ac-ndesc" data-po="'+po+'" placeholder="+ add a cost…" style="width:190px"></td><td style="text-align:right"><input class="fci pp-ac-nqty" data-po="'+po+'" placeholder="qty" style="width:56px;text-align:right" inputmode="numeric"></td><td style="text-align:right"><input class="fci pp-ac-nprice" data-po="'+po+'" placeholder="price" style="width:74px;text-align:right" inputmode="decimal"></td><td></td><td class="l"><button class="save-btn pp-ac-add" data-po="'+po+'">Add</button></td></tr>'
         +(add.length?'<tr style="font-weight:700;border-top:1px solid #ccc"><td class="l">Additional total</td><td></td><td></td><td style="text-align:right">$'+money(addTot)+'</td><td></td></tr>':'')
         +'</tbody></table>'
-        +'<div style="margin:8px 0 4px;font-weight:700;font-size:12px">Total invoice cost: <span class="pp-inv-tot" data-add="'+addTot+'">$'+money(invTot)+'</span> <span class="mut tiny" style="font-weight:400">(line items $'+money(totP)+' + additional $'+money(addTot)+')</span></div>';
+        +'<div style="margin:12px 0 4px;padding:10px 12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-weight:800;font-size:18px">Total invoice amount: <span class="pp-inv-tot" data-add="'+addTot+'">$'+money(invTot)+'</span> <span class="mut" style="font-weight:400;font-size:12px">(line items $'+money(totP)+' + additional $'+money(addTot)+')</span></div>';
       // ---- crossdock SKUs → shipped-qty entry lives in the SHIPMENT tab (becomes an open action once shipping) ----
       var cdSkus=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
       var today=new Date().toISOString().slice(0,10);
@@ -769,7 +769,7 @@
       var confirmOP=(needConfirm && !confirmed)?('<div style="margin:0 0 10px;padding:8px 11px;border-radius:6px;font-size:12px;box-sizing:border-box;background:#fef3c7;border:1px solid #fcd34d">'
         +'<div style="margin-bottom:8px">⏳ <b>'+(_chgs.length?'A change has been made. Please re-confirm this order.':'Please confirm this order.')+'</b> Review the SKUs &amp; quantities and the dates below, amend anything that\'s wrong, then confirm.</div>'
         +'<button class="save-btn pp-confirm" data-po="'+po+'" data-v="1" style="background:#16a34a;color:#fff;border-color:#16a34a">✓ Confirm order</button></div>'):'';
-      skus=confirmOP+skus;
+      skus=confirmOP+'<div class="sect-h" style="font-size:14px;margin:0 0 8px">Step 1 — Confirm order plan <span class="mut tiny" style="font-weight:400">(SKU · qty · your cost)</span></div>'+skus;
       // ---- TIMELINE: production status + status + notes (Dock & Bay notes show as 'new' until you mark them read) ----
       var unreadInt=notes.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
       var prodExc=needConfirm?prodAttention(p.production_status, p.prod_start, p.prod_end, subs):'';
@@ -797,25 +797,29 @@
       // ---- INVOICE (the submitted value persists here with its approval status) ----
       var invSubsAll=subs.filter(function(s){return s.kind==='invoice_value';}); var invSub=invSubsAll.length?invSubsAll[invSubsAll.length-1]:null;
       var invStatus=invSub?(invSub.status==='applied'?'<span class="tool-badge bg-green">approved</span>':invSub.status==='dismissed'?'<span class="tool-badge bg-neutral">rejected — please resubmit</span>':'<span class="tool-badge bg-amber">awaiting Dock &amp; Bay approval</span>'):'';
-      // why the (1) on this tab: production has completed and no invoice value is submitted yet → explain the action.
-      var invoice=(invoiceDue(p,subs)?'<div style="margin:0 0 12px;padding:8px 11px;border-radius:6px;font-size:12px;background:#fef3c7;border:1px solid #fcd34d">⏳ <b>Please submit your invoice.</b> This order\'s production is complete, so Dock &amp; Bay need your commercial invoice to proceed with payment — enter the invoice value and attach the document below.</div>':'')
+      // STEP 2 — confirm the invoice amount (defaults to the calculated Step-1 total) → submit for D&B approval + tax invoice
+      var invDefault=(invSub&&invSub.status!=='dismissed'&&invSub.value!=null&&invSub.value!=='')?esc(invSub.value):(Number(invTot)||0).toFixed(2);
+      var invStep2='<div class="sect-h" style="font-size:14px;margin:18px 0 8px;padding-top:12px;border-top:2px solid #e5e7eb">Step 2 — Confirm invoice amount</div>'
+        +(invoiceDue(p,subs)?'<div style="margin:0 0 12px;padding:8px 11px;border-radius:6px;font-size:12px;background:#fef3c7;border:1px solid #fcd34d">⏳ <b>Please submit your invoice.</b> This order\'s production is complete, so Dock &amp; Bay need your commercial invoice to proceed with payment.</div>':'')
         +'<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end">'
-        +'<label class="tiny">Invoice value (USD)<br><input class="fci pp-inv" data-po="'+po+'" placeholder="0.00" value="'+(invSub&&invSub.status!=='dismissed'?esc(invSub.value):'')+'" style="width:110px"></label>'
-        +'<label class="tiny">Invoice doc<br><input type="file" class="pp-inv-file" data-po="'+po+'" style="font-size:11px;width:200px"></label><button class="save-btn pp-inv-go" data-po="'+po+'">'+(invSub&&invSub.status!=='dismissed'?'Resubmit invoice':'Submit invoice')+'</button></div>'
-        +(invSub?'<div class="tiny" style="margin-top:8px;padding:6px 9px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px">Submitted: <b>$'+esc(invSub.value)+'</b> · '+esc(invSub.submitted_at||'')+' · '+invStatus+(invSub.attachment_id?' · <a href="/api/portal/attachment/'+invSub.attachment_id+'" target="_blank">doc</a>':'')+'</div>':'<div class="tiny mut" style="margin-top:6px">No invoice submitted yet.</div>');
-      // ---- DOCUMENTS: upload multiple files, each tagged with a type (Commercial Invoice, Packing List, …) ----
+        +'<label class="tiny">Invoice amount (USD) <span class="mut">— defaults to the calculated total above</span><br><input class="fci pp-inv" data-po="'+po+'" placeholder="0.00" value="'+invDefault+'" style="width:150px;font-size:15px;font-weight:700"></label>'
+        +'<label class="tiny">Invoice doc <span class="mut">(optional)</span><br><input type="file" class="pp-inv-file" data-po="'+po+'" style="font-size:11px;width:200px"></label>'
+        +'<button class="save-btn pp-inv-go" data-po="'+po+'" style="background:#16a34a;color:#fff;border-color:#15803d;font-weight:700">SUBMIT TO DOCK &amp; BAY FOR APPROVAL</button></div>'
+        +(invSub?'<div class="tiny" style="margin-top:8px;padding:6px 9px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px">Submitted: <b>$'+esc(invSub.value)+'</b> · '+esc(invSub.submitted_at||'')+' · '+invStatus+(invSub.attachment_id?' · <a href="/api/portal/attachment/'+invSub.attachment_id+'" target="_blank">doc</a>':'')+'</div>':'')
+        +'<div style="margin-top:12px"><button class="save-btn pp-po-inv" data-po="'+esc(po)+'" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;font-weight:600">⤓ DOWNLOAD GENERATED TAX INVOICE FOR THIS PO</button></div>';
+      // DOCUMENTS — moved to the PAYMENTS & DOCUMENTS tab
       var pdocs=(_ppData&&_ppData.docsByPo&&_ppData.docsByPo[po])||[];
       var attBase=(EP.attachmentBase||'/api/portal/attachment/');
       var docRows=pdocs.length?pdocs.map(function(d){ return '<tr><td class="l">'+esc(d.category||'Other')+'</td><td class="l"><a href="'+attBase+d.id+'" target="_blank" rel="noopener">'+esc(d.filename||'file')+'</a></td><td class="l mut tiny">'+esc(d.uploaded_at||'')+'</td><td class="l"><button class="lnk-btn pp-doc-rm" data-id="'+d.id+'" data-po="'+po+'" style="color:#b91c1c">remove</button></td></tr>'; }).join('')
         :'<tr><td colspan="4" class="mut tiny">No documents uploaded yet.</td></tr>';
-      invoice+='<div style="margin-top:14px"><button class="save-btn pp-po-inv" data-po="'+esc(po)+'" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;font-weight:600">⤓ DOWNLOAD GENERATED TAX INVOICE FOR THIS PO</button></div>';
-      invoice+='<div class="sect-h" style="margin-top:14px">Documents <span class="mut tiny">— attach your commercial invoice, packing list, certificates, photos…</span></div>'
+      var docsBlock='<div class="sect-h" style="margin-top:16px">Documents <span class="mut tiny">— attach your commercial invoice, packing list, certificates, photos…</span></div>'
         +'<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:6px">'
         +'<label class="tiny">Type<br><select class="fci pp-doc-type" data-po="'+po+'" style="text-align:left;min-width:160px">'+DOC_TYPES.map(function(t){return '<option>'+esc(t)+'</option>';}).join('')+'</select></label>'
         +'<label class="tiny">File<br><input type="file" class="pp-doc-file" data-po="'+po+'" style="font-size:11px;width:210px"></label>'
         +'<button class="save-btn pp-doc-go" data-po="'+po+'">Upload document</button></div>'
         +'<table style="font-size:11px;width:auto"><thead><tr><th class="l">Type</th><th class="l">File</th><th class="l">Uploaded</th><th></th></tr></thead><tbody>'+docRows+'</tbody></table>'
         +(/coghlans/i.test(p.branch||'')?'<div style="margin-top:8px"><button class="save-btn" onclick="window.open(\'/api/portal/asn-labels/\'+encodeURIComponent(\''+po+'\'))" title="download your A4 ASN pallet labels — one page per pallet">⤓ ASN Pallet Labels</button> <span class="mut tiny">one A4 page per pallet</span></div>':'');
+      var orderInvoice=skus+invStep2;   // merged ORDER PLAN & INVOICE tab (Step 1 order plan + Step 2 invoice)
       // ---- SHIPMENT: flexport details, else submit tracking/carrier + completion ----
       var shipLabelBtn=(p.ship_other_supplier?'<div style="margin:6px 0"><button class="save-btn pp-shiplabel" data-po="'+po+'" title="this shipment consolidates under another supplier’s master — download the SHIPS WITH labels for your cartons">⤓ Shipment Labels</button> <span class="mut tiny">consolidated under another supplier — label your cartons</span></div>':'');
       // carrier + tracking live on the SHIPMENT (same carrier list as the planner). If this PO isn't on a
@@ -960,10 +964,11 @@
         +((!p.start_date&&!p.completion_date&&!p.balance_1_date)?'<tr><td class="l mut" colspan="4" style="padding:4px 0">No payments recorded yet.</td></tr>':'')
         +'</tbody></table>'
         +'<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">'+ppCard('Amount paid','$'+units(paidTot))+ppCard('Amount due',dueTot!=null?'$'+units(dueTot):'—')+'</div>'
-        +'<div class="tiny mut" style="margin-top:6px">Total invoice value shows its payment due date. Amounts/dates are the deposit &amp; balance milestones from your PO.</div>';
+        +'<div class="tiny mut" style="margin-top:6px">Total invoice value shows its payment due date. Amounts/dates are the deposit &amp; balance milestones from your PO.</div>'
+        +docsBlock;   // Documents moved here (PAYMENTS & DOCUMENTS)
       // ---- tabs + action badges ----
-      var tabs=[['timeline','TIMELINE',timeline,unreadInt+((needConfirm&&!confirmed)?1:0)+(prodExc?1:0)+(cdMiss?1:0)],['orderplan','ORDER PLAN',skus, _chgs.length?1:0],
-        ['invoice','INVOICE &amp; DOCUMENTS',invoice, invoiceDue(p,subs)?1:0],['payments','PAYMENTS',payments,0],
+      var tabs=[['timeline','TIMELINE',timeline,unreadInt+((needConfirm&&!confirmed)?1:0)+(prodExc?1:0)+(cdMiss?1:0)],['orderplan','ORDER PLAN &amp; INVOICE',orderInvoice, (_chgs.length?1:0)+(invoiceDue(p,subs)?1:0)],
+        ['payments','PAYMENTS &amp; DOCUMENTS',payments,0],
         ['shipment','SHIPMENT',shipment, xdAction],   // "no shipment assigned yet" is a passive state, not an action — only a real outstanding crossdock qty entry counts
         ['barcodes','BARCODES & LABELS',barcodesLabels,0]];
       if(dtcApplies) tabs.push(['dtc','DIRECT TO CLIENT DETAILS', dtc, (dtcAccepted||ppShipped(p))?0:1]);
