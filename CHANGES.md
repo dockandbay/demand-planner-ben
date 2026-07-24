@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.077 - SHIPS WITH label: master never gets it (riders only); + Genfreight carrier
+
+- The **SHIPS WITH** label no longer appears on a shipment's **master** PO — only on the **riders** that ship
+  under it. Keyed off the shipment master (`ships_with_master_po` added to the admin PO grid + portal queries):
+  the label shows when `po !== master`. Fixes the label appearing on the master (e.g. shipment PO-57AUBL1's
+  master lost it; its Lixin riders keep it). Applied to both the supplier portal (Barcodes & Labels) and the
+  admin PO ▸ Shipments tab.
+- Added **Genfreight** to the shipments carrier list (grid datalist + shipment-detail carrier select).
+
 ## v26.076 - Crossdock labels download as one consolidated PDF (no zip)
 
 Crossdock box labels now download as a **single multi-page PDF** (one A4 page per crossdock SKU) instead of a

@@ -1221,7 +1221,7 @@
       +(isFbaAwd?docBlock('carton_barcode','Carton barcodes <span class="mut tiny">(upload — supplier downloads on the portal)</span>')+docBlock('pallet_barcode','Pallet barcodes <span class="mut tiny">(upload)</span>'):'')
       +(isEU?docBlock('idn_pallet_label','IDN pallet labels <span class="mut tiny">(upload — supplier downloads on the portal)</span>'):'')
       +(preshipBranch?row('Not required?','<label style="font-size:12px;cursor:pointer"><input type="checkbox" class="fci" data-ep="'+ep+'" data-field="preship_not_required" '+(r.preship_not_required?'checked':'')+' style="width:auto;min-width:0;vertical-align:middle;margin-right:5px">mark pre-shipment documents not required for this PO (clears the overdue action)</label>'):'')
-      +row('Ships With Supplier labels','<button class="save-btn po-dl-sw" data-po="'+esc(po)+'" title="SHIPS WITH SUPPLIER master pallet label (carton size)">⤓ Ships With Supplier labels</button>')
+      +((r.shipment&&r.ships_with_master_po&&r.po!==r.ships_with_master_po)?row('Ships With Supplier labels','<button class="save-btn po-dl-sw" data-po="'+esc(po)+'" title="SHIPS WITH SUPPLIER master pallet label (carton size)">⤓ Ships With Supplier labels</button>'):'')   /* riders only — the shipment master never gets a SHIPS WITH label */
       +'</div>'; }
   // iFulfillment pallet labels — opens a printable A4 sheet of one label per pallet (PO / shipment / ASN / pallet n of N).
   // NOTE: exact label artwork/layout for iFulfillment is to be confirmed with Ben; this is a clean print-ready draft.
@@ -4145,7 +4145,7 @@
       render(''); pop.querySelector('.shpop-q').oninput=function(){render(this.value);}; pop.querySelector('.shpop-q').focus(); }); }
 
   // ---- SHIPMENTS (real planner.shipments records; dates OVERRIDE the POs aboard) ----
-  var CARRIERS=['DHL','FedEx','UPS','Flexport','SF Express','Other'];   // consistent carrier set across shipments, samples & portal (legacy values preserved by the select builder)
+  var CARRIERS=['DHL','FedEx','UPS','Flexport','SF Express','Genfreight','Other'];   // consistent carrier set across shipments, samples & portal (legacy values preserved by the select builder)
   function shipReload(){ delete cache['shipments']; showPoSub('shipments'); }
   function shipPost(ep,body,cb){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
     .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); cb&&cb(j); })
@@ -4400,7 +4400,7 @@
   // ">20 pallets" only matters before it ships; "unlinked" = no POs; "no Flexport match" = has a Flexport ref that doesn't match
   function shipIsExc(s){ if(shipComplete(s))return false; return !!s.no_pos || !!s.no_flex_match || (!!s.over_pallets && !shipShipping(s)); }
   // (Removed dead shipExReason + shipExShort — unused shipment-exception text builders. v25.652)
-  function carrierSel(ep,val,dis){ var O=['Flexport','DHL','Fedex','UPS','FOB','Other'], v=val||'', has=O.indexOf(v)>=0;
+  function carrierSel(ep,val,dis){ var O=['Flexport','DHL','Fedex','UPS','Genfreight','FOB','Other'], v=val||'', has=O.indexOf(v)>=0;
     return '<select class="fci" data-ep="'+ep+'" data-field="carrier"'+(dis?' disabled title="FOB — carrier handled by the client\'s forwarder"':'')+' style="min-width:96px'+(dis?';opacity:.45;background:#f1f1f1':'')+'"><option value=""'+(v?'':' selected')+'>—</option>'
       +(v&&!has?'<option selected>'+esc(v)+'</option>':'')+O.map(function(o){return '<option'+(o===v?' selected':'')+'>'+o+'</option>';}).join('')+'</select>'; }
   function carrierRefInput(ep,val,dis){ return '<input class="fci txt" data-ep="'+ep+'" data-field="carrier_ref" value="'+esc(val||'')+'"'+(dis?' disabled':'')+' style="min-width:120px'+(dis?';opacity:.45;background:#f1f1f1':'')+'">'; }

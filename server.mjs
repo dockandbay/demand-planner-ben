@@ -1675,6 +1675,7 @@ app.get('/api/supply/:section', async (req, res) => {
             to_char(balance_due_date_overide,'YYYY-MM-DD') final_payment_due,   -- the "final payment due" override (priority for balance due)
             credit_days, credit_type,
             coalesce(deposit_ref,'') deposit_ref, coalesce(nullif(shipment_ref,''), (SELECT s.shipment_ref FROM planner.shipments s WHERE s.master_po=calc4.po LIMIT 1), '') shipment,
+            coalesce((SELECT s.master_po FROM planner.shipments s WHERE s.shipment_ref=calc4.shipment_ref), nullif(calc4.shipment_ref,''), (SELECT s.master_po FROM planner.shipments s WHERE s.master_po=calc4.po LIMIT 1)) ships_with_master_po,
             -- mode of the assigned shipment (fob/air/sea) — from the sh join above (self-master resolution).
             -- FOB shipments carry no freight/duty/tax (landed cost = goods only).
             lower(coalesce(sh_mode,'')) ship_mode,
@@ -6726,6 +6727,7 @@ const POS_SQL_PORTAL = `
     -- server-side because the admin app derives it client-side from ALL POs, which the supplier-scoped portal
     -- can't see — so without this the portal's Ships With column was always blank.
     coalesce(shipment_ref,'') ships_with,
+    coalesce((SELECT s.master_po FROM planner.shipments s WHERE s.shipment_ref=calc4.shipment_ref), nullif(calc4.shipment_ref,'')) ships_with_master_po,
     coalesce((SELECT m.supplier_name FROM planner.purchase_orders m
        WHERE m.po = coalesce((SELECT s.master_po FROM planner.shipments s WHERE s.shipment_ref=calc4.shipment_ref), calc4.shipment_ref)),'') ships_with_supplier,
     coalesce(client,'') client, coalesce(dispatch_order_ref,'') dispatch_order_ref,
