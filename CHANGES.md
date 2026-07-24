@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.106 - Branch delivery notes applied to open POs + shipments (data seed, migration 144)
+
+Approved branch delivery notes seeded on the 8 branches and stamped onto all **open** POs
+(`branch_delivery_notes`) and **open** shipments (`delivery_notes`), only where blank. Applied in sandbox
+(146 POs, 83 shipments); **migration 144** carries the same to live (Diviyaj). No code change.
+
 ## v26.105 - HOTFIX supplier portal down ("column po is ambiguous") + barcode fixes
 
 - **HOTFIX (portal down):** `POS_SQL_PORTAL` joined `v_po_finance` with `dtc_shipment_details` and `key_accounts`,
