@@ -8210,6 +8210,15 @@ app.get('/api/portal/label-data', portalAuth, async (req, res) => {
       WHERE sl.sku = ANY($1) AND coalesce(sl.variant_type,'') NOT ILIKE 'set'
         AND coalesce(sl.product_barcode, sl.carton_barcode, sl.inner_barcode) IS NOT NULL
       ORDER BY sl.sku`, [finalSkus])).rows;
+    // Stamp the batch + its production date on each row so the label can print BATCH / DATE OF PRODUCTION.
+    // Resolve the batch from the explicit ?batch, else from the single PO's batch_id.
+    let batchCode = batch || null;
+    if (!batchCode && po) { try { batchCode = (await pool.query(`SELECT batch_id FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0]?.batch_id || null; } catch (e) {} }
+    if (batchCode) {
+      let bd = null;
+      try { bd = (await pool.query(`SELECT to_char(batch_date,'YYYY-MM-DD') d FROM planner.batches WHERE batch=$1`, [batchCode])).rows[0]?.d || null; } catch (e) {}
+      rows.forEach(r => { r.batch = batchCode; r.batch_date = bd; });
+    }
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

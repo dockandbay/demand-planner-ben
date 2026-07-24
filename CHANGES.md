@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.102 - Portal barcodes: labels now carry BATCH + DATE OF PRODUCTION; smaller batch selector
+
+- **Fix:** supplier-portal barcode downloads (Productions / Barcodes & Labels / per-PO) came out with a blank
+  BATCH and DATE OF PRODUCTION. `bcDownloadSheets` never received a batch. Now `/api/portal/label-data` stamps
+  the batch + its production date on each row (resolved from `?batch`, or the PO's `batch_id`), and the label
+  renderer prints them. (⚠️ the batch must have a `batch_date` set in CONFIG for the date to show.)
+- **UI:** the Productions-tab **batch selector is now compact** and the download buttons sit **right next to it**
+  (no longer pushed to the far right).
+
 ## v26.101 - Payments Report: brief "copied ✓" popup on the copy icons
 
 Clicking the **copy for email** / **copy for Xero** icons now shows a brief floating confirmation

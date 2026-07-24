@@ -340,11 +340,13 @@
   function bcDownloadSheets(rows,kinds,zipname,btn){
     var items=rows.filter(function(r){ return kinds.some(function(k){ return rowHasKind(r,k); }); });
     if(!items.length){ alert('No barcodes here'); return; }
+    // batch + production date ride on the rows (server stamps them from ?batch / PO) → print on the label
+    var _b=items[0]||{}; var batch=_b.batch?{batch:_b.batch, batch_date:_b.batch_date}:null;
     var orig=btn?btn.textContent:''; if(btn)btn.disabled=true;
     var needCI = kinds.indexOf('carton')>=0 || kinds.indexOf('inner')>=0;
     var jobs=[fetchImgDataUri('/api/portal/asset/gotham-book'),fetchImgDataUri('/api/portal/asset/gotham-bold')];
     if(needCI){ jobs.push(fetchImgDataUri('/api/portal/asset/grs')); jobs.push(fetchImgDataUri('/api/portal/asset/db')); }
-    Promise.all(jobs).then(function(a){ var base={fontBook:a[0],fontBold:a[1]}; if(needCI){ base.grsUri=a[2]; base.dbUri=a[3]; }
+    Promise.all(jobs).then(function(a){ var base={fontBook:a[0],fontBold:a[1],batch:batch}; if(needCI){ base.grsUri=a[2]; base.dbUri=a[3]; }
       preloadFonts(base).then(function(){ var files=[], i=0;
         function next(){ if(i>=items.length) return finish();
           var r=items[i++]; if(btn)btn.textContent='Rendering '+i+'/'+items.length+'…';
@@ -1077,9 +1079,9 @@
     function ppProductions(){
       var batches=prodBatchesList();
       var sel='<div class="bar" style="gap:8px;align-items:center;flex-wrap:wrap"><span class="pill-lbl" style="width:auto">Batch</span>'
-        +'<select class="fci pv-prod-batch" style="min-width:200px;text-align:left"><option value="">— choose a batch —</option>'
+        +'<select class="fci pv-prod-batch" style="width:auto;min-width:0;max-width:150px;text-align:left"><option value="">— choose —</option>'
         +batches.map(function(b){return '<option value="'+esc(b)+'"'+(PORTAL_PROD_BATCH===b?' selected':'')+'>'+esc(b)+'</option>';}).join('')+'</select>'
-        +(PORTAL_PROD_BATCH?'<span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="save-btn pv-prod-dl">⤓ Download order plan (XLSX)</button>'
+        +(PORTAL_PROD_BATCH?'<span style="display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="save-btn pv-prod-dl">⤓ Download order plan (XLSX)</button>'
           +'<span style="position:relative;display:inline-block"><button class="save-btn pv-bc-dl">⤓ Download barcodes ▾</button>'
           +'<span class="pv-bc-menu" style="display:none;position:absolute;right:0;top:100%;z-index:50;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:190px;text-align:left">'
           +[['product','Product barcodes'],['carton','Carton barcodes'],['inner','Inner barcodes']].map(function(o,i){return '<div class="pv-bc-opt" data-k="'+o[0]+'" style="padding:9px 13px;cursor:pointer;font-size:12px'+(i?';border-top:1px solid #f1f1f1':'')+'">'+o[1]+'</div>';}).join('')
