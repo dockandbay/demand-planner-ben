@@ -1676,6 +1676,7 @@ app.get('/api/supply/:section', async (req, res) => {
             credit_days, credit_type,
             coalesce(deposit_ref,'') deposit_ref, coalesce(nullif(shipment_ref,''), (SELECT s.shipment_ref FROM planner.shipments s WHERE s.master_po=calc4.po LIMIT 1), '') shipment,
             coalesce((SELECT s.master_po FROM planner.shipments s WHERE s.shipment_ref=calc4.shipment_ref), nullif(calc4.shipment_ref,''), (SELECT s.master_po FROM planner.shipments s WHERE s.master_po=calc4.po LIMIT 1)) ships_with_master_po,
+            coalesce((SELECT po2.branch_delivery_notes FROM planner.purchase_orders po2 WHERE po2.po=calc4.po), (SELECT b2.delivery_notes FROM planner.branches b2 WHERE b2.name=calc4.branch), '') branch_delivery_notes,
             -- mode of the assigned shipment (fob/air/sea) — from the sh join above (self-master resolution).
             -- FOB shipments carry no freight/duty/tax (landed cost = goods only).
             lower(coalesce(sh_mode,'')) ship_mode,
@@ -2593,7 +2594,7 @@ app.get('/api/supply/:section', async (req, res) => {
           q(`SELECT id, coalesce(category,'') category, coalesce(country,'') country, duty_pct, coalesce(notes,'') notes
              FROM planner.duty_rates ORDER BY category, country`),
           q(`SELECT name, coalesce(country_code,'') country_code, sea_lead_time_days, air_lead_time_days,
-             coalesce(shipping_notes,'') shipping_notes FROM planner.branches ORDER BY name`),
+             coalesce(shipping_notes,'') shipping_notes, coalesce(delivery_notes,'') delivery_notes FROM planner.branches ORDER BY name`),
         ]);
         const air = await q(`SELECT id, min_kg, max_kg, rate_per_kg FROM planner.air_freight_rates ORDER BY min_kg`).catch(() => []);
         return res.json({ tax, freight, duty, branches, air, sizes: ['20ft','40ft','LCL'] });
@@ -2715,7 +2716,7 @@ app.post('/api/supply/tax-rate/:country', async (req, res) => {
 //  superseded by the pivot endpoints freight-upsert / freight-pallets / duty-upsert. v25.652)
 // Branches (lead-time table) — edit by name (upsert), and create. Drives PO ship/landing dates.
 app.post('/api/supply/branch/:name', async (req, res) => {
-  const b = req.body || {}, allowed = { country_code: 'text', sea_lead_time_days: 'int', air_lead_time_days: 'int', shipping_notes: 'text' };
+  const b = req.body || {}, allowed = { country_code: 'text', sea_lead_time_days: 'int', air_lead_time_days: 'int', shipping_notes: 'text', delivery_notes: 'text' };
   const cols = ['name'], vals = [req.params.name], ph = ['$1::text']; let i = 2;
   for (const k of Object.keys(b)) { if (!allowed[k]) continue; cols.push(k); vals.push(b[k] === '' ? null : b[k]); ph.push(`$${i++}::${allowed[k]}`); }
   const upd = cols.slice(1).map(c => `${c}=excluded.${c}`).join(',') || 'name=excluded.name';
@@ -5117,6 +5118,11 @@ app.post('/api/supply/po/:po', async (req, res) => {
   if (Object.keys(body).some(k => k.indexOf('pack_') === 0 || DTC_FIELDS.indexOf(k) >= 0)) {
     try { await pool.query(`UPDATE planner.purchase_orders SET dtc_accepted_at=NULL, dtc_accepted_by=NULL WHERE po=$1`, [req.params.po]); } catch (e) {}
   }
+  // Assigning/changing the branch re-populates the branch delivery notes: clear the PO override so it falls back
+  // to the new branch's delivery_notes (unless the caller is explicitly editing branch_delivery_notes itself).
+  if (body.branch !== undefined && body.branch_delivery_notes === undefined) {
+    try { await pool.query(`UPDATE planner.purchase_orders SET branch_delivery_notes=NULL WHERE po=$1`, [req.params.po]); } catch (e) {}
+  }
   // Deposit assignment guards: (1) region — AU deposits pair only with AU POs and vice-versa; (2) supplier —
   // a deposit can only go on a PO from the same supplier (a Lixin deposit only onto Lixin POs). Prevents
   // accidental cross-region / cross-supplier assignment.
@@ -5140,7 +5146,7 @@ app.post('/api/supply/po/:po', async (req, res) => {
     preship_not_required: 'boolean',   // "not required" tick suppresses the pre-shipment-docs action (migration 107)
     batch_id: 'text', branch: 'text', erp_po: 'text', notes: 'text', container_size: 'text',
     country_code: 'text', client: 'text', client_requirements: 'text', sales_order_ref: 'text', client_deadline_date: 'date', asn_numbers: 'text',
-    client_po_ref: 'text', dispatch_order_ref: 'text', final_delivery_address: 'text', crossdock_skus: 'text',
+    client_po_ref: 'text', dispatch_order_ref: 'text', final_delivery_address: 'text', crossdock_skus: 'text', branch_delivery_notes: 'text',
     // Packing & Labelling (Client/FBA tab → supplier portal "Direct to Client details") — migration 086
     pack_polybags: 'boolean', pack_polybags_notes: 'text', pack_dnb_barcodes: 'boolean', pack_dnb_barcodes_notes: 'text',
     pack_rfid_barcodes: 'boolean', pack_rfid_barcodes_notes: 'text', pack_dnb_carton: 'boolean', pack_dnb_carton_notes: 'text',
@@ -6775,6 +6781,7 @@ const POS_SQL_PORTAL = `
     coalesce(shipment_ref,'') ships_with,
     coalesce((SELECT s.master_po FROM planner.shipments s WHERE s.shipment_ref=calc4.shipment_ref), nullif(calc4.shipment_ref,'')) ships_with_master_po,
     lower(coalesce((SELECT s.mode FROM planner.shipments s WHERE s.shipment_ref=calc4.shipment_ref),'')) ship_mode,
+    coalesce((SELECT po2.branch_delivery_notes FROM planner.purchase_orders po2 WHERE po2.po=calc4.po), (SELECT b2.delivery_notes FROM planner.branches b2 WHERE b2.name=calc4.branch), '') branch_delivery_notes,
     coalesce((SELECT m.supplier_name FROM planner.purchase_orders m
        WHERE m.po = coalesce((SELECT s.master_po FROM planner.shipments s WHERE s.shipment_ref=calc4.shipment_ref), calc4.shipment_ref)),'') ships_with_supplier,
     coalesce(client,'') client, coalesce(dispatch_order_ref,'') dispatch_order_ref,

@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.081 - Branch delivery notes → flow onto POs + portal
+
+New **Delivery notes** field on branches (CONFIG ▸ Branches, editable). It flows onto a PO as **Branch delivery
+notes**:
+- Auto-populates from the PO's branch (read-time fallback `coalesce(po.branch_delivery_notes, branch.delivery_notes)`);
+  assigning/changing a PO's branch clears the PO override so it re-populates from the new branch.
+- **Editable per PO** in the supply app — PO ▸ Client/FBA tab ("Branch delivery notes").
+- **Visible in the supplier portal** on the PO's SHIPMENT tab (read-only "Delivery notes" block).
+- **Migration 139** adds `branches.delivery_notes` + `purchase_orders.branch_delivery_notes`. Exposed in the
+  admin PO grid + portal queries; editable via branch patch + PO patch.
+
 ## v26.080 - Air freight labels (master of an air shipment)
 
 New **Air freight labels** download, in the same place as the Ships With labels (supplier portal Barcodes &

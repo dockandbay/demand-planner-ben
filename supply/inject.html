@@ -2683,6 +2683,7 @@
           if(fp)parts.push('<a href="tel:'+esc(fp.replace(/[^+0-9]/g,''))+'">'+esc(fp)+'</a>');
           return cliRow('Forwarder <span class="mut tiny">(from key account)</span>', parts.join(' &nbsp;·&nbsp; ')); })()
       +cliRow('Final delivery address <span class="mut tiny">(shown on crossdock labels)</span>',txtIn(ep,'final_delivery_address',r.final_delivery_address,440,true))
+      +cliRow('Branch delivery notes <span class="mut tiny">(defaults from the branch when the branch is set · shown to the supplier)</span>',txtIn(ep,'branch_delivery_notes',r.branch_delivery_notes,440,true))
       +cliRow('Crossdock SKUs <span class="mut tiny">(CROSSDOCK/PREORDER)</span>',crossdockPicker(r.po,xdList))
       // Crossdock destination exception: crossdock SKUs must ship to a real market (UK/US/EU/AU/CA). If this PO
       // carries crossdock SKUs but its ship-to resolves to OT (DIRECT / other non-market), flag it here.
@@ -4814,9 +4815,10 @@
     function brTbl(){ var rows=(d.branches||[]).map(function(r){var ep='/api/supply/branch/'+encodeURIComponent(r.name);
       return '<tr><td class="l"><b>'+esc(r.name)+'</b></td><td class="l">'+editCell(ep,'country_code',r.country_code,'txt')+'</td>'
         +'<td class="l">'+editCell(ep,'sea_lead_time_days',r.sea_lead_time_days)+'</td><td class="l">'+editCell(ep,'air_lead_time_days',r.air_lead_time_days)+'</td>'
-        +'<td class="l">'+editCell(ep,'shipping_notes',r.shipping_notes,'txt')+'</td></tr>';}).join('');
-      return '<div class="sect-h">Branches — shipping lead times <span class="mut tiny">(sea lead drives a PO\'s delivery date: ship + sea days)</span></div>'
-        +'<div class="tw" style="max-width:760px"><table><thead><tr><th class="l">Branch</th><th class="l">Country</th><th class="l">Sea lead (days)</th><th class="l">Air lead (days)</th><th class="l">Notes</th></tr></thead><tbody>'+rows+'</tbody></table></div>'; }
+        +'<td class="l">'+editCell(ep,'shipping_notes',r.shipping_notes,'txt')+'</td>'
+        +'<td class="l">'+editCell(ep,'delivery_notes',r.delivery_notes,'txt')+'</td></tr>';}).join('');
+      return '<div class="sect-h">Branches — shipping lead times <span class="mut tiny">(sea lead drives a PO\'s delivery date: ship + sea days · delivery notes flow onto a PO when its branch is set)</span></div>'
+        +'<div class="tw" style="max-width:900px"><table><thead><tr><th class="l">Branch</th><th class="l">Country</th><th class="l">Sea lead (days)</th><th class="l">Air lead (days)</th><th class="l">Notes</th><th class="l">Delivery notes</th></tr></thead><tbody>'+rows+'</tbody></table></div>'; }
     // (Suppliers + Key accounts now use dedicated card lists + edit forms — see their CONFIG_SUB blocks — not editTbl.)
     var PROD_COLS=[{f:'prod_no',h:'Production #',w:96},{f:'status',h:'Status',t:'select',opts:['','ACTIVE','CLOSED']},
       {f:'require_supplier_confirmation',h:'Require supplier confirmation',t:'bool',w:120},
