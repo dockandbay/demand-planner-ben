@@ -3,6 +3,20 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.099 - Document "submitted for approval" workflow (portal ⇄ admin)
+
+Supplier-initiated document approval on PO documents:
+- **Portal** (PAYMENTS & DOCUMENTS): each document shows an **Approval** status; a **Submit for approval**
+  button (supplier-only) sets it to *⏳ Awaiting Dock & Bay approval*, drops an unread PO timeline note and
+  emails D&B (same recipients as invoice submissions).
+- **Admin** (PO ▸ MASTER DATA & DOCS ▸ Documents): submitted docs show **Approve** / **Reject** (with notes).
+  The tab badge counts docs awaiting approval. The decision posts a timeline note back to the supplier.
+- **Reject** returns the doc to a re-submittable state and keeps the rejection note (shown in the portal so the
+  supplier knows what to fix); **Approve** shows ✓ with reviewer + date.
+- New columns (**migration 143**): `approval_status`, `submitted_at/by`, `reviewed_at/by`, `review_notes` on
+  `planner.portal_attachments`. New endpoints `POST /api/portal/doc-submit`, `POST /api/supply/po-doc-review`.
+  Portal bootstrap now returns `docsByPo` (so suppliers see all their PO documents, not just this session's).
+
 ## v26.098 - PERF: edits return their own row — no second fetch (steps 1+2+3)
 
 Follow-up to v26.097 (which still made a second request per edit). Re-architected so the **save itself**

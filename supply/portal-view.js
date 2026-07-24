@@ -813,14 +813,24 @@
       // DOCUMENTS — moved to the PAYMENTS & DOCUMENTS tab
       var pdocs=(_ppData&&_ppData.docsByPo&&_ppData.docsByPo[po])||[];
       var attBase=(EP.attachmentBase||'/api/portal/attachment/');
-      var docRows=pdocs.length?pdocs.map(function(d){ return '<tr><td class="l">'+esc(d.category||'Other')+'</td><td class="l"><a href="'+attBase+d.id+'" target="_blank" rel="noopener">'+esc(d.filename||'file')+'</a></td><td class="l mut tiny">'+esc(d.uploaded_at||'')+'</td><td class="l"><button class="lnk-btn pp-doc-rm" data-id="'+d.id+'" data-po="'+po+'" style="color:#b91c1c">remove</button></td></tr>'; }).join('')
-        :'<tr><td colspan="4" class="mut tiny">No documents uploaded yet.</td></tr>';
-      var docsBlock='<div class="sect-h" style="margin-top:16px">Documents <span class="mut tiny">— attach your commercial invoice, packing list, certificates, photos…</span></div>'
+      // Approval workflow: a supplier submits a document for Dock & Bay approval; the status + D&B's decision
+      // (with notes) show here and on the timeline. Rejected docs can be revised & re-submitted.
+      function docStatusCell(d){ var s=d.approval_status||'draft';
+        if(s==='submitted') return '<span class="tool-badge bg-amber">⏳ Awaiting Dock &amp; Bay approval</span>';
+        if(s==='approved') return '<span class="tool-badge bg-green">✓ Approved</span>'+(d.reviewed_at?' <span class="mut tiny">'+esc(d.reviewed_at)+'</span>':'');
+        if(s==='rejected') return '<span class="tool-badge" style="background:#fee2e2;color:#b91c1c">✗ Rejected</span>'+(d.review_notes?' <span class="mut tiny">'+esc(d.review_notes)+'</span>':'');
+        return '<span class="mut tiny">Draft</span>'; }
+      function docActionCell(d){ var s=d.approval_status||'draft', canSubmit=(s==='draft'||s==='rejected')&&EP.docSubmit;
+        return (canSubmit?'<button class="save-btn pp-doc-submit" data-id="'+d.id+'" data-po="'+po+'" title="send this document to Dock &amp; Bay for approval">'+(s==='rejected'?'Re-submit':'Submit for approval')+'</button> ':'')
+          +'<button class="lnk-btn pp-doc-rm" data-id="'+d.id+'" data-po="'+po+'" style="color:#b91c1c">remove</button>'; }
+      var docRows=pdocs.length?pdocs.map(function(d){ return '<tr><td class="l">'+esc(d.category||'Other')+'</td><td class="l"><a href="'+attBase+d.id+'" target="_blank" rel="noopener">'+esc(d.filename||'file')+'</a></td><td class="l mut tiny">'+esc(d.uploaded_at||'')+'</td><td class="l">'+docStatusCell(d)+'</td><td class="l">'+docActionCell(d)+'</td></tr>'; }).join('')
+        :'<tr><td colspan="5" class="mut tiny">No documents uploaded yet.</td></tr>';
+      var docsBlock='<div class="sect-h" style="margin-top:16px">Documents <span class="mut tiny">— attach your commercial invoice, packing list, certificates, photos… then submit for Dock &amp; Bay approval</span></div>'
         +'<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:6px">'
         +'<label class="tiny">Type<br><select class="fci pp-doc-type" data-po="'+po+'" style="text-align:left;min-width:160px">'+DOC_TYPES.map(function(t){return '<option>'+esc(t)+'</option>';}).join('')+'</select></label>'
         +'<label class="tiny">File<br><input type="file" class="pp-doc-file" data-po="'+po+'" style="font-size:11px;width:210px"></label>'
         +'<button class="save-btn pp-doc-go" data-po="'+po+'">Upload document</button></div>'
-        +'<table style="font-size:11px;width:auto"><thead><tr><th class="l">Type</th><th class="l">File</th><th class="l">Uploaded</th><th></th></tr></thead><tbody>'+docRows+'</tbody></table>'
+        +'<table style="font-size:11px;width:auto"><thead><tr><th class="l">Type</th><th class="l">File</th><th class="l">Uploaded</th><th class="l">Approval</th><th></th></tr></thead><tbody>'+docRows+'</tbody></table>'
         +(/coghlans/i.test(p.branch||'')?'<div style="margin-top:8px"><button class="save-btn" onclick="window.open(\'/api/portal/asn-labels/\'+encodeURIComponent(\''+po+'\'))" title="download your A4 ASN pallet labels — one page per pallet">⤓ ASN Pallet Labels</button> <span class="mut tiny">one A4 page per pallet</span></div>':'');
       var orderInvoice=skus+invStep2;   // merged ORDER PLAN & INVOICE tab (Step 1 order plan + Step 2 invoice)
       // ---- SHIPMENT: flexport details, else submit tracking/carrier + completion ----
@@ -2071,11 +2081,16 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                 var typeEl=pick('pp-doc-type',po), fin=pick('pp-doc-file',po), f=fin&&fin.files&&fin.files[0];
                 if(!f){ alert('Choose a file to upload.'); return; } var cat=typeEl?typeEl.value:'Other'; var row=btn.closest('tr[id^="pp-"]'); btn.disabled=true;
                 var rd=new FileReader(); rd.onload=function(){ postJSON(EP.upload,{po:po,supplier_id:sid,filename:f.name,mime:f.type,data_base64:rd.result,uploaded_by:by,category:cat},function(j){
-                  (_ppData.docsByPo=_ppData.docsByPo||{}); (_ppData.docsByPo[po]=_ppData.docsByPo[po]||[]).unshift({id:j.id,filename:f.name,category:cat,uploaded_at:''});
+                  (_ppData.docsByPo=_ppData.docsByPo||{}); (_ppData.docsByPo[po]=_ppData.docsByPo[po]||[]).unshift({id:j.id,filename:f.name,category:cat,uploaded_at:'',approval_status:'draft'});
                   rerenderRow(row,po,'invoice'); }); }; rd.readAsDataURL(f); }; });
               // remove a supplier document
               scope.querySelectorAll('.pp-doc-rm').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Remove this document?'))return; var id=btn.dataset.id, po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]');
                 postJSON(EP.docRemove,{id:id},function(){ if(po&&_ppData.docsByPo&&_ppData.docsByPo[po])_ppData.docsByPo[po]=_ppData.docsByPo[po].filter(function(d){return String(d.id)!==String(id);}); rerenderRow(row,po,'invoice'); }); }; });
+              // submit a document for Dock & Bay approval
+              scope.querySelectorAll('.pp-doc-submit').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Submit this document to Dock & Bay for approval?'))return; var id=btn.dataset.id, po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); btn.disabled=true;
+                postJSON(EP.docSubmit,{att_id:id},function(j){ if(j&&j.error){alert(j.error);btn.disabled=false;return;}
+                  if(_ppData.docsByPo&&_ppData.docsByPo[po])_ppData.docsByPo[po].forEach(function(d){ if(String(d.id)===String(id)){ d.approval_status='submitted'; d.review_notes=''; } });
+                  rerenderRow(row,po,'invoice'); }); }; });
             } }
     function loadPreview(){ tabsEl.style.display=''; body.innerHTML='<div class="count">Loading…</div>';
       opts.getData().then(function(d){ if(d&&d.notesByPo){ Object.keys(d.notesByPo).forEach(function(k){ shortNotes(d.notesByPo[k]); }); } _ppData=d; renderPP(); }).catch(function(e){ body.innerHTML='<div class="count" style="color:#dc2626">'+esc(e&&e.message||e)+'</div>'; }); }

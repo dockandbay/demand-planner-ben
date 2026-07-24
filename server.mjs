@@ -2885,6 +2885,18 @@ async function emailInvoiceSubmit(po, value, by) {
     + '<p><a href="' + link + '">Open ' + po + ' in HORIZON</a></p>';
   return sendResendEmail({ to: emails, subject: 'Supplier submitted invoice info — ' + po, html });
 }
+// Push email when a supplier submits a DOCUMENT for approval (same recipients as invoice submissions).
+async function emailDocSubmit(po, filename, by) {
+  let emails;
+  try { const s = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='invoice_submit_notify'`)).rows[0];
+    emails = _emails(s ? s.value : ''); } catch (e) { emails = []; }
+  if (!emails.length) emails = ['zera@dockandbay.com', 'ben@dockandbay.com'];
+  const link = PLANNER_URL + '/#/supply/purchase-orders/plan/' + encodeURIComponent(po);
+  const html = '<p>A supplier submitted a <b>document for approval</b> on <b>' + po + '</b>.</p>'
+    + '<p>Document: <b>' + (filename || 'document') + '</b><br>Submitted by: ' + (by || 'supplier') + '</p>'
+    + '<p><a href="' + link + '">Review it on the PO ▸ Documents tab in HORIZON</a></p>';
+  return sendResendEmail({ to: emails, subject: 'Supplier submitted a document for approval — ' + po, html });
+}
 async function escalateCore({ initiator, kind, ref, message, user, supplierId, setEscalated, postNote }) {
   kind = ['po', 'shipment', 'sample'].includes(kind) ? kind : 'po';
   ref = String(ref || '').trim(); message = String(message || '').trim();
@@ -3709,6 +3721,27 @@ app.post('/api/supply/po-doc-upload', async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, uploaded_by, category)
       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`, [b.po, b.filename || 'document', b.mime || 'application/octet-stream', buf.length, buf, b.uploaded_by || 'admin', b.category || 'document']);
     res.json({ id: r.rows[0].id, byte_size: buf.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Admin PO ▸ DOCUMENTS tab: approve / reject a supplier-submitted document (with notes). Rejection returns the
+// doc to a re-submittable state; the notes are kept so the portal shows why. Posts an INTERNAL timeline note
+// (shows as an unread action for the supplier in the portal) so the decision flows both ways.
+app.post('/api/supply/po-doc-review', async (req, res) => {
+  const b = req.body || {}; const id = b.id, decision = (b.decision === 'rejected') ? 'rejected' : 'approved';
+  const notes = String(b.notes || '').trim();
+  if (!id) return res.status(400).json({ error: 'id required' });
+  try {
+    const doc = (await pool.query(`UPDATE planner.portal_attachments
+        SET approval_status=$2, review_notes=$3, reviewed_by=$4, reviewed_at=now()
+        WHERE id=$1 RETURNING po, coalesce(filename,'document') filename`, [id, decision, notes || null, internalAuthor(req, b.reviewed_by)])).rows[0];
+    if (doc && doc.po) {
+      const verb = decision === 'approved' ? 'Approved' : 'Rejected';
+      const tail = decision === 'rejected' ? ' — please revise & re-submit' : '';
+      const body = verb + ' document “' + doc.filename + '”' + tail + (notes ? (' — ' + notes) : '');
+      try { await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'internal',$3)`,
+        [doc.po, internalAuthor(req, b.reviewed_by), body]); } catch (e) { /* timeline best-effort */ }
+    }
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/portal-submit', async (req, res) => {
@@ -5270,7 +5303,11 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
       pool.query(`SELECT id, value, status, submitted_by, to_char(submitted_at,'YYYY-MM-DD') submitted_at, attachment_id
                   FROM planner.supplier_submissions WHERE po=$1 AND kind='invoice_value' ORDER BY id DESC LIMIT 1`, [po]).catch(() => ({ rows: [] })),
       pool.query(`SELECT id, filename, coalesce(category,'invoice') category, coalesce(uploaded_by,'') uploaded_by, byte_size,
-                    to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments WHERE po=$1 ORDER BY uploaded_at DESC`, [po]).catch(() => ({ rows: [] })),
+                    to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at,
+                    coalesce(approval_status,'draft') approval_status, coalesce(review_notes,'') review_notes,
+                    coalesce(submitted_by,'') submitted_by, to_char(submitted_at,'YYYY-MM-DD') submitted_at,
+                    coalesce(reviewed_by,'') reviewed_by, to_char(reviewed_at,'YYYY-MM-DD') reviewed_at
+                  FROM planner.portal_attachments WHERE po=$1 ORDER BY uploaded_at DESC`, [po]).catch(() => ({ rows: [] })),
       // PO PLAN Timeline: notes (supplier + internal) + submission status
       pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
                     to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read
@@ -7884,8 +7921,19 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
         (SELECT count(*)::int FROM planner.product_dev_sizes s WHERE s.item_id=i.id) sizes,
         (SELECT count(*)::int FROM planner.supplier_notes n WHERE n.po=i.ref AND n.author_kind='internal' AND n.read_at IS NULL) unread_dnb
       FROM planner.product_dev_items i WHERE i.supplier = ANY($1) ORDER BY i.created_at DESC`, [names]) : [];
+    // Documents the supplier has for their POs (excl. admin-managed client/FBA docs) with approval status →
+    // powers the Documents list + the "submit for approval" workflow in the portal.
+    const _pokeys = pos.map(p => p.po);
+    const docsByPo = {};
+    if (_pokeys.length) {
+      const drows = await q(`SELECT po, id, filename, coalesce(category,'Other') category, to_char(uploaded_at,'YYYY-MM-DD') uploaded_at,
+          coalesce(approval_status,'draft') approval_status, coalesce(review_notes,'') review_notes,
+          to_char(reviewed_at,'YYYY-MM-DD') reviewed_at FROM planner.portal_attachments
+          WHERE po = ANY($1) AND coalesce(category,'') <> 'client' ORDER BY uploaded_at DESC`, [_pokeys]);
+      drows.forEach(d => { (docsByPo[d.po] = docsByPo[d.po] || []).push(d); });
+    }
     res.json({ pos, lb, sdep: deps, sid: ids[0] || null, supplierName: names.join(', '),
-      notesByPo, subsByPo, costsByPo, supSkus, xdByPo, addByPo, approvedByPo, samples, payments, shipmentPlan, productEnabled, products });
+      notesByPo, subsByPo, costsByPo, supSkus, xdByPo, addByPo, approvedByPo, docsByPo, samples, payments, shipmentPlan, productEnabled, products });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // ── PORTAL PRODUCT (supplier-scoped): timeline view + comment on their assigned product-dev items ──
@@ -8219,6 +8267,23 @@ app.post('/api/portal/additional-cost-remove', portalAuth, async (req, res) => {
     const r = (await pool.query(`SELECT po FROM planner.portal_additional_costs WHERE id=$1`, [id])).rows[0];
     if (!r || !await portalOwnsPO(req, r.po)) return portalDeny(res);
     await pool.query(`DELETE FROM planner.portal_additional_costs WHERE id=$1`, [id]); res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Supplier submits a document for approval (Documents section, PAYMENTS & DOCUMENTS tab). Sets it 'submitted',
+// drops an UNREAD supplier timeline note on the PO (→ admin notification badge) and pushes an email to D&B.
+app.post('/api/portal/doc-submit', portalAuth, async (req, res) => {
+  const id = req.body && req.body.att_id; if (!id) return res.status(400).json({ error: 'att_id required' });
+  try {
+    const doc = (await pool.query(`SELECT id, po, coalesce(filename,'document') filename FROM planner.portal_attachments WHERE id=$1`, [id])).rows[0];
+    if (!doc || !doc.po || !await portalOwnsPO(req, doc.po)) return portalDeny(res);
+    await pool.query(`UPDATE planner.portal_attachments
+        SET approval_status='submitted', submitted_by=$2, submitted_at=now(), review_notes=NULL, reviewed_by=NULL, reviewed_at=NULL
+        WHERE id=$1`, [id, req.portal.email || 'supplier']);
+    const sid = (req.portal.supplierIds || [])[0] || null;
+    try { await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body) VALUES ($1,$2,$3,'supplier',$4)`,
+      [doc.po, sid, req.portal.email || null, 'Submitted document “' + doc.filename + '” for approval']); } catch (e) { /* timeline best-effort */ }
+    emailDocSubmit(doc.po, doc.filename, req.portal.email).catch(() => {});
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/portal/note', portalAuth, async (req, res) => {
