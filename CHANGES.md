@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.075 - Supplier portal: ASN Pallet Labels also under Barcodes & Labels
+
+The **⤓ ASN Pallet Labels** button (Coghlans branch) now also appears on the **Barcodes & Labels** tab, not
+just Invoice & Documents — same download (`/api/portal/asn-labels/:po`, one A4 page per pallet).
+
 ## v26.074 - Buy plan: FBA Shortfall shown in whole cartons; demand-grid scrollbar gap
 
 - **FBA Shortfall** row in the SKU plan popup is now shown **rounded up to whole cartons** (using the SKU's

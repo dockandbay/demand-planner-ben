@@ -868,6 +868,7 @@
         +(p.shipment&&!p.ship_other_supplier?blRow('Shipment labels','<button class="save-btn pp-shiplabel" data-po="'+po+'">⤓ Download shipment labels</button> <span class="mut tiny">SHIPS WITH master label for shipment '+esc(p.shipment)+'</span>'):'')
         +(p.ship_other_supplier?blRow('Ship To pallet labels','<button class="save-btn pp-shiplabel" data-po="'+po+'">⤓ Download Ship To Pallet Labels</button> <span class="mut tiny">this PO ships under another supplier’s PO</span>'):'')
         +(cdSkus.length?blRow('Crossdock box labels','<button class="save-btn pp-dl-cd" data-skus="'+esc(cdSkus.join(','))+'" data-po="'+po+'" data-do="'+esc(p.dispatch_order_ref||'')+'" data-client="'+esc(p.client||'')+'" data-address="'+esc(p.final_delivery_address||'')+'">⤓ Download crossdock labels</button> <span class="mut tiny">PO / dispatch order / client / delivery address overlaid</span>'):'')
+        +(/coghlans/i.test(p.branch||'')?blRow('ASN pallet labels','<button class="save-btn" onclick="window.open(\'/api/portal/asn-labels/\'+encodeURIComponent(\''+po+'\'))">⤓ ASN Pallet Labels</button> <span class="mut tiny">one A4 page per pallet</span>'):'')
         +(clientDocs.length?blRow('Direct to Client / FBA attachments',clientDocs.map(function(x){return '<a href="/api/portal/attachment/'+x.id+'" target="_blank" rel="noopener">'+esc(x.filename||'file')+'</a>';}).join(' &nbsp;·&nbsp; ')):'')
         +'</div>';
       // ---- Direct to Client details (read-only packing & labelling) + approve workflow ----
