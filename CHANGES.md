@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.068 - Supplier portal: re-confirm signalling + invoice-action explanation
+
+Two supplier-portal clarity fixes:
+- **ORDER PLAN tab** now shows a **(1) badge** when there are *changes since you approved* (i.e. the order was
+  previously confirmed, a qty/SKU has since changed, and it needs re-confirming — `_chgs.length>0`). The
+  confirm banner's prompt now reads **"A change has been made. Please re-confirm this order…"** in that case
+  (vs the first-time **"Please confirm this order…"**). Confirmation is already auto-reset server-side on a
+  material change, so this only surfaces that state to the supplier.
+- **INVOICE & DOCUMENTS tab** now shows an amber banner explaining *why* its (1) action is firing:
+  "Please submit your invoice — this order's production is complete, so Dock & Bay need your commercial invoice
+  to proceed with payment." (Previously the (1) appeared with no in-portal explanation.)
+
 ## v26.067 - Forwarder details on key accounts → PO Client/FBA + supplier portal
 
 New **Forwarder details** (name / email / phone) on a key account:

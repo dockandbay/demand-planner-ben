@@ -739,7 +739,7 @@
       var confirmBar=needConfirm?('<div style="margin:0 0 10px;padding:8px 11px;border-radius:6px;font-size:12px;box-sizing:border-box;'+(confirmed?'background:#dcfce7;border:1px solid #86efac':'background:#fef3c7;border:1px solid #fcd34d')+'">'
         +(confirmed
           ? '<div style="margin-bottom:8px">✓ <b>Order confirmed</b> on '+esc(p.supplier_confirmed)+(p.supplier_confirmed_by?' · '+esc(p.supplier_confirmed_by):'')+'</div><button class="save-btn light pp-confirm" data-po="'+po+'" data-v="0">Withdraw confirmation</button>'
-          : '<div style="margin-bottom:8px">⏳ <b>Please confirm this order.</b> Review the SKUs &amp; quantities (ORDER PLAN tab) and the dates, amend anything that\'s wrong, then confirm.</div><button class="save-btn pp-confirm" data-po="'+po+'" data-v="1" style="background:#16a34a;color:#fff;border-color:#16a34a">✓ Confirm order</button>')
+          : '<div style="margin-bottom:8px">⏳ <b>'+(_chgs.length?'A change has been made. Please re-confirm this order.':'Please confirm this order.')+'</b> Review the SKUs &amp; quantities (ORDER PLAN tab) and the dates, amend anything that\'s wrong, then confirm.</div><button class="save-btn pp-confirm" data-po="'+po+'" data-v="1" style="background:#16a34a;color:#fff;border-color:#16a34a">✓ Confirm order</button>')
         +'</div>'):'';
       // ---- TIMELINE: production status + status + notes (Dock & Bay notes show as 'new' until you mark them read) ----
       var unreadInt=notes.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
@@ -768,7 +768,9 @@
       // ---- INVOICE (the submitted value persists here with its approval status) ----
       var invSubsAll=subs.filter(function(s){return s.kind==='invoice_value';}); var invSub=invSubsAll.length?invSubsAll[invSubsAll.length-1]:null;
       var invStatus=invSub?(invSub.status==='applied'?'<span class="tool-badge bg-green">approved</span>':invSub.status==='dismissed'?'<span class="tool-badge bg-neutral">rejected — please resubmit</span>':'<span class="tool-badge bg-amber">awaiting Dock &amp; Bay approval</span>'):'';
-      var invoice='<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end">'
+      // why the (1) on this tab: production has completed and no invoice value is submitted yet → explain the action.
+      var invoice=(invoiceDue(p,subs)?'<div style="margin:0 0 12px;padding:8px 11px;border-radius:6px;font-size:12px;background:#fef3c7;border:1px solid #fcd34d">⏳ <b>Please submit your invoice.</b> This order\'s production is complete, so Dock &amp; Bay need your commercial invoice to proceed with payment — enter the invoice value and attach the document below.</div>':'')
+        +'<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end">'
         +'<label class="tiny">Invoice value (USD)<br><input class="fci pp-inv" data-po="'+po+'" placeholder="0.00" value="'+(invSub&&invSub.status!=='dismissed'?esc(invSub.value):'')+'" style="width:110px"></label>'
         +'<label class="tiny">Invoice doc<br><input type="file" class="pp-inv-file" data-po="'+po+'" style="font-size:11px;width:200px"></label><button class="save-btn pp-inv-go" data-po="'+po+'">'+(invSub&&invSub.status!=='dismissed'?'Resubmit invoice':'Submit invoice')+'</button></div>'
         +(invSub?'<div class="tiny" style="margin-top:8px;padding:6px 9px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px">Submitted: <b>$'+esc(invSub.value)+'</b> · '+esc(invSub.submitted_at||'')+' · '+invStatus+(invSub.attachment_id?' · <a href="/api/portal/attachment/'+invSub.attachment_id+'" target="_blank">doc</a>':'')+'</div>':'<div class="tiny mut" style="margin-top:6px">No invoice submitted yet.</div>');
@@ -919,7 +921,7 @@
         +'<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">'+ppCard('Amount paid','$'+units(paidTot))+ppCard('Amount due',dueTot!=null?'$'+units(dueTot):'—')+'</div>'
         +'<div class="tiny mut" style="margin-top:6px">Total invoice value shows its payment due date. Amounts/dates are the deposit &amp; balance milestones from your PO.</div>';
       // ---- tabs + action badges ----
-      var tabs=[['timeline','TIMELINE',timeline,unreadInt+((needConfirm&&!confirmed)?1:0)+(prodExc?1:0)+(cdMiss?1:0)],['orderplan','ORDER PLAN',skus,0],
+      var tabs=[['timeline','TIMELINE',timeline,unreadInt+((needConfirm&&!confirmed)?1:0)+(prodExc?1:0)+(cdMiss?1:0)],['orderplan','ORDER PLAN',skus, _chgs.length?1:0],
         ['invoice','INVOICE &amp; DOCUMENTS',invoice, invoiceDue(p,subs)?1:0],['payments','PAYMENTS',payments,0],
         ['shipment','SHIPMENT',shipment, xdAction],   // "no shipment assigned yet" is a passive state, not an action — only a real outstanding crossdock qty entry counts
         ['barcodes','BARCODES & LABELS',barcodesLabels,0]];
