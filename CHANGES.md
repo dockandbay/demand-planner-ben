@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.069 - Supplier portal: confirm/re-confirm box on ORDER PLAN tab too
+
+The yellow **Confirm order / Re-confirm order** prompt + button now also sits at the top of the **ORDER PLAN**
+sub-tab (previously TIMELINE only), so the supplier can confirm right where they review the SKUs/qtys. On
+click it's **removed from both tabs**: the card re-renders with `supplier_confirmed=true`, and the confirm
+also re-snapshots the approved lines client-side (mirroring the server) so the "changes since you approved"
+block + the ORDER PLAN (1) badge clear immediately too. The TIMELINE banner keeps the green "confirmed" state
++ Withdraw; the ORDER PLAN copy is the yellow prompt only.
+
 ## v26.068 - Supplier portal: re-confirm signalling + invoice-action explanation
 
 Two supplier-portal clarity fixes:

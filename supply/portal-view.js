@@ -741,6 +741,13 @@
           ? '<div style="margin-bottom:8px">✓ <b>Order confirmed</b> on '+esc(p.supplier_confirmed)+(p.supplier_confirmed_by?' · '+esc(p.supplier_confirmed_by):'')+'</div><button class="save-btn light pp-confirm" data-po="'+po+'" data-v="0">Withdraw confirmation</button>'
           : '<div style="margin-bottom:8px">⏳ <b>'+(_chgs.length?'A change has been made. Please re-confirm this order.':'Please confirm this order.')+'</b> Review the SKUs &amp; quantities (ORDER PLAN tab) and the dates, amend anything that\'s wrong, then confirm.</div><button class="save-btn pp-confirm" data-po="'+po+'" data-v="1" style="background:#16a34a;color:#fff;border-color:#16a34a">✓ Confirm order</button>')
         +'</div>'):'';
+      // The same confirm / re-confirm prompt + button also sits at the top of the ORDER PLAN tab (Ben). Yellow
+      // prompt only — once confirmed it disappears from BOTH tabs (the card re-renders on confirm). Withdraw
+      // stays on the TIMELINE banner only.
+      var confirmOP=(needConfirm && !confirmed)?('<div style="margin:0 0 10px;padding:8px 11px;border-radius:6px;font-size:12px;box-sizing:border-box;background:#fef3c7;border:1px solid #fcd34d">'
+        +'<div style="margin-bottom:8px">⏳ <b>'+(_chgs.length?'A change has been made. Please re-confirm this order.':'Please confirm this order.')+'</b> Review the SKUs &amp; quantities and the dates below, amend anything that\'s wrong, then confirm.</div>'
+        +'<button class="save-btn pp-confirm" data-po="'+po+'" data-v="1" style="background:#16a34a;color:#fff;border-color:#16a34a">✓ Confirm order</button></div>'):'';
+      skus=confirmOP+skus;
       // ---- TIMELINE: production status + status + notes (Dock & Bay notes show as 'new' until you mark them read) ----
       var unreadInt=notes.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
       var prodExc=needConfirm?prodAttention(p.production_status, p.prod_start, p.prod_end, subs):'';
@@ -1827,7 +1834,10 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
               scope.querySelectorAll('.pp-confirm').forEach(function(btn){ btn.onclick=function(){ var v=btn.dataset.v==='1';
                 if(v && !confirm('Confirm this order? You’re accepting the SKUs, quantities and dates as shown.'))return;
                 if(!v && !confirm('Withdraw your confirmation of this order?'))return;
-                var po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); btn.disabled=true; postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,po_confirmed:v},function(){ var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; if(p){ p.supplier_confirmed=v?(by||'confirmed'):null; p.supplier_confirmed_by=v?by:null; } refreshRow(row,po); }); }; });
+                var po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); btn.disabled=true; postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,po_confirmed:v},function(){ var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; if(p){ p.supplier_confirmed=v?(by||'confirmed'):null; p.supplier_confirmed_by=v?by:null; }
+                  // on confirm, re-snapshot approved lines locally (server does the same) so "changes since you approved" + the ORDER PLAN (1) badge clear immediately on both tabs
+                  if(v){ var snap={}; (_ppData.lb[po]||[]).forEach(function(l){ snap[l.sku]=Number(l.qty)||0; }); _ppData.approvedByPo=_ppData.approvedByPo||{}; _ppData.approvedByPo[po]=snap; }
+                  refreshRow(row,po); }); }; });
               // post a note → refresh just this PO's timeline in place (re-fetch the supplier's notes, stay on TIMELINE)
               scope.querySelectorAll('.pp-note-post').forEach(function(btn){ btn.onclick=function(){ var ta=pick('pp-note-body',btn.dataset.po); var v=(ta.value||'').trim(); if(!v)return; var po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); btn.disabled=true;
                 postJSON(EP.note,{po:po,supplier_id:sid,body:v,author_kind:'supplier',author_email:by},function(){
