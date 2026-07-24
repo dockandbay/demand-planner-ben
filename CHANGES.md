@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.107 - Prime Day scenario: compact Category dropdown, kept beside its label
+
+Shortened the Category `<select>` on SCENARIO ▸ Prime Day and locked it inline next to the "Category"
+label (was wide and wrapped to the next line).
+
 ## v26.106 - Branch delivery notes applied to open POs + shipments (data seed, migration 144)
 
 Approved branch delivery notes seeded on the 8 branches and stamped onto all **open** POs
