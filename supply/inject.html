@@ -2427,9 +2427,9 @@
       document.body.style.overflow=''; } }
   // small floating "Copied to clipboard" tooltip anchored just above a cell (fades out on its own)
   var _copyTip=null,_copyTipT=null;
-  function showCopyTip(cell){ if(!cell)return;
+  function showCopyTip(cell,msg){ if(!cell)return;
     if(!_copyTip){ _copyTip=document.createElement('div'); _copyTip.className='po-copy-tip'; document.body.appendChild(_copyTip); }
-    _copyTip.textContent='Copied to clipboard ✓';
+    _copyTip.textContent=msg||'Copied to clipboard ✓';
     var r=cell.getBoundingClientRect();
     _copyTip.style.left=Math.max(6,Math.round(r.left+r.width/2))+'px';
     _copyTip.style.top=Math.max(4,Math.round(r.top-8))+'px';
@@ -6203,7 +6203,7 @@
     var bl=new Blob([xbToCsv(m)],{type:'text/csv'}); var u=URL.createObjectURL(bl); var a=document.createElement('a'); a.href=u; a.download=xbFilename(run); document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); }
   function xbCopy(run, ccy, amt, btn){ var m=xeroBillMatrix(run,ccy,amt); if(!m){alert('No payments in this run to export (other payments are excluded).');return;}
     var tsv=xbToTsv(m);   // TAB-separated so it pastes into separate Google Sheets columns
-    navigator.clipboard.writeText(tsv).catch(function(){ alert('Copy failed — your browser blocked clipboard access.'); }); }
+    navigator.clipboard.writeText(tsv).then(function(){ showCopyTip(btn,'Xero details copied ✓'); },function(){ alert('Copy failed — your browser blocked clipboard access.'); }); }
   // Payment SUMMARY copy (TAB-separated): supplier + amount + payment reference, then the full line table
   // (Reference, Amount, Type, Production ref, Deposit ref) — ALL lines incl. "other". Pastes into Sheets.
   function xbSummaryTsv(run, ccy, amt){
@@ -6241,7 +6241,7 @@
       +'</tr></thead><tbody>'+rows+'</tbody></table></div>';
   }
   function xbCopySummary(run, ccy, amt, btn){ if(!(run.lines||[]).length){alert('No payments in this run.');return;}
-    function done(){}   // no button state change — click just copies (Ben's request)
+    function done(){ showCopyTip(btn,'Email summary copied ✓'); }   // brief popup confirmation (no button state change)
     function fail(){ alert('Copy failed — your browser blocked clipboard access.'); }
     var html=xbSummaryHtml(run,ccy,amt), text=xbSummaryTsv(run,ccy,amt);
     // write rich (text/html → Gmail / Sheets) + plain (TSV fallback); fall back to plain-text write if needed

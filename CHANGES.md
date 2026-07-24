@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.101 - Payments Report: brief "copied ✓" popup on the copy icons
+
+Clicking the **copy for email** / **copy for Xero** icons now shows a brief floating confirmation
+("Email summary copied ✓" / "Xero details copied ✓") above the icon, so you know the copy worked.
+Reuses the existing copy-tip popup; the buttons still don't change state.
+
 ## v26.100 - PO ▸ Payments: additional costs read-only with an "edit" link
 
 Additional cost lines (and the Credit amount row) now render as **greyed read-only values** with an **edit**
