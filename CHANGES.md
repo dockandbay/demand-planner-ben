@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.090 - Multi-select SKU pickers + Step-2 invoice-mismatch warning
+
+- **Portal PO ▸ ORDER PLAN & INVOICE (Step 1)**: the old "search a SKU / qty / price / Add SKU" row is
+  replaced by a single **+ Add new line** button that opens a **multi-select SKU search picker** (tick SKUs +
+  qty → + Add selected), same UX as adding a sample. Cost is entered per line in the table after.
+- **Portal PO ▸ Step 2**: red warning when the submitted invoice amount differs from the Step-1 calculated
+  total — prompts to update the order plan.
+- **Admin ▸ Samples ▸ Edit sample**: the old "+ line" method is replaced by the same multi-select search
+  picker used by "add new sample" (search → tick + qty → + Add selected, plus free-text).
+
 ## v26.089 - Supplier portal PO: merge Order Plan + Invoice (2-step); Documents → Payments
 
 Restructured the supplier-portal PO tabs:

@@ -727,11 +727,9 @@
         +rws
         +'<tr style="font-weight:700;border-top:2px solid #999"><td class="l">TOTAL</td><td style="text-align:right" class="pp-totq">'+units(totQ)+'</td><td></td><td style="text-align:right">FINAL</td><td style="text-align:right" class="pp-totp">$'+money(totP)+'</td><td></td></tr>'
         +'</tbody></table></div>'
-        +'<div style="margin:6px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><input class="fci pp-add-sku" data-po="'+po+'" placeholder="search a SKU you supply…" style="width:250px;text-align:left" autocomplete="off">'
-        +'<input class="fci pp-add-qty" data-po="'+po+'" placeholder="qty" style="width:62px;text-align:right" inputmode="numeric">'
-        +'<input class="fci pp-add-cost" data-po="'+po+'" placeholder="price" style="width:80px;text-align:right" inputmode="decimal">'
-        +'<button class="save-btn pp-add-go" data-po="'+po+'">Add SKU</button></div>'
-        +'<div class="tiny mut" style="margin:2px 0 6px">Amend the quantity, enter your cost price per line, or add a SKU you supply (qty + price). Saved on change.</div>';
+        +'<div style="margin:6px 0"><button class="save-btn pp-op-addline" data-po="'+po+'">+ Add new line</button></div>'
+        +'<div class="pp-op-picker" data-po="'+po+'" style="display:none"></div>'
+        +'<div class="tiny mut" style="margin:2px 0 6px">Amend the quantity or enter your cost per line in the table above, or use <b>+ Add new line</b> to add SKUs you supply (enter the cost in the table after).</div>';
       // ---- Additional costs (freight, tooling, surcharges…) → sum into the total invoice cost ----
       var addTot=0; var acRows=add.map(function(a){ var q=Number(a.qty)||0, pr=Number(a.price)||0, lt=q*pr; addTot+=lt;
         return '<tr><td class="l"><input class="fci pp-ac-desc" data-id="'+a.id+'" data-po="'+po+'" value="'+esc(a.description||'')+'" placeholder="description" style="width:190px"></td>'
@@ -799,7 +797,11 @@
       var invStatus=invSub?(invSub.status==='applied'?'<span class="tool-badge bg-green">approved</span>':invSub.status==='dismissed'?'<span class="tool-badge bg-neutral">rejected — please resubmit</span>':'<span class="tool-badge bg-amber">awaiting Dock &amp; Bay approval</span>'):'';
       // STEP 2 — confirm the invoice amount (defaults to the calculated Step-1 total) → submit for D&B approval + tax invoice
       var invDefault=(invSub&&invSub.status!=='dismissed'&&invSub.value!=null&&invSub.value!=='')?esc(invSub.value):(Number(invTot)||0).toFixed(2);
+      // red warning if the submitted invoice amount differs from the Step-1 calculated total (update the order plan)
+      var invSubNum=(invSub&&invSub.value!=null&&invSub.value!=='')?(Number(String(invSub.value).replace(/,/g,''))||0):null;
+      var invMismatch=(invSubNum!=null && Math.abs(invSubNum-(Number(invTot)||0))>0.01);
       var invStep2='<div class="sect-h" style="font-size:14px;margin:18px 0 8px;padding-top:12px;border-top:2px solid #e5e7eb">Step 2 — Confirm invoice amount</div>'
+        +(invMismatch?'<div style="margin:0 0 10px;padding:8px 11px;border-radius:6px;font-size:12px;background:#fef2f2;border:1px solid #fca5a5;color:#991b1b"><b>⚠ Invoice amount doesn\'t match the order plan.</b> Your invoice amount <b>$'+esc(invSub.value)+'</b> differs from the calculated total <b>$'+money(invTot)+'</b>. Please update the order plan in Step 1 above (SKUs / quantities / costs) so they match.</div>':'')
         +(invoiceDue(p,subs)?'<div style="margin:0 0 12px;padding:8px 11px;border-radius:6px;font-size:12px;background:#fef3c7;border:1px solid #fcd34d">⏳ <b>Please submit your invoice.</b> This order\'s production is complete, so Dock &amp; Bay need your commercial invoice to proceed with payment.</div>':'')
         +'<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end">'
         +'<label class="tiny">Invoice amount (USD) <span class="mut">— defaults to the calculated total above</span><br><input class="fci pp-inv" data-po="'+po+'" placeholder="0.00" value="'+invDefault+'" style="width:150px;font-size:15px;font-weight:700"></label>'
@@ -1931,29 +1933,29 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                 inp.oninput=function(){ recalc(inp.closest('.ppx')); };
                 inp.onchange=function(){ var box=inp.closest('.ppx'); recalc(box); saveLine(box,inp.dataset.po,inp.dataset.sku); }; });
               // add-SKU search: a filterable dropdown of the supplier's SKUs not already on the order (standard picker UX)
-              scope.querySelectorAll('.pp-add-sku').forEach(function(inp){ var po=inp.dataset.po, pop=null;
+              // "+ Add new line" → multi-select SKU picker (search + checkboxes + qty, "+ Add selected") — same UX as adding a sample
+              scope.querySelectorAll('.pp-op-addline').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po;
+                var esq=function(v){ return (window.CSS&&CSS.escape)?CSS.escape(v):v; };
+                var host=btn.closest('.ppx').querySelector('.pp-op-picker[data-po="'+esq(po)+'"]'); if(!host)return;
+                if(host.style.display!=='none'){ host.style.display='none'; host.innerHTML=''; return; }
+                host.style.display='';
                 function cands(){ var on={}; (_ppData.lb[po]||[]).forEach(function(l){on[l.sku]=1;}); var cb=_ppData.costsByPo[po]||{}; Object.keys(cb).forEach(function(s){ if(cb[s]&&cb[s].is_added)on[s]=1; }); return (_ppData.supSkus||[]).filter(function(s){return !on[s.sku];}); }
-                function close(){ if(pop){ pop.remove(); pop=null; } document.removeEventListener('scroll',onScroll,true); window.removeEventListener('resize',close); }
-                function onScroll(){ close(); }   // close on scroll rather than track (avoids drift + escapes the grid)
-                function place(){ if(!pop)return; var r=inp.getBoundingClientRect(); pop.style.left=r.left+'px'; pop.style.top=(r.bottom+2)+'px'; pop.style.minWidth=Math.max(r.width,280)+'px'; }
-                function render(){ if(!pop)return; var q=(inp.value||'').trim().toLowerCase(); var list=cands().filter(function(s){return !q||((s.sku+' '+(s.product_name||'')).toLowerCase().indexOf(q)>=0);});
-                  pop.innerHTML=list.slice(0,60).map(function(s){return '<div class="pp-sku-opt" data-sku="'+esc(s.sku)+'" style="padding:5px 9px;cursor:pointer;border-bottom:1px solid #f1f5f9"><b>'+esc(s.sku)+'</b>'+(s.product_name?' <span class="mut tiny">'+esc(s.product_name)+'</span>':'')+'</div>';}).join('')||'<div style="padding:6px 9px" class="mut tiny">no matching SKU</div>';
-                  pop.querySelectorAll('.pp-sku-opt').forEach(function(o){ o.onmouseover=function(){o.style.background='#f1f5f9';}; o.onmouseout=function(){o.style.background='';};
-                    o.onmousedown=function(e){ e.preventDefault(); inp.value=o.dataset.sku; close(); var qi=inp.parentNode.querySelector('.pp-add-qty'); if(qi)qi.focus(); }; }); }
-                function open(){ if(pop)return; pop=document.createElement('div'); pop.style.cssText='position:fixed;z-index:99999;background:#fff;border:1px solid #cbd5e1;border-radius:6px;max-height:260px;overflow:auto;box-shadow:0 8px 24px rgba(15,23,42,.22);font-size:12px'; document.body.appendChild(pop); place(); render(); document.addEventListener('scroll',onScroll,true); window.addEventListener('resize',close); }
-                inp.onfocus=open; inp.oninput=function(){ if(!pop)open(); else render(); };
-                inp.onblur=function(){ setTimeout(close,150); }; });
-              // add a SKU (typed/searched from the supplier's list) → re-render this PO's detail in place, stay on ORDER PLAN
-              scope.querySelectorAll('.pp-add-go').forEach(function(btn){ btn.onclick=function(){ var box=btn.closest('.ppx'); var po=btn.dataset.po;
-                var sku=(box.querySelector('.pp-add-sku').value||'').trim(); if(!sku){ alert('Search and pick a SKU to add.'); return; }
-                if(!(_ppData.supSkus||[]).some(function(s){return s.sku===sku;})){ alert('“'+sku+'” isn’t one of your SKUs — pick from the list.'); return; }
-                if((_ppData.lb[po]||[]).some(function(l){return l.sku===sku;}) || (_ppData.costsByPo[po]&&_ppData.costsByPo[po][sku])){ alert('That SKU is already on the order.'); return; }
-                var q=box.querySelector('.pp-add-qty').value.trim(), pr=box.querySelector('.pp-add-cost').value.trim();
-                if(!q){ alert('Enter a quantity for the added SKU.'); return; } btn.disabled=true;
-                var row=btn.closest('tr[id^="pp-"]');
-                postJSON(EP.lineCost,{po:po,sku:sku,amended_qty:q,actual_cost:pr||null,is_added:true,submitted_by:by},function(){
-
-                  (_ppData.costsByPo[po]=_ppData.costsByPo[po]||{})[sku]={actual_cost:pr||null,amended_qty:q,is_added:true}; rerenderRow(row,po); }); }; });
+                function draw(q){ q=(q||'').trim().toLowerCase(); var list=cands().filter(function(s){return !q||((s.sku+' '+(s.product_name||'')).toLowerCase().indexOf(q)>=0);});
+                  host.querySelector('.pp-pk-list').innerHTML=list.length?list.slice(0,200).map(function(s){return '<div style="display:flex;gap:7px;align-items:center;padding:3px 6px;border-bottom:1px solid #f1f5f9;font-size:12px"><input type="checkbox" class="pp-pk-cb" value="'+esc(s.sku)+'"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.sku)+'</b><span class="mut tiny" style="flex:1;min-width:0">'+esc(s.product_name||'')+'</span><input class="fci pp-pk-qty" data-sku="'+esc(s.sku)+'" placeholder="qty" style="width:52px;text-align:left" inputmode="numeric"></div>';}).join(''):'<div class="mut tiny" style="padding:6px">no matching SKU</div>'; }
+                host.innerHTML='<div style="border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;background:#f8fafc;text-align:left;max-width:560px">'
+                  +'<input class="fci pp-pk-q" placeholder="search a SKU you supply…" style="width:100%;text-align:left;margin-bottom:5px" autocomplete="off">'
+                  +'<div class="pp-pk-list" style="max-height:230px;overflow:auto;border:1px solid #eef2f7;border-radius:6px;background:#fff"></div>'
+                  +'<div style="margin-top:8px;display:flex;gap:8px;align-items:center"><button class="save-btn pp-pk-add" style="background:#16a34a;color:#fff;border-color:#15803d">+ Add selected</button><button class="save-btn light pp-pk-cancel">Cancel</button><span class="pp-pk-msg mut tiny"></span></div>'
+                  +'<div class="tiny mut" style="margin-top:4px">Tick SKUs, set qty, then Add selected. Enter your cost per line in the table above.</div></div>';
+                draw(''); var qi=host.querySelector('.pp-pk-q'); qi.oninput=function(){ draw(this.value); }; qi.focus();
+                host.querySelector('.pp-pk-cancel').onclick=function(){ host.style.display='none'; host.innerHTML=''; };
+                host.querySelector('.pp-pk-add').onclick=function(){ var ab=this, msg=host.querySelector('.pp-pk-msg');
+                  var picks=Array.prototype.map.call(host.querySelectorAll('.pp-pk-cb:checked'),function(c){ var qel=host.querySelector('.pp-pk-qty[data-sku="'+esq(c.value)+'"]'); return {sku:c.value, qty:(qel&&Number(qel.value))||1}; });
+                  if(!picks.length){ msg.textContent='Tick at least one SKU.'; return; }
+                  ab.disabled=true; msg.textContent='Adding '+picks.length+'…'; var row=btn.closest('tr[id^="pp-"]'); var done=0;
+                  picks.forEach(function(pk){ postJSON(EP.lineCost,{po:po,sku:pk.sku,amended_qty:String(pk.qty),actual_cost:null,is_added:true,submitted_by:by},function(){
+                    (_ppData.costsByPo[po]=_ppData.costsByPo[po]||{})[pk.sku]={actual_cost:null,amended_qty:String(pk.qty),is_added:true};
+                    if(++done===picks.length){ rerenderRow(row,po,'orderplan'); } }); }); }; }; });
               // ORDER PLAN → download all SKUs/quantities (and costs) for this PO as a CSV
               scope.querySelectorAll('.pp-op-csv').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po;
                 var lines=_ppData.lb[po]||[], costs=_ppData.costsByPo[po]||{}, lineSkus={};
