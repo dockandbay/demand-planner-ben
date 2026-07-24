@@ -2704,7 +2704,36 @@
       +'<div class="cli-form" style="max-width:760px">'
       +cliRow('Estimate <span class="mut tiny">(order plan)</span>', money(r.value_est))
       +cliRow('<b>Final invoice amount</b>', '<input class="fci payin" style="width:120px;text-align:left" inputmode="decimal" data-ep="'+ep+'" data-field="supplier_invoice_total" value="'+esc(r.final_invoice==null?'':r.final_invoice)+'"> <span class="mut tiny">blank = use estimate</span>')
-      +cliRow('<b>Credit amount</b> <span class="mut tiny">added to invoice · paid in the balance</span>', payIn(ep,'credit_amount',r.credit_amount,false,false,'style="width:90px;text-align:left"'))
+      +cliRow('<b>Credit amount</b> <span class="mut tiny">added to invoice · paid in the balance · <i>prefer adding as an additional cost below</i></span>', payIn(ep,'credit_amount',r.credit_amount,false,false,'style="width:90px;text-align:left"'))
+      // ---- Additional costs (supplier-submitted: freight / tooling / surcharges / credits) — slimline; sits under
+      // Credit amount as both add to the invoice. D&B reviews / edits / approves / removes; add row is hidden until "+ Add cost". ----
+      +(function(){ var ac=(d&&d.additional_costs)||[]; var pon=esc(r.po);
+          function acLine(a){ var line=(Number(a.qty)||0)*(Number(a.price)||0);
+            return '<div class="ac-line" style="display:flex;align-items:center;gap:5px;font-size:11px;padding:2px 0;border-bottom:1px solid #f1f5f9">'
+              +'<input class="fci ac-desc" data-id="'+a.id+'" value="'+esc(a.description||'')+'" placeholder="description" style="flex:1;min-width:110px;text-align:left;font-size:11px;padding:1px 4px">'
+              +'<input class="fci ac-qty" data-id="'+a.id+'" value="'+(a.qty!=null?esc(a.qty):'')+'" title="qty" style="width:42px;text-align:left;font-size:11px;padding:1px 4px" inputmode="numeric">'
+              +'<span class="mut">×</span>'
+              +'<input class="fci ac-price" data-id="'+a.id+'" value="'+(a.price!=null?esc(a.price):'')+'" title="price" style="width:58px;text-align:left;font-size:11px;padding:1px 4px" inputmode="decimal">'
+              +'<span style="width:74px;text-align:right;font-weight:600">'+money(line)+'</span>'
+              +(a.approved?'<span class="tool-badge bg-green" style="font-size:9px;padding:0 5px">✓</span> <button class="lnk-btn ac-unapprove" data-id="'+a.id+'" title="un-approve" style="font-size:10px">undo</button>':'<button class="save-btn ac-approve" data-id="'+a.id+'" style="font-size:10px;padding:1px 6px">Approve</button>')
+              +' <button class="lnk-btn ac-rm" data-id="'+a.id+'" title="remove" style="color:#b91c1c">✕</button>'
+              +'</div>'; }
+          var addTot=ac.reduce(function(s,a){return s+(Number(a.qty)||0)*(Number(a.price)||0);},0);
+          return '<div style="margin:4px 0 6px;max-width:760px;border-top:1px solid #eef2f7;padding-top:5px">'
+            +'<div style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.03em">Additional costs <span class="mut tiny" style="font-weight:400;text-transform:none">— supplier-submitted (freight / tooling / surcharges / credits); added to the invoice</span></div>'
+            +'<div id="ac-body-'+pon+'" style="margin-top:2px">'+(ac.length?ac.map(acLine).join(''):'<div class="ac-empty mut tiny" style="padding:2px 0">None yet.</div>')+'</div>'
+            +'<div style="margin-top:4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+            +'<button class="lnk-btn ac-add-show" style="font-size:11px;color:#1d4ed8">+ Add cost</button>'
+            +'<span class="ac-add-row" style="display:none;align-items:center;gap:5px;font-size:11px">'
+              +'<input class="fci ac-ndesc" data-po="'+pon+'" placeholder="description" style="width:140px;text-align:left;font-size:11px;padding:1px 4px">'
+              +'<input class="fci ac-nqty" data-po="'+pon+'" placeholder="qty" style="width:42px;text-align:left;font-size:11px;padding:1px 4px" inputmode="numeric">'
+              +'<span class="mut">×</span>'
+              +'<input class="fci ac-nprice" data-po="'+pon+'" placeholder="price" style="width:58px;text-align:left;font-size:11px;padding:1px 4px" inputmode="decimal">'
+              +'<button class="save-btn ac-add" data-po="'+pon+'" style="font-size:10px;padding:1px 8px">Add</button>'
+              +'<button class="lnk-btn ac-add-cancel" style="font-size:10px">cancel</button>'
+            +'</span>'
+            +(addTot?'<span class="mut tiny" style="margin-left:auto">Total <b>'+money(addTot)+'</b></span>':'')
+            +'</div></div>'; })()
       // Supplier-submitted invoice total (from the portal) — shown right next to the Final invoice amount so it
       // can be reviewed and applied. "Apply → final" writes it into supplier_invoice_total; the doc downloads here.
       +(function(){ var si=d&&d.sup_invoice, docs=((d&&d.sup_docs)||[]).filter(function(x){return PO_DOC_INVOICE.indexOf(String(x.category||''))>=0;}); var out='';   // Invoice tab = actual invoice docs only (set a doc's Type in the DOCUMENTS tab)
@@ -2727,26 +2756,6 @@
       +cliRow('<b>Total amount due</b>', '<b'+(totalDue>0.02?' style="color:#991b1b"':'')+'>'+money(totalDue)+'</b> <span class="mut tiny">remaining'+(paid>0.01?' · '+money(paid)+' paid':'')+'</span>')
       +'</div>'
       +'<div style="margin:10px 0 4px"><button class="save-btn" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd" title="download the Commercial Invoice + Packing List for this PO" onclick="window.open(\'/api/invoice/po/\'+encodeURIComponent(\''+esc(r.po)+'\'))">📄 Commercial Invoice</button></div>'
-      // ---- Additional costs (freight / tooling / surcharges) — supplier submits these in the portal; D&B reviews /
-      // edits / approves / removes them here. Same add/edit/remove ability as the portal, plus an approve toggle. ----
-      +(function(){ var ac=(d&&d.additional_costs)||[]; var pon=esc(r.po);
-          function acRow(a){ var line=(Number(a.qty)||0)*(Number(a.price)||0);
-            return '<tr id="ac-r-'+a.id+'"><td class="l"><input class="fci ac-desc" data-id="'+a.id+'" value="'+esc(a.description||'')+'" placeholder="description" style="width:220px;text-align:left"></td>'
-              +'<td class="l"><input class="fci ac-qty" data-id="'+a.id+'" value="'+(a.qty!=null?esc(a.qty):'')+'" style="width:60px;text-align:left" inputmode="numeric"></td>'
-              +'<td class="l"><input class="fci ac-price" data-id="'+a.id+'" value="'+(a.price!=null?esc(a.price):'')+'" style="width:80px;text-align:left" inputmode="decimal"></td>'
-              +'<td class="l"><b>'+money(line)+'</b></td>'
-              +'<td class="l">'+(a.approved?'<span class="tool-badge bg-green">✓ approved</span> <button class="lnk-btn ac-unapprove" data-id="'+a.id+'" title="un-approve">undo</button>':'<button class="save-btn ac-approve" data-id="'+a.id+'">Approve</button>')+'</td>'
-              +'<td class="l"><button class="lnk-btn ac-rm" data-id="'+a.id+'" title="remove" style="color:#b91c1c">✕</button></td></tr>'; }
-          var addTot=ac.reduce(function(s,a){return s+(Number(a.qty)||0)*(Number(a.price)||0);},0);
-          return '<div class="sect-h" style="margin-top:12px">Additional costs <span class="mut tiny">— supplier-submitted (freight / tooling / surcharges); review, edit &amp; approve — added to the invoice</span></div>'
-            +'<div class="tw" style="max-width:760px"><table><thead><tr><th class="l">Description</th><th class="l">Qty</th><th class="l">Price</th><th class="l">Line</th><th class="l">Status</th><th class="l"></th></tr></thead><tbody id="ac-body-'+pon+'">'
-            +(ac.length?ac.map(acRow).join(''):'<tr class="ac-empty"><td class="l mut tiny" colspan="6">None submitted yet.</td></tr>')
-            +'<tr><td class="l"><input class="fci ac-ndesc" data-po="'+pon+'" placeholder="+ add a cost…" style="width:220px;text-align:left"></td>'
-            +'<td class="l"><input class="fci ac-nqty" data-po="'+pon+'" placeholder="qty" style="width:60px;text-align:left" inputmode="numeric"></td>'
-            +'<td class="l"><input class="fci ac-nprice" data-po="'+pon+'" placeholder="price" style="width:80px;text-align:left" inputmode="decimal"></td>'
-            +'<td></td><td></td><td class="l"><button class="save-btn ac-add" data-po="'+pon+'">Add</button></td></tr>'
-            +'</tbody></table></div>'
-            +'<div class="mut tiny" style="margin:2px 2px 8px">Additional costs total: <b>'+money(addTot)+'</b> · editing a line resets its approval.</div>'; })()
       +'<div class="sect-h" style="margin-top:12px">Payment plan — terms from supplier; amount / date / % override inline (saves on blur)</div>'
       +'<div class="tw pay-tbl" style="max-width:1320px"><table><thead><tr><th class="l">Payment</th><th>Calc / est</th><th class="l">Amount</th><th class="l">Date paid</th><th class="l">Deposit ref</th><th class="l">Due</th><th class="l">Likely pay date</th><th class="l">Status</th></tr></thead><tbody>';
     h+=tr('<td class="l"><b>Start deposit</b> <input class="fci pctin payin" data-ep="'+ep+'" data-field="start_deposit_pct_override" value="'+esc(r.start_pct)+'"><span class="mut tiny">% · capped at ref avail</span></td>'
@@ -3063,6 +3072,9 @@
         fetch('/api/supply/additional-cost-remove',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:b.dataset.id})}).then(function(r){return r.json();}).then(function(){ poRefetchPanel(po,i); }); }; });
       acScope.querySelectorAll('.ac-approve,.ac-unapprove').forEach(function(b){ b.onclick=function(){ var ap=b.classList.contains('ac-approve'); b.disabled=true;
         fetch('/api/supply/additional-cost-approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:b.dataset.id,approved:ap})}).then(function(r){return r.json();}).then(function(){ poRefetchPanel(po,i); }); }; });
+      // add row stays hidden until "+ Add cost"
+      acScope.querySelectorAll('.ac-add-show').forEach(function(b){ b.onclick=function(){ var row=acScope.querySelector('.ac-add-row'); if(row){ row.style.display='inline-flex'; b.style.display='none'; var f=row.querySelector('.ac-ndesc'); if(f)f.focus(); } }; });
+      acScope.querySelectorAll('.ac-add-cancel').forEach(function(b){ b.onclick=function(){ var row=acScope.querySelector('.ac-add-row'), show=acScope.querySelector('.ac-add-show'); if(row)row.style.display='none'; if(show)show.style.display=''; ['.ac-ndesc','.ac-nqty','.ac-nprice'].forEach(function(s){ var el=acScope.querySelector(s); if(el)el.value=''; }); }; });
     })();
     // Client/FBA file attachment upload (#12) — base64 into portal_attachments with category='client'
     document.querySelectorAll('#podet-'+i+' .cli-attach').forEach(function(inp){ inp.onchange=function(){ var f=inp.files&&inp.files[0]; if(!f)return;

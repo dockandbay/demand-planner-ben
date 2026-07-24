@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.095 - PO ▸ Payments: additional costs moved under Credit amount, slimmed down
+
+- **Additional costs** section moved from below the Commercial Invoice button to directly **under the
+  Credit amount** row (both add to the invoice, so they now sit together).
+- **Slimmer + smaller**: compact inline rows (desc × qty × price = line) instead of a full table.
+- **Add row hidden by default** — a `+ Add cost` link reveals the description/qty/price inputs (with cancel).
+- **Credit amount** kept but de-emphasised (hint: *prefer adding as an additional cost below*), since credits
+  can now be entered as an additional-cost line.
+
 ## v26.094 - Samples PLAN detail: supplier approval status + consistent styling
 
 On the **SAMPLES ▸ PLAN ▸ Details** panel:
