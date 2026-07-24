@@ -1665,7 +1665,7 @@ app.get('/api/supply/:section', async (req, res) => {
             round(pay_balance_1_amount,2) balance_1_amount, to_char(pay_balance_1_date,'YYYY-MM-DD') balance_1_date,
             round(pay_balance_2_amount,2) balance_2_amount, to_char(pay_balance_2_date,'YYYY-MM-DD') balance_2_date,
             round(catch_up,2) catch_up, round(deposit_avail,2) deposit_avail, deposit_fx, coalesce(notes,'') notes,
-            CASE WHEN start_calc > 0 THEN to_char(start_production,'YYYY-MM-DD') END start_due,        -- no due date for a 0% milestone
+            CASE WHEN start_calc > 0 THEN to_char((start_production + 7),'YYYY-MM-DD') END start_due,        -- start deposit due = production start + 7 days (no due date for a 0% milestone)
             CASE WHEN completion_calc > 0 THEN to_char(eff_prod_end,'YYYY-MM-DD') END completion_due,
             to_char(bal_due_date,'YYYY-MM-DD') balance_due,
             to_char(balance_due_date_overide,'YYYY-MM-DD') final_payment_due,   -- the "final payment due" override (priority for balance due)
@@ -1740,7 +1740,7 @@ app.get('/api/supply/:section', async (req, res) => {
             -- payment_overdue applies to COMPLETE POs too (an owed payment shouldn't hide behind COMPLETE);
             -- old payments are cut off at 2026-01-01 (matches the Payments Due report's PDUE_MIN_DUE).
             ((
-               (start_production >= DATE '2026-01-01' AND start_production < current_date AND pay_start_deposit_assigned IS NULL AND coalesce(deposit_ref,'')='' AND start_calc > 0)
+               ((start_production + 7) >= DATE '2026-01-01' AND (start_production + 7) < current_date AND pay_start_deposit_assigned IS NULL AND coalesce(deposit_ref,'')='' AND start_calc > 0)
                OR (eff_prod_end >= DATE '2026-01-01' AND eff_prod_end < current_date AND pay_completion_assigned IS NULL AND completion_calc > 0)
                OR (bal_due_date >= DATE '2026-01-01' AND bal_due_date < current_date AND pay_balance_1_amount IS NULL
                    AND round(val + coalesce(credit_amount,0) - start_paid - coalesce(pay_completion_assigned, completion_calc),2) > 0.01))) payment_overdue,
@@ -3526,6 +3526,26 @@ app.post('/api/supply/note-read/:id', async (req, res) => {
     res.json({ ok: true, read });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Delete the MOST RECENT note in a timeline thread. Guards against deleting older history: the id must be the
+// latest note for its thread (looked up from the note's own thread key). Optional supplierOnly restricts to
+// supplier-authored notes (portal side). table/keyCol are code literals; keyVal + id are parameterised.
+async function deleteLatestNote(res, table, keyCol, id, opts) {
+  opts = opts || {};
+  try {
+    const row = (await pool.query(`SELECT ${keyCol} k, author_kind FROM planner.${table} WHERE id=$1`, [id])).rows[0];
+    if (!row) return res.status(404).json({ error: 'note not found' });
+    if (opts.supplierOnly && row.author_kind !== 'supplier') return res.status(403).json({ error: 'can only delete your own messages' });
+    if (opts.ownsKey && !(await opts.ownsKey(row.k))) return res.status(403).json({ error: 'not your thread' });
+    const latest = (await pool.query(`SELECT id FROM planner.${table} WHERE ${keyCol}=$1 ORDER BY created_at DESC, id DESC LIMIT 1`, [row.k])).rows[0];
+    if (!latest || String(latest.id) !== String(id)) return res.status(409).json({ error: 'only the most recent message can be deleted' });
+    await pool.query(`DELETE FROM planner.${table} WHERE id=$1`, [id]);
+    res.json({ ok: true, deleted: id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+}
+// Admin: delete the latest note on a PO/product (supplier_notes), shipment, or sample timeline.
+app.post('/api/supply/note-delete/:id', (req, res) => deleteLatestNote(res, 'supplier_notes', 'po', req.params.id));
+app.post('/api/supply/shipment-note-delete/:id', (req, res) => deleteLatestNote(res, 'shipment_notes', 'shipment_ref', req.params.id));
+app.post('/api/supply/sample-note-delete/:id', (req, res) => deleteLatestNote(res, 'sample_notes', 'sample_id', req.params.id));
 // The signed-in user's email, forwarded by the auth layer in front of the app (Diviyaj's Gmail login).
 // Checks the common auth-proxy headers; strips the IAP "accounts.google.com:" prefix. null if none present.
 function authUser(req) {
@@ -7602,6 +7622,13 @@ app.post('/api/portal/note-read/:id', portalAuth, async (req, res) => {
     res.json({ ok: true, read });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Portal: delete the most recent timeline message — the supplier's OWN latest note only, on a thread they own.
+app.post('/api/portal/note-delete/:id', portalAuth, (req, res) =>
+  deleteLatestNote(res, 'supplier_notes', 'po', req.params.id, { supplierOnly: true, ownsKey: (po) => portalOwnsPO(req, po) }));
+app.post('/api/portal/shipment-note-delete/:id', portalAuth, (req, res) =>
+  deleteLatestNote(res, 'shipment_notes', 'shipment_ref', req.params.id, { supplierOnly: true, ownsKey: (ref) => portalOwnsShipmentRef(req, ref) }));
+app.post('/api/portal/sample-note-delete/:id', portalAuth, (req, res) =>
+  deleteLatestNote(res, 'sample_notes', 'sample_id', req.params.id, { supplierOnly: true, ownsKey: async (sid) => !!(await portalOwnsSample(req, sid)) }));
 // Serve an uploaded invoice/doc — only if its PO belongs to the session's supplier.
 app.get('/api/portal/attachment/:id', portalAuth, async (req, res) => {
   try {

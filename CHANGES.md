@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.072 - Start-deposit due = production start + 7 days; delete latest timeline message
+
+- **Start deposit due date** is now auto-calculated as **production start + 7 days** (was the exact production
+  start date). Drives `start_due` in the PO grid, Payments Due, cash flow, and the payment-overdue flag (all
+  shifted +7). No migration.
+- **Delete the most recent timeline message**: a small red "delete" link now sits under Escalate on the
+  **PO timeline** (admin). Server-side it only permits deleting the *latest* message in a thread (guards
+  history). Endpoints added for all timelines — admin PO/shipment/sample (`/api/supply/*-note-delete/:id`) and
+  portal PO/shipment/sample (`/api/portal/*-note-delete/:id`, supplier's own latest only). Portal + admin
+  shipment/sample/product timeline UI wiring to follow.
+
 ## v26.071 - ORDER PLAN exception counters (admin): top-nav tab + per-PO sub-tab
 
 Surfaces unapproved order-plan exceptions (partial cartons / supplier risk / discontinued arrival / country

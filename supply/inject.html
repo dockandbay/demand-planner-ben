@@ -2950,10 +2950,12 @@
     // escalate is only offered on YOUR OWN (internal) latest message (it emails the supplier) — never on a supplier note
     var _ownNotes=notes.filter(function(n){return n.author_kind==='internal';});
     var recentOwnId=_ownNotes.length?_ownNotes.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0].id:null;
+    var recentAnyId=notes.length?notes.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''))||(Number(b.id)-Number(a.id));})[0].id:null;   // most recent message overall → gets a delete link
     var list=notes.length?tlDesc(notes).map(function(n){ var sup=(n.author_kind!=='internal');
       var ctrl = sup
         ? (n.read?'<a class="note-read" data-id="'+n.id+'" data-read="1" style="font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline;white-space:nowrap">mark unread</a>':'<button class="save-btn light note-read" data-id="'+n.id+'" data-read="0">Mark read</button>')
         : ((n.id===recentOwnId)?'<button class="save-btn light po-esc" data-po="'+esc(po)+'" data-msg="'+esc(n.body)+'" title="Escalate this message to the supplier by email" style="color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'');
+      if(n.id===recentAnyId) ctrl += '<a class="po-note-del" data-id="'+n.id+'" data-po="'+esc(po)+'" title="delete this (most recent) message" style="font-size:10px;color:#b91c1c;cursor:pointer;text-decoration:underline;white-space:nowrap">delete</a>';
       return '<div style="font-size:11px;margin:3px 0;max-width:640px;padding:5px 8px;background:'+(sup?(n.read?'#f1f5f9':'#fff7ed'):'#eef2ff')+';border:1px solid '+(sup&&!n.read?'#fdba74':'#e5e7eb')+';border-radius:5px;display:flex;gap:10px;align-items:flex-start">'
         +(ctrl?'<div style="flex:0 0 auto;display:flex;flex-direction:column;gap:3px;align-items:flex-start;min-width:78px">'+ctrl+'</div>':'')
         +'<div style="flex:1"><span class="mut tiny">'+esc(n.created_at)+' · '+(sup?('supplier'+(n.author_email?' ('+esc(shortUser(n.author_email))+')':'')):(n.author_email&&n.author_email!=='Dock & Bay'?esc(shortUser(n.author_email)):'Dock &amp; Bay'))+'</span>'+(sup&&!n.read?' <span class="ex-badge">new</span>':'')+'<br><span style="color:#1a1a1a">'+esc(n.body)+'</span></div>'
@@ -3156,6 +3158,11 @@
           if(j.sandbox) alert('Sandbox: no email key, nothing sent. On live this would email: '+((j.emails||[]).join(', ')||'(no portal users for this supplier)'));
           else if(!j.sent) alert('No active portal users for this supplier to email.'); })
         .catch(function(e){ b.disabled=false; b.textContent=t; alert('Escalate failed: '+(e.message||e)); }); }; });
+    // Delete the most recent timeline message (small link under Escalate)
+    document.querySelectorAll('#podet-'+i+' .po-note-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete the most recent timeline message? This cannot be undone.'))return; b.style.pointerEvents='none'; b.textContent='deleting…';
+      fetch('/api/supply/note-delete/'+b.dataset.id,{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(function(r){return r.json();})
+        .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); })
+        .catch(function(e){ b.style.pointerEvents=''; b.textContent='delete'; alert('Could not delete: '+(e.message||e)); }); }; });
     // ORDER PLAN tab — accept a supplier change (per line / all), and jump to the full ORDER PLAN filtered to this PO
     document.querySelectorAll('#podet-'+i+' .op-accept').forEach(function(b){ b.onclick=function(){ b.disabled=true;
       fetch('/api/supply/po-line-accept',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:b.dataset.po,sku:b.dataset.sku})}).then(function(r){return r.json();})
