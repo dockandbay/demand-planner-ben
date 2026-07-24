@@ -2764,6 +2764,7 @@
         +dueCell(r.balance_due,totalDue>0.02 && !bal2Paid)+likelyCell('bal2:'+r.po,totalDue>0.02 && !bal2Paid,r.likely_balance_2)+'<td class="l">'+payBadge(r.balance_2_amount!=null?'paid':'est',r.balance_2_amount!=null?'bg-green':'bg-amber')+'</td>'); }
     h+='</tbody></table></div>'
       +'<div class="mut tiny" style="margin:2px 2px 8px">Balance 2 appears automatically when balance 1 is partial · clear a % to revert to the supplier&rsquo;s terms · a start deposit drawn on a deposit ref is no longer a cash due · saving recalcs catch-up &amp; owing.</div>';
+    if(r.deposit_ref) h+='<div class="dep-ctx" data-po="'+esc(r.po)+'" style="margin:2px 2px 10px"></div>';   // deposit analysis box (filled async in bindPay)
     var payH=h;
     // ---- DATES chunk — only production start & end are editable; ship/delivery/completion are always calculated
     // (from the assigned shipment if any, else from supplier + branch lead times).
@@ -2974,6 +2975,19 @@
   function bindPay(po,i){
     // MASTER DATA + SHIPMENTS PLAN-panel controls (#2 / #10) — pickers + rename / delete / pallet labels for this PO
     bindCellPick(); bindShipPick(); bindShipOpen();
+    // Deposit analysis box on the PAYMENTS tab (async): remaining, other unallocated POs, suggested extra + at-risk
+    document.querySelectorAll('#podet-'+i+' .dep-ctx').forEach(function(el){ var p=el.dataset.po;
+      fetch('/api/supply/deposit-context/'+encodeURIComponent(p)).then(function(r){return r.json();}).then(function(d){ if(!d||!d.ref){el.innerHTML='';return;}
+        var head='<b>Deposit '+esc(d.ref)+'</b> · <b>'+money(d.remaining)+'</b> remaining · '+d.other_unalloc+' other open PO'+(d.other_unalloc===1?'':'s')+' with no start deposit allocated';
+        var sug=''; if(d.suggest_extra!=null && d.suggest_extra>0.009){
+          sug='<div style="margin-top:6px">Up to <b>'+money(d.suggest_extra)+'</b> of the deposit can be allocated to this PO'+(d.is_last?' (last unallocated PO on the deposit)':'')+'. <button class="save-btn dep-ctx-fill" data-amt="'+d.suggest_extra+'" style="margin-left:6px;background:#dcfce7;border:1px solid #86efac;color:#166534">Assign '+money(d.suggest_extra)+'</button></div>'; }
+        var risk=''; if(d.at_risk){
+          risk='<div style="margin-top:6px;background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;border-radius:6px;padding:7px 9px"><b>⚠ Deposit at risk</b> — '+money(d.remaining)+' remaining is over 50% of the '+money(d.unalloc_value)+' open PO value on '+esc(d.ref)+' with no start deposit allocated. It may be over-funded / stranded — allocate more or reassign.</div>'; }
+        el.innerHTML='<div style="border:1px solid #cbd5e1;border-radius:7px;padding:8px 10px;font-size:12px;background:#f8fafc">'+head+sug+risk+'</div>';
+        var fb=el.querySelector('.dep-ctx-fill'); if(fb)fb.onclick=function(){ var amt=fb.dataset.amt;
+          var inp=document.querySelector('#podet-'+i+' [data-field="pay_start_deposit_assigned"]'); var dt=document.querySelector('#podet-'+i+' [data-field="pay_start_deposit_date"]');
+          if(inp){ inp.value=amt; if(dt&&!dt.value)dt.value=new Date().toISOString().slice(0,10); inp.dispatchEvent(new Event('change',{bubbles:true})); } }; })
+        .catch(function(){ el.innerHTML=''; }); });
     function poGone(){ invalidateDerived(); delete cache['purchase-orders']; if(_poRefresh)_poRefresh(); else selectSection('purchase-orders'); }
     bindActMark(document.getElementById('podet-'+i));   // inline Ⓐ action markers (tooltip + snooze) in the detail
     document.querySelectorAll('#podet-'+i+' .pom-del').forEach(function(b){ b.onclick=function(){ var p=b.dataset.po; if(!confirm('Delete PO '+p+' and all its lines? This cannot be undone.'))return;
@@ -3975,8 +3989,10 @@
       var remStranded = d.is_deposit && hasOpenPO && est===0 && rem>0.01;   // open POs but nothing left to allocate → red remaining (matches the action)
       var remNoOpenPO = d.is_deposit && !hasOpenPO && rem>0.01 && !closed;  // money left but NO open PO drawing on it → red remaining (matches the action)
       var redRem=(rem<0||remStranded||remNoOpenPO);
-      var remTitle=remNoOpenPO?'Deposit remaining, no open PO':(remStranded?'Deposit remaining, none left to be allocated':'');
-      var c_rem = '<td style="width:64px;white-space:nowrap'+(redRem?';color:#dc2626;font-weight:700':'')+'"'+(remTitle?(' title="'+remTitle+'"'):'')+'>'+money(d.deposit_remaining)+(d.shared_ref?' <span class="src fx">pool</span>':'')+'</td>';
+      // at risk: remaining is over 50% of the open, not-yet-allocated POs' order value (may be over-funded / stranded)
+      var uval=Number(d.unalloc_value)||0, depAtRisk = d.is_deposit && uval>0 && rem>0.5*uval && !redRem;
+      var remTitle=remNoOpenPO?'Deposit remaining, no open PO':(remStranded?'Deposit remaining, none left to be allocated':(depAtRisk?('At risk — '+money(rem)+' remaining is over 50% of the '+money(uval)+' open PO value with no start deposit allocated'):''));
+      var c_rem = '<td style="width:64px;white-space:nowrap'+(redRem?';color:#dc2626;font-weight:700':(depAtRisk?';background:#fef3c7;color:#92400e;font-weight:700':''))+'"'+(remTitle?(' title="'+remTitle+'"'):'')+'>'+money(d.deposit_remaining)+(depAtRisk?' ⚠':'')+(d.open_unalloc>0?' <span class="mut tiny" style="color:#64748b">'+d.open_unalloc+' unalloc</span>':'')+(d.shared_ref?' <span class="src fx">pool</span>':'')+'</td>';
       var c_est = '<td style="width:84px;white-space:nowrap'+(estOver?';color:#dc2626;font-weight:700':'')+'"'+(estOver?' title="Estimated allocation exceeds the remaining deposit">':'>')+(d.is_deposit?money(d.est_alloc):'')+'</td>';
       // purchase orders linked to this deposit (open-only by default; toggle shows all) — each links to the
       // PO opened on its PAYMENTS tab; the cell wraps so long lists flow onto multiple lines.

@@ -2027,6 +2027,7 @@ app.get('/api/supply/:section', async (req, res) => {
             SELECT po.deposit_ref,
               sum(round(coalesce(po.supplier_invoice_total, lv.line_value, po.order_value_estimation, 0)
                         * coalesce(po.start_deposit_pct_override, s.start_deposit_pct, 0)/100, 2)) est_alloc,
+              sum(round(coalesce(po.supplier_invoice_total, lv.line_value, po.order_value_estimation, 0), 2)) unalloc_value,
               count(*) open_unalloc
             FROM planner.purchase_orders po
             LEFT JOIN planner.suppliers s ON s.id=po.supplier_id
@@ -2046,6 +2047,8 @@ app.get('/api/supply/:section', async (req, res) => {
             CASE WHEN d.is_deposit THEN coalesce(dr.used,0) END deposit_used,
             CASE WHEN d.is_deposit THEN coalesce(p.pool_amount, coalesce(d.amount,0))-coalesce(dr.used,0) END deposit_remaining,
             CASE WHEN d.is_deposit THEN round(coalesce(ea.est_alloc,0),2) END est_alloc,
+            CASE WHEN d.is_deposit THEN coalesce(ea.open_unalloc,0) END open_unalloc,
+            CASE WHEN d.is_deposit THEN round(coalesce(ea.unalloc_value,0),2) END unalloc_value,
             CASE WHEN d.is_deposit THEN
               (SELECT string_agg(po.po,', ' ORDER BY po.po) FROM planner.purchase_orders po WHERE po.deposit_ref=d.reference)
             END linked_pos,
@@ -2720,6 +2723,39 @@ app.post('/api/supply/branch/:name', async (req, res) => {
     await pool.query(`INSERT INTO planner.branches (${cols.join(',')}) VALUES (${ph.join(',')})
       ON CONFLICT (name) DO UPDATE SET ${upd}`, vals);
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Deposit context for a PO's Payments tab: remaining on the deposit, how many OTHER open POs on the same
+// ref have no start deposit allocated, the extra start deposit this PO could take (deposit remaining minus the
+// other unallocated POs' estimated starts — offered when this is the last unallocated PO or that estimate is
+// under the remaining), and an at-risk flag (remaining > 50% of the open unallocated POs' order value).
+app.get('/api/supply/deposit-context/:po', async (req, res) => {
+  try {
+    const po = req.params.po;
+    const meRow = (await pool.query(`SELECT coalesce(deposit_ref,'') ref FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0];
+    if (!meRow || !meRow.ref) return res.json({ ref: null });
+    const ref = meRow.ref;
+    const remaining = Number((await pool.query(`
+      SELECT coalesce((SELECT sum(coalesce(amount,0)) FROM planner.deposits WHERE reference=$1 AND is_deposit),0)
+           - coalesce((SELECT sum(coalesce(pay_start_deposit_assigned,0)) FROM planner.purchase_orders WHERE deposit_ref=$1),0) rem`, [ref])).rows[0].rem || 0);
+    // open POs on this ref with no start deposit assigned yet — order value + estimated start deposit
+    const rows = (await pool.query(`
+      SELECT po.po,
+        round(coalesce(po.supplier_invoice_total, lv.v, po.order_value_estimation, 0), 2) val,
+        round(coalesce(po.supplier_invoice_total, lv.v, po.order_value_estimation, 0) * coalesce(po.start_deposit_pct_override, s.start_deposit_pct, 0)/100, 2) est
+      FROM planner.purchase_orders po
+      LEFT JOIN planner.suppliers s ON s.id = po.supplier_id
+      LEFT JOIN LATERAL (SELECT sum(l.qty * l.cost_price) v FROM planner.purchase_order_lines l WHERE l.po = po.po) lv ON true
+      WHERE po.deposit_ref = $1 AND coalesce(po.status,'') NOT ILIKE '%complete%' AND po.pay_start_deposit_assigned IS NULL`, [ref])).rows;
+    const others = rows.filter(x => x.po !== po);
+    const estOthers = Math.round(others.reduce((a, x) => a + Number(x.est || 0), 0) * 100) / 100;
+    const unallocValue = Math.round(rows.reduce((a, x) => a + Number(x.val || 0), 0) * 100) / 100;
+    const isLast = rows.some(x => x.po === po) && rows.length <= 1;
+    const extra = Math.max(0, Math.round((remaining - estOthers) * 100) / 100);
+    res.json({ ref, remaining: Math.round(remaining * 100) / 100, other_unalloc: others.length,
+      est_others: estOthers, unalloc_value: unallocValue, is_last: isLast,
+      suggest_extra: (isLast || estOthers < remaining) ? extra : null,
+      at_risk: unallocValue > 0 && remaining > 0.5 * unallocValue });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Suppliers — editable terms table (CONFIG). Edit by id; create a new supplier (name required).

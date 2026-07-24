@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.079 - PO Payments: deposit analysis (unallocated POs, suggested extra, at-risk)
+
+On the PO ▸ Payments tab, a new deposit-analysis box (shown when the PO draws on a deposit):
+- **Remaining on the deposit** + **how many other open POs** on the same ref have **no start deposit allocated**.
+- **Suggested extra allocation** for this PO = deposit remaining − the other unallocated POs' estimated starts
+  (shown when this is the last unallocated PO, or that estimate is under the remaining). Can exceed this PO's
+  own start %. One-click **"Assign £X"** fills the start-deposit field (you save).
+- **At-risk highlight** when the deposit remaining is over **50% of the open unallocated POs' order value**
+  (i.e. remaining PO value < 2× remaining deposit) — flags over-funded / stranded deposits.
+- **Deposits grid**: Remaining cell now shows the unallocated-PO count and turns amber ⚠ when at risk.
+
+New endpoint `/api/supply/deposit-context/:po`; deposits query exposes `open_unalloc` + `unalloc_value`.
+
 ## v26.078 - Top-bar "Recent changes" drawer (last 10 major supply changes)
 
 New **🕘** button in the top-right bar (next to the ✉ bell) opens a drawer of the **10 most recent major SUPPLY
