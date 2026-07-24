@@ -2616,6 +2616,13 @@ app.get('/api/supply/:section', async (req, res) => {
             UNION ALL SELECT submitted_at, 'supplier_submission', 'Supplier submitted '||kind||' on '||po, po FROM planner.supplier_submissions WHERE submitted_at IS NOT NULL
             UNION ALL SELECT ran_at, 'erp_push', coalesce(nullif(message,''),'Line items updated to ERP'), '' FROM planner.etl_runs WHERE job='supply_erp_push' AND ran_at IS NOT NULL
           ) z ORDER BY at DESC NULLS LAST LIMIT 10`));
+      case 'pos-no-lines':   // open POs with NO SKU order-plan lines yet → surfaced above the ORDER PLAN grid (they'd otherwise be invisible in the SKU×PO pivot)
+        return res.json(await q(`SELECT po, coalesce(supplier_name,'') supplier_name, coalesce(branch,'') branch,
+            coalesce(status,'') status, coalesce(nullif(country_code,''),'') country
+          FROM planner.purchase_orders po
+          WHERE coalesce(status,'') NOT ILIKE '%complete%'
+            AND NOT EXISTS (SELECT 1 FROM planner.purchase_order_lines l WHERE l.po=po.po AND coalesce(l.qty,0)<>0)
+          ORDER BY po`));
       default:
         return res.status(404).json({ error: 'unknown section: ' + req.params.section });
     }

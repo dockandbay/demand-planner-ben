@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.084 - Order Plan: surface POs with no SKU lines yet
+
+POs with no SKU lines (e.g. a freshly-created FUTURE PO like PO-58BETEST) never appeared in the Order Plan —
+it's a SKU×PO pivot driven off line rows, so a line-less PO produces nothing. Added a banner above the grid
+listing **"N POs with no SKU lines yet"** as clickable chips (open → PO ORDER PLAN tab to add lines). New
+endpoint `/api/supply/pos-no-lines` (open POs with no non-zero-qty lines).
+
 ## v26.083 - Labels: "PRODUCTION REF" + Air freight labels on Crossdock & Labels sub-tab
 
 - Ships With + Air freight labels now read **PRODUCTION REF** (was "PRODUCTION REFERENCE").
