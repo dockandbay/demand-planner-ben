@@ -1228,6 +1228,7 @@
       +(isEU?docBlock('idn_pallet_label','IDN pallet labels <span class="mut tiny">(upload — supplier downloads on the portal)</span>'):'')
       +(preshipBranch?row('Not required?','<label style="font-size:12px;cursor:pointer"><input type="checkbox" class="fci" data-ep="'+ep+'" data-field="preship_not_required" '+(r.preship_not_required?'checked':'')+' style="width:auto;min-width:0;vertical-align:middle;margin-right:5px">mark pre-shipment documents not required for this PO (clears the overdue action)</label>'):'')
       +((r.shipment&&r.ships_with_master_po&&r.po!==r.ships_with_master_po)?row('Ships With Supplier labels','<button class="save-btn po-dl-sw" data-po="'+esc(po)+'" title="SHIPS WITH SUPPLIER master pallet label (carton size)">⤓ Ships With Supplier labels</button>'):'')   /* riders only — the shipment master never gets a SHIPS WITH label */
+      +((r.shipment&&r.po===r.ships_with_master_po&&/air/i.test(r.ship_mode||''))?row('Air freight labels','<button class="save-btn po-dl-air" data-po="'+esc(po)+'" title="AIR FREIGHT pallet label (carton size) — ships-with label without the ships-with section">⤓ Air freight labels</button>'):'')   /* master of an AIR shipment */
       +'</div>'; }
   // iFulfillment pallet labels — opens a printable A4 sheet of one label per pallet (PO / shipment / ASN / pallet n of N).
   // NOTE: exact label artwork/layout for iFulfillment is to be confirmed with Ben; this is a clean print-ready draft.
@@ -3233,6 +3234,7 @@
         bcDownloadCrossdock(rows, po, (poBy[po].dispatch_order_ref||''), (poBy[po].client||''), (poBy[po].final_delivery_address||''), b, po+'_crossdock_labels.zip'); })
         .catch(function(){ b.textContent=orig; b.disabled=false; alert('Could not load crossdock labels'); }); }; });
     document.querySelectorAll('#podet-'+i+' .po-dl-sw').forEach(function(b){ b.onclick=function(){ dlShipsWith(po,b); }; });
+    document.querySelectorAll('#podet-'+i+' .po-dl-air').forEach(function(b){ b.onclick=function(){ dlShipsWith(po,b,true); }; });
     // PLAN sub-tabs (PAYMENTS / DATES / CLIENT / ORDER PLAN / LANDED COSTS / TIMELINE) — toggle panels
     var root=document.getElementById('podet-'+i);
     if(root) root.querySelectorAll('.potab').forEach(function(b){ b.onclick=function(){ var pt=b.dataset.pt;
@@ -6269,15 +6271,16 @@
   // SHIPS-WITH master label (carton size 600×841) — field : value rows matching PRODUCTION-MASTER artwork
   function buildShipsWithSVG(d,opts){ opts=opts||{}; var W=600,H=841,el=[]; var lx=46,vx=278;
     el.push('<rect x="22" y="22" width="'+(W-44)+'" height="'+(H-44)+'" fill="none" stroke="#111" stroke-width="1.5"/>');
-    var y=80; el.push(svgText(lx,y,'DOCK & BAY',{size:30,bold:true,ls:0.5})); y+=66;
-    var rows=[['SOURCE SUPPLIER',d.source_supplier],['PRODUCTION REFERENCE',d.production_ref],
-      ['SHIPS WITH SUPPLIER',d.ships_with_supplier],['SHIPS WITH PO',d.ships_with_po],
-      ['DESTINATION BRANCH',d.dest_branch],['DESTINATION COUNTRY',d.dest_country],
-      ['CLIENT NAME',d.client],['CLIENT SALES ORDER REF',d.sales_order_ref]];
+    var y=80; el.push(svgText(lx,y,'DOCK & BAY',{size:30,bold:true,ls:0.5})); if(opts.air)el.push(svgText(lx+300,y,'AIR FREIGHT',{size:18,bold:true,fill:'#b45309'})); y+=66;
+    // AIR FREIGHT label = the SHIPS WITH label WITHOUT the "ships with supplier / ships with PO" section.
+    var rows=[['SOURCE SUPPLIER',d.source_supplier],['PRODUCTION REFERENCE',d.production_ref]]
+      .concat(opts.air?[]:[['SHIPS WITH SUPPLIER',d.ships_with_supplier],['SHIPS WITH PO',d.ships_with_po]])
+      .concat([['DESTINATION BRANCH',d.dest_branch],['DESTINATION COUNTRY',d.dest_country],
+      ['CLIENT NAME',d.client],['CLIENT SALES ORDER REF',d.sales_order_ref]]);
     var boxTop=null, boxBot=null;
     rows.forEach(function(rw,idx){
       var big=(idx<2);                       // SOURCE SUPPLIER + PRODUCTION REFERENCE → +3pt
-      var swRow=(idx===2||idx===3);          // SHIPS WITH SUPPLIER + SHIPS WITH PO → boxed, value not bold
+      var swRow=!opts.air && (idx===2||idx===3);          // SHIPS WITH SUPPLIER + SHIPS WITH PO → boxed, value not bold
       if(swRow){ if(boxTop===null)boxTop=y-26; boxBot=y+18; }
       el.push(svgText(lx,y,rw[0],{size:big?17:14,fill:'#222'}));
       var val=String(rw[1]==null?'':rw[1]).trim()||'—'; wrapLines(val,22).slice(0,2).forEach(function(ln,li){ el.push(svgText(vx,y+li*19,ln,{size:big?19:16,bold:!swRow})); }); y+=58; });
@@ -6285,13 +6288,13 @@
     y+=28; el.push(svgText(lx,y,'CARTON / PALLET COUNT',{size:13,fill:'#222'})); el.push(svgText(vx,y,'___________ of ___________',{size:14}));
     return '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">'+fontCss(opts)+'<rect width="'+W+'" height="'+H+'" fill="#fff"/>'+el.join('')+'</svg>'; }
   // SHIPS-WITH label → A4 print mould (4-up, carton size), one PDF
-  function dlShipsWith(po,btn){ var orig=btn?btn.textContent:''; if(btn)btn.disabled=true;
+  function dlShipsWith(po,btn,air){ var orig=btn?btn.textContent:''; if(btn)btn.disabled=true;
     fetch('/api/supply/ships-with/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(d){
       if(!d||d.error){ if(btn){btn.textContent=orig;btn.disabled=false;} alert((d&&d.error)||'Could not load ships-with data'); return; }
       Promise.all([fetchImgDataUri('/api/supply/asset/gotham-book'),fetchImgDataUri('/api/supply/asset/gotham-bold')]).then(function(a){
-        var opts={fontBook:a[0],fontBold:a[1]};
+        var opts={fontBook:a[0],fontBold:a[1],air:!!air};
         preloadFonts(opts).then(function(){ rasterizeSVGCanvas(buildShipsWithSVG(d,opts),2.5,function(cv){ if(btn){btn.textContent=orig;btn.disabled=false;} if(!cv){alert('Could not render label');return;}
-          cv.toBlob(function(jb){ if(!jb){alert('Could not encode label');return;} jb.arrayBuffer().then(function(ab){ bcDownloadBlob('SHIPSWITH-'+zipSafe(po)+'_A4.pdf', new Blob([pdfA4(new Uint8Array(ab),cv.width,cv.height,MOLD_4)],{type:'application/pdf'})); }); },'image/jpeg',0.92); }); });
+          cv.toBlob(function(jb){ if(!jb){alert('Could not encode label');return;} jb.arrayBuffer().then(function(ab){ bcDownloadBlob((air?'AIRFREIGHT-':'SHIPSWITH-')+zipSafe(po)+'_A4.pdf', new Blob([pdfA4(new Uint8Array(ab),cv.width,cv.height,MOLD_4)],{type:'application/pdf'})); }); },'image/jpeg',0.92); }); });
       });
     }).catch(function(){ if(btn){btn.textContent=orig;btn.disabled=false;} alert('Could not load ships-with data'); }); }
   // v2 barcode label — product (landscape) matches the OUTPUT artwork; carton/inner go to buildCartonSVG

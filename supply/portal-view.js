@@ -180,15 +180,16 @@
   // SHIPS-WITH master label (carton size 600×841) — field : value rows matching PRODUCTION-MASTER artwork
   function buildShipsWithSVG(d,opts){ opts=opts||{}; var W=600,H=841,el=[]; var lx=46,vx=278;
     el.push('<rect x="22" y="22" width="'+(W-44)+'" height="'+(H-44)+'" fill="none" stroke="#111" stroke-width="1.5"/>');
-    var y=80; el.push(svgText(lx,y,'DOCK & BAY',{size:30,bold:true,ls:0.5})); y+=66;
-    var rows=[['SOURCE SUPPLIER',d.source_supplier],['PRODUCTION REFERENCE',d.production_ref],
-      ['SHIPS WITH SUPPLIER',d.ships_with_supplier],['SHIPS WITH PO',d.ships_with_po],
-      ['DESTINATION BRANCH',d.dest_branch],['DESTINATION COUNTRY',d.dest_country],
-      ['CLIENT NAME',d.client],['CLIENT SALES ORDER REF',d.sales_order_ref]];
+    var y=80; el.push(svgText(lx,y,'DOCK & BAY',{size:30,bold:true,ls:0.5})); if(opts.air)el.push(svgText(lx+300,y,'AIR FREIGHT',{size:18,bold:true,fill:'#b45309'})); y+=66;
+    // AIR FREIGHT label = the SHIPS WITH label WITHOUT the "ships with supplier / ships with PO" section.
+    var rows=[['SOURCE SUPPLIER',d.source_supplier],['PRODUCTION REFERENCE',d.production_ref]]
+      .concat(opts.air?[]:[['SHIPS WITH SUPPLIER',d.ships_with_supplier],['SHIPS WITH PO',d.ships_with_po]])
+      .concat([['DESTINATION BRANCH',d.dest_branch],['DESTINATION COUNTRY',d.dest_country],
+      ['CLIENT NAME',d.client],['CLIENT SALES ORDER REF',d.sales_order_ref]]);
     var boxTop=null, boxBot=null;
     rows.forEach(function(rw,idx){
       var big=(idx<2);                       // SOURCE SUPPLIER + PRODUCTION REFERENCE → +3pt
-      var swRow=(idx===2||idx===3);          // SHIPS WITH SUPPLIER + SHIPS WITH PO → boxed, value not bold
+      var swRow=!opts.air && (idx===2||idx===3);          // SHIPS WITH SUPPLIER + SHIPS WITH PO → boxed, value not bold
       if(swRow){ if(boxTop===null)boxTop=y-26; boxBot=y+18; }
       el.push(svgText(lx,y,rw[0],{size:big?17:14,fill:'#222'}));
       var val=String(rw[1]==null?'':rw[1]).trim()||'—'; wrapLines(val,22).slice(0,2).forEach(function(ln,li){ el.push(svgText(vx,y+li*19,ln,{size:big?19:16,bold:!swRow})); }); y+=58; });
@@ -196,13 +197,13 @@
     y+=28; el.push(svgText(lx,y,'CARTON / PALLET COUNT',{size:13,fill:'#222'})); el.push(svgText(vx,y,'___________ of ___________',{size:14}));
     return '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">'+fontCss(opts)+'<rect width="'+W+'" height="'+H+'" fill="#fff"/>'+el.join('')+'</svg>'; }
   // SHIPS-WITH label → A4 print mould (4-up, carton size), one PDF
-  function dlShipsWith(po,btn,base){ var orig=btn?btn.textContent:''; if(btn)btn.disabled=true;
+  function dlShipsWith(po,btn,base,air){ var orig=btn?btn.textContent:''; if(btn)btn.disabled=true;
     fetch((base||'/api/supply/ships-with/')+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(d){
       if(!d||d.error){ if(btn){btn.textContent=orig;btn.disabled=false;} alert((d&&d.error)||'Could not load ships-with data'); return; }
       Promise.all([fetchImgDataUri('/api/portal/asset/gotham-book'),fetchImgDataUri('/api/portal/asset/gotham-bold')]).then(function(a){
-        var opts={fontBook:a[0],fontBold:a[1]};
+        var opts={fontBook:a[0],fontBold:a[1],air:!!air};
         preloadFonts(opts).then(function(){ rasterizeSVGCanvas(buildShipsWithSVG(d,opts),2.5,function(cv){ if(btn){btn.textContent=orig;btn.disabled=false;} if(!cv){alert('Could not render label');return;}
-          cv.toBlob(function(jb){ if(!jb){alert('Could not encode label');return;} jb.arrayBuffer().then(function(ab){ bcDownloadBlob('SHIPSWITH-'+zipSafe(po)+'_A4.pdf', new Blob([pdfA4(new Uint8Array(ab),cv.width,cv.height,MOLD_4)],{type:'application/pdf'})); }); },'image/jpeg',0.92); }); });
+          cv.toBlob(function(jb){ if(!jb){alert('Could not encode label');return;} jb.arrayBuffer().then(function(ab){ bcDownloadBlob((air?'AIRFREIGHT-':'SHIPSWITH-')+zipSafe(po)+'_A4.pdf', new Blob([pdfA4(new Uint8Array(ab),cv.width,cv.height,MOLD_4)],{type:'application/pdf'})); }); },'image/jpeg',0.92); }); });
       });
     }).catch(function(){ if(btn){btn.textContent=orig;btn.disabled=false;} alert('Could not load ships-with data'); }); }
   // v2 barcode label — product (landscape) matches the OUTPUT artwork; carton/inner go to buildCartonSVG
@@ -888,6 +889,7 @@
         +(p.prod_no?blRow('Barcodes for production '+esc(p.prod_no),'<button class="save-btn pp-dl-prod" data-prod="'+esc(p.prod_no)+'">⤓ Download barcodes for '+esc(p.prod_no)+'</button>'):'')
         +(p.shipment&&!p.ship_other_supplier&&p.po!==p.ships_with_master_po?blRow('Shipment labels','<button class="save-btn pp-shiplabel" data-po="'+po+'">⤓ Download shipment labels</button> <span class="mut tiny">SHIPS WITH master label for shipment '+esc(p.shipment)+'</span>'):'')   /* riders only — the shipment master never gets a SHIPS WITH label */
         +(p.ship_other_supplier?blRow('Ship To pallet labels','<button class="save-btn pp-shiplabel" data-po="'+po+'">⤓ Download Ship To Pallet Labels</button> <span class="mut tiny">this PO ships under another supplier’s PO</span>'):'')
+        +((p.shipment&&p.po===p.ships_with_master_po&&/air/i.test(p.ship_mode||''))?blRow('Air freight labels','<button class="save-btn pp-airlabel" data-po="'+po+'">⤓ Download air freight labels</button> <span class="mut tiny">master of air shipment '+esc(p.shipment)+'</span>'):'')   /* master of an AIR shipment — ships-with label without the ships-with section */
         +(cdSkus.length?blRow('Crossdock box labels','<button class="save-btn pp-dl-cd" data-skus="'+esc(cdSkus.join(','))+'" data-po="'+po+'" data-do="'+esc(p.dispatch_order_ref||'')+'" data-client="'+esc(p.client||'')+'" data-address="'+esc(p.final_delivery_address||'')+'">⤓ Download crossdock labels</button> <span class="mut tiny">PO / dispatch order / client / delivery address overlaid</span>'):'')
         +(/coghlans/i.test(p.branch||'')?blRow('ASN pallet labels','<button class="save-btn" onclick="window.open(\'/api/portal/asn-labels/\'+encodeURIComponent(\''+po+'\'))">⤓ ASN Pallet Labels</button> <span class="mut tiny">one A4 page per pallet</span>'):'')
         +(clientDocs.length?blRow('Direct to Client / FBA attachments',clientDocs.map(function(x){return '<a href="/api/portal/attachment/'+x.id+'" target="_blank" rel="noopener">'+esc(x.filename||'file')+'</a>';}).join(' &nbsp;·&nbsp; ')):'')
@@ -1862,6 +1864,7 @@ scope.querySelectorAll('.pp-dl-po').forEach(function(btn){ btn.onclick=function(
 scope.querySelectorAll('.pp-dl-prod').forEach(function(btn){ btn.onclick=function(){ ppDl(EP.labelData+'?prod='+encodeURIComponent(btn.dataset.prod)+'&supplier='+encodeURIComponent(STATE.supplierName), btn.dataset.prod+'_barcodes.zip', btn); }; });
 scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(){ if(BC.placeholder){BC.note();return;} btn.disabled=true; fetch(EP.labelData+'?skus='+encodeURIComponent(btn.dataset.skus)).then(function(r){return r.json();}).then(function(rows){ btn.disabled=false; if(!rows||!rows.length||rows.error){alert('No crossdock barcodes found');return;} BC.crossdock(rows,btn.dataset.po,btn.dataset.do,btn.dataset.client,btn.dataset.address,btn,btn.dataset.po+'_crossdock_labels.zip'); }).catch(function(){alert('Could not load crossdock labels');btn.disabled=false;}); }; });
               scope.querySelectorAll('.pp-shiplabel').forEach(function(btn){ btn.onclick=function(){ dlShipsWith(btn.dataset.po, btn, EP.shipsWith); }; });   // SHIPS WITH shipment label (per-PO, barcodes & labels tab)
+              scope.querySelectorAll('.pp-airlabel').forEach(function(btn){ btn.onclick=function(){ dlShipsWith(btn.dataset.po, btn, EP.shipsWith, true); }; });   // AIR FREIGHT label (master of an air shipment)
               // PO confirmation: supplier confirms (or withdraws) acceptance of the order's SKUs / qty / dates
               scope.querySelectorAll('.pp-confirm').forEach(function(btn){ btn.onclick=function(){ var v=btn.dataset.v==='1';
                 if(v && !confirm('Confirm this order? You’re accepting the SKUs, quantities and dates as shown.'))return;

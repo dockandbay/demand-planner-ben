@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.080 - Air freight labels (master of an air shipment)
+
+New **Air freight labels** download, in the same place as the Ships With labels (supplier portal Barcodes &
+Labels + admin PO ▸ Shipments), shown for the **master PO of a shipment whose mode is air**. It's the same
+label as the Ships With label but **without the "ships with supplier / ships with PO" section** (adds a small
+"AIR FREIGHT" header). `buildShipsWithSVG` gains an `air` option; `dlShipsWith` an `air` arg; portal query now
+carries `ship_mode`. Verified on an air-mode master (PO-54UKBE1-FEB).
+
 ## v26.079 - PO Payments: deposit analysis (unallocated POs, suggested extra, at-risk)
 
 On the PO ▸ Payments tab, a new deposit-analysis box (shown when the PO draws on a deposit):

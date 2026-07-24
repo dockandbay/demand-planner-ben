@@ -6774,6 +6774,7 @@ const POS_SQL_PORTAL = `
     -- can't see — so without this the portal's Ships With column was always blank.
     coalesce(shipment_ref,'') ships_with,
     coalesce((SELECT s.master_po FROM planner.shipments s WHERE s.shipment_ref=calc4.shipment_ref), nullif(calc4.shipment_ref,'')) ships_with_master_po,
+    lower(coalesce((SELECT s.mode FROM planner.shipments s WHERE s.shipment_ref=calc4.shipment_ref),'')) ship_mode,
     coalesce((SELECT m.supplier_name FROM planner.purchase_orders m
        WHERE m.po = coalesce((SELECT s.master_po FROM planner.shipments s WHERE s.shipment_ref=calc4.shipment_ref), calc4.shipment_ref)),'') ships_with_supplier,
     coalesce(client,'') client, coalesce(dispatch_order_ref,'') dispatch_order_ref,
