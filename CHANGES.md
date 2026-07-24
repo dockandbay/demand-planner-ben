@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.091 - Step-2 invoice-mismatch warning is now LIVE
+
+The Step-2 red warning previously only compared a *submitted* invoice value; PO-55EUBL1 had none, so it never
+fired. Now it compares the **amount in the field against the Step-1 calculated total live** (data-calc on the
+input; toggles on every keystroke) and on render — so typing/holding an amount that differs from the
+calculated total (e.g. 12280 vs the SKU-cost total) shows the red "update the order plan" warning.
+
 ## v26.090 - Multi-select SKU pickers + Step-2 invoice-mismatch warning
 
 - **Portal PO ▸ ORDER PLAN & INVOICE (Step 1)**: the old "search a SKU / qty / price / Add SKU" row is
