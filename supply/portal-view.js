@@ -139,12 +139,13 @@
     if(r.grs_material){ wrapLines(r.grs_material,70).slice(0,4).forEach(function(ln){ el.push(svgText(cx,y,ln,{size:11,fill:'#222',anchor:'middle'})); y+=15; }); }
     y+=18;
     var bits=ean13Pattern(code);
-    if(bits){ var m=4.5,bw=95*m,bx=(W-bw)/2,nH=85,gExt=22; el.push(eanBars(code,bx,y,m,nH,gExt)); var dbl=y+nH+30,c=String(code).replace(/\D/g,''); if(c.length===12)c='0'+c;
+    // barcode anchored near the bottom, just above the address block (not floating mid-label)
+    var by=Math.max(y, H-190);
+    if(bits){ var m=4.5,bw=95*m,bx=(W-bw)/2,nH=85,gExt=22; el.push(eanBars(code,bx,by,m,nH,gExt)); var dbl=by+nH+30,c=String(code).replace(/\D/g,''); if(c.length===12)c='0'+c;
       el.push(svgText(bx-8,dbl,c[0],{size:30,anchor:'end'}));
       el.push(svgText(bx+24*m,dbl,c.slice(1,7),{size:30,anchor:'middle',ls:2}));
-      el.push(svgText(bx+71*m,dbl,c.slice(7,13),{size:30,anchor:'middle',ls:2}));
-      y=dbl+34; }
-    else { el.push(svgText(cx,y+30,'no '+kind+' barcode on file',{size:13,fill:'#b91c1c',anchor:'middle'})); y+=52; }
+      el.push(svgText(bx+71*m,dbl,c.slice(7,13),{size:30,anchor:'middle',ls:2})); }
+    else { el.push(svgText(cx,by+30,'no '+kind+' barcode on file',{size:13,fill:'#b91c1c',anchor:'middle'})); }
     var ay=H-66; DB_ADDRESS.forEach(function(ln){ el.push(svgText(cx,ay,ln,{size:14,anchor:'middle'})); ay+=19; });   // address anchored to the bottom
     return '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">'+fontCss(opts)+'<rect width="'+W+'" height="'+H+'" fill="#fff"/>'+el.join('')+'</svg>'; }
   // crossdock / preorder box label — matches the _CROSS DOCK TEMPLATES artwork, with PO# / sales-order# / client

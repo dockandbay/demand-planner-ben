@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.105 - HOTFIX supplier portal down ("column po is ambiguous") + barcode fixes
+
+- **HOTFIX (portal down):** `POS_SQL_PORTAL` joined `v_po_finance` with `dtc_shipment_details` and `key_accounts`,
+  which share columns (`po`, `client_requirements`, all `pack_*`). The bare references were ambiguous → the
+  portal `bootstrap` 500'd and the whole supplier portal failed to load. Qualified them as `calc4.*`.
+- **Product barcodes (CONFIG portal preview):** the admin `/api/supply/label-data` now also stamps batch +
+  production date on the rows, and admin `bcDownloadSheets` threads it — so labels downloaded from the CONFIG
+  portal preview print BATCH / DATE OF PRODUCTION (previously only the real portal was fixed).
+- **Carton labels:** the barcode image is anchored near the bottom, **just above the address block**, instead
+  of floating mid-label (admin + portal builders).
+
 ## v26.104 - Auto Forecast now measures the category-vs-SKU gap (fixes the empty forward view)
 
 The Auto Forecast report only read SKU-level forecasts (`forecast_outputs`), which tail off in the future

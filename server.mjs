@@ -1117,6 +1117,14 @@ app.get('/api/supply/label-data', async (req, res) => {
         AND coalesce(sl.variant_type,'') NOT ILIKE 'set'
         AND coalesce(sl.product_barcode, sl.carton_barcode, sl.inner_barcode) IS NOT NULL
       ORDER BY sl.sku`, params)).rows;
+    // Stamp batch + production date on each row (from ?batch, else the PO's batch_id) → label prints BATCH / DATE.
+    let batchCode = batch || null;
+    if (!batchCode && po) { try { batchCode = (await pool.query(`SELECT batch_id FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0]?.batch_id || null; } catch (e) {} }
+    if (batchCode) {
+      let bd = null;
+      try { bd = (await pool.query(`SELECT to_char(batch_date,'YYYY-MM-DD') d FROM planner.batches WHERE batch=$1`, [batchCode])).rows[0]?.d || null; } catch (e) {}
+      rows.forEach(r => { r.batch = batchCode; r.batch_date = bd; });
+    }
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -6679,7 +6687,7 @@ const POS_SQL_PORTAL = `
   -- admin reads, so every payment figure matches exactly. Supplier-scoped by $1 (supplier names[]); landed-cost /
   -- duty / freight / ERP columns the portal renderer doesn't use are simply not selected. No mastering (a
   -- supplier can't see other suppliers' master POs, so it shows own-PO dates — unchanged portal behaviour).
-  SELECT po, supplier_name, status,
+  SELECT calc4.po, supplier_name, status,
     coalesce(production_status,'') production_status,   -- portal PO grid + timeline production-status dropdown (was never selected → always blank)
     to_char(start_production,'YYYY-MM-DD') prod_start,
     to_char(eff_prod_end,'YYYY-MM-DD') prod_end,
@@ -6709,17 +6717,17 @@ const POS_SQL_PORTAL = `
     coalesce(final_delivery_address,'') final_delivery_address, coalesce(crossdock_skus,'') crossdock_skus,
     coalesce(prod_no,'') prod_no, coalesce(batch_id,'') batch_id,
     coalesce(branch,'') branch, coalesce(nullif(country_code,''), branch_country, '') country,
-    coalesce(client_requirements,'') client_requirements, coalesce(sales_order_ref,'') sales_order_ref,
+    coalesce(calc4.client_requirements,'') client_requirements, coalesce(sales_order_ref,'') sales_order_ref,
     to_char(client_deadline_date,'YYYY-MM-DD') client_deadline, coalesce(client_po_ref,'') client_po_ref,
     -- Forwarder contact details (live from the matching key account, by client name)
     coalesce(ka.forwarder_name,'') forwarder_name, coalesce(ka.forwarder_email,'') forwarder_email, coalesce(ka.forwarder_phone,'') forwarder_phone,
     -- Packing & Labelling (migration 086) + Direct to Client details approval
-    coalesce(pack_polybags,false) pack_polybags, coalesce(pack_polybags_notes,'') pack_polybags_notes,
-    coalesce(pack_dnb_barcodes,false) pack_dnb_barcodes, coalesce(pack_dnb_barcodes_notes,'') pack_dnb_barcodes_notes,
-    coalesce(pack_rfid_barcodes,false) pack_rfid_barcodes, coalesce(pack_rfid_barcodes_notes,'') pack_rfid_barcodes_notes,
-    coalesce(pack_dnb_carton,false) pack_dnb_carton, coalesce(pack_dnb_carton_notes,'') pack_dnb_carton_notes,
-    coalesce(pack_client_carton,false) pack_client_carton, coalesce(pack_client_carton_notes,'') pack_client_carton_notes,
-    coalesce(pack_pallet_notes,'') pack_pallet_notes, coalesce(pack_other_notes,'') pack_other_notes,
+    coalesce(calc4.pack_polybags,false) pack_polybags, coalesce(calc4.pack_polybags_notes,'') pack_polybags_notes,
+    coalesce(calc4.pack_dnb_barcodes,false) pack_dnb_barcodes, coalesce(calc4.pack_dnb_barcodes_notes,'') pack_dnb_barcodes_notes,
+    coalesce(calc4.pack_rfid_barcodes,false) pack_rfid_barcodes, coalesce(calc4.pack_rfid_barcodes_notes,'') pack_rfid_barcodes_notes,
+    coalesce(calc4.pack_dnb_carton,false) pack_dnb_carton, coalesce(calc4.pack_dnb_carton_notes,'') pack_dnb_carton_notes,
+    coalesce(calc4.pack_client_carton,false) pack_client_carton, coalesce(calc4.pack_client_carton_notes,'') pack_client_carton_notes,
+    coalesce(calc4.pack_pallet_notes,'') pack_pallet_notes, coalesce(calc4.pack_other_notes,'') pack_other_notes,
     to_char(dtc_accepted_at,'YYYY-MM-DD HH24:MI') dtc_accepted_at, coalesce(dtc_accepted_by,'') dtc_accepted_by,
     (SELECT po2.dtc_approved_snapshot FROM planner.purchase_orders po2 WHERE po2.po=calc4.po) dtc_approved_snapshot,
     -- DTC shipment details (supplier-entered in portal ▸ SHIPMENT; migration 127)
@@ -6728,7 +6736,7 @@ const POS_SQL_PORTAL = `
   FROM planner.v_po_finance calc4
   LEFT JOIN planner.dtc_shipment_details dsd ON dsd.po = calc4.po
   LEFT JOIN planner.key_accounts ka ON lower(trim(ka.name)) = lower(trim(calc4.client))
-  WHERE supplier_name = ANY($1) AND coalesce(status,'') NOT ILIKE '%future%' ORDER BY po`;   // FUTURE POs are hidden from the supplier portal
+  WHERE supplier_name = ANY($1) AND coalesce(status,'') NOT ILIKE '%future%' ORDER BY calc4.po`;   // FUTURE POs are hidden from the supplier portal
 function loadPortalPage() { try { return readFileSync(new URL('./supply/portal.html', import.meta.url), 'utf8'); } catch { return '<!doctype html><meta charset=utf8>portal page missing'; } }
 const PORTAL_PAGE = DEV ? null : loadPortalPage();
 const portalToken = () => crypto.randomBytes(24).toString('hex');
