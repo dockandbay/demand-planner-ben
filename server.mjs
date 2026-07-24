@@ -2922,6 +2922,32 @@ async function sendResendEmail({ to, subject, html, cc }) {
 }
 // Escalation email now goes through the shared best-effort sender (like the magic link) — never throws.
 async function escalateSend(r) { return sendResendEmail({ to: r.emails, subject: r.subject, html: r.html }); }
+// A supplier submitting invoice / completion info should be VISIBLE, not silent: drop an UNREAD timeline note
+// on the PO (author_kind='supplier', read_at NULL → shows on the PO timeline + increments the ✉ unread badge).
+// Best-effort — never break the submit if the note fails.
+async function postSupplierSubmitNote(db, po, kind, value, by) {
+  const label = kind === 'invoice_value' ? ('submitted invoice information — value ' + value)
+    : kind === 'completion_date' ? ('submitted completion date ' + value)
+    : ('submitted ' + kind);
+  try {
+    const sid = (await db.query(`SELECT supplier_id FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0]?.supplier_id || null;
+    await db.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body) VALUES ($1,$2,$3,'supplier',$4)`,
+      [po, sid, by || null, 'Supplier ' + label]);
+  } catch (e) { /* timeline note best-effort */ }
+}
+// Push email when a supplier submits invoice info. Recipients from app_settings.invoice_submit_notify,
+// defaulting to zera@ + ben@ when unset. Best-effort (sandbox with no RESEND key just logs).
+async function emailInvoiceSubmit(po, value, by) {
+  let emails;
+  try { const s = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='invoice_submit_notify'`)).rows[0];
+    emails = _emails(s ? s.value : ''); } catch (e) { emails = []; }
+  if (!emails.length) emails = ['zera@dockandbay.com', 'ben@dockandbay.com'];
+  const link = PLANNER_URL + '/#/supply/purchase-orders/plan/' + encodeURIComponent(po);
+  const html = '<p>A supplier submitted <b>invoice information</b> for <b>' + po + '</b>.</p>'
+    + '<p>Invoice value: <b>' + value + '</b><br>Submitted by: ' + (by || 'supplier') + '</p>'
+    + '<p><a href="' + link + '">Open ' + po + ' in HORIZON</a></p>';
+  return sendResendEmail({ to: emails, subject: 'Supplier submitted invoice info — ' + po, html });
+}
 async function escalateCore({ initiator, kind, ref, message, user, supplierId, setEscalated, postNote }) {
   kind = ['po', 'shipment', 'sample'].includes(kind) ? kind : 'po';
   ref = String(ref || '').trim(); message = String(message || '').trim();
@@ -3736,7 +3762,7 @@ app.post('/api/supply/portal-submit', async (req, res) => {
     const st = String(b.production_status).trim();
     if (st !== '' && !PROD_STATUSES.includes(st)) return res.status(400).json({ error: 'bad production_status' });
   }
-  const out = { staged: [], applied: [] };
+  const out = { staged: [], applied: [] }; let _invoiceSubmit = null;
   // one transaction for the whole submit so a mid-way failure can't leave a half-created shipment / orphan PO
   const client = await pool.connect();
   try {
@@ -3749,6 +3775,9 @@ app.post('/api/supply/portal-submit', async (req, res) => {
       await client.query(`INSERT INTO planner.supplier_submissions (supplier_id, po, kind, value, attachment_id, status, submitted_by)
         VALUES ($1,$2,$3,$4,$5,'pending',$6)`, [sid, b.po, kind, String(value), attId || null, by]);
       out.staged.push(kind);
+      // invoice / completion info → visible unread timeline note (+ email for invoices)
+      if (kind === 'invoice_value' || kind === 'completion_date') await postSupplierSubmitNote(client, b.po, kind, value, by);
+      if (kind === 'invoice_value') _invoiceSubmit = String(value);
     };
     await stage('completion_date', b.completion_date);
     await stage('invoice_value', b.invoice_value, b.invoice_attachment_id);
@@ -3792,6 +3821,7 @@ app.post('/api/supply/portal-submit', async (req, res) => {
       else { await client.query(`UPDATE planner.purchase_orders SET supplier_confirmed_at=NULL, supplier_confirmed_by=NULL WHERE po=$1`, [b.po]); out.applied.push('PO confirmation cleared'); }
     }
     await client.query('COMMIT');
+    if (_invoiceSubmit != null) await emailInvoiceSubmit(b.po, _invoiceSubmit, by).catch(() => {});
     res.json(out);
   } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
@@ -8010,7 +8040,7 @@ app.post('/api/portal/upload', portalAuth, async (req, res) => {
 app.post('/api/portal/submit', portalAuth, async (req, res) => {
   const b = req.body || {}; if (!b.po) return res.status(400).json({ error: 'po required' });
   if (!await portalOwnsPO(req, b.po)) return portalDeny(res);
-  const sid = req.portal.supplierIds[0] || null, by = req.portal.email, out = { staged: [], applied: [] };
+  const sid = req.portal.supplierIds[0] || null, by = req.portal.email, out = { staged: [], applied: [] }; let _invoiceSubmit = null;
   try {
     const stage = async (kind, value, attId) => {
       if (value == null || value === '') return;
@@ -8018,6 +8048,9 @@ app.post('/api/portal/submit', portalAuth, async (req, res) => {
       await pool.query(`INSERT INTO planner.supplier_submissions (supplier_id,po,kind,value,attachment_id,status,submitted_by) VALUES ($1,$2,$3,$4,$5,'pending',$6)`,
         [sid, b.po, kind, String(value), attId || null, by]);
       out.staged.push(kind);
+      // invoice / completion info → visible unread timeline note (+ email for invoices)
+      if (kind === 'invoice_value' || kind === 'completion_date') await postSupplierSubmitNote(pool, b.po, kind, value, by);
+      if (kind === 'invoice_value') _invoiceSubmit = String(value);
     };
     await stage('completion_date', b.completion_date);
     await stage('invoice_value', b.invoice_value, b.invoice_attachment_id);
@@ -8049,6 +8082,7 @@ app.post('/api/portal/submit', portalAuth, async (req, res) => {
       // master PO marked shipped → its shipment advances to Shipping (master POs only)
       if (st === 'shipped') { const shref = await shipmentShippingFromMasterPO(pool, b.po); if (shref) out.applied.push('shipment ' + shref + ' → Shipping'); }
     }
+    if (_invoiceSubmit != null) await emailInvoiceSubmit(b.po, _invoiceSubmit, by).catch(() => {});
     res.json(out);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

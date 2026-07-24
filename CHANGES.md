@@ -3,6 +3,21 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.062 - Supplier invoice submission → unread PO timeline note + push email (CONFIG recipient)
+
+When a supplier submits invoice information (or a completion date) on a PO, it's now visible instead of
+silent:
+- Posts an **unread timeline note** to the PO (`supplier_notes`, `author_kind='supplier'`, `read_at` NULL)
+  → shows on the PO timeline and increments the ✉ unread badge. Fires for both `invoice_value` and
+  `completion_date` submissions, on the real portal (`/api/portal/submit`) and the admin preview
+  (`/api/supply/portal-submit`).
+- Sends a **push email** when a supplier submits *invoice* info, to recipients from a new CONFIG ▸ General
+  settings field **"Supplier notifications ▸ Invoice submitted"** (`app_settings.invoice_submit_notify`),
+  defaulting to `zera@dockandbay.com, ben@dockandbay.com` when unset. Best-effort (sandbox with no
+  RESEND_API_KEY just logs the intended send).
+
+No new migration or env var (reuses `app_settings` + the existing Resend sender).
+
 ## v26.061 - Samples status model: our status (PLANNED/SHIPPED/CANCELLED) + supplier status + Set-shipping
 
 Simplified the sample status per Ben, mirroring the PO grid's supplier-vs-our-status pattern:
