@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.065 - Upload POs: template is now an .xlsx with system-sourced dropdowns
+
+The "Download template" in Upload purchase orders now downloads **PO_upload_template.xlsx** (was a plain CSV).
+Its **Supplier**, **Branch**, **Ship to** and **Status** columns are **data-validation dropdowns sourced from
+the system's own lists** (suppliers + branches from `/api/supply/lookups`; Ship to from `PO_COUNTRIES`; Status
+from `PO_STATUSES`) — so pasted values can't mismatch. Lists live on a hidden "Lists" sheet (avoids Excel's
+255-char inline-list limit for long supplier lists) and are referenced by range. Header row frozen + bold.
+New builder `buildPoTemplateXlsx()`; reuses the existing zip/XML helpers.
+
 ## v26.064 - Payments Report copy buttons: no button state change + email intro line
 
 - **Copy for email** and **Copy for Xero** buttons no longer swap to a ✓/✗ — a click just copies to the

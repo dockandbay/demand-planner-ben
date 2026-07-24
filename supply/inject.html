@@ -2140,19 +2140,17 @@
   }
   function openPoUpload(){ var bg=document.createElement('div'); bg.className='pomodal-bg';
     bg.innerHTML='<div class="pomodal"><div style="font-weight:600;font-size:14px;margin-bottom:6px">Upload purchase orders</div>'
-      +'<div class="mut tiny" style="margin-bottom:8px">Paste rows (comma or tab separated). Include a <b>header row</b> to use SKU/Qty. Recognised columns: <b>PO</b>, Supplier, Ship to (UK/US/AU/EU/CA/DIRECT), Branch, Status, Start (YYYY-MM-DD), <b>SKU</b>, <b>Qty</b>. SKU + Qty are optional — repeat the PO on multiple lines to add several SKU/qty order-plan lines. New POs are created; <b>existing POs keep their details and just get the lines added</b>. Tip: open the template in Excel / Google Sheets, fill it in, then copy the cells and paste here — a Sheets/Excel paste is tab-separated and works without commas.</div>'
+      +'<div class="mut tiny" style="margin-bottom:8px">Paste rows (comma or tab separated). Include a <b>header row</b> to use SKU/Qty. Recognised columns: <b>PO</b>, Supplier, Ship to (UK/US/AU/EU/CA/DIRECT), Branch, Status, Start (YYYY-MM-DD), <b>SKU</b>, <b>Qty</b>. SKU + Qty are optional — repeat the PO on multiple lines to add several SKU/qty order-plan lines. New POs are created; <b>existing POs keep their details and just get the lines added</b>. Tip: download the <b>Excel template</b> below — its <b>Supplier</b>, <b>Branch</b>, <b>Ship to</b> and <b>Status</b> columns are <b>dropdowns from the system</b> so the values can’t mismatch. Fill it in, then copy the cells and paste here (a Sheets/Excel paste is tab-separated and works without commas).</div>'
       +'<textarea id="po-up-ta" style="width:100%;height:170px;font:12px ui-monospace,Menlo,monospace;border:1px solid #d0d0d0;border-radius:6px;padding:8px;box-sizing:border-box" placeholder="PO,Supplier,Ship to,Branch,Status,SKU,Qty\nPO-90001,XR Textile,UK,UK ILG,FUTURE,TOWEL-LG-NAVY,500\nPO-90001,,,,,TOWEL-LG-CORAL,300\nPO-90002,Lixin,US,US Geneva,PRODUCTION,,"></textarea>'
       +'<div id="po-up-prev" class="mut tiny" style="margin:6px 0">&nbsp;</div>'
       +'<div style="display:flex;align-items:center;margin-top:8px"><button class="save-btn" id="po-up-tmpl" style="background:#eff6ff;border-color:#93c5fd">⬇ Download template</button><span style="margin-left:auto"></span><button class="save-btn light" id="po-up-cancel">Cancel</button> <button class="save-btn dark" id="po-up-go" style="margin-left:6px">Import</button></div></div>';
     document.body.appendChild(bg);
     var ta=document.getElementById('po-up-ta'), prev=document.getElementById('po-up-prev');
     document.getElementById('po-up-tmpl').onclick=function(){
-      var csv='PO,Supplier,Ship to,Branch,Status,Start,SKU,Qty\n'
-        +'PO-90001,XR Textile,UK,UK ILG,FUTURE,2026-08-01,TOWEL-LG-NAVY,500\n'
-        +'PO-90001,,,,,,TOWEL-LG-CORAL,300\n'
-        +'PO-90002,Lixin,US,US Geneva,PRODUCTION,,,\n';
-      var bl=new Blob([csv],{type:'text/csv'}), u=URL.createObjectURL(bl), a=document.createElement('a');
-      a.href=u; a.download='PO_upload_template.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); };
+      function build(){ var data=buildPoTemplateXlsx(supplierList, branchList);
+        var bl=new Blob([data],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}), u=URL.createObjectURL(bl), a=document.createElement('a');
+        a.href=u; a.download='PO_upload_template.xlsx'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); }
+      if(supplierList&&supplierList.length){ build(); } else { fetchLookups(build); } };
     ta.oninput=function(){ var r=poUploadParse(ta.value); var pos={},ln=0; r.forEach(function(x){pos[x.po]=1; if((x.sku||'').trim())ln++;}); var np=Object.keys(pos).length;
       prev.textContent=np?(np+' PO(s)'+(ln?' · '+ln+' SKU line(s)':'')+' detected'):'nothing detected yet'; };
     bg.onclick=function(e){ if(e.target===bg)bg.parentNode.removeChild(bg); };
@@ -3297,6 +3295,44 @@
       {name:'xl/_rels/workbook.xml.rels', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'},
       {name:'xl/styles.xml', str:STYLES},
       {name:'xl/worksheets/sheet1.xml', str:_xlsxSheet(grid, freeze, cols)}
+    ];
+    return _zipStore(files.map(function(f){ return {name:f.name, data:enc.encode(f.str)}; })); }
+  // PO-upload template as .xlsx with data-validation DROPDOWNS for Supplier, Branch, Ship to, Status — sourced
+  // from the system's own lists so pasted data can't mismatch. Lists live on a hidden "Lists" sheet (avoids the
+  // 255-char inline-list limit for long supplier/branch lists); Sheet1 references them by range.
+  function buildPoTemplateXlsx(suppliers, branches){ var enc=new TextEncoder();
+    suppliers=(suppliers||[]).filter(Boolean); branches=(branches||[]).filter(Boolean);
+    var COUNTRIES=PO_COUNTRIES.map(function(o){return o[0];}), STATUSES=PO_STATUSES.slice();
+    var header=['PO','Supplier','Ship to','Branch','Status','Start','SKU','Qty'];
+    var sample=[['PO-90001','','UK','','FUTURE','2026-08-01','TOWEL-LG-NAVY',500],
+      ['PO-90001','','','','','','TOWEL-LG-CORAL',300],
+      ['PO-90002','','US','','PRODUCTION','','','']];
+    var grid=[header].concat(sample);
+    var rowsXml=grid.map(function(row,ri){ var cells=row.map(function(v,ci){ return _xlsxCell(_xlsxCol(ci)+(ri+1), ri===0?{v:v,s:1}:v); }).join(''); return '<row r="'+(ri+1)+'">'+cells+'</row>'; }).join('');
+    function dv(sqref,formula){ return '<dataValidation type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1" sqref="'+sqref+'"><formula1>'+formula+'</formula1></dataValidation>'; }
+    var nSup=Math.max(1,suppliers.length), nBr=Math.max(1,branches.length), LO='1000';
+    var dvs='<dataValidations count="4">'
+      +dv('B2:B'+LO,'Lists!$A$2:$A$'+(nSup+1))     // Supplier
+      +dv('C2:C'+LO,'Lists!$C$2:$C$'+(COUNTRIES.length+1))   // Ship to
+      +dv('D2:D'+LO,'Lists!$B$2:$B$'+(nBr+1))     // Branch
+      +dv('E2:E'+LO,'Lists!$D$2:$D$'+(STATUSES.length+1))    // Status
+      +'</dataValidations>';
+    var cols='<cols><col min="1" max="1" width="12" customWidth="1"/><col min="2" max="2" width="22" customWidth="1"/><col min="3" max="3" width="10" customWidth="1"/><col min="4" max="4" width="18" customWidth="1"/><col min="5" max="5" width="15" customWidth="1"/><col min="6" max="6" width="12" customWidth="1"/><col min="7" max="7" width="22" customWidth="1"/><col min="8" max="8" width="8" customWidth="1"/></cols>';
+    var sheet1='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>'+cols+'<sheetData>'+rowsXml+'</sheetData>'+dvs+'</worksheet>';
+    var maxLen=Math.max(suppliers.length,branches.length,COUNTRIES.length,STATUSES.length);
+    var listGrid=[['Suppliers','Branches','Ship to','Status']];
+    for(var i=0;i<maxLen;i++){ listGrid.push([suppliers[i]||'',branches[i]||'',COUNTRIES[i]||'',STATUSES[i]||'']); }
+    var l2=listGrid.map(function(row,ri){ var cells=row.map(function(v,ci){ return v===''?'':_xlsxCell(_xlsxCol(ci)+(ri+1), ri===0?{v:v,s:1}:v); }).join(''); return cells?'<row r="'+(ri+1)+'">'+cells+'</row>':''; }).join('');
+    var sheet2='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'+l2+'</sheetData></worksheet>';
+    var STYLES='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="1"><fill><patternFill patternType="none"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs></styleSheet>';
+    var files=[
+      {name:'[Content_Types].xml', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'},
+      {name:'_rels/.rels', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'},
+      {name:'xl/workbook.xml', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="PO upload" sheetId="1" r:id="rId1"/><sheet name="Lists" sheetId="2" state="hidden" r:id="rId2"/></sheets></workbook>'},
+      {name:'xl/_rels/workbook.xml.rels', str:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'},
+      {name:'xl/styles.xml', str:STYLES},
+      {name:'xl/worksheets/sheet1.xml', str:sheet1},
+      {name:'xl/worksheets/sheet2.xml', str:sheet2}
     ];
     return _zipStore(files.map(function(f){ return {name:f.name, data:enc.encode(f.str)}; })); }
   function renderOrderPlan(lines){ var c=document.getElementById('supply-content');
