@@ -1387,10 +1387,20 @@ app.post('/api/supply/shipment-charge', async (req, res) => {
       VALUES ('shipment',$1,$2,$3,$4,$5,$6) RETURNING id`, [b.shipment_ref, b.supplier_name||sup, Number(b.freight_cost)||0, Number(b.product_cost)||0, b.description||null, b.created_by||'preview']);
     res.json({ ok:true, id: r.rows[0].id }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// The DtC-details fields a supplier approves — snapshotted at approval so we can later show WHAT changed.
+const DTC_SNAPSHOT_SQL = `jsonb_build_object(
+  'pack_polybags',coalesce(pack_polybags,false),'pack_polybags_notes',coalesce(pack_polybags_notes,''),
+  'pack_dnb_barcodes',coalesce(pack_dnb_barcodes,false),'pack_dnb_barcodes_notes',coalesce(pack_dnb_barcodes_notes,''),
+  'pack_rfid_barcodes',coalesce(pack_rfid_barcodes,false),'pack_rfid_barcodes_notes',coalesce(pack_rfid_barcodes_notes,''),
+  'pack_dnb_carton',coalesce(pack_dnb_carton,false),'pack_dnb_carton_notes',coalesce(pack_dnb_carton_notes,''),
+  'pack_client_carton',coalesce(pack_client_carton,false),'pack_client_carton_notes',coalesce(pack_client_carton_notes,''),
+  'pack_pallet_notes',coalesce(pack_pallet_notes,''),'pack_other_notes',coalesce(pack_other_notes,''),
+  'client_requirements',coalesce(client_requirements,''),'sales_order_ref',coalesce(sales_order_ref,''),
+  'client_po_ref',coalesce(client_po_ref,''),'client',coalesce(client,''),'final_delivery_address',coalesce(final_delivery_address,''))`;
 // Direct to Client details approval (admin "preview as supplier")
 app.post('/api/supply/dtc-accept', async (req, res) => {
   const po = req.body && req.body.po; if(!po) return res.status(400).json({ error: 'po required' });
-  try { await pool.query(`UPDATE planner.purchase_orders SET dtc_accepted_at=now(), dtc_accepted_by=$2 WHERE po=$1`, [po, req.body.by||'D&B (preview)']);
+  try { await pool.query(`UPDATE planner.purchase_orders SET dtc_accepted_at=now(), dtc_accepted_by=$2, dtc_approved_snapshot=${DTC_SNAPSHOT_SQL} WHERE po=$1`, [po, req.body.by||'D&B (preview)']);
     res.json({ ok:true }); } catch(e){ res.status(500).json({ error: e.message }); } });
 
 // ── SUPPLY tab (Production Planner) read APIs — one route, section in the path.
@@ -1685,6 +1695,7 @@ app.get('/api/supply/:section', async (req, res) => {
             coalesce(pack_client_carton,false) pack_client_carton, coalesce(pack_client_carton_notes,'') pack_client_carton_notes,
             coalesce(pack_pallet_notes,'') pack_pallet_notes, coalesce(pack_other_notes,'') pack_other_notes,
             to_char(dtc_accepted_at,'YYYY-MM-DD HH24:MI') dtc_accepted_at, coalesce(dtc_accepted_by,'') dtc_accepted_by,
+            (SELECT po2.dtc_approved_snapshot FROM planner.purchase_orders po2 WHERE po2.po=calc4.po) dtc_approved_snapshot,
             coalesce(nullif(country_code,''), branch_country, '') country,
             CASE WHEN nullif(country_code,'') IS NOT NULL THEN 'M' WHEN branch_country IS NOT NULL THEN 'branch' END country_src,
             coalesce(country_code,'') country_override, coalesce(branch,'') branch,
@@ -6703,6 +6714,7 @@ const POS_SQL_PORTAL = `
     coalesce(pack_client_carton,false) pack_client_carton, coalesce(pack_client_carton_notes,'') pack_client_carton_notes,
     coalesce(pack_pallet_notes,'') pack_pallet_notes, coalesce(pack_other_notes,'') pack_other_notes,
     to_char(dtc_accepted_at,'YYYY-MM-DD HH24:MI') dtc_accepted_at, coalesce(dtc_accepted_by,'') dtc_accepted_by,
+    (SELECT po2.dtc_approved_snapshot FROM planner.purchase_orders po2 WHERE po2.po=calc4.po) dtc_approved_snapshot,
     -- DTC shipment details (supplier-entered in portal ▸ SHIPMENT; migration 127)
     dsd.cartons dtc_cartons, dsd.cbm dtc_cbm, dsd.gross_weight_kg dtc_weight, coalesce(dsd.dimensions,'') dtc_dimensions,
     to_char(dsd.updated_at,'YYYY-MM-DD HH24:MI') dtc_entered_at, coalesce(dsd.entered_by,'') dtc_entered_by
@@ -7889,7 +7901,7 @@ app.post('/api/portal/dtc-accept', portalAuth, async (req, res) => {
   if(!po) return res.status(400).json({ error: 'po required' });
   try { const own = (await pool.query(`SELECT 1 FROM planner.purchase_orders WHERE po=$1 AND supplier_name=ANY($2) LIMIT 1`, [po, names])).rows[0];
     if(!own) return res.status(403).json({ error: 'not your PO' });
-    await pool.query(`UPDATE planner.purchase_orders SET dtc_accepted_at=now(), dtc_accepted_by=$2 WHERE po=$1`, [po, req.portal.email||'supplier']);
+    await pool.query(`UPDATE planner.purchase_orders SET dtc_accepted_at=now(), dtc_accepted_by=$2, dtc_approved_snapshot=${DTC_SNAPSHOT_SQL} WHERE po=$1`, [po, req.portal.email||'supplier']);
     res.json({ ok:true }); } catch(e){ res.status(500).json({ error: e.message }); } });
 
 // (Removed dead /api/portal/data — old supplier loader, superseded by /api/portal/bootstrap. Zero callers. v25.653)

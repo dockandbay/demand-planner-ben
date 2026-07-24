@@ -871,17 +871,26 @@
         +(clientDocs.length?blRow('Direct to Client / FBA attachments',clientDocs.map(function(x){return '<a href="/api/portal/attachment/'+x.id+'" target="_blank" rel="noopener">'+esc(x.filename||'file')+'</a>';}).join(' &nbsp;·&nbsp; ')):'')
         +'</div>';
       // ---- Direct to Client details (read-only packing & labelling) + approve workflow ----
-      var packBools=[['Polybags',p.pack_polybags,p.pack_polybags_notes],['Dock & Bay Product barcodes',p.pack_dnb_barcodes,p.pack_dnb_barcodes_notes],['RFID Product Barcodes',p.pack_rfid_barcodes,p.pack_rfid_barcodes_notes],['Dock & Bay Carton labels',p.pack_dnb_carton,p.pack_dnb_carton_notes],['Client Specific Carton Labels',p.pack_client_carton,p.pack_client_carton_notes]];
+      var packBools=[['Polybags',p.pack_polybags,p.pack_polybags_notes,'pack_polybags','pack_polybags_notes'],['Dock & Bay Product barcodes',p.pack_dnb_barcodes,p.pack_dnb_barcodes_notes,'pack_dnb_barcodes','pack_dnb_barcodes_notes'],['RFID Product Barcodes',p.pack_rfid_barcodes,p.pack_rfid_barcodes_notes,'pack_rfid_barcodes','pack_rfid_barcodes_notes'],['Dock & Bay Carton labels',p.pack_dnb_carton,p.pack_dnb_carton_notes,'pack_dnb_carton','pack_dnb_carton_notes'],['Client Specific Carton Labels',p.pack_client_carton,p.pack_client_carton_notes,'pack_client_carton','pack_client_carton_notes']];
       var dtcApplies=ppIsDtc(p);   // only Direct-to-Client POs with a client sales ref get the tab + approval
       var dtcAccepted=!!p.dtc_accepted_at;
-      var dtcReqRow=function(lbl,yes,notes){ return '<tr><td class="mut" style="padding:3px 14px 3px 0;text-align:left;white-space:nowrap">'+esc(lbl)+'</td><td style="text-align:left;padding:3px 14px 3px 0">'+(yes?'<span style="color:#166534;font-weight:700">Yes</span>':'<span class="mut">No</span>')+'</td><td style="text-align:left;padding:3px 0">'+(notes?esc(notes):'<span class="mut">—</span>')+'</td></tr>'; };
-      var dtcNoteRow=function(lbl,notes){ return '<tr><td class="mut" style="padding:3px 14px 3px 0;text-align:left;white-space:nowrap">'+esc(lbl)+'</td><td colspan="2" style="text-align:left;padding:3px 0">'+(notes?esc(notes):'<span class="mut">—</span>')+'</td></tr>'; };
-      var dtcInfoRow=function(lbl,val,pre){ return '<tr><td class="mut" style="padding:3px 16px 3px 0;text-align:left;white-space:nowrap;vertical-align:top">'+esc(lbl)+'</td><td style="text-align:left;padding:3px 0'+(pre?';white-space:pre-wrap':'')+'">'+(val?'<b>'+esc(val)+'</b>':'<span class="mut">—</span>')+'</td></tr>'; };
+      // What changed since the supplier last approved these DtC details — diff current vs the approval snapshot
+      // (server captures dtc_approved_snapshot on approve; kept when D&B edits, which resets dtc_accepted_at).
+      var dtcSnap=p.dtc_approved_snapshot||null; if(typeof dtcSnap==='string'){ try{dtcSnap=JSON.parse(dtcSnap);}catch(e){dtcSnap=null;} }
+      function dtcChg(k){ if(!dtcSnap||!(k in dtcSnap))return false; var a=dtcSnap[k], b=p[k];
+        if(k.indexOf('pack_')===0 && k.slice(-6)!=='_notes') return (!!a)!==(!!b);   // packing boolean flag
+        return String(a==null?'':a).trim()!==String(b==null?'':b).trim(); }
+      var dtcChangedKeys=dtcSnap?Object.keys(dtcSnap).filter(dtcChg):[];
+      var dtcHasChange=!dtcAccepted && !!dtcSnap && dtcChangedKeys.length>0;   // previously approved, now differs → re-approve
+      var _dtcChgTag=' <span style="background:#f59e0b;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:1px 6px;vertical-align:1px">changed</span>';
+      var dtcReqRow=function(lbl,yes,notes,changed){ return '<tr'+(changed?' style="background:#fef9c3"':'')+'><td class="mut" style="padding:3px 14px 3px 0;text-align:left;white-space:nowrap">'+esc(lbl)+(changed?_dtcChgTag:'')+'</td><td style="text-align:left;padding:3px 14px 3px 0">'+(yes?'<span style="color:#166534;font-weight:700">Yes</span>':'<span class="mut">No</span>')+'</td><td style="text-align:left;padding:3px 0">'+(notes?esc(notes):'<span class="mut">—</span>')+'</td></tr>'; };
+      var dtcNoteRow=function(lbl,notes,changed){ return '<tr'+(changed?' style="background:#fef9c3"':'')+'><td class="mut" style="padding:3px 14px 3px 0;text-align:left;white-space:nowrap">'+esc(lbl)+(changed?_dtcChgTag:'')+'</td><td colspan="2" style="text-align:left;padding:3px 0">'+(notes?esc(notes):'<span class="mut">—</span>')+'</td></tr>'; };
+      var dtcInfoRow=function(lbl,val,pre,changed){ return '<tr'+(changed?' style="background:#fef9c3"':'')+'><td class="mut" style="padding:3px 16px 3px 0;text-align:left;white-space:nowrap;vertical-align:top">'+esc(lbl)+(changed?_dtcChgTag:'')+'</td><td style="text-align:left;padding:3px 0'+(pre?';white-space:pre-wrap':'')+'">'+(val?'<b>'+esc(val)+'</b>':'<span class="mut">—</span>')+'</td></tr>'; };
       var dtcInfo='<table style="font-size:12px;border-collapse:collapse;text-align:left;margin-bottom:12px"><tbody>'
-        +dtcInfoRow('Direct to Client Name',p.client)
-        +dtcInfoRow('Direct to Client sales ref',p.sales_order_ref)
-        +dtcInfoRow('Direct to Client PO number',p.client_po_ref)
-        +dtcInfoRow('Direct to Client notes',p.client_requirements,true)
+        +dtcInfoRow('Direct to Client Name',p.client,false,dtcChg('client'))
+        +dtcInfoRow('Direct to Client sales ref',p.sales_order_ref,false,dtcChg('sales_order_ref'))
+        +dtcInfoRow('Direct to Client PO number',p.client_po_ref,false,dtcChg('client_po_ref'))
+        +dtcInfoRow('Direct to Client notes',p.client_requirements,true,dtcChg('client_requirements'))
         +((p.forwarder_name||p.forwarder_email||p.forwarder_phone)
             ? dtcInfoRow('Forwarder name',p.forwarder_name)
               +dtcInfoRow('Forwarder email',p.forwarder_email)
@@ -892,13 +901,13 @@
       var dtcApproveBar='<div style="margin:0 0 12px;padding:8px 11px;border-radius:6px;font-size:12px;'+(dtcAccepted?'background:#dcfce7;border:1px solid #86efac':'background:#fef3c7;border:1px solid #fcd34d')+'">'
         +(dtcAccepted
            ? '✓ <b>Direct to Client details approved</b>'+(p.dtc_accepted_at?' on '+esc(p.dtc_accepted_at):'')+(p.dtc_accepted_by?' · '+esc(p.dtc_accepted_by):'')
-           : '⏳ <b>Please approve these Direct to Client details.</b> Review the packing &amp; labelling below, then approve. &nbsp; <button class="save-btn pp-dtc-accept" data-po="'+po+'" data-v="1" style="background:#16a34a;color:#fff;border-color:#16a34a">✓ Approve Direct to Client details</button>')
+           : (dtcHasChange?'<b>A change has been made.</b> ':'')+'⏳ <b>Please approve these Direct to Client details.</b> Review the packing &amp; labelling below'+(dtcHasChange?' (changes highlighted)':'')+', then approve. &nbsp; <button class="save-btn pp-dtc-accept" data-po="'+po+'" data-v="1" style="background:#16a34a;color:#fff;border-color:#16a34a">✓ Approve Direct to Client details</button>')
         +'</div>';
       var dtcPackTbl='<div style="font-size:12px;margin-bottom:8px">Packing &amp; labelling requirements set by Dock &amp; Bay:</div>'
           +'<table style="font-size:12px;border-collapse:collapse;text-align:left"><thead><tr><th class="l" style="padding:2px 14px 2px 0">Requirement</th><th class="l" style="padding:2px 14px 2px 0">Required</th><th class="l">Notes</th></tr></thead><tbody>'
-          +packBools.map(function(x){return dtcReqRow(x[0],x[1],x[2]);}).join('')
-          +dtcNoteRow('Pallet Packing requirements',p.pack_pallet_notes)
-          +dtcNoteRow('Other Packing & Labelling requirements',p.pack_other_notes)
+          +packBools.map(function(x){return dtcReqRow(x[0],x[1],x[2], dtcChg(x[3])||dtcChg(x[4]));}).join('')
+          +dtcNoteRow('Pallet Packing requirements',p.pack_pallet_notes, dtcChg('pack_pallet_notes'))
+          +dtcNoteRow('Other Packing & Labelling requirements',p.pack_other_notes, dtcChg('pack_other_notes'))
           +'</tbody></table>';
       var dtc='<div class="dtc-wrap">'+dtcApproveBar+'<div class="sect-h" style="margin:0 0 8px">Direct to Client details</div>'+dtcInfo
         +'<div class="sect-h" style="margin:6px 0 8px">Packing &amp; Labelling</div>'+dtcPackTbl+'</div>';
@@ -2000,7 +2009,9 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
               // approve the Direct to Client details (packing & labelling)
               scope.querySelectorAll('.pp-dtc-accept').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); btn.disabled=true;
                 postJSON(EP.dtcAccept,{po:po},function(j){ if(j&&j.error){alert(j.error);btn.disabled=false;return;}
-                  var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; if(p){ p.dtc_accepted_at=new Date().toISOString().slice(0,16).replace('T',' '); p.dtc_accepted_by=STATE.by; } refreshRow(row,po); }); }; });
+                  var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; if(p){ p.dtc_accepted_at=new Date().toISOString().slice(0,16).replace('T',' '); p.dtc_accepted_by=STATE.by;
+                    // re-snapshot the approved DtC details locally (server does the same) so the change highlights clear
+                    p.dtc_approved_snapshot={pack_polybags:!!p.pack_polybags,pack_polybags_notes:p.pack_polybags_notes||'',pack_dnb_barcodes:!!p.pack_dnb_barcodes,pack_dnb_barcodes_notes:p.pack_dnb_barcodes_notes||'',pack_rfid_barcodes:!!p.pack_rfid_barcodes,pack_rfid_barcodes_notes:p.pack_rfid_barcodes_notes||'',pack_dnb_carton:!!p.pack_dnb_carton,pack_dnb_carton_notes:p.pack_dnb_carton_notes||'',pack_client_carton:!!p.pack_client_carton,pack_client_carton_notes:p.pack_client_carton_notes||'',pack_pallet_notes:p.pack_pallet_notes||'',pack_other_notes:p.pack_other_notes||'',client_requirements:p.client_requirements||'',sales_order_ref:p.sales_order_ref||'',client_po_ref:p.client_po_ref||'',client:p.client||'',final_delivery_address:p.final_delivery_address||''}; } refreshRow(row,po); }); }; });
               // jump to this PO's shipment in the Shipment Plan tab (search overrides the pills so it shows whatever its status)
               scope.querySelectorAll('.pp-go-shipplan').forEach(function(btn){ btn.onclick=function(){ PORTAL_TAB='shipmentplan'; PORTAL_SP_PO=btn.dataset.ref||''; renderPP(); }; });
               scope.querySelectorAll('.pp-inv-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); var val=pick('pp-inv',po).value; var fin=pick('pp-inv-file',po); var f=fin&&fin.files[0]; if(!val&&!f)return; btn.disabled=true;

@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.070 - Supplier portal: Direct-to-Client re-approval shows WHAT changed
+
+When a supplier has approved the Direct-to-Client details and D&B later edits them, the portal now shows the
+change, not just a bare re-approval prompt:
+- Server snapshots the approved DtC details (`dtc_approved_snapshot`, **migration 138**) on approval (portal +
+  admin preview). D&B's edit still resets `dtc_accepted_at` but keeps the snapshot.
+- The DtC tab diffs current vs snapshot and **highlights the changed rows** (yellow + a "changed" tag) across
+  the packing/labelling table and the client info rows.
+- The approve banner reads **"A change has been made. ⏳ Please approve these Direct to Client details. Review
+  the packing & labelling below (changes highlighted), then approve."** (vs the first-time prompt). On
+  re-approval the snapshot is refreshed (client + server) so the highlights clear. **Deploy:** run migration
+  **138_dtc_approved_snapshot.sql**.
+
 ## v26.069 - Supplier portal: confirm/re-confirm box on ORDER PLAN tab too
 
 The yellow **Confirm order / Re-confirm order** prompt + button now also sits at the top of the **ORDER PLAN**
