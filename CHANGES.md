@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.063 - PRODUCT ▸ Master data: dates shown as dd-mmm-yy (app-consistent)
+
+On PRODUCT ▸ Master data, the "Development started ▸ blank = created …" hint and the Status "approved …"
+timestamp now render via the shared `fd()` helper as **dd-mmm-yy** (e.g. `23-Jul-26`) instead of raw
+`2026-07-23`, matching the rest of HORIZON. (The `<input type="date">` itself stays native — it stores ISO
+and the browser controls its display.)
+
 ## v26.062 - Supplier invoice submission → unread PO timeline note + push email (CONFIG recipient)
 
 When a supplier submits invoice information (or a completion date) on a PO, it's now visible instead of
