@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.085 - CONFIG ▸ Branches: card-list + edit-form UX (matches Consignees)
+
+Rebuilt CONFIG ▸ Branches from the inline table to the same **card list + full-width edit form** UX as
+Consignees / Key accounts (shared `cardEditor`): searchable cards showing country, sea/air lead, shipping
+notes and delivery notes; Edit opens a grouped form. Saves via the existing branch patch endpoint.
+
 ## v26.084 - Order Plan: surface POs with no SKU lines yet
 
 POs with no SKU lines (e.g. a freshly-created FUTURE PO like PO-58BETEST) never appeared in the Order Plan —

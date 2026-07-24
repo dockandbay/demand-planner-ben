@@ -5117,7 +5117,45 @@
           fetch('/api/supply/duty-upsert',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({category:inp.dataset.cat,country:inp.dataset.country,duty_pct:v})})
             .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw 0; inp.style.borderColor='#16a34a'; delete cache['config']; invalidateDerived(); }).catch(function(){ inp.style.borderColor='#dc2626'; }); }; });
         document.getElementById('dt-addcat').onclick=function(){ var nm=prompt('New category name:'); if(!nm||!nm.trim())return; shipPost('/api/supply/duty-upsert',{category:nm.trim(),country:'UK',duty_pct:''},reload); }; };
-      SUBS['branches']=function(){ b.innerHTML=brTbl(); bindEdits(); };
+      SUBS['branches']=function(){ var rows=d.branches||[];
+        // Card list + full-width edit form (same UX as Consignees / Key accounts), via the shared cardEditor().
+        function fieldOf(r,f){ return r[f]==null?'':r[f]; }
+        function block(lbl,val){ val=String(val==null?'':val); return '<div style="margin:0 0 2px"><div class="mut tiny" style="text-transform:uppercase;letter-spacing:.3px;font-weight:700">'+esc(lbl)+'</div><div style="white-space:pre-wrap;font-size:12px;color:'+(val?'#1f2937':'#9ca3af')+'">'+(val?esc(val):'—')+'</div></div>'; }
+        function cardHtml(r){ var nm=esc(r.name);
+          return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;background:#fff;box-shadow:0 1px 2px rgba(15,23,42,.04)">'
+            +'<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px"><div style="flex:1;min-width:0;font-weight:700;font-size:14px">'+nm+(r.country_code?' <span class="mut tiny" style="font-weight:600">'+esc(r.country_code)+'</span>':'')+'</div>'
+            +'<button class="br-edit" data-b="'+nm+'" style="cursor:pointer;border:1px solid #cbd5e1;background:#f8fafc;padding:3px 12px;border-radius:5px;font-size:11px;white-space:nowrap">Edit</button></div>'
+            +'<div style="display:flex;gap:20px;margin-bottom:6px">'+block('Sea lead (days)', fieldOf(r,'sea_lead_time_days'))+block('Air lead (days)', fieldOf(r,'air_lead_time_days'))+'</div>'
+            +block('Shipping notes', fieldOf(r,'shipping_notes'))
+            +'<div style="margin-top:6px"></div>'+block('Delivery notes', fieldOf(r,'delivery_notes'))
+            +'</div>'; }
+        function listHtml(cq){ var f=cq?rows.filter(function(x){return String(JSON.stringify(x)||'').toLowerCase().indexOf(cq)>=0;}):rows;
+          var cards=f.length?('<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-top:12px">'+f.map(cardHtml).join('')+'</div>'):'<div class="count" style="padding:10px 2px">No branches'+(cq?' match your search':'')+'.</div>';
+          return '<div class="sect-h">Branches <span class="mut tiny">(shipping lead times + notes · delivery notes flow onto a PO when its branch is set, and show to the supplier)</span></div>'
+            +'<div class="bar"><input class="flt" id="br-q" placeholder="Search branch / country / notes…" value="'+esc(cq)+'" style="width:320px;background:#eff6ff;border-color:#93c5fd"><span class="count" style="margin-left:8px">'+f.length+(cq?' / '+rows.length:'')+' branch'+(f.length===1?'':'es')+'</span></div>'+cards; }
+        function ta(f,val,ph){ return '<textarea class="br-in" data-f="'+f+'" rows="4" placeholder="'+esc(ph||'')+'" style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;font-family:inherit;resize:vertical">'+esc(val==null?'':val)+'</textarea>'; }
+        function inp(f,val,ph,w){ return '<input class="br-in" data-f="'+f+'" value="'+esc(val==null?'':val)+'" placeholder="'+esc(ph||'')+'" style="width:'+(w||120)+'px;max-width:100%;box-sizing:border-box;padding:6px 9px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px">'; }
+        function lblBlk(lbl,help,field){ return '<div style="margin:0 0 14px"><div style="font-weight:600;font-size:12px;margin-bottom:'+(help?'1px':'4px')+'">'+esc(lbl)+'</div>'+(help?'<div class="mut tiny" style="margin-bottom:4px">'+esc(help)+'</div>':'')+field+'</div>'; }
+        function editHtml(r){ var nm=esc(r.name);
+          return '<div class="sect-h" style="display:flex;align-items:center;gap:10px"><button id="br-back" style="cursor:pointer;border:1px solid #cbd5e1;background:#f8fafc;padding:3px 11px;border-radius:5px;font-size:11px">← Back</button> Edit branch — '+nm+'</div>'
+            +'<div style="max-width:720px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;padding:16px 18px">'
+            +'<div style="display:flex;gap:18px;flex-wrap:wrap">'
+            +lblBlk('Country code','', inp('country_code', fieldOf(r,'country_code'),'UK',80))
+            +lblBlk('Sea lead (days)','', inp('sea_lead_time_days', fieldOf(r,'sea_lead_time_days'),'',90))
+            +lblBlk('Air lead (days)','', inp('air_lead_time_days', fieldOf(r,'air_lead_time_days'),'',90))
+            +'</div>'
+            +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">'
+            +lblBlk('Shipping notes','Internal shipping notes for this branch.', ta('shipping_notes', fieldOf(r,'shipping_notes'),''))
+            +lblBlk('Delivery notes','Packing / delivery requirements — flow onto every PO for this branch and show to the supplier.', ta('delivery_notes', fieldOf(r,'delivery_notes'),'Max pallet height…'))
+            +'</div>'
+            +'<div style="display:flex;gap:8px;margin-top:4px;padding-top:12px;border-top:1px solid #eef2f7"><button id="br-save" data-b="'+nm+'" style="cursor:pointer;border:none;background:#2563eb;color:#fff;padding:6px 18px;border-radius:6px;font-size:12px;font-weight:600">Save changes</button>'
+            +'<button id="br-cancel" style="cursor:pointer;border:1px solid #cbd5e1;background:#fff;padding:6px 14px;border-radius:6px;font-size:12px">Cancel</button>'
+            +'<span id="br-msg" class="mut tiny" style="align-self:center;margin-left:6px"></span></div></div>'; }
+        cardEditor({ mount:b, rows:rows, idOf:function(r){return r.name;}, inClass:'br-in', searchId:'br-q',
+          listHtml:listHtml, editHtml:editHtml, editSel:'.br-edit', idAttr:'b',
+          ids:{save:'br-save',back:'br-back',cancel:'br-cancel',msg:'br-msg'},
+          saveUrl:function(id){ return '/api/supply/branch/'+encodeURIComponent(id); } });
+      };
       SUBS['suppliers']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/suppliers').then(function(r){return r.json();}).then(function(rows){
           // Suppliers have ~13 fields (identity + payment terms + contact) — a scannable CARD LIST + a grouped
