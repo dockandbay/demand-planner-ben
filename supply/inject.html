@@ -149,6 +149,7 @@
 /* keep each tab's label + its action-count badge on one line (never wrap the badge below the header) */
 #supply-root #prod-subtabs .rtab,#supply-root .po-subnav .rtab{white-space:nowrap}
 #supply-root #prod-subtabs .rtab .ex-badge,#supply-root .po-subnav .rtab .ex-badge{display:inline-block;vertical-align:middle}
+#supply-root .rtab-count{display:inline-block;margin-left:5px;background:#dc2626;color:#fff;font-size:9px;font-weight:700;line-height:1;padding:2px 5px;border-radius:8px;vertical-align:middle}
 /* Opened PO detail lives inside the wide, horizontally-scrolling PO grid — pin its sub-tab strip to the left
    so PAYMENTS/DATES/etc stay fixed while the grid scrolls sideways (desktop). */
 /* The expanded PO detail panel (.po-detail-wrap) is pinned to the left of the horizontally-scrolling grid via
@@ -6553,12 +6554,20 @@
       var btn=document.querySelector('#view-tabs-row .view-toggle[data-view="'+seg[0]+'"]'); if(btn)btn.click(); } }
   window.addEventListener('hashchange',function(){ if(location.hash===_expectedHash)return; applyRoute(); });
 
+  // ERP-compare "to review" (non-ignored) counter shown next to the ERP COMPARE sub-nav tab.
+  var _erpcCount=null;
+  function paintErpcBadge(){ var el=document.getElementById('rep-erpc-badge'); if(!el)return;
+    if(_erpcCount==null||_erpcCount===0){ el.textContent=''; el.style.display='none'; }
+    else { el.textContent=_erpcCount; el.style.display=''; el.title=_erpcCount+' open ERP PO(s) to review (not ignored)'; } }
+  function refreshErpcBadge(){ fetch('/api/supply/bi/erp-compare').then(function(r){return r.json();}).then(function(j){ if(j&&typeof j.count==='number'){ _erpcCount=j.count; paintErpcBadge(); } }).catch(function(){}); }
   function selectReport(rk){ current='reports'; reportTab=rk; syncHash();
     document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k==='reports');});
     var _ns=document.getElementById('supply-nav-sel'); if(_ns)_ns.value='reports';
     var c=document.getElementById('supply-content');
-    c.innerHTML='<div id="rep-subnav">'+REPORT_SECTIONS.map(function(s){return '<span class="rtab'+(s[0]===rk?' active':'')+'" data-rk="'+s[0]+'">'+s[1]+'</span>';}).join('')+'</div><div id="rep-body"><div class="count">Loading…</div></div>';
+    c.innerHTML='<div id="rep-subnav">'+REPORT_SECTIONS.map(function(s){return '<span class="rtab'+(s[0]===rk?' active':'')+'" data-rk="'+s[0]+'">'+s[1]+(s[0]==='erp-compare'?'<span id="rep-erpc-badge" class="rtab-count" style="display:none"></span>':'')+'</span>';}).join('')+'</div><div id="rep-body"><div class="count">Loading…</div></div>';
     c.querySelectorAll('#rep-subnav .rtab').forEach(function(p){p.onclick=function(){selectReport(p.dataset.rk);};});
+    paintErpcBadge();   // repaint from last-known count; refresh in the background unless we're about to load the report itself (which sets it)
+    if(rk!=='erp-compare') refreshErpcBadge();
     var done=function(d){
       if(rk==='metrics')return renderBIMetrics(d);
       if(rk==='urgent-buy')return renderUrgentBuy(d);
@@ -6601,6 +6610,7 @@
   // ERP COMPARE — open/draft ERP POs missing from the planner (supplier must be a planner product supplier)
   function renderErpCompare(d){ var b=biBody(); d=d||{}; var all=d.rows||[];
     var active=all.filter(function(r){return !r.ignored;}), ignored=all.filter(function(r){return r.ignored;});
+    _erpcCount=active.length; paintErpcBadge();   // keep the sub-nav counter in sync (incl. after ignore / un-ignore)
     var head='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:#0f172a">ERP compare — open ERP POs missing from the planner</div>'
       +'<div class="mut tiny" style="margin-bottom:12px">Open/draft purchase orders in the ERP (Cin7) that are <b>not</b> in your PURCHASE ORDERS list — limited to POs whose supplier is a supplier in the planner (freight / internal / test vendors like Flexport &amp; HMRC are excluded). <b>'+active.length+'</b> to review'+(ignored.length?' · '+ignored.length+' ignored':'')+'.</div>';
     function tbl(list,isIgnored){

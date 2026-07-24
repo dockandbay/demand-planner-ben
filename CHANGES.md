@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.066 - Reports sub-nav: "to review" counter on the ERP COMPARE tab
+
+Added a red count pill next to the **ERP COMPARE** sub-nav tab showing the number of open ERP POs still
+**to review** (not ignored) — the same non-ignored count the report and the open-actions item use. Refreshes
+in the background when the Reports view opens and stays in sync after ignore / un-ignore. Hidden when zero.
+
 ## v26.065 - Upload POs: template is now an .xlsx with system-sourced dropdowns
 
 The "Download template" in Upload purchase orders now downloads **PO_upload_template.xlsx** (was a plain CSV).
