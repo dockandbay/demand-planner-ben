@@ -1206,7 +1206,7 @@
               if(EP.shipmentNotesRead&&ent&&(ent.unread_dnb||0)>0){ postJSON(EP.shipmentNotesRead,{shipment_ref:ref},function(){ ent.unread_dnb=0; setShipBadge(); var bd=rootEl.querySelector('.sp-shipbadge[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(bd)bd.innerHTML=''; }); }
               box.querySelector('.sp-note-post').onclick=function(){ var inp=box.querySelector('.sp-note-in'); var v=(inp.value||'').trim(); if(!v)return;
                 postJSON(EP.shipmentNote,{shipment_ref:ref,author_kind:'supplier',author_email:STATE.by,body:v},function(){ ppShipTimeline(ref); }); }; }).catch(function(){}); }
-          function sampChip(st){ var m={'Awaiting supplier':['#fef3c7','#92710a'],'Change requested':['#fee2e2','#b91c1c'],'In production':['#dbeafe','#1d4ed8'],'Charge to review':['#fee2e2','#b91c1c'],'Shipped':['#dcfce7','#166534'],'Complete':['#e2e8f0','#475569'],'Cancelled':['#f1f5f9','#94a3b8']}; var c=m[st]||['#e2e8f0','#475569']; return '<span style="background:'+c[0]+';color:'+c[1]+';border-radius:4px;font-size:10px;font-weight:700;padding:1px 6px">'+esc(st||'')+'</span>'; }
+          function sampChip(st){ var m={'PLANNED':['#dbeafe','#1d4ed8'],'SHIPPED':['#dcfce7','#166534'],'CANCELLED':['#f1f5f9','#94a3b8'],'Awaiting supplier':['#fef3c7','#92710a'],'Change requested':['#fee2e2','#b91c1c'],'In production':['#dbeafe','#1d4ed8'],'Charge to review':['#fee2e2','#b91c1c'],'Shipped':['#dcfce7','#166534'],'Complete':['#e2e8f0','#475569'],'Cancelled':['#f1f5f9','#94a3b8']}; var c=m[st]||['#e2e8f0','#475569']; return '<span style="background:'+c[0]+';color:'+c[1]+';border-radius:4px;font-size:10px;font-weight:700;padding:1px 6px">'+esc(st||'')+'</span>'; }
           function chgChip(st){ var m={pending:['#fef3c7','#92710a'],accepted:['#dcfce7','#166534'],rejected:['#f1f5f9','#94a3b8']}; var c=m[st]||['#e2e8f0','#475569']; return '<span style="background:'+c[0]+';color:'+c[1]+';border-radius:4px;font-size:10px;padding:1px 6px">'+esc(st)+'</span>'; }
           // freight charges on a PO's shipment (lazy-loaded into .pp-fchg-list when a PO row is expanded)
           function loadFreightCharges(container){ if(!container||!container.querySelectorAll)return;
@@ -1222,8 +1222,7 @@
             var addr=[s.address_line1,s.address_line2,[s.city,s.region,s.postcode].filter(Boolean).join(' '),s.country].filter(Boolean);
             var charges=(s.charges||[]).map(function(c){ var t=(Number(c.freight_cost)||0)+(Number(c.product_cost)||0); return '<div class="tiny" style="margin:2px 0">'+chgChip(c.status)+' &nbsp;freight '+money(c.freight_cost)+' + product '+money(c.product_cost)+' = <b>'+money(t)+'</b>'+(c.description?' · '+esc(c.description):'')+'</div>'; }).join('')||'<div class="mut tiny">none yet</div>';
             return '<div class="samp-card" data-id="'+s.id+'" data-ref="'+esc(s.ref)+'" style="border:1px solid #e5e7eb;border-radius:10px;padding:14px;margin-bottom:12px;background:#fff;text-align:left">'
-              +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px"><b style="font-size:15px">'+esc(s.ref)+'</b>'+sampChip(s.status_calc)
-                +(sampNeedsAccept(s)?'<button class="save-btn samp-accept" data-id="'+s.id+'" style="background:'+(s.change_requested?'#b91c1c':'#2563eb')+';color:#fff;border-color:'+(s.change_requested?'#991b1b':'#1d4ed8')+'">'+(s.change_requested?'Re-accept (change requested)':'Accept request')+'</button>':'<span style="background:#dcfce7;color:#166534;border-radius:4px;font-size:10px;font-weight:700;padding:2px 7px">✓ accepted</span>')
+              +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px"><b style="font-size:15px">'+esc(s.ref)+'</b>'+sampChip(s.status_calc)+' <span class="mut tiny">Dock &amp; Bay status</span>'
                 +'<span class="mut tiny">Completion required: <b>'+(s.completion_required?fd(s.completion_required):'—')+'</b></span></div>'
               +'<div style="display:flex;gap:32px;flex-wrap:wrap">'
                 +'<div style="min-width:190px">'+lbl('Ship to')+'<div class="tiny" style="line-height:1.65"><b>'+esc(s.recipient_company||'—')+'</b>'+(s.recipient_name?'<br>'+esc(s.recipient_name):'')+(addr.length?'<br>'+addr.map(esc).join('<br>'):'')+(s.phone?'<br>☏ '+esc(s.phone):'')+'</div></div>'
@@ -1235,7 +1234,7 @@
                 +'<div style="min-width:190px">'+lbl('Purpose')+'<div class="tiny" style="margin-bottom:10px">'+esc((s.purpose||[]).join(', ')||'—')+'</div>'+lbl('Notes')+'<div class="tiny" style="white-space:pre-wrap;background:#f8fafc;border:1px solid #eef2f7;border-radius:6px;padding:7px 9px;min-width:170px;max-width:300px">'+(s.notes?esc(s.notes):'<span class="mut">—</span>')+'</div></div>'
               +'</div>'
               +'<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px">'
-                +'<div>'+lbl('Status')+'<select class="fci samp-prod" data-id="'+s.id+'" style="width:150px;font-size:12px'+((sampStMissing(s)||sampDateConflict(s))?';border:1px solid #dc2626;background:#fef2f2':'')+'"><option value="">—</option>'+PROD_STATUS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===(s.production_status||'')?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'+(sampStMissing(s)?'<div style="margin-top:3px"><span style="background:#dc2626;color:#fff;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px">⚠ Must enter status</span></div>':'')+'</div>'
+                +'<div>'+lbl('Your production status')+'<select class="fci samp-prod" data-id="'+s.id+'" style="width:150px;font-size:12px'+((sampStMissing(s)||sampDateConflict(s))?';border:1px solid #dc2626;background:#fef2f2':'')+'"><option value="">—</option>'+PROD_STATUS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===(s.production_status||'')?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'+(sampStMissing(s)?'<div style="margin-top:3px"><span style="background:#dc2626;color:#fff;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px">⚠ Must set status</span></div>':'')+'</div>'
                 +'<div>'+lbl('Expected completion')+'<input type="date" class="fci samp-exp" value="'+esc(s.supplier_expected||'')+'" style="width:150px'+((sampCdMissing(s)||sampDateConflict(s))?';border:1px solid #dc2626;background:#fef2f2':'')+'">'+(sampCdMissing(s)?'<div style="margin-top:3px"><span style="background:#dc2626;color:#fff;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px">⚠ Must enter completion date</span></div>':'')+'</div>'
                 +(sampDateConflict(s)?'<div style="flex-basis:100%"><span style="background:#dc2626;color:#fff;border-radius:4px;font-size:10px;font-weight:700;padding:2px 7px">⚠ Expected completion date has passed but status is still "In production" — please update</span></div>':'')
                 +'<div>'+lbl('Tracking code')+'<input class="fci txt samp-trk" value="'+esc(s.tracking_code||'')+'" style="width:170px" placeholder="tracking…">'+(carrierTrackUrl(s.carrier,s.tracking_code)?'<div class="tiny" style="margin-top:3px">'+carrierTrackLink(s.carrier,s.tracking_code)+'</div>':'')+'</div>'
@@ -1251,15 +1250,15 @@
                 +'<div class="samp-tl" data-id="'+s.id+'"></div></div>'
               +'</div>'; }
           function sampNeedsAccept(s){ return (!s.accepted||s.change_requested)&&s.status!=='cancelled'&&s.status!=='complete'; }
-          function sampInFilt(s,f){ if(f==='all')return true; if(f==='closed')return !s.is_open; if(f==='unaccepted')return sampNeedsAccept(s); return s.is_open; }
-          function sampActive(s){ return s.status!=='cancelled' && s.status!=='complete'; }
+          function sampInFilt(s,f){ if(f==='all')return true; if(f==='closed')return !s.is_open; return s.is_open; }
+          function sampActive(s){ var u=String(s.status_calc||s.status||'').toUpperCase(); return u!=='CANCELLED' && u!=='SHIPPED'; }
           function sampCdMissing(s){ return sampActive(s) && !s.supplier_expected; }   // must enter expected completion date
-          function sampStMissing(s){ return sampActive(s) && !s.production_status; }     // must enter status
+          function sampStMissing(s){ return sampActive(s) && !s.production_status; }     // must set their production status
           // logic conflict: the expected completion date has passed but the supplier still says "In production".
           function sampDateConflict(s){ return sampActive(s) && !!s.supplier_expected && s.supplier_expected<new Date().toISOString().slice(0,10) && s.production_status==='in_production'; }
-          // supplier actions on a sample: needs (re-)accept, unread D&B message, missing expected date / status,
-          // or a past-expected-date-while-in-production conflict.
-          function sampActions(s){ return (sampNeedsAccept(s)?1:0)+((s.unread_dnb)||0)+(sampCdMissing(s)?1:0)+(sampStMissing(s)?1:0)+(sampDateConflict(s)?1:0); }
+          // supplier actions on a sample: unread D&B message, missing expected date / production status, or a
+          // past-expected-date-while-in-production conflict. (Accept step removed.)
+          function sampActions(s){ return ((s.unread_dnb)||0)+(sampCdMissing(s)?1:0)+(sampStMissing(s)?1:0)+(sampDateConflict(s)?1:0); }
           function setSampBadge(){ var n=((_ppData&&_ppData.samples)||[]).reduce(function(a,s){return a+sampActions(s);},0);   // supplier actions: needs-(re)accept + unread D&B notes
             var sbg=document.getElementById('pp-samp-badge'); if(sbg)sbg.innerHTML=n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
           function sampRowBadgeHtml(s){ var n=sampActions(s); var act=n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;margin-left:4px" title="needs your attention">'+n+'</span>':''; var nu=s.unread_dnb?'<span style="background:#f59e0b;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;margin-left:3px" title="new note from Dock &amp; Bay">'+s.unread_dnb+'</span>':''; return act+nu; }
@@ -1299,7 +1298,7 @@
               +'<td class="l">'+(s.tracking_code?carrierTrackLink(s.carrier,s.tracking_code):'<span class="mut">—</span>')+'</td></tr>'
               +'<tr class="ps-exp" id="ps-exp-'+i+'" style="display:none"><td colspan="7"><div class="ps-det" data-id="'+s.id+'"></div></td></tr>'; }
           function ppSamples(samples){
-            var F=[['open','Open'],['unaccepted','Not yet accepted'],['closed','Closed'],['all','All']];
+            var F=[['open','Open'],['closed','Closed'],['all','All']];
             var q=(PORTAL_SAMP_Q||'').toLowerCase();
             var rows=samples.filter(function(s){ if(!sampInFilt(s,PORTAL_SAMP_F))return false; if(q){ var hay=((s.ref||'')+' '+(s.recipient_company||'')+' '+(s.recipient_name||'')+' '+(s.lines||[]).map(function(l){return l.sku;}).join(' ')).toLowerCase(); if(hay.indexOf(q)<0)return false; } return true; });
             var bar='<div class="bar" style="margin-bottom:8px;flex-wrap:wrap;gap:6px;align-items:center">'

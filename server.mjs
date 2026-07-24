@@ -1531,22 +1531,14 @@ app.get('/api/supply/:section', async (req, res) => {
           (SELECT coalesce(sum(c.freight_cost+c.product_cost),0) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='accepted') accepted_charge,
           (SELECT count(*) FROM planner.sample_notes n WHERE n.sample_id=s.id AND n.author_kind='supplier' AND n.read_at IS NULL)::int unread_notes,
           coalesce(s.change_requested,false) change_requested,
-          (s.status NOT IN ('cancelled','complete') AND (coalesce(s.tracking_code,'')='' OR coalesce(s.change_requested,false)
-             OR EXISTS (SELECT 1 FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending')
-             OR EXISTS (SELECT 1 FROM planner.sample_notes n WHERE n.sample_id=s.id AND n.author_kind='supplier' AND n.read_at IS NULL)
-             OR EXISTS (SELECT 1 FROM planner.sample_notes n2 WHERE n2.sample_id=s.id AND n2.body LIKE 'Order shipped%' AND n2.created_at >= now() - interval '30 days'))) is_open,
-          (s.completion_date_required IS NOT NULL AND s.status NOT IN ('cancelled','complete')
+          (upper(coalesce(s.status,'')) NOT IN ('SHIPPED','CANCELLED')) is_open,
+          (s.completion_date_required IS NOT NULL AND upper(coalesce(s.status,'')) NOT IN ('SHIPPED','CANCELLED')
              AND (current_date > s.completion_date_required
                   OR (s.supplier_expected_completion IS NOT NULL AND s.supplier_expected_completion > s.completion_date_required))) overdue,
-          CASE
-            WHEN s.status='cancelled' THEN 'Cancelled'
-            WHEN s.status='complete' THEN 'Complete'
-            WHEN coalesce(s.change_requested,false) THEN 'Change requested'
-            WHEN (SELECT count(*) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending')>0 THEN 'Charge to review'
-            WHEN coalesce(s.tracking_code,'')<>'' THEN 'Shipped'
-            WHEN s.accepted_at IS NOT NULL THEN 'In production'
-            ELSE 'Awaiting supplier'
-          END status_calc
+          -- OUR status (normalised): PLANNED / SHIPPED / CANCELLED. Supplier's own state is production_status.
+          CASE WHEN s.status ILIKE 'cancel%' THEN 'CANCELLED'
+               WHEN s.status ILIKE 'ship%' OR s.status ILIKE 'complete%' THEN 'SHIPPED'
+               ELSE 'PLANNED' END status_calc
           FROM planner.sample_requests s ORDER BY s.created_at DESC`));
       case 'suppliers':
         return res.json(await q(`SELECT id,code,name,kind,default_currency,

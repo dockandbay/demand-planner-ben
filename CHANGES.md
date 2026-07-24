@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.061 - Samples status model: our status (PLANNED/SHIPPED/CANCELLED) + supplier status + Set-shipping
+
+Simplified the sample status per Ben, mirroring the PO grid's supplier-vs-our-status pattern:
+- **Our status** = PLANNED / SHIPPED / CANCELLED (was open/complete/cancelled + a separate computed chip).
+  Migration **136** normalises it; `status_calc` now just returns our status; chip + admin dropdown use it.
+- **Supplier status** stays as their `production_status` (not started → shipped) — shown alongside ours in the
+  grid ("supplier: …") and detail ("Supplier status").
+- **Set shipping**: when the supplier has shipped (marked shipped or entered tracking) but our status is still
+  PLANNED, a **`supplier_shipped` exception** flags and a green **"🚢 Set shipping"** button on the detail flips
+  our status to SHIPPED — like the PO grid's advance-to-shipping.
+- **Accept step dropped**: removed the "Accept request" button + "Not Accepted" filter; supplier just sets their
+  production status. Portal shows our status as a read-only "Dock & Bay status" chip.
+
 ## v26.060 - Samples detail: exception on Details tab, fast tooltip, Contents merged in
 
 - The sample **exception badge** now surfaces inside the detail: the **Details tab shows a badge** when the
