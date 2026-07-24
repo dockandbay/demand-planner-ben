@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.083 - Labels: "PRODUCTION REF" + Air freight labels on Crossdock & Labels sub-tab
+
+- Ships With + Air freight labels now read **PRODUCTION REF** (was "PRODUCTION REFERENCE").
+- The PURCHASE ORDERS **Crossdock** sub-tab is renamed **Crossdock & Labels** and now lists every **air
+  shipment master PO** with a **⤓ Air freight labels** download (same as the PO Shipments-tab button).
+
 ## v26.082 - Recent changes drawer: add "updated line items to ERP"
 
 The 🕘 Recent changes drawer now also counts **ERP line-item pushes** as a major change (from

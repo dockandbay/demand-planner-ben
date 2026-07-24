@@ -3764,7 +3764,7 @@
   var prodTab='list', _prodList=[];
   // PURCHASE ORDERS is now the umbrella: PLAN (the PO grid) + the former PRODUCTIONS sub-tabs.
   var poSub='plan';
-  var PO_SUBS=[['plan','PLAN'],['shipments','Shipments'],['crossdock','Crossdock'],['manufacturing','Manufacturing'],['list','Productions'],['deposits','Deposits'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['barcodes','Barcodes']];
+  var PO_SUBS=[['plan','PLAN'],['shipments','Shipments'],['crossdock','Crossdock & Labels'],['manufacturing','Manufacturing'],['list','Productions'],['deposits','Deposits'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['barcodes','Barcodes']];
   var PO_SUB_KEYS=PO_SUBS.map(function(t){return t[0];});
   // Sub-menu action counters: rows-needing-action count per sub-tab (open = snooze-excluded). Populated as each
   // section's data renders (_navCounts.plan / .shipments / .manufacturing) + a background prefetch on entry.
@@ -3825,7 +3825,8 @@
       if(s.type==='preorder')return 'Preorder '+units(s.qty)+' · '+esc(s.ref||'?')+(s.date?' ships '+esc(s.date):'');
       if(s.type==='crossdock_po')return 'PO '+esc(s.po||'?')+(s.client?' ('+esc(s.client)+')':'')+(s.so?' · '+esc(s.so):'')+(s.qty?' · '+units(s.qty)+' shipped':'');
       return esc(s.type); }
-    var out='<div class="annot"><b>PURCHASE ORDERS ▸ Crossdock.</b> On-hand and inbound for every CROSSDOCK / PREORDER SKU in the four 3PL warehouses, with a best-guess at what each stock is (inbound → PO, then preorder, then assigned crossdock PO). Stock it cannot identify is flagged amber — add a note, which is auto-wiped once that stock ships out.</div>';
+    var out='<div class="annot"><b>PURCHASE ORDERS ▸ Crossdock &amp; Labels.</b> On-hand and inbound for every CROSSDOCK / PREORDER SKU in the four 3PL warehouses, with a best-guess at what each stock is (inbound → PO, then preorder, then assigned crossdock PO). Stock it cannot identify is flagged amber — add a note, which is auto-wiped once that stock ships out.</div>'
+      +'<div id="xd-air-labels"></div>';
     (d.warehouses||['uk_3pl','us_3pl','eu_3pl','au_3pl']).forEach(function(wh){
       var wr=rows.filter(function(r){return r.wh===wh;});
       out+='<div class="sect-h">'+esc(WHL[wh]||wh)+' <span class="mut tiny">('+wr.length+' SKU'+(wr.length!==1?'s':'')+')</span></div>';
@@ -3845,6 +3846,17 @@
       +'</tbody></table></div>'; }
     else out+='<div class="count">None.</div>';
     body.innerHTML=out;
+    // Air freight labels — one per air-shipment master PO (same label as ships-with, without the ships-with section)
+    (function(){ var el=body.querySelector('#xd-air-labels'); if(!el)return;
+      function fill(ships){ var air=(ships||[]).filter(function(s){return /air/i.test(s.mode||'') && s.master_po;});
+        if(!air.length){ el.innerHTML=''; return; }
+        el.innerHTML='<div class="sect-h">Air freight labels <span class="mut tiny">(master PO of each air shipment — ships-with label without the ships-with section)</span></div>'
+          +'<div class="tw" style="margin-bottom:14px;max-width:700px"><table><thead><tr><th class="l">Shipment</th><th class="l">Master PO</th><th class="l">Supplier</th><th></th></tr></thead><tbody>'
+          +air.map(function(s){return '<tr><td class="l">'+esc(s.shipment_ref||'')+'</td><td class="l"><b>'+esc(s.master_po)+'</b></td><td class="l">'+esc(s.master_supplier||'')+'</td><td class="l"><button class="save-btn xd-air-lbl" data-po="'+esc(s.master_po)+'">⤓ Air freight labels</button></td></tr>';}).join('')
+          +'</tbody></table></div>';
+        el.querySelectorAll('.xd-air-lbl').forEach(function(b){ b.onclick=function(){ dlShipsWith(b.dataset.po,b,true); }; }); }
+      if(_allShips&&_allShips.length)fill(_allShips);
+      else fetch('/api/supply/shipments').then(function(r){return r.json();}).then(function(d){ _allShips=(d&&d.shipments)||[]; fill(_allShips); }).catch(function(){}); })();
     body.querySelectorAll('.xd-note').forEach(function(inp){ inp.onblur=function(){ inp.style.opacity='0.5';
       fetch('/api/supply/crossdock-note',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({warehouse:inp.dataset.wh,sku:inp.dataset.sku,note:inp.value})})
         .then(function(r){return r.json();}).then(function(){ inp.style.opacity=''; inp.style.borderColor='#16a34a'; setTimeout(function(){inp.style.borderColor='';},800); })
@@ -6275,7 +6287,7 @@
     el.push('<rect x="22" y="22" width="'+(W-44)+'" height="'+(H-44)+'" fill="none" stroke="#111" stroke-width="1.5"/>');
     var y=80; el.push(svgText(lx,y,'DOCK & BAY',{size:30,bold:true,ls:0.5})); if(opts.air)el.push(svgText(lx+300,y,'AIR FREIGHT',{size:18,bold:true,fill:'#b45309'})); y+=66;
     // AIR FREIGHT label = the SHIPS WITH label WITHOUT the "ships with supplier / ships with PO" section.
-    var rows=[['SOURCE SUPPLIER',d.source_supplier],['PRODUCTION REFERENCE',d.production_ref]]
+    var rows=[['SOURCE SUPPLIER',d.source_supplier],['PRODUCTION REF',d.production_ref]]
       .concat(opts.air?[]:[['SHIPS WITH SUPPLIER',d.ships_with_supplier],['SHIPS WITH PO',d.ships_with_po]])
       .concat([['DESTINATION BRANCH',d.dest_branch],['DESTINATION COUNTRY',d.dest_country],
       ['CLIENT NAME',d.client],['CLIENT SALES ORDER REF',d.sales_order_ref]]);

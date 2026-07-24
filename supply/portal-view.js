@@ -182,7 +182,7 @@
     el.push('<rect x="22" y="22" width="'+(W-44)+'" height="'+(H-44)+'" fill="none" stroke="#111" stroke-width="1.5"/>');
     var y=80; el.push(svgText(lx,y,'DOCK & BAY',{size:30,bold:true,ls:0.5})); if(opts.air)el.push(svgText(lx+300,y,'AIR FREIGHT',{size:18,bold:true,fill:'#b45309'})); y+=66;
     // AIR FREIGHT label = the SHIPS WITH label WITHOUT the "ships with supplier / ships with PO" section.
-    var rows=[['SOURCE SUPPLIER',d.source_supplier],['PRODUCTION REFERENCE',d.production_ref]]
+    var rows=[['SOURCE SUPPLIER',d.source_supplier],['PRODUCTION REF',d.production_ref]]
       .concat(opts.air?[]:[['SHIPS WITH SUPPLIER',d.ships_with_supplier],['SHIPS WITH PO',d.ships_with_po]])
       .concat([['DESTINATION BRANCH',d.dest_branch],['DESTINATION COUNTRY',d.dest_country],
       ['CLIENT NAME',d.client],['CLIENT SALES ORDER REF',d.sales_order_ref]]);
