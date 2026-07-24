@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.093 - Admin: review / edit / approve supplier additional costs on PO ▸ Payments
+
+The supplier submits **Additional costs** (freight / tooling / surcharges) in the portal Order Plan &
+Invoice tab, but D&B had no way to review them in the app. Added an **Additional costs** section on the
+admin **PO ▸ Payments** tab with the same add / edit / remove ability as the portal, plus an **Approve**
+toggle:
+- Lists each submitted line (description / qty / price / line total) with **Approve** / **undo** and **✕ remove**.
+- Inline add row (`+ add a cost…`) and inline edits — editing any value **resets that line's approval**
+  (server-side) so a changed cost must be re-approved.
+- New `approved` boolean (**migration 142**) on `planner.portal_additional_costs`; new endpoint
+  `/api/supply/additional-cost-approve`; the GET / PO-detail / portal fetches now return `approved`.
+
 ## v26.092 - Samples: supplier confirm + re-confirm-on-change + highlight what changed
 
 Sample requests now have a proper approval loop in the portal sample card:

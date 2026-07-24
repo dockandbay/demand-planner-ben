@@ -1146,7 +1146,7 @@ app.post('/api/supply/crossdock-qty', async (req, res) => {
 });
 // Supplier-entered additional cost lines (description / qty / price) per PO — sum into the total invoice cost.
 app.get('/api/supply/additional-costs', async (req, res) => {
-  try { res.json((await pool.query(`SELECT id, po, coalesce(description,'') description, qty, price FROM planner.portal_additional_costs ORDER BY id`)).rows); }
+  try { res.json((await pool.query(`SELECT id, po, coalesce(description,'') description, qty, price, coalesce(approved,false) approved FROM planner.portal_additional_costs ORDER BY id`)).rows); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/additional-cost', async (req, res) => {
@@ -1154,7 +1154,8 @@ app.post('/api/supply/additional-cost', async (req, res) => {
   const num = v => (v === '' || v == null) ? null : Number(v);
   try {
     if (b.id) {
-      await pool.query(`UPDATE planner.portal_additional_costs SET description=$2, qty=$3, price=$4, submitted_by=$5, submitted_at=now() WHERE id=$1`,
+      // Any value edit (supplier or D&B) invalidates a prior approval; approve is a separate action.
+      await pool.query(`UPDATE planner.portal_additional_costs SET description=$2, qty=$3, price=$4, submitted_by=$5, submitted_at=now(), approved=false WHERE id=$1`,
         [b.id, b.description || '', num(b.qty), num(b.price), b.submitted_by || null]);
       res.json({ ok: true, id: b.id });
     } else {
@@ -1168,6 +1169,13 @@ app.post('/api/supply/additional-cost', async (req, res) => {
 app.post('/api/supply/additional-cost-remove', async (req, res) => {
   if (!req.body || !req.body.id) return res.status(400).json({ error: 'id required' });
   try { await pool.query('DELETE FROM planner.portal_additional_costs WHERE id=$1', [req.body.id]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// D&B approves (or un-approves) a supplier's additional cost line on the admin PO ▸ Payments tab.
+app.post('/api/supply/additional-cost-approve', async (req, res) => {
+  const b = req.body || {};
+  if (!b.id) return res.status(400).json({ error: 'id required' });
+  try { await pool.query('UPDATE planner.portal_additional_costs SET approved=$2 WHERE id=$1', [b.id, b.approved !== false]); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Crossdock rollup for one shipment: every crossdock SKU across the POs on the shipment, with qty + source PO/supplier/client.
@@ -5438,7 +5446,7 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
       // CLIENT tab: supplier-entered crossdock shipped quantities for this PO
       pool.query(`SELECT sku, qty FROM planner.crossdock_shipments WHERE po=$1`, [po]).catch(() => ({ rows: [] })),
       // ORDER PLAN: supplier-entered additional cost lines for this PO
-      pool.query(`SELECT id, coalesce(description,'') description, qty, price FROM planner.portal_additional_costs WHERE po=$1 ORDER BY id`, [po]).catch(() => ({ rows: [] })),
+      pool.query(`SELECT id, coalesce(description,'') description, qty, price, coalesce(approved,false) approved FROM planner.portal_additional_costs WHERE po=$1 ORDER BY id`, [po]).catch(() => ({ rows: [] })),
       // ERP-deviation gate for THIS PO: only COMPLETE matters (deviations are quantity-only; price is never
       // an exception, so no cost-trigger signal is needed).
       pool.query(`SELECT coalesce(p.status,'') ILIKE '%complete%' AS is_complete
@@ -7755,7 +7763,7 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
             ORDER BY d.date_paid DESC NULLS LAST, d.reference DESC`, [names]).catch(() => []) : Promise.resolve([]),
       grab(`SELECT po, sku, actual_cost, amended_qty, is_added, final_cost, confirmed_at FROM planner.portal_line_costs WHERE po = ANY($1)`),
       grab(`SELECT po, sku, qty FROM planner.crossdock_shipments WHERE po = ANY($1)`),
-      grab(`SELECT id, po, coalesce(description,'') description, qty, price FROM planner.portal_additional_costs WHERE po = ANY($1) ORDER BY id`),
+      grab(`SELECT id, po, coalesce(description,'') description, qty, price, coalesce(approved,false) approved FROM planner.portal_additional_costs WHERE po = ANY($1) ORDER BY id`),
       ids.length ? q(`SELECT id, po, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read FROM planner.supplier_notes WHERE supplier_id = ANY($1) ORDER BY created_at`, [ids]) : Promise.resolve([]),
       ids.length ? q(`SELECT id, po, kind, value, status, attachment_id, to_char(submitted_at,'YYYY-MM-DD') submitted_at, to_char(applied_at,'YYYY-MM-DD') applied_at, note FROM planner.supplier_submissions WHERE supplier_id = ANY($1) ORDER BY submitted_at DESC`, [ids]) : Promise.resolve([]),
       q(`SELECT sku, coalesce(product_name_final,product_name,'') product_name, coalesce(product_ean,'') ean,
