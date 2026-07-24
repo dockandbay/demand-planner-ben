@@ -1937,6 +1937,8 @@ app.get('/api/supply/:section', async (req, res) => {
             coalesce(sh.export_port,'') ov_export_port, coalesce(mp.mp_export_port,'') export_port_default,
             CASE WHEN nullif(sh.export_port,'') IS NOT NULL THEN 'S' WHEN nullif(mp.mp_export_port,'') IS NOT NULL THEN 'SUP' END export_port_src,
             coalesce(mp.mp_client,'') master_client,   -- master PO's client name (shown under branch for Direct to Client)
+            coalesce(sh.delivery_notes,'') ov_delivery_notes,   -- shipment override
+            coalesce(nullif(sh.delivery_notes,''), mp.mp_delivery_notes, '') delivery_notes,   -- effective: override ▸ master PO branch notes
             fx.total_freight_cost flex_cost, sh.cost_manual cost_manual,
             (SELECT json_agg(json_build_object('cap', fr.pallets, 'cost', fr.cost, 'sz', fr.container_size)) FROM planner.freight_rates fr
               WHERE upper(fr.destination)=coalesce(nullif(coalesce(nullif(upper(sh.country_code),''), nullif(mp.mp_country,'')),''),'UK') AND coalesce(fr.pallets,0)>0 AND fr.cost IS NOT NULL) sea_tiers,
@@ -1991,6 +1993,7 @@ app.get('/api/supply/:section', async (req, res) => {
                                THEN coalesce(mb.air_lead_time_days,0) ELSE coalesce(mb.sea_lead_time_days,0) END)||' days')::interval)::date END delivery_calc,
                    coalesce(m.branch,'') mp_branch, coalesce(m.client,'') mp_client,
                    coalesce(ms.export_port,'') mp_export_port,   -- master PO supplier's default export port
+                   coalesce(nullif(m.branch_delivery_notes,''), mb.delivery_notes, '') mp_delivery_notes,   -- master PO branch delivery notes (→ shipment inherits)
                    upper(coalesce(nullif(m.country_code,''), mb.country_code, '')) mp_country
             FROM planner.purchase_orders m
             LEFT JOIN planner.suppliers ms ON ms.id=m.supplier_id
@@ -5584,6 +5587,7 @@ const SHIP_FIELDS = {
   departure_date: 'date', landing_date: 'date', delivery_date: 'date', arrival_date: 'date',
   branch: 'text', country_code: 'text',   // shipment-level destination override (inherits from master PO)
   export_port: 'text',   // override; blank = inherit the master PO supplier's export_port
+  delivery_notes: 'text',   // shipment-level branch delivery notes override (inherits from the master PO)
 };
 app.post('/api/supply/shipment/:ref', async (req, res) => {
   const ref = req.params.ref;

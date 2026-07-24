@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.087 - Branch delivery notes on the shipment record (Shipment details)
+
+Added a **Branch delivery notes** field to SHIPMENTS ▸ Shipment details (under dates & tracking). It
+**inherits from the master PO's** branch delivery notes (which falls back to the branch); typing stores a
+shipment-level override. **Migration 140** adds `shipments.delivery_notes`; exposed as effective
+(`coalesce(override, master-PO notes)`) + `ov_delivery_notes`; editable via `SHIP_FIELDS`.
+
 ## v26.086 - Move Branch delivery notes to the PO Shipments tab
 
 Moved the editable **Branch delivery notes** field from the PO ▸ Client/FBA tab to the PO ▸ **Shipments** tab

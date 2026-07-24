@@ -4559,6 +4559,9 @@
           +'<input class="fci txt shipdest" data-field="export_port" value="'+esc(ov)+'" placeholder="'+esc(def||'supplier default')+'" style="min-width:150px">'
           +'</div>'; })()
       +'</div>'
+      +'<div style="margin:2px 0 12px;max-width:520px"><div class="mut tiny" style="text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px">Branch delivery notes</div>'
+        +'<textarea class="fci shipdest" data-field="delivery_notes" rows="3" placeholder="'+(s.ov_delivery_notes?'':'inherits from the master PO — type to override')+'" style="width:100%;box-sizing:border-box;text-align:left;font-family:inherit">'+esc(s.ov_delivery_notes||'')+'</textarea>'
+        +((!s.ov_delivery_notes&&s.delivery_notes)?'<div class="mut tiny" style="white-space:pre-wrap;margin-top:3px;color:#64748b">Inherited from master PO '+esc(s.master_po||'')+':\n'+esc(s.delivery_notes)+'</div>':'')+'</div>'
       +(function(){ var fr=shipFreight(s), m=s.mode_eff;
         var se=seaEst(s.sea_tiers,s.pallets);
         var estTxt=m==='air'?('~'+money(Math.round((Number(s.weight_kg)||0)*(Number(s.air_rate)||15)))+' · '+(s.weight_kg||0)+'kg × $'+(Number(s.air_rate)||15)+'/kg')
