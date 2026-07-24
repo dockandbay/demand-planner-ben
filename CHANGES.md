@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.086 - Move Branch delivery notes to the PO Shipments tab
+
+Moved the editable **Branch delivery notes** field from the PO ▸ Client/FBA tab to the PO ▸ **Shipments** tab
+(under Shipment / FOB). Same field/behaviour (branch fallback, editable, shown to the supplier).
+
 ## v26.085 - CONFIG ▸ Branches: card-list + edit-form UX (matches Consignees)
 
 Rebuilt CONFIG ▸ Branches from the inline table to the same **card list + full-width edit form** UX as
