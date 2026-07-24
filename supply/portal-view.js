@@ -135,7 +135,7 @@
     el.push(svgText(tx,bY+40,sizeName,{size:15}));
     if(batch) el.push(svgText(tx,bY+66,'BATCH '+batch.batch,{size:15,bold:true}));
     y=bY+swW+34;
-    if(opts.grsUri){ var gw=140,gh=Math.round(gw*185/273); el.push('<image x="'+(cx-gw/2)+'" y="'+y+'" width="'+gw+'" height="'+gh+'" href="'+opts.grsUri+'" xlink:href="'+opts.grsUri+'"/>'); y+=gh+20; }
+    if(opts.grsUri && r.grs_material){ var gw=140,gh=Math.round(gw*185/273); el.push('<image x="'+(cx-gw/2)+'" y="'+y+'" width="'+gw+'" height="'+gh+'" href="'+opts.grsUri+'" xlink:href="'+opts.grsUri+'"/>'); y+=gh+20; }
     if(r.grs_material){ wrapLines(r.grs_material,70).slice(0,4).forEach(function(ln){ el.push(svgText(cx,y,ln,{size:11,fill:'#222',anchor:'middle'})); y+=15; }); }
     y+=18;
     var bits=ean13Pattern(code);

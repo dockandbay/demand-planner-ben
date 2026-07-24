@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.103 - Carton labels: hide the GRS logo when the SKU has no GRS material
+
+Carton labels only show the GRS logo when the SKU actually has a `grs_material` value (matches the
+material text, which was already gated). Applied to both admin and portal label builders.
+
 ## v26.102 - Portal barcodes: labels now carry BATCH + DATE OF PRODUCTION; smaller batch selector
 
 - **Fix:** supplier-portal barcode downloads (Productions / Barcodes & Labels / per-PO) came out with a blank
