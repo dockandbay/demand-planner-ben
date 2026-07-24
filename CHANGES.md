@@ -3,6 +3,24 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.098 - PERF: edits return their own row — no second fetch (steps 1+2+3)
+
+Follow-up to v26.097 (which still made a second request per edit). Re-architected so the **save itself**
+returns what's needed:
+
+1. **Save returns the recomputed row.** `POST /api/supply/po/:po` now hands back the fresh grid row (`j.row`);
+   the client repaints from it — **zero extra round-trips** (was: save + a separate row fetch).
+2. **Cosmetic fields skip the recompute entirely.** Detail-only text (client name, dispatch ref, delivery
+   address, branch delivery notes, notes) returns no row → the client just repaints the cell it changed. No
+   per-row query at all. (Conservative set — anything touching DtC approval, dates, amounts, deposit, shipment,
+   status, prod#/batch still refreshes.)
+3. **Shipment-date cascade in one response.** `POST /api/supply/shipment/:ref` returns every affected PO row
+   recomputed (`j.rows`); the client repaints them all from that single payload (was: one full-grid fetch per PO
+   aboard).
+
+`patch()` gained an optional `extraFn` (backward-compatible) to merge the row into the response. Shared
+`PO_ROWS_SQL` still the single source → no admin/portal drift.
+
 ## v26.097 - PERF: PO grid edits no longer re-pull all ~1400 POs
 
 **Fixes the slow PO-grid editing reported over the last 48h.** Root cause: every grid-cell edit called

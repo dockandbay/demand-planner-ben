@@ -2482,7 +2482,9 @@ app.get('/api/supply/:section', async (req, res) => {
 
 // ── SUPPLY writes — editable cells in PAYMENTS/DEPOSITS save here. Targets the configured DB
 // (Ben's sandbox). Whitelisted fields only, parameterised. Production writes stay Diviyaj's/gated.
-async function patch(res, table, keyCol, keyVal, allowed, body, keyType) {
+// extraFn (optional): async fn run after a successful update; whatever object it returns is merged into the
+// JSON response. Used by the PO save to hand back the freshly-computed grid row (no separate fetch).
+async function patch(res, table, keyCol, keyVal, allowed, body, keyType, extraFn) {
   const sets = [], vals = []; let i = 1;
   for (const k of Object.keys(body || {})) {
     if (!allowed[k]) continue;
@@ -2496,7 +2498,9 @@ async function patch(res, table, keyCol, keyVal, allowed, body, keyType) {
   vals.push(keyVal);
   try {
     const r = await pool.query(`UPDATE ${table} SET ${sets.join(',')} WHERE ${keyCol}=$${i}${keyType ? '::' + keyType : ''}`, vals);
-    res.json({ updated: r.rowCount });
+    let extra = {};
+    if (extraFn) { try { extra = (await extraFn(r.rowCount)) || {}; } catch (e) { /* non-fatal — still report the save */ } }
+    res.json({ updated: r.rowCount, ...extra });
   } catch (e) { res.status(500).json({ error: e.message }); }
 }
 app.post('/api/supply/deposit/:id', async (req, res) => {
@@ -5021,7 +5025,14 @@ app.post('/api/supply/po/:po', async (req, res) => {
     pay_balance_1_amount: 'numeric', pay_balance_1_date: 'date',
     pay_balance_2_amount: 'numeric', pay_balance_2_date: 'date',
     credit_amount: 'numeric',
-  }, body);
+  }, body,
+  undefined,
+  // Step 1+2: hand back the recomputed grid row so the client repaints WITHOUT a second fetch — but only when the
+  // edit can move a value shown in the grid. Purely detail-panel / cosmetic fields (client text, refs, packing,
+  // notes) skip the ~0.4s row query entirely: the client just repaints the cell it already changed.
+  (Object.keys(body).some(k => !PO_COSMETIC_FIELDS.has(k))
+    ? async () => ({ row: (await pool.query(PO_ROWS_SQL + ' WHERE calc4.po = $1', [req.params.po])).rows[0] || null })
+    : undefined));
 });
 // Advance a PO (and every PO on the same master shipment still in PRODUCTION) to SHIPPING. Offered on the
 // grid when the shipment has departed but the PO status still says PRODUCTION. Only touches PRODUCTION POs
@@ -5451,7 +5462,16 @@ app.post('/api/supply/shipment/:ref', async (req, res) => {
     if (up.rows[0] && up.rows[0].inserted) await noteShipmentCreated(pool, ref, authUser(req));
     // status → Shipping advances the POs on board (same as the "→ set shipping" action / supplier portal)
     if ((req.body || {}).status === 'Shipping') await propagateShippingToPOs(ref);
-    res.json({ ok: true });
+    // Step 3: a shipment date change cascades to every PO aboard (they inherit the master's effective dates).
+    // Return all affected rows recomputed in ONE response so the client repaints them without N separate fetches.
+    let rows = [];
+    try {
+      const aboard = (await pool.query(
+        `SELECT po FROM planner.purchase_orders WHERE shipment_ref=$1
+         UNION SELECT master_po FROM planner.shipments WHERE shipment_ref=$1 AND coalesce(master_po,'')<>''`, [ref])).rows.map(x => x.po);
+      if (aboard.length) rows = (await pool.query(PO_ROWS_SQL + ' WHERE calc4.po = ANY($1)', [aboard])).rows;
+    } catch (e) { /* non-fatal — client falls back to per-PO refresh */ }
+    res.json({ ok: true, rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Create a new shipment (header only; POs are assigned separately). master_po defaults to the ref.
@@ -7094,6 +7114,11 @@ app.post('/api/supply/bi/erp-compare/ignore', async (req, res) => {
 // ORDER PLAN unapproved exceptions per PO (partials / supplier-risk / discontinued / country-risk). Drives the
 // ORDER PLAN top-nav counter (# POs impacted) + the per-PO ORDER PLAN sub-tab badge. Gates mirror the grid:
 // partials + supplier-risk exclude complete/shipping/delivered; discontinued + country-risk exclude complete only.
+// PO fields that live ONLY in the detail panel and never change a grid cell or a grid action badge — editing
+// one skips the recomputed-row query in the save response (client just repaints the cell it already changed).
+// Deliberately small/conservative: anything touching DtC approval (pack_*, sales/client refs), dates, amounts,
+// %, deposit, shipment, branch, status, prod#/batch is NOT here, so those still refresh the row.
+const PO_COSMETIC_FIELDS = new Set(['client', 'dispatch_order_ref', 'final_delivery_address', 'branch_delivery_notes', 'notes']);
 // Shared PO grid-row query (WITH mastered ... FROM mastered calc4). Reused by the full grid endpoint
 // (+ ORDER BY po) and by /api/supply/po-row/:po (+ WHERE calc4.po=$1) so a single-cell edit refreshes ONE
 // row instead of re-pulling all ~1400 POs (multi-MB). Same SQL = zero drift.

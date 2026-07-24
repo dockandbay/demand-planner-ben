@@ -801,21 +801,25 @@
         // dropdown vs the same field in the expanded "Dates & tracking" panel) — no full refresh needed
         var ep=inp.dataset.ep, fld=inp.dataset.field, val=inp.value;
         document.querySelectorAll('#supply-root .fci[data-field="'+fld+'"]').forEach(function(o){ if(o===inp||o.dataset.ep!==ep||o.value===val)return; o.value=val; recolorFci(o, fld, val); });
-        // live-sync the collapsed PO grid row when a field was edited in that PO's expansion sub-tabs
+        // live-sync the collapsed PO grid row when a field was edited in that PO's expansion sub-tabs.
+        // The save returns the recomputed row (j.row) → repaint with NO extra fetch. If it's a cosmetic field the
+        // server returns no row (nothing to recompute in the grid) → the in-place recolour above is all that's needed.
         var _pm=/^\/api\/supply\/po\/([^\/]+)$/.exec(ep);
-        if(_pm && current==='purchase-orders' && typeof window.__poRowRefresh==='function'){ try{ window.__poRowRefresh(decodeURIComponent(_pm[1])); }catch(e){} }
+        if(_pm && current==='purchase-orders'){ try{ if(j&&j.row&&window.__poRowApply){ window.__poRowApply(j.row); } }catch(e){} }
         // shipment edit (e.g. a departure/landing/arrival override in the shipment drawer/popout): re-render the
         // drawer or grid row so the chained Ship/Arrival/Completion "final" dates recompute — they're display-only
         // text, not .fci inputs, so the duplicate-control sync above can't touch them.
         var _sm=/^\/api\/supply\/shipment\/([^\/]+)$/.exec(ep);
         if(_sm){ var _sref=decodeURIComponent(_sm[1]);
           if(typeof _shipPatchRow==='function'){ try{ _shipPatchRow(_sref); }catch(e){} }
-          // Shipment dates authoritatively override the PO dates aboard. When a departure/landing/arrival/completion
-          // is edited in the shipment DRAWER (opened from PURCHASE ORDERS), silently refresh each PO aboard so the
-          // grid row + any open PO panel pick up the new Ship/Arrival/Completion dates — no manual reload needed.
-          if(current==='purchase-orders'){ var _seen={};
-            document.querySelectorAll('#shipdet-DRAWER .ship-po-link[data-po]').forEach(function(b){ var p=b.dataset.po; if(!p||_seen[p])return; _seen[p]=1;
-              try{ if(window.__poRowRefresh)window.__poRowRefresh(p); if(window.__poPanelRefresh)window.__poPanelRefresh(p); }catch(e){} }); } } })
+          // Shipment dates authoritatively override the PO dates aboard. The shipment save now returns every affected
+          // PO row recomputed (j.rows) → repaint them all from that ONE response (was one full-grid fetch per PO).
+          if(current==='purchase-orders'){
+            if(j&&Array.isArray(j.rows)&&j.rows.length&&window.__poRowApply){
+              j.rows.forEach(function(rw){ try{ window.__poRowApply(rw); if(window.__poPanelRefresh)window.__poPanelRefresh(rw.po); }catch(e){} });
+            } else { var _seen={};   // fallback: no rows in response → per-PO refresh
+              document.querySelectorAll('#shipdet-DRAWER .ship-po-link[data-po]').forEach(function(b){ var p=b.dataset.po; if(!p||_seen[p])return; _seen[p]=1;
+                try{ if(window.__poRowRefresh)window.__poRowRefresh(p); if(window.__poPanelRefresh)window.__poPanelRefresh(p); }catch(e){} }); } } } })
       .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; }); bindDatePickers(); }
 
   function renderGeneric(key,rows){ var c=document.getElementById('supply-content');
@@ -1878,24 +1882,25 @@
     // Silently sync ONE collapsed grid row after a field was edited in that PO's expansion sub-tabs (Dates,
     // Payments, …). Re-fetches the data (derived dates/values recompute server-side), then swaps only the main
     // <tr> — the open expansion <tr> (a separate sibling row) is left untouched, so the panel stays put.
+    // Repaint ONE PO's grid <tr> from an already-in-hand row object (no fetch). The save endpoint now returns the
+    // recomputed row, so most edits repaint with ZERO extra round-trips. Leaves the open expansion <tr> untouched.
+    function applyPoRow(rr){ if(!rr||!rr.po)return; var po=rr.po;
+      for(var _k=0;_k<rows.length;_k++){ if(rows[_k].po===po){ rows[_k]=rr; break; } } poBy[po]=rr;
+      var key=(window.CSS&&CSS.escape)?CSS.escape(po):po;
+      var expBtn=document.querySelector('#sup-grid .po-exp[data-po="'+key+'"]'); if(!expBtn)return;
+      var mainTr=expBtn.closest('tr'); if(!mainTr)return;
+      var g=mainTr.dataset.g, tmp=document.createElement('tbody');
+      tmp.innerHTML=poRowHtml(rr, expBtn.dataset.i, mainTr.classList.contains('po-child'), (g==null?null:g));
+      var newMain=tmp.querySelector('tr'); if(!newMain)return;
+      var wasOpen=mainTr.classList.contains('row-open');
+      mainTr.parentNode.replaceChild(newMain, mainTr);
+      if(wasOpen){ newMain.classList.add('row-open'); var eb=newMain.querySelector('.po-exp'); if(eb)eb.classList.add('open'); }
+      bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindDepPick(patchPoRow); bindPoStars(); bindPoNotes(); bindPoActBadge(); bindSetShipping(); bindPoCopy(); bindPoScrollPin(); }
+    // Fallback path: fetch one PO's row then apply it (used when a caller only has the PO id, e.g. a deposit assign).
     function silentRowRefresh(po){
-      // Refresh just THIS PO's row (bindEdits already invalidated derived caches) — a single-PO fetch instead of
-      // re-pulling all ~1400 POs (was multi-MB / multi-second on every keystroke).
       fetch('/api/supply/po-row/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(arr){
-        var rr=Array.isArray(arr)?arr[0]:null; if(!rr)return;
-        for(var _k=0;_k<rows.length;_k++){ if(rows[_k].po===po){ rows[_k]=rr; break; } } poBy[po]=rr;
-        var key=(window.CSS&&CSS.escape)?CSS.escape(po):po;
-        var expBtn=document.querySelector('#sup-grid .po-exp[data-po="'+key+'"]'); if(!expBtn)return;
-        var mainTr=expBtn.closest('tr'); if(!mainTr)return;
-        var g=mainTr.dataset.g, tmp=document.createElement('tbody');
-        tmp.innerHTML=poRowHtml(rr, expBtn.dataset.i, mainTr.classList.contains('po-child'), (g==null?null:g));
-        var newMain=tmp.querySelector('tr'); if(!newMain)return;
-        var wasOpen=mainTr.classList.contains('row-open');
-        mainTr.parentNode.replaceChild(newMain, mainTr);
-        if(wasOpen){ newMain.classList.add('row-open'); var eb=newMain.querySelector('.po-exp'); if(eb)eb.classList.add('open'); }
-        bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindDepPick(patchPoRow); bindPoStars(); bindPoNotes(); bindPoActBadge(); bindSetShipping(); bindPoCopy(); bindPoScrollPin();
-      }).catch(function(){}); }
-    try{ window.__poRowRefresh=silentRowRefresh; window.__poPanelRefresh=refreshOpenPanel; }catch(e){}
+        applyPoRow(Array.isArray(arr)?arr[0]:null); }).catch(function(){}); }
+    try{ window.__poRowApply=applyPoRow; window.__poRowRefresh=silentRowRefresh; window.__poPanelRefresh=refreshOpenPanel; }catch(e){}
     // Patch ONE PO row in place (no grid re-render / flash) after an assign. In shipment-grouped mode the row
     // would ideally move to its new shipment group, but a full regroup collapses any open PO detail and loses
     // the user's place — so we patch the row in place instead (its shipment cell updates); the regroup happens
