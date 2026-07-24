@@ -1673,6 +1673,10 @@ app.get('/api/supply/:section', async (req, res) => {
             coalesce(dispatch_order_ref,'') dispatch_order_ref, coalesce(final_delivery_address,'') final_delivery_address,
             coalesce(crossdock_skus,'') crossdock_skus,
             coalesce(dtc_custom,false) dtc_custom, coalesce(dtc_key_account,false) dtc_key_account,   -- Direct-to-Client tags
+            -- Forwarder contact details — read LIVE from the matching key account (by client name), not snapshotted
+            (SELECT coalesce(ka.forwarder_name,'')  FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) forwarder_name,
+            (SELECT coalesce(ka.forwarder_email,'') FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) forwarder_email,
+            (SELECT coalesce(ka.forwarder_phone,'') FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) forwarder_phone,
             -- Packing & Labelling (migration 086) + Direct to Client details approval
             coalesce(pack_polybags,false) pack_polybags, coalesce(pack_polybags_notes,'') pack_polybags_notes,
             coalesce(pack_dnb_barcodes,false) pack_dnb_barcodes, coalesce(pack_dnb_barcodes_notes,'') pack_dnb_barcodes_notes,
@@ -2710,6 +2714,7 @@ app.post('/api/supply/supplier-create', async (req, res) => {
 // Direct-to-Client details when selected. List / create / edit / delete, plus apply-to-PO.
 const KA_FIELDS = {
   name: 'text', client_requirements: 'text', address: 'text', pack_pallet_notes: 'text', pack_other_notes: 'text',
+  forwarder_name: 'text', forwarder_email: 'text', forwarder_phone: 'text',
   pack_polybags: 'boolean', pack_polybags_notes: 'text', pack_dnb_barcodes: 'boolean', pack_dnb_barcodes_notes: 'text',
   pack_rfid_barcodes: 'boolean', pack_rfid_barcodes_notes: 'text', pack_dnb_carton: 'boolean', pack_dnb_carton_notes: 'text',
   pack_client_carton: 'boolean', pack_client_carton_notes: 'text',
@@ -6688,6 +6693,8 @@ const POS_SQL_PORTAL = `
     coalesce(branch,'') branch, coalesce(nullif(country_code,''), branch_country, '') country,
     coalesce(client_requirements,'') client_requirements, coalesce(sales_order_ref,'') sales_order_ref,
     to_char(client_deadline_date,'YYYY-MM-DD') client_deadline, coalesce(client_po_ref,'') client_po_ref,
+    -- Forwarder contact details (live from the matching key account, by client name)
+    coalesce(ka.forwarder_name,'') forwarder_name, coalesce(ka.forwarder_email,'') forwarder_email, coalesce(ka.forwarder_phone,'') forwarder_phone,
     -- Packing & Labelling (migration 086) + Direct to Client details approval
     coalesce(pack_polybags,false) pack_polybags, coalesce(pack_polybags_notes,'') pack_polybags_notes,
     coalesce(pack_dnb_barcodes,false) pack_dnb_barcodes, coalesce(pack_dnb_barcodes_notes,'') pack_dnb_barcodes_notes,
@@ -6701,6 +6708,7 @@ const POS_SQL_PORTAL = `
     to_char(dsd.updated_at,'YYYY-MM-DD HH24:MI') dtc_entered_at, coalesce(dsd.entered_by,'') dtc_entered_by
   FROM planner.v_po_finance calc4
   LEFT JOIN planner.dtc_shipment_details dsd ON dsd.po = calc4.po
+  LEFT JOIN planner.key_accounts ka ON lower(trim(ka.name)) = lower(trim(calc4.client))
   WHERE supplier_name = ANY($1) ORDER BY po`;
 function loadPortalPage() { try { return readFileSync(new URL('./supply/portal.html', import.meta.url), 'utf8'); } catch { return '<!doctype html><meta charset=utf8>portal page missing'; } }
 const PORTAL_PAGE = DEV ? null : loadPortalPage();

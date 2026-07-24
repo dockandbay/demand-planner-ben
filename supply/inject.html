@@ -2666,6 +2666,11 @@
       +cliRow('Client deadline date', dateField(r.client_deadline,{attrs:'data-ep="'+ep+'" data-field="client_deadline_date"', cls:'txtin', width:'130px'})+' <span class="mut tiny">(date the client needs it by)</span>')
       +cliRow('Client purchase order ref',txtIn(ep,'client_po_ref',r.client_po_ref,220))
       +cliRow('Dispatch order ref',txtIn(ep,'dispatch_order_ref',r.dispatch_order_ref,220))
+      +(function(){ var fn=r.forwarder_name||'', fe=r.forwarder_email||'', fp=r.forwarder_phone||''; if(!fn&&!fe&&!fp)return '';
+          var parts=[]; if(fn)parts.push(esc(fn));
+          if(fe)parts.push('<a href="mailto:'+esc(fe)+'">'+esc(fe)+'</a>');
+          if(fp)parts.push('<a href="tel:'+esc(fp.replace(/[^+0-9]/g,''))+'">'+esc(fp)+'</a>');
+          return cliRow('Forwarder <span class="mut tiny">(from key account)</span>', parts.join(' &nbsp;·&nbsp; ')); })()
       +cliRow('Final delivery address <span class="mut tiny">(shown on crossdock labels)</span>',txtIn(ep,'final_delivery_address',r.final_delivery_address,440,true))
       +cliRow('Crossdock SKUs <span class="mut tiny">(CROSSDOCK/PREORDER)</span>',crossdockPicker(r.po,xdList))
       // Crossdock destination exception: crossdock SKUs must ship to a real market (UK/US/EU/AU/CA). If this PO
@@ -5183,6 +5188,7 @@
               +'<div class="bar"><input class="flt" id="ka-q" placeholder="Search name / requirements / address / notes…" value="'+esc(kq)+'" style="width:300px;background:#eff6ff;border-color:#93c5fd"><span class="count" id="ka-count" style="margin-left:8px">'+f.length+(kq?' / '+rows.length:'')+' key account'+(f.length===1?'':'s')+'</span></div>'
               +cards; }
           function ta(f,val,ph){ return '<textarea class="ka-in" data-f="'+f+'" rows="2" placeholder="'+esc(ph||'')+'" style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;font-family:inherit;resize:vertical">'+esc(val==null?'':val)+'</textarea>'; }
+          function kaInp(f,val,ph,type){ return '<input class="ka-in" data-f="'+f+'" type="'+(type||'text')+'" value="'+esc(val==null?'':val)+'" placeholder="'+esc(ph||'')+'" style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;font-family:inherit"'+((type||'')==='email'?' inputmode="email"':(type==='tel'?' inputmode="tel"':''))+'>'; }
           function lblBlk(lbl,help,field){ return '<div style="margin:0 0 14px"><div style="font-weight:600;font-size:12px;margin-bottom:'+(help?'1px':'4px')+'">'+esc(lbl)+'</div>'+(help?'<div class="mut tiny" style="margin-bottom:4px">'+esc(help)+'</div>':'')+field+'</div>'; }
           function packBox(r,p){ var on=isYes(r[p[0]]);
             return '<div style="border:1px solid '+(on?'#bbf7d0':'#e5e7eb')+';background:'+(on?'#f0fdf4':'#fff')+';border-radius:7px;padding:9px 10px">'
@@ -5199,6 +5205,13 @@
               +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px">'
               +lblBlk('Delivery address','Full address this client ships to.', ta('address', fieldOf(r,'address'),'Street, city, postcode, country…'))
               +lblBlk('Client requirements','Any special handling / compliance the client demands.', ta('client_requirements', fieldOf(r,'client_requirements'),'e.g. GS1 labels, appointment booking…'))
+              +'</div>'
+              +'<div style="border-top:1px solid #eef2f7;margin:2px 0 14px"></div>'
+              +'<div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:10px">Forwarder details</div>'
+              +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px">'
+              +lblBlk('Forwarder name','', kaInp('forwarder_name', fieldOf(r,'forwarder_name'),'freight forwarder / company…'))
+              +lblBlk('Forwarder email','', kaInp('forwarder_email', fieldOf(r,'forwarder_email'),'ops@forwarder.com…','email'))
+              +lblBlk('Forwarder phone','', kaInp('forwarder_phone', fieldOf(r,'forwarder_phone'),'+44 …','tel'))
               +'</div>'
               +'<div style="border-top:1px solid #eef2f7;margin:2px 0 14px"></div>'
               +'<div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:10px">Packing &amp; labelling</div>'

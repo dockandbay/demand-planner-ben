@@ -3,6 +3,20 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.067 - Forwarder details on key accounts → PO Client/FBA + supplier portal
+
+New **Forwarder details** (name / email / phone) on a key account:
+- **CONFIG ▸ Key accounts** detail editor — a new "Forwarder details" section (3 inputs), saved with the rest
+  of the key account (`KA_FIELDS` + the save endpoint). **Migration 137** adds the three columns to
+  `planner.key_accounts`.
+- **PURCHASE ORDER ▸ Client/FBA tab** — shows the forwarder (name · email · phone, email/phone clickable),
+  read-only, pulled **live** from the matching key account (by client name). Hidden when none set.
+- **Supplier portal ▸ Direct to Client tab** — forwarder name/email/phone rows added to the DtC details table.
+
+Read path is a live lookup on `key_accounts` by the PO's client name (no snapshot onto the PO, so no
+`v_po_finance` change): correlated subselects in the admin PO query, a `LEFT JOIN key_accounts` in the portal
+query. **Deploy:** run migration **137_key_account_forwarder.sql**.
+
 ## v26.066 - Reports sub-nav: "to review" counter on the ERP COMPARE tab
 
 Added a red count pill next to the **ERP COMPARE** sub-nav tab showing the number of open ERP POs still

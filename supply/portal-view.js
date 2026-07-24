@@ -873,6 +873,11 @@
         +dtcInfoRow('Direct to Client sales ref',p.sales_order_ref)
         +dtcInfoRow('Direct to Client PO number',p.client_po_ref)
         +dtcInfoRow('Direct to Client notes',p.client_requirements,true)
+        +((p.forwarder_name||p.forwarder_email||p.forwarder_phone)
+            ? dtcInfoRow('Forwarder name',p.forwarder_name)
+              +dtcInfoRow('Forwarder email',p.forwarder_email)
+              +dtcInfoRow('Forwarder phone',p.forwarder_phone)
+            : '')
         +'</tbody></table>';
       // approve bar — same format as the Confirm-order banner (green button, yellow box), at the TOP of the tab
       var dtcApproveBar='<div style="margin:0 0 12px;padding:8px 11px;border-radius:6px;font-size:12px;'+(dtcAccepted?'background:#dcfce7;border:1px solid #86efac':'background:#fef3c7;border:1px solid #fcd34d')+'">'
