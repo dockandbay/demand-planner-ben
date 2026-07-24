@@ -7117,9 +7117,15 @@
             +'<div class="cli-row"><div class="cli-lbl">Tracking</div><div class="cli-val">'+tracking+'</div></div>'
             +'<div class="cli-row"><div class="cli-lbl">Carrier</div><div class="cli-val">'+carrier+'</div></div>'
             +'<div class="cli-row"><div class="cli-lbl">Supplier status</div><div class="cli-val"><span class="tiny">'+(s.production_status?esc(prodStatusLabel(s.production_status)):'<span class="mut">—</span>')+'</span></div></div>'
+            +(function(){ var _acc=!!s.accepted_at, _chg=!!s.change_requested, _cancelled=/cancel/i.test(s.status||'');
+                var b = _cancelled ? '<span class="mut">—</span>'
+                  : _chg ? '<span class="tool-badge bg-amber">⏳ Change made — awaiting re-approval</span>'
+                  : _acc ? '<span class="tool-badge bg-green">✓ Approved</span>'+(s.accepted_at?' <span class="mut tiny">'+fd(s.accepted_at)+'</span>':'')
+                  : '<span class="tool-badge bg-amber">Awaiting supplier approval</span>';
+                return '<div class="cli-row"><div class="cli-lbl">Supplier approval</div><div class="cli-val">'+b+'</div></div>'; })()
+            +'<div class="cli-row"><div class="cli-lbl">Supplier expected</div><div class="cli-val">'+(s.supplier_expected?fd(s.supplier_expected):'<span class="mut">—</span>')+'</div></div>'
             +'<div class="cli-row"><div class="cli-lbl">Our status</div><div class="cli-val">'+statusCtl+'</div></div>'
             +(setShip?'<div>'+setShip+'</div>':'')
-            +'<div class="tiny mut" style="margin-top:4px">Supplier expected: '+(s.supplier_expected?fd(s.supplier_expected):'—')+'</div>'
             +(dateExc?'<div style="color:#dc2626;font-weight:700;font-size:11px;margin-top:4px">⚠ Overdue — completion / supplier-expected date has passed</div>':'')
             +'<div style="margin-top:10px">'+actBtn+' <button class="save-btn light samp-del" data-id="'+id+'" style="color:#dc2626">Delete</button></div></div>'
           +'<div style="min-width:220px"><div class="sect-h">SKUs</div>'+skus+'</div>'

@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.094 - Samples PLAN detail: supplier approval status + consistent styling
+
+On the **SAMPLES ▸ PLAN ▸ Details** panel:
+- Added a **Supplier approval** row (styled like the other Fulfilment rows): ✓ Approved (+ date) /
+  Awaiting supplier approval / ⏳ Change made — awaiting re-approval / — when cancelled.
+- **Supplier expected** is now a proper `cli-row` (matching Supplier status), no longer a small footnote.
+- `sample-detail` now returns `change_requested` + `production_status` (the latter also makes the
+  existing **Supplier status** row populate).
+
+The main samples grid already carries the **Supplier ETA** column (supplier expected completion date).
+
 ## v26.093 - Admin: review / edit / approve supplier additional costs on PO ▸ Payments
 
 The supplier submits **Additional costs** (freight / tooling / surcharges) in the portal Order Plan &

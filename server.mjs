@@ -1351,6 +1351,7 @@ app.get('/api/supply/sample-detail/:id', async (req, res) => {
       coalesce(region,'') region, coalesce(postcode,'') postcode, coalesce(country,'') country, coalesce(phone,'') phone,
       to_char(completion_date_required,'YYYY-MM-DD') completion_required, coalesce(purpose,'{}') purpose, coalesce(notes,'') notes,
       status, to_char(accepted_at,'YYYY-MM-DD') accepted_at, to_char(supplier_expected_completion,'YYYY-MM-DD') supplier_expected,
+      coalesce(change_requested,false) change_requested, coalesce(production_status,'') production_status,
       coalesce(tracking_code,'') tracking_code, coalesce(carrier,'') carrier, coalesce(created_by,'') created_by,
       to_char(created_at,'YYYY-MM-DD') created_at
       FROM planner.sample_requests WHERE id=$1::bigint`, [id])).rows[0];
