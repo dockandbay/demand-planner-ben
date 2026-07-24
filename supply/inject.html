@@ -87,6 +87,12 @@
 #tl-count.on{display:inline-block}
 #tl-drop{position:fixed;top:52px;right:12px;width:370px;max-width:94vw;max-height:72vh;overflow-y:auto;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 12px 34px rgba(15,23,42,.24);z-index:100050;display:none}
 #tl-drop.open{display:block}
+#act-drop{position:fixed;top:52px;right:12px;width:390px;max-width:94vw;max-height:72vh;overflow-y:auto;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 12px 34px rgba(15,23,42,.24);z-index:100050;display:none;font-size:12px;color:#1a1a1a;line-height:1.4}
+#act-drop.open{display:block}
+#act-drop .act-item{padding:8px 12px;border-bottom:1px solid #f1f5f9;display:flex;gap:9px;align-items:flex-start}
+#act-drop .act-item:last-child{border-bottom:none}
+#act-drop .act-ref{font-weight:700;color:#1d4ed8;cursor:pointer}
+#act-drop .act-when{color:#94a3b8;font-size:10px;white-space:nowrap;margin-left:auto;padding-left:8px}
 /* dropdown content — scoped to #tl-drop (it now lives on <body>, not under #supply-root). v26.007 */
 #tl-drop{font-size:12px;color:#1a1a1a;line-height:1.4}
 #tl-drop .mut{color:#888}
@@ -7146,6 +7152,33 @@
     bell.onclick=function(e){ e.stopPropagation(); toggleTlDropdown(); };
     if(!document.getElementById('tl-drop')){ var d=document.createElement('div'); d.id='tl-drop'; document.body.appendChild(d); }
     loadTlNotifs(); if(!window.__tlPoll)window.__tlPoll=setInterval(function(){ loadTlNotifs(); }, 60000); }
+  // ── Recent changes drawer (top bar 🕘) — last 10 major SUPPLY events, newest first ──────────────────────
+  var ACT_ICON={po_created:'🧾',po_confirmed:'✅',shipment_created:'🚢',deposit_added:'💰',sample_created:'🎁',supplier_submission:'📩'};
+  function actWhen(at){ if(!at)return ''; var d=at.slice(0,10), t=at.slice(11); return fd(d)+(t?' '+t:''); }   // YYYY-MM-DD HH:MI → dd-mmm-yy HH:MI
+  function renderActDrop(rows){ var d=document.getElementById('act-drop'); if(!d)return; rows=rows||[];
+    d.innerHTML='<div style="padding:9px 12px;border-bottom:1px solid #e5e7eb;font-weight:700;font-size:12px">Recent changes <span class="mut tiny" style="font-weight:400">— last '+rows.length+' major supply changes</span></div>'
+      +(rows.length?rows.map(function(r){ var ic=ACT_ICON[r.typ]||'•';
+          var go=(r.typ==='po_created'||r.typ==='po_confirmed'||r.typ==='supplier_submission')?'po':(r.typ==='shipment_created'?'ship':(r.typ==='sample_created'?'sample':''));
+          var refHtml=(go&&r.ref)?'<span class="act-ref" data-go="'+go+'" data-ref="'+esc(r.ref)+'">'+esc(r.label)+'</span>':esc(r.label);
+          return '<div class="act-item"><span style="flex:0 0 auto">'+ic+'</span><span style="flex:1">'+refHtml+'</span><span class="act-when">'+esc(actWhen(r.at))+'</span></div>'; }).join('')
+        :'<div class="count" style="padding:16px 12px">No recent changes.</div>');
+    d.querySelectorAll('.act-ref').forEach(function(el){ el.onclick=function(){ var go=el.dataset.go, ref=el.dataset.ref; closeActDrop();
+      var sr=document.getElementById('supply-root'); if((!sr||sr.style.display==='none')&&typeof showSupply==='function'){ showSupply(true); }
+      if(go==='po'&&typeof openPODrawer==='function')openPODrawer(ref,'timeline');
+      else if(go==='sample'&&typeof gotoSample==='function')gotoSample(ref);
+      else if(go==='ship'&&typeof selectSection==='function'){ selectSection('purchase-orders'); } }; }); }
+  function toggleActDrop(){ var d=document.getElementById('act-drop'); if(!d)return;
+    if(d.classList.contains('open')){ closeActDrop(); return; }
+    d.classList.add('open'); d.innerHTML='<div class="count" style="padding:16px 12px">Loading…</div>';
+    fetch('/api/supply/recent-activity').then(function(r){return r.json();}).then(function(rows){ renderActDrop(Array.isArray(rows)?rows:[]); }).catch(function(){ renderActDrop([]); });
+    setTimeout(function(){ document.addEventListener('mousedown', actOutside); },0); }
+  function actOutside(e){ var d=document.getElementById('act-drop'), b=document.getElementById('act-btn'); if(d&&!d.contains(e.target)&&!(b&&b.contains(e.target)))closeActDrop(); }
+  function closeActDrop(){ var d=document.getElementById('act-drop'); if(d)d.classList.remove('open'); document.removeEventListener('mousedown', actOutside); }
+  function ensureActivityButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('act-btn'))return;
+    var b=document.createElement('button'); b.id='act-btn'; b.className='tl-bell'; b.title='Recent changes — last 10 major supply changes'; b.textContent='🕘';
+    var bell=document.getElementById('tl-bell'); if(bell)row.insertBefore(b,bell); else row.appendChild(b);
+    b.onclick=function(e){ e.stopPropagation(); toggleActDrop(); };
+    if(!document.getElementById('act-drop')){ var d=document.createElement('div'); d.id='act-drop'; document.body.appendChild(d); } }
   // ── Suggestion Box ─────────────────────────────────────────────────────────
   // 💡 top-bar button (next to the bell) opens a submit modal; anyone can drop a suggestion. It's stored with the
   // submitter's email + timestamp and gets a stable reference (SUG-0001) shown on submit. Triage in CONFIG ▸ Suggestions.
@@ -7965,7 +7998,7 @@
       body.querySelector('#pt-post').onclick=function(){ var t=body.querySelector('#pt-in').value.trim(); if(!t)return; shipPost('/api/product/note',{ref:ref,body:t,author_email:(window.ME&&ME.email)||''},function(){ renderProdTimeline(body,ref); }); };
       body.querySelector('#pt-esc').onclick=function(){ var t=body.querySelector('#pt-in').value.trim(); if(!t){ alert('Type the escalation message in the note box first.'); return; } if(!confirm('Escalate '+ref+' to the product-development team?'))return; shipPost('/api/product/escalate',{ref:ref,message:t},function(j){ if(j&&j.error){alert(j.error);return;} alert(j&&j.sent?('Escalated — emailed '+j.emails.join(', ')):(j&&j.note)||'Escalated (no recipients configured).'); renderProdTimeline(body,ref); }); };
     }).catch(function(e){ body.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
-  function boot(){ try{ if(ME===null)fetchMe(); ensureRoot(); ensureNavButton(); ensureBellButton(); ensureSuggestButton(); ensureScenarioRoot(); ensureScenarioButton(); ensureConfigButton(); ensureProductButton();
+  function boot(){ try{ if(ME===null)fetchMe(); ensureRoot(); ensureNavButton(); ensureBellButton(); ensureActivityButton(); ensureSuggestButton(); ensureScenarioRoot(); ensureScenarioButton(); ensureConfigButton(); ensureProductButton();
     if(!_routed){ _routed=true; try{ if(/^#\/?(supply|config|scenario|demand|reports|buy|fba|planning|exec)(\/|$)/.test(location.hash)) applyRoute();
       else { var _land=(window.__HZ_LANDING||'supply/purchase-orders').replace(/^#?\/?/,''); location.hash='#/'+_land; applyRoute(); }   // no hash → per-user landing slug (server-injected), default SUPPLY ▸ Purchase Orders
       var _a=document.getElementById('app'); if(_a)_a.style.visibility='';   // reveal once routed (server hid it to avoid the DEMAND→SUPPLY flash)

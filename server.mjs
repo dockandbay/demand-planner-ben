@@ -2601,6 +2601,16 @@ app.get('/api/supply/:section', async (req, res) => {
         exr.forEach(x => { pos.add(x.po); (byPo[x.po] = byPo[x.po] || {})[x.typ] = true; });
         return res.json({ count: pos.size, byPo });
       }
+      case 'recent-activity':   // top-bar "recent changes" drawer — last 10 major SUPPLY events, newest first
+        return res.json(await q(`
+          SELECT to_char(ts,'YYYY-MM-DD HH24:MI') at, typ, label, ref FROM (
+            SELECT created_at ts, 'po_created' typ, 'Purchase order '||po||' created' label, po ref FROM planner.purchase_orders WHERE created_at IS NOT NULL
+            UNION ALL SELECT supplier_confirmed_at, 'po_confirmed', 'PO '||po||' confirmed by supplier', po FROM planner.purchase_orders WHERE supplier_confirmed_at IS NOT NULL
+            UNION ALL SELECT coalesce(created_at,supplier_created_at), 'shipment_created', 'Shipment '||shipment_ref||' created', shipment_ref FROM planner.shipments WHERE coalesce(created_at,supplier_created_at) IS NOT NULL
+            UNION ALL SELECT created_at, 'deposit_added', 'Deposit '||coalesce(nullif(reference,''),'(unreferenced)')||' added', reference FROM planner.deposits WHERE created_at IS NOT NULL
+            UNION ALL SELECT created_at, 'sample_created', 'Sample request SR-'||id||' created', 'SR-'||id FROM planner.sample_requests WHERE created_at IS NOT NULL
+            UNION ALL SELECT submitted_at, 'supplier_submission', 'Supplier submitted '||kind||' on '||po, po FROM planner.supplier_submissions WHERE submitted_at IS NOT NULL
+          ) z ORDER BY at DESC NULLS LAST LIMIT 10`));
       default:
         return res.status(404).json({ error: 'unknown section: ' + req.params.section });
     }

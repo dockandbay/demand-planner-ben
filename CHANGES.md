@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.078 - Top-bar "Recent changes" drawer (last 10 major supply changes)
+
+New **🕘** button in the top-right bar (next to the ✉ bell) opens a drawer of the **10 most recent major SUPPLY
+changes**, newest first: PO created, PO confirmed by supplier, shipment created, deposit added, sample request
+created, supplier submission. Each shows an icon + label + dd-mmm-yy HH:MM; PO/shipment/sample entries click
+through to the record. New endpoint `/api/supply/recent-activity` (unions the tables' timestamps, ORDER BY
+time DESC LIMIT 10).
+
 ## v26.077 - SHIPS WITH label: master never gets it (riders only); + Genfreight carrier
 
 - The **SHIPS WITH** label no longer appears on a shipment's **master** PO — only on the **riders** that ship
