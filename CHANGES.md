@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.088 - Branch delivery notes: shipment is the source once assigned
+
+- **Shipment ▸ Shipment details ▸ Branch delivery notes** is now a plain editable text field pre-filled with
+  the inherited notes (was placeholder + a separate "inherited" hint).
+- **PO ▸ Shipments tab ▸ Branch delivery notes**: once the PO is on a shipment, the field is **greyed out /
+  read-only** and shows the **shipment's** delivery notes (new `shipment_delivery_notes` on the PO query =
+  shipment override ▸ shipment master-PO branch notes). Still editable when no shipment is assigned.
+
 ## v26.087 - Branch delivery notes on the shipment record (Shipment details)
 
 Added a **Branch delivery notes** field to SHIPMENTS ▸ Shipment details (under dates & tracking). It

@@ -1221,7 +1221,9 @@
     return '<div class="sect-h">Shipments <span class="mut tiny">— assign a shipment or mark FOB, ASN numbers, Ships With Supplier pallet labels</span></div>'
       +lookupDatalists()+'<div class="cli-form" style="max-width:620px">'
       +row('Shipment / FOB',ship+(PO_ACTCOND.unassigned_shipment(r)?actMark(po,'unassigned_shipment'):''))
-      +row('Branch delivery notes <span class="mut tiny">(defaults from the branch when the branch is set · shown to the supplier)</span>',txtIn(ep,'branch_delivery_notes',r.branch_delivery_notes,440,true))
+      +row('Branch delivery notes <span class="mut tiny">'+(r.shipment?'(from the assigned shipment — edit on the shipment)':'(defaults from the branch when the branch is set · shown to the supplier)')+'</span>', r.shipment
+          ? '<textarea rows="3" readonly style="width:440px;max-width:100%;box-sizing:border-box;text-align:left;font-family:inherit;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:6px;padding:6px 8px">'+esc(r.shipment_delivery_notes||r.branch_delivery_notes||'')+'</textarea>'
+          : txtIn(ep,'branch_delivery_notes',r.branch_delivery_notes,440,true))
       +(PO_ACTCOND.preship(r)?row('Pre-shipment docs',actMark(po,'preship')):'')
       +((r.flex_id||r.flexport_reference)?row('Flexport <span class="mut tiny">(reference &amp; link)</span>',(function(){ var fid=r.flex_id||r.flexport_reference, u=flexUrl(fid); return u?'<a href="'+u+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;white-space:nowrap">'+esc(fid)+' ↗</a>':esc(fid); })()):'')
       +(isCogh?row('ASN numbers <span class="mut tiny">(1 per pallet, comma-separated)</span>',(r.prod_end&&r.prod_end<today&&r.progress!=='complete'&&!String(r.asn_numbers||'').trim()?'<div style="color:#b91c1c;font-weight:700;margin-bottom:4px">⚠ ASN pallet labels overdue — production ended '+fd(r.prod_end)+'</div>':'')+'<input class="fci txtin" data-ep="'+ep+'" data-field="asn_numbers" value="'+esc(r.asn_numbers||'')+'" placeholder="ASN1, ASN2…" style="width:280px;text-align:left"> <button class="save-btn" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd" title="download A4 pallet labels — one page per ASN (save your ASN entry first)" onclick="window.open(\'/api/asn-labels/\'+encodeURIComponent(\''+esc(po)+'\'))">⤓ ASN PALLET LABELS</button>'):'')
@@ -4559,9 +4561,8 @@
           +'<input class="fci txt shipdest" data-field="export_port" value="'+esc(ov)+'" placeholder="'+esc(def||'supplier default')+'" style="min-width:150px">'
           +'</div>'; })()
       +'</div>'
-      +'<div style="margin:2px 0 12px;max-width:520px"><div class="mut tiny" style="text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px">Branch delivery notes</div>'
-        +'<textarea class="fci shipdest" data-field="delivery_notes" rows="3" placeholder="'+(s.ov_delivery_notes?'':'inherits from the master PO — type to override')+'" style="width:100%;box-sizing:border-box;text-align:left;font-family:inherit">'+esc(s.ov_delivery_notes||'')+'</textarea>'
-        +((!s.ov_delivery_notes&&s.delivery_notes)?'<div class="mut tiny" style="white-space:pre-wrap;margin-top:3px;color:#64748b">Inherited from master PO '+esc(s.master_po||'')+':\n'+esc(s.delivery_notes)+'</div>':'')+'</div>'
+      +'<div style="margin:2px 0 12px;max-width:520px"><div class="mut tiny" style="text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px">Branch delivery notes <span style="text-transform:none;letter-spacing:0">(inherited on creation from the master PO — editable here)</span></div>'
+        +'<textarea class="fci shipdest" data-field="delivery_notes" rows="3" placeholder="delivery notes…" style="width:100%;box-sizing:border-box;text-align:left;font-family:inherit">'+esc(s.delivery_notes||'')+'</textarea></div>'
       +(function(){ var fr=shipFreight(s), m=s.mode_eff;
         var se=seaEst(s.sea_tiers,s.pallets);
         var estTxt=m==='air'?('~'+money(Math.round((Number(s.weight_kg)||0)*(Number(s.air_rate)||15)))+' · '+(s.weight_kg||0)+'kg × $'+(Number(s.air_rate)||15)+'/kg')

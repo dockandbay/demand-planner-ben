@@ -1677,6 +1677,10 @@ app.get('/api/supply/:section', async (req, res) => {
             coalesce(deposit_ref,'') deposit_ref, coalesce(nullif(shipment_ref,''), (SELECT s.shipment_ref FROM planner.shipments s WHERE s.master_po=calc4.po LIMIT 1), '') shipment,
             coalesce((SELECT s.master_po FROM planner.shipments s WHERE s.shipment_ref=calc4.shipment_ref), nullif(calc4.shipment_ref,''), (SELECT s.master_po FROM planner.shipments s WHERE s.master_po=calc4.po LIMIT 1)) ships_with_master_po,
             coalesce((SELECT po2.branch_delivery_notes FROM planner.purchase_orders po2 WHERE po2.po=calc4.po), (SELECT b2.delivery_notes FROM planner.branches b2 WHERE b2.name=calc4.branch), '') branch_delivery_notes,
+            -- once assigned to a shipment, the PO's delivery notes come FROM that shipment (effective: shipment override ▸ shipment master-PO branch notes)
+            coalesce((SELECT coalesce(nullif(s.delivery_notes,''),
+                (SELECT coalesce(nullif(m.branch_delivery_notes,''), mb.delivery_notes) FROM planner.purchase_orders m LEFT JOIN planner.branches mb ON mb.name=m.branch WHERE m.po=coalesce(nullif(s.master_po,''), s.shipment_ref)))
+              FROM planner.shipments s WHERE s.shipment_ref=calc4.shipment_ref), '') shipment_delivery_notes,
             -- mode of the assigned shipment (fob/air/sea) — from the sh join above (self-master resolution).
             -- FOB shipments carry no freight/duty/tax (landed cost = goods only).
             lower(coalesce(sh_mode,'')) ship_mode,
