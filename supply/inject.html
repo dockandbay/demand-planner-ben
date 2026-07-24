@@ -6348,6 +6348,24 @@
     bcGatherAssets(kind,r,batch,rrp,function(opts){ rasterizeSVGCanvas(buildLabelSVG(kind,r,opts),2.5,function(cv){ if(!cv){ alert('Could not render label'); return; }
       cv.toBlob(function(jb){ if(!jb){ alert('Could not encode label'); return; } jb.arrayBuffer().then(function(ab){
         var pdf=pdfA4(new Uint8Array(ab),cv.width,cv.height,cells); bcDownloadBlob(kindPrefix(kind)+r.sku+'_A4.pdf', new Blob([pdf],{type:'application/pdf'})); }); },'image/jpeg',0.92); }); }); }
+  // Multi-page A4 PDF: one page per {jpeg,imgW,imgH}, same cell layout — for a consolidated (no-zip) batch download.
+  function pdfA4Multi(pages,cells){ var enc=new TextEncoder(), parts=[], off=[], len=0, P=0.24, pageW=2480*P, pageH=3505*P;
+    function push(x){ var u=(x instanceof Uint8Array)?x:enc.encode(x); parts.push(u); len+=u.length; }
+    function pad(n){ n=String(n); while(n.length<10)n='0'+n; return n; }
+    var N=pages.length, kids=[]; for(var k=0;k<N;k++)kids.push((3+k*3)+' 0 R');
+    push('%PDF-1.4\n');
+    off[1]=len; push('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
+    off[2]=len; push('2 0 obj\n<< /Type /Pages /Kids ['+kids.join(' ')+'] /Count '+N+' >>\nendobj\n');
+    for(var pi=0;pi<N;pi++){ var pg=pages[pi], imgW=pg.imgW, imgH=pg.imgH, jpeg=pg.jpeg, pageObj=3+pi*3, contentObj=4+pi*3, imgObj=5+pi*3;
+      off[pageObj]=len; push(pageObj+' 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 '+pageW.toFixed(2)+' '+pageH.toFixed(2)+'] /Resources << /XObject << /Im0 '+imgObj+' 0 R >> >> /Contents '+contentObj+' 0 R >>\nendobj\n');
+      var content=''; cells.forEach(function(c){ var cw=c[2]*P, ch=c[3]*P, s=Math.min(cw/imgW, ch/imgH), dw=imgW*s, dh=imgH*s;
+        var x=(c[0]*P+(cw-dw)/2).toFixed(2), y=(pageH-c[1]*P-(ch+dh)/2).toFixed(2); content+='q '+dw.toFixed(2)+' 0 0 '+dh.toFixed(2)+' '+x+' '+y+' cm /Im0 Do Q\n'; });
+      var cb=enc.encode(content);
+      off[contentObj]=len; push(contentObj+' 0 obj\n<< /Length '+cb.length+' >>\nstream\n'); push(cb); push('\nendstream\nendobj\n');
+      off[imgObj]=len; push(imgObj+' 0 obj\n<< /Type /XObject /Subtype /Image /Width '+imgW+' /Height '+imgH+' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length '+jpeg.length+' >>\nstream\n'); push(jpeg); push('\nendstream\nendobj\n'); }
+    var total=2+N*3, xo=len, xref='xref\n0 '+(total+1)+'\n0000000000 65535 f \n'; for(var i=1;i<=total;i++)xref+=pad(off[i])+' 00000 n \n';
+    push(xref); push('trailer\n<< /Size '+(total+1)+' /Root 1 0 R >>\nstartxref\n'+xo+'\n%%EOF');
+    var out=new Uint8Array(len),o=0; parts.forEach(function(u){ out.set(u,o); o+=u.length; }); return out; }
   // ---- ZIP (STORE / no compression — CSP-safe, no lib) for the "download all" batch ----
   function crc32(buf){ var t=crc32._t; if(!t){ t=crc32._t=[]; for(var n=0;n<256;n++){ var c=n; for(var k=0;k<8;k++) c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1); t[n]=c>>>0; } }
     var crc=0xFFFFFFFF; for(var i=0;i<buf.length;i++) crc=(crc>>>8)^t[(crc^buf[i])&0xFF]; return (crc^0xFFFFFFFF)>>>0; }
@@ -6370,12 +6388,14 @@
     var orig=btn?btn.textContent:''; if(btn)btn.disabled=true;
     Promise.all([fetchImgDataUri('/api/supply/asset/gotham-book'),fetchImgDataUri('/api/supply/asset/gotham-bold'),fetchImgDataUri('/api/supply/asset/db')]).then(function(a){
       var base={po:po,dispatchOrder:dispatchOrder,client:client,address:address,fontBook:a[0],fontBold:a[1],dbUri:a[2]};
-      preloadFonts(base).then(function(){ var files=[], i=0;
+      preloadFonts(base).then(function(){ var pages=[], i=0;
         function next(){ if(i>=items.length) return finish();
           var r=items[i++]; if(btn)btn.textContent='Rendering '+i+'/'+items.length+'…';
           rasterizeSVGCanvas(buildLabelSVG('crossdock',r,base),2.5,function(cv){ if(!cv)return next();
-            cv.toBlob(function(jb){ if(!jb)return next(); jb.arrayBuffer().then(function(ab){ files.push({name:kindPrefix('crossdock')+zipSafe(r.sku)+'_A4.pdf',data:pdfA4(new Uint8Array(ab),cv.width,cv.height,MOLD_4)}); next(); }); },'image/jpeg',0.92); }); }
-        function finish(){ if(btn){btn.textContent=orig;btn.disabled=false;} if(!files.length){alert('Nothing rendered');return;} bcDownloadBlob(zipname,new Blob([zipStore(files)],{type:'application/zip'})); }
+            cv.toBlob(function(jb){ if(!jb)return next(); jb.arrayBuffer().then(function(ab){ pages.push({jpeg:new Uint8Array(ab),imgW:cv.width,imgH:cv.height}); next(); }); },'image/jpeg',0.92); }); }
+        function finish(){ if(btn){btn.textContent=orig;btn.disabled=false;} if(!pages.length){alert('Nothing rendered');return;}
+          var name=String(zipname||'crossdock_labels').replace(/\.zip$/i,'')+'.pdf';   // one consolidated PDF (no zip)
+          bcDownloadBlob(name,new Blob([pdfA4Multi(pages,MOLD_4)],{type:'application/pdf'})); }
         next();
       });
     }); }

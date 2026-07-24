@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.076 - Crossdock labels download as one consolidated PDF (no zip)
+
+Crossdock box labels now download as a **single multi-page PDF** (one A4 page per crossdock SKU) instead of a
+zip of one-page PDFs — both the supplier portal and the admin PO ▸ Client/FBA "⤓ Crossdock" button. New
+`pdfA4Multi()` (pure, no lib) in portal-view.js + inject.html; filename `<PO>_crossdock_labels.pdf`.
+
 ## v26.075 - Supplier portal: ASN Pallet Labels also under Barcodes & Labels
 
 The **⤓ ASN Pallet Labels** button (Coghlans branch) now also appears on the **Barcodes & Labels** tab, not
