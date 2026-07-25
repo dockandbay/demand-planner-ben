@@ -581,13 +581,17 @@ app.get('/', async (_req, res) => {
     // Per-user landing slug + hide #app until the router lands, so a plain load goes straight to the user's page
     // (default SUPPLY ▸ Purchase Orders) with no DEMAND→SUPPLY flash. inject.html reveals #app once routed.
     let _land = 'supply/purchase-orders'; try { _land = (await permsFor(_req)).landing_page || _land; } catch (_) {}
-    // Hide #app until the router lands on ANY non-demand-native route (no hash, or a #/supply|config|scenario… hash) —
-    // not just plain loads. A refresh at #/supply/... used to leave #app visible, so the static DEMAND filter bar
-    // painted for a beat before the harness switched to SUPPLY (the flash). inject.html reveals #app once routed;
-    // the 3s timer is a failsafe. Demand-native views (planning/demand/buy/fba/exec/reports) paint themselves, no flash.
-    const LANDING_JS = '<script>window.__HZ_LANDING=' + JSON.stringify(_land) + ';(function(){var a=document.getElementById("app");if(a&&!/^#\\/?(planning|demand|buy|fba|exec|reports)(\\/|$)/.test(location.hash||""))a.style.visibility="hidden";setTimeout(function(){var b=document.getElementById("app");if(b)b.style.visibility="";},3000);})();</script>';
+    // 3s failsafe reveal (belt-and-suspenders — the harness removes hz-hide-app once routed). The actual flash
+    // prevention is HEAD_NOFLASH below: it must run in <head>, BEFORE the browser paints the static DEMAND filter
+    // bar. A script at the end of <body> runs too late (the pills have already painted → flash).
+    const LANDING_JS = '<script>window.__HZ_LANDING=' + JSON.stringify(_land) + ';setTimeout(function(){document.documentElement.classList.remove("hz-hide-app");var b=document.getElementById("app");if(b)b.style.visibility="";},3000);</script>';
     const injectTail = LANDING_JS + FBADIMS_JS + FIT + (DEV ? loadInject() : SUPPLY_INJECT).split('__APP_VERSION__').join(APP_VERSION) + '</body>';
     html = html.replace('</body>', () => injectTail);
+    // Flash prevention — MUST be in <head> so it runs before the body (the static DEMAND filter bar) is painted.
+    // If the landing route isn't a demand-native view, hide #app via a CSS class from the very first paint; the
+    // harness removes hz-hide-app once it has routed (and there's a 3s failsafe in LANDING_JS).
+    const HEAD_NOFLASH = '<style>html.hz-hide-app #app{visibility:hidden}</style><script>try{if(!/^#\\/?(planning|demand|buy|fba|exec|reports)(\\/|$)/.test(location.hash||""))document.documentElement.classList.add("hz-hide-app");}catch(e){}</script>';
+    html = html.replace('<head>', () => '<head>' + HEAD_NOFLASH);
     // Inject the configured USD→GBP rate into both clients (CF_GBP in inject.html, AF_GBP in the artefact).
     html = html.replace(/var CF_GBP\s*=\s*[\d.]+/, 'var CF_GBP=' + GBP_RATE).replace(/var AF_GBP\s*=\s*[\d.]+/, 'var AF_GBP=' + GBP_RATE);
     if (IS_SANDBOX) {

@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.120 - DEMAND flash on refresh — actually fixed (head-level)
+
+The v26.118 attempt hid `#app` from a script at the END of `<body>`, which runs after the browser has already
+painted the static DEMAND filter bar (so the pills still flashed). Moved the guard into `<head>`: a CSS class
+`hz-hide-app` is added before the body is parsed when the route isn't demand-native, so `#app` is hidden from
+the first paint; the harness removes the class once routed (3s failsafe).
+
 ## v26.119 - Deposit at-risk button fits its two lines
 
 Smaller text (10px) + auto height + wrapping so "⚠ deposit at risk / assign X" fits the button box.

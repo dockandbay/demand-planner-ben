@@ -8300,9 +8300,9 @@
   function boot(){ try{ if(ME===null)fetchMe(); ensureRoot(); ensureNavButton(); ensureBellButton(); ensureActivityButton(); ensureSuggestButton(); ensureScenarioRoot(); ensureScenarioButton(); ensureConfigButton(); ensureProductButton();
     if(!_routed){ _routed=true; try{ if(/^#\/?(supply|config|scenario|demand|reports|buy|fba|planning|exec)(\/|$)/.test(location.hash)) applyRoute();
       else { var _land=(window.__HZ_LANDING||'supply/purchase-orders').replace(/^#?\/?/,''); location.hash='#/'+_land; applyRoute(); }   // no hash → per-user landing slug (server-injected), default SUPPLY ▸ Purchase Orders
-      var _a=document.getElementById('app'); if(_a)_a.style.visibility='';   // reveal once routed (server hid it to avoid the DEMAND→SUPPLY flash)
-    }catch(e){ var _ar=document.getElementById('app'); if(_ar)_ar.style.visibility=''; } }
-  }catch(e){ var _a2=document.getElementById('app'); if(_a2)_a2.style.visibility=''; if(window.console)console.log('[SUPPLY] boot error',e&&e.message); } }
+      document.documentElement.classList.remove('hz-hide-app'); var _a=document.getElementById('app'); if(_a)_a.style.visibility='';   // reveal once routed (server hid it via hz-hide-app to avoid the DEMAND→SUPPLY flash)
+    }catch(e){ document.documentElement.classList.remove('hz-hide-app'); var _ar=document.getElementById('app'); if(_ar)_ar.style.visibility=''; } }
+  }catch(e){ document.documentElement.classList.remove('hz-hide-app'); var _a2=document.getElementById('app'); if(_a2)_a2.style.visibility=''; if(window.console)console.log('[SUPPLY] boot error',e&&e.message); } }
   if(window.console)console.log('[SUPPLY] inject __APP_VERSION__ executing');
   boot(); document.addEventListener('DOMContentLoaded',boot); window.addEventListener('load',boot);
   setTimeout(boot,600); setTimeout(boot,1800); setTimeout(boot,4000);
