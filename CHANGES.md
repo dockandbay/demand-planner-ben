@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.119 - Deposit at-risk button fits its two lines
+
+Smaller text (10px) + auto height + wrapping so "⚠ deposit at risk / assign X" fits the button box.
+
 ## v26.118 - Fix DEMAND flash on refresh + 2-row at-risk button
 
 - **No more DEMAND flash:** refreshing on a SUPPLY page (e.g. `#/supply/purchase-orders`) no longer shows the
