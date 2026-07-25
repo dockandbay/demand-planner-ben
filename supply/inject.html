@@ -4884,11 +4884,24 @@
     // Always refetch THIS PO's row so the drawer shows current data (poBy may be stale after an edit elsewhere —
     // e.g. a "pay" on the Payments Due report). Cheap single-row fetch; falls back to the full list if needed.
     fetch('/api/supply/po-row/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(arr){
-        var rr=Array.isArray(arr)?arr[0]:null; if(rr){ poBy[po]=rr; loadPoDetail(po,'DRAWER',tab); return; }
-        if(poBy[po]){ loadPoDetail(po,'DRAWER',tab); return; }
+        var rr=Array.isArray(arr)?arr[0]:null; if(rr){ poBy[po]=rr; drawerFastPaint(po,tab); loadPoDetail(po,'DRAWER',tab); return; }
+        if(poBy[po]){ drawerFastPaint(po,tab); loadPoDetail(po,'DRAWER',tab); return; }
         return fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(rows){ (rows||[]).forEach(function(x){poBy[x.po]=x;}); cache['purchase-orders']=rows; loadPoDetail(po,'DRAWER',tab); }); })
       .catch(function(e){ if(poBy[po]){ loadPoDetail(po,'DRAWER',tab); return; } var b=document.getElementById('podet-DRAWER'); if(b)b.innerHTML='<span style="color:#dc2626">Could not load PO: '+esc(e.message||e)+'</span>'; });
   }
+  // Progressive drawer open: PAYMENTS renders from the already-loaded po-row, so paint it IMMEDIATELY (~0.4s)
+  // instead of waiting ~3s for po-detail's ~13 sub-queries. loadPoDetail then swaps in the full detail (Order
+  // Plan / Docs / Timeline / additional costs …). Wrapped in try/catch → if the empty-detail render ever throws,
+  // it silently falls back to the old behaviour (a blank "Loading…" until po-detail arrives).
+  function __emptyPoDetail(){ return { lines:[], deposit:[], payments:[], flexport:{}, dtc:{}, crossdock_lines:[],
+    sup_invoice:{}, sup_docs:[], client_docs:[], all_docs:[], notes:[], subs:[], line_costs:{}, sup_completion:{},
+    crossdock_shipped:[], additional_costs:[], erp_complete:false, __fast:true }; }
+  function drawerFastPaint(po,tab){ try{
+    var pd=document.getElementById('podet-DRAWER'); if(!pd||!poBy[po])return;
+    pd.innerHTML='<div class="mut tiny" id="podet-fastnote" style="padding:2px 6px 6px;color:#94a3b8">⏳ loading full detail…</div>'+poDetailHTML(po,__emptyPoDetail(),'DRAWER');
+    bindPay(po,'DRAWER');
+    if(tab && tab!=='pay'){ var t=pd.querySelector('.potab[data-pt="'+esc(tab)+'"]'); if(t)t.click(); }
+  }catch(e){} }
   function closePODrawer(silent){ var bg=document.getElementById('podrawer-bg'); if(bg&&bg.parentNode)bg.parentNode.removeChild(bg);
     if(!silent){ _poPatchRow=_poDrawerPrevPatch; _poRefresh=_poDrawerPrevRefresh; _poDrawerPrevPatch=null; _poDrawerPrevRefresh=null; } }
   // (Removed dead unassignedTable + bindAssign — superseded by the shipments-assign flow. v25.652)

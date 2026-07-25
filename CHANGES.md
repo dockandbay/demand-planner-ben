@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.123 - PO drawer opens instantly (progressive load)
+
+Opening a PO drawer waited ~3s for `/api/supply/po-detail` (≈13 sub-queries, each paying the DB round-trip)
+before showing anything — even though the **PAYMENTS tab renders from the single po-row we already fetch in
+~0.4s**. Now the drawer **paints PAYMENTS immediately** from the po-row and shows a small "⏳ loading full
+detail…" note; `loadPoDetail` then swaps in the full detail (Order Plan, Docs, Timeline, additional costs, etc.)
+when it arrives. So the drawer opens ~7× faster to first content. The fast paint is wrapped in try/catch — if
+anything's off it silently falls back to the previous behaviour. Inline expand is unchanged.
+
 ## v26.122 - Lighter PO grid (thin Complete rows)
 
 The PO grid loaded all ~1,375 POs in full, but ~85% are **Complete** history that's rarely opened. Now Complete
