@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.115 - Payment email in the supplier's currency
+
+The payment-confirmed email now shows the amount in the **supplier's own currency** (CONFIG ▸ Suppliers →
+default currency) with its symbol — subject *"Payment £5,762.16 made to …"*, body *"… for £5,762.16 GBP"* —
+instead of a hardcoded USD/$. Falls back to USD/$ where a supplier has no currency set.
+
 ## v26.114 - Deposit assign UX + at-risk cap + deposits PO-view dropdown
 
 - **PO ▸ PAYMENTS, Start deposit (calc/est):** the draw/assign button now sits **inline** with the deposit

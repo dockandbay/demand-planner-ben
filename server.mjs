@@ -2944,11 +2944,12 @@ async function emailPaymentConfirmed(runDate, supplier, bankAmt, bankCcy) {
   const to = Array.from(new Set(us.map(u => u.email)));
   const cc = ['ben@dockandbay.com', 'accounts@dockandbay.com'];
   const run = await paymentRunDetail(runDate, supplier);
-  const ba = Number(String(bankAmt == null ? '' : bankAmt).replace(/,/g, ''));
-  const useAlt = (bankCcy && bankCcy !== 'USD' && ba > 0);
-  const amtNum = useAlt ? fmtMoney2(ba) : fmtMoney2(run.total);
-  const amtCcy = useAlt ? bankCcy : 'USD';
-  const payAmt = amtNum + ' ' + amtCcy;
+  // Amount is shown in the SUPPLIER's currency (suppliers.default_currency in CONFIG), with its symbol.
+  const supCcy = (await pool.query(`SELECT upper(coalesce(nullif(default_currency,''),'USD')) c FROM planner.suppliers WHERE lower(trim(name))=lower(trim($1)) LIMIT 1`, [supplier])).rows[0]?.c || 'USD';
+  const CCY_SYM = { USD: '$', GBP: '£', EUR: '€', AUD: 'A$', CAD: 'C$', NZD: 'NZ$', CNY: '¥', JPY: '¥', HKD: 'HK$', SGD: 'S$' };
+  const sym = CCY_SYM[supCcy] || '';
+  const amtNum = fmtMoney2(run.total);
+  const payAmt = sym + amtNum + ' ' + supCcy;
   const inv = 'SUPPLIER-PAYMENT-' + (run.supplier_code ? run.supplier_code + '-' : '') + run.dt;
   const cell = 'border:1px solid #cccccc;padding:4px 8px', hcell = cell + ';background:#f2f2f2;text-align:left;font-weight:bold';
   const rowsHtml = run.lines.map(l => `<tr><td style="${cell}">${escHtml(l.reference || '')}</td><td style="${cell};text-align:right">${fmtMoney2(l.amount)}</td><td style="${cell}">${escHtml(l.type || '')}</td><td style="${cell}">${escHtml(l.prod_no || '')}</td><td style="${cell}">${escHtml(l.deposit_ref || '')}</td></tr>`).join('');
@@ -2958,7 +2959,7 @@ async function emailPaymentConfirmed(runDate, supplier, bankAmt, bankCcy) {
     + `<p style="margin:0 0 10px">Please see below details as confirmed for the recent payment made to <b>${escHtml(supplier)}</b> for <b>${escHtml(payAmt)}</b>.</p>`
     + `<p style="margin:0 0 10px"><b>Supplier:</b> ${escHtml(supplier)}<br><b>Payment amount:</b> ${escHtml(payAmt)}<br><b>Payment reference:</b> ${escHtml(inv)}</p>`
     + `<table style="border-collapse:collapse;font-size:13px"><thead><tr><th style="${hcell}">Reference</th><th style="${hcell};text-align:right">Amount</th><th style="${hcell}">Type</th><th style="${hcell}">Production ref</th><th style="${hcell}">Deposit ref</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>`;
-  const subject = `Payment $${fmtMoney2(run.total)} made to ${supplier}`;
+  const subject = `Payment ${sym}${amtNum} made to ${supplier}`;
   // Always return a preview (so the sandbox can pop it up for testing); only actually send if someone's opted in.
   const preview = { to, cc, subject, html, recipients: to.length };
   const result = to.length ? await sendResendEmail({ to, cc, subject, html }) : { skipped: 'no opted-in recipients' };
