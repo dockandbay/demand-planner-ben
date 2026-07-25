@@ -2799,9 +2799,11 @@
           var _btn=((startOwed && startUnpaid && !r.deposit_ref)?payFillBtn('pay_start_deposit_assigned','pay_start_deposit_date',r.start_calc)   // direct cash
               :(startOwed && r.deposit_ref && !(n(r.start_assigned)>0))?payFillBtn('pay_start_deposit_assigned','pay_start_deposit_date',(capped?drawn:r.start_calc),'assign')   // draw from the deposit pool
               :'');
-          // amount on line 1; the "of X term · Y → dest" note + assign button on a 2nd line so they don't push the
-          // Likely-pay-date / Status columns off-screen
-          return '<td style="white-space:normal">'+money(capped?drawn:r.start_calc)+((_note||_btn)?'<div class="tiny" style="margin-top:2px">'+_note+(_note&&_btn?' ':'')+_btn+'</div>':'')+'</td>'; })()
+          // amount + the (normal) draw/assign button on line 1; the "of X term · Y → dest" note on line 2; a
+          // .dep-atrisk-slot below for the async "deposit at risk · assign X" extra-allocation button (bindPay fills it)
+          return '<td style="white-space:normal">'+money(capped?drawn:r.start_calc)+(_btn?' '+_btn:'')
+            +(_note?'<div class="tiny" style="margin-top:2px">'+_note+'</div>':'')
+            +'<div class="dep-atrisk-slot" data-po="'+esc(r.po)+'"></div></td>'; })()
       +'<td class="l">'+payIn(ep,'pay_start_deposit_assigned',r.start_assigned,false,false,(r.deposit_ref&&r.deposit_avail!=null)?('data-avail="'+esc(Math.round((Number(r.deposit_avail||0)+Number(r.start_assigned||0))*100)/100)+'"'):'')+'</td>'
       +'<td class="l">'+payIn(ep,'pay_start_deposit_date',r.start_date,true,!(n(r.start_assigned)>0))+'</td>'
       +'<td class="l" style="white-space:normal">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0 && !poFullyPaid(r))+(r.deposit_avail!=null?'<div class="mut tiny" style="margin-top:2px">'+money(r.deposit_avail)+' avail'+(r.deposit_fx!=null&&r.deposit_fx!==''?' · FX '+Number(r.deposit_fx).toFixed(4):'')+'</div>':'')+'</td>'
@@ -3048,14 +3050,22 @@
     document.querySelectorAll('#podet-'+i+' .dep-ctx').forEach(function(el){ var p=el.dataset.po;
       fetch('/api/supply/deposit-context/'+encodeURIComponent(p)).then(function(r){return r.json();}).then(function(d){ if(!d||!d.ref){el.innerHTML='';return;}
         var head='<b>Deposit '+esc(d.ref)+'</b> · <b>'+money(d.remaining)+'</b> remaining · '+d.other_unalloc+' other open PO'+(d.other_unalloc===1?'':'s')+' with no start deposit allocated';
+        // the actionable "assign extra" button now lives in the Start-deposit calc/est cell (below); the box keeps context only
         var sug=''; if(d.suggest_extra!=null && d.suggest_extra>0.009){
-          sug='<div style="margin-top:6px">Up to <b>'+money(d.suggest_extra)+'</b> of the deposit can be allocated to this PO'+(d.is_last?' (last unallocated PO on the deposit)':'')+'. <button class="save-btn dep-ctx-fill" data-amt="'+d.suggest_extra+'" style="margin-left:6px;background:#dcfce7;border:1px solid #86efac;color:#166534">Assign '+money(d.suggest_extra)+'</button></div>'; }
+          sug='<div style="margin-top:6px">Up to <b>'+money(d.suggest_extra)+'</b> of the deposit can be allocated to this PO'+(d.is_last?' (last unallocated PO on the deposit)':'')+' — capped at this PO&rsquo;s value.</div>'; }
         var risk=''; if(d.at_risk){
           risk='<div style="margin-top:6px;background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;border-radius:6px;padding:7px 9px"><b>⚠ Deposit at risk</b> — '+money(d.remaining)+' remaining is over 50% of the '+money(d.unalloc_value)+' open PO value on '+esc(d.ref)+' with no start deposit allocated. It may be over-funded / stranded — allocate more or reassign.</div>'; }
         el.innerHTML='<div style="border:1px solid #cbd5e1;border-radius:7px;padding:8px 10px;font-size:12px;background:#f8fafc">'+head+sug+risk+'</div>';
-        var fb=el.querySelector('.dep-ctx-fill'); if(fb)fb.onclick=function(){ var amt=fb.dataset.amt;
-          var inp=document.querySelector('#podet-'+i+' [data-field="pay_start_deposit_assigned"]'); var dt=document.querySelector('#podet-'+i+' [data-field="pay_start_deposit_date"]');
-          if(inp){ inp.value=amt; if(dt&&!dt.value)dt.value=new Date().toISOString().slice(0,10); inp.dispatchEvent(new Event('change',{bubbles:true})); } }; })
+        // inline "deposit at risk · assign X" button in the Start-deposit calc/est cell — fills the start-deposit amount
+        var fill=function(amt){ var inp=document.querySelector('#podet-'+i+' [data-field="pay_start_deposit_assigned"]'); var dt=document.querySelector('#podet-'+i+' [data-field="pay_start_deposit_date"]');
+          if(inp){ inp.value=amt; if(dt&&!dt.value)dt.value=new Date().toISOString().slice(0,10); inp.dispatchEvent(new Event('change',{bubbles:true})); } };
+        var slot=document.querySelector('#podet-'+i+' .dep-atrisk-slot[data-po="'+(window.CSS&&CSS.escape?CSS.escape(p):p)+'"]');
+        if(slot && d.suggest_extra!=null && d.suggest_extra>0.009){
+          var lbl=(d.at_risk?'⚠ deposit at risk · ':'')+'assign '+money(d.suggest_extra);
+          var stl=d.at_risk?'background:#fef2f2;border:1px solid #fca5a5;color:#991b1b':'background:#dcfce7;border:1px solid #86efac;color:#166534';
+          slot.innerHTML='<button class="save-btn dep-ctx-fill2" data-amt="'+d.suggest_extra+'" title="allocate this extra start deposit to this PO from the remaining pool" style="margin-top:4px;white-space:nowrap;'+stl+'">'+lbl+'</button>';
+          var fb2=slot.querySelector('.dep-ctx-fill2'); if(fb2)fb2.onclick=function(){ fill(fb2.dataset.amt); };
+        } })
         .catch(function(){ el.innerHTML=''; }); });
     function poGone(){ invalidateDerived(); delete cache['purchase-orders']; if(_poRefresh)_poRefresh(); else selectSection('purchase-orders'); }
     bindActMark(document.getElementById('podet-'+i));   // inline Ⓐ action markers (tooltip + snooze) in the detail
@@ -4086,11 +4096,11 @@
   // Deposit register (under PRODUCTIONS) — editable + assign each deposit to a production inline.
   function renderDepRegister(b, deps, prods){ _prodList=prods; var pend=_pendingDep; _pendingDep=null;   // arriving from a cash-flow deposit link → filter to that ref
     var st={f:pend?'all':'remaining',q:pend?String(pend).toLowerCase():''}; var DEP_EDIT={};   // default = open deposits that still hold money
-    var depProdAll=false;   // Assigned productions column: false = only productions with OPEN POs; true = all
+    var depPoView='unalloc';   // linked-PO column view: 'unalloc' (default) = only POs with no start deposit yet · 'open' = all non-complete · 'all' = every linked PO
     var FILT=[['remaining','Remaining · open'],['open','To assign'],['closed','Closed'],['all','All']];
     b.innerHTML=lookupDatalists()+'<div class="bar">'+FILT.map(function(f){return '<span class="pill'+(f[0]==='remaining'?' active':'')+'" data-f="'+f[0]+'"'+(f[0]==='remaining'?' title="open (not closed) deposits that still have money remaining"':'')+'>'+f[1]+'</span>';}).join('')
       +'<button class="save-btn" id="dep-new">+ Deposit</button>'
-      +'<button class="tool-badge bg-neutral" id="dep-prodtoggle" style="cursor:pointer;border:none;margin-left:4px" title="Linked purchase orders: show only UNALLOCATED POs (no start deposit allocated yet), or all linked POs">POs: unallocated</button>'
+      +'<label style="font-size:12px;margin-left:6px;color:#475569">POs: <select id="dep-poview" style="font-size:12px;padding:2px 5px;border:1px solid #cbd5e1;border-radius:5px;background:#fff" title="Which linked purchase orders to list in the deposit&rsquo;s POs column"><option value="unalloc">Unallocated</option><option value="open">Open</option><option value="all">All linked</option></select></label>'
       +'<input class="flt" id="dep-q" placeholder="Filter reference / supplier…"><span class="count" id="dep-cnt"></span></div>'
       +'<style>#deptbl{table-layout:fixed;width:100%}#deptbl td,#deptbl th{white-space:normal;overflow-wrap:break-word;vertical-align:top}#deptbl .fci{width:100%;box-sizing:border-box;min-width:0;text-align:left}'
       +'#deptbl .datewrap{display:flex;width:100%;max-width:100%}#deptbl .datewrap .dateinp{flex:1 1 auto;min-width:0;width:auto!important;text-align:left!important}#deptbl .datewrap .datepick{flex:0 0 auto}</style>'
@@ -4133,7 +4143,7 @@
       var c_est = '<td style="width:84px;white-space:nowrap'+(estOver?';color:#dc2626;font-weight:700':'')+'"'+(estOver?' title="Estimated allocation exceeds the remaining deposit">':'>')+(d.is_deposit?money(d.est_alloc):'')+'</td>';
       // purchase orders linked to this deposit (open-only by default; toggle shows all) — each links to the
       // PO opened on its PAYMENTS tab; the cell wraps so long lists flow onto multiple lines.
-      var ap=(depProdAll ? d.linked_pos : d.pos_unalloc)||'';   // default = only UNALLOCATED linked POs (no start deposit yet); toggle → all linked POs
+      var ap=(depPoView==='all' ? d.linked_pos : (depPoView==='open' ? d.pos_open : d.pos_unalloc))||'';   // Unallocated (default) / Open / All linked
       var poLinks = ap ? ap.split(',').map(function(p){ p=p.trim(); return p?'<button class="lnk-btn dep-po-link" data-po="'+esc(p)+'" title="open this PO — payments tab" style="font-size:9px">'+esc(p)+'</button>':''; }).filter(Boolean).join(' ') : '<span class="mut tiny">—</span>';
       var c_asg = '<td class="l" style="white-space:normal;min-width:480px;max-width:640px;line-height:1.7">'+poLinks+'</td>';
       var act;
@@ -4191,7 +4201,7 @@
     b.querySelectorAll('.bar .pill').forEach(function(p){p.onclick=function(){b.querySelectorAll('.bar .pill').forEach(function(x){x.classList.remove('active');});p.classList.add('active');st.f=p.dataset.f;draw();};});
     document.getElementById('dep-q').oninput=function(){st.q=this.value.toLowerCase();draw();};
     document.getElementById('dep-new').onclick=function(){ shipPost('/api/supply/deposit-create',{is_deposit:true},function(){ prodTab='deposits'; delete cache['productions']; selectSection('productions'); }); };
-    document.getElementById('dep-prodtoggle').onclick=function(){ depProdAll=!depProdAll; this.textContent=depProdAll?'POs: all':'POs: unallocated'; draw(); };
+    var _pv=document.getElementById('dep-poview'); if(_pv){ _pv.value=depPoView; _pv.onchange=function(){ depPoView=this.value; draw(); }; }
     if(pend){ var pqi=document.getElementById('dep-q'); if(pqi)pqi.value=pend; b.querySelectorAll('.bar .pill').forEach(function(x){x.classList.toggle('active',x.dataset.f==='all');}); }
     draw(); }
   // Pallet rebalance preview/apply modal (from the "Over 20 pallets" action). Shows the proposed per-PO

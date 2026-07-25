@@ -3,6 +3,20 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.114 - Deposit assign UX + at-risk cap + deposits PO-view dropdown
+
+- **PO ▸ PAYMENTS, Start deposit (calc/est):** the draw/assign button now sits **inline** with the deposit
+  amount (e.g. `1,385.10  assign ▸▸`); the term note drops to a line below. The **"deposit at risk · assign X"**
+  extra-allocation button now appears **in that same cell**, under the amount (the analysis box keeps the
+  context text only, no duplicate button).
+- **Deposit at-risk fix:** the suggested extra allocation is now **capped at the PO's own value** (final
+  invoice if set, else line value / estimate) — it can no longer suggest more than the PO is worth
+  (e.g. PO-55AUWK3 suggested 10,147 against a 2,000 PO; now capped to 2,000).
+- **Deposits register:** the "POs: …" pill is now a proper **dropdown** — **Unallocated** (default) · **Open** ·
+  **All linked**.
+
+No schema/endpoint additions (deposit-context calc refined only).
+
 ## v26.113 - Payment-confirmed notifications + Payments Report "Paid USD"
 
 A payment "run" (date + supplier) is **confirmed paid** once its bank amount + currency are applied in the

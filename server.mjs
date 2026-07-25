@@ -2625,7 +2625,11 @@ app.get('/api/supply/deposit-context/:po', async (req, res) => {
     const estOthers = Math.round(others.reduce((a, x) => a + Number(x.est || 0), 0) * 100) / 100;
     const unallocValue = Math.round(rows.reduce((a, x) => a + Number(x.val || 0), 0) * 100) / 100;
     const isLast = rows.some(x => x.po === po) && rows.length <= 1;
-    const extra = Math.max(0, Math.round((remaining - estOthers) * 100) / 100);
+    // this PO can't take more start deposit than its own order value (final invoice if set, else the estimate) —
+    // so the suggested extra is capped at that value, never the whole remaining pool.
+    const meVal = (rows.find(x => x.po === po) || {}).val;
+    const thisCap = meVal != null ? Number(meVal) : Infinity;
+    const extra = Math.max(0, Math.min(Math.round((remaining - estOthers) * 100) / 100, thisCap));
     res.json({ ref, remaining: Math.round(remaining * 100) / 100, other_unalloc: others.length,
       est_others: estOthers, unalloc_value: unallocValue, is_last: isLast,
       suggest_extra: (isLast || estOthers < remaining) ? extra : null,
