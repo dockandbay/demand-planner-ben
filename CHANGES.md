@@ -3,6 +3,28 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.113 - Payment-confirmed notifications + Payments Report "Paid USD"
+
+A payment "run" (date + supplier) is **confirmed paid** once its bank amount + currency are applied in the
+Payments Report. On that confirmation:
+
+- **New per-user setting** `receive_payment_notification` (CONFIG ▸ Portal users → **Pay notify** On/Off,
+  default Off). When On, that supplier's portal user gets a **"Payment confirmed"** event in the portal
+  RECENTS drawer and an **email**.
+- **Email** (to opted-in portal users; **cc ben@ + accounts@**): subject *"Payment $X made to {supplier}"*,
+  body *"Dear {contact}, please see below details as confirmed for the recent payment made to {supplier}
+  for {amount}"* + the line-detail table (same layout as the report's "copy for email"). Fires **once**, on
+  the unconfirmed→confirmed transition (editing an already-confirmed run won't re-send).
+- **Sandbox has no live email sender**, so the rendered email is returned and shown as a **popup preview**
+  when you confirm a run — for testing.
+- **Payments Report:** green **"Paid USD"** button per run (fills bank amount = base total, currency = USD);
+  the **Bank ccy** dropdown is narrowed.
+- **Portal Payments tab** now shows a run **only once it's confirmed** (bank amount + currency set).
+
+**Migrations:** `145_portal_payment_notification.sql` (adds the column). **Backfill (run on live + sandbox
+when ready):** `145b_payment_fx_backfill_bank_usd.sql` sets bank amount = base total, currency = USD for every
+existing run that has no bank data yet (idempotent, leaves filled runs untouched). No new env vars.
+
 ## v26.112 - PO Payments plan: second-line notes to save width
 
 On the PO ▸ PAYMENTS payment-plan table:

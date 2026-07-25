@@ -1961,7 +1961,7 @@ app.get('/api/supply/:section', async (req, res) => {
       case 'portal-users':   // CONFIG ▸ Portal Users: approved supplier-portal logins (email ↔ supplier)
         return res.json(await q(`
           SELECT u.id, u.email, u.supplier_id, coalesce(u.supplier_name, s.name, '') supplier_name,
-            coalesce(u.contact_name,'') contact_name, u.active,
+            coalesce(u.contact_name,'') contact_name, u.active, coalesce(u.receive_payment_notification,false) receive_payment_notification,
             to_char(u.created_at,'YYYY-MM-DD') created_at,
             (SELECT count(*) FROM planner.portal_sessions ps WHERE ps.email=lower(u.email) AND ps.expires_at>now())::int live_sessions
           FROM planner.supplier_portal_users u LEFT JOIN planner.suppliers s ON s.id=u.supplier_id
@@ -2775,7 +2775,7 @@ app.post('/api/supply/portal-user/:id', async (req, res) => {
   }
   if (b.email) b.email = String(b.email).trim().toLowerCase();
   return patch(res, 'planner.supplier_portal_users', 'id', req.params.id,
-    { email: 'text', supplier_id: 'bigint', supplier_name: 'text', contact_name: 'text', active: 'boolean' }, b, 'bigint');
+    { email: 'text', supplier_id: 'bigint', supplier_name: 'text', contact_name: 'text', active: 'boolean', receive_payment_notification: 'boolean' }, b, 'bigint');
 });
 // Issue a magic link (dev stub: returns the URL instead of emailing it — Diviyaj wires real email for prod).
 app.post('/api/supply/portal-magic/:id', async (req, res) => {
@@ -2906,6 +2906,59 @@ async function emailDocSubmit(po, filename, by) {
     + '<p>Document: <b>' + (filename || 'document') + '</b><br>Submitted by: ' + (by || 'supplier') + '</p>'
     + '<p><a href="' + link + '">Review it on the PO ▸ Documents tab in HORIZON</a></p>';
   return sendResendEmail({ to: emails, subject: 'Supplier submitted a document for approval — ' + po, html });
+}
+// ── Payment-confirmed notification ── a payment "run" (date + supplier) is confirmed once its bank amount +
+// currency are applied in the Payments Report. paymentRunDetail rebuilds that run's line detail (same source
+// tables + ordering as the report) so the email mirrors the on-screen "copy for email" summary exactly.
+function escHtml(s){ return String(s==null?'':s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
+function fmtMoney2(n){ return Number(n||0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+async function paymentRunDetail(runDate, supplier) {
+  const rows = (await pool.query(`
+    SELECT reference, round(amount,2) amount, type, deposit_ref, prod_no FROM (
+      SELECT o.po reference, o.pay_completion_assigned amount, 'Completion' type, coalesce(o.deposit_ref,'') deposit_ref, coalesce(o.prod_no,'') prod_no, to_char(o.pay_completion_date,'YYYY-MM-DD') dt, o.supplier_name sup
+        FROM planner.purchase_orders o WHERE o.pay_completion_date IS NOT NULL AND coalesce(o.pay_completion_assigned,0)>0
+      UNION ALL SELECT o.po, o.pay_balance_1_amount, 'Balance', coalesce(o.deposit_ref,''), coalesce(o.prod_no,''), to_char(o.pay_balance_1_date,'YYYY-MM-DD'), o.supplier_name
+        FROM planner.purchase_orders o WHERE o.pay_balance_1_date IS NOT NULL AND coalesce(o.pay_balance_1_amount,0)>0
+      UNION ALL SELECT o.po, o.pay_balance_2_amount, 'Balance', coalesce(o.deposit_ref,''), coalesce(o.prod_no,''), to_char(o.pay_balance_2_date,'YYYY-MM-DD'), o.supplier_name
+        FROM planner.purchase_orders o WHERE o.pay_balance_2_date IS NOT NULL AND coalesce(o.pay_balance_2_amount,0)>0
+      UNION ALL SELECT coalesce(nullif(reference,''),description,''), amount, 'Deposit', '', coalesce(prod_no,''), to_char(date_paid,'YYYY-MM-DD'), supplier_name
+        FROM planner.deposits WHERE is_deposit=true AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0
+      UNION ALL SELECT coalesce(nullif(reference,''),description,''), amount, 'Other', '', coalesce(prod_no,''), to_char(date_paid,'YYYY-MM-DD'), supplier_name
+        FROM planner.deposits WHERE is_deposit=false AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0
+    ) z WHERE dt=$1 AND lower(trim(sup))=lower(trim($2))
+    ORDER BY CASE type WHEN 'Deposit' THEN 0 WHEN 'Completion' THEN 1 WHEN 'Balance' THEN 2 ELSE 3 END`, [runDate, supplier])).rows;
+  const total = Math.round(rows.reduce((a, x) => a + Number(x.amount || 0), 0) * 100) / 100;
+  const code = (await pool.query(`SELECT s.code FROM planner.suppliers s WHERE lower(trim(s.name))=lower(trim($1)) LIMIT 1`, [supplier])).rows[0]?.code || '';
+  return { supplier, supplier_code: code, dt: runDate, total, lines: rows };
+}
+// Email the supplier's opted-in portal users (receive_payment_notification=true) when a payment is confirmed.
+// cc ben@ + accounts@. Amount shown in the bank currency if it isn't USD, else the base USD total. Best-effort.
+async function emailPaymentConfirmed(runDate, supplier, bankAmt, bankCcy) {
+  const us = (await pool.query(`SELECT lower(email) email, coalesce(contact_name,'') contact_name
+     FROM planner.supplier_portal_users
+     WHERE receive_payment_notification=true AND active=true AND coalesce(email,'')<>'' AND lower(trim(supplier_name))=lower(trim($1))`, [supplier])).rows;
+  const to = Array.from(new Set(us.map(u => u.email)));
+  const cc = ['ben@dockandbay.com', 'accounts@dockandbay.com'];
+  const run = await paymentRunDetail(runDate, supplier);
+  const ba = Number(String(bankAmt == null ? '' : bankAmt).replace(/,/g, ''));
+  const useAlt = (bankCcy && bankCcy !== 'USD' && ba > 0);
+  const amtNum = useAlt ? fmtMoney2(ba) : fmtMoney2(run.total);
+  const amtCcy = useAlt ? bankCcy : 'USD';
+  const payAmt = amtNum + ' ' + amtCcy;
+  const inv = 'SUPPLIER-PAYMENT-' + (run.supplier_code ? run.supplier_code + '-' : '') + run.dt;
+  const cell = 'border:1px solid #cccccc;padding:4px 8px', hcell = cell + ';background:#f2f2f2;text-align:left;font-weight:bold';
+  const rowsHtml = run.lines.map(l => `<tr><td style="${cell}">${escHtml(l.reference || '')}</td><td style="${cell};text-align:right">${fmtMoney2(l.amount)}</td><td style="${cell}">${escHtml(l.type || '')}</td><td style="${cell}">${escHtml(l.prod_no || '')}</td><td style="${cell}">${escHtml(l.deposit_ref || '')}</td></tr>`).join('');
+  const greet = (us.find(u => u.contact_name) || {}).contact_name || supplier;
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#111">`
+    + `<p style="margin:0 0 10px">Dear ${escHtml(greet)},</p>`
+    + `<p style="margin:0 0 10px">Please see below details as confirmed for the recent payment made to <b>${escHtml(supplier)}</b> for <b>${escHtml(payAmt)}</b>.</p>`
+    + `<p style="margin:0 0 10px"><b>Supplier:</b> ${escHtml(supplier)}<br><b>Payment amount:</b> ${escHtml(payAmt)}<br><b>Payment reference:</b> ${escHtml(inv)}</p>`
+    + `<table style="border-collapse:collapse;font-size:13px"><thead><tr><th style="${hcell}">Reference</th><th style="${hcell};text-align:right">Amount</th><th style="${hcell}">Type</th><th style="${hcell}">Production ref</th><th style="${hcell}">Deposit ref</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>`;
+  const subject = `Payment $${fmtMoney2(run.total)} made to ${supplier}`;
+  // Always return a preview (so the sandbox can pop it up for testing); only actually send if someone's opted in.
+  const preview = { to, cc, subject, html, recipients: to.length };
+  const result = to.length ? await sendResendEmail({ to, cc, subject, html }) : { skipped: 'no opted-in recipients' };
+  return { preview, result };
 }
 async function escalateCore({ initiator, kind, ref, message, user, supplierId, setEscalated, postNote }) {
   kind = ['po', 'shipment', 'sample'].includes(kind) ? kind : 'po';
@@ -5472,11 +5525,25 @@ app.post('/api/supply/payment-fx', async (req, res) => {
   const b = req.body || {};
   if (!b.run_date || !b.supplier) return res.status(400).json({ error: 'run_date + supplier required' });
   try {
+    // A run is "confirmed paid" once it has BOTH a bank amount and a bank currency. Capture the prior state so we
+    // only notify on the transition unconfirmed → confirmed (editing an already-confirmed run won't re-email).
+    const prev = (await pool.query(`SELECT paid_amount, coalesce(paid_currency,'') paid_currency FROM planner.payment_fx WHERE run_date=$1 AND supplier=$2`, [b.run_date, b.supplier])).rows[0];
+    const wasConfirmed = !!(prev && prev.paid_amount != null && prev.paid_currency);
+    const newAmt = (b.paid_amount === '' || b.paid_amount == null) ? null : b.paid_amount;
+    const newCcy = b.paid_currency || null;
     await pool.query(`INSERT INTO planner.payment_fx (run_date, supplier, paid_currency, paid_amount)
       VALUES ($1,$2,$3,$4) ON CONFLICT (run_date, supplier) DO UPDATE
       SET paid_currency=excluded.paid_currency, paid_amount=excluded.paid_amount, updated_at=now()`,
-      [b.run_date, b.supplier, b.paid_currency || null, (b.paid_amount === '' || b.paid_amount == null) ? null : b.paid_amount]);
-    res.json({ ok: true });
+      [b.run_date, b.supplier, newCcy, newAmt]);
+    const nowConfirmed = (newAmt != null && newCcy && String(newCcy).trim() !== '');
+    let emailPreview;
+    if (nowConfirmed && !wasConfirmed) {   // fire the supplier payment-confirmed notification ONCE, on transition
+      try { const em = await emailPaymentConfirmed(b.run_date, b.supplier, newAmt, newCcy);
+        // sandbox (no RESEND key) → hand the rendered email back so the UI can pop it up for testing; prod sends silently
+        if (!process.env.RESEND_API_KEY && em && em.preview) emailPreview = em.preview;
+      } catch (e) { console.error('[payment-confirmed email]', e.message); }
+    }
+    res.json({ ok: true, confirmed: nowConfirmed, emailPreview });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Shipment detail — the POs aboard a shipment (master first).
@@ -7906,22 +7973,26 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
     // ledger (which is import-only and doesn't capture plan-entered dates/amounts). Starting deposits are
     // excluded (they're a drawdown against a register deposit, not a separate cash payment).
     const _pnames = names.map(n => String(n).toLowerCase().trim());
+    // Only CONFIRMED runs show in the portal — a run (date+supplier) appears once its bank amount + currency are
+    // applied in the Payments Report (planner.payment_fx). Each line carries its supplier (sname) to match the run.
     const payments = names.length ? await q(`SELECT dt payment_date, dt payment_run_ref, reference, type, amount, deposit_ref FROM (
-        SELECT to_char(o.pay_completion_date,'YYYY-MM-DD') dt, o.po reference, round(o.pay_completion_assigned,2) amount, 'Completion' type, coalesce(o.deposit_ref,'') deposit_ref
+        SELECT to_char(o.pay_completion_date,'YYYY-MM-DD') dt, o.po reference, round(o.pay_completion_assigned,2) amount, 'Completion' type, coalesce(o.deposit_ref,'') deposit_ref, o.supplier_name sname
           FROM planner.purchase_orders o WHERE o.pay_completion_date IS NOT NULL AND coalesce(o.pay_completion_assigned,0)>0 AND lower(trim(o.supplier_name))=ANY($1)
         UNION ALL
-        SELECT to_char(o.pay_balance_1_date,'YYYY-MM-DD'), o.po, round(o.pay_balance_1_amount,2), 'Balance', coalesce(o.deposit_ref,'')
+        SELECT to_char(o.pay_balance_1_date,'YYYY-MM-DD'), o.po, round(o.pay_balance_1_amount,2), 'Balance', coalesce(o.deposit_ref,''), o.supplier_name
           FROM planner.purchase_orders o WHERE o.pay_balance_1_date IS NOT NULL AND coalesce(o.pay_balance_1_amount,0)>0 AND lower(trim(o.supplier_name))=ANY($1)
         UNION ALL
-        SELECT to_char(o.pay_balance_2_date,'YYYY-MM-DD'), o.po, round(o.pay_balance_2_amount,2), 'Balance', coalesce(o.deposit_ref,'')
+        SELECT to_char(o.pay_balance_2_date,'YYYY-MM-DD'), o.po, round(o.pay_balance_2_amount,2), 'Balance', coalesce(o.deposit_ref,''), o.supplier_name
           FROM planner.purchase_orders o WHERE o.pay_balance_2_date IS NOT NULL AND coalesce(o.pay_balance_2_amount,0)>0 AND lower(trim(o.supplier_name))=ANY($1)
         UNION ALL
-        SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(nullif(reference,''), description, ''), round(amount,2), 'Deposit', ''
+        SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(nullif(reference,''), description, ''), round(amount,2), 'Deposit', '', supplier_name
           FROM planner.deposits WHERE is_deposit=true AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND lower(trim(supplier_name))=ANY($1)
         UNION ALL
-        SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(nullif(reference,''), description, ''), round(amount,2), 'Other', ''
+        SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(nullif(reference,''), description, ''), round(amount,2), 'Other', '', supplier_name
           FROM planner.deposits WHERE is_deposit=false AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND lower(trim(supplier_name))=ANY($1)
-      ) t ORDER BY payment_date DESC NULLS LAST`, [_pnames]).catch(() => []) : [];
+      ) t WHERE EXISTS (SELECT 1 FROM planner.payment_fx f WHERE f.run_date=t.dt::date AND lower(trim(f.supplier))=lower(trim(t.sname))
+                          AND f.paid_amount IS NOT NULL AND coalesce(f.paid_currency,'')<>'')
+      ORDER BY payment_date DESC NULLS LAST`, [_pnames]).catch(() => []) : [];
     // Shipment Plan tab: all shipments this supplier is on — as consolidator (master) OR with a PO aboard
     // (so they see who consolidates their goods / whose POs share their shipment). Same builder as the admin tab.
     const nameSet = new Set(names.map(n => String(n).toLowerCase()));
@@ -7963,6 +8034,13 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
 app.get('/api/portal/recent-activity', portalAuth, async (req, res) => {
   const names = req.portal.suppliers; if (!names.length) return res.json([]);
   try {
+    // Payment-confirmed events appear only for a user who has opted in (receive_payment_notification). A payment is
+    // "confirmed" when its run carries a bank amount + currency (applied in the Payments Report).
+    const wantPay = (await pool.query(`SELECT bool_or(receive_payment_notification) f FROM planner.supplier_portal_users WHERE lower(email)=lower($1) AND active=true`, [req.portal.email])).rows[0]?.f === true;
+    const payUnion = wantPay ? `
+        UNION ALL SELECT coalesce(updated_at, run_date::timestamp) ts, 'payment' typ,
+          'Payment confirmed — '||to_char(round(paid_amount),'FM999,999,999')||' '||paid_currency||' ('||to_char(run_date,'DD Mon YY')||')' label, '' ref
+          FROM planner.payment_fx WHERE supplier = ANY($1) AND paid_amount IS NOT NULL AND coalesce(paid_currency,'')<>''` : '';
     res.json((await pool.query(`
       SELECT to_char(ts,'YYYY-MM-DD HH24:MI') at, typ, label, ref FROM (
         -- "New purchase order" fires only once the PO is portal-visible (not FUTURE) — i.e. set to Production —
@@ -7978,9 +8056,7 @@ app.get('/api/portal/recent-activity', portalAuth, async (req, res) => {
           FROM planner.shipments sh WHERE sh.created_at IS NOT NULL
             AND EXISTS (SELECT 1 FROM planner.purchase_orders po WHERE po.shipment_ref = sh.shipment_ref
                           AND po.supplier_name = ANY($1)
-                          AND (po.status ILIKE 'production%' OR po.status ILIKE 'ready%' OR po.status ILIKE 'shipping%'))
-        UNION ALL SELECT date_paid, 'payment', 'Payment received'||coalesce(' — '||nullif(reference,''),'')||coalesce(' ('||to_char(round(amount),'FM999,999,999')||')',''), coalesce(nullif(reference,''),'')
-          FROM planner.deposits WHERE date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND supplier_name = ANY($1)
+                          AND (po.status ILIKE 'production%' OR po.status ILIKE 'ready%' OR po.status ILIKE 'shipping%'))${payUnion}
         UNION ALL SELECT created_at, 'sample_created', 'New sample request SR-'||id, 'SR-'||id
           FROM planner.sample_requests WHERE created_at IS NOT NULL AND supplier_name = ANY($1)
       ) z ORDER BY at DESC NULLS LAST LIMIT 15`, [names])).rows);

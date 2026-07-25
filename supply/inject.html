@@ -5002,11 +5002,16 @@
       var accessCell = editing
         ? '<select class="fci pu-active" data-id="'+u.id+'"><option value="true"'+(puActive(u)?' selected':'')+'>Active</option><option value="false"'+(!puActive(u)?' selected':'')+'>Inactive</option></select>'
         : (puActive(u)?'<span class="tool-badge bg-green">Active</span>':'<span class="tool-badge bg-neutral">Inactive</span>');
+      var payNotify=(u.receive_payment_notification===true||u.receive_payment_notification==='true');   // opt-in: payment-confirmed RECENTS event + email
+      var payCell = editing
+        ? '<select class="fci pu-paynotify" data-id="'+u.id+'"><option value="true"'+(payNotify?' selected':'')+'>On</option><option value="false"'+(!payNotify?' selected':'')+'>Off</option></select>'
+        : (payNotify?'<span class="tool-badge bg-green">On</span>':'<span class="tool-badge bg-neutral">Off</span>');
       return '<tr data-id="'+u.id+'">'
         +'<td class="l pu-c1"><div class="pu-email">'+esc(u.email||'')+'</div><div class="pu-btns">'+acts+'</div></td>'
         +'<td class="l">'+supCell+'</td>'
         +'<td class="l">'+contactCell+'</td>'
         +'<td class="l">'+accessCell+'</td>'
+        +'<td class="l">'+payCell+'</td>'
         +'<td class="l"><span class="mut tiny">'+(u.live_sessions?u.live_sessions+' live':'—')+'</span></td>'
         +'<td class="l"><button class="pu-act" data-sup="'+esc(u.supplier_name||'')+'" data-sid="'+esc(u.supplier_id||'')+'" title="Open actions for this supplier — click to view + send a reminder" style="cursor:pointer;border:1px solid #e2e8f0;background:#f8fafc;border-radius:10px;font-size:11px;font-weight:700;padding:2px 10px;min-width:22px">·</button></td>'
         +'<td class="l"><button class="tool-badge bg-blue pu-magic" data-id="'+u.id+'" style="cursor:pointer;border:none">Magic link</button></td></tr>'; }
@@ -5031,9 +5036,10 @@
       if(b=q('.pu-sup'))b.onclick=function(e){ e.stopPropagation(); openPuSup(b); };
       if(b=q('.pu-save'))b.onclick=function(){ var btn=this; var sup=(q('.pu-sup')&&q('.pu-sup').dataset.val)||''; var ct=(q('.pu-contact')&&q('.pu-contact').value||'').trim(); var act=(q('.pu-active')&&q('.pu-active').value)==='true';
         if(!sup){ alert('Pick a supplier.'); return; } btn.disabled=true; btn.textContent='Saving…';
-        fetch('/api/supply/portal-user/'+id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({supplier_name:sup,contact_name:ct||null,active:act})}).then(function(r){return r.json();})
+        var pn=(q('.pu-paynotify')&&q('.pu-paynotify').value)==='true';
+        fetch('/api/supply/portal-user/'+id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({supplier_name:sup,contact_name:ct||null,active:act,receive_payment_notification:pn})}).then(function(r){return r.json();})
           .then(function(j){ if(j&&j.error){ btn.disabled=false; btn.textContent='Save'; alert('Save failed: '+j.error); return; }
-            var u=PU_ROWS[id]||{}; u.supplier_name=sup; u.contact_name=ct||null; u.active=act; PU_ROWS[id]=u; delete PU_EDIT[id]; puReRow(id); })
+            var u=PU_ROWS[id]||{}; u.supplier_name=sup; u.contact_name=ct||null; u.active=act; u.receive_payment_notification=pn; PU_ROWS[id]=u; delete PU_EDIT[id]; puReRow(id); })
           .catch(function(e){ btn.disabled=false; btn.textContent='Save'; alert('Save failed: '+(e.message||e)); }); };
       if(b=q('.pu-del'))b.onclick=function(){ if(!confirm('Remove this portal user? Their access is revoked.'))return; shipPost('/api/supply/portal-user/'+id,{_delete:true},showSub); };
       if(b=q('.pu-magic'))b.onclick=function(){ var mb=this; fetch('/api/supply/portal-magic/'+id,{method:'POST'}).then(function(r){return r.json();}).then(function(j){ if(j.error)return alert(j.error);
@@ -5045,7 +5051,7 @@
       var body=(rows||[]).map(puRow).join('');
       return lookupDatalists()+PU_CSS
         +'<div class="sect-h">Portal users <span class="mut tiny">(approved supplier logins — each email is mapped to one supplier and sees only that supplier\'s data in the portal)</span> <button class="tool-badge bg-blue" id="pu-new" style="cursor:pointer;border:none;margin-left:8px">+ Portal user</button></div>'
-        +'<div class="pu-tw"><table class="pu-tbl"><thead><tr><th class="l pu-c1">Email</th><th class="l">Supplier</th><th class="l">Contact</th><th class="l">Access</th><th class="l">Sessions</th><th class="l">Actions</th><th class="l">Login</th></tr></thead><tbody id="pu-tbody">'+(body||'<tr class="pu-empty"><td colspan="7" class="l mut">No portal users yet.</td></tr>')+'</tbody></table></div>'
+        +'<div class="pu-tw"><table class="pu-tbl"><thead><tr><th class="l pu-c1">Email</th><th class="l">Supplier</th><th class="l">Contact</th><th class="l">Access</th><th class="l" title="Receive a payment-confirmed notification (RECENTS + email) when a payment is confirmed as paid">Pay notify</th><th class="l">Sessions</th><th class="l">Actions</th><th class="l">Login</th></tr></thead><tbody id="pu-tbody">'+(body||'<tr class="pu-empty"><td colspan="8" class="l mut">No portal users yet.</td></tr>')+'</tbody></table></div>'
         +'<div class="mut tiny" style="margin-top:6px">Tap <b>Edit</b> on a row to change supplier / contact / access, then <b>Save</b>. Magic link returns the 7-day login URL (dev stub — real email is Diviyaj\'s prod wiring).</div>'; }
     // Compute each supplier's open portal actions (same conditions the supplier's own portal shows), keyed by supplier name.
     function supPortalActions(pos, sig, xd, samples){
@@ -6293,12 +6299,13 @@
         +'<td class="l">'+esc(fd(r.dt))+'</td><td class="l">'+esc(r.supplier)+'</td>'
         +'<td><b>'+money(r.total)+'</b></td><td class="l">'+r.base_ccy+'</td>'
         +'<td class="l"><input class="fci pfx-amt" '+dk+' style="width:104px;text-align:right" placeholder="bank amount" value="'+(r.other_amount==null?'':fmtAmt(r.other_amount))+'"></td>'
-        +'<td class="l"><select class="fci pfx-ccy" '+dk+'>'+PAY_CCY.map(function(cc){return '<option'+(cc===(r.bank_ccy||'')?' selected':'')+'>'+cc+'</option>';}).join('')+'</select></td></tr>'+det; }).join('');
-    return '<div class="bar"><span class="count">'+rows.length+' payments · grouped by date + supplier · expand a row to see the individual payments</span></div>'
-      +'<div class="tw"><table><thead><tr><th class="l"></th><th class="l">Date</th><th class="l">Supplier</th><th>Total (base)</th><th class="l">Base ccy</th><th class="l">Bank amount</th><th class="l">Bank ccy</th></tr></thead><tbody>'
+        +'<td class="l"><select class="fci pfx-ccy" '+dk+' style="width:60px">'+PAY_CCY.map(function(cc){return '<option'+(cc===(r.bank_ccy||'')?' selected':'')+'>'+cc+'</option>';}).join('')+'</select></td>'
+        +'<td class="l"><button class="save-btn pay-usd" '+dk+' data-total="'+esc(r.total)+'" title="Mark this run paid in USD — sets bank amount to the base total and currency to USD" style="background:#16a34a;color:#fff;border-color:#15803d;white-space:nowrap">Paid USD</button></td></tr>'+det; }).join('');
+    return '<div style="max-width:1000px"><div class="bar"><span class="count">'+rows.length+' payments · grouped by date + supplier · expand a row to see the individual payments</span></div>'
+      +'<div class="tw"><table><thead><tr><th class="l"></th><th class="l">Date</th><th class="l">Supplier</th><th>Total (base)</th><th class="l">Base ccy</th><th class="l">Bank amount</th><th class="l">Bank ccy</th><th class="l"></th></tr></thead><tbody>'
       +body
-      +'<tr class="batchrow"><td></td><td class="l" colspan="2"><b>TOTAL</b></td><td><b>'+money(tT)+'</b></td><td colspan="3"></td></tr>'
-      +'</tbody></table></div>'; }
+      +'<tr class="batchrow"><td></td><td class="l" colspan="2"><b>TOTAL</b></td><td><b>'+money(tT)+'</b></td><td colspan="4"></td></tr>'
+      +'</tbody></table></div></div>'; }
   function bindPayFx(b){
     b.querySelectorAll('.pay-exp').forEach(function(btn){ btn.onclick=function(){ var ex=document.getElementById('payexp-'+btn.dataset.i); if(!ex)return; var open=ex.style.display!=='none'; ex.style.display=open?'none':''; btn.textContent=open?'▸':'▾'; }; });
     b.querySelectorAll('.pr-ref').forEach(function(x){ x.onclick=function(){ var g=x.dataset.go; if(g==='po')openPODrawer(x.dataset.k,'pay'); else if(g==='dep')gotoDeposit(x.dataset.k); else if(g==='other')gotoOther(); }; });
@@ -6310,7 +6317,30 @@
       if(el.classList.contains('pfx-amt') && amt!=='') el.value=fmtAmt(amt);
       el.classList.add('saved');
       fetch('/api/supply/payment-fx',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({run_date:dt,supplier:sup,paid_currency:ccy,paid_amount:amt})})
-        .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); setTimeout(function(){el.classList.remove('saved');},1000); }).catch(function(){el.classList.remove('saved');el.classList.add('err');}); }; }); }
+        .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); if(j&&j.emailPreview)showEmailPreview(j.emailPreview); setTimeout(function(){el.classList.remove('saved');},1000); }).catch(function(){el.classList.remove('saved');el.classList.add('err');}); }; });
+    // "Paid USD" — fill bank amount = base total, currency = USD, save (which confirms the run → notification fires)
+    b.querySelectorAll('.pay-usd').forEach(function(btn){ btn.onclick=function(){ var tr=btn.closest('tr');
+      var amtEl=tr.querySelector('.pfx-amt'), ccyEl=tr.querySelector('.pfx-ccy'), total=String(btn.dataset.total||'').replace(/,/g,'');
+      if(amtEl)amtEl.value=fmtAmt(total); if(ccyEl)ccyEl.value='USD';
+      btn.disabled=true; var o=btn.textContent; btn.textContent='…';
+      fetch('/api/supply/payment-fx',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({run_date:btn.dataset.dt,supplier:btn.dataset.sup,paid_currency:'USD',paid_amount:total})})
+        .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error);
+          if(j&&j.emailPreview)showEmailPreview(j.emailPreview); btn.textContent='✓ USD'; setTimeout(function(){btn.disabled=false;btn.textContent=o;},1200); })
+        .catch(function(e){ btn.disabled=false; btn.textContent=o; alert('Save failed: '+(e.message||e)); }); }; }); }
+  // Sandbox-only: pop up the rendered payment-confirmed email (server returns it when no live email sender is set).
+  function showEmailPreview(p){ if(!p)return; var ov=document.createElement('div');
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200002;display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.innerHTML='<div style="background:#fff;border-radius:10px;max-width:720px;width:100%;max-height:88vh;overflow:auto;box-shadow:0 12px 48px rgba(0,0,0,.35)">'
+      +'<div style="padding:12px 16px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center"><b>📧 Sandbox email preview <span class="mut tiny" style="font-weight:400">— this is what would be emailed (no live sender in sandbox)</span></b> <button id="epv-x" style="border:none;background:none;font-size:18px;cursor:pointer">✕</button></div>'
+      +'<div style="padding:12px 16px;font-size:12px;color:#334155;border-bottom:1px solid #eef2f7">'
+        +'<div><b>To:</b> '+esc((p.to||[]).join(', ')||'—  (no opted-in recipients — would NOT send)')+'</div>'
+        +'<div><b>Cc:</b> '+esc((p.cc||[]).join(', '))+'</div>'
+        +'<div><b>Subject:</b> '+esc(p.subject||'')+'</div></div>'
+      +'<div style="padding:16px">'+(p.html||'')+'</div>'
+      +'<div style="padding:10px 16px;border-top:1px solid #eef2f7;text-align:right"><button id="epv-ok" class="save-btn">Close</button></div></div>';
+    document.body.appendChild(ov); var close=function(){ ov.remove(); };
+    ov.addEventListener('click',function(e){ if(e.target===ov)close(); });
+    ov.querySelector('#epv-x').onclick=close; ov.querySelector('#epv-ok').onclick=close; }
   // (Removed dead payRegister + bindRunRecalc — old payment-runs register, superseded by renderPaymentsReport. v25.652)
 
   function renderDeposits(rows){ var c=document.getElementById('supply-content');
