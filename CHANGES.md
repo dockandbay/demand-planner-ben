@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.133 - Loading spinner on the version badge + Actions mobile filters + version-badge fix
+
+- **Loading is now a subtle spinner over the version badge** (desktop + mobile), driven by in-flight network
+  activity — one consistent indicator instead of per-container "Loading…" rows. The main content area also keeps
+  the current view visible while the next one loads (no "Loading…" row flash on section switch).
+- **Actions filters on mobile** (Status / Severity / Type) are now tucked behind a **"⚙ Filters" button**, the same
+  as the PO grid and Order Plan.
+- **Fixed the desktop version badge** flashing amber then reverting to plain grey text: the amber box now styles the
+  SUPPLY/SCENARIO/PRODUCT version badge that actually persists (the artifact's separate DEMAND `#ver` no longer
+  gets the amber treatment, so it doesn't flash on load).
+
 ## v26.132 - PO drawer uses the full-screen mobile sheet on phones + payments col-1 fix
 
 - On phones, **opening a PO drawer** (from Actions, shipments, deposits, reports, etc.) now presents as the same

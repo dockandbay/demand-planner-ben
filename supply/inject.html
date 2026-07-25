@@ -76,7 +76,15 @@
 #supply-root .stab{background:transparent;border:none;padding:6px 13px;font-size:12px;font-weight:500;cursor:pointer;color:#888;border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit}
 #supply-root .stab:hover{color:#1a1a1a}
 #supply-root .stab.active{color:#1a1a1a;border-bottom-color:#1a1a1a;font-weight:600}
-#supply-root .ver{margin-left:auto;color:#aaa;font-size:10px}
+/* Desktop version badge — the amber box (matches mobile's #hz-ver). This is the version that actually persists on
+   SUPPLY/SCENARIO/PRODUCT (the artifact's #ver is a separate DEMAND-side element). position:relative for the load spinner. */
+#supply-root .ver,#scenario-root .ver,#product-root .ver{margin-left:auto;color:#0f172a;background:#fbbf24;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:800;line-height:1.2;letter-spacing:.02em;position:relative;flex:0 0 auto}
+/* Global "loading" spinner — a subtle overlay ON the version badge (desktop .ver / #ver, mobile #hz-ver), driven by
+   in-flight fetch activity. One consistent indicator instead of per-container "Loading…" rows that flash on swap. */
+#hz-ver,#ver{position:relative}
+.hz-verspin{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;border-radius:6px;background:rgba(251,191,36,.92);z-index:6;pointer-events:none}
+.hz-verspin::after{content:'';width:11px;height:11px;border:2px solid rgba(15,23,42,.28);border-top-color:#0f172a;border-radius:50%;animation:hzspin .7s linear infinite}
+@keyframes hzspin{to{transform:rotate(360deg)}}
 /* Timeline notifications — top-bar messages bell + unread counter + pop-down drawer */
 #supply-root #supply-subnav{position:relative}
 /* Timeline messages bell — lives in the top bar (#view-tabs-row) next to SA, visible on every view. v26.006 */
@@ -404,7 +412,12 @@
   /* on mobile the two severity columns stack full-width, each its own horizontal scroller */
   #supply-root .act-colwrap{gap:14px}
   #supply-root .act-tbl .act-ref-m .lnk-btn{white-space:nowrap}
+  /* phone: tuck the Status / Severity / Type filters behind a "⚙ Filters" button (like the PO grid) */
+  #supply-root .act-filt-toggle{display:inline-block;margin-bottom:8px}
+  #supply-root .act-filters{display:none}
+  #supply-root .act-filters.open{display:block}
 }
+#supply-root .act-filt-toggle{display:none}   /* "Filters" toggle: phone only (desktop shows the filter bars inline) */
 #supply-root .act-colwrap{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start}
 #supply-root .act-col-main{flex:2 1 520px;min-width:0}#supply-root .act-col-rec{flex:1 1 330px;min-width:0}
 #supply-root .act-colhdr{font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#334155;margin:10px 0 4px}
@@ -441,7 +454,7 @@
 #scenario-subnav{display:flex;gap:2px;border-bottom:1px solid #e0e0e0;margin:2px 0 10px;align-items:center;flex-wrap:wrap}
 #scenario-root .stab{background:transparent;border:none;padding:6px 13px;font-size:12px;font-weight:500;cursor:pointer;color:#888;border-bottom:2px solid transparent;font-family:inherit}
 #scenario-root .stab:hover{color:#1a1a1a}#scenario-root .stab.active{color:#1a1a1a;border-bottom-color:#1a1a1a;font-weight:600}
-#scenario-root .ver{margin-left:auto;color:#aaa;font-size:10px}
+/* scenario .ver amber handled by the shared rule above (grouped with #supply-root/.#product-root) */
 #scenario-root .annot{background:#0f172a;color:#cbd5e1;font-size:11px;border-radius:6px;padding:8px 12px;margin:0 0 10px;line-height:1.5}#scenario-root .annot b{color:#7dd3fc}
 #scenario-root .bar{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
 #scenario-root .pill{padding:3px 9px;font-size:10px;cursor:pointer;border:1px solid #d0d0d0;background:#fff;color:#666;border-radius:4px;white-space:nowrap;font-weight:600}#scenario-root .pill:hover{background:#f5f5f5}#scenario-root .pill.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
@@ -996,7 +1009,10 @@
     function renderActSub(){ var sb=document.getElementById('act-sub'); if(!sb)return;
       if(actSub==='recommendations'){ renderRecsTab(sb); return; }
       if(actSub==='erp-compare'){ renderErpTab(sb); return; }
-      sb.innerHTML='<div class="bar" id="act-statbar"></div><div class="bar" id="act-sevbar"></div><div id="act-grid"></div>'; statBar(); sevBar(); view(); }
+      sb.innerHTML='<button class="save-btn act-filt-toggle" id="act-filt-toggle">⚙ Filters</button>'
+        +'<div class="act-filters" id="act-filters"><div class="bar" id="act-statbar"></div><div class="bar" id="act-sevbar"></div></div><div id="act-grid"></div>';
+      var _aft=document.getElementById('act-filt-toggle'); if(_aft)_aft.onclick=function(){ var fp=document.getElementById('act-filters'); if(!fp)return; var on=fp.classList.toggle('open'); this.textContent=on?'⚙ Filters ▴':'⚙ Filters'; };   // phone: hide the Status/Severity/Type filters behind a Filters button (like the PO grid)
+      statBar(); sevBar(); view(); }
     function renderRecsTab(sb){ var open=_recs.filter(function(r){return !r.status||r.status==='open';});
       if(!open.length){ sb.innerHTML='<div class="count" style="padding:10px 2px">No recommendations right now 🎉</div>'; return; }
       open.sort(function(a,b){ var so={high:0,amber:1,low:2}; return (so[a.severity]==null?3:so[a.severity])-(so[b.severity]==null?3:so[b.severity]) || String(a.type||'').localeCompare(String(b.type||'')); });
@@ -5100,9 +5116,20 @@
   // Read-only UX. The server is the hard boundary (403); this surfaces it: a global 403-readonly toast
   // (covers every view incl. DEMAND/FBA) + a banner on SUPPLY/CONFIG when you lack the edit right.
   (function(){ if(window.__permFetchWrapped)return; window.__permFetchWrapped=true; var of=window.fetch;
-    window.fetch=function(){ return of.apply(this,arguments).then(function(res){
-      if(res&&res.status===403&&res.clone){ res.clone().json().then(function(j){ if(j&&j.code==='readonly')permToast(j.error||'Read-only access — ask an admin.'); }).catch(function(){}); }
-      return res; }); }; })();
+    window.fetch=function(){ hzActivity(1);
+      return of.apply(this,arguments).then(function(res){
+        if(res&&res.status===403&&res.clone){ res.clone().json().then(function(j){ if(j&&j.code==='readonly')permToast(j.error||'Read-only access — ask an admin.'); }).catch(function(){}); }
+        return res; }).finally(function(){ hzActivity(-1); }); }; })();
+  // Global loading indicator: a spinner overlaid on the version badge whenever a fetch is in flight. Debounced 160ms
+  // so quick requests don't blink the badge. Covers every view (any fetch) — no per-container "Loading…" rows needed.
+  var _hzInflight=0,_hzSpinT=null;
+  function hzBadgeSpin(show){ var bs=document.querySelectorAll('#supply-root .ver, #scenario-root .ver, #product-root .ver, #hz-ver, #ver');
+    for(var i=0;i<bs.length;i++){ var b=bs[i]; if(!b)continue; var s=b.querySelector('.hz-verspin');
+      if(show){ if(!s){ s=document.createElement('span'); s.className='hz-verspin'; b.appendChild(s); } }
+      else if(s&&s.parentNode){ s.parentNode.removeChild(s); } } }
+  function hzActivity(delta){ _hzInflight=Math.max(0,_hzInflight+(delta||0));
+    if(_hzInflight>0){ if(_hzSpinT==null)_hzSpinT=setTimeout(function(){ _hzSpinT=null; hzBadgeSpin(true); },160); }
+    else { if(_hzSpinT){ clearTimeout(_hzSpinT); _hzSpinT=null; } hzBadgeSpin(false); } }
   function permToast(msg){ var t=document.getElementById('perm-toast'); if(!t){ t=document.createElement('div'); t.id='perm-toast'; t.style.cssText='position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#991b1b;color:#fff;padding:10px 16px;border-radius:8px;font:600 13px system-ui;z-index:300000;box-shadow:0 6px 20px rgba(0,0,0,.3);max-width:90vw;text-align:center'; document.body.appendChild(t); } t.textContent=msg; t.style.display='block'; clearTimeout(t._t); t._t=setTimeout(function(){t.style.display='none';},4600); }
   function updatePermBanner(){ var root=document.getElementById('supply-root'); if(!root)return;
     var app=document.getElementById('app'); var inConfig=app&&app.classList.contains('config-mode');
@@ -7575,7 +7602,8 @@
     var _tk=++_navToken;   // this navigation — a later click bumps _navToken and invalidates our async render below
     document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k===key);});
     var _ns=document.getElementById('supply-nav-sel'); if(_ns&&_ns.value!==key)_ns.value=key;   // keep the phone section dropdown in sync
-    var c=document.getElementById('supply-content'); c.innerHTML='<div class="count">Loading…</div>';
+    var c=document.getElementById('supply-content');   // keep the current view visible while loading (the badge spinner signals activity) → no "Loading…" row flash on section switch
+    if(!c.children.length)c.innerHTML='<div class="count" style="opacity:.6">Loading…</div>';   // only on a truly empty first paint
     var done=function(d){ cache[key]=d; if(_tk!==_navToken)return;   // navigated away before this resolved → don't overwrite the newer view
       if(key==='actions')return renderActions(d);
       if(key==='upcoming')return renderUpcoming(d);
@@ -8267,7 +8295,7 @@
   function ensureProductRoot(){ if(document.getElementById('product-root'))return;
     var app=document.getElementById('app')||document.body; if(!app)return;
     var el=document.createElement('div'); el.id='product-root';
-    el.innerHTML='<div id="product-subnav"><button class="stab" data-k="plan">PLAN</button><button class="stab" data-k="reports">REPORTS</button><span class="ver" style="margin-left:auto;color:#94a3b8;font-size:10px">HORIZON __APP_VERSION__</span></div><div id="product-content"></div>';
+    el.innerHTML='<div id="product-subnav"><button class="stab" data-k="plan">PLAN</button><button class="stab" data-k="reports">REPORTS</button><span class="ver">HORIZON __APP_VERSION__</span></div><div id="product-content"></div>';
     app.appendChild(el);
     el.querySelectorAll('.stab').forEach(function(b){ b.onclick=function(){ selectProductSub(b.dataset.k); }; }); }
   function showProduct(){ ensureProductRoot(); if(typeof hideSupply==='function')hideSupply(); if(typeof hideScenario==='function')hideScenario();
