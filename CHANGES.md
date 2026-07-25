@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.127 - Actions redesign (triage table) + high-priority counter + tidy-ups
+
+- **SUPPLY ▸ Actions redesigned as a compact triage table** — one line per action, **sorted by severity** (High
+  → Amber → Low), each row tinted + left-accented by urgency, category shown as a small chip. Two columns on
+  desktop: **Actions** (left, wide) and **💡 Recommendations** (right, advisory) — they stack on mobile. Much
+  easier to see what to tackle first than the old uniform cards. Same filters/fixes/snooze/dismiss.
+- **ACTIONS tab now shows a red counter** of open **high-priority** actions (computed on supply mount, refreshed
+  when the list loads).
+- **Version label** now reads **"HORIZON v26.x"** on BUY/DEMAND/FBA/REPORTS too (was just "v26.x"), matching SUPPLY.
+- **"⏳ loading full detail…"** on the PO expand/drawer now sits **inline in the sub-nav** (after the Timeline tab
+  on desktop) instead of as a banner above the tabs.
+
 ## v26.126 - SUPPLY ▸ Actions: high-priority actions load first
 
 Actions was one heavy ~4–7s load (19 exception rules + the recommendation/ERP/manufacturing layers + a cashflow

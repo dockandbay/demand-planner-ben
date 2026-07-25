@@ -6694,7 +6694,7 @@ function syncTabs(){
 }
 
 function st(msg){var e=document.getElementById('st');if(e)e.textContent=msg;}
-(function(){document.getElementById('ver').innerHTML='<b>'+VERSION+'</b>';var _hv=document.getElementById('hz-ver');if(_hv)_hv.innerHTML='HORIZON<br>'+VERSION;})();
+(function(){document.getElementById('ver').innerHTML='HORIZON <b>'+VERSION+'</b>';var _hv=document.getElementById('hz-ver');if(_hv)_hv.innerHTML='HORIZON<br>'+VERSION;})();
 function render(){
   // load trading-calendar events once (for the PLAN month-cell "C" markers); re-render when they arrive
   if(CAL_EVENTS===null){ CAL_EVENTS=[]; fetch('/api/trading-calendar').then(function(r){return r.json();}).then(function(d){ CAL_EVENTS=(d&&d.events)||[]; if(VIEW_MODE==='planning')render(); }).catch(function(){}); }

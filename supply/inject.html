@@ -364,6 +364,24 @@
 #supply-root .card.high{border-left-color:#dc2626}#supply-root .card.amber{border-left-color:#f59e0b}#supply-root .card.low{border-left-color:#16a34a}
 #supply-root .card .t{font-weight:700}#supply-root .card .d{color:#666;font-size:11px;margin-top:2px}
 #supply-root .act-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:8px;align-items:start}#supply-root .act-cards .card{margin-bottom:0}
+/* Actions triage TABLE — severity-sorted, one line per action, tinted by urgency */
+#supply-root .act-tbl{width:100%;border-collapse:collapse;font-size:12px}
+#supply-root .act-colwrap{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start}
+#supply-root .act-col-main{flex:2 1 520px;min-width:0}#supply-root .act-col-rec{flex:1 1 330px;min-width:0}
+#supply-root .act-colhdr{font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#334155;margin:10px 0 4px}
+#supply-root .act-col-rec .act-colhdr{color:#6d28d9}
+#supply-root .act-tbl th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;font-weight:700;padding:5px 8px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#fff;z-index:1}
+#supply-root .act-tbl td{padding:7px 8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+#supply-root .act-tbl tr.actrow:hover td{background:#f8fafc}
+#supply-root .act-tbl tr.sev-high td{background:#fef4f4}#supply-root .act-tbl tr.sev-high:hover td{background:#fdeaea}
+#supply-root .act-tbl tr.sev-amber td{background:#fffbf1}#supply-root .act-tbl tr.sev-amber:hover td{background:#fdf3e0}
+#supply-root .act-tbl td.sev-cell{border-left:3px solid transparent;text-align:center;font-size:13px;line-height:1;width:22px}
+#supply-root .act-tbl .act-ref{white-space:nowrap}#supply-root .act-tbl td{word-break:break-word}
+#supply-root .act-tbl tr.sev-high td.sev-cell{border-left-color:#dc2626}#supply-root .act-tbl tr.sev-amber td.sev-cell{border-left-color:#f59e0b}#supply-root .act-tbl tr.sev-low td.sev-cell{border-left-color:#cbd5e1}
+#supply-root .act-tbl .act-type{font-weight:700;font-size:12px;line-height:1.15}
+#supply-root .act-tbl .act-chip{font-size:8.5px;text-transform:uppercase;letter-spacing:.03em;color:#94a3b8;font-weight:600}
+#supply-root .act-tbl .act-detail{color:#475569;font-size:11px;line-height:1.35;white-space:normal;word-break:break-word}
+#supply-root .act-tbl .act-fixcell,#supply-root .act-tbl .act-lifecell{white-space:normal}
 #supply-root .sect-h{font-weight:700;margin:12px 0 5px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#555}
 /* ── SCENARIO panel (parallel top tab, same visual language) ── */
 #scenario-root{display:none;font-size:12px;color:#1a1a1a;padding-top:4px}
@@ -889,6 +907,7 @@
     // BI recommendations — advisory (from the forecast/expedite engine), not blocking actions
     'Consider air freight':'RECOMMENDATIONS','Expedite production':'RECOMMENDATIONS' };
   function actGroup(t){ return ACT_GROUP[t]||'OTHER'; }   // everything else (supplier, ERP, partials, unassigned) → OTHER
+  var ACT_CHIP={PRIORITY:'PRIORITY',PAYMENTS:'PAYMENTS',DATES:'DATES',OTHER:'OTHER',RECOMMENDATIONS:'ADVISORY'};   // short category tag on each triage row
   // Which PO detail sub-tab an action should deep-link to (payment issues → PAYMENTS, date issues → DATES,
   // shipping → SHIPMENTS, ERP/order-plan → ORDER PLAN). Null → the default (first) tab.
   var ACT_POTAB={ 'Deposit not paid':'pay','Deposit over-assigned':'pay','Payment invalid':'pay','Payment overdue':'pay','Supplier invoice':'pay','Unpaid — last month':'pay','Aged payment':'pay',
@@ -898,6 +917,7 @@
   function poTabForAction(t){ return ACT_POTAB[t]||null; }
   function actBuild(rows,c,partial){
     actRows=rows; rows.forEach(function(r,i){ r._id=i; });
+    if(!partial)setActionsBadgeFrom(rows);   // refresh the ACTIONS tab's high-priority counter from the full set
     var _partBanner=partial?'<div class="mut tiny" style="padding:4px 2px 6px;color:#94a3b8">⏳ showing high-priority actions — loading the rest…</div>':'';
     if(!rows.length){c.innerHTML=annot('actions')+(partial?'<div class="count">⏳ loading actions…</div>':'<div class="count">No actions 🎉</div>');return;}
     var types=Array.from(new Set(rows.map(function(r){return r.type;})));
@@ -954,17 +974,21 @@
         syncTypeBtn(); view(); }; });
       document.getElementById('act-refresh').onclick=function(){ delete cache['actions']; selectSection('actions'); }; }
     function view(){ var f=pool().filter(function(r){return st.sev==='All'||r.severity===st.sev;}).filter(typeMatch);
-      var G={PRIORITY:[],PAYMENTS:[],DATES:[],OTHER:[],RECOMMENDATIONS:[]}; f.forEach(function(r){ (G[actGroup(r.type)]||G.OTHER).push(r); });
-      // PRIORITY first; BI recommendations render last, in their own clearly-labelled (advisory) section
-      var GROUPS=[['PRIORITY','⚠ PRIORITY'],['PAYMENTS','PAYMENTS'],['DATES','DATES'],['OTHER','OTHER'],['RECOMMENDATIONS','💡 BI RECOMMENDATIONS']];
-      var html=''; GROUPS.forEach(function(gg){ var g=gg[0], arr=G[g]; if(!arr.length)return;
-        var hi=arr.filter(function(r){return r.severity==='high';}).length, isRec=(g==='RECOMMENDATIONS');
-        html+='<div class="sect-h" style="margin-top:12px'+(isRec?';color:#6d28d9;border-top:1px dashed #ddd6fe;padding-top:10px':'')+'">'+gg[1]+' <span class="mut tiny">('+arr.length+(hi?' · '+hi+' high':'')+(isRec?' · advisory, not blocking':'')+')</span></div>'
-          +'<div class="act-cards">'+arr.map(actCard).join('')+'</div>'; });
-      document.getElementById('act-grid').innerHTML=html||'<div class="count">none in this view 🎉</div>'; bindActFix(); bindLifecycle(statBar,sevBar,view); }
+      var SO={high:0,amber:1,low:2};
+      function bySev(a,b){ var sa=SO[a.severity]==null?3:SO[a.severity], sb=SO[b.severity]==null?3:SO[b.severity]; return sa-sb || String(a.type||'').localeCompare(String(b.type||'')) || String(a.ref||'').localeCompare(String(b.ref||'')); }
+      // Two columns on desktop: real ACTIONS (left, wide) + advisory RECOMMENDATIONS (right, narrow); each a
+      // single severity-sorted triage table. They stack on mobile (flex-wrap).
+      var acts=f.filter(function(r){return actGroup(r.type)!=='RECOMMENDATIONS';}).sort(bySev);
+      var recs=f.filter(function(r){return actGroup(r.type)==='RECOMMENDATIONS';}).sort(bySev);
+      function tbl(rows){ return '<div class="tw"><table class="act-tbl"><thead><tr><th title="Severity" style="text-align:center">!</th><th>Type</th><th>Ref</th><th>Detail</th><th>Fix</th><th>Manage</th></tr></thead><tbody>'+rows.map(actRow).join('')+'</tbody></table></div>'; }
+      function hiN(rows){ return rows.filter(function(r){return r.severity==='high';}).length; }
+      if(!acts.length && !recs.length){ document.getElementById('act-grid').innerHTML='<div class="count">none in this view 🎉</div>'; bindLifecycle(statBar,sevBar,view); return; }
+      var mainCol='<div class="act-col-main"><div class="act-colhdr">Actions <span class="mut tiny">('+acts.length+(hiN(acts)?' · '+hiN(acts)+' high':'')+')</span></div>'+(acts.length?tbl(acts):'<div class="count" style="padding:8px 2px">no open actions 🎉</div>')+'</div>';
+      var recCol=recs.length?'<div class="act-col-rec"><div class="act-colhdr">💡 Recommendations <span class="mut tiny">('+recs.length+' · advisory)</span></div>'+tbl(recs)+'</div>':'';
+      document.getElementById('act-grid').innerHTML='<div class="act-colwrap">'+mainCol+recCol+'</div>'; bindActFix(); bindLifecycle(statBar,sevBar,view); }
     statBar(); sevBar(); view(); }
-  function actCard(r){
-    if(r._done) return '<div class="card low" style="opacity:.55" id="actcard-'+r._id+'"><div class="t">'+esc(r.ref||'')+' <span class="tool-badge bg-green">✓ done</span></div><div class="d">'+esc(r.type)+' — applied'+(r._val?(': '+esc(r._val)):'')+'. Refresh to clear.</div></div>';
+  function actRow(r){
+    if(r._done) return '<tr class="actrow sev-low" id="actcard-'+r._id+'" style="opacity:.5"><td class="sev-cell">✓</td><td><span class="act-type">'+esc(r.type)+'</span></td><td class="act-ref">'+esc(r.ref||'')+'</td><td class="act-detail">applied'+(r._val?(': '+esc(r._val)):'')+' — refresh to clear</td><td></td><td><span class="tool-badge bg-green">✓ done</span></td></tr>';
     var fix='', fix2='';
     if(r.fix==='date'){ fix='<span class="tiny mut">fix date</span> <input class="fci dt act-in" type="date" data-id="'+r._id+'"> '+applyBtn(r._id); }
     else if(r.fix==='shipment'){ fix='<span class="tiny mut">assign shipment</span> <input class="fci txt act-in" list="shiplist" placeholder="pick / type…" data-id="'+r._id+'"> '+applyBtn(r._id); }
@@ -997,9 +1021,16 @@
             +((r.snoozed_by||r.snoozed_at)?'<span class="mut tiny">'+esc(r.status==='snoozed'?'snoozed':r.status)+' by '+esc(shortUser(r.snoozed_by)||'—')+(r.snoozed_at?' on '+esc(r.snoozed_at):'')+'</span>':'')
             +'<button class="save-btn light act-life" data-id="'+r._id+'" data-st="open">↩ Restore</button>'
           : '<button class="save-btn light act-life" data-id="'+r._id+'" data-st="dismissed">Dismiss</button><button class="save-btn light act-snz-menu" data-id="'+r._id+'" title="snooze this action">Snooze ▾</button>'); }
-    // one flex-wrap row: fix button(s) + any secondary fix + the Dismiss/Snooze (or resolved) lifecycle controls
-    var actRow=[fix,fix2,life].filter(Boolean).join('');
-    return '<div class="card '+esc(r.severity||'low')+'" id="actcard-'+r._id+'"><div class="t">'+refHtml+' <span class="tool-badge '+(r.severity==='high'?'bg-red':r.severity==='low'?'bg-neutral':'bg-amber')+'">'+esc(r.type)+'</span></div><div class="d">'+esc(r.detail||'')+'</div>'+(actRow?'<div style="margin-top:6px;display:flex;gap:6px 8px;align-items:center;flex-wrap:wrap">'+actRow+'</div>':'')+'</div>'; }
+    var sev=r.severity||'low', grp=actGroup(r.type), isRec=(grp==='RECOMMENDATIONS');
+    var col=sev==='high'?'#dc2626':sev==='amber'?'#b45309':'#64748b';
+    var fixCell=[fix,fix2].filter(Boolean).join(' ');
+    return '<tr class="actrow sev-'+esc(sev)+'" id="actcard-'+r._id+'">'
+      +'<td class="sev-cell" title="'+(sev==='high'?'High':sev==='amber'?'Amber':'Low')+'"><span style="color:'+col+'">●</span></td>'
+      +'<td><div class="act-type" style="color:'+col+'">'+esc(r.type)+'</div><div class="act-chip">'+esc(isRec?'💡 advisory':(ACT_CHIP[grp]||grp))+'</div></td>'
+      +'<td class="act-ref">'+refHtml+'</td>'
+      +'<td class="act-detail">'+esc(r.detail||'')+'</td>'
+      +'<td class="act-fixcell">'+(fixCell||'<span class="mut tiny">—</span>')+'</td>'
+      +'<td class="act-lifecell" style="text-align:right">'+(life||'')+'</td></tr>'; }
   // Persist an Actions-page lifecycle change (dismiss / snooze / open) + update the card in place.
   function actLifeSet(r,ns,days,cb){ if(!r||!r.key)return; var ind=(parseInt(days,10)<0);
     fetch('/api/supply/actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:r.key,status:ns,snooze_days:(ind?7:(days||7)),indefinite:ind})})
@@ -1033,7 +1064,7 @@
   function actResolve(id,val){ var r=actRows[id]; if(!r)return; r._done=true; r._val=val; invalidateDerived();
     // an applied fix is genuinely "done" — persist it so it shows under the Done pill (and stays resolved on refresh)
     if(r.key){ r.status='done'; fetch('/api/supply/actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:r.key,status:'done'})}).catch(function(){}); }
-    var card=document.getElementById('actcard-'+id); if(card)card.outerHTML=actCard(r); }
+    var card=document.getElementById('actcard-'+id); if(card)card.outerHTML=actRow(r); }
   function bindActFix(){
     document.querySelectorAll('#act-grid .act-in').forEach(function(inp){ inp.oninput=function(){ var b=document.querySelector('#act-grid .act-apply[data-id="'+inp.dataset.id+'"]'); if(b)b.disabled=!inp.value; }; });
     document.querySelectorAll('#act-grid .act-apply').forEach(function(b){ b.onclick=function(){
@@ -3430,7 +3461,8 @@
     var _docsAwaiting=((d&&d.all_docs)||[]).filter(function(x){return (x.approval_status||'')==='submitted';}).length;   // supplier docs awaiting approval → flag the tab
     var tabs=[['pay','PAYMENTS',payH2,(p.ex.pay||0)+(p.ex.landed||0)],['dates','DATES',p.dates,p.ex.dates],['client','CLIENT/FBA',p.client,p.ex.client],['oplan','ORDER PLAN',oplanH,(p.ex.oplan||0)],['shipments','SHIPMENTS',shipH,(p.ex.ship||0)],['masterdata','MASTER DATA & DOCS',masterH2,(p.ex.master||0)+_docsAwaiting],['timeline','TIMELINE',timelineH,p.ex.timeline]];
     function badge(n){ return n>0?' <span class="ex-badge" title="'+n+' exception'+(n>1?'s':'')+' / action'+(n>1?'s':'')+'">'+n+'</span>':''; }
-    var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab potab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'" data-po="'+esc(po)+'">'+t[1]+badge(t[3])+'</button>';}).join('')+'</div>';
+    var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab potab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'" data-po="'+esc(po)+'">'+t[1]+badge(t[3])+'</button>';}).join('')
+      +((d&&d.__fast)?'<span class="mut tiny po-fastnote" style="margin-left:auto;align-self:center;white-space:nowrap;color:#94a3b8;padding:0 4px">⏳ loading full detail…</span>':'')+'</div>';
     var panels=tabs.map(function(t,ti){return '<div class="potab-panel" data-pt="'+t[0]+'"'+(ti===0?'':' style="display:none"')+'>'+t[2]+'</div>';}).join('');
     return '<div class="po-detail-wrap" style="padding:4px 4px;max-width:1340px">'+bar+panels+'</div>'; }
 
@@ -3945,6 +3977,10 @@
   // PAYMENTS top-level tab inherits the Payments Due overdue count (same number as the Payments Due sub-tab)
   function paymentsNavBadge(n){ n=Number(n)||0; var btn=document.querySelector('#supply-subnav .stab[data-k="payments"]'); if(btn)btn.innerHTML='PAYMENTS'+(n>0?' <span class="ex-badge" title="'+n+' payment'+(n>1?'s':'')+' overdue">'+n+'</span>':'');
     var opt=document.querySelector('#supply-nav-sel option[value="payments"]'); if(opt)opt.textContent='PAYMENTS'+(n>0?' ('+n+')':''); }
+  // ACTIONS tab badge = number of OPEN, HIGH-severity actions (the red items you should tackle first)
+  function actionsNavBadge(n){ n=Number(n)||0; var btn=document.querySelector('#supply-subnav .stab[data-k="actions"]'); if(btn)btn.innerHTML='ACTIONS'+(n>0?' <span class="ex-badge" style="background:#dc2626;color:#fff" title="'+n+' high-priority action'+(n>1?'s':'')+'">'+n+'</span>':'');
+    var opt=document.querySelector('#supply-nav-sel option[value="actions"]'); if(opt)opt.textContent='ACTIONS'+(n>0?' ('+n+')':''); }
+  function setActionsBadgeFrom(rows){ try{ actionsNavBadge((rows||[]).filter(function(r){return r.severity==='high' && (!r.status||r.status==='open');}).length); }catch(e){} }
   function poSubNav(){ return '<div id="prod-subtabs">'+subListFor(poSub).map(function(t){ var bd=(_NAVLBL[t[0]]!==undefined)?navBadge(_navCounts[t[0]],_NAVNOUN[t[0]]):''; return '<span class="rtab'+(poSub===t[0]?' active':'')+'" data-posub="'+t[0]+'">'+t[1]+bd+'</span>'; }).join('')+'</div>'; }
   // count of OVERDUE payments — mirrors buildPaymentsDue's r.overdue (unpaid, has a due date, 2026-01-01 ≤ due < today).
   var PDUE_MIN_DUE='2026-01-01';   // Payments Due cutoff: hide payments whose due date is before this (old/legacy)
@@ -4925,7 +4961,7 @@
   function poFastPaint(po,i,tab){ try{
     var pd=document.getElementById('podet-'+i); if(!pd||!poBy[po]||poBy[po]._thin)return;
     if(pd.querySelector('.po-detail-wrap'))return;   // already rendered (a refresh) → don't flash
-    pd.innerHTML='<div class="mut tiny" style="padding:2px 6px 6px;color:#94a3b8">⏳ loading full detail…</div>'+poDetailHTML(po,__emptyPoDetail(),i);
+    pd.innerHTML=poDetailHTML(po,__emptyPoDetail(),i);   // the "loading full detail…" note is placed inline in the sub-nav bar (poDetailHTML, when d.__fast)
     if(pd.classList)pd.classList.remove('count'); bindPay(po,i);
     if(tab && tab!=='pay'){ var t=pd.querySelector('.potab[data-pt="'+esc(tab)+'"]'); if(t)t.click(); }
   }catch(e){} }
@@ -7481,7 +7517,10 @@
     rootEl.querySelectorAll('.stab').forEach(function(b){b.onclick=function(){selectSection(b.dataset.k);};});
     var _navSel=rootEl.querySelector('#supply-nav-sel'); if(_navSel)_navSel.onchange=function(){selectSection(this.value);};
     fetch('/api/supply/samples').then(function(r){return r.json();}).then(function(d){ if(Array.isArray(d)){ cache['samples']=d; samplesNavBadge(d); } }).catch(function(){});
-    refreshOpExc(); try{ prefetchNavCounts(); }catch(e){} }   // compute the Payments Due count on mount so the PAYMENTS tab badge shows immediately
+    refreshOpExc(); try{ prefetchNavCounts(); }catch(e){}   // compute the Payments Due count on mount so the PAYMENTS tab badge shows immediately
+    // high-priority ACTIONS count for the ACTIONS tab badge (warms the actions cache too, so opening it is instant)
+    try{ if(cache['actions']!==undefined){ setActionsBadgeFrom(cache['actions']); }
+      else { fetch('/api/supply/actions').then(function(r){return r.json();}).then(function(d){ if(Array.isArray(d)){ cache['actions']=d; setActionsBadgeFrom(d); } }).catch(function(){}); } }catch(e){} }
   // ORDER PLAN exception counter (# POs impacted by unapproved partials / supplier-risk / discontinued / country-risk)
   function orderPlanNavBadge(n){ var btn=document.querySelector('#supply-subnav .stab[data-k="order-plan"]'); if(btn)btn.innerHTML='ORDER PLAN'+(n>0?' <span class="ex-badge" title="'+n+' PO(s) with unapproved order-plan exceptions">'+n+'</span>':'');
     var opt=document.querySelector('#supply-nav-sel option[value="order-plan"]'); if(opt)opt.textContent='ORDER PLAN'+(n>0?' ('+n+')':''); }
