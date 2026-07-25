@@ -83,7 +83,7 @@
 #view-tabs-row .tl-bell{position:relative;background:none;border:none;cursor:pointer;font-size:15px;color:#cbd5e1;padding:2px 7px;line-height:1;flex:0 0 auto;margin-right:2px}
 #view-tabs-row .tl-bell:hover{color:#fff}
 #supply-root #supply-subnav .ver{margin-left:auto}
-#tl-count{position:absolute;top:-5px;right:-2px;background:#dc2626;color:#fff;font-size:9px;font-weight:700;border-radius:8px;min-width:15px;height:15px;line-height:15px;text-align:center;padding:0 3px;display:none}
+#tl-count{margin-left:3px;background:#dc2626;color:#fff;font-size:9px;font-weight:700;border-radius:8px;min-width:15px;height:15px;line-height:15px;text-align:center;padding:0 3px;display:none;vertical-align:middle}
 #tl-count.on{display:inline-block}
 #tl-drop{position:fixed;top:52px;right:12px;width:370px;max-width:94vw;max-height:72vh;overflow-y:auto;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 12px 34px rgba(15,23,42,.24);z-index:100050;display:none}
 #tl-drop.open{display:block}
@@ -3024,12 +3024,13 @@
     // escalate is only offered on YOUR OWN (internal) latest message (it emails the supplier) — never on a supplier note
     var _ownNotes=notes.filter(function(n){return n.author_kind==='internal';});
     var recentOwnId=_ownNotes.length?_ownNotes.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0].id:null;
-    var recentAnyId=notes.length?notes.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''))||(Number(b.id)-Number(a.id));})[0].id:null;   // most recent message overall → gets a delete link
+    var recentAnyId=notes.length?notes.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''))||(Number(b.id)-Number(a.id));})[0].id:null;   // most recent message overall
+    var meEmail=((window.ME&&ME.email)||'').toLowerCase();   // you can only delete YOUR OWN latest message — not a supplier's, not a colleague's
     var list=notes.length?tlDesc(notes).map(function(n){ var sup=(n.author_kind!=='internal');
       var ctrl = sup
         ? (n.read?'<a class="note-read" data-id="'+n.id+'" data-read="1" style="font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline;white-space:nowrap">mark unread</a>':'<button class="save-btn light note-read" data-id="'+n.id+'" data-read="0">Mark read</button>')
         : ((n.id===recentOwnId)?'<button class="save-btn light po-esc" data-po="'+esc(po)+'" data-msg="'+esc(n.body)+'" title="Escalate this message to the supplier by email" style="color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'');
-      if(n.id===recentAnyId) ctrl += '<a class="po-note-del" data-id="'+n.id+'" data-po="'+esc(po)+'" title="delete this (most recent) message" style="font-size:10px;color:#b91c1c;cursor:pointer;text-decoration:underline;white-space:nowrap">delete</a>';
+      if(n.id===recentAnyId && n.author_kind==='internal' && (n.author_email||'').toLowerCase()===meEmail) ctrl += '<a class="po-note-del" data-id="'+n.id+'" data-po="'+esc(po)+'" title="delete this (most recent) message — you can only delete your own" style="font-size:10px;color:#b91c1c;cursor:pointer;text-decoration:underline;white-space:nowrap">delete</a>';
       return '<div style="font-size:11px;margin:3px 0;max-width:640px;padding:5px 8px;background:'+(sup?(n.read?'#f1f5f9':'#fff7ed'):'#eef2ff')+';border:1px solid '+(sup&&!n.read?'#fdba74':'#e5e7eb')+';border-radius:5px;display:flex;gap:10px;align-items:flex-start">'
         +(ctrl?'<div style="flex:0 0 auto;display:flex;flex-direction:column;gap:3px;align-items:flex-start;min-width:78px">'+ctrl+'</div>':'')
         +'<div style="flex:1"><span class="mut tiny">'+esc(n.created_at)+' · '+(sup?('supplier'+(n.author_email?' ('+esc(shortUser(n.author_email))+')':'')):(n.author_email&&n.author_email!=='Dock & Bay'?esc(shortUser(n.author_email)):'Dock &amp; Bay'))+'</span>'+(sup&&!n.read?' <span class="ex-badge">new</span>':'')+'<br><span style="color:#1a1a1a">'+esc(n.body)+'</span></div>'
@@ -3281,7 +3282,7 @@
         .catch(function(e){ b.disabled=false; b.textContent=t; alert('Escalate failed: '+(e.message||e)); }); }; });
     // Delete the most recent timeline message (small link under Escalate)
     document.querySelectorAll('#podet-'+i+' .po-note-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete the most recent timeline message? This cannot be undone.'))return; b.style.pointerEvents='none'; b.textContent='deleting…';
-      fetch('/api/supply/note-delete/'+b.dataset.id,{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(function(r){return r.json();})
+      fetch('/api/supply/note-delete/'+b.dataset.id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({by:(window.ME&&ME.email)||''})}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); })
         .catch(function(e){ b.style.pointerEvents=''; b.textContent='delete'; alert('Could not delete: '+(e.message||e)); }); }; });
     // ORDER PLAN tab — accept a supplier change (per line / all), and jump to the full ORDER PLAN filtered to this PO
@@ -4088,7 +4089,7 @@
     var FILT=[['remaining','Remaining · open'],['open','To assign'],['closed','Closed'],['all','All']];
     b.innerHTML=lookupDatalists()+'<div class="bar">'+FILT.map(function(f){return '<span class="pill'+(f[0]==='remaining'?' active':'')+'" data-f="'+f[0]+'"'+(f[0]==='remaining'?' title="open (not closed) deposits that still have money remaining"':'')+'>'+f[1]+'</span>';}).join('')
       +'<button class="save-btn" id="dep-new">+ Deposit</button>'
-      +'<button class="tool-badge bg-neutral" id="dep-prodtoggle" style="cursor:pointer;border:none;margin-left:4px" title="Linked purchase orders: show only OPEN (non-complete) POs, or all">POs: open only</button>'
+      +'<button class="tool-badge bg-neutral" id="dep-prodtoggle" style="cursor:pointer;border:none;margin-left:4px" title="Linked purchase orders: show only UNALLOCATED POs (no start deposit allocated yet), or all linked POs">POs: unallocated</button>'
       +'<input class="flt" id="dep-q" placeholder="Filter reference / supplier…"><span class="count" id="dep-cnt"></span></div>'
       +'<style>#deptbl{table-layout:fixed;width:100%}#deptbl td,#deptbl th{white-space:normal;overflow-wrap:break-word;vertical-align:top}#deptbl .fci{width:100%;box-sizing:border-box;min-width:0;text-align:left}'
       +'#deptbl .datewrap{display:flex;width:100%;max-width:100%}#deptbl .datewrap .dateinp{flex:1 1 auto;min-width:0;width:auto!important;text-align:left!important}#deptbl .datewrap .datepick{flex:0 0 auto}</style>'
@@ -4127,11 +4128,11 @@
       // at risk: remaining is over 50% of the open, not-yet-allocated POs' order value (may be over-funded / stranded)
       var uval=Number(d.unalloc_value)||0, depAtRisk = d.is_deposit && uval>0 && rem>0.5*uval && !redRem;
       var remTitle=remNoOpenPO?'Deposit remaining, no open PO':(remStranded?'Deposit remaining, none left to be allocated':(depAtRisk?('At risk — '+money(rem)+' remaining is over 50% of the '+money(uval)+' open PO value with no start deposit allocated'):''));
-      var c_rem = '<td style="width:64px;white-space:nowrap'+(redRem?';color:#dc2626;font-weight:700':(depAtRisk?';background:#fef3c7;color:#92400e;font-weight:700':''))+'"'+(remTitle?(' title="'+remTitle+'"'):'')+'>'+money(d.deposit_remaining)+(depAtRisk?' ⚠':'')+(d.open_unalloc>0?' <span class="mut tiny" style="color:#64748b">'+d.open_unalloc+' unalloc</span>':'')+(d.shared_ref?' <span class="src fx">pool</span>':'')+'</td>';
+      var c_rem = '<td style="width:64px;white-space:nowrap'+(redRem?';color:#dc2626;font-weight:700':(depAtRisk?';background:#fef3c7;color:#92400e;font-weight:700':''))+'"'+(remTitle?(' title="'+remTitle+'"'):'')+'>'+money(d.deposit_remaining)+(depAtRisk?' ⚠':'')+(d.open_unalloc>0?' <span class="mut tiny" title="'+d.open_unalloc+' open linked PO'+(d.open_unalloc===1?'':'s')+' on this deposit with no start deposit allocated yet" style="color:#64748b;cursor:help;border-bottom:1px dotted #94a3b8">'+d.open_unalloc+' unalloc</span>':'')+(d.shared_ref?' <span class="src fx">pool</span>':'')+'</td>';
       var c_est = '<td style="width:84px;white-space:nowrap'+(estOver?';color:#dc2626;font-weight:700':'')+'"'+(estOver?' title="Estimated allocation exceeds the remaining deposit">':'>')+(d.is_deposit?money(d.est_alloc):'')+'</td>';
       // purchase orders linked to this deposit (open-only by default; toggle shows all) — each links to the
       // PO opened on its PAYMENTS tab; the cell wraps so long lists flow onto multiple lines.
-      var ap=(depProdAll ? d.linked_pos : d.pos_open)||'';
+      var ap=(depProdAll ? d.linked_pos : d.pos_unalloc)||'';   // default = only UNALLOCATED linked POs (no start deposit yet); toggle → all linked POs
       var poLinks = ap ? ap.split(',').map(function(p){ p=p.trim(); return p?'<button class="lnk-btn dep-po-link" data-po="'+esc(p)+'" title="open this PO — payments tab" style="font-size:9px">'+esc(p)+'</button>':''; }).filter(Boolean).join(' ') : '<span class="mut tiny">—</span>';
       var c_asg = '<td class="l" style="white-space:normal;min-width:480px;max-width:640px;line-height:1.7">'+poLinks+'</td>';
       var act;
@@ -4155,7 +4156,7 @@
       document.getElementById('dep-cnt').textContent=f.length+' / '+deps.length+' deposits';
       document.getElementById('dep-rows').innerHTML=f.map(rowHTML).join(''); bindEdits();
       b.querySelectorAll('.dep-prod-pick').forEach(function(btn){ btn.onclick=function(e){ e.stopPropagation(); openDepProdNoPick(btn); }; });   // searchable active-productions picker
-      b.querySelectorAll('.dep-po-link').forEach(function(btn){ btn.onclick=function(){ gotoPO(btn.dataset.po,'pay'); }; });
+      b.querySelectorAll('.dep-po-link').forEach(function(btn){ btn.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(btn.dataset.po,'pay'); else gotoPO(btn.dataset.po,'pay'); }; });   // popout drawer (Payments tab), not a full navigation
       b.querySelectorAll('.dep-edit').forEach(function(btn){ btn.onclick=function(){ DEP_EDIT[btn.dataset.id]=true; draw(); }; });   // unlock this row in place
       b.querySelectorAll('.dep-save').forEach(function(btn){ btn.onclick=function(){ delete DEP_EDIT[btn.dataset.id]; prodTab='deposits'; delete cache['productions']; selectSection('productions'); }; });   // relock + refresh (edits auto-saved inline)
       // custom confirm for closing a deposit that still holds money (native confirm can't relabel buttons)
@@ -4189,7 +4190,7 @@
     b.querySelectorAll('.bar .pill').forEach(function(p){p.onclick=function(){b.querySelectorAll('.bar .pill').forEach(function(x){x.classList.remove('active');});p.classList.add('active');st.f=p.dataset.f;draw();};});
     document.getElementById('dep-q').oninput=function(){st.q=this.value.toLowerCase();draw();};
     document.getElementById('dep-new').onclick=function(){ shipPost('/api/supply/deposit-create',{is_deposit:true},function(){ prodTab='deposits'; delete cache['productions']; selectSection('productions'); }); };
-    document.getElementById('dep-prodtoggle').onclick=function(){ depProdAll=!depProdAll; this.textContent=depProdAll?'POs: all':'POs: open only'; draw(); };
+    document.getElementById('dep-prodtoggle').onclick=function(){ depProdAll=!depProdAll; this.textContent=depProdAll?'POs: all':'POs: unallocated'; draw(); };
     if(pend){ var pqi=document.getElementById('dep-q'); if(pqi)pqi.value=pend; b.querySelectorAll('.bar .pill').forEach(function(x){x.classList.toggle('active',x.dataset.f==='all');}); }
     draw(); }
   // Pallet rebalance preview/apply modal (from the "Over 20 pallets" action). Shows the proposed per-PO
@@ -4817,7 +4818,7 @@
     closePODrawer(true);   // drop any existing PO drawer (silent: keep saved patch to restore later)
     var root=document.getElementById('supply-root')||document.body;
     var bg=document.createElement('div'); bg.id='podrawer-bg';
-    bg.innerHTML='<div id="podrawer"><div class="shipdrawer-head"><div class="shipdrawer-title">PO '+esc(po)+'</div>'
+    bg.innerHTML='<div id="podrawer"><div class="shipdrawer-head"><div class="shipdrawer-title">'+esc(po)+'</div>'
       +'<div><button class="lnk-btn shipdrawer-full" title="open the full PO page for this PO">Full page ↗</button>'
       +'<button class="shipdrawer-x" title="close">✕</button></div></div>'
       +'<div class="shipdrawer-body"><div id="podet-DRAWER" class="count">Loading…</div></div></div>';
@@ -5612,7 +5613,7 @@
             ban.innerHTML='';
             if(!window.DBPortalView){ mt.innerHTML='<div class="count" style="color:#dc2626">portal view not loaded</div>'; return; }
             window.DBPortalView.mount({ root:mt, supplierName:name, by:'preview (acting as '+name+')', sid:supById[name],
-              ep:{ lineCost:'/api/supply/portal-line-cost', lineRemove:'/api/supply/portal-line-remove', crossdockQty:'/api/supply/crossdock-qty', addlCost:'/api/supply/additional-cost', addlCostRemove:'/api/supply/additional-cost-remove', note:'/api/supply/portal-note', notesBase:'/api/supply/portal-notes/', noteReadBase:'/api/supply/note-read/', escalate:'/api/supply/escalate', submit:'/api/supply/portal-submit', upload:'/api/supply/portal-upload', labelData:'/api/supply/label-data', shipsWith:'/api/supply/ships-with/', shipmentInvoice:'/api/invoice/shipment/', poInvoice:'/api/invoice/po/', parseInvoice:'/api/supply/portal-parse-invoice', invoiceApply:'/api/supply/portal-invoice-apply', docRemove:'/api/supply/portal-attachment-remove', attachmentBase:'/api/supply/portal-attachment/', shipmentEscalate:'/api/supply/shipment/', shipmentNotesBase:'/api/supply/shipment-notes?ref=', shipmentNote:'/api/supply/shipment-note', shipmentCharge:'/api/supply/shipment-charge', shipmentChargesBase:'/api/supply/shipment-charges/', shipmentUpdate:'/api/supply/shipment/', dtcAccept:'/api/supply/dtc-accept', docSubmit:'', recentActivity:'', sampleAccept:'/api/supply/sample-accept', sampleUpdate:'/api/supply/sample-update', sampleNote:'/api/supply/sample-note', sampleNoteAuthorKind:'supplier', sampleNoteAuthorEmail:'D&B', sampleNotesBase:'/api/supply/sample-notes?id=', sampleNoteReadBase:'/api/supply/sample-note-read/', sampleCharge:'/api/supply/sample-charge', sampleCreate:'/api/supply/sample-create', sampleAttachment:'/api/supply/sample-attachment', sampleAttachmentRemove:'/api/supply/sample-attachment-remove', productNotesBase:'/api/product/notes/', productNote:'/api/product/note', productNotesRead:'/api/product/notes-read', productSamplesBase:'/api/product/samples/', productSample:'/api/product/sample', productSamplePhoto:'/api/product/sample-photo', productSwatchBase:'/api/product/swatch/', attachImgBase:'/api/supply/portal-attachment/', productOpenSamples:'/api/product/open-samples', productSkus:'/api/product/skus', sampleContentsBase:'/api/supply/sample/' },
+              ep:{ lineCost:'/api/supply/portal-line-cost', lineRemove:'/api/supply/portal-line-remove', crossdockQty:'/api/supply/crossdock-qty', addlCost:'/api/supply/additional-cost', addlCostRemove:'/api/supply/additional-cost-remove', note:'/api/supply/portal-note', notesBase:'/api/supply/portal-notes/', noteReadBase:'/api/supply/note-read/', escalate:'/api/supply/escalate', submit:'/api/supply/portal-submit', upload:'/api/supply/portal-upload', labelData:'/api/supply/label-data', shipsWith:'/api/supply/ships-with/', shipmentInvoice:'/api/invoice/shipment/', poInvoice:'/api/invoice/po/', parseInvoice:'/api/supply/portal-parse-invoice', invoiceApply:'/api/supply/portal-invoice-apply', docRemove:'/api/supply/portal-attachment-remove', attachmentBase:'/api/supply/portal-attachment/', shipmentEscalate:'/api/supply/shipment/', shipmentNotesBase:'/api/supply/shipment-notes?ref=', shipmentNote:'/api/supply/shipment-note', shipmentCharge:'/api/supply/shipment-charge', shipmentChargesBase:'/api/supply/shipment-charges/', shipmentUpdate:'/api/supply/shipment/', dtcAccept:'/api/supply/dtc-accept', docSubmit:'', recentActivity:'', unreadMessages:'', sampleAccept:'/api/supply/sample-accept', sampleUpdate:'/api/supply/sample-update', sampleNote:'/api/supply/sample-note', sampleNoteAuthorKind:'supplier', sampleNoteAuthorEmail:'D&B', sampleNotesBase:'/api/supply/sample-notes?id=', sampleNoteReadBase:'/api/supply/sample-note-read/', sampleCharge:'/api/supply/sample-charge', sampleCreate:'/api/supply/sample-create', sampleAttachment:'/api/supply/sample-attachment', sampleAttachmentRemove:'/api/supply/sample-attachment-remove', productNotesBase:'/api/product/notes/', productNote:'/api/product/note', productNotesRead:'/api/product/notes-read', productSamplesBase:'/api/product/samples/', productSample:'/api/product/sample', productSamplePhoto:'/api/product/sample-photo', productSwatchBase:'/api/product/swatch/', attachImgBase:'/api/supply/portal-attachment/', productOpenSamples:'/api/product/open-samples', productSkus:'/api/product/skus', sampleContentsBase:'/api/supply/sample/' },
               bc:{ sheets:bcDownloadSheets, crossdock:bcDownloadCrossdock, placeholder:false },
               getData:function(){ return loadPortalData(name); },
               onChange:function(){ invalidateDerived(); }   // a portal write (e.g. creating a shipment) must refresh the admin grids
@@ -7370,7 +7371,7 @@
   // Timeline messages bell → top bar (#view-tabs-row) next to SA. Lives outside #supply-root so it's visible on
   // every view; the dropdown is a fixed-position element on <body>. Polls unread supplier notes every 60s.
   function ensureBellButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('tl-bell'))return;
-    var bell=document.createElement('button'); bell.id='tl-bell'; bell.className='tl-bell'; bell.title='Timeline messages — unread supplier notes'; bell.innerHTML='✉<span id="tl-count"></span>';
+    var bell=document.createElement('button'); bell.id='tl-bell'; bell.className='tl-bell'; bell.title='Inbox — unread supplier messages'; bell.innerHTML='✉ Inbox <span id="tl-count"></span>'; bell.style.fontSize='12px'; bell.style.fontWeight='600';
     var sa=document.getElementById('sa-drawer-btn'); if(sa)row.insertBefore(bell,sa); else { var sp=row.querySelector('div[style*="flex:1"]'); if(sp&&sp.nextSibling)row.insertBefore(bell,sp.nextSibling); else row.appendChild(bell); }
     bell.onclick=function(e){ e.stopPropagation(); toggleTlDropdown(); };
     if(!document.getElementById('tl-drop')){ var d=document.createElement('div'); d.id='tl-drop'; document.body.appendChild(d); }
@@ -7398,7 +7399,7 @@
   function actOutside(e){ var d=document.getElementById('act-drop'), b=document.getElementById('act-btn'); if(d&&!d.contains(e.target)&&!(b&&b.contains(e.target)))closeActDrop(); }
   function closeActDrop(){ var d=document.getElementById('act-drop'); if(d)d.classList.remove('open'); document.removeEventListener('mousedown', actOutside); }
   function ensureActivityButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('act-btn'))return;
-    var b=document.createElement('button'); b.id='act-btn'; b.className='tl-bell'; b.title='Recent changes — last 10 major supply changes'; b.textContent='🕘';
+    var b=document.createElement('button'); b.id='act-btn'; b.className='tl-bell'; b.title='Recent changes — last 10 major supply changes'; b.innerHTML='🕘 Recent'; b.style.fontSize='12px'; b.style.fontWeight='600';
     var bell=document.getElementById('tl-bell'); if(bell)row.insertBefore(b,bell); else row.appendChild(b);
     b.onclick=function(e){ e.stopPropagation(); toggleActDrop(); };
     if(!document.getElementById('act-drop')){ var d=document.createElement('div'); d.id='act-drop'; document.body.appendChild(d); } }

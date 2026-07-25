@@ -1888,7 +1888,8 @@ app.get('/api/supply/:section', async (req, res) => {
               sum(round(coalesce(po.supplier_invoice_total, lv.line_value, po.order_value_estimation, 0)
                         * coalesce(po.start_deposit_pct_override, s.start_deposit_pct, 0)/100, 2)) est_alloc,
               sum(round(coalesce(po.supplier_invoice_total, lv.line_value, po.order_value_estimation, 0), 2)) unalloc_value,
-              count(*) open_unalloc
+              count(*) open_unalloc,
+              string_agg(po.po, ', ' ORDER BY po.po) pos_unalloc   -- the actual OPEN, not-yet-allocated POs (matches the "N unalloc" badge)
             FROM planner.purchase_orders po
             LEFT JOIN planner.suppliers s ON s.id=po.supplier_id
             LEFT JOIN LATERAL (SELECT sum(l.qty * coalesce(
@@ -1908,6 +1909,7 @@ app.get('/api/supply/:section', async (req, res) => {
             CASE WHEN d.is_deposit THEN coalesce(p.pool_amount, coalesce(d.amount,0))-coalesce(dr.used,0) END deposit_remaining,
             CASE WHEN d.is_deposit THEN round(coalesce(ea.est_alloc,0),2) END est_alloc,
             CASE WHEN d.is_deposit THEN coalesce(ea.open_unalloc,0) END open_unalloc,
+            CASE WHEN d.is_deposit THEN ea.pos_unalloc END pos_unalloc,
             CASE WHEN d.is_deposit THEN round(coalesce(ea.unalloc_value,0),2) END unalloc_value,
             CASE WHEN d.is_deposit THEN
               (SELECT string_agg(po.po,', ' ORDER BY po.po) FROM planner.purchase_orders po WHERE po.deposit_ref=d.reference)
@@ -3467,9 +3469,15 @@ app.post('/api/supply/note-read/:id', async (req, res) => {
 async function deleteLatestNote(res, table, keyCol, id, opts) {
   opts = opts || {};
   try {
-    const row = (await pool.query(`SELECT ${keyCol} k, author_kind FROM planner.${table} WHERE id=$1`, [id])).rows[0];
+    const row = (await pool.query(`SELECT ${keyCol} k, author_kind, coalesce(author_email,'') author_email FROM planner.${table} WHERE id=$1`, [id])).rows[0];
     if (!row) return res.status(404).json({ error: 'note not found' });
     if (opts.supplierOnly && row.author_kind !== 'supplier') return res.status(403).json({ error: 'can only delete your own messages' });
+    // Admin side: you may only delete YOUR OWN latest Dock & Bay message — never a supplier's, never a colleague's.
+    if (opts.ownAuthorOnly) {
+      if (row.author_kind !== 'internal') return res.status(403).json({ error: 'can only delete your own messages' });
+      if (!opts.me || row.author_email.toLowerCase() !== String(opts.me).toLowerCase())
+        return res.status(403).json({ error: 'can only delete your own messages' });
+    }
     if (opts.ownsKey && !(await opts.ownsKey(row.k))) return res.status(403).json({ error: 'not your thread' });
     const latest = (await pool.query(`SELECT id FROM planner.${table} WHERE ${keyCol}=$1 ORDER BY created_at DESC, id DESC LIMIT 1`, [row.k])).rows[0];
     if (!latest || String(latest.id) !== String(id)) return res.status(409).json({ error: 'only the most recent message can be deleted' });
@@ -3477,10 +3485,13 @@ async function deleteLatestNote(res, table, keyCol, id, opts) {
     res.json({ ok: true, deleted: id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 }
-// Admin: delete the latest note on a PO/product (supplier_notes), shipment, or sample timeline.
-app.post('/api/supply/note-delete/:id', (req, res) => deleteLatestNote(res, 'supplier_notes', 'po', req.params.id));
-app.post('/api/supply/shipment-note-delete/:id', (req, res) => deleteLatestNote(res, 'shipment_notes', 'shipment_ref', req.params.id));
-app.post('/api/supply/sample-note-delete/:id', (req, res) => deleteLatestNote(res, 'sample_notes', 'sample_id', req.params.id));
+// Admin: delete the latest note on a PO/product (supplier_notes), shipment, or sample timeline. You can only
+// delete YOUR OWN most-recent Dock & Bay message (ownAuthorOnly) — the signed-in user (authUser), or the client's
+// declared user in sandbox where no auth proxy forwards a header (live always sends the header, which wins).
+const noteDelMe = (req) => authUser(req) || (req.body && req.body.by) || null;
+app.post('/api/supply/note-delete/:id', (req, res) => deleteLatestNote(res, 'supplier_notes', 'po', req.params.id, { ownAuthorOnly: true, me: noteDelMe(req) }));
+app.post('/api/supply/shipment-note-delete/:id', (req, res) => deleteLatestNote(res, 'shipment_notes', 'shipment_ref', req.params.id, { ownAuthorOnly: true, me: noteDelMe(req) }));
+app.post('/api/supply/sample-note-delete/:id', (req, res) => deleteLatestNote(res, 'sample_notes', 'sample_id', req.params.id, { ownAuthorOnly: true, me: noteDelMe(req) }));
 // The signed-in user's email, forwarded by the auth layer in front of the app (Diviyaj's Gmail login).
 // Checks the common auth-proxy headers; strips the IAP "accounts.google.com:" prefix. null if none present.
 function authUser(req) {
@@ -7954,15 +7965,53 @@ app.get('/api/portal/recent-activity', portalAuth, async (req, res) => {
   try {
     res.json((await pool.query(`
       SELECT to_char(ts,'YYYY-MM-DD HH24:MI') at, typ, label, ref FROM (
+        -- "New purchase order" fires only once the PO is portal-visible (not FUTURE) — i.e. set to Production —
+        -- so we never surface a PO the supplier can't open (matches the portal PO list's own NOT-future filter).
         SELECT created_at ts, 'po_created' typ, 'New purchase order '||po label, po ref
           FROM planner.purchase_orders WHERE created_at IS NOT NULL AND supplier_name = ANY($1)
+            AND coalesce(status,'') NOT ILIKE '%future%'
         UNION ALL SELECT supplier_confirmed_at, 'po_confirmed', 'You confirmed order '||po, po
           FROM planner.purchase_orders WHERE supplier_confirmed_at IS NOT NULL AND supplier_name = ANY($1)
+        -- "New shipment" fires only when at least one of the supplier's POs aboard it is in production / ready to
+        -- ship / shipping (so the shipment is real and relevant to them — not a shell around FUTURE-only POs).
+        UNION ALL SELECT sh.created_at, 'shipment_created', 'New shipment '||sh.shipment_ref, sh.shipment_ref
+          FROM planner.shipments sh WHERE sh.created_at IS NOT NULL
+            AND EXISTS (SELECT 1 FROM planner.purchase_orders po WHERE po.shipment_ref = sh.shipment_ref
+                          AND po.supplier_name = ANY($1)
+                          AND (po.status ILIKE 'production%' OR po.status ILIKE 'ready%' OR po.status ILIKE 'shipping%'))
         UNION ALL SELECT date_paid, 'payment', 'Payment received'||coalesce(' — '||nullif(reference,''),'')||coalesce(' ('||to_char(round(amount),'FM999,999,999')||')',''), coalesce(nullif(reference,''),'')
           FROM planner.deposits WHERE date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND supplier_name = ANY($1)
         UNION ALL SELECT created_at, 'sample_created', 'New sample request SR-'||id, 'SR-'||id
           FROM planner.sample_requests WHERE created_at IS NOT NULL AND supplier_name = ANY($1)
       ) z ORDER BY at DESC NULLS LAST LIMIT 15`, [names])).rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Portal "Inbox" drawer — the actual UNREAD Dock & Bay messages for THIS supplier across every thread type
+// (PO, shipment, sample, product), newest first. Each row carries the note id + its thread type/ref so the
+// client can render the message, link to the item, and mark it read via the matching read endpoint.
+app.get('/api/portal/unread-messages', portalAuth, async (req, res) => {
+  const names = req.portal.suppliers; if (!names.length) return res.json([]);
+  try {
+    res.json((await pool.query(`
+      SELECT type, ref, note_id, author, body, to_char(created_at,'YYYY-MM-DD HH24:MI') at FROM (
+        SELECT 'po' type, n.po ref, n.id note_id, coalesce(n.author_email,'') author, n.body, n.created_at
+          FROM planner.supplier_notes n JOIN planner.purchase_orders po ON po.po=n.po
+          WHERE n.author_kind='internal' AND n.read_at IS NULL AND po.supplier_name = ANY($1)
+            AND coalesce(po.status,'') NOT ILIKE '%future%'
+        UNION ALL
+        SELECT 'shipment', n.shipment_ref, n.id, coalesce(n.author_email,''), n.body, n.created_at
+          FROM planner.shipment_notes n
+          WHERE n.author_kind='internal' AND n.read_at IS NULL
+            AND EXISTS (SELECT 1 FROM planner.purchase_orders po WHERE po.shipment_ref=n.shipment_ref AND po.supplier_name = ANY($1))
+        UNION ALL
+        SELECT 'sample', sr.ref, n.id, coalesce(n.author_email,''), n.body, n.created_at
+          FROM planner.sample_notes n JOIN planner.sample_requests sr ON sr.id=n.sample_id
+          WHERE n.author_kind='internal' AND n.read_at IS NULL AND sr.supplier_name = ANY($1)
+        UNION ALL
+        SELECT 'product', n.po, n.id, coalesce(n.author_email,''), n.body, n.created_at
+          FROM planner.supplier_notes n JOIN planner.product_dev_items pdi ON pdi.ref=n.po
+          WHERE n.author_kind='internal' AND n.read_at IS NULL AND pdi.supplier = ANY($1)
+      ) z ORDER BY created_at DESC NULLS LAST LIMIT 40`, [names])).rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // ── PORTAL PRODUCT (supplier-scoped): timeline view + comment on their assigned product-dev items ──

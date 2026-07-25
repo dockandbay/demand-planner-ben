@@ -1656,22 +1656,57 @@
             d.innerHTML='<div style="padding:8px 12px;font-weight:700;border-bottom:1px solid #eef2f7;font-size:12px">Recent changes</div><div style="padding:10px 12px;color:#888;font-size:12px">Loading…</div>';
             fetch(EP.recentActivity).then(function(r){return r.json();}).then(function(rows){
               if(!Array.isArray(rows)||!rows.length){ d.innerHTML='<div style="padding:8px 12px;font-weight:700;border-bottom:1px solid #eef2f7;font-size:12px">Recent changes</div><div style="padding:10px 12px;color:#888;font-size:12px">Nothing recent.</div>'; return; }
-              var ICO={po_created:'🆕',po_confirmed:'✅',payment:'💰',sample_created:'🧪'};
+              var ICO={po_created:'🆕',po_confirmed:'✅',shipment_created:'🚢',payment:'💰',sample_created:'🧪'};
               d.innerHTML='<div style="padding:8px 12px;font-weight:700;border-bottom:1px solid #eef2f7;font-size:12px">Recent changes</div>'
-                +rows.map(function(r){ var kind=(r.typ==='payment')?'payments':(r.typ==='sample_created')?'sample':'po';
+                +rows.map(function(r){ var kind=(r.typ==='payment')?'payments':(r.typ==='sample_created')?'sample':(r.typ==='shipment_created')?'shipment':'po';
                   return '<div class="pp-recent-row" data-kind="'+kind+'" data-ref="'+esc(r.ref||'')+'" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #f5f5f5;font-size:12px"><div>'+(ICO[r.typ]||'•')+' '+esc(r.label)+'</div><div style="color:#94a3b8;font-size:10px;margin-top:1px">'+esc(r.at||'')+'</div></div>'; }).join('');
               d.querySelectorAll('.pp-recent-row').forEach(function(row){ row.onclick=function(e){ e.stopPropagation(); notifGo(row.dataset.kind, row.dataset.ref); }; });
             }).catch(function(){ d.innerHTML='<div style="padding:10px 12px;color:#dc2626;font-size:12px">Could not load recent changes.</div>'; }); }
+          // Inbox drawer: fetch the actual UNREAD Dock & Bay messages (body, sender, date/time, clickable ref +
+          // Mark as read). fmtDT: 'YYYY-MM-DD HH:MI' → 'dd-mmm-yy HH:MM'. shortAuthor: ben@dockandbay.com → ben@.
+          function fmtDT(at){ if(!at)return ''; var t=String(at).slice(11,16); return fd(at)+(t?(' '+t):''); }
+          function shortAuthor(e){ e=String(e||'').trim(); return e?e.replace(/@dockandbay\.com\b/i,'@'):'Dock & Bay'; }
+          var UNREAD_LBL={po:'Purchase order',shipment:'Shipment',sample:'Sample',product:'Product'};
+          function unreadMarkRead(type,ref,noteId,cb){ var url,body;
+            if(type==='po'){ url=EP.noteReadBase&&(EP.noteReadBase+encodeURIComponent(noteId)); body={read:true}; }
+            else if(type==='sample'){ url=EP.sampleNoteReadBase&&(EP.sampleNoteReadBase+encodeURIComponent(noteId)); body={read:true}; }
+            else if(type==='shipment'){ url=EP.shipmentNotesRead; body={shipment_ref:ref}; }
+            else if(type==='product'){ url=EP.productNotesRead; body={ref:ref}; }
+            if(!url){ if(cb)cb(); return; }
+            postJSON(url,body,function(){ var D=_ppData||{};   // keep the ✉ badge honest without a full bootstrap refetch
+              if(type==='po'){ ((D.notesByPo||{})[ref]||[]).forEach(function(x){ if(String(x.id)===String(noteId))x.read=true; }); }
+              else if(type==='shipment'){ (D.shipmentPlan||[]).forEach(function(s){ if(s.shipment_ref===ref)s.unread_dnb=0; }); }
+              else if(type==='sample'){ (D.samples||[]).forEach(function(s){ if(s.ref===ref)s.unread_dnb=Math.max(0,(Number(s.unread_dnb)||0)-1); }); }
+              else if(type==='product'){ (D.products||[]).forEach(function(p){ if(p.ref===ref)p.unread_dnb=0; }); }
+              try{ setSampBadge();setPosBadge();setShipBadge();setProdBadge(); }catch(e){}
+              if(cb)cb(); }); }
+          function loadUnread(d){ if(!d)return;
+            var hdr='<div style="padding:8px 12px;font-weight:700;border-bottom:1px solid #eef2f7;font-size:12px">Unread messages from Dock &amp; Bay</div>';
+            if(!EP.unreadMessages){ d.innerHTML=hdr+'<div style="padding:10px 12px;color:#888;font-size:12px">Not available in preview.</div>'; return; }
+            d.innerHTML=hdr+'<div style="padding:10px 12px;color:#888;font-size:12px">Loading…</div>';
+            fetch(EP.unreadMessages).then(function(r){return r.json();}).then(function(rows){
+              if(!Array.isArray(rows)||!rows.length){ d.innerHTML=hdr+'<div style="padding:10px 12px;color:#888;font-size:12px">No unread messages.</div>'; return; }
+              d.innerHTML=hdr+rows.map(function(m){ var body=String(m.body||''); if(body.length>240)body=body.slice(0,240)+'…';
+                return '<div style="padding:8px 12px;border-bottom:1px solid #f5f5f5;font-size:12px">'
+                  +'<div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">'
+                    +'<a class="pp-un-go" data-kind="'+esc(m.type)+'" data-ref="'+esc(m.ref||'')+'" style="color:#2563eb;text-decoration:underline;cursor:pointer;font-weight:600">'+esc((UNREAD_LBL[m.type]||'')+' '+(m.ref||''))+'</a>'
+                    +'<span style="color:#94a3b8;font-size:10px;white-space:nowrap">'+esc(fmtDT(m.at))+'</span></div>'
+                  +'<div style="color:#475569;font-size:10px;margin:1px 0 2px">from '+esc(shortAuthor(m.author))+'</div>'
+                  +'<div style="color:#1f2937;white-space:pre-wrap;word-break:break-word">'+esc(body)+'</div>'
+                  +'<div style="margin-top:4px"><button class="pp-un-read save-btn light" data-type="'+esc(m.type)+'" data-ref="'+esc(m.ref||'')+'" data-id="'+esc(String(m.note_id))+'" style="font-size:10px">Mark as read</button></div>'
+                  +'</div>'; }).join('');
+              d.querySelectorAll('.pp-un-go').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); notifGo(a.dataset.kind, a.dataset.ref); }; });
+              d.querySelectorAll('.pp-un-read').forEach(function(bn){ bn.onclick=function(e){ e.stopPropagation(); bn.disabled=true; bn.textContent='…';
+                unreadMarkRead(bn.dataset.type, bn.dataset.ref, bn.dataset.id, function(){ renderPortalNotif(); loadUnread(d); }); }; });
+            }).catch(function(){ d.innerHTML=hdr+'<div style="padding:10px 12px;color:#dc2626;font-size:12px">Could not load messages.</div>'; }); }
           function renderPortalNotif(){ var wrap=document.getElementById('pp-notif'); if(!wrap)return; wrap.style.display='inline-flex';
             var items=computeUnread(), total=items.reduce(function(t,x){return t+x.n;},0);
             var nEl=document.getElementById('pp-unread-n'); if(nEl)nEl.textContent=total;
             var ub=document.getElementById('pp-unread-btn'); if(ub){ ub.style.background=total>0?'#fef2f2':''; ub.style.borderColor=total>0?'#fca5a5':''; ub.style.color=total>0?'#b91c1c':''; }
             var ud=document.getElementById('pp-unread-drop');
-            if(ud){ ud.innerHTML='<div style="padding:8px 12px;font-weight:700;border-bottom:1px solid #eef2f7;font-size:12px">Unread messages from Dock &amp; Bay</div>'
-              +(items.length?items.map(function(it){ return '<div class="pp-notif-row" data-kind="'+it.kind+'" data-ref="'+esc(it.ref)+'" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #f5f5f5;font-size:12px;display:flex;gap:8px;align-items:center"><span class="tool-badge bg-red" style="min-width:20px;text-align:center">'+it.n+'</span> '+esc(it.label)+'</div>'; }).join(''):'<div style="padding:10px 12px;color:#888;font-size:12px">No unread messages.</div>');
-              ud.querySelectorAll('.pp-notif-row').forEach(function(r){ r.onclick=function(e){ e.stopPropagation(); notifGo(r.dataset.kind, r.dataset.ref); }; }); }
+            if(ud && ud.style.display!=='none') loadUnread(ud);   // an already-open Inbox stays fresh; otherwise it loads on open
             if(!wrap._wired){ wrap._wired=1;
-              document.getElementById('pp-unread-btn').onclick=function(e){ e.stopPropagation(); var d=document.getElementById('pp-unread-drop'), r=document.getElementById('pp-recent-drop'); if(r)r.style.display='none'; d.style.display=(d.style.display==='none'?'block':'none'); };
+              document.getElementById('pp-unread-btn').onclick=function(e){ e.stopPropagation(); var d=document.getElementById('pp-unread-drop'), r=document.getElementById('pp-recent-drop'); if(r)r.style.display='none'; if(d.style.display!=='none'){ d.style.display='none'; return; } d.style.display='block'; loadUnread(d); };
               document.getElementById('pp-recent-btn').onclick=function(e){ e.stopPropagation(); var d=document.getElementById('pp-recent-drop'), u=document.getElementById('pp-unread-drop'); if(u)u.style.display='none'; if(d.style.display!=='none'){ d.style.display='none'; return; } d.style.display='block'; loadRecent(d); };
               document.getElementById('pp-unread-drop').onclick=function(e){ e.stopPropagation(); };
               document.getElementById('pp-recent-drop').onclick=function(e){ e.stopPropagation(); };

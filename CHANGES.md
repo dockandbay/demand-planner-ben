@@ -3,6 +3,29 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.111 - Portal notifications, deposits UX, timeline-delete guard
+
+Batch of admin + portal refinements:
+
+- **Portal Recent changes:** the "New purchase order" event now fires only once a PO leaves FUTURE
+  (i.e. is set to Production), matching the portal PO list's own visibility — no more dead links to POs
+  the supplier can't open. **Added a "New shipment" event**, gated on ≥1 linked PO in
+  production / ready-to-ship / shipping.
+- **Portal Inbox (unread messages):** the dropdown now shows the actual message — body, sender (`ben@`),
+  date+time (dd-mmm-yy HH:MM) — with a **Mark as read** button and the item ref as a clickable link.
+  New endpoint `GET /api/portal/unread-messages` (unread internal notes across PO/shipment/sample/product).
+- **Deposits register:** "N unalloc" now has a hover tooltip; the linked-PO toggle is now
+  **Unallocated (default) / All** (was open-only/all). Clicking a linked PO opens the **popout drawer**
+  (Payments tab) instead of navigating away.
+- **Timeline delete:** admin can now only delete their **own** most-recent message — not a supplier's,
+  not a colleague's (client + server guard on PO/shipment/sample timelines). Sandbox attributes notes to
+  `DEV_USER`; live uses the auth-proxy email.
+- **Admin top bar:** the recent/messages buttons now read **🕘 Recent** and **✉ Inbox (N)** to match the
+  supplier portal.
+- **PO popout drawer:** title shows just the reference (e.g. `PO-55UKLX3`), no more "PO PO-…".
+
+No new env vars. No migrations. (Ensure `DEV_USER` stays sandbox-only — never set on prod.)
+
 ## v26.110 - Supplier portal: anonymise mode for screenshots
 
 Display-only anonymise mode (for screenshots). Open the portal with `?anon=1` (or `?as=Your Name`;
