@@ -4726,6 +4726,20 @@
           +'<div style="margin-right:16px"><div class="mut tiny">Freight used</div><div style="padding:4px 0;font-weight:600">'+(fr.c==null?'—':money(fr.c))+' <span class="src '+(fr.src==='FLEX'?'fx':'m')+'">'+esc(fr.src)+'</span></div></div>'
           +'<div style="margin-right:16px"><div class="mut tiny">Estimate ('+esc(m)+')</div><div class="tiny" style="padding:5px 0;color:#475569">'+estTxt+'</div></div>'
           +'</div>'; })();   // shipment notes now live in the Timeline & notes tab (multi-line); Tax Invoice button moved to the POs-aboard tab
+    // Progressive open: the "Dates & tracking" view (head) is built entirely from the grid row, so on the INITIAL
+    // open (box still showing "Loading…") paint it IMMEDIATELY — the drawer appears at once instead of waiting ~2s
+    // for the POs-aboard + crossdock fetch below, which then replaces this with the full tabbed view. Additive +
+    // try/catch → if anything's off it silently falls back to the old blank-until-loaded behaviour. Skipped on a
+    // silent refresh (box already has content) so an in-place edit doesn't flash back to "loading".
+    try{ var _b0=document.getElementById('shipdet-'+i);
+      if(_b0 && _b0.classList.contains('count') && (shipBy[ref]||s)){
+        _b0.innerHTML='<div class="mut tiny" style="padding:2px 2px 8px;color:#94a3b8">⏳ loading POs aboard &amp; crossdock…</div>'+head;
+        _b0.classList.remove('count'); bindEdits();
+        _b0.querySelectorAll('.shipdest').forEach(function(el){ el.onchange=function(){ var body={}; body[el.dataset.field]=el.value; el.classList.add('saved');
+          fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
+            .then(function(j){ if(j&&j.error)throw new Error(j.error); if(_shipPatchRow)_shipPatchRow(ref); else shipReload(); })
+            .catch(function(){ el.classList.remove('saved'); el.classList.add('err'); }); }; }); }
+    }catch(e){}
     Promise.all([fetch('/api/supply/shipment-detail/'+encodeURIComponent(ref)).then(function(r){return r.json();}),
       fetch('/api/supply/shipment-crossdock/'+encodeURIComponent(ref)).then(function(r){return r.json();}).catch(function(){return [];})])
       .then(function(R){ var rows=R[0]||[], xd=R[1]||[]; var t='<div class="sect-h">POs aboard ('+rows.length+') — ★ marks the master (consolidation) PO</div>';

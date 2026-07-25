@@ -3,6 +3,16 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.124 - Shipment drawer opens instantly (progressive load)
+
+Same treatment as the PO drawer: opening a shipment waited ~2s for the POs-aboard + crossdock fetch before
+showing anything, even though the **Dates & tracking** tab is built entirely from the grid row. Now that tab
+paints **immediately** (with a "⏳ loading POs aboard & crossdock…" note); the full tabbed view swaps in when the
+fetch returns. Additive + try/catch, and only on the initial open (a silent in-place refresh won't flash).
+
+(The shipments *grid* itself was left as-is — unlike the PO grid it's already tiny over the wire (~35KB gzipped)
+with no heavy expand-only fields to strip, and its cost is the aggregation query, not payload.)
+
 ## v26.123 - PO drawer opens instantly (progressive load)
 
 Opening a PO drawer waited ~3s for `/api/supply/po-detail` (≈13 sub-queries, each paying the DB round-trip)
