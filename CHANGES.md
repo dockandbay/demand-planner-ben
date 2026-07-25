@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.137 - Actions priority preview now shows ALL high-priority items
+
+- The fast priority preview was a hand-picked 4-rule subset, so many high-priority actions (e.g. "PO not in ERP",
+  "Client deadline at risk", "Shipment escalated") only appeared once the full set loaded. It now runs the **same
+  full rule set filtered to high severity**, so *every* high-priority action loads first (49 vs 8 in sandbox) — and
+  it can never drift out of sync with the full rules again. (Only the Manufacturing-mismatch layer, which needs a
+  heavier query, still arrives with the full fetch.) Also slightly faster.
+
 ## v26.136 - Actions loading polish + sub-tab counter
 
 - Removed the redundant inline "showing high-priority actions — loading the rest…" banner — the version-badge
