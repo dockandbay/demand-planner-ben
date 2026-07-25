@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.117 - Payment amounts in supplier currency + PAYMENTS polish + faster order-plan filters
+
+- **Supplier currency everywhere in payments:** the **Payments Due** report (per-row amount, per-supplier
+  subtotal, and total) and the **Payments Report** (base currency column + expanded "Amount (…)" heading)
+  now show each supplier's own currency + symbol (e.g. **£11,760.00 GBP** for a GBP supplier). Mixed-currency
+  totals are flagged. Driven by `suppliers.default_currency`.
+- **Payment email:** the Reference column is now left-aligned.
+- **PAYMENTS section:** the default/first tab is now **Payments Due**, and the top-level PAYMENTS tab shows the
+  **same overdue count** badge as the Payments Due sub-tab.
+- **Order Plan:** clicking an exception filter (partials / supplier risk / …) now highlights + dims
+  **instantly** and rebuilds on the next frame, instead of the UI freezing for 2-3s before any feedback.
+
 ## v26.116 - SUPPLY ▸ PAYMENTS section + deposit at-risk fixes + top-bar tidy
 
 - **New SUPPLY ▸ PAYMENTS section** (after ORDER PLAN): **Deposits · Other Payments · Payments Due ·

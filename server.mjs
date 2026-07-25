@@ -1651,7 +1651,7 @@ app.get('/api/supply/:section', async (req, res) => {
           q(`SELECT batch FROM planner.batches ORDER BY batch DESC`),
           q(`SELECT prod_no FROM planner.prod_numbers WHERE prod_no IS NOT NULL AND status='ACTIVE' ORDER BY prod_no DESC`),   // PROD picker/filter: ACTIVE only, most-recent first
           q(`SELECT shipment_ref FROM planner.shipments ORDER BY shipment_ref`),
-          q(`SELECT name FROM planner.suppliers WHERE name IS NOT NULL ORDER BY name`),
+          q(`SELECT name, upper(coalesce(nullif(default_currency,''),'USD')) ccy FROM planner.suppliers WHERE name IS NOT NULL ORDER BY name`),
           q(`SELECT name FROM planner.branches ORDER BY name`),
           // eligible crossdock SKUs (code starts with CROSSDOCK or PREORDER), union of products + sku_labels
           q(`SELECT sku FROM (
@@ -1667,6 +1667,7 @@ app.get('/api/supply/:section', async (req, res) => {
           prods: pr.map(x => x.prod_no),
           shipments: sh.map(x => x.shipment_ref),
           suppliers: su.map(x => x.name),
+          supplier_ccy: Object.fromEntries(su.map(x => [x.name, x.ccy])),   // name → default currency (for showing payment amounts in the supplier's currency)
           branches: br.map(x => x.name),
           crossdock: xd.map(x => x.sku),
           pos: po.map(x => x.po),
@@ -2067,9 +2068,12 @@ app.get('/api/supply/:section', async (req, res) => {
           if (l.supplier_code && !g.supplier_code) g.supplier_code = l.supplier_code;
           g.lines.push({ reference: l.reference, amount: Number(l.amount), type: l.type, deposit_ref: l.deposit_ref, source: l.source, account_code: l.account_code || '', prod_no: l.prod_no || '' }); }
         const TYPE_ORD = { Deposit: 0, Completion: 1, Balance: 2, Other: 3 };
+        // base currency = the supplier's default currency (CONFIG), not a hardcoded USD
+        const ccyRows = (await pool.query(`SELECT name, upper(coalesce(nullif(default_currency,''),'USD')) ccy FROM planner.suppliers`)).rows;
+        const ccyMap = {}; ccyRows.forEach(r => { ccyMap[String(r.name).toLowerCase().trim()] = r.ccy; });
         const out = Object.values(groups).map(g => { const f = fxMap[g.dt + '|' + g.supplier];
           g.lines.sort((a, b) => (TYPE_ORD[a.type] ?? 9) - (TYPE_ORD[b.type] ?? 9));
-          return { dt: g.dt, supplier: g.supplier, supplier_code: g.supplier_code || '', total: Math.round(g.total * 100) / 100, base_ccy: 'USD',
+          return { dt: g.dt, supplier: g.supplier, supplier_code: g.supplier_code || '', total: Math.round(g.total * 100) / 100, base_ccy: ccyMap[String(g.supplier).toLowerCase().trim()] || 'USD',
             other_amount: f && f.paid_amount != null ? Number(f.paid_amount) : null, bank_ccy: f ? f.ccy : '',
             lines: g.lines }; })
           .sort((a, b) => a.dt < b.dt ? 1 : a.dt > b.dt ? -1 : (a.supplier < b.supplier ? -1 : 1));
@@ -2955,7 +2959,7 @@ async function emailPaymentConfirmed(runDate, supplier, bankAmt, bankCcy) {
   const payAmt = sym + amtNum + ' ' + supCcy;
   const inv = 'SUPPLIER-PAYMENT-' + (run.supplier_code ? run.supplier_code + '-' : '') + run.dt;
   const cell = 'border:1px solid #cccccc;padding:4px 8px', hcell = cell + ';background:#f2f2f2;text-align:left;font-weight:bold';
-  const rowsHtml = run.lines.map(l => `<tr><td style="${cell}">${escHtml(l.reference || '')}</td><td style="${cell};text-align:right">${fmtMoney2(l.amount)}</td><td style="${cell}">${escHtml(l.type || '')}</td><td style="${cell}">${escHtml(l.prod_no || '')}</td><td style="${cell}">${escHtml(l.deposit_ref || '')}</td></tr>`).join('');
+  const rowsHtml = run.lines.map(l => `<tr><td style="${cell};text-align:left">${escHtml(l.reference || '')}</td><td style="${cell};text-align:right">${fmtMoney2(l.amount)}</td><td style="${cell}">${escHtml(l.type || '')}</td><td style="${cell}">${escHtml(l.prod_no || '')}</td><td style="${cell}">${escHtml(l.deposit_ref || '')}</td></tr>`).join('');
   const greet = (us.find(u => u.contact_name) || {}).contact_name || supplier;
   const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#111">`
     + `<p style="margin:0 0 10px">Dear ${escHtml(greet)},</p>`

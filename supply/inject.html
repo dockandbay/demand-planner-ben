@@ -613,7 +613,7 @@
     if(u.indexOf('COMPLETE')>=0||u.indexOf('DELIVER')>=0)return 'bg-green'; return 'bg-blue'; }
   var STBG={'bg-neutral':['#f3f4f6','#4b5563'],'bg-amber':['#fef3c7','#92400e'],'bg-red':['#fee2e2','#991b1b'],'bg-green':['#dcfce7','#166534'],'bg-blue':['#dbeafe','#1e40af']};
   var _opExc={count:0,byPo:{}};   // ORDER PLAN unapproved exceptions (partials/suprisk/disc/country) per PO → nav counter + sub-tab badge
-  var cache={},current=null,depRefs=null,poBy={},shipBy={},batchList=[],prodList=[],shipList=[],supplierList=[],branchList=[],crossdockList=[],poLookupList=[];
+  var cache={},current=null,depRefs=null,poBy={},shipBy={},batchList=[],prodList=[],shipList=[],supplierList=[],branchList=[],crossdockList=[],poLookupList=[],supplierCcy={};
   var _navToken=0;   // bumps on every section / PO sub-tab navigation; async renders check it so a slow fetch from a view you've left can't overwrite the newer one (fixes fast-clicking loading the wrong view)
   var _pendingPO=null,_pendingPOTab=null,_pendingShip=null,_pendingOP=null,_pendingDep=null,_pendingSampleRef=null;   // cross-view navigation: expand this PO / shipment, pre-filter order plan / deposit register, after the target view renders
   var _poRefresh=null;   // set by the PO grid to refresh itself in place (no full section reload) after an assign
@@ -630,6 +630,11 @@
   function shortNotes(arr){ (arr||[]).forEach(function(n){ if(n){ if(n.body)n.body=shortUser(n.body); if(n.author_email)n.author_email=shortUser(n.author_email); } }); return arr; }  // shorten user emails in timeline bodies/authors
   function isNum(v){return v!==''&&v!=null&&!isNaN(Number(v))&&/^-?[\d.]+$/.test(String(v));}
   function money(v){return v==null||v===''?'':Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});}
+  // Currency helpers — show a payment amount in a supplier's own currency with the right symbol (e.g. £11,760.00 GBP).
+  var CCY_SYM={USD:'$',GBP:'£',EUR:'€',AUD:'A$',CAD:'C$',NZD:'NZ$',CNY:'¥',JPY:'¥',HKD:'HK$',SGD:'S$'};
+  function curSym(ccy){ return CCY_SYM[String(ccy||'').toUpperCase()]||''; }
+  function supCcyOf(name){ return (supplierCcy&&supplierCcy[name])?String(supplierCcy[name]).toUpperCase():'USD'; }
+  function fmtCur(v,ccy){ ccy=String(ccy||'USD').toUpperCase(); return curSym(ccy)+money(v)+' '+ccy; }   // £11,760.00 GBP
   function units(v){return v==null||v===''?'':Number(v).toLocaleString(undefined,{maximumFractionDigits:0});}
   var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   function fd(s){ if(!s)return ''; var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(s)); return m?(m[3]+'-'+MON[+m[2]-1]+'-'+m[1].slice(2)):String(s); }  // YYYY-MM-DD -> dd-mmm-yy
@@ -756,7 +761,7 @@
   function dl(id,arr){ return '<datalist id="'+id+'">'+(arr||[]).map(function(r){return '<option value="'+esc(r)+'">';}).join('')+'</datalist>'; }
   function lookupDatalists(){ return depDatalist()+dl('batchlist',batchList)+dl('prodlist',prodList)+dl('shiplist',shipList)+dl('supplierlist',supplierList)+dl('branchlist',branchList)+dl('crossdocklist',crossdockList)+dl('polist',poLookupList); }
   function combo(ep,field,val,list){ return '<input class="fci txt" list="'+list+'" data-ep="'+esc(ep)+'" data-field="'+esc(field)+'" value="'+esc(val==null?'':val)+'">'; }
-  function fetchLookups(cb){ fetch('/api/supply/lookups').then(function(r){return r.json();}).then(function(d){ depRefs=d.deposits||[]; batchList=d.batches||[]; prodList=d.prods||[]; shipList=d.shipments||[]; supplierList=d.suppliers||[]; branchList=d.branches||[]; crossdockList=d.crossdock||[]; poLookupList=d.pos||[]; cb(); }).catch(cb); }
+  function fetchLookups(cb){ fetch('/api/supply/lookups').then(function(r){return r.json();}).then(function(d){ depRefs=d.deposits||[]; batchList=d.batches||[]; prodList=d.prods||[]; shipList=d.shipments||[]; supplierList=d.suppliers||[]; supplierCcy=d.supplier_ccy||{}; branchList=d.branches||[]; crossdockList=d.crossdock||[]; poLookupList=d.pos||[]; cb(); }).catch(cb); }
   // explicit per-status colours for the PO grid Status dropdown (Ben's palette). [background, text]
   var PO_STATUS_BG={'FUTURE':['#D3D3FF','#2a2a55'],'PRODUCTION':['#F2B949','#5a3a00'],'READY TO SHIP':['#8FD9FB','#0a3a4a'],
     'SHIPPING':['#50C878','#0f3d22'],'DELIVERED':['#2E8B57','#ffffff'],'COMPLETE':['#305CDE','#ffffff']};
@@ -3699,8 +3704,12 @@
     c.querySelectorAll('[data-sc]').forEach(function(p){p.onclick=function(){st.scope=p.dataset.sc; c.querySelectorAll('[data-sc]').forEach(function(x){x.classList.toggle('active',x===p);}); viewReset();};});
     // Action-item pills are SINGLE-select: clicking one clears the others (click again to turn it off).
     var OP_EXCL={partials:'op-partials',suprisk:'op-suprisk',disc:'op-disc',notmkt:'op-notmkt'};
+    // Defer the (heavy) grid rebuild to the next frame so the clicked pill highlights + the grid dims IMMEDIATELY,
+    // instead of the browser freezing for 2-3s before any visible feedback (the rebuild is synchronous).
+    function opDeferReset(){ var g=document.getElementById('op-grid'); if(g){ g.style.opacity='.45'; g.style.pointerEvents='none'; }
+      requestAnimationFrame(function(){ requestAnimationFrame(function(){ viewReset(); var g2=document.getElementById('op-grid'); if(g2){ g2.style.opacity=''; g2.style.pointerEvents=''; } }); }); }
     function opExcl(which){ var was=st[which]; Object.keys(OP_EXCL).forEach(function(k){st[k]=false;}); st[which]=!was;
-      Object.keys(OP_EXCL).forEach(function(k){ var el=document.getElementById(OP_EXCL[k]); if(el)el.classList.toggle('active',st[k]); }); viewReset(); }
+      Object.keys(OP_EXCL).forEach(function(k){ var el=document.getElementById(OP_EXCL[k]); if(el)el.classList.toggle('active',st[k]); }); opDeferReset(); }
     document.getElementById('op-partials').onclick=function(){opExcl('partials');};
     document.getElementById('op-suprisk').onclick=function(){opExcl('suprisk');};
     document.getElementById('op-disc').onclick=function(){opExcl('disc');};
@@ -3910,7 +3919,10 @@
   // section's data renders (_navCounts.plan / .shipments / .manufacturing) + a background prefetch on entry.
   var _navCounts={}, _allShips=[], _NAVLBL={plan:'PLAN',shipments:'Shipments',manufacturing:'Manufacturing',paydue:'Payments Due'}, _NAVNOUN={paydue:'overdue payment'};
   function navBadge(n,noun){ n=Number(n)||0; return n>0?' <span class="ex-badge" title="'+n+' '+(noun?esc(noun)+(n>1?'s':''):('item'+(n>1?'s':'')+' needing action'))+'">'+n+'</span>':''; }
-  function updateNavBadges(){ document.querySelectorAll('#supply-content #prod-subtabs .rtab[data-posub]').forEach(function(sp){ var k=sp.dataset.posub; if(_NAVLBL[k]!==undefined) sp.innerHTML=_NAVLBL[k]+navBadge(_navCounts[k],_NAVNOUN[k]); }); }
+  function updateNavBadges(){ document.querySelectorAll('#supply-content #prod-subtabs .rtab[data-posub]').forEach(function(sp){ var k=sp.dataset.posub; if(_NAVLBL[k]!==undefined) sp.innerHTML=_NAVLBL[k]+navBadge(_navCounts[k],_NAVNOUN[k]); }); paymentsNavBadge(_navCounts.paydue); }
+  // PAYMENTS top-level tab inherits the Payments Due overdue count (same number as the Payments Due sub-tab)
+  function paymentsNavBadge(n){ n=Number(n)||0; var btn=document.querySelector('#supply-subnav .stab[data-k="payments"]'); if(btn)btn.innerHTML='PAYMENTS'+(n>0?' <span class="ex-badge" title="'+n+' payment'+(n>1?'s':'')+' overdue">'+n+'</span>':'');
+    var opt=document.querySelector('#supply-nav-sel option[value="payments"]'); if(opt)opt.textContent='PAYMENTS'+(n>0?' ('+n+')':''); }
   function poSubNav(){ return '<div id="prod-subtabs">'+subListFor(poSub).map(function(t){ var bd=(_NAVLBL[t[0]]!==undefined)?navBadge(_navCounts[t[0]],_NAVNOUN[t[0]]):''; return '<span class="rtab'+(poSub===t[0]?' active':'')+'" data-posub="'+t[0]+'">'+t[1]+bd+'</span>'; }).join('')+'</div>'; }
   // count of OVERDUE payments — mirrors buildPaymentsDue's r.overdue (unpaid, has a due date, 2026-01-01 ≤ due < today).
   var PDUE_MIN_DUE='2026-01-01';   // Payments Due cutoff: hide payments whose due date is before this (old/legacy)
@@ -6098,10 +6110,11 @@
   // can be seen AND recorded in one place. Overdue (due date past, not yet paid) is highlighted red.
   var PDUE_BG={Completion:'bg-amber',Balance:'bg-green',Deposit:'bg-blue',Other:'bg-neutral'};
   function renderPaymentsDue(b){ b.innerHTML='<div class="count">Loading…</div>';
+    fetchLookups(function(){   // ensure supplierCcy is loaded so amounts show in each supplier's currency
     Promise.all([fetch('/api/supply/purchase-orders').then(function(r){return r.json();}),
                  fetch('/api/supply/deposits').then(function(r){return r.json();})])
       .then(function(res){ buildPaymentsDue(b, res[0]||[], res[1]||[]); })
-      .catch(function(e){b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>';}); }
+      .catch(function(e){b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>';}); }); }
   function buildPaymentsDue(b, pos, deps){
     var today=new Date().toISOString().slice(0,10);
     var rows=[];
@@ -6136,7 +6149,7 @@
       if(!f.length) h+='<tr><td colspan="6" class="l mut">No payments match this filter.</td></tr>';
       order.forEach(function(s){ var gr=groups[s].slice().sort(function(a,c){return (a.due||'9999').localeCompare(c.due||'9999')||a.type.localeCompare(c.type);});
         var sub=gr.reduce(function(t,r){return t+(r.due_amt||0);},0); grand+=sub;
-        h+='<tr class="batchrow"><td class="l" colspan="3"><b>'+esc(s)+'</b> <span class="tiny mut">'+gr.length+' payment(s)</span></td><td class="l" colspan="3"><span class="tiny mut">subtotal due $'+money(sub)+'</span></td></tr>';
+        h+='<tr class="batchrow"><td class="l" colspan="3"><b>'+esc(s)+'</b> <span class="tiny mut">'+gr.length+' payment(s)</span></td><td class="l" colspan="3"><span class="tiny mut">subtotal due '+fmtCur(sub, supCcyOf(s))+'</span></td></tr>';
         gr.forEach(function(r){
           var dueCell=r.due?(r.overdue?'<span style="color:#dc2626;font-weight:700">'+esc(fd(r.due))+'</span>':esc(fd(r.due))):'<span class="mut">—</span>';
           // reference → its source: PO opens the PO with the PLAN expanded on the PAYMENTS tab; deposit/other open their register
@@ -6148,13 +6161,15 @@
           h+='<tr'+(r.overdue?' style="background:#fef2f2"':(r.paid?' style="opacity:.6"':''))+'>'
             +'<td class="l"><span class="tool-badge '+(PDUE_BG[r.type]||'bg-neutral')+'">'+esc(r.type)+'</span></td>'
             +'<td class="l">'+refCell+'</td>'
-            +'<td>'+money(r.due_amt)+'</td>'
+            +'<td>'+fmtCur(r.due_amt, supCcyOf(r.sup))+'</td>'
             +'<td class="l">'+dueCell+'</td>'
             +'<td>'+editCell(r.ep,r.amt_field,r.amt_val)+'</td>'
             +'<td class="l">'+editCell(r.ep,r.dt_field,r.dt_val,'date')
               +(!r.paid?' <button class="save-btn pdue-pay" data-ep="'+esc(r.ep)+'" data-af="'+esc(r.amt_field)+'" data-amt="'+esc(r.due_amt)+'" data-df="'+esc(r.dt_field)+'" style="background:#16a34a;color:#fff;border-color:#15803d;padding:2px 9px;font-size:11px" title="mark paid — set amount to '+money(r.due_amt)+' and date to today ('+localToday()+')">pay</button>':'')
               +'</td></tr>'; }); });
-      h+='<tr class="batchrow"><td class="l" colspan="2"><b>TOTAL DUE</b></td><td><b>'+money(grand)+'</b></td><td colspan="3"></td></tr>';
+      var _curs=Array.from(new Set(f.map(function(r){return supCcyOf(r.sup);})));   // one symbol only if every visible row shares a currency; else flag mixed
+      var _totCell=_curs.length===1?fmtCur(grand,_curs[0]):(money(grand)+' <span class="tiny mut">(mixed currencies)</span>');
+      h+='<tr class="batchrow"><td class="l" colspan="2"><b>TOTAL DUE</b></td><td><b>'+_totCell+'</b></td><td colspan="3"></td></tr>';
       document.getElementById('pdue-wrap').innerHTML=h+'</tbody></table></div>';
       bindEdits();
       document.querySelectorAll('#pdue-wrap .pdue-ref').forEach(function(x){ x.onclick=function(){ var g=x.dataset.go;
@@ -6314,7 +6329,7 @@
           +'<td class="l">'+drCell+'</td></tr>'; }).join('');
       var det='<tr class="exp-row" id="payexp-'+i+'" style="display:none"><td colspan="7"><div style="padding:2px">'
         +'<div class="sect-h" style="margin-top:2px">Payments in this run ('+(r.lines||[]).length+')</div>'
-        +'<table style="font-size:11px"><thead><tr><th class="l">Reference</th><th>Amount (USD)</th><th class="l">Type</th><th class="l">Production</th><th class="l">Deposit ref</th></tr></thead><tbody>'+lines+'</tbody></table></div></td></tr>';
+        +'<table style="font-size:11px"><thead><tr><th class="l">Reference</th><th>Amount ('+esc(r.base_ccy||'USD')+')</th><th class="l">Type</th><th class="l">Production</th><th class="l">Deposit ref</th></tr></thead><tbody>'+lines+'</tbody></table></div></td></tr>';
       var hasBill=(r.lines||[]).some(function(l){return l.source!=='other';});   // bill = everything except "other"
       var xeroIco='<svg width="13" height="13" viewBox="0 0 32 32" style="vertical-align:middle"><circle cx="16" cy="16" r="16" fill="#13B5EA"/><text x="16" y="23" font-size="21" font-weight="700" text-anchor="middle" fill="#fff" font-family="Arial,Helvetica,sans-serif">x</text></svg>';
       var emailIco='<svg width="15" height="12" viewBox="0 0 24 20" style="vertical-align:middle"><rect x="1.5" y="2" width="21" height="16" rx="2.5" fill="none" stroke="#7c3aed" stroke-width="2.2"/><path d="M2.5 4L12 11.5 21.5 4" fill="none" stroke="#7c3aed" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -6841,14 +6856,14 @@
   }
   function syncHash(){ if(current==='reports') writeHash(['supply','reports',reportTab]);
     else if(current==='purchase-orders') writeHash(['supply','purchase-orders'].concat(poSub&&PO_SUB_KEYS.indexOf(poSub)>=0&&poSub!=='plan'?[poSub]:[]));
-    else if(current==='payments') writeHash(['supply','payments'].concat(poSub&&PAY_SUB_KEYS.indexOf(poSub)>=0&&poSub!=='deposits'?[poSub]:[]));
+    else if(current==='payments') writeHash(['supply','payments'].concat(poSub&&PAY_SUB_KEYS.indexOf(poSub)>=0&&poSub!=='paydue'?[poSub]:[]));
     else if(current==='config') writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['config','portal',encodeURIComponent(PORTAL_SUP.toLowerCase())]:['config',CONFIG_SUB]);
     else if(current) writeHash(['supply',current]); }
   function applyRoute(){ var seg=(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean); _expectedHash=location.hash;
     if(seg[0]==='supply'){ showSupply(true); var sec=seg[1]||'actions';   // (true) = show chrome but don't auto-select Actions; we select the routed section next
       if(sec==='reports') selectReport(seg[2]||reportTab||'metrics');
       else if(sec==='productions'){ showPoSub(seg[2]&&PO_SUB_KEYS.indexOf(seg[2])>=0?seg[2]:'list'); }   // legacy links → PURCHASE ORDERS umbrella
-      else if(sec==='payments'){ showPoSub(seg[2]&&PAY_SUB_KEYS.indexOf(seg[2])>=0?seg[2]:'deposits'); }   // PAYMENTS umbrella
+      else if(sec==='payments'){ showPoSub(seg[2]&&PAY_SUB_KEYS.indexOf(seg[2])>=0?seg[2]:'paydue'); }   // PAYMENTS umbrella (default Payments Due)
       else if(sec==='config'){ if(seg[2])CONFIG_SUB=seg[2]; enterConfig(); }   // legacy #/supply/config → top-level CONFIG
       else if(sec==='purchase-orders'){ var _s2=seg[2]?decodeURIComponent(seg[2]):null, _s3=seg[3]?decodeURIComponent(seg[3]):null;
         if(_s2 && POTAB_FROM_SLUG[_s2] && _s3){ _pendingPO=_s3; _pendingPOTab=POTAB_FROM_SLUG[_s2]; showPoSub('plan'); }   // deep-link a PO detail sub-tab: .../<slug>/<PO>
@@ -7345,7 +7360,7 @@
     if(key==='barcodes')return showPoSub('barcodes');                                   // now a PURCHASE ORDERS sub-tab
     if(key==='productions')return showPoSub(PO_SUB_KEYS.indexOf(prodTab)>=0&&prodTab!=='plan'?prodTab:'list');   // PRODUCTIONS folded under PURCHASE ORDERS
     if(key==='purchase-orders')return showPoSub(PO_SUB_KEYS.indexOf(poSub)>=0?poSub:'plan');
-    if(key==='payments')return showPoSub(PAY_SUB_KEYS.indexOf(poSub)>=0?poSub:'deposits');   // PAYMENTS umbrella: Deposits / Other / Payments Due / Payments Report
+    if(key==='payments')return showPoSub(PAY_SUB_KEYS.indexOf(poSub)>=0?poSub:'paydue');   // PAYMENTS umbrella: default tab = Payments Due
     if(key==='reports')return selectReport(reportTab||'metrics');
     if(REPORT_KEYS.indexOf(key)>=0)return selectReport(key);
     current=key; syncHash();
@@ -7414,7 +7429,7 @@
     rootEl.querySelectorAll('.stab').forEach(function(b){b.onclick=function(){selectSection(b.dataset.k);};});
     var _navSel=rootEl.querySelector('#supply-nav-sel'); if(_navSel)_navSel.onchange=function(){selectSection(this.value);};
     fetch('/api/supply/samples').then(function(r){return r.json();}).then(function(d){ if(Array.isArray(d)){ cache['samples']=d; samplesNavBadge(d); } }).catch(function(){});
-    refreshOpExc(); }
+    refreshOpExc(); try{ prefetchNavCounts(); }catch(e){} }   // compute the Payments Due count on mount so the PAYMENTS tab badge shows immediately
   // ORDER PLAN exception counter (# POs impacted by unapproved partials / supplier-risk / discontinued / country-risk)
   function orderPlanNavBadge(n){ var btn=document.querySelector('#supply-subnav .stab[data-k="order-plan"]'); if(btn)btn.innerHTML='ORDER PLAN'+(n>0?' <span class="ex-badge" title="'+n+' PO(s) with unapproved order-plan exceptions">'+n+'</span>':'');
     var opt=document.querySelector('#supply-nav-sel option[value="order-plan"]'); if(opt)opt.textContent='ORDER PLAN'+(n>0?' ('+n+')':''); }
