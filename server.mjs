@@ -3240,7 +3240,9 @@ app.get('/api/product/item/:ref', async (req, res) => {
 app.get('/api/product/swatch/:ref', async (req, res) => {
   try { const r = (await pool.query(`SELECT swatch, swatch_mime FROM planner.product_dev_items WHERE ref=$1`, [req.params.ref])).rows[0];
     if (!r || !r.swatch) return res.status(404).end();
-    res.setHeader('Content-Type', r.swatch_mime || 'image/png'); res.setHeader('Cache-Control', 'no-cache'); res.end(r.swatch);
+    // The client always requests with ?t=<updated_at>, so a re-uploaded swatch is a new URL — safe to cache hard.
+    // (Was 'no-cache', which forced a full re-download of the image on every render → the Product grid felt slow.)
+    res.setHeader('Content-Type', r.swatch_mime || 'image/png'); res.setHeader('Cache-Control', 'public, max-age=31536000, immutable'); res.end(r.swatch);
   } catch (e) { res.status(500).end(); }
 });
 app.post('/api/product/item', async (req, res) => {

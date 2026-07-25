@@ -8278,7 +8278,25 @@
     body.querySelector('#pm-addsz').onclick=function(){ var v=body.querySelector('#pm-newsz').value.trim(); if(!v)return; shipPost('/api/product/size',{ref:it.ref,size_label:v},function(){ renderProductDetail(it.ref); }); };
     body.querySelectorAll('.pm-sz').forEach(function(el){ el.onchange=function(){ var b={}; b[el.dataset.f]=el.value; shipPost('/api/product/size/'+el.dataset.id,b,function(){}); }; });
     body.querySelectorAll('.pm-sz-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Remove this size?'))return; shipPost('/api/product/size/'+a.dataset.id+'/delete',{},function(){ renderProductDetail(it.ref); }); }; });
-    function swUp(f){ var m=body.querySelector('#pm-sw-msg'); if(!f)return; if(['image/png','image/jpeg'].indexOf(f.type)<0){ m.style.color='#dc2626'; m.textContent='JPG or PNG only'; return; } if(f.size>2*1024*1024){ m.style.color='#dc2626'; m.textContent='max 2MB'; return; } m.style.color='#64748b'; m.textContent='uploading…'; var rd=new FileReader(); rd.onload=function(){ shipPost('/api/product/swatch',{ref:it.ref,mime:f.type,data_base64:String(rd.result)},function(j){ if(j&&j.error){m.style.color='#dc2626';m.textContent=j.error;return;} renderProductDetail(it.ref); }); }; rd.readAsDataURL(f); }
+    function swUp(f){ var m=body.querySelector('#pm-sw-msg'); if(!f)return; if(['image/png','image/jpeg'].indexOf(f.type)<0){ m.style.color='#dc2626'; m.textContent='JPG or PNG only'; return; } if(f.size>10*1024*1024){ m.style.color='#dc2626'; m.textContent='max 10MB'; return; } m.style.color='#64748b'; m.textContent='optimising…';
+      var rd=new FileReader();
+      rd.onload=function(){ var src=String(rd.result);
+        var post=function(mime,data){ m.textContent='uploading…'; shipPost('/api/product/swatch',{ref:it.ref,mime:mime,data_base64:data},function(j){ if(j&&j.error){m.style.color='#dc2626';m.textContent=j.error;return;} renderProductDetail(it.ref); }); };
+        // downscale to a small optimised thumbnail in the browser (no server-side image lib) so what's stored — and
+        // re-loaded — is tiny. Swatches display at ≤120px, so 512px max keeps it crisp on retina. Flatten to JPEG.
+        try{ var img=new Image();
+          img.onload=function(){ try{ var MAX=512, w=img.naturalWidth||img.width, h=img.naturalHeight||img.height, sc=Math.min(1,MAX/Math.max(w||1,h||1));
+              var cw=Math.max(1,Math.round(w*sc)), ch=Math.max(1,Math.round(h*sc));
+              var cv=document.createElement('canvas'); cv.width=cw; cv.height=ch; var cx=cv.getContext('2d');
+              cx.fillStyle='#fff'; cx.fillRect(0,0,cw,ch); cx.drawImage(img,0,0,cw,ch);
+              var out=cv.toDataURL('image/jpeg',0.85);
+              if(out && out.length < src.length) post('image/jpeg', out); else post(f.type, src);   // whichever is smaller
+            }catch(e){ post(f.type, src); } };
+          img.onerror=function(){ post(f.type, src); };
+          img.src=src;
+        }catch(e){ post(f.type, src); }
+      };
+      rd.readAsDataURL(f); }
     body.querySelector('#pm-swatch').onchange=function(){ swUp(this.files[0]); };
     var _pz=body.querySelector('#pm-swatch-paste'); if(_pz)_pz.addEventListener('paste',function(e){ var items=(e.clipboardData&&e.clipboardData.items)||[]; for(var k=0;k<items.length;k++){ if(items[k].type&&items[k].type.indexOf('image')===0){ var f=items[k].getAsFile(); if(f){ e.preventDefault(); swUp(f); return; } } } });
   }); }); }

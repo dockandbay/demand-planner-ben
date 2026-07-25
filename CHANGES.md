@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.121 - Faster product swatches (cache + downscale on upload)
+
+- **Swatch serving is now cacheable** (`immutable`, versioned by the `?t=updated_at` the client already sends)
+  instead of `no-cache` — so swatches load from browser cache on repeat renders rather than re-downloading
+  the full image every time (the Product grid felt slow because of this).
+- **Swatches are downscaled on upload** in the browser (canvas → max 512px, JPEG q0.85, whichever is smaller)
+  so what's stored in the DB and re-loaded is a small optimised thumbnail. Existing swatches benefit from the
+  caching immediately; they shrink physically when next re-uploaded. No new server dependency.
+
 ## v26.120 - DEMAND flash on refresh — actually fixed (head-level)
 
 The v26.118 attempt hid `#app` from a script at the END of `<body>`, which runs after the browser has already
