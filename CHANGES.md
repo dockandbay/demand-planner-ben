@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.110 - Supplier portal: anonymise mode for screenshots
+
+Display-only anonymise mode (for screenshots). Open the portal with `?anon=1` (or `?as=Your Name`;
+`?anon=0` to turn off — sticky via localStorage). It shows the supplier name as **ACME Inc** and rewrites
+displayed **PO supplier codes to CM** (e.g. PO-55UKLX3 -> PO-55UKCM3). Data and requests are unchanged.
+
 ## v26.109 - Supplier portal: top-right "Recent changes" + "Unread messages" dropdowns
 
 Added two controls to the top-right of the supplier portal:

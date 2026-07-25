@@ -70,8 +70,15 @@
     productSamplesBase:'/api/portal/product-samples/', productSample:'/api/portal/product-sample', productSamplePhoto:'/api/portal/product-sample-photo', attachImgBase:'/api/supply/portal-attachment/',
     productOpenSamples:'/api/portal/product-open-samples', productSkus:'/api/portal/product-skus', sampleContentsBase:'/api/portal/sample/' };
 
+  // Anonymise mode (for screenshots only): ?anon=1 → header "ACME Inc" + PO supplier codes shown as CM; ?as=Name
+  // sets a custom name; ?anon=0 turns it off. Sticky via localStorage. Display only — data & filtering unchanged.
+  (function(){ try{ var q=new URLSearchParams(location.search||'');
+    if(q.has('anon')||q.has('as')){ var v=q.get('as'); if(v==null) v=(q.get('anon')==='0'?'':'ACME Inc');
+      if(v) localStorage.setItem('pp_anon_name', v); else localStorage.removeItem('pp_anon_name'); } }catch(e){} })();
+  var ANON_NAME=(function(){ try{ return localStorage.getItem('pp_anon_name')||''; }catch(e){ return ''; } })();
   function showPortal(me){
-    var sup=(me.suppliers||[]).join(', ')||'Supplier';
+    var realSup=(me.suppliers||[]).join(', ')||'Supplier';
+    var sup=ANON_NAME||realSup;
     root.innerHTML='<header class="pv-top"><h1>Dock &amp; Bay</h1><span class="sup">'+esc(sup)+'</span><span class="sp"></span>'
       +'<span style="font-size:10px;opacity:.5;margin-right:10px" title="app version — tell Ben this if something looks stale">__APP_VERSION__</span>'
       +'<button class="pv-btn ghost" id="logout">Sign out</button></header><div id="pv-wrap"><div id="pv"></div></div>';
@@ -80,7 +87,8 @@
     s.onload=function(){
       window.DBPortalView.mount({
         root: document.getElementById('pv'),
-        ep: EP, by: me.email, sid: null, supplierName: sup,
+        ep: EP, by: me.email, sid: null, supplierName: realSup,
+        anon: ANON_NAME ? {name:ANON_NAME, realNames:(me.suppliers||[])} : null,
         getData: function(){ return fetch('/api/portal/bootstrap').then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); return j; }); }
       });
     };

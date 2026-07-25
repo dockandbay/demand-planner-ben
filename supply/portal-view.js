@@ -559,6 +559,19 @@
   function mount(opts){
     injectStyle();
     var EP=opts.ep, STATE={supplierName:opts.supplierName||'', sid:opts.sid||null, by:opts.by||'portal'};
+    // Anonymise mode (screenshots only): rewrite displayed text — PO supplier code → CM, real supplier name → the
+    // demo name. Display only; underlying data / requests are unchanged.
+    var PP_ANON = opts.anon || null;
+    function anonText(t){ if(!PP_ANON||!t)return t;
+      t=t.replace(/(PO-\d+(?:UK|US|EU|AU|CA))([A-Za-z]+)(\d)/g,'$1CM$3');   // PO-55UKLX3 → PO-55UKCM3
+      (PP_ANON.realNames||[]).forEach(function(nm){ if(nm&&nm!==PP_ANON.name) t=t.split(nm).join(PP_ANON.name); });
+      return t; }
+    function anonSweep(){ if(!PP_ANON||!rootEl)return;
+      var w=document.createTreeWalker(rootEl,NodeFilter.SHOW_TEXT,null,false), n, ch=[];
+      while(n=w.nextNode()){ var v=n.nodeValue; if(!v)continue;
+        if(v.indexOf('PO-')<0 && !(PP_ANON.realNames||[]).some(function(nm){return nm&&v.indexOf(nm)>=0;}))continue;
+        var nv=anonText(v); if(nv!==v)ch.push([n,nv]); }
+      ch.forEach(function(c){ c[0].nodeValue=c[1]; }); }
     var by=STATE.by, sid=STATE.sid;
     var BC=opts.bc||(typeof bcDownloadSheets==='function'?{sheets:bcDownloadSheets,crossdock:bcDownloadCrossdock}:{placeholder:true,note:function(){alert('Labels unavailable.');}});
     var _ppData=null, PORTAL_TAB='pos', PORTAL_PO_ST=null, _ppOpenPO=null;   // _ppOpenPO: a PO to auto-expand after switching to the Purchase Orders tab
@@ -578,6 +591,8 @@
     var PORTAL_PROD_Q='', PORTAL_PROD_SEASON='', PORTAL_PROD_STATUS='in_development';   // Product grid: search + season + status (default: in development)
     var _invFiles={};     // base64 of the last parsed invoice file, per PO (for the Apply step)
     var rootEl=opts.root; if(!rootEl.closest('#supply-root')){rootEl.id='supply-root';} rootEl.style.display='block';
+    if(PP_ANON){ try{ var _anonObs=new MutationObserver(function(){ if(_anonObs._busy)return; _anonObs._busy=1; _anonObs.disconnect(); try{anonSweep();}catch(e){} _anonObs.observe(rootEl,{childList:true,subtree:true}); _anonObs._busy=0; });
+      _anonObs.observe(rootEl,{childList:true,subtree:true}); setTimeout(anonSweep,80); }catch(e){} }
     rootEl.innerHTML='<div class="bar" style="align-items:center"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders <span id="pp-pos-badge"></span></span><span class="rtab" data-pt="shipmentplan">Shipment Plan <span id="pp-ship-badge"></span></span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="productions">Productions</span><span class="rtab" data-pt="samples">Samples <span id="pp-samp-badge"></span></span><span class="rtab" data-pt="product" id="pp-prod-tab" style="display:none">Product <span id="pp-prod-badge"></span></span></span>'
       +'<span id="pp-notif" style="margin-left:auto;display:none;gap:6px;align-items:center;position:relative;white-space:nowrap">'
         +'<button id="pp-unread-btn" class="save-btn light" title="Unread messages from Dock &amp; Bay" style="position:relative">✉ <span id="pp-unread-n">0</span></button>'
