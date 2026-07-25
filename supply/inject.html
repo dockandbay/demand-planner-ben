@@ -82,8 +82,8 @@
 /* Global "loading" spinner — a subtle overlay ON the version badge (desktop .ver / #ver, mobile #hz-ver), driven by
    in-flight fetch activity. One consistent indicator instead of per-container "Loading…" rows that flash on swap. */
 #hz-ver,#ver{position:relative}
-.hz-verspin{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;border-radius:6px;background:rgba(251,191,36,.92);z-index:6;pointer-events:none}
-.hz-verspin::after{content:'';width:11px;height:11px;border:2px solid rgba(15,23,42,.28);border-top-color:#0f172a;border-radius:50%;animation:hzspin .7s linear infinite}
+.hz-verspin{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:4px;border-radius:6px;background:rgba(251,191,36,.96);z-index:6;pointer-events:none;font-size:8.5px;font-weight:800;color:#0f172a;letter-spacing:.02em;overflow:hidden}
+.hz-verspin::before{content:'';width:9px;height:9px;border:2px solid rgba(15,23,42,.3);border-top-color:#0f172a;border-radius:50%;animation:hzspin .7s linear infinite;flex:0 0 auto}
 @keyframes hzspin{to{transform:rotate(360deg)}}
 /* Timeline notifications — top-bar messages bell + unread counter + pop-down drawer */
 #supply-root #supply-subnav{position:relative}
@@ -1012,7 +1012,7 @@
     var _acts=rows.filter(function(r){return r.type!=='ERP POs not in planner' && actGroup(r.type)!=='RECOMMENDATIONS';});
     var _recs=rows.filter(function(r){return r.type!=='ERP POs not in planner' && actGroup(r.type)==='RECOMMENDATIONS';});
     var _recOpen=_recs.filter(function(r){return !r.status||r.status==='open';}).length;
-    var _partBanner=partial?'<div class="mut tiny" style="padding:4px 2px 6px;color:#94a3b8">⏳ showing high-priority actions — loading the rest…</div>':'';
+    var _partBanner='';   // the version-badge loading spinner now signals "still loading" — no inline banner needed
     var types=Array.from(new Set(_acts.map(function(r){return r.type;})));
     var STAT=[['open','Open'],['snoozed','Snoozed'],['dismissed','Dismissed'],['done','Done'],['all','All']];
     var st={sev:'All',status:'open',types:[],showSnoozed:false};   // types: [] = all; showSnoozed = surface snoozed items in the Open view
@@ -1024,7 +1024,8 @@
     function statCount(s){ return s==='all'?_acts.length:_acts.filter(function(r){return stOf(r)===s;}).length; }
     function pool(){ return _acts.filter(inStat); }
     function actSubNav(){ function tab(k,lbl,n,red){ return '<span class="rtab act-subtab'+(actSub===k?' active':'')+'" data-as="'+k+'">'+lbl+(n>0?' <span class="ex-badge"'+(red?' style="background:#dc2626;color:#fff"':'')+'>'+n+'</span>':'')+'</span>'; }
-      return '<div class="po-subnav" id="act-subnav">'+tab('actions','ACTIONS',0)+tab('recommendations','💡 RECOMMENDATIONS',_recOpen)+tab('erp-compare','⬆ ERP COMPARE',_actErpCount||0)+'</div>'; }
+      var _hi=_acts.filter(function(r){return r.severity==='high' && (!r.status||r.status==='open');}).length;   // high-priority open actions → red counter on the ACTIONS sub-tab
+      return '<div class="po-subnav" id="act-subnav">'+tab('actions','ACTIONS',_hi,true)+tab('recommendations','💡 RECOMMENDATIONS',_recOpen)+tab('erp-compare','⬆ ERP COMPARE',_actErpCount||0)+'</div>'; }
     c.innerHTML=annot('actions')+_partBanner+lookupDatalists()+actSubNav()+'<div id="act-sub"></div>';
     document.querySelectorAll('#act-subnav .act-subtab').forEach(function(t){ t.onclick=function(){ actSub=t.dataset.as; document.querySelectorAll('#act-subnav .act-subtab').forEach(function(x){x.classList.toggle('active',x===t);}); renderActSub(); }; });
     function renderActSub(){ var sb=document.getElementById('act-sub'); if(!sb)return;
@@ -5155,7 +5156,7 @@
   var _hzInflight=0,_hzSpinT=null;
   function hzBadgeSpin(show){ var bs=document.querySelectorAll('#supply-root .ver, #scenario-root .ver, #product-root .ver, #hz-ver, #ver');
     for(var i=0;i<bs.length;i++){ var b=bs[i]; if(!b)continue; var s=b.querySelector('.hz-verspin');
-      if(show){ if(!s){ s=document.createElement('span'); s.className='hz-verspin'; b.appendChild(s); } }
+      if(show){ if(!s){ s=document.createElement('span'); s.className='hz-verspin'; s.textContent='loading'; b.appendChild(s); } }
       else if(s&&s.parentNode){ s.parentNode.removeChild(s); } } }
   function hzActivity(delta){ _hzInflight=Math.max(0,_hzInflight+(delta||0));
     if(_hzInflight>0){ if(_hzSpinT==null)_hzSpinT=setTimeout(function(){ _hzSpinT=null; hzBadgeSpin(true); },160); }
