@@ -365,7 +365,14 @@
 #supply-root .card .t{font-weight:700}#supply-root .card .d{color:#666;font-size:11px;margin-top:2px}
 #supply-root .act-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:8px;align-items:start}#supply-root .act-cards .card{margin-bottom:0}
 /* Actions triage TABLE — severity-sorted, one line per action, tinted by urgency */
-#supply-root .act-tbl{width:100%;border-collapse:collapse;font-size:12px}
+#supply-root .act-tbl{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
+/* fixed column widths: keep the severity dot / ref narrow, give Fix + Manage room for their inputs */
+#supply-root .act-tbl th:nth-child(1),#supply-root .act-tbl td:nth-child(1){width:16px}
+#supply-root .act-tbl th:nth-child(2),#supply-root .act-tbl td:nth-child(2){width:17%}
+#supply-root .act-tbl th:nth-child(3),#supply-root .act-tbl td:nth-child(3){width:76px}
+#supply-root .act-tbl th:nth-child(4),#supply-root .act-tbl td:nth-child(4){width:33%}
+#supply-root .act-tbl th:nth-child(5),#supply-root .act-tbl td:nth-child(5){width:32%}
+#supply-root .act-tbl th:nth-child(6),#supply-root .act-tbl td:nth-child(6){width:18%}
 #supply-root .act-colwrap{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start}
 #supply-root .act-col-main{flex:2 1 520px;min-width:0}#supply-root .act-col-rec{flex:1 1 330px;min-width:0}
 #supply-root .act-colhdr{font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#334155;margin:10px 0 4px}
@@ -375,8 +382,16 @@
 #supply-root .act-tbl tr.actrow:hover td{background:#f8fafc}
 #supply-root .act-tbl tr.sev-high td{background:#fef4f4}#supply-root .act-tbl tr.sev-high:hover td{background:#fdeaea}
 #supply-root .act-tbl tr.sev-amber td{background:#fffbf1}#supply-root .act-tbl tr.sev-amber:hover td{background:#fdf3e0}
-#supply-root .act-tbl td.sev-cell{border-left:3px solid transparent;text-align:center;font-size:13px;line-height:1;width:22px}
-#supply-root .act-tbl .act-ref{white-space:nowrap}#supply-root .act-tbl td{word-break:break-word}
+#supply-root .act-tbl td.sev-cell{border-left:3px solid transparent;text-align:left;font-size:12px;line-height:1;padding-left:5px;padding-right:0}
+#supply-root .act-tbl td.act-ref{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#supply-root .act-tbl td{word-break:break-word}
+#supply-root .act-tbl td.act-ref .lnk-btn{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:bottom}
+/* Fix / Manage cells: let controls wrap neatly and give inputs a sensible width instead of random sizes */
+#supply-root .act-tbl td.act-fixcell{white-space:normal;line-height:1.9}
+#supply-root .act-tbl td.act-fixcell .fci{max-width:100%;box-sizing:border-box;vertical-align:middle}
+#supply-root .act-tbl td.act-fixcell .fci.dt,#supply-root .act-tbl td.act-fixcell .fci.txt{width:100%;margin:1px 0}
+#supply-root .act-tbl td.act-fixcell .save-btn,#supply-root .act-tbl td.act-fixcell .act-apply{margin:1px 2px 1px 0}
+#supply-root .act-tbl td.act-lifecell{white-space:normal;line-height:1.9}
+#supply-root .act-tbl td.act-lifecell .save-btn{margin:1px 0 1px 3px}
 #supply-root .act-tbl tr.sev-high td.sev-cell{border-left-color:#dc2626}#supply-root .act-tbl tr.sev-amber td.sev-cell{border-left-color:#f59e0b}#supply-root .act-tbl tr.sev-low td.sev-cell{border-left-color:#cbd5e1}
 #supply-root .act-tbl .act-type{font-weight:700;font-size:12px;line-height:1.15}
 #supply-root .act-tbl .act-chip{font-size:8.5px;text-transform:uppercase;letter-spacing:.03em;color:#94a3b8;font-weight:600}
@@ -597,8 +612,8 @@
     ['payments','PAYMENTS'],['samples','SAMPLES']];   // CONFIG is now a top-level view (see enterConfig); SHIPMENTS lives under the PURCHASE ORDERS sub-nav (poSub 'shipments'); PAYMENTS umbrella holds Deposits / Other Payments / Payments Due / Payments Report
   // REPORTS is a parent tab; these are its sub-tabs (the read-across views).
   var REPORT_SECTIONS=[['metrics','METRICS'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
-    ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['cashflow','CASH FLOW'],['directclient','DIRECT TO CLIENT'],['flexport','FLEXPORT'],['erp-compare','ERP COMPARE']];
-  var REPORT_KEYS=['metrics','reallocate','urgent-buy','container-fill','consolidate','upcoming','pipeline','cashflow','directclient','flexport','erp-compare'];
+    ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['cashflow','CASH FLOW'],['directclient','DIRECT TO CLIENT'],['flexport','FLEXPORT']];   // ERP COMPARE moved to ACTIONS ▸ ERP Compare sub-tab
+  var REPORT_KEYS=['metrics','reallocate','urgent-buy','container-fill','consolidate','upcoming','pipeline','cashflow','directclient','flexport'];
   var BI_TABS={'metrics':'/api/supply/bi','urgent-buy':'/api/supply/bi/projection','reallocate':'/api/supply/bi/reallocations','container-fill':'/api/supply/bi/container-fill','consolidate':'/api/supply/bi/consolidations','erp-compare':'/api/supply/bi/erp-compare'};   // fluid: always re-fetch
   var reportTab='metrics';   // BI & REPORTS opens on METRICS by default
   var ANNOT={
@@ -908,6 +923,8 @@
     'Consider air freight':'RECOMMENDATIONS','Expedite production':'RECOMMENDATIONS' };
   function actGroup(t){ return ACT_GROUP[t]||'OTHER'; }   // everything else (supplier, ERP, partials, unassigned) → OTHER
   var ACT_CHIP={PRIORITY:'PRIORITY',PAYMENTS:'PAYMENTS',DATES:'DATES',OTHER:'OTHER',RECOMMENDATIONS:'ADVISORY'};   // short category tag on each triage row
+  var actSub='actions';   // Actions section sub-tab: 'actions' | 'recommendations' | 'erp-compare'
+  var _actErpCount=null;   // ERP-compare "to review" count for the sub-tab badge (lazy)
   // Which PO detail sub-tab an action should deep-link to (payment issues → PAYMENTS, date issues → DATES,
   // shipping → SHIPMENTS, ERP/order-plan → ORDER PLAN). Null → the default (first) tab.
   var ACT_POTAB={ 'Deposit not paid':'pay','Deposit over-assigned':'pay','Payment invalid':'pay','Payment overdue':'pay','Supplier invoice':'pay','Unpaid — last month':'pay','Aged payment':'pay',
@@ -918,9 +935,12 @@
   function actBuild(rows,c,partial){
     actRows=rows; rows.forEach(function(r,i){ r._id=i; });
     if(!partial)setActionsBadgeFrom(rows);   // refresh the ACTIONS tab's high-priority counter from the full set
+    // RECOMMENDATIONS now live in their own sub-tab; ACTIONS shows only the real (non-advisory) exceptions.
+    var _acts=rows.filter(function(r){return actGroup(r.type)!=='RECOMMENDATIONS';});
+    var _recs=rows.filter(function(r){return actGroup(r.type)==='RECOMMENDATIONS';});
+    var _recOpen=_recs.filter(function(r){return !r.status||r.status==='open';}).length;
     var _partBanner=partial?'<div class="mut tiny" style="padding:4px 2px 6px;color:#94a3b8">⏳ showing high-priority actions — loading the rest…</div>':'';
-    if(!rows.length){c.innerHTML=annot('actions')+(partial?'<div class="count">⏳ loading actions…</div>':'<div class="count">No actions 🎉</div>');return;}
-    var types=Array.from(new Set(rows.map(function(r){return r.type;})));
+    var types=Array.from(new Set(_acts.map(function(r){return r.type;})));
     var STAT=[['open','Open'],['snoozed','Snoozed'],['dismissed','Dismissed'],['done','Done'],['all','All']];
     var st={sev:'All',status:'open',types:[],showSnoozed:false};   // types: [] = all; showSnoozed = surface snoozed items in the Open view
     function stOf(r){ return r.status||'open'; }
@@ -928,10 +948,26 @@
     function typeMatch(r){ return !st.types.length||st.types.indexOf(r.type)>=0; }
     function actTypeOutside(e){ var pop=document.getElementById('act-typepop'),btn=document.getElementById('act-typebtn');
       if(pop&&!pop.contains(e.target)&&e.target!==btn){ pop.style.display='none'; document.removeEventListener('mousedown',actTypeOutside,true); } }
-    function statCount(s){ return s==='all'?rows.length:rows.filter(function(r){return stOf(r)===s;}).length; }
-    function pool(){ return rows.filter(inStat); }
-    c.innerHTML=annot('actions')+_partBanner+lookupDatalists()
-      +'<div class="bar" id="act-statbar"></div><div class="bar" id="act-sevbar"></div><div id="act-grid"></div>';
+    function statCount(s){ return s==='all'?_acts.length:_acts.filter(function(r){return stOf(r)===s;}).length; }
+    function pool(){ return _acts.filter(inStat); }
+    function actSubNav(){ function tab(k,lbl,n,red){ return '<span class="rtab act-subtab'+(actSub===k?' active':'')+'" data-as="'+k+'">'+lbl+(n>0?' <span class="ex-badge"'+(red?' style="background:#dc2626;color:#fff"':'')+'>'+n+'</span>':'')+'</span>'; }
+      return '<div class="po-subnav" id="act-subnav">'+tab('actions','ACTIONS',0)+tab('recommendations','💡 RECOMMENDATIONS',_recOpen)+tab('erp-compare','⬆ ERP COMPARE',_actErpCount||0)+'</div>'; }
+    c.innerHTML=annot('actions')+_partBanner+lookupDatalists()+actSubNav()+'<div id="act-sub"></div>';
+    document.querySelectorAll('#act-subnav .act-subtab').forEach(function(t){ t.onclick=function(){ actSub=t.dataset.as; document.querySelectorAll('#act-subnav .act-subtab').forEach(function(x){x.classList.toggle('active',x===t);}); renderActSub(); }; });
+    function renderActSub(){ var sb=document.getElementById('act-sub'); if(!sb)return;
+      if(actSub==='recommendations'){ renderRecsTab(sb); return; }
+      if(actSub==='erp-compare'){ renderErpTab(sb); return; }
+      sb.innerHTML='<div class="bar" id="act-statbar"></div><div class="bar" id="act-sevbar"></div><div id="act-grid"></div>'; statBar(); sevBar(); view(); }
+    function renderRecsTab(sb){ var open=_recs.filter(function(r){return !r.status||r.status==='open';});
+      if(!open.length){ sb.innerHTML='<div class="count" style="padding:10px 2px">No recommendations right now 🎉</div>'; return; }
+      open.sort(function(a,b){ var so={high:0,amber:1,low:2}; return (so[a.severity]==null?3:so[a.severity])-(so[b.severity]==null?3:so[b.severity]) || String(a.type||'').localeCompare(String(b.type||'')); });
+      sb.innerHTML='<div class="mut tiny" style="margin:6px 0 8px;color:#6d28d9">Advisory — from the forecast / expedite engine. Not blocking.</div>'
+        +'<div class="tw" style="max-width:900px"><table class="act-tbl"><thead><tr><th style="text-align:center">!</th><th>Type</th><th>Ref</th><th>Detail</th><th>Fix</th><th>Manage</th></tr></thead><tbody>'+open.map(actRow).join('')+'</tbody></table></div>';
+      bindActFix(); bindLifecycle(statBar,sevBar,view); }
+    function renderErpTab(sb){ sb.innerHTML='<div class="count" style="padding:10px 2px">Loading ERP compare…</div>';
+      fetch('/api/supply/bi/erp-compare').then(function(r){return r.json();}).then(function(d){ _actErpCount=(d&&typeof d.count==='number')?d.count:((d&&d.rows||[]).filter(function(x){return !x.ignored;}).length);
+        var badge=document.querySelector('#act-subnav .act-subtab[data-as="erp-compare"]'); if(badge)badge.innerHTML='⬆ ERP COMPARE'+(_actErpCount>0?' <span class="ex-badge">'+_actErpCount+'</span>':'');
+        renderErpCompare(d, sb, function(){ renderErpTab(sb); }); }).catch(function(){ sb.innerHTML='<div style="color:#dc2626">Could not load ERP compare.</div>'; }); }
     function statBar(){ document.getElementById('act-statbar').innerHTML='<span class="pill-lbl">Status</span>'
       +STAT.map(function(s){return '<span class="pill stpill'+(st.status===s[0]?' active':'')+'" data-st="'+s[0]+'">'+s[1]+' ('+statCount(s[0])+')</span>';}).join('')
       +'<label style="margin-left:12px;font-size:12px;cursor:pointer;'+(st.status==='open'?'':'opacity:.4')+'"><input type="checkbox" id="act-showsnz"'+(st.showSnoozed?' checked':'')+(st.status==='open'?'':' disabled')+'> show snoozed as active</label>';
@@ -973,20 +1009,23 @@
           if(on){ if(i<0)st.types.push(v); } else if(i>=0)st.types.splice(i,1); });
         syncTypeBtn(); view(); }; });
       document.getElementById('act-refresh').onclick=function(){ delete cache['actions']; selectSection('actions'); }; }
+    // Column 1 = HIGH priority; column 2 = MEDIUM (amber) + LOW. If there are no highs, column 1 = MEDIUM,
+    // column 2 = LOW. Recommendations are excluded (own sub-tab).
     function view(){ var f=pool().filter(function(r){return st.sev==='All'||r.severity===st.sev;}).filter(typeMatch);
-      var SO={high:0,amber:1,low:2};
-      function bySev(a,b){ var sa=SO[a.severity]==null?3:SO[a.severity], sb=SO[b.severity]==null?3:SO[b.severity]; return sa-sb || String(a.type||'').localeCompare(String(b.type||'')) || String(a.ref||'').localeCompare(String(b.ref||'')); }
-      // Two columns on desktop: real ACTIONS (left, wide) + advisory RECOMMENDATIONS (right, narrow); each a
-      // single severity-sorted triage table. They stack on mobile (flex-wrap).
-      var acts=f.filter(function(r){return actGroup(r.type)!=='RECOMMENDATIONS';}).sort(bySev);
-      var recs=f.filter(function(r){return actGroup(r.type)==='RECOMMENDATIONS';}).sort(bySev);
-      function tbl(rows){ return '<div class="tw"><table class="act-tbl"><thead><tr><th title="Severity" style="text-align:center">!</th><th>Type</th><th>Ref</th><th>Detail</th><th>Fix</th><th>Manage</th></tr></thead><tbody>'+rows.map(actRow).join('')+'</tbody></table></div>'; }
-      function hiN(rows){ return rows.filter(function(r){return r.severity==='high';}).length; }
-      if(!acts.length && !recs.length){ document.getElementById('act-grid').innerHTML='<div class="count">none in this view 🎉</div>'; bindLifecycle(statBar,sevBar,view); return; }
-      var mainCol='<div class="act-col-main"><div class="act-colhdr">Actions <span class="mut tiny">('+acts.length+(hiN(acts)?' · '+hiN(acts)+' high':'')+')</span></div>'+(acts.length?tbl(acts):'<div class="count" style="padding:8px 2px">no open actions 🎉</div>')+'</div>';
-      var recCol=recs.length?'<div class="act-col-rec"><div class="act-colhdr">💡 Recommendations <span class="mut tiny">('+recs.length+' · advisory)</span></div>'+tbl(recs)+'</div>':'';
-      document.getElementById('act-grid').innerHTML='<div class="act-colwrap">'+mainCol+recCol+'</div>'; bindActFix(); bindLifecycle(statBar,sevBar,view); }
-    statBar(); sevBar(); view(); }
+      function byType(a,b){ return String(a.type||'').localeCompare(String(b.type||'')) || String(a.ref||'').localeCompare(String(b.ref||'')); }
+      function tbl(rows){ return rows.length?'<div class="tw"><table class="act-tbl"><thead><tr><th title="Severity" style="text-align:center">!</th><th>Type</th><th>Ref</th><th>Detail</th><th>Fix</th><th>Manage</th></tr></thead><tbody>'+rows.map(actRow).join('')+'</tbody></table></div>':'<div class="count" style="padding:8px 2px">none</div>'; }
+      var g=document.getElementById('act-grid'); if(!g)return;
+      if(!f.length){ g.innerHTML='<div class="count">none in this view 🎉</div>'; bindLifecycle(statBar,sevBar,view); return; }
+      var high=f.filter(function(r){return r.severity==='high';}).sort(byType);
+      var med=f.filter(function(r){return r.severity==='amber';}).sort(byType);
+      var low=f.filter(function(r){return r.severity==='low';}).sort(byType);
+      var col1,col2,l1,l2;
+      if(high.length){ col1=high; l1='🔴 High priority'; col2=med.concat(low); l2='🟡 Medium &amp; ⚪ Low'; }
+      else { col1=med; l1='🟡 Medium'; col2=low; l2='⚪ Low'; }
+      var c1='<div style="flex:1 1 460px;min-width:0"><div class="act-colhdr">'+l1+' <span class="mut tiny">('+col1.length+')</span></div>'+tbl(col1)+'</div>';
+      var c2='<div style="flex:1 1 460px;min-width:0"><div class="act-colhdr">'+l2+' <span class="mut tiny">('+col2.length+')</span></div>'+tbl(col2)+'</div>';
+      g.innerHTML='<div class="act-colwrap">'+c1+c2+'</div>'; bindActFix(); bindLifecycle(statBar,sevBar,view); }
+    renderActSub(); }
   function actRow(r){
     if(r._done) return '<tr class="actrow sev-low" id="actcard-'+r._id+'" style="opacity:.5"><td class="sev-cell">✓</td><td><span class="act-type">'+esc(r.type)+'</span></td><td class="act-ref">'+esc(r.ref||'')+'</td><td class="act-detail">applied'+(r._val?(': '+esc(r._val)):'')+' — refresh to clear</td><td></td><td><span class="tool-badge bg-green">✓ done</span></td></tr>';
     var fix='', fix2='';
@@ -1009,7 +1048,10 @@
       fix2='<span class="tiny mut">or set status</span> <select class="fci act-postatus" data-po="'+esc(r.target_key||r.ref)+'" data-id="'+r._id+'">'+(_curSt?'':'<option value="">—</option>')+PO_STATUSES.map(function(stx){return '<option'+(stx===_curSt?' selected':'')+'>'+esc(stx)+'</option>';}).join('')+'</select>'; }
     // clickable ref → open the PO (expanded) or the shipment, based on the action's target
     var key=r.target_key||r.ref, ref=esc(r.ref||'');
-    var refHtml = r.target==='po' ? '<button class="lnk-btn act-go" data-go="po" data-k="'+esc(key)+'" data-tab="'+esc(poTabForAction(r.type)||'')+'">'+ref+'</button>'
+    // Treat as a PO link when explicitly target=po OR when the ref itself is a PO code (covers aged-payment /
+    // payment actions whose target isn't set but whose ref is "PO-…") — so every PO-bearing action is clickable.
+    var isPoRef = r.target==='po' || (r.target!=='shipment' && /^PO[-\s]/i.test(String(key||'')));
+    var refHtml = isPoRef ? '<button class="lnk-btn act-go" data-go="po" data-k="'+esc(key)+'" data-tab="'+esc(poTabForAction(r.type)||'')+'">'+ref+'</button>'
                 : r.target==='shipment' ? '<button class="lnk-btn act-go" data-go="ship" data-k="'+esc(key)+'">'+ref+'</button>'
                 : ref;
     // lifecycle: dismiss / snooze / done (handled but kept visible via the status pills); restore reopens.
@@ -1052,11 +1094,11 @@
       o.onclick=function(){ close(); btn.disabled=true; actLifeSet(r,'snoozed',parseInt(o.dataset.d,10),after); }; }); }
   function bindLifecycle(statBar,sevBar,view){
     var refresh=function(){ statBar(); sevBar(); view(); };
-    document.querySelectorAll('#act-grid .act-life').forEach(function(b){ b.onclick=function(){
+    document.querySelectorAll('#act-sub .act-life').forEach(function(b){ b.onclick=function(){
       var id=b.dataset.id, r=actRows[id]; if(!r||!r.key)return; var ns=b.dataset.st; b.disabled=true;
       actLifeSet(r,ns,(b.dataset.days||7),refresh); };
     });
-    document.querySelectorAll('#act-grid .act-snz-menu').forEach(function(b){ b.onclick=function(e){ e.stopPropagation();
+    document.querySelectorAll('#act-sub .act-snz-menu').forEach(function(b){ b.onclick=function(e){ e.stopPropagation();
       var r=actRows[b.dataset.id]; if(!r||!r.key)return; openActSnzMenu(b,r,refresh); };
     });
   }
@@ -1066,9 +1108,9 @@
     if(r.key){ r.status='done'; fetch('/api/supply/actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:r.key,status:'done'})}).catch(function(){}); }
     var card=document.getElementById('actcard-'+id); if(card)card.outerHTML=actRow(r); }
   function bindActFix(){
-    document.querySelectorAll('#act-grid .act-in').forEach(function(inp){ inp.oninput=function(){ var b=document.querySelector('#act-grid .act-apply[data-id="'+inp.dataset.id+'"]'); if(b)b.disabled=!inp.value; }; });
-    document.querySelectorAll('#act-grid .act-apply').forEach(function(b){ b.onclick=function(){
-      var id=b.dataset.id, r=actRows[id], inp=document.querySelector('#act-grid .act-in[data-id="'+id+'"]'), val=inp&&inp.value;
+    document.querySelectorAll('#act-sub .act-in').forEach(function(inp){ inp.oninput=function(){ var b=document.querySelector('#act-sub .act-apply[data-id="'+inp.dataset.id+'"]'); if(b)b.disabled=!inp.value; }; });
+    document.querySelectorAll('#act-sub .act-apply').forEach(function(b){ b.onclick=function(){
+      var id=b.dataset.id, r=actRows[id], inp=document.querySelector('#act-sub .act-in[data-id="'+id+'"]'), val=inp&&inp.value;
       if(!r||!val)return;
       var key=r.target_key||r.ref, ep, body={};
       if(r.fix==='supplier'){ ep='/api/supply/po/'+encodeURIComponent(key)+'/supplier'; body.supplier_name=val; }
@@ -1079,28 +1121,29 @@
       fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(x){return x.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error); actResolve(id,val); })
         .catch(function(e){ b.disabled=false; b.textContent='Apply'; alert('Failed: '+(e.message||e)); }); }; });
-    document.querySelectorAll('#act-grid .act-up').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po); }; });
-    document.querySelectorAll('#act-grid .act-arrived').forEach(function(b){ b.onclick=function(){ var id=b.dataset.id, r=actRows[id]; b.disabled=true; b.textContent='…';
+    document.querySelectorAll('#act-sub .act-up').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po); }; });
+    document.querySelectorAll('#act-sub .act-arrived').forEach(function(b){ b.onclick=function(){ var id=b.dataset.id, r=actRows[id]; b.disabled=true; b.textContent='…';
       fetch('/api/supply/shipment/'+encodeURIComponent(r.target_key||r.ref),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({status:'ARRIVED'})}).then(function(x){return x.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); actResolve(id,'arrived'); }).catch(function(e){ b.disabled=false; b.textContent='✓ Mark arrived'; alert('Failed: '+(e.message||e)); }); }; });
-    document.querySelectorAll('#act-grid .act-postatus').forEach(function(sel){ sel.onchange=function(){ var v=sel.value; if(!v)return; var id=sel.dataset.id; sel.disabled=true;
+    document.querySelectorAll('#act-sub .act-postatus').forEach(function(sel){ sel.onchange=function(){ var v=sel.value; if(!v)return; var id=sel.dataset.id; sel.disabled=true;
       fetch('/api/supply/po/'+encodeURIComponent(sel.dataset.po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({status:v})}).then(function(x){return x.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); actResolve(id,'status '+v); }).catch(function(e){ sel.disabled=false; alert('Failed: '+(e.message||e)); }); }; });
-    document.querySelectorAll('#act-grid .act-podeliver').forEach(function(b){ b.onclick=function(){ var id=b.dataset.id, r=actRows[id]; b.disabled=true; b.textContent='…';
+    document.querySelectorAll('#act-sub .act-podeliver').forEach(function(b){ b.onclick=function(){ var id=b.dataset.id, r=actRows[id]; b.disabled=true; b.textContent='…';
       fetch('/api/supply/po/'+encodeURIComponent(r.target_key||r.ref),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({status:'Delivered'})}).then(function(x){return x.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); actResolve(id,'delivered'); }).catch(function(e){ b.disabled=false; b.textContent='✓ Mark PO delivered'; alert('Failed: '+(e.message||e)); }); }; });
-    document.querySelectorAll('#act-grid .act-applysub').forEach(function(b){ b.onclick=function(){ var id=b.dataset.id, r=actRows[id]; b.disabled=true; b.textContent='…';
+    document.querySelectorAll('#act-sub .act-applysub').forEach(function(b){ b.onclick=function(){ var id=b.dataset.id, r=actRows[id]; b.disabled=true; b.textContent='…';
       fetch('/api/supply/submission/'+encodeURIComponent(r.target_key)+'/apply',{method:'POST'}).then(function(x){return x.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); actResolve(id,j.applied||'applied'); }).catch(function(e){ b.disabled=false; b.textContent='✓ Apply'; alert('Apply failed: '+(e.message||e)); }); }; });
-    document.querySelectorAll('#act-grid .act-dismisssub').forEach(function(b){ b.onclick=function(){ var id=b.dataset.id, r=actRows[id]; if(!confirm('Dismiss this supplier submission?'))return; b.disabled=true;
+    document.querySelectorAll('#act-sub .act-dismisssub').forEach(function(b){ b.onclick=function(){ var id=b.dataset.id, r=actRows[id]; if(!confirm('Dismiss this supplier submission?'))return; b.disabled=true;
       fetch('/api/supply/submission/'+encodeURIComponent(r.target_key)+'/dismiss',{method:'POST'}).then(function(x){return x.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); actResolve(id,'dismissed'); }).catch(function(e){ b.disabled=false; alert('Failed: '+(e.message||e)); }); }; });
-    document.querySelectorAll('#act-grid .act-rebal').forEach(function(b){ b.onclick=function(){ openRebalance(b.dataset.po); }; });
-    document.querySelectorAll('#act-grid [data-goto]').forEach(function(b){b.onclick=function(){selectSection(b.dataset.goto);};});
-    document.querySelectorAll('#act-grid .act-gotopo').forEach(function(b){b.onclick=function(){gotoPO(b.dataset.po, b.dataset.tab||undefined);};});
-    document.querySelectorAll('#act-grid .act-go').forEach(function(b){b.onclick=function(){ if(b.dataset.go==='po')gotoPO(b.dataset.k, b.dataset.tab||undefined); else gotoShipment(b.dataset.k); };});
-    document.querySelectorAll('#act-grid .act-open-op').forEach(function(b){b.onclick=function(){ var f=b.dataset.flt||'partials'; var op={po:b.dataset.k}; op[f==='suprisk'?'suprisk':f==='disc'?'disc':'partials']=true; _pendingOP=op; selectSection('order-plan'); };});
-    document.querySelectorAll('#act-grid .act-gotoreport').forEach(function(b){b.onclick=function(){ var rk=b.dataset.rk||'erp-compare';
+    document.querySelectorAll('#act-sub .act-rebal').forEach(function(b){ b.onclick=function(){ openRebalance(b.dataset.po); }; });
+    document.querySelectorAll('#act-sub [data-goto]').forEach(function(b){b.onclick=function(){selectSection(b.dataset.goto);};});
+    document.querySelectorAll('#act-sub .act-gotopo').forEach(function(b){b.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(b.dataset.po, b.dataset.tab||undefined); else gotoPO(b.dataset.po, b.dataset.tab||undefined); };});
+    document.querySelectorAll('#act-sub .act-go').forEach(function(b){b.onclick=function(){ if(b.dataset.go==='po'){ if(typeof openPODrawer==='function')openPODrawer(b.dataset.k, b.dataset.tab||undefined); else gotoPO(b.dataset.k, b.dataset.tab||undefined); } else { if(typeof openShipDrawer==='function')openShipDrawer(b.dataset.k); else gotoShipment(b.dataset.k); } };});
+    document.querySelectorAll('#act-sub .act-open-op').forEach(function(b){b.onclick=function(){ var f=b.dataset.flt||'partials'; var op={po:b.dataset.k}; op[f==='suprisk'?'suprisk':f==='disc'?'disc':'partials']=true; _pendingOP=op; selectSection('order-plan'); };});
+    document.querySelectorAll('#act-sub .act-gotoreport').forEach(function(b){b.onclick=function(){ var rk=b.dataset.rk||'erp-compare';
+      if(rk==='erp-compare'){ actSub='erp-compare'; selectSection('actions'); return; }   // ERP Compare now lives under ACTIONS ▸ ERP Compare
       if(rk==='cashflow'){ if(b.dataset.cfstatus)_cfState.status=b.dataset.cfstatus; if(b.dataset.cfmonth)_cfState.month=b.dataset.cfmonth; }
       selectReport(rk); };});
-    document.querySelectorAll('#act-grid .act-gotoitem').forEach(function(b){b.onclick=function(){ var g=b.dataset.go, k=b.dataset.k;
+    document.querySelectorAll('#act-sub .act-gotoitem').forEach(function(b){b.onclick=function(){ var g=b.dataset.go, k=b.dataset.k;
       if(g==='dep')gotoDeposit(k); else if(g==='other')gotoOther(); else gotoPO(k,'pay'); };});
-    document.querySelectorAll('#act-grid .act-gotomfg').forEach(function(b){b.onclick=function(){ showPoSub('manufacturing'); };}); }
+    document.querySelectorAll('#act-sub .act-gotomfg').forEach(function(b){b.onclick=function(){ showPoSub('manufacturing'); };}); }
 
   // ---- PIPELINE: PO lifecycle as a grouped timeline (stages = groups; cards ordered by next milestone) ----
   var PIPE_HC={late:'#b91c1c',soon:'#d97706',ok:'#15803d',done:'#6b7280',unknown:'#9ca3af'};
@@ -7025,7 +7068,7 @@
         +biTile('Deposits outstanding', '$'+units(d.deposits_outstanding||0), (d.deposit_pools||0)+' active pool'+(Number(d.deposit_pools)===1?'':'s'))
       +'</div>'; }
   // ERP COMPARE — open/draft ERP POs missing from the planner (supplier must be a planner product supplier)
-  function renderErpCompare(d){ var b=biBody(); d=d||{}; var all=d.rows||[];
+  function renderErpCompare(d,_cont,_re){ var b=_cont||biBody(); d=d||{}; var all=d.rows||[];
     var active=all.filter(function(r){return !r.ignored;}), ignored=all.filter(function(r){return r.ignored;});
     _erpcCount=active.length; paintErpcBadge();   // keep the sub-nav counter in sync (incl. after ignore / un-ignore)
     var head='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:#0f172a">ERP compare — open ERP POs missing from the planner</div>'
@@ -7051,7 +7094,7 @@
     else htmlOut+=tbl(active,false);
     if(ignored.length) htmlOut+='<div class="sect-h" style="margin-top:16px">Ignored ('+ignored.length+') <span class="mut tiny">— excluded from the actions count; un-ignore to bring back</span></div>'+tbl(ignored,true);
     b.innerHTML=htmlOut;
-    function setIgnore(po,ig){ fetch('/api/supply/bi/erp-compare/ignore',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,ignore:ig})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} selectReport('erp-compare'); }).catch(function(){alert('Could not update');}); }
+    function setIgnore(po,ig){ fetch('/api/supply/bi/erp-compare/ignore',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,ignore:ig})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} if(_re)_re(); else selectReport('erp-compare'); }).catch(function(){alert('Could not update');}); }
     b.querySelectorAll('.erpc-ignore').forEach(function(x){ x.onclick=function(){ setIgnore(x.dataset.po,true); }; });
     b.querySelectorAll('.erpc-unignore').forEach(function(x){ x.onclick=function(){ setIgnore(x.dataset.po,false); }; }); }
   // URGENT BUY — SKU × market at stock-out risk (critical/soon) from the live cover projection
@@ -7531,7 +7574,7 @@
       var exc=poExceptions(r, pd._poDetail); nav.querySelectorAll('.potab').forEach(function(btn){ if(btn.dataset.pt!=='oplan')return; var n=exc.oplan.length, bd=btn.querySelector('.ex-badge');
         if(n>0){ if(bd){bd.textContent=n;} else btn.insertAdjacentHTML('beforeend',' <span class="ex-badge" title="'+n+' order-plan exception'+(n>1?'s':'')+'">'+n+'</span>'); } else if(bd){bd.remove();} }); });
   }).catch(function(){}); }
-  function samplesNavBadge(rows){ var n=(rows||[]).reduce(function(a,r){return a+(r.unread_notes||0);},0);   // total unread supplier notes
+  function samplesNavBadge(rows){ var n=(rows||[]).reduce(function(a,r){return a+(sampActions(r)||[]).length;},0);   // total open sample actions (supplier-shipped / overdue / charge / unread), matching the per-row exception badges
     var btn=document.querySelector('#supply-subnav .stab[data-k="samples"]'); if(btn)btn.innerHTML='SAMPLES'+(n>0?' <span class="ex-badge">'+n+'</span>':'');
     var opt=document.querySelector('#supply-nav-sel option[value="samples"]'); if(opt)opt.textContent='SAMPLES'+(n>0?' ('+n+')':''); }
   // Timeline messages bell → top bar (#view-tabs-row) next to SA. Lives outside #supply-root so it's visible on

@@ -3,6 +3,21 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.129 - Actions sub-tabs (Actions / Recommendations / ERP Compare) + column polish
+
+- **SUPPLY ▸ Actions is now split into three sub-tabs**: **ACTIONS**, **💡 RECOMMENDATIONS** (advisory
+  forecast/expedite items, own counter), and **⬆ ERP COMPARE** (moved in from BI & Reports; ERP Compare is
+  no longer a BI report tab — its recommendation button now deep-links here).
+- **ACTIONS keeps the 2-column view**, but now splits by severity: **column 1 = 🔴 High priority**,
+  **column 2 = 🟡 Medium & ⚪ Low**. If there are no highs, column 1 = Medium and column 2 = Low.
+- **Triage table column polish**: fixed layout — the severity dot column is now as narrow as possible and
+  left-aligned; Type and Ref are compact; **Fix and Manage columns get real room** so inputs stop looking
+  squashed/random.
+- **Ref is now a pop-out drawer link everywhere** (PO or shipment), including on **aged-payment** actions
+  which previously had no link. Recommendation refs are hyperlinked to the PO/shipment drawer too.
+- **SAMPLES tab counter** now shows the number of **open sample actions** (supplier-shipped / overdue /
+  charge-to-review / unread), matching the per-row exception badges (5 in sandbox).
+
 ## v26.128 - Create POs from Buy Plan: per-category select + amber supplier picker
 
 - The **Create 3PL/FBA POs from Buy Plan** form now has **select all / none per category** (on each category
