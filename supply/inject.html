@@ -3069,9 +3069,9 @@
           inp.dispatchEvent(new Event('change',{bubbles:true})); };
         var slot=document.querySelector('#podet-'+i+' .dep-atrisk-slot[data-po="'+(window.CSS&&CSS.escape?CSS.escape(p):p)+'"]');
         if(slot && d.suggest_extra!=null && d.suggest_extra>0.009){
-          var lbl=(d.at_risk?'⚠ deposit at risk · ':'')+'assign '+money(d.suggest_extra);
+          var lbl=(d.at_risk?'<div style="line-height:1.15">⚠ deposit at risk</div><div style="line-height:1.15">assign '+money(d.suggest_extra)+'</div>':'assign '+money(d.suggest_extra));
           var stl=d.at_risk?'background:#fef2f2;border:1px solid #fca5a5;color:#991b1b':'background:#dcfce7;border:1px solid #86efac;color:#166534';
-          slot.innerHTML='<button class="save-btn dep-ctx-fill2" data-amt="'+d.suggest_extra+'" title="allocate this extra start deposit to this PO from the remaining pool" style="margin-top:4px;white-space:nowrap;'+stl+'">'+lbl+'</button>';
+          slot.innerHTML='<button class="save-btn dep-ctx-fill2" data-amt="'+d.suggest_extra+'" title="allocate this extra start deposit to this PO from the remaining pool" style="margin-top:4px;text-align:center;'+stl+'">'+lbl+'</button>';
           var fb2=slot.querySelector('.dep-ctx-fill2'); if(fb2)fb2.onclick=function(){ fill(fb2.dataset.amt); };
         } })
         .catch(function(){ el.innerHTML=''; }); });

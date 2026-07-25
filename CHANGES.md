@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.118 - Fix DEMAND flash on refresh + 2-row at-risk button
+
+- **No more DEMAND flash:** refreshing on a SUPPLY page (e.g. `#/supply/purchase-orders`) no longer shows the
+  DEMAND filter pills for a beat first. `#app` is now hidden until the router lands on any non-demand route
+  (was only hidden for a plain no-hash load); the harness reveals it once routed.
+- **Deposit at-risk button** now wraps onto two lines inside the single button — "⚠ deposit at risk" on top,
+  "assign 2,000.00" beneath.
+
 ## v26.117 - Payment amounts in supplier currency + PAYMENTS polish + faster order-plan filters
 
 - **Supplier currency everywhere in payments:** the **Payments Due** report (per-row amount, per-supplier

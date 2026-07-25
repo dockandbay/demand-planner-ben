@@ -581,7 +581,11 @@ app.get('/', async (_req, res) => {
     // Per-user landing slug + hide #app until the router lands, so a plain load goes straight to the user's page
     // (default SUPPLY ▸ Purchase Orders) with no DEMAND→SUPPLY flash. inject.html reveals #app once routed.
     let _land = 'supply/purchase-orders'; try { _land = (await permsFor(_req)).landing_page || _land; } catch (_) {}
-    const LANDING_JS = '<script>window.__HZ_LANDING=' + JSON.stringify(_land) + ';(function(){var a=document.getElementById("app");if(a&&!location.hash)a.style.visibility="hidden";setTimeout(function(){var b=document.getElementById("app");if(b)b.style.visibility="";},3000);})();</script>';
+    // Hide #app until the router lands on ANY non-demand-native route (no hash, or a #/supply|config|scenario… hash) —
+    // not just plain loads. A refresh at #/supply/... used to leave #app visible, so the static DEMAND filter bar
+    // painted for a beat before the harness switched to SUPPLY (the flash). inject.html reveals #app once routed;
+    // the 3s timer is a failsafe. Demand-native views (planning/demand/buy/fba/exec/reports) paint themselves, no flash.
+    const LANDING_JS = '<script>window.__HZ_LANDING=' + JSON.stringify(_land) + ';(function(){var a=document.getElementById("app");if(a&&!/^#\\/?(planning|demand|buy|fba|exec|reports)(\\/|$)/.test(location.hash||""))a.style.visibility="hidden";setTimeout(function(){var b=document.getElementById("app");if(b)b.style.visibility="";},3000);})();</script>';
     const injectTail = LANDING_JS + FBADIMS_JS + FIT + (DEV ? loadInject() : SUPPLY_INJECT).split('__APP_VERSION__').join(APP_VERSION) + '</body>';
     html = html.replace('</body>', () => injectTail);
     // Inject the configured USD→GBP rate into both clients (CF_GBP in inject.html, AF_GBP in the artefact).
