@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.125 - Inline PO expand opens instantly too
+
+Generalised the drawer's fast-paint to the **inline PLAN expand** in the PO grid (and consolidated the two into
+one `poFastPaint`): clicking PLAN now paints **PAYMENTS immediately** from the row we already have, with a "⏳
+loading full detail…" note, then swaps in the full detail (Order Plan / Docs / Timeline …) when po-detail
+arrives. Only on the initial expand (won't flash on a refresh); Complete POs refetch their full row first (~0.4s)
+then fast-paint. So both the inline expand and the drawer open ~7× faster to first content.
+
 ## v26.124 - Shipment drawer opens instantly (progressive load)
 
 Same treatment as the PO drawer: opening a shipment waited ~2s for the POs-aboard + crossdock fetch before
