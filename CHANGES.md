@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.109 - Supplier portal: top-right "Recent changes" + "Unread messages" dropdowns
+
+Added two controls to the top-right of the supplier portal:
+- **✉ Unread** — count of unread Dock & Bay timeline messages across the supplier's POs, shipments, samples
+  and products (computed from the bootstrap). Click to see each item + count; click an item to open it.
+- **🕘 Recent** — recent key events for the supplier (new purchase order, payment received, new sample), newest
+  first, via the new `GET /api/portal/recent-activity` endpoint. Click an event to jump to it.
+
 ## v26.108 - Payments Due fixes + PO Payments table layout + wider drawers
 
 - **Payments Due ▸ PAY** now saves the amount + date in **one request** (was two racing saves → the PO could

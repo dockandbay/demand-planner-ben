@@ -578,7 +578,13 @@
     var PORTAL_PROD_Q='', PORTAL_PROD_SEASON='', PORTAL_PROD_STATUS='in_development';   // Product grid: search + season + status (default: in development)
     var _invFiles={};     // base64 of the last parsed invoice file, per PO (for the Apply step)
     var rootEl=opts.root; if(!rootEl.closest('#supply-root')){rootEl.id='supply-root';} rootEl.style.display='block';
-    rootEl.innerHTML='<div class="bar"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders <span id="pp-pos-badge"></span></span><span class="rtab" data-pt="shipmentplan">Shipment Plan <span id="pp-ship-badge"></span></span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="productions">Productions</span><span class="rtab" data-pt="samples">Samples <span id="pp-samp-badge"></span></span><span class="rtab" data-pt="product" id="pp-prod-tab" style="display:none">Product <span id="pp-prod-badge"></span></span></span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
+    rootEl.innerHTML='<div class="bar" style="align-items:center"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders <span id="pp-pos-badge"></span></span><span class="rtab" data-pt="shipmentplan">Shipment Plan <span id="pp-ship-badge"></span></span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="productions">Productions</span><span class="rtab" data-pt="samples">Samples <span id="pp-samp-badge"></span></span><span class="rtab" data-pt="product" id="pp-prod-tab" style="display:none">Product <span id="pp-prod-badge"></span></span></span>'
+      +'<span id="pp-notif" style="margin-left:auto;display:none;gap:6px;align-items:center;position:relative;white-space:nowrap">'
+        +'<button id="pp-unread-btn" class="save-btn light" title="Unread messages from Dock &amp; Bay" style="position:relative">✉ <span id="pp-unread-n">0</span></button>'
+        +'<button id="pp-recent-btn" class="save-btn light" title="Recent changes">🕘 Recent</button>'
+        +'<div id="pp-unread-drop" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;z-index:120;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:280px;max-width:360px;max-height:60vh;overflow:auto;text-align:left"></div>'
+        +'<div id="pp-recent-drop" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;z-index:120;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:300px;max-width:380px;max-height:60vh;overflow:auto;text-align:left"></div>'
+      +'</span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
     var tabsEl=document.getElementById('pp-tabs'), body=document.getElementById('pp-body');
     // download a generated invoice as a real file (fetch -> blob) rather than opening a tab — works on the
     // portal host where /api/invoice/* isn't routed (uses the /api/portal/* endpoints via EP).
@@ -1615,9 +1621,49 @@
           function setProdBadge(){ var t=document.getElementById('pp-prod-tab'); if(t)t.style.display=_ppData&&_ppData.productEnabled?'':'none';
             var n=((_ppData&&_ppData.products)||[]).reduce(function(a,p){return a+(Number(p.unread_dnb)||0);},0);
             var bg=document.getElementById('pp-prod-badge'); if(bg)bg.innerHTML=n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
+          // ---- top-right: unread D&B messages + recent changes -----------------------------------------
+          function closeNotif(){ var a=document.getElementById('pp-unread-drop'),b=document.getElementById('pp-recent-drop'); if(a)a.style.display='none'; if(b)b.style.display='none'; }
+          function computeUnread(){ var items=[];
+            var nb=(_ppData&&_ppData.notesByPo)||{};
+            Object.keys(nb).forEach(function(po){ var n=(nb[po]||[]).filter(function(x){return x.author_kind==='internal' && !x.read;}).length; if(n>0)items.push({kind:'po',ref:po,n:n,label:'Purchase order '+po}); });
+            ((_ppData&&_ppData.shipmentPlan)||[]).forEach(function(s){ if(s.unread_dnb>0)items.push({kind:'shipment',ref:s.shipment_ref,n:s.unread_dnb,label:'Shipment '+(s.shipment_ref||'')}); });
+            ((_ppData&&_ppData.samples)||[]).forEach(function(s){ if(s.unread_dnb>0)items.push({kind:'sample',ref:s.ref,n:s.unread_dnb,label:'Sample '+(s.ref||'')}); });
+            ((_ppData&&_ppData.products)||[]).forEach(function(pr){ if(pr.unread_dnb>0)items.push({kind:'product',ref:pr.ref,n:pr.unread_dnb,label:'Product '+(pr.ref||'')}); });
+            return items; }
+          function notifGo(kind,ref){ closeNotif();
+            if(kind==='po'){ PORTAL_TAB='pos'; _ppOpenPO=ref; PORTAL_PO_Q=ref; }
+            else if(kind==='shipment'){ PORTAL_TAB='shipmentplan'; PORTAL_SP_PO=ref; }
+            else if(kind==='sample'){ PORTAL_TAB='samples'; }
+            else if(kind==='product'){ PORTAL_TAB='product'; }
+            else if(kind==='payments'){ PORTAL_TAB='payments'; }
+            renderPP(); }
+          function loadRecent(d){ if(!EP.recentActivity){ d.innerHTML='<div style="padding:10px 12px;color:#888;font-size:12px">Not available in preview.</div>'; return; }
+            d.innerHTML='<div style="padding:8px 12px;font-weight:700;border-bottom:1px solid #eef2f7;font-size:12px">Recent changes</div><div style="padding:10px 12px;color:#888;font-size:12px">Loading…</div>';
+            fetch(EP.recentActivity).then(function(r){return r.json();}).then(function(rows){
+              if(!Array.isArray(rows)||!rows.length){ d.innerHTML='<div style="padding:8px 12px;font-weight:700;border-bottom:1px solid #eef2f7;font-size:12px">Recent changes</div><div style="padding:10px 12px;color:#888;font-size:12px">Nothing recent.</div>'; return; }
+              var ICO={po_created:'🆕',po_confirmed:'✅',payment:'💰',sample_created:'🧪'};
+              d.innerHTML='<div style="padding:8px 12px;font-weight:700;border-bottom:1px solid #eef2f7;font-size:12px">Recent changes</div>'
+                +rows.map(function(r){ var kind=(r.typ==='payment')?'payments':(r.typ==='sample_created')?'sample':'po';
+                  return '<div class="pp-recent-row" data-kind="'+kind+'" data-ref="'+esc(r.ref||'')+'" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #f5f5f5;font-size:12px"><div>'+(ICO[r.typ]||'•')+' '+esc(r.label)+'</div><div style="color:#94a3b8;font-size:10px;margin-top:1px">'+esc(r.at||'')+'</div></div>'; }).join('');
+              d.querySelectorAll('.pp-recent-row').forEach(function(row){ row.onclick=function(e){ e.stopPropagation(); notifGo(row.dataset.kind, row.dataset.ref); }; });
+            }).catch(function(){ d.innerHTML='<div style="padding:10px 12px;color:#dc2626;font-size:12px">Could not load recent changes.</div>'; }); }
+          function renderPortalNotif(){ var wrap=document.getElementById('pp-notif'); if(!wrap)return; wrap.style.display='inline-flex';
+            var items=computeUnread(), total=items.reduce(function(t,x){return t+x.n;},0);
+            var nEl=document.getElementById('pp-unread-n'); if(nEl)nEl.textContent=total;
+            var ub=document.getElementById('pp-unread-btn'); if(ub){ ub.style.background=total>0?'#fef2f2':''; ub.style.borderColor=total>0?'#fca5a5':''; ub.style.color=total>0?'#b91c1c':''; }
+            var ud=document.getElementById('pp-unread-drop');
+            if(ud){ ud.innerHTML='<div style="padding:8px 12px;font-weight:700;border-bottom:1px solid #eef2f7;font-size:12px">Unread messages from Dock &amp; Bay</div>'
+              +(items.length?items.map(function(it){ return '<div class="pp-notif-row" data-kind="'+it.kind+'" data-ref="'+esc(it.ref)+'" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #f5f5f5;font-size:12px;display:flex;gap:8px;align-items:center"><span class="tool-badge bg-red" style="min-width:20px;text-align:center">'+it.n+'</span> '+esc(it.label)+'</div>'; }).join(''):'<div style="padding:10px 12px;color:#888;font-size:12px">No unread messages.</div>');
+              ud.querySelectorAll('.pp-notif-row').forEach(function(r){ r.onclick=function(e){ e.stopPropagation(); notifGo(r.dataset.kind, r.dataset.ref); }; }); }
+            if(!wrap._wired){ wrap._wired=1;
+              document.getElementById('pp-unread-btn').onclick=function(e){ e.stopPropagation(); var d=document.getElementById('pp-unread-drop'), r=document.getElementById('pp-recent-drop'); if(r)r.style.display='none'; d.style.display=(d.style.display==='none'?'block':'none'); };
+              document.getElementById('pp-recent-btn').onclick=function(e){ e.stopPropagation(); var d=document.getElementById('pp-recent-drop'), u=document.getElementById('pp-unread-drop'); if(u)u.style.display='none'; if(d.style.display!=='none'){ d.style.display='none'; return; } d.style.display='block'; loadRecent(d); };
+              document.getElementById('pp-unread-drop').onclick=function(e){ e.stopPropagation(); };
+              document.getElementById('pp-recent-drop').onclick=function(e){ e.stopPropagation(); };
+              document.addEventListener('click', closeNotif); } }
           function renderPP(){ if(!_ppData)return; var body=document.getElementById('pp-body');
             tabsEl.querySelectorAll('.rtab').forEach(function(t){t.classList.toggle('active',t.dataset.pt===PORTAL_TAB);});
-            setSampBadge(); setPosBadge(); setShipBadge(); setProdBadge();
+            setSampBadge(); setPosBadge(); setShipBadge(); setProdBadge(); try{ renderPortalNotif(); }catch(e){}
             if(PORTAL_TAB==='product'){ body.innerHTML=ppProducts(_ppData.products||[]); wireProducts(); return; }
             if(PORTAL_TAB==='samples'){ body.innerHTML=ppSamples(_ppData.samples||[]); wireSamples(); return; }
             if(PORTAL_TAB==='shipmentplan'){

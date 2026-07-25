@@ -7948,6 +7948,23 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
       notesByPo, subsByPo, costsByPo, supSkus, xdByPo, addByPo, approvedByPo, docsByPo, samples, payments, shipmentPlan, productEnabled, products });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Portal "recent changes" drawer — key events for THIS supplier, newest first (new PO, payment received, sample).
+app.get('/api/portal/recent-activity', portalAuth, async (req, res) => {
+  const names = req.portal.suppliers; if (!names.length) return res.json([]);
+  try {
+    res.json((await pool.query(`
+      SELECT to_char(ts,'YYYY-MM-DD HH24:MI') at, typ, label, ref FROM (
+        SELECT created_at ts, 'po_created' typ, 'New purchase order '||po label, po ref
+          FROM planner.purchase_orders WHERE created_at IS NOT NULL AND supplier_name = ANY($1)
+        UNION ALL SELECT supplier_confirmed_at, 'po_confirmed', 'You confirmed order '||po, po
+          FROM planner.purchase_orders WHERE supplier_confirmed_at IS NOT NULL AND supplier_name = ANY($1)
+        UNION ALL SELECT date_paid, 'payment', 'Payment received'||coalesce(' — '||nullif(reference,''),'')||coalesce(' ('||to_char(round(amount),'FM999,999,999')||')',''), coalesce(nullif(reference,''),'')
+          FROM planner.deposits WHERE date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND supplier_name = ANY($1)
+        UNION ALL SELECT created_at, 'sample_created', 'New sample request SR-'||id, 'SR-'||id
+          FROM planner.sample_requests WHERE created_at IS NOT NULL AND supplier_name = ANY($1)
+      ) z ORDER BY at DESC NULLS LAST LIMIT 15`, [names])).rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // ── PORTAL PRODUCT (supplier-scoped): timeline view + comment on their assigned product-dev items ──
 async function portalOwnsProduct(req, ref) { if (!ref || !req.portal.suppliers.length) return false;
   return (await pool.query(`SELECT 1 FROM planner.product_dev_items WHERE ref=$1 AND supplier = ANY($2)`, [ref, req.portal.suppliers])).rowCount > 0; }
