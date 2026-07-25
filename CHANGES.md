@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.122 - Lighter PO grid (thin Complete rows)
+
+The PO grid loaded all ~1,375 POs in full, but ~85% are **Complete** history that's rarely opened. Now Complete
+rows carry only what the grid needs to **list / filter / sort** plus **all payment-action fields** (a Complete PO
+can still have an overdue payment or a supplier invoice awaiting approval — those still show). The heavy
+expand-only fields (big JSON snapshots, packing/labelling, forwarder, landed cost, delivery notes, ERP diff,
+likely-pay dates) are dropped from Complete rows; opening one **refetches its full detail on demand** (same as
+the drawer already does — nothing is lost). Working (non-Complete) POs are unchanged.
+
+Payload dropped **4.4MB → 2.6MB (‑41%)** to transfer/parse/render; the grid query itself is unchanged (no
+slowdown). Cashflow, the single-row PO endpoint and PO detail are untouched. **Revert:** set env
+`PO_GRID_SPLIT=0` to send every PO in full again — no code change.
+
 ## v26.121 - Faster product swatches (cache + downscale on upload)
 
 - **Swatch serving is now cacheable** (`immutable`, versioned by the `?t=updated_at` the client already sends)

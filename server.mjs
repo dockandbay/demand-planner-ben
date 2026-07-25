@@ -1651,6 +1651,17 @@ app.get('/api/supply/:section', async (req, res) => {
         // 'cashflow' reuses this exact PO calc, then re-shapes the rows into dated payment line items.
         const _pos = await q(PO_ROWS_SQL + ' ORDER BY po');
         if (req.params.section === 'cashflow') return res.json(await cashflowResponse(_pos, q));
+        // PO grid: COMPLETE POs (≈85% of all POs, rarely opened) keep their list/filter/sort + PAYMENT-action
+        // fields but shed the heavy expand-only fields (big JSON snapshots, packing, forwarder, landed cost,
+        // delivery notes, ERP diff, likely dates) — a much smaller payload to transfer/parse/render. Expanding a
+        // marked (_thin) row refetches the full PO_ROWS_SQL via /api/supply/po-row/:po. Toggle with PO_GRID_SPLIT=0.
+        if (PO_GRID_SPLIT) {
+          for (const r of _pos) {
+            if (!String(r.status || '').toLowerCase().includes('complete')) continue;
+            for (const k of PO_COMPLETE_STRIP) delete r[k];
+            r._thin = true;
+          }
+        }
         return res.json(_pos);
       }
       case 'lookups': {  // dropdown sources for PO editing: deposit refs, batches, prod#s, shipments
@@ -7444,6 +7455,26 @@ const PO_ROWS_SQL = `
                           ELSE val + coalesce(duty,0) + coalesce(flex_quote, freight_rate, 0) END)
                     * coalesce(tax_pct,0)/100, 2) landed_total
           FROM mastered calc4`;
+const PO_GRID_SPLIT = process.env.PO_GRID_SPLIT !== '0';   // default ON; set PO_GRID_SPLIT=0 to send every PO in full (revert)
+// Heavy, expand-ONLY fields stripped from COMPLETE PO grid rows (the detail panels refetch the full row on
+// expand via /api/supply/po-row/:po, so nothing is lost). KEEP everything the grid needs to list/filter/sort and
+// every PAYMENT-action input (complete POs can still owe a payment / have a supplier invoice pending) — so the
+// payment/date/amount fields, deposit ref, payment_overdue, sup_invoice_pending etc. are deliberately NOT here.
+const PO_COMPLETE_STRIP = [
+  'approved_lines', 'dtc_approved_snapshot', 'sea_tiers',
+  'container_size', 'est_freight', 'freight_src', 'flex_quote', 'est_duty', 'est_tax', 'tax_pct', 'landed_total',
+  'pack_polybags', 'pack_polybags_notes', 'pack_dnb_barcodes', 'pack_dnb_barcodes_notes',
+  'pack_rfid_barcodes', 'pack_rfid_barcodes_notes', 'pack_dnb_carton', 'pack_dnb_carton_notes',
+  'pack_client_carton', 'pack_client_carton_notes', 'pack_pallet_notes', 'pack_other_notes',
+  'forwarder_name', 'forwarder_email', 'forwarder_phone',
+  'branch_delivery_notes', 'shipment_delivery_notes', 'ships_with_master_po',
+  'client_requirements', 'client_po_ref', 'client_deadline', 'asn_numbers', 'dispatch_order_ref',
+  'final_delivery_address', 'crossdock_skus', 'dtc_accepted_by',
+  'likely_start', 'likely_completion', 'likely_balance_1', 'likely_balance_2',
+  'erp_final_delivery', 'erp_po_id', 'prod_confirmed_age', 'production_status',
+  'end_override', 'ship_override', 'delivery_override', 'ship_carrier', 'ship_carrier_ref',
+  'catch_up', 'final_payment_due', 'credit_days', 'credit_type',
+];
 const OP_EXC_SQL = `
   SELECT DISTINCT po, typ FROM (
     SELECT l.po, 'partials'::text typ

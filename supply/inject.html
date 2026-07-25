@@ -2532,8 +2532,19 @@
     b.addEventListener('mouseenter',function(){ b._t=setTimeout(function(){ noteTip(b); },120); });   // fast 120ms tooltip (native title is ~1s)
     b.addEventListener('mouseleave',function(){ clearTimeout(b._t); hideNoteTip(); });
     b.onclick=function(e){ e.stopPropagation(); hideNoteTip(); poActPopover(b); }; }); }
-  function loadPoDetail(po,i,wantTab){ fetch('/api/supply/po-detail/'+encodeURIComponent(po)).then(function(r){return r.json();})
-    .then(function(d){ var _pd=document.getElementById('podet-'+i); _pd.innerHTML=poDetailHTML(po,d,i); _pd._poDetail=d;   // stash detail so a silent snooze can recompute tab badges in place
+  function loadPoDetail(po,i,wantTab){
+    // Complete POs load as THIN grid rows (no expand-only fields). Before rendering the detail panels — which read
+    // many fields straight off poBy[po] — hydrate the full row from /api/supply/po-row/:po (mirrors the drawer).
+    if(poBy[po] && poBy[po]._thin){
+      fetch('/api/supply/po-row/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(arr){
+        var rr=Array.isArray(arr)?arr[0]:null; if(rr){ poBy[po]=rr; }   // full row (no _thin) replaces the thin one
+        _loadPoDetailInner(po,i,wantTab);
+      }).catch(function(){ _loadPoDetailInner(po,i,wantTab); });
+      return;
+    }
+    _loadPoDetailInner(po,i,wantTab); }
+  function _loadPoDetailInner(po,i,wantTab){ fetch('/api/supply/po-detail/'+encodeURIComponent(po)).then(function(r){return r.json();})
+    .then(function(d){ var _pd=document.getElementById('podet-'+i); if(!_pd)return; _pd.innerHTML=poDetailHTML(po,d,i); _pd._poDetail=d;   // stash detail so a silent snooze can recompute tab badges in place
       bindPay(po,i); bindPoScrollPin(); applyPoPin();   // pin left + position for any current horizontal scroll
       if(wantTab){ var t=document.querySelector('#podet-'+i+' .potab[data-pt="'+wantTab+'"]'); if(t)t.onclick(); } })
     .catch(function(e){ document.getElementById('podet-'+i).innerHTML='<span style="color:#dc2626">'+esc(e.message||e)+'</span>'; }); }
