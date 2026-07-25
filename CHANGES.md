@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.128 - Create POs from Buy Plan: per-category select + amber supplier picker
+
+- The **Create 3PL/FBA POs from Buy Plan** form now has **select all / none per category** (on each category
+  header), alongside the existing global "tick all".
+- The **multi-supplier dropdown** (shown when a SKU has more than one supplier — you must pick one) is now
+  **light amber**, so it's obvious it needs an action.
+
 ## v26.127 - Actions redesign (triage table) + high-priority counter + tidy-ups
 
 - **SUPPLY ▸ Actions redesigned as a compact triage table** — one line per action, **sorted by severity** (High

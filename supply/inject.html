@@ -8068,15 +8068,15 @@
       var tdB='padding:3px 8px;border-bottom:1px solid #f0f0f0;white-space:nowrap';   // base cell (modal is outside #supply-root, so styles are explicit)
       var rows='', curCat=null;
       skus.forEach(function(s){ var cat=s.category||'(uncategorised)';
-        if(cat!==curCat){ curCat=cat; rows+='<tr><td colspan="5" style="background:#e8e8e6;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#333;padding:3px 8px;text-align:left">'+esc(cat)+'</td></tr>'; }
+        if(cat!==curCat){ curCat=cat; rows+='<tr><td colspan="5" style="background:#e8e8e6;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#333;padding:3px 8px;text-align:left">'+esc(cat)+' <span style="float:right;font-weight:400;text-transform:none;letter-spacing:0"><a class="bp-cat-sel" data-cat="'+esc(cat)+'" data-on="1" style="cursor:pointer;color:#1d4ed8;font-size:9px">select all</a> <span style="color:#cbd5e1">·</span> <a class="bp-cat-sel" data-cat="'+esc(cat)+'" data-on="0" style="cursor:pointer;color:#64748b;font-size:9px">none</a></span></td></tr>'; }
         var code='', supCell;
         if(!s.options.length){ supCell='<span style="color:#b45309">⚠ no supplier</span>'; }
         else if(s.options.length===1){ var o=s.options[0]; if(o.code){ code=o.code; supCell=esc(o.code)+' · '+esc(o.name); } else { supCell='<span style="color:#b45309">⚠ '+esc(o.name)+' (no code)</span>'; } }
-        else { supCell='<select class="bp-skusup" style="width:auto;font-size:11px;padding:1px 4px;border:1px solid #cbd5e1;border-radius:4px">'+s.options.map(function(o){return '<option value="'+esc(o.code||'')+'"'+(o.code===s.main_code?' selected':'')+(o.code?'':' disabled')+'>'+esc(o.code||'?')+' · '+esc(o.name)+'</option>';}).join('')+'</select>'; }
+        else { supCell='<select class="bp-skusup" title="multiple suppliers — pick one" style="width:auto;font-size:11px;padding:1px 4px;border:1px solid #f59e0b;border-radius:4px;background:#fef3c7;color:#92400e;font-weight:600">'+s.options.map(function(o){return '<option value="'+esc(o.code||'')+'"'+(o.code===s.main_code?' selected':'')+(o.code?'':' disabled')+'>'+esc(o.code||'?')+' · '+esc(o.name)+'</option>';}).join('')+'</select>'; }
         // tickable as long as there's a supplier code; pallet_qty is optional (no-pallet SKUs still go in a PO)
         var hasCode=(s.options.length===1?!!code:s.options.some(function(o){return o.code;}));
         var pal=s.pallet_qty>0?(Math.round(s.qty/s.pallet_qty*10)/10):('<span style="color:#b45309" title="no pallet_qty — included, not counted in the 20-pallet split">n/a</span>');
-        return rows+='<tr data-sku="'+esc(s.sku)+'" data-qty="'+s.qty+'" data-code="'+esc(code)+'">'
+        return rows+='<tr data-sku="'+esc(s.sku)+'" data-qty="'+s.qty+'" data-code="'+esc(code)+'" data-cat="'+esc(cat)+'">'
           +'<td style="'+tdB+';text-align:center"><input type="checkbox" class="bp-skutick"'+(hasCode?' checked':'')+'></td>'
           +'<td style="'+tdB.replace('white-space:nowrap','')+';text-align:left;min-width:200px"><div style="display:flex;align-items:center;gap:6px"><button class="bp-plan" data-sku="'+esc(s.sku)+'" title="show the buy plan for this SKU (pick country in the popup)" style="font-size:8px;font-weight:700;padding:0 4px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer;white-space:nowrap">PLAN</button><span>'+esc(s.sku)+'</span></div>'+(s.discontinue?'<div style="font-size:9px;color:#9ca3af;margin-top:1px">discontinue '+esc(fd(s.discontinue))+'</div>':'')+'</td>'
           +'<td style="'+tdB+';text-align:center">'+s.qty.toLocaleString()+'</td>'
@@ -8090,6 +8090,9 @@
         +'<th style="'+thB+';text-align:left;min-width:160px">Supplier</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
       var ta=document.getElementById('bp-tickall'); if(ta)ta.onchange=function(){ document.querySelectorAll('#bp-skus .bp-skutick:not([disabled])').forEach(function(t){t.checked=ta.checked;}); refreshCount(); };
       box.querySelectorAll('.bp-skutick').forEach(function(t){ t.onchange=refreshCount; }); refreshCount();
+      // per-category select all / none
+      box.querySelectorAll('.bp-cat-sel').forEach(function(a){ a.onclick=function(){ var cat=a.dataset.cat, on=a.dataset.on==='1';
+        box.querySelectorAll('.bp-skutick').forEach(function(t){ var tr=t.closest('tr'); if(tr&&tr.getAttribute('data-cat')===cat&&!t.disabled)t.checked=on; }); refreshCount(); }; });
       // "Plan ▸" → open the BUY-tab plan popup for that SKU (artifact's global open_)
       box.querySelectorAll('.bp-plan').forEach(function(b){ b.onclick=function(){ var sku=b.dataset.sku;
         if(!window.open_){ alert('Buy plan unavailable — reload the page.'); return; }
