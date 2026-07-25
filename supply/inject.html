@@ -326,6 +326,8 @@
 #supply-root tr.exp-row .tw>table{width:max-content;min-width:100%}
 #supply-root tr.exp-row table td:first-child,#supply-root tr.exp-row table th:first-child{white-space:nowrap;min-width:240px;padding-right:16px}
 #supply-root .pay-tbl td:first-child,#supply-root .pay-tbl th:first-child{white-space:nowrap;min-width:330px}
+/* Mobile (full-screen PO sheet): the 330px column-1 floor above is far too wide on a phone — let it wrap and shrink. */
+#mob-sheet-ov .pay-tbl td:first-child,#mob-sheet-ov .pay-tbl th:first-child{min-width:150px;white-space:normal}
 #supply-root .payin.pdis,#supply-root .payin:disabled{background:#f1f1f1;color:#bbb;cursor:not-allowed;border-color:#eee}
 #supply-root .payin{text-align:left}   /* PAYMENTS panel: left-align the amount inputs */
 #supply-root .mut{color:#888}#supply-root .tiny{font-size:9.5px}
@@ -5020,8 +5022,28 @@
   function tlOutside(e){ var d=document.getElementById('tl-drop'), bell=document.getElementById('tl-bell'); if(d&&!d.contains(e.target)&&!(bell&&bell.contains(e.target)))closeTlDropdown(); }
   function closeTlDropdown(){ var d=document.getElementById('tl-drop'); if(d)d.classList.remove('open'); document.removeEventListener('mousedown', tlOutside); }
   try{ window.HZ_BELL={ toggle:toggleTlDropdown, load:loadTlNotifs, count:function(){return TL_NOTIFS.length;} }; }catch(e){}   // bridge for the app-level mobile drawer (SA + Messages)
+  // Build the PO drawer on PHONES as the same full-screen sheet the PO-grid expand uses (#mob-sheet-ov) — the
+  // right-side slide-in panel is cramped on mobile. Renders #podet-DRAWER inside .mob-sheet-body so all the
+  // existing mobile-sheet CSS (stacked cli-rows, sticky sub-nav, scrolling tables) applies unchanged.
+  function buildPOMobSheet(po,tab){
+    if(_mobActiveTd){ restoreMob(_mobActiveTd); _mobActiveTd=null; }   // close any grid-expand sheet first (one at a time)
+    var ov=document.getElementById('mob-sheet-ov');
+    if(!ov){ ov=document.createElement('div'); ov.id='mob-sheet-ov'; (document.getElementById('supply-root')||document.body).appendChild(ov); }
+    ov.innerHTML='';
+    var bk=document.createElement('button'); bk.className='mob-back';
+    bk.innerHTML='<span>← Back</span><span class="mob-back-ref">'+esc(po)+'</span>';
+    bk.onclick=function(e){ e.stopPropagation(); closePODrawer(); };
+    ov.appendChild(bk);
+    var holder=document.createElement('div'); holder.className='mob-sheet-body';
+    holder.innerHTML='<div id="podet-DRAWER" class="count">Loading…</div>';
+    ov.appendChild(holder);
+    ov.dataset.podrawer='1'; ov.style.zIndex='6200';   // mark as a PO-drawer sheet + sit above the shipment drawer if that's open
+    ov.style.display='block'; ov.scrollTop=0; document.body.style.overflow='hidden';
+  }
   function openPODrawer(po,tab){ if(!po)return; tab=tab||'dates';
     closePODrawer(true);   // drop any existing PO drawer (silent: keep saved patch to restore later)
+    if(isPhone()){ buildPOMobSheet(po,tab); }
+    else {
     var root=document.getElementById('supply-root')||document.body;
     var bg=document.createElement('div'); bg.id='podrawer-bg';
     bg.innerHTML='<div id="podrawer"><div class="shipdrawer-head"><div class="shipdrawer-title">'+esc(po)+'</div>'
@@ -5033,6 +5055,7 @@
     bg.addEventListener('mousedown',function(e){ if(e.target===bg)closePODrawer(); });
     bg.querySelector('.shipdrawer-x').onclick=function(){ closePODrawer(); };
     bg.querySelector('.shipdrawer-full').onclick=function(){ closePODrawer(); gotoPO(po,tab); };
+    }
     // while the drawer is open, in-place refreshes (after an edit/assign) target the drawer, not a grid row that
     // may not exist on this page (e.g. the What's Next report).
     _poDrawerPrevPatch=_poPatchRow; _poDrawerPrevRefresh=_poRefresh;
@@ -5062,6 +5085,8 @@
     if(tab && tab!=='pay'){ var t=pd.querySelector('.potab[data-pt="'+esc(tab)+'"]'); if(t)t.click(); }
   }catch(e){} }
   function closePODrawer(silent){ var bg=document.getElementById('podrawer-bg'); if(bg&&bg.parentNode)bg.parentNode.removeChild(bg);
+    var ov=document.getElementById('mob-sheet-ov');   // phone variant: the PO drawer rendered into the full-screen mobile sheet
+    if(ov && ov.dataset.podrawer){ ov.style.display='none'; ov.innerHTML=''; ov.dataset.podrawer=''; ov.style.zIndex=''; document.body.style.overflow=''; }
     if(!silent){ _poPatchRow=_poDrawerPrevPatch; _poRefresh=_poDrawerPrevRefresh; _poDrawerPrevPatch=null; _poDrawerPrevRefresh=null; } }
   // (Removed dead unassignedTable + bindAssign — superseded by the shipments-assign flow. v25.652)
 

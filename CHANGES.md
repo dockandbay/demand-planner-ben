@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.132 - PO drawer uses the full-screen mobile sheet on phones + payments col-1 fix
+
+- On phones, **opening a PO drawer** (from Actions, shipments, deposits, reports, etc.) now presents as the same
+  **full-screen sheet** the PO-grid expand uses — stacked fields, sticky sub-nav, scrolling tables — instead of the
+  cramped right-side panel. Desktop keeps the slide-in drawer.
+- **Payments table column 1** (the payment-name column) no longer forces a 330px width on mobile — it now wraps and
+  shrinks, so the table isn't dominated by column 1 on a phone.
+
 ## v26.131 - Mobile Actions/Recommendations/ERP tables scroll with sticky first columns
 
 - On mobile, the **Actions**, **Recommendations** and **ERP Compare** tables now **scroll horizontally** (instead
