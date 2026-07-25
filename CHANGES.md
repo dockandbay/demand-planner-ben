@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.134 - Drawers stack in open order (newest on top)
+
+- Opening a shipment from inside a PO drawer (or a PO from inside a shipment drawer) now always opens **on top** of
+  the one already open, on both desktop and mobile. Each newly opened drawer/sheet gets a z-index above the last;
+  the counter resets once everything's closed.
+
 ## v26.133 - Loading spinner on the version badge + Actions mobile filters + version-badge fix
 
 - **Loading is now a subtle spinner over the version badge** (desktop + mobile), driven by in-flight network

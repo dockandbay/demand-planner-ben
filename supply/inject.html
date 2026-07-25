@@ -4960,6 +4960,13 @@
             .catch(function(){ el.classList.remove('saved'); el.classList.add('err'); }); }; });
         if(typeof afterRender==='function')afterRender(box); })
       .catch(function(e){ document.getElementById('shipdet-'+i).innerHTML=head+'<span style="color:#dc2626">'+esc(e.message||e)+'</span>'; }); }
+  // Drawers/sheets stack in the order they're opened: each newly opened one gets a z-index above the last, so a
+  // shipment opened from inside a PO drawer (or vice-versa) always lands ON TOP. Base 6100 (matches the CSS floor);
+  // resets once everything is closed so it never grows unbounded.
+  var _drawerZTop=6100;
+  function nextDrawerZ(){ _drawerZTop+=10; return _drawerZTop; }
+  function maybeResetDrawerZ(){ if(document.getElementById('shipdrawer-bg')||document.getElementById('podrawer-bg'))return;
+    var ov=document.getElementById('mob-sheet-ov'); if(ov&&ov.dataset.podrawer&&ov.style.display!=='none')return; _drawerZTop=6100; }
   // ── Shipment DRAWER: right-side slide-in popout so a shipment can be opened/edited without leaving PURCHASE ORDERS.
   // Reuses shipExpand(ref,'DRAWER') into #shipdet-DRAWER; the drawer lives inside #supply-root so bindEdits (scoped to
   // '#supply-root .fci[data-ep]') wires every edit field, and the same shtab tabs / assign / delete flows work unchanged.
@@ -4967,7 +4974,7 @@
   function openShipDrawer(ref){ if(!ref)return;
     closeShipDrawer(true);   // drop any existing drawer (silent: keep the saved patch to restore later)
     var root=document.getElementById('supply-root')||document.body;
-    var bg=document.createElement('div'); bg.id='shipdrawer-bg';
+    var bg=document.createElement('div'); bg.id='shipdrawer-bg'; bg.style.zIndex=nextDrawerZ();   // stack above whatever's already open (e.g. a PO drawer)
     bg.innerHTML='<div id="shipdrawer"><div class="shipdrawer-head"><div class="shipdrawer-title">Shipment '+esc(ref)+'</div>'
       +'<div><button class="lnk-btn shipdrawer-full" title="open the full Shipments page for this shipment">Full page ↗</button>'
       +'<button class="shipdrawer-x" title="close">✕</button></div></div>'
@@ -4990,6 +4997,7 @@
     fetchShipmentsFull(function(list){ (list||[]).forEach(function(s){ shipBy[s.shipment_ref]=s; });
       shipExpand(ref,'DRAWER',function(bx){ var tb=bx.querySelector('.shtab[data-st="'+st+'"]'); if(tb)tb.click(); }); }); }
   function closeShipDrawer(silent){ var bg=document.getElementById('shipdrawer-bg'); if(bg&&bg.parentNode)bg.parentNode.removeChild(bg);
+    maybeResetDrawerZ();
     if(!silent && _shipPatchRow===refreshShipDrawer){ _shipPatchRow=_shipDrawerPrevPatch; _shipDrawerPrevPatch=null; } }
   function gotoShipmentPage(ref){ _pendingShip=ref; showPoSub('shipments'); }   // "Full page ↗" — jump to the full Shipments tab + expand
   // open a PO from elsewhere: right-side drawer popout (stays on the current page), reusing the full PO detail
@@ -5053,7 +5061,7 @@
     var holder=document.createElement('div'); holder.className='mob-sheet-body';
     holder.innerHTML='<div id="podet-DRAWER" class="count">Loading…</div>';
     ov.appendChild(holder);
-    ov.dataset.podrawer='1'; ov.style.zIndex='6200';   // mark as a PO-drawer sheet + sit above the shipment drawer if that's open
+    ov.dataset.podrawer='1'; ov.style.zIndex=nextDrawerZ();   // mark as a PO-drawer sheet + stack above whatever's already open
     ov.style.display='block'; ov.scrollTop=0; document.body.style.overflow='hidden';
   }
   function openPODrawer(po,tab){ if(!po)return; tab=tab||'dates';
@@ -5061,7 +5069,7 @@
     if(isPhone()){ buildPOMobSheet(po,tab); }
     else {
     var root=document.getElementById('supply-root')||document.body;
-    var bg=document.createElement('div'); bg.id='podrawer-bg';
+    var bg=document.createElement('div'); bg.id='podrawer-bg'; bg.style.zIndex=nextDrawerZ();   // stack above whatever's already open (e.g. a shipment drawer)
     bg.innerHTML='<div id="podrawer"><div class="shipdrawer-head"><div class="shipdrawer-title">'+esc(po)+'</div>'
       +'<div><button class="lnk-btn shipdrawer-full" title="open the full PO page for this PO">Full page ↗</button>'
       +'<button class="shipdrawer-x" title="close">✕</button></div></div>'
@@ -5103,6 +5111,7 @@
   function closePODrawer(silent){ var bg=document.getElementById('podrawer-bg'); if(bg&&bg.parentNode)bg.parentNode.removeChild(bg);
     var ov=document.getElementById('mob-sheet-ov');   // phone variant: the PO drawer rendered into the full-screen mobile sheet
     if(ov && ov.dataset.podrawer){ ov.style.display='none'; ov.innerHTML=''; ov.dataset.podrawer=''; ov.style.zIndex=''; document.body.style.overflow=''; }
+    maybeResetDrawerZ();
     if(!silent){ _poPatchRow=_poDrawerPrevPatch; _poRefresh=_poDrawerPrevRefresh; _poDrawerPrevPatch=null; _poDrawerPrevRefresh=null; } }
   // (Removed dead unassignedTable + bindAssign — superseded by the shipments-assign flow. v25.652)
 
