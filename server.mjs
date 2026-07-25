@@ -2102,7 +2102,7 @@ app.get('/api/supply/:section', async (req, res) => {
         // (fix/target/field) plus target_key — the key the fix endpoint addresses (po number, or
         // the deposit row id now that deposits are id-keyed). Lifecycle state (dismiss/snooze/done)
         // attached below against a stable key = type|target_key, mirroring DEMAND ▸ Actions.
-        const arows = await q(`
+        const arows = await q(req.query.scope === 'priority' ? `SELECT * FROM (${PO_ACTIONS_PRIORITY_SQL}) z` : `
           SELECT * FROM (
           SELECT 'high' severity,'Date conflict' type, po ref,
             'Landing '||landing_date_overide::text||' is in the past (status '||coalesce(status,'?')||')' detail,
@@ -2353,6 +2353,9 @@ app.get('/api/supply/:section', async (req, res) => {
                     AND coalesce(po.status,'') NOT ILIKE '%deliver%') z
             WHERE z.pal > 20 AND z.ctry <> 'DIRECT'
           ) _a ORDER BY CASE severity WHEN 'high' THEN 0 WHEN 'amber' THEN 1 ELSE 2 END, type LIMIT 400`);
+        // The recommendation / submission / ERP layers each run their own (heavier) queries — skip them for the
+        // fast priority preview (scope=priority); the full fetch that follows includes them.
+        if (req.query.scope !== 'priority') {
         try { (await expediteActions()).forEach(a => arows.push(a)); } catch (e) { /* recommendation layer is best-effort */ }
         try { (await submissionActions()).forEach(a => arows.push(a)); } catch (e) { /* portal-submission layer is best-effort */ }
         try { (await manufacturingActions()).forEach(a => arows.push(a)); } catch (e) { /* manufacturing-mismatch layer is best-effort */ }
@@ -2362,6 +2365,7 @@ app.get('/api/supply/:section', async (req, res) => {
             ref: ec + ' PO' + (ec > 1 ? 's' : ''),
             detail: 'There ' + (ec > 1 ? 'are ' : 'is ') + ec + ' PO' + (ec > 1 ? 's' : '') + ' open in the ERP but not in the planner — review the ERP Compare report',
             fix: 'gotoreport', target: '', field: 'erp-compare', target_key: 'erp-compare' }); } catch (e) { /* best-effort */ }
+        }
         const dtoday = (await pool.query(`SELECT to_char(current_date,'YYYY-MM-DD') d`)).rows[0].d;
         let astate = {};
         try { (await pool.query(`SELECT action_key, status, to_char(snooze_until,'YYYY-MM-DD') snooze_until, snoozed_by, to_char(snoozed_at,'YYYY-MM-DD HH24:MI') snoozed_at FROM planner.supply_action_state`))
@@ -7475,6 +7479,38 @@ const PO_COMPLETE_STRIP = [
   'end_override', 'ship_override', 'delivery_override', 'ship_carrier', 'ship_carrier_ref',
   'catch_up', 'final_payment_due', 'credit_days', 'credit_type',
 ];
+// Fast "priority preview" for SUPPLY ▸ Actions — the most common HIGH-severity rules, extracted VERBATIM from the
+// full actions UNION so their output is identical. The client renders this first (~1s) then the full 19-rule set
+// (~4s) replaces it. A subset is fine: the full fetch is authoritative and corrects anything missing.
+const PO_ACTIONS_PRIORITY_SQL = `
+  SELECT 'high' severity,'Date conflict' type, po ref,
+    'Landing '||landing_date_overide::text||' is in the past (status '||coalesce(status,'?')||')' detail,
+    'date' fix, 'po' target, 'landing_date_overide' field, po target_key
+    FROM planner.purchase_orders
+    WHERE landing_date_overide < current_date AND coalesce(status,'') NOT ILIKE '%complete%'
+  UNION ALL
+  SELECT 'high','PO missing supplier', po, 'No supplier set on this PO', 'supplier','po','supplier_name', po
+    FROM planner.purchase_orders WHERE supplier_name IS NULL
+  UNION ALL
+  SELECT 'high','Deposit over-assigned', d.reference,
+    'Assigned start deposits '||round(dr.used)||' exceed pool '||round(d.pool)
+    ||' (remaining '||round(d.pool-dr.used)||')', '','','', d.reference
+    FROM (SELECT reference, sum(coalesce(amount,0)) pool FROM planner.deposits
+          WHERE is_deposit AND reference IS NOT NULL AND coalesce(status,'')<>'closed' GROUP BY reference) d
+    JOIN (SELECT deposit_ref, sum(coalesce(pay_start_deposit_assigned,0)) used
+          FROM planner.purchase_orders WHERE deposit_ref IS NOT NULL GROUP BY deposit_ref
+    ) dr ON dr.deposit_ref=d.reference WHERE dr.used > d.pool + 0.01
+  UNION ALL
+  SELECT 'high','Payment invalid', po,
+    'A payment amount is set with no payment date — add the date in the PO''s PLAN', 'gotopo','po','', po
+    FROM planner.purchase_orders
+    WHERE (coalesce(status,'') NOT ILIKE '%complete%'
+           OR (prod_no ~ '^[0-9]+$' AND prod_no::int >= 55)) AND (
+      (coalesce(pay_start_deposit_assigned,0)>0 AND pay_start_deposit_date IS NULL) OR
+      (coalesce(pay_completion_assigned,0)>0 AND pay_completion_date IS NULL) OR
+      (coalesce(pay_balance_1_amount,0)>0 AND pay_balance_1_date IS NULL) OR
+      (coalesce(pay_balance_2_amount,0)>0 AND pay_balance_2_date IS NULL) OR
+      (coalesce(supplier_invoice_total,0)>0 AND balance_due_date_overide IS NULL) )`;
 const OP_EXC_SQL = `
   SELECT DISTINCT po, typ FROM (
     SELECT l.po, 'partials'::text typ

@@ -866,11 +866,21 @@
         detail:x.type+' · $'+units(x.amount)+' · '+(x.likely_date?('likely '+fd(x.likely_date)):('due '+(x.due?fd(x.due):'—')))+' · '+cfMonthLabel(x.month),
         fix:'gotoitem', gotarget:go, target:'', target_key:x.ref }); });
     return out; }
-  function renderActions(rows){ var c=document.getElementById('supply-content'); fetchLookups(function(){
+  function renderActions(rows,partial){ var c=document.getElementById('supply-content'); fetchLookups(function(){
+    if(partial){ actBuild(rows,c,true); return; }   // priority preview — skip the (slow) cashflow fetch; the full phase adds it
     fetch('/api/supply/cashflow').then(function(r){return r.json();}).then(function(cf){
       try{ var extra=cfUnpaidActions(cf); if(extra.length)rows=extra.concat(rows); }catch(e){}
       actBuild(rows,c);
     }).catch(function(){ actBuild(rows,c); }); }); }
+  // Lazy load: fetch the fast HIGH-severity subset first (~1s) and render it, then the full set (~4s) replaces it.
+  function renderActionsProgressive(c,tk){
+    fetch('/api/supply/actions?scope=priority').then(function(r){return r.json();}).then(function(pr){
+      if(tk!==_navToken||cache['actions'])return;   // navigated away, or the full set already arrived → drop the preview
+      if(Array.isArray(pr))renderActions(pr,true);
+    }).catch(function(){});
+    fetch('/api/supply/actions').then(function(r){return r.json();}).then(function(full){
+      cache['actions']=full; if(tk!==_navToken)return; renderActions(full);
+    }).catch(function(e){ if(tk!==_navToken)return; c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>'; }); }
   var ACT_GROUP={ // PRIORITY — the highest-attention exceptions, surfaced first
     'PO not in ERP':'PRIORITY','Shipment escalated':'PRIORITY','Manufacturing mismatch':'PRIORITY','Client deadline at risk':'PRIORITY',
     'Deposit not paid':'PAYMENTS','Deposit over-assigned':'PAYMENTS','Payment invalid':'PAYMENTS','Payment overdue':'PAYMENTS','Supplier invoice':'PAYMENTS',
@@ -886,9 +896,10 @@
     'Ship check-in':'shipments','Shipment missing dates':'shipments','Shipment ETA passed':'shipments','Shipment delivered — update PO':'shipments','Unassigned shipment':'shipments',
     'Order-plan change pending ERP push':'oplan','PO not in ERP':'oplan','Partial cartons need approval':'oplan' };
   function poTabForAction(t){ return ACT_POTAB[t]||null; }
-  function actBuild(rows,c){
+  function actBuild(rows,c,partial){
     actRows=rows; rows.forEach(function(r,i){ r._id=i; });
-    if(!rows.length){c.innerHTML=annot('actions')+'<div class="count">No actions 🎉</div>';return;}
+    var _partBanner=partial?'<div class="mut tiny" style="padding:4px 2px 6px;color:#94a3b8">⏳ showing high-priority actions — loading the rest…</div>':'';
+    if(!rows.length){c.innerHTML=annot('actions')+(partial?'<div class="count">⏳ loading actions…</div>':'<div class="count">No actions 🎉</div>');return;}
     var types=Array.from(new Set(rows.map(function(r){return r.type;})));
     var STAT=[['open','Open'],['snoozed','Snoozed'],['dismissed','Dismissed'],['done','Done'],['all','All']];
     var st={sev:'All',status:'open',types:[],showSnoozed:false};   // types: [] = all; showSnoozed = surface snoozed items in the Open view
@@ -899,7 +910,7 @@
       if(pop&&!pop.contains(e.target)&&e.target!==btn){ pop.style.display='none'; document.removeEventListener('mousedown',actTypeOutside,true); } }
     function statCount(s){ return s==='all'?rows.length:rows.filter(function(r){return stOf(r)===s;}).length; }
     function pool(){ return rows.filter(inStat); }
-    c.innerHTML=annot('actions')+lookupDatalists()
+    c.innerHTML=annot('actions')+_partBanner+lookupDatalists()
       +'<div class="bar" id="act-statbar"></div><div class="bar" id="act-sevbar"></div><div id="act-grid"></div>';
     function statBar(){ document.getElementById('act-statbar').innerHTML='<span class="pill-lbl">Status</span>'
       +STAT.map(function(s){return '<span class="pill stpill'+(st.status===s[0]?' active':'')+'" data-st="'+s[0]+'">'+s[1]+' ('+statCount(s[0])+')</span>';}).join('')
@@ -7424,6 +7435,7 @@
       if(key==='config')return renderConfig(d);
       renderGeneric(key,d); };
     if(cache[key])return done(cache[key]);
+    if(key==='actions')return renderActionsProgressive(c,_tk);   // Actions: high-priority preview first, then the full set
     fetch('/api/supply/'+key).then(function(r){return r.json();}).then(done).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); }
 
   try{window.__supplyNav={sections:SECTIONS,reports:REPORT_SECTIONS,select:function(k){selectSection(k);},current:function(){return current;}};}catch(e){}   // bridge for the app-level mobile drawer

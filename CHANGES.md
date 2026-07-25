@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.126 - SUPPLY ▸ Actions: high-priority actions load first
+
+Actions was one heavy ~4–7s load (19 exception rules + the recommendation/ERP/manufacturing layers + a cashflow
+fetch). Now it **loads the High-severity actions first (~1s)** — Date conflict, PO missing supplier, Deposit
+over-assigned, Payment invalid — with a "⏳ loading the rest…" note, then the **full set replaces it** when ready.
+New `?scope=priority` on `/api/supply/actions` runs just those High rules (extracted verbatim, so identical) and
+skips the slower recommendation layers + cashflow. Fully fallback-safe (the full fetch is authoritative; if the
+preview fails, behaviour is exactly as before).
+
+Note: the deeper cause is that each of the 19 rules is a separate UNION branch, so `purchase_orders`/`deposits`
+get scanned ~10× — a future optimisation is to derive all a table's exceptions in a single scan.
+
 ## v26.125 - Inline PO expand opens instantly too
 
 Generalised the drawer's fast-paint to the **inline PLAN expand** in the PO grid (and consolidated the two into
