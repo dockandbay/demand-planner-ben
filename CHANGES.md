@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.112 - PO Payments plan: second-line notes to save width
+
+On the PO ▸ PAYMENTS payment-plan table:
+- **Due column:** when a payment is overdue, the Ⓐ / **SNOOZE ▾** marker now sits on a **second line**
+  under the red due date (same cell) instead of pushing the row wider.
+- **Payment column (col 1):** the descriptive note now sits on a **second line** under the label + %
+  input — Start deposit ("capped at ref avail"), Completion ("+ catch-up +X"), Balance 1
+  ("X% · remainder"), Balance 2 ("remainder").
+
+No data/schema/endpoint changes.
+
 ## v26.111 - Portal notifications, deposits UX, timeline-delete guard
 
 Batch of admin + portal refinements:

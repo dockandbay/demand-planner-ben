@@ -2649,7 +2649,8 @@
     var startUnpaid=(totalDue>0.02 && !startPaid), compUnpaid=(totalDue>0.02 && !compPaid), bal1Unpaid=(totalDue>0.02 && !bal1Paid);
     // Inline action marker on overdue payment rows — keyed to the badge's payment condition so snooze stays consistent.
     var _pa=poActionsAll(r), payCode=_pa.indexOf('payment_overdue')>=0?'payment_overdue':(_pa.indexOf('unpaid_payment')>=0?'unpaid_payment':null);
-    function mkPay(cell,over){ return (payCode&&over)?cell.replace(/<\/td>\s*$/, actMark(r.po,payCode)+'</td>') : cell; }
+    // overdue payment → the Ⓐ / SNOOZE marker drops to a SECOND LINE under the red due date (saves column width)
+    function mkPay(cell,over){ return (payCode&&over)?cell.replace(/<\/td>\s*$/, '<div style="margin-top:3px">'+actMark(r.po,payCode)+'</div></td>') : cell; }
     var _startOver=startOwed&&startUnpaid&&r.start_due&&r.start_due<today, _compOver=compOwed&&compUnpaid&&r.completion_due&&r.completion_due<today, _balOver=bal1Unpaid&&r.balance_due&&r.balance_due<today;
     var xdList=(r.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
     // ---- CLIENT chunk (label/field rows, not an overflow table; crossdock picker grows freely) ----
@@ -2789,7 +2790,7 @@
       +'<div style="margin:10px 0 4px"><button class="save-btn" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd" title="download the Commercial Invoice + Packing List for this PO" onclick="window.open(\'/api/invoice/po/\'+encodeURIComponent(\''+esc(r.po)+'\'))">📄 Commercial Invoice</button></div>'
       +'<div class="sect-h" style="margin-top:12px">Payment plan — terms from supplier; amount / date / % override inline (saves on blur)</div>'
       +'<div class="tw pay-tbl" style="max-width:1320px"><table><thead><tr><th class="l">Payment</th><th>Calc / est</th><th class="l">Amount</th><th class="l">Date paid</th><th class="l">Deposit ref</th><th class="l">Due</th><th class="l">Likely pay date</th><th class="l">Status</th></tr></thead><tbody>';
-    h+=tr('<td class="l"><b>Start deposit</b> <input class="fci pctin payin" data-ep="'+ep+'" data-field="start_deposit_pct_override" value="'+esc(r.start_pct)+'"><span class="mut tiny">% · capped at ref avail</span></td>'
+    h+=tr('<td class="l"><b>Start deposit</b> <input class="fci pctin payin" data-ep="'+ep+'" data-field="start_deposit_pct_override" value="'+esc(r.start_pct)+'"><span class="mut tiny">%</span><div class="mut tiny" style="margin-top:2px">capped at ref avail</div></td>'
       +(function(){ var term=Number(r.start_calc)||0, drawn=Number(r.start_dep)||0, rolled=Math.round((term-drawn)*100)/100;
           var capped=(r.deposit_ref&&rolled>0.009);   // drew less than term (NO DEPOSIT, or a ref that ran short) → rest rolls on
           var dest=(Number(r.completion_pct)>0?'completion':'balance');   // rolls into completion if the supplier has one, else the balance
@@ -2805,7 +2806,7 @@
       +'<td class="l">'+payIn(ep,'pay_start_deposit_date',r.start_date,true,!(n(r.start_assigned)>0))+'</td>'
       +'<td class="l" style="white-space:normal">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0 && !poFullyPaid(r))+(r.deposit_avail!=null?'<div class="mut tiny" style="margin-top:2px">'+money(r.deposit_avail)+' avail'+(r.deposit_fx!=null&&r.deposit_fx!==''?' · FX '+Number(r.deposit_fx).toFixed(4):'')+'</div>':'')+'</td>'
       +mkPay(dueCell(r.start_due,startUnpaid,'',startOwed),_startOver)+likelyCell('dep:'+r.po,startUnpaid&&startOwed,r.likely_start)+'<td class="l">'+(startOwed?payBadge(sStat[0],sStat[1]):payBadge('—','bg-neutral'))+'</td>');
-    h+=tr('<td class="l"><b>Completion</b> <input class="fci pctin payin" data-ep="'+ep+'" data-field="completion_pct_override" value="'+esc(r.completion_pct)+'"><span class="mut tiny">% + catch-up'+(Number(r.catch_up)?' '+(Number(r.catch_up)>0?'+':'')+money(r.catch_up):'')+'</span></td>'
+    h+=tr('<td class="l"><b>Completion</b> <input class="fci pctin payin" data-ep="'+ep+'" data-field="completion_pct_override" value="'+esc(r.completion_pct)+'"><span class="mut tiny">%</span><div class="mut tiny" style="margin-top:2px">+ catch-up'+(Number(r.catch_up)?' '+(Number(r.catch_up)>0?'+':'')+money(r.catch_up):'')+'</div></td>'
       +'<td>'+money(r.completion_calc)+((compOwed && compUnpaid)?payFillBtn('pay_completion_assigned','pay_completion_date',r.completion_calc):'')+'</td>'
       +'<td class="l">'+payIn(ep,'pay_completion_assigned',r.completion_assigned)+'</td>'
       +'<td class="l">'+payIn(ep,'pay_completion_date',r.completion_date,true,!(n(r.completion_assigned)>0))+'</td>'
@@ -2816,14 +2817,14 @@
     var balnote = isSmallPo ? '<span class="mut tiny" title="orders under $500 are due in full on the invoice-processed date, or the ship date while still an estimate">'+(r.is_final?'invoice date':'ship date')+' · under $500</span>'
                 : (r.credit_days!=null?'<span class="mut tiny">'+(r.credit_type==='on_shipment'?'ship':'clearance')+' +'+r.credit_days+'cr</span>':'');
     var balPctShown=(n(r.value_used)>0?Math.round((n(r.value_used)-n(r.start_dep)-n(r.completion_calc))/n(r.value_used)*100):n(r.balance_pct));   // effective % of order value (matches the owing amount, incl. any start rolled in)
-    h+=tr('<td class="l"><b>Balance'+(partial?' 1':'')+'</b> <span class="mut tiny">'+esc(balPctShown)+'% · remainder</span></td>'
+    h+=tr('<td class="l"><b>Balance'+(partial?' 1':'')+'</b><div class="mut tiny" style="margin-top:2px">'+esc(balPctShown)+'% · remainder</div></td>'
       +'<td>'+money(r.balance_owing)+' <span class="mut tiny">owing'+(n(r.credit_amount)>0?' · incl. '+money(r.credit_amount)+' credit':'')+'</span>'+(bal1Unpaid?payFillBtn('pay_balance_1_amount','pay_balance_1_date',r.balance_owing):'')+'</td>'
       +'<td class="l">'+payIn(ep,'pay_balance_1_amount',r.balance_1_amount)+'</td>'
       +'<td class="l">'+payIn(ep,'pay_balance_1_date',r.balance_1_date,true,!(n(r.balance_1_amount)>0))+'</td>'
       +'<td class="l"><span class="mut">—</span></td>'
       +mkPay(dueCell(r.balance_due,bal1Unpaid,' '+balnote),_balOver)+likelyCell('bal:'+r.po,bal1Unpaid,r.likely_balance_1)+'<td class="l">'+payBadge(b1Stat[0],b1Stat[1])+'</td>');
     if(partial){ var rem2=Math.round((owe-bal1)*100)/100;
-      h+=tr('<td class="l"><b>Balance 2</b> <span class="mut tiny">remainder</span></td>'
+      h+=tr('<td class="l"><b>Balance 2</b><div class="mut tiny" style="margin-top:2px">remainder</div></td>'
         +'<td>'+money(rem2)+' <span class="mut tiny">owing</span>'+((totalDue>0.02 && !bal2Paid)?payFillBtn('pay_balance_2_amount','pay_balance_2_date',rem2):'')+'</td>'
         +'<td class="l">'+payIn(ep,'pay_balance_2_amount',r.balance_2_amount)+'</td>'
         +'<td class="l">'+payIn(ep,'pay_balance_2_date',r.balance_2_date,true,!(n(r.balance_2_amount)>0))+'</td>'
