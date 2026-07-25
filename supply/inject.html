@@ -200,7 +200,7 @@
 /* Shipment / PO drawer — right-side slide-in popout (open a shipment or PO without leaving the current page) */
 #supply-root #shipdrawer-bg,#supply-root #podrawer-bg{position:fixed;inset:0;z-index:6100;background:rgba(15,23,42,0);transition:background .18s ease}   /* above the mobile PO sheet (#mob-sheet-ov, z6000) so the drawer opens on top of it */
 #supply-root #shipdrawer-bg.open,#supply-root #podrawer-bg.open{background:rgba(15,23,42,.32)}
-#supply-root #shipdrawer,#supply-root #podrawer{position:absolute;top:0;right:0;height:100%;width:min(920px,94vw);background:#fff;box-shadow:-8px 0 28px rgba(15,23,42,.18);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1)}
+#supply-root #shipdrawer,#supply-root #podrawer{position:absolute;top:0;right:0;height:100%;width:clamp(min(920px,94vw), 65vw, 94vw);background:#fff;box-shadow:-8px 0 28px rgba(15,23,42,.18);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1)}
 #supply-root #shipdrawer-bg.open #shipdrawer,#supply-root #podrawer-bg.open #podrawer{transform:translateX(0)}
 #supply-root #podrawer-bg{z-index:100002}   /* above the consolidation modal (z100001) so a PO opened from it is visible */
 #supply-root .shipdrawer-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 18px;border-bottom:1px solid #e6ebf2;background:#f8fafc;flex:0 0 auto}
@@ -2794,13 +2794,16 @@
           var capped=(r.deposit_ref&&rolled>0.009);   // drew less than term (NO DEPOSIT, or a ref that ran short) → rest rolls on
           var dest=(Number(r.completion_pct)>0?'completion':'balance');   // rolls into completion if the supplier has one, else the balance
           var noDep=(String(r.deposit_ref||'').toUpperCase()==='NO DEPOSIT');
-          return '<td>'+money(capped?drawn:r.start_calc)+(capped?' <span class="mut tiny" style="color:#b91c1c" title="'+(noDep?'no deposit taken':'capped at the deposit ref&rsquo;s remaining availability')+' — the rest rolls into the '+dest+'">'+(noDep?'no deposit · ':'of '+money(term)+' term · ')+money(rolled)+' → '+dest+'</span>':'')
-            +((startOwed && startUnpaid && !r.deposit_ref)?payFillBtn('pay_start_deposit_assigned','pay_start_deposit_date',r.start_calc)   // direct cash
+          var _note=(capped?'<span class="mut tiny" style="color:#b91c1c" title="'+(noDep?'no deposit taken':'capped at the deposit ref&rsquo;s remaining availability')+' — the rest rolls into the '+dest+'">'+(noDep?'no deposit · ':'of '+money(term)+' term · ')+money(rolled)+' → '+dest+'</span>':'');
+          var _btn=((startOwed && startUnpaid && !r.deposit_ref)?payFillBtn('pay_start_deposit_assigned','pay_start_deposit_date',r.start_calc)   // direct cash
               :(startOwed && r.deposit_ref && !(n(r.start_assigned)>0))?payFillBtn('pay_start_deposit_assigned','pay_start_deposit_date',(capped?drawn:r.start_calc),'assign')   // draw from the deposit pool
-              :'')+'</td>'; })()
+              :'');
+          // amount on line 1; the "of X term · Y → dest" note + assign button on a 2nd line so they don't push the
+          // Likely-pay-date / Status columns off-screen
+          return '<td style="white-space:normal">'+money(capped?drawn:r.start_calc)+((_note||_btn)?'<div class="tiny" style="margin-top:2px">'+_note+(_note&&_btn?' ':'')+_btn+'</div>':'')+'</td>'; })()
       +'<td class="l">'+payIn(ep,'pay_start_deposit_assigned',r.start_assigned,false,false,(r.deposit_ref&&r.deposit_avail!=null)?('data-avail="'+esc(Math.round((Number(r.deposit_avail||0)+Number(r.start_assigned||0))*100)/100)+'"'):'')+'</td>'
       +'<td class="l">'+payIn(ep,'pay_start_deposit_date',r.start_date,true,!(n(r.start_assigned)>0))+'</td>'
-      +'<td class="l">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0 && !poFullyPaid(r))+(r.deposit_avail!=null?' <span class="mut tiny">'+money(r.deposit_avail)+' avail'+(r.deposit_fx!=null&&r.deposit_fx!==''?' · FX '+Number(r.deposit_fx).toFixed(4):'')+'</span>':'')+'</td>'
+      +'<td class="l" style="white-space:normal">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0 && !poFullyPaid(r))+(r.deposit_avail!=null?'<div class="mut tiny" style="margin-top:2px">'+money(r.deposit_avail)+' avail'+(r.deposit_fx!=null&&r.deposit_fx!==''?' · FX '+Number(r.deposit_fx).toFixed(4):'')+'</div>':'')+'</td>'
       +mkPay(dueCell(r.start_due,startUnpaid,'',startOwed),_startOver)+likelyCell('dep:'+r.po,startUnpaid&&startOwed,r.likely_start)+'<td class="l">'+(startOwed?payBadge(sStat[0],sStat[1]):payBadge('—','bg-neutral'))+'</td>');
     h+=tr('<td class="l"><b>Completion</b> <input class="fci pctin payin" data-ep="'+ep+'" data-field="completion_pct_override" value="'+esc(r.completion_pct)+'"><span class="mut tiny">% + catch-up'+(Number(r.catch_up)?' '+(Number(r.catch_up)>0?'+':'')+money(r.catch_up):'')+'</span></td>'
       +'<td>'+money(r.completion_calc)+((compOwed && compUnpaid)?payFillBtn('pay_completion_assigned','pay_completion_date',r.completion_calc):'')+'</td>'
@@ -4828,10 +4831,13 @@
     _poDrawerPrevPatch=_poPatchRow; _poDrawerPrevRefresh=_poRefresh;
     _poPatchRow=function(){ poRefetchPanel(po,'DRAWER'); };
     _poRefresh=function(){ poRefetchPanel(po,'DRAWER'); };
-    // ensure poBy[po] exists (poDetailHTML reads it) — refetch the PO list if this page never loaded it
-    if(poBy[po]) loadPoDetail(po,'DRAWER',tab);
-    else fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(rows){ (rows||[]).forEach(function(x){poBy[x.po]=x;}); cache['purchase-orders']=rows; loadPoDetail(po,'DRAWER',tab); })
-      .catch(function(e){ var b=document.getElementById('podet-DRAWER'); if(b)b.innerHTML='<span style="color:#dc2626">Could not load PO: '+esc(e.message||e)+'</span>'; });
+    // Always refetch THIS PO's row so the drawer shows current data (poBy may be stale after an edit elsewhere —
+    // e.g. a "pay" on the Payments Due report). Cheap single-row fetch; falls back to the full list if needed.
+    fetch('/api/supply/po-row/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(arr){
+        var rr=Array.isArray(arr)?arr[0]:null; if(rr){ poBy[po]=rr; loadPoDetail(po,'DRAWER',tab); return; }
+        if(poBy[po]){ loadPoDetail(po,'DRAWER',tab); return; }
+        return fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(rows){ (rows||[]).forEach(function(x){poBy[x.po]=x;}); cache['purchase-orders']=rows; loadPoDetail(po,'DRAWER',tab); }); })
+      .catch(function(e){ if(poBy[po]){ loadPoDetail(po,'DRAWER',tab); return; } var b=document.getElementById('podet-DRAWER'); if(b)b.innerHTML='<span style="color:#dc2626">Could not load PO: '+esc(e.message||e)+'</span>'; });
   }
   function closePODrawer(silent){ var bg=document.getElementById('podrawer-bg'); if(bg&&bg.parentNode)bg.parentNode.removeChild(bg);
     if(!silent){ _poPatchRow=_poDrawerPrevPatch; _poRefresh=_poDrawerPrevRefresh; _poDrawerPrevPatch=null; _poDrawerPrevRefresh=null; } }
@@ -6093,7 +6099,7 @@
       document.getElementById('pdue-bar').innerHTML='<span class="pill-lbl">Status</span>'+stP
         +' <span class="pill-lbl" style="margin-left:8px">Supplier</span><select class="flt" id="pdue-sup" style="width:auto">'+supOpts+'</select>'
         +'<span class="count" style="margin-left:auto">'+f.length+' payments · '+order.length+' suppliers</span>';
-      var h='<div class="tw"><table><thead><tr><th class="l">Type</th><th class="l">Reference</th><th>Amount due</th><th class="l">Due date</th><th>Assigned £</th><th class="l">Payment date</th></tr></thead><tbody>';
+      var h='<div class="tw"><table><thead><tr><th class="l">Type</th><th class="l">Reference</th><th>Amount due</th><th class="l">Due date</th><th>Assigned</th><th class="l">Payment date</th></tr></thead><tbody>';
       if(!f.length) h+='<tr><td colspan="6" class="l mut">No payments match this filter.</td></tr>';
       order.forEach(function(s){ var gr=groups[s].slice().sort(function(a,c){return (a.due||'9999').localeCompare(c.due||'9999')||a.type.localeCompare(c.type);});
         var sub=gr.reduce(function(t,r){return t+(r.due_amt||0);},0); grand+=sub;
@@ -6125,10 +6131,16 @@
       // green "pay" → fill the row's amount (= due) + payment date (today, local tz) and save via the same path as
       // typing, so the row STAYS on screen (no re-filter) until the next manual refresh — matching manual entry.
       document.querySelectorAll('#pdue-wrap .pdue-pay').forEach(function(b){ b.onclick=function(){ var tr=b.closest('tr'); if(!tr)return;
-        var amtInp=tr.querySelector('.fci[data-field="'+b.dataset.af+'"]'), dtInp=tr.querySelector('.fci[data-field="'+b.dataset.df+'"]');
-        if(amtInp){ amtInp.value=b.dataset.amt; amtInp.dispatchEvent(new Event('change')); }
-        if(dtInp){ dtInp.value=localToday(); dtInp.dispatchEvent(new Event('change')); }
-        b.disabled=true; b.textContent='✓'; }; }); }
+        // Save amount + date in ONE request (was two racing change events → the PO could end up with only one field).
+        var iso=localToday(); var body={}; body[b.dataset.af]=b.dataset.amt; body[b.dataset.df]=iso; b.disabled=true;
+        fetch(b.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
+          .then(function(j){ if(j&&j.error)throw new Error(j.error);
+            var amtInp=tr.querySelector('.fci[data-field="'+b.dataset.af+'"]'), dtInp=tr.querySelector('.fci[data-field="'+b.dataset.df+'"]');
+            if(amtInp)amtInp.value=b.dataset.amt;
+            if(dtInp)dtInp.value=fd(iso);   // show the payment date as dd-mmm-yy (server holds the ISO)
+            if(j&&j.row&&j.row.po){ poBy[j.row.po]=j.row; }   // keep the PO row fresh so opening the PO shows the payment
+            invalidateDerived(); b.textContent='✓';
+          }).catch(function(e){ b.disabled=false; alert('Save failed: '+(e.message||e)); }); }; }); }
     draw(); }
   function renderPaymentsReport(b){ b.innerHTML='<div class="count">Loading…</div>';
     fetch('/api/supply/payments-report').then(function(r){return r.json();}).then(function(rows){

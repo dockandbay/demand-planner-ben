@@ -3,6 +3,17 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.108 - Payments Due fixes + PO Payments table layout + wider drawers
+
+- **Payments Due ▸ PAY** now saves the amount + date in **one request** (was two racing saves → the PO could
+  end up with only one field). Opening the PO afterwards shows the payment (the PO drawer refetches the fresh
+  row instead of using a stale in-memory one). The date is inserted as **dd-mmm-yy**.
+- **Payments Due**: removed the stray **£** from the "Assigned" column header.
+- **PO ▸ Payments table**: the Start-deposit "Calc / est" note ("of X term · Y → completion" + assign) and the
+  Deposit-ref "avail · FX" now render on a **second line** in their cell, so the **Likely pay date** and
+  **Status** columns aren't pushed off-screen.
+- **PO & Shipment pop-out drawers**: widened to ~**65vw** on desktop (still full-width on mobile) so data fits.
+
 ## v26.107 - Prime Day scenario: compact Category dropdown, kept beside its label
 
 Shortened the Category `<select>` on SCENARIO ▸ Prime Day and locked it inline next to the "Category"
