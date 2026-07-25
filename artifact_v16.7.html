@@ -59,6 +59,9 @@ body{font-family:system-ui,-apple-system,sans-serif;font-size:12px;color:#1a1a1a
 #hz-topbar{display:none;position:fixed;top:0;left:0;right:0;z-index:5000;align-items:center;gap:8px;background:#0f172a;padding:7px 9px;box-shadow:0 1px 5px rgba(0,0,0,.3)}
 #hz-title{color:#fff;font-weight:700;font-size:14px;letter-spacing:.04em;white-space:nowrap;flex:0 0 auto}
 #hz-ver{margin-left:auto;flex:0 0 auto;font-size:8px;font-weight:800;line-height:1.05;text-align:center;white-space:normal;color:#0f172a;background:#fbbf24;border-radius:6px;padding:2px 5px;letter-spacing:.02em;max-width:56px}
+/* Desktop version indicator (#ver) in the same amber box as mobile's #hz-ver. !important because #ver's inline
+   style is reset (to grey) each time it's relocated onto a nav row. */
+#ver{font-weight:800!important;color:#0f172a!important;background:#fbbf24!important;border-radius:6px!important;padding:2px 7px!important;line-height:1.2!important}
 #hz-search{display:none;flex:1;min-width:0;font-size:15px;padding:8px 11px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#fff;font-family:inherit}
 #hz-search::placeholder{color:#94a3b8}
 #hz-burger{flex:0 0 auto;width:38px;height:34px;align-items:center;justify-content:center;background:#1e293b;color:#fff;border:none;border-radius:7px;font-size:17px;cursor:pointer;display:flex}

@@ -3,6 +3,22 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.130 - Actions rule fixes + table columns + ERP badge + shipment PO drawer + version box
+
+- **Date conflict** now fires **only when the PO hasn't reached shipping yet** (Future/Production/Ready to ship).
+  A past landing while SHIPPING/DELIVERED/COMPLETE is expected (goods arriving/arrived; marking delivered is
+  optional) — no longer flagged.
+- **"Shipment missing dates" rule removed** — a shipment lacking its own departure/ETA is normal (those dates are
+  inherited/calculated from the PO). Only *past/exceeded* dates matter, already caught by "Ship check-in" and
+  "Shipment ETA passed".
+- **All dates on the Actions tab now display dd-mmm-yy** (was yyyy-mm-dd).
+- **Actions table columns** re-tuned: PO ref shows ~20 chars then wraps (no more truncation); Fix column narrower;
+  status/date inputs reduced; **Manage keeps Dismiss + Snooze on one row**.
+- **ERP COMPARE sub-tab** shows the **open (not-ignored) count** in the menu up front, not only when opened.
+- **SHIPMENTS ▸ POs on board**: PO refs now **open the PO pop-out drawer** (Payments tab), including when the
+  shipment itself is open in its drawer — no navigating away.
+- **Desktop version** now shows in the **same amber box** as mobile ("HORIZON v26.130").
+
 ## v26.129 - Actions sub-tabs (Actions / Recommendations / ERP Compare) + column polish
 
 - **SUPPLY ▸ Actions is now split into three sub-tabs**: **ACTIONS**, **💡 RECOMMENDATIONS** (advisory

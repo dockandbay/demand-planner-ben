@@ -366,13 +366,14 @@
 #supply-root .act-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:8px;align-items:start}#supply-root .act-cards .card{margin-bottom:0}
 /* Actions triage TABLE — severity-sorted, one line per action, tinted by urgency */
 #supply-root .act-tbl{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
-/* fixed column widths: keep the severity dot / ref narrow, give Fix + Manage room for their inputs */
+/* fixed column widths: tiny severity dot; ref wide enough for ~20 chars (then wraps); narrower Fix; Manage
+   wide enough to keep Dismiss + Snooze on one row */
 #supply-root .act-tbl th:nth-child(1),#supply-root .act-tbl td:nth-child(1){width:16px}
-#supply-root .act-tbl th:nth-child(2),#supply-root .act-tbl td:nth-child(2){width:17%}
-#supply-root .act-tbl th:nth-child(3),#supply-root .act-tbl td:nth-child(3){width:76px}
-#supply-root .act-tbl th:nth-child(4),#supply-root .act-tbl td:nth-child(4){width:33%}
-#supply-root .act-tbl th:nth-child(5),#supply-root .act-tbl td:nth-child(5){width:32%}
-#supply-root .act-tbl th:nth-child(6),#supply-root .act-tbl td:nth-child(6){width:18%}
+#supply-root .act-tbl th:nth-child(2),#supply-root .act-tbl td:nth-child(2){width:15%}
+#supply-root .act-tbl th:nth-child(3),#supply-root .act-tbl td:nth-child(3){width:128px}
+#supply-root .act-tbl th:nth-child(4),#supply-root .act-tbl td:nth-child(4){width:39%}
+#supply-root .act-tbl th:nth-child(5),#supply-root .act-tbl td:nth-child(5){width:20%}
+#supply-root .act-tbl th:nth-child(6),#supply-root .act-tbl td:nth-child(6){width:26%}
 #supply-root .act-colwrap{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start}
 #supply-root .act-col-main{flex:2 1 520px;min-width:0}#supply-root .act-col-rec{flex:1 1 330px;min-width:0}
 #supply-root .act-colhdr{font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#334155;margin:10px 0 4px}
@@ -383,15 +384,18 @@
 #supply-root .act-tbl tr.sev-high td{background:#fef4f4}#supply-root .act-tbl tr.sev-high:hover td{background:#fdeaea}
 #supply-root .act-tbl tr.sev-amber td{background:#fffbf1}#supply-root .act-tbl tr.sev-amber:hover td{background:#fdf3e0}
 #supply-root .act-tbl td.sev-cell{border-left:3px solid transparent;text-align:left;font-size:12px;line-height:1;padding-left:5px;padding-right:0}
-#supply-root .act-tbl td.act-ref{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#supply-root .act-tbl td{word-break:break-word}
-#supply-root .act-tbl td.act-ref .lnk-btn{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:bottom}
-/* Fix / Manage cells: let controls wrap neatly and give inputs a sensible width instead of random sizes */
+#supply-root .act-tbl td{word-break:break-word}
+#supply-root .act-tbl td.act-ref{white-space:normal;word-break:break-word}
+#supply-root .act-tbl td.act-ref .lnk-btn{max-width:100%;white-space:normal;text-align:left;word-break:break-word;display:inline-block}
+/* Fix cell: inputs fill the (now narrower) column and wrap; buttons drop below neatly */
 #supply-root .act-tbl td.act-fixcell{white-space:normal;line-height:1.9}
 #supply-root .act-tbl td.act-fixcell .fci{max-width:100%;box-sizing:border-box;vertical-align:middle}
-#supply-root .act-tbl td.act-fixcell .fci.dt,#supply-root .act-tbl td.act-fixcell .fci.txt{width:100%;margin:1px 0}
+#supply-root .act-tbl td.act-fixcell .fci.dt,#supply-root .act-tbl td.act-fixcell .fci.txt,#supply-root .act-tbl td.act-fixcell select.fci{width:100%;margin:1px 0}
 #supply-root .act-tbl td.act-fixcell .save-btn,#supply-root .act-tbl td.act-fixcell .act-apply{margin:1px 2px 1px 0}
-#supply-root .act-tbl td.act-lifecell{white-space:normal;line-height:1.9}
-#supply-root .act-tbl td.act-lifecell .save-btn{margin:1px 0 1px 3px}
+/* Manage cell: compact buttons; the open-state pair is wrapped in .act-lifebtns (nowrap) to stay on ONE row */
+#supply-root .act-tbl td.act-lifecell{white-space:normal;line-height:1.6}
+#supply-root .act-tbl td.act-lifecell .save-btn{margin:1px 0 1px 4px;font-size:10px;padding:2px 7px}
+#supply-root .act-tbl td.act-lifecell .act-lifebtns{white-space:nowrap;display:inline-block}
 #supply-root .act-tbl tr.sev-high td.sev-cell{border-left-color:#dc2626}#supply-root .act-tbl tr.sev-amber td.sev-cell{border-left-color:#f59e0b}#supply-root .act-tbl tr.sev-low td.sev-cell{border-left-color:#cbd5e1}
 #supply-root .act-tbl .act-type{font-weight:700;font-size:12px;line-height:1.15}
 #supply-root .act-tbl .act-chip{font-size:8.5px;text-transform:uppercase;letter-spacing:.03em;color:#94a3b8;font-weight:600}
@@ -935,9 +939,13 @@
   function actBuild(rows,c,partial){
     actRows=rows; rows.forEach(function(r,i){ r._id=i; });
     if(!partial)setActionsBadgeFrom(rows);   // refresh the ACTIONS tab's high-priority counter from the full set
+    // The server folds the ERP-compare count into an 'ERP POs not in planner' row (ref = "N PO(s)"). Use it to
+    // populate the ERP COMPARE sub-tab badge up front, then drop it from the lists (the ERP COMPARE tab is its surface).
+    var _erpRow=rows.filter(function(r){return r.type==='ERP POs not in planner';})[0];
+    if(!partial)_actErpCount=_erpRow?(parseInt(String(_erpRow.ref),10)||0):0;
     // RECOMMENDATIONS now live in their own sub-tab; ACTIONS shows only the real (non-advisory) exceptions.
-    var _acts=rows.filter(function(r){return actGroup(r.type)!=='RECOMMENDATIONS';});
-    var _recs=rows.filter(function(r){return actGroup(r.type)==='RECOMMENDATIONS';});
+    var _acts=rows.filter(function(r){return r.type!=='ERP POs not in planner' && actGroup(r.type)!=='RECOMMENDATIONS';});
+    var _recs=rows.filter(function(r){return r.type!=='ERP POs not in planner' && actGroup(r.type)==='RECOMMENDATIONS';});
     var _recOpen=_recs.filter(function(r){return !r.status||r.status==='open';}).length;
     var _partBanner=partial?'<div class="mut tiny" style="padding:4px 2px 6px;color:#94a3b8">⏳ showing high-priority actions — loading the rest…</div>':'';
     var types=Array.from(new Set(_acts.map(function(r){return r.type;})));
@@ -1026,6 +1034,8 @@
       var c2='<div style="flex:1 1 460px;min-width:0"><div class="act-colhdr">'+l2+' <span class="mut tiny">('+col2.length+')</span></div>'+tbl(col2)+'</div>';
       g.innerHTML='<div class="act-colwrap">'+c1+c2+'</div>'; bindActFix(); bindLifecycle(statBar,sevBar,view); }
     renderActSub(); }
+  // Reformat any ISO date (YYYY-MM-DD) embedded in an action's text to dd-mmm-yy (Ben's preferred display).
+  function actDates(s){ return String(s==null?'':s).replace(/\d{4}-\d{2}-\d{2}/g, function(m){ return fd(m); }); }
   function actRow(r){
     if(r._done) return '<tr class="actrow sev-low" id="actcard-'+r._id+'" style="opacity:.5"><td class="sev-cell">✓</td><td><span class="act-type">'+esc(r.type)+'</span></td><td class="act-ref">'+esc(r.ref||'')+'</td><td class="act-detail">applied'+(r._val?(': '+esc(r._val)):'')+' — refresh to clear</td><td></td><td><span class="tool-badge bg-green">✓ done</span></td></tr>';
     var fix='', fix2='';
@@ -1059,10 +1069,10 @@
     var life='';
     if(r.key){ var resolved=(r.status&&r.status!=='open');
       life=(resolved
-          ? '<span class="tool-badge bg-neutral">'+esc(r.status)+(r.snooze_until?' → '+esc(r.snooze_until):'')+'</span>'
-            +((r.snoozed_by||r.snoozed_at)?'<span class="mut tiny">'+esc(r.status==='snoozed'?'snoozed':r.status)+' by '+esc(shortUser(r.snoozed_by)||'—')+(r.snoozed_at?' on '+esc(r.snoozed_at):'')+'</span>':'')
+          ? '<span class="tool-badge bg-neutral">'+esc(r.status)+(r.snooze_until?' → '+esc(fd(r.snooze_until)):'')+'</span>'
+            +((r.snoozed_by||r.snoozed_at)?'<span class="mut tiny">'+esc(r.status==='snoozed'?'snoozed':r.status)+' by '+esc(shortUser(r.snoozed_by)||'—')+(r.snoozed_at?' on '+esc(fd(r.snoozed_at)):'')+'</span>':'')
             +'<button class="save-btn light act-life" data-id="'+r._id+'" data-st="open">↩ Restore</button>'
-          : '<button class="save-btn light act-life" data-id="'+r._id+'" data-st="dismissed">Dismiss</button><button class="save-btn light act-snz-menu" data-id="'+r._id+'" title="snooze this action">Snooze ▾</button>'); }
+          : '<span class="act-lifebtns"><button class="save-btn light act-life" data-id="'+r._id+'" data-st="dismissed">Dismiss</button><button class="save-btn light act-snz-menu" data-id="'+r._id+'" title="snooze this action">Snooze ▾</button></span>'); }
     var sev=r.severity||'low', grp=actGroup(r.type), isRec=(grp==='RECOMMENDATIONS');
     var col=sev==='high'?'#dc2626':sev==='amber'?'#b45309':'#64748b';
     var fixCell=[fix,fix2].filter(Boolean).join(' ');
@@ -1070,7 +1080,7 @@
       +'<td class="sev-cell" title="'+(sev==='high'?'High':sev==='amber'?'Amber':'Low')+'"><span style="color:'+col+'">●</span></td>'
       +'<td><div class="act-type" style="color:'+col+'">'+esc(r.type)+'</div><div class="act-chip">'+esc(isRec?'💡 advisory':(ACT_CHIP[grp]||grp))+'</div></td>'
       +'<td class="act-ref">'+refHtml+'</td>'
-      +'<td class="act-detail">'+esc(r.detail||'')+'</td>'
+      +'<td class="act-detail">'+esc(actDates(r.detail||''))+'</td>'
       +'<td class="act-fixcell">'+(fixCell||'<span class="mut tiny">—</span>')+'</td>'
       +'<td class="act-lifecell" style="text-align:right">'+(life||'')+'</td></tr>'; }
   // Persist an Actions-page lifecycle change (dismiss / snooze / open) + update the card in place.
@@ -4873,7 +4883,8 @@
         box.querySelectorAll('button[data-act]').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po;
           if(btn.dataset.act==='unassign'){ if(confirm('Unassign '+po+' from '+ref+'?'))shipPost('/api/supply/shipment/'+encodeURIComponent(ref)+'/assign',{po:po,assign:false},shipRefresh); }
           else shipPost('/api/supply/shipment/'+encodeURIComponent(ref)+'/assign',{po:po,assign:true,master:true},shipRefresh); }; });
-        box.querySelectorAll('.ship-po-link').forEach(function(b){ b.onclick=function(){ gotoPO(b.dataset.po); }; });
+        // PO on board → pop-out PO drawer (Payments tab), stacking over the shipment drawer if that's open — no navigation away.
+        box.querySelectorAll('.ship-po-link').forEach(function(b){ b.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(b.dataset.po,'pay'); else gotoPO(b.dataset.po); }; });
         // Add a PO to this shipment (search + assign) — mirrors the unassign/master assign flow
         box.querySelectorAll('.sh-addpo-go').forEach(function(b){ b.onclick=function(){
           var inp=box.querySelector('.sh-addpo-inp'), po=(inp&&inp.value||'').trim(), msg=box.querySelector('.sh-addpo-msg');

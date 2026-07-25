@@ -2108,7 +2108,11 @@ app.get('/api/supply/:section', async (req, res) => {
             'Landing '||landing_date_overide::text||' is in the past (status '||coalesce(status,'?')||')' detail,
             'date' fix, 'po' target, 'landing_date_overide' field, po target_key
             FROM planner.purchase_orders
-            WHERE landing_date_overide < current_date AND coalesce(status,'') NOT ILIKE '%complete%'
+            -- Only a genuine conflict when the PO hasn't reached shipping yet. A past landing while SHIPPING /
+            -- DELIVERED / COMPLETE is expected (goods arriving/arrived; marking delivered is optional) — not an action.
+            WHERE landing_date_overide < current_date
+              AND coalesce(status,'') NOT ILIKE '%complete%' AND coalesce(status,'') NOT ILIKE '%shipping%'
+              AND coalesce(status,'') NOT ILIKE '%deliver%' AND coalesce(status,'') NOT ILIKE '%arriv%'
           UNION ALL
           SELECT 'low','Unassigned shipment', po, 'Past production with no shipment assigned',
             'shipment','po','shipment_ref', po
@@ -2286,13 +2290,9 @@ app.get('/api/supply/:section', async (req, res) => {
                   LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
                   WHERE coalesce(po.status,'') NOT ILIKE '%complete%') y
             WHERE y.shipd IS NOT NULL AND y.shipd <= current_date + 7 AND y.ps='ready_to_ship'
-          UNION ALL
-          SELECT 'amber','Shipment missing dates', s.shipment_ref,
-            'Assigned to live PO(s) but has no departure/ETA date set', 'date','shipment','arrival_date', s.shipment_ref
-            FROM planner.shipments s
-            WHERE s.departure_date IS NULL AND s.arrival_date IS NULL AND s.landing_date IS NULL AND s.delivery_date IS NULL
-              AND EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.shipment_ref=s.shipment_ref
-                          AND coalesce(p.status,'') NOT ILIKE '%complete%')
+          -- (removed) "Shipment missing dates" — a shipment lacking its own departure/ETA is normal: those dates
+          -- are inherited/calculated from the PO. Only *past/exceeded* dates matter, and those are already caught by
+          -- "Ship check-in" (calculated ship date passed) and "Shipment ETA passed" below.
           UNION ALL
           SELECT 'amber','Shipment ETA passed', s.shipment_ref,
             'ETA '||coalesce(s.arrival_date,s.delivery_date,s.landing_date)::text||' has passed but not marked arrived',
@@ -7487,7 +7487,10 @@ const PO_ACTIONS_PRIORITY_SQL = `
     'Landing '||landing_date_overide::text||' is in the past (status '||coalesce(status,'?')||')' detail,
     'date' fix, 'po' target, 'landing_date_overide' field, po target_key
     FROM planner.purchase_orders
-    WHERE landing_date_overide < current_date AND coalesce(status,'') NOT ILIKE '%complete%'
+    -- fire only pre-shipping (see full UNION); past landing while shipping/delivered/complete is expected, not an action
+    WHERE landing_date_overide < current_date
+      AND coalesce(status,'') NOT ILIKE '%complete%' AND coalesce(status,'') NOT ILIKE '%shipping%'
+      AND coalesce(status,'') NOT ILIKE '%deliver%' AND coalesce(status,'') NOT ILIKE '%arriv%'
   UNION ALL
   SELECT 'high','PO missing supplier', po, 'No supplier set on this PO', 'supplier','po','supplier_name', po
     FROM planner.purchase_orders WHERE supplier_name IS NULL
