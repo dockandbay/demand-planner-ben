@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.131 - Mobile Actions/Recommendations/ERP tables scroll with sticky first columns
+
+- On mobile, the **Actions**, **Recommendations** and **ERP Compare** tables now **scroll horizontally** (instead
+  of being crushed to screen width), with the **first two columns pinned (sticky)** while you scroll across.
+- On mobile, the Actions/Recommendations **Type and Ref are merged into one cell** (ref below the type) so the
+  table is more compact. Desktop is unchanged (Type and Ref stay separate columns).
+
 ## v26.130 - Actions rule fixes + table columns + ERP badge + shipment PO drawer + version box
 
 - **Date conflict** now fires **only when the PO hasn't reached shipping yet** (Future/Production/Ready to ship).

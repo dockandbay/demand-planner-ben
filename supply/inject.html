@@ -365,15 +365,44 @@
 #supply-root .card .t{font-weight:700}#supply-root .card .d{color:#666;font-size:11px;margin-top:2px}
 #supply-root .act-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:8px;align-items:start}#supply-root .act-cards .card{margin-bottom:0}
 /* Actions triage TABLE — severity-sorted, one line per action, tinted by urgency */
-#supply-root .act-tbl{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
-/* fixed column widths: tiny severity dot; ref wide enough for ~20 chars (then wraps); narrower Fix; Manage
-   wide enough to keep Dismiss + Snooze on one row */
-#supply-root .act-tbl th:nth-child(1),#supply-root .act-tbl td:nth-child(1){width:16px}
-#supply-root .act-tbl th:nth-child(2),#supply-root .act-tbl td:nth-child(2){width:15%}
-#supply-root .act-tbl th:nth-child(3),#supply-root .act-tbl td:nth-child(3){width:128px}
-#supply-root .act-tbl th:nth-child(4),#supply-root .act-tbl td:nth-child(4){width:39%}
-#supply-root .act-tbl th:nth-child(5),#supply-root .act-tbl td:nth-child(5){width:20%}
-#supply-root .act-tbl th:nth-child(6),#supply-root .act-tbl td:nth-child(6){width:26%}
+#supply-root .act-tbl{width:100%;border-collapse:collapse;font-size:12px}
+/* DESKTOP fixed column widths: tiny severity dot; ref wide enough for ~20 chars (then wraps); narrower Fix;
+   Manage wide enough to keep Dismiss + Snooze on one row. Scoped to desktop — mobile uses a scrolling layout. */
+@media (min-width:701px){
+  #supply-root .act-tbl{table-layout:fixed}
+  #supply-root .act-tbl th:nth-child(1),#supply-root .act-tbl td:nth-child(1){width:16px}
+  #supply-root .act-tbl th:nth-child(2),#supply-root .act-tbl td:nth-child(2){width:15%}
+  #supply-root .act-tbl th:nth-child(3),#supply-root .act-tbl td:nth-child(3){width:128px}
+  #supply-root .act-tbl th:nth-child(4),#supply-root .act-tbl td:nth-child(4){width:39%}
+  #supply-root .act-tbl th:nth-child(5),#supply-root .act-tbl td:nth-child(5){width:20%}
+  #supply-root .act-tbl th:nth-child(6),#supply-root .act-tbl td:nth-child(6){width:26%}
+}
+/* MOBILE: let the Actions / Recommendations / ERP tables grow past the screen and scroll horizontally inside
+   their .tw wrapper, with the first two columns pinned (sticky). Type + Ref are merged into col 2 (see actRow). */
+@media (max-width:700px){
+  #supply-root .act-tbl,#supply-root .erpc-tbl{table-layout:auto;width:auto;min-width:100%}
+  #supply-root .act-tbl th,#supply-root .act-tbl td,#supply-root .erpc-tbl th,#supply-root .erpc-tbl td{white-space:nowrap}
+  #supply-root .act-tbl td.act-detail{white-space:normal;min-width:190px;max-width:250px}
+  #supply-root .act-tbl td.act-typeref{white-space:normal;min-width:120px;max-width:170px}
+  #supply-root .act-tbl td.act-fixcell{white-space:normal;min-width:150px}
+  #supply-root .act-tbl td.act-lifecell{min-width:120px}
+  #supply-root .act-tbl .act-ref-m{margin-top:3px}
+  /* sticky first two columns (both act-tbl and erpc-tbl). Col-1 fixed width so col-2's left offset lines up. */
+  #supply-root .act-tbl th:nth-child(1),#supply-root .act-tbl td:nth-child(1),
+  #supply-root .erpc-tbl th:nth-child(1),#supply-root .erpc-tbl td:nth-child(1){position:sticky;left:0;width:22px;min-width:22px;box-sizing:border-box;z-index:2}
+  #supply-root .act-tbl th:nth-child(2),#supply-root .act-tbl td:nth-child(2),
+  #supply-root .erpc-tbl th:nth-child(2),#supply-root .erpc-tbl td:nth-child(2){position:sticky;left:22px;z-index:2}
+  /* sticky cells need an opaque background so scrolled content doesn't bleed through; match the row tints */
+  #supply-root .act-tbl td:nth-child(1),#supply-root .act-tbl td:nth-child(2),
+  #supply-root .erpc-tbl td:nth-child(1),#supply-root .erpc-tbl td:nth-child(2){background:#fff}
+  #supply-root .act-tbl tr.sev-high td:nth-child(1),#supply-root .act-tbl tr.sev-high td:nth-child(2){background:#fef4f4}
+  #supply-root .act-tbl tr.sev-amber td:nth-child(1),#supply-root .act-tbl tr.sev-amber td:nth-child(2){background:#fffbf1}
+  #supply-root .act-tbl th:nth-child(1),#supply-root .act-tbl th:nth-child(2),
+  #supply-root .erpc-tbl th:nth-child(1),#supply-root .erpc-tbl th:nth-child(2){background:#fff;z-index:4}
+  /* on mobile the two severity columns stack full-width, each its own horizontal scroller */
+  #supply-root .act-colwrap{gap:14px}
+  #supply-root .act-tbl .act-ref-m .lnk-btn{white-space:nowrap}
+}
 #supply-root .act-colwrap{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start}
 #supply-root .act-col-main{flex:2 1 520px;min-width:0}#supply-root .act-col-rec{flex:1 1 330px;min-width:0}
 #supply-root .act-colhdr{font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#334155;margin:10px 0 4px}
@@ -970,7 +999,7 @@
       if(!open.length){ sb.innerHTML='<div class="count" style="padding:10px 2px">No recommendations right now 🎉</div>'; return; }
       open.sort(function(a,b){ var so={high:0,amber:1,low:2}; return (so[a.severity]==null?3:so[a.severity])-(so[b.severity]==null?3:so[b.severity]) || String(a.type||'').localeCompare(String(b.type||'')); });
       sb.innerHTML='<div class="mut tiny" style="margin:6px 0 8px;color:#6d28d9">Advisory — from the forecast / expedite engine. Not blocking.</div>'
-        +'<div class="tw" style="max-width:900px"><table class="act-tbl"><thead><tr><th style="text-align:center">!</th><th>Type</th><th>Ref</th><th>Detail</th><th>Fix</th><th>Manage</th></tr></thead><tbody>'+open.map(actRow).join('')+'</tbody></table></div>';
+        +'<div class="tw" style="max-width:900px"><table class="act-tbl">'+actHead()+'<tbody>'+open.map(actRow).join('')+'</tbody></table></div>';
       bindActFix(); bindLifecycle(statBar,sevBar,view); }
     function renderErpTab(sb){ sb.innerHTML='<div class="count" style="padding:10px 2px">Loading ERP compare…</div>';
       fetch('/api/supply/bi/erp-compare').then(function(r){return r.json();}).then(function(d){ _actErpCount=(d&&typeof d.count==='number')?d.count:((d&&d.rows||[]).filter(function(x){return !x.ignored;}).length);
@@ -1021,7 +1050,7 @@
     // column 2 = LOW. Recommendations are excluded (own sub-tab).
     function view(){ var f=pool().filter(function(r){return st.sev==='All'||r.severity===st.sev;}).filter(typeMatch);
       function byType(a,b){ return String(a.type||'').localeCompare(String(b.type||'')) || String(a.ref||'').localeCompare(String(b.ref||'')); }
-      function tbl(rows){ return rows.length?'<div class="tw"><table class="act-tbl"><thead><tr><th title="Severity" style="text-align:center">!</th><th>Type</th><th>Ref</th><th>Detail</th><th>Fix</th><th>Manage</th></tr></thead><tbody>'+rows.map(actRow).join('')+'</tbody></table></div>':'<div class="count" style="padding:8px 2px">none</div>'; }
+      function tbl(rows){ return rows.length?'<div class="tw"><table class="act-tbl">'+actHead()+'<tbody>'+rows.map(actRow).join('')+'</tbody></table></div>':'<div class="count" style="padding:8px 2px">none</div>'; }
       var g=document.getElementById('act-grid'); if(!g)return;
       if(!f.length){ g.innerHTML='<div class="count">none in this view 🎉</div>'; bindLifecycle(statBar,sevBar,view); return; }
       var high=f.filter(function(r){return r.severity==='high';}).sort(byType);
@@ -1036,8 +1065,17 @@
     renderActSub(); }
   // Reformat any ISO date (YYYY-MM-DD) embedded in an action's text to dd-mmm-yy (Ben's preferred display).
   function actDates(s){ return String(s==null?'':s).replace(/\d{4}-\d{2}-\d{2}/g, function(m){ return fd(m); }); }
+  // On mobile the Actions/Recommendations/ERP tables scroll horizontally with the first two columns pinned, and
+  // Type + Ref are merged into one cell to save width. actHead() returns the matching <thead> for either layout.
+  function actMob(){ return !!(window.matchMedia && window.matchMedia('(max-width:700px)').matches); }
+  function actHead(){ return actMob()
+    ? '<thead><tr><th title="Severity" style="text-align:center">!</th><th>Type / Ref</th><th>Detail</th><th>Fix</th><th>Manage</th></tr></thead>'
+    : '<thead><tr><th title="Severity" style="text-align:center">!</th><th>Type</th><th>Ref</th><th>Detail</th><th>Fix</th><th>Manage</th></tr></thead>'; }
   function actRow(r){
-    if(r._done) return '<tr class="actrow sev-low" id="actcard-'+r._id+'" style="opacity:.5"><td class="sev-cell">✓</td><td><span class="act-type">'+esc(r.type)+'</span></td><td class="act-ref">'+esc(r.ref||'')+'</td><td class="act-detail">applied'+(r._val?(': '+esc(r._val)):'')+' — refresh to clear</td><td></td><td><span class="tool-badge bg-green">✓ done</span></td></tr>';
+    if(r._done){ var _dtr=actMob()
+        ? '<td class="act-typeref"><span class="act-type">'+esc(r.type)+'</span>'+(r.ref?'<div class="act-ref-m">'+esc(r.ref)+'</div>':'')+'</td>'
+        : '<td><span class="act-type">'+esc(r.type)+'</span></td><td class="act-ref">'+esc(r.ref||'')+'</td>';
+      return '<tr class="actrow sev-low" id="actcard-'+r._id+'" style="opacity:.5"><td class="sev-cell">✓</td>'+_dtr+'<td class="act-detail">applied'+(r._val?(': '+esc(r._val)):'')+' — refresh to clear</td><td></td><td><span class="tool-badge bg-green">✓ done</span></td></tr>'; }
     var fix='', fix2='';
     if(r.fix==='date'){ fix='<span class="tiny mut">fix date</span> <input class="fci dt act-in" type="date" data-id="'+r._id+'"> '+applyBtn(r._id); }
     else if(r.fix==='shipment'){ fix='<span class="tiny mut">assign shipment</span> <input class="fci txt act-in" list="shiplist" placeholder="pick / type…" data-id="'+r._id+'"> '+applyBtn(r._id); }
@@ -1076,10 +1114,14 @@
     var sev=r.severity||'low', grp=actGroup(r.type), isRec=(grp==='RECOMMENDATIONS');
     var col=sev==='high'?'#dc2626':sev==='amber'?'#b45309':'#64748b';
     var fixCell=[fix,fix2].filter(Boolean).join(' ');
+    var chip=esc(isRec?'💡 advisory':(ACT_CHIP[grp]||grp));
+    // Mobile: merge Type + Ref into one cell (ref below the type). Desktop: keep them as two columns.
+    var typeRefCells = actMob()
+      ? '<td class="act-typeref"><div class="act-type" style="color:'+col+'">'+esc(r.type)+'</div><div class="act-chip">'+chip+'</div>'+(refHtml?'<div class="act-ref-m">'+refHtml+'</div>':'')+'</td>'
+      : '<td><div class="act-type" style="color:'+col+'">'+esc(r.type)+'</div><div class="act-chip">'+chip+'</div></td><td class="act-ref">'+refHtml+'</td>';
     return '<tr class="actrow sev-'+esc(sev)+'" id="actcard-'+r._id+'">'
       +'<td class="sev-cell" title="'+(sev==='high'?'High':sev==='amber'?'Amber':'Low')+'"><span style="color:'+col+'">●</span></td>'
-      +'<td><div class="act-type" style="color:'+col+'">'+esc(r.type)+'</div><div class="act-chip">'+esc(isRec?'💡 advisory':(ACT_CHIP[grp]||grp))+'</div></td>'
-      +'<td class="act-ref">'+refHtml+'</td>'
+      +typeRefCells
       +'<td class="act-detail">'+esc(actDates(r.detail||''))+'</td>'
       +'<td class="act-fixcell">'+(fixCell||'<span class="mut tiny">—</span>')+'</td>'
       +'<td class="act-lifecell" style="text-align:right">'+(life||'')+'</td></tr>'; }
@@ -7098,7 +7140,7 @@
         +'<td class="l">'+(isIgnored
             ? '<button class="save-btn light erpc-unignore" data-po="'+esc(r.po)+'">↩ Un-ignore</button>'
             : '<button class="save-btn light erpc-ignore" data-po="'+esc(r.po)+'">Ignore</button>')+'</td></tr>'; }).join('');
-      return '<div class="tw"><table><thead><tr><th class="l">PO</th><th class="l">ERP id</th><th class="l">Supplier</th><th class="l">Branch</th><th class="l">ERP status</th><th class="l">Order date</th><th>Value</th><th class="l">ERP delivery</th><th class="l">Synced</th><th class="l"></th></tr></thead><tbody>'+body+'</tbody></table></div>';
+      return '<div class="tw"><table class="erpc-tbl"><thead><tr><th class="l">PO</th><th class="l">ERP id</th><th class="l">Supplier</th><th class="l">Branch</th><th class="l">ERP status</th><th class="l">Order date</th><th>Value</th><th class="l">ERP delivery</th><th class="l">Synced</th><th class="l"></th></tr></thead><tbody>'+body+'</tbody></table></div>';
     }
     var htmlOut=head;
     if(!active.length) htmlOut+='<div class="count">Nothing to reconcile — every open ERP PO for your suppliers is already in the planner (or ignored). ✓</div>';
