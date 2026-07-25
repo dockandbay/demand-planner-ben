@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.135 - Actions tab loads progressively (instant shell, priority first)
+
+- Opening **SUPPLY ▸ Actions** now paints the header + sub-nav + a spinner **instantly**, instead of the sub-nav and
+  grid appearing together only after everything loaded. Priority (high-severity) actions fill in first, then the full
+  set replaces them.
+- **Lookups are cached** (30s, cleared on any data change) and warmed in parallel — the priority render no longer
+  waits on a back-to-back lookups fetch (was adding ~3s on top of the priority fetch). Faster first paint of actions.
+
 ## v26.134 - Drawers stack in open order (newest on top)
 
 - Opening a shipment from inside a PO drawer (or a PO from inside a shipment drawer) now always opens **on top** of

@@ -704,7 +704,7 @@
   var _sampleReload=null;  // set by the Samples grid so detail-panel actions can refresh it
   // a write to a PO / shipment / deposit changes the derived views — drop their caches so they re-fetch fresh
   var _opExcTimer=null;   // debounce the exception-count refetch so rapid grid edits don't fire it per keystroke
-  function invalidateDerived(){ ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments','manufacturing'].forEach(function(k){delete cache[k];}); try{ if(typeof _navCounts!=='undefined'){_navCounts.manufacturing=undefined;_navCounts.paydue=undefined;} }catch(e){} clearTimeout(_opExcTimer); _opExcTimer=setTimeout(function(){ try{ refreshOpExc(); }catch(e){} },600); }   // 'manufacturing' + 'paydue' nav badges recompute after a PO/order-plan/payment edit → tabs update on next nav; no hard refresh
+  function invalidateDerived(){ ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments','manufacturing'].forEach(function(k){delete cache[k];}); _lookupsAt=0; /* refetch lookups after any data change */ try{ if(typeof _navCounts!=='undefined'){_navCounts.manufacturing=undefined;_navCounts.paydue=undefined;} }catch(e){} clearTimeout(_opExcTimer); _opExcTimer=setTimeout(function(){ try{ refreshOpExc(); }catch(e){} },600); }   // 'manufacturing' + 'paydue' nav badges recompute after a PO/order-plan/payment edit → tabs update on next nav; no hard refresh
 
   function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function shortUser(s){return String(s==null?'':s).replace(/@dockandbay\.com\b/gi,'@');}  // ben@dockandbay.com → ben@ (display only)
@@ -842,7 +842,15 @@
   function dl(id,arr){ return '<datalist id="'+id+'">'+(arr||[]).map(function(r){return '<option value="'+esc(r)+'">';}).join('')+'</datalist>'; }
   function lookupDatalists(){ return depDatalist()+dl('batchlist',batchList)+dl('prodlist',prodList)+dl('shiplist',shipList)+dl('supplierlist',supplierList)+dl('branchlist',branchList)+dl('crossdocklist',crossdockList)+dl('polist',poLookupList); }
   function combo(ep,field,val,list){ return '<input class="fci txt" list="'+list+'" data-ep="'+esc(ep)+'" data-field="'+esc(field)+'" value="'+esc(val==null?'':val)+'">'; }
-  function fetchLookups(cb){ fetch('/api/supply/lookups').then(function(r){return r.json();}).then(function(d){ depRefs=d.deposits||[]; batchList=d.batches||[]; prodList=d.prods||[]; shipList=d.shipments||[]; supplierList=d.suppliers||[]; supplierCcy=d.supplier_ccy||{}; branchList=d.branches||[]; crossdockList=d.crossdock||[]; poLookupList=d.pos||[]; cb(); }).catch(cb); }
+  // Lookups (suppliers / shipments / deposits / branches …) rarely change, but re-fetching them on every call was
+  // making the Actions load do priority-fetch THEN a fresh lookups fetch back-to-back. Cache the result for a short
+  // window + coalesce concurrent calls; the cache is cleared on any data-change (invalidateDerived) so it stays fresh.
+  var _lookupsInflight=null, _lookupsAt=0, LOOKUPS_TTL=30000;
+  function fetchLookups(cb){ cb=cb||function(){};
+    if(_lookupsAt && (Date.now()-_lookupsAt)<LOOKUPS_TTL){ cb(); return; }   // fresh enough → serve from memory
+    if(_lookupsInflight){ _lookupsInflight.then(cb,cb); return; }            // a fetch is already in flight → ride it
+    _lookupsInflight=fetch('/api/supply/lookups').then(function(r){return r.json();}).then(function(d){ depRefs=d.deposits||[]; batchList=d.batches||[]; prodList=d.prods||[]; shipList=d.shipments||[]; supplierList=d.suppliers||[]; supplierCcy=d.supplier_ccy||{}; branchList=d.branches||[]; crossdockList=d.crossdock||[]; poLookupList=d.pos||[]; _lookupsAt=Date.now(); });
+    _lookupsInflight.then(function(){ _lookupsInflight=null; cb(); },function(){ _lookupsInflight=null; cb(); }); }
   // explicit per-status colours for the PO grid Status dropdown (Ben's palette). [background, text]
   var PO_STATUS_BG={'FUTURE':['#D3D3FF','#2a2a55'],'PRODUCTION':['#F2B949','#5a3a00'],'READY TO SHIP':['#8FD9FB','#0a3a4a'],
     'SHIPPING':['#50C878','#0f3d22'],'DELIVERED':['#2E8B57','#ffffff'],'COMPLETE':['#305CDE','#ffffff']};
@@ -953,8 +961,21 @@
       try{ var extra=cfUnpaidActions(cf); if(extra.length)rows=extra.concat(rows); }catch(e){}
       actBuild(rows,c);
     }).catch(function(){ actBuild(rows,c); }); }); }
-  // Lazy load: fetch the fast HIGH-severity subset first (~1s) and render it, then the full set (~4s) replaces it.
+  // Instant shell: paint the Actions header + sub-nav + a spinner synchronously so the section appears immediately
+  // (before any fetch resolves). actBuild() re-renders this same structure with live data + wired sub-tabs.
+  function actShell(c){ if(!c)return;
+    c.innerHTML=annot('actions')
+      +'<div class="po-subnav" id="act-subnav">'
+        +'<span class="rtab act-subtab active" data-as="actions">ACTIONS</span>'
+        +'<span class="rtab act-subtab" data-as="recommendations">💡 RECOMMENDATIONS</span>'
+        +'<span class="rtab act-subtab" data-as="erp-compare">⬆ ERP COMPARE</span>'
+      +'</div>'
+      +'<div id="act-sub"><div class="count" style="opacity:.7;padding:16px 2px">⏳ Loading priority actions…</div></div>'; }
+  // Lazy load: paint the shell instantly, warm lookups in parallel, then render the fast HIGH-severity subset (~1s),
+  // then the full set (~4s) replaces it.
   function renderActionsProgressive(c,tk){
+    actShell(c);            // immediate feedback — sub-nav visible right away, spinner in the grid area
+    fetchLookups();         // warm the lookups cache in parallel so the priority render doesn't wait on it
     fetch('/api/supply/actions?scope=priority').then(function(r){return r.json();}).then(function(pr){
       if(tk!==_navToken||cache['actions'])return;   // navigated away, or the full set already arrived → drop the preview
       if(Array.isArray(pr))renderActions(pr,true);
