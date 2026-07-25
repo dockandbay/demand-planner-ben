@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.116 - SUPPLY ▸ PAYMENTS section + deposit at-risk fixes + top-bar tidy
+
+- **New SUPPLY ▸ PAYMENTS section** (after ORDER PLAN): **Deposits · Other Payments · Payments Due ·
+  Payments Report** moved out from under PURCHASE ORDERS into their own umbrella. Old
+  `/supply/purchase-orders/<deposits|other|paydue|payreport>` links redirect automatically.
+- **Deposit at-risk fixes:** (1) clicking the "assign" button now also **saves the payment date** (it was
+  set in the field but never persisted). (2) the deposit-context box + at-risk button are now **hidden once
+  the PO's start deposit is allocated** — it no longer offers more to a fully-paid PO.
+- **Top bar:** the 💡 button now reads **"💡 Suggestions"**.
+- **Inbox messages:** the snooze row is now a single **SNOOZE ▾ dropdown** (1/3/7 days · indefinitely),
+  matching the rest of the app.
+
 ## v26.115 - Payment email in the supplier's currency
 
 The payment-confirmed email now shows the amount in the **supplier's own currency** (CONFIG ▸ Suppliers →

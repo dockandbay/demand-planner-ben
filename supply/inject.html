@@ -576,7 +576,7 @@
 <script>
 (function(){
   var SECTIONS=[['actions','ACTIONS'],['reports','BI & REPORTS'],['purchase-orders','PURCHASE ORDERS'],['order-plan','ORDER PLAN'],
-    ['samples','SAMPLES']];   // CONFIG is now a top-level view (see enterConfig); SHIPMENTS lives under the PURCHASE ORDERS sub-nav (poSub 'shipments')
+    ['payments','PAYMENTS'],['samples','SAMPLES']];   // CONFIG is now a top-level view (see enterConfig); SHIPMENTS lives under the PURCHASE ORDERS sub-nav (poSub 'shipments'); PAYMENTS umbrella holds Deposits / Other Payments / Payments Due / Payments Report
   // REPORTS is a parent tab; these are its sub-tabs (the read-across views).
   var REPORT_SECTIONS=[['metrics','METRICS'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
     ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['cashflow','CASH FLOW'],['directclient','DIRECT TO CLIENT'],['flexport','FLEXPORT'],['erp-compare','ERP COMPARE']];
@@ -588,6 +588,7 @@
     reports:'<b>SUPPLY ▸ Reports.</b> The read-across views, pick one from the sub-tabs: <b>What\'s Next</b> (forward calendar), <b>Pipeline</b> (every PO by stage), <b>Payments</b> (the run register), <b>Cash Flow</b> (itemised monthly payments) and <b>Flexport</b> (the Flexport shipment feed).',
     'purchase-orders':'<b>SUPPLY ▸ Purchase Orders.</b> Inline-editable management grid (default: in progress). Status is colour-coded; deposit ref is a lookup; <b>value est = Σ(qty×cost) from the order plan</b>. Dates are the final used dates (M=manual, FLEX, S=shipment, calc=lead-time); edit overrides in <b>PLAN</b>. Completion = delivery +7 (the Fulfil/Cin7 date). Expand <b>PLAN</b> for the payment plan, dates, landed cost and linked records.',
     'order-plan':'<b>SUPPLY ▸ Order Plan.</b> PO×SKU lines with carton checks (p = partial, not a full carton multiple).',
+    'payments':'<b>SUPPLY ▸ Payments.</b> Deposits register, Other Payments, Payments Due and the Payments Report — every supplier cash payment in one place.',
     productions:'<b>SUPPLY ▸ Productions.</b> Four sub-tabs: <b>Productions</b> (POs grouped by PROD#; expand for SKU×qty, the POs and deposits), <b>Deposits</b> (the deposit register, assign each to a production), <b>Other Payments</b> (sundry costs — freight, fees — with due date + paid/overdue status) and <b>Payments Report</b> (the payment-run register, filterable by date).',
     pipeline:'<b>SUPPLY ▸ Pipeline.</b> Every open PO placed in one stage of its journey (awaiting → in production → complete → in transit → arriving → checked in), ordered by its next milestone and coloured by health. The "where is everything" cockpit. Production stages get sharper as suppliers confirm status.',
     upcoming:'<b>SUPPLY ▸ What\'s Next.</b> A forward calendar, by date — which POs are <b>completing</b>, <b>shipping</b> and <b>arriving</b> soon. The "what I need to know" briefing; pick a window and market, click a row to open the PO.',
@@ -3058,7 +3059,9 @@
         el.innerHTML='<div style="border:1px solid #cbd5e1;border-radius:7px;padding:8px 10px;font-size:12px;background:#f8fafc">'+head+sug+risk+'</div>';
         // inline "deposit at risk · assign X" button in the Start-deposit calc/est cell — fills the start-deposit amount
         var fill=function(amt){ var inp=document.querySelector('#podet-'+i+' [data-field="pay_start_deposit_assigned"]'); var dt=document.querySelector('#podet-'+i+' [data-field="pay_start_deposit_date"]');
-          if(inp){ inp.value=amt; if(dt&&!dt.value)dt.value=new Date().toISOString().slice(0,10); inp.dispatchEvent(new Event('change',{bubbles:true})); } };
+          if(!inp)return; inp.value=amt;
+          if(dt&&!dt.value){ dt.value=new Date().toISOString().slice(0,10); dt.dispatchEvent(new Event('change',{bubbles:true})); }   // save the date too (was set in the DOM but never dispatched → didn't persist)
+          inp.dispatchEvent(new Event('change',{bubbles:true})); };
         var slot=document.querySelector('#podet-'+i+' .dep-atrisk-slot[data-po="'+(window.CSS&&CSS.escape?CSS.escape(p):p)+'"]');
         if(slot && d.suggest_extra!=null && d.suggest_extra>0.009){
           var lbl=(d.at_risk?'⚠ deposit at risk · ':'')+'assign '+money(d.suggest_extra);
@@ -3896,14 +3899,19 @@
   var prodTab='list', _prodList=[];
   // PURCHASE ORDERS is now the umbrella: PLAN (the PO grid) + the former PRODUCTIONS sub-tabs.
   var poSub='plan';
-  var PO_SUBS=[['plan','PLAN'],['shipments','Shipments'],['crossdock','Crossdock & Labels'],['manufacturing','Manufacturing'],['list','Productions'],['deposits','Deposits'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['barcodes','Barcodes']];
+  var PO_SUBS=[['plan','PLAN'],['shipments','Shipments'],['crossdock','Crossdock & Labels'],['manufacturing','Manufacturing'],['list','Productions'],['barcodes','Barcodes']];
+  var PAY_SUBS=[['deposits','Deposits'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report']];   // the PAYMENTS umbrella (moved out of PURCHASE ORDERS)
   var PO_SUB_KEYS=PO_SUBS.map(function(t){return t[0];});
+  var PAY_SUB_KEYS=PAY_SUBS.map(function(t){return t[0];});
+  var ALL_SUB_KEYS=PO_SUB_KEYS.concat(PAY_SUB_KEYS);
+  function subUmbrella(tab){ return PAY_SUB_KEYS.indexOf(tab)>=0?'payments':'purchase-orders'; }   // which top-level SUPPLY section a sub-tab belongs to
+  function subListFor(tab){ return subUmbrella(tab)==='payments'?PAY_SUBS:PO_SUBS; }
   // Sub-menu action counters: rows-needing-action count per sub-tab (open = snooze-excluded). Populated as each
   // section's data renders (_navCounts.plan / .shipments / .manufacturing) + a background prefetch on entry.
   var _navCounts={}, _allShips=[], _NAVLBL={plan:'PLAN',shipments:'Shipments',manufacturing:'Manufacturing',paydue:'Payments Due'}, _NAVNOUN={paydue:'overdue payment'};
   function navBadge(n,noun){ n=Number(n)||0; return n>0?' <span class="ex-badge" title="'+n+' '+(noun?esc(noun)+(n>1?'s':''):('item'+(n>1?'s':'')+' needing action'))+'">'+n+'</span>':''; }
   function updateNavBadges(){ document.querySelectorAll('#supply-content #prod-subtabs .rtab[data-posub]').forEach(function(sp){ var k=sp.dataset.posub; if(_NAVLBL[k]!==undefined) sp.innerHTML=_NAVLBL[k]+navBadge(_navCounts[k],_NAVNOUN[k]); }); }
-  function poSubNav(){ return '<div id="prod-subtabs">'+PO_SUBS.map(function(t){ var bd=(_NAVLBL[t[0]]!==undefined)?navBadge(_navCounts[t[0]],_NAVNOUN[t[0]]):''; return '<span class="rtab'+(poSub===t[0]?' active':'')+'" data-posub="'+t[0]+'">'+t[1]+bd+'</span>'; }).join('')+'</div>'; }
+  function poSubNav(){ return '<div id="prod-subtabs">'+subListFor(poSub).map(function(t){ var bd=(_NAVLBL[t[0]]!==undefined)?navBadge(_navCounts[t[0]],_NAVNOUN[t[0]]):''; return '<span class="rtab'+(poSub===t[0]?' active':'')+'" data-posub="'+t[0]+'">'+t[1]+bd+'</span>'; }).join('')+'</div>'; }
   // count of OVERDUE payments — mirrors buildPaymentsDue's r.overdue (unpaid, has a due date, 2026-01-01 ≤ due < today).
   var PDUE_MIN_DUE='2026-01-01';   // Payments Due cutoff: hide payments whose due date is before this (old/legacy)
   function paymentsDueOverdueCount(pos, deps){ var today=new Date().toISOString().slice(0,10), n=0;
@@ -3927,10 +3935,10 @@
   }
   function bindPoSubNav(){ document.querySelectorAll('#supply-content .rtab[data-posub]').forEach(function(p){ p.onclick=function(){ showPoSub(p.dataset.posub); }; }); }
   // render the PURCHASE ORDERS section on the given sub-tab (plan = PO grid; others = former productions views)
-  function showPoSub(tab){ poSub=(PO_SUB_KEYS.indexOf(tab)>=0?tab:'plan'); current='purchase-orders'; syncHash();
+  function showPoSub(tab){ poSub=(ALL_SUB_KEYS.indexOf(tab)>=0?tab:'plan'); var _umb=subUmbrella(poSub); current=_umb; syncHash();
     var _tk=++_navToken;   // this navigation — invalidates any slower async render from a view we've since left
-    document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k==='purchase-orders');});
-    var _ns=document.getElementById('supply-nav-sel'); if(_ns&&_ns.value!=='purchase-orders')_ns.value='purchase-orders';
+    document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k===_umb);});
+    var _ns=document.getElementById('supply-nav-sel'); if(_ns&&_ns.value!==_umb)_ns.value=_umb;
     var c=document.getElementById('supply-content');
     prefetchNavCounts();   // fill Shipments + Manufacturing counters in the background so all sub-nav badges show
     if(poSub==='plan'){ if(cache['purchase-orders'])return renderPO(cache['purchase-orders']); c.innerHTML='<div class="count">Loading…</div>';
@@ -4064,7 +4072,7 @@
         .catch(function(e){ cb.checked=!on; alert('Could not save: '+(e.message||e)); }); }; });
   }
   function renderProductions(rows){ var c=document.getElementById('supply-content');
-    c.innerHTML=annot('productions')+poSubNav()
+    c.innerHTML=annot(subUmbrella(poSub)==='payments'?'payments':'productions')+poSubNav()
       +'<div id="prod-body"><div class="count">Loading…</div></div>';
     bindPoSubNav();
     prodSub(rows); }
@@ -4799,12 +4807,19 @@
     return '<div class="tl-item" data-id="'+esc(String(n.id))+'"><div><span class="tl-po" data-po="'+esc(n.po||'')+'">'+esc(n.po||'—')+'</span>'+(n.supplier_name?' <span class="mut tiny">'+esc(n.supplier_name)+'</span>':'')+'<span class="mut tiny" style="float:right">'+esc(n.created_at||'')+'</span></div>'
       +'<div class="tl-body">'+esc(body)+'</div>'
       +'<div class="tl-acts"><button class="tl-read" data-id="'+esc(String(n.id))+'">✓ Mark read</button>'
-      +'<span class="tl-snz-lbl">⏰ Snooze:</span>'
-      +'<button class="tl-snooze" data-id="'+esc(String(n.id))+'" data-days="1">1d</button>'
-      +'<button class="tl-snooze" data-id="'+esc(String(n.id))+'" data-days="3">3d</button>'
-      +'<button class="tl-snooze" data-id="'+esc(String(n.id))+'" data-days="7">7d</button>'
-      +'<button class="tl-snooze" data-id="'+esc(String(n.id))+'" data-indef="1" title="snooze indefinitely">∞</button>'
+      +'<button class="save-btn light tl-snz-menu" data-id="'+esc(String(n.id))+'" title="snooze this message">SNOOZE ▾</button>'
       +'</div></div>'; }
+  // snooze dropdown for an Inbox message (1/3/7 days · indefinitely) — mirrors the SNOOZE ▾ menu used elsewhere
+  function openTlSnzMenu(btn){ var id=btn.dataset.id; var ex=document.getElementById('snz-menu'); if(ex)ex.remove();
+    var m=document.createElement('div'); m.id='snz-menu'; m.style.cssText='position:absolute;z-index:2147483001;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 6px 20px rgba(15,23,42,.18);padding:4px;font-size:12px;min-width:96px';
+    m.innerHTML='<div style="font-weight:700;color:#64748b;font-size:10px;padding:2px 10px 4px">Snooze</div>'+[[1,'1 day'],[3,'3 days'],[7,'7 days'],[-1,'Indefinitely']].map(function(o){return '<div class="snz-opt" data-d="'+o[0]+'" style="padding:5px 12px;cursor:pointer;border-radius:4px">'+o[1]+'</div>';}).join('');
+    document.body.appendChild(m);
+    var rc=btn.getBoundingClientRect(); m.style.left=(window.scrollX+Math.min(rc.left,window.innerWidth-140))+'px'; m.style.top=(window.scrollY+rc.bottom+3)+'px';
+    function close(){ m.remove(); document.removeEventListener('mousedown',out,true); }
+    function out(e){ if(!m.contains(e.target)&&e.target!==btn)close(); }
+    setTimeout(function(){ document.addEventListener('mousedown',out,true); },0);
+    m.querySelectorAll('.snz-opt').forEach(function(o){ o.onmouseenter=function(){o.style.background='#eff6ff';}; o.onmouseleave=function(){o.style.background='';};
+      o.onclick=function(){ close(); var d=parseInt(o.dataset.d,10); tlAct(id,'snooze',null,d<0?{indef:1}:{days:d}); }; }); }
   function renderTlDrop(){ var d=document.getElementById('tl-drop'); if(!d)return;
     d.innerHTML='<div style="padding:9px 12px;border-bottom:1px solid #e5e7eb;font-weight:700;font-size:12px">Timeline messages'+(TL_NOTIFS.length?' <span class="mut tiny">('+TL_NOTIFS.length+' unread)</span>':'')+'</div>'
       +(TL_NOTIFS.length?TL_NOTIFS.map(tlItemHtml).join(''):'<div class="count" style="padding:16px 12px">No unread timeline messages 🎉</div>');
@@ -4812,7 +4827,7 @@
       var sr=document.getElementById('supply-root'); if((!sr||sr.style.display==='none')&&typeof showSupply==='function'){ showSupply(true); if(typeof selectSection==='function')selectSection('purchase-orders'); }   // clicked from DEMAND/BUY/etc → reveal SUPPLY so the PO drawer is visible
       if(typeof openPODrawer==='function')openPODrawer(po,'timeline'); }; });
     d.querySelectorAll('.tl-read').forEach(function(b){ b.onclick=function(){ tlAct(b.dataset.id,'read',b); }; });
-    d.querySelectorAll('.tl-snooze').forEach(function(b){ b.onclick=function(){ tlAct(b.dataset.id,'snooze',b,{days:b.dataset.days,indef:b.dataset.indef}); }; }); }
+    d.querySelectorAll('.tl-snz-menu').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openTlSnzMenu(b); }; }); }
   function tlAct(id,kind,btn,opts){ opts=opts||{}; if(btn)btn.disabled=true;
     var ep = kind==='read' ? '/api/supply/note-read/'+encodeURIComponent(id) : '/api/supply/actions/state';
     var body = kind==='read' ? {} : {key:'tlnote|'+id, status:'snoozed', snooze_days:parseInt(opts.days,10)||7, indefinite:!!opts.indef};
@@ -6825,17 +6840,20 @@
     else writeHash([v]);
   }
   function syncHash(){ if(current==='reports') writeHash(['supply','reports',reportTab]);
-    else if(current==='purchase-orders') writeHash(['supply','purchase-orders'].concat(poSub&&poSub!=='plan'?[poSub]:[]));
+    else if(current==='purchase-orders') writeHash(['supply','purchase-orders'].concat(poSub&&PO_SUB_KEYS.indexOf(poSub)>=0&&poSub!=='plan'?[poSub]:[]));
+    else if(current==='payments') writeHash(['supply','payments'].concat(poSub&&PAY_SUB_KEYS.indexOf(poSub)>=0&&poSub!=='deposits'?[poSub]:[]));
     else if(current==='config') writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['config','portal',encodeURIComponent(PORTAL_SUP.toLowerCase())]:['config',CONFIG_SUB]);
     else if(current) writeHash(['supply',current]); }
   function applyRoute(){ var seg=(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean); _expectedHash=location.hash;
     if(seg[0]==='supply'){ showSupply(true); var sec=seg[1]||'actions';   // (true) = show chrome but don't auto-select Actions; we select the routed section next
       if(sec==='reports') selectReport(seg[2]||reportTab||'metrics');
       else if(sec==='productions'){ showPoSub(seg[2]&&PO_SUB_KEYS.indexOf(seg[2])>=0?seg[2]:'list'); }   // legacy links → PURCHASE ORDERS umbrella
+      else if(sec==='payments'){ showPoSub(seg[2]&&PAY_SUB_KEYS.indexOf(seg[2])>=0?seg[2]:'deposits'); }   // PAYMENTS umbrella
       else if(sec==='config'){ if(seg[2])CONFIG_SUB=seg[2]; enterConfig(); }   // legacy #/supply/config → top-level CONFIG
       else if(sec==='purchase-orders'){ var _s2=seg[2]?decodeURIComponent(seg[2]):null, _s3=seg[3]?decodeURIComponent(seg[3]):null;
         if(_s2 && POTAB_FROM_SLUG[_s2] && _s3){ _pendingPO=_s3; _pendingPOTab=POTAB_FROM_SLUG[_s2]; showPoSub('plan'); }   // deep-link a PO detail sub-tab: .../<slug>/<PO>
         else if(_s2 && PO_SUB_KEYS.indexOf(_s2)>=0){ showPoSub(_s2); }   // PURCHASE ORDERS umbrella sub-tab
+        else if(_s2 && PAY_SUB_KEYS.indexOf(_s2)>=0){ showPoSub(_s2); }   // legacy /supply/purchase-orders/<deposits|other|paydue|payreport> → PAYMENTS umbrella
         else { if(_s2)_pendingPO=_s2; showPoSub('plan'); } }   // just a PO → open it in PLAN, default tab
       else if(sec==='shipments'){ if(seg[2])_pendingShip=decodeURIComponent(seg[2]); showPoSub('shipments'); }   // legacy: shipments moved under purchase-orders
       else if(sec==='samples'){ if(seg[2])_pendingSampleRef=decodeURIComponent(seg[2]); selectSection('samples'); }   // #/supply/samples/<ref> → open & expand that sample
@@ -7326,7 +7344,8 @@
   function selectSection(key){
     if(key==='barcodes')return showPoSub('barcodes');                                   // now a PURCHASE ORDERS sub-tab
     if(key==='productions')return showPoSub(PO_SUB_KEYS.indexOf(prodTab)>=0&&prodTab!=='plan'?prodTab:'list');   // PRODUCTIONS folded under PURCHASE ORDERS
-    if(key==='purchase-orders')return showPoSub(poSub||'plan');
+    if(key==='purchase-orders')return showPoSub(PO_SUB_KEYS.indexOf(poSub)>=0?poSub:'plan');
+    if(key==='payments')return showPoSub(PAY_SUB_KEYS.indexOf(poSub)>=0?poSub:'deposits');   // PAYMENTS umbrella: Deposits / Other / Payments Due / Payments Report
     if(key==='reports')return selectReport(reportTab||'metrics');
     if(REPORT_KEYS.indexOf(key)>=0)return selectReport(key);
     current=key; syncHash();
@@ -7477,7 +7496,7 @@
         .catch(function(e){ msg.style.color='#dc2626'; msg.textContent='Failed: '+(e.message||e); btn.disabled=false; }); }; }
   try{ window.HZ_SUGGEST={ open:openSuggestBox }; }catch(e){}
   function ensureSuggestButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('sug-btn'))return;
-    var b=document.createElement('button'); b.id='sug-btn'; b.className='tl-bell'; b.title='Suggestion box — drop an idea'; b.textContent='💡';
+    var b=document.createElement('button'); b.id='sug-btn'; b.className='tl-bell'; b.title='Suggestion box — drop an idea'; b.innerHTML='💡 Suggestions'; b.style.fontSize='12px'; b.style.fontWeight='600';
     var bell=document.getElementById('tl-bell'); if(bell&&bell.nextSibling)row.insertBefore(b,bell.nextSibling); else { var sa=document.getElementById('sa-drawer-btn'); if(sa)row.insertBefore(b,sa); else row.appendChild(b); }
     b.onclick=function(e){ e.stopPropagation(); openSuggestBox(); }; }
   function ensureNavButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('supply-btn'))return;

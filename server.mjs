@@ -2621,6 +2621,9 @@ app.get('/api/supply/deposit-context/:po', async (req, res) => {
       LEFT JOIN planner.suppliers s ON s.id = po.supplier_id
       LEFT JOIN LATERAL (SELECT sum(l.qty * l.cost_price) v FROM planner.purchase_order_lines l WHERE l.po = po.po) lv ON true
       WHERE po.deposit_ref = $1 AND coalesce(po.status,'') NOT ILIKE '%complete%' AND po.pay_start_deposit_assigned IS NULL`, [ref])).rows;
+    // If THIS PO already has its start deposit allocated (or is complete) it's not in the open-unallocated set —
+    // there's nothing to allocate to it, so hide the whole deposit-context box (it was wrongly offering it more).
+    if (!rows.some(x => x.po === po)) return res.json({ ref: null });
     const others = rows.filter(x => x.po !== po);
     const estOthers = Math.round(others.reduce((a, x) => a + Number(x.est || 0), 0) * 100) / 100;
     const unallocValue = Math.round(rows.reduce((a, x) => a + Number(x.val || 0), 0) * 100) / 100;
