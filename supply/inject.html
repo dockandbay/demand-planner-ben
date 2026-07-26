@@ -8753,27 +8753,41 @@
   function renderProdDocs(body,d){ var ref=d.item.ref; var docs=d.docs||[];
     var dnb=docs.filter(function(x){return (x.uploader_kind||'internal')!=='supplier';}), sup=docs.filter(function(x){return x.uploader_kind==='supplier';});
     function isImg(m){ return /^image\//i.test(String(m||'')); }
+    function dt(s){ if(!s)return '<span class="mut tiny">—</span>'; var t=/(\d{2}:\d{2})/.exec(String(s)); return esc(fd(s)+(t?' '+t[1]:'')); }   // YYYY-MM-DD HH:MM -> dd-mmm-yy HH:MM
+    function thumb(mime,att,pad){ return isImg(mime)?'<td style="padding:'+pad+'"><img class="pdoc-img" data-src="'+att+'" src="'+att+'" style="width:38px;height:38px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;cursor:zoom-in" title="click to enlarge"></td>':'<td style="padding:'+pad+';color:#cbd5e1;text-align:center;font-size:16px">📄</td>'; }
+    function dlLink(href,fn){ return '<a href="'+href+'" download title="Download '+esc(fn)+'" style="color:#1d4ed8;text-decoration:underline;word-break:break-word">'+esc(fn)+'</a> <span style="color:#94a3b8" title="download">⤓</span>'; }
+    function thead(cols){ return '<thead><tr>'+cols.map(function(c){return '<th style="text-align:left;padding:2px 8px 4px 0;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7;white-space:nowrap">'+c+'</th>';}).join('')+'</tr></thead>'; }
     function adRow(x){ var att='/api/supply/portal-attachment/'+x.id, dl='/api/product/doc/'+x.id;
-      return '<tr>'+(isImg(x.mime)?'<td style="padding:5px 8px 5px 0"><img class="pdoc-img" data-src="'+att+'" src="'+att+'" style="width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;cursor:zoom-in" title="click to enlarge"></td>':'<td style="padding:5px 8px 5px 0;color:#cbd5e1">📄</td>')
-        +'<td style="padding:5px 8px"><a href="'+dl+'" style="color:#1d4ed8;text-decoration:underline;word-break:break-word">'+esc(x.filename)+'</a></td><td style="padding:5px 8px;color:#94a3b8;white-space:nowrap">'+Math.max(1,Math.round((x.byte_size||0)/1024))+' KB</td><td style="padding:5px 8px;color:#94a3b8;white-space:nowrap">'+esc(x.uploaded_at||'')+'</td><td style="padding:5px 8px"><a class="pdoc-del" data-id="'+x.id+'" style="color:#dc2626;cursor:pointer">✕</a></td></tr>'; }
-    function tbl(list){ return '<table style="border-collapse:collapse;font-size:12px;width:100%;max-width:660px"><tbody>'+(list.length?list.map(adRow).join(''):'<tr><td style="color:#94a3b8;padding:6px 2px">None yet.</td></tr>')+'</tbody></table>'; }
+      return '<tr>'+thumb(x.mime,att,'5px 8px 5px 0')
+        +'<td style="padding:5px 8px">'+dlLink(dl,x.filename)+'</td>'
+        +'<td style="padding:5px 8px;color:#94a3b8;white-space:nowrap">'+Math.max(1,Math.round((x.byte_size||0)/1024))+' KB</td>'
+        +'<td style="padding:5px 8px;color:#94a3b8;white-space:nowrap">'+dt(x.uploaded_at)+'</td>'
+        +'<td style="padding:5px 8px;text-align:center"><a class="pdoc-del" data-id="'+x.id+'" title="Delete document" style="color:#dc2626;cursor:pointer;padding:2px 6px;border-radius:4px">✕</a></td></tr>'; }
+    function tbl(list,empty){ return '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;max-width:680px">'+thead(['','File','Size','Uploaded',''])+'<tbody>'+(list.length?list.map(adRow).join(''):'<tr><td colspan="5" style="color:#94a3b8;padding:8px 2px">'+empty+'</td></tr>')+'</tbody></table></div>'; }
     // Size/variant component uploads (managed in Master data) — surfaced here read-only for reference.
     var compFiles=[]; (d.sizes||[]).forEach(function(s){ (s.dimensions||[]).forEach(function(dm){ (dm.files||[]).forEach(function(f){ compFiles.push({sz:s.size_label,dim:dm.dimension,f:f}); }); }); });
     function cfRow(x){ var att='/api/supply/portal-attachment/'+x.f.id;
       var who=x.f.uploader_kind==='supplier'?'supplier':(x.f.uploaded_by?shortUser(x.f.uploaded_by):'Dock & Bay');
-      return '<tr>'+(isImg(x.f.mime)?'<td style="padding:5px 8px 5px 0"><img class="pdoc-img" data-src="'+att+'" src="'+att+'" style="width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;cursor:zoom-in" title="click to enlarge"></td>':'<td style="padding:5px 8px 5px 0;color:#cbd5e1">📄</td>')
+      return '<tr>'+thumb(x.f.mime,att,'5px 8px 5px 0')
         +'<td style="padding:5px 8px;color:#64748b;white-space:nowrap">'+esc(x.sz||'')+' · '+esc(COMP_LBL[x.dim]||x.dim)+(x.f.version?' · <b>v'+x.f.version+'</b>':'')+'</td>'
-        +'<td style="padding:5px 8px"><a href="'+att+'" download style="color:#1d4ed8;text-decoration:underline;word-break:break-word">'+esc(x.f.filename)+'</a></td>'
+        +'<td style="padding:5px 8px">'+dlLink(att,x.f.filename||'file')+'</td>'
         +'<td style="padding:5px 8px;color:#94a3b8;white-space:nowrap">'+esc(who)+'</td>'
-        +'<td style="padding:5px 8px;color:#94a3b8;white-space:nowrap">'+esc(x.f.uploaded_at||'')+'</td></tr>'; }
-    function cfTbl(list){ return '<table style="border-collapse:collapse;font-size:12px;width:100%;max-width:660px"><tbody>'+(list.length?list.map(cfRow).join(''):'<tr><td style="color:#94a3b8;padding:6px 2px">None yet.</td></tr>')+'</tbody></table>'; }
-    body.innerHTML='<div style="border:1px dashed #cbd5e1;border-radius:8px;padding:12px 14px;margin-bottom:14px;background:#f8fafc"><div style="font-weight:700;font-size:12px;margin-bottom:6px">Upload document <span style="color:#94a3b8;font-weight:400">(≤10MB)</span></div><input type="file" id="pdoc-file" style="font-size:12px"> <button class="save-btn" id="pdoc-up" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Upload</button> <span id="pdoc-msg" style="font-size:12px;margin-left:6px"></span></div>'
-      +'<div style="font-weight:700;font-size:13px;margin:4px 0 5px">Uploaded by Dock &amp; Bay</div>'+tbl(dnb)
-      +'<div style="font-weight:700;font-size:13px;margin:16px 0 5px">Uploaded by supplier</div>'+tbl(sup)
-      +'<div style="font-weight:700;font-size:13px;margin:16px 0 5px">Size / component files <span class="mut tiny" style="font-weight:400">(from Master data — edit there)</span></div>'+cfTbl(compFiles);
-    body.querySelector('#pdoc-up').onclick=function(){ var f=body.querySelector('#pdoc-file').files[0]; var m=body.querySelector('#pdoc-msg'); if(!f){m.style.color='#dc2626';m.textContent='choose a file';return;} if(f.size>10*1024*1024){m.style.color='#dc2626';m.textContent='max 10MB';return;} m.style.color='#64748b'; m.textContent='uploading…'; var rd=new FileReader(); rd.onload=function(){ shipPost('/api/product/doc',{ref:ref,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),uploaded_by:(window.ME&&ME.email)||''},function(j){ if(j&&j.error){m.style.color='#dc2626';m.textContent=j.error;return;} renderProductDetail(ref); }); }; rd.readAsDataURL(f); };
+        +'<td style="padding:5px 8px;color:#94a3b8;white-space:nowrap">'+dt(x.f.uploaded_at)+'</td></tr>'; }
+    function cfTbl(list){ return '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;max-width:680px;background:#fbfcfe">'+thead(['','Component','File','By','Uploaded'])+'<tbody>'+(list.length?list.map(cfRow).join(''):'<tr><td colspan="5" style="color:#94a3b8;padding:8px 2px">No component files yet — upload them per component in Master data.</td></tr>')+'</tbody></table></div>'; }
+    body.innerHTML='<div style="border:1px dashed #cbd5e1;border-radius:8px;padding:12px 14px;margin-bottom:14px;background:#f8fafc"><div style="font-weight:700;font-size:12px;margin-bottom:6px">Upload document <span style="color:#94a3b8;font-weight:400">(≤10MB each · multiple allowed)</span></div><input type="file" id="pdoc-file" multiple accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv" style="font-size:12px"> <button class="save-btn" id="pdoc-up" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Upload</button> <span id="pdoc-msg" style="font-size:12px;margin-left:6px"></span></div>'
+      +'<div style="font-weight:700;font-size:13px;margin:4px 0 5px">Uploaded by Dock &amp; Bay</div>'+tbl(dnb,'No documents uploaded by Dock &amp; Bay yet.')
+      +'<div style="font-weight:700;font-size:13px;margin:16px 0 5px">Uploaded by supplier</div>'+tbl(sup,'Nothing uploaded by the supplier yet.')
+      +'<div style="font-weight:700;font-size:13px;margin:16px 0 5px">Size / component files <span style="font-weight:400;font-size:10px;background:#eef2f7;color:#64748b;border-radius:4px;padding:1px 6px;vertical-align:middle">read-only — manage in Master data</span></div>'+cfTbl(compFiles);
+    function refreshDocs(){ loadProdItem(ref,function(nd){ if(nd&&nd.item&&body.isConnected){ _prodDetail=nd; renderProdDocs(body,nd); } },true); }   // silent docs-only refresh (no tab flash)
+    body.querySelector('#pdoc-up').onclick=function(){ var inp=body.querySelector('#pdoc-file'), files=inp.files, m=body.querySelector('#pdoc-msg');
+      if(!files||!files.length){m.style.color='#dc2626';m.textContent='choose a file';return;}
+      var list=Array.prototype.slice.call(files), skipped=list.filter(function(f){return f.size>10*1024*1024;}).length, ok=list.filter(function(f){return f.size<=10*1024*1024;});
+      if(!ok.length){m.style.color='#dc2626';m.textContent='all files over 10MB — skipped';return;}
+      m.style.color='#64748b'; m.textContent='uploading '+ok.length+' file'+(ok.length>1?'s':'')+'…'; var i=0;
+      (function up(){ if(i>=ok.length){ m.style.color='#16a34a'; m.textContent='uploaded'+(skipped?' ('+skipped+' skipped — over 10MB)':''); refreshDocs(); return; }
+        var f=ok[i++]; var rd=new FileReader(); rd.onload=function(){ shipPost('/api/product/doc',{ref:ref,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),uploaded_by:(window.ME&&ME.email)||''},function(j){ if(j&&j.error){m.style.color='#dc2626';m.textContent=j.error;return;} up(); }); }; rd.readAsDataURL(f); })(); };
     body.querySelectorAll('.pdoc-img').forEach(function(im){ im.onclick=function(){ openImgZoom(im.dataset.src); }; });
-    body.querySelectorAll('.pdoc-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this document?'))return; shipPost('/api/product/doc/'+a.dataset.id+'/delete',{},function(){ renderProductDetail(ref); }); }; }); }
+    body.querySelectorAll('.pdoc-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this document?'))return; shipPost('/api/product/doc/'+a.dataset.id+'/delete',{},function(){ refreshDocs(); }); }; }); }
   function renderProdTimeline(body,ref){ body.innerHTML='<div style="color:#94a3b8">Loading…</div>';
     fetch('/api/product/notes/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){ notes=Array.isArray(notes)?notes:[];
       var unreadSup=notes.filter(function(n){return n.author_kind==='supplier'&&!n.read;}).length;

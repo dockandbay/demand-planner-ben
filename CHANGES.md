@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.166 - PRODUCT Documents tab UI polish
+- Column headers (File/Size/Uploaded) on all three tables incl. the component table (Component/File/By/Uploaded).
+- Consistent download affordance: filename links download (⤓ glyph + title) across D&B, supplier and component tables; image thumbnails click-to-enlarge.
+- Dates formatted dd-mmm-yy HH:MM (was raw); "—" when empty.
+- Multi-file upload with accept filter + ≤10MB-each hint; over-size files skipped with a message; upload/delete now refresh just the Documents table (silent) instead of re-rendering the whole detail pane.
+- Delete ✕ has a title + larger hit target; component table marked "read-only — manage in Master data"; overflow-x wrappers + friendlier empty states.
+
 ## v26.165 - PRODUCT expand performance: cache + skeleton + parallel warm (A+B+C)
 - (A) Cache product item responses by ref (60s TTL); re-opening a row is now instant. Cache is cleared on any /api/product/ write so it's always current after an edit.
 - (B) Skeleton shimmer rows paint immediately on expand instead of a ~1s blank panel.
