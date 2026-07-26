@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.146 - Fix: PLAN button on the product grid opens the detail again
+
+- A regression in v26.145 left an out-of-scope reference in the PLAN click handler, so nothing opened. Fixed.
+
 ## v26.145 - PRODUCT grid actions match the PO grid UX
 
 - The product-row action indicator is now a **single count badge** (e.g. "3") with a **fast 120ms tooltip** explaining
