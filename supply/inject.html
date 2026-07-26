@@ -664,8 +664,8 @@
     ['payments','PAYMENTS'],['samples','SAMPLES']];   // CONFIG is now a top-level view (see enterConfig); SHIPMENTS lives under the PURCHASE ORDERS sub-nav (poSub 'shipments'); PAYMENTS umbrella holds Deposits / Other Payments / Payments Due / Payments Report
   // REPORTS is a parent tab; these are its sub-tabs (the read-across views).
   var REPORT_SECTIONS=[['metrics','METRICS'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
-    ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['cashflow','CASH FLOW'],['directclient','DIRECT TO CLIENT'],['flexport','FLEXPORT']];   // ERP COMPARE moved to ACTIONS ▸ ERP Compare sub-tab
-  var REPORT_KEYS=['metrics','reallocate','urgent-buy','container-fill','consolidate','upcoming','pipeline','cashflow','directclient','flexport'];
+    ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['directclient','DIRECT TO CLIENT'],['flexport','FLEXPORT']];   // ERP COMPARE moved to ACTIONS ▸ ERP Compare sub-tab; CASH FLOW moved to PAYMENTS ▸ Cash Flow
+  var REPORT_KEYS=['metrics','reallocate','urgent-buy','container-fill','consolidate','upcoming','pipeline','directclient','flexport'];
   var BI_TABS={'metrics':'/api/supply/bi','urgent-buy':'/api/supply/bi/projection','reallocate':'/api/supply/bi/reallocations','container-fill':'/api/supply/bi/container-fill','consolidate':'/api/supply/bi/consolidations','erp-compare':'/api/supply/bi/erp-compare'};   // fluid: always re-fetch
   var reportTab='metrics';   // BI & REPORTS opens on METRICS by default
   var ANNOT={
@@ -4102,7 +4102,7 @@
   // PURCHASE ORDERS is now the umbrella: PLAN (the PO grid) + the former PRODUCTIONS sub-tabs.
   var poSub='plan';
   var PO_SUBS=[['plan','PLAN'],['shipments','Shipments'],['crossdock','Crossdock & Labels'],['manufacturing','Manufacturing'],['list','Productions'],['barcodes','Barcodes']];
-  var PAY_SUBS=[['deposits','Deposits'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report']];   // the PAYMENTS umbrella (moved out of PURCHASE ORDERS)
+  var PAY_SUBS=[['deposits','Deposits'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['cashflow','Cash Flow']];   // the PAYMENTS umbrella (moved out of PURCHASE ORDERS); Cash Flow moved here from BI & REPORTS
   var PO_SUB_KEYS=PO_SUBS.map(function(t){return t[0];});
   var PAY_SUB_KEYS=PAY_SUBS.map(function(t){return t[0];});
   var ALL_SUB_KEYS=PO_SUB_KEYS.concat(PAY_SUB_KEYS);
@@ -4293,6 +4293,7 @@
     if(prodTab==='other'){ renderOtherPayments(b); return; }
     if(prodTab==='paydue'){ renderPaymentsDue(b); return; }
     if(prodTab==='payreport'){ renderPaymentsReport(b); return; }
+    if(prodTab==='cashflow'){ b.innerHTML='<div class="count">Loading…</div>'; fetch('/api/supply/cashflow').then(function(r){return r.json();}).then(function(d){ renderCashflow(d); }).catch(function(e){ b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>'; }); return; }   // Cash Flow now lives under PAYMENTS
     if(prodTab==='barcodes'){ b.innerHTML='<div class="count">Loading…</div>';
       fetch('/api/supply/barcodes').then(function(r){return r.json();}).then(function(d){ renderBarcodes(d, b); })
         .catch(function(e){ b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>'; }); return; }
@@ -5949,7 +5950,7 @@
                 +'<button class="save-btn fx-drive-btn" data-c="'+c+'">⬆ DriveHQ</button></td></tr>'; }).join('')
             +'</tbody></table></div>';
           // ── Report exports — email a report CSV to a saved recipient ──
-          var RX=[['cf_transactions','Cash Flow Transactions','all cash-flow transactions','#/supply/reports/cashflow'],['cf_arrivals','Cash Flow Stock Arrivals','stock arrivals (goods + duty per PO)','#/supply/reports/cashflow'],['auto_forecast','Auto Forecast','payments plan — cash out by month (USD + GBP)','#/reports/af']];
+          var RX=[['cf_transactions','Cash Flow Transactions','all cash-flow transactions','#/supply/payments/cashflow'],['cf_arrivals','Cash Flow Stock Arrivals','stock arrivals (goods + duty per PO)','#/supply/payments/cashflow'],['cf_starting_deposits','Cash Flow Starting Deposits','starting deposits (type = Deposit)','#/supply/payments/cashflow'],['auto_forecast','Auto Forecast','payments plan — cash out by month (USD + GBP)','#/reports/af']];
           var rxHead='<div class="sect-h" style="margin-top:22px">Report exports — email <span class="mut tiny">— set a recipient and email the current CSV (same data as the on-screen export). Report names link to the source page.</span></div>';
           var rxTbl='<div class="tw" style="max-width:820px"><table><thead><tr><th class="l">Report</th><th class="l">Email to</th><th class="l">Action</th></tr></thead><tbody>'
             +RX.map(function(x){ var ek=x[0], em=esc(_appset['export_email_'+ek]||'');
@@ -6216,7 +6217,7 @@
       if(s.country&&(x.country||'').toUpperCase()!==s.country)return false;
       if(s.q){ var q=s.q.toLowerCase(); if(((x.ref||'')+' '+(x.supplier||'')+' '+x.type).toLowerCase().indexOf(q)<0)return false; }
       return true; }); }
-  function renderCashflow(d){ var c=document.getElementById('rep-body')||document.getElementById('supply-content');
+  function renderCashflow(d){ var c=document.getElementById('rep-body')||document.getElementById('prod-body')||document.getElementById('supply-content');
     var today=d.today, curMonth=today.slice(0,7), exportLines=[];   // exportLines = the currently-filtered list (Copy/CSV)
     if(!_cfState.types){ _cfState.types={}; CF_TYPES.forEach(function(t){_cfState.types[t]=true;}); }
     // month options from the data; default the list to the current month (else all)
@@ -6291,6 +6292,9 @@
       +'<button class="save-btn" id="cf-copy-all" title="Copy every cash-flow transaction to the clipboard">⧉</button>'
       +'<button class="save-btn" id="cf-csv-all" style="background:#dcfce7;color:#166534;border-color:#16a34a" title="Download every cash-flow transaction as CSV">⬇ CSV</button>'
       +'<button class="save-btn" id="cf-email-all" style="background:#dbeafe;color:#1e40af;border-color:#93c5fd" title="Email the all-transactions CSV to the saved recipient (set in CONFIG ▸ Exports & uploads)">✉ Email</button>'
+      +'<span class="tiny mut" style="margin-left:6px">Starting deposits:</span>'
+      +'<button class="save-btn" id="cf-copy-sd" title="Copy the starting deposits (type = Deposit) to the clipboard">⧉</button>'
+      +'<span style="position:relative;display:inline-block"><button class="save-btn" id="cf-sd-exp" style="background:#dcfce7;color:#166534;border-color:#16a34a" title="Export the starting deposits (CSV or Email)">⬇ Export ▾</button><span id="cf-sd-menu" style="display:none;position:absolute;top:100%;right:0;z-index:70;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.18);min-width:120px"><a class="cf-sd-opt" data-a="csv" style="display:block;padding:7px 11px;font-size:12px;cursor:pointer;border-bottom:1px solid #f1f5f9;color:#166534">⬇ CSV</a><a class="cf-sd-opt" data-a="email" style="display:block;padding:7px 11px;font-size:12px;cursor:pointer;color:#1e40af">✉ Email</a></span></span>'
       +'<span class="tiny mut" style="margin-left:6px">Stock arrivals:</span>'
       +'<button class="save-btn" id="cf-arr-copy" title="Copy Stock arrivals (goods + import duty per PO, dated on completion) to the clipboard">⧉</button>'
       +'<button class="save-btn" id="cf-arr-csv" style="background:#dcfce7;color:#166534;border-color:#16a34a" title="Download Stock arrivals as CSV (goods + import duty per PO, dated on completion)">⬇ CSV</button>'
@@ -6320,6 +6324,12 @@
     function cfEmail(btn,key,rowsFn,fn){ postEmailCsv(btn,key,rowsToCsvStr(rowsFn()),fn); }
     c.querySelector('#cf-email-all').onclick=function(){ cfEmail(this,'cf_transactions',cfAllRows,'cash_flow_all_transactions.csv'); };
     c.querySelector('#cf-email-arr').onclick=function(){ cfEmail(this,'cf_arrivals',cfArrivalsRows,'stock_arrivals.csv'); };
+    // Starting Deposits — the "All transactions" format filtered to type = Deposit; copy + a merged CSV/Email dropdown.
+    function cfStartDepRows(){ return cfAllRows().filter(function(r){return r.Type==='Deposit';}); }
+    c.querySelector('#cf-copy-sd').onclick=function(){ copyRows(cfStartDepRows(),'Starting deposits'); };
+    var _sdExp=c.querySelector('#cf-sd-exp'), _sdMenu=c.querySelector('#cf-sd-menu');
+    _sdExp.onclick=function(e){ e.stopPropagation(); _sdMenu.style.display=(_sdMenu.style.display==='none'?'':'none'); };
+    c.querySelectorAll('.cf-sd-opt').forEach(function(a){ a.onclick=function(){ _sdMenu.style.display='none'; if(a.dataset.a==='csv')csv(cfStartDepRows(),'starting_deposits.csv'); else cfEmail(_sdExp,'cf_starting_deposits',cfStartDepRows,'starting_deposits.csv'); }; });
     c.querySelector('#cf-month').onchange=function(){_cfState.month=this.value;draw();};
     c.querySelectorAll('.pill[data-tt]').forEach(function(p){p.onclick=function(){var t=p.dataset.tt;_cfState.types[t]=!_cfState.types[t];p.classList.toggle('active',_cfState.types[t]);draw();};});
     c.querySelectorAll('.pill[data-st]').forEach(function(p){p.onclick=function(){_cfState.status=p.dataset.st;c.querySelectorAll('.pill[data-st]').forEach(function(x){x.classList.toggle('active',x===p);});draw();};});
@@ -6662,10 +6672,18 @@
     c.innerHTML=annot('deposits')+lookupDatalists()+'<div class="bar">'
       +'<input class="flt" id="sup-search" placeholder="Filter…">'
       +'<button class="save-btn" id="dep-new">+ Deposit</button>'
-      +'<span class="count" id="sup-count"></span></div><div id="sup-grid"></div>';
+      +'<span class="count" id="sup-count"></span>'
+      +'<span style="margin-left:auto;display:flex;align-items:center;gap:5px"><span class="tiny mut">Deposits summary:</span><button class="save-btn" id="dep-sum-copy" title="Copy each deposit (ref, supplier, PROD#, description, amount, FX, date paid, used, remaining) to the clipboard">⧉</button><button class="save-btn" id="dep-sum-csv" style="background:#dcfce7;color:#166534;border-color:#16a34a" title="Download the deposits summary as CSV (excludes linked POs and due / likely-pay dates)">⬇ CSV</button></span></div><div id="sup-grid"></div>';
+    // Deposits Summary export — each deposit without linked POs / due date / likely-pay date.
+    function depSummaryRows(){ return rows.filter(function(x){return x.is_deposit;}).map(function(x){ return {
+      Reference:x.reference||'', Type:'Deposit', Supplier:x.supplier_name||'', 'PROD#':x.prod_no||'', Description:x.description||'',
+      Amount:(Number(x.amount)||0).toFixed(2), 'FX (Xero)':x.xero_fx||'', 'Date paid':x.date_paid||'',
+      Used:(Number(x.deposit_used)||0).toFixed(2), Remaining:(Number(x.deposit_remaining)||0).toFixed(2) }; }); }
     function view(){ var f=filt(rows,state.q); document.getElementById('sup-count').textContent=f.length+' deposits'; document.getElementById('sup-grid').innerHTML=depTable(f); bindEdits(); }
     document.getElementById('sup-search').oninput=function(){state.q=this.value;view();};
     document.getElementById('dep-new').onclick=function(){depCreate(true);};
+    document.getElementById('dep-sum-copy').onclick=function(){ copyRows(depSummaryRows(),'Deposits summary'); };
+    document.getElementById('dep-sum-csv').onclick=function(){ csv(depSummaryRows(),'deposits_summary.csv'); };
     view(); }
   function supSel(ep,val){ return '<input class="fci txt" list="supplierlist" placeholder="pick / type…" data-ep="'+esc(ep)+'" data-field="supplier_name" value="'+esc(val==null?'':val)+'">'; }
   function depTable(rows){ if(!rows.length)return '<div class="count">No rows in this filter.</div>';
@@ -7160,7 +7178,8 @@
     if(_erpcCount==null||_erpcCount===0){ el.textContent=''; el.style.display='none'; }
     else { el.textContent=_erpcCount; el.style.display=''; el.title=_erpcCount+' open ERP PO(s) to review (not ignored)'; } }
   function refreshErpcBadge(){ fetch('/api/supply/bi/erp-compare').then(function(r){return r.json();}).then(function(j){ if(j&&typeof j.count==='number'){ _erpcCount=j.count; paintErpcBadge(); } }).catch(function(){}); }
-  function selectReport(rk){ current='reports'; reportTab=rk; syncHash();
+  function selectReport(rk){ if(rk==='cashflow')return showPoSub('cashflow');   // Cash Flow moved to PAYMENTS ▸ Cash Flow
+    current='reports'; reportTab=rk; syncHash();
     document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k==='reports');});
     var _ns=document.getElementById('supply-nav-sel'); if(_ns)_ns.value='reports';
     var c=document.getElementById('supply-content');

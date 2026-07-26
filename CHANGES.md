@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.181 - Cash Flow reports: Starting Deposits, Deposits Summary, moved under Payments
+- Cash Flow report: new "Starting deposits" export (the All-transactions format filtered to type = Deposit) with copy + a merged CSV/Email dropdown (new export key cf_starting_deposits for CONFIG ▸ Exports).
+- Deposits page: new "Deposits summary" copy + CSV (each deposit — ref, supplier, PROD#, description, amount, FX, date paid, used, remaining — excludes linked POs and due/likely-pay dates).
+- Moved the Cash Flow report from BI & REPORTS to PAYMENTS ▸ Cash Flow. New URL #/supply/payments/cashflow; the old #/supply/reports/cashflow redirects. CONFIG export links updated.
+
 ## v26.180 - Component + Status columns widened (again), no label clipping
 - Size variants & components: Component column 250→380px (+50%) with a larger bold label and NO ellipsis clipping (so "Other components" always shows in full); Status column 130→175px (+~30%) to hold the approved-sample dropdown. Table min-width bumped to 1320px.
 
