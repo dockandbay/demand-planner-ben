@@ -8313,6 +8313,15 @@ app.post('/api/portal/product-sample-photo', portalAuth, async (req, res) => { c
     await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'supplier',$3)`,
       [sr.item_ref, req.portal.email || null, 'Supplier uploaded a file to sample v' + sr.version + ': ' + (b.filename || 'file')]);
     res.json({ ok: true, id: attId }); } catch (e) { res.status(500).json({ error: e.message }); } });
+// Supplier deletes a file they uploaded to a sample (only their own uploads on their own sample).
+app.post('/api/portal/product-sample-photo/:id/delete', portalAuth, async (req, res) => {
+  try { const a = (await pool.query(`SELECT po, coalesce(uploader_kind,'internal') uploader_kind FROM planner.portal_attachments WHERE id=$1 AND category='product_sample'`, [req.params.id])).rows[0];
+    if (!a) return res.status(404).json({ error: 'not found' });
+    const sampleId = String(a.po).replace('PSAMPLE-', '');
+    if (!(await portalOwnsProductSample(req, sampleId))) return res.status(403).json({ error: 'not your sample' });
+    if (a.uploader_kind !== 'supplier') return res.status(403).json({ error: 'you can only delete files you uploaded' });
+    await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
 // Supplier uploads a document/photo directly into a product's Documents list (category='product', uploader_kind='supplier').
 app.post('/api/portal/product-doc', portalAuth, async (req, res) => { const b = req.body || {}, ref = (b.ref || '').trim();
   if (!ref || !b.data_base64) return res.status(400).json({ error: 'ref + data_base64 required' });

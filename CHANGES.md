@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.174 - Portal sample: silent status/shipment updates, searchable shipment picker, file delete/download
+- Changing a sample's status or shipment now updates silently (in place) instead of reloading the whole tab — the "assign to a shipment" nudge appears without a flash.
+- The shipment control is now a search box: type to filter the supplier's sample shipments by SR ref, carrier or tracking code; each option shows carrier · tracking; plus Not shipped / Unassign.
+- Sample files: supplier can now delete files they uploaded (✕, own uploads only) and download image files (⤓) as well as click-to-view. Uploads/deletes update silently. New endpoint /api/portal/product-sample-photo/:id/delete.
+
 ## v26.173 - Supplier portal URL routing (shareable deep links)
 - Added hash-based routing to the supplier portal. Menu tabs update the URL (#/pos, #/shipmentplan, #/deposits, #/payments, #/productions, #/samples, #/product) and grid items deep-link: #/pos/PO-123 (auto-opens the PO), #/product/SS27-TOWEL-BL-02 (auto-opens the product dev), #/samples/SR-45 (filters to the sample), #/shipmentplan/PO-123.
 - URL updates as you navigate (tab switch, PO expand, product open, notifications) so a link can be copied and shared; opening a shared link lands on the right tab/item. Back/forward and paste-in supported via hashchange. Legacy ?po= deep link still works.
