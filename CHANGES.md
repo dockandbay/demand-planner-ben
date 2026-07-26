@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.139 - Type column wraps long labels
+
+- Long Type labels in Actions (e.g. "Deposit FX missing") now wrap within the column instead of overflowing.
+
 ## v26.138 - Smaller Fix-column buttons in Actions
 
 - Reduced the button size in the Actions **Fix** column (10px font, tighter padding) so they fit the column cleanly.
