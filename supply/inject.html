@@ -8421,15 +8421,16 @@
   // Colour the size-approval dropdown: pending = orange, approved = green, rejected = red.
   function szApprovalStyle(v){ return v==='approved'?'background:#dcfce7;color:#166534;font-weight:700':v==='rejected'?'background:#fee2e2;color:#991b1b;font-weight:700':'background:#fef3c7;color:#92400e;font-weight:600'; }
   // Red "N map SKU" reminder (+ snooze) shown on a product row when it has approved sizes with no planner SKU yet.
-  function skuMapBadge(r){ var n=r.sizes_unmapped||0; if(!n)return '';
-    if(snzActive(_poActState['prodsku|'+r.ref]))return ' <span class="mut tiny" title="SKU-mapping reminder snoozed — click 💤 to change" style="cursor:default">💤 SKU</span>';
-    return ' <button class="ex-badge pg-skumap" data-ref="'+esc(r.ref)+'" style="background:#dc2626;cursor:pointer;border:none" title="'+n+' approved size(s) need a SKU mapping — click to map">'+n+' map SKU</button>'
-      +' <button class="pg-skusnz" data-ref="'+esc(r.ref)+'" title="snooze this reminder" style="background:none;border:none;cursor:pointer;font-size:12px;padding:0 2px;line-height:1">💤</button>'; }
-  // Red "A N" action next to the product ref: approved item with sizes still lacking an approved sample version (+ snooze).
-  function sampApprBadge(r){ var n=r.sizes_unappr_sample||0; if(!n)return '';
-    if(snzActive(_poActState['prodsamp|'+r.ref]))return ' <span class="mut tiny" title="sample-approval reminder snoozed" style="cursor:default">💤 A</span>';
-    return ' <button class="ex-badge pg-sampact" data-ref="'+esc(r.ref)+'" style="background:#dc2626;cursor:pointer;border:none" title="'+n+' size(s) need an approved sample version — click to open">A '+n+'</button>'
-      +' <button class="pg-sampsnz" data-ref="'+esc(r.ref)+'" title="snooze this reminder" style="background:none;border:none;cursor:pointer;font-size:12px;padding:0 2px;line-height:1">💤</button>'; }
+  // Open product actions (respecting item-level snooze): approved sizes needing a SKU, + approved item's sizes needing
+  // an approved sample version. Returns {n, note} for a single count badge (like the PO grid) — snooze lives in the detail.
+  function prodOpenActs(r){ var nMap=(r.sizes_unmapped||0), nSamp=(r.sizes_unappr_sample||0);
+    var mapOn=nMap&&!snzActive(_poActState['prodsku|'+r.ref]), sampOn=nSamp&&!snzActive(_poActState['prodsamp|'+r.ref]);
+    var n=(mapOn?nMap:0)+(sampOn?nSamp:0), notes=[];
+    if(mapOn)notes.push(nMap+' size'+(nMap>1?'s':'')+' need a SKU mapping');
+    if(sampOn)notes.push(nSamp+' size'+(nSamp>1?'s':'')+' need an approved sample version');
+    return { n:n, note:notes.join(' · ') }; }
+  function prodActBadge(r){ var a=prodOpenActs(r); if(!a.n)return '';
+    return ' <button class="ex-badge pg-actbadge" data-ref="'+esc(r.ref)+'" data-note="'+esc(a.note+' — click to open')+'" style="background:#dc2626;cursor:pointer;border:none">'+a.n+'</button>'; }
   function renderProductReports(c){ c.innerHTML='<div style="color:#94a3b8">Loading…</div>';
     fetch('/api/product/reports').then(function(r){return r.json();}).then(function(d){ if(!d||d.error){ c.innerHTML='<div style="color:#dc2626">Failed: '+esc((d&&d.error)||'error')+'</div>'; return; }
       var o=d.overall||{};
@@ -8448,17 +8449,17 @@
         +'<div class="mut tiny" style="margin-top:6px">“Avg samples/days to approve” are measured over <b>approved</b> products only. Time-to-approve runs from the product’s development-start date (the <i>Development started</i> override on Master data, else its creation date) to approval.</div>'
         +tbl('By season','Season',d.bySeason)+tbl('By category','Category',d.byCategory)+tbl('By supplier','Supplier',d.bySupplier);
     }).catch(function(e){ c.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
-  var _prodFilt={season:'',status:'unapproved',q:''};
+  var _prodFilt={season:'',status:'dev_actions',q:''};
   function renderProductPlan(c){
     c.innerHTML='<div id="pg-filters" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px"></div><div id="pg-grid"><div style="color:#94a3b8">Loading…</div></div>';
     if(!_poActStateLoaded){ loadPoActState(function(){ renderProductPlan(c); }); return; }   // need snooze state for the SKU-mapping reminder
     fetch('/api/product/items').then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
       var seasons=[]; rows.forEach(function(r){ if(r.season&&seasons.indexOf(r.season)<0)seasons.push(r.season); }); seasons.sort();
-      var STAT=[['unapproved','Not approved'],['','All'],['in_development','In development'],['approved','Approved'],['dropped','Dropped']];
+      var STAT=[['dev_actions','In development + open actions'],['unapproved','Not approved'],['','All'],['in_development','In development'],['approved','Approved'],['dropped','Rejected']];
       var fb=document.getElementById('pg-filters');
       fb.innerHTML='<button class="save-btn" id="pg-new" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd">+ New product</button>'
         +'<span style="display:flex;align-items:center;gap:5px"><span style="color:#64748b;font-size:11px">Season</span><select class="fci" id="pg-season" style="text-align:left"><option value="">All</option>'+seasons.map(function(s){return '<option value="'+esc(s)+'"'+(s===_prodFilt.season?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>'
-        +'<span style="display:flex;align-items:center;gap:5px"><span style="color:#64748b;font-size:11px">Status</span><select class="fci" id="pg-status" style="text-align:left">'+STAT.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===_prodFilt.status?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></span>'
+        +'<span style="display:flex;align-items:center;gap:5px"><span style="color:#64748b;font-size:11px">Status</span><select class="fci" id="pg-status" style="text-align:left'+(_prodFilt.status?';background:#0f172a;color:#fff;font-weight:600':'')+'">'+STAT.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===_prodFilt.status?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></span>'
         +'<input class="fci" id="pg-q" value="'+esc(_prodFilt.q)+'" placeholder="search ref / colour / supplier / description…" style="width:300px;text-align:left">'
         +'<span id="pg-count" style="color:#94a3b8;font-size:11px"></span>';
       document.getElementById('pg-new').onclick=openProductNew;
@@ -8467,7 +8468,8 @@
         var q=_prodFilt.q.trim().toLowerCase();
         var f=rows.filter(function(r){
           if(_prodFilt.season && r.season!==_prodFilt.season)return false;
-          if(_prodFilt.status==='unapproved'){ if(r.status==='approved')return false; } else if(_prodFilt.status){ if(r.status!==_prodFilt.status)return false; }
+          if(_prodFilt.status==='dev_actions'){ if(!(r.status==='in_development' || prodOpenActs(r).n>0))return false; }
+          else if(_prodFilt.status==='unapproved'){ if(r.status==='approved')return false; } else if(_prodFilt.status){ if(r.status!==_prodFilt.status)return false; }
           if(q){ var hay=((r.ref||'')+' '+(r.colour_name||'')+' '+(r.supplier||'')+' '+(r.description||'')).toLowerCase(); if(hay.indexOf(q)<0)return false; }
           return true; });
         document.getElementById('pg-count').textContent=f.length+' of '+rows.length;
@@ -8481,7 +8483,7 @@
             var sw=r.has_swatch?'<img class="pg-swatch2 pg-swatch-zoom" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at)+'" title="click to enlarge" style="cursor:zoom-in">':'<span class="pg-swatch2 none">n/a</span>';
             return '<tr>'
               +'<td><span style="display:inline-flex;align-items:center;gap:7px">'+sw+'<button class="planbtn pg-open" data-ref="'+esc(r.ref)+'" data-i="'+i+'">PLAN</button></span></td>'
-              +'<td><div class="pg-ref">'+esc(r.ref)+(r.unread_supplier?' <span class="ex-badge" title="'+r.unread_supplier+' new supplier message(s)">'+r.unread_supplier+'</span>':'')+skuMapBadge(r)+sampApprBadge(r)+'</div>'+(r.colour_name?'<div class="pg-colour">'+esc(r.colour_name)+'</div>':'')+'</td>'
+              +'<td><div class="pg-ref" data-ref="'+esc(r.ref)+'">'+esc(r.ref)+(r.unread_supplier?' <span class="ex-badge" title="'+r.unread_supplier+' new supplier message(s)">'+r.unread_supplier+'</span>':'')+prodActBadge(r)+'</div>'+(r.colour_name?'<div class="pg-colour">'+esc(r.colour_name)+'</div>':'')+'</td>'
               +'<td>'+prodPickBtn(r.ref,'category',r.category,'category')+'</td>'
               +'<td>'+prodPickBtn(r.ref,'season',r.season,'season')+'</td>'
               +'<td>'+prodPickBtn(r.ref,'supplier',r.supplier,'supplier')+'</td>'
@@ -8497,18 +8499,23 @@
           row.style.display=''; datarow.classList.add('pg-openrow'); _prodDetailTab='master'; renderProductDetail(ref, row.querySelector('.pg-det'), r); }; });
         g.querySelectorAll('.prod-cell-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openProdCellPick(b); }; });
         g.querySelectorAll('.samp-open').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); gotoSample(a.dataset.ref); }; });   // sample-shipment ref → SUPPLY ▸ Samples
-        g.querySelectorAll('.pg-skumap').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var pb=g.querySelector('.pg-open[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(b.dataset.ref):b.dataset.ref)+'"]'); if(pb)pb.click(); }; });   // open the product → map its sizes
-        g.querySelectorAll('.pg-skusnz').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openKeySnzMenu(b,'prodsku|'+b.dataset.ref,function(){ draw(); }); }; });
-        g.querySelectorAll('.pg-sampact').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var pb=g.querySelector('.pg-open[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(b.dataset.ref):b.dataset.ref)+'"]'); if(pb)pb.click(); }; });   // open the product → pick approved sample versions
-        g.querySelectorAll('.pg-sampsnz').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openKeySnzMenu(b,'prodsamp|'+b.dataset.ref,function(){ draw(); }); }; });
+        // Single count badge (like the PO grid): fast 120ms tooltip explains the actions; click opens the product (snooze lives inside).
+        g.querySelectorAll('.pg-actbadge').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var pb=g.querySelector('.pg-open[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(b.dataset.ref):b.dataset.ref)+'"]'); if(pb)pb.click(); }; });
+        bindFastTips(g);
         g.querySelectorAll('.pg-swatch-zoom').forEach(function(img){ img.onclick=function(e){ e.stopPropagation(); openImgZoom(img.src); }; });   // click swatch → enlarge
         g.querySelectorAll('.pg-status-sel').forEach(function(sel){ sel.onclick=function(e){ e.stopPropagation(); }; sel.onchange=function(){ var v=this.value, ref=this.dataset.ref; this.setAttribute('style',prodStatusStyle(v));   // recolour immediately
-          shipPost('/api/product/item/'+encodeURIComponent(ref),{status:v},function(j){ if(j&&j.error){alert('Failed: '+j.error);return;} _prodCfg=null; renderProductPlan(c); }); }; });   // status is colour-coded + editable; save + refresh (badges depend on approval)
+          shipPost('/api/product/item/'+encodeURIComponent(ref),{status:v},function(j){ if(j&&j.error){alert('Failed: '+j.error);return;} _prodCfg=null;
+            // Persist the view: patch just this row's action badge in place (don't collapse an open detail / lose scroll).
+            fetch('/api/product/item/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ if(!d||!d.item)return; var sz=d.sizes||[], ro=rows.filter(function(x){return x.ref===ref;})[0]; if(!ro)return;
+              ro.status=v; ro.sizes_unmapped=sz.filter(function(s){return s.approval_status==='approved'&&!s.mapped_sku;}).length; ro.sizes_unappr_sample=(v==='approved')?sz.filter(function(s){return !s.approved_sample_id;}).length:0;
+              var rc=g.querySelector('.pg-ref[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(rc){ rc.innerHTML=esc(ro.ref)+(ro.unread_supplier?' <span class="ex-badge" title="'+ro.unread_supplier+' new supplier message(s)">'+ro.unread_supplier+'</span>':'')+prodActBadge(ro);
+                var nb=rc.querySelector('.pg-actbadge'); if(nb)nb.onclick=function(e){ e.stopPropagation(); var pb=g.querySelector('.pg-open[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(pb)pb.click(); }; }
+            }).catch(function(){}); }); }; });
         if(_pendingProdRef){ var _pr=_pendingProdRef; _pendingProdRef=null; var _pb=g.querySelector('.pg-open[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(_pr):_pr)+'"]'); if(_pb)_pb.click(); }
       }
       _prodDraw=draw;
       document.getElementById('pg-season').onchange=function(){ _prodFilt.season=this.value; draw(); };
-      document.getElementById('pg-status').onchange=function(){ _prodFilt.status=this.value; draw(); };
+      document.getElementById('pg-status').onchange=function(){ _prodFilt.status=this.value; this.setAttribute('style','text-align:left'+(this.value?';background:#0f172a;color:#fff;font-weight:600':'')); draw(); };
       document.getElementById('pg-q').oninput=function(){ _prodFilt.q=this.value; draw(); };
       draw();
     }).catch(function(e){ document.getElementById('pg-grid').innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
@@ -8592,6 +8599,7 @@
       // Mapped SKU: once the size is approved, map it to a planner SKU (searchable). Red "map SKU" prompt until set.
       +'<td style="padding:3px 8px">'+(s.approval_status==='approved'
           ? '<button class="cell-pick pm-sku-pick" data-id="'+s.id+'" data-sku="'+esc(s.mapped_sku||'')+'" title="map this approved size to a planner SKU">'+(s.mapped_sku?'<b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.mapped_sku)+'</b>':'<span class="mut">— <span style="background:#fee2e2;color:#991b1b;font-weight:700;border-radius:3px;padding:0 3px">map SKU</span></span>')+' ▾</button>'
+             +((s.mapped_sku||snzActive(_poActState['prodsku|'+it.ref]))?'':' <button class="ex-badge pm-skua" data-ref="'+esc(it.ref)+'" title="Action: map this approved size to a planner SKU (click to snooze this reminder)" style="background:#dc2626;cursor:pointer;border:none">A</button>')
           : '<span class="mut tiny">approve first</span>')+'</td>'
       // Approved sample version — only once the ITEM is approved. Red + "A" action (item-level snooze) until a version is picked.
       +'<td style="padding:3px 8px">'+(it.status!=='approved'
@@ -8637,6 +8645,7 @@
       scope.querySelectorAll('.pm-sz-del').forEach(function(a){ if(a._b)return; a._b=1; a.onclick=function(){ if(!confirm('Remove this size?'))return; shipPost('/api/product/size/'+a.dataset.id+'/delete',{},function(){ renderProductDetail(it.ref); }); }; });
       scope.querySelectorAll('.pm-sku-pick').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(e){ e.stopPropagation(); openSkuPick(b,function(val){ var id=b.dataset.id, so=szObj(id); if(so)so.mapped_sku=(val||''); reRow(id); }); }; });
       scope.querySelectorAll('.pm-samp-a').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(e){ e.stopPropagation(); openKeySnzMenu(b,'prodsamp|'+b.dataset.ref,function(){ renderProductDetail(it.ref); }); }; });
+      scope.querySelectorAll('.pm-skua').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(e){ e.stopPropagation(); openKeySnzMenu(b,'prodsku|'+b.dataset.ref,function(){ renderProductDetail(it.ref); }); }; });
     }
     bindSz(body);
     // Item status: colour-code + re-render the size rows on change (the "Approved sample" cell depends on it.status).

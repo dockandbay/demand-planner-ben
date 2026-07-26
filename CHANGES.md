@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.145 - PRODUCT grid actions match the PO grid UX
+
+- The product-row action indicator is now a **single count badge** (e.g. "3") with a **fast 120ms tooltip** explaining
+  the items (like the PO grid), instead of the verbose "N map SKU 💤 / A N 💤". Clicking it opens the product.
+- **Snooze moved into the detail**: each open action (map-SKU / approved-sample) shows a red **"A"** badge with an
+  explainer tooltip + snooze dropdown on the size row — no snooze clutter in the grid.
+- **Default grid filter** is now **"In development + open actions"** (shows in-dev products *and* any product with
+  open actions), so approving a product doesn't make it vanish from the list.
+- The **Status filter** is highlighted **black** when a filter is active (not "All"), so it's clear one's applied.
+- Changing a product's status in the grid now **patches the row in place** (keeps your place / any open detail) instead
+  of reloading the whole grid.
+
 ## v26.144 - Supplier uploads to product docs + samples
 
 - Supplier portal: suppliers can now **upload photos/documents** (a) against a **sample version** and (b) directly
