@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.175 - Admin PRODUCT: samples ordering/format, sample-shipments column, combined grid badge
+- Admin Samples tab: dates shown dd-mmm-yy, "submitted by <user>", and versions listed newest-first (descending by date).
+- Size variants & components table: new last column "Sample shipments" — per size×component, the SR sample shipments of samples covering that size + aspect (hover shows carrier · tracking). Item endpoint now returns sample_sizes/sampled_aspects/shipments.
+- Product grid: the ref badge is now a single combined count = open actions + unread supplier messages (was two separate badges).
+- The Master data sub-tab heading now shows the open-action count (like Timeline shows unread), computed from the detail.
+
 ## v26.174 - Portal sample: silent status/shipment updates, searchable shipment picker, file delete/download
 - Changing a sample's status or shipment now updates silently (in place) instead of reloading the whole tab — the "assign to a shipment" nudge appears without a flash.
 - The shipment control is now a search box: type to filter the supplier's sample shipments by SR ref, carrier or tracking code; each option shows carrier · tracking; plus Not shipped / Unassign.

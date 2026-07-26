@@ -3265,9 +3265,12 @@ app.get('/api/product/item/:ref', async (req, res) => {
       pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort, coalesce(mapped_sku,'') mapped_sku, approved_sample_id
         FROM planner.product_dev_sizes WHERE item_id=(SELECT id FROM planner.product_dev_items WHERE ref=$1) ORDER BY sort, id`, [ref]),
       pool.query(`SELECT id, filename, mime, byte_size, coalesce(uploaded_by,'') uploaded_by, coalesce(uploader_kind,'internal') uploader_kind, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments WHERE po=$1 AND category='product' ORDER BY uploaded_at DESC`, [ref]),
-      pool.query(`SELECT id, version, coalesce(dimension,'product') dimension,
-        CASE WHEN coalesce(dimension,'product')='product' THEN item_ref||'_v'||version ELSE item_ref||'_'||dimension||'_v'||version END ref
-        FROM planner.product_dev_samples WHERE item_ref=$1 ORDER BY dimension, version`, [ref]),
+      pool.query(`SELECT ps.id, ps.version, coalesce(ps.dimension,'product') dimension,
+        CASE WHEN coalesce(ps.dimension,'product')='product' THEN ps.item_ref||'_v'||ps.version ELSE ps.item_ref||'_'||ps.dimension||'_v'||ps.version END ref,
+        coalesce(ps.sample_sizes,'{}') sample_sizes, coalesce(ps.sampled_aspects,'{}') sampled_aspects,
+        coalesce((SELECT json_agg(jsonb_build_object('ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,'')) ORDER BY sr.ref)
+          FROM planner.sample_request_dev_samples l JOIN planner.sample_requests sr ON sr.id=l.sample_request_id WHERE l.dev_sample_id=ps.id),'[]'::json) shipments
+        FROM planner.product_dev_samples ps WHERE ps.item_ref=$1 ORDER BY ps.dimension, ps.version`, [ref]),
       pool.query(`SELECT count(*)::int n FROM planner.supplier_notes WHERE po=$1 AND author_kind='supplier' AND read_at IS NULL`, [ref]),
     ]);
     const item = itemR.rows[0];

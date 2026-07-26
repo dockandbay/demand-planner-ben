@@ -8443,6 +8443,15 @@
     return { n:n, note:notes.join('\n') }; }
   function prodActBadge(r){ var a=prodOpenActs(r); if(!a.n)return '';
     return ' <button class="ex-badge pg-actbadge" data-ref="'+esc(r.ref)+'" data-note="'+esc(a.note+'\n— click to open')+'" style="background:#dc2626;cursor:pointer;border:none">'+a.n+'</button>'; }
+  // Grid badge = ALL notifications for this product: open actions + unread supplier messages, one combined count.
+  function prodComboBadge(r){ var a=prodOpenActs(r), acts=a.n, un=Number(r.unread_supplier)||0, tot=acts+un; if(!tot)return '';
+    var note=[]; if(a.note)note.push(a.note); if(un)note.push(un+' unread supplier message'+(un>1?'s':''));
+    return ' <button class="ex-badge pg-actbadge" data-ref="'+esc(r.ref)+'" data-note="'+esc(note.join('\n')+'\n— click to open')+'" style="background:#dc2626;cursor:pointer;border:none">'+tot+'</button>'; }
+  // Action count for a product from its detail payload (d.sizes/d.item) — used for the Master data sub-tab counter.
+  function prodDetailActs(d){ if(!d||!d.item)return 0; var c={ref:d.item.ref,comp_product:0,comp_packaging:0,comp_labels:0,comp_polybag:0,comp_other:0,sizes_unmapped:0,status_misaligned:0};
+    (d.sizes||[]).forEach(function(s){ (s.dimensions||[]).forEach(function(dm){ if(dm.required&&(dm.approval_status||'pending')!=='approved')c['comp_'+dm.dimension]=(c['comp_'+dm.dimension]||0)+1; }); if(s.approval_status==='approved'&&!s.mapped_sku)c.sizes_unmapped++; });
+    var szs=(d.sizes||[]); if(szs.length&&szs.every(function(s){return s.approval_status==='approved';})&&d.item.status!=='approved')c.status_misaligned=1;
+    return prodOpenActs(c).n; }
   // Product action marker — IDENTICAL UX to the PO grid's actMark (A tooltip + SNOOZE ▾ menu 1/3/7/Indefinitely + wake).
   var PROD_ACT_HELP={ sku:'This approved size needs a planner SKU mapping. Map it above, or snooze to defer the reminder.',
     samp:'This size needs an approved sample version selected (the item is approved). Pick a version, or snooze to defer.',
@@ -8528,7 +8537,7 @@
             var sw=r.has_swatch?'<img class="pg-swatch2 pg-swatch-zoom" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at)+'" title="click to enlarge" style="cursor:zoom-in">':'<span class="pg-swatch2 none">n/a</span>';
             return '<tr>'
               +'<td><span style="display:inline-flex;align-items:center;gap:7px">'+sw+'<button class="planbtn pg-open" data-ref="'+esc(r.ref)+'" data-i="'+i+'">PLAN</button></span></td>'
-              +'<td><div class="pg-ref" data-ref="'+esc(r.ref)+'">'+esc(r.ref)+(r.unread_supplier?' <span class="ex-badge" title="'+r.unread_supplier+' new supplier message(s)">'+r.unread_supplier+'</span>':'')+prodActBadge(r)+'</div>'+(r.colour_name?'<div class="pg-colour">'+esc(r.colour_name)+'</div>':'')+'</td>'
+              +'<td><div class="pg-ref" data-ref="'+esc(r.ref)+'">'+esc(r.ref)+prodComboBadge(r)+'</div>'+(r.colour_name?'<div class="pg-colour">'+esc(r.colour_name)+'</div>':'')+'</td>'
               +'<td>'+prodPickBtn(r.ref,'category',r.category,'category')+'</td>'
               +'<td>'+prodPickBtn(r.ref,'season',r.season,'season')+'</td>'
               +'<td>'+prodPickBtn(r.ref,'supplier',r.supplier,'supplier')+'</td>'
@@ -8553,7 +8562,7 @@
             // Persist the view: patch just this row's action badge in place (don't collapse an open detail / lose scroll).
             fetch('/api/product/item/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ if(!d||!d.item)return; var sz=d.sizes||[], ro=rows.filter(function(x){return x.ref===ref;})[0]; if(!ro)return;
               ro.status=v; ro.sizes_unmapped=sz.filter(function(s){return s.approval_status==='approved'&&!s.mapped_sku;}).length; ro.sizes_unappr_sample=sz.filter(function(s){return s.approval_status==='approved'&&!s.approved_sample_id;}).length;
-              var rc=g.querySelector('.pg-ref[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(rc){ rc.innerHTML=esc(ro.ref)+(ro.unread_supplier?' <span class="ex-badge" title="'+ro.unread_supplier+' new supplier message(s)">'+ro.unread_supplier+'</span>':'')+prodActBadge(ro);
+              var rc=g.querySelector('.pg-ref[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(rc){ rc.innerHTML=esc(ro.ref)+prodComboBadge(ro);
                 var nb=rc.querySelector('.pg-actbadge'); if(nb)nb.onclick=function(e){ e.stopPropagation(); var pb=g.querySelector('.pg-open[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(pb)pb.click(); }; }
             }).catch(function(){}); }); }; });
         if(_pendingProdRef){ var _pr=_pendingProdRef; _pendingProdRef=null; var _pb=g.querySelector('.pg-open[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(_pr):_pr)+'"]'); if(_pb)_pb.click(); }
@@ -8605,7 +8614,8 @@
       _prodDetail=d; renderProdDetailShell(box,d); }); }
   function renderProdDetailShell(c,d){ var it=d.item; var inline=(c!==document.getElementById('product-content'));
     var _u=Number(d.unread_supplier)||0;
-    var tabs=[['master','Master data'],['samples','Samples'],['timeline','Timeline'+(_u?' <span class="ex-badge">'+_u+'</span>':'')],['documents','Documents']];
+    var _mAct=prodDetailActs(d);
+    var tabs=[['master','Master data'+(_mAct?' <span class="ex-badge">'+_mAct+'</span>':'')],['samples','Samples'],['timeline','Timeline'+(_u?' <span class="ex-badge">'+_u+'</span>':'')],['documents','Documents']];
     // inline (expanded under the grid row) shows just the sub-tabs — no header; the grid row above already shows ref/colour/etc.
     var header=inline?'':('<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px"><button class="save-btn light" id="pd-back">← Back</button>'
       +(it.has_swatch?'<img src="/api/product/swatch/'+encodeURIComponent(it.ref)+'?t='+encodeURIComponent(it.updated_at)+'" style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">':'')
@@ -8621,6 +8631,7 @@
     renderProdMaster(body,d); }
   function renderProdSamplesTab(body,ref){ body.innerHTML='<div style="color:#94a3b8">Loading…</div>';
     fetch('/api/product/samples/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(list){ list=Array.isArray(list)?list:[];
+      list.sort(function(a,b){ var d=String(b.sample_date||'').localeCompare(String(a.sample_date||'')); return d||((b.version||0)-(a.version||0)); });   // newest first
       body.innerHTML='<div style="font-size:12px;color:#94a3b8;margin-bottom:10px">Sample versions submitted by the supplier in the portal — each colour + quality verified before submission.</div>'
         +(list.length?list.map(function(s){ var ph=(s.photos||[]).map(function(p){ var url='/api/supply/portal-attachment/'+p.id;
             return /^image\//i.test(String(p.mime||''))
@@ -8629,7 +8640,7 @@
           var _est=s.supplier_status==='cancelled'?'cancelled':((s.shipments||[]).some(function(sh){return sh.tracking;})?'shipped':(s.supplier_status||'in_development'));
           var _estL={in_development:'In development',completed:'Completed',shipped:'Shipped',cancelled:'Cancelled'}[_est]||_est;
           var _estC=_est==='shipped'?['#dbeafe','#1e40af']:_est==='completed'?['#dcfce7','#166534']:_est==='cancelled'?['#fee2e2','#991b1b']:['#fef3c7','#92400e'];
-          return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:8px;max-width:640px"><div style="display:flex;align-items:center;gap:10px"><b style="font-family:ui-monospace,Menlo,monospace;font-size:13px">'+esc(s.ref)+'</b><span style="font-size:11px;padding:1px 8px;border-radius:10px;background:'+_estC[0]+';color:'+_estC[1]+';font-weight:700">'+_estL+'</span><span style="color:#94a3b8;font-size:11px">'+esc(s.sample_date||'')+(s.created_by?' · '+esc(shortUser(s.created_by)):'')+'</span>'
+          return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:8px;max-width:640px"><div style="display:flex;align-items:center;gap:10px"><b style="font-family:ui-monospace,Menlo,monospace;font-size:13px">'+esc(s.ref)+'</b><span style="font-size:11px;padding:1px 8px;border-radius:10px;background:'+_estC[0]+';color:'+_estC[1]+';font-weight:700">'+_estL+'</span><span style="color:#94a3b8;font-size:11px">'+(s.sample_date?esc(fd(s.sample_date)):'')+(s.created_by?' · submitted by '+esc(shortUser(s.created_by)):'')+'</span>'
             +'<span style="margin-left:auto;font-size:11px">'+(s.colour_verified?'<span style="color:#16a34a;font-weight:700">✓ colour</span>':'<span style="color:#dc2626">✗ colour</span>')+' &nbsp; '+(s.quality_verified?'<span style="color:#16a34a;font-weight:700">✓ quality</span>':'<span style="color:#dc2626">✗ quality</span>')+'</span>'
             +'<a class="ps-adm-del" data-id="'+s.id+'" title="delete version" style="color:#dc2626;cursor:pointer;margin-left:8px">✕</a></div>'
             +((s.sample_sizes&&s.sample_sizes.length)?'<div style="margin-top:4px"><span class="mut tiny" style="margin-right:4px">Sizes:</span>'+s.sample_sizes.map(function(k){return '<span style="display:inline-block;font-size:10px;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;border-radius:10px;padding:1px 7px;margin:1px 4px 1px 0">'+esc(k)+'</span>';}).join('')+'</div>':'')
@@ -8655,6 +8666,10 @@
           +'<a href="'+url+'" target="_blank" rel="noopener" title="'+esc(fn)+'" style="font-size:10px;color:#1d4ed8;text-decoration:none;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(fn)+'</a>'
           +'<a class="pm-comp-fdel" data-fid="'+f.id+'" title="remove file" style="color:#dc2626;cursor:pointer;font-size:10px;flex:none">✕</a></span>'; }).join(' ')
         +' <label style="font-size:10px;color:#1d4ed8;cursor:pointer;white-space:nowrap">+ file<input type="file" class="pm-comp-file" data-id="'+s.id+'" data-dim="'+dim+'" style="display:none" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx" multiple></label>'; }
+    function compShipCell(s,dim){ var seen={},out=[];   // sample shipments (SRs) of samples covering this size + this component
+      (d.samples||[]).forEach(function(sm){ if((sm.sampled_aspects||[]).indexOf(dim)>=0 && (sm.sample_sizes||[]).indexOf(s.size_label)>=0){ (sm.shipments||[]).forEach(function(sh){ if(sh.ref&&!seen[sh.ref]){ seen[sh.ref]=1; out.push(sh); } }); } });
+      if(!out.length)return '<span class="mut tiny">—</span>';
+      return out.map(function(sh){ return '<span title="'+esc([sh.carrier,sh.tracking].filter(Boolean).join(' · '))+'" style="display:inline-block;background:#f0f6ff;border:1px solid #dbeafe;color:#1e40af;border-radius:8px;padding:1px 6px;margin:1px 3px 1px 0;font-family:ui-monospace,Menlo,monospace;font-size:10px">'+esc(sh.ref)+'</span>'; }).join(''); }
     function compRow(s,dim){ var sd=sizeDim(s,dim), req=!!sd.required, appr=sd.approval_status||'pending';
       var reqCell='<input type="checkbox" class="pm-comp-req" data-id="'+s.id+'" data-dim="'+dim+'"'+(req?' checked':'')+'>';
       var apprCell='<select class="fci pm-comp-appr" data-id="'+s.id+'" data-dim="'+dim+'" style="font-size:11px;'+compApprStyle(appr)+'"><option value="pending"'+(appr==='pending'?' selected':'')+'>Pending</option><option value="approved"'+(appr==='approved'?' selected':'')+'>Approved</option><option value="rejected"'+(appr==='rejected'?' selected':'')+'>Rejected</option></select>';
@@ -8665,8 +8680,9 @@
         +'<td style="padding:2px 8px;text-align:left;white-space:nowrap">'+reqCell+'</td>'
         +'<td style="padding:2px 8px;text-align:left">'+(req?apprCell:'<span class="mut tiny">—</span>')+'</td>'
         +'<td style="padding:2px 8px;text-align:left;white-space:nowrap">'+actCell+'</td>'
-        +'<td style="padding:2px 8px">'+(req?compFiles(s,dim,sd):'<span class="mut tiny">—</span>')+'</td></tr>'; }
-    function szHdr(s){ return '<tr class="pm-szhdr" data-id="'+s.id+'"><td colspan="6" style="padding:9px 8px 3px 0;border-top:1px solid #e5e7eb;white-space:nowrap"><span style="display:inline-flex;align-items:center;gap:8px;flex-wrap:nowrap"><a class="pm-sz-del" data-id="'+s.id+'" title="remove size" style="color:#dc2626;cursor:pointer;font-weight:700">✕</a><span style="font-weight:700;color:#64748b;font-size:11px">Size</span><input class="fci pm-sz" data-id="'+s.id+'" data-f="size_label" value="'+esc(s.size_label)+'" placeholder="e.g. Large" size="25" style="width:210px;font-weight:700"><select class="fci pm-sz" data-id="'+s.id+'" data-f="approval_status" style="'+szApprovalStyle(s.approval_status)+'"><option value="pending"'+(s.approval_status==='pending'?' selected':'')+'>Pending</option><option value="approved"'+(s.approval_status==='approved'?' selected':'')+'>Approved</option><option value="rejected"'+(s.approval_status==='rejected'?' selected':'')+'>Rejected</option></select>'
+        +'<td style="padding:2px 8px">'+(req?compFiles(s,dim,sd):'<span class="mut tiny">—</span>')+'</td>'
+        +'<td style="padding:2px 8px">'+compShipCell(s,dim)+'</td></tr>'; }
+    function szHdr(s){ return '<tr class="pm-szhdr" data-id="'+s.id+'"><td colspan="7" style="padding:9px 8px 3px 0;border-top:1px solid #e5e7eb;white-space:nowrap"><span style="display:inline-flex;align-items:center;gap:8px;flex-wrap:nowrap"><a class="pm-sz-del" data-id="'+s.id+'" title="remove size" style="color:#dc2626;cursor:pointer;font-weight:700">✕</a><span style="font-weight:700;color:#64748b;font-size:11px">Size</span><input class="fci pm-sz" data-id="'+s.id+'" data-f="size_label" value="'+esc(s.size_label)+'" placeholder="e.g. Large" size="25" style="width:210px;font-weight:700"><select class="fci pm-sz" data-id="'+s.id+'" data-f="approval_status" style="'+szApprovalStyle(s.approval_status)+'"><option value="pending"'+(s.approval_status==='pending'?' selected':'')+'>Pending</option><option value="approved"'+(s.approval_status==='approved'?' selected':'')+'>Approved</option><option value="rejected"'+(s.approval_status==='rejected'?' selected':'')+'>Rejected</option></select>'
       +' <span class="mut tiny">SKU</span> '+(s.approval_status==='approved'
           ? '<button class="cell-pick pm-sku-pick" data-id="'+s.id+'" data-sku="'+esc(s.mapped_sku||'')+'" title="map this approved size to a planner SKU">'+(s.mapped_sku?'<b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.mapped_sku)+'</b>':'<span class="mut">— <span style="background:#fee2e2;color:#991b1b;font-weight:700;border-radius:3px;padding:0 3px">map</span></span>')+' ▾</button>'+(s.mapped_sku?'':prodActMark(it.ref,'sku'))
           : '<span class="mut tiny">approve to map</span>')
@@ -8692,7 +8708,7 @@
       +'<div style="font-size:11px;color:#94a3b8;margin:2px 0 12px">Changes save automatically. <span id="pm-msg" style="margin-left:6px"></span></div>'
       +'</div>'
       +'<div style="font-weight:700;font-size:13px;margin:14px 0 6px">Size variants &amp; components <span style="color:#94a3b8;font-weight:400;font-size:11px">(approval = internal D&amp;B sign-off)</span></div>'
-      +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;min-width:920px;table-layout:fixed"><thead><tr>'+[['Component','width:230px'],['Description','width:20%'],['Req','width:46px'],['Status','width:104px'],['Actions','width:120px'],['Files','']].map(function(h){return '<th style="text-align:left;padding:2px 8px 4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7;white-space:nowrap;'+h[1]+'">'+h[0]+'</th>';}).join('')+'</tr></thead><tbody id="pm-sztbody">'+(sizeRows||'<tr><td colspan="6" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>')+'</tbody></table></div>'
+      +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;min-width:1080px;table-layout:fixed"><thead><tr>'+[['Component','width:210px'],['Description','width:18%'],['Req','width:46px'],['Status','width:104px'],['Actions','width:112px'],['Files',''],['Sample shipments','width:16%']].map(function(h){return '<th style="text-align:left;padding:2px 8px 4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7;white-space:nowrap;'+h[1]+'">'+h[0]+'</th>';}).join('')+'</tr></thead><tbody id="pm-sztbody">'+(sizeRows||'<tr><td colspan="7" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>')+'</tbody></table></div>'
       +'<div style="margin-top:8px"><input class="fci" id="pm-newsz" placeholder="add size…" style="width:130px"> <button class="save-btn" id="pm-addsz">+ Add size</button></div>'
       +'<div style="margin-top:16px;padding-top:12px;border-top:1px solid #eef2f7;max-width:660px"><button class="save-btn light" id="pm-del" style="color:#dc2626">Delete product</button></div>';
     body.querySelectorAll('.pm-fld').forEach(function(el){ el.onchange=function(){ var msg=body.querySelector('#pm-msg'); if(msg){msg.style.color='#64748b';msg.textContent='Saving…';}
@@ -8703,7 +8719,7 @@
     // Silent per-row updates — an approval / mapped-SKU / approved-sample change re-renders JUST that row (no tab flash).
     function szObj(id){ return (d.sizes||[]).filter(function(x){return String(x.id)===String(id);})[0]; }
     function sizeDimObj(id,dim){ var so=szObj(id); if(!so)return null; so.dimensions=so.dimensions||[]; var sd=so.dimensions.filter(function(x){return x.dimension===dim;})[0]; if(!sd){ sd={dimension:dim}; so.dimensions.push(sd); } return sd; }
-    function reRender(){ var tb=body.querySelector('#pm-sztbody'); if(tb){ tb.innerHTML=(d.sizes||[]).map(szRows).join('')||'<tr><td colspan="6" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>'; bindSz(body); } }   // re-render just the size table
+    function reRender(){ var tb=body.querySelector('#pm-sztbody'); if(tb){ tb.innerHTML=(d.sizes||[]).map(szRows).join('')||'<tr><td colspan="7" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>'; bindSz(body); } }   // re-render just the size table
     function reloadSizes(){ fetch('/api/product/item/'+encodeURIComponent(it.ref)).then(function(r){return r.json();}).then(function(nd){ if(nd&&nd.item){ d.sizes=nd.sizes||[]; d.samples=nd.samples||[]; reRender(); } }).catch(function(){ reRender(); }); }   // silent refresh (no tab flash) — used after file up/down/version
     function bindSz(scope){
       scope.querySelectorAll('.pm-sz').forEach(function(el){ if(el._b)return; el._b=1; el.onchange=function(){ var id=el.dataset.id, f=el.dataset.f, so=szObj(id), b={}; b[f]=el.value;
