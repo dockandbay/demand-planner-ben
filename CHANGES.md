@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.167 - Supplier portal UI polish
+- Approval status now pairs colour with a glyph (✓ approved / ⚠ pending / ✕ rejected) on size rows and each component line (accessibility + mobile).
+- Image-zoom modal has a visible corner ✕ close button (was click-anywhere only).
+- Document rows: non-image files get a 📄 gutter tile so they align with image thumbnails; download links use `download` + ⤓ affordance.
+- Component/dimension files show the filename (not just 📄 + tooltip) so touch users can tell them apart; links download.
+- Uploads: ≤10MB-each hint shown; over-size files reported as "skipped" instead of silently dropped (Documents + Sample uploads); sample upload input is block-level on mobile.
+- Friendlier empty states; product sub-tab "Sample" → "Samples".
+
 ## v26.166 - PRODUCT Documents tab UI polish
 - Column headers (File/Size/Uploaded) on all three tables incl. the component table (Component/File/By/Uploaded).
 - Consistent download affordance: filename links download (⤓ glyph + title) across D&B, supplier and component tables; image thumbnails click-to-enlarge.
