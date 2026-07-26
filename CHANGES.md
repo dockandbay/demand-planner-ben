@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.188 - PRODUCT: season grid⇄detail binding, ref rename, grid tidy
+- Product grid: rows now grouped by SEASON with a grey header line (newest season first). Removed the notification counter from the top PRODUCT menu button.
+- Season/category/colour now bind both ways between grid and detail: changing a field in master data updates the grid cell in place (no redraw), and changing a grid cell updates the open detail form — no more stale values.
+- Master data: new **Reference** edit field (under Description) to rename a product's ref. Rejects a duplicate of an existing ref; on success cascades the rename across samples, timeline notes, product documents and any staged submissions. New endpoint POST /api/product/item/:ref/rename (transactional).
+
 ## v26.187 - SUPPLY ▸ Reports ▸ SUPPLIER DELAYS
 - New report measuring production timing + supplier completion-date movements. Per-supplier summary (open POs, avg slip, total pushed-out days, POs slipped, # moves, worst slip) + a per-PO detail showing the full completion-date trail (first → … → latest) and net slip. Data: production start/end + planner.supplier_submissions (kind=completion_date) history (superseded rows preserved = the movement log). Endpoint /api/supply/supplier-timing (open POs + any with completion-date submissions). Note: only supplier-portal date changes are logged; internal date edits aren't (no audit table).
 

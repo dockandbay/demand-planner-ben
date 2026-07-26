@@ -3417,6 +3417,28 @@ app.post('/api/product/item/:ref', async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Rename a product's reference — cascades to samples, timeline notes, product documents & any staged submissions.
+app.post('/api/product/item/:ref/rename', async (req, res) => {
+  const oldRef = req.params.ref, newRef = String((req.body || {}).new_ref || '').trim();
+  if (!newRef) return res.status(400).json({ error: 'New reference is required' });
+  if (newRef === oldRef) return res.json({ ok: true, ref: newRef });
+  const client = await pool.connect();
+  try {
+    const exists = (await client.query(`SELECT 1 FROM planner.product_dev_items WHERE ref=$1`, [newRef])).rows[0];
+    if (exists) return res.status(409).json({ error: 'Reference "' + newRef + '" already exists' });
+    const cur = (await client.query(`SELECT 1 FROM planner.product_dev_items WHERE ref=$1`, [oldRef])).rows[0];
+    if (!cur) return res.status(404).json({ error: 'item not found' });
+    await client.query('BEGIN');
+    await client.query(`UPDATE planner.product_dev_items   SET ref=$1, updated_at=now() WHERE ref=$2`, [newRef, oldRef]);
+    await client.query(`UPDATE planner.product_dev_samples SET item_ref=$1 WHERE item_ref=$2`, [newRef, oldRef]);
+    await client.query(`UPDATE planner.supplier_notes      SET po=$1 WHERE po=$2`, [newRef, oldRef]);
+    await client.query(`UPDATE planner.portal_attachments  SET po=$1 WHERE po=$2 AND category='product'`, [newRef, oldRef]);
+    await client.query(`UPDATE planner.supplier_submissions SET po=$1 WHERE po=$2`, [newRef, oldRef]);
+    await client.query('COMMIT');
+    res.json({ ok: true, ref: newRef });
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
 app.post('/api/product/item/:ref/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.product_dev_items WHERE ref=$1`, [req.params.ref]); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
