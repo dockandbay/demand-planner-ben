@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.190 - PRODUCT timeline: downloadable file links + dd-mmm-yy dates
+- "Supplier uploaded a file to sample vN: …" / "Supplier uploaded a document: …" timeline entries now show a clickable ⬇ download link to the actual file (served via /api/supply/portal-attachment/:id). Sample-photo and product-doc upload notes now store attachment_id; migration 155 adds the column and backfills existing notes by matching filename.
+- Timeline dates now render as dd-mmm-yy (e.g. 26-Jul-26 09:02) instead of YYYY-MM-DD.
+- ⚠️ Diviyaj: run migration 155_note_attachment.sql on live.
+
 ## v26.189 - RANGE PLAN PDF: drop the redundant print button
 - The Range Plan PDF popup auto-triggers the print/save dialog on load, so the on-page "Print / Save as PDF" button was redundant and was printing onto the saved PDF. Removed it.
 

@@ -3561,8 +3561,11 @@ app.post('/api/product/doc/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1 AND category='product'`, [req.params.id]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/product/notes/:ref', async (req, res) => {
-  try { const r = await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
-    to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read FROM planner.supplier_notes WHERE po=$1 ORDER BY created_at`, [req.params.ref]);
+  try { const r = await pool.query(`SELECT n.id, n.author_kind, coalesce(n.author_email,'') author_email, n.body,
+    to_char(n.created_at,'DD-Mon-YY HH24:MI') created_at, n.read_at IS NOT NULL read,
+    n.attachment_id, coalesce(a.filename,'') attachment_name
+    FROM planner.supplier_notes n LEFT JOIN planner.portal_attachments a ON a.id=n.attachment_id
+    WHERE n.po=$1 ORDER BY n.created_at`, [req.params.ref]);
     res.json(r.rows); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/note', async (req, res) => {
@@ -8416,8 +8419,8 @@ app.post('/api/portal/product-sample-photo', portalAuth, async (req, res) => { c
     if (!sr || !(await portalOwnsProduct(req, sr.item_ref))) return res.status(403).json({ error: 'not your sample' });
     const attId = await insertProductSamplePhoto(id, b, req.portal.email || null, 'supplier');
     // timeline note → admin PRODUCT ✉ unread
-    await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'supplier',$3)`,
-      [sr.item_ref, req.portal.email || null, 'Supplier uploaded a file to sample v' + sr.version + ': ' + (b.filename || 'file')]);
+    await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body, attachment_id) VALUES ($1,$2,'supplier',$3,$4)`,
+      [sr.item_ref, req.portal.email || null, 'Supplier uploaded a file to sample v' + sr.version + ': ' + (b.filename || 'file'), attId]);
     res.json({ ok: true, id: attId }); } catch (e) { res.status(500).json({ error: e.message }); } });
 // Supplier deletes a file they uploaded to a sample (only their own uploads on their own sample).
 app.post('/api/portal/product-sample-photo/:id/delete', portalAuth, async (req, res) => {
@@ -8437,8 +8440,8 @@ app.post('/api/portal/product-doc', portalAuth, async (req, res) => { const b = 
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, uploaded_by, category, uploader_kind)
       VALUES ($1,$2,$3,$4,$5,$6,'product','supplier') RETURNING id`,
       [ref, b.filename || 'document', b.mime || 'application/octet-stream', buf.length, buf, req.portal.email || null]);
-    await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'supplier',$3)`,
-      [ref, req.portal.email || null, 'Supplier uploaded a document: ' + (b.filename || 'document')]);
+    await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body, attachment_id) VALUES ($1,$2,'supplier',$3,$4)`,
+      [ref, req.portal.email || null, 'Supplier uploaded a document: ' + (b.filename || 'document'), r.rows[0].id]);
     res.json({ ok: true, id: r.rows[0].id }); } catch (e) { res.status(500).json({ error: e.message }); } });
 // SAMPLE SHIPMENT CONTENTS (portal) — candidate lists + replace-all contents on a sample_request
 app.get('/api/portal/product-open-samples', portalAuth, async (req, res) => {   // in-development dev-sample candidates for the picker
