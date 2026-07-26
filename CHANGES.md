@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.186 - PRODUCT: RANGE PLAN tab
+- New PRODUCT ▸ RANGE PLAN tab: pick a season, toggle "Approved only" vs all in-development+approved (dropped excluded), products grouped horizontally by category, each shown as swatch + colour-way name + a tiny status pill (green "approved" / amber "in development"). Click a card to open the product.
+
 ## v26.185 - PRODUCT detail progressive load (instant tabs → fast fields → streamed sizes)
 - Clicking PLAN now paints the sub-tabs (Master data / Samples / Timeline / Documents) INSTANTLY from the grid row (badges from the seed), then loads the Master-data fields from a tiny /core call (~0.4s), then streams in the size variants & components from /sizes (~1.3s) with a "Loading…" row. Samples / Timeline / Documents stay lazy (fetch on tab click). New endpoints /api/product/item/:ref/core and /sizes; Documents self-fetches.
 

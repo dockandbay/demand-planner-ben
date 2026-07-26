@@ -8354,7 +8354,7 @@
   function ensureProductRoot(){ if(document.getElementById('product-root'))return;
     var app=document.getElementById('app')||document.body; if(!app)return;
     var el=document.createElement('div'); el.id='product-root';
-    el.innerHTML='<div id="product-subnav"><button class="stab" data-k="plan">PLAN</button><button class="stab" data-k="reports">REPORTS</button><span class="ver">HORIZON __APP_VERSION__</span></div><div id="product-content"></div>';
+    el.innerHTML='<div id="product-subnav"><button class="stab" data-k="plan">PLAN</button><button class="stab" data-k="range">RANGE PLAN</button><button class="stab" data-k="reports">REPORTS</button><span class="ver">HORIZON __APP_VERSION__</span></div><div id="product-content"></div>';
     app.appendChild(el);
     el.querySelectorAll('.stab').forEach(function(b){ b.onclick=function(){ selectProductSub(b.dataset.k); }; }); }
   function showProduct(){ ensureProductRoot(); if(typeof hideSupply==='function')hideSupply(); if(typeof hideScenario==='function')hideScenario();
@@ -8372,7 +8372,35 @@
     try{ writeHash(['product',k]); }catch(e){}
     var c=document.getElementById('product-content'); if(!c)return;
     if(k==='reports') return renderProductReports(c);
+    if(k==='range') return renderProductRange(c);
     renderProductPlan(c); }
+  // RANGE PLAN — a season's products laid out by category: swatch + colour way + a tiny status pill. Toggle all vs approved-only.
+  var _rangeSeason=null, _rangeApprovedOnly=false;
+  function renderProductRange(c){
+    c.innerHTML='<div class="count" style="padding:10px 2px;color:#94a3b8">Loading range…</div>';
+    fetch('/api/product/items').then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
+      var seasons=[]; rows.forEach(function(r){ if(r.season&&seasons.indexOf(r.season)<0)seasons.push(r.season); }); seasons.sort();
+      if(!_rangeSeason||seasons.indexOf(_rangeSeason)<0)_rangeSeason=seasons[seasons.length-1]||'';
+      function stPill(s){ var ap=s==='approved'; return '<span style="display:inline-block;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;'+(ap?'background:#dcfce7;color:#166534':'background:#fef3c7;color:#92400e')+'">'+(ap?'approved':'in development')+'</span>'; }
+      function card(r){ var sw='/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at||'');
+        return '<div class="pr-card" data-ref="'+esc(r.ref)+'" title="'+esc(r.ref)+' — click to open" style="width:120px;flex:0 0 auto;text-align:center;cursor:pointer">'
+          +(r.has_swatch?'<img src="'+sw+'" style="width:110px;height:110px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">':'<div style="width:110px;height:110px;border-radius:8px;border:1px dashed #cbd5e1;background:#f8fafc;display:flex;align-items:center;justify-content:center;color:#cbd5e1;font-size:11px">no swatch</div>')
+          +'<div style="font-size:11px;font-weight:600;color:#334155;margin:4px 0 3px;line-height:1.2;word-break:break-word">'+esc(r.colour_name||'—')+'</div>'+stPill(r.status)+'</div>'; }
+      function draw(){
+        var f=rows.filter(function(r){ return r.season===_rangeSeason && r.status!=='dropped' && (_rangeApprovedOnly?r.status==='approved':true); });
+        var cats={}; f.forEach(function(r){ var k=r.category||'—'; (cats[k]=cats[k]||[]).push(r); });
+        var catKeys=Object.keys(cats).sort();
+        var bar='<div class="bar" style="align-items:center;gap:10px;flex-wrap:wrap"><span style="color:#64748b;font-size:11px">Season</span><select class="fci" id="pr-season" style="text-align:left">'+seasons.map(function(s){return '<option value="'+esc(s)+'"'+(s===_rangeSeason?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select>'
+          +'<label style="font-size:12px;display:flex;align-items:center;gap:5px;cursor:pointer;margin-left:6px"><input type="checkbox" id="pr-appr"'+(_rangeApprovedOnly?' checked':'')+'> Approved only</label>'
+          +'<span class="count" style="margin-left:auto">'+f.length+' product'+(f.length===1?'':'s')+' · '+catKeys.length+' categor'+(catKeys.length===1?'y':'ies')+'</span></div>';
+        var groups=catKeys.length?catKeys.map(function(cat){ return '<div style="margin:6px 0 16px"><div style="font-weight:700;font-size:13px;color:#0f172a;border-bottom:2px solid #eef2f7;padding-bottom:4px;margin-bottom:8px">'+esc(cat)+' <span class="mut tiny" style="font-weight:400">('+cats[cat].length+')</span></div><div style="display:flex;gap:14px;flex-wrap:wrap">'+cats[cat].map(card).join('')+'</div></div>'; }).join('') : '<div class="count" style="padding:14px 2px;color:#94a3b8">No products for this filter.</div>';
+        c.innerHTML=bar+groups;
+        var ss=document.getElementById('pr-season'); if(ss)ss.onchange=function(){ _rangeSeason=this.value; draw(); };
+        var ap=document.getElementById('pr-appr'); if(ap)ap.onchange=function(){ _rangeApprovedOnly=this.checked; draw(); };
+        c.querySelectorAll('.pr-card').forEach(function(el){ el.onclick=function(){ _prodDetailTab='master'; selectProductSub('plan'); setTimeout(function(){ renderProductDetail(el.dataset.ref); },0); }; });
+      }
+      draw();
+    }).catch(function(e){ c.innerHTML='<div style="color:#dc2626;padding:10px 2px">Failed: '+esc(e.message||e)+'</div>'; }); }
   function ensureProductButton(){ var row=document.getElementById('view-tabs-row'); if(!row)return;
     var existing=document.getElementById('product-btn');
     if(existing){ existing.style.display=prodCan()?'':'none'; return; }
