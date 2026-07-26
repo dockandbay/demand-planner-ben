@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.184 - Refresh stays on #/product routes + wider Component column
+- Added 'product' to the boot route matcher so refreshing (or the silent auto-update reload) on #/product/plan[/REF] stays there instead of defaulting to #/supply/purchase-orders. applyRoute already handled product; only the boot regex was missing it.
+- Size variants & components: Component column widened again 380→470px (min-width 1460) for longer labels.
+
 ## v26.183 - Deposits summary: closed → remaining 0 (+ Status col); component Description nudged right
 - Deposits Summary export now shows a Status column (Open/Closed) and forces Remaining to 0 for CLOSED deposits.
 - Size variants & components: Description column content nudged 20px to the right (padding-left 8→28px).
