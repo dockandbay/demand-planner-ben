@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.171 - Sample lifecycle status + shipment assignment (portal)
+- Product sample versions now carry a supplier status: In development / Completed / Cancelled (manual), with Shipped auto-derived once the sample's linked sample shipment has a tracking code. Effective status = cancelled > shipped > manual.
+- Suppliers can assign a sample to a sample shipment (SR) — from the sample (a "Shipment" selector: pick an SR / Not shipped / unassign) as well as the existing SR-side contents picker. Assignment also possible at creation.
+- Portal-only exception: a Completed sample that is neither assigned to a shipment nor marked "Not shipped" shows an inline "assign to a sample shipment" nudge.
+- Status shown on the admin Samples tab (read-only). New columns planner.product_dev_samples.supplier_status + not_shipped (migration 154 — run on live).
+
 ## v26.170 - Portal variant structure + sample version/size on submit
 - Supplier portal Master data: size variants redesigned into per-size cards with a clear 3-column table (Component · Status · Files), status pills, and descriptions — much easier to read than the old cramped one-liners.
 - Submitting a sample now captures the sample version (shown explicitly in the form) and requires the supplier to multi-select which size variant(s) the sample covers. Sizes shown as chips on each sample version (portal + admin Samples tab). New column planner.product_dev_samples.sample_sizes text[] (migration 153 — run on live).

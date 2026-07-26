@@ -3512,6 +3512,18 @@ async function supplierSkuCandidates(suppliers, q, includeDev) {   // bulk SKUs,
   return devRows.concat(skuRows);   // dev items first
 }
 function qtyOrOne(v) { var q = Math.round(Number(v) || 0); return q < 1 ? 1 : q; }   // blank/0/NaN → 1
+// Assign a product sample version (dev sample) to a single sample shipment (SR), or clear it. srId=null clears all
+// links; notShipped sets the "will not be shipped" flag (used to suppress the completed-but-unassigned exception).
+async function assignSampleToShipment(devSampleId, srId, notShipped, by) {
+  await pool.query(`DELETE FROM planner.sample_request_dev_samples WHERE dev_sample_id=$1`, [devSampleId]);
+  if (srId) await pool.query(`INSERT INTO planner.sample_request_dev_samples (sample_request_id, dev_sample_id, qty, created_by)
+    VALUES ($1::bigint,$2,1,$3) ON CONFLICT (sample_request_id, dev_sample_id) DO NOTHING`, [srId, devSampleId, by || null]);
+  await pool.query(`UPDATE planner.product_dev_samples SET not_shipped=$2 WHERE id=$1`, [devSampleId, srId ? false : !!notShipped]);
+}
+async function portalOwnsProductSample(req, sampleId) {   // ownership: the product sample's item must belong to the caller's supplier
+  const r = (await pool.query(`SELECT item_ref FROM planner.product_dev_samples WHERE id=$1`, [sampleId])).rows[0];
+  return r ? portalOwnsProduct(req, r.item_ref) : false;
+}
 async function setSampleDevSamples(sampleId, devs, by) {   // replace-all the dev-sample links on a sample shipment; devs = [{id,qty}] or [id]
   await pool.query(`DELETE FROM planner.sample_request_dev_samples WHERE sample_request_id=$1::bigint`, [sampleId]);
   for (const d of (Array.isArray(devs) ? devs : [])) { const id = (d && typeof d === 'object') ? d.id : d; if (!id) continue;
@@ -3587,6 +3599,7 @@ async function productSampleList(itemRef) {
   const rows = (await pool.query(`SELECT ps.id, ps.version, (ps.item_ref||'_v'||ps.version) ref, to_char(ps.sample_date,'YYYY-MM-DD') sample_date,
     ps.colour_verified, ps.quality_verified, coalesce(ps.description,'') description, coalesce(ps.created_by,'') created_by,
     coalesce(ps.sampled_aspects,'{}') sampled_aspects, coalesce(ps.sample_sizes,'{}') sample_sizes,
+    coalesce(ps.supplier_status,'in_development') supplier_status, coalesce(ps.not_shipped,false) not_shipped,
     to_char(ps.created_at,'YYYY-MM-DD HH24:MI') created_at,
     coalesce((SELECT json_agg(json_build_object('id',sr.id,'ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,'')) ORDER BY sr.created_at)
       FROM planner.sample_request_dev_samples l JOIN planner.sample_requests sr ON sr.id=l.sample_request_id
@@ -3612,9 +3625,12 @@ async function createProductSample(b, by) {
   const validSizes = (await pool.query(`SELECT coalesce(size_label,'') l FROM planner.product_dev_sizes s JOIN planner.product_dev_items i ON i.id=s.item_id WHERE i.ref=$1`, [itemRef])).rows.map(x => x.l);
   const sizes = (Array.isArray(b.sample_sizes) ? b.sample_sizes : []).map(s => String(s)).filter(s => validSizes.includes(s));
   if (validSizes.length && !sizes.length) throw new Error('select at least one size variant');
+  const status = ['in_development', 'completed', 'cancelled'].includes(b.supplier_status) ? b.supplier_status : 'in_development';
   const v = (await pool.query(`SELECT coalesce(max(version),0)+1 n FROM planner.product_dev_samples WHERE item_ref=$1`, [itemRef])).rows[0].n;
-  const r = await pool.query(`INSERT INTO planner.product_dev_samples (item_ref, version, sample_date, colour_verified, quality_verified, description, created_by, sampled_aspects, sample_sizes)
-    VALUES ($1,$2,$3,true,true,$4,$5,$6,$7) RETURNING id`, [itemRef, v, (b.sample_date || '').trim() || null, (b.description || '').trim() || null, by || null, aspects, sizes]);
+  const r = await pool.query(`INSERT INTO planner.product_dev_samples (item_ref, version, sample_date, colour_verified, quality_verified, description, created_by, sampled_aspects, sample_sizes, supplier_status, not_shipped)
+    VALUES ($1,$2,$3,true,true,$4,$5,$6,$7,$8,$9) RETURNING id`, [itemRef, v, (b.sample_date || '').trim() || null, (b.description || '').trim() || null, by || null, aspects, sizes, status, !!b.not_shipped]);
+  // optional shipment assignment at creation (assign to an SR, or leave for later)
+  if (b.sample_request_id || b.not_shipped) await assignSampleToShipment(r.rows[0].id, b.sample_request_id || null, !!b.not_shipped, by);
   // supplier note → shows on the product timeline + the admin ✉ bell
   await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'supplier',$3)`, [itemRef, by || null, 'Sample v' + v + ' submitted (colour + quality verified)']);
   return { id: r.rows[0].id, version: v, ref: itemRef + '_v' + v };
@@ -8275,6 +8291,19 @@ app.get('/api/portal/product-samples/:ref', portalAuth, async (req, res) => { co
 app.post('/api/portal/product-sample', portalAuth, async (req, res) => { const b = req.body || {}, ref = (b.item_ref || '').trim();
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
   try { res.json({ ok: true, ...(await createProductSample(b, req.portal.email || null)) }); } catch (e) { res.status(400).json({ error: e.message }); } });
+// Supplier sets the manual lifecycle status of a sample version (in_development / completed / cancelled — 'shipped' is derived).
+app.post('/api/portal/product-sample/:id/status', portalAuth, async (req, res) => { const id = req.params.id, st = ((req.body || {}).supplier_status || '').trim();
+  if (!['in_development', 'completed', 'cancelled'].includes(st)) return res.status(400).json({ error: 'invalid status' });
+  if (!(await portalOwnsProductSample(req, id))) return res.status(403).json({ error: 'not your sample' });
+  try { await pool.query(`UPDATE planner.product_dev_samples SET supplier_status=$2 WHERE id=$1`, [id, st]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
+// Supplier assigns a sample version to a sample shipment (SR), marks it not-shipped, or unassigns it.
+app.post('/api/portal/product-sample/:id/assign', portalAuth, async (req, res) => { const id = req.params.id, b = req.body || {};
+  if (!(await portalOwnsProductSample(req, id))) return res.status(403).json({ error: 'not your sample' });
+  const mode = b.mode, srId = (mode === 'shipment') ? b.sample_request_id : null, notShipped = (mode === 'not_shipped');
+  if (mode === 'shipment' && !srId) return res.status(400).json({ error: 'sample_request_id required' });
+  try { await assignSampleToShipment(id, srId, notShipped, req.portal.email || null); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/product-sample-photo', portalAuth, async (req, res) => { const b = req.body || {}, id = b.sample_id;
   if (!b.data_base64 || !id) return res.status(400).json({ error: 'sample_id + data_base64 required' });
   try { const sr = (await pool.query(`SELECT item_ref, version FROM planner.product_dev_samples WHERE id=$1`, [id])).rows[0];
