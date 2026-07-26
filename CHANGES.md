@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.183 - Deposits summary: closed → remaining 0 (+ Status col); component Description nudged right
+- Deposits Summary export now shows a Status column (Open/Closed) and forces Remaining to 0 for CLOSED deposits.
+- Size variants & components: Description column content nudged 20px to the right (padding-left 8→28px).
+
 ## v26.182 - Cash Flow: merged Export dropdown on All transactions + Stock arrivals
 - All transactions and Stock arrivals now use the same single "⬇ Export ▾" dropdown (CSV / Email) as Starting deposits, instead of separate CSV and Email buttons. Copy buttons unchanged. Refactored to a shared cfExportDD helper.
 

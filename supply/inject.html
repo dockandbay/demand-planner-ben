@@ -6673,10 +6673,10 @@
       +'<span class="count" id="sup-count"></span>'
       +'<span style="margin-left:auto;display:flex;align-items:center;gap:5px"><span class="tiny mut">Deposits summary:</span><button class="save-btn" id="dep-sum-copy" title="Copy each deposit (ref, supplier, PROD#, description, amount, FX, date paid, used, remaining) to the clipboard">⧉</button><button class="save-btn" id="dep-sum-csv" style="background:#dcfce7;color:#166534;border-color:#16a34a" title="Download the deposits summary as CSV (excludes linked POs and due / likely-pay dates)">⬇ CSV</button></span></div><div id="sup-grid"></div>';
     // Deposits Summary export — each deposit without linked POs / due date / likely-pay date.
-    function depSummaryRows(){ return rows.filter(function(x){return x.is_deposit;}).map(function(x){ return {
-      Reference:x.reference||'', Type:'Deposit', Supplier:x.supplier_name||'', 'PROD#':x.prod_no||'', Description:x.description||'',
+    function depSummaryRows(){ return rows.filter(function(x){return x.is_deposit;}).map(function(x){ var closed=x.status==='closed'; return {
+      Reference:x.reference||'', Type:'Deposit', Status:(closed?'Closed':'Open'), Supplier:x.supplier_name||'', 'PROD#':x.prod_no||'', Description:x.description||'',
       Amount:(Number(x.amount)||0).toFixed(2), 'FX (Xero)':x.xero_fx||'', 'Date paid':x.date_paid||'',
-      Used:(Number(x.deposit_used)||0).toFixed(2), Remaining:(Number(x.deposit_remaining)||0).toFixed(2) }; }); }
+      Used:(Number(x.deposit_used)||0).toFixed(2), Remaining:(closed?0:(Number(x.deposit_remaining)||0)).toFixed(2) }; }); }
     function view(){ var f=filt(rows,state.q); document.getElementById('sup-count').textContent=f.length+' deposits'; document.getElementById('sup-grid').innerHTML=depTable(f); bindEdits(); }
     document.getElementById('sup-search').oninput=function(){state.q=this.value;view();};
     document.getElementById('dep-new').onclick=function(){depCreate(true);};
@@ -8701,7 +8701,7 @@
       else if(req&&appr==='approved'&&!sd.approved_sample_id) actCell=prodActMark(it.ref,'cs_'+dim);
       return '<tr class="pm-comprow" style="'+(req?'':'opacity:.6')+'">'
         +'<td style="padding:2px 8px 2px 16px;font-size:12px;font-weight:600;color:#334155;white-space:nowrap">'+COMP_LBL[dim]+'</td>'
-        +'<td style="padding:2px 8px"><input class="fci pm-comp-desc" data-id="'+s.id+'" data-dim="'+dim+'" value="'+esc(sd.description||'')+'" placeholder="description…" style="width:100%;font-size:11px;box-sizing:border-box"></td>'
+        +'<td style="padding:2px 8px 2px 28px"><input class="fci pm-comp-desc" data-id="'+s.id+'" data-dim="'+dim+'" value="'+esc(sd.description||'')+'" placeholder="description…" style="width:100%;font-size:11px;box-sizing:border-box"></td>'
         +'<td style="padding:2px 8px;text-align:left;white-space:nowrap">'+reqCell+'</td>'
         +'<td style="padding:2px 8px;text-align:left">'+(req?apprCell:'<span class="mut tiny">—</span>')+'</td>'
         +'<td style="padding:2px 8px;text-align:left;white-space:nowrap">'+actCell+'</td>'
