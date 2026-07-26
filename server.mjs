@@ -5636,7 +5636,7 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
                   FROM planner.portal_attachments WHERE po=$1 ORDER BY uploaded_at DESC`, [po]).catch(() => ({ rows: [] })),
       // PO PLAN Timeline: notes (supplier + internal) + submission status
       pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
-                    to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read
+                    to_char(created_at,'DD-Mon-YY HH24:MI') created_at, read_at IS NOT NULL read
                   FROM planner.supplier_notes WHERE po=$1 ORDER BY created_at`, [po]).catch(() => ({ rows: [] })),
       pool.query(`SELECT kind, value, status, coalesce(submitted_by,'') submitted_by, to_char(submitted_at,'YYYY-MM-DD') submitted_at, attachment_id
                   FROM planner.supplier_submissions WHERE po=$1 ORDER BY submitted_at`, [po]).catch(() => ({ rows: [] })),

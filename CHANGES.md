@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.191 - Timeline consistency: product matches PO + PO dates dd-mmm-yy
+- PRODUCT timeline now mirrors the PO timeline UI: newest-first message cards, and ⚑ Escalate lives on your most-recent D&B message (not next to the compose box). The compose box is a single "Post" at the bottom. To escalate: post the message, then click Escalate on it — same flow as POs.
+- PO timeline dates now render dd-mmm-yy (e.g. 08-Jul-26 06:13) to match the product timeline.
+
 ## v26.190 - PRODUCT timeline: downloadable file links + dd-mmm-yy dates
 - "Supplier uploaded a file to sample vN: …" / "Supplier uploaded a document: …" timeline entries now show a clickable ⬇ download link to the actual file (served via /api/supply/portal-attachment/:id). Sample-photo and product-doc upload notes now store attachment_id; migration 155 adds the column and backfills existing notes by matching filename.
 - Timeline dates now render as dd-mmm-yy (e.g. 26-Jul-26 09:02) instead of YYYY-MM-DD.
