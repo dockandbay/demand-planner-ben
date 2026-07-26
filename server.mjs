@@ -3223,6 +3223,7 @@ app.get('/api/product/items', async (_req, res) => {
       to_char(i.updated_at,'YYYY-MM-DD HH24:MI') updated_at,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id)::int sizes,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approval_status='approved')::int sizes_approved,
+      (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approval_status='approved' AND coalesce(s.mapped_sku,'')='')::int sizes_unmapped,
       (SELECT count(*) FROM planner.supplier_notes n WHERE n.po=i.ref AND n.author_kind='supplier' AND n.read_at IS NULL)::int unread_supplier,
       coalesce((SELECT json_agg(DISTINCT jsonb_build_object('ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,'')))
         FROM planner.product_dev_samples ps
@@ -3252,8 +3253,9 @@ app.get('/api/product/item/:ref', async (req, res) => {
     const sizes = (await pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort,
       coalesce(mapped_sku,'') mapped_sku, approved_sample_id FROM planner.product_dev_sizes WHERE item_id=$1 ORDER BY sort, id`, [item.id])).rows;
     const docs = (await pool.query(`SELECT id, filename, mime, byte_size, coalesce(uploaded_by,'') uploaded_by, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments WHERE po=$1 AND category='product' ORDER BY uploaded_at DESC`, [ref])).rows;
+    const samples = (await pool.query(`SELECT id, version, item_ref||'_v'||version ref FROM planner.product_dev_samples WHERE item_ref=$1 ORDER BY version`, [ref])).rows;
     const unread_supplier = (await pool.query(`SELECT count(*)::int n FROM planner.supplier_notes WHERE po=$1 AND author_kind='supplier' AND read_at IS NULL`, [ref])).rows[0].n;
-    res.json({ item, sizes, docs, unread_supplier });
+    res.json({ item, sizes, docs, samples, unread_supplier });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/product/swatch/:ref', async (req, res) => {

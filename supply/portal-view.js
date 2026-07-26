@@ -279,6 +279,22 @@
     var xo=len, xref='xref\n0 6\n0000000000 65535 f \n'; for(var i=1;i<=5;i++)xref+=pad(off[i])+' 00000 n \n';
     push(xref); push('trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n'+xo+'\n%%EOF');
     var out=new Uint8Array(len),o=0; parts.forEach(function(u){ out.set(u,o); o+=u.length; }); return out; }
+  // Single small-label PDF: one page sized to (ptW × ptH) points, the JPEG filling the whole page. Used for the
+  // per-sample-version label (a compact label to stick on the physical sample).
+  function pdfSingleImg(jpeg,imgW,imgH,ptW,ptH){ var enc=new TextEncoder(),parts=[],off=[],len=0;
+    function push(x){ var u=(x instanceof Uint8Array)?x:enc.encode(x); parts.push(u); len+=u.length; }
+    function pad(n){ n=String(n); while(n.length<10)n='0'+n; return n; }
+    push('%PDF-1.4\n');
+    off[1]=len; push('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
+    off[2]=len; push('2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n');
+    off[3]=len; push('3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 '+ptW.toFixed(2)+' '+ptH.toFixed(2)+'] /Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>\nendobj\n');
+    var content='q '+ptW.toFixed(2)+' 0 0 '+ptH.toFixed(2)+' 0 0 cm /Im0 Do Q\n';
+    var cb=enc.encode(content);
+    off[4]=len; push('4 0 obj\n<< /Length '+cb.length+' >>\nstream\n'); push(cb); push('\nendstream\nendobj\n');
+    off[5]=len; push('5 0 obj\n<< /Type /XObject /Subtype /Image /Width '+imgW+' /Height '+imgH+' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length '+jpeg.length+' >>\nstream\n'); push(jpeg); push('\nendstream\nendobj\n');
+    var xo=len,xref='xref\n0 6\n0000000000 65535 f \n'; for(var i=1;i<=5;i++)xref+=pad(off[i])+' 00000 n \n';
+    push(xref); push('trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n'+xo+'\n%%EOF');
+    var out=new Uint8Array(len),o=0; parts.forEach(function(u){ out.set(u,o); o+=u.length; }); return out; }
   // Multi-page A4 PDF: one page per {jpeg,imgW,imgH} entry, same cell layout on each. Lets a batch download as a
   // single consolidated PDF instead of a zip of one-page PDFs.
   function pdfA4Multi(pages,cells){ var enc=new TextEncoder(), parts=[], off=[], len=0, P=0.24, pageW=2480*P, pageH=3505*P;
@@ -1535,7 +1551,8 @@
           function ppProdMaster(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
             fetch('/api/product/item/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ if(!d||!d.item){ box.innerHTML='<div class="mut" style="text-align:left">Not found.</div>'; return; } var it=d.item;
               function row(l,v){ return '<div style="display:flex;gap:10px;padding:5px 0;border-bottom:1px solid #f4f4f5;text-align:left"><div style="flex:0 0 130px;color:#64748b">'+l+'</div><div style="flex:1;min-width:0">'+v+'</div></div>'; }
-              var sizes=(d.sizes||[]).map(function(s){ var ok=s.approval_status==='approved'; return '<span style="display:inline-block;border:1px solid #e5e7eb;border-radius:5px;padding:2px 8px;margin:2px;font-size:11px">'+esc(s.size_label)+' · <span style="color:'+(ok?'#16a34a':s.approval_status==='rejected'?'#dc2626':'#94a3b8')+'">'+esc(s.approval_status)+'</span></span>'; }).join('')||'<span class="mut">no sizes</span>';
+              var _sampV={}; (d.samples||[]).forEach(function(v){ _sampV[v.id]=v.version; });
+              var sizes=(d.sizes||[]).map(function(s){ var ok=s.approval_status==='approved'; return '<span style="display:inline-block;border:1px solid #e5e7eb;border-radius:5px;padding:2px 8px;margin:2px;font-size:11px">'+esc(s.size_label)+' · <span style="color:'+(ok?'#16a34a':s.approval_status==='rejected'?'#dc2626':'#94a3b8')+'">'+esc(s.approval_status)+'</span>'+(s.approved_sample_id&&_sampV[s.approved_sample_id]?' · <span style="color:#16a34a" title="approved sample version">✓ sample v'+_sampV[s.approved_sample_id]+'</span>':'')+(s.mapped_sku?' · <b style="font-family:ui-monospace,Menlo,monospace;color:#0f172a" title="mapped planner SKU">'+esc(s.mapped_sku)+'</b>':'')+'</span>'; }).join('')||'<span class="mut">no sizes</span>';
               var sw=it.has_swatch?'<img src="'+(EP.productSwatchBase||'/api/product/swatch/')+encodeURIComponent(ref)+'?t='+encodeURIComponent(it.updated_at||'')+'" style="width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">':'';
               box.innerHTML='<div style="max-width:600px;text-align:left">'+(sw?'<div style="margin-bottom:8px">'+sw+'</div>':'')
                 +row('Reference','<b style="font-family:ui-monospace,Menlo,monospace">'+esc(it.ref)+'</b>')+row('Season',esc(it.season||'—'))+row('Category',esc(it.category||'—'))+row('Supplier',esc(it.supplier||'—'))+row('Colour way',esc(it.colour_name||'—'))+row('Status',esc(prodStatusLabel(it.status)))+row('Description','<span style="white-space:pre-wrap">'+esc(it.description||'—')+'</span>')+row('Size variants',sizes)+'</div>';
@@ -1544,20 +1561,31 @@
             fetch('/api/product/item/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ var docs=(d&&d.docs)||[];
               box.innerHTML='<div style="max-width:600px;text-align:left">'+(docs.length?docs.map(function(x){ return '<div style="padding:7px 0;border-bottom:1px solid #f1f1f1"><a href="/api/product/doc/'+x.id+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline">'+esc(x.filename)+'</a> <span class="mut tiny">'+Math.max(1,Math.round((x.byte_size||0)/1024))+' KB · '+esc(x.uploaded_at||'')+'</span></div>'; }).join(''):'<div class="mut" style="padding:6px 0">No documents.</div>')+'</div>';
             }).catch(function(e){ box.innerHTML='<div style="color:#dc2626;text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
-          function dlSampleLabel(ref){ try{ var c=document.createElement('canvas'); c.width=800; c.height=400; var x=c.getContext('2d');
-            x.fillStyle='#fff'; x.fillRect(0,0,800,400); x.strokeStyle='#0f172a'; x.lineWidth=4; x.strokeRect(20,20,760,360);
-            x.fillStyle='#0f172a'; x.textAlign='center'; x.font='700 34px system-ui,Arial'; x.fillText('SAMPLE',400,120);
-            x.font='700 52px ui-monospace,Menlo,monospace'; x.fillText(String(ref),400,230);
-            x.font='400 20px system-ui,Arial'; x.fillStyle='#64748b'; x.fillText('Dock & Bay — product sample',400,320);
-            c.toBlob(function(b){ if(!b){alert('Could not create label');return;} var a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download='sample_'+String(ref).replace(/[^A-Za-z0-9_-]/g,'_')+'.png'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(a.href);},2000); },'image/png'); }catch(e){ alert('Could not create label'); } }
+          // Compact single-label PDF for one sample version: ref (incl _vN), colourway, supplier, date.
+          function dlSampleLabel(opts){ try{ opts=opts||{}; var ref=String(opts.ref||''), S=2, W=500, H=320;
+            var c=document.createElement('canvas'); c.width=W*S; c.height=H*S; var x=c.getContext('2d'); x.scale(S,S);
+            x.fillStyle='#fff'; x.fillRect(0,0,W,H); x.strokeStyle='#0f172a'; x.lineWidth=3; x.strokeRect(10,10,W-20,H-20);
+            x.textAlign='left'; x.fillStyle='#0f172a';
+            x.font='700 22px system-ui,Arial'; x.fillText('SAMPLE',28,50);
+            x.font='700 28px ui-monospace,Menlo,monospace'; x.fillText(ref,28,92);
+            x.font='400 17px system-ui,Arial'; var y=134;
+            function line(l,v){ if(v==null||v==='')return; x.fillStyle='#64748b'; x.fillText(l,28,y); x.fillStyle='#0f172a'; x.fillText(String(v),160,y); y+=30; }
+            line('Colourway',opts.colour); line('Supplier',opts.supplier); line('Date',opts.date);
+            x.fillStyle='#94a3b8'; x.font='400 13px system-ui,Arial'; x.fillText('Dock & Bay — product sample',28,H-22);
+            c.toBlob(function(b){ if(!b){alert('Could not create label');return;} b.arrayBuffer().then(function(ab){
+              var ptW=283, ptH=ptW*(H/W);   // ~100mm wide small label, aspect-preserved (~64mm tall)
+              var pdf=pdfSingleImg(new Uint8Array(ab), c.width, c.height, ptW, ptH);
+              bcDownloadBlob('sample_'+ref.replace(/[^A-Za-z0-9_-]/g,'_')+'.pdf', new Blob([pdf],{type:'application/pdf'})); }); },'image/jpeg',0.92);
+          }catch(e){ alert('Could not create label'); } }
           function ppProdSamples(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
+            var _it=((_ppData&&_ppData.products)||[]).filter(function(x){return x.ref===ref;})[0]||{};   // colour/supplier for the sample label
             getJSON(EP.productSamplesBase+encodeURIComponent(ref)).then(function(list){ list=Array.isArray(list)?list:[];
               var today=new Date().toISOString().slice(0,10);
               var nextV=list.reduce(function(m,s){return Math.max(m,s.version||0);},0)+1, nextRef=ref+'_v'+nextV;   // shown read-only on the add form
               var rows=list.slice().reverse().map(function(s){ var ph=(s.photos||[]).map(function(p){return '<a href="'+(EP.attachImgBase||'/api/supply/portal-attachment/')+p.id+'" target="_blank" rel="noopener"><img src="'+(EP.attachImgBase||'/api/supply/portal-attachment/')+p.id+'" style="width:52px;height:52px;object-fit:cover;border-radius:5px;border:1px solid #e5e7eb;margin:2px"></a>';}).join('');
                 return '<div style="border:1px solid #eef2f7;border-radius:8px;padding:9px 11px;margin-bottom:8px;text-align:left"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.ref)+'</b><span class="mut tiny">'+esc(s.sample_date||'')+'</span>'
                   +'<span style="font-size:10px">'+(s.colour_verified?'<span style="color:#16a34a">✓ colour</span>':'<span class="mut">colour?</span>')+' &nbsp; '+(s.quality_verified?'<span style="color:#16a34a">✓ quality</span>':'<span class="mut">quality?</span>')+'</span>'
-                  +'<button class="save-btn pp-samp-label" data-ref="'+esc(s.ref)+'" style="margin-left:auto">⤓ Download label</button></div>'
+                  +'<button class="save-btn pp-samp-label" data-ref="'+esc(s.ref)+'" data-date="'+esc(s.sample_date||'')+'" style="margin-left:auto">⤓ Download label</button></div>'
                   +(s.description?'<div style="margin:4px 0;white-space:pre-wrap">'+esc(s.description)+'</div>':'')
                   +(ph?'<div style="margin-top:4px">'+ph+'</div>':'')
                   +((s.shipments||[]).length?'<div style="margin-top:7px;display:flex;flex-direction:column;gap:5px">'+(s.shipments||[]).map(function(sh){return '<div style="padding:6px 9px;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">📦 <b>'+esc(sh.ref)+'</b>'+(sh.carrier?'<span class="mut tiny">'+esc(sh.carrier)+'</span>':'')+(sh.tracking?'<span style="font-size:12px">'+carrierTrackLink(sh.carrier,sh.tracking)+'</span>':'')+'</div>';}).join('')+'<div class="mut tiny">add this sample to a shipment in the <b>Samples</b> tab</div></div>':'')
@@ -1573,7 +1601,7 @@
                 +'<div><label style="font-size:12px;display:block;margin-bottom:2px">Description and notes</label><textarea class="fci ps2-desc" rows="2" placeholder="description and notes…" style="width:320px;max-width:100%;text-align:left;box-sizing:border-box"></textarea></div>'
                 +'<div style="margin-top:7px"><label style="font-size:12px">Photos <input type="file" class="ps2-photos" accept="image/*" multiple style="font-size:12px"></label></div>'
                 +'<div style="margin-top:9px"><button class="save-btn ps2-save" data-ref="'+esc(ref)+'">Submit sample version</button> <span class="ps2-msg" style="font-size:12px;margin-left:6px"></span></div></div></div>';
-              box.querySelectorAll('.pp-samp-label').forEach(function(lb){ lb.onclick=function(){ dlSampleLabel(lb.dataset.ref); }; });
+              box.querySelectorAll('.pp-samp-label').forEach(function(lb){ lb.onclick=function(){ dlSampleLabel({ref:lb.dataset.ref, date:lb.dataset.date, colour:_it.colour_name||'', supplier:_it.supplier||STATE.supplierName||''}); }; });
               var _addb=box.querySelector('.pp-add-sample'), _form=box.querySelector('.pp-sample-form'); if(_addb)_addb.onclick=function(){ _form.style.display=(_form.style.display!=='none')?'none':''; };   // no auto-focus on the date input (it auto-opens the mobile picker); date defaults to today, opens on tap
               var sv=box.querySelector('.ps2-save'); sv.onclick=function(){ var msg=box.querySelector('.ps2-msg');
                 var col=box.querySelector('.ps2-col').checked, qual=box.querySelector('.ps2-qual').checked;

@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.141 - PRODUCT: SKU-mapping action, portal display, sample-version approval + labels
+
+Completes the product-dev feature:
+- **1b — SKU-mapping reminder + snooze + counter:** when a size is approved but not yet SKU-mapped, the product row
+  shows a red **"N map SKU"** badge (click → open to map) with a **snooze** (7d/30d/∞), and the PRODUCT ▸ **PLAN**
+  sub-tab shows a red counter of outstanding mappings.
+- **1c — portal shows the mapped SKU** per size (read-only) on the supplier's Product tab.
+- **2 — approved sample version per size:** admin PRODUCT ▸ Master data has a new **Approved sample** dropdown per
+  size (pick which submitted version was signed off); the supplier sees "✓ sample vN" per size in the portal.
+- **3 — downloadable sample label:** the portal's per-version "⤓ Download label" now produces a **compact PDF label**
+  (SAMPLE + ref/version, colourway, supplier, date) instead of a sparse PNG.
+
 ## v26.140 - PRODUCT: map an approved size to a planner SKU (Phase 1a)
 
 - New per-size **Mapped SKU** field in PRODUCT ▸ Master data: once a size is **approved**, a searchable picker (full
