@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.140 - PRODUCT: map an approved size to a planner SKU (Phase 1a)
+
+- New per-size **Mapped SKU** field in PRODUCT ▸ Master data: once a size is **approved**, a searchable picker (full
+  planner SKU list) lets you map it to a planner SKU. Until it's set, the cell shows a red "map SKU" prompt.
+- Schema (migration 148): `product_dev_sizes.mapped_sku` + `product_dev_sizes.approved_sample_id` (the latter for the
+  upcoming sample-version approval step). New `/api/product/skus` picker source.
+- Next in this feature: the "SKU mapping needed" action + snooze + PRODUCT counter, then the supplier-portal display,
+  then the sample-version approval + downloadable sample labels.
+
 ## v26.139 - Type column wraps long labels
 
 - Long Type labels in Actions (e.g. "Deposit FX missing") now wrap within the column instead of overflowing.

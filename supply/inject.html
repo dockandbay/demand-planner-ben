@@ -8377,6 +8377,21 @@
     render(''); var qi=pop.querySelector('.shpop-q'); if(qi){ qi.oninput=function(){render(this.value);}; qi.focus(); }
   }); }); }
   function loadProdCfg(cb){ if(_prodCfg)return cb(_prodCfg); fetch('/api/product/config').then(function(r){return r.json();}).then(function(d){ _prodCfg=d||{seasons:[],categories:[]}; cb(_prodCfg); }).catch(function(){ cb({seasons:[],categories:[]}); }); }
+  var _skuList=null;
+  function loadSkuList(cb){ if(_skuList)return cb(_skuList); fetch('/api/product/skus').then(function(r){return r.json();}).then(function(d){ _skuList=Array.isArray(d)?d:[]; cb(_skuList); }).catch(function(){ cb([]); }); }
+  // Searchable SKU picker (reuses the shpop popover) — maps an approved size to a planner SKU.
+  function openSkuPick(btn,onSaved){ closeShPop(); loadSkuList(function(list){
+    var id=btn.dataset.id, cur=btn.dataset.sku||'';
+    var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop';
+    pop.innerHTML='<div class="shpop-h">Map SKU'+(cur?' <span class="mut">(current '+esc(cur)+')</span>':'')+'</div><input class="shpop-q" placeholder="search SKU…"><div id="shpop-list"></div>';
+    placePop(pop, btn.getBoundingClientRect()); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
+    function set(val){ shipPost('/api/product/size/'+id,{mapped_sku:val},function(j){ if(j&&j.error){alert('Failed: '+j.error);return;} closeShPop(); if(onSaved)onSaved(); }); }
+    function render(q){ q=(q||'').trim().toLowerCase(); var html=(cur?'<div class="shpop-opt unassign" data-clear="1">— Clear</div>':'');
+      list.filter(function(n){return !q||n.sku.toLowerCase().indexOf(q)>=0||String(n.label||'').toLowerCase().indexOf(q)>=0;}).slice(0,q?120:25).forEach(function(n){ html+='<div class="shpop-opt" data-v="'+esc(n.sku)+'"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(n.sku)+'</b>'+(n.label?' <span class="mut">'+esc(n.label)+'</span>':'')+'</div>'; });
+      var l=document.getElementById('shpop-list'); l.innerHTML=html||'<div class="mut" style="padding:6px 10px">no match</div>';
+      l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ set(o.dataset.clear?'':o.dataset.v); }; }); }
+    render(''); var qi=pop.querySelector('.shpop-q'); if(qi){ qi.oninput=function(){render(this.value);}; qi.focus(); }
+  }); }
   function ensureSuppliers(cb){ if(supplierList&&supplierList.length)return cb(); if(typeof fetchLookups==='function')fetchLookups(cb); else cb(); }
   function prodSupList(){ return '<datalist id="prod-suplist">'+(supplierList||[]).slice().sort().map(function(s){return '<option value="'+esc(s)+'">';}).join('')+'</datalist>'; }
   function prodFormLists(cfg){ cfg=cfg||{seasons:[],categories:[]};
@@ -8522,8 +8537,12 @@
   function renderProdMaster(body,d){ var it=d.item; ensureSuppliers(function(){ loadProdCfg(function(cfg){
     var seasons=(cfg.seasons||[]), cats=(cfg.categories||[]);
     function selOf(id,val,opts,valKey,lblFn){ return '<select class="fci" id="'+id+'">'+opts.map(function(o){ var v=valKey?o[valKey]:o; return '<option value="'+esc(v)+'"'+(String(v)===String(val)?' selected':'')+'>'+esc(lblFn?lblFn(o):v)+'</option>'; }).join('')+'</select>'; }
-    var sizeRows=(d.sizes||[]).map(function(s){ return '<tr data-id="'+s.id+'"><td style="padding:3px 8px 3px 0"><input class="fci pm-sz" data-id="'+s.id+'" data-f="size_label" value="'+esc(s.size_label)+'" style="width:120px"></td>'
+    var sizeRows=(d.sizes||[]).map(function(s){ return '<tr data-id="'+s.id+'"><td style="padding:3px 8px 3px 0"><input class="fci pm-sz" data-id="'+s.id+'" data-f="size_label" value="'+esc(s.size_label)+'" style="width:110px"></td>'
       +'<td style="padding:3px 8px"><select class="fci pm-sz" data-id="'+s.id+'" data-f="approval_status"><option value="pending"'+(s.approval_status==='pending'?' selected':'')+'>Pending</option><option value="approved"'+(s.approval_status==='approved'?' selected':'')+'>Approved</option><option value="rejected"'+(s.approval_status==='rejected'?' selected':'')+'>Rejected</option></select></td>'
+      // Mapped SKU: once the size is approved, map it to a planner SKU (searchable). Red "map SKU" prompt until set.
+      +'<td style="padding:3px 8px">'+(s.approval_status==='approved'
+          ? '<button class="cell-pick pm-sku-pick" data-id="'+s.id+'" data-sku="'+esc(s.mapped_sku||'')+'" title="map this approved size to a planner SKU">'+(s.mapped_sku?'<b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.mapped_sku)+'</b>':'<span class="mut">— <span style="background:#fee2e2;color:#991b1b;font-weight:700;border-radius:3px;padding:0 3px">map SKU</span></span>')+' ▾</button>'
+          : '<span class="mut tiny">approve first</span>')+'</td>'
       +'<td style="padding:3px 8px"><a class="pm-sz-del" data-id="'+s.id+'" style="color:#dc2626;cursor:pointer">✕</a></td></tr>'; }).join('');
     var seasonOpts=seasons.map(function(o){return '<option value="'+esc(o.code)+'"'+(o.code===it.season?' selected':'')+'>'+esc(o.code)+'</option>';}).join('');
     var catOpts=cats.map(function(o){return '<option value="'+esc(o.category)+'"'+(o.category===it.category?' selected':'')+'>'+esc(o.category)+(o.code?' ('+esc(o.code)+')':'')+'</option>';}).join('');
@@ -8538,7 +8557,7 @@
       +pRow('Description','<textarea class="fci pm-fld" data-f="description" id="pm-desc" rows="3" style="width:100%;max-width:620px;box-sizing:border-box">'+esc(it.description)+'</textarea>')
       +'<div style="font-size:11px;color:#94a3b8;margin:2px 0 12px">Changes save automatically. <span id="pm-msg" style="margin-left:6px"></span></div>'
       +'<div style="font-weight:700;font-size:13px;margin:14px 0 6px">Size variants <span style="color:#94a3b8;font-weight:400;font-size:11px">(approval = internal D&amp;B sign-off)</span></div>'
-      +'<table style="border-collapse:collapse;font-size:12px"><tbody>'+(sizeRows||'<tr><td style="color:#94a3b8;padding:4px 0">no sizes</td></tr>')+'</tbody></table>'
+      +'<table style="border-collapse:collapse;font-size:12px"><thead><tr>'+['Size','Approval','Mapped SKU',''].map(function(h){return '<th style="text-align:left;padding:2px 8px 4px 0;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7">'+h+'</th>';}).join('')+'</tr></thead><tbody>'+(sizeRows||'<tr><td colspan="4" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>')+'</tbody></table>'
       +'<div style="margin-top:8px"><input class="fci" id="pm-newsz" placeholder="add size…" style="width:130px"> <button class="save-btn" id="pm-addsz">+ Add size</button></div>'
       +'<div style="font-weight:700;font-size:13px;margin:16px 0 6px">Swatch image <span style="color:#94a3b8;font-weight:400;font-size:11px">(JPG/PNG, ≤2MB — uploads on select)</span></div>'
       +'<input type="file" id="pm-swatch" accept="image/png,image/jpeg" style="font-size:12px"> <span id="pm-sw-msg" style="font-size:11px;margin-left:6px"></span>'
@@ -8552,6 +8571,7 @@
     body.querySelector('#pm-addsz').onclick=function(){ var v=body.querySelector('#pm-newsz').value.trim(); if(!v)return; shipPost('/api/product/size',{ref:it.ref,size_label:v},function(){ renderProductDetail(it.ref); }); };
     body.querySelectorAll('.pm-sz').forEach(function(el){ el.onchange=function(){ var b={}; b[el.dataset.f]=el.value; shipPost('/api/product/size/'+el.dataset.id,b,function(){}); }; });
     body.querySelectorAll('.pm-sz-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Remove this size?'))return; shipPost('/api/product/size/'+a.dataset.id+'/delete',{},function(){ renderProductDetail(it.ref); }); }; });
+    body.querySelectorAll('.pm-sku-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openSkuPick(b,function(){ renderProductDetail(it.ref); }); }; });
     function swUp(f){ var m=body.querySelector('#pm-sw-msg'); if(!f)return; if(['image/png','image/jpeg'].indexOf(f.type)<0){ m.style.color='#dc2626'; m.textContent='JPG or PNG only'; return; } if(f.size>10*1024*1024){ m.style.color='#dc2626'; m.textContent='max 10MB'; return; } m.style.color='#64748b'; m.textContent='optimising…';
       var rd=new FileReader();
       rd.onload=function(){ var src=String(rd.result);

@@ -3249,7 +3249,8 @@ app.get('/api/product/item/:ref', async (req, res) => {
       to_char(dev_start_override,'YYYY-MM-DD') dev_start_override, to_char(approved_at,'YYYY-MM-DD HH24:MI') approved_at
       FROM planner.product_dev_items WHERE ref=$1`, [ref])).rows[0];
     if (!item) return res.status(404).json({ error: 'not found' });
-    const sizes = (await pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort FROM planner.product_dev_sizes WHERE item_id=$1 ORDER BY sort, id`, [item.id])).rows;
+    const sizes = (await pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort,
+      coalesce(mapped_sku,'') mapped_sku, approved_sample_id FROM planner.product_dev_sizes WHERE item_id=$1 ORDER BY sort, id`, [item.id])).rows;
     const docs = (await pool.query(`SELECT id, filename, mime, byte_size, coalesce(uploaded_by,'') uploaded_by, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments WHERE po=$1 AND category='product' ORDER BY uploaded_at DESC`, [ref])).rows;
     const unread_supplier = (await pool.query(`SELECT count(*)::int n FROM planner.supplier_notes WHERE po=$1 AND author_kind='supplier' AND read_at IS NULL`, [ref])).rows[0].n;
     res.json({ item, sizes, docs, unread_supplier });
@@ -3342,7 +3343,14 @@ app.post('/api/product/size', async (req, res) => {
     res.json({ ok: true, id: r.rows[0].id }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/size/:id', (req, res) =>
-  patch(res, 'planner.product_dev_sizes', 'id', req.params.id, { size_label: 'text', approval_status: 'text' }, req.body, 'bigint'));
+  patch(res, 'planner.product_dev_sizes', 'id', req.params.id, { size_label: 'text', approval_status: 'text', mapped_sku: 'text', approved_sample_id: 'bigint' }, req.body, 'bigint'));
+// SKU picker source for mapping an approved size → a planner SKU (full searchable list).
+app.get('/api/product/skus', async (_req, res) => {
+  try { const rows = (await pool.query(`SELECT sku,
+      trim(both ' ' from coalesce(colour_long,'')||' '||coalesce(size_short,'')) label
+      FROM planner.products ORDER BY sku`)).rows;
+    res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.post('/api/product/size/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.product_dev_sizes WHERE id=$1`, [req.params.id]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
