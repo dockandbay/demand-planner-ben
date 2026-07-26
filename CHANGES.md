@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.149 - Widen Size variants table so A badges / snooze fit
+
+- The Size-variants table now uses the full page width (nowrap action cells) so the "A" action badge + SNOOZE dropdown fit cleanly; horizontal scroll as a fallback. (Groundwork for the per-size approval matrix.)
+
 ## v26.148 - PRODUCT: status-misalignment action
 
 - If **all sizes are approved** but the product status is still **In development / Rejected**, a PO-style **"A" action**

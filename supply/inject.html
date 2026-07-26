@@ -8628,12 +8628,12 @@
     function szRow(s){ return '<tr data-id="'+s.id+'"><td style="padding:3px 8px 3px 0"><input class="fci pm-sz" data-id="'+s.id+'" data-f="size_label" value="'+esc(s.size_label)+'" style="width:110px"></td>'
       +'<td style="padding:3px 8px"><select class="fci pm-sz" data-id="'+s.id+'" data-f="approval_status" style="'+szApprovalStyle(s.approval_status)+'"><option value="pending"'+(s.approval_status==='pending'?' selected':'')+'>Pending</option><option value="approved"'+(s.approval_status==='approved'?' selected':'')+'>Approved</option><option value="rejected"'+(s.approval_status==='rejected'?' selected':'')+'>Rejected</option></select></td>'
       // Mapped SKU: once the size is approved, map it to a planner SKU (searchable). PO-style "A" action marker until set.
-      +'<td style="padding:3px 8px">'+(s.approval_status==='approved'
+      +'<td style="padding:3px 8px;white-space:nowrap">'+(s.approval_status==='approved'
           ? '<button class="cell-pick pm-sku-pick" data-id="'+s.id+'" data-sku="'+esc(s.mapped_sku||'')+'" title="map this approved size to a planner SKU">'+(s.mapped_sku?'<b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.mapped_sku)+'</b>':'<span class="mut">— <span style="background:#fee2e2;color:#991b1b;font-weight:700;border-radius:3px;padding:0 3px">map SKU</span></span>')+' ▾</button>'
              +(s.mapped_sku?'':prodActMark(it.ref,'sku'))
           : '<span class="mut tiny">approve first</span>')+'</td>'
       // Approved sample version — shown once the SIZE is approved. PO-style "A" action marker until a version is picked.
-      +'<td style="padding:3px 8px">'+(s.approval_status!=='approved'
+      +'<td style="padding:3px 8px;white-space:nowrap">'+(s.approval_status!=='approved'
           ? '<span class="mut tiny">approve size first</span>'
           : (d.samples&&d.samples.length
               ? '<select class="fci pm-sz" data-id="'+s.id+'" data-f="approved_sample_id" style="'+(s.approved_sample_id?'':'background:#fee2e2;color:#991b1b;font-weight:700')+'"><option value="">—</option>'+d.samples.map(function(v){return '<option value="'+v.id+'"'+(String(s.approved_sample_id||'')===String(v.id)?' selected':'')+'>v'+v.version+'</option>';}).join('')+'</select>'
@@ -8654,7 +8654,7 @@
       +pRow('Description','<textarea class="fci pm-fld" data-f="description" id="pm-desc" rows="3" style="width:100%;max-width:620px;box-sizing:border-box">'+esc(it.description)+'</textarea>')
       +'<div style="font-size:11px;color:#94a3b8;margin:2px 0 12px">Changes save automatically. <span id="pm-msg" style="margin-left:6px"></span></div>'
       +'<div style="font-weight:700;font-size:13px;margin:14px 0 6px">Size variants <span style="color:#94a3b8;font-weight:400;font-size:11px">(approval = internal D&amp;B sign-off)</span></div>'
-      +'<table style="border-collapse:collapse;font-size:12px"><thead><tr>'+['Size','Approval','Mapped SKU','Approved sample',''].map(function(h){return '<th style="text-align:left;padding:2px 8px 4px 0;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7">'+h+'</th>';}).join('')+'</tr></thead><tbody id="pm-sztbody">'+(sizeRows||'<tr><td colspan="5" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>')+'</tbody></table>'
+      +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;max-width:1000px"><thead><tr>'+['Size','Approval','Mapped SKU','Approved sample',''].map(function(h){return '<th style="text-align:left;padding:2px 8px 4px 0;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody id="pm-sztbody">'+(sizeRows||'<tr><td colspan="5" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>')+'</tbody></table></div>'
       +'<div style="margin-top:8px"><input class="fci" id="pm-newsz" placeholder="add size…" style="width:130px"> <button class="save-btn" id="pm-addsz">+ Add size</button></div>'
       +'<div style="font-weight:700;font-size:13px;margin:16px 0 6px">Swatch image <span style="color:#94a3b8;font-weight:400;font-size:11px">(JPG/PNG, ≤2MB — uploads on select)</span></div>'
       +'<input type="file" id="pm-swatch" accept="image/png,image/jpeg" style="font-size:12px"> <span id="pm-sw-msg" style="font-size:11px;margin-left:6px"></span>'
