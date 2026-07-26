@@ -8429,9 +8429,9 @@
     var nMap=(r.sizes_unmapped||0); if(nMap&&!snzActive(_poActState['prodsku|'+r.ref])){ n+=nMap; notes.push(nMap+' size'+(nMap>1?'s':'')+' need a SKU mapping'); }
     if(r.status_misaligned&&!snzActive(_poActState['prodstatus|'+r.ref])){ n+=1; notes.push('status misaligned — all sizes approved but item isn’t Approved'); }
     [['product','comp_product'],['packaging','comp_packaging'],['labels','comp_labels'],['polybag','comp_polybag'],['other','comp_other']].forEach(function(c){ var cnt=r[c[1]]||0; if(cnt&&!snzActive(_poActState['prodcomp|'+c[0]+'|'+r.ref])){ n+=cnt; notes.push(cnt+' '+COMP_LBL[c[0]]+' approval'+(cnt>1?'s':'')+' pending'); } });
-    return { n:n, note:notes.join(' · ') }; }
+    return { n:n, note:notes.join('\n') }; }
   function prodActBadge(r){ var a=prodOpenActs(r); if(!a.n)return '';
-    return ' <button class="ex-badge pg-actbadge" data-ref="'+esc(r.ref)+'" data-note="'+esc(a.note+' — click to open')+'" style="background:#dc2626;cursor:pointer;border:none">'+a.n+'</button>'; }
+    return ' <button class="ex-badge pg-actbadge" data-ref="'+esc(r.ref)+'" data-note="'+esc(a.note+'\n— click to open')+'" style="background:#dc2626;cursor:pointer;border:none">'+a.n+'</button>'; }
   // Product action marker — IDENTICAL UX to the PO grid's actMark (A tooltip + SNOOZE ▾ menu 1/3/7/Indefinitely + wake).
   var PROD_ACT_HELP={ sku:'This approved size needs a planner SKU mapping. Map it above, or snooze to defer the reminder.',
     samp:'This size needs an approved sample version selected (the item is approved). Pick a version, or snooze to defer.',
@@ -8522,7 +8522,7 @@
               +'<td>'+prodPickBtn(r.ref,'season',r.season,'season')+'</td>'
               +'<td>'+prodPickBtn(r.ref,'supplier',r.supplier,'supplier')+'</td>'
               +'<td>'+r.sizes_approved+'/'+r.sizes+'</td>'
-              +'<td><span style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:2px">'+prodStatusSelHtml(r.ref,r.status)+(r.status_misaligned?prodActMark(r.ref,'status'):'')+'</span></td>'
+              +'<td>'+prodStatusSelHtml(r.ref,r.status)+'</td>'
               +'<td class="l">'+(r.latest_shipment?('<div style="white-space:nowrap;font-size:11px">📦 <a class="samp-open" data-ref="'+esc(r.latest_shipment.ref)+'" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;font-weight:600" title="open this sample shipment">'+esc(r.latest_shipment.ref)+'</a>'+(r.latest_shipment.carrier?' <span class="mut tiny">'+esc(r.latest_shipment.carrier)+'</span>':'')+(r.latest_shipment.tracking?' · '+carrierTrackLinkInj(r.latest_shipment.carrier,r.latest_shipment.tracking):'')+'</div>'):'<span class="mut tiny">—</span>')+'</td></tr>'
               +'<tr class="pg-detrow" id="pgdet-'+i+'" style="display:none"><td colspan="8"><div class="pg-det"></div></td></tr>';
           }).join('')+'</tbody></table></div>';
@@ -8631,27 +8631,28 @@
     var COMPS=[['product','Product'],['packaging','Packaging'],['labels','Labels/wraps'],['polybag','Polybags'],['other','Other components']];
     function sizeDim(s,dim){ return ((s.dimensions||[]).filter(function(x){return x.dimension===dim;})[0])||{}; }
     function compApprStyle(v){ return v==='approved'?'background:#dcfce7;color:#166534;font-weight:700':v==='rejected'?'background:#fee2e2;color:#991b1b;font-weight:700':'background:#fef3c7;color:#92400e;font-weight:600'; }
-    function compFiles(s,dim,sd){ return (sd.files||[]).map(function(f){ var url='/api/supply/portal-attachment/'+f.id, img=/^image\//i.test(f.mime);
-        return '<span style="display:inline-flex;align-items:center;gap:2px;border:1px solid #eef2f7;border-radius:5px;padding:1px 4px;margin:1px"><input class="pm-comp-fver" data-fid="'+f.id+'" value="'+(f.version==null?'':f.version)+'" placeholder="v" title="version #" style="width:26px;font-size:10px;text-align:center;border:1px solid #e5e7eb;border-radius:3px">'
-          +(img?'<img class="pm-dimimg" data-src="'+url+'" src="'+url+'" style="width:22px;height:22px;object-fit:cover;border-radius:3px;cursor:zoom-in" title="'+esc(f.filename||'')+'">':'<a href="'+url+'" target="_blank" rel="noopener" style="font-size:10px;color:#1d4ed8" title="'+esc(f.filename||'')+'">📄</a>')
-          +'<a class="pm-comp-fdel" data-fid="'+f.id+'" title="remove file" style="color:#dc2626;cursor:pointer;font-size:10px">✕</a></span>'; }).join('')
+    function compFiles(s,dim,sd){ return (sd.files||[]).map(function(f){ var url='/api/supply/portal-attachment/'+f.id, img=/^image\//i.test(f.mime), fn=f.filename||'file';
+        return '<span style="display:inline-flex;align-items:center;gap:3px;border:1px solid #eef2f7;border-radius:5px;padding:1px 5px;margin:1px;max-width:100%"><input class="pm-comp-fver" data-fid="'+f.id+'" value="'+(f.version==null?'':f.version)+'" placeholder="v" title="version #" style="width:24px;font-size:10px;text-align:center;border:1px solid #e5e7eb;border-radius:3px">'
+          +(img?'<img class="pm-dimimg" data-src="'+url+'" src="'+url+'" style="width:20px;height:20px;object-fit:cover;border-radius:3px;cursor:zoom-in;flex:none" title="'+esc(fn)+'">':'<span style="font-size:11px;flex:none">📄</span>')
+          +'<a href="'+url+'" target="_blank" rel="noopener" title="'+esc(fn)+'" style="font-size:10px;color:#1d4ed8;text-decoration:none;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(fn)+'</a>'
+          +'<a class="pm-comp-fdel" data-fid="'+f.id+'" title="remove file" style="color:#dc2626;cursor:pointer;font-size:10px;flex:none">✕</a></span>'; }).join(' ')
         +' <label style="font-size:10px;color:#1d4ed8;cursor:pointer;white-space:nowrap">+ file<input type="file" class="pm-comp-file" data-id="'+s.id+'" data-dim="'+dim+'" style="display:none" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx" multiple></label>'; }
     function compRow(s,dim){ var sd=sizeDim(s,dim), req=!!sd.required, appr=sd.approval_status||'pending';
       var reqCell='<input type="checkbox" class="pm-comp-req" data-id="'+s.id+'" data-dim="'+dim+'"'+(req?' checked':'')+'>'+(dim==='packaging'&&req?' <select class="fci pm-comp-type" data-id="'+s.id+'" data-dim="packaging" style="font-size:11px"><option value="">type…</option><option'+(sd.packaging_type==='pouch'?' selected':'')+'>pouch</option><option'+(sd.packaging_type==='box'?' selected':'')+'>box</option></select>':'');
       var apprCell='<select class="fci pm-comp-appr" data-id="'+s.id+'" data-dim="'+dim+'" style="font-size:11px;'+compApprStyle(appr)+'"><option value="pending"'+(appr==='pending'?' selected':'')+'>Pending</option><option value="approved"'+(appr==='approved'?' selected':'')+'>Approved</option><option value="rejected"'+(appr==='rejected'?' selected':'')+'>Rejected</option></select>';
       var actCell=(req&&appr!=='approved')?prodActMark(it.ref,'c_'+dim):'<span class="mut tiny">—</span>';
       return '<tr class="pm-comprow" style="'+(req?'':'opacity:.6')+'">'
-        +'<td style="padding:2px 8px 2px 16px;font-size:11px;color:#334155;white-space:nowrap">'+COMP_LBL[dim]+'</td>'
-        +'<td style="padding:2px 8px"><input class="fci pm-comp-desc" data-id="'+s.id+'" data-dim="'+dim+'" value="'+esc(sd.description||'')+'" placeholder="description…" style="width:100%;min-width:120px;font-size:11px"></td>'
-        +'<td style="padding:2px 8px;text-align:center;white-space:nowrap">'+reqCell+'</td>'
-        +'<td style="padding:2px 8px">'+(req?compFiles(s,dim,sd):'<span class="mut tiny">—</span>')+'</td>'
-        +'<td style="padding:2px 8px">'+(req?apprCell:'<span class="mut tiny">—</span>')+'</td>'
-        +'<td style="padding:2px 8px;white-space:nowrap">'+actCell+'</td></tr>'; }
-    function szHdr(s){ return '<tr class="pm-szhdr" data-id="'+s.id+'"><td colspan="6" style="padding:9px 8px 3px 0;border-top:1px solid #e5e7eb;white-space:nowrap"><span style="display:inline-flex;align-items:center;gap:8px;flex-wrap:nowrap"><span style="font-weight:700;color:#64748b;font-size:11px">Size</span><input class="fci pm-sz" data-id="'+s.id+'" data-f="size_label" value="'+esc(s.size_label)+'" placeholder="e.g. Large" style="width:90px;font-weight:700"><select class="fci pm-sz" data-id="'+s.id+'" data-f="approval_status" style="'+szApprovalStyle(s.approval_status)+'"><option value="pending"'+(s.approval_status==='pending'?' selected':'')+'>Pending</option><option value="approved"'+(s.approval_status==='approved'?' selected':'')+'>Approved</option><option value="rejected"'+(s.approval_status==='rejected'?' selected':'')+'>Rejected</option></select>'
+        +'<td style="padding:2px 8px 2px 16px;font-size:11px;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+COMP_LBL[dim]+'</td>'
+        +'<td style="padding:2px 8px"><input class="fci pm-comp-desc" data-id="'+s.id+'" data-dim="'+dim+'" value="'+esc(sd.description||'')+'" placeholder="description…" style="width:100%;font-size:11px;box-sizing:border-box"></td>'
+        +'<td style="padding:2px 8px;text-align:left;white-space:nowrap">'+reqCell+'</td>'
+        +'<td style="padding:2px 8px;text-align:left">'+(req?apprCell:'<span class="mut tiny">—</span>')+'</td>'
+        +'<td style="padding:2px 8px;text-align:left;white-space:nowrap">'+actCell+'</td>'
+        +'<td style="padding:2px 8px">'+(req?compFiles(s,dim,sd):'<span class="mut tiny">—</span>')+'</td></tr>'; }
+    function szHdr(s){ return '<tr class="pm-szhdr" data-id="'+s.id+'"><td colspan="6" style="padding:9px 8px 3px 0;border-top:1px solid #e5e7eb;white-space:nowrap"><span style="display:inline-flex;align-items:center;gap:8px;flex-wrap:nowrap"><a class="pm-sz-del" data-id="'+s.id+'" title="remove size" style="color:#dc2626;cursor:pointer;font-weight:700">✕</a><span style="font-weight:700;color:#64748b;font-size:11px">Size</span><input class="fci pm-sz" data-id="'+s.id+'" data-f="size_label" value="'+esc(s.size_label)+'" placeholder="e.g. Large" size="25" style="width:210px;font-weight:700"><select class="fci pm-sz" data-id="'+s.id+'" data-f="approval_status" style="'+szApprovalStyle(s.approval_status)+'"><option value="pending"'+(s.approval_status==='pending'?' selected':'')+'>Pending</option><option value="approved"'+(s.approval_status==='approved'?' selected':'')+'>Approved</option><option value="rejected"'+(s.approval_status==='rejected'?' selected':'')+'>Rejected</option></select>'
       +' <span class="mut tiny">SKU</span> '+(s.approval_status==='approved'
           ? '<button class="cell-pick pm-sku-pick" data-id="'+s.id+'" data-sku="'+esc(s.mapped_sku||'')+'" title="map this approved size to a planner SKU">'+(s.mapped_sku?'<b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.mapped_sku)+'</b>':'<span class="mut">— <span style="background:#fee2e2;color:#991b1b;font-weight:700;border-radius:3px;padding:0 3px">map</span></span>')+' ▾</button>'+(s.mapped_sku?'':prodActMark(it.ref,'sku'))
           : '<span class="mut tiny">approve to map</span>')
-      +' <a class="pm-sz-del" data-id="'+s.id+'" title="remove size" style="color:#dc2626;cursor:pointer">✕</a></span></td></tr>'; }
+      +'</span></td></tr>'; }
     function szRows(s){ return szHdr(s)+COMPS.map(function(cl){return compRow(s,cl[0]);}).join(''); }
     var sizeRows=(d.sizes||[]).map(szRows).join('');
     var seasonOpts=seasons.map(function(o){return '<option value="'+esc(o.code)+'"'+(o.code===it.season?' selected':'')+'>'+esc(o.code)+'</option>';}).join('');
@@ -8659,7 +8660,7 @@
     var statOpts=PROD_ITEM_STAT.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===it.status?' selected':'')+'>'+o[1]+'</option>';}).join('');
     var swUrl='/api/product/swatch/'+encodeURIComponent(it.ref)+'?t='+encodeURIComponent(it.updated_at||'');
     var swatchVal='<input type="file" id="pm-swatch" accept="image/png,image/jpeg" style="font-size:12px"> <span id="pm-sw-msg" style="font-size:11px"></span>'
-      +(it.has_swatch?' <img class="pm-swatch-zoom" data-src="'+swUrl+'" src="'+swUrl+'" style="width:36px;height:36px;object-fit:cover;border-radius:5px;border:1px solid #e5e7eb;cursor:zoom-in;vertical-align:middle" title="click to enlarge"> <a href="'+swUrl+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;font-size:11px">view / download</a>':'')
+      +(it.has_swatch?' <img class="pm-swatch-zoom" data-src="'+swUrl+'" src="'+swUrl+'" style="width:36px;height:36px;object-fit:cover;border-radius:5px;border:1px solid #e5e7eb;cursor:zoom-in;vertical-align:middle" title="click to enlarge"> <a href="'+swUrl+'" download title="download swatch" style="color:#1d4ed8;text-decoration:none;font-size:15px;vertical-align:middle">⬇</a>':'')
       +'<div id="pm-swatch-paste" tabindex="0" style="margin-top:6px;border:1px dashed #cbd5e1;border-radius:6px;padding:8px 11px;font-size:11px;color:#94a3b8;max-width:340px;cursor:text">…or click here and paste an image (⌘/Ctrl+V)</div>';
     body.innerHTML=prodSupList()+'<div style="max-width:660px">'
       +pRow('Season','<select class="fci pm-field pm-fld" data-f="season" id="pm-season">'+seasonOpts+'</select>')
@@ -8673,7 +8674,7 @@
       +'<div style="font-size:11px;color:#94a3b8;margin:2px 0 12px">Changes save automatically. <span id="pm-msg" style="margin-left:6px"></span></div>'
       +'</div>'
       +'<div style="font-weight:700;font-size:13px;margin:14px 0 6px">Size variants &amp; components <span style="color:#94a3b8;font-weight:400;font-size:11px">(approval = internal D&amp;B sign-off)</span></div>'
-      +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%"><thead><tr>'+['Component','Description','Req','Files (versioned)','Approval','Actions'].map(function(h){return '<th style="text-align:left;padding:2px 8px 4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody id="pm-sztbody">'+(sizeRows||'<tr><td colspan="6" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>')+'</tbody></table></div>'
+      +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;min-width:820px;table-layout:fixed"><thead><tr>'+[['Component','width:130px'],['Description','width:22%'],['Req','width:46px'],['Status','width:104px'],['Actions','width:120px'],['Files','']].map(function(h){return '<th style="text-align:left;padding:2px 8px 4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7;white-space:nowrap;'+h[1]+'">'+h[0]+'</th>';}).join('')+'</tr></thead><tbody id="pm-sztbody">'+(sizeRows||'<tr><td colspan="6" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>')+'</tbody></table></div>'
       +'<div style="margin-top:8px"><input class="fci" id="pm-newsz" placeholder="add size…" style="width:130px"> <button class="save-btn" id="pm-addsz">+ Add size</button></div>'
       +'<div style="margin-top:16px;padding-top:12px;border-top:1px solid #eef2f7;max-width:660px"><button class="save-btn light" id="pm-del" style="color:#dc2626">Delete product</button></div>';
     body.querySelectorAll('.pm-fld').forEach(function(el){ el.onchange=function(){ var msg=body.querySelector('#pm-msg'); if(msg){msg.style.color='#64748b';msg.textContent='Saving…';}
@@ -8742,9 +8743,20 @@
       return '<tr>'+(isImg(x.mime)?'<td style="padding:5px 8px 5px 0"><img class="pdoc-img" data-src="'+att+'" src="'+att+'" style="width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;cursor:zoom-in" title="click to enlarge"></td>':'<td style="padding:5px 8px 5px 0;color:#cbd5e1">📄</td>')
         +'<td style="padding:5px 8px"><a href="'+dl+'" style="color:#1d4ed8;text-decoration:underline;word-break:break-word">'+esc(x.filename)+'</a></td><td style="padding:5px 8px;color:#94a3b8;white-space:nowrap">'+Math.max(1,Math.round((x.byte_size||0)/1024))+' KB</td><td style="padding:5px 8px;color:#94a3b8;white-space:nowrap">'+esc(x.uploaded_at||'')+'</td><td style="padding:5px 8px"><a class="pdoc-del" data-id="'+x.id+'" style="color:#dc2626;cursor:pointer">✕</a></td></tr>'; }
     function tbl(list){ return '<table style="border-collapse:collapse;font-size:12px;width:100%;max-width:660px"><tbody>'+(list.length?list.map(adRow).join(''):'<tr><td style="color:#94a3b8;padding:6px 2px">None yet.</td></tr>')+'</tbody></table>'; }
+    // Size/variant component uploads (managed in Master data) — surfaced here read-only for reference.
+    var compFiles=[]; (d.sizes||[]).forEach(function(s){ (s.dimensions||[]).forEach(function(dm){ (dm.files||[]).forEach(function(f){ compFiles.push({sz:s.size_label,dim:dm.dimension,f:f}); }); }); });
+    function cfRow(x){ var att='/api/supply/portal-attachment/'+x.f.id;
+      var who=x.f.uploader_kind==='supplier'?'supplier':(x.f.uploaded_by?shortUser(x.f.uploaded_by):'Dock & Bay');
+      return '<tr>'+(isImg(x.f.mime)?'<td style="padding:5px 8px 5px 0"><img class="pdoc-img" data-src="'+att+'" src="'+att+'" style="width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;cursor:zoom-in" title="click to enlarge"></td>':'<td style="padding:5px 8px 5px 0;color:#cbd5e1">📄</td>')
+        +'<td style="padding:5px 8px;color:#64748b;white-space:nowrap">'+esc(x.sz||'')+' · '+esc(COMP_LBL[x.dim]||x.dim)+(x.f.version?' · <b>v'+x.f.version+'</b>':'')+'</td>'
+        +'<td style="padding:5px 8px"><a href="'+att+'" download style="color:#1d4ed8;text-decoration:underline;word-break:break-word">'+esc(x.f.filename)+'</a></td>'
+        +'<td style="padding:5px 8px;color:#94a3b8;white-space:nowrap">'+esc(who)+'</td>'
+        +'<td style="padding:5px 8px;color:#94a3b8;white-space:nowrap">'+esc(x.f.uploaded_at||'')+'</td></tr>'; }
+    function cfTbl(list){ return '<table style="border-collapse:collapse;font-size:12px;width:100%;max-width:660px"><tbody>'+(list.length?list.map(cfRow).join(''):'<tr><td style="color:#94a3b8;padding:6px 2px">None yet.</td></tr>')+'</tbody></table>'; }
     body.innerHTML='<div style="border:1px dashed #cbd5e1;border-radius:8px;padding:12px 14px;margin-bottom:14px;background:#f8fafc"><div style="font-weight:700;font-size:12px;margin-bottom:6px">Upload document <span style="color:#94a3b8;font-weight:400">(≤10MB)</span></div><input type="file" id="pdoc-file" style="font-size:12px"> <button class="save-btn" id="pdoc-up" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Upload</button> <span id="pdoc-msg" style="font-size:12px;margin-left:6px"></span></div>'
       +'<div style="font-weight:700;font-size:13px;margin:4px 0 5px">Uploaded by Dock &amp; Bay</div>'+tbl(dnb)
-      +'<div style="font-weight:700;font-size:13px;margin:16px 0 5px">Uploaded by supplier</div>'+tbl(sup);
+      +'<div style="font-weight:700;font-size:13px;margin:16px 0 5px">Uploaded by supplier</div>'+tbl(sup)
+      +'<div style="font-weight:700;font-size:13px;margin:16px 0 5px">Size / component files <span class="mut tiny" style="font-weight:400">(from Master data — edit there)</span></div>'+cfTbl(compFiles);
     body.querySelector('#pdoc-up').onclick=function(){ var f=body.querySelector('#pdoc-file').files[0]; var m=body.querySelector('#pdoc-msg'); if(!f){m.style.color='#dc2626';m.textContent='choose a file';return;} if(f.size>10*1024*1024){m.style.color='#dc2626';m.textContent='max 10MB';return;} m.style.color='#64748b'; m.textContent='uploading…'; var rd=new FileReader(); rd.onload=function(){ shipPost('/api/product/doc',{ref:ref,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),uploaded_by:(window.ME&&ME.email)||''},function(j){ if(j&&j.error){m.style.color='#dc2626';m.textContent=j.error;return;} renderProductDetail(ref); }); }; rd.readAsDataURL(f); };
     body.querySelectorAll('.pdoc-img').forEach(function(im){ im.onclick=function(){ openImgZoom(im.dataset.src); }; });
     body.querySelectorAll('.pdoc-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this document?'))return; shipPost('/api/product/doc/'+a.dataset.id+'/delete',{},function(){ renderProductDetail(ref); }); }; }); }

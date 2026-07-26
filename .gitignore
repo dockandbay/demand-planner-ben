@@ -30,3 +30,10 @@ migrations/099_product_carton_dims.sql
 # Cin7 API call log (sandbox debugging)
 cin7-calls.jsonl
 *Screenshot at*.png
+
+# Large local data & assets — never commit (14GB+ of barcodes/archives/exports lives here;
+# a stray `git add -A` swept these in and >100MB files break the GitHub push). files/ is not
+# repo content — it's local working data.
+files/
+*.mov
+*.dmg

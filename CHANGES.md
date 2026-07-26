@@ -3,6 +3,36 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.164 - Fix collapsed component columns (table-layout:fixed)
+- Size variants & components table: switched to table-layout:fixed with explicit column widths (Component 130px, Description 22%, Req 46px, Status 104px, Actions 120px, Files rest) + min-width 820px. Fixes Component/Description/Req collapsing to zero width (only STATUS/ACTIONS/FILES were showing). Component label ellipsizes if long; description input no longer overflows.
+
+## v26.163 - Size input fits ~25 characters
+- Widened the size-label input in the Size & variants header to ~210px (size=25) so longer size descriptions fit.
+
+## v26.162 - Component table: fix crushed Component/Req columns
+- Component and Req columns now size to their content (were being crushed/cut off by the over-100% fixed widths). Files is the single flexible column (width:100%) absorbing the slack; Status 92px, Actions 112px kept.
+
+## v26.161 - Component table: wider Actions, tighter Component column
+- Doubled the Actions column width (56px→112px). Shrunk the Component label column to its content so Description onwards sit right next to the Product/Packaging/etc. labels (removes the large auto-sizing gap).
+
+## v26.160 - Documents: uploader + timestamp on size/component files
+- The "Size / component files" section in the PRODUCT Documents tab now shows who uploaded each file and the upload date/time (server round-3 query extended with uploaded_by/uploader_kind/uploaded_at).
+
+## v26.159 - Component table column widths + filenames in Files
+- Size/variants component table: REQ narrowed to just the checkbox + header; STATUS (approval) narrowed + left-aligned; ACTIONS narrowed + left-aligned; FILES widened and now shows each filename (clickable) alongside the version input / thumbnail / delete.
+
+## v26.158 - PRODUCT grid: drop inline A/SNOOZE on the status cell
+- Removed the "A" action marker + SNOOZE from the Status cell in the PRODUCT grid (status misalignment still counts into the ref action badge; snooze/action handling stays in Master data).
+
+## v26.157 - PRODUCT Documents tab now lists size/component uploads
+- Files uploaded against a size-variant component (Master data) now also appear in the DOCUMENTS tab under a "Size / component files" section (read-only reference: Size · Component · version, view/download + image popup).
+
+## v26.156 - PRODUCT polish: swatch download icon, component-table column reorder, delete-X left, multiline action tooltip
+- Swatch: "view / download" link replaced with a single download icon (⬇, forces download).
+- Size variants & components table: REQ column left-aligned + narrowed; column order now Component · Description · Req · Approval · Actions · Files (files last).
+- Delete-size ✕ moved to the left of the "Size" label.
+- Product grid action tooltip: each pending action listed on its own line.
+
 ## v26.155 - Size header on one row
 
 - Size · Status · Mapped SKU now stay on a single row in the Size-variants header (no wrapping).

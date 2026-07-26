@@ -3281,8 +3281,8 @@ app.get('/api/product/item/:ref', async (req, res) => {
     { const byV = {}; sfR.rows.forEach(f => { (byV[f.po] = byV[f.po] || []).push({ id: f.id, filename: f.filename, mime: f.mime }); }); samples.forEach(s => { s.files = byV['PSAMPLE-' + s.id] || []; }); }
     const dims = dimsR.rows;
     if (dims.length) {   // Round 3 — component files
-      const dfR = await pool.query(`SELECT po, id, filename, coalesce(mime,'') mime, version FROM planner.portal_attachments WHERE po = ANY($1) AND category='product_dim' ORDER BY version NULLS LAST, uploaded_at`, [dims.map(d => 'PDIM-' + d.id)]);
-      const byDim = {}; dfR.rows.forEach(f => { const did = f.po.replace('PDIM-', ''); (byDim[did] = byDim[did] || []).push({ id: f.id, filename: f.filename, mime: f.mime, version: f.version }); });
+      const dfR = await pool.query(`SELECT po, id, filename, coalesce(mime,'') mime, version, coalesce(uploaded_by,'') uploaded_by, coalesce(uploader_kind,'internal') uploader_kind, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments WHERE po = ANY($1) AND category='product_dim' ORDER BY version NULLS LAST, uploaded_at`, [dims.map(d => 'PDIM-' + d.id)]);
+      const byDim = {}; dfR.rows.forEach(f => { const did = f.po.replace('PDIM-', ''); (byDim[did] = byDim[did] || []).push({ id: f.id, filename: f.filename, mime: f.mime, version: f.version, uploaded_by: f.uploaded_by, uploader_kind: f.uploader_kind, uploaded_at: f.uploaded_at }); });
       dims.forEach(d => { d.files = byDim[d.id] || []; });
     }
     const byS = {}; dims.forEach(d => { (byS[d.size_id] = byS[d.size_id] || []).push(d); });
