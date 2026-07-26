@@ -8656,7 +8656,7 @@
           +'<a class="pm-comp-fdel" data-fid="'+f.id+'" title="remove file" style="color:#dc2626;cursor:pointer;font-size:10px;flex:none">✕</a></span>'; }).join(' ')
         +' <label style="font-size:10px;color:#1d4ed8;cursor:pointer;white-space:nowrap">+ file<input type="file" class="pm-comp-file" data-id="'+s.id+'" data-dim="'+dim+'" style="display:none" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx" multiple></label>'; }
     function compRow(s,dim){ var sd=sizeDim(s,dim), req=!!sd.required, appr=sd.approval_status||'pending';
-      var reqCell='<input type="checkbox" class="pm-comp-req" data-id="'+s.id+'" data-dim="'+dim+'"'+(req?' checked':'')+'>'+(dim==='packaging'&&req?' <select class="fci pm-comp-type" data-id="'+s.id+'" data-dim="packaging" style="font-size:11px"><option value="">type…</option><option'+(sd.packaging_type==='pouch'?' selected':'')+'>pouch</option><option'+(sd.packaging_type==='box'?' selected':'')+'>box</option></select>':'');
+      var reqCell='<input type="checkbox" class="pm-comp-req" data-id="'+s.id+'" data-dim="'+dim+'"'+(req?' checked':'')+'>';
       var apprCell='<select class="fci pm-comp-appr" data-id="'+s.id+'" data-dim="'+dim+'" style="font-size:11px;'+compApprStyle(appr)+'"><option value="pending"'+(appr==='pending'?' selected':'')+'>Pending</option><option value="approved"'+(appr==='approved'?' selected':'')+'>Approved</option><option value="rejected"'+(appr==='rejected'?' selected':'')+'>Rejected</option></select>';
       var actCell=(req&&appr!=='approved')?prodActMark(it.ref,'c_'+dim):'<span class="mut tiny">—</span>';
       return '<tr class="pm-comprow" style="'+(req?'':'opacity:.6')+'">'

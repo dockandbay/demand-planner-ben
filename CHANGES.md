@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.172 - Remove packaging type dropdown + portal variant left-align
+- Admin PRODUCT ▸ Size variants: removed the pouch/box type dropdown next to Packaging (not required).
+- Supplier portal Master data: the size/components table cells were inheriting the global right-align from #supply-root tbody td (esp. visible on the M size) — forced left-align on all cells.
+
 ## v26.171 - Sample lifecycle status + shipment assignment (portal)
 - Product sample versions now carry a supplier status: In development / Completed / Cancelled (manual), with Shipped auto-derived once the sample's linked sample shipment has a tracking code. Effective status = cancelled > shipped > manual.
 - Suppliers can assign a sample to a sample shipment (SR) — from the sample (a "Shipment" selector: pick an SR / Not shipped / unassign) as well as the existing SR-side contents picker. Assignment also possible at creation.
