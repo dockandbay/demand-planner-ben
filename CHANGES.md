@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.176 - Portal: "＋ new shipment" shortcut on a sample
+- Added a "＋ new shipment" link on each sample's shipment control: creates a sample shipment (SR) with that sample already on it, then jumps to the Samples tab (deep-linked to the new SR) to complete the address & tracking.
+
 ## v26.175 - Admin PRODUCT: samples ordering/format, sample-shipments column, combined grid badge
 - Admin Samples tab: dates shown dd-mmm-yy, "submitted by <user>", and versions listed newest-first (descending by date).
 - Size variants & components table: new last column "Sample shipments" — per size×component, the SR sample shipments of samples covering that size + aspect (hover shows carrier · tracking). Item endpoint now returns sample_sizes/sampled_aspects/shipments.
