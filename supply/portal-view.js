@@ -1554,21 +1554,18 @@
               function pFiles(files){ return (files||[]).map(function(f){ var url=(EP.attachImgBase||'/api/supply/portal-attachment/')+f.id, vt=(f.version!=null?'v'+f.version+' ':'');
                 return /^image\//i.test(String(f.mime||''))?'<img class="pp-dimimg" data-src="'+url+'" src="'+url+'" style="width:24px;height:24px;object-fit:cover;border-radius:4px;border:1px solid #e5e7eb;margin:1px;cursor:zoom-in;vertical-align:middle" title="'+esc(vt+(f.filename||''))+'">':'<a href="'+url+'" download rel="noopener" style="font-size:10px;color:#1d4ed8;margin:0 4px;text-decoration:underline" title="'+esc(f.filename||'')+'">📄 '+esc(vt)+esc(f.filename||'file')+'</a>'; }).join(''); }
               function apprGlyph(a){ return a==='approved'?'✓':a==='rejected'?'✕':'⚠'; }
-              function pDimLine(label, sd){ if(!sd.required)return '<div style="color:#94a3b8;font-size:11px;padding:1px 0">'+label+': <span class="mut">not required</span></div>';
-                var appr=sd.approval_status||'pending', col=appr==='approved'?'#16a34a':appr==='rejected'?'#dc2626':'#b45309';
-                return '<div style="font-size:11px;padding:1px 0">'+label+(sd.description?' <span class="mut">('+esc(sd.description)+')</span>':'')+': <b style="color:'+col+'">'+apprGlyph(appr)+' '+esc(appr)+'</b> '+pFiles(sd.files)+'</div>'; }
+              function statusCell(appr){ var col=appr==='approved'?'#16a34a':appr==='rejected'?'#dc2626':'#b45309'; return '<b style="color:'+col+';white-space:nowrap">'+apprGlyph(appr)+' '+esc(appr||'pending')+'</b>'; }
+              function pDimRow(label, sd){ if(!sd.required)return '<tr style="border-top:1px solid #f4f4f5;color:#cbd5e1"><td style="padding:5px 8px 5px 0">'+label+'</td><td colspan="2" style="padding:5px 0">not required</td></tr>';
+                return '<tr style="border-top:1px solid #f4f4f5;vertical-align:top"><td style="padding:6px 10px 6px 0"><div style="font-weight:600;color:#334155">'+label+'</div>'+(sd.description?'<div class="mut tiny" style="margin-top:1px;white-space:normal">'+esc(sd.description)+'</div>':'')+'</td><td style="padding:6px 10px 6px 0;white-space:nowrap">'+statusCell(sd.approval_status)+'</td><td style="padding:6px 0">'+(pFiles(sd.files)||'<span class="mut tiny">—</span>')+'</td></tr>'; }
               var sizes=(d.sizes||[]).map(function(s){ function sd(dm){ return ((s.dimensions||[]).filter(function(x){return x.dimension===dm;})[0])||{}; } var pk=sd('packaging'), ok=s.approval_status==='approved';
-                return '<div style="border:1px solid #eef2f7;border-radius:7px;padding:7px 10px;margin-bottom:6px">'
-                  +'<div><b>'+esc(s.size_label)+'</b> · <span style="color:'+(ok?'#16a34a':s.approval_status==='rejected'?'#dc2626':'#94a3b8')+'">'+apprGlyph(s.approval_status)+' '+esc(s.approval_status)+'</span>'+(s.mapped_sku?' · <b style="font-family:ui-monospace,Menlo,monospace" title="planner SKU">'+esc(s.mapped_sku)+'</b>':'')+'</div>'
-                  +pDimLine('Product', sd('product'))
-                  +pDimLine('Packaging'+(pk.packaging_type?' ('+esc(pk.packaging_type)+')':''), pk)
-                  +pDimLine('Labels/wraps', sd('labels'))
-                  +pDimLine('Polybags', sd('polybag'))
-                  +pDimLine('Other components', sd('other'))
-                  +'</div>'; }).join('')||'<span class="mut">no sizes</span>';
+                var head='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:7px"><span style="font-weight:700;font-size:14px">'+esc(s.size_label)+'</span><span style="font-size:11px;padding:1px 8px;border-radius:10px;background:'+(ok?'#ecfdf5':s.approval_status==='rejected'?'#fef2f2':'#fffbeb')+';color:'+(ok?'#065f46':s.approval_status==='rejected'?'#991b1b':'#92400e')+';font-weight:700">'+apprGlyph(s.approval_status)+' '+esc(s.approval_status||'pending')+'</span>'+(s.mapped_sku?'<span style="font-size:11px;color:#64748b">SKU <b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.mapped_sku)+'</b></span>':'')+'</div>';
+                var body='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:#94a3b8;font-size:10px;text-transform:uppercase;letter-spacing:.04em"><th style="text-align:left;padding:0 10px 4px 0;font-weight:600">Component</th><th style="text-align:left;padding:0 10px 4px 0;font-weight:600">Status</th><th style="text-align:left;padding:0 0 4px;font-weight:600">Files</th></tr></thead><tbody>'
+                  +pDimRow('Product', sd('product'))+pDimRow('Packaging'+(pk.packaging_type?' ('+esc(pk.packaging_type)+')':''), pk)+pDimRow('Labels/wraps', sd('labels'))+pDimRow('Polybags', sd('polybag'))+pDimRow('Other components', sd('other'))+'</tbody></table>';
+                return '<div style="border:1px solid #e5e7eb;border-radius:9px;padding:10px 13px;margin-bottom:9px;background:#fff">'+head+body+'</div>'; }).join('')||'<span class="mut">no sizes</span>';
               var sw=it.has_swatch?'<img src="'+(EP.productSwatchBase||'/api/product/swatch/')+encodeURIComponent(ref)+'?t='+encodeURIComponent(it.updated_at||'')+'" style="width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">':'';
-              box.innerHTML='<div style="max-width:600px;text-align:left">'+(sw?'<div style="margin-bottom:8px">'+sw+'</div>':'')
-                +row('Reference','<b style="font-family:ui-monospace,Menlo,monospace">'+esc(it.ref)+'</b>')+row('Season',esc(it.season||'—'))+row('Category',esc(it.category||'—'))+row('Supplier',esc(it.supplier||'—'))+row('Colour way',esc(it.colour_name||'—'))+row('Status',esc(prodStatusLabel(it.status)))+row('Description','<span style="white-space:pre-wrap">'+esc(it.description||'—')+'</span>')+row('Size variants',sizes)+'</div>';
+              box.innerHTML='<div style="max-width:660px;text-align:left">'+(sw?'<div style="margin-bottom:8px">'+sw+'</div>':'')
+                +row('Reference','<b style="font-family:ui-monospace,Menlo,monospace">'+esc(it.ref)+'</b>')+row('Season',esc(it.season||'—'))+row('Category',esc(it.category||'—'))+row('Supplier',esc(it.supplier||'—'))+row('Colour way',esc(it.colour_name||'—'))+row('Status',esc(prodStatusLabel(it.status)))+row('Description','<span style="white-space:pre-wrap">'+esc(it.description||'—')+'</span>')
+                +'<div style="padding:10px 0 4px"><div style="color:#334155;font-weight:700;font-size:13px;margin-bottom:7px">Size variants &amp; components</div>'+sizes+'</div></div>';
               box.querySelectorAll('.pp-dimimg').forEach(function(im){ im.onclick=function(){ ppImgZoom(im.dataset.src); }; });
             }).catch(function(e){ box.innerHTML='<div style="color:#dc2626;text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
           // Click-to-view image modal (portal). Images pop up; click anywhere to close.
@@ -1613,11 +1610,13 @@
           }catch(e){ alert('Could not create label'); } }
           function ppProdSamples(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
             var _it=((_ppData&&_ppData.products)||[]).filter(function(x){return x.ref===ref;})[0]||{};   // colour/supplier for the sample label
-            getJSON(EP.productSamplesBase+encodeURIComponent(ref)).then(function(list){ list=Array.isArray(list)?list:[];
+            Promise.all([getJSON(EP.productSamplesBase+encodeURIComponent(ref)), fetch((EP.productItemBase||'/api/product/item/')+encodeURIComponent(ref)).then(function(r){return r.json();}).catch(function(){return {};})]).then(function(_res){ var list=Array.isArray(_res[0])?_res[0]:[];
+              var sizesList=(((_res[1]||{}).sizes)||[]).map(function(s){return s.size_label;}).filter(Boolean);
               var today=new Date().toISOString().slice(0,10);
               var ASPECTS=[['product','Product'],['packaging','Packaging'],['labels','Labels/wraps'],['polybag','Polybags'],['other','Other components']];
               var ASP_LBL={product:'Product',packaging:'Packaging',labels:'Labels/wraps',polybag:'Polybags',other:'Other components'};
               function aspChips(keys){ return (keys||[]).map(function(k){return '<span style="display:inline-block;font-size:10px;background:#eef2ff;color:#3730a3;border:1px solid #dbeafe;border-radius:10px;padding:1px 7px;margin:1px 4px 1px 0">'+esc(ASP_LBL[k]||k)+'</span>';}).join(''); }
+              function sizeChips(arr){ return (arr||[]).map(function(k){return '<span style="display:inline-block;font-size:10px;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;border-radius:10px;padding:1px 7px;margin:1px 4px 1px 0">'+esc(k)+'</span>';}).join(''); }
               var nextV=list.reduce(function(m,s){return Math.max(m,s.version||0);},0)+1, nextRef=ref+'_v'+nextV;   // shown read-only on the add form
               var rows=list.slice().reverse().map(function(s){ var ph=(s.photos||[]).map(function(p){ var url=(EP.attachImgBase||'/api/supply/portal-attachment/')+p.id;
                   return isImgMime(p.mime)
@@ -1626,6 +1625,7 @@
                 return '<div style="border:1px solid #eef2f7;border-radius:8px;padding:9px 11px;margin-bottom:8px;text-align:left"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.ref)+'</b><span class="mut tiny">'+esc(s.sample_date||'')+'</span>'
                   +'<span style="font-size:10px">'+(s.colour_verified?'<span style="color:#16a34a">✓ colour</span>':'<span class="mut">colour?</span>')+' &nbsp; '+(s.quality_verified?'<span style="color:#16a34a">✓ quality</span>':'<span class="mut">quality?</span>')+'</span>'
                   +'<button class="save-btn pp-samp-label" data-ref="'+esc(s.ref)+'" data-date="'+esc(s.sample_date||'')+'" style="margin-left:auto">⤓ Download label</button></div>'
+                  +((s.sample_sizes&&s.sample_sizes.length)?'<div style="margin-top:4px"><span class="mut tiny" style="margin-right:4px">Sizes:</span>'+sizeChips(s.sample_sizes)+'</div>':'')
                   +((s.sampled_aspects&&s.sampled_aspects.length)?'<div style="margin-top:4px"><span class="mut tiny" style="margin-right:4px">Sampled:</span>'+aspChips(s.sampled_aspects)+'</div>':'')
                   +(s.description?'<div style="margin:4px 0;white-space:pre-wrap">'+esc(s.description)+'</div>':'')
                   +(ph?'<div style="margin-top:4px">'+ph+'</div>':'')
@@ -1636,8 +1636,9 @@
                 +'<div style="margin-top:8px"><button class="save-btn pp-add-sample" style="background:#16a34a;color:#fff;border-color:#15803d">+ Add sample</button></div>'
                 +'<div class="pp-sample-form" style="display:none;border:1px dashed #cbd5e1;border-radius:8px;padding:11px 13px;margin-top:10px;background:#f8fafc">'
                 +'<div style="font-weight:700;font-size:12px;margin-bottom:8px">Add a new sample version</div>'
-                +'<div style="margin-bottom:8px"><label style="font-size:12px">Reference <input class="fci" value="'+esc(nextRef)+'" readonly style="width:220px;text-align:left;background:#eef2f7;margin-left:4px" title="auto-generated"></label></div>'
+                +'<div style="margin-bottom:8px"><label style="font-size:12px">Sample version <input class="fci" value="'+esc(nextRef)+'" readonly style="width:220px;text-align:left;background:#eef2f7;margin-left:4px;font-family:ui-monospace,Menlo,monospace" title="auto-generated — this is version '+nextV+'"></label> <span class="mut tiny">v'+nextV+'</span></div>'
                 +'<div style="margin-bottom:7px"><label style="font-size:12px">Sample date <input type="date" class="fci ps2-date" value="'+today+'" style="width:150px;text-align:left;margin-left:4px"></label></div>'
+                +'<div style="margin-bottom:8px"><div style="font-size:12px;font-weight:600;margin-bottom:3px">Size variant(s) sampled <span style="color:#94a3b8;font-weight:400">— tick every size in this sample</span></div>'+(sizesList.length?sizesList.map(function(sz){return '<label style="display:inline-block;font-size:12px;margin:0 14px 4px 0;cursor:pointer"><input type="checkbox" class="ps2-size" value="'+esc(sz)+'" style="vertical-align:middle;margin-right:5px">'+esc(sz)+'</label>';}).join(''):'<span class="mut tiny">no size variants defined for this product</span>')+'</div>'
                 +'<div style="margin-bottom:8px"><div style="font-size:12px;font-weight:600;margin-bottom:3px">Aspects sampled <span style="color:#94a3b8;font-weight:400">— tick every part this sample covers</span></div>'+ASPECTS.map(function(a){return '<label style="display:inline-block;font-size:12px;margin:0 14px 4px 0;cursor:pointer"><input type="checkbox" class="ps2-aspect" value="'+a[0]+'" style="vertical-align:middle;margin-right:5px">'+a[1]+'</label>';}).join('')+'</div>'
                 +'<label style="display:block;font-size:12px;margin-bottom:5px;cursor:pointer"><input type="checkbox" class="ps2-col" style="vertical-align:middle;margin-right:6px">I verify that I have colour checked every colour to match Pantone in design</label>'
                 +'<label style="display:block;font-size:12px;margin-bottom:7px;cursor:pointer"><input type="checkbox" class="ps2-qual" style="vertical-align:middle;margin-right:6px">I verify I have quality checked sample matches design and quality standards</label>'
@@ -1654,10 +1655,12 @@
               var sv=box.querySelector('.ps2-save'); sv.onclick=function(){ var msg=box.querySelector('.ps2-msg');
                 var col=box.querySelector('.ps2-col').checked, qual=box.querySelector('.ps2-qual').checked;
                 var aspects=Array.prototype.slice.call(box.querySelectorAll('.ps2-aspect:checked')).map(function(c){return c.value;});
+                var sizes=Array.prototype.slice.call(box.querySelectorAll('.ps2-size:checked')).map(function(c){return c.value;});
+                if(sizesList.length&&!sizes.length){ msg.style.color='#dc2626'; msg.textContent='Tick at least one size variant this sample covers.'; return; }
                 if(!aspects.length){ msg.style.color='#dc2626'; msg.textContent='Tick at least one aspect you have sampled.'; return; }
                 if(!col||!qual){ msg.style.color='#dc2626'; msg.textContent='Please tick both verification boxes.'; return; }
                 sv.disabled=true; msg.style.color='#64748b'; msg.textContent='Submitting…';
-                postJSON(EP.productSample,{item_ref:ref,sample_date:box.querySelector('.ps2-date').value,colour_verified:true,quality_verified:true,description:box.querySelector('.ps2-desc').value,sampled_aspects:aspects},function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;sv.disabled=false;return;}
+                postJSON(EP.productSample,{item_ref:ref,sample_date:box.querySelector('.ps2-date').value,colour_verified:true,quality_verified:true,description:box.querySelector('.ps2-desc').value,sampled_aspects:aspects,sample_sizes:sizes},function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;sv.disabled=false;return;}
                   var files=box.querySelector('.ps2-photos').files, i=0;
                   (function up(){ if(i>=files.length){ ppProdSamples(box,ref); return; } var f=files[i++]; if(f.size>10*1024*1024){ up(); return; } var rd=new FileReader(); rd.onload=function(){ postJSON(EP.productSamplePhoto,{sample_id:j.id,filename:f.name,mime:f.type||'image/jpeg',data_base64:String(rd.result)},function(){ up(); }); }; rd.readAsDataURL(f); })(); }); };
             }).catch(function(e){ box.innerHTML='<div style="color:#dc2626;text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }

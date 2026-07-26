@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.170 - Portal variant structure + sample version/size on submit
+- Supplier portal Master data: size variants redesigned into per-size cards with a clear 3-column table (Component · Status · Files), status pills, and descriptions — much easier to read than the old cramped one-liners.
+- Submitting a sample now captures the sample version (shown explicitly in the form) and requires the supplier to multi-select which size variant(s) the sample covers. Sizes shown as chips on each sample version (portal + admin Samples tab). New column planner.product_dev_samples.sample_sizes text[] (migration 153 — run on live).
+
 ## v26.169 - Sample aspects (portal) + wider component-label column
 - Supplier portal: when adding a new sample version the supplier must now tick which aspects it covers (Product / Packaging / Labels-wraps / Polybags / Other components) — at least one required. Shown as chips on each sample version (portal + admin Samples tab). New column planner.product_dev_samples.sampled_aspects text[] (migration 152 — run on live).
 - Admin PRODUCT ▸ Master data: widened the Component label column (130px→230px, table min-width 820→920) so "Labels/wraps" and "Other components" are no longer cut off.
