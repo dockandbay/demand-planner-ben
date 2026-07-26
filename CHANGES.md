@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.168 - Documents reorder + portal badge colour
+- Reordered the PRODUCT Documents tab so the read-only "Size / component files" section sits directly under "Uploaded by Dock & Bay" (above "Uploaded by supplier").
+- Supplier portal product list: the unread (N) badge next to a product ref is now red (#dc2626) to match all other action badges (was orange).
+
 ## v26.167 - Supplier portal UI polish
 - Approval status now pairs colour with a glyph (✓ approved / ⚠ pending / ✕ rejected) on size rows and each component line (accessibility + mobile).
 - Image-zoom modal has a visible corner ✕ close button (was click-anywhere only).

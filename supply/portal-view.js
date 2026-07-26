@@ -1525,7 +1525,7 @@
             var cnt=document.querySelector('.pp-prod-count'); if(cnt)cnt.textContent=f.length+' of '+items.length;
             if(!f.length){ host.innerHTML='<div class="count" style="padding:14px 2px;text-align:left">No items match these filters.</div>'; return; }
             host.innerHTML='<div class="tw"><table class="ppp-tbl"><thead><tr>'+['Product','Category','Season','Sizes','Status'].map(function(h){return '<th>'+h+'</th>';}).join('')+'</tr></thead><tbody>'
-              +f.map(function(p,i){ var badge=p.unread_dnb?' <span style="background:#f59e0b;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+p.unread_dnb+'</span>':'';
+              +f.map(function(p,i){ var badge=p.unread_dnb?' <span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+p.unread_dnb+'</span>':'';
                 var sw=p.has_swatch?'<img src="'+(EP.productSwatchBase||'/api/product/swatch/')+encodeURIComponent(p.ref)+'?t='+encodeURIComponent(p.updated_at||'')+'" style="width:34px;height:34px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;flex:0 0 auto">':'<span style="width:34px;height:34px;border-radius:6px;border:1px dashed #cbd5e1;flex:0 0 auto"></span>';
                 return '<tr><td><div style="display:flex;align-items:center;gap:8px">'+sw
                     +'<button class="planbtn pp-prod-open" data-ref="'+esc(p.ref)+'" data-i="'+i+'" style="flex:0 0 auto">PLAN</button>'
