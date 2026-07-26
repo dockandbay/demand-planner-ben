@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.151 - Product dimensions matrix — admin UI (Phase B, layout C)
+
+- The Size-variants table is now a per-size **dimension matrix** (layout C): each size shows a header (label · approval ·
+  SKU) then sub-rows for **Product / Packaging / Polybag / Labels**, each with **Required** (+ packaging pouch/box type),
+  the **approved version** dropdown (red until picked), and the approved version's **files** (click images to enlarge).
+- A **Design versions** manager below the table lets D&B add versions per dimension and upload files to each (supplier
+  still submits Product samples in the Sample tab). Product-sample "A" action preserved; the other dimensions' actions land in Phase C.
+
 ## v26.150 - Product dimensions matrix — backend (Phase A)
 
 - Migration 150: `product_dev_samples.dimension` (product/packaging/polybag/labels) + `product_dev_size_dimensions` (per-size required / approved version / packaging type). New endpoints: create D&B design version, set a size's dimension state. Item detail now returns per-dimension versions + each size's dimension rows. (UI next.)

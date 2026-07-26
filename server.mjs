@@ -3263,6 +3263,13 @@ app.get('/api/product/item/:ref', async (req, res) => {
     const samples = (await pool.query(`SELECT id, version, coalesce(dimension,'product') dimension,
       CASE WHEN coalesce(dimension,'product')='product' THEN item_ref||'_v'||version ELSE item_ref||'_'||dimension||'_v'||version END ref
       FROM planner.product_dev_samples WHERE item_ref=$1 ORDER BY dimension, version`, [ref])).rows;
+    // each version's uploaded files (photos/designs) — keyed PSAMPLE-<id>
+    if (samples.length) {
+      const skeys = samples.map(s => 'PSAMPLE-' + s.id);
+      const sf = (await pool.query(`SELECT po, id, filename, coalesce(mime,'') mime FROM planner.portal_attachments WHERE po = ANY($1) AND category='product_sample' ORDER BY uploaded_at`, [skeys])).rows;
+      const byV = {}; sf.forEach(f => { (byV[f.po] = byV[f.po] || []).push({ id: f.id, filename: f.filename, mime: f.mime }); });
+      samples.forEach(s => { s.files = byV['PSAMPLE-' + s.id] || []; });
+    }
     // per-size dimension rows (packaging/polybag/labels): required + approved version + packaging type
     if (sizes.length) {
       const dims = (await pool.query(`SELECT size_id, dimension, required, approved_sample_id, coalesce(packaging_type,'') packaging_type
