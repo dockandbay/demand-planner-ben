@@ -3586,6 +3586,7 @@ app.post('/api/product/category-code', async (req, res) => {
 async function productSampleList(itemRef) {
   const rows = (await pool.query(`SELECT ps.id, ps.version, (ps.item_ref||'_v'||ps.version) ref, to_char(ps.sample_date,'YYYY-MM-DD') sample_date,
     ps.colour_verified, ps.quality_verified, coalesce(ps.description,'') description, coalesce(ps.created_by,'') created_by,
+    coalesce(ps.sampled_aspects,'{}') sampled_aspects,
     to_char(ps.created_at,'YYYY-MM-DD HH24:MI') created_at,
     coalesce((SELECT json_agg(json_build_object('id',sr.id,'ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,'')) ORDER BY sr.created_at)
       FROM planner.sample_request_dev_samples l JOIN planner.sample_requests sr ON sr.id=l.sample_request_id
@@ -3604,9 +3605,12 @@ async function createProductSample(b, by) {
   const itemRef = (b.item_ref || '').trim();
   if (!itemRef) throw new Error('item_ref required');
   if (!(b.colour_verified && b.quality_verified)) throw new Error('both verification checkboxes are required');
+  const ALLOWED = ['product', 'packaging', 'labels', 'polybag', 'other'];
+  const aspects = (Array.isArray(b.sampled_aspects) ? b.sampled_aspects : []).filter(a => ALLOWED.includes(a));
+  if (!aspects.length) throw new Error('select at least one sampled aspect');
   const v = (await pool.query(`SELECT coalesce(max(version),0)+1 n FROM planner.product_dev_samples WHERE item_ref=$1`, [itemRef])).rows[0].n;
-  const r = await pool.query(`INSERT INTO planner.product_dev_samples (item_ref, version, sample_date, colour_verified, quality_verified, description, created_by)
-    VALUES ($1,$2,$3,true,true,$4,$5) RETURNING id`, [itemRef, v, (b.sample_date || '').trim() || null, (b.description || '').trim() || null, by || null]);
+  const r = await pool.query(`INSERT INTO planner.product_dev_samples (item_ref, version, sample_date, colour_verified, quality_verified, description, created_by, sampled_aspects)
+    VALUES ($1,$2,$3,true,true,$4,$5,$6) RETURNING id`, [itemRef, v, (b.sample_date || '').trim() || null, (b.description || '').trim() || null, by || null, aspects]);
   // supplier note → shows on the product timeline + the admin ✉ bell
   await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'supplier',$3)`, [itemRef, by || null, 'Sample v' + v + ' submitted (colour + quality verified)']);
   return { id: r.rows[0].id, version: v, ref: itemRef + '_v' + v };

@@ -1615,6 +1615,9 @@
             var _it=((_ppData&&_ppData.products)||[]).filter(function(x){return x.ref===ref;})[0]||{};   // colour/supplier for the sample label
             getJSON(EP.productSamplesBase+encodeURIComponent(ref)).then(function(list){ list=Array.isArray(list)?list:[];
               var today=new Date().toISOString().slice(0,10);
+              var ASPECTS=[['product','Product'],['packaging','Packaging'],['labels','Labels/wraps'],['polybag','Polybags'],['other','Other components']];
+              var ASP_LBL={product:'Product',packaging:'Packaging',labels:'Labels/wraps',polybag:'Polybags',other:'Other components'};
+              function aspChips(keys){ return (keys||[]).map(function(k){return '<span style="display:inline-block;font-size:10px;background:#eef2ff;color:#3730a3;border:1px solid #dbeafe;border-radius:10px;padding:1px 7px;margin:1px 4px 1px 0">'+esc(ASP_LBL[k]||k)+'</span>';}).join(''); }
               var nextV=list.reduce(function(m,s){return Math.max(m,s.version||0);},0)+1, nextRef=ref+'_v'+nextV;   // shown read-only on the add form
               var rows=list.slice().reverse().map(function(s){ var ph=(s.photos||[]).map(function(p){ var url=(EP.attachImgBase||'/api/supply/portal-attachment/')+p.id;
                   return isImgMime(p.mime)
@@ -1623,6 +1626,7 @@
                 return '<div style="border:1px solid #eef2f7;border-radius:8px;padding:9px 11px;margin-bottom:8px;text-align:left"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.ref)+'</b><span class="mut tiny">'+esc(s.sample_date||'')+'</span>'
                   +'<span style="font-size:10px">'+(s.colour_verified?'<span style="color:#16a34a">✓ colour</span>':'<span class="mut">colour?</span>')+' &nbsp; '+(s.quality_verified?'<span style="color:#16a34a">✓ quality</span>':'<span class="mut">quality?</span>')+'</span>'
                   +'<button class="save-btn pp-samp-label" data-ref="'+esc(s.ref)+'" data-date="'+esc(s.sample_date||'')+'" style="margin-left:auto">⤓ Download label</button></div>'
+                  +((s.sampled_aspects&&s.sampled_aspects.length)?'<div style="margin-top:4px"><span class="mut tiny" style="margin-right:4px">Sampled:</span>'+aspChips(s.sampled_aspects)+'</div>':'')
                   +(s.description?'<div style="margin:4px 0;white-space:pre-wrap">'+esc(s.description)+'</div>':'')
                   +(ph?'<div style="margin-top:4px">'+ph+'</div>':'')
                   +'<div style="margin-top:6px"><label style="font-size:11px;color:#64748b">📎 Upload photo / document <span style="color:#94a3b8">(≤10MB each)</span><input type="file" class="pp-samp-file" data-id="'+s.id+'" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv" multiple style="font-size:11px;display:block;margin-top:4px"></label> <span class="pp-samp-msg" data-id="'+s.id+'" style="font-size:11px"></span></div>'
@@ -1634,6 +1638,7 @@
                 +'<div style="font-weight:700;font-size:12px;margin-bottom:8px">Add a new sample version</div>'
                 +'<div style="margin-bottom:8px"><label style="font-size:12px">Reference <input class="fci" value="'+esc(nextRef)+'" readonly style="width:220px;text-align:left;background:#eef2f7;margin-left:4px" title="auto-generated"></label></div>'
                 +'<div style="margin-bottom:7px"><label style="font-size:12px">Sample date <input type="date" class="fci ps2-date" value="'+today+'" style="width:150px;text-align:left;margin-left:4px"></label></div>'
+                +'<div style="margin-bottom:8px"><div style="font-size:12px;font-weight:600;margin-bottom:3px">Aspects sampled <span style="color:#94a3b8;font-weight:400">— tick every part this sample covers</span></div>'+ASPECTS.map(function(a){return '<label style="display:inline-block;font-size:12px;margin:0 14px 4px 0;cursor:pointer"><input type="checkbox" class="ps2-aspect" value="'+a[0]+'" style="vertical-align:middle;margin-right:5px">'+a[1]+'</label>';}).join('')+'</div>'
                 +'<label style="display:block;font-size:12px;margin-bottom:5px;cursor:pointer"><input type="checkbox" class="ps2-col" style="vertical-align:middle;margin-right:6px">I verify that I have colour checked every colour to match Pantone in design</label>'
                 +'<label style="display:block;font-size:12px;margin-bottom:7px;cursor:pointer"><input type="checkbox" class="ps2-qual" style="vertical-align:middle;margin-right:6px">I verify I have quality checked sample matches design and quality standards</label>'
                 +'<div><label style="font-size:12px;display:block;margin-bottom:2px">Description and notes</label><textarea class="fci ps2-desc" rows="2" placeholder="description and notes…" style="width:320px;max-width:100%;text-align:left;box-sizing:border-box"></textarea></div>'
@@ -1648,9 +1653,11 @@
               var _addb=box.querySelector('.pp-add-sample'), _form=box.querySelector('.pp-sample-form'); if(_addb)_addb.onclick=function(){ _form.style.display=(_form.style.display!=='none')?'none':''; };   // no auto-focus on the date input (it auto-opens the mobile picker); date defaults to today, opens on tap
               var sv=box.querySelector('.ps2-save'); sv.onclick=function(){ var msg=box.querySelector('.ps2-msg');
                 var col=box.querySelector('.ps2-col').checked, qual=box.querySelector('.ps2-qual').checked;
+                var aspects=Array.prototype.slice.call(box.querySelectorAll('.ps2-aspect:checked')).map(function(c){return c.value;});
+                if(!aspects.length){ msg.style.color='#dc2626'; msg.textContent='Tick at least one aspect you have sampled.'; return; }
                 if(!col||!qual){ msg.style.color='#dc2626'; msg.textContent='Please tick both verification boxes.'; return; }
                 sv.disabled=true; msg.style.color='#64748b'; msg.textContent='Submitting…';
-                postJSON(EP.productSample,{item_ref:ref,sample_date:box.querySelector('.ps2-date').value,colour_verified:true,quality_verified:true,description:box.querySelector('.ps2-desc').value},function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;sv.disabled=false;return;}
+                postJSON(EP.productSample,{item_ref:ref,sample_date:box.querySelector('.ps2-date').value,colour_verified:true,quality_verified:true,description:box.querySelector('.ps2-desc').value,sampled_aspects:aspects},function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;sv.disabled=false;return;}
                   var files=box.querySelector('.ps2-photos').files, i=0;
                   (function up(){ if(i>=files.length){ ppProdSamples(box,ref); return; } var f=files[i++]; if(f.size>10*1024*1024){ up(); return; } var rd=new FileReader(); rd.onload=function(){ postJSON(EP.productSamplePhoto,{sample_id:j.id,filename:f.name,mime:f.type||'image/jpeg',data_base64:String(rd.result)},function(){ up(); }); }; rd.readAsDataURL(f); })(); }); };
             }).catch(function(e){ box.innerHTML='<div style="color:#dc2626;text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }

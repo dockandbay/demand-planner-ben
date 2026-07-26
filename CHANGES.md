@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.169 - Sample aspects (portal) + wider component-label column
+- Supplier portal: when adding a new sample version the supplier must now tick which aspects it covers (Product / Packaging / Labels-wraps / Polybags / Other components) — at least one required. Shown as chips on each sample version (portal + admin Samples tab). New column planner.product_dev_samples.sampled_aspects text[] (migration 152 — run on live).
+- Admin PRODUCT ▸ Master data: widened the Component label column (130px→230px, table min-width 820→920) so "Labels/wraps" and "Other components" are no longer cut off.
+
 ## v26.168 - Documents reorder + portal badge colour
 - Reordered the PRODUCT Documents tab so the read-only "Size / component files" section sits directly under "Uploaded by Dock & Bay" (above "Uploaded by supplier").
 - Supplier portal product list: the unread (N) badge next to a product ref is now red (#dc2626) to match all other action badges (was orange).
