@@ -8300,6 +8300,16 @@ app.post('/api/portal/product-sample/:id/status', portalAuth, async (req, res) =
   if (!(await portalOwnsProductSample(req, id))) return res.status(403).json({ error: 'not your sample' });
   try { await pool.query(`UPDATE planner.product_dev_samples SET supplier_status=$2 WHERE id=$1`, [id, st]); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); } });
+// Supplier edits which sizes + item types (aspects) a sample covers — so older/shipped samples can be backfilled.
+app.post('/api/portal/product-sample/:id/meta', portalAuth, async (req, res) => { const id = req.params.id, b = req.body || {};
+  if (!(await portalOwnsProductSample(req, id))) return res.status(403).json({ error: 'not your sample' });
+  try { const ALLOWED = ['product', 'packaging', 'labels', 'polybag', 'other'];
+    const aspects = (Array.isArray(b.sampled_aspects) ? b.sampled_aspects : []).filter(a => ALLOWED.includes(a));
+    const sr = (await pool.query(`SELECT item_ref FROM planner.product_dev_samples WHERE id=$1`, [id])).rows[0];
+    const valid = (await pool.query(`SELECT coalesce(size_label,'') l FROM planner.product_dev_sizes s JOIN planner.product_dev_items i ON i.id=s.item_id WHERE i.ref=$1`, [sr ? sr.item_ref : ''])).rows.map(x => x.l);
+    const sizes = (Array.isArray(b.sample_sizes) ? b.sample_sizes : []).map(String).filter(s => valid.includes(s));
+    await pool.query(`UPDATE planner.product_dev_samples SET sample_sizes=$2, sampled_aspects=$3 WHERE id=$1`, [id, sizes, aspects]);
+    res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
 // Supplier assigns a sample version to a sample shipment (SR), marks it not-shipped, or unassigns it.
 app.post('/api/portal/product-sample/:id/assign', portalAuth, async (req, res) => { const id = req.params.id, b = req.body || {};
   if (!(await portalOwnsProductSample(req, id))) return res.status(403).json({ error: 'not your sample' });

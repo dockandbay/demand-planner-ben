@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.177 - Portal: edit a sample's sizes & item types (backfill)
+- Each sample now has an "✎ edit" affordance to change which sizes and item types (aspects) it covers — so older/already-shipped samples (created before these fields existed) can be backfilled. Saves silently. New endpoint /api/portal/product-sample/:id/meta.
+- This is what feeds the admin "Sample shipments" column (size × item type that was shipped).
+
 ## v26.176 - Portal: "＋ new shipment" shortcut on a sample
 - Added a "＋ new shipment" link on each sample's shipment control: creates a sample shipment (SR) with that sample already on it, then jumps to the Samples tab (deep-linked to the new SR) to complete the address & tracking.
 
