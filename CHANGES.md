@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.154 - Faster PRODUCT detail load + drop inline loading text
+
+- The product detail endpoint now runs its queries in **parallel** (3 round-trips instead of ~8) — the first tab
+  loads in ~1s on sandbox (was 3s+), faster still on live.
+- Removed the inline "⏳ Loading master data…" text — the **version-badge spinner** already signals the load.
+
 ## v26.153 - Product size×component matrix rework + swatch move
 
 - **Size variants → components matrix**: each size now has a "Size" label + sub-rows for **Product / Packaging /

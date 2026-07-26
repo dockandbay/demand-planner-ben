@@ -3253,43 +3253,40 @@ app.get('/api/product/items', async (_req, res) => {
 app.get('/api/product/item/:ref', async (req, res) => {
   const ref = req.params.ref;
   try {
-    const item = (await pool.query(`SELECT id, ref, coalesce(season,'') season, coalesce(category,'') category,
-      coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(description,'') description,
-      coalesce(supplier,'') supplier, coalesce(supplier_code,'') supplier_code,
-      status, (swatch IS NOT NULL) has_swatch, coalesce(created_by,'') created_by,
-      to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at,
-      to_char(dev_start_override,'YYYY-MM-DD') dev_start_override, to_char(approved_at,'YYYY-MM-DD HH24:MI') approved_at
-      FROM planner.product_dev_items WHERE ref=$1`, [ref])).rows[0];
+    // Round 1 — item + sizes + docs + samples + unread all in parallel (sizes uses a subquery so it needn't wait on item)
+    const [itemR, sizesR, docsR, samplesR, unreadR] = await Promise.all([
+      pool.query(`SELECT id, ref, coalesce(season,'') season, coalesce(category,'') category,
+        coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(description,'') description,
+        coalesce(supplier,'') supplier, coalesce(supplier_code,'') supplier_code,
+        status, (swatch IS NOT NULL) has_swatch, coalesce(created_by,'') created_by,
+        to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at,
+        to_char(dev_start_override,'YYYY-MM-DD') dev_start_override, to_char(approved_at,'YYYY-MM-DD HH24:MI') approved_at
+        FROM planner.product_dev_items WHERE ref=$1`, [ref]),
+      pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort, coalesce(mapped_sku,'') mapped_sku, approved_sample_id
+        FROM planner.product_dev_sizes WHERE item_id=(SELECT id FROM planner.product_dev_items WHERE ref=$1) ORDER BY sort, id`, [ref]),
+      pool.query(`SELECT id, filename, mime, byte_size, coalesce(uploaded_by,'') uploaded_by, coalesce(uploader_kind,'internal') uploader_kind, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments WHERE po=$1 AND category='product' ORDER BY uploaded_at DESC`, [ref]),
+      pool.query(`SELECT id, version, coalesce(dimension,'product') dimension,
+        CASE WHEN coalesce(dimension,'product')='product' THEN item_ref||'_v'||version ELSE item_ref||'_'||dimension||'_v'||version END ref
+        FROM planner.product_dev_samples WHERE item_ref=$1 ORDER BY dimension, version`, [ref]),
+      pool.query(`SELECT count(*)::int n FROM planner.supplier_notes WHERE po=$1 AND author_kind='supplier' AND read_at IS NULL`, [ref]),
+    ]);
+    const item = itemR.rows[0];
     if (!item) return res.status(404).json({ error: 'not found' });
-    const sizes = (await pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort,
-      coalesce(mapped_sku,'') mapped_sku, approved_sample_id FROM planner.product_dev_sizes WHERE item_id=$1 ORDER BY sort, id`, [item.id])).rows;
-    const docs = (await pool.query(`SELECT id, filename, mime, byte_size, coalesce(uploaded_by,'') uploaded_by, coalesce(uploader_kind,'internal') uploader_kind, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments WHERE po=$1 AND category='product' ORDER BY uploaded_at DESC`, [ref])).rows;
-    // versions across ALL dimensions (product = supplier samples; packaging/polybag/labels = D&B design uploads)
-    const samples = (await pool.query(`SELECT id, version, coalesce(dimension,'product') dimension,
-      CASE WHEN coalesce(dimension,'product')='product' THEN item_ref||'_v'||version ELSE item_ref||'_'||dimension||'_v'||version END ref
-      FROM planner.product_dev_samples WHERE item_ref=$1 ORDER BY dimension, version`, [ref])).rows;
-    // each version's uploaded files (photos/designs) — keyed PSAMPLE-<id>
-    if (samples.length) {
-      const skeys = samples.map(s => 'PSAMPLE-' + s.id);
-      const sf = (await pool.query(`SELECT po, id, filename, coalesce(mime,'') mime FROM planner.portal_attachments WHERE po = ANY($1) AND category='product_sample' ORDER BY uploaded_at`, [skeys])).rows;
-      const byV = {}; sf.forEach(f => { (byV[f.po] = byV[f.po] || []).push({ id: f.id, filename: f.filename, mime: f.mime }); });
-      samples.forEach(s => { s.files = byV['PSAMPLE-' + s.id] || []; });
+    const sizes = sizesR.rows, docs = docsR.rows, samples = samplesR.rows, unread_supplier = unreadR.rows[0].n;
+    // Round 2 — sample files + component rows in parallel (each depends on round 1 ids)
+    const [sfR, dimsR] = await Promise.all([
+      samples.length ? pool.query(`SELECT po, id, filename, coalesce(mime,'') mime FROM planner.portal_attachments WHERE po = ANY($1) AND category='product_sample' ORDER BY uploaded_at`, [samples.map(s => 'PSAMPLE-' + s.id)]) : Promise.resolve({ rows: [] }),
+      sizes.length ? pool.query(`SELECT id, size_id, dimension, required, coalesce(approval_status,'pending') approval_status, coalesce(description,'') description, coalesce(packaging_type,'') packaging_type FROM planner.product_dev_size_dimensions WHERE size_id = ANY($1)`, [sizes.map(s => s.id)]) : Promise.resolve({ rows: [] }),
+    ]);
+    { const byV = {}; sfR.rows.forEach(f => { (byV[f.po] = byV[f.po] || []).push({ id: f.id, filename: f.filename, mime: f.mime }); }); samples.forEach(s => { s.files = byV['PSAMPLE-' + s.id] || []; }); }
+    const dims = dimsR.rows;
+    if (dims.length) {   // Round 3 — component files
+      const dfR = await pool.query(`SELECT po, id, filename, coalesce(mime,'') mime, version FROM planner.portal_attachments WHERE po = ANY($1) AND category='product_dim' ORDER BY version NULLS LAST, uploaded_at`, [dims.map(d => 'PDIM-' + d.id)]);
+      const byDim = {}; dfR.rows.forEach(f => { const did = f.po.replace('PDIM-', ''); (byDim[did] = byDim[did] || []).push({ id: f.id, filename: f.filename, mime: f.mime, version: f.version }); });
+      dims.forEach(d => { d.files = byDim[d.id] || []; });
     }
-    // per-size component rows (product/packaging/labels/polybag/other): description + required + approval + type + files
-    if (sizes.length) {
-      const dims = (await pool.query(`SELECT id, size_id, dimension, required, coalesce(approval_status,'pending') approval_status,
-        coalesce(description,'') description, coalesce(packaging_type,'') packaging_type
-        FROM planner.product_dev_size_dimensions WHERE size_id = ANY($1)`, [sizes.map(s => s.id)])).rows;
-      if (dims.length) {   // versioned files per component row (portal_attachments 'PDIM-<row id>')
-        const keys = dims.map(d => 'PDIM-' + d.id);
-        const fs = (await pool.query(`SELECT po, id, filename, coalesce(mime,'') mime, version FROM planner.portal_attachments WHERE po = ANY($1) AND category='product_dim' ORDER BY version NULLS LAST, uploaded_at`, [keys])).rows;
-        const byDim = {}; fs.forEach(f => { const did = f.po.replace('PDIM-', ''); (byDim[did] = byDim[did] || []).push({ id: f.id, filename: f.filename, mime: f.mime, version: f.version }); });
-        dims.forEach(d => { d.files = byDim[d.id] || []; });
-      }
-      const byS = {}; dims.forEach(d => { (byS[d.size_id] = byS[d.size_id] || []).push(d); });
-      sizes.forEach(s => { s.dimensions = byS[s.id] || []; });
-    }
-    const unread_supplier = (await pool.query(`SELECT count(*)::int n FROM planner.supplier_notes WHERE po=$1 AND author_kind='supplier' AND read_at IS NULL`, [ref])).rows[0].n;
+    const byS = {}; dims.forEach(d => { (byS[d.size_id] = byS[d.size_id] || []).push(d); });
+    sizes.forEach(s => { s.dimensions = byS[s.id] || []; });
     res.json({ item, sizes, docs, samples, unread_supplier });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

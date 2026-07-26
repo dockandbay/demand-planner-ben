@@ -8583,11 +8583,10 @@
       })(); }; }); }); }
   function renderProductDetail(ref, box, seed){ box=box||_prodDetailBox||document.getElementById('product-content'); _prodDetailBox=box;
     try{ writeHash(['product','plan',ref]); }catch(e){}
-    // Fast paint: show the ref + colour + a Master-data spinner instantly from the grid row (seed) so it isn't blank
-    // while the full detail (sizes, samples) loads. The version-badge spinner also signals the in-flight fetch.
+    // Fast paint: show just the ref + colour instantly from the grid row (seed) so it isn't blank while the full
+    // detail loads. No inline "loading" text — the version-badge spinner already signals the in-flight fetch.
     box.innerHTML='<div style="padding:6px 2px 10px"><b style="font-family:ui-monospace,Menlo,monospace;font-size:15px">'+esc(ref)+'</b>'
-      +(seed&&seed.colour_name?' <span class="mut" style="font-size:12px">'+esc(seed.colour_name)+'</span>':'')
-      +'<div class="mut tiny" style="margin-top:8px">⏳ Loading master data…</div></div>';
+      +(seed&&seed.colour_name?' <span class="mut" style="font-size:12px">'+esc(seed.colour_name)+'</span>':'')+'</div>';
     fetch('/api/product/item/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ if(!d||d.error||!d.item){ box.innerHTML='<div style="color:#dc2626">Not found</div>'; return; }
       _prodDetail=d; renderProdDetailShell(box,d); }).catch(function(e){ box.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
   function renderProdDetailShell(c,d){ var it=d.item; var inline=(c!==document.getElementById('product-content'));
