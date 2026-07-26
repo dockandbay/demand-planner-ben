@@ -3253,7 +3253,7 @@ app.get('/api/product/item/:ref', async (req, res) => {
     if (!item) return res.status(404).json({ error: 'not found' });
     const sizes = (await pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort,
       coalesce(mapped_sku,'') mapped_sku, approved_sample_id FROM planner.product_dev_sizes WHERE item_id=$1 ORDER BY sort, id`, [item.id])).rows;
-    const docs = (await pool.query(`SELECT id, filename, mime, byte_size, coalesce(uploaded_by,'') uploaded_by, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments WHERE po=$1 AND category='product' ORDER BY uploaded_at DESC`, [ref])).rows;
+    const docs = (await pool.query(`SELECT id, filename, mime, byte_size, coalesce(uploaded_by,'') uploaded_by, coalesce(uploader_kind,'internal') uploader_kind, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments WHERE po=$1 AND category='product' ORDER BY uploaded_at DESC`, [ref])).rows;
     const samples = (await pool.query(`SELECT id, version, item_ref||'_v'||version ref FROM planner.product_dev_samples WHERE item_ref=$1 ORDER BY version`, [ref])).rows;
     const unread_supplier = (await pool.query(`SELECT count(*)::int n FROM planner.supplier_notes WHERE po=$1 AND author_kind='supplier' AND read_at IS NULL`, [ref])).rows[0].n;
     res.json({ item, sizes, docs, samples, unread_supplier });
@@ -3514,8 +3514,8 @@ async function productSampleList(itemRef) {
     WHERE ps.item_ref=$1 ORDER BY ps.version`, [itemRef])).rows;
   if (rows.length) {
     const keys = rows.map(r => 'PSAMPLE-' + r.id);
-    const ph = (await pool.query(`SELECT po, id, filename FROM planner.portal_attachments WHERE po = ANY($1) AND category='product_sample' ORDER BY uploaded_at`, [keys])).rows;
-    const byKey = {}; ph.forEach(p => { (byKey[p.po] = byKey[p.po] || []).push({ id: p.id, filename: p.filename }); });
+    const ph = (await pool.query(`SELECT po, id, filename, coalesce(mime,'') mime, coalesce(uploader_kind,'internal') uploader_kind FROM planner.portal_attachments WHERE po = ANY($1) AND category='product_sample' ORDER BY uploaded_at`, [keys])).rows;
+    const byKey = {}; ph.forEach(p => { (byKey[p.po] = byKey[p.po] || []).push({ id: p.id, filename: p.filename, mime: p.mime, uploader_kind: p.uploader_kind }); });
     rows.forEach(r => { r.photos = byKey['PSAMPLE-' + r.id] || []; });
   }
   return rows;
@@ -3531,11 +3531,11 @@ async function createProductSample(b, by) {
   await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'supplier',$3)`, [itemRef, by || null, 'Sample v' + v + ' submitted (colour + quality verified)']);
   return { id: r.rows[0].id, version: v, ref: itemRef + '_v' + v };
 }
-async function insertProductSamplePhoto(sampleId, b, by) {
+async function insertProductSamplePhoto(sampleId, b, by, kind) {
   const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
-  if (buf.length > 10 * 1024 * 1024) throw new Error('photo exceeds 10MB');
-  const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, uploaded_by, category)
-    VALUES ($1,$2,$3,$4,$5,$6,'product_sample') RETURNING id`, ['PSAMPLE-' + sampleId, b.filename || 'photo', b.mime || 'image/jpeg', buf.length, buf, by || null]);
+  if (buf.length > 10 * 1024 * 1024) throw new Error('file exceeds 10MB');
+  const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, uploaded_by, category, uploader_kind)
+    VALUES ($1,$2,$3,$4,$5,$6,'product_sample',$7) RETURNING id`, ['PSAMPLE-' + sampleId, b.filename || 'photo', b.mime || 'image/jpeg', buf.length, buf, by || null, kind || 'internal']);
   return r.rows[0].id;
 }
 app.get('/api/product/samples/:ref', async (req, res) => {
@@ -8189,9 +8189,25 @@ app.post('/api/portal/product-sample', portalAuth, async (req, res) => { const b
   try { res.json({ ok: true, ...(await createProductSample(b, req.portal.email || null)) }); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.post('/api/portal/product-sample-photo', portalAuth, async (req, res) => { const b = req.body || {}, id = b.sample_id;
   if (!b.data_base64 || !id) return res.status(400).json({ error: 'sample_id + data_base64 required' });
-  try { const sr = (await pool.query(`SELECT item_ref FROM planner.product_dev_samples WHERE id=$1`, [id])).rows[0];
+  try { const sr = (await pool.query(`SELECT item_ref, version FROM planner.product_dev_samples WHERE id=$1`, [id])).rows[0];
     if (!sr || !(await portalOwnsProduct(req, sr.item_ref))) return res.status(403).json({ error: 'not your sample' });
-    res.json({ ok: true, id: await insertProductSamplePhoto(id, b, req.portal.email || null) }); } catch (e) { res.status(500).json({ error: e.message }); } });
+    const attId = await insertProductSamplePhoto(id, b, req.portal.email || null, 'supplier');
+    // timeline note → admin PRODUCT ✉ unread
+    await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'supplier',$3)`,
+      [sr.item_ref, req.portal.email || null, 'Supplier uploaded a file to sample v' + sr.version + ': ' + (b.filename || 'file')]);
+    res.json({ ok: true, id: attId }); } catch (e) { res.status(500).json({ error: e.message }); } });
+// Supplier uploads a document/photo directly into a product's Documents list (category='product', uploader_kind='supplier').
+app.post('/api/portal/product-doc', portalAuth, async (req, res) => { const b = req.body || {}, ref = (b.ref || '').trim();
+  if (!ref || !b.data_base64) return res.status(400).json({ error: 'ref + data_base64 required' });
+  if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
+  try { const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (buf.length > 10 * 1024 * 1024) return res.status(413).json({ error: 'file exceeds 10MB' });
+    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, uploaded_by, category, uploader_kind)
+      VALUES ($1,$2,$3,$4,$5,$6,'product','supplier') RETURNING id`,
+      [ref, b.filename || 'document', b.mime || 'application/octet-stream', buf.length, buf, req.portal.email || null]);
+    await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'supplier',$3)`,
+      [ref, req.portal.email || null, 'Supplier uploaded a document: ' + (b.filename || 'document')]);
+    res.json({ ok: true, id: r.rows[0].id }); } catch (e) { res.status(500).json({ error: e.message }); } });
 // SAMPLE SHIPMENT CONTENTS (portal) — candidate lists + replace-all contents on a sample_request
 app.get('/api/portal/product-open-samples', portalAuth, async (req, res) => {   // in-development dev-sample candidates for the picker
   try { res.json(await openSampleCandidates(req.portal.suppliers)); } catch (e) { res.status(500).json({ error: e.message }); } });

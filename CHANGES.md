@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.144 - Supplier uploads to product docs + samples
+
+- Supplier portal: suppliers can now **upload photos/documents** (a) against a **sample version** and (b) directly
+  into the product **Documents** list. Each upload posts a **timeline note** to admin PRODUCT (raises the ✉ unread).
+- The **Documents** tab (admin + portal) is split into **"Uploaded by Dock & Bay"** (top) and **"Uploaded by
+  supplier/you"** (bottom). Migration 149 adds `portal_attachments.uploader_kind`.
+- Sample uploads show as thumbnails/links on the admin **Samples** sub-tab too.
+- Images are **click-to-enlarge** (popup) everywhere; non-image docs are download links.
+
 ## v26.143 - PRODUCT grid: swatch zoom + editable colour-coded status
 
 - **Click a swatch** in the PRODUCT grid to see it enlarged in a pop-up (click anywhere to close).

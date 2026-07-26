@@ -1557,9 +1557,27 @@
               box.innerHTML='<div style="max-width:600px;text-align:left">'+(sw?'<div style="margin-bottom:8px">'+sw+'</div>':'')
                 +row('Reference','<b style="font-family:ui-monospace,Menlo,monospace">'+esc(it.ref)+'</b>')+row('Season',esc(it.season||'—'))+row('Category',esc(it.category||'—'))+row('Supplier',esc(it.supplier||'—'))+row('Colour way',esc(it.colour_name||'—'))+row('Status',esc(prodStatusLabel(it.status)))+row('Description','<span style="white-space:pre-wrap">'+esc(it.description||'—')+'</span>')+row('Size variants',sizes)+'</div>';
             }).catch(function(e){ box.innerHTML='<div style="color:#dc2626;text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
+          // Click-to-view image modal (portal). Images pop up; click anywhere to close.
+          function ppImgZoom(src){ if(!src)return; var ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:200060;display:flex;align-items:center;justify-content:center;padding:20px;cursor:zoom-out';
+            ov.innerHTML='<img src="'+src+'" style="max-width:92vw;max-height:92vh;border-radius:10px;box-shadow:0 12px 46px rgba(0,0,0,.55)">'; ov.onclick=function(){ ov.remove(); }; document.body.appendChild(ov); }
+          function isImgMime(m){ return /^image\//i.test(String(m||'')); }
+          // One document/photo row: image → thumbnail (click to enlarge) + download; other → download link.
+          function docRow(x){ var att=(EP.attachImgBase||'/api/supply/portal-attachment/')+x.id, dl='/api/product/doc/'+x.id, kb=Math.max(1,Math.round((x.byte_size||0)/1024));
+            if(isImgMime(x.mime)) return '<div style="display:flex;align-items:center;gap:9px;padding:6px 0;border-bottom:1px solid #f4f4f5"><img class="pp-doc-img" data-src="'+att+'" src="'+att+'" style="width:46px;height:46px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;cursor:zoom-in" title="click to enlarge"><div style="min-width:0"><a href="'+dl+'" style="color:#1d4ed8;text-decoration:underline;word-break:break-word">'+esc(x.filename)+'</a><div class="mut tiny">'+kb+' KB · '+esc(x.uploaded_at||'')+'</div></div></div>';
+            return '<div style="padding:6px 0;border-bottom:1px solid #f4f4f5"><a href="'+dl+'" style="color:#1d4ed8;text-decoration:underline;word-break:break-word">'+esc(x.filename)+'</a> <span class="mut tiny">'+kb+' KB · '+esc(x.uploaded_at||'')+'</span></div>'; }
           function ppProdDocs(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
-            fetch('/api/product/item/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ var docs=(d&&d.docs)||[];
-              box.innerHTML='<div style="max-width:600px;text-align:left">'+(docs.length?docs.map(function(x){ return '<div style="padding:7px 0;border-bottom:1px solid #f1f1f1"><a href="/api/product/doc/'+x.id+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline">'+esc(x.filename)+'</a> <span class="mut tiny">'+Math.max(1,Math.round((x.byte_size||0)/1024))+' KB · '+esc(x.uploaded_at||'')+'</span></div>'; }).join(''):'<div class="mut" style="padding:6px 0">No documents.</div>')+'</div>';
+            fetch((EP.productItemBase||'/api/product/item/')+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ var docs=(d&&d.docs)||[];
+              var dnb=docs.filter(function(x){return (x.uploader_kind||'internal')!=='supplier';}), sup=docs.filter(function(x){return x.uploader_kind==='supplier';});
+              function sect(title,list,empty){ return '<div style="font-weight:700;font-size:12px;margin:0 0 4px;color:#334155">'+title+'</div>'+(list.length?list.map(docRow).join(''):'<div class="mut tiny" style="padding:4px 0">'+empty+'</div>'); }
+              box.innerHTML='<div style="max-width:620px;text-align:left">'
+                +sect('Uploaded by Dock &amp; Bay',dnb,'None yet.')
+                +'<div style="height:14px"></div>'
+                +sect('Uploaded by you',sup,'None yet.')
+                +'<div style="margin-top:14px;padding-top:10px;border-top:1px dashed #cbd5e1"><label style="font-size:12px;font-weight:600">Upload a document or photo <input type="file" class="pp-doc-file" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv" multiple style="font-size:12px;display:block;margin-top:5px"></label><span class="pp-doc-msg" style="font-size:12px;margin-left:2px"></span></div>'
+                +'</div>';
+              box.querySelectorAll('.pp-doc-img').forEach(function(im){ im.onclick=function(){ ppImgZoom(im.dataset.src); }; });
+              var fi=box.querySelector('.pp-doc-file'), msg=box.querySelector('.pp-doc-msg'); if(fi)fi.onchange=function(){ var files=fi.files; if(!files.length)return; msg.style.color='#64748b'; msg.textContent='Uploading…'; var i=0;
+                (function up(){ if(i>=files.length){ ppProdDocs(box,ref); return; } var f=files[i++]; if(f.size>10*1024*1024){ up(); return; } var rd=new FileReader(); rd.onload=function(){ postJSON(EP.productDoc,{ref:ref,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result)},function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;return;} up(); }); }; rd.readAsDataURL(f); })(); };
             }).catch(function(e){ box.innerHTML='<div style="color:#dc2626;text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
           // Compact single-label PDF for one sample version: ref (incl _vN), colourway, supplier, date.
           function dlSampleLabel(opts){ try{ opts=opts||{}; var ref=String(opts.ref||''), S=2, W=500, H=320;
@@ -1582,12 +1600,16 @@
             getJSON(EP.productSamplesBase+encodeURIComponent(ref)).then(function(list){ list=Array.isArray(list)?list:[];
               var today=new Date().toISOString().slice(0,10);
               var nextV=list.reduce(function(m,s){return Math.max(m,s.version||0);},0)+1, nextRef=ref+'_v'+nextV;   // shown read-only on the add form
-              var rows=list.slice().reverse().map(function(s){ var ph=(s.photos||[]).map(function(p){return '<a href="'+(EP.attachImgBase||'/api/supply/portal-attachment/')+p.id+'" target="_blank" rel="noopener"><img src="'+(EP.attachImgBase||'/api/supply/portal-attachment/')+p.id+'" style="width:52px;height:52px;object-fit:cover;border-radius:5px;border:1px solid #e5e7eb;margin:2px"></a>';}).join('');
+              var rows=list.slice().reverse().map(function(s){ var ph=(s.photos||[]).map(function(p){ var url=(EP.attachImgBase||'/api/supply/portal-attachment/')+p.id;
+                  return isImgMime(p.mime)
+                    ? '<img class="pp-samp-img" data-src="'+url+'" src="'+url+'" style="width:52px;height:52px;object-fit:cover;border-radius:5px;border:1px solid #e5e7eb;margin:2px;cursor:zoom-in" title="click to enlarge">'
+                    : '<a href="'+url+'" target="_blank" rel="noopener" style="display:inline-block;margin:2px;padding:4px 8px;border:1px solid #e5e7eb;border-radius:5px;font-size:11px;color:#1d4ed8;text-decoration:underline">'+esc(p.filename||'file')+'</a>'; }).join('');
                 return '<div style="border:1px solid #eef2f7;border-radius:8px;padding:9px 11px;margin-bottom:8px;text-align:left"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.ref)+'</b><span class="mut tiny">'+esc(s.sample_date||'')+'</span>'
                   +'<span style="font-size:10px">'+(s.colour_verified?'<span style="color:#16a34a">✓ colour</span>':'<span class="mut">colour?</span>')+' &nbsp; '+(s.quality_verified?'<span style="color:#16a34a">✓ quality</span>':'<span class="mut">quality?</span>')+'</span>'
                   +'<button class="save-btn pp-samp-label" data-ref="'+esc(s.ref)+'" data-date="'+esc(s.sample_date||'')+'" style="margin-left:auto">⤓ Download label</button></div>'
                   +(s.description?'<div style="margin:4px 0;white-space:pre-wrap">'+esc(s.description)+'</div>':'')
                   +(ph?'<div style="margin-top:4px">'+ph+'</div>':'')
+                  +'<div style="margin-top:6px"><label style="font-size:11px;color:#64748b">📎 Upload photo / document <input type="file" class="pp-samp-file" data-id="'+s.id+'" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv" multiple style="font-size:11px;display:inline-block;margin-left:4px"></label> <span class="pp-samp-msg" data-id="'+s.id+'" style="font-size:11px"></span></div>'
                   +((s.shipments||[]).length?'<div style="margin-top:7px;display:flex;flex-direction:column;gap:5px">'+(s.shipments||[]).map(function(sh){return '<div style="padding:6px 9px;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">📦 <b>'+esc(sh.ref)+'</b>'+(sh.carrier?'<span class="mut tiny">'+esc(sh.carrier)+'</span>':'')+(sh.tracking?'<span style="font-size:12px">'+carrierTrackLink(sh.carrier,sh.tracking)+'</span>':'')+'</div>';}).join('')+'<div class="mut tiny">add this sample to a shipment in the <b>Samples</b> tab</div></div>':'')
                   +'</div>'; }).join('')||'<div class="mut" style="padding:4px 0;text-align:left">No sample versions yet.</div>';
               box.innerHTML='<div style="text-align:left"><div style="font-weight:700;font-size:13px;margin-bottom:6px">Sample versions</div>'+rows
@@ -1602,6 +1624,9 @@
                 +'<div style="margin-top:7px"><label style="font-size:12px">Photos <input type="file" class="ps2-photos" accept="image/*" multiple style="font-size:12px"></label></div>'
                 +'<div style="margin-top:9px"><button class="save-btn ps2-save" data-ref="'+esc(ref)+'">Submit sample version</button> <span class="ps2-msg" style="font-size:12px;margin-left:6px"></span></div></div></div>';
               box.querySelectorAll('.pp-samp-label').forEach(function(lb){ lb.onclick=function(){ dlSampleLabel({ref:lb.dataset.ref, date:lb.dataset.date, colour:_it.colour_name||'', supplier:_it.supplier||STATE.supplierName||''}); }; });
+              box.querySelectorAll('.pp-samp-img').forEach(function(im){ im.onclick=function(){ ppImgZoom(im.dataset.src); }; });
+              box.querySelectorAll('.pp-samp-file').forEach(function(fi){ fi.onchange=function(){ var id=fi.dataset.id, files=fi.files; if(!files.length)return; var msg=box.querySelector('.pp-samp-msg[data-id="'+id+'"]'); if(msg){msg.style.color='#64748b';msg.textContent='Uploading…';} var i=0;
+                (function up(){ if(i>=files.length){ ppProdSamples(box,ref); return; } var f=files[i++]; if(f.size>10*1024*1024){ up(); return; } var rd=new FileReader(); rd.onload=function(){ postJSON(EP.productSamplePhoto,{sample_id:id,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result)},function(j){ if(j&&j.error){ if(msg){msg.style.color='#dc2626';msg.textContent=j.error;} return; } up(); }); }; rd.readAsDataURL(f); })(); }; });
               var _addb=box.querySelector('.pp-add-sample'), _form=box.querySelector('.pp-sample-form'); if(_addb)_addb.onclick=function(){ _form.style.display=(_form.style.display!=='none')?'none':''; };   // no auto-focus on the date input (it auto-opens the mobile picker); date defaults to today, opens on tap
               var sv=box.querySelector('.ps2-save'); sv.onclick=function(){ var msg=box.querySelector('.ps2-msg');
                 var col=box.querySelector('.ps2-col').checked, qual=box.querySelector('.ps2-qual').checked;
