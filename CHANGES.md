@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.147 - PRODUCT snooze identical to PO grid + fixes
+
+- The product action **snooze is now identical to the PO grid**: an "A" tooltip marker + a **"SNOOZE ▾"** menu
+  (1 day / 3 days / 7 days / Indefinitely) and a **"Snoozed → date · wake"** state, on the size row.
+- Fix: the **Approved sample** dropdown now shows once the **size** is approved (was requiring the whole item approved).
+- Fix: the **map-SKU picker** now closes when you click its button again (toggle).
+
 ## v26.146 - Fix: PLAN button on the product grid opens the detail again
 
 - A regression in v26.145 left an out-of-scope reference in the PLAN click handler, so nothing opened. Fixed.
