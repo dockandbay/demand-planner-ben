@@ -3279,7 +3279,7 @@ app.get('/api/product/item/:ref', async (req, res) => {
     // Round 2 — sample files + component rows in parallel (each depends on round 1 ids)
     const [sfR, dimsR] = await Promise.all([
       samples.length ? pool.query(`SELECT po, id, filename, coalesce(mime,'') mime FROM planner.portal_attachments WHERE po = ANY($1) AND category='product_sample' ORDER BY uploaded_at`, [samples.map(s => 'PSAMPLE-' + s.id)]) : Promise.resolve({ rows: [] }),
-      sizes.length ? pool.query(`SELECT id, size_id, dimension, required, coalesce(approval_status,'pending') approval_status, coalesce(description,'') description, coalesce(packaging_type,'') packaging_type FROM planner.product_dev_size_dimensions WHERE size_id = ANY($1)`, [sizes.map(s => s.id)]) : Promise.resolve({ rows: [] }),
+      sizes.length ? pool.query(`SELECT id, size_id, dimension, required, coalesce(approval_status,'pending') approval_status, coalesce(description,'') description, coalesce(packaging_type,'') packaging_type, approved_sample_id FROM planner.product_dev_size_dimensions WHERE size_id = ANY($1)`, [sizes.map(s => s.id)]) : Promise.resolve({ rows: [] }),
     ]);
     { const byV = {}; sfR.rows.forEach(f => { (byV[f.po] = byV[f.po] || []).push({ id: f.id, filename: f.filename, mime: f.mime }); }); samples.forEach(s => { s.files = byV['PSAMPLE-' + s.id] || []; }); }
     const dims = dimsR.rows;

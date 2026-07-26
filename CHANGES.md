@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.179 - Component approval requires a sample version + reworded note + wider column
+- Size variants & components: when a component's status is set to Approved, an "approved sample version?" picker appears (listing the supplier samples that cover that size + component). Until one is chosen it's highlighted amber and an action flags "approved but no sample version recorded". Item endpoint now returns dimension approved_sample_id.
+- Reworded the pending-component action: "The <Component> for this size is still pending. All components must be approved before overall approval." (was "required for this size but not approved yet").
+- Widened the Component column (210→250px) so "Other components" fits; Status column widened to fit the sample picker.
+
 ## v26.178 - Portal samples layout tidy
 - "+ Add sample" button moved to the top, next to the "Sample versions" header (and the add form now opens at the top).
 - Each sample version is a clearer separated card (stronger border + more spacing).
