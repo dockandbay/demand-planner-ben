@@ -7210,9 +7210,21 @@
     +'<div style="font-size:10.5px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-top:4px">'+esc(label)+'</div>'
     +(sub?'<div style="font-size:11px;color:#94a3b8;margin-top:4px">'+esc(sub)+'</div>':'')+'</div>'; }
   // SUPPLIER DELAYS — production start/completion + supplier completion-date movements (which suppliers slip / delay)
-  function renderSupplierTiming(d){ var b=biBody(); var pos=(d&&d.pos)||[];
+  var _stProd='', _stMonths='';   // Supplier-delays filters: PROD# (e.g. "58") and "started within last N months" (by start_production)
+  function renderSupplierTiming(d){ var b=biBody(); var allPos=(d&&d.pos)||[];
     function dd(s){ return s?fd(s):'—'; }
     function slipPill(n){ if(n==null)return '<span class="mut tiny">—</span>'; var c=n>0?['#fee2e2','#991b1b']:n<0?['#dcfce7','#166534']:['#f1f5f9','#64748b']; return '<span style="display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:8px;background:'+c[0]+';color:'+c[1]+'">'+(n>0?'+':'')+n+'d</span>'; }
+    var prodOpts=[]; allPos.forEach(function(p){ if(p.prod_no&&prodOpts.indexOf(p.prod_no)<0)prodOpts.push(p.prod_no); }); prodOpts.sort(function(x,y){return Number(y)-Number(x)||String(y).localeCompare(String(x));});
+    function monthsCutoff(m){ var dt=new Date(); dt.setMonth(dt.getMonth()-Number(m)); return dt.toISOString().slice(0,10); }
+    function applyFilters(list){ var out=list;
+      if(_stProd)out=out.filter(function(p){return String(p.prod_no||'')===String(_stProd);});
+      if(_stMonths){ var cut=monthsCutoff(_stMonths); out=out.filter(function(p){return p.start_date&&p.start_date>=cut;}); }
+      return out; }
+    var bar='<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:2px 0 12px">'
+      +'<span style="display:flex;align-items:center;gap:5px"><span style="color:#64748b;font-size:11px">PROD#</span><select class="fci" id="st-prod" style="text-align:left"><option value="">All</option>'+prodOpts.map(function(n){return '<option value="'+esc(n)+'"'+(String(n)===String(_stProd)?' selected':'')+'>P'+esc(n)+'</option>';}).join('')+'</select></span>'
+      +'<span style="display:flex;align-items:center;gap:5px"><span style="color:#64748b;font-size:11px">Started within</span><select class="fci" id="st-months" style="text-align:left">'+[['','Any time'],['3','Last 3 months'],['6','Last 6 months'],['12','Last 12 months']].map(function(o){return '<option value="'+o[0]+'"'+(o[0]===_stMonths?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></span>'
+      +'<span id="st-count" style="color:#94a3b8;font-size:11px"></span></div>';
+    function draw(){ var pos=applyFilters(allPos);
     var bySup={};
     pos.forEach(function(p){ var k=p.supplier||'—'; var a=bySup[k]||(bySup[k]={sup:k,pos:0,slipN:0,slipSum:0,pushed:0,slipped:0,moves:0,worst:null});
       a.pos++; if(p.slip_days!=null){ a.slipN++; a.slipSum+=p.slip_days; if(p.slip_days>0){a.pushed+=p.slip_days;a.slipped++;} if(a.worst==null||p.slip_days>a.worst)a.worst=p.slip_days; } if(p.changes>1)a.moves+=(p.changes-1); });
@@ -7224,12 +7236,18 @@
     var detail=moved.length?('<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%"><thead><tr>'+['PO','Supplier','PROD#','Status','Start','Completion movements (first → latest)','Net slip','Moves'].map(function(h,i){return '<th style="text-align:left;padding:3px 12px 5px '+(i===0?'0':'12px')+';font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
       +moved.map(function(p){ var trail=(p.trail||[]).map(function(t){return fd(t.date);}); var trailStr=trail.length?trail.join(' <span style="color:#cbd5e1">→</span> '):'—';
         return '<tr style="border-bottom:1px solid #f4f4f5;vertical-align:top"><td style="padding:5px 12px 5px 0;font-family:ui-monospace,Menlo,monospace"><a class="st-po" data-po="'+esc(p.po)+'" style="color:#1d4ed8;cursor:pointer">'+esc(p.po)+'</a></td><td style="padding:5px 12px;white-space:nowrap">'+esc(p.supplier||'—')+'</td><td style="padding:5px 12px">'+(p.prod_no?'P'+esc(p.prod_no):'')+'</td><td style="padding:5px 12px"><span class="mut tiny">'+esc(p.status||'')+'</span></td><td style="padding:5px 12px;white-space:nowrap">'+dd(p.start_date)+'</td><td style="padding:5px 12px;line-height:1.7;min-width:220px">'+trailStr+'</td><td style="padding:5px 12px;text-align:center;white-space:nowrap">'+slipPill(p.slip_days)+'</td><td style="padding:5px 12px;text-align:center">'+Math.max(0,(p.changes||0)-1)+'</td></tr>'; }).join('')
-      +'</tbody></table></div>') : '<div class="mut" style="padding:10px 2px">No supplier completion-date movements recorded yet — they appear here as suppliers submit / change completion dates in the portal.</div>';
+      +'</tbody></table></div>') : '<div class="mut" style="padding:10px 2px">No supplier completion-date movements'+((_stProd||_stMonths)?' for this filter':' recorded yet — they appear here as suppliers submit / change completion dates in the portal')+'.</div>';
     b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:#0f172a">Supplier delays &amp; production timing</div>'
       +'<div class="mut tiny" style="margin-bottom:12px;max-width:760px">Supplier completion-date movements (submitted via the portal) plus production start/completion for open POs. <b>Slip</b> = latest completion date − first submitted; positive = pushed out (a delay). Sorted worst-first.</div>'
+      +bar
       +'<div style="font-weight:700;font-size:12px;margin:6px 0 6px;color:#334155">By supplier</div>'+summary
       +'<div style="font-weight:700;font-size:12px;margin:20px 0 6px;color:#334155">Completion-date movements ('+moved.length+' PO'+(moved.length===1?'':'s')+')</div>'+detail;
+    var cnt=b.querySelector('#st-count'); if(cnt)cnt.textContent=pos.length+' of '+allPos.length+' PO'+(allPos.length===1?'':'s');
     b.querySelectorAll('.st-po').forEach(function(a){ a.onclick=function(){ try{ gotoPO(a.dataset.po,'timeline'); }catch(e){ try{ gotoPO(a.dataset.po); }catch(_){} } }; });
+    var sp=b.querySelector('#st-prod'); if(sp)sp.onchange=function(){ _stProd=this.value; draw(); };
+    var sm=b.querySelector('#st-months'); if(sm)sm.onchange=function(){ _stMonths=this.value; draw(); };
+    }
+    draw();
   }
   // METRICS — live operational counts
   function renderBIMetrics(d){ var b=biBody(); d=d||{}; var op=d.open_pos||{};

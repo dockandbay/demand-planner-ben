@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.192 - SUPPLIER DELAYS: filter by PROD# + "started within last N months"
+- Added a filter bar to the SUPPLIER DELAYS report: pick a PROD# (e.g. P58) to see just that production, and/or limit to POs started within the last 3/6/12 months (by production start date). Both the by-supplier summary and the movements detail recompute live; a count shows "N of M POs". Client-side filter on already-loaded data (no re-fetch).
+
 ## v26.191 - Timeline consistency: product matches PO + PO dates dd-mmm-yy
 - PRODUCT timeline now mirrors the PO timeline UI: newest-first message cards, and ⚑ Escalate lives on your most-recent D&B message (not next to the compose box). The compose box is a single "Post" at the bottom. To escalate: post the message, then click Escalate on it — same flow as POs.
 - PO timeline dates now render dd-mmm-yy (e.g. 08-Jul-26 06:13) to match the product timeline.
