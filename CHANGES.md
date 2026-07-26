@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.148 - PRODUCT: status-misalignment action
+
+- If **all sizes are approved** but the product status is still **In development / Rejected**, a PO-style **"A" action**
+  now appears **on the status** (grid status cell + master-data status row) with the same tooltip + SNOOZE dropdown —
+  flagging the mismatch so you can set the status to Approved. It counts toward the row's action badge too.
+
 ## v26.147 - PRODUCT snooze identical to PO grid + fixes
 
 - The product action **snooze is now identical to the PO grid**: an "A" tooltip marker + a **"SNOOZE ▾"** menu

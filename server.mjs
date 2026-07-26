@@ -3225,6 +3225,11 @@ app.get('/api/product/items', async (_req, res) => {
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approval_status='approved')::int sizes_approved,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approval_status='approved' AND coalesce(s.mapped_sku,'')='')::int sizes_unmapped,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approval_status='approved' AND s.approved_sample_id IS NULL)::int sizes_unappr_sample,
+      -- status misaligned: every size is approved but the item status isn't 'approved' (still in development / rejected)
+      (CASE WHEN i.status<>'approved'
+              AND (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id)>0
+              AND NOT EXISTS (SELECT 1 FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND coalesce(s.approval_status,'')<>'approved')
+            THEN 1 ELSE 0 END)::int status_misaligned,
       (SELECT count(*) FROM planner.supplier_notes n WHERE n.po=i.ref AND n.author_kind='supplier' AND n.read_at IS NULL)::int unread_supplier,
       coalesce((SELECT json_agg(DISTINCT jsonb_build_object('ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,'')))
         FROM planner.product_dev_samples ps

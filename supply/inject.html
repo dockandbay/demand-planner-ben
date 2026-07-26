@@ -8427,7 +8427,9 @@
   // an approved sample version. Returns {n, note} for a single count badge (like the PO grid) — snooze lives in the detail.
   function prodOpenActs(r){ var nMap=(r.sizes_unmapped||0), nSamp=(r.sizes_unappr_sample||0);
     var mapOn=nMap&&!snzActive(_poActState['prodsku|'+r.ref]), sampOn=nSamp&&!snzActive(_poActState['prodsamp|'+r.ref]);
-    var n=(mapOn?nMap:0)+(sampOn?nSamp:0), notes=[];
+    var statusOn=(r.status_misaligned)&&!snzActive(_poActState['prodstatus|'+r.ref]);
+    var n=(mapOn?nMap:0)+(sampOn?nSamp:0)+(statusOn?1:0), notes=[];
+    if(statusOn)notes.push('status misaligned — all sizes approved but item isn’t Approved');
     if(mapOn)notes.push(nMap+' size'+(nMap>1?'s':'')+' need a SKU mapping');
     if(sampOn)notes.push(nSamp+' size'+(nSamp>1?'s':'')+' need an approved sample version');
     return { n:n, note:notes.join(' · ') }; }
@@ -8435,8 +8437,10 @@
     return ' <button class="ex-badge pg-actbadge" data-ref="'+esc(r.ref)+'" data-note="'+esc(a.note+' — click to open')+'" style="background:#dc2626;cursor:pointer;border:none">'+a.n+'</button>'; }
   // Product action marker — IDENTICAL UX to the PO grid's actMark (A tooltip + SNOOZE ▾ menu 1/3/7/Indefinitely + wake).
   var PROD_ACT_HELP={ sku:'This approved size needs a planner SKU mapping. Map it above, or snooze to defer the reminder.',
-    samp:'This size needs an approved sample version selected (the item is approved). Pick a version, or snooze to defer.' };
-  function prodActMark(ref, code){ var key=(code==='sku'?'prodsku|':'prodsamp|')+ref, help=PROD_ACT_HELP[code]||'Action required.', s=_poActState[key]||{}, sn=snzActive(s);
+    samp:'This size needs an approved sample version selected (the item is approved). Pick a version, or snooze to defer.',
+    status:'All sizes are approved but the product status isn’t Approved — set the status to Approved (or snooze).' };
+  function prodActKey(ref,code){ return (code==='sku'?'prodsku|':code==='samp'?'prodsamp|':'prodstatus|')+ref; }
+  function prodActMark(ref, code){ var key=prodActKey(ref,code), help=PROD_ACT_HELP[code]||'Action required.', s=_poActState[key]||{}, sn=snzActive(s);
     var A='<span class="act-mk" data-note="'+esc(help)+(sn?' — currently snoozed until '+esc(snzUntil(s))+snzBy(s):'')+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:'+(sn?'#f3a3a3':'#dc2626')+';color:#fff;font-weight:800;font-size:10px;cursor:help;vertical-align:middle;margin-left:5px">A</span>';
     var snz=sn
       ? ' <span class="mut tiny" style="white-space:nowrap">Snoozed'+snzBy(s)+' → '+esc(snzUntil(s))+' <button class="pact-snz" data-key="'+esc(key)+'" style="border:none;background:none;color:#1d4ed8;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">wake</button></span>'
@@ -8515,7 +8519,7 @@
               +'<td>'+prodPickBtn(r.ref,'season',r.season,'season')+'</td>'
               +'<td>'+prodPickBtn(r.ref,'supplier',r.supplier,'supplier')+'</td>'
               +'<td>'+r.sizes_approved+'/'+r.sizes+'</td>'
-              +'<td>'+prodStatusSelHtml(r.ref,r.status)+'</td>'
+              +'<td><span style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:2px">'+prodStatusSelHtml(r.ref,r.status)+(r.status_misaligned?prodActMark(r.ref,'status'):'')+'</span></td>'
               +'<td class="l">'+(r.latest_shipment?('<div style="white-space:nowrap;font-size:11px">📦 <a class="samp-open" data-ref="'+esc(r.latest_shipment.ref)+'" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;font-weight:600" title="open this sample shipment">'+esc(r.latest_shipment.ref)+'</a>'+(r.latest_shipment.carrier?' <span class="mut tiny">'+esc(r.latest_shipment.carrier)+'</span>':'')+(r.latest_shipment.tracking?' · '+carrierTrackLinkInj(r.latest_shipment.carrier,r.latest_shipment.tracking):'')+'</div>'):'<span class="mut tiny">—</span>')+'</td></tr>'
               +'<tr class="pg-detrow" id="pgdet-'+i+'" style="display:none"><td colspan="8"><div class="pg-det"></div></td></tr>';
           }).join('')+'</tbody></table></div>';
@@ -8528,7 +8532,7 @@
         g.querySelectorAll('.samp-open').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); gotoSample(a.dataset.ref); }; });   // sample-shipment ref → SUPPLY ▸ Samples
         // Single count badge (like the PO grid): fast 120ms tooltip explains the actions; click opens the product (snooze lives inside).
         g.querySelectorAll('.pg-actbadge').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var pb=g.querySelector('.pg-open[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(b.dataset.ref):b.dataset.ref)+'"]'); if(pb)pb.click(); }; });
-        bindFastTips(g);
+        bindFastTips(g); bindProdActMark(g, function(){ draw(); });   // status-misalignment A marker + SNOOZE on the grid
         g.querySelectorAll('.pg-swatch-zoom').forEach(function(img){ img.onclick=function(e){ e.stopPropagation(); openImgZoom(img.src); }; });   // click swatch → enlarge
         g.querySelectorAll('.pg-status-sel').forEach(function(sel){ sel.onclick=function(e){ e.stopPropagation(); }; sel.onchange=function(){ var v=this.value, ref=this.dataset.ref; this.setAttribute('style',prodStatusStyle(v));   // recolour immediately
           shipPost('/api/product/item/'+encodeURIComponent(ref),{status:v},function(j){ if(j&&j.error){alert('Failed: '+j.error);return;} _prodCfg=null;
@@ -8645,7 +8649,7 @@
       +pRow('Category','<select class="fci pm-field pm-fld" data-f="category" id="pm-cat">'+catOpts+'</select>')
       +pRow('Supplier','<span class="pm-sup-pick" style="display:inline-block;min-width:200px;border:1px solid #cbd5e1;border-radius:5px;padding:4px 8px">'+prodPickBtn(it.ref,'supplier',it.supplier,'supplier')+'</span> <span style="color:#94a3b8;font-size:11px;margin-left:6px">ref keeps its original code'+(it.supplier_code?' ('+esc(it.supplier_code)+')':'')+'</span>')
       +pRow('Colour way','<input class="fci pm-field pm-fld" data-f="colour_name" id="pm-colour" value="'+esc(it.colour_name)+'">')
-      +pRow('Status','<select class="fci pm-field pm-fld" data-f="status" id="pm-status" style="'+prodStatusStyle(it.status)+'">'+statOpts+'</select>'+(it.approved_at?' <span class="mut tiny" style="margin-left:6px">approved '+esc(fd(it.approved_at))+'</span>':''))
+      +pRow('Status','<select class="fci pm-field pm-fld" data-f="status" id="pm-status" style="'+prodStatusStyle(it.status)+'">'+statOpts+'</select>'+((d.sizes&&d.sizes.length&&d.sizes.every(function(s){return s.approval_status==='approved';})&&it.status!=='approved')?prodActMark(it.ref,'status'):'')+(it.approved_at?' <span class="mut tiny" style="margin-left:6px">approved '+esc(fd(it.approved_at))+'</span>':''))
       +pRow('Development started','<input type="date" class="fci pm-fld" data-f="dev_start_override" value="'+esc(it.dev_start_override||'')+'" style="width:150px"> <span class="mut tiny">override — blank = created '+esc(fd(it.created_at))+' (used for time-to-approve)</span>')
       +pRow('Description','<textarea class="fci pm-fld" data-f="description" id="pm-desc" rows="3" style="width:100%;max-width:620px;box-sizing:border-box">'+esc(it.description)+'</textarea>')
       +'<div style="font-size:11px;color:#94a3b8;margin:2px 0 12px">Changes save automatically. <span id="pm-msg" style="margin-left:6px"></span></div>'
@@ -8676,7 +8680,9 @@
     bindSz(body);
     // Item status: colour-code + re-render the size rows on change (the "Approved sample" cell depends on it.status).
     var _pst=body.querySelector('#pm-status'); if(_pst)_pst.addEventListener('change',function(){ it.status=this.value; this.setAttribute('style',prodStatusStyle(this.value));
-      var tb=body.querySelector('#pm-sztbody'); if(tb){ tb.innerHTML=(d.sizes||[]).map(szRow).join('')||'<tr><td colspan="5" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>'; bindSz(body); } });
+      var tb=body.querySelector('#pm-sztbody'); if(tb){ tb.innerHTML=(d.sizes||[]).map(szRow).join('')||'<tr><td colspan="5" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>'; bindSz(body); }
+      var mk=_pst.parentNode.querySelector('.act-wrap'); if(mk)mk.remove();   // refresh the status-misalignment marker
+      if(d.sizes&&d.sizes.length&&d.sizes.every(function(s){return s.approval_status==='approved';})&&it.status!=='approved'){ _pst.insertAdjacentHTML('afterend', prodActMark(it.ref,'status')); bindProdActMark(_pst.parentNode, function(){ renderProductDetail(it.ref); }); } });
     function swUp(f){ var m=body.querySelector('#pm-sw-msg'); if(!f)return; if(['image/png','image/jpeg'].indexOf(f.type)<0){ m.style.color='#dc2626'; m.textContent='JPG or PNG only'; return; } if(f.size>10*1024*1024){ m.style.color='#dc2626'; m.textContent='max 10MB'; return; } m.style.color='#64748b'; m.textContent='optimising…';
       var rd=new FileReader();
       rd.onload=function(){ var src=String(rd.result);
