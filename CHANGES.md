@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.189 - RANGE PLAN PDF: drop the redundant print button
+- The Range Plan PDF popup auto-triggers the print/save dialog on load, so the on-page "Print / Save as PDF" button was redundant and was printing onto the saved PDF. Removed it.
+
 ## v26.188 - PRODUCT: season grid⇄detail binding, ref rename, grid tidy
 - Product grid: rows now grouped by SEASON with a grey header line (newest season first). Removed the notification counter from the top PRODUCT menu button.
 - Season/category/colour now bind both ways between grid and detail: changing a field in master data updates the grid cell in place (no redraw), and changing a grid cell updates the open detail form — no more stale values.
