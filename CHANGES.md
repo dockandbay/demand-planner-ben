@@ -3,6 +3,18 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.142 - PRODUCT size-variant polish + portal unread-badge fix
+
+- **Fixed portal "Unread messages" badge**: it showed "1" while the Inbox said "No unread messages" — the badge
+  counted a note on a FUTURE PO, which the portal hides. The badge now only counts POs the supplier can see (matches
+  the Inbox list).
+- **Size variants**: the Approval dropdown is now **colour-coded** (Pending = orange, Approved = green, Rejected = red).
+- The **Approved sample** dropdown only appears once the **item** is approved; until a version is picked it's **red**
+  with an **"A" action** badge (item-level snooze), and the product row shows a red **"A N"** counter (with snooze).
+- Changing a size's Approval / Approved-sample now updates **silently** (just that row) instead of refreshing the whole tab.
+- Opening a product now **fast-paints** the ref/colour + "Loading master data…" instantly (the version-badge spinner
+  signals the load) instead of a blank pause.
+
 ## v26.141 - PRODUCT: SKU-mapping action, portal display, sample-version approval + labels
 
 Completes the product-dev feature:

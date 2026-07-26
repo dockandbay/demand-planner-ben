@@ -1668,7 +1668,11 @@
           function closeNotif(){ var a=document.getElementById('pp-unread-drop'),b=document.getElementById('pp-recent-drop'); if(a)a.style.display='none'; if(b)b.style.display='none'; }
           function computeUnread(){ var items=[];
             var nb=(_ppData&&_ppData.notesByPo)||{};
-            Object.keys(nb).forEach(function(po){ var n=(nb[po]||[]).filter(function(x){return x.author_kind==='internal' && !x.read;}).length; if(n>0)items.push({kind:'po',ref:po,n:n,label:'Purchase order '+po}); });
+            // Only count POs the supplier can actually see. notesByPo is scoped by supplier and includes notes on
+            // FUTURE POs, but FUTURE POs are hidden from the portal (and excluded by the unread-messages list) — so a
+            // note on one would make the badge say "1" while the Inbox shows "No unread messages". Match the list.
+            var poSet={}; ((_ppData&&_ppData.pos)||[]).forEach(function(p){ if(p&&p.po)poSet[p.po]=1; });
+            Object.keys(nb).forEach(function(po){ if(!poSet[po])return; var n=(nb[po]||[]).filter(function(x){return x.author_kind==='internal' && !x.read;}).length; if(n>0)items.push({kind:'po',ref:po,n:n,label:'Purchase order '+po}); });
             ((_ppData&&_ppData.shipmentPlan)||[]).forEach(function(s){ if(s.unread_dnb>0)items.push({kind:'shipment',ref:s.shipment_ref,n:s.unread_dnb,label:'Shipment '+(s.shipment_ref||'')}); });
             ((_ppData&&_ppData.samples)||[]).forEach(function(s){ if(s.unread_dnb>0)items.push({kind:'sample',ref:s.ref,n:s.unread_dnb,label:'Sample '+(s.ref||'')}); });
             ((_ppData&&_ppData.products)||[]).forEach(function(pr){ if(pr.unread_dnb>0)items.push({kind:'product',ref:pr.ref,n:pr.unread_dnb,label:'Product '+(pr.ref||'')}); });

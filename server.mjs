@@ -3224,6 +3224,7 @@ app.get('/api/product/items', async (_req, res) => {
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id)::int sizes,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approval_status='approved')::int sizes_approved,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approval_status='approved' AND coalesce(s.mapped_sku,'')='')::int sizes_unmapped,
+      (CASE WHEN i.status='approved' THEN (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approved_sample_id IS NULL) ELSE 0 END)::int sizes_unappr_sample,
       (SELECT count(*) FROM planner.supplier_notes n WHERE n.po=i.ref AND n.author_kind='supplier' AND n.read_at IS NULL)::int unread_supplier,
       coalesce((SELECT json_agg(DISTINCT jsonb_build_object('ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,'')))
         FROM planner.product_dev_samples ps
