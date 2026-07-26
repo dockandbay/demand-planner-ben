@@ -3225,6 +3225,10 @@ app.get('/api/product/items', async (_req, res) => {
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approval_status='approved')::int sizes_approved,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approval_status='approved' AND coalesce(s.mapped_sku,'')='')::int sizes_unmapped,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approval_status='approved' AND s.approved_sample_id IS NULL)::int sizes_unappr_sample,
+      -- required design dimensions with no approved version yet (per size × dimension)
+      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='packaging' AND sd.required AND sd.approved_sample_id IS NULL)::int sizes_unappr_packaging,
+      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='polybag'   AND sd.required AND sd.approved_sample_id IS NULL)::int sizes_unappr_polybag,
+      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='labels'    AND sd.required AND sd.approved_sample_id IS NULL)::int sizes_unappr_labels,
       -- status misaligned: every size is approved but the item status isn't 'approved' (still in development / rejected)
       (CASE WHEN i.status<>'approved'
               AND (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id)>0

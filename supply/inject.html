@@ -8428,18 +8428,27 @@
   function prodOpenActs(r){ var nMap=(r.sizes_unmapped||0), nSamp=(r.sizes_unappr_sample||0);
     var mapOn=nMap&&!snzActive(_poActState['prodsku|'+r.ref]), sampOn=nSamp&&!snzActive(_poActState['prodsamp|'+r.ref]);
     var statusOn=(r.status_misaligned)&&!snzActive(_poActState['prodstatus|'+r.ref]);
-    var n=(mapOn?nMap:0)+(sampOn?nSamp:0)+(statusOn?1:0), notes=[];
+    var nPkg=(r.sizes_unappr_packaging||0), nPoly=(r.sizes_unappr_polybag||0), nLbl=(r.sizes_unappr_labels||0);
+    var pkgOn=nPkg&&!snzActive(_poActState['prodpkg|'+r.ref]), polyOn=nPoly&&!snzActive(_poActState['prodpoly|'+r.ref]), lblOn=nLbl&&!snzActive(_poActState['prodlabel|'+r.ref]);
+    var n=(mapOn?nMap:0)+(sampOn?nSamp:0)+(statusOn?1:0)+(pkgOn?nPkg:0)+(polyOn?nPoly:0)+(lblOn?nLbl:0), notes=[];
     if(statusOn)notes.push('status misaligned — all sizes approved but item isn’t Approved');
     if(mapOn)notes.push(nMap+' size'+(nMap>1?'s':'')+' need a SKU mapping');
-    if(sampOn)notes.push(nSamp+' size'+(nSamp>1?'s':'')+' need an approved sample version');
+    if(sampOn)notes.push(nSamp+' size'+(nSamp>1?'s':'')+' need an approved sample');
+    if(pkgOn)notes.push(nPkg+' size'+(nPkg>1?'s':'')+' need approved packaging');
+    if(polyOn)notes.push(nPoly+' size'+(nPoly>1?'s':'')+' need an approved polybag');
+    if(lblOn)notes.push(nLbl+' size'+(nLbl>1?'s':'')+' need approved labels');
     return { n:n, note:notes.join(' · ') }; }
   function prodActBadge(r){ var a=prodOpenActs(r); if(!a.n)return '';
     return ' <button class="ex-badge pg-actbadge" data-ref="'+esc(r.ref)+'" data-note="'+esc(a.note+' — click to open')+'" style="background:#dc2626;cursor:pointer;border:none">'+a.n+'</button>'; }
   // Product action marker — IDENTICAL UX to the PO grid's actMark (A tooltip + SNOOZE ▾ menu 1/3/7/Indefinitely + wake).
   var PROD_ACT_HELP={ sku:'This approved size needs a planner SKU mapping. Map it above, or snooze to defer the reminder.',
     samp:'This size needs an approved sample version selected (the item is approved). Pick a version, or snooze to defer.',
-    status:'All sizes are approved but the product status isn’t Approved — set the status to Approved (or snooze).' };
-  function prodActKey(ref,code){ return (code==='sku'?'prodsku|':code==='samp'?'prodsamp|':'prodstatus|')+ref; }
+    status:'All sizes are approved but the product status isn’t Approved — set the status to Approved (or snooze).',
+    pkg:'Packaging is required for this size but no design version is approved yet — approve one (or snooze).',
+    poly:'Polybag is required for this size but no design version is approved yet — approve one (or snooze).',
+    label:'Labels/wraps are required for this size but no design version is approved yet — approve one (or snooze).' };
+  var PROD_ACT_PREFIX={ sku:'prodsku|', samp:'prodsamp|', status:'prodstatus|', pkg:'prodpkg|', poly:'prodpoly|', label:'prodlabel|' };
+  function prodActKey(ref,code){ return (PROD_ACT_PREFIX[code]||'prodstatus|')+ref; }
   function prodActMark(ref, code){ var key=prodActKey(ref,code), help=PROD_ACT_HELP[code]||'Action required.', s=_poActState[key]||{}, sn=snzActive(s);
     var A='<span class="act-mk" data-note="'+esc(help)+(sn?' — currently snoozed until '+esc(snzUntil(s))+snzBy(s):'')+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:'+(sn?'#f3a3a3':'#dc2626')+';color:#fff;font-weight:800;font-size:10px;cursor:help;vertical-align:middle;margin-left:5px">A</span>';
     var snz=sn
@@ -8639,13 +8648,15 @@
           ? '<button class="cell-pick pm-sku-pick" data-id="'+s.id+'" data-sku="'+esc(s.mapped_sku||'')+'" title="map this approved size to a planner SKU">'+(s.mapped_sku?'<b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.mapped_sku)+'</b>':'<span class="mut">— <span style="background:#fee2e2;color:#991b1b;font-weight:700;border-radius:3px;padding:0 3px">map</span></span>')+' ▾</button>'+(s.mapped_sku?'':prodActMark(it.ref,'sku'))
           : '<span class="mut tiny">approve to map</span>')
       +' <a class="pm-sz-del" data-id="'+s.id+'" title="remove size" style="color:#dc2626;cursor:pointer">✕</a></span></td></tr>'; }
+    var DIM_ACT={packaging:'pkg',polybag:'poly',labels:'label'};
     function dimRow(s,dim){ var isP=(dim==='product'), sd=isP?{required:true,approved_sample_id:s.approved_sample_id}:sizeDim(s,dim), req=isP?true:!!sd.required, vers=dimVers(dim), appId=sd.approved_sample_id;
+      var dimMark=(!isP&&req&&!appId)?prodActMark(it.ref,DIM_ACT[dim]):((isP&&!appId&&s.approval_status==='approved')?prodActMark(it.ref,'samp'):'');
       var reqCell=isP?'<span class="mut tiny">always</span>'
         :'<label style="font-size:11px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="pm-dim-req" data-id="'+s.id+'" data-dim="'+dim+'"'+(req?' checked':'')+'> required</label>'
          +(dim==='packaging'&&req?' <select class="fci pm-dim-type" data-id="'+s.id+'" data-dim="packaging" style="font-size:11px"><option value="">type…</option><option'+(sd.packaging_type==='pouch'?' selected':'')+'>pouch</option><option'+(sd.packaging_type==='box'?' selected':'')+'>box</option></select>':'');
       var verCell=!req?'<span class="mut tiny">—</span>'
-        :(vers.length?'<select class="fci '+(isP?'pm-sz" data-f="approved_sample_id" data-id="'+s.id:'pm-dim-ver" data-id="'+s.id+'" data-dim="'+dim)+'" style="'+(appId?'':'background:#fee2e2;color:#991b1b;font-weight:700')+'"><option value="">—</option>'+vers.map(function(v){return '<option value="'+v.id+'"'+(String(appId||'')===String(v.id)?' selected':'')+'>v'+v.version+'</option>';}).join('')+'</select>'+((isP&&!appId&&s.approval_status==='approved')?prodActMark(it.ref,'samp'):'')
-            :'<span class="mut tiny">'+(isP?'no samples yet':'no versions — add below')+'</span>');
+        :(vers.length?'<select class="fci '+(isP?'pm-sz" data-f="approved_sample_id" data-id="'+s.id:'pm-dim-ver" data-id="'+s.id+'" data-dim="'+dim)+'" style="'+(appId?'':'background:#fee2e2;color:#991b1b;font-weight:700')+'"><option value="">—</option>'+vers.map(function(v){return '<option value="'+v.id+'"'+(String(appId||'')===String(v.id)?' selected':'')+'>v'+v.version+'</option>';}).join('')+'</select>'+dimMark
+            :'<span class="mut tiny">'+(isP?'no samples yet':'no versions — add below')+'</span>'+dimMark);
       var appFiles=(appId&&verById(appId))?filesHtml(verById(appId).files):'';
       return '<tr class="pm-dimrow" style="'+(req?'':'opacity:.55')+'"><td style="padding:1px 8px 1px 16px;color:#334155;font-size:11px;white-space:nowrap">'+DIM_LBL[dim]+'</td><td style="padding:1px 8px;white-space:nowrap">'+reqCell+'</td><td style="padding:1px 8px;white-space:nowrap">'+verCell+'</td><td style="padding:1px 8px">'+(appFiles||'<span class="mut tiny">—</span>')+'</td></tr>'; }
     function szRows(s){ return szHdr(s)+DIMS.map(function(dl){return dimRow(s,dl[0]);}).join(''); }

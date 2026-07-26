@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.152 - Product dimensions matrix — actions + portal (Phase C)
+
+- **Per-dimension actions**: a required Packaging / Polybag / Labels dimension with no approved version now raises a
+  PO-style **"A" action** on that size row (snoozeable) and counts toward the product's action badge + tooltip
+  (alongside SKU-mapping, sample approval, status-misalignment).
+- **Portal**: the supplier now sees, per size, each dimension's status — required (+ packaging type), the **approved
+  version** (or "pending"), and the approved version's **files** (click images to enlarge). Read-only for
+  packaging/polybag/labels; the supplier still submits Product samples in the Sample tab.
+
 ## v26.151 - Product dimensions matrix — admin UI (Phase B, layout C)
 
 - The Size-variants table is now a per-size **dimension matrix** (layout C): each size shows a header (label · approval ·
