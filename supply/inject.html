@@ -8356,7 +8356,15 @@
     row.querySelectorAll('.view-toggle:not(.product-toggle)').forEach(function(b){ b.addEventListener('click',function(){ hideProduct(); }); });
     loadProductUnread(); if(!window.__prodUnreadPoll)window.__prodUnreadPoll=setInterval(loadProductUnread,60000); }
   function loadProductUnread(){ if(!prodCan())return; fetch('/api/product/unread').then(function(r){return r.json();}).then(function(j){ var b=document.getElementById('product-unread'); if(!b)return; var n=(j&&j.count)||0; b.textContent=n>0?(n>99?'99+':String(n)):''; b.style.display=n>0?'inline-block':'none'; }).catch(function(){}); }
-  function prodStatusChip(s){ var m={in_development:['In development','#b45309','#fffbeb'],approved:['Approved','#16a34a','#f0fdf4'],dropped:['Dropped','#b91c1c','#fef2f2']}; var x=m[s]||m.in_development; return hzChip(x[2],x[1],x[0]); }
+  function prodStatusChip(s){ var m={in_development:['In development','#b45309','#fffbeb'],approved:['Approved','#16a34a','#f0fdf4'],dropped:['Rejected','#b91c1c','#fef2f2']}; var x=m[s]||m.in_development; return hzChip(x[2],x[1],x[0]); }
+  // Item status: In development (orange) / Approved (green) / Rejected (red, value 'dropped'). Colour-coded editable dropdown.
+  var PROD_ITEM_STAT=[['in_development','In development'],['approved','Approved'],['dropped','Rejected']];
+  function prodStatusStyle(v){ return v==='approved'?'background:#dcfce7;color:#166534;font-weight:700':v==='dropped'?'background:#fee2e2;color:#991b1b;font-weight:700':'background:#fef3c7;color:#92400e;font-weight:600'; }
+  function prodStatusSelHtml(ref,val){ return '<select class="fci pg-status-sel" data-ref="'+esc(ref)+'" style="'+prodStatusStyle(val)+'">'+PROD_ITEM_STAT.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'; }
+  // Click-to-zoom overlay for an image (swatch enlarge on the product grid).
+  function openImgZoom(src){ if(!src)return; var ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:200060;display:flex;align-items:center;justify-content:center;padding:24px;cursor:zoom-out';
+    ov.innerHTML='<img src="'+esc(src)+'" style="max-width:92vw;max-height:92vh;border-radius:10px;box-shadow:0 12px 46px rgba(0,0,0,.55)">';
+    ov.onclick=function(){ ov.remove(); }; document.body.appendChild(ov); }
   // Inline cell picker for the product grid (same popup UX as the PO grid's supplier/branch picker) — edits are
   // bound straight to the master-data fields via /api/product/item/<ref>. kind = supplier | season | category.
   function prodPickBtn(ref,field,val,kind){ return '<button class="cell-pick prod-cell-pick" data-ref="'+esc(ref)+'" data-field="'+field+'" data-kind="'+kind+'" title="'+esc(val||'')+'">'+(val?esc(val):'<span class="mut">— <span style="background:#fee2e2;color:#991b1b;font-weight:700;border-radius:3px;padding:0 3px">set</span></span>')+' ▾</button>'; }
@@ -8470,7 +8478,7 @@
         g.innerHTML='<div class="tw"><table class="pg-tbl"><thead><tr>'
           +['','Ref','Category','Season','Supplier','Sizes approved','Status','Sample shipment'].map(function(h){return '<th>'+h+'</th>';}).join('')+'</tr></thead><tbody>'
           +f.map(function(r,i){
-            var sw=r.has_swatch?'<img class="pg-swatch2" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at)+'">':'<span class="pg-swatch2 none">n/a</span>';
+            var sw=r.has_swatch?'<img class="pg-swatch2 pg-swatch-zoom" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at)+'" title="click to enlarge" style="cursor:zoom-in">':'<span class="pg-swatch2 none">n/a</span>';
             return '<tr>'
               +'<td><span style="display:inline-flex;align-items:center;gap:7px">'+sw+'<button class="planbtn pg-open" data-ref="'+esc(r.ref)+'" data-i="'+i+'">PLAN</button></span></td>'
               +'<td><div class="pg-ref">'+esc(r.ref)+(r.unread_supplier?' <span class="ex-badge" title="'+r.unread_supplier+' new supplier message(s)">'+r.unread_supplier+'</span>':'')+skuMapBadge(r)+sampApprBadge(r)+'</div>'+(r.colour_name?'<div class="pg-colour">'+esc(r.colour_name)+'</div>':'')+'</td>'
@@ -8478,7 +8486,7 @@
               +'<td>'+prodPickBtn(r.ref,'season',r.season,'season')+'</td>'
               +'<td>'+prodPickBtn(r.ref,'supplier',r.supplier,'supplier')+'</td>'
               +'<td>'+r.sizes_approved+'/'+r.sizes+'</td>'
-              +'<td>'+prodStatusChip(r.status)+'</td>'
+              +'<td>'+prodStatusSelHtml(r.ref,r.status)+'</td>'
               +'<td class="l">'+(r.latest_shipment?('<div style="white-space:nowrap;font-size:11px">📦 <a class="samp-open" data-ref="'+esc(r.latest_shipment.ref)+'" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;font-weight:600" title="open this sample shipment">'+esc(r.latest_shipment.ref)+'</a>'+(r.latest_shipment.carrier?' <span class="mut tiny">'+esc(r.latest_shipment.carrier)+'</span>':'')+(r.latest_shipment.tracking?' · '+carrierTrackLinkInj(r.latest_shipment.carrier,r.latest_shipment.tracking):'')+'</div>'):'<span class="mut tiny">—</span>')+'</td></tr>'
               +'<tr class="pg-detrow" id="pgdet-'+i+'" style="display:none"><td colspan="8"><div class="pg-det"></div></td></tr>';
           }).join('')+'</tbody></table></div>';
@@ -8493,6 +8501,9 @@
         g.querySelectorAll('.pg-skusnz').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openKeySnzMenu(b,'prodsku|'+b.dataset.ref,function(){ draw(); }); }; });
         g.querySelectorAll('.pg-sampact').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var pb=g.querySelector('.pg-open[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(b.dataset.ref):b.dataset.ref)+'"]'); if(pb)pb.click(); }; });   // open the product → pick approved sample versions
         g.querySelectorAll('.pg-sampsnz').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openKeySnzMenu(b,'prodsamp|'+b.dataset.ref,function(){ draw(); }); }; });
+        g.querySelectorAll('.pg-swatch-zoom').forEach(function(img){ img.onclick=function(e){ e.stopPropagation(); openImgZoom(img.src); }; });   // click swatch → enlarge
+        g.querySelectorAll('.pg-status-sel').forEach(function(sel){ sel.onclick=function(e){ e.stopPropagation(); }; sel.onchange=function(){ var v=this.value, ref=this.dataset.ref; this.setAttribute('style',prodStatusStyle(v));   // recolour immediately
+          shipPost('/api/product/item/'+encodeURIComponent(ref),{status:v},function(j){ if(j&&j.error){alert('Failed: '+j.error);return;} _prodCfg=null; renderProductPlan(c); }); }; });   // status is colour-coded + editable; save + refresh (badges depend on approval)
         if(_pendingProdRef){ var _pr=_pendingProdRef; _pendingProdRef=null; var _pb=g.querySelector('.pg-open[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(_pr):_pr)+'"]'); if(_pb)_pb.click(); }
       }
       _prodDraw=draw;
@@ -8589,18 +8600,18 @@
     var sizeRows=(d.sizes||[]).map(szRow).join('');
     var seasonOpts=seasons.map(function(o){return '<option value="'+esc(o.code)+'"'+(o.code===it.season?' selected':'')+'>'+esc(o.code)+'</option>';}).join('');
     var catOpts=cats.map(function(o){return '<option value="'+esc(o.category)+'"'+(o.category===it.category?' selected':'')+'>'+esc(o.category)+(o.code?' ('+esc(o.code)+')':'')+'</option>';}).join('');
-    var statOpts=[['in_development','In development'],['approved','Approved'],['dropped','Dropped']].map(function(o){return '<option value="'+o[0]+'"'+(o[0]===it.status?' selected':'')+'>'+o[1]+'</option>';}).join('');
+    var statOpts=PROD_ITEM_STAT.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===it.status?' selected':'')+'>'+o[1]+'</option>';}).join('');
     body.innerHTML=prodSupList()+'<div style="max-width:660px">'
       +pRow('Season','<select class="fci pm-field pm-fld" data-f="season" id="pm-season">'+seasonOpts+'</select>')
       +pRow('Category','<select class="fci pm-field pm-fld" data-f="category" id="pm-cat">'+catOpts+'</select>')
       +pRow('Supplier','<span class="pm-sup-pick" style="display:inline-block;min-width:200px;border:1px solid #cbd5e1;border-radius:5px;padding:4px 8px">'+prodPickBtn(it.ref,'supplier',it.supplier,'supplier')+'</span> <span style="color:#94a3b8;font-size:11px;margin-left:6px">ref keeps its original code'+(it.supplier_code?' ('+esc(it.supplier_code)+')':'')+'</span>')
       +pRow('Colour way','<input class="fci pm-field pm-fld" data-f="colour_name" id="pm-colour" value="'+esc(it.colour_name)+'">')
-      +pRow('Status','<select class="fci pm-field pm-fld" data-f="status" id="pm-status">'+statOpts+'</select>'+(it.approved_at?' <span class="mut tiny" style="margin-left:6px">approved '+esc(fd(it.approved_at))+'</span>':''))
+      +pRow('Status','<select class="fci pm-field pm-fld" data-f="status" id="pm-status" style="'+prodStatusStyle(it.status)+'">'+statOpts+'</select>'+(it.approved_at?' <span class="mut tiny" style="margin-left:6px">approved '+esc(fd(it.approved_at))+'</span>':''))
       +pRow('Development started','<input type="date" class="fci pm-fld" data-f="dev_start_override" value="'+esc(it.dev_start_override||'')+'" style="width:150px"> <span class="mut tiny">override — blank = created '+esc(fd(it.created_at))+' (used for time-to-approve)</span>')
       +pRow('Description','<textarea class="fci pm-fld" data-f="description" id="pm-desc" rows="3" style="width:100%;max-width:620px;box-sizing:border-box">'+esc(it.description)+'</textarea>')
       +'<div style="font-size:11px;color:#94a3b8;margin:2px 0 12px">Changes save automatically. <span id="pm-msg" style="margin-left:6px"></span></div>'
       +'<div style="font-weight:700;font-size:13px;margin:14px 0 6px">Size variants <span style="color:#94a3b8;font-weight:400;font-size:11px">(approval = internal D&amp;B sign-off)</span></div>'
-      +'<table style="border-collapse:collapse;font-size:12px"><thead><tr>'+['Size','Approval','Mapped SKU','Approved sample',''].map(function(h){return '<th style="text-align:left;padding:2px 8px 4px 0;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7">'+h+'</th>';}).join('')+'</tr></thead><tbody>'+(sizeRows||'<tr><td colspan="5" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>')+'</tbody></table>'
+      +'<table style="border-collapse:collapse;font-size:12px"><thead><tr>'+['Size','Approval','Mapped SKU','Approved sample',''].map(function(h){return '<th style="text-align:left;padding:2px 8px 4px 0;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7">'+h+'</th>';}).join('')+'</tr></thead><tbody id="pm-sztbody">'+(sizeRows||'<tr><td colspan="5" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>')+'</tbody></table>'
       +'<div style="margin-top:8px"><input class="fci" id="pm-newsz" placeholder="add size…" style="width:130px"> <button class="save-btn" id="pm-addsz">+ Add size</button></div>'
       +'<div style="font-weight:700;font-size:13px;margin:16px 0 6px">Swatch image <span style="color:#94a3b8;font-weight:400;font-size:11px">(JPG/PNG, ≤2MB — uploads on select)</span></div>'
       +'<input type="file" id="pm-swatch" accept="image/png,image/jpeg" style="font-size:12px"> <span id="pm-sw-msg" style="font-size:11px;margin-left:6px"></span>'
@@ -8624,6 +8635,9 @@
       scope.querySelectorAll('.pm-samp-a').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(e){ e.stopPropagation(); openKeySnzMenu(b,'prodsamp|'+b.dataset.ref,function(){ renderProductDetail(it.ref); }); }; });
     }
     bindSz(body);
+    // Item status: colour-code + re-render the size rows on change (the "Approved sample" cell depends on it.status).
+    var _pst=body.querySelector('#pm-status'); if(_pst)_pst.addEventListener('change',function(){ it.status=this.value; this.setAttribute('style',prodStatusStyle(this.value));
+      var tb=body.querySelector('#pm-sztbody'); if(tb){ tb.innerHTML=(d.sizes||[]).map(szRow).join('')||'<tr><td colspan="5" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>'; bindSz(body); } });
     function swUp(f){ var m=body.querySelector('#pm-sw-msg'); if(!f)return; if(['image/png','image/jpeg'].indexOf(f.type)<0){ m.style.color='#dc2626'; m.textContent='JPG or PNG only'; return; } if(f.size>10*1024*1024){ m.style.color='#dc2626'; m.textContent='max 10MB'; return; } m.style.color='#64748b'; m.textContent='optimising…';
       var rd=new FileReader();
       rd.onload=function(){ var src=String(rd.result);

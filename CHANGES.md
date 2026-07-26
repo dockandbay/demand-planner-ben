@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.143 - PRODUCT grid: swatch zoom + editable colour-coded status
+
+- **Click a swatch** in the PRODUCT grid to see it enlarged in a pop-up (click anywhere to close).
+- The grid **Status** is now an **editable, colour-coded dropdown** (like the PO grid): In development = orange,
+  Approved = green, **Rejected** (was "Dropped") = red — edits save inline and refresh the row. The detail Master-tab
+  status dropdown matches (same colours + label), and changing it re-renders the size rows in place.
+
 ## v26.142 - PRODUCT size-variant polish + portal unread-badge fix
 
 - **Fixed portal "Unread messages" badge**: it showed "1" while the Inbox said "No unread messages" — the badge
