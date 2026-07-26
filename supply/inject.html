@@ -39,6 +39,10 @@
 #product-root .pd-tab{background:transparent;border:none;padding:6px 14px;font-size:12px;font-weight:500;cursor:pointer;color:#7c93b8;border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit}
 #product-root .pd-tab:hover{color:#2563eb}
 #product-root .pd-tab.active{color:#2563eb;border-bottom-color:#3b82f6;font-weight:600}
+#product-root .pd-skel{max-width:660px}
+#product-root .pd-skel-row{height:34px;margin-bottom:8px;border-radius:6px;background:linear-gradient(90deg,#f1f5f9 25%,#e2e8f0 37%,#f1f5f9 63%);background-size:400% 100%;animation:pdShimmer 1.2s ease-in-out infinite}
+#product-root .pd-skel-row:first-child{height:22px;width:40%}
+@keyframes pdShimmer{0%{background-position:100% 0}100%{background-position:0 0}}
 #product-root .pg-detrow > td{background:#fff;border-bottom:2px solid #dbeafe;padding:12px 10px}
 /* highlight the expanded row light yellow (like the PO grid) — beats the sticky/hover bg */
 #product-root table.pg-tbl tr.pg-openrow > td{background:#fffbeb}
@@ -4530,7 +4534,7 @@
   var CARRIERS=['DHL','FedEx','UPS','Flexport','SF Express','Genfreight','Other'];   // consistent carrier set across shipments, samples & portal (legacy values preserved by the select builder)
   function shipReload(){ delete cache['shipments']; showPoSub('shipments'); }
   function shipPost(ep,body,cb){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
-    .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); cb&&cb(j); })
+    .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); if(ep.indexOf('/api/product/')>=0){ try{ _prodItemCache={}; }catch(e){} } cb&&cb(j); })
     .catch(function(e){ alert('Failed: '+(e.message||e)); }); }
   // Shared config card-editor. Collapses the identical list/search/edit/save plumbing behind the config editors
   // (Key accounts, Consignees, …): a searchable CARD LIST + a one-at-a-time grouped EDIT FORM. Only the bespoke
@@ -8320,6 +8324,13 @@
     return {t:t, h:h||'This SUPPLY section.'}; };
   // ════════ PRODUCT module (top-level; migration 128) ════════
   var PRODUCT_SUB='plan', _prodCfg=null, _prodDetail=null, _prodDetailTab='master', _prodDetailBox=null, _pendingProdRef=null, _prodDraw=null;
+  // Product item cache (A) — expand re-open is instant; entries expire after TTL and are cleared on any save to that ref.
+  var _prodItemCache={}, _PROD_ITEM_TTL=60000;
+  function prodItemInvalidate(ref){ if(ref)delete _prodItemCache[ref]; }
+  function prodItemCached(ref){ var e=_prodItemCache[ref]; return (e && (Date.now()-e.t)<_PROD_ITEM_TTL) ? e.d : null; }
+  function loadProdItem(ref,cb,force){ var c=force?null:prodItemCached(ref);   // returns cached data synchronously via cb when fresh
+    if(c)return cb(c,true);
+    fetch('/api/product/item/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ if(d&&d.item)_prodItemCache[ref]={t:Date.now(),d:d}; cb(d,false); }).catch(function(){ cb(null,false); }); }
   function wireProdTopSearch(){ var box=document.getElementById('hz-search'); if(!box||box._prodWired)return; box._prodWired=1;
     box.addEventListener('input',function(){ var pr=document.getElementById('product-root'); if(!pr||pr.style.display==='none')return; _prodFilt.q=box.value; if(_prodDraw)_prodDraw(); }); }
   function prodCan(){ return !window.ME || ME.is_admin || ME.product_edit || ME.live===false; }
@@ -8583,12 +8594,15 @@
       })(); }; }); }); }
   function renderProductDetail(ref, box, seed){ box=box||_prodDetailBox||document.getElementById('product-content'); _prodDetailBox=box;
     try{ writeHash(['product','plan',ref]); }catch(e){}
-    // Fast paint: show just the ref + colour instantly from the grid row (seed) so it isn't blank while the full
-    // detail loads. No inline "loading" text — the version-badge spinner already signals the in-flight fetch.
+    try{ ensureSuppliers(function(){}); loadProdCfg(function(){}); }catch(e){}   // (C) warm suppliers + config in parallel with the item fetch
+    var cached=prodItemCached(ref);
+    if(cached&&cached.item){ _prodDetail=cached; renderProdDetailShell(box,cached); return; }   // (A) instant re-open from cache (cleared on any product write, so always current for this user; TTL bounds concurrent-edit staleness)
+    // (B) Skeleton paint: ref + colour instantly, then shimmer rows so the panel isn't blank while the ~1s fetch runs.
     box.innerHTML='<div style="padding:6px 2px 10px"><b style="font-family:ui-monospace,Menlo,monospace;font-size:15px">'+esc(ref)+'</b>'
-      +(seed&&seed.colour_name?' <span class="mut" style="font-size:12px">'+esc(seed.colour_name)+'</span>':'')+'</div>';
-    fetch('/api/product/item/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ if(!d||d.error||!d.item){ box.innerHTML='<div style="color:#dc2626">Not found</div>'; return; }
-      _prodDetail=d; renderProdDetailShell(box,d); }).catch(function(e){ box.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
+      +(seed&&seed.colour_name?' <span class="mut" style="font-size:12px">'+esc(seed.colour_name)+'</span>':'')+'</div>'
+      +'<div class="pd-skel">'+Array(5).join('x').split('x').map(function(){return '<div class="pd-skel-row"></div>';}).join('')+'</div>';
+    loadProdItem(ref,function(d){ if(box!==_prodDetailBox)return; if(!d||d.error||!d.item){ box.innerHTML='<div style="color:#dc2626">Not found</div>'; return; }
+      _prodDetail=d; renderProdDetailShell(box,d); }); }
   function renderProdDetailShell(c,d){ var it=d.item; var inline=(c!==document.getElementById('product-content'));
     var _u=Number(d.unread_supplier)||0;
     var tabs=[['master','Master data'],['samples','Samples'],['timeline','Timeline'+(_u?' <span class="ex-badge">'+_u+'</span>':'')],['documents','Documents']];

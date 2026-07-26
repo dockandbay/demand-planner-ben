@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.165 - PRODUCT expand performance: cache + skeleton + parallel warm (A+B+C)
+- (A) Cache product item responses by ref (60s TTL); re-opening a row is now instant. Cache is cleared on any /api/product/ write so it's always current after an edit.
+- (B) Skeleton shimmer rows paint immediately on expand instead of a ~1s blank panel.
+- (C) Warm suppliers + product-config lookups in parallel with the item fetch (was chained after it inside renderProdMaster), so first expand no longer serializes three round-trips.
+- Note: much of the sandbox expand latency is the remote DB (~300-800ms/query); production's local DB is far faster. These changes make it feel instant regardless. Grid-query refactor (E) + hover-prefetch (D) still pending.
+
 ## v26.164 - Fix collapsed component columns (table-layout:fixed)
 - Size variants & components table: switched to table-layout:fixed with explicit column widths (Component 130px, Description 22%, Req 46px, Status 104px, Actions 120px, Files rest) + min-width 820px. Fixes Component/Description/Req collapsing to zero width (only STATUS/ACTIONS/FILES were showing). Component label ellipsizes if long; description input no longer overflows.
 
