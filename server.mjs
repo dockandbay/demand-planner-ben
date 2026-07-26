@@ -3259,7 +3259,17 @@ app.get('/api/product/item/:ref', async (req, res) => {
     const sizes = (await pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort,
       coalesce(mapped_sku,'') mapped_sku, approved_sample_id FROM planner.product_dev_sizes WHERE item_id=$1 ORDER BY sort, id`, [item.id])).rows;
     const docs = (await pool.query(`SELECT id, filename, mime, byte_size, coalesce(uploaded_by,'') uploaded_by, coalesce(uploader_kind,'internal') uploader_kind, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments WHERE po=$1 AND category='product' ORDER BY uploaded_at DESC`, [ref])).rows;
-    const samples = (await pool.query(`SELECT id, version, item_ref||'_v'||version ref FROM planner.product_dev_samples WHERE item_ref=$1 ORDER BY version`, [ref])).rows;
+    // versions across ALL dimensions (product = supplier samples; packaging/polybag/labels = D&B design uploads)
+    const samples = (await pool.query(`SELECT id, version, coalesce(dimension,'product') dimension,
+      CASE WHEN coalesce(dimension,'product')='product' THEN item_ref||'_v'||version ELSE item_ref||'_'||dimension||'_v'||version END ref
+      FROM planner.product_dev_samples WHERE item_ref=$1 ORDER BY dimension, version`, [ref])).rows;
+    // per-size dimension rows (packaging/polybag/labels): required + approved version + packaging type
+    if (sizes.length) {
+      const dims = (await pool.query(`SELECT size_id, dimension, required, approved_sample_id, coalesce(packaging_type,'') packaging_type
+        FROM planner.product_dev_size_dimensions WHERE size_id = ANY($1)`, [sizes.map(s => s.id)])).rows;
+      const byS = {}; dims.forEach(d => { (byS[d.size_id] = byS[d.size_id] || []).push(d); });
+      sizes.forEach(s => { s.dimensions = byS[s.id] || []; });
+    }
     const unread_supplier = (await pool.query(`SELECT count(*)::int n FROM planner.supplier_notes WHERE po=$1 AND author_kind='supplier' AND read_at IS NULL`, [ref])).rows[0].n;
     res.json({ item, sizes, docs, samples, unread_supplier });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -3358,6 +3368,31 @@ app.get('/api/product/skus', async (_req, res) => {
       trim(both ' ' from coalesce(colour_long,'')||' '||coalesce(size_short,'')) label
       FROM planner.products ORDER BY sku`)).rows;
     res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Create a D&B-uploaded DESIGN version for a dimension (packaging / polybag / labels). Version numbers per (ref, dimension).
+app.post('/api/product/design-version', async (req, res) => {
+  const b = req.body || {}, ref = (b.ref || '').trim(), dim = (b.dimension || '').trim();
+  if (!ref || !['packaging', 'polybag', 'labels'].includes(dim)) return res.status(400).json({ error: 'ref + valid dimension required' });
+  try {
+    const v = (await pool.query(`SELECT coalesce(max(version),0)+1 n FROM planner.product_dev_samples WHERE item_ref=$1 AND coalesce(dimension,'product')=$2`, [ref, dim])).rows[0].n;
+    const r = await pool.query(`INSERT INTO planner.product_dev_samples (item_ref, version, dimension, description, created_by)
+      VALUES ($1,$2,$3,$4,$5) RETURNING id`, [ref, v, dim, (b.description || '').trim() || null, shortUser(authUser(req)) || null]);
+    res.json({ ok: true, id: r.rows[0].id, version: v });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Upsert a size's dimension state (required / approved version / packaging type) for packaging|polybag|labels.
+app.post('/api/product/size/:id/dimension', async (req, res) => {
+  const b = req.body || {}, sizeId = req.params.id, dim = (b.dimension || '').trim();
+  if (!['packaging', 'polybag', 'labels'].includes(dim)) return res.status(400).json({ error: 'valid dimension required' });
+  const params = [sizeId, dim], fields = [];
+  for (const k of ['required', 'approved_sample_id', 'packaging_type']) {
+    if (k in b) { params.push(b[k] === '' ? null : b[k]); fields.push(`${k}=$${params.length}${k === 'approved_sample_id' ? '::bigint' : k === 'required' ? '::boolean' : ''}`); }
+  }
+  try {
+    await pool.query(`INSERT INTO planner.product_dev_size_dimensions (size_id, dimension) VALUES ($1,$2) ON CONFLICT (size_id, dimension) DO NOTHING`, [sizeId, dim]);
+    if (fields.length) await pool.query(`UPDATE planner.product_dev_size_dimensions SET ${fields.join(',')} WHERE size_id=$1 AND dimension=$2`, params);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/size/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.product_dev_sizes WHERE id=$1`, [req.params.id]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
@@ -3516,7 +3551,7 @@ async function productSampleList(itemRef) {
       FROM planner.sample_request_dev_samples l JOIN planner.sample_requests sr ON sr.id=l.sample_request_id
       WHERE l.dev_sample_id=ps.id),'[]'::json) shipments
     FROM planner.product_dev_samples ps
-    WHERE ps.item_ref=$1 ORDER BY ps.version`, [itemRef])).rows;
+    WHERE ps.item_ref=$1 AND coalesce(ps.dimension,'product')='product' ORDER BY ps.version`, [itemRef])).rows;
   if (rows.length) {
     const keys = rows.map(r => 'PSAMPLE-' + r.id);
     const ph = (await pool.query(`SELECT po, id, filename, coalesce(mime,'') mime, coalesce(uploader_kind,'internal') uploader_kind FROM planner.portal_attachments WHERE po = ANY($1) AND category='product_sample' ORDER BY uploaded_at`, [keys])).rows;
