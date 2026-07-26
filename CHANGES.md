@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.138 - Smaller Fix-column buttons in Actions
+
+- Reduced the button size in the Actions **Fix** column (10px font, tighter padding) so they fit the column cleanly.
+
 ## v26.137 - Actions priority preview now shows ALL high-priority items
 
 - The fast priority preview was a hand-picked 4-rule subset, so many high-priority actions (e.g. "PO not in ERP",
