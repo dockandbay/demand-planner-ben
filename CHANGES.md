@@ -3,6 +3,20 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.153 - Product size×component matrix rework + swatch move
+
+- **Size variants → components matrix**: each size now has a "Size" label + sub-rows for **Product / Packaging /
+  Labels/wraps / Polybags / Other components**. Each component has a **description**, **Required** checkbox
+  (+ pouch/box type for packaging), **versioned file uploads** (each file gets a version #, viewable/enlargeable/
+  removable), an **Approval** status (Pending/Approved/Rejected, colour-coded), and a PO-style **"A" action** (with
+  snooze) when required-but-not-approved. Table is now full-page width.
+- Migration 151: `product_dev_size_dimensions.description` + `.approval_status`; `portal_attachments.version`. New
+  component-file upload/version/delete endpoints.
+- **Swatch upload moved** up under the *Colour way* field; an uploaded swatch shows a thumbnail (click to enlarge) +
+  a view/download link.
+- **Silent file uploads**: adding/removing a component file now refreshes just the table (no full-tab flash).
+- **Portal**: supplier sees each component per size — required, description, approval status, and files (versioned).
+
 ## v26.152 - Product dimensions matrix — actions + portal (Phase C)
 
 - **Per-dimension actions**: a required Packaging / Polybag / Labels dimension with no approved version now raises a

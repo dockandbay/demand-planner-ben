@@ -1551,19 +1551,19 @@
           function ppProdMaster(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
             fetch('/api/product/item/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ if(!d||!d.item){ box.innerHTML='<div class="mut" style="text-align:left">Not found.</div>'; return; } var it=d.item;
               function row(l,v){ return '<div style="display:flex;gap:10px;padding:5px 0;border-bottom:1px solid #f4f4f5;text-align:left"><div style="flex:0 0 130px;color:#64748b">'+l+'</div><div style="flex:1;min-width:0">'+v+'</div></div>'; }
-              function pvById(id){ return (d.samples||[]).filter(function(v){return String(v.id)===String(id);})[0]; }
-              function pFiles(files){ return (files||[]).map(function(f){ var url=(EP.attachImgBase||'/api/supply/portal-attachment/')+f.id;
-                return /^image\//i.test(String(f.mime||''))?'<img class="pp-dimimg" data-src="'+url+'" src="'+url+'" style="width:24px;height:24px;object-fit:cover;border-radius:4px;border:1px solid #e5e7eb;margin:1px;cursor:zoom-in;vertical-align:middle">':'<a href="'+url+'" target="_blank" rel="noopener" style="font-size:10px;color:#1d4ed8;margin:0 3px">📄</a>'; }).join(''); }
-              function pDimLine(label, required, approvedId){ if(!required)return '<div style="color:#94a3b8;font-size:11px;padding:1px 0">'+label+': <span class="mut">not required</span></div>';
-                var v=approvedId?pvById(approvedId):null;
-                return '<div style="font-size:11px;padding:1px 0">'+label+': '+(v?'<b style="color:#16a34a">v'+v.version+' approved</b> '+pFiles(v.files):'<span style="color:#dc2626">pending</span>')+'</div>'; }
-              var sizes=(d.sizes||[]).map(function(s){ function sd(dm){ return ((s.dimensions||[]).filter(function(x){return x.dimension===dm;})[0])||{}; } var pk=sd('packaging'), pl=sd('polybag'), lb=sd('labels'), ok=s.approval_status==='approved';
+              function pFiles(files){ return (files||[]).map(function(f){ var url=(EP.attachImgBase||'/api/supply/portal-attachment/')+f.id, vt=(f.version!=null?'v'+f.version+' ':'');
+                return /^image\//i.test(String(f.mime||''))?'<img class="pp-dimimg" data-src="'+url+'" src="'+url+'" style="width:24px;height:24px;object-fit:cover;border-radius:4px;border:1px solid #e5e7eb;margin:1px;cursor:zoom-in;vertical-align:middle" title="'+esc(vt+(f.filename||''))+'">':'<a href="'+url+'" target="_blank" rel="noopener" style="font-size:10px;color:#1d4ed8;margin:0 3px" title="'+esc(f.filename||'')+'">📄'+esc(vt)+'</a>'; }).join(''); }
+              function pDimLine(label, sd){ if(!sd.required)return '<div style="color:#94a3b8;font-size:11px;padding:1px 0">'+label+': <span class="mut">not required</span></div>';
+                var appr=sd.approval_status||'pending', col=appr==='approved'?'#16a34a':appr==='rejected'?'#dc2626':'#b45309';
+                return '<div style="font-size:11px;padding:1px 0">'+label+(sd.description?' <span class="mut">('+esc(sd.description)+')</span>':'')+': <b style="color:'+col+'">'+esc(appr)+'</b> '+pFiles(sd.files)+'</div>'; }
+              var sizes=(d.sizes||[]).map(function(s){ function sd(dm){ return ((s.dimensions||[]).filter(function(x){return x.dimension===dm;})[0])||{}; } var pk=sd('packaging'), ok=s.approval_status==='approved';
                 return '<div style="border:1px solid #eef2f7;border-radius:7px;padding:7px 10px;margin-bottom:6px">'
                   +'<div><b>'+esc(s.size_label)+'</b> · <span style="color:'+(ok?'#16a34a':s.approval_status==='rejected'?'#dc2626':'#94a3b8')+'">'+esc(s.approval_status)+'</span>'+(s.mapped_sku?' · <b style="font-family:ui-monospace,Menlo,monospace" title="planner SKU">'+esc(s.mapped_sku)+'</b>':'')+'</div>'
-                  +pDimLine('Product', true, s.approved_sample_id)
-                  +pDimLine('Packaging'+(pk.packaging_type?' ('+esc(pk.packaging_type)+')':''), !!pk.required, pk.approved_sample_id)
-                  +pDimLine('Polybag', !!pl.required, pl.approved_sample_id)
-                  +pDimLine('Labels/wraps', !!lb.required, lb.approved_sample_id)
+                  +pDimLine('Product', sd('product'))
+                  +pDimLine('Packaging'+(pk.packaging_type?' ('+esc(pk.packaging_type)+')':''), pk)
+                  +pDimLine('Labels/wraps', sd('labels'))
+                  +pDimLine('Polybags', sd('polybag'))
+                  +pDimLine('Other components', sd('other'))
                   +'</div>'; }).join('')||'<span class="mut">no sizes</span>';
               var sw=it.has_swatch?'<img src="'+(EP.productSwatchBase||'/api/product/swatch/')+encodeURIComponent(ref)+'?t='+encodeURIComponent(it.updated_at||'')+'" style="width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">':'';
               box.innerHTML='<div style="max-width:600px;text-align:left">'+(sw?'<div style="margin-bottom:8px">'+sw+'</div>':'')

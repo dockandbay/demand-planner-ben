@@ -3224,11 +3224,12 @@ app.get('/api/product/items', async (_req, res) => {
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id)::int sizes,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approval_status='approved')::int sizes_approved,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approval_status='approved' AND coalesce(s.mapped_sku,'')='')::int sizes_unmapped,
-      (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approval_status='approved' AND s.approved_sample_id IS NULL)::int sizes_unappr_sample,
-      -- required design dimensions with no approved version yet (per size × dimension)
-      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='packaging' AND sd.required AND sd.approved_sample_id IS NULL)::int sizes_unappr_packaging,
-      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='polybag'   AND sd.required AND sd.approved_sample_id IS NULL)::int sizes_unappr_polybag,
-      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='labels'    AND sd.required AND sd.approved_sample_id IS NULL)::int sizes_unappr_labels,
+      -- required components with approval still pending/rejected (per size × component)
+      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='product'   AND sd.required AND coalesce(sd.approval_status,'pending')<>'approved')::int comp_product,
+      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='packaging' AND sd.required AND coalesce(sd.approval_status,'pending')<>'approved')::int comp_packaging,
+      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='labels'    AND sd.required AND coalesce(sd.approval_status,'pending')<>'approved')::int comp_labels,
+      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='polybag'   AND sd.required AND coalesce(sd.approval_status,'pending')<>'approved')::int comp_polybag,
+      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='other'     AND sd.required AND coalesce(sd.approval_status,'pending')<>'approved')::int comp_other,
       -- status misaligned: every size is approved but the item status isn't 'approved' (still in development / rejected)
       (CASE WHEN i.status<>'approved'
               AND (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id)>0
@@ -3274,10 +3275,17 @@ app.get('/api/product/item/:ref', async (req, res) => {
       const byV = {}; sf.forEach(f => { (byV[f.po] = byV[f.po] || []).push({ id: f.id, filename: f.filename, mime: f.mime }); });
       samples.forEach(s => { s.files = byV['PSAMPLE-' + s.id] || []; });
     }
-    // per-size dimension rows (packaging/polybag/labels): required + approved version + packaging type
+    // per-size component rows (product/packaging/labels/polybag/other): description + required + approval + type + files
     if (sizes.length) {
-      const dims = (await pool.query(`SELECT size_id, dimension, required, approved_sample_id, coalesce(packaging_type,'') packaging_type
+      const dims = (await pool.query(`SELECT id, size_id, dimension, required, coalesce(approval_status,'pending') approval_status,
+        coalesce(description,'') description, coalesce(packaging_type,'') packaging_type
         FROM planner.product_dev_size_dimensions WHERE size_id = ANY($1)`, [sizes.map(s => s.id)])).rows;
+      if (dims.length) {   // versioned files per component row (portal_attachments 'PDIM-<row id>')
+        const keys = dims.map(d => 'PDIM-' + d.id);
+        const fs = (await pool.query(`SELECT po, id, filename, coalesce(mime,'') mime, version FROM planner.portal_attachments WHERE po = ANY($1) AND category='product_dim' ORDER BY version NULLS LAST, uploaded_at`, [keys])).rows;
+        const byDim = {}; fs.forEach(f => { const did = f.po.replace('PDIM-', ''); (byDim[did] = byDim[did] || []).push({ id: f.id, filename: f.filename, mime: f.mime, version: f.version }); });
+        dims.forEach(d => { d.files = byDim[d.id] || []; });
+      }
       const byS = {}; dims.forEach(d => { (byS[d.size_id] = byS[d.size_id] || []).push(d); });
       sizes.forEach(s => { s.dimensions = byS[s.id] || []; });
     }
@@ -3391,12 +3399,13 @@ app.post('/api/product/design-version', async (req, res) => {
     res.json({ ok: true, id: r.rows[0].id, version: v });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-// Upsert a size's dimension state (required / approved version / packaging type) for packaging|polybag|labels.
+const PROD_COMPONENTS = ['product', 'packaging', 'labels', 'polybag', 'other'];
+// Upsert a size's component state (description / required / approval status / packaging type / approved version).
 app.post('/api/product/size/:id/dimension', async (req, res) => {
   const b = req.body || {}, sizeId = req.params.id, dim = (b.dimension || '').trim();
-  if (!['packaging', 'polybag', 'labels'].includes(dim)) return res.status(400).json({ error: 'valid dimension required' });
+  if (!PROD_COMPONENTS.includes(dim)) return res.status(400).json({ error: 'valid dimension required' });
   const params = [sizeId, dim], fields = [];
-  for (const k of ['required', 'approved_sample_id', 'packaging_type']) {
+  for (const k of ['required', 'approved_sample_id', 'packaging_type', 'description', 'approval_status']) {
     if (k in b) { params.push(b[k] === '' ? null : b[k]); fields.push(`${k}=$${params.length}${k === 'approved_sample_id' ? '::bigint' : k === 'required' ? '::boolean' : ''}`); }
   }
   try {
@@ -3404,6 +3413,29 @@ app.post('/api/product/size/:id/dimension', async (req, res) => {
     if (fields.length) await pool.query(`UPDATE planner.product_dev_size_dimensions SET ${fields.join(',')} WHERE size_id=$1 AND dimension=$2`, params);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Upload a versioned file to a size's component (ensures the component row exists first). Returns the new file id.
+app.post('/api/product/component-file', async (req, res) => {
+  const b = req.body || {}, sizeId = b.size_id, dim = (b.dimension || '').trim();
+  if (!sizeId || !PROD_COMPONENTS.includes(dim) || !b.data_base64) return res.status(400).json({ error: 'size_id + dimension + data_base64 required' });
+  try {
+    await pool.query(`INSERT INTO planner.product_dev_size_dimensions (size_id, dimension) VALUES ($1,$2) ON CONFLICT (size_id, dimension) DO NOTHING`, [sizeId, dim]);
+    const row = (await pool.query(`SELECT id FROM planner.product_dev_size_dimensions WHERE size_id=$1 AND dimension=$2`, [sizeId, dim])).rows[0];
+    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (buf.length > 10 * 1024 * 1024) return res.status(413).json({ error: 'file exceeds 10MB' });
+    const v = (b.version === '' || b.version == null) ? null : parseInt(b.version, 10) || null;
+    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, uploaded_by, category, uploader_kind, version)
+      VALUES ($1,$2,$3,$4,$5,$6,'product_dim','internal',$7) RETURNING id`,
+      ['PDIM-' + row.id, b.filename || 'file', b.mime || 'application/octet-stream', buf.length, buf, (b.uploaded_by || '').trim() || null, v]);
+    res.json({ ok: true, id: r.rows[0].id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/component-file/:id/delete', async (req, res) => {
+  try { await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1 AND category='product_dim'`, [req.params.id]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/component-file/:id', async (req, res) => {   // assign / change a file's version number
+  const v = (req.body || {}).version, vv = (v === '' || v == null) ? null : parseInt(v, 10) || null;
+  try { await pool.query(`UPDATE planner.portal_attachments SET version=$2 WHERE id=$1 AND category='product_dim'`, [req.params.id, vv]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/size/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.product_dev_sizes WHERE id=$1`, [req.params.id]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
