@@ -8340,7 +8340,7 @@
     if(m){ t=m[1].replace(/[.\s]+$/,''); h=m[2]; }
     return {t:t, h:h||'This SUPPLY section.'}; };
   // ════════ PRODUCT module (top-level; migration 128) ════════
-  var PRODUCT_SUB='plan', _prodCfg=null, _prodDetail=null, _prodDetailTab='master', _prodDetailBox=null, _pendingProdRef=null, _prodDraw=null;
+  var PRODUCT_SUB='plan', _prodCfg=null, _prodDetail=null, _prodSeed=null, _prodDetailTab='master', _prodDetailBox=null, _pendingProdRef=null, _prodDraw=null;
   // Product item cache (A) — expand re-open is instant; entries expire after TTL and are cleared on any save to that ref.
   var _prodItemCache={}, _PROD_ITEM_TTL=60000;
   function prodItemInvalidate(ref){ if(ref)delete _prodItemCache[ref]; }
@@ -8620,20 +8620,25 @@
           if(j&&j.error){ msg.style.color='#dc2626'; msg.textContent='Failed on “'+(colours[i]||'(no colour)')+'”: '+j.error; btn.disabled=false; return; }
           if(j&&j.ref)created.push(j.ref); i++; msg.textContent='Created '+created.length+' of '+colours.length+'…'; next(); });
       })(); }; }); }); }
-  function renderProductDetail(ref, box, seed){ box=box||_prodDetailBox||document.getElementById('product-content'); _prodDetailBox=box;
+  function renderProductDetail(ref, box, seed){ box=box||_prodDetailBox||document.getElementById('product-content'); _prodDetailBox=box; _prodSeed=seed||null;
     try{ writeHash(['product','plan',ref]); }catch(e){}
-    try{ ensureSuppliers(function(){}); loadProdCfg(function(){}); }catch(e){}   // (C) warm suppliers + config in parallel with the item fetch
+    try{ ensureSuppliers(function(){}); loadProdCfg(function(){}); }catch(e){}   // warm suppliers + config
     var cached=prodItemCached(ref);
-    if(cached&&cached.item){ _prodDetail=cached; renderProdDetailShell(box,cached); return; }   // (A) instant re-open from cache (cleared on any product write, so always current for this user; TTL bounds concurrent-edit staleness)
-    // (B) Skeleton paint: ref + colour instantly, then shimmer rows so the panel isn't blank while the ~1s fetch runs.
-    box.innerHTML='<div style="padding:6px 2px 10px"><b style="font-family:ui-monospace,Menlo,monospace;font-size:15px">'+esc(ref)+'</b>'
-      +(seed&&seed.colour_name?' <span class="mut" style="font-size:12px">'+esc(seed.colour_name)+'</span>':'')+'</div>'
-      +'<div class="pd-skel">'+Array(5).join('x').split('x').map(function(){return '<div class="pd-skel-row"></div>';}).join('')+'</div>';
-    loadProdItem(ref,function(d){ if(box!==_prodDetailBox)return; if(!d||d.error||!d.item){ box.innerHTML='<div style="color:#dc2626">Not found</div>'; return; }
-      _prodDetail=d; renderProdDetailShell(box,d); }); }
-  function renderProdDetailShell(c,d){ var it=d.item; var inline=(c!==document.getElementById('product-content'));
+    if(cached&&cached.item){ _prodDetail=cached; renderProdDetailShell(box,cached,seed); return; }   // instant re-open from cache
+    // (1) INSTANT: paint the sub-tabs from the grid seed (no fetch). Badges come from the seed's counts.
+    _prodDetail={ item:{ref:ref, colour_name:(seed&&seed.colour_name)||'', category:(seed&&seed.category)||'', season:(seed&&seed.season)||'', supplier:(seed&&seed.supplier)||'', status:(seed&&seed.status)||'', has_swatch:!!(seed&&seed.has_swatch)}, unread_supplier:(seed&&seed.unread_supplier)||0, _partial:true };
+    renderProdDetailShell(box, _prodDetail, seed);
+    // (2) FAST: tiny core call → real Master-data fields render immediately.
+    fetch('/api/product/item/'+encodeURIComponent(ref)+'/core').then(function(r){return r.json();}).then(function(cd){ if(box!==_prodDetailBox)return; if(!cd||cd.error||!cd.item){ box.innerHTML='<div style="color:#dc2626">Not found</div>'; return; }
+      _prodDetail.item=cd.item; _prodDetail.unread_supplier=cd.unread_supplier; _prodDetail._coreLoaded=true;
+      renderProdDetailShell(box, _prodDetail, seed);
+      // (3) HEAVY: sizes + components load in the background → the size table fills in; then cache the full thing.
+      fetch('/api/product/item/'+encodeURIComponent(ref)+'/sizes').then(function(r){return r.json();}).then(function(sd){ if(box!==_prodDetailBox)return; _prodDetail.sizes=(sd&&sd.sizes)||[]; _prodDetail.samples=(sd&&sd.samples)||[]; _prodDetail._sizesLoaded=true; _prodItemCache[ref]={t:Date.now(),d:_prodDetail};
+        if(_prodDetailTab==='master'){ var _b=box.querySelector('.pd-body'); if(_b)renderProdMaster(_b,_prodDetail); } else renderProdDetailShell(box,_prodDetail,seed); }).catch(function(){});
+    }).catch(function(e){ box.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
+  function renderProdDetailShell(c,d,seed){ var it=d.item; var inline=(c!==document.getElementById('product-content'));
     var _u=Number(d.unread_supplier)||0;
-    var _mAct=prodDetailActs(d);
+    var _mAct=d._sizesLoaded?prodDetailActs(d):(seed?prodOpenActs(seed).n:0);   // seed's action count until the real sizes land
     var tabs=[['master','Master data'+(_mAct?' <span class="ex-badge">'+_mAct+'</span>':'')],['samples','Samples'],['timeline','Timeline'+(_u?' <span class="ex-badge">'+_u+'</span>':'')],['documents','Documents']];
     // inline (expanded under the grid row) shows just the sub-tabs — no header; the grid row above already shows ref/colour/etc.
     var header=inline?'':('<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px"><button class="save-btn light" id="pd-back">← Back</button>'
@@ -8642,11 +8647,12 @@
       +'<span style="margin-left:auto">'+prodStatusChip(it.status)+'</span></div>');
     c.innerHTML=header+'<div class="pd-tabs">'+tabs.map(function(t){return '<button class="pd-tab'+(t[0]===_prodDetailTab?' active':'')+'" data-t="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div><div class="pd-body"></div>';
     if(!inline){ var bk=c.querySelector('#pd-back'); if(bk)bk.onclick=function(){ selectProductSub('plan'); }; }
-    c.querySelectorAll('.pd-tab').forEach(function(b){ b.onclick=function(){ _prodDetailTab=b.dataset.t; renderProdDetailShell(c,_prodDetail); }; });
+    c.querySelectorAll('.pd-tab').forEach(function(b){ b.onclick=function(){ _prodDetailTab=b.dataset.t; renderProdDetailShell(c,_prodDetail,_prodSeed); }; });
     var body=c.querySelector('.pd-body');
     if(_prodDetailTab==='timeline')return renderProdTimeline(body,it.ref);
-    if(_prodDetailTab==='documents')return renderProdDocs(body,d);
+    if(_prodDetailTab==='documents')return renderProdDocs(body,it.ref);
     if(_prodDetailTab==='samples')return renderProdSamplesTab(body,it.ref);
+    if(!d._coreLoaded && d._partial){ body.innerHTML='<div class="pd-skel">'+Array(5).join('x').split('x').map(function(){return '<div class="pd-skel-row"></div>';}).join('')+'</div>'; return; }   // master fields wait on the tiny core call
     renderProdMaster(body,d); }
   function renderProdSamplesTab(body,ref){ body.innerHTML='<div style="color:#94a3b8">Loading…</div>';
     fetch('/api/product/samples/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(list){ list=Array.isArray(list)?list:[];
@@ -8713,6 +8719,7 @@
           : '<span class="mut tiny">approve to map</span>')
       +'</span></td></tr>'; }
     function szRows(s){ return szHdr(s)+COMPS.map(function(cl){return compRow(s,cl[0]);}).join(''); }
+    var _szLoading=(d._partial===true && d._sizesLoaded!==true);   // core rendered, size/components still streaming
     var sizeRows=(d.sizes||[]).map(szRows).join('');
     var seasonOpts=seasons.map(function(o){return '<option value="'+esc(o.code)+'"'+(o.code===it.season?' selected':'')+'>'+esc(o.code)+'</option>';}).join('');
     var catOpts=cats.map(function(o){return '<option value="'+esc(o.category)+'"'+(o.category===it.category?' selected':'')+'>'+esc(o.category)+(o.code?' ('+esc(o.code)+')':'')+'</option>';}).join('');
@@ -8733,7 +8740,7 @@
       +'<div style="font-size:11px;color:#94a3b8;margin:2px 0 12px">Changes save automatically. <span id="pm-msg" style="margin-left:6px"></span></div>'
       +'</div>'
       +'<div style="font-weight:700;font-size:13px;margin:14px 0 6px">Size variants &amp; components <span style="color:#94a3b8;font-weight:400;font-size:11px">(approval = internal D&amp;B sign-off)</span></div>'
-      +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;min-width:1460px;table-layout:fixed"><thead><tr>'+[['Component','width:470px'],['Description','width:14%'],['Req','width:46px'],['Status','width:175px'],['Actions','width:110px'],['Files',''],['Sample shipments','width:13%']].map(function(h){return '<th style="text-align:left;padding:2px 8px 4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7;white-space:nowrap;'+h[1]+'">'+h[0]+'</th>';}).join('')+'</tr></thead><tbody id="pm-sztbody">'+(sizeRows||'<tr><td colspan="7" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>')+'</tbody></table></div>'
+      +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;min-width:1460px;table-layout:fixed"><thead><tr>'+[['Component','width:470px'],['Description','width:14%'],['Req','width:46px'],['Status','width:175px'],['Actions','width:110px'],['Files',''],['Sample shipments','width:13%']].map(function(h){return '<th style="text-align:left;padding:2px 8px 4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7;white-space:nowrap;'+h[1]+'">'+h[0]+'</th>';}).join('')+'</tr></thead><tbody id="pm-sztbody">'+(sizeRows||(_szLoading?'<tr><td colspan="7" style="color:#94a3b8;padding:8px 4px">Loading size variants &amp; components…</td></tr>':'<tr><td colspan="7" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>'))+'</tbody></table></div>'
       +'<div style="margin-top:8px"><input class="fci" id="pm-newsz" placeholder="add size…" style="width:130px"> <button class="save-btn" id="pm-addsz">+ Add size</button></div>'
       +'<div style="margin-top:16px;padding-top:12px;border-top:1px solid #eef2f7;max-width:660px"><button class="save-btn light" id="pm-del" style="color:#dc2626">Delete product</button></div>';
     body.querySelectorAll('.pm-fld').forEach(function(el){ el.onchange=function(){ var msg=body.querySelector('#pm-msg'); if(msg){msg.style.color='#64748b';msg.textContent='Saving…';}
@@ -8797,7 +8804,8 @@
     body.querySelector('#pm-swatch').onchange=function(){ swUp(this.files[0]); };
     var _pz=body.querySelector('#pm-swatch-paste'); if(_pz)_pz.addEventListener('paste',function(e){ var items=(e.clipboardData&&e.clipboardData.items)||[]; for(var k=0;k<items.length;k++){ if(items[k].type&&items[k].type.indexOf('image')===0){ var f=items[k].getAsFile(); if(f){ e.preventDefault(); swUp(f); return; } } } });
   }); }); }
-  function renderProdDocs(body,d){ var ref=d.item.ref; var docs=d.docs||[];
+  function renderProdDocs(body,ref){ body.innerHTML='<div class="count" style="color:#94a3b8;padding:6px 2px">Loading…</div>';
+    fetch('/api/product/item/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ if(!d||!d.item){ body.innerHTML='<div style="color:#dc2626">Not found</div>'; return; } var docs=d.docs||[];
     var dnb=docs.filter(function(x){return (x.uploader_kind||'internal')!=='supplier';}), sup=docs.filter(function(x){return x.uploader_kind==='supplier';});
     function isImg(m){ return /^image\//i.test(String(m||'')); }
     function dt(s){ if(!s)return '<span class="mut tiny">—</span>'; var t=/(\d{2}:\d{2})/.exec(String(s)); return esc(fd(s)+(t?' '+t[1]:'')); }   // YYYY-MM-DD HH:MM -> dd-mmm-yy HH:MM
@@ -8825,7 +8833,7 @@
       +'<div style="font-weight:700;font-size:13px;margin:4px 0 5px">Uploaded by Dock &amp; Bay</div>'+tbl(dnb,'No documents uploaded by Dock &amp; Bay yet.')
       +'<div style="font-weight:700;font-size:13px;margin:16px 0 5px">Size / component files <span style="font-weight:400;font-size:10px;background:#eef2f7;color:#64748b;border-radius:4px;padding:1px 6px;vertical-align:middle">read-only — manage in Master data</span></div>'+cfTbl(compFiles)
       +'<div style="font-weight:700;font-size:13px;margin:16px 0 5px">Uploaded by supplier</div>'+tbl(sup,'Nothing uploaded by the supplier yet.');
-    function refreshDocs(){ loadProdItem(ref,function(nd){ if(nd&&nd.item&&body.isConnected){ _prodDetail=nd; renderProdDocs(body,nd); } },true); }   // silent docs-only refresh (no tab flash)
+    function refreshDocs(){ prodItemInvalidate(ref); renderProdDocs(body,ref); }   // re-fetch docs + re-render
     body.querySelector('#pdoc-up').onclick=function(){ var inp=body.querySelector('#pdoc-file'), files=inp.files, m=body.querySelector('#pdoc-msg');
       if(!files||!files.length){m.style.color='#dc2626';m.textContent='choose a file';return;}
       var list=Array.prototype.slice.call(files), skipped=list.filter(function(f){return f.size>10*1024*1024;}).length, ok=list.filter(function(f){return f.size<=10*1024*1024;});
@@ -8834,7 +8842,8 @@
       (function up(){ if(i>=ok.length){ m.style.color='#16a34a'; m.textContent='uploaded'+(skipped?' ('+skipped+' skipped — over 10MB)':''); refreshDocs(); return; }
         var f=ok[i++]; var rd=new FileReader(); rd.onload=function(){ shipPost('/api/product/doc',{ref:ref,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),uploaded_by:(window.ME&&ME.email)||''},function(j){ if(j&&j.error){m.style.color='#dc2626';m.textContent=j.error;return;} up(); }); }; rd.readAsDataURL(f); })(); };
     body.querySelectorAll('.pdoc-img').forEach(function(im){ im.onclick=function(){ openImgZoom(im.dataset.src); }; });
-    body.querySelectorAll('.pdoc-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this document?'))return; shipPost('/api/product/doc/'+a.dataset.id+'/delete',{},function(){ refreshDocs(); }); }; }); }
+    body.querySelectorAll('.pdoc-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this document?'))return; shipPost('/api/product/doc/'+a.dataset.id+'/delete',{},function(){ refreshDocs(); }); }; });
+    }).catch(function(e){ body.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
   function renderProdTimeline(body,ref){ body.innerHTML='<div style="color:#94a3b8">Loading…</div>';
     fetch('/api/product/notes/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){ notes=Array.isArray(notes)?notes:[];
       var unreadSup=notes.filter(function(n){return n.author_kind==='supplier'&&!n.read;}).length;

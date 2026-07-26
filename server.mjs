@@ -3293,6 +3293,50 @@ app.get('/api/product/item/:ref', async (req, res) => {
     res.json({ item, sizes, docs, samples, unread_supplier });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Fast first paint: just the item row + unread count (no sizes/components). Master-data fields render instantly off this.
+app.get('/api/product/item/:ref/core', async (req, res) => {
+  const ref = req.params.ref;
+  try {
+    const [itemR, unreadR] = await Promise.all([
+      pool.query(`SELECT id, ref, coalesce(season,'') season, coalesce(category,'') category,
+        coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(description,'') description,
+        coalesce(supplier,'') supplier, coalesce(supplier_code,'') supplier_code,
+        status, (swatch IS NOT NULL) has_swatch, coalesce(created_by,'') created_by,
+        to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at,
+        to_char(dev_start_override,'YYYY-MM-DD') dev_start_override, to_char(approved_at,'YYYY-MM-DD HH24:MI') approved_at
+        FROM planner.product_dev_items WHERE ref=$1`, [ref]),
+      pool.query(`SELECT count(*)::int n FROM planner.supplier_notes WHERE po=$1 AND author_kind='supplier' AND read_at IS NULL`, [ref]),
+    ]);
+    const item = itemR.rows[0]; if (!item) return res.status(404).json({ error: 'not found' });
+    res.json({ item, unread_supplier: unreadR.rows[0].n });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// The heavy part — sizes + component dimensions + files + samples (for the shipments column). Loaded after the core.
+app.get('/api/product/item/:ref/sizes', async (req, res) => {
+  const ref = req.params.ref;
+  try {
+    const [sizesR, samplesR] = await Promise.all([
+      pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort, coalesce(mapped_sku,'') mapped_sku, approved_sample_id
+        FROM planner.product_dev_sizes WHERE item_id=(SELECT id FROM planner.product_dev_items WHERE ref=$1) ORDER BY sort, id`, [ref]),
+      pool.query(`SELECT ps.id, ps.version, coalesce(ps.dimension,'product') dimension,
+        coalesce(ps.sample_sizes,'{}') sample_sizes, coalesce(ps.sampled_aspects,'{}') sampled_aspects,
+        coalesce((SELECT json_agg(jsonb_build_object('ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,'')) ORDER BY sr.ref)
+          FROM planner.sample_request_dev_samples l JOIN planner.sample_requests sr ON sr.id=l.sample_request_id WHERE l.dev_sample_id=ps.id),'[]'::json) shipments
+        FROM planner.product_dev_samples ps WHERE ps.item_ref=$1 ORDER BY ps.dimension, ps.version`, [ref]),
+    ]);
+    const sizes = sizesR.rows, samples = samplesR.rows;
+    const dimsR = sizes.length ? await pool.query(`SELECT id, size_id, dimension, required, coalesce(approval_status,'pending') approval_status, coalesce(description,'') description, coalesce(packaging_type,'') packaging_type, approved_sample_id FROM planner.product_dev_size_dimensions WHERE size_id = ANY($1)`, [sizes.map(s => s.id)]) : { rows: [] };
+    const dims = dimsR.rows;
+    if (dims.length) {
+      const dfR = await pool.query(`SELECT po, id, filename, coalesce(mime,'') mime, version, coalesce(uploaded_by,'') uploaded_by, coalesce(uploader_kind,'internal') uploader_kind, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments WHERE po = ANY($1) AND category='product_dim' ORDER BY version NULLS LAST, uploaded_at`, [dims.map(d => 'PDIM-' + d.id)]);
+      const byDim = {}; dfR.rows.forEach(f => { const did = f.po.replace('PDIM-', ''); (byDim[did] = byDim[did] || []).push({ id: f.id, filename: f.filename, mime: f.mime, version: f.version, uploaded_by: f.uploaded_by, uploader_kind: f.uploader_kind, uploaded_at: f.uploaded_at }); });
+      dims.forEach(d => { d.files = byDim[d.id] || []; });
+    }
+    const byS = {}; dims.forEach(d => { (byS[d.size_id] = byS[d.size_id] || []).push(d); });
+    sizes.forEach(s => { s.dimensions = byS[s.id] || []; });
+    res.json({ sizes, samples });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/api/product/swatch/:ref', async (req, res) => {
   try { const r = (await pool.query(`SELECT swatch, swatch_mime FROM planner.product_dev_items WHERE ref=$1`, [req.params.ref])).rows[0];
     if (!r || !r.swatch) return res.status(404).end();

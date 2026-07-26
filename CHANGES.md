@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.185 - PRODUCT detail progressive load (instant tabs → fast fields → streamed sizes)
+- Clicking PLAN now paints the sub-tabs (Master data / Samples / Timeline / Documents) INSTANTLY from the grid row (badges from the seed), then loads the Master-data fields from a tiny /core call (~0.4s), then streams in the size variants & components from /sizes (~1.3s) with a "Loading…" row. Samples / Timeline / Documents stay lazy (fetch on tab click). New endpoints /api/product/item/:ref/core and /sizes; Documents self-fetches.
+
 ## v26.184 - Refresh stays on #/product routes + wider Component column
 - Added 'product' to the boot route matcher so refreshing (or the silent auto-update reload) on #/product/plan[/REF] stays there instead of defaulting to #/supply/purchase-orders. applyRoute already handled product; only the boot regex was missing it.
 - Size variants & components: Component column widened again 380→470px (min-width 1460) for longer labels.
