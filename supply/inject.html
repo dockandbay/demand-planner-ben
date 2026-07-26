@@ -6290,15 +6290,13 @@
       +'<span style="margin-left:auto;display:flex;align-items:center;gap:5px;flex-wrap:wrap;justify-content:flex-end">'
       +'<span class="tiny mut">All transactions:</span>'
       +'<button class="save-btn" id="cf-copy-all" title="Copy every cash-flow transaction to the clipboard">⧉</button>'
-      +'<button class="save-btn" id="cf-csv-all" style="background:#dcfce7;color:#166534;border-color:#16a34a" title="Download every cash-flow transaction as CSV">⬇ CSV</button>'
-      +'<button class="save-btn" id="cf-email-all" style="background:#dbeafe;color:#1e40af;border-color:#93c5fd" title="Email the all-transactions CSV to the saved recipient (set in CONFIG ▸ Exports & uploads)">✉ Email</button>'
+      +'<span style="position:relative;display:inline-block"><button class="save-btn" id="cf-all-exp" style="background:#dcfce7;color:#166534;border-color:#16a34a" title="Export all transactions (CSV or Email)">⬇ Export ▾</button><span id="cf-all-menu" style="display:none;position:absolute;top:100%;right:0;z-index:70;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.18);min-width:120px"><a class="cf-all-opt" data-a="csv" style="display:block;padding:7px 11px;font-size:12px;cursor:pointer;border-bottom:1px solid #f1f5f9;color:#166534">⬇ CSV</a><a class="cf-all-opt" data-a="email" style="display:block;padding:7px 11px;font-size:12px;cursor:pointer;color:#1e40af">✉ Email</a></span></span>'
       +'<span class="tiny mut" style="margin-left:6px">Starting deposits:</span>'
       +'<button class="save-btn" id="cf-copy-sd" title="Copy the starting deposits (type = Deposit) to the clipboard">⧉</button>'
       +'<span style="position:relative;display:inline-block"><button class="save-btn" id="cf-sd-exp" style="background:#dcfce7;color:#166534;border-color:#16a34a" title="Export the starting deposits (CSV or Email)">⬇ Export ▾</button><span id="cf-sd-menu" style="display:none;position:absolute;top:100%;right:0;z-index:70;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.18);min-width:120px"><a class="cf-sd-opt" data-a="csv" style="display:block;padding:7px 11px;font-size:12px;cursor:pointer;border-bottom:1px solid #f1f5f9;color:#166534">⬇ CSV</a><a class="cf-sd-opt" data-a="email" style="display:block;padding:7px 11px;font-size:12px;cursor:pointer;color:#1e40af">✉ Email</a></span></span>'
       +'<span class="tiny mut" style="margin-left:6px">Stock arrivals:</span>'
       +'<button class="save-btn" id="cf-arr-copy" title="Copy Stock arrivals (goods + import duty per PO, dated on completion) to the clipboard">⧉</button>'
-      +'<button class="save-btn" id="cf-arr-csv" style="background:#dcfce7;color:#166534;border-color:#16a34a" title="Download Stock arrivals as CSV (goods + import duty per PO, dated on completion)">⬇ CSV</button>'
-      +'<button class="save-btn" id="cf-email-arr" style="background:#dbeafe;color:#1e40af;border-color:#93c5fd" title="Email the Stock arrivals CSV to the saved recipient (set in CONFIG ▸ Exports & uploads)">✉ Email</button>'
+      +'<span style="position:relative;display:inline-block"><button class="save-btn" id="cf-arr-exp" style="background:#dcfce7;color:#166534;border-color:#16a34a" title="Export Stock arrivals (CSV or Email)">⬇ Export ▾</button><span id="cf-arr-menu" style="display:none;position:absolute;top:100%;right:0;z-index:70;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.18);min-width:120px"><a class="cf-arr-opt" data-a="csv" style="display:block;padding:7px 11px;font-size:12px;cursor:pointer;border-bottom:1px solid #f1f5f9;color:#166534">⬇ CSV</a><a class="cf-arr-opt" data-a="email" style="display:block;padding:7px 11px;font-size:12px;cursor:pointer;color:#1e40af">✉ Email</a></span></span>'
       +'<span class="tiny mut" style="margin-left:6px">This view:</span>'
       +'<button class="save-btn" id="cf-copy" title="Copy the filtered lines to the clipboard">⧉</button>'
       +'<button class="save-btn" id="cf-csv" title="Download the filtered lines as a CSV">⬇ CSV</button>'
@@ -6317,19 +6315,19 @@
     c.querySelector('#cf-copy').onclick=function(){ copyRows(cfExportRows(),'Cash flow ('+cfTag()+')'); };
     c.querySelector('#cf-csv').onclick=function(){ csv(cfExportRows(),'cash_flow_'+(_cfState.month||'all')+'.csv'); };
     c.querySelector('#cf-copy-all').onclick=function(){ copyRows(cfAllRows(),'Cash flow — all transactions'); };
-    c.querySelector('#cf-csv-all').onclick=function(){ csv(cfAllRows(),'cash_flow_all_transactions.csv'); };
     c.querySelector('#cf-arr-copy').onclick=function(){ copyRows(cfArrivalsRows(),'Stock arrivals'); };
-    c.querySelector('#cf-arr-csv').onclick=function(){ csv(cfArrivalsRows(),'stock_arrivals.csv'); };
     // Email a report CSV to the saved recipient (CONFIG ▸ Exports & uploads → export_email_<key>)
     function cfEmail(btn,key,rowsFn,fn){ postEmailCsv(btn,key,rowsToCsvStr(rowsFn()),fn); }
-    c.querySelector('#cf-email-all').onclick=function(){ cfEmail(this,'cf_transactions',cfAllRows,'cash_flow_all_transactions.csv'); };
-    c.querySelector('#cf-email-arr').onclick=function(){ cfEmail(this,'cf_arrivals',cfArrivalsRows,'stock_arrivals.csv'); };
-    // Starting Deposits — the "All transactions" format filtered to type = Deposit; copy + a merged CSV/Email dropdown.
+    // Merged CSV/Email dropdown — one "Export ▾" per report group (All transactions / Stock arrivals / Starting deposits).
+    function cfExportDD(expId,menuId,optClass,rowsFn,fn,emailKey){ var exp=c.querySelector('#'+expId), menu=c.querySelector('#'+menuId); if(!exp||!menu)return;
+      exp.onclick=function(e){ e.stopPropagation(); menu.style.display=(menu.style.display==='none'?'':'none'); };
+      c.querySelectorAll('.'+optClass).forEach(function(a){ a.onclick=function(){ menu.style.display='none'; if(a.dataset.a==='csv')csv(rowsFn(),fn); else cfEmail(exp,emailKey,rowsFn,fn); }; }); }
+    // Starting Deposits — the "All transactions" format filtered to type = Deposit.
     function cfStartDepRows(){ return cfAllRows().filter(function(r){return r.Type==='Deposit';}); }
     c.querySelector('#cf-copy-sd').onclick=function(){ copyRows(cfStartDepRows(),'Starting deposits'); };
-    var _sdExp=c.querySelector('#cf-sd-exp'), _sdMenu=c.querySelector('#cf-sd-menu');
-    _sdExp.onclick=function(e){ e.stopPropagation(); _sdMenu.style.display=(_sdMenu.style.display==='none'?'':'none'); };
-    c.querySelectorAll('.cf-sd-opt').forEach(function(a){ a.onclick=function(){ _sdMenu.style.display='none'; if(a.dataset.a==='csv')csv(cfStartDepRows(),'starting_deposits.csv'); else cfEmail(_sdExp,'cf_starting_deposits',cfStartDepRows,'starting_deposits.csv'); }; });
+    cfExportDD('cf-all-exp','cf-all-menu','cf-all-opt',cfAllRows,'cash_flow_all_transactions.csv','cf_transactions');
+    cfExportDD('cf-arr-exp','cf-arr-menu','cf-arr-opt',cfArrivalsRows,'stock_arrivals.csv','cf_arrivals');
+    cfExportDD('cf-sd-exp','cf-sd-menu','cf-sd-opt',cfStartDepRows,'starting_deposits.csv','cf_starting_deposits');
     c.querySelector('#cf-month').onchange=function(){_cfState.month=this.value;draw();};
     c.querySelectorAll('.pill[data-tt]').forEach(function(p){p.onclick=function(){var t=p.dataset.tt;_cfState.types[t]=!_cfState.types[t];p.classList.toggle('active',_cfState.types[t]);draw();};});
     c.querySelectorAll('.pill[data-st]').forEach(function(p){p.onclick=function(){_cfState.status=p.dataset.st;c.querySelectorAll('.pill[data-st]').forEach(function(x){x.classList.toggle('active',x===p);});draw();};});

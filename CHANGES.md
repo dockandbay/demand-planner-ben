@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.182 - Cash Flow: merged Export dropdown on All transactions + Stock arrivals
+- All transactions and Stock arrivals now use the same single "⬇ Export ▾" dropdown (CSV / Email) as Starting deposits, instead of separate CSV and Email buttons. Copy buttons unchanged. Refactored to a shared cfExportDD helper.
+
 ## v26.181 - Cash Flow reports: Starting Deposits, Deposits Summary, moved under Payments
 - Cash Flow report: new "Starting deposits" export (the All-transactions format filtered to type = Deposit) with copy + a merged CSV/Email dropdown (new export key cf_starting_deposits for CONFIG ▸ Exports).
 - Deposits page: new "Deposits summary" copy + CSV (each deposit — ref, supplier, PROD#, description, amount, FX, date paid, used, remaining — excludes linked POs and due/likely-pay dates).
