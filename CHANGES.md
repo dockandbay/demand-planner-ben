@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.173 - Supplier portal URL routing (shareable deep links)
+- Added hash-based routing to the supplier portal. Menu tabs update the URL (#/pos, #/shipmentplan, #/deposits, #/payments, #/productions, #/samples, #/product) and grid items deep-link: #/pos/PO-123 (auto-opens the PO), #/product/SS27-TOWEL-BL-02 (auto-opens the product dev), #/samples/SR-45 (filters to the sample), #/shipmentplan/PO-123.
+- URL updates as you navigate (tab switch, PO expand, product open, notifications) so a link can be copied and shared; opening a shared link lands on the right tab/item. Back/forward and paste-in supported via hashchange. Legacy ?po= deep link still works.
+
 ## v26.172 - Remove packaging type dropdown + portal variant left-align
 - Admin PRODUCT ▸ Size variants: removed the pouch/box type dropdown next to Packaging (not required).
 - Supplier portal Master data: the size/components table cells were inheriting the global right-align from #supply-root tbody td (esp. visible on the M size) — forced left-align on all cells.

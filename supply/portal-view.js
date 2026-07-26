@@ -590,7 +590,19 @@
       ch.forEach(function(c){ c[0].nodeValue=c[1]; }); }
     var by=STATE.by, sid=STATE.sid;
     var BC=opts.bc||(typeof bcDownloadSheets==='function'?{sheets:bcDownloadSheets,crossdock:bcDownloadCrossdock}:{placeholder:true,note:function(){alert('Labels unavailable.');}});
-    var _ppData=null, PORTAL_TAB='pos', PORTAL_PO_ST=null, _ppOpenPO=null;   // _ppOpenPO: a PO to auto-expand after switching to the Purchase Orders tab
+    var _ppData=null, PORTAL_TAB='pos', PORTAL_PO_ST=null, _ppOpenPO=null, _ppOpenProd=null;   // _ppOpenPO / _ppOpenProd: item to auto-open after switching to its tab
+    // ── Hash router: shareable deep links. #/<tab> for menus; #/<tab>/<ref> for a specific PO / product / sample /
+    // shipment (e.g. #/pos/PO-123, #/product/SS27-TOWEL-BL-02, #/samples/SR-45). Applied on load + hashchange.
+    var _ppRouting=false;
+    var PP_TABS=['pos','shipmentplan','deposits','payments','productions','samples','product'];
+    function ppSetHash(tab, ref){ _ppRouting=true; try{ location.hash='#/'+tab+(ref?('/'+encodeURIComponent(ref)):''); }catch(e){} setTimeout(function(){ _ppRouting=false; },30); }
+    function ppApplyHash(){ var h=(location.hash||'').replace(/^#\/?/,''); if(!h)return false; var parts=h.split('/'); var tab=parts[0], ref=parts[1]?decodeURIComponent(parts[1]):'';
+      if(PP_TABS.indexOf(tab)<0)return false;
+      PORTAL_TAB=tab; _ppOpenPO=null; _ppOpenProd=null;
+      if(ref){ if(tab==='pos'){ _ppOpenPO=ref; PORTAL_PO_Q=ref; } else if(tab==='shipmentplan'){ PORTAL_SP_PO=ref; } else if(tab==='product'){ _ppOpenProd=ref; } else if(tab==='samples'){ PORTAL_SAMP_Q=ref; } }
+      if(_ppData)renderPP();
+      return true; }
+    try{ window.addEventListener('hashchange',function(){ if(_ppRouting)return; ppApplyHash(); }); }catch(e){}
     var PORTAL_SP_ESC=false, PORTAL_SP_PO='', PORTAL_SP_ACTIVE=true, PORTAL_SP_SHIPPED=false, PORTAL_SP_FOB=false, PORTAL_SP_CTRY={};   // Shipment Plan filters
     var PORTAL_PROD_BATCH='';   // PRODUCTIONS tab: selected batch id
     var PORTAL_PO_Q='';   // Purchase Orders search (overrides the status pills)
@@ -1534,8 +1546,9 @@
               +'</tbody></table></div>'
               +'<div id="pp-prod-detail" style="display:none;margin-top:12px;text-align:left;max-width:100%;box-sizing:border-box"></div>';   // detail renders OUTSIDE the scrollable table → fits the phone width
             host.querySelectorAll('.pp-prod-open').forEach(function(b){ b.onclick=function(){ var ref=b.dataset.ref, det=document.getElementById('pp-prod-detail');
-              if(det.dataset.ref===ref && det.style.display!=='none'){ det.style.display='none'; det.dataset.ref=''; return; }
-              det.dataset.ref=ref; det.style.display=''; ppProdDetail(det, ref); if(det.scrollIntoView)det.scrollIntoView({block:'nearest'}); }; }); }
+              if(det.dataset.ref===ref && det.style.display!=='none'){ det.style.display='none'; det.dataset.ref=''; ppSetHash('product'); return; }
+              det.dataset.ref=ref; det.style.display=''; ppProdDetail(det, ref); ppSetHash('product', ref); if(det.scrollIntoView)det.scrollIntoView({block:'nearest'}); }; });
+            if(_ppOpenProd){ var _pr=_ppOpenProd; _ppOpenProd=null; var _pb=null; host.querySelectorAll('.pp-prod-open').forEach(function(b){ if(b.dataset.ref===_pr)_pb=b; }); if(_pb)setTimeout(function(){ _pb.click(); },0); } }   // deep link #/product/<ref> → auto-open
           function wireProducts(){ var body=document.getElementById('pp-body');
             var ss=body.querySelector('.pp-prod-season'); if(ss)ss.onchange=function(){ PORTAL_PROD_SEASON=ss.value; drawProdGrid(); };
             var st=body.querySelector('.pp-prod-status'); if(st)st.onchange=function(){ PORTAL_PROD_STATUS=st.value; drawProdGrid(); };
@@ -1746,11 +1759,11 @@
             ((_ppData&&_ppData.products)||[]).forEach(function(pr){ if(pr.unread_dnb>0)items.push({kind:'product',ref:pr.ref,n:pr.unread_dnb,label:'Product '+(pr.ref||'')}); });
             return items; }
           function notifGo(kind,ref){ closeNotif();
-            if(kind==='po'){ PORTAL_TAB='pos'; _ppOpenPO=ref; PORTAL_PO_Q=ref; }
-            else if(kind==='shipment'){ PORTAL_TAB='shipmentplan'; PORTAL_SP_PO=ref; }
-            else if(kind==='sample'){ PORTAL_TAB='samples'; }
-            else if(kind==='product'){ PORTAL_TAB='product'; }
-            else if(kind==='payments'){ PORTAL_TAB='payments'; }
+            if(kind==='po'){ PORTAL_TAB='pos'; _ppOpenPO=ref; PORTAL_PO_Q=ref; ppSetHash('pos',ref); }
+            else if(kind==='shipment'){ PORTAL_TAB='shipmentplan'; PORTAL_SP_PO=ref; ppSetHash('shipmentplan',ref); }
+            else if(kind==='sample'){ PORTAL_TAB='samples'; if(ref)PORTAL_SAMP_Q=ref; ppSetHash('samples',ref||''); }
+            else if(kind==='product'){ PORTAL_TAB='product'; _ppOpenProd=ref; ppSetHash('product',ref||''); }
+            else if(kind==='payments'){ PORTAL_TAB='payments'; ppSetHash('payments',''); }
             renderPP(); }
           function loadRecent(d){ if(!EP.recentActivity){ d.innerHTML='<div style="padding:10px 12px;color:#888;font-size:12px">Not available in preview.</div>'; return; }
             d.innerHTML='<div style="padding:8px 12px;font-weight:700;border-bottom:1px solid #eef2f7;font-size:12px">Recent changes</div><div style="padding:10px 12px;color:#888;font-size:12px">Loading…</div>';
@@ -1852,7 +1865,7 @@
               body.querySelectorAll('.pill[data-spf]').forEach(function(p){ p.onclick=function(){ var f=p.dataset.spf;
                 if(f==='active')PORTAL_SP_ACTIVE=!PORTAL_SP_ACTIVE; else if(f==='shipped')PORTAL_SP_SHIPPED=!PORTAL_SP_SHIPPED; else if(f==='esc')PORTAL_SP_ESC=!PORTAL_SP_ESC; else if(f==='fob')PORTAL_SP_FOB=!PORTAL_SP_FOB; _ppShowAllSP=false; renderPP(); }; });
               body.querySelectorAll('.pill[data-spctry]').forEach(function(p){ p.onclick=function(){ var c=p.dataset.spctry; PORTAL_SP_CTRY[c]=!PORTAL_SP_CTRY[c]; _ppShowAllSP=false; renderPP(); }; });
-              body.querySelectorAll('.pp-go-po').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); PORTAL_TAB='pos'; PORTAL_PO_Q=b.dataset.po; _ppOpenPO=b.dataset.po; renderPP(); }; });
+              body.querySelectorAll('.pp-go-po').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); PORTAL_TAB='pos'; PORTAL_PO_Q=b.dataset.po; _ppOpenPO=b.dataset.po; ppSetHash('pos',b.dataset.po); renderPP(); }; });
               var sq=body.querySelector('.sp-po-q'); if(sq)sq.oninput=debounce(function(){ PORTAL_SP_PO=sq.value; _ppShowAllSP=false; var f=document.activeElement===sq; renderPP(); if(f){ var n=body.querySelector('.sp-po-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } } },350);
               // FOB cards: production end date → submit for D&B approval (completion_date, applies to end_production_overide)
               var _sid=(_ppData&&_ppData.sid)||sid||null;
@@ -2036,6 +2049,7 @@
               if(!ex.dataset.built){ ex.dataset.built='1'; var po=ex.dataset.po, p=_ppData.pos.filter(function(x){return x.po===po;})[0], cell=ex.children[0];
                 if(p&&cell){ cell.innerHTML=ppExpand(p,_ppData.lb[po]||[],_ppData.notesByPo[po]||[],_ppData.subsByPo[po]||[],i,_ppData.costsByPo[po]||{},_ppData.supSkus||[],_ppData.xdByPo[po]||{},_ppData.addByPo[po]||[]); wireDetail(cell); } }
               ex.style.display=(ex.style.display!=='none')?'none':''; var _poOpen=ex.style.display!=='none'; var _poRow=btn.closest('.pp-row'); if(_poRow)_poRow.classList.toggle('row-open',_poOpen);   // highlight the open PO row (light yellow, like the main supply grid)
+              ppSetHash('pos', _poOpen?btn.dataset.po:'');   // keep the URL shareable — #/pos/<PO> when open
               if(_poOpen&&!ex.dataset.fcLoaded){ ex.dataset.fcLoaded='1'; loadFreightCharges(ex); }
               applyPortalPin(); }; });   // align the just-opened detail to the current horizontal scroll
             // production grouping rows expand / collapse their POs (default expanded) — collapse hides the group's
@@ -2292,9 +2306,9 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                   rerenderRow(row,po,'invoice'); }); }; });
             } }
     function loadPreview(){ tabsEl.style.display=''; body.innerHTML='<div class="count">Loading…</div>';
-      opts.getData().then(function(d){ if(d&&d.notesByPo){ Object.keys(d.notesByPo).forEach(function(k){ shortNotes(d.notesByPo[k]); }); } _ppData=d; renderPP(); }).catch(function(e){ body.innerHTML='<div class="count" style="color:#dc2626">'+esc(e&&e.message||e)+'</div>'; }); }
+      opts.getData().then(function(d){ if(d&&d.notesByPo){ Object.keys(d.notesByPo).forEach(function(k){ shortNotes(d.notesByPo[k]); }); } _ppData=d; if(!ppApplyHash())renderPP(); }).catch(function(e){ body.innerHTML='<div class="count" style="color:#dc2626">'+esc(e&&e.message||e)+'</div>'; }); }
     function reload(){ if(typeof opts.onChange==='function')try{opts.onChange();}catch(e){} loadPreview(); }
-    tabsEl.querySelectorAll('.rtab').forEach(function(t){ t.onclick=function(){ PORTAL_TAB=t.dataset.pt; renderPP(); }; });
+    tabsEl.querySelectorAll('.rtab').forEach(function(t){ t.onclick=function(){ PORTAL_TAB=t.dataset.pt; _ppOpenPO=null; _ppOpenProd=null; ppSetHash(t.dataset.pt); renderPP(); }; });
     loadPreview();
   }
   window.DBPortalView={ mount: mount };
