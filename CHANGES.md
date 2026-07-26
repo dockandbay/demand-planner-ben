@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.187 - SUPPLY ▸ Reports ▸ SUPPLIER DELAYS
+- New report measuring production timing + supplier completion-date movements. Per-supplier summary (open POs, avg slip, total pushed-out days, POs slipped, # moves, worst slip) + a per-PO detail showing the full completion-date trail (first → … → latest) and net slip. Data: production start/end + planner.supplier_submissions (kind=completion_date) history (superseded rows preserved = the movement log). Endpoint /api/supply/supplier-timing (open POs + any with completion-date submissions). Note: only supplier-portal date changes are logged; internal date edits aren't (no audit table).
+
 ## v26.186 - PRODUCT: RANGE PLAN tab
 - New PRODUCT ▸ RANGE PLAN tab: pick a season, toggle "Approved only" vs all in-development+approved (dropped excluded), products grouped horizontally by category, each shown as swatch + colour-way name + a tiny status pill (green "approved" / amber "in development"). Click a card to open the product.
 

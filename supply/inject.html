@@ -664,9 +664,9 @@
     ['payments','PAYMENTS'],['samples','SAMPLES']];   // CONFIG is now a top-level view (see enterConfig); SHIPMENTS lives under the PURCHASE ORDERS sub-nav (poSub 'shipments'); PAYMENTS umbrella holds Deposits / Other Payments / Payments Due / Payments Report
   // REPORTS is a parent tab; these are its sub-tabs (the read-across views).
   var REPORT_SECTIONS=[['metrics','METRICS'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
-    ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['directclient','DIRECT TO CLIENT'],['flexport','FLEXPORT']];   // ERP COMPARE moved to ACTIONS ▸ ERP Compare sub-tab; CASH FLOW moved to PAYMENTS ▸ Cash Flow
-  var REPORT_KEYS=['metrics','reallocate','urgent-buy','container-fill','consolidate','upcoming','pipeline','directclient','flexport'];
-  var BI_TABS={'metrics':'/api/supply/bi','urgent-buy':'/api/supply/bi/projection','reallocate':'/api/supply/bi/reallocations','container-fill':'/api/supply/bi/container-fill','consolidate':'/api/supply/bi/consolidations','erp-compare':'/api/supply/bi/erp-compare'};   // fluid: always re-fetch
+    ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['supplier-timing','SUPPLIER DELAYS'],['directclient','DIRECT TO CLIENT'],['flexport','FLEXPORT']];   // ERP COMPARE moved to ACTIONS ▸ ERP Compare sub-tab; CASH FLOW moved to PAYMENTS ▸ Cash Flow
+  var REPORT_KEYS=['metrics','reallocate','urgent-buy','container-fill','consolidate','upcoming','pipeline','supplier-timing','directclient','flexport'];
+  var BI_TABS={'metrics':'/api/supply/bi','urgent-buy':'/api/supply/bi/projection','reallocate':'/api/supply/bi/reallocations','container-fill':'/api/supply/bi/container-fill','consolidate':'/api/supply/bi/consolidations','erp-compare':'/api/supply/bi/erp-compare','supplier-timing':'/api/supply/supplier-timing'};   // fluid: always re-fetch
   var reportTab='metrics';   // BI & REPORTS opens on METRICS by default
   var ANNOT={
     actions:'<b>SUPPLY ▸ Actions.</b> Exceptions surfaced from the supply picture — date conflicts, unassigned shipments, missing supplier, unpaid deposits. Grouped by type.',
@@ -7195,6 +7195,7 @@
       cache[rk]=d;   // reports cache; BI tabs stay fluid (re-fetched each visit)
       if(rk==='upcoming')return renderUpcoming(d);
       if(rk==='pipeline')return renderPipeline(d);
+      if(rk==='supplier-timing')return renderSupplierTiming(d);
       if(rk==='cashflow')return renderCashflow(d);
       if(rk==='directclient')return renderDirectClient(d);
       if(rk==='flexport')return renderFlexport(d); };
@@ -7208,6 +7209,28 @@
     +'<div style="font-size:23px;font-weight:800;line-height:1.1;color:'+(accent||'#0f172a')+'">'+val+'</div>'
     +'<div style="font-size:10.5px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-top:4px">'+esc(label)+'</div>'
     +(sub?'<div style="font-size:11px;color:#94a3b8;margin-top:4px">'+esc(sub)+'</div>':'')+'</div>'; }
+  // SUPPLIER DELAYS — production start/completion + supplier completion-date movements (which suppliers slip / delay)
+  function renderSupplierTiming(d){ var b=biBody(); var pos=(d&&d.pos)||[];
+    function dd(s){ return s?fd(s):'—'; }
+    function slipPill(n){ if(n==null)return '<span class="mut tiny">—</span>'; var c=n>0?['#fee2e2','#991b1b']:n<0?['#dcfce7','#166534']:['#f1f5f9','#64748b']; return '<span style="display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:8px;background:'+c[0]+';color:'+c[1]+'">'+(n>0?'+':'')+n+'d</span>'; }
+    var bySup={};
+    pos.forEach(function(p){ var k=p.supplier||'—'; var a=bySup[k]||(bySup[k]={sup:k,pos:0,slipN:0,slipSum:0,pushed:0,slipped:0,moves:0,worst:null});
+      a.pos++; if(p.slip_days!=null){ a.slipN++; a.slipSum+=p.slip_days; if(p.slip_days>0){a.pushed+=p.slip_days;a.slipped++;} if(a.worst==null||p.slip_days>a.worst)a.worst=p.slip_days; } if(p.changes>1)a.moves+=(p.changes-1); });
+    var sups=Object.keys(bySup).map(function(k){var a=bySup[k]; a.avg=a.slipN?Math.round(a.slipSum/a.slipN):null; return a;}).sort(function(x,y){return ((y.pushed||0)-(x.pushed||0))||((y.moves||0)-(x.moves||0));});
+    var moved=pos.filter(function(p){return p.changes>0;}).sort(function(x,y){return (y.slip_days||0)-(x.slip_days||0);});
+    var summary='<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;max-width:860px"><thead><tr>'+['Supplier','Open POs','Avg slip','Total pushed-out','POs slipped','# moves','Worst slip'].map(function(h,i){return '<th style="text-align:'+(i===0?'left':'right')+';padding:3px 12px 5px '+(i===0?'0':'12px')+';font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+      +(sups.length?sups.map(function(a){ return '<tr style="border-bottom:1px solid #f4f4f5"><td style="padding:4px 12px 4px 0;font-weight:600">'+esc(a.sup)+'</td><td style="text-align:right;padding:4px 12px">'+a.pos+'</td><td style="text-align:right;padding:4px 12px">'+(a.avg==null?'—':(a.avg>0?'+':'')+a.avg+'d')+'</td><td style="text-align:right;padding:4px 12px;font-weight:700;color:'+(a.pushed>0?'#991b1b':'#64748b')+'">'+(a.pushed>0?'+'+a.pushed+'d':'—')+'</td><td style="text-align:right;padding:4px 12px">'+(a.slipped||'—')+'</td><td style="text-align:right;padding:4px 12px">'+(a.moves||'—')+'</td><td style="text-align:right;padding:4px 12px">'+(a.worst==null?'—':(a.worst>0?'+':'')+a.worst+'d')+'</td></tr>'; }).join(''):'<tr><td colspan="7" class="mut" style="padding:8px 0">no data</td></tr>')
+      +'</tbody></table></div>';
+    var detail=moved.length?('<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%"><thead><tr>'+['PO','Supplier','PROD#','Status','Start','Completion movements (first → latest)','Net slip','Moves'].map(function(h,i){return '<th style="text-align:left;padding:3px 12px 5px '+(i===0?'0':'12px')+';font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+      +moved.map(function(p){ var trail=(p.trail||[]).map(function(t){return fd(t.date);}); var trailStr=trail.length?trail.join(' <span style="color:#cbd5e1">→</span> '):'—';
+        return '<tr style="border-bottom:1px solid #f4f4f5;vertical-align:top"><td style="padding:5px 12px 5px 0;font-family:ui-monospace,Menlo,monospace"><a class="st-po" data-po="'+esc(p.po)+'" style="color:#1d4ed8;cursor:pointer">'+esc(p.po)+'</a></td><td style="padding:5px 12px;white-space:nowrap">'+esc(p.supplier||'—')+'</td><td style="padding:5px 12px">'+(p.prod_no?'P'+esc(p.prod_no):'')+'</td><td style="padding:5px 12px"><span class="mut tiny">'+esc(p.status||'')+'</span></td><td style="padding:5px 12px;white-space:nowrap">'+dd(p.start_date)+'</td><td style="padding:5px 12px;line-height:1.7;min-width:220px">'+trailStr+'</td><td style="padding:5px 12px;text-align:center;white-space:nowrap">'+slipPill(p.slip_days)+'</td><td style="padding:5px 12px;text-align:center">'+Math.max(0,(p.changes||0)-1)+'</td></tr>'; }).join('')
+      +'</tbody></table></div>') : '<div class="mut" style="padding:10px 2px">No supplier completion-date movements recorded yet — they appear here as suppliers submit / change completion dates in the portal.</div>';
+    b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:#0f172a">Supplier delays &amp; production timing</div>'
+      +'<div class="mut tiny" style="margin-bottom:12px;max-width:760px">Supplier completion-date movements (submitted via the portal) plus production start/completion for open POs. <b>Slip</b> = latest completion date − first submitted; positive = pushed out (a delay). Sorted worst-first.</div>'
+      +'<div style="font-weight:700;font-size:12px;margin:6px 0 6px;color:#334155">By supplier</div>'+summary
+      +'<div style="font-weight:700;font-size:12px;margin:20px 0 6px;color:#334155">Completion-date movements ('+moved.length+' PO'+(moved.length===1?'':'s')+')</div>'+detail;
+    b.querySelectorAll('.st-po').forEach(function(a){ a.onclick=function(){ try{ gotoPO(a.dataset.po,'timeline'); }catch(e){ try{ gotoPO(a.dataset.po); }catch(_){} } }; });
+  }
   // METRICS — live operational counts
   function renderBIMetrics(d){ var b=biBody(); d=d||{}; var op=d.open_pos||{};
     var cont=Math.round(((Number(d.containers_shipping)||0)+(Number(d.containers_in_production)||0))*10)/10;

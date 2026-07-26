@@ -1545,6 +1545,33 @@ app.get('/api/supply/:section', async (req, res) => {
           to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, status, coalesce(status_by,'') status_by,
           to_char(status_at,'YYYY-MM-DD HH24:MI') status_at
           FROM planner.suggestions ORDER BY (status='new') DESC, created_at DESC`));
+      case 'supplier-timing': {   // SUPPLY ▸ Reports ▸ Supplier Timing — production start/completion + supplier completion-date movements (delay tracking)
+        const rows = await q(`
+          WITH sub AS (
+            SELECT po,
+              (array_agg(value ORDER BY submitted_at, id))[1] first_date,
+              (array_agg(value ORDER BY submitted_at DESC, id DESC))[1] latest_date,
+              count(*)::int changes,
+              to_char(min(submitted_at),'YYYY-MM-DD') first_at,
+              to_char(max(submitted_at),'YYYY-MM-DD') last_at,
+              json_agg(json_build_object('date',value,'at',to_char(submitted_at,'YYYY-MM-DD HH24:MI'),'status',coalesce(status,''),'by',coalesce(submitted_by,'')) ORDER BY submitted_at, id) trail
+            FROM planner.supplier_submissions
+            WHERE kind='completion_date' AND coalesce(value,'') ~ '^\\d{4}-\\d{2}-\\d{2}$'
+            GROUP BY po
+          )
+          SELECT po.po, coalesce(po.supplier_name,'') supplier, coalesce(po.prod_no,'') prod_no, coalesce(po.status,'') status,
+            to_char(po.start_production,'YYYY-MM-DD') start_date,
+            to_char(po.end_production_overide,'YYYY-MM-DD') applied_completion,
+            s.first_date, s.latest_date, coalesce(s.changes,0) changes, s.first_at, s.last_at, coalesce(s.trail,'[]'::json) trail,
+            CASE WHEN s.first_date IS NOT NULL AND s.latest_date IS NOT NULL THEN (s.latest_date::date - s.first_date::date) END slip_days,
+            CASE WHEN po.start_production IS NOT NULL THEN (coalesce(s.latest_date::date, po.end_production_overide) - po.start_production) END lead_days
+          FROM planner.purchase_orders po
+          LEFT JOIN sub s ON s.po=po.po
+          WHERE s.po IS NOT NULL
+             OR (po.start_production IS NOT NULL AND coalesce(po.status,'') !~* 'complete|arrived|received|cancel|closed|deliver')
+          ORDER BY slip_days DESC NULLS LAST, po.supplier_name, po.po`);
+        return res.json({ pos: rows });
+      }
       case 'timeline-notifications':   // top-bar ✉ bell: unread SUPPLIER PO-timeline notes (newest first), minus snoozed (supply_action_state key 'tlnote|<id>')
         return res.json(await q(`
           SELECT sn.id, sn.po, coalesce(po.supplier_name,'') supplier_name, sn.body,
