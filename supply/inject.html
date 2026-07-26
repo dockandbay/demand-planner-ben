@@ -8683,7 +8683,7 @@
       if(req&&appr!=='approved') actCell=prodActMark(it.ref,'c_'+dim);
       else if(req&&appr==='approved'&&!sd.approved_sample_id) actCell=prodActMark(it.ref,'cs_'+dim);
       return '<tr class="pm-comprow" style="'+(req?'':'opacity:.6')+'">'
-        +'<td style="padding:2px 8px 2px 16px;font-size:11px;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+COMP_LBL[dim]+'</td>'
+        +'<td style="padding:2px 8px 2px 16px;font-size:12px;font-weight:600;color:#334155;white-space:nowrap">'+COMP_LBL[dim]+'</td>'
         +'<td style="padding:2px 8px"><input class="fci pm-comp-desc" data-id="'+s.id+'" data-dim="'+dim+'" value="'+esc(sd.description||'')+'" placeholder="description…" style="width:100%;font-size:11px;box-sizing:border-box"></td>'
         +'<td style="padding:2px 8px;text-align:left;white-space:nowrap">'+reqCell+'</td>'
         +'<td style="padding:2px 8px;text-align:left">'+(req?apprCell:'<span class="mut tiny">—</span>')+'</td>'
@@ -8716,7 +8716,7 @@
       +'<div style="font-size:11px;color:#94a3b8;margin:2px 0 12px">Changes save automatically. <span id="pm-msg" style="margin-left:6px"></span></div>'
       +'</div>'
       +'<div style="font-weight:700;font-size:13px;margin:14px 0 6px">Size variants &amp; components <span style="color:#94a3b8;font-weight:400;font-size:11px">(approval = internal D&amp;B sign-off)</span></div>'
-      +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;min-width:1140px;table-layout:fixed"><thead><tr>'+[['Component','width:250px'],['Description','width:16%'],['Req','width:46px'],['Status','width:130px'],['Actions','width:112px'],['Files',''],['Sample shipments','width:15%']].map(function(h){return '<th style="text-align:left;padding:2px 8px 4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7;white-space:nowrap;'+h[1]+'">'+h[0]+'</th>';}).join('')+'</tr></thead><tbody id="pm-sztbody">'+(sizeRows||'<tr><td colspan="7" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>')+'</tbody></table></div>'
+      +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;min-width:1320px;table-layout:fixed"><thead><tr>'+[['Component','width:380px'],['Description','width:15%'],['Req','width:46px'],['Status','width:175px'],['Actions','width:110px'],['Files',''],['Sample shipments','width:14%']].map(function(h){return '<th style="text-align:left;padding:2px 8px 4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7;white-space:nowrap;'+h[1]+'">'+h[0]+'</th>';}).join('')+'</tr></thead><tbody id="pm-sztbody">'+(sizeRows||'<tr><td colspan="7" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>')+'</tbody></table></div>'
       +'<div style="margin-top:8px"><input class="fci" id="pm-newsz" placeholder="add size…" style="width:130px"> <button class="save-btn" id="pm-addsz">+ Add size</button></div>'
       +'<div style="margin-top:16px;padding-top:12px;border-top:1px solid #eef2f7;max-width:660px"><button class="save-btn light" id="pm-del" style="color:#dc2626">Delete product</button></div>';
     body.querySelectorAll('.pm-fld').forEach(function(el){ el.onchange=function(){ var msg=body.querySelector('#pm-msg'); if(msg){msg.style.color='#64748b';msg.textContent='Saving…';}

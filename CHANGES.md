@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.180 - Component + Status columns widened (again), no label clipping
+- Size variants & components: Component column 250→380px (+50%) with a larger bold label and NO ellipsis clipping (so "Other components" always shows in full); Status column 130→175px (+~30%) to hold the approved-sample dropdown. Table min-width bumped to 1320px.
+
 ## v26.179 - Component approval requires a sample version + reworded note + wider column
 - Size variants & components: when a component's status is set to Approved, an "approved sample version?" picker appears (listing the supplier samples that cover that size + component). Until one is chosen it's highlighted amber and an action flags "approved but no sample version recorded". Item endpoint now returns dimension approved_sample_id.
 - Reworded the pending-component action: "The <Component> for this size is still pending. All components must be approved before overall approval." (was "required for this size but not approved yet").
