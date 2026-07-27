@@ -8800,6 +8800,7 @@
       wireProdTopSearch();
       function draw(){
         var q=_prodFilt.q.trim().toLowerCase();
+        var expandAll=!!(_prodFilt.category || q);   // a category filter / search forces groups open so results are visible (doesn't wipe manual collapse state)
         var f=rows.filter(function(r){
           if(_prodFilt.season && r.season!==_prodFilt.season)return false;
           if(_prodFilt.category && r.category!==_prodFilt.category)return false;
@@ -8835,10 +8836,11 @@
           }).join('')+'</tbody></table></div>';
         // group collapse/expand — season collapses its categories + rows; category collapses its rows. Closes any open detail in a collapsed group.
         function pgApplyCollapse(){
-          g.querySelectorAll('tr.pg-seasonhdr').forEach(function(h){ var cr=h.querySelector('.pg-caret'); if(cr)cr.textContent=_pgSeasonCollapsed[h.dataset.season]?'▸':'▾'; });
-          g.querySelectorAll('tr.pg-cathdr').forEach(function(h){ var sc=_pgSeasonCollapsed[h.dataset.season]; h.style.display=sc?'none':''; var cr=h.querySelector('.pg-caret'); if(cr)cr.textContent=_pgCatCollapsed[h.dataset.season+'|'+h.dataset.cat]?'▸':'▾'; });
-          g.querySelectorAll('tr.pg-datarow').forEach(function(r){ var hide=_pgSeasonCollapsed[r.dataset.season]||_pgCatCollapsed[r.dataset.season+'|'+r.dataset.cat]; r.style.display=hide?'none':''; });
-          g.querySelectorAll('tr.pg-detrow').forEach(function(r){ if(_pgSeasonCollapsed[r.dataset.season]||_pgCatCollapsed[r.dataset.season+'|'+r.dataset.cat]){ r.style.display='none'; var dd=r.querySelector('.pg-det'); if(dd)dd.innerHTML=''; } });
+          var scol=function(s){ return !expandAll && _pgSeasonCollapsed[s]; }, ccol=function(s,c){ return !expandAll && _pgCatCollapsed[s+'|'+c]; };
+          g.querySelectorAll('tr.pg-seasonhdr').forEach(function(h){ var cr=h.querySelector('.pg-caret'); if(cr)cr.textContent=scol(h.dataset.season)?'▸':'▾'; });
+          g.querySelectorAll('tr.pg-cathdr').forEach(function(h){ h.style.display=scol(h.dataset.season)?'none':''; var cr=h.querySelector('.pg-caret'); if(cr)cr.textContent=ccol(h.dataset.season,h.dataset.cat)?'▸':'▾'; });
+          g.querySelectorAll('tr.pg-datarow').forEach(function(r){ r.style.display=(scol(r.dataset.season)||ccol(r.dataset.season,r.dataset.cat))?'none':''; });
+          g.querySelectorAll('tr.pg-detrow').forEach(function(r){ if(scol(r.dataset.season)||ccol(r.dataset.season,r.dataset.cat)){ r.style.display='none'; var dd=r.querySelector('.pg-det'); if(dd)dd.innerHTML=''; } });
         }
         g.querySelectorAll('tr.pg-seasonhdr').forEach(function(h){ h.onclick=function(){ var s=h.dataset.season; _pgSeasonCollapsed[s]=!_pgSeasonCollapsed[s]; pgApplyCollapse(); }; });
         g.querySelectorAll('tr.pg-cathdr').forEach(function(h){ h.onclick=function(){ var k=h.dataset.season+'|'+h.dataset.cat; _pgCatCollapsed[k]=!_pgCatCollapsed[k]; pgApplyCollapse(); }; });
