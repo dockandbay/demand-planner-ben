@@ -1421,6 +1421,7 @@
     if(otherMaster){
       shipBlock=row('Shipment','<button class="ship-open" data-ref="'+esc(r.shipment)+'">🚢 '+esc(r.shipment)+'</button> <button class="ship-pick" data-po="'+esc(po)+'">▾ change</button> <span class="mut tiny">mode &amp; dates inherit from this shipment</span>')
         +row('Mode','<span style="color:#334155;font-weight:600">'+esc((sh.mode||'—').toUpperCase())+'</span>')
+        +((sh.carrier&&sh.carrier_ref)?row('Carrier / tracking',esc(sh.carrier)+' · '+carrierTrackLinkInj(sh.carrier,sh.carrier_ref)):'')
         +(curMode==='fob'?'':shViewDate('Departure','departure_date')+shViewDate('Landing','landing_date')+shViewDate('Arrival','arrival_date')+shViewDate('Completion','delivery_date'));
     } else {
       var modeOpts=(isMfg?['','fob']:['','sea','air','fob']).map(function(m){ var L={'':'— not a shipment','sea':'Sea','air':'Air','fob':'FOB'}[m]; return '<option value="'+m+'"'+(curMode===m?' selected':'')+'>'+L+'</option>'; }).join('');
@@ -1431,9 +1432,11 @@
       if(selfShip && curMode==='fob'){
         detail=row('FOB','<span class="mut tiny">Factory pickup — no transit or freight details.'+(r.prod_end?' Production ends <b>'+esc(fd(r.prod_end))+'</b>.':'')+'</span>');
       } else if(selfShip && (curMode==='sea'||curMode==='air')){
-        detail=row('Carrier',carrierSel(shipEp,sh.carrier,false))
-          +row('Tracking / carrier ref',carrierRefInput(shipEp,sh.carrier_ref,false))
-          +row('Status',shipStatusSel(shipEp,sh.status))
+        var _trkU=carrierTrackUrl(sh.carrier,sh.carrier_ref);
+        detail='<div class="po-trk-wrap">'
+          +row('Carrier',carrierSel(shipEp,sh.carrier,false))
+          +row('Tracking / carrier ref',carrierRefInput(shipEp,sh.carrier_ref,false)+' <span class="po-trk-link" style="margin-left:6px;font-size:12px">'+(_trkU?'<a href="'+_trkU+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;font-weight:600" title="track ↗">track '+esc(sh.carrier||'')+' ↗</a>':'')+'</span>')
+          +'</div>'
           +shEditDate('Departure','departure_date')+shEditDate('Landing','landing_date')+shEditDate('Arrival','arrival_date')+shEditDate('Completion','delivery_date')
           +row('Freight cost <span class="mut tiny">(manual — blank = auto from rates)</span>','<input class="fci" data-ep="'+shipEp+'" data-field="cost_manual" value="'+esc(sh.cost_manual!=null?sh.cost_manual:'')+'" style="width:120px">');
       }
@@ -2516,8 +2519,13 @@
     // MANUFACTURING branch = FOB (goods collected at the factory) → no shipment can be assigned.
     var isMfg=/manufactur/i.test(r.branch||'');
     var _fxfid=r.flex_id||r.flexport_reference, _fxu=_fxfid?flexUrl(_fxfid):'';   // Flexport-linked shipment → clickable FLEX badge
+    // Non-Flexport carrier tracking badge (DHL / FedEx / UPS / SF Express) — dynamic link, from the assigned shipment
+    // (self OR master), so it shows even when the PO is on a separate master shipment.
+    var _carU=(!_fxu && r.ship_carrier && r.ship_carrier_ref && !/flex/i.test(r.ship_carrier))?carrierTrackUrl(r.ship_carrier,r.ship_carrier_ref):'';
+    var _carBadge=_carU?'<a href="'+_carU+'" target="_blank" rel="noopener" class="tool-badge bg-blue" style="font-size:8px;padding:0 4px;text-decoration:none" title="track '+esc(r.ship_carrier_ref)+' with '+esc(r.ship_carrier)+' ↗">'+esc(r.ship_carrier)+' ↗</a>':'';
     var _shipBadges=(r.is_master?'<span class="tool-badge bg-blue" style="font-size:8px;padding:0 4px" title="master / consolidation PO for this shipment">master</span>':'')
-      +(_fxu?(r.is_master?' ':'')+'<a href="'+_fxu+'" target="_blank" rel="noopener" class="src fx" style="text-decoration:none" title="open '+esc(_fxfid)+' in Flexport ↗">FLEX ↗</a>':'');
+      +(_fxu?(r.is_master?' ':'')+'<a href="'+_fxu+'" target="_blank" rel="noopener" class="src fx" style="text-decoration:none" title="open '+esc(_fxfid)+' in Flexport ↗">FLEX ↗</a>':'')
+      +(_carBadge?' '+_carBadge:'');
     var shipcell=(isMfg
       ? '<span class="tool-badge bg-neutral" title="MANUFACTURING branch = FOB — collected at factory, no shipment assigned">FOB</span>'
       : (r.shipment
@@ -3298,6 +3306,10 @@
   function bindPay(po,i){
     // MASTER DATA + SHIPMENTS PLAN-panel controls (#2 / #10) — pickers + rename / delete / pallet labels for this PO
     bindCellPick(); bindShipPick(); bindShipOpen(); bindEdits(); bindPoShipMode();
+    // Live dynamic tracking link under the carrier/tracking on the SHIPMENTS sub-tab (DHL/FedEx/UPS/SF Express).
+    document.querySelectorAll('#podet-'+i+' .po-trk-wrap').forEach(function(w){ var car=w.querySelector('[data-field="carrier"]'), ref=w.querySelector('[data-field="carrier_ref"]'), lnk=w.querySelector('.po-trk-link');
+      function upd(){ if(!lnk)return; var u=(typeof carrierTrackUrl==='function')?carrierTrackUrl(car&&car.value,ref&&ref.value):''; lnk.innerHTML=u?'<a href="'+u+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;font-weight:600" title="track ↗">track '+esc((car&&car.value)||'')+' ↗</a>':''; }
+      if(car&&!car._trk){car._trk=1;car.addEventListener('change',upd);} if(ref&&!ref._trk){ref._trk=1;ref.addEventListener('input',upd);ref.addEventListener('change',upd);} });
     // Deposit analysis box on the PAYMENTS tab (async): remaining, other unallocated POs, suggested extra + at-risk
     document.querySelectorAll('#podet-'+i+' .dep-ctx').forEach(function(el){ var p=el.dataset.po;
       fetch('/api/supply/deposit-context/'+encodeURIComponent(p)).then(function(r){return r.json();}).then(function(d){ if(!d||!d.ref){el.innerHTML='';return;}

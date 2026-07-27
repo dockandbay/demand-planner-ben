@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.203 - Self-shipment: drop redundant status, live carrier tracking links
+- Removed the separate shipment Status field from the PO ▸ SHIPMENTS self-shipment block — the main PO status (Production / Ready to ship / Shipping) already covers it.
+- Entering a carrier + tracking code on the SHIPMENTS sub-tab now shows a live dynamic tracking link (DHL / FedEx / UPS / SF Express) right under the carrier/tracking fields, updating as you type.
+- Main PO grid: the Shipment cell now shows a carrier tracking badge (dynamic link, like the Flexport badge) for DHL/FedEx/UPS/SF Express — sourced from the assigned shipment (self OR master), so it shows even when the PO rides on a separate master shipment.
+
 ## v26.202 - PO self-shipment: instant mode toggle (kill the delay)
 - Setting the shipment mode was doing a full poRefetchPanel — which re-fetches the entire 1375-row PO list + po-detail — so the fields took seconds to appear. Now the SHIPMENTS panel re-renders optimistically the instant you pick a mode (fields appear/disappear with no wait), and the change persists in the background; a failure reverts the optimistic render. ship-mode endpoint kept lightweight (no heavy row recompute).
 
