@@ -89,6 +89,17 @@
 .hz-verspin{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:4px;border-radius:6px;background:rgba(251,191,36,.96);z-index:6;pointer-events:none;font-size:8.5px;font-weight:800;color:#0f172a;letter-spacing:.02em;overflow:hidden}
 .hz-verspin::before{content:'';width:9px;height:9px;border:2px solid rgba(15,23,42,.3);border-top-color:#0f172a;border-radius:50%;animation:hzspin .7s linear infinite;flex:0 0 auto}
 @keyframes hzspin{to{transform:rotate(360deg)}}
+/* Mobile: the dark top-bar (#hz-ver) already shows the HORIZON version badge, so hide the in-page one to avoid a duplicate. */
+@media (max-width:640px){
+  #supply-root .ver,#scenario-root .ver,#product-root .ver{display:none !important}
+  /* PRODUCT ▸ DASHBOARD matrix — tighten so more of the grid fits without a wide scroll */
+  .db-matrix{min-width:0 !important;font-size:11px}
+  .db-matrix th,.db-matrix td{padding-left:4px !important;padding-right:4px !important}
+  .db-matrix .db-sw{width:22px !important;height:22px !important}
+  .db-matrix .db-prodcell{min-width:104px !important}
+  .db-matrix .db-compcol{min-width:38px !important}
+  .db-matrix .db-ov{font-size:9px !important;padding:1px 5px !important}
+}
 /* Timeline notifications — top-bar messages bell + unread counter + pop-down drawer */
 #supply-root #supply-subnav{position:relative}
 /* Timeline messages bell — lives in the top bar (#view-tabs-row) next to SA, visible on every view. v26.006 */
@@ -8467,7 +8478,7 @@
     fetch('/api/product/dashboard').then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
       var seasons=[]; rows.forEach(function(r){ if(r.season&&seasons.indexOf(r.season)<0)seasons.push(r.season); }); seasons.sort();
       if(!_dashSeason||(_dashSeason!=='__all'&&seasons.indexOf(_dashSeason)<0))_dashSeason=seasons[seasons.length-1]||'__all';
-      function ovPill(s){ var m={approved:['Approved','#166534','#dcfce7'],dropped:['Rejected','#991b1b','#fee2e2']}, x=m[s]||['In development','#92400e','#fef3c7']; return '<span style="display:inline-block;font-size:10px;font-weight:700;padding:1px 8px;border-radius:8px;background:'+x[2]+';color:'+x[1]+';white-space:nowrap">'+x[0]+'</span>'; }
+      function ovPill(s){ var m={approved:['Approved','#166534','#dcfce7'],dropped:['Rejected','#991b1b','#fee2e2']}, x=m[s]||['In development','#92400e','#fef3c7']; return '<span class="db-ov" style="display:inline-block;font-size:10px;font-weight:700;padding:1px 8px;border-radius:8px;background:'+x[2]+';color:'+x[1]+';white-space:nowrap">'+x[0]+'</span>'; }
       function cell(comp,prodApproved){ var req=comp?(comp.req||0):0, appr=comp?(comp.appr||0):0;
         if(req===0) return '<td style="text-align:center;padding:6px 4px;background:#f1f5f9;color:#cbd5e1;font-size:12px" title="not required">—</td>';
         if(appr>=req) return '<td style="text-align:center;padding:6px 4px;background:#dcfce7;color:#166534;font-weight:700;font-size:12px" title="approved ('+appr+'/'+req+')">✓</td>';
@@ -8488,21 +8499,21 @@
         if(!f.length){ c.innerHTML=bar+'<div style="padding:14px 2px;color:#94a3b8">No products for this filter.</div>'; var s0=document.getElementById('db-season'); if(s0)s0.onchange=function(){ _dashSeason=this.value; draw(); }; return; }
         var thStick='position:sticky;left:0;z-index:2;background:#f8fafc';
         var head='<thead><tr>'
-          +'<th rowspan="2" style="text-align:left;padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #e5e7eb;'+thStick+';min-width:150px">Product</th>'
+          +'<th rowspan="2" class="db-prodcell" style="text-align:left;padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #e5e7eb;'+thStick+';min-width:150px">Product</th>'
           +'<th rowspan="2" style="text-align:center;padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #e5e7eb">Overall</th>'
           +'<th colspan="'+DIMS.length+'" style="text-align:center;padding:5px 10px 2px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#64748b;border-bottom:1px solid #eef2f7">Component approval</th></tr>'
-          +'<tr>'+DIMS.map(function(dd){return '<th style="text-align:center;padding:2px 4px 6px;font-size:10px;color:#94a3b8;border-bottom:1px solid #e5e7eb;min-width:58px">'+esc(dd[1])+'</th>';}).join('')+'</tr></thead>';
+          +'<tr>'+DIMS.map(function(dd){return '<th class="db-compcol" style="text-align:center;padding:2px 4px 6px;font-size:10px;color:#94a3b8;border-bottom:1px solid #e5e7eb;min-width:58px">'+esc(dd[1])+'</th>';}).join('')+'</tr></thead>';
         var body=catKeys.map(function(cat){
           var grp='<tr><td colspan="'+(2+DIMS.length)+'" style="background:#eef2f7;border-top:2px solid #cbd5e1;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#475569;padding:4px 10px;'+thStick+'">'+esc(cat)+' <span style="font-weight:400;color:#94a3b8">('+cats[cat].length+')</span></td></tr>';
           return grp+cats[cat].map(function(r){ var pa=(r.status==='approved');
-            var sw=r.has_swatch?'<img src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at||'')+'" style="width:26px;height:26px;object-fit:cover;border-radius:5px;border:1px solid #e5e7eb;flex:0 0 auto">':'<span style="width:26px;height:26px;border-radius:5px;border:1px dashed #cbd5e1;background:#f8fafc;flex:0 0 auto"></span>';
+            var sw=r.has_swatch?'<img class="db-sw" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at||'')+'" style="width:26px;height:26px;object-fit:cover;border-radius:5px;border:1px solid #e5e7eb;flex:0 0 auto">':'<span class="db-sw" style="width:26px;height:26px;border-radius:5px;border:1px dashed #cbd5e1;background:#f8fafc;flex:0 0 auto"></span>';
             return '<tr style="border-bottom:1px solid #f1f5f9">'
-              +'<td style="padding:5px 10px;'+thStick+'"><a class="db-open" data-ref="'+esc(r.ref)+'" style="display:flex;gap:8px;align-items:center;cursor:pointer;text-decoration:none;color:inherit">'+sw+'<span style="min-width:0"><span style="font-weight:600;font-size:12px;color:#0f172a;display:block;line-height:1.15">'+esc(r.colour_name||'—')+'</span><span style="font-size:10px;color:#94a3b8;font-family:ui-monospace,Menlo,monospace">'+esc(r.ref)+'</span></span></a></td>'
+              +'<td class="db-prodcell" style="padding:5px 10px;'+thStick+'"><a class="db-open" data-ref="'+esc(r.ref)+'" style="display:flex;gap:8px;align-items:center;cursor:pointer;text-decoration:none;color:inherit">'+sw+'<span style="min-width:0"><span style="font-weight:600;font-size:12px;color:#0f172a;display:block;line-height:1.15">'+esc(r.colour_name||'—')+'</span><span style="font-size:10px;color:#94a3b8;font-family:ui-monospace,Menlo,monospace">'+esc(r.ref)+'</span></span></a></td>'
               +'<td style="text-align:center;padding:5px 8px">'+ovPill(r.status)+'</td>'
               +DIMS.map(function(dd){ return cell((r.comps||{})[dd[0]], pa); }).join('')
               +'</tr>'; }).join('');
         }).join('');
-        c.innerHTML=bar+legend+'<div style="overflow-x:auto;border:1px solid #eef2f7;border-radius:8px"><table style="border-collapse:collapse;font-size:12px;width:100%;min-width:620px">'+head+'<tbody>'+body+'</tbody></table></div>';
+        c.innerHTML=bar+legend+'<div style="overflow-x:auto;border:1px solid #eef2f7;border-radius:8px"><table class="db-matrix" style="border-collapse:collapse;font-size:12px;width:100%;min-width:620px">'+head+'<tbody>'+body+'</tbody></table></div>';
         var s=document.getElementById('db-season'); if(s)s.onchange=function(){ _dashSeason=this.value; draw(); };
         c.querySelectorAll('.db-open').forEach(function(el){ el.onclick=function(){ _prodDetailTab='master'; selectProductSub('plan'); setTimeout(function(){ renderProductDetail(el.dataset.ref); },0); }; });
       }

@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.194 - Mobile: kill duplicate HORIZON badge + tighten DASHBOARD
+- Fixed the HORIZON version badge rendering twice on mobile: the dark top-bar already shows it (#hz-ver), so the in-page sub-nav badge (.ver) is now hidden under 640px across PRODUCT / SUPPLY / SCENARIO.
+- PRODUCT ▸ DASHBOARD matrix tightened for phones: smaller swatches, narrower product/component columns, compact overall pill, and the min-width cap lifted so more of the grid fits before it scrolls.
+
 ## v26.193 - PRODUCT: DASHBOARD approval matrix
 - New PRODUCT ▸ DASHBOARD tab. Season dropdown (default latest, or All seasons). One product per row, grouped by category, showing the overall approval status plus each component type's status (Product / Packaging / Labels-wraps / Polybags / Other). Cell colour: green ✓ = approved, amber = pending (with approved/required count), grey = not required. Exceptions — where a product is Approved but a component is still pending — are highlighted with a red ring + ⚠ and counted in the header. First column is sticky for mobile scroll; click a product to open its detail. New endpoint /api/product/dashboard.
 
