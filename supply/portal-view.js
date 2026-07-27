@@ -629,6 +629,8 @@
         +'<div id="pp-recent-drop" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;z-index:120;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:300px;max-width:380px;max-height:60vh;overflow:auto;text-align:left"></div>'
       +'</span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
     var tabsEl=document.getElementById('pp-tabs'), body=document.getElementById('pp-body');
+    // Move the Inbox + Recent controls up into the persistent top bar (out of the content bar) — tidier on mobile.
+    try{ var _top=document.querySelector('.pv-top'), _notif=document.getElementById('pp-notif'); if(_top&&_notif){ _notif.style.marginLeft='0'; _top.appendChild(_notif); } }catch(e){}
     // download a generated invoice as a real file (fetch -> blob) rather than opening a tab — works on the
     // portal host where /api/invoice/* isn't routed (uses the /api/portal/* endpoints via EP).
     function dlInvoice(url, btn){ var t=btn?btn.textContent:'';

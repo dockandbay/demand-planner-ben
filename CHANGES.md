@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.212 - Portal top-bar tidy + auto-prune orphaned self-shipments
+- Supplier portal: moved the Inbox (✉) and Recent (🕘) controls up into the persistent top bar, and removed the "Sign out" button (sessions expire on their own — not a required feature).
+- Auto-cleanup: when a self-shipment's only PO is reassigned away (via assign or consolidate), the now-empty self-shipment row is deleted automatically. Guarded — only prunes a true empty self-shipment (master = itself, no POs, no supplier charges); its timeline notes are removed with it. Verified on the sandbox.
+
 ## v26.211 - Hide empty shipments (no POs) from the grid + portal
 - A shipment with no POs assigned (e.g. an orphaned self-shipment left behind after its PO was reassigned to another master) is now hidden from the SUPPLY ▸ Shipments grid (still findable via search) and never shows on the supplier portal (the portal is PO-driven so it already excluded them). Also stopped flagging "no POs linked" as an action item, since empties are no longer surfaced.
 

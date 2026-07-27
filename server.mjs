@@ -1300,8 +1300,12 @@ app.post('/api/supply/consolidate', async (req, res) => {
       const ex = (await client.query(`SELECT 1 FROM planner.shipments WHERE shipment_ref=$1`, [ref])).rows[0];
       if (!ex) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'shipment ' + ref + ' does not exist (tick "create new" to make it)' }); }
     }
+    // capture the POs' prior shipments (to prune any now-empty self-shipment they leave behind)
+    const priors = (await client.query(`SELECT DISTINCT shipment_ref FROM planner.purchase_orders
+      WHERE po = ANY($1::text[]) AND coalesce(shipment_ref,'')<>'' AND shipment_ref<>$2`, [pos, ref])).rows.map(r => r.shipment_ref);
     const upd = await client.query(`UPDATE planner.purchase_orders SET shipment_ref=$1 WHERE po = ANY($2::text[])`, [ref, pos]);
     await client.query(`UPDATE planner.shipments SET updated_at=now() WHERE shipment_ref=$1`, [ref]);
+    for (const pr of priors) { await pruneEmptySelfShipment(client, pr); }   // clean up orphaned self-shipments
     await client.query('COMMIT');
     res.json({ ok: true, ref, assigned: upd.rowCount });
   } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
@@ -5924,12 +5928,26 @@ app.post('/api/supply/shipment-create', async (req, res) => {
     res.json({ ok: true, shipment_ref: ref });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Delete a now-empty SELF-shipment (its master IS itself) left orphaned when its only PO was reassigned away.
+// Guarded: only when no POs reference it AND it has no supplier charges (protects money/claim data). Notes are removed with it.
+async function pruneEmptySelfShipment(db, ref) {
+  if (!ref) return false;
+  const ok = (await db.query(`SELECT 1 FROM planner.shipments s
+    WHERE s.shipment_ref=$1 AND coalesce(nullif(s.master_po,''), s.shipment_ref)=s.shipment_ref
+      AND NOT EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.shipment_ref=$1)
+      AND NOT EXISTS (SELECT 1 FROM planner.supplier_charges c WHERE c.source_type='shipment' AND c.source_ref=$1)`, [ref])).rows[0];
+  if (!ok) return false;
+  await db.query(`DELETE FROM planner.shipment_notes WHERE shipment_ref=$1`, [ref]);
+  await db.query(`DELETE FROM planner.shipments WHERE shipment_ref=$1`, [ref]);
+  return true;
+}
 // Assign / unassign a PO to a shipment, and optionally mark it the master (consolidation) PO.
 // body: { po, assign:true|false, master:true }. Unassign clears purchase_orders.shipment_ref.
 app.post('/api/supply/shipment/:ref/assign', async (req, res) => {
   const ref = req.params.ref, b = req.body || {};
   if (!b.po) return res.status(400).json({ error: 'po required' });
   try {
+    const prior = ((await pool.query(`SELECT shipment_ref FROM planner.purchase_orders WHERE po=$1`, [b.po])).rows[0] || {}).shipment_ref;
     if (b.assign === false) {
       await pool.query(`UPDATE planner.purchase_orders SET shipment_ref=NULL WHERE po=$1`, [b.po]);
       await pool.query(`UPDATE planner.shipments SET master_po=NULL, updated_at=now()
@@ -5942,6 +5960,8 @@ app.post('/api/supply/shipment/:ref/assign', async (req, res) => {
       if (b.master) await pool.query(`UPDATE planner.shipments SET master_po=$2, updated_at=now()
         WHERE shipment_ref=$1`, [ref, b.po]);
     }
+    // the PO's PRIOR shipment may now be an empty self-shipment → clean it up
+    if (prior) await pruneEmptySelfShipment(pool, prior);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
