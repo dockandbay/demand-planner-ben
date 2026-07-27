@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.215 - PRODUCT grid: season+category grouping (collapsible) + category filter; admin timeline box on top
+- PRODUCT grid now groups by SEASON (darker grey header) and, nested under it, by CATEGORY (light grey header). Both group rows have larger (12px) text and are collapsible/expandable (click the row; ▸/▾ caret; state persists across redraws — collapsing closes any open detail inside).
+- New CATEGORY filter at the top next to Season. Season / Category / Status filter dropdowns now turn black when a value is selected (shows an active filter).
+- Admin PRODUCT ▸ Timeline: the new-message box now sits above the existing thread (was below).
+
 ## v26.214 - Portal PRODUCT timeline: entry box at the top
 - On the supplier portal PRODUCT ▸ Timeline, the comment/data-entry box now sits at the very top (above the "Messages" heading + the message list) instead of between them.
 

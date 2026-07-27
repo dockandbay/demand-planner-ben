@@ -8778,18 +8778,22 @@
         +'<div class="mut tiny" style="margin-top:6px">“Avg samples/days to approve” are measured over <b>approved</b> products only. Time-to-approve runs from the product’s development-start date (the <i>Development started</i> override on Master data, else its creation date) to approval.</div>'
         +tbl('By season','Season',d.bySeason)+tbl('By category','Category',d.byCategory)+tbl('By supplier','Supplier',d.bySupplier);
     }).catch(function(e){ c.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
-  var _prodFilt={season:'',status:'dev_actions',q:''};
+  var _prodFilt={season:'',status:'dev_actions',q:'',category:''};
+  var _pgSeasonCollapsed={}, _pgCatCollapsed={};   // PRODUCT grid group collapse state — persists across redraws
   function renderProductPlan(c){
     c.innerHTML='<div id="pg-filters" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px"></div><div id="pg-grid"><div style="color:#94a3b8">Loading…</div></div>';
     if(!_poActStateLoaded){ loadPoActState(function(){ renderProductPlan(c); }); return; }   // need snooze state for the SKU-mapping reminder
     fetch('/api/product/items').then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
       _prodRows=rows;
       var seasons=[]; rows.forEach(function(r){ if(r.season&&seasons.indexOf(r.season)<0)seasons.push(r.season); }); seasons.sort();
+      var cats=[]; rows.forEach(function(r){ if(r.category&&cats.indexOf(r.category)<0)cats.push(r.category); }); cats.sort();
       var STAT=[['dev_actions','In development + open actions'],['unapproved','Not approved'],['','All'],['in_development','In development'],['approved','Approved'],['dropped','Rejected']];
+      var selDark=function(v){ return 'text-align:left'+(v?';background:#0f172a;color:#fff;font-weight:600':''); };   // dark chip when a filter is set
       var fb=document.getElementById('pg-filters');
       fb.innerHTML='<button class="save-btn" id="pg-new" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd">+ New product</button>'
-        +'<span style="display:flex;align-items:center;gap:5px"><span style="color:#64748b;font-size:11px">Season</span><select class="fci" id="pg-season" style="text-align:left"><option value="">All</option>'+seasons.map(function(s){return '<option value="'+esc(s)+'"'+(s===_prodFilt.season?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>'
-        +'<span style="display:flex;align-items:center;gap:5px"><span style="color:#64748b;font-size:11px">Status</span><select class="fci" id="pg-status" style="text-align:left'+(_prodFilt.status?';background:#0f172a;color:#fff;font-weight:600':'')+'">'+STAT.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===_prodFilt.status?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></span>'
+        +'<span style="display:flex;align-items:center;gap:5px"><span style="color:#64748b;font-size:11px">Season</span><select class="fci" id="pg-season" style="'+selDark(_prodFilt.season)+'"><option value="">All</option>'+seasons.map(function(s){return '<option value="'+esc(s)+'"'+(s===_prodFilt.season?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>'
+        +'<span style="display:flex;align-items:center;gap:5px"><span style="color:#64748b;font-size:11px">Category</span><select class="fci" id="pg-cat" style="'+selDark(_prodFilt.category)+'"><option value="">All</option>'+cats.map(function(cc){return '<option value="'+esc(cc)+'"'+(cc===_prodFilt.category?' selected':'')+'>'+esc(cc)+'</option>';}).join('')+'</select></span>'
+        +'<span style="display:flex;align-items:center;gap:5px"><span style="color:#64748b;font-size:11px">Status</span><select class="fci" id="pg-status" style="'+selDark(_prodFilt.status)+'">'+STAT.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===_prodFilt.status?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></span>'
         +'<input class="fci" id="pg-q" value="'+esc(_prodFilt.q)+'" placeholder="search ref / colour / supplier / description…" style="width:300px;text-align:left">'
         +'<span id="pg-count" style="color:#94a3b8;font-size:11px"></span>';
       document.getElementById('pg-new').onclick=openProductNew;
@@ -8798,6 +8802,7 @@
         var q=_prodFilt.q.trim().toLowerCase();
         var f=rows.filter(function(r){
           if(_prodFilt.season && r.season!==_prodFilt.season)return false;
+          if(_prodFilt.category && r.category!==_prodFilt.category)return false;
           if(_prodFilt.status==='dev_actions'){ if(!(r.status==='in_development' || prodOpenActs(r).n>0))return false; }
           else if(_prodFilt.status==='unapproved'){ if(r.status==='approved')return false; } else if(_prodFilt.status){ if(r.status!==_prodFilt.status)return false; }
           if(q){ var hay=((r.ref||'')+' '+(r.colour_name||'')+' '+(r.supplier||'')+' '+(r.description||'')).toLowerCase(); if(hay.indexOf(q)<0)return false; }
@@ -8807,14 +8812,17 @@
         var g=document.getElementById('pg-grid');
         if(!rows.length){ g.innerHTML='<div style="color:#94a3b8;padding:16px 2px">No product development items yet — click “+ New product”.</div>'; return; }
         if(!f.length){ g.innerHTML='<div style="color:#94a3b8;padding:16px 2px">No items match these filters.</div>'; return; }
-        f=f.slice().sort(function(a,b){ return String(b.season||'').localeCompare(String(a.season||'')); });   // group by season (stable → within-season order preserved); newest season first
-        var _pgSeason=null;
+        f=f.slice().sort(function(a,b){ var sc=String(b.season||'').localeCompare(String(a.season||'')); if(sc)return sc; return String(a.category||'').localeCompare(String(b.category||'')); });   // group by season (newest first) then category (A–Z)
+        var seasonCount={}, catCount={}; f.forEach(function(r){ var sk=r.season||'', ck=(r.season||'')+'|'+(r.category||''); seasonCount[sk]=(seasonCount[sk]||0)+1; catCount[ck]=(catCount[ck]||0)+1; });
+        var _pgSeason=null, _pgCat=null;
         g.innerHTML='<div class="tw"><table class="pg-tbl"><thead><tr>'
           +['','Ref','Category','Season','Supplier','Sizes approved','Status','Sample shipment'].map(function(h){return '<th>'+h+'</th>';}).join('')+'</tr></thead><tbody>'
           +f.map(function(r,i){
             var sw=r.has_swatch?'<img class="pg-swatch2 pg-swatch-zoom" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at)+'" title="click to enlarge" style="cursor:zoom-in">':'<span class="pg-swatch2 none">n/a</span>';
-            var hdr=''; if((r.season||'')!==_pgSeason){ _pgSeason=(r.season||''); hdr='<tr class="pg-seasonhdr"><td colspan="8" style="background:#eef2f7;border-top:2px solid #cbd5e1;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#475569;padding:4px 10px">'+esc(_pgSeason||'— no season —')+'</td></tr>'; }
-            return hdr+'<tr>'
+            var sKey=r.season||'', cKey=r.category||'', hdr='';
+            if(sKey!==_pgSeason){ _pgSeason=sKey; _pgCat=null; hdr+='<tr class="pg-seasonhdr" data-season="'+esc(sKey)+'"><td colspan="8" style="cursor:pointer;background:#cbd5e1;border-top:2px solid #94a3b8;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#1f2937;padding:5px 10px"><span class="pg-caret" style="display:inline-block;width:13px">▾</span>'+esc(sKey||'— no season —')+' <span style="font-weight:400;color:#475569">('+seasonCount[sKey]+')</span></td></tr>'; }
+            if(cKey!==_pgCat){ _pgCat=cKey; hdr+='<tr class="pg-cathdr" data-season="'+esc(sKey)+'" data-cat="'+esc(cKey)+'"><td colspan="8" style="cursor:pointer;background:#eef2f7;font-weight:600;font-size:12px;letter-spacing:.02em;color:#475569;padding:4px 10px 4px 28px"><span class="pg-caret" style="display:inline-block;width:13px">▾</span>'+esc(cKey||'— no category —')+' <span style="font-weight:400;color:#94a3b8">('+catCount[sKey+'|'+cKey]+')</span></td></tr>'; }
+            return hdr+'<tr class="pg-datarow" data-season="'+esc(sKey)+'" data-cat="'+esc(cKey)+'">'
               +'<td><span style="display:inline-flex;align-items:center;gap:7px">'+sw+'<button class="planbtn pg-open" data-ref="'+esc(r.ref)+'" data-i="'+i+'">PLAN</button></span></td>'
               +'<td><div class="pg-ref" data-ref="'+esc(r.ref)+'">'+esc(r.ref)+prodComboBadge(r)+'</div>'+(r.colour_name?'<div class="pg-colour">'+esc(r.colour_name)+'</div>':'')+'</td>'
               +'<td>'+prodPickBtn(r.ref,'category',r.category,'category')+'</td>'
@@ -8823,8 +8831,18 @@
               +'<td>'+r.sizes_approved+'/'+r.sizes+'</td>'
               +'<td>'+prodStatusSelHtml(r.ref,r.status)+'</td>'
               +'<td class="l">'+(r.latest_shipment?('<div style="white-space:nowrap;font-size:11px">📦 <a class="samp-open" data-ref="'+esc(r.latest_shipment.ref)+'" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;font-weight:600" title="open this sample shipment">'+esc(r.latest_shipment.ref)+'</a>'+(r.latest_shipment.carrier?' <span class="mut tiny">'+esc(r.latest_shipment.carrier)+'</span>':'')+(r.latest_shipment.tracking?' · '+carrierTrackLinkInj(r.latest_shipment.carrier,r.latest_shipment.tracking):'')+'</div>'):'<span class="mut tiny">—</span>')+'</td></tr>'
-              +'<tr class="pg-detrow" id="pgdet-'+i+'" style="display:none"><td colspan="8"><div class="pg-det"></div></td></tr>';
+              +'<tr class="pg-detrow" id="pgdet-'+i+'" data-season="'+esc(r.season||'')+'" data-cat="'+esc(r.category||'')+'" style="display:none"><td colspan="8"><div class="pg-det"></div></td></tr>';
           }).join('')+'</tbody></table></div>';
+        // group collapse/expand — season collapses its categories + rows; category collapses its rows. Closes any open detail in a collapsed group.
+        function pgApplyCollapse(){
+          g.querySelectorAll('tr.pg-seasonhdr').forEach(function(h){ var cr=h.querySelector('.pg-caret'); if(cr)cr.textContent=_pgSeasonCollapsed[h.dataset.season]?'▸':'▾'; });
+          g.querySelectorAll('tr.pg-cathdr').forEach(function(h){ var sc=_pgSeasonCollapsed[h.dataset.season]; h.style.display=sc?'none':''; var cr=h.querySelector('.pg-caret'); if(cr)cr.textContent=_pgCatCollapsed[h.dataset.season+'|'+h.dataset.cat]?'▸':'▾'; });
+          g.querySelectorAll('tr.pg-datarow').forEach(function(r){ var hide=_pgSeasonCollapsed[r.dataset.season]||_pgCatCollapsed[r.dataset.season+'|'+r.dataset.cat]; r.style.display=hide?'none':''; });
+          g.querySelectorAll('tr.pg-detrow').forEach(function(r){ if(_pgSeasonCollapsed[r.dataset.season]||_pgCatCollapsed[r.dataset.season+'|'+r.dataset.cat]){ r.style.display='none'; var dd=r.querySelector('.pg-det'); if(dd)dd.innerHTML=''; } });
+        }
+        g.querySelectorAll('tr.pg-seasonhdr').forEach(function(h){ h.onclick=function(){ var s=h.dataset.season; _pgSeasonCollapsed[s]=!_pgSeasonCollapsed[s]; pgApplyCollapse(); }; });
+        g.querySelectorAll('tr.pg-cathdr').forEach(function(h){ h.onclick=function(){ var k=h.dataset.season+'|'+h.dataset.cat; _pgCatCollapsed[k]=!_pgCatCollapsed[k]; pgApplyCollapse(); }; });
+        pgApplyCollapse();
         g.querySelectorAll('.pg-open').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var i=b.dataset.i, ref=b.dataset.ref, row=document.getElementById('pgdet-'+i), datarow=b.closest('tr'), open=row.style.display!=='none';
           g.querySelectorAll('.pg-detrow').forEach(function(dr){ if(dr!==row){ dr.style.display='none'; var dd=dr.querySelector('.pg-det'); if(dd)dd.innerHTML=''; } });
           g.querySelectorAll('tr.pg-openrow').forEach(function(tr){ if(tr!==datarow)tr.classList.remove('pg-openrow'); });
@@ -8847,8 +8865,10 @@
         if(_pendingProdRef){ var _pr=_pendingProdRef; _pendingProdRef=null; var _pb=g.querySelector('.pg-open[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(_pr):_pr)+'"]'); if(_pb)_pb.click(); }
       }
       _prodDraw=draw;
-      document.getElementById('pg-season').onchange=function(){ _prodFilt.season=this.value; draw(); };
-      document.getElementById('pg-status').onchange=function(){ _prodFilt.status=this.value; this.setAttribute('style','text-align:left'+(this.value?';background:#0f172a;color:#fff;font-weight:600':'')); draw(); };
+      var _pgDark=function(el){ el.setAttribute('style','text-align:left'+(el.value?';background:#0f172a;color:#fff;font-weight:600':'')); };
+      document.getElementById('pg-season').onchange=function(){ _prodFilt.season=this.value; _pgDark(this); draw(); };
+      document.getElementById('pg-cat').onchange=function(){ _prodFilt.category=this.value; _pgDark(this); draw(); };
+      document.getElementById('pg-status').onchange=function(){ _prodFilt.status=this.value; _pgDark(this); draw(); };
       document.getElementById('pg-q').oninput=function(){ _prodFilt.q=this.value; draw(); };
       draw();
     }).catch(function(e){ document.getElementById('pg-grid').innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
@@ -9125,9 +9145,9 @@
           +(ctrl?'<div style="flex:0 0 auto;display:flex;flex-direction:column;gap:3px;align-items:flex-start;min-width:78px">'+ctrl+'</div>':'')
           +'<div style="flex:1"><span class="mut tiny">'+esc(n.created_at||'')+' · '+who+'</span>'+(isNew?' <span class="ex-badge">new</span>':'')+'<br><span style="color:#1a1a1a;white-space:pre-wrap">'+esc(n.body||'')+'</span>'+dl+'</div>'
           +'</div>'; }).join(''):'<div class="mut tiny" style="padding:6px 0">No timeline entries yet.</div>';
-      var compose='<div style="margin-top:10px;display:flex;gap:6px;align-items:flex-start;max-width:640px"><textarea class="fci" id="pt-in" rows="2" placeholder="Add a note…" style="flex:1;min-height:34px;text-align:left"></textarea><button class="save-btn" id="pt-post" style="flex:0 0 auto;background:#2563eb;color:#fff;border-color:#1d4ed8">Post</button></div>'
-        +'<div class="mut tiny" style="margin:4px 2px">To escalate to the product-development team, post the message then use ⚑ Escalate on it.</div>';
-      body.innerHTML='<div class="sect-h">Timeline <span class="mut tiny">— message thread for this product</span></div>'+list+compose;
+      var compose='<div style="margin-top:6px;display:flex;gap:6px;align-items:flex-start;max-width:640px"><textarea class="fci" id="pt-in" rows="2" placeholder="Add a note…" style="flex:1;min-height:34px;text-align:left"></textarea><button class="save-btn" id="pt-post" style="flex:0 0 auto;background:#2563eb;color:#fff;border-color:#1d4ed8">Post</button></div>'
+        +'<div class="mut tiny" style="margin:4px 2px 12px">To escalate to the product-development team, post the message then use ⚑ Escalate on it.</div>';
+      body.innerHTML='<div class="sect-h">Timeline <span class="mut tiny">— message thread for this product</span></div>'+compose+list;
       if(unreadSup>0){ shipPost('/api/product/notes-read-supplier',{ref:ref},function(){ if(typeof loadProductUnread==='function')loadProductUnread(); }); }   // D&B has now seen them → clear the unread badges
       body.querySelector('#pt-post').onclick=function(){ var t=body.querySelector('#pt-in').value.trim(); if(!t)return; shipPost('/api/product/note',{ref:ref,body:t,author_email:(window.ME&&ME.email)||''},function(){ renderProdTimeline(body,ref); }); };
       var eb=body.querySelector('.prod-esc'); if(eb)eb.onclick=function(){ var msg=eb.dataset.msg||''; if(!msg){alert('No message to escalate.');return;} if(!confirm('Escalate this message for '+ref+' to the product-development team?'))return; eb.disabled=true; var t=eb.textContent; eb.textContent='Sending…'; shipPost('/api/product/escalate',{ref:ref,message:msg},function(j){ if(j&&j.error){alert(j.error);eb.disabled=false;eb.textContent=t;return;} alert(j&&j.sent?('Escalated — emailed '+j.emails.join(', ')):(j&&j.note)||'Escalated (no recipients configured).'); renderProdTimeline(body,ref); }); };
