@@ -1415,14 +1415,17 @@
     var isMfg=/manufactur/i.test(r.branch||'');
     var selfShip=(r.shipment&&r.shipment===po), otherMaster=(r.shipment&&r.shipment!==po);
     var sh=(d&&d.ship)||{}, shipEp='/api/supply/shipment/'+encodeURIComponent(po), curMode=(sh.mode||'').toLowerCase();
-    function shViewDate(lbl,f){ return row(lbl,(sh[f]?esc(fd(sh[f])):'<span class="mut">—</span>')); }
-    function shEditDate(lbl,f){ return row(lbl,'<input type="date" class="fci" data-ep="'+shipEp+'" data-field="'+f+'" value="'+esc(sh[f]||'')+'" style="width:150px">'); }
+    // read-only: show the FINAL calculated date (eff)
+    function shViewDate(lbl,f,effK){ var v=sh[effK]||sh[f]; return row(lbl,(v?esc(fd(v)):'<span class="mut">—</span>')); }
+    // editable: override input + the FINAL calculated date beside it (like the shipment drawer)
+    function shEditDate(lbl,f,effK){ var eff=sh[effK]||'', ov=sh[f]||'';
+      return row(lbl,'<input type="date" class="fci" data-ep="'+shipEp+'" data-field="'+f+'" value="'+esc(ov)+'" style="width:150px"> <span class="mut tiny" style="margin-left:8px">final: <b>'+(eff?esc(fd(eff)):'—')+'</b>'+(ov?'':' (calc)')+'</span>'); }
     var shipBlock;
     if(otherMaster){
       shipBlock=row('Shipment','<button class="ship-open" data-ref="'+esc(r.shipment)+'">🚢 '+esc(r.shipment)+'</button> <button class="ship-pick" data-po="'+esc(po)+'">▾ change</button> <span class="mut tiny">mode &amp; dates inherit from this shipment</span>')
         +row('Mode','<span style="color:#334155;font-weight:600">'+esc((sh.mode||'—').toUpperCase())+'</span>')
         +((sh.carrier&&sh.carrier_ref)?row('Carrier / tracking',esc(sh.carrier)+' · '+carrierTrackLinkInj(sh.carrier,sh.carrier_ref)):'')
-        +(curMode==='fob'?'':shViewDate('Departure','departure_date')+shViewDate('Landing','landing_date')+shViewDate('Arrival','arrival_date')+shViewDate('Completion','delivery_date'));
+        +(curMode==='fob'?'':shViewDate('Departure','departure_date','eff_departure')+shViewDate('Landing','landing_date','eff_landing')+shViewDate('Arrival','arrival_date','eff_arrival')+shViewDate('Completion','delivery_date','eff_completion'));
     } else {
       var modeOpts=(isMfg?['','fob']:['','sea','air','fob']).map(function(m){ var L={'':'— not a shipment','sea':'Sea','air':'Air','fob':'FOB'}[m]; return '<option value="'+m+'"'+(curMode===m?' selected':'')+'>'+L+'</option>'; }).join('');
       var modeRow=row('Shipment mode'+(isMfg?' <span class="mut tiny">(Manufacturing → FOB)</span>':'')+(PO_ACTCOND.unassigned_shipment(r)?' '+actMark(po,'unassigned_shipment'):''),
@@ -1437,7 +1440,7 @@
           +row('Carrier',carrierSel(shipEp,sh.carrier,false))
           +row('Tracking / carrier ref',carrierRefInput(shipEp,sh.carrier_ref,false)+' <span class="po-trk-link" style="margin-left:6px;font-size:12px">'+(_trkU?'<a href="'+_trkU+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;font-weight:600" title="track ↗">track '+esc(sh.carrier||'')+' ↗</a>':'')+'</span>')
           +'</div>'
-          +shEditDate('Departure','departure_date')+shEditDate('Landing','landing_date')+shEditDate('Arrival','arrival_date')+shEditDate('Completion','delivery_date')
+          +shEditDate('Departure','departure_date','eff_departure')+shEditDate('Landing','landing_date','eff_landing')+shEditDate('Arrival','arrival_date','eff_arrival')+shEditDate('Completion','delivery_date','eff_completion')
           +row('Freight cost <span class="mut tiny">(manual — blank = auto from rates)</span>','<input class="fci" data-ep="'+shipEp+'" data-field="cost_manual" value="'+esc(sh.cost_manual!=null?sh.cost_manual:'')+'" style="width:120px">');
       }
       if(selfShip){ var nAb=(sh.other_pos||0);

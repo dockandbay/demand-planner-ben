@@ -5712,10 +5712,26 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
              coalesce(s.status,'') status,
              to_char(s.departure_date,'YYYY-MM-DD') departure_date, to_char(s.landing_date,'YYYY-MM-DD') landing_date,
              to_char(s.arrival_date,'YYYY-MM-DD') arrival_date, to_char(s.delivery_date,'YYYY-MM-DD') delivery_date,
+             -- FINAL calculated dates (override ▸ calc), mirroring the SHIPMENTS grid: departure = prod_end+7,
+             -- + branch transit (air/sea by mode) = landing/arrival, + 7 = completion.
+             to_char(coalesce(s.departure_date, c.dep_calc),'YYYY-MM-DD') eff_departure,
+             to_char(coalesce(s.landing_date, c.land_calc),'YYYY-MM-DD') eff_landing,
+             to_char(coalesce(s.arrival_date, s.landing_date, c.land_calc),'YYYY-MM-DD') eff_arrival,
+             to_char(coalesce(s.delivery_date, c.comp_calc),'YYYY-MM-DD') eff_completion,
              s.cost_manual, coalesce(s.branch,'') branch, coalesce(s.country_code,'') country_code,
              (s.shipment_ref = p.po) is_self,
              (SELECT count(*)::int FROM planner.purchase_orders x WHERE x.shipment_ref=s.shipment_ref AND x.po<>p.po) other_pos
       FROM planner.purchase_orders p JOIN planner.shipments s ON s.shipment_ref=p.shipment_ref
+      LEFT JOIN LATERAL (
+        SELECT (pe + interval '7 days')::date dep_calc,
+               (pe + interval '7 days' + ((CASE WHEN coalesce(lower(s.mode),'sea')='air' THEN coalesce(mb.air_lead_time_days,0) ELSE coalesce(mb.sea_lead_time_days,0) END)||' days')::interval)::date land_calc,
+               (pe + interval '7 days' + ((CASE WHEN coalesce(lower(s.mode),'sea')='air' THEN coalesce(mb.air_lead_time_days,0) ELSE coalesce(mb.sea_lead_time_days,0) END)||' days')::interval + interval '7 days')::date comp_calc
+        FROM planner.purchase_orders m
+        LEFT JOIN planner.suppliers ms ON ms.id=m.supplier_id
+        LEFT JOIN planner.branches mb ON mb.name=m.branch
+        CROSS JOIN LATERAL (SELECT coalesce(m.end_production_overide, (m.start_production + (coalesce(ms.production_days,0)||' days')::interval)::date) pe) pec
+        WHERE m.po = coalesce(nullif(s.master_po,''), s.shipment_ref) LIMIT 1
+      ) c ON true
       WHERE p.po=$1`, [po])).rows[0] || null;
     res.json({ ship, lines: lines.rows, deposit: deposit.rows, payments: payments.rows, flexport: flexport.rows, dtc,
       crossdock_lines: xdMaster.rows,

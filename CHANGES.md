@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.204 - Self-shipment dates: show the final calculated date beside the override
+- The PO ▸ SHIPMENTS departure/landing/arrival/completion fields now show the FINAL calculated date next to each override input (like a shipment): override = prod_end+7 → +branch transit (air/sea by mode) → +7 completion. Read-only (inherited-from-master) view shows the finals too. Verified the computed finals match the SHIPMENTS grid exactly for the same self-shipment.
+
 ## v26.203 - Self-shipment: drop redundant status, live carrier tracking links
 - Removed the separate shipment Status field from the PO ▸ SHIPMENTS self-shipment block — the main PO status (Production / Ready to ship / Shipping) already covers it.
 - Entering a carrier + tracking code on the SHIPMENTS sub-tab now shows a live dynamic tracking link (DHL / FedEx / UPS / SF Express) right under the carrier/tracking fields, updating as you type.
