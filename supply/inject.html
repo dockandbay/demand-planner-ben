@@ -1409,9 +1409,36 @@
     var isCogh=/coghlans/i.test(r.branch||'');   // ASN pallet labels apply to AU Coghlans only
     var isFbaAwd=/fba|awd/i.test(r.branch||''), isEU=/ifulfillment/i.test(r.branch||'');
     var preshipBranch=isCogh||isFbaAwd||isEU;   // any branch with a pre-shipment doc rule
-    var ship=/manufactur/i.test(r.branch||'')?'<span class="tool-badge bg-neutral" title="MANUFACTURING = FOB">FOB</span>'
-      :(r.shipment?'<button class="ship-open" data-ref="'+esc(r.shipment)+'">'+esc(r.shipment)+'</button> <button class="ship-pick" data-po="'+esc(po)+'">▾</button>':'<button class="ship-pick" data-po="'+esc(po)+'">— assign ▾</button>');
     function row(lbl,f){ return '<div class="cli-row"><div class="cli-lbl">'+lbl+'</div><div class="cli-val">'+f+'</div></div>'; }
+    // ── Self-shipment: MODE is the gate. Picking a mode makes this PO its own shipment (fields editable here);
+    //    if it's assigned to a DIFFERENT master the fields inherit read-only; Manufacturing is always FOB. ──
+    var isMfg=/manufactur/i.test(r.branch||'');
+    var selfShip=(r.shipment&&r.shipment===po), otherMaster=(r.shipment&&r.shipment!==po);
+    var sh=(d&&d.ship)||{}, shipEp='/api/supply/shipment/'+encodeURIComponent(po), curMode=(sh.mode||'').toLowerCase();
+    function shViewDate(lbl,f){ return row(lbl,(sh[f]?esc(fd(sh[f])):'<span class="mut">—</span>')); }
+    function shEditDate(lbl,f){ return row(lbl,'<input type="date" class="fci" data-ep="'+shipEp+'" data-field="'+f+'" value="'+esc(sh[f]||'')+'" style="width:150px">'); }
+    var shipBlock;
+    if(otherMaster){
+      shipBlock=row('Shipment','<button class="ship-open" data-ref="'+esc(r.shipment)+'">🚢 '+esc(r.shipment)+'</button> <button class="ship-pick" data-po="'+esc(po)+'">▾ change</button> <span class="mut tiny">mode &amp; dates inherit from this shipment</span>')
+        +row('Mode','<span style="color:#334155;font-weight:600">'+esc((sh.mode||'—').toUpperCase())+'</span>')
+        +(curMode==='fob'?'':shViewDate('Departure','departure_date')+shViewDate('Landing','landing_date')+shViewDate('Arrival','arrival_date')+shViewDate('Completion','delivery_date'));
+    } else {
+      var modeOpts=(isMfg?['','fob']:['','sea','air','fob']).map(function(m){ var L={'':'— not a shipment','sea':'Sea','air':'Air','fob':'FOB'}[m]; return '<option value="'+m+'"'+(curMode===m?' selected':'')+'>'+L+'</option>'; }).join('');
+      var modeRow=row('Shipment mode'+(isMfg?' <span class="mut tiny">(Manufacturing → FOB)</span>':'')+(PO_ACTCOND.unassigned_shipment(r)?' '+actMark(po,'unassigned_shipment'):''),
+        '<select class="fci po-shipmode" data-po="'+esc(po)+'" style="min-width:160px">'+modeOpts+'</select>'
+        +(selfShip?' <span class="mut tiny">🚢 this PO is its own shipment ('+esc(po)+')</span>':' <span class="mut tiny">— or <button class="ship-pick" data-po="'+esc(po)+'">assign an existing shipment ▾</button></span>'));
+      var detail='';
+      if(selfShip && curMode==='fob'){
+        detail=row('FOB','<span class="mut tiny">Factory pickup — no transit or freight details.'+(r.prod_end?' Production ends <b>'+esc(fd(r.prod_end))+'</b>.':'')+'</span>');
+      } else if(selfShip && (curMode==='sea'||curMode==='air')){
+        detail=row('Carrier',carrierSel(shipEp,sh.carrier,false))
+          +row('Tracking / carrier ref',carrierRefInput(shipEp,sh.carrier_ref,false))
+          +row('Status',shipStatusSel(shipEp,sh.status))
+          +shEditDate('Departure','departure_date')+shEditDate('Landing','landing_date')+shEditDate('Arrival','arrival_date')+shEditDate('Completion','delivery_date')
+          +row('Freight cost <span class="mut tiny">(manual — blank = auto from rates)</span>','<input class="fci" data-ep="'+shipEp+'" data-field="cost_manual" value="'+esc(sh.cost_manual!=null?sh.cost_manual:'')+'" style="width:120px">');
+      }
+      shipBlock=modeRow+detail;
+    }
     // Rule 2/3 doc block: list uploaded files of a category (admin uploads → supplier downloads), + upload control.
     function docBlock(cat,label){ var ds=((d&&d.all_docs)||[]).filter(function(x){return x.category===cat;});
       var over=(r.status==='PRODUCTION'||r.production_status==='ready_to_ship')&&!r.preship_not_required&&r.prod_end&&r.prod_end<today&&!ds.length;
@@ -1420,7 +1447,7 @@
         +'<input type="file" class="shdoc-file" data-po="'+esc(po)+'" data-category="'+cat+'" style="font-size:11px"> <button class="save-btn shdoc-up" data-po="'+esc(po)+'" data-category="'+cat+'">⬆ Upload</button>'); }
     return '<div class="sect-h">Shipments <span class="mut tiny">— assign a shipment or mark FOB, ASN numbers, Ships With Supplier pallet labels</span></div>'
       +lookupDatalists()+'<div class="cli-form" style="max-width:620px">'
-      +row('Shipment / FOB',ship+(PO_ACTCOND.unassigned_shipment(r)?actMark(po,'unassigned_shipment'):''))
+      +shipBlock
       +row('Branch delivery notes <span class="mut tiny">'+(r.shipment?'(from the assigned shipment — edit on the shipment)':'(defaults from the branch when the branch is set · shown to the supplier)')+'</span>', r.shipment
           ? '<textarea rows="3" readonly style="width:440px;max-width:100%;box-sizing:border-box;text-align:left;font-family:inherit;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:6px;padding:6px 8px">'+esc(r.shipment_delivery_notes||r.branch_delivery_notes||'')+'</textarea>'
           : txtIn(ep,'branch_delivery_notes',r.branch_delivery_notes,440,true))
@@ -1487,6 +1514,15 @@
     try{ var mo=new MutationObserver(pos); mo.observe(pop,{childList:true,subtree:true}); pop._mo=mo; }catch(e){} }
   function shPopOutside(e){ var p=document.getElementById('shpop'); if(p&&!p.contains(e.target)&&!(e.target.closest&&e.target.closest('.ship-pick,.dep-pick,.cell-pick')))closeShPop(); }
   function bindShipPick(){ document.querySelectorAll('#supply-root .ship-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openShipAssign(b.dataset.po,b); }; }); }
+  // Self-shipment MODE gate: change the mode → create/teardown the PO's own shipment, then refresh the panel so the
+  // shipment fields appear / disappear. (A plain field save would only update the row — it wouldn't assign / tear down.)
+  function bindPoShipMode(){ document.querySelectorAll('#supply-root .po-shipmode').forEach(function(sel){ if(sel._b)return; sel._b=1;
+    sel.onchange=function(){ var po=sel.dataset.po, mode=sel.value; sel.disabled=true;
+      fetch('/api/supply/po/'+encodeURIComponent(po)+'/ship-mode',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mode:mode})})
+        .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived();
+          var cont=sel.closest('[id^="podet-"]'), m=cont&&/podet-(\d+)/.exec(cont.id);
+          if(m) poRefetchPanel(po, m[1]); else { sel.disabled=false; } })
+        .catch(function(e){ sel.disabled=false; alert('Could not set shipment mode: '+(e.message||e)); }); }; }); }
   // open a shipment from elsewhere: right-side drawer popout (stays on the current page). "Full page ↗" in the
   // drawer jumps to the full Shipments tab via gotoShipmentPage.
   function gotoShipment(ref){ openShipDrawer(ref); }
@@ -3251,7 +3287,7 @@
     fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(rows){ rows.forEach(function(x){poBy[x.po]=x;}); cache['purchase-orders']=rows; loadPoDetail(po,i,wantTab); }); }
   function bindPay(po,i){
     // MASTER DATA + SHIPMENTS PLAN-panel controls (#2 / #10) — pickers + rename / delete / pallet labels for this PO
-    bindCellPick(); bindShipPick(); bindShipOpen();
+    bindCellPick(); bindShipPick(); bindShipOpen(); bindEdits(); bindPoShipMode();
     // Deposit analysis box on the PAYMENTS tab (async): remaining, other unallocated POs, suggested extra + at-risk
     document.querySelectorAll('#podet-'+i+' .dep-ctx').forEach(function(el){ var p=el.dataset.po;
       fetch('/api/supply/deposit-context/'+encodeURIComponent(p)).then(function(r){return r.json();}).then(function(d){ if(!d||!d.ref){el.innerHTML='';return;}

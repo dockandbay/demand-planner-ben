@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.200 - PO self-shipment: Phase 2 (SHIPMENTS tab UI + mode gate)
+- PO ▸ SHIPMENTS tab now leads with a Shipment mode selector (— / Sea / Air / FOB; Manufacturing locked to FOB). Picking a mode turns the PO into its own shipment and reveals the full shipment field set inline — Carrier, Tracking/carrier ref, Status, Departure/Landing/Arrival/Completion, Freight cost (manual) — all editable, saving to the shipment via the existing autosave. FOB shows just the FOB note + production-end date (no transit/freight). When the PO is assigned to a different master shipment, the same fields show read-only and inherited from that master. po-detail now returns a `ship` object. Blank mode = not a shipment (planning calcs still default sea+branch, unchanged). Portal surfacing is Phase 4.
+
 ## v26.199 - PO self-shipment: Phase 1 (backend mode-gate lifecycle)
 - New endpoint POST /api/supply/po/:po/ship-mode. Picking a mode (sea/air/fob) turns a PO into its own shipment — a planner.shipments row with shipment_ref = the PO (reusing all existing shipment machinery: portal, freight/duty calc, timeline). Clearing the mode tears the self-shipment down (only when no other POs are aboard). branch=Manufacturing is always forced to FOB. If the PO is already assigned to a different master shipment, the endpoint refuses (409) — its mode is inherited from that master, not set here. No schema change (reuses shipments.mode/branch/country_code). Backend only; PO ▸ SHIPMENTS UI is Phase 2.
 

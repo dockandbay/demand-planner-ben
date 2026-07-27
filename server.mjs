@@ -5695,7 +5695,19 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
     const lc = {}; lineCosts.rows.forEach(r => { lc[r.sku] = r; });
     const dtc = (await pool.query(`SELECT cartons, cbm, gross_weight_kg, dimensions, coalesce(entered_by,'') entered_by,
       to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at FROM planner.dtc_shipment_details WHERE po=$1`, [po])).rows[0] || null;
-    res.json({ lines: lines.rows, deposit: deposit.rows, payments: payments.rows, flexport: flexport.rows, dtc,
+    // The shipment this PO rides on (its own self-shipment, or a master it's assigned to) — drives the PO ▸ SHIPMENTS
+    // field block. is_self = the shipment_ref equals the PO; other_pos = how many OTHER POs share the shipment.
+    const ship = (await pool.query(`
+      SELECT coalesce(lower(s.mode),'') mode, coalesce(s.carrier,'') carrier, coalesce(s.carrier_ref,'') carrier_ref,
+             coalesce(s.status,'') status,
+             to_char(s.departure_date,'YYYY-MM-DD') departure_date, to_char(s.landing_date,'YYYY-MM-DD') landing_date,
+             to_char(s.arrival_date,'YYYY-MM-DD') arrival_date, to_char(s.delivery_date,'YYYY-MM-DD') delivery_date,
+             s.cost_manual, coalesce(s.branch,'') branch, coalesce(s.country_code,'') country_code,
+             (s.shipment_ref = p.po) is_self,
+             (SELECT count(*)::int FROM planner.purchase_orders x WHERE x.shipment_ref=s.shipment_ref AND x.po<>p.po) other_pos
+      FROM planner.purchase_orders p JOIN planner.shipments s ON s.shipment_ref=p.shipment_ref
+      WHERE p.po=$1`, [po])).rows[0] || null;
+    res.json({ ship, lines: lines.rows, deposit: deposit.rows, payments: payments.rows, flexport: flexport.rows, dtc,
       crossdock_lines: xdMaster.rows,
       sup_invoice: supInv.rows[0] || null,
       sup_docs: supDocs.rows.filter(x => x.category !== 'client'),
