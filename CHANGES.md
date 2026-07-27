@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.207 - PO grid: mode badge onto the badges row, compact + lowercase
+- The sea/air/fob badge now sits on the same row as the master / FLEX / carrier badges (a tidy flex row, gap 4px) instead of beside the shipment ref. Made it compact (font 8px, tight padding) and lowercase text with no icon (sea / air / fob).
+
 ## v26.206 - SHIPMENTS sub-tab layout + mode-badge recolour
 - PO ▸ SHIPMENTS mode row: the mode dropdown + "assign an existing shipment ▾" now sit on the left, with the ACTION indicator + SNOOZE pushed to the right (space-between), instead of the action being on the label.
 - Recoloured the shipment-mode badges: 🚢 Sea = light blue, ✈ Air = green, FOB = purple.

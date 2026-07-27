@@ -776,7 +776,7 @@
   // full clickable tracking code (code + ↗) — dynamic carrier link; plain text if the carrier has no tracker
   function carrierTrackLinkInj(carrier,code){ if(!code)return ''; var u=carrierTrackUrl(carrier,code); return u?'<a href="'+u+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;font-weight:600" title="track with '+esc(carrier||'carrier')+' ↗">'+esc(code)+' ↗</a>':esc(code); }
   // coloured shipment-mode badge (sea / air / fob) — used on the PO grid next to the shipment
-  function poModeBadge(m){ m=String(m||'').toLowerCase(); var mp={sea:['🚢 Sea','#e0f2fe','#0369a1'],air:['✈ Air','#dcfce7','#166534'],fob:['FOB','#ede9fe','#6d28d9']}; var x=mp[m]; return x?'<span class="up-mode" style="background:'+x[1]+';color:'+x[2]+'">'+x[0]+'</span>':''; }
+  function poModeBadge(m){ m=String(m||'').toLowerCase(); var mp={sea:['#e0f2fe','#0369a1'],air:['#dcfce7','#166534'],fob:['#ede9fe','#6d28d9']}; var x=mp[m]; return x?'<span style="display:inline-block;font-size:8px;font-weight:700;padding:0 4px;border-radius:8px;background:'+x[0]+';color:'+x[1]+';vertical-align:middle">'+m+'</span>':''; }
   // FLEX source badge that links to the Flexport shipment when a flex id is known; otherwise the plain badge
   function srctagLink(s,r){ if(s==='FLEX'&&r&&r.flex_id){ var u=flexUrl(r.flex_id); if(u)return '<a href="'+u+'" target="_blank" rel="noopener" class="src fx" style="text-decoration:none" title="open '+esc(r.flex_id)+' in Flexport ↗">FLEX ↗</a>'; } return srctag(s); }
   function annot(k){return '';}   // section description boxes removed (Ben) — ANNOT kept for reference only
@@ -2532,16 +2532,19 @@
     // (self OR master), so it shows even when the PO is on a separate master shipment.
     var _carU=(!_fxu && r.ship_carrier && r.ship_carrier_ref && !/flex/i.test(r.ship_carrier))?carrierTrackUrl(r.ship_carrier,r.ship_carrier_ref):'';
     var _carBadge=_carU?'<a href="'+_carU+'" target="_blank" rel="noopener" class="tool-badge bg-blue" style="font-size:8px;padding:0 4px;text-decoration:none" title="track '+esc(r.ship_carrier_ref)+' with '+esc(r.ship_carrier)+' ↗">'+esc(r.ship_carrier)+' ↗</a>':'';
-    var _shipBadges=(r.is_master?'<span class="tool-badge bg-blue" style="font-size:8px;padding:0 4px" title="master / consolidation PO for this shipment">master</span>':'')
-      +(_fxu?(r.is_master?' ':'')+'<a href="'+_fxu+'" target="_blank" rel="noopener" class="src fx" style="text-decoration:none" title="open '+esc(_fxfid)+' in Flexport ↗">FLEX ↗</a>':'')
-      +(_carBadge?' '+_carBadge:'');
-    var _modeBadge=(!isMfg && r.shipment)?(' '+poModeBadge(r.ship_mode)):'';
+    var _modeB=(!isMfg && r.shipment)?poModeBadge(r.ship_mode):'';
+    var _badgeArr=[];
+    if(_modeB)_badgeArr.push(_modeB);
+    if(r.is_master)_badgeArr.push('<span class="tool-badge bg-blue" style="font-size:8px;padding:0 4px" title="master / consolidation PO for this shipment">master</span>');
+    if(_fxu)_badgeArr.push('<a href="'+_fxu+'" target="_blank" rel="noopener" class="src fx" style="text-decoration:none" title="open '+esc(_fxfid)+' in Flexport ↗">FLEX ↗</a>');
+    if(_carBadge)_badgeArr.push(_carBadge);
+    var _shipBadges=_badgeArr.join(' ');
     var shipcell=(isMfg
       ? '<span class="tool-badge bg-neutral" title="MANUFACTURING branch = FOB — collected at factory, no shipment assigned">FOB</span>'
       : (r.shipment
-        ? '<button class="ship-open" data-ref="'+esc(r.shipment)+'" title="open this shipment">'+esc(r.shipment)+'</button>'+_modeBadge+' <button class="ship-pick" data-po="'+esc(r.po)+'" title="reassign">▾</button>'
+        ? '<button class="ship-open" data-ref="'+esc(r.shipment)+'" title="open this shipment">'+esc(r.shipment)+'</button> <button class="ship-pick" data-po="'+esc(r.po)+'" title="reassign">▾</button>'
         : '<button class="ship-pick" data-po="'+esc(r.po)+'">— assign ▾</button>'))
-      +(_shipBadges?'<div style="margin-top:2px">'+_shipBadges+'</div>':'');
+      +(_shipBadges?'<div style="margin-top:2px;display:flex;gap:4px;flex-wrap:wrap;align-items:center">'+_shipBadges+'</div>':'');
     // exceptions surface inline at the data point (e.g. the DATES sub-tab Source column) + as per-sub-tab
     // count badges in the PLAN panel + the grid date-cell highlights — not as a badge on the PO reference.
     // purple "N" badge → this PO has internal Notes (MASTER DATA). Hover shows them; click opens the PLAN ▸ MASTER DATA tab.
