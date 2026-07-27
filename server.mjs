@@ -3698,11 +3698,16 @@ app.post('/api/product/escalate', async (req, res) => {
   if (!ref || !message) return res.status(400).json({ error: 'ref + message required' });
   try {
     const user = shortUser(authUser(req)) || b.user || 'A user';
+    // post the escalation onto the product timeline (the supplier sees it on the portal)
     await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'internal',$3)`, [ref, authUser(req) || null, user + ' escalated: ' + message]).catch(() => {});
-    const s = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='escalation_product_dev'`)).rows[0];
-    const emails = _emails(s ? s.value : '');
-    if (!emails.length) return res.json({ ok: true, sent: 0, emails: [], note: 'no product-dev recipients configured (CONFIG ▸ General ▸ Product development)' });
-    const html = '<p><b>' + _eh(user) + '</b> escalated product <b>' + _eh(ref) + '</b>:</p><blockquote style="border-left:3px solid #cbd5e1;margin:0;padding:4px 12px;color:#334155;white-space:pre-wrap">' + _eh(message) + '</blockquote>';
+    // email the PRODUCT's supplier's active portal user(s) — escalate goes to the supplier (like the PO/shipment timeline)
+    const sup = (await pool.query(`SELECT coalesce(supplier,'') supplier FROM planner.product_dev_items WHERE ref=$1`, [ref])).rows[0];
+    const sid = (sup && sup.supplier) ? (await pool.query(`SELECT id FROM planner.suppliers WHERE lower(name)=lower($1)`, [sup.supplier])).rows[0]?.id : null;
+    const emails = sid ? (await pool.query(`SELECT DISTINCT lower(email) e FROM planner.supplier_portal_users WHERE supplier_id=$1 AND active=true AND coalesce(email,'')<>''`, [sid])).rows.map(x => x.e) : [];
+    if (!emails.length) return res.json({ ok: true, sent: 0, emails: [], note: 'no active portal users for this supplier to email — the escalation note is still on the timeline' });
+    const link = PORTAL_URL + '#/product/' + encodeURIComponent(ref);
+    const html = '<p><b>' + _eh(user) + '</b> escalated product <b>' + _eh(ref) + '</b>:</p><blockquote style="border-left:3px solid #cbd5e1;margin:0;padding:4px 12px;color:#334155;white-space:pre-wrap">' + _eh(message) + '</blockquote>'
+      + '<p><a href="' + link + '">Open ' + _eh(ref) + ' &rarr;</a></p>';
     const sent = await sendResendEmail({ to: emails, subject: 'horizon escalation - ' + ref, html });
     res.json({ ok: true, sent: sent.sent || 0, emails, sandbox: !!sent.sandbox });
   } catch (e) { res.status(500).json({ error: e.message }); }

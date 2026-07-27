@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.217 - PRODUCT timeline Escalate now goes to the supplier
+- The PRODUCT ▸ Timeline Escalate now emails the product's supplier's active portal user(s) — like the PO/shipment timeline escalate — instead of the internal product-dev team. Still posts the escalation onto the timeline (supplier sees it on the portal) and now includes a portal deep-link in the email. Tooltip/confirm/hint reworded to "escalate to the supplier".
+
 ## v26.216 - PRODUCT grid: category filter / search force groups open
 - When a Category filter is applied or a search is active, all season/category groups are forced open so the matching items are visible even if that group was manually collapsed. Clearing the filter/search restores your manual collapse state (it isn't wiped).
 
