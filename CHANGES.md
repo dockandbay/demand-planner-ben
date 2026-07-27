@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.202 - PO self-shipment: instant mode toggle (kill the delay)
+- Setting the shipment mode was doing a full poRefetchPanel — which re-fetches the entire 1375-row PO list + po-detail — so the fields took seconds to appear. Now the SHIPMENTS panel re-renders optimistically the instant you pick a mode (fields appear/disappear with no wait), and the change persists in the background; a failure reverts the optimistic render. ship-mode endpoint kept lightweight (no heavy row recompute).
+
 ## v26.201 - PO self-shipment: Phase 3 (convert to master + field binding)
 - A self-shipment PO ▸ SHIPMENTS tab now shows a "POs aboard" row with an add/manage-POs action — adding other POs turns it into a consolidation master, and they inherit this shipment's mode/dates (the master IS the self-shipment, so its fields are already bound — never blank).
 - When creating a NEW consolidation reference from an anchor PO (Analyse consolidation ▸ Create new), the new master is now seeded from that anchor's shipment (mode / carrier / transit dates) via a seed_from binding, so it doesn't start blank.
