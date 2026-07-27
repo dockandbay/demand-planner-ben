@@ -584,13 +584,16 @@ app.get('/', async (_req, res) => {
     // 3s failsafe reveal (belt-and-suspenders — the harness removes hz-hide-app once routed). The actual flash
     // prevention is HEAD_NOFLASH below: it must run in <head>, BEFORE the browser paints the static DEMAND filter
     // bar. A script at the end of <body> runs too late (the pills have already painted → flash).
-    const LANDING_JS = '<script>window.__HZ_LANDING=' + JSON.stringify(_land) + ';setTimeout(function(){document.documentElement.classList.remove("hz-hide-app");var b=document.getElementById("app");if(b)b.style.visibility="";},3000);</script>';
+    const LANDING_JS = '<script>window.__HZ_LANDING=' + JSON.stringify(_land) + ';setTimeout(function(){document.documentElement.classList.remove("hz-hide-app");document.documentElement.classList.remove("hz-preboot");var b=document.getElementById("app");if(b)b.style.visibility="";},3000);</script>';
     const injectTail = LANDING_JS + FBADIMS_JS + FIT + (DEV ? loadInject() : SUPPLY_INJECT).split('__APP_VERSION__').join(APP_VERSION) + '</body>';
     html = html.replace('</body>', () => injectTail);
     // Flash prevention — MUST be in <head> so it runs before the body (the static DEMAND filter bar) is painted.
     // If the landing route isn't a demand-native view, hide #app via a CSS class from the very first paint; the
     // harness removes hz-hide-app once it has routed (and there's a 3s failsafe in LANDING_JS).
-    const HEAD_NOFLASH = '<style>html.hz-hide-app #app{visibility:hidden}</style><script>try{if(!/^#\\/?(planning|demand|buy|fba|exec|reports)(\\/|$)/.test(location.hash||""))document.documentElement.classList.add("hz-hide-app");}catch(e){}</script>';
+    // hz-preboot additionally masks JUST the demand PLAN filter rows (which the artifact only hides at runtime), so they
+    // never paint before boot — including on buy/fba/exec/reports hashes where #app itself is intentionally left visible.
+    // Skipped only for the planning/demand hash (where those rows belong). Removed at boot end, after which the artifact governs them.
+    const HEAD_NOFLASH = '<style>html.hz-hide-app #app{visibility:hidden}html.hz-preboot #ctabs-row,html.hz-preboot #filters-row2,html.hz-preboot #catrow1-wrap{display:none!important}</style><script>try{var _h=location.hash||"";if(!/^#\\/?(planning|demand|buy|fba|exec|reports)(\\/|$)/.test(_h))document.documentElement.classList.add("hz-hide-app");if(!/^#\\/?(planning|demand)(\\/|$)/.test(_h))document.documentElement.classList.add("hz-preboot");}catch(e){}</script>';
     html = html.replace('<head>', () => '<head>' + HEAD_NOFLASH);
     // Inject the configured USD→GBP rate into both clients (CF_GBP in inject.html, AF_GBP in the artefact).
     html = html.replace(/var CF_GBP\s*=\s*[\d.]+/, 'var CF_GBP=' + GBP_RATE).replace(/var AF_GBP\s*=\s*[\d.]+/, 'var AF_GBP=' + GBP_RATE);

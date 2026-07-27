@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.197 - Kill DEMAND plan filter-pill flash on non-demand loads
+- The DEMAND plan filter rows (Country/Channel/Sort + category + tier/active rows) briefly painted on first load of non-demand pages (notably buy/fba/exec/reports hashes, where the whole-#app mask is intentionally off). Added a head-level `hz-preboot` mask that hides just those three rows (#ctabs-row/#filters-row2/#catrow1-wrap) from the very first paint, lifted at boot end after the app has routed. Skipped only for planning/demand hashes (where the pills belong). The artifact's own runtime show/hide is unchanged.
+
 ## v26.196 - PRODUCT ▸ DASHBOARD: proper mobile card layout
 - Replaced the horizontally-scrolling matrix on mobile with a clean card-per-product layout (grouped by category): swatch + colour name + ref + overall status pill, then a row of component chips (green ✓ approved / amber pending n/N / grey n/a). Exceptions (product approved but a component pending) get a red-bordered card + a "⚠ Approved, but N components still pending" banner. Desktop keeps the full matrix table; the two toggle at 640px.
 
