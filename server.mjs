@@ -3277,6 +3277,23 @@ app.get('/api/product/items', async (_req, res) => {
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// PRODUCT ▸ DASHBOARD — approval matrix: one row per product with per-component-type {required, approved} counts.
+app.get('/api/product/dashboard', async (req, res) => {
+  try {
+    const r = await pool.query(`SELECT i.ref, coalesce(i.season,'') season, coalesce(i.category,'') category,
+      coalesce(i.colour_name,'') colour_name, i.status, (i.swatch IS NOT NULL) has_swatch,
+      to_char(i.updated_at,'YYYY-MM-DD HH24:MI') updated_at,
+      (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id)::int sizes,
+      coalesce((SELECT json_object_agg(dimension, json_build_object('req',req,'appr',appr)) FROM (
+        SELECT sd.dimension,
+               count(*) FILTER (WHERE sd.required)::int req,
+               count(*) FILTER (WHERE sd.required AND coalesce(sd.approval_status,'pending')='approved')::int appr
+        FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id
+        WHERE s.item_id=i.id GROUP BY sd.dimension) t),'{}'::json) comps
+      FROM planner.product_dev_items i ORDER BY i.category, i.ref`);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/api/product/item/:ref', async (req, res) => {
   const ref = req.params.ref;
   try {

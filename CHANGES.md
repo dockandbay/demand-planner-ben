@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.193 - PRODUCT: DASHBOARD approval matrix
+- New PRODUCT ▸ DASHBOARD tab. Season dropdown (default latest, or All seasons). One product per row, grouped by category, showing the overall approval status plus each component type's status (Product / Packaging / Labels-wraps / Polybags / Other). Cell colour: green ✓ = approved, amber = pending (with approved/required count), grey = not required. Exceptions — where a product is Approved but a component is still pending — are highlighted with a red ring + ⚠ and counted in the header. First column is sticky for mobile scroll; click a product to open its detail. New endpoint /api/product/dashboard.
+
 ## v26.192 - SUPPLIER DELAYS: filter by PROD# + "started within last N months"
 - Added a filter bar to the SUPPLIER DELAYS report: pick a PROD# (e.g. P58) to see just that production, and/or limit to POs started within the last 3/6/12 months (by production start date). Both the by-supplier summary and the movements detail recompute live; a count shows "N of M POs". Client-side filter on already-loaded data (no re-fetch).
 

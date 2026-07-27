@@ -8405,7 +8405,7 @@
   function ensureProductRoot(){ if(document.getElementById('product-root'))return;
     var app=document.getElementById('app')||document.body; if(!app)return;
     var el=document.createElement('div'); el.id='product-root';
-    el.innerHTML='<div id="product-subnav"><button class="stab" data-k="plan">PLAN</button><button class="stab" data-k="range">RANGE PLAN</button><button class="stab" data-k="reports">REPORTS</button><span class="ver">HORIZON __APP_VERSION__</span></div><div id="product-content"></div>';
+    el.innerHTML='<div id="product-subnav"><button class="stab" data-k="plan">PLAN</button><button class="stab" data-k="dashboard">DASHBOARD</button><button class="stab" data-k="range">RANGE PLAN</button><button class="stab" data-k="reports">REPORTS</button><span class="ver">HORIZON __APP_VERSION__</span></div><div id="product-content"></div>';
     app.appendChild(el);
     el.querySelectorAll('.stab').forEach(function(b){ b.onclick=function(){ selectProductSub(b.dataset.k); }; }); }
   function showProduct(){ ensureProductRoot(); if(typeof hideSupply==='function')hideSupply(); if(typeof hideScenario==='function')hideScenario();
@@ -8424,6 +8424,7 @@
     var c=document.getElementById('product-content'); if(!c)return;
     if(k==='reports') return renderProductReports(c);
     if(k==='range') return renderProductRange(c);
+    if(k==='dashboard') return renderProductDashboard(c);
     renderProductPlan(c); }
   // RANGE PLAN — a season's products laid out by category: swatch + colour way + a tiny status pill. Toggle all vs approved-only.
   var _rangeSeason=null, _rangeApprovedOnly=false;
@@ -8454,6 +8455,56 @@
         var ap=document.getElementById('pr-appr'); if(ap)ap.onchange=function(){ _rangeApprovedOnly=this.checked; draw(); };
         var pb=document.getElementById('pr-pdf'); if(pb)pb.onclick=function(){ rangePDF(_rangeSeason, groupsHtml(catKeys,cats,true)); };
         c.querySelectorAll('.pr-card').forEach(function(el){ el.onclick=function(){ _prodDetailTab='master'; selectProductSub('plan'); setTimeout(function(){ renderProductDetail(el.dataset.ref); },0); }; });
+      }
+      draw();
+    }).catch(function(e){ c.innerHTML='<div style="color:#dc2626;padding:10px 2px">Failed: '+esc(e.message||e)+'</div>'; }); }
+  // DASHBOARD — approval matrix: one product per row (grouped by category), overall status + each component type's status.
+  // Cell states: grey = not required · green ✓ = approved · amber = pending · red ring = exception (product approved but component still pending).
+  var _dashSeason=null;
+  function renderProductDashboard(c){
+    c.innerHTML='<div class="count" style="padding:10px 2px;color:#94a3b8">Loading dashboard…</div>';
+    var DIMS=[['product','Product'],['packaging','Packaging'],['labels','Labels/wraps'],['polybag','Polybags'],['other','Other']];
+    fetch('/api/product/dashboard').then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
+      var seasons=[]; rows.forEach(function(r){ if(r.season&&seasons.indexOf(r.season)<0)seasons.push(r.season); }); seasons.sort();
+      if(!_dashSeason||(_dashSeason!=='__all'&&seasons.indexOf(_dashSeason)<0))_dashSeason=seasons[seasons.length-1]||'__all';
+      function ovPill(s){ var m={approved:['Approved','#166534','#dcfce7'],dropped:['Rejected','#991b1b','#fee2e2']}, x=m[s]||['In development','#92400e','#fef3c7']; return '<span style="display:inline-block;font-size:10px;font-weight:700;padding:1px 8px;border-radius:8px;background:'+x[2]+';color:'+x[1]+';white-space:nowrap">'+x[0]+'</span>'; }
+      function cell(comp,prodApproved){ var req=comp?(comp.req||0):0, appr=comp?(comp.appr||0):0;
+        if(req===0) return '<td style="text-align:center;padding:6px 4px;background:#f1f5f9;color:#cbd5e1;font-size:12px" title="not required">—</td>';
+        if(appr>=req) return '<td style="text-align:center;padding:6px 4px;background:#dcfce7;color:#166534;font-weight:700;font-size:12px" title="approved ('+appr+'/'+req+')">✓</td>';
+        var exc=prodApproved;   // product overall approved but this component still pending → exception
+        return '<td style="text-align:center;padding:6px 4px;background:'+(exc?'#fee2e2':'#fef3c7')+';color:'+(exc?'#991b1b':'#92400e')+';font-weight:700;font-size:11px'+(exc?';box-shadow:inset 0 0 0 2px #ef4444':'')+'" title="'+(exc?'EXCEPTION — product is approved but this component is still pending':'pending')+' ('+appr+'/'+req+' approved)">'+(exc?'⚠ ':'')+appr+'/'+req+'</td>'; }
+      function draw(){
+        var f=rows.filter(function(r){ return r.status!=='dropped' && (_dashSeason==='__all'?true:r.season===_dashSeason); });
+        var cats={}; f.forEach(function(r){ var k=r.category||'—'; (cats[k]=cats[k]||[]).push(r); });
+        var catKeys=Object.keys(cats).sort();
+        var exCount=f.filter(function(r){ if(r.status!=='approved')return false; return DIMS.some(function(dd){ var cc=(r.comps||{})[dd[0]]; return cc&&cc.req>0&&cc.appr<cc.req; }); }).length;
+        var bar='<div class="bar" style="align-items:center;gap:10px;flex-wrap:wrap"><span style="color:#64748b;font-size:11px">Season</span><select class="fci" id="db-season" style="text-align:left;width:120px"><option value="__all"'+(_dashSeason==='__all'?' selected':'')+'>All seasons</option>'+seasons.map(function(s){return '<option value="'+esc(s)+'"'+(s===_dashSeason?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select>'
+          +'<span class="count" style="margin-left:auto">'+f.length+' product'+(f.length===1?'':'s')+(exCount?' · <span style="color:#991b1b;font-weight:700">'+exCount+' exception'+(exCount===1?'':'s')+'</span>':'')+'</span></div>';
+        var legend='<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:10px;color:#64748b;margin:2px 2px 10px">'
+          +'<span><span style="display:inline-block;width:11px;height:11px;border-radius:3px;background:#dcfce7;vertical-align:-1px"></span> approved</span>'
+          +'<span><span style="display:inline-block;width:11px;height:11px;border-radius:3px;background:#fef3c7;vertical-align:-1px"></span> pending</span>'
+          +'<span><span style="display:inline-block;width:11px;height:11px;border-radius:3px;background:#f1f5f9;vertical-align:-1px"></span> not required</span>'
+          +'<span><span style="display:inline-block;width:11px;height:11px;border-radius:3px;background:#fee2e2;box-shadow:inset 0 0 0 2px #ef4444;vertical-align:-1px"></span> exception (product approved, component pending)</span></div>';
+        if(!f.length){ c.innerHTML=bar+'<div style="padding:14px 2px;color:#94a3b8">No products for this filter.</div>'; var s0=document.getElementById('db-season'); if(s0)s0.onchange=function(){ _dashSeason=this.value; draw(); }; return; }
+        var thStick='position:sticky;left:0;z-index:2;background:#f8fafc';
+        var head='<thead><tr>'
+          +'<th rowspan="2" style="text-align:left;padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #e5e7eb;'+thStick+';min-width:150px">Product</th>'
+          +'<th rowspan="2" style="text-align:center;padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #e5e7eb">Overall</th>'
+          +'<th colspan="'+DIMS.length+'" style="text-align:center;padding:5px 10px 2px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#64748b;border-bottom:1px solid #eef2f7">Component approval</th></tr>'
+          +'<tr>'+DIMS.map(function(dd){return '<th style="text-align:center;padding:2px 4px 6px;font-size:10px;color:#94a3b8;border-bottom:1px solid #e5e7eb;min-width:58px">'+esc(dd[1])+'</th>';}).join('')+'</tr></thead>';
+        var body=catKeys.map(function(cat){
+          var grp='<tr><td colspan="'+(2+DIMS.length)+'" style="background:#eef2f7;border-top:2px solid #cbd5e1;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#475569;padding:4px 10px;'+thStick+'">'+esc(cat)+' <span style="font-weight:400;color:#94a3b8">('+cats[cat].length+')</span></td></tr>';
+          return grp+cats[cat].map(function(r){ var pa=(r.status==='approved');
+            var sw=r.has_swatch?'<img src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at||'')+'" style="width:26px;height:26px;object-fit:cover;border-radius:5px;border:1px solid #e5e7eb;flex:0 0 auto">':'<span style="width:26px;height:26px;border-radius:5px;border:1px dashed #cbd5e1;background:#f8fafc;flex:0 0 auto"></span>';
+            return '<tr style="border-bottom:1px solid #f1f5f9">'
+              +'<td style="padding:5px 10px;'+thStick+'"><a class="db-open" data-ref="'+esc(r.ref)+'" style="display:flex;gap:8px;align-items:center;cursor:pointer;text-decoration:none;color:inherit">'+sw+'<span style="min-width:0"><span style="font-weight:600;font-size:12px;color:#0f172a;display:block;line-height:1.15">'+esc(r.colour_name||'—')+'</span><span style="font-size:10px;color:#94a3b8;font-family:ui-monospace,Menlo,monospace">'+esc(r.ref)+'</span></span></a></td>'
+              +'<td style="text-align:center;padding:5px 8px">'+ovPill(r.status)+'</td>'
+              +DIMS.map(function(dd){ return cell((r.comps||{})[dd[0]], pa); }).join('')
+              +'</tr>'; }).join('');
+        }).join('');
+        c.innerHTML=bar+legend+'<div style="overflow-x:auto;border:1px solid #eef2f7;border-radius:8px"><table style="border-collapse:collapse;font-size:12px;width:100%;min-width:620px">'+head+'<tbody>'+body+'</tbody></table></div>';
+        var s=document.getElementById('db-season'); if(s)s.onchange=function(){ _dashSeason=this.value; draw(); };
+        c.querySelectorAll('.db-open').forEach(function(el){ el.onclick=function(){ _prodDetailTab='master'; selectProductSub('plan'); setTimeout(function(){ renderProductDetail(el.dataset.ref); },0); }; });
       }
       draw();
     }).catch(function(e){ c.innerHTML='<div style="color:#dc2626;padding:10px 2px">Failed: '+esc(e.message||e)+'</div>'; }); }
