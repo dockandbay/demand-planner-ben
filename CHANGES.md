@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.218 - FIX: portal Recent/Inbox dropdown text was invisible
+- After moving Inbox/Recent into the dark top bar (v26.212), the dropdown panels inherited the header's white text on their white background, so the item labels were invisible. Set an explicit dark text colour on both dropdowns.
+
 ## v26.217 - PRODUCT timeline Escalate now goes to the supplier
 - The PRODUCT ▸ Timeline Escalate now emails the product's supplier's active portal user(s) — like the PO/shipment timeline escalate — instead of the internal product-dev team. Still posts the escalation onto the timeline (supplier sees it on the portal) and now includes a portal deep-link in the email. Tooltip/confirm/hint reworded to "escalate to the supplier".
 

@@ -625,8 +625,8 @@
       +'<span id="pp-notif" style="margin-left:auto;display:none;gap:6px;align-items:center;position:relative;white-space:nowrap">'
         +'<button id="pp-unread-btn" class="save-btn light" title="Unread messages from Dock &amp; Bay" style="position:relative">✉ <span class="pp-inbox-lbl">Inbox </span><span id="pp-unread-n">0</span></button>'
         +'<button id="pp-recent-btn" class="save-btn light" title="Recent changes">🕘 Recent</button>'
-        +'<div id="pp-unread-drop" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;z-index:120;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:280px;max-width:360px;max-height:60vh;overflow:auto;text-align:left"></div>'
-        +'<div id="pp-recent-drop" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;z-index:120;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:300px;max-width:380px;max-height:60vh;overflow:auto;text-align:left"></div>'
+        +'<div id="pp-unread-drop" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;z-index:120;background:#fff;color:#0f172a;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:280px;max-width:360px;max-height:60vh;overflow:auto;text-align:left"></div>'
+        +'<div id="pp-recent-drop" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;z-index:120;background:#fff;color:#0f172a;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:300px;max-width:380px;max-height:60vh;overflow:auto;text-align:left"></div>'
       +'</span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
     var tabsEl=document.getElementById('pp-tabs'), body=document.getElementById('pp-body');
     // Move the Inbox + Recent controls up into the persistent top bar (out of the content bar) — tidier on mobile.
