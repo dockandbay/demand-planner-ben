@@ -541,6 +541,7 @@
 #supply-root #supply-nav-sel{display:none}   /* section dropdown: phone only */
 #supply-root .po-filt-toggle{display:none}   /* "Filters" toggle: phone only */
 #supply-root .op-filt-toggle{display:none}   /* ORDER PLAN "Filters" toggle button: phone only (desktop shows filters inline) */
+#supply-root .pay-filt-toggle{display:none;margin:0 0 8px;background:#f8fafc;border:1px solid #cbd5e1;color:#475569;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer}   /* PAYMENTS pages Filters toggle: phone only */
 #supply-root .op-dl-top{display:none}        /* ORDER PLAN header Download button: phone only (desktop keeps it in the filter bar) */
 #supply-root .op-po-grp{display:inline-flex;align-items:center;gap:4px}   /* keep the PO(s) label + search box together */
 /* PO filter items: desktop = inline (as before); mobile = 2 per row (50/50), Ship-to on its own row */
@@ -634,6 +635,11 @@
   /* ORDER PLAN filters: collapse behind the "⚙ Filters" button (saves space) + condense the expanded panel */
   #supply-root .op-filt-toggle{display:inline-flex}
   #supply-content:not(.op-filters-open) #op-filters{display:none}
+  /* PAYMENTS pages (Payments Due / Other Payments / Cash Flow): collapse the filter bar behind ⚙ Filters */
+  #supply-root .pay-filt-toggle{display:inline-flex}
+  #supply-content:not(.pay-filters-open) .pay-filters{display:none!important}
+  #supply-root .pay-filters .bar,#supply-root .pay-filters.bar{gap:3px 5px}
+  #supply-root .pay-filters .flt{max-width:100%}
   #supply-root #op-filters .bar{gap:2px 3px;margin-bottom:5px}
   #supply-root #op-filters .pill-lbl{margin:0 3px 0 0!important;font-size:11px}
   #supply-root #op-filters .pill{padding:3px 7px;margin:2px 3px 2px 0;font-size:11px}
@@ -6312,7 +6318,11 @@
       if(s.country&&(x.country||'').toUpperCase()!==s.country)return false;
       if(s.q){ var q=s.q.toLowerCase(); if(((x.ref||'')+' '+(x.supplier||'')+' '+x.type).toLowerCase().indexOf(q)<0)return false; }
       return true; }); }
-  function renderCashflow(d){ var c=document.getElementById('rep-body')||document.getElementById('prod-body')||document.getElementById('supply-content');
+  // PAYMENTS pages: ⚙ Filters toggle (mobile) — starts collapsed each visit; one delegated click handler.
+  function ensurePayFilt(){ var sc=document.getElementById('supply-content'); if(sc)sc.classList.remove('pay-filters-open');
+    if(window.__payFiltWired)return; window.__payFiltWired=1;
+    document.addEventListener('click',function(e){ var t=e.target.closest&&e.target.closest('.pay-filt-toggle'); if(!t)return; var s=document.getElementById('supply-content'); if(!s)return; var on=s.classList.toggle('pay-filters-open'); t.textContent=on?'⚙ Filters ▴':'⚙ Filters'; }); }
+  function renderCashflow(d){ ensurePayFilt(); var c=document.getElementById('rep-body')||document.getElementById('prod-body')||document.getElementById('supply-content');
     var today=d.today, curMonth=today.slice(0,7), exportLines=[];   // exportLines = the currently-filtered list (Copy/CSV)
     if(!_cfState.types){ _cfState.types={}; CF_TYPES.forEach(function(t){_cfState.types[t]=true;}); }
     // month options from the data; default the list to the current month (else all)
@@ -6377,7 +6387,7 @@
     var basisChips=[['all','All'],['committed','Committed'],['estimate','Estimate']].map(function(o){return chip(_cfState.basis===o[0],o[1],'data-bs="'+o[0]+'"');}).join('');
     var monthSelHtml='<select class="flt" id="cf-month" style="width:auto"><option value="">All months</option><option value="aged"'+(_cfState.month==='aged'?' selected':'')+'>Aged (before last month)</option>'+monthList.map(function(m){return '<option value="'+esc(m)+'"'+(_cfState.month===m?' selected':'')+'>'+cfMonthLabel(m)+'</option>';}).join('')+'</select>';
     var countrySelHtml='<select class="flt" id="cf-country" style="width:auto"><option value="">All markets</option>'+['UK','US','EU','AU','CA'].map(function(cc){return '<option'+(_cfState.country===cc?' selected':'')+'>'+cc+'</option>';}).join('')+'</select>';
-    c.innerHTML='<div class="bar" style="flex-wrap:wrap;gap:6px"><span class="tiny mut">Month:</span>'+monthSelHtml
+    c.innerHTML='<button class="pay-filt-toggle">⚙ Filters</button><div class="bar pay-filters" style="flex-wrap:wrap;gap:6px"><span class="tiny mut">Month:</span>'+monthSelHtml
       +' <span class="tiny mut" style="margin-left:8px">Type:</span>'+typeChips
       +' <span class="tiny mut" style="margin-left:8px">Status:</span>'+statusChips
       +' <span class="tiny mut" style="margin-left:8px">Basis:</span>'+basisChips
@@ -6460,7 +6470,7 @@
       function draw(){ var f=filtered();
         var stPills=[['all','All'],['paid','Paid'],['overdue','Overdue'],['unpaid','Unpaid']].map(function(o){return '<span class="pill'+(OTH_STATE.status===o[0]?' active':'')+'" data-os="'+o[0]+'">'+o[1]+'</span>';}).join('');
         var supOpts='<option value="">All suppliers</option>'+sups.map(function(s){return '<option value="'+esc(s)+'"'+(OTH_STATE.supplier===s?' selected':'')+'>'+esc(s)+'</option>';}).join('');
-        document.getElementById('oth-wrap').innerHTML='<div class="bar" style="gap:5px"><span class="pill-lbl">Status</span>'+stPills
+        document.getElementById('oth-wrap').innerHTML='<div class="bar pay-filters" style="gap:5px"><span class="pill-lbl">Status</span>'+stPills
           +' <span class="pill-lbl" style="margin-left:8px">Supplier</span><select class="flt" id="oth-sup" style="width:auto">'+supOpts+'</select>'
           +'<span class="count" style="margin-left:auto">'+f.length+' / '+oth.length+'</span></div>'
           +'<div class="tw"><table><thead><tr><th class="l">Reference</th><th class="l">Supplier</th><th class="l">Description</th><th>Amount</th><th class="l">Due date</th><th class="l">Date paid</th><th class="l">Status</th><th class="l"></th></tr></thead><tbody>'+(f.map(otherRow).join('')||'<tr><td colspan="8" class="l mut">No other payments match.</td></tr>')+'</tbody></table></div>';
@@ -6472,7 +6482,8 @@
         document.querySelectorAll('#oth-wrap .oth-del').forEach(function(btn){btn.onclick=function(){ if(!confirm('Delete other payment "'+btn.dataset.ref+'"? This cannot be undone.'))return;
           shipPost('/api/supply/deposit/'+btn.dataset.id+'/delete',{},function(){ renderOtherPayments(b); }); };});
       }
-      b.innerHTML=lookupDatalists()+'<div class="bar"><button class="save-btn" id="oth-new">+ Other payment</button><span class="count">sundry costs (freight, fees, write-offs) — paid rows lock; Edit to change</span></div><div id="oth-wrap"></div>';
+      b.innerHTML=lookupDatalists()+'<div class="bar"><button class="save-btn" id="oth-new">+ Other payment</button><button class="pay-filt-toggle">⚙ Filters</button><span class="count">sundry costs (freight, fees, write-offs) — paid rows lock; Edit to change</span></div><div id="oth-wrap"></div>';
+      ensurePayFilt();
       document.getElementById('oth-new').onclick=function(){ shipPost('/api/supply/deposit-create',{is_deposit:false},function(){ renderOtherPayments(b); }); };
       draw(); })
       .catch(function(e){b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>';}); }); }
@@ -6507,7 +6518,8 @@
       if(PDUE_STATE.status==='overdue'&&!r.overdue)return false;
       if(PDUE_STATE.status==='paid'&&!r.paid)return false;
       if(PDUE_STATE.supplier&&r.sup!==PDUE_STATE.supplier)return false; return true; }
-    b.innerHTML=lookupDatalists()+'<div class="bar" id="pdue-bar"></div><div id="pdue-wrap"></div>';
+    b.innerHTML=lookupDatalists()+'<button class="pay-filt-toggle">⚙ Filters</button><div class="bar pay-filters" id="pdue-bar"></div><div id="pdue-wrap"></div>';
+    ensurePayFilt();
     function draw(){ var f=rows.filter(pass);
       // group by supplier; order groups by earliest due date, rows within a group by due date
       var groups={}; f.forEach(function(r){ (groups[r.sup||'—']=groups[r.sup||'—']||[]).push(r); });
