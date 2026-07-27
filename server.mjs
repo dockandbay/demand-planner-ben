@@ -5920,6 +5920,45 @@ app.post('/api/supply/shipment/:ref/delete', async (req, res) => {
   } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
+// SELF-SHIPMENT mode gate (PO ▸ SHIPMENTS). Picking a mode turns the PO into its own shipment (a planner.shipments
+// row whose shipment_ref = the PO, master_po = the PO) so it flows through all the existing shipment machinery
+// (portal, freight/duty calc, timeline). Clearing the mode tears the self-shipment down. branch=Manufacturing is
+// always FOB. Only applies to the PO's OWN shipment — if it's assigned to a different master, mode is inherited.
+app.post('/api/supply/po/:po/ship-mode', async (req, res) => {
+  const po = req.params.po;
+  let mode = String((req.body || {}).mode || '').trim().toLowerCase();
+  if (mode && !['sea', 'air', 'fob'].includes(mode)) return res.status(400).json({ error: 'mode must be sea, air, fob or blank' });
+  const client = await pool.connect();
+  try {
+    const p = (await client.query(`SELECT coalesce(branch,'') branch, coalesce(country_code,'') country_code, shipment_ref FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0];
+    if (!p) return res.status(404).json({ error: 'PO ' + po + ' not found' });
+    if (p.shipment_ref && p.shipment_ref !== po) return res.status(409).json({ error: 'PO is assigned to shipment ' + p.shipment_ref + ' — its mode is inherited from that shipment, not set here.' });
+    const manufacturing = /manufactur/i.test(p.branch);
+    if (mode && manufacturing) mode = 'fob';   // Manufacturing branch is always FOB (factory pickup, no transit detail)
+    await client.query('BEGIN');
+    if (!mode) {
+      const others = (await client.query(`SELECT count(*)::int n FROM planner.purchase_orders WHERE shipment_ref=$1 AND po<>$1`, [po])).rows[0].n;
+      if (others > 0) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'This shipment has ' + others + ' other PO(s) aboard — manage it as a master shipment instead of clearing the mode here.' }); }
+      await client.query(`UPDATE planner.purchase_orders SET shipment_ref=NULL WHERE po=$1 AND shipment_ref=$1`, [po]);
+      await client.query(`DELETE FROM planner.shipment_notes WHERE shipment_ref=$1`, [po]);
+      await client.query(`DELETE FROM planner.shipments WHERE shipment_ref=$1`, [po]);
+      await client.query('COMMIT');
+      return res.json({ ok: true, mode: '', is_shipment: false });
+    }
+    const ins = await client.query(`INSERT INTO planner.shipments (shipment_ref, master_po, mode, branch, country_code)
+      VALUES ($1,$1,$2,NULLIF($3,''),NULLIF($4,''))
+      ON CONFLICT (shipment_ref) DO UPDATE SET mode=$2,
+        branch=coalesce(planner.shipments.branch, NULLIF($3,'')),
+        country_code=coalesce(planner.shipments.country_code, NULLIF($4,'')),
+        updated_at=now()
+      RETURNING (xmax=0) created`, [po, mode, p.branch, p.country_code]);
+    if (ins.rows[0] && ins.rows[0].created) await noteShipmentCreated(client, po, authUser(req));
+    await client.query(`UPDATE planner.purchase_orders SET shipment_ref=$1 WHERE po=$1`, [po]);
+    await client.query('COMMIT');
+    res.json({ ok: true, mode, is_shipment: true, manufacturing });
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
 
 // ── SCENARIO PLANNER ───────────────────────────────────────────────────────
 // Prime Day: inventory by SKU split into FBA / 3PL / AWD per the selected market(s).

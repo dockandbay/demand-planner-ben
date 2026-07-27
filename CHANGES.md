@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.199 - PO self-shipment: Phase 1 (backend mode-gate lifecycle)
+- New endpoint POST /api/supply/po/:po/ship-mode. Picking a mode (sea/air/fob) turns a PO into its own shipment — a planner.shipments row with shipment_ref = the PO (reusing all existing shipment machinery: portal, freight/duty calc, timeline). Clearing the mode tears the self-shipment down (only when no other POs are aboard). branch=Manufacturing is always forced to FOB. If the PO is already assigned to a different master shipment, the endpoint refuses (409) — its mode is inherited from that master, not set here. No schema change (reuses shipments.mode/branch/country_code). Backend only; PO ▸ SHIPMENTS UI is Phase 2.
+
 ## v26.198 - DEMAND pill flash: make the mask persistent (not a one-shot)
 - v26.197 lifted hz-preboot at boot end, which left a frame where the pills fell back to display:flex before the runtime hide — so they still "showed then hid". Now hz-preboot is a persistent state driven by hzSyncDemandPills(): it stays on for every non-demand view (supply/product/scenario/config/buy/fba/exec/reports) and only lifts when the live DEMAND (planning) view is active; leaving demand re-adds it. Synced on boot, every view-toggle click, and in show/hide functions. Also stopped the 3s failsafe from blindly clearing the mask.
 
