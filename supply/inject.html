@@ -640,6 +640,9 @@
   #supply-content:not(.pay-filters-open) .pay-filters{display:none!important}
   #supply-root .pay-filters .bar,#supply-root .pay-filters.bar{gap:3px 5px}
   #supply-root .pay-filters .flt{max-width:100%}
+  /* PAYMENTS tables: size to content + scroll sideways instead of squashing to the phone width (beats the global table{width:100%}) */
+  #supply-root .pay-tbl{width:max-content!important;min-width:100%}
+  #supply-root .pay-tbl th,#supply-root .pay-tbl td{white-space:nowrap}
   #supply-root #op-filters .bar{gap:2px 3px;margin-bottom:5px}
   #supply-root #op-filters .pill-lbl{margin:0 3px 0 0!important;font-size:11px}
   #supply-root #op-filters .pill{padding:3px 7px;margin:2px 3px 2px 0;font-size:11px}
@@ -6368,7 +6371,7 @@
       document.getElementById('cf-body').innerHTML=
         (strip?'<div class="tiny mut" style="margin-bottom:3px">Next months — click a card to filter (committed + estimate)</div><div style="display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px">'+strip+'</div>':'')
         +'<div class="bar"><span class="count">'+summary+'</span></div>'
-        +'<div class="tw"><table><thead><tr><th class="l">Due</th><th class="l">Likely pay date</th><th class="l">Paid</th><th class="l">Status</th><th class="l">Type</th><th class="l">Reference</th><th style="text-align:right">Amount (USD)</th><th class="l">Month</th><th class="l">Supplier</th><th class="l">Mkt</th></tr></thead>'
+        +'<div class="tw"><table class="pay-tbl"><thead><tr><th class="l">Due</th><th class="l">Likely pay date</th><th class="l">Paid</th><th class="l">Status</th><th class="l">Type</th><th class="l">Reference</th><th style="text-align:right">Amount (USD)</th><th class="l">Month</th><th class="l">Supplier</th><th class="l">Mkt</th></tr></thead>'
         +'<tbody>'+(rows||'<tr><td colspan="10" class="l mut">No payments match.</td></tr>')+'</tbody>'
         +'<tfoot><tr class="batchrow"><td class="l" colspan="6"><b>TOTAL</b></td><td style="text-align:right"><b>$'+units(gT)+'</b></td><td colspan="3"></td></tr></tfoot></table></div>';
       // reference → open the PO (PLAN expanded) or the shipment (detail expanded) for payment review
@@ -6473,7 +6476,7 @@
         document.getElementById('oth-wrap').innerHTML='<div class="bar pay-filters" style="gap:5px"><span class="pill-lbl">Status</span>'+stPills
           +' <span class="pill-lbl" style="margin-left:8px">Supplier</span><select class="flt" id="oth-sup" style="width:auto">'+supOpts+'</select>'
           +'<span class="count" style="margin-left:auto">'+f.length+' / '+oth.length+'</span></div>'
-          +'<div class="tw"><table><thead><tr><th class="l">Reference</th><th class="l">Supplier</th><th class="l">Description</th><th>Amount</th><th class="l">Due date</th><th class="l">Date paid</th><th class="l">Status</th><th class="l"></th></tr></thead><tbody>'+(f.map(otherRow).join('')||'<tr><td colspan="8" class="l mut">No other payments match.</td></tr>')+'</tbody></table></div>';
+          +'<div class="tw"><table class="pay-tbl"><thead><tr><th class="l">Reference</th><th class="l">Supplier</th><th class="l">Description</th><th>Amount</th><th class="l">Due date</th><th class="l">Date paid</th><th class="l">Status</th><th class="l"></th></tr></thead><tbody>'+(f.map(otherRow).join('')||'<tr><td colspan="8" class="l mut">No other payments match.</td></tr>')+'</tbody></table></div>';
         bindEdits();
         document.querySelectorAll('#oth-wrap .pill[data-os]').forEach(function(p){p.onclick=function(){OTH_STATE.status=p.dataset.os;draw();};});
         document.getElementById('oth-sup').onchange=function(){OTH_STATE.supplier=this.value;draw();};
@@ -6530,7 +6533,7 @@
       document.getElementById('pdue-bar').innerHTML='<span class="pill-lbl">Status</span>'+stP
         +' <span class="pill-lbl" style="margin-left:8px">Supplier</span><select class="flt" id="pdue-sup" style="width:auto">'+supOpts+'</select>'
         +'<span class="count" style="margin-left:auto">'+f.length+' payments · '+order.length+' suppliers</span>';
-      var h='<div class="tw"><table><thead><tr><th class="l">Type</th><th class="l">Reference</th><th>Amount due</th><th class="l">Due date</th><th>Assigned</th><th class="l">Payment date</th></tr></thead><tbody>';
+      var h='<div class="tw"><table class="pay-tbl"><thead><tr><th class="l">Type</th><th class="l">Reference</th><th>Amount due</th><th class="l">Due date</th><th>Assigned</th><th class="l">Payment date</th></tr></thead><tbody>';
       if(!f.length) h+='<tr><td colspan="6" class="l mut">No payments match this filter.</td></tr>';
       order.forEach(function(s){ var gr=groups[s].slice().sort(function(a,c){return (a.due||'9999').localeCompare(c.due||'9999')||a.type.localeCompare(c.type);});
         var sub=gr.reduce(function(t,r){return t+(r.due_amt||0);},0); grand+=sub;

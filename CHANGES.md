@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.220 - PAYMENTS tables: scroll on mobile instead of squashing
+- Payments Due / Other Payments / Cash Flow tables were being crushed to the phone width (the global table{width:100%}). Tagged them .pay-tbl → on mobile they size to their content (nowrap cells) and scroll sideways within the .tw wrapper. Desktop unchanged.
+
 ## v26.219 - PAYMENTS pages: mobile ⚙ Filters toggle (Payments Due / Other Payments / Cash Flow)
 - Added a ⚙ Filters hide/show button (phone only) on Payments Due, Other Payments and Cash Flow — the filter bar starts collapsed on mobile and expands on tap, freeing the screen for the table (which already scrolls horizontally). Desktop unchanged (filters always shown). Same pattern as the ORDER PLAN filters toggle.
 
