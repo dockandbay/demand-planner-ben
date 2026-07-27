@@ -1429,12 +1429,16 @@
         +((sh.carrier&&sh.carrier_ref)?row('Carrier / tracking',esc(sh.carrier)+' · '+carrierTrackLinkInj(sh.carrier,sh.carrier_ref)):'')
         +(curMode==='fob'?'':shViewDate('Departure','departure_date','eff_departure')+shViewDate('Landing','landing_date','eff_landing')+shViewDate('Arrival','arrival_date','eff_arrival')+shViewDate('Completion','delivery_date','eff_completion'));
     } else {
-      var modeOpts=(isMfg?['','fob']:['','sea','air','fob']).map(function(m){ var L={'':'— not a shipment','sea':'Sea','air':'Air','fob':'FOB'}[m]; return '<option value="'+m+'"'+(curMode===m?' selected':'')+'>'+L+'</option>'; }).join('');
+      // When it IS a shipment (self), offer only the modes (no "— not a shipment"); a non-shipment gets the blank gate.
+      var _modeList=isMfg?['fob']:['sea','air','fob']; if(!selfShip)_modeList=[''].concat(_modeList);
+      var modeOpts=_modeList.map(function(m){ var L={'':'— not a shipment','sea':'Sea','air':'Air','fob':'FOB'}[m]; return '<option value="'+m+'"'+(curMode===m?' selected':'')+'>'+L+'</option>'; }).join('');
       var _actR=PO_ACTCOND.unassigned_shipment(r)?actMark(po,'unassigned_shipment'):'';
+      var _rightSide=selfShip
+        ? '<span class="mut tiny">🚢 <button class="ship-open" data-ref="'+esc(po)+'" title="open this shipment">'+esc(po)+' ↗</button> · <button class="po-ship-remove" data-po="'+esc(po)+'" style="border:none;background:none;color:#b91c1c;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">remove</button></span>'
+        : '<span class="mut tiny">— or</span> <button class="ship-pick" data-po="'+esc(po)+'">assign an existing shipment ▾</button>';
       var modeRow=row('Shipment mode'+(isMfg?' <span class="mut tiny">(Manufacturing → FOB)</span>':''),
         '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
-          +'<span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap"><select class="fci po-shipmode" data-po="'+esc(po)+'" style="min-width:160px">'+modeOpts+'</select>'
-            +(selfShip?'<span class="mut tiny">🚢 this PO is its own shipment ('+esc(po)+')</span>':'<span class="mut tiny">— or</span> <button class="ship-pick" data-po="'+esc(po)+'">assign an existing shipment ▾</button>')+'</span>'
+          +'<span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap"><select class="fci po-shipmode" data-po="'+esc(po)+'" style="min-width:120px">'+modeOpts+'</select>'+_rightSide+'</span>'
           +(_actR?'<span style="display:inline-flex;align-items:center;white-space:nowrap">'+_actR+'</span>':'')
         +'</div>');
       var detail='';
@@ -1530,21 +1534,24 @@
   function bindShipPick(){ document.querySelectorAll('#supply-root .ship-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openShipAssign(b.dataset.po,b); }; }); }
   // Self-shipment MODE gate: change the mode → create/teardown the PO's own shipment, then refresh the panel so the
   // shipment fields appear / disappear. (A plain field save would only update the row — it wouldn't assign / tear down.)
-  function bindPoShipMode(){ document.querySelectorAll('#supply-root .po-shipmode').forEach(function(sel){ if(sel._b)return; sel._b=1;
-    sel.onchange=function(){ var po=sel.dataset.po, mode=sel.value;
-      var cont=sel.closest('[id^="podet-"]'), m=cont&&/podet-(\d+)/.exec(cont.id), i=m&&m[1];
+  function bindPoShipMode(){
+    // Shared: apply a mode change (or removal with mode='') — optimistic instant render + background persist + revert-on-fail.
+    function apply(po, mode, anchorEl){
+      var cont=anchorEl.closest('[id^="podet-"]'), m=cont&&/podet-(\d+)/.exec(cont.id), i=m&&m[1];
       var pd=i&&document.getElementById('podet-'+i), d=pd&&pd._poDetail;
-      var prevShip=d?d.ship:undefined, prevPoShip=(poBy[po]||{}).shipment;   // snapshot for revert-on-failure
+      var prevShip=d?d.ship:undefined, prevPoShip=(poBy[po]||{}).shipment;
       function paint(){ if(!(pd&&d))return; pd.innerHTML=poDetailHTML(po,d,i); bindPay(po,i); var t=pd.querySelector('.potab[data-pt="shipments"]'); if(t)t.click(); try{ if(window.__poRowApply&&poBy[po])window.__poRowApply(poBy[po]); }catch(e){} }
-      // Optimistic INSTANT render (before the network call) — the fields appear/disappear with no wait.
       if(pd&&d){ var pr=poBy[po]||{}, mfg=/manufactur/i.test(pr.branch||''), eff=(mode&&mfg)?'fob':mode;
         if(eff){ var prev=(d.ship&&d.ship.is_self)?d.ship:{}; d.ship=Object.assign({},prev,{mode:eff,is_self:true,branch:prev.branch||pr.branch||'',country_code:prev.country_code||pr.country||''}); if(!('other_pos' in d.ship))d.ship.other_pos=0; if(poBy[po])poBy[po].shipment=po; }
         else { d.ship=null; if(poBy[po])poBy[po].shipment=''; }
         paint(); }
-      // Persist in the background; revert the optimistic render if it fails.
       fetch('/api/supply/po/'+encodeURIComponent(po)+'/ship-mode',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mode:mode})})
-        .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); })
-        .catch(function(e){ if(pd&&d){ d.ship=prevShip; if(poBy[po])poBy[po].shipment=prevPoShip; paint(); } alert('Could not set shipment mode: '+(e.message||e)); }); }; }); }
+        .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived();
+          if(pd&&d&&('ship' in j)){ d.ship=j.ship; paint(); } })
+        .catch(function(e){ if(pd&&d){ d.ship=prevShip; if(poBy[po])poBy[po].shipment=prevPoShip; paint(); } alert('Could not set shipment mode: '+(e.message||e)); });
+    }
+    document.querySelectorAll('#supply-root .po-shipmode').forEach(function(sel){ if(sel._b)return; sel._b=1; sel.onchange=function(){ apply(sel.dataset.po, sel.value, sel); }; });
+    document.querySelectorAll('#supply-root .po-ship-remove').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(){ if(!confirm('Remove '+b.dataset.po+' as a shipment? Its mode & shipment details will be cleared.'))return; apply(b.dataset.po, '', b); }; }); }
   // open a shipment from elsewhere: right-side drawer popout (stays on the current page). "Full page ↗" in the
   // drawer jumps to the full Shipments tab via gotoShipmentPage.
   function gotoShipment(ref){ openShipDrawer(ref); }
@@ -8573,10 +8580,9 @@
         if(!f.length){ c.innerHTML=bar+'<div style="padding:14px 2px;color:#94a3b8">No products for this filter.</div>'; var s0=document.getElementById('db-season'); if(s0)s0.onchange=function(){ _dashSeason=this.value; draw(); }; return; }
         var thStick='position:sticky;left:0;z-index:2;background:#f8fafc';
         var head='<thead><tr>'
-          +'<th rowspan="2" class="db-prodcell" style="text-align:left;padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #e5e7eb;'+thStick+';min-width:150px">Product</th>'
-          +'<th rowspan="2" style="text-align:center;padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #e5e7eb">Overall</th>'
-          +'<th colspan="'+DIMS.length+'" style="text-align:center;padding:5px 10px 2px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#64748b;border-bottom:1px solid #eef2f7">Component approval</th></tr>'
-          +'<tr>'+DIMS.map(function(dd){return '<th class="db-compcol" style="text-align:center;padding:2px 4px 6px;font-size:10px;color:#94a3b8;border-bottom:1px solid #e5e7eb;min-width:58px">'+esc(dd[1])+'</th>';}).join('')+'</tr></thead>';
+          +'<th class="db-prodcell" style="text-align:left;padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #e5e7eb;'+thStick+';min-width:150px">Product</th>'
+          +'<th style="text-align:center;padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #e5e7eb">Overall</th>'
+          +DIMS.map(function(dd){return '<th class="db-compcol" style="text-align:center;padding:6px 4px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #e5e7eb;min-width:58px">'+esc(dd[1])+'</th>';}).join('')+'</tr></thead>';
         var body=catKeys.map(function(cat){
           var grp='<tr><td colspan="'+(2+DIMS.length)+'" style="background:#eef2f7;border-top:2px solid #cbd5e1;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#475569;padding:4px 10px;'+thStick+'">'+esc(cat)+' <span style="font-weight:400;color:#94a3b8">('+cats[cat].length+')</span></td></tr>';
           return grp+cats[cat].map(function(r){ var pa=(r.status==='approved');

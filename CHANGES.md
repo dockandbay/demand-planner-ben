@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.208 - Dashboard header tidy; self-shipment fixes (resolve, finals, links)
+- PRODUCT ▸ DASHBOARD: removed the "Component approval" super-header row — just the component column headings now.
+- PO ▸ SHIPMENTS: picking Sea/Air now fills the FINAL calculated dates silently (ship-mode endpoint returns the computed shipment object; client repaints without a wait).
+- Fixed a PO that had a self-shipment row but a NULL purchase_orders.shipment_ref showing "not a shipment" (e.g. PO-55USLX-AW26-1): poShipObj now resolves the shipment via the master_po fallback (matching the grid), so it correctly shows the mode + fields.
+- When a PO IS its own shipment, the mode dropdown no longer offers "— not a shipment"; the "🚢 this PO is its own shipment (ref)" is a hyperlink that opens the shipment drawer, plus a "remove" link to clear it.
+
 ## v26.207 - PO grid: mode badge onto the badges row, compact + lowercase
 - The sea/air/fob badge now sits on the same row as the master / FLEX / carrier badges (a tidy flex row, gap 4px) instead of beside the shipment ref. Made it compact (font 8px, tight padding) and lowercase text with no icon (sea / air / fob).
 
