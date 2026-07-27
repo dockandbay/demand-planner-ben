@@ -1285,7 +1285,17 @@ app.post('/api/supply/consolidate', async (req, res) => {
     if (b.create) {
       const ins = await client.query(`INSERT INTO planner.shipments (shipment_ref, master_po, country_code)
         VALUES ($1, NULL, $2) ON CONFLICT (shipment_ref) DO NOTHING RETURNING shipment_ref`, [ref, String(b.country || '') || null]);
-      if (ins.rowCount) await noteShipmentCreated(client, ref, authUser(req));
+      if (ins.rowCount) {
+        await noteShipmentCreated(client, ref, authUser(req));
+        // Binding: seed the fresh consolidation shipment from the anchor PO's existing shipment (its self-shipment)
+        // so the new master isn't blank — carries over mode / carrier / transit dates.
+        const seed = String(b.seed_from || '').trim();
+        if (seed) await client.query(`UPDATE planner.shipments t SET mode=s.mode, carrier=s.carrier, carrier_ref=s.carrier_ref,
+            departure_date=s.departure_date, landing_date=s.landing_date, arrival_date=s.arrival_date, delivery_date=s.delivery_date,
+            branch=coalesce(t.branch,s.branch), country_code=coalesce(t.country_code,s.country_code), updated_at=now()
+          FROM planner.shipments s JOIN planner.purchase_orders p ON p.shipment_ref=s.shipment_ref
+          WHERE t.shipment_ref=$1 AND p.po=$2 AND s.shipment_ref<>$1`, [ref, seed]);
+      }
     } else {
       const ex = (await client.query(`SELECT 1 FROM planner.shipments WHERE shipment_ref=$1`, [ref])).rows[0];
       if (!ex) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'shipment ' + ref + ' does not exist (tick "create new" to make it)' }); }

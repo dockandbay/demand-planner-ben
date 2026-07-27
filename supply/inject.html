@@ -1437,6 +1437,8 @@
           +shEditDate('Departure','departure_date')+shEditDate('Landing','landing_date')+shEditDate('Arrival','arrival_date')+shEditDate('Completion','delivery_date')
           +row('Freight cost <span class="mut tiny">(manual — blank = auto from rates)</span>','<input class="fci" data-ep="'+shipEp+'" data-field="cost_manual" value="'+esc(sh.cost_manual!=null?sh.cost_manual:'')+'" style="width:120px">');
       }
+      if(selfShip){ var nAb=(sh.other_pos||0);
+        detail+=row('POs aboard','🚢 <b>'+esc(po)+'</b>'+(nAb>0?' + <b>'+nAb+'</b> other PO'+(nAb===1?'':'s'):' <span class="mut tiny">(just this PO)</span>')+' &nbsp; <button class="ship-open" data-ref="'+esc(po)+'">➕ add / manage POs ↗</button><div class="mut tiny" style="margin-top:2px">Add other POs to make this a consolidation master — they inherit this shipment&rsquo;s mode &amp; dates.</div>'); }
       shipBlock=modeRow+detail;
     }
     // Rule 2/3 doc block: list uploaded files of a category (admin uploads → supplier downloads), + upload control.
@@ -1815,7 +1817,7 @@
         else { ref=(document.getElementById('consol-ref').value||'').trim(); create=true; if(!ref){ alert('Enter a consolidation reference.'); return; } }
         if(pos.length<2 && create && !confirm('Only the anchor PO is selected — create a shipment with just '+A.po+'?'))return;
         var go=document.getElementById('consol-go'); go.disabled=true; go.textContent='Assigning…';
-        fetch('/api/supply/consolidate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ref:ref,pos:pos,create:create,country:A.country})}).then(function(r){return r.json();}).then(function(j){
+        fetch('/api/supply/consolidate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ref:ref,pos:pos,create:create,country:A.country,seed_from:anchorPo})}).then(function(r){return r.json();}).then(function(j){
           if(j&&j.error){ alert(j.error); go.disabled=false; go.textContent='Assign to shipment'; return; }
           bg.parentNode.removeChild(bg); shipFull=null; invalidateDerived(); delete cache['purchase-orders']; selectSection('purchase-orders');
         }).catch(function(e){ alert('Failed: '+(e.message||e)); go.disabled=false; go.textContent='Assign to shipment'; });

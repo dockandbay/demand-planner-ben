@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.201 - PO self-shipment: Phase 3 (convert to master + field binding)
+- A self-shipment PO ▸ SHIPMENTS tab now shows a "POs aboard" row with an add/manage-POs action — adding other POs turns it into a consolidation master, and they inherit this shipment's mode/dates (the master IS the self-shipment, so its fields are already bound — never blank).
+- When creating a NEW consolidation reference from an anchor PO (Analyse consolidation ▸ Create new), the new master is now seeded from that anchor's shipment (mode / carrier / transit dates) via a seed_from binding, so it doesn't start blank.
+
 ## v26.200 - PO self-shipment: Phase 2 (SHIPMENTS tab UI + mode gate)
 - PO ▸ SHIPMENTS tab now leads with a Shipment mode selector (— / Sea / Air / FOB; Manufacturing locked to FOB). Picking a mode turns the PO into its own shipment and reveals the full shipment field set inline — Carrier, Tracking/carrier ref, Status, Departure/Landing/Arrival/Completion, Freight cost (manual) — all editable, saving to the shipment via the existing autosave. FOB shows just the FOB note + production-end date (no transit/freight). When the PO is assigned to a different master shipment, the same fields show read-only and inherited from that master. po-detail now returns a `ship` object. Blank mode = not a shipment (planning calcs still default sea+branch, unchanged). Portal surfacing is Phase 4.
 
