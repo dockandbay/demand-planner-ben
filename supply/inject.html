@@ -776,7 +776,7 @@
   // full clickable tracking code (code + ↗) — dynamic carrier link; plain text if the carrier has no tracker
   function carrierTrackLinkInj(carrier,code){ if(!code)return ''; var u=carrierTrackUrl(carrier,code); return u?'<a href="'+u+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;font-weight:600" title="track with '+esc(carrier||'carrier')+' ↗">'+esc(code)+' ↗</a>':esc(code); }
   // coloured shipment-mode badge (sea / air / fob) — used on the PO grid next to the shipment
-  function poModeBadge(m){ m=String(m||'').toLowerCase(); var mp={sea:['🚢 Sea','#ccfbf1','#0f766e'],air:['✈ Air','#dbeafe','#1e40af'],fob:['FOB','#ede9fe','#6d28d9']}; var x=mp[m]; return x?'<span class="up-mode" style="background:'+x[1]+';color:'+x[2]+'">'+x[0]+'</span>':''; }
+  function poModeBadge(m){ m=String(m||'').toLowerCase(); var mp={sea:['🚢 Sea','#e0f2fe','#0369a1'],air:['✈ Air','#dcfce7','#166534'],fob:['FOB','#ede9fe','#6d28d9']}; var x=mp[m]; return x?'<span class="up-mode" style="background:'+x[1]+';color:'+x[2]+'">'+x[0]+'</span>':''; }
   // FLEX source badge that links to the Flexport shipment when a flex id is known; otherwise the plain badge
   function srctagLink(s,r){ if(s==='FLEX'&&r&&r.flex_id){ var u=flexUrl(r.flex_id); if(u)return '<a href="'+u+'" target="_blank" rel="noopener" class="src fx" style="text-decoration:none" title="open '+esc(r.flex_id)+' in Flexport ↗">FLEX ↗</a>'; } return srctag(s); }
   function annot(k){return '';}   // section description boxes removed (Ben) — ANNOT kept for reference only
@@ -1430,9 +1430,13 @@
         +(curMode==='fob'?'':shViewDate('Departure','departure_date','eff_departure')+shViewDate('Landing','landing_date','eff_landing')+shViewDate('Arrival','arrival_date','eff_arrival')+shViewDate('Completion','delivery_date','eff_completion'));
     } else {
       var modeOpts=(isMfg?['','fob']:['','sea','air','fob']).map(function(m){ var L={'':'— not a shipment','sea':'Sea','air':'Air','fob':'FOB'}[m]; return '<option value="'+m+'"'+(curMode===m?' selected':'')+'>'+L+'</option>'; }).join('');
-      var modeRow=row('Shipment mode'+(isMfg?' <span class="mut tiny">(Manufacturing → FOB)</span>':'')+(PO_ACTCOND.unassigned_shipment(r)?' '+actMark(po,'unassigned_shipment'):''),
-        '<select class="fci po-shipmode" data-po="'+esc(po)+'" style="min-width:160px">'+modeOpts+'</select>'
-        +(selfShip?' <span class="mut tiny">🚢 this PO is its own shipment ('+esc(po)+')</span>':' <span class="mut tiny">— or <button class="ship-pick" data-po="'+esc(po)+'">assign an existing shipment ▾</button></span>'));
+      var _actR=PO_ACTCOND.unassigned_shipment(r)?actMark(po,'unassigned_shipment'):'';
+      var modeRow=row('Shipment mode'+(isMfg?' <span class="mut tiny">(Manufacturing → FOB)</span>':''),
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
+          +'<span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap"><select class="fci po-shipmode" data-po="'+esc(po)+'" style="min-width:160px">'+modeOpts+'</select>'
+            +(selfShip?'<span class="mut tiny">🚢 this PO is its own shipment ('+esc(po)+')</span>':'<span class="mut tiny">— or</span> <button class="ship-pick" data-po="'+esc(po)+'">assign an existing shipment ▾</button>')+'</span>'
+          +(_actR?'<span style="display:inline-flex;align-items:center;white-space:nowrap">'+_actR+'</span>':'')
+        +'</div>');
       var detail='';
       if(selfShip && curMode==='fob'){
         detail=row('FOB','<span class="mut tiny">Factory pickup — no transit or freight details.'+(r.prod_end?' Production ends <b>'+esc(fd(r.prod_end))+'</b>.':'')+'</span>');
