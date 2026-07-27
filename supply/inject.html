@@ -775,6 +775,8 @@
   function carrierTrackTag(carrier,ref){ var u=carrierTrackUrl(carrier,ref); return u?' <a href="'+u+'" target="_blank" rel="noopener" class="mut" title="track with '+esc(carrier||'carrier')+' ↗" style="text-decoration:none">↗</a>':''; }
   // full clickable tracking code (code + ↗) — dynamic carrier link; plain text if the carrier has no tracker
   function carrierTrackLinkInj(carrier,code){ if(!code)return ''; var u=carrierTrackUrl(carrier,code); return u?'<a href="'+u+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;font-weight:600" title="track with '+esc(carrier||'carrier')+' ↗">'+esc(code)+' ↗</a>':esc(code); }
+  // coloured shipment-mode badge (sea / air / fob) — used on the PO grid next to the shipment
+  function poModeBadge(m){ m=String(m||'').toLowerCase(); var mp={sea:['🚢 Sea','#ccfbf1','#0f766e'],air:['✈ Air','#dbeafe','#1e40af'],fob:['FOB','#ede9fe','#6d28d9']}; var x=mp[m]; return x?'<span class="up-mode" style="background:'+x[1]+';color:'+x[2]+'">'+x[0]+'</span>':''; }
   // FLEX source badge that links to the Flexport shipment when a flex id is known; otherwise the plain badge
   function srctagLink(s,r){ if(s==='FLEX'&&r&&r.flex_id){ var u=flexUrl(r.flex_id); if(u)return '<a href="'+u+'" target="_blank" rel="noopener" class="src fx" style="text-decoration:none" title="open '+esc(r.flex_id)+' in Flexport ↗">FLEX ↗</a>'; } return srctag(s); }
   function annot(k){return '';}   // section description boxes removed (Ben) — ANNOT kept for reference only
@@ -2529,10 +2531,11 @@
     var _shipBadges=(r.is_master?'<span class="tool-badge bg-blue" style="font-size:8px;padding:0 4px" title="master / consolidation PO for this shipment">master</span>':'')
       +(_fxu?(r.is_master?' ':'')+'<a href="'+_fxu+'" target="_blank" rel="noopener" class="src fx" style="text-decoration:none" title="open '+esc(_fxfid)+' in Flexport ↗">FLEX ↗</a>':'')
       +(_carBadge?' '+_carBadge:'');
+    var _modeBadge=(!isMfg && r.shipment)?(' '+poModeBadge(r.ship_mode)):'';
     var shipcell=(isMfg
       ? '<span class="tool-badge bg-neutral" title="MANUFACTURING branch = FOB — collected at factory, no shipment assigned">FOB</span>'
       : (r.shipment
-        ? '<button class="ship-open" data-ref="'+esc(r.shipment)+'" title="open this shipment">'+esc(r.shipment)+'</button> <button class="ship-pick" data-po="'+esc(r.po)+'" title="reassign">▾</button>'
+        ? '<button class="ship-open" data-ref="'+esc(r.shipment)+'" title="open this shipment">'+esc(r.shipment)+'</button>'+_modeBadge+' <button class="ship-pick" data-po="'+esc(r.po)+'" title="reassign">▾</button>'
         : '<button class="ship-pick" data-po="'+esc(r.po)+'">— assign ▾</button>'))
       +(_shipBadges?'<div style="margin-top:2px">'+_shipBadges+'</div>':'');
     // exceptions surface inline at the data point (e.g. the DATES sub-tab Source column) + as per-sub-tab

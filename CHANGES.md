@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.205 - PO grid: coloured shipment-mode badge (sea / air / fob)
+- The PO grid Shipment cell now shows a coloured mode badge next to the shipment ref — 🚢 Sea (teal), ✈ Air (blue), FOB (purple) — from the assigned shipment (self or master). Manufacturing keeps its existing FOB badge.
+
 ## v26.204 - Self-shipment dates: show the final calculated date beside the override
 - The PO ▸ SHIPMENTS departure/landing/arrival/completion fields now show the FINAL calculated date next to each override input (like a shipment): override = prod_end+7 → +branch transit (air/sea by mode) → +7 completion. Read-only (inherited-from-master) view shows the finals too. Verified the computed finals match the SHIPMENTS grid exactly for the same self-shipment.
 
