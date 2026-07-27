@@ -1890,10 +1890,12 @@
       return false; },
     // ERP delivery-date deviation: planner completion date differs from Cin7 EstimatedDeliveryDate.
     // A first-class action so it counts on the PO-ref badge and the DATES tab consistently.
-    erp_date:function(r){ return r.erp_date_pending>0 && !poComplete(r); },
+    erp_date:function(r){ return r.erp_date_pending>0 && !poComplete(r) && !poErpNa(r); },
     // Order-plan lines differ from the ERP (never-pushed OR qty drift). ONE action ("push to align"),
     // not one-per-line — mapped to the ORDER PLAN tab where the deviations box + push button live.
-    erp_lines:function(r){ return r.progress!=='complete' && ((Number(r.erp_total)>0 && !(Number(r.erp_in)>0)) || Number(r.erp_pending)>0); }};
+    erp_lines:function(r){ return r.progress!=='complete' && !poErpNa(r) && ((Number(r.erp_total)>0 && !(Number(r.erp_in)>0)) || Number(r.erp_pending)>0); }};
+  // Manufacturing = FOB → the PO is never pushed to Cin7/Fulfil, so it has NO ERP state at all (no deviation, no "in sync").
+  function poErpNa(r){ return /manufactur/i.test((r&&r.branch)||''); }
   // PO-row action badge: label + which PO detail sub-tab each condition deep-links to.
   var PO_ACT_LABEL={payment_overdue:'Payment overdue',unpaid_payment:'Unpaid payment',late:'Late — should be completed',unassigned_shipment:'Unassigned shipment',production:'Late — should have shipped',dtc_not_approved:'Direct-to-Client not approved',po_not_approved:'Not confirmed by supplier',preship:'Pre-shipment documents overdue',erp_date:'ERP delivery date differs',erp_lines:'Order plan differs from ERP — push to align'};
   var PO_ACT_TAB={payment_overdue:'pay',unpaid_payment:'pay',late:'dates',unassigned_shipment:'shipments',production:'dates',dtc_not_approved:'client',po_not_approved:'masterdata',preship:'shipments',erp_date:'dates',erp_lines:'oplan'};
@@ -2036,7 +2038,7 @@
     function actItemsCount(){ return rows.filter(hasActions).length; }
     // ERP misalignment: PO has lines but none mirrored from ERP (never pushed → "upload entire PO"),
     // OR has lines whose planned qty/cost differ from the ERP (pending → "update"). Excludes complete POs.
-    function poErpMisaligned(r){ return r.progress!=='complete' && ((r.erp_total>0 && (!(r.erp_in>0) || r.erp_pending>0)) || r.erp_date_pending>0); }
+    function poErpMisaligned(r){ return r.progress!=='complete' && !poErpNa(r) && ((r.erp_total>0 && (!(r.erp_in>0) || r.erp_pending>0)) || r.erp_date_pending>0); }
     function erpCount(){ return rows.filter(poErpMisaligned).length; }
     // distinct non-empty values for a column (for the Production # / Batch filter dropdowns)
     function distinct(key){ var s={}; rows.forEach(function(r){ var v=r[key]; if(v!=null&&String(v).trim()!=='')s[String(v)]=true; }); return Object.keys(s).sort(function(a,b){return b.localeCompare(a,undefined,{numeric:true});}); }   // descending (newest PROD#/Batch first)
@@ -2575,7 +2577,8 @@
     var linesPending=(r.erp_total>0&&!(r.erp_in>0))||r.erp_pending>0;
     var datePending=r.erp_date_pending>0 && !poComplete(r);
     var erpCell;
-    if(linesPending && datePending) erpCell='<button class="erp-up tool-badge bg-purple" data-up="'+esc(r.po)+'" style="'+erpStyle+'" title="order-plan lines AND the completion date differ from the ERP">Update both</button>';
+    if(poErpNa(r)) erpCell='<span class="mut tiny" title="Manufacturing = FOB — not pushed to Cin7/Fulfil, so there is no ERP state">—</span>';   // no ERP for Manufacturing (not in sync, no deviation)
+    else if(linesPending && datePending) erpCell='<button class="erp-up tool-badge bg-purple" data-up="'+esc(r.po)+'" style="'+erpStyle+'" title="order-plan lines AND the completion date differ from the ERP">Update both</button>';
     else if(linesPending) erpCell='<button class="erp-up tool-badge bg-blue" data-up="'+esc(r.po)+'" style="'+erpStyle+'" title="'+((r.erp_total>0&&!(r.erp_in>0))?r.erp_total+' line(s) not yet in the ERP (never pushed)':r.erp_pending+' order-plan line(s) differ from the ERP')+'">Update lines</button>';
     else if(datePending) erpCell='<button class="erp-up tool-badge bg-amber" data-up="'+esc(r.po)+'" style="'+erpStyle+'" title="completed-at-warehouse '+esc(r.checkin||'?')+' ≠ ERP final delivery '+esc(r.erp_final_delivery||'?')+'">Update date</button>';
     else erpCell='<span class="tool-badge bg-green" title="planned quantities match the ERP">✓ in sync</span>';

@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.209 - Manufacturing POs: no ERP state at all (FOB, never in Cin7/Fulfil)
+- A Manufacturing-branch PO no longer shows any ERP badge in the PO grid — not "✓ in sync", not "Update lines/date/both". It shows a muted "—" (Manufacturing = FOB, never pushed to Cin7/Fulfil). Also excluded from the ERP-deviation action items and the ERP-compare count. (The line-drift flag was already excluded; the "not in ERP" / in-sync states were leaking — now gated via poErpNa.)
+
 ## v26.208 - Dashboard header tidy; self-shipment fixes (resolve, finals, links)
 - PRODUCT ▸ DASHBOARD: removed the "Component approval" super-header row — just the component column headings now.
 - PO ▸ SHIPMENTS: picking Sea/Air now fills the FINAL calculated dates silently (ship-mode endpoint returns the computed shipment object; client repaints without a wait).
