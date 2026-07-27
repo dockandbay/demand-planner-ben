@@ -4985,7 +4985,7 @@ app.post('/api/supply/po/:po/cin7-date', async (req, res) => {
     const upd = { id: Number(cin7Id) || cin7Id, estimatedDeliveryDate: edd };
     if (curApproved !== undefined) upd.isApproved = curApproved;
     const body = [upd];
-    const r = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
+    const r = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=false',
       { method: 'PUT', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify(body) });
     const txt = await r.text();
     if (!r.ok) return res.status(502).json({ error: 'Cin7 API error ' + r.status + ': ' + txt.slice(0, 300) });
@@ -5127,7 +5127,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
       // draft). Sending only id+lines (as before) let Cin7 reclassify the order as a sales order.
       const upd = Object.assign({ id: Number(cin7Id) || cin7Id, lineItems }, poFields);
       const body = [upd];
-      r = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
+      r = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=false',
         { method: 'PUT', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify(body) });
       txt = await r.text();
       trace.push({ step: 'update', method: 'PUT', endpoint: '/v1/PurchaseOrders', request: body, http: r.status, response: traceResp(txt) });
@@ -5141,7 +5141,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
       // Do NOT send `stage` — let Cin7 apply the account's default PO stage. currencyCode = the supplier's
       // default_currency (USD today); Cin7 looks up the rate. poFields carries memberId/company/branchId + draft.
       const create = Object.assign({ reference: po, currencyCode: poRow.currency || 'USD', lineItems }, poFields);
-      r = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
+      r = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=false',
         { method: 'POST', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify([create]) });
       txt = await r.text();
       trace.push({ step: 'create', method: 'POST', endpoint: '/v1/PurchaseOrders', request: [create], http: r.status, response: traceResp(txt) });
@@ -5196,7 +5196,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
             const fixItems = lines.map(l => ({ code: l.sku, qty: Number(l.qty), unitPrice: Number(l.price) || 0 }));
             const fix = fixItems.concat(extras.map(c => ({ code: byCode[c].code, qty: 0, unitPrice: Number(byCode[c].unitPrice) || 0 })));
             const body2 = [Object.assign({ id: Number(validateId) || validateId, lineItems: fix }, poFields)];   // keep the PO-anchoring fields so the corrective PUT doesn't reclassify it
-            const r2 = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
+            const r2 = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=false',
               { method: 'PUT', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify(body2) });
             trace.push({ step: 'correct', method: 'PUT', endpoint: '/v1/PurchaseOrders', request: body2, http: r2.status });
             validation.corrected = true; validation.correction_ok = r2.ok;
@@ -5313,7 +5313,7 @@ app.post('/api/supply/cin7-dates-sync', async (req, res) => {
     // 3) one batched PUT, echoing each PO's current approval state
     const batch = todo.map(t => { const upd = { id: t.id, estimatedDeliveryDate: t.edd };
       if (approvedById[t.id] !== undefined) upd.isApproved = approvedById[t.id]; return upd; });
-    const r = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=0',
+    const r = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=false',
       { method: 'PUT', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify(batch) });
     const txt = await r.text();
     if (!r.ok) return res.status(502).json({ error: 'Cin7 API error ' + r.status + ': ' + txt.slice(0, 300) });

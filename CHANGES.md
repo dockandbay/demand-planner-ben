@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.195 - FIX: Cin7 push 400 "loadboms The value '0' is not valid"
+- Cin7 tightened the `loadboms` query param to a boolean; our write URLs sent `loadboms=0`, which now fails model-binding with a 400 ("The value '0' is not valid") — blocking PO create/update pushes (e.g. PO-56UKLX6-AIR create). Changed all five Cin7 PurchaseOrders write/read calls to `loadboms=false`. Not a price/qty problem — line unitPrice (e.g. 4.20) was never the cause.
+- ⚠️ Cannot be verified from the sandbox (Cin7 calls hit PRODUCTION). Needs deploy to live, then Ben retries the push.
+
 ## v26.194 - Mobile: kill duplicate HORIZON badge + tighten DASHBOARD
 - Fixed the HORIZON version badge rendering twice on mobile: the dark top-bar already shows it (#hz-ver), so the in-page sub-nav badge (.ver) is now hidden under 640px across PRODUCT / SUPPLY / SCENARIO.
 - PRODUCT ▸ DASHBOARD matrix tightened for phones: smaller swatches, narrower product/component columns, compact overall pill, and the min-width cap lifted so more of the grid fits before it scrolls.
