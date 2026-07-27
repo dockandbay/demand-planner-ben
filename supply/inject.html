@@ -89,16 +89,13 @@
 .hz-verspin{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:4px;border-radius:6px;background:rgba(251,191,36,.96);z-index:6;pointer-events:none;font-size:8.5px;font-weight:800;color:#0f172a;letter-spacing:.02em;overflow:hidden}
 .hz-verspin::before{content:'';width:9px;height:9px;border:2px solid rgba(15,23,42,.3);border-top-color:#0f172a;border-radius:50%;animation:hzspin .7s linear infinite;flex:0 0 auto}
 @keyframes hzspin{to{transform:rotate(360deg)}}
+/* PRODUCT ▸ DASHBOARD: matrix table on desktop, card layout on mobile (toggled at 640px). */
+.db-mobile{display:none}
 /* Mobile: the dark top-bar (#hz-ver) already shows the HORIZON version badge, so hide the in-page one to avoid a duplicate. */
 @media (max-width:640px){
   #supply-root .ver,#scenario-root .ver,#product-root .ver{display:none !important}
-  /* PRODUCT ▸ DASHBOARD matrix — tighten so more of the grid fits without a wide scroll */
-  .db-matrix{min-width:0 !important;font-size:11px}
-  .db-matrix th,.db-matrix td{padding-left:4px !important;padding-right:4px !important}
-  .db-matrix .db-sw{width:22px !important;height:22px !important}
-  .db-matrix .db-prodcell{min-width:104px !important}
-  .db-matrix .db-compcol{min-width:38px !important}
-  .db-matrix .db-ov{font-size:9px !important;padding:1px 5px !important}
+  .db-desktop{display:none}
+  .db-mobile{display:block}
 }
 /* Timeline notifications — top-bar messages bell + unread counter + pop-down drawer */
 #supply-root #supply-subnav{position:relative}
@@ -8484,6 +8481,12 @@
         if(appr>=req) return '<td style="text-align:center;padding:6px 4px;background:#dcfce7;color:#166534;font-weight:700;font-size:12px" title="approved ('+appr+'/'+req+')">✓</td>';
         var exc=prodApproved;   // product overall approved but this component still pending → exception
         return '<td style="text-align:center;padding:6px 4px;background:'+(exc?'#fee2e2':'#fef3c7')+';color:'+(exc?'#991b1b':'#92400e')+';font-weight:700;font-size:11px'+(exc?';box-shadow:inset 0 0 0 2px #ef4444':'')+'" title="'+(exc?'EXCEPTION — product is approved but this component is still pending':'pending')+' ('+appr+'/'+req+' approved)">'+(exc?'⚠ ':'')+appr+'/'+req+'</td>'; }
+      // Mobile card chip for one component type
+      function compChip(label,comp,prodApproved){ var req=comp?(comp.req||0):0, appr=comp?(comp.appr||0):0, bg,fg,ring='',tag;
+        if(req===0){ bg='#f8fafc';fg='#94a3b8';tag='n/a'; }
+        else if(appr>=req){ bg='#dcfce7';fg='#166534';tag='✓'; }
+        else { var exc=prodApproved; bg=exc?'#fee2e2':'#fef3c7'; fg=exc?'#991b1b':'#92400e'; tag=(exc?'⚠ ':'')+appr+'/'+req; if(exc)ring=';box-shadow:inset 0 0 0 1.5px #ef4444'; }
+        return '<span style="display:inline-flex;align-items:center;gap:6px;background:'+bg+';color:'+fg+';border-radius:8px;padding:5px 10px;font-size:12px;line-height:1'+ring+'"><span style="font-weight:500;opacity:.9">'+esc(label)+'</span><span style="font-weight:800">'+tag+'</span></span>'; }
       function draw(){
         var f=rows.filter(function(r){ return r.status!=='dropped' && (_dashSeason==='__all'?true:r.season===_dashSeason); });
         var cats={}; f.forEach(function(r){ var k=r.category||'—'; (cats[k]=cats[k]||[]).push(r); });
@@ -8513,7 +8516,24 @@
               +DIMS.map(function(dd){ return cell((r.comps||{})[dd[0]], pa); }).join('')
               +'</tr>'; }).join('');
         }).join('');
-        c.innerHTML=bar+legend+'<div style="overflow-x:auto;border:1px solid #eef2f7;border-radius:8px"><table class="db-matrix" style="border-collapse:collapse;font-size:12px;width:100%;min-width:620px">'+head+'<tbody>'+body+'</tbody></table></div>';
+        var deskTable='<div class="db-desktop" style="overflow-x:auto;border:1px solid #eef2f7;border-radius:8px"><table class="db-matrix" style="border-collapse:collapse;font-size:12px;width:100%;min-width:620px">'+head+'<tbody>'+body+'</tbody></table></div>';
+        // Mobile: a clean card per product, grouped by category — swatch + name + overall status, then component chips.
+        var cards=catKeys.map(function(cat){
+          return '<div style="margin:2px 0 6px 2px;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#64748b">'+esc(cat)+' <span style="font-weight:400;color:#cbd5e1">'+cats[cat].length+'</span></div>'
+            +cats[cat].map(function(r){ var pa=(r.status==='approved');
+              var pend=DIMS.filter(function(dd){ var cc=(r.comps||{})[dd[0]]; return cc&&cc.req>0&&cc.appr<cc.req; }).length;
+              var excBanner=(pa&&pend)?'<div style="margin:9px 0 0;padding:6px 9px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:11px;color:#991b1b;font-weight:600">⚠ Approved, but '+pend+' component'+(pend===1?'':'s')+' still pending</div>':'';
+              var sw=r.has_swatch?'<img src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at||'')+'" style="width:44px;height:44px;object-fit:cover;border-radius:9px;border:1px solid #e5e7eb;flex:0 0 auto">':'<span style="width:44px;height:44px;border-radius:9px;border:1px dashed #cbd5e1;background:#f8fafc;flex:0 0 auto;display:inline-block"></span>';
+              return '<div class="db-open" data-ref="'+esc(r.ref)+'" style="border:1px solid #e5e7eb;border-radius:13px;padding:12px 13px;background:#fff;box-shadow:0 1px 2px rgba(15,23,42,.05);margin-bottom:11px;cursor:pointer'+(pa&&pend?';border-color:#fca5a5':'')+'">'
+                +'<div style="display:flex;gap:11px;align-items:center">'+sw
+                  +'<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14.5px;color:#0f172a;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(r.colour_name||'—')+'</div><div style="font-size:11px;color:#94a3b8;font-family:ui-monospace,Menlo,monospace;margin-top:1px">'+esc(r.ref)+'</div></div>'
+                  +ovPill(r.status)+'</div>'
+                +excBanner
+                +'<div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:11px;padding-top:11px;border-top:1px solid #f1f5f9">'+DIMS.map(function(dd){ return compChip(dd[1],(r.comps||{})[dd[0]],pa); }).join('')+'</div>'
+                +'</div>'; }).join('');
+        }).join('');
+        var mob='<div class="db-mobile">'+cards+'</div>';
+        c.innerHTML=bar+legend+deskTable+mob;
         var s=document.getElementById('db-season'); if(s)s.onchange=function(){ _dashSeason=this.value; draw(); };
         c.querySelectorAll('.db-open').forEach(function(el){ el.onclick=function(){ _prodDetailTab='master'; selectProductSub('plan'); setTimeout(function(){ renderProductDetail(el.dataset.ref); },0); }; });
       }

@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.196 - PRODUCT ▸ DASHBOARD: proper mobile card layout
+- Replaced the horizontally-scrolling matrix on mobile with a clean card-per-product layout (grouped by category): swatch + colour name + ref + overall status pill, then a row of component chips (green ✓ approved / amber pending n/N / grey n/a). Exceptions (product approved but a component pending) get a red-bordered card + a "⚠ Approved, but N components still pending" banner. Desktop keeps the full matrix table; the two toggle at 640px.
+
 ## v26.195 - FIX: Cin7 push 400 "loadboms The value '0' is not valid"
 - Cin7 tightened the `loadboms` query param to a boolean; our write URLs sent `loadboms=0`, which now fails model-binding with a 400 ("The value '0' is not valid") — blocking PO create/update pushes (e.g. PO-56UKLX6-AIR create). Changed all five Cin7 PurchaseOrders write/read calls to `loadboms=false`. Not a price/qty problem — line unitPrice (e.g. 4.20) was never the cause.
 - ⚠️ Cannot be verified from the sandbox (Cin7 calls hit PRODUCTION). Needs deploy to live, then Ben retries the push.
