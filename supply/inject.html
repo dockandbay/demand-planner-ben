@@ -4752,6 +4752,7 @@
       if(state.br && (s.branch||'').indexOf(state.br)<0)return false;
       if(state.fob==='fob' && s.mode_eff!=='fob')return false;       // FOB only
       if(state.fob==='nonfob' && s.mode_eff==='fob')return false;    // non-FOB only
+      if(!searching && s.no_pos)return false;   // empty shipments (no POs — e.g. an orphaned self-shipment) are hidden from the grid; still findable via search
       if(searching)return true;   // a shipment / PO search overrides the status filter (find it whatever its status)
       var complete=(s.status==='Complete'||s.status==='Completed');
       if(state.focus)return (s.starred || s.escalated) && !complete;   // Focus = starred OR escalated, active only (overrides status)
@@ -4805,7 +4806,7 @@
   // Conditions read the shipment row `s`; snooze reuses the shared /api/supply/actions/state store (_poActState)
   // with the key 'shipact|<ref>|<code>'. Snoozed items drop out of the counts unless "show snoozed" is on.
   var SHIP_ACTCOND={
-    unlinked:function(s){ return !shipComplete(s) && !!s.no_pos; },
+    unlinked:function(s){ return false; },   // empty shipments are now hidden from the grid (not an action to resolve) — see cur()
     no_flex:function(s){ return !shipComplete(s) && !!s.no_flex_match; },
     over_pallets:function(s){ return !shipComplete(s) && !shipShipping(s) && !!s.over_pallets; },
     escalated:function(s){ return !!s.escalated; },

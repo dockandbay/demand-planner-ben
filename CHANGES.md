@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.211 - Hide empty shipments (no POs) from the grid + portal
+- A shipment with no POs assigned (e.g. an orphaned self-shipment left behind after its PO was reassigned to another master) is now hidden from the SUPPLY ▸ Shipments grid (still findable via search) and never shows on the supplier portal (the portal is PO-driven so it already excluded them). Also stopped flagging "no POs linked" as an action item, since empties are no longer surfaced.
+
 ## v26.210 - Mode change binds the grid dates; PO detail honors your tab click while loading
 - Changing a PO's shipment mode now also refreshes the main PO grid row's ship/landing/delivery dates (the ship-mode endpoint returns the recomputed grid row; the client patches it on the backgrounded response — the shipment tab already updated instantly).
 - Opening a PO via PLAN and clicking SHIPMENTS while it's still loading now stays on SHIPMENTS — the async re-render honors the tab you clicked on the fast-paint view instead of snapping back to PAYMENTS.
