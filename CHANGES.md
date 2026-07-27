@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.213 - Portal: Inbox button shows the word "Inbox" on desktop
+- The top-bar Inbox control now reads "✉ Inbox N" on desktop (≥641px); stays icon-only "✉ N" on mobile to save space.
+
 ## v26.212 - Portal top-bar tidy + auto-prune orphaned self-shipments
 - Supplier portal: moved the Inbox (✉) and Recent (🕘) controls up into the persistent top bar, and removed the "Sign out" button (sessions expire on their own — not a required feature).
 - Auto-cleanup: when a self-shipment's only PO is reassigned away (via assign or consolidate), the now-empty self-shipment row is deleted automatically. Guarded — only prunes a true empty self-shipment (master = itself, no POs, no supplier charges); its timeline notes are removed with it. Verified on the sandbox.

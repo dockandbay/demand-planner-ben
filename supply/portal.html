@@ -12,6 +12,8 @@
   header.pv-top .sp{flex:1}
   .pv-btn{border:0;border-radius:8px;padding:7px 13px;font-weight:600;cursor:pointer;font-size:13px;background:#2563eb;color:#fff}
   .pv-btn.ghost{background:transparent;color:#cbd5e1;border:1px solid #475569}
+  .pp-inbox-lbl{display:none}                        /* "Inbox" word: desktop only */
+  @media (min-width:641px){ .pp-inbox-lbl{display:inline} }
   #pv-wrap{padding:14px 16px}   /* full-width (was boxed to 1100px, leaving empty margins on larger screens) */
   /* PO table was leaving a dead strip at the bottom. portal-view.js injects "#supply-root .tw{max-height:calc(100vh-210px)}"
      AFTER this style, so a plain "#pv-wrap .tw" loses on equal specificity + load order — the double-ID selector wins. */
