@@ -5983,7 +5983,8 @@ app.post('/api/supply/po/:po/ship-mode', async (req, res) => {
       await client.query(`DELETE FROM planner.shipment_notes WHERE shipment_ref=$1`, [po]);
       await client.query(`DELETE FROM planner.shipments WHERE shipment_ref=$1`, [po]);
       await client.query('COMMIT');
-      return res.json({ ok: true, mode: '', is_shipment: false });
+      const row0 = (await pool.query(PO_ROWS_SQL + ' WHERE calc4.po=$1', [po])).rows[0] || null;
+      return res.json({ ok: true, mode: '', is_shipment: false, ship: null, row: row0 });
     }
     const ins = await client.query(`INSERT INTO planner.shipments (shipment_ref, master_po, mode, branch, country_code)
       VALUES ($1,$1,$2,NULLIF($3,''),NULLIF($4,''))
@@ -5996,7 +5997,8 @@ app.post('/api/supply/po/:po/ship-mode', async (req, res) => {
     await client.query(`UPDATE planner.purchase_orders SET shipment_ref=$1 WHERE po=$1`, [po]);
     await client.query('COMMIT');
     const ship = await poShipObj(po);   // includes the FINAL calculated dates so the client can fill them silently
-    res.json({ ok: true, mode, is_shipment: true, manufacturing, ship });
+    const row1 = (await pool.query(PO_ROWS_SQL + ' WHERE calc4.po=$1', [po])).rows[0] || null;   // recomputed grid row (ship/landing/delivery dates) so the main PO grid stays bound
+    res.json({ ok: true, mode, is_shipment: true, manufacturing, ship, row: row1 });
   } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });

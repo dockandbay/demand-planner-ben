@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.210 - Mode change binds the grid dates; PO detail honors your tab click while loading
+- Changing a PO's shipment mode now also refreshes the main PO grid row's ship/landing/delivery dates (the ship-mode endpoint returns the recomputed grid row; the client patches it on the backgrounded response — the shipment tab already updated instantly).
+- Opening a PO via PLAN and clicking SHIPMENTS while it's still loading now stays on SHIPMENTS — the async re-render honors the tab you clicked on the fast-paint view instead of snapping back to PAYMENTS.
+
 ## v26.209 - Manufacturing POs: no ERP state at all (FOB, never in Cin7/Fulfil)
 - A Manufacturing-branch PO no longer shows any ERP badge in the PO grid — not "✓ in sync", not "Update lines/date/both". It shows a muted "—" (Manufacturing = FOB, never pushed to Cin7/Fulfil). Also excluded from the ERP-deviation action items and the ERP-compare count. (The line-drift flag was already excluded; the "not in ERP" / in-sync states were leaking — now gated via poErpNa.)
 

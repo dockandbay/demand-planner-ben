@@ -1547,7 +1547,9 @@
         paint(); }
       fetch('/api/supply/po/'+encodeURIComponent(po)+'/ship-mode',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mode:mode})})
         .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived();
-          if(pd&&d&&('ship' in j)){ d.ship=j.ship; paint(); } })
+          if(j.row){ poBy[po]=j.row; }   // fresh grid row (recalculated ship/landing/delivery dates) so the main PO grid stays bound
+          if(pd&&d){ if('ship' in j)d.ship=j.ship; paint(); }   // paint() re-applies the grid row via __poRowApply
+          else if(j.row){ try{ if(window.__poRowApply)window.__poRowApply(j.row); }catch(e){} } })
         .catch(function(e){ if(pd&&d){ d.ship=prevShip; if(poBy[po])poBy[po].shipment=prevPoShip; paint(); } alert('Could not set shipment mode: '+(e.message||e)); });
     }
     document.querySelectorAll('#supply-root .po-shipmode').forEach(function(sel){ if(sel._b)return; sel._b=1; sel.onchange=function(){ apply(sel.dataset.po, sel.value, sel); }; });
@@ -2810,9 +2812,12 @@
     }
     poFastPaint(po,i,wantTab); _loadPoDetailInner(po,i,wantTab); }
   function _loadPoDetailInner(po,i,wantTab){ fetch('/api/supply/po-detail/'+encodeURIComponent(po)).then(function(r){return r.json();})
-    .then(function(d){ var _pd=document.getElementById('podet-'+i); if(!_pd)return; _pd.innerHTML=poDetailHTML(po,d,i); _pd._poDetail=d;   // stash detail so a silent snooze can recompute tab badges in place
+    .then(function(d){ var _pd=document.getElementById('podet-'+i); if(!_pd)return;
+      // honor a tab the user clicked on the fast-paint view WHILE this was loading (else the re-render snaps back to PAYMENTS)
+      var _domTab=_pd.querySelector('.potab.active'), _domWant=_domTab?_domTab.dataset.pt:null;
+      _pd.innerHTML=poDetailHTML(po,d,i); _pd._poDetail=d;   // stash detail so a silent snooze can recompute tab badges in place
       bindPay(po,i); bindPoScrollPin(); applyPoPin();   // pin left + position for any current horizontal scroll
-      if(wantTab){ var t=document.querySelector('#podet-'+i+' .potab[data-pt="'+wantTab+'"]'); if(t)t.onclick(); } })
+      var _useTab=wantTab||_domWant; if(_useTab){ var t=document.querySelector('#podet-'+i+' .potab[data-pt="'+_useTab+'"]'); if(t)t.onclick(); } })
     .catch(function(e){ document.getElementById('podet-'+i).innerHTML='<span style="color:#dc2626">'+esc(e.message||e)+'</span>'; }); }
   // Editable PLAN payment panel. Terms come from the supplier; each milestone's amount, date and %
   // can be overridden inline (saves on blur). Saving re-pulls the PO so catch-up / owing ripple.
