@@ -7735,13 +7735,13 @@
     var sb=document.getElementById('supply-btn'); if(sb)sb.classList.add('active');
     var fb=document.getElementById('supply-float'); if(fb)fb.style.display='none';
     try{updatePermBanner();}catch(e){}
-    if(noSelect!==true)selectSection(current||'actions'); }   // noSelect: caller (applyRoute) will select the routed section itself
+    if(noSelect!==true)selectSection(current||'actions'); hzSyncDemandPills(); }   // noSelect: caller (applyRoute) will select the routed section itself
   function hideSupply(){ var app=document.getElementById('app'); if(app){app.classList.remove('supply-active');app.classList.remove('config-mode');}
     document.body.classList.remove('supply-on');
     var r=document.getElementById('supply-root'); if(r)r.style.display='none';
     var sb=document.getElementById('supply-btn'); if(sb)sb.classList.remove('active');
     var cb=document.getElementById('config-btn'); if(cb)cb.classList.remove('active');
-    var fb=document.getElementById('supply-float'); if(fb)fb.style.display=''; }
+    var fb=document.getElementById('supply-float'); if(fb)fb.style.display=''; setTimeout(hzSyncDemandPills,0); }
   // CONFIG top-level view: reuse the SUPPLY surface (supply-root + supply-content) but flag config-mode so
   // the SUPPLY section sub-nav is hidden and the CONFIG button (not SUPPLY) reads active.
   function enterConfig(){ showSupply(true); var app=document.getElementById('app'); if(app)app.classList.add('config-mode');
@@ -8271,7 +8271,7 @@
     var r=document.getElementById('scenario-root'); if(r)r.style.display='block';
     document.querySelectorAll('#view-tabs-row .view-toggle').forEach(function(b){b.classList.remove('active');});
     var sb=document.getElementById('scenario-btn'); if(sb)sb.classList.add('active');
-    scenSelect(scenCurrent); }
+    scenSelect(scenCurrent); hzSyncDemandPills(); }
   function hideScenario(){ var app=document.getElementById('app'); if(app)app.classList.remove('scenario-active');
     var r=document.getElementById('scenario-root'); if(r)r.style.display='none';
     var sb=document.getElementById('scenario-btn'); if(sb)sb.classList.remove('active'); }
@@ -8421,7 +8421,7 @@
     document.body.classList.add('supply-on');   // reveal the mobile top-bar search (used for product search on phone)
     var r=document.getElementById('product-root'); if(r)r.style.display='block';
     document.querySelectorAll('#view-tabs-row .view-toggle').forEach(function(b){b.classList.remove('active');});
-    var pb=document.getElementById('product-btn'); if(pb)pb.classList.add('active'); wireProdTopSearch(); }
+    var pb=document.getElementById('product-btn'); if(pb)pb.classList.add('active'); wireProdTopSearch(); hzSyncDemandPills(); }
   function hideProduct(){ var app=document.getElementById('app'); if(app)app.classList.remove('product-active');
     document.body.classList.remove('supply-on');
     var r=document.getElementById('product-root'); if(r)r.style.display='none';
@@ -9046,12 +9046,21 @@
       body.querySelector('#pt-post').onclick=function(){ var t=body.querySelector('#pt-in').value.trim(); if(!t)return; shipPost('/api/product/note',{ref:ref,body:t,author_email:(window.ME&&ME.email)||''},function(){ renderProdTimeline(body,ref); }); };
       var eb=body.querySelector('.prod-esc'); if(eb)eb.onclick=function(){ var msg=eb.dataset.msg||''; if(!msg){alert('No message to escalate.');return;} if(!confirm('Escalate this message for '+ref+' to the product-development team?'))return; eb.disabled=true; var t=eb.textContent; eb.textContent='Sending…'; shipPost('/api/product/escalate',{ref:ref,message:msg},function(j){ if(j&&j.error){alert(j.error);eb.disabled=false;eb.textContent=t;return;} alert(j&&j.sent?('Escalated — emailed '+j.emails.join(', ')):(j&&j.note)||'Escalated (no recipients configured).'); renderProdTimeline(body,ref); }); };
     }).catch(function(e){ body.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
+  // hz-preboot masks the DEMAND plan filter rows. It must persist on EVERY non-demand view (not just lift at boot) — else
+  // there's a frame where the rows fall back to their static display:flex before the runtime hide catches them. Only the
+  // live DEMAND (planning) view lifts it; leaving demand re-adds it. Called on boot + every view switch.
+  function hzSyncDemandPills(){ try{ var app=document.getElementById('app'); if(!app)return;
+    var nonDemand=app.classList.contains('supply-active')||app.classList.contains('product-active')||app.classList.contains('scenario-active')||app.classList.contains('config-mode');
+    var pb=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]');
+    var onDemand=!nonDemand && pb && pb.classList.contains('active');
+    document.documentElement.classList.toggle('hz-preboot', !onDemand); }catch(e){} }
   function boot(){ try{ if(ME===null)fetchMe(); ensureRoot(); ensureNavButton(); ensureBellButton(); ensureActivityButton(); ensureSuggestButton(); ensureScenarioRoot(); ensureScenarioButton(); ensureConfigButton(); ensureProductButton();
+    var _vtr=document.getElementById('view-tabs-row'); if(_vtr&&!_vtr._hzPillWired){ _vtr._hzPillWired=1; _vtr.addEventListener('click',function(e){ if(e.target&&e.target.closest('.view-toggle'))setTimeout(hzSyncDemandPills,0); }); }
     if(!_routed){ _routed=true; try{ if(/^#\/?(supply|config|scenario|demand|reports|buy|fba|planning|exec|product)(\/|$)/.test(location.hash)) applyRoute();
       else { var _land=(window.__HZ_LANDING||'supply/purchase-orders').replace(/^#?\/?/,''); location.hash='#/'+_land; applyRoute(); }   // no hash → per-user landing slug (server-injected), default SUPPLY ▸ Purchase Orders
-      document.documentElement.classList.remove('hz-hide-app'); document.documentElement.classList.remove('hz-preboot'); var _a=document.getElementById('app'); if(_a)_a.style.visibility='';   // reveal once routed (server hid it via hz-hide-app to avoid the DEMAND→SUPPLY flash)
-    }catch(e){ document.documentElement.classList.remove('hz-hide-app'); document.documentElement.classList.remove('hz-preboot'); var _ar=document.getElementById('app'); if(_ar)_ar.style.visibility=''; } }
-  }catch(e){ document.documentElement.classList.remove('hz-hide-app'); document.documentElement.classList.remove('hz-preboot'); var _a2=document.getElementById('app'); if(_a2)_a2.style.visibility=''; if(window.console)console.log('[SUPPLY] boot error',e&&e.message); } }
+      document.documentElement.classList.remove('hz-hide-app'); hzSyncDemandPills(); var _a=document.getElementById('app'); if(_a)_a.style.visibility='';   // reveal once routed; keep pills masked unless on DEMAND
+    }catch(e){ document.documentElement.classList.remove('hz-hide-app'); hzSyncDemandPills(); var _ar=document.getElementById('app'); if(_ar)_ar.style.visibility=''; } }
+  }catch(e){ document.documentElement.classList.remove('hz-hide-app'); hzSyncDemandPills(); var _a2=document.getElementById('app'); if(_a2)_a2.style.visibility=''; if(window.console)console.log('[SUPPLY] boot error',e&&e.message); } }
   if(window.console)console.log('[SUPPLY] inject __APP_VERSION__ executing');
   boot(); document.addEventListener('DOMContentLoaded',boot); window.addEventListener('load',boot);
   setTimeout(boot,600); setTimeout(boot,1800); setTimeout(boot,4000);

@@ -584,7 +584,8 @@ app.get('/', async (_req, res) => {
     // 3s failsafe reveal (belt-and-suspenders — the harness removes hz-hide-app once routed). The actual flash
     // prevention is HEAD_NOFLASH below: it must run in <head>, BEFORE the browser paints the static DEMAND filter
     // bar. A script at the end of <body> runs too late (the pills have already painted → flash).
-    const LANDING_JS = '<script>window.__HZ_LANDING=' + JSON.stringify(_land) + ';setTimeout(function(){document.documentElement.classList.remove("hz-hide-app");document.documentElement.classList.remove("hz-preboot");var b=document.getElementById("app");if(b)b.style.visibility="";},3000);</script>';
+    // Failsafe reveal only un-hides #app; hz-preboot (the demand-pill mask) is managed by hzSyncDemandPills so it persists on non-demand views.
+    const LANDING_JS = '<script>window.__HZ_LANDING=' + JSON.stringify(_land) + ';setTimeout(function(){document.documentElement.classList.remove("hz-hide-app");var b=document.getElementById("app");if(b)b.style.visibility="";},3000);</script>';
     const injectTail = LANDING_JS + FBADIMS_JS + FIT + (DEV ? loadInject() : SUPPLY_INJECT).split('__APP_VERSION__').join(APP_VERSION) + '</body>';
     html = html.replace('</body>', () => injectTail);
     // Flash prevention — MUST be in <head> so it runs before the body (the static DEMAND filter bar) is painted.

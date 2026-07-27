@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.198 - DEMAND pill flash: make the mask persistent (not a one-shot)
+- v26.197 lifted hz-preboot at boot end, which left a frame where the pills fell back to display:flex before the runtime hide — so they still "showed then hid". Now hz-preboot is a persistent state driven by hzSyncDemandPills(): it stays on for every non-demand view (supply/product/scenario/config/buy/fba/exec/reports) and only lifts when the live DEMAND (planning) view is active; leaving demand re-adds it. Synced on boot, every view-toggle click, and in show/hide functions. Also stopped the 3s failsafe from blindly clearing the mask.
+
 ## v26.197 - Kill DEMAND plan filter-pill flash on non-demand loads
 - The DEMAND plan filter rows (Country/Channel/Sort + category + tier/active rows) briefly painted on first load of non-demand pages (notably buy/fba/exec/reports hashes, where the whole-#app mask is intentionally off). Added a head-level `hz-preboot` mask that hides just those three rows (#ctabs-row/#filters-row2/#catrow1-wrap) from the very first paint, lifted at boot end after the app has routed. Skipped only for planning/demand hashes (where the pills belong). The artifact's own runtime show/hide is unchanged.
 
