@@ -1764,8 +1764,10 @@
               var unread=notes.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
               var list=(notes.length?tlDesc(notes).map(function(n){ var sup=(n.author_kind!=='internal'); var isNew=(!sup&&!n.read);
                 return '<div style="padding:7px 0;border-bottom:1px solid #f1f1f1;text-align:left'+(isNew?';background:#fffbeb':'')+'"><div class="mut tiny">'+esc(n.created_at||'')+' · '+(sup?'you':'Dock &amp; Bay')+(isNew?' <span class="ex-badge">NEW</span>':(!sup?' <span style="color:#94a3b8">· read</span>':''))+'</div><div style="white-space:pre-wrap">'+esc(n.body||'')+'</div></div>'; }).join(''):'<div class="mut" style="padding:6px 0;text-align:left">No messages yet.</div>');
-              box.innerHTML='<div style="max-width:640px;text-align:left"><div style="font-weight:700;font-size:13px;margin-bottom:8px">Messages'+(unread?' <span class="ex-badge" title="unread messages from Dock &amp; Bay">'+unread+' unread</span>':' <span class="mut tiny">(all read)</span>')+'</div>'
-                +'<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:10px"><textarea class="fci pp-prod-note" rows="2" placeholder="Add a comment…" style="flex:1;text-align:left"></textarea><button class="save-btn pp-prod-post" data-ref="'+esc(ref)+'">Post</button></div><div>'+list+'</div></div>';
+              box.innerHTML='<div style="max-width:640px;text-align:left">'
+                +'<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:10px"><textarea class="fci pp-prod-note" rows="2" placeholder="Add a comment…" style="flex:1;text-align:left"></textarea><button class="save-btn pp-prod-post" data-ref="'+esc(ref)+'">Post</button></div>'
+                +'<div style="font-weight:700;font-size:13px;margin-bottom:8px">Messages'+(unread?' <span class="ex-badge" title="unread messages from Dock &amp; Bay">'+unread+' unread</span>':' <span class="mut tiny">(all read)</span>')+'</div>'
+                +'<div>'+list+'</div></div>';
               var it=((_ppData&&_ppData.products)||[]).filter(function(x){return x.ref===ref;})[0];
               if(unread>0){ postJSON(EP.productNotesRead,{ref:ref},function(){ if(it)it.unread_dnb=0; setProdBadge();
                 var tb=box.parentNode&&box.parentNode.querySelector('.pd2-tab[data-t="timeline"] .ex-badge'); if(tb&&tb.parentNode)tb.parentNode.removeChild(tb); }); }

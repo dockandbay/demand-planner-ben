@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.214 - Portal PRODUCT timeline: entry box at the top
+- On the supplier portal PRODUCT ▸ Timeline, the comment/data-entry box now sits at the very top (above the "Messages" heading + the message list) instead of between them.
+
 ## v26.213 - Portal: Inbox button shows the word "Inbox" on desktop
 - The top-bar Inbox control now reads "✉ Inbox N" on desktop (≥641px); stays icon-only "✉ N" on mobile to save space.
 
