@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.239 - PO timeline: compose on top, dd-mmm-yy dates, submitter + date on submissions
+- PO drawer Timeline: the "post a note" box is now at the top, messages below it.
+- Supplier submission banners ("⏳ Awaiting your approval" / "✓ Applied") now show each submission's completion date as dd-mmm-yy and include who submitted it + the submission date.
+- The "Supplier submitted completion date …" timeline note / inbox message now formats the date as dd-mmm-yy (server; existing sandbox notes reformatted).
+
 ## v26.238 - DEMAND ▸ new SUMMARY tab (forecast rollup)
 - New "Summary" sub-tab next to Plan: a clean, read-only rollup of the PLAN forecast.
   - Follows PLAN's selected country/channel (own pills to switch).

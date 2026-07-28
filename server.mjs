@@ -2956,9 +2956,11 @@ async function escalateSend(r) { return sendResendEmail({ to: r.emails, subject:
 // A supplier submitting invoice / completion info should be VISIBLE, not silent: drop an UNREAD timeline note
 // on the PO (author_kind='supplier', read_at NULL → shows on the PO timeline + increments the ✉ unread badge).
 // Best-effort — never break the submit if the note fails.
+function ddMonYy(v) { const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})/); if (!m) return v;
+  return m[3] + '-' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][(+m[2]) - 1] + '-' + m[1].slice(2); }
 async function postSupplierSubmitNote(db, po, kind, value, by) {
   const label = kind === 'invoice_value' ? ('submitted invoice information — value ' + value)
-    : kind === 'completion_date' ? ('submitted completion date ' + value)
+    : kind === 'completion_date' ? ('submitted completion date ' + ddMonYy(value))
     : ('submitted ' + kind);
   try {
     const sid = (await db.query(`SELECT supplier_id FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0]?.supplier_id || null;
