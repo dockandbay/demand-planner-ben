@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.245 - Barcode ZIP: per-supplier folders labelled by kind
+- Downloading all barcodes for a supplier now names the folder inside the ZIP "<supplier> - Cartons" (for the Cartons/inners download) or "<supplier> - Product" (for the Products download), instead of just the supplier name.
+
 ## v26.244 - ORDER PLAN TOTAL row alignment fix (folded in from Diviyaj)
 - The PO-detail Order Plan TOTAL footer row had 7 cells vs the 8-column header, so the qty total sat under "Exceptions" instead of "Qty". Added the missing Exceptions-column `<td>` so totals align (Diviyaj had been re-applying this every deploy).
 

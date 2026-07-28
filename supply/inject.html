@@ -7186,6 +7186,7 @@
     if(!opts.noWarn && !confirmNoBatch(batch))return;
     var orig=btn?btn.textContent:''; if(btn){btn.disabled=true;}
     var needCI = kinds.indexOf('carton')>=0 || kinds.indexOf('inner')>=0;
+    var folderSuffix = needCI ? ' - Cartons' : ' - Product';   // per-supplier folder inside the ZIP: "<supplier> - Cartons" / "<supplier> - Product"
     var jobs=[fetchImgDataUri('/api/supply/asset/gotham-book'),fetchImgDataUri('/api/supply/asset/gotham-bold')];
     if(needCI){ jobs.push(fetchImgDataUri('/api/supply/asset/grs')); jobs.push(fetchImgDataUri('/api/supply/asset/db')); }
     Promise.all(jobs).then(function(a){
@@ -7199,8 +7200,8 @@
             var kp=kinds.filter(function(k){ return rowHasKind(r,k); }), ki=0;
             var a4=(opts.fmt==='a4');
             function nextKind(){ if(ki>=kp.length) return next(); var kind=kp[ki++];
-              if(a4){ renderLabelA4Pdf(kind,r,base,sw).then(function(pdf){ if(pdf) sups.forEach(function(sn){ files.push({name:(sn?zipSafe(sn)+'/':'')+kindPrefix(kind)+zipSafe(r.sku)+'_A4.pdf',data:pdf}); }); nextKind(); }); }
-              else { renderLabelPng(kind,r,base,sw).then(function(png){ if(png) sups.forEach(function(sn){ files.push({name:(sn?zipSafe(sn)+'/':'')+kindPrefix(kind)+zipSafe(r.sku)+'.png',data:png}); }); nextKind(); }); } }
+              if(a4){ renderLabelA4Pdf(kind,r,base,sw).then(function(pdf){ if(pdf) sups.forEach(function(sn){ files.push({name:(sn?zipSafe(sn+folderSuffix)+'/':'')+kindPrefix(kind)+zipSafe(r.sku)+'_A4.pdf',data:pdf}); }); nextKind(); }); }
+              else { renderLabelPng(kind,r,base,sw).then(function(png){ if(png) sups.forEach(function(sn){ files.push({name:(sn?zipSafe(sn+folderSuffix)+'/':'')+kindPrefix(kind)+zipSafe(r.sku)+'.png',data:png}); }); nextKind(); }); } }
             nextKind();
           });
         }
