@@ -1121,7 +1121,7 @@ app.get('/api/supply/label-data', async (req, res) => {
     const rows = (await pool.query(`
       SELECT sl.sku, sl.barcode_sku_name, sl.barcode_carton_name, sl.barcode_inner_name,
         sl.size, coalesce(p.size_short, sl.size_short, '') size_short, sl.category, sl.carton_qty,
-        sl.product_barcode, sl.carton_barcode, sl.inner_barcode, sl.grs_material, sl.swatch_url,
+        sl.product_barcode, sl.carton_barcode, sl.inner_barcode, sl.grs_material, coalesce(p.colour_swatch_url, sl.swatch_url) swatch_url,
         sl.uk_carton_l, sl.uk_carton_w, sl.uk_carton_h, sl.uk_carton_wt,
         coalesce(p.supplier_multiple_all,'') supplier_multiple, p.uk_rt, p.us_rt, p.eu_rt, coalesce(p.product_name,'') product_name
       FROM planner.sku_labels sl LEFT JOIN planner.products p ON p.sku=sl.sku
@@ -2050,7 +2050,7 @@ app.get('/api/supply/:section', async (req, res) => {
             GROUP BY l.sku)
           SELECT sl.sku, sl.barcode_sku_name, sl.barcode_carton_name, sl.barcode_inner_name,
             sl.size, coalesce(p.size_short, sl.size_short, '') size_short, sl.category, coalesce(sl.release_window,'') release_window, sl.carton_qty,
-            sl.product_barcode, sl.carton_barcode, sl.inner_barcode, sl.grs_material, sl.swatch_url,
+            sl.product_barcode, sl.carton_barcode, sl.inner_barcode, sl.grs_material, coalesce(p.colour_swatch_url, sl.swatch_url) swatch_url,
             sl.uk_carton_l, sl.uk_carton_w, sl.uk_carton_h, sl.uk_carton_wt,
             coalesce(sp.prod_nos,'') prod_nos, coalesce(sp.suppliers,'') suppliers,
             coalesce(p.supplier_multiple_all,'') supplier_multiple,
@@ -8860,7 +8860,7 @@ app.get('/api/portal/label-data', portalAuth, async (req, res) => {
     const rows = (await pool.query(`
       SELECT sl.sku, sl.barcode_sku_name, sl.barcode_carton_name, sl.barcode_inner_name,
         sl.size, coalesce(p.size_short, sl.size_short, '') size_short, sl.category, sl.carton_qty,
-        sl.product_barcode, sl.carton_barcode, sl.inner_barcode, sl.grs_material, sl.swatch_url,
+        sl.product_barcode, sl.carton_barcode, sl.inner_barcode, sl.grs_material, coalesce(p.colour_swatch_url, sl.swatch_url) swatch_url,
         sl.uk_carton_l, sl.uk_carton_w, sl.uk_carton_h, sl.uk_carton_wt,
         coalesce(p.supplier_multiple_all,'') supplier_multiple, p.uk_rt, p.us_rt, p.eu_rt, coalesce(p.product_name,'') product_name
       FROM planner.sku_labels sl LEFT JOIN planner.products p ON p.sku=sl.sku

@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.241 - Barcode swatch reads products.colour_swatch_url
+- Barcode label queries (3) now source the swatch from planner.products.colour_swatch_url (falling back to sku_labels.swatch_url), making colour_swatch_url the single source of truth. sku_labels.swatch_url is now redundant. No schema change.
+
 ## v26.240 - SUMMARY tab refinements
 - Cells now stack 3 values like PLAN: LY actual / forecast / growth% (for subcategory, SKU and totals).
 - SKU rows: removed product name; added A/B/C tier badge + launch and discontinue dates.
