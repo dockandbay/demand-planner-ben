@@ -6946,7 +6946,8 @@
     var tx=swX+swW+68;
     el.push(svgText(tx,bY+16,boxSku,{size:17,bold:true}));
     el.push(svgText(tx,bY+40,sizeName,{size:15}));
-    if(batch) el.push(svgText(tx,bY+66,'BATCH '+batch.batch,{size:15,bold:true}));
+    var _bl=(batch?'BATCH '+batch.batch:'')+(r.supplier_code?(batch?'   ':'')+r.supplier_code:'');   // batch number + 2-letter supplier code
+    if(_bl) el.push(svgText(tx,bY+66,_bl,{size:15,bold:true}));
     y=bY+swW+34;
     if(opts.grsUri && r.grs_material){ var gw=140,gh=Math.round(gw*185/273); el.push('<image x="'+(cx-gw/2)+'" y="'+y+'" width="'+gw+'" height="'+gh+'" href="'+opts.grsUri+'" xlink:href="'+opts.grsUri+'"/>'); y+=gh+20; }
     if(r.grs_material){ wrapLines(r.grs_material,70).slice(0,4).forEach(function(ln){ el.push(svgText(cx,y,ln,{size:11,fill:'#222',anchor:'middle'})); y+=15; }); }
@@ -7037,7 +7038,7 @@
     var swX=440,swY=15,swW=120;
     if(kind==='product' && opts.swatchUri) el.push('<image x="'+swX+'" y="'+swY+'" width="'+swW+'" height="'+swW+'" preserveAspectRatio="xMidYMid slice" href="'+opts.swatchUri+'" xlink:href="'+opts.swatchUri+'"/>');
     if(circle){ el.push('<circle cx="405" cy="50" r="30" fill="#111"/>'); el.push(svgText(405,58,circle,{size:circle.length>1?20:25,bold:true,fill:'#fff',anchor:'middle'})); }
-    if(batch){ var by=swY+swW+24; el.push(svgText(swX+swW/2,by,'BATCH '+batch.batch,{size:12,anchor:'middle'})); el.push(svgText(swX+swW/2,by+15,'DATE OF PRODUCTION:',{size:11,bold:true,anchor:'middle'})); el.push(svgText(swX+swW/2,by+30,batch.batch_date?fd(batch.batch_date):'',{size:12,bold:true,anchor:'middle'})); }
+    if(batch){ var by=swY+swW+24; el.push(svgText(swX+swW/2,by,'BATCH '+batch.batch+(r.supplier_code?'  '+r.supplier_code:''),{size:12,anchor:'middle'})); el.push(svgText(swX+swW/2,by+15,'DATE OF PRODUCTION:',{size:11,bold:true,anchor:'middle'})); el.push(svgText(swX+swW/2,by+30,batch.batch_date?fd(batch.batch_date):'',{size:12,bold:true,anchor:'middle'})); }
     // carton: GRS material text (icon artwork still TODO)
     if(kind==='carton' && r.grs_material){ var gy=afterSku+30; wrapLines(r.grs_material,72).slice(0,4).forEach(function(ln){ el.push(svgText(40,gy,ln,{size:9,fill:'#444'})); gy+=12; }); }
     // barcode

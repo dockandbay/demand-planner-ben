@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.243 - Barcode labels: show 2-letter supplier code next to the batch
+- Carton / inner / product labels now print the SKU's 2-letter supplier code (suppliers.code for products.main_supplier_final) next to the BATCH number. Barcode queries now return supplier_code (admin + portal). Size + batch already show (size from size_long; batch when a batch is selected).
+
 ## v26.242 - Barcode size = products.size_long + carton/inner barcode moved up
 - The size printed on barcode labels (and shown in the Barcodes grid) now comes from planner.products.size_long. Previously the label derived it from the product name / sku_labels.size (which showed e.g. "LANYARD" instead of "One Size"). Barcode queries now return size_long; lblSizeName prefers it (both admin + portal copies); the admin Barcodes grid "size" column shows the printed size.
 - CARTON and INNER label templates: the EAN barcode sits ~40px higher so its digits no longer overlap the compliance address block (both admin + portal copies).
