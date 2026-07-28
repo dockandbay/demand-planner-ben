@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.242 - Barcode size = products.size_long + carton/inner barcode moved up
+- The size printed on barcode labels (and shown in the Barcodes grid) now comes from planner.products.size_long. Previously the label derived it from the product name / sku_labels.size (which showed e.g. "LANYARD" instead of "One Size"). Barcode queries now return size_long; lblSizeName prefers it (both admin + portal copies); the admin Barcodes grid "size" column shows the printed size.
+- CARTON and INNER label templates: the EAN barcode sits ~40px higher so its digits no longer overlap the compliance address block (both admin + portal copies).
+
 ## v26.241 - Barcode swatch reads products.colour_swatch_url
 - Barcode label queries (3) now source the swatch from planner.products.colour_swatch_url (falling back to sku_labels.swatch_url), making colour_swatch_url the single source of truth. sku_labels.swatch_url is now redundant. No schema change.
 

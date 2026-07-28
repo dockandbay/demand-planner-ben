@@ -97,7 +97,7 @@
       document.fonts.add(a); document.fonts.add(b); return Promise.all([a.load(),b.load()]).catch(function(){}); }catch(e){ return Promise.resolve(); } }
   function wrapLines(s,max){ s=String(s||''); var w=s.split(/\s+/),lines=[],cur=''; w.forEach(function(t){ if((cur+' '+t).trim().length>max){ if(cur)lines.push(cur); cur=t; } else cur=(cur+' '+t).trim(); }); if(cur)lines.push(cur); return lines; }
   // friendly size = last " - " segment of the product name (e.g. "Quick Dry Towel - Navy - Extra Large …" → "Extra Large …")
-  function lblSizeName(r){ var pn=r.product_name||''; if(pn.indexOf(' - ')>=0){ var p=pn.split(' - '); return p[p.length-1].trim(); } return r.size||''; }
+  function lblSizeName(r){ if(r.size_long) return r.size_long; var pn=r.product_name||''; if(pn.indexOf(' - ')>=0){ var p=pn.split(' - '); return p[p.length-1].trim(); } return r.size||''; }
   // size-circle code: the source size_short field verbatim (blank for "One Size"); falls back to a derivation
   // from the size name until size_short is populated from the PIM.
   function lblCircle(r,sizeName){ var ss=(r.size_short||'').trim(); if(ss) return /^one\s*size$/i.test(ss)?'':ss;
@@ -140,7 +140,7 @@
     y+=18;
     var bits=ean13Pattern(code);
     // barcode anchored near the bottom, just above the address block (not floating mid-label)
-    var by=Math.max(y, H-190);
+    var by=Math.max(y, H-230);   // barcode sits higher so its digits don't overlap the address block at the bottom
     if(bits){ var m=4.5,bw=95*m,bx=(W-bw)/2,nH=85,gExt=22; el.push(eanBars(code,bx,by,m,nH,gExt)); var dbl=by+nH+30,c=String(code).replace(/\D/g,''); if(c.length===12)c='0'+c;
       el.push(svgText(bx-8,dbl,c[0],{size:30,anchor:'end'}));
       el.push(svgText(bx+24*m,dbl,c.slice(1,7),{size:30,anchor:'middle',ls:2}));
