@@ -1380,6 +1380,42 @@ app.post('/api/supply/crossdock-note', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Parse an uploaded Xero "Payable Invoice Summary" XLSX → structured rows for PAYMENTS ▸ Xero Compare.
+// Read-only (no DB write); the compare against Horizon happens client-side off the cashflow lines.
+app.post('/api/supply/xero-parse', async (req, res) => {
+  try {
+    const b64 = String((req.body || {}).data_base64 || '').replace(/^data:[^;]+;base64,/, '');
+    if (!b64) return res.status(400).json({ error: 'data_base64 required' });
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(Buffer.from(b64, 'base64'));
+    const ws = wb.worksheets[0];
+    if (!ws) return res.json({ rows: [] });
+    const txt = (c) => { const v = c && c.value; if (v == null) return ''; if (typeof v === 'object') { if (v.result != null) return String(v.result); if (v.text != null) return String(v.text); if (Array.isArray(v.richText)) return v.richText.map(t => t.text).join(''); return ''; } return String(v); };
+    const numv = (s) => { const n = parseFloat(String(s).replace(/[^0-9.\-]/g, '')); return isNaN(n) ? 0 : n; };
+    let hdr = -1, col = {};
+    for (let r = 1; r <= Math.min(ws.rowCount, 40); r++) {
+      const m = {}; ws.getRow(r).eachCell({ includeEmpty: false }, (c, cn) => { m[txt(c).trim().toLowerCase()] = cn; });
+      if (m['reference'] != null && m['status'] != null) { hdr = r;
+        col = { reference: m['reference'], contact: m['contact'], status: m['status'], rate: m['currency rate'],
+          net: m['net (gbp)'], balance: m['balance (gbp)'], currency: m['original currency'],
+          invdate: m['invoice date'], planned: m['planned date'] }; break; }
+    }
+    if (hdr < 0) return res.json({ rows: [], error: 'Could not find the report header (Reference / Status). Is this the Payable Invoice Summary export?' });
+    const rows = [];
+    for (let r = hdr + 1; r <= ws.rowCount; r++) {
+      const row = ws.getRow(r); const g = (cn) => cn ? txt(row.getCell(cn)) : '';
+      const reference = g(col.reference).trim(), status = g(col.status).trim(), supplier = g(col.contact).trim();
+      if (!reference && !status && !supplier) continue;
+      const first = reference.split('/')[0].trim();
+      rows.push({ reference, po: /^PO-/i.test(first) ? first : '', supplier, status, currency: g(col.currency).trim(),
+        rate: numv(g(col.rate)), net_gbp: numv(g(col.net)), balance_gbp: numv(g(col.balance)),
+        invoice_date: g(col.invdate).trim(), planned_date: g(col.planned).trim() });
+    }
+    res.json({ rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── SAMPLES — detail / address autocomplete / timeline (specific routes BEFORE the :section catch-all)
 app.get('/api/supply/sample-detail/:id', async (req, res) => {
   try {

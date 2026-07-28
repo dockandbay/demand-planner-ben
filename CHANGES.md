@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.248 - SUPPLY ▸ Payments: new "Xero Compare" tab
+- New Payments sub-tab that reconciles Xero payable invoices against Horizon. Link to the Xero Payable Invoice Summary report + instructions to export last month as XLSX and upload.
+- On upload: server parses the XLSX (exceljs, new POST /api/supply/xero-parse, read-only); the client compares every "Approved" (not-yet-paid) invoice's PO against Horizon's amount due (sum of unpaid deposit/completion/balance from cashflow). Xero balance is GBP × the export's exchange rate → USD to match Horizon.
+- Flags mismatches with an Issue column (amounts differ / Horizon shows nothing due / PO not found / no PO in reference). Each PO opens the PO popout drawer. Toggle to show all Approved rows vs just issues.
+
 ## v26.247 - PO timeline: internal notes show "<user> · Dock & Bay"
 - Internal (D&B) timeline notes now show the author as "ben@ · Dock & Bay" when the posting user is known (was just "ben@" or just "Dock & Bay"). Falls back to "Dock & Bay" only when no user was captured. NOTE: capture relies on the forwarded login header (server authUser) / session email — notes posted with neither still show generic "Dock & Bay".
 
