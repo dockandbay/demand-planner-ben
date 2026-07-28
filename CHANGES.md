@@ -3,6 +3,36 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.230 - Supplier portal PRODUCT fixes + sample feedback on timeline
+- Portal Product grid: the PLAN detail now opens in a row directly under the clicked product (pinned left + capped to viewport for phones), instead of at the bottom of the grid.
+- Portal: clicking a swatch (product grid + master data) pops up a larger version.
+- Portal Product status filter now defaults to "In development + actions" (in-dev items plus any with open D&B messages); added as a filter option.
+- Portal master-data "Size variants & components" table: new "Sample versions" column per component — each version with its shipment/tracking + Dock & Bay feedback note.
+- Dock & Bay sample feedback now also posts to the product timeline as a normal note (author + date/time), visible to the supplier. (server: /api/product/sample/:id/feedback posts a supplier_notes entry on new/changed feedback.)
+
+## v26.229 - Supplier portal: PRODUCT grouped by season → category
+- The supplier portal's Product grid now groups items by season (newest first) then category, with the same banded headers + counts as the admin PLAN grid. Filters/search still apply within the grouping.
+
+## v26.228 - PRODUCT master-data SAMPLES column + sample drawer fixes + nav race fix
+- PRODUCT master-data grid (size & variants) SAMPLES column: now shows the sample VERSION (→ opens the Samples tab), its shipment (📦 SR + carrier/tracking dynamic badge, DHL/FedEx/UPS/SF Express), and the admin feedback note below. Component labels (Product/Packaging/Labels…) are highlighted by approval — green ✓ approved, red ✗ rejected, amber ● pending. (server: samples query now returns version ref + admin_feedback.)
+- PRODUCT grid: fixed the dark expanded-block bottom rule — the facelift td rule was overriding it by specificity, so only the top line showed. Now both top and bottom bracket the expanded product.
+- Sample drawer: "Supplier marked shipped" action reworded — it fires on a tracking number OR a shipped status (SR-8 fired on the tracking code while supplier status was blank); "Set shipping" button now also appears when only tracking is entered, labelled accordingly. Moved "Supplier status" to sit just above "Our status". ✓ Done now saves + re-renders the drawer in place (no grid reload / no closing the open tab).
+- Navigation race: clicking a section while another is still loading (e.g. Actions → Samples) no longer flashes back to the slow one — the deferred render writes (Actions' cashflow hop, and the lookups warm-up for Samples/Shipments/POs) now re-check the nav token before painting.
+
+## v26.226 - CONFIG ▸ Suppliers: Credit type is now a dropdown
+- The "Credit type" field on the supplier editor was free text; it's now a dropdown (— none — / On shipment / On clearance) mapping to the stored values on_shipment / on_clearance. No schema change; UI only.
+
+## v26.225 - Sample feedback to supplier + clearer PRODUCT grid rows
+- PRODUCT ▸ product ▸ Samples: each sample version now has an editable "Feedback to supplier" box (admin-authored, saves on blur). It shows read-only to the supplier in the portal against the matching sample version (amber "Feedback from Dock & Bay" note). Migration 156 adds planner.product_dev_samples.admin_feedback.
+- PRODUCT grid: darker horizontal row separators so rows are easier to tell apart; an expanded product now has a strong top rule + a strong bottom rule under its detail panel, so the whole product block is clearly bracketed from the next row.
+- Test data: SS27-TOWEL-BL-02 sample versions v1/v2 backfilled with sizes/aspects (they had none, so didn't map to a size row in the master-data grid); v3 given example feedback.
+- New migration: **156_sample_admin_feedback.sql**.
+
+## v26.221 - PRODUCT facelift pass 1 (REVIEW — not pushed until approved)
+- Design system for the PRODUCT module: segmented sub-nav, refined filter bar, cohesive spacing/typography/colour tokens.
+- PLAN view is now hybrid: a cleaner, airier list on desktop; a card-per-product layout on mobile (swatch + colour + ref + status chip + summary), tap a card to open its detail inline. Grouped by season → category throughout.
+- Pass 1 focuses on the PLAN view + shared shell; Dashboard/Range/Reports inherit the new sub-nav and will get the same language once the direction is approved.
+
 ## v26.220 - PAYMENTS tables: scroll on mobile instead of squashing
 - Payments Due / Other Payments / Cash Flow tables were being crushed to the phone width (the global table{width:100%}). Tagged them .pay-tbl → on mobile they size to their content (nowrap cells) and scroll sideways within the .tw wrapper. Desktop unchanged.
 

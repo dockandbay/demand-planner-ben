@@ -3329,7 +3329,7 @@ app.get('/api/product/item/:ref', async (req, res) => {
       pool.query(`SELECT id, filename, mime, byte_size, coalesce(uploaded_by,'') uploaded_by, coalesce(uploader_kind,'internal') uploader_kind, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments WHERE po=$1 AND category='product' ORDER BY uploaded_at DESC`, [ref]),
       pool.query(`SELECT ps.id, ps.version, coalesce(ps.dimension,'product') dimension,
         CASE WHEN coalesce(ps.dimension,'product')='product' THEN ps.item_ref||'_v'||ps.version ELSE ps.item_ref||'_'||ps.dimension||'_v'||ps.version END ref,
-        coalesce(ps.sample_sizes,'{}') sample_sizes, coalesce(ps.sampled_aspects,'{}') sampled_aspects,
+        coalesce(ps.sample_sizes,'{}') sample_sizes, coalesce(ps.sampled_aspects,'{}') sampled_aspects, coalesce(ps.admin_feedback,'') admin_feedback,
         coalesce((SELECT json_agg(jsonb_build_object('ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,'')) ORDER BY sr.ref)
           FROM planner.sample_request_dev_samples l JOIN planner.sample_requests sr ON sr.id=l.sample_request_id WHERE l.dev_sample_id=ps.id),'[]'::json) shipments
         FROM planner.product_dev_samples ps WHERE ps.item_ref=$1 ORDER BY ps.dimension, ps.version`, [ref]),
@@ -3381,7 +3381,8 @@ app.get('/api/product/item/:ref/sizes', async (req, res) => {
       pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort, coalesce(mapped_sku,'') mapped_sku, approved_sample_id
         FROM planner.product_dev_sizes WHERE item_id=(SELECT id FROM planner.product_dev_items WHERE ref=$1) ORDER BY sort, id`, [ref]),
       pool.query(`SELECT ps.id, ps.version, coalesce(ps.dimension,'product') dimension,
-        coalesce(ps.sample_sizes,'{}') sample_sizes, coalesce(ps.sampled_aspects,'{}') sampled_aspects,
+        CASE WHEN coalesce(ps.dimension,'product')='product' THEN ps.item_ref||'_v'||ps.version ELSE ps.item_ref||'_'||ps.dimension||'_v'||ps.version END ref,
+        coalesce(ps.sample_sizes,'{}') sample_sizes, coalesce(ps.sampled_aspects,'{}') sampled_aspects, coalesce(ps.admin_feedback,'') admin_feedback,
         coalesce((SELECT json_agg(jsonb_build_object('ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,'')) ORDER BY sr.ref)
           FROM planner.sample_request_dev_samples l JOIN planner.sample_requests sr ON sr.id=l.sample_request_id WHERE l.dev_sample_id=ps.id),'[]'::json) shipments
         FROM planner.product_dev_samples ps WHERE ps.item_ref=$1 ORDER BY ps.dimension, ps.version`, [ref]),
@@ -3739,6 +3740,7 @@ async function productSampleList(itemRef) {
     ps.colour_verified, ps.quality_verified, coalesce(ps.description,'') description, coalesce(ps.created_by,'') created_by,
     coalesce(ps.sampled_aspects,'{}') sampled_aspects, coalesce(ps.sample_sizes,'{}') sample_sizes,
     coalesce(ps.supplier_status,'in_development') supplier_status, coalesce(ps.not_shipped,false) not_shipped,
+    coalesce(ps.admin_feedback,'') admin_feedback,
     to_char(ps.created_at,'YYYY-MM-DD HH24:MI') created_at,
     coalesce((SELECT json_agg(json_build_object('id',sr.id,'ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,'')) ORDER BY sr.created_at)
       FROM planner.sample_request_dev_samples l JOIN planner.sample_requests sr ON sr.id=l.sample_request_id
@@ -3787,6 +3789,19 @@ app.get('/api/product/samples/:ref', async (req, res) => {
 app.post('/api/product/sample', async (req, res) => {
   try { res.json({ ok: true, ...(await createProductSample(req.body || {}, ((req.body || {}).created_by || '').trim() || shortUser(authUser(req)) || null)) }); }
   catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/product/sample/:id/feedback', async (req, res) => {   // admin-authored feedback on a sample version (shown read-only to the supplier in the portal)
+  try { const fb = String((req.body || {}).admin_feedback || '').trim();
+    const prev = (await pool.query(`SELECT item_ref, version, coalesce(dimension,'product') dimension, coalesce(admin_feedback,'') admin_feedback FROM planner.product_dev_samples WHERE id=$1`, [req.params.id])).rows[0];
+    await pool.query(`UPDATE planner.product_dev_samples SET admin_feedback=$2 WHERE id=$1`, [req.params.id, fb || null]);
+    // new / changed feedback also lands on the product timeline as a normal note (author + timestamp), visible to the supplier
+    if (prev && fb && fb !== prev.admin_feedback) {
+      const verRef = prev.dimension === 'product' ? `${prev.item_ref}_v${prev.version}` : `${prev.item_ref}_${prev.dimension}_v${prev.version}`;
+      const by = (String((req.body || {}).author || '').trim()) || shortUser(authUser(req)) || null;
+      await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'internal',$3)`, [prev.item_ref, by, 'Feedback on sample ' + verRef + ': ' + fb]);
+    }
+    res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/sample/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.product_dev_samples WHERE id=$1`, [req.params.id]);

@@ -43,7 +43,7 @@
 #product-root .pd-skel-row{height:34px;margin-bottom:8px;border-radius:6px;background:linear-gradient(90deg,#f1f5f9 25%,#e2e8f0 37%,#f1f5f9 63%);background-size:400% 100%;animation:pdShimmer 1.2s ease-in-out infinite}
 #product-root .pd-skel-row:first-child{height:22px;width:40%}
 @keyframes pdShimmer{0%{background-position:100% 0}100%{background-position:0 0}}
-#product-root .pg-detrow > td{background:#fff;border-bottom:2px solid #dbeafe;padding:12px 10px}
+#product-root table.pg-tbl tr.pg-detrow > td{background:#fff;border-bottom:3px solid #94a3b8;padding:12px 10px}
 /* highlight the expanded row light yellow (like the PO grid) — beats the sticky/hover bg */
 #product-root table.pg-tbl tr.pg-openrow > td{background:#fffbeb}
 #product-root .pm-field{width:280px;max-width:100%}
@@ -70,6 +70,44 @@
 #product-root .cell-pick:hover{color:#1d4ed8}
 #product-root .pg-ref{font-weight:700;font-family:ui-monospace,Menlo,monospace}
 #product-root .pg-colour{font-weight:400;font-size:10px;color:#94a3b8;margin-top:1px}
+/* ═══ PRODUCT facelift (v26.221) — design system + hybrid list⇄cards ═══ */
+#product-root{--p-ink:#0f172a;--p-mut:#64748b;--p-line:#e6e9ef;--p-bg:#f7f8fb;--p-acc:#4f46e5}
+/* sub-nav: keep HORIZON's standard .stab style (consistent with SUPPLY / SCENARIO) — no bespoke restyle */
+/* filter bar */
+#product-root #pg-filters{gap:8px;align-items:center;margin-bottom:14px}
+#product-root #pg-filters .fci{border:1px solid #d5dae3;border-radius:9px;padding:7px 11px;font-size:12px;background:#fff;color:#0f172a}
+#product-root #pg-filters .fci:focus{outline:none;border-color:var(--p-acc);box-shadow:0 0 0 3px rgba(79,70,229,.12)}
+#product-root #pg-count{margin-left:auto}
+/* desktop list refinements */
+#product-root .pg-desktop .tw{border:1px solid var(--p-line);border-radius:12px;background:#fff}
+#product-root table.pg-tbl td{padding:9px 12px;border-bottom:1px solid #d8dde7}
+/* an expanded product row gets a strong top rule so the whole product block (row + its detail panel) reads as one unit, clearly bracketed from neighbours */
+#product-root table.pg-tbl tr.pg-openrow > td{border-top:2px solid #94a3b8}
+#product-root table.pg-tbl th{padding:9px 12px;background:#fbfcfe;color:#8a93a3;border-bottom:1px solid var(--p-line)}
+#product-root table.pg-tbl tr:hover td{background:#f8faff}
+#product-root .pg-swatch2{width:44px;height:44px;border-radius:9px;box-shadow:0 1px 2px rgba(15,23,42,.10)}
+#product-root .pg-ref{font-weight:700;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:#0f172a}
+#product-root .pg-colour{font-size:12px;color:#475569;font-weight:600;margin-top:2px}
+/* hybrid toggle */
+#product-root .pg-mobile{display:none}
+/* mobile cards */
+#product-root .pgm-shdr{font-weight:800;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#334155;background:#e7ebf2;border-radius:8px;padding:6px 11px;margin:14px 0 8px}
+#product-root .pgm-chdr{font-weight:700;font-size:11px;letter-spacing:.02em;color:#64748b;margin:10px 2px 7px}
+#product-root .pgm-card{border:1px solid var(--p-line);border-radius:14px;background:#fff;padding:12px 13px;margin-bottom:10px;box-shadow:0 1px 2px rgba(15,23,42,.05);cursor:pointer;transition:box-shadow .12s,border-color .12s}
+#product-root .pgm-card:active{box-shadow:0 2px 8px rgba(15,23,42,.10)}
+#product-root .pgm-card.open{border-color:#c7d2fe;box-shadow:0 4px 14px rgba(79,70,229,.12)}
+#product-root .pgm-top{display:flex;gap:12px;align-items:center}
+#product-root .pgm-sw{width:52px;height:52px;object-fit:cover;border-radius:11px;border:1px solid #e5e7eb;flex:0 0 auto;box-shadow:0 1px 2px rgba(15,23,42,.10)}
+#product-root .pgm-sw.none{display:inline-block;background:#f1f5f9}
+#product-root .pgm-meta{flex:1;min-width:0}
+#product-root .pgm-colour{font-weight:700;font-size:15px;color:#0f172a;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#product-root .pgm-ref{font-size:11px;color:#94a3b8;font-family:ui-monospace,Menlo,monospace;margin-top:2px;display:flex;align-items:center;gap:6px}
+#product-root .pgm-sub{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:10px;padding-top:10px;border-top:1px solid #f1f3f7;font-size:12px;color:#64748b}
+#product-root .pg-mdet{background:#fff}
+@media(max-width:640px){
+  #product-root .pg-desktop{display:none}
+  #product-root .pg-mobile{display:block}
+}
 @media(max-width:640px){
   #product-root .pg-swatch2{width:26px;height:26px}
   #product-root table.pg-tbl td,#product-root table.pg-tbl th{padding:5px 6px}
@@ -978,12 +1016,14 @@
         detail:x.type+' · $'+units(x.amount)+' · '+(x.likely_date?('likely '+fd(x.likely_date)):('due '+(x.due?fd(x.due):'—')))+' · '+cfMonthLabel(x.month),
         fix:'gotoitem', gotarget:go, target:'', target_key:x.ref }); });
     return out; }
-  function renderActions(rows,partial){ var c=document.getElementById('supply-content'); fetchLookups(function(){
+  function renderActions(rows,partial){ var c=document.getElementById('supply-content'); var _tk=_navToken; fetchLookups(function(){
+    if(_tk!==_navToken)return;   // navigated away during the (async) lookups warm-up → don't paint over the newer view
     if(partial){ actBuild(rows,c,true); return; }   // priority preview — skip the (slow) cashflow fetch; the full phase adds it
     fetch('/api/supply/cashflow').then(function(r){return r.json();}).then(function(cf){
+      if(_tk!==_navToken)return;   // the slow cashflow hop is where Actions used to land on top of a view you'd already clicked to
       try{ var extra=cfUnpaidActions(cf); if(extra.length)rows=extra.concat(rows); }catch(e){}
       actBuild(rows,c);
-    }).catch(function(){ actBuild(rows,c); }); }); }
+    }).catch(function(){ if(_tk!==_navToken)return; actBuild(rows,c); }); }); }
   // Instant shell: paint the Actions header + sub-nav + a spinner synchronously so the section appears immediately
   // (before any fetch resolves). actBuild() re-renders this same structure with live data + wired sub-tabs.
   function actShell(c){ if(!c)return;
@@ -1398,7 +1438,7 @@
         var body=h.parentNode.querySelector('.up-sec-body'), chev=h.querySelector('.up-chev'); if(body)body.style.display=_up.col[k]?'none':''; if(chev)chev.textContent=_up.col[k]?'▸':'▾'; }; });
     };
     view(); }
-  function renderPO(rows){ var c=document.getElementById('supply-content'); fetchLookups(function(){ poInner(rows,c); }); }
+  function renderPO(rows){ var c=document.getElementById('supply-content'); var _tk=_navToken; fetchLookups(function(){ if(_tk!==_navToken)return; poInner(rows,c); }); }
   // PLAN-panel MASTER DATA tab (#2): edit this PO's key fields (PO Number rename / Branch / Supplier / Production
   // / Batch / Shipment) + delete the PO. Rendered inside a single PO's PLAN panel.
   function poMasterPanel(po){ var r=poBy[po]||{}; var ep='/api/supply/po/'+encodeURIComponent(po);
@@ -1947,7 +1987,7 @@
     return out; }
   function poActions(r){ return poActionsAll(r).filter(function(k){ return _poShowSnoozed || !poActSnoozed(r.po,k); }); }
   // ── SAMPLE exceptions (mirror the PO action model; reuse _poActState + _poShowSnoozed + the actions/state API) ──
-  var SAMP_ACT_LABEL={supplier_shipped:'Supplier marked shipped — set our status to SHIPPED',date_overdue:'Date overdue — completion/expected date has passed',charge_review:'Charge to review',unread:'Unread supplier note'};
+  var SAMP_ACT_LABEL={supplier_shipped:'Supplier signalled shipped (marked shipped OR entered a tracking number) — set our status to SHIPPED',date_overdue:'Date overdue — completion/expected date has passed',charge_review:'Charge to review',unread:'Unread supplier note'};
   function sampActionsAll(s){ var out=[]; var us=String(s.status_calc||s.status||'').toUpperCase(); var active=(us!=='SHIPPED'&&us!=='CANCELLED');
     if(active && (s.production_status==='shipped' || String(s.tracking_code||'').trim())) out.push('supplier_shipped');   // supplier shipped (marked shipped or entered tracking) but we haven't set SHIPPED
     if(active && s.overdue) out.push('date_overdue');
@@ -1966,7 +2006,7 @@
       +conds.map(function(k){ var sn=sampActSnoozed(ref,k), s=_poActState[sampActKey(ref,k)]||{};
         return '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-top:1px solid #f1f5f9"><span style="flex:1">'+esc(SAMP_ACT_LABEL[k]||k)+(sn?'<br><span class="mut tiny">snoozed → '+esc(snzUntil(s))+snzBy(s)+'</span>':'')+'</span>'
           +(sn?'<button class="save-btn light sap-wake" data-k="'+k+'">wake</button>'
-              :'<button class="save-btn light sap-snz" data-k="'+k+'" data-d="7">7d</button><button class="save-btn light sap-snz" data-k="'+k+'" data-d="30">30d</button><button class="save-btn light sap-snz" data-k="'+k+'" data-d="-1">∞</button>')+'</div>'; }).join('')
+              :'<button class="save-btn light sap-snz-menu" data-kind="samp" data-ref="'+esc(ref)+'" data-code="'+esc(k)+'">SNOOZE ▾</button>')+'</div>'; }).join('')
       +'<div style="text-align:right;margin-top:6px"><button class="save-btn light sap-close">close</button></div>';
     document.body.appendChild(pop);
     var rc=b.getBoundingClientRect(); pop.style.left=(window.scrollX+Math.min(rc.left,window.innerWidth-310))+'px'; pop.style.top=(window.scrollY+rc.bottom+4)+'px';
@@ -1975,8 +2015,18 @@
     setTimeout(function(){ document.addEventListener('mousedown',out,true); },0);
     function refresh(){ close(); if(_sampleReload)_sampleReload(); }
     pop.querySelector('.sap-close').onclick=close;
-    pop.querySelectorAll('.sap-snz').forEach(function(x){ x.onclick=function(){ sampSnoozeSet(ref,x.dataset.k,Number(x.dataset.d),refresh); }; });
+    pop.querySelectorAll('.sap-snz-menu').forEach(function(x){ x.onclick=function(e){ e.stopPropagation(); openSnzMenu(x, close); }; });   // standard 1/3/7d + indefinite menu (same as POs)
     pop.querySelectorAll('.sap-wake').forEach(function(x){ x.onclick=function(){ sampSnoozeSet(ref,x.dataset.k,0,refresh); }; }); }
+  // Inline sample action indicator — the SAME experience as the PO drawer's actMark(): red Ⓐ (tooltip explaining the
+  // rule) + SNOOZE ▾ (1/3/7d + indefinite), sitting next to the item that carries the action. Reuses the act-mk /
+  // act-snz-btn / act-snz classes (bindActMark wires them; kind='samp' routes snooze to sampSnoozeSet).
+  function sampActMark(ref,code){
+    var help=SAMP_ACT_LABEL[code]||'Action required.', s=_poActState[sampActKey(ref,code)]||{}, sn=sampActSnoozed(ref,code);
+    var A='<span class="act-mk" data-note="'+esc(help)+(sn?' — currently snoozed until '+esc(snzUntil(s))+snzBy(s)+(s.snoozed_at?' on '+esc(s.snoozed_at):''):'')+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:'+(sn?'#f3a3a3':'#dc2626')+';color:#fff;font-weight:800;font-size:10px;cursor:help;vertical-align:middle;margin-left:5px">A</span>';
+    var snz=sn
+      ? ' <span class="mut tiny" style="white-space:nowrap">Snoozed'+snzBy(s)+' → '+esc(snzUntil(s))+' <button class="act-snz" data-kind="samp" data-ref="'+esc(ref)+'" data-code="'+esc(code)+'" data-d="0" style="border:none;background:none;color:#1d4ed8;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">wake</button></span>'
+      : ' <button class="act-snz-btn" data-kind="samp" data-ref="'+esc(ref)+'" data-code="'+esc(code)+'" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:4px;font-size:10px;padding:1px 6px;margin-left:4px;cursor:pointer">SNOOZE ▾</button>';
+    return '<span class="act-wrap" data-mk="samp|'+esc(ref)+'|'+esc(code)+'">'+A+snz+'</span>'; }
   // Inline action indicator: red Ⓐ (120ms tooltip explaining the rule) + snooze 1/3/7d (or wake), keyed like the badge.
   var ACT_HELP={
     payment_overdue:'Payment overdue — a payment’s due date has passed and it’s still unpaid. Due dates come from the supplier’s deposit / completion / balance terms.',
@@ -2008,14 +2058,17 @@
     function out(e){ if(!m.contains(e.target)&&e.target!==btn)close(); }
     setTimeout(function(){ document.addEventListener('mousedown',out,true); },0);
     m.querySelectorAll('.snz-opt').forEach(function(o){ o.onmouseenter=function(){o.style.background='#eff6ff';}; o.onmouseleave=function(){o.style.background='';};
-      o.onclick=function(){ close(); poSnoozeSet(po,code,parseInt(o.dataset.d,10),function(){ refreshActInPlace(po,code); if(after)after(); }); }; }); }
+      o.onclick=function(){ close();
+        if(btn.dataset.kind==='samp'){ sampSnoozeSet(btn.dataset.ref,code,parseInt(o.dataset.d,10),function(){ if(_sampleReload)_sampleReload(); if(after)after(); }); }
+        else { poSnoozeSet(po,code,parseInt(o.dataset.d,10),function(){ refreshActInPlace(po,code); if(after)after(); }); } }; }); }
   function bindActMark(scope){ var root=scope||document;
     root.querySelectorAll('.act-mk[data-note]').forEach(function(b){ if(b._b)return; b._b=1;
       b.addEventListener('mouseenter',function(){ b._t=setTimeout(function(){ noteTip(b); },120); });
       b.addEventListener('mouseleave',function(){ clearTimeout(b._t); hideNoteTip(); }); });
     root.querySelectorAll('.act-snz-btn').forEach(function(x){ if(x._b)return; x._b=1; x.onclick=function(e){ e.stopPropagation(); openSnzMenu(x); }; });
     root.querySelectorAll('.act-snz').forEach(function(x){ if(x._b)return; x._b=1; x.onclick=function(e){ e.stopPropagation();   // "wake" (data-d=0) restores an already-snoozed item
-      poSnoozeSet(x.dataset.po,x.dataset.code,parseInt(x.dataset.d,10),function(){ refreshActInPlace(x.dataset.po,x.dataset.code); }); }; }); }
+      if(x.dataset.kind==='samp'){ sampSnoozeSet(x.dataset.ref,x.dataset.code,0,function(){ if(_sampleReload)_sampleReload(); }); }
+      else poSnoozeSet(x.dataset.po,x.dataset.code,parseInt(x.dataset.d,10),function(){ refreshActInPlace(x.dataset.po,x.dataset.code); }); }; }); }
   var _poState=null;   // PURCHASE ORDERS filter state — persisted across edit-triggered reloads so the filter survives
   function poInner(rows,c){
     if(!_poActStateLoaded){ loadPoActState(function(){ try{view();}catch(e){} }); }   // snooze map → re-render once loaded
@@ -2830,6 +2883,13 @@
     .catch(function(e){ document.getElementById('podet-'+i).innerHTML='<span style="color:#dc2626">'+esc(e.message||e)+'</span>'; }); }
   // Editable PLAN payment panel. Terms come from the supplier; each milestone's amount, date and %
   // can be overridden inline (saves on blur). Saving re-pulls the PO so catch-up / owing ripple.
+  // Amount-cell input resolver: strips currency symbols + thousands commas, and evaluates a simple arithmetic
+  // expression (+ - * /) so "5099.60-2,393.69" or "$1,350.91" resolve on entry. Plain/blank input passes through.
+  function payEvalAmount(s){ s=String(s==null?'':s).replace(/[£$€¥₹]/g,'').replace(/[,\s]/g,'').trim();
+    if(!s)return '';
+    if(/^[-+]?\d*\.?\d+([-+*\/][-+]?\d*\.?\d+)+$/.test(s)){
+      try{ var v=Function('"use strict";return('+s.replace(/[^0-9.+\-*\/()]/g,'')+')')(); if(typeof v==='number'&&isFinite(v))return String(Math.round(v*100)/100); }catch(e){} }
+    return s; }
   function payIn(ep,field,val,dt,dis,extra){
     if(dt) return dateField(val,{attrs:'data-ep="'+esc(ep)+'" data-field="'+esc(field)+'"'+(extra?(' '+extra):''), cls:'payin', disabled:!!dis});
     return '<input class="fci payin'+(dis?' pdis':'')+'"'+(dis?' disabled title="set an amount first"':'')+(extra?(' '+extra):'')+' data-ep="'+esc(ep)+'" data-field="'+field+'" value="'+esc(val==null?'':val)+'">'; }
@@ -3381,6 +3441,7 @@
     document.querySelectorAll('#podet-'+i+' .payin').forEach(function(inp){ inp.onchange=function(){
     // date payin (start/completion/balance dates): resolve any typed/pasted format → ISO, validate
     if(inp.classList.contains('dateinp')){ var _raw=(inp.value||'').trim(), _iso=_raw?parseDateLoose(_raw):''; if(_raw&&!_iso){ inp.classList.add('err'); return; } inp.classList.remove('err'); inp.value=_iso; }
+    else { inp.value=payEvalAmount(inp.value); }   // amount cells (completion / balance / starting deposit): resolve currency symbols, commas + arithmetic (e.g. "$5,099.60-2,393.69" → 2705.91)
     // Starting deposit can't exceed what the deposit ref still holds — clamp + roll the rest into completion.
     if(inp.dataset.field==='pay_start_deposit_assigned' && inp.dataset.avail!=null){ var av=Number(inp.dataset.avail), v=Number(String(inp.value).replace(/,/g,''));
       if(isFinite(av)&&isFinite(v)&&v>av+0.005){ inp.value=av.toFixed(2); alert('Starting deposit capped at the deposit ref’s availability ('+money(av)+'). The remainder rolls into the completion deposit.'); } }
@@ -4691,7 +4752,7 @@
     }
     draw(); return api;
   }
-  function renderShipments(data){ var c=document.getElementById('supply-content'); fetchLookups(function(){ shipInner(data,c); }); }
+  function renderShipments(data){ var c=document.getElementById('supply-content'); var _tk=_navToken; fetchLookups(function(){ if(_tk!==_navToken)return; shipInner(data,c); }); }
   // (admin Shipment Plan sub-tab removed — that's portal-only; the per-shipment timeline lives in the shipment-row expand)
   // (the old admin Shipment Plan view was removed in v20.365 — Shipment Plan is supplier-portal only now)
   // unread-supplier-notes badge for the Shipments grid (empty string when none)
@@ -5762,7 +5823,7 @@
               +numBlk('Balance','balance_pct',fieldOf(r,'balance_pct'),'%')
               +numBlk('Production','production_days',fieldOf(r,'production_days'),'days')
               +numBlk('Credit','credit_days',fieldOf(r,'credit_days'),'days')
-              +'<div><div style="font-weight:600;font-size:11px;margin-bottom:3px">Credit type</div>'+inp('credit_type',fieldOf(r,'credit_type'),'120px')+'</div>'
+              +'<div><div style="font-weight:600;font-size:11px;margin-bottom:3px">Credit type</div>'+(function(){ var cv=String(fieldOf(r,'credit_type')||''); var OPTS=[['','— none —'],['on_shipment','On shipment'],['on_clearance','On clearance']]; return '<select class="sup-in" data-f="credit_type" style="padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;width:130px">'+OPTS.map(function(o){return '<option value="'+o[0]+'"'+(cv===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'; })()+'</div>'
               +'<div><div style="font-weight:600;font-size:11px;margin-bottom:3px">Currency</div>'+seln('default_currency',fieldOf(r,'default_currency')||'USD',CURS)+'</div>'
               +'</div>'
               +'<div style="border-top:1px solid #eef2f7;margin:2px 0 14px"></div>'
@@ -6655,9 +6716,9 @@
   // Payment SUMMARY copy (TAB-separated): supplier + amount + payment reference, then the full line table
   // (Reference, Amount, Type, Production ref, Deposit ref) — ALL lines incl. "other". Pastes into Sheets.
   function xbSummaryTsv(run, ccy, amt){
-    var altAmt=Number(String(amt==null?'':amt).replace(/,/g,''));
-    var useAlt=(ccy && ccy!=='USD' && altAmt>0);
-    var amtNum=useAlt?fmtAmt(altAmt):fmtAmt(run.total), amtCcy=useAlt?ccy:'USD';
+    // Supplier-facing summary states the BASE currency (USD) — the amount the supplier invoiced. The entered
+    // ccy/amt is the bank-settlement currency (e.g. GBP) for the Xero export only, not what we tell the supplier.
+    var amtNum=fmtAmt(run.total), amtCcy='USD';
     var payAmt=amtNum+' '+amtCcy;
     var inv='SUPPLIER-PAYMENT-'+(run.supplier_code?run.supplier_code+'-':'')+run.dt;
     var clean=function(c){return String(c==null?'':c).replace(/[\t\n\r]/g,' ');};
@@ -6669,9 +6730,8 @@
   }
   // HTML version of the summary — a basic inline-styled table that pastes neatly into Gmail (and Sheets).
   function xbSummaryHtml(run, ccy, amt){
-    var altAmt=Number(String(amt==null?'':amt).replace(/,/g,''));
-    var useAlt=(ccy && ccy!=='USD' && altAmt>0);
-    var amtNum=useAlt?fmtAmt(altAmt):fmtAmt(run.total), amtCcy=useAlt?ccy:'USD';
+    // Supplier-facing summary uses the BASE currency (USD), not the entered bank-settlement currency.
+    var amtNum=fmtAmt(run.total), amtCcy='USD';
     var payAmt=amtNum+' '+amtCcy;
     var inv='SUPPLIER-PAYMENT-'+(run.supplier_code?run.supplier_code+'-':'')+run.dt;
     var cell='border:1px solid #cccccc;padding:4px 8px', hcell=cell+';background:#f2f2f2;text-align:left;font-weight:bold';
@@ -7512,7 +7572,7 @@
   function sampleStatusChip(s){ var m={'PLANNED':['#dbeafe','#1d4ed8'],'SHIPPED':['#dcfce7','#166534'],'CANCELLED':['#f1f5f9','#94a3b8'],'Awaiting supplier':['#fef3c7','#92710a'],'Change requested':['#fee2e2','#b91c1c'],'In production':['#dbeafe','#1d4ed8'],'Charge to review':['#fee2e2','#b91c1c'],'Shipped':['#dcfce7','#166534'],'Complete':['#e2e8f0','#475569'],'Cancelled':['#f1f5f9','#94a3b8']};
     var col=m[s]||['#e2e8f0','#475569']; return hzChip(col[0],col[1],esc(s||'')); }
   function sampleChargeChip(s){ var m={pending:['#fef3c7','#92710a'],accepted:['#dcfce7','#166534'],rejected:['#f1f5f9','#94a3b8']}; var c=m[s]||['#e2e8f0','#475569']; return '<span class="tool-badge" style="background:'+c[0]+';color:'+c[1]+'">'+esc(s)+'</span>'; }
-  function renderSamples(data){ var c=document.getElementById('supply-content'); fetchLookups(function(){ samplesInner(data,c); }); }
+  function renderSamples(data){ var c=document.getElementById('supply-content'); var _tk=_navToken; fetchLookups(function(){ if(_tk!==_navToken)return; samplesInner(data,c); }); }
   function samplesInner(rows,c){
     var st={f:(_pendingSampleRef?'all':'open'),q:''};   // when deep-linking/navigating to a specific sample, show 'all' so it's not filtered out
     function cur(){ return rows.filter(function(r){ if(st.q){ var hay=((r.ref||'')+' '+(r.supplier_name||'')+' '+(r.recipient_company||'')+' '+(r.recipient_name||'')).toLowerCase(); if(hay.indexOf(st.q)<0)return false; }
@@ -7520,7 +7580,7 @@
     var FILT=[['open','Open'],['closed','Closed'],['all','All']];
     function rowHTML(r,i){
       var _sa=sampActions(r);   // active (non-snoozed) exceptions → red count badge + snooze popover
-      var actFlag=_sa.length?' <button class="samp-act-badge ex-badge" style="cursor:pointer;border:none" data-ref="'+esc(r.ref||'')+'" data-allacts="'+esc(sampActionsAll(r).join(','))+'" data-note="'+esc(_sa.length+' exception'+(_sa.length>1?'s':'')+' — '+_sa.map(function(k){return (SAMP_ACT_LABEL[k]||k).split(' — ')[0];}).join('; ')+' (click to snooze)')+'">'+_sa.length+'</button>':'';
+      var actFlag=_sa.length?' <button class="samp-act-badge ex-badge" style="cursor:pointer;border:none" data-ref="'+esc(r.ref||'')+'" data-allacts="'+esc(sampActionsAll(r).join(','))+'" data-note="'+esc(_sa.length+' action item'+(_sa.length>1?'s':'')+' — '+_sa.map(function(k){return (SAMP_ACT_LABEL[k]||k).split(' — ')[0];}).join('; ')+' (click to snooze / open)')+'">'+_sa.length+'</button>':'';
       var _tu=(typeof carrierTrackUrl==='function')?carrierTrackUrl(r.carrier,r.tracking_code):'';
       var tr=r.tracking_code?((_tu?'<a href="'+_tu+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;font-weight:600">'+esc(r.tracking_code)+' ↗</a>':esc(r.tracking_code))+(r.carrier?' <span class="mut tiny">'+esc(r.carrier)+'</span>':'')):'<span class="mut">—</span>';
       var ch=r.pending_charges>0?'<span class="ex-badge" title="'+r.pending_charges+' charge(s) to review">'+r.pending_charges+'</span>':'';
@@ -7694,11 +7754,14 @@
         var tracking = editing ? fld('tracking_code',s.tracking_code,150,'tracking') : '<span class="tiny">'+(s.tracking_code?(_stu?'<a href="'+_stu+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;font-weight:700" title="track with '+esc(s.carrier||'carrier')+' ↗">'+esc(s.tracking_code)+' ↗</a>':esc(s.tracking_code)):'<span class="mut">—</span>')+'</span>';
         var carrier  = editing ? (fld('carrier',s.carrier,120,'carrier').replace('class="fci txt samp-fld"','class="fci txt samp-fld" list="samp-carrierlist"')) : '<span class="tiny">'+(s.carrier?esc(s.carrier):'<span class="mut">—</span>')+'</span>';
         var _us=(s.status_calc||'PLANNED');   // our status: PLANNED / SHIPPED / CANCELLED
+        var _sActsAll=sampActionsAll(s);   // all matched exceptions (incl. snoozed) → inline Ⓐ markers next to the item that carries each one
+        function _sMk(code){ return _sActsAll.indexOf(code)>=0?sampActMark(s.ref,code):''; }
         var statusCtl = editing
           ? '<select class="fci samp-fld" data-field="status">'+['PLANNED','SHIPPED','CANCELLED'].map(function(o){return '<option value="'+o+'"'+(o===_us?' selected':'')+'>'+o+'</option>';}).join('')+'</select>'
           : sampleStatusChip(_us);
-        // supplier says shipped but we haven't set SHIPPED → offer "Set shipping" (mirrors the PO grid)
-        var setShip=(s.production_status==='shipped' && _us!=='SHIPPED' && _us!=='CANCELLED')?'<button class="save-btn samp-setship" data-id="'+id+'" style="background:#50C878;color:#0f3d22;border:1px solid #3ca35f;font-weight:700;margin-top:6px">🚢 Set shipping — supplier marked shipped</button>':'';
+        // supplier signalled shipped (marked shipped OR entered tracking) but we haven't set SHIPPED → offer "Set shipping" (mirrors the PO grid)
+        var _supShipped=(s.production_status==='shipped' || String(s.tracking_code||'').trim());
+        var setShip=(_supShipped && _us!=='SHIPPED' && _us!=='CANCELLED')?'<button class="save-btn samp-setship" data-id="'+id+'" style="background:#50C878;color:#0f3d22;border:1px solid #3ca35f;font-weight:700;margin-top:6px">🚢 Set shipping — supplier '+(s.production_status==='shipped'?'marked shipped':'entered tracking')+'</button>':'';
         var actBtn = editing ? '<button class="save-btn samp-done" style="background:#2563eb;color:#fff;border-color:#1d4ed8">✓ Done</button>'
                              : '<button class="save-btn samp-edit">Edit</button>';
         // tabbed detail — mirrors the PO detail (.po-subnav / .rtab + panels), with per-tab counts
@@ -7714,7 +7777,6 @@
             +'<div class="cli-row"><div class="cli-lbl">Requested Completion Date</div><div class="cli-val">'+completion+'</div></div>'
             +'<div class="cli-row"><div class="cli-lbl">Tracking</div><div class="cli-val">'+tracking+'</div></div>'
             +'<div class="cli-row"><div class="cli-lbl">Carrier</div><div class="cli-val">'+carrier+'</div></div>'
-            +'<div class="cli-row"><div class="cli-lbl">Supplier status</div><div class="cli-val"><span class="tiny">'+(s.production_status?esc(prodStatusLabel(s.production_status)):'<span class="mut">—</span>')+'</span></div></div>'
             +(function(){ var _acc=!!s.accepted_at, _chg=!!s.change_requested, _cancelled=/cancel/i.test(s.status||'');
                 var b = _cancelled ? '<span class="mut">—</span>'
                   : _chg ? '<span class="tool-badge bg-amber">⏳ Change made — awaiting re-approval</span>'
@@ -7722,9 +7784,10 @@
                   : '<span class="tool-badge bg-amber">Awaiting supplier approval</span>';
                 return '<div class="cli-row"><div class="cli-lbl">Supplier approval</div><div class="cli-val">'+b+'</div></div>'; })()
             +'<div class="cli-row"><div class="cli-lbl">Supplier expected</div><div class="cli-val">'+(s.supplier_expected?fd(s.supplier_expected):'<span class="mut">—</span>')+'</div></div>'
-            +'<div class="cli-row"><div class="cli-lbl">Our status</div><div class="cli-val">'+statusCtl+'</div></div>'
+            +'<div class="cli-row"><div class="cli-lbl">Supplier status</div><div class="cli-val"><span class="tiny">'+(s.production_status?esc(prodStatusLabel(s.production_status)):'<span class="mut">—</span>')+'</span></div></div>'
+            +'<div class="cli-row"><div class="cli-lbl">Our status</div><div class="cli-val">'+statusCtl+_sMk('supplier_shipped')+'</div></div>'
             +(setShip?'<div>'+setShip+'</div>':'')
-            +(dateExc?'<div style="color:#dc2626;font-weight:700;font-size:11px;margin-top:4px">⚠ Overdue — completion / supplier-expected date has passed</div>':'')
+            +(dateExc?'<div style="color:#dc2626;font-weight:700;font-size:11px;margin-top:4px">⚠ Overdue — completion / supplier-expected date has passed'+_sMk('date_overdue')+'</div>':'')
             +'<div style="margin-top:10px">'+actBtn+' <button class="save-btn light samp-del" data-id="'+id+'" style="color:#dc2626">Delete</button></div></div>'
           +'<div style="min-width:220px"><div class="sect-h">SKUs</div>'+skus+'</div>'
           +'</div>';
@@ -7739,9 +7802,10 @@
         box.querySelectorAll('.samp-tab').forEach(function(t){ t.onclick=function(){ curTab=t.dataset.st; box._sampTab=curTab;
           box.querySelectorAll('.samp-tab').forEach(function(x){x.classList.toggle('active',x===t);});
           box.querySelectorAll('.samp-panel').forEach(function(p){p.style.display=(p.dataset.st===curTab)?'':'none';}); }; });
+        try{ bindActMark(box); }catch(e){}   // wire the inline Ⓐ tooltip + SNOOZE ▾ (same as the PO drawer)
         var eb=box.querySelector('.samp-edit'); if(eb)eb.onclick=function(){ editing=true; paint(); };
         var db=box.querySelector('.samp-done'); if(db)db.onclick=function(){ db.disabled=true;   // ✓ Done also persists the SKU lines (fields already auto-save on change)
-          shipPost('/api/supply/sample/'+id+'/lines',{lines:slines.filter(function(l){return l.sku&&String(l.sku).trim();}).map(function(l){return {sku:String(l.sku).trim(),qty:Number(l.qty)||0};})},function(){ editing=false; if(_sampleReload)_sampleReload(); }); };
+          shipPost('/api/supply/sample/'+id+'/lines',{lines:slines.filter(function(l){return l.sku&&String(l.sku).trim();}).map(function(l){return {sku:String(l.sku).trim(),qty:Number(l.qty)||0};})},function(){ editing=false; paint(); }); };   // silent: re-render this drawer in place, keep it open (no grid reload / no tab close)
         var af=box.querySelector('.samp-att-file'), au=box.querySelector('.samp-att-up');
         if(au)au.onclick=function(){ var f=af&&af.files&&af.files[0]; if(!f){alert('Choose a file to upload.');return;} au.disabled=true; var rd=new FileReader(); rd.onload=function(){ shipPost('/api/supply/portal-upload',{po:s.ref,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),category:'sample',uploaded_by:'PO PLAN'},function(j){ if(j&&j.error){alert(j.error);au.disabled=false;return;} loadSampleDetail(id,i); }); }; rd.readAsDataURL(f); };
         box.querySelectorAll('.samp-att-rm').forEach(function(b){ b.onclick=function(){ if(!confirm('Remove this attachment?'))return; shipPost('/api/supply/portal-attachment-remove',{id:b.dataset.aid},function(){ loadSampleDetail(id,i); }); }; });
@@ -8580,13 +8644,13 @@
       function ovPill(s){ var m={approved:['Approved','#166534','#dcfce7'],dropped:['Rejected','#991b1b','#fee2e2']}, x=m[s]||['In development','#92400e','#fef3c7']; return '<span class="db-ov" style="display:inline-block;font-size:10px;font-weight:700;padding:1px 8px;border-radius:8px;background:'+x[2]+';color:'+x[1]+';white-space:nowrap">'+x[0]+'</span>'; }
       function cell(comp,prodApproved){ var req=comp?(comp.req||0):0, appr=comp?(comp.appr||0):0;
         if(req===0) return '<td style="text-align:center;padding:6px 4px;background:#f1f5f9;color:#cbd5e1;font-size:12px" title="not required">—</td>';
-        if(appr>=req) return '<td style="text-align:center;padding:6px 4px;background:#dcfce7;color:#166534;font-weight:700;font-size:12px" title="approved ('+appr+'/'+req+')">✓</td>';
+        if(appr>=req) return '<td style="text-align:center;padding:6px 4px;background:#dcfce7;color:#166534;font-weight:700;font-size:11px" title="approved ('+appr+'/'+req+')">'+appr+'/'+req+'</td>';
         var exc=prodApproved;   // product overall approved but this component still pending → exception
         return '<td style="text-align:center;padding:6px 4px;background:'+(exc?'#fee2e2':'#fef3c7')+';color:'+(exc?'#991b1b':'#92400e')+';font-weight:700;font-size:11px'+(exc?';box-shadow:inset 0 0 0 2px #ef4444':'')+'" title="'+(exc?'EXCEPTION — product is approved but this component is still pending':'pending')+' ('+appr+'/'+req+' approved)">'+(exc?'⚠ ':'')+appr+'/'+req+'</td>'; }
       // Mobile card chip for one component type
       function compChip(label,comp,prodApproved){ var req=comp?(comp.req||0):0, appr=comp?(comp.appr||0):0, bg,fg,ring='',tag;
         if(req===0){ bg='#f8fafc';fg='#94a3b8';tag='n/a'; }
-        else if(appr>=req){ bg='#dcfce7';fg='#166534';tag='✓'; }
+        else if(appr>=req){ bg='#dcfce7';fg='#166534';tag=appr+'/'+req; }
         else { var exc=prodApproved; bg=exc?'#fee2e2':'#fef3c7'; fg=exc?'#991b1b':'#92400e'; tag=(exc?'⚠ ':'')+appr+'/'+req; if(exc)ring=';box-shadow:inset 0 0 0 1.5px #ef4444'; }
         return '<span style="display:inline-flex;align-items:center;gap:6px;background:'+bg+';color:'+fg+';border-radius:8px;padding:5px 10px;font-size:12px;line-height:1'+ring+'"><span style="font-weight:500;opacity:.9">'+esc(label)+'</span><span style="font-weight:800">'+tag+'</span></span>'; }
       function draw(){
@@ -8831,7 +8895,7 @@
         f=f.slice().sort(function(a,b){ var sc=String(b.season||'').localeCompare(String(a.season||'')); if(sc)return sc; return String(a.category||'').localeCompare(String(b.category||'')); });   // group by season (newest first) then category (A–Z)
         var seasonCount={}, catCount={}; f.forEach(function(r){ var sk=r.season||'', ck=(r.season||'')+'|'+(r.category||''); seasonCount[sk]=(seasonCount[sk]||0)+1; catCount[ck]=(catCount[ck]||0)+1; });
         var _pgSeason=null, _pgCat=null;
-        g.innerHTML='<div class="tw"><table class="pg-tbl"><thead><tr>'
+        var _tbl='<div class="pg-desktop"><div class="tw"><table class="pg-tbl"><thead><tr>'
           +['','Ref','Category','Season','Supplier','Sizes approved','Status','Sample shipment'].map(function(h){return '<th>'+h+'</th>';}).join('')+'</tr></thead><tbody>'
           +f.map(function(r,i){
             var sw=r.has_swatch?'<img class="pg-swatch2 pg-swatch-zoom" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at)+'" title="click to enlarge" style="cursor:zoom-in">':'<span class="pg-swatch2 none">n/a</span>';
@@ -8848,7 +8912,19 @@
               +'<td>'+prodStatusSelHtml(r.ref,r.status)+'</td>'
               +'<td class="l">'+(r.latest_shipment?('<div style="white-space:nowrap;font-size:11px">📦 <a class="samp-open" data-ref="'+esc(r.latest_shipment.ref)+'" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;font-weight:600" title="open this sample shipment">'+esc(r.latest_shipment.ref)+'</a>'+(r.latest_shipment.carrier?' <span class="mut tiny">'+esc(r.latest_shipment.carrier)+'</span>':'')+(r.latest_shipment.tracking?' · '+carrierTrackLinkInj(r.latest_shipment.carrier,r.latest_shipment.tracking):'')+'</div>'):'<span class="mut tiny">—</span>')+'</td></tr>'
               +'<tr class="pg-detrow" id="pgdet-'+i+'" data-season="'+esc(r.season||'')+'" data-cat="'+esc(r.category||'')+'" style="display:none"><td colspan="8"><div class="pg-det"></div></td></tr>';
-          }).join('')+'</tbody></table></div>';
+          }).join('')+'</tbody></table></div></div>';
+        // MOBILE: a card per product, grouped by season → category; tap a card to open its detail inline.
+        var _mS=null,_mC=null;
+        var mob=f.map(function(r,i){ var sKey=r.season||'', cKey=r.category||'', hdr='';
+          if(sKey!==_mS){ _mS=sKey; _mC=null; hdr+='<div class="pgm-shdr">'+esc(sKey||'— no season —')+' <span style="font-weight:500;opacity:.6">'+seasonCount[sKey]+'</span></div>'; }
+          if(cKey!==_mC){ _mC=cKey; hdr+='<div class="pgm-chdr">'+esc(cKey||'— no category —')+' · '+catCount[sKey+'|'+cKey]+'</div>'; }
+          var sw=r.has_swatch?'<img class="pgm-sw" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at||'')+'">':'<span class="pgm-sw none"></span>';
+          return hdr+'<div class="pgm-card" data-ref="'+esc(r.ref)+'" data-i="'+i+'">'
+            +'<div class="pgm-top">'+sw+'<div class="pgm-meta"><div class="pgm-colour">'+esc(r.colour_name||'—')+'</div><div class="pgm-ref">'+esc(r.ref)+prodComboBadge(r)+'</div></div>'+prodStatusChip(r.status)+'</div>'
+            +'<div class="pgm-sub"><span>Sizes '+r.sizes_approved+'/'+r.sizes+'</span>'+(r.latest_shipment?'<span>📦 '+esc(r.latest_shipment.ref)+'</span>':'')+'</div>'
+            +'</div><div class="pg-mdet" id="pgmdet-'+i+'" style="display:none"></div>';
+        }).join('');
+        g.innerHTML=_tbl+'<div class="pg-mobile">'+mob+'</div>';
         // group collapse/expand — season collapses its categories + rows; category collapses its rows. Closes any open detail in a collapsed group.
         function pgApplyCollapse(){
           var scol=function(s){ return !expandAll && _pgSeasonCollapsed[s]; }, ccol=function(s,c){ return !expandAll && _pgCatCollapsed[s+'|'+c]; };
@@ -8860,6 +8936,12 @@
         g.querySelectorAll('tr.pg-seasonhdr').forEach(function(h){ h.onclick=function(){ var s=h.dataset.season; _pgSeasonCollapsed[s]=!_pgSeasonCollapsed[s]; pgApplyCollapse(); }; });
         g.querySelectorAll('tr.pg-cathdr').forEach(function(h){ h.onclick=function(){ var k=h.dataset.season+'|'+h.dataset.cat; _pgCatCollapsed[k]=!_pgCatCollapsed[k]; pgApplyCollapse(); }; });
         pgApplyCollapse();
+        // mobile card → open the product detail inline below the card (one open at a time)
+        g.querySelectorAll('.pgm-card').forEach(function(card){ card.onclick=function(){ var i=card.dataset.i, ref=card.dataset.ref, det=document.getElementById('pgmdet-'+i), open=det.style.display!=='none';
+          g.querySelectorAll('.pg-mdet').forEach(function(d){ if(d!==det){ d.style.display='none'; d.innerHTML=''; } });
+          g.querySelectorAll('.pgm-card.open').forEach(function(cc){ if(cc!==card)cc.classList.remove('open'); });
+          if(open){ det.style.display='none'; det.innerHTML=''; card.classList.remove('open'); _prodDetailBox=null; try{writeHash(['product','plan']);}catch(_){} return; }
+          det.style.display=''; card.classList.add('open'); _prodDetailTab='master'; renderProductDetail(ref, det, rows.filter(function(x){return x.ref===ref;})[0]); }; });
         g.querySelectorAll('.pg-open').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var i=b.dataset.i, ref=b.dataset.ref, row=document.getElementById('pgdet-'+i), datarow=b.closest('tr'), open=row.style.display!=='none';
           g.querySelectorAll('.pg-detrow').forEach(function(dr){ if(dr!==row){ dr.style.display='none'; var dd=dr.querySelector('.pg-det'); if(dd)dd.innerHTML=''; } });
           g.querySelectorAll('tr.pg-openrow').forEach(function(tr){ if(tr!==datarow)tr.classList.remove('pg-openrow'); });
@@ -8968,9 +9050,13 @@
             +((s.sample_sizes&&s.sample_sizes.length)?'<div style="margin-top:4px"><span class="mut tiny" style="margin-right:4px">Sizes:</span>'+s.sample_sizes.map(function(k){return '<span style="display:inline-block;font-size:10px;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;border-radius:10px;padding:1px 7px;margin:1px 4px 1px 0">'+esc(k)+'</span>';}).join('')+'</div>':'')
             +((s.sampled_aspects&&s.sampled_aspects.length)?'<div style="margin-top:4px"><span class="mut tiny" style="margin-right:4px">Sampled:</span>'+s.sampled_aspects.map(function(k){return '<span style="display:inline-block;font-size:10px;background:#eef2ff;color:#3730a3;border:1px solid #dbeafe;border-radius:10px;padding:1px 7px;margin:1px 4px 1px 0">'+esc(COMP_LBL[k]||k)+'</span>';}).join('')+'</div>':'')
             +(ph?'<div style="margin-top:5px">'+ph+'</div>':'')
+            +'<div style="margin-top:8px"><div style="font-size:11px;font-weight:700;color:#334155;margin-bottom:3px">Feedback to supplier <span class="mut tiny" style="font-weight:400">— visible in their portal against this sample</span></div>'
+              +'<textarea class="ps-adm-fb fci" data-id="'+s.id+'" rows="2" placeholder="Add feedback on this sample version…" style="width:100%;max-width:600px;box-sizing:border-box;font-size:12px;resize:vertical">'+esc(s.admin_feedback||'')+'</textarea>'
+              +' <span class="ps-adm-fb-msg" data-id="'+s.id+'" style="font-size:11px;color:#16a34a"></span></div>'
             +((s.shipments&&s.shipments.length)?'<div style="margin-top:6px;display:flex;flex-direction:column;gap:4px">'+s.shipments.map(function(sh){return '<div style="padding:6px 9px;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;font-size:12px">📦 Shipment <a class="samp-open" data-ref="'+esc(sh.ref)+'" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;font-weight:600" title="open this sample shipment">'+esc(sh.ref)+'</a>'+(sh.carrier?' · '+esc(sh.carrier):'')+(sh.tracking?' · '+carrierTrackLinkInj(sh.carrier,sh.tracking):'')+'</div>';}).join('')+'</div>':'')
             +'</div>'; }).join(''):'<div style="color:#94a3b8;padding:6px 2px">No sample versions submitted yet.</div>');
       body.querySelectorAll('.ps-adm-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this sample version?'))return; shipPost('/api/product/sample/'+a.dataset.id+'/delete',{},function(){ renderProdSamplesTab(body,ref); }); }; });
+      body.querySelectorAll('.ps-adm-fb').forEach(function(t){ t.onchange=function(){ var msg=body.querySelector('.ps-adm-fb-msg[data-id="'+t.dataset.id+'"]'); if(msg){msg.style.color='#94a3b8';msg.textContent='saving…';} shipPost('/api/product/sample/'+t.dataset.id+'/feedback',{admin_feedback:t.value},function(j){ if(msg){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;} else {msg.style.color='#16a34a';msg.textContent='✓ saved';setTimeout(function(){msg.textContent='';},1800);} } }); }; });
       body.querySelectorAll('.psamp-img').forEach(function(im){ im.onclick=function(){ openImgZoom(im.dataset.src); }; });
       body.querySelectorAll('.samp-open').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); gotoSample(a.dataset.ref); }; });   // sample-shipment ref → SUPPLY ▸ Samples
     }).catch(function(e){ body.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
@@ -8988,10 +9074,16 @@
           +'<a href="'+url+'" target="_blank" rel="noopener" title="'+esc(fn)+'" style="font-size:10px;color:#1d4ed8;text-decoration:none;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(fn)+'</a>'
           +'<a class="pm-comp-fdel" data-fid="'+f.id+'" title="remove file" style="color:#dc2626;cursor:pointer;font-size:10px;flex:none">✕</a></span>'; }).join(' ')
         +' <label style="font-size:10px;color:#1d4ed8;cursor:pointer;white-space:nowrap">+ file<input type="file" class="pm-comp-file" data-id="'+s.id+'" data-dim="'+dim+'" style="display:none" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx" multiple></label>'; }
-    function compShipCell(s,dim){ var seen={},out=[];   // sample shipments (SRs) of samples covering this size + this component
-      (d.samples||[]).forEach(function(sm){ if((sm.sampled_aspects||[]).indexOf(dim)>=0 && (sm.sample_sizes||[]).indexOf(s.size_label)>=0){ (sm.shipments||[]).forEach(function(sh){ if(sh.ref&&!seen[sh.ref]){ seen[sh.ref]=1; out.push(sh); } }); } });
-      if(!out.length)return '<span class="mut tiny">—</span>';
-      return out.map(function(sh){ return '<span title="'+esc([sh.carrier,sh.tracking].filter(Boolean).join(' · '))+'" style="display:inline-block;background:#f0f6ff;border:1px solid #dbeafe;color:#1e40af;border-radius:8px;padding:1px 6px;margin:1px 3px 1px 0;font-family:ui-monospace,Menlo,monospace;font-size:10px">'+esc(sh.ref)+'</span>'; }).join(''); }
+    function compSampleCell(s,dim){   // sample VERSIONS covering this size + this component: version (→ Samples tab) + shipment + carrier/tracking badge + feedback
+      var rel=(d.samples||[]).filter(function(sm){ return (sm.sampled_aspects||[]).indexOf(dim)>=0 && (sm.sample_sizes||[]).indexOf(s.size_label)>=0; });
+      if(!rel.length)return '<span class="mut tiny">—</span>';
+      return rel.map(function(sm){
+        var shs=(sm.shipments||[]).map(function(sh){ return '<span style="display:inline-flex;align-items:center;gap:3px;margin:1px 4px 1px 0"><a class="samp-open" data-ref="'+esc(sh.ref)+'" title="open this sample shipment" style="font-family:ui-monospace,Menlo,monospace;font-size:10px;color:#1d4ed8;text-decoration:underline;cursor:pointer">📦'+esc(sh.ref)+'</a>'+(sh.tracking?' '+carrierTrackLinkInj(sh.carrier,sh.tracking):(sh.carrier?'<span class="mut tiny">'+esc(sh.carrier)+'</span>':''))+'</span>'; }).join('');
+        return '<div style="margin-bottom:6px">'
+          +'<a class="pm-samp-open pm-samp-open-'+esc(dim)+'" data-ref="'+esc(it.ref)+'" title="open the Samples tab" style="font-family:ui-monospace,Menlo,monospace;font-size:10px;font-weight:700;color:#1d4ed8;text-decoration:underline;cursor:pointer">'+esc(sm.ref)+'</a>'
+          +(shs?'<div style="margin-top:2px">'+shs+'</div>':'<div class="mut tiny" style="margin-top:1px">not shipped</div>')
+          +(sm.admin_feedback?'<div style="margin-top:3px;font-size:10px;color:#78350f;background:#fffbeb;border:1px solid #fde68a;border-radius:5px;padding:2px 6px;white-space:normal;max-width:230px" title="feedback to supplier">💬 '+esc(sm.admin_feedback)+'</div>':'')
+          +'</div>'; }).join(''); }
     function compRow(s,dim){ var sd=sizeDim(s,dim), req=!!sd.required, appr=sd.approval_status||'pending';
       var reqCell='<input type="checkbox" class="pm-comp-req" data-id="'+s.id+'" data-dim="'+dim+'"'+(req?' checked':'')+'>';
       var relSamples=(d.samples||[]).filter(function(sm){ return (sm.sampled_aspects||[]).indexOf(dim)>=0 && (sm.sample_sizes||[]).indexOf(s.size_label)>=0; });   // supplier samples covering this size + component
@@ -9002,14 +9094,18 @@
       var actCell='<span class="mut tiny">—</span>';
       if(req&&appr!=='approved') actCell=prodActMark(it.ref,'c_'+dim);
       else if(req&&appr==='approved'&&!sd.approved_sample_id) actCell=prodActMark(it.ref,'cs_'+dim);
+      var _lblIcon='', _lblBg='', _lblFg='#334155';   // highlight the component (Product / Packaging / Labels…) by its approval so it reads at a glance
+      if(req&&appr==='approved'){ _lblIcon='<span style="font-size:15px;font-weight:900;color:#16a34a;margin-right:5px">✓</span>'; _lblBg='background:#dcfce7;'; _lblFg='#166534'; }
+      else if(req&&appr==='rejected'){ _lblIcon='<span style="font-size:15px;font-weight:900;color:#dc2626;margin-right:5px">✗</span>'; _lblBg='background:#fee2e2;'; _lblFg='#991b1b'; }
+      else if(req){ _lblIcon='<span style="font-size:12px;color:#f59e0b;margin-right:5px" title="pending approval">●</span>'; }
       return '<tr class="pm-comprow" style="'+(req?'':'opacity:.6')+'">'
-        +'<td style="padding:2px 8px 2px 16px;font-size:12px;font-weight:600;color:#334155;white-space:nowrap">'+COMP_LBL[dim]+'</td>'
+        +'<td style="padding:4px 8px 4px 16px;font-size:12px;font-weight:700;color:'+_lblFg+';white-space:nowrap;'+_lblBg+'">'+_lblIcon+COMP_LBL[dim]+'</td>'
         +'<td style="padding:2px 8px 2px 28px"><input class="fci pm-comp-desc" data-id="'+s.id+'" data-dim="'+dim+'" value="'+esc(sd.description||'')+'" placeholder="description…" style="width:100%;font-size:11px;box-sizing:border-box"></td>'
         +'<td style="padding:2px 8px;text-align:left;white-space:nowrap">'+reqCell+'</td>'
         +'<td style="padding:2px 8px;text-align:left">'+(req?apprCell:'<span class="mut tiny">—</span>')+'</td>'
         +'<td style="padding:2px 8px;text-align:left;white-space:nowrap">'+actCell+'</td>'
         +'<td style="padding:2px 8px">'+(req?compFiles(s,dim,sd):'<span class="mut tiny">—</span>')+'</td>'
-        +'<td style="padding:2px 8px">'+compShipCell(s,dim)+'</td></tr>'; }
+        +'<td style="padding:2px 8px">'+compSampleCell(s,dim)+'</td></tr>'; }
     function szHdr(s){ return '<tr class="pm-szhdr" data-id="'+s.id+'"><td colspan="7" style="padding:9px 8px 3px 0;border-top:1px solid #e5e7eb;white-space:nowrap"><span style="display:inline-flex;align-items:center;gap:8px;flex-wrap:nowrap"><a class="pm-sz-del" data-id="'+s.id+'" title="remove size" style="color:#dc2626;cursor:pointer;font-weight:700">✕</a><span style="font-weight:700;color:#64748b;font-size:11px">Size</span><input class="fci pm-sz" data-id="'+s.id+'" data-f="size_label" value="'+esc(s.size_label)+'" placeholder="e.g. Large" size="25" style="width:210px;font-weight:700"><select class="fci pm-sz" data-id="'+s.id+'" data-f="approval_status" style="'+szApprovalStyle(s.approval_status)+'"><option value="pending"'+(s.approval_status==='pending'?' selected':'')+'>Pending</option><option value="approved"'+(s.approval_status==='approved'?' selected':'')+'>Approved</option><option value="rejected"'+(s.approval_status==='rejected'?' selected':'')+'>Rejected</option></select>'
       +' <span class="mut tiny">SKU</span> '+(s.approval_status==='approved'
           ? '<button class="cell-pick pm-sku-pick" data-id="'+s.id+'" data-sku="'+esc(s.mapped_sku||'')+'" title="map this approved size to a planner SKU">'+(s.mapped_sku?'<b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.mapped_sku)+'</b>':'<span class="mut">— <span style="background:#fee2e2;color:#991b1b;font-weight:700;border-radius:3px;padding:0 3px">map</span></span>')+' ▾</button>'+(s.mapped_sku?'':prodActMark(it.ref,'sku'))
@@ -9038,7 +9134,7 @@
       +'<div style="font-size:11px;color:#94a3b8;margin:2px 0 12px">Changes save automatically. <span id="pm-msg" style="margin-left:6px"></span></div>'
       +'</div>'
       +'<div style="font-weight:700;font-size:13px;margin:14px 0 6px">Size variants &amp; components <span style="color:#94a3b8;font-weight:400;font-size:11px">(approval = internal D&amp;B sign-off)</span></div>'
-      +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;min-width:1460px;table-layout:fixed"><thead><tr>'+[['Component','width:470px'],['Description','width:14%'],['Req','width:46px'],['Status','width:175px'],['Actions','width:110px'],['Files',''],['Sample shipments','width:13%']].map(function(h){return '<th style="text-align:left;padding:2px 8px 4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7;white-space:nowrap;'+h[1]+'">'+h[0]+'</th>';}).join('')+'</tr></thead><tbody id="pm-sztbody">'+(sizeRows||(_szLoading?'<tr><td colspan="7" style="color:#94a3b8;padding:8px 4px">Loading size variants &amp; components…</td></tr>':'<tr><td colspan="7" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>'))+'</tbody></table></div>'
+      +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;min-width:1460px;table-layout:fixed"><thead><tr>'+[['Component','width:470px'],['Description','width:14%'],['Req','width:46px'],['Status','width:175px'],['Actions','width:110px'],['Files',''],['Samples','width:15%']].map(function(h){return '<th style="text-align:left;padding:2px 8px 4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7;white-space:nowrap;'+h[1]+'">'+h[0]+'</th>';}).join('')+'</tr></thead><tbody id="pm-sztbody">'+(sizeRows||(_szLoading?'<tr><td colspan="7" style="color:#94a3b8;padding:8px 4px">Loading size variants &amp; components…</td></tr>':'<tr><td colspan="7" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>'))+'</tbody></table></div>'
       +'<div style="margin-top:8px"><input class="fci" id="pm-newsz" placeholder="add size…" style="width:130px"> <button class="save-btn" id="pm-addsz">+ Add size</button></div>'
       +'<div style="margin-top:16px;padding-top:12px;border-top:1px solid #eef2f7;max-width:660px"><button class="save-btn light" id="pm-del" style="color:#dc2626">Delete product</button></div>';
     body.querySelectorAll('.pm-fld').forEach(function(el){ el.onchange=function(){ var msg=body.querySelector('#pm-msg'); if(msg){msg.style.color='#64748b';msg.textContent='Saving…';}
@@ -9077,6 +9173,8 @@
       scope.querySelectorAll('.pm-comp-fver').forEach(function(inp){ if(inp._b)return; inp._b=1; inp.onchange=function(){ shipPost('/api/product/component-file/'+inp.dataset.fid,{version:inp.value},function(){}); }; });
       scope.querySelectorAll('.pm-comp-fdel').forEach(function(a){ if(a._b)return; a._b=1; a.onclick=function(){ if(!confirm('Remove this file?'))return; shipPost('/api/product/component-file/'+a.dataset.fid+'/delete',{},function(){ reloadSizes(); }); }; });
       scope.querySelectorAll('.pm-dimimg').forEach(function(im){ if(im._b)return; im._b=1; im.onclick=function(){ openImgZoom(im.dataset.src); }; });
+      scope.querySelectorAll('.pm-samp-open').forEach(function(a){ if(a._b)return; a._b=1; a.onclick=function(e){ e.stopPropagation(); var tb=document.querySelector('.pd-tab[data-t="samples"]'); if(tb)tb.click(); }; });   // sample version → the product's Samples tab
+      scope.querySelectorAll('.samp-open').forEach(function(a){ if(a._b)return; a._b=1; a.onclick=function(e){ e.stopPropagation(); gotoSample(a.dataset.ref); }; });   // sample shipment (SR) → SUPPLY ▸ Samples
       bindProdActMark(scope, function(){ renderProductDetail(it.ref); });   // PO-style A marker: 120ms tooltip + SNOOZE ▾ / wake
     }
     bindSz(body);

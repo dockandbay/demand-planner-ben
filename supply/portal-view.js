@@ -460,6 +460,9 @@
 #supply-root table.ppp-tbl td{background:#fff;text-align:left;padding:6px 8px;border-bottom:1px solid #f1f1f1;white-space:nowrap}
 #supply-root table.ppp-tbl td:nth-child(1),#supply-root table.ppp-tbl th:nth-child(1){position:sticky;left:0;z-index:2;box-shadow:2px 0 4px -2px rgba(15,23,42,.15)}
 #supply-root table.ppp-tbl th:nth-child(1){z-index:3}
+/* season / category group bands — mirror the admin PLAN grid; the colspan header must NOT inherit the sticky first-column rule */
+#supply-root table.ppp-tbl tr.ppp-grp td{position:static;box-shadow:none;background:#cbd5e1;border-top:2px solid #94a3b8;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#1f2937;padding:5px 10px}
+#supply-root table.ppp-tbl tr.ppp-cathdr td{position:static;box-shadow:none;background:#eef2f7;font-weight:600;font-size:12px;letter-spacing:.02em;color:#475569;padding:4px 10px 4px 24px}
 #supply-root table.po-tbl .fci.dt{width:84px}#supply-root table.po-tbl .fci.txt{width:96px}
 #supply-root table.po-tbl thead th:first-child,
 #supply-root table.po-tbl tbody tr:not(.exp-row):not(.grp-row) td:first-child{position:sticky;left:0;z-index:2;background:#fff;box-sizing:border-box;width:54px;min-width:54px;max-width:54px}
@@ -616,7 +619,7 @@
     var _bcRowsCache={};      // Barcodes tab: batch → fetched label-data rows (avoid refetch on filter/re-render)
     var _ppShowAllPO=false, _ppShowAllSP=false;   // "show all" toggles for the capped PO / shipment grids
     var PORTAL_SAMP_F='open', PORTAL_SAMP_Q='';   // Samples grid filter + search (default: open)
-    var PORTAL_PROD_Q='', PORTAL_PROD_SEASON='', PORTAL_PROD_STATUS='in_development';   // Product grid: search + season + status (default: in development)
+    var PORTAL_PROD_Q='', PORTAL_PROD_SEASON='', PORTAL_PROD_STATUS='dev_actions';   // Product grid: search + season + status (default: in development + items with open D&B actions)
     var _invFiles={};     // base64 of the last parsed invoice file, per PO (for the Apply step)
     var rootEl=opts.root; if(!rootEl.closest('#supply-root')){rootEl.id='supply-root';} rootEl.style.display='block';
     if(PP_ANON){ try{ var _anonObs=new MutationObserver(function(){ if(_anonObs._busy)return; _anonObs._busy=1; _anonObs.disconnect(); try{anonSweep();}catch(e){} _anonObs.observe(rootEl,{childList:true,subtree:true}); _anonObs._busy=0; });
@@ -1524,7 +1527,7 @@
           function ppProducts(items){ items=items||[];
             if(!items.length) return '<div class="count" style="padding:16px 2px;text-align:left">No product development items assigned to you yet.</div>';
             var seasons=[]; items.forEach(function(p){ if(p.season&&seasons.indexOf(p.season)<0)seasons.push(p.season); }); seasons.sort();
-            var STAT=[['','All'],['in_development','In development'],['approved','Approved'],['dropped','Dropped']];
+            var STAT=[['dev_actions','In development + actions'],['','All'],['in_development','In development'],['approved','Approved'],['dropped','Dropped']];
             return '<div style="font-size:13px;color:#334155;margin-bottom:8px;text-align:left">Product development items Dock &amp; Bay is working on with you — open one to view its details, samples and timeline.</div>'
               +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;text-align:left">'
               +'<span style="display:flex;align-items:center;gap:5px"><span style="color:#64748b;font-size:11px">Season</span><select class="fci pp-prod-season" style="text-align:left"><option value="">All</option>'+seasons.map(function(s){return '<option value="'+esc(s)+'"'+(s===PORTAL_PROD_SEASON?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>'
@@ -1534,22 +1537,36 @@
               +'<div id="pp-prod-grid"></div>'; }
           function drawProdGrid(){ var host=document.getElementById('pp-prod-grid'); if(!host)return;
             var items=(_ppData&&_ppData.products)||[]; var q=(PORTAL_PROD_Q||'').toLowerCase();
-            var f=items.filter(function(p){ if(PORTAL_PROD_SEASON&&p.season!==PORTAL_PROD_SEASON)return false; if(PORTAL_PROD_STATUS&&p.status!==PORTAL_PROD_STATUS)return false;
+            var f=items.filter(function(p){ if(PORTAL_PROD_SEASON&&p.season!==PORTAL_PROD_SEASON)return false;
+              if(PORTAL_PROD_STATUS==='dev_actions'){ if(!(p.status==='in_development' || Number(p.unread_dnb)>0))return false; }
+              else if(PORTAL_PROD_STATUS&&p.status!==PORTAL_PROD_STATUS)return false;
               if(q){ var hay=((p.ref||'')+' '+(p.colour_name||'')+' '+(p.category||'')+' '+(p.supplier||'')).toLowerCase(); if(hay.indexOf(q)<0)return false; } return true; });
             var cnt=document.querySelector('.pp-prod-count'); if(cnt)cnt.textContent=f.length+' of '+items.length;
             if(!f.length){ host.innerHTML='<div class="count" style="padding:14px 2px;text-align:left">No items match these filters.</div>'; return; }
+            // group by season (newest first) then category (A–Z), mirroring the admin PLAN grid
+            f=f.slice().sort(function(a,b){ var sc=String(b.season||'').localeCompare(String(a.season||'')); if(sc)return sc; var cc=String(a.category||'').localeCompare(String(b.category||'')); if(cc)return cc; return String(a.ref||'').localeCompare(String(b.ref||'')); });
+            var seasonCount={}, catCount={}; f.forEach(function(p){ var sk=p.season||'', ck=(p.season||'')+'|'+(p.category||''); seasonCount[sk]=(seasonCount[sk]||0)+1; catCount[ck]=(catCount[ck]||0)+1; });
+            var _ppS=null, _ppC=null;
             host.innerHTML='<div class="tw"><table class="ppp-tbl"><thead><tr>'+['Product','Category','Season','Sizes','Status'].map(function(h){return '<th>'+h+'</th>';}).join('')+'</tr></thead><tbody>'
               +f.map(function(p,i){ var badge=p.unread_dnb?' <span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+p.unread_dnb+'</span>':'';
-                var sw=p.has_swatch?'<img src="'+(EP.productSwatchBase||'/api/product/swatch/')+encodeURIComponent(p.ref)+'?t='+encodeURIComponent(p.updated_at||'')+'" style="width:34px;height:34px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;flex:0 0 auto">':'<span style="width:34px;height:34px;border-radius:6px;border:1px dashed #cbd5e1;flex:0 0 auto"></span>';
-                return '<tr><td><div style="display:flex;align-items:center;gap:8px">'+sw
+                var _swU=(EP.productSwatchBase||'/api/product/swatch/')+encodeURIComponent(p.ref)+'?t='+encodeURIComponent(p.updated_at||'');
+                var sw=p.has_swatch?'<img class="pp-dimimg" data-src="'+_swU+'" src="'+_swU+'" title="click to enlarge" style="width:34px;height:34px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;flex:0 0 auto;cursor:zoom-in">':'<span style="width:34px;height:34px;border-radius:6px;border:1px dashed #cbd5e1;flex:0 0 auto"></span>';
+                var sKey=p.season||'', cKey=p.category||'', hdr='';
+                if(sKey!==_ppS){ _ppS=sKey; _ppC=null; hdr+='<tr class="ppp-grp"><td colspan="5">'+esc(sKey||'— no season —')+' <span style="font-weight:400;color:#475569">('+seasonCount[sKey]+')</span></td></tr>'; }
+                if(cKey!==_ppC){ _ppC=cKey; hdr+='<tr class="ppp-cathdr"><td colspan="5">'+esc(cKey||'— no category —')+' <span style="font-weight:400;color:#94a3b8">('+catCount[sKey+'|'+cKey]+')</span></td></tr>'; }
+                return hdr+'<tr id="ppprow-'+i+'"><td><div style="display:flex;align-items:center;gap:8px">'+sw
                     +'<button class="planbtn pp-prod-open" data-ref="'+esc(p.ref)+'" data-i="'+i+'" style="flex:0 0 auto">PLAN</button>'
                     +'<div style="min-width:0"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(p.ref)+'</b>'+badge+(p.colour_name?'<div style="font-size:10px;color:#94a3b8">'+esc(p.colour_name)+'</div>':'')+'</div></div></td>'
-                  +'<td>'+esc(p.category||'')+'</td><td>'+esc(p.season||'')+'</td><td>'+p.sizes+'</td><td>'+esc(prodStatusLabel(p.status))+'</td></tr>'; }).join('')
-              +'</tbody></table></div>'
-              +'<div id="pp-prod-detail" style="display:none;margin-top:12px;text-align:left;max-width:100%;box-sizing:border-box"></div>';   // detail renders OUTSIDE the scrollable table → fits the phone width
-            host.querySelectorAll('.pp-prod-open').forEach(function(b){ b.onclick=function(){ var ref=b.dataset.ref, det=document.getElementById('pp-prod-detail');
-              if(det.dataset.ref===ref && det.style.display!=='none'){ det.style.display='none'; det.dataset.ref=''; ppSetHash('product'); return; }
-              det.dataset.ref=ref; det.style.display=''; ppProdDetail(det, ref); ppSetHash('product', ref); if(det.scrollIntoView)det.scrollIntoView({block:'nearest'}); }; });
+                  +'<td>'+esc(p.category||'')+'</td><td>'+esc(p.season||'')+'</td><td>'+p.sizes+'</td><td>'+esc(prodStatusLabel(p.status))+'</td></tr>'
+                  // detail renders in a row directly UNDER this product; pinned to the left edge + capped to the viewport so it stays usable while the table scrolls sideways on a phone
+                  +'<tr class="ppp-detrow" id="ppdet-'+i+'" style="display:none"><td colspan="5" style="position:sticky;left:0;padding:0;background:#fff;box-shadow:none"><div class="pp-prod-det" style="text-align:left;max-width:96vw;box-sizing:border-box;padding:10px 6px 14px"></div></td></tr>'; }).join('')
+              +'</tbody></table></div>';
+            host.querySelectorAll('.pp-prod-open').forEach(function(b){ b.onclick=function(){ var ref=b.dataset.ref, i=b.dataset.i, drow=document.getElementById('ppdet-'+i), det=drow&&drow.querySelector('.pp-prod-det');
+              if(!drow||!det)return;
+              if(drow.style.display!=='none' && det.dataset.ref===ref){ drow.style.display='none'; det.dataset.ref=''; det.innerHTML=''; ppSetHash('product'); return; }   // toggle closed
+              host.querySelectorAll('.ppp-detrow').forEach(function(r){ if(r!==drow){ r.style.display='none'; var d=r.querySelector('.pp-prod-det'); if(d){ d.dataset.ref=''; d.innerHTML=''; } } });   // close any other open detail
+              drow.style.display=''; det.dataset.ref=ref; ppProdDetail(det, ref); ppSetHash('product', ref); if(drow.scrollIntoView)drow.scrollIntoView({block:'nearest'}); }; });
+            host.querySelectorAll('.pp-dimimg').forEach(function(im){ im.onclick=function(e){ e.stopPropagation(); ppImgZoom(im.dataset.src); }; });   // swatch → enlarge
             if(_ppOpenProd){ var _pr=_ppOpenProd; _ppOpenProd=null; var _pb=null; host.querySelectorAll('.pp-prod-open').forEach(function(b){ if(b.dataset.ref===_pr)_pb=b; }); if(_pb)setTimeout(function(){ _pb.click(); },0); } }   // deep link #/product/<ref> → auto-open
           function wireProducts(){ var body=document.getElementById('pp-body');
             var ss=body.querySelector('.pp-prod-season'); if(ss)ss.onchange=function(){ PORTAL_PROD_SEASON=ss.value; drawProdGrid(); };
@@ -1570,14 +1587,21 @@
                 return /^image\//i.test(String(f.mime||''))?'<img class="pp-dimimg" data-src="'+url+'" src="'+url+'" style="width:24px;height:24px;object-fit:cover;border-radius:4px;border:1px solid #e5e7eb;margin:1px;cursor:zoom-in;vertical-align:middle" title="'+esc(vt+(f.filename||''))+'">':'<a href="'+url+'" download rel="noopener" style="font-size:10px;color:#1d4ed8;margin:0 4px;text-decoration:underline" title="'+esc(f.filename||'')+'">📄 '+esc(vt)+esc(f.filename||'file')+'</a>'; }).join(''); }
               function apprGlyph(a){ return a==='approved'?'✓':a==='rejected'?'✕':'⚠'; }
               function statusCell(appr){ var col=appr==='approved'?'#16a34a':appr==='rejected'?'#dc2626':'#b45309'; return '<b style="color:'+col+';white-space:nowrap">'+apprGlyph(appr)+' '+esc(appr||'pending')+'</b>'; }
-              function pDimRow(label, sd){ if(!sd.required)return '<tr style="border-top:1px solid #f4f4f5;color:#cbd5e1"><td style="padding:5px 8px 5px 0;text-align:left">'+label+'</td><td colspan="2" style="padding:5px 0;text-align:left">not required</td></tr>';
-                return '<tr style="border-top:1px solid #f4f4f5;vertical-align:top"><td style="padding:6px 10px 6px 0;text-align:left"><div style="font-weight:600;color:#334155">'+label+'</div>'+(sd.description?'<div class="mut tiny" style="margin-top:1px;white-space:normal">'+esc(sd.description)+'</div>':'')+'</td><td style="padding:6px 10px 6px 0;white-space:nowrap;text-align:left">'+statusCell(sd.approval_status)+'</td><td style="padding:6px 0;text-align:left">'+(pFiles(sd.files)||'<span class="mut tiny">—</span>')+'</td></tr>'; }
+              // sample VERSIONS covering this size + component, each with its shipment + Dock & Bay feedback
+              function pSampleCell(s, dim){ var rel=(d.samples||[]).filter(function(sm){ return (sm.sampled_aspects||[]).indexOf(dim)>=0 && (sm.sample_sizes||[]).indexOf(s.size_label)>=0; });
+                if(!rel.length)return '<span class="mut tiny">—</span>';
+                return rel.map(function(sm){ var shs=(sm.shipments||[]).map(function(sh){ return '📦'+esc(sh.ref)+(sh.tracking?' '+carrierTrackLink(sh.carrier,sh.tracking):''); }).join(' ');
+                  return '<div style="margin-bottom:5px"><b style="font-family:ui-monospace,Menlo,monospace;font-size:10px">'+esc(sm.ref)+'</b>'+(shs?' <span class="mut tiny">'+shs+'</span>':'')
+                    +(sm.admin_feedback?'<div style="margin-top:2px;font-size:10px;color:#78350f;background:#fffbeb;border:1px solid #fde68a;border-radius:5px;padding:2px 6px;white-space:normal">💬 '+esc(sm.admin_feedback)+'</div>':'')+'</div>'; }).join(''); }
+              function pDimRow(label, sd, s, dim){ if(!sd.required)return '<tr style="border-top:1px solid #f4f4f5;color:#cbd5e1"><td style="padding:5px 8px 5px 0;text-align:left">'+label+'</td><td colspan="3" style="padding:5px 0;text-align:left">not required</td></tr>';
+                return '<tr style="border-top:1px solid #f4f4f5;vertical-align:top"><td style="padding:6px 10px 6px 0;text-align:left"><div style="font-weight:600;color:#334155">'+label+'</div>'+(sd.description?'<div class="mut tiny" style="margin-top:1px;white-space:normal">'+esc(sd.description)+'</div>':'')+'</td><td style="padding:6px 10px 6px 0;white-space:nowrap;text-align:left">'+statusCell(sd.approval_status)+'</td><td style="padding:6px 10px 6px 0;text-align:left">'+pSampleCell(s,dim)+'</td><td style="padding:6px 0;text-align:left">'+(pFiles(sd.files)||'<span class="mut tiny">—</span>')+'</td></tr>'; }
               var sizes=(d.sizes||[]).map(function(s){ function sd(dm){ return ((s.dimensions||[]).filter(function(x){return x.dimension===dm;})[0])||{}; } var pk=sd('packaging'), ok=s.approval_status==='approved';
                 var head='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:7px"><span style="font-weight:700;font-size:14px">'+esc(s.size_label)+'</span><span style="font-size:11px;padding:1px 8px;border-radius:10px;background:'+(ok?'#ecfdf5':s.approval_status==='rejected'?'#fef2f2':'#fffbeb')+';color:'+(ok?'#065f46':s.approval_status==='rejected'?'#991b1b':'#92400e')+';font-weight:700">'+apprGlyph(s.approval_status)+' '+esc(s.approval_status||'pending')+'</span>'+(s.mapped_sku?'<span style="font-size:11px;color:#64748b">SKU <b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.mapped_sku)+'</b></span>':'')+'</div>';
-                var body='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:#94a3b8;font-size:10px;text-transform:uppercase;letter-spacing:.04em"><th style="text-align:left;padding:0 10px 4px 0;font-weight:600">Component</th><th style="text-align:left;padding:0 10px 4px 0;font-weight:600">Status</th><th style="text-align:left;padding:0 0 4px;font-weight:600">Files</th></tr></thead><tbody>'
-                  +pDimRow('Product', sd('product'))+pDimRow('Packaging'+(pk.packaging_type?' ('+esc(pk.packaging_type)+')':''), pk)+pDimRow('Labels/wraps', sd('labels'))+pDimRow('Polybags', sd('polybag'))+pDimRow('Other components', sd('other'))+'</tbody></table>';
+                var body='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:#94a3b8;font-size:10px;text-transform:uppercase;letter-spacing:.04em"><th style="text-align:left;padding:0 10px 4px 0;font-weight:600">Component</th><th style="text-align:left;padding:0 10px 4px 0;font-weight:600">Status</th><th style="text-align:left;padding:0 10px 4px 0;font-weight:600">Sample versions</th><th style="text-align:left;padding:0 0 4px;font-weight:600">Files</th></tr></thead><tbody>'
+                  +pDimRow('Product', sd('product'), s, 'product')+pDimRow('Packaging'+(pk.packaging_type?' ('+esc(pk.packaging_type)+')':''), pk, s, 'packaging')+pDimRow('Labels/wraps', sd('labels'), s, 'labels')+pDimRow('Polybags', sd('polybag'), s, 'polybag')+pDimRow('Other components', sd('other'), s, 'other')+'</tbody></table>';
                 return '<div style="border:1px solid #e5e7eb;border-radius:9px;padding:10px 13px;margin-bottom:9px;background:#fff">'+head+body+'</div>'; }).join('')||'<span class="mut">no sizes</span>';
-              var sw=it.has_swatch?'<img src="'+(EP.productSwatchBase||'/api/product/swatch/')+encodeURIComponent(ref)+'?t='+encodeURIComponent(it.updated_at||'')+'" style="width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">':'';
+              var _mswU=(EP.productSwatchBase||'/api/product/swatch/')+encodeURIComponent(ref)+'?t='+encodeURIComponent(it.updated_at||'');
+              var sw=it.has_swatch?'<img class="pp-dimimg" data-src="'+_mswU+'" src="'+_mswU+'" title="click to enlarge" style="width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb;cursor:zoom-in">':'';
               box.innerHTML='<div style="max-width:660px;text-align:left">'+(sw?'<div style="margin-bottom:8px">'+sw+'</div>':'')
                 +row('Reference','<b style="font-family:ui-monospace,Menlo,monospace">'+esc(it.ref)+'</b>')+row('Season',esc(it.season||'—'))+row('Category',esc(it.category||'—'))+row('Supplier',esc(it.supplier||'—'))+row('Colour way',esc(it.colour_name||'—'))+row('Status',esc(prodStatusLabel(it.status)))+row('Description','<span style="white-space:pre-wrap">'+esc(it.description||'—')+'</span>')
                 +'<div style="padding:10px 0 4px"><div style="color:#334155;font-weight:700;font-size:13px;margin-bottom:7px">Size variants &amp; components</div>'+sizes+'</div></div>';
@@ -1668,6 +1692,7 @@
                     +'<div style="font-size:11px;font-weight:600;margin:4px 0 2px">Item types in this sample</div>'+ASPECTS.map(function(a){return '<label style="display:inline-block;font-size:11px;margin:0 12px 3px 0;cursor:pointer"><input type="checkbox" class="pp-meta-aspect" value="'+a[0]+'"'+((s.sampled_aspects||[]).indexOf(a[0])>=0?' checked':'')+' style="vertical-align:middle;margin-right:4px">'+a[1]+'</label>';}).join('')
                     +'<div style="margin-top:6px"><button class="save-btn pp-meta-save" data-id="'+s.id+'" style="font-size:11px">Save</button></div></div>'
                   +(s.description?'<div style="margin:4px 0;white-space:pre-wrap">'+esc(s.description)+'</div>':'')
+                  +(s.admin_feedback?'<div style="margin:6px 0;padding:8px 11px;background:#fffbeb;border:1px solid #fde68a;border-radius:7px"><div style="font-size:11px;font-weight:700;color:#92400e;margin-bottom:2px">💬 Feedback from Dock &amp; Bay</div><div style="font-size:12px;color:#78350f;white-space:pre-wrap">'+esc(s.admin_feedback)+'</div></div>':'')
                   +(ph?'<div style="margin-top:4px">'+ph+'</div>':'')
                   +'<div style="margin-top:6px"><label style="font-size:11px;color:#64748b">📎 Upload photo / document <span style="color:#94a3b8">(≤10MB each)</span><input type="file" class="pp-samp-file" data-id="'+s.id+'" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv" multiple style="font-size:11px;display:block;margin-top:4px"></label> <span class="pp-samp-msg" data-id="'+s.id+'" style="font-size:11px"></span></div>'
                   +((s.shipments||[]).length?'<div style="margin-top:7px;display:flex;flex-direction:column;gap:5px">'+(s.shipments||[]).map(function(sh){return '<div style="padding:6px 9px;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">📦 <b>'+esc(sh.ref)+'</b>'+(sh.carrier?'<span class="mut tiny">'+esc(sh.carrier)+'</span>':'')+(sh.tracking?'<span style="font-size:12px">'+carrierTrackLink(sh.carrier,sh.tracking)+'</span>':'')+'</div>';}).join('')+'<div class="mut tiny">add this sample to a shipment in the <b>Samples</b> tab</div></div>':'')
