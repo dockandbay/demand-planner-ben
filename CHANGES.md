@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.247 - PO timeline: internal notes show "<user> · Dock & Bay"
+- Internal (D&B) timeline notes now show the author as "ben@ · Dock & Bay" when the posting user is known (was just "ben@" or just "Dock & Bay"). Falls back to "Dock & Bay" only when no user was captured. NOTE: capture relies on the forwarded login header (server authUser) / session email — notes posted with neither still show generic "Dock & Bay".
+
 ## v26.246 - Crossdock: PO references open the PO popout drawer
 - On PURCHASE ORDERS ▸ Crossdock & Labels, PO numbers (in the "what is this stock?" sources, the assigned-crossdock table, and the air-freight master-PO table) are now clickable and open the PO in the popout drawer, like the consolidation view.
 
