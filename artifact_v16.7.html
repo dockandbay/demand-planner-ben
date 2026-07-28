@@ -6765,7 +6765,7 @@ function renderKeyAccountsView(body){
   var pendClients=[], pendSkus={};   // transient: client/skus added in the UI before any qty is saved (per current country)
   function ym(d){ return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2); }
   function monthList(){ var out=[], now=new Date(), base=new Date(now.getFullYear(),now.getMonth(),1);
-    for(var i=(KAF_PAST?-12:0);i<12;i++){ var d=new Date(base.getFullYear(),base.getMonth()+i,1);
+    for(var i=(KAF_PAST?-12:0);i<18;i++){ var d=new Date(base.getFullYear(),base.getMonth()+i,1);
       out.push({key:ym(d), label:d.toLocaleString('en',{month:'short'})+" '"+String(d.getFullYear()).slice(2), past:i<0, cur:i===0}); } return out; }
   function skuName(s){ return (s&&SKUM[s])?(SKUM[s].n||''):''; }
   function resolveSku(raw){ var s=String(raw||'').trim(); if(!s)return null; if(SKUM[s])return s;
@@ -6776,7 +6776,7 @@ function renderKeyAccountsView(body){
     +'<input id="kaf-q" placeholder="filter SKU or client…" value="'+e(KAF_Q)+'" style="padding:5px 9px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;width:210px">'
     +'<label style="font-size:12px;color:#475569;cursor:pointer;display:flex;align-items:center;gap:4px"><input type="checkbox" id="kaf-past"'+(KAF_PAST?' checked':'')+'> show 12 months back</label>'
     +'<button id="kaf-import" style="margin-left:auto;border:1px solid #93c5fd;background:#eff6ff;color:#1e40af;padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600">⬆ Import / paste</button></div>'
-    +'<div style="font-size:12px;color:#666;margin:0 0 10px">Forecast qty per month — edit inline (saves straight to the database). Current month → 12 months forward; past hidden by default.</div>'
+    +'<div style="font-size:12px;color:#666;margin:0 0 10px">Forecast qty per month — edit inline (saves straight to the database). Current month → 18 months forward; past hidden by default.</div>'
     +'<div id="kaf-imp"></div>'
     +'<div id="kafc" style="overflow-x:auto"><div style="color:#888;font-size:12px">Loading…</div></div></div>';
   var host=body.querySelector('#kafc');

@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.237 - Key Accounts grid: forward window 12 → 18 months
+- The month-grid now shows the current month → 18 months forward (was 12). "Show 12 months back" toggle unchanged.
+
 ## v26.236 - DEMAND ▸ Key Accounts forecast grid rebuilt (month pivot + import)
 - Replaced the flat Client/SKU/Country/Date/Qty editor with a pivoted month-grid:
   - **Country pills** (UK / US / EU) — each filters to that 3PL warehouse.
