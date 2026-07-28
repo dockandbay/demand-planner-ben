@@ -3,6 +3,22 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.233 - Supplier portal polish (escalate rename, compose-on-top, auto-save, prod-status colour)
+- Timeline "⚑ Flag" buttons renamed to "⚑ Escalate"; their tooltip is now a native title (never renders off-screen).
+- PO timeline: the reply/new-message box now sits at the TOP of the thread (above the messages), not the bottom.
+- Shipment "📝 Update this shipment" (carrier / tracking / ship date / status) now auto-saves on change — Save button removed ("Changes save automatically").
+- PO grid production-status dropdown: "In production" is now orange (was pale amber) to match the supply-plan palette — orange in production · blue ready to ship · green shipped.
+
+## v26.232 - FOB shipment tracking + kill phantom tracking approval (PO-1760789 workflow)
+- SHIPMENTS tab: FOB self-shipments now show an editable Carrier + Tracking (with the live track link) under the "FOB · factory pickup · production ends…" note — so supplier-entered shipment details show even though there's no transit/freight.
+- Timeline no longer shows tracking submissions as "⏳ Awaiting your approval" — tracking auto-applies onto the shipment and never needed an approval step (there was no approve button; it was a dead-end).
+- Portal-submit: submitting tracking/carrier now posts a readable supplier timeline note ("Supplier submitted shipment details — carrier X, tracking Y").
+- Timeline attribution now shows the exact submitting user + supplier (e.g. "XR Textile · yw11@xrtextile.com") instead of a generic "supplier (…)". (server: PO-detail notes join suppliers for the name.)
+- Data cleanup: cleared the stranded pending 'tracking' submission on sandbox (PO-53AUXR1) and live (PO-1760789, id 32 → applied). No data loss — the tracking was already on the shipment.
+
+## v26.231 - Supplier portal: Flexport in the own-carrier options
+- Added "Flexport" to the carrier dropdown under "Supplier shipped this with own carrier account" (was DHL/Fedex/SF Express/Local Delivery/Other). Suppliers no longer have to pick "Other" for Flexport.
+
 ## v26.230 - Supplier portal PRODUCT fixes + sample feedback on timeline
 - Portal Product grid: the PLAN detail now opens in a row directly under the clicked product (pinned left + capped to viewport for phones), instead of at the bottom of the grid.
 - Portal: clicking a swatch (product grid + master data) pops up a larger version.

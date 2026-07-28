@@ -1492,7 +1492,13 @@
         +'</div>');
       var detail='';
       if(selfShip && curMode==='fob'){
-        detail=row('FOB','<span class="mut tiny">Factory pickup — no transit or freight details.'+(r.prod_end?' Production ends <b>'+esc(fd(r.prod_end))+'</b>.':'')+'</span>');
+        // FOB = no transit/freight, but the supplier can still submit a carrier + tracking (factory-arranged pickup / their own account) — always show + allow editing here.
+        var _trkUf=carrierTrackUrl(sh.carrier,sh.carrier_ref);
+        detail=row('FOB','<span class="mut tiny">Factory pickup — no transit or freight details.'+(r.prod_end?' Production ends <b>'+esc(fd(r.prod_end))+'</b>.':'')+'</span>')
+          +'<div class="po-trk-wrap">'
+          +row('Carrier <span class="mut tiny">(if supplier ships it)</span>',carrierSel(shipEp,sh.carrier,false))
+          +row('Tracking / carrier ref',carrierRefInput(shipEp,sh.carrier_ref,false)+' <span class="po-trk-link" style="margin-left:6px;font-size:12px">'+(_trkUf?'<a href="'+_trkUf+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;font-weight:600" title="track ↗">track '+esc(sh.carrier||'')+' ↗</a>':'')+'</span>')
+          +'</div>';
       } else if(selfShip && (curMode==='sea'||curMode==='air')){
         var _trkU=carrierTrackUrl(sh.carrier,sh.carrier_ref);
         detail='<div class="po-trk-wrap">'
@@ -3378,7 +3384,8 @@
   function timelinePanel(po,d){ var notes=shortNotes((d&&d.notes)||[]), subs=(d&&d.subs)||[];
     function sf(s){ if(s.kind==='tracking'){ try{var o=JSON.parse(s.value);return 'tracking '+(o.tracking||'')+(o.carrier?' / '+o.carrier:'');}catch(e){return 'tracking';} }
       if(s.kind==='completion_date')return 'completion '+s.value; if(s.kind==='invoice_value')return 'invoice $'+s.value; return s.kind+' '+(s.value||''); }
-    var pend=subs.filter(function(s){return s.status==='pending';}), appl=subs.filter(function(s){return s.status==='applied';});
+    // tracking/carrier is informational — it auto-applies onto the shipment and never needs approval, so it never appears as "awaiting approval" (a legacy pending 'tracking' row is just noise here).
+    var pend=subs.filter(function(s){return s.status==='pending' && s.kind!=='tracking';}), appl=subs.filter(function(s){return s.status==='applied';});
     var head=(pend.length?'<div class="tiny" style="color:#92400e;margin-bottom:3px">⏳ Awaiting your approval: '+pend.map(function(s){return esc(sf(s));}).join(' · ')+'</div>':'')
       +(appl.length?'<div class="tiny" style="color:#166534;margin-bottom:6px">✓ Applied: '+appl.map(function(s){return esc(sf(s));}).join(' · ')+'</div>':'');
     // escalate is only offered on YOUR OWN (internal) latest message (it emails the supplier) — never on a supplier note
@@ -3393,7 +3400,7 @@
       if(n.id===recentAnyId && n.author_kind==='internal' && (n.author_email||'').toLowerCase()===meEmail) ctrl += '<a class="po-note-del" data-id="'+n.id+'" data-po="'+esc(po)+'" title="delete this (most recent) message — you can only delete your own" style="font-size:10px;color:#b91c1c;cursor:pointer;text-decoration:underline;white-space:nowrap">delete</a>';
       return '<div style="font-size:11px;margin:3px 0;max-width:640px;padding:5px 8px;background:'+(sup?(n.read?'#f1f5f9':'#fff7ed'):'#eef2ff')+';border:1px solid '+(sup&&!n.read?'#fdba74':'#e5e7eb')+';border-radius:5px;display:flex;gap:10px;align-items:flex-start">'
         +(ctrl?'<div style="flex:0 0 auto;display:flex;flex-direction:column;gap:3px;align-items:flex-start;min-width:78px">'+ctrl+'</div>':'')
-        +'<div style="flex:1"><span class="mut tiny">'+esc(n.created_at)+' · '+(sup?('supplier'+(n.author_email?' ('+esc(shortUser(n.author_email))+')':'')):(n.author_email&&n.author_email!=='Dock & Bay'?esc(shortUser(n.author_email)):'Dock &amp; Bay'))+'</span>'+(sup&&!n.read?' <span class="ex-badge">new</span>':'')+'<br><span style="color:#1a1a1a">'+esc(n.body)+'</span></div>'
+        +'<div style="flex:1"><span class="mut tiny">'+esc(n.created_at)+' · '+(sup?((n.supplier_name?esc(n.supplier_name):'Supplier')+(n.author_email&&!/^(d&b|dock & bay|portal)$/i.test(n.author_email)?' · '+esc(n.author_email):'')):(n.author_email&&n.author_email!=='Dock & Bay'?esc(shortUser(n.author_email)):'Dock &amp; Bay'))+'</span>'+(sup&&!n.read?' <span class="ex-badge">new</span>':'')+'<br><span style="color:#1a1a1a">'+esc(n.body)+'</span></div>'
         +'</div>'; }).join(''):'<div class="mut tiny">No timeline notes yet.</div>';
     var compose='<div style="margin-top:8px;display:flex;gap:6px;align-items:flex-start"><textarea class="po-note-body fci" data-po="'+esc(po)+'" rows="2" placeholder="Add a note for the supplier…" style="flex:1;min-height:34px;max-width:480px;text-align:left"></textarea><button class="save-btn po-note-post" data-po="'+esc(po)+'" style="flex:0 0 auto">Post to supplier</button></div>'
       +'<div class="mut tiny" style="margin:4px 2px">Posting appears in the supplier&rsquo;s portal timeline. Unread supplier replies show as an action.</div>';

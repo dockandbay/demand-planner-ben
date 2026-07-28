@@ -4173,6 +4173,10 @@ app.post('/api/supply/portal-submit', async (req, res) => {
       await client.query(`INSERT INTO planner.supplier_submissions (supplier_id, po, shipment_ref, kind, value, status, submitted_by, applied_by, applied_at)
         VALUES ($1,$2,$3,'tracking',$4,'applied',$5,$5,now())`, [sid, b.po, ref, JSON.stringify({ tracking: b.tracking || null, carrier: b.carrier || null }), by]);
       out.applied.push('tracking/carrier → ' + ref);
+      // shipment details also land on the PO timeline as a readable supplier message (author = the exact portal user)
+      const _shipParts = []; if (b.carrier) _shipParts.push('carrier ' + b.carrier); if (b.tracking) _shipParts.push('tracking ' + b.tracking);
+      if (_shipParts.length) try { await client.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body) VALUES ($1,$2,$3,'supplier',$4)`,
+        [b.po, sid, by || null, 'Supplier submitted shipment details — ' + _shipParts.join(', ')]); } catch (e) { /* timeline note best-effort */ }
     }
     // supplier production status (validated above) — '' clears it
     if (b.production_status != null) {
@@ -5718,10 +5722,13 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
                     coalesce(submitted_by,'') submitted_by, to_char(submitted_at,'YYYY-MM-DD') submitted_at,
                     coalesce(reviewed_by,'') reviewed_by, to_char(reviewed_at,'YYYY-MM-DD') reviewed_at
                   FROM planner.portal_attachments WHERE po=$1 ORDER BY uploaded_at DESC`, [po]).catch(() => ({ rows: [] })),
-      // PO PLAN Timeline: notes (supplier + internal) + submission status
-      pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
-                    to_char(created_at,'DD-Mon-YY HH24:MI') created_at, read_at IS NOT NULL read
-                  FROM planner.supplier_notes WHERE po=$1 ORDER BY created_at`, [po]).catch(() => ({ rows: [] })),
+      // PO PLAN Timeline: notes (supplier + internal) + submission status. supplier_name lets the timeline show
+      // the exact submitting user AND their supplier (e.g. "XR Textile · yw11@xrtextile.com").
+      pool.query(`SELECT n.id, n.author_kind, coalesce(n.author_email,'') author_email, n.body,
+                    to_char(n.created_at,'DD-Mon-YY HH24:MI') created_at, n.read_at IS NOT NULL read,
+                    coalesce(s.name,'') supplier_name
+                  FROM planner.supplier_notes n LEFT JOIN planner.suppliers s ON s.id=n.supplier_id
+                  WHERE n.po=$1 ORDER BY n.created_at`, [po]).catch(() => ({ rows: [] })),
       pool.query(`SELECT kind, value, status, coalesce(submitted_by,'') submitted_by, to_char(submitted_at,'YYYY-MM-DD') submitted_at, attachment_id
                   FROM planner.supplier_submissions WHERE po=$1 ORDER BY submitted_at`, [po]).catch(() => ({ rows: [] })),
       // PO PLAN order plan: supplier-submitted actual cost + amended qty + added SKUs + D&B final cost per line

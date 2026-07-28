@@ -50,7 +50,7 @@
   var PROD_STATUS=[['not_started','Not started'],['in_production','In production'],['ready_to_ship','Ready to ship'],['shipped','Shipped']];
   function prodStatusLabel(v){ var m=PROD_STATUS.filter(function(o){return o[0]===v;}); return m.length?m[0][1]:''; }
   // production-status colour coding: —/not started grey, in production amber, ready to ship blue, shipped green
-  var PROD_STATUS_COL={'':['#f1f5f9','#64748b','#e2e8f0'],not_started:['#f1f5f9','#64748b','#e2e8f0'],in_production:['#fef3c7','#92710a','#fcd34d'],ready_to_ship:['#dbeafe','#1d4ed8','#93c5fd'],shipped:['#dcfce7','#15803d','#86efac']};
+  var PROD_STATUS_COL={'':['#f1f5f9','#64748b','#e2e8f0'],not_started:['#f1f5f9','#64748b','#e2e8f0'],in_production:['#ffedd5','#9a3412','#fdba74'],ready_to_ship:['#dbeafe','#1d4ed8','#93c5fd'],shipped:['#dcfce7','#15803d','#86efac']};   // orange in production · blue ready to ship · green shipped (matches the supply plan palette)
   function prodStatusStyle(v){ var c=PROD_STATUS_COL[v||'']||PROD_STATUS_COL['']; return 'background:'+c[0]+';color:'+c[1]+';border:1px solid '+c[2]+';font-weight:600'; }
   function paintProdSel(el){ if(!el)return; var c=PROD_STATUS_COL[el.value||'']||PROD_STATUS_COL['']; el.style.background=c[0]; el.style.color=c[1]; el.style.borderColor=c[2]; el.style.fontWeight='600'; }
   function prodStatusSel(po,val){ return '<select class="fci pp-prod" data-po="'+esc(po)+'" style="font-size:11px;text-align:left;width:130px;min-width:0;'+prodStatusStyle(val)+'"><option value=""'+(val?'':' selected')+'>—</option>'
@@ -646,7 +646,7 @@
     if(!rootEl._invBound){ rootEl._invBound=1; rootEl.addEventListener('click', function(e){
       var fb=e.target.closest('.sp-fob-flag');   // FOB timeline "Flag" — delegated so it survives the note-list re-render
       if(fb){ e.preventDefault(); if(!EP.escalate)return; var msg=fb.dataset.msg||''; if(!msg)return; if(!confirm('Email this note to the supply planner?'))return; fb.disabled=true; fb.textContent='Sending…';
-        postJSON(EP.escalate,{kind:'po',ref:fb.dataset.po,message:msg,initiator:'supplier'},function(j){ fb.textContent='✓ Flagged'; if(j&&j.sandbox)alert('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); return; }
+        postJSON(EP.escalate,{kind:'po',ref:fb.dataset.po,message:msg,initiator:'supplier'},function(j){ fb.textContent='✓ Escalated'; if(j&&j.sandbox)alert('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); return; }
       var b=e.target.closest('.pp-ship-inv,.pp-po-inv'); if(!b)return; e.preventDefault();
       if(b.classList.contains('pp-ship-inv')) dlInvoice((EP.shipmentInvoice||'/api/invoice/shipment/')+encodeURIComponent(b.dataset.ref), b);
       else dlInvoice((EP.poInvoice||'/api/invoice/po/')+encodeURIComponent(b.dataset.po), b); }); }
@@ -840,15 +840,15 @@
       var timeline=confirmBar+prodBlock
         +(pend.length?'<div class="tiny" style="color:#92400e;margin-bottom:3px">⏳ Submitted, awaiting approval: '+pend.map(function(s){return esc(subFmt(s));}).join(' · ')+'</div>':'')
         +(appl.length?'<div class="tiny" style="color:#166534;margin-bottom:6px">✓ Applied: '+appl.map(function(s){return esc(subFmt(s))+(s.attachment_id?' <a href="/api/portal/attachment/'+s.attachment_id+'" target="_blank">doc</a>':'');}).join(' · ')+'</div>':'')
+        +'<div style="margin:0 0 8px;display:flex;gap:5px"><textarea class="pp-note-body fci" data-po="'+po+'" rows="1" placeholder="Reply to Dock &amp; Bay…" style="flex:1;min-height:26px;max-width:420px;text-align:left"></textarea><button class="save-btn pp-note-post" data-po="'+po+'">Post</button></div>'
         +(notes.length?tlDesc(notes).map(function(n){ var internal=(n.author_kind==='internal');
           var ctrl = internal
             ? (n.read?'<button class="pp-note-read" data-id="'+n.id+'" data-read="1" style="font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline;white-space:nowrap;background:none;border:none;padding:0">mark unread</button>':'<button class="save-btn light pp-note-read" data-id="'+n.id+'" data-read="0">Mark read</button>')
-            : ((EP.escalate&&n.id===_recentSupNoteId)?'<button class="save-btn light tip pp-esc-note" data-po="'+po+'" data-msg="'+esc(n.body)+'" data-tip="email this note to the supply planner" style="color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Flag</button>':'');
+            : ((EP.escalate&&n.id===_recentSupNoteId)?'<button class="save-btn light pp-esc-note" data-po="'+po+'" data-msg="'+esc(n.body)+'" title="email this note to the supply planner" style="color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'');
           return '<div style="font-size:11px;margin:3px 0;max-width:640px;padding:5px 8px;background:'+(internal?(n.read?'#eef2ff':'#fff7ed'):'#f1f5f9')+';border:1px solid '+(internal&&!n.read?'#fdba74':'#e5e7eb')+';border-radius:5px;display:flex;gap:10px;align-items:flex-start">'
             +(ctrl?'<div style="flex:0 0 auto;display:flex;flex-direction:column;gap:3px;align-items:flex-start;min-width:78px">'+ctrl+'</div>':'')
             +'<div style="flex:1"><span class="mut tiny">'+esc(n.created_at)+' · '+(internal?'Dock &amp; Bay':'You')+'</span>'+(internal&&!n.read?' <span class="ex-badge">new</span>':'')+'<br>'+esc(n.body)+'</div>'
-            +'</div>'; }).join(''):'<div class="mut tiny">No notes yet.</div>')
-        +'<div style="margin-top:6px;display:flex;gap:5px"><textarea class="pp-note-body fci" data-po="'+po+'" rows="1" placeholder="Reply to Dock &amp; Bay…" style="flex:1;min-height:26px;max-width:420px;text-align:left"></textarea><button class="save-btn pp-note-post" data-po="'+po+'">Post</button></div>';
+            +'</div>'; }).join(''):'<div class="mut tiny">No notes yet.</div>');
       // ---- INVOICE (the submitted value persists here with its approval status) ----
       var invSubsAll=subs.filter(function(s){return s.kind==='invoice_value';}); var invSub=invSubsAll.length?invSubsAll[invSubsAll.length-1]:null;
       var invStatus=invSub?(invSub.status==='applied'?'<span class="tool-badge bg-green">approved</span>':invSub.status==='dismissed'?'<span class="tool-badge bg-neutral">rejected — please resubmit</span>':'<span class="tool-badge bg-amber">awaiting Dock &amp; Bay approval</span>'):'';
@@ -895,7 +895,7 @@
       // carrier + tracking live on the SHIPMENT (same carrier list as the planner). If this PO isn't on a
       // shipment yet, submitting creates a master shipment for it and assigns this PO.
       var hasShip=!!p.shipment;
-      var CARS_PP=['DHL','Fedex','SF Express','Local Delivery','Other'];
+      var CARS_PP=['DHL','Fedex','Flexport','SF Express','Local Delivery','Other'];
       var carVal=p.ship_carrier||(p.flexport_reference?'Flexport':'');
       var trkVal=p.ship_carrier_ref||p.flexport_reference||'';
       var carOpts='<option value="">—</option>'+((carVal&&CARS_PP.indexOf(carVal)<0)?'<option selected>'+esc(carVal)+'</option>':'')
@@ -1185,7 +1185,7 @@
           // FOB card timeline = notes on the PO itself (FOB has no shipment). Reuses the PO-notes store.
           function fobTLHtml(po){ var nts=(_ppData.notesByPo&&_ppData.notesByPo[po])||[];
             var sup=nts.filter(function(n){return n.author_kind==='supplier';}); var recent=sup.length?sup.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0]:null;
-            return nts.length?nts.map(function(n){ var flag=(EP.escalate&&recent&&n===recent)?' <button class="save-btn light tip sp-fob-flag" data-po="'+esc(po)+'" data-msg="'+esc(n.body)+'" data-tip="email this note to the supply planner" style="color:#b91c1c;border-color:#fca5a5;white-space:nowrap;font-size:10px;padding:0 5px">⚑ Flag</button>':'';
+            return nts.length?nts.map(function(n){ var flag=(EP.escalate&&recent&&n===recent)?' <button class="save-btn light sp-fob-flag" data-po="'+esc(po)+'" data-msg="'+esc(n.body)+'" title="email this note to the supply planner" style="color:#b91c1c;border-color:#fca5a5;white-space:nowrap;font-size:10px;padding:0 5px">⚑ Escalate</button>':'';
               return '<div style="margin:6px 0"><span class="mut" style="font-size:10px">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span> '+flag+'<div class="tl-msg">'+esc(n.body)+'</div></div>'; }).join(''):'<div class="mut tiny">No timeline entries yet.</div>'; }
           function ppShipmentPlan(rows){ rows=rows||[];
             if(!rows.length)return '<div class="count">No shipments for your orders yet.</div>';
@@ -1279,8 +1279,8 @@
                   +'<div>'+eLbl('Status')+(stNorm==='Completed'
                     ? '<div style="font-weight:700;color:#1d4ed8;font-size:13px;padding:4px 0">Completed</div><div class="tiny mut">set by Dock &amp; Bay</div>'
                     : '<select class="fci sp-e-status" data-ref="'+rf+'" style="width:130px;font-weight:600;'+(stNorm==='Shipping'?'background:#dcfce7;color:#15803d;border:1px solid #86efac':'background:#ffedd5;color:#9a3412;border:1px solid #fdba74')+'">'+STO.map(function(o){return '<option'+(o===stNorm?' selected':'')+'>'+o+'</option>';}).join('')+'</select>')+'</div>'
-                  +'<button class="save-btn sp-ship-save" data-ref="'+rf+'" style="background:#16a34a;color:#fff;border-color:#15803d">Save</button>'
-                +'</div></div>';
+                  +'<span class="sp-ship-msg" data-ref="'+rf+'" style="font-size:11px;color:#16a34a;align-self:center;white-space:nowrap"></span>'
+                +'</div><div class="tiny mut" style="margin-top:4px">Changes save automatically.</div></div>';
               var chgPanel='<div style="margin-top:10px;padding:10px 12px;background:#fffbeb;border:1px solid #fde68a;border-radius:7px">'
                 +'<div style="font-weight:700;font-size:12px;color:#92400e;margin-bottom:6px">💰 Freight charges</div>'
                 +'<div class="sp-chg-list" data-ref="'+rf+'"><span class="mut tiny">Loading…</span></div>'
@@ -1314,7 +1314,7 @@
                 +'<div style="font-weight:600;font-size:12px;margin-bottom:4px">Add timeline note</div>'
                 +'<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:10px"><textarea class="fci sp-note-in" rows="3" placeholder="Add a note to the timeline… (multiple lines OK)" style="flex:1;max-width:560px;min-height:58px;text-align:left;resize:vertical;line-height:1.4"></textarea><button class="save-btn sp-note-post" style="flex:0 0 auto">Post</button></div>'
                 +'<div class="tiny" style="font-weight:600;margin-bottom:3px">Timeline</div>'
-                +((notes&&notes.length)?tlDesc(notes).map(function(n){ var flag=(EP.escalate&&n.id===recentSupId)?'<button class="save-btn light tip sp-flag-note" data-ref="'+esc(ref)+'" data-msg="'+esc(n.body)+'" data-tip="email this note to the supply planner" style="flex:0 0 auto;color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Flag</button>':'';
+                +((notes&&notes.length)?tlDesc(notes).map(function(n){ var flag=(EP.escalate&&n.id===recentSupId)?'<button class="save-btn light sp-flag-note" data-ref="'+esc(ref)+'" data-msg="'+esc(n.body)+'" title="email this note to the supply planner" style="flex:0 0 auto;color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'';
                   return '<div style="margin:6px 0;max-width:640px;display:flex;gap:8px;align-items:flex-start">'+(flag?'<div style="flex:0 0 auto;min-width:60px">'+flag+'</div>':'')+'<div style="flex:1"><span class="mut" style="font-size:10px">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span><div class="tl-msg">'+esc(n.body)+'</div></div></div>';}).join(''):'<div class="mut tiny">No timeline entries yet.</div>');
               var _se=box.querySelector('.sp-esc-ship'); if(_se)_se.onclick=function(){ if(!confirm('Escalate this shipment to Dock & Bay by email?'))return;
                 _se.disabled=true; _se.textContent='Sending…';
@@ -1323,7 +1323,7 @@
                   ppShipTimeline(ref);   // re-render so the "<user> escalated this shipment" note appears on the timeline
                   if(j&&j.sandbox)alert('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); };
               var _fn=box.querySelector('.sp-flag-note'); if(_fn)_fn.onclick=function(){ var msg=_fn.dataset.msg||''; if(!msg)return; if(!confirm('Email this note to the supply planner?'))return; _fn.disabled=true; _fn.textContent='Sending…';
-                postJSON(EP.escalate,{kind:'shipment',ref:_fn.dataset.ref,message:msg,initiator:'supplier'},function(j){ _fn.textContent='✓ Flagged'; if(j&&j.sandbox)alert('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); };
+                postJSON(EP.escalate,{kind:'shipment',ref:_fn.dataset.ref,message:msg,initiator:'supplier'},function(j){ _fn.textContent='✓ Escalated'; if(j&&j.sandbox)alert('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); };
               // opening the timeline marks Dock&Bay notes read → clears this shipment's notification
               var ent=(_ppData.shipmentPlan||[]).filter(function(x){return x.shipment_ref===ref;})[0];
               if(EP.shipmentNotesRead&&ent&&(ent.unread_dnb||0)>0){ postJSON(EP.shipmentNotesRead,{shipment_ref:ref},function(){ ent.unread_dnb=0; setShipBadge(); var bd=rootEl.querySelector('.sp-shipbadge[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(bd)bd.innerHTML=''; }); }
@@ -1480,11 +1480,11 @@
               box.innerHTML=(notes&&notes.length)?tlDesc(notes).map(function(n){ var onBehalf=(n.author_kind==='supplier'&&n.author_email==='D&B'); var dnb=(n.author_kind!=='supplier'), nu=dnb&&!n.read;
                 var who=onBehalf?('D&amp;B as '+esc(STATE.supplierName||'supplier')):(dnb?'Dock &amp; Bay':'You');
                 var ctrl = nu ? '<button class="save-btn light ps-note-read" data-id="'+n.id+'" style="flex:0 0 auto">Mark read</button>'
-                              : ((EP.escalate&&sref&&!dnb&&n.id===recentSupId)?'<button class="save-btn light tip samp-esc-note" data-ref="'+esc(sref)+'" data-msg="'+esc(n.body)+'" data-tip="email this note to the supply planner" style="flex:0 0 auto;color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Flag</button>':'');
+                              : ((EP.escalate&&sref&&!dnb&&n.id===recentSupId)?'<button class="save-btn light samp-esc-note" data-ref="'+esc(sref)+'" data-msg="'+esc(n.body)+'" title="email this note to the supply planner" style="flex:0 0 auto;color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'');
                 return '<div style="font-size:13px;line-height:1.5;text-align:left;margin:4px 0;max-width:640px;display:flex;gap:10px;align-items:flex-start'+(nu?';background:#fff7ed;border:1px solid #fdba74;border-radius:6px;padding:6px 9px':'')+'">'+(ctrl?'<div style="flex:0 0 auto;min-width:74px">'+ctrl+'</div>':'')+'<div style="flex:1"><span class="mut" style="font-size:11px">'+esc(n.created_at)+' · '+who+'</span>'+(nu?' <span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">new</span>':'')+'<br>'+esc(n.body)+'</div></div>'; }).join(''):'<div class="mut" style="font-size:12px">No timeline entries yet.</div>';
               box.querySelectorAll('.ps-note-read').forEach(function(b){ b.onclick=function(){ postJSON(EP.sampleNoteReadBase+b.dataset.id,{read:true},function(){ var s=(_ppData.samples||[]).filter(function(x){return String(x.id)===String(id);})[0]; if(s&&s.unread_dnb>0)s.unread_dnb--; setSampBadge(); ppSampleTimeline(id); }); }; });
               var _se=box.querySelector('.samp-esc-note'); if(_se)_se.onclick=function(){ var msg=_se.dataset.msg||''; if(!msg)return; if(!confirm('Email this note to the supply planner?'))return; _se.disabled=true; _se.textContent='Sending…';
-                postJSON(EP.escalate,{kind:'sample',ref:_se.dataset.ref,message:msg,initiator:'supplier'},function(j){ _se.textContent='✓ Flagged'; if(j&&j.sandbox)alert('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); };
+                postJSON(EP.escalate,{kind:'sample',ref:_se.dataset.ref,message:msg,initiator:'supplier'},function(j){ _se.textContent='✓ Escalated'; if(j&&j.sandbox)alert('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); };
             }).catch(function(){}); }
           function ppSampleNewForm(){ var box=document.getElementById('samp-newform'); if(box.dataset.open==='1'){box.dataset.open='';box.innerHTML='';return;} box.dataset.open='1';
             var purp=['sales','product','photography','marketing','operations'].map(function(p){return '<label style="margin-right:10px;font-size:11px"><input type="checkbox" class="snf-purpose" value="'+p+'"> '+p+'</label>';}).join('');
@@ -1951,24 +1951,25 @@
                 fetch(EP.shipmentChargesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(cs){
                   el.innerHTML=(Array.isArray(cs)&&cs.length)?cs.map(chgRow).join(''):'<span class="mut tiny">No charges yet.</span>'; }).catch(function(){ el.innerHTML='<span class="mut tiny">—</span>'; }); }
               // recolor the status dropdown live — orange = Planned, green = Shipping
-              body.querySelectorAll('.sp-e-status').forEach(function(sel){ sel.onchange=function(){ var sh=sel.value==='Shipping';
-                sel.style.background=sh?'#dcfce7':'#ffedd5'; sel.style.color=sh?'#15803d':'#9a3412'; sel.style.borderColor=sh?'#86efac':'#fdba74'; }; });
-              body.querySelectorAll('.sp-ship-save').forEach(function(btn){ btn.onclick=function(){ var ref=btn.dataset.ref;
+              // auto-save "Update this shipment" — each field saves on change (no Save button)
+              function saveShip(ref){ var msg=body.querySelector('.sp-ship-msg[data-ref="'+_rfEsc(ref)+'"]');
                 var g=function(cls){ var el=body.querySelector('.'+cls+'[data-ref="'+_rfEsc(ref)+'"]'); return el?el.value:''; };
                 var stEl=body.querySelector('.sp-e-status[data-ref="'+_rfEsc(ref)+'"]');   // absent when D&B has marked it Completed
                 var payload={ carrier:g('sp-e-carrier'), carrier_ref:g('sp-e-trk'), departure_date:g('sp-e-date') };
                 if(stEl)payload.status=stEl.value;
-                btn.disabled=true; var ot=btn.textContent; btn.textContent='Saving…';
-                postJSON(EP.shipmentUpdate+encodeURIComponent(ref),payload,function(j){ btn.disabled=false;
-                  if(j&&j.error){ btn.textContent=ot; alert('Failed: '+j.error); return; }
-                  btn.textContent='✓ Saved'; setTimeout(function(){ btn.textContent=ot; },1500);
+                if(msg){ msg.style.color='#94a3b8'; msg.textContent='saving…'; }
+                postJSON(EP.shipmentUpdate+encodeURIComponent(ref),payload,function(j){
+                  if(j&&j.error){ if(msg){ msg.style.color='#dc2626'; msg.textContent=j.error; } return; }
+                  if(msg){ msg.style.color='#16a34a'; msg.textContent='✓ saved'; setTimeout(function(){ if(msg)msg.textContent=''; },1500); }
                   var ent=(_ppData.shipmentPlan||[]).filter(function(x){return x.shipment_ref===ref;})[0];
                   if(ent){ ent.carrier=payload.carrier; ent.carrier_ref=payload.carrier_ref; ent.departure=payload.departure_date; if(stEl)ent.status=payload.status; }
                   if(j&&j.date_note&&typeof ppShipTimeline==='function')ppShipTimeline(ref);   // show the "set ship date" note
-                  // Shipping advances the POs on board (status + production_status 'shipped' + completion date).
-                  // Refresh _ppData SILENTLY (no Loading… flash / no view reset) so the PO tab reflects it next view.
+                  // Shipping advances the POs on board (status + production_status 'shipped' + completion date). Refresh _ppData silently.
                   if(stEl&&stEl.value==='Shipping'){ opts.getData().then(function(d){ if(d){ if(d.notesByPo)Object.keys(d.notesByPo).forEach(function(k){ shortNotes(d.notesByPo[k]); }); _ppData=d; } }).catch(function(){}); }
-                }); }; });
+                }); }
+              body.querySelectorAll('.sp-e-status').forEach(function(sel){ sel.onchange=function(){ var sh=sel.value==='Shipping';
+                sel.style.background=sh?'#dcfce7':'#ffedd5'; sel.style.color=sh?'#15803d':'#9a3412'; sel.style.borderColor=sh?'#86efac':'#fdba74'; saveShip(sel.dataset.ref); }; });
+              body.querySelectorAll('.sp-e-carrier, .sp-e-trk, .sp-e-date').forEach(function(inp){ inp.onchange=function(){ saveShip(inp.dataset.ref); }; });
               body.querySelectorAll('.sp-chg-go').forEach(function(btn){ btn.onclick=function(){ var ref=btn.dataset.ref;
                 var cEl=body.querySelector('.sp-chg-cost[data-ref="'+_rfEsc(ref)+'"]'), dEl=body.querySelector('.sp-chg-desc[data-ref="'+_rfEsc(ref)+'"]');
                 var fc=Number(cEl&&cEl.value)||0; if(fc<=0){ alert('Enter a freight cost greater than 0.'); return; }
@@ -2194,7 +2195,7 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                 }); }; });
               scope.querySelectorAll('.pp-esc-note').forEach(function(btn){ btn.onclick=function(){ var msg=btn.dataset.msg||''; if(!msg)return;
                 if(!confirm('Email this note to the supply planner?'))return; btn.disabled=true; var t=btn.textContent; btn.textContent='Sending…';
-                postJSON(EP.escalate,{kind:'po',ref:btn.dataset.po,message:msg,initiator:'supplier'},function(j){ btn.textContent='✓ Flagged';
+                postJSON(EP.escalate,{kind:'po',ref:btn.dataset.po,message:msg,initiator:'supplier'},function(j){ btn.textContent='✓ Escalated';
                   if(j&&j.sandbox)alert('Sandbox: no email key configured, so nothing was sent. On live this routes to the internal recipients set in CONFIG ▸ General settings.'); }); }; });
               scope.querySelectorAll('.pp-cd-grid').forEach(function(inp){ var t;
                 inp.onclick=function(){ try{ if(inp.showPicker)inp.showPicker(); }catch(e){} };
