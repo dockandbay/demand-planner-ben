@@ -1498,7 +1498,8 @@
           +'<div class="po-trk-wrap">'
           +row('Carrier <span class="mut tiny">(if supplier ships it)</span>',carrierSel(shipEp,sh.carrier,false))
           +row('Tracking / carrier ref',carrierRefInput(shipEp,sh.carrier_ref,false)+' <span class="po-trk-link" style="margin-left:6px;font-size:12px">'+(_trkUf?'<a href="'+_trkUf+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;font-weight:600" title="track ↗">track '+esc(sh.carrier||'')+' ↗</a>':'')+'</span>')
-          +'</div>';
+          +'</div>'
+          +shEditDate('Ship date <span class="mut tiny">(factory pickup / handover)</span>','departure_date','eff_departure');   // FOB still has a ship/pickup date — editable + persists here (was hidden, so it looked lost after saving)
       } else if(selfShip && (curMode==='sea'||curMode==='air')){
         var _trkU=carrierTrackUrl(sh.carrier,sh.carrier_ref);
         detail='<div class="po-trk-wrap">'
