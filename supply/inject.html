@@ -6586,43 +6586,59 @@
         +'</ol></div>'
       +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px"><input type="file" id="xc-file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="font-size:12px"><button class="save-btn" id="xc-go" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;font-weight:600">Analyse</button><label style="font-size:12px;color:#475569;cursor:pointer"><input type="checkbox" id="xc-allrows"> show all Approved rows (not just issues)</label><span id="xc-msg" style="font-size:12px"></span></div>'
       +'<div id="xc-result"></div>';
-    var _rows=null, _cf=null;
+    var _rows=null, _cf=null, LS_KEY='HZ_XERO_COMPARE', TTL=24*3600*1000;
     var go=b.querySelector('#xc-go'), fileI=b.querySelector('#xc-file'), msg=b.querySelector('#xc-msg');
     function setMsg(t,bad){ msg.style.color=bad?'#dc2626':'#64748b'; msg.textContent=t; }
+    function loadSaved(){ try{ var s=JSON.parse(localStorage.getItem(LS_KEY)||'null'); if(s&&s.at&&(Date.now()-s.at)<TTL&&Array.isArray(s.rows))return s; }catch(e){} return null; }
+    function agoLabel(at){ var m=Math.round((Date.now()-at)/60000); return m<1?'just now':m<60?(m+'m ago'):(Math.round(m/60)+'h ago'); }
+    function compareNow(){ setMsg('Comparing against current Horizon data…'); return fetch('/api/supply/cashflow').then(function(r){return r.json();}).then(function(cf){ _cf=cf; analyse(); }).catch(function(e){ setMsg('Failed: '+(e.message||e),1); }); }
     go.onclick=function(){ var f=fileI.files&&fileI.files[0]; if(!f){ setMsg('Choose the XLSX export first.',1); return; }
-      setMsg('Reading…'); go.disabled=true; var rd=new FileReader();
+      setMsg('Reading…'); go.disabled=true; var fname=f.name; var rd=new FileReader();
       rd.onload=function(){ var b64=String(rd.result).replace(/^data:[^;]+;base64,/,'');
         fetch('/api/supply/xero-parse',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({data_base64:b64})}).then(function(r){return r.json();})
-          .then(function(j){ if(j&&j.error)throw new Error(j.error); _rows=j.rows||[]; setMsg('Parsed '+_rows.length+' rows · comparing…'); return fetch('/api/supply/cashflow').then(function(r){return r.json();}); })
-          .then(function(cf){ go.disabled=false; _cf=cf; analyse(); })
+          .then(function(j){ if(j&&j.error)throw new Error(j.error); _rows=j.rows||[];
+            try{ localStorage.setItem(LS_KEY,JSON.stringify({rows:_rows,at:Date.now(),name:fname})); }catch(e){}   // persist 24h so refreshes re-analyse without re-uploading
+            var bn=b.querySelector('#xc-banner'); if(bn)bn.remove(); return compareNow(); })
+          .then(function(){ go.disabled=false; })
           .catch(function(e){ go.disabled=false; setMsg('Failed: '+(e.message||e),1); }); };
       rd.readAsDataURL(f); };
     b.querySelector('#xc-allrows').onchange=function(){ if(_rows&&_cf)analyse(); };
+    // auto-load the last upload if < 24h old — each visit/refresh re-runs the compare against fresh Horizon data
+    (function(){ var s=loadSaved(); if(!s){ try{ localStorage.removeItem(LS_KEY); }catch(e){} return; } _rows=s.rows;
+      var bn=document.createElement('div'); bn.id='xc-banner'; bn.style.cssText='font-size:12px;color:#475569;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:7px 10px;margin-bottom:10px';
+      bn.innerHTML='Using your last upload'+(s.name?' <b>'+esc(s.name)+'</b>':'')+' ('+esc(agoLabel(s.at))+', kept for 24h) — re-analysed against current Horizon data. Upload a new file to replace it. <button id="xc-clear" style="border:none;background:none;color:#b91c1c;text-decoration:underline;cursor:pointer;font-size:12px;padding:0">clear</button>';
+      var rr=b.querySelector('#xc-result'); rr.parentNode.insertBefore(bn, rr);
+      var cl=bn.querySelector('#xc-clear'); if(cl)cl.onclick=function(){ try{ localStorage.removeItem(LS_KEY); }catch(e){} bn.remove(); rr.innerHTML=''; _rows=null; setMsg(''); };
+      compareNow(); })();
     function analyse(){
       var due={}; ((_cf&&_cf.lines)||[]).forEach(function(l){ if(l.paid)return; if((l.basis||'po')!=='po')return; var _t=String(l.type||'').toLowerCase(); if(!(_t.indexOf('deposit')>=0||_t==='completion'||_t==='balance'))return; if(!l.ref)return; due[l.ref]=(due[l.ref]||0)+(Number(l.amount)||0); });   // unpaid goods payments per PO (type is title-case: Deposit/Start deposit/Completion/Balance)
       var showAll=b.querySelector('#xc-allrows').checked;
       var approved=(_rows||[]).filter(function(r){ return /approv/i.test(r.status||''); });
       var out=approved.map(function(r){
         var isGbp=!(Number(r.rate)>0), ccy=isGbp?'GBP':'USD';
-        var xero=(Number(r.balance_gbp)||0)*(isGbp?1:(Number(r.rate)||0));   // Xero outstanding → USD (or GBP for GBP invoices)
-        var hd=r.po?due[r.po]:undefined, issue='', flag=false;
+        var xero=(Number(r.balance_gbp)||0)*(isGbp?1:(Number(r.rate)||0));   // Xero outstanding → USD at the report rate
+        var fx=isGbp?0:(Number(r.unrealised_gain)||0);   // unrealised FX gain = revaluation of the outstanding balance vs Horizon's booked USD
+        var xadj=xero-fx;   // FX-neutralised → comparable to Horizon (booked rate)
+        var hd=r.po?due[r.po]:undefined, issue='', flag=false, pct=null;
         if(!r.po){ issue='No PO in the Xero reference ('+(r.reference||'')+')'; flag=true; }
         else if(hd===undefined){ issue='PO not found in Horizon (no open payment plan / already complete)'; flag=true; }
-        else { var d=xero-hd; if(Math.abs(d)>Math.max(1,xero*0.01)){
-            issue=(hd<=0.5)?('Xero shows '+(isGbp?'£':'$')+money(xero)+' still owed, but Horizon shows nothing due (likely already paid)')
-                           :('Amounts differ — Xero '+(isGbp?'£':'$')+money(xero)+' vs Horizon $'+money(hd)+' (Δ '+money(Math.abs(d))+')'); flag=true; }
-          else issue='Matches'; }
-        return { po:r.po, reference:r.reference, supplier:r.supplier, status:r.status, gbp:Number(r.balance_gbp)||0, rate:Number(r.rate)||0, ccy:ccy, xero:xero, hd:hd, flag:flag, issue:issue }; });
+        else if(hd<=0.5){ issue='Xero shows '+(isGbp?'£':'$')+money(xero)+' still owed, but Horizon shows nothing due (likely already paid)'; flag=true; pct=100; }
+        else { var d=xadj-hd; pct=d/hd*100;   // variance AFTER removing FX; ≥5% = flagged
+          if(Math.abs(pct)>=5){ issue='Differs — Xero '+(isGbp?'£':'$')+money(xero)+(fx?' (−$'+money(fx)+' FX = $'+money(xadj)+')':'')+' vs Horizon $'+money(hd)+' (Δ '+money(Math.abs(d))+')'; flag=true; }
+          else issue='OK (within 5%'+(fx?', after FX':'')+')'; }
+        return { po:r.po, reference:r.reference, supplier:r.supplier, status:r.status, gbp:Number(r.balance_gbp)||0, rate:Number(r.rate)||0, ccy:ccy, xero:xero, fx:fx, xadj:xadj, hd:hd, pct:pct, flag:flag, issue:issue }; });
       var nIssue=out.filter(function(x){return x.flag;}).length, view=showAll?out:out.filter(function(x){return x.flag;});
       setMsg(approved.length+' Approved invoice'+(approved.length===1?'':'s')+' · '+nIssue+' flagged');
       var res=b.querySelector('#xc-result');
       if(!view.length){ res.innerHTML='<div class="count" style="padding:10px 2px">'+(out.length?'✓ No mismatches — every Approved invoice matches Horizon.':'No Approved (unpaid) invoices in this upload.')+'</div>'; return; }
-      res.innerHTML='<div class="tw"><table class="pay-tbl"><thead><tr><th class="l">Supplier</th><th class="l">PO</th><th class="l">Status</th><th style="text-align:right">Xero balance (GBP)</th><th style="text-align:right">Rate</th><th style="text-align:right">Xero amount</th><th style="text-align:right">Horizon due</th><th class="l">Issue</th></tr></thead><tbody>'
+      res.innerHTML='<div class="tw"><table class="pay-tbl"><thead><tr><th class="l">Supplier</th><th class="l">PO</th><th class="l">Status</th><th style="text-align:right">Xero balance (GBP)</th><th style="text-align:right">Rate</th><th style="text-align:right">Xero amount</th><th style="text-align:right">FX gain</th><th style="text-align:right">Horizon due</th><th style="text-align:right">Variance</th><th class="l">Issue</th></tr></thead><tbody>'
         +view.map(function(x){ return '<tr'+(x.flag?' style="background:#fff7ed"':'')+'><td class="l">'+esc(x.supplier||'')+'</td>'
           +'<td class="l">'+(x.po?'<button class="lnk-btn xc-po" data-po="'+esc(x.po)+'" style="color:#1d4ed8;text-decoration:underline;cursor:pointer">'+esc(x.po)+'</button>':'<span class="mut">'+esc(x.reference||'—')+'</span>')+'</td>'
           +'<td class="l">'+esc(x.status)+'</td><td style="text-align:right">£'+money(x.gbp)+'</td><td style="text-align:right">'+(x.rate?x.rate.toFixed(4):'—')+'</td>'
           +'<td style="text-align:right">'+(x.ccy==='GBP'?'£':'$')+money(x.xero)+'</td>'
+          +'<td style="text-align:right;color:#64748b">'+(x.fx?'−$'+money(x.fx):'<span class="mut">—</span>')+'</td>'
           +'<td style="text-align:right">'+(x.hd===undefined?'<span class="mut">—</span>':'$'+money(x.hd))+'</td>'
+          +'<td style="text-align:right;'+(x.pct==null?'':(Math.abs(x.pct)>=5?'color:#b45309;font-weight:600':'color:#166534'))+'">'+(x.pct==null?'<span class="mut">—</span>':((x.pct>0?'+':'')+x.pct.toFixed(1)+'%'))+'</td>'
           +'<td class="l" style="'+(x.flag?'color:#b45309;font-weight:600':'color:#166534')+'">'+esc(x.issue)+'</td></tr>'; }).join('')
         +'</tbody></table></div>';
       res.querySelectorAll('.xc-po').forEach(function(bt){ bt.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(bt.dataset.po,'pay'); else gotoPO(bt.dataset.po,'pay'); }; });

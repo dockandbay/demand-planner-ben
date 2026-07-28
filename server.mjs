@@ -1399,7 +1399,8 @@ app.post('/api/supply/xero-parse', async (req, res) => {
       if (m['reference'] != null && m['status'] != null) { hdr = r;
         col = { reference: m['reference'], contact: m['contact'], status: m['status'], rate: m['currency rate'],
           net: m['net (gbp)'], balance: m['balance (gbp)'], currency: m['original currency'],
-          invdate: m['invoice date'], planned: m['planned date'] }; break; }
+          invdate: m['invoice date'], planned: m['planned date'],
+          realised: m['realised gains'], unrealised: m['unrealised gains'] }; break; }
     }
     if (hdr < 0) return res.json({ rows: [], error: 'Could not find the report header (Reference / Status). Is this the Payable Invoice Summary export?' });
     const rows = [];
@@ -1410,6 +1411,7 @@ app.post('/api/supply/xero-parse', async (req, res) => {
       const first = reference.split('/')[0].trim();
       rows.push({ reference, po: /^PO-/i.test(first) ? first : '', supplier, status, currency: g(col.currency).trim(),
         rate: numv(g(col.rate)), net_gbp: numv(g(col.net)), balance_gbp: numv(g(col.balance)),
+        realised_gain: numv(g(col.realised)), unrealised_gain: numv(g(col.unrealised)),
         invoice_date: g(col.invdate).trim(), planned_date: g(col.planned).trim() });
     }
     res.json({ rows });

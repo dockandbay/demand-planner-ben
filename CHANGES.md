@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.251 - Xero Compare: 24h persistence, 5% tolerance + variance %, FX-gain neutralisation
+- **Persists the last upload for 24h** (localStorage). Every page refresh re-analyses the saved file against *current* Horizon data — no re-upload needed. A new upload overwrites it; a banner shows what's loaded (name + age) with a "clear" link.
+- **5% tolerance**: variances under 5% are treated as OK (green). Added a **Variance %** column so the size of every discrepancy is visible; ≥5% is flagged amber.
+- **FX-gain neutralisation**: the report's *unrealised gain* (change in FX on the outstanding balance vs Horizon's booked USD rate) is now subtracted from the Xero USD amount before comparing. This collapses FX-only variances to <0.5% (e.g. PO-1672806 $7.57→$1.95) while genuine mismatches (wrong amount) stay large. New **FX gain** column shows the adjustment; the Issue text spells out "Xero X (−FX = Y) vs Horizon Z" when it matters. Only applies to USD-rated (foreign-currency) invoices; GBP-native rows have no FX component.
+
 ## v26.249 - Xero Compare: fix "PO not found" (cashflow type is title-case)
 - The Horizon amount-due lookup matched lowercase payment types but the cashflow lines are title-case (Completion/Balance/Deposit), so every PO came back "not found". Now case-insensitive + basis=po; PO-1672806 correctly shows £-converted Xero vs Horizon due (e.g. 529.63).
 
