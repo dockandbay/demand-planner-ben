@@ -3364,7 +3364,7 @@
       +'<div class="tw" style="max-width:1000px"><table style="width:max-content"><thead><tr><th class="l">SKU</th><th class="l" title="partial (p) / supplier risk (s) / discontinued (d) / country risk (c) — ⚠ needs review, ✓ approved">Exceptions</th><th style="text-align:right">Qty</th><th style="text-align:right">Est. cost</th><th style="text-align:right">Supplier submitted</th><th style="text-align:right">Final price</th><th style="text-align:right">Line item total cost</th><th class="l" style="min-width:90px;white-space:nowrap">Confirm</th></tr></thead><tbody class="op-tbody">'
       +rows
       +addRowHtml
-      +'<tr class="op-total" style="font-weight:700;border-top:2px solid #999"><td class="l">TOTAL</td><td style="text-align:right" class="op-totq">'+units(totQ)+'</td><td></td><td></td><td style="text-align:right">FINAL</td><td style="text-align:right" class="op-totc">$'+money(totC)+'</td><td></td></tr>'
+      +'<tr class="op-total" style="font-weight:700;border-top:2px solid #999"><td class="l">TOTAL</td><td></td><td style="text-align:right" class="op-totq">'+units(totQ)+'</td><td></td><td></td><td style="text-align:right">FINAL</td><td style="text-align:right" class="op-totc">$'+money(totC)+'</td><td></td></tr>'
       +'</tbody></table></div>'
       +(function(){ if(!xdLines.length)return ''; var tot=xdLines.reduce(function(a,x){return a+(Number(x.qty)||0);},0);
         var shipped=/shipped|shipping|deliver|complete/i.test(((poBy[po]||{}).status)||'');

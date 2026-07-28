@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.244 - ORDER PLAN TOTAL row alignment fix (folded in from Diviyaj)
+- The PO-detail Order Plan TOTAL footer row had 7 cells vs the 8-column header, so the qty total sat under "Exceptions" instead of "Qty". Added the missing Exceptions-column `<td>` so totals align (Diviyaj had been re-applying this every deploy).
+
 ## v26.243 - Barcode labels: show 2-letter supplier code next to the batch
 - Carton / inner / product labels now print the SKU's 2-letter supplier code (suppliers.code for products.main_supplier_final) next to the BATCH number. Barcode queries now return supplier_code (admin + portal). Size + batch already show (size from size_long; batch when a batch is selected).
 
