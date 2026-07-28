@@ -3217,6 +3217,31 @@ app.post('/api/supply/ka-forecast/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.key_account_forecasts WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Month-cell upsert for the pivoted Key Accounts grid: (client, sku, warehouse, month) is authoritative.
+// Deletes any existing forecast rows for that client/sku/warehouse within the month, then inserts one row at
+// month-01 with the given quantity (qty 0 / blank just clears the month). Keeps the grid's one-cell-per-month model.
+app.post('/api/supply/ka-forecast-cell', async (req, res) => {
+  const b = req.body || {};
+  const client = (b.client || '').trim(), sku = (b.sku || '').trim(), warehouse = (b.warehouse || '').trim();
+  const month = (b.month || '').trim();   // 'YYYY-MM'
+  const qty = (b.quantity === '' || b.quantity == null) ? null : parseInt(b.quantity, 10);
+  if (!sku || !warehouse || !/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'client/sku/warehouse/month required' });
+  const first = month + '-01';
+  const client2 = await pool.connect();
+  try {
+    await client2.query('BEGIN');
+    await client2.query(`DELETE FROM planner.key_account_forecasts
+      WHERE coalesce(client,'')=$1 AND sku=$2 AND warehouse=$3
+        AND ship_date >= $4::date AND ship_date < ($4::date + interval '1 month')`, [client, sku, warehouse, first]);
+    if (qty != null && qty !== 0) {
+      await client2.query(`INSERT INTO planner.key_account_forecasts (client, sku, warehouse, ship_date, quantity, source, loaded_at)
+        VALUES ($1,$2,$3,$4::date,$5,'manual',now())`, [client, sku, warehouse, first, qty]);
+    }
+    await client2.query('COMMIT');
+    res.json({ ok: true });
+  } catch (e) { try { await client2.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: e.message }); }
+  finally { client2.release(); }
+});
 // Suggestion Box — submit a new suggestion (returns its assigned reference) and triage its status.
 app.post('/api/supply/suggestion', async (req, res) => {
   const b = req.body || {};

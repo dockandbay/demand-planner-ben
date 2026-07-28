@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.236 - DEMAND ▸ Key Accounts forecast grid rebuilt (month pivot + import)
+- Replaced the flat Client/SKU/Country/Date/Qty editor with a pivoted month-grid:
+  - **Country pills** (UK / US / EU) — each filters to that 3PL warehouse.
+  - **Grouped by client**, SKUs nested underneath; **columns = months** (current → 12 forward; "show 12 months back" toggle; past months tinted).
+  - Editable qty per cell — each cell is authoritative for (client · SKU · country · month), saved via a new `POST /api/supply/ka-forecast-cell` (ship_date = 1st of month; qty 0/blank clears).
+  - **Filter box** matches SKU or client; **type-to-search SKU picker** to add SKUs under a client; **+ Add client**.
+  - **Import / paste**: CSV upload or clipboard paste from Excel/Sheets (SKU + qty per line), a **month picker** and **free-text client**; unresolved SKUs are listed as warnings and skipped (import doesn't fail).
+- Existing forecast data is preserved (same `key_account_forecasts` table, just presented pivoted). NOTE: this is a change to the demand artifact (`artifact_v16.7.html`).
+
 ## v26.235 - FOB shipment: Ship date field (date was hidden, looked "lost")
 - FOB self-shipments had no date field on the SHIPMENTS tab (only carrier/tracking), so a shipment date set while the mode was sea/air disappeared from view after switching to FOB — it saved fine but looked lost. Added a "Ship date (factory pickup / handover)" field to the FOB block (edits/persists departure_date, shows the final calc), so the date shows and stays.
 

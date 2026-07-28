@@ -6756,57 +6756,122 @@ function render(){
 // market×channel with on-hand stock above a (per-channel toggleable) threshold; plus the A-player subset.
 // ── DEMAND ▸ Key Accounts Forecast — inline spreadsheet of per-country key-account SKU forecasts, saved straight
 // to planner.key_account_forecasts (replaces the old n8n Airtable flow). SKU is a type-to-search dropdown from SKUM.
+var KAF_CTRY='uk_3pl', KAF_Q='', KAF_PAST=false;   // Key Accounts grid: selected country (3PL), filter text, show-past-12mo toggle
 function renderKeyAccountsView(body){
   function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
-  var WH=[['uk_3pl','UK'],['us_3pl','US'],['eu_3pl','EU'],['au_3pl','AU'],['ca_3pl','CA']];
+  var CTRY=[['uk_3pl','UK'],['us_3pl','US'],['eu_3pl','EU']];   // pill tabs (per Ben)
   var SKUS=Object.keys(SKUM).sort();
-  var rows=[];
-  body.innerHTML='<div style="padding:6px 2px 12px"><div style="font-weight:700;font-size:15px">Key Accounts Forecast</div>'
-    +'<div style="font-size:12px;color:#666;margin:2px 0 12px">Per-country key-account SKU forecasts — edit inline (saves straight to the database). Type to search a SKU.</div>'
+  var rows=[];                 // raw ka-forecasts
+  var pendClients=[], pendSkus={};   // transient: client/skus added in the UI before any qty is saved (per current country)
+  function ym(d){ return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2); }
+  function monthList(){ var out=[], now=new Date(), base=new Date(now.getFullYear(),now.getMonth(),1);
+    for(var i=(KAF_PAST?-12:0);i<12;i++){ var d=new Date(base.getFullYear(),base.getMonth()+i,1);
+      out.push({key:ym(d), label:d.toLocaleString('en',{month:'short'})+" '"+String(d.getFullYear()).slice(2), past:i<0, cur:i===0}); } return out; }
+  function skuName(s){ return (s&&SKUM[s])?(SKUM[s].n||''):''; }
+  function resolveSku(raw){ var s=String(raw||'').trim(); if(!s)return null; if(SKUM[s])return s;
+    var up=s.toUpperCase(); if(SKUM[up])return up; var hit=SKUS.filter(function(x){return x.toUpperCase()===up;})[0]; return hit||null; }
+  body.innerHTML='<div style="padding:6px 2px 12px">'
+    +'<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px"><div style="font-weight:700;font-size:15px">Key Accounts Forecast</div>'
+    +'<span id="kaf-pills" style="display:flex;gap:4px">'+CTRY.map(function(c){return '<button class="kaf-pill'+(c[0]===KAF_CTRY?' on':'')+'" data-w="'+c[0]+'">'+c[1]+'</button>';}).join('')+'</span>'
+    +'<input id="kaf-q" placeholder="filter SKU or client…" value="'+e(KAF_Q)+'" style="padding:5px 9px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;width:210px">'
+    +'<label style="font-size:12px;color:#475569;cursor:pointer;display:flex;align-items:center;gap:4px"><input type="checkbox" id="kaf-past"'+(KAF_PAST?' checked':'')+'> show 12 months back</label>'
+    +'<button id="kaf-import" style="margin-left:auto;border:1px solid #93c5fd;background:#eff6ff;color:#1e40af;padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600">⬆ Import / paste</button></div>'
+    +'<div style="font-size:12px;color:#666;margin:0 0 10px">Forecast qty per month — edit inline (saves straight to the database). Current month → 12 months forward; past hidden by default.</div>'
+    +'<div id="kaf-imp"></div>'
     +'<div id="kafc" style="overflow-x:auto"><div style="color:#888;font-size:12px">Loading…</div></div></div>';
   var host=body.querySelector('#kafc');
+  body.querySelectorAll('.kaf-pill').forEach(function(b){ b.onclick=function(){ KAF_CTRY=b.dataset.w; pendClients=[]; pendSkus={}; renderKeyAccountsView(body); }; });
+  var qIn=body.querySelector('#kaf-q'); qIn.oninput=function(){ KAF_Q=qIn.value; draw(); };
+  body.querySelector('#kaf-past').onchange=function(){ KAF_PAST=this.checked; draw(); };
+  body.querySelector('#kaf-import').onclick=function(){ toggleImport(); };
   fetch('/api/supply/ka-forecasts').then(function(r){return r.json();}).then(function(d){ rows=Array.isArray(d)?d:[]; draw(); })
     .catch(function(err){ host.innerHTML='<div style="color:#dc2626;font-size:12px">Failed to load: '+e(err&&err.message||err)+'</div>'; });
-  function rowHtml(r){ r=r||{}; var nm=(r.sku&&SKUM[r.sku])?(SKUM[r.sku].n||''):'';
-    return '<tr data-id="'+e(r.id||'')+'">'
-      +'<td class="kac"><input class="ka-f ka-client" data-f="client" value="'+e(r.client)+'" placeholder="client / account"></td>'
-      +'<td class="kac" style="position:relative"><input class="ka-f ka-sku" data-f="sku" value="'+e(r.sku)+'" placeholder="search SKU…" autocomplete="off"><div class="ka-skuname">'+e(nm)+'</div><div class="ka-skudrop"></div></td>'
-      +'<td class="kac"><select class="ka-f ka-wh" data-f="warehouse">'+WH.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===(r.warehouse||'uk_3pl')?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></td>'
-      +'<td class="kac"><input type="date" class="ka-f ka-date" data-f="ship_date" value="'+e(r.ship_date)+'"></td>'
-      +'<td class="kac"><input class="ka-f ka-qty" data-f="quantity" inputmode="numeric" value="'+e(r.quantity)+'" style="width:80px;text-align:right"></td>'
-      +'<td class="kac"><button class="ka-del" title="delete this row">✕</button></td></tr>'; }
-  function draw(){
-    host.innerHTML='<style>#kafc table{border-collapse:collapse;font-size:12px;min-width:660px}#kafc th{text-align:left;padding:5px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#666;border-bottom:1px solid #ddd;white-space:nowrap}'
-      +'#kafc td.kac{padding:3px 6px;border-bottom:1px solid #f1f1f1;vertical-align:top}#kafc .ka-f{padding:4px 6px;border:1px solid #cbd5e1;border-radius:4px;font-size:12px;font-family:inherit;box-sizing:border-box}'
-      +'#kafc .ka-client,#kafc .ka-sku{width:100%;min-width:150px}#kafc .ka-skuname{font-size:10px;color:#999;padding:1px 2px;max-width:230px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
-      +'#kafc .ka-del{border:none;background:transparent;color:#b91c1c;cursor:pointer;font-size:14px}#kafc .ka-skudrop{position:absolute;z-index:60;left:0;top:100%;width:300px;max-height:220px;overflow-y:auto;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 8px 22px rgba(15,23,42,.18);display:none}'
-      +'#kafc .ka-skudrop.open{display:block}#kafc .ka-opt{padding:5px 8px;font-size:11px;cursor:pointer}#kafc .ka-opt:hover{background:#eff6ff}#kafc #ka-msg{color:#16a34a;font-size:11px;margin-left:10px}</style>'
-      +'<table><thead><tr>'+['Client','SKU','Country','Ship date','Qty',''].map(function(h){return '<th>'+h+'</th>';}).join('')+'</tr></thead>'
-      +'<tbody>'+rows.map(rowHtml).join('')+'</tbody></table>'
-      +'<div style="margin-top:10px"><button id="ka-add" style="border:1px solid #cbd5e1;background:#f8fafc;padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer">+ Add row</button><span id="ka-msg"></span></div>';
-    host.querySelectorAll('tbody tr').forEach(wireRow);
-    host.querySelector('#ka-add').onclick=function(){ var tb=host.querySelector('tbody'); var tmp=document.createElement('tbody'); tmp.innerHTML=rowHtml({warehouse:'uk_3pl'}); var tr=tmp.firstChild; tb.appendChild(tr); wireRow(tr); var ci=tr.querySelector('.ka-client'); if(ci)ci.focus(); };
+  // build cells[client][sku][month]=qty for the selected country, + ordered client/sku lists (incl. transient pending)
+  function build(){ var C={}, clients=[], skusBy={};
+    function ensure(cl,sk){ if(!C[cl]){C[cl]={};clients.push(cl);skusBy[cl]=[];} if(sk&&!C[cl][sk]){C[cl][sk]={};skusBy[cl].push(sk);} }
+    rows.forEach(function(r){ if(r.warehouse!==KAF_CTRY)return; var sk=r.sku||''; if(!sk)return; var cl=r.client||'(no client)'; var m=(r.ship_date||'').slice(0,7); if(!m)return;
+      ensure(cl,sk); C[cl][sk][m]=(C[cl][sk][m]||0)+(Number(r.quantity)||0); });
+    pendClients.forEach(function(cl){ ensure(cl,null); }); Object.keys(pendSkus).forEach(function(cl){ (pendSkus[cl]||[]).forEach(function(sk){ ensure(cl,sk); }); });
+    clients.sort(function(a,b){ return a.toLowerCase()<b.toLowerCase()?-1:1; }); clients.forEach(function(cl){ skusBy[cl].sort(); });
+    return {C:C,clients:clients,skusBy:skusBy}; }
+  function flash(m,bad){ var el=host.querySelector('#kaf-msg'); if(el){ el.style.color=bad?'#dc2626':'#16a34a'; el.textContent=m; clearTimeout(el._t); el._t=setTimeout(function(){el.textContent='';},1600); } }
+  function saveCell(client,sku,month,qty){ fetch('/api/supply/ka-forecast-cell',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({client:client,sku:sku,warehouse:KAF_CTRY,month:month,quantity:qty})})
+      .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); flash('Saved ✓'); }).catch(function(){ flash('Save failed',1); }); }
+  function draw(){ var m=monthList(), d=build(), q=KAF_Q.trim().toLowerCase();
+    var STY='<style>#kafc table{border-collapse:separate;border-spacing:0;font-size:12px}'
+      +'#kafc th{padding:5px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#666;border-bottom:1px solid #ddd;white-space:nowrap;background:#f8fafc;position:sticky;top:0;z-index:2}'
+      +'#kafc th.mcur{color:#1e40af}#kafc th.mpast{color:#b45309;background:#fff7ed}'
+      +'#kafc td{padding:2px 5px;border-bottom:1px solid #f1f1f1;white-space:nowrap}#kafc td.lbl{position:sticky;left:0;background:#fff;z-index:1;min-width:210px;box-shadow:2px 0 3px -2px rgba(15,23,42,.15)}'
+      +'#kafc tr.clihdr td{background:#eef2f7;font-weight:700;color:#334155;border-top:1px solid #cbd5e1}#kafc tr.clihdr td.lbl{background:#eef2f7}'
+      +'#kafc .kaf-cell{width:58px;text-align:right;padding:3px 5px;border:1px solid transparent;border-radius:4px;font-size:12px;font-family:inherit;background:transparent}#kafc .kaf-cell:focus{border-color:#93c5fd;background:#fff;outline:none}#kafc td.past .kaf-cell{color:#b45309}'
+      +'#kafc .kaf-skunm{font-size:10px;color:#999;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#kafc .kaf-del{border:none;background:transparent;color:#b91c1c;cursor:pointer;font-size:12px}'
+      +'.kaf-pill{border:1px solid #cbd5e1;background:#fff;color:#334155;font-size:12px;padding:4px 14px;border-radius:14px;cursor:pointer;font-weight:600}.kaf-pill.on{background:#0f172a;color:#fff;border-color:#0f172a}'
+      +'#kafc .kaf-addsku{position:relative}#kafc .kaf-skuin{width:180px;padding:4px 6px;border:1px solid #cbd5e1;border-radius:4px;font-size:11px}#kafc .kaf-drop{position:absolute;z-index:60;left:0;top:100%;width:300px;max-height:220px;overflow-y:auto;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 8px 22px rgba(15,23,42,.18);display:none}#kafc .kaf-drop.open{display:block}#kafc .kaf-opt{padding:5px 8px;font-size:11px;cursor:pointer}#kafc .kaf-opt:hover{background:#eff6ff}</style>';
+    var head='<tr><th class="lbl">Client / SKU</th>'+m.map(function(x){return '<th class="'+(x.cur?'mcur':x.past?'mpast':'')+'">'+x.label+'</th>';}).join('')+'<th></th></tr>';
+    var bodyH='';
+    d.clients.forEach(function(cl){
+      var cliMatch=!q||cl.toLowerCase().indexOf(q)>=0;
+      var allSks=d.skusBy[cl]||[];
+      var sks=cliMatch?allSks:allSks.filter(function(sk){ return sk.toLowerCase().indexOf(q)>=0 || skuName(sk).toLowerCase().indexOf(q)>=0; });
+      if(q && !cliMatch && !sks.length) return;   // filtering + nothing in this client matches → skip the group
+      bodyH+='<tr class="clihdr"><td class="lbl">'+e(cl)+'</td><td colspan="'+(m.length+1)+'"></td></tr>';
+      sks.forEach(function(sk){
+        bodyH+='<tr data-cl="'+e(cl)+'" data-sku="'+e(sk)+'"><td class="lbl"><div style="font-family:ui-monospace,Menlo,monospace;font-weight:600">'+e(sk)+'</div><div class="kaf-skunm">'+e(skuName(sk))+'</div></td>'
+          +m.map(function(x){ var v=(d.C[cl]&&d.C[cl][sk]&&d.C[cl][sk][x.key]!=null)?d.C[cl][sk][x.key]:''; return '<td class="'+(x.past?'past':'')+'"><input class="kaf-cell" data-cl="'+e(cl)+'" data-sku="'+e(sk)+'" data-m="'+x.key+'" inputmode="numeric" value="'+e(v)+'"></td>'; }).join('')
+          +'<td><button class="kaf-del" data-cl="'+e(cl)+'" data-sku="'+e(sk)+'" title="clear this SKU across all shown months">✕</button></td></tr>';
+      });
+      // add-SKU affordance for this client
+      bodyH+='<tr class="kaf-addrow" data-cl="'+e(cl)+'"><td class="lbl kaf-addsku"><input class="kaf-skuin" data-cl="'+e(cl)+'" placeholder="+ add SKU…" autocomplete="off"><div class="kaf-drop"></div></td><td colspan="'+(m.length+1)+'"></td></tr>';
+    });
+    host.innerHTML=STY+(d.clients.length?'<table><thead>'+head+'</thead><tbody>'+bodyH+'</tbody></table>':'<div style="color:#888;font-size:12px;padding:10px 2px">No forecasts for '+e(({uk_3pl:'UK',us_3pl:'US',eu_3pl:'EU'})[KAF_CTRY])+(q?' matching “'+e(KAF_Q)+'”':'')+' yet — add a client below or import.</div>')
+      +'<div style="margin-top:12px;display:flex;align-items:center;gap:8px"><input id="kaf-newcli" placeholder="new client / account…" style="padding:5px 9px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;width:220px"><button id="kaf-addcli" style="border:1px solid #cbd5e1;background:#f8fafc;padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer">+ Add client</button><span id="kaf-msg" style="font-size:11px"></span></div>';
+    wire();
   }
-  function flash(m){ var el=host.querySelector('#ka-msg'); if(el){ el.textContent=m; clearTimeout(el._t); el._t=setTimeout(function(){el.textContent='';},1500); } }
-  function collect(tr){ var o={id:tr.dataset.id||''}; tr.querySelectorAll('.ka-f').forEach(function(f){ o[f.dataset.f]=f.value; }); return o; }
-  function save(tr){ var o=collect(tr); if(!o.sku&&!o.client&&!o.quantity)return;   // don't persist a fully-blank row
-    fetch('/api/supply/ka-forecast',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(o)}).then(function(r){return r.json();})
-      .then(function(j){ if(j&&j.error)throw new Error(j.error); if(j&&j.id&&!tr.dataset.id)tr.dataset.id=j.id; flash('Saved ✓'); }).catch(function(){ flash('Save failed'); }); }
-  function closeDrop(){ host.querySelectorAll('.ka-skudrop.open').forEach(function(d){ d.classList.remove('open'); }); }
-  function showDrop(input,tr,nameEl){ var q=input.value.trim().toLowerCase(); var d=input.closest('td').querySelector('.ka-skudrop'); if(!d)return;
-    var ms=SKUS.filter(function(s){ return !q || s.toLowerCase().indexOf(q)>=0 || ((SKUM[s].n||'').toLowerCase().indexOf(q)>=0); }).slice(0,40);
-    d.innerHTML=ms.length?ms.map(function(s){return '<div class="ka-opt" data-sku="'+e(s)+'"><b>'+e(s)+'</b> <span style="color:#999">'+e(SKUM[s].n||'')+'</span></div>';}).join(''):'<div class="ka-opt" style="color:#999;cursor:default">no matches</div>';
-    d.classList.add('open');
-    d.querySelectorAll('.ka-opt[data-sku]').forEach(function(o){ o.onmousedown=function(ev){ ev.preventDefault(); input.value=o.dataset.sku; if(nameEl)nameEl.textContent=(SKUM[o.dataset.sku]&&SKUM[o.dataset.sku].n)||''; d.classList.remove('open'); save(tr); }; }); }
-  function wireRow(tr){
-    tr.querySelectorAll('.ka-f').forEach(function(f){ if(f.classList.contains('ka-sku'))return; f.onchange=function(){ save(tr); }; });
-    var skuIn=tr.querySelector('.ka-sku'), nameEl=tr.querySelector('.ka-skuname');
-    skuIn.oninput=function(){ showDrop(skuIn,tr,nameEl); };
-    skuIn.onfocus=function(){ showDrop(skuIn,tr,nameEl); };
-    skuIn.onblur=function(){ setTimeout(closeDrop,160); if(nameEl)nameEl.textContent=(SKUM[skuIn.value]&&SKUM[skuIn.value].n)||''; save(tr); };
-    tr.querySelector('.ka-del').onclick=function(){ var id=tr.dataset.id;
-      if(id){ if(!confirm('Delete this forecast row?'))return; fetch('/api/supply/ka-forecast/'+encodeURIComponent(id)+'/delete',{method:'POST'}).then(function(r){return r.json();}).then(function(){ tr.remove(); flash('Deleted'); }); }
-      else tr.remove(); }; }
+  function wire(){
+    host.querySelectorAll('.kaf-cell').forEach(function(inp){ inp.onchange=function(){ var v=inp.value.trim(); var qty=v===''?'':parseInt(v,10); if(v!==''&&isNaN(qty)){ inp.value=''; return; }
+      saveCell(inp.dataset.cl==='(no client)'?'':inp.dataset.cl, inp.dataset.sku, inp.dataset.m, v===''?'':qty); }; });
+    host.querySelectorAll('.kaf-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Clear '+b.dataset.sku+' across all shown months for this client?'))return;
+      var cl=b.dataset.cl==='(no client)'?'':b.dataset.cl; monthList().forEach(function(x){ saveCell(cl,b.dataset.sku,x.key,''); }); setTimeout(reload,300); }; });
+    host.querySelectorAll('.kaf-skuin').forEach(function(inp){ var td=inp.closest('td'), drop=td.querySelector('.kaf-drop');
+      function show(){ var qq=inp.value.trim().toLowerCase(); var ms=SKUS.filter(function(s){ return !qq||s.toLowerCase().indexOf(qq)>=0||skuName(s).toLowerCase().indexOf(qq)>=0; }).slice(0,40);
+        drop.innerHTML=ms.length?ms.map(function(s){return '<div class="kaf-opt" data-sku="'+e(s)+'"><b>'+e(s)+'</b> <span style="color:#999">'+e(skuName(s))+'</span></div>';}).join(''):'<div class="kaf-opt" style="color:#999;cursor:default">no matches</div>';
+        drop.classList.add('open'); drop.querySelectorAll('.kaf-opt[data-sku]').forEach(function(o){ o.onmousedown=function(ev){ ev.preventDefault(); var cl=inp.dataset.cl; (pendSkus[cl]=pendSkus[cl]||[]).push(o.dataset.sku); drop.classList.remove('open'); draw(); }; }); }
+      inp.oninput=show; inp.onfocus=show; inp.onblur=function(){ setTimeout(function(){drop.classList.remove('open');},160); }; });
+    var addCli=host.querySelector('#kaf-addcli'); if(addCli)addCli.onclick=function(){ var i=host.querySelector('#kaf-newcli'); var v=(i.value||'').trim(); if(!v)return; if(pendClients.indexOf(v)<0)pendClients.push(v); i.value=''; draw(); };
+  }
+  function reload(){ fetch('/api/supply/ka-forecasts').then(function(r){return r.json();}).then(function(d){ rows=Array.isArray(d)?d:[]; draw(); }); }
+  // ── Import / paste panel ──
+  function toggleImport(){ var box=body.querySelector('#kaf-imp'); if(box.innerHTML){ box.innerHTML=''; return; }
+    var mo=monthList(); var moOpts=mo.map(function(x){return '<option value="'+x.key+'"'+(x.cur?' selected':'')+'>'+x.label+'</option>';}).join('');
+    box.innerHTML='<div style="border:1px solid #93c5fd;background:#f8fbff;border-radius:8px;padding:12px 14px;margin-bottom:12px;max-width:640px">'
+      +'<div style="font-weight:700;font-size:13px;margin-bottom:8px">Import forecast — '+e(({uk_3pl:'UK',us_3pl:'US',eu_3pl:'EU'})[KAF_CTRY])+'</div>'
+      +'<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px">'
+      +'<label style="font-size:12px">Client<br><input id="kaf-icli" placeholder="client / account" style="padding:5px 8px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px;width:200px"></label>'
+      +'<label style="font-size:12px">Month<br><select id="kaf-imo" style="padding:5px 8px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px">'+moOpts+'</select></label>'
+      +'<label style="font-size:12px">CSV file<br><input type="file" id="kaf-ifile" accept=".csv,text/csv,text/plain" style="font-size:11px"></label></div>'
+      +'<div style="font-size:12px;margin-bottom:3px">Paste from Excel / Google Sheets — <b>SKU</b> and <b>qty</b> per line (tab or comma separated):</div>'
+      +'<textarea id="kaf-ipaste" rows="6" placeholder="ACTIVE-XLG-GREY\t500&#10;TOWEL-BL-02, 250" style="width:100%;box-sizing:border-box;font-family:ui-monospace,Menlo,monospace;font-size:12px;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px"></textarea>'
+      +'<div style="margin-top:8px"><button id="kaf-ido" style="border:1px solid #15803d;background:#16a34a;color:#fff;padding:6px 14px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600">Import</button> <button id="kaf-icancel" style="border:1px solid #cbd5e1;background:#fff;padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer">Cancel</button> <span id="kaf-ires" style="font-size:12px;margin-left:6px"></span></div>'
+      +'<div id="kaf-iwarn" style="margin-top:8px"></div></div>';
+    box.querySelector('#kaf-icancel').onclick=function(){ box.innerHTML=''; };
+    box.querySelector('#kaf-ifile').onchange=function(){ var f=this.files&&this.files[0]; if(!f)return; var rd=new FileReader(); rd.onload=function(){ box.querySelector('#kaf-ipaste').value=String(rd.result); }; rd.readAsText(f); };
+    box.querySelector('#kaf-ido').onclick=function(){ doImport(box); };
+  }
+  function doImport(box){ var client=(box.querySelector('#kaf-icli').value||'').trim(), month=box.querySelector('#kaf-imo').value, txt=box.querySelector('#kaf-ipaste').value||'';
+    var lines=txt.split(/\r?\n/).map(function(l){return l.trim();}).filter(Boolean);
+    var agg={}, unresolved=[];
+    lines.forEach(function(l){ var parts=l.split(/[\t,;]+/).map(function(p){return p.trim();}).filter(function(p){return p!=='';});
+      if(!parts.length)return; var rawSku=parts[0]; var qty=null;
+      for(var i=parts.length-1;i>=1;i--){ var n=parseInt(parts[i].replace(/[^0-9-]/g,''),10); if(!isNaN(n)){ qty=n; break; } }
+      var sku=resolveSku(rawSku); if(!sku){ unresolved.push(rawSku); return; } if(qty==null)return; agg[sku]=(agg[sku]||0)+qty; });
+    var skus=Object.keys(agg); var res=box.querySelector('#kaf-ires'), warn=box.querySelector('#kaf-iwarn');
+    if(!skus.length){ res.style.color='#dc2626'; res.textContent='Nothing to import'+(unresolved.length?' — '+unresolved.length+' unresolved':''); }
+    if(unresolved.length){ warn.innerHTML='<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:7px 10px;font-size:12px;color:#92400e"><b>⚠ '+unresolved.length+' SKU'+(unresolved.length>1?'s':'')+' didn’t resolve</b> (skipped): '+unresolved.map(e).join(', ')+'</div>'; } else warn.innerHTML='';
+    if(!skus.length)return;
+    res.style.color='#64748b'; res.textContent='Importing '+skus.length+'…'; var i=0;
+    (function nx(){ if(i>=skus.length){ res.style.color='#16a34a'; res.textContent='✓ Imported '+skus.length+' SKU'+(skus.length>1?'s':'')+' into '+month+(unresolved.length?' · '+unresolved.length+' skipped':''); reload(); return; }
+      var sk=skus[i++]; fetch('/api/supply/ka-forecast-cell',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({client:client,sku:sk,warehouse:KAF_CTRY,month:month,quantity:agg[sk]})}).then(function(){ nx(); }).catch(function(){ nx(); }); })();
+  }
 }
 function renderKpisView(body){
   var subTabs=[['instock','In Stock'],['slowmoving','Slow moving'],['inventory','Inventory cover'],['stockout','Stockout risk'],['discontinued','Discontinued'],['accuracy','Forecast accuracy']];
