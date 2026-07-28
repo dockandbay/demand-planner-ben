@@ -6740,7 +6740,8 @@ function render(){
     var bw=document.getElementById('buy-wrap'); if(bw)bw.remove();
     var body=document.getElementById('demand-body');
     if(!body){ body=document.createElement('div'); body.id='demand-body'; document.querySelector('.wrap').appendChild(body); }
-    if(DEMAND_VIEW==='keyaccounts') renderKeyAccountsView(body);
+    if(DEMAND_VIEW==='summary') renderSummaryView(body);
+    else if(DEMAND_VIEW==='keyaccounts') renderKeyAccountsView(body);
     else if(DEMAND_VIEW==='targets') renderTargetsView(body);
     else if(DEMAND_VIEW==='calendar') renderCalendarView(body);
     else if(DEMAND_VIEW==='kpis') renderKpisView(body);
@@ -6756,6 +6757,95 @@ function render(){
 // market×channel with on-hand stock above a (per-channel toggleable) threshold; plus the A-player subset.
 // ── DEMAND ▸ Key Accounts Forecast — inline spreadsheet of per-country key-account SKU forecasts, saved straight
 // to planner.key_account_forecasts (replaces the old n8n Airtable flow). SKU is a type-to-search dropdown from SKUM.
+// ── DEMAND ▸ SUMMARY — clean read-only rollup of the PLAN forecast, by country/channel, grouped by
+//    subcategory (expand → SKU), across financial years (past FYs minimised) or a custom month range.
+var SUMM_FROM='', SUMM_TO='', SUMM_OPEN={}, SUMM_FYOPEN={};
+function renderSummaryView(body){
+  function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  function fn(n){ n=Math.round(Number(n)||0); return n?n.toLocaleString():'<span style="color:#cbd5e1">–</span>'; }
+  var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function mlab(m){ return MON[(+m.slice(5,7))-1]+" '"+m.slice(2,4); }
+  var co=CUR, ch=CF;
+  var DATAr=(typeof DATA!=='undefined')?DATA:[];
+  var subs=[]; DATAr.forEach(function(d){ if(d.co===co&&d.ch===ch&&d.s&&subs.indexOf(d.s)<0)subs.push(d.s); }); subs.sort();
+  var fuCache={}; function subFU(s){ if(!(s in fuCache))fuCache[s]=(calc(s,co,ch).fu)||{}; return fuCache[s]; }
+  var LYYM=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
+  function skuRows(s){ var wh=skuWh(co,ch), ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':'b'; var fu=subFU(s);
+    var all=Object.keys(SKUM).filter(function(sku){var p=SKUM[sku];if(!p||p.s!==s)return false;var av=(p.av||{})[ctry]||'';return av.indexOf(chKey)>=0;});
+    var shares=buildSkuShares(all,co,ch,LYYM);
+    return all.map(function(sku){ var p=SKUM[sku]; var disc=(p.disc&&p.disc[ctry])||null, lch=(p.lch&&p.lch[ctry])||null;
+      var rem=((p.inv&&p.inv[wh])||0)+((p.oo&&p.oo[wh])||0), mm={};
+      DISP_MONTHS.forEach(function(m){ var ms=m.slice(0,4)+'-'+m.slice(5,7)+'-01', fo=skuOutFC(sku,co,ch,m);
+        var raw=(fo!=null)?fo:Math.round((fu[m]||0)*(shares[sku]||0)), v;
+        if(lch&&ms<lch)v=0; else if(disc&&ms>disc){ if(rem<=0)v=0; else {v=Math.max(0,Math.min(raw,rem));rem=Math.max(0,rem-v);} } else v=raw;
+        mm[m]=v; });
+      return {sku:sku,name:(p.n||''),mm:mm}; }).sort(function(a,b){return a.sku<b.sku?-1:1;}); }
+  // column model
+  var rangeMode=SUMM_FROM&&SUMM_TO&&SUMM_FROM<=SUMM_TO;
+  var rangeMonths=[]; if(rangeMode)DISP_MONTHS.forEach(function(m){ if(m>=SUMM_FROM&&m<=SUMM_TO)rangeMonths.push(m); });
+  var fyOpen=function(Y){ return (Y in SUMM_FYOPEN)?SUMM_FYOPEN[Y]:(Y>=CUR_FY_START); };   // past FYs minimised by default
+  // sum a monthly-map over a set of months
+  function sumM(mm,months){ var t=0; months.forEach(function(m){ t+=(mm[m]||0); }); return t; }
+  function growthCell(cur,prev){ if(!(prev>0))return '<span style="color:#94a3b8;font-size:9px">–</span>'; var g=Math.round((cur/prev-1)*100); return '<span style="font-size:9px;font-weight:700;color:'+(g>0?'#15803d':g<0?'#b91c1c':'#64748b')+'">'+(g>0?'+':'')+g+'%</span>'; }
+  // count columns for a subheader
+  var CO_PILLS=(typeof CTRS!=='undefined'?CTRS:['UK','US','EU','AU','CA']);
+  var CH_PILLS=['DTC','FBA','B2B'];
+  var moOpts=function(sel){ return '<option value="">—</option>'+DISP_MONTHS.map(function(m){return '<option value="'+m+'"'+(m===sel?' selected':'')+'>'+mlab(m)+'</option>';}).join(''); };
+  body.innerHTML='<div style="padding:6px 2px 12px">'
+    +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px"><div style="font-weight:700;font-size:15px">Summary</div>'
+    +'<span style="display:flex;gap:3px">'+CO_PILLS.map(function(c){return '<button class="sm-co'+(c===co?' on':'')+'" data-c="'+c+'">'+c+'</button>';}).join('')+'</span>'
+    +'<span style="display:flex;gap:3px">'+CH_PILLS.map(function(c){return '<button class="sm-ch'+(c===ch?' on':'')+'" data-c="'+c+'">'+c+'</button>';}).join('')+'</span>'
+    +'<span style="margin-left:14px;font-size:12px;color:#475569;display:flex;align-items:center;gap:5px">Show from <select id="sm-from" style="padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px">'+moOpts(SUMM_FROM)+'</select> to <select id="sm-to" style="padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px">'+moOpts(SUMM_TO)+'</select>'+(rangeMode?' <button id="sm-clear" style="font-size:11px;padding:3px 9px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;cursor:pointer">✕ clear · FY view</button>':'')+'</span>'
+    +'</div>'
+    +'<div style="font-size:12px;color:#666;margin:0 0 10px">'+e(co)+' · '+e(ch)+' — units by subcategory (click a subcategory to see its SKUs). '+(rangeMode?('Showing '+mlab(SUMM_FROM)+' → '+mlab(SUMM_TO)+' with a period total.'):'Financial years (Mar–Feb); past years minimised — click a year to expand. Actual months are shaded green.')+'</div>'
+    +'<div id="smc" style="overflow-x:auto"></div></div>';
+  body.querySelectorAll('.sm-co').forEach(function(b){ b.onclick=function(){ CUR=b.dataset.c; render(); }; });
+  body.querySelectorAll('.sm-ch').forEach(function(b){ b.onclick=function(){ CF=b.dataset.c; render(); }; });
+  var fSel=body.querySelector('#sm-from'), tSel=body.querySelector('#sm-to');
+  function applyRange(){ SUMM_FROM=fSel.value; SUMM_TO=tSel.value; draw(); }
+  fSel.onchange=applyRange; tSel.onchange=applyRange;
+  var clr=body.querySelector('#sm-clear'); if(clr)clr.onclick=function(){ SUMM_FROM=''; SUMM_TO=''; renderSummaryView(body); };
+  var host=body.querySelector('#smc');
+  function draw(){
+    var STY='<style>#smc table{border-collapse:separate;border-spacing:0;font-size:12px}#smc th,#smc td{padding:3px 7px;white-space:nowrap;border-bottom:1px solid #f1f1f1;text-align:right}'
+      +'#smc th{font-size:10px;text-transform:uppercase;letter-spacing:.02em;color:#666;background:#f8fafc;position:sticky;top:0;z-index:2}'
+      +'#smc td.lbl,#smc th.lbl{position:sticky;left:0;background:#fff;text-align:left;z-index:1;min-width:230px;box-shadow:2px 0 3px -2px rgba(15,23,42,.15)}'
+      +'#smc th.lbl{z-index:3;background:#f8fafc}#smc td.act{background:#ecfdf5}#smc th.fyh{text-align:center;cursor:pointer;border-left:2px solid #cbd5e1;color:#334155}#smc td.tot,#smc th.tot{font-weight:700;border-left:1px solid #e2e8f0;background:#fbfdff}'
+      +'#smc tr.sub td{border-top:1px solid #eef2f7}#smc tr.sub td.lbl{font-weight:700;color:#0f172a;cursor:pointer}#smc tr.gt td{background:#eef2ff;font-weight:700;border-top:2px solid #cbd5e1}#smc tr.gt td.lbl{background:#eef2ff}'
+      +'#smc tr.sku td.lbl{padding-left:22px;font-family:ui-monospace,Menlo,monospace;color:#475569}#smc .smx{color:#94a3b8;font-size:10px;display:inline-block;width:11px}'
+      +'.sm-co,.sm-ch{border:1px solid #cbd5e1;background:#fff;color:#334155;font-size:11px;padding:3px 10px;border-radius:12px;cursor:pointer;font-weight:600}.sm-co.on,.sm-ch.on{background:#0f172a;color:#fff;border-color:#0f172a}</style>';
+    if(!subs.length){ host.innerHTML=STY+'<div style="color:#888;font-size:12px;padding:12px 2px">No forecast data for '+e(co)+' · '+e(ch)+'.</div>'; return; }
+    // build header + body depending on mode
+    var h1='', h2='', colMonths=[];   // colMonths = ordered list of {m, fyTotAfter?} — for cell rendering
+    var cols=[];  // flat column descriptors: {type:'m',m} | {type:'tot',Y} | {type:'ptot'}
+    if(rangeMode){
+      h2='<th class="lbl">Subcategory / SKU</th>'+rangeMonths.map(function(m){return '<th class="'+(isActualMonth(m)?'act':'')+'">'+mlab(m)+'</th>';}).join('')+'<th class="tot">Total</th>';
+      rangeMonths.forEach(function(m){ cols.push({type:'m',m:m}); }); cols.push({type:'ptot'});
+    } else {
+      DISP_FY_STARTS.forEach(function(Y){ var op=fyOpen(Y); h1+='<th class="fyh" data-fy="'+Y+'" colspan="'+(op?fyMonths(Y).length+1:1)+'">'+(op?'▾ ':'▸ ')+fyLabel(Y)+'</th>';
+        if(op){ fyMonths(Y).forEach(function(m){ h2+='<th class="'+(isActualMonth(m)?'act':'')+'">'+MON[(+m.slice(5,7))-1]+'</th>'; cols.push({type:'m',m:m}); }); }
+        h2+='<th class="tot">'+(op?'Total':fyLabel(Y).replace('FY',''))+'</th>'; cols.push({type:'tot',Y:Y}); });
+      h1='<th class="lbl" rowspan="2">Subcategory / SKU</th>'+h1; h2=h2;   // h2 has no label cell (label spans via rowspan)
+    }
+    // row renderer: given a monthly-map mm, produce the cells
+    function cells(mm){ return cols.map(function(c){
+        if(c.type==='m')return '<td class="'+(isActualMonth(c.m)?'act':'')+'">'+fn(mm[c.m]||0)+'</td>';
+        if(c.type==='ptot')return '<td class="tot">'+fn(sumM(mm,rangeMonths))+'</td>';
+        var cur=sumM(mm,fyMonths(c.Y)), prev=sumM(mm,fyMonths(c.Y-1)); return '<td class="tot">'+fn(cur)+' '+growthCell(cur,prev)+'</td>'; }).join(''); }
+    // grand total = sum of subcat monthly
+    var gt={}; subs.forEach(function(s){ var fu=subFU(s); DISP_MONTHS.forEach(function(m){ gt[m]=(gt[m]||0)+(fu[m]||0); }); });
+    var bodyH='<tr class="gt"><td class="lbl">ALL SUBCATEGORIES</td>'+cells(gt)+'</tr>';
+    subs.forEach(function(s){ var fu=subFU(s);
+      bodyH+='<tr class="sub"><td class="lbl" data-sub="'+e(s)+'"><span class="smx">'+(SUMM_OPEN[s]?'▾':'▸')+'</span>'+e(s)+'</td>'+cells(fu)+'</tr>';
+      if(SUMM_OPEN[s]){ skuRows(s).forEach(function(r){ bodyH+='<tr class="sku"><td class="lbl">'+e(r.sku)+'<span style="color:#94a3b8;font-family:system-ui;margin-left:6px">'+e(r.name)+'</span></td>'+cells(r.mm)+'</tr>'; }); }
+    });
+    var thead=rangeMode?('<thead><tr>'+h2+'</tr></thead>'):('<thead><tr>'+h1+'</tr><tr>'+h2+'</tr></thead>');
+    host.innerHTML=STY+'<table>'+thead+'<tbody>'+bodyH+'</tbody></table>';
+    host.querySelectorAll('td.lbl[data-sub]').forEach(function(td){ td.onclick=function(){ var s=td.dataset.sub; SUMM_OPEN[s]=!SUMM_OPEN[s]; draw(); }; });
+    host.querySelectorAll('th.fyh[data-fy]').forEach(function(th){ th.onclick=function(){ var Y=+th.dataset.fy; SUMM_FYOPEN[Y]=!fyOpen(Y); draw(); }; });
+  }
+  draw();
+}
 var KAF_CTRY='uk_3pl', KAF_Q='', KAF_PAST=false;   // Key Accounts grid: selected country (3PL), filter text, show-past-12mo toggle
 function renderKeyAccountsView(body){
   function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
@@ -7011,7 +7101,7 @@ function renderAccuracyView(kb,body){
   }).catch(function(){ kb.innerHTML='<div style="color:#dc2626;font-size:12px">Failed to load.</div>'; });
 }
 // ─── DEMAND sub-tabs (PLAN / KPIs / TARGETS / ACTIONS / CALENDAR) ───────────────────────────
-var DEMAND_TABS=[['plan','Plan'],['keyaccounts','Key Accts'],['kpis','KPIs'],['targets','Targets'],['actions','Actions'],['calendar','Calendar']];
+var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accts'],['kpis','KPIs'],['targets','Targets'],['actions','Actions'],['calendar','Calendar']];
 function renderDemandTabs(){
   var bar=document.getElementById('demand-tabs');
   var _sb=document.getElementById('statusbar');

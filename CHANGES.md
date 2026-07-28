@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.238 - DEMAND ▸ new SUMMARY tab (forecast rollup)
+- New "Summary" sub-tab next to Plan: a clean, read-only rollup of the PLAN forecast.
+  - Follows PLAN's selected country/channel (own pills to switch).
+  - Grouped by subcategory, click to expand to SKUs; grand-total row.
+  - Financial-year column groups (Mar–Feb, same as PLAN) with monthly cells + an FY total carrying YoY growth% (this FY ÷ prior FY − 1). Past FYs minimised by default (click a year to expand its months). Actual months shaded light green.
+  - "Show from → to" month-range mode: pick a start + end month to show only that period with a period-total column.
+- Demand artifact change (artifact_v16.7.html).
+
 ## v26.237 - Key Accounts grid: forward window 12 → 18 months
 - The month-grid now shows the current month → 18 months forward (was 12). "Show 12 months back" toggle unchanged.
 
