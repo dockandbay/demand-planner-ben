@@ -6599,7 +6599,7 @@
       rd.readAsDataURL(f); };
     b.querySelector('#xc-allrows').onchange=function(){ if(_rows&&_cf)analyse(); };
     function analyse(){
-      var due={}; ((_cf&&_cf.lines)||[]).forEach(function(l){ if(l.paid)return; if(['deposit','completion','balance'].indexOf(l.type)<0)return; if(!l.ref)return; due[l.ref]=(due[l.ref]||0)+(Number(l.amount)||0); });
+      var due={}; ((_cf&&_cf.lines)||[]).forEach(function(l){ if(l.paid)return; if((l.basis||'po')!=='po')return; var _t=String(l.type||'').toLowerCase(); if(!(_t.indexOf('deposit')>=0||_t==='completion'||_t==='balance'))return; if(!l.ref)return; due[l.ref]=(due[l.ref]||0)+(Number(l.amount)||0); });   // unpaid goods payments per PO (type is title-case: Deposit/Start deposit/Completion/Balance)
       var showAll=b.querySelector('#xc-allrows').checked;
       var approved=(_rows||[]).filter(function(r){ return /approv/i.test(r.status||''); });
       var out=approved.map(function(r){

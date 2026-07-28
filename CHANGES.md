@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.249 - Xero Compare: fix "PO not found" (cashflow type is title-case)
+- The Horizon amount-due lookup matched lowercase payment types but the cashflow lines are title-case (Completion/Balance/Deposit), so every PO came back "not found". Now case-insensitive + basis=po; PO-1672806 correctly shows £-converted Xero vs Horizon due (e.g. 529.63).
+
 ## v26.248 - SUPPLY ▸ Payments: new "Xero Compare" tab
 - New Payments sub-tab that reconciles Xero payable invoices against Horizon. Link to the Xero Payable Invoice Summary report + instructions to export last month as XLSX and upload.
 - On upload: server parses the XLSX (exceljs, new POST /api/supply/xero-parse, read-only); the client compares every "Approved" (not-yet-paid) invoice's PO against Horizon's amount due (sum of unpaid deposit/completion/balance from cashflow). Xero balance is GBP × the export's exchange rate → USD to match Horizon.
