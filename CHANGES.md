@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.234 - Delivery notes on the portal shipment (were PO-only)
+- Supplier portal Shipment Plan cards now show a "Delivery notes" block (branch delivery notes — pallet spec, IDN labels, etc.), inherited from the master PO (or the shipment-level override). Previously these showed on the PO but not on the shipment, so a supplier building the shipment couldn't see them. (server: buildShipmentPlan now returns the shipment's effective delivery_notes.)
+
 ## v26.233 - Supplier portal polish (escalate rename, compose-on-top, auto-save, prod-status colour)
 - Timeline "⚑ Flag" buttons renamed to "⚑ Escalate"; their tooltip is now a native title (never renders off-screen).
 - PO timeline: the reply/new-message box now sits at the TOP of the thread (above the messages), not the bottom.

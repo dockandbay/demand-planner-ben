@@ -1297,7 +1297,9 @@
                 +'<span class="mut tiny">'+esc((s.mode||'—')+(s.carrier?' · '+s.carrier:''))+(s.departure?' · dep '+esc(fd(s.departure)):'')+(s.arrival?' · arr '+esc(fd(s.arrival)):'')+'</span>'
                 +(s.escalated?'<span class="tool-badge bg-red" style="margin-left:auto">⚑ ESCALATED</span>':'')
                 +'</div>'
-                +'<div class="sp-body" style="display:none;padding:0 12px 12px">'+editPanel+datesStrip+'<div style="margin-top:8px">'+members+'</div>'
+                +'<div class="sp-body" style="display:none;padding:0 12px 12px">'
+                +(s.delivery_notes?'<div style="margin:8px 0;padding:8px 11px;border-radius:6px;font-size:12px;background:#eff6ff;border:1px solid #bfdbfe;white-space:pre-wrap;text-align:left"><b>Delivery notes</b><br>'+esc(s.delivery_notes)+'</div>':'')
+                +editPanel+datesStrip+'<div style="margin-top:8px">'+members+'</div>'
                 +(s.members||[]).map(function(m){return dtcBlock(m.po);}).join('')
                 +chgPanel
                 +'<div style="margin-top:10px"><div class="mut tiny" style="margin-bottom:3px">Download a consolidated shipment tax invoice</div><button class="save-btn pp-ship-inv" data-ref="'+esc(s.shipment_ref)+'" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd" title="download the consolidated Tax Invoice + Packing List for this shipment">📄 Tax Invoice</button></div>'

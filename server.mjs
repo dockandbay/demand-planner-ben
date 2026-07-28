@@ -1477,7 +1477,9 @@ async function buildShipmentPlan() {
       to_char(p.client_deadline_date,'YYYY-MM-DD') client_deadline,
       (p.po = coalesce(sh.master_po, p.shipment_ref)) is_master, coalesce(sh.escalated,false) escalated,
       round(coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0))
-        FROM planner.purchase_order_lines l LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=p.po),0)::numeric,1) pallets
+        FROM planner.purchase_order_lines l LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=p.po),0)::numeric,1) pallets,
+      coalesce(sh.delivery_notes,'') sh_delivery_notes,   -- shipment-level override
+      coalesce(nullif(p.branch_delivery_notes,''), b.delivery_notes, '') po_delivery_notes   -- this PO's branch delivery notes (used from the master row)
     FROM planner.purchase_orders p
     LEFT JOIN planner.shipments sh ON sh.shipment_ref=p.shipment_ref
     LEFT JOIN planner.branches b ON b.name=p.branch
@@ -1489,12 +1491,12 @@ async function buildShipmentPlan() {
     ORDER BY p.shipment_ref, (p.po = coalesce(sh.master_po, p.shipment_ref)) DESC, p.po`);
   const byRef = {};
   rows.forEach(r => { let s = byRef[r.shipment_ref];
-    if (!s) s = byRef[r.shipment_ref] = { shipment_ref: r.shipment_ref, master_po: r.master_po, mode: r.mode, carrier: r.carrier, carrier_ref: r.carrier_ref, flex_id: r.flex_id, status: r.status, departure: r.departure, landing: r.landing, arrival: r.arrival, sea_lead: r.sea_lead, air_lead: r.air_lead, prod_end: '', escalated: !!r.escalated, master_client: '', master_deadline: '', master_supplier: '', country: '', total_pallets: 0, suppliers: [], members: [] };
+    if (!s) s = byRef[r.shipment_ref] = { shipment_ref: r.shipment_ref, master_po: r.master_po, mode: r.mode, carrier: r.carrier, carrier_ref: r.carrier_ref, flex_id: r.flex_id, status: r.status, departure: r.departure, landing: r.landing, arrival: r.arrival, sea_lead: r.sea_lead, air_lead: r.air_lead, prod_end: '', escalated: !!r.escalated, master_client: '', master_deadline: '', master_supplier: '', country: '', total_pallets: 0, delivery_notes: r.sh_delivery_notes || '', suppliers: [], members: [] };
     if (r.prod_end && r.prod_end > s.prod_end) s.prod_end = r.prod_end;   // shipment production-end = latest across its POs (drives the portal date bands)
     s.total_pallets += Number(r.pallets) || 0;
     if (s.suppliers.indexOf(r.supplier_name) < 0 && r.supplier_name) s.suppliers.push(r.supplier_name);
     if (r.country && (r.is_master || !s.country)) s.country = r.country;
-    if (r.is_master) { s.master_client = r.client; s.master_deadline = r.client_deadline; s.master_supplier = r.supplier_name; }
+    if (r.is_master) { s.master_client = r.client; s.master_deadline = r.client_deadline; s.master_supplier = r.supplier_name; if (!s.delivery_notes) s.delivery_notes = r.po_delivery_notes || ''; }   // shipment inherits the master PO's branch delivery notes (unless overridden on the shipment)
     s.members.push({ po: r.po, supplier: r.supplier_name, pallets: Number(r.pallets) || 0, client: r.client, is_master: !!r.is_master });
   });
   // Fill missing shipment dates by inheriting/calculating from the master PO: ship = prod-end + 7 days,
