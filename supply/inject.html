@@ -4344,10 +4344,11 @@
   // and the crossdock assigned to open POs that isn't showing inbound yet.
   function renderCrossdock(d, body){ if(!body)return; d=d||{}; var rows=d.rows||[], expected=d.expected||[];
     var WHL={uk_3pl:'UK 3PL',us_3pl:'US 3PL',eu_3pl:'EU 3PL',au_3pl:'AU 3PL'};
+    function poLink(po){ po=String(po||''); return (po&&po!=='?')?'<b class="xd-po" data-po="'+esc(po)+'" style="color:#1d4ed8;cursor:pointer" title="open '+esc(po)+' in a popout">'+esc(po)+'</b>':esc(po); }
     function srcLabel(s){
-      if(s.type==='inbound')return 'Inbound '+units(s.qty)+' · '+esc(s.po||s.ref||'?')+(s.client?' ('+esc(s.client)+')':'')+(s.date?' · '+esc(s.date):'');
+      if(s.type==='inbound')return 'Inbound '+units(s.qty)+' · '+(s.po?poLink(s.po):esc(s.ref||'?'))+(s.client?' ('+esc(s.client)+')':'')+(s.date?' · '+esc(s.date):'');
       if(s.type==='preorder')return 'Preorder '+units(s.qty)+' · '+esc(s.ref||'?')+(s.date?' ships '+esc(s.date):'');
-      if(s.type==='crossdock_po')return 'PO '+esc(s.po||'?')+(s.client?' ('+esc(s.client)+')':'')+(s.so?' · '+esc(s.so):'')+(s.qty?' · '+units(s.qty)+' shipped':'');
+      if(s.type==='crossdock_po')return 'PO '+poLink(s.po)+(s.client?' ('+esc(s.client)+')':'')+(s.so?' · '+esc(s.so):'')+(s.qty?' · '+units(s.qty)+' shipped':'');
       return esc(s.type); }
     var out='<div class="annot"><b>PURCHASE ORDERS ▸ Crossdock &amp; Labels.</b> On-hand and inbound for every CROSSDOCK / PREORDER SKU in the four 3PL warehouses, with a best-guess at what each stock is (inbound → PO, then preorder, then assigned crossdock PO). Stock it cannot identify is flagged amber — add a note, which is auto-wiped once that stock ships out.</div>'
       +'<div id="xd-air-labels"></div>';
@@ -4366,17 +4367,19 @@
     });
     out+='<div class="sect-h">Crossdock assigned to open POs — not yet showing inbound <span class="mut tiny">('+expected.length+')</span></div>';
     if(expected.length){ out+='<div class="tw"><table><thead><tr><th class="l">SKU</th><th class="l">PO</th><th class="l">Client</th><th class="l">Sales order</th><th class="l">Dest</th><th>Shipped</th></tr></thead><tbody>'
-      +expected.map(function(e){return '<tr><td class="l"><b>'+esc(e.sku)+'</b></td><td class="l">'+esc(e.po)+'</td><td class="l">'+esc(e.client||'—')+'</td><td class="l">'+esc(e.so||'—')+'</td><td class="l">'+esc(e.country||'—')+'</td><td>'+units(e.shipped||0)+'</td></tr>';}).join('')
+      +expected.map(function(e){return '<tr><td class="l"><b>'+esc(e.sku)+'</b></td><td class="l">'+poLink(e.po)+'</td><td class="l">'+esc(e.client||'—')+'</td><td class="l">'+esc(e.so||'—')+'</td><td class="l">'+esc(e.country||'—')+'</td><td>'+units(e.shipped||0)+'</td></tr>';}).join('')
       +'</tbody></table></div>'; }
     else out+='<div class="count">None.</div>';
     body.innerHTML=out;
+    // PO refs → open the PO popout drawer (delegated so it also catches the async-rendered air-freight rows)
+    body.addEventListener('click',function(ev){ var el=ev.target.closest&&ev.target.closest('.xd-po'); if(el&&el.dataset.po){ ev.stopPropagation(); if(typeof openPODrawer==='function')openPODrawer(el.dataset.po); else gotoPO(el.dataset.po); } });
     // Air freight labels — one per air-shipment master PO (same label as ships-with, without the ships-with section)
     (function(){ var el=body.querySelector('#xd-air-labels'); if(!el)return;
       function fill(ships){ var air=(ships||[]).filter(function(s){return /air/i.test(s.mode||'') && s.master_po;});
         if(!air.length){ el.innerHTML=''; return; }
         el.innerHTML='<div class="sect-h">Air freight labels <span class="mut tiny">(master PO of each air shipment — ships-with label without the ships-with section)</span></div>'
           +'<div class="tw" style="margin-bottom:14px;max-width:700px"><table><thead><tr><th class="l">Shipment</th><th class="l">Master PO</th><th class="l">Supplier</th><th></th></tr></thead><tbody>'
-          +air.map(function(s){return '<tr><td class="l">'+esc(s.shipment_ref||'')+'</td><td class="l"><b>'+esc(s.master_po)+'</b></td><td class="l">'+esc(s.master_supplier||'')+'</td><td class="l"><button class="save-btn xd-air-lbl" data-po="'+esc(s.master_po)+'">⤓ Air freight labels</button></td></tr>';}).join('')
+          +air.map(function(s){return '<tr><td class="l">'+esc(s.shipment_ref||'')+'</td><td class="l">'+poLink(s.master_po)+'</td><td class="l">'+esc(s.master_supplier||'')+'</td><td class="l"><button class="save-btn xd-air-lbl" data-po="'+esc(s.master_po)+'">⤓ Air freight labels</button></td></tr>';}).join('')
           +'</tbody></table></div>';
         el.querySelectorAll('.xd-air-lbl').forEach(function(b){ b.onclick=function(){ dlShipsWith(b.dataset.po,b,true); }; }); }
       if(_allShips&&_allShips.length)fill(_allShips);

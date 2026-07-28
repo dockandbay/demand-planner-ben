@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.246 - Crossdock: PO references open the PO popout drawer
+- On PURCHASE ORDERS ▸ Crossdock & Labels, PO numbers (in the "what is this stock?" sources, the assigned-crossdock table, and the air-freight master-PO table) are now clickable and open the PO in the popout drawer, like the consolidation view.
+
 ## v26.245 - Barcode ZIP: per-supplier folders labelled by kind
 - Downloading all barcodes for a supplier now names the folder inside the ZIP "<supplier> - Cartons" (for the Cartons/inners download) or "<supplier> - Product" (for the Products download), instead of just the supplier name.
 
