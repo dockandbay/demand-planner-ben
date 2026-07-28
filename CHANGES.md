@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.240 - SUMMARY tab refinements
+- Cells now stack 3 values like PLAN: LY actual / forecast / growth% (for subcategory, SKU and totals).
+- SKU rows: removed product name; added A/B/C tier badge + launch and discontinue dates.
+- Cell shading: discontinued months red, pre-launch months light grey, actual months green.
+- Total columns are dark blue with white text.
+- Fixed 2024/2025 showing blank — actual months now read from the actuals series (not the forecast map).
+- Fixed the "show from → to" range not updating until refresh (now re-renders silently on change).
+
 ## v26.239 - PO timeline: compose on top, dd-mmm-yy dates, submitter + date on submissions
 - PO drawer Timeline: the "post a note" box is now at the top, messages below it.
 - Supplier submission banners ("⏳ Awaiting your approval" / "✓ Applied") now show each submission's completion date as dd-mmm-yy and include who submitted it + the submission date.
