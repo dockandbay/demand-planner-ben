@@ -6586,7 +6586,7 @@
         +'</ol></div>'
       +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px"><input type="file" id="xc-file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="font-size:12px"><button class="save-btn" id="xc-go" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;font-weight:600">Analyse</button><label style="font-size:12px;color:#475569;cursor:pointer"><input type="checkbox" id="xc-allrows"> show all Approved rows (not just issues)</label><span id="xc-msg" style="font-size:12px"></span></div>'
       +'<div id="xc-result"></div>';
-    var _rows=null, _cf=null, LS_KEY='HZ_XERO_COMPARE', TTL=24*3600*1000;
+    var _rows=null, _cf=null, _period='', LS_KEY='HZ_XERO_COMPARE', TTL=24*3600*1000;
     var go=b.querySelector('#xc-go'), fileI=b.querySelector('#xc-file'), msg=b.querySelector('#xc-msg');
     function setMsg(t,bad){ msg.style.color=bad?'#dc2626':'#64748b'; msg.textContent=t; }
     function loadSaved(){ try{ var s=JSON.parse(localStorage.getItem(LS_KEY)||'null'); if(s&&s.at&&(Date.now()-s.at)<TTL&&Array.isArray(s.rows))return s; }catch(e){} return null; }
@@ -6596,22 +6596,28 @@
       setMsg('Reading…'); go.disabled=true; var fname=f.name; var rd=new FileReader();
       rd.onload=function(){ var b64=String(rd.result).replace(/^data:[^;]+;base64,/,'');
         fetch('/api/supply/xero-parse',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({data_base64:b64})}).then(function(r){return r.json();})
-          .then(function(j){ if(j&&j.error)throw new Error(j.error); _rows=j.rows||[];
-            try{ localStorage.setItem(LS_KEY,JSON.stringify({rows:_rows,at:Date.now(),name:fname})); }catch(e){}   // persist 24h so refreshes re-analyse without re-uploading
+          .then(function(j){ if(j&&j.error)throw new Error(j.error); _rows=j.rows||[]; _period=j.period_end||'';
+            try{ localStorage.setItem(LS_KEY,JSON.stringify({rows:_rows,at:Date.now(),name:fname,period:_period})); }catch(e){}   // persist 24h so refreshes re-analyse without re-uploading
             var bn=b.querySelector('#xc-banner'); if(bn)bn.remove(); return compareNow(); })
           .then(function(){ go.disabled=false; })
           .catch(function(e){ go.disabled=false; setMsg('Failed: '+(e.message||e),1); }); };
       rd.readAsDataURL(f); };
     b.querySelector('#xc-allrows').onchange=function(){ if(_rows&&_cf)analyse(); };
     // auto-load the last upload if < 24h old — each visit/refresh re-runs the compare against fresh Horizon data
-    (function(){ var s=loadSaved(); if(!s){ try{ localStorage.removeItem(LS_KEY); }catch(e){} return; } _rows=s.rows;
+    (function(){ var s=loadSaved(); if(!s){ try{ localStorage.removeItem(LS_KEY); }catch(e){} return; } _rows=s.rows; _period=s.period||'';
       var bn=document.createElement('div'); bn.id='xc-banner'; bn.style.cssText='font-size:12px;color:#475569;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:7px 10px;margin-bottom:10px';
       bn.innerHTML='Using your last upload'+(s.name?' <b>'+esc(s.name)+'</b>':'')+' ('+esc(agoLabel(s.at))+', kept for 24h) — re-analysed against current Horizon data. Upload a new file to replace it. <button id="xc-clear" style="border:none;background:none;color:#b91c1c;text-decoration:underline;cursor:pointer;font-size:12px;padding:0">clear</button>';
       var rr=b.querySelector('#xc-result'); rr.parentNode.insertBefore(bn, rr);
       var cl=bn.querySelector('#xc-clear'); if(cl)cl.onclick=function(){ try{ localStorage.removeItem(LS_KEY); }catch(e){} bn.remove(); rr.innerHTML=''; _rows=null; setMsg(''); };
       compareNow(); })();
     function analyse(){
-      var due={}; ((_cf&&_cf.lines)||[]).forEach(function(l){ if(l.paid)return; if((l.basis||'po')!=='po')return; var _t=String(l.type||'').toLowerCase(); if(!(_t.indexOf('deposit')>=0||_t==='completion'||_t==='balance'))return; if(!l.ref)return; due[l.ref]=(due[l.ref]||0)+(Number(l.amount)||0); });   // unpaid goods payments per PO (type is title-case: Deposit/Start deposit/Completion/Balance)
+      // Period-aware Horizon due. The Xero report is a point-in-time snapshot (period end = _period). A Horizon payment
+      // that was PAID AFTER the period end was still OUTSTANDING at report time, so we count it as due for the comparison.
+      var pend=_period||'', due={}, known={};
+      ((_cf&&_cf.lines)||[]).forEach(function(l){ if((l.basis||'po')!=='po'||!l.ref)return; var _t=String(l.type||'').toLowerCase(); if(!(_t.indexOf('deposit')>=0||_t==='completion'||_t==='balance'))return;
+        known[l.ref]=true;   // PO is present in Horizon's payment plan (paid or not) — lets us distinguish "not found" from "nothing open"
+        var openAtReport = !l.paid || (pend && l.paid_date && String(l.paid_date).slice(0,10) > pend);
+        if(openAtReport) due[l.ref]=(due[l.ref]||0)+(Number(l.amount)||0); });   // type is title-case: Deposit/Start deposit/Completion/Balance
       var showAll=b.querySelector('#xc-allrows').checked;
       var approved=(_rows||[]).filter(function(r){ return /approv/i.test(r.status||''); });
       var out=approved.map(function(r){
@@ -6619,16 +6625,17 @@
         var xero=(Number(r.balance_gbp)||0)*(isGbp?1:(Number(r.rate)||0));   // Xero outstanding → USD at the report rate
         var fx=isGbp?0:(Number(r.unrealised_gain)||0);   // unrealised FX gain = revaluation of the outstanding balance vs Horizon's booked USD
         var xadj=xero-fx;   // FX-neutralised → comparable to Horizon (booked rate)
-        var hd=r.po?due[r.po]:undefined, issue='', flag=false, pct=null;
+        var hd=(r.po&&due[r.po]!==undefined)?due[r.po]:(r.po&&known[r.po]?0:undefined), issue='', flag=false, pct=null;
+        var asOf=pend?(' as of '+pend):'';
         if(!r.po){ issue='No PO in the Xero reference ('+(r.reference||'')+')'; flag=true; }
-        else if(hd===undefined){ issue='PO not found in Horizon (no open payment plan / already complete)'; flag=true; }
-        else if(hd<=0.5){ issue='Xero shows '+(isGbp?'£':'$')+money(xero)+' still owed, but Horizon shows nothing due (likely already paid)'; flag=true; pct=100; }
+        else if(hd===undefined){ issue='PO not found in Horizon'; flag=true; }
+        else if(hd<=0.5){ issue='No open payments found in Horizon'+asOf+' — but Xero still shows '+(isGbp?'£':'$')+money(xero)+' owed'; flag=true; pct=100; }
         else { var d=xadj-hd; pct=d/hd*100;   // variance AFTER removing FX; ≥5% = flagged
           if(Math.abs(pct)>=5){ issue='Differs — Xero '+(isGbp?'£':'$')+money(xero)+(fx?' (−$'+money(fx)+' FX = $'+money(xadj)+')':'')+' vs Horizon $'+money(hd)+' (Δ '+money(Math.abs(d))+')'; flag=true; }
           else issue='OK (within 5%'+(fx?', after FX':'')+')'; }
         return { po:r.po, reference:r.reference, supplier:r.supplier, status:r.status, gbp:Number(r.balance_gbp)||0, rate:Number(r.rate)||0, ccy:ccy, xero:xero, fx:fx, xadj:xadj, hd:hd, pct:pct, flag:flag, issue:issue }; });
       var nIssue=out.filter(function(x){return x.flag;}).length, view=showAll?out:out.filter(function(x){return x.flag;});
-      setMsg(approved.length+' Approved invoice'+(approved.length===1?'':'s')+' · '+nIssue+' flagged');
+      setMsg(approved.length+' Approved invoice'+(approved.length===1?'':'s')+' · '+nIssue+' flagged'+(pend?' · report as of '+pend+' (later Horizon payments counted as still-due)':''));
       var res=b.querySelector('#xc-result');
       if(!view.length){ res.innerHTML='<div class="count" style="padding:10px 2px">'+(out.length?'✓ No mismatches — every Approved invoice matches Horizon.':'No Approved (unpaid) invoices in this upload.')+'</div>'; return; }
       res.innerHTML='<div class="tw"><table class="pay-tbl"><thead><tr><th class="l">Supplier</th><th class="l">PO</th><th class="l">Status</th><th style="text-align:right">Xero balance (GBP)</th><th style="text-align:right">Rate</th><th style="text-align:right">Xero amount</th><th style="text-align:right">FX gain</th><th style="text-align:right">Horizon due</th><th style="text-align:right">Variance</th><th class="l">Issue</th></tr></thead><tbody>'

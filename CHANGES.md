@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.252 - Xero Compare: period-aware (snapshot) comparison + clearer "no open payments" wording
+- The Xero report is a point-in-time snapshot. Server now reads the "For the period … to …" line and returns period_start/period_end. The client treats any Horizon payment PAID AFTER the period end as still-outstanding at report time — so a PO paid off in the month(s) after the report reconciles against what Xero still shows owed. Example: PO-55CALX-FBA2 (Lixin) had two balance payments made 17 Jul that a 30 Jun report can't know about; comparing against "$5,222 due as of 30 Jun" gives +3.5% (OK) instead of "PO not found".
+- Distinguishes "PO not found in Horizon" (genuinely absent from the payment plan) from "No open payments found in Horizon as of <date>" (PO is known but fully paid by report time). Message header shows the report as-of date.
+
 ## v26.251 - Xero Compare: 24h persistence, 5% tolerance + variance %, FX-gain neutralisation
 - **Persists the last upload for 24h** (localStorage). Every page refresh re-analyses the saved file against *current* Horizon data — no re-upload needed. A new upload overwrites it; a banner shows what's loaded (name + age) with a "clear" link.
 - **5% tolerance**: variances under 5% are treated as OK (green). Added a **Variance %** column so the size of every discrepancy is visible; ≥5% is flagged amber.

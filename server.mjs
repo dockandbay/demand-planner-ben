@@ -1393,6 +1393,15 @@ app.post('/api/supply/xero-parse', async (req, res) => {
     if (!ws) return res.json({ rows: [] });
     const txt = (c) => { const v = c && c.value; if (v == null) return ''; if (typeof v === 'object') { if (v.result != null) return String(v.result); if (v.text != null) return String(v.text); if (Array.isArray(v.richText)) return v.richText.map(t => t.text).join(''); return ''; } return String(v); };
     const numv = (s) => { const n = parseFloat(String(s).replace(/[^0-9.\-]/g, '')); return isNaN(n) ? 0 : n; };
+    // Report period — "For the period 1 June 2026 to 30 June 2026". The end date bounds the snapshot:
+    // any Horizon payment made AFTER it was still outstanding at report time, so the client treats it as due.
+    const MONS = { january:'01',february:'02',march:'03',april:'04',may:'05',june:'06',july:'07',august:'08',september:'09',october:'10',november:'11',december:'12' };
+    const parseDmy = (s) => { const m = /(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/.exec(String(s || '')); if (!m) return ''; const mo = MONS[m[2].toLowerCase()]; if (!mo) return ''; return m[3] + '-' + mo + '-' + String(m[1]).padStart(2, '0'); };
+    let period_start = '', period_end = '';
+    for (let r = 1; r <= Math.min(ws.rowCount, 12); r++) {
+      const t = txt(ws.getRow(r).getCell(1)); const pm = /period\s+(.+?)\s+to\s+(.+)$/i.exec(t);
+      if (pm) { period_start = parseDmy(pm[1]); period_end = parseDmy(pm[2]); break; }
+    }
     let hdr = -1, col = {};
     for (let r = 1; r <= Math.min(ws.rowCount, 40); r++) {
       const m = {}; ws.getRow(r).eachCell({ includeEmpty: false }, (c, cn) => { m[txt(c).trim().toLowerCase()] = cn; });
@@ -1414,7 +1423,7 @@ app.post('/api/supply/xero-parse', async (req, res) => {
         realised_gain: numv(g(col.realised)), unrealised_gain: numv(g(col.unrealised)),
         invoice_date: g(col.invdate).trim(), planned_date: g(col.planned).trim() });
     }
-    res.json({ rows });
+    res.json({ rows, period_start, period_end });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
