@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.260 - Reallocate report: PO refs clickable (open drawer)
+- In the Reallocate report cards, the from/to PO references are now clickable and open the PO in the right-side drawer (Order Plan tab). `supply/inject.html`.
+- NOTE: the "SKU / PO / supplier not mapping" issue is a deeper algorithm bug (see deploy notes) — diagnosed, fix pending a design decision, not yet applied.
+
 ## v26.259 - Carton/inner barcode labels: quantity now from planner.products.carton_qty
 - The carton & inner barcode labels ("BOX OF N x …") now take the per-carton quantity from **`planner.products.carton_qty`** (the source of truth), falling back to `sku_labels.carton_qty` only when products is blank. Applied to all three label queries: admin `label-data`, the batch/label preview, and the supplier-portal label-data. `server.mjs`.
 
