@@ -535,6 +535,7 @@
   #supply-root #pp-tabs::-webkit-scrollbar{height:0}
   #supply-root #pp-tabs .rtab{flex:0 0 auto;padding:9px 13px;font-size:13px;white-space:nowrap;border-bottom-width:3px}
   /* compact MANAGE → "M", but keep the first column wide enough to show the action-count badge */
+  #supply-root .pp-grp-cnt{display:none}   /* mobile: production group header shows just "P# 56", not the "— N PO's" count */
   #supply-root .pp-exp .mng-txt{display:none}
   #supply-root .pp-exp{padding:1px 3px}   /* compact the "M" button so the first column is tight */
   #supply-root .pp-exp::before{content:"M"}
@@ -1067,7 +1068,7 @@
           function _pk(x){ return (x.prod_no==null?'':String(x.prod_no)).trim(); }
           var _gk=_pk(p), _gkey=_gk||'none', _gcnt=arr.filter(function(x){return _pk(x)===_gk;}).length;
           var _grpHdr=(i===0||_pk(arr[i-1])!==_gk)
-            ? '<tr class="pp-grp" data-grp="'+esc(_gkey)+'"><td colspan="20" style="cursor:pointer;user-select:none" title="click to expand / collapse this production"><span class="pp-grp-car">▾</span> '+(_gk?('P# '+esc(_gk)):'No production number')+' — '+_gcnt+" PO"+(_gcnt>1?"'s":"")+'</td></tr>'
+            ? '<tr class="pp-grp" data-grp="'+esc(_gkey)+'"><td colspan="20" style="cursor:pointer;user-select:none" title="click to expand / collapse this production"><span class="pp-grp-car">▾</span> '+(_gk?('P# '+esc(_gk)):'No production number')+'<span class="pp-grp-cnt"> — '+_gcnt+" PO"+(_gcnt>1?"'s":"")+'</span></td></tr>'
             : '';
           // lazy: the heavy expanded card (all sub-tabs) is built on first expand, not upfront (see .pp-exp handler)
           var det='<tr id="pp-'+i+'" data-po="'+esc(p.po)+'" data-grp="'+esc(_gkey)+'" style="display:none"><td colspan="20"><div class="count">Loading…</div></td></tr>';   // single flush cell (no leading empty td) so the detail panel isn't indented by the MANAGE column

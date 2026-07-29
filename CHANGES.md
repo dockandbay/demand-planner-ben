@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.270 - Supplier portal PO grid (mobile): production header without PO count
+- On mobile the production group header now shows just **"▾ P# 56"** instead of "▾ P# 56 — 33 PO's" (count hidden on ≤640px; desktop unchanged). `supply/portal-view.js`.
+
 ## v26.269 - Supplier portal PO grid: expanded-PO rules + compact mobile "M"
 - Expanded PO now has a **darker horizontal rule top and bottom** (2px slate) bracketing the PO row + its detail panel, so an open PO reads as one block.
 - **Mobile**: reduced the padding on the "M" (MANAGE) button and tightened the first column (60→42px) so the PO reference column gets much more room. `supply/portal-view.js`.
