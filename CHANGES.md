@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.257 - Quick-wins batch: Order Plan, Actions, PO grid, B2B planner
+- **Order Plan**: PO column header now opens the PO in the right-side **drawer** (not a full page nav); added **production status + client + order ref** to each PO's header block; grid cells now **top-aligned** (were baseline/bottom); **COMPLETED** status is now selectable in the status pills (the OP_POCAP=40 column cap keeps the pivot bounded so it can't explode); **removed the "All" status pill** — none-selected now means all statuses.
+- **Actions**: medium/amber **payment actions ("Open PO ▸ Payments") now open the PO drawer** instead of navigating away (matches the other action links); added a **"🙈 Hide payment noise" pill** that filters out Deposit FX missing / Deposit not paid / Aged payment.
+- **PO grid**: renamed **"⬇ CSV for Fulfil" → "⬇ Export CSV"**.
+- **Scenario ▸ B2B Allocation**: the Recommendation column now **wraps** instead of cutting off.
+- `supply/inject.html` only; no schema change.
+
 ## v26.256 - Xero export: NO-DEPOSIT PO payments derive account code from production no.
 - Payments Report → Xero copy/download no longer leaves the `*AccountCode` column blank for PO payments that have no deposit (or a deposit with no Xero code). The code now falls back to the production number's Xero code (`prod_numbers.xero_account_code`, e.g. P56 → `620.36 P56`). AU deliveries still always get `620.00 AU`.
 - Root cause: the `NO DEPOSIT` sentinel is a non-empty string, so the old logic took the deposit branch, found no matching deposit, returned NULL, and never fell through to the production-code lookup. Rewrote to: AU → coalesce(assigned-deposit code, production code). Fixed 253 historic blank lines in the sandbox.

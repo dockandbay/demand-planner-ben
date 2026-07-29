@@ -586,6 +586,7 @@
 #supply-root .po-filt-ship{display:inline-flex;align-items:center;flex-wrap:wrap;gap:3px}
 #supply-root .po-filt-ship .pill-lbl{margin-right:2px}
 #supply-root .po-filt-item{display:inline-flex;align-items:center;gap:5px;margin-left:14px}
+#supply-root .op-pivot th,#supply-root .op-pivot td{vertical-align:top}   /* ORDER PLAN grid: data sits at the TOP of each cell (was baseline/bottom) */
 @media (max-width:700px){
   #supply-root #po-ctry, #supply-root #po-act{flex-wrap:wrap;row-gap:4px;column-gap:0!important}
   /* Ship-to: own full-width row; tight so all country pills fit one line */
@@ -1101,14 +1102,15 @@
     var _partBanner='';   // the version-badge loading spinner now signals "still loading" — no inline banner needed
     var types=Array.from(new Set(_acts.map(function(r){return r.type;})));
     var STAT=[['open','Open'],['snoozed','Snoozed'],['dismissed','Dismissed'],['done','Done'],['all','All']];
-    var st={sev:'All',status:'open',types:[],showSnoozed:false};   // types: [] = all; showSnoozed = surface snoozed items in the Open view
+    var ACT_NOISE=['Deposit FX missing','Deposit not paid','Aged payment'];   // low-signal payment actions the "Hide payment noise" pill filters out
+    var st={sev:'All',status:'open',types:[],showSnoozed:false,hideNoise:false};   // types: [] = all; showSnoozed = surface snoozed items in the Open view
     function stOf(r){ return r.status||'open'; }
     function inStat(r){ if(st.status==='all')return true; if(st.status==='open'&&st.showSnoozed&&stOf(r)==='snoozed')return true; return stOf(r)===st.status; }
     function typeMatch(r){ return !st.types.length||st.types.indexOf(r.type)>=0; }
     function actTypeOutside(e){ var pop=document.getElementById('act-typepop'),btn=document.getElementById('act-typebtn');
       if(pop&&!pop.contains(e.target)&&e.target!==btn){ pop.style.display='none'; document.removeEventListener('mousedown',actTypeOutside,true); } }
     function statCount(s){ return s==='all'?_acts.length:_acts.filter(function(r){return stOf(r)===s;}).length; }
-    function pool(){ return _acts.filter(inStat); }
+    function pool(){ return _acts.filter(inStat).filter(function(r){ return !st.hideNoise || ACT_NOISE.indexOf(r.type)<0; }); }
     function actSubNav(){ function tab(k,lbl,n,red){ return '<span class="rtab act-subtab'+(actSub===k?' active':'')+'" data-as="'+k+'">'+lbl+(n>0?' <span class="ex-badge"'+(red?' style="background:#dc2626;color:#fff"':'')+'>'+n+'</span>':'')+'</span>'; }
       var _hi=_acts.filter(function(r){return r.severity==='high' && (!r.status||r.status==='open');}).length;   // high-priority open actions → red counter on the ACTIONS sub-tab
       return '<div class="po-subnav" id="act-subnav">'+tab('actions','ACTIONS',_hi,true)+tab('recommendations','💡 RECOMMENDATIONS',_recOpen)+tab('erp-compare','⬆ ERP COMPARE',_actErpCount||0)+'</div>'; }
@@ -1156,6 +1158,7 @@
           +'<label style="display:block;padding:4px 4px 6px;font-weight:600;cursor:pointer;border-bottom:1px solid #eef0f2;margin-bottom:6px"><input type="checkbox" id="act-type-all"'+(st.types.length?'':' checked')+'> All types</label>'
           +'<div style="display:flex;gap:20px;align-items:flex-start">'+typeGroupsHtml+'</div>'
         +'</div></span>'
+        +'<button class="pill'+(st.hideNoise?' active':'')+'" id="act-hidenoise" title="hide low-signal payment actions: Deposit FX missing, Deposit not paid, Aged payment" style="margin-left:10px">'+(st.hideNoise?'🙈 Payment noise hidden':'🙈 Hide payment noise')+'</button>'
         +'<button class="tool-badge bg-neutral" id="act-refresh" style="cursor:pointer;border:none;margin-left:auto">↻ Refresh</button>';
       document.querySelectorAll('#act-sevbar .spill').forEach(function(p){p.onclick=function(){st.sev=p.dataset.s;sevBar();view();};});
       var tb=document.getElementById('act-typebtn'),tp=document.getElementById('act-typepop');
@@ -1171,7 +1174,8 @@
         document.querySelectorAll('#act-sevbar .act-typechk[data-grp="'+g+'"]').forEach(function(cb){ cb.checked=on; var v=cb.value,i=st.types.indexOf(v);
           if(on){ if(i<0)st.types.push(v); } else if(i>=0)st.types.splice(i,1); });
         syncTypeBtn(); view(); }; });
-      document.getElementById('act-refresh').onclick=function(){ delete cache['actions']; selectSection('actions'); }; }
+      document.getElementById('act-refresh').onclick=function(){ delete cache['actions']; selectSection('actions'); };
+      var _hn=document.getElementById('act-hidenoise'); if(_hn)_hn.onclick=function(){ st.hideNoise=!st.hideNoise; sevBar(); view(); }; }
     // Column 1 = HIGH priority; column 2 = MEDIUM (amber) + LOW. If there are no highs, column 1 = MEDIUM,
     // column 2 = LOW. Recommendations are excluded (own sub-tab).
     function view(){ var f=pool().filter(function(r){return st.sev==='All'||r.severity===st.sev;}).filter(typeMatch);
@@ -1320,7 +1324,7 @@
       if(rk==='cashflow'){ if(b.dataset.cfstatus)_cfState.status=b.dataset.cfstatus; if(b.dataset.cfmonth)_cfState.month=b.dataset.cfmonth; }
       selectReport(rk); };});
     document.querySelectorAll('#act-sub .act-gotoitem').forEach(function(b){b.onclick=function(){ var g=b.dataset.go, k=b.dataset.k;
-      if(g==='dep')gotoDeposit(k); else if(g==='other')gotoOther(); else gotoPO(k,'pay'); };});
+      if(g==='dep')gotoDeposit(k); else if(g==='other')gotoOther(); else { if(typeof openPODrawer==='function')openPODrawer(k,'pay'); else gotoPO(k,'pay'); } };});   // PO payment actions → drawer (not full page)
     document.querySelectorAll('#act-sub .act-gotomfg').forEach(function(b){b.onclick=function(){ showPoSub('manufacturing'); };}); }
 
   // ---- PIPELINE: PO lifecycle as a grouped timeline (stages = groups; cards ordered by next milestone) ----
@@ -2155,7 +2159,7 @@
           +'<button class="save-btn" id="po-upload" style="'+lb+'">⬆ Upload POs</button>'
           +'<button class="save-btn" id="po-import-cin7" style="'+lb+'" title="import a purchase order from Cin7 by its PO number — brings in supplier, branch, SKUs &amp; quantities">⬆ Import PO from Cin7</button>'
           +'<button class="save-btn" id="po-merge" style="'+lb+'" title="merge one PO&rsquo;s SKUs &amp; quantities into another, then delete the merged-from PO">⛙ Merge PO&rsquo;s</button>'
-          +'<button class="save-btn" id="po-csv" style="'+lb+'">⬇ CSV for Fulfil</button>'
+          +'<button class="save-btn" id="po-csv" style="'+lb+'">⬇ Export CSV</button>'
           +'<button class="save-btn" id="po-cin7-dates" style="'+lb+'" title="push the planner completion date to Cin7 EstimatedDeliveryDate for every ACTIVE PO whose date differs from Cin7 — complete POs are skipped (live write)">📅 Sync Cin7 dates</button>'
           +'</div>'; })()
       +'<div class="bar" id="po-ctry">'
@@ -3939,9 +3943,9 @@
     // which overrides the status filter.
     // Grouped status options shared with the PURCHASE ORDERS grid (Production / Shipping / Future). COMPLETE is
     // intentionally left off — an all-SKUs pivot over 1000+ complete POs would explode; complete POs surface via a PO search.
-    var OP_ST=STATUS_PILLS.filter(function(g){ return g[0]!=='complete' && lines.some(function(l){return stGroup(l.status)===g[0];}); });
+    var OP_ST=STATUS_PILLS.filter(function(g){ return lines.some(function(l){return stGroup(l.status)===g[0];}); });   // include Complete (PO-column cap OP_POCAP bounds the pivot so it can't explode)
     var OP_ST_KEYS=OP_ST.map(function(g){return g[0];});
-    function opStatusPills(setv){ return OP_ST.map(function(g){return '<span class="pill'+(setv.has(g[0])?' active':'')+'" data-v="'+g[0]+'">'+esc(g[1])+'</span>';}).join('')+'<span class="pill" data-all="1">All</span>'; }
+    function opStatusPills(setv){ return OP_ST.map(function(g){return '<span class="pill'+(setv.has(g[0])?' active':'')+'" data-v="'+g[0]+'">'+esc(g[1])+'</span>';}).join(''); }   // no "All" pill — none-selected already means all (see curLines)
     var cats=Array.from(new Set(skuMaster.map(function(s){return s.category;}).concat(lines.map(function(l){return l.category;})).filter(Boolean))).sort();
     var rws=Array.from(new Set(skuMaster.map(function(s){return s.release_window;}).filter(Boolean))).sort();
     var skuCat={},skuRW={},skuAttr={}; skuMaster.forEach(function(s){skuCat[s.sku]=s.category;skuRW[s.sku]=s.release_window;
@@ -4016,7 +4020,7 @@
       else if(poqOn){ if(!pt.length)return false;   // typed a PO search but under 3 chars → no results (don't fall back to showing everything)
         if(!pt.some(function(t){return nrm(l.po).indexOf(t)>=0;}))return false; }
       else if(st.partials||st.erpdiff||st.suprisk||st.disc||st.notmkt){ if(!(allC||st.countries.has(l.country)))return false; }   // an action-item risk pill spans ALL active statuses (its count is computed across statuses too) — otherwise the count and the view disagree
-      else { if(!st.statuses.has(stGroup(l.status)))return false; if(!(allC||st.countries.has(l.country)))return false; }
+      else { if(st.statuses.size && !st.statuses.has(stGroup(l.status)))return false; if(!(allC||st.countries.has(l.country)))return false; }   // empty status set = all statuses
       // A PO text search (poqOn) OVERRIDES the action-item pills — you asked to see that exact PO regardless of
       // which risk pill happens to be active, so the pill restrictions below are skipped while searching a PO.
       return (st.prod==='All'||l.prod_no===st.prod)&&(st.batch==='All'||l.batch_id===st.batch)&&(st.supplier==='All'||l.supplier_name===st.supplier)&&(skipCat||st.cat==='All'||l.category===st.cat)&&(st.rw==='All'||skuRW[l.sku]===st.rw)&&(poqOn||((!st.partials||isUnapprovedPartial(l)||_opStay.partial.has(opKey(l)))&&(!st.erpdiff||erpDiff(l))&&(!st.suprisk||lineSupRisk(l)||_opStay.supplier.has(opKey(l)))&&(!st.disc||lineDisc(l)||_opStay.discontinue.has(opKey(l)))&&(!st.notmkt||lineCountryRisk(l)||_opStay.country.has(opKey(l)))))&&qMatch(l.sku); }); }
@@ -4055,7 +4059,7 @@
           mo.observe(ov,{attributes:true,attributeFilter:['class']}); } }; });
       var spa=document.querySelector('#op-grid .op-showall-pos'); if(spa)spa.onclick=function(){ _opShowAllPos=true; view(); }; }
     // PO column header → open that PO in PURCHASE ORDERS with its ORDER PLAN tab expanded
-    function bindPoLinks(){ document.querySelectorAll('#op-grid .op-po-link').forEach(function(b){ b.onclick=function(){ gotoPO(b.dataset.po,'oplan'); }; }); }
+    function bindPoLinks(){ document.querySelectorAll('#op-grid .op-po-link').forEach(function(b){ b.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(b.dataset.po,'oplan'); else gotoPO(b.dataset.po,'oplan'); }; }); }   // PO header → right-side drawer (no page change)
     // inline confirm of a supplier change in a pivot cell (priority over partial-approve)
     function bindConfirm(){ document.querySelectorAll('#op-grid .opconfirm').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var ps=b.dataset.ps, po=ps.split('|')[0], sku=ps.slice(ps.indexOf('|')+1);
       fetch('/api/supply/po-line-accept',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,sku:sku})}).then(function(r){return r.json();})
@@ -4248,7 +4252,7 @@
   function pivot(rows, skuList, skuCat, plcMap, skuAttr, skuRW, showAllPos){ plcMap=plcMap||{}; skuAttr=skuAttr||{}; skuRW=skuRW||{}; var cn=document.getElementById('op-count');
     if(!skuList.length){ if(cn)cn.textContent='0 SKUs'; return '<div class="count">No SKUs for this filter (pick a Category for \"All in category\").</div>'; }
     var pos=[],psn={},cell={},meta={};
-    rows.forEach(function(l){ if(!psn[l.po]){psn[l.po]=1;pos.push(l.po);meta[l.po]={s:l.supplier_name,co:l.country,ps:l.prod_start,pe:l.prod_end,sd:l.ship_date,dl:l.delivery};}
+    rows.forEach(function(l){ if(!psn[l.po]){psn[l.po]=1;pos.push(l.po);meta[l.po]={s:l.supplier_name,co:l.country,ps:l.prod_start,pe:l.prod_end,sd:l.ship_date,dl:l.delivery,st:l.status,cl:l.client,so:l.sales_order_ref};}
       cell[l.po+'|'+l.sku]={q:l.qty,eq:(l.erp_qty==null?l.qty:l.erp_qty),c:Number(l.cost_price)||0,pq:Number(l.pallet_qty)||0,fcc:(l.full_carton_check||''),sra:!!l.supplier_risk_approved,dca:!!l.discontinue_approved,nm:!!l.not_avail_market,cra:!!l.country_risk_approved}; });
     pos.sort().reverse();   // purchase orders across the top, descending (newest first)
     var poTotal=pos.length, poCapped=(!showAllPos && poTotal>OP_POCAP);
@@ -4274,7 +4278,9 @@
       +'<th class="l" style="'+fzc('sup','#f3f3f1',5)+';'+fzh+'" title="allowed suppliers for the SKU (supplier_multiple_all)">Suppliers</th>'
       +'<th class="l" style="'+fzc('dis','#f3f3f1',5)+';'+fzh+'">Discontinue</th>';
     pos.forEach(function(po){var m=meta[po],ps=pstat[po];
-      h+='<th style="min-width:'+POW+';width:'+POW+'"><button class="lnk-btn op-po-link" data-po="'+esc(po)+'" title="open this PO’s order plan in PURCHASE ORDERS"><b style="font-size:12px">'+esc(po)+'</b></button><br><span class="tiny mut" style="'+sp+'">'+esc(m?m.s:'')+'</span>'
+      h+='<th style="min-width:'+POW+';width:'+POW+'"><button class="lnk-btn op-po-link" data-po="'+esc(po)+'" title="open '+esc(po)+' in a drawer"><b style="font-size:12px">'+esc(po)+'</b></button><br><span class="tiny mut" style="'+sp+'">'+esc(m?m.s:'')+'</span>'
+        +(m&&m.st?'<br><span class="tiny mut" style="'+sp+'">'+esc(m.st)+'</span>':'')
+        +(m&&(m.cl||m.so)?'<br><span class="tiny mut" style="'+sp+'">'+esc([m.cl,m.so].filter(Boolean).join(' · '))+'</span>':'')
         +'<br><span class="tiny mut" style="'+sp+'">'+(m&&m.ps?fd(m.ps):'?')+'→'+(m&&m.pe?fd(m.pe):'?')+'</span>'
         +'<br><span class="tiny mut" style="'+sp+'">'+(m&&m.sd?fd(m.sd):'—')+'</span>'
         +'<br><span class="tiny mut" style="'+sp+'">'+(m&&m.dl?fd(m.dl):'—')+'</span>'
@@ -8541,7 +8547,7 @@
         +'<td>'+(ws!=null?csym+fmInt(ws):'<span class="mut tiny">no price</span>')+'</td>'
         +'<td>'+(rev!=null?csym+fmInt(rev):'—')+'</td>'
         +'<td>'+(mar!=null?csym+fmInt(mar):'<span class="mut tiny">no cost</span>')+'</td>'
-        +'<td class="l"><span class="tool-badge '+cls+'">'+esc(rec)+'</span></td></tr>';
+        +'<td class="l" style="white-space:normal;min-width:150px;max-width:230px"><span class="tool-badge '+cls+'" style="white-space:normal;display:inline-block;line-height:1.25">'+esc(rec)+'</span></td></tr>';
     }).join('');
     // ---- order-level verdict: take it? stock impact? worth it after air cost? ----
     var net=tMar-tAir;
