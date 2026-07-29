@@ -7476,7 +7476,7 @@
           if(prog.cancelled()){ prog.done(); return; } var r=items[i++]; prog.tick(i,items.length);
           var swP = r.swatch_url ? fetchImgDataUri('/api/supply/img?url='+encodeURIComponent(r.swatch_url)) : Promise.resolve('');
           swP.then(function(sw){
-            var sups=opts.flat ? [''] : String(r.supplier_multiple||'').split(',').map(function(s){return s.trim();}).filter(Boolean); if(!sups.length)sups=['_no supplier'];
+            var sups=opts.flat ? [''] : (opts.onlySup ? [opts.onlySup] : String(r.supplier_multiple||'').split(',').map(function(s){return s.trim();}).filter(Boolean)); if(!sups.length)sups=['_no supplier'];   // onlySup: honour the supplier filter — don't fan a multi-supplier SKU out into other suppliers' folders
             var kp=kinds.filter(function(k){ return rowHasKind(r,k); }), ki=0;
             var a4=(opts.fmt==='a4');
             function nextKind(){ if(ki>=kp.length) return next(); var kind=kp[ki++];
@@ -7542,8 +7542,8 @@
     document.getElementById('bc-batch').onchange=function(){st.batch=this.value;apply();};
     document.getElementById('bc-rrp').onchange=function(){st.rrp=this.checked;apply();};
     document.getElementById('bc-dlfmt').onchange=function(){st.dlfmt=this.value;};
-    document.getElementById('bc-dlall-prod').onclick=function(){ var a4=st.dlfmt==='a4'; bcDownloadAll(cur, st.batch?batchBy[st.batch]:null, st.rrp, this, ['product'], a4?'product_barcodes_A4_by_supplier.zip':'product_barcodes_by_supplier.zip', {fmt:st.dlfmt}); };
-    document.getElementById('bc-dlall-cart').onclick=function(){ var a4=st.dlfmt==='a4'; bcDownloadAll(cur, st.batch?batchBy[st.batch]:null, st.rrp, this, ['carton','inner'], a4?'carton_inner_barcodes_A4_by_supplier.zip':'carton_inner_barcodes_by_supplier.zip', {fmt:st.dlfmt}); };
+    document.getElementById('bc-dlall-prod').onclick=function(){ var a4=st.dlfmt==='a4'; bcDownloadAll(cur, st.batch?batchBy[st.batch]:null, st.rrp, this, ['product'], a4?'product_barcodes_A4_by_supplier.zip':'product_barcodes_by_supplier.zip', {fmt:st.dlfmt, onlySup:st.sup!=='All'?st.sup:null}); };
+    document.getElementById('bc-dlall-cart').onclick=function(){ var a4=st.dlfmt==='a4'; bcDownloadAll(cur, st.batch?batchBy[st.batch]:null, st.rrp, this, ['carton','inner'], a4?'carton_inner_barcodes_A4_by_supplier.zip':'carton_inner_barcodes_by_supplier.zip', {fmt:st.dlfmt, onlySup:st.sup!=='All'?st.sup:null}); };
     document.getElementById('bc-mkt').onchange=function(){ st.rmkt=this.value; if(st.rrp)apply(); };
     // label download buttons (delegated — survives grid re-renders on filter)
     var bySku={}; rows.forEach(function(r){ bySku[r.sku]=r; });

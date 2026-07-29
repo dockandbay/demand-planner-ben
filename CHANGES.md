@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.282 - Barcode ZIP honours the supplier filter
+- When a supplier is selected in the Barcodes filter, the download-all ZIP now only contains **that supplier's** folder. Previously a multi-supplier SKU (e.g. allowed for Lixin *and* XR Textile) was fanned out into a folder per allowed supplier, so filtering to Lixin still produced XR Textile labels too. Now `onlySup` restricts the foldering to the chosen supplier. `supply/inject.html`.
+
 ## v26.281 - Barcode downloads: hover-to-cancel while rendering
 - While a barcode batch is rendering ("Rendering i/total…"), hovering the download button now shows a red **✕ Cancel**; clicking it aborts the render (the batch loop checks between items and stops — no file downloaded). Applies to all three batch downloads (all-in-view, portal A4 sheets, crossdock). New shared `bcProgress` helper. `supply/inject.html`.
 
