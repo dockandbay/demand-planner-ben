@@ -2238,6 +2238,28 @@ app.get('/api/supply/:section', async (req, res) => {
                  OR coalesce(o.pay_completion_assigned,0)<>0 OR coalesce(o.pay_balance_1_amount,0)<>0 OR coalesce(o.pay_balance_2_amount,0)<>0)
           ORDER BY o.supplier_name, o.prod_no, o.po`));
       }
+      case 'email-log': {   // CONFIG ▸ Email log (admin only) — every Resend send (migration 159). Default last 7 days; search overrides the date range.
+        const me = await permsFor(req);
+        if (me.live && !me.is_admin) return res.status(403).json({ error: 'admin only' });
+        const from = /^\d{4}-\d{2}-\d{2}$/.test(req.query.from || '') ? req.query.from : null;
+        const to = /^\d{4}-\d{2}-\d{2}$/.test(req.query.to || '') ? req.query.to : null;
+        const qs = String(req.query.q || '').trim();
+        const COLS = `id, resend_id, recipients, subject, kind, ref, status, coalesce(sent_by,'') sent_by, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at`;
+        const monthly = (await pool.query(`SELECT to_char(date_trunc('month',created_at),'YYYY-MM') month, count(*)::int n
+          FROM planner.email_log WHERE created_at >= (current_date - interval '12 months') GROUP BY 1 ORDER BY 1 DESC`).catch(() => ({ rows: [] }))).rows;
+        let rows;
+        if (qs) {   // search spans ALL dates (overrides from/to)
+          rows = (await pool.query(`SELECT ${COLS} FROM planner.email_log
+            WHERE recipients ILIKE '%'||$1||'%' OR subject ILIKE '%'||$1||'%' OR kind ILIKE '%'||$1||'%' OR coalesce(ref,'') ILIKE '%'||$1||'%' OR coalesce(sent_by,'') ILIKE '%'||$1||'%'
+            ORDER BY created_at DESC LIMIT 1000`, [qs]).catch(() => ({ rows: [] }))).rows;
+        } else {   // default last 7 days; from/to widen it
+          rows = (await pool.query(`SELECT ${COLS} FROM planner.email_log
+            WHERE created_at >= COALESCE($1::date, current_date - interval '7 days')
+              AND created_at < COALESCE($2::date + interval '1 day', current_date + interval '1 day')
+            ORDER BY created_at DESC LIMIT 1000`, [from, to]).catch(() => ({ rows: [] }))).rows;
+        }
+        return res.json({ rows, monthly, default_days: 7 });
+      }
       case 'actions': {  // derived exceptions (spec B3.2). Each carries an inline-fix descriptor
         // (fix/target/field) plus target_key — the key the fix endpoint addresses (po number, or
         // the deposit row id now that deposits are id-keyed). Lifecycle state (dismiss/snooze/done)
@@ -2992,7 +3014,9 @@ app.post('/api/supply/portal-remind', async (req, res) => {
     const r = await fetch('https://api.resend.com/emails', { method: 'POST',
       headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', to: emails, subject, html }) });
-    if (!r.ok) { const t = await r.text().catch(() => ''); return res.status(502).json({ error: 'email send failed: ' + t.slice(0, 200) }); }
+    if (!r.ok) { const t = await r.text().catch(() => ''); logEmail({ recipients: emails.join(', '), subject, kind: 'portal-remind', by: authUser(req), status: 'error', error: 'resend ' + r.status }); return res.status(502).json({ error: 'email send failed: ' + t.slice(0, 200) }); }
+    const _rid = await r.json().then(j => j && j.id).catch(() => null);
+    logEmail({ recipients: emails.join(', '), subject, kind: 'portal-remind', ref: b.supplier_name || null, by: authUser(req), status: 'sent', resend_id: _rid });
     res.json({ ok: true, sent: emails.length, emails });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -3040,22 +3064,35 @@ function escLink(kind, ref, audience) {
 // Shared Resend sender — the SAME best-effort method the supplier magic-link uses (sendMagicEmail):
 // swallow any failure and log it, NEVER throw. Email is best-effort; a Resend hiccup / unverified domain
 // must not fail the user's action (that's what made Escalate show "Load failed"). Returns a result object.
-async function sendResendEmail({ to, subject, html, cc }) {
+// Email log (migration 159): record every send so CONFIG ▸ Email log can show what went out. Defensive — a
+// missing table (pre-migration) or any insert error never blocks the actual email.
+async function logEmail(m) {
+  try {
+    await pool.query(`INSERT INTO planner.email_log (resend_id, recipients, subject, kind, ref, status, error, sent_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [m.resend_id || null, String(m.recipients || '').slice(0, 2000), String(m.subject || '').slice(0, 500),
+       m.kind || 'other', m.ref || null, m.status || 'sent', m.error ? String(m.error).slice(0, 500) : null, m.by || null]);
+  } catch (e) { /* table absent pre-migration 159, or insert failed — never block the send */ }
+}
+async function sendResendEmail({ to, subject, html, cc, kind, ref, by }) {
   const list = Array.isArray(to) ? to : [to];
   const cclist = cc ? (Array.isArray(cc) ? cc : [cc]).filter(Boolean) : [];
-  if (!process.env.RESEND_API_KEY) { console.log('[email] no RESEND_API_KEY — would email ' + list.join(', ') + (cclist.length ? ' (cc ' + cclist.join(', ') + ')' : '') + ' :: ' + subject); return { sandbox: true, sent: 0 }; }
+  const recipients = list.concat(cclist).filter(Boolean).join(', ');
+  if (!process.env.RESEND_API_KEY) { console.log('[email] no RESEND_API_KEY — would email ' + list.join(', ') + (cclist.length ? ' (cc ' + cclist.join(', ') + ')' : '') + ' :: ' + subject); logEmail({ recipients, subject, kind, ref, by, status: 'sandbox' }); return { sandbox: true, sent: 0 }; }
   try {
     const payload = { from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', to: list, subject, html };
     if (cclist.length) payload.cc = cclist;
     const resp = await fetch('https://api.resend.com/emails', { method: 'POST',
       headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify(payload) });
-    if (!resp.ok) { const t = await resp.text().catch(() => ''); console.error('[email] Resend error ' + resp.status + ': ' + t.slice(0, 200)); return { sent: 0, error: 'resend ' + resp.status }; }
+    if (!resp.ok) { const t = await resp.text().catch(() => ''); console.error('[email] Resend error ' + resp.status + ': ' + t.slice(0, 200)); logEmail({ recipients, subject, kind, ref, by, status: 'error', error: 'resend ' + resp.status }); return { sent: 0, error: 'resend ' + resp.status }; }
+    const rid = await resp.json().then(j => j && j.id).catch(() => null);
+    logEmail({ recipients, subject, kind, ref, by, status: 'sent', resend_id: rid });
     return { sent: list.length };
-  } catch (e) { console.error('[email] Resend failed:', e.message); return { sent: 0, error: e.message }; }
+  } catch (e) { console.error('[email] Resend failed:', e.message); logEmail({ recipients, subject, kind, ref, by, status: 'error', error: e.message }); return { sent: 0, error: e.message }; }
 }
 // Escalation email now goes through the shared best-effort sender (like the magic link) — never throws.
-async function escalateSend(r) { return sendResendEmail({ to: r.emails, subject: r.subject, html: r.html }); }
+async function escalateSend(r) { return sendResendEmail({ to: r.emails, subject: r.subject, html: r.html, kind: 'escalation', ref: r.ref }); }
 // A supplier submitting invoice / completion info should be VISIBLE, not silent: drop an UNREAD timeline note
 // on the PO (author_kind='supplier', read_at NULL → shows on the PO timeline + increments the ✉ unread badge).
 // Best-effort — never break the submit if the note fails.
@@ -3082,7 +3119,7 @@ async function emailInvoiceSubmit(po, value, by) {
   const html = '<p>A supplier submitted <b>invoice information</b> for <b>' + po + '</b>.</p>'
     + '<p>Invoice value: <b>' + value + '</b><br>Submitted by: ' + (by || 'supplier') + '</p>'
     + '<p><a href="' + link + '">Open ' + po + ' in HORIZON</a></p>';
-  return sendResendEmail({ to: emails, subject: 'Supplier submitted invoice info — ' + po, html });
+  return sendResendEmail({ to: emails, subject: 'Supplier submitted invoice info — ' + po, html, kind: 'invoice-notify', ref: po });
 }
 // Push email when a supplier submits a DOCUMENT for approval (same recipients as invoice submissions).
 async function emailDocSubmit(po, filename, by) {
@@ -3094,7 +3131,7 @@ async function emailDocSubmit(po, filename, by) {
   const html = '<p>A supplier submitted a <b>document for approval</b> on <b>' + po + '</b>.</p>'
     + '<p>Document: <b>' + (filename || 'document') + '</b><br>Submitted by: ' + (by || 'supplier') + '</p>'
     + '<p><a href="' + link + '">Review it on the PO ▸ Documents tab in HORIZON</a></p>';
-  return sendResendEmail({ to: emails, subject: 'Supplier submitted a document for approval — ' + po, html });
+  return sendResendEmail({ to: emails, subject: 'Supplier submitted a document for approval — ' + po, html, kind: 'invoice-notify', ref: po });
 }
 // ── Payment-confirmed notification ── a payment "run" (date + supplier) is confirmed once its bank amount +
 // currency are applied in the Payments Report. paymentRunDetail rebuilds that run's line detail (same source
@@ -3858,7 +3895,7 @@ app.post('/api/product/escalate', async (req, res) => {
     const link = PORTAL_URL + '#/product/' + encodeURIComponent(ref);
     const html = '<p><b>' + _eh(user) + '</b> escalated product <b>' + _eh(ref) + '</b>:</p><blockquote style="border-left:3px solid #cbd5e1;margin:0;padding:4px 12px;color:#334155;white-space:pre-wrap">' + _eh(message) + '</blockquote>'
       + '<p><a href="' + link + '">Open ' + _eh(ref) + ' &rarr;</a></p>';
-    const sent = await sendResendEmail({ to: emails, subject: 'horizon escalation - ' + ref, html });
+    const sent = await sendResendEmail({ to: emails, subject: 'horizon escalation - ' + ref, html, kind: 'escalation', ref: ref });
     res.json({ ok: true, sent: sent.sent || 0, emails, sandbox: !!sent.sandbox });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -4234,7 +4271,7 @@ app.post('/api/supply/portal-note', async (req, res) => {
             + '<p style="color:#94a3b8;font-size:12px">Internal note — not visible to the supplier. No reply needed here; respond on the PO timeline.</p></div>';
           const text = who + ' tagged you in an internal note on ' + b.po + ':\n\n' + body + '\n\nOpen ' + b.po + ' in HORIZON: ' + link
             + '\n\nInternal note — not visible to the supplier. No reply needed here; respond on the PO timeline.';
-          const r = await sendResendEmail({ to: send, subject, html });
+          const r = await sendResendEmail({ to: send, subject, html, kind: 'mention', ref: b.po, by: email });
           mailed = r && r.sandbox ? [] : send;
           if (r && r.sandbox) console.log('[mention] sandbox — would email ' + send.join(', '));
           preview = { to: send, subject, text, sent: !(r && r.sandbox), dropped };
@@ -7437,7 +7474,7 @@ const portalSuppliers = (email) => pool.query(
   [email]).then(r => r.rows);
 async function sendMagicEmail(email, url) {
   // Uses the shared best-effort Resend sender (same method escalation now uses).
-  await sendResendEmail({ to: email, subject: 'Your Dock & Bay supplier portal link',
+  await sendResendEmail({ kind: 'magic-link', ref: email, to: email, subject: 'Your Dock & Bay supplier portal link',
     html: `<p>Hi,</p><p>Here's your link to the Dock &amp; Bay supplier portal (valid 7 days):</p><p><a href="${url}">${url}</a></p><p>If you didn't request this, you can ignore this email.</p>` });
 }
 // ── DEMAND ▸ KPIs ▸ In Stock rate ────────────────────────────────────────────────────────────────────────
@@ -8399,7 +8436,9 @@ async function emailForecastCountry(country) {
       subject: 'Dock & Bay forecast — ' + co + ' (next 12 months)',
       html: '<p>Attached is the latest 12-month forecast for <b>' + co + '</b> (DTC / FBA / B2B by SKU).</p>',
       attachments: [{ filename: 'forecast_' + co + '_12mo.csv', content: Buffer.from(csv).toString('base64') }] }) });
-  if (!r.ok) return { country: co, ok: false, reason: 'Resend error ' + r.status + ': ' + (await r.text()).slice(0, 200) };
+  if (!r.ok) { const t = (await r.text()).slice(0, 200); logEmail({ recipients: email, subject: 'Dock & Bay forecast — ' + co + ' (next 12 months)', kind: 'report-export', ref: co, status: 'error', error: 'resend ' + r.status }); return { country: co, ok: false, reason: 'Resend error ' + r.status + ': ' + t }; }
+  const _rid = await r.json().then(j => j && j.id).catch(() => null);
+  logEmail({ recipients: email, subject: 'Dock & Bay forecast — ' + co + ' (next 12 months)', kind: 'report-export', ref: co, status: 'sent', resend_id: _rid });
   return { country: co, ok: true, sent_to: email, rows: rowCount };
 }
 app.post('/api/forecast/email/:country', async (req, res) => { try { res.json(await emailForecastCountry(req.params.country)); } catch (e) { res.status(500).json({ error: e.message }); } });

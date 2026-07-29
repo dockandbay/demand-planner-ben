@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.273 - CONFIG ▸ Email log (admin-only) ⚠️ NEEDS MIGRATION 159
+- New **CONFIG ▸ Email log** (admin-only): every email sent via Resend is logged as it goes out (mentions, escalations, magic links, portal reminders, report exports). Shows **sent-per-month** counts (last 12 months), a **date from/to** filter (**default last 7 days**), and a **search** box that spans all dates (overrides the date range).
+- **Migration `159_email_log.sql`** — new `planner.email_log` table. Logging is defensive (no table = no-op, never blocks a send). Captures sends **from deploy forward** (Resend has no list-all API for history).
+- `server.mjs`: `logEmail` + instrumented `sendResendEmail` (+ raw portal-remind / forecast-export sends), new admin-gated `GET /api/supply/email-log`. `supply/inject.html`: CONFIG panel.
+
+## v26.272 - Supplier portal (mobile): PO-grid first column → 36px
+## v26.271 - Supplier portal (mobile): PO-grid first column shrunk to fit M button + badge (override wider base rule)
+
 ## v26.270 - Supplier portal PO grid (mobile): production header without PO count
 - On mobile the production group header now shows just **"▾ P# 56"** instead of "▾ P# 56 — 33 PO's" (count hidden on ≤640px; desktop unchanged). `supply/portal-view.js`.
 

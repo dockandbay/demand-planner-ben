@@ -5481,9 +5481,9 @@
     var SC_LABEL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'Manufacturing BOM'};
     // Supply chain sits second (next to General settings); it expands to the level-3 members below / nested.
     var L2=[['general','General settings'],['supplychain','Supply chain'],['portalusers','Portal users'],['portal','Portal'],['keyaccounts','Key accounts'],['products','Products'],['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']];
-    if(ME&&ME.is_admin)L2.push(['permissions','Permissions']);   // admin-only tab
+    if(ME&&ME.is_admin){L2.push(['permissions','Permissions']);L2.push(['email-log','Email log']);}   // admin-only tabs
     if(CONFIG_SUB==='forecast-export')CONFIG_SUB='export-uploads';   // legacy slug redirect
-    if(CONFIG_SUB==='permissions'&&!(ME&&ME.is_admin))CONFIG_SUB='general';   // guard: non-admins can't land on Permissions
+    if((CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log')&&!(ME&&ME.is_admin))CONFIG_SUB='general';   // guard: non-admins can't land on admin-only tabs
     function reload(){ delete cache['config']; selectSection('config'); }   // refresh after a rate add (keeps sub-tab)
     // Generic Edit/Save row table: read-only cells + an Edit button per row; Edit swaps that row's cells to inputs
     // and shows Save/Cancel; Save POSTs all editable fields at once. cols: [{f,h,t:'text|num|select',ro,opts,w}].
@@ -6187,6 +6187,33 @@
             if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){ err.textContent='Enter a valid email.'; return; }
             save({email:em,supply_edit:document.getElementById('pm-nsupply').checked,demand_edit:document.getElementById('pm-ndemand').checked,product_edit:document.getElementById('pm-nproduct').checked,is_admin:document.getElementById('pm-nadmin').checked},function(j){ if(j&&j.error){ err.textContent=j.error; return; } showSub(); }); };
         }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); };
+      SUBS['email-log']=function(){
+        var st={from:'',to:'',q:''};
+        function elStatus(s){ var m={sent:['#dcfce7','#166534'],sandbox:['#e2e8f0','#475569'],error:['#fee2e2','#b91c1c']}; var c=m[s]||['#e2e8f0','#475569']; return '<span class="tool-badge" style="background:'+c[0]+';color:'+c[1]+'">'+esc(s||'')+'</span>'; }
+        b.innerHTML='<div class="annot"><b>CONFIG ▸ Email log.</b> Every email sent via Resend (mentions, escalations, magic links, reminders, report exports), logged as it goes out. Default shows the <b>last 7 days</b>; set a date range to widen, or search (search spans <b>all</b> dates). <span class="mut">Admin only. Captures sends from the deploy of this feature onward.</span></div>'
+          +'<div class="sect-h">Sent per month <span class="mut tiny">(last 12 months)</span></div><div id="el-months" style="display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 12px"></div>'
+          +'<div class="bar" style="gap:8px"><span class="pill-lbl">From</span><input class="flt" id="el-from" type="date" style="width:150px"><span class="pill-lbl">To</span><input class="flt" id="el-to" type="date" style="width:150px">'
+          +'<span class="pill-lbl" style="margin-left:6px">Search</span><input class="flt" id="el-q" placeholder="recipient / subject / kind / ref…" style="width:230px;background:#eff6ff;border-color:#93c5fd" title="searches all dates — overrides the date range">'
+          +'<button class="save-btn light" id="el-clear">Clear</button><span class="count" id="el-count" style="margin-left:6px"></span></div>'
+          +'<div id="el-results"><div class="count">Loading…</div></div>';
+        var fromEl=document.getElementById('el-from'), toEl=document.getElementById('el-to'), qEl=document.getElementById('el-q');
+        function draw(){
+          var qsp=[]; if(st.q)qsp.push('q='+encodeURIComponent(st.q)); else { if(st.from)qsp.push('from='+st.from); if(st.to)qsp.push('to='+st.to); }
+          fetch('/api/supply/email-log'+(qsp.length?'?'+qsp.join('&'):'')).then(function(r){return r.json();}).then(function(d){
+            if(d&&d.error){ document.getElementById('el-results').innerHTML='<div class="count" style="color:#dc2626">'+esc(d.error)+'</div>'; return; }
+            var rows=d.rows||[], monthly=d.monthly||[];
+            document.getElementById('el-months').innerHTML=monthly.length?monthly.map(function(m){return '<span class="tool-badge bg-neutral" style="font-weight:600">'+esc(m.month)+': '+m.n+'</span>';}).join(''):'<span class="mut tiny">No emails logged yet.</span>';
+            var cnt=document.getElementById('el-count'); if(cnt)cnt.textContent=rows.length+' email'+(rows.length===1?'':'s')+(st.q?' (search — all dates)':'')+(rows.length>=1000?' · capped at 1000':'');
+            var body=rows.map(function(r){ return '<tr><td class="l" style="white-space:nowrap">'+esc(r.created_at)+'</td><td class="l" style="max-width:280px;word-break:break-word">'+esc(r.recipients||'')+'</td><td class="l" style="max-width:320px">'+esc(r.subject||'')+'</td><td class="l">'+esc(r.kind||'')+'</td><td class="l">'+esc(r.ref||'')+'</td><td class="l">'+elStatus(r.status)+'</td><td class="l"><span class="mut tiny">'+esc(shortUser(r.sent_by||'')||'')+'</span></td></tr>'; }).join('');
+            document.getElementById('el-results').innerHTML='<div class="tw" style="max-width:1120px"><table><thead><tr><th class="l">Sent</th><th class="l">Recipients</th><th class="l">Subject</th><th class="l">Kind</th><th class="l">Ref</th><th class="l">Status</th><th class="l">By</th></tr></thead><tbody>'+(body||'<tr><td colspan="7" class="l mut">No emails in this range.</td></tr>')+'</tbody></table></div>';
+          }).catch(function(e){ document.getElementById('el-results').innerHTML='<div class="count" style="color:#dc2626">'+esc(String(e))+'</div>'; });
+        }
+        fromEl.onchange=function(){ st.from=this.value; st.q=''; if(qEl)qEl.value=''; draw(); };
+        toEl.onchange=function(){ st.to=this.value; st.q=''; if(qEl)qEl.value=''; draw(); };
+        qEl.oninput=debounce(function(){ st.q=qEl.value.trim(); draw(); },350);
+        document.getElementById('el-clear').onclick=function(){ st={from:'',to:'',q:''}; fromEl.value=''; toEl.value=''; qEl.value=''; draw(); };
+        draw();
+      };
       SUBS['portal']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/suppliers').then(function(r){return r.json();}).then(function(sups){
           var supById={}; sups.forEach(function(s){supById[s.name]=s.id;});
