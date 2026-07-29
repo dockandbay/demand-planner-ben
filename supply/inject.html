@@ -1470,7 +1470,7 @@
       +lookupDatalists()+'<div class="cli-form" style="max-width:560px">'
       +row('PO Number','<input class="fci pom-po" data-po="'+esc(po)+'" value="'+esc(po)+'" style="width:200px;text-align:left">')
       +row('Branch',cellPickBtn(po,ep,'branch',r.branch,'branch'))
-      +row('Ship to <span class="mut tiny">(blank = use branch country)</span>',countrySel(ep,r.country_override,true)+' <span class="mut tiny">'+(r.country_src==='M'?'override':'branch country')+'</span>')
+      +row('Ship to <span class="mut tiny">(blank = use branch country)</span>',countrySel(ep,r.country_override,true)+' <span class="mut tiny">'+(r.country_src==='M'?'override':(r.country?esc(String(r.country).toUpperCase())+' (inherited from branch)':'inherited from branch'))+'</span>')
       +row('Supplier',cellPickBtn(po,'/api/supply/po/'+encodeURIComponent(po)+'/supplier','supplier_name',r.supplier_name,'supplier'))
       +row('Production',cellPickBtn(po,ep,'prod_no',r.prod_no,'prod'))
       +row('Batch ID',cellPickBtn(po,ep,'batch_id',r.batch_id,'batch'))

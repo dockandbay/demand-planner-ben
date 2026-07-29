@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.255 - PO edit: "Ship to" shows inherited branch country
+- When a PO has no country override, the "Ship to" field now shows the actual inherited country (e.g. `AU (inherited from branch)`) instead of the generic "branch country" label, so it's clear which country will be used.
+
 ## v26.254 - Internal @-mention: preview the email on post (sandbox-testable)
 - Posting an internal note with @mentions now pops up a **preview of the exact email** the tagged teammate receives (subject, recipients, body). In sandbox it shows "composed but not sent" (no email key); on live it shows "✓ Sent to …". Also flags any @tag that isn't a known Dock & Bay user ("Ignored"). Lets the whole flow be tested in sandbox without a mail key.
 - `POST /api/supply/portal-note` now returns an `email` preview object alongside the post result.
