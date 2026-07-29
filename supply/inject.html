@@ -7542,8 +7542,11 @@
     document.getElementById('bc-batch').onchange=function(){st.batch=this.value;apply();};
     document.getElementById('bc-rrp').onchange=function(){st.rrp=this.checked;apply();};
     document.getElementById('bc-dlfmt').onchange=function(){st.dlfmt=this.value;};
-    document.getElementById('bc-dlall-prod').onclick=function(){ var a4=st.dlfmt==='a4'; bcDownloadAll(cur, st.batch?batchBy[st.batch]:null, st.rrp, this, ['product'], a4?'product_barcodes_A4_by_supplier.zip':'product_barcodes_by_supplier.zip', {fmt:st.dlfmt, onlySup:st.sup!=='All'?st.sup:null}); };
-    document.getElementById('bc-dlall-cart').onclick=function(){ var a4=st.dlfmt==='a4'; bcDownloadAll(cur, st.batch?batchBy[st.batch]:null, st.rrp, this, ['carton','inner'], a4?'carton_inner_barcodes_A4_by_supplier.zip':'carton_inner_barcodes_by_supplier.zip', {fmt:st.dlfmt, onlySup:st.sup!=='All'?st.sup:null}); };
+    // name the ZIP from the active filters: <base>[_A4]_by_<supplier|supplier><_batch | _P<prod>>.zip
+    function bcZipName(base){ var a4=st.dlfmt==='a4';
+      return base+(a4?'_A4':'')+(st.sup!=='All'?'_by_'+zipSafe(st.sup):'_by_supplier')+(st.batch?'_'+zipSafe(st.batch):(st.prod!=='All'?'_P'+zipSafe(st.prod):''))+'.zip'; }
+    document.getElementById('bc-dlall-prod').onclick=function(){ bcDownloadAll(cur, st.batch?batchBy[st.batch]:null, st.rrp, this, ['product'], bcZipName('product_barcodes'), {fmt:st.dlfmt, onlySup:st.sup!=='All'?st.sup:null}); };
+    document.getElementById('bc-dlall-cart').onclick=function(){ bcDownloadAll(cur, st.batch?batchBy[st.batch]:null, st.rrp, this, ['carton','inner'], bcZipName('carton_inner_barcodes'), {fmt:st.dlfmt, onlySup:st.sup!=='All'?st.sup:null}); };
     document.getElementById('bc-mkt').onchange=function(){ st.rmkt=this.value; if(st.rrp)apply(); };
     // label download buttons (delegated — survives grid re-renders on filter)
     var bySku={}; rows.forEach(function(r){ bySku[r.sku]=r; });

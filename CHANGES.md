@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.283 - Barcode ZIP filename reflects the filters
+- The download-all ZIP is now named from the active filters, e.g. `carton_inner_barcodes_A4_by_Lixin_57.0626.zip` (supplier + batch), falling back to `_P<prod>` when no batch, or `_by_supplier` when no supplier is selected. `supply/inject.html`.
+
 ## v26.282 - Barcode ZIP honours the supplier filter
 - When a supplier is selected in the Barcodes filter, the download-all ZIP now only contains **that supplier's** folder. Previously a multi-supplier SKU (e.g. allowed for Lixin *and* XR Textile) was fanned out into a folder per allowed supplier, so filtering to Lixin still produced XR Textile labels too. Now `onlySup` restricts the foldering to the chosen supplier. `supply/inject.html`.
 
