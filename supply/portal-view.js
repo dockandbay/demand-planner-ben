@@ -541,9 +541,9 @@
   #supply-root .pp-exp::before{content:"M"}
   #supply-root .pp-exp .ex-badge{min-width:13px;height:14px;line-height:14px;padding:0 3px;margin-left:2px;font-size:8px}   /* shrink the action-count badge on mobile */
   #supply-root table.pp-tbl thead th:first-child,
-  #supply-root table.pp-tbl tbody tr:not([id]) td:first-child{width:32px!important;min-width:32px!important;max-width:32px!important;overflow:visible;padding-left:2px!important;padding-right:2px!important}
+  #supply-root table.pp-tbl tbody tr:not([id]) td:first-child{width:36px!important;min-width:36px!important;max-width:36px!important;overflow:visible;padding-left:2px!important;padding-right:2px!important}
   #supply-root table.pp-tbl thead th:nth-child(2),
-  #supply-root table.pp-tbl tbody tr:not([id]) td:nth-child(2){left:32px;white-space:normal;word-break:break-all;max-width:12ch;min-width:0}
+  #supply-root table.pp-tbl tbody tr:not([id]) td:nth-child(2){left:36px;white-space:normal;word-break:break-all;max-width:12ch;min-width:0}
   /* PO-detail sub-menu (TIMELINE / ORDER PLAN / …): the detail renders inside a very wide table cell, so pin
      the strip to the viewport (sticky left:0 + width:100vw) and let it scroll sideways within that, instead of
      spanning the full table width. sticky top:0 keeps it visible while scrolling the panel. */
