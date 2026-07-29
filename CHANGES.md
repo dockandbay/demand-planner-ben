@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.281 - Barcode downloads: hover-to-cancel while rendering
+- While a barcode batch is rendering ("Rendering i/total…"), hovering the download button now shows a red **✕ Cancel**; clicking it aborts the render (the batch loop checks between items and stops — no file downloaded). Applies to all three batch downloads (all-in-view, portal A4 sheets, crossdock). New shared `bcProgress` helper. `supply/inject.html`.
+
 ## v26.280 - Fix persistent "open this PO's payment plan" hover tip
 - The fast-tip (`#po-note-tip`, from `bindFastTips` which promotes `title` → a custom tooltip) could stay stuck on screen when you clicked a PO ref and the drawer opened over the still-hovered element (no mouseout fired). Now any mousedown dismisses a lingering fast-tip. `supply/inject.html`.
 

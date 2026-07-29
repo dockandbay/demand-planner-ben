@@ -7395,18 +7395,34 @@
     var out=new Uint8Array(len),o=0; parts.forEach(function(u){ out.set(u,o); o+=u.length; }); return out; }
   function zipSafe(s){ return String(s||'').replace(/[\/\\:*?"<>|]/g,'_').trim()||'_'; }
   // crossdock labels: A4 4-up box label per crossdock SKU, PO# / sales-order# / client overlaid → ZIP of PDFs
+  // Render-progress + cancel: while a barcode batch renders, the button shows "Rendering i/total…"; hovering it shows
+  // a red "✕ Cancel" and clicking cancels (the batch loop checks .cancelled() between items and aborts — no download).
+  function bcProgress(btn){
+    if(!btn) return { tick:function(){}, cancelled:function(){return false;}, done:function(){} };
+    var orig=btn.dataset.bcOrig||btn.textContent; btn.dataset.bcOrig=orig;
+    var st={cancel:false,hover:false,last:orig};
+    function paint(){ if(st.cancel){ btn.textContent='Cancelling…'; return; } if(st.hover){ btn.textContent='✕ Cancel'; btn.style.background='#fee2e2'; btn.style.color='#b91c1c'; btn.style.borderColor='#fca5a5'; } else { btn.textContent=st.last; btn.style.background=''; btn.style.color=''; btn.style.borderColor=''; } }
+    var over=function(){ st.hover=true; paint(); }, out=function(){ st.hover=false; paint(); };
+    btn.addEventListener('mouseenter',over); btn.addEventListener('mouseleave',out);
+    var prevClick=btn.onclick; btn.onclick=function(e){ if(e){e.preventDefault();e.stopPropagation();} st.cancel=true; paint(); };
+    return {
+      tick:function(i,total){ st.last='Rendering '+i+'/'+total+'…'; if(!st.hover&&!st.cancel)btn.textContent=st.last; },
+      cancelled:function(){ return st.cancel; },
+      done:function(){ btn.removeEventListener('mouseenter',over); btn.removeEventListener('mouseleave',out); btn.onclick=prevClick; btn.style.background=''; btn.style.color=''; btn.style.borderColor=''; btn.textContent=orig; }
+    };
+  }
   function bcDownloadCrossdock(rows,po,dispatchOrder,client,address,btn,zipname){
     var items=rows.filter(function(r){ return r.carton_barcode||r.product_barcode||r.inner_barcode; });
     if(!items.length){ alert('No crossdock SKUs with a barcode on this PO'); return; }
-    var orig=btn?btn.textContent:''; if(btn)btn.disabled=true;
+    var prog=bcProgress(btn);
     Promise.all([fetchImgDataUri('/api/supply/asset/gotham-book'),fetchImgDataUri('/api/supply/asset/gotham-bold'),fetchImgDataUri('/api/supply/asset/db')]).then(function(a){
       var base={po:po,dispatchOrder:dispatchOrder,client:client,address:address,fontBook:a[0],fontBold:a[1],dbUri:a[2]};
       preloadFonts(base).then(function(){ var pages=[], i=0;
         function next(){ if(i>=items.length) return finish();
-          var r=items[i++]; if(btn)btn.textContent='Rendering '+i+'/'+items.length+'…';
+          if(prog.cancelled()){ prog.done(); return; } var r=items[i++]; prog.tick(i,items.length);
           rasterizeSVGCanvas(buildLabelSVG('crossdock',r,base),2.5,function(cv){ if(!cv)return next();
             cv.toBlob(function(jb){ if(!jb)return next(); jb.arrayBuffer().then(function(ab){ pages.push({jpeg:new Uint8Array(ab),imgW:cv.width,imgH:cv.height}); next(); }); },'image/jpeg',0.92); }); }
-        function finish(){ if(btn){btn.textContent=orig;btn.disabled=false;} if(!pages.length){alert('Nothing rendered');return;}
+        function finish(){ prog.done(); if(!pages.length){alert('Nothing rendered');return;}
           var name=String(zipname||'crossdock_labels').replace(/\.zip$/i,'')+'.pdf';   // one consolidated PDF (no zip)
           bcDownloadBlob(name,new Blob([pdfA4Multi(pages,MOLD_4)],{type:'application/pdf'})); }
         next();
@@ -7420,20 +7436,20 @@
     if(!items.length){ alert('No barcodes here'); return; }
     // batch + production date ride on the rows (server stamps them from ?batch / PO) → print on the label
     var _b=items[0]||{}; var batch=_b.batch?{batch:_b.batch, batch_date:_b.batch_date}:null;
-    var orig=btn?btn.textContent:''; if(btn)btn.disabled=true;
+    var prog=bcProgress(btn);
     var needCI = kinds.indexOf('carton')>=0 || kinds.indexOf('inner')>=0;
     var jobs=[fetchImgDataUri('/api/supply/asset/gotham-book'),fetchImgDataUri('/api/supply/asset/gotham-bold')];
     if(needCI){ jobs.push(fetchImgDataUri('/api/supply/asset/grs')); jobs.push(fetchImgDataUri('/api/supply/asset/db')); }
     Promise.all(jobs).then(function(a){ var base={fontBook:a[0],fontBold:a[1],batch:batch}; if(needCI){ base.grsUri=a[2]; base.dbUri=a[3]; }
       preloadFonts(base).then(function(){ var files=[], i=0;
         function next(){ if(i>=items.length) return finish();
-          var r=items[i++]; if(btn)btn.textContent='Rendering '+i+'/'+items.length+'…';
+          if(prog.cancelled()){ prog.done(); return; } var r=items[i++]; prog.tick(i,items.length);
           var swP=r.swatch_url?fetchImgDataUri('/api/supply/img?url='+encodeURIComponent(r.swatch_url)):Promise.resolve('');
           swP.then(function(sw){ var kp=kinds.filter(function(k){ return rowHasKind(r,k); }), ki=0;
             function nk(){ if(ki>=kp.length) return next(); var kind=kp[ki++]; var opts={}; for(var x in base)opts[x]=base[x]; opts.swatchUri=sw; var cells=kind==='product'?MOLD_36:MOLD_4;
               rasterizeSVGCanvas(buildLabelSVG(kind,r,opts),2.5,function(cv){ if(!cv)return nk(); cv.toBlob(function(jb){ if(!jb)return nk(); jb.arrayBuffer().then(function(ab){ files.push({name:kindPrefix(kind)+zipSafe(r.sku)+'_A4.pdf',data:pdfA4(new Uint8Array(ab),cv.width,cv.height,cells)}); nk(); }); },'image/jpeg',0.92); }); }
             nk(); }); }
-        function finish(){ if(btn){btn.textContent=orig;btn.disabled=false;} if(!files.length){alert('Nothing rendered');return;} bcDownloadBlob(zipname,new Blob([zipStore(files)],{type:'application/zip'})); }
+        function finish(){ prog.done(); if(!files.length){alert('Nothing rendered');return;} bcDownloadBlob(zipname,new Blob([zipStore(files)],{type:'application/zip'})); }
         next();
       });
     }); }
@@ -7448,7 +7464,7 @@
     var items=rows.filter(function(r){ return kinds.some(function(k){ return rowHasKind(r,k); }); });
     if(!items.length){ alert('No matching barcodes here'); return; }
     if(!opts.noWarn && !confirmNoBatch(batch))return;
-    var orig=btn?btn.textContent:''; if(btn){btn.disabled=true;}
+    var prog=bcProgress(btn);
     var needCI = kinds.indexOf('carton')>=0 || kinds.indexOf('inner')>=0;
     var folderSuffix = needCI ? ' - Cartons' : ' - Product';   // per-supplier folder inside the ZIP: "<supplier> - Cartons" / "<supplier> - Product"
     var jobs=[fetchImgDataUri('/api/supply/asset/gotham-book'),fetchImgDataUri('/api/supply/asset/gotham-bold')];
@@ -7457,7 +7473,7 @@
       var base={batch:batch,rrp:rrp,fontBook:a[0],fontBold:a[1]}; if(needCI){ base.grsUri=a[2]; base.dbUri=a[3]; }
       preloadFonts(base).then(function(){ var files=[], i=0;
         function next(){ if(i>=items.length) return finish();
-          var r=items[i++]; if(btn)btn.textContent='Rendering '+i+'/'+items.length+'…';
+          if(prog.cancelled()){ prog.done(); return; } var r=items[i++]; prog.tick(i,items.length);
           var swP = r.swatch_url ? fetchImgDataUri('/api/supply/img?url='+encodeURIComponent(r.swatch_url)) : Promise.resolve('');
           swP.then(function(sw){
             var sups=opts.flat ? [''] : String(r.supplier_multiple||'').split(',').map(function(s){return s.trim();}).filter(Boolean); if(!sups.length)sups=['_no supplier'];
@@ -7469,7 +7485,7 @@
             nextKind();
           });
         }
-        function finish(){ if(btn){btn.textContent=orig;btn.disabled=false;} if(!files.length){ alert('Nothing rendered'); return; }
+        function finish(){ prog.done(); if(!files.length){ alert('Nothing rendered'); return; }
           bcDownloadBlob(zipname, new Blob([zipStore(files)],{type:'application/zip'})); }
         next();
       });
