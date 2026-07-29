@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.262 - Order plan / invoice parse: Cancel-Reject supplier changes (not just Accept)
+- New **`POST /api/supply/po-line-reject`** (server.mjs): discards a supplier-submitted change without touching the order-plan line — added-SKU proposals are removed; qty/cost amendments are cleared and marked reviewed. Accepts `sku` (one line) or `all:true`.
+- **PO ▸ PLAN order plan**: each unconfirmed line now has **✕ Reject** beside Accept, and a **Reject all** beside "Accept all changes".
+- **ORDER PLAN grid**: the "supplier changes awaiting approval" banner now has **Reject all** beside Accept all.
+- **Invoice parse (PO ▸ Payments)**: after parsing, a **✕ Cancel** button beside Apply discards the parsed result (nothing applied to the order plan).
+
 ## v26.261 - Reallocate report: correct SKU/PO/supplier mapping + same-supplier only
 - Rebuilt `biReallocations` (server.mjs). Reallocations now group by **(production, supplier)** and only ever move qty between **POs of the same supplier**, so the supplier's total production is genuinely unchanged (previously donor/recipient could be different suppliers → not zero-sum).
 - The donor PO is now the specific PO **carrying the most of that SKU** in the surplus country (was: one arbitrary PO per country while quantities were summed across all of them → SKU/PO/supplier didn't belong together). Recipient PO prefers the one already carrying the SKU, else the country's representative PO.

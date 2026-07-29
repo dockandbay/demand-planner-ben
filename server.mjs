@@ -3255,6 +3255,23 @@ app.post('/api/supply/po-line-accept', async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// PO PLAN order plan: D&B REJECTS a supplier-submitted change — discard it WITHOUT touching the order-plan line.
+// Added-SKU proposals are removed outright; qty/cost amendments are cleared and marked reviewed (confirmed_at=now)
+// so they stop showing as pending. `all:true` rejects every unconfirmed change on the PO.
+app.post('/api/supply/po-line-reject', async (req, res) => {
+  const b = req.body || {};
+  if (!b.po) return res.status(400).json({ error: 'po required' });
+  if (!b.all && !b.sku) return res.status(400).json({ error: 'sku or all required' });
+  const scope = b.all
+    ? `po=$1 AND (actual_cost IS NOT NULL OR amended_qty IS NOT NULL OR is_added=true) AND (confirmed_at IS NULL OR confirmed_at < submitted_at)`
+    : `po=$1 AND sku=$2`;
+  const params = b.all ? [b.po] : [b.po, b.sku];
+  try {
+    await pool.query(`DELETE FROM planner.portal_line_costs WHERE ${scope} AND is_added=true`, params);
+    await pool.query(`UPDATE planner.portal_line_costs SET amended_qty=NULL, actual_cost=NULL, confirmed_at=now() WHERE ${scope}`, params);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // PO PLAN Timeline: mark a supplier note read / unread (toggle).
 // DEMAND ▸ Key Accounts Forecast inline editor — upsert a row (insert when no id, else update) direct to Supabase.
 app.post('/api/supply/ka-forecast', async (req, res) => {
