@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.277 - PAYMENTS ▸ Deposits: add/save/prod-change no longer bounce to Productions
+- Adding a deposit, changing a deposit's production number, and saving/deleting a deposit now refresh the **Deposits** view in place (stays under PAYMENTS) instead of navigating to Purchase Orders ▸ Productions. Leftover `selectSection('productions')` calls from when Deposits lived under Productions → now `showPoSub('deposits')`. `supply/inject.html`.
+
+## v26.276 - Cash Flow report: PO / shipment refs open the drawer
+- Cash Flow rows' PO and shipment references now open the right-side drawer (PO → Payments tab) instead of a full page navigation. `supply/inject.html`.
+
 ## v26.275 - Quality Control docs surface on PO ▸ Master Data & Docs
 - The PO Documents panel (under Master Data) now has a **Quality Control documents** section listing test reports / GRS certs **for that supplier shared across the PO's production or batch** (plus any mapped directly to the PO) — read-only with download; managed in SUPPLY ▸ Quality Control. `server.mjs` po-detail returns `quality_docs`; `supply/inject.html` renders the section. (Uses migration 160.)
 
