@@ -791,6 +791,24 @@
   // Render a note body, bolding any @handle that resolved to a tagged teammate (mentions = full emails).
   function noteBodyHtml(n){ var b=esc(n&&n.body||''); var hs=((n&&n.mentions)||[]).map(function(e){return String(e).split('@')[0].toLowerCase();});
     if(!hs.length)return b; return b.replace(/@([a-z0-9._-]+)/gi,function(m,h){ return hs.indexOf(h.toLowerCase())>=0?'<b style="color:#4f46e5">@'+esc(h)+'</b>':m; }); }
+  // Preview the mention email exactly as a tagged teammate receives it (used on post; on sandbox nothing is actually sent).
+  function showMentionEmail(p){ if(!p)return; var ex=document.getElementById('hz-mailprev'); if(ex)ex.remove();
+    var sentTxt=p.sent?('<span style="color:#166534">✓ Sent to '+p.to.map(function(e){return esc(shortUser(e));}).join(', ')+'</span>')
+      :('<span style="color:#b45309;font-weight:600">SANDBOX — composed but not sent.</span> On live this emails: '+ (p.to||[]).map(function(e){return esc(shortUser(e));}).join(', '));
+    var dropped=(p.dropped&&p.dropped.length)?'<div style="margin-top:8px;color:#b91c1c;font-size:12px">Ignored (not a Dock &amp; Bay user): '+p.dropped.map(function(e){return esc(e);}).join(', ')+'</div>':'';
+    var ov=document.createElement('div'); ov.id='hz-mailprev';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:100050;display:flex;align-items:center;justify-content:center;padding:16px';
+    ov.innerHTML='<div style="background:#fff;border-radius:10px;max-width:560px;width:100%;max-height:85vh;overflow:auto;box-shadow:0 20px 50px rgba(0,0,0,.3)">'
+      +'<div style="padding:12px 16px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center"><b style="font-size:14px">📧 Mention email preview</b><button id="hz-mailprev-x" class="save-btn light" style="padding:2px 10px">Close</button></div>'
+      +'<div style="padding:14px 16px;font-size:13px;line-height:1.6">'
+      +'<div style="margin-bottom:8px">'+sentTxt+'</div>'
+      +(p.subject?('<div style="margin-bottom:6px"><span class="mut tiny">TO</span> '+ (p.to||[]).map(function(e){return esc(e);}).join(', ')+'</div>'
+      +'<div style="margin-bottom:10px"><span class="mut tiny">SUBJECT</span> <b>'+esc(p.subject)+'</b></div>'
+      +'<div style="white-space:pre-wrap;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px 12px;color:#334155">'+esc(p.text)+'</div>'):'')
+      +dropped+'</div></div>';
+    document.body.appendChild(ov);
+    function close(){ ov.remove(); } ov.querySelector('#hz-mailprev-x').onclick=close;
+    ov.onclick=function(e){ if(e.target===ov)close(); }; }
   // grid date cell: subtle inline-editable for open POs (bound to the same field the DATES sub-tab edits),
   // read-only text for completed ones. Shows the effective date; editing End sets a manual override.
   function gDate(r,field,dispIso,src,hot){
@@ -3684,7 +3702,7 @@
       b.disabled=true;
       fetch('/api/supply/portal-note',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:b.dataset.po,body:v,author_kind:'internal',private:true,mentions:mentions,author_email:(ME&&ME.email)||'Dock & Bay'})}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error);
-          if(mentions.length && !((j.mailed||[]).length)) alert('Internal note saved and tagged '+mentions.map(function(e){return shortUser(e).replace(/@$/,'');}).join(', ')+'. (No email key in sandbox — the email sends on live.)');
+          if(j&&j.email) showMentionEmail(j.email);   // preview exactly what the tagged teammate receives (sandbox: composed, not sent)
           poRefetchPanel(po,i); })
         .catch(function(e){ b.disabled=false; alert('Could not post: '+(e.message||e)); }); }; });
     document.querySelectorAll('#podet-'+i+' .note-read').forEach(function(b){ b.onclick=function(){ var read=b.dataset.read!=='1'; b.disabled=true;

@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.254 - Internal @-mention: preview the email on post (sandbox-testable)
+- Posting an internal note with @mentions now pops up a **preview of the exact email** the tagged teammate receives (subject, recipients, body). In sandbox it shows "composed but not sent" (no email key); on live it shows "✓ Sent to …". Also flags any @tag that isn't a known Dock & Bay user ("Ignored"). Lets the whole flow be tested in sandbox without a mail key.
+- `POST /api/supply/portal-note` now returns an `email` preview object alongside the post result.
+
 ## v26.253 - PO timeline: internal @-mention notes (team-only, email the tagged teammate)
 - New **🔒 Internal note** composer on the PO timeline (admin only). Posts a note that is **hidden from the supplier** — private notes are filtered out server-side in every supplier-portal data path, so they never reach the supplier's browser (previously *all* "internal" notes were shown to suppliers as "Dock & Bay").
 - Type **@** to tag a Dock & Bay teammate — a picker resolves against `app_permissions` (supply/admin users). If it doesn't resolve it stays plain text. Display is the short handle (@ben), never the full email.

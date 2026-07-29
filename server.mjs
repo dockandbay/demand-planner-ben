@@ -4145,26 +4145,35 @@ app.post('/api/supply/portal-note', async (req, res) => {
     await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body, private, mentions) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
       [b.po, sid, email, kind, body, priv, mentions.length ? mentions : null]);
     // Notify tagged teammates — one email each, immediately. Best-effort; never breaks the post.
-    let mailed = [];
+    // `email` is returned so the UI can preview exactly what the teammate receives (essential for sandbox testing,
+    // where no key means nothing is actually sent). `sandbox=true` → composed but not delivered.
+    let mailed = [], preview = null;
     if (mentions.length) {
       try {
         const valid = (await pool.query(`SELECT lower(email) email FROM planner.app_permissions WHERE lower(email) = ANY($1)`, [mentions])).rows.map(r => r.email);
         const send = mentions.filter(m => valid.includes(m));
+        const dropped = mentions.filter(m => !valid.includes(m));   // tagged but not a known D&B user
         if (send.length) {
           const who = email ? String(email).replace(/@dockandbay\.com$/i, '@') : 'A teammate';
+          const link = PLANNER_URL + '/#/supply/purchase-orders';
           const subject = who + ' tagged you on ' + b.po;
           const html = '<div style="font:14px/1.6 system-ui,-apple-system,sans-serif;color:#1a1a1a">'
             + '<p><b>' + escHtml(who) + '</b> tagged you in an internal note on <b>' + escHtml(b.po) + '</b>:</p>'
             + '<blockquote style="margin:10px 0;padding:8px 12px;border-left:3px solid #6366f1;background:#f5f3ff;color:#334155">' + escHtml(body) + '</blockquote>'
-            + '<p style="margin-top:14px"><a href="' + PLANNER_URL + '/#/supply/purchase-orders" style="color:#4f46e5">Open ' + escHtml(b.po) + ' in HORIZON &rarr;</a></p>'
+            + '<p style="margin-top:14px"><a href="' + link + '" style="color:#4f46e5">Open ' + escHtml(b.po) + ' in HORIZON &rarr;</a></p>'
             + '<p style="color:#94a3b8;font-size:12px">Internal note — not visible to the supplier. No reply needed here; respond on the PO timeline.</p></div>';
+          const text = who + ' tagged you in an internal note on ' + b.po + ':\n\n' + body + '\n\nOpen ' + b.po + ' in HORIZON: ' + link
+            + '\n\nInternal note — not visible to the supplier. No reply needed here; respond on the PO timeline.';
           const r = await sendResendEmail({ to: send, subject, html });
           mailed = r && r.sandbox ? [] : send;
           if (r && r.sandbox) console.log('[mention] sandbox — would email ' + send.join(', '));
+          preview = { to: send, subject, text, sent: !(r && r.sandbox), dropped };
+        } else if (dropped.length) {
+          preview = { to: [], subject: '', text: '', sent: false, dropped };
         }
       } catch (e) { console.error('[mention] email failed:', e.message); }
     }
-    res.json({ ok: true, mentions, mailed });
+    res.json({ ok: true, mentions, mailed, email: preview });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/portal-upload', async (req, res) => {
