@@ -6604,7 +6604,7 @@
         +'<tbody>'+(rows||'<tr><td colspan="10" class="l mut">No payments match.</td></tr>')+'</tbody>'
         +'<tfoot><tr class="batchrow"><td class="l" colspan="6"><b>TOTAL</b></td><td style="text-align:right"><b>$'+units(gT)+'</b></td><td colspan="3"></td></tr></tfoot></table></div>';
       // reference → open the PO (PLAN expanded) or the shipment (detail expanded) for payment review
-      document.querySelectorAll('#cf-body .cf-ref').forEach(function(b){ b.onclick=function(){ var g=b.dataset.go; if(g==='ship')gotoShipment(b.dataset.k); else if(g==='dep')gotoDeposit(b.dataset.k); else if(g==='other')gotoOther(); else gotoPO(b.dataset.k); }; });
+      document.querySelectorAll('#cf-body .cf-ref').forEach(function(b){ b.onclick=function(){ var g=b.dataset.go; if(g==='ship'){ if(typeof openShipDrawer==='function')openShipDrawer(b.dataset.k); else gotoShipment(b.dataset.k); } else if(g==='dep')gotoDeposit(b.dataset.k); else if(g==='other')gotoOther(); else { if(typeof openPODrawer==='function')openPODrawer(b.dataset.k,'pay'); else gotoPO(b.dataset.k); } }; });   // PO/shipment refs → drawer
       // strip card → set month filter
       document.querySelectorAll('#cf-body .cf-strip').forEach(function(card){ card.onclick=function(){ _cfState.month=card.dataset.m; var sel=document.getElementById('cf-month'); if(sel)sel.value=card.dataset.m; draw(); }; });
       // likely-date saves
