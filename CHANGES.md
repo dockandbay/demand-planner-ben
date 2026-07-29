@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.279 - Cash Flow report: likely-pay-date calendar picker works
+- The likely-pay-date field on the Cash Flow report now has its 📅 calendar picker wired — `renderCashflow`'s `draw()` was missing the `bindDatePickers()` call, so picking a date did nothing (typing worked, calendar didn't). Also the post-save refresh uses `showPoSub('cashflow')` instead of `selectSection('cashflow')` so it stays in the PAYMENTS view. `supply/inject.html`.
+
 ## v26.278 - Main SUPPLY menu: Cmd/Ctrl-click opens a section in a new tab
 - The top SUPPLY menu tabs (Actions / BI & Reports / Purchase Orders / Order Plan / Payments / Samples / Quality Control) are now real anchors pointing at each section's deep-link (`#/supply/<section>`). Plain click behaves exactly as before (in-app section switch); **Cmd/Ctrl/Shift/Alt-click or middle-click opens that section in a new browser tab/window** (the router loads straight to it). `supply/inject.html`. (Drawer/feature refs deliberately unchanged.)
 
