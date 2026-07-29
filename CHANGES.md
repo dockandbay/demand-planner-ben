@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.280 - Fix persistent "open this PO's payment plan" hover tip
+- The fast-tip (`#po-note-tip`, from `bindFastTips` which promotes `title` → a custom tooltip) could stay stuck on screen when you clicked a PO ref and the drawer opened over the still-hovered element (no mouseout fired). Now any mousedown dismisses a lingering fast-tip. `supply/inject.html`.
+
 ## v26.279 - Cash Flow report: likely-pay-date calendar picker works
 - The likely-pay-date field on the Cash Flow report now has its 📅 calendar picker wired — `renderCashflow`'s `draw()` was missing the `bindDatePickers()` call, so picking a date did nothing (typing worked, calendar didn't). Also the post-save refresh uses `showPoSub('cashflow')` instead of `selectSection('cashflow')` so it stays in the PAYMENTS view. `supply/inject.html`.
 

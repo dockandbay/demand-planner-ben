@@ -2850,6 +2850,7 @@
     var r=el.getBoundingClientRect(), w=_noteTip.offsetWidth||200;
     _noteTip.style.left=Math.max(6,Math.min(r.left, window.innerWidth-w-8))+'px'; _noteTip.style.top=(r.bottom+5)+'px'; }
   function hideNoteTip(){ if(_noteTip)_noteTip.style.display='none'; }
+  try{ document.addEventListener('mousedown', function(){ hideNoteTip(); }, true); }catch(e){}   // any click dismisses a lingering fast-tip (fixes the tip persisting when a drawer opens over the hovered ref)
   // Fast tooltips for a whole container: intercept any element's native `title` (slow ~1s) on first hover,
   // move it to data-note, and show the shared 120ms noteTip instead. Delegated → covers re-rendered content.
   function bindFastTips(root){ if(!root||root._ftips)return; root._ftips=1; var t;
