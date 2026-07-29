@@ -3849,7 +3849,12 @@
     }).join(''):'<tr><td colspan="7" class="count">No documents held for this PO yet.</td></tr>';
     return '<div class="sect-h">Documents <span class="mut tiny">(every file held for this PO — invoices, supplier uploads, client/FBA docs; approve supplier submissions here)</span></div>'
       +'<div class="tw" style="max-width:980px"><table><thead><tr><th class="l">File</th><th class="l">Type</th><th class="l">Uploaded</th><th class="l">By</th><th class="l">Size</th><th class="l">Approval</th><th class="l">Actions</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
-      +'<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><label class="tiny">Upload a document<br><input type="file" class="podoc-file" data-po="'+esc(po)+'" style="font-size:11px"></label><button class="save-btn podoc-up" data-po="'+esc(po)+'">⬆ Upload</button></div>'; }
+      +'<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><label class="tiny">Upload a document<br><input type="file" class="podoc-file" data-po="'+esc(po)+'" style="font-size:11px"></label><button class="save-btn podoc-up" data-po="'+esc(po)+'">⬆ Upload</button></div>'
+      +(function(){ var qd=(d&&d.quality_docs)||[];
+        var qcRows=qd.length?qd.map(function(x){ var map=[x.po?('PO '+x.po):'',x.prod_no?('P'+x.prod_no):'',x.batch_id?('batch '+x.batch_id):''].filter(Boolean).join(' · ');
+          return '<tr><td class="l">'+esc(x.doc_type||'')+'</td><td class="l"><a href="/api/supply/quality-doc/'+x.id+'" target="_blank" rel="noopener">'+esc(x.filename||'file')+'</a></td><td class="l mut tiny">'+esc(map)+'</td><td class="l mut tiny" style="white-space:nowrap">'+esc(x.created_at||'')+(x.uploader_kind==='supplier'?' · supplier':'')+'</td></tr>'; }).join(''):'<tr><td colspan="4" class="mut tiny">No quality-control documents for this PO / production / batch yet.</td></tr>';
+        return '<div class="sect-h" style="margin-top:20px">Quality Control documents <span class="mut tiny">— test reports / GRS certificates for this supplier, shared across this PO&rsquo;s production or batch (upload &amp; manage in SUPPLY ▸ Quality Control)</span></div>'
+          +'<div class="tw" style="max-width:820px"><table><thead><tr><th class="l">Type</th><th class="l">File</th><th class="l">Applies to</th><th class="l">Uploaded</th></tr></thead><tbody>'+qcRows+'</tbody></table></div>'; })(); }
   function poDetailHTML(po,d,i){
     var p=payPanel(poBy[po],d);
     if(!p||typeof p==='string') return '<div class="count">No PO data.</div>';

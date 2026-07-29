@@ -6044,8 +6044,17 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
     // Record-of-change audit trail (migration 158) — shown inline in the timeline, newest first. Defensive: empty if the table isn't there yet.
     const changes = await pool.query(`SELECT event, detail, coalesce(changed_by,'') changed_by,
       to_char(changed_at,'YYYY-MM-DD HH24:MI') created_at FROM planner.po_change_log WHERE po=$1 ORDER BY changed_at DESC LIMIT 200`, [po]).catch(() => ({ rows: [] }));
+    // Quality-control docs shared across this PO's production / batch (same supplier), + any mapped directly to the PO. Migration 160.
+    const qdocs = await pool.query(`SELECT qd.id, qd.doc_type, qd.filename, coalesce(qd.prod_no,'') prod_no, coalesce(qd.batch_id,'') batch_id,
+        coalesce(qd.po,'') po, coalesce(qd.uploader_kind,'') uploader_kind, to_char(qd.created_at,'YYYY-MM-DD HH24:MI') created_at
+      FROM planner.quality_docs qd JOIN planner.purchase_orders o ON o.po=$1
+      WHERE (qd.po=o.po
+             OR (coalesce(qd.prod_no,'')<>'' AND qd.prod_no=coalesce(o.prod_no,''))
+             OR (coalesce(qd.batch_id,'')<>'' AND qd.batch_id=coalesce(o.batch_id,'')))
+        AND (coalesce(qd.supplier_name,'')='' OR lower(qd.supplier_name)=lower(coalesce(o.supplier_name,'')))
+      ORDER BY qd.created_at DESC LIMIT 200`, [po]).catch(() => ({ rows: [] }));
     res.json({ ship, lines: lines.rows, deposit: deposit.rows, payments: payments.rows, flexport: flexport.rows, dtc,
-      changes: changes.rows,
+      changes: changes.rows, quality_docs: qdocs.rows,
       crossdock_lines: xdMaster.rows,
       sup_invoice: supInv.rows[0] || null,
       sup_docs: supDocs.rows.filter(x => x.category !== 'client'),

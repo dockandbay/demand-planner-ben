@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.275 - Quality Control docs surface on PO ▸ Master Data & Docs
+- The PO Documents panel (under Master Data) now has a **Quality Control documents** section listing test reports / GRS certs **for that supplier shared across the PO's production or batch** (plus any mapped directly to the PO) — read-only with download; managed in SUPPLY ▸ Quality Control. `server.mjs` po-detail returns `quality_docs`; `supply/inject.html` renders the section. (Uses migration 160.)
+
 ## v26.274 - SUPPLY ▸ Quality Control (SUG-0001) ⚠️ NEEDS MIGRATION 160
 - New top-level **SUPPLY ▸ Quality Control**: manage product test reports, GRS transaction/scope certificates, inspection & compliance docs. Files stored **in the database** (bytea), uploaded by **D&B admin** (Quality Control tab) **and the supplier portal** (new **Quality Control** tab). Each doc maps flexibly to **production # / batch # / PO** (GRS certs usually map to a batch since they span POs).
 - Admin view: table of all docs (Type · File · PO · Supplier · PROD# · Batch · Uploaded), filter by type + search (spans all), download, delete. PO refs open the drawer.
