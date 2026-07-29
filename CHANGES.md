@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.269 - Supplier portal PO grid: expanded-PO rules + compact mobile "M"
+- Expanded PO now has a **darker horizontal rule top and bottom** (2px slate) bracketing the PO row + its detail panel, so an open PO reads as one block.
+- **Mobile**: reduced the padding on the "M" (MANAGE) button and tightened the first column (60→42px) so the PO reference column gets much more room. `supply/portal-view.js`.
+
 ## v26.268 - Scenario ▸ B2B: in-production stock analysis + proposed actions
 - New **"Fulfil from"** toggle on the B2B planner: **On-hand + inbound** / **In production** / **Mix** — controls which stock counts toward Fulfil / Shortfall.
 - Each SKU now shows its **in-production POs** (open Production-status POs carrying the SKU, **Direct-to-Client excluded**) with qty, branch and date; PO opens the drawer.

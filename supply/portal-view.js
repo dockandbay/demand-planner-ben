@@ -525,7 +525,8 @@
 /* Production sub-heading row spanning the portal PO grid. NOT position:sticky — a sticky <td> drops its
    background in Chrome (border-collapse), which left this banner white; a normal full-width row paints grey. */
 #supply-root table.pp-tbl tr.pp-grp td{background:#e5e7eb;color:#374151;font-weight:700;font-size:11px;padding:6px 10px;text-align:left;letter-spacing:.03em;text-transform:uppercase;border-top:2px solid #cbd5e1;border-bottom:1px solid #cbd5e1}
-#supply-root table.pp-tbl tr.pp-row.row-open>td{background:#FDFBD4!important}   /* expanded PO row highlight — matches the main supply grid */
+#supply-root table.pp-tbl tr.pp-row.row-open>td{background:#FDFBD4!important;border-top:2px solid #475569!important}   /* expanded PO row highlight + darker top rule */
+#supply-root table.pp-tbl tr[id^="pp-"]>td{border-bottom:2px solid #475569}   /* expanded PO detail: darker bottom rule (detail row is display:none when collapsed, so only shows while open) */
 /* Mobile: turn the portal sub-menu (tab strip) into a full-width horizontally-scrollable row so all tabs
    stay reachable instead of wrapping/overlapping. */
 @media (max-width:640px){
@@ -535,12 +536,12 @@
   #supply-root #pp-tabs .rtab{flex:0 0 auto;padding:9px 13px;font-size:13px;white-space:nowrap;border-bottom-width:3px}
   /* compact MANAGE → "M", but keep the first column wide enough to show the action-count badge */
   #supply-root .pp-exp .mng-txt{display:none}
-  #supply-root .pp-exp{padding:4px 6px}
+  #supply-root .pp-exp{padding:1px 3px}   /* compact the "M" button so the first column is tight */
   #supply-root .pp-exp::before{content:"M"}
   #supply-root table.pp-tbl thead th:first-child,
-  #supply-root table.pp-tbl tbody tr:not([id]) td:first-child{width:60px;min-width:60px;max-width:60px;overflow:visible}
+  #supply-root table.pp-tbl tbody tr:not([id]) td:first-child{width:42px;min-width:42px;max-width:42px;overflow:visible;padding-left:3px;padding-right:3px}
   #supply-root table.pp-tbl thead th:nth-child(2),
-  #supply-root table.pp-tbl tbody tr:not([id]) td:nth-child(2){left:60px;white-space:normal;word-break:break-all;max-width:12ch;min-width:0}
+  #supply-root table.pp-tbl tbody tr:not([id]) td:nth-child(2){left:42px;white-space:normal;word-break:break-all;max-width:12ch;min-width:0}
   /* PO-detail sub-menu (TIMELINE / ORDER PLAN / …): the detail renders inside a very wide table cell, so pin
      the strip to the viewport (sticky left:0 + width:100vw) and let it scroll sideways within that, instead of
      spanning the full table width. sticky top:0 keeps it visible while scrolling the panel. */
