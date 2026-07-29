@@ -2103,6 +2103,11 @@
     root.querySelectorAll('.act-snz').forEach(function(x){ if(x._b)return; x._b=1; x.onclick=function(e){ e.stopPropagation();   // "wake" (data-d=0) restores an already-snoozed item
       if(x.dataset.kind==='samp'){ sampSnoozeSet(x.dataset.ref,x.dataset.code,0,function(){ if(_sampleReload)_sampleReload(); }); }
       else poSnoozeSet(x.dataset.po,x.dataset.code,parseInt(x.dataset.d,10),function(){ refreshActInPlace(x.dataset.po,x.dataset.code); }); }; }); }
+  // Filter persistence: remember a view's structured filters in localStorage with a SLIDING 1h TTL — every save
+  // stamps now(), so filters survive navigation / reload and only reset after ~1h of no use. Free-text search is
+  // deliberately NOT persisted (a sticky search that silently hides rows is a footgun).
+  function hzFilterSave(key,obj){ try{ localStorage.setItem('hzf.'+key, JSON.stringify({at:Date.now(), v:obj})); }catch(e){} }
+  function hzFilterLoad(key){ try{ var s=JSON.parse(localStorage.getItem('hzf.'+key)||'null'); if(s&&s.at&&(Date.now()-s.at)<3600000) return s.v; }catch(e){} return null; }
   var _poState=null;   // PURCHASE ORDERS filter state — persisted across edit-triggered reloads so the filter survives
   function poInner(rows,c){
     if(!_poActStateLoaded){ loadPoActState(function(){ try{view();}catch(e){} }); }   // snooze map → re-render once loaded
@@ -2118,7 +2123,8 @@
     var GRP=[['none','None'],['production','Production'],['shipment','Master shipment']];
     // persist filters across edit reloads; reset to a clean view only when navigating to a specific PO
     if(_pendingPO){ _poState={f:{production:1},q:_pendingPO,act:{},ctry:{},grp:'production',sup:'',prod:'',batch:'',branch:''}; }   // seed only the SEARCH with the PO # — a text search spans ALL statuses/recency (filt), so it finds even a years-old completed PO WITHOUT forcing the 'all' filter. (The old 'all' seed used to stick, so after such a search the grid showed unfiltered instead of defaulting back to In progress once the search was cleared.)
-    else if(!_poState){ _poState={f:{production:1},q:'',act:{},ctry:{},grp:'production',sup:'',prod:'',batch:'',branch:''}; }
+    else if(!_poState){ var _posv=hzFilterLoad('po'); _poState=(_posv&&typeof _posv==='object')?_posv:{f:{production:1},q:'',act:{},ctry:{},grp:'production',sup:'',prod:'',batch:'',branch:''};
+      _poState.q=''; _poState.f=_poState.f||{}; _poState.act=_poState.act||{}; _poState.ctry=_poState.ctry||{}; }   // restore persisted filters (sliding 1h TTL); never restore the free-text search
     if(_poState.prod==null)_poState.prod=''; if(_poState.batch==null)_poState.batch='';
     if(_poState.recent==null)_poState.recent=true;   // completed POs default to last 12 months only (perf)
     if(_poState.focus==null)_poState.focus=false;   // ⭐ Focus filter (starred + active only)
@@ -2201,7 +2207,8 @@
       if(state.batch && String(r.batch_id)!==state.batch)return false;
       return true; }); }
     // a text search overrides the status/action/country filters — search across ALL POs
-    function view(){ var q=effQ(state.q); var f=q ? filt(rows,q) : cur(); var fuzzy=false;
+    function view(){ try{hzFilterSave('po',Object.assign({},state,{q:''}));}catch(e){}   // persist filters (not the search)
+      var q=effQ(state.q); var f=q ? filt(rows,q) : cur(); var fuzzy=false;
       if(q && !f.length){ var ff=fuzzyFilt(rows,state.q); if(ff.length){ f=ff; fuzzy=true; } }   // nothing on the exact search → fuzzy fallback on the best token
       _poShowClient=!!(state.ctry&&state.ctry['OTHER']);   // OTHER pill (incl. Direct-to-Client) → reveal Client name + sales ref columns
       var shown=(_poShowAll||f.length<=PO_CAP)?f:f.slice(0,PO_CAP);
@@ -3974,6 +3981,12 @@
     lines.forEach(function(l){if(l.category)skuCat[l.sku]=l.category; if(l.release_window)skuRW[l.sku]=l.release_window;});
     var defS=OP_ST_KEYS.indexOf('production')>=0?['production']:OP_ST_KEYS.slice(0,1);   // default to Production (same as the PO grid)
     var st={statuses:new Set(defS),countries:new Set(),prod:'All',cat:'All',batch:'All',supplier:'All',q:'',poq:'',scope:'ordered',rw:'All',partials:false,erpdiff:false,suprisk:false,disc:false,notmkt:false,focus:false};   // countries: empty = all (like PURCHASE ORDERS)
+    if(!_pendingOP){ var _opsv=hzFilterLoad('oplan'); if(_opsv){ try{   // restore persisted filters (sliding 1h TTL) unless deep-linking a PO/exception; search boxes are not restored
+      if(Array.isArray(_opsv.statuses)) st.statuses=new Set(_opsv.statuses.filter(function(k){return OP_ST_KEYS.indexOf(k)>=0;}));
+      if(Array.isArray(_opsv.countries)) st.countries=new Set(_opsv.countries);
+      ['prod','cat','batch','supplier','scope','rw'].forEach(function(k){ if(_opsv[k]!=null)st[k]=_opsv[k]; });
+      ['partials','erpdiff','suprisk','disc','notmkt','focus'].forEach(function(k){ if(typeof _opsv[k]==='boolean')st[k]=_opsv[k]; });
+    }catch(e){} } }
     // action sets (exclude complete POs): unapproved partial cartons, and lines whose planned qty differs from the ERP
     // Once a PO has shipped/delivered/completed the plan is locked — no partials / supplier-risk to action.
     function poLocked(l){ return /complete|shipping|deliver/i.test(l.status||''); }
@@ -4069,7 +4082,8 @@
       var nn=document.getElementById('op-notmkt-n'); if(nn)nn.textContent=nc?('('+nc+')'):''; }
     var _opShowAllPos=false;
     function viewReset(){ _opShowAllPos=false; view(); }   // any filter/search change re-caps the PO columns
-    function view(){ var cl=curLines(); var poCl=curLines(true); document.getElementById('op-grid').innerHTML=pivot(poCl,rowsFor(cl),skuCat,plcMap,skuAttr,skuRW,_opShowAllPos); bindQty(); bindUploads(); bindApprove(); bindConfirm(); bindPoLinks(); bindOpTips(); updateActionCounts();
+    function view(){ try{hzFilterSave('oplan',{statuses:Array.from(st.statuses),countries:Array.from(st.countries),prod:st.prod,cat:st.cat,batch:st.batch,supplier:st.supplier,scope:st.scope,rw:st.rw,partials:st.partials,erpdiff:st.erpdiff,suprisk:st.suprisk,disc:st.disc,notmkt:st.notmkt,focus:st.focus});}catch(e){}   // persist filters (not the search boxes)
+      var cl=curLines(); var poCl=curLines(true); document.getElementById('op-grid').innerHTML=pivot(poCl,rowsFor(cl),skuCat,plcMap,skuAttr,skuRW,_opShowAllPos); bindQty(); bindUploads(); bindApprove(); bindConfirm(); bindPoLinks(); bindOpTips(); updateActionCounts();
       document.querySelectorAll('#op-grid .op-plan').forEach(function(b){ b.onclick=function(){ var sku=b.dataset.sku;
         if(!window.open_){ alert('Buy plan unavailable — reload the page.'); return; }
         if(window.ensureBuyPlanScaffold)window.ensureBuyPlanScaffold();   // build #buy-wrap/#ov lazily if BUY view never rendered
@@ -4896,6 +4910,7 @@
     recomputeShipNavCount();
     var FILTERS=[['planned','Planned'],['shipping','Shipping'],['completed','Completed'],['exceptions','Exceptions'],['escalated','Escalated'],['all','All']];
     var state={f:_pendingShip?'all':'planned',q:'',ctry:'',br:'',fob:'',recent:true,focus:false};   // default Planned; show all when navigating to a specific shipment
+    if(!_pendingShip){ var _shsv=hzFilterLoad('ships'); if(_shsv&&typeof _shsv==='object'){ try{ ['f','ctry','br','fob','focus','recent'].forEach(function(k){ if(_shsv[k]!=null)state[k]=_shsv[k]; }); }catch(e){} } }   // restore persisted filters (sliding 1h TTL); not the search
     var SHIP_CAP=250, _shipShowAll=false;   // cap rendered rows; "show all" reveals the rest
     var RECENT_CUT=(function(){var x=new Date();x.setMonth(x.getMonth()-12);return x.toISOString().slice(0,10);})();
     function shipRecentDate(s){ return s.arrival||s.landing||s.departure||''; }   // most-recent milestone for the 12m cut
@@ -4927,7 +4942,8 @@
       if(state.f==='all')return true; if(state.f==='escalated')return !!s.escalated; if(state.f==='exceptions')return shipIsExc(s); if(state.f==='completed')return complete;
       if(state.f==='shipping')return !complete && s.status==='Shipping';   // shipping = in transit
       return !complete && s.status!=='Shipping'; }); }   // planned (default) = active, not yet shipping
-    function view(){ var q=effQ(state.q); var f=filt(cur(),q);
+    function view(){ try{hzFilterSave('ships',{f:state.f,ctry:state.ctry,br:state.br,fob:state.fob,focus:state.focus,recent:state.recent});}catch(e){}   // persist filters (not the search)
+      var q=effQ(state.q); var f=filt(cur(),q);
       var shown=(_shipShowAll||f.length<=SHIP_CAP)?f:f.slice(0,SHIP_CAP);
       document.getElementById('sup-count').textContent=(shown.length<f.length?shown.length+' of ':'')+f.length+' / '+ships.length+' shipments';
       document.getElementById('sup-grid').innerHTML=shipTable(shown)
