@@ -1120,7 +1120,7 @@ app.get('/api/supply/label-data', async (req, res) => {
     } else return res.status(400).json({ error: 'po, prod or batch required' });
     const rows = (await pool.query(`
       SELECT sl.sku, sl.barcode_sku_name, sl.barcode_carton_name, sl.barcode_inner_name,
-        sl.size, coalesce(p.size_short, sl.size_short, '') size_short, sl.category, sl.carton_qty,
+        sl.size, coalesce(p.size_short, sl.size_short, '') size_short, sl.category, coalesce(nullif(p.carton_qty::text,''), sl.carton_qty::text) carton_qty,
         sl.product_barcode, sl.carton_barcode, sl.inner_barcode, sl.grs_material, coalesce(p.colour_swatch_url, sl.swatch_url) swatch_url, coalesce(p.size_long,'') size_long, coalesce((SELECT s.code FROM planner.suppliers s WHERE lower(s.name)=lower(p.main_supplier_final) LIMIT 1),'') supplier_code,
         sl.uk_carton_l, sl.uk_carton_w, sl.uk_carton_h, sl.uk_carton_wt,
         coalesce(p.supplier_multiple_all,'') supplier_multiple, p.uk_rt, p.us_rt, p.eu_rt, coalesce(p.product_name,'') product_name
@@ -2099,7 +2099,7 @@ app.get('/api/supply/:section', async (req, res) => {
             FROM planner.purchase_order_lines l JOIN planner.purchase_orders po ON po.po=l.po
             GROUP BY l.sku)
           SELECT sl.sku, sl.barcode_sku_name, sl.barcode_carton_name, sl.barcode_inner_name,
-            sl.size, coalesce(p.size_short, sl.size_short, '') size_short, sl.category, coalesce(sl.release_window,'') release_window, sl.carton_qty,
+            sl.size, coalesce(p.size_short, sl.size_short, '') size_short, sl.category, coalesce(sl.release_window,'') release_window, coalesce(nullif(p.carton_qty::text,''), sl.carton_qty::text) carton_qty,
             sl.product_barcode, sl.carton_barcode, sl.inner_barcode, sl.grs_material, coalesce(p.colour_swatch_url, sl.swatch_url) swatch_url, coalesce(p.size_long,'') size_long, coalesce((SELECT s.code FROM planner.suppliers s WHERE lower(s.name)=lower(p.main_supplier_final) LIMIT 1),'') supplier_code,
             sl.uk_carton_l, sl.uk_carton_w, sl.uk_carton_h, sl.uk_carton_wt,
             coalesce(sp.prod_nos,'') prod_nos, coalesce(sp.suppliers,'') suppliers,
@@ -8953,7 +8953,7 @@ app.get('/api/portal/label-data', portalAuth, async (req, res) => {
     if (!finalSkus.length) return res.json([]);
     const rows = (await pool.query(`
       SELECT sl.sku, sl.barcode_sku_name, sl.barcode_carton_name, sl.barcode_inner_name,
-        sl.size, coalesce(p.size_short, sl.size_short, '') size_short, sl.category, sl.carton_qty,
+        sl.size, coalesce(p.size_short, sl.size_short, '') size_short, sl.category, coalesce(nullif(p.carton_qty::text,''), sl.carton_qty::text) carton_qty,
         sl.product_barcode, sl.carton_barcode, sl.inner_barcode, sl.grs_material, coalesce(p.colour_swatch_url, sl.swatch_url) swatch_url, coalesce(p.size_long,'') size_long, coalesce((SELECT s.code FROM planner.suppliers s WHERE lower(s.name)=lower(p.main_supplier_final) LIMIT 1),'') supplier_code,
         sl.uk_carton_l, sl.uk_carton_w, sl.uk_carton_h, sl.uk_carton_wt,
         coalesce(p.supplier_multiple_all,'') supplier_multiple, p.uk_rt, p.us_rt, p.eu_rt, coalesce(p.product_name,'') product_name

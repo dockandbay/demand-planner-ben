@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.259 - Carton/inner barcode labels: quantity now from planner.products.carton_qty
+- The carton & inner barcode labels ("BOX OF N x …") now take the per-carton quantity from **`planner.products.carton_qty`** (the source of truth), falling back to `sku_labels.carton_qty` only when products is blank. Applied to all three label queries: admin `label-data`, the batch/label preview, and the supplier-portal label-data. `server.mjs`.
+
 ## v26.258 - Internal @-mention: keyboard + un-clip picker; mention email deep-links to timeline
 - **@-mention picker** (internal note): now keyboard-driven — **↑/↓** move the highlight, **Tab** applies the highlighted teammate, **Esc** closes (Enter stays a newline). Mouse still works.
 - Picker no longer gets **clipped by the timeline's scroll container**: rendered with `position:fixed` and placed **above** the textarea (over the table) when there's room, falling back to below.
