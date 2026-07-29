@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.261 - Reallocate report: correct SKU/PO/supplier mapping + same-supplier only
+- Rebuilt `biReallocations` (server.mjs). Reallocations now group by **(production, supplier)** and only ever move qty between **POs of the same supplier**, so the supplier's total production is genuinely unchanged (previously donor/recipient could be different suppliers → not zero-sum).
+- The donor PO is now the specific PO **carrying the most of that SKU** in the surplus country (was: one arbitrary PO per country while quantities were summed across all of them → SKU/PO/supplier didn't belong together). Recipient PO prefers the one already carrying the SKU, else the country's representative PO.
+- Verified in sandbox: 17 recs, all internally consistent, all same-supplier, no same-PO moves.
+
 ## v26.260 - Reallocate report: PO refs clickable (open drawer)
 - In the Reallocate report cards, the from/to PO references are now clickable and open the PO in the right-side drawer (Order Plan tab). `supply/inject.html`.
 - NOTE: the "SKU / PO / supplier not mapping" issue is a deeper algorithm bug (see deploy notes) — diagnosed, fix pending a design decision, not yet applied.

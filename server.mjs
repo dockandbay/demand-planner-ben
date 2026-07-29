@@ -7493,41 +7493,59 @@ async function biReallocations() {
   const pj = {}; proj.forEach(r => { pj[r.sku + '|' + r.country] = r; });
   const lines = (await pool.query(`
     SELECT p.prod_no, p.po, upper(coalesce(nullif(p.country_code,''), b.country_code, '')) country,
-           l.sku, l.qty::int qty, coalesce(p.supplier_name,'') supplier
+           l.sku, l.qty::int qty, lower(coalesce(p.supplier_name,'')) sup_key, coalesce(p.supplier_name,'') supplier
     FROM planner.purchase_orders p
     JOIN planner.purchase_order_lines l ON l.po=p.po
     LEFT JOIN planner.branches b ON b.name=p.branch
     WHERE coalesce(p.prod_no,'')<>'' AND (p.status ILIKE 'future%' OR p.status ILIKE 'production%') AND coalesce(l.qty,0)>0`)).rows;
-  const coPO = {}, qByCoSku = {};   // prod→country→{po,supplier} ; prod→sku→country→qty
-  lines.forEach(r => { if (!r.country) return;
-    (coPO[r.prod_no] = coPO[r.prod_no] || {})[r.country] = coPO[r.prod_no][r.country] || { po: r.po, supplier: r.supplier };
-    (((qByCoSku[r.prod_no] = qByCoSku[r.prod_no] || {})[r.sku] = qByCoSku[r.prod_no][r.sku] || {})[r.country] = (qByCoSku[r.prod_no][r.sku][r.country] || 0) + r.qty); });
+  // Group by (production, SUPPLIER): a reallocation only ever moves qty between POs of the SAME supplier, so the
+  // supplier's total production is genuinely unchanged. Within a group we track, per country, a representative PO
+  // (largest line) for receiving, and per (sku,country) the qty split across that supplier's POs — the donor is the
+  // specific PO carrying the most of that SKU, so the SKU/PO/supplier shown always belong together.
+  const grp = {};   // gk = prod|supKey → { prod, supplier, prim:{co:{po,q}}, skuCo:{ 'sku|co':{ total, byPo:{po:qty} } } }
+  for (const r of lines) { if (!r.country) continue;
+    const gk = r.prod_no + '|' + r.sup_key;
+    const g = grp[gk] || (grp[gk] = { prod: r.prod_no, supplier: r.supplier, prim: {}, skuCo: {} });
+    const pc = g.prim[r.country] || (g.prim[r.country] = { po: r.po, q: 0 });
+    if (r.qty > pc.q) pc.po = r.po;   // representative PO for the country = the one with the biggest single line
+    pc.q += r.qty;
+    const sk = r.sku + '|' + r.country;
+    const e = g.skuCo[sk] || (g.skuCo[sk] = { total: 0, byPo: {} });
+    e.total += r.qty; e.byPo[r.po] = (e.byPo[r.po] || 0) + r.qty; }
   const recs = [];
-  for (const prod of Object.keys(qByCoSku)) {
-    const cos = Object.keys(coPO[prod] || {});
-    for (const sku of Object.keys(qByCoSku[prod])) {
-      const qByCo = qByCoSku[prod][sku];
+  for (const gk of Object.keys(grp)) {
+    const g = grp[gk], cos = Object.keys(g.prim);
+    const skus = new Set(); Object.keys(g.skuCo).forEach(k => skus.add(k.slice(0, k.lastIndexOf('|'))));
+    for (const sku of skus) {
       const donors = [];
-      for (const co of cos) { const r = pj[sku + '|' + co], lq = qByCo[co] || 0;
-        if (!r || lq <= 0 || r.urgency !== 'surplus') continue;
+      for (const co of cos) { const e = g.skuCo[sku + '|' + co]; if (!e || e.total <= 0) continue;
+        const r = pj[sku + '|' + co]; if (!r || r.urgency !== 'surplus') continue;
         const avgM = r.demand_12m / 12;
-        const spare = Math.floor(avgM > 0 ? (r.on_hand + r.inbound) - (r.target_months || 3) * avgM : (r.on_hand + r.inbound));
-        if (spare > 0) donors.push({ co, po: coPO[prod][co].po, spare: Math.min(spare, lq), cover: r.cover_with_inbound, avgM, sup: coPO[prod][co].supplier }); }
+        const countrySpare = Math.floor(avgM > 0 ? (r.on_hand + r.inbound) - (r.target_months || 3) * avgM : (r.on_hand + r.inbound));
+        if (countrySpare <= 0) continue;
+        let po = null, lineQty = 0; for (const k of Object.keys(e.byPo)) if (e.byPo[k] > lineQty) { lineQty = e.byPo[k]; po = k; }   // donor PO carries the most of this SKU here
+        const spare = Math.min(countrySpare, lineQty); if (spare <= 0 || !po) continue;
+        donors.push({ co, po, spare, cover: r.cover_with_inbound, avgM }); }
       if (!donors.length) continue;
       donors.sort((a, b) => b.spare - a.spare);
       for (const co of cos) { const r = pj[sku + '|' + co];
         if (!r || (r.urgency !== 'critical' && r.urgency !== 'soon')) continue;
         const need = r.need_qty || 0; if (need <= 0) continue;
         const donor = donors.find(d => d.co !== co && d.spare > 0); if (!donor) continue;
+        // recipient PO (SAME supplier): prefer the PO already carrying this SKU in the short country, else the country's representative PO
+        const re = g.skuCo[sku + '|' + co]; let toPo = null;
+        if (re) { let mq = 0; for (const k of Object.keys(re.byPo)) if (re.byPo[k] > mq) { mq = re.byPo[k]; toPo = k; } }
+        if (!toPo) toPo = (g.prim[co] || {}).po;
+        if (!toPo || toPo === donor.po) continue;
         let move = Math.min(need, donor.spare); if (move <= 0) continue;
         // round to whole cartons, minimum 1 carton — capped by what the donor can spare (skip if <1 carton fits)
         const cq = r.carton_qty || 0;
         if (cq > 0) { let cartons = Math.max(1, Math.round(move / cq)); if (cartons * cq > donor.spare) cartons = Math.floor(donor.spare / cq); if (cartons < 1) continue; move = cartons * cq; }
         const avgR = r.demand_12m / 12, dr = pj[sku + '|' + donor.co];
         donor.spare -= move;
-        recs.push({ key: 'bi-realloc|' + sku + '|' + donor.po + '|' + coPO[prod][co].po,
-          prod_no: prod, sku, supplier: coPO[prod][co].supplier || donor.sup || '',
-          from_po: donor.po, from_country: donor.co, to_po: coPO[prod][co].po, to_country: co, qty: move,
+        recs.push({ key: 'bi-realloc|' + sku + '|' + donor.po + '|' + toPo,
+          prod_no: g.prod, sku, supplier: g.supplier,
+          from_po: donor.po, from_country: donor.co, to_po: toPo, to_country: co, qty: move,
           from_cover: donor.cover, from_cover_after: donor.avgM > 0 ? Math.round((((dr.on_hand + dr.inbound) - move) / donor.avgM) * 10) / 10 : null,
           to_cover: r.cover_with_inbound, to_cover_after: avgR > 0 ? Math.round(((r.on_hand + r.inbound + move) / avgR) * 10) / 10 : null,
           to_urgency: r.urgency, to_need: need }); }
