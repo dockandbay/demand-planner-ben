@@ -4163,7 +4163,7 @@ app.post('/api/supply/portal-note', async (req, res) => {
         const dropped = mentions.filter(m => !valid.includes(m));   // tagged but not a known D&B user
         if (send.length) {
           const who = email ? String(email).replace(/@dockandbay\.com$/i, '@') : 'A teammate';
-          const link = PLANNER_URL + '/#/supply/purchase-orders';
+          const link = PLANNER_URL + '/#/supply/purchase-orders/timeline/' + encodeURIComponent(b.po);   // deep-link straight to this PO's timeline
           const subject = who + ' tagged you on ' + b.po;
           const html = '<div style="font:14px/1.6 system-ui,-apple-system,sans-serif;color:#1a1a1a">'
             + '<p><b>' + escHtml(who) + '</b> tagged you in an internal note on <b>' + escHtml(b.po) + '</b>:</p>'

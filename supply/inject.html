@@ -3689,16 +3689,26 @@
     // Internal (team-only) note with @-mentions — hidden from the supplier; tagged teammates get an email.
     ensureTeam();
     document.querySelectorAll('#podet-'+i+' .po-int-body').forEach(function(ta){ var pop=ta.parentNode.querySelector('.po-int-pop');
-      function hide(){ if(pop)pop.style.display='none'; }
+      function hide(){ if(pop){ pop.style.display='none'; pop._opts=null; } }
+      // position:fixed → escapes the timeline's overflow clip; prefer ABOVE the textarea (over the table) so it's never cut off, falling back to below only when there's no room up top.
+      function place(){ if(!pop)return; var r=ta.getBoundingClientRect(); pop.style.position='fixed'; pop.style.zIndex='100000'; pop.style.left=r.left+'px'; pop.style.minWidth=Math.max(200,r.width)+'px'; pop.style.bottom=''; var ph=pop.offsetHeight||190;
+        pop.style.top=((r.top-ph-4)>=0 ? (r.top-ph-4) : (r.bottom+2))+'px'; }
+      function paint(){ pop.querySelectorAll('.po-int-opt').forEach(function(o,ix){ o.style.background=(ix===pop._sel)?'#eef2ff':'#fff'; }); }
+      function applyHandle(h){ var pos=ta.selectionStart, upto=ta.value.slice(0,pos); var before=upto.replace(/@([a-z0-9._-]*)$/i,'@'+h+' '); ta.value=before+ta.value.slice(pos); var np=before.length; ta.focus(); ta.setSelectionRange(np,np); hide(); }
       ta.addEventListener('input',function(){ if(!pop)return; var pos=ta.selectionStart, upto=ta.value.slice(0,pos), m=upto.match(/@([a-z0-9._-]*)$/i);
         if(!m){ hide(); return; } var q=m[1].toLowerCase();
         var ms=_team.filter(function(t){ return t.handle.indexOf(q)===0||t.email.indexOf(q)===0; }).slice(0,8);
         if(!ms.length){ hide(); return; }
+        pop._opts=ms; pop._sel=0;
         pop.innerHTML=ms.map(function(t){ return '<div class="po-int-opt" data-h="'+esc(t.handle)+'" style="padding:5px 10px;cursor:pointer;font-size:12px;white-space:nowrap">@'+esc(t.handle)+' <span class="mut tiny">'+esc(t.email)+'</span></div>'; }).join('');
-        pop.style.top=(ta.offsetTop+ta.offsetHeight+2)+'px'; pop.style.left=ta.offsetLeft+'px'; pop.style.display='block';
-        pop.querySelectorAll('.po-int-opt').forEach(function(o){ o.onmousedown=function(ev){ ev.preventDefault();
-          var before=upto.replace(/@([a-z0-9._-]*)$/i,'@'+o.dataset.h+' '); ta.value=before+ta.value.slice(pos);
-          var np=before.length; ta.focus(); ta.setSelectionRange(np,np); hide(); }; }); });
+        pop.style.display='block'; place(); paint();
+        pop.querySelectorAll('.po-int-opt').forEach(function(o,ix){ o.onmouseenter=function(){ pop._sel=ix; paint(); }; o.onmousedown=function(ev){ ev.preventDefault(); applyHandle(o.dataset.h); }; }); });
+      // keyboard: ↑/↓ move the highlight, Tab applies the highlighted teammate, Esc closes. (Enter stays a newline.)
+      ta.addEventListener('keydown',function(ev){ if(!pop||pop.style.display==='none'||!pop._opts)return;
+        if(ev.key==='ArrowDown'){ ev.preventDefault(); pop._sel=Math.min(pop._sel+1,pop._opts.length-1); paint(); }
+        else if(ev.key==='ArrowUp'){ ev.preventDefault(); pop._sel=Math.max(pop._sel-1,0); paint(); }
+        else if(ev.key==='Tab'){ ev.preventDefault(); var o=pop._opts[pop._sel]; if(o)applyHandle(o.handle); }
+        else if(ev.key==='Escape'){ hide(); } });
       ta.addEventListener('blur',function(){ setTimeout(hide,150); }); });
     document.querySelectorAll('#podet-'+i+' .po-int-post').forEach(function(b){ b.onclick=function(){ var ta=document.querySelector('#podet-'+i+' .po-int-body[data-po="'+CSS.escape(b.dataset.po)+'"]'); var v=(ta&&ta.value||'').trim(); if(!v)return;
       var handles=(v.match(/@([a-z0-9._-]+)/gi)||[]).map(function(s){return s.slice(1).toLowerCase();});

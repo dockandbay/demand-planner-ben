@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.258 - Internal @-mention: keyboard + un-clip picker; mention email deep-links to timeline
+- **@-mention picker** (internal note): now keyboard-driven — **↑/↓** move the highlight, **Tab** applies the highlighted teammate, **Esc** closes (Enter stays a newline). Mouse still works.
+- Picker no longer gets **clipped by the timeline's scroll container**: rendered with `position:fixed` and placed **above** the textarea (over the table) when there's room, falling back to below.
+- **Mention email** now deep-links straight to the tagged PO's **timeline** (`…/#/supply/purchase-orders/timeline/<PO>`) instead of the generic PO grid. `server.mjs`.
+
 ## v26.257 - Quick-wins batch: Order Plan, Actions, PO grid, B2B planner
 - **Order Plan**: PO column header now opens the PO in the right-side **drawer** (not a full page nav); added **production status + client + order ref** to each PO's header block; grid cells now **top-aligned** (were baseline/bottom); **COMPLETED** status is now selectable in the status pills (the OP_POCAP=40 column cap keeps the pivot bounded so it can't explode); **removed the "All" status pill** — none-selected now means all statuses.
 - **Actions**: medium/amber **payment actions ("Open PO ▸ Payments") now open the PO drawer** instead of navigating away (matches the other action links); added a **"🙈 Hide payment noise" pill** that filters out Deposit FX missing / Deposit not paid / Aged payment.
