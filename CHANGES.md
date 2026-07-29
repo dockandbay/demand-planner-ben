@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.253 - PO timeline: internal @-mention notes (team-only, email the tagged teammate)
+- New **🔒 Internal note** composer on the PO timeline (admin only). Posts a note that is **hidden from the supplier** — private notes are filtered out server-side in every supplier-portal data path, so they never reach the supplier's browser (previously *all* "internal" notes were shown to suppliers as "Dock & Bay").
+- Type **@** to tag a Dock & Bay teammate — a picker resolves against `app_permissions` (supply/admin users). If it doesn't resolve it stays plain text. Display is the short handle (@ben), never the full email.
+- Each tagged teammate gets **one email immediately** (via the existing Resend sender) with the note + a link to the PO. No reply-from-email; no mark-as-read.
+- Private notes render distinctly (lock icon, "internal" badge, @mentions bolded, tagged list). Escalate (which emails the supplier) is never offered on a private note.
+- New `GET /api/supply/team` (mention picker); `POST /api/supply/portal-note` accepts `private`+`mentions`. **Migration 157** adds `supplier_notes.private` + `.mentions`.
+
 ## v26.252 - Xero Compare: period-aware (snapshot) comparison + clearer "no open payments" wording
 - The Xero report is a point-in-time snapshot. Server now reads the "For the period … to …" line and returns period_start/period_end. The client treats any Horizon payment PAID AFTER the period end as still-outstanding at report time — so a PO paid off in the month(s) after the report reconciles against what Xero still shows owed. Example: PO-55CALX-FBA2 (Lixin) had two balance payments made 17 Jul that a 30 Jun report can't know about; comparing against "$5,222 due as of 30 Jun" gives +3.5% (OK) instead of "PO not found".
 - Distinguishes "PO not found in Horizon" (genuinely absent from the payment plan) from "No open payments found in Horizon as of <date>" (PO is known but fully paid by report time). Message header shows the report as-of date.

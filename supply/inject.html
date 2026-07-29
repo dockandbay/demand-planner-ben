@@ -786,6 +786,11 @@
   function dTd(v,src,hot){ return '<td class="l"'+(hot?' style="'+hot+'"':'')+'>'+dcell(v)+(src||'')+'</td>'; }
   // timeline notes shown newest-first (descending by created_at)
   function tlDesc(a){ return (a||[]).slice().sort(function(x,y){ var cx=String(x.created_at||''), cy=String(y.created_at||''); return cx<cy?1:(cx>cy?-1:0); }); }
+  // Dock & Bay teammates for internal-note @-mentions (loaded once). handle = email local-part.
+  var _team=[]; function ensureTeam(){ if(_team.length)return Promise.resolve(_team); return fetch('/api/supply/team').then(function(r){return r.json();}).then(function(t){ _team=Array.isArray(t)?t:[]; return _team; }).catch(function(){ return []; }); }
+  // Render a note body, bolding any @handle that resolved to a tagged teammate (mentions = full emails).
+  function noteBodyHtml(n){ var b=esc(n&&n.body||''); var hs=((n&&n.mentions)||[]).map(function(e){return String(e).split('@')[0].toLowerCase();});
+    if(!hs.length)return b; return b.replace(/@([a-z0-9._-]+)/gi,function(m,h){ return hs.indexOf(h.toLowerCase())>=0?'<b style="color:#4f46e5">@'+esc(h)+'</b>':m; }); }
   // grid date cell: subtle inline-editable for open POs (bound to the same field the DATES sub-tab edits),
   // read-only text for completed ones. Shows the effective date; editing End sets a manual override.
   function gDate(r,field,dispIso,src,hot){
@@ -3392,21 +3397,26 @@
     var head=(pend.length?pend.map(function(s){return '<div class="tiny" style="color:#92400e;margin-bottom:3px">⏳ Awaiting your approval: '+esc(sf(s))+subWho(s)+'</div>';}).join(''):'')
       +(appl.length?appl.map(function(s){return '<div class="tiny" style="color:#166534;margin-bottom:6px">✓ Applied: '+esc(sf(s))+subWho(s)+'</div>';}).join(''):'');
     // escalate is only offered on YOUR OWN (internal) latest message (it emails the supplier) — never on a supplier note
-    var _ownNotes=notes.filter(function(n){return n.author_kind==='internal';});
+    var _ownNotes=notes.filter(function(n){return n.author_kind==='internal'&&!n.private;});   // escalate emails the supplier — never offered on a private (team-only) note
     var recentOwnId=_ownNotes.length?_ownNotes.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0].id:null;
     var recentAnyId=notes.length?notes.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''))||(Number(b.id)-Number(a.id));})[0].id:null;   // most recent message overall
     var meEmail=((window.ME&&ME.email)||'').toLowerCase();   // you can only delete YOUR OWN latest message — not a supplier's, not a colleague's
-    var list=notes.length?tlDesc(notes).map(function(n){ var sup=(n.author_kind!=='internal');
+    var list=notes.length?tlDesc(notes).map(function(n){ var sup=(n.author_kind!=='internal'); var priv=!!n.private;
       var ctrl = sup
         ? (n.read?'<a class="note-read" data-id="'+n.id+'" data-read="1" style="font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline;white-space:nowrap">mark unread</a>':'<button class="save-btn light note-read" data-id="'+n.id+'" data-read="0">Mark read</button>')
         : ((n.id===recentOwnId)?'<button class="save-btn light po-esc" data-po="'+esc(po)+'" data-msg="'+esc(n.body)+'" title="Escalate this message to the supplier by email" style="color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'');
       if(n.id===recentAnyId && n.author_kind==='internal' && (n.author_email||'').toLowerCase()===meEmail) ctrl += '<a class="po-note-del" data-id="'+n.id+'" data-po="'+esc(po)+'" title="delete this (most recent) message — you can only delete your own" style="font-size:10px;color:#b91c1c;cursor:pointer;text-decoration:underline;white-space:nowrap">delete</a>';
-      return '<div style="font-size:11px;margin:3px 0;max-width:640px;padding:5px 8px;background:'+(sup?(n.read?'#f1f5f9':'#fff7ed'):'#eef2ff')+';border:1px solid '+(sup&&!n.read?'#fdba74':'#e5e7eb')+';border-radius:5px;display:flex;gap:10px;align-items:flex-start">'
+      var mto=priv&&(n.mentions||[]).length?' · <span class="mut">to '+(n.mentions||[]).map(function(e){return '@'+esc(shortUser(e).replace(/@$/,''));}).join(' ')+'</span>':'';
+      var who=sup?((n.supplier_name?esc(n.supplier_name):'Supplier')+(n.author_email&&!/^(d&b|dock & bay|portal)$/i.test(n.author_email)?' · '+esc(n.author_email):'')):(n.author_email&&n.author_email!=='Dock & Bay'?esc(shortUser(n.author_email))+' · Dock &amp; Bay':'Dock &amp; Bay');
+      var bg=priv?'#f5f3ff':(sup?(n.read?'#f1f5f9':'#fff7ed'):'#eef2ff'), bd=priv?'#c7d2fe':(sup&&!n.read?'#fdba74':'#e5e7eb');
+      return '<div style="font-size:11px;margin:3px 0;max-width:640px;padding:5px 8px;background:'+bg+';border:1px solid '+bd+';border-radius:5px;display:flex;gap:10px;align-items:flex-start">'
         +(ctrl?'<div style="flex:0 0 auto;display:flex;flex-direction:column;gap:3px;align-items:flex-start;min-width:78px">'+ctrl+'</div>':'')
-        +'<div style="flex:1"><span class="mut tiny">'+esc(n.created_at)+' · '+(sup?((n.supplier_name?esc(n.supplier_name):'Supplier')+(n.author_email&&!/^(d&b|dock & bay|portal)$/i.test(n.author_email)?' · '+esc(n.author_email):'')):(n.author_email&&n.author_email!=='Dock & Bay'?esc(shortUser(n.author_email))+' · Dock &amp; Bay':'Dock &amp; Bay'))+'</span>'+(sup&&!n.read?' <span class="ex-badge">new</span>':'')+'<br><span style="color:#1a1a1a">'+esc(n.body)+'</span></div>'
+        +'<div style="flex:1"><span class="mut tiny">'+(priv?'🔒 ':'')+esc(n.created_at)+' · '+who+mto+'</span>'+(priv?' <span class="ex-badge" style="background:#e0e7ff;color:#3730a3">internal</span>':'')+(sup&&!n.read?' <span class="ex-badge">new</span>':'')+'<br><span style="color:#1a1a1a">'+noteBodyHtml(n)+'</span></div>'
         +'</div>'; }).join(''):'<div class="mut tiny">No timeline notes yet.</div>';
     var compose='<div style="margin:2px 0 4px;display:flex;gap:6px;align-items:flex-start"><textarea class="po-note-body fci" data-po="'+esc(po)+'" rows="2" placeholder="Add a note for the supplier…" style="flex:1;min-height:34px;max-width:480px;text-align:left"></textarea><button class="save-btn po-note-post" data-po="'+esc(po)+'" style="flex:0 0 auto">Post to supplier</button></div>'
-      +'<div class="mut tiny" style="margin:0 2px 8px">Posting appears in the supplier&rsquo;s portal timeline. Unread supplier replies show as an action.</div>';
+      +'<div class="mut tiny" style="margin:0 2px 8px">Posting appears in the supplier&rsquo;s portal timeline. Unread supplier replies show as an action.</div>'
+      +'<div style="position:relative;margin:2px 0 4px;display:flex;gap:6px;align-items:flex-start"><textarea class="po-int-body fci" data-po="'+esc(po)+'" rows="2" placeholder="🔒 Internal note — type @ to tag a teammate…" style="flex:1;min-height:34px;max-width:480px;text-align:left;background:#faf5ff"></textarea><button class="save-btn po-int-post" data-po="'+esc(po)+'" style="flex:0 0 auto;background:#eef2ff;color:#3730a3;border-color:#c7d2fe">🔒 Post internal</button><div class="po-int-pop" style="display:none;position:absolute;z-index:60;background:#fff;border:1px solid #c7d2fe;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.14);max-height:190px;overflow:auto;min-width:200px"></div></div>'
+      +'<div class="mut tiny" style="margin:0 2px 8px">Internal note — <b>team only, hidden from the supplier</b>. Type <b>@</b> to tag a teammate; they get an email.</div>';
     // new-message box on top, then submission banners + the message thread below it
     return '<div class="sect-h">Timeline <span class="mut tiny">— shared message thread with the supplier (their portal shows the same)</span></div>'+compose+head+list; }
   function poRefetchPanel(po,i){ var at=document.querySelector('#podet-'+i+' .potab.active'); var wantTab=at?at.dataset.pt:null;   // keep the open sub-tab after a save re-render
@@ -3653,6 +3663,29 @@
     document.querySelectorAll('#podet-'+i+' .po-note-post').forEach(function(b){ b.onclick=function(){ var ta=document.querySelector('#podet-'+i+' .po-note-body[data-po="'+CSS.escape(b.dataset.po)+'"]'); var v=(ta&&ta.value||'').trim(); if(!v)return; b.disabled=true;
       fetch('/api/supply/portal-note',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:b.dataset.po,body:v,author_kind:'internal',author_email:(ME&&ME.email)||'Dock & Bay'})}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error); poRefetchPanel(po,i); })
+        .catch(function(e){ b.disabled=false; alert('Could not post: '+(e.message||e)); }); }; });
+    // Internal (team-only) note with @-mentions — hidden from the supplier; tagged teammates get an email.
+    ensureTeam();
+    document.querySelectorAll('#podet-'+i+' .po-int-body').forEach(function(ta){ var pop=ta.parentNode.querySelector('.po-int-pop');
+      function hide(){ if(pop)pop.style.display='none'; }
+      ta.addEventListener('input',function(){ if(!pop)return; var pos=ta.selectionStart, upto=ta.value.slice(0,pos), m=upto.match(/@([a-z0-9._-]*)$/i);
+        if(!m){ hide(); return; } var q=m[1].toLowerCase();
+        var ms=_team.filter(function(t){ return t.handle.indexOf(q)===0||t.email.indexOf(q)===0; }).slice(0,8);
+        if(!ms.length){ hide(); return; }
+        pop.innerHTML=ms.map(function(t){ return '<div class="po-int-opt" data-h="'+esc(t.handle)+'" style="padding:5px 10px;cursor:pointer;font-size:12px;white-space:nowrap">@'+esc(t.handle)+' <span class="mut tiny">'+esc(t.email)+'</span></div>'; }).join('');
+        pop.style.top=(ta.offsetTop+ta.offsetHeight+2)+'px'; pop.style.left=ta.offsetLeft+'px'; pop.style.display='block';
+        pop.querySelectorAll('.po-int-opt').forEach(function(o){ o.onmousedown=function(ev){ ev.preventDefault();
+          var before=upto.replace(/@([a-z0-9._-]*)$/i,'@'+o.dataset.h+' '); ta.value=before+ta.value.slice(pos);
+          var np=before.length; ta.focus(); ta.setSelectionRange(np,np); hide(); }; }); });
+      ta.addEventListener('blur',function(){ setTimeout(hide,150); }); });
+    document.querySelectorAll('#podet-'+i+' .po-int-post').forEach(function(b){ b.onclick=function(){ var ta=document.querySelector('#podet-'+i+' .po-int-body[data-po="'+CSS.escape(b.dataset.po)+'"]'); var v=(ta&&ta.value||'').trim(); if(!v)return;
+      var handles=(v.match(/@([a-z0-9._-]+)/gi)||[]).map(function(s){return s.slice(1).toLowerCase();});
+      var mentions=_team.filter(function(t){ return handles.indexOf(t.handle)>=0; }).map(function(t){return t.email;});
+      b.disabled=true;
+      fetch('/api/supply/portal-note',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:b.dataset.po,body:v,author_kind:'internal',private:true,mentions:mentions,author_email:(ME&&ME.email)||'Dock & Bay'})}).then(function(r){return r.json();})
+        .then(function(j){ if(j&&j.error)throw new Error(j.error);
+          if(mentions.length && !((j.mailed||[]).length)) alert('Internal note saved and tagged '+mentions.map(function(e){return shortUser(e).replace(/@$/,'');}).join(', ')+'. (No email key in sandbox — the email sends on live.)');
+          poRefetchPanel(po,i); })
         .catch(function(e){ b.disabled=false; alert('Could not post: '+(e.message||e)); }); }; });
     document.querySelectorAll('#podet-'+i+' .note-read').forEach(function(b){ b.onclick=function(){ var read=b.dataset.read!=='1'; b.disabled=true;
       fetch('/api/supply/note-read/'+b.dataset.id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({read:read})}).then(function(r){return r.json();})

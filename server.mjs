@@ -1604,6 +1604,9 @@ app.get('/api/supply/:section', async (req, res) => {
   const q = (sql) => pool.query(sql).then(r => r.rows);
   try {
     switch (req.params.section) {
+      case 'team':   // mentionable Dock & Bay teammates for the internal-note @-picker (handle = email local-part)
+        return res.json((await q(`SELECT lower(email) email FROM planner.app_permissions
+          WHERE coalesce(supply_edit,false) OR coalesce(is_admin,false) ORDER BY email`)).map(x => ({ email: x.email, handle: x.email.split('@')[0] })));
       case 'ka-forecasts':   // DEMAND ▸ Key Accounts Forecast — inline-editable rows (client + SKU + country/wh + ship date + qty)
         return res.json(await q(`SELECT id, coalesce(client,'') client, coalesce(sku,'') sku, coalesce(warehouse,'') warehouse,
           to_char(ship_date,'YYYY-MM-DD') ship_date, quantity FROM planner.key_account_forecasts ORDER BY warehouse, client, sku`));
@@ -4133,9 +4136,35 @@ app.post('/api/supply/portal-note', async (req, res) => {
     if (!sid) { const r = await pool.query(`SELECT s.id FROM planner.purchase_orders po JOIN planner.suppliers s ON s.name=po.supplier_name WHERE po.po=$1`, [b.po]); sid = (r.rows[0] && r.rows[0].id) || null; }
     const kind = b.author_kind || 'supplier';
     const email = kind === 'internal' ? internalAuthor(req, b.author_email) : (b.author_email || null);
-    await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body) VALUES ($1,$2,$3,$4,$5)`,
-      [b.po, sid, email, kind, String(b.body).trim()]);
-    res.json({ ok: true });
+    // Private (team-only) notes: internal notes that must NEVER reach the supplier portal. Mentions are
+    // lowercased dockandbay.com emails tagged in the note; each is emailed once. Only internal notes can be private.
+    const priv = kind === 'internal' && !!b.private;
+    const mentions = priv && Array.isArray(b.mentions)
+      ? Array.from(new Set(b.mentions.map(m => String(m || '').trim().toLowerCase()).filter(m => m.indexOf('@') > 0))) : [];
+    const body = String(b.body).trim();
+    await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body, private, mentions) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [b.po, sid, email, kind, body, priv, mentions.length ? mentions : null]);
+    // Notify tagged teammates — one email each, immediately. Best-effort; never breaks the post.
+    let mailed = [];
+    if (mentions.length) {
+      try {
+        const valid = (await pool.query(`SELECT lower(email) email FROM planner.app_permissions WHERE lower(email) = ANY($1)`, [mentions])).rows.map(r => r.email);
+        const send = mentions.filter(m => valid.includes(m));
+        if (send.length) {
+          const who = email ? String(email).replace(/@dockandbay\.com$/i, '@') : 'A teammate';
+          const subject = who + ' tagged you on ' + b.po;
+          const html = '<div style="font:14px/1.6 system-ui,-apple-system,sans-serif;color:#1a1a1a">'
+            + '<p><b>' + escHtml(who) + '</b> tagged you in an internal note on <b>' + escHtml(b.po) + '</b>:</p>'
+            + '<blockquote style="margin:10px 0;padding:8px 12px;border-left:3px solid #6366f1;background:#f5f3ff;color:#334155">' + escHtml(body) + '</blockquote>'
+            + '<p style="margin-top:14px"><a href="' + PLANNER_URL + '/#/supply/purchase-orders" style="color:#4f46e5">Open ' + escHtml(b.po) + ' in HORIZON &rarr;</a></p>'
+            + '<p style="color:#94a3b8;font-size:12px">Internal note — not visible to the supplier. No reply needed here; respond on the PO timeline.</p></div>';
+          const r = await sendResendEmail({ to: send, subject, html });
+          mailed = r && r.sandbox ? [] : send;
+          if (r && r.sandbox) console.log('[mention] sandbox — would email ' + send.join(', '));
+        }
+      } catch (e) { console.error('[mention] email failed:', e.message); }
+    }
+    res.json({ ok: true, mentions, mailed });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/portal-upload', async (req, res) => {
@@ -4479,7 +4508,7 @@ app.post('/api/supply/shipment-note-read/:id', async (req, res) => {
 app.get('/api/supply/portal-notes/:sid', async (req, res) => {
   try { res.json(await qp(`SELECT id, po, author_kind, coalesce(author_email,'') author_email, body,
       to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read
-    FROM planner.supplier_notes WHERE supplier_id=$1 ORDER BY created_at`, [req.params.sid])); }
+    FROM planner.supplier_notes WHERE supplier_id=$1 AND NOT coalesce(private,false) ORDER BY created_at`, [req.params.sid])); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/supply/portal-submissions/:sid', async (req, res) => {
@@ -5802,6 +5831,7 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
       // the exact submitting user AND their supplier (e.g. "XR Textile · yw11@xrtextile.com").
       pool.query(`SELECT n.id, n.author_kind, coalesce(n.author_email,'') author_email, n.body,
                     to_char(n.created_at,'DD-Mon-YY HH24:MI') created_at, n.read_at IS NOT NULL read,
+                    coalesce(n.private,false) private, coalesce(n.mentions,'{}') mentions,
                     coalesce(s.name,'') supplier_name
                   FROM planner.supplier_notes n LEFT JOIN planner.suppliers s ON s.id=n.supplier_id
                   WHERE n.po=$1 ORDER BY n.created_at`, [po]).catch(() => ({ rows: [] })),
@@ -8359,7 +8389,7 @@ app.get('/api/portal/notes/:sid', portalAuth, async (req, res) => {
     if (!req.portal.supplierIds.length) return res.json([]);
     res.json((await pool.query(`SELECT id, po, author_kind, coalesce(author_email,'') author_email, body,
       to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read
-      FROM planner.supplier_notes WHERE supplier_id = ANY($1) ORDER BY created_at`, [req.portal.supplierIds])).rows);
+      FROM planner.supplier_notes WHERE supplier_id = ANY($1) AND NOT coalesce(private,false) ORDER BY created_at`, [req.portal.supplierIds])).rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Mark a note read/unread — only notes belonging to the session's supplier.
@@ -8428,7 +8458,7 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
       grab(`SELECT po, sku, actual_cost, amended_qty, is_added, final_cost, confirmed_at FROM planner.portal_line_costs WHERE po = ANY($1)`),
       grab(`SELECT po, sku, qty FROM planner.crossdock_shipments WHERE po = ANY($1)`),
       grab(`SELECT id, po, coalesce(description,'') description, qty, price, coalesce(approved,false) approved FROM planner.portal_additional_costs WHERE po = ANY($1) ORDER BY id`),
-      ids.length ? q(`SELECT id, po, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read FROM planner.supplier_notes WHERE supplier_id = ANY($1) ORDER BY created_at`, [ids]) : Promise.resolve([]),
+      ids.length ? q(`SELECT id, po, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read FROM planner.supplier_notes WHERE supplier_id = ANY($1) AND NOT coalesce(private,false) ORDER BY created_at`, [ids]) : Promise.resolve([]),
       ids.length ? q(`SELECT id, po, kind, value, status, attachment_id, to_char(submitted_at,'YYYY-MM-DD') submitted_at, to_char(applied_at,'YYYY-MM-DD') applied_at, note FROM planner.supplier_submissions WHERE supplier_id = ANY($1) ORDER BY submitted_at DESC`, [ids]) : Promise.resolve([]),
       q(`SELECT sku, coalesce(product_name_final,product_name,'') product_name, coalesce(product_ean,'') ean,
           coalesce(carton_qty::text,'') carton_qty, coalesce(size_long,'') size_long, coalesce(colour_long,'') colour,
