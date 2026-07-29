@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.267 - Manufacturing tab: "Recently closed" orders
+- Manufacturing tab now shows a **✅ Recently closed manufacturing orders** section: manufacturing-branch POs completed in the **last 30 days**, each with **closed date**, **PROD#**, supplier and its **SKU × qty** lines; PO opens the drawer.
+- (Sandbox currently has no completed manufacturing POs, so the section is empty there — it populates on live.)
+- `server.mjs` manufacturing endpoint returns `recentClosed`; `supply/inject.html` renders it.
+
 ## v26.266 - PO timeline: record-of-change audit log ⚠️ NEEDS MIGRATION 158
 - **Migration `158_po_change_log.sql`** — new `planner.po_change_log` table. **Run this on the DB** or the audit log stays empty (the code is defensive — everything works without it, just no change records).
 - Editing a PO's **status, production end date, shipment assignment, deposit assignment, or any payment** now writes a **record of change** (old → new + user), and **uploading to ERP** (Cin7 date push / lines push) is logged too.

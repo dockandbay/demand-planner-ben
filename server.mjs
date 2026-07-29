@@ -1806,8 +1806,22 @@ app.get('/api/supply/:section', async (req, res) => {
           WHERE coalesce(s.status,'') NOT ILIKE '%discontinued%' ORDER BY s.category, s.sku`));
       case 'manufacturing-bom':   // CONFIG ▸ Manufacturing BOM — parent (finished) → component × qty
         return res.json(await q(`SELECT parent_sku, component_sku, qty::numeric qty FROM planner.manufacturing_bom ORDER BY parent_sku, component_sku`));
-      case 'manufacturing':       // SUPPLY ▸ PURCHASE ORDERS ▸ Manufacturing — finished-bundle demand vs manufacturing-PO component supply
-        return res.json(await manufacturingData());
+      case 'manufacturing': {     // SUPPLY ▸ PURCHASE ORDERS ▸ Manufacturing — finished-bundle demand vs manufacturing-PO component supply
+        const data = await manufacturingData();
+        // Recently CLOSED manufacturing orders (branch = Manufacturing, status complete, closed in the last 30 days),
+        // with each PO's SKU lines + qty and the completion (closed) date. Grouped per PO for display.
+        const rc = (await q(`SELECT p.po, coalesce(p.prod_no,'') prod_no, coalesce(p.supplier_name,'') supplier,
+            to_char(coalesce(p.delivery_date_overide, p.landing_date_overide, p.end_production_overide),'YYYY-MM-DD') closed_date,
+            l.sku, l.qty::int qty
+          FROM planner.purchase_orders p JOIN planner.purchase_order_lines l ON l.po=p.po
+          WHERE p.branch ILIKE '%manufactur%' AND coalesce(p.status,'') ILIKE '%complete%'
+            AND coalesce(p.delivery_date_overide, p.landing_date_overide, p.end_production_overide) >= (current_date - interval '30 days')
+            AND coalesce(l.qty,0)>0
+          ORDER BY coalesce(p.delivery_date_overide, p.landing_date_overide, p.end_production_overide) DESC, p.po, l.sku`).catch(() => []));
+        const rcBy = {}; rc.forEach(r => { const e = rcBy[r.po] || (rcBy[r.po] = { po: r.po, prod_no: r.prod_no, supplier: r.supplier, closed_date: r.closed_date, lines: [] }); e.lines.push({ sku: r.sku, qty: r.qty }); });
+        data.recentClosed = Object.values(rcBy);
+        return res.json(data);
+      }
       case 'client-attachments':   // Client/FBA docs across all POs (category='client') — portal Barcodes & Labels tab
         return res.json(await q(`SELECT po, id, filename FROM planner.portal_attachments WHERE coalesce(category,'')='client' ORDER BY uploaded_at DESC`));
       case 'portal-docs':   // supplier-uploaded documents across all POs (every category except 'client') — portal Documents section

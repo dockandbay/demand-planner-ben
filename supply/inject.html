@@ -4524,7 +4524,13 @@
       +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px"><b style="font-size:12px">📝 Manufacturing notes</b><span class="mut tiny" id="mfg-notes-meta"></span></div>'
       +'<textarea id="mfg-notes-body" placeholder="Detailed notes — e.g. SKUs remaining somewhere…" style="width:100%;min-height:60px;box-sizing:border-box;border:1px solid #e5d9a8;border-radius:5px;padding:6px;font:12px inherit;resize:vertical"></textarea>'
       +'<div style="margin-top:5px"><button class="save-btn" id="mfg-notes-save" style="background:#2563eb;color:#fff;border-color:#2563eb">Save notes</button> <span class="mut tiny" id="mfg-notes-status"></span></div></div>';
-    var h='<div class="sect-h">Manufacturing — bundle assembly coverage</div>'+mfgNotesHtml
+    var rc=(d.recentClosed||[]);
+    var rcHtml=rc.length?('<div style="margin:2px 0 14px;border:1px solid #e5e7eb;border-radius:8px;background:#f8fafc;padding:9px 11px">'
+      +'<b style="font-size:12px">✅ Recently closed manufacturing orders <span class="mut tiny">— completed in the last 30 days ('+rc.length+')</span></b>'
+      +'<div class="tw" style="margin-top:6px;max-width:660px"><table style="width:max-content;min-width:100%;font-size:11px"><thead><tr><th class="l">Order</th><th class="l">PROD#</th><th class="l">Supplier</th><th class="l">Closed</th><th class="l">SKU × qty</th></tr></thead><tbody>'
+      +rc.map(function(o){ return '<tr><td class="l"><button class="lnk-btn mfg-po-go" data-po="'+esc(o.po)+'" title="open '+esc(o.po)+' in a drawer" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer">'+esc(o.po)+'</button></td><td class="l">'+(o.prod_no?'P'+esc(o.prod_no):'')+'</td><td class="l">'+esc(o.supplier||'')+'</td><td class="l" style="white-space:nowrap">'+(o.closed_date?fd(o.closed_date):'')+'</td><td class="l">'+(o.lines||[]).map(function(x){return esc(x.sku)+' <span class="mut">×'+units(x.qty)+'</span>';}).join('<br>')+'</td></tr>'; }).join('')
+      +'</tbody></table></div></div>'):'';
+    var h='<div class="sect-h">Manufacturing — bundle assembly coverage</div>'+mfgNotesHtml+rcHtml
       +'<div class="mut tiny" style="margin-bottom:8px">Grouped by bundle. '+badgeFin+' = open finished-product orders (the demand); '+badgeMfg+' = open Manufacturing-branch orders supplying the component SKUs. Demand × BOM must be covered by the MFG orders. Tick <b>Accept</b> to sign off a shortage/overage. (Open orders only — complete/shipped excluded.)</div>'
       +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'
         +kpi('Bundles',bundles.length,'#f1f5f9','#334155')
