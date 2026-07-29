@@ -115,7 +115,7 @@
   #product-root table.pg-tbl td:nth-child(2),#product-root table.pg-tbl th:nth-child(2){left:64px}
 }
 #supply-subnav{display:flex;gap:2px;border-bottom:1px solid #e0e0e0;margin:2px 0 10px;align-items:center;flex-wrap:wrap}
-#supply-root .stab{background:transparent;border:none;padding:6px 13px;font-size:12px;font-weight:500;cursor:pointer;color:#888;border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit}
+#supply-root .stab{background:transparent;border:none;padding:6px 13px;font-size:12px;font-weight:500;cursor:pointer;color:#888;border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit;text-decoration:none;display:inline-block}
 #supply-root .stab:hover{color:#1a1a1a}
 #supply-root .stab.active{color:#1a1a1a;border-bottom-color:#1a1a1a;font-weight:600}
 /* Desktop version badge — the amber box (matches mobile's #hz-ver). This is the version that actually persists on
@@ -8240,12 +8240,12 @@
   function ensureRoot(){ if(document.getElementById('supply-root'))return;
     var app=document.getElementById('app')||document.body; if(!app)return;
     var rootEl=document.createElement('div'); rootEl.id='supply-root';
-    rootEl.innerHTML='<div id="supply-subnav">'+SECTIONS.map(function(s){return '<button class="stab" data-k="'+s[0]+'">'+s[1]+'</button>';}).join('')
+    rootEl.innerHTML='<div id="supply-subnav">'+SECTIONS.map(function(s){return '<a class="stab" data-k="'+s[0]+'" href="#/supply/'+s[0]+'">'+s[1]+'</a>';}).join('')
       +'<span class="ver">HORIZON __APP_VERSION__</span></div>'
       +'<select id="supply-nav-sel" aria-label="Section">'+SECTIONS.map(function(s){return '<option value="'+s[0]+'">'+s[1]+'</option>';}).join('')+'</select>'
       +'<div id="supply-content"></div>';
     app.appendChild(rootEl);
-    rootEl.querySelectorAll('.stab').forEach(function(b){b.onclick=function(){selectSection(b.dataset.k);};});
+    rootEl.querySelectorAll('.stab').forEach(function(b){b.onclick=function(e){ if(e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return; e.preventDefault(); selectSection(b.dataset.k); };});   // Cmd/Ctrl/Shift/Alt-click (or middle-click) opens the section in a new tab via its deep-link href
     var _navSel=rootEl.querySelector('#supply-nav-sel'); if(_navSel)_navSel.onchange=function(){selectSection(this.value);};
     fetch('/api/supply/samples').then(function(r){return r.json();}).then(function(d){ if(Array.isArray(d)){ cache['samples']=d; samplesNavBadge(d); } }).catch(function(){});
     refreshOpExc(); try{ prefetchNavCounts(); }catch(e){}   // compute the Payments Due count on mount so the PAYMENTS tab badge shows immediately

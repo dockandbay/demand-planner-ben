@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.278 - Main SUPPLY menu: Cmd/Ctrl-click opens a section in a new tab
+- The top SUPPLY menu tabs (Actions / BI & Reports / Purchase Orders / Order Plan / Payments / Samples / Quality Control) are now real anchors pointing at each section's deep-link (`#/supply/<section>`). Plain click behaves exactly as before (in-app section switch); **Cmd/Ctrl/Shift/Alt-click or middle-click opens that section in a new browser tab/window** (the router loads straight to it). `supply/inject.html`. (Drawer/feature refs deliberately unchanged.)
+
 ## v26.277 - PAYMENTS ▸ Deposits: add/save/prod-change no longer bounce to Productions
 - Adding a deposit, changing a deposit's production number, and saving/deleting a deposit now refresh the **Deposits** view in place (stays under PAYMENTS) instead of navigating to Purchase Orders ▸ Productions. Leftover `selectSection('productions')` calls from when Deposits lived under Productions → now `showPoSub('deposits')`. `supply/inject.html`.
 
