@@ -1607,6 +1607,11 @@ app.get('/api/supply/:section', async (req, res) => {
       case 'team':   // mentionable Dock & Bay teammates for the internal-note @-picker (handle = email local-part)
         return res.json((await q(`SELECT lower(email) email FROM planner.app_permissions
           WHERE coalesce(supply_edit,false) OR coalesce(is_admin,false) ORDER BY email`)).map(x => ({ email: x.email, handle: x.email.split('@')[0] })));
+      case 'manufacturing-notes': {   // shared free-text notes shown at the top of PURCHASE ORDERS ▸ Manufacturing (app_settings KV)
+        const r = (await q(`SELECT value, coalesce(updated_by,'') updated_by, to_char(updated_at,'DD-Mon-YY HH24:MI') updated_at
+          FROM planner.app_settings WHERE key='manufacturing_notes'`))[0];
+        return res.json({ body: (r && r.value) || '', updated_by: (r && r.updated_by) || '', updated_at: (r && r.updated_at) || '' });
+      }
       case 'ka-forecasts':   // DEMAND ▸ Key Accounts Forecast — inline-editable rows (client + SKU + country/wh + ship date + qty)
         return res.json(await q(`SELECT id, coalesce(client,'') client, coalesce(sku,'') sku, coalesce(warehouse,'') warehouse,
           to_char(ship_date,'YYYY-MM-DD') ship_date, quantity FROM planner.key_account_forecasts ORDER BY warehouse, client, sku`));
@@ -2993,6 +2998,16 @@ app.post('/api/app-settings', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Manufacturing notes: save the shared free-text notes (top of the Manufacturing tab). Supply-edit gated by the
+// global write guard; stored in app_settings under 'manufacturing_notes' with updated_by / updated_at.
+app.post('/api/supply/manufacturing-notes', async (req, res) => {
+  try {
+    await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ('manufacturing_notes',$1,$2,now())
+      ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`,
+      [String((req.body || {}).body || ''), authUser(req) || null]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // ── Escalate a timeline message as an email ─────────────────────────────────────────────────────
 // initiator 'supplier' (portal) → routed to a CONFIG-managed internal list by context; link → planner.
 // initiator 'internal' (grid)   → that supplier's active portal users;                 link → portal.

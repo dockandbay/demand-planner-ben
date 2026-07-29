@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.265 - Manufacturing tab: persisted notes area (+ PO links open drawer)
+- New **📝 Manufacturing notes** free-text area at the top of PURCHASE ORDERS ▸ Manufacturing — team-shared, persisted, shows "last edited by … · <date>". For detailed notes (e.g. SKUs remaining somewhere).
+- Stored in `app_settings` under `manufacturing_notes` (no migration). New `GET /api/supply/manufacturing-notes` + `POST` (supply-edit gated).
+- Manufacturing PO links now open the **PO drawer** instead of navigating away (start of the Manufacturing rework).
+
 ## v26.264 - PAYMENTS ▸ By Supplier report
 - New **PAYMENTS ▸ By Supplier** sub-tab: one row per supplier PO showing **final invoice total · starting · completion · balance** (balance = balance_1 + balance_2 summed), with **Supplier / PROD# / Batch** filters and a totals footer. PO refs open the drawer.
 - New server section `GET /api/supply/payments-by-supplier` (server.mjs). No schema change.

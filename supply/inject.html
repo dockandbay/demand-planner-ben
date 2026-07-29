@@ -4509,7 +4509,15 @@
     var badgeFin='<span style="display:inline-block;padding:1px 7px;border-radius:10px;background:#dbeafe;color:#1e40af;font-weight:700;font-size:10px;letter-spacing:.03em">📦 FINISHED</span>';
     function kpi(label,val,bg,fg){ return '<div style="flex:0 0 auto;min-width:96px;padding:8px 12px;border-radius:8px;background:'+bg+';color:'+fg+'"><div style="font-size:19px;font-weight:800;line-height:1">'+val+'</div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.04em;opacity:.85;margin-top:2px">'+label+'</div></div>'; }
     var shortN=allComps.filter(function(c){return c.diff<0;}).length, overN=allComps.filter(function(c){return c.diff>0;}).length;
-    var h='<div class="sect-h">Manufacturing — bundle assembly coverage</div>'
+    function wireMfgNotes(){ var ta=document.getElementById('mfg-notes-body'); if(!ta)return;
+      fetch('/api/supply/manufacturing-notes').then(function(r){return r.json();}).then(function(j){ if(document.activeElement!==ta)ta.value=(j&&j.body)||''; var m=document.getElementById('mfg-notes-meta'); if(m&&j&&j.updated_by)m.textContent='last edited by '+shortUser(j.updated_by)+(j.updated_at?' · '+j.updated_at:''); }).catch(function(){});
+      var sv=document.getElementById('mfg-notes-save'); if(sv)sv.onclick=function(){ sv.disabled=true; var st=document.getElementById('mfg-notes-status'); if(st)st.textContent='Saving…';
+        fetch('/api/supply/manufacturing-notes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({body:ta.value})}).then(function(r){return r.json();}).then(function(j){ sv.disabled=false; if(j&&j.error){ if(st)st.textContent='Error: '+j.error; return; } if(st)st.textContent='Saved ✓'; var m=document.getElementById('mfg-notes-meta'); if(m&&window.ME&&ME.email)m.textContent='last edited by '+shortUser(ME.email)+' · just now'; setTimeout(function(){ if(st)st.textContent=''; },1600); }).catch(function(){ sv.disabled=false; if(st)st.textContent='Save failed'; }); }; }
+    var mfgNotesHtml='<div id="mfg-notes-wrap" style="margin:2px 0 12px;border:1px solid #e5e7eb;border-radius:8px;background:#fffef7;padding:9px 11px">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px"><b style="font-size:12px">📝 Manufacturing notes</b><span class="mut tiny" id="mfg-notes-meta"></span></div>'
+      +'<textarea id="mfg-notes-body" placeholder="Detailed notes — e.g. SKUs remaining somewhere…" style="width:100%;min-height:60px;box-sizing:border-box;border:1px solid #e5d9a8;border-radius:5px;padding:6px;font:12px inherit;resize:vertical"></textarea>'
+      +'<div style="margin-top:5px"><button class="save-btn" id="mfg-notes-save" style="background:#2563eb;color:#fff;border-color:#2563eb">Save notes</button> <span class="mut tiny" id="mfg-notes-status"></span></div></div>';
+    var h='<div class="sect-h">Manufacturing — bundle assembly coverage</div>'+mfgNotesHtml
       +'<div class="mut tiny" style="margin-bottom:8px">Grouped by bundle. '+badgeFin+' = open finished-product orders (the demand); '+badgeMfg+' = open Manufacturing-branch orders supplying the component SKUs. Demand × BOM must be covered by the MFG orders. Tick <b>Accept</b> to sign off a shortage/overage. (Open orders only — complete/shipped excluded.)</div>'
       +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'
         +kpi('Bundles',bundles.length,'#f1f5f9','#334155')
@@ -4518,7 +4526,7 @@
         +kpi('Short',shortN,shortN?'#fee2e2':'#f1f5f9',shortN?'#b91c1c':'#334155')
         +kpi('Over',overN,overN?'#fef9c3':'#f1f5f9',overN?'#92710a':'#334155')
       +'</div>';
-    if(!bundles.length){ b.innerHTML=h+'<div class="count">No BOM bundles configured — add them in CONFIG ▸ Manufacturing BOM.</div>'; return; }
+    if(!bundles.length){ b.innerHTML=h+'<div class="count">No BOM bundles configured — add them in CONFIG ▸ Manufacturing BOM.</div>'; wireMfgNotes(); return; }
     // One card per bundle SKU: (a) open finished orders + total demand, (b) each component's open MFG orders + mismatch
     h+=bundles.map(function(bn){
       var pos=(bn.finishedPos||[]).filter(function(x){return x.qty;});
@@ -4546,8 +4554,8 @@
           +'<div style="flex:1 1 460px;min-width:320px"><div style="font-weight:700;font-size:12px;margin-bottom:3px">(b) Components — required vs open MFG orders</div>'+bTbl+'</div>'
         +'</div></div>';
     }).join('');
-    b.innerHTML=h;
-    b.querySelectorAll('.mfg-po-go').forEach(function(x){ x.onclick=function(){ gotoPO(x.dataset.po); }; });
+    b.innerHTML=h; wireMfgNotes();
+    b.querySelectorAll('.mfg-po-go').forEach(function(x){ x.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(x.dataset.po); else gotoPO(x.dataset.po); }; });
     b.querySelectorAll('.mfg-acc').forEach(function(cb){ cb.onchange=function(){ var comp=cb.dataset.comp, on=cb.checked;
       fetch('/api/supply/manufacturing-accept',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({component_sku:comp,accepted:on,accepted_by:'PO PLAN'})})
         .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); delete cache['manufacturing'];
