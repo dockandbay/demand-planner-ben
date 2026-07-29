@@ -4373,7 +4373,7 @@
   // PURCHASE ORDERS is now the umbrella: PLAN (the PO grid) + the former PRODUCTIONS sub-tabs.
   var poSub='plan';
   var PO_SUBS=[['plan','PLAN'],['shipments','Shipments'],['crossdock','Crossdock & Labels'],['manufacturing','Manufacturing'],['list','Productions'],['barcodes','Barcodes']];
-  var PAY_SUBS=[['deposits','Deposits'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['cashflow','Cash Flow'],['xerocompare','Xero Compare']];   // the PAYMENTS umbrella (moved out of PURCHASE ORDERS); Cash Flow moved here from BI & REPORTS
+  var PAY_SUBS=[['deposits','Deposits'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['bysupplier','By Supplier'],['cashflow','Cash Flow'],['xerocompare','Xero Compare']];   // the PAYMENTS umbrella (moved out of PURCHASE ORDERS); Cash Flow moved here from BI & REPORTS
   var PO_SUB_KEYS=PO_SUBS.map(function(t){return t[0];});
   var PAY_SUB_KEYS=PAY_SUBS.map(function(t){return t[0];});
   var ALL_SUB_KEYS=PO_SUB_KEYS.concat(PAY_SUB_KEYS);
@@ -4567,6 +4567,7 @@
     if(prodTab==='other'){ renderOtherPayments(b); return; }
     if(prodTab==='paydue'){ renderPaymentsDue(b); return; }
     if(prodTab==='payreport'){ renderPaymentsReport(b); return; }
+    if(prodTab==='bysupplier'){ renderBySupplier(b); return; }
     if(prodTab==='cashflow'){ b.innerHTML='<div class="count">Loading…</div>'; fetch('/api/supply/cashflow').then(function(r){return r.json();}).then(function(d){ renderCashflow(d); }).catch(function(e){ b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>'; }); return; }   // Cash Flow now lives under PAYMENTS
     if(prodTab==='xerocompare'){ renderXeroCompare(b); return; }
     if(prodTab==='barcodes'){ b.innerHTML='<div class="count">Loading…</div>';
@@ -6831,6 +6832,32 @@
             invalidateDerived(); b.textContent='✓';
           }).catch(function(e){ b.disabled=false; alert('Save failed: '+(e.message||e)); }); }; }); }
     draw(); }
+  // PAYMENTS ▸ By Supplier — one row per supplier PO: invoice total + starting / completion / balance (summed).
+  // Filter by supplier / production / batch; PO opens the drawer; a totals footer sums the current view.
+  function renderBySupplier(b){ b.innerHTML='<div class="count">Loading…</div>';
+    fetch('/api/supply/payments-by-supplier').then(function(r){return r.json();}).then(function(rows){
+      rows=Array.isArray(rows)?rows:[];
+      var st={sup:'',prod:'',batch:''};
+      function uniq(k){ var s={}; rows.forEach(function(r){ if(r[k])s[r[k]]=1; }); return Object.keys(s); }
+      var sups=uniq('supplier').sort(), prods=uniq('prod_no').sort(function(a,c){return (parseInt(c,10)||0)-(parseInt(a,10)||0);}), batches=uniq('batch_id').sort();
+      function sel(id,label,opts,val){ return '<span class="pill-lbl">'+label+'</span><select class="flt" id="'+id+'" style="width:auto;padding:3px 6px"><option value="">All</option>'+opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>'; }
+      b.innerHTML='<div class="bar">'+sel('bs-sup','Supplier',sups,st.sup)+' '+sel('bs-prod','PROD#',prods,st.prod)+' '+sel('bs-batch','Batch',batches,st.batch)+'<span class="count" id="bs-count" style="margin-left:10px"></span></div><div id="bs-grid"></div>';
+      function draw(){ var f=rows.filter(function(r){ return (!st.sup||r.supplier===st.sup)&&(!st.prod||String(r.prod_no)===st.prod)&&(!st.batch||r.batch_id===st.batch); });
+        var t={iv:0,st:0,co:0,ba:0};
+        var body=f.map(function(r){ t.iv+=Number(r.invoice_total)||0; t.st+=Number(r.starting)||0; t.co+=Number(r.completion)||0; t.ba+=Number(r.balance)||0;
+          return '<tr><td class="l">'+esc(r.supplier)+'</td><td class="l">'+(r.prod_no?'P'+esc(r.prod_no):'')+'</td><td class="l">'+esc(r.batch_id||'')+'</td>'
+            +'<td class="l"><button class="lnk-btn bs-po" data-po="'+esc(r.po)+'" title="open '+esc(r.po)+' in a drawer" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer">'+esc(r.po)+'</button></td>'
+            +'<td style="text-align:right">'+money(r.invoice_total)+'</td><td style="text-align:right">'+money(r.starting)+'</td><td style="text-align:right">'+money(r.completion)+'</td><td style="text-align:right">'+money(r.balance)+'</td></tr>'; }).join('');
+        var cnt=document.getElementById('bs-count'); if(cnt)cnt.textContent=f.length+' PO'+(f.length===1?'':'s')+(st.sup?'':' · totals span mixed currencies — filter to a supplier for a clean sum');
+        document.getElementById('bs-grid').innerHTML='<div class="tw"><table class="sup-tbl" style="width:max-content;min-width:100%"><thead><tr><th class="l">Supplier</th><th class="l">PROD#</th><th class="l">Batch</th><th class="l">PO</th><th style="text-align:right">Invoice total</th><th style="text-align:right">Starting</th><th style="text-align:right">Completion</th><th style="text-align:right">Balance</th></tr></thead><tbody>'
+          +(body||'<tr><td colspan="8" class="mut">No payments for this filter.</td></tr>')
+          +'<tr style="border-top:2px solid #cbd5e1;font-weight:700;background:#f8fafc"><td class="l" colspan="4">Total ('+f.length+')</td><td style="text-align:right">'+money(t.iv)+'</td><td style="text-align:right">'+money(t.st)+'</td><td style="text-align:right">'+money(t.co)+'</td><td style="text-align:right">'+money(t.ba)+'</td></tr></tbody></table></div>';
+        document.querySelectorAll('#bs-grid .bs-po').forEach(function(x){ x.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(x.dataset.po,'pay'); else gotoPO(x.dataset.po,'pay'); }; }); }
+      document.getElementById('bs-sup').onchange=function(){ st.sup=this.value; draw(); };
+      document.getElementById('bs-prod').onchange=function(){ st.prod=this.value; draw(); };
+      document.getElementById('bs-batch').onchange=function(){ st.batch=this.value; draw(); };
+      draw();
+    }).catch(function(e){ b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>'; }); }
   function renderPaymentsReport(b){ b.innerHTML='<div class="count">Loading…</div>';
     fetch('/api/supply/payments-report').then(function(r){return r.json();}).then(function(rows){
       // date filter: type a date (or partial, e.g. 2026-06) into From / To — no date picker

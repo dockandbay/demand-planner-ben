@@ -2203,6 +2203,22 @@ app.get('/api/supply/:section', async (req, res) => {
           .sort((a, b) => a.dt < b.dt ? 1 : a.dt > b.dt ? -1 : (a.supplier < b.supplier ? -1 : 1));
         return res.json(out);
       }
+      case 'payments-by-supplier': {
+        // One row per supplier PO with its payment breakdown: agreed final invoice total, starting deposit,
+        // completion, and balance (balance_1 + balance_2 summed). Client filters by supplier / production / batch.
+        return res.json(await q(`
+          SELECT o.po, coalesce(o.supplier_name,'') supplier, coalesce(o.prod_no,'') prod_no, coalesce(o.batch_id,'') batch_id,
+            round(coalesce(o.supplier_invoice_total,0),2) invoice_total,
+            round(coalesce(o.pay_start_deposit_assigned,0),2) starting,
+            round(coalesce(o.pay_completion_assigned,0),2) completion,
+            round(coalesce(o.pay_balance_1_amount,0)+coalesce(o.pay_balance_2_amount,0),2) balance,
+            coalesce(o.status,'') status
+          FROM planner.purchase_orders o
+          WHERE EXISTS (SELECT 1 FROM planner.suppliers s WHERE lower(trim(s.name))=lower(trim(o.supplier_name)) AND coalesce(s.kind,'')='supplier')
+            AND (coalesce(o.supplier_invoice_total,0)<>0 OR coalesce(o.pay_start_deposit_assigned,0)<>0
+                 OR coalesce(o.pay_completion_assigned,0)<>0 OR coalesce(o.pay_balance_1_amount,0)<>0 OR coalesce(o.pay_balance_2_amount,0)<>0)
+          ORDER BY o.supplier_name, o.prod_no, o.po`));
+      }
       case 'actions': {  // derived exceptions (spec B3.2). Each carries an inline-fix descriptor
         // (fix/target/field) plus target_key — the key the fix endpoint addresses (po number, or
         // the deposit row id now that deposits are id-keyed). Lifecycle state (dismiss/snooze/done)

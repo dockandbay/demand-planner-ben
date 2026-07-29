@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.264 - PAYMENTS ▸ By Supplier report
+- New **PAYMENTS ▸ By Supplier** sub-tab: one row per supplier PO showing **final invoice total · starting · completion · balance** (balance = balance_1 + balance_2 summed), with **Supplier / PROD# / Batch** filters and a totals footer. PO refs open the drawer.
+- New server section `GET /api/supply/payments-by-supplier` (server.mjs). No schema change.
+- Note: totals across mixed-currency suppliers are flagged in the count line — filter to a supplier for a clean sum.
+
 ## v26.263 - Filter persistence across PO grid, Shipments and Order Plan
 - Structured filters (status pills, country, PROD#, batch, supplier, category, release, group, action-item pills, Focus) now **persist across navigation and page reload** for the **Purchase Orders grid, Shipments grid and Order Plan**, resetting only after **~1h of no use** (sliding TTL via localStorage; every interaction refreshes the clock).
 - Free-text **search boxes are intentionally NOT persisted** (a sticky search that silently hides rows is a footgun), and deep-linking to a specific PO/shipment/exception still overrides the saved filters.
