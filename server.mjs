@@ -2143,12 +2143,20 @@ app.get('/api/supply/:section', async (req, res) => {
         // Xero AccountCode per PO line: AU delivery → always '620.00 AU'; else the deposit the PO is
         // assigned to (deposits.xero_account_code by deposit_ref); else the production's code
         // (prod_numbers.xero_account_code by prod_no). supplier_code = suppliers.code (the 2-letter code).
+        // AU delivery → always '620.00 AU'. Otherwise prefer the assigned deposit's Xero code, but fall
+        // back to the production-number code (prod_numbers.xero_account_code, e.g. P56 → '620.36 P56') when
+        // the PO has no deposit — the 'NO DEPOSIT' sentinel or a deposit with no code must NOT swallow the
+        // line into a blank (previously the non-empty sentinel took the deposit branch and returned null).
         const ACCT = `CASE
             WHEN upper(coalesce(nullif(o.country_code,''),(SELECT br.country_code FROM planner.branches br WHERE br.name=o.branch),''))='AU' THEN '620.00 AU'
-            WHEN coalesce(o.deposit_ref,'')<>'' THEN (SELECT d.xero_account_code FROM planner.deposits d WHERE d.reference=o.deposit_ref AND coalesce(d.xero_account_code,'')<>'' ORDER BY d.id LIMIT 1)
-            ELSE (SELECT pn.xero_account_code FROM planner.prod_numbers pn
-                   WHERE regexp_replace(upper(coalesce(pn.prod_no,'')),'^P','')=regexp_replace(upper(coalesce(o.prod_no,'')),'^P','')
-                     AND coalesce(pn.xero_account_code,'')<>'' LIMIT 1) END`;
+            ELSE coalesce(
+              (SELECT d.xero_account_code FROM planner.deposits d
+                 WHERE d.reference=o.deposit_ref AND coalesce(o.deposit_ref,'')<>'' AND upper(o.deposit_ref)<>'NO DEPOSIT'
+                   AND coalesce(d.xero_account_code,'')<>'' ORDER BY d.id LIMIT 1),
+              (SELECT pn.xero_account_code FROM planner.prod_numbers pn
+                 WHERE regexp_replace(upper(coalesce(pn.prod_no,'')),'^P','')=regexp_replace(upper(coalesce(o.prod_no,'')),'^P','')
+                   AND coalesce(pn.xero_account_code,'')<>'' LIMIT 1)
+            ) END`;
         const SUPC = nm => `(SELECT s.code FROM planner.suppliers s WHERE lower(trim(s.name))=lower(trim(${nm})) LIMIT 1)`;
         // only payments to a supplier whose master kind = 'supplier' (excludes freight / transfer / other kinds)
         const KIND = nm => `EXISTS (SELECT 1 FROM planner.suppliers s WHERE lower(trim(s.name))=lower(trim(${nm})) AND coalesce(s.kind,'')='supplier')`;

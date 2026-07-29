@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.256 - Xero export: NO-DEPOSIT PO payments derive account code from production no.
+- Payments Report → Xero copy/download no longer leaves the `*AccountCode` column blank for PO payments that have no deposit (or a deposit with no Xero code). The code now falls back to the production number's Xero code (`prod_numbers.xero_account_code`, e.g. P56 → `620.36 P56`). AU deliveries still always get `620.00 AU`.
+- Root cause: the `NO DEPOSIT` sentinel is a non-empty string, so the old logic took the deposit branch, found no matching deposit, returned NULL, and never fell through to the production-code lookup. Rewrote to: AU → coalesce(assigned-deposit code, production code). Fixed 253 historic blank lines in the sandbox.
+- `server.mjs` payments-report only; no schema change, no migration.
+
 ## v26.255 - PO edit: "Ship to" shows inherited branch country
 - When a PO has no country override, the "Ship to" field now shows the actual inherited country (e.g. `AU (inherited from branch)`) instead of the generic "branch country" label, so it's clear which country will be used.
 
