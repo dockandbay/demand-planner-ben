@@ -5204,6 +5204,7 @@ app.post('/api/supply/po/:po/cin7-date', async (req, res) => {
     // optimistically sync the local ERP mirror so the "Date ≠ ERP" flag clears immediately (n8n re-confirms later)
     let mirrored = false;
     try { const u = await pool.query(`UPDATE planner.erp_purchase_orders SET final_delivery_date=$2::date, synced_at=now() WHERE po=$1`, [po, completion]); mirrored = u.rowCount > 0; } catch (e) { /* non-fatal — Cin7 write already succeeded */ }
+    logPoChange(po, 'Uploaded to ERP', 'delivery date → ' + (completion || edd || ''), authUser(req));   // audit trail
     res.json({ ok: true, cin7_id: cin7Id, estimatedDeliveryDate: edd, erp_mirror_updated: mirrored,
       approval_preserved: curApproved === undefined ? 'unchanged' : (curApproved ? 'approved' : 'draft'),
       link: 'https://go.cin7.com/Cloud/TransactionEntry/TransactionEntry.aspx?idCustomerAppsLink=951111&OrderId=' + encodeURIComponent(cin7Id) });
@@ -5441,6 +5442,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
     const ownLines = lines.filter(l => !l.crossdock);
     const total_units = ownLines.reduce((s, l) => s + (Number(l.qty) || 0), 0);
     const total_cost = ownLines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.price) || 0), 0);
+    logPoChange(po, 'Uploaded to ERP', lines.length + ' line' + (lines.length === 1 ? '' : 's') + ' (' + mode + ')', authUser(req));   // audit trail
     res.json({ ok: true, mode, cin7_id: newId, cin7_member_id: memberId || null, cin7_branch_id: branchId || null, lines: lines.length, approved: lines.filter(l => l.approved_price).length, erp_mirror_updated: mirrored, validation, cin7_trace: trace,
       total_units, total_cost: Math.round(total_cost * 100) / 100, currency: poRow.currency || 'USD',
       link: newId ? 'https://go.cin7.com/Cloud/TransactionEntry/TransactionEntry.aspx?idCustomerAppsLink=951111&OrderId=' + encodeURIComponent(newId) : null });
@@ -5591,6 +5593,13 @@ app.post('/api/supply/po/:po', async (req, res) => {
       }
     } catch (e) { /* non-fatal — fall through */ }
   }
+  // Audit log: snapshot the prior values of any tracked fields in this edit, so the post-update callback can
+  // record exactly what changed (old → new) on the PO timeline.
+  const _trackKeys = Object.keys(body).filter(k => PO_TRACK[k]);
+  let _trackOld = {};
+  if (_trackKeys.length) { try { _trackOld = (await pool.query(
+    `SELECT ${_trackKeys.map(k => `${k}::text AS ${k}`).join(',')} FROM planner.purchase_orders WHERE po=$1`, [req.params.po])).rows[0] || {}; } catch (e) {} }
+  const _trackBy = authUser(req) || null;
   patch(res, 'planner.purchase_orders', 'po', req.params.po, {
     status: 'text', ship_type: 'text', deposit_ref: 'text', shipment_ref: 'text', prod_no: 'text',
     starred: 'boolean',   // ⭐ Focus / favourite toggle (migration 082)
@@ -5619,7 +5628,8 @@ app.post('/api/supply/po/:po', async (req, res) => {
   // edit can move a value shown in the grid. Purely detail-panel / cosmetic fields (client text, refs, packing,
   // notes) skip the ~0.4s row query entirely: the client just repaints the cell it already changed.
   (Object.keys(body).some(k => !PO_COSMETIC_FIELDS.has(k))
-    ? async () => ({ row: (await pool.query(PO_ROWS_SQL + ' WHERE calc4.po = $1', [req.params.po])).rows[0] || null })
+    ? async () => { if (_trackKeys.length) await logPoFieldChanges(req.params.po, _trackKeys, _trackOld, body, _trackBy);
+        return { row: (await pool.query(PO_ROWS_SQL + ' WHERE calc4.po = $1', [req.params.po])).rows[0] || null }; }
     : undefined));
 });
 // Advance a PO (and every PO on the same master shipment still in PRODUCTION) to SHIPPING. Offered on the
@@ -5937,7 +5947,11 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
     const dtc = (await pool.query(`SELECT cartons, cbm, gross_weight_kg, dimensions, coalesce(entered_by,'') entered_by,
       to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at FROM planner.dtc_shipment_details WHERE po=$1`, [po])).rows[0] || null;
     const ship = await poShipObj(po);
+    // Record-of-change audit trail (migration 158) — shown inline in the timeline, newest first. Defensive: empty if the table isn't there yet.
+    const changes = await pool.query(`SELECT event, detail, coalesce(changed_by,'') changed_by,
+      to_char(changed_at,'YYYY-MM-DD HH24:MI') created_at FROM planner.po_change_log WHERE po=$1 ORDER BY changed_at DESC LIMIT 200`, [po]).catch(() => ({ rows: [] }));
     res.json({ ship, lines: lines.rows, deposit: deposit.rows, payments: payments.rows, flexport: flexport.rows, dtc,
+      changes: changes.rows,
       crossdock_lines: xdMaster.rows,
       sup_invoice: supInv.rows[0] || null,
       sup_docs: supDocs.rows.filter(x => x.category !== 'client'),
@@ -7839,6 +7853,29 @@ app.post('/api/supply/bi/erp-compare/ignore', async (req, res) => {
 // Deliberately small/conservative: anything touching DtC approval (pack_*, sales/client refs), dates, amounts,
 // %, deposit, shipment, branch, status, prod#/batch is NOT here, so those still refresh the row.
 const PO_COSMETIC_FIELDS = new Set(['client', 'dispatch_order_ref', 'final_delivery_address', 'branch_delivery_notes', 'notes']);
+// PO audit log (migration 158): fields whose edits are recorded on the timeline as a "record of change".
+const PO_TRACK = { status: 'Status', end_production_overide: 'Production end date', shipment_ref: 'Shipment assignment',
+  deposit_ref: 'Deposit assignment',
+  pay_start_deposit_assigned: 'Start deposit paid', pay_start_deposit_date: 'Start deposit date',
+  pay_completion_assigned: 'Completion paid', pay_completion_date: 'Completion date',
+  pay_balance_1_amount: 'Balance 1 paid', pay_balance_1_date: 'Balance 1 date',
+  pay_balance_2_amount: 'Balance 2 paid', pay_balance_2_date: 'Balance 2 date' };
+async function logPoChange(po, event, detail, by) {
+  try { await pool.query(`INSERT INTO planner.po_change_log (po,event,detail,changed_by) VALUES ($1,$2,$3,$4)`, [po, event, detail || null, by || null]); }
+  catch (e) { /* table absent pre-migration 158 — non-fatal, never breaks the underlying save */ }
+}
+async function logPoFieldChanges(po, keys, oldRow, body, by) {
+  const numish = (s) => s !== '' && s != null && !isNaN(Number(s));
+  for (const k of keys) {
+    let nv = (body[k] === '' || body[k] == null) ? '' : String(body[k]).trim();
+    let ov = (oldRow[k] == null) ? '' : String(oldRow[k]).trim();
+    if (/_date$|_overide$/.test(k)) { ov = ov.slice(0, 10); nv = nv.slice(0, 10); }   // date fields: compare the date part only
+    if (numish(ov) && numish(nv)) { if (Number(ov) === Number(nv)) continue; }
+    else if (ov === nv) continue;
+    const f = (v) => v === '' ? '(blank)' : v;
+    await logPoChange(po, PO_TRACK[k] || k, f(ov) + ' → ' + f(nv), by);
+  }
+}
 // Shared PO grid-row query (WITH mastered ... FROM mastered calc4). Reused by the full grid endpoint
 // (+ ORDER BY po) and by /api/supply/po-row/:po (+ WHERE calc4.po=$1) so a single-cell edit refreshes ONE
 // row instead of re-pulling all ~1400 POs (multi-MB). Same SQL = zero drift.

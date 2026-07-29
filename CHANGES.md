@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.266 - PO timeline: record-of-change audit log ⚠️ NEEDS MIGRATION 158
+- **Migration `158_po_change_log.sql`** — new `planner.po_change_log` table. **Run this on the DB** or the audit log stays empty (the code is defensive — everything works without it, just no change records).
+- Editing a PO's **status, production end date, shipment assignment, deposit assignment, or any payment** now writes a **record of change** (old → new + user), and **uploading to ERP** (Cin7 date push / lines push) is logged too.
+- These render **inline in the PO timeline**, distinct from supplier notes ("record of change" badge, grey left-border), interleaved with notes **newest-first**, showing **dd-mmm-yy HH:MM · user**.
+- `server.mjs`: `logPoChange`/`logPoFieldChanges`, hooks in `POST /api/supply/po/:po` + the two Cin7 push endpoints; `po-detail` returns a `changes` array. `supply/inject.html`: timeline merges notes + changes.
+
 ## v26.265 - Manufacturing tab: persisted notes area (+ PO links open drawer)
 - New **📝 Manufacturing notes** free-text area at the top of PURCHASE ORDERS ▸ Manufacturing — team-shared, persisted, shows "last edited by … · <date>". For detailed notes (e.g. SKUs remaining somewhere).
 - Stored in `app_settings` under `manufacturing_notes` (no migration). New `GET /api/supply/manufacturing-notes` + `POST` (supply-edit gated).
