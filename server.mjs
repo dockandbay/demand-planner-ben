@@ -6419,7 +6419,17 @@ app.post('/api/scenario/b2b', async (req, res) => {
         coalesce((SELECT sum(ib.quantity - coalesce(ib.received_quantity,0)) FROM planner.inbound_shipments ib
            WHERE ib.sku=p.sku AND ib.destination_warehouse LIKE $2||'\\_%' AND ib.quantity > coalesce(ib.received_quantity,0)
              AND ib.estimated_delivery_date = (SELECT min(ib2.estimated_delivery_date) FROM planner.inbound_shipments ib2
-                WHERE ib2.sku=p.sku AND ib2.destination_warehouse LIKE $2||'\\_%' AND ib2.quantity > coalesce(ib2.received_quantity,0) AND ib2.estimated_delivery_date >= CURRENT_DATE)),0)::int next_inbound_qty
+                WHERE ib2.sku=p.sku AND ib2.destination_warehouse LIKE $2||'\\_%' AND ib2.quantity > coalesce(ib2.received_quantity,0) AND ib2.estimated_delivery_date >= CURRENT_DATE)),0)::int next_inbound_qty,
+        -- in-production stock that could be pulled/expedited: OPEN Production-status POs carrying this SKU, EXCLUDING
+        -- Direct-to-Client POs (their units are already committed). Any market — branch shown so a redirect is visible.
+        coalesce((SELECT json_agg(json_build_object('po',po2.po,'qty',l2.qty::int,'branch',coalesce(po2.branch,''),
+             'supplier',coalesce(po2.supplier_name,''),'prod_no',coalesce(po2.prod_no,''),
+             'date', to_char(coalesce(po2.delivery_date_overide,po2.landing_date_overide,po2.end_production_overide),'YYYY-MM-DD'))
+             ORDER BY coalesce(po2.delivery_date_overide,po2.landing_date_overide,po2.end_production_overide) NULLS LAST)
+           FROM planner.purchase_order_lines l2 JOIN planner.purchase_orders po2 ON po2.po=l2.po
+           WHERE l2.sku=p.sku AND coalesce(l2.qty,0)>0 AND coalesce(po2.status,'') ILIKE 'production%'
+             AND coalesce(po2.branch,'') NOT ILIKE '%direct to client%'
+             AND coalesce(po2.branch,'') NOT ILIKE '%jlew%' AND coalesce(po2.branch,'') NOT ILIKE '%next%'), '[]'::json) production
       FROM planner.products p WHERE upper(p.sku) = ANY($1)`, [skus, market, date]);
     res.json({ market: market.toUpperCase(), date, rows });
   } catch (e) { res.status(500).json({ error: e.message }); }

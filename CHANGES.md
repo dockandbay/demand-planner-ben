@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.268 - Scenario ▸ B2B: in-production stock analysis + proposed actions
+- New **"Fulfil from"** toggle on the B2B planner: **On-hand + inbound** / **In production** / **Mix** — controls which stock counts toward Fulfil / Shortfall.
+- Each SKU now shows its **in-production POs** (open Production-status POs carrying the SKU, **Direct-to-Client excluded**) with qty, branch and date; PO opens the drawer.
+- The recommendation cell now **proposes actions**: ship from stock · **⚡ Expedite N from production** (≤4wk usually feasible) · **🏭 Make more & expedite** the residual (or rush air).
+- `server.mjs` b2b endpoint returns a per-SKU `production` array; `supply/inject.html` renders the toggle + actions.
+- Note: POs in Production status include transfer (TRF-) orders — tell me if you want those excluded.
+
 ## v26.267 - Manufacturing tab: "Recently closed" orders
 - Manufacturing tab now shows a **✅ Recently closed manufacturing orders** section: manufacturing-branch POs completed in the **last 30 days**, each with **closed date**, **PROD#**, supplier and its **SKU × qty** lines; PO opens the drawer.
 - (Sandbox currently has no completed manufacturing POs, so the section is empty there — it populates on live.)

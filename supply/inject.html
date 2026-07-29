@@ -8567,13 +8567,14 @@
   var B2B_COS=['UK','US','EU','AU','CA'];
   var _b2bLast=null;
   function b2bWholesale(co,retail){ if(retail==null||retail==='')return null; var r=Number(retail); return (co==='UK'||co==='EU')?(r/1.2*0.5):(r*0.5); }
-  function renderB2B(c){ var st={co:'UK',cur:'USD',keep:6};
+  function renderB2B(c){ var st={co:'UK',cur:'USD',keep:6,src:'mix'};
     c.innerHTML=scenAnnot('b2b')
       +'<div class="bar"><span class="pill-lbl">Client</span><input class="fci txt" id="b2b-client" placeholder="client name" style="width:130px">'
         +'<span class="pill-lbl" style="margin-left:6px">Required by</span><input class="fci" id="b2b-date" type="date" style="width:120px;text-align:left" title="inbound landing on/before this date can fulfil the order">'
         +'<span class="pill-lbl" style="margin-left:6px">Market</span>'+B2B_COS.map(function(co){return '<span class="pill'+(co==='UK'?' active':'')+'" data-co="'+co+'">'+co+'</span>';}).join('')
         +'<span class="pill-lbl" style="margin-left:6px">Keep cover</span><input class="fci" id="b2b-keep" value="6" style="width:38px;text-align:right" title="weeks of own-channel cover to reserve before allocating to B2B">wk'
-        +'<span class="pill-lbl" style="margin-left:6px">Rush rate</span><span class="pill active" data-cur="USD">$10/kg</span><span class="pill" data-cur="GBP">£7/kg</span></div>'
+        +'<span class="pill-lbl" style="margin-left:6px">Rush rate</span><span class="pill active" data-cur="USD">$10/kg</span><span class="pill" data-cur="GBP">£7/kg</span>'
+        +'<span class="pill-lbl" style="margin-left:6px" title="which stock to count when deciding if the order can be fulfilled">Fulfil from</span><span class="pill'+(st.src==='onhand'?' active':'')+'" data-src="onhand">On-hand + inbound</span><span class="pill'+(st.src==='inproduction'?' active':'')+'" data-src="inproduction">In production</span><span class="pill'+(st.src==='mix'?' active':'')+'" data-src="mix">Mix</span></div>'
       +'<div class="bar"><textarea id="b2b-lines" placeholder="one per line:  SKU, qty   (e.g.  TOWLB-CAB-LG-NAVY-R, 500)" style="width:340px;height:78px;font:11px ui-monospace,monospace;border:1px solid #d0d0d0;border-radius:5px;padding:6px"></textarea>'
         +'<button class="pill active" id="b2b-run" style="background:#1a1a1a;color:#fff">Analyse order</button></div>'
       +'<div id="b2b-out"></div>';
@@ -8585,11 +8586,12 @@
       document.getElementById('b2b-out').innerHTML='<div class="mut tiny" style="padding:8px">Analysing '+st.co+'…</div>';
       fetch('/api/scenario/b2b',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({market:st.co,date:dt,skus:lines.map(function(l){return l.sku;})})})
         .then(function(r){return r.json();}).then(function(d){ var by={}; (d.rows||[]).forEach(function(r){by[(r.sku||'').toUpperCase()]=r;});
-          var data=lines.map(function(l){ return {qty:l.qty, d:by[l.sku]||{sku:l.sku,name:'(not found)',available:0,recent_units:0,weight:null,retail:null,cogs:null,avg_cost:null,inbound_by_date:0,inbound_total:0,next_inbound_date:null,next_inbound_qty:0}}; });
+          var data=lines.map(function(l){ return {qty:l.qty, d:by[l.sku]||{sku:l.sku,name:'(not found)',available:0,recent_units:0,weight:null,retail:null,cogs:null,avg_cost:null,inbound_by_date:0,inbound_total:0,next_inbound_date:null,next_inbound_qty:0,production:[]}}; });
           _b2bLast={data:data,co:st.co,date:dt}; b2bRender(_b2bLast,st); })
         .catch(function(e){document.getElementById('b2b-out').innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>';}); }
     c.querySelectorAll('.bar .pill[data-co]').forEach(function(p){p.onclick=function(){c.querySelectorAll('.pill[data-co]').forEach(function(x){x.classList.remove('active');});p.classList.add('active');st.co=p.dataset.co; runB2B(false);};});
     c.querySelectorAll('.bar .pill[data-cur]').forEach(function(p){p.onclick=function(){c.querySelectorAll('.pill[data-cur]').forEach(function(x){x.classList.remove('active');});p.classList.add('active');st.cur=p.dataset.cur; if(_b2bLast)b2bRender(_b2bLast,st);};});
+    c.querySelectorAll('.bar .pill[data-src]').forEach(function(p){p.onclick=function(){c.querySelectorAll('.pill[data-src]').forEach(function(x){x.classList.remove('active');});p.classList.add('active');st.src=p.dataset.src; if(_b2bLast)b2bRender(_b2bLast,st);};});
     var _bd=document.getElementById('b2b-date'); if(_bd&&!_bd.value)_bd.value=new Date().toISOString().slice(0,10);   // default required-by = today
     document.getElementById('b2b-date').onchange=function(){ if(_b2bLast)runB2B(false); };
     document.getElementById('b2b-keep').onchange=function(){ var v=parseFloat(this.value); st.keep=(isNaN(v)||v<0)?0:v; if(_b2bLast)b2bRender(_b2bLast,st); };
@@ -8613,17 +8615,29 @@
       var inbBy=d.inbound_by_date||0;
       var projAtDate=Math.max(0, avail - expSold + inbBy);   // stock you can actually ship on the date
       var reserve=Math.ceil(vel*7*keepW), giveable=Math.max(0, projAtDate-reserve);
-      var ful=Math.min(qty,giveable), short=Math.max(0,qty-ful);
-      var coverAfter=vel>0?((projAtDate-ful)/vel/7):999;
+      // Stock-source toggle: fulfil from on-hand+inbound only, in-production only, or a mix. In-production =
+      // OPEN Production-status POs carrying this SKU (Direct-to-Client excluded server-side) that could be expedited.
+      var prodPOs=(d.production||[]), prodQty=prodPOs.reduce(function(s,pp){return s+(Number(pp.qty)||0);},0);
+      var gStock=(st.src==='inproduction')?0:giveable, gProd=(st.src==='onhand')?0:prodQty;
+      var fromStock=Math.min(qty,gStock), fromProd=Math.min(Math.max(0,qty-fromStock),gProd);
+      var ful=fromStock+fromProd, short=Math.max(0,qty-ful);
+      var coverAfter=vel>0?((projAtDate-fromStock)/vel/7):999;   // own-channel cover impact is only from physical stock given
       var air=(short>0&&wt!=null)?(short*wt*rate):null;
       var rev=ws!=null?ws*qty:null, mar=(ws!=null&&cost!=null)?((ws-cost)*qty):null;
       tReq+=qty;tFul+=ful;tShort+=short; if(air)tAir+=air; if(rev)tRev+=rev; if(mar)tMar+=mar;
       var nextTxt=d.next_inbound_date?units(d.next_inbound_qty)+' '+fd(d.next_inbound_date):'';
       var rec,cls;
-      if(short>0){ rec='Short '+units(short)+(air!=null?' · rush air '+sym+fmInt(air):' · need weight')+(nextTxt?' · next in '+nextTxt:''); cls='bg-red'; nShort++; }
+      if(short>0){ rec='Short '+units(short); cls='bg-red'; nShort++; }
+      else if(fromProd>0){ rec='Coverable — expedite production'; cls='bg-amber'; nOK++; }
       else if(coverAfter<2){ rec='Hold — would stock out'; cls='bg-red'; nOOS++; }
       else if(coverAfter<keepW){ rec='Caution — '+coverAfter.toFixed(0)+'wk cover left'; cls='bg-amber'; nTight++; }
       else { rec='Give ✓ — '+(coverAfter>=999?'no sales':coverAfter.toFixed(0)+'wk left'); cls='bg-green'; nOK++; }
+      // proposed actions + in-production source detail (rendered in the recommendation cell, which wraps)
+      var acts=[];
+      if(fromStock>0 && (fromProd>0||short>0)) acts.push('Ship '+units(fromStock)+' from stock');
+      if(fromProd>0) acts.push('⚡ Expedite '+units(fromProd)+' from production (≤4wk usually feasible)');
+      if(short>0) acts.push('🏭 Make more &amp; expedite '+units(short)+(air!=null?' <span class="mut">(or rush air '+sym+fmInt(air)+')</span>':''));
+      var prodDetail = prodPOs.length ? '<div class="tiny mut" style="margin-top:3px">In production ('+units(prodQty)+'): '+prodPOs.slice(0,4).map(function(pp){ return '<button class="lnk-btn b2b-prod-po" data-po="'+esc(pp.po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer">'+esc(pp.po)+'</button>'+(pp.branch?' <span style="opacity:.7">'+esc(pp.branch)+'</span>':'')+' ×'+units(pp.qty)+(pp.date?' · '+fd(pp.date):''); }).join('<br>')+(prodPOs.length>4?'<br>+'+(prodPOs.length-4)+' more':'')+'</div>' : (st.src!=='onhand'?'<div class="tiny mut" style="margin-top:3px">No open production POs for this SKU.</div>':'');
       var availSub='now '+units(avail)+(expSold>0?' − '+units(expSold)+' sold':'')+(inbBy>0?' + '+units(inbBy)+' in':'');
       return '<tr><td class="l" style="white-space:nowrap"><b>'+esc(d.sku)+'</b></td>'
         +'<td>'+units(qty)+'</td>'
@@ -8637,7 +8651,8 @@
         +'<td>'+(ws!=null?csym+fmInt(ws):'<span class="mut tiny">no price</span>')+'</td>'
         +'<td>'+(rev!=null?csym+fmInt(rev):'—')+'</td>'
         +'<td>'+(mar!=null?csym+fmInt(mar):'<span class="mut tiny">no cost</span>')+'</td>'
-        +'<td class="l" style="white-space:normal;min-width:150px;max-width:230px"><span class="tool-badge '+cls+'" style="white-space:normal;display:inline-block;line-height:1.25">'+esc(rec)+'</span></td></tr>';
+        +'<td class="l" style="white-space:normal;min-width:170px;max-width:290px"><span class="tool-badge '+cls+'" style="white-space:normal;display:inline-block;line-height:1.25">'+esc(rec)+'</span>'
+        +(acts.length?'<div class="tiny" style="margin-top:3px;line-height:1.35">'+acts.join('<br>')+'</div>':'')+prodDetail+'</td></tr>';
     }).join('');
     // ---- order-level verdict: take it? stock impact? worth it after air cost? ----
     var net=tMar-tAir;
@@ -8669,7 +8684,8 @@
       +'<div class="kpi"><div class="l">Net after air</div><div class="v"'+(net<0?' style="color:#991b1b"':'')+'>'+csym+fmInt(net)+'</div></div></div>';
     document.getElementById('b2b-out').innerHTML=verdict+kpi
       +'<div class="tw"><table><thead><tr><th class="l">SKU</th><th>Req</th><th>Avail @ '+(orderDate?fd(orderDate):'date')+'</th><th>Keep</th><th>Fulfil</th><th>Short</th><th>Cover after</th><th>Wt kg</th><th>Air cost</th><th>Wholesale</th><th>Revenue</th><th>Margin</th><th class="l">Recommendation</th></tr></thead><tbody>'+rowsH+'</tbody></table></div>'
-      +'<div class="mut tiny" style="margin-top:4px"><b>Avail @ date</b> = on-hand today − own-channel sales between now and the required-by date + inbound landing by then (so a later date both sells down stock and lands more inbound). <b>Keep</b> = '+keepW+'wk of own-channel cover (velocity × '+keepW+'wk) held back before giving to B2B. <b>Fulfil</b> = min(requested, avail @date − keep); <b>Short</b> = the rest, rushed by air. Wholesale = 50% of ex-VAT retail (UK/EU ÷1.2). Air = short × unit weight × '+sym+rate+'/kg. Margin = (wholesale − market COGS, 3PL final; else avg PO cost) × qty; net after air in '+sym+'.</div>'; }
+      +'<div class="mut tiny" style="margin-top:4px"><b>Avail @ date</b> = on-hand today − own-channel sales between now and the required-by date + inbound landing by then (so a later date both sells down stock and lands more inbound). <b>Keep</b> = '+keepW+'wk of own-channel cover (velocity × '+keepW+'wk) held back before giving to B2B. <b>Fulfil</b> = min(requested, avail @date − keep); <b>Short</b> = the rest, rushed by air. Wholesale = 50% of ex-VAT retail (UK/EU ÷1.2). Air = short × unit weight × '+sym+rate+'/kg. Margin = (wholesale − market COGS, 3PL final; else avg PO cost) × qty; net after air in '+sym+'. <b>Fulfil from</b> switches whether stock, in-production POs (open Production status, Direct-to-Client excluded — expeditable, ≤4wk usually feasible), or both count toward Fulfil.</div>';
+    document.querySelectorAll('#b2b-out .b2b-prod-po').forEach(function(x){ x.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(x.dataset.po,'oplan'); else gotoPO(x.dataset.po,'oplan'); }; }); }
   function ensureScenarioRoot(){ if(document.getElementById('scenario-root'))return;
     var app=document.getElementById('app')||document.body; if(!app)return;
     var el=document.createElement('div'); el.id='scenario-root';
