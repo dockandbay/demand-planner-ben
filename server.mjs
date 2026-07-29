@@ -2260,6 +2260,21 @@ app.get('/api/supply/:section', async (req, res) => {
         }
         return res.json({ rows, monthly, default_days: 7 });
       }
+      case 'quality-docs': {   // SUPPLY ▸ Quality Control — list all QC docs (metadata only, no bytea). Migration 160.
+        const type = String(req.query.type || '').trim(), sup = String(req.query.supplier || '').trim(),
+          prod = String(req.query.prod || '').trim(), batch = String(req.query.batch || '').trim(), qs = String(req.query.q || '').trim();
+        const w = [], p = []; let i = 1;
+        if (type) { w.push(`doc_type=$${i++}`); p.push(type); }
+        if (sup) { w.push(`lower(coalesce(supplier_name,''))=lower($${i++})`); p.push(sup); }
+        if (prod) { w.push(`coalesce(prod_no,'')=$${i++}`); p.push(prod); }
+        if (batch) { w.push(`coalesce(batch_id,'')=$${i++}`); p.push(batch); }
+        if (qs) { w.push(`(filename ILIKE '%'||$${i}||'%' OR coalesce(po,'') ILIKE '%'||$${i}||'%' OR coalesce(supplier_name,'') ILIKE '%'||$${i}||'%' OR coalesce(prod_no,'') ILIKE '%'||$${i}||'%' OR coalesce(batch_id,'') ILIKE '%'||$${i}||'%' OR doc_type ILIKE '%'||$${i}||'%')`); p.push(qs); i++; }
+        const sql = `SELECT id, doc_type, filename, coalesce(mime,'') mime, coalesce(byte_size,0) byte_size,
+            coalesce(prod_no,'') prod_no, coalesce(batch_id,'') batch_id, coalesce(po,'') po, coalesce(supplier_name,'') supplier_name,
+            coalesce(uploaded_by,'') uploaded_by, coalesce(uploader_kind,'') uploader_kind, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at
+          FROM planner.quality_docs ${w.length ? 'WHERE ' + w.join(' AND ') : ''} ORDER BY created_at DESC LIMIT 2000`;
+        return res.json((await pool.query(sql, p).catch(() => ({ rows: [] }))).rows);
+      }
       case 'actions': {  // derived exceptions (spec B3.2). Each carries an inline-fix descriptor
         // (fix/target/field) plus target_key — the key the fix endpoint addresses (po number, or
         // the deposit row id now that deposits are id-keyed). Lifecycle state (dismiss/snooze/done)
@@ -4323,6 +4338,34 @@ app.post('/api/supply/po-doc-upload', async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, uploaded_by, category)
       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`, [b.po, b.filename || 'document', b.mime || 'application/octet-stream', buf.length, buf, b.uploaded_by || 'admin', b.category || 'document']);
     res.json({ id: r.rows[0].id, byte_size: buf.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// ── SUPPLY ▸ Quality Control (migration 160): test reports / GRS certs etc., stored in-DB, mapped to prod/batch/PO.
+// Admin upload (supply-edit gated by the global write guard). Requires at least one of prod_no / batch_id / po.
+app.post('/api/supply/quality-doc', async (req, res) => {
+  const b = req.body || {};
+  if (!b.doc_type || !b.data_base64) return res.status(400).json({ error: 'doc_type and data_base64 required' });
+  if (!(b.prod_no || b.batch_id || b.po)) return res.status(400).json({ error: 'assign at least one of production / batch / PO' });
+  try {
+    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    const r = await pool.query(`INSERT INTO planner.quality_docs (doc_type, filename, mime, byte_size, data, prod_no, batch_id, po, supplier_name, uploaded_by, uploader_kind)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'admin') RETURNING id`,
+      [String(b.doc_type), b.filename || 'document', b.mime || 'application/octet-stream', buf.length, buf,
+       b.prod_no || null, b.batch_id || null, b.po || null, b.supplier_name || null, authUser(req) || 'admin']);
+    res.json({ id: r.rows[0].id, byte_size: buf.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/quality-doc/:id/delete', async (req, res) => {
+  try { const r = await pool.query(`DELETE FROM planner.quality_docs WHERE id=$1`, [req.params.id]); res.json({ ok: true, deleted: r.rowCount }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/quality-doc/:id', async (req, res) => {
+  try {
+    const r = (await pool.query(`SELECT filename, mime, data FROM planner.quality_docs WHERE id=$1`, [req.params.id])).rows[0];
+    if (!r) return res.status(404).json({ error: 'not found' });
+    res.setHeader('Content-Type', r.mime || 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'attachment; filename="' + String(r.filename || 'document').replace(/"/g, '') + '"');
+    res.send(r.data);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Admin PO ▸ DOCUMENTS tab: approve / reject a supplier-submitted document (with notes). Rejection returns the
@@ -8553,6 +8596,41 @@ app.post('/api/portal/logout', portalAuth, async (req, res) => {
 });
 
 app.get('/api/portal/me', portalAuth, (req, res) => res.json({ email: req.portal.email, suppliers: req.portal.suppliers }));
+// Supplier portal ▸ Quality Control (migration 160): the supplier's own uploaded QC docs, scoped to their supplier(s).
+app.get('/api/portal/quality-docs', portalAuth, async (req, res) => {
+  try {
+    const sups = (req.portal.suppliers || []).map(s => String(s).toLowerCase());
+    if (!sups.length) return res.json([]);
+    const r = await pool.query(`SELECT id, doc_type, filename, coalesce(byte_size,0) byte_size, coalesce(prod_no,'') prod_no,
+        coalesce(batch_id,'') batch_id, coalesce(po,'') po, coalesce(uploader_kind,'') uploader_kind, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at
+      FROM planner.quality_docs WHERE lower(coalesce(supplier_name,'')) = ANY($1) ORDER BY created_at DESC LIMIT 500`, [sups]);
+    res.json(r.rows);
+  } catch (e) { res.json([]); }
+});
+app.post('/api/portal/quality-doc', portalAuth, async (req, res) => {
+  const b = req.body || {};
+  if (!b.doc_type || !b.data_base64) return res.status(400).json({ error: 'doc_type and file required' });
+  if (!(b.prod_no || b.batch_id || b.po)) return res.status(400).json({ error: 'assign at least one of production / batch / PO' });
+  const sup = (req.portal.suppliers || [])[0] || null;   // scope to the logged-in supplier
+  try {
+    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    const r = await pool.query(`INSERT INTO planner.quality_docs (doc_type, filename, mime, byte_size, data, prod_no, batch_id, po, supplier_name, uploaded_by, uploader_kind)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'supplier') RETURNING id`,
+      [String(b.doc_type), b.filename || 'document', b.mime || 'application/octet-stream', buf.length, buf,
+       b.prod_no || null, b.batch_id || null, b.po || null, sup, req.portal.email || null]);
+    res.json({ id: r.rows[0].id, byte_size: buf.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/portal/quality-doc/:id', portalAuth, async (req, res) => {
+  try {
+    const sups = (req.portal.suppliers || []).map(s => String(s).toLowerCase());
+    const r = (await pool.query(`SELECT filename, mime, data, lower(coalesce(supplier_name,'')) sn FROM planner.quality_docs WHERE id=$1`, [req.params.id])).rows[0];
+    if (!r || (sups.length && r.sn && sups.indexOf(r.sn) < 0)) return res.status(404).json({ error: 'not found' });
+    res.setHeader('Content-Type', r.mime || 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'attachment; filename="' + String(r.filename || 'document').replace(/"/g, '') + '"');
+    res.send(r.data);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // Shared portal renderer (generated from inject.html). Served to the supplier portal page.
 let PORTAL_VIEW_JS = DEV ? null : (() => { try { return readFileSync(new URL('./supply/portal-view.js', import.meta.url), 'utf8'); } catch { return '/* portal-view.js missing */'; } })();

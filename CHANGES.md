@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.274 - SUPPLY ▸ Quality Control (SUG-0001) ⚠️ NEEDS MIGRATION 160
+- New top-level **SUPPLY ▸ Quality Control**: manage product test reports, GRS transaction/scope certificates, inspection & compliance docs. Files stored **in the database** (bytea), uploaded by **D&B admin** (Quality Control tab) **and the supplier portal** (new **Quality Control** tab). Each doc maps flexibly to **production # / batch # / PO** (GRS certs usually map to a batch since they span POs).
+- Admin view: table of all docs (Type · File · PO · Supplier · PROD# · Batch · Uploaded), filter by type + search (spans all), download, delete. PO refs open the drawer.
+- Supplier portal: generic upload space (file + type + prod/batch/PO) scoped to their supplier; they see their own uploads.
+- **Migration `160_quality_docs.sql`** — new `planner.quality_docs` table. Endpoints defensive if absent.
+- `server.mjs`: admin `quality-docs` list + `quality-doc` upload/download/delete; portal `quality-docs`/`quality-doc` (portalAuth-scoped). `supply/inject.html`: QC section. `supply/portal-view.js`: portal QC tab.
+- Doc types: Test report · GRS transaction certificate · GRS scope certificate · Inspection report · Compliance certificate · Material certificate · Packaging spec · Other.
+
 ## v26.273 - CONFIG ▸ Email log (admin-only) ⚠️ NEEDS MIGRATION 159
 - New **CONFIG ▸ Email log** (admin-only): every email sent via Resend is logged as it goes out (mentions, escalations, magic links, portal reminders, report exports). Shows **sent-per-month** counts (last 12 months), a **date from/to** filter (**default last 7 days**), and a **search** box that spans all dates (overrides the date range).
 - **Migration `159_email_log.sql`** — new `planner.email_log` table. Logging is defensive (no table = no-op, never blocks a send). Captures sends **from deploy forward** (Resend has no list-all API for history).

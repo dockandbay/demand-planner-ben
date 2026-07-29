@@ -717,7 +717,7 @@
 <script>
 (function(){
   var SECTIONS=[['actions','ACTIONS'],['reports','BI & REPORTS'],['purchase-orders','PURCHASE ORDERS'],['order-plan','ORDER PLAN'],
-    ['payments','PAYMENTS'],['samples','SAMPLES']];   // CONFIG is now a top-level view (see enterConfig); SHIPMENTS lives under the PURCHASE ORDERS sub-nav (poSub 'shipments'); PAYMENTS umbrella holds Deposits / Other Payments / Payments Due / Payments Report
+    ['payments','PAYMENTS'],['samples','SAMPLES'],['quality-control','QUALITY CONTROL']];   // CONFIG is now a top-level view (see enterConfig); SHIPMENTS lives under the PURCHASE ORDERS sub-nav (poSub 'shipments'); PAYMENTS umbrella holds Deposits / Other Payments / Payments Due / Payments Report
   // REPORTS is a parent tab; these are its sub-tabs (the read-across views).
   var REPORT_SECTIONS=[['metrics','METRICS'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
     ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['supplier-timing','SUPPLIER DELAYS'],['directclient','DIRECT TO CLIENT'],['flexport','FLEXPORT']];   // ERP COMPARE moved to ACTIONS ▸ ERP Compare sub-tab; CASH FLOW moved to PAYMENTS ▸ Cash Flow
@@ -729,6 +729,7 @@
     reports:'<b>SUPPLY ▸ Reports.</b> The read-across views, pick one from the sub-tabs: <b>What\'s Next</b> (forward calendar), <b>Pipeline</b> (every PO by stage), <b>Payments</b> (the run register), <b>Cash Flow</b> (itemised monthly payments) and <b>Flexport</b> (the Flexport shipment feed).',
     'purchase-orders':'<b>SUPPLY ▸ Purchase Orders.</b> Inline-editable management grid (default: in progress). Status is colour-coded; deposit ref is a lookup; <b>value est = Σ(qty×cost) from the order plan</b>. Dates are the final used dates (M=manual, FLEX, S=shipment, calc=lead-time); edit overrides in <b>PLAN</b>. Completion = delivery +7 (the Fulfil/Cin7 date). Expand <b>PLAN</b> for the payment plan, dates, landed cost and linked records.',
     'order-plan':'<b>SUPPLY ▸ Order Plan.</b> PO×SKU lines with carton checks (p = partial, not a full carton multiple).',
+    'quality-control':'<b>SUPPLY ▸ Quality Control.</b> Test reports, GRS transaction/scope certificates, inspection &amp; compliance docs — uploaded by D&amp;B or the supplier portal, stored in the database. Each maps to a production / batch / PO (GRS certs usually map to a batch as they span POs). Filter by type or search across all.',
     'payments':'<b>SUPPLY ▸ Payments.</b> Deposits register, Other Payments, Payments Due and the Payments Report — every supplier cash payment in one place.',
     productions:'<b>SUPPLY ▸ Productions.</b> Four sub-tabs: <b>Productions</b> (POs grouped by PROD#; expand for SKU×qty, the POs and deposits), <b>Deposits</b> (the deposit register, assign each to a production), <b>Other Payments</b> (sundry costs — freight, fees — with due date + paid/overdue status) and <b>Payments Report</b> (the payment-run register, filterable by date).',
     pipeline:'<b>SUPPLY ▸ Pipeline.</b> Every open PO placed in one stage of its journey (awaiting → in production → complete → in transit → arriving → checked in), ordered by its next milestone and coloured by health. The "where is everything" cockpit. Production stages get sharper as suppliers confirm status.',
@@ -7842,6 +7843,44 @@
   function sampleStatusChip(s){ var m={'PLANNED':['#dbeafe','#1d4ed8'],'SHIPPED':['#dcfce7','#166534'],'CANCELLED':['#f1f5f9','#94a3b8'],'Awaiting supplier':['#fef3c7','#92710a'],'Change requested':['#fee2e2','#b91c1c'],'In production':['#dbeafe','#1d4ed8'],'Charge to review':['#fee2e2','#b91c1c'],'Shipped':['#dcfce7','#166534'],'Complete':['#e2e8f0','#475569'],'Cancelled':['#f1f5f9','#94a3b8']};
     var col=m[s]||['#e2e8f0','#475569']; return hzChip(col[0],col[1],esc(s||'')); }
   function sampleChargeChip(s){ var m={pending:['#fef3c7','#92710a'],accepted:['#dcfce7','#166534'],rejected:['#f1f5f9','#94a3b8']}; var c=m[s]||['#e2e8f0','#475569']; return '<span class="tool-badge" style="background:'+c[0]+';color:'+c[1]+'">'+esc(s)+'</span>'; }
+  // ── SUPPLY ▸ QUALITY CONTROL ──────────────────────────────────────────────────
+  var QC_TYPES=['Test report','GRS transaction certificate','GRS scope certificate','Inspection report','Compliance certificate','Material certificate','Packaging spec','Other'];
+  function renderQualityControl(){ var c=document.getElementById('supply-content'); if(!c)return;
+    var st={type:'',q:''};
+    c.innerHTML=annot('quality-control')
+      +'<div class="sect-h">Upload a document</div>'
+      +'<div class="bar" style="gap:8px;flex-wrap:wrap;align-items:center"><select class="fci" id="qc-type" style="width:auto">'+QC_TYPES.map(function(t){return '<option>'+esc(t)+'</option>';}).join('')+'</select>'
+        +'<input class="fci txt" id="qc-prod" placeholder="PROD# (opt)" style="width:110px"><input class="fci txt" id="qc-batch" placeholder="Batch (opt)" style="width:120px"><input class="fci txt" id="qc-po" placeholder="PO (opt)" style="width:150px"><input class="fci txt" id="qc-sup" placeholder="Supplier (opt)" style="width:150px">'
+        +'<input type="file" id="qc-file" style="font-size:12px"><button class="save-btn" id="qc-up" style="background:#2563eb;color:#fff;border-color:#2563eb">⬆ Upload</button>'
+        +'<span class="mut tiny" id="qc-upmsg">assign at least one of PROD# / Batch / PO</span></div>'
+      +'<div class="sect-h" style="margin-top:14px">All quality documents</div>'
+      +'<div class="bar" style="gap:8px;flex-wrap:wrap"><span class="pill-lbl">Type</span><select class="flt" id="qc-ftype" style="width:auto"><option value="">All</option>'+QC_TYPES.map(function(t){return '<option>'+esc(t)+'</option>';}).join('')+'</select>'
+        +'<span class="pill-lbl">Search</span><input class="flt" id="qc-fq" placeholder="file / PO / supplier / prod / batch…" style="width:240px;background:#eff6ff;border-color:#93c5fd" title="searches all documents (overrides the type filter)"><button class="save-btn light" id="qc-fclear">Clear</button><span class="count" id="qc-count" style="margin-left:6px"></span></div>'
+      +'<div id="qc-results"><div class="count">Loading…</div></div>';
+    function draw(){ var qsp=[]; if(st.q)qsp.push('q='+encodeURIComponent(st.q)); else if(st.type)qsp.push('type='+encodeURIComponent(st.type));
+      fetch('/api/supply/quality-docs'+(qsp.length?'?'+qsp.join('&'):'')).then(function(r){return r.json();}).then(function(rows){
+        rows=Array.isArray(rows)?rows:[]; var cnt=document.getElementById('qc-count'); if(cnt)cnt.textContent=rows.length+' document'+(rows.length===1?'':'s');
+        var body=rows.map(function(d){ return '<tr><td class="l">'+esc(d.doc_type||'')+'</td>'
+          +'<td class="l"><a href="/api/supply/quality-doc/'+d.id+'" target="_blank" rel="noopener">'+esc(d.filename||'file')+'</a>'+(d.byte_size?' <span class="mut tiny">'+Math.max(1,Math.round(d.byte_size/1024))+' KB</span>':'')+'</td>'
+          +'<td class="l">'+(d.po?'<button class="lnk-btn qc-po" data-po="'+esc(d.po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer">'+esc(d.po)+'</button>':'')+'</td>'
+          +'<td class="l">'+esc(d.supplier_name||'')+'</td><td class="l">'+(d.prod_no?'P'+esc(d.prod_no):'')+'</td><td class="l">'+esc(d.batch_id||'')+'</td>'
+          +'<td class="l" style="white-space:nowrap"><span class="mut tiny">'+esc(d.created_at||'')+' · '+esc(shortUser(d.uploaded_by||'')||'')+(d.uploader_kind==='supplier'?' (supplier)':'')+'</span></td>'
+          +'<td class="l"><button class="lnk-btn qc-del" data-id="'+d.id+'" style="color:#b91c1c;background:none;border:none;cursor:pointer;font-size:11px;text-decoration:underline">delete</button></td></tr>'; }).join('');
+        document.getElementById('qc-results').innerHTML='<div class="tw" style="max-width:1200px"><table><thead><tr><th class="l">Type</th><th class="l">File</th><th class="l">PO</th><th class="l">Supplier</th><th class="l">PROD#</th><th class="l">Batch</th><th class="l">Uploaded</th><th class="l"></th></tr></thead><tbody>'+(body||'<tr><td colspan="8" class="l mut">No documents.</td></tr>')+'</tbody></table></div>';
+        document.querySelectorAll('#qc-results .qc-po').forEach(function(b){ b.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(b.dataset.po,'documents'); else gotoPO(b.dataset.po,'documents'); }; });
+        document.querySelectorAll('#qc-results .qc-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete this document? This cannot be undone.'))return; fetch('/api/supply/quality-doc/'+b.dataset.id+'/delete',{method:'POST'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)return alert(j.error); draw(); }).catch(function(e){ alert('Delete failed'); }); }; });
+      }).catch(function(e){ document.getElementById('qc-results').innerHTML='<div class="count" style="color:#dc2626">'+esc(String(e))+'</div>'; }); }
+    document.getElementById('qc-ftype').onchange=function(){ st.type=this.value; st.q=''; var fq=document.getElementById('qc-fq'); if(fq)fq.value=''; draw(); };
+    var _qfq=document.getElementById('qc-fq'); _qfq.oninput=debounce(function(){ st.q=_qfq.value.trim(); draw(); },350);
+    document.getElementById('qc-fclear').onclick=function(){ st={type:'',q:''}; document.getElementById('qc-ftype').value=''; _qfq.value=''; draw(); };
+    document.getElementById('qc-up').onclick=function(){ var msg=document.getElementById('qc-upmsg'), f=(document.getElementById('qc-file').files||[])[0];
+      if(!f){ msg.textContent='Choose a file.'; return; }
+      var prod=document.getElementById('qc-prod').value.trim(), batch=document.getElementById('qc-batch').value.trim(), po=document.getElementById('qc-po').value.trim();
+      if(!(prod||batch||po)){ msg.textContent='Assign at least one of PROD# / Batch / PO.'; return; }
+      var btn=this; btn.disabled=true; msg.textContent='Uploading…';
+      var rd=new FileReader(); rd.onload=function(){ fetch('/api/supply/quality-doc',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({doc_type:document.getElementById('qc-type').value, filename:f.name, mime:f.type||'application/octet-stream', data_base64:String(rd.result), prod_no:prod||null, batch_id:batch||null, po:po||null, supplier_name:document.getElementById('qc-sup').value.trim()||null})}).then(function(r){return r.json();}).then(function(j){ btn.disabled=false; if(j&&j.error){ msg.textContent='Error: '+j.error; return; } msg.textContent='Uploaded ✓'; ['qc-prod','qc-batch','qc-po','qc-sup'].forEach(function(id){document.getElementById(id).value='';}); document.getElementById('qc-file').value=''; draw(); }).catch(function(e){ btn.disabled=false; msg.textContent='Upload failed'; }); }; rd.readAsDataURL(f); };
+    draw();
+  }
   function renderSamples(data){ var c=document.getElementById('supply-content'); var _tk=_navToken; fetchLookups(function(){ if(_tk!==_navToken)return; samplesInner(data,c); }); }
   function samplesInner(rows,c){
     var st={f:(_pendingSampleRef?'all':'open'),q:''};   // when deep-linking/navigating to a specific sample, show 'all' so it's not filtered out
@@ -8135,6 +8174,7 @@
     if(key==='payments')return showPoSub(PAY_SUB_KEYS.indexOf(poSub)>=0?poSub:'paydue');   // PAYMENTS umbrella: default tab = Payments Due
     if(key==='reports')return selectReport(reportTab||'metrics');
     if(REPORT_KEYS.indexOf(key)>=0)return selectReport(key);
+    if(key==='quality-control'){ current=key; syncHash(); document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k===key);}); var _qns=document.getElementById('supply-nav-sel'); if(_qns&&_qns.value!==key)_qns.value=key; return renderQualityControl(); }
     current=key; syncHash();
     var _tk=++_navToken;   // this navigation — a later click bumps _navToken and invalidates our async render below
     document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k===key);});

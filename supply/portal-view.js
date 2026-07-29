@@ -628,7 +628,7 @@
     var rootEl=opts.root; if(!rootEl.closest('#supply-root')){rootEl.id='supply-root';} rootEl.style.display='block';
     if(PP_ANON){ try{ var _anonObs=new MutationObserver(function(){ if(_anonObs._busy)return; _anonObs._busy=1; _anonObs.disconnect(); try{anonSweep();}catch(e){} _anonObs.observe(rootEl,{childList:true,subtree:true}); _anonObs._busy=0; });
       _anonObs.observe(rootEl,{childList:true,subtree:true}); setTimeout(anonSweep,80); }catch(e){} }
-    rootEl.innerHTML='<div class="bar" style="align-items:center"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders <span id="pp-pos-badge"></span></span><span class="rtab" data-pt="shipmentplan">Shipment Plan <span id="pp-ship-badge"></span></span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="productions">Productions</span><span class="rtab" data-pt="samples">Samples <span id="pp-samp-badge"></span></span><span class="rtab" data-pt="product" id="pp-prod-tab" style="display:none">Product <span id="pp-prod-badge"></span></span></span>'
+    rootEl.innerHTML='<div class="bar" style="align-items:center"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders <span id="pp-pos-badge"></span></span><span class="rtab" data-pt="shipmentplan">Shipment Plan <span id="pp-ship-badge"></span></span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="productions">Productions</span><span class="rtab" data-pt="samples">Samples <span id="pp-samp-badge"></span></span><span class="rtab" data-pt="quality">Quality Control</span><span class="rtab" data-pt="product" id="pp-prod-tab" style="display:none">Product <span id="pp-prod-badge"></span></span></span>'
       +'<span id="pp-notif" style="margin-left:auto;display:none;gap:6px;align-items:center;position:relative;white-space:nowrap">'
         +'<button id="pp-unread-btn" class="save-btn light" title="Unread messages from Dock &amp; Bay" style="position:relative">✉ <span class="pp-inbox-lbl">Inbox </span><span id="pp-unread-n">0</span></button>'
         +'<button id="pp-recent-btn" class="save-btn light" title="Recent changes">🕘 Recent</button>'
@@ -1886,9 +1886,34 @@
               document.getElementById('pp-unread-drop').onclick=function(e){ e.stopPropagation(); };
               document.getElementById('pp-recent-drop').onclick=function(e){ e.stopPropagation(); };
               document.addEventListener('click', closeNotif); } }
+          // Portal ▸ Quality Control — supplier uploads test reports / GRS certs etc. (stored in-DB), assigned to prod/batch/PO.
+          function ppQuality(){
+            var TYPES=['Test report','GRS transaction certificate','GRS scope certificate','Inspection report','Compliance certificate','Material certificate','Packaging spec','Other'];
+            return '<div style="max-width:920px">'
+              +'<div class="sect-h">Upload a document</div>'
+              +'<div class="mut tiny" style="margin-bottom:8px">Test reports, GRS certificates, inspection &amp; compliance docs. Assign to a production, batch, and/or PO. GRS transaction certificates usually map to a <b>batch</b> (they span POs).</div>'
+              +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px"><select class="fci" id="pq-type">'+TYPES.map(function(t){return '<option>'+t+'</option>';}).join('')+'</select>'
+              +'<input class="fci txt" id="pq-prod" placeholder="Production # (opt)" style="width:130px"><input class="fci txt" id="pq-batch" placeholder="Batch # (opt)" style="width:130px"><input class="fci txt" id="pq-po" placeholder="PO (opt)" style="width:150px">'
+              +'<input type="file" id="pq-file"><button class="save-btn" id="pq-up" style="background:#1a1a1a;color:#fff">⬆ Upload</button><span class="mut tiny" id="pq-msg"></span></div>'
+              +'<div class="sect-h">Your uploaded documents</div><div id="pq-list"><div class="mut tiny">Loading…</div></div></div>';
+          }
+          function wireQuality(){
+            function load(){ fetch('/api/portal/quality-docs').then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
+              var body=rows.map(function(d){ return '<tr><td class="l">'+esc(d.doc_type||'')+'</td><td class="l"><a href="/api/portal/quality-doc/'+d.id+'" target="_blank" rel="noopener">'+esc(d.filename||'file')+'</a></td><td class="l">'+esc(d.po||'')+'</td><td class="l">'+(d.prod_no?'P'+esc(d.prod_no):'')+'</td><td class="l">'+esc(d.batch_id||'')+'</td><td class="l mut tiny">'+esc(d.created_at||'')+'</td></tr>'; }).join('');
+              var el=document.getElementById('pq-list'); if(el)el.innerHTML='<div class="tw"><table style="width:max-content;min-width:100%"><thead><tr><th class="l">Type</th><th class="l">File</th><th class="l">PO</th><th class="l">Prod</th><th class="l">Batch</th><th class="l">Uploaded</th></tr></thead><tbody>'+(body||'<tr><td colspan="6" class="mut tiny">No documents uploaded yet.</td></tr>')+'</tbody></table></div>';
+            }).catch(function(){ var el=document.getElementById('pq-list'); if(el)el.innerHTML='<div class="mut tiny">Could not load.</div>'; }); }
+            var up=document.getElementById('pq-up'); if(up)up.onclick=function(){ var msg=document.getElementById('pq-msg'), f=((document.getElementById('pq-file')||{}).files||[])[0];
+              if(!f){ msg.textContent='Choose a file.'; return; }
+              var prod=document.getElementById('pq-prod').value.trim(), batch=document.getElementById('pq-batch').value.trim(), po=document.getElementById('pq-po').value.trim();
+              if(!(prod||batch||po)){ msg.textContent='Assign at least one of Production / Batch / PO.'; return; }
+              up.disabled=true; msg.textContent='Uploading…';
+              var rd=new FileReader(); rd.onload=function(){ fetch('/api/portal/quality-doc',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({doc_type:document.getElementById('pq-type').value, filename:f.name, mime:f.type||'application/octet-stream', data_base64:String(rd.result), prod_no:prod||null, batch_id:batch||null, po:po||null})}).then(function(r){return r.json();}).then(function(j){ up.disabled=false; if(j&&j.error){ msg.textContent='Error: '+j.error; return; } msg.textContent='Uploaded ✓'; ['pq-prod','pq-batch','pq-po'].forEach(function(id){var e=document.getElementById(id); if(e)e.value='';}); var fe=document.getElementById('pq-file'); if(fe)fe.value=''; load(); }).catch(function(){ up.disabled=false; msg.textContent='Upload failed'; }); }; rd.readAsDataURL(f); };
+            load();
+          }
           function renderPP(){ if(!_ppData)return; var body=document.getElementById('pp-body');
             tabsEl.querySelectorAll('.rtab').forEach(function(t){t.classList.toggle('active',t.dataset.pt===PORTAL_TAB);});
             setSampBadge(); setPosBadge(); setShipBadge(); setProdBadge(); try{ renderPortalNotif(); }catch(e){}
+            if(PORTAL_TAB==='quality'){ body.innerHTML=ppQuality(); wireQuality(); return; }
             if(PORTAL_TAB==='product'){ body.innerHTML=ppProducts(_ppData.products||[]); wireProducts(); return; }
             if(PORTAL_TAB==='samples'){ body.innerHTML=ppSamples(_ppData.samples||[]); wireSamples(); return; }
             if(PORTAL_TAB==='shipmentplan'){
