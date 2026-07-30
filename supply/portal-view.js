@@ -1889,11 +1889,19 @@
           // Portal ▸ Quality Control — supplier uploads test reports / GRS certs etc. (stored in-DB), assigned to prod/batch/PO.
           function ppQuality(){
             var TYPES=['Test report','GRS transaction certificate','GRS scope certificate','Inspection report','Compliance certificate','Material certificate','Packaging spec','Other'];
+            // Prod # / batch # / PO options come from THIS supplier's PO history (_ppData.pos). Searchable dropdowns
+            // (native datalist) only appear when there's history to match; prod + batch sort largest→smallest.
+            var pos=(_ppData&&_ppData.pos)||[];
+            function distinct(key){ var s={}; pos.forEach(function(p){ var v=(p[key]==null?'':String(p[key])).trim(); if(v)s[v]=1; }); return Object.keys(s); }
+            function numDesc(a,b){ var na=parseFloat(a),nb=parseFloat(b); if(isFinite(na)&&isFinite(nb))return nb-na; return a<b?1:(a>b?-1:0); }
+            var prods=distinct('prod_no').sort(numDesc), batches=distinct('batch_id').sort(numDesc), poList=distinct('po').sort().reverse();
+            function dl(id,arr){ return arr.length?('<datalist id="'+id+'">'+arr.map(function(o){return '<option value="'+esc(o)+'">';}).join('')+'</datalist>'):''; }
+            function fld(id,ph,arr,w){ return '<input class="fci txt" id="'+id+'" placeholder="'+ph+'"'+(arr.length?(' list="'+id+'-dl" autocomplete="off"'):'')+' style="width:'+w+'">'+dl(id+'-dl',arr); }
             return '<div style="max-width:920px">'
               +'<div class="sect-h">Upload a document</div>'
-              +'<div class="mut tiny" style="margin-bottom:8px">Test reports, GRS certificates, inspection &amp; compliance docs. Assign to a production, batch, and/or PO. GRS transaction certificates usually map to a <b>batch</b> (they span POs).</div>'
+              +'<div class="mut tiny" style="margin-bottom:8px">Test reports, GRS certificates, inspection &amp; compliance docs. Assign to a production, batch, and/or PO'+(pos.length?' — search the dropdowns (from your POs)':'')+'. GRS transaction certificates usually map to a <b>batch</b> (they span POs).</div>'
               +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px"><select class="fci" id="pq-type">'+TYPES.map(function(t){return '<option>'+t+'</option>';}).join('')+'</select>'
-              +'<input class="fci txt" id="pq-prod" placeholder="Production # (opt)" style="width:130px"><input class="fci txt" id="pq-batch" placeholder="Batch # (opt)" style="width:130px"><input class="fci txt" id="pq-po" placeholder="PO (opt)" style="width:150px">'
+              +fld('pq-prod','Production # (opt)',prods,'150px')+fld('pq-batch','Batch # (opt)',batches,'150px')+fld('pq-po','PO (opt)',poList,'170px')
               +'<input type="file" id="pq-file"><button class="save-btn" id="pq-up" style="background:#1a1a1a;color:#fff">⬆ Upload</button><span class="mut tiny" id="pq-msg"></span></div>'
               +'<div class="sect-h">Your uploaded documents</div><div id="pq-list"><div class="mut tiny">Loading…</div></div></div>';
           }
