@@ -6718,7 +6718,7 @@ function render(){
     ['plan-tools'].forEach(function(id){ var el=document.getElementById(id); if(el&&vtr&&el.parentNode!==vtr) vtr.appendChild(el); });
     // return the relocated status note (#st) + version (#ver) to their bar before tearing down the sub-nav
     var _sb=document.getElementById('statusbar');
-    ['st','ver'].forEach(function(id){ var el=document.getElementById(id); if(_sb&&el&&el.parentNode!==_sb){ if(id==='st'){el.removeAttribute('style');el.className='status';} else {el.style.cssText='font-size:10px;color:#bbb;margin-left:auto';} _sb.appendChild(el); } });
+    ['st','ver'].forEach(function(id){ var el=document.getElementById(id); if(_sb&&el&&el.parentNode!==_sb){ if(id==='st'){el.removeAttribute('style');el.className='status';} else {el.style.cssText='color:#0f172a;background:#fbbf24;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:800;line-height:1.2;letter-spacing:.02em;margin-left:auto;white-space:nowrap;position:relative';} _sb.appendChild(el); } });   // amber badge, matches SUPPLY
     if(_sb)_sb.style.display='';
     ['demand-tabs','demand-body'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
   }
@@ -7135,7 +7135,7 @@ function renderDemandTabs(){
   var _st=document.getElementById('st');
   if(_st){ _st.className=''; _st.style.cssText='font-size:11px;color:#888;margin-left:auto;flex:0 0 auto;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:46%'; bar.appendChild(_st); }
   var _ver=document.getElementById('ver');
-  if(_ver){ _ver.style.cssText='font-size:10px;color:#bbb;flex:0 0 auto;margin-left:10px;white-space:nowrap'; bar.appendChild(_ver); }
+  if(_ver){ _ver.style.cssText='color:#0f172a;background:#fbbf24;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:800;line-height:1.2;letter-spacing:.02em;flex:0 0 auto;margin-left:10px;white-space:nowrap;position:relative'; bar.appendChild(_ver); }   // amber badge, matches SUPPLY
   if(_sb)_sb.style.display='none';   // its contents now live on nav-2
 }
 // ─── DEMAND ▸ TARGETS: sell-through % targets by category × market ─────────

@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.293 - Demand version badge (amber) + portal Shipments box (review feedback)
+- **DEMAND version** now renders as the **amber HORIZON badge** (matches SUPPLY) instead of faint grey plain text — on the plan and the other demand-side views. (`artifact_v16.7.html`.)
+- **Portal product samples:** the linked shipments now live in a clearly-titled **📦 Shipments** box — a **right-hand column on desktop** (stacks on mobile) — holding the Link-to-shipment control, the "completed but not shipped" warning, and the linked-shipment chips (or "Not linked to any shipment yet"). **"＋ New shipment" now stays on the product page** and refreshes in place, so the new shipment appears in that sample's Shipments box instead of jumping to the Samples tab / getting lost at the bottom. (`supply/portal-view.js`.)
+
 ## v26.292 - BI & Reports: Production Summary report (SUG-0009)
 - New **SUPPLY ▸ BI & Reports ▸ PRODUCTION SUMMARY** sub-tab. Shows **total quantity in production per category** (collapsed headings, tap to expand to per-SKU totals). Filters: **PROD#** and **BATCH** (both dropdowns sorted **descending**) plus **SUPPLIER**; **nothing renders until a prod# or batch is chosen**. Two exports: **Categories CSV** and **SKUs CSV** (filenames stamped with the prod/batch). **Mobile-optimised** — wrapping filter bar, tap-to-expand rows, horizontally-scrollable SKU tables. New endpoint `GET /api/supply/bi/production-summary` (returns filter option lists always; aggregated rows only when filtered). Reads `purchase_order_lines` × `purchase_orders` × `products` (category). No migration. `server.mjs`, `supply/inject.html`.
 
