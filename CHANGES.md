@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.296 - Portal: tracking-code "track here ↗" (no duplicate)
+- On the portal Sample shipments card, the tracking code no longer renders a second time as the track link. Below the tracking-code input, the link now reads **"track here ↗"** (opens the carrier tracking page) instead of repeating the code. (`supply/portal-view.js`.)
+
 ## v26.295 - Portal: sample-shipment contents refresh + menu rename
 - **Fixed staleness bug** — a sample shipment's contents showed only the dev samples that existed when the portal first loaded; dev samples linked afterwards from **PRODUCT ▸ samples** didn't appear (e.g. SR-10 had 4 linked but showed 2). Expanding a sample now **re-fetches `/contents` from the DB** and re-renders, so all linked dev samples + SKU lines show. Server data was already correct (`/api/supply/sample/:id/contents` returns all). (`supply/portal-view.js`.)
 - Portal menu heading **"Samples" → "Sample shipments"**. (`supply/portal-view.js`.)
