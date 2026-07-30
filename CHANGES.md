@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.295 - Portal: sample-shipment contents refresh + menu rename
+- **Fixed staleness bug** — a sample shipment's contents showed only the dev samples that existed when the portal first loaded; dev samples linked afterwards from **PRODUCT ▸ samples** didn't appear (e.g. SR-10 had 4 linked but showed 2). Expanding a sample now **re-fetches `/contents` from the DB** and re-renders, so all linked dev samples + SKU lines show. Server data was already correct (`/api/supply/sample/:id/contents` returns all). (`supply/portal-view.js`.)
+- Portal menu heading **"Samples" → "Sample shipments"**. (`supply/portal-view.js`.)
+
 ## v26.294 - Level-2 menu alignment across views (review feedback)
 - **REPORTS** (`#/reports/ex`): removed the leading **"REPORTS"** label and normalised `#report-tabs` to match DEMAND/SUPPLY (`margin:2px 0 10px`, no `padding-bottom`), so the row no longer sits lower than the other menus. (`artifact_v16.7.html`.)
 - **CONFIG** and **PRODUCT** level-2 menus converted from the light-blue **pill** style to the **underline-tab** style used by SUPPLY/SCENARIO/DEMAND/REPORTS, so every top-level view shows a consistent level-2 menu. (CONFIG's level-3 Supply-chain sub-menu stays a nested pill.) (`supply/inject.html`.)
