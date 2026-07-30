@@ -7498,7 +7498,8 @@
     if(!opts.noWarn && !confirmNoBatch(batch))return;
     var prog=bcProgress(btn);
     var needCI = kinds.indexOf('carton')>=0 || kinds.indexOf('inner')>=0;
-    var folderSuffix = needCI ? ' - Cartons' : ' - Product';   // per-supplier folder inside the ZIP: "<supplier> - Cartons" / "<supplier> - Product"
+    var hasProd = kinds.indexOf('product')>=0;
+    var folderSuffix = (needCI && hasProd) ? ' - Barcodes' : (needCI ? ' - Cartons' : ' - Product');   // per-supplier folder inside the ZIP: "<supplier> - Barcodes" (all kinds) / " - Cartons" / " - Product"
     var jobs=[fetchImgDataUri('/api/supply/asset/gotham-book'),fetchImgDataUri('/api/supply/asset/gotham-bold')];
     if(needCI){ jobs.push(fetchImgDataUri('/api/supply/asset/grs')); jobs.push(fetchImgDataUri('/api/supply/asset/db')); }
     Promise.all(jobs).then(function(a){
@@ -7550,6 +7551,7 @@
         +'<span class="bar-grp"><span class="pill-lbl">File Download</span><select class="flt" id="bc-dlfmt" style="width:auto;padding:3px 6px"><option value="a4">A4 Print Mold</option><option value="png">Individual PNG</option></select></span>'
         +'<button id="bc-dlall-cart" class="bc-dlall-btn" style="cursor:pointer;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:5px;padding:4px 10px;font-size:11px;white-space:nowrap" title="download every CARTON + INNER barcode in view as a ZIP, foldered by supplier — A4 print-mould PDFs or individual PNGs per the File Download setting">⤓ All Cartons (+inners)</button>'
         +'<button id="bc-dlall-prod" class="bc-dlall-btn" style="cursor:pointer;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:5px;padding:4px 10px;font-size:11px;white-space:nowrap" title="download every PRODUCT barcode in view as a ZIP, foldered by supplier — A4 print-mould PDFs or individual PNGs per the File Download setting">⤓ All Products</button>'
+        +'<button id="bc-dlall-all" class="bc-dlall-btn" style="cursor:pointer;background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:5px;padding:4px 10px;font-size:11px;white-space:nowrap" title="download every PRODUCT + CARTON + INNER barcode in view as a ZIP, foldered by supplier — A4 print-mould PDFs or individual PNGs per the File Download setting">⤓ All (product + carton + inner)</button>'
       +'</div>'
       +'<div id="sup-grid">'+bcTable(rows,opts())+'</div>';
     var cur=rows;   // rows currently in view (after filters) — what "Download all" operates on
@@ -7579,6 +7581,7 @@
       return base+(a4?'_A4':'')+(st.sup!=='All'?'_by_'+zipSafe(st.sup):'_by_supplier')+(st.batch?'_'+zipSafe(st.batch):(st.prod!=='All'?'_P'+zipSafe(st.prod):''))+'.zip'; }
     document.getElementById('bc-dlall-prod').onclick=function(){ bcDownloadAll(cur, st.batch?batchBy[st.batch]:null, st.rrp, this, ['product'], bcZipName('product_barcodes'), {fmt:st.dlfmt, onlySup:st.sup!=='All'?st.sup:null}); };
     document.getElementById('bc-dlall-cart').onclick=function(){ bcDownloadAll(cur, st.batch?batchBy[st.batch]:null, st.rrp, this, ['carton','inner'], bcZipName('carton_inner_barcodes'), {fmt:st.dlfmt, onlySup:st.sup!=='All'?st.sup:null}); };
+    document.getElementById('bc-dlall-all').onclick=function(){ bcDownloadAll(cur, st.batch?batchBy[st.batch]:null, st.rrp, this, ['product','carton','inner'], bcZipName('product_carton_inner_barcodes'), {fmt:st.dlfmt, onlySup:st.sup!=='All'?st.sup:null}); };
     document.getElementById('bc-mkt').onchange=function(){ st.rmkt=this.value; if(st.rrp)apply(); };
     // label download buttons (delegated — survives grid re-renders on filter)
     var bySku={}; rows.forEach(function(r){ bySku[r.sku]=r; });

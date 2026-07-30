@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.297 - Barcodes: one-click "All (product + carton + inner)" download
+- PURCHASE ORDERS ▸ Barcodes: new **⤓ All (product + carton + inner)** button downloads every product, carton and inner barcode in view as a single ZIP (foldered by supplier), alongside the existing "All Cartons (+inners)" and "All Products" buttons. Honours the current filters + File Download (A4 / PNG) setting. When a ZIP contains all kinds, the per-supplier folder is named "<supplier> - Barcodes" (filenames stay kind-prefixed). `supply/inject.html`.
+
 ## v26.296 - Portal: tracking-code "track here ↗" (no duplicate)
 - On the portal Sample shipments card, the tracking code no longer renders a second time as the track link. Below the tracking-code input, the link now reads **"track here ↗"** (opens the carrier tracking page) instead of repeating the code. (`supply/portal-view.js`.)
 
