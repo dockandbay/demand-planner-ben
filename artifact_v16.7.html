@@ -7771,10 +7771,9 @@ function renderReportView(){
   // sub-tab bar (persists across sub-report switches; created once, placed above the report body)
   var bar=document.getElementById('report-tabs');
   if(!bar){ bar=document.createElement('div'); bar.id='report-tabs';
-    bar.style.cssText='display:flex;gap:4px;align-items:center;margin:2px 0 10px;border-bottom:1px solid #e5e5e5;padding-bottom:6px';
+    bar.style.cssText='display:flex;gap:2px;align-items:center;margin:2px 0 10px;border-bottom:1px solid #e0e0e0;flex-wrap:wrap';   // match SUPPLY #supply-subnav / DEMAND #demand-tabs exactly
     document.querySelector('.wrap').appendChild(bar); }
-  bar.innerHTML='<span style="font-size:11px;font-weight:700;letter-spacing:.04em;color:#888;margin-right:6px">REPORTS</span>'
-    +REPORT_TABS.map(function(t){return '<button class="view-toggle rtab'+(t[0]===REPORT_VIEW?' active':'')+'" data-report="'+t[0]+'">'+t[1]+'</button>';}).join('');
+  bar.innerHTML=REPORT_TABS.map(function(t){return '<button class="view-toggle rtab'+(t[0]===REPORT_VIEW?' active':'')+'" data-report="'+t[0]+'">'+t[1]+'</button>';}).join('');   // no leading "REPORTS" label (kept the row aligned with other tabs)
   bar.querySelectorAll('.rtab').forEach(function(b){ b.onclick=function(){ REPORT_VIEW=b.dataset.report; if(window.writeHash)window.writeHash(['reports',REPORT_VIEW]); render(); }; });
   if(REPORT_VIEW==='ex'){ var rb=document.getElementById('report-body'); if(rb)rb.remove(); renderExecView(); return; }
   // new reports — remove the exec table, render into a #report-body below the bar

@@ -23,7 +23,7 @@
 #app.product-active #dab-navwrap > *:not(#view-tabs-row){display:none!important}
 #app.product-active #view-tabs-row .tool-bar{display:none!important}
 /* product top sub-nav (Plan / Reports) — matches the PO-detail subnav (.po-subnav / .rtab) */
-#product-root #product-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:2px 0 12px}
+#product-root #product-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #e0e0e0;margin:2px 0 10px}   /* level-2 underline tabs — match SUPPLY/SCENARIO (was a pill container) */
 #product-root #product-subnav .stab{background:transparent;border:none;padding:6px 14px;font-size:12px;font-weight:500;color:#7c93b8;cursor:pointer;border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit}
 #product-root #product-subnav .stab:hover{color:#2563eb}
 #product-root #product-subnav .stab.active{color:#2563eb;border-bottom-color:#3b82f6;font-weight:600}
@@ -201,7 +201,8 @@
 #supply-root #po-prog>*,#supply-root #po-act>*,#supply-root #po-ctry>*{margin:2px 3px 2px 0}
 #supply-root #po-prog .pill,#supply-root #po-act .pill,#supply-root #po-ctry .pill{padding:2px 7px}
 /* level-3 sub-navs (REPORTS, CONFIG): underline tabs like the level-1/2 menus, in light blue */
-#supply-root #rep-subnav,#supply-root #config-subs,#supply-root #prod-subtabs,#supply-root .po-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 12px}
+#supply-root #rep-subnav,#supply-root #prod-subtabs,#supply-root .po-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 12px}
+#supply-root #config-subs{display:flex;gap:2px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #e0e0e0;margin:2px 0 10px}   /* CONFIG level-2 = underline tabs, match other views (level-3 #config-subs-l3 stays a pill) */
 /* CONFIG level-3 nav (members of the "Supply chain" tab): a lighter, indented strip under the level-2 row */
 #supply-root #config-subs-l3{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f8fbff;border:1px solid #e5eefb;border-radius:6px;padding:2px 5px;margin:-6px 0 12px 16px}
 /* Searchable SKU dropdown (Manufacturing BOM): input + filtering popover, picks from the product list */

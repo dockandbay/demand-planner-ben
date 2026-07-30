@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.294 - Level-2 menu alignment across views (review feedback)
+- **REPORTS** (`#/reports/ex`): removed the leading **"REPORTS"** label and normalised `#report-tabs` to match DEMAND/SUPPLY (`margin:2px 0 10px`, no `padding-bottom`), so the row no longer sits lower than the other menus. (`artifact_v16.7.html`.)
+- **CONFIG** and **PRODUCT** level-2 menus converted from the light-blue **pill** style to the **underline-tab** style used by SUPPLY/SCENARIO/DEMAND/REPORTS, so every top-level view shows a consistent level-2 menu. (CONFIG's level-3 Supply-chain sub-menu stays a nested pill.) (`supply/inject.html`.)
+- Note: SCENARIO shares the same root padding + subnav style as SUPPLY; if it still reads as slightly low after this, flag it and I'll chase the specific offset.
+
 ## v26.293 - Demand version badge (amber) + portal Shipments box (review feedback)
 - **DEMAND version** now renders as the **amber HORIZON badge** (matches SUPPLY) instead of faint grey plain text — on the plan and the other demand-side views. (`artifact_v16.7.html`.)
 - **Portal product samples:** the linked shipments now live in a clearly-titled **📦 Shipments** box — a **right-hand column on desktop** (stacks on mobile) — holding the Link-to-shipment control, the "completed but not shipped" warning, and the linked-shipment chips (or "Not linked to any shipment yet"). **"＋ New shipment" now stays on the product page** and refreshes in place, so the new shipment appears in that sample's Shipments box instead of jumping to the Samples tab / getting lost at the bottom. (`supply/portal-view.js`.)
