@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.300 - Email log: wider Subject column
+- CONFIG ▸ Email log: the **Subject** column is roughly doubled (max-width 320→640px, min-width 360px, wraps) and the table container widened (1120→1440px) so subjects aren't cramped. `supply/inject.html`.
+
 ## v26.299 - CONFIG: version badge + tab colour match other views
 - CONFIG level-2 nav (`#config-subs`) now shows the **amber HORIZON version badge** (right-aligned, like SUPPLY/SCENARIO/PRODUCT) — it previously had none. Tab colours aligned to `.stab` (grey → dark active) instead of the blue `.rtab` tint, so the CONFIG menu matches the other views. `supply/inject.html`.
 
