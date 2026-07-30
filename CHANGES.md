@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.287 - Supplier "Expedited production weeks" field (SUG-0008, part 1) ⚠️ NEEDS MIGRATION 161
+- New supplier config field **Expedited production weeks** in CONFIG ▸ Suppliers (Payment terms block). **Migration `161_supplier_expedited_weeks.sql`** adds `suppliers.expedited_production_weeks` (default 6; XR Textile / Lixin / Jinma = 3). Read defensively so the page works pre-migration (defaults to 6); editable + saved via the supplier PATCH.
+- The **BI calc wiring** (feeding urgent-buy + expedited-production) is NOT yet done — awaiting Ben's confirm on the exact formula. `server.mjs`, `supply/inject.html`.
+
 ## v26.286 - PAYMENTS ▸ By Supplier: CSV/copy, default latest production, black active filters (SUG-0006)
 - **Copy** (TSV) + **CSV** download of the filtered rows (incl. a TOTAL row). First load now defaults to the **most recent production**. Active (non-All) filter dropdowns show **black** (`sel-on`). `supply/inject.html`.
 

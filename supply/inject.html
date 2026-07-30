@@ -5968,6 +5968,7 @@
               +numBlk('Completion','completion_pct',fieldOf(r,'completion_pct'),'%')
               +numBlk('Balance','balance_pct',fieldOf(r,'balance_pct'),'%')
               +numBlk('Production','production_days',fieldOf(r,'production_days'),'days')
+              +numBlk('Expedited prod','expedited_production_weeks',fieldOf(r,'expedited_production_weeks'),'weeks')
               +numBlk('Credit','credit_days',fieldOf(r,'credit_days'),'days')
               +'<div><div style="font-weight:600;font-size:11px;margin-bottom:3px">Credit type</div>'+(function(){ var cv=String(fieldOf(r,'credit_type')||''); var OPTS=[['','— none —'],['on_shipment','On shipment'],['on_clearance','On clearance']]; return '<select class="sup-in" data-f="credit_type" style="padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;width:130px">'+OPTS.map(function(o){return '<option value="'+o[0]+'"'+(cv===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'; })()+'</div>'
               +'<div><div style="font-weight:600;font-size:11px;margin-bottom:3px">Currency</div>'+seln('default_currency',fieldOf(r,'default_currency')||'USD',CURS)+'</div>'

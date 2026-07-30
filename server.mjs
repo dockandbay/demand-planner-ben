@@ -1688,14 +1688,19 @@ app.get('/api/supply/:section', async (req, res) => {
                WHEN s.status ILIKE 'ship%' OR s.status ILIKE 'complete%' THEN 'SHIPPED'
                ELSE 'PLANNED' END status_calc
           FROM planner.sample_requests s ORDER BY s.created_at DESC`));
-      case 'suppliers':
-        return res.json(await q(`SELECT id,code,name,kind,default_currency,
+      case 'suppliers': {
+        const suppliers = await q(`SELECT id,code,name,kind,default_currency,
           start_deposit_pct,completion_pct,balance_pct,credit_days,credit_type,
           credit_fee_on_balance_pct,production_days,country,contact_name,email,
           business_name,address_1,address_2,city,state,postcode,phone,
           te_id,incoterm,cin7_member_id,fulfil_id,export_port,
           coalesce(include_product_dev,false) include_product_dev
-          FROM planner.suppliers ORDER BY kind,name`));
+          FROM planner.suppliers ORDER BY kind,name`);
+        // expedited_production_weeks (migration 161) read separately + defensively so the page still works pre-migration
+        const ew = {}; try { (await q(`SELECT id, expedited_production_weeks FROM planner.suppliers`)).forEach(x => { ew[x.id] = x.expedited_production_weeks; }); } catch (e) {}
+        suppliers.forEach(r => { r.expedited_production_weeks = (ew[r.id] != null ? Number(ew[r.id]) : 6); });
+        return res.json(suppliers);
+      }
       case 'key-accounts':
         return res.json(await q(`SELECT * FROM planner.key_accounts ORDER BY name`));
       case 'bi': {   // SUPPLY ▸ BI — Metrics Summary (Phase 0a). Live operational counts; no engine yet.
@@ -2852,7 +2857,7 @@ app.post('/api/supply/supplier/:id', (req, res) =>
     { code: 'text', name: 'text', kind: 'text', default_currency: 'text',
       start_deposit_pct: 'numeric', completion_pct: 'numeric', balance_pct: 'numeric',
       credit_days: 'int', credit_type: 'text', credit_fee_on_balance_pct: 'numeric',
-      production_days: 'int', country: 'text', contact_name: 'text', email: 'text',
+      production_days: 'int', expedited_production_weeks: 'numeric', country: 'text', contact_name: 'text', email: 'text',
       // company / address / phone (tax-invoice), compliance IDs + ERP linkage
       business_name: 'text', address_1: 'text', address_2: 'text', city: 'text', state: 'text', postcode: 'text', phone: 'text',
       te_id: 'text', incoterm: 'text', cin7_member_id: 'bigint', fulfil_id: 'text', export_port: 'text',
