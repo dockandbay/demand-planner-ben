@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.286 - PAYMENTS ▸ By Supplier: CSV/copy, default latest production, black active filters (SUG-0006)
+- **Copy** (TSV) + **CSV** download of the filtered rows (incl. a TOTAL row). First load now defaults to the **most recent production**. Active (non-All) filter dropdowns show **black** (`sel-on`). `supply/inject.html`.
+
 ## v26.285 - Suggestion box: stakeholder emails (SUG-0003) + add-another (SUG-0004)
 - **SUG-0003:** new suggestions and status changes now email the **stakeholders** (default **ben@ + sarah@**; editable in CONFIG ▸ Suggestions). Fixes "email not firing on a new suggestion" — the submit endpoint previously sent nothing. Stored in `app_settings.suggestion_stakeholders`; emails logged to the Email log (kinds `suggestion-new` / `suggestion-status`).
 - **SUG-0004:** after submitting in the 💡 Suggestion box, the form now **resets so you can add another** without closing/refreshing (Cancel becomes Close).

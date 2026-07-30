@@ -6897,12 +6897,23 @@
   function renderBySupplier(b){ b.innerHTML='<div class="count">Loading…</div>';
     fetch('/api/supply/payments-by-supplier').then(function(r){return r.json();}).then(function(rows){
       rows=Array.isArray(rows)?rows:[];
-      var st={sup:'',prod:'',batch:''};
       function uniq(k){ var s={}; rows.forEach(function(r){ if(r[k])s[r[k]]=1; }); return Object.keys(s); }
       var sups=uniq('supplier').sort(), prods=uniq('prod_no').sort(function(a,c){return (parseInt(c,10)||0)-(parseInt(a,10)||0);}), batches=uniq('batch_id').sort();
-      function sel(id,label,opts,val){ return '<span class="pill-lbl">'+label+'</span><select class="flt" id="'+id+'" style="width:auto;padding:3px 6px"><option value="">All</option>'+opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>'; }
-      b.innerHTML='<div class="bar">'+sel('bs-sup','Supplier',sups,st.sup)+' '+sel('bs-prod','PROD#',prods,st.prod)+' '+sel('bs-batch','Batch',batches,st.batch)+'<span class="count" id="bs-count" style="margin-left:10px"></span></div><div id="bs-grid"></div>';
-      function draw(){ var f=rows.filter(function(r){ return (!st.sup||r.supplier===st.sup)&&(!st.prod||String(r.prod_no)===st.prod)&&(!st.batch||r.batch_id===st.batch); });
+      var st={sup:'',prod:(prods[0]||''),batch:''};   // SUG-0006: first load defaults to the most recent production
+      function sel(id,label,opts,val){ return '<span class="pill-lbl">'+label+'</span><select class="flt'+(val?' sel-on':'')+'" id="'+id+'" style="width:auto;padding:3px 6px"><option value="">All</option>'+opts.map(function(o){return '<option'+(String(o)===String(val)?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>'; }
+      b.innerHTML='<div class="bar">'+sel('bs-sup','Supplier',sups,st.sup)+' '+sel('bs-prod','PROD#',prods,st.prod)+' '+sel('bs-batch','Batch',batches,st.batch)
+        +'<span style="margin-left:auto;display:flex;gap:6px;align-items:center"><button class="save-btn" id="bs-copy" title="Copy the filtered rows to the clipboard (tab-separated)">⧉ Copy</button><button class="save-btn" id="bs-csv" style="background:#dcfce7;color:#166534;border-color:#16a34a" title="Download the filtered rows as CSV">⬇ CSV</button></span>'
+        +'<span class="count" id="bs-count" style="margin-left:10px"></span></div><div id="bs-grid"></div>';
+      var _cur=[];   // current filtered rows (for export)
+      function n2(v){ return (Math.round((Number(v)||0)*100)/100).toFixed(2); }
+      function expMatrix(){ var hdr=['Supplier','PROD#','Batch','PO','Invoice total','Starting','Completion','Balance'];
+        var body=_cur.map(function(r){ return [r.supplier||'', r.prod_no?('P'+r.prod_no):'', r.batch_id||'', r.po||'', n2(r.invoice_total), n2(r.starting), n2(r.completion), n2(r.balance)]; });
+        var t=_cur.reduce(function(a,r){ a[0]+=Number(r.invoice_total)||0;a[1]+=Number(r.starting)||0;a[2]+=Number(r.completion)||0;a[3]+=Number(r.balance)||0; return a; },[0,0,0,0]);
+        body.push(['TOTAL ('+_cur.length+')','','','', n2(t[0]), n2(t[1]), n2(t[2]), n2(t[3])]);
+        return [hdr].concat(body); }
+      function csvCell(v){ v=String(v==null?'':v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+      function fname(ext){ return 'payments_by_supplier'+(st.sup?'_'+st.sup.replace(/[^A-Za-z0-9]+/g,'_'):'')+(st.prod?'_P'+st.prod:'')+(st.batch?'_'+st.batch:'')+'.'+ext; }
+      function draw(){ var f=rows.filter(function(r){ return (!st.sup||r.supplier===st.sup)&&(!st.prod||String(r.prod_no)===String(st.prod))&&(!st.batch||r.batch_id===st.batch); }); _cur=f;
         var t={iv:0,st:0,co:0,ba:0};
         var body=f.map(function(r){ t.iv+=Number(r.invoice_total)||0; t.st+=Number(r.starting)||0; t.co+=Number(r.completion)||0; t.ba+=Number(r.balance)||0;
           return '<tr><td class="l">'+esc(r.supplier)+'</td><td class="l">'+(r.prod_no?'P'+esc(r.prod_no):'')+'</td><td class="l">'+esc(r.batch_id||'')+'</td>'
@@ -6913,9 +6924,12 @@
           +(body||'<tr><td colspan="8" class="mut">No payments for this filter.</td></tr>')
           +'<tr style="border-top:2px solid #cbd5e1;font-weight:700;background:#f8fafc"><td class="l" colspan="4">Total ('+f.length+')</td><td style="text-align:right">'+money(t.iv)+'</td><td style="text-align:right">'+money(t.st)+'</td><td style="text-align:right">'+money(t.co)+'</td><td style="text-align:right">'+money(t.ba)+'</td></tr></tbody></table></div>';
         document.querySelectorAll('#bs-grid .bs-po').forEach(function(x){ x.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(x.dataset.po,'pay'); else gotoPO(x.dataset.po,'pay'); }; }); }
-      document.getElementById('bs-sup').onchange=function(){ st.sup=this.value; draw(); };
-      document.getElementById('bs-prod').onchange=function(){ st.prod=this.value; draw(); };
-      document.getElementById('bs-batch').onchange=function(){ st.batch=this.value; draw(); };
+      function onPick(id,key){ var el=document.getElementById(id); el.onchange=function(){ st[key]=this.value; this.classList.toggle('sel-on',!!this.value); draw(); }; }
+      onPick('bs-sup','sup'); onPick('bs-prod','prod'); onPick('bs-batch','batch');
+      document.getElementById('bs-copy').onclick=function(){ var btn=this; var tsv=expMatrix().map(function(row){return row.join('\t');}).join('\n');
+        navigator.clipboard.writeText(tsv).then(function(){ var o=btn.textContent; btn.textContent='✓ Copied'; setTimeout(function(){btn.textContent=o;},1200); },function(){ alert('Copy failed — clipboard blocked.'); }); };
+      document.getElementById('bs-csv').onclick=function(){ var csv=expMatrix().map(function(row){return row.map(csvCell).join(',');}).join('\n')+'\n';
+        var bl=new Blob([csv],{type:'text/csv'}); var u=URL.createObjectURL(bl); var a=document.createElement('a'); a.href=u; a.download=fname('csv'); document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); };
       draw();
     }).catch(function(e){ b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>'; }); }
   function renderPaymentsReport(b){ b.innerHTML='<div class="count">Loading…</div>';
