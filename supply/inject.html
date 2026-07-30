@@ -8372,8 +8372,10 @@
     +'</div>';
     document.body.appendChild(bg);
     function close(){ if(bg.parentNode)bg.parentNode.removeChild(bg); }
-    bg.addEventListener('mousedown',function(e){ if(e.target===bg)close(); });
-    bg.querySelector('#sug-x').onclick=close; bg.querySelector('#sug-cancel').onclick=close;
+    function dirty(){ return !!(bg.querySelector('#sug-body').value.trim()||bg.querySelector('#sug-area').value.trim()); }   // SUG-0010
+    function tryClose(){ if(dirty()&&!confirm('You will lose all data typed. Close anyway?'))return; close(); }
+    bg.addEventListener('mousedown',function(e){ if(e.target===bg&&!dirty())close(); });   // SUG-0010: don't dismiss on click-away when there's unsaved input
+    bg.querySelector('#sug-x').onclick=tryClose; bg.querySelector('#sug-cancel').onclick=tryClose;
     var ta=bg.querySelector('#sug-body'); setTimeout(function(){ta.focus();},30);
     bg.querySelector('#sug-send').onclick=function(){ var body=ta.value.trim(); var msg=bg.querySelector('#sug-msg');
       if(!body){ msg.style.color='#dc2626'; msg.textContent='Please enter a suggestion.'; ta.focus(); return; }

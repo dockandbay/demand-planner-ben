@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.291 - Suggestion box: guard unsaved input (SUG-0010)
+- The 💡 Suggestion box now warns before losing typed text: clicking **Cancel** or **✕** with anything in the suggestion/area fields asks **"You will lose all data typed. Close anyway?"**, and **clicking the backdrop no longer dismisses** the box while there's unsaved input (it only closes on click-away when both fields are empty). After a successful submit the fields reset, so closing is prompt-free. `supply/inject.html`.
+
 ## v26.290 - Portal: link a sample to MULTIPLE shipments (SUG-0005 part B)
 - On the supplier portal (PRODUCT ▸ sample versions), a sample can now be linked to **many** sample shipments instead of just one. The old single "Shipment" select is now a **"Link to shipment"** search box: type to filter existing shipments (ref / carrier / tracking), pick one to add it, and **"＋ New shipment"** sits in the dropdown to spin up a fresh one. Linked shipments show as chips below with a per-shipment **✕ unlink**. "Not shipped" only offered when nothing is linked. Data model was already many-to-many (`sample_request_dev_samples`); added server modes `link`/`unlink` on `/api/portal/product-sample/:id/assign` (legacy single-`shipment` assign kept). No migration. `server.mjs`, `supply/portal-view.js`.
 
