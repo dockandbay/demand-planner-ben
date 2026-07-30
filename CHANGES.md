@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.299 - CONFIG: version badge + tab colour match other views
+- CONFIG level-2 nav (`#config-subs`) now shows the **amber HORIZON version badge** (right-aligned, like SUPPLY/SCENARIO/PRODUCT) — it previously had none. Tab colours aligned to `.stab` (grey → dark active) instead of the blue `.rtab` tint, so the CONFIG menu matches the other views. `supply/inject.html`.
+
 ## v26.298 - REPORTS: level-2 tabs + version badge now match other views
 - REPORTS (`#/reports/ex`) sub-tabs were using the level-1 `.view-toggle` style; switched to `.dnav` (the same level-2 style as DEMAND/SUPPLY). `renderReportView` now also relocates the **amber version badge** (`#ver`) + status note onto the report bar, right-aligned, mirroring the DEMAND plan (statusbar hidden). `artifact_v16.7.html`.
 
