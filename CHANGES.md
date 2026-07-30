@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.284 - Supplier portal: carton barcode download includes inners (SUG-0002)
+- The supplier portal's batch "Download carton barcodes" button now downloads **carton + inner** labels together (relabelled "Download carton + inner barcodes"), matching the admin "All Cartons (+inners)". The redundant standalone batch inner button is removed; per-row Inner download is still available for inner-only. `supply/portal-view.js`.
+
 ## v26.283 - Barcode ZIP filename reflects the filters
 - The download-all ZIP is now named from the active filters, e.g. `carton_inner_barcodes_A4_by_Lixin_57.0626.zip` (supplier + batch), falling back to `_P<prod>` when no batch, or `_by_supplier` when no supplier is selected. `supply/inject.html`.
 

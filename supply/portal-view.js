@@ -2042,8 +2042,7 @@
                 +'<select class="fci pp-bc-batch" style="width:auto;min-width:150px;max-width:240px;text-align:left"><option value="">Select a batch…</option>'
                 +batches.map(function(b){return '<option'+(b===PORTAL_BC_BATCH?' selected':'')+'>'+esc(b)+'</option>';}).join('')+'</select>'
                 +'<button class="save-btn pp-bc-dl-prod"'+dis+'>⤓ Download product barcodes</button>'
-                +'<button class="save-btn pp-bc-dl-carton"'+dis+'>⤓ Download carton barcodes</button>'
-                +'<button class="save-btn pp-bc-dl-inner"'+dis+'>⤓ Download inner barcodes</button></div>';
+                +'<button class="save-btn pp-bc-dl-carton"'+dis+'>⤓ Download carton + inner barcodes</button></div>';
               var help = batches.length ? (picked
                   ? '<div class="count" style="margin:2px 0 8px">Barcodes cover every product on your order-plan lines for POs in batch <b>'+esc(PORTAL_BC_BATCH)+'</b>.</div>'
                   : '<div class="count" style="margin:2px 0 8px">Select a batch to enable the downloads.</div>')
@@ -2056,13 +2055,12 @@
                 : '';
               body.innerHTML=note+picker+help+listBlock;
               var bsel=body.querySelector('.pp-bc-batch'); if(bsel)bsel.onchange=function(){ PORTAL_BC_BATCH=this.value; PORTAL_BC_Q=''; renderPP(); };
-              function bcBatchDl(kind,btn){ if(!PORTAL_BC_BATCH)return; if(BC.placeholder){BC.note();return;} btn.disabled=true;
+              function bcBatchDl(kinds,name,btn){ if(!PORTAL_BC_BATCH)return; if(BC.placeholder){BC.note();return;} btn.disabled=true;
                 fetch(EP.labelData+'?batch='+encodeURIComponent(PORTAL_BC_BATCH)+'&supplier='+encodeURIComponent(STATE.supplierName)).then(function(r){return r.json();}).then(function(rows){ btn.disabled=false;
-                  if(rows&&rows.error){alert(rows.error);return;} if(!rows||!rows.length){alert('No '+kind+' barcodes found for batch '+PORTAL_BC_BATCH);return;}
-                  BC.sheets(rows,[kind],'batch_'+PORTAL_BC_BATCH+'_'+kind+'_barcodes.zip',btn); }).catch(function(){alert('Could not load barcodes');btn.disabled=false;}); }
-              var bp=body.querySelector('.pp-bc-dl-prod'); if(bp)bp.onclick=function(){ bcBatchDl('product',bp); };
-              var bc=body.querySelector('.pp-bc-dl-carton'); if(bc)bc.onclick=function(){ bcBatchDl('carton',bc); };
-              var bi=body.querySelector('.pp-bc-dl-inner'); if(bi)bi.onclick=function(){ bcBatchDl('inner',bi); };
+                  if(rows&&rows.error){alert(rows.error);return;} if(!rows||!rows.length){alert('No barcodes found for batch '+PORTAL_BC_BATCH);return;}
+                  BC.sheets(rows,kinds,'batch_'+PORTAL_BC_BATCH+'_'+name+'_barcodes.zip',btn); }).catch(function(){alert('Could not load barcodes');btn.disabled=false;}); }
+              var bp=body.querySelector('.pp-bc-dl-prod'); if(bp)bp.onclick=function(){ bcBatchDl(['product'],'product',bp); };
+              var bc=body.querySelector('.pp-bc-dl-carton'); if(bc)bc.onclick=function(){ bcBatchDl(['carton','inner'],'carton_inner',bc); };   // SUG-0002: carton download now includes inners
               if(picked){
                 var _bkey='__'+PORTAL_BC_BATCH;
                 function renderBcList(rows){ var listEl=body.querySelector('#pp-bc-list'); if(!listEl)return;
