@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.292 - BI & Reports: Production Summary report (SUG-0009)
+- New **SUPPLY ▸ BI & Reports ▸ PRODUCTION SUMMARY** sub-tab. Shows **total quantity in production per category** (collapsed headings, tap to expand to per-SKU totals). Filters: **PROD#** and **BATCH** (both dropdowns sorted **descending**) plus **SUPPLIER**; **nothing renders until a prod# or batch is chosen**. Two exports: **Categories CSV** and **SKUs CSV** (filenames stamped with the prod/batch). **Mobile-optimised** — wrapping filter bar, tap-to-expand rows, horizontally-scrollable SKU tables. New endpoint `GET /api/supply/bi/production-summary` (returns filter option lists always; aggregated rows only when filtered). Reads `purchase_order_lines` × `purchase_orders` × `products` (category). No migration. `server.mjs`, `supply/inject.html`.
+
 ## v26.291 - Suggestion box: guard unsaved input (SUG-0010)
 - The 💡 Suggestion box now warns before losing typed text: clicking **Cancel** or **✕** with anything in the suggestion/area fields asks **"You will lose all data typed. Close anyway?"**, and **clicking the backdrop no longer dismisses** the box while there's unsaved input (it only closes on click-away when both fields are empty). After a successful submit the fields reset, so closing is prompt-free. `supply/inject.html`.
 

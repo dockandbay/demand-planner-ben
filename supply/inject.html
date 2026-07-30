@@ -719,10 +719,10 @@
   var SECTIONS=[['actions','ACTIONS'],['reports','BI & REPORTS'],['purchase-orders','PURCHASE ORDERS'],['order-plan','ORDER PLAN'],
     ['payments','PAYMENTS'],['samples','SAMPLES'],['quality-control','QUALITY CONTROL']];   // CONFIG is now a top-level view (see enterConfig); SHIPMENTS lives under the PURCHASE ORDERS sub-nav (poSub 'shipments'); PAYMENTS umbrella holds Deposits / Other Payments / Payments Due / Payments Report
   // REPORTS is a parent tab; these are its sub-tabs (the read-across views).
-  var REPORT_SECTIONS=[['metrics','METRICS'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
+  var REPORT_SECTIONS=[['metrics','METRICS'],['production-summary','PRODUCTION SUMMARY'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
     ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['supplier-timing','SUPPLIER DELAYS'],['directclient','DIRECT TO CLIENT'],['flexport','FLEXPORT']];   // ERP COMPARE moved to ACTIONS ▸ ERP Compare sub-tab; CASH FLOW moved to PAYMENTS ▸ Cash Flow
-  var REPORT_KEYS=['metrics','reallocate','urgent-buy','container-fill','consolidate','upcoming','pipeline','supplier-timing','directclient','flexport'];
-  var BI_TABS={'metrics':'/api/supply/bi','urgent-buy':'/api/supply/bi/projection','reallocate':'/api/supply/bi/reallocations','container-fill':'/api/supply/bi/container-fill','consolidate':'/api/supply/bi/consolidations','erp-compare':'/api/supply/bi/erp-compare','supplier-timing':'/api/supply/supplier-timing'};   // fluid: always re-fetch
+  var REPORT_KEYS=['metrics','production-summary','reallocate','urgent-buy','container-fill','consolidate','upcoming','pipeline','supplier-timing','directclient','flexport'];
+  var BI_TABS={'metrics':'/api/supply/bi','production-summary':'/api/supply/bi/production-summary','urgent-buy':'/api/supply/bi/projection','reallocate':'/api/supply/bi/reallocations','container-fill':'/api/supply/bi/container-fill','consolidate':'/api/supply/bi/consolidations','erp-compare':'/api/supply/bi/erp-compare','supplier-timing':'/api/supply/supplier-timing'};   // fluid: always re-fetch
   var reportTab='metrics';   // BI & REPORTS opens on METRICS by default
   var ANNOT={
     actions:'<b>SUPPLY ▸ Actions.</b> Exceptions surfaced from the supply picture — date conflicts, unassigned shipments, missing supplier, unpaid deposits. Grouped by type.',
@@ -7684,6 +7684,7 @@
     if(rk!=='erp-compare') refreshErpcBadge();
     var done=function(d){
       if(rk==='metrics')return renderBIMetrics(d);
+      if(rk==='production-summary')return renderProductionSummary(d);
       if(rk==='urgent-buy')return renderUrgentBuy(d);
       if(rk==='reallocate')return renderReallocate(d);
       if(rk==='container-fill')return renderContainerFill(d);
@@ -7706,6 +7707,60 @@
     +'<div style="font-size:23px;font-weight:800;line-height:1.1;color:'+(accent||'#0f172a')+'">'+val+'</div>'
     +'<div style="font-size:10.5px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-top:4px">'+esc(label)+'</div>'
     +(sub?'<div style="font-size:11px;color:#94a3b8;margin-top:4px">'+esc(sub)+'</div>':'')+'</div>'; }
+  // PRODUCTION SUMMARY (SUG-0009) — qty in production per category (expand → per SKU), filtered by prod#/batch/supplier
+  var _psProd='', _psBatch='', _psSupplier='', _psOpts={prods:[],batches:[],suppliers:[]}, _psRows=[], _psExp={};
+  function psDescSort(arr){ return (arr||[]).slice().sort(function(x,y){ var nx=parseFloat(x),ny=parseFloat(y); if(!isNaN(nx)&&!isNaN(ny)&&nx!==ny)return ny-nx; return String(y).localeCompare(String(x),undefined,{numeric:true}); }); }
+  function psCsvC(v){ v=String(v==null?'':v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+  function psGroupCats(){ var m={}; _psRows.forEach(function(r){ var c=r.category||'Uncategorised'; var g=m[c]||(m[c]={category:c,total:0,skus:[]}); g.total+=Number(r.qty)||0; g.skus.push(r); });
+    return Object.keys(m).map(function(k){return m[k];}).sort(function(a,b){return b.total-a.total||a.category.localeCompare(b.category);}); }
+  function renderProductionSummary(d){ var b=biBody();
+    if(d&&d.prods){ _psOpts={prods:d.prods||[],batches:d.batches||[],suppliers:d.suppliers||[]}; }
+    _psRows=(d&&d.rows)||[];
+    var prods=psDescSort(_psOpts.prods), batches=psDescSort(_psOpts.batches), sups=(_psOpts.suppliers||[]).slice().sort();
+    function opt(v,cur){ return '<option value="'+esc(v)+'"'+(String(v)===String(cur)?' selected':'')+'>'+esc(v)+'</option>'; }
+    b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:#0f172a">Production summary</div>'
+      +'<div class="mut tiny" style="margin-bottom:12px;max-width:760px">Total quantity in production for a run or batch, by category — tap a category to expand to its SKUs. Pick a <b>production number</b> or <b>batch</b> to begin.</div>'
+      +'<div id="ps-bar" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:2px 0 12px">'
+        +'<span style="display:flex;align-items:center;gap:5px"><span style="color:#64748b;font-size:11px">PROD#</span><select class="fci" id="ps-prod" style="text-align:left"><option value="">— select —</option>'+prods.map(function(v){return opt(v,_psProd);}).join('')+'</select></span>'
+        +'<span style="display:flex;align-items:center;gap:5px"><span style="color:#64748b;font-size:11px">BATCH</span><select class="fci" id="ps-batch" style="text-align:left"><option value="">— select —</option>'+batches.map(function(v){return opt(v,_psBatch);}).join('')+'</select></span>'
+        +'<span style="display:flex;align-items:center;gap:5px"><span style="color:#64748b;font-size:11px">SUPPLIER</span><select class="fci" id="ps-sup" style="text-align:left"><option value="">All</option>'+sups.map(function(v){return opt(v,_psSupplier);}).join('')+'</select></span>'
+        +'<a id="ps-clear" class="mut tiny" style="cursor:pointer;color:#1d4ed8'+((_psProd||_psBatch||_psSupplier)?'':';display:none')+'">clear</a>'
+      +'</div><div id="ps-content"></div>';
+    function fetchPS(){ var c=document.getElementById('ps-content'); if(c)c.innerHTML='<div class="count">Loading…</div>';
+      var qs=[]; if(_psProd)qs.push('prod='+encodeURIComponent(_psProd)); if(_psBatch)qs.push('batch='+encodeURIComponent(_psBatch)); if(_psSupplier)qs.push('supplier='+encodeURIComponent(_psSupplier));
+      fetch('/api/supply/bi/production-summary'+(qs.length?'?'+qs.join('&'):'')).then(function(r){return r.json();}).then(function(j){ _psRows=(j&&j.rows)||[]; drawContent(); }).catch(function(e){ var c=document.getElementById('ps-content'); if(c)c.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
+    function drawContent(){ var c=document.getElementById('ps-content'); if(!c)return;
+      if(!_psProd&&!_psBatch){ c.innerHTML='<div class="mut" style="padding:14px 2px;border:1px dashed #e2e8f0;border-radius:8px;text-align:center">Select a <b>production number</b> or <b>batch</b> above to view the summary.</div>'; return; }
+      var cats=psGroupCats(); var grand=cats.reduce(function(s,c2){return s+c2.total;},0);
+      if(!cats.length){ c.innerHTML='<div class="mut" style="padding:14px 2px">No production lines for this selection.</div>'; return; }
+      var head='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">'
+        +'<div style="font-weight:800;font-size:13px;color:#0f172a">'+units(grand)+' units <span class="mut tiny" style="font-weight:600">across '+cats.length+' categor'+(cats.length===1?'y':'ies')+'</span></div>'
+        +'<span style="flex:1"></span>'
+        +'<button class="save-btn light" id="ps-csv-cat" style="font-size:11px">⤓ Categories CSV</button>'
+        +'<button class="save-btn light" id="ps-csv-sku" style="font-size:11px">⤓ SKUs CSV</button></div>';
+      var rowsH=cats.map(function(cat){ var open=!!_psExp[cat.category];
+        var catRow='<div class="ps-cat" data-cat="'+esc(cat.category)+'" style="display:flex;align-items:center;gap:8px;padding:9px 11px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:6px;cursor:pointer">'
+          +'<span style="width:14px;color:#64748b;font-size:11px">'+(open?'▾':'▸')+'</span>'
+          +'<span style="font-weight:700;font-size:12.5px;flex:1;min-width:0">'+esc(cat.category)+'</span>'
+          +'<span class="mut tiny">'+cat.skus.length+' SKU'+(cat.skus.length===1?'':'s')+'</span>'
+          +'<span style="font-weight:800;font-size:13px;min-width:78px;text-align:right">'+units(cat.total)+'</span></div>';
+        var skuRows=open?('<div style="margin:-2px 0 10px 0;overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;min-width:340px"><tbody>'
+          +cat.skus.slice().sort(function(a,b){return b.qty-a.qty;}).map(function(s){ return '<tr style="border-bottom:1px solid #f4f4f5"><td style="padding:4px 10px 4px 26px;font-family:ui-monospace,Menlo,monospace;white-space:nowrap">'+esc(s.sku)+'</td><td style="padding:4px 10px;color:#475569">'+esc(s.product_name||'')+'</td><td style="padding:4px 6px;text-align:right;font-weight:700;white-space:nowrap">'+units(s.qty)+'</td></tr>'; }).join('')
+          +'</tbody></table></div>'):'';
+        return catRow+skuRows; }).join('');
+      c.innerHTML=head+rowsH;
+      c.querySelectorAll('.ps-cat').forEach(function(el){ el.onclick=function(){ var k=el.dataset.cat; _psExp[k]=!_psExp[k]; drawContent(); }; });
+      var cc=document.getElementById('ps-csv-cat'); if(cc)cc.onclick=function(){ var lines=[['Category','Total qty']]; cats.forEach(function(cat){lines.push([cat.category,cat.total]);}); downloadCsvStr(lines.map(function(r){return r.map(psCsvC).join(',');}).join('\n')+'\n','production_summary_categories'+(_psProd?'_P'+_psProd:'')+(_psBatch?'_'+_psBatch:'')+'.csv'); };
+      var cs=document.getElementById('ps-csv-sku'); if(cs)cs.onclick=function(){ var lines=[['Category','SKU','Product','Qty']]; cats.forEach(function(cat){ cat.skus.slice().sort(function(a,b){return b.qty-a.qty;}).forEach(function(s){lines.push([cat.category,s.sku,s.product_name||'',s.qty]);}); }); downloadCsvStr(lines.map(function(r){return r.map(psCsvC).join(',');}).join('\n')+'\n','production_summary_skus'+(_psProd?'_P'+_psProd:'')+(_psBatch?'_'+_psBatch:'')+'.csv'); };
+    }
+    var sp=b.querySelector('#ps-prod'); if(sp)sp.onchange=function(){ _psProd=this.value; _psExp={}; toggleClear(); fetchPS(); };
+    var sb=b.querySelector('#ps-batch'); if(sb)sb.onchange=function(){ _psBatch=this.value; _psExp={}; toggleClear(); fetchPS(); };
+    var ss=b.querySelector('#ps-sup'); if(ss)ss.onchange=function(){ _psSupplier=this.value; _psExp={}; toggleClear(); fetchPS(); };
+    var cl=b.querySelector('#ps-clear'); if(cl)cl.onclick=function(){ _psProd=_psBatch=_psSupplier=''; _psExp={}; renderProductionSummary({prods:_psOpts.prods,batches:_psOpts.batches,suppliers:_psOpts.suppliers,rows:[]}); };
+    function toggleClear(){ var e=b.querySelector('#ps-clear'); if(e)e.style.display=(_psProd||_psBatch||_psSupplier)?'':'none'; }
+    // if a filter is already set (returning to the tab), pull the rows straight away; otherwise show the prompt
+    if(_psProd||_psBatch)fetchPS(); else drawContent();
+  }
   // SUPPLIER DELAYS — production start/completion + supplier completion-date movements (which suppliers slip / delay)
   var _stProd='', _stMonths='';   // Supplier-delays filters: PROD# (e.g. "58") and "started within last N months" (by start_production)
   function renderSupplierTiming(d){ var b=biBody(); var allPos=(d&&d.pos)||[];

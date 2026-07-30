@@ -7962,6 +7962,33 @@ app.get('/api/supply/bi/consolidations', async (req, res) => {
     res.json({ ok: true, count: open.length, recs: open });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// PRODUCTION SUMMARY (SUG-0009) — total qty for a production run / batch, grouped by category → SKU.
+// Always returns the filter option lists; rows only when a prod# or batch is chosen (report shows nothing until then).
+app.get('/api/supply/bi/production-summary', async (req, res) => {
+  try {
+    const prod = (req.query.prod || '').trim() || null;
+    const batch = (req.query.batch || '').trim() || null;
+    const supplier = (req.query.supplier || '').trim() || null;
+    const prods = (await pool.query(`SELECT DISTINCT prod_no FROM planner.purchase_orders WHERE coalesce(prod_no,'')<>''`)).rows.map(r => r.prod_no);
+    const batches = (await pool.query(`SELECT DISTINCT batch_id FROM planner.purchase_orders WHERE coalesce(batch_id,'')<>''`)).rows.map(r => r.batch_id);
+    const suppliers = (await pool.query(`SELECT DISTINCT supplier_name FROM planner.purchase_orders WHERE coalesce(supplier_name,'')<>'' ORDER BY supplier_name`)).rows.map(r => r.supplier_name);
+    let rows = [];
+    if (prod || batch) {
+      rows = (await pool.query(`
+        SELECT coalesce(nullif(trim(p.category),''),'Uncategorised') category, l.sku,
+               coalesce(nullif(p.product_name,''), l.sku) product_name, sum(l.qty)::bigint qty
+        FROM planner.purchase_order_lines l
+        JOIN planner.purchase_orders po ON po.po=l.po
+        LEFT JOIN planner.products p ON p.sku=l.sku
+        WHERE ($1::text IS NULL OR po.prod_no=$1)
+          AND ($2::text IS NULL OR po.batch_id=$2)
+          AND ($3::text IS NULL OR po.supplier_name=$3)
+        GROUP BY 1,2,3 HAVING sum(l.qty) <> 0
+        ORDER BY 1, qty DESC`, [prod, batch, supplier])).rows.map(r => ({ ...r, qty: Number(r.qty) }));
+    }
+    res.json({ prods, batches, suppliers, rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // ERP COMPARE — open/draft ERP POs that are NOT in the planner's purchase_orders, limited to POs whose
 // supplier matches a product supplier in the planner (planner.suppliers, kind='supplier') so freight/
 // internal/test vendors (Flexport, HMRC, print shops, …) are excluded.
