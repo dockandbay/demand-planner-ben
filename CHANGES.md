@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.285 - Suggestion box: stakeholder emails (SUG-0003) + add-another (SUG-0004)
+- **SUG-0003:** new suggestions and status changes now email the **stakeholders** (default **ben@ + sarah@**; editable in CONFIG ▸ Suggestions). Fixes "email not firing on a new suggestion" — the submit endpoint previously sent nothing. Stored in `app_settings.suggestion_stakeholders`; emails logged to the Email log (kinds `suggestion-new` / `suggestion-status`).
+- **SUG-0004:** after submitting in the 💡 Suggestion box, the form now **resets so you can add another** without closing/refreshing (Cancel becomes Close).
+- `server.mjs` (suggestion submit + status email hooks, `suggestionStakeholders`), `supply/inject.html` (submit-box reset + CONFIG stakeholder editor). No migration.
+
 ## v26.284 - Supplier portal: carton barcode download includes inners (SUG-0002)
 - The supplier portal's batch "Download carton barcodes" button now downloads **carton + inner** labels together (relabelled "Download carton + inner barcodes"), matching the admin "All Cartons (+inners)". The redundant standalone batch inner button is removed; per-row Inner download is still available for inner-only. `supply/portal-view.js`.
 

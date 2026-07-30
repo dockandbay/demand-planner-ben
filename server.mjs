@@ -3416,6 +3416,15 @@ app.post('/api/supply/ka-forecast-cell', async (req, res) => {
   } catch (e) { try { await client2.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: e.message }); }
   finally { client2.release(); }
 });
+// Suggestion-box stakeholders: emailed on a new suggestion + on a status change. Configured in CONFIG ▸ Suggestions
+// (app_settings.suggestion_stakeholders, comma-separated); ben@ + sarah@ are the default.
+async function suggestionStakeholders() {
+  let v = '';
+  try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='suggestion_stakeholders'`)).rows[0]; v = (r && r.value || '').trim(); } catch (e) {}
+  const list = (v || 'ben@dockandbay.com,sarah@dockandbay.com').split(/[,;\s]+/).map(s => s.trim().toLowerCase()).filter(e => /@/.test(e));
+  return Array.from(new Set(list));
+}
+const _sugEsc = s => String(s == null ? '' : s).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
 // Suggestion Box — submit a new suggestion (returns its assigned reference) and triage its status.
 app.post('/api/supply/suggestion', async (req, res) => {
   const b = req.body || {};
@@ -3423,7 +3432,18 @@ app.post('/api/supply/suggestion', async (req, res) => {
   if (!body) return res.status(400).json({ error: 'Suggestion text is required.' });
   try {
     const r = await pool.query(`INSERT INTO planner.suggestions (body, area, created_by) VALUES ($1,$2,$3) RETURNING id, ref`, [body, area, by]);
-    res.json({ ok: true, id: r.rows[0].id, ref: r.rows[0].ref });
+    const ref = r.rows[0].ref;
+    try {
+      const stake = await suggestionStakeholders();
+      if (stake.length) {
+        const html = `<p><b>New suggestion logged in HORIZON.</b></p>`
+          + `<p><b>${_sugEsc(ref)}</b>${area ? (' &middot; ' + _sugEsc(area)) : ''}</p>`
+          + `<p style="color:#475569">${_sugEsc(body)}</p>`
+          + `<p style="color:#94a3b8;font-size:12px">Submitted by ${_sugEsc(by || '(unknown)')} &middot; triage in CONFIG ▸ Suggestions.</p>`;
+        await sendResendEmail({ to: stake, subject: `New suggestion ${ref}`, html, kind: 'suggestion-new', ref, by });
+      }
+    } catch (e) { /* email is best-effort — never fail the submit */ }
+    res.json({ ok: true, id: r.rows[0].id, ref });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/suggestion/:id/status', async (req, res) => {
@@ -3443,6 +3463,18 @@ app.post('/api/supply/suggestion/:id/status', async (req, res) => {
       const r = await sendResendEmail({ to: prev.created_by, cc: CC, subject: `Your suggestion ${prev.ref} is going live 🎉`, html });
       emailed = !!(r && (r.sent || r.sandbox));
     }
+    // notify the suggestion-box stakeholders on ANY status change
+    try {
+      if (prev && prev.status !== status) {
+        const stake = await suggestionStakeholders();
+        if (stake.length) {
+          const html = `<p>Suggestion <b>${_sugEsc(prev.ref)}</b> status changed to <b>${_sugEsc(status)}</b>${by ? (' by ' + _sugEsc(by)) : ''}.</p>`
+            + `<p style="color:#475569">${_sugEsc(prev.body)}</p>`
+            + `<p style="color:#94a3b8;font-size:12px">HORIZON Suggestion Box.</p>`;
+          await sendResendEmail({ to: stake, subject: `Suggestion ${prev.ref} → ${status}`, html, kind: 'suggestion-status', ref: prev.ref, by });
+        }
+      }
+    } catch (e) { /* best-effort */ }
     res.json({ ok: true, emailed });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

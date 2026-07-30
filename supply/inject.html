@@ -5813,7 +5813,7 @@
       SUBS['suggestions']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         var SS=[['new','New','#2563eb','#eff6ff'],['complete','Complete','#16a34a','#f0fdf4'],['future','Future','#7c3aed','#f5f3ff'],['deferred','Deferred','#b45309','#fffbeb']];
         var SMAP={}; SS.forEach(function(s){SMAP[s[0]]=s;});
-        var stFilt='all';
+        var stFilt='all', _sugStake='';
         function draw(rows,flash){
           var counts={all:rows.length}; SS.forEach(function(s){counts[s[0]]=0;}); rows.forEach(function(r){counts[r.status]=(counts[r.status]||0)+1;});
           var f=(stFilt==='all')?rows:rows.filter(function(r){return r.status===stFilt;});
@@ -5832,6 +5832,7 @@
             +'<td class="l"><a class="sug-del mut" data-id="'+r.id+'" title="delete" style="color:#dc2626;cursor:pointer">×</a></td></tr>'; }).join('')
             ||'<tr><td colspan="8" class="count">No '+(stFilt==='all'?'':stFilt+' ')+'suggestions.</td></tr>';
           b.innerHTML='<div class="annot"><b>CONFIG ▸ Suggestions.</b> Everything submitted from the top-bar 💡 <b>Suggestion box</b>. Each has a reference (<b>SUG-nnnn</b>) you can quote in chat. Set a status: <b>Complete</b> when done (emails the submitter "this feature is going live", cc sarah/ben/diviyaj), <b>Future</b> for the backlog, <b>Deferred</b> to park it.</div>'
+            +'<div class="bar" style="gap:8px;align-items:center;margin-bottom:10px"><span class="pill-lbl">Stakeholders <span class="mut tiny">(emailed on every new suggestion + status change)</span></span><input class="flt" id="sug-stake" value="'+esc(_sugStake)+'" placeholder="email, email…" style="width:340px"><button class="save-btn" id="sug-stake-save">Save</button><span class="mut tiny" id="sug-stake-msg"></span></div>'
             +(flash?'<div style="background:#f0fdf4;border:1px solid #16a34a;color:#166534;font-size:12px;border-radius:6px;padding:7px 11px;margin-bottom:10px">'+esc(flash)+'</div>':'')
             +pills+'<div class="tw"><table class="samp-tbl" style="font-size:12px"><thead><tr><th class="l">Ref</th><th class="l">Suggestion</th><th class="l">Area</th><th class="l">By</th><th class="l">When</th><th class="l">Status</th><th class="l">Set status</th><th></th></tr></thead><tbody>'+body+'</tbody></table></div>';
           b.querySelectorAll('.sug-filt').forEach(function(p){ p.onclick=function(){ stFilt=p.dataset.s; draw(rows); }; });
@@ -5839,8 +5840,11 @@
             shipPost('/api/supply/suggestion/'+id+'/status',{status:ns,status_by:(window.ME&&ME.email)||''},function(j){ if(j&&j.error){alert(j.error);return;} var r=rows.filter(function(x){return String(x.id)===String(id);})[0]; if(r)r.status=ns;
               var fl=(ns==='complete'&&j&&j.emailed&&r&&r.created_by)?('📧 "This feature is going live" emailed to '+shortUser(r.created_by)+' (cc sarah@, ben@, diviyaj@)'):''; draw(rows,fl); }); }; });
           b.querySelectorAll('.sug-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this suggestion?'))return; shipPost('/api/supply/suggestion/'+a.dataset.id+'/delete',{},function(){ SUBS['suggestions'](); }); }; });
+          var _sss=document.getElementById('sug-stake-save'); if(_sss)_sss.onclick=function(){ var v=(document.getElementById('sug-stake').value||'').trim(), m=document.getElementById('sug-stake-msg');
+            fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'suggestion_stakeholders',value:v})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){m.style.color='#dc2626';m.textContent='Error: '+j.error;return;} _sugStake=v; m.style.color='#16a34a'; m.textContent='Saved ✓'; setTimeout(function(){if(m)m.textContent='';},1600); }).catch(function(){ m.style.color='#dc2626'; m.textContent='Save failed'; }); };
         }
-        fetch('/api/supply/suggestions').then(function(r){return r.json();}).then(function(rows){ draw(Array.isArray(rows)?rows:[]); })
+        Promise.all([fetch('/api/supply/suggestions').then(function(r){return r.json();}), fetch('/api/app-settings').then(function(r){return r.json();}).catch(function(){return {};})])
+          .then(function(res){ _sugStake=(res[1]&&res[1].suggestion_stakeholders)||'ben@dockandbay.com, sarah@dockandbay.com'; draw(Array.isArray(res[0])?res[0]:[]); })
           .catch(function(e){ b.innerHTML='<div class="count" style="color:#dc2626">'+esc(String(e))+'</div>'; }); };
       SUBS['tax']=function(){ b.innerHTML=taxTbl(); bindEdits(); };
       SUBS['freight']=function(){ b.innerHTML=frTbl(); bindEdits();   // bindEdits wires the air-tier rate inputs (.fci)
@@ -8349,8 +8353,8 @@
       var btn=this; btn.disabled=true; msg.style.color='#64748b'; msg.textContent='Submitting…';
       fetch('/api/supply/suggestion',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({body:body,area:bg.querySelector('#sug-area').value.trim(),created_by:(window.ME&&ME.email)||''})})
         .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error);
-          bg.querySelector('#sug-send').style.display='none'; bg.querySelector('#sug-cancel').textContent='Close';
-          msg.style.color='#16a34a'; msg.innerHTML='Thanks! Logged as <b>'+esc(j.ref)+'</b> — quote that reference to push it forward.'; ta.disabled=true; bg.querySelector('#sug-area').disabled=true; })
+          msg.style.color='#16a34a'; msg.innerHTML='Thanks! Logged as <b>'+esc(j.ref)+'</b> — quote that reference to push it forward. Add another below, or Close.';
+          ta.value=''; bg.querySelector('#sug-area').value=''; ta.disabled=false; bg.querySelector('#sug-area').disabled=false; btn.disabled=false; ta.focus(); bg.querySelector('#sug-cancel').textContent='Close'; })   // SUG-0004: reset so another can be added without refreshing
         .catch(function(e){ msg.style.color='#dc2626'; msg.textContent='Failed: '+(e.message||e); btn.disabled=false; }); }; }
   try{ window.HZ_SUGGEST={ open:openSuggestBox }; }catch(e){}
   function ensureSuggestButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('sug-btn'))return;
