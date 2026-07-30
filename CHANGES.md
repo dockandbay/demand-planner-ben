@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.301 - Email log: "Sent per month" client-side fallback
+- The **Sent per month** badge no longer relies solely on the server's `monthly` aggregation. If the response's `monthly` is empty, the client now derives the counts itself from a 12-month rows fetch — so the badge can't show "No emails logged yet" while rows exist (guards against an older/harness serving layer that returns rows but not the monthly array). Server `monthly` is still used when present (accurate + uncapped). `supply/inject.html`.
+
 ## v26.300 - Email log: wider Subject column
 - CONFIG ▸ Email log: the **Subject** column is roughly doubled (max-width 320→640px, min-width 360px, wraps) and the table container widened (1120→1440px) so subjects aren't cramped. `supply/inject.html`.
 
