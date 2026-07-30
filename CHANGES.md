@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.288 - Session guard: 4h re-check + 7-day auto-logout (SUG-0007, app side)
+- On **live** only, the app now re-checks `/api/me` every **4 hours** and hard-expires at **7 days**; if the session is gone (401 / login-redirect / email cleared or changed) it logs out via the proxy logout URL (`app_settings.auth_logout_url`, exposed on `/api/me`), falling back to a reload. **This is the app half of SUG-0007** — it only actually logs anyone out once Diviyaj sets the proxy's 7-day session + ~4h Google re-validation (see `SUG-0007_session-reauth-spec.md`). `server.mjs`, `supply/inject.html`.
+
 ## v26.287 - Supplier "Expedited production weeks" field (SUG-0008, part 1) ⚠️ NEEDS MIGRATION 161
 - New supplier config field **Expedited production weeks** in CONFIG ▸ Suppliers (Payment terms block). **Migration `161_supplier_expedited_weeks.sql`** adds `suppliers.expedited_production_weeks` (default 6; XR Textile / Lixin / Jinma = 3). Read defensively so the page works pre-migration (defaults to 6); editable + saved via the supplier PATCH.
 - The **BI calc wiring** (feeding urgent-buy + expedited-production) is NOT yet done — awaiting Ben's confirm on the exact formula. `server.mjs`, `supply/inject.html`.

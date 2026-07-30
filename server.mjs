@@ -4160,7 +4160,10 @@ async function permsFor(req) {
   return { email: e, live: true, supply_edit: !!(row && row.supply_edit), demand_edit: !!(row && row.demand_edit), product_edit: !!(row && row.product_edit), is_admin: !!(row && row.is_admin), landing_page: (row && row.landing_page) || 'supply/purchase-orders' };
 }
 // What the client asks on load to decide what to enable (read-only UI otherwise).
-app.get('/api/me', async (req, res) => { try { res.json(await permsFor(req)); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get('/api/me', async (req, res) => { try { const me = await permsFor(req);
+  // logout URL for the client session-guard (SUG-0007) — set app_settings.auth_logout_url to your proxy's sign-out path
+  let lo = ''; try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='auth_logout_url'`)).rows[0]; lo = (r && r.value) || ''; } catch (e) {}
+  me.logout_url = lo; res.json(me); } catch (e) { res.status(500).json({ error: e.message }); } });
 // Permissions admin — ADMIN-ONLY (sandbox counts as admin so Ben can build/test locally).
 app.get('/api/config/permissions', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
   try { const r = await pool.query('SELECT email, supply_edit, demand_edit, product_edit, is_admin, coalesce(landing_page,\'\') landing_page, to_char(updated_at,\'YYYY-MM-DD HH24:MI\') updated_at, updated_by FROM planner.app_permissions ORDER BY email'); res.json(r.rows); }

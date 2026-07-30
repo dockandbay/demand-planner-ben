@@ -5455,7 +5455,19 @@
   var PORTAL_SUP='', PORTAL_TAB='pos', PORTAL_PO_ST=null, _pendingPortalSup=null;   // CONFIG ▸ Portal preview: chosen supplier + inner tab + PO status filter (+ pending supplier slug from #/config/portal/<name>)
   var ROW_EDIT={};   // per-sub-tab: which row key is currently in Edit mode (Edit/Save rows for suppliers + productions)
   var ME=null;   // caller's app permissions (/api/me): {email,live,supply_edit,demand_edit,is_admin}. null until loaded; sandbox = full access.
-  function fetchMe(cb){ fetch('/api/me').then(function(r){return r.json();}).then(function(j){ ME=j||null; try{window.ME=ME;}catch(e){} try{updatePermBanner();}catch(e){} if(cb)cb(); }).catch(function(){ if(cb)cb(); }); }
+  function fetchMe(cb){ fetch('/api/me').then(function(r){return r.json();}).then(function(j){ ME=j||null; try{window.ME=ME;}catch(e){} try{updatePermBanner();}catch(e){} try{startSessionGuard();}catch(e){} if(cb)cb(); }).catch(function(){ if(cb)cb(); }); }
+  // SUG-0007: on LIVE only, silently re-check the session every 4h + hard-expire at 7 days. If /api/me stops
+  // returning our email (proxy session gone / Google account revoked), log out via the proxy logout URL (from
+  // app_settings.auth_logout_url) — falling back to a reload, which the proxy will bounce to Google sign-in.
+  function startSessionGuard(){ if(!ME||!ME.live||window._hzGuard)return; window._hzGuard=1;
+    var bootEmail=(ME.email||'').toLowerCase(), bootT=Date.now(), MAX=7*24*3600*1000;
+    function logout(){ if(window._hzLoggedOut)return; window._hzLoggedOut=1; try{ if(window._hzGuardT)clearInterval(window._hzGuardT); }catch(e){}
+      var url=(ME&&ME.logout_url)||''; try{ if(url){ window.location.href=url; return; } }catch(e){} try{ location.reload(); }catch(e){} }
+    function check(){ if(Date.now()-bootT>=MAX){ logout(); return; }   // 7-day hard cap (backstop even if the proxy is lenient)
+      fetch('/api/me',{cache:'no-store'}).then(function(r){ if(!r.ok||r.redirected){ logout(); return null; } var ct=r.headers.get('content-type')||''; if(ct.indexOf('json')<0){ logout(); return null; } return r.json(); })
+        .then(function(j){ if(!j)return; var e=(j.email||'').toLowerCase(); if(!e || (bootEmail && e!==bootEmail)) logout(); })
+        .catch(function(){ /* transient network blip — leave the session alone */ }); }
+    window._hzGuardT=setInterval(check, 4*3600*1000); }   // every 4 hours
   // Read-only UX. The server is the hard boundary (403); this surfaces it: a global 403-readonly toast
   // (covers every view incl. DEMAND/FBA) + a banner on SUPPLY/CONFIG when you lack the edit right.
   (function(){ if(window.__permFetchWrapped)return; window.__permFetchWrapped=true; var of=window.fetch;
