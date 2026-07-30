@@ -3893,6 +3893,17 @@ async function assignSampleToShipment(devSampleId, srId, notShipped, by) {
     VALUES ($1::bigint,$2,1,$3) ON CONFLICT (sample_request_id, dev_sample_id) DO NOTHING`, [srId, devSampleId, by || null]);
   await pool.query(`UPDATE planner.product_dev_samples SET not_shipped=$2 WHERE id=$1`, [devSampleId, srId ? false : !!notShipped]);
 }
+// ADD a link (a dev sample can be on MANY shipments) without disturbing existing links; UNLINK removes just one.
+async function linkSampleToShipment(devSampleId, srId, by) {
+  if (!srId) return;
+  await pool.query(`INSERT INTO planner.sample_request_dev_samples (sample_request_id, dev_sample_id, qty, created_by)
+    VALUES ($1::bigint,$2,1,$3) ON CONFLICT (sample_request_id, dev_sample_id) DO NOTHING`, [srId, devSampleId, by || null]);
+  await pool.query(`UPDATE planner.product_dev_samples SET not_shipped=false WHERE id=$1`, [devSampleId]);
+}
+async function unlinkSampleFromShipment(devSampleId, srId) {
+  if (!srId) return;
+  await pool.query(`DELETE FROM planner.sample_request_dev_samples WHERE dev_sample_id=$1 AND sample_request_id=$2::bigint`, [devSampleId, srId]);
+}
 async function portalOwnsProductSample(req, sampleId) {   // ownership: the product sample's item must belong to the caller's supplier
   const r = (await pool.query(`SELECT item_ref FROM planner.product_dev_samples WHERE id=$1`, [sampleId])).rows[0];
   return r ? portalOwnsProduct(req, r.item_ref) : false;
@@ -8975,10 +8986,15 @@ app.post('/api/portal/product-sample/:id/meta', portalAuth, async (req, res) => 
 // Supplier assigns a sample version to a sample shipment (SR), marks it not-shipped, or unassigns it.
 app.post('/api/portal/product-sample/:id/assign', portalAuth, async (req, res) => { const id = req.params.id, b = req.body || {};
   if (!(await portalOwnsProductSample(req, id))) return res.status(403).json({ error: 'not your sample' });
-  const mode = b.mode, srId = (mode === 'shipment') ? b.sample_request_id : null, notShipped = (mode === 'not_shipped');
-  if (mode === 'shipment' && !srId) return res.status(400).json({ error: 'sample_request_id required' });
-  try { await assignSampleToShipment(id, srId, notShipped, req.portal.email || null); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
+  const mode = b.mode;
+  try {
+    if (mode === 'link') { if (!b.sample_request_id) return res.status(400).json({ error: 'sample_request_id required' }); await linkSampleToShipment(id, b.sample_request_id, req.portal.email || null); }
+    else if (mode === 'unlink') { if (!b.sample_request_id) return res.status(400).json({ error: 'sample_request_id required' }); await unlinkSampleFromShipment(id, b.sample_request_id); }
+    else { const srId = (mode === 'shipment') ? b.sample_request_id : null, notShipped = (mode === 'not_shipped');   // legacy single-assign / not-shipped / clear
+      if (mode === 'shipment' && !srId) return res.status(400).json({ error: 'sample_request_id required' });
+      await assignSampleToShipment(id, srId, notShipped, req.portal.email || null); }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/product-sample-photo', portalAuth, async (req, res) => { const b = req.body || {}, id = b.sample_id;
   if (!b.data_base64 || !id) return res.status(400).json({ error: 'sample_id + data_base64 required' });
   try { const sr = (await pool.query(`SELECT item_ref, version FROM planner.product_dev_samples WHERE id=$1`, [id])).rows[0];

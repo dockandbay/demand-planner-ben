@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.290 - Portal: link a sample to MULTIPLE shipments (SUG-0005 part B)
+- On the supplier portal (PRODUCT ▸ sample versions), a sample can now be linked to **many** sample shipments instead of just one. The old single "Shipment" select is now a **"Link to shipment"** search box: type to filter existing shipments (ref / carrier / tracking), pick one to add it, and **"＋ New shipment"** sits in the dropdown to spin up a fresh one. Linked shipments show as chips below with a per-shipment **✕ unlink**. "Not shipped" only offered when nothing is linked. Data model was already many-to-many (`sample_request_dev_samples`); added server modes `link`/`unlink` on `/api/portal/product-sample/:id/assign` (legacy single-`shipment` assign kept). No migration. `server.mjs`, `supply/portal-view.js`.
+
 ## v26.288 - Session guard: 4h re-check + 7-day auto-logout (SUG-0007, app side)
 - On **live** only, the app now re-checks `/api/me` every **4 hours** and hard-expires at **7 days**; if the session is gone (401 / login-redirect / email cleared or changed) it logs out via the proxy logout URL (`app_settings.auth_logout_url`, exposed on `/api/me`), falling back to a reload. **This is the app half of SUG-0007** — it only actually logs anyone out once Diviyaj sets the proxy's 7-day session + ~4h Google re-validation (see `SUG-0007_session-reauth-spec.md`). `server.mjs`, `supply/inject.html`.
 
