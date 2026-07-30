@@ -7773,8 +7773,12 @@ function renderReportView(){
   if(!bar){ bar=document.createElement('div'); bar.id='report-tabs';
     bar.style.cssText='display:flex;gap:2px;align-items:center;margin:2px 0 10px;border-bottom:1px solid #e0e0e0;flex-wrap:wrap';   // match SUPPLY #supply-subnav / DEMAND #demand-tabs exactly
     document.querySelector('.wrap').appendChild(bar); }
-  bar.innerHTML=REPORT_TABS.map(function(t){return '<button class="view-toggle rtab'+(t[0]===REPORT_VIEW?' active':'')+'" data-report="'+t[0]+'">'+t[1]+'</button>';}).join('');   // no leading "REPORTS" label (kept the row aligned with other tabs)
-  bar.querySelectorAll('.rtab').forEach(function(b){ b.onclick=function(){ REPORT_VIEW=b.dataset.report; if(window.writeHash)window.writeHash(['reports',REPORT_VIEW]); render(); }; });
+  bar.innerHTML=REPORT_TABS.map(function(t){return '<button class="dnav'+(t[0]===REPORT_VIEW?' active':'')+'" data-report="'+t[0]+'">'+t[1]+'</button>';}).join('');   // .dnav = the same level-2 tab style as DEMAND/SUPPLY (was view-toggle = level-1 style); no leading label
+  bar.querySelectorAll('.dnav').forEach(function(b){ b.onclick=function(){ REPORT_VIEW=b.dataset.report; if(window.writeHash)window.writeHash(['reports',REPORT_VIEW]); render(); }; });
+  // relocate the status note (#st) + amber version badge (#ver) onto this bar, right-aligned — mirror the DEMAND plan so the row matches other views
+  var _rst=document.getElementById('st'); if(_rst){ _rst.className=''; _rst.style.cssText='font-size:11px;color:#888;margin-left:auto;flex:0 0 auto;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:46%'; bar.appendChild(_rst); }
+  var _rver=document.getElementById('ver'); if(_rver){ _rver.style.cssText='color:#0f172a;background:#fbbf24;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:800;line-height:1.2;letter-spacing:.02em;'+(_rst?'margin-left:10px':'margin-left:auto')+';white-space:nowrap;position:relative;flex:0 0 auto'; bar.appendChild(_rver); }
+  var _rsb=document.getElementById('statusbar'); if(_rsb)_rsb.style.display='none';
   if(REPORT_VIEW==='ex'){ var rb=document.getElementById('report-body'); if(rb)rb.remove(); renderExecView(); return; }
   // new reports — remove the exec table, render into a #report-body below the bar
   var ew=document.getElementById('exec-wrap'); if(ew)ew.remove();

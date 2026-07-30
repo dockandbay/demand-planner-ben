@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.298 - REPORTS: level-2 tabs + version badge now match other views
+- REPORTS (`#/reports/ex`) sub-tabs were using the level-1 `.view-toggle` style; switched to `.dnav` (the same level-2 style as DEMAND/SUPPLY). `renderReportView` now also relocates the **amber version badge** (`#ver`) + status note onto the report bar, right-aligned, mirroring the DEMAND plan (statusbar hidden). `artifact_v16.7.html`.
+
 ## v26.297 - Barcodes: one-click "All (product + carton + inner)" download
 - PURCHASE ORDERS ▸ Barcodes: new **⤓ All (product + carton + inner)** button downloads every product, carton and inner barcode in view as a single ZIP (foldered by supplier), alongside the existing "All Cartons (+inners)" and "All Products" buttons. Honours the current filters + File Download (A4 / PNG) setting. When a ZIP contains all kinds, the per-supplier folder is named "<supplier> - Barcodes" (filenames stay kind-prefixed). `supply/inject.html`.
 
