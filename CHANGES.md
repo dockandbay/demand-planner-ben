@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.332 - Demand grid: drop the phantom blank grey category row
+- Root cause of the blank grey row (between "Tea Towel" and "Towel - Beach") was **uncategorised products** — SKUs with null category *and* null subcategory grouped into a nameless category, rendering an empty grey `cat-hdr` bar. `filteredCats()` now skips any category group whose name is blank/null, so the phantom row is gone. `artifact_v16.7.html`.
+- Note for Diviyaj/data: **934 SKUs on live have no category/subcategory** (`planner.products` where category and subcategory are both blank). They were never plottable in the plan; this just stops them rendering a blank header. Worth a categorisation pass in Airtable if any are live-selling SKUs.
+
 ## v26.331 - Demand grid: darker category borders + category-total toggle
 - Darker top/bottom borders on category header, category-total and subcategory rows so the bands stand out (`tr.cat-hdr`/`tr.cat-tot` → 2px #777; `tr.sub-row` → 1px #a8a8a5 top+bottom). `artifact_v16.7.html`.
 - Category-total rows (e.g. "Hair Wrap — total") are now **hidden by default** — this also removes the grey "— total" row that had been appearing between adjacent categories. New "Cat totals: Show" toggle in the Plan toolbar (tier row) reveals them; state persists in localStorage (`hzShowCatTot`). `artifact_v16.7.html`.

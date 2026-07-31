@@ -3286,7 +3286,7 @@ function filteredCats(){
   const ac=SEL.has('ALL')?null:SEL;
   const rows=DATA.filter(function(r){return r.co===CUR&&(!CF||r.ch===CF)&&(!ac||ac.has(parentCat(r.c)));});
   const m={};
-  rows.forEach(function(r){var pg=parentCat(r.c);if(!m[pg])m[pg]=[];if(!m[pg].find(function(x){return x.s===r.s&&x.ch===r.ch;}))m[pg].push({s:r.s,ch:r.ch,x:r.x,c:r.c});});
+  rows.forEach(function(r){var pg=parentCat(r.c);if(pg==null||!String(pg).trim()||String(pg).trim().toLowerCase()==='null')return;if(!m[pg])m[pg]=[];if(!m[pg].find(function(x){return x.s===r.s&&x.ch===r.ch;}))m[pg].push({s:r.s,ch:r.ch,x:r.x,c:r.c});});
   // Row order: follow the same grouping the picker uses (Priority → Beach → Bags → Home → other),
   // alphabetical within group. Falls back to legacy OTHER_ORDER + BAG_CATS sort when Airtable
   // CAT_GROUPING isn't loaded.
