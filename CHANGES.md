@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.350 - CONFIG nav: Admin group + Products under Supply chain
+- New **Admin** top-level config tab (admin-only) that expands to **Permissions** + **Email log** as level-3 tabs (were standalone top-level tabs). **Products** moved under **Supply chain** (level-3, alongside Suppliers/Branches/etc.). `supply/inject.html`.
+
 ## v26.349 - PO Payments: snooze note wraps
 - The "Snoozed by … → wake" indicator on the PO payments/actions view now wraps instead of running off one line (was white-space:nowrap). `supply/inject.html`.
 

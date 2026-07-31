@@ -5535,11 +5535,13 @@
   function renderConfig(d){ var c=document.getElementById('supply-content'); var sizes=d.sizes||[];
     // CONFIG nav is two tiers: level-2 tabs (like every other page) + a "Supply chain" tab that,
     // when active, expands a level-3 row of its member config tabs.
-    var SC_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom'];
-    var SC_LABEL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'Manufacturing BOM'};
+    var SC_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom','products'];
+    var SC_LABEL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'Manufacturing BOM',products:'Products'};
+    var ADM_KEYS=['permissions','email-log'];
+    var ADM_LABEL={permissions:'Permissions','email-log':'Email log'};
     // Supply chain sits second (next to General settings); it expands to the level-3 members below / nested.
-    var L2=[['general','General settings'],['supplychain','Supply chain'],['portalusers','Portal users'],['portal','Portal'],['keyaccounts','Key accounts'],['products','Products'],['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']];
-    if(ME&&ME.is_admin){L2.push(['permissions','Permissions']);L2.push(['email-log','Email log']);}   // admin-only tabs
+    var L2=[['general','General settings'],['supplychain','Supply chain'],['portalusers','Portal users'],['portal','Portal'],['keyaccounts','Key accounts'],['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']];
+    if(ME&&ME.is_admin){L2.push(['admin','Admin']);}   // Admin grouping → Permissions / Email log as level-3 tabs
     if(CONFIG_SUB==='forecast-export')CONFIG_SUB='export-uploads';   // legacy slug redirect
     if((CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log')&&!(ME&&ME.is_admin))CONFIG_SUB='general';   // guard: non-admins can't land on admin-only tabs
     function reload(){ delete cache['config']; selectSection('config'); }   // refresh after a rate add (keeps sub-tab)
@@ -5800,14 +5802,16 @@
     c.innerHTML=annot('config')+dl('szlist',sizes)
       +'<div id="config-nav"></div>'
       +'<div id="config-body"><div class="count">Loading…</div></div>';
-    function navHtml(){ var inSC=SC_KEYS.indexOf(CONFIG_SUB)>=0;
-      var l2='<div id="config-subs">'+L2.map(function(s){ var act=(s[0]===CONFIG_SUB)||(s[0]==='supplychain'&&inSC);
+    function navHtml(){ var inSC=SC_KEYS.indexOf(CONFIG_SUB)>=0, inADM=ADM_KEYS.indexOf(CONFIG_SUB)>=0;
+      var l2='<div id="config-subs">'+L2.map(function(s){ var act=(s[0]===CONFIG_SUB)||(s[0]==='supplychain'&&inSC)||(s[0]==='admin'&&inADM);
         return '<span class="rtab'+(act?' active':'')+'" data-cs="'+s[0]+'">'+esc(s[1])+'</span>'; }).join('')+'<span class="ver">HORIZON __APP_VERSION__</span></div>';
-      var l3=inSC?'<div id="config-subs-l3">'+SC_KEYS.map(function(k){ return '<span class="rtab'+(k===CONFIG_SUB?' active':'')+'" data-cs="'+k+'">'+esc(SC_LABEL[k])+'</span>'; }).join('')+'</div>':'';
+      var l3keys=inSC?SC_KEYS:(inADM?ADM_KEYS:null), l3lbl=inSC?SC_LABEL:ADM_LABEL;
+      var l3=l3keys?'<div id="config-subs-l3">'+l3keys.map(function(k){ return '<span class="rtab'+(k===CONFIG_SUB?' active':'')+'" data-cs="'+k+'">'+esc(l3lbl[k])+'</span>'; }).join('')+'</div>':'';
       return l2+l3; }
     function drawNav(){ var nv=document.getElementById('config-nav'); nv.innerHTML=navHtml();
       nv.querySelectorAll('.rtab').forEach(function(p){ p.onclick=function(){ var k=p.dataset.cs;
         if(k==='supplychain'){ if(SC_KEYS.indexOf(CONFIG_SUB)<0)CONFIG_SUB='suppliers'; }   // open → default to Suppliers (Ben)
+        else if(k==='admin'){ if(ADM_KEYS.indexOf(CONFIG_SUB)<0)CONFIG_SUB='permissions'; }   // open → default to Permissions
         else CONFIG_SUB=k;
         syncHash(); drawNav(); showSub(); };}); }
     drawNav();
@@ -8463,7 +8467,7 @@
   try{window.__supplyNav={sections:SECTIONS,reports:REPORT_SECTIONS,select:function(k){selectSection(k);},current:function(){return current;}};}catch(e){}   // bridge for the app-level mobile drawer
   // CONFIG sub-nav bridge for the mobile drawer — a STATIC list so the drawer can render sub-items immediately,
   // without waiting for CONFIG's (sometimes slow) DOM render. Mirror L2 in renderConfig if that list changes.
-  try{window.__configNav={items:[['general','General settings'],['supplychain','Supply chain'],['portalusers','Portal users'],['portal','Portal'],['keyaccounts','Key accounts'],['products','Products'],['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']],select:function(k){CONFIG_SUB=k;enterConfig();},current:function(){return CONFIG_SUB;}};}catch(e){}
+  try{window.__configNav={items:[['general','General settings'],['supplychain','Supply chain'],['portalusers','Portal users'],['portal','Portal'],['keyaccounts','Key accounts'],['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']],select:function(k){CONFIG_SUB=k;enterConfig();},current:function(){return CONFIG_SUB;}};}catch(e){}
   function showSupply(noSelect){ ensureRoot(); if(typeof hideScenario==='function')hideScenario(); var app=document.getElementById('app'); if(app){app.classList.add('supply-active');app.classList.remove('config-mode');}
     document.body.classList.add('supply-on');   // reveals the mobile top-bar search
     var r=document.getElementById('supply-root'); if(r)r.style.display='block';
