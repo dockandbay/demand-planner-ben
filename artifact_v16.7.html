@@ -331,7 +331,7 @@ td.rectd{padding:1px 3px;background:#f0fdf4;border-left:2px solid #86efac}
 .rbtn{flex:1;font-size:8px;padding:1px 2px;border:1px solid #86efac;border-radius:2px;background:#dcfce7;color:#166534;cursor:pointer;text-align:center;white-space:nowrap;line-height:1.5}
 .rbtn:hover{background:#bbf7d0}
 .rbtn.ro{background:#fef9c3;border-color:#fcd34d;color:#854d0e}
-td.fctd{padding:1px 2px;background:#fafafa;border-left:1px solid #e5e5e5;position:relative;min-width:74px}
+td.fctd{padding:2px 2px 0;background:#fafafa;border-left:1px solid #e5e5e5;position:relative;min-width:74px}
 tr.sub th{background:#e7e5e0 !important}
 tr.sub th.actual-hdr{background:#F0FFF0 !important;color:#166534}
 td.fctd.y27{background:#fafafa;border-left-color:#e5e5e5}
@@ -397,16 +397,16 @@ td.sku-fc.fc-nostock .sku-fc-v{color:#991b1b}
 .anom-lbl{color:#94a3b8;font-size:9px}
 .anom-val{color:#fff;font-weight:600}
 .anom-hi{color:#f59e0b}.anom-lo{color:#38bdf8}
-.fcin{display:flex;flex-direction:column;padding:1px 0}
-.fcly{font-size:10px;color:#94a3b8;text-align:right;padding-right:3px;font-variant-numeric:tabular-nums;line-height:1.5}
-.fci{width:100%;padding:1px 3px;font-size:11px;text-align:right;border:1px solid transparent;border-radius:2px;background:transparent;color:#555;line-height:1.4}
+.fcin{display:flex;flex-direction:column;padding:0}
+.fcly{font-size:10px;color:#94a3b8;text-align:right;padding-right:2px;font-variant-numeric:tabular-nums;line-height:1.15}
+.fci{width:100%;padding:0 2px;font-size:11px;text-align:right;border:1px solid transparent;border-radius:2px;background:transparent;color:#555;line-height:1.2}
 .fci:focus{outline:none;border-color:#60a5fa;background:#fff}
 .fci.pct{border-color:transparent;background:transparent;color:#1d4ed8}
 .fci.pct.neg{color:#dc2626}
 .fci.ovr{border-color:transparent;background:transparent;color:#6d28d9}
 .fci.actual-pct{background:transparent;border-color:transparent;color:#166534;font-size:11px;pointer-events:none}
 .fci.actual-pct.neg{color:#991b1b}
-.fcr{font-size:12px;font-weight:700;color:#1d4ed8;text-align:right;padding-right:3px;font-variant-numeric:tabular-nums;line-height:1.5}
+.fcr{font-size:12px;font-weight:700;color:#1d4ed8;text-align:right;padding-right:2px;font-variant-numeric:tabular-nums;line-height:1.15}
 .fcr.y27{color:#525252}
 .fcr.y28{color:#525252}
 .fcr.flat{color:#94a3b8;font-weight:400}
@@ -4547,7 +4547,7 @@ function buildDataRow(s,co,ch,x,fu_cache){
 
   // Stacked actuals: each year/period is one column (Units / Revenue / YoY%)
   function addStack(u,r,y,cls){
-    var html='<div style="padding:2px 5px;text-align:right;font-size:9px;line-height:1.25;font-variant-numeric:tabular-nums">'
+    var html='<div style="padding:2px 2px 0;text-align:right;font-size:9px;line-height:1.15;font-variant-numeric:tabular-nums">'
       +'<div style="font-weight:600;color:#1a1a1a">'+u+'</div>'
       +'<div style="color:#94a3b8;font-size:8px">'+r+'</div>'
       +(y?'<div class="'+fpc(y)+'" style="font-size:8px;font-weight:600">'+y+'</div>':'')
@@ -4558,7 +4558,7 @@ function buildDataRow(s,co,ch,x,fu_cache){
   addStack(fn(y25u),fr(y25r),fp(y25u,y24u),'sep2');            // col3: 2025
   addStack(fn(yt26u),fr(yt26r),fp(yt26u,yt25u),'sep2');        // col4: YTD 2026
   // col5: trends stacked (1mo over 3mo)
-  addT('<div style="padding:2px 5px;text-align:right;line-height:1.25;font-variant-numeric:tabular-nums">'
+  addT('<div style="padding:2px 2px 0;text-align:right;line-height:1.15;font-variant-numeric:tabular-nums">'
     +'<div class="'+fpc(t1)+'" style="font-size:9px;font-weight:600">'+(t1||'--')+'</div>'
     +'<div class="'+fpc(t3)+'" style="font-size:8px">'+(t3||'--')+'</div></div>','sc sep1');
 

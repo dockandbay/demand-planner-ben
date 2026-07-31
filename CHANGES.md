@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.334 - Demand grid: tighter data-cell padding (less vertical space)
+- Reduced padding + line-height on the month forecast cells (`td.fctd`/`.fcin`/`.fcly`/`.fci`/`.fcr` → 2px sides/top, line-height 1.5→1.15) and the FY24/25/26 lookback + trend stacks (inline `padding:2px 5px`→`2px 2px 0`, line-height 1.25→1.15). Packs more rows on screen. `artifact_v16.7.html`.
+
 ## v26.333 - Fulfil: real create/update PO write path (guarded, resolvers verified)
 - Built the actual Fulfil PO push in `fulfilPushLines` (previously a stub). It now: resolves the supplier→`party.party` id (by name), currency→`currency.currency` id (by ISO code, from `suppliers.default_currency`, USD default), destination `branch`→`stock.location` warehouse id (by code, ILG fallback), and every line SKU→`product.product` id (by code). Then create-if-absent: **create** posts `purchase.purchase` with header + inline `lines` (Tryton `["create",[...]]`); **update** replaces existing lines + delivery date on the matched PO. `server.mjs`.
 - Pre-flight resolution report: aborts with a clear message (missing supplier party / currency / warehouse / uncatalogued SKUs) **before any write**, so a PO is never created with unresolved objects.
