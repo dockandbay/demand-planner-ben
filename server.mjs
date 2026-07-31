@@ -1152,6 +1152,25 @@ app.get('/api/supply/pos-by-sku', async (req, res) => {
     res.json({ pos });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// ── ERP integration (Cin7 ▸ Fulfil migration) ──────────────────────────────────────────────────────────
+// Which ERP the app targets + (for Fulfil) which environment, both from CONFIG ▸ General settings (app_settings).
+// Fulfil API keys/subdomains live in the server env, one pair per environment. Nothing here calls Fulfil yet —
+// this just resolves the active config + reports whether keys are present (the PO push wiring comes next).
+function fulfilConfigFor(env) {
+  env = (env === 'live') ? 'live' : 'sandbox';
+  const P = 'FULFIL_' + env.toUpperCase() + '_';
+  const subdomain = (process.env[P + 'SUBDOMAIN'] || '').trim();
+  const apiKey = (process.env[P + 'API_KEY'] || '').trim();
+  return { env, subdomain, apiKey, base: subdomain ? ('https://' + subdomain + '.fulfil.io/api/v2') : '', configured: !!(subdomain && apiKey) };
+}
+async function activeErp() { try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='erp_integration'`)).rows[0]; return (r && r.value === 'fulfil') ? 'fulfil' : 'cin7'; } catch (e) { return 'cin7'; } }
+async function activeFulfilEnv() { try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='fulfil_env'`)).rows[0]; return (r && r.value === 'live') ? 'live' : 'sandbox'; } catch (e) { return 'sandbox'; } }
+// Status for CONFIG ▸ General settings — active ERP, Fulfil env, and whether the env keys are configured (no live call).
+app.get('/api/supply/erp-status', async (req, res) => {
+  try { res.json({ erp: await activeErp(), fulfil_env: await activeFulfilEnv(),
+    fulfil: { sandbox: fulfilConfigFor('sandbox').configured, live: fulfilConfigFor('live').configured } }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 // Supplier-submitted actual cost prices (portal order plan). Read all (small table); filtered client-side by PO.
 app.get('/api/supply/portal-line-costs', async (req, res) => {
   try { res.json((await pool.query(`SELECT po, sku, actual_cost, amended_qty, coalesce(is_added,false) is_added, final_cost,

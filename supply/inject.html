@@ -5828,6 +5828,14 @@
             +'<div style="max-width:720px"><div style="margin:0 0 12px"><div style="font-weight:600;font-size:13px">Invoice submitted</div>'
               +'<div class="mut tiny" style="margin:1px 0 4px">Emailed when a supplier submits invoice information on a PO. Comma-separate multiple addresses.</div>'
               +'<input class="fci gs-set" data-key="invoice_submit_notify" value="'+esc(s.invoice_submit_notify||'zera@dockandbay.com, ben@dockandbay.com')+'" placeholder="email@dockandbay.com, other@dockandbay.com" style="width:100%;box-sizing:border-box;text-align:left"></div></div>'
+            +'<div class="sect-h" style="margin-top:18px">ERP integration <span class="mut tiny">— which system purchase orders push to (dates + line items)</span></div>'
+            +'<div style="max-width:720px">'
+              +'<div style="margin:0 0 12px"><div style="font-weight:600;font-size:13px">Active ERP</div><div class="mut tiny" style="margin:1px 0 4px"><b>Cin7</b> is current; switch to <b>Fulfil</b> to target Fulfil instead. PO pushes (dates + line items) follow this setting.</div>'
+                +'<select class="fci gs-set" data-key="erp_integration" style="width:200px;box-sizing:border-box;text-align:left"><option value="cin7"'+((s.erp_integration||'cin7')==='cin7'?' selected':'')+'>Cin7</option><option value="fulfil"'+(s.erp_integration==='fulfil'?' selected':'')+'>Fulfil</option></select></div>'
+              +'<div style="margin:0 0 12px"><div style="font-weight:600;font-size:13px">Fulfil environment</div><div class="mut tiny" style="margin:1px 0 4px">Which Fulfil instance to use when Fulfil is the active ERP. Use <b>Sandbox</b> for testing. API keys per environment live in the server env file.</div>'
+                +'<select class="fci gs-set" data-key="fulfil_env" style="width:200px;box-sizing:border-box;text-align:left"><option value="sandbox"'+((s.fulfil_env||'sandbox')==='sandbox'?' selected':'')+'>Sandbox</option><option value="live"'+(s.fulfil_env==='live'?' selected':'')+'>Live</option></select></div>'
+              +'<div id="erp-status" class="mut tiny" style="margin-top:2px">Checking Fulfil keys…</div>'
+            +'</div>'
             +'<div class="sect-h" style="margin-top:18px">Finance</div>'
             +'<div style="max-width:720px"><div style="margin:0 0 12px"><div style="font-weight:600;font-size:13px">USD → GBP exchange rate</div>'
               +'<div class="mut tiny" style="margin:1px 0 4px">Used for the GBP columns in the Cash Flow &amp; Auto Forecast reports (GBP = USD ÷ this rate). Takes effect on the next page reload.</div>'
@@ -5836,6 +5844,9 @@
             fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:inp.dataset.key,value:inp.value})})
               .then(function(r){return r.json();}).then(function(j){ inp.style.borderColor=(j&&j.error)?'#dc2626':'#16a34a'; setTimeout(function(){inp.style.borderColor='';},900); })
               .catch(function(){ inp.style.borderColor='#dc2626'; }); }; });
+          fetch('/api/supply/erp-status').then(function(r){return r.json();}).then(function(st){ var el=document.getElementById('erp-status'); if(!el)return;
+            function dot(ok){ return ok?'<span style="color:#16a34a">✓ configured</span>':'<span style="color:#b45309">⚠ keys missing</span>'; }
+            el.innerHTML='Fulfil API keys in server env — Sandbox: '+dot(st&&st.fulfil&&st.fulfil.sandbox)+' &nbsp;·&nbsp; Live: '+dot(st&&st.fulfil&&st.fulfil.live); }).catch(function(){});
         }).catch(function(e){ b.innerHTML='<div class="count" style="color:#dc2626">'+esc(String(e))+'</div>'; }); };
       SUBS['productcfg']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/product/config').then(function(r){return r.json();}).then(function(d){ d=d||{seasons:[],categories:[]};

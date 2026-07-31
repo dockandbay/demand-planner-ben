@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.322 - ERP integration settings (Cin7 ▸ Fulfil) — scaffold
+- CONFIG ▸ General settings: new **ERP integration** section — **Active ERP** toggle (Cin7 / Fulfil) and **Fulfil environment** toggle (Sandbox / Live), saved to `app_settings` (`erp_integration`, `fulfil_env`; default cin7 / sandbox). Shows whether the Fulfil API keys are present in the server env (sandbox / live), via new `GET /api/supply/erp-status`. Server helpers `fulfilConfigFor(env)` / `activeErp()` / `activeFulfilEnv()` resolve the active config from env — **no Fulfil calls yet** (the PO push wiring is the next step). New env vars (Diviyaj): `FULFIL_SANDBOX_SUBDOMAIN`, `FULFIL_SANDBOX_API_KEY`, `FULFIL_LIVE_SUBDOMAIN`, `FULFIL_LIVE_API_KEY`. `server.mjs`, `supply/inject.html`.
+
 ## v26.321 - Fix: portal confirm / withdraw button never showed (missing query columns)
 - `POS_SQL_PORTAL` wasn't selecting `require_confirmation` / `supplier_confirmed` / `supplier_confirmed_by`, so `p.require_confirmation` was always undefined in the portal → the **"✓ Confirm order"** and **"Withdraw confirmation"** buttons never rendered (e.g. PO-58AMCEUS1). Added the three columns (same derivation as the admin PO rows: `require_supplier_confirmation` from the production). Not related to the order plan being empty. `server.mjs`.
 
