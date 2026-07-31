@@ -5675,10 +5675,11 @@ function insertInlineSkuRows(s,co,ch,afterTr){
   var insertRef=afterTr.nextSibling;
   var tbody=afterTr.parentNode;
 
-  // Filter/sort bar row
+  // Filter/sort bar row — kept only as an insert anchor for the subtotal row. Its tier/sort pills were promoted to
+  // the main PLAN control bar, so it now only held a redundant "N SKUs" count → hidden (display:none) per Ben.
   var fbr=document.createElement('tr');
   fbr.className='sku-inline';fbr.dataset.parentkey=parentKey;
-  fbr.style.cssText='background:#f5f5f3;border-bottom:1px solid #e0e0de';
+  fbr.style.cssText='display:none';
   var fbtd=document.createElement('td');fbtd.colSpan=COL_TOTAL;
   fbtd.style.cssText='padding:3px 6px 3px 20px';
 
