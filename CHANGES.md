@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.339 - Demand grid: uniform black forecast numbers + fix blank category rows
+- Subcategory-row forecast numbers (`.fcr`) are now a uniform **black** (#111827), same weight/size, regardless of override state — dropped the blue (base), purple (integer override), light-grey (no adjustment) and medium-grey (future FY) variants. Actual-month values stay green. `artifact_v16.7.html`.
+- Fixed the "blank grey dividing rows": they were category headers for single-subcategory categories (category name == subcategory, e.g. "Bag - Cooling") whose name lived in a non-sticky cell and scrolled out of view when scrolled right. Now redundant single-subcategory headers are skipped entirely, and real multi-subcategory headers pin their name to the left (sticky) so it stays visible. `artifact_v16.7.html`.
+
 ## v26.338 - Fulfil: per-branch warehouse mapping (branches.fulfil_id)
 - New `planner.branches.fulfil_id` (migration **163**) — the Fulfil stock.location id per branch. Branch names don't match Fulfil warehouse codes 1:1 (country-prefixed, 19 branches → 4 warehouses), so the PO push now resolves the receiving warehouse from this explicit id, then code-match, then flags "no warehouse" (removed the silent ILG default — no more wrong-warehouse writes). Pre-flight report shows `warehouse_source`. `server.mjs`.
 - CONFIG ▸ Branches editor: new "Fulfil ERP ID" field + hint (enter the stock.location id from the URL, not the code; blank for non-Fulfil branches). Mapped branches show a "Fulfil NN" tag on their card. `supply/inject.html`.

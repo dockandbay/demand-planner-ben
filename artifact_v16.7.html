@@ -406,11 +406,11 @@ td.sku-fc.fc-nostock .sku-fc-v{color:#991b1b}
 .fci.ovr{border-color:transparent;background:transparent;color:#6d28d9}
 .fci.actual-pct{background:transparent;border-color:transparent;color:#166534;font-size:11px;pointer-events:none}
 .fci.actual-pct.neg{color:#991b1b}
-.fcr{font-size:12px;font-weight:700;color:#1d4ed8;text-align:right;padding-right:2px;font-variant-numeric:tabular-nums;line-height:1.15}
-.fcr.y27{color:#525252}
-.fcr.y28{color:#525252}
-.fcr.flat{color:#94a3b8;font-weight:400}
-.fcr.ovc{color:#6d28d9}
+.fcr{font-size:12px;font-weight:700;color:#111827;text-align:right;padding-right:2px;font-variant-numeric:tabular-nums;line-height:1.15}
+.fcr.y27{color:#111827}
+.fcr.y28{color:#111827}
+.fcr.flat{color:#111827;font-weight:700}
+.fcr.ovc{color:#111827}
 .fcr.actual{color:#166534;font-weight:700}
 .fcr.actual.neg{color:#991b1b}
 td.totu{padding:2px 5px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums;font-size:12px;white-space:nowrap}
@@ -6497,9 +6497,18 @@ function buildBody(){
   Object.keys(cm).forEach(function(cat){
     var rows=cm[cat].sort(function(a,b){return a.s.localeCompare(b.s)||(a.ch.localeCompare(b.ch));});
     if(PLAN_SKU_QRY){rows=rows.filter(function(row){return filteredSkus(row.s,CUR,row.ch).length>0;});if(!rows.length)return;}
-    const htr=document.createElement('tr');htr.className='cat-hdr';
-    const htd=document.createElement('td');htd.colSpan=200;htd.textContent=cat;htr.appendChild(htd);
-    frag.appendChild(htr);
+    // Category header — skip when redundant (the category's only subcategory has the same name, e.g. "Bag - Cooling"),
+    // since the data row already labels it. Otherwise render it with the name PINNED left (sticky) so it stays visible
+    // when the grid is scrolled right — previously the name scrolled out of view leaving a blank grey bar.
+    var _subs=new Set(rows.map(function(r){return r.s;}));
+    var _redundantHdr=_subs.size===1 && String(Array.from(_subs)[0]||'').trim().toLowerCase()===String(cat||'').trim().toLowerCase();
+    if(!_redundantHdr){
+      const htr=document.createElement('tr');htr.className='cat-hdr';
+      const htd=document.createElement('td');htd.colSpan=200;
+      const hsp=document.createElement('span');hsp.textContent=cat;hsp.style.cssText='position:sticky;left:0;display:inline-block';
+      htd.appendChild(hsp);htr.appendChild(htd);
+      frag.appendChild(htr);
+    }
     rows.forEach(function(row){
       var drow=buildDataRow(row.s,CUR,row.ch,row.x,fu_cache);
       frag.appendChild(drow);
