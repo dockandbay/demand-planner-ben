@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.360 - PO order plan: near-instant edit / add / delete
+- **Root cause:** every order-plan action funnelled through `poRefetchPanel`, which fetched the ENTIRE PO grid (~1400 rows / 2.7MB) + re-fetched the full PO detail — even for a pure UI toggle.
+- **Edit qty / Cancel / empty Save** now re-render only the order-plan panel from the in-memory detail (`box._poDetail`) — **zero fetch → instant**.
+- **Delete a line** is now optimistic: the row + totals update instantly, the delete validates in the background, and on error it reloads the order plan + alerts so you can retry (no blocking refetch).
+- **`poRefetchPanel`** (used by Save + ~15 other actions) now refreshes just this PO via the single-row `/api/supply/po-row/:po` (3KB / ~0.4s warm) instead of the whole grid (2.7MB / ~3s). `supply/inject.html`.
+
 ## v26.359 - Manage-supplier drawer: magic-link button per portal user
 - Each portal user in the manage-supplier drawer now has a **🔗 link** button that copies a 7-day portal login URL to the clipboard (same as the Portal users tab; inactive users are rejected by the server). `supply/inject.html`.
 

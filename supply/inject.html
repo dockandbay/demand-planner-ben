@@ -3504,7 +3504,15 @@
     // new-message box on top, then submission banners + the message thread below it
     return '<div class="sect-h">Timeline <span class="mut tiny">— shared message thread with the supplier (their portal shows the same)</span></div>'+compose+head+list; }
   function poRefetchPanel(po,i){ var at=document.querySelector('#podet-'+i+' .potab.active'); var wantTab=at?at.dataset.pt:null;   // keep the open sub-tab after a save re-render
-    fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(rows){ rows.forEach(function(x){poBy[x.po]=x;}); cache['purchase-orders']=rows; loadPoDetail(po,i,wantTab); }); }
+    // Refresh ONLY this PO's row (single-row endpoint) instead of pulling the whole ~1400-row grid — much faster.
+    fetch('/api/supply/po-row/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(arr){ var rr=Array.isArray(arr)?arr[0]:null; if(rr)poBy[po]=rr; loadPoDetail(po,i,wantTab); }).catch(function(){ loadPoDetail(po,i,wantTab); }); }
+  // Re-render ONLY the order-plan panel from the in-memory detail (box._poDetail) — no fetch → instant. Used by
+  // Edit / Cancel (pure UI toggle) and empty Save. Falls back to the full refetch if the detail isn't cached.
+  function rerenderOrderPlan(po,i){ var box=document.getElementById('podet-'+i); var d=box&&box._poDetail;
+    var panel=box&&box.querySelector('.potab-panel[data-pt="oplan"]');
+    if(!d||!panel){ poRefetchPanel(po,i); return; }
+    panel.innerHTML=orderPlanPanel(po,d.lines,d.line_costs,d.additional_costs,{complete:d.erp_complete},d.crossdock_lines);
+    bindPay(po,i); }
   function bindPay(po,i){
     // MASTER DATA + SHIPMENTS PLAN-panel controls (#2 / #10) — pickers + rename / delete / pallet labels for this PO
     bindCellPick(); bindShipPick(); bindShipOpen(); bindEdits(); bindPoShipMode();
@@ -3819,29 +3827,30 @@
         .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); })
         .catch(function(e){ b.disabled=false; alert('Could not reject: '+(e.message||e)); }); }; });
     document.querySelectorAll('#podet-'+i+' .op-del-line').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete '+b.dataset.sku+' from this order plan?'))return;
-      // Immediate feedback so the (slower) refetch never looks like nothing happened: fade the row, spin the ✕,
-      // stamp a "deleting…" note on the panel, and block further deletes until it resolves.
-      var tr=b.closest('tr'), tbody=tr&&tr.closest('tbody'), box=document.getElementById('podet-'+i);
-      if(tr){ tr.style.transition='opacity .15s'; tr.style.opacity='0.35'; }
-      b.disabled=true; b.textContent='⟳'; b.style.pointerEvents='none';
-      if(tbody)tbody.querySelectorAll('.op-del-line').forEach(function(x){ x.style.pointerEvents='none'; });
-      var busy=box&&box.querySelector('.op-busy'); if(box&&!busy){ busy=document.createElement('div'); busy.className='op-busy'; busy.style.cssText='margin:4px 2px;font-size:12px;color:#7c3aed;font-weight:600'; busy.textContent='⟳ Deleting '+b.dataset.sku+'…'; var opt=box.querySelector('.op-tbody'); if(opt&&opt.closest('table'))opt.closest('table').parentNode.insertBefore(busy,opt.closest('table')); }
+      // OPTIMISTIC: remove the row + adjust the order-plan totals instantly; validate in the background. If the
+      // server rejects it, reload the order plan (true state restored) + alert so you can retry.
+      var tr=b.closest('tr'), box=document.getElementById('podet-'+i);
+      function num(el){ return el?(parseFloat(String(el.textContent).replace(/[^0-9.\-]/g,''))||0):0; }
+      var dq=parseInt(b.dataset.qty,10)||0, ltEl=tr&&tr.querySelector('.op-lt'), dlt=ltEl?num(ltEl):0;
+      var totQ=box&&box.querySelector('.op-totq'), totC=box&&box.querySelector('.op-totc');
+      if(tr)tr.remove();
+      if(totQ)totQ.textContent=units(Math.max(0,num(totQ)-dq));
+      if(totC)totC.textContent='$'+money(Math.max(0,num(totC)-dlt));
+      invalidateDerived();
       var added=b.dataset.added==='1';
       var url=added?'/api/supply/portal-line-remove':'/api/supply/po-line/'+encodeURIComponent(b.dataset.po+'|'+b.dataset.sku);
       var body=added?{po:b.dataset.po,sku:b.dataset.sku}:{po:b.dataset.po,sku:b.dataset.sku,qty:0,_prevqty:b.dataset.qty,who:'order plan delete'};
       fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
-        .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); })
-        .catch(function(e){ if(tr)tr.style.opacity=''; b.disabled=false; b.textContent='✕'; b.style.pointerEvents='';
-          if(tbody)tbody.querySelectorAll('.op-del-line').forEach(function(x){ x.style.pointerEvents=''; });
-          if(busy&&busy.parentNode)busy.parentNode.removeChild(busy); alert('Could not delete: '+(e.message||e)); }); }; });
+        .then(function(j){ if(j&&j.error)throw new Error(j.error); })
+        .catch(function(e){ alert('Delete failed — reloading the order plan so you can retry.\n('+(e.message||e)+')'); poRefetchPanel(po,i); }); }; });
     document.querySelectorAll('#podet-'+i+' .op-goto').forEach(function(b){ b.onclick=function(){ gotoOrderPlan(b.dataset.po); }; });
     // ORDER PLAN edit mode: toggle, add-SKU row, copy, save (writes qty / new lines as proposed → auto ERP-pending)
     // in edit mode, prefetch the supplier-scoped SKU list (cached in OP_SKUS) and wire the add-SKU search picker
     (function(){ if(OP_EDIT!==po)return; var sup=(poBy[po]&&poBy[po].supplier_name)||'';
       if(sup&&!OP_SKUS[po]){ fetch('/api/supply/supplier-skus/'+encodeURIComponent(sup)).then(function(r){return r.json();}).then(function(rows){ OP_SKUS[po]=Array.isArray(rows)?rows:[]; }).catch(function(){ OP_SKUS[po]=[]; }); }
       bindOpAddSku(document.getElementById('podet-'+i)); })();
-    document.querySelectorAll('#podet-'+i+' .op-edit').forEach(function(b){ b.onclick=function(){ OP_EDIT=b.dataset.po; poRefetchPanel(po,i); }; });
-    document.querySelectorAll('#podet-'+i+' .op-cancel').forEach(function(b){ b.onclick=function(){ OP_EDIT=null; poRefetchPanel(po,i); }; });
+    document.querySelectorAll('#podet-'+i+' .op-edit').forEach(function(b){ b.onclick=function(){ OP_EDIT=b.dataset.po; rerenderOrderPlan(po,i); }; });
+    document.querySelectorAll('#podet-'+i+' .op-cancel').forEach(function(b){ b.onclick=function(){ OP_EDIT=null; rerenderOrderPlan(po,i); }; });
     document.querySelectorAll('#podet-'+i+' .op-copy').forEach(function(b){ b.onclick=function(){ var tsv=decodeURIComponent(b.dataset.copy||''); if(!tsv){alert('No lines to copy.');return;}
       navigator.clipboard.writeText(tsv).then(function(){ var o=b.textContent; b.textContent='✓ Copied'; setTimeout(function(){b.textContent=o;},1200); }).catch(function(){ alert('Copy failed — clipboard blocked.'); }); }; });
     document.querySelectorAll('#podet-'+i+' .op-add-row').forEach(function(b){ b.onclick=function(){ var box=document.getElementById('podet-'+i), tb=box&&box.querySelector('.op-tbody'); if(!tb)return;
@@ -3852,7 +3861,7 @@
     document.querySelectorAll('#podet-'+i+' .op-save').forEach(function(b){ b.onclick=function(){ var box=document.getElementById('podet-'+i); if(!box)return; var po2=b.dataset.po, jobs=[];
       box.querySelectorAll('.op-eq').forEach(function(inp){ var v=inp.value.trim(); if(v===''||v===inp.dataset.orig)return; var n=parseInt(v.replace(/[^0-9-]/g,''),10); if(isNaN(n))return; jobs.push({sku:inp.dataset.sku,qty:n}); });
       box.querySelectorAll('.op-addrow').forEach(function(tr){ var sk=((tr.querySelector('.op-add-sku')||{}).value||'').trim().toUpperCase(); var qv=(tr.querySelector('.op-add-qty')||{}).value; var n=parseInt(String(qv||'').replace(/[^0-9-]/g,''),10); if(sk&&!isNaN(n)) jobs.push({sku:sk,qty:n}); });
-      if(!jobs.length){ OP_EDIT=null; poRefetchPanel(po,i); return; }
+      if(!jobs.length){ OP_EDIT=null; rerenderOrderPlan(po,i); return; }
       b.disabled=true; b.textContent='Saving…';
       Promise.all(jobs.map(function(j){ return fetch('/api/supply/po-line/'+encodeURIComponent(po2+'|'+j.sku),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po2,sku:j.sku,qty:j.qty,who:'PO PLAN'})}).then(function(r){return r.json();}).then(function(x){ if(x&&x.error)throw new Error(x.error); }); }))
         .then(function(){ OP_EDIT=null; invalidateDerived(); poRefetchPanel(po,i); })
