@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.340 - Demand grid: larger SKU-row forecast numbers
+- Bumped the SKU-row forecast-cell figures by 2px each: LY `.sku-fc-ly` 9→11px, override input `.sku-fc-inp` 10→12px, this-year forecast `.sku-fc-v` 11→13px. `artifact_v16.7.html`.
+
 ## v26.339 - Demand grid: uniform black forecast numbers + fix blank category rows
 - Subcategory-row forecast numbers (`.fcr`) are now a uniform **black** (#111827), same weight/size, regardless of override state — dropped the blue (base), purple (integer override), light-grey (no adjustment) and medium-grey (future FY) variants. Actual-month values stay green. `artifact_v16.7.html`.
 - Fixed the "blank grey dividing rows": they were category headers for single-subcategory categories (category name == subcategory, e.g. "Bag - Cooling") whose name lived in a non-sticky cell and scrolled out of view when scrolled right. Now redundant single-subcategory headers are skipped entirely, and real multi-subcategory headers pin their name to the left (sticky) so it stays visible. `artifact_v16.7.html`.
