@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.320 - PO timeline: supplier + internal composers side by side
+- On the PO **Timeline**, the "Post to supplier" and "🔒 Post internal" composers now sit **side by side** on desktop (each in a capped ~440px column) to use the width better, stacking on narrow screens. Each keeps its own hint underneath. `supply/inject.html`.
+
 ## v26.319 - Add-supplier: inline form (no double prompt) + duplicate-code handling + bigger button
 - CONFIG ▸ Suppliers: the **+ Supplier** button is now a proper button (was a small badge). Clicking it opens an **inline Name + Code form** instead of two `prompt()` popups. On a **duplicate code** (`suppliers_code_key`) it shows "Code X is already used — choose a different code" and focuses the code field, instead of a raw error. Enter submits. `supply/inject.html`. (Pairs with the v26.318 create-default fix.)
 

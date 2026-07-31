@@ -3480,10 +3480,16 @@
       .concat(((d&&d.changes)||[]).map(function(c){ return {ts:String(c.created_at||'')+'~0', h:renderChange(c)}; }));
     _tlItems.sort(function(a,b){ return b.ts.localeCompare(a.ts); });   // newest first, notes + changes interleaved
     var list=_tlItems.length?_tlItems.map(function(x){return x.h;}).join(''):'<div class="mut tiny">No timeline activity yet.</div>';
-    var compose='<div style="margin:2px 0 4px;display:flex;gap:6px;align-items:flex-start"><textarea class="po-note-body fci" data-po="'+esc(po)+'" rows="2" placeholder="Add a note for the supplier…" style="flex:1;min-height:34px;max-width:480px;text-align:left"></textarea><button class="save-btn po-note-post" data-po="'+esc(po)+'" style="flex:0 0 auto">Post to supplier</button></div>'
-      +'<div class="mut tiny" style="margin:0 2px 8px">Posting appears in the supplier&rsquo;s portal timeline. Unread supplier replies show as an action.</div>'
-      +'<div style="position:relative;margin:2px 0 4px;display:flex;gap:6px;align-items:flex-start"><textarea class="po-int-body fci" data-po="'+esc(po)+'" rows="2" placeholder="🔒 Internal note — type @ to tag a teammate…" style="flex:1;min-height:34px;max-width:480px;text-align:left;background:#faf5ff"></textarea><button class="save-btn po-int-post" data-po="'+esc(po)+'" style="flex:0 0 auto;background:#eef2ff;color:#3730a3;border-color:#c7d2fe">🔒 Post internal</button><div class="po-int-pop" style="display:none;position:absolute;z-index:60;background:#fff;border:1px solid #c7d2fe;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.14);max-height:190px;overflow:auto;min-width:200px"></div></div>'
-      +'<div class="mut tiny" style="margin:0 2px 8px">Internal note — <b>team only, hidden from the supplier</b>. Type <b>@</b> to tag a teammate; they get an email.</div>';
+    var compose='<div class="po-compose-row" style="display:flex;gap:16px;flex-wrap:wrap;margin:2px 0 8px">'
+      +'<div style="flex:1 1 300px;min-width:0;max-width:440px">'
+        +'<div style="display:flex;gap:6px;align-items:flex-start"><textarea class="po-note-body fci" data-po="'+esc(po)+'" rows="2" placeholder="Add a note for the supplier…" style="flex:1;min-width:0;min-height:34px;text-align:left"></textarea><button class="save-btn po-note-post" data-po="'+esc(po)+'" style="flex:0 0 auto">Post to supplier</button></div>'
+        +'<div class="mut tiny" style="margin:2px 2px 0">Posting appears in the supplier&rsquo;s portal timeline. Unread supplier replies show as an action.</div>'
+      +'</div>'
+      +'<div style="flex:1 1 300px;min-width:0;max-width:440px">'
+        +'<div style="position:relative;display:flex;gap:6px;align-items:flex-start"><textarea class="po-int-body fci" data-po="'+esc(po)+'" rows="2" placeholder="🔒 Internal note — type @ to tag a teammate…" style="flex:1;min-width:0;min-height:34px;text-align:left;background:#faf5ff"></textarea><button class="save-btn po-int-post" data-po="'+esc(po)+'" style="flex:0 0 auto;background:#eef2ff;color:#3730a3;border-color:#c7d2fe">🔒 Post internal</button><div class="po-int-pop" style="display:none;position:absolute;z-index:60;background:#fff;border:1px solid #c7d2fe;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.14);max-height:190px;overflow:auto;min-width:200px"></div></div>'
+        +'<div class="mut tiny" style="margin:2px 2px 0">Internal note — <b>team only, hidden from the supplier</b>. Type <b>@</b> to tag a teammate; they get an email.</div>'
+      +'</div>'
+    +'</div>';
     // new-message box on top, then submission banners + the message thread below it
     return '<div class="sect-h">Timeline <span class="mut tiny">— shared message thread with the supplier (their portal shows the same)</span></div>'+compose+head+list; }
   function poRefetchPanel(po,i){ var at=document.querySelector('#podet-'+i+' .potab.active'); var wantTab=at?at.dataset.pt:null;   // keep the open sub-tab after a save re-render
