@@ -2880,9 +2880,11 @@ app.post('/api/supply/supplier/:id', (req, res) =>
 app.post('/api/supply/supplier-create', async (req, res) => {
   const b = req.body || {}, name = (b.name || '').trim();
   if (!name) return res.status(400).json({ error: 'supplier name required' });
+  // kind must satisfy suppliers_kind_check (supplier | freight | internal | other); default to 'supplier' (was 'factory' → constraint violation)
+  const kind = ['supplier', 'freight', 'internal', 'other'].includes((b.kind || '').trim()) ? (b.kind || '').trim() : 'supplier';
   try {
-    const r = await pool.query(`INSERT INTO planner.suppliers (name, code, kind) VALUES ($1,$2,coalesce($3,'factory')) RETURNING id`,
-      [name, (b.code || '').trim() || null, b.kind || null]);
+    const r = await pool.query(`INSERT INTO planner.suppliers (name, code, kind) VALUES ($1,$2,$3) RETURNING id`,
+      [name, (b.code || '').trim() || null, kind]);
     res.json({ ok: true, id: r.rows[0].id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.318 - Fix: adding a new supplier failed (kind check constraint)
+- `supplier-create` defaulted `kind` to **'factory'**, which violates `suppliers_kind_check` (`supplier | freight | internal | other`) — so adding a new supplier errored. Now defaults to **'supplier'** and validates any supplied kind against the allowed set. `server.mjs`.
+
 ## v26.317 - CONFIG ▸ Supply chain defaults to Suppliers
 - Clicking CONFIG ▸ **Supply chain** now opens on the **Suppliers** table by default (was Import duty). `supply/inject.html`.
 
