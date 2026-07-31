@@ -8161,7 +8161,8 @@ const PO_ROWS_SQL = `
             round(catch_up,2) catch_up, round(deposit_avail,2) deposit_avail, deposit_fx, coalesce(notes,'') notes,
             CASE WHEN start_calc > 0 THEN to_char((start_production + 7),'YYYY-MM-DD') END start_due,        -- start deposit due = production start + 7 days (no due date for a 0% milestone)
             CASE WHEN completion_calc > 0 THEN to_char(eff_prod_end,'YYYY-MM-DD') END completion_due,
-            to_char(bal_due_date,'YYYY-MM-DD') balance_due,
+            -- balance due date only when the CALCULATED balance is > 0 (a 0-balance milestone has no due date / payment-due notification), mirroring the start/completion gates
+            CASE WHEN val>0 AND round(val + coalesce(credit_amount,0) - start_paid - coalesce(pay_completion_assigned, completion_calc),2) > 0.009 THEN to_char(bal_due_date,'YYYY-MM-DD') END balance_due,
             to_char(balance_due_date_overide,'YYYY-MM-DD') final_payment_due,   -- the "final payment due" override (priority for balance due)
             credit_days, credit_type,
             coalesce(deposit_ref,'') deposit_ref, coalesce(nullif(shipment_ref,''), (SELECT s.shipment_ref FROM planner.shipments s WHERE s.master_po=calc4.po LIMIT 1), '') shipment,
