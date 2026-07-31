@@ -1670,7 +1670,8 @@
     // differing in AU-ness — a blank/unknown country no longer greys a valid deposit (that was caused by a stale
     // cached deposit list showing no country). Supplier only blocks when both are known and differ. The server
     // re-checks on save, so failing open here is safe.
-    function depIssue(d){ var dCtry=String(d.country||'').trim().toUpperCase();
+    function depIssue(d){ if(String(d.status||'')==='closed') return 'closed';   // a closed deposit can't be assigned — grey it out
+      var dCtry=String(d.country||'').trim().toUpperCase();
       if(dCtry && poCtry && (dCtry==='AU')!==(poCtry==='AU')) return 'region';
       if(poSup && String(d.supplier_name||'').trim().toLowerCase()!==poSup) return 'supplier'; return ''; }
     depFull=null;   // always pull a FRESH deposit list (country/paid/supplier may have changed since first load)
@@ -1687,8 +1688,8 @@
         var ms=deps.filter(function(d){return !q||((d.reference||'')+' '+(d.supplier_name||'')).toLowerCase().indexOf(q)>=0;});
         ms.sort(function(a,b){ return (depIssue(a)?1:0)-(depIssue(b)?1:0); });   // assignable (matching) deposits first
         ms.slice(0,q?40:12).forEach(function(d){ var issue=depIssue(d), bad=!!issue;   // region OR supplier mismatch → show but block
-          var reason=issue==='region'?'region mismatch — an AU deposit can only go on an AU PO (and vice-versa)':issue==='supplier'?'supplier mismatch — a deposit can only be assigned to a PO from the same supplier':'';
-          var flag=issue==='region'?' · ✗ '+esc(d.country||'?')+' region':issue==='supplier'?' · ✗ '+esc(d.supplier_name||'other supplier'):'';
+          var reason=issue==='closed'?'this deposit is closed — reopen it in the Deposits register before assigning':issue==='region'?'region mismatch — an AU deposit can only go on an AU PO (and vice-versa)':issue==='supplier'?'supplier mismatch — a deposit can only be assigned to a PO from the same supplier':'';
+          var flag=issue==='closed'?' · ✗ closed':issue==='region'?' · ✗ '+esc(d.country||'?')+' region':issue==='supplier'?' · ✗ '+esc(d.supplier_name||'other supplier'):'';
           html+='<div class="shpop-opt'+(bad?' dep-blocked':'')+'"'+(bad?' title="'+reason+'" style="opacity:.45;cursor:not-allowed"':' data-ref="'+esc(d.reference)+'"')+'>'+esc(d.reference)+' <span class="mut tiny">'+esc(d.supplier_name||'')+(d.deposit_remaining!=null?' · '+money(d.deposit_remaining)+' left':'')+flag+'</span></div>'; });
         if(!q&&deps.length>12)html+='<div class="mut tiny" style="padding:5px 10px">'+(deps.length-12)+' more — type to search…</div>';
         var list=document.getElementById('shpop-list'); list.innerHTML=html;
