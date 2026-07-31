@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.336 - Supplier editor: hint on the Fulfil ERP ID field
+- Added help text under the "Fulfil ERP ID" field in the supplier edit form: enter the record ID from the Fulfil URL (…/model/contact/6 → 6), not the supplier "Code" number; sandbox/live IDs differ. `supply/inject.html`.
+
 ## v26.335 - Fulfil: use stored supplier party id (skip name lookup)
 - The PO push now prefers `planner.suppliers.fulfil_id` (existing text column, manual entry) as the Fulfil party id — authoritative link + skips the name-lookup API call. Falls back to a name search when blank. Pre-flight report shows `party_source` (`suppliers.fulfil_id` vs `name-lookup`). No migration (column already exists). `server.mjs`.
 - Note: `fulfil_id` is **env-specific** — the sandbox party id (ACME = 6) is not the live id; re-enter it at go-live.
