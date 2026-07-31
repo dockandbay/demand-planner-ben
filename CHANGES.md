@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.328 - Demand grid: header row colours, input styling, column width + disc-cell fixes
+- **Month-header row** all `#e7e5e0`, except **actual months** `#F0FFF0` (every actual month header now tagged, not just the current one); "Subcategory / Channel" col included.
+- **Forecast input** override styling: dropped the purple (whole-number) / blue (%) **background + outline** — coloured text only now (`.fci.ovr` / `.fci.pct`).
+- **Month columns** widened (min-width 98px on `fctd` / `sku-fc` / `sku-act`) so the est row (e.g. "est 11,100 ▾ £865k") fits.
+- **Discontinued cells:** the `#FFD6D1` fill was losing to `!important` class backgrounds — now set via `setProperty(...,'important')` in both `applyDisc` (no stock) and `markDiscRundown` (with stock), and the **-100% growth %** is blanked on both. `artifact_v16.7.html`.
+
 ## v26.327 - Demand grid: unify FY columns to #e7e5e0 + mark discontinued months in the main grid
 - **Financial-year total columns** (FY26/27/28 unit + revenue, `.totu`/`.totr`/`.bgt*`) all set to `#e7e5e0` with neutral text (were blue/purple/teal). 
 - **Discontinued months now show `#FFD6D1` in the main plan grid** — a new `fc-disc` class is applied to every forecast cell **at/after the SKU's discontinue month** (per country), with or without stock (previously the pink only appeared in the multi-year SKU view). e.g. HAIRW-SUE-MIAMI UK-DTC now pinks from its Sep-27 discontinue month. `artifact_v16.7.html`.

@@ -263,7 +263,7 @@ thead tr.sub th.stk2{background:#f3f3f1}
 .sep2{border-left:2px solid #b0b0ae !important}
 .sep1{border-left:1px solid #d5d5d3 !important}
 .bg26{background:#edf4ff !important}
-.bg26.actual-hdr{background:#dcfce7 !important;color:#166534 !important}
+.bg26.actual-hdr{background:#F0FFF0 !important;color:#166534 !important}
 .bg26.sku-act-cell{background:#F0FFF0 !important;border-left-color:#86efac !important}
 .bg26.anom-hi-cell{background:#fef9c3 !important;border-left-color:#f59e0b !important}
 .bg26.anom-lo-cell{background:#fff !important;border-left-color:#e5e5e5 !important}
@@ -331,7 +331,9 @@ td.rectd{padding:1px 3px;background:#f0fdf4;border-left:2px solid #86efac}
 .rbtn{flex:1;font-size:8px;padding:1px 2px;border:1px solid #86efac;border-radius:2px;background:#dcfce7;color:#166534;cursor:pointer;text-align:center;white-space:nowrap;line-height:1.5}
 .rbtn:hover{background:#bbf7d0}
 .rbtn.ro{background:#fef9c3;border-color:#fcd34d;color:#854d0e}
-td.fctd{padding:1px 2px;background:#fafafa;border-left:1px solid #e5e5e5;position:relative}
+td.fctd{padding:1px 2px;background:#fafafa;border-left:1px solid #e5e5e5;position:relative;min-width:98px}
+tr.sub th{background:#e7e5e0 !important}
+tr.sub th.actual-hdr{background:#F0FFF0 !important;color:#166534}
 td.fctd.y27{background:#fafafa;border-left-color:#e5e5e5}
 td.fctd.y28{background:#fafafa;border-left-color:#e5e5e5}
 td.fctd.yH1,td.fctd.yH2{background:#fafafa;border-left-color:#e5e5e5}
@@ -365,13 +367,13 @@ td.sku-inv{padding:2px 4px;text-align:right;white-space:nowrap}
 .inv-oh{font-size:10px;font-weight:600;font-variant-numeric:tabular-nums}
 .inv-oo{font-size:8px;color:#888;font-variant-numeric:tabular-nums}
 .inv-neg{color:#dc2626}
-td.sku-act{padding:1px 2px;background:#F0FFF0;border-left:1px solid #bbf7d0}
+td.sku-act{padding:1px 2px;background:#F0FFF0;border-left:1px solid #bbf7d0;min-width:98px}
 td.sku-act.act-cur{background:#F0FFF0;border-left:1px solid #4ade80}
 .sku-act-vals{display:flex;flex-direction:column;gap:0;padding:1px 2px}
 .sku-ly{font-size:9px;color:#94a3b8;text-align:right;font-variant-numeric:tabular-nums}
 .sku-ty{font-size:10px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
 .sku-yoy{font-size:8px;text-align:right;font-variant-numeric:tabular-nums}
-td.sku-fc{padding:1px 2px;background:#f8fbff;border-left:1px solid #dbeafe}
+td.sku-fc{padding:1px 2px;background:#f8fbff;border-left:1px solid #dbeafe;min-width:98px}
 td.sku-fc.fc-first{border-left:2px solid #93c5fd}
 .sku-fc-vals{display:flex;flex-direction:column;gap:0;padding:1px 2px}
 .sku-fc-ly{font-size:9px;color:#94a3b8;text-align:right;font-variant-numeric:tabular-nums}
@@ -399,9 +401,9 @@ td.sku-fc.fc-nostock .sku-fc-v{color:#991b1b}
 .fcly{font-size:10px;color:#94a3b8;text-align:right;padding-right:3px;font-variant-numeric:tabular-nums;line-height:1.5}
 .fci{width:100%;padding:1px 3px;font-size:11px;text-align:right;border:1px solid transparent;border-radius:2px;background:transparent;color:#555;line-height:1.4}
 .fci:focus{outline:none;border-color:#60a5fa;background:#fff}
-.fci.pct{border-color:#93c5fd;background:#eff6ff;color:#1d4ed8}
+.fci.pct{border-color:transparent;background:transparent;color:#1d4ed8}
 .fci.pct.neg{color:#dc2626}
-.fci.ovr{border-color:#a78bfa;background:#f5f3ff;color:#6d28d9}
+.fci.ovr{border-color:transparent;background:transparent;color:#6d28d9}
 .fci.actual-pct{background:transparent;border-color:transparent;color:#166534;font-size:11px;pointer-events:none}
 .fci.actual-pct.neg{color:#991b1b}
 .fcr{font-size:12px;font-weight:700;color:#1d4ed8;text-align:right;padding-right:3px;font-variant-numeric:tabular-nums;line-height:1.5}
@@ -3514,7 +3516,7 @@ function buildHdr(){
   TIME_COLS.forEach(function(tc){
     if(tc.t==='m'){
       var p=pa(tc.m),Y=fyStartOf(tc.m),isAct=isActualMonth(tc.m),first=(tc.m===fyMonths(Y)[0]);
-      s2((isAct?'* ':'')+MN[p.mo-1]+' '+String(p.y).slice(2),(first?'sep2 ':'')+fyBg(Y)+(tc.m===CUR_MONTH?' actual-hdr':''));
+      s2((isAct?'* ':'')+MN[p.mo-1]+' '+String(p.y).slice(2),(first?'sep2 ':'')+fyBg(Y)+(isAct?' actual-hdr':''));
     } else if(tc.t==='fc'){
       var pf=pa(tc.m);s2(MN[pf.mo-1]+' fc',fyBg(fyStartOf(tc.m)));
     } else {
@@ -5712,7 +5714,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
     if(inp){inp.value='';inp.placeholder='';inp.disabled=true;inp.title='Discontinued — on-hand + inbound stock exhausted';}
     if(fcDiv){fcDiv.textContent='';}
     var _td=(fcDiv&&fcDiv.closest&&fcDiv.closest('td'))||(inp&&inp.closest&&inp.closest('td'));   // disc-out cell: pink fill, no growth %, keep only the grey LY
-    if(_td){ _td.style.background='#FFD6D1';
+    if(_td){ _td.style.setProperty('background','#FFD6D1','important');   // inline !important — beats the .fc-nostock / year-tint !important class backgrounds
       try { _td.querySelectorAll('.gp,.rp,.fp').forEach(function(el){ el.textContent=''; }); } catch(e){}   // drop the forecast-vs-LY growth % (was -100%)
     }
   }
@@ -5720,7 +5722,8 @@ function insertInlineSkuRows(s,co,ch,afterTr){
   // remaining stock (rundown, stock not yet exhausted). Replaces the old small red "d" badge.
   function markDiscRundown(td,on){
     if(!on||!td)return;
-    td.style.background='#FFD6D1';   // discontinued this month (with stock) — pink fill, no outline
+    td.style.setProperty('background','#FFD6D1','important');   // inline !important — beats year-tint / anomaly !important class backgrounds
+    try { td.querySelectorAll('.gp,.rp,.fp').forEach(function(el){ el.textContent=''; }); } catch(e){}   // drop the forecast-vs-LY growth % on disc months
     if(!td.title)td.title='Discontinued this month — selling down remaining stock';
   }
   // During an active Smooth preview, show each SKU's proposed (uncommitted) override in amber.
