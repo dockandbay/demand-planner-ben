@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.341 - Demand grid: catch remaining blank category-header rows
+- Broadened the redundant-header skip: it now strips CORE/SEASONAL/SEASONAL SUM variant suffixes and prefix-matches, so single-subcategory categories whose grid subcategory carries a variant suffix (e.g. "Tea Towel", "Lanyard", "Towel - Beach" CORE/SEASONAL) also drop their redundant grey header. `artifact_v16.7.html`.
+
 ## v26.340 - Demand grid: larger SKU-row forecast numbers
 - Bumped the SKU-row forecast-cell figures by 2px each: LY `.sku-fc-ly` 9→11px, override input `.sku-fc-inp` 10→12px, this-year forecast `.sku-fc-v` 11→13px. `artifact_v16.7.html`.
 

@@ -6500,8 +6500,12 @@ function buildBody(){
     // Category header — skip when redundant (the category's only subcategory has the same name, e.g. "Bag - Cooling"),
     // since the data row already labels it. Otherwise render it with the name PINNED left (sticky) so it stays visible
     // when the grid is scrolled right — previously the name scrolled out of view leaving a blank grey bar.
-    var _subs=new Set(rows.map(function(r){return r.s;}));
-    var _redundantHdr=_subs.size===1 && String(Array.from(_subs)[0]||'').trim().toLowerCase()===String(cat||'').trim().toLowerCase();
+    function _stripVar(x){return String(x||'').trim().replace(/\s+(CORE|SEASONAL SUM|SEASONAL|SUM)$/i,'').trim().toLowerCase();}
+    var _catN=_stripVar(cat);
+    var _subsArr=Array.from(new Set(rows.map(function(r){return r.s;})));
+    // Redundant when every subcategory (CORE/SEASONAL variant stripped) is the category name or a prefix of it —
+    // the data rows already carry that label, so the grey header would just be a blank bar when scrolled right.
+    var _redundantHdr=_subsArr.length>0 && _catN && _subsArr.every(function(s){var n=_stripVar(s);return n===_catN||n.indexOf(_catN)===0||_catN.indexOf(n)===0;});
     if(!_redundantHdr){
       const htr=document.createElement('tr');htr.className='cat-hdr';
       const htd=document.createElement('td');htd.colSpan=200;
