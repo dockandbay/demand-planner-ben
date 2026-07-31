@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.342 - Demand grid: fix -100% + missing pink on discontinued/stock-out SKU cells
+- On expanded SKU rows, months where a discontinued SKU has run out of stock (forecast 0) were still showing "-100%" and no pink fill. Cause: `applyDisc` ran before the cell was attached to the DOM, so `closest('td')` returned null (no pink) and the growth-% div didn't exist yet (never blanked). Fixed by passing `td` into `applyDisc` and calling it after the cell is assembled, across all SKU forecast renderers (current / 2026 / 2027 / 2028 + the generic cell builders). Now those cells stay pink (#FFD6D1) with just the grey LY number, no -100%. `artifact_v16.7.html`.
+
 ## v26.341 - Demand grid: catch remaining blank category-header rows
 - Broadened the redundant-header skip: it now strips CORE/SEASONAL/SEASONAL SUM variant suffixes and prefix-matches, so single-subcategory categories whose grid subcategory carries a variant suffix (e.g. "Tea Towel", "Lanyard", "Towel - Beach" CORE/SEASONAL) also drop their redundant grey header. `artifact_v16.7.html`.
 

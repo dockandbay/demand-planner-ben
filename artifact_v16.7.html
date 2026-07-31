@@ -5715,11 +5715,12 @@ function insertInlineSkuRows(s,co,ch,afterTr){
   }
 
   // Greys a forecast cell to 0 + "disc" when a discontinued SKU has run out of stock.
-  function applyDisc(inp,fcDiv,isOut){
+  function applyDisc(inp,fcDiv,isOut,tdArg){
     if(!isOut)return;
     if(inp){inp.value='';inp.placeholder='';inp.disabled=true;inp.title='Discontinued — on-hand + inbound stock exhausted';}
     if(fcDiv){fcDiv.textContent='';}
-    var _td=(fcDiv&&fcDiv.closest&&fcDiv.closest('td'))||(inp&&inp.closest&&inp.closest('td'));   // disc-out cell: pink fill, no growth %, keep only the grey LY
+    // Prefer the td passed by the caller (call sites run this AFTER the cell is attached); fall back to closest().
+    var _td=tdArg||(fcDiv&&fcDiv.closest&&fcDiv.closest('td'))||(inp&&inp.closest&&inp.closest('td'));   // disc-out cell: pink fill, no growth %, keep only the grey LY
     if(_td){ _td.style.setProperty('background','#FFD6D1','important');   // inline !important — beats the .fc-nostock / year-tint !important class backgrounds
       try { _td.querySelectorAll('.gp,.rp,.fp').forEach(function(el){ el.textContent=''; }); } catch(e){}   // drop the forecast-vs-LY growth % (was -100%)
     }
@@ -5917,11 +5918,10 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         fcDivCur.style.cssText='font-size:9px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;color:#334155';
         fcDivCur.textContent=fn(fcvCur);
         fcWrapCur.appendChild(fcDivCur);
-        applyDisc(inpCur,fcDivCur,skuDiscOut[mCur]);markDiscRundown(td,skuRundown[mCur]&&!skuDiscOut[mCur]);
-        applyPreview(inpCur,fcDivCur,mCur,sku);
         var yoyDivCur=document.createElement('div');yoyDivCur.style.cssText='font-size:7px;text-align:right';yoyDivCur.className=yoyCls26Cur;yoyDivCur.textContent=yoyStrCur;
         fcWrapCur.appendChild(yoyDivCur);
         td.appendChild(fcWrapCur);
+        applyDisc(inpCur,fcDivCur,skuDiscOut[mCur],td);markDiscRundown(td,skuRundown[mCur]&&!skuDiscOut[mCur]);applyPreview(inpCur,fcDivCur,mCur,sku);
 
       } else if(ci>=COL_FM_START && ci<COL_F26_END){
         // 2026 month — actual if in ACTUAL_MONTHS, forecast otherwise
@@ -5981,8 +5981,6 @@ function insertInlineSkuRows(s,co,ch,afterTr){
           fcDiv26.style.cssText='font-size:9px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;color:#334155';
           fcDiv26.textContent=fn(fcv26);
           fcWrap26.appendChild(fcDiv26);
-          applyDisc(inp26,fcDiv26,skuDiscOut[m26]);markDiscRundown(td,skuRundown[m26]&&!skuDiscOut[m26]);
-          applyPreview(inp26,fcDiv26,m26,sku);
           var yoyDiv26=document.createElement('div');
           yoyDiv26.style.cssText='font-size:7px;text-align:right';
           yoyDiv26.className=skuYoYCls(fcv26,ly26);yoyDiv26.textContent=skuYoYStr(fcv26,ly26);
@@ -6013,6 +6011,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
             fcWrap26.appendChild(estDiv26);
           }
           td.appendChild(fcWrap26);
+          applyDisc(inp26,fcDiv26,skuDiscOut[m26],td);markDiscRundown(td,skuRundown[m26]&&!skuDiscOut[m26]);applyPreview(inp26,fcDiv26,m26,sku);
         }
 
       } else if(ci>=COL_F27_START && ci<COL_F27_TOT){
@@ -6055,8 +6054,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         fcDiv27.style.cssText='font-size:9px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;color:#4c1d95';
         fcDiv27.textContent=fn(fcv27);
         fcWrap27.appendChild(fcDiv27);
-        applyDisc(inp27,fcDiv27,skuDiscOut[m27]);markDiscRundown(td,skuRundown[m27]&&!skuDiscOut[m27]);
-        applyPreview(inp27,fcDiv27,m27,sku);
+        // disc styling + preview applied after the cell is attached (below)
         var yoyDiv27=document.createElement('div');
         yoyDiv27.style.cssText='font-size:7px;text-align:right';
         yoyDiv27.className=yoyCls27;yoyDiv27.textContent=yoyStr27;
@@ -6084,6 +6082,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
           fcWrap27.appendChild(estDiv27);
         }
         td.appendChild(fcWrap27);
+        applyDisc(inp27,fcDiv27,skuDiscOut[m27],td);markDiscRundown(td,skuRundown[m27]&&!skuDiscOut[m27]);applyPreview(inp27,fcDiv27,m27,sku);
 
       } else if(ci===COL_F26_TOT){
         // Fiscal FY26/27 stacked (Mar26–Feb27): SKU real actuals to date + calculated forecast
@@ -6142,8 +6141,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         fcDiv28.style.cssText='font-size:9px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;color:#0f766e';
         fcDiv28.textContent=fn(fcv28);
         fcWrap28.appendChild(fcDiv28);
-        applyDisc(inp28,fcDiv28,skuDiscOut[m28]);markDiscRundown(td,skuRundown[m28]&&!skuDiscOut[m28]);
-        applyPreview(inp28,fcDiv28,m28,sku);
+        // disc styling + preview applied after the cell is attached (below)
         var yoyDiv28=document.createElement('div');
         yoyDiv28.style.cssText='font-size:7px;text-align:right';
         yoyDiv28.className=yoyCls28;yoyDiv28.textContent=yoyStr28;
@@ -6171,6 +6169,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
           fcWrap28.appendChild(estDiv28);
         }
         td.appendChild(fcWrap28);
+        applyDisc(inp28,fcDiv28,skuDiscOut[m28],td);markDiscRundown(td,skuRundown[m28]&&!skuDiscOut[m28]);applyPreview(inp28,fcDiv28,m28,sku);
 
       } else if(ci===COL_F28_TOT){
         // Fiscal FY28/29 stacked (Mar28–Feb29, incl. 2029 spill)
@@ -6224,8 +6223,6 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       inp.addEventListener('change',function(){skuCommitOv(this.dataset.ovkey,this.value,parseFloat(this.dataset.ly));refreshRow(s,co,ch);});
       wrap.appendChild(inp);
       var fcD=document.createElement('div');fcD.style.cssText='font-size:9px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;color:#334155';fcD.textContent=fn(fcv);wrap.appendChild(fcD);
-      applyDisc(inp,fcD,skuDiscOut[m]);markDiscRundown(td,skuRundown[m]&&!skuDiscOut[m]);
-      applyPreview(inp,fcD,m,sku);
       var yD=document.createElement('div');yD.style.cssText='font-size:7px;text-align:right';yD.className=skuYoYCls(fcv,lyVal);yD.textContent=skuYoYStr(fcv,lyVal);wrap.appendChild(yD);
       if(af){
         var estD=document.createElement('div');
@@ -6237,6 +6234,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         wrap.appendChild(estD);
       }
       td.appendChild(wrap);
+      applyDisc(inp,fcD,skuDiscOut[m],td);markDiscRundown(td,skuRundown[m]&&!skuDiscOut[m]);applyPreview(inp,fcD,m,sku);
       return td;
     }
     function skuCurFcCell(){
@@ -6255,9 +6253,8 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       inp.addEventListener('change',function(){skuCommitOv(this.dataset.ovkey,this.value,parseFloat(this.dataset.ly));refreshRow(s,co,ch);});
       w.appendChild(inp);
       var fcD=document.createElement('div');fcD.style.cssText='font-size:9px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;color:#334155';fcD.textContent=fn(fcvCur);w.appendChild(fcD);
-      applyDisc(inp,fcD,skuDiscOut[mCur]);markDiscRundown(td,skuRundown[mCur]&&!skuDiscOut[mCur]);applyPreview(inp,fcD,mCur,sku);
       var yD=document.createElement('div');yD.style.cssText='font-size:7px;text-align:right';yD.className=yoyCur>0?'gp':yoyCur<0?'rp':'fp';yD.textContent=(yoyCur>=0?'+':'')+yoyCur+'%';w.appendChild(yD);
-      td.appendChild(w);return td;
+      td.appendChild(w);applyDisc(inp,fcD,skuDiscOut[mCur],td);markDiscRundown(td,skuRundown[mCur]&&!skuDiscOut[mCur]);applyPreview(inp,fcD,mCur,sku);return td;
     }
     function skuFyTotCell(Y){
       var td=document.createElement('td');
