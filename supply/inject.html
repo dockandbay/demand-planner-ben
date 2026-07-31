@@ -2064,7 +2064,7 @@
     var help=SAMP_ACT_LABEL[code]||'Action required.', s=_poActState[sampActKey(ref,code)]||{}, sn=sampActSnoozed(ref,code);
     var A='<span class="act-mk" data-note="'+esc(help)+(sn?' — currently snoozed until '+esc(snzUntil(s))+snzBy(s)+(s.snoozed_at?' on '+esc(s.snoozed_at):''):'')+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:'+(sn?'#f3a3a3':'#dc2626')+';color:#fff;font-weight:800;font-size:10px;cursor:help;vertical-align:middle;margin-left:5px">A</span>';
     var snz=sn
-      ? ' <span class="mut tiny" style="white-space:nowrap">Snoozed'+snzBy(s)+' → '+esc(snzUntil(s))+' <button class="act-snz" data-kind="samp" data-ref="'+esc(ref)+'" data-code="'+esc(code)+'" data-d="0" style="border:none;background:none;color:#1d4ed8;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">wake</button></span>'
+      ? ' <span class="mut tiny" style="white-space:normal">Snoozed'+snzBy(s)+' → '+esc(snzUntil(s))+' <button class="act-snz" data-kind="samp" data-ref="'+esc(ref)+'" data-code="'+esc(code)+'" data-d="0" style="border:none;background:none;color:#1d4ed8;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">wake</button></span>'
       : ' <button class="act-snz-btn" data-kind="samp" data-ref="'+esc(ref)+'" data-code="'+esc(code)+'" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:4px;font-size:10px;padding:1px 6px;margin-left:4px;cursor:pointer">SNOOZE ▾</button>';
     return '<span class="act-wrap" data-mk="samp|'+esc(ref)+'|'+esc(code)+'">'+A+snz+'</span>'; }
   // Inline action indicator: red Ⓐ (120ms tooltip explaining the rule) + snooze 1/3/7d (or wake), keyed like the badge.
@@ -2084,7 +2084,7 @@
     // The Ⓐ stays visible even when snoozed (muted); the count badges drop it, but the marker still reads "Snoozed".
     var A='<span class="act-mk" data-po="'+esc(po)+'" data-note="'+esc(help)+(sn?' — currently snoozed until '+esc(snzUntil(s))+snzBy(s)+(s.snoozed_at?' on '+esc(s.snoozed_at):''):'')+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:'+(sn?'#f3a3a3':'#dc2626')+';color:#fff;font-weight:800;font-size:10px;cursor:help;vertical-align:middle;margin-left:5px">A</span>';
     var snz=sn
-      ? ' <span class="mut tiny" style="white-space:nowrap">Snoozed'+snzBy(s)+' → '+esc(snzUntil(s))+' <button class="act-snz" data-po="'+esc(po)+'" data-code="'+esc(code)+'" data-d="0" style="border:none;background:none;color:#1d4ed8;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">wake</button></span>'
+      ? ' <span class="mut tiny" style="white-space:normal">Snoozed'+snzBy(s)+' → '+esc(snzUntil(s))+' <button class="act-snz" data-po="'+esc(po)+'" data-code="'+esc(code)+'" data-d="0" style="border:none;background:none;color:#1d4ed8;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">wake</button></span>'
       : ' <button class="act-snz-btn" data-po="'+esc(po)+'" data-code="'+esc(code)+'" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:4px;font-size:10px;padding:1px 6px;margin-left:4px;cursor:pointer">SNOOZE ▾</button>';
     return '<span class="act-wrap" data-mk="'+esc(po)+'|'+esc(code)+'">'+A+snz+'</span>'; }
   // Snooze menu popped from a SNOOZE button (1/3/7 days).
@@ -9408,7 +9408,7 @@
   function prodActMark(ref, code){ var key=prodActKey(ref,code), help=prodActHelp(code), s=_poActState[key]||{}, sn=snzActive(s);
     var A='<span class="act-mk" data-note="'+esc(help)+(sn?' — currently snoozed until '+esc(snzUntil(s))+snzBy(s):'')+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:'+(sn?'#f3a3a3':'#dc2626')+';color:#fff;font-weight:800;font-size:10px;cursor:help;vertical-align:middle;margin-left:5px">A</span>';
     var snz=sn
-      ? ' <span class="mut tiny" style="white-space:nowrap">Snoozed'+snzBy(s)+' → '+esc(snzUntil(s))+' <button class="pact-snz" data-key="'+esc(key)+'" style="border:none;background:none;color:#1d4ed8;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">wake</button></span>'
+      ? ' <span class="mut tiny" style="white-space:normal">Snoozed'+snzBy(s)+' → '+esc(snzUntil(s))+' <button class="pact-snz" data-key="'+esc(key)+'" style="border:none;background:none;color:#1d4ed8;cursor:pointer;text-decoration:underline;font-size:11px;padding:0">wake</button></span>'
       : ' <button class="pact-snz-btn" data-key="'+esc(key)+'" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:4px;font-size:10px;padding:1px 6px;margin-left:4px;cursor:pointer">SNOOZE ▾</button>';
     return '<span class="act-wrap">'+A+snz+'</span>'; }
   function openProdSnzMenu(btn, after){ var key=btn.dataset.key; var ex=document.getElementById('snz-menu'); if(ex)ex.remove();

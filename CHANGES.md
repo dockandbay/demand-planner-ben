@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.349 - PO Payments: snooze note wraps
+- The "Snoozed by … → wake" indicator on the PO payments/actions view now wraps instead of running off one line (was white-space:nowrap). `supply/inject.html`.
+
 ## v26.348 - Payments Report: remittance upload + delayed paid-notification email ⚠️ NEEDS MIGRATION 164
 - New per-run column "Remittance & notify" on the Payments Report. **⬆ Remittance** uploads a file (stored as bytea, migration **164** `payment_remittances`). **✉ Mark paid & notify** queues an email to the supplier's active portal users, **sent after a 5-minute delay** (`payment_emails` queue + a 30s background worker) so a remittance can be uploaded in the window; a live countdown + **Cancel** button show until it fires. If a remittance is attached, the email body says **"Remittance attached."** and the file is attached (Resend). Row shows sent/failed state after. `server.mjs`, `supply/inject.html`.
 - `sendResendEmail` gained an `attachments` param (Resend base64 content). Recipient = `supplier_portal_users` (active) for the run's supplier; errors clearly if none. Uses existing `RESEND_API_KEY` (no new env/dep). run_key = `<date>|<supplier>` (matches payment_fx grouping).
