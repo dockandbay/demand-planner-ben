@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.335 - Fulfil: use stored supplier party id (skip name lookup)
+- The PO push now prefers `planner.suppliers.fulfil_id` (existing text column, manual entry) as the Fulfil party id — authoritative link + skips the name-lookup API call. Falls back to a name search when blank. Pre-flight report shows `party_source` (`suppliers.fulfil_id` vs `name-lookup`). No migration (column already exists). `server.mjs`.
+- Note: `fulfil_id` is **env-specific** — the sandbox party id (ACME = 6) is not the live id; re-enter it at go-live.
+
 ## v26.334 - Demand grid: tighter data-cell padding (less vertical space)
 - Reduced padding + line-height on the month forecast cells (`td.fctd`/`.fcin`/`.fcly`/`.fci`/`.fcr` → 2px sides/top, line-height 1.5→1.15) and the FY24/25/26 lookback + trend stacks (inline `padding:2px 5px`→`2px 2px 0`, line-height 1.25→1.15). Packs more rows on screen. `artifact_v16.7.html`.
 

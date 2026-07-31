@@ -1251,11 +1251,16 @@ async function fulfilPushLines(po, completion) {
     FROM planner.purchase_order_lines l WHERE l.po=$1 AND coalesce(l.qty,0)>0 ORDER BY l.sku`, [po])).rows;
   const poRow = (await pool.query(`SELECT coalesce(supplier_name,'') supplier, coalesce(branch,'') warehouse FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0] || {};
   const supName = poRow.supplier || '';
-  const curCode = (await pool.query(`SELECT coalesce(s.default_currency,'USD') c FROM planner.suppliers s WHERE s.name=$1`, [supName])).rows[0]?.c || 'USD';
+  const supRow = (await pool.query(`SELECT coalesce(default_currency,'USD') c, nullif(trim(coalesce(fulfil_id,'')),'') fulfil_id FROM planner.suppliers WHERE name=$1`, [supName])).rows[0] || {};
+  const curCode = supRow.c || 'USD';
   if (!lines.length) return { ok: false, error: 'PO ' + po + ' has no line quantities to push.' };
 
   const fulfilId = await fulfilFindPO(po);                          // needs keys; throws NO_FULFIL_CFG when absent
-  const partyId = await fulfilResolveParty(supName);
+  // Prefer the Fulfil party id stored on the supplier record (planner.suppliers.fulfil_id, manual entry) — this is the
+  // authoritative link and skips the name-lookup API call. Note: it's env-specific (sandbox party id ≠ live id), so it
+  // must be re-entered at go-live. Falls back to a name search when the field is blank.
+  const storedPartyId = /^\d+$/.test(String(supRow.fulfil_id || '')) ? parseInt(supRow.fulfil_id, 10) : null;
+  const partyId = storedPartyId || (await fulfilResolveParty(supName));
   const currencyId = await fulfilResolveCurrency(curCode);
   // Map the planner warehouse to a Fulfil warehouse code; fall back to the default (ILG).
   const whCode = (String(poRow.warehouse || '').toUpperCase().replace(/[^A-Z0-9]/g, '') || FULFIL_MAP.defaultWarehouseCode);
@@ -1264,7 +1269,7 @@ async function fulfilPushLines(po, completion) {
   const missingSkus = lines.map(l => l.sku).filter(s => !(String(s) in prodMap));
 
   // Pre-flight resolution report — surfaces exactly what's missing before any write.
-  const resolution = { supplier: supName, party_id: partyId, currency: curCode, currency_id: currencyId,
+  const resolution = { supplier: supName, party_id: partyId, party_source: storedPartyId ? 'suppliers.fulfil_id' : 'name-lookup', currency: curCode, currency_id: currencyId,
     warehouse_code: whCode, warehouse_id: warehouseId, products_found: Object.keys(prodMap).length,
     products_total: lines.length, missing_skus: missingSkus };
   const problems = [];
