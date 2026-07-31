@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.311 - PO grid exceptions: "Shipped · no final invoice" filter
+- New option in the PURCHASE ORDERS grid **Exceptions** dropdown: **Shipped · no final invoice** — POs at status **SHIPPING / DELIVERED / COMPLETE** with **no final invoice** recorded, **excluding legacy productions before P50** (prod_no < 50 or non-numeric). `supply/inject.html`.
+
 ## v26.310 - Deposit picker: closed deposits greyed out (not assignable)
 - In the PO deposit-assignment picker, **closed** deposits are now greyed out and non-clickable (with a "reopen it in the Deposits register" tooltip), alongside the existing region/supplier-mismatch blocks. `supply/inject.html`.
 
