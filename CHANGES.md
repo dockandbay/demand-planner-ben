@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.324 - Fulfil ERP push: client + date sync (real) + lines/create (dry-run), behind the toggle
+- Added a Fulfil v2 REST client (`fulfilFetch`, `fulfilFindPO`) and wired the per-PO ERP push to branch to Fulfil when **Active ERP = Fulfil** (same process, Fulfil target):
+  - **Update ERP Date** → finds the Fulfil PO by reference and sets its delivery date (real call; absent PO → "push lines first").
+  - **Update / Create ERP PO** → gathers the same planner lines (SKU/qty/price = approved final cost else standard) + supplier + date and **create-if-absent**; currently a **DRY-RUN** returning the exact payload it would send (guarded by `FULFIL_LINES_SEND`) until the field mapping is verified on the sandbox.
+  - With **no keys set**, every Fulfil op cleanly refuses ("not configured — no write"); with **Cin7** active, nothing changes. Bulk "Sync ERP dates" still guards on Fulfil (wire after sandbox validation).
+  - ⚠ `FULFIL_MAP` field names (reference / delivery_date / product.code / quantity / unit_price) are **unverified** — confirm on the first sandbox run. `server.mjs`.
+
 ## v26.323 - ERP buttons relabelled to "ERP" + Fulfil-active write guard
 - Renamed the Cin7-named buttons to generic ERP: **Sync ERP dates**, **Import PO from ERP**, **Update ERP Date**, **Update / Create ERP PO**, **Push to ERP (full)**. (Process unchanged — same endpoints/logic.)
 - Safety guard: while **Active ERP = Fulfil**, the Cin7 write endpoints (`cin7-date`, `cin7-lines`, `cin7-dates-sync`) now return a clear "Fulfil push not wired yet — no write performed" instead of silently pushing to **live Cin7**. So flipping the toggle can't accidentally write to Cin7 before the Fulfil calls exist. `server.mjs`, `supply/inject.html`.

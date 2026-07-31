@@ -1171,6 +1171,57 @@ app.get('/api/supply/erp-status', async (req, res) => {
     fulfil: { sandbox: fulfilConfigFor('sandbox').configured, live: fulfilConfigFor('live').configured } }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// ===================== Fulfil ERP client (v2 REST / Tryton model API) =====================
+// Targets Fulfil when Active ERP = Fulfil, mirroring the Cin7 push process (dates + line items, create-if-absent).
+// ⚠ FIELD MAPPING BELOW IS UNVERIFIED — confirm against the Fulfil SANDBOX on the first run, then adjust.
+// Safety: with no keys set (FULFIL_<ENV>_SUBDOMAIN/_API_KEY) every op throws NO_FULFIL_CFG and NOTHING sends.
+// The line/create push is a DRY-RUN for now (builds + returns the intended payload, does not POST a blind live
+// create) until the mapping is validated on the sandbox — then FULFIL_LINES_SEND flips it to a real write.
+const FULFIL_LINES_SEND = false;   // flip true once the create/line payload is verified against the sandbox
+const FULFIL_MAP = {
+  poModel: 'purchase.order', lineModel: 'purchase.line',
+  ref: 'reference',                 // PO number field on purchase.order  (verify)
+  deliveryDate: 'delivery_date',    // planner completion date maps here  (verify)
+  line: { productCode: 'product.code', qty: 'quantity', price: 'unit_price', desc: 'description' },
+};
+async function fulfilFetch(method, path, body) {
+  const cfg = fulfilConfigFor(await activeFulfilEnv());
+  if (!cfg.configured) { const e = new Error('Fulfil ' + cfg.env + ' API not configured (set FULFIL_' + cfg.env.toUpperCase() + '_SUBDOMAIN + FULFIL_' + cfg.env.toUpperCase() + '_API_KEY). No write performed.'); e.code = 'NO_FULFIL_CFG'; throw e; }
+  const r = await fetch(cfg.base + path, { method, headers: { 'X-API-KEY': cfg.apiKey, 'Content-Type': 'application/json' }, body: body != null ? JSON.stringify(body) : undefined });
+  const t = await r.text().catch(() => ''); let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) {}
+  if (!r.ok) { const e = new Error('Fulfil ' + r.status + ': ' + String(t).slice(0, 300)); e.status = r.status; throw e; }
+  return j;
+}
+// find a Fulfil purchase order id by its reference (PO number); null if not present
+async function fulfilFindPO(reference) {
+  const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[[FULFIL_MAP.ref, '=', reference]], 0, 1, null, ['id', FULFIL_MAP.ref]]);
+  return (Array.isArray(rows) && rows[0]) ? rows[0].id : null;
+}
+// update the delivery date on an existing Fulfil PO (a date alone can't create a PO — absent → report missing)
+async function fulfilSyncDate(po, completion) {
+  const iso = String(completion).slice(0, 10);
+  const id = await fulfilFindPO(po);
+  if (!id) return { ok: false, missing: true, error: 'PO ' + po + ' is not in Fulfil yet — push its lines first (create), then the date.' };
+  await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + id, { [FULFIL_MAP.deliveryDate]: iso });
+  return { ok: true, fulfil_id: id, deliveryDate: iso };
+}
+// push line items (SKU / qty / price) + date to Fulfil; create the PO if absent. Gathers the SAME planner data
+// the Cin7 push uses. DRY-RUN until FULFIL_LINES_SEND=true — returns the payload it WOULD send for review.
+async function fulfilPushLines(po, completion) {
+  const lines = (await pool.query(`SELECT l.sku, l.qty,
+      coalesce((SELECT c.final_cost FROM planner.portal_line_costs c WHERE c.po=l.po AND c.sku=l.sku AND c.final_cost IS NOT NULL AND c.confirmed_at IS NOT NULL), l.cost_price) price
+    FROM planner.purchase_order_lines l WHERE l.po=$1 AND coalesce(l.qty,0)>0 ORDER BY l.sku`, [po])).rows;
+  const sup = (await pool.query(`SELECT coalesce(supplier_name,'') s FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0]?.s || '';
+  const fulfilId = await fulfilFindPO(po);   // this call needs keys; throws NO_FULFIL_CFG when absent
+  const payload = {
+    action: fulfilId ? 'update' : 'create', po, fulfil_id: fulfilId, supplier: sup,
+    [FULFIL_MAP.deliveryDate]: completion ? String(completion).slice(0, 10) : null,
+    lines: lines.map(l => ({ [FULFIL_MAP.line.productCode]: l.sku, [FULFIL_MAP.line.qty]: Number(l.qty) || 0, [FULFIL_MAP.line.price]: l.price == null ? null : Number(l.price) })),
+  };
+  if (!FULFIL_LINES_SEND) return { ok: true, dry_run: true, note: 'Fulfil line/create push is not enabled yet — payload below is what would be sent. Verify the field mapping on the sandbox, then set FULFIL_LINES_SEND=true.', would_send: payload };
+  // (real create/update wiring goes here once the mapping is verified on the sandbox)
+  throw new Error('Fulfil line push mapping verified flag is on but the write path is not implemented — verify on sandbox first.');
+}
 // Supplier-submitted actual cost prices (portal order plan). Read all (small table); filtered client-side by PO.
 app.get('/api/supply/portal-line-costs', async (req, res) => {
   try { res.json((await pool.query(`SELECT po, sku, actual_cost, amended_qty, coalesce(is_added,false) is_added, final_cost,
@@ -5379,10 +5430,15 @@ app.post('/api/supply/po-lines-paste', async (req, res) => {
   finally { client.release(); }
 });
 app.post('/api/supply/po/:po/cin7-date', async (req, res) => {
-  if (await activeErp() === 'fulfil') return res.status(501).json({ error: 'Fulfil is the active ERP — the Fulfil push is not wired yet, so no write was performed. Switch Active ERP to Cin7 in CONFIG ▸ General settings to push to Cin7.' });
   const po = req.params.po;
   const completion = ((req.body && req.body.completion_date) || '').trim();
   if (!completion) return res.status(400).json({ error: 'completion_date required' });
+  if (await activeErp() === 'fulfil') {   // same process, Fulfil target
+    try { const out = await fulfilSyncDate(po, completion);
+      if (out.ok) { logPoChange(po, 'Uploaded to ERP', 'delivery date → ' + completion + ' (Fulfil)', authUser(req)); return res.json(out); }
+      return res.status(out.missing ? 404 : 502).json({ error: out.error }); }
+    catch (e) { return res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: e.message }); }
+  }
   try {
     const row = (await pool.query('SELECT erp_po_id FROM planner.erp_purchase_orders WHERE po=$1', [po])).rows[0];
     const cin7Id = row && row.erp_po_id;
@@ -5418,9 +5474,12 @@ app.post('/api/supply/po/:po/cin7-date', async (req, res) => {
 // there is one (portal_line_costs.final_cost, confirmed), else the standard plan cost (cost_price).
 // LIVE write to Cin7 — gated on CIN7_AUTH; safe no-op (501) when absent.
 app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
-  if (await activeErp() === 'fulfil') return res.status(501).json({ error: 'Fulfil is the active ERP — the Fulfil push is not wired yet, so no write was performed. Switch Active ERP to Cin7 in CONFIG ▸ General settings to push to Cin7.' });
   const po = req.params.po;
   const completion = ((req.body && req.body.completion_date) || '').trim();
+  if (await activeErp() === 'fulfil') {   // same process, Fulfil target (create-if-absent) — DRY-RUN until FULFIL_LINES_SEND
+    try { return res.json(await fulfilPushLines(po, completion)); }
+    catch (e) { return res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: e.message }); }
+  }
   try {
     const erpRow = (await pool.query('SELECT erp_po_id FROM planner.erp_purchase_orders WHERE po=$1', [po])).rows[0];
     let cin7Id = erpRow && erpRow.erp_po_id;            // present → update; absent → create a new Cin7 PO (nulled below if the mirrored id turns out to be voided/gone)
