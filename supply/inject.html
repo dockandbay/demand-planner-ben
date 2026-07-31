@@ -5968,7 +5968,7 @@
               +'</div>'; }
           function listHtml(sq){ var f=sq?rows.filter(function(x){return String(JSON.stringify(x)||'').toLowerCase().indexOf(sq)>=0;}):rows;
             var cards=f.length?('<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-top:12px">'+f.map(cardHtml).join('')+'</div>'):'<div class="count" style="padding:10px 2px">No suppliers'+(sq?' match your search':' yet')+'.</div>';
-            return '<div class="sect-h">Suppliers — payment terms drive every payment calc <span class="mut tiny">(<b>Prod</b> = production lead time; a PO&rsquo;s production-end date = start + this, unless overridden)</span> <button class="tool-badge bg-blue" id="sup-new" style="cursor:pointer;border:none;margin-left:8px">+ Supplier</button></div>'
+            return '<div class="sect-h">Suppliers — payment terms drive every payment calc <span class="mut tiny">(<b>Prod</b> = production lead time; a PO&rsquo;s production-end date = start + this, unless overridden)</span> <button class="save-btn" id="sup-new" style="margin-left:10px;background:#dcfce7;color:#166534;border:1px solid #16a34a;font-weight:600">+ Supplier</button></div>'
               +'<div class="bar"><input class="flt" id="sup-q" placeholder="Search name / code / contact / country…" value="'+esc(sq)+'" style="width:300px;background:#eff6ff;border-color:#93c5fd"><span class="count" style="margin-left:8px">'+f.length+(sq?' / '+rows.length:'')+' supplier'+(f.length===1?'':'s')+'</span></div>'
               +cards; }
           function inp(f,val,w,ph){ return '<input class="sup-in" data-f="'+f+'" value="'+esc(val==null?'':val)+'" placeholder="'+esc(ph||'')+'" style="width:'+(w||'100%')+';box-sizing:border-box;padding:6px 9px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px">'; }
@@ -6042,8 +6042,29 @@
             saveUrl:function(id){ return '/api/supply/supplier/'+encodeURIComponent(id); },
             wireEdit:function(){ updPctSum();
               b.querySelectorAll('.sup-in[data-f="start_deposit_pct"],.sup-in[data-f="completion_pct"],.sup-in[data-f="balance_pct"]').forEach(function(i){ i.oninput=updPctSum; }); },
-            wireList:function(){ var nb=document.getElementById('sup-new'); if(nb)nb.onclick=function(){ var nm=prompt('New supplier name:'); if(!nm||!nm.trim())return; var cd=prompt('Supplier code (2 letters, optional):')||'';
-              shipPost('/api/supply/supplier-create',{name:nm.trim(),code:cd.trim()||null},showSub); }; } });
+            wireList:function(){ var nb=document.getElementById('sup-new'); if(!nb)return;
+              nb.onclick=function(){ if(document.getElementById('sup-newform'))return;   // inline form (not 2 prompts)
+                var host=nb.closest('.sect-h')||nb.parentNode;
+                var form=document.createElement('div'); form.id='sup-newform';
+                form.style.cssText='display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0 12px;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc';
+                form.innerHTML='<b style="font-size:12px">New supplier</b>'
+                  +'<input id="snf-name" placeholder="Supplier name" style="font-size:12px;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;width:220px">'
+                  +'<input id="snf-code" placeholder="Code (optional)" style="font-size:12px;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;width:130px">'
+                  +'<button class="save-btn" id="snf-create" style="background:#16a34a;color:#fff;border-color:#15803d">Create</button>'
+                  +'<button class="save-btn light" id="snf-cancel">Cancel</button>'
+                  +'<span id="snf-msg" class="mut tiny" style="align-self:center"></span>';
+                host.parentNode.insertBefore(form, host.nextSibling);
+                var nameI=form.querySelector('#snf-name'), codeI=form.querySelector('#snf-code'), msg=form.querySelector('#snf-msg'); nameI.focus();
+                form.querySelector('#snf-cancel').onclick=function(){ form.remove(); };
+                function create(){ var nm=(nameI.value||'').trim(), cd=(codeI.value||'').trim();
+                  if(!nm){ msg.style.color='#dc2626'; msg.textContent='Enter a name.'; nameI.focus(); return; }
+                  msg.style.color='#64748b'; msg.textContent='Creating…';
+                  fetch('/api/supply/supplier-create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:nm,code:cd||null})}).then(function(r){return r.json();}).then(function(j){
+                    if(j&&j.error){ if(/code_key|duplicate key/i.test(j.error)){ msg.style.color='#dc2626'; msg.textContent='Code “'+esc(cd)+'” is already used — choose a different code.'; codeI.focus(); codeI.select(); } else { msg.style.color='#dc2626'; msg.textContent='Failed: '+j.error; } return; }
+                    showSub(); }).catch(function(e){ msg.style.color='#dc2626'; msg.textContent='Failed: '+(e.message||e); }); }
+                form.querySelector('#snf-create').onclick=create;
+                codeI.onkeydown=nameI.onkeydown=function(e){ if(e.key==='Enter'){ e.preventDefault(); create(); } };
+              }; } });
         }); };
       SUBS['keyaccounts']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/key-accounts').then(function(r){return r.json();}).then(function(rows){
