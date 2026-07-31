@@ -3473,7 +3473,8 @@ app.post('/api/supply/suggestion', async (req, res) => {
           + `<p><b>${_sugEsc(ref)}</b>${area ? (' &middot; ' + _sugEsc(area)) : ''}</p>`
           + `<p style="color:#475569">${_sugEsc(body)}</p>`
           + `<p style="color:#94a3b8;font-size:12px">Submitted by ${_sugEsc(by || '(unknown)')} &middot; triage in CONFIG ▸ Suggestions.</p>`;
-        await sendResendEmail({ to: stake, subject: `New suggestion ${ref}`, html, kind: 'suggestion-new', ref, by });
+        const _sub = (shortUser(by) || 'Someone') + ' submitted suggestion ' + ref;
+        await sendResendEmail({ to: stake, subject: _sub, html, kind: 'suggestion-new', ref, by });
       }
     } catch (e) { /* email is best-effort — never fail the submit */ }
     res.json({ ok: true, id: r.rows[0].id, ref });

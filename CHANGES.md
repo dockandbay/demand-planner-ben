@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.307 - New-suggestion email: subject names the submitter
+- The new-suggestion email subject is now "**zera@ submitted suggestion SUG-0012**" (submitter's short handle) instead of "New suggestion SUG-0012". Falls back to "Someone" when the submitter is unknown. `server.mjs`.
+
 ## v26.306 - PO grid: remove the "N / N POs" count line
 - Removed the "27 / 1375 POs" filtered/total count from the PURCHASE ORDERS grid filter bar (the `#sup-count` span + its population). `supply/inject.html`.
 
