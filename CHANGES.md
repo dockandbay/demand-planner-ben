@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.331 - Demand grid: darker category borders + category-total toggle
+- Darker top/bottom borders on category header, category-total and subcategory rows so the bands stand out (`tr.cat-hdr`/`tr.cat-tot` → 2px #777; `tr.sub-row` → 1px #a8a8a5 top+bottom). `artifact_v16.7.html`.
+- Category-total rows (e.g. "Hair Wrap — total") are now **hidden by default** — this also removes the grey "— total" row that had been appearing between adjacent categories. New "Cat totals: Show" toggle in the Plan toolbar (tier row) reveals them; state persists in localStorage (`hzShowCatTot`). `artifact_v16.7.html`.
+
 ## v26.330 - Demand grid: narrower month columns
 - Reduced the month-column min-width 98px → 74px (the 98px from v26.328 was too wide). `artifact_v16.7.html`.
 

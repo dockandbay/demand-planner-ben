@@ -307,10 +307,10 @@ td.stk2{position:sticky;left:160px;z-index:1;background:#fff;text-align:right;wi
 .nm{padding:3px 4px 3px 14px;display:flex;align-items:center;gap:3px;white-space:nowrap;overflow:hidden;font-size:11px}
 .nmc{padding:3px 6px;font-style:italic;color:#444;font-size:11px;white-space:nowrap}
 .chbg{font-size:9px;padding:0 3px;background:#efefef;border-radius:2px;color:#888;flex-shrink:0}
-tr.cat-hdr td{background:#e0e0de;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#333;padding:3px 6px;border-top:2px solid #aaa;border-bottom:1px solid #c0c0be;white-space:nowrap}
-tr.cat-tot td{background:#eaeae8;font-weight:600;border-top:1px solid #d0d0ce;border-bottom:1px solid #d0d0ce}
+tr.cat-hdr td{background:#e0e0de;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#333;padding:3px 6px;border-top:2px solid #777;border-bottom:2px solid #777;white-space:nowrap}
+tr.cat-tot td{background:#eaeae8;font-weight:600;border-top:2px solid #777;border-bottom:2px solid #777}
 tr.cat-tot td.fctd,tr.cat-tot td.fctd.y27,tr.cat-tot td.fctd.y28,tr.cat-tot td.fctd.actual,tr.cat-tot td.fctd.actual.fs26,tr.cat-tot td.fctd.fs26,tr.cat-tot td.fctd.fs27,tr.cat-tot td.totu,tr.cat-tot td.totr,tr.cat-tot td.totu.y26,tr.cat-tot td.totu.y27,tr.cat-tot td.totr.y26,tr.cat-tot td.totr.y27,tr.cat-tot td.sc,tr.cat-tot td.lbltd,tr.cat-tot td.rectd{background:#eaeae8 !important;border-left-color:#d0d0ce}
-tr.sub-row td{border-bottom:1px solid #cbcbc8}
+tr.sub-row td{border-top:1px solid #a8a8a5;border-bottom:1px solid #a8a8a5}
 
 
 
@@ -673,6 +673,10 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
         <button class="pill catpill ptier" data-tier="B" onclick="setPlanTier('B')">B</button>
         <button class="pill catpill ptier" data-tier="C" onclick="setPlanTier('C')">C</button>
       </div>
+    </span>
+    <span style="display:inline-flex;align-items:center;gap:6px;flex-shrink:0;margin-left:12px">
+      <span class="pill-lbl" title="Show a &lsquo;— total&rsquo; row at the foot of each category">Cat&nbsp;totals</span>
+      <button id="cat-tot-toggle" class="pill catpill" aria-pressed="false" title="Show / hide a total row under each category (e.g. &ldquo;Hair Wrap — total&rdquo;). Hidden by default." onclick="setShowCatTot(!SHOW_CAT_TOT)">Show</button>
     </span>
   </div>
   <div id="catrow1-wrap" style="display:flex;align-items:center;gap:6px;position:relative">
@@ -3030,6 +3034,8 @@ let SKU_SORT='alpha';
 let EXPANDED=new Set((function(){try{return JSON.parse(localStorage.getItem('db_layout_expanded_v1'))||[];}catch(e){return [];}})()); // 'subcat|co|ch' combos with SKU rows expanded — restored from last session
 function saveLayout(){ try{ localStorage.setItem('db_layout_expanded_v1',JSON.stringify(Array.from(EXPANDED))); }catch(e){} }
 var PLAN_SKU_QRY=''; // planner SKU filter text (matches sku code or product name)
+var SHOW_CAT_TOT=(function(){try{return localStorage.getItem('hzShowCatTot')==='1';}catch(e){return false;}})(); // category-total rows hidden by default; toggle in the plan toolbar
+function setShowCatTot(on){SHOW_CAT_TOT=!!on;try{localStorage.setItem('hzShowCatTot',SHOW_CAT_TOT?'1':'0');}catch(e){}var b=document.getElementById('cat-tot-toggle');if(b){b.classList.toggle('active',SHOW_CAT_TOT);b.setAttribute('aria-pressed',SHOW_CAT_TOT?'true':'false');}renderMain();}
 var SMOOTH_PREVIEW=null; // {pk:'subcat|co|ch', fy:startY|null, months:{'YYYY_MM':{sku:units}}} — one pending smooth preview at a time (fy set = whole-FY smooth)
 var SMOOTH_LEADER=false;  // false = Standard (pure proportional), true = Leader (protect historically-strong SKUs). Set via the FY-total dropdown; applies to ALL smoothing.
 // 120ms hover tooltip explaining Standard vs Leader smoothing (used on the FY-total dropdown).
@@ -6500,6 +6506,7 @@ function buildBody(){
       if(PLAN_SKU_QRY)insertInlineSkuRows(row.s,CUR,row.ch,drow);
     });
     if(PLAN_SKU_QRY)return; // filter mode: skip category totals
+    if(!SHOW_CAT_TOT)return; // category-total rows hidden by default (toolbar toggle)
     // Category totals
     const allR=DATA.filter(function(r){return parentCat(r.c)===cat&&r.co===CUR&&(!CF||r.ch===CF);});
     var c24u=0,c24r=0,c25u=0,c25r=0,cy26u=0,cy26r=0,cy25u=0;
@@ -6633,6 +6640,7 @@ function renderMain(){
   t.appendChild(buildColgroup());
   t.appendChild(buildHdr());
   const tb=document.createElement('tbody');tb.appendChild(buildBody());t.appendChild(tb);
+  (function(){var b=document.getElementById('cat-tot-toggle');if(b){b.classList.toggle('active',SHOW_CAT_TOT);b.setAttribute('aria-pressed',SHOW_CAT_TOT?'true':'false');}})();
   syncTabs();
   // Re-open any inline SKU expansions after a full rebuild (e.g. country/channel switch),
   // re-rendering them for the current country so dates/forecasts update. The PLAN_SKU_QRY
