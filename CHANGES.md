@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.321 - Fix: portal confirm / withdraw button never showed (missing query columns)
+- `POS_SQL_PORTAL` wasn't selecting `require_confirmation` / `supplier_confirmed` / `supplier_confirmed_by`, so `p.require_confirmation` was always undefined in the portal → the **"✓ Confirm order"** and **"Withdraw confirmation"** buttons never rendered (e.g. PO-58AMCEUS1). Added the three columns (same derivation as the admin PO rows: `require_supplier_confirmation` from the production). Not related to the order plan being empty. `server.mjs`.
+
 ## v26.320 - PO timeline: supplier + internal composers side by side
 - On the PO **Timeline**, the "Post to supplier" and "🔒 Post internal" composers now sit **side by side** on desktop (each in a capped ~440px column) to use the width better, stacking on narrow screens. Each keeps its own hint underneath. `supply/inject.html`.
 

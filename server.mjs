@@ -7602,7 +7602,10 @@ const POS_SQL_PORTAL = `
     (SELECT po2.dtc_approved_snapshot FROM planner.purchase_orders po2 WHERE po2.po=calc4.po) dtc_approved_snapshot,
     -- DTC shipment details (supplier-entered in portal ▸ SHIPMENT; migration 127)
     dsd.cartons dtc_cartons, dsd.cbm dtc_cbm, dsd.gross_weight_kg dtc_weight, coalesce(dsd.dimensions,'') dtc_dimensions,
-    to_char(dsd.updated_at,'YYYY-MM-DD HH24:MI') dtc_entered_at, coalesce(dsd.entered_by,'') dtc_entered_by
+    to_char(dsd.updated_at,'YYYY-MM-DD HH24:MI') dtc_entered_at, coalesce(dsd.entered_by,'') dtc_entered_by,
+    -- PO confirmation (portal confirm / withdraw banner) — was missing here, so the button never rendered
+    to_char(supplier_confirmed_at,'YYYY-MM-DD') supplier_confirmed, coalesce(supplier_confirmed_by,'') supplier_confirmed_by,
+    coalesce((SELECT pn.require_supplier_confirmation FROM planner.prod_numbers pn WHERE pn.prod_no=calc4.prod_no),false) require_confirmation
   FROM planner.v_po_finance calc4
   LEFT JOIN planner.dtc_shipment_details dsd ON dsd.po = calc4.po
   LEFT JOIN planner.key_accounts ka ON lower(trim(ka.name)) = lower(trim(calc4.client))
