@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.304 - Other Payments: "Likely pay" date → Cash Flow (SUG-0013)
+- PAYMENTS ▸ **Other Payments** now has an editable **Likely pay** date column (between Due date and Date paid). It feeds the **Cash Flow** report exactly like a PO milestone's likely-pay date — set it on an unpaid sundry payment to move it into the month you expect to pay it. Backed by the existing `deposits.date_likely_pay` (already read by cash flow); no migration. `supply/inject.html`.
+
 ## v26.303 - Supplier-submission emails name the supplier (SUG-0011)
 - The "supplier submitted invoice info / document for approval" emails now use the **supplier's name** in the subject + body (e.g. "**Weireken** submitted invoice info — PO-1712952A") instead of the generic word "Supplier". Falls back to "Supplier" when the name is unknown. `server.mjs`.
 

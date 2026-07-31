@@ -6722,8 +6722,8 @@
         function txt(v,isd){ return (v==null||v==='')?'<span class="mut">—</span>':esc(isd?fd(v):v); }
         var badge=stt==='paid'?'<span class="tool-badge bg-green">Paid</span>':stt==='overdue'?'<span class="tool-badge bg-red">Overdue</span>':'<span class="tool-badge bg-amber">Unpaid</span>';
         var cells = locked
-          ? '<td class="l">'+txt(d.reference)+'</td><td class="l">'+txt(d.supplier_name)+'</td><td class="l">'+txt(d.description)+'</td><td>'+txt(d.amount)+'</td><td class="l">'+txt(d.date_due,true)+'</td><td class="l">'+txt(d.date_paid,true)+'</td>'
-          : '<td class="l">'+editCell(ep,'reference',d.reference,'txt')+'</td><td class="l">'+supSel(ep,d.supplier_name)+'</td><td class="l">'+editCell(ep,'description',d.description,'txt','style="width:100%;min-width:240px;box-sizing:border-box"')+'</td><td>'+editCell(ep,'amount',d.amount,'','style="width:70px"')+'</td><td class="l">'+editCell(ep,'date_due',d.date_due,'date')+'</td><td class="l">'+editCell(ep,'date_paid',d.date_paid,'date')+'</td>';
+          ? '<td class="l">'+txt(d.reference)+'</td><td class="l">'+txt(d.supplier_name)+'</td><td class="l">'+txt(d.description)+'</td><td>'+txt(d.amount)+'</td><td class="l">'+txt(d.date_due,true)+'</td><td class="l">'+(d.date_paid?'<span class="mut">—</span>':txt(d.date_likely_pay,true))+'</td><td class="l">'+txt(d.date_paid,true)+'</td>'
+          : '<td class="l">'+editCell(ep,'reference',d.reference,'txt')+'</td><td class="l">'+supSel(ep,d.supplier_name)+'</td><td class="l">'+editCell(ep,'description',d.description,'txt','style="width:100%;min-width:240px;box-sizing:border-box"')+'</td><td>'+editCell(ep,'amount',d.amount,'','style="width:70px"')+'</td><td class="l">'+editCell(ep,'date_due',d.date_due,'date')+'</td><td class="l">'+editCell(ep,'date_likely_pay',d.date_likely_pay,'date')+'</td><td class="l">'+editCell(ep,'date_paid',d.date_paid,'date')+'</td>';
         var act = paid ? (editing?'<button class="lnk-btn oth-save" data-id="'+d.id+'">✓ save</button>':'<button class="lnk-btn oth-edit" data-id="'+d.id+'">edit</button>') : '';
         // paid items can't be deleted (a payment date locks deletion) — only unpaid rows get the delete link
         if(!paid) act += ' <button class="lnk-btn oth-del" data-id="'+d.id+'" data-ref="'+esc(d.reference||d.description||('#'+d.id))+'" title="delete this payment" style="color:#dc2626">delete</button>';
@@ -6740,7 +6740,7 @@
         document.getElementById('oth-wrap').innerHTML='<div class="bar pay-filters" style="gap:5px"><span class="pill-lbl">Status</span>'+stPills
           +' <span class="pill-lbl" style="margin-left:8px">Supplier</span><select class="flt" id="oth-sup" style="width:auto">'+supOpts+'</select>'
           +'<span class="count" style="margin-left:auto">'+f.length+' / '+oth.length+'</span></div>'
-          +'<div class="tw"><table class="pay-tbl"><thead><tr><th class="l">Reference</th><th class="l">Supplier</th><th class="l">Description</th><th>Amount</th><th class="l">Due date</th><th class="l">Date paid</th><th class="l">Status</th><th class="l"></th></tr></thead><tbody>'+(f.map(otherRow).join('')||'<tr><td colspan="8" class="l mut">No other payments match.</td></tr>')+'</tbody></table></div>';
+          +'<div class="tw"><table class="pay-tbl"><thead><tr><th class="l">Reference</th><th class="l">Supplier</th><th class="l">Description</th><th>Amount</th><th class="l">Due date</th><th class="l">Likely pay</th><th class="l">Date paid</th><th class="l">Status</th><th class="l"></th></tr></thead><tbody>'+(f.map(otherRow).join('')||'<tr><td colspan="9" class="l mut">No other payments match.</td></tr>')+'</tbody></table></div>';
         bindEdits();
         document.querySelectorAll('#oth-wrap .pill[data-os]').forEach(function(p){p.onclick=function(){OTH_STATE.status=p.dataset.os;draw();};});
         document.getElementById('oth-sup').onchange=function(){OTH_STATE.supplier=this.value;draw();};
