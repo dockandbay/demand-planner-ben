@@ -283,15 +283,15 @@ tr.sku-inline:not(.subtot-row) td.bg28:not(.anom-hi-cell):not(.anom-lo-cell){bac
 tr.sku-inline:not(.subtot-row) td.bgH1:not(.anom-hi-cell):not(.anom-lo-cell){background:#fff !important}
 tr.sku-inline:not(.subtot-row) td.bgH2:not(.anom-hi-cell):not(.anom-lo-cell){background:#fff !important}
 tr.sku-inline:not(.subtot-row) td{border-bottom-color:#cfcfcf !important}
-.bgt26u{background:#dbeafe !important;color:#1d4ed8 !important;font-weight:700}
-.bgt26r{background:#ecfdf5 !important;color:#065f46 !important}
-.bgt27u{background:#ede9fe !important;color:#7c3aed !important;font-weight:700}
-.bgt28u{background:#ccfbf1 !important;color:#0f766e !important;font-weight:700}
+.bgt26u{background:#e7e5e0 !important;color:#44403c !important;font-weight:700}
+.bgt26r{background:#e7e5e0 !important;color:#44403c !important}
+.bgt27u{background:#e7e5e0 !important;color:#44403c !important;font-weight:700}
+.bgt28u{background:#e7e5e0 !important;color:#44403c !important;font-weight:700}
 .fy-toggle{width:100%;border:none;background:transparent;cursor:pointer;font-family:inherit;font-size:8px;font-weight:700;line-height:1.15;color:inherit;padding:1px 1px;text-align:center;letter-spacing:-.02em}
 .fy-toggle:hover{text-decoration:underline}
 .bgtH1u{background:#e2e8f0 !important;color:#334155 !important;font-weight:700}
 .bgtH2u{background:#e7e5e0 !important;color:#44403c !important;font-weight:700}
-.bgt27r{background:#fdf4ff !important;color:#6b21a8 !important}
+.bgt27r{background:#e7e5e0 !important;color:#44403c !important}
 .bglbl{background:#edf2ff !important}
 .bgrec{background:#f0fdf4 !important}
 td{padding:0;border-bottom:1px solid #f0f0f0;vertical-align:middle;overflow:hidden;text-align:right}
@@ -384,6 +384,7 @@ td.sku-fc.anom-hi-cell{background:#fef9c3 !important;border-left-color:#f59e0b !
 td.sku-fc.anom-lo-cell{background:#fff !important;border-left-color:#e5e5e5 !important}
 /* forecast with no stock to cover it — red flag (overrides anomaly tint) */
 td.sku-fc.fc-nostock{background:#fee2e2 !important;border-left-color:#fca5a5 !important}
+td.sku-fc.fc-disc{background:#FFD6D1 !important;border-left-color:#f3b6b0 !important}
 td.sku-fc.fc-nostock .sku-fc-inp{background:transparent}
 td.sku-fc.fc-nostock .sku-fc-v{color:#991b1b}
 .sku-loading{padding:20px;text-align:center;color:#888;font-size:12px}
@@ -411,15 +412,15 @@ td.sku-fc.fc-nostock .sku-fc-v{color:#991b1b}
 .fcr.actual{color:#166534;font-weight:700}
 .fcr.actual.neg{color:#991b1b}
 td.totu{padding:2px 5px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums;font-size:12px;white-space:nowrap}
-td.totu.y26{background:#dbeafe;border-left:2px solid #60a5fa;color:#1d4ed8}
-td.totu.y27{background:#ede9fe;border-left:2px solid #a78bfa;color:#7c3aed}
-td.totu.y28{background:#ccfbf1;border-left:2px solid #5eead4;color:#0f766e}
-td.totu.yH1{background:#e2e8f0;border-left:2px solid #94a3b8;color:#334155}
+td.totu.y26{background:#e7e5e0;border-left:2px solid #a8a29e;color:#44403c}
+td.totu.y27{background:#e7e5e0;border-left:2px solid #a8a29e;color:#44403c}
+td.totu.y28{background:#e7e5e0;border-left:2px solid #a8a29e;color:#44403c}
+td.totu.yH1{background:#e7e5e0;border-left:2px solid #a8a29e;color:#44403c}
 td.totu.yH2{background:#e7e5e0;border-left:2px solid #a8a29e;color:#44403c}
 td.totr{padding:2px 5px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
-td.totr.y26{background:#ecfdf5;color:#065f46}
-td.totr.y27{background:#fdf4ff;color:#6b21a8}
-.totr.y28{background:#f0fdfa;color:#0f766e}
+td.totr.y26{background:#e7e5e0;color:#44403c}
+td.totr.y27{background:#e7e5e0;color:#44403c}
+.totr.y28{background:#e7e5e0;color:#44403c}
 tr.cat-tot td.totu.y26{background:#eaeae8}
 tr.cat-tot td.totu.y27{background:#eaeae8}
 tr.cat-tot td.totu.y28{background:#eaeae8}
@@ -5299,7 +5300,8 @@ function renderSkuView(){
       _fsBal-=fcv;
       var isAnom=skuAflags[m];
       var isCurFc=m===SKU_CUR_MONTH;
-      td.className='sku-fc'+(i===0?' fc-first sep2':'')+(isCurFc?' act-cur':'')+(isAnom?' anom-'+isAnom.type+'-cell':'')+(_noStock?' fc-nostock':'');
+      var _mYM=m.slice(0,4)+'-'+m.slice(5,7); var _isDisc=!!(discDate && _mYM>=String(discDate).slice(0,7));   // at/after discontinue month → pink (with or without stock)
+      td.className='sku-fc'+(i===0?' fc-first sep2':'')+(isCurFc?' act-cur':'')+(_isDisc?' fc-disc':((isAnom?' anom-'+isAnom.type+'-cell':'')+(_noStock?' fc-nostock':'')));
 
       // LY for forecast: for 2026 months use 2025 actuals; for 2027 use 2026 actuals
       var lyM=lyMonth(m);
