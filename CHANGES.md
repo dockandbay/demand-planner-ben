@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.353 - Order-plan delete: immediate in-progress feedback
+- Deleting an order-plan line now gives instant feedback while the panel refetches: the row fades, the ✕ turns to a spinner, a "⟳ Deleting SKU…" note shows, and further deletes are blocked until it resolves (restores on error). Avoids the delete looking like nothing happened during the slower refetch. `supply/inject.html`.
+
 ## v26.352 - PO grid: "Shipped · no final invoice" auto-selects Shipping+Complete pills
 - Choosing the "Shipped · no final invoice" exception now auto-sets the status pills to **Shipping + Complete** so the matching POs actually show (they were hidden by the default in-progress status filter). Criteria unchanged: SHIPPING/DELIVERED/COMPLETE, no final invoice, production ≥ 50 (excludes legacy pre-P50). `supply/inject.html`.
 

@@ -3810,13 +3810,22 @@
       fetch('/api/supply/po-line-reject',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:b.dataset.po,all:true})}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); })
         .catch(function(e){ b.disabled=false; alert('Could not reject: '+(e.message||e)); }); }; });
-    document.querySelectorAll('#podet-'+i+' .op-del-line').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete '+b.dataset.sku+' from this order plan?'))return; b.disabled=true;
+    document.querySelectorAll('#podet-'+i+' .op-del-line').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete '+b.dataset.sku+' from this order plan?'))return;
+      // Immediate feedback so the (slower) refetch never looks like nothing happened: fade the row, spin the ✕,
+      // stamp a "deleting…" note on the panel, and block further deletes until it resolves.
+      var tr=b.closest('tr'), tbody=tr&&tr.closest('tbody'), box=document.getElementById('podet-'+i);
+      if(tr){ tr.style.transition='opacity .15s'; tr.style.opacity='0.35'; }
+      b.disabled=true; b.textContent='⟳'; b.style.pointerEvents='none';
+      if(tbody)tbody.querySelectorAll('.op-del-line').forEach(function(x){ x.style.pointerEvents='none'; });
+      var busy=box&&box.querySelector('.op-busy'); if(box&&!busy){ busy=document.createElement('div'); busy.className='op-busy'; busy.style.cssText='margin:4px 2px;font-size:12px;color:#7c3aed;font-weight:600'; busy.textContent='⟳ Deleting '+b.dataset.sku+'…'; var opt=box.querySelector('.op-tbody'); if(opt&&opt.closest('table'))opt.closest('table').parentNode.insertBefore(busy,opt.closest('table')); }
       var added=b.dataset.added==='1';
       var url=added?'/api/supply/portal-line-remove':'/api/supply/po-line/'+encodeURIComponent(b.dataset.po+'|'+b.dataset.sku);
       var body=added?{po:b.dataset.po,sku:b.dataset.sku}:{po:b.dataset.po,sku:b.dataset.sku,qty:0,_prevqty:b.dataset.qty,who:'order plan delete'};
       fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); })
-        .catch(function(e){ b.disabled=false; alert('Could not delete: '+(e.message||e)); }); }; });
+        .catch(function(e){ if(tr)tr.style.opacity=''; b.disabled=false; b.textContent='✕'; b.style.pointerEvents='';
+          if(tbody)tbody.querySelectorAll('.op-del-line').forEach(function(x){ x.style.pointerEvents=''; });
+          if(busy&&busy.parentNode)busy.parentNode.removeChild(busy); alert('Could not delete: '+(e.message||e)); }); }; });
     document.querySelectorAll('#podet-'+i+' .op-goto').forEach(function(b){ b.onclick=function(){ gotoOrderPlan(b.dataset.po); }; });
     // ORDER PLAN edit mode: toggle, add-SKU row, copy, save (writes qty / new lines as proposed → auto ERP-pending)
     // in edit mode, prefetch the supplier-scoped SKU list (cached in OP_SKUS) and wire the add-SKU search picker
