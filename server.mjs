@@ -8391,14 +8391,25 @@ async function logPoChange(po, event, detail, by) {
 }
 async function logPoFieldChanges(po, keys, oldRow, body, by) {
   const numish = (s) => s !== '' && s != null && !isNaN(Number(s));
+  let _ccy = null;   // supplier default currency (lazy — only when a money field actually changed)
+  const supCcy = async () => { if (_ccy) return _ccy; try { _ccy = (await pool.query(`SELECT upper(coalesce(nullif(s.default_currency,''),'USD')) c
+    FROM planner.purchase_orders o LEFT JOIN planner.suppliers s ON lower(trim(s.name))=lower(trim(o.supplier_name)) WHERE o.po=$1`, [po])).rows[0]?.c || 'USD'; } catch (e) { _ccy = 'USD'; } return _ccy; };
+  const money2 = (v, c) => Number(v).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ' + c;
+  const MONEY_FIELDS = new Set(['supplier_invoice_total', 'order_value_estimation', 'credit_amount',
+    'pay_start_deposit_assigned', 'pay_completion_assigned', 'pay_balance_1_amount', 'pay_balance_2_amount']);
   for (const k of keys) {
     let nv = (body[k] === '' || body[k] == null) ? '' : String(body[k]).trim();
     let ov = (oldRow[k] == null) ? '' : String(oldRow[k]).trim();
-    if (/_date$|_overide$/.test(k)) { ov = ov.slice(0, 10); nv = nv.slice(0, 10); }   // date fields: compare the date part only
+    const isDate = /_date$|_overide$/.test(k);
+    if (isDate) { ov = ov.slice(0, 10); nv = nv.slice(0, 10); }   // date fields: compare the date part only
     if (numish(ov) && numish(nv)) { if (Number(ov) === Number(nv)) continue; }
     else if (ov === nv) continue;
+    // Display formatting: dates → dd-mmm-yy (Ben: always); money fields → 2dp + supplier currency.
+    let fov = ov, fnv = nv;
+    if (isDate) { fov = ov ? ddMonYy(ov) : ''; fnv = nv ? ddMonYy(nv) : ''; }
+    else if (MONEY_FIELDS.has(k)) { const c = await supCcy(); if (numish(ov)) fov = money2(ov, c); if (numish(nv)) fnv = money2(nv, c); }
     const f = (v) => v === '' ? '(blank)' : v;
-    await logPoChange(po, PO_TRACK[k] || k, f(ov) + ' → ' + f(nv), by);
+    await logPoChange(po, PO_TRACK[k] || k, f(fov) + ' → ' + f(fnv), by);
   }
 }
 // Shared PO grid-row query (WITH mastered ... FROM mastered calc4). Reused by the full grid endpoint

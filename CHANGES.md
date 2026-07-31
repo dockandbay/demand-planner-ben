@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.354 - Record-of-change: dd-mmm-yy dates + money 2dp with currency
+- Change-log detail now formats date fields as **dd-mmm-yy** (e.g. `29-Jul-26 → 07-Aug-26`) and money fields (invoice total, deposit/completion/balance amounts, order value, credit) as **2dp + supplier currency** (e.g. `(blank) → 2,000.00 USD`). `server.mjs`.
+
 ## v26.353 - Order-plan delete: immediate in-progress feedback
 - Deleting an order-plan line now gives instant feedback while the panel refetches: the row fades, the ✕ turns to a spinner, a "⟳ Deleting SKU…" note shows, and further deletes are blocked until it resolves (restores on error). Avoids the delete looking like nothing happened during the slower refetch. `supply/inject.html`.
 
