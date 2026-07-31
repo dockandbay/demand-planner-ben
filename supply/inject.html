@@ -2162,7 +2162,7 @@
       +'<div class="bar" id="po-prog">'+FILTERS.map(function(f){return '<span class="pill'+(state.f&&state.f[f[0]]?' active':'')+'" data-f="'+f[0]+'">'+f[1]+'</span>';}).join('')
       +'<span class="pill po-recent'+(state.recent?' active':'')+'" data-recent title="when on, Completed shows only POs completed in the last 12 months (faster)">📅 Last 12m</span>'
       +'<span class="pill po-focus'+(state.focus?' active':'')+'" data-focus title="show only starred POs (active only — completed are hidden)">★ Focus</span>'
-      +'<input class="flt" id="sup-search" placeholder="Filter PO / supplier…" value="'+esc(state.q||'')+'" style="background:#eff6ff;border-color:#93c5fd"><span class="count" id="sup-count"></span>'
+      +'<input class="flt" id="sup-search" placeholder="Filter PO / supplier…" value="'+esc(state.q||'')+'" style="background:#eff6ff;border-color:#93c5fd">'
       +'<span id="po-sku-wrap" style="position:relative;display:inline-flex;align-items:center;gap:3px;margin-left:6px"><input class="flt" id="po-sku-search" placeholder="Filter by SKU(s)…" value="'+esc(state.sku||'')+'" title="show only POs whose order plan contains any of these SKUs — comma-separate for an OR search" style="width:160px;background:#f0fdf4;border-color:#86efac">'
       +'<button class="save-btn" id="po-sku-exp" title="expand — paste many SKUs" style="padding:2px 7px;background:#f0fdf4;border:1px solid #86efac;color:#166534">⤢</button>'
       +'<div id="po-sku-pop" style="display:none;position:absolute;top:100%;left:0;z-index:70;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 10px 26px rgba(0,0,0,.16);padding:10px;width:340px"><div class="tiny mut" style="margin-bottom:4px">SKUs — comma / space / newline separated (OR search, partial match)</div><textarea id="po-sku-ta" rows="6" style="width:100%;box-sizing:border-box;font-size:12px;text-align:left" placeholder="TOWLB-…, PONCHK-…"></textarea><div style="margin-top:6px;display:flex;justify-content:flex-end;gap:6px"><button class="save-btn light" id="po-sku-clear2">Clear</button><button class="save-btn" id="po-sku-apply" style="background:#dcfce7;color:#166534;border-color:#16a34a">Apply</button></div></div></span>'
@@ -2222,7 +2222,7 @@
       if(state.sku && String(state.sku).trim()){ f=f.filter(function(r){ return _poSkuSet && _poSkuSet.has(r.po); }); }   // SUG-0012: intersect with the SKU filter (POs whose order plan has any of the SKUs)
       _poShowClient=!!(state.ctry&&state.ctry['OTHER']);   // OTHER pill (incl. Direct-to-Client) → reveal Client name + sales ref columns
       var shown=(_poShowAll||f.length<=PO_CAP)?f:f.slice(0,PO_CAP);
-      document.getElementById('sup-count').textContent=(shown.length<f.length?shown.length+' of ':'')+f.length+' / '+rows.length+' POs'+(q?(fuzzy?' (fuzzy match)':' (search — all statuses)'):'');
+      var _sc=document.getElementById('sup-count'); if(_sc)_sc.textContent='';   // PO count line removed (Ben) — guard kept in case the element returns
       document.getElementById('sup-grid').innerHTML=poTable(shown,q?'status':state.grp)   // a search spans all statuses → always group the results under status sub-labels (Production ▸ Ready to ship ▸ Future ▸ Shipping ▸ Complete)
         +(shown.length<f.length?'<div style="margin:8px 0;text-align:center"><button class="save-btn light" id="po-showall">Show all '+f.length+' &darr;</button></div>':'');
       var sa=document.getElementById('po-showall'); if(sa)sa.onclick=function(){ _poShowAll=true; view(); };

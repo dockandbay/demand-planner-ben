@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.306 - PO grid: remove the "N / N POs" count line
+- Removed the "27 / 1375 POs" filtered/total count from the PURCHASE ORDERS grid filter bar (the `#sup-count` span + its population). `supply/inject.html`.
+
 ## v26.305 - PO grid: SKU filter (SUG-0012)
 - PURCHASE ORDERS grid: new **SKU filter** box next to the PO/supplier search. Filters the grid to POs whose **order plan** contains any of the entered SKUs; **comma / space / newline separated = OR search** (partial match via ILIKE), with a **⤢ expand** popover (textarea) for pasting many SKUs at once. Intersects with all other filters (status / supplier / prod / batch / search). New endpoint `GET /api/supply/pos-by-sku`. Not persisted (behaves like the search box). `server.mjs`, `supply/inject.html`.
 
