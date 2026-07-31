@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.337 - Demand grid: subcategory names (col 1) wrap instead of truncating
+- Column 1 subcategory names now wrap onto multiple lines instead of cutting off with an ellipsis (e.g. "Poncho - Adults SEASONAL" no longer clips to "…SEA"). Changed `.nm` to `white-space:normal` + `align-items:flex-start`, and the inner name span to `overflow-wrap:anywhere` (dropped the `text-overflow:ellipsis`). `artifact_v16.7.html`.
+
 ## v26.336 - Supplier editor: hint on the Fulfil ERP ID field
 - Added help text under the "Fulfil ERP ID" field in the supplier edit form: enter the record ID from the Fulfil URL (…/model/contact/6 → 6), not the supplier "Code" number; sandbox/live IDs differ. `supply/inject.html`.
 

@@ -304,7 +304,7 @@ td{padding:0;border-bottom:1px solid #f0f0f0;vertical-align:middle;overflow:hidd
 #fc-note-tip{position:fixed;z-index:100060;max-width:300px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:7px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none;display:none;text-align:left}
 td.stk{position:sticky;left:0;z-index:1;background:#fff;text-align:left;width:160px;min-width:160px;max-width:160px}
 td.stk2{position:sticky;left:160px;z-index:1;background:#fff;text-align:right;width:62px;min-width:62px;max-width:62px;border-right:2px solid #b0b0ae}
-.nm{padding:3px 4px 3px 14px;display:flex;align-items:center;gap:3px;white-space:nowrap;overflow:hidden;font-size:11px}
+.nm{padding:3px 4px 3px 14px;display:flex;align-items:flex-start;gap:3px;white-space:normal;font-size:11px}
 .nmc{padding:3px 6px;font-style:italic;color:#444;font-size:11px;white-space:nowrap}
 .chbg{font-size:9px;padding:0 3px;background:#efefef;border-radius:2px;color:#888;flex-shrink:0}
 tr.cat-hdr td{background:#e0e0de;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#333;padding:3px 6px;border-top:2px solid #777;border-bottom:2px solid #777;white-space:nowrap}
@@ -4529,11 +4529,11 @@ function buildDataRow(s,co,ch,x,fu_cache){
   var isExp=EXPANDED.has(expKey);
   var biSubcat=getBIForSubcat(s,co,ch);
   var biIconHtmlSub=renderBIIcon(biSubcat);
-  ntd.innerHTML='<div class="nm" style="display:flex;align-items:center;gap:4px">'
-    +'<span style="display:flex;align-items:center;gap:4px;min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis">'
+  ntd.innerHTML='<div class="nm" style="display:flex;align-items:flex-start;gap:4px">'
+    +'<span style="display:flex;align-items:flex-start;gap:4px;min-width:0;flex:1">'
     +'<button class="sku-toggle" data-s="'+s+'" data-co="'+co+'" data-ch="'+ch+'" style="font-size:9px;padding:0 4px;border:1px solid #d0d0d0;border-radius:3px;background:#f8f8f8;color:#666;cursor:pointer;flex-shrink:0;line-height:1.6;transition:transform 0.1s">'+(isExp?'▾':'▸')+'</button>'
     +(biIconHtmlSub||'')
-    +'<span style="overflow:hidden;text-overflow:ellipsis;min-width:0">'+s+'</span>'
+    +'<span style="min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word;line-height:1.2">'+s+'</span>'
     +(CF?'':'<span class="chbg" style="flex-shrink:0">'+ch+'</span>')
     +'</span>'
     +'</div>';
