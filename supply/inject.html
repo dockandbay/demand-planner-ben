@@ -7033,7 +7033,11 @@
       draw();
     }).catch(function(e){ b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>'; }); }
   function renderPaymentsReport(b){ b.innerHTML='<div class="count">Loading…</div>';
-    fetch('/api/supply/payments-report').then(function(r){return r.json();}).then(function(rows){
+    Promise.all([
+      fetch('/api/supply/payments-report').then(function(r){return r.json();}),
+      fetch('/api/supply/remittances').then(function(r){return r.json();}).catch(function(){return [];}),
+      fetch('/api/supply/payment-emails').then(function(r){return r.json();}).catch(function(){return [];})
+    ]).then(function(_res){ payBuildMaps(_res[1],_res[2]); var rows=_res[0];
       // date filter: type a date (or partial, e.g. 2026-06) into From / To — no date picker
       b.innerHTML='<div class="bar"><span class="pill-lbl">Date</span><span class="tiny mut">from</span> <input class="flt" id="pay-from" placeholder="YYYY-MM-DD" value="'+esc(PAY_FROM)+'" style="width:118px"> <span class="tiny mut">to</span> <input class="flt" id="pay-to" placeholder="YYYY-MM-DD" value="'+esc(PAY_TO)+'" style="width:118px"> <button class="save-btn light" id="pay-clear">Clear</button>'
         +'<span class="pill-lbl" style="margin-left:14px">Search</span><input class="flt" id="pay-q" placeholder="supplier / amount…" value="'+esc(PAY_Q)+'" style="width:180px;background:#eff6ff;border-color:#93c5fd" title="search by supplier name or amount — overrides the date filter (spans all history)"> <span class="tiny mut">supplier or amount (spans all dates)</span></div><div id="pay-rep"></div>';
@@ -7057,10 +7061,20 @@
       document.getElementById('pay-to').oninput=function(){ PAY_TO=this.value.trim(); draw(); };
       document.getElementById('pay-clear').onclick=function(){ PAY_FROM=''; PAY_TO=''; PAY_Q=''; document.getElementById('pay-from').value=''; document.getElementById('pay-to').value=''; var _q=document.getElementById('pay-q'); if(_q)_q.value=''; draw(); };
       document.getElementById('pay-q').oninput=function(){ PAY_Q=this.value; draw(); };
-      draw(); })
+      _payDraw=draw; draw(); })
       .catch(function(e){b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>';}); }
   var PAY_CCY=['','GBP','EUR','AUD','USD'];
   var PTYPE_BG={Deposit:'bg-blue',Completion:'bg-amber',Balance:'bg-green',Other:'bg-neutral'};
+  // Remittance upload + delayed paid-notification state, keyed by run_key = '<date>|<supplier>'.
+  var PAY_REMIT={}, PAY_EMAILS={}, _payDraw=null;
+  function payRunKey(r){ return (r.dt||'')+'|'+(r.supplier||''); }
+  function payBuildMaps(rem,em){ PAY_REMIT={}; PAY_EMAILS={};
+    (rem||[]).forEach(function(x){ (PAY_REMIT[x.run_key]||(PAY_REMIT[x.run_key]=[])).push(x); });
+    (em||[]).forEach(function(x){ if(!PAY_EMAILS[x.run_key])PAY_EMAILS[x.run_key]=x; }); }   // list is id DESC → first seen = latest
+  function payRefreshState(){ return Promise.all([
+      fetch('/api/supply/remittances').then(function(r){return r.json();}).catch(function(){return [];}),
+      fetch('/api/supply/payment-emails').then(function(r){return r.json();}).catch(function(){return [];})
+    ]).then(function(a){ payBuildMaps(a[0],a[1]); if(_payDraw)_payDraw(); }); }
   // ---- Xero bill export (Payments Report) ----
   function xbDmy(iso){ var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(iso||''); return m?(m[3]+'/'+m[2]+'/'+m[1]):(iso||''); }   // YYYY-MM-DD → DD/MM/YYYY
   function xbCell(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
@@ -7155,6 +7169,17 @@
   function payReportHTML(rows){ if(!rows||!rows.length)return '<div class="count">No payments.</div>';
     var tT=0;
     var body=rows.map(function(r,i){ tT+=+r.total; var dk='data-dt="'+esc(r.dt)+'" data-sup="'+esc(r.supplier)+'"';
+      var rk=payRunKey(r), rem=PAY_REMIT[rk]||[], em=PAY_EMAILS[rk];
+      var remHtml = rem.length
+        ? '<span class="tool-badge bg-green" title="'+esc(rem.length>1?(rem.length+' files'):rem[0].filename)+'">📎 attached</span> <a class="lnk-btn" href="/api/supply/remittance/'+rem[0].id+'" title="download remittance">⬇</a> <button class="lnk-btn pr-remit-del" data-id="'+rem[0].id+'" title="remove remittance">✕</button>'
+        : '<button class="save-btn light pr-remit-up" data-rk="'+esc(rk)+'" data-sup="'+esc(r.supplier)+'" title="Upload a remittance — it gets attached to the paid email">⬆ Remittance</button>';
+      var ndata='data-rk="'+esc(rk)+'" data-sup="'+esc(r.supplier)+'" data-dt="'+esc(r.dt)+'" data-bt="'+esc(r.total)+'" data-bc="'+esc(r.base_ccy||'USD')+'"';
+      var notifyHtml;
+      if(em && em.status==='queued'){ notifyHtml='<span class="tool-badge bg-amber pr-cd" data-until="'+esc(em.send_after)+'">✉ sending…</span> <button class="lnk-btn pr-notify-cancel" data-id="'+em.id+'" title="cancel this email">Cancel</button>'; }
+      else if(em && em.status==='sending'){ notifyHtml='<span class="tool-badge bg-amber">✉ sending…</span>'; }
+      else if(em && em.status==='sent'){ notifyHtml='<span class="tool-badge bg-green" title="sent '+esc(em.sent_at||'')+' → '+esc(em.to_emails||'')+'">✉ sent</span>'; }
+      else if(em && em.status==='failed'){ notifyHtml='<span class="tool-badge" style="background:#fee2e2;color:#b91c1c" title="'+esc(em.error||'')+'">✉ failed</span> <button class="save-btn light pr-notify" '+ndata+'>retry</button>'; }
+      else { notifyHtml='<button class="save-btn pr-notify" '+ndata+' title="Email the supplier a paid confirmation — sends in 5 min so you can upload a remittance first" style="background:#7c3aed;color:#fff;border-color:#6d28d9;white-space:nowrap">✉ Mark paid &amp; notify</button>'; }
       var lines=(r.lines||[]).map(function(l){
         var depKey=(l.reference||'').split(',')[0].trim();   // register reference is just the code (e.g. P55-UK-WK2); line ref may append the description
         var refCell = l.reference ? (l.type==='Other'
@@ -7168,7 +7193,7 @@
           +'<td class="l"><span class="tool-badge '+(PTYPE_BG[l.type]||'bg-neutral')+'">'+esc(l.type)+'</span></td>'
           +'<td class="l">'+(l.prod_no?esc(l.prod_no):'<span class="mut">—</span>')+'</td>'
           +'<td class="l">'+drCell+'</td></tr>'; }).join('');
-      var det='<tr class="exp-row" id="payexp-'+i+'" style="display:none"><td colspan="7"><div style="padding:2px">'
+      var det='<tr class="exp-row" id="payexp-'+i+'" style="display:none"><td colspan="9"><div style="padding:2px">'
         +'<div class="sect-h" style="margin-top:2px">Payments in this run ('+(r.lines||[]).length+')</div>'
         +'<table style="font-size:11px"><thead><tr><th class="l">Reference</th><th>Amount ('+esc(r.base_ccy||'USD')+')</th><th class="l">Type</th><th class="l">Production</th><th class="l">Deposit ref</th></tr></thead><tbody>'+lines+'</tbody></table></div></td></tr>';
       var hasBill=(r.lines||[]).some(function(l){return l.source!=='other';});   // bill = everything except "other"
@@ -7181,11 +7206,12 @@
         +'<td><b>'+money(r.total)+'</b></td><td class="l">'+r.base_ccy+'</td>'
         +'<td class="l"><input class="fci pfx-amt" '+dk+' style="width:104px;text-align:right" placeholder="bank amount" value="'+(r.other_amount==null?'':fmtAmt(r.other_amount))+'"></td>'
         +'<td class="l"><select class="fci pfx-ccy" '+dk+' style="width:60px">'+PAY_CCY.map(function(cc){return '<option'+(cc===(r.bank_ccy||'')?' selected':'')+'>'+cc+'</option>';}).join('')+'</select></td>'
-        +'<td class="l"><button class="save-btn pay-usd" '+dk+' data-total="'+esc(r.total)+'" title="Mark this run paid in USD — sets bank amount to the base total and currency to USD" style="background:#16a34a;color:#fff;border-color:#15803d;white-space:nowrap">Paid USD</button></td></tr>'+det; }).join('');
-    return '<div style="max-width:1000px"><div class="bar"><span class="count">'+rows.length+' payments · grouped by date + supplier · expand a row to see the individual payments</span></div>'
-      +'<div class="tw"><table><thead><tr><th class="l"></th><th class="l">Date</th><th class="l">Supplier</th><th>Total (base)</th><th class="l">Base ccy</th><th class="l">Bank amount</th><th class="l">Bank ccy</th><th class="l"></th></tr></thead><tbody>'
+        +'<td class="l"><button class="save-btn pay-usd" '+dk+' data-total="'+esc(r.total)+'" title="Mark this run paid in USD — sets bank amount to the base total and currency to USD" style="background:#16a34a;color:#fff;border-color:#15803d;white-space:nowrap">Paid USD</button></td>'
+        +'<td class="l" style="white-space:nowrap;min-width:210px">'+remHtml+'<div style="margin-top:4px">'+notifyHtml+'</div></td></tr>'+det; }).join('');
+    return '<div style="max-width:1220px"><div class="bar"><span class="count">'+rows.length+' payments · grouped by date + supplier · expand a row to see the individual payments</span></div>'
+      +'<div class="tw"><table><thead><tr><th class="l"></th><th class="l">Date</th><th class="l">Supplier</th><th>Total (base)</th><th class="l">Base ccy</th><th class="l">Bank amount</th><th class="l">Bank ccy</th><th class="l"></th><th class="l">Remittance &amp; notify</th></tr></thead><tbody>'
       +body
-      +'<tr class="batchrow"><td></td><td class="l" colspan="2"><b>TOTAL</b></td><td><b>'+money(tT)+'</b></td><td colspan="4"></td></tr>'
+      +'<tr class="batchrow"><td></td><td class="l" colspan="2"><b>TOTAL</b></td><td><b>'+money(tT)+'</b></td><td colspan="5"></td></tr>'
       +'</tbody></table></div></div>'; }
   function bindPayFx(b){
     b.querySelectorAll('.pay-exp').forEach(function(btn){ btn.onclick=function(){ var ex=document.getElementById('payexp-'+btn.dataset.i); if(!ex)return; var open=ex.style.display!=='none'; ex.style.display=open?'none':''; btn.textContent=open?'▸':'▾'; }; });
@@ -7207,7 +7233,39 @@
       fetch('/api/supply/payment-fx',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({run_date:btn.dataset.dt,supplier:btn.dataset.sup,paid_currency:'USD',paid_amount:total})})
         .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error);
           if(j&&j.emailPreview)showEmailPreview(j.emailPreview); btn.textContent='✓ USD'; setTimeout(function(){btn.disabled=false;btn.textContent=o;},1200); })
-        .catch(function(e){ btn.disabled=false; btn.textContent=o; alert('Save failed: '+(e.message||e)); }); }; }); }
+        .catch(function(e){ btn.disabled=false; btn.textContent=o; alert('Save failed: '+(e.message||e)); }); }; });
+    // ── Remittance upload + delayed paid-notification (run_key = date|supplier) ──
+    b.querySelectorAll('.pr-remit-up').forEach(function(btn){ btn.onclick=function(){
+      var fi=document.createElement('input'); fi.type='file'; fi.style.display='none'; document.body.appendChild(fi);
+      fi.onchange=function(){ var f=fi.files&&fi.files[0]; if(!f){document.body.removeChild(fi);return;}
+        var o=btn.textContent; btn.disabled=true; btn.textContent='…';
+        var rd=new FileReader(); rd.onload=function(){
+          fetch('/api/supply/remittance',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({run_key:btn.dataset.rk,supplier_name:btn.dataset.sup,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result)})})
+            .then(function(r){return r.json();}).then(function(j){ document.body.removeChild(fi); if(j&&j.error){btn.disabled=false;btn.textContent=o;return alert(j.error);} payRefreshState(); })
+            .catch(function(e){ document.body.removeChild(fi); btn.disabled=false; btn.textContent=o; alert('Upload failed: '+(e.message||e)); }); };
+        rd.readAsDataURL(f); };
+      fi.click(); }; });
+    b.querySelectorAll('.pr-remit-del').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Remove this remittance?'))return;
+      fetch('/api/supply/remittance/'+btn.dataset.id+'/delete',{method:'POST'}).then(function(r){return r.json();}).then(function(){ payRefreshState(); }); }; });
+    b.querySelectorAll('.pr-notify').forEach(function(btn){ btn.onclick=function(){ var tr=btn.closest('tr');
+      var amtEl=tr&&tr.querySelector('.pfx-amt'), ccyEl=tr&&tr.querySelector('.pfx-ccy');
+      var amt=(amtEl&&amtEl.value.replace(/,/g,'').trim())||btn.dataset.bt||'';
+      var ccy=(ccyEl&&ccyEl.value)||btn.dataset.bc||'USD';
+      if(!confirm('Email the supplier a paid confirmation for '+(amt?fmtAmt(amt)+' '+ccy:'this payment')+'?\nIt sends in 5 minutes — upload a remittance in the meantime to attach it.'))return;
+      var o=btn.textContent; btn.disabled=true; btn.textContent='…';
+      fetch('/api/supply/payment-notify',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({run_key:btn.dataset.rk,supplier_name:btn.dataset.sup,amount:amt,currency:ccy,pay_date:btn.dataset.dt})})
+        .then(function(r){return r.json();}).then(function(j){ if(j&&j.error){btn.disabled=false;btn.textContent=o;return alert(j.error);} payRefreshState(); })
+        .catch(function(e){ btn.disabled=false; btn.textContent=o; alert('Failed: '+(e.message||e)); }); }; });
+    b.querySelectorAll('.pr-notify-cancel').forEach(function(btn){ btn.onclick=function(){
+      fetch('/api/supply/payment-notify/'+btn.dataset.id+'/cancel',{method:'POST'}).then(function(r){return r.json();}).then(function(){ payRefreshState(); }); }; });
+    payTickCountdown(); }
+  // Live countdown for queued paid-notification emails; auto-refreshes state ~35s after the window elapses (worker runs every 30s).
+  function payTickCountdown(){ if(window._payCdT)return; window._payCdT=setInterval(function(){
+    var els=document.querySelectorAll('.pr-cd'); if(!els.length)return; var now=Date.now();
+    els.forEach(function(el){ var t=Date.parse(el.dataset.until||''); if(!t){el.textContent='✉ sending…';return;}
+      var s=Math.max(0,Math.round((t-now)/1000));
+      if(s<=0){ el.textContent='✉ sending…'; if(!el.dataset.rq){ el.dataset.rq='1'; setTimeout(function(){ if(typeof payRefreshState==='function')payRefreshState(); },35000); } }
+      else { var m=Math.floor(s/60), ss=s%60; el.textContent='✉ sending ~'+m+':'+(ss<10?'0':'')+ss; } }); },1000); }
   // Sandbox-only: pop up the rendered payment-confirmed email (server returns it when no live email sender is set).
   function showEmailPreview(p){ if(!p)return; var ov=document.createElement('div');
     ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200002;display:flex;align-items:center;justify-content:center;padding:20px';

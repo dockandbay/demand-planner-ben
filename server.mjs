@@ -2874,6 +2874,13 @@ app.get('/api/supply/:section', async (req, res) => {
           WHERE coalesce(status,'') NOT ILIKE '%complete%'
             AND NOT EXISTS (SELECT 1 FROM planner.purchase_order_lines l WHERE l.po=po.po AND coalesce(l.qty,0)<>0)
           ORDER BY po`));
+      case 'remittances':   // Payments Report — remittance metadata per run_key (migration 164)
+        return res.json(await q(`SELECT id, run_key, coalesce(filename,'remittance') filename, coalesce(byte_size,0) byte_size,
+          coalesce(uploaded_by,'') uploaded_by, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.payment_remittances ORDER BY uploaded_at DESC`));
+      case 'payment-emails':   // Payments Report — queued/recent paid-notification emails per run_key (migration 164)
+        return res.json(await q(`SELECT id, run_key, coalesce(supplier_name,'') supplier_name, coalesce(to_emails,'') to_emails,
+          status, to_char(send_after,'YYYY-MM-DD"T"HH24:MI:SS"Z"') send_after, to_char(sent_at,'YYYY-MM-DD HH24:MI') sent_at, coalesce(error,'') error
+          FROM planner.payment_emails WHERE status IN ('queued','sending') OR sent_at > now() - interval '30 days' ORDER BY id DESC`));
       default:
         return res.status(404).json({ error: 'unknown section: ' + req.params.section });
     }
@@ -3274,15 +3281,16 @@ async function logEmail(m) {
        m.kind || 'other', m.ref || null, m.status || 'sent', m.error ? String(m.error).slice(0, 500) : null, m.by || null]);
   } catch (e) { /* table absent pre-migration 159, or insert failed — never block the send */ }
 }
-async function sendResendEmail({ to, subject, html, cc, kind, ref, by, replyTo }) {
+async function sendResendEmail({ to, subject, html, cc, kind, ref, by, replyTo, attachments }) {
   const list = Array.isArray(to) ? to : [to];
   const cclist = cc ? (Array.isArray(cc) ? cc : [cc]).filter(Boolean) : [];
   const recipients = list.concat(cclist).filter(Boolean).join(', ');
-  if (!process.env.RESEND_API_KEY) { console.log('[email] no RESEND_API_KEY — would email ' + list.join(', ') + (cclist.length ? ' (cc ' + cclist.join(', ') + ')' : '') + ' :: ' + subject); logEmail({ recipients, subject, kind, ref, by, status: 'sandbox' }); return { sandbox: true, sent: 0 }; }
+  if (!process.env.RESEND_API_KEY) { console.log('[email] no RESEND_API_KEY — would email ' + list.join(', ') + (cclist.length ? ' (cc ' + cclist.join(', ') + ')' : '') + ' :: ' + subject + ((attachments && attachments.length) ? ' [+' + attachments.length + ' attachment]' : '')); logEmail({ recipients, subject, kind, ref, by, status: 'sandbox' }); return { sandbox: true, sent: 0 }; }
   try {
     const payload = { from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', to: list, subject, html };
     if (cclist.length) payload.cc = cclist;
     if (replyTo && /@/.test(String(replyTo))) payload.reply_to = String(replyTo).trim();   // reply goes to the person who triggered it (submitter / escalator / supplier)
+    if (attachments && attachments.length) payload.attachments = attachments.map(a => ({ filename: a.filename || 'attachment', content: a.content }));   // Resend: content = base64 string
     const resp = await fetch('https://api.resend.com/emails', { method: 'POST',
       headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify(payload) });
@@ -4621,6 +4629,104 @@ app.get('/api/supply/quality-doc/:id', async (req, res) => {
     res.send(r.data);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// ── Payments Report: remittance upload + delayed "paid" notification to the supplier (migration 164) ──────────
+// run_key = '<YYYY-MM-DD>|<supplier>' (matches the payments-report grouping / payment_fx). Recipient = the
+// supplier's active portal users. Email is queued 5 min out so a remittance can be uploaded; a worker sends it
+// (attaching the remittance if present) unless cancelled in the window.
+const REMIT_DELAY_MS = 5 * 60 * 1000;
+// Upload a remittance file against a payment run (base64 in the body, like quality-doc).
+app.post('/api/supply/remittance', async (req, res) => {
+  const b = req.body || {};
+  if (!b.run_key || !b.data_base64) return res.status(400).json({ error: 'run_key and data_base64 required' });
+  try {
+    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    const r = await pool.query(`INSERT INTO planner.payment_remittances (run_key, supplier_name, filename, mime, byte_size, data, uploaded_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+      [String(b.run_key), b.supplier_name || null, b.filename || 'remittance', b.mime || 'application/octet-stream', buf.length, buf, authUser(req) || 'admin']);
+    res.json({ id: r.rows[0].id, byte_size: buf.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// (List endpoints /api/supply/remittances + /api/supply/payment-emails are served by the /api/supply/:section switch above.)
+app.get('/api/supply/remittance/:id', async (req, res) => {
+  try {
+    const r = (await pool.query(`SELECT filename, mime, data FROM planner.payment_remittances WHERE id=$1`, [req.params.id])).rows[0];
+    if (!r) return res.status(404).json({ error: 'not found' });
+    res.setHeader('Content-Type', r.mime || 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'attachment; filename="' + String(r.filename || 'remittance').replace(/"/g, '') + '"');
+    res.send(r.data);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/remittance/:id/delete', async (req, res) => {
+  try { const r = await pool.query(`DELETE FROM planner.payment_remittances WHERE id=$1`, [req.params.id]); res.json({ ok: true, deleted: r.rowCount }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Resolve a supplier name → its active portal-user emails.
+async function supplierPortalEmails(name) {
+  if (!name) return [];
+  return (await pool.query(`SELECT DISTINCT lower(u.email) e FROM planner.supplier_portal_users u
+    LEFT JOIN planner.suppliers s ON s.id=u.supplier_id
+    WHERE u.active=true AND coalesce(u.email,'')<>'' AND (lower(trim(u.supplier_name))=lower(trim($1)) OR lower(trim(s.name))=lower(trim($1)))`, [name])).rows.map(x => x.e);
+}
+// Queue the paid-notification email (5-min delay). Body: run_key, supplier_name, amount, currency, pay_date.
+app.post('/api/supply/payment-notify', async (req, res) => {
+  const b = req.body || {};
+  if (!b.run_key || !b.supplier_name) return res.status(400).json({ error: 'run_key and supplier_name required' });
+  try {
+    const emails = await supplierPortalEmails(b.supplier_name);
+    if (!emails.length) return res.status(400).json({ error: 'No active portal users for "' + b.supplier_name + '" — add one in CONFIG ▸ Suppliers to send a remittance email.' });
+    // one live queued email per run — replace any existing queued one
+    await pool.query(`UPDATE planner.payment_emails SET status='cancelled' WHERE run_key=$1 AND status='queued'`, [b.run_key]);
+    const sendAfter = new Date(Date.now() + REMIT_DELAY_MS).toISOString();
+    const r = await pool.query(`INSERT INTO planner.payment_emails (run_key, supplier_name, to_emails, amount, currency, pay_date, send_after, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+      [b.run_key, b.supplier_name, emails.join(', '), (b.amount == null || b.amount === '') ? null : Number(b.amount), (b.currency || '').toUpperCase() || null, b.pay_date || null, sendAfter, authUser(req) || 'admin']);
+    res.json({ id: r.rows[0].id, to_emails: emails, send_after: sendAfter });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/payment-notify/:id/cancel', async (req, res) => {
+  try { const r = await pool.query(`UPDATE planner.payment_emails SET status='cancelled' WHERE id=$1 AND status='queued'`, [req.params.id]);
+    res.json({ ok: true, cancelled: r.rowCount }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// (Status list /api/supply/payment-emails is served by the /api/supply/:section switch above.)
+// Build + send one queued paid-notification. Attaches the remittance(s) for the run if any exist.
+async function sendPaymentNotify(row) {
+  const rem = (await pool.query(`SELECT filename, mime, data FROM planner.payment_remittances WHERE run_key=$1 ORDER BY uploaded_at`, [row.run_key])).rows;
+  const money = (row.amount != null) ? (Number(row.amount).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })) : '';
+  const amtLine = money ? ('<b>' + escHtml(money) + ' ' + escHtml(row.currency || '') + '</b>') : 'your payment';
+  const dateLine = row.pay_date ? (' on <b>' + escHtml(row.pay_date) + '</b>') : '';
+  const hasRem = rem.length > 0;
+  const html = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111;line-height:1.5">'
+    + '<p>Hello,</p>'
+    + '<p>This is to confirm that Dock &amp; Bay has made a payment of ' + amtLine + dateLine + '.</p>'
+    + (hasRem ? '<p><b>Remittance attached.</b></p>' : '')
+    + '<p>Thank you,<br>Dock &amp; Bay Accounts</p></div>';
+  const attachments = rem.map(a => ({ filename: a.filename || 'remittance', content: Buffer.from(a.data).toString('base64') }));
+  const subj = 'Payment made — Dock & Bay' + (money ? (' (' + money + ' ' + (row.currency || '') + ')') : '');
+  return sendResendEmail({ to: row.to_emails.split(',').map(s => s.trim()).filter(Boolean), subject: subj, html,
+    kind: 'payment-remittance', ref: row.run_key, by: row.created_by, attachments });
+}
+// Worker: every 30s, claim + send any queued email whose 5-min window has elapsed.
+let _remitTick = false;
+async function processPaymentEmails() {
+  if (_remitTick) return; _remitTick = true;
+  try {
+    const due = (await pool.query(`SELECT id FROM planner.payment_emails WHERE status='queued' AND send_after<=now() ORDER BY id LIMIT 20`)).rows;
+    for (const d of due) {
+      // claim (skip if someone else took it)
+      const claim = await pool.query(`UPDATE planner.payment_emails SET status='sending' WHERE id=$1 AND status='queued' RETURNING *`, [d.id]);
+      const row = claim.rows[0]; if (!row) continue;
+      try { const r = await sendPaymentNotify(row);
+        if (r && r.error) await pool.query(`UPDATE planner.payment_emails SET status='failed', error=$2 WHERE id=$1`, [row.id, String(r.error).slice(0, 300)]);
+        else await pool.query(`UPDATE planner.payment_emails SET status='sent', sent_at=now(), error=null WHERE id=$1`, [row.id]);
+      } catch (e) { await pool.query(`UPDATE planner.payment_emails SET status='failed', error=$2 WHERE id=$1`, [row.id, String(e.message || e).slice(0, 300)]); }
+    }
+  } catch (e) { /* worker best-effort */ }
+  finally { _remitTick = false; }
+}
+setInterval(processPaymentEmails, 30000);
+
 // Admin PO ▸ DOCUMENTS tab: approve / reject a supplier-submitted document (with notes). Rejection returns the
 // doc to a re-submittable state; the notes are kept so the portal shows why. Posts an INTERNAL timeline note
 // (shows as an unread action for the supplier in the portal) so the decision flows both ways.
