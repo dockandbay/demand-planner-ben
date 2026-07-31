@@ -3307,6 +3307,15 @@ async function escalateSend(r) { return sendResendEmail({ to: r.emails, subject:
 // Best-effort — never break the submit if the note fails.
 function ddMonYy(v) { const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})/); if (!m) return v;
   return m[3] + '-' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][(+m[2]) - 1] + '-' + m[1].slice(2); }
+// Signed movement between two ISO dates → "(DELAY of N days)" / "(BROUGHT FORWARD N days)" (blank if unchanged/invalid).
+function dateDeltaLabel(oldISO, newISO) {
+  const a = String(oldISO || '').slice(0, 10), b = String(newISO || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(a) || !/^\d{4}-\d{2}-\d{2}$/.test(b)) return '';
+  const days = Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
+  if (!days || isNaN(days)) return '';
+  return days > 0 ? '(DELAY of ' + days + ' day' + (days === 1 ? '' : 's') + ')'
+                  : '(BROUGHT FORWARD ' + (-days) + ' day' + (-days === 1 ? '' : 's') + ')';
+}
 async function postSupplierSubmitNote(db, po, kind, value, by) {
   const label = kind === 'invoice_value' ? ('submitted invoice information — value ' + value)
     : kind === 'completion_date' ? ('submitted completion date ' + ddMonYy(value))
@@ -6594,6 +6603,14 @@ app.post('/api/supply/shipment/:ref', async (req, res) => {
     cols.push(k); vals.push(req.body[k] === '' ? null : req.body[k]); ph.push(`$${i++}::${SHIP_FIELDS[k]}`);
   }
   const upd = cols.slice(1).map(c => `${c}=excluded.${c}`).join(',') || 'updated_at=now()';
+  // Snapshot (pre-change) the shipment's dates + each aboard PO's effective completion (checkin), so we can log the
+  // cascade on every PO whose inherited date shifts (record of change extends to shipment-driven date recalcs).
+  let _oldShip = null, _preCheckin = {};
+  try {
+    _oldShip = (await pool.query(`SELECT departure_date::text dep, landing_date::text land, delivery_date::text del, arrival_date::text arr, tracked_delivery_date::text trk FROM planner.shipments WHERE shipment_ref=$1`, [ref])).rows[0] || null;
+    const _pa = (await pool.query(`SELECT po FROM planner.purchase_orders WHERE shipment_ref=$1 UNION SELECT master_po FROM planner.shipments WHERE shipment_ref=$1 AND coalesce(master_po,'')<>''`, [ref])).rows.map(x => x.po);
+    if (_pa.length) (await pool.query(PO_ROWS_SQL + ' WHERE calc4.po = ANY($1)', [_pa])).rows.forEach(r => { _preCheckin[r.po] = r.checkin ? String(r.checkin).slice(0, 10) : ''; });
+  } catch (e) { /* snapshot best-effort */ }
   try {
     const up = await pool.query(`INSERT INTO planner.shipments (${cols.join(',')}) VALUES (${ph.join(',')})
       ON CONFLICT (shipment_ref) DO UPDATE SET ${upd}, updated_at=now() RETURNING (xmax = 0) AS inserted`, vals);
@@ -6609,6 +6626,24 @@ app.post('/api/supply/shipment/:ref', async (req, res) => {
          UNION SELECT master_po FROM planner.shipments WHERE shipment_ref=$1 AND coalesce(master_po,'')<>''`, [ref])).rows.map(x => x.po);
       if (aboard.length) rows = (await pool.query(PO_ROWS_SQL + ' WHERE calc4.po = ANY($1)', [aboard])).rows;
     } catch (e) { /* non-fatal — client falls back to per-PO refresh */ }
+    // Record of change: for every aboard PO whose effective completion shifted from the shipment date edit, log it.
+    try {
+      const DL = { dep: 'ship date', del: 'delivery date', land: 'landing date', arr: 'arrival date', trk: 'tracked delivery date' };
+      const FK = { dep: 'departure_date', del: 'delivery_date', land: 'landing_date', arr: 'arrival_date', trk: 'tracked_delivery_date' };
+      const changed = _oldShip ? Object.keys(DL).filter(k => (req.body || {})[FK[k]] !== undefined && String(_oldShip[k] || '').slice(0, 10) !== String((req.body[FK[k]] || '')).slice(0, 10)) : [];
+      if (changed.length && rows.length) {
+        const shipMaster = (await pool.query(`SELECT coalesce(nullif(master_po,''),shipment_ref) m FROM planner.shipments WHERE shipment_ref=$1`, [ref])).rows[0]?.m || ref;
+        const dateBits = changed.map(k => DL[k] + ' → ' + (req.body[FK[k]] ? ddMonYy(String(req.body[FK[k]]).slice(0, 10)) : '(cleared)')).join(', ');
+        const by = authUser(req);
+        for (const r of rows) {
+          const oldC = _preCheckin[r.po] || '', newC = r.checkin ? String(r.checkin).slice(0, 10) : '';
+          if (oldC !== newC) {
+            const delta = dateDeltaLabel(oldC, newC);
+            logPoChange(r.po, 'Shipment date', 'Shipment ' + shipMaster + ' ' + dateBits + '. Completion recalculated to ' + (newC ? ddMonYy(newC) : '(none)') + (delta ? ' ' + delta : ''), by);
+          }
+        }
+      }
+    } catch (e) { /* cascade log best-effort */ }
     res.json({ ok: true, rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -8406,7 +8441,8 @@ async function logPoFieldChanges(po, keys, oldRow, body, by) {
     else if (ov === nv) continue;
     // Display formatting: dates → dd-mmm-yy (Ben: always); money fields → 2dp + supplier currency.
     let fov = ov, fnv = nv;
-    if (isDate) { fov = ov ? ddMonYy(ov) : ''; fnv = nv ? ddMonYy(nv) : ''; }
+    if (isDate) { fov = ov ? ddMonYy(ov) : ''; fnv = nv ? ddMonYy(nv) : '';
+      const dl = dateDeltaLabel(ov, nv); if (dl) fnv = fnv + ' ' + dl; }   // append (DELAY of N days) / (BROUGHT FORWARD N days)
     else if (MONEY_FIELDS.has(k)) { const c = await supCcy(); if (numish(ov)) fov = money2(ov, c); if (numish(nv)) fnv = money2(nv, c); }
     const f = (v) => v === '' ? '(blank)' : v;
     await logPoChange(po, PO_TRACK[k] || k, f(fov) + ' → ' + f(fnv), by);
