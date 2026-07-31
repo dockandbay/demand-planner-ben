@@ -2015,6 +2015,11 @@ app.get('/api/supply/:section', async (req, res) => {
       case 'shipment-notes':   // ?ref=… → timeline notes for a master shipment
         return res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read
           FROM planner.shipment_notes WHERE shipment_ref=$1 ORDER BY created_at`, [req.query.ref || ''])).rows);
+      case 'shipment-changes': {   // ?ref=… → record-of-change entries for a shipment (admin timeline only; migration 165)
+        const chg = await pool.query(`SELECT id, coalesce(event,'') event, coalesce(detail,'') detail, coalesce(changed_by,'') changed_by,
+          to_char(changed_at,'YYYY-MM-DD HH24:MI') created_at FROM planner.shipment_change_log WHERE shipment_ref=$1 ORDER BY changed_at DESC LIMIT 200`, [req.query.ref || '']).catch(() => ({ rows: [] }));
+        return res.json(chg.rows);
+      }
       case 'flexport':
         return res.json(await q(`SELECT flex_id, shipment_name, mode, status_description status, incoterm,
           CASE WHEN arrival_date < current_date THEN 'Completed' ELSE 'Active' END status_group,
@@ -6595,6 +6600,31 @@ const SHIP_FIELDS = {
   export_port: 'text',   // override; blank = inherit the master PO supplier's export_port
   delivery_notes: 'text',   // shipment-level branch delivery notes override (inherits from the master PO)
 };
+// Shipment record-of-change: which fields are worth logging on the shipment timeline (mirrors PO_TRACK).
+const SHIP_TRACK = { master_po: 'Master PO', carrier: 'Carrier', carrier_ref: 'Carrier ref', status: 'Status', mode: 'Mode',
+  cost_manual: 'Freight cost', departure_date: 'Ship / departure date', landing_date: 'Landing date',
+  delivery_date: 'Delivery date', arrival_date: 'Arrival date', tracked_delivery_date: 'Tracked delivery date',
+  branch: 'Destination branch', export_port: 'Export port' };
+async function logShipChange(ref, event, detail, by) {
+  try { await pool.query(`INSERT INTO planner.shipment_change_log (shipment_ref, event, detail, changed_by) VALUES ($1,$2,$3,$4)`, [ref, event, detail || null, by || null]); }
+  catch (e) { /* table absent pre-migration 165 — non-fatal */ }
+}
+async function logShipFieldChanges(ref, oldRow, body, by) {
+  const numish = (s) => s !== '' && s != null && !isNaN(Number(s));
+  for (const k of Object.keys(SHIP_TRACK)) {
+    if (body[k] === undefined) continue;
+    let nv = (body[k] === '' || body[k] == null) ? '' : String(body[k]).trim();
+    let ov = (oldRow[k] == null) ? '' : String(oldRow[k]).trim();
+    const isDate = /_date$/.test(k);
+    if (isDate) { ov = ov.slice(0, 10); nv = nv.slice(0, 10); }
+    if (numish(ov) && numish(nv)) { if (Number(ov) === Number(nv)) continue; } else if (ov === nv) continue;
+    let fov = ov, fnv = nv;
+    if (isDate) { fov = ov ? ddMonYy(ov) : ''; fnv = nv ? ddMonYy(nv) : ''; const dl = dateDeltaLabel(ov, nv); if (dl) fnv = fnv + ' ' + dl; }
+    else if (k === 'cost_manual') { const m = (v) => Number(v).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); if (numish(ov)) fov = m(ov); if (numish(nv)) fnv = m(nv); }
+    const f = (v) => v === '' ? '(blank)' : v;
+    await logShipChange(ref, SHIP_TRACK[k], f(fov) + ' → ' + f(fnv), by);
+  }
+}
 app.post('/api/supply/shipment/:ref', async (req, res) => {
   const ref = req.params.ref;
   const cols = ['shipment_ref'], vals = [ref], ph = ['$1::text']; let i = 2;
@@ -6605,9 +6635,10 @@ app.post('/api/supply/shipment/:ref', async (req, res) => {
   const upd = cols.slice(1).map(c => `${c}=excluded.${c}`).join(',') || 'updated_at=now()';
   // Snapshot (pre-change) the shipment's dates + each aboard PO's effective completion (checkin), so we can log the
   // cascade on every PO whose inherited date shifts (record of change extends to shipment-driven date recalcs).
-  let _oldShip = null, _preCheckin = {};
+  let _oldShip = null, _preCheckin = {}, _oldShipFull = null;
   try {
     _oldShip = (await pool.query(`SELECT departure_date::text dep, landing_date::text land, delivery_date::text del, arrival_date::text arr, tracked_delivery_date::text trk FROM planner.shipments WHERE shipment_ref=$1`, [ref])).rows[0] || null;
+    _oldShipFull = (await pool.query(`SELECT master_po, carrier, carrier_ref, status, mode, cost_manual::text, departure_date::text, landing_date::text, delivery_date::text, arrival_date::text, tracked_delivery_date::text, branch, export_port FROM planner.shipments WHERE shipment_ref=$1`, [ref])).rows[0] || null;
     const _pa = (await pool.query(`SELECT po FROM planner.purchase_orders WHERE shipment_ref=$1 UNION SELECT master_po FROM planner.shipments WHERE shipment_ref=$1 AND coalesce(master_po,'')<>''`, [ref])).rows.map(x => x.po);
     if (_pa.length) (await pool.query(PO_ROWS_SQL + ' WHERE calc4.po = ANY($1)', [_pa])).rows.forEach(r => { _preCheckin[r.po] = r.checkin ? String(r.checkin).slice(0, 10) : ''; });
   } catch (e) { /* snapshot best-effort */ }
@@ -6644,6 +6675,8 @@ app.post('/api/supply/shipment/:ref', async (req, res) => {
         }
       }
     } catch (e) { /* cascade log best-effort */ }
+    // Record of change on the SHIPMENT's own timeline (field edits: carrier / status / mode / freight / dates).
+    try { if (_oldShipFull) await logShipFieldChanges(ref, _oldShipFull, req.body, authUser(req)); } catch (e) { /* best-effort */ }
     res.json({ ok: true, rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

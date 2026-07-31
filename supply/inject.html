@@ -4982,21 +4982,26 @@
   // On the admin side (authorKind 'internal') supplier notes carry a read/unread toggle + 'new' badge, like the PO timeline.
   function loadShipTimeline(ref, authorKind, getBase, postEp){ var box=document.querySelector('.sp-timeline[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(!box)return;
     var admin=(authorKind||'internal')==='internal';
-    fetch(getBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){
+    function renderShipChange(c){ return '<div class="tl-change tiny" style="margin:2px 0;max-width:640px;padding:3px 8px;background:#f8fafc;border:1px solid #e5e7eb;border-left:3px solid #94a3b8;border-radius:5px'+(ROC_HIDDEN?';display:none':'')+'"><span class="mut">🕓 '+esc(c.created_at)+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span> <span class="ex-badge" style="background:#e2e8f0;color:#475569">record of change</span> — <b>'+esc(c.event)+'</b>'+(c.detail?': '+esc(c.detail):'')+'</div>'; }
+    Promise.all([fetch(getBase+encodeURIComponent(ref)).then(function(r){return r.json();}), admin?fetch('/api/supply/shipment-changes?ref='+encodeURIComponent(ref)).then(function(r){return r.json();}).catch(function(){return [];}):Promise.resolve([])]).then(function(_tl){ var notes=_tl[0], _changes=_tl[1]||[];
       shortNotes(notes);
       var unread=0;
       var _ownN=(notes||[]).filter(function(n){return n.author_kind!=='supplier';});   // escalate only on YOUR OWN latest note
       var recentOwnId=_ownN.length?_ownN.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0].id:null;
-      var list=(notes&&notes.length)?tlDesc(notes).map(function(n){ var sup=(n.author_kind==='supplier'); var nu=sup&&!n.read; if(nu)unread++;
+      var _items=(notes&&notes.length)?tlDesc(notes).map(function(n){ var sup=(n.author_kind==='supplier'); var nu=sup&&!n.read; if(nu)unread++;
         var ctrl=(admin&&sup)?(n.read?'<a class="sp-note-read" data-id="'+n.id+'" data-read="1" style="flex:0 0 auto;font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline;white-space:nowrap">mark unread</a>':'<button class="save-btn light sp-note-read" data-id="'+n.id+'" data-read="0" style="flex:0 0 auto">Mark read</button>')
           :((admin&&n.id===recentOwnId)?'<button class="save-btn light sp-esc" data-ref="'+esc(ref)+'" data-msg="'+esc(n.body)+'" title="Escalate this message to the supplier by email" style="flex:0 0 auto;color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'');
-        return '<div class="tiny" style="margin:2px 0;max-width:640px;display:flex;gap:10px;align-items:flex-start'+(nu?';background:#fff7ed;border:1px solid #fdba74;border-radius:5px;padding:3px 6px':'')+'">'
+        return {ts:String(n.created_at||'')+'~'+String(n.id||''), h:'<div class="tiny" style="margin:2px 0;max-width:640px;display:flex;gap:10px;align-items:flex-start'+(nu?';background:#fff7ed;border:1px solid #fdba74;border-radius:5px;padding:3px 6px':'')+'">'
           +(ctrl?'<div style="flex:0 0 auto;min-width:70px">'+ctrl+'</div>':'')
           +'<div style="flex:1">'+'<span class="mut">'+esc(n.created_at)+' · '+(sup?'Supplier':(n.author_email&&n.author_email!=='Dock & Bay'?esc(shortUser(n.author_email)):'D&amp;B'))+'</span>'+(nu?' <span class="ex-badge">new</span>':'')+' — '+esc(n.body)+'</div>'
-          +'</div>'; }).join(''):'<div class="mut tiny">No timeline entries yet.</div>';
+          +'</div>'}; }):[];
+      (_changes||[]).forEach(function(c){ _items.push({ts:String(c.created_at||'')+'~0', h:renderShipChange(c)}); });
+      _items.sort(function(a,b){ return b.ts.localeCompare(a.ts); });
+      var list=_items.length?_items.map(function(x){return x.h;}).join(''):'<div class="mut tiny">No timeline entries yet.</div>';
       var compose='<div style="font-weight:600;font-size:12px;margin-bottom:4px">Add timeline note</div>'
         +'<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:10px"><textarea class="fci sp-note-in" rows="3" placeholder="Add a note to the timeline… (multiple lines OK)" style="flex:1;max-width:560px;min-height:58px;text-align:left;resize:vertical;line-height:1.4"></textarea><button class="save-btn sp-note-post" style="flex:0 0 auto">Post</button></div>';
-      box.innerHTML=compose+'<div class="tiny" style="font-weight:600;margin-bottom:3px">Timeline</div>'+list;
+      box.innerHTML=compose+'<div class="tiny" style="font-weight:600;margin-bottom:3px;display:flex;align-items:center;gap:8px">Timeline'+(admin?' <label style="font-weight:400;cursor:pointer;white-space:nowrap"><input type="checkbox" class="sp-hide-chg"'+(ROC_HIDDEN?' checked':'')+' style="vertical-align:middle;margin-right:3px">hide record of change</label>':'')+'</div>'+list;
+      var _hc=box.querySelector('.sp-hide-chg'); if(_hc)_hc.onchange=function(){ ROC_HIDDEN=_hc.checked; try{localStorage.setItem('hzHideRoc',ROC_HIDDEN?'1':'0');}catch(e){} box.querySelectorAll('.tl-change').forEach(function(el){ el.style.display=ROC_HIDDEN?'none':''; }); };
       if(admin)shSetUnread(ref,unread);
       box.querySelector('.sp-note-post').onclick=function(){ var inp=box.querySelector('.sp-note-in'); var v=(inp.value||'').trim(); if(!v)return;
         shipPost(postEp,{shipment_ref:ref,author_kind:authorKind||'internal',body:v,author_email:(ME&&ME.email)||undefined},function(){ loadShipTimeline(ref,authorKind,getBase,postEp); }); };
