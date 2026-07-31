@@ -3377,7 +3377,7 @@
       else { var qdiff=(aq!=null&&oq!=null&&aq!==oq); qtyCell=units(oq)+(qdiff?' <span style="background:#fef3c7;color:#92400e;font-weight:700;padding:0 4px;border-radius:3px" title="supplier amended the quantity">→ '+units(aq)+' ⚠</span>':''); }
       var confCell = lcr.unconfirmed ? '<button class="save-btn op-accept" data-po="'+esc(po)+'" data-sku="'+esc(sku)+'" title="confirm this supplier change">Accept</button> <button class="save-btn light op-reject" data-po="'+esc(po)+'" data-sku="'+esc(sku)+'" title="reject this supplier change — discards it; order plan unchanged">✕ Reject</button>'
         : (hasSub&&lcr.confirmed ? '<span class="tool-badge bg-green" title="confirmed">✓</span>' : '<span class="mut tiny">—</span>');
-      return '<tr'+(lcr.unconfirmed?' style="background:#fff7ed"':'')+'><td class="l">'+esc(sku)+'</td>'
+      return '<tr'+(lcr.unconfirmed?' style="background:#fff7ed"':'')+'><td class="l"><button class="lnk-btn op-del-line" data-po="'+esc(po)+'" data-sku="'+esc(sku)+'" data-qty="'+(oq||0)+'" data-added="'+(added?1:0)+'" title="Delete this line from the order plan" style="color:#b91c1c;font-weight:700;margin-right:6px">✕</button>'+esc(sku)+'</td>'
         +'<td class="l" style="white-space:nowrap">'+(riskBadges(lineObj)||'<span class="mut">—</span>')+'</td>'
         +'<td style="text-align:right">'+qtyCell+'</td>'
         +'<td style="text-align:right">'+(est!=null?'$'+money(est):'<span class="mut">—</span>')+'</td>'
@@ -3806,6 +3806,13 @@
       fetch('/api/supply/po-line-reject',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:b.dataset.po,all:true})}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); })
         .catch(function(e){ b.disabled=false; alert('Could not reject: '+(e.message||e)); }); }; });
+    document.querySelectorAll('#podet-'+i+' .op-del-line').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete '+b.dataset.sku+' from this order plan?'))return; b.disabled=true;
+      var added=b.dataset.added==='1';
+      var url=added?'/api/supply/portal-line-remove':'/api/supply/po-line/'+encodeURIComponent(b.dataset.po+'|'+b.dataset.sku);
+      var body=added?{po:b.dataset.po,sku:b.dataset.sku}:{po:b.dataset.po,sku:b.dataset.sku,qty:0,_prevqty:b.dataset.qty,who:'order plan delete'};
+      fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
+        .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); })
+        .catch(function(e){ b.disabled=false; alert('Could not delete: '+(e.message||e)); }); }; });
     document.querySelectorAll('#podet-'+i+' .op-goto').forEach(function(b){ b.onclick=function(){ gotoOrderPlan(b.dataset.po); }; });
     // ORDER PLAN edit mode: toggle, add-SKU row, copy, save (writes qty / new lines as proposed → auto ERP-pending)
     // in edit mode, prefetch the supplier-scoped SKU list (cached in OP_SKUS) and wire the add-SKU search picker

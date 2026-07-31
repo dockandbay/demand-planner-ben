@@ -5241,6 +5241,9 @@ app.post('/api/supply/po-line/:po_sku', async (req, res) => {
   const sku = b.sku || key.slice(key.indexOf('|') + 1);
   try {
     const qn = parseInt(b.qty, 10);
+    // Snapshot the prior qty so we can log the exact change (SKU + old → new) on the PO timeline (record of change).
+    const _prevQ = (() => { const p = req.body._prevqty; return (p === undefined || p === null || p === '') ? null : (parseInt(p, 10) || 0); })();
+    const _oldQ = _prevQ != null ? _prevQ : (Number((await pool.query(`SELECT qty FROM planner.purchase_order_lines WHERE po_sku=$1`, [key])).rows[0]?.qty) || 0);
     let r;
     if (!qn) {   // qty 0 (or blank/NaN) → REMOVE the SKU from the order plan entirely (don't keep a 0-qty line)
       r = await pool.query(`DELETE FROM planner.purchase_order_lines WHERE po_sku=$1`, [key]);
@@ -5266,6 +5269,14 @@ app.post('/api/supply/po-line/:po_sku', async (req, res) => {
         }
       }
     } catch (e) { /* confirmation reset / note is best-effort — never block the plan edit */ }
+    // Record of change: log the order-plan line edit (added / removed / qty old→new) on the PO timeline.
+    const _newQ = qn || 0;
+    if (_oldQ !== _newQ) {
+      const detail = _oldQ === 0 ? (sku + ' added — qty ' + _newQ.toLocaleString('en-GB'))
+        : _newQ === 0 ? (sku + ' removed (was ' + _oldQ.toLocaleString('en-GB') + ')')
+        : (sku + ' qty ' + _oldQ.toLocaleString('en-GB') + ' → ' + _newQ.toLocaleString('en-GB'));
+      logPoChange(po, 'Order plan', detail, authUser(req) || b.who || null);
+    }
     res.json({ updated: r.rowCount });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -8369,6 +8380,7 @@ const PO_COSMETIC_FIELDS = new Set(['client', 'dispatch_order_ref', 'final_deliv
 // PO audit log (migration 158): fields whose edits are recorded on the timeline as a "record of change".
 const PO_TRACK = { status: 'Status', end_production_overide: 'Production end date', shipment_ref: 'Shipment assignment',
   deposit_ref: 'Deposit assignment',
+  supplier_invoice_total: 'Final invoice amount', balance_due_date_overide: 'Final invoice due date',
   pay_start_deposit_assigned: 'Start deposit paid', pay_start_deposit_date: 'Start deposit date',
   pay_completion_assigned: 'Completion paid', pay_completion_date: 'Completion date',
   pay_balance_1_amount: 'Balance 1 paid', pay_balance_1_date: 'Balance 1 date',

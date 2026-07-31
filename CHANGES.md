@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.351 - PO record-of-change: invoice + order-plan edits; order-plan line delete
+- Final invoice amount (`supplier_invoice_total`) and final invoice due date (`balance_due_date_overide`) now post a timeline record-of-change entry when edited (added to the tracked-field map). `server.mjs`.
+- Order-plan edits now log a record of change naming the SKU + the qty movement (added / removed / `qty old → new`). `server.mjs`.
+- Order plan: each line now has a red ✕ to delete it (confirm first) — removes the line (supplier-added lines via portal-line-remove; real lines set to qty 0, which also logs the removal). `supply/inject.html`.
+
 ## v26.350 - CONFIG nav: Admin group + Products under Supply chain
 - New **Admin** top-level config tab (admin-only) that expands to **Permissions** + **Email log** as level-3 tabs (were standalone top-level tabs). **Products** moved under **Supply chain** (level-3, alongside Suppliers/Branches/etc.). `supply/inject.html`.
 
