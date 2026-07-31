@@ -2157,11 +2157,15 @@
     // a filter <select> with a non-default value is highlighted black/white so active filters stand out
     var SEL_ON=';background:#0f172a;color:#fff;border-color:#0f172a;font-weight:700';
     var _excOn=Object.keys(state.act||{}).some(function(k){return state.act[k];});
+    var _poSkuSet=null;   // SUG-0012: set of PO refs matching the SKU filter (null = no SKU filter active)
     c.innerHTML=annot('purchase-orders')+poSubNav()
       +'<div class="bar" id="po-prog">'+FILTERS.map(function(f){return '<span class="pill'+(state.f&&state.f[f[0]]?' active':'')+'" data-f="'+f[0]+'">'+f[1]+'</span>';}).join('')
       +'<span class="pill po-recent'+(state.recent?' active':'')+'" data-recent title="when on, Completed shows only POs completed in the last 12 months (faster)">📅 Last 12m</span>'
       +'<span class="pill po-focus'+(state.focus?' active':'')+'" data-focus title="show only starred POs (active only — completed are hidden)">★ Focus</span>'
       +'<input class="flt" id="sup-search" placeholder="Filter PO / supplier…" value="'+esc(state.q||'')+'" style="background:#eff6ff;border-color:#93c5fd"><span class="count" id="sup-count"></span>'
+      +'<span id="po-sku-wrap" style="position:relative;display:inline-flex;align-items:center;gap:3px;margin-left:6px"><input class="flt" id="po-sku-search" placeholder="Filter by SKU(s)…" value="'+esc(state.sku||'')+'" title="show only POs whose order plan contains any of these SKUs — comma-separate for an OR search" style="width:160px;background:#f0fdf4;border-color:#86efac">'
+      +'<button class="save-btn" id="po-sku-exp" title="expand — paste many SKUs" style="padding:2px 7px;background:#f0fdf4;border:1px solid #86efac;color:#166534">⤢</button>'
+      +'<div id="po-sku-pop" style="display:none;position:absolute;top:100%;left:0;z-index:70;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 10px 26px rgba(0,0,0,.16);padding:10px;width:340px"><div class="tiny mut" style="margin-bottom:4px">SKUs — comma / space / newline separated (OR search, partial match)</div><textarea id="po-sku-ta" rows="6" style="width:100%;box-sizing:border-box;font-size:12px;text-align:left" placeholder="TOWLB-…, PONCHK-…"></textarea><div style="margin-top:6px;display:flex;justify-content:flex-end;gap:6px"><button class="save-btn light" id="po-sku-clear2">Clear</button><button class="save-btn" id="po-sku-apply" style="background:#dcfce7;color:#166534;border-color:#16a34a">Apply</button></div></div></span>'
       +'<button class="save-btn po-filt-toggle" id="po-filt-toggle">⚙ Filters</button>'
       +'<button class="save-btn" id="po-impexp-toggle" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd">⇅ Import/Export</button></div>'
       +(function(){ var lb='background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;';   // light-blue PO action buttons
@@ -2212,9 +2216,10 @@
       if(state.batch && String(r.batch_id)!==state.batch)return false;
       return true; }); }
     // a text search overrides the status/action/country filters — search across ALL POs
-    function view(){ try{hzFilterSave('po',Object.assign({},state,{q:''}));}catch(e){}   // persist filters (not the search)
+    function view(){ try{hzFilterSave('po',Object.assign({},state,{q:'',sku:''}));}catch(e){}   // persist filters (not the search / SKU box)
       var q=effQ(state.q); var f=q ? filt(rows,q) : cur(); var fuzzy=false;
       if(q && !f.length){ var ff=fuzzyFilt(rows,state.q); if(ff.length){ f=ff; fuzzy=true; } }   // nothing on the exact search → fuzzy fallback on the best token
+      if(state.sku && String(state.sku).trim()){ f=f.filter(function(r){ return _poSkuSet && _poSkuSet.has(r.po); }); }   // SUG-0012: intersect with the SKU filter (POs whose order plan has any of the SKUs)
       _poShowClient=!!(state.ctry&&state.ctry['OTHER']);   // OTHER pill (incl. Direct-to-Client) → reveal Client name + sales ref columns
       var shown=(_poShowAll||f.length<=PO_CAP)?f:f.slice(0,PO_CAP);
       document.getElementById('sup-count').textContent=(shown.length<f.length?shown.length+' of ':'')+f.length+' / '+rows.length+' POs'+(q?(fuzzy?' (fuzzy match)':' (search — all statuses)'):'');
@@ -2340,6 +2345,17 @@
     var pprod=document.getElementById('po-prod'); if(pprod)pprod.onchange=function(){state.prod=this.value;selHi(this,!!this.value);view();};
     var pbatch=document.getElementById('po-batch'); if(pbatch)pbatch.onchange=function(){state.batch=this.value;selHi(this,!!this.value);view();};
     document.getElementById('sup-search').oninput=debounce(function(){state.q=this.value;_poShowAll=false;view();},350);
+    // SUG-0012 — SKU filter box (+ expand popover). Fetches the matching PO set, then view() intersects it.
+    function runSku(){ var v=String(state.sku||'').trim();
+      if(!v){ _poSkuSet=null; view(); return; }
+      var toks=v.split(/[\s,]+/).filter(Boolean);
+      fetch('/api/supply/pos-by-sku?q='+encodeURIComponent(toks.join(','))).then(function(r){return r.json();}).then(function(j){ _poSkuSet=new Set((j&&j.pos)||[]); view(); }).catch(function(){ _poSkuSet=new Set(); view(); }); }
+    var _skuIn=document.getElementById('po-sku-search'); if(_skuIn)_skuIn.oninput=debounce(function(){ state.sku=this.value; runSku(); },350);
+    var _skuPop=document.getElementById('po-sku-pop'), _skuTa=document.getElementById('po-sku-ta'), _skuExp=document.getElementById('po-sku-exp');
+    if(_skuExp)_skuExp.onclick=function(){ if(!_skuPop)return; if(_skuPop.style.display!=='none'){ _skuPop.style.display='none'; return; } if(_skuTa)_skuTa.value=state.sku||''; _skuPop.style.display=''; if(_skuTa)_skuTa.focus(); };
+    var _skuApply=document.getElementById('po-sku-apply'); if(_skuApply)_skuApply.onclick=function(){ state.sku=String((_skuTa&&_skuTa.value)||'').trim(); if(_skuIn)_skuIn.value=state.sku; if(_skuPop)_skuPop.style.display='none'; runSku(); };
+    var _skuClr2=document.getElementById('po-sku-clear2'); if(_skuClr2)_skuClr2.onclick=function(){ if(_skuTa)_skuTa.value=''; state.sku=''; if(_skuIn)_skuIn.value=''; if(_skuPop)_skuPop.style.display='none'; runSku(); };
+    if(String(state.sku||'').trim())runSku();   // re-hydrate the match set after a full re-render
     var _ft=document.getElementById('po-filt-toggle'); if(_ft)_ft.onclick=function(){ var sc=document.getElementById('supply-content'); var on=sc.classList.toggle('filters-open'); this.textContent=on?'⚙ Filters ▴':'⚙ Filters'; };
     var _ie=document.getElementById('po-impexp-toggle'); if(_ie)_ie.onclick=function(){ var pb=document.getElementById('po-impexp-bar'); if(!pb)return; var on=(pb.style.display==='none'||!pb.style.display); pb.style.display=on?'flex':'none'; this.textContent=on?'⇅ Import/Export ▴':'⇅ Import/Export'; };
     document.getElementById('po-csv').onclick=function(){var q=effQ(state.q);csv(q?filt(rows,q):cur(),'purchase_orders.csv',PO_CSV_LABELS);};

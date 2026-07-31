@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.305 - PO grid: SKU filter (SUG-0012)
+- PURCHASE ORDERS grid: new **SKU filter** box next to the PO/supplier search. Filters the grid to POs whose **order plan** contains any of the entered SKUs; **comma / space / newline separated = OR search** (partial match via ILIKE), with a **⤢ expand** popover (textarea) for pasting many SKUs at once. Intersects with all other filters (status / supplier / prod / batch / search). New endpoint `GET /api/supply/pos-by-sku`. Not persisted (behaves like the search box). `server.mjs`, `supply/inject.html`.
+
 ## v26.304 - Other Payments: "Likely pay" date → Cash Flow (SUG-0013)
 - PAYMENTS ▸ **Other Payments** now has an editable **Likely pay** date column (between Due date and Date paid). It feeds the **Cash Flow** report exactly like a PO milestone's likely-pay date — set it on an unpaid sundry payment to move it into the month you expect to pay it. Backed by the existing `deposits.date_likely_pay` (already read by cash flow); no migration. `supply/inject.html`.
 

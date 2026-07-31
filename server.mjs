@@ -1141,6 +1141,17 @@ app.get('/api/supply/label-data', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// SUG-0012 — PO-grid SKU filter: return the PO refs whose order-plan lines contain ANY of the given SKUs
+// (comma/space separated → OR search, partial-match via ILIKE). The grid intersects this with its other filters.
+app.get('/api/supply/pos-by-sku', async (req, res) => {
+  const toks = String(req.query.q || '').split(/[\s,]+/).map(s => s.trim()).filter(Boolean).slice(0, 200);
+  if (!toks.length) return res.json({ pos: [] });
+  try {
+    const conds = toks.map((_, i) => `l.sku ILIKE '%'||$${i + 1}||'%'`).join(' OR ');
+    const pos = (await pool.query(`SELECT DISTINCT l.po FROM planner.purchase_order_lines l WHERE ${conds}`, toks)).rows.map(r => r.po);
+    res.json({ pos });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // Supplier-submitted actual cost prices (portal order plan). Read all (small table); filtered client-side by PO.
 app.get('/api/supply/portal-line-costs', async (req, res) => {
   try { res.json((await pool.query(`SELECT po, sku, actual_cost, amended_qty, coalesce(is_added,false) is_added, final_cost,
