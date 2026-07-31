@@ -287,8 +287,12 @@ tr.sku-inline:not(.subtot-row) td{border-bottom-color:#cfcfcf !important}
 .bgt26r{background:#e7e5e0 !important;color:#44403c !important}
 .bgt27u{background:#e7e5e0 !important;color:#44403c !important;font-weight:700}
 .bgt28u{background:#e7e5e0 !important;color:#44403c !important;font-weight:700}
-.fy-toggle{width:100%;border:none;background:transparent;cursor:pointer;font-family:inherit;font-size:8px;font-weight:700;line-height:1.15;color:inherit;padding:1px 1px;text-align:center;letter-spacing:-.02em}
-.fy-toggle:hover{text-decoration:underline}
+.fy-toggle{width:100%;border:none;background:transparent;cursor:pointer;font-family:inherit;font-size:8px;font-weight:700;line-height:1.3;color:inherit;padding:2px 1px;text-align:center;letter-spacing:-.02em}
+/* The show/hide action gets a coloured badge so it reads as a control, not label text. */
+.fy-toggle .fyt-act{display:inline-block;padding:1px 6px;border-radius:8px;margin-bottom:1px;white-space:nowrap}
+.fy-toggle.fyt-show .fyt-act{background:#dbeafe;color:#1e40af;border:1px solid #93c5fd}
+.fy-toggle.fyt-hide .fyt-act{background:#f1f5f9;color:#475569;border:1px solid #cbd5e1}
+.fy-toggle:hover .fyt-act{filter:brightness(.96)}
 .bgtH1u{background:#e2e8f0 !important;color:#334155 !important;font-weight:700}
 .bgtH2u{background:#e7e5e0 !important;color:#44403c !important;font-weight:700}
 .bgt27r{background:#e7e5e0 !important;color:#44403c !important}
@@ -3530,7 +3534,7 @@ function buildHdr(){
       // FY total column header = show/hide pill (replaces the plain FY label)
       var th=document.createElement('th');th.className='sep2 '+fyTotBg(tc.startY);
       var coll=FY_COLLAPSED.has(tc.startY);
-      th.innerHTML='<button class="fy-toggle" data-fy="'+tc.startY+'" title="'+(coll?'Show':'Hide')+' '+tc.label+' months">'+(coll?'▸ show':'▾ hide')+'<br>'+tc.label+'</button>';
+      th.innerHTML='<button class="fy-toggle'+(coll?' fyt-show':' fyt-hide')+'" data-fy="'+tc.startY+'" title="'+(coll?'Show':'Hide')+' '+tc.label+' months"><span class="fyt-act">'+(coll?'▸ show':'▾ hide')+'</span><br>'+tc.label+'</button>';
       r2.appendChild(th);
     }
   });
