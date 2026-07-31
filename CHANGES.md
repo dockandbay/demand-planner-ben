@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.338 - Fulfil: per-branch warehouse mapping (branches.fulfil_id)
+- New `planner.branches.fulfil_id` (migration **163**) — the Fulfil stock.location id per branch. Branch names don't match Fulfil warehouse codes 1:1 (country-prefixed, 19 branches → 4 warehouses), so the PO push now resolves the receiving warehouse from this explicit id, then code-match, then flags "no warehouse" (removed the silent ILG default — no more wrong-warehouse writes). Pre-flight report shows `warehouse_source`. `server.mjs`.
+- CONFIG ▸ Branches editor: new "Fulfil ERP ID" field + hint (enter the stock.location id from the URL, not the code; blank for non-Fulfil branches). Mapped branches show a "Fulfil NN" tag on their card. `supply/inject.html`.
+- **Sandbox seeded** (applied directly, per Ben): UK ILG & EU ILG→16, EU iFulfillment→20, US Geneva→24, AU Coghlans→28; the 14 non-Fulfil branches left blank.
+- **Action for Diviyaj:** run migration 163 (schema only — the `fulfil_id` VALUES are env-specific and set per environment in CONFIG ▸ Branches, NOT seeded in the migration). Live branch ids must be entered on live once the live Fulfil catalog is up.
+
 ## v26.337 - Demand grid: subcategory names (col 1) wrap instead of truncating
 - Column 1 subcategory names now wrap onto multiple lines instead of cutting off with an ellipsis (e.g. "Poncho - Adults SEASONAL" no longer clips to "…SEA"). Changed `.nm` to `white-space:normal` + `align-items:flex-start`, and the inner name span to `overflow-wrap:anywhere` (dropped the `text-overflow:ellipsis`). `artifact_v16.7.html`.
 

@@ -1249,7 +1249,9 @@ async function fulfilPushLines(po, completion) {
   const lines = (await pool.query(`SELECT l.sku, l.qty,
       coalesce((SELECT c.final_cost FROM planner.portal_line_costs c WHERE c.po=l.po AND c.sku=l.sku AND c.final_cost IS NOT NULL AND c.confirmed_at IS NOT NULL), l.cost_price) price
     FROM planner.purchase_order_lines l WHERE l.po=$1 AND coalesce(l.qty,0)>0 ORDER BY l.sku`, [po])).rows;
-  const poRow = (await pool.query(`SELECT coalesce(supplier_name,'') supplier, coalesce(branch,'') warehouse FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0] || {};
+  const poRow = (await pool.query(`SELECT coalesce(po.supplier_name,'') supplier, coalesce(po.branch,'') warehouse,
+      nullif(trim(coalesce(b.fulfil_id,'')),'') branch_fulfil_id
+    FROM planner.purchase_orders po LEFT JOIN planner.branches b ON b.name=po.branch WHERE po.po=$1`, [po])).rows[0] || {};
   const supName = poRow.supplier || '';
   const supRow = (await pool.query(`SELECT coalesce(default_currency,'USD') c, nullif(trim(coalesce(fulfil_id,'')),'') fulfil_id FROM planner.suppliers WHERE name=$1`, [supName])).rows[0] || {};
   const curCode = supRow.c || 'USD';
@@ -1262,20 +1264,23 @@ async function fulfilPushLines(po, completion) {
   const storedPartyId = /^\d+$/.test(String(supRow.fulfil_id || '')) ? parseInt(supRow.fulfil_id, 10) : null;
   const partyId = storedPartyId || (await fulfilResolveParty(supName));
   const currencyId = await fulfilResolveCurrency(curCode);
-  // Map the planner warehouse to a Fulfil warehouse code; fall back to the default (ILG).
-  const whCode = (String(poRow.warehouse || '').toUpperCase().replace(/[^A-Z0-9]/g, '') || FULFIL_MAP.defaultWarehouseCode);
-  const warehouseId = (await fulfilResolveWarehouse(whCode)) || (await fulfilResolveWarehouse(FULFIL_MAP.defaultWarehouseCode));
+  // Warehouse: prefer the Fulfil stock.location id stored on the branch (planner.branches.fulfil_id) — the authoritative
+  // link (branch names don't match Fulfil codes 1:1). Else try to match by code. No silent default: an unresolved
+  // branch is flagged in the pre-flight so it never writes to the wrong warehouse.
+  const storedWhId = /^\d+$/.test(String(poRow.branch_fulfil_id || '')) ? parseInt(poRow.branch_fulfil_id, 10) : null;
+  const whCode = String(poRow.warehouse || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const warehouseId = storedWhId || (whCode ? await fulfilResolveWarehouse(whCode) : null);
   const prodMap = await fulfilResolveProducts(lines.map(l => l.sku));
   const missingSkus = lines.map(l => l.sku).filter(s => !(String(s) in prodMap));
 
   // Pre-flight resolution report — surfaces exactly what's missing before any write.
   const resolution = { supplier: supName, party_id: partyId, party_source: storedPartyId ? 'suppliers.fulfil_id' : 'name-lookup', currency: curCode, currency_id: currencyId,
-    warehouse_code: whCode, warehouse_id: warehouseId, products_found: Object.keys(prodMap).length,
-    products_total: lines.length, missing_skus: missingSkus };
+    branch: poRow.warehouse || '', warehouse_id: warehouseId, warehouse_source: storedWhId ? 'branches.fulfil_id' : (warehouseId ? 'code-match' : 'unresolved'),
+    products_found: Object.keys(prodMap).length, products_total: lines.length, missing_skus: missingSkus };
   const problems = [];
   if (!fulfilId && !partyId) problems.push('supplier "' + supName + '" is not a party in Fulfil (create it / import suppliers first)');
   if (!currencyId) problems.push('currency ' + curCode + ' not found in Fulfil');
-  if (!warehouseId) problems.push('no matching warehouse (tried ' + whCode + ' and ' + FULFIL_MAP.defaultWarehouseCode + ')');
+  if (!warehouseId) problems.push('branch "' + (poRow.warehouse || '') + '" has no Fulfil warehouse — set its Fulfil ERP ID in CONFIG ▸ Branches');
   if (missingSkus.length) problems.push(missingSkus.length + ' SKU(s) not in Fulfil catalog: ' + missingSkus.slice(0, 8).join(', ') + (missingSkus.length > 8 ? '…' : ''));
 
   const lineDicts = lines.map(l => ({
@@ -2840,7 +2845,7 @@ app.get('/api/supply/:section', async (req, res) => {
           q(`SELECT id, coalesce(category,'') category, coalesce(country,'') country, duty_pct, coalesce(notes,'') notes
              FROM planner.duty_rates ORDER BY category, country`),
           q(`SELECT name, coalesce(country_code,'') country_code, sea_lead_time_days, air_lead_time_days,
-             coalesce(shipping_notes,'') shipping_notes, coalesce(delivery_notes,'') delivery_notes FROM planner.branches ORDER BY name`),
+             coalesce(shipping_notes,'') shipping_notes, coalesce(delivery_notes,'') delivery_notes, coalesce(fulfil_id,'') fulfil_id FROM planner.branches ORDER BY name`),
         ]);
         const air = await q(`SELECT id, min_kg, max_kg, rate_per_kg FROM planner.air_freight_rates ORDER BY min_kg`).catch(() => []);
         return res.json({ tax, freight, duty, branches, air, sizes: ['20ft','40ft','LCL'] });
@@ -2974,7 +2979,7 @@ app.post('/api/supply/tax-rate/:country', async (req, res) => {
 //  superseded by the pivot endpoints freight-upsert / freight-pallets / duty-upsert. v25.652)
 // Branches (lead-time table) — edit by name (upsert), and create. Drives PO ship/landing dates.
 app.post('/api/supply/branch/:name', async (req, res) => {
-  const b = req.body || {}, allowed = { country_code: 'text', sea_lead_time_days: 'int', air_lead_time_days: 'int', shipping_notes: 'text', delivery_notes: 'text' };
+  const b = req.body || {}, allowed = { country_code: 'text', sea_lead_time_days: 'int', air_lead_time_days: 'int', shipping_notes: 'text', delivery_notes: 'text', fulfil_id: 'text' };
   const cols = ['name'], vals = [req.params.name], ph = ['$1::text']; let i = 2;
   for (const k of Object.keys(b)) { if (!allowed[k]) continue; cols.push(k); vals.push(b[k] === '' ? null : b[k]); ph.push(`$${i++}::${allowed[k]}`); }
   const upd = cols.slice(1).map(c => `${c}=excluded.${c}`).join(',') || 'name=excluded.name';
