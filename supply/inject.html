@@ -4637,13 +4637,16 @@
     view(); }
   // Deposit register (under PRODUCTIONS) — editable + assign each deposit to a production inline.
   function renderDepRegister(b, deps, prods){ _prodList=prods; var pend=_pendingDep; _pendingDep=null;   // arriving from a cash-flow deposit link → filter to that ref
-    var st={f:pend?'all':'remaining',q:pend?String(pend).toLowerCase():''}; var DEP_EDIT={};   // default = open deposits that still hold money
+    var st={f:pend?'all':'remaining',q:pend?String(pend).toLowerCase():'',sup:''}; var DEP_EDIT={};   // default = open deposits that still hold money
+    if(!pend){ var _dsv=hzFilterLoad('deposits'); if(_dsv&&typeof _dsv==='object'){ if(_dsv.f)st.f=_dsv.f; if(_dsv.sup)st.sup=_dsv.sup; } }   // restore persisted filters (sliding 1h TTL); not the search
+    var depSups=Array.from(new Set((deps||[]).map(function(d){return d.supplier_name;}).filter(Boolean))).sort();
     var depPoView='unalloc';   // linked-PO column view: 'unalloc' (default) = only POs with no start deposit yet · 'open' = all non-complete · 'all' = every linked PO
     var FILT=[['remaining','Remaining · open'],['open','To assign'],['closed','Closed'],['all','All']];
-    b.innerHTML=lookupDatalists()+'<div class="bar">'+FILT.map(function(f){return '<span class="pill'+(f[0]==='remaining'?' active':'')+'" data-f="'+f[0]+'"'+(f[0]==='remaining'?' title="open (not closed) deposits that still have money remaining"':'')+'>'+f[1]+'</span>';}).join('')
+    b.innerHTML=lookupDatalists()+'<div class="bar">'+FILT.map(function(f){return '<span class="pill'+(f[0]===st.f?' active':'')+'" data-f="'+f[0]+'"'+(f[0]==='remaining'?' title="open (not closed) deposits that still have money remaining"':'')+'>'+f[1]+'</span>';}).join('')
       +'<button class="save-btn" id="dep-new">+ Deposit</button>'
       +'<label style="font-size:12px;margin-left:6px;color:#475569">POs: <select id="dep-poview" style="font-size:12px;padding:2px 5px;border:1px solid #cbd5e1;border-radius:5px;background:#fff" title="Which linked purchase orders to list in the deposit&rsquo;s POs column"><option value="unalloc">Unallocated</option><option value="open">Open</option><option value="all">All linked</option></select></label>'
-      +'<input class="flt" id="dep-q" placeholder="Filter reference / supplier…"><span class="count" id="dep-cnt"></span></div>'
+      +'<span class="pill-lbl" style="margin-left:6px">Supplier</span><select class="flt" id="dep-sup" style="width:auto;max-width:190px" title="filter by supplier"><option value="">All suppliers</option>'+depSups.map(function(s){return '<option value="'+esc(s)+'"'+(st.sup===s?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select>'
+      +'<input class="flt" id="dep-q" placeholder="Filter reference / supplier…" style="margin-left:6px"><span class="count" id="dep-cnt"></span></div>'
       +'<style>#deptbl{table-layout:fixed;width:100%}#deptbl td,#deptbl th{white-space:normal;overflow-wrap:break-word;vertical-align:top}#deptbl .fci{width:100%;box-sizing:border-box;min-width:0;text-align:left}'
       +'#deptbl .datewrap{display:flex;width:100%;max-width:100%}#deptbl .datewrap .dateinp{flex:1 1 auto;min-width:0;width:auto!important;text-align:left!important}#deptbl .datewrap .datepick{flex:0 0 auto}</style>'
       +'<div class="tw"><table id="deptbl"><colgroup>'
@@ -4705,7 +4708,8 @@
     function cur(){ return deps.filter(function(d){ if(st.f==='all')return true; if(st.f==='closed')return d.status==='closed';
       if(st.f==='remaining')return d.status!=='closed' && ((Number(d.deposit_remaining)||0)>0.01 || !(Number(d.amount)>0));   // open + still holds money, OR a new/blank deposit not yet filled in (so +Deposit is visible here)
       return d.status!=='closed'; }); }
-    function draw(){ var f=cur().filter(function(d){return !st.q||((d.reference||'')+' '+(d.supplier_name||'')).toLowerCase().indexOf(st.q)>=0;});
+    function draw(){ try{hzFilterSave('deposits',{f:st.f,sup:st.sup});}catch(e){}   // persist filters (not the search) — sliding 1h TTL
+      var f=cur().filter(function(d){return (!st.q||((d.reference||'')+' '+(d.supplier_name||'')).toLowerCase().indexOf(st.q)>=0) && (!st.sup||(d.supplier_name||'')===st.sup);});
       document.getElementById('dep-cnt').textContent=f.length+' / '+deps.length+' deposits';
       document.getElementById('dep-rows').innerHTML=f.map(rowHTML).join(''); bindEdits();
       b.querySelectorAll('.dep-prod-pick').forEach(function(btn){ btn.onclick=function(e){ e.stopPropagation(); openDepProdNoPick(btn); }; });   // searchable active-productions picker
@@ -4742,6 +4746,7 @@
           delete cache['purchase-orders']; delete cache['productions']; invalidateDerived(); showPoSub('deposits'); }); }; }); }
     b.querySelectorAll('.bar .pill').forEach(function(p){p.onclick=function(){b.querySelectorAll('.bar .pill').forEach(function(x){x.classList.remove('active');});p.classList.add('active');st.f=p.dataset.f;draw();};});
     document.getElementById('dep-q').oninput=function(){st.q=this.value.toLowerCase();draw();};
+    var _depSup=document.getElementById('dep-sup'); if(_depSup)_depSup.onchange=function(){st.sup=this.value;draw();};
     document.getElementById('dep-new').onclick=function(){ shipPost('/api/supply/deposit-create',{is_deposit:true},function(){ delete cache['productions']; showPoSub('deposits'); }); };
     var _pv=document.getElementById('dep-poview'); if(_pv){ _pv.value=depPoView; _pv.onchange=function(){ depPoView=this.value; draw(); }; }
     if(pend){ var pqi=document.getElementById('dep-q'); if(pqi)pqi.value=pend; b.querySelectorAll('.bar .pill').forEach(function(x){x.classList.toggle('active',x.dataset.f==='all');}); }

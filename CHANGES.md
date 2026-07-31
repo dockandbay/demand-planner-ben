@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.309 - Deposits: supplier filter + remember filters
+- PAYMENTS ▸ **Deposits** now has a **Supplier** filter dropdown, and it **remembers your filters** (status pill + supplier) across visits — sliding 1h TTL, same as the PO grid / Shipments / Order Plan (the search box is not persisted). `supply/inject.html`.
+
 ## v26.308 - Emails set Reply-To to the person who triggered them
 - Added `reply_to` support to the shared Resend sender, and wired it: **new-suggestion** email → reply-to the submitter; **escalation** email → reply-to the escalator (internal user's email; supplier-initiated carries it when the caller passes `reply_to`); **supplier invoice / document submission** emails → reply-to the supplier who submitted (their portal email). So hitting Reply goes to the right person instead of the app's From address. `server.mjs`.
 
