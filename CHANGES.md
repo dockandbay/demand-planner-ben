@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.345 - Demand grid: darker subcategory divider lines
+- Darkened the horizontal divider between subcategory rows from light #a8a8a5 to #777 (`tr.sub-row td`), so subcategories are clearly separated too. Category boundaries keep the heavier 2px line for hierarchy. `artifact_v16.7.html`.
+
 ## v26.344 - Demand grid: darker divider line between header-less categories
 - Since redundant single-subcategory headers are skipped, those categories flowed together with no separator. The first row of each header-less category now carries a darker 2px top border (`tr.sub-row.cat-start`) — a full-width horizontal divider between categories (e.g. Bag - Beach → Bag - Cooling). `artifact_v16.7.html`.
 
