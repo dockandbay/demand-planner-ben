@@ -1710,6 +1710,7 @@
   function bindCellPick(){ document.querySelectorAll('#supply-root .cell-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openCellPick(b); }; }); }
   function openCellPick(btn){ closeShPop();
     var kind=btn.dataset.kind, lbl=CELL_LBL[kind]||kind, isCtry=(kind==='country');
+    var cur=(btn.getAttribute('title')||'').trim();   // the currently-selected value → pin it at the top of the list
     // list of {v:value, l:label}; country is a fixed code→label set, the rest are searchable string lists
     var list=isCtry ? PO_COUNTRIES.map(function(o){return {v:o[0],l:o[1]};})
                      : (function(){ var arr=({supplier:supplierList,branch:branchList,prod:prodList,batch:batchList}[kind]||[]).slice();
@@ -1723,10 +1724,15 @@
       fetch(btn.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error); closeShPop(); if(_poPatchRow){ _poPatchRow(btn.dataset.po); } else if(_poRefresh){ _poRefresh(); } else { invalidateDerived(); delete cache['purchase-orders']; selectSection('purchase-orders'); } })   // patch just this row (silent)
         .catch(function(e){ alert('Failed: '+(e.message||e)); }); }
-    function render(q){ q=(q||'').trim().toLowerCase(); var html='<div class="shpop-opt unassign" data-clear="1">'+(isCtry?'— (use branch country)':'— Clear')+'</div>';
-      var ms=list.filter(function(n){return !q||n.l.toLowerCase().indexOf(q)>=0;});
-      ms.slice(0,q?80:15).forEach(function(n){ html+='<div class="shpop-opt" data-v="'+esc(n.v)+'">'+esc(n.l)+(kind==='supplier'?' <button class="lnk-btn shpop-mng" data-sup="'+esc(n.v)+'" title="edit this supplier in a popout" style="float:right;color:#2563eb">⚙ manage</button>':'')+'</div>'; });
-      if(!q&&list.length>15)html+='<div class="mut tiny" style="padding:5px 10px">'+(list.length-15)+' more — type to search…</div>';
+    function mngBtn(v){ return kind==='supplier'?' <button class="lnk-btn shpop-mng" data-sup="'+esc(v)+'" title="edit this supplier in a popout" style="float:right;color:#2563eb">⚙ manage</button>':''; }
+    function render(q){ q=(q||'').trim().toLowerCase();
+      var curItem=cur?list.filter(function(n){return String(n.v)===cur;})[0]:null;
+      var html='';
+      if(cur){ html+='<div class="shpop-opt" data-v="'+esc(cur)+'" style="background:#eff6ff;border-bottom:1px solid #dbeafe"><b>'+esc(curItem?curItem.l:cur)+'</b> <span class="mut tiny">— currently selected</span>'+mngBtn(cur)+'</div>'; }
+      html+='<div class="shpop-opt unassign" data-clear="1">'+(isCtry?'— (use branch country)':'— Clear')+'</div>';
+      var ms=list.filter(function(n){return (!q||n.l.toLowerCase().indexOf(q)>=0) && String(n.v)!==cur;});   // exclude cur — it's pinned at the top
+      ms.slice(0,q?80:15).forEach(function(n){ html+='<div class="shpop-opt" data-v="'+esc(n.v)+'">'+esc(n.l)+mngBtn(n.v)+'</div>'; });
+      if(!q&&ms.length>15)html+='<div class="mut tiny" style="padding:5px 10px">'+(ms.length-15)+' more — type to search…</div>';
       var l=document.getElementById('shpop-list'); l.innerHTML=html;
       l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ set(o.dataset.clear?'':o.dataset.v); }; });
       l.querySelectorAll('.shpop-mng').forEach(function(mb){ mb.onclick=function(e){ e.stopPropagation(); closeShPop(); openSupplierDrawer(mb.dataset.sup); }; }); }

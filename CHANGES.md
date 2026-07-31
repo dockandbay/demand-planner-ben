@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.358 - Cell picker: pin the currently-selected value at the top
+- When a supplier (or branch / prod / batch) is already set, opening its picker now shows that value pinned at the top, highlighted, labelled “— currently selected” (and de-duplicated from the list below). `supply/inject.html`.
+
 ## v26.357 - Manage-supplier popout drawer (from PO ▸ Master Data + supplier picker)
 - New right-side **Manage supplier** drawer: edit the supplier (identity, currency, payment terms, contact, ERP IDs) + its portal users without leaving the PO. Saves to the same `/api/supply/supplier/:id` as CONFIG. Triggered by a **⚙ manage supplier** link next to the supplier in PO ▸ Master Data, and a **⚙ manage** link per supplier in the choose-supplier picker. Includes a "Full settings in CONFIG ↗" jump for the address/company block. `supply/inject.html`.
 
