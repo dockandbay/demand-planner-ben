@@ -5709,8 +5709,10 @@ function insertInlineSkuRows(s,co,ch,afterTr){
     if(!isOut)return;
     if(inp){inp.value='';inp.placeholder='';inp.disabled=true;inp.title='Discontinued — on-hand + inbound stock exhausted';}
     if(fcDiv){fcDiv.textContent='';}
-    var _td=(fcDiv&&fcDiv.closest&&fcDiv.closest('td'))||(inp&&inp.closest&&inp.closest('td'));   // "disc" cells get the same red border as the rundown cells
-    if(_td)_td.style.background='#FFD6D1';
+    var _td=(fcDiv&&fcDiv.closest&&fcDiv.closest('td'))||(inp&&inp.closest&&inp.closest('td'));   // disc-out cell: pink fill, no growth %, keep only the grey LY
+    if(_td){ _td.style.background='#FFD6D1';
+      try { _td.querySelectorAll('.gp,.rp,.fp').forEach(function(el){ el.textContent=''; }); } catch(e){}   // drop the forecast-vs-LY growth % (was -100%)
+    }
   }
   // Red cell border for months where the SKU is past its discontinue date but is still selling down
   // remaining stock (rundown, stock not yet exhausted). Replaces the old small red "d" badge.

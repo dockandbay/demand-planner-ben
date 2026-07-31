@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.326 - Demand grid: drop the -100% growth on discontinued-no-stock cells
+- On a discontinued-out-of-stock SKU forecast cell, the **forecast-vs-last-year growth %** (which read **-100%**) is now blanked along with the "disc"/"0" — leaving only the grey last-year-actuals number (finishes v26.325 item 4). `artifact_v16.7.html`.
+
 ## v26.325 - Demand plan grid: colour cleanup (round 1)
 - **Actuals** cells now `#F0FFF0` (was `#dcfce7`/`#f0fdf4`). **Blue "low" anomaly** cells → white (dropped `#e0f5fe`). **Discontinued with stock** → `#FFD6D1` fill, red outline removed. **Discontinued no stock** → `#FFD6D1`, removed the "disc" label + "0" forecast (kept the grey last-year-actuals number). Removed the **sub-row hover** colour change so summary rows stay one colour. `artifact_v16.7.html`.
 
