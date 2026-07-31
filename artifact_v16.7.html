@@ -264,17 +264,17 @@ thead tr.sub th.stk2{background:#f3f3f1}
 .sep1{border-left:1px solid #d5d5d3 !important}
 .bg26{background:#edf4ff !important}
 .bg26.actual-hdr{background:#dcfce7 !important;color:#166534 !important}
-.bg26.sku-act-cell{background:#dcfce7 !important;border-left-color:#86efac !important}
+.bg26.sku-act-cell{background:#F0FFF0 !important;border-left-color:#86efac !important}
 .bg26.anom-hi-cell{background:#fef9c3 !important;border-left-color:#f59e0b !important}
-.bg26.anom-lo-cell{background:#e0f5fe !important;border-left-color:#8FD9FB !important}
+.bg26.anom-lo-cell{background:#fff !important;border-left-color:#e5e5e5 !important}
 .bg27.anom-hi-cell{background:#fef9c3 !important;border-left-color:#f59e0b !important}
-.bg27.anom-lo-cell{background:#e0f5fe !important;border-left-color:#8FD9FB !important}
+.bg27.anom-lo-cell{background:#fff !important;border-left-color:#e5e5e5 !important}
 .bg27{background:#f2edff !important}
 .bg28{background:#eafaf4 !important}
 .bgH1{background:#eef1f5 !important}
 .bgH2{background:#f4f3f0 !important}
 .bg28.anom-hi-cell{background:#fef9c3 !important;border-left-color:#f59e0b !important}
-.bg28.anom-lo-cell{background:#e0f5fe !important;border-left-color:#8FD9FB !important}
+.bg28.anom-lo-cell{background:#fff !important;border-left-color:#e5e5e5 !important}
 /* SKU rows (demand PLAN): plain white forecast cells (drop the 2026 blue / 2027 purple tint),
    keep actual (green) + anomaly signals, and make row dividers visible. */
 tr.sku-inline:not(.subtot-row) td.bg26:not(.sku-act-cell):not(.anom-hi-cell):not(.anom-lo-cell){background:#fff !important}
@@ -311,9 +311,9 @@ tr.cat-hdr td{background:#e0e0de;font-weight:700;font-size:10px;text-transform:u
 tr.cat-tot td{background:#eaeae8;font-weight:600;border-top:1px solid #d0d0ce;border-bottom:1px solid #d0d0ce}
 tr.cat-tot td.fctd,tr.cat-tot td.fctd.y27,tr.cat-tot td.fctd.y28,tr.cat-tot td.fctd.actual,tr.cat-tot td.fctd.actual.fs26,tr.cat-tot td.fctd.fs26,tr.cat-tot td.fctd.fs27,tr.cat-tot td.totu,tr.cat-tot td.totr,tr.cat-tot td.totu.y26,tr.cat-tot td.totu.y27,tr.cat-tot td.totr.y26,tr.cat-tot td.totr.y27,tr.cat-tot td.sc,tr.cat-tot td.lbltd,tr.cat-tot td.rectd{background:#eaeae8 !important;border-left-color:#d0d0ce}
 tr.sub-row td{border-bottom:1px solid #cbcbc8}
-tr.sub-row:hover td{background:#fafaf8}
-tr.sub-row:hover td.stk{background:#fafaf8}
-tr.sub-row:hover td.stk2{background:#fafaf8}
+
+
+
 td.sc{padding:2px 5px;vertical-align:middle;white-space:nowrap;text-align:right}
 .gp{color:#2E6F40}.rp{color:#991b1b}.fp{color:#999}
 td.trd{padding:2px 4px;vertical-align:middle;white-space:nowrap;text-align:right;font-size:11px;font-variant-numeric:tabular-nums}
@@ -337,10 +337,10 @@ td.fctd.y28{background:#fafafa;border-left-color:#e5e5e5}
 td.fctd.yH1,td.fctd.yH2{background:#fafafa;border-left-color:#e5e5e5}
 td.fctd.fs26{border-left:2px solid #9ca3af}
 td.fctd.fs27{border-left:2px solid #9ca3af}
-td.fctd.actual{background:#f0fdf4;border-left-color:#86efac}
+td.fctd.actual{background:#F0FFF0;border-left-color:#86efac}
 td.fctd.actual.fs26{border-left:2px solid #22c55e}
 td.fctd.anomaly-hi{background:#fef9c3 !important;border-left-color:#f59e0b !important}
-td.fctd.anomaly-lo{background:#e0f5fe !important;border-left-color:#8FD9FB !important}
+td.fctd.anomaly-lo{background:#fff !important;border-left-color:#e5e5e5 !important}
 /* ── SKU View ─────────────────────────────────────────── */
 .sku-back{font-size:11px;padding:3px 10px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer;display:flex;align-items:center;gap:4px}
 .sku-back:hover{background:#f5f5f5}
@@ -365,8 +365,8 @@ td.sku-inv{padding:2px 4px;text-align:right;white-space:nowrap}
 .inv-oh{font-size:10px;font-weight:600;font-variant-numeric:tabular-nums}
 .inv-oo{font-size:8px;color:#888;font-variant-numeric:tabular-nums}
 .inv-neg{color:#dc2626}
-td.sku-act{padding:1px 2px;background:#f0fdf4;border-left:1px solid #bbf7d0}
-td.sku-act.act-cur{background:#dcfce7;border-left:1px solid #4ade80}
+td.sku-act{padding:1px 2px;background:#F0FFF0;border-left:1px solid #bbf7d0}
+td.sku-act.act-cur{background:#F0FFF0;border-left:1px solid #4ade80}
 .sku-act-vals{display:flex;flex-direction:column;gap:0;padding:1px 2px}
 .sku-ly{font-size:9px;color:#94a3b8;text-align:right;font-variant-numeric:tabular-nums}
 .sku-ty{font-size:10px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
@@ -381,7 +381,7 @@ td.sku-fc.fc-first{border-left:2px solid #93c5fd}
 .sku-fc-v{font-size:11px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;color:#1d4ed8}
 .sku-fc-v.ovr{color:#7c3aed}
 td.sku-fc.anom-hi-cell{background:#fef9c3 !important;border-left-color:#f59e0b !important}
-td.sku-fc.anom-lo-cell{background:#e0f5fe !important;border-left-color:#8FD9FB !important}
+td.sku-fc.anom-lo-cell{background:#fff !important;border-left-color:#e5e5e5 !important}
 /* forecast with no stock to cover it — red flag (overrides anomaly tint) */
 td.sku-fc.fc-nostock{background:#fee2e2 !important;border-left-color:#fca5a5 !important}
 td.sku-fc.fc-nostock .sku-fc-inp{background:transparent}
@@ -5707,16 +5707,16 @@ function insertInlineSkuRows(s,co,ch,afterTr){
   // Greys a forecast cell to 0 + "disc" when a discontinued SKU has run out of stock.
   function applyDisc(inp,fcDiv,isOut){
     if(!isOut)return;
-    if(inp){inp.value='0';inp.disabled=true;inp.style.color='#991b1b';inp.style.fontStyle='italic';inp.title='Discontinued — on-hand + inbound stock exhausted';}
-    if(fcDiv){fcDiv.textContent='disc';fcDiv.style.color='#991b1b';fcDiv.style.fontStyle='italic';}
+    if(inp){inp.value='';inp.placeholder='';inp.disabled=true;inp.title='Discontinued — on-hand + inbound stock exhausted';}
+    if(fcDiv){fcDiv.textContent='';}
     var _td=(fcDiv&&fcDiv.closest&&fcDiv.closest('td'))||(inp&&inp.closest&&inp.closest('td'));   // "disc" cells get the same red border as the rundown cells
-    if(_td)_td.style.boxShadow='inset 0 0 0 1.5px #FF746C';
+    if(_td)_td.style.background='#FFD6D1';
   }
   // Red cell border for months where the SKU is past its discontinue date but is still selling down
   // remaining stock (rundown, stock not yet exhausted). Replaces the old small red "d" badge.
   function markDiscRundown(td,on){
     if(!on||!td)return;
-    td.style.boxShadow='inset 0 0 0 1.5px #FF746C';   // lighter red outline = discontinued this month
+    td.style.background='#FFD6D1';   // discontinued this month (with stock) — pink fill, no outline
     if(!td.title)td.title='Discontinued this month — selling down remaining stock';
   }
   // During an active Smooth preview, show each SKU's proposed (uncommitted) override in amber.

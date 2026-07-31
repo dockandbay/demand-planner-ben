@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.325 - Demand plan grid: colour cleanup (round 1)
+- **Actuals** cells now `#F0FFF0` (was `#dcfce7`/`#f0fdf4`). **Blue "low" anomaly** cells → white (dropped `#e0f5fe`). **Discontinued with stock** → `#FFD6D1` fill, red outline removed. **Discontinued no stock** → `#FFD6D1`, removed the "disc" label + "0" forecast (kept the grey last-year-actuals number). Removed the **sub-row hover** colour change so summary rows stay one colour. `artifact_v16.7.html`.
+
 ## v26.324 - Fulfil ERP push: client + date sync (real) + lines/create (dry-run), behind the toggle
 - Added a Fulfil v2 REST client (`fulfilFetch`, `fulfilFindPO`) and wired the per-PO ERP push to branch to Fulfil when **Active ERP = Fulfil** (same process, Fulfil target):
   - **Update ERP Date** → finds the Fulfil PO by reference and sets its delivery date (real call; absent PO → "push lines first").
