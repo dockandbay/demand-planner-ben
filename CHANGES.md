@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.314 - Payments Due: completion-owed showing + stop $0 "Balance overdue"
+- **Payments Due** (report + the sub-tab overdue counter) now treats a PO milestone as **paid by its assigned amount**, not just a scheduled date — matching the PO detail. A PO that owes a completion payment (e.g. 100% completion, no deposit) but had a completion *date* entered with **no amount** was being hidden as "paid"; it now correctly shows as due (e.g. PO-55EUWK-AW26-1). `supply/inject.html`.
+- Fixed the **"Balance overdue" action firing on a $0 balance**: it now requires `balance_owing > 0` (previously any total-due > 0 — driven by the unpaid completion — triggered it). So the action now lands on the real overdue completion, not a $0 balance. `supply/inject.html`.
+
 ## v26.313 - By Supplier report: "Due" column
 - PAYMENTS ▸ **By Supplier** gets a **Due** column at the end = agreed **invoice total − (starting + completion + balance)** paid. Shows "—" until a final invoice is set (can't compute what's owed without the total). Included in the totals row + the Copy / CSV exports. `supply/inject.html`.
 

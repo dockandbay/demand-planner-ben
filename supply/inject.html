@@ -3006,7 +3006,7 @@
     if(!_payOverSnz){
       if(totalDue>0.02 && r.start_due && r.start_due>=PDUE_MIN_DUE && r.start_due<today && startUnpaid && n(r.start_calc)>0.009) pay.push('Start deposit overdue ('+fd(r.start_due)+')');
       if(totalDue>0.02 && r.completion_due && r.completion_due>=PDUE_MIN_DUE && r.completion_due<today && compUnpaid && n(r.completion_calc)>0.009) pay.push('Completion payment overdue ('+fd(r.completion_due)+')');
-      if(r.balance_due && r.balance_due>=PDUE_MIN_DUE && r.balance_due<today && totalDue>0.02) pay.push('Balance overdue ('+fd(r.balance_due)+')');
+      if(r.balance_due && r.balance_due>=PDUE_MIN_DUE && r.balance_due<today && totalDue>0.02 && n(r.balance_owing)>0.009) pay.push('Balance overdue ('+fd(r.balance_due)+')');   // only if the BALANCE milestone actually owes something (was firing on $0 balances when the completion drove totalDue>0)
     }
     // supplier-submitted invoice awaiting approve/reject (actionable on any PO — shows on the grid flag and the PAYMENTS badge)
     if(r.sup_invoice_pending!=null) pay.push('Supplier invoice '+money(r.sup_invoice_pending)+' awaiting approve/reject');
@@ -4438,8 +4438,8 @@
   var PDUE_MIN_DUE='2026-01-01';   // Payments Due cutoff: hide payments whose due date is before this (old/legacy)
   function paymentsDueOverdueCount(pos, deps){ var today=new Date().toISOString().slice(0,10), n=0;
     (pos||[]).forEach(function(p){ if(!p.is_final)return;
-      if(Number(p.completion_calc)>0.009 && p.completion_due && !p.completion_date && p.completion_due>=PDUE_MIN_DUE && p.completion_due<today)n++;
-      if(Number(p.balance_owing)>0.009 && p.balance_due && !p.balance_1_date && p.balance_due>=PDUE_MIN_DUE && p.balance_due<today)n++; });
+      if(Number(p.completion_calc)>0.009 && p.completion_due && !(Number(p.completion_assigned)>0.009) && p.completion_due>=PDUE_MIN_DUE && p.completion_due<today)n++;
+      if(Number(p.balance_owing)>0.009 && p.balance_due && !(Number(p.balance_1_amount)>0.009) && p.balance_due>=PDUE_MIN_DUE && p.balance_due<today)n++; });
     (deps||[]).forEach(function(d){ if(d.status==='closed')return; if(!(Number(d.amount)>0.009)&&!d.date_paid&&!d.date_due)return;
       if(!d.date_paid && d.date_due && d.date_due>=PDUE_MIN_DUE && d.date_due<today)n++; });
     return n; }
@@ -6886,7 +6886,8 @@
       if(!(Number(d.amount)>0.009) && !d.date_paid && !d.date_due) return;   // skip empty stubs
       rows.push({sup:d.supplier_name||'',type:d.is_deposit?'Deposit':'Other',ref:d.reference||d.description||('#'+d.id),due_amt:Number(d.amount)||0,due:d.date_due||'',ep:'/api/supply/deposit/'+encodeURIComponent(d.id),amt_field:'amount',amt_val:d.amount,dt_field:'date_paid',dt_val:d.date_paid,po:false}); });
     rows=rows.filter(function(r){ return !(r.due && r.due<PDUE_MIN_DUE); });   // exclude old payments (due date before 2026-01-01); no-due-date rows are kept
-    rows.forEach(function(r){ r.paid=!!r.dt_val; r.overdue=!r.paid && !!r.due && r.due<today; });
+    // PO milestone = paid once an AMOUNT is assigned (matches the PO detail); a scheduled date with no amount is NOT paid → still due. Deposits/other = date_paid.
+    rows.forEach(function(r){ r.paid = r.po ? (Number(r.amt_val)>0.009) : !!r.dt_val; r.overdue=!r.paid && !!r.due && r.due<today; });
     _navCounts.paydue=rows.filter(function(r){return r.overdue;}).length; updateNavBadges();   // keep the sub-menu overdue counter fresh
     var sups=Array.from(new Set(rows.map(function(r){return r.sup;}))).filter(Boolean).sort();
     function pass(r){ if(PDUE_STATE.status==='outstanding'&&r.paid)return false;
