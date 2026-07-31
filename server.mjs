@@ -3109,7 +3109,7 @@ async function logEmail(m) {
        m.kind || 'other', m.ref || null, m.status || 'sent', m.error ? String(m.error).slice(0, 500) : null, m.by || null]);
   } catch (e) { /* table absent pre-migration 159, or insert failed — never block the send */ }
 }
-async function sendResendEmail({ to, subject, html, cc, kind, ref, by }) {
+async function sendResendEmail({ to, subject, html, cc, kind, ref, by, replyTo }) {
   const list = Array.isArray(to) ? to : [to];
   const cclist = cc ? (Array.isArray(cc) ? cc : [cc]).filter(Boolean) : [];
   const recipients = list.concat(cclist).filter(Boolean).join(', ');
@@ -3117,6 +3117,7 @@ async function sendResendEmail({ to, subject, html, cc, kind, ref, by }) {
   try {
     const payload = { from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', to: list, subject, html };
     if (cclist.length) payload.cc = cclist;
+    if (replyTo && /@/.test(String(replyTo))) payload.reply_to = String(replyTo).trim();   // reply goes to the person who triggered it (submitter / escalator / supplier)
     const resp = await fetch('https://api.resend.com/emails', { method: 'POST',
       headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify(payload) });
@@ -3127,7 +3128,7 @@ async function sendResendEmail({ to, subject, html, cc, kind, ref, by }) {
   } catch (e) { console.error('[email] Resend failed:', e.message); logEmail({ recipients, subject, kind, ref, by, status: 'error', error: e.message }); return { sent: 0, error: e.message }; }
 }
 // Escalation email now goes through the shared best-effort sender (like the magic link) — never throws.
-async function escalateSend(r) { return sendResendEmail({ to: r.emails, subject: r.subject, html: r.html, kind: 'escalation', ref: r.ref }); }
+async function escalateSend(r) { return sendResendEmail({ to: r.emails, subject: r.subject, html: r.html, kind: 'escalation', ref: r.ref, replyTo: r.replyTo }); }
 // A supplier submitting invoice / completion info should be VISIBLE, not silent: drop an UNREAD timeline note
 // on the PO (author_kind='supplier', read_at NULL → shows on the PO timeline + increments the ✉ unread badge).
 // Best-effort — never break the submit if the note fails.
@@ -3155,7 +3156,7 @@ async function emailInvoiceSubmit(po, value, by) {
   const html = '<p><b>' + escHtml(supName) + '</b> submitted <b>invoice information</b> for <b>' + po + '</b>.</p>'
     + '<p>Invoice value: <b>' + value + '</b><br>Submitted by: ' + (by || 'supplier') + '</p>'
     + '<p><a href="' + link + '">Open ' + po + ' in HORIZON</a></p>';
-  return sendResendEmail({ to: emails, subject: supName + ' submitted invoice info — ' + po, html, kind: 'invoice-notify', ref: po });
+  return sendResendEmail({ to: emails, subject: supName + ' submitted invoice info — ' + po, html, kind: 'invoice-notify', ref: po, replyTo: by });   // reply-to = the supplier who submitted
 }
 // supplier display name for a PO (falls back to "Supplier" when unknown) — used in supplier-submission emails
 async function poSupplierName(po) {
@@ -3173,7 +3174,7 @@ async function emailDocSubmit(po, filename, by) {
   const html = '<p><b>' + escHtml(supName) + '</b> submitted a <b>document for approval</b> on <b>' + po + '</b>.</p>'
     + '<p>Document: <b>' + (filename || 'document') + '</b><br>Submitted by: ' + (by || 'supplier') + '</p>'
     + '<p><a href="' + link + '">Review it on the PO ▸ Documents tab in HORIZON</a></p>';
-  return sendResendEmail({ to: emails, subject: supName + ' submitted a document for approval — ' + po, html, kind: 'invoice-notify', ref: po });
+  return sendResendEmail({ to: emails, subject: supName + ' submitted a document for approval — ' + po, html, kind: 'invoice-notify', ref: po, replyTo: by });   // reply-to = the supplier who submitted
 }
 // ── Payment-confirmed notification ── a payment "run" (date + supplier) is confirmed once its bank amount +
 // currency are applied in the Payments Report. paymentRunDetail rebuilds that run's line detail (same source
@@ -3229,7 +3230,7 @@ async function emailPaymentConfirmed(runDate, supplier, bankAmt, bankCcy) {
   const result = to.length ? await sendResendEmail({ to, cc, subject, html }) : { skipped: 'no opted-in recipients' };
   return { preview, result };
 }
-async function escalateCore({ initiator, kind, ref, message, user, supplierId, setEscalated, postNote }) {
+async function escalateCore({ initiator, kind, ref, message, user, supplierId, setEscalated, postNote, replyTo }) {
   kind = ['po', 'shipment', 'sample'].includes(kind) ? kind : 'po';
   ref = String(ref || '').trim(); message = String(message || '').trim();
   if (!ref || !message) throw new Error('ref + message required');
@@ -3281,7 +3282,7 @@ async function escalateCore({ initiator, kind, ref, message, user, supplierId, s
   const html = '<p><b>' + _eh(user || 'A user') + '</b> has escalated this message on ' + kindWord + ' <b>' + _eh(ref) + '</b>:</p>'
     + '<blockquote style="border-left:3px solid #cbd5e1;margin:0;padding:4px 12px;color:#334155;white-space:pre-wrap">' + _eh(message) + '</blockquote>'
     + '<p><a href="' + link + '">Open ' + _eh(ref) + ' &rarr;</a></p>';
-  const sent = await escalateSend({ emails, subject, html });
+  const sent = await escalateSend({ emails, subject, html, replyTo });   // reply goes back to whoever escalated
   return { ok: true, sent: sent.sent || 0, emails, sandbox: !!sent.sandbox, emailError: sent.error || null, link };
 }
 app.post('/api/supply/escalate', async (req, res) => {
@@ -3289,7 +3290,8 @@ app.post('/api/supply/escalate', async (req, res) => {
   try {
     const initiator = b.initiator === 'internal' ? 'internal' : 'supplier';
     const user = initiator === 'internal' ? (shortUser(authUser(req)) || b.user || 'A user') : (b.user || 'The supplier');
-    res.json(await escalateCore({ initiator, kind: b.kind, ref: b.ref, message: b.message, user, supplierId: b.supplier_id, setEscalated: !!b.set_escalated, postNote: !!b.post_note }));
+    const replyTo = initiator === 'internal' ? authUser(req) : (b.reply_to || b.email || null);   // reply-to = the person who escalated
+    res.json(await escalateCore({ initiator, kind: b.kind, ref: b.ref, message: b.message, user, supplierId: b.supplier_id, setEscalated: !!b.set_escalated, postNote: !!b.post_note, replyTo }));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -3474,7 +3476,7 @@ app.post('/api/supply/suggestion', async (req, res) => {
           + `<p style="color:#475569">${_sugEsc(body)}</p>`
           + `<p style="color:#94a3b8;font-size:12px">Submitted by ${_sugEsc(by || '(unknown)')} &middot; triage in CONFIG ▸ Suggestions.</p>`;
         const _sub = (shortUser(by) || 'Someone') + ' submitted suggestion ' + ref;
-        await sendResendEmail({ to: stake, subject: _sub, html, kind: 'suggestion-new', ref, by });
+        await sendResendEmail({ to: stake, subject: _sub, html, kind: 'suggestion-new', ref, by, replyTo: by });   // reply-to = the submitter
       }
     } catch (e) { /* email is best-effort — never fail the submit */ }
     res.json({ ok: true, id: r.rows[0].id, ref });

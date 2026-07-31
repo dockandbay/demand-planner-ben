@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.308 - Emails set Reply-To to the person who triggered them
+- Added `reply_to` support to the shared Resend sender, and wired it: **new-suggestion** email → reply-to the submitter; **escalation** email → reply-to the escalator (internal user's email; supplier-initiated carries it when the caller passes `reply_to`); **supplier invoice / document submission** emails → reply-to the supplier who submitted (their portal email). So hitting Reply goes to the right person instead of the app's From address. `server.mjs`.
+
 ## v26.307 - New-suggestion email: subject names the submitter
 - The new-suggestion email subject is now "**zera@ submitted suggestion SUG-0012**" (submitter's short handle) instead of "New suggestion SUG-0012". Falls back to "Someone" when the submitter is unknown. `server.mjs`.
 
