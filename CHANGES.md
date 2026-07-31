@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.323 - ERP buttons relabelled to "ERP" + Fulfil-active write guard
+- Renamed the Cin7-named buttons to generic ERP: **Sync ERP dates**, **Import PO from ERP**, **Update ERP Date**, **Update / Create ERP PO**, **Push to ERP (full)**. (Process unchanged — same endpoints/logic.)
+- Safety guard: while **Active ERP = Fulfil**, the Cin7 write endpoints (`cin7-date`, `cin7-lines`, `cin7-dates-sync`) now return a clear "Fulfil push not wired yet — no write performed" instead of silently pushing to **live Cin7**. So flipping the toggle can't accidentally write to Cin7 before the Fulfil calls exist. `server.mjs`, `supply/inject.html`.
+
 ## v26.322 - ERP integration settings (Cin7 ▸ Fulfil) — scaffold
 - CONFIG ▸ General settings: new **ERP integration** section — **Active ERP** toggle (Cin7 / Fulfil) and **Fulfil environment** toggle (Sandbox / Live), saved to `app_settings` (`erp_integration`, `fulfil_env`; default cin7 / sandbox). Shows whether the Fulfil API keys are present in the server env (sandbox / live), via new `GET /api/supply/erp-status`. Server helpers `fulfilConfigFor(env)` / `activeErp()` / `activeFulfilEnv()` resolve the active config from env — **no Fulfil calls yet** (the PO push wiring is the next step). New env vars (Diviyaj): `FULFIL_SANDBOX_SUBDOMAIN`, `FULFIL_SANDBOX_API_KEY`, `FULFIL_LIVE_SUBDOMAIN`, `FULFIL_LIVE_API_KEY`. `server.mjs`, `supply/inject.html`.
 

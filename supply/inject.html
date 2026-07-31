@@ -2176,10 +2176,10 @@
         return '<div class="bar" id="po-impexp-bar" style="display:none;gap:8px;flex-wrap:wrap">'
           +'<button class="save-btn" id="po-new" style="'+lb+'">+ New PO</button>'
           +'<button class="save-btn" id="po-upload" style="'+lb+'">⬆ Upload POs</button>'
-          +'<button class="save-btn" id="po-import-cin7" style="'+lb+'" title="import a purchase order from Cin7 by its PO number — brings in supplier, branch, SKUs &amp; quantities">⬆ Import PO from Cin7</button>'
+          +'<button class="save-btn" id="po-import-cin7" style="'+lb+'" title="import a purchase order from Cin7 by its PO number — brings in supplier, branch, SKUs &amp; quantities">⬆ Import PO from ERP</button>'
           +'<button class="save-btn" id="po-merge" style="'+lb+'" title="merge one PO&rsquo;s SKUs &amp; quantities into another, then delete the merged-from PO">⛙ Merge PO&rsquo;s</button>'
           +'<button class="save-btn" id="po-csv" style="'+lb+'">⬇ Export CSV</button>'
-          +'<button class="save-btn" id="po-cin7-dates" style="'+lb+'" title="push the planner completion date to Cin7 EstimatedDeliveryDate for every ACTIVE PO whose date differs from Cin7 — complete POs are skipped (live write)">📅 Sync Cin7 dates</button>'
+          +'<button class="save-btn" id="po-cin7-dates" style="'+lb+'" title="push the planner completion date to Cin7 EstimatedDeliveryDate for every ACTIVE PO whose date differs from Cin7 — complete POs are skipped (live write)">📅 Sync ERP dates</button>'
           +'</div>'; })()
       +'<div class="bar" id="po-ctry">'
       +'<span class="po-filt-ship">'+CTRYP.map(function(a){return '<span class="pill'+(state.ctry[a[0]]?' active':'')+'" data-c="'+a[0]+'">'+(CFLAG[a[0]]?CFLAG[a[0]]+' ':'')+a[1]+'</span>';}).join('')+'</span>'
@@ -2615,9 +2615,9 @@
       +'<div style="font-weight:700;font-size:15px;margin-bottom:6px">Update ERP'+(po?(' — '+esc(po)):'')+'</div>'
       +manualBlk
       +'<div style="margin-top:12px;border-top:1px solid #eee;padding-top:12px;display:flex;flex-direction:column;gap:8px">'
-        +(showDate?'<div><button class="save-btn" id="erp-cin7" style="background:#0b6;color:#fff;border-color:#0b6">📅 Update Cin7 Date</button>'
+        +(showDate?'<div><button class="save-btn" id="erp-cin7" style="background:#0b6;color:#fff;border-color:#0b6">📅 Update ERP Date</button>'
             +' <span class="mut tiny">Cin7 EstimatedDeliveryDate: <b>'+(_r.erp_final_delivery?fd(_r.erp_final_delivery):'—')+'</b> &rarr; <b>'+(_r.checkin?fd(_r.checkin):'—')+'</b> (this PO&rsquo;s completion date) &middot; live write</span></div>':'')
-        +(showLines?'<div><button class="save-btn" id="erp-cin7-lines" style="background:#0a8;color:#fff;border-color:#0a8">📦 Update / Create Cin7 PO (SKUs / Qty / Price)</button> <span class="mut tiny">updates the Cin7 PO, or creates it if not in Cin7 — price = approved supplier final cost, else standard (live write)</span></div>':'')
+        +(showLines?'<div><button class="save-btn" id="erp-cin7-lines" style="background:#0a8;color:#fff;border-color:#0a8">📦 Update / Create ERP PO (SKUs / Qty / Price)</button> <span class="mut tiny">updates the Cin7 PO, or creates it if not in Cin7 — price = approved supplier final cost, else standard (live write)</span></div>':'')
       +'</div>'
       +'<div class="mut tiny" id="erp-msg" style="margin-top:10px"></div>'
       +'<div style="margin-top:10px;text-align:right"><button class="save-btn light" id="erp-x">Close</button></div></div>';
@@ -3417,7 +3417,7 @@
     var addRowHtml=editing?'<tr class="op-addrow"><td class="l"><input class="op-add-sku" data-po="'+esc(po)+'" readonly placeholder="click to pick SKU…" style="width:220px;cursor:pointer;background:#fff" autocomplete="off"></td><td class="l"></td><td style="text-align:right"><input class="op-add-qty" placeholder="qty" style="width:74px;text-align:right" inputmode="numeric"></td><td colspan="5" class="mut tiny">new line — added as proposed (not in ERP until you Upload)</td></tr>':'';
     var opBtns=editing
       ? '<button class="lnk-btn op-add-row" data-po="'+esc(po)+'" style="margin-left:8px">＋ Add SKU</button> <button class="save-btn op-paste" data-po="'+esc(po)+'" style="margin-left:4px;background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8" title="paste a SKU + qty block from Excel / Google Sheets (2 columns)">⧉ Paste SKU,Qty</button> <button class="save-btn op-save" data-po="'+esc(po)+'" style="margin-left:4px;background:#dcfce7;border:1px solid #16a34a;color:#166534;font-weight:700">✓ Save</button> <button class="save-btn light op-cancel">Cancel</button>'
-      : '<button class="save-btn op-edit" data-po="'+esc(po)+'" style="margin-left:8px">✎ Edit qty / add SKU</button> <button class="save-btn light op-copy" data-copy="'+copyData+'" style="margin-left:4px" title="copy this PO&rsquo;s SKUs + quantities to the clipboard (tab-separated)">⧉ Copy SKU + Qty</button> <button class="save-btn op-cin7-full" data-po="'+esc(po)+'" style="margin-left:4px;background:#0a8;color:#fff;border-color:#0a8" title="push ALL of this PO&rsquo;s SKUs, quantities and prices to Cin7 — full override for exact alignment (live write)">⬆ Push to Cin7 (full)</button>';
+      : '<button class="save-btn op-edit" data-po="'+esc(po)+'" style="margin-left:8px">✎ Edit qty / add SKU</button> <button class="save-btn light op-copy" data-copy="'+copyData+'" style="margin-left:4px" title="copy this PO&rsquo;s SKUs + quantities to the clipboard (tab-separated)">⧉ Copy SKU + Qty</button> <button class="save-btn op-cin7-full" data-po="'+esc(po)+'" style="margin-left:4px;background:#0a8;color:#fff;border-color:#0a8" title="push ALL of this PO&rsquo;s SKUs, quantities and prices to Cin7 — full override for exact alignment (live write)">⬆ Push to ERP (full)</button>';
     var _csv='SKU,Qty\n'+(lines||[]).map(function(l){ return '"'+String(l.sku).replace(/"/g,'""')+'",'+(Number(l.qty)||0); }).join('\n');
     return '<div class="sect-h">Order plan — agree the final cost price per line '
       +'<button class="lnk-btn op-goto" data-po="'+esc(po)+'" style="margin-left:8px" title="open the full ORDER PLAN filtered to this PO">↗ open in full order plan</button>'

@@ -5379,6 +5379,7 @@ app.post('/api/supply/po-lines-paste', async (req, res) => {
   finally { client.release(); }
 });
 app.post('/api/supply/po/:po/cin7-date', async (req, res) => {
+  if (await activeErp() === 'fulfil') return res.status(501).json({ error: 'Fulfil is the active ERP — the Fulfil push is not wired yet, so no write was performed. Switch Active ERP to Cin7 in CONFIG ▸ General settings to push to Cin7.' });
   const po = req.params.po;
   const completion = ((req.body && req.body.completion_date) || '').trim();
   if (!completion) return res.status(400).json({ error: 'completion_date required' });
@@ -5417,6 +5418,7 @@ app.post('/api/supply/po/:po/cin7-date', async (req, res) => {
 // there is one (portal_line_costs.final_cost, confirmed), else the standard plan cost (cost_price).
 // LIVE write to Cin7 — gated on CIN7_AUTH; safe no-op (501) when absent.
 app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
+  if (await activeErp() === 'fulfil') return res.status(501).json({ error: 'Fulfil is the active ERP — the Fulfil push is not wired yet, so no write was performed. Switch Active ERP to Cin7 in CONFIG ▸ General settings to push to Cin7.' });
   const po = req.params.po;
   const completion = ((req.body && req.body.completion_date) || '').trim();
   try {
@@ -5696,6 +5698,7 @@ app.get('/api/supply/po/:po/cin7-verify', async (req, res) => {
 // are touched (a complete PO is skipped — its date no longer needs pushing). Each PO's CURRENT approval state is
 // read and echoed so the bulk update never flips a draft to approved. One batched PUT. LIVE write — gated on creds.
 app.post('/api/supply/cin7-dates-sync', async (req, res) => {
+  if (await activeErp() === 'fulfil') return res.status(501).json({ error: 'Fulfil is the active ERP — the Fulfil push is not wired yet, so no write was performed. Switch Active ERP to Cin7 in CONFIG ▸ General settings to push to Cin7.' });
   const auth = cin7Auth();
   if (!auth) return res.status(501).json({ error: 'Cin7 API credentials not configured (set CIN7_AUTH). No write performed.' });
   const items = Array.isArray(req.body && req.body.pos) ? req.body.pos.filter(x => x && x.po) : [];
