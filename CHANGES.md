@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.312 - PO grid: only indent a shipment member when its master is in view
+- The child-indent marker (└) on a consolidated PO now shows **only when its master PO is also visible in the current (filtered) grid**. Previously a member kept the indent even when the master was filtered out (e.g. filtering by one supplier), so the └ dangled with no parent above it. `supply/inject.html`.
+
 ## v26.311 - PO grid exceptions: "Shipped · no final invoice" filter
 - New option in the PURCHASE ORDERS grid **Exceptions** dropdown: **Shipped · no final invoice** — POs at status **SHIPPING / DELIVERED / COMPLETE** with **no final invoice** recorded, **excluding legacy productions before P50** (prod_no < 50 or non-numeric). `supply/inject.html`.
 

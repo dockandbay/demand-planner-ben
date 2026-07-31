@@ -2734,6 +2734,9 @@
       +'</tr>'
       +'<tr class="exp-row"'+ga+' id="poexp-'+i+'" style="display:none"><td colspan="19"><div id="podet-'+i+'" class="count">Loading…</div></td></tr>'; }
   function poTable(rows,groupBy){ if(!rows.length)return '<div class="count">No POs in this filter.</div>';
+    var _visPo={}; rows.forEach(function(r){ _visPo[String(r.po)]=1; });
+    var _isMasterRow=function(r){ return !r.shipment || r.is_master || r.po===r.shipment; };
+    var indentFor=function(r){ return !_isMasterRow(r) && !!_visPo[String(r.shipment||'')]; };   // indent a shipment member ONLY when its master PO is also visible in the current (filtered) grid — otherwise the └ dangles
     var head=lookupDatalists()+'<div class="tw"><table class="po-tbl"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l">ERP</th><th class="l">Supplier</th><th class="l">Ship to</th><th class="l">Branch</th><th class="l">Direct</th><th class="l">Status</th><th class="l">Shipment</th><th class="l">Deposit ref</th><th class="l">Start</th><th class="l">End</th><th class="l">Ship</th><th class="l">Arrival/Delivery</th><th class="l">Completion</th><th>Value est</th><th>Pallets</th><th class="l">PROD#</th><th class="l">Batch</th></tr></thead><tbody>';
     var body='';
     if(!groupBy||groupBy==='none'){ rows.forEach(function(r,i){ body+=poRowHtml(r,i,false,null); }); }
@@ -2760,7 +2763,7 @@
         if(ka!==kb) return ka<kb?-1:1;                                  // groups ordered by master ref
         var ra=isMasterRow(a)?0:1, rb=isMasterRow(b)?0:1;
         return ra-rb || (a.po<b.po?-1:a.po>b.po?1:0);                   // master first, then members alphabetically
-      }).forEach(function(r,idx){ body+=poRowHtml(r,idx,!isMasterRow(r),null); });
+      }).forEach(function(r,idx){ body+=poRowHtml(r,idx,indentFor(r),null); });
     }
     else {
       // Production: group each PO by the production number of its shipment's MASTER PO — a PO consolidated onto
@@ -2779,7 +2782,7 @@
         list.sort(function(a,b){ var ka=shipKey(a), kb=shipKey(b); if(ka!==kb)return ka<kb?-1:1; var ra=isMasterRow(a)?0:1, rb=isMasterRow(b)?0:1; return ra-rb || (a.po<b.po?-1:a.po>b.po?1:0); });   // cluster by shipment, master first, then alphabetical
         var gkey=k||'none', cnt=list.length;
         body+='<tr class="grp-row cat-hdr po-grp" data-grp="'+esc(gkey)+'"><td colspan="19" style="cursor:pointer;user-select:none" title="click to expand / collapse this production"><span class="po-grp-car">▾</span> '+(k?('P# '+esc(k)):'No production number')+' — '+cnt+" PO"+(cnt>1?"'s":"")+'</td></tr>';
-        list.forEach(function(r){ body+=poRowHtml(r,i++,!isMasterRow(r),gkey); });   // consolidated members indented under their master PO
+        list.forEach(function(r){ body+=poRowHtml(r,i++,indentFor(r),gkey); });   // consolidated members indented under their master PO (only when the master is also in view)
       });
     }
     return head+body+'</tbody></table></div><div class="grid-tailspace"></div>'; }
