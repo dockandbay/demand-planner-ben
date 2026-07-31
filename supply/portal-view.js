@@ -1107,8 +1107,17 @@
         +'</tbody></table></div>'; }
     function ppDeposits(deps){ var paid=0,used=0,rem=0,seenRef={}; deps.forEach(function(d,di){ if(!d.is_deposit)return; paid+=Number(d.amount)||0; var k=d.reference||('__'+di); if(seenRef[k])return; seenRef[k]=1; used+=Number(d.deposit_used)||0; rem+=Number(d.deposit_remaining)||0; });
       var cards='<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">'+ppCard('Total deposits','$'+money(paid))+ppCard('Drawn down','$'+money(used))+ppCard('Remaining','$'+money(rem))+'</div>';
-      var rows=deps.filter(function(d){return d.is_deposit;}).map(function(d){
-        return '<tr><td class="l">'+esc(d.reference||'—')+'</td><td style="text-align:right">$'+money(d.amount)+'</td><td class="l">'+(d.date_paid?esc(fd(d.date_paid)):'<span class="mut">unpaid</span>')+'</td><td style="text-align:right">$'+money(d.deposit_used||0)+'</td><td style="text-align:right">$'+money(d.deposit_remaining||0)+'</td></tr>'; }).join('');
+      // each PO that drew its starting deposit from this reference (deposit_ref match), with the amount drawn
+      var _pos=(_ppData&&_ppData.pos)||[];
+      function drawdownsFor(ref){ ref=String(ref||'').trim(); if(!ref)return []; var out=[];
+        _pos.forEach(function(p){ if(String(p.deposit_ref||'').trim()!==ref)return; var amt=Number(p.start_assigned!=null?p.start_assigned:p.start_dep)||0; if(amt>0.009)out.push({po:p.po||'',amt:amt}); });
+        out.sort(function(a,b){return a.po<b.po?-1:a.po>b.po?1:0;}); return out; }
+      var rows=deps.filter(function(d){return d.is_deposit;}).map(function(d,i){
+        var dd=drawdownsFor(d.reference), rk='dep'+i;
+        var caret=dd.length?'<a class="pp-dep-exp" data-k="'+rk+'" style="cursor:pointer;color:#1d4ed8;margin-right:6px;user-select:none;font-weight:700" title="show the purchase orders that drew down this deposit">▸</a>':'<span style="display:inline-block;width:14px"></span>';
+        var main='<tr><td class="l">'+caret+esc(d.reference||'—')+'</td><td style="text-align:right">$'+money(d.amount)+'</td><td class="l">'+(d.date_paid?esc(fd(d.date_paid)):'<span class="mut">unpaid</span>')+'</td><td style="text-align:right">$'+money(d.deposit_used||0)+'</td><td style="text-align:right">$'+money(d.deposit_remaining||0)+'</td></tr>';
+        var det=dd.length?'<tr class="pp-dep-det" data-k="'+rk+'" style="display:none"><td colspan="5" style="padding:0"><div style="padding:6px 10px 8px 26px;background:#f8fafc;border-bottom:1px solid #eef2f7"><div class="mut tiny" style="margin-bottom:3px">Drawn down by '+dd.length+' purchase order'+(dd.length===1?'':'s')+'</div><table style="font-size:12px;border-collapse:collapse">'+dd.map(function(x){return '<tr><td class="l" style="padding:2px 22px 2px 0;font-family:ui-monospace,Menlo,monospace">'+esc(x.po)+'</td><td style="text-align:right;padding:2px 0"><b>$'+money(x.amt)+'</b></td></tr>';}).join('')+'</table></div></td></tr>':'';
+        return main+det; }).join('');
       return cards+'<div class="tw" style="max-width:720px"><table style="width:auto;min-width:0"><thead><tr><th class="l">Deposit reference</th><th style="text-align:right">Amount</th><th class="l">Paid</th><th style="text-align:right">Drawn down</th><th style="text-align:right">Remaining</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5" class="l mut">No deposits for this supplier.</td></tr>')+'</tbody></table></div>'; }
     // Master PAYMENTS tab: payments MADE to this supplier (the ledger), grouped by payment run and expandable to
     // the per-line breakdown (PO reference, type, amount, deposit ref).
@@ -2041,7 +2050,9 @@
                 fetch(EP.labelData+'?skus='+encodeURIComponent(btn.dataset.skus)).then(function(r){return r.json();}).then(function(rows){ btn.disabled=false; if(!rows||!rows.length||rows.error){alert('No crossdock barcodes found');return;}
                   BC.crossdock(rows,btn.dataset.po,btn.dataset.do,btn.dataset.client,btn.dataset.address,btn,btn.dataset.po+'_crossdock_labels.zip'); }).catch(function(){alert('Could not load crossdock labels');btn.disabled=false;}); }; });
               spRender.forEach(function(s){ if(!s.is_fob) ppShipTimeline(s.shipment_ref); }); return; }
-            if(PORTAL_TAB==='deposits'){ body.innerHTML=ppDeposits(_ppData.sdep); return; }
+            if(PORTAL_TAB==='deposits'){ body.innerHTML=ppDeposits(_ppData.sdep);
+              body.querySelectorAll('.pp-dep-exp').forEach(function(a){ a.onclick=function(){ var k=a.dataset.k, det=body.querySelector('.pp-dep-det[data-k="'+k+'"]'); if(!det)return; var open=det.style.display!=='none'; det.style.display=open?'none':''; a.textContent=open?'▸':'▾'; }; });   // expand each deposit → POs that drew it down
+              return; }
             if(PORTAL_TAB==='payments'){ body.innerHTML=ppPayments(_ppData.payments||[]);
               body.querySelectorAll('.pay-head').forEach(function(h){ h.onclick=function(){ var c=h.closest('.sp-card'), bd=c&&c.querySelector('.pay-body'), tg=h.querySelector('.pay-toggle'); if(!bd)return; var open=bd.style.display!=='none'; bd.style.display=open?'none':''; if(tg)tg.textContent=open?'▸':'▾'; }; });
               return; }

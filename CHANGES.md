@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.316 - Supplier portal Deposits: expand to see POs that drew it down
+- On the supplier portal **Deposits** tab, each deposit reference now has an **expand (▸)** button that reveals the individual **purchase orders that drew down that deposit** and the amount each drew (from the PO's starting deposit; matched by deposit reference). Only shown when there's at least one drawdown. `supply/portal-view.js`.
+
 ## v26.315 - Balance milestone: no due date when the calculated balance is $0
 - `balance_due` in `PO_ROWS_SQL` is now null when the **calculated balance is 0**, mirroring the existing start/completion gates ("a 0-amount milestone has no due date"). Removes the spurious "Balance overdue" notification / Payments-Due row on POs whose balance is $0 (e.g. a 100%-completion PO). `server.mjs`.
 
