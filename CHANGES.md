@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.352 - PO grid: "Shipped · no final invoice" auto-selects Shipping+Complete pills
+- Choosing the "Shipped · no final invoice" exception now auto-sets the status pills to **Shipping + Complete** so the matching POs actually show (they were hidden by the default in-progress status filter). Criteria unchanged: SHIPPING/DELIVERED/COMPLETE, no final invoice, production ≥ 50 (excludes legacy pre-P50). `supply/inject.html`.
+
 ## v26.351 - PO record-of-change: invoice + order-plan edits; order-plan line delete
 - Final invoice amount (`supplier_invoice_total`) and final invoice due date (`balance_due_date_overide`) now post a timeline record-of-change entry when edited (added to the tracked-field map). `server.mjs`.
 - Order-plan edits now log a record of change naming the SKU + the qty movement (added / removed / `qty old → new`). `server.mjs`.
