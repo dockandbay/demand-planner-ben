@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.333 - Fulfil: real create/update PO write path (guarded, resolvers verified)
+- Built the actual Fulfil PO push in `fulfilPushLines` (previously a stub). It now: resolves the supplier→`party.party` id (by name), currency→`currency.currency` id (by ISO code, from `suppliers.default_currency`, USD default), destination `branch`→`stock.location` warehouse id (by code, ILG fallback), and every line SKU→`product.product` id (by code). Then create-if-absent: **create** posts `purchase.purchase` with header + inline `lines` (Tryton `["create",[...]]`); **update** replaces existing lines + delivery date on the matched PO. `server.mjs`.
+- Pre-flight resolution report: aborts with a clear message (missing supplier party / currency / warehouse / uncatalogued SKUs) **before any write**, so a PO is never created with unresolved objects.
+- Still guarded: `FULFIL_LINES_SEND=false` → the push runs read-only resolution and returns the resolved payload + any problems (dry-run); flipping to `true` performs the real write. Resolvers verified read-only against the sandbox (party/currency/warehouse all resolve; product returns empty until catalog import).
+- **Action for Diviyaj:** the Fulfil **sandbox is empty of products (0) and has no supplier parties** — import the product catalog + suppliers into the Fulfil sandbox so an end-to-end PO push can be validated. Sandbox reference objects confirmed: company id 1, currency USD id 143, warehouses ILG/IFULFILLMENT/G10/COGHLANS. Field names on create (`party`/`company`/`currency`/`warehouse`/`lines`) are best-effort and get final confirmation on the first real push once the catalog exists.
+
 ## v26.332 - Demand grid: drop the phantom blank grey category row
 - Root cause of the blank grey row (between "Tea Towel" and "Towel - Beach") was **uncategorised products** — SKUs with null category *and* null subcategory grouped into a nameless category, rendering an empty grey `cat-hdr` bar. `filteredCats()` now skips any category group whose name is blank/null, so the phantom row is gone. `artifact_v16.7.html`.
 - Note for Diviyaj/data: **934 SKUs on live have no category/subcategory** (`planner.products` where category and subcategory are both blank). They were never plottable in the plan; this just stops them rendering a blank header. Worth a categorisation pass in Airtable if any are live-selling SKUs.

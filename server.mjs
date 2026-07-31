@@ -1177,12 +1177,21 @@ app.get('/api/supply/erp-status', async (req, res) => {
 // Safety: with no keys set (FULFIL_<ENV>_SUBDOMAIN/_API_KEY) every op throws NO_FULFIL_CFG and NOTHING sends.
 // The line/create push is a DRY-RUN for now (builds + returns the intended payload, does not POST a blind live
 // create) until the mapping is validated on the sandbox — then FULFIL_LINES_SEND flips it to a real write.
-const FULFIL_LINES_SEND = false;   // flip true once the create/line payload is verified against the sandbox
+const FULFIL_LINES_SEND = false;   // flip true once the create/line payload is verified against the sandbox catalog
 const FULFIL_MAP = {
-  poModel: 'purchase.purchase', lineModel: 'purchase.line',   // confirmed: purchase.purchase resolves (purchase.order 404s); base /api/v2, auth X-API-KEY
-  ref: 'reference',                 // PO number field on purchase.purchase  (field names verify once a sandbox PO exists)
-  deliveryDate: 'delivery_date',    // planner completion date maps here  (verify)
-  line: { productCode: 'product.code', qty: 'quantity', price: 'unit_price', desc: 'description' },
+  poModel: 'purchase.purchase', lineModel: 'purchase.line', partyModel: 'party.party',
+  productModel: 'product.product', whModel: 'stock.location', currencyModel: 'currency.currency',
+  ref: 'reference',                 // PO number field on purchase.purchase  (verified: reference exists, search_read ok)
+  party: 'party',                   // supplier party (id) — REQUIRED to create a PO
+  company: 'company',               // company (id) — sandbox has one: id 1 (Dock & Bay Ltd)
+  currency: 'currency',             // currency (id) — resolved by ISO code (sandbox: USD=143)
+  warehouse: 'warehouse',           // receiving warehouse (id) — resolved by code (ILG/IFULFILLMENT/G10/COGHLANS)
+  deliveryDate: 'delivery_date',    // planner completion date maps here — set per line (verify on first real push)
+  linesField: 'lines',              // one2many on purchase.purchase; created inline via Tryton ["create",[...]]
+  line: { product: 'product', productCode: 'code', qty: 'quantity', price: 'unit_price', desc: 'description', deliveryDate: 'delivery_date' },
+  // Defaults discovered read-only from the sandbox (2026-07): single company, USD currency present.
+  // Warehouse defaults to ILG unless the PO's destination maps to one of the codes above.
+  defaultCompany: 1, defaultWarehouseCode: 'ILG',
 };
 async function fulfilFetch(method, path, body) {
   const cfg = fulfilConfigFor(await activeFulfilEnv());
@@ -1205,22 +1214,96 @@ async function fulfilSyncDate(po, completion) {
   await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + id, { [FULFIL_MAP.deliveryDate]: iso });
   return { ok: true, fulfil_id: id, deliveryDate: iso };
 }
-// push line items (SKU / qty / price) + date to Fulfil; create the PO if absent. Gathers the SAME planner data
-// the Cin7 push uses. DRY-RUN until FULFIL_LINES_SEND=true — returns the payload it WOULD send for review.
+// ── Read-only resolvers: map planner values → Fulfil object ids (verifiable against the sandbox now) ──
+async function fulfilSearchOne(model, domain, fields) {
+  const rows = await fulfilFetch('PUT', '/model/' + model + '/search_read', [domain, 0, 1, null, fields || ['id']]);
+  return (Array.isArray(rows) && rows[0]) || null;
+}
+async function fulfilResolveParty(name) {
+  if (!name) return null;
+  const r = await fulfilSearchOne(FULFIL_MAP.partyModel, [['name', '=', name]], ['id', 'name']);
+  return r ? r.id : null;
+}
+async function fulfilResolveCurrency(code) {
+  const r = await fulfilSearchOne(FULFIL_MAP.currencyModel, [['code', '=', String(code || 'USD').toUpperCase()]], ['id', 'code']);
+  return r ? r.id : null;
+}
+async function fulfilResolveWarehouse(code) {
+  const r = await fulfilSearchOne(FULFIL_MAP.whModel, [['type', '=', 'warehouse'], ['code', '=', code]], ['id', 'code']);
+  return r ? r.id : null;
+}
+// SKU → product id (by product code). Returns a map of found codes; missing codes are reported by the caller.
+async function fulfilResolveProducts(skus) {
+  const uniq = Array.from(new Set(skus.filter(Boolean)));
+  const out = {};
+  if (!uniq.length) return out;
+  const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.productModel + '/search_read', [[['code', 'in', uniq]], 0, uniq.length, null, ['id', 'code']]);
+  (rows || []).forEach(r => { if (r && r.code != null) out[String(r.code)] = r.id; });
+  return out;
+}
+// push line items (SKU / qty / price) + delivery date to Fulfil; create the PO if absent. Gathers the SAME planner
+// data the Cin7 push uses. Resolves supplier/currency/warehouse/products to Fulfil ids first (read-only) and aborts
+// with a clear message if any are missing — so a create is never attempted with an unresolved SKU/supplier.
+// DRY-RUN until FULFIL_LINES_SEND=true (returns the resolved payload for review); then it performs the real write.
 async function fulfilPushLines(po, completion) {
   const lines = (await pool.query(`SELECT l.sku, l.qty,
       coalesce((SELECT c.final_cost FROM planner.portal_line_costs c WHERE c.po=l.po AND c.sku=l.sku AND c.final_cost IS NOT NULL AND c.confirmed_at IS NOT NULL), l.cost_price) price
     FROM planner.purchase_order_lines l WHERE l.po=$1 AND coalesce(l.qty,0)>0 ORDER BY l.sku`, [po])).rows;
-  const sup = (await pool.query(`SELECT coalesce(supplier_name,'') s FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0]?.s || '';
-  const fulfilId = await fulfilFindPO(po);   // this call needs keys; throws NO_FULFIL_CFG when absent
-  const payload = {
-    action: fulfilId ? 'update' : 'create', po, fulfil_id: fulfilId, supplier: sup,
-    [FULFIL_MAP.deliveryDate]: completion ? String(completion).slice(0, 10) : null,
-    lines: lines.map(l => ({ [FULFIL_MAP.line.productCode]: l.sku, [FULFIL_MAP.line.qty]: Number(l.qty) || 0, [FULFIL_MAP.line.price]: l.price == null ? null : Number(l.price) })),
+  const poRow = (await pool.query(`SELECT coalesce(supplier_name,'') supplier, coalesce(branch,'') warehouse FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0] || {};
+  const supName = poRow.supplier || '';
+  const curCode = (await pool.query(`SELECT coalesce(s.default_currency,'USD') c FROM planner.suppliers s WHERE s.name=$1`, [supName])).rows[0]?.c || 'USD';
+  if (!lines.length) return { ok: false, error: 'PO ' + po + ' has no line quantities to push.' };
+
+  const fulfilId = await fulfilFindPO(po);                          // needs keys; throws NO_FULFIL_CFG when absent
+  const partyId = await fulfilResolveParty(supName);
+  const currencyId = await fulfilResolveCurrency(curCode);
+  // Map the planner warehouse to a Fulfil warehouse code; fall back to the default (ILG).
+  const whCode = (String(poRow.warehouse || '').toUpperCase().replace(/[^A-Z0-9]/g, '') || FULFIL_MAP.defaultWarehouseCode);
+  const warehouseId = (await fulfilResolveWarehouse(whCode)) || (await fulfilResolveWarehouse(FULFIL_MAP.defaultWarehouseCode));
+  const prodMap = await fulfilResolveProducts(lines.map(l => l.sku));
+  const missingSkus = lines.map(l => l.sku).filter(s => !(String(s) in prodMap));
+
+  // Pre-flight resolution report — surfaces exactly what's missing before any write.
+  const resolution = { supplier: supName, party_id: partyId, currency: curCode, currency_id: currencyId,
+    warehouse_code: whCode, warehouse_id: warehouseId, products_found: Object.keys(prodMap).length,
+    products_total: lines.length, missing_skus: missingSkus };
+  const problems = [];
+  if (!fulfilId && !partyId) problems.push('supplier "' + supName + '" is not a party in Fulfil (create it / import suppliers first)');
+  if (!currencyId) problems.push('currency ' + curCode + ' not found in Fulfil');
+  if (!warehouseId) problems.push('no matching warehouse (tried ' + whCode + ' and ' + FULFIL_MAP.defaultWarehouseCode + ')');
+  if (missingSkus.length) problems.push(missingSkus.length + ' SKU(s) not in Fulfil catalog: ' + missingSkus.slice(0, 8).join(', ') + (missingSkus.length > 8 ? '…' : ''));
+
+  const lineDicts = lines.map(l => ({
+    [FULFIL_MAP.line.product]: prodMap[String(l.sku)] || null,
+    [FULFIL_MAP.line.qty]: Number(l.qty) || 0,
+    [FULFIL_MAP.line.price]: l.price == null ? null : Number(l.price),
+    [FULFIL_MAP.line.deliveryDate]: completion ? String(completion).slice(0, 10) : null,
+  }));
+  const headerPayload = {
+    [FULFIL_MAP.ref]: po, [FULFIL_MAP.party]: partyId, [FULFIL_MAP.company]: FULFIL_MAP.defaultCompany,
+    [FULFIL_MAP.currency]: currencyId, [FULFIL_MAP.warehouse]: warehouseId,
+    [FULFIL_MAP.linesField]: [['create', lineDicts]],
   };
-  if (!FULFIL_LINES_SEND) return { ok: true, dry_run: true, note: 'Fulfil line/create push is not enabled yet — payload below is what would be sent. Verify the field mapping on the sandbox, then set FULFIL_LINES_SEND=true.', would_send: payload };
-  // (real create/update wiring goes here once the mapping is verified on the sandbox)
-  throw new Error('Fulfil line push mapping verified flag is on but the write path is not implemented — verify on sandbox first.');
+
+  if (!FULFIL_LINES_SEND) {
+    return { ok: problems.length === 0, dry_run: true,
+      note: problems.length ? 'Not ready to push — resolve the issues below (usually: import the catalog/supplier into the Fulfil sandbox), then re-run.' : 'All references resolved. Flip FULFIL_LINES_SEND=true to perform the real ' + (fulfilId ? 'update' : 'create') + '.',
+      action: fulfilId ? 'update' : 'create', fulfil_id: fulfilId, resolution, problems, would_send: headerPayload };
+  }
+  if (problems.length) { const e = new Error('Fulfil push blocked: ' + problems.join('; ')); e.code = 'FULFIL_UNRESOLVED'; throw e; }
+
+  if (fulfilId) {
+    // UPDATE: replace the existing PO's lines and refresh the delivery date. (delete existing + create fresh)
+    const existing = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.lineModel + '/search_read', [[['purchase', '=', fulfilId]], 0, 500, null, ['id']]);
+    const ids = (existing || []).map(r => r.id);
+    if (ids.length) await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + fulfilId, { [FULFIL_MAP.linesField]: [['delete', ids]] });
+    await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + fulfilId, { [FULFIL_MAP.linesField]: [['create', lineDicts]] });
+    return { ok: true, action: 'update', fulfil_id: fulfilId, lines: lineDicts.length, resolution };
+  }
+  // CREATE: Fulfil v2 create → POST list of dicts, returns created ids.
+  const created = await fulfilFetch('POST', '/model/' + FULFIL_MAP.poModel, [headerPayload]);
+  const newId = Array.isArray(created) ? created[0] : (created && created.id);
+  return { ok: true, action: 'create', fulfil_id: newId, lines: lineDicts.length, resolution };
 }
 // Supplier-submitted actual cost prices (portal order plan). Read all (small table); filtered client-side by PO.
 app.get('/api/supply/portal-line-costs', async (req, res) => {
