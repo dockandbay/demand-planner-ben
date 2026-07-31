@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.356 - CONFIG ▸ Suppliers: manage portal users inline
+- The supplier edit form now has a **Portal users** section — list, add, remove and toggle-active the supplier’s portal logins right there (reuses the portal-user endpoints), instead of only in the separate Portal users tab. `supply/inject.html`.
+
 ## v26.355 - Record-of-change: date deltas + shipment-date cascade
 - Date changes now show the movement in brackets: `07-Aug-26 (DELAY of 6 days)` or `(BROUGHT FORWARD N days)`. `server.mjs`.
 - Record of change now extends to **shipment-driven date recalcs**: when a shipment date changes, every aboard PO whose effective completion shifts (even inherited) gets a log entry, e.g. `Shipment PO-234 delivery date → 15-Sep-26. Completion recalculated to 22-Sep-26 (BROUGHT FORWARD 5 days)`. `server.mjs`.

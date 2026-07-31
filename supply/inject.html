@@ -5988,7 +5988,8 @@
           saveUrl:function(id){ return '/api/supply/branch/'+encodeURIComponent(id); } });
       };
       SUBS['suppliers']=function(){ b.innerHTML='<div class="count">Loading…</div>';
-        fetch('/api/supply/suppliers').then(function(r){return r.json();}).then(function(rows){
+        Promise.all([fetch('/api/supply/suppliers').then(function(r){return r.json();}),fetch('/api/supply/portal-users').then(function(r){return r.json();}).catch(function(){return [];})]).then(function(_sr){ var rows=_sr[0], PUSERS=_sr[1]||[];
+          function puFor(r){ return (PUSERS||[]).filter(function(u){ return String(u.supplier_id||'')===String(r.id) || (u.supplier_name&&r.name&&String(u.supplier_name).toLowerCase().trim()===String(r.name).toLowerCase().trim()); }); }
           // Suppliers have ~13 fields (identity + payment terms + contact) — a scannable CARD LIST + a grouped
           // full-width EDIT FORM, via the shared cardEditor(). The %-sum live indicator is a wireEdit hook.
           var KINDS=['supplier','freight','internal','other'], CURS=['USD','GBP','EUR','AUD','CAD'];
@@ -6017,6 +6018,30 @@
           function seln(f,val,opts){ var ov=String(val==null?'':val); return '<select class="sup-in" data-f="'+f+'" style="padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px">'+opts.map(function(o){return '<option'+(ov.toLowerCase()===String(o).toLowerCase()?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>'; }
           function lblBlk(lbl,help,field){ return '<div style="margin:0 0 12px"><div style="font-weight:600;font-size:12px;margin-bottom:'+(help?'1px':'4px')+'">'+esc(lbl)+'</div>'+(help?'<div class="mut tiny" style="margin-bottom:4px">'+esc(help)+'</div>':'')+field+'</div>'; }
           function numBlk(lbl,f,val,suffix){ return '<div><div style="font-weight:600;font-size:11px;margin-bottom:3px">'+esc(lbl)+'</div><div style="display:flex;align-items:center;gap:4px"><input class="sup-in" data-f="'+f+'" value="'+esc(val==null?'':val)+'" inputmode="decimal" style="width:66px;box-sizing:border-box;padding:5px 7px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;text-align:right">'+(suffix?'<span class="mut tiny">'+esc(suffix)+'</span>':'')+'</div></div>'; }
+          // Portal-users management embedded in the supplier editor (also reused by the PO "manage supplier" drawer).
+          function supPuRow(u){ return '<div class="sup-pu-row" data-id="'+esc(String(u.id))+'" style="display:flex;align-items:center;gap:8px;font-size:12px;margin:3px 0">'
+              +'<label style="cursor:pointer;flex:0 0 auto" title="active"><input type="checkbox" class="sup-pu-active"'+(u.active?' checked':'')+'></label>'
+              +'<span style="flex:1;min-width:0;word-break:break-word">'+esc(u.email)+(u.contact_name?' <span class="mut tiny">· '+esc(u.contact_name)+'</span>':'')+(u.active?'':' <span class="tool-badge bg-neutral" style="font-size:8px">inactive</span>')+'</span>'
+              +'<button class="lnk-btn sup-pu-del" title="remove this portal user" style="color:#b91c1c">✕</button></div>'; }
+          function supPuBlock(r){ var users=puFor(r);
+            return '<div style="border-top:1px solid #eef2f7;margin:2px 0 14px"></div>'
+              +'<div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:2px">Portal users <span class="mut tiny" style="font-weight:400">— logins for this supplier’s portal (tick = active)</span></div>'
+              +'<div id="sup-pu-list" data-sup="'+esc(r.name||'')+'" style="margin-bottom:6px">'+(users.length?users.map(supPuRow).join(''):'<div class="sup-pu-empty mut tiny" style="margin:3px 0">No portal users yet.</div>')+'</div>'
+              +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><input id="sup-pu-email" type="email" placeholder="email@supplier.com" style="font-size:12px;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;width:200px"><input id="sup-pu-contact" placeholder="contact (optional)" style="font-size:12px;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;width:140px"><button class="save-btn light" id="sup-pu-add">+ Add portal user</button><span id="sup-pu-msg" class="mut tiny"></span></div>'; }
+          function wireSupPuRow(row){ row.querySelector('.sup-pu-del').onclick=function(){ if(!confirm('Remove this portal user?'))return;
+              fetch('/api/supply/portal-user/'+row.dataset.id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({_delete:true})}).then(function(r){return r.json();}).then(function(){ row.remove(); }).catch(function(e){ alert('Remove failed: '+(e.message||e)); }); };
+            row.querySelector('.sup-pu-active').onchange=function(){ var cb=this; fetch('/api/supply/portal-user/'+row.dataset.id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({active:cb.checked})}).then(function(r){return r.json();}).catch(function(){ cb.checked=!cb.checked; alert('Update failed'); }); }; }
+          function wireSupPu(scope){ scope.querySelectorAll('.sup-pu-row').forEach(wireSupPuRow);
+            var addBtn=scope.querySelector('#sup-pu-add'); if(!addBtn)return; addBtn.onclick=function(){
+              var emEl=scope.querySelector('#sup-pu-email'), ctEl=scope.querySelector('#sup-pu-contact'), msg=scope.querySelector('#sup-pu-msg'), list=scope.querySelector('#sup-pu-list');
+              var em=(emEl.value||'').trim(), ct=(ctEl.value||'').trim(), sup=list.dataset.sup;
+              if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){ msg.style.color='#dc2626'; msg.textContent='Enter a valid email.'; emEl.focus(); return; }
+              addBtn.disabled=true; msg.style.color='#64748b'; msg.textContent='Adding…';
+              fetch('/api/supply/portal-user-create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:em,supplier_name:sup,contact_name:ct||null})}).then(function(r){return r.json();}).then(function(j){ addBtn.disabled=false;
+                if(j&&j.error){ msg.style.color='#dc2626'; msg.textContent=j.error; return; }
+                var emp=list.querySelector('.sup-pu-empty'); if(emp)emp.remove();
+                var tmp=document.createElement('div'); tmp.innerHTML=supPuRow({id:j.id,email:em,contact_name:ct,active:true}); var row=tmp.firstChild; list.appendChild(row); wireSupPuRow(row);
+                emEl.value=''; ctEl.value=''; msg.style.color='#16a34a'; msg.textContent='Added.'; }).catch(function(e){ addBtn.disabled=false; msg.style.color='#dc2626'; msg.textContent=(e.message||e); }); }; }
           function editHtml(r){ var id=esc(String(r.id));
             return '<div class="sect-h" style="display:flex;align-items:center;gap:10px"><button id="sup-back" style="cursor:pointer;border:1px solid #cbd5e1;background:#f8fafc;padding:3px 11px;border-radius:5px;font-size:11px">← Back</button> Edit supplier</div>'
               +'<div style="max-width:860px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;padding:16px 18px">'
@@ -6073,6 +6098,7 @@
               +lblBlk('Include for product development','shows the Product tab in this supplier’s portal',
                  '<select class="sup-in" data-f="include_product_dev" style="padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;width:90px"><option value="false"'+(fieldOf(r,'include_product_dev')?'':' selected')+'>No</option><option value="true"'+(fieldOf(r,'include_product_dev')?' selected':'')+'>Yes</option></select>')
               +'</div>'
+              +supPuBlock(r)
               +'<div style="display:flex;gap:8px;margin-top:8px;padding-top:12px;border-top:1px solid #eef2f7"><button id="sup-save" data-k="'+id+'" style="cursor:pointer;border:none;background:#2563eb;color:#fff;padding:6px 18px;border-radius:6px;font-size:12px;font-weight:600">Save changes</button>'
               +'<button id="sup-cancel" style="cursor:pointer;border:1px solid #cbd5e1;background:#fff;padding:6px 14px;border-radius:6px;font-size:12px">Cancel</button>'
               +'<span id="sup-msg" class="mut tiny" style="align-self:center;margin-left:6px"></span></div></div>'; }
@@ -6083,7 +6109,8 @@
             ids:{save:'sup-save',back:'sup-back',cancel:'sup-cancel',msg:'sup-msg'},
             saveUrl:function(id){ return '/api/supply/supplier/'+encodeURIComponent(id); },
             wireEdit:function(){ updPctSum();
-              b.querySelectorAll('.sup-in[data-f="start_deposit_pct"],.sup-in[data-f="completion_pct"],.sup-in[data-f="balance_pct"]').forEach(function(i){ i.oninput=updPctSum; }); },
+              b.querySelectorAll('.sup-in[data-f="start_deposit_pct"],.sup-in[data-f="completion_pct"],.sup-in[data-f="balance_pct"]').forEach(function(i){ i.oninput=updPctSum; });
+              wireSupPu(b); },
             wireList:function(){ var nb=document.getElementById('sup-new'); if(!nb)return;
               nb.onclick=function(){ if(document.getElementById('sup-newform'))return;   // inline form (not 2 prompts)
                 var host=nb.closest('.sect-h')||nb.parentNode;
