@@ -6254,13 +6254,13 @@
           function chk(email,field,val){ return '<input type="checkbox" class="pm-chk" data-em="'+esc(email)+'" data-f="'+field+'"'+(val?' checked':'')+'>'; }
           var LAND_OPTS=[['supply/purchase-orders','SUPPLY ▸ Purchase Orders'],['supply/actions','SUPPLY ▸ Actions'],['demand','DEMAND'],['buy','BUY'],['fba','FBA'],['reports','REPORTS'],['product/plan','PRODUCT'],['config','CONFIG'],['scenario','SCENARIO']];
           function landSel(val){ var v=val||'supply/purchase-orders'; return '<select class="pm-land" style="font-size:11px;padding:2px 5px;border:1px solid #cbd5e1;border-radius:4px">'+LAND_OPTS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===v?' selected':'')+'>'+esc(o[1])+'</option>';}).join('')+'</select>'; }
-          var body=(rows||[]).map(function(r){ return '<tr data-em="'+esc(r.email)+'"><td class="l">'+esc(r.email)+'</td>'
+          var body=(rows||[]).map(function(r){ return '<tr data-em="'+esc(r.email)+'"><td class="l" style="white-space:nowrap">'+esc(r.email)+'</td>'
               +'<td class="l" style="text-align:center">'+chk(r.email,'supply_edit',r.supply_edit)+'</td>'
               +'<td class="l" style="text-align:center">'+chk(r.email,'demand_edit',r.demand_edit)+'</td>'
               +'<td class="l" style="text-align:center">'+chk(r.email,'product_edit',r.product_edit)+'</td>'
               +'<td class="l" style="text-align:center">'+chk(r.email,'is_admin',r.is_admin)+'</td>'
               +'<td class="l">'+landSel(r.landing_page)+'</td>'
-              +'<td class="l"><span class="mut tiny">'+esc(r.updated_at||'')+(r.updated_by?' · '+esc(r.updated_by):'')+'</span></td>'
+              +'<td class="l" style="white-space:nowrap"><span class="mut tiny">'+esc(r.updated_at||'')+(r.updated_by?' · '+esc(r.updated_by):'')+'</span></td>'
               +'<td class="l"><button class="pm-del" data-em="'+esc(r.email)+'" style="cursor:pointer;border:1px solid #fecaca;background:#fff5f5;color:#b91c1c;border-radius:4px;font-size:11px;padding:3px 9px">Remove</button></td></tr>'; }).join('');
           b.innerHTML='<div class="annot"><b>CONFIG ▸ Permissions.</b> Access is <b>read-only for everyone</b> by default. Grant <b>SUPPLY</b> and/or <b>DEMAND</b> edit rights per email (the Gmail login). <b>Admin</b> can use this panel. FBA stays read-only (bar its Override column); SCENARIO is open to all; anyone with SUPPLY or DEMAND edit can edit the rest of Config. <span class="mut">Live only — your sandbox is always full-access.</span></div>'
             +'<div class="sect-h">Access <span class="mut tiny">(changes save immediately)</span></div>'
@@ -6271,7 +6271,7 @@
               +'<label style="font-size:12px"><input type="checkbox" id="pm-nadmin"> Admin</label>'
               +'<button class="tool-badge bg-blue" id="pm-add" style="cursor:pointer;border:none">+ Grant access</button>'
               +'<span class="pm-err" style="color:#dc2626;font-size:12px"></span></div>'
-            +'<div class="tw" style="max-width:940px"><table><thead><tr><th class="l" style="min-width:220px">Email</th><th class="l">SUPPLY edit</th><th class="l">DEMAND edit</th><th class="l">PRODUCT</th><th class="l">Admin</th><th class="l">Landing page</th><th class="l">Updated</th><th class="l"></th></tr></thead><tbody id="pm-tbody">'+(body||'<tr><td colspan="8" class="l mut">No one granted — everyone is read-only.</td></tr>')+'</tbody></table></div>';
+            +'<div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th class="l" style="white-space:nowrap;min-width:240px">Email</th><th class="l" style="white-space:nowrap;text-align:center">SUPPLY edit</th><th class="l" style="white-space:nowrap;text-align:center">DEMAND edit</th><th class="l" style="white-space:nowrap;text-align:center">PRODUCT</th><th class="l" style="white-space:nowrap;text-align:center">Admin</th><th class="l" style="white-space:nowrap">Landing page</th><th class="l" style="white-space:nowrap">Updated</th><th class="l"></th></tr></thead><tbody id="pm-tbody">'+(body||'<tr><td colspan="8" class="l mut">No one granted — everyone is read-only.</td></tr>')+'</tbody></table></div>';
           function save(payload,cb){ fetch('/api/config/permissions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(function(r){return r.json();}).then(function(j){ if(cb)cb(j); }).catch(function(e){ if(cb)cb({error:(e&&e.message)||'failed'}); }); }
           function rowPayload(tr){ return { email:tr.dataset.em,
             supply_edit:tr.querySelector('.pm-chk[data-f="supply_edit"]').checked, demand_edit:tr.querySelector('.pm-chk[data-f="demand_edit"]').checked,

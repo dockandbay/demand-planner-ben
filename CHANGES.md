@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.347 - CONFIG ▸ Permissions: table fills desktop width, columns fit contents
+- Removed the 940px cap that squished the permissions table; headers (SUPPLY edit / DEMAND edit / PRODUCT / Admin / Landing page / Updated) and the email + updated cells now `white-space:nowrap` so every column sizes to its content and uses available desktop width. `supply/inject.html`.
+
 ## v26.346 - FY show/hide badge + Order Plan SKU filter green
 - DEMAND: the FY show/hide toggle in the FY-total header is now a coloured badge (blue "▸ show" when collapsed / grey "▾ hide" when expanded) so it reads as a control, not label text. `artifact_v16.7.html`.
 - Order Plan view: the "filter SKU / colour…" box (`#op-q`) now uses the same light-green fill (#f0fdf4 / #86efac) as the PO-grid SKU filter, for consistency. `supply/inject.html`.
