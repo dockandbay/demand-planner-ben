@@ -1480,7 +1480,7 @@
       +row('PO Number','<input class="fci pom-po" data-po="'+esc(po)+'" value="'+esc(po)+'" style="width:200px;text-align:left">')
       +row('Branch',cellPickBtn(po,ep,'branch',r.branch,'branch'))
       +row('Ship to <span class="mut tiny">(blank = use branch country)</span>',countrySel(ep,r.country_override,true)+' <span class="mut tiny">'+(r.country_src==='M'?'override':(r.country?esc(String(r.country).toUpperCase())+' (inherited from branch)':'inherited from branch'))+'</span>')
-      +row('Supplier',cellPickBtn(po,'/api/supply/po/'+encodeURIComponent(po)+'/supplier','supplier_name',r.supplier_name,'supplier'))
+      +row('Supplier',cellPickBtn(po,'/api/supply/po/'+encodeURIComponent(po)+'/supplier','supplier_name',r.supplier_name,'supplier')+(r.supplier_name?' <button class="lnk-btn pom-mng-sup" data-sup="'+esc(r.supplier_name)+'" title="edit this supplier in a popout" style="margin-left:8px;color:#2563eb">⚙ manage supplier</button>':''))
       +row('Production',cellPickBtn(po,ep,'prod_no',r.prod_no,'prod'))
       +row('Batch ID',cellPickBtn(po,ep,'batch_id',r.batch_id,'batch'))
       +row('Supplier confirmation',(r.supplier_confirmed?'<span class="tool-badge bg-green">✓ confirmed '+esc(r.supplier_confirmed)+(r.supplier_confirmed_by?' · '+esc(r.supplier_confirmed_by):'')+'</span> <button class="save-btn light pom-unconfirm" data-po="'+esc(po)+'" title="reset so the supplier must re-confirm">reset</button>':'<span class="tool-badge bg-amber">⏳ awaiting supplier confirmation</span>'+(PO_ACTCOND.po_not_approved(r)?actMark(po,'po_not_approved'):'')))
@@ -1725,10 +1725,11 @@
         .catch(function(e){ alert('Failed: '+(e.message||e)); }); }
     function render(q){ q=(q||'').trim().toLowerCase(); var html='<div class="shpop-opt unassign" data-clear="1">'+(isCtry?'— (use branch country)':'— Clear')+'</div>';
       var ms=list.filter(function(n){return !q||n.l.toLowerCase().indexOf(q)>=0;});
-      ms.slice(0,q?80:15).forEach(function(n){ html+='<div class="shpop-opt" data-v="'+esc(n.v)+'">'+esc(n.l)+'</div>'; });
+      ms.slice(0,q?80:15).forEach(function(n){ html+='<div class="shpop-opt" data-v="'+esc(n.v)+'">'+esc(n.l)+(kind==='supplier'?' <button class="lnk-btn shpop-mng" data-sup="'+esc(n.v)+'" title="edit this supplier in a popout" style="float:right;color:#2563eb">⚙ manage</button>':'')+'</div>'; });
       if(!q&&list.length>15)html+='<div class="mut tiny" style="padding:5px 10px">'+(list.length-15)+' more — type to search…</div>';
       var l=document.getElementById('shpop-list'); l.innerHTML=html;
-      l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ set(o.dataset.clear?'':o.dataset.v); }; }); }
+      l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ set(o.dataset.clear?'':o.dataset.v); }; });
+      l.querySelectorAll('.shpop-mng').forEach(function(mb){ mb.onclick=function(e){ e.stopPropagation(); closeShPop(); openSupplierDrawer(mb.dataset.sup); }; }); }
     render(''); var qi=pop.querySelector('.shpop-q'); if(qi){ qi.oninput=function(){render(this.value);}; qi.focus(); } }
   // Crossdock SKU add — same searchable popover UX as the batch/branch cell picker, but multi-add: picking a
   // SKU calls onPick(sku) (the caller appends + saves the comma list). Excludes already-selected SKUs.
@@ -3532,6 +3533,7 @@
     bindActMark(document.getElementById('podet-'+i));   // inline Ⓐ action markers (tooltip + snooze) in the detail
     document.querySelectorAll('#podet-'+i+' .pom-del').forEach(function(b){ b.onclick=function(){ var p=b.dataset.po; if(!confirm('Delete PO '+p+' and all its lines? This cannot be undone.'))return;
       shipPost('/api/supply/po/'+encodeURIComponent(p)+'/delete',{},function(){ poGone(); }); }; });
+    document.querySelectorAll('#podet-'+i+' .pom-mng-sup').forEach(function(b){ b.onclick=function(){ openSupplierDrawer(b.dataset.sup); }; });
     document.querySelectorAll('#podet-'+i+' .pom-unconfirm').forEach(function(b){ b.onclick=function(){ var p=b.dataset.po; if(!confirm('Reset supplier confirmation for '+p+'? They will need to re-confirm in the portal.'))return;
       shipPost('/api/supply/portal-submit',{po:p,po_confirmed:false,submitted_by:'admin'},function(){ if(poBy[p]){poBy[p].supplier_confirmed=null;poBy[p].supplier_confirmed_by='';} invalidateDerived(); poRefetchPanel(p,i); }); }; });
     document.querySelectorAll('#podet-'+i+' .pom-po').forEach(function(inp){ inp.onchange=function(){ var oldpo=inp.dataset.po, np=inp.value.trim(); if(!np||np===oldpo){inp.value=oldpo;return;} if(!confirm('Rename PO '+oldpo+' → '+np+'? Updates all its lines and references.')){inp.value=oldpo;return;}
@@ -7083,6 +7085,56 @@
         var bl=new Blob([csv],{type:'text/csv'}); var u=URL.createObjectURL(bl); var a=document.createElement('a'); a.href=u; a.download=fname('csv'); document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); };
       draw();
     }).catch(function(e){ b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>'; }); }
+  // ── "Manage supplier" popout drawer (from PO ▸ Master Data + the supplier picker) — edit the supplier + its
+  // portal users without leaving the PO. Saves to the same /api/supply/supplier/:id endpoint as CONFIG ▸ Suppliers.
+  var _supDrawerCcy=['USD','GBP','EUR','AUD','CAD'], _supDrawerKinds=['supplier','freight','internal','other'];
+  function closeSupplierDrawer(){ var bg=document.getElementById('supdrawer-bg'); if(bg)bg.style.display='none'; }
+  function openSupplierDrawer(name){
+    var bg=document.getElementById('supdrawer-bg');
+    if(!bg){ bg=document.createElement('div'); bg.id='supdrawer-bg'; bg.style.cssText='position:fixed;inset:0;z-index:100050;background:rgba(15,23,42,.32)';
+      var d0=document.createElement('div'); d0.id='supdrawer'; d0.style.cssText='position:absolute;top:0;right:0;height:100%;width:clamp(min(640px,96vw),46vw,96vw);background:#fff;box-shadow:-8px 0 28px rgba(15,23,42,.18);display:flex;flex-direction:column';
+      bg.appendChild(d0); document.body.appendChild(bg); bg.addEventListener('click',function(e){ if(e.target===bg)closeSupplierDrawer(); }); }
+    bg.style.display='block';
+    document.getElementById('supdrawer').innerHTML='<div style="padding:13px 18px;border-bottom:1px solid #e6ebf2;background:#f8fafc;display:flex;justify-content:space-between;align-items:center;flex:0 0 auto"><b style="font-size:15px">Manage supplier — '+esc(name)+'</b><button onclick="closeSupplierDrawer()" style="border:none;background:none;font-size:18px;cursor:pointer;color:#64748b;font-family:inherit">✕</button></div><div id="supdrawer-body" style="flex:1;overflow:auto;padding:16px 18px"><div class="count">Loading…</div></div>';
+    Promise.all([fetch('/api/supply/suppliers').then(function(r){return r.json();}),fetch('/api/supply/portal-users').then(function(r){return r.json();}).catch(function(){return [];})]).then(function(res){
+      var body=document.getElementById('supdrawer-body'); if(!body)return;
+      var r=(res[0]||[]).filter(function(s){return String(s.name||'').toLowerCase().trim()===String(name||'').toLowerCase().trim();})[0];
+      if(!r){ body.innerHTML='<div class="mut">Supplier “'+esc(name)+'” isn’t in the suppliers list.</div>'; return; }
+      var pusers=(res[1]||[]).filter(function(u){return String(u.supplier_id||'')===String(r.id)||(u.supplier_name&&String(u.supplier_name).toLowerCase().trim()===String(name).toLowerCase().trim());});
+      renderSupplierDrawer(r,pusers);
+    }).catch(function(e){ var body=document.getElementById('supdrawer-body'); if(body)body.innerHTML='<div style="color:#dc2626">'+esc(String(e))+'</div>'; });
+  }
+  function renderSupplierDrawer(r,pusers){
+    var body=document.getElementById('supdrawer-body'); if(!body)return;
+    function fo(f){ return r[f]==null?'':r[f]; }
+    function inp(f,val,w,ph){ return '<input class="supd-in" data-f="'+f+'" value="'+esc(val==null?'':val)+'" placeholder="'+esc(ph||'')+'" style="width:'+(w||'100%')+';box-sizing:border-box;padding:6px 9px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px">'; }
+    function sel(f,val,opts){ var ov=String(val==null?'':val); return '<select class="supd-in" data-f="'+f+'" style="padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px">'+opts.map(function(o){return '<option'+(ov.toLowerCase()===String(o).toLowerCase()?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>'; }
+    function num(f,val){ return '<input class="supd-in" data-f="'+f+'" value="'+esc(val==null?'':val)+'" inputmode="decimal" style="width:70px;box-sizing:border-box;padding:5px 7px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;text-align:right">'; }
+    function blk(lbl,field){ return '<div style="margin:0 0 10px"><div style="font-weight:600;font-size:11px;margin-bottom:3px">'+esc(lbl)+'</div>'+field+'</div>'; }
+    var creditOpts='<select class="supd-in" data-f="credit_type" style="padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;width:140px">'+[['','— none —'],['on_shipment','On shipment'],['on_clearance','On clearance']].map(function(o){return '<option value="'+o[0]+'"'+(String(fo('credit_type'))===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>';
+    var puList=(pusers.length?pusers.map(function(u){ return '<div class="supd-pu-row" data-id="'+esc(String(u.id))+'" style="display:flex;align-items:center;gap:8px;font-size:12px;margin:3px 0"><label style="cursor:pointer"><input type="checkbox" class="supd-pu-active"'+(u.active?' checked':'')+'></label><span style="flex:1;word-break:break-word">'+esc(u.email)+(u.contact_name?' <span class="mut tiny">· '+esc(u.contact_name)+'</span>':'')+'</span><button class="lnk-btn supd-pu-del" style="color:#b91c1c">✕</button></div>'; }).join(''):'<div class="supd-pu-empty mut tiny">No portal users yet.</div>');
+    body.innerHTML='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">'
+        +blk('Name',inp('name',fo('name')))+blk('Code',inp('code',fo('code'),'110px','LX'))+blk('Kind',sel('kind',fo('kind')||'supplier',_supDrawerKinds))+blk('Country',inp('country',fo('country'),'150px'))+blk('Currency',sel('default_currency',fo('default_currency')||'USD',_supDrawerCcy))+'</div>'
+      +'<div style="border-top:1px solid #eef2f7;margin:6px 0 12px"></div><div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:8px">Payment terms</div><div id="supd-pctsum" class="mut tiny" style="margin-bottom:8px"></div>'
+      +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px">'+blk('Start deposit %',num('start_deposit_pct',fo('start_deposit_pct')))+blk('Completion %',num('completion_pct',fo('completion_pct')))+blk('Balance %',num('balance_pct',fo('balance_pct')))+blk('Production (days)',num('production_days',fo('production_days')))+blk('Expedited (weeks)',num('expedited_production_weeks',fo('expedited_production_weeks')))+blk('Credit (days)',num('credit_days',fo('credit_days')))+blk('Credit type',creditOpts)+'</div>'
+      +'<div style="border-top:1px solid #eef2f7;margin:6px 0 12px"></div><div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:8px">Contact &amp; ERP IDs</div>'
+      +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">'+blk('Contact name',inp('contact_name',fo('contact_name')))+blk('Email',inp('email',fo('email')))+blk('Incoterm',inp('incoterm',fo('incoterm'),'110px'))+blk('Export port',inp('export_port',fo('export_port'),'160px'))+blk('Cin7 member ID',inp('cin7_member_id',fo('cin7_member_id'),'160px'))+blk('Fulfil ERP ID',inp('fulfil_id',fo('fulfil_id'),'120px'))+'</div>'
+      +'<div style="border-top:1px solid #eef2f7;margin:6px 0 12px"></div><div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:2px">Portal users <span class="mut tiny" style="font-weight:400">— tick = active</span></div>'
+      +'<div id="supd-pu-list" data-sup="'+esc(r.name||'')+'" style="margin-bottom:6px">'+puList+'</div>'
+      +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><input id="supd-pu-email" type="email" placeholder="email@supplier.com" style="font-size:12px;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;width:190px"><input id="supd-pu-contact" placeholder="contact (optional)" style="font-size:12px;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;width:130px"><button class="save-btn light" id="supd-pu-add">+ Add</button><span id="supd-pu-msg" class="mut tiny"></span></div>'
+      +'<div style="display:flex;gap:8px;align-items:center;margin-top:14px;padding-top:12px;border-top:1px solid #eef2f7;position:sticky;bottom:0;background:#fff"><button id="supd-save" style="cursor:pointer;border:none;background:#2563eb;color:#fff;padding:7px 18px;border-radius:6px;font-size:12px;font-weight:600">Save changes</button><button class="save-btn light" onclick="closeSupplierDrawer()">Close</button><span id="supd-msg" class="mut tiny"></span><button class="lnk-btn" style="margin-left:auto" onclick="closeSupplierDrawer();try{window.__configNav.select(\'suppliers\')}catch(e){}">Full settings in CONFIG ↗</button></div>';
+    function pctSum(){ var el=document.getElementById('supd-pctsum'); if(!el)return; var s=0; ['start_deposit_pct','completion_pct','balance_pct'].forEach(function(f){ var i=body.querySelector('.supd-in[data-f="'+f+'"]'); if(i)s+=parseFloat(i.value)||0; }); s=Math.round(s*100)/100; el.innerHTML='Deposit + Completion + Balance = <b style="color:'+(s===100?'#16a34a':'#b45309')+'">'+s+'%</b>'+(s===100?'':' — should total 100%'); }
+    pctSum(); body.querySelectorAll('.supd-in[data-f="start_deposit_pct"],.supd-in[data-f="completion_pct"],.supd-in[data-f="balance_pct"]').forEach(function(i){ i.oninput=pctSum; });
+    document.getElementById('supd-save').onclick=function(){ var btn=this, msg=document.getElementById('supd-msg'); var payload={}; body.querySelectorAll('.supd-in').forEach(function(i){ payload[i.dataset.f]=i.value; }); btn.disabled=true; msg.style.color='#64748b'; msg.textContent='Saving…';
+      fetch('/api/supply/supplier/'+encodeURIComponent(r.id),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(function(x){return x.json();}).then(function(j){ btn.disabled=false; if(j&&j.error){ msg.style.color='#dc2626'; msg.textContent=j.error; return; } msg.style.color='#16a34a'; msg.textContent='Saved.'; try{invalidateDerived();}catch(e){} }).catch(function(e){ btn.disabled=false; msg.style.color='#dc2626'; msg.textContent=(e.message||e); }); };
+    function wireRow(row){ row.querySelector('.supd-pu-del').onclick=function(){ if(!confirm('Remove this portal user?'))return; fetch('/api/supply/portal-user/'+row.dataset.id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({_delete:true})}).then(function(x){return x.json();}).then(function(){ row.remove(); }); };
+      row.querySelector('.supd-pu-active').onchange=function(){ var cb=this; fetch('/api/supply/portal-user/'+row.dataset.id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({active:cb.checked})}).catch(function(){ cb.checked=!cb.checked; }); }; }
+    body.querySelectorAll('.supd-pu-row').forEach(wireRow);
+    document.getElementById('supd-pu-add').onclick=function(){ var btn=this, list=document.getElementById('supd-pu-list'), emEl=document.getElementById('supd-pu-email'), ctEl=document.getElementById('supd-pu-contact'), msg=document.getElementById('supd-pu-msg'); var em=(emEl.value||'').trim(), ct=(ctEl.value||'').trim();
+      if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){ msg.style.color='#dc2626'; msg.textContent='Enter a valid email.'; return; } btn.disabled=true; msg.textContent='';
+      fetch('/api/supply/portal-user-create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:em,supplier_name:list.dataset.sup,contact_name:ct||null})}).then(function(x){return x.json();}).then(function(j){ btn.disabled=false; if(j&&j.error){ msg.style.color='#dc2626'; msg.textContent=j.error; return; } var emp=list.querySelector('.supd-pu-empty'); if(emp)emp.remove(); var tmp=document.createElement('div'); tmp.innerHTML='<div class="supd-pu-row" data-id="'+esc(String(j.id||''))+'" style="display:flex;align-items:center;gap:8px;font-size:12px;margin:3px 0"><label style="cursor:pointer"><input type="checkbox" class="supd-pu-active" checked></label><span style="flex:1;word-break:break-word">'+esc(em)+(ct?' <span class="mut tiny">· '+esc(ct)+'</span>':'')+'</span><button class="lnk-btn supd-pu-del" style="color:#b91c1c">✕</button></div>'; var row=tmp.firstChild; list.appendChild(row); wireRow(row); emEl.value=''; ctEl.value=''; msg.style.color='#16a34a'; msg.textContent='Added.'; }).catch(function(e){ btn.disabled=false; msg.style.color='#dc2626'; msg.textContent=(e.message||e); }); };
+  }
+  window.openSupplierDrawer=openSupplierDrawer; window.closeSupplierDrawer=closeSupplierDrawer;
   function renderPaymentsReport(b){ b.innerHTML='<div class="count">Loading…</div>';
     Promise.all([
       fetch('/api/supply/payments-report').then(function(r){return r.json();}),
