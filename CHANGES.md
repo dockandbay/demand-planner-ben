@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.361 - PO timeline: "hide record of change" checkbox
+- The PO timeline has a **hide record of change** checkbox (persisted per user) that collapses the record-of-change entries so only the message thread shows. `supply/inject.html`.
+
 ## v26.360 - PO order plan: near-instant edit / add / delete
 - **Root cause:** every order-plan action funnelled through `poRefetchPanel`, which fetched the ENTIRE PO grid (~1400 rows / 2.7MB) + re-fetched the full PO detail — even for a pure UI toggle.
 - **Edit qty / Cancel / empty Save** now re-render only the order-plan panel from the in-memory detail (`box._poDetail`) — **zero fetch → instant**.
