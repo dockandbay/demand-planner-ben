@@ -3139,11 +3139,17 @@ async function emailInvoiceSubmit(po, value, by) {
   try { const s = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='invoice_submit_notify'`)).rows[0];
     emails = _emails(s ? s.value : ''); } catch (e) { emails = []; }
   if (!emails.length) emails = ['zera@dockandbay.com', 'ben@dockandbay.com'];
+  const supName = await poSupplierName(po);   // SUG-0011: name the supplier, not the generic word "Supplier"
   const link = PLANNER_URL + '/#/supply/purchase-orders/plan/' + encodeURIComponent(po);
-  const html = '<p>A supplier submitted <b>invoice information</b> for <b>' + po + '</b>.</p>'
+  const html = '<p><b>' + escHtml(supName) + '</b> submitted <b>invoice information</b> for <b>' + po + '</b>.</p>'
     + '<p>Invoice value: <b>' + value + '</b><br>Submitted by: ' + (by || 'supplier') + '</p>'
     + '<p><a href="' + link + '">Open ' + po + ' in HORIZON</a></p>';
-  return sendResendEmail({ to: emails, subject: 'Supplier submitted invoice info — ' + po, html, kind: 'invoice-notify', ref: po });
+  return sendResendEmail({ to: emails, subject: supName + ' submitted invoice info — ' + po, html, kind: 'invoice-notify', ref: po });
+}
+// supplier display name for a PO (falls back to "Supplier" when unknown) — used in supplier-submission emails
+async function poSupplierName(po) {
+  try { const r = (await pool.query(`SELECT coalesce(nullif(trim(supplier_name),''),'Supplier') n FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0];
+    return (r && r.n) || 'Supplier'; } catch (e) { return 'Supplier'; }
 }
 // Push email when a supplier submits a DOCUMENT for approval (same recipients as invoice submissions).
 async function emailDocSubmit(po, filename, by) {
@@ -3151,11 +3157,12 @@ async function emailDocSubmit(po, filename, by) {
   try { const s = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='invoice_submit_notify'`)).rows[0];
     emails = _emails(s ? s.value : ''); } catch (e) { emails = []; }
   if (!emails.length) emails = ['zera@dockandbay.com', 'ben@dockandbay.com'];
+  const supName = await poSupplierName(po);   // SUG-0011: name the supplier
   const link = PLANNER_URL + '/#/supply/purchase-orders/plan/' + encodeURIComponent(po);
-  const html = '<p>A supplier submitted a <b>document for approval</b> on <b>' + po + '</b>.</p>'
+  const html = '<p><b>' + escHtml(supName) + '</b> submitted a <b>document for approval</b> on <b>' + po + '</b>.</p>'
     + '<p>Document: <b>' + (filename || 'document') + '</b><br>Submitted by: ' + (by || 'supplier') + '</p>'
     + '<p><a href="' + link + '">Review it on the PO ▸ Documents tab in HORIZON</a></p>';
-  return sendResendEmail({ to: emails, subject: 'Supplier submitted a document for approval — ' + po, html, kind: 'invoice-notify', ref: po });
+  return sendResendEmail({ to: emails, subject: supName + ' submitted a document for approval — ' + po, html, kind: 'invoice-notify', ref: po });
 }
 // ── Payment-confirmed notification ── a payment "run" (date + supplier) is confirmed once its bank amount +
 // currency are applied in the Payments Report. paymentRunDetail rebuilds that run's line detail (same source

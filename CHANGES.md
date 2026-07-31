@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.303 - Supplier-submission emails name the supplier (SUG-0011)
+- The "supplier submitted invoice info / document for approval" emails now use the **supplier's name** in the subject + body (e.g. "**Weireken** submitted invoice info — PO-1712952A") instead of the generic word "Supplier". Falls back to "Supplier" when the name is unknown. `server.mjs`.
+
 ## v26.302 - Suggestion box: per-suggestion stakeholders (SUG-0003) ⚠️ NEEDS MIGRATION 162
 - Each suggestion can now have **its own stakeholders** — a new **Stakeholders** column in CONFIG ▸ Suggestions — who are emailed on **that** suggestion's status changes, **in addition to** the global list. The global list is kept (relabelled **Global stakeholders**, emailed on every suggestion + status change). **Migration `162_suggestion_stakeholders.sql`** adds `suggestions.stakeholders` (read defensively — the page works pre-migration, but saving a per-suggestion stakeholder needs the column). Status-change email now sends to the **union** of global + per-suggestion stakeholders. New `POST /api/supply/suggestion/:id/stakeholders`. `server.mjs`, `supply/inject.html`.
 
