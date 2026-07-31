@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.317 - CONFIG ▸ Supply chain defaults to Suppliers
+- Clicking CONFIG ▸ **Supply chain** now opens on the **Suppliers** table by default (was Import duty). `supply/inject.html`.
+
 ## v26.316 - Supplier portal Deposits: expand to see POs that drew it down
 - On the supplier portal **Deposits** tab, each deposit reference now has an **expand (▸)** button that reveals the individual **purchase orders that drew down that deposit** and the amount each drew (from the PO's starting deposit; matched by deposit reference). Only shown when there's at least one drawdown. `supply/portal-view.js`.
 

@@ -5801,7 +5801,7 @@
       return l2+l3; }
     function drawNav(){ var nv=document.getElementById('config-nav'); nv.innerHTML=navHtml();
       nv.querySelectorAll('.rtab').forEach(function(p){ p.onclick=function(){ var k=p.dataset.cs;
-        if(k==='supplychain'){ if(SC_KEYS.indexOf(CONFIG_SUB)<0)CONFIG_SUB=SC_KEYS[0]; }   // open → default to first member
+        if(k==='supplychain'){ if(SC_KEYS.indexOf(CONFIG_SUB)<0)CONFIG_SUB='suppliers'; }   // open → default to Suppliers (Ben)
         else CONFIG_SUB=k;
         syncHash(); drawNav(); showSub(); };}); }
     drawNav();
