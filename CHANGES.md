@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.329 - Fulfil sandbox wired + confirmed reachable
+- Confirmed the Fulfil API: base `https://<subdomain>.fulfil.io/api/v2`, auth header **`X-API-KEY`** (Bearer rejected), PO model **`purchase.purchase`** (`purchase.order` 404s). Updated `FULFIL_MAP.poModel` accordingly. Sandbox creds added to the server `.env` (`FULFIL_SANDBOX_SUBDOMAIN`/`_API_KEY`, gitignored) → `erp-status` shows sandbox configured. End-to-end verified: with Active ERP = Fulfil, the date push reaches the sandbox and searches `purchase.purchase` (0 POs there yet). Line/create push stays dry-run (`FULFIL_LINES_SEND=false`) until a sandbox PO exists to verify field names. `server.mjs`.
+
 ## v26.328 - Demand grid: header row colours, input styling, column width + disc-cell fixes
 - **Month-header row** all `#e7e5e0`, except **actual months** `#F0FFF0` (every actual month header now tagged, not just the current one); "Subcategory / Channel" col included.
 - **Forecast input** override styling: dropped the purple (whole-number) / blue (%) **background + outline** — coloured text only now (`.fci.ovr` / `.fci.pct`).

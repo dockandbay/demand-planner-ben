@@ -1179,8 +1179,8 @@ app.get('/api/supply/erp-status', async (req, res) => {
 // create) until the mapping is validated on the sandbox — then FULFIL_LINES_SEND flips it to a real write.
 const FULFIL_LINES_SEND = false;   // flip true once the create/line payload is verified against the sandbox
 const FULFIL_MAP = {
-  poModel: 'purchase.order', lineModel: 'purchase.line',
-  ref: 'reference',                 // PO number field on purchase.order  (verify)
+  poModel: 'purchase.purchase', lineModel: 'purchase.line',   // confirmed: purchase.purchase resolves (purchase.order 404s); base /api/v2, auth X-API-KEY
+  ref: 'reference',                 // PO number field on purchase.purchase  (field names verify once a sandbox PO exists)
   deliveryDate: 'delivery_date',    // planner completion date maps here  (verify)
   line: { productCode: 'product.code', qty: 'quantity', price: 'unit_price', desc: 'description' },
 };
