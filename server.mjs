@@ -1615,11 +1615,15 @@ app.get('/api/supply/:section', async (req, res) => {
       case 'ka-forecasts':   // DEMAND ▸ Key Accounts Forecast — inline-editable rows (client + SKU + country/wh + ship date + qty)
         return res.json(await q(`SELECT id, coalesce(client,'') client, coalesce(sku,'') sku, coalesce(warehouse,'') warehouse,
           to_char(ship_date,'YYYY-MM-DD') ship_date, quantity FROM planner.key_account_forecasts ORDER BY warehouse, client, sku`));
-      case 'suggestions':   // Suggestion Box — submitted from the top bar, triaged in CONFIG ▸ Suggestions
-        return res.json(await q(`SELECT id, ref, body, coalesce(area,'') area, coalesce(created_by,'') created_by,
+      case 'suggestions': {   // Suggestion Box — submitted from the top bar, triaged in CONFIG ▸ Suggestions
+        const _sugBase = `id, ref, body, coalesce(area,'') area, coalesce(created_by,'') created_by,
           to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, status, coalesce(status_by,'') status_by,
-          to_char(status_at,'YYYY-MM-DD HH24:MI') status_at
-          FROM planner.suggestions ORDER BY (status='new') DESC, created_at DESC`));
+          to_char(status_at,'YYYY-MM-DD HH24:MI') status_at`;
+        const _sugOrder = ` FROM planner.suggestions ORDER BY (status='new') DESC, created_at DESC`;
+        // stakeholders column is migration 162 — read defensively so the page works pre-migration
+        try { return res.json(await q(`SELECT ${_sugBase}, coalesce(stakeholders,'') stakeholders${_sugOrder}`)); }
+        catch (e) { return res.json(await q(`SELECT ${_sugBase}, ''::text stakeholders${_sugOrder}`)); }
+      }
       case 'supplier-timing': {   // SUPPLY ▸ Reports ▸ Supplier Timing — production start/completion + supplier completion-date movements (delay tracking)
         const rows = await q(`
           WITH sub AS (
@@ -3429,6 +3433,12 @@ async function suggestionStakeholders() {
   const list = (v || 'ben@dockandbay.com,sarah@dockandbay.com').split(/[,;\s]+/).map(s => s.trim().toLowerCase()).filter(e => /@/.test(e));
   return Array.from(new Set(list));
 }
+function parseEmails(v) { return Array.from(new Set(String(v || '').split(/[,;\s]+/).map(s => s.trim().toLowerCase()).filter(e => /@/.test(e)))); }
+// per-suggestion stakeholders (mig 162) — read defensively; [] if the column isn't there yet
+async function suggestionOwnStakeholders(id) {
+  try { const r = (await pool.query(`SELECT coalesce(stakeholders,'') s FROM planner.suggestions WHERE id=$1`, [id])).rows[0]; return parseEmails(r && r.s); }
+  catch (e) { return []; }
+}
 const _sugEsc = s => String(s == null ? '' : s).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
 // Suggestion Box — submit a new suggestion (returns its assigned reference) and triage its status.
 app.post('/api/supply/suggestion', async (req, res) => {
@@ -3468,10 +3478,10 @@ app.post('/api/supply/suggestion/:id/status', async (req, res) => {
       const r = await sendResendEmail({ to: prev.created_by, cc: CC, subject: `Your suggestion ${prev.ref} is going live 🎉`, html });
       emailed = !!(r && (r.sent || r.sandbox));
     }
-    // notify the suggestion-box stakeholders on ANY status change
+    // notify the suggestion-box stakeholders on ANY status change — the GLOBAL list plus THIS suggestion's own stakeholders (mig 162)
     try {
       if (prev && prev.status !== status) {
-        const stake = await suggestionStakeholders();
+        const stake = Array.from(new Set([...(await suggestionStakeholders()), ...(await suggestionOwnStakeholders(req.params.id))]));
         if (stake.length) {
           const html = `<p>Suggestion <b>${_sugEsc(prev.ref)}</b> status changed to <b>${_sugEsc(status)}</b>${by ? (' by ' + _sugEsc(by)) : ''}.</p>`
             + `<p style="color:#475569">${_sugEsc(prev.body)}</p>`
@@ -3482,6 +3492,12 @@ app.post('/api/supply/suggestion/:id/status', async (req, res) => {
     } catch (e) { /* best-effort */ }
     res.json({ ok: true, emailed });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Per-suggestion stakeholders (mig 162) — comma/space-separated emails, notified on this suggestion's status changes.
+app.post('/api/supply/suggestion/:id/stakeholders', async (req, res) => {
+  const v = parseEmails((req.body || {}).stakeholders).join(', ');
+  try { await pool.query(`UPDATE planner.suggestions SET stakeholders=$2 WHERE id=$1`, [req.params.id, v || null]); res.json({ ok: true, stakeholders: v }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/suggestion/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.suggestions WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }

@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.302 - Suggestion box: per-suggestion stakeholders (SUG-0003) ⚠️ NEEDS MIGRATION 162
+- Each suggestion can now have **its own stakeholders** — a new **Stakeholders** column in CONFIG ▸ Suggestions — who are emailed on **that** suggestion's status changes, **in addition to** the global list. The global list is kept (relabelled **Global stakeholders**, emailed on every suggestion + status change). **Migration `162_suggestion_stakeholders.sql`** adds `suggestions.stakeholders` (read defensively — the page works pre-migration, but saving a per-suggestion stakeholder needs the column). Status-change email now sends to the **union** of global + per-suggestion stakeholders. New `POST /api/supply/suggestion/:id/stakeholders`. `server.mjs`, `supply/inject.html`.
+
 ## v26.301 - Email log: "Sent per month" client-side fallback
 - The **Sent per month** badge no longer relies solely on the server's `monthly` aggregation. If the response's `monthly` is empty, the client now derives the counts itself from a 12-month rows fetch — so the badge can't show "No emails logged yet" while rows exist (guards against an older/harness serving layer that returns rows but not the monthly array). Server `monthly` is still used when present (accurate + uncapped). `supply/inject.html`.
 
