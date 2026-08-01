@@ -7192,15 +7192,18 @@ function revReload(){ if(_revBody)renderRevenueView(_revBody); }
 function revCombos(){ var seen={}, out=[]; (DATA||[]).forEach(function(r){ if(!r.co||!r.ch)return; var k=r.co+'|'+r.ch; if(!seen[k]){ seen[k]=1; out.push({co:r.co,ch:r.ch}); } });
   out.sort(function(a,b){ var ia=MKTS.indexOf(a.co),ib=MKTS.indexOf(b.co); ia=ia<0?99:ia; ib=ib<0?99:ib; return ia!==ib?ia-ib:String(a.ch).localeCompare(String(b.ch)); }); return out; }
 function revSubcats(){ var seen={}, out=[]; (DATA||[]).forEach(function(r){ if(r.s&&!seen[r.s]){ seen[r.s]=1; out.push(r.s); } }); return out.sort(); }
-// FY revenue for a country×channel: forecast (actuals-to-date + forecast×ASP incl. price changes) + last-year actual.
-function revComboFY(co,ch,startY){ var fmC=fyMonths(startY), fmL=fyMonths(startY-1), fc=0, ly=0;
-  (DATA||[]).forEach(function(r){ if(r.co!==co||r.ch!==ch)return; var s=r.s, a=ga(co,ch,s), fu=(calc(s,co,ch)||{}).fu||{};
-    fmC.forEach(function(m){ if(isActualMonth(m)){ fc+=(a[m]?a[m][1]:0); } else { var p=pa(m); fc+=(fu[m]||0)*getASP(co,ch,s,p.y,p.mo); } });
+// Monthly + FY revenue for a country (ch=null → all channels): per-month forecast (actuals-to-date + forecast×ASP
+// incl. price changes), FY total, and last-year FY actual. Cached per (co|ch|fy) within a render pass.
+var _revCache={};
+function revMonthly(co,ch,fy){ var ck=co+'|'+(ch||'*')+'|'+fy; if(_revCache[ck])return _revCache[ck];
+  var fmC=fyMonths(fy), fmL=fyMonths(fy-1), mon={}, fc=0, ly=0; fmC.forEach(function(m){mon[m]=0;});
+  (DATA||[]).forEach(function(r){ if(r.co!==co)return; if(ch&&r.ch!==ch)return; var s=r.s, a=ga(co,r.ch,s), fu=(calc(s,co,r.ch)||{}).fu||{};
+    fmC.forEach(function(m){ var v=isActualMonth(m)?(a[m]?a[m][1]:0):((fu[m]||0)*getASP(co,r.ch,s,pa(m).y,pa(m).mo)); mon[m]+=v; fc+=v; });
     fmL.forEach(function(m){ ly+=(a[m]?a[m][1]:0); }); });
-  return {fc:fc, ly:ly}; }
+  var out={mon:mon, fc:fc, ly:ly}; _revCache[ck]=out; return out; }
 function renderRevenueView(body){ _revBody=body; if(REV_FY==null)REV_FY=CUR_FY_START;
   var subs=[['targets','Targets &amp; tracking'],['prices','Price changes']];
-  body.innerHTML='<style>.rev-tbl{border-collapse:collapse;font-size:12px;margin-top:6px}.rev-tbl th,.rev-tbl td{padding:4px 11px;border-bottom:1px solid #eef2f7;text-align:left;white-space:nowrap}.rev-tbl .r{text-align:right;font-variant-numeric:tabular-nums}.rev-tbl .c{text-align:center}.rev-tbl tr.tot td{border-top:2px solid #999;font-weight:700}.rev-tbl input,.rev-tbl select{font-size:12px}</style>'
+  body.innerHTML='<style>.rev-tbl{border-collapse:collapse;font-size:12px;margin-top:6px}.rev-tbl th,.rev-tbl td{padding:4px 11px;border-bottom:1px solid #eef2f7;text-align:left;white-space:nowrap}.rev-tbl .r{text-align:right;font-variant-numeric:tabular-nums}.rev-tbl .c{text-align:center}.rev-tbl tr.tot td{border-top:2px solid #999;font-weight:700}.rev-tbl tr.rev-cotot td{background:#f1f5f9;border-top:2px solid #cbd5e1;font-weight:600}.rev-tbl .mut{color:#9aa5b1}.rev-tbl .tiny{font-size:10px;font-weight:400}.rev-tbl input,.rev-tbl select{font-size:12px}</style>'
     +'<div class="bar" style="gap:4px;margin-bottom:8px">'+subs.map(function(s){return '<button class="pill catpill'+(s[0]===REV_SUB?' active':'')+'" data-rs="'+s[0]+'">'+s[1]+'</button>';}).join('')+'</div><div id="rev-body"><div class="count">Loading…</div></div>';
   body.querySelectorAll('.pill[data-rs]').forEach(function(b){ b.onclick=function(){ REV_SUB=b.dataset.rs; revReload(); }; });
   Promise.all([fetch('/api/price-changes').then(function(r){return r.json();}).catch(function(){return [];}),
@@ -7215,30 +7218,33 @@ function saveRevTarget(co,ch,fy,str){ var v=String(str||'').trim(), b={country:c
   else if(v.indexOf('%')>=0){ b.target_type='pct'; b.target_pct=parseFloat(v.replace(/[^0-9.\-]/g,'')); }
   else { var n=v.replace(/[£$,\s]/g,''), mult=1; if(/m$/i.test(n)){mult=1e6;n=n.replace(/m$/i,'');} else if(/k$/i.test(n)){mult=1e3;n=n.replace(/k$/i,'');} b.target_type='value'; b.target_value=parseFloat(n)*mult; }
   fetch('/api/demand-revenue-targets',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b)}).then(function(r){return r.json();}).then(function(){ revReload(); }).catch(function(){ revReload(); }); }
-function renderRevTargets(el){ var combos=revCombos(), fys=[CUR_FY_START,CUR_FY_START+1,CUR_FY_START+2], fy=REV_FY;
+function renderRevTargets(el){ _revCache={}; var combos=revCombos(), fys=[CUR_FY_START,CUR_FY_START+1,CUR_FY_START+2], fy=REV_FY;
   var fyLbl=function(y){return 'FY'+String(y).slice(2)+'/'+String(y+1).slice(2);};
+  var months=fyMonths(fy), MON=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   var sel='<span class="pill-lbl">Financial year</span> '+fys.map(function(y){return '<button class="pill catpill'+(y===fy?' active':'')+'" data-fy="'+y+'">'+fyLbl(y)+'</button>';}).join(' ');
-  var rows='', totFc=0, totLy=0, totTgt=0, anyTgt=false;
-  combos.forEach(function(c){ var r=revComboFY(c.co,c.ch,fy), t=REV_TARGETS[c.co+'|'+c.ch+'|'+fy];
-    var tgt = t ? (t.type==='pct'?r.ly*(1+Number(t.pct||0)/100):Number(t.value||0)) : null;
-    var inputVal = t ? (t.type==='pct'?((Number(t.pct)>=0?'+':'')+Number(t.pct)+'%'):Math.round(Number(t.value))) : '';
-    totFc+=r.fc; totLy+=r.ly; if(tgt!=null){totTgt+=tgt;anyTgt=true;}
-    var gap = tgt!=null?r.fc-tgt:null, implied=r.ly>0?Math.round((r.fc-r.ly)/r.ly*100):null;
-    var rag = tgt==null?'':(r.fc>=tgt?'#16a34a':(r.fc>=tgt*0.95?'#f59e0b':'#dc2626'));
-    rows+='<tr><td><b>'+esc(c.co)+'</b></td><td>'+esc(c.ch)+'</td><td class="r">'+fr(r.ly)+'</td>'
-      +'<td class="r"><input class="rev-tgt" data-co="'+esc(c.co)+'" data-ch="'+esc(c.ch)+'" value="'+esc(inputVal)+'" placeholder="+% or value" style="width:96px;text-align:right;padding:3px 5px;border:1px solid #cbd5e1;border-radius:4px"></td>'
-      +'<td class="r">'+(tgt!=null?fr(tgt):'<span class="mut">—</span>')+'</td>'
-      +'<td class="r"><b>'+fr(r.fc)+'</b></td>'
-      +'<td class="r" style="color:'+(gap==null?'':(gap>=0?'#166534':'#b91c1c'))+'">'+(gap!=null?((gap>=0?'+':'')+fr(gap)):'<span class="mut">—</span>')+'</td>'
-      +'<td class="r">'+(implied!=null?((implied>=0?'+':'')+implied+'%'):'<span class="mut">—</span>')+'</td>'
-      +'<td class="c">'+(rag?'<span title="green ≥ target · amber within 5% · red below" style="display:inline-block;width:12px;height:12px;border-radius:50%;background:'+rag+'"></span>':'')+'</td></tr>';
-  });
-  var totGap=anyTgt?totFc-totTgt:null;
+  var byCo={}; combos.forEach(function(c){ (byCo[c.co]=byCo[c.co]||[]).push(c.ch); });
+  var cos=Object.keys(byCo).sort(function(a,b){var ia=MKTS.indexOf(a),ib=MKTS.indexOf(b);ia=ia<0?99:ia;ib=ib<0?99:ib;return ia-ib;});
+  function tgtOf(co,ch,ly){ var t=REV_TARGETS[co+'|'+ch+'|'+fy]; return t?(t.type==='pct'?ly*(1+Number(t.pct||0)/100):Number(t.value||0)):null; }
+  function tgtInput(co,ch){ var t=REV_TARGETS[co+'|'+ch+'|'+fy], iv=t?(t.type==='pct'?((Number(t.pct)>=0?'+':'')+Number(t.pct)+'%'):Math.round(Number(t.value))):'';
+    return '<input class="rev-tgt" data-co="'+esc(co)+'" data-ch="'+esc(ch)+'" value="'+esc(iv)+'" placeholder="+% / val" style="width:80px;text-align:right;padding:2px 4px;border:1px solid #cbd5e1;border-radius:4px">'; }
+  function rag(fc,t){ if(t==null)return ''; var c=fc>=t?'#16a34a':(fc>=t*0.95?'#f59e0b':'#dc2626'); return '<span title="green ≥ target · amber within 5% · red below" style="display:inline-block;width:11px;height:11px;border-radius:50%;background:'+c+'"></span>'; }
+  var totMon={}; months.forEach(function(m){totMon[m]=0;}); var totFc=0, totLy=0;
+  function row(co,ch,isCo){ var r=revMonthly(co,isCo?null:ch,fy), tKey=isCo?'ALL':ch, tgt=tgtOf(co,tKey,r.ly), gap=tgt!=null?r.fc-tgt:null, grw=r.ly>0?Math.round((r.fc-r.ly)/r.ly*100):null;
+    if(isCo){ months.forEach(function(m){totMon[m]+=r.mon[m];}); totFc+=r.fc; totLy+=r.ly; }
+    var mc=months.map(function(m){return '<td class="r">'+(r.mon[m]?fr(r.mon[m]):'<span class="mut">–</span>')+'</td>';}).join('');
+    return '<tr'+(isCo?' class="rev-cotot"':'')+'><td>'+(isCo?'<b>'+esc(co)+'</b> <span class="mut tiny">all channels</span>':'<span style="padding-left:16px">'+esc(ch)+'</span>')+'</td>'
+      +'<td class="r">'+fr(r.ly)+'</td><td class="r">'+tgtInput(co,tKey)+'</td><td class="r">'+(tgt!=null?fr(tgt):'<span class="mut">—</span>')+'</td>'
+      +mc+'<td class="r"><b>'+fr(r.fc)+'</b></td><td class="r" style="color:'+(gap==null?'':(gap>=0?'#166534':'#b91c1c'))+'">'+(gap!=null?((gap>=0?'+':'')+fr(gap)):'—')+'</td>'
+      +'<td class="r">'+(grw!=null?((grw>=0?'+':'')+grw+'%'):'—')+'</td><td class="c">'+rag(r.fc,tgt)+'</td></tr>'; }
+  var body='';
+  cos.forEach(function(co){ body+=row(co,'ALL',true); byCo[co].sort().forEach(function(ch){ body+=row(co,ch,false); }); });
+  var monHdr=months.map(function(m){var p=pa(m);return '<th class="r">'+MON[p.mo]+'<br>'+String(p.y).slice(2)+'</th>';}).join('');
+  var totCells=months.map(function(m){return '<td class="r">'+(totMon[m]?fr(totMon[m]):'–')+'</td>';}).join('');
   el.innerHTML='<div class="bar" style="margin-bottom:4px">'+sel+'</div>'
-    +'<div style="font-size:11px;color:#888;margin:2px 0 4px">Target = a growth % on last-year revenue, or an absolute value. <b>Forecast</b> = the plan\'s projected '+fyLbl(fy)+' revenue (actuals-to-date + forecast, including any price changes). RAG: <span style="color:#16a34a">■</span> ≥ target · <span style="color:#f59e0b">■</span> within 5% · <span style="color:#dc2626">■</span> below. Edit the plan or add a price change and this updates.</div>'
-    +'<table class="rev-tbl"><thead><tr><th>Country</th><th>Channel</th><th class="r">Last year</th><th class="r">Target (+% or value)</th><th class="r">Target</th><th class="r">Forecast</th><th class="r">Gap</th><th class="r">Growth</th><th class="c">Status</th></tr></thead><tbody>'+rows
-    +'<tr class="tot"><td colspan="2">Total (all combos)</td><td class="r">'+fr(totLy)+'</td><td></td><td class="r">'+(anyTgt?fr(totTgt):'—')+'</td><td class="r">'+fr(totFc)+'</td><td class="r">'+(totGap!=null?((totGap>=0?'+':'')+fr(totGap)):'—')+'</td><td colspan="2"></td></tr>'
-    +'</tbody></table>';
+    +'<div style="font-size:11px;color:#888;margin:2px 0 6px">Revenue by month + '+fyLbl(fy)+' total, per country (all channels) and per country × channel. Set a target (+% on last-year or an absolute value) on either level. <b>Forecast</b> includes price changes. RAG: <span style="color:#16a34a">■</span> ≥ target · <span style="color:#f59e0b">■</span> within 5% · <span style="color:#dc2626">■</span> below.</div>'
+    +'<div style="overflow-x:auto"><table class="rev-tbl"><thead><tr><th style="position:sticky;left:0;background:#fff;z-index:1">Country / channel</th><th class="r">LY</th><th class="r">Target</th><th class="r">Tgt</th>'+monHdr+'<th class="r">'+fyLbl(fy)+'</th><th class="r">Gap</th><th class="r">Grw</th><th class="c">●</th></tr></thead><tbody>'+body
+    +'<tr class="tot"><td style="position:sticky;left:0;background:#eef2f7">Total</td><td class="r">'+fr(totLy)+'</td><td></td><td></td>'+totCells+'<td class="r">'+fr(totFc)+'</td><td colspan="3"></td></tr>'
+    +'</tbody></table></div>';
   el.querySelectorAll('.pill[data-fy]').forEach(function(b){ b.onclick=function(){ REV_FY=+b.dataset.fy; renderRevTargets(el); }; });
   el.querySelectorAll('.rev-tgt').forEach(function(inp){ inp.onchange=function(){ saveRevTarget(inp.dataset.co,inp.dataset.ch,fy,inp.value); }; }); }
 function renderPriceChanges(el){

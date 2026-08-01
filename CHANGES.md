@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.369 - DEMAND ▸ Revenue: monthly breakdown + country subtotals
+- Revenue ▸ Targets & tracking rebuilt as a **month-by-month** matrix (columns = each month of the FY + FY total), grouped by country: a **country subtotal row (all channels)** above its per-**channel** rows, plus a grand **Total** row.
+- Targets can now be set at **both levels** — per country (all channels) and per country × channel — each with its own last-year / target / gap / growth / RAG. Country-level targets store as `channel='ALL'`.
+- Monthly cells make price-change step-ups visible (e.g. an EU +10% from Sep shows the lift from Sep onward). Horizontally scrollable; first column pinned. `artifact_v16.7.html` only (no schema change).
+
 ## v26.368 - DEMAND ▸ Revenue tab: growth targets + tracking + price changes ⚠️ NEEDS MIGRATIONS 168/169
 - New **Revenue** tab under DEMAND with two sub-views:
   - **Targets & tracking** — revenue-growth targets per **country × channel × FY** (enter +% on last-year revenue or an absolute value). Shows last-year, target, the plan’s projected FY revenue (actuals-to-date + forecast incl. price changes), gap, implied growth, and a **RAG** dot (green ≥ target · amber within 5% · red below). Recomputes live off the plan.
