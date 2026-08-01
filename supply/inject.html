@@ -4192,7 +4192,10 @@
         var ov=document.getElementById('ov'); if(ov){ ov.style.zIndex='300000';
           var mo=new MutationObserver(function(){ if(!ov.classList.contains('open')){ if(app)app.classList.remove('plan-ov-open'); mo.disconnect(); } });
           mo.observe(ov,{attributes:true,attributeFilter:['class']}); } }; });
-      var _lm=document.querySelector('#op-count .op-loadmore'); if(_lm)_lm.onclick=function(){ _opLimit+=OP_POCAP; view(); };
+      var _lm=document.querySelector('#op-count .op-loadmore'); if(_lm)_lm.onclick=function(){
+        var _sy=window.scrollY, _tw=document.querySelector('#op-grid .op-pivot-tw'), _sl=_tw?_tw.scrollLeft:0, _st=_tw?_tw.scrollTop:0;
+        _opLimit+=OP_POCAP; view();   // add the next page of PO columns without jumping — restore scroll position
+        var _tw2=document.querySelector('#op-grid .op-pivot-tw'); if(_tw2){ _tw2.scrollLeft=_sl; _tw2.scrollTop=_st; } window.scrollTo(0,_sy); };
       var _sa=document.querySelector('#op-count .op-showall-pos'); if(_sa)_sa.onclick=function(){ _opShowAllPos=true; view(); }; }
     // PO column header → open that PO in PURCHASE ORDERS with its ORDER PLAN tab expanded
     function bindPoLinks(){ document.querySelectorAll('#op-grid .op-po-link').forEach(function(b){ b.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(b.dataset.po,'oplan'); else gotoPO(b.dataset.po,'oplan'); }; }); }   // PO header → right-side drawer (no page change)
@@ -4399,7 +4402,7 @@
     var poTotal=pos.length, poCapped=(!showAllPos && poTotal>_lim);
     if(poCapped)pos=pos.slice(0,_lim);   // render only the first _lim PO columns; "Load more" raises the limit
     if(cn){ var _more=Math.min(OP_POCAP,poTotal-pos.length);
-      cn.innerHTML=skuList.length+' SKUs × '+(poCapped?pos.length+' of ':'')+poTotal+' POs'
+      cn.innerHTML=(poCapped?pos.length+' of ':'')+poTotal+' POs'
         +(poCapped?' &nbsp;<button class="save-btn op-loadmore" style="padding:1px 9px;font-size:11px;background:#2563eb;color:#fff;border-color:#2563eb">Load '+_more+' more &darr;</button> <button class="save-btn light op-showall-pos" style="padding:1px 9px;font-size:11px">Show all '+poTotal+'</button>':(poTotal>25?' · narrow with filters':'')); }
     var pstat={}; pos.forEach(function(po){var u=0,pl=0; skuList.forEach(function(sku){var cc=cell[po+'|'+sku]; if(cc){u+=cc.q; if(cc.pq>0)pl+=cc.q/cc.pq;}}); pstat[po]={u:u,pl:pl};});
     var POW='112px';
