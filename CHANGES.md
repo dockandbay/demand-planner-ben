@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.363 - Hide record of change: persist PER-PO (and per-shipment), not globally
+- The "hide record of change" preference is now stored per PO / per shipment ref (a persisted set), so hiding it on one PO no longer hides it everywhere. `supply/inject.html`.
+
 ## v26.362 - Shipment record-of-change on the shipment timeline ⚠️ NEEDS MIGRATION 165
 - Shipment field edits (carrier, status, mode, freight cost, dates, destination) now log a record-of-change on the shipment timeline (admin only — not shown to the supplier portal). New `planner.shipment_change_log` (migration **165**); dates use dd-mmm-yy + DELAY/BROUGHT-FORWARD, freight cost is 2dp. The shipment timeline also gets the **hide record of change** checkbox (shares the PO preference). `server.mjs`, `supply/inject.html`.
 

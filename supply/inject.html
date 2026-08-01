@@ -3350,7 +3350,9 @@
   function erpDevLines(lines,erpMeta){ erpMeta=erpMeta||{}; if(erpMeta.complete)return [];
     return (lines||[]).filter(function(l){ return l.qty_pending; }); }
   var OP_EDIT=null;   // po currently in ORDER PLAN edit mode (qty editable + add SKUs); null = view mode
-  var ROC_HIDDEN=(function(){try{return localStorage.getItem('hzHideRoc')==='1';}catch(e){return false;}})();   // timeline: hide "record of change" entries (user preference, persisted)
+  var ROC_HIDDEN=(function(){try{var v=JSON.parse(localStorage.getItem('hzHideRocSet')||'[]');return Array.isArray(v)?v:[];}catch(e){return [];}})();   // PO/shipment refs whose "record of change" is hidden — PER-PO, persisted per user
+  function rocIsHidden(k){ return ROC_HIDDEN.indexOf(String(k))>=0; }
+  function rocSetHidden(k,on){ k=String(k); var i=ROC_HIDDEN.indexOf(k); if(on&&i<0)ROC_HIDDEN.push(k); else if(!on&&i>=0)ROC_HIDDEN.splice(i,1); try{localStorage.setItem('hzHideRocSet',JSON.stringify(ROC_HIDDEN));}catch(e){} }
   var OP_SKUS={};     // po → supplier SKU rows [{sku,product_name}] for the add-SKU search picker (item 5)
   function orderPlanPanel(po,lines,costs,addc,erpMeta,xdLines){ costs=costs||{}; addc=addc||[]; erpMeta=erpMeta||{}; xdLines=xdLines||[];
     var editing=(OP_EDIT===po);
@@ -3487,7 +3489,7 @@
         +'</div>'; }
     // Record-of-change entries (status / dates / shipment / payment / ERP upload) render distinctly and interleave with notes by time.
     function fmtChangeTime(s){ s=String(s||''); var d=s.slice(0,10), t=s.slice(11,16); return (d?fd(d):s)+(t?' '+t:''); }
-    function renderChange(c){ return '<div class="tl-change" style="font-size:11px;margin:3px 0;max-width:640px;padding:4px 8px;background:#f8fafc;border:1px solid #e5e7eb;border-left:3px solid #94a3b8;border-radius:5px'+(ROC_HIDDEN?';display:none':'')+'"><span class="mut tiny">🕓 '+esc(fmtChangeTime(c.created_at))+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span> <span class="ex-badge" style="background:#e2e8f0;color:#475569">record of change</span><br><span style="color:#334155"><b>'+esc(c.event)+'</b>'+(c.detail?': '+esc(c.detail):'')+'</span></div>'; }
+    function renderChange(c){ return '<div class="tl-change" style="font-size:11px;margin:3px 0;max-width:640px;padding:4px 8px;background:#f8fafc;border:1px solid #e5e7eb;border-left:3px solid #94a3b8;border-radius:5px'+(rocIsHidden(po)?';display:none':'')+'"><span class="mut tiny">🕓 '+esc(fmtChangeTime(c.created_at))+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span> <span class="ex-badge" style="background:#e2e8f0;color:#475569">record of change</span><br><span style="color:#334155"><b>'+esc(c.event)+'</b>'+(c.detail?': '+esc(c.detail):'')+'</span></div>'; }
     var _tlItems=tlDesc(notes).map(function(n){ return {ts:String(n.created_at||'')+'~'+String(n.id||''), h:renderNote(n)}; })
       .concat(((d&&d.changes)||[]).map(function(c){ return {ts:String(c.created_at||'')+'~0', h:renderChange(c)}; }));
     _tlItems.sort(function(a,b){ return b.ts.localeCompare(a.ts); });   // newest first, notes + changes interleaved
@@ -3503,7 +3505,7 @@
       +'</div>'
     +'</div>';
     // new-message box on top, then submission banners + the message thread below it
-    return '<div class="sect-h">Timeline <span class="mut tiny">— shared message thread with the supplier (their portal shows the same)</span> <label style="font-size:11px;font-weight:400;margin-left:10px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="tl-hide-chg"'+(ROC_HIDDEN?' checked':'')+' style="vertical-align:middle;margin-right:3px">hide record of change</label></div>'+compose+head+list; }
+    return '<div class="sect-h">Timeline <span class="mut tiny">— shared message thread with the supplier (their portal shows the same)</span> <label style="font-size:11px;font-weight:400;margin-left:10px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="tl-hide-chg"'+(rocIsHidden(po)?' checked':'')+' style="vertical-align:middle;margin-right:3px">hide record of change</label></div>'+compose+head+list; }
   function poRefetchPanel(po,i){ var at=document.querySelector('#podet-'+i+' .potab.active'); var wantTab=at?at.dataset.pt:null;   // keep the open sub-tab after a save re-render
     // Refresh ONLY this PO's row (single-row endpoint) instead of pulling the whole ~1400-row grid — much faster.
     fetch('/api/supply/po-row/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(arr){ var rr=Array.isArray(arr)?arr[0]:null; if(rr)poBy[po]=rr; loadPoDetail(po,i,wantTab); }).catch(function(){ loadPoDetail(po,i,wantTab); }); }
@@ -3845,8 +3847,8 @@
         .then(function(j){ if(j&&j.error)throw new Error(j.error); })
         .catch(function(e){ alert('Delete failed — reloading the order plan so you can retry.\n('+(e.message||e)+')'); poRefetchPanel(po,i); }); }; });
     document.querySelectorAll('#podet-'+i+' .op-goto').forEach(function(b){ b.onclick=function(){ gotoOrderPlan(b.dataset.po); }; });
-    document.querySelectorAll('#podet-'+i+' .tl-hide-chg').forEach(function(cb){ cb.onchange=function(){ ROC_HIDDEN=cb.checked; try{localStorage.setItem('hzHideRoc',ROC_HIDDEN?'1':'0');}catch(e){}
-      document.querySelectorAll('#podet-'+i+' .tl-change').forEach(function(el){ el.style.display=ROC_HIDDEN?'none':''; }); }; });
+    document.querySelectorAll('#podet-'+i+' .tl-hide-chg').forEach(function(cb){ cb.onchange=function(){ rocSetHidden(po, cb.checked);
+      document.querySelectorAll('#podet-'+i+' .tl-change').forEach(function(el){ el.style.display=cb.checked?'none':''; }); }; });
     // ORDER PLAN edit mode: toggle, add-SKU row, copy, save (writes qty / new lines as proposed → auto ERP-pending)
     // in edit mode, prefetch the supplier-scoped SKU list (cached in OP_SKUS) and wire the add-SKU search picker
     (function(){ if(OP_EDIT!==po)return; var sup=(poBy[po]&&poBy[po].supplier_name)||'';
@@ -4982,7 +4984,7 @@
   // On the admin side (authorKind 'internal') supplier notes carry a read/unread toggle + 'new' badge, like the PO timeline.
   function loadShipTimeline(ref, authorKind, getBase, postEp){ var box=document.querySelector('.sp-timeline[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(!box)return;
     var admin=(authorKind||'internal')==='internal';
-    function renderShipChange(c){ return '<div class="tl-change tiny" style="margin:2px 0;max-width:640px;padding:3px 8px;background:#f8fafc;border:1px solid #e5e7eb;border-left:3px solid #94a3b8;border-radius:5px'+(ROC_HIDDEN?';display:none':'')+'"><span class="mut">🕓 '+esc(c.created_at)+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span> <span class="ex-badge" style="background:#e2e8f0;color:#475569">record of change</span> — <b>'+esc(c.event)+'</b>'+(c.detail?': '+esc(c.detail):'')+'</div>'; }
+    function renderShipChange(c){ return '<div class="tl-change tiny" style="margin:2px 0;max-width:640px;padding:3px 8px;background:#f8fafc;border:1px solid #e5e7eb;border-left:3px solid #94a3b8;border-radius:5px'+(rocIsHidden(ref)?';display:none':'')+'"><span class="mut">🕓 '+esc(c.created_at)+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span> <span class="ex-badge" style="background:#e2e8f0;color:#475569">record of change</span> — <b>'+esc(c.event)+'</b>'+(c.detail?': '+esc(c.detail):'')+'</div>'; }
     Promise.all([fetch(getBase+encodeURIComponent(ref)).then(function(r){return r.json();}), admin?fetch('/api/supply/shipment-changes?ref='+encodeURIComponent(ref)).then(function(r){return r.json();}).catch(function(){return [];}):Promise.resolve([])]).then(function(_tl){ var notes=_tl[0], _changes=_tl[1]||[];
       shortNotes(notes);
       var unread=0;
@@ -5000,8 +5002,8 @@
       var list=_items.length?_items.map(function(x){return x.h;}).join(''):'<div class="mut tiny">No timeline entries yet.</div>';
       var compose='<div style="font-weight:600;font-size:12px;margin-bottom:4px">Add timeline note</div>'
         +'<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:10px"><textarea class="fci sp-note-in" rows="3" placeholder="Add a note to the timeline… (multiple lines OK)" style="flex:1;max-width:560px;min-height:58px;text-align:left;resize:vertical;line-height:1.4"></textarea><button class="save-btn sp-note-post" style="flex:0 0 auto">Post</button></div>';
-      box.innerHTML=compose+'<div class="tiny" style="font-weight:600;margin-bottom:3px;display:flex;align-items:center;gap:8px">Timeline'+(admin?' <label style="font-weight:400;cursor:pointer;white-space:nowrap"><input type="checkbox" class="sp-hide-chg"'+(ROC_HIDDEN?' checked':'')+' style="vertical-align:middle;margin-right:3px">hide record of change</label>':'')+'</div>'+list;
-      var _hc=box.querySelector('.sp-hide-chg'); if(_hc)_hc.onchange=function(){ ROC_HIDDEN=_hc.checked; try{localStorage.setItem('hzHideRoc',ROC_HIDDEN?'1':'0');}catch(e){} box.querySelectorAll('.tl-change').forEach(function(el){ el.style.display=ROC_HIDDEN?'none':''; }); };
+      box.innerHTML=compose+'<div class="tiny" style="font-weight:600;margin-bottom:3px;display:flex;align-items:center;gap:8px">Timeline'+(admin?' <label style="font-weight:400;cursor:pointer;white-space:nowrap"><input type="checkbox" class="sp-hide-chg"'+(rocIsHidden(ref)?' checked':'')+' style="vertical-align:middle;margin-right:3px">hide record of change</label>':'')+'</div>'+list;
+      var _hc=box.querySelector('.sp-hide-chg'); if(_hc)_hc.onchange=function(){ rocSetHidden(ref, _hc.checked); box.querySelectorAll('.tl-change').forEach(function(el){ el.style.display=_hc.checked?'none':''; }); };
       if(admin)shSetUnread(ref,unread);
       box.querySelector('.sp-note-post').onclick=function(){ var inp=box.querySelector('.sp-note-in'); var v=(inp.value||'').trim(); if(!v)return;
         shipPost(postEp,{shipment_ref:ref,author_kind:authorKind||'internal',body:v,author_email:(ME&&ME.email)||undefined},function(){ loadShipTimeline(ref,authorKind,getBase,postEp); }); };
