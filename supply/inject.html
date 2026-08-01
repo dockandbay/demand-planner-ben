@@ -2641,8 +2641,9 @@
     var msg=bg.querySelector('#erp-msg'); bg.querySelector('#erp-x').onclick=function(){bg.remove();};
     if(!po){ msg.textContent='No PO context for this upload.'; return; }
     function build(cb){ msg.textContent='Loading order plan…';
-      fetch('/api/supply/order-plan').then(function(r){return r.json();}).then(function(all){
-        cb((all||[]).filter(function(l){return l.po===po && Number(l.qty)>0;}).map(function(l){return {code:l.sku, qty:Math.round(Number(l.qty))};}));
+      // fetch only THIS PO's lines (was fetching all ~6,734 order-plan lines / 4.8MB then filtering to one PO)
+      fetch('/api/supply/po-detail/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(d){
+        cb(((d&&d.lines)||[]).filter(function(l){return Number(l.qty)>0;}).map(function(l){return {code:l.sku, qty:Math.round(Number(l.qty))};}));
       }).catch(function(){ cb(null); }); }
     var _dlBtn=bg.querySelector('#erp-dl'); if(_dlBtn)_dlBtn.onclick=function(){ build(function(rows){ if(!rows){msg.textContent='Failed to load order plan.';return;} if(!rows.length){msg.textContent='No order-plan lines with qty for '+po+'.';return;}
       var csv='Code,Qty\n'+rows.map(function(r){var c=String(r.code); if(/[",\n]/.test(c))c='"'+c.replace(/"/g,'""')+'"'; return c+','+r.qty;}).join('\n')+'\n';

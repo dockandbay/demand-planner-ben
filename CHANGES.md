@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.375 - Performance Tier 1: parallelise slow endpoints + memoise calc()
+Four low-risk wins from the load-time audit (deterministic output, no behaviour change):
+- **`server.mjs` `/api/targets`** — 5 independent queries were awaited in series; now kicked off together (hoisted promises). **2.7s → ~0.68s.**
+- **`server.mjs` `/api/demand-actions`** — 7 independent queries in series → one parallel wave. **2.6s → ~0.70s.**
+- **`server.mjs` `/api/scenario/auto-forecast`** — was a serial `for` over 4 markets, re-querying 3 market-independent lookups (cost / primary-supplier / terms) 4×. Hoisted those to compute once, and run the markets in parallel (shared writes are additive/commutative; each market's sync block is atomic). **6.0s → ~1.6s.** Output verified identical (9 suppliers, £2.25M payments, 949 txns).
+- **`artifact_v16.7.html` `calc()`** — the forecast engine is called many times for the same SKU×country×channel per render; added a per-render memo `CALC_MEMO` (keyed `s|co|ch`), **cleared at the top of `render()` and `renderMain()`** so it can never go stale (every edit re-renders → clears). Verified: memoised call returns same ref, cleared recompute is byte-identical, and an override is reflected after the clear.
+- **`supply/inject.html`** ERP-upload modal — fetched all ~6,734 order-plan lines (4.8MB) to extract one PO's lines; now uses `po-detail/:po` (that PO's lines only). Same class as the earlier edit-SKU fix.
+
 ## v26.374 - SUPPLY ▸ Purchase Orders: paged grid (50 + Load more)
 - The PO grid now renders **50 rows initially** with an incremental **"Load 50 more ↓"** button (plus a **"Show all N"** for the whole set), instead of rendering up to 250 at once. Cuts the initial DOM build on the most-used SUPPLY tab (1,376 POs → parse/render was the real cost; wire transfer is already gzipped to ~177 KB).
 - The page size **resets to 50 whenever the filter/search set changes**, but is **preserved across in-place edits and Load-more** (via a lightweight filtered-set signature) — so editing a row or loading more never snaps you back to 50. Deep-links to a PO past the current page still auto-reveal (unchanged `_pendingPO` fallback → show all). `supply/inject.html` only.

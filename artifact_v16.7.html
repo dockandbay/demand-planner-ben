@@ -950,6 +950,11 @@ const CURRENT_FLD_MAP={
 };
 let DATA=[];
 var PRICE_CHANGES=[];   // DEMAND ▸ Revenue: definitive price changes (server-injected). getASP applies them to projected months.
+// Per-render memo for calc() — the forecast engine is called many times for the same SKU×country×channel in a
+// single render (grid rows, category totals, summary, FY totals). This dedupes those within one render. It is
+// CLEARED at the top of render() and renderMain(), so it can never go stale: any edit that changes IV triggers a
+// re-render, which wipes it. calc()'s return is never mutated by callers, so sharing the object is safe.
+var CALC_MEMO={};
 // Dynamic month anchor: current/partial month = latest 2026 month that has actuals in the data.
 // Advances automatically when fresh data is embedded — no hardcoded month to edit each cycle.
 (function(){
@@ -3215,7 +3220,8 @@ function gk(s,co,ch){return'__g|'+s+'|'+co+'|'+ch}
 function aspF(s,co,ch){const a=ga(co,ch,s);const u=sumU(a,2025),r=sumR(a,2025);return u>0?r/u:0}
 
 function calc(s,co,ch){
-  const a=ga(co,ch,s),fu={},reasons={},kb=s+'|'+co+'|'+ch;
+  const kb=s+'|'+co+'|'+ch; var _memo=CALC_MEMO[kb]; if(_memo)return _memo;
+  const a=ga(co,ch,s),fu={},reasons={};
   const graw=IV[gk(s,co,ch)];const gn=(graw!=null&&graw!=='')?parseFloat(graw):null;
   FM_CALC.forEach(function(fym){
     const{y,mo}=pa(fym),ik=kb+'|'+fym,stored=IV[ik];
@@ -3253,7 +3259,7 @@ function calc(s,co,ch){
     }
     fu[fym]=Math.max(0,fc);
   });
-  return {fu:fu,reasons:reasons};
+  var _out={fu:fu,reasons:reasons}; CALC_MEMO[kb]=_out; return _out;
 }
 
 // Full-month forecast for the current (partial) month — driven by the Jun-FC input box / row growth,
@@ -6654,6 +6660,7 @@ function remapExpanded(dim,newVal){
   EXPANDED=ne;
 }
 function renderMain(){
+  CALC_MEMO={};   // fresh per-render forecast memo — covers direct renderMain() calls (filters/toggles) too
   // load per-cell forecast notes for the current country+channel before building the grid (so the N badges
   // render). fcNotesLoad always sets FC_NOTES_KEY (even on failure) so this can't loop.
   if(typeof FC_NOTES_KEY!=='undefined' && FC_NOTES_KEY!==CUR+'|'+CF){ fcNotesLoad(CUR,CF,function(){ renderMain(); }); return; }
@@ -6738,6 +6745,7 @@ function syncTabs(){
 function st(msg){var e=document.getElementById('st');if(e)e.textContent=msg;}
 (function(){document.getElementById('ver').innerHTML='HORIZON <b>'+VERSION+'</b>';var _hv=document.getElementById('hz-ver');if(_hv)_hv.innerHTML='HORIZON<br>'+VERSION;})();
 function render(){
+  CALC_MEMO={};   // fresh per-render forecast memo (see decl) — cleared here so it never survives an edit
   // load trading-calendar events once (for the PLAN month-cell "C" markers); re-render when they arrive
   if(CAL_EVENTS===null){ CAL_EVENTS=[]; fetch('/api/trading-calendar').then(function(r){return r.json();}).then(function(d){ CAL_EVENTS=(d&&d.events)||[]; if(VIEW_MODE==='planning')render(); }).catch(function(){}); }
   // Toggle filter rows visibility based on view mode.
