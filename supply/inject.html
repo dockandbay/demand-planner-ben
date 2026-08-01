@@ -4179,10 +4179,10 @@
       var sn=document.getElementById('op-suprisk-n'); if(sn)sn.textContent=sc?('('+sc+')'):'';
       var dn=document.getElementById('op-disc-n'); if(dn)dn.textContent=dc?('('+dc+')'):'';
       var nn=document.getElementById('op-notmkt-n'); if(nn)nn.textContent=nc?('('+nc+')'):''; }
-    var _opShowAllPos=false;
-    function viewReset(){ _opShowAllPos=false; view(); }   // any filter/search change re-caps the PO columns
+    var _opShowAllPos=false, _opLimit=OP_POCAP;
+    function viewReset(){ _opShowAllPos=false; _opLimit=OP_POCAP; view(); }   // any filter/search change re-caps the PO columns to the first page
     function view(){ try{hzFilterSave('oplan',{statuses:Array.from(st.statuses),countries:Array.from(st.countries),prod:st.prod,cat:st.cat,batch:st.batch,supplier:st.supplier,scope:st.scope,rw:st.rw,partials:st.partials,erpdiff:st.erpdiff,suprisk:st.suprisk,disc:st.disc,notmkt:st.notmkt,focus:st.focus});}catch(e){}   // persist filters (not the search boxes)
-      var cl=curLines(); var poCl=curLines(true); document.getElementById('op-grid').innerHTML=pivot(poCl,rowsFor(cl),skuCat,plcMap,skuAttr,skuRW,_opShowAllPos); bindQty(); bindUploads(); bindApprove(); bindConfirm(); bindPoLinks(); bindOpTips(); updateActionCounts();
+      var cl=curLines(); var poCl=curLines(true); document.getElementById('op-grid').innerHTML=pivot(poCl,rowsFor(cl),skuCat,plcMap,skuAttr,skuRW,_opShowAllPos,_opLimit); bindQty(); bindUploads(); bindApprove(); bindConfirm(); bindPoLinks(); bindOpTips(); updateActionCounts();
       document.querySelectorAll('#op-grid .op-plan').forEach(function(b){ b.onclick=function(){ var sku=b.dataset.sku;
         if(!window.open_){ alert('Buy plan unavailable — reload the page.'); return; }
         if(window.ensureBuyPlanScaffold)window.ensureBuyPlanScaffold();   // build #buy-wrap/#ov lazily if BUY view never rendered
@@ -4191,7 +4191,8 @@
         var ov=document.getElementById('ov'); if(ov){ ov.style.zIndex='300000';
           var mo=new MutationObserver(function(){ if(!ov.classList.contains('open')){ if(app)app.classList.remove('plan-ov-open'); mo.disconnect(); } });
           mo.observe(ov,{attributes:true,attributeFilter:['class']}); } }; });
-      var spa=document.querySelector('#op-grid .op-showall-pos'); if(spa)spa.onclick=function(){ _opShowAllPos=true; view(); }; }
+      var _lm=document.querySelector('#op-count .op-loadmore'); if(_lm)_lm.onclick=function(){ _opLimit+=OP_POCAP; view(); };
+      var _sa=document.querySelector('#op-count .op-showall-pos'); if(_sa)_sa.onclick=function(){ _opShowAllPos=true; view(); }; }
     // PO column header → open that PO in PURCHASE ORDERS with its ORDER PLAN tab expanded
     function bindPoLinks(){ document.querySelectorAll('#op-grid .op-po-link').forEach(function(b){ b.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(b.dataset.po,'oplan'); else gotoPO(b.dataset.po,'oplan'); }; }); }   // PO header → right-side drawer (no page change)
     // inline confirm of a supplier change in a pivot cell (priority over partial-approve)
@@ -4381,21 +4382,24 @@
   function plt(pl){ return pl>20 ? '<span style="color:#dc2626;font-weight:700">'+pl.toFixed(1)+' plt ⚠</span>' : pl.toFixed(1)+' plt'; }
   // pick the discontinue date for a destination: AU/CA have their own, else the global final.
   function pickDisc(co,a){ co=(co||'').toUpperCase(); a=a||{}; if(co==='AU'&&a.disAu)return a.disAu; if(co==='CA'&&a.disCa)return a.disCa; return a.dis||''; }
-  var OP_POCAP=40;   // cap rendered PO columns (wide pivots are the main slowdown); "show all" reveals the rest
+  var OP_POCAP=20;   // initial PO columns rendered (wide pivots are the main slowdown); "Load more" adds OP_POCAP, "Show all" reveals the rest
   // Approved-exception badge (kind ✓) with an undo ✕ that OVERLAYS the badge on hover (no layout shift).
   // undoCls = 'opundo' (grid) or 'oprisk-undo' (PO panel); both data-ap + data-ps are set so either handler works.
   function apprBadge(kind,title,field,psku,undoCls){ return ' <span class="opappr" style="position:relative;display:inline-block">'
     +'<span class="tool-badge bg-green" title="'+title+' approved">'+kind+'✓</span>'
     +'<button class="'+undoCls+'" data-ap="'+esc(psku)+'" data-ps="'+esc(psku)+'" data-field="'+field+'" title="undo '+title+' approval" style="position:absolute;inset:0;align-items:center;justify-content:center;background:rgba(185,28,28,.94);color:#fff;border:none;border-radius:3px;font-size:9px;font-weight:700;line-height:1;cursor:pointer">✕</button></span>'; }
-  function pivot(rows, skuList, skuCat, plcMap, skuAttr, skuRW, showAllPos){ plcMap=plcMap||{}; skuAttr=skuAttr||{}; skuRW=skuRW||{}; var cn=document.getElementById('op-count');
+  function pivot(rows, skuList, skuCat, plcMap, skuAttr, skuRW, showAllPos, opLimit){ plcMap=plcMap||{}; skuAttr=skuAttr||{}; skuRW=skuRW||{}; var cn=document.getElementById('op-count');
     if(!skuList.length){ if(cn)cn.textContent='0 SKUs'; return '<div class="count">No SKUs for this filter (pick a Category for \"All in category\").</div>'; }
     var pos=[],psn={},cell={},meta={};
     rows.forEach(function(l){ if(!psn[l.po]){psn[l.po]=1;pos.push(l.po);meta[l.po]={s:l.supplier_name,co:l.country,ps:l.prod_start,pe:l.prod_end,sd:l.ship_date,dl:l.delivery,st:l.status,cl:l.client,so:l.sales_order_ref};}
       cell[l.po+'|'+l.sku]={q:l.qty,eq:(l.erp_qty==null?l.qty:l.erp_qty),c:Number(l.cost_price)||0,pq:Number(l.pallet_qty)||0,fcc:(l.full_carton_check||''),sra:!!l.supplier_risk_approved,dca:!!l.discontinue_approved,nm:!!l.not_avail_market,cra:!!l.country_risk_approved}; });
     pos.sort().reverse();   // purchase orders across the top, descending (newest first)
-    var poTotal=pos.length, poCapped=(!showAllPos && poTotal>OP_POCAP);
-    if(poCapped)pos=pos.slice(0,OP_POCAP);   // render only the first N PO columns until "show all"
-    if(cn)cn.textContent=skuList.length+' SKUs × '+(poCapped?OP_POCAP+' of ':'')+poTotal+' POs'+(poCapped?' · capped for speed':(poTotal>25?' · narrow with filters':''));
+    var _lim=showAllPos?pos.length:(opLimit||OP_POCAP);
+    var poTotal=pos.length, poCapped=(!showAllPos && poTotal>_lim);
+    if(poCapped)pos=pos.slice(0,_lim);   // render only the first _lim PO columns; "Load more" raises the limit
+    if(cn){ var _more=Math.min(OP_POCAP,poTotal-pos.length);
+      cn.innerHTML=skuList.length+' SKUs × '+(poCapped?pos.length+' of ':'')+poTotal+' POs'
+        +(poCapped?' &nbsp;<button class="save-btn op-loadmore" style="padding:1px 9px;font-size:11px;background:#2563eb;color:#fff;border-color:#2563eb">Load '+_more+' more &darr;</button> <button class="save-btn light op-showall-pos" style="padding:1px 9px;font-size:11px">Show all '+poTotal+'</button>':(poTotal>25?' · narrow with filters':'')); }
     var pstat={}; pos.forEach(function(po){var u=0,pl=0; skuList.forEach(function(sku){var cc=cell[po+'|'+sku]; if(cc){u+=cc.q; if(cc.pq>0)pl+=cc.q/cc.pq;}}); pstat[po]={u:u,pl:pl};});
     var POW='112px';
     // frozen label columns after SKU (cumulative left offsets): SKU · Release · Carton · Supplier · Discontinue
@@ -4465,7 +4469,7 @@
     var gu=0,gv=0,gpl=0,ptd=''; pos.forEach(function(po){var u=pstat[po].u,pl=pstat[po].pl,v=0; skuList.forEach(function(sku){var cc=cell[po+'|'+sku]; if(cc)v+=cc.q*cc.c;}); gu+=u;gv+=v;gpl+=pl; ptd+='<td style="text-align:center"><b>'+units(u)+'</b><br><span class="tiny mut">$'+money(v)+' · '+plt(pl)+'</span></td>';});
     h+='<tr class="batchrow"><td class="l" colspan="5" style="position:sticky;left:0;background:#eef2ff;z-index:2;min-width:'+FROZEN+'px;white-space:nowrap">PO TOTALS · units / value / pallets'+(poCapped?' (first '+OP_POCAP+' POs)':'')+'</td>'+ptd+'<td style="text-align:center"><b>'+units(gu)+'</b><br><span class="tiny mut">$'+money(gv)+' · '+plt(gpl)+'</span></td></tr>';
     return h+'</tbody></table></div>'
-      +(poCapped?'<div style="margin:8px 0;text-align:center"><button class="save-btn light op-showall-pos">Show all '+poTotal+' POs &rarr;</button> <span class="mut tiny">showing first '+OP_POCAP+' — narrowing with filters is faster</span></div>':''); }
+      ; }   // (Load more / Show all live in the top toolbar count line, always visible — not down here off-screen)
 
   // ---- PRODUCTIONS (POs grouped by PROD#; aggregated SKU view) ----
   var prodTab='list', _prodList=[];

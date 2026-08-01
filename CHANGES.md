@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.381 - Order Plan: page PO columns (20) + visible top Load-more ⚠️ NEEDS TESTING
+- Order Plan pivot now renders the first **20 PO columns** (was 40), with an incremental **"Load 20 more"** button — moved to the **top toolbar count line** (always visible) instead of the old "Show all" that sat at the bottom of a wide pivot, off-screen. "Show all N" is still there beside it.
+- Page size resets to 20 on any filter/search change (`viewReset`), and raises via Load-more; newest POs first, so the first 20 are the most recent. `supply/inject.html` only. SUPPLY render only → buy plan untouched.
+- NOTE: Order Plan lines are all production 53–67 (the endpoint only holds recent POs), so a separate Order-Plan archive cutoff would need to be ~55 to bite (50 hides nothing). Separate cutoff + PO-level normalization (#3) still to come.
+
 ## v26.380 - PO archiving feature (CONFIG ▸ Admin ▸ General) ⚠️ NEEDS TESTING
 - New **PO archive** lever to speed up SUPPLY: admin sets a **production-number cutoff** (CONFIG ▸ Admin ▸ General, key `po_archive_before_prod`). **Completed** POs below it are hidden from the **Purchase Orders grid** and **Order Plan** by default. Verified: cutoff 40 → grid **1,376 → 926** (hides 450, **all complete, zero active POs hidden**).
 - **Safety:** only `complete` POs are ever archived — Production/Shipping/Future always show, whatever their number. Nothing is deleted; a **"🗄 Show archived"** toggle on the PO grid re-fetches with `?includeArchived=1`. **Does NOT touch the supplier portal or Cash Flow** (per Ben). Blank/0 = off (default).
