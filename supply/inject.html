@@ -4132,16 +4132,23 @@
       +'</div>'   // /#op-filters
       +'<div id="op-empties"></div>'
       +'<div id="op-changes"></div>'
-      +'<div style="display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:6px;margin:6px 0 3px"><span class="count" id="op-count"></span></div>'   // count + Load-more/Show-all, right-aligned directly above the grid
+      +'<div style="display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:5px;margin:6px 0 3px"><span id="op-accept-bar" style="display:flex;gap:4px;flex-wrap:wrap;align-items:center"></span><span class="count" id="op-count" style="margin-left:4px"></span></div>'   // accept-all buttons + count + Load-more/Show-all, right-aligned directly above the grid
       +'<div id="op-grid"></div>';
     // POs with no SKU lines yet don't appear in the SKU×PO grid — surface them here so they're visible + openable.
     (function(){ var el=document.getElementById('op-empties'); if(!el)return;
       fetch('/api/supply/pos-no-lines').then(function(r){return r.json();}).then(function(rows){ if(!Array.isArray(rows)||!rows.length){el.innerHTML='';return;}
-        el.innerHTML='<div style="margin:2px 0 10px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:9px 12px;font-size:12px">'
-          +'<b>⚠ '+rows.length+' PO'+(rows.length===1?'':'s')+' with no SKU lines yet</b> <span class="mut tiny">— not shown in the grid below (no SKUs). Click to open and add lines.</span><div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">'
-          +rows.map(function(r){ return '<button class="lnk-btn op-empty-po" data-po="'+esc(r.po)+'" style="border:1px solid #fcd34d;background:#fff;border-radius:5px;padding:3px 8px;cursor:pointer">'+esc(r.po)+' <span class="mut tiny">'+esc(r.supplier_name||'')+(r.status?' · '+esc(r.status):'')+'</span></button>'; }).join('')
-          +'</div></div>';
-        el.querySelectorAll('.op-empty-po').forEach(function(b){ b.onclick=function(){ if(typeof gotoPO==='function')gotoPO(b.dataset.po,'oplan'); else if(typeof openPODrawer==='function')openPODrawer(b.dataset.po,'oplan'); }; }); }).catch(function(){}); })();
+        var CAP=4, expanded=false;
+        function poBtn(r){ return '<button class="lnk-btn op-empty-po" data-po="'+esc(r.po)+'" style="border:1px solid #fcd34d;background:#fff;border-radius:5px;padding:3px 8px;cursor:pointer">'+esc(r.po)+' <span class="mut tiny">'+esc(r.supplier_name||'')+(r.status?' · '+esc(r.status):'')+'</span></button>'; }
+        function draw(){ var shown=expanded?rows:rows.slice(0,CAP);
+          el.innerHTML='<div style="margin:2px 0 10px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:9px 12px;font-size:12px">'
+            +'<b>⚠ '+rows.length+' PO'+(rows.length===1?'':'s')+' with no SKU lines yet</b> <span class="mut tiny">— not shown in the grid below (no SKUs). Click to open and add lines.</span><div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
+            +shown.map(poBtn).join('')
+            +(rows.length>CAP?'<button class="lnk-btn op-empty-more" style="border:1px solid #fcd34d;background:#fef3c7;border-radius:5px;padding:3px 10px;cursor:pointer;font-weight:600;color:#92400e">'+(expanded?'Show less':'See '+(rows.length-CAP)+' more')+'</button>':'')
+            +'</div></div>';
+          el.querySelectorAll('.op-empty-po').forEach(function(b){ b.onclick=function(){ if(typeof gotoPO==='function')gotoPO(b.dataset.po,'oplan'); else if(typeof openPODrawer==='function')openPODrawer(b.dataset.po,'oplan'); }; });
+          var mb=el.querySelector('.op-empty-more'); if(mb)mb.onclick=function(){ expanded=!expanded; draw(); }; }
+        draw();
+      }).catch(function(){}); })();
     try{ document.getElementById('supply-content').classList.remove('op-filters-open'); }catch(e){}   // start collapsed on mobile each visit
     // parse the PO box into tokens (space / comma / newline). When present it OVERRIDES the status + country filters.
     // PO-search tokens — ≥3 chars (the pivot caps PO columns, so a broad match is bounded). The box searches
@@ -4181,7 +4188,28 @@
       var sc=poCount(lineSupRisk), dc=poCount(lineDisc), nc=poCount(lineCountryRisk);
       var sn=document.getElementById('op-suprisk-n'); if(sn)sn.textContent=sc?('('+sc+')'):'';
       var dn=document.getElementById('op-disc-n'); if(dn)dn.textContent=dc?('('+dc+')'):'';
-      var nn=document.getElementById('op-notmkt-n'); if(nn)nn.textContent=nc?('('+nc+')'):''; }
+      var nn=document.getElementById('op-notmkt-n'); if(nn)nn.textContent=nc?('('+nc+')'):'';
+      renderOpAcceptBar(pc,sc,dc,nc); }
+    // Compact "accept all" buttons on the top row (above the grid) — one per exception type that has items, on a
+    // single wrapping row. Each bulk-approves every matching line across the current data (matches the pill counts).
+    function renderOpAcceptBar(pc,sc,dc,nc){ var bar=document.getElementById('op-accept-bar'); if(!bar)return;
+      var chg=plc.filter(function(x){return x.unconfirmed&&((x.amended_qty!=null&&x.amended_qty!=='')||x.is_added);});
+      var chgN=new Set(chg.map(function(x){return x.po;})).size;
+      var bt=function(cls,n,lbl){ return n>0?'<button class="save-btn '+cls+'" style="font-size:10px;padding:1px 7px;background:#dcfce7;border:1px solid #86efac;color:#166534;white-space:nowrap">✓ '+n+' '+lbl+'</button>':''; };
+      bar.innerHTML=bt('opacc-changes',chgN,'changes')+bt('opacc-partial',pc,'partials')+bt('opacc-supplier',sc,'sup risk')+bt('opacc-country',nc,'country')+bt('opacc-disc',dc,'disc');
+      function bulk(detector,field,lbl){ var ls=lines.filter(detector); if(!ls.length)return; if(!confirm('Accept all '+ls.length+' '+lbl+'? Approves the exception on every matching line.'))return;
+        bar.querySelectorAll('button').forEach(function(x){x.disabled=true;});
+        Promise.all(ls.map(function(l){return opApprove(opKey(l),field,true);})).then(function(){viewKeep();}).catch(function(){alert('Some failed to approve.');viewKeep();}); }
+      var b;
+      b=bar.querySelector('.opacc-partial'); if(b)b.onclick=function(){bulk(isUnapprovedPartial,'partial','unapproved partials');};
+      b=bar.querySelector('.opacc-supplier'); if(b)b.onclick=function(){bulk(lineSupRisk,'supplier','supplier-risk lines');};
+      b=bar.querySelector('.opacc-country'); if(b)b.onclick=function(){bulk(lineCountryRisk,'country','country-risk lines');};
+      b=bar.querySelector('.opacc-disc'); if(b)b.onclick=function(){bulk(lineDisc,'discontinue','discontinue-risk lines');};
+      b=bar.querySelector('.opacc-changes'); if(b)b.onclick=function(){ if(!chg.length)return; if(!confirm('Accept all '+chg.length+' supplier change'+(chg.length>1?'s':'')+'?'))return;
+        bar.querySelectorAll('button').forEach(function(x){x.disabled=true;});
+        var pos=Array.from(new Set(chg.map(function(x){return x.po;})));
+        Promise.all(pos.map(function(po){ return fetch('/api/supply/po-line-accept',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,all:true})}).then(function(r){return r.json();}); }))
+          .then(function(){ plc.forEach(function(x){ if(x.unconfirmed&&x.amended_qty!=null&&x.amended_qty!==''){ var l=lines.find(function(y){return y.po===x.po&&y.sku===x.sku;}); if(l)l.qty=Number(x.amended_qty); } x.unconfirmed=false; }); invalidateDerived(); renderChanges(); view(); }); }; }
     var _opShowAllPos=false, _opLimit=OP_POCAP;
     function viewReset(){ _opShowAllPos=false; _opLimit=OP_POCAP; view(); }   // any filter/search change re-caps the PO columns to the first page
     function view(){ try{hzFilterSave('oplan',{statuses:Array.from(st.statuses),countries:Array.from(st.countries),prod:st.prod,cat:st.cat,batch:st.batch,supplier:st.supplier,scope:st.scope,rw:st.rw,partials:st.partials,erpdiff:st.erpdiff,suprisk:st.suprisk,disc:st.disc,notmkt:st.notmkt,focus:st.focus});}catch(e){}   // persist filters (not the search boxes)

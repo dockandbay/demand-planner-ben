@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.385 - Order Plan: top-row "accept all" buttons + cap the no-lines list ⚠️ NEEDS TESTING
+- **Accept-all bar** on the top row (with Load-more, above the grid): compact buttons — **✓ N changes · ✓ N partials · ✓ N sup risk · ✓ N country · ✓ N disc** — each only shows when it has items, all on one wrapping row (not stacked). Each bulk-approves every matching line (supplier changes via `po-line-accept {all}`; the rest via `opApprove(field)`), matching the existing pill counts. The per-PO column button stays for now.
+- **"N POs with no SKU lines"** banner now shows the first **4** with a **"See N more" / "Show less"** toggle instead of listing all. `supply/inject.html`. SUPPLY render only → buy plan untouched.
+
 ## v26.384 - Order Plan: default to the latest in-production PROD#
 - Order Plan now opens on the **latest production number that still has POs in Production** (e.g. P60 in sandbox), with STATUS=Production and SKUs=Ordered — a small, relevant, fast first load instead of all POs. Persisted filters (1h TTL) still override for a returning session. `supply/inject.html`. Buy plan untouched.
 
