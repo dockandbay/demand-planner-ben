@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.384 - Order Plan: default to the latest in-production PROD#
+- Order Plan now opens on the **latest production number that still has POs in Production** (e.g. P60 in sandbox), with STATUS=Production and SKUs=Ordered — a small, relevant, fast first load instead of all POs. Persisted filters (1h TTL) still override for a returning session. `supply/inject.html`. Buy plan untouched.
+
+## v26.383 - Order Plan: drop 'N SKUs' from count; Load-more preserves scroll ⚠️ NEEDS TESTING
+
+## v26.382 - Order Plan: move count + Load-more/Show-all right-aligned above the grid ⚠️ NEEDS TESTING
+
 ## v26.381 - Order Plan: page PO columns (20) + visible top Load-more ⚠️ NEEDS TESTING
 - Order Plan pivot now renders the first **20 PO columns** (was 40), with an incremental **"Load 20 more"** button — moved to the **top toolbar count line** (always visible) instead of the old "Show all" that sat at the bottom of a wide pivot, off-screen. "Show all N" is still there beside it.
 - Page size resets to 20 on any filter/search change (`viewReset`), and raises via Load-more; newest POs first, so the first 20 are the most recent. `supply/inject.html` only. SUPPLY render only → buy plan untouched.

@@ -4079,7 +4079,9 @@
       skuAttr[s.sku]={sup:s.supplier||'',cq:s.carton_qty||'',dis:s.discontinue||'',disAu:s.discontinue_au||'',disCa:s.discontinue_ca||'',sm:s.supplier_multiple_all||'',ean:s.product_ean||'',title:s.product_name||'',size:s.size||'',size_long:s.size_long||'',colour:s.colour_long||''};});
     lines.forEach(function(l){if(l.category)skuCat[l.sku]=l.category; if(l.release_window)skuRW[l.sku]=l.release_window;});
     var defS=OP_ST_KEYS.indexOf('production')>=0?['production']:OP_ST_KEYS.slice(0,1);   // default to Production (same as the PO grid)
-    var st={statuses:new Set(defS),countries:new Set(),prod:'All',cat:'All',batch:'All',supplier:'All',q:'',poq:'',scope:'ordered',rw:'All',partials:false,erpdiff:false,suprisk:false,disc:false,notmkt:false,focus:false};   // countries: empty = all (like PURCHASE ORDERS)
+    // default PROD# = the latest production number that still has POs IN PRODUCTION (a small, relevant, fast first load)
+    var _prodDef='All'; (function(){ var bestN=-1; lines.forEach(function(l){ if(stGroup(l.status)!=='production'||!l.prod_no)return; var n=parseInt(String(l.prod_no).replace(/[^0-9]/g,''),10); if(!isNaN(n)&&n>bestN){bestN=n;_prodDef=String(l.prod_no);} }); })();
+    var st={statuses:new Set(defS),countries:new Set(),prod:_prodDef,cat:'All',batch:'All',supplier:'All',q:'',poq:'',scope:'ordered',rw:'All',partials:false,erpdiff:false,suprisk:false,disc:false,notmkt:false,focus:false};   // countries: empty = all (like PURCHASE ORDERS)
     if(!_pendingOP){ var _opsv=hzFilterLoad('oplan'); if(_opsv){ try{   // restore persisted filters (sliding 1h TTL) unless deep-linking a PO/exception; search boxes are not restored
       if(Array.isArray(_opsv.statuses)) st.statuses=new Set(_opsv.statuses.filter(function(k){return OP_ST_KEYS.indexOf(k)>=0;}));
       if(Array.isArray(_opsv.countries)) st.countries=new Set(_opsv.countries);
