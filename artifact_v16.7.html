@@ -7221,7 +7221,7 @@ function saveRevTarget(co,ch,fy,str){ var v=String(str||'').trim(), b={country:c
 function renderRevTargets(el){ _revCache={}; var combos=revCombos(), fys=[CUR_FY_START,CUR_FY_START+1,CUR_FY_START+2], fy=REV_FY;
   var fyLbl=function(y){return 'FY'+String(y).slice(2)+'/'+String(y+1).slice(2);};
   var months=fyMonths(fy), MON=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  var sel='<span class="pill-lbl">Financial year</span> '+fys.map(function(y){return '<button class="pill catpill'+(y===fy?' active':'')+'" data-fy="'+y+'">'+fyLbl(y)+'</button>';}).join(' ');
+  var sel='<span style="font-weight:700;font-size:13px;margin-right:8px">Targets for financial year:</span> '+fys.map(function(y){return '<button class="pill catpill'+(y===fy?' active':'')+'" data-fy="'+y+'" style="font-weight:600'+(y===fy?';box-shadow:0 0 0 2px #2563eb inset':'')+'">'+fyLbl(y)+'</button>';}).join(' ')+'<span style="font-size:11px;color:#888;margin-left:10px">each year keeps its own targets</span>';
   var byCo={}; combos.forEach(function(c){ (byCo[c.co]=byCo[c.co]||[]).push(c.ch); });
   var cos=Object.keys(byCo).sort(function(a,b){var ia=MKTS.indexOf(a),ib=MKTS.indexOf(b);ia=ia<0?99:ia;ib=ib<0?99:ib;return ia-ib;});
   function tgtOf(co,ch,ly){ var t=REV_TARGETS[co+'|'+ch+'|'+fy]; return t?(t.type==='pct'?ly*(1+Number(t.pct||0)/100):Number(t.value||0)):null; }
@@ -7240,7 +7240,7 @@ function renderRevTargets(el){ _revCache={}; var combos=revCombos(), fys=[CUR_FY
   cos.forEach(function(co){ body+=row(co,'ALL',true); byCo[co].sort().forEach(function(ch){ body+=row(co,ch,false); }); });
   var monHdr=months.map(function(m){var p=pa(m);return '<th class="r">'+MON[p.mo]+'<br>'+String(p.y).slice(2)+'</th>';}).join('');
   var totCells=months.map(function(m){return '<td class="r">'+(totMon[m]?fr(totMon[m]):'–')+'</td>';}).join('');
-  el.innerHTML='<div class="bar" style="margin-bottom:4px">'+sel+'</div>'
+  el.innerHTML='<div class="bar" style="margin-bottom:6px;padding:7px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;align-items:center;flex-wrap:wrap">'+sel+'</div>'
     +'<div style="font-size:11px;color:#888;margin:2px 0 6px">Revenue by month + '+fyLbl(fy)+' total, per country (all channels) and per country × channel. Set a target (+% on last-year or an absolute value) on either level. <b>Forecast</b> includes price changes. RAG: <span style="color:#16a34a">■</span> ≥ target · <span style="color:#f59e0b">■</span> within 5% · <span style="color:#dc2626">■</span> below.</div>'
     +'<div style="overflow-x:auto"><table class="rev-tbl"><thead><tr><th style="position:sticky;left:0;background:#fff;z-index:1">Country / channel</th><th class="r">LY</th><th class="r">Target</th><th class="r">Tgt</th>'+monHdr+'<th class="r">'+fyLbl(fy)+'</th><th class="r">Gap</th><th class="r">Grw</th><th class="c">●</th></tr></thead><tbody>'+body
     +'<tr class="tot"><td style="position:sticky;left:0;background:#eef2f7">Total</td><td class="r">'+fr(totLy)+'</td><td></td><td></td>'+totCells+'<td class="r">'+fr(totFc)+'</td><td colspan="3"></td></tr>'
