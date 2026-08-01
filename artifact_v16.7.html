@@ -6551,7 +6551,7 @@ function buildBody(){
       cm1_25+=(a['2025_05']||[0])[0];cm1_26+=(a['2026_05']||[0])[0];
       cm3_25+=sumUT(a,2025,5)-sumUT(a,2025,2);cm3_26+=sumUT(a,2026,5)-sumUT(a,2026,2);
       const rk2=r.s+'|'+CUR+'|'+r.ch;
-      const fu2=fu_cache[rk2]||calc(r.s,CUR,r.ch);fu_cache[rk2]=fu2;
+      const fu2=fu_cache[rk2]||calc(r.s,CUR,r.ch).fu;fu_cache[rk2]=fu2;   // store the .fu MAP (was storing the whole {fu,reasons} → fyFC read undefined→0, and poisoned the cache for the per-month rollup)
       const sp2=aspF(r.s,CUR,r.ch);
       const f26s=fyFC(fu2,2026);   // FY26/27
       const f27s=fyFC(fu2,2027);   // FY27/28

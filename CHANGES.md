@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.376 - Bug fix: category FY-total forecast read 0 (cache-shape)
+- DEMAND plan category totals (SHOW_CAT_TOT): on a cache miss, `fu_cache[rk2]` stored the whole `{fu,reasons}` object instead of the `.fu` month-map, so `fyFC(fu2,…)` read `undefined`→**0** for category FY forecast columns — and poisoned the cache for the per-month rollup. Now stores `.fu` consistently (matching the other two sites). Verified: `fyFC(.fu)=9714` vs the old buggy `fyFC({fu,reasons})=0`. Masked in normal use because "show category totals" is off by default. `artifact_v16.7.html` only; does not touch calc/BP → **buy plan unchanged**.
+
 ## v26.375 - Performance Tier 1: parallelise slow endpoints + memoise calc()
 Four low-risk wins from the load-time audit (deterministic output, no behaviour change):
 - **`server.mjs` `/api/targets`** — 5 independent queries were awaited in series; now kicked off together (hoisted promises). **2.7s → ~0.68s.**
