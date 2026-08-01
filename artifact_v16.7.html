@@ -6678,6 +6678,7 @@ function renderMain(){
       if(pTr)insertInlineSkuRows(p[0],p[1],p[2],pTr);
     });
   }
+  if(typeof planRevPopRefresh==='function')planRevPopRefresh(); // keep the pop-out in sync with forecast/scope changes
 }
 
 // Planner SKU filter: re-render body to surface matching SKUs (input lives in the toolbar so it keeps focus)
@@ -6753,6 +6754,7 @@ function render(){
   // Show the top-right AI tool-bar (Insights) on the PLAN/DEMAND view only; REPORTS/BUY/FBA get none.
   var _pt=document.getElementById('plan-tools');
   if(_pt)_pt.style.display=(VIEW_MODE==='planning')?'':'none';
+  if(typeof planRevBtnSync==='function')planRevBtnSync(); // floating "Revenue vs target" button on the plan
   // leaving DEMAND — return the relocated tools to the main bar, then tear down the sub-tab bar + body
   if(VIEW_MODE!=='planning'){
     var vtr=document.getElementById('view-tabs-row');
@@ -7201,6 +7203,63 @@ function revMonthly(co,ch,fy){ var ck=co+'|'+(ch||'*')+'|'+fy; if(_revCache[ck])
     fmC.forEach(function(m){ var v=isActualMonth(m)?(a[m]?a[m][1]:0):((fu[m]||0)*getASP(co,r.ch,s,pa(m).y,pa(m).mo)); mon[m]+=v; fc+=v; });
     fmL.forEach(function(m){ ly+=(a[m]?a[m][1]:0); }); });
   var out={mon:mon, fc:fc, ly:ly}; _revCache[ck]=out; return out; }
+
+// ── Plan ▸ floating "Revenue vs target" pop-out ────────────────────────────────────────────────
+// A pill button on the demand plan that pops a compact card comparing the plan's live forecast
+// (actuals-to-date + forecast, incl. price changes) to the revenue-growth target for the plan's
+// CURRENT country (CUR) + channel (CF). Defaults to the current FY; follows the plan's scope.
+var PLAN_REV_FY=null;
+function ensureRevTargets(cb){ fetch('/api/demand-revenue-targets').then(function(r){return r.json();}).then(function(rows){
+    REV_TARGETS={}; (rows||[]).forEach(function(t){ REV_TARGETS[t.country+'|'+t.channel+'|'+t.fy]={type:t.target_type,pct:t.target_pct,value:t.target_value}; }); cb&&cb();
+  }).catch(function(){ cb&&cb(); }); }
+function planRevBtnSync(){ var show=(typeof VIEW_MODE!=='undefined'&&VIEW_MODE==='planning'&&typeof DEMAND_VIEW!=='undefined'&&DEMAND_VIEW==='plan');
+  var b=document.getElementById('plan-rev-btn');
+  if(show){ if(!b){ b=document.createElement('button'); b.id='plan-rev-btn'; b.type='button'; b.innerHTML='📈 Revenue vs target';
+      b.title='Compare the plan’s forecast to the revenue growth target for this country / channel';
+      b.style.cssText='position:fixed;right:20px;bottom:20px;z-index:1200;background:#2563eb;color:#fff;border:none;border-radius:22px;padding:10px 17px;font-size:13px;font-weight:700;font-family:inherit;cursor:pointer;box-shadow:0 4px 12px rgba(37,99,235,.35)';
+      b.onclick=openPlanRevPopout; document.body.appendChild(b); } }
+  else { if(b)b.remove(); var p=document.getElementById('plan-rev-pop'); if(p)p.remove(); } }
+function openPlanRevPopout(){ if(PLAN_REV_FY==null)PLAN_REV_FY=CUR_FY_START;
+  var p=document.getElementById('plan-rev-pop'); if(p){ p.remove(); return; }   // click again to close
+  p=document.createElement('div'); p.id='plan-rev-pop';
+  p.style.cssText='position:fixed;right:20px;bottom:70px;z-index:1201;width:390px;max-height:80vh;overflow:auto;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 10px 34px rgba(15,23,42,.28);font-size:12px';
+  document.body.appendChild(p); planRevPopRender(); ensureRevTargets(function(){ planRevPopRender(); }); }
+function planRevPopRefresh(){ if(document.getElementById('plan-rev-pop'))planRevPopRender(); }
+function planRevPopRender(){ var p=document.getElementById('plan-rev-pop'); if(!p)return; _revCache={};
+  var fy=PLAN_REV_FY, co=CUR, ch=CF, fys=[CUR_FY_START,CUR_FY_START+1,CUR_FY_START+2];
+  var fyLbl=function(y){return 'FY'+String(y).slice(2)+'/'+String(y+1).slice(2);};
+  var MON=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], months=fyMonths(fy);
+  var rCh=revMonthly(co,ch,fy), rCo=revMonthly(co,null,fy);
+  function tgtVal(t,ly){ return t?(t.type==='pct'?ly*(1+Number(t.pct||0)/100):Number(t.value||0)):null; }
+  var tgtCh=tgtVal(REV_TARGETS[co+'|'+ch+'|'+fy],rCh.ly), tgtCo=tgtVal(REV_TARGETS[co+'|ALL|'+fy],rCo.ly);
+  function ragC(fc,t){ return fc>=t?'#16a34a':(fc>=t*0.95?'#f59e0b':'#dc2626'); }
+  function grow(fc,ly){ return ly>0?Math.round((fc-ly)/ly*100):null; }
+  function statusLine(fc,t,lbl){ if(t==null)return '<span style="color:#64748b">No '+fyLbl(fy)+' target set for '+esc(lbl)+' — add one in the Revenue tab.</span>';
+    var gap=fc-t, gp=t>0?Math.round(gap/t*100):0;
+    return '<span style="color:'+ragC(fc,t)+';font-weight:700">'+(gap>=0?'On track · '+fr(gap)+' above target':'Short by '+fr(-gap)+' ('+gp+'%)')+'</span>'; }
+  function bigRow(label,r,t){ var g=grow(r.fc,r.ly);
+    return '<div style="padding:9px 13px;border-top:1px solid #eef2f7">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center"><b>'+esc(label)+'</b>'+(t!=null?'<span title="green ≥ target · amber within 5% · red below" style="display:inline-block;width:12px;height:12px;border-radius:50%;background:'+ragC(r.fc,t)+'"></span>':'')+'</div>'
+      +'<div style="display:flex;justify-content:space-between;margin-top:3px"><span style="color:#64748b">Forecast</span><b>'+fr(r.fc)+'</b></div>'
+      +'<div style="display:flex;justify-content:space-between"><span style="color:#64748b">Target</span><span>'+(t!=null?fr(t):'—')+'</span></div>'
+      +'<div style="display:flex;justify-content:space-between"><span style="color:#64748b">Last year</span><span>'+fr(r.ly)+(g!=null?' <span style="color:'+(g>=0?'#166534':'#b91c1c')+'">('+(g>=0?'+':'')+g+'%)</span>':'')+'</span></div>'
+      +'<div style="margin-top:4px">'+statusLine(r.fc,t,label)+'</div></div>'; }
+  var pills=fys.map(function(y){return '<button class="prp-fy" data-fy="'+y+'" style="border:1px solid '+(y===fy?'#2563eb':'#cbd5e1')+';background:'+(y===fy?'#2563eb':'#fff')+';color:'+(y===fy?'#fff':'#475569')+';border-radius:14px;padding:2px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit">'+fyLbl(y)+'</button>';}).join(' ');
+  var monRows=months.map(function(m){var p2=pa(m),act=isActualMonth(m),v=rCh.mon[m];
+    return '<div style="display:flex;justify-content:space-between;padding:2px 0;border-top:1px solid #f4f6f9"><span style="color:'+(act?'#16a34a':'#64748b')+'">'+MON[p2.mo]+" '"+String(p2.y).slice(2)+(act?' · actual':'')+'</span><span style="font-variant-numeric:tabular-nums'+(act?';color:#16a34a;font-weight:600':'')+'">'+(v?fr(v):'–')+'</span></div>';}).join('');
+  p.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 13px;border-bottom:1px solid #eef2f7;position:sticky;top:0;background:#fff;border-radius:12px 12px 0 0">'
+      +'<div><div style="font-weight:800;font-size:13px">Revenue vs target</div><div style="color:#64748b;font-size:11px">'+esc(co)+' · '+esc(ch)+' · '+fyLbl(fy)+' <span style="color:#94a3b8">(follows the plan)</span></div></div>'
+      +'<button id="prp-x" style="border:none;background:#f1f5f9;border-radius:8px;width:26px;height:26px;cursor:pointer;font-size:15px;line-height:1">✕</button></div>'
+    +'<div style="padding:8px 13px 2px;display:flex;gap:5px">'+pills+'</div>'
+    +bigRow(co+' · '+ch+' (this channel)',rCh,tgtCh)
+    +bigRow(co+' · all channels',rCo,tgtCo)
+    +'<div style="padding:9px 13px 4px;color:#64748b;font-weight:700">Monthly forecast · '+esc(ch)+'</div>'
+    +'<div style="padding:0 13px 6px">'+monRows+'</div>'
+    +'<div style="padding:8px 13px 12px;border-top:1px solid #eef2f7"><button id="prp-goto" style="width:100%;border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:8px;padding:7px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">Open Revenue tab to edit targets →</button></div>';
+  p.querySelector('#prp-x').onclick=function(){ p.remove(); };
+  p.querySelectorAll('.prp-fy').forEach(function(b){ b.onclick=function(){ PLAN_REV_FY=+b.dataset.fy; planRevPopRender(); }; });
+  p.querySelector('#prp-goto').onclick=function(){ p.remove(); REV_SUB='targets'; REV_FY=fy; DEMAND_VIEW='revenue'; if(window.writeHash)window.writeHash(['demand','revenue']); render(); }; }
+
 function renderRevenueView(body){ _revBody=body; if(REV_FY==null)REV_FY=CUR_FY_START;
   var subs=[['targets','Targets &amp; tracking'],['prices','Price changes']];
   body.innerHTML='<style>.rev-tbl{border-collapse:collapse;font-size:12px;margin-top:6px}.rev-tbl th,.rev-tbl td{padding:4px 11px;border-bottom:1px solid #eef2f7;text-align:left;white-space:nowrap}.rev-tbl .r{text-align:right;font-variant-numeric:tabular-nums}.rev-tbl .c{text-align:center}.rev-tbl tr.tot td{border-top:2px solid #999;font-weight:700}.rev-tbl tr.rev-cotot td{background:#f1f5f9;border-top:2px solid #cbd5e1;font-weight:600}.rev-tbl .mut{color:#9aa5b1}.rev-tbl .tiny{font-size:10px;font-weight:400}.rev-tbl input,.rev-tbl select{font-size:12px}</style>'

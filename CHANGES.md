@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.371 - DEMAND plan: floating "Revenue vs target" pop-out
+- New floating pill button (bottom-right) on the demand **plan** view. Pops a compact card comparing the plan's **live forecast** (actuals-to-date + forecast incl. price changes) to the **revenue-growth target**, defaulting to the plan's **current country + channel** (`CUR`/`CF`).
+- Card shows: this-channel row + the country's all-channels row (each with forecast / target / last-year+growth% / RAG dot / on-track-or-short status), a monthly forecast breakdown for the channel (actual months in green), an in-card FY toggle, and a "Open Revenue tab" shortcut.
+- Follows the plan: switching country/channel or editing a forecast re-renders the card live. Button only shows on DEMAND ▸ Plan. Reuses `revMonthly` + fetches targets on open. `artifact_v16.7.html` only (no schema change).
+
 ## v26.370 - DEMAND ▸ Revenue: prominent per-FY target toggle
 - Made the financial-year switcher on Revenue ▸ Targets & tracking unmissable — a labelled bar ("Targets for financial year:") with the active FY outlined, plus a "each year keeps its own targets" hint. Behaviour unchanged: each FY (FY26/27, FY27/28, FY28/29) holds its own independent targets, and switching re-renders the whole matrix (targets, monthly forecast, gap, RAG) for that year. `artifact_v16.7.html`.
 
