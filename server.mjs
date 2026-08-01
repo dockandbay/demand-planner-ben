@@ -505,6 +505,7 @@ function requiredCap(method, p) {
   if (p === '/api/me' || p === '/api/ai') return null;       // profile + AI helper (no gated DB write)
   if (p === '/api/save-forecasts' || p === '/api/save-sku-forecasts' || p === '/api/targets'
       || p === '/api/demand-actions/state' || p.startsWith('/api/trading-calendar')
+      || p.startsWith('/api/price-changes') || p.startsWith('/api/demand-revenue-targets')
       || p.startsWith('/api/forecast/')) return 'demand';    // DEMAND / forecasting domain
   if (p === '/api/consignee' || p.startsWith('/api/consignee/')) return 'config'; // CONFIG ▸ Consignees
   if (p === '/api/app-settings') return 'config';            // CONFIG ▸ General settings
@@ -556,6 +557,9 @@ app.get('/', async (_req, res) => {
     html = replaceGlobal(html, 'SUBS_META', JSON.stringify(SUBS));
     html = replaceGlobal(html, 'BI_RULES', JSON.stringify(BI));
     html = replaceGlobal(html, 'PROD_CONST', JSON.stringify(PROD_CONST));
+    // Definitive price changes (DEMAND ▸ Revenue) — injected fresh (not in the 5-min data cache) so an edit shows
+    // on the next load. getASP applies these to lift the revenue forecast.
+    try { const PRICE_CHANGES = await buildPriceChanges(); html = replaceGlobal(html, 'PRICE_CHANGES', JSON.stringify(PRICE_CHANGES)); } catch (e) { /* leave the [] default */ }
     // Neutralise the stale baked input overlay so live forecast_inputs is authoritative.
     // (FC_SEED already seeds IV from live FC_CURRENT.)
     html = replaceGlobal(html, 'SAVED_INPUTS', '{}');
@@ -7445,7 +7449,50 @@ app.get('/api/scenario/key-arrivals', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Sell-through targets (DEMAND ▸ Targets) — target % by category × market. GET returns the in-scope
+// ── DEMAND ▸ Revenue: price changes + revenue-growth targets (migrations 168/169) ──────────────────────────
+async function buildPriceChanges() {
+  try { return (await pool.query(`SELECT id, country, coalesce(channel,'') channel, coalesce(subcategory,'') subcategory,
+    effective_month, uplift_pct, coalesce(note,'') note FROM planner.price_changes ORDER BY effective_month, country`)).rows; }
+  catch (e) { return []; }
+}
+app.get('/api/price-changes', async (_req, res) => { res.json(await buildPriceChanges()); });
+app.post('/api/price-changes', async (req, res) => {
+  const b = req.body || {};
+  if (!b.country || !b.effective_month || b.uplift_pct == null || b.uplift_pct === '') return res.status(400).json({ error: 'country, effective_month and uplift_pct are required' });
+  try {
+    if (b.id) { await pool.query(`UPDATE planner.price_changes SET country=$1, channel=$2, subcategory=$3, effective_month=$4, uplift_pct=$5, note=$6 WHERE id=$7`,
+      [b.country, b.channel || null, b.subcategory || null, b.effective_month, Number(b.uplift_pct), b.note || null, b.id]);
+      return res.json({ id: b.id }); }
+    const r = await pool.query(`INSERT INTO planner.price_changes (country, channel, subcategory, effective_month, uplift_pct, note, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`, [b.country, b.channel || null, b.subcategory || null, b.effective_month, Number(b.uplift_pct), b.note || null, authUser(req) || null]);
+    res.json({ id: r.rows[0].id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/price-changes/:id/delete', async (req, res) => {
+  try { await pool.query(`DELETE FROM planner.price_changes WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Revenue-growth targets per country × channel × FY. GET returns all; POST upserts one cell (blank clears it).
+app.get('/api/demand-revenue-targets', async (_req, res) => {
+  try { res.json((await pool.query(`SELECT country, channel, fy, target_type, target_pct, target_value FROM planner.demand_revenue_targets`)).rows); }
+  catch (e) { res.json([]); }
+});
+app.post('/api/demand-revenue-targets', async (req, res) => {
+  const b = req.body || {};
+  if (!b.country || !b.channel || b.fy == null) return res.status(400).json({ error: 'country, channel and fy are required' });
+  try {
+    const type = b.target_type === 'value' ? 'value' : 'pct';
+    const pct = (type === 'pct' && b.target_pct !== '' && b.target_pct != null) ? Number(b.target_pct) : null;
+    const val = (type === 'value' && b.target_value !== '' && b.target_value != null) ? Number(b.target_value) : null;
+    if (pct == null && val == null) { await pool.query(`DELETE FROM planner.demand_revenue_targets WHERE country=$1 AND channel=$2 AND fy=$3`, [b.country, b.channel, b.fy]); return res.json({ cleared: true }); }
+    await pool.query(`INSERT INTO planner.demand_revenue_targets (country, channel, fy, target_type, target_pct, target_value, updated_by, updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,now()) ON CONFLICT (country, channel, fy)
+      DO UPDATE SET target_type=excluded.target_type, target_pct=excluded.target_pct, target_value=excluded.target_value, updated_by=excluded.updated_by, updated_at=now()`,
+      [b.country, b.channel, b.fy, type, pct, val, authUser(req) || null]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Sell-through targets (DEMAND ▸ Sell-through targets) — target % by category × market. GET returns the in-scope
 // category list + markets + the saved targets; POST upserts one cell.
 const TARGET_MARKETS = ['UK', 'US', 'EU', 'AU'];
 app.get('/api/targets', async (req, res) => {

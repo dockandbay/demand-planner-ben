@@ -949,6 +949,7 @@ const CURRENT_FLD_MAP={
   "2027_10":"fldAkavY5TTDN03pX","2027_11":"fldwNOVvPh77dF41J","2027_12":"fldkdAYuo0stOWzYI"
 };
 let DATA=[];
+var PRICE_CHANGES=[];   // DEMAND ▸ Revenue: definitive price changes (server-injected). getASP applies them to projected months.
 // Dynamic month anchor: current/partial month = latest 2026 month that has actuals in the data.
 // Advances automatically when fresh data is embedded — no hardcoded month to edit each cycle.
 (function(){
@@ -3067,26 +3068,32 @@ function ga(co,ch,s){const r=DATA.find(d=>d.co===co&&d.ch===ch&&d.s===s);return 
 // ASP (average selling price) for a given subcat × country × channel × month/year.
 // Returns the price per unit (revenue ÷ units) from the most recent prior-year data available.
 // Future: will accept BI rule overrides for forecasted price changes.
+// Compounded price-change uplift factor for a PROJECTED month (co × ch × subcat × YYYY-MM). Multiple changes
+// compound (a country-wide + a subcategory change both apply). Blank channel/subcategory = all. 1 = no change.
+function priceUpliftFactor(co,ch,s,year,mo){
+  var pc=PRICE_CHANGES; if(!pc||!pc.length)return 1;
+  var ymk=year+'-'+(mo<10?'0':'')+mo, COU=String(co||'').toUpperCase(), f=1;
+  for(var i=0;i<pc.length;i++){ var p=pc[i];
+    if(String(p.country||'').toUpperCase()!==COU)continue;
+    if(p.channel && String(p.channel)!==String(ch))continue;
+    if(p.subcategory && String(p.subcategory)!==String(s))continue;
+    if(String(p.effective_month||'')>ymk)continue;   // not yet in effect this month
+    f*=(1+Number(p.uplift_pct||0)/100);
+  }
+  return f;
+}
 function getASP(co,ch,s,year,mo){
   var a=ga(co,ch,s);
   var thisK=ym(year,mo);
-  // If the target month itself has actuals (past completed month or partial current
-  // month), use its own ASP.
+  // Actual month (past / partial current) → its own real ASP; no price-change uplift applied to real data.
   if(a[thisK]&&a[thisK][0]>0)return a[thisK][1]/a[thisK][0];
-  // Future month: inherit the most recent actual month's ASP. Anchors all future
-  // revenue projections to the current run-rate ASP rather than reverting to LY.
-  // (Per-month price modelling will land as a separate feature; until then,
-  // assume ASP is flat going forward from the most recent observation.)
-  for(var i=ACTUAL_MONTHS.length-1;i>=0;i--){
-    var am=ACTUAL_MONTHS[i];
-    if(a[am]&&a[am][0]>0)return a[am][1]/a[am][0];
-  }
-  // No actuals anywhere for this combo: fall back to LY same month, then earlier years.
-  for(var y=year-1;y>=2024;y--){
-    var k=ym(y,mo);
-    if(a[k]&&a[k][0]>0)return a[k][1]/a[k][0];
-  }
-  return 0;
+  // Projected month: base ASP = most recent actual run-rate (else LY same month, then earlier), then apply any
+  // definitive price changes in effect for this month (compounded).
+  var base=0;
+  for(var i=ACTUAL_MONTHS.length-1;i>=0;i--){ var am=ACTUAL_MONTHS[i]; if(a[am]&&a[am][0]>0){ base=a[am][1]/a[am][0]; break; } }
+  if(!base){ for(var y=year-1;y>=2024;y--){ var k=ym(y,mo); if(a[k]&&a[k][0]>0){ base=a[k][1]/a[k][0]; break; } } }
+  if(!base)return 0;
+  return base*priceUpliftFactor(co,ch,s,year,mo);
 }
 
 // Render a revenue line showing rev + YoY% with ASP in hover tooltip
@@ -6779,6 +6786,7 @@ function render(){
     else if(DEMAND_VIEW==='targets') renderTargetsView(body);
     else if(DEMAND_VIEW==='calendar') renderCalendarView(body);
     else if(DEMAND_VIEW==='kpis') renderKpisView(body);
+    else if(DEMAND_VIEW==='revenue') renderRevenueView(body);
     else renderDemandActionsView(body);
     return;
   }
@@ -7146,7 +7154,7 @@ function renderAccuracyView(kb,body){
   }).catch(function(){ kb.innerHTML='<div style="color:#dc2626;font-size:12px">Failed to load.</div>'; });
 }
 // ─── DEMAND sub-tabs (PLAN / KPIs / TARGETS / ACTIONS / CALENDAR) ───────────────────────────
-var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accts'],['kpis','KPIs'],['targets','Sell-through targets'],['actions','Actions'],['calendar','Calendar']];
+var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accts'],['kpis','KPIs'],['targets','Sell-through targets'],['revenue','Revenue'],['actions','Actions'],['calendar','Calendar']];
 function renderDemandTabs(){
   var bar=document.getElementById('demand-tabs');
   var _sb=document.getElementById('statusbar');
@@ -7178,6 +7186,83 @@ var _tgtMetric='st'; // Targets sub-metric: 'st' (sell-through %) | 'cover' (cov
 var _tgtView='score'; // Targets view: 'score' (scorecard + recommendations) | 'edit' (set targets matrix)
 var _tgtStatus='all'; // scorecard status filter
 function applyTarget(cat,mkt,pct){ return fetch('/api/targets',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({category:cat,market:mkt,metric:'st',value:pct})}).then(function(r){return r.json();}); }
+// ── DEMAND ▸ Revenue: revenue-growth targets + tracking, and definitive price changes ──────────────────────
+var REV_SUB='targets', REV_FY=null, REV_TARGETS={}, _revBody=null;
+function revReload(){ if(_revBody)renderRevenueView(_revBody); }
+function revCombos(){ var seen={}, out=[]; (DATA||[]).forEach(function(r){ if(!r.co||!r.ch)return; var k=r.co+'|'+r.ch; if(!seen[k]){ seen[k]=1; out.push({co:r.co,ch:r.ch}); } });
+  out.sort(function(a,b){ var ia=MKTS.indexOf(a.co),ib=MKTS.indexOf(b.co); ia=ia<0?99:ia; ib=ib<0?99:ib; return ia!==ib?ia-ib:String(a.ch).localeCompare(String(b.ch)); }); return out; }
+function revSubcats(){ var seen={}, out=[]; (DATA||[]).forEach(function(r){ if(r.s&&!seen[r.s]){ seen[r.s]=1; out.push(r.s); } }); return out.sort(); }
+// FY revenue for a country×channel: forecast (actuals-to-date + forecast×ASP incl. price changes) + last-year actual.
+function revComboFY(co,ch,startY){ var fmC=fyMonths(startY), fmL=fyMonths(startY-1), fc=0, ly=0;
+  (DATA||[]).forEach(function(r){ if(r.co!==co||r.ch!==ch)return; var s=r.s, a=ga(co,ch,s), fu=(calc(s,co,ch)||{}).fu||{};
+    fmC.forEach(function(m){ if(isActualMonth(m)){ fc+=(a[m]?a[m][1]:0); } else { var p=pa(m); fc+=(fu[m]||0)*getASP(co,ch,s,p.y,p.mo); } });
+    fmL.forEach(function(m){ ly+=(a[m]?a[m][1]:0); }); });
+  return {fc:fc, ly:ly}; }
+function renderRevenueView(body){ _revBody=body; if(REV_FY==null)REV_FY=CUR_FY_START;
+  var subs=[['targets','Targets &amp; tracking'],['prices','Price changes']];
+  body.innerHTML='<style>.rev-tbl{border-collapse:collapse;font-size:12px;margin-top:6px}.rev-tbl th,.rev-tbl td{padding:4px 11px;border-bottom:1px solid #eef2f7;text-align:left;white-space:nowrap}.rev-tbl .r{text-align:right;font-variant-numeric:tabular-nums}.rev-tbl .c{text-align:center}.rev-tbl tr.tot td{border-top:2px solid #999;font-weight:700}.rev-tbl input,.rev-tbl select{font-size:12px}</style>'
+    +'<div class="bar" style="gap:4px;margin-bottom:8px">'+subs.map(function(s){return '<button class="pill catpill'+(s[0]===REV_SUB?' active':'')+'" data-rs="'+s[0]+'">'+s[1]+'</button>';}).join('')+'</div><div id="rev-body"><div class="count">Loading…</div></div>';
+  body.querySelectorAll('.pill[data-rs]').forEach(function(b){ b.onclick=function(){ REV_SUB=b.dataset.rs; revReload(); }; });
+  Promise.all([fetch('/api/price-changes').then(function(r){return r.json();}).catch(function(){return [];}),
+               fetch('/api/demand-revenue-targets').then(function(r){return r.json();}).catch(function(){return [];})]).then(function(res){
+    PRICE_CHANGES=res[0]||[];   // refresh so the tracking reflects the latest price changes without a page reload
+    REV_TARGETS={}; (res[1]||[]).forEach(function(t){ REV_TARGETS[t.country+'|'+t.channel+'|'+t.fy]={type:t.target_type,pct:t.target_pct,value:t.target_value}; });
+    var rb=document.getElementById('rev-body'); if(!rb)return;
+    if(REV_SUB==='prices')renderPriceChanges(rb); else renderRevTargets(rb);
+  }); }
+function saveRevTarget(co,ch,fy,str){ var v=String(str||'').trim(), b={country:co,channel:ch,fy:fy};
+  if(!v){ b.target_type='pct'; b.target_pct=''; b.target_value=''; }
+  else if(v.indexOf('%')>=0){ b.target_type='pct'; b.target_pct=parseFloat(v.replace(/[^0-9.\-]/g,'')); }
+  else { var n=v.replace(/[£$,\s]/g,''), mult=1; if(/m$/i.test(n)){mult=1e6;n=n.replace(/m$/i,'');} else if(/k$/i.test(n)){mult=1e3;n=n.replace(/k$/i,'');} b.target_type='value'; b.target_value=parseFloat(n)*mult; }
+  fetch('/api/demand-revenue-targets',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b)}).then(function(r){return r.json();}).then(function(){ revReload(); }).catch(function(){ revReload(); }); }
+function renderRevTargets(el){ var combos=revCombos(), fys=[CUR_FY_START,CUR_FY_START+1,CUR_FY_START+2], fy=REV_FY;
+  var fyLbl=function(y){return 'FY'+String(y).slice(2)+'/'+String(y+1).slice(2);};
+  var sel='<span class="pill-lbl">Financial year</span> '+fys.map(function(y){return '<button class="pill catpill'+(y===fy?' active':'')+'" data-fy="'+y+'">'+fyLbl(y)+'</button>';}).join(' ');
+  var rows='', totFc=0, totLy=0, totTgt=0, anyTgt=false;
+  combos.forEach(function(c){ var r=revComboFY(c.co,c.ch,fy), t=REV_TARGETS[c.co+'|'+c.ch+'|'+fy];
+    var tgt = t ? (t.type==='pct'?r.ly*(1+Number(t.pct||0)/100):Number(t.value||0)) : null;
+    var inputVal = t ? (t.type==='pct'?((Number(t.pct)>=0?'+':'')+Number(t.pct)+'%'):Math.round(Number(t.value))) : '';
+    totFc+=r.fc; totLy+=r.ly; if(tgt!=null){totTgt+=tgt;anyTgt=true;}
+    var gap = tgt!=null?r.fc-tgt:null, implied=r.ly>0?Math.round((r.fc-r.ly)/r.ly*100):null;
+    var rag = tgt==null?'':(r.fc>=tgt?'#16a34a':(r.fc>=tgt*0.95?'#f59e0b':'#dc2626'));
+    rows+='<tr><td><b>'+esc(c.co)+'</b></td><td>'+esc(c.ch)+'</td><td class="r">'+fr(r.ly)+'</td>'
+      +'<td class="r"><input class="rev-tgt" data-co="'+esc(c.co)+'" data-ch="'+esc(c.ch)+'" value="'+esc(inputVal)+'" placeholder="+% or value" style="width:96px;text-align:right;padding:3px 5px;border:1px solid #cbd5e1;border-radius:4px"></td>'
+      +'<td class="r">'+(tgt!=null?fr(tgt):'<span class="mut">—</span>')+'</td>'
+      +'<td class="r"><b>'+fr(r.fc)+'</b></td>'
+      +'<td class="r" style="color:'+(gap==null?'':(gap>=0?'#166534':'#b91c1c'))+'">'+(gap!=null?((gap>=0?'+':'')+fr(gap)):'<span class="mut">—</span>')+'</td>'
+      +'<td class="r">'+(implied!=null?((implied>=0?'+':'')+implied+'%'):'<span class="mut">—</span>')+'</td>'
+      +'<td class="c">'+(rag?'<span title="green ≥ target · amber within 5% · red below" style="display:inline-block;width:12px;height:12px;border-radius:50%;background:'+rag+'"></span>':'')+'</td></tr>';
+  });
+  var totGap=anyTgt?totFc-totTgt:null;
+  el.innerHTML='<div class="bar" style="margin-bottom:4px">'+sel+'</div>'
+    +'<div style="font-size:11px;color:#888;margin:2px 0 4px">Target = a growth % on last-year revenue, or an absolute value. <b>Forecast</b> = the plan\'s projected '+fyLbl(fy)+' revenue (actuals-to-date + forecast, including any price changes). RAG: <span style="color:#16a34a">■</span> ≥ target · <span style="color:#f59e0b">■</span> within 5% · <span style="color:#dc2626">■</span> below. Edit the plan or add a price change and this updates.</div>'
+    +'<table class="rev-tbl"><thead><tr><th>Country</th><th>Channel</th><th class="r">Last year</th><th class="r">Target (+% or value)</th><th class="r">Target</th><th class="r">Forecast</th><th class="r">Gap</th><th class="r">Growth</th><th class="c">Status</th></tr></thead><tbody>'+rows
+    +'<tr class="tot"><td colspan="2">Total (all combos)</td><td class="r">'+fr(totLy)+'</td><td></td><td class="r">'+(anyTgt?fr(totTgt):'—')+'</td><td class="r">'+fr(totFc)+'</td><td class="r">'+(totGap!=null?((totGap>=0?'+':'')+fr(totGap)):'—')+'</td><td colspan="2"></td></tr>'
+    +'</tbody></table>';
+  el.querySelectorAll('.pill[data-fy]').forEach(function(b){ b.onclick=function(){ REV_FY=+b.dataset.fy; renderRevTargets(el); }; });
+  el.querySelectorAll('.rev-tgt').forEach(function(inp){ inp.onchange=function(){ saveRevTarget(inp.dataset.co,inp.dataset.ch,fy,inp.value); }; }); }
+function renderPriceChanges(el){
+  var rows=(PRICE_CHANGES||[]).map(function(p){ return '<tr><td><b>'+esc(p.country)+'</b></td><td>'+(p.channel?esc(p.channel):'<span class="mut">all</span>')+'</td><td>'+(p.subcategory?esc(p.subcategory):'<span class="mut">all</span>')+'</td><td>'+esc(p.effective_month)+'</td><td class="r" style="font-weight:600;color:'+(Number(p.uplift_pct)>=0?'#166534':'#b91c1c')+'">'+(Number(p.uplift_pct)>=0?'+':'')+Number(p.uplift_pct)+'%</td><td>'+esc(p.note||'')+'</td><td class="c"><button class="pc-del" data-id="'+p.id+'" title="delete" style="color:#dc2626;cursor:pointer;border:none;background:none;font-size:13px">✕</button></td></tr>'; }).join('')||'<tr><td colspan="7" class="mut" style="padding:10px">No price changes yet.</td></tr>';
+  el.innerHTML='<div style="font-size:11px;color:#888;margin-bottom:8px">Definitive price changes lift the revenue forecast (ASP) from the effective month forward — units are unchanged. Country is required; leave channel / subcategory blank for "all". Multiple changes <b>compound</b>.</div>'
+    +'<div class="bar" style="gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px;padding:8px 10px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px">'
+      +'<div><div class="mut tiny">Country</div><select id="pc-co" class="fci">'+MKTS.map(function(c){return '<option>'+c+'</option>';}).join('')+'</select></div>'
+      +'<div><div class="mut tiny">Channel</div><select id="pc-ch" class="fci"><option value="">all</option>'+['DTC','FBA','B2B'].map(function(c){return '<option>'+c+'</option>';}).join('')+'</select></div>'
+      +'<div><div class="mut tiny">Subcategory</div><input id="pc-sub" class="fci" list="pc-subs" placeholder="all" style="width:170px"></div>'
+      +'<div><div class="mut tiny">From month</div><input id="pc-mon" class="fci" placeholder="YYYY-MM" style="width:90px"></div>'
+      +'<div><div class="mut tiny">Uplift %</div><input id="pc-pct" class="fci" placeholder="+10" style="width:64px;text-align:right"></div>'
+      +'<div style="flex:1;min-width:120px"><div class="mut tiny">Note</div><input id="pc-note" class="fci" placeholder="optional" style="width:100%"></div>'
+      +'<button class="pill" id="pc-add" style="background:#dcfce7;color:#166534;border:1px solid #16a34a;font-weight:600">+ Add price change</button>'
+      +'<span id="pc-msg" class="mut tiny"></span>'
+      +'<datalist id="pc-subs">'+revSubcats().map(function(s){return '<option value="'+esc(s)+'"></option>';}).join('')+'</datalist>'
+    +'</div>'
+    +'<table class="rev-tbl"><thead><tr><th>Country</th><th>Channel</th><th>Subcategory</th><th>From</th><th class="r">Uplift</th><th>Note</th><th class="c"></th></tr></thead><tbody>'+rows+'</tbody></table>';
+  document.getElementById('pc-add').onclick=function(){ var msg=document.getElementById('pc-msg');
+    var body={country:document.getElementById('pc-co').value, channel:document.getElementById('pc-ch').value||null, subcategory:(document.getElementById('pc-sub').value||'').trim()||null, effective_month:(document.getElementById('pc-mon').value||'').trim(), uplift_pct:document.getElementById('pc-pct').value.replace(/[^0-9.\-]/g,''), note:(document.getElementById('pc-note').value||'').trim()||null };
+    if(!/^\d{4}-\d{2}$/.test(body.effective_month)){ msg.style.color='#dc2626'; msg.textContent='From month must be YYYY-MM.'; return; }
+    if(body.uplift_pct===''||isNaN(Number(body.uplift_pct))){ msg.style.color='#dc2626'; msg.textContent='Enter an uplift %.'; return; }
+    msg.style.color='#64748b'; msg.textContent='Saving…';
+    fetch('/api/price-changes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;return;} revReload(); }).catch(function(e){ msg.style.color='#dc2626'; msg.textContent=(e.message||e); }); };
+  el.querySelectorAll('.pc-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete this price change?'))return; fetch('/api/price-changes/'+b.dataset.id+'/delete',{method:'POST'}).then(function(r){return r.json();}).then(function(){ revReload(); }); }; }); }
 function renderTargetsView(body){
   var viewTog=function(){ var t=function(v,l){return '<button class="d3tab'+(_tgtView===v?' active':'')+'" data-tv="'+v+'">'+l+'</button>';};
     return '<div class="d3nav">'+t('score','Sell Through Scorecard')+t('edit','Set targets')+'</div>'; };

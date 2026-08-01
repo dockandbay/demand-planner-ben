@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.368 - DEMAND ▸ Revenue tab: growth targets + tracking + price changes ⚠️ NEEDS MIGRATIONS 168/169
+- New **Revenue** tab under DEMAND with two sub-views:
+  - **Targets & tracking** — revenue-growth targets per **country × channel × FY** (enter +% on last-year revenue or an absolute value). Shows last-year, target, the plan’s projected FY revenue (actuals-to-date + forecast incl. price changes), gap, implied growth, and a **RAG** dot (green ≥ target · amber within 5% · red below). Recomputes live off the plan.
+  - **Price changes** — definitive ASP uplifts (country · optional channel · optional subcategory · effective month · +%), which lift the revenue forecast from that month forward (units unchanged); multiple changes **compound**. Injected into the plan so getASP applies them.
+- New tables `demand_revenue_targets` (mig 168) + `price_changes` (mig 169); endpoints + DEMAND-scoped write guard. Currency mirrors the plan (£). `server.mjs`, `artifact_v16.7.html`.
+
 ## v26.367 - DEMAND: rename "Targets" tab to "Sell-through targets"
 - The DEMAND ▸ Targets tab is now labelled **Sell-through targets** (and its header/help references updated) to distinguish it from the upcoming revenue-targets work. `artifact_v16.7.html`.
 
