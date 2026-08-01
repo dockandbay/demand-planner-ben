@@ -3,7 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
-## v26.385 - Order Plan: top-row "accept all" buttons + cap the no-lines list ⚠️ NEEDS TESTING
+## v26.386 - Order Plan: per-PO "Accept all" button with itemised tooltip ⚠️ NEEDS TESTING
+- Replaced the global top-row accept-all bar (v26.385) with a **per-PO** button in each PO column header: **"✓ Accept all (N)"** where N = that PO's open exceptions. Clicking approves **all** of that PO's exceptions at once — partials + supplier/country/discontinue risk — and adopts any supplier changes (`po-line-accept {all}`).
+- **120 ms hover tooltip** (reuses the risk-badge tooltip) **itemises each exception on its own row** (SKU — type), so you see exactly what "Accept all" will do before clicking. `supply/inject.html`. SUPPLY render only → buy plan untouched.
+
+## v26.385 - Order Plan: top-row "accept all" buttons + cap the no-lines list ⚠️ NEEDS TESTING (superseded by v26.386 for the accept-all part)
 - **Accept-all bar** on the top row (with Load-more, above the grid): compact buttons — **✓ N changes · ✓ N partials · ✓ N sup risk · ✓ N country · ✓ N disc** — each only shows when it has items, all on one wrapping row (not stacked). Each bulk-approves every matching line (supplier changes via `po-line-accept {all}`; the rest via `opApprove(field)`), matching the existing pill counts. The per-PO column button stays for now.
 - **"N POs with no SKU lines"** banner now shows the first **4** with a **"See N more" / "Show less"** toggle instead of listing all. `supply/inject.html`. SUPPLY render only → buy plan untouched.
 
