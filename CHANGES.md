@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.364 - Other Payments: explicit Save button (SUG-0014)
+- Each unpaid Other Payment row now has a **💾 Save** button that commits all its fields (reusing the inline saver) with a **✓ Saved** confirmation — edits previously only saved silently on blur, so it looked like the line didn't save unless you added a new payment. `supply/inject.html`.
+
 ## v26.363 - Hide record of change: persist PER-PO (and per-shipment), not globally
 - The "hide record of change" preference is now stored per PO / per shipment ref (a persisted set), so hiding it on one PO no longer hides it everywhere. `supply/inject.html`.
 
