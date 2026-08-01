@@ -3780,7 +3780,7 @@ app.get('/api/product/item/:ref', async (req, res) => {
     // Round 1 — item + sizes + docs + samples + unread all in parallel (sizes uses a subquery so it needn't wait on item)
     const [itemR, sizesR, docsR, samplesR, unreadR] = await Promise.all([
       pool.query(`SELECT id, ref, coalesce(season,'') season, coalesce(category,'') category,
-        coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(description,'') description,
+        coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(description,'') description, coalesce(recipient_countries,'UK') recipient_countries,
         coalesce(supplier,'') supplier, coalesce(supplier_code,'') supplier_code,
         status, (swatch IS NOT NULL) has_swatch, coalesce(created_by,'') created_by,
         to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at,
@@ -3823,7 +3823,7 @@ app.get('/api/product/item/:ref/core', async (req, res) => {
   try {
     const [itemR, unreadR] = await Promise.all([
       pool.query(`SELECT id, ref, coalesce(season,'') season, coalesce(category,'') category,
-        coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(description,'') description,
+        coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(description,'') description, coalesce(recipient_countries,'UK') recipient_countries,
         coalesce(supplier,'') supplier, coalesce(supplier_code,'') supplier_code,
         status, (swatch IS NOT NULL) has_swatch, coalesce(created_by,'') created_by,
         to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at,
@@ -3900,11 +3900,18 @@ app.post('/api/product/item', async (req, res) => {
 });
 app.post('/api/product/item/:ref', async (req, res) => {
   const b = req.body || {}, ref = req.params.ref, sets = [], vals = []; let i = 1;
-  const allow = { colour_name: 'text', description: 'text', status: 'text', season: 'text', category: 'text', dev_start_override: 'date' };
+  const allow = { colour_name: 'text', description: 'text', status: 'text', season: 'text', category: 'text', dev_start_override: 'date', recipient_countries: 'text' };
   for (const k of Object.keys(allow)) { if (k in b) { sets.push(`${k}=$${i}${allow[k] === 'date' ? '::date' : ''}`); vals.push(b[k] === '' ? null : b[k]); i++; } }
   // stamp / clear the approval time when status changes (drives Reports' time-to-approve)
   if ('status' in b) sets.push(b.status === 'approved' ? 'approved_at=coalesce(approved_at, now())' : 'approved_at=NULL');
   try {
+    // Recipient country change → drop a supplier-visible note on the product timeline (SUG-0005).
+    let _recNote = null;
+    if ('recipient_countries' in b) {
+      const norm = (s) => String(s || '').split(',').map(x => x.trim().toUpperCase()).filter(Boolean).sort().join(',');
+      const old = (await pool.query(`SELECT coalesce(recipient_countries,'UK') rc FROM planner.product_dev_items WHERE ref=$1`, [ref])).rows[0]?.rc || 'UK';
+      if (norm(old) !== norm(b.recipient_countries)) _recNote = String(b.recipient_countries || 'UK');
+    }
     if ('supplier' in b) { const sup = (b.supplier || '').trim() || null; let supCode = null;
       if (sup) { const sr = (await pool.query(`SELECT code FROM planner.suppliers WHERE name=$1`, [sup])).rows[0];
         supCode = (sr && sr.code && sr.code.trim()) ? sr.code.trim().toUpperCase() : sup.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3); }
@@ -3912,6 +3919,8 @@ app.post('/api/product/item/:ref', async (req, res) => {
     if (!sets.length) return res.json({ ok: true });
     vals.push(ref);
     await pool.query(`UPDATE planner.product_dev_items SET ${sets.join(',')}, updated_at=now() WHERE ref=$${i}`, vals);
+    if (_recNote) { const label = _recNote.split(',').map(x => x.trim()).filter(Boolean).join(' and ') || 'UK';
+      try { await pool.query(`INSERT INTO planner.supplier_notes (po, author_kind, author_email, body) VALUES ($1,'internal',$2,$3)`, [ref, authUser(req) || null, 'Recipient country updated to ' + label]); } catch (e) { /* note best-effort */ } }
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

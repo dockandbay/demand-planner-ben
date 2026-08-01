@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.365 - Product development: recipient country (SUG-0005 Part A) ⚠️ NEEDS MIGRATION 166
+- Product-dev items get a **Recipient country** (UK / AU checkboxes, UK default; migration **166** `recipient_countries`, comma list). Editing it in PRODUCT ▸ Master data saves + drops a **supplier-visible timeline note** ("Recipient country updated to UK and AU"). The supplier portal product tab shows **Recipient: UK** / **UK and AU** clearly. `server.mjs`, `supply/inject.html`, `supply/portal-view.js`.
+- Note: SUG-0005 Part B (multiple tracking per shipment) is dropped by decision — 1 tracking code = 1 sample shipment.
+
 ## v26.364 - Other Payments: explicit Save button (SUG-0014)
 - Each unpaid Other Payment row now has a **💾 Save** button that commits all its fields (reusing the inline saver) with a **✓ Saved** confirmation — edits previously only saved silently on blur, so it looked like the line didn't save unless you added a new payment. `supply/inject.html`.
 
