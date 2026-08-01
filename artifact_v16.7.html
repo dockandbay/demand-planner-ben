@@ -3385,6 +3385,9 @@ function refreshRow(s,co,ch){
       dParent.appendChild(pill);
     });
   }catch(e){}
+  // grand-total row aggregates across ALL rows → rebuild it in place so it reflects this edit (memo-fast: only this
+  // row's calc was recomputed above; every other row's calc is a memo hit)
+  try{ if(_makeGrandTotRow){ var _oldGt=document.querySelector('tr.grand-tot'); if(_oldGt){ var _newGt=_makeGrandTotRow(); if(_newGt)_oldGt.parentNode.replaceChild(_newGt,_oldGt); } } }catch(e){}
 }
 
 // (Removed dead applyRec — superseded by the confidence-popup apply flow. v25.652)
@@ -6413,10 +6416,12 @@ function insertInlineSkuRows(s,co,ch,afterTr){
   }
 }
 
+var _makeGrandTotRow=null;   // set by buildBody; lets refreshRow() rebuild the grand-total row in place on an edit
 function buildBody(){
   const cm=filteredCats(),frag=document.createDocumentFragment();
-  // Grand total row — only when ALL categories selected (skip in SKU filter mode)
-  if(SEL.has('ALL')&&!PLAN_SKU_QRY){
+  // Grand total row — built by _makeGrandTotRow() so refreshRow() can rebuild it in place on an edit
+  _makeGrandTotRow=function(){
+    if(!(SEL.has('ALL')&&!PLAN_SKU_QRY))return null;
     var allRows=DATA.filter(function(r){return r.co===CUR&&(!CF||r.ch===CF);});
     var gt24u=0,gt25u=0,gty25u=0,gty26u=0,gty26r=0,gtf26u=0,gtf27u=0,gtf28u=0,gt24r=0,gt25r=0,gtf26r=0,gtf27r=0,gtf28r=0;
     var gtm1_25=0,gtm1_26=0,gtm3_25=0,gtm3_26=0;
@@ -6508,8 +6513,9 @@ function buildBody(){
       else if(tc.t==='tot'){ gtFyCell(tc.startY); }
       else { gtMonthCell(tc.m, tc.m===fyMonths(fyStartOf(tc.m))[0]); }
     });
-    frag.appendChild(gtr);
-  }
+    return gtr;
+  };
+  var _gtr0=_makeGrandTotRow(); if(_gtr0)frag.appendChild(_gtr0);
   const fu_cache={};
   Object.keys(cm).forEach(function(cat){
     var rows=cm[cat].sort(function(a,b){return a.s.localeCompare(b.s)||(a.ch.localeCompare(b.ch));});
