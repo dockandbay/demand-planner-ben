@@ -3388,6 +3388,9 @@ function refreshRow(s,co,ch){
   // grand-total row aggregates across ALL rows → rebuild it in place so it reflects this edit (memo-fast: only this
   // row's calc was recomputed above; every other row's calc is a memo hit)
   try{ if(_makeGrandTotRow){ var _oldGt=document.querySelector('tr.grand-tot'); if(_oldGt){ var _newGt=_makeGrandTotRow(); if(_newGt)_oldGt.parentNode.replaceChild(_newGt,_oldGt); } } }catch(e){}
+  // category subtotal row for this row's category (only rendered when "show category totals" is on) → rebuild in place too
+  try{ if(SHOW_CAT_TOT && typeof _makeCatTotRow==='function'){ var _rrow=DATA.find(function(r){return r.s===s&&r.co===co&&r.ch===ch;}); var _cat=_rrow?parentCat(_rrow.c):null;
+    if(_cat){ var _oldCt=document.querySelector('tr.cat-tot[data-cat="'+esc(_cat)+'"]'); if(_oldCt){ var _newCt=_makeCatTotRow(_cat); if(_newCt)_oldCt.parentNode.replaceChild(_newCt,_oldCt); } } } }catch(e){}
 }
 
 // (Removed dead applyRec — superseded by the confidence-popup apply flow. v25.652)
@@ -6546,6 +6549,14 @@ function buildBody(){
     });
     if(PLAN_SKU_QRY)return; // filter mode: skip category totals
     if(!SHOW_CAT_TOT)return; // category-total rows hidden by default (toolbar toggle)
+    var _ctr0=_makeCatTotRow(cat); if(_ctr0)frag.appendChild(_ctr0);
+  });
+  return frag;
+}
+// Category subtotal row for one category (across its subcats in scope). Extracted so refreshRow() can rebuild it
+// in place on an edit. Returns the <tr>, or null when the category has ≤1 subcat.
+function _makeCatTotRow(cat){
+    var fu_cache={};
     // Category totals
     const allR=DATA.filter(function(r){return parentCat(r.c)===cat&&r.co===CUR&&(!CF||r.ch===CF);});
     var c24u=0,c24r=0,c25u=0,c25r=0,cy26u=0,cy26r=0,cy25u=0;
@@ -6652,9 +6663,8 @@ function buildBody(){
     });
     // Only show totals row if there are multiple subcategories (otherwise it duplicates the single row)
     var uniqueSubcats=Array.from(new Set(allR.map(function(r){return r.s;})));
-    if(uniqueSubcats.length>1)frag.appendChild(totr);
-  });
-  return frag;
+    totr.setAttribute('data-cat', cat);
+    return uniqueSubcats.length>1?totr:null;
 }
 
 // Remap inline-expansion keys when the country/channel selector changes, so an

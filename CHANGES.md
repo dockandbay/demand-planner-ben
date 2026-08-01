@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.390 - DEMAND category subtotals update on cell edit (closes the known gap)
+- The category subtotal rows ("<Category> — total", shown when the toolbar's "Show category totals" is on) didn't live-update on a forecast-cell edit — the last remaining stale-total gap. Extracted their build into `_makeCatTotRow(cat)` (tagged with `data-cat`); `refreshRow` now rebuilds the **edited row's category subtotal in place** (only when the toggle is on). Verified: subtotal changes on edit. Memo-fast. `artifact_v16.7.html`. Display-only → buy plan untouched.
+
 ## v26.389 - DEMAND grand-total row now updates on cell edit
 - The "ALL CATEGORIES" **grand-total row** was built once in `buildBody` and **not** updated by the targeted `refreshRow()` edit path — so it went **stale** on a forecast-cell edit until a full re-render. Extracted it into `_makeGrandTotRow()` (buildBody + refreshRow both use it); `refreshRow` now **rebuilds the grand-total row in place** after patching the edited row. Memo-fast (only the edited row's `calc` recomputes; all others are memo hits). Verified: grand total changes on edit. `artifact_v16.7.html`. Display-only (calc/BP untouched) → buy plan unaffected.
 - (Note: category subtotal rows — only shown when "show category totals" is on, off by default — still don't live-update on edit; smaller follow-up if wanted.)
