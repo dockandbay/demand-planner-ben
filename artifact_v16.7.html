@@ -776,7 +776,7 @@ function closeHelp(){var e=document.getElementById('help-ov');if(e)e.style.displ
 var CTX_HELP={
   'planning|plan':{t:'DEMAND ▸ Plan',h:'The monthly demand plan, category → SKU × market. Edit a forecast input (growth % like 0.3, an absolute like &gt;=4, or a literal) and the cascade rebuilds the SKU-level forecast. In a month cell, <b>i</b> = a BI rule applies, <b>C</b> = a trading-calendar event for that category × market × month.'},
   'planning|kpis':{t:'DEMAND ▸ KPIs',h:'Headline demand-planning KPIs (forecast vs actuals, units / value by country &amp; channel, growth, stock cover). Metric set to be confirmed.'},
-  'planning|targets':{t:'DEMAND ▸ Targets',h:'A sell-through scorecard by category × market. Set ST% and cover-week targets; the table shows actual vs target with a RAG status and a plain-English recommendation. Where no target is set, “apply ~X%” adopts last year’s seasonal pace.'},
+  'planning|targets':{t:'DEMAND ▸ Sell-through targets',h:'A sell-through scorecard by category × market. Set ST% and cover-week targets; the table shows actual vs target with a RAG status and a plain-English recommendation. Where no target is set, “apply ~X%” adopts last year’s seasonal pace.'},
   'planning|actions':{t:'DEMAND ▸ Actions',h:'Demand exceptions: behind / ahead of sell-through target, trading vs last year, and upcoming trading-calendar events (with cover-at-uplift). Filter by market / category / status; dismiss, snooze or mark done — handled items stay viewable under the status pills.'},
   'planning|calendar':{t:'DEMAND ▸ Calendar',h:'Trading calendar of promo / campaign events by date × market × category (optional SKU list + uplift %). Upload / download CSV; the timeline focuses on the next 6 months. Events surface as “C” markers in Plan and as Demand Actions.'},
   'buy':{t:'BUY plan',h:'Recommended buys by SKU × market — Buy 3PL, Urgent, Buy FBA, and 3PL→market transfer opportunities. <b>3PL / FBA – Create POs</b> turn those quantities into proposed POs split into ≤20-pallet containers (supplier picked per SKU). <b>On Order</b> includes confirmed inbound + open POs (deduped by PO ref).'},
@@ -7146,7 +7146,7 @@ function renderAccuracyView(kb,body){
   }).catch(function(){ kb.innerHTML='<div style="color:#dc2626;font-size:12px">Failed to load.</div>'; });
 }
 // ─── DEMAND sub-tabs (PLAN / KPIs / TARGETS / ACTIONS / CALENDAR) ───────────────────────────
-var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accts'],['kpis','KPIs'],['targets','Targets'],['actions','Actions'],['calendar','Calendar']];
+var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accts'],['kpis','KPIs'],['targets','Sell-through targets'],['actions','Actions'],['calendar','Calendar']];
 function renderDemandTabs(){
   var bar=document.getElementById('demand-tabs');
   var _sb=document.getElementById('statusbar');
@@ -8070,7 +8070,7 @@ function renderOtbReport(body){
       +'<span style="display:inline-flex;gap:4px;align-items:center"><span style="font-size:11px;font-weight:700;color:#888">MARKET</span>'+otbPills('market',MK)+'</span>'
       +'<span style="display:inline-flex;gap:4px;align-items:center"><span style="font-size:11px;font-weight:700;color:#888">STATUS</span>'+otbPills('status',ST)+'</span>'
       +ninp('months','HORIZON','mo')+ninp('defcover','DEFAULT COVER','wk')
-      +'<span style="font-size:11px;color:#999">'+d.months+'mo horizon · cover target from DEMAND ▸ Targets ('+d.def_cover+'wk where unset)</span>'
+      +'<span style="font-size:11px;color:#999">'+d.months+'mo horizon · cover target from DEMAND ▸ Sell-through targets ('+d.def_cover+'wk where unset)</span>'
       +'</div><div id="otb-body"></div>';
     body.querySelectorAll('.otb-market,.otb-status').forEach(function(b){ var k=b.classList.contains('otb-market')?'market':'status'; b.onclick=function(){ OTB[k]=b.dataset.v; renderOtbReport(body); }; });
     body.querySelectorAll('.otb-num').forEach(function(el){ el.onchange=function(){ var v=Number(el.value)||0; if(v>0){OTB[el.dataset.k]=v; renderOtbReport(body);} }; });
@@ -8106,7 +8106,7 @@ function renderOtbReport(body){
         +'<td style="text-align:right;padding:3px 6px;font-weight:600;color:'+oc+'">'+(r.otb_cost<0?'-£'+Math.abs(r.otb_cost).toLocaleString():'£'+r.otb_cost.toLocaleString())+'</td>'
         +'<td style="padding:3px 6px">'+badge(r.status)+'</td></tr>';
     });
-    h+='</tbody></table></div><div style="font-size:11px;color:#999;margin-top:6px">* no cover target set for this category·market — using the '+d.def_cover+'wk default. Set targets in DEMAND ▸ Targets.</div>';
+    h+='</tbody></table></div><div style="font-size:11px;color:#999;margin-top:6px">* no cover target set for this category·market — using the '+d.def_cover+'wk default. Set targets in DEMAND ▸ Sell-through targets.</div>';
     document.getElementById('otb-body').innerHTML=h;
   };
   if(OTB_CACHE[key]) return draw(OTB_CACHE[key]);

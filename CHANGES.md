@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.367 - DEMAND: rename "Targets" tab to "Sell-through targets"
+- The DEMAND ▸ Targets tab is now labelled **Sell-through targets** (and its header/help references updated) to distinguish it from the upcoming revenue-targets work. `artifact_v16.7.html`.
+
 ## v26.366 - Sample shipment: second recipient + second tracking code ⚠️ NEEDS MIGRATION 167
 - A sample shipment can now carry a **second recipient + second tracking code** (e.g. one parcel to UK, one to AU). On the supplier portal sample card, a collapsible **Second recipient & tracking** section lets the supplier add the address + tracking + carrier; setting the second tracking drops a **Second parcel shipped** timeline note. Shown in **admin** (sample drawer) as a Second-recipient column + 2nd tracking link. New `*_2` columns (migration **167**). `server.mjs`, `supply/portal-view.js`, `supply/inject.html`.
 
