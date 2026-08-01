@@ -656,6 +656,7 @@ app.post('/api/save-forecasts', async (req, res) => {
       [upserts + deletes, `${upserts} upsert / ${deletes} clear by ${who || 'unknown'}`]);
     await client.query('COMMIT');
     _dataCache = null;   // a forecast edit changes FC_CURRENT — force a fresh build on the next page load
+    invalidateBiCache();   // forecast_outputs changed → BI/KPI projections must recompute
     res.json({ saved: upserts + deletes, upserts, deletes });
   } catch (e) {
     await client.query('ROLLBACK');
@@ -693,6 +694,7 @@ app.post('/api/save-sku-forecasts', async (req, res) => {
       [n, `${n} SKU cells by ${who || 'unknown'}`]);
     await client.query('COMMIT');
     _dataCache = null;   // SKU-forecast edit changes FC_OUTPUTS — invalidate the page-data cache
+    invalidateBiCache();   // FC_OUTPUTS drives biProjection()/kpiBase() → recompute
     res.json({ saved: n });
   } catch (e) {
     await client.query('ROLLBACK');
@@ -8106,7 +8108,28 @@ app.get('/api/kpi/in-stock', async (req, res) => {
 const KPI_WH = [['US 3PL', 'US', 'us_3pl', '3PL'], ['UK 3PL', 'UK', 'uk_3pl', '3PL'], ['EU 3PL', 'EU', 'eu_3pl', '3PL'], ['AU 3PL', 'AU', 'au_3pl', '3PL'],
   ['US FBA', 'US', 'us_fba', 'FBA'], ['UK FBA', 'UK', 'uk_fba', 'FBA'], ['EU FBA', 'EU', 'eu_fba', 'FBA'], ['AU FBA', 'AU', 'au_fba', 'FBA'], ['CA FBA', 'CA', 'ca_fba', 'FBA']];
 // shared base for the inventory KPIs: per-SKU meta + on-hand by warehouse + 12-mo demand by warehouse
+// ── BI/KPI compute cache ─────────────────────────────────────────────────────────────────────────────────
+// kpiBase() and biProjection() were recomputed from raw SQL on EVERY call — and the SUPPLY ▸ Actions page fans
+// out to 4 BI endpoints that each recompute them (kpiBase ran 3-4× per page load). Cache the PROMISE (so 4
+// concurrent calls share ONE computation) with a short TTL, and clear it on forecast saves. Inputs (products /
+// inventory / forecast_outputs / PO lines) change a few times a day, so ≤TTL staleness is fine for a planning
+// view. Returns are treated read-only by all callers (verified — no row/ map mutation), so caching by ref is safe.
+const BI_TTL_MS = 30000;
+let _kpiBaseCache = null, _biProjCache = null;
+function invalidateBiCache() { _kpiBaseCache = null; _biProjCache = null; }
 async function kpiBase() {
+  if (_kpiBaseCache && Date.now() - _kpiBaseCache.at < BI_TTL_MS) return _kpiBaseCache.p;
+  const p = _kpiBaseCompute(); _kpiBaseCache = { at: Date.now(), p };
+  p.catch(() => { if (_kpiBaseCache && _kpiBaseCache.p === p) _kpiBaseCache = null; });   // drop on failure so next call retries
+  return p;
+}
+async function biProjection() {
+  if (_biProjCache && Date.now() - _biProjCache.at < BI_TTL_MS) return _biProjCache.p;
+  const p = _biProjectionCompute(); _biProjCache = { at: Date.now(), p };
+  p.catch(() => { if (_biProjCache && _biProjCache.p === p) _biProjCache = null; });
+  return p;
+}
+async function _kpiBaseCompute() {
   const prods = {};
   (await pool.query(`SELECT sku, coalesce(in_planning_scope,false) act, coalesce(market_tier,'') tier, coalesce(core_seasonal,'') cs,
       coalesce(discontinue_date_final,'') disc, coalesce(discontinue_date_au_final,'') disc_au, coalesce(discontinue_date_ca,'') disc_ca,
@@ -8129,7 +8152,7 @@ const kpiDisc = (p, co) => kpiDpast(co === 'AU' ? (p.disc_au || p.disc) : co ===
 //    TARGET_MONTHS default ≈12 weeks; exact per-SKU/category/market targets get ported from the BUY artifact next.
 const BI_COUNTRIES = ['UK', 'US', 'EU', 'AU', 'CA'];
 const BI_TARGET_MONTHS = 3;
-async function biProjection() {
+async function _biProjectionCompute() {
   const { prods, onhand, dem } = await kpiBase();
   const whCo = wh => String(wh || '').split('_')[0].toUpperCase();   // 'us_3pl' -> 'US'
   // cover targets (WEEKS) — same source as the buy plan: SKU override ▸ category, per warehouse. Default 12wk.

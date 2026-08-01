@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.377 - Performance Tier 2 (#6): cache BI/KPI compute (kpiBase / biProjection)
+- `kpiBase()` and `biProjection()` were recomputed from raw SQL on every call — and the SUPPLY ▸ Actions page fans out to 4 BI endpoints that each recompute them (kpiBase ran 3–4× per page load). Added a **promise + 30s-TTL cache** for both (caching the promise means 4 concurrent calls share ONE computation — no thundering herd), invalidated on the two forecast-save hooks.
+- Verified: `bi/projection` **5,075 ms → 10 ms** warm (identical counts); **4 concurrent cold calls share one compute** (~5.6 s, not 4×); KPI endpoints (in-stock / inventory-cover / reallocations) still valid. Inputs (products / inventory / forecast_outputs / PO lines) change a few times a day, so ≤30 s staleness is fine for a planning view; returns are read-only for all callers (verified). `server.mjs` only.
+- Server-side BI cache — does **not** touch the client BP engine / `calc` → **buy plan unchanged**.
+
 ## v26.376 - Bug fix: category FY-total forecast read 0 (cache-shape)
 - DEMAND plan category totals (SHOW_CAT_TOT): on a cache miss, `fu_cache[rk2]` stored the whole `{fu,reasons}` object instead of the `.fu` month-map, so `fyFC(fu2,…)` read `undefined`→**0** for category FY forecast columns — and poisoned the cache for the per-month rollup. Now stores `.fu` consistently (matching the other two sites). Verified: `fyFC(.fu)=9714` vs the old buggy `fyFC({fu,reasons})=0`. Masked in normal use because "show category totals" is off by default. `artifact_v16.7.html` only; does not touch calc/BP → **buy plan unchanged**.
 
