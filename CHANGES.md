@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.374 - SUPPLY ▸ Purchase Orders: paged grid (50 + Load more)
+- The PO grid now renders **50 rows initially** with an incremental **"Load 50 more ↓"** button (plus a **"Show all N"** for the whole set), instead of rendering up to 250 at once. Cuts the initial DOM build on the most-used SUPPLY tab (1,376 POs → parse/render was the real cost; wire transfer is already gzipped to ~177 KB).
+- The page size **resets to 50 whenever the filter/search set changes**, but is **preserved across in-place edits and Load-more** (via a lightweight filtered-set signature) — so editing a row or loading more never snaps you back to 50. Deep-links to a PO past the current page still auto-reveal (unchanged `_pendingPO` fallback → show all). `supply/inject.html` only.
+
 ## v26.373 - DEMAND ▸ Revenue: FIX render (wrong global) + L3 sub-nav
 - **Bug fix (was broken since v26.368):** the Revenue tab's two sub-views rendered nothing — `revCombos`/`renderRevTargets`/`renderPriceChanges` referenced `MKTS`, which is **local to the Buy-Plan IIFE**, not a global → `ReferenceError: MKTS is not defined` thrown inside the fetch `.then`, leaving the panel stuck. Switched them to the real global country list **`CTRS`**. (Earlier "verification" only exercised the API endpoints, never the client render — caught this time with a jsdom render harness.)
 - **Targets & tracking / Price changes** now presented as a **level-3 sub-nav** (`dnav` tabs, matching KPIs) instead of pills.

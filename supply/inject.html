@@ -2143,7 +2143,7 @@
     if(_poState.focus==null)_poState.focus=false;   // ⭐ Focus filter (starred + active only)
     var state=_poState;
     if(typeof state.f==='string')state.f = state.f && state.f!=='all' ? (function(o){o[state.f]=1;return o;})({}) : {};   // migrate any persisted single-string filter to the multi-select set
-    var PO_CAP=250, _poShowAll=false;   // cap rendered rows; "show all" reveals the rest
+    var PO_PAGE=50, _poShowAll=false, _poLimit=50, _poFiltSig=null;   // paged rendering: 50 rows; "load more" adds 50; "show all" reveals the rest
     var RECENT_CUT=(function(){var x=new Date();x.setMonth(x.getMonth()-12);return x.toISOString().slice(0,10);})();
     function actCount(k){ return rows.filter(PO_ACTCOND[k]).length; }
     // "Includes crossdock" is an exception-dropdown option but NOT a red action item (so it's handled here, not in
@@ -2233,10 +2233,15 @@
       if(q && !f.length){ var ff=fuzzyFilt(rows,state.q); if(ff.length){ f=ff; fuzzy=true; } }   // nothing on the exact search → fuzzy fallback on the best token
       if(state.sku && String(state.sku).trim()){ f=f.filter(function(r){ return _poSkuSet && _poSkuSet.has(r.po); }); }   // SUG-0012: intersect with the SKU filter (POs whose order plan has any of the SKUs)
       _poShowClient=!!(state.ctry&&state.ctry['OTHER']);   // OTHER pill (incl. Direct-to-Client) → reveal Client name + sales ref columns
-      var shown=(_poShowAll||f.length<=PO_CAP)?f:f.slice(0,PO_CAP);
+      // page the render: reset to the first 50 whenever the filtered/searched set changes; keep the current
+      // page across in-place edits + "load more" (same set → same signature, so the limit isn't reset)
+      var _sig=f.length+'#'+f.map(function(r){return r.po;}).join(',');
+      if(_sig!==_poFiltSig){ _poFiltSig=_sig; _poLimit=PO_PAGE; }
+      var shown=(_poShowAll||f.length<=_poLimit)?f:f.slice(0,_poLimit);
       var _sc=document.getElementById('sup-count'); if(_sc)_sc.textContent='';   // PO count line removed (Ben) — guard kept in case the element returns
       document.getElementById('sup-grid').innerHTML=poTable(shown,q?'status':state.grp)   // a search spans all statuses → always group the results under status sub-labels (Production ▸ Ready to ship ▸ Future ▸ Shipping ▸ Complete)
-        +(shown.length<f.length?'<div style="margin:8px 0;text-align:center"><button class="save-btn light" id="po-showall">Show all '+f.length+' &darr;</button></div>':'');
+        +(shown.length<f.length?'<div style="margin:8px 0;text-align:center;display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap"><span class="mut" style="font-size:12px">Showing '+shown.length+' of '+f.length+'</span><button class="save-btn light" id="po-loadmore">Load '+Math.min(PO_PAGE,f.length-shown.length)+' more &darr;</button><button class="save-btn light" id="po-showall">Show all '+f.length+'</button></div>':'');
+      var lm=document.getElementById('po-loadmore'); if(lm)lm.onclick=function(){ _poLimit+=PO_PAGE; view(); };
       var sa=document.getElementById('po-showall'); if(sa)sa.onclick=function(){ _poShowAll=true; view(); };
       bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindPoNotes(); bindPoActBadge(); bindPoCopy(); bindPoScrollPin(); bindPoGrpToggle();
       bindDepPick(patchPoRow); bindPoStars(); bindSetShipping();
