@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.378 - Performance Tier 2 (#7): lean PO picker for production-assign popover
+- The "assign a PO to a production" popover (`openProdPoPick`) fetched **all ~1,376 POs via the heavy grid SQL** (2.6 MB, ~1.8 s) just to list one supplier's POs. New lean endpoint `/api/supply/po-picker/:supplier` returns only `po`/`prod_no`/`country` for that supplier. **1,802 ms / 2.59 MB → 310 ms / 0.4 KB** (7 rows, matches the supplier's PO count). `server.mjs` + `supply/inject.html`. Does not touch calc/BP → **buy plan unchanged**.
+
 ## v26.377 - Performance Tier 2 (#6): cache BI/KPI compute (kpiBase / biProjection)
 - `kpiBase()` and `biProjection()` were recomputed from raw SQL on every call — and the SUPPLY ▸ Actions page fans out to 4 BI endpoints that each recompute them (kpiBase ran 3–4× per page load). Added a **promise + 30s-TTL cache** for both (caching the promise means 4 concurrent calls share ONE computation — no thundering herd), invalidated on the two forecast-save hooks.
 - Verified: `bi/projection` **5,075 ms → 10 ms** warm (identical counts); **4 concurrent cold calls share one compute** (~5.6 s, not 4×); KPI endpoints (in-stock / inventory-cover / reallocations) still valid. Inputs (products / inventory / forecast_outputs / PO lines) change a few times a day, so ≤30 s staleness is fine for a planning view; returns are read-only for all callers (verified). `server.mjs` only.

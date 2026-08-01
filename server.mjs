@@ -1383,6 +1383,19 @@ app.get('/api/supply/po-row/:po', async (req, res) => {
   try { res.json((await pool.query(PO_ROWS_SQL + ' WHERE calc4.po = $1', [req.params.po])).rows); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Lean PO picker for one supplier — just po/prod_no/country for the "assign a PO to a production" popover
+// (was fetching all ~1,376 POs via the heavy grid SQL to build one supplier's short list).
+app.get('/api/supply/po-picker/:supplier', async (req, res) => {
+  try {
+    res.json((await pool.query(`
+      SELECT p.po, coalesce(p.prod_no,'') prod_no,
+             upper(coalesce(nullif(p.country_code,''), b.country_code, '')) country
+      FROM planner.purchase_orders p
+      LEFT JOIN planner.branches b ON b.name=p.branch
+      WHERE coalesce(p.supplier_name,'')=$1
+      ORDER BY p.po`, [req.params.supplier])).rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // Crossdock rollup for one shipment: every crossdock SKU across the POs on the shipment, with qty + source PO/supplier/client.
 app.get('/api/supply/shipment-crossdock/:ref', async (req, res) => {
   try { res.json(await qp(`

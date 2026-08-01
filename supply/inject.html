@@ -4904,8 +4904,8 @@
     var rc=anchor.getBoundingClientRect(); pop.style.cssText='position:fixed;z-index:100000;top:'+(rc.bottom+4)+'px;left:'+Math.max(8,Math.min(rc.left,window.innerWidth-312))+'px';
     pop.innerHTML='<div class="shpop-h">Assign a PO to <b>'+esc(prod)+' · '+esc(sup)+'</b></div><input class="shpop-q" placeholder="search PO…"><div id="shpop-list"><div class="count" style="padding:8px">Loading…</div></div>';
     document.body.appendChild(pop); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
-    fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(rows){
-      var avail=rows.filter(function(r){ return (r.supplier_name||'')===sup && (r.prod_no||'')!==prod; });
+    fetch('/api/supply/po-picker/'+encodeURIComponent(sup)).then(function(r){return r.json();}).then(function(rows){
+      var avail=(rows||[]).filter(function(r){ return (r.prod_no||'')!==prod; });   // supplier already filtered server-side (was fetching all ~1,376 POs)
       function render(q){ q=(q||'').trim().toLowerCase(); var ms=avail.filter(function(r){return !q||((r.po||'')+' '+(r.prod_no||'')).toLowerCase().indexOf(q)>=0;});
         document.getElementById('shpop-list').innerHTML=ms.slice(0,q?60:16).map(function(r){return '<div class="shpop-opt" data-po="'+esc(r.po)+'">'+esc(r.po)+' <span class="mut tiny">'+(r.prod_no?'in '+esc(r.prod_no):'unassigned')+' · '+esc(r.country||'')+'</span></div>';}).join('')||'<div class="count" style="padding:8px">no '+esc(sup)+' POs to assign</div>';
         document.querySelectorAll('#shpop-list .shpop-opt').forEach(function(o){ o.onclick=function(){ shipPost('/api/supply/po/'+encodeURIComponent(o.dataset.po),{prod_no:prod},function(){ invalidateDerived(); closeShPop(); prodExpand(prod,sup,i); }); }; }); }
