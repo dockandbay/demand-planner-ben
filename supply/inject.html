@@ -4131,8 +4131,7 @@
         +'<span style="margin-left:14px;font-size:9px;line-height:1.2;color:#64748b" title="In a quantity cell you can type shortcuts instead of a plain number:\n• 4c = 4 cartons = 4 × the SKU\'s carton qty (e.g. carton 12 → 48)\n• 150r = round 150 UP to the nearest full carton (e.g. carton 12 → 156)">💡 in a cell: <b>4c</b> = 4 cartons · <b>150r</b> = round up to carton</span></div>'
       +'</div>'   // /#op-filters
       +'<div id="op-empties"></div>'
-      +'<div id="op-changes"></div>'
-      +'<div style="display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:6px;margin:6px 0 3px"><span class="count" id="op-count"></span></div>'   // count + Load-more/Show-all, right-aligned directly above the grid
+      +'<div style="display:flex;align-items:center;gap:10px;margin:6px 0 3px;flex-wrap:wrap"><div id="op-changes" style="flex:1 1 62%;min-width:260px"></div><span class="count" id="op-count" style="flex:0 1 34%;min-width:150px;text-align:right;margin-left:auto"></span></div>'   // supplier-changes banner (~65%) + count/Load-more (~35%) on one row
       +'<div id="op-grid"></div>';
     // POs with no SKU lines yet don't appear in the SKU×PO grid — surface them here so they're visible + openable.
     (function(){ var el=document.getElementById('op-empties'); if(!el)return;
@@ -4375,23 +4374,14 @@
       if(!unconf.length){ box.innerHTML=''; return; }
       // banner — count + the actual PO(s) as clickable links that filter the grid to them, + bulk accept
       var upos=Array.from(new Set(unconf.map(function(x){return x.po;}))).sort();
-      box.innerHTML='<div style="margin:4px 0 10px;padding:7px 11px;background:#fff7ed;border:1px solid #fdba74;border-radius:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+      box.innerHTML='<div style="margin:0;padding:7px 11px;background:#fff7ed;border:1px solid #fdba74;border-radius:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
         +'<span style="font-weight:700;color:#92400e">⚠ '+unconf.length+' supplier change'+(unconf.length>1?'s':'')+' awaiting approval</span>'
         +'<span class="mut tiny">on:</span>'+upos.map(function(p){return ' <button class="lnk-btn op-chg-po" data-po="'+esc(p)+'" title="filter the order plan to '+esc(p)+'" style="color:#1d4ed8;text-decoration:underline;font-weight:600;background:none;border:none;padding:0;cursor:pointer">'+esc(p)+'</button>';}).join(',')
-        +' <span class="mut tiny">— click a PO to review, confirm inline (amber <b>✓</b>), or</span>'
-        +'<button class="save-btn op-chg-acc-all">Accept all</button> <button class="save-btn light op-chg-rej-all">Reject all</button></div>';
+        +'</div>';
       box.querySelectorAll('.op-chg-po').forEach(function(b){ b.onclick=function(){
         ['partials','erpdiff','suprisk','disc','notmkt'].forEach(function(k){ st[k]=false; });   // PO search overrides the pills — clear them so the highlighted state matches the (unfiltered) view
         ['op-partials','op-suprisk','op-disc','op-notmkt'].forEach(function(id){ var el=document.getElementById(id); if(el)el.classList.remove('active'); });
         st.poq=String(b.dataset.po||'').toLowerCase(); var pin=document.getElementById('op-po'); if(pin)pin.value=b.dataset.po; viewReset(); }; });
-      box.querySelector('.op-chg-acc-all').onclick=function(){ if(!confirm('Accept all '+unconf.length+' supplier change'+(unconf.length>1?'s':'')+'?'))return;
-        var pos=Array.from(new Set(unconf.map(function(x){return x.po;})));
-        Promise.all(pos.map(function(po){ return fetch('/api/supply/po-line-accept',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,all:true})}).then(function(r){return r.json();}); }))
-          .then(function(){ plc.forEach(function(x){ if(x.unconfirmed&&x.amended_qty!=null&&x.amended_qty!==''){ var l=lines.find(function(y){return y.po===x.po&&y.sku===x.sku;}); if(l)l.qty=Number(x.amended_qty); } x.unconfirmed=false; }); invalidateDerived(); renderChanges(); view(); }); };
-      box.querySelector('.op-chg-rej-all').onclick=function(){ if(!confirm('Reject all '+unconf.length+' supplier change'+(unconf.length>1?'s':'')+'? They will be discarded and the order plan left unchanged.'))return;
-        var pos=Array.from(new Set(unconf.map(function(x){return x.po;})));
-        Promise.all(pos.map(function(po){ return fetch('/api/supply/po-line-reject',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,all:true})}).then(function(r){return r.json();}); }))
-          .then(function(){ plc.forEach(function(x){ if(x.unconfirmed){ x.amended_qty=null; x.actual_cost=null; x.is_added=false; x.unconfirmed=false; } }); invalidateDerived(); renderChanges(); view(); }); };
     }
     renderChanges();
     view();
