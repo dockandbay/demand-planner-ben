@@ -6703,10 +6703,21 @@ function renderMain(){
     });
   }
   if(typeof planRevPopRefresh==='function')planRevPopRefresh(); // keep the pop-out in sync with forecast/scope changes
+  if(typeof hzPlanSave==='function')hzPlanSave();   // persist the current plan filters (1h)
 }
 
 // Planner SKU filter: re-render body to surface matching SKUs (input lives in the toolbar so it keeps focus)
 function setPlanSkuQry(v){PLAN_SKU_QRY=(v||'').trim();renderMain();}
+// DEMAND plan filter persistence — remember country / channel / categories / SKU filter for 1h so returning to the
+// page keeps your view. Saved on each plan render; restored in init() before the first render (syncTabs +
+// renderCatControl then redraw the pills from the restored state).
+function hzPlanSave(){ try{ if(typeof VIEW_MODE!=='undefined'&&VIEW_MODE!=='planning')return;
+  localStorage.setItem('hzPlanFilters', JSON.stringify({ t:Date.now(), CUR:CUR, CF:CF, SEL:Array.from(SEL||[]), skuq:PLAN_SKU_QRY||'' })); }catch(e){} }
+function hzPlanRestore(){ try{ var raw=localStorage.getItem('hzPlanFilters'); if(!raw)return; var f=JSON.parse(raw);
+  if(!f||(Date.now()-(f.t||0))>3600000)return;   // 1-hour TTL
+  if(f.CUR)CUR=f.CUR; if(f.CF)CF=f.CF;
+  if(Array.isArray(f.SEL)&&f.SEL.length)SEL=new Set(f.SEL);
+  if(typeof f.skuq==='string'){ PLAN_SKU_QRY=f.skuq; var _si=document.getElementById('plan-sku-qry'); if(_si)_si.value=f.skuq; } }catch(e){} }
 
 function setPlanActiveStart(v){SKU_FILTER.startDate=v||'';renderMain();}
 function setPlanActiveEnd(v){SKU_FILTER.endDate=v||'';renderMain();}
@@ -10525,6 +10536,7 @@ var _rfBtn=document.getElementById('rf'); if(_rfBtn)_rfBtn.onclick=function(){
   // Snapshot the post-load IV state — anything different from this is a user edit (dirty)
   FC_INITIAL=Object.assign({},IV);
   syncPlanActiveDates();
+  if(typeof hzPlanRestore==='function')hzPlanRestore();   // restore last plan filters (country/channel/categories/SKU) if within 1h
   // HORIZON default landing is SUPPLY (the harness routes to it). Only paint a demand-side view up front when
   // the URL explicitly asks for one — avoids the DEMAND flash/redirect on a plain first load.
   if(/^#\/?(planning|demand|buy|fba|exec|reports)(\/|$)/.test(location.hash||'')) render();

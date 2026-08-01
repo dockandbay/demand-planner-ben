@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.392 - DEMAND plan: remember filters for 1h (country/channel/categories/SKU)
+- DEMAND plan now persists its filters — **country, channel, category selection, SKU filter** — to localStorage and restores them on return **within 1 hour** (`hzPlanSave` on each plan render; `hzPlanRestore` in init before the first render). Verified: round-trips within 1h, ignored after. Buy plan untouched.
+- TODO: extend the same 1h persistence to **Buy / FBA** (their filter state is inside the BP IIFE — needs a small BP get/set API).
+
+## v26.391 - DEMAND: green SKU-filter field (match Order Plan)
+- `plan-sku-qry` now light-green (#f0fdf4/#86efac) like the Order Plan SKU filter.
+
 ## v26.390 - DEMAND category subtotals update on cell edit (closes the known gap)
 - The category subtotal rows ("<Category> — total", shown when the toolbar's "Show category totals" is on) didn't live-update on a forecast-cell edit — the last remaining stale-total gap. Extracted their build into `_makeCatTotRow(cat)` (tagged with `data-cat`); `refreshRow` now rebuilds the **edited row's category subtotal in place** (only when the toggle is on). Verified: subtotal changes on edit. Memo-fast. `artifact_v16.7.html`. Display-only → buy plan untouched.
 
