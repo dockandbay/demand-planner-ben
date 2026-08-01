@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.373 - DEMAND ▸ Revenue: FIX render (wrong global) + L3 sub-nav
+- **Bug fix (was broken since v26.368):** the Revenue tab's two sub-views rendered nothing — `revCombos`/`renderRevTargets`/`renderPriceChanges` referenced `MKTS`, which is **local to the Buy-Plan IIFE**, not a global → `ReferenceError: MKTS is not defined` thrown inside the fetch `.then`, leaving the panel stuck. Switched them to the real global country list **`CTRS`**. (Earlier "verification" only exercised the API endpoints, never the client render — caught this time with a jsdom render harness.)
+- **Targets & tracking / Price changes** now presented as a **level-3 sub-nav** (`dnav` tabs, matching KPIs) instead of pills.
+- Revenue sub-render now wrapped in try/catch — any future render error shows on-screen (+ console) instead of a silent "Loading…". `artifact_v16.7.html` only.
+
 ## v26.371 - DEMAND plan: floating "Revenue vs target" pop-out
 - New floating pill button (bottom-right) on the demand **plan** view. Pops a compact card comparing the plan's **live forecast** (actuals-to-date + forecast incl. price changes) to the **revenue-growth target**, defaulting to the plan's **current country + channel** (`CUR`/`CF`).
 - Card shows: this-channel row + the country's all-channels row (each with forecast / target / last-year+growth% / RAG dot / on-track-or-short status), a monthly forecast breakdown for the channel (actual months in green), an in-card FY toggle, and a "Open Revenue tab" shortcut.

@@ -7192,7 +7192,7 @@ function applyTarget(cat,mkt,pct){ return fetch('/api/targets',{method:'POST',he
 var REV_SUB='targets', REV_FY=null, REV_TARGETS={}, _revBody=null;
 function revReload(){ if(_revBody)renderRevenueView(_revBody); }
 function revCombos(){ var seen={}, out=[]; (DATA||[]).forEach(function(r){ if(!r.co||!r.ch)return; var k=r.co+'|'+r.ch; if(!seen[k]){ seen[k]=1; out.push({co:r.co,ch:r.ch}); } });
-  out.sort(function(a,b){ var ia=MKTS.indexOf(a.co),ib=MKTS.indexOf(b.co); ia=ia<0?99:ia; ib=ib<0?99:ib; return ia!==ib?ia-ib:String(a.ch).localeCompare(String(b.ch)); }); return out; }
+  out.sort(function(a,b){ var ia=CTRS.indexOf(a.co),ib=CTRS.indexOf(b.co); ia=ia<0?99:ia; ib=ib<0?99:ib; return ia!==ib?ia-ib:String(a.ch).localeCompare(String(b.ch)); }); return out; }
 function revSubcats(){ var seen={}, out=[]; (DATA||[]).forEach(function(r){ if(r.s&&!seen[r.s]){ seen[r.s]=1; out.push(r.s); } }); return out.sort(); }
 // Monthly + FY revenue for a country (ch=null → all channels): per-month forecast (actuals-to-date + forecast×ASP
 // incl. price changes), FY total, and last-year FY actual. Cached per (co|ch|fy) within a render pass.
@@ -7263,15 +7263,16 @@ function planRevPopRender(){ var p=document.getElementById('plan-rev-pop'); if(!
 function renderRevenueView(body){ _revBody=body; if(REV_FY==null)REV_FY=CUR_FY_START;
   var subs=[['targets','Targets &amp; tracking'],['prices','Price changes']];
   body.innerHTML='<style>.rev-tbl{border-collapse:collapse;font-size:12px;margin-top:6px}.rev-tbl th,.rev-tbl td{padding:4px 11px;border-bottom:1px solid #eef2f7;text-align:left;white-space:nowrap}.rev-tbl .r{text-align:right;font-variant-numeric:tabular-nums}.rev-tbl .c{text-align:center}.rev-tbl tr.tot td{border-top:2px solid #999;font-weight:700}.rev-tbl tr.rev-cotot td{background:#f1f5f9;border-top:2px solid #cbd5e1;font-weight:600}.rev-tbl .mut{color:#9aa5b1}.rev-tbl .tiny{font-size:10px;font-weight:400}.rev-tbl input,.rev-tbl select{font-size:12px}</style>'
-    +'<div class="bar" style="gap:4px;margin-bottom:8px">'+subs.map(function(s){return '<button class="pill catpill'+(s[0]===REV_SUB?' active':'')+'" data-rs="'+s[0]+'">'+s[1]+'</button>';}).join('')+'</div><div id="rev-body"><div class="count">Loading…</div></div>';
-  body.querySelectorAll('.pill[data-rs]').forEach(function(b){ b.onclick=function(){ REV_SUB=b.dataset.rs; revReload(); }; });
+    +'<div style="display:flex;gap:2px;margin:2px 0 12px;border-bottom:1px solid #e0e0e0;flex-wrap:wrap">'+subs.map(function(s){return '<button class="dnav'+(s[0]===REV_SUB?' active':'')+'" data-rs="'+s[0]+'">'+s[1]+'</button>';}).join('')+'</div><div id="rev-body"><div class="count">Loading…</div></div>';
+  body.querySelectorAll('.dnav[data-rs]').forEach(function(b){ b.onclick=function(){ REV_SUB=b.dataset.rs; revReload(); }; });
   Promise.all([fetch('/api/price-changes').then(function(r){return r.json();}).catch(function(){return [];}),
                fetch('/api/demand-revenue-targets').then(function(r){return r.json();}).catch(function(){return [];})]).then(function(res){
     PRICE_CHANGES=res[0]||[];   // refresh so the tracking reflects the latest price changes without a page reload
     REV_TARGETS={}; (res[1]||[]).forEach(function(t){ REV_TARGETS[t.country+'|'+t.channel+'|'+t.fy]={type:t.target_type,pct:t.target_pct,value:t.target_value}; });
     var rb=document.getElementById('rev-body'); if(!rb)return;
-    if(REV_SUB==='prices')renderPriceChanges(rb); else renderRevTargets(rb);
-  }); }
+    try { if(REV_SUB==='prices')renderPriceChanges(rb); else renderRevTargets(rb); }
+    catch(err){ rb.innerHTML='<div style="padding:12px;color:#b91c1c;font-size:12px">Could not render this view: '+esc(String(err&&err.message||err))+'</div>'; if(window.console)console.error('[revenue] render error',err); }
+  }).catch(function(err){ var rb=document.getElementById('rev-body'); if(rb)rb.innerHTML='<div style="padding:12px;color:#b91c1c;font-size:12px">Could not load revenue data: '+esc(String(err&&err.message||err))+'</div>'; if(window.console)console.error('[revenue] load error',err); }); }
 function saveRevTarget(co,ch,fy,str){ var v=String(str||'').trim(), b={country:co,channel:ch,fy:fy};
   if(!v){ b.target_type='pct'; b.target_pct=''; b.target_value=''; }
   else if(v.indexOf('%')>=0){ b.target_type='pct'; b.target_pct=parseFloat(v.replace(/[^0-9.\-]/g,'')); }
@@ -7282,7 +7283,7 @@ function renderRevTargets(el){ _revCache={}; var combos=revCombos(), fys=[CUR_FY
   var months=fyMonths(fy), MON=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   var sel='<span style="font-weight:700;font-size:13px;margin-right:8px">Targets for financial year:</span> '+fys.map(function(y){return '<button class="pill catpill'+(y===fy?' active':'')+'" data-fy="'+y+'" style="font-weight:600'+(y===fy?';box-shadow:0 0 0 2px #2563eb inset':'')+'">'+fyLbl(y)+'</button>';}).join(' ')+'<span style="font-size:11px;color:#888;margin-left:10px">each year keeps its own targets</span>';
   var byCo={}; combos.forEach(function(c){ (byCo[c.co]=byCo[c.co]||[]).push(c.ch); });
-  var cos=Object.keys(byCo).sort(function(a,b){var ia=MKTS.indexOf(a),ib=MKTS.indexOf(b);ia=ia<0?99:ia;ib=ib<0?99:ib;return ia-ib;});
+  var cos=Object.keys(byCo).sort(function(a,b){var ia=CTRS.indexOf(a),ib=CTRS.indexOf(b);ia=ia<0?99:ia;ib=ib<0?99:ib;return ia-ib;});
   function tgtOf(co,ch,ly){ var t=REV_TARGETS[co+'|'+ch+'|'+fy]; return t?(t.type==='pct'?ly*(1+Number(t.pct||0)/100):Number(t.value||0)):null; }
   function tgtInput(co,ch){ var t=REV_TARGETS[co+'|'+ch+'|'+fy], iv=t?(t.type==='pct'?((Number(t.pct)>=0?'+':'')+Number(t.pct)+'%'):Math.round(Number(t.value))):'';
     return '<input class="rev-tgt" data-co="'+esc(co)+'" data-ch="'+esc(ch)+'" value="'+esc(iv)+'" placeholder="+% / val" style="width:80px;text-align:right;padding:2px 4px;border:1px solid #cbd5e1;border-radius:4px">'; }
@@ -7310,7 +7311,7 @@ function renderPriceChanges(el){
   var rows=(PRICE_CHANGES||[]).map(function(p){ return '<tr><td><b>'+esc(p.country)+'</b></td><td>'+(p.channel?esc(p.channel):'<span class="mut">all</span>')+'</td><td>'+(p.subcategory?esc(p.subcategory):'<span class="mut">all</span>')+'</td><td>'+esc(p.effective_month)+'</td><td class="r" style="font-weight:600;color:'+(Number(p.uplift_pct)>=0?'#166534':'#b91c1c')+'">'+(Number(p.uplift_pct)>=0?'+':'')+Number(p.uplift_pct)+'%</td><td>'+esc(p.note||'')+'</td><td class="c"><button class="pc-del" data-id="'+p.id+'" title="delete" style="color:#dc2626;cursor:pointer;border:none;background:none;font-size:13px">✕</button></td></tr>'; }).join('')||'<tr><td colspan="7" class="mut" style="padding:10px">No price changes yet.</td></tr>';
   el.innerHTML='<div style="font-size:11px;color:#888;margin-bottom:8px">Definitive price changes lift the revenue forecast (ASP) from the effective month forward — units are unchanged. Country is required; leave channel / subcategory blank for "all". Multiple changes <b>compound</b>.</div>'
     +'<div class="bar" style="gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px;padding:8px 10px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px">'
-      +'<div><div class="mut tiny">Country</div><select id="pc-co" class="fci">'+MKTS.map(function(c){return '<option>'+c+'</option>';}).join('')+'</select></div>'
+      +'<div><div class="mut tiny">Country</div><select id="pc-co" class="fci">'+CTRS.map(function(c){return '<option>'+c+'</option>';}).join('')+'</select></div>'
       +'<div><div class="mut tiny">Channel</div><select id="pc-ch" class="fci"><option value="">all</option>'+['DTC','FBA','B2B'].map(function(c){return '<option>'+c+'</option>';}).join('')+'</select></div>'
       +'<div><div class="mut tiny">Subcategory</div><input id="pc-sub" class="fci" list="pc-subs" placeholder="all" style="width:170px"></div>'
       +'<div><div class="mut tiny">From month</div><input id="pc-mon" class="fci" placeholder="YYYY-MM" style="width:90px"></div>'
