@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.379 - Performance Tier 2 (#5): scope the admin portal-preview fetch
+- The admin "preview / view as supplier" portal (`loadPortalData`) fetched **all POs (2.7 MB) + all order-plan (4.8 MB)** then filtered to one supplier client-side. Now the two heavy endpoints take a **`?supplier=` filter** (SQL-scoped), plus a tiny `/api/supply/po-suppliers` map (2 fields, all POs) for the "ships with <other supplier>" resolution.
+- Verified byte-for-byte equivalent: scoped POs/lines are **identical** to the old client-filter, map matches all POs. On an outlier supplier (686 POs) **7,484 KB/5.8 s → 4,188 KB/2.8 s**; typical suppliers (few POs) load near-instantly. `server.mjs` + `supply/inject.html`. Live supplier portal was already scoped (`/api/portal/bootstrap`) — unaffected. Buy plan untouched.
+
 ## v26.378 - Performance Tier 2 (#7): lean PO picker for production-assign popover
 - The "assign a PO to a production" popover (`openProdPoPick`) fetched **all ~1,376 POs via the heavy grid SQL** (2.6 MB, ~1.8 s) just to list one supplier's POs. New lean endpoint `/api/supply/po-picker/:supplier` returns only `po`/`prod_no`/`country` for that supplier. **1,802 ms / 2.59 MB → 310 ms / 0.4 KB** (7 rows, matches the supplier's PO count). `server.mjs` + `supply/inject.html`. Does not touch calc/BP → **buy plan unchanged**.
 

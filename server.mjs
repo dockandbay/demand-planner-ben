@@ -1396,6 +1396,12 @@ app.get('/api/supply/po-picker/:supplier', async (req, res) => {
       ORDER BY p.po`, [req.params.supplier])).rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Tiny global po→supplier map (2 fields, all POs) — the admin portal-preview needs it to resolve "ships with
+// <other supplier>" without pulling the full 2.7MB PO grid.
+app.get('/api/supply/po-suppliers', async (_req, res) => {
+  try { res.json((await pool.query(`SELECT po, coalesce(supplier_name,'') supplier_name FROM planner.purchase_orders`)).rows); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 // Crossdock rollup for one shipment: every crossdock SKU across the POs on the shipment, with qty + source PO/supplier/client.
 app.get('/api/supply/shipment-crossdock/:ref', async (req, res) => {
   try { res.json(await qp(`
@@ -1961,6 +1967,9 @@ app.get('/api/supply/:section', async (req, res) => {
         // Balance due: on-shipment → ship/departure + credit days; on-clearance → landing + credit days.
         // Landing imports from linked Flexport (FLEX) unless manually overridden (M).
         // 'cashflow' reuses this exact PO calc, then re-shapes the rows into dated payment line items.
+        if (req.params.section === 'purchase-orders' && req.query.supplier) {   // admin portal-preview: only this supplier's POs (full rows, unthinned)
+          return res.json((await pool.query(PO_ROWS_SQL + ' WHERE calc4.supplier_name = $1 ORDER BY po', [req.query.supplier])).rows);
+        }
         const _pos = await q(PO_ROWS_SQL + ' ORDER BY po');
         if (req.params.section === 'cashflow') return res.json(await cashflowResponse(_pos, q));
         // PO grid: COMPLETE POs (≈85% of all POs, rarely opened) keep their list/filter/sort + PAYMENT-action
@@ -2054,8 +2063,9 @@ app.get('/api/supply/:section', async (req, res) => {
           to_char(landing_date,'YYYY-MM-DD') landing, to_char(arrival_date,'YYYY-MM-DD') arrival,
           container_numbers, mbl_number, total_freight_cost, total_invoiced_amount, customs_duty_cost
           FROM planner.flexport_shipments ORDER BY arrival_date DESC NULLS LAST`));
-      case 'order-plan':  // enriched lines for the side-by-side grid (filter/group/pivot client-side)
-        return res.json(await q(`SELECT l.po, l.sku, l.qty, el.qty erp_qty,
+      case 'order-plan': {  // enriched lines for the side-by-side grid (filter/group/pivot client-side)
+        const _opSup = req.query.supplier ? ` WHERE coalesce(p.supplier_name,'')=$1` : '';   // admin portal-preview: scope to one supplier's POs
+        return res.json((await pool.query(`SELECT l.po, l.sku, l.qty, el.qty erp_qty,
           (coalesce(l.qty,0) IS DISTINCT FROM coalesce(el.qty,0)) pending, to_char(pol.proposed_at,'YYYY-MM-DD') proposed_at,   -- 0 plan == absent from ERP → not pending
           l.cost_price, l.carton_qty, l.partial_carton_approved, l.full_carton_check,
           pol.supplier_risk_approved, pol.discontinue_approved, pol.country_risk_approved,
@@ -2087,7 +2097,9 @@ app.get('/api/supply/:section', async (req, res) => {
           LEFT JOIN LATERAL (SELECT f.departure_date, f.landing_date FROM planner.flexport_shipments f
             WHERE f.flex_id=p.flexport_reference OR f.shipment_name=p.po OR f.shipment_name=p.shipment_ref
             ORDER BY (f.flex_id=p.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true
-          ORDER BY l.po, l.sku`));
+          ${_opSup}
+          ORDER BY l.po, l.sku`, req.query.supplier ? [req.query.supplier] : [])).rows);
+      }
       case 'shipments': {
         // Editable shipment records (planner.shipments) joined to the POs aboard them. A shipment's
         // own date columns OVERRIDE the POs; where blank they fall back to Flexport. Effective
