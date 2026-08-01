@@ -2523,7 +2523,11 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
   function fwdDemand(wks, startIdx, demFn){
     if(wks<=0)return 0;
     let weeksLeft=wks,total=0;
-    for(let fi=startIdx+1;fi<PROJ.length;fi++){
+    // Cover target INCLUDES the arrival month (startIdx): stock landing in month i must cover demand from month i
+    // onward, not i+1. The old `startIdx+1` under-covered by one month — invisible on smooth demand, but at a
+    // demand cliff (e.g. 10k in Jan → ~0 in Feb) it dropped the whole high month, so a big Jan need never showed
+    // as a normal Buy 3PL (it fell through to Urgent / nothing).
+    for(let fi=startIdx;fi<PROJ.length;fi++){
       if(PROJ[fi].isActual||PROJ[fi].isForecast)continue;
       const monthly=demFn(fi);
       if(weeksLeft>=4.33){

@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.393 - BUY: fix target-cover off-by-one (fwdDemand excluded the arrival month) ⚠️ NEEDS BEN'S REVIEW
+- `fwdDemand(wks,startIdx,demFn)` looped from `startIdx+1`, so the buy/transfer **target cover excluded the arrival month's own demand**. Invisible on smooth demand, but at a demand cliff it dropped the whole high month — a SKU forecast 10k in Jan (reachable by an ~Aug order at 5-mo lead) showed Buy 3PL = **144** with the 10k stuck in Urgent/nowhere. Changed to `startIdx` (arrival month included).
+- **Impact (sandbox, all SKUs×markets):** PICNIC-CAB-XL-NAVY UK Buy 3PL **144 → 10,080** (correct); **70 SKUs moved urgent→normal**; total Buy 3PL **45,866 → 78,380 (+71%)**, urgent 112,384 → 103,266. The +71% is systemic (every target gains ~1 month cover) — **needs Ben's sign-off** that this is the intended sizing, or we narrow it. `artifact_v16.7.html`. ⚠️ Changes real order quantities.
+
 ## v26.392 - DEMAND plan: remember filters for 1h (country/channel/categories/SKU)
 - DEMAND plan now persists its filters — **country, channel, category selection, SKU filter** — to localStorage and restores them on return **within 1 hour** (`hzPlanSave` on each plan render; `hzPlanRestore` in init before the first render). Verified: round-trips within 1h, ignored after. Buy plan untouched.
 - TODO: extend the same 1h persistence to **Buy / FBA** (their filter state is inside the BP IIFE — needs a small BP get/set API).
