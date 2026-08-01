@@ -1389,6 +1389,21 @@
                 +'<div>'+lbl('Tracking code')+'<input class="fci txt samp-trk" value="'+esc(s.tracking_code||'')+'" style="width:170px" placeholder="tracking…">'+(carrierTrackUrl(s.carrier,s.tracking_code)?'<div class="tiny" style="margin-top:3px"><a href="'+carrierTrackUrl(s.carrier,s.tracking_code)+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;font-weight:700" title="track with '+esc(s.carrier||'carrier')+'">track here ↗</a></div>':'')+'</div>'
                 +'<div>'+lbl('Carrier')+(function(){var CARR=['DHL','FedEx','UPS','Flexport','SF Express','Other'],cur=s.carrier||'';return '<select class="fci samp-car" style="width:130px"><option value="">—</option>'+CARR.map(function(o){return '<option'+(o===cur?' selected':'')+'>'+o+'</option>';}).join('')+((cur&&CARR.indexOf(cur)<0)?'<option selected>'+esc(cur)+'</option>':'')+'</select>';})()+'</div>'
                 +'<button class="save-btn samp-save">Save</button></div>'
+              +'<details class="samp-2nd" style="margin-top:8px;border-top:1px solid #f1f5f9;padding-top:8px"'+((s.recipient_company_2||s.tracking_code_2||s.address_line1_2)?' open':'')+'><summary style="cursor:pointer;font-size:12px;font-weight:700;color:#1d4ed8">＋ Second recipient &amp; tracking <span class="mut tiny" style="font-weight:400">(optional — e.g. a second parcel to another country)</span></summary>'
+                +'<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:8px">'
+                  +'<div>'+lbl('Recipient company')+'<input class="fci txt s2-recipient_company" value="'+esc(s.recipient_company_2||'')+'" style="width:180px"></div>'
+                  +'<div>'+lbl('Name')+'<input class="fci txt s2-first_name" value="'+esc(s.first_name_2||'')+'" placeholder="first" style="width:90px"> <input class="fci txt s2-last_name" value="'+esc(s.last_name_2||'')+'" placeholder="last" style="width:90px"></div>'
+                  +'<div>'+lbl('Address line 1')+'<input class="fci txt s2-address_line1" value="'+esc(s.address_line1_2||'')+'" style="width:180px"></div>'
+                  +'<div>'+lbl('Address line 2')+'<input class="fci txt s2-address_line2" value="'+esc(s.address_line2_2||'')+'" style="width:150px"></div>'
+                  +'<div>'+lbl('City')+'<input class="fci txt s2-city" value="'+esc(s.city_2||'')+'" style="width:110px"></div>'
+                  +'<div>'+lbl('Region')+'<input class="fci txt s2-region" value="'+esc(s.region_2||'')+'" style="width:90px"></div>'
+                  +'<div>'+lbl('Postcode')+'<input class="fci txt s2-postcode" value="'+esc(s.postcode_2||'')+'" style="width:90px"></div>'
+                  +'<div>'+lbl('Country')+'<input class="fci txt s2-country" value="'+esc(s.country_2||'')+'" style="width:90px"></div>'
+                  +'<div>'+lbl('Phone')+'<input class="fci txt s2-phone" value="'+esc(s.phone_2||'')+'" style="width:120px"></div>'
+                  +'<div>'+lbl('Tracking code')+'<input class="fci txt s2-tracking_code" value="'+esc(s.tracking_code_2||'')+'" style="width:150px" placeholder="tracking…"></div>'
+                  +'<div>'+lbl('Carrier')+(function(){var CARR=['DHL','FedEx','UPS','Flexport','SF Express','Other'],cur=s.carrier_2||'';return '<select class="fci s2-carrier" style="width:120px"><option value="">—</option>'+CARR.map(function(o){return '<option'+(o===cur?' selected':'')+'>'+o+'</option>';}).join('')+((cur&&CARR.indexOf(cur)<0)?'<option selected>'+esc(cur)+'</option>':'')+'</select>';})()+'</div>'
+                  +'<button class="save-btn samp-save-2">Save 2nd recipient</button>'
+                +'</div></details>'
               +'<div style="margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px">'+lbl('Charges')+charges
                 +'<div style="display:flex;gap:8px;align-items:flex-end;margin-top:6px;flex-wrap:wrap"><div><div class="mut tiny">Freight</div><input class="fci samp-cf" style="width:80px" placeholder="0.00"></div><div><div class="mut tiny">Product</div><input class="fci samp-cp" style="width:80px" placeholder="0.00"></div><div><div class="mut tiny">Note</div><input class="fci txt samp-cd" style="width:180px" placeholder="optional"></div><button class="save-btn samp-charge">Create charge</button></div></div>'
               +'<div style="margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px;text-align:left">'+lbl('Attachments')
@@ -1478,6 +1493,10 @@
             var save=scope.querySelector('.samp-save'); if(save)save.onclick=function(){ var ps=scope.querySelector('.samp-prod'),ex=scope.querySelector('.samp-exp'),tk=scope.querySelector('.samp-trk'),cr=scope.querySelector('.samp-car');
               var ev=(ex&&ex.value)||null,pv=(ps&&ps.value)||null,tv=(tk&&tk.value)||null,cv=(cr&&cr.value)||null;
               postJSON(EP.sampleUpdate,{id:id,supplier_expected_completion:ev,tracking_code:tv,carrier:cv,production_status:pv},function(){ var s=sampById(id); if(s){s.supplier_expected=ev||'';s.production_status=pv||'';s.tracking_code=tv||'';s.carrier=cv||'';} refreshSampleCard(id); }); };
+            var save2=scope.querySelector('.samp-save-2'); if(save2)save2.onclick=function(){ var b={id:id}, F=['recipient_company','first_name','last_name','address_line1','address_line2','city','region','postcode','country','phone','tracking_code','carrier'];
+              F.forEach(function(f){ var el=scope.querySelector('.s2-'+f); b[f+'_2']=(el&&el.value)||null; });
+              save2.disabled=true; var o=save2.textContent; save2.textContent='Saving…';
+              postJSON(EP.sampleUpdate,b,function(j){ if(j&&j.error){ save2.disabled=false; save2.textContent=o; alert(j.error); return; } var s=sampById(id); if(s){ F.forEach(function(f){ s[f+'_2']=b[f+'_2']||''; }); } save2.textContent='✓ Saved'; setTimeout(function(){ refreshSampleCard(id); },700); }); };
             // completion date + status auto-save silently on change (no reload / no screen refresh)
             var sexp=scope.querySelector('.samp-exp'); if(sexp)sexp.onchange=function(){ var v=sexp.value||null; postJSON(EP.sampleUpdate,{id:id,supplier_expected_completion:v},function(){ var s=sampById(id); if(s)s.supplier_expected=v||''; refreshSampleCard(id); }); };
             var sprod=scope.querySelector('.samp-prod'); if(sprod)sprod.onchange=function(){ var v=sprod.value||null; postJSON(EP.sampleUpdate,{id:id,production_status:v},function(){ var s=sampById(id); if(s)s.production_status=v||''; refreshSampleCard(id); }); };

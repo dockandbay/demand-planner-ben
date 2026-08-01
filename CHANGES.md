@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.366 - Sample shipment: second recipient + second tracking code ⚠️ NEEDS MIGRATION 167
+- A sample shipment can now carry a **second recipient + second tracking code** (e.g. one parcel to UK, one to AU). On the supplier portal sample card, a collapsible **Second recipient & tracking** section lets the supplier add the address + tracking + carrier; setting the second tracking drops a **Second parcel shipped** timeline note. Shown in **admin** (sample drawer) as a Second-recipient column + 2nd tracking link. New `*_2` columns (migration **167**). `server.mjs`, `supply/portal-view.js`, `supply/inject.html`.
+
 ## v26.365 - Product development: recipient country (SUG-0005 Part A) ⚠️ NEEDS MIGRATION 166
 - Product-dev items get a **Recipient country** (UK / AU checkboxes, UK default; migration **166** `recipient_countries`, comma list). Editing it in PRODUCT ▸ Master data saves + drops a **supplier-visible timeline note** ("Recipient country updated to UK and AU"). The supplier portal product tab shows **Recipient: UK** / **UK and AU** clearly. `server.mjs`, `supply/inject.html`, `supply/portal-view.js`.
 - Note: SUG-0005 Part B (multiple tracking per shipment) is dropped by decision — 1 tracking code = 1 sample shipment.

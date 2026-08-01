@@ -1613,6 +1613,10 @@ app.get('/api/supply/sample-detail/:id', async (req, res) => {
       status, to_char(accepted_at,'YYYY-MM-DD') accepted_at, to_char(supplier_expected_completion,'YYYY-MM-DD') supplier_expected,
       coalesce(change_requested,false) change_requested, coalesce(production_status,'') production_status,
       coalesce(tracking_code,'') tracking_code, coalesce(carrier,'') carrier, coalesce(created_by,'') created_by,
+      coalesce(recipient_company_2,'') recipient_company_2, coalesce(first_name_2,'') first_name_2, coalesce(last_name_2,'') last_name_2,
+      coalesce(address_line1_2,'') address_line1_2, coalesce(address_line2_2,'') address_line2_2, coalesce(city_2,'') city_2,
+      coalesce(region_2,'') region_2, coalesce(postcode_2,'') postcode_2, coalesce(country_2,'') country_2, coalesce(phone_2,'') phone_2,
+      coalesce(tracking_code_2,'') tracking_code_2, coalesce(carrier_2,'') carrier_2,
       to_char(created_at,'YYYY-MM-DD') created_at
       FROM planner.sample_requests WHERE id=$1::bigint`, [id])).rows[0];
     if (!s) return res.status(404).json({ error: 'sample not found' });
@@ -1848,6 +1852,10 @@ app.get('/api/supply/:section', async (req, res) => {
           to_char(s.completion_date_required,'YYYY-MM-DD') completion_required,
           to_char(s.supplier_expected_completion,'YYYY-MM-DD') supplier_expected,
           s.status, coalesce(s.production_status,'') production_status, coalesce(s.tracking_code,'') tracking_code, coalesce(s.carrier,'') carrier,
+          coalesce(s.recipient_company_2,'') recipient_company_2, coalesce(s.first_name_2,'') first_name_2, coalesce(s.last_name_2,'') last_name_2,
+          coalesce(s.address_line1_2,'') address_line1_2, coalesce(s.address_line2_2,'') address_line2_2, coalesce(s.city_2,'') city_2,
+          coalesce(s.region_2,'') region_2, coalesce(s.postcode_2,'') postcode_2, coalesce(s.country_2,'') country_2, coalesce(s.phone_2,'') phone_2,
+          coalesce(s.tracking_code_2,'') tracking_code_2, coalesce(s.carrier_2,'') carrier_2,
           (s.accepted_at IS NOT NULL) accepted, coalesce(s.purpose,'{}') purpose,
           (SELECT count(*) FROM planner.sample_request_lines l WHERE l.sample_id=s.id)::int line_count,
           (SELECT coalesce(sum(l.qty),0) FROM planner.sample_request_lines l WHERE l.sample_id=s.id)::int units,
@@ -7750,17 +7758,21 @@ app.post('/api/trading-calendar/:id', (req, res) =>
 const SAMPLE_FIELDS = { supplier_id:'bigint', supplier_name:'text', recipient_company:'text', first_name:'text',
   last_name:'text', address_line1:'text', address_line2:'text', city:'text', region:'text', postcode:'text',
   country:'text', phone:'text', completion_date_required:'date', purpose:'text[]', notes:'text', status:'text',
-  supplier_expected_completion:'date', tracking_code:'text', carrier:'text', production_status:'text' };
+  supplier_expected_completion:'date', tracking_code:'text', carrier:'text', production_status:'text',
+  // Second recipient + second tracking (migration 167) — a sample can ship to two destinations.
+  recipient_company_2:'text', first_name_2:'text', last_name_2:'text', address_line1_2:'text', address_line2_2:'text',
+  city_2:'text', region_2:'text', postcode_2:'text', country_2:'text', phone_2:'text', carrier_2:'text', tracking_code_2:'text' };
 // When tracking is newly set on a sample, drop a timeline note announcing the shipment (an unread
 // notification for the other side). Posted as the supplier (the shipment event).
 async function maybeShippedNote(sampleId, body, authorKind, email){
-  if(!body || body.tracking_code===undefined) return;
-  const trk = String(body.tracking_code||'').trim(); if(!trk) return;
-  const cur = (await pool.query(`SELECT coalesce(tracking_code,'') tc FROM planner.sample_requests WHERE id=$1::bigint`, [sampleId])).rows[0];
-  if(cur && cur.tc===trk) return;   // unchanged → no note
-  const car = String(body.carrier||'').trim();
-  try { await pool.query(`INSERT INTO planner.sample_notes (sample_id, author_kind, author_email, body) VALUES ($1::bigint,$2,$3,$4)`,
-    [sampleId, authorKind||'supplier', email||null, 'Order shipped — tracking '+trk+(car?' ('+car+')':'')]); } catch(e){}
+  if(!body) return;
+  const cur = (await pool.query(`SELECT coalesce(tracking_code,'') tc, coalesce(tracking_code_2,'') tc2 FROM planner.sample_requests WHERE id=$1::bigint`, [sampleId])).rows[0] || { tc:'', tc2:'' };
+  async function note(trk, car, second){ trk = String(trk||'').trim(); if(!trk) return;
+    try { await pool.query(`INSERT INTO planner.sample_notes (sample_id, author_kind, author_email, body) VALUES ($1::bigint,$2,$3,$4)`,
+      [sampleId, authorKind||'supplier', email||null, (second?'Second parcel shipped':'Order shipped')+' — tracking '+trk+(car?' ('+car+')':'')]); } catch(e){}
+  }
+  if(body.tracking_code!==undefined && String(body.tracking_code||'').trim() && String(body.tracking_code||'').trim()!==cur.tc) await note(body.tracking_code, body.carrier, false);
+  if(body.tracking_code_2!==undefined && String(body.tracking_code_2||'').trim() && String(body.tracking_code_2||'').trim()!==cur.tc2) await note(body.tracking_code_2, body.carrier_2, true);
 }
 app.post('/api/supply/sample-create', async (req, res) => {
   const b = req.body || {};
@@ -9251,6 +9263,10 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
         to_char(s.completion_date_required,'YYYY-MM-DD') completion_required, coalesce(s.purpose,'{}') purpose, coalesce(s.notes,'') notes,
         s.status, (s.accepted_at IS NOT NULL) accepted, coalesce(s.change_requested,false) change_requested, to_char(s.supplier_expected_completion,'YYYY-MM-DD') supplier_expected,
         coalesce(s.production_status,'') production_status, coalesce(s.tracking_code,'') tracking_code, coalesce(s.carrier,'') carrier,
+        coalesce(s.recipient_company_2,'') recipient_company_2, coalesce(s.first_name_2,'') first_name_2, coalesce(s.last_name_2,'') last_name_2,
+        coalesce(s.address_line1_2,'') address_line1_2, coalesce(s.address_line2_2,'') address_line2_2, coalesce(s.city_2,'') city_2,
+        coalesce(s.region_2,'') region_2, coalesce(s.postcode_2,'') postcode_2, coalesce(s.country_2,'') country_2, coalesce(s.phone_2,'') phone_2,
+        coalesce(s.tracking_code_2,'') tracking_code_2, coalesce(s.carrier_2,'') carrier_2,
         (s.status NOT IN ('cancelled','complete') AND (coalesce(s.tracking_code,'')='' OR coalesce(s.change_requested,false)
            OR EXISTS (SELECT 1 FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending')
            OR EXISTS (SELECT 1 FROM planner.sample_notes n WHERE n.sample_id=s.id AND n.author_kind='internal' AND n.read_at IS NULL)
