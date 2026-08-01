@@ -761,7 +761,8 @@
   var _opExc={count:0,byPo:{}};   // ORDER PLAN unapproved exceptions (partials/suprisk/disc/country) per PO → nav counter + sub-tab badge
   var cache={},current=null,depRefs=null,poBy={},shipBy={},batchList=[],prodList=[],shipList=[],supplierList=[],branchList=[],crossdockList=[],poLookupList=[],supplierCcy={};
   var _navToken=0;   // bumps on every section / PO sub-tab navigation; async renders check it so a slow fetch from a view you've left can't overwrite the newer one (fixes fast-clicking loading the wrong view)
-  var _pendingPO=null,_pendingPOTab=null,_pendingShip=null,_pendingOP=null,_pendingDep=null,_pendingSampleRef=null;   // cross-view navigation: expand this PO / shipment, pre-filter order plan / deposit register, after the target view renders
+  var _pendingPO=null,_pendingPOTab=null,_pendingShip=null,_pendingOP=null,_pendingDep=null,_pendingSampleRef=null;
+  var _poInclArch=false;   // "Show archived" toggle on the PO grid → appends ?includeArchived=1 (archive cutoff set in CONFIG ▸ Admin ▸ General)   // cross-view navigation: expand this PO / shipment, pre-filter order plan / deposit register, after the target view renders
   var _poRefresh=null;   // set by the PO grid to refresh itself in place (no full section reload) after an assign
   var _poShowClient=false;   // PO grid: show Client name + Client sales ref columns when the DIRECT pill is active
   var _poPatchRow=null;  // set by the PO grid to patch a SINGLE row in place (no grid re-render) after an assign
@@ -2178,7 +2179,8 @@
       +'<button class="save-btn" id="po-sku-exp" title="expand — paste many SKUs" style="padding:2px 7px;background:#f0fdf4;border:1px solid #86efac;color:#166534">⤢</button>'
       +'<div id="po-sku-pop" style="display:none;position:absolute;top:100%;left:0;z-index:70;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 10px 26px rgba(0,0,0,.16);padding:10px;width:340px"><div class="tiny mut" style="margin-bottom:4px">SKUs — comma / space / newline separated (OR search, partial match)</div><textarea id="po-sku-ta" rows="6" style="width:100%;box-sizing:border-box;font-size:12px;text-align:left" placeholder="TOWLB-…, PONCHK-…"></textarea><div style="margin-top:6px;display:flex;justify-content:flex-end;gap:6px"><button class="save-btn light" id="po-sku-clear2">Clear</button><button class="save-btn" id="po-sku-apply" style="background:#dcfce7;color:#166534;border-color:#16a34a">Apply</button></div></div></span>'
       +'<button class="save-btn po-filt-toggle" id="po-filt-toggle">⚙ Filters</button>'
-      +'<button class="save-btn" id="po-impexp-toggle" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd">⇅ Import/Export</button></div>'
+      +'<button class="save-btn" id="po-impexp-toggle" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd">⇅ Import/Export</button>'
+      +'<span class="pill po-arch'+(_poInclArch?' active':'')+'" id="po-arch-toggle" title="Archived = completed POs before the production cutoff, hidden by default for speed. Toggle to include them. Set the cutoff in CONFIG ▸ Admin ▸ General.">🗄 '+(_poInclArch?'Hide archived':'Show archived')+'</span></div>'
       +(function(){ var lb='background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;';   // light-blue PO action buttons
         return '<div class="bar" id="po-impexp-bar" style="display:none;gap:8px;flex-wrap:wrap">'
           +'<button class="save-btn" id="po-new" style="'+lb+'">+ New PO</button>'
@@ -2254,7 +2256,7 @@
     // refresh the grid IN PLACE after an assign (deposit / shipment / supplier / branch / …) — re-fetch the PO
     // rows and re-render only #sup-grid, so filters + scroll position are kept (no full section reload / jump).
     function refreshGrid(){ invalidateDerived(); delete cache['purchase-orders']; var sy=window.scrollY;
-      fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(fresh){
+      fetch('/api/supply/purchase-orders'+(_poInclArch?'?includeArchived=1':'')).then(function(r){return r.json();}).then(function(fresh){
         if(Array.isArray(fresh)){ rows.length=0; Array.prototype.push.apply(rows, fresh); }
         view(); try{window.scrollTo(0,sy);}catch(e){}
       }).catch(function(){ selectSection('purchase-orders'); }); }
@@ -2366,6 +2368,7 @@
     var pprod=document.getElementById('po-prod'); if(pprod)pprod.onchange=function(){state.prod=this.value;selHi(this,!!this.value);view();};
     var pbatch=document.getElementById('po-batch'); if(pbatch)pbatch.onchange=function(){state.batch=this.value;selHi(this,!!this.value);view();};
     document.getElementById('sup-search').oninput=debounce(function(){state.q=this.value;_poShowAll=false;view();},350);
+    (function(){ var _pat=document.getElementById('po-arch-toggle'); if(_pat)_pat.onclick=function(){ _poInclArch=!_poInclArch; delete cache['purchase-orders']; showPoSub('plan'); }; })();
     // SUG-0012 — SKU filter box (+ expand popover). Fetches the matching PO set, then view() intersects it.
     function runSku(){ var v=String(state.sku||'').trim();
       if(!v){ _poSkuSet=null; view(); return; }
@@ -4518,7 +4521,7 @@
     var c=document.getElementById('supply-content');
     prefetchNavCounts();   // fill Shipments + Manufacturing counters in the background so all sub-nav badges show
     if(poSub==='plan'){ if(cache['purchase-orders'])return renderPO(cache['purchase-orders']); c.innerHTML='<div class="count">Loading…</div>';
-      fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(d){cache['purchase-orders']=d; if(_tk!==_navToken)return; renderPO(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
+      fetch('/api/supply/purchase-orders'+(_poInclArch?'?includeArchived=1':'')).then(function(r){return r.json();}).then(function(d){cache['purchase-orders']=d; if(_tk!==_navToken)return; renderPO(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
     if(poSub==='shipments'){ var showShip=function(d){ if(_tk!==_navToken)return; c.innerHTML=poSubNav()+'<div id="prod-body"></div>'; bindPoSubNav(); fetchLookups(function(){ if(_tk!==_navToken)return; shipInner(d, document.getElementById('prod-body')); }); };
       if(cache['shipments'])return showShip(cache['shipments']); c.innerHTML='<div class="count">Loading…</div>';
       fetch('/api/supply/shipments').then(function(r){return r.json();}).then(function(d){cache['shipments']=d; showShip(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
@@ -5590,13 +5593,13 @@
     // when active, expands a level-3 row of its member config tabs.
     var SC_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom','products'];
     var SC_LABEL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'Manufacturing BOM',products:'Products'};
-    var ADM_KEYS=['permissions','email-log'];
-    var ADM_LABEL={permissions:'Permissions','email-log':'Email log'};
+    var ADM_KEYS=['admin-general','permissions','email-log'];
+    var ADM_LABEL={'admin-general':'General',permissions:'Permissions','email-log':'Email log'};
     // Supply chain sits second (next to General settings); it expands to the level-3 members below / nested.
     var L2=[['general','General settings'],['supplychain','Supply chain'],['portalusers','Portal users'],['portal','Portal'],['keyaccounts','Key accounts'],['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']];
     if(ME&&ME.is_admin){L2.push(['admin','Admin']);}   // Admin grouping → Permissions / Email log as level-3 tabs
     if(CONFIG_SUB==='forecast-export')CONFIG_SUB='export-uploads';   // legacy slug redirect
-    if((CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log')&&!(ME&&ME.is_admin))CONFIG_SUB='general';   // guard: non-admins can't land on admin-only tabs
+    if((CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log'||CONFIG_SUB==='admin-general')&&!(ME&&ME.is_admin))CONFIG_SUB='general';   // guard: non-admins can't land on admin-only tabs
     function reload(){ delete cache['config']; selectSection('config'); }   // refresh after a rate add (keeps sub-tab)
     // Generic Edit/Save row table: read-only cells + an Edit button per row; Edit swaps that row's cells to inputs
     // and shows Save/Cancel; Save POSTs all editable fields at once. cols: [{f,h,t:'text|num|select',ro,opts,w}].
@@ -5864,7 +5867,7 @@
     function drawNav(){ var nv=document.getElementById('config-nav'); nv.innerHTML=navHtml();
       nv.querySelectorAll('.rtab').forEach(function(p){ p.onclick=function(){ var k=p.dataset.cs;
         if(k==='supplychain'){ if(SC_KEYS.indexOf(CONFIG_SUB)<0)CONFIG_SUB='suppliers'; }   // open → default to Suppliers (Ben)
-        else if(k==='admin'){ if(ADM_KEYS.indexOf(CONFIG_SUB)<0)CONFIG_SUB='permissions'; }   // open → default to Permissions
+        else if(k==='admin'){ if(ADM_KEYS.indexOf(CONFIG_SUB)<0)CONFIG_SUB='admin-general'; }   // open → default to General
         else CONFIG_SUB=k;
         syncHash(); drawNav(); showSub(); };}); }
     drawNav();
@@ -5885,14 +5888,6 @@
             +'<div style="max-width:720px"><div style="margin:0 0 12px"><div style="font-weight:600;font-size:13px">Invoice submitted</div>'
               +'<div class="mut tiny" style="margin:1px 0 4px">Emailed when a supplier submits invoice information on a PO. Comma-separate multiple addresses.</div>'
               +'<input class="fci gs-set" data-key="invoice_submit_notify" value="'+esc(s.invoice_submit_notify||'zera@dockandbay.com, ben@dockandbay.com')+'" placeholder="email@dockandbay.com, other@dockandbay.com" style="width:100%;box-sizing:border-box;text-align:left"></div></div>'
-            +'<div class="sect-h" style="margin-top:18px">ERP integration <span class="mut tiny">— which system purchase orders push to (dates + line items)</span></div>'
-            +'<div style="max-width:720px">'
-              +'<div style="margin:0 0 12px"><div style="font-weight:600;font-size:13px">Active ERP</div><div class="mut tiny" style="margin:1px 0 4px"><b>Cin7</b> is current; switch to <b>Fulfil</b> to target Fulfil instead. PO pushes (dates + line items) follow this setting.</div>'
-                +'<select class="fci gs-set" data-key="erp_integration" style="width:200px;box-sizing:border-box;text-align:left"><option value="cin7"'+((s.erp_integration||'cin7')==='cin7'?' selected':'')+'>Cin7</option><option value="fulfil"'+(s.erp_integration==='fulfil'?' selected':'')+'>Fulfil</option></select></div>'
-              +'<div style="margin:0 0 12px"><div style="font-weight:600;font-size:13px">Fulfil environment</div><div class="mut tiny" style="margin:1px 0 4px">Which Fulfil instance to use when Fulfil is the active ERP. Use <b>Sandbox</b> for testing. API keys per environment live in the server env file.</div>'
-                +'<select class="fci gs-set" data-key="fulfil_env" style="width:200px;box-sizing:border-box;text-align:left"><option value="sandbox"'+((s.fulfil_env||'sandbox')==='sandbox'?' selected':'')+'>Sandbox</option><option value="live"'+(s.fulfil_env==='live'?' selected':'')+'>Live</option></select></div>'
-              +'<div id="erp-status" class="mut tiny" style="margin-top:2px">Checking Fulfil keys…</div>'
-            +'</div>'
             +'<div class="sect-h" style="margin-top:18px">Finance</div>'
             +'<div style="max-width:720px"><div style="margin:0 0 12px"><div style="font-weight:600;font-size:13px">USD → GBP exchange rate</div>'
               +'<div class="mut tiny" style="margin:1px 0 4px">Used for the GBP columns in the Cash Flow &amp; Auto Forecast reports (GBP = USD ÷ this rate). Takes effect on the next page reload.</div>'
@@ -6332,6 +6327,30 @@
                 btn.disabled=true; fetch('/api/consignee/'+encodeURIComponent(ct)+'/delete',{method:'POST'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); for(var i=rows.length-1;i>=0;i--){ if(rows[i].country===ct)rows.splice(i,1); } invalidateDerived(); api.draw(); }).catch(function(e){ btn.disabled=false; alert('Remove failed: '+(e&&e.message||e)); }); }; });
             } });
         }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); };
+      SUBS['admin-general']=function(){ b.innerHTML='<div class="count">Loading…</div>';
+        fetch('/api/app-settings').then(function(r){return r.json();}).then(function(s){ s=s||{};
+          b.innerHTML='<div class="annot"><b>CONFIG ▸ Admin ▸ General.</b> Admin-only system settings.</div>'
+            +'<div class="sect-h">Purchase order archiving</div>'
+            +'<div style="max-width:760px"><div style="margin:0 0 12px"><div style="font-weight:600;font-size:13px">Archive completed POs before production number '
+              +'<span class="gs-help" title="Speeds up the Purchase Orders grid and Order Plan by hiding old, finished POs from the default view.\n\n• Only COMPLETE POs are ever archived — Production / Shipping / Future POs always show, no matter their production number.\n• Nothing is deleted: archived POs stay in the database. A “Show archived” toggle on the grid brings them back instantly.\n• Does NOT affect the supplier portal or Cash Flow.\n• Blank or 0 = archiving off." style="cursor:help;color:#2563eb;font-weight:700;border:1px solid #93c5fd;border-radius:50%;font-size:10px;padding:0 5px;margin-left:4px">i</span></div>'
+              +'<div class="mut tiny" style="margin:1px 0 6px">Hides <b>completed</b> POs with a production number below this value from the <b>Purchase Orders grid</b> and <b>Order Plan</b> (hover the <b>i</b> for details). Nothing is deleted — a <b>“Show archived”</b> toggle on the grid brings them back. Leave blank / 0 to turn off.</div>'
+              +'<input class="fci gs-set" data-key="po_archive_before_prod" value="'+esc(s.po_archive_before_prod||'')+'" placeholder="e.g. 40  (blank = off)" inputmode="numeric" style="width:220px;box-sizing:border-box;text-align:left"></div></div>'
+            +'<div class="sect-h" style="margin-top:18px">ERP integration <span class="mut tiny">— which system purchase orders push to (dates + line items)</span></div>'
+            +'<div style="max-width:760px">'
+              +'<div style="margin:0 0 12px"><div style="font-weight:600;font-size:13px">Active ERP</div><div class="mut tiny" style="margin:1px 0 4px"><b>Cin7</b> is current; switch to <b>Fulfil</b> to target Fulfil instead. PO pushes (dates + line items) follow this setting.</div>'
+                +'<select class="fci gs-set" data-key="erp_integration" style="width:200px;box-sizing:border-box;text-align:left"><option value="cin7"'+((s.erp_integration||'cin7')==='cin7'?' selected':'')+'>Cin7</option><option value="fulfil"'+(s.erp_integration==='fulfil'?' selected':'')+'>Fulfil</option></select></div>'
+              +'<div style="margin:0 0 12px"><div style="font-weight:600;font-size:13px">Fulfil environment</div><div class="mut tiny" style="margin:1px 0 4px">Which Fulfil instance to use when Fulfil is the active ERP. Use <b>Sandbox</b> for testing. API keys per environment live in the server env file.</div>'
+                +'<select class="fci gs-set" data-key="fulfil_env" style="width:200px;box-sizing:border-box;text-align:left"><option value="sandbox"'+((s.fulfil_env||'sandbox')==='sandbox'?' selected':'')+'>Sandbox</option><option value="live"'+(s.fulfil_env==='live'?' selected':'')+'>Live</option></select></div>'
+              +'<div id="erp-status" class="mut tiny" style="margin-top:2px">Checking Fulfil keys…</div>'
+            +'</div>';
+          b.querySelectorAll('.gs-set').forEach(function(inp){ inp.onchange=function(){ inp.style.borderColor='#d0d0d0';
+            fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:inp.dataset.key,value:inp.value})})
+              .then(function(r){return r.json();}).then(function(j){ inp.style.borderColor=(j&&j.error)?'#dc2626':'#16a34a'; setTimeout(function(){inp.style.borderColor='';},900); })
+              .catch(function(){ inp.style.borderColor='#dc2626'; }); }; });
+          fetch('/api/supply/erp-status').then(function(r){return r.json();}).then(function(st){ var el=document.getElementById('erp-status'); if(!el)return;
+            function dot(ok){ return ok?'<span style="color:#16a34a">✓ configured</span>':'<span style="color:#b45309">⚠ keys missing</span>'; }
+            el.innerHTML='Fulfil API keys in server env — Sandbox: '+dot(st&&st.fulfil&&st.fulfil.sandbox)+' &nbsp;·&nbsp; Live: '+dot(st&&st.fulfil&&st.fulfil.live); }).catch(function(){});
+        }).catch(function(e){ b.innerHTML='<div class="count" style="color:#dc2626">'+esc(String(e))+'</div>'; }); };
       SUBS['permissions']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/config/permissions').then(function(r){return r.json();}).then(function(rows){
           if(rows&&rows.error){ b.innerHTML='<div class="count" style="color:#dc2626">'+esc(rows.error)+'</div>'; return; }

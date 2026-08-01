@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.380 - PO archiving feature (CONFIG ▸ Admin ▸ General) ⚠️ NEEDS TESTING
+- New **PO archive** lever to speed up SUPPLY: admin sets a **production-number cutoff** (CONFIG ▸ Admin ▸ General, key `po_archive_before_prod`). **Completed** POs below it are hidden from the **Purchase Orders grid** and **Order Plan** by default. Verified: cutoff 40 → grid **1,376 → 926** (hides 450, **all complete, zero active POs hidden**).
+- **Safety:** only `complete` POs are ever archived — Production/Shipping/Future always show, whatever their number. Nothing is deleted; a **"🗄 Show archived"** toggle on the PO grid re-fetches with `?includeArchived=1`. **Does NOT touch the supplier portal or Cash Flow** (per Ben). Blank/0 = off (default).
+- New: `poArchiveCutoff()` + `archivedSql()` helper + `?includeArchived=1` on `purchase-orders`/`order-plan` (the supplier/portal-preview path is never archived). CONFIG ▸ **Admin ▸ General** L3 page created; **ERP integration settings moved here** from top-level General settings; archive input has an **ⓘ tooltip**. `server.mjs` + `supply/inject.html`. No migration (uses app_settings). Buy plan untouched (SUPPLY-only; doesn't touch calc/BP/BP_DATA).
+- **TODO:** Order-Plan "Show archived" toggle (server filter is applied there but currently hides nothing — old complete POs have no live order-plan lines).
+
 ## v26.379 - Performance Tier 2 (#5): scope the admin portal-preview fetch
 - The admin "preview / view as supplier" portal (`loadPortalData`) fetched **all POs (2.7 MB) + all order-plan (4.8 MB)** then filtered to one supplier client-side. Now the two heavy endpoints take a **`?supplier=` filter** (SQL-scoped), plus a tiny `/api/supply/po-suppliers` map (2 fields, all POs) for the "ships with <other supplier>" resolution.
 - Verified byte-for-byte equivalent: scoped POs/lines are **identical** to the old client-filter, map matches all POs. On an outlier supplier (686 POs) **7,484 KB/5.8 s → 4,188 KB/2.8 s**; typical suppliers (few POs) load near-instantly. `server.mjs` + `supply/inject.html`. Live supplier portal was already scoped (`/api/portal/bootstrap`) — unaffected. Buy plan untouched.

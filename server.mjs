@@ -1171,6 +1171,18 @@ function fulfilConfigFor(env) {
 }
 async function activeErp() { try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='erp_integration'`)).rows[0]; return (r && r.value === 'fulfil') ? 'fulfil' : 'cin7'; } catch (e) { return 'cin7'; } }
 async function activeFulfilEnv() { try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='fulfil_env'`)).rows[0]; return (r && r.value === 'live') ? 'live' : 'sandbox'; } catch (e) { return 'sandbox'; } }
+// PO archive cutoff (CONFIG ▸ Admin ▸ General). Returns the production number below which COMPLETE POs are archived
+// (hidden from the admin PO grid + Order Plan by default), or null when archiving is off. Never affects the supplier
+// portal or cashflow. app_settings key 'po_archive_before_prod'.
+async function poArchiveCutoff() {
+  try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='po_archive_before_prod'`)).rows[0];
+    const n = r ? parseInt(r.value, 10) : NaN; return (Number.isFinite(n) && n > 0) ? n : null; }
+  catch (e) { return null; }
+}
+// SQL fragment: TRUE when a row is archived (complete + numeric prod_no below the cutoff). `alias` = the table/subquery
+// alias exposing status + prod_no. Non-numeric/blank prod_no → never archived. Bind the cutoff as the given $param.
+const archivedSql = (alias, param) =>
+  `${alias}.status ILIKE '%complete%' AND (CASE WHEN coalesce(${alias}.prod_no,'') ~ '^[0-9]+$' THEN ${alias}.prod_no::int ELSE 999999 END) < ${param}`;
 // Status for CONFIG ▸ General settings — active ERP, Fulfil env, and whether the env keys are configured (no live call).
 app.get('/api/supply/erp-status', async (req, res) => {
   try { res.json({ erp: await activeErp(), fulfil_env: await activeFulfilEnv(),
@@ -1970,7 +1982,10 @@ app.get('/api/supply/:section', async (req, res) => {
         if (req.params.section === 'purchase-orders' && req.query.supplier) {   // admin portal-preview: only this supplier's POs (full rows, unthinned)
           return res.json((await pool.query(PO_ROWS_SQL + ' WHERE calc4.supplier_name = $1 ORDER BY po', [req.query.supplier])).rows);
         }
-        const _pos = await q(PO_ROWS_SQL + ' ORDER BY po');
+        // PO grid only (not cashflow, not the supplier/portal-preview path): hide archived POs unless ?includeArchived=1
+        const _archN = (req.params.section === 'purchase-orders' && !req.query.includeArchived) ? await poArchiveCutoff() : null;
+        const _archW = _archN ? ` WHERE NOT (${archivedSql('calc4', '$1')})` : '';
+        const _pos = (await pool.query(PO_ROWS_SQL + _archW + ' ORDER BY po', _archN ? [_archN] : [])).rows;
         if (req.params.section === 'cashflow') return res.json(await cashflowResponse(_pos, q));
         // PO grid: COMPLETE POs (≈85% of all POs, rarely opened) keep their list/filter/sort + PAYMENT-action
         // fields but shed the heavy expand-only fields (big JSON snapshots, packing, forwarder, landed cost,
@@ -2065,6 +2080,10 @@ app.get('/api/supply/:section', async (req, res) => {
           FROM planner.flexport_shipments ORDER BY arrival_date DESC NULLS LAST`));
       case 'order-plan': {  // enriched lines for the side-by-side grid (filter/group/pivot client-side)
         const _opSup = req.query.supplier ? ` WHERE coalesce(p.supplier_name,'')=$1` : '';   // admin portal-preview: scope to one supplier's POs
+        // admin ORDER PLAN grid (no supplier): hide archived POs unless includeArchived. Mutually exclusive with the
+        // supplier/preview path (which is never archived), so only one WHERE is ever produced.
+        const _opArchN = (!req.query.supplier && !req.query.includeArchived) ? await poArchiveCutoff() : null;
+        const _opArch = _opArchN ? ` WHERE NOT (${archivedSql('p', '$1')})` : '';
         return res.json((await pool.query(`SELECT l.po, l.sku, l.qty, el.qty erp_qty,
           (coalesce(l.qty,0) IS DISTINCT FROM coalesce(el.qty,0)) pending, to_char(pol.proposed_at,'YYYY-MM-DD') proposed_at,   -- 0 plan == absent from ERP → not pending
           l.cost_price, l.carton_qty, l.partial_carton_approved, l.full_carton_check,
@@ -2097,8 +2116,8 @@ app.get('/api/supply/:section', async (req, res) => {
           LEFT JOIN LATERAL (SELECT f.departure_date, f.landing_date FROM planner.flexport_shipments f
             WHERE f.flex_id=p.flexport_reference OR f.shipment_name=p.po OR f.shipment_name=p.shipment_ref
             ORDER BY (f.flex_id=p.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true
-          ${_opSup}
-          ORDER BY l.po, l.sku`, req.query.supplier ? [req.query.supplier] : [])).rows);
+          ${_opSup}${_opArch}
+          ORDER BY l.po, l.sku`, req.query.supplier ? [req.query.supplier] : (_opArchN ? [_opArchN] : []))).rows);
       }
       case 'shipments': {
         // Editable shipment records (planner.shipments) joined to the POs aboard them. A shipment's
