@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.388 - FIX: forecast-cell edits showed stale values (calc memo not cleared on edit)
+- Regression from v26.375's `calc()` per-render memo: it was only cleared in `render()`/`renderMain()`, but a cell edit uses the targeted `refreshRow()` path (no full render) — so `refreshRow`'s `calc()` returned the **stale memoised forecast**, and the row's result cells + FY totals didn't reflect the edit until a full re-render. **Display-only** (the saved forecast / IV was always correct, so the buy plan was never affected). Fix: `refreshRow` drops the edited row's memo entry before recomputing. Verified: edit reflects immediately. `artifact_v16.7.html`.
+- (Also noted: #8's premise was wrong — DEMAND cell edits are ALREADY scoped via `refreshRow`, not a full tbody rebuild. Real remaining gap = the grand-total row doesn't update on edit.)
+
+## v26.387 - Order Plan: supplier-changes banner + count/Load-more on one row (strip banner text/buttons) ⚠️ NEEDS TESTING
+
 ## v26.386 - Order Plan: per-PO "Accept all" button with itemised tooltip ⚠️ NEEDS TESTING
 - Replaced the global top-row accept-all bar (v26.385) with a **per-PO** button in each PO column header: **"✓ Accept all (N)"** where N = that PO's open exceptions. Clicking approves **all** of that PO's exceptions at once — partials + supplier/country/discontinue risk — and adopts any supplier changes (`po-line-accept {all}`).
 - **120 ms hover tooltip** (reuses the risk-badge tooltip) **itemises each exception on its own row** (SKU — type), so you see exactly what "Accept all" will do before clicking. `supply/inject.html`. SUPPLY render only → buy plan untouched.

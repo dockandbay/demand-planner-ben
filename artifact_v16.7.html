@@ -3320,6 +3320,7 @@ function filteredCats(){
 }
 
 function refreshRow(s,co,ch){
+  try{ delete CALC_MEMO[s+'|'+co+'|'+ch]; }catch(e){}   // this row's IV just changed → drop its cached calc so the edit reflects (the per-render memo is otherwise only cleared in render()/renderMain())
   const _cr0=calc(s,co,ch);const fu=_cr0.fu;const reasons=_cr0.reasons;const sp=aspF(s,co,ch);
   const f26u=F26.reduce(function(a,m){return a+(m===CUR_MONTH?curMonthForecast(s,co,ch):(fu[m]||0));},0);
   const f27u=F27.reduce(function(a,m){return a+(fu[m]||0);},0);
