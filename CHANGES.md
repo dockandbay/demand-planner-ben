@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.431 - DEMAND plan: Google-Sheets-style fiscal-year column grouping ⚠️ NEEDS TESTING
+- Replaced the confusing per-FY "▸ show / ▾ hide" pill with a **Google-Sheets-style grouping bar** on top of the month columns. When a fiscal year is **expanded**, a bar spans its month columns with a **−** (minimise); when **collapsed**, a **+** (expand) sits on its lone total column. The FY total header is now just a plain label.
+- Same underlying toggle (`FY_COLLAPSED`, persisted); buttons keep the `.fy-toggle` class so the existing click handler is unchanged. `artifact_v16.7.html` only.
+
 ## v26.430 - DEMAND plan: "Plan ▸" button on SKU cell opens the buy-plan popup ⚠️ NEEDS TESTING
 - Each SKU row in the DEMAND plan now has a small **"Plan ▸"** button in column 1 (under the SKU/RW) that opens that SKU's **buy-plan detail popup** (the monthly projection / cover / buy view). Builds the buy scaffold on demand (`ensureBuyPlanScaffold`) without leaving the demand view, syncs the buy market to the demand plan's country, then `window.open_(sku)`. Same mechanism SUPPLY's Order Plan already uses.
 - `artifact_v16.7.html` only. No migration.

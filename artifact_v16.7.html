@@ -294,6 +294,15 @@ tr.sku-inline:not(.subtot-row) td{border-bottom-color:#cfcfcf !important}
 .fy-toggle.fyt-show .fyt-act{background:#dbeafe;color:#1e40af;border:1px solid #93c5fd}
 .fy-toggle.fyt-hide .fyt-act{background:#f1f5f9;color:#475569;border:1px solid #cbd5e1}
 .fy-toggle:hover .fyt-act{filter:brightness(.96)}
+/* Google-Sheets-style fiscal-year column grouping: a bar on top of the month columns with a − (minimise) when
+   expanded, or a + (expand) on the lone total column when collapsed. */
+tr.grp th.grpbar{padding:0 2px 0;vertical-align:bottom;background:transparent}
+th.grpbar-exp{border-bottom:2px solid #9aa8c2}   /* bracket line spanning the grouped month columns */
+.grp-tog{display:inline-flex;align-items:center;gap:4px;justify-content:center;width:100%;border:none;background:transparent;cursor:pointer;font-family:inherit;font-size:8px;font-weight:700;color:#475569;padding:1px 2px 2px;letter-spacing:-.02em;white-space:nowrap}
+.grp-tog:hover{color:#1e40af}
+.grp-pm{display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;border:1px solid #94a3b8;border-radius:2px;background:#fff;font-size:11px;line-height:1;color:#334155;flex:0 0 auto}
+th.grpbar-col .grp-pm{border-color:#93c5fd;color:#1e40af;background:#dbeafe}
+.grp-tog:hover .grp-pm{background:#eff6ff;border-color:#60a5fa}
 .bgtH1u{background:#e2e8f0 !important;color:#334155 !important;font-weight:700}
 .bgtH2u{background:#e7e5e0 !important;color:#44403c !important;font-weight:700}
 .bgt27r{background:#e7e5e0 !important;color:#44403c !important}
@@ -3996,11 +4005,22 @@ function buildHdr(){
   g('Trends');
   g('');
   g('');
-  // Group labels span each fiscal year's month-run; collapsed FYs have no month cells, just the total.
+  // Google-Sheets-style column grouping: a bar on top of each fiscal year's columns. Expanded → the bar spans the
+  // FY's month columns with a − (minimise); collapsed → a + (expand) sits on the lone total column. Reuses the
+  // .fy-toggle click handler (toggles FY_COLLAPSED). The FY's total column carries an empty group cell.
   (function(){var i=0;while(i<TIME_COLS.length){var tc=TIME_COLS[i];
-    if(tc.t==='tot'){ g(fyLabel(tc.startY)); i++; continue; }
-    var Y=fyStartOf(tc.m),n=0; while(i<TIME_COLS.length&&TIME_COLS[i].t!=='tot'){n++;i++;}
-    g(fyLabel(Y));for(var z=1;z<n;z++)g('');
+    var Y=(tc.t==='tot')?tc.startY:fyStartOf(tc.m);
+    if(FY_COLLAPSED.has(Y)){   // collapsed FY = just the total column → EXPAND (+)
+      var ce=document.createElement('th');ce.className='grpbar grpbar-col';
+      ce.innerHTML='<button class="fy-toggle grp-tog" data-fy="'+Y+'" title="Expand '+fyLabel(Y)+' months"><span class="grp-pm">+</span> '+fyLabel(Y)+'</button>';
+      r1.appendChild(ce); i++; continue;
+    }
+    // expanded FY = n month columns (+ a trailing total column) → bar spans the months with − (minimise)
+    var n=0; while(i<TIME_COLS.length&&TIME_COLS[i].t!=='tot'&&fyStartOf(TIME_COLS[i].m)===Y){n++;i++;}
+    var ee=document.createElement('th');ee.className='grpbar grpbar-exp';ee.colSpan=n;
+    ee.innerHTML='<button class="fy-toggle grp-tog" data-fy="'+Y+'" title="Minimise '+fyLabel(Y)+' months"><span class="grp-pm">−</span> '+fyLabel(Y)+'</button>';
+    r1.appendChild(ee);
+    if(i<TIME_COLS.length&&TIME_COLS[i].t==='tot'&&TIME_COLS[i].startY===Y){ g(''); i++; }   // FY total column: empty group cell
   }})();
 
   const r2=document.createElement('tr');r2.className='sub';
@@ -4019,10 +4039,9 @@ function buildHdr(){
     } else if(tc.t==='fc'){
       var pf=pa(tc.m);s2(MN[pf.mo-1]+' fc',fyBg(fyStartOf(tc.m)));
     } else {
-      // FY total column header = show/hide pill (replaces the plain FY label)
+      // FY total column header — plain label; the expand/minimise control lives in the group bar above (r1).
       var th=document.createElement('th');th.className='sep2 '+fyTotBg(tc.startY);
-      var coll=FY_COLLAPSED.has(tc.startY);
-      th.innerHTML='<button class="fy-toggle'+(coll?' fyt-show':' fyt-hide')+'" data-fy="'+tc.startY+'" title="'+(coll?'Show':'Hide')+' '+tc.label+' months"><span class="fyt-act">'+(coll?'▸ show':'▾ hide')+'</span><br>'+tc.label+'</button>';
+      th.innerHTML='<span style="font-size:8px;font-weight:700;white-space:nowrap">'+tc.label+'</span>';
       r2.appendChild(th);
     }
   });
