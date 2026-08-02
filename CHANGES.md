@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.399 - Manufacturing tab: grouped by production + In-production/Completed coverage ⚠️ NEEDS TESTING
+Reworks SUPPLY ▸ Purchase Orders ▸ Manufacturing per Ben's steer.
+- **Ready-to-ship = production:** the old status filter used `NOT ILIKE '%ship%'`, which wrongly dropped **"READY TO SHIP"** POs (still at the factory, not dispatched). Demand now includes FUTURE / PRODUCTION / READY TO SHIP; only Shipping/Delivered/Complete are excluded.
+- **Completed component POs now count:** supply previously excluded completed, so a made-but-not-in-production component looked like a shortage ("showing only what's in production doesn't cut it"). Supply now counts **In production** (Future/Production/Ready-to-ship) *and* **Completed** (Complete/Delivered/Shipping), split into **2 columns** + Total, with the diff/coverage.
+- **Grouped by production:** the view is now sectioned by finished production number (P57/P56/P55…), each showing its bundle demand and per-component coverage. In-prod/completed cells tooltip the underlying MFG POs.
+- **Known limitation (flagged):** component supply is pooled by SKU and shown in full against *each* production that needs it — when one MFG PO feeds several open productions it can read as over-covered. Per-production allocation + the "covered by existing stock" manual entry are a fast-follow. `server.mjs`, `supply/inject.html`.
+- Only cancelled MFG POs are excluded from supply. Also fixed the same `%ship%`-drops-ready-to-ship latent bug scope (consolidation query left unchanged).
+
 ## v26.398 - FBA transfer: unify buy plan ↔ Transfer FBA tab + carton rounding (Hybrid) ⚠️ NEEDS TESTING / REVIEW
 Fixes HAIRW-SUE-OCETRES (and all SKUs): buy plan showed **no** 3PL→FBA transfer while the Transfer FBA tab showed 311 — two different engines. Now unified to ONE identical, carton-rounded number in both (your "Hybrid" choice).
 - **One source of truth:** the buy plan's "transfer now" (M+0) now calls the SAME `fbaTransferRec` as the Transfer FBA tab, and actually draws it off 3PL in the buy math (displayed = used — fixes the old HIGH-4 divergence where the buy plan's `tx` was **0 for every SKU**).

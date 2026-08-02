@@ -934,29 +934,54 @@ async function manufacturingData() {
   const bom = (await pool.query(`SELECT parent_sku, component_sku, qty::numeric qty FROM planner.manufacturing_bom ORDER BY parent_sku, component_sku`)).rows;
   const parents = [...new Set(bom.map(b => b.parent_sku))];
   const comps = [...new Set(bom.map(b => b.component_sku))];
-  const demRows = parents.length ? (await pool.query(`SELECT l.sku, l.po, l.qty::numeric qty, coalesce(p.branch,'') branch, coalesce(p.status,'') status,
+  // DEMAND: open finished-product POs carrying the parent (bundle) SKUs. "Open" = not yet dispatched/closed →
+  // FUTURE / PRODUCTION / READY TO SHIP (a shipped/delivered/complete bundle has already consumed its components,
+  // so it no longer creates demand). Carries prod_no so the view can group by production.
+  const demRows = parents.length ? (await pool.query(`SELECT l.sku, l.po, coalesce(p.prod_no,'') prod_no, l.qty::numeric qty, coalesce(p.branch,'') branch, coalesce(p.status,'') status,
       to_char(coalesce(p.end_production_overide, p.start_production + (coalesce(sup.production_days,0)||' days')::interval)::date,'YYYY-MM-DD') prod_end
     FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po
     LEFT JOIN planner.suppliers sup ON sup.id=p.supplier_id
     WHERE l.sku = ANY($1) AND coalesce(p.branch,'') NOT ILIKE '%manufactur%'
-      AND coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%deliver%' AND coalesce(p.status,'') NOT ILIKE '%ship%'`, [parents])).rows : [];
-  const supRows = comps.length ? (await pool.query(`SELECT l.sku, l.po, l.qty::numeric qty, coalesce(p.status,'') status
+      AND coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%deliver%' AND coalesce(p.status,'') NOT ILIKE '%shipping%'`, [parents])).rows : [];
+  // SUPPLY: manufacturing-branch POs carrying the component SKUs. Count what's IN PRODUCTION *and* what's already
+  // COMPLETED (components already made are real coverage — "showing only what's in production doesn't cut it").
+  // Bucket by status:  inProd = FUTURE / PRODUCTION / READY TO SHIP (still at factory) ; completed = COMPLETE /
+  // DELIVERED / SHIPPING (made). Only cancelled is excluded.
+  const supRows = comps.length ? (await pool.query(`SELECT l.sku, l.po, l.qty::numeric qty, coalesce(p.status,'') status, coalesce(p.prod_no,'') prod_no
     FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po
     WHERE l.sku = ANY($1) AND coalesce(p.branch,'') ILIKE '%manufactur%'
-      AND coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%deliver%' AND coalesce(p.status,'') NOT ILIKE '%ship%'`, [comps])).rows : [];
+      AND coalesce(p.status,'') NOT ILIKE '%cancel%'`, [comps])).rows : [];
   const accepted = {}; (await pool.query(`SELECT component_sku, accepted FROM planner.manufacturing_accept`)).rows.forEach(r => { accepted[r.component_sku] = !!r.accepted; });
-  const demandBy = {}, finishedPosBy = {}, supplyBy = {}, mfgPosBy = {};
-  demRows.forEach(r => { demandBy[r.sku] = (demandBy[r.sku] || 0) + Number(r.qty); (finishedPosBy[r.sku] = finishedPosBy[r.sku] || []).push({ po: r.po, qty: Number(r.qty), branch: r.branch, status: r.status, prod_end: r.prod_end || '' }); });
-  supRows.forEach(r => { supplyBy[r.sku] = (supplyBy[r.sku] || 0) + Number(r.qty); (mfgPosBy[r.sku] = mfgPosBy[r.sku] || []).push({ po: r.po, qty: Number(r.qty), status: r.status }); });
+  const mfgBucket = s => { const u = (s || '').toUpperCase(); if (u.includes('READY TO SHIP')) return 'inProd'; if (/COMPLETE|DELIVER|SHIP/.test(u)) return 'completed'; return 'inProd'; };
+  // Component supply pooled by SKU, split into inProd / completed.
+  const compSup = {};   // sku -> { inProd, completed, mfgPos:[] }
+  supRows.forEach(r => { const e = compSup[r.sku] || (compSup[r.sku] = { inProd: 0, completed: 0, mfgPos: [] }); const b = mfgBucket(r.status); e[b] += Number(r.qty); e.mfgPos.push({ po: r.po, qty: Number(r.qty), status: r.status, prod_no: r.prod_no, bucket: b }); });
+  // Demand pooled by parent (flat, for actions/KPIs) AND by (prod_no, parent) for the grouped view.
+  const demandBy = {}, finishedPosBy = {}, demByProd = {};
+  demRows.forEach(r => {
+    demandBy[r.sku] = (demandBy[r.sku] || 0) + Number(r.qty);
+    (finishedPosBy[r.sku] = finishedPosBy[r.sku] || []).push({ po: r.po, prod_no: r.prod_no, qty: Number(r.qty), branch: r.branch, status: r.status, prod_end: r.prod_end || '' });
+    const pk = r.prod_no || '(no prod #)';
+    (demByProd[pk] = demByProd[pk] || {})[r.sku] = (demByProd[pk][r.sku] || 0) + Number(r.qty);
+  });
+  const compsOf = (parent, demand) => bom.filter(b => b.parent_sku === parent).map(b => {
+    const sup = compSup[b.component_sku] || { inProd: 0, completed: 0, mfgPos: [] };
+    const required = demand * Number(b.qty), supplied = sup.inProd + sup.completed;
+    return { component_sku: b.component_sku, per: Number(b.qty), required, inProd: sup.inProd, completed: sup.completed, supplied, diff: supplied - required, mfgPos: sup.mfgPos, accepted: !!accepted[b.component_sku] };
+  });
+  // Flat bundles (per parent, pooled demand) — kept for manufacturingActions + KPIs.
   const bundles = parents.map(parent => {
     const demand = demandBy[parent] || 0;
-    const components = bom.filter(b => b.parent_sku === parent).map(b => {
-      const required = demand * Number(b.qty), supplied = supplyBy[b.component_sku] || 0;
-      return { component_sku: b.component_sku, per: Number(b.qty), required, supplied, diff: supplied - required, mfgPos: mfgPosBy[b.component_sku] || [], accepted: !!accepted[b.component_sku] };
-    });
-    return { parent_sku: parent, demand, finishedPos: finishedPosBy[parent] || [], components };
+    return { parent_sku: parent, demand, finishedPos: finishedPosBy[parent] || [], components: compsOf(parent, demand) };
   });
-  return { bom, bundles };
+  // Grouped by production (finished prod_no) — the view. NOTE: component supply is pooled by SKU and shown in full
+  // against each production that needs it; when one component feeds several open productions this can read as
+  // over-covered (allocation across productions is a later refinement).
+  const productions = Object.keys(demByProd).sort((a, b) => (a < b ? 1 : a > b ? -1 : 0)).map(prod => ({
+    prod_no: prod,
+    bundles: Object.keys(demByProd[prod]).sort().map(parent => ({ parent_sku: parent, demand: demByProd[prod][parent], components: compsOf(parent, demByProd[prod][parent]) }))
+  }));
+  return { bom, bundles, productions };
 }
 // One action card per bundle SKU that has an UNACCEPTED component mismatch (short or over vs demand).
 async function manufacturingActions() {

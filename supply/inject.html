@@ -4653,7 +4653,7 @@
       +rc.map(function(o){ return '<tr><td class="l"><button class="lnk-btn mfg-po-go" data-po="'+esc(o.po)+'" title="open '+esc(o.po)+' in a drawer" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer">'+esc(o.po)+'</button></td><td class="l">'+(o.prod_no?'P'+esc(o.prod_no):'')+'</td><td class="l">'+esc(o.supplier||'')+'</td><td class="l" style="white-space:nowrap">'+(o.closed_date?fd(o.closed_date):'')+'</td><td class="l">'+(o.lines||[]).map(function(x){return esc(x.sku)+' <span class="mut">×'+units(x.qty)+'</span>';}).join('<br>')+'</td></tr>'; }).join('')
       +'</tbody></table></div></div>'):'';
     var h='<div class="sect-h">Manufacturing — bundle assembly coverage</div>'+mfgNotesHtml+rcHtml
-      +'<div class="mut tiny" style="margin-bottom:8px">Grouped by bundle. '+badgeFin+' = open finished-product orders (the demand); '+badgeMfg+' = open Manufacturing-branch orders supplying the component SKUs. Demand × BOM must be covered by the MFG orders. Tick <b>Accept</b> to sign off a shortage/overage. (Open orders only — complete/shipped excluded.)</div>'
+      +'<div class="mut tiny" style="margin-bottom:8px">Grouped by production. '+badgeFin+' = finished-product demand (FUTURE / PRODUCTION / READY TO SHIP); '+badgeMfg+' component supply is split into <b>In production</b> (still at factory) and <b>Completed</b> (already made) — both count toward coverage. Demand × BOM must be covered. Tick <b>Accept</b> to sign off a shortage/overage.</div>'
       +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'
         +kpi('Bundles',bundles.length,'#f1f5f9','#334155')
         +kpi('Finished orders',finPos.length,'#dbeafe','#1e40af')
@@ -4663,31 +4663,34 @@
       +'</div>';
     if(!bundles.length){ b.innerHTML=h+'<div class="count">No BOM bundles configured — add them in CONFIG ▸ Manufacturing BOM.</div>'; wireMfgNotes(); return; }
     // One card per bundle SKU: (a) open finished orders + total demand, (b) each component's open MFG orders + mismatch
-    h+=bundles.map(function(bn){
-      var pos=(bn.finishedPos||[]).filter(function(x){return x.qty;});
-      // (a) open finished orders → demand — sorted by production end date (earliest first; blanks last)
-      pos.sort(function(a,c){ var da=a.prod_end||'', dc=c.prod_end||''; if(!da&&!dc)return 0; if(!da)return 1; if(!dc)return -1; return da<dc?-1:(da>dc?1:0); });
-      var ordRows=pos.length?pos.map(function(x){return '<tr><td class="l"><button class="lnk-btn mfg-po-go" data-po="'+esc(x.po)+'" title="'+esc(x.branch||'')+'">'+esc(x.po)+'</button></td><td class="l">'+dcell(x.prod_end)+'</td><td>'+units(x.qty)+'</td></tr>';}).join('')
-        :'<tr><td class="l mut tiny" colspan="3">no open finished orders</td></tr>';
-      var aTbl='<div class="tw" style="max-width:440px"><table style="width:max-content;min-width:100%"><thead><tr><th class="l" style="white-space:nowrap">'+badgeFin+' Open order</th><th class="l">Prod. end</th><th>Qty</th></tr></thead><tbody>'+ordRows
-        +'<tr style="border-top:2px solid #cbd5e1;font-weight:700;background:#f8fafc"><td class="l">Total demand</td><td></td><td>'+units(bn.demand)+'</td></tr></tbody></table></div>';
-      // (b) components — each with its open MFG orders + mismatch
-      var compRows=(bn.components||[]).map(function(c){
-        var st=c.diff<0?'short':c.diff>0?'over':'ok';
-        var diffTxt=st==='ok'?'<span class="tool-badge bg-green">match</span>':(st==='short'?'<span style="color:#b91c1c;font-weight:700">short '+units(-c.diff)+'</span>':'<span style="color:#92710a;font-weight:700">over '+units(c.diff)+'</span>');
-        var mfgList=(c.mfgPos||[]).filter(function(m){return m.qty;});
-        var mfgHtml=mfgList.length?mfgList.map(function(m){return '<span style="white-space:nowrap"><button class="lnk-btn mfg-po-go" data-po="'+esc(m.po)+'" title="'+esc(m.status||'')+'">'+esc(m.po)+'</button> <span class="mut tiny">×'+units(m.qty)+'</span></span>';}).join('<br>')
-          :'<span class="mut tiny">no open MFG orders</span>';
-        var acc=(st!=='ok')?'<label class="mut tiny" style="cursor:pointer;white-space:nowrap"><input type="checkbox" class="mfg-acc" data-comp="'+esc(c.component_sku)+'"'+(c.accepted?' checked':'')+'> accept</label>':'';
-        return '<tr'+(st!=='ok'&&!c.accepted?' style="background:#fff7ed"':'')+'><td class="l">'+esc(c.component_sku)+'</td><td>'+units(c.required)+'</td><td class="l">'+mfgHtml+'</td><td>'+units(c.supplied)+'</td><td>'+diffTxt+'</td><td class="l">'+acc+'</td></tr>';
+    // Grouped by PRODUCTION. Each production lists its bundle (parent) demand and, per component, the supply split
+    // into IN PRODUCTION vs COMPLETED (both count toward coverage) so the numbers can be confirmed against demand.
+    var prods=(d.productions||[]);
+    if(!prods.length){ h+='<div class="count">No open finished-product demand (FUTURE / PRODUCTION / READY TO SHIP) for any bundle SKU.</div>'; }
+    h+=prods.map(function(pr){
+      var body=(pr.bundles||[]).map(function(bn){
+        var compRows=(bn.components||[]).map(function(c){
+          var st=c.diff<0?'short':c.diff>0?'over':'ok';
+          var diffTxt=st==='ok'?'<span class="tool-badge bg-green">match</span>':(st==='short'?'<span style="color:#b91c1c;font-weight:700">short '+units(-c.diff)+'</span>':'<span style="color:#92710a;font-weight:700">over '+units(c.diff)+'</span>');
+          var ipPos=(c.mfgPos||[]).filter(function(m){return m.bucket==='inProd'&&m.qty;});
+          var cpPos=(c.mfgPos||[]).filter(function(m){return m.bucket==='completed'&&m.qty;});
+          var tip=function(list,lbl){ return list.length?list.map(function(m){return m.po+(m.prod_no?' (P'+m.prod_no+')':'')+' ×'+m.qty;}).join('  ·  '):('no '+lbl+' MFG orders'); };
+          var acc=(st!=='ok')?'<label class="mut tiny" style="cursor:pointer;white-space:nowrap"><input type="checkbox" class="mfg-acc" data-comp="'+esc(c.component_sku)+'"'+(c.accepted?' checked':'')+'> accept</label>':'';
+          return '<tr'+(st!=='ok'&&!c.accepted?' style="background:#fff7ed"':'')+'>'
+            +'<td class="l">'+esc(c.component_sku)+'</td>'
+            +'<td>'+units(c.required)+'</td>'
+            +'<td title="'+esc(tip(ipPos,'in-production'))+'">'+units(c.inProd)+'</td>'
+            +'<td title="'+esc(tip(cpPos,'completed'))+'">'+units(c.completed)+'</td>'
+            +'<td style="font-weight:700">'+units(c.supplied)+'</td>'
+            +'<td>'+diffTxt+'</td>'
+            +'<td class="l">'+acc+'</td></tr>';
+        }).join('');
+        return '<div style="margin:6px 0 12px"><div style="font-weight:700;font-size:12px;margin-bottom:3px">'+badgeFin+' '+esc(bn.parent_sku)+' <span class="mut tiny">— demand '+units(bn.demand)+'</span></div>'
+          +'<div class="tw" style="max-width:840px"><table style="width:max-content;min-width:100%"><thead><tr><th class="l">'+badgeMfg+' Component SKU</th><th>Required</th><th title="FUTURE / PRODUCTION / READY TO SHIP — still at the factory">In production</th><th title="COMPLETE / DELIVERED / SHIPPING — already made">Completed</th><th>Total supply</th><th>Coverage</th><th class="l">Sign-off</th></tr></thead><tbody>'+compRows+'</tbody></table></div></div>';
       }).join('');
-      var bTbl='<div class="tw" style="max-width:960px"><table style="width:max-content;min-width:100%"><thead><tr><th class="l">Component SKU</th><th>Required</th><th class="l" style="white-space:nowrap">'+badgeMfg+' Open MFG orders</th><th>Supplied</th><th>Mismatch</th><th class="l">Sign-off</th></tr></thead><tbody>'+compRows+'</tbody></table></div>';
-      return '<div style="margin-bottom:18px;max-width:1200px;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px">'
-        +'<div style="font-weight:800;font-size:14px;margin-bottom:8px">'+esc(bn.parent_sku)+'</div>'
-        +'<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">'
-          +'<div style="flex:0 0 auto"><div style="font-weight:700;font-size:12px;margin-bottom:3px">(a) Open finished orders → demand</div>'+aTbl+'</div>'
-          +'<div style="flex:1 1 460px;min-width:320px"><div style="font-weight:700;font-size:12px;margin-bottom:3px">(b) Components — required vs open MFG orders</div>'+bTbl+'</div>'
-        +'</div></div>';
+      var plabel=(pr.prod_no&&pr.prod_no!=='(no prod #)')?'Production P'+esc(pr.prod_no):esc(pr.prod_no);
+      return '<div style="margin-bottom:16px;max-width:1000px;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px">'
+        +'<div style="font-weight:800;font-size:14px;margin-bottom:6px">'+plabel+'</div>'+body+'</div>';
     }).join('');
     b.innerHTML=h; wireMfgNotes();
     b.querySelectorAll('.mfg-po-go').forEach(function(x){ x.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(x.dataset.po); else gotoPO(x.dataset.po); }; });
