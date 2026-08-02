@@ -559,7 +559,6 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
 #buy-wrap table.pt tr:hover td.rl{background:#fafaf8}
 #buy-wrap table.pt tr:hover td.rl.sec, #buy-wrap table.pt tr:hover td.sx{background:#e0e0de}
 #buy-wrap .txb{margin-top:6px;background:#fef9c3;border:1px solid #fcd34d;border-radius:4px;padding:5px 10px;font-size:11px;color:#854d0e}
-#buy-wrap .fb-flag{display:inline-block;background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:3px;font-weight:700;font-size:9px;margin-left:3px;cursor:default;border:1px solid #fcd34d}
 #buy-wrap .cs-core{background:#dbeafe;color:#1e40af;padding:1px 5px;border-radius:3px;font-weight:600;font-size:9px}
 #buy-wrap .cs-seasonal{background:#dcfce7;color:#166534;padding:1px 5px;border-radius:3px;font-weight:700;font-size:9px}
 #buy-wrap .cs-noncore{background:#ffedd5;color:#9a3412;padding:1px 5px;border-radius:3px;font-weight:700;font-size:9px}
@@ -1619,7 +1618,7 @@ function buildBuPills(){
     ? [['All','ALL'],['Transfer FBA','TRFFBA'],['Transfer FBA (non GRS)','TRFFBA_NG']].concat(String(CUR).toUpperCase()==='US'?[['AWD · FBA <3wk','AWDLOW']]:[])   // US only: AWD on hand + FBA under 3 weeks
     : (BP_VIEW==='transfer')
       ? [['All','ALL'],['Transfer','TRF']]   // TRANSFER view: only All / Transfer (buy pills removed per Ben)
-      : [['All','ALL'],['Urgent','URGENT'],['Urg Sea','URGENT_SEA'],['Urg Air','URGENT_AIR'],['Buy 3PL','3PL'],['Buy FBA','FBA'],['First Buy','FIRST'],['Transfer','TRF']];
+      : [['All','ALL'],['Urgent','URGENT'],['Urg Sea','URGENT_SEA'],['Urg Air','URGENT_AIR'],['Buy 3PL','3PL'],['Buy FBA','FBA'],['Transfer','TRF']];
   if(!BU_PILLS.some(function(p){return p[1]===BU_SEL;}))BU_SEL=(BP_VIEW==='fba')?'TRFFBA':(BP_VIEW==='transfer'?'TRF':'ALL');   // FBA→Transfer FBA, Transfer→Transfer
   BU_PILLS.forEach(function(pr){ var lbl=pr[0],val=pr[1];
     var b=mk('button','pill'+(val===BU_SEL?' active':''),lbl);
@@ -1799,11 +1798,6 @@ function render(){
       if(BU_SEL==='URGENT_AIR'&&!bq.b3uAir)return false;
       if(BU_SEL==='3PL'&&!bq.b3)return false;
       if(BU_SEL==='FBA'&&!bq.bf)return false;
-      if(BU_SEL==='FIRST'){
-        const _lf=(s.ms[CUR]||{}).launch;
-        const _today=(new Date()).toISOString().slice(0,10);
-        if(!(_lf&&_lf.slice(0,10)>_today&&(bq.b3||bq.b3u)))return false;
-      }
       if(BU_SEL==='TRF'){
         const txL3=parseInt(document.getElementById('txl')?.value)||6;
         const pdd3=PD[s.s];if(!pdd3)return false;
@@ -1923,7 +1917,7 @@ function render(){
         <td class="bq">${bf>0?`<span class="bq-fba">${fmt(bf)}</span>`:`<span class="bq-nil">—</span>`}</td>`;   // inter-market Trf columns removed from BUY (now the TRANSFER tab)
       }
       h+=`<tr class="sr">
-        <td class="stk"><div class="snm"><button class="ob" data-sku="${s.s}">Plan \u25b8</button><span class="${tc}">${s.ti}</span><span class="scode">${s.s}</span>${launch&&launch.slice(0,10)>(new Date()).toISOString().slice(0,10)&&(b3||b3u)?` <span class="fb-flag" title="First Buy: +${(function(){var v=parseInt((document.getElementById('fbl')||{}).value,10);return isFinite(v)&&v>=0?v:4;})()}wk lead, ${(function(){var v=parseInt((document.getElementById('fbm')||{}).value,10);return isFinite(v)&&v>0?v:4;})()}mo cover${s.ti==='A'?', +50% A-tier contingency':''}">FB</span>`:''}</div></td>
+        <td class="stk"><div class="snm"><button class="ob" data-sku="${s.s}">Plan \u25b8</button><span class="${tc}">${s.ti}</span><span class="scode">${s.s}</span></div></td>
         ${_MERGE
           ? `<td style="padding:2px 6px;font-size:10px;line-height:1.3"><span class="${sc2}">${st}</span><br>${s.cs?`<span class="cs-${s.cs.toLowerCase().replace('-','')}" title="${s.cs}">${s.cs==='Seasonal'?'S':'C'}</span>`:'<span style="color:#bbb">—</span>'}</td>`
           : `<td style="padding:2px 8px"><span class="${sc2}">${st}</span></td>
@@ -2319,31 +2313,13 @@ function rpc(){
     cards+=card('Buy 3PL URGENT',fmt(b3u),urgInfo,'warn');
   }
   if(bf>0)cards+=card('Buy FBA',fmt(bf),BUY_LBL,'purple');
-  // First Buy indicator (launch in future) — only show if there's actually a buy needed
-  // (if inbound + SOH already covers the first-buy target, no FB badge). Reads the
-  // First Buy settings (fbm months / fbl weeks) and A-tier extra (atr) from the panel.
-  const fbLaunchInFuture=md.launch&&md.launch.slice(0,10)>(new Date()).toISOString().slice(0,10);
-  const fbIsLaunching=fbLaunchInFuture&&(b3>0||b3u>0);
-  const _fbmD=document.getElementById('fbm');const _fbmV=_fbmD?parseInt(_fbmD.value,10):4;
-  const _fblD=document.getElementById('fbl');const _fblV=_fblD?parseInt(_fblD.value,10):4;
+  // Lead time + A-tier extra (new-launch cover boosts now live in Complex Rules — First Buy removed).
   const _atrD=document.getElementById('atr');const _atrV=_atrD?parseInt(_atrD.value,10):0;
-  const fbmS=isFinite(_fbmV)&&_fbmV>0?_fbmV:4;
-  const fblS=isFinite(_fblV)&&_fblV>=0?_fblV:4;
   const atrS=isFinite(_atrV)&&_atrV>=0?_atrV:0;
-  const fbExtra=fbIsLaunching?fblS:0;
-  const fbCovWeeks=Math.round(fbmS*4.33);
   const skuMeta=SL.find(x=>x.s===PSKU);
   const skuTier=skuMeta?skuMeta.ti:'';
-  const fbABoost=(fbIsLaunching&&skuTier==='A')?'+50% A-tier':'';
-  const leadDisplay=fbIsLaunching?`${md.l3||'?'}+${fbExtra}w`:`${md.l3||'?'}w`;
-  const leadSub=fbIsLaunching?`First Buy \u2014 China\u2192${PMKT} 3PL`:`China\u2192${PMKT} 3PL`;
-  cards+=card('Lead Time',leadDisplay,leadSub,fbIsLaunching?'warn':'');
-  if(fbIsLaunching){
-    const tgt=`${fbCovWeeks+(skuTier==='A'?atrS:0)}w target`;
-    const sub=fbABoost?fbABoost:`${fbmS}mo demand`;
-    cards+=card('First Buy',tgt,sub,'warn');
-  } else if(skuTier==='A'&&atrS>0){
-    // Non-first-buy A-tier with extra cover applied
+  cards+=card('Lead Time',`${md.l3||'?'}w`,`China\u2192${PMKT} 3PL`,'');
+  if(skuTier==='A'&&atrS>0){
     cards+=card('A-tier extra',`+${atrS}w`,'added to 3PL target','');
   }
   cards+=card('Case Pack',pd.cp||'?','MOQ: '+(pd.moq||'?'),'');
@@ -2386,29 +2362,17 @@ function rpc(){
 function project(md,pd,ple,mkt,tfOverride,skuKey){
   mkt=mkt||PMKT;
   const cp=pd.cp||1,moq=pd.moq||1;
-  // First Buy detection: launch date in the future means this SKU is a new launch
-  // with no sales history — apply lead+cover+tier adjustments. Lead/cover come from
-  // the Settings panel (fbm = months of demand to buy, fbl = weeks to land before
-  // launch); defaults: 4 months / 4 weeks.
-  const isFirstBuy=md.launch&&md.launch.slice(0,10)>(new Date()).toISOString().slice(0,10);
-  const _fbm=(typeof document!=='undefined'&&document.getElementById('fbm'))?parseInt(document.getElementById('fbm').value,10):4;
-  const _fbl=(typeof document!=='undefined'&&document.getElementById('fbl'))?parseInt(document.getElementById('fbl').value,10):4;
+  // New-launch cover boosts are now handled by BUY ▸ Complex Rules (see crMatch/crCoverWeeks) — First Buy removed.
+  // A-tier extra: optional safety-stock cover added to every A SKU's 3PL target (Settings ▸ 3PL A-tier extra).
   const _atr=(typeof document!=='undefined'&&document.getElementById('atr'))?parseInt(document.getElementById('atr').value,10):0;
-  const fbm=isFinite(_fbm)&&_fbm>0?_fbm:4;
-  const fbl=isFinite(_fbl)&&_fbl>=0?_fbl:4;
   const atrExtra=isFinite(_atr)&&_atr>=0?_atr:0;
-  const fbCoverWeeks=Math.round(fbm*4.33);             // months → weeks (4 mo ≈ 17wk)
-  const fbLeadExtra=isFirstBuy?fbl:0;                  // weeks added to China lead time
   const t3base=md.t3||12;
-  // For first buys, target cover is the absolute fbCoverWeeks (replaces base if larger).
-  const fbCoverExtra=isFirstBuy?Math.max(fbCoverWeeks-t3base,0):0;
   const skuTier=skuKey?TIER_MAP[skuKey]:(PSKU?TIER_MAP[PSKU]:null);
   const tierAExtra=(skuTier==='A')?atrExtra:0;         // A-tier safety stock, stacks on top
-  const fbTierBoost=(isFirstBuy&&skuTier==='A')?1.5:1; // +50% for A-tier first buys (quantity contingency)
-  const l3=Math.max((md.l3||9)+(ple||0)+fbLeadExtra,0);
+  const l3=Math.max((md.l3||9)+(ple||0),0);
   const ltWks=md.lt||2;
   const lt=ltWks<=2?0:Math.round(ltWks/4.33);
-  const t3=t3base+fbCoverExtra+tierAExtra;             // effective 3PL target cover (wks)
+  const t3=t3base+tierAExtra;                           // effective 3PL target cover (wks)
   const crMatched=crMatch(skuKey,mkt);                 // Complex Rules matching this SKU's scope in this market (per-month window applied in the loop)
   const tf=(tfOverride!==undefined&&tfOverride!==null)?tfOverride:(md.tf||4);
   const fm=md.fm||24;
@@ -2591,9 +2555,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
       // already in the past (pi<1), the need is sooner than a standard order could ever arrive → it is NOT a
       // Buy-3PL; leave it for the Buy 3PL Urgent column (rush/air). Only place a 3PL buy with full lead time.
       if(pi>=1){
-        // First-buy A-tier: boost buy qty by 50%
-        const boostedGap=gap*fbTierBoost;
-        const r=Math.ceil(boostedGap/cp)*cp;
+        const r=Math.ceil(gap/cp)*cp;
         bQ=Math.max(r,moq);
         buyDisplay[pi]=(buyDisplay[pi]||0)+bQ;
         buyFromLbl[i]=(buyFromLbl[i]?buyFromLbl[i]+', ':'')+`${PROJ[pi].lbl} order`;
@@ -3286,12 +3248,9 @@ var BUY_SCAFFOLD=`<div class="wrap">
 
       <span class="sl">3PL A-tier extra:</span>
       <span style="display:inline-flex;align-items:center;gap:6px"><span class="sl">add</span><input type="number" class="si" id="atr" value="0" min="0" max="20" step="1" onchange="BP.render()" style="width:60px"><span class="sl">wks to A-tier 3PL target cover (applies to every A SKU on top of the products-table value)</span></span>
-
-      <span class="sl" style="border-top:1px solid #e2e8f0;padding-top:8px">First Buy &mdash; new launches:</span>
-      <span style="display:inline-flex;align-items:center;gap:6px;border-top:1px solid #e2e8f0;padding-top:8px"><span class="sl">buy</span><input type="number" class="si" id="fbm" value="4" min="1" max="24" step="1" onchange="BP.render()" style="width:60px"><span class="sl">months of forecast demand, land</span><input type="number" class="si" id="fbl" value="4" min="0" max="26" step="1" onchange="BP.render()" style="width:60px"><span class="sl">wks before launch (added to China lead time)</span></span>
     </div>
     <div style="margin-top:8px;padding-top:8px;border-top:1px solid #e2e8f0;color:#64748b;font-size:10px;line-height:1.5">
-      <b>First Buy</b> applies to SKUs with a future launch date: the order is placed early enough to land <i>land</i> weeks before launch, and is sized to cover <i>buy</i> months of forecast demand from launch. A-tier first-buys also receive the standing +50% contingency on top of the demand-based quantity. <b>A-tier extra</b> stacks on top of any per-SKU target cover from the products table, including for first buys.
+      <b>A-tier extra</b> stacks on top of any per-SKU target cover from the products table. New-launch cover boosts are now set in <b>&#9819; Complex Rules</b> (per SKU / category / tier / season × window), which replaced the old First Buy settings.
     </div>
   </div>
   <!-- Complex Rules panel: cover-target override rules grouped by country. Managed via CR (Complex Rules) module. -->

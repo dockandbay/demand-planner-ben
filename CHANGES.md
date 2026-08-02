@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.421 - Complex Rules Phase 3: remove First Buy ⚠️ NEEDS TESTING · CHANGES BUY QTY
+- **First Buy is fully removed** — its Settings row (`fbm`/`fbl`), the grid **FB** badge (+ CSS), the FB pill/filter, the SKU-panel First Buy card, and all engine logic (`isFirstBuy`, `fbCoverExtra`/`fbCoverWeeks` cover boost, `fbLeadExtra` lead bump, `fbTierBoost` A-tier ×1.5). New-launch cover boosts are now set via **Complex Rules** instead. **A-tier extra** (Settings ▸ 3PL A-tier extra) is unchanged.
+- **Verified before/after (all 5 markets):** **only future-launch SKUs changed — 0 non-launch rows moved.** Totals: Buy 3PL 78,920 → 69,014 (−9,906), Urgent 136,394 → 130,628 (−5,766), Buy FBA 4,828 → 5,948 (+1,120). Launch SKUs now size on their normal cover target (e.g. TEATWL-MD-BIGDILL/UK 1000→500) rather than the First-Buy front-load; add a Complex Rule to boost a specific launch.
+- `artifact_v16.7.html` only. No migration. **Complex Rules is now the complete replacement (Phases 1–3 done).**
+
 ## v26.420 - Complex Rules Phase 2: engine reads the rules ⚠️ NEEDS TESTING · CHANGES BUY QTY
 - The buy engine now **applies Complex Rules to the 3PL cover target** per SKU × market × month. `crMatch(sku,mkt)` filters enabled rules by scope (sku/category/tier/season AND'd, per country); `crCoverWeeks(i,base,matched)` returns the effective cover target (weeks) for each projection month, gated by the rule's window.
   - **'months'** rule → target = `cover_months × 4.33` weeks. **'range'** rule → target = weeks from the month to the end of `range_to`, applied only while the month is within `[range_from, range_to]`.
