@@ -955,6 +955,10 @@ var PRICE_CHANGES=[];   // DEMAND ▸ Revenue: definitive price changes (server-
 // CLEARED at the top of render() and renderMain(), so it can never go stale: any edit that changes IV triggers a
 // re-render, which wipes it. calc()'s return is never mutated by callers, so sharing the object is safe.
 var CALC_MEMO={};
+// Buy plan reads its demand from a runtime overlay (buildLiveDemand, off the live forecast). A PLAN forecast edit
+// makes that overlay stale; this flag (set on edit) tells BP.render() to rebuild the demand before recomputing,
+// instead of only refreshing on BUY-tab entry.
+var BUY_FC_STALE=false;
 // Dynamic month anchor: current/partial month = latest 2026 month that has actuals in the data.
 // Advances automatically when fresh data is embedded — no hardcoded month to edit each cycle.
 (function(){
@@ -1620,6 +1624,9 @@ function nonGrsOf(sku,mkt){ if(!EXTRA_STOCK||!EXTRA_STOCK[sku])return 0; var m=S
 function render(){
   // Invalidate buy quantity cache so setting changes take effect
   for(const k in BUY_CACHE)delete BUY_CACHE[k];
+  // Rebuild the demand overlay if a forecast edit made it stale, so buy quantities reflect the latest forecast
+  // (was only refreshed on BUY-tab entry). Gated on the flag so settings/filter re-renders stay cheap.
+  try{ if(typeof BUY_FC_STALE!=='undefined' && BUY_FC_STALE && typeof buildLiveDemand==='function'){ buildLiveDemand(); BUY_FC_STALE=false; } }catch(e){}
   // Load AWD / NonGRS pools once, then re-render (mirrors CAL_EVENTS).
   if(EXTRA_STOCK===null){ EXTRA_STOCK={}; fetch('/api/buy-extra-stock').then(function(r){return r.json();}).then(function(d){ EXTRA_STOCK=(d&&d.stock)||{}; render(); }).catch(function(){}); }
   // Extra stock columns on the FBA view: SOH NON GRS (UK+US), SOH AWD (US only).
@@ -3325,6 +3332,7 @@ function filteredCats(){
 
 function refreshRow(s,co,ch){
   try{ delete CALC_MEMO[s+'|'+co+'|'+ch]; }catch(e){}   // this row's IV just changed → drop its cached calc so the edit reflects (the per-render memo is otherwise only cleared in render()/renderMain())
+  try{ BUY_FC_STALE=true; }catch(e){}                   // forecast changed → the buy plan's demand overlay is now stale (rebuilt on the next BP.render)
   const _cr0=calc(s,co,ch);const fu=_cr0.fu;const reasons=_cr0.reasons;const sp=aspF(s,co,ch);
   const f26u=F26.reduce(function(a,m){return a+(m===CUR_MONTH?curMonthForecast(s,co,ch):(fu[m]||0));},0);
   const f27u=F27.reduce(function(a,m){return a+(fu[m]||0);},0);
