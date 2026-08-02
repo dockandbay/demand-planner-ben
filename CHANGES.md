@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.429 - BUY & MOVE remembers last sub-tab + SKU search overrides all pills ⚠️ NEEDS TESTING
+- **BUY & MOVE remembers your last sub-tab.** Clicking the top BUY & MOVE nav now returns you to the sub-tab you were last on (Actions / Buy / FBA / Transfer) instead of always defaulting to Actions. Persisted in `localStorage` (`hzBuyMoveLast`); restored in both the artifact top-nav handler and inject's `writeViewHash`.
+- **SKU search overrides all pills.** On BUY / FBA / TRANSFER and the DEMAND plan, typing in the SKU search box now shows the matching SKUs **regardless of the other filters** (category, tier, status, core/seasonal, release-window, buy-type). The query short-circuits past every pill (still scoped to the current market/channel). On DEMAND it also overrides the category selection so matches surface across all categories.
+- `artifact_v16.7.html`, `supply/inject.html`. No migration.
+
 ## v26.428 - SKU popup: flag complex-rule-impacted cover cells ⚠️ NEEDS TESTING
 - In the buy-plan **SKU popup**, the **Cover (weeks)** cells for months whose cover target is driven by a **Complex Rule** now get a **light-purple background** and a **120ms hover tooltip** naming the rule (name, scope, coverage, window).
 - `project()` records the winning rule per month (`crWinRule` → `row.crRule`); `buildTable` styles those cells; `crRuleTip` builds the tooltip; a delegated `.crc-tip[data-tip]` hover handler shows it. Verified: for a Sep-26→Jan-27 rule, exactly those months are flagged.

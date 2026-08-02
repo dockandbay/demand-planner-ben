@@ -1834,6 +1834,7 @@ function render(){
   const q=(document.getElementById('qry')?.value||'').toLowerCase().trim();
   const vis=SL.filter(s=>{
     if(!s.ms||!s.ms[CUR])return false;
+    if(q)return skuMatchQ(s.s.toLowerCase(),q);   // SKU search OVERRIDES all pills (category/tier/status/core/RW/buy-type)
     if(!SC_SEL.has('ALL')&&!SC_SEL.has(s.c))return false;
     if(!TI_SEL.has('ALL')&&!TI_SEL.has(s.ti))return false;
     if(!ST_SEL.has(getSt(s.ms,CUR)))return false;
@@ -2042,6 +2043,7 @@ function getFilteredVis(ignoreBuy){
   const q=(document.getElementById('qry')?.value||'').toLowerCase().trim();
   return SL.filter(s=>{
     if(!s.ms||!s.ms[CUR])return false;
+    if(q)return skuMatchQ(s.s.toLowerCase(),q);   // SKU search OVERRIDES all pills (category/tier/status/core/RW/buy-type)
     if(!SC_SEL.has('ALL')&&!SC_SEL.has(s.c))return false;
     if(!TI_SEL.has('ALL')&&!TI_SEL.has(s.ti))return false;
     if(!ST_SEL.has(getSt(s.ms,CUR)))return false;
@@ -3766,7 +3768,7 @@ function recCalc(s,co,ch){
 }
 
 function filteredCats(){
-  const ac=SEL.has('ALL')?null:SEL;
+  const ac=(SEL.has('ALL')||PLAN_SKU_QRY)?null:SEL;   // SKU search overrides the category pill (show matches across all categories)
   const rows=DATA.filter(function(r){return r.co===CUR&&(!CF||r.ch===CF)&&(!ac||ac.has(parentCat(r.c)));});
   const m={};
   rows.forEach(function(r){var pg=parentCat(r.c);if(pg==null||!String(pg).trim()||String(pg).trim().toLowerCase()==='null')return;if(!m[pg])m[pg]=[];if(!m[pg].find(function(x){return x.s===r.s&&x.ch===r.ch;}))m[pg].push({s:r.s,ch:r.ch,x:r.x,c:r.c});});
@@ -5512,15 +5514,15 @@ function filteredSkus(s,co,ch,all){
     // this country in any channel. These rows can never sell, never need buying,
     // and only add visual noise to the planner.
     if(!skuHasAnyActivity(sku,co))return false;
-    // SKU text filter (matches sku code or product name)
-    if(PLAN_SKU_QRY){var _q=PLAN_SKU_QRY.toLowerCase();if(sku.toLowerCase().indexOf(_q)<0&&(p.n||'').toLowerCase().indexOf(_q)<0)return false;}
-    if(PLAN_RW!=='ALL'&&(p.rw||'')!==PLAN_RW)return false;   // Release Window filter (DEMAND plan)
-    // Channel availability
+    // Channel availability (always required)
     var av=p.av||{};
     var ctry=co.toLowerCase();
     var chKey=ch.toLowerCase()==='dtc'?'d':ch.toLowerCase()==='fba'?'f':'b';
     var ctryAvail=av[ctry]||'';
     if(!ctryAvail.includes(chKey))return false;
+    // SKU text filter — when active it OVERRIDES all pills (RW / tier / core-seasonal / status): match by code or name only.
+    if(PLAN_SKU_QRY){var _q=PLAN_SKU_QRY.toLowerCase();return sku.toLowerCase().indexOf(_q)>=0||(p.n||'').toLowerCase().indexOf(_q)>=0;}
+    if(PLAN_RW!=='ALL'&&(p.rw||'')!==PLAN_RW)return false;   // Release Window filter (DEMAND plan)
     // all=true => show every SKU in the subcat (so the subtotal = sum of all rows, matching Smooth).
     if(all)return true;
     // Filters
@@ -7783,7 +7785,7 @@ function renderBuyMoveTabs(){
     bar.style.cssText='display:flex;gap:2px;align-items:center;margin:2px 0 10px;border-bottom:1px solid #e0e0e0;flex-wrap:wrap';   // match #demand-tabs
     if(_vtr&&_vtr.parentNode)_vtr.parentNode.insertBefore(bar,_vtr.nextSibling); }
   bar.innerHTML=BUYMOVE_TABS.map(function(t){return '<button class="dnav'+(t[0]===VIEW_MODE?' active':'')+'" data-bm="'+t[0]+'">'+t[1]+'</button>';}).join('');
-  bar.querySelectorAll('.dnav').forEach(function(b){ b.onclick=function(){ VIEW_MODE=b.dataset.bm; if(window.writeHash)window.writeHash(['buy-move',VIEW_MODE]); render(); }; });   // #/buy-move/<buy|fba|transfer>
+  bar.querySelectorAll('.dnav').forEach(function(b){ b.onclick=function(){ VIEW_MODE=b.dataset.bm; try{localStorage.setItem('hzBuyMoveLast',VIEW_MODE);}catch(e){} if(window.writeHash)window.writeHash(['buy-move',VIEW_MODE]); render(); }; });   // #/buy-move/<buy|fba|transfer>; remember last sub-tab
   // Move the HORIZON version badge (+ status note) onto this second-level nav, right-aligned (matches DEMAND).
   var _st=document.getElementById('st'); if(_st){ _st.className=''; _st.style.cssText='font-size:11px;color:#888;margin-left:auto;flex:0 0 auto;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:40%'; bar.appendChild(_st); }
   var _ver=document.getElementById('ver'); if(_ver){ _ver.style.cssText='color:#0f172a;background:#fbbf24;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:800;line-height:1.2;letter-spacing:.02em;flex:0 0 auto;margin-left:'+(_st?'10px':'auto')+';white-space:nowrap;position:relative'; bar.appendChild(_ver); }
@@ -9514,7 +9516,12 @@ if(typeof window!=='undefined'){
 
 // View mode toggle (Planning / Exec)
 document.querySelectorAll('.view-toggle').forEach(function(b){
-  b.onclick=function(){VIEW_MODE=b.dataset.view;render();};
+  b.onclick=function(){
+    var v=b.dataset.view;
+    // BUY & MOVE: restore the last sub-tab the user was on (default 'actions')
+    if(b.dataset.group==='buymove'){ try{var last=localStorage.getItem('hzBuyMoveLast');if(last&&['actions','buy','fba','transfer'].indexOf(last)>=0)v=last;}catch(e){} }
+    VIEW_MODE=v; render();
+  };
 });
 
 // Country tabs

@@ -7982,7 +7982,11 @@
   function writeViewHash(v){
     if(v==='planning')writeHash(['demand',(typeof DEMAND_VIEW!=='undefined'&&DEMAND_VIEW)||'plan']);
     else if(v==='exec')writeHash(['reports',(typeof REPORT_VIEW!=='undefined'&&REPORT_VIEW)||'ex']);
-    else if(v==='actions'||v==='buy'||v==='fba'||v==='transfer')writeHash(['buy-move',v]);   // BUY & MOVE group: #/buy-move/<actions|buy|fba|transfer>
+    else if(v==='actions'||v==='buy'||v==='fba'||v==='transfer'){   // BUY & MOVE group: #/buy-move/<actions|buy|fba|transfer>
+      var _sub=v;   // entering via the top BUY & MOVE button (data-view='actions') → restore the last sub-tab the user was on
+      if(v==='actions'){try{var _last=localStorage.getItem('hzBuyMoveLast');if(_last&&['actions','buy','fba','transfer'].indexOf(_last)>=0)_sub=_last;}catch(e){}}
+      writeHash(['buy-move',_sub]);
+    }
     else writeHash([v]);
   }
   function syncHash(){ if(current==='reports') writeHash(['supply','reports',reportTab]);
