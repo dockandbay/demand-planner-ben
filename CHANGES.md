@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.413 - BUY & MOVE ▸ ACTIONS tab + BUY tab tidy ⚠️ NEEDS TESTING
+- New **ACTIONS** sub-tab (now the FIRST tab under BUY & MOVE, and the default when you click BUY & MOVE): per-country summary of the buy/move actions — **Buy 3PL, Buy 3PL Urgent Sea, Urgent Air, Buy FBA, FBA Transfer** — each with total units + SKU count and **expand-to-SKU×qty**. URL `#/buy-move/actions`. Built from `BP.getBuyQtys` across each market's visible SKUs.
+- **BUY tab: removed the inter-market "Trf→EU / Trf→AU" columns** (they now live in full on the TRANSFER tab's Outbound/Inbound). COLS 14→12.
+- **BUY header values vertically centred** (`#buy-wrap thead th` vertical-align:middle). `artifact_v16.7.html`, `supply/inject.html` (router: `#/buy-move/actions`).
+
 ## v26.412 - Buy 3PL Urgent split into Urgent Sea + Urgent Air (columns + pills) ⚠️ NEEDS TESTING
 - The BUY tab's single "Buy 3PL Urgent" column is now **two columns — Urgent Sea + Urgent Air** — with a **filter pill for each** ("Urg Sea" / "Urg Air"; "Urgent" combined kept).
 - **Routing:** the urgent qty goes to **Sea** if sea-expedite (supplier `exped` + branch sea freight) lands before the stockout month, else **Air** (exped + air freight). Uses the v26.411 data (BRANCH_FREIGHT + per-SKU expedite weeks).

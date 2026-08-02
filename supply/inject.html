@@ -8012,12 +8012,12 @@
     else if(seg[0]==='buy-move'||seg[0]==='buy'||seg[0]==='fba'){
       // BUY & MOVE group. New URLs: #/buy-move/<buy|fba|transfer>. Legacy #/buy/<ctry>, #/fba/<ctry> still work.
       var sub, ctry=null;
-      if(seg[0]==='buy-move'){ sub=(['buy','fba','transfer'].indexOf(seg[1])>=0)?seg[1]:'buy'; }
+      if(seg[0]==='buy-move'){ sub=(['actions','buy','fba','transfer'].indexOf(seg[1])>=0)?seg[1]:'actions'; }
       else { sub=seg[0]; ctry=seg[1]; }
       if(ctry&&window.BP&&window.BP.setFilters&&['uk','us','eu','au','ca'].indexOf(String(ctry).toLowerCase())>=0){ try{ window.BP.setFilters(ctry.toUpperCase()); }catch(e){} }
-      var top=document.querySelector('#view-tabs-row .view-toggle[data-group="buymove"]'); if(top)top.click();   // enter the group (VIEW_MODE=buy, builds the sub-nav)
+      var top=document.querySelector('#view-tabs-row .view-toggle[data-group="buymove"]'); if(top)top.click();   // enter the group (builds the sub-nav)
       var pick=function(){ var sb=document.querySelector('#buymove-tabs .dnav[data-bm="'+sub+'"]'); if(sb){ sb.click(); return true; } return false; };
-      if(!pick()&&sub!=='buy')setTimeout(pick,40); }
+      if(!pick())setTimeout(pick,40); }
     else if(seg[0]){
       var btn=document.querySelector('#view-tabs-row .view-toggle[data-view="'+seg[0]+'"]'); if(btn)btn.click(); } }
   window.addEventListener('hashchange',function(){ if(location.hash===_expectedHash)return; applyRoute(); });

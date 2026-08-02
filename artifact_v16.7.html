@@ -458,7 +458,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
 #buy-wrap .tw{overflow-x:auto;max-height:calc(100vh - 184px);overflow-y:auto;border:1px solid #e0e0e0;border-radius:6px}
 #buy-wrap #bp-filt-toggle{display:none}   /* BUY/FBA "Filters" toggle: phone only */
 #buy-wrap table{border-collapse:collapse;font-size:11px;width:100%}
-#buy-wrap thead th{position:sticky;top:0;z-index:2;background:#f3f3f1;padding:3px 6px;font-weight:500;font-size:10px;color:#666;border-bottom:2px solid #d5d5d5;white-space:nowrap;text-align:center}
+#buy-wrap thead th{position:sticky;top:0;z-index:2;background:#f3f3f1;padding:3px 6px;font-weight:500;font-size:10px;color:#666;border-bottom:2px solid #d5d5d5;white-space:nowrap;text-align:center;vertical-align:middle}
 #buy-wrap thead th.r{text-align:center}
 #buy-wrap thead th.stk{position:sticky;left:0;z-index:3;background:#f3f3f1;text-align:left;width:260px;min-width:260px;max-width:260px}
 #buy-wrap td{padding:0;border-bottom:1px solid #f0f0f0;vertical-align:middle;text-align:center}
@@ -625,7 +625,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
 <div style="display:flex;flex-direction:column;gap:4px;padding-bottom:8px;border-bottom:1px solid #e8e8e8;margin-bottom:6px">
   <div id="view-tabs-row" style="display:flex;align-items:center;gap:6px;background:#374151;border-radius:7px;padding:5px 8px">
     <button class="view-toggle" data-view="planning">DEMAND</button>
-    <button class="view-toggle" data-view="buy" data-group="buymove">BUY &amp; MOVE</button>
+    <button class="view-toggle" data-view="actions" data-group="buymove">BUY &amp; MOVE</button>
     <button class="view-toggle" data-view="exec">REPORTS</button>
     <div style="flex:1"></div>
     <button id="sa-drawer-btn" title="Stock Availability" onclick="openSADrawer()" style="margin-right:4px;height:24px;padding:0 9px;border-radius:12px;border:1px solid #2563eb;background:#1d4ed8;color:#fff;cursor:pointer;font-weight:700;font-size:11px;letter-spacing:.03em;line-height:1;flex:0 0 auto">SA</button>
@@ -1707,9 +1707,7 @@ function render(){
         : '<th class="r" style="min-width:64px">Buy 3PL</th>'
         +'<th class="r" style="min-width:58px" title="Buy 3PL Urgent — SEA-expedite (expedited production + sea freight); used when sea still lands before the stockout">Urgent<br>Sea</th>'
         +'<th class="r" style="min-width:58px" title="Buy 3PL Urgent — AIR-expedite (expedited production + air freight); used when sea can no longer land in time">Urgent<br>Air</th>'
-        +'<th class="r" style="min-width:64px">Buy FBA</th>'
-        +'<th class="r" style="min-width:60px" id="trfh1"></th>'
-        +'<th class="r" style="min-width:60px" id="trfh2"></th>');
+        +'<th class="r" style="min-width:64px">Buy FBA</th>');   // inter-market Trf columns removed from BUY (now the TRANSFER tab)
     _hdr.innerHTML=_lead+_trail+'</tr>';
   }
   var _dl=document.getElementById('fba-dl-btn');
@@ -1775,7 +1773,7 @@ function render(){
   vis.forEach(s=>{const k=s.c||'?';if(!grp[k])grp[k]=[];grp[k].push(s);});
   const gk=Object.keys(grp).sort((a,b)=>{const ai=CAT_ORDER.indexOf(a),bi=CAT_ORDER.indexOf(b);if(ai<0&&bi<0)return a.localeCompare(b);if(ai<0)return 1;if(bi<0)return-1;return ai-bi;});
   let h='';
-  const COLS=(BP_VIEW==='fba')?(14+_extra):(BP_VIEW==='transfer'?(8+(MKTS.length-1)*2):14);   // buy = 14 (Urgent split into Sea+Air); transfer = 8 lead + OUT/IN per other market
+  const COLS=(BP_VIEW==='fba')?(14+_extra):(BP_VIEW==='transfer'?(8+(MKTS.length-1)*2):12);   // buy = 12 (8 lead + Buy 3PL + Urgent Sea + Urgent Air + Buy FBA; inter-market Trf removed); transfer = 8 lead + OUT/IN
   const COLS_EFF=COLS-(_MERGE?2:0);   // mobile FBA merges 2 column pairs → 2 fewer columns
   if(!vis.length){h='<tr><td colspan="'+COLS_EFF+'" class="nd">No SKUs match filters</td></tr>';}
   else gk.forEach(sc=>{
@@ -1864,9 +1862,7 @@ function render(){
         <td class="bq">${b3>0?`<span class="bq-v">${fmt(b3)}</span>`:`<span class="bq-nil">—</span>`}${futN>0?`<span title="${futN} further buy(s) scheduled later in the plan (${fmt(futQty)}u) — not due to order this cycle" style="font-size:8px;color:#2563eb;margin-left:2px;white-space:nowrap">+${futN}f</span>`:``}</td>
         <td class="bq">${b3uSea>0?`<span class="bq-v" style="color:#0f766e;font-weight:700">${fmt(b3uSea)}</span>`:`<span class="bq-nil">—</span>`}</td>
         <td class="bq">${b3uAir>0?`<span class="bq-v" style="color:#dc2626;font-weight:700">${fmt(b3uAir)}</span>`:`<span class="bq-nil">—</span>`}</td>
-        <td class="bq">${bf>0?`<span class="bq-fba">${fmt(bf)}</span>`:`<span class="bq-nil">—</span>`}</td>${/* Buy FBA = new-stock purchases only (become POs). The 3PL→FBA transfer of EXISTING stock lives in the FBA / Transfer FBA view, NOT here. */''}
-        ${getTrfCell(pairs[0])}
-        ${getTrfCell(pairs[1])}`;
+        <td class="bq">${bf>0?`<span class="bq-fba">${fmt(bf)}</span>`:`<span class="bq-nil">—</span>`}</td>`;   // inter-market Trf columns removed from BUY (now the TRANSFER tab)
       }
       h+=`<tr class="sr">
         <td class="stk"><div class="snm"><button class="ob" data-sku="${s.s}">Plan \u25b8</button><span class="${tc}">${s.ti}</span><span class="scode">${s.s}</span>${launch&&launch.slice(0,10)>(new Date()).toISOString().slice(0,10)&&(b3||b3u)?` <span class="fb-flag" title="First Buy: +${(function(){var v=parseInt((document.getElementById('fbl')||{}).value,10);return isFinite(v)&&v>=0?v:4;})()}wk lead, ${(function(){var v=parseInt((document.getElementById('fbm')||{}).value,10);return isFinite(v)&&v>0?v:4;})()}mo cover${s.ti==='A'?', +50% A-tier contingency':''}">FB</span>`:''}</div></td>
@@ -6929,14 +6925,14 @@ function render(){
   if(CAL_EVENTS===null){ CAL_EVENTS=[]; fetch('/api/trading-calendar').then(function(r){return r.json();}).then(function(d){ CAL_EVENTS=(d&&d.events)||[]; if(VIEW_MODE==='planning')render(); }).catch(function(){}); }
   // Toggle filter rows visibility based on view mode.
   // PLAN shows filters; BUY and REPORT hide the PLAN filter rows (BUY gets its own in a later part).
-  var filtersHide=(VIEW_MODE==='exec'||VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer');
+  var filtersHide=(VIEW_MODE==='exec'||VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions');
   ['ctabs-row','filters-row2','catrow1-wrap'].forEach(function(id){
     var el=document.getElementById(id);
     if(el)el.style.display=filtersHide?'none':'';
   });
   // Update view toggle button states
   document.querySelectorAll('.view-toggle').forEach(function(b){
-    b.classList.toggle('active',b.dataset.view===VIEW_MODE||(b.dataset.group==='buymove'&&(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer')));
+    b.classList.toggle('active',b.dataset.view===VIEW_MODE||(b.dataset.group==='buymove'&&(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions')));
   });
   // Show the top-right AI tool-bar (Insights) on the PLAN/DEMAND view only; REPORTS/BUY/FBA get none.
   var _pt=document.getElementById('plan-tools');
@@ -6952,15 +6948,17 @@ function render(){
     if(_sb)_sb.style.display='';
     ['demand-tabs','demand-body'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
   }
-  // Leaving the BUY & MOVE group → tear down its sub-nav + the TRANSFER placeholder.
-  if(VIEW_MODE!=='buy'&&VIEW_MODE!=='fba'&&VIEW_MODE!=='transfer'){ ['buymove-tabs','transfer-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();}); }
+  // Leaving the BUY & MOVE group → tear down its sub-nav + the ACTIONS/TRANSFER pages.
+  var _inBM=(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions');
+  if(!_inBM){ ['buymove-tabs','transfer-wrap','bm-actions-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();}); }
   if(VIEW_MODE==='exec'){renderReportView();return;}
   // leaving the REPORTS area — tear down its sub-tab bar + any report body
   ['report-tabs','report-body','exec-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
-  if(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'){
-    if(window.BP)BP.BP_VIEW=VIEW_MODE; // hint; renderBuyView sets the engine flag
-    var _tvw=document.getElementById('transfer-wrap'); if(_tvw)_tvw.remove();
-    renderBuyView(VIEW_MODE);   // 'buy' | 'fba' | 'transfer' (transfer = buy grid minus the 3 Buy columns)
+  if(_inBM){
+    if(window.BP)BP.BP_VIEW=(VIEW_MODE==='actions'?'buy':VIEW_MODE); // hint; renderBuyView sets the engine flag
+    ['transfer-wrap','bm-actions-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
+    if(VIEW_MODE==='actions'){ var _tw=document.getElementById('tw'); if(_tw)_tw.style.display='none'; var _bw=document.getElementById('buy-wrap'); if(_bw)_bw.remove(); renderBuyMoveActions(); }
+    else renderBuyView(VIEW_MODE);   // 'buy' | 'fba' | 'transfer'
     renderBuyMoveTabs();
     return;
   }
@@ -7374,7 +7372,51 @@ function renderDemandTabs(){
   if(_sb)_sb.style.display='none';   // its contents now live on nav-2
 }
 // ── BUY & MOVE group: second-level sub-nav (BUY / FBA / TRANSFER) + the TRANSFER placeholder page ──
-var BUYMOVE_TABS=[['buy','BUY'],['fba','FBA'],['transfer','TRANSFER']];
+var BUYMOVE_TABS=[['actions','ACTIONS'],['buy','BUY'],['fba','FBA'],['transfer','TRANSFER']];
+// ACTIONS: per-country summary of the buy/move actions (Buy 3PL, Urgent Sea/Air, Buy FBA, FBA Transfer) —
+// total units per action with expand-to-SKU. Uses BP.getBuyQtys across each market's visible SKUs.
+function renderBuyMoveActions(){
+  try{ buildLiveDemand(); }catch(e){}
+  var host=document.querySelector('.wrap');
+  var ex=document.getElementById('bm-actions-wrap'); if(ex)ex.remove();
+  var wrap=document.createElement('div'); wrap.id='bm-actions-wrap'; wrap.style.cssText='max-width:1080px;margin:6px 0 20px';
+  var MK=(typeof MKTS!=='undefined'?MKTS:['UK','US','EU','AU','CA']);
+  var ACTS=[['b3','Buy 3PL','#1d4ed8'],['sea','Buy 3PL Urgent — Sea','#0f766e'],['air','Buy 3PL Urgent — Air','#dc2626'],['bf','Buy FBA','#7c3aed'],['tx','FBA Transfer','#92400e']];
+  var savedCur=BP.CUR, html='<div style="font-weight:800;font-size:16px;margin:4px 0 10px">Actions — by country</div>';
+  MK.forEach(function(m){
+    try{ BP.CUR=m; }catch(e){} for(var k in BP.BUY_CACHE)delete BP.BUY_CACHE[k];
+    var vis=[]; try{ vis=BP.getFilteredVis()||[]; }catch(e){}
+    var acts={b3:[],sea:[],air:[],bf:[],tx:[]};
+    vis.forEach(function(s){ var q; try{ q=BP.getBuyQtys(s.s,m); }catch(e){} if(!q)return;
+      if(q.b3>0)acts.b3.push({sku:s.s,qty:Math.round(q.b3)});
+      if(q.b3uSea>0)acts.sea.push({sku:s.s,qty:Math.round(q.b3uSea)});
+      if(q.b3uAir>0)acts.air.push({sku:s.s,qty:Math.round(q.b3uAir)});
+      if(q.bf>0)acts.bf.push({sku:s.s,qty:Math.round(q.bf)});
+      if(q.tx>0)acts.tx.push({sku:s.s,qty:Math.round(q.tx)});
+    });
+    var any=ACTS.some(function(a){return acts[a[0]].length;});
+    html+='<div style="border:1px solid #e2e8f0;border-radius:10px;margin-bottom:12px;overflow:hidden">'
+      +'<div style="background:#f8fafc;padding:8px 12px;font-weight:800;font-size:13px;border-bottom:1px solid #eef2f7">'+m+'</div>'
+      +'<table style="width:100%;border-collapse:collapse;font-size:12px"><tbody>';
+    if(!any){ html+='<tr><td style="padding:8px 12px;color:#94a3b8">No actions</td></tr>'; }
+    ACTS.forEach(function(a){ var list=acts[a[0]]; if(!list.length)return;
+      var tot=list.reduce(function(t,x){return t+x.qty;},0); list.sort(function(x,y){return y.qty-x.qty;});
+      var rid='bma-'+m+'-'+a[0];
+      html+='<tr class="bma-row" data-t="'+rid+'" style="cursor:pointer;border-top:1px solid #f1f5f9">'
+        +'<td style="padding:6px 12px;font-weight:700;color:'+a[2]+'">'+a[1]+'</td>'
+        +'<td style="padding:6px 12px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700">'+fn(tot)+' <span style="color:#94a3b8;font-weight:400">units</span></td>'
+        +'<td style="padding:6px 12px;text-align:right;color:#64748b">'+list.length+' SKU'+(list.length>1?'s':'')+'</td>'
+        +'<td style="padding:6px 12px;text-align:right;color:#94a3b8;width:22px"><span class="bma-chev">&#9656;</span></td></tr>'
+        +'<tr id="'+rid+'" style="display:none"><td colspan="4" style="padding:0 12px 8px 24px;background:#fbfdff"><div style="max-height:230px;overflow:auto">'
+        +list.map(function(x){return '<div style="display:flex;justify-content:space-between;padding:1px 0;font-size:11px;border-bottom:1px solid #f4f6f9"><span>'+esc(x.sku)+'</span><span style="font-variant-numeric:tabular-nums">'+fn(x.qty)+'</span></div>';}).join('')
+        +'</div></td></tr>';
+    });
+    html+='</tbody></table></div>';
+  });
+  try{ BP.CUR=savedCur; }catch(e){} for(var k2 in BP.BUY_CACHE)delete BP.BUY_CACHE[k2];
+  wrap.innerHTML=html; if(host)host.appendChild(wrap); else document.body.appendChild(wrap);
+  wrap.querySelectorAll('.bma-row').forEach(function(r){ r.onclick=function(){ var d=document.getElementById(r.dataset.t); if(d){ var op=d.style.display!=='none'; d.style.display=op?'none':''; var ch=r.querySelector('.bma-chev'); if(ch)ch.innerHTML=op?'&#9656;':'&#9662;'; } }; });
+}
 function renderBuyMoveTabs(){
   var _vtr=document.getElementById('view-tabs-row');
   var bar=document.getElementById('buymove-tabs');
