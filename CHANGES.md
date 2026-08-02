@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.418 - Complex Rules (Phase 1: foundation + CRUD UI) ⚠️ NEEDS TESTING · NEW MIGRATION
+- **New BUY-tab feature "Complex Rules"** (will replace First Buy) — cover-target override rules by **scope × window × coverage**, grouped by country. Phase 1 = foundation + full CRUD UI; **no buy-quantity change yet** (engine wiring is Phase 2).
+- **⚠️ MIGRATION 170** `170_buy_complex_rules.sql` — new table `planner.buy_complex_rules`. Diviyaj must run it on live (already applied to sandbox). Fields: country, name, scope (sku/category/tier/season, all optional & AND'd), window_from/to, coverage_type ('months'|'range'), cover_months | range_from/range_to, enabled.
+- **Server** (`server.mjs`): `buildComplexRules()` + inject `COMPLEX_RULES` global (fresh, uncached); CRUD endpoints `GET/POST /api/buy-complex-rules`, `POST /api/buy-complex-rules/:id/delete`; classified under the `demand` edit capability.
+- **UI** (`artifact_v16.7.html`): "♛ Complex Rules (N)" button next to Settings (BUY tab only); panel lists rules grouped by country with scope chips, window, coverage, enabled + Edit/Delete; add/edit form with scope inputs (category datalist from CATS_META), window dates, and a months↔range coverage toggle. Rules reload live after save/delete.
+- Rules are stored & displayed only — the buy engine does **not** read them yet (Phase 2), and First Buy is **still active** (removed in Phase 3).
+
 ## v26.417 - Urgent buy: don't rush-restock a SKU's discontinue month ⚠️ NEEDS TESTING
 - **Bug:** a SKU discontinuing at month-end (e.g. HAIRW-CAB-LTPNK-NB/UK, disc 31-Dec) showed a phantom **Urgent Sea 2,400**. Its December demand (1,863 ≈ on-hand 1,862) is the forecast's *final-month clearance* of existing stock, and the urgent scan was treating that sell-down as a shortfall to rush-restock — for a product dying 31-Dec.
 - **Fix (Ben's rule):** in the urgent scan, a shortfall that falls in the **discontinue month or later** no longer drives an urgent buy (stock still runs to 0, we just don't reorder a dying SKU for its final selling month). `discMonthKey` = the calendar month of the disc date; guards the urgent sizing loop only.

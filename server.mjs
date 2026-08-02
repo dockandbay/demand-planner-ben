@@ -518,6 +518,7 @@ function requiredCap(method, p) {
   if (p === '/api/save-forecasts' || p === '/api/save-sku-forecasts' || p === '/api/targets'
       || p === '/api/demand-actions/state' || p.startsWith('/api/trading-calendar')
       || p.startsWith('/api/price-changes') || p.startsWith('/api/demand-revenue-targets')
+      || p.startsWith('/api/buy-complex-rules')
       || p.startsWith('/api/forecast/')) return 'demand';    // DEMAND / forecasting domain
   if (p === '/api/consignee' || p.startsWith('/api/consignee/')) return 'config'; // CONFIG ▸ Consignees
   if (p === '/api/app-settings') return 'config';            // CONFIG ▸ General settings
@@ -573,6 +574,9 @@ app.get('/', async (_req, res) => {
     // Definitive price changes (DEMAND ▸ Revenue) — injected fresh (not in the 5-min data cache) so an edit shows
     // on the next load. getASP applies these to lift the revenue forecast.
     try { const PRICE_CHANGES = await buildPriceChanges(); html = replaceGlobal(html, 'PRICE_CHANGES', JSON.stringify(PRICE_CHANGES)); } catch (e) { /* leave the [] default */ }
+    // BUY ▸ Complex Rules — cover-target override rules (replaces First Buy). Injected fresh (not cached) so an
+    // add/edit shows on the next load. The buy engine reads these to override the 3PL cover target per SKU/window.
+    try { const COMPLEX_RULES = await buildComplexRules(); html = replaceGlobal(html, 'COMPLEX_RULES', JSON.stringify(COMPLEX_RULES)); } catch (e) { /* leave the [] default */ }
     // Neutralise the stale baked input overlay so live forecast_inputs is authoritative.
     // (FC_SEED already seeds IV from live FC_CURRENT.)
     html = replaceGlobal(html, 'SAVED_INPUTS', '{}');
@@ -7566,6 +7570,49 @@ app.post('/api/price-changes', async (req, res) => {
 });
 app.post('/api/price-changes/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.price_changes WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// BUY ▸ Complex Rules — cover-target override rules for the buy engine. GET returns all (enabled + disabled,
+// newest first); POST upserts one rule; /:id/delete removes it. Read-only fields are the scope/window/coverage.
+async function buildComplexRules() {
+  try {
+    const r = await pool.query(`SELECT id, country, name, sku, category, tier, season,
+      to_char(window_from,'YYYY-MM-DD') window_from, to_char(window_to,'YYYY-MM-DD') window_to,
+      coverage_type, cover_months, range_from, range_to, enabled, updated_by, to_char(updated_at,'YYYY-MM-DD') updated_at
+      FROM planner.buy_complex_rules ORDER BY country, id DESC`);
+    return r.rows.map(x => ({ ...x, cover_months: x.cover_months == null ? null : Number(x.cover_months) }));
+  } catch (e) { return []; }
+}
+app.get('/api/buy-complex-rules', async (_req, res) => { res.json(await buildComplexRules()); });
+app.post('/api/buy-complex-rules', async (req, res) => {
+  const b = req.body || {};
+  if (!b.country) return res.status(400).json({ error: 'country is required' });
+  const ct = b.coverage_type === 'range' ? 'range' : 'months';
+  const cm = (ct === 'months' && b.cover_months !== '' && b.cover_months != null) ? Number(b.cover_months) : null;
+  const rf = ct === 'range' ? (b.range_from || null) : null;
+  const rt = ct === 'range' ? (b.range_to || null) : null;
+  if (ct === 'months' && cm == null) return res.status(400).json({ error: 'cover_months is required for a months rule' });
+  if (ct === 'range' && (!rf || !rt)) return res.status(400).json({ error: 'range_from and range_to are required for a range rule' });
+  const nn = (v) => (v === '' || v == null) ? null : v;
+  try {
+    if (b.id) {
+      await pool.query(`UPDATE planner.buy_complex_rules SET country=$1, name=$2, sku=$3, category=$4, tier=$5, season=$6,
+        window_from=$7, window_to=$8, coverage_type=$9, cover_months=$10, range_from=$11, range_to=$12,
+        enabled=$13, updated_by=$14, updated_at=now() WHERE id=$15`,
+        [b.country, nn(b.name), nn(b.sku), nn(b.category), nn(b.tier), nn(b.season), nn(b.window_from), nn(b.window_to),
+         ct, cm, rf, rt, b.enabled !== false, authUser(req) || null, b.id]);
+      return res.json({ id: b.id });
+    }
+    const r = await pool.query(`INSERT INTO planner.buy_complex_rules (country, name, sku, category, tier, season,
+      window_from, window_to, coverage_type, cover_months, range_from, range_to, enabled, updated_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
+      [b.country, nn(b.name), nn(b.sku), nn(b.category), nn(b.tier), nn(b.season), nn(b.window_from), nn(b.window_to),
+       ct, cm, rf, rt, b.enabled !== false, authUser(req) || null]);
+    res.json({ id: r.rows[0].id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/buy-complex-rules/:id/delete', async (req, res) => {
+  try { await pool.query(`DELETE FROM planner.buy_complex_rules WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Revenue-growth targets per country × channel × FY. GET returns all; POST upserts one cell (blank clears it).

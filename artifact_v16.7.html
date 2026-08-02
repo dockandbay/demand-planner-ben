@@ -977,6 +977,7 @@ var BP_DATA={products:{},sku_list:[],built:'',demand_source:'',may_days:{elapsed
 // independent of buy_plan_data extraction. Refresh by re-running the MCP pull when products change.
 var PROD_CONST={};
 var BRANCH_FREIGHT={};   // {uk:{air,sea days},…} — expedite freight leads for Buy 3PL Urgent Air/Sea (server-injected)
+var COMPLEX_RULES=[];    // BUY ▸ Complex Rules: cover-target override rules (server-injected). Buy engine reads these to override the 3PL cover target per SKU/window. Replaces First Buy.
 // Categories + subcategories metadata — pulled via MCP each rebuild from
 // Airtable's categories/subcategories tables. CATS_META keyed by category
 // name: {a:is_active, g:grouping}. SUBS_META keyed by subcategory name:
@@ -1722,6 +1723,8 @@ function render(){
   var _bt=document.getElementById('bp-buy-actions'); if(_bt)_bt.style.display=(BP_VIEW==='buy')?'inline-flex':'none';
   var _fh=document.getElementById('bp-fba-help-btn'); if(_fh)_fh.style.display=(BP_VIEW==='fba')?'':'none';
   var _vdl=document.getElementById('bp-view-dl'); if(_vdl)_vdl.style.display=(BP_VIEW==='fba'||BP_VIEW==='transfer')?'inline-flex':'none';
+  var _crb=document.getElementById('cr-btn'); if(_crb)_crb.style.display=(BP_VIEW==='buy')?'':'none';   // Complex Rules — BUY tab only
+  var _crp=document.getElementById('cr-panel'); if(_crp&&BP_VIEW!=='buy')_crp.style.display='none';
   updateFbaSelBox();
   updateTrfHeaders();
   updateDlMenuLabels();
@@ -2993,6 +2996,145 @@ return {project:project, getBuyQtys:getBuyQtys, buyplanItems:buyplanItems, rende
 /* Expose handlers referenced by engine-generated inline markup (e.g. panel market tabs use onclick="swM(...)"). */
 if(typeof window!=='undefined'){window.swM=BP.swM;window.rpc=BP.rpc;window.open_=BP.open_;window.close_=BP.close_;}
 
+/* ===== COMPLEX RULES (BUY-tab cover-target overrides — replaces First Buy) ===== */
+var CR=(function(){
+  var CTRS_CR=['UK','US','EU','AU','CA'];
+  var rules=(typeof COMPLEX_RULES!=='undefined'&&Array.isArray(COMPLEX_RULES))?COMPLEX_RULES.slice():[];
+  var editing=null;   // rule being edited (object) or {} for new, or null when list view
+  function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  function count(){return rules.filter(function(r){return r.enabled!==false;}).length;}
+  function updateBtn(){var b=document.getElementById('cr-btn');if(b)b.innerHTML='&#9819; Complex Rules ('+count()+') &#9662;';}
+  function scopeChips(r){
+    var out=[];
+    if(r.sku)out.push('SKU: '+esc(r.sku));
+    if(r.category)out.push('Cat: '+esc(r.category));
+    if(r.tier)out.push('Tier '+esc(r.tier));
+    if(r.season)out.push('Season: '+esc(r.season));
+    if(!out.length)return '<span style="color:#94a3b8">All SKUs</span>';
+    return out.map(function(t){return '<span style="display:inline-block;background:#ede9fe;color:#5b21b6;border-radius:3px;padding:1px 6px;margin-right:3px;font-size:10px">'+t+'</span>';}).join('');
+  }
+  function coverText(r){
+    if(r.coverage_type==='range')return (r.range_from||'?')+' &rarr; '+(r.range_to||'?');
+    return (r.cover_months!=null?r.cover_months:'?')+' mo cover';
+  }
+  function windowText(r){
+    if(!r.window_from&&!r.window_to)return '<span style="color:#94a3b8">Always on</span>';
+    var f=r.window_from?(window.fd?window.fd(r.window_from):r.window_from):'—';
+    var t=r.window_to?(window.fd?window.fd(r.window_to):r.window_to):'open';
+    return esc(f)+' &rarr; '+esc(t);
+  }
+  function listHTML(){
+    var h='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
+      +'<div style="font-weight:700;color:#5b21b6;font-size:12px">&#9819; Complex Rules <span style="color:#94a3b8;font-weight:400">— override the 3PL cover target by scope × window, per country. Highest coverage wins.</span></div>'
+      +'<button type="button" onclick="CR.add()" style="font-size:10px;padding:3px 11px;border:1px solid #7c3aed;border-radius:3px;background:#7c3aed;color:#fff;cursor:pointer;font-weight:700">&#43; Add rule</button></div>';
+    if(!rules.length){h+='<div style="color:#94a3b8;text-align:left;padding:8px 0">No rules yet. Add one to override buy cover targets for a launch, a season, or a specific SKU.</div>';return h;}
+    CTRS_CR.forEach(function(co){
+      var rs=rules.filter(function(r){return r.country===co;});
+      if(!rs.length)return;
+      h+='<div style="margin-top:8px"><div style="font-weight:700;color:#0f172a;font-size:11px;margin-bottom:3px">'+co+'</div>';
+      h+='<table style="width:100%;border-collapse:collapse;font-size:11px"><tbody>';
+      rs.forEach(function(r){
+        h+='<tr style="border-bottom:1px solid #ede9fe'+(r.enabled===false?';opacity:.5':'')+'">'
+          +'<td style="padding:4px 8px 4px 0;text-align:left;white-space:nowrap;font-weight:600">'+esc(r.name||'')+'</td>'
+          +'<td style="padding:4px 8px;text-align:left">'+scopeChips(r)+'</td>'
+          +'<td style="padding:4px 8px;text-align:left;white-space:nowrap">'+windowText(r)+'</td>'
+          +'<td style="padding:4px 8px;text-align:left;white-space:nowrap;font-weight:600;color:#5b21b6">'+coverText(r)+'</td>'
+          +'<td style="padding:4px 8px;text-align:left;white-space:nowrap;color:#94a3b8">'+(r.enabled===false?'off':'on')+'</td>'
+          +'<td style="padding:4px 0;text-align:left;white-space:nowrap">'
+            +'<button type="button" onclick="CR.edit('+r.id+')" style="font-size:10px;padding:1px 8px;border:1px solid #cbd5e1;border-radius:3px;background:#fff;cursor:pointer">Edit</button> '
+            +'<button type="button" onclick="CR.del('+r.id+')" style="font-size:10px;padding:1px 8px;border:1px solid #fecaca;border-radius:3px;background:#fef2f2;color:#b91c1c;cursor:pointer">Delete</button>'
+          +'</td></tr>';
+      });
+      h+='</tbody></table></div>';
+    });
+    return h;
+  }
+  function opt(v,cur){return '<option value="'+esc(v)+'"'+(String(cur)===String(v)?' selected':'')+'>'+esc(v)+'</option>';}
+  function formHTML(){
+    var r=editing||{};
+    var isRange=r.coverage_type==='range';
+    var catList=(typeof window.CR_CATS!=='undefined'&&window.CR_CATS.length)?window.CR_CATS:[];
+    var h='<div style="font-weight:700;color:#5b21b6;font-size:12px;margin-bottom:8px">&#9819; '+(r.id?'Edit rule':'New rule')+'</div>'
+      +'<div style="display:grid;grid-template-columns:130px 1fr;gap:7px 12px;align-items:center">'
+      +'<span class="sl">Country:</span><span><select id="cr-country" style="width:120px">'+CTRS_CR.map(function(c){return opt(c,r.country||'UK');}).join('')+'</select></span>'
+      +'<span class="sl">Name (optional):</span><span><input id="cr-name" type="text" value="'+esc(r.name||'')+'" placeholder="e.g. Unicorn summer push" style="width:280px"></span>'
+      +'<span class="sl" style="border-top:1px solid #e9d5ff;padding-top:7px">Scope — SKU:</span><span style="border-top:1px solid #e9d5ff;padding-top:7px"><input id="cr-sku" type="text" value="'+esc(r.sku||'')+'" placeholder="exact SKU (blank = any)" style="width:280px"></span>'
+      +'<span class="sl">Scope — Category:</span><span><input id="cr-category" list="cr-catlist" type="text" value="'+esc(r.category||'')+'" placeholder="category (blank = any)" style="width:220px"><datalist id="cr-catlist">'+catList.map(function(c){return '<option value="'+esc(c)+'">';}).join('')+'</datalist></span>'
+      +'<span class="sl">Scope — Tier:</span><span><select id="cr-tier" style="width:120px"><option value="">any</option>'+['A','B','C'].map(function(t){return opt(t,r.tier||'');}).join('')+'</select></span>'
+      +'<span class="sl">Scope — Season:</span><span><input id="cr-season" type="text" value="'+esc(r.season||'')+'" placeholder="release window / season (blank = any)" style="width:220px"></span>'
+      +'<span class="sl" style="border-top:1px solid #e9d5ff;padding-top:7px">Window from:</span><span style="border-top:1px solid #e9d5ff;padding-top:7px"><input id="cr-wfrom" type="date" value="'+esc(r.window_from||'')+'"> <span class="sl">(blank = always on)</span></span>'
+      +'<span class="sl">Window to:</span><span><input id="cr-wto" type="date" value="'+esc(r.window_to||'')+'"> <span class="sl">(blank = open-ended)</span></span>'
+      +'<span class="sl" style="border-top:1px solid #e9d5ff;padding-top:7px">Coverage:</span><span style="border-top:1px solid #e9d5ff;padding-top:7px">'
+        +'<label style="margin-right:12px"><input type="radio" name="cr-ctype" value="months"'+(isRange?'':' checked')+' onchange="CR.toggleCoverage()"> Months of cover</label>'
+        +'<label><input type="radio" name="cr-ctype" value="range"'+(isRange?' checked':'')+' onchange="CR.toggleCoverage()"> Fixed month range</label></span>'
+      +'<span class="sl" id="cr-months-lbl"'+(isRange?' style="display:none"':'')+'>Cover months:</span><span id="cr-months-wrap"'+(isRange?' style="display:none"':'')+'><input id="cr-cover-months" type="number" min="0" step="0.5" value="'+esc(r.cover_months!=null?r.cover_months:'')+'" style="width:80px"> <span class="sl">months</span></span>'
+      +'<span class="sl" id="cr-range-lbl"'+(isRange?'':' style="display:none"')+'>Cover range:</span><span id="cr-range-wrap"'+(isRange?'':' style="display:none"')+'><input id="cr-range-from" type="text" value="'+esc(r.range_from||'')+'" placeholder="YYYY_MM" style="width:90px"> &rarr; <input id="cr-range-to" type="text" value="'+esc(r.range_to||'')+'" placeholder="YYYY_MM" style="width:90px"></span>'
+      +'<span class="sl">Enabled:</span><span><label><input id="cr-enabled" type="checkbox"'+(r.enabled===false?'':' checked')+'> active</label></span>'
+      +'</div>'
+      +'<div style="margin-top:10px;display:flex;gap:8px"><button type="button" onclick="CR.save()" style="font-size:10px;padding:4px 14px;border:1px solid #7c3aed;border-radius:3px;background:#7c3aed;color:#fff;cursor:pointer;font-weight:700">Save rule</button>'
+      +'<button type="button" onclick="CR.cancel()" style="font-size:10px;padding:4px 14px;border:1px solid #cbd5e1;border-radius:3px;background:#fff;cursor:pointer">Cancel</button>'
+      +'<span id="cr-msg" style="color:#b91c1c;align-self:center"></span></div>';
+    return h;
+  }
+  function render(){
+    var p=document.getElementById('cr-panel');if(!p)return;
+    p.innerHTML=editing?formHTML():listHTML();
+    updateBtn();
+  }
+  function toggle(){var p=document.getElementById('cr-panel');if(!p)return;var open=(p.style.display==='none'||!p.style.display);p.style.display=open?'block':'none';if(open){editing=null;render();}}
+  function add(){editing={};render();}
+  function edit(id){var r=rules.filter(function(x){return String(x.id)===String(id);})[0];editing=r?JSON.parse(JSON.stringify(r)):{};render();}
+  function cancel(){editing=null;render();}
+  function toggleCoverage(){
+    var isRange=(document.querySelector('input[name="cr-ctype"]:checked')||{}).value==='range';
+    ['cr-months-lbl','cr-months-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.style.display=isRange?'none':'';});
+    ['cr-range-lbl','cr-range-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.style.display=isRange?'':'none';});
+  }
+  function val(id){var e=document.getElementById(id);return e?e.value.trim():'';}
+  function save(){
+    var msg=document.getElementById('cr-msg');
+    var ctype=(document.querySelector('input[name="cr-ctype"]:checked')||{}).value||'months';
+    var body={
+      id:(editing&&editing.id)||undefined,
+      country:val('cr-country'), name:val('cr-name')||null,
+      sku:val('cr-sku')||null, category:val('cr-category')||null, tier:val('cr-tier')||null, season:val('cr-season')||null,
+      window_from:val('cr-wfrom')||null, window_to:val('cr-wto')||null,
+      coverage_type:ctype,
+      cover_months:ctype==='months'?val('cr-cover-months'):null,
+      range_from:ctype==='range'?val('cr-range-from'):null, range_to:ctype==='range'?val('cr-range-to'):null,
+      enabled:!!document.getElementById('cr-enabled').checked
+    };
+    if(ctype==='months'&&!body.cover_months){if(msg)msg.textContent='Enter cover months.';return;}
+    if(ctype==='range'&&(!body.range_from||!body.range_to)){if(msg)msg.textContent='Enter both range months (YYYY_MM).';return;}
+    if(msg)msg.textContent='Saving…';
+    fetch('/api/buy-complex-rules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+      .then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j};});})
+      .then(function(res){
+        if(!res.ok){if(msg)msg.textContent=res.j.error||'Save failed';return;}
+        reload();
+      }).catch(function(e){if(msg)msg.textContent=String(e);});
+  }
+  function del(id){
+    if(!window.confirm('Delete this rule?'))return;
+    fetch('/api/buy-complex-rules/'+id+'/delete',{method:'POST'}).then(function(){reload();});
+  }
+  function reload(){
+    fetch('/api/buy-complex-rules').then(function(r){return r.json();}).then(function(list){
+      rules=Array.isArray(list)?list:[];
+      if(typeof COMPLEX_RULES!=='undefined')try{COMPLEX_RULES.length=0;Array.prototype.push.apply(COMPLEX_RULES,rules);}catch(e){}
+      editing=null;render();
+      if(window.BP&&BP.render)try{BP.render();}catch(e){}   // Phase 2 will make the engine read the rules; harmless now
+    });
+  }
+  return {toggle:toggle,add:add,edit:edit,cancel:cancel,save:save,del:del,toggleCoverage:toggleCoverage,reload:reload,updateBtn:updateBtn,get rules(){return rules;}};
+})();
+if(typeof window!=='undefined'){
+  window.CR=CR;
+  try{ window.CR_CATS=(typeof CATS_META!=='undefined')?Object.keys(CATS_META).sort():[]; }catch(e){ window.CR_CATS=[]; }
+  function _crInit(){ try{ CR.updateBtn(); }catch(e){} }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',_crInit); else _crInit();
+}
+
 // Buy plan scaffold HTML (pills, settings, table, overlay). Injected into #buy-wrap by renderBuyView().
 var BUY_SCAFFOLD=`<div class="wrap">
 <div style="display:flex;flex-direction:column;gap:4px;padding-bottom:6px;border-bottom:1px solid #e8e8e8;margin-bottom:5px">
@@ -3030,6 +3172,7 @@ var BUY_SCAFFOLD=`<div class="wrap">
   <div style="display:flex;align-items:center;gap:6px;font-size:11px;flex-wrap:wrap">
     <button type="button" id="bp-filt-toggle" onclick="(function(){var w=document.getElementById('buy-wrap');if(w)w.classList.toggle('bpf-open');})()" style="font-size:10px;padding:3px 11px;border:1px solid #cbd5e1;border-radius:4px;background:#f1f5f9;color:#0f172a;cursor:pointer;font-weight:700">&#9881; Filters &#9662;</button>
     <button type="button" id="set-btn" onclick="(function(){var p=document.getElementById('set-panel');p.style.display=(p.style.display==='none'||!p.style.display?'block':'none');})()" title="Buy plan settings" style="font-size:10px;padding:2px 9px;border:1px solid #cbd5e1;border-radius:3px;background:#f1f5f9;color:#0f172a;cursor:pointer;font-weight:600">&#9881; Settings &#9662;</button>
+    <button type="button" id="cr-btn" onclick="CR.toggle()" title="Complex Rules — override buy cover targets by SKU / category / tier / season × window, per country" style="font-size:10px;padding:2px 9px;border:1px solid #7c3aed;border-radius:3px;background:#f5f3ff;color:#5b21b6;cursor:pointer;font-weight:600">&#9819; Complex Rules (0) &#9662;</button>
     <button type="button" id="bp-view-dl" onclick="BP.downloadViewCSV()" title="Download the data in view as CSV" style="display:none;font-size:10px;padding:2px 10px;border:1px solid #16a34a;border-radius:3px;background:#dcfce7;color:#166534;cursor:pointer;font-weight:600">&#11015; Download CSV</button>
     <button type="button" id="bp-fba-help-btn" onclick="document.getElementById('fba-help').style.display=(document.getElementById('fba-help').style.display==='none'?'block':'none')" title="How Transfer FBA is calculated" style="font-size:10px;padding:2px 9px;border:1px solid #cbd5e1;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer">&#9432; FBA Transfer Logic</button>
     <span id="bp-buy-actions" style="display:inline-flex;align-items:center;gap:6px;margin-left:6px;border-left:1px solid #e2e8f0;padding-left:8px">
@@ -3082,6 +3225,8 @@ var BUY_SCAFFOLD=`<div class="wrap">
       <b>First Buy</b> applies to SKUs with a future launch date: the order is placed early enough to land <i>land</i> weeks before launch, and is sized to cover <i>buy</i> months of forecast demand from launch. A-tier first-buys also receive the standing +50% contingency on top of the demand-based quantity. <b>A-tier extra</b> stacks on top of any per-SKU target cover from the products table, including for first buys.
     </div>
   </div>
+  <!-- Complex Rules panel: cover-target override rules grouped by country. Managed via CR (Complex Rules) module. -->
+  <div id="cr-panel" style="display:none;margin:4px 0 8px;padding:12px 14px;background:#faf5ff;border:1px solid #e9d5ff;border-left:3px solid #7c3aed;border-radius:4px;font-size:11px;color:#334155;max-width:980px"></div>
 </div>
 <div id="fba-help" style="display:none;margin:4px 0 8px;padding:10px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-left:3px solid #1d4ed8;border-radius:4px;font-size:11px;line-height:1.55;color:#334155;max-width:880px">
   <div style="font-weight:700;color:#0f172a;margin-bottom:4px">How "Transfer FBA" is calculated</div>
