@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.425 - Complex Rules form: SKU multi-picker, category dropdown, dd-mmm-yy dates ⚠️ NEEDS TESTING
+- **Scope — SKUs** is now a **multi-select search picker** (like Order Plan's add-SKU box): type to search (503 SKUs, shows subcat), click to add removable chips. A rule can now scope **several SKUs** — stored comma-separated in `sku`; the engine (`crMatch`) matches membership. Single-SKU rules behave as before.
+- **Scope — Category** is now a **searchable dropdown** (free-text allowed, like the PO-grid assign-shipment box) instead of a plain datalist input.
+- **Dates shown as dd-mmm-yy** in the rules list (window dates via `fdmy`, e.g. 01-Sep-26); the cover range shows `Mmm-yy → Mmm-yy`. (Form editors stay native date pickers.)
+- List scope chip shows "N SKUs" when several, with the full list on hover.
+- `artifact_v16.7.html` only. No schema change (SKU list packs into the existing `sku` text column).
+
 ## v26.424 - BUY & MOVE ▸ ACTIONS: fix empty "No actions" + URL + left-align ⚠️ NEEDS TESTING
 - **ACTIONS showed "No actions" for every country** — root cause: `getFilteredVis` read `document.getElementById('qry').value` (the buy-grid search box) unguarded, but on the ACTIONS tab `buy-wrap` is removed so `#qry` is null → it threw → `renderBuyMoveActions` swallowed the error → empty. Guarded both reads with `?.value`. Now populates (UK ~472 SKUs scanned → Buy 3PL / Urgent Sea / Urgent Air / Buy FBA / FBA Transfer per country with SKU counts + expand).
 - **URL fix:** landing on ACTIONS wrote `#/actions`; now writes **`#/buy-move/actions`** (added `actions` to `writeViewHash`). `supply/inject.html`.

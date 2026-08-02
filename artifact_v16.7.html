@@ -570,6 +570,16 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
 #cr-panel .cr-status{order:5;color:#94a3b8}
 #cr-panel .cr-acts{order:6;white-space:nowrap}
 #cr-panel .cr-break{display:none;flex-basis:100%;height:0;margin:0}
+/* Complex Rules form pickers — searchable dropdown (category single-select, SKU multi-select) */
+#cr-panel .cr-pick{position:relative;display:inline-block}
+#cr-panel .cr-drop{display:none;position:absolute;z-index:70;left:0;top:100%;min-width:230px;max-width:360px;max-height:230px;overflow:auto;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 6px 18px rgba(15,23,42,.16);margin-top:2px}
+#cr-panel .cr-drop.open{display:block}
+#cr-panel .cr-opt{padding:5px 9px;font-size:12px;cursor:pointer;white-space:nowrap;display:flex;justify-content:space-between;gap:12px}
+#cr-panel .cr-opt:hover{background:#f5f3ff}
+#cr-panel .cr-opt .mut{color:#94a3b8;font-size:11px}
+#cr-panel .cr-opt.sel{background:#ede9fe;font-weight:600}
+#cr-panel .cr-chip{display:inline-flex;align-items:center;gap:3px;background:#ede9fe;color:#5b21b6;border-radius:4px;padding:1px 3px 1px 7px;margin:0 4px 4px 0;font-size:11px}
+#cr-panel .cr-chip button{border:none;background:transparent;color:#7c3aed;cursor:pointer;font-size:14px;line-height:1;padding:0 2px}
 @media (max-width:640px){
   #cr-panel .cr-rule{padding:9px 0;gap:5px 8px}
   #cr-panel .cr-name{order:1;flex:1 1 auto}
@@ -1232,7 +1242,7 @@ function crMatch(sku,mkt){
   for(var i=0;i<COMPLEX_RULES.length;i++){ var r=COMPLEX_RULES[i];
     if(r.enabled===false)continue;
     if(r.country!==mkt)continue;
-    if(r.sku && r.sku!==sku)continue;
+    if(r.sku){ var _sks=String(r.sku).split(',').map(function(x){return x.trim();}).filter(Boolean); if(_sks.indexOf(sku)<0)continue; }   // multi-SKU scope (comma-separated)
     if(r.category && r.category!==meta.cat)continue;
     if(r.tier && r.tier!==meta.tier)continue;
     if(r.season && r.season!==meta.rw)continue;
@@ -3026,6 +3036,8 @@ return {project:project, getBuyQtys:getBuyQtys, buyplanItems:buyplanItems, rende
   downloadReport:downloadReport, downloadReportCSV:downloadReportCSV, downloadViewCSV:downloadViewCSV, updateDlMenuLabels:updateDlMenuLabels,
   updateTrfHeaders:updateTrfHeaders, getFilteredVis:getFilteredVis,
   seasons:function(){ var out={}; SL.forEach(function(s){ if(!s.rw)return; var ok=false; for(var m in (s.ms||{})){ if(s.ms[m]&&(s.ms[m].st==='ACTIVE'||s.ms[m].st==='FUTURE')){ok=true;break;} } if(ok)out[s.rw]=1; }); return Object.keys(out).sort(); },
+  skuOptions:function(){ return SL.map(function(s){ return {s:s.s, sc:s.sc||s.c||''}; }).sort(function(a,b){ return a.s<b.s?-1:a.s>b.s?1:0; }); },   // for the Complex Rules SKU picker: {sku, subcat/cat}
+
   BUY_CACHE:BUY_CACHE, D:D, setView:function(v){var was=BP_VIEW;BP_VIEW=(v==='fba')?'fba':(v==='transfer'?'transfer':'buy');if(BP_VIEW==='fba'&&was!=='fba')BU_SEL='TRFFBA';if(BP_VIEW==='transfer'&&was!=='transfer')BU_SEL='TRF';}, fbaClearAll:fbaClearAll, fbaSelectAll:fbaSelectAll, fbaClearOverrides:fbaClearOverrides, fbaClearTicks:fbaClearTicks, downloadFbaTransfer:downloadFbaTransfer,
   open_:open_, close_:close_,
   get CUR(){return CUR;}, set CUR(v){CUR=v;}};
@@ -3039,28 +3051,36 @@ var CR=(function(){
   var CTRS_CR=['UK','US','EU','AU','CA'];
   var rules=(typeof COMPLEX_RULES!=='undefined'&&Array.isArray(COMPLEX_RULES))?COMPLEX_RULES.slice():[];
   var editing=null;   // rule being edited (object) or {} for new, or null when list view
+  var crSkuSel=[];    // form: selected SKUs (multi-select picker)
+  var crCatVal='';    // form: selected category (searchable dropdown)
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function ym(d){d=String(d==null?'':d).trim();var m=/^(\d{4})-(\d{2})/.exec(d);return m?(m[1]+'_'+m[2]):null;}          // date input → 'YYYY_MM'
   function ymToDate(v){v=String(v==null?'':v).trim();var m=/^(\d{4})_(\d{2})/.exec(v);return m?(m[1]+'-'+m[2]+'-01'):'';}   // stored 'YYYY_MM' → date-input value (1st of month)
+  var _MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function fdmy(iso){var m=String(iso==null?'':iso).match(/^(\d{4})-(\d{2})-(\d{2})/);return m?(m[3]+'-'+_MON[(+m[2])-1]+'-'+m[1].slice(2)):String(iso||'');}   // ISO date → dd-mmm-yy (house format)
+  function fmoYY(v){var m=String(v==null?'':v).match(/^(\d{4})_(\d{2})/);return m?(_MON[(+m[2])-1]+'-'+m[1].slice(2)):String(v||'');}                          // 'YYYY_MM' → Mmm-yy
+  function skuList(r){return String(r&&r.sku||'').split(',').map(function(x){return x.trim();}).filter(Boolean);}   // rule.sku is comma-separated (multi-SKU scope)
   function count(){return rules.filter(function(r){return r.enabled!==false;}).length;}
   function updateBtn(){var b=document.getElementById('cr-btn');if(b)b.innerHTML='&#9819; Complex Rules ('+count()+') &#9662;';}
   function scopeChips(r){
     var out=[];
-    if(r.sku)out.push('SKU: '+esc(r.sku));
+    var sk=skuList(r);
+    if(sk.length===1)out.push('SKU: '+esc(sk[0]));
+    else if(sk.length>1)out.push(sk.length+' SKUs');
     if(r.category)out.push('Cat: '+esc(r.category));
     if(r.tier)out.push('Tier '+esc(r.tier));
     if(r.season)out.push('Season: '+esc(r.season));
     if(!out.length)return '<span style="color:#94a3b8">All SKUs</span>';
-    return out.map(function(t){return '<span style="display:inline-block;background:#ede9fe;color:#5b21b6;border-radius:3px;padding:1px 6px;margin-right:3px;font-size:10px">'+t+'</span>';}).join('');
+    return out.map(function(t){return '<span title="'+esc(sk.join(', '))+'" style="display:inline-block;background:#ede9fe;color:#5b21b6;border-radius:3px;padding:1px 6px;margin-right:3px;font-size:10px">'+t+'</span>';}).join('');
   }
   function coverText(r){
-    if(r.coverage_type==='range')return (r.range_from||'?')+' &rarr; '+(r.range_to||'?');
+    if(r.coverage_type==='range')return fmoYY(r.range_from)+' &rarr; '+fmoYY(r.range_to);
     return (r.cover_months!=null?r.cover_months:'?')+' mo cover';
   }
   function windowText(r){
     if(!r.window_from&&!r.window_to)return '<span style="color:#94a3b8">Always on</span>';
-    var f=r.window_from?(window.fd?window.fd(r.window_from):r.window_from):'—';
-    var t=r.window_to?(window.fd?window.fd(r.window_to):r.window_to):'open';
+    var f=r.window_from?fdmy(r.window_from):'—';
+    var t=r.window_to?fdmy(r.window_to):'open';
     return esc(f)+' &rarr; '+esc(t);
   }
   function listHTML(){
@@ -3102,8 +3122,8 @@ var CR=(function(){
       +'<div class="cr-fgrid" style="display:grid;grid-template-columns:130px 1fr;gap:7px 12px;align-items:start">'
       +'<span class="sl" style="padding-top:4px">Countries:</span><span><select id="cr-country" multiple size="5" style="width:110px;vertical-align:top">'+CTRS_CR.map(function(c){return '<option value="'+c+'"'+(selCo.indexOf(c)>=0?' selected':'')+'>'+c+'</option>';}).join('')+'</select> <span class="sl">Ctrl/Cmd-click for several'+(r.id?' — first stays this rule, extras become new rules':'')+'</span></span>'
       +'<span class="sl">Name (optional):</span><span><input id="cr-name" type="text" value="'+esc(r.name||'')+'" placeholder="e.g. Unicorn summer push" style="width:280px"></span>'
-      +'<span class="sl" style="border-top:1px solid #e9d5ff;padding-top:7px">Scope — SKU:</span><span style="border-top:1px solid #e9d5ff;padding-top:7px"><input id="cr-sku" type="text" value="'+esc(r.sku||'')+'" placeholder="exact SKU (blank = any)" style="width:280px"></span>'
-      +'<span class="sl">Scope — Category:</span><span><input id="cr-category" list="cr-catlist" type="text" value="'+esc(r.category||'')+'" placeholder="category (blank = any)" style="width:220px"><datalist id="cr-catlist">'+catList.map(function(c){return '<option value="'+esc(c)+'">';}).join('')+'</datalist></span>'
+      +'<span class="sl" style="border-top:1px solid #e9d5ff;padding-top:7px">Scope — SKUs:</span><span style="border-top:1px solid #e9d5ff;padding-top:7px"><div class="cr-pick" style="display:block"><div id="cr-sku-chips" style="margin-bottom:3px"></div><input id="cr-sku-search" type="text" autocomplete="off" placeholder="search SKU to add (blank = any SKU)" style="width:260px"><div id="cr-sku-drop" class="cr-drop"></div></div></span>'
+      +'<span class="sl">Scope — Category:</span><span><div class="cr-pick"><input id="cr-cat-search" type="text" autocomplete="off" value="'+esc(r.category||'')+'" placeholder="search category (blank = any)" style="width:220px"><div id="cr-cat-drop" class="cr-drop"></div></div></span>'
       +'<span class="sl">Scope — Tier:</span><span><select id="cr-tier" style="width:120px"><option value="">any</option>'+['A','B','C'].map(function(t){return opt(t,r.tier||'');}).join('')+'</select></span>'
       +'<span class="sl">Scope — Season:</span><span><select id="cr-season" style="width:220px"><option value="">any</option>'+seasonList.map(function(sv){return opt(sv,r.season||'');}).join('')+'</select> <span class="sl">(active + future release windows)</span></span>'
       +'<span class="sl" style="border-top:1px solid #e9d5ff;padding-top:7px">Window from:</span><span style="border-top:1px solid #e9d5ff;padding-top:7px"><input id="cr-wfrom" type="date" value="'+esc(r.window_from||'')+'"> <span class="sl">(blank = always on)</span></span>'
@@ -3123,11 +3143,45 @@ var CR=(function(){
   function render(){
     var p=document.getElementById('cr-panel');if(!p)return;
     p.innerHTML=editing?formHTML():listHTML();
+    if(editing)wireForm();
     updateBtn();
   }
+  function renderSkuChips(){
+    var c=document.getElementById('cr-sku-chips');if(!c)return;
+    c.innerHTML=crSkuSel.length?crSkuSel.map(function(s,i){return '<span class="cr-chip">'+esc(s)+'<button type="button" data-i="'+i+'" title="remove">&times;</button></span>';}).join(''):'<span style="color:#94a3b8;font-size:11px">any SKU</span>';
+    c.querySelectorAll('.cr-chip button').forEach(function(b){ b.onclick=function(){ crSkuSel.splice(+b.getAttribute('data-i'),1); renderSkuChips(); }; });
+  }
+  function optClosest(t,root){ while(t&&t!==root&&!(t.classList&&t.classList.contains('cr-opt')))t=t.parentNode; return (t&&t!==root)?t:null; }
+  function wireForm(){
+    // Category — single-select searchable dropdown (free text allowed, like the PO-grid assign-shipment box)
+    var cats=(typeof window.CR_CATS!=='undefined'&&window.CR_CATS.length)?window.CR_CATS:[];
+    var cin=document.getElementById('cr-cat-search'), cdr=document.getElementById('cr-cat-drop');
+    if(cin&&cdr){
+      var catRender=function(){ var q=cin.value.trim().toLowerCase();
+        var opts=cats.filter(function(c){return !q||c.toLowerCase().indexOf(q)>=0;}).slice(0,80);
+        cdr.innerHTML=(cin.value.trim()?'<div class="cr-opt" data-v=""><span class="mut">(any / clear)</span></div>':'')
+          +(opts.length?opts.map(function(c){return '<div class="cr-opt" data-v="'+esc(c)+'">'+esc(c)+'</div>';}).join(''):'<div class="cr-opt mut">no match</div>'); };
+      cin.addEventListener('focus',function(){ catRender(); cdr.classList.add('open'); });
+      cin.addEventListener('input',function(){ crCatVal=cin.value.trim(); catRender(); cdr.classList.add('open'); });
+      cdr.addEventListener('mousedown',function(e){ var o=optClosest(e.target,cdr); if(!o)return; e.preventDefault(); var v=o.getAttribute('data-v')||''; crCatVal=v; cin.value=v; cdr.classList.remove('open'); });
+    }
+    // SKU — multi-select searchable picker (like Order Plan's add-SKU box)
+    var skus=(typeof window.CR_SKUS!=='undefined'&&window.CR_SKUS.length)?window.CR_SKUS:[];
+    var sin=document.getElementById('cr-sku-search'), sdr=document.getElementById('cr-sku-drop');
+    renderSkuChips();
+    if(sin&&sdr){
+      var skuRender=function(){ var q=sin.value.trim().toLowerCase();
+        var opts=skus.filter(function(o){ return (!q||o.s.toLowerCase().indexOf(q)>=0)&&crSkuSel.indexOf(o.s)<0; }).slice(0,60);
+        sdr.innerHTML=opts.length?opts.map(function(o){return '<div class="cr-opt" data-v="'+esc(o.s)+'"><span>'+esc(o.s)+'</span><span class="mut">'+esc(o.sc||'')+'</span></div>';}).join(''):'<div class="cr-opt mut">'+(q?'no match':'type to search')+'</div>'; };
+      sin.addEventListener('focus',function(){ skuRender(); sdr.classList.add('open'); });
+      sin.addEventListener('input',function(){ skuRender(); sdr.classList.add('open'); });
+      sdr.addEventListener('mousedown',function(e){ var o=optClosest(e.target,sdr); if(!o)return; e.preventDefault(); var v=o.getAttribute('data-v'); if(v&&crSkuSel.indexOf(v)<0){ crSkuSel.push(v); renderSkuChips(); } sin.value=''; skuRender(); sin.focus(); });
+    }
+    if(!wireForm._bound){ wireForm._bound=true; document.addEventListener('mousedown',function(e){ ['cr-cat-drop','cr-sku-drop'].forEach(function(id){ var d=document.getElementById(id); if(d&&d.parentNode&&!d.parentNode.contains(e.target))d.classList.remove('open'); }); }); }
+  }
   function toggle(){var p=document.getElementById('cr-panel');if(!p)return;var open=(p.style.display==='none'||!p.style.display);p.style.display=open?'block':'none';if(open){editing=null;render();}}
-  function add(){editing={};render();}
-  function edit(id){var r=rules.filter(function(x){return String(x.id)===String(id);})[0];editing=r?JSON.parse(JSON.stringify(r)):{};render();}
+  function add(){editing={};crSkuSel=[];crCatVal='';render();}
+  function edit(id){var r=rules.filter(function(x){return String(x.id)===String(id);})[0];editing=r?JSON.parse(JSON.stringify(r)):{};crSkuSel=skuList(editing);crCatVal=editing.category||'';render();}
   function cancel(){editing=null;render();}
   function toggleCoverage(){
     var isRange=(document.querySelector('input[name="cr-ctype"]:checked')||{}).value==='range';
@@ -3144,7 +3198,7 @@ var CR=(function(){
     var rf=ctype==='range'?ym(val('cr-range-from')):null, rt=ctype==='range'?ym(val('cr-range-to')):null;
     var base={
       name:val('cr-name')||null,
-      sku:val('cr-sku')||null, category:val('cr-category')||null, tier:val('cr-tier')||null, season:val('cr-season')||null,
+      sku:(crSkuSel.length?crSkuSel.join(','):null), category:(crCatVal||null), tier:val('cr-tier')||null, season:val('cr-season')||null,
       window_from:val('cr-wfrom')||null, window_to:val('cr-wto')||null,
       coverage_type:ctype,
       cover_months:ctype==='months'?val('cr-cover-months'):null,
@@ -3185,6 +3239,7 @@ if(typeof window!=='undefined'){
   window.CR=CR;
   try{ window.CR_CATS=(typeof CATS_META!=='undefined')?Object.keys(CATS_META).sort():[]; }catch(e){ window.CR_CATS=[]; }
   try{ window.CR_SEASONS=(window.BP&&BP.seasons)?BP.seasons():[]; }catch(e){ window.CR_SEASONS=[]; }
+  try{ window.CR_SKUS=(window.BP&&BP.skuOptions)?BP.skuOptions():[]; }catch(e){ window.CR_SKUS=[]; }
   function _crInit(){ try{ if((!window.CR_SEASONS||!window.CR_SEASONS.length)&&window.BP&&BP.seasons)window.CR_SEASONS=BP.seasons(); }catch(e){} try{ CR.updateBtn(); }catch(e){} }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',_crInit); else _crInit();
 }
