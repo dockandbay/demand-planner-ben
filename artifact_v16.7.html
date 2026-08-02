@@ -2601,7 +2601,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
   // Only looks 3 months forward. Triggers if cover drops below 3 weeks
   // in that window. Plugs actual zero-stock months only, stopping at
   // the first assumed inbound arrival.
-  const URGENT_THRESHOLD_WKS=3;   // danger trigger (cover wks) — kept at 3 for now; the <2wk "restore cover for held-at-~0 SKUs" enhancement is a separate follow-up (needs trace debug, see TOWLB)
+  const URGENT_THRESHOLD_WKS=2;   // danger trigger (cover wks) — fire when projected 3PL cover drops below 2 weeks (Ben)
   const URGENT_LOOKAHEAD=3; // months forward to scan
   let ts3=md.i3||0,tsF=md['if_']||0;
   const stockTrace=[];
@@ -2660,10 +2660,9 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     }
 
     if(urgentQtyNeeded>0){
-      // Bridge WITH cover, not just survival (per Ben): add a safety buffer (~URGENT_THRESHOLD_WKS of cover at the
-      // rush-arrival demand rate) so the rush doesn't leave the SKU at ~0 until the next normal order lands.
-      var _bufWk=(stockTrace[injPos]||stockTrace[dangerStart]||{weekly:0}).weekly||0;
-      urgentQtyNeeded+=_bufWk*URGENT_THRESHOLD_WKS;
+      // Size to the DEMAND that would otherwise go unmet (the urgent forecast) from the rush arrival until the next
+      // resupply — an existing shipment (confInb3, already in the sim) or a Buy-3PL order (the loop breaks when one
+      // lands). No extra safety buffer (Ben): restore just enough to cover demand until more stock arrives.
       urgentQtyNeeded=Math.max(Math.ceil(urgentQtyNeeded/cp)*cp,moq);
       // Air/Sea SPLIT of the (unchanged) urgent qty (Ben): SEA-expedite if it lands before the stockout month
       // (cheaper), else AIR. Lead = supplier expedited_production_weeks (pd.exped, default 6) + branch air/sea freight.

@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.423 - Urgent trigger: fire below 2wk cover, size to demand (no buffer) ⚠️ NEEDS TESTING · CHANGES BUY QTY
+- **Trigger lowered 3wk → 2wk** (`URGENT_THRESHOLD_WKS`): a Buy-3PL-Urgent fires when projected 3PL cover drops below **2 weeks** (was 3).
+- **Removed the 3-week safety buffer** — the urgent is now sized to the **demand that would otherwise go unmet** (the urgent forecast) from the rush arrival **until the next resupply**: an existing shipment (confirmed inbound, already in the sim) or a Buy-3PL order (the sizing loop stops when one lands). Restore just enough to cover demand, no extra cushion (Ben).
+- **Before/after (all 5 markets):** Buy 3PL 69,014 and Buy FBA 5,948 **unchanged**; **Buy 3PL Urgent 130,628 → 102,578 (−28,050, −21.5%)** — the drop is the removed buffer + tighter trigger (thinner safety stock, bridges exactly to the next arrival). To re-add a cushion, say the word (e.g. +1 week).
+- `artifact_v16.7.html` only. No migration.
+
 ## v26.422 - Complex Rules: mobile-friendly list ⚠️ NEEDS TESTING
 - The Complex Rules list was a wide table that squeezed on a phone. It's now **flex rows** (`.cr-rule`): a single line on desktop (name · scope · window · coverage · on/off · Edit/Delete), and on mobile it **stacks over ~2 lines** — line 1: name + coverage; line 2: scope chips + window + status + actions (via a `.cr-break` flex spacer that only appears under 640px).
 - The add/edit **form also stacks** on mobile (labels above inputs, `.cr-fgrid`).
