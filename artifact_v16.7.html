@@ -1824,7 +1824,7 @@ function render(){
         trail=`
         <td class="bq">${b3>0?`<span class="bq-v">${fmt(b3)}</span>`:`<span class="bq-nil">—</span>`}${futN>0?`<span title="${futN} further buy(s) scheduled later in the plan (${fmt(futQty)}u) — not due to order this cycle" style="font-size:8px;color:#2563eb;margin-left:2px;white-space:nowrap">+${futN}f</span>`:``}</td>
         <td class="bq">${b3u>0?`<span class="bq-v" style="color:#dc2626;font-weight:700">${fmt(b3u)}</span>`:`<span class="bq-nil">—</span>`}</td>
-        <td class="bq">${bf>0?`<span class="bq-fba">${fmt(bf)}</span>`:`<span class="bq-nil">—</span>`}${tx>0?`<span class="tx-opp" title="3PL→FBA transfer now: ${fmt(tx)} units of EXISTING stock (carton-rounded, 4wk-3PL floor — identical to the Transfer FBA tab). Separate from Buy FBA (new stock).">⇄ ${fmt(tx)}</span>`:``}</td>
+        <td class="bq">${bf>0?`<span class="bq-fba">${fmt(bf)}</span>`:`<span class="bq-nil">—</span>`}</td>${/* Buy FBA = new-stock purchases only (become POs). The 3PL→FBA transfer of EXISTING stock lives in the FBA / Transfer FBA view, NOT here. */''}
         ${getTrfCell(pairs[0])}
         ${getTrfCell(pairs[1])}`;
       }
@@ -7331,6 +7331,10 @@ function renderBuyMoveTabs(){
     if(_vtr&&_vtr.parentNode)_vtr.parentNode.insertBefore(bar,_vtr.nextSibling); }
   bar.innerHTML=BUYMOVE_TABS.map(function(t){return '<button class="dnav'+(t[0]===VIEW_MODE?' active':'')+'" data-bm="'+t[0]+'">'+t[1]+'</button>';}).join('');
   bar.querySelectorAll('.dnav').forEach(function(b){ b.onclick=function(){ VIEW_MODE=b.dataset.bm; if(window.writeHash&&(VIEW_MODE==='buy'||VIEW_MODE==='fba'))window.writeHash([VIEW_MODE,String(typeof CUR!=='undefined'?CUR:'uk').toLowerCase()]); render(); }; });
+  // Move the HORIZON version badge (+ status note) onto this second-level nav, right-aligned (matches DEMAND).
+  var _st=document.getElementById('st'); if(_st){ _st.className=''; _st.style.cssText='font-size:11px;color:#888;margin-left:auto;flex:0 0 auto;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:40%'; bar.appendChild(_st); }
+  var _ver=document.getElementById('ver'); if(_ver){ _ver.style.cssText='color:#0f172a;background:#fbbf24;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:800;line-height:1.2;letter-spacing:.02em;flex:0 0 auto;margin-left:'+(_st?'10px':'auto')+';white-space:nowrap;position:relative'; bar.appendChild(_ver); }
+  var _sb=document.getElementById('statusbar'); if(_sb)_sb.style.display='none';
 }
 function renderTransferView(){
   var host=document.querySelector('.wrap');
@@ -7379,25 +7383,38 @@ function ensureRevTargets(cb){ fetch('/api/demand-revenue-targets').then(functio
 // bar collapses behind "⚙ Filters" on mobile anyway. Each opens a pop-out drawer.
 function planRevBtnSync(){ var show=(typeof VIEW_MODE!=='undefined'&&VIEW_MODE==='planning'&&typeof DEMAND_VIEW!=='undefined'&&DEMAND_VIEW==='plan');
   var legacy=document.getElementById('plan-rev-btn'); if(legacy)legacy.remove();   // drop the very old bottom-right button
-  var inline=document.getElementById('plan-report-btns'); if(inline)inline.remove();   // drop the in-filters-row version
-  var c=document.getElementById('plan-report-float');
+  var floatOld=document.getElementById('plan-report-float'); if(floatOld)floatOld.remove();   // drop the fixed-position version
+  var row=document.getElementById('ctabs-row'), c=document.getElementById('plan-report-btns');
   var isMobile=!!(window.matchMedia&&window.matchMedia('(max-width:640px)').matches);
-  // The two report buttons float pinned at the TOP-RIGHT of the screen (over the filters row), desktop only.
-  if(show&&!isMobile){
-    if(!c){ c=document.createElement('div'); c.id='plan-report-float';
-      c.style.cssText='position:fixed;top:6px;right:16px;z-index:1200;display:flex;gap:8px;align-items:center';
-      var btn='border:none;border-radius:16px;padding:6px 13px;font-size:12px;font-weight:700;font-family:inherit;cursor:pointer;box-shadow:0 2px 10px rgba(15,23,42,.22);white-space:nowrap;color:#fff';
-      c.innerHTML='<button id="plan-rev-btn2" type="button" title="Compare the plan’s forecast to the revenue growth target for this country / channel" style="'+btn+';background:#2563eb">📈 Revenue vs target</button>'
+  // The two report buttons sit on the top Country row, right-aligned (desktop only).
+  if(show&&row&&!isMobile){
+    if(!c){ c=document.createElement('div'); c.id='plan-report-btns'; c.style.cssText='margin-left:auto;display:flex;gap:6px;align-items:center';
+      var btn='border:none;border-radius:16px;padding:5px 12px;font-size:12px;font-weight:700;font-family:inherit;cursor:pointer;white-space:nowrap;color:#fff';
+      c.innerHTML='<button id="plan-rev-btn2" type="button" title="Revenue growth targets & tracking — full report" style="'+btn+';background:#2563eb">📈 Revenue vs target</button>'
         +'<button id="plan-exec-btn" type="button" title="Executive summary — FY revenue &amp; units vs last year" style="'+btn+';background:#0f766e">📊 Executive summary</button>';
-      document.body.appendChild(c);
+      row.appendChild(c);
       c.querySelector('#plan-rev-btn2').onclick=openPlanRevPopout;
       c.querySelector('#plan-exec-btn').onclick=openExecSummaryPopout; }
-  } else { if(c)c.remove(); var p=document.getElementById('plan-rev-pop'); if(p)p.remove(); if(typeof closeExecDrawer==='function')closeExecDrawer(); } }
-function openPlanRevPopout(){ if(PLAN_REV_FY==null)PLAN_REV_FY=CUR_FY_START;
-  var p=document.getElementById('plan-rev-pop'); if(p){ p.remove(); return; }   // click again to close
-  p=document.createElement('div'); p.id='plan-rev-pop';
-  p.style.cssText='position:fixed;right:20px;bottom:70px;z-index:1201;width:390px;max-height:80vh;overflow:auto;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 10px 34px rgba(15,23,42,.28);font-size:12px';
-  document.body.appendChild(p); planRevPopRender(); ensureRevTargets(function(){ planRevPopRender(); }); }
+  } else { if(c)c.remove(); if(typeof closeExecDrawer==='function')closeExecDrawer(); if(typeof closeRevDrawer==='function')closeRevDrawer(); } }
+// "Revenue vs target" opens the FULL revenue report (targets & tracking + price changes) in a 50% drawer —
+// the compact planRevPopRender card is deprecated.
+function revEnsureDrawer(){ var d=document.getElementById('rev-drawer');
+  if(!d){ d=document.createElement('div'); d.id='rev-drawer';
+    d.style.cssText='position:fixed;top:0;right:0;height:100%;width:clamp(400px,50vw,1000px);background:#fff;box-shadow:-8px 0 28px rgba(0,0,0,.22);z-index:6000;flex-direction:column;display:none';
+    d.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;border-bottom:1px solid #e5e5e5;flex:0 0 auto"><b style="font-size:15px">Revenue vs target</b><button id="rev-drawer-x" title="Close" style="width:28px;height:28px;border-radius:6px;border:1px solid #cbd5e1;background:#f8fafc;cursor:pointer;font-size:16px;line-height:1">&times;</button></div><div id="rev-drawer-body" style="flex:1 1 auto;overflow:auto;padding:0 16px 12px">Loading…</div>';
+    document.body.appendChild(d); var x=d.querySelector('#rev-drawer-x'); if(x)x.onclick=closeRevDrawer; }
+  else if(d.parentNode!==document.body)document.body.appendChild(d);
+  var bk=document.getElementById('rev-drawer-backdrop');
+  if(!bk){ bk=document.createElement('div'); bk.id='rev-drawer-backdrop'; bk.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:5900;display:none'; bk.onclick=closeRevDrawer; document.body.appendChild(bk); }
+  else if(bk.parentNode!==document.body)document.body.appendChild(bk);
+  return d; }
+function closeRevDrawer(){ var d=document.getElementById('rev-drawer'); if(d)d.style.display='none'; var bk=document.getElementById('rev-drawer-backdrop'); if(bk)bk.style.display='none'; }
+function openPlanRevPopout(){ var d=document.getElementById('rev-drawer');
+  if(d && d.style.display!=='none'){ closeRevDrawer(); return; }   // click again to close
+  d=revEnsureDrawer(); var bk=document.getElementById('rev-drawer-backdrop'); if(bk)bk.style.display='block'; d.style.display='flex';
+  var body=document.getElementById('rev-drawer-body'); if(body)body.innerHTML='<div class="count" style="padding:14px;color:#888">Loading…</div>';
+  setTimeout(function(){ try{ renderRevenueView(document.getElementById('rev-drawer-body')); }
+    catch(e){ var b=document.getElementById('rev-drawer-body'); if(b)b.innerHTML='<div style="padding:14px;color:#dc2626">Could not load Revenue report: '+String(e&&e.message||e)+'</div>'; } }, 20); }
 function planRevPopRefresh(){ if(document.getElementById('plan-rev-pop'))planRevPopRender(); if(document.getElementById('exec-sum-pop'))execSumPopRender(); }
 
 // ── Plan ▸ "Executive summary" pop-out drawer ──────────────────────────────────────────────────

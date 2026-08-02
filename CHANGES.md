@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.405 - DEMAND report buttons → Country row; Revenue full-report drawer; Buy FBA = purchases only; version badge in sub-nav ⚠️ NEEDS TESTING
+- **Report buttons** ("Revenue vs target" / "Executive summary") moved onto the **top Country row, right-aligned** (desktop only) — no longer floating.
+- **"Revenue vs target" now opens the FULL revenue report** (targets & tracking + price changes) in a **50% drawer** (`renderRevenueView`) — the compact summary card is deprecated. (Exec Summary already full-drawer.)
+- **Buy FBA column shows purchases only** — removed the ⇄ 3PL→FBA transfer chip (per Ben: Buy FBA = new-stock numbers that become POs; the transfer of existing stock lives in the FBA / Transfer FBA view, not this column). The transfer math/display there is unchanged.
+- **HORIZON version badge** (+ status note) now sits in the **BUY / FBA / TRANSFER second-level nav** on those tabs (matches DEMAND). `artifact_v16.7.html`.
+
 ## v26.404 - Nav: merge BUY + FBA under "BUY & MOVE" + new TRANSFER placeholder page ⚠️ NEEDS TESTING
 - Top-level **BUY** and **FBA** tabs merged into one **"BUY & MOVE"** tab. Under it, a second-level sub-nav: **BUY / FBA / TRANSFER** (matches the DEMAND sub-nav style). The top tab highlights for any of the three.
 - **TRANSFER** = new page, placeholder: "Function to be confirmed." (Planned: stock-transfer analysis from each warehouse to the others — which SKUs to move where to balance cover, like the buy-plan transfer columns.)
