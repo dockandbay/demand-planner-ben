@@ -7190,10 +7190,22 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
       txMap[k].amount_usd+=v; };
     let truncated=false, overdueUnits=0;   // overdueUnits = gap whose order month is already past the window start → shows in cash but not in the units grid (surface it, don't hide it)
     // market-independent lookups — compute ONCE (previously re-queried inside every market iteration):
-    // avg cost per subcat, the volume-dominant supplier per subcat, and supplier payment terms.
+    // unit cost per subcat, the volume-dominant supplier per subcat, and supplier payment terms.
+    // COST BASIS (Ben): forecast-WEIGHTED current product cost — for each subcategory, Σ(SKU forecast units ×
+    // SKU product cost) ÷ Σ(SKU forecast units), where the cost is the live planner.products cost (cost, then
+    // cost_lx/cost_xr fallbacks — same source the order plan uses). Falls back to the historical avg PO cost
+    // only for subcats that have no product cost. (Was: plain historical avg of past PO cost_price.)
     const [costRows, supRows, termsRows] = await Promise.all([
-      pool.query(`SELECT pr.subcategory s, avg(l.cost_price) c FROM planner.purchase_order_lines l
-        JOIN planner.products pr ON pr.sku=l.sku WHERE pr.subcategory IS NOT NULL AND l.cost_price>0 GROUP BY 1`),
+      pool.query(`SELECT sub s, coalesce(wcost, pocost) c FROM
+        (SELECT pr.subcategory sub, avg(l.cost_price) pocost FROM planner.purchase_order_lines l
+           JOIN planner.products pr ON pr.sku=l.sku WHERE pr.subcategory IS NOT NULL AND l.cost_price>0 GROUP BY 1) po
+        FULL OUTER JOIN
+        (SELECT p.subcategory sub,
+           sum(fo.units*coalesce(p.cost,p.cost_lx,p.cost_xr))
+             / nullif(sum(CASE WHEN coalesce(p.cost,p.cost_lx,p.cost_xr) IS NOT NULL THEN fo.units ELSE 0 END),0) wcost
+         FROM planner.forecast_outputs fo JOIN planner.products p ON p.sku=fo.sku
+         WHERE p.subcategory IS NOT NULL AND fo.units>0 GROUP BY 1) w
+        USING (sub)`),
       pool.query(`SELECT s, nm FROM (
           SELECT pr.subcategory s, po.supplier_name nm,
             row_number() OVER (PARTITION BY pr.subcategory ORDER BY sum(l.qty) DESC) rn
