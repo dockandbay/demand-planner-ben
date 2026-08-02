@@ -6369,6 +6369,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
             +'</span>':'')
           +'</div>'
           +(p.rw?'<div style="font-size:7px;color:#7c3aed;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="Release window / season">RW: '+p.rw+'</div>':'')
+          +'<button onclick="openDemandPlanPopup(\''+sku+'\')" title="Open the buy-plan view for this SKU" style="margin-top:3px;font-size:7px;padding:1px 7px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer;font-weight:600;line-height:1.4">Plan ▸</button>'
           +'</div>';
 
       } else if(ci===1){
@@ -7214,6 +7215,16 @@ var _skuQryTimer=null;
 function setPlanSkuQry(v){PLAN_SKU_QRY=(v||'').trim();clearTimeout(_skuQryTimer);_skuQryTimer=setTimeout(function(){renderMain();},300);}   // debounce the re-render ~300ms so typing doesn't refilter on every keystroke
 // Planner Release Window filter (dropdown next to Category) — filters SKUs by release window, surfacing matching SKU rows.
 function setPlanRw(v){PLAN_RW=v||'ALL';renderMain();}
+// DEMAND plan "Plan ▸" button (under a SKU) → open the buy-plan detail popup for that SKU. Builds the buy scaffold
+// on demand (without switching the visible view) and syncs the buy market to the demand plan's country.
+function openDemandPlanPopup(sku){
+  try{
+    if(window.ensureBuyPlanScaffold)window.ensureBuyPlanScaffold();
+    if(window.BP){ try{ BP.CUR=CUR; }catch(e){} }
+    if(!document.getElementById('ov'))return;
+    if(window.open_)window.open_(sku);
+  }catch(e){ if(window.console)console.error('openDemandPlanPopup',e); }
+}
 function fillPlanRwSel(){ var sel=document.getElementById('plan-rw-sel'); if(!sel)return; var seen={}; Object.keys(SKUM).forEach(function(sku){var p=SKUM[sku];if(p&&p.rw)seen[p.rw]=1;}); var opts=Object.keys(seen).sort(); if(PLAN_RW!=='ALL'&&opts.indexOf(PLAN_RW)<0)PLAN_RW='ALL'; sel.innerHTML='<option value="ALL">All</option>'+opts.map(function(o){return '<option value="'+String(o).replace(/"/g,'&quot;')+'"'+(o===PLAN_RW?' selected':'')+'>'+o+'</option>';}).join(''); sel.value=PLAN_RW; }
 // DEMAND plan filter persistence — remember country / channel / categories / SKU filter for 1h so returning to the
 // page keeps your view. Saved on each plan render; restored in init() before the first render (syncTabs +

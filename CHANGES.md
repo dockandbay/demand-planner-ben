@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.430 - DEMAND plan: "Plan ▸" button on SKU cell opens the buy-plan popup ⚠️ NEEDS TESTING
+- Each SKU row in the DEMAND plan now has a small **"Plan ▸"** button in column 1 (under the SKU/RW) that opens that SKU's **buy-plan detail popup** (the monthly projection / cover / buy view). Builds the buy scaffold on demand (`ensureBuyPlanScaffold`) without leaving the demand view, syncs the buy market to the demand plan's country, then `window.open_(sku)`. Same mechanism SUPPLY's Order Plan already uses.
+- `artifact_v16.7.html` only. No migration.
+
 ## v26.429 - BUY & MOVE remembers last sub-tab + SKU search overrides all pills ⚠️ NEEDS TESTING
 - **BUY & MOVE remembers your last sub-tab.** Clicking the top BUY & MOVE nav now returns you to the sub-tab you were last on (Actions / Buy / FBA / Transfer) instead of always defaulting to Actions. Persisted in `localStorage` (`hzBuyMoveLast`); restored in both the artifact top-nav handler and inject's `writeViewHash`.
 - **SKU search overrides all pills.** On BUY / FBA / TRANSFER and the DEMAND plan, typing in the SKU search box now shows the matching SKUs **regardless of the other filters** (category, tier, status, core/seasonal, release-window, buy-type). The query short-circuits past every pill (still scoped to the current market/channel). On DEMAND it also overrides the category selection so matches surface across all categories.
