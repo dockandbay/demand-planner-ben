@@ -7302,7 +7302,7 @@ var _revCache={};
 function revMonthly(co,ch,fy){ var ck=co+'|'+(ch||'*')+'|'+fy; if(_revCache[ck])return _revCache[ck];
   var fmC=fyMonths(fy), fmL=fyMonths(fy-1), mon={}, fc=0, ly=0; fmC.forEach(function(m){mon[m]=0;});
   (DATA||[]).forEach(function(r){ if(r.co!==co)return; if(ch&&r.ch!==ch)return; var s=r.s, a=ga(co,r.ch,s), fu=(calc(s,co,r.ch)||{}).fu||{};
-    fmC.forEach(function(m){ var v=isActualMonth(m)?(a[m]?a[m][1]:0):((fu[m]||0)*getASP(co,r.ch,s,pa(m).y,pa(m).mo)); mon[m]+=v; fc+=v; });
+    fmC.forEach(function(m){ var v=(isActualMonth(m)&&m!==CUR_MONTH)?(a[m]?a[m][1]:0):((m===CUR_MONTH?curMonthForecast(s,co,r.ch):(fu[m]||0))*getASP(co,r.ch,s,pa(m).y,pa(m).mo)); mon[m]+=v; fc+=v; });   // current partial month → full-month forecast (matches plan + exec)
     fmL.forEach(function(m){ ly+=(a[m]?a[m][1]:0); }); });
   var out={mon:mon, fc:fc, ly:ly}; _revCache[ck]=out; return out; }
 
@@ -7908,25 +7908,32 @@ function buildExecData(){
   function ensure(o,m){if(!o[m])o[m]={u:0,r:0,lyU:0,lyR:0};}
   DATA.forEach(function(row){
     if(['DTC','FBA','B2B'].indexOf(row.ch)<0)return;
-    var cacheKey=row.s+'|'+row.co+'|'+row.ch;
-    var fu=BI_CACHE[cacheKey]||calc(row.s,row.co,row.ch).fu;
+    // Reports mirror the DEMAND plan (Ben's call): use the RAW forecast (no BI_CACHE / AI overlay), and for the
+    // current partial month use the FULL-month forecast (curMonthForecast) — matching the plan's fyTot — rather
+    // than month-to-date actual (which understated the in-flight month).
+    var fu=calc(row.s,row.co,row.ch).fu;
     var a=row.m;
+    var cmF=null;   // full-month forecast for CUR_MONTH (computed once per row, lazily)
+    var cmfOf=function(){ return cmF!=null?cmF:(cmF=Number(curMonthForecast(row.s,row.co,row.ch))||0); };
     FM.forEach(function(fym){
       var pm=pa(fym);
       var isAct=ACTUAL_MONTHS.indexOf(fym)>=0;
       var u,r;
-      if(isAct){
+      if(isAct && fym!==CUR_MONTH){
         u=a[fym]?(a[fym][0]||0):0;
         r=a[fym]?(a[fym][1]||0):0;
       } else {
-        u=Number(fu[fym])||0;
+        u=(fym===CUR_MONTH)?cmfOf():(Number(fu[fym])||0);
         var asp=Number(getASP(row.co,row.ch,row.s,pm.y,pm.mo))||0;
         r=u*asp;
       }
       // LY: same month, prior year
       var lyYM=ym(pm.y-1,pm.mo);
       var lyU=0,lyR=0;
-      if(a[lyYM]){
+      if(lyYM===CUR_MONTH){
+        // prior-year reference IS the current partial month → full-month forecast (consistent with above)
+        lyU=cmfOf(); var lyAspC=Number(getASP(row.co,row.ch,row.s,pm.y-1,pm.mo))||0; lyR=lyU*lyAspC;
+      } else if(a[lyYM]){
         // Real actual
         lyU=a[lyYM][0]||0;lyR=a[lyYM][1]||0;
       } else if(pm.y-1>=2026){

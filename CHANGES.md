@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.401 - Exec Summary + Revenue tab: match the plan basis (your 2 calls) ⚠️ NEEDS TESTING
+Both your answers implemented — reports now mirror the DEMAND plan. `artifact_v16.7.html`, display-only.
+- **Raw forecast (not BI-adjusted):** dropped the `BI_CACHE` (AI-rule) overlay from `buildExecData`, so Exec = Revenue tab = plan. (Turned out latent anyway — `applyAllBIRules` had no caller, so BI_CACHE was never actually populated; this is a clean no-op that removes the trap.)
+- **Current partial month = full-month forecast:** Exec Summary AND the Revenue tab now use `curMonthForecast` for the in-flight month (matching the plan's `fyTot`), instead of month-to-date actual which understated it. Applied to `buildExecData` (units + revenue + the LY reference when it lands on the current month) and `revMonthly`. Verified: exec popout + renderExecView + revMonthly all render clean.
+
 ## v26.400 - Forecast reports audit fixes (Auto Forecast + Exec Summary) ⚠️ NEEDS TESTING
 From `FORECAST_REPORTS_AUDIT.md`. Both reports are read-only — no buy-plan/save impact.
 **Auto Forecast (`server.mjs`):**
