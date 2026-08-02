@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.398 - FBA transfer: unify buy plan ↔ Transfer FBA tab + carton rounding (Hybrid) ⚠️ NEEDS TESTING / REVIEW
+Fixes HAIRW-SUE-OCETRES (and all SKUs): buy plan showed **no** 3PL→FBA transfer while the Transfer FBA tab showed 311 — two different engines. Now unified to ONE identical, carton-rounded number in both (your "Hybrid" choice).
+- **One source of truth:** the buy plan's "transfer now" (M+0) now calls the SAME `fbaTransferRec` as the Transfer FBA tab, and actually draws it off 3PL in the buy math (displayed = used — fixes the old HIGH-4 divergence where the buy plan's `tx` was **0 for every SKU**).
+- **Carton rounding is now the default** (`FBA_CARTON_MODE` ANY→FULL): whole cartons where the next-90-day FBA demand allows; <70% of a carton → send nothing yet; <20% of next-60-day demand → defer. Pills still let you pick Any/Partial. HAIRW 311 → **300** (5×60).
+- **Hybrid website guard:** dual-channel SKUs never transfer >50% of 3PL AND never draw 3PL below ~4 weeks of website (DTC+B2B) cover (`TRF_MIN_3PL_WKS=4`). Amazon-only SKUs exempt.
+- **Buy view now shows the transfer** as a "⇄ N" chip on the Buy FBA cell (tooltip explains it's existing stock, separate from Buy FBA new-stock).
+- **Impact (all 2062 sku×mkt, snapshotted before/after):** Buy 3PL 78,440 → 78,600 (**+0.2%**); Urgent 140,598 → 140,558 (−0.03%); Buy FBA unchanged; **Transfer now 0 → 1,322 units across 19 SKUs** (was invisible). HAIRW: b3/b3u/bf unchanged, tx 0 → 300. The guard kept 3PL protected so buys barely moved. `artifact_v16.7.html`. ⚠️ Changes real transfer quantities + buy display — please review.
+
 ## v26.397 - BUY/FBA: 1h filter persistence + light-green SKU field ⚠️ NEEDS TESTING
 - **Filter persistence (1h):** Buy & FBA now remember tier / status / core-seasonal / buy-type pills + the SKU query on returning to the page (localStorage `hzBuyFilters`, 1h TTL). Buy-type is remembered per-view (Buy vs FBA); the rest are shared. Country + category still follow the DEMAND plan (persisted there since v26.392). Restore runs in `renderBuyView` after the plan-sync, before the pills build.
 - **Tier & Core/Seasonal pills now reflect their restored (or current) state** on build — previously always drew "All"/all-active regardless.

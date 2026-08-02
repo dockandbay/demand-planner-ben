@@ -1218,7 +1218,7 @@ const BUY_KEYS=AFTER15?[PROJ[1].key,PROJ[2].key]:[PROJ[1].key];
 const BUY_LBL=AFTER15?`${MN[_CUR_M]} + ${PROJ[2].lbl}`:`${MN[_CUR_M]}`;
 
 let CUR='UK',SC_SEL=new Set(['ALL']),TI_SEL=new Set(['ALL']),ST_SEL=new Set(['ACTIVE','FUTURE']),CS_SEL=new Set(['ALL']),BU_SEL='ALL';
-let FBA_CARTON_MODE='ANY';   // FBA transfer sizing: 'ANY' = full shortfall, no restriction (default) | 'FULL' = whole cartons only | 'PARTIAL' = raw shortfall with floor
+let FBA_CARTON_MODE='FULL';  // FBA transfer sizing (default FULL = whole cartons, per the agreed rules): 'FULL' = whole cartons only | 'ANY' = full shortfall, no rounding | 'PARTIAL' = raw shortfall with floor
 let BP_VIEW='buy'; // 'buy' (Buy 3PL/Urgent/FBA + 3PL transfer opps) | 'fba' (Transfer-to-FBA + FBA inbound)
 let PSKU=null,PMKT='UK';
 
@@ -1344,6 +1344,17 @@ function fbaFwdDemand(md,n){
   }
   return sum;
 }
+// Next-n-months website (DTC+B2B) demand — used to keep a minimum 3PL cover floor when transferring to FBA.
+function webFwdDemand(md,n){
+  const D=(md.demand&&md.demand.DTC)||{},B=(md.demand&&md.demand.B2B)||{};
+  let got=0,sum=0;
+  for(let i=0;i<PROJ.length&&got<n;i++){
+    if(PROJ[i].isActual||PROJ[i].isForecast)continue;
+    const k=PROJ[i].key; sum+=(D[k]||0)+(B[k]||0);got++;
+  }
+  return sum;
+}
+const TRF_MIN_3PL_WKS=4;   // hybrid guard: never transfer so much that 3PL drops below this many weeks of website cover
 
 // Recommended units to transfer 3PL -> FBA now, per the agreed rules:
 //  - size the shipment to forecast FBA demand over the FBA-target weeks (from the demand plan)
@@ -1388,8 +1399,13 @@ function fbaTransferRec(sku,mkt){
   const pd=PD[sku];const md=pd&&pd.mkts&&pd.mkts[mkt];if(!md)return 0;
   const ch=md.ch||[];
   const amazonOnly=ch.includes('FBA')&&!ch.includes('DTC');
-  const i3=md.i3||0;
-  const cap=amazonOnly?Math.max(i3,0):Math.floor(0.5*Math.max(i3,0)); // 50% of 3PL unless Amazon-only
+  const i3=Math.max(md.i3||0,0);
+  // Website protection (Hybrid): dual-channel SKUs never transfer more than 50% of 3PL AND never draw 3PL
+  // below TRF_MIN_3PL_WKS of website (DTC+B2B) cover. Amazon-only SKUs are exempt (3PL only feeds Amazon).
+  let cap;
+  if(amazonOnly){ cap=i3; }
+  else { const minCover3PL=Math.round(webFwdDemand(md,1)*TRF_MIN_3PL_WKS/4.33); // ~4 wks of website demand held back
+    cap=Math.min(Math.floor(0.5*i3),Math.max(0,i3-minCover3PL)); }
   return fbaTransferSized(sku,mkt,cap);
 }
 // Non-GRS transfer: demand-driven (FBA shortfall over the target weeks), drawn from the non-GRS pool.
@@ -1749,7 +1765,7 @@ function render(){
       const i3=md.i3,ifv=md['if_'],oo=md.oo||0;
       const tc=tiCls(s.ti),sc2=stCls(st);
       const launch=md.launch,disc=md.disc;
-      const {b3,b3u,bf,futN,futQty}=getBuyQtys(s.s,CUR);
+      const {b3,b3u,bf,futN,futQty,tx}=getBuyQtys(s.s,CUR);
           // Transfer opportunity: per fixed target market columns
       function getTrfCell(om){
         const txH2=parseInt(document.getElementById('txh')?.value)||20;
@@ -1797,7 +1813,7 @@ function render(){
         trail=`
         <td class="bq">${b3>0?`<span class="bq-v">${fmt(b3)}</span>`:`<span class="bq-nil">—</span>`}${futN>0?`<span title="${futN} further buy(s) scheduled later in the plan (${fmt(futQty)}u) — not due to order this cycle" style="font-size:8px;color:#2563eb;margin-left:2px;white-space:nowrap">+${futN}f</span>`:``}</td>
         <td class="bq">${b3u>0?`<span class="bq-v" style="color:#dc2626;font-weight:700">${fmt(b3u)}</span>`:`<span class="bq-nil">—</span>`}</td>
-        <td class="bq">${bf>0?`<span class="bq-fba">${fmt(bf)}</span>`:`<span class="bq-nil">—</span>`}</td>
+        <td class="bq">${bf>0?`<span class="bq-fba">${fmt(bf)}</span>`:`<span class="bq-nil">—</span>`}${tx>0?`<span class="tx-opp" title="3PL→FBA transfer now: ${fmt(tx)} units of EXISTING stock (carton-rounded, 4wk-3PL floor — identical to the Transfer FBA tab). Separate from Buy FBA (new stock).">⇄ ${fmt(tx)}</span>`:``}</td>
         ${getTrfCell(pairs[0])}
         ${getTrfCell(pairs[1])}`;
       }
@@ -2055,7 +2071,7 @@ function buildReport(type){
   else { // ALL
     rows=[['SKU','Subcategory','Tier','Status','SOH 3PL','SOH FBA','On Order','Buy 3PL','Buy Urgent','Buy FBA','Supplier']];
     vis.forEach(s=>{
-      const {b3,b3u,bf,futN,futQty}=getBuyQtys(s.s,CUR);
+      const {b3,b3u,bf,futN,futQty,tx}=getBuyQtys(s.s,CUR);
       const md=s.ms[CUR]||{};
       rows.push([s.s,s.sc||'',s.ti||'',getSt(s.ms,CUR),md.i3||0,md.if_||0,md.oo||0,b3||'',b3u||'',bf||'',(PD[s.s]&&PD[s.s].supp)||'']);
     });
@@ -2334,6 +2350,12 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
       const _riF=(ibF[key]||[]).filter(s=>s.eta&&s.eta.slice(8,10)>String(TODAY.getDate()).padStart(2,'0')).reduce((s,x)=>s+(x.qty||0),0);
       s3=Math.max(s3+_ri3-(_rdtc+_rb2b),0);
       sF=Math.max(sF+_riF-_rfba,0);
+      // "Transfer now" (M+0): the current actionable month (PROJ[1]="Remaining") is where getBuyQtys reads tx and
+      // the buy view displays the now-figures. Unify it with the Transfer FBA tab — same fbaTransferRec (demand-
+      // sized, 50%-cap + 4wk-3PL-floor hybrid, carton-rounded). Draw it off 3PL now and land it in FBA after transit
+      // (tA1), so displayed = used: one identical number, and it really moves the stock in the buy math.
+      if(hasFBA&&skuKey){ const _tNow=fbaTransferRec(skuKey,mkt)||0;
+        if(_tNow>0){ transferOut[i]=_tNow; s3=Math.max(s3-_tNow,0); if(i+lt<PROJ.length)tA1[i+lt]=(tA1[i+lt]||0)+_tNow; } }
       return;
     }
 
