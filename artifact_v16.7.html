@@ -6773,7 +6773,8 @@ function renderMain(){
 }
 
 // Planner SKU filter: re-render body to surface matching SKUs (input lives in the toolbar so it keeps focus)
-function setPlanSkuQry(v){PLAN_SKU_QRY=(v||'').trim();renderMain();}
+var _skuQryTimer=null;
+function setPlanSkuQry(v){PLAN_SKU_QRY=(v||'').trim();clearTimeout(_skuQryTimer);_skuQryTimer=setTimeout(function(){renderMain();},300);}   // debounce the re-render ~300ms so typing doesn't refilter on every keystroke
 // DEMAND plan filter persistence — remember country / channel / categories / SKU filter for 1h so returning to the
 // page keeps your view. Saved on each plan render; restored in init() before the first render (syncTabs +
 // renderCatControl then redraw the pills from the restored state).
@@ -7318,17 +7319,21 @@ function ensureRevTargets(cb){ fetch('/api/demand-revenue-targets').then(functio
 // filters row (#catrow1-wrap). DESKTOP ONLY — hidden on mobile (Ben's requirement); the plan's filter
 // bar collapses behind "⚙ Filters" on mobile anyway. Each opens a pop-out drawer.
 function planRevBtnSync(){ var show=(typeof VIEW_MODE!=='undefined'&&VIEW_MODE==='planning'&&typeof DEMAND_VIEW!=='undefined'&&DEMAND_VIEW==='plan');
-  var legacy=document.getElementById('plan-rev-btn'); if(legacy)legacy.remove();   // drop the old floating button
-  var wrap=document.getElementById('catrow1-wrap'), c=document.getElementById('plan-report-btns');
+  var legacy=document.getElementById('plan-rev-btn'); if(legacy)legacy.remove();   // drop the very old bottom-right button
+  var inline=document.getElementById('plan-report-btns'); if(inline)inline.remove();   // drop the in-filters-row version
+  var c=document.getElementById('plan-report-float');
   var isMobile=!!(window.matchMedia&&window.matchMedia('(max-width:640px)').matches);
-  if(show&&wrap&&!isMobile){
-    if(!c){ c=document.createElement('div'); c.id='plan-report-btns'; c.style.cssText='margin-left:auto;display:flex;gap:6px;align-items:center';
-      c.innerHTML='<button id="plan-rev-btn2" type="button" title="Compare the plan’s forecast to the revenue growth target for this country / channel" style="background:#2563eb;color:#fff;border:none;border-radius:16px;padding:6px 13px;font-size:12px;font-weight:700;font-family:inherit;cursor:pointer">📈 Revenue vs target</button>'
-        +'<button id="plan-exec-btn" type="button" title="Executive summary — FY revenue &amp; units vs last year" style="background:#0f766e;color:#fff;border:none;border-radius:16px;padding:6px 13px;font-size:12px;font-weight:700;font-family:inherit;cursor:pointer">📊 Executive summary</button>';
-      wrap.appendChild(c);
+  // The two report buttons float pinned at the TOP-RIGHT of the screen (over the filters row), desktop only.
+  if(show&&!isMobile){
+    if(!c){ c=document.createElement('div'); c.id='plan-report-float';
+      c.style.cssText='position:fixed;top:6px;right:16px;z-index:1200;display:flex;gap:8px;align-items:center';
+      var btn='border:none;border-radius:16px;padding:6px 13px;font-size:12px;font-weight:700;font-family:inherit;cursor:pointer;box-shadow:0 2px 10px rgba(15,23,42,.22);white-space:nowrap;color:#fff';
+      c.innerHTML='<button id="plan-rev-btn2" type="button" title="Compare the plan’s forecast to the revenue growth target for this country / channel" style="'+btn+';background:#2563eb">📈 Revenue vs target</button>'
+        +'<button id="plan-exec-btn" type="button" title="Executive summary — FY revenue &amp; units vs last year" style="'+btn+';background:#0f766e">📊 Executive summary</button>';
+      document.body.appendChild(c);
       c.querySelector('#plan-rev-btn2').onclick=openPlanRevPopout;
       c.querySelector('#plan-exec-btn').onclick=openExecSummaryPopout; }
-  } else { if(c)c.remove(); var p=document.getElementById('plan-rev-pop'); if(p)p.remove(); var e=document.getElementById('exec-sum-pop'); if(e)e.remove(); } }
+  } else { if(c)c.remove(); var p=document.getElementById('plan-rev-pop'); if(p)p.remove(); if(typeof closeExecDrawer==='function')closeExecDrawer(); } }
 function openPlanRevPopout(){ if(PLAN_REV_FY==null)PLAN_REV_FY=CUR_FY_START;
   var p=document.getElementById('plan-rev-pop'); if(p){ p.remove(); return; }   // click again to close
   p=document.createElement('div'); p.id='plan-rev-pop';
@@ -7339,10 +7344,24 @@ function planRevPopRefresh(){ if(document.getElementById('plan-rev-pop'))planRev
 // ── Plan ▸ "Executive summary" pop-out drawer ──────────────────────────────────────────────────
 // A compact FY revenue/units summary (FY26 LY → FY27 → FY28 partial) plus a per-channel breakdown,
 // derived from buildExecData(). A link opens the full Exec Summary report in the Reports tab.
-function openExecSummaryPopout(){ var p=document.getElementById('exec-sum-pop'); if(p){ p.remove(); return; }   // click again to close
-  p=document.createElement('div'); p.id='exec-sum-pop';
-  p.style.cssText='position:fixed;right:20px;bottom:70px;z-index:1201;width:430px;max-height:82vh;overflow:auto;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 10px 34px rgba(15,23,42,.28);font-size:12px';
-  document.body.appendChild(p); execSumPopRender(); }
+// The Executive Summary opens the FULL exec report in a 50%-screen right drawer (not a compact card).
+function execEnsureDrawer(){ var d=document.getElementById('exec-drawer');
+  if(!d){ d=document.createElement('div'); d.id='exec-drawer';
+    d.style.cssText='position:fixed;top:0;right:0;height:100%;width:clamp(400px,50vw,1000px);background:#fff;box-shadow:-8px 0 28px rgba(0,0,0,.22);z-index:6000;flex-direction:column;display:none';
+    d.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;border-bottom:1px solid #e5e5e5;flex:0 0 auto"><b style="font-size:15px">Executive Summary</b><button id="exec-drawer-x" title="Close" style="width:28px;height:28px;border-radius:6px;border:1px solid #cbd5e1;background:#f8fafc;cursor:pointer;font-size:16px;line-height:1">&times;</button></div><div id="exec-drawer-body" style="flex:1 1 auto;overflow:auto;padding:0 16px 12px">Loading…</div>';
+    document.body.appendChild(d); var x=d.querySelector('#exec-drawer-x'); if(x)x.onclick=closeExecDrawer; }
+  else if(d.parentNode!==document.body)document.body.appendChild(d);
+  var bk=document.getElementById('exec-drawer-backdrop');
+  if(!bk){ bk=document.createElement('div'); bk.id='exec-drawer-backdrop'; bk.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:5900;display:none'; bk.onclick=closeExecDrawer; document.body.appendChild(bk); }
+  else if(bk.parentNode!==document.body)document.body.appendChild(bk);
+  return d; }
+function closeExecDrawer(){ var d=document.getElementById('exec-drawer'); if(d)d.style.display='none'; var bk=document.getElementById('exec-drawer-backdrop'); if(bk)bk.style.display='none'; _execHost=null; }
+function openExecSummaryPopout(){ var d=document.getElementById('exec-drawer');
+  if(d && d.style.display!=='none'){ closeExecDrawer(); return; }   // click again to close
+  d=execEnsureDrawer(); var bk=document.getElementById('exec-drawer-backdrop'); if(bk)bk.style.display='block'; d.style.display='flex';
+  var body=document.getElementById('exec-drawer-body'); if(body)body.innerHTML='<div class="count" style="padding:14px;color:#888">Loading…</div>';
+  setTimeout(function(){ try{ renderExecView(document.getElementById('exec-drawer-body')); }
+    catch(e){ var b=document.getElementById('exec-drawer-body'); if(b)b.innerHTML='<div style="padding:14px;color:#dc2626">Could not load Executive Summary: '+String(e&&e.message||e)+'</div>'; } }, 20); }
 function execSumPopRender(){ var p=document.getElementById('exec-sum-pop'); if(!p)return;
   var d=buildExecData();
   var gbp=function(v){ if(Math.abs(v)>=1e6)return '£'+(v/1e6).toFixed(2)+'M'; if(Math.abs(v)>=1e3)return '£'+Math.round(v/1e3)+'k'; return '£'+Math.round(v); };
@@ -8570,14 +8589,18 @@ function renderKeyArrivalsReport(body){
   fetch('/api/scenario/key-arrivals').then(function(r){return r.json();}).then(function(d){ KA_CACHE=d; draw(d); }).catch(function(e){ draw({error:String(e)}); });
 }
 
-function renderExecView(){
-  // Hide the original main table wrapper
-  var origTw=document.getElementById('tw');
-  if(origTw)origTw.style.display='none';
-  var buyWrap=document.getElementById('buy-wrap');
-  if(buyWrap)buyWrap.remove();
-  var existing=document.getElementById('exec-wrap');
-  if(existing)existing.remove();
+var _execHost=null;   // when set, renderExecView renders into this container (the 50% drawer) instead of the Reports page
+function renderExecView(host){
+  _execHost=host||null;
+  if(!host){
+    // Full Reports-tab page: hide the main table wrapper + drop the buy view.
+    var origTw=document.getElementById('tw');
+    if(origTw)origTw.style.display='none';
+    var buyWrap=document.getElementById('buy-wrap');
+    if(buyWrap)buyWrap.remove();
+    var existing=document.getElementById('exec-wrap');
+    if(existing)existing.remove();
+  } else { host.innerHTML=''; }   // drawer: render into the given container, no page side-effects
 
   var d=buildExecData();
   var fnGBP=function(v){if(v>=1e6)return '£'+(v/1e6).toFixed(2)+'M';if(v>=1e3)return '£'+(v/1e3).toFixed(0)+'k';return '£'+Math.round(v);};
@@ -8602,7 +8625,7 @@ function renderExecView(){
 
   // Container
   var wrap=document.createElement('div');wrap.id='exec-wrap';
-  document.querySelector('.wrap').appendChild(wrap);
+  (host||document.querySelector('.wrap')).appendChild(wrap);
 
   // 3-year summary: 2025 → 2026 → 2027 with growth between
   function yearCard(label,sub,u,r,emphasis,growth,prevLabel){
@@ -8712,7 +8735,7 @@ function renderExecView(){
     lbl.onclick=function(){
       if(EXPANDED_CHANNELS.has(chKey))EXPANDED_CHANNELS.delete(chKey);
       else EXPANDED_CHANNELS.add(chKey);
-      renderExecView();
+      renderExecView(_execHost);
     };
     tr.appendChild(lbl);
     FY_ORDER.forEach(function(fym){
@@ -9211,8 +9234,7 @@ async function saveForecasts(){
     _dirty=false;
     try{localStorage.setItem('db_inputs_v1',JSON.stringify(IV));}catch(e){} // local cache only
     if(btn)btn.textContent='Save Forecasts';
-    var skuMsg=skuWritten?(' + '+skuWritten+' SKU cells'):'';
-    st('✓ Saved '+written+' forecast inputs'+skuMsg+' to Supabase at '+new Date().toLocaleTimeString());
+    st('');   // (save-confirmation toast removed per Ben — no "✓ Saved N forecast inputs…" message)
   }catch(e){
     st('Save error: '+(e.message||e).toString().slice(0,120));
     if(btn)btn.textContent='Save Forecasts *';

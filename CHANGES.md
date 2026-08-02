@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.402 - DEMAND plan: report buttons float top + full Exec Summary drawer + filter debounce + drop save toast ⚠️ NEEDS TESTING
+- **Report buttons float pinned top-right** of the screen (over the filters row), desktop only — moved out of the filters row. `#plan-report-float`.
+- **Executive Summary now opens the FULL report in a 50%-screen right drawer** (was a compact card). `renderExecView` refactored to render into any container; reuses the half-screen drawer pattern; FY toggle re-renders inside the drawer. (Compact `execSumPopRender` retired.)
+- **SKU filter debounced** (~300ms) on the DEMAND plan so typing doesn't re-filter every keystroke.
+- **Removed the "✓ Saved N forecast inputs… to Supabase" toast** on save (per Ben) — errors still show. `artifact_v16.7.html`.
+
 ## v26.401 - Exec Summary + Revenue tab: match the plan basis (your 2 calls) ⚠️ NEEDS TESTING
 Both your answers implemented — reports now mirror the DEMAND plan. `artifact_v16.7.html`, display-only.
 - **Raw forecast (not BI-adjusted):** dropped the `BI_CACHE` (AI-rule) overlay from `buildExecData`, so Exec = Revenue tab = plan. (Turned out latent anyway — `applyAllBIRules` had no caller, so BI_CACHE was never actually populated; this is a clean no-op that removes the trap.)
