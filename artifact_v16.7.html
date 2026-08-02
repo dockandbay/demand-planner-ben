@@ -559,6 +559,29 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
 #buy-wrap table.pt tr:hover td.rl{background:#fafaf8}
 #buy-wrap table.pt tr:hover td.rl.sec, #buy-wrap table.pt tr:hover td.sx{background:#e0e0de}
 #buy-wrap .txb{margin-top:6px;background:#fef9c3;border:1px solid #fcd34d;border-radius:4px;padding:5px 10px;font-size:11px;color:#854d0e}
+/* Complex Rules list — flex rows: one line on desktop, stacks over ~2 lines on mobile */
+#cr-panel .cr-grp{font-weight:700;color:#0f172a;font-size:11px;margin:9px 0 2px}
+#cr-panel .cr-rule{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;padding:5px 0;border-bottom:1px solid #ede9fe;font-size:11px}
+#cr-panel .cr-rule.cr-off{opacity:.55}
+#cr-panel .cr-name{order:1;font-weight:600}
+#cr-panel .cr-scope{order:2;flex:1 1 auto;min-width:60px}
+#cr-panel .cr-win{order:3;white-space:nowrap;color:#475569}
+#cr-panel .cr-cov{order:4;white-space:nowrap;font-weight:700;color:#5b21b6}
+#cr-panel .cr-status{order:5;color:#94a3b8}
+#cr-panel .cr-acts{order:6;white-space:nowrap}
+#cr-panel .cr-break{display:none;flex-basis:100%;height:0;margin:0}
+@media (max-width:640px){
+  #cr-panel .cr-rule{padding:9px 0;gap:5px 8px}
+  #cr-panel .cr-name{order:1;flex:1 1 auto}
+  #cr-panel .cr-cov{order:2}
+  #cr-panel .cr-break{display:block;order:3}
+  #cr-panel .cr-scope{order:4;flex:1 1 auto}
+  #cr-panel .cr-win{order:5}
+  #cr-panel .cr-status{order:6}
+  #cr-panel .cr-acts{order:7;margin-left:auto}
+  #cr-panel .cr-fgrid{grid-template-columns:1fr!important;gap:3px 0!important}
+  #cr-panel .cr-fgrid > .sl{padding-top:8px}
+}
 #buy-wrap .cs-core{background:#dbeafe;color:#1e40af;padding:1px 5px;border-radius:3px;font-weight:600;font-size:9px}
 #buy-wrap .cs-seasonal{background:#dcfce7;color:#166534;padding:1px 5px;border-radius:3px;font-weight:700;font-size:9px}
 #buy-wrap .cs-noncore{background:#ffedd5;color:#9a3412;padding:1px 5px;border-radius:3px;font-weight:700;font-size:9px}
@@ -3049,21 +3072,22 @@ var CR=(function(){
     CTRS_CR.forEach(function(co){
       var rs=rules.filter(function(r){return r.country===co;});
       if(!rs.length)return;
-      h+='<div style="margin-top:8px"><div style="font-weight:700;color:#0f172a;font-size:11px;margin-bottom:3px">'+co+'</div>';
-      h+='<table style="width:100%;border-collapse:collapse;font-size:11px"><tbody>';
+      h+='<div style="margin-top:8px"><div class="cr-grp">'+co+'</div>';
       rs.forEach(function(r){
-        h+='<tr style="border-bottom:1px solid #ede9fe'+(r.enabled===false?';opacity:.5':'')+'">'
-          +'<td style="padding:4px 8px 4px 0;text-align:left;white-space:nowrap;font-weight:600">'+esc(r.name||'')+'</td>'
-          +'<td style="padding:4px 8px;text-align:left">'+scopeChips(r)+'</td>'
-          +'<td style="padding:4px 8px;text-align:left;white-space:nowrap">'+windowText(r)+'</td>'
-          +'<td style="padding:4px 8px;text-align:left;white-space:nowrap;font-weight:600;color:#5b21b6">'+coverText(r)+'</td>'
-          +'<td style="padding:4px 8px;text-align:left;white-space:nowrap;color:#94a3b8">'+(r.enabled===false?'off':'on')+'</td>'
-          +'<td style="padding:4px 0;text-align:left;white-space:nowrap">'
-            +'<button type="button" onclick="CR.edit('+r.id+')" style="font-size:10px;padding:1px 8px;border:1px solid #cbd5e1;border-radius:3px;background:#fff;cursor:pointer">Edit</button> '
-            +'<button type="button" onclick="CR.del('+r.id+')" style="font-size:10px;padding:1px 8px;border:1px solid #fecaca;border-radius:3px;background:#fef2f2;color:#b91c1c;cursor:pointer">Delete</button>'
-          +'</td></tr>';
+        h+='<div class="cr-rule'+(r.enabled===false?' cr-off':'')+'">'
+          +'<span class="cr-name">'+(r.name?esc(r.name):'<span style="color:#94a3b8;font-weight:400">(rule)</span>')+'</span>'
+          +'<span class="cr-scope">'+scopeChips(r)+'</span>'
+          +'<span class="cr-win">'+windowText(r)+'</span>'
+          +'<span class="cr-cov">'+coverText(r)+'</span>'
+          +'<span class="cr-status">'+(r.enabled===false?'off':'on')+'</span>'
+          +'<span class="cr-break"></span>'
+          +'<span class="cr-acts">'
+            +'<button type="button" onclick="CR.edit('+r.id+')" style="font-size:10px;padding:2px 9px;border:1px solid #cbd5e1;border-radius:3px;background:#fff;cursor:pointer">Edit</button> '
+            +'<button type="button" onclick="CR.del('+r.id+')" style="font-size:10px;padding:2px 9px;border:1px solid #fecaca;border-radius:3px;background:#fef2f2;color:#b91c1c;cursor:pointer">Delete</button>'
+          +'</span>'
+        +'</div>';
       });
-      h+='</tbody></table></div>';
+      h+='</div>';
     });
     return h;
   }
@@ -3076,7 +3100,7 @@ var CR=(function(){
     if(r.season&&seasonList.indexOf(r.season)<0)seasonList.unshift(r.season);   // keep an old rule's season even if no longer active
     var selCo=r.country?[String(r.country)]:['UK'];
     var h='<div style="font-weight:700;color:#5b21b6;font-size:12px;margin-bottom:8px">&#9819; '+(r.id?'Edit rule':'New rule')+'</div>'
-      +'<div style="display:grid;grid-template-columns:130px 1fr;gap:7px 12px;align-items:start">'
+      +'<div class="cr-fgrid" style="display:grid;grid-template-columns:130px 1fr;gap:7px 12px;align-items:start">'
       +'<span class="sl" style="padding-top:4px">Countries:</span><span><select id="cr-country" multiple size="5" style="width:110px;vertical-align:top">'+CTRS_CR.map(function(c){return '<option value="'+c+'"'+(selCo.indexOf(c)>=0?' selected':'')+'>'+c+'</option>';}).join('')+'</select> <span class="sl">Ctrl/Cmd-click for several'+(r.id?' — first stays this rule, extras become new rules':'')+'</span></span>'
       +'<span class="sl">Name (optional):</span><span><input id="cr-name" type="text" value="'+esc(r.name||'')+'" placeholder="e.g. Unicorn summer push" style="width:280px"></span>'
       +'<span class="sl" style="border-top:1px solid #e9d5ff;padding-top:7px">Scope — SKU:</span><span style="border-top:1px solid #e9d5ff;padding-top:7px"><input id="cr-sku" type="text" value="'+esc(r.sku||'')+'" placeholder="exact SKU (blank = any)" style="width:280px"></span>'
