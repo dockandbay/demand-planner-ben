@@ -2038,7 +2038,7 @@ function _bindTb(){var _tb=document.getElementById('tb');if(_tb){_tb.addEventLis
 function fillRwFilter(){
   var wrap=document.getElementById('bp-rw-wrap'), sel=document.getElementById('bp-rw-sel');
   if(!wrap||!sel)return;
-  var show=(BP_VIEW==='buy'||BP_VIEW==='fba');
+  var show=(BP_VIEW==='buy'||BP_VIEW==='fba'||BP_VIEW==='transfer');
   wrap.style.display=show?'inline-flex':'none';
   if(!show){ RW_SEL='ALL'; return; }
   var seen={}; SL.forEach(function(s){ if(s.rw&&s.ms&&s.ms[CUR])seen[s.rw]=1; });
@@ -3334,6 +3334,7 @@ var BUY_SCAFFOLD=`<div class="wrap">
       <div id="bp-cat-chips" style="display:flex;gap:4px;flex-wrap:nowrap"></div>
       <div id="bp-cat-pop" style="display:none;position:absolute;top:100%;left:0;z-index:300;background:#fff;border:1px solid #d0d0d0;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.18);width:440px;padding:8px"></div>
     </span>
+    <span id="bp-rw-wrap" style="display:none;align-items:center;gap:5px"><div style="width:1px;height:14px;background:#e0e0e0;margin:0 4px;flex-shrink:0"></div><span class="pill-lbl">Release Window</span><select id="bp-rw-sel" style="font-size:11px;padding:2px 6px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;cursor:pointer"><option value="ALL">All</option></select></span>
   </div>
   <div style="display:flex;align-items:center;gap:6px">
     <span class="pill-lbl">Filters</span>
@@ -3342,7 +3343,6 @@ var BUY_SCAFFOLD=`<div class="wrap">
     <div style="display:flex;gap:3px" id="stp"></div>
     <div style="width:1px;height:14px;background:#e0e0e0;margin:0 4px;flex-shrink:0"></div>
     <div style="display:flex;gap:3px" id="csp"></div>
-    <span id="bp-rw-wrap" style="display:none;align-items:center;gap:5px"><div style="width:1px;height:14px;background:#e0e0e0;margin:0 4px;flex-shrink:0"></div><span class="pill-lbl">Release Window</span><select id="bp-rw-sel" style="font-size:11px;padding:2px 6px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;cursor:pointer"><option value="ALL">All</option></select></span>
     <div style="width:1px;height:14px;background:#e0e0e0;margin:0 4px;flex-shrink:0"></div>
     <div style="display:flex;gap:3px" id="bup"></div>
     <span id="cartp-wrap" style="display:none;align-items:center;gap:3px"><div style="width:1px;height:14px;background:#e0e0e0;margin:0 4px;flex-shrink:0"></div><span class="pill-lbl" title="Any = full shortfall, no restriction (default). Full = whole cartons only. Partial = exact shortfall with min-size floor.">Cartons</span><span style="display:flex;gap:3px" id="cartp"></span></span>
@@ -6375,10 +6375,9 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         // Label cell - sticky
         td.style.cssText='position:sticky;left:0;background:#fafafa;border-bottom:1px solid #f0f0ee;padding:0;min-width:160px;max-width:160px;z-index:1';
         var tierCls='tier-'+(p.ti||'c').toLowerCase();
-        td.innerHTML='<div style="padding:2px 4px 2px 16px;text-align:left">'
+        td.innerHTML='<div style="padding:2px 4px;text-align:left">'
           +'<div style="font-size:9px;font-weight:700;color:#1a1a1a;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left">'+sku+'</div>'
-          +'<div style="font-size:8px;color:#aaa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+p.n+'">'+p.n+'</div>'
-          +'<div style="display:flex;gap:2px;align-items:center">'
+          +'<div style="display:flex;gap:2px;align-items:center;flex-wrap:wrap">'
           +'<span class="sku-tier '+tierCls+'" style="font-size:7px">'+(p.ti||'C')+'</span>'
           +skuStatusBadge(launchDate,discDate)
           +((launchDate||discDate)?'<span style="font-size:7px;color:#aaa;margin-left:2px">'
@@ -6386,8 +6385,8 @@ function insertInlineSkuRows(s,co,ch,afterTr){
             +(launchDate&&discDate?' — ':'')
             +(discDate?'<span style="color:'+(discDate<TODAY?'#dc2626':'#888')+'">'+dateShort(discDate)+'</span>':'')
             +'</span>':'')
+          +(p.rw?'<span style="background:#ede9fe;color:#5b21b6;border-radius:3px;padding:0 4px;font-size:7px;font-weight:600;margin-left:2px" title="Release window / season">'+p.rw+'</span>':'')
           +'</div>'
-          +(p.rw?'<div style="font-size:7px;color:#7c3aed;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="Release window / season">RW: '+p.rw+'</div>':'')
           +'<button onclick="openDemandPlanPopup(\''+sku+'\')" title="Open the buy-plan view for this SKU" style="margin-top:3px;font-size:7px;padding:1px 7px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer;font-weight:600;line-height:1.4">Plan ▸</button>'
           +'</div>';
 

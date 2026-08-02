@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.432 - Release Window filter onto Category row + DEMAND col-1 tidy ⚠️ NEEDS TESTING
+- **Release Window filter** moved onto the **Category row** (right after the category filter) on BUY / FBA / TRANSFER (was in the Filters row) and confirmed there on the DEMAND plan. Now also shows on **TRANSFER** (was buy/fba only).
+- **DEMAND plan column 1:** removed the product-title line; the release window now shows as a small purple **badge** with just the value (e.g. `SS27`, was `RW: SS27`) placed after the launch/disc dates; removed the left indent padding in the cell.
+- `artifact_v16.7.html` only. No migration.
+
 ## v26.431 - DEMAND plan: Google-Sheets-style fiscal-year column grouping ⚠️ NEEDS TESTING
 - Replaced the confusing per-FY "▸ show / ▾ hide" pill with a **Google-Sheets-style grouping bar** on top of the month columns. When a fiscal year is **expanded**, a bar spans its month columns with a **−** (minimise); when **collapsed**, a **+** (expand) sits on its lone total column. The FY total header is now just a plain label.
 - Same underlying toggle (`FY_COLLAPSED`, persisted); buttons keep the `.fy-toggle` class so the existing click handler is unchanged. `artifact_v16.7.html` only.
