@@ -199,8 +199,8 @@ async function buildFC_OUTPUTS() {
 // oo (on-order) derived from outstanding inbound — both fill gaps the baked snapshot lacked.
 async function buildSKURAW() {
   const [prods, pcs, inv, avail, oo, sales, inbound, openpo] = await Promise.all([
-    pool.query(`SELECT sku, product_name n, subcategory s, category c, market_tier ti, core_seasonal cs
-                FROM planner.products WHERE in_planning_scope`),
+    pool.query(`SELECT p.sku, p.product_name n, p.subcategory s, p.category c, p.market_tier ti, p.core_seasonal cs, coalesce(sl.release_window,'') rw
+                FROM planner.products p LEFT JOIN planner.sku_labels sl ON sl.sku=p.sku WHERE p.in_planning_scope`),
     // Launch + discontinue dates per country, from planner.products (Ben's single source of truth).
     // Values are already ISO text on products, so pass through; the artifact compares them as strings.
     pool.query(`SELECT sku, co, lch, disc FROM (
@@ -274,6 +274,7 @@ async function buildSKURAW() {
   for (const r of prods.rows)
     p[r.sku] = { n: r.n, s: r.s, c: r.c, ti: r.ti, cs: r.cs === 'Seasonal' ? 'S' : 'C',
                  csf: r.cs || '', // full core/seasonal classification (Core | Seasonal | Non-Core) for the BUY filter
+                 rw: r.rw || '',  // release window (season) — shown on the BUY/FBA/Transfer grid after Type
                  av: {}, disc: {}, lch: {}, inv: {}, oo: {} };
   for (const r of avail.rows) if (p[r.sku] && r.av) p[r.sku].av[r.co] = r.av;
   for (const r of pcs.rows) if (p[r.sku]) { if (r.lch) p[r.sku].lch[r.co] = r.lch; if (r.disc) p[r.sku].disc[r.co] = r.disc; }

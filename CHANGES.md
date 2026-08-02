@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.415 - Release Window (season) column on BUY / FBA / TRANSFER grids ⚠️ NEEDS TESTING
+- Added a **Release Window** column (from `sku_labels.release_window`) to the buy-plan grid, right **after Type**. Shows on BUY, FBA and TRANSFER (shared lead column). `server.mjs` (SKU query + object now carry `rw`), `artifact_v16.7.html` (header/row + COLS/nameCol +1). Verified header + row alignment (13 cols).
+
 ## v26.414 - Main menu order fix (DEMAND · SUPPLY · BUY & MOVE · REPORTS · SCENARIO · PRODUCT · CONFIG) ⚠️ NEEDS TESTING
 - SUPPLY insertion was broken by the BUY & MOVE merge (it targeted the old `data-view="buy"` button) → now targets the BUY & MOVE tab (`data-group="buymove"`), so SUPPLY sits right after DEMAND again.
 - Reordered PRODUCT before CONFIG in boot so the tail is SCENARIO · PRODUCT · CONFIG (was SCENARIO · CONFIG · PRODUCT). Single `#view-tabs-row` nav → same on desktop + mobile. `supply/inject.html`.

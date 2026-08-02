@@ -1136,7 +1136,7 @@ DATA=(DATA||[]).filter(function(r){
       if(md.disc&&md.disc<todayISO)st='DISCONTINUED';
       ms[mkt]={i3:md.i3,if_:md.if_,oo:(md.oo3||0)+(md.oof||0),st:st,disc:md.disc,launch:md.launch,ibc:(md.inb||[]).length};
     });
-    return{s:sku,ti:p.ti||'C',sc:p.s,c:p.c,cs:p.cs,csf:p.csf||'',ms:ms};
+    return{s:sku,ti:p.ti||'C',sc:p.s,c:p.c,cs:p.cs,csf:p.csf||'',rw:p.rw||'',ms:ms};
   });
   // Refresh cur_days from today (replaces stale may_days when calendar month differs)
   var _td=new Date(),_dy=_td.getDate(),_mo=_td.getMonth()+1,_yr=_td.getFullYear();
@@ -1686,6 +1686,7 @@ function render(){
     var _lead='<tr>'
       +'<th class="stk" style="min-width:320px">SKU</th>'
       +(_MERGE?'<th style="min-width:60px">Status<br><span class="tip-wrap" style="width:auto">Type<span class="tip-box">Core or seasonal</span></span></th>':'<th style="min-width:52px">Status</th><th style="min-width:64px"><span class="tip-wrap" style="width:auto">Type<span class="tip-box">Core or seasonal</span></span></th>')
+      +'<th style="min-width:74px">Release<br>Window</th>'
       +(_MERGE?'<th style="min-width:58px">Launch<br>Disc</th>':'<th style="min-width:60px">Launch</th><th style="min-width:60px">Disc</th>')
       +'<th class="r" style="min-width:60px">SOH 3PL</th>'
       +(showNonGRS?'<th class="r" style="min-width:72px">SOH NON GRS</th>':'')
@@ -1773,7 +1774,7 @@ function render(){
   vis.forEach(s=>{const k=s.c||'?';if(!grp[k])grp[k]=[];grp[k].push(s);});
   const gk=Object.keys(grp).sort((a,b)=>{const ai=CAT_ORDER.indexOf(a),bi=CAT_ORDER.indexOf(b);if(ai<0&&bi<0)return a.localeCompare(b);if(ai<0)return 1;if(bi<0)return-1;return ai-bi;});
   let h='';
-  const COLS=(BP_VIEW==='fba')?(14+_extra):(BP_VIEW==='transfer'?(8+(MKTS.length-1)*2):12);   // buy = 12 (8 lead + Buy 3PL + Urgent Sea + Urgent Air + Buy FBA; inter-market Trf removed); transfer = 8 lead + OUT/IN
+  const COLS=(BP_VIEW==='fba')?(15+_extra):(BP_VIEW==='transfer'?(9+(MKTS.length-1)*2):13);   // 9 lead cols (incl. Release Window); buy adds Buy 3PL/Urgent Sea/Urgent Air/Buy FBA; transfer adds OUT/IN per other market
   const COLS_EFF=COLS-(_MERGE?2:0);   // mobile FBA merges 2 column pairs → 2 fewer columns
   if(!vis.length){h='<tr><td colspan="'+COLS_EFF+'" class="nd">No SKUs match filters</td></tr>';}
   else gk.forEach(sc=>{
@@ -1781,7 +1782,7 @@ function render(){
     const _catEsc=String(sc).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
     if(BP_VIEW==='fba'){
       // category header: name spans up to the Ship column, the per-category "select all" sits in the Ship column itself
-      var _nameCol=(9+_extra)-(_MERGE?2:0);   // Ship column index shifts by extra SOH cols and the mobile merge (2 fewer)
+      var _nameCol=(10+_extra)-(_MERGE?2:0);   // Ship column index: 10 lead (incl. Release Window) + extra SOH cols − mobile merge (2 fewer)
       h+=`<tr class="sch"><td colspan="${_nameCol}">${_catNm}</td><td class="r"><span class="cat-selall" data-cat="${_catEsc}" title="Tick all ${_catEsc} rows for shipping" style="cursor:pointer;color:#94a3b8;font-weight:400;font-size:8px;white-space:nowrap">select all</span></td><td colspan="4"></td></tr>`;
     } else {
       h+=`<tr class="sch"><td colspan="${COLS_EFF}">${_catNm}</td></tr>`;
@@ -1870,6 +1871,7 @@ function render(){
           ? `<td style="padding:2px 6px;font-size:10px;line-height:1.3"><span class="${sc2}">${st}</span><br>${s.cs?`<span class="cs-${s.cs.toLowerCase().replace('-','')}" title="${s.cs}">${s.cs==='Seasonal'?'S':'C'}</span>`:'<span style="color:#bbb">—</span>'}</td>`
           : `<td style="padding:2px 8px"><span class="${sc2}">${st}</span></td>
         <td style="padding:2px 6px;font-size:10px">${s.cs?`<span class="cs-${s.cs.toLowerCase().replace('-','')}" title="${s.cs}">${s.cs==='Seasonal'?'S':'C'}</span>`:'<span style="color:#bbb">—</span>'}</td>`}
+        <td class="dt" style="font-size:9px;color:#475569;text-align:left" title="Release window / season">${s.rw?esc(String(s.rw)):'<span style="color:#bbb">—</span>'}</td>
         ${_MERGE
           ? `<td class="dt" style="line-height:1.3">${launchStr?`<span class="${st==='FUTURE'?'dt-launch':''}">${launchStr}</span>`:'<span style="color:#bbb">—</span>'}<br>${discStr?`<span class="${st==='DISC'?'dt-disc':''}">${discStr}</span>`:'<span style="color:#bbb">—</span>'}</td>`
           : `<td class="dt">${launchStr?`<span class="${st==='FUTURE'?'dt-launch':''}">${launchStr}</span>`:''}</td>
