@@ -2369,6 +2369,9 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
   });
 
   const discCutoff=discCutoffMo(md.disc);
+  // The calendar month the disc date falls in (YYYY_MM). Demand in this final selling month is clearance of
+  // existing stock — we DON'T rush-restock a dying SKU for it (Ben). Used to gate the urgent scan below.
+  const discMonthKey=md.disc?(md.disc.slice(0,4)+'_'+md.disc.slice(5,7)):null;
   const dem=md.demand||{};
 
   function demAt(idx){
@@ -2609,7 +2612,10 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
       const t=stockTrace[ti];
       if(ti>injPos&&t.assumedInb3>0)break;
       const stockAfter=simStock+t.confInb3-t.d3;
-      if(ti>=injPos&&stockAfter<0)urgentQtyNeeded+=Math.abs(stockAfter);
+      // Don't rush-buy for the discontinue month (or later): that month's demand sells down existing stock —
+      // you never restock a SKU in its final selling month. The shortfall still runs stock to 0, just no urgent.
+      const inDiscMonth=discMonthKey&&t.key>=discMonthKey;
+      if(ti>=injPos&&stockAfter<0&&!inDiscMonth)urgentQtyNeeded+=Math.abs(stockAfter);
       simStock=Math.max(stockAfter,0);
     }
 

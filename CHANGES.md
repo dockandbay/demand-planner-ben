@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.417 - Urgent buy: don't rush-restock a SKU's discontinue month ⚠️ NEEDS TESTING
+- **Bug:** a SKU discontinuing at month-end (e.g. HAIRW-CAB-LTPNK-NB/UK, disc 31-Dec) showed a phantom **Urgent Sea 2,400**. Its December demand (1,863 ≈ on-hand 1,862) is the forecast's *final-month clearance* of existing stock, and the urgent scan was treating that sell-down as a shortfall to rush-restock — for a product dying 31-Dec.
+- **Fix (Ben's rule):** in the urgent scan, a shortfall that falls in the **discontinue month or later** no longer drives an urgent buy (stock still runs to 0, we just don't reorder a dying SKU for its final selling month). `discMonthKey` = the calendar month of the disc date; guards the urgent sizing loop only.
+- **Before/after snapshot (all 5 markets):** Buy 3PL **78,920 → 78,920** (unchanged), Buy FBA **4,828 → 4,828** (unchanged), **Buy 3PL Urgent 140,558 → 136,394** (−4,164). 29 disc-dated SKU·markets reduced (only the disc-month portion); HAIRW-CAB-LTPNK-NB/UK **2,400 → 0**. Non-disc SKUs mathematically unaffected (guard only fires when a disc date exists).
+- Files: `artifact_v16.7.html` only. No migration.
+
 ## v26.416 - TRANSFER/FBA toolbar tidy + ACTIONS left-align ⚠️ NEEDS TESTING
 - **TRANSFER tab:** removed the ⓘ FBA Transfer Logic / 3PL-Create-POs / FBA-Create-POs / multi-Download buttons and the Urgent/Urg Sea/Urg Air/Buy 3PL/Buy FBA/First Buy pills. Pills are now just **All / Transfer** (defaults to **Transfer**).
 - **FBA tab** defaults to the **Transfer FBA** pill.
