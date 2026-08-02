@@ -1301,7 +1301,7 @@ const CUR_DAYS=(function(){
 const BUY_KEYS=AFTER15?[PROJ[1].key,PROJ[2].key]:[PROJ[1].key];
 const BUY_LBL=AFTER15?`${MN[_CUR_M]} + ${PROJ[2].lbl}`:`${MN[_CUR_M]}`;
 
-let CUR='UK',SC_SEL=new Set(['ALL']),TI_SEL=new Set(['ALL']),ST_SEL=new Set(['ACTIVE','FUTURE']),CS_SEL=new Set(['ALL']),BU_SEL='ALL';
+let CUR='UK',SC_SEL=new Set(['ALL']),TI_SEL=new Set(['ALL']),ST_SEL=new Set(['ACTIVE','FUTURE']),CS_SEL=new Set(['ALL']),BU_SEL='ALL',RW_SEL='ALL';   // RW_SEL = Release Window filter (BUY/FBA)
 let FBA_CARTON_MODE='FULL';  // FBA transfer sizing (default FULL = whole cartons, per the agreed rules): 'FULL' = whole cartons only | 'ANY' = full shortfall, no rounding | 'PARTIAL' = raw shortfall with floor
 let BP_VIEW='buy'; // 'buy' (Buy 3PL/Urgent/FBA + 3PL transfer opps) | 'fba' (Transfer-to-FBA + FBA inbound)
 let PSKU=null,PMKT='UK';
@@ -1771,7 +1771,7 @@ function render(){
     var _lead='<tr>'
       +'<th class="stk" style="min-width:320px">SKU</th>'
       +(_MERGE?'<th style="min-width:60px">Status<br><span class="tip-wrap" style="width:auto">Type<span class="tip-box">Core or seasonal</span></span></th>':'<th style="min-width:52px">Status</th><th style="min-width:64px"><span class="tip-wrap" style="width:auto">Type<span class="tip-box">Core or seasonal</span></span></th>')
-      +'<th style="min-width:74px">Release<br>Window</th>'
+      +'<th style="min-width:74px;text-align:center">Release<br>Window</th>'
       +(_MERGE?'<th style="min-width:58px">Launch<br>Disc</th>':'<th style="min-width:60px">Launch</th><th style="min-width:60px">Disc</th>')
       +'<th class="r" style="min-width:60px">SOH 3PL</th>'
       +(showNonGRS?'<th class="r" style="min-width:72px">SOH NON GRS</th>':'')
@@ -1810,6 +1810,7 @@ function render(){
   updateFbaSelBox();
   updateTrfHeaders();
   updateDlMenuLabels();
+  fillRwFilter();
   const q=(document.getElementById('qry')?.value||'').toLowerCase().trim();
   const vis=SL.filter(s=>{
     if(!s.ms||!s.ms[CUR])return false;
@@ -1817,6 +1818,7 @@ function render(){
     if(!TI_SEL.has('ALL')&&!TI_SEL.has(s.ti))return false;
     if(!ST_SEL.has(getSt(s.ms,CUR)))return false;
     if(!CS_SEL.has('ALL')){const cs=s.csf||null;if(cs!==null&&!CS_SEL.has(cs))return false;}
+    if(RW_SEL!=='ALL'&&(s.rw||'')!==RW_SEL)return false;   // Release Window filter (BUY/FBA)
     if(q&&!skuMatchQ(s.s.toLowerCase(),q))return false;
     if(BU_SEL!=='ALL'){
       const bq=getBuyQtys(s.s,CUR);
@@ -1955,7 +1957,7 @@ function render(){
           ? `<td style="padding:2px 6px;font-size:10px;line-height:1.3"><span class="${sc2}">${st}</span><br>${s.cs?`<span class="cs-${s.cs.toLowerCase().replace('-','')}" title="${s.cs}">${s.cs==='Seasonal'?'S':'C'}</span>`:'<span style="color:#bbb">—</span>'}</td>`
           : `<td style="padding:2px 8px"><span class="${sc2}">${st}</span></td>
         <td style="padding:2px 6px;font-size:10px">${s.cs?`<span class="cs-${s.cs.toLowerCase().replace('-','')}" title="${s.cs}">${s.cs==='Seasonal'?'S':'C'}</span>`:'<span style="color:#bbb">—</span>'}</td>`}
-        <td class="dt" style="font-size:9px;color:#475569;text-align:left" title="Release window / season">${s.rw?esc(String(s.rw)):'<span style="color:#bbb">—</span>'}</td>
+        <td class="dt" style="font-size:9px;color:#475569;text-align:center" title="Release window / season">${s.rw?esc(String(s.rw)):'<span style="color:#bbb">—</span>'}</td>
         ${_MERGE
           ? `<td class="dt" style="line-height:1.3">${launchStr?`<span class="${st==='FUTURE'?'dt-launch':''}">${launchStr}</span>`:'<span style="color:#bbb">—</span>'}<br>${discStr?`<span class="${st==='DISC'?'dt-disc':''}">${discStr}</span>`:'<span style="color:#bbb">—</span>'}</td>`
           : `<td class="dt">${launchStr?`<span class="${st==='FUTURE'?'dt-launch':''}">${launchStr}</span>`:''}</td>
@@ -2001,6 +2003,21 @@ function bpRestoreFilters(){ try{
 function _bindTb(){var _tb=document.getElementById('tb');if(_tb){_tb.addEventListener('click',function(e){var ca=e.target.closest('.cat-selall');if(ca){var cat=ca.dataset.cat;document.querySelectorAll('#tb .fba-tick').forEach(function(tk){if(tk.dataset.cat===cat)FBA_TICK[tk.dataset.sku+'|'+CUR]=true;});render();updateFbaSelBox();return;}var b=e.target.closest('.ob');if(b)open_(b.dataset.sku);});_tb.addEventListener('change',function(e){var inp=e.target.closest('.fba-ov');if(inp){var v=inp.value.trim();FBA_OV[inp.dataset.sku+'|'+CUR]=(v===''?'':String(parseInt(v)||0));updateFbaSelBox();return;}var tk=e.target.closest('.fba-tick');if(tk){if(tk.checked)FBA_TICK[tk.dataset.sku+'|'+CUR]=true;else delete FBA_TICK[tk.dataset.sku+'|'+CUR];updateFbaSelBox();}});}}
 
 // CSV download
+// Release Window dropdown filter (BUY + FBA views): populate from the release windows present in the current
+// market, keep it in sync with RW_SEL, and hide it on other views. Wired on each render.
+function fillRwFilter(){
+  var wrap=document.getElementById('bp-rw-wrap'), sel=document.getElementById('bp-rw-sel');
+  if(!wrap||!sel)return;
+  var show=(BP_VIEW==='buy'||BP_VIEW==='fba');
+  wrap.style.display=show?'inline-flex':'none';
+  if(!show){ RW_SEL='ALL'; return; }
+  var seen={}; SL.forEach(function(s){ if(s.rw&&s.ms&&s.ms[CUR])seen[s.rw]=1; });
+  var opts=Object.keys(seen).sort();
+  if(RW_SEL!=='ALL'&&opts.indexOf(RW_SEL)<0)RW_SEL='ALL';
+  sel.innerHTML='<option value="ALL">All</option>'+opts.map(function(o){return '<option value="'+esc(o)+'"'+(o===RW_SEL?' selected':'')+'>'+esc(o)+'</option>';}).join('');
+  sel.value=RW_SEL;
+  sel.onchange=function(){ RW_SEL=sel.value; render(); };
+}
 function getFilteredVis(ignoreBuy){
   const q=(document.getElementById('qry')?.value||'').toLowerCase().trim();
   return SL.filter(s=>{
@@ -2009,6 +2026,7 @@ function getFilteredVis(ignoreBuy){
     if(!TI_SEL.has('ALL')&&!TI_SEL.has(s.ti))return false;
     if(!ST_SEL.has(getSt(s.ms,CUR)))return false;
     if(!CS_SEL.has('ALL')){const cs=s.csf||null;if(cs!==null&&!CS_SEL.has(cs))return false;}
+    if(RW_SEL!=='ALL'&&(s.rw||'')!==RW_SEL)return false;   // Release Window filter (BUY/FBA)
     if(q&&!skuMatchQ(s.s.toLowerCase(),q))return false;
     return true;
   }).sort((a,b)=>String(a.s).localeCompare(String(b.s)));
@@ -2321,8 +2339,8 @@ function rpc(){
   const meta=SL.find(s=>s.s===PSKU)||{};
   const st=getSt(meta.ms,PMKT);
   let dateInfo='';
-  if(md.launch)dateInfo+=`<span class="mkt-date">Launch: ${md.launch}</span>`;
-  if(md.disc)dateInfo+=`<span class="mkt-date">${md.launch?' \u00b7 ':''}Disc: ${md.disc}</span>`;
+  if(md.launch)dateInfo+=`<span class="mkt-date">Launch: ${dateDMY(md.launch)}</span>`;
+  if(md.disc)dateInfo+=`<span class="mkt-date">${md.launch?' \u00b7 ':''}Disc: ${dateDMY(md.disc)}</span>`;
   const statusRow=dateInfo?`<div class="mkt-status"><span class="${stCls(st)}">${st}</span>${dateInfo}</div>`:'';
 
   const note='';
@@ -3273,6 +3291,7 @@ var BUY_SCAFFOLD=`<div class="wrap">
     <div style="display:flex;gap:3px" id="stp"></div>
     <div style="width:1px;height:14px;background:#e0e0e0;margin:0 4px;flex-shrink:0"></div>
     <div style="display:flex;gap:3px" id="csp"></div>
+    <span id="bp-rw-wrap" style="display:none;align-items:center;gap:5px"><div style="width:1px;height:14px;background:#e0e0e0;margin:0 4px;flex-shrink:0"></div><span class="pill-lbl">Release Window</span><select id="bp-rw-sel" style="font-size:11px;padding:2px 6px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;cursor:pointer"><option value="ALL">All</option></select></span>
     <div style="width:1px;height:14px;background:#e0e0e0;margin:0 4px;flex-shrink:0"></div>
     <div style="display:flex;gap:3px" id="bup"></div>
     <span id="cartp-wrap" style="display:none;align-items:center;gap:3px"><div style="width:1px;height:14px;background:#e0e0e0;margin:0 4px;flex-shrink:0"></div><span class="pill-lbl" title="Any = full shortfall, no restriction (default). Full = whole cartons only. Partial = exact shortfall with min-size floor.">Cartons</span><span style="display:flex;gap:3px" id="cartp"></span></span>

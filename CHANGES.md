@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.426 - BUY/FBA Release Window filter + centred column + popup dates ⚠️ NEEDS TESTING
+- **Release Window dropdown filter** on the BUY and FBA tabs (in the Filters row, after Core/Seasonal): pick a release window to filter the grid to those SKUs (`RW_SEL`; options built from the windows present in the current market; hidden on TRANSFER). Applied in both filter chains (grid render + `getFilteredVis`).
+- **Release Window column centred** — header and cell were left-aligned, now `text-align:center`.
+- **SKU detail popup dates → dd-mmm-yy** — Launch/Disc were raw ISO (e.g. 2027-02-01), now `dateDMY` (01-Feb-27).
+- `artifact_v16.7.html` only. No migration.
+
 ## v26.425 - Complex Rules form: SKU multi-picker, category dropdown, dd-mmm-yy dates ⚠️ NEEDS TESTING
 - **Scope — SKUs** is now a **multi-select search picker** (like Order Plan's add-SKU box): type to search (503 SKUs, shows subcat), click to add removable chips. A rule can now scope **several SKUs** — stored comma-separated in `sku`; the engine (`crMatch`) matches membership. Single-SKU rules behave as before.
 - **Scope — Category** is now a **searchable dropdown** (free-text allowed, like the PO-grid assign-shipment box) instead of a plain datalist input.
