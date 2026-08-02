@@ -8806,8 +8806,8 @@
   function ensureNavButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('supply-btn'))return;
     var navwrap=row.parentElement; if(navwrap&&!navwrap.id)navwrap.id='dab-navwrap';
     var btn=document.createElement('button'); btn.id='supply-btn'; btn.className='view-toggle supply-toggle'; btn.textContent='SUPPLY';
-    // place SUPPLY second — right after DEMAND, before BUY
-    var buyBtn=row.querySelector('button[data-view="buy"]');
+    // place SUPPLY second — right after DEMAND, before BUY & MOVE
+    var buyBtn=row.querySelector('button[data-group="buymove"]')||row.querySelector('button[data-view="buy"]');
     if(buyBtn)row.insertBefore(btn,buyBtn);
     else { var spacer=row.querySelector('div[style*="flex:1"]'); if(spacer)row.insertBefore(btn,spacer); else row.appendChild(btn); }
     // From CONFIG (or any non-supply state), the SUPPLY tab lands on PURCHASE ORDERS; otherwise it returns
@@ -10079,7 +10079,7 @@
     var pb=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]');
     var onDemand=!nonDemand && pb && pb.classList.contains('active');
     document.documentElement.classList.toggle('hz-preboot', !onDemand); }catch(e){} }
-  function boot(){ try{ if(ME===null)fetchMe(); ensureRoot(); ensureNavButton(); ensureBellButton(); ensureActivityButton(); ensureSuggestButton(); ensureScenarioRoot(); ensureScenarioButton(); ensureConfigButton(); ensureProductButton();
+  function boot(){ try{ if(ME===null)fetchMe(); ensureRoot(); ensureNavButton(); ensureBellButton(); ensureActivityButton(); ensureSuggestButton(); ensureScenarioRoot(); ensureScenarioButton(); ensureProductButton(); ensureConfigButton();   // order: … REPORTS, SCENARIO, PRODUCT, CONFIG
     var _vtr=document.getElementById('view-tabs-row'); if(_vtr&&!_vtr._hzPillWired){ _vtr._hzPillWired=1; _vtr.addEventListener('click',function(e){ if(e.target&&e.target.closest('.view-toggle'))setTimeout(hzSyncDemandPills,0); }); }
     if(!_routed){ _routed=true; try{ if(/^#\/?(supply|config|scenario|demand|reports|buy-move|buy|fba|planning|exec|product)(\/|$)/.test(location.hash)) applyRoute();
       else { var _land=(window.__HZ_LANDING||'supply/purchase-orders').replace(/^#?\/?/,''); location.hash='#/'+_land; applyRoute(); }   // no hash → per-user landing slug (server-injected), default SUPPLY ▸ Purchase Orders

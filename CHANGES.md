@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.414 - Main menu order fix (DEMAND · SUPPLY · BUY & MOVE · REPORTS · SCENARIO · PRODUCT · CONFIG) ⚠️ NEEDS TESTING
+- SUPPLY insertion was broken by the BUY & MOVE merge (it targeted the old `data-view="buy"` button) → now targets the BUY & MOVE tab (`data-group="buymove"`), so SUPPLY sits right after DEMAND again.
+- Reordered PRODUCT before CONFIG in boot so the tail is SCENARIO · PRODUCT · CONFIG (was SCENARIO · CONFIG · PRODUCT). Single `#view-tabs-row` nav → same on desktop + mobile. `supply/inject.html`.
+
 ## v26.413 - BUY & MOVE ▸ ACTIONS tab + BUY tab tidy ⚠️ NEEDS TESTING
 - New **ACTIONS** sub-tab (now the FIRST tab under BUY & MOVE, and the default when you click BUY & MOVE): per-country summary of the buy/move actions — **Buy 3PL, Buy 3PL Urgent Sea, Urgent Air, Buy FBA, FBA Transfer** — each with total units + SKU count and **expand-to-SKU×qty**. URL `#/buy-move/actions`. Built from `BP.getBuyQtys` across each market's visible SKUs.
 - **BUY tab: removed the inter-market "Trf→EU / Trf→AU" columns** (they now live in full on the TRANSFER tab's Outbound/Inbound). COLS 14→12.
