@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.407 - FBA inbound tooltip PO links + BUY & MOVE URL slugs ⚠️ NEEDS TESTING
+- **FBA inbound hover tooltip**: the PO/shipment reference is now a **clickable link** that opens that PO's drawer (`#/supply/purchase-orders/<ref>`). Tooltip still copies the full detail on click elsewhere. `artifact_v16.7.html`.
+- **URL slugs for the BUY & MOVE group**: BUY → `#/buy-move/buy`, FBA → `#/buy-move/fba`, TRANSFER → `#/buy-move/transfer`. Also fixes routing that the tab-merge broke (there was no `data-view="fba"` button anymore). Legacy `#/buy/<ctry>` and `#/fba/<ctry>` still resolve into the group. `supply/inject.html` (writer + router + regex), `artifact_v16.7.html`.
+
 ## v26.406 - FIX: widen DEMAND stock column so both 3PL & FBA lines are visible ⚠️ NEEDS TESTING
 - The stock column ("3PL / FBA") was only 62px wide, so "3PL: 236,411 / FBA: 20,582" was clipping and looked like it wasn't showing both. Widened to 96px + `white-space:nowrap` on each line, so both 3PL and FBA on-hand display in full. (Feature landed v26.403; this fixes the display.) `artifact_v16.7.html`.
 

@@ -7979,6 +7979,7 @@
   function writeViewHash(v){
     if(v==='planning')writeHash(['demand',(typeof DEMAND_VIEW!=='undefined'&&DEMAND_VIEW)||'plan']);
     else if(v==='exec')writeHash(['reports',(typeof REPORT_VIEW!=='undefined'&&REPORT_VIEW)||'ex']);
+    else if(v==='buy'||v==='fba'||v==='transfer')writeHash(['buy-move',v]);   // BUY & MOVE group: #/buy-move/<buy|fba|transfer>
     else writeHash([v]);
   }
   function syncHash(){ if(current==='reports') writeHash(['supply','reports',reportTab]);
@@ -8005,9 +8006,16 @@
     else if(seg[0]==='demand'){ if(seg[1]&&typeof DEMAND_VIEW!=='undefined')DEMAND_VIEW=seg[1]; var _db=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]'); if(_db)_db.click(); }
     else if(seg[0]==='reports'){ if(seg[1]&&typeof REPORT_VIEW!=='undefined')REPORT_VIEW=seg[1]; var _rb=document.querySelector('#view-tabs-row .view-toggle[data-view="exec"]'); if(_rb)_rb.click(); }
     else if(seg[0]==='product'){ if(typeof showProduct==='function'){ if(seg[2])_pendingProdRef=decodeURIComponent(seg[2]); showProduct(); selectProductSub(seg[1]||'plan'); } }
+    else if(seg[0]==='buy-move'||seg[0]==='buy'||seg[0]==='fba'){
+      // BUY & MOVE group. New URLs: #/buy-move/<buy|fba|transfer>. Legacy #/buy/<ctry>, #/fba/<ctry> still work.
+      var sub, ctry=null;
+      if(seg[0]==='buy-move'){ sub=(['buy','fba','transfer'].indexOf(seg[1])>=0)?seg[1]:'buy'; }
+      else { sub=seg[0]; ctry=seg[1]; }
+      if(ctry&&window.BP&&window.BP.setFilters&&['uk','us','eu','au','ca'].indexOf(String(ctry).toLowerCase())>=0){ try{ window.BP.setFilters(ctry.toUpperCase()); }catch(e){} }
+      var top=document.querySelector('#view-tabs-row .view-toggle[data-group="buymove"]'); if(top)top.click();   // enter the group (VIEW_MODE=buy, builds the sub-nav)
+      var pick=function(){ var sb=document.querySelector('#buymove-tabs .dnav[data-bm="'+sub+'"]'); if(sb){ sb.click(); return true; } return false; };
+      if(!pick()&&sub!=='buy')setTimeout(pick,40); }
     else if(seg[0]){
-      // buy/fba can carry a country: #/fba/us, #/buy/uk → set the market before switching in
-      if((seg[0]==='buy'||seg[0]==='fba')&&seg[1]&&window.BP&&window.BP.setFilters&&['uk','us','eu','au','ca'].indexOf(seg[1].toLowerCase())>=0){ try{ window.BP.setFilters(seg[1].toUpperCase()); }catch(e){} }   // BP is an IIFE — set market via the exposed API, not a bare global
       var btn=document.querySelector('#view-tabs-row .view-toggle[data-view="'+seg[0]+'"]'); if(btn)btn.click(); } }
   window.addEventListener('hashchange',function(){ if(location.hash===_expectedHash)return; applyRoute(); });
 
@@ -10070,7 +10078,7 @@
     document.documentElement.classList.toggle('hz-preboot', !onDemand); }catch(e){} }
   function boot(){ try{ if(ME===null)fetchMe(); ensureRoot(); ensureNavButton(); ensureBellButton(); ensureActivityButton(); ensureSuggestButton(); ensureScenarioRoot(); ensureScenarioButton(); ensureConfigButton(); ensureProductButton();
     var _vtr=document.getElementById('view-tabs-row'); if(_vtr&&!_vtr._hzPillWired){ _vtr._hzPillWired=1; _vtr.addEventListener('click',function(e){ if(e.target&&e.target.closest('.view-toggle'))setTimeout(hzSyncDemandPills,0); }); }
-    if(!_routed){ _routed=true; try{ if(/^#\/?(supply|config|scenario|demand|reports|buy|fba|planning|exec|product)(\/|$)/.test(location.hash)) applyRoute();
+    if(!_routed){ _routed=true; try{ if(/^#\/?(supply|config|scenario|demand|reports|buy-move|buy|fba|planning|exec|product)(\/|$)/.test(location.hash)) applyRoute();
       else { var _land=(window.__HZ_LANDING||'supply/purchase-orders').replace(/^#?\/?/,''); location.hash='#/'+_land; applyRoute(); }   // no hash → per-user landing slug (server-injected), default SUPPLY ▸ Purchase Orders
       document.documentElement.classList.remove('hz-hide-app'); hzSyncDemandPills(); var _a=document.getElementById('app'); if(_a)_a.style.visibility='';   // reveal once routed; keep pills masked unless on DEMAND
     }catch(e){ document.documentElement.classList.remove('hz-hide-app'); hzSyncDemandPills(); var _ar=document.getElementById('app'); if(_ar)_ar.style.visibility=''; } }

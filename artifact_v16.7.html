@@ -1295,7 +1295,11 @@ function fbaInbCell(amount, lines, firstEta){
   if(!(amount>0)) return '<td class="iv"><span class="iv-v">—</span></td>';
   var copy=(lines.length)+' FBA inbound shipment'+(lines.length>1?'s':'')+':\n'
     + lines.map(function(l){ return dateDMY(l.eta)+'  ·  '+fmt(l.qty)+' units'+(l.ref?('  ·  '+l.ref):''); }).join('\n');
-  return '<td class="iv"><span class="fba-inb" data-copy="'+esc(copy)+'" style="cursor:pointer">'
+  // HTML tip: each PO reference is a clickable link that opens the PO drawer.
+  var tip='<b>'+lines.length+' FBA inbound'+(lines.length>1?' shipments':'')+'</b><br>'
+    + lines.map(function(l){ var r=l.ref?esc(String(l.ref)):''; return dateDMY(l.eta)+' &middot; '+fmt(l.qty)+'u'+(r?(" &middot; <a class='fba-inb-po' data-po='"+r+"' style='color:#93c5fd;text-decoration:underline;cursor:pointer'>"+r+'</a>'):''); }).join('<br>')
+    + "<div style='margin-top:6px;font-size:9px;color:#9ca3af'>click a PO to open · click elsewhere to copy</div>";
+  return '<td class="iv"><span class="fba-inb" data-tip="'+String(tip).replace(/"/g,'&quot;')+'" data-copy="'+esc(copy)+'" style="cursor:pointer">'
     +'<span class="iv-v">'+fmt(amount)+'</span>'
     +'<span style="display:block;font-size:8px;opacity:.85;white-space:nowrap">↙ '+(firstEta?dateDMY(firstEta):'TBC')+'</span></span></td>';
 }
@@ -1572,7 +1576,7 @@ function initUI(){
   MKTS.forEach(m=>{
     const b=mk('button','pill'+(m===CUR?' active':''),(FLAGS[m]||'')+' '+m);
     b.onclick=()=>{CUR=m;PMKT=m;cp.querySelectorAll('.pill').forEach(p=>p.classList.remove('active'));b.classList.add('active');
-      if((VIEW_MODE==='buy'||VIEW_MODE==='fba')&&window.writeHash)window.writeHash([VIEW_MODE,m.toLowerCase()]);   // deep-linkable per-country URL e.g. #/fba/us, #/buy/uk
+      if((VIEW_MODE==='buy'||VIEW_MODE==='fba')&&window.writeHash)window.writeHash(['buy-move',VIEW_MODE]);   // #/buy-move/buy · #/buy-move/fba (country carried in BP state, not the URL)
       buildBuPills();   // market-dependent pills (e.g. US AWD filter) must refresh on country change
       render();};
     cp.appendChild(b);
@@ -4841,15 +4845,18 @@ function inbDiv(inb, entries, color){
 // stays while hovering the cell OR the tooltip; click copies the detail (qty · date · ref) to the clipboard.
 (function(){ var el=null,t=null,cur=null,hideT=null;
   function scheduleHide(){ clearTimeout(hideT); hideT=setTimeout(function(){ if(el && !el.matches(':hover') && !(cur&&cur.matches&&cur.matches(':hover'))) el.style.display='none'; },220); }
-  function build(){ if(el)return el; el=document.createElement('div'); el.id='fba-inb-tip'; el.title='Click to copy';
-    el.style.cssText='position:fixed;z-index:100002;max-width:320px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:8px 10px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.35);white-space:pre-line;cursor:copy;display:none';
+  function build(){ if(el)return el; el=document.createElement('div'); el.id='fba-inb-tip';
+    el.style.cssText='position:fixed;z-index:100002;max-width:340px;background:#111827;color:#fff;font-size:11px;line-height:1.55;padding:8px 10px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.35);cursor:copy;display:none';
     el.addEventListener('mouseover',function(){ clearTimeout(hideT); });
     el.addEventListener('mouseout',scheduleHide);
-    el.addEventListener('click',function(){ try{ navigator.clipboard.writeText(el.dataset.copy||el.textContent); }catch(e){} el.style.background='#065f46'; setTimeout(function(){ el.style.background='#111827'; },800); });
+    el.addEventListener('click',function(ev){
+      var po=ev.target&&ev.target.closest?ev.target.closest('.fba-inb-po'):null;   // clicking a PO ref opens its drawer
+      if(po&&po.dataset.po){ ev.stopPropagation(); el.style.display='none'; location.hash='#/supply/purchase-orders/'+encodeURIComponent(po.dataset.po); return; }
+      try{ navigator.clipboard.writeText(el.dataset.copy||el.textContent); }catch(e){} el.style.background='#065f46'; setTimeout(function(){ el.style.background='#111827'; },800); });
     document.body.appendChild(el); return el; }
-  document.addEventListener('mouseover',function(ev){ var n=ev.target&&ev.target.closest?ev.target.closest('.fba-inb[data-copy]'):null; if(!n)return; cur=n; clearTimeout(hideT); clearTimeout(t);
-    t=setTimeout(function(){ var e=build(); e.textContent=n.getAttribute('data-copy')||''; e.dataset.copy=n.getAttribute('data-copy')||''; e.style.display='block'; var r=n.getBoundingClientRect(); e.style.left=Math.max(6,Math.min(r.left,window.innerWidth-326))+'px'; e.style.top=(r.bottom+5)+'px'; },120); });
-  document.addEventListener('mouseout',function(ev){ var n=ev.target&&ev.target.closest?ev.target.closest('.fba-inb[data-copy]'):null; if(n){ clearTimeout(t); scheduleHide(); } });
+  document.addEventListener('mouseover',function(ev){ var n=ev.target&&ev.target.closest?ev.target.closest('.fba-inb[data-tip]'):null; if(!n)return; cur=n; clearTimeout(hideT); clearTimeout(t);
+    t=setTimeout(function(){ var e=build(); e.innerHTML=n.getAttribute('data-tip')||''; e.dataset.copy=n.getAttribute('data-copy')||''; e.style.display='block'; var r=n.getBoundingClientRect(); e.style.left=Math.max(6,Math.min(r.left,window.innerWidth-346))+'px'; e.style.top=(r.bottom+5)+'px'; },120); });
+  document.addEventListener('mouseout',function(ev){ var n=ev.target&&ev.target.closest?ev.target.closest('.fba-inb[data-tip]'):null; if(n){ clearTimeout(t); scheduleHide(); } });
   document.addEventListener('scroll',function(){ if(el)el.style.display='none'; },true);
 })();
 
@@ -7330,7 +7337,7 @@ function renderBuyMoveTabs(){
     bar.style.cssText='display:flex;gap:2px;align-items:center;margin:2px 0 10px;border-bottom:1px solid #e0e0e0;flex-wrap:wrap';   // match #demand-tabs
     if(_vtr&&_vtr.parentNode)_vtr.parentNode.insertBefore(bar,_vtr.nextSibling); }
   bar.innerHTML=BUYMOVE_TABS.map(function(t){return '<button class="dnav'+(t[0]===VIEW_MODE?' active':'')+'" data-bm="'+t[0]+'">'+t[1]+'</button>';}).join('');
-  bar.querySelectorAll('.dnav').forEach(function(b){ b.onclick=function(){ VIEW_MODE=b.dataset.bm; if(window.writeHash&&(VIEW_MODE==='buy'||VIEW_MODE==='fba'))window.writeHash([VIEW_MODE,String(typeof CUR!=='undefined'?CUR:'uk').toLowerCase()]); render(); }; });
+  bar.querySelectorAll('.dnav').forEach(function(b){ b.onclick=function(){ VIEW_MODE=b.dataset.bm; if(window.writeHash)window.writeHash(['buy-move',VIEW_MODE]); render(); }; });   // #/buy-move/<buy|fba|transfer>
   // Move the HORIZON version badge (+ status note) onto this second-level nav, right-aligned (matches DEMAND).
   var _st=document.getElementById('st'); if(_st){ _st.className=''; _st.style.cssText='font-size:11px;color:#888;margin-left:auto;flex:0 0 auto;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:40%'; bar.appendChild(_st); }
   var _ver=document.getElementById('ver'); if(_ver){ _ver.style.cssText='color:#0f172a;background:#fbbf24;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:800;line-height:1.2;letter-spacing:.02em;flex:0 0 auto;margin-left:'+(_st?'10px':'auto')+';white-space:nowrap;position:relative'; bar.appendChild(_ver); }
@@ -10762,7 +10769,7 @@ var _rfBtn=document.getElementById('rf'); if(_rfBtn)_rfBtn.onclick=function(){
   if(typeof hzPlanRestore==='function')hzPlanRestore();   // restore last plan filters (country/channel/categories/SKU) if within 1h
   // HORIZON default landing is SUPPLY (the harness routes to it). Only paint a demand-side view up front when
   // the URL explicitly asks for one — avoids the DEMAND flash/redirect on a plain first load.
-  if(/^#\/?(planning|demand|buy|fba|exec|reports)(\/|$)/.test(location.hash||'')) render();
+  if(/^#\/?(planning|demand|buy-move|buy|fba|exec|reports)(\/|$)/.test(location.hash||'')) render();
 })();
 
 /* ── Mobile drawer navigation (phone only; CSS gates visibility) ────────────
