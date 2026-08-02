@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.428 - SKU popup: flag complex-rule-impacted cover cells ⚠️ NEEDS TESTING
+- In the buy-plan **SKU popup**, the **Cover (weeks)** cells for months whose cover target is driven by a **Complex Rule** now get a **light-purple background** and a **120ms hover tooltip** naming the rule (name, scope, coverage, window).
+- `project()` records the winning rule per month (`crWinRule` → `row.crRule`); `buildTable` styles those cells; `crRuleTip` builds the tooltip; a delegated `.crc-tip[data-tip]` hover handler shows it. Verified: for a Sep-26→Jan-27 rule, exactly those months are flagged.
+- `artifact_v16.7.html` only. No migration.
+
 ## v26.427 - DEMAND plan: Release Window filter + RW in column 1 ⚠️ NEEDS TESTING
 - **Release Window dropdown filter** on the DEMAND plan, next to the Category filter (`PLAN_RW`). Selecting a window surfaces the matching SKU rows (same behaviour as the SKU search box); "All" clears it. Options built from the release windows present in the SKU master.
 - **Release Window shown in column 1** (under "Subcategory / Channel") on each SKU row — a small purple `RW: <window>` line beneath the tier/status/dates.

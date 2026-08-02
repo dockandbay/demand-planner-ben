@@ -1283,6 +1283,23 @@ function crCoverWeeks(i,base,matched){
   }
   return best;
 }
+// Complex Rules — which rule (if any) is DRIVING the cover target for PROJ month `i` (the highest-coverage match
+// that beats the base target). Returns the rule object or null. Used by the SKU popup to flag rule-impacted cells.
+function crWinRule(i,base,matched){
+  if(!matched||!matched.length)return null;
+  var p=PROJ[i]; if(!p||!p.key)return null;
+  var parts=String(p.key).split('_'); var mDate=new Date(Number(parts[0]),Number(parts[1])-1,1);
+  var best=base, win=null;
+  for(var j=0;j<matched.length;j++){ var m=matched[j], r=m.r;
+    if(m.wf && mDate<m.wf)continue;
+    if(m.wt && mDate>m.wt)continue;
+    var wks;
+    if(r.coverage_type==='range'){ if(!m.rt)continue; if(m.rf && mDate<m.rf)continue; if(mDate>m.rt)continue; wks=Math.max((m.rt-mDate)/(7*86400000),0); }
+    else { wks=(Number(r.cover_months)||0)*4.33; }
+    if(wks>best){best=wks;win=r;}
+  }
+  return win;
+}
 
 // After-15th logic: include M+0 and M+1
 const TODAY=new Date();
@@ -2906,7 +2923,8 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     const arrivalLbl=buyDisplay[i]?PROJ[Math.min(i+lm,PROJ.length-1)].lbl:'';
     const bPM=buyDisplay[i]?`arrives ${arrivalLbl}`:null;
 
-    const row={key,lbl,lbl2,now,isActual:false,isForecast:!!isForecast,
+    const crRule=crMatched.length?crWinRule(i,t3,crMatched):null;   // Complex Rule driving this month's cover target (or null)
+    const row={key,lbl,lbl2,now,isActual:false,isForecast:!!isForecast,crRule,
       dtc,b2b,fba,tot,pka:(md.pka&&md.pka[key])||0,a3,aF,confQty3,confQtyF,assumedQty3,
       assumedLabel:buyFromLbl[i]||lbl,
       fTx,trfIn,fSh,c3,cF,tg3,tgF,tot3pl:dtc+b2b+fTx,
@@ -2920,6 +2938,23 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     s3=c3;sF=cF;
     return row;
   });
+}
+// Tooltip HTML for a complex-rule-impacted cover cell in the SKU popup (see buildTable "Cover (weeks)").
+function crRuleTip(r){
+  if(!r)return '';
+  var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function moyy(v){var m=String(v==null?'':v).match(/^(\d{4})_(\d{2})/);return m?(MON[(+m[2])-1]+'-'+m[1].slice(2)):String(v||'');}
+  var scope=[];
+  if(r.sku){var n=String(r.sku).split(',').filter(Boolean).length;scope.push(n>1?(n+' SKUs'):('SKU '+r.sku));}
+  if(r.category)scope.push(r.category);
+  if(r.tier)scope.push('Tier '+r.tier);
+  if(r.season)scope.push(r.season);
+  var cov=(r.coverage_type==='range')?('cover '+moyy(r.range_from)+' → '+moyy(r.range_to)):((r.cover_months!=null?r.cover_months:'?')+' months cover');
+  var out='<b>♛ Complex Rule</b>'+(r.name?' — '+esc(r.name):'')
+    +'<br>Scope: '+(scope.length?esc(scope.join(' · ')):'all SKUs')+' · '+esc(r.country||'')
+    +'<br>'+esc(cov);
+  if(r.window_from||r.window_to)out+='<br>Window: '+(r.window_from?dateDMY(r.window_from):'—')+' → '+(r.window_to?dateDMY(r.window_to):'open');
+  return out.replace(/"/g,'&quot;');
 }
 function buildTable(proj,md,pd,is3,hasFBA){
   const ch=md.ch||[],hasDTC=ch.includes('DTC'),hasB2B=ch.includes('B2B');
@@ -3000,6 +3035,8 @@ function buildTable(proj,md,pd,is3,hasFBA){
       // Green within ±20% of target, red otherwise
       const tol=t3*0.2;
       const cls=Math.abs(w-t3)<=tol?'cok':'clo';
+      // Complex-rule-impacted month: light-purple background + 120ms hover tooltip naming the rule.
+      if(p.crRule)return '<td class="'+cls+' crc-tip" data-tip="'+crRuleTip(p.crRule)+'" style="background:#f5f3ff;cursor:help">'+Math.round(w)+'w</td>';
       return c(Math.round(w)+'w',cls);
     }));
     // 3PL Target Units
@@ -5187,6 +5224,14 @@ function inbDiv(inb, entries, color){
   document.addEventListener('mouseover',function(e){ var n=e.target&&e.target.closest?e.target.closest('.stk-inb[data-tip]'):null; if(!n)return;
     clearTimeout(t); t=setTimeout(function(){ if(!el){el=document.createElement('div'); el.style.cssText='position:fixed;z-index:100001;max-width:260px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:7px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none'; document.body.appendChild(el);} el.innerHTML=n.getAttribute('data-tip'); el.style.display='block'; var r=n.getBoundingClientRect(); el.style.left=Math.max(6,Math.min(r.left,window.innerWidth-266))+'px'; el.style.top=(r.bottom+5)+'px'; },120); });
   document.addEventListener('mouseout',function(e){ var n=e.target&&e.target.closest?e.target.closest('.stk-inb[data-tip]'):null; if(n){clearTimeout(t); hide();} });
+  document.addEventListener('scroll',hide,true);
+})();
+// Complex-rule cover cells (.crc-tip[data-tip]) in the SKU popup — 120ms hover tooltip naming the rule (bound once).
+(function(){ var el=null,t=null;
+  function hide(){ if(el)el.style.display='none'; }
+  document.addEventListener('mouseover',function(e){ var n=e.target&&e.target.closest?e.target.closest('.crc-tip[data-tip]'):null; if(!n)return;
+    clearTimeout(t); t=setTimeout(function(){ if(!el){el=document.createElement('div'); el.style.cssText='position:fixed;z-index:100006;max-width:300px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:7px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none'; document.body.appendChild(el);} el.innerHTML=n.getAttribute('data-tip'); el.style.display='block'; var r=n.getBoundingClientRect(); el.style.left=Math.max(6,Math.min(r.left,window.innerWidth-306))+'px'; el.style.top=(r.bottom+5)+'px'; },120); });
+  document.addEventListener('mouseout',function(e){ var n=e.target&&e.target.closest?e.target.closest('.crc-tip[data-tip]'):null; if(n){clearTimeout(t); hide();} });
   document.addEventListener('scroll',hide,true);
 })();
 // Persistent, click-to-copy tooltip for FBA-inbound cells (.fba-inb[data-copy]) — 120ms hover to show;
