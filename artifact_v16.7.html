@@ -20,6 +20,7 @@ body{font-family:system-ui,-apple-system,sans-serif;font-size:12px;color:#1a1a1a
   .wrap{padding:6px 7px;padding-top:52px}                 /* clear the fixed top bar */
   #view-tabs-row{display:none !important}                 /* replaced by the drawer on phone */
   #supply-nav-sel{display:none !important}                /* section dropdown replaced by the drawer */
+  #ver,.ver{display:none !important}                      /* sub-nav HORIZON version badge is redundant on phone — the top bar (#hz-ver) already shows it */
   #hz-topbar{display:flex !important}
   body.supply-on #hz-search{display:block}                /* search only useful inside SUPPLY */
   /* BUY / FBA plan (shared scaffold): collapse filters behind the "Filters" button, make the grid scroll,
@@ -2988,6 +2989,7 @@ return {project:project, getBuyQtys:getBuyQtys, buyplanItems:buyplanItems, rende
   open_:open_, close_:close_, renderPanel:renderPanel, swM:swM, rpc:rpc,
   downloadReport:downloadReport, downloadReportCSV:downloadReportCSV, downloadViewCSV:downloadViewCSV, updateDlMenuLabels:updateDlMenuLabels,
   updateTrfHeaders:updateTrfHeaders, getFilteredVis:getFilteredVis,
+  seasons:function(){ var out={}; SL.forEach(function(s){ if(!s.rw)return; var ok=false; for(var m in (s.ms||{})){ if(s.ms[m]&&(s.ms[m].st==='ACTIVE'||s.ms[m].st==='FUTURE')){ok=true;break;} } if(ok)out[s.rw]=1; }); return Object.keys(out).sort(); },
   BUY_CACHE:BUY_CACHE, D:D, setView:function(v){var was=BP_VIEW;BP_VIEW=(v==='fba')?'fba':(v==='transfer'?'transfer':'buy');if(BP_VIEW==='fba'&&was!=='fba')BU_SEL='TRFFBA';if(BP_VIEW==='transfer'&&was!=='transfer')BU_SEL='TRF';}, fbaClearAll:fbaClearAll, fbaSelectAll:fbaSelectAll, fbaClearOverrides:fbaClearOverrides, fbaClearTicks:fbaClearTicks, downloadFbaTransfer:downloadFbaTransfer,
   open_:open_, close_:close_,
   get CUR(){return CUR;}, set CUR(v){CUR=v;}};
@@ -3002,6 +3004,8 @@ var CR=(function(){
   var rules=(typeof COMPLEX_RULES!=='undefined'&&Array.isArray(COMPLEX_RULES))?COMPLEX_RULES.slice():[];
   var editing=null;   // rule being edited (object) or {} for new, or null when list view
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  function ym(d){d=String(d==null?'':d).trim();var m=/^(\d{4})-(\d{2})/.exec(d);return m?(m[1]+'_'+m[2]):null;}          // date input → 'YYYY_MM'
+  function ymToDate(v){v=String(v==null?'':v).trim();var m=/^(\d{4})_(\d{2})/.exec(v);return m?(m[1]+'-'+m[2]+'-01'):'';}   // stored 'YYYY_MM' → date-input value (1st of month)
   function count(){return rules.filter(function(r){return r.enabled!==false;}).length;}
   function updateBtn(){var b=document.getElementById('cr-btn');if(b)b.innerHTML='&#9819; Complex Rules ('+count()+') &#9662;';}
   function scopeChips(r){
@@ -3054,21 +3058,24 @@ var CR=(function(){
     var r=editing||{};
     var isRange=r.coverage_type==='range';
     var catList=(typeof window.CR_CATS!=='undefined'&&window.CR_CATS.length)?window.CR_CATS:[];
+    var seasonList=(typeof window.CR_SEASONS!=='undefined'&&window.CR_SEASONS.length)?window.CR_SEASONS.slice():[];
+    if(r.season&&seasonList.indexOf(r.season)<0)seasonList.unshift(r.season);   // keep an old rule's season even if no longer active
+    var selCo=r.country?[String(r.country)]:['UK'];
     var h='<div style="font-weight:700;color:#5b21b6;font-size:12px;margin-bottom:8px">&#9819; '+(r.id?'Edit rule':'New rule')+'</div>'
-      +'<div style="display:grid;grid-template-columns:130px 1fr;gap:7px 12px;align-items:center">'
-      +'<span class="sl">Country:</span><span><select id="cr-country" style="width:120px">'+CTRS_CR.map(function(c){return opt(c,r.country||'UK');}).join('')+'</select></span>'
+      +'<div style="display:grid;grid-template-columns:130px 1fr;gap:7px 12px;align-items:start">'
+      +'<span class="sl" style="padding-top:4px">Countries:</span><span><select id="cr-country" multiple size="5" style="width:110px;vertical-align:top">'+CTRS_CR.map(function(c){return '<option value="'+c+'"'+(selCo.indexOf(c)>=0?' selected':'')+'>'+c+'</option>';}).join('')+'</select> <span class="sl">Ctrl/Cmd-click for several'+(r.id?' — first stays this rule, extras become new rules':'')+'</span></span>'
       +'<span class="sl">Name (optional):</span><span><input id="cr-name" type="text" value="'+esc(r.name||'')+'" placeholder="e.g. Unicorn summer push" style="width:280px"></span>'
       +'<span class="sl" style="border-top:1px solid #e9d5ff;padding-top:7px">Scope — SKU:</span><span style="border-top:1px solid #e9d5ff;padding-top:7px"><input id="cr-sku" type="text" value="'+esc(r.sku||'')+'" placeholder="exact SKU (blank = any)" style="width:280px"></span>'
       +'<span class="sl">Scope — Category:</span><span><input id="cr-category" list="cr-catlist" type="text" value="'+esc(r.category||'')+'" placeholder="category (blank = any)" style="width:220px"><datalist id="cr-catlist">'+catList.map(function(c){return '<option value="'+esc(c)+'">';}).join('')+'</datalist></span>'
       +'<span class="sl">Scope — Tier:</span><span><select id="cr-tier" style="width:120px"><option value="">any</option>'+['A','B','C'].map(function(t){return opt(t,r.tier||'');}).join('')+'</select></span>'
-      +'<span class="sl">Scope — Season:</span><span><input id="cr-season" type="text" value="'+esc(r.season||'')+'" placeholder="release window / season (blank = any)" style="width:220px"></span>'
+      +'<span class="sl">Scope — Season:</span><span><select id="cr-season" style="width:220px"><option value="">any</option>'+seasonList.map(function(sv){return opt(sv,r.season||'');}).join('')+'</select> <span class="sl">(active + future release windows)</span></span>'
       +'<span class="sl" style="border-top:1px solid #e9d5ff;padding-top:7px">Window from:</span><span style="border-top:1px solid #e9d5ff;padding-top:7px"><input id="cr-wfrom" type="date" value="'+esc(r.window_from||'')+'"> <span class="sl">(blank = always on)</span></span>'
       +'<span class="sl">Window to:</span><span><input id="cr-wto" type="date" value="'+esc(r.window_to||'')+'"> <span class="sl">(blank = open-ended)</span></span>'
       +'<span class="sl" style="border-top:1px solid #e9d5ff;padding-top:7px">Coverage:</span><span style="border-top:1px solid #e9d5ff;padding-top:7px">'
         +'<label style="margin-right:12px"><input type="radio" name="cr-ctype" value="months"'+(isRange?'':' checked')+' onchange="CR.toggleCoverage()"> Months of cover</label>'
         +'<label><input type="radio" name="cr-ctype" value="range"'+(isRange?' checked':'')+' onchange="CR.toggleCoverage()"> Fixed month range</label></span>'
       +'<span class="sl" id="cr-months-lbl"'+(isRange?' style="display:none"':'')+'>Cover months:</span><span id="cr-months-wrap"'+(isRange?' style="display:none"':'')+'><input id="cr-cover-months" type="number" min="0" step="0.5" value="'+esc(r.cover_months!=null?r.cover_months:'')+'" style="width:80px"> <span class="sl">months</span></span>'
-      +'<span class="sl" id="cr-range-lbl"'+(isRange?'':' style="display:none"')+'>Cover range:</span><span id="cr-range-wrap"'+(isRange?'':' style="display:none"')+'><input id="cr-range-from" type="text" value="'+esc(r.range_from||'')+'" placeholder="YYYY_MM" style="width:90px"> &rarr; <input id="cr-range-to" type="text" value="'+esc(r.range_to||'')+'" placeholder="YYYY_MM" style="width:90px"></span>'
+      +'<span class="sl" id="cr-range-lbl"'+(isRange?'':' style="display:none"')+'>Cover range:</span><span id="cr-range-wrap"'+(isRange?'':' style="display:none"')+'><input id="cr-range-from" type="date" value="'+esc(ymToDate(r.range_from))+'"> &rarr; <input id="cr-range-to" type="date" value="'+esc(ymToDate(r.range_to))+'"> <span class="sl">(pick any day — the month is used)</span></span>'
       +'<span class="sl">Enabled:</span><span><label><input id="cr-enabled" type="checkbox"'+(r.enabled===false?'':' checked')+'> active</label></span>'
       +'</div>'
       +'<div style="margin-top:10px;display:flex;gap:8px"><button type="button" onclick="CR.save()" style="font-size:10px;padding:4px 14px;border:1px solid #7c3aed;border-radius:3px;background:#7c3aed;color:#fff;cursor:pointer;font-weight:700">Save rule</button>'
@@ -3094,25 +3101,34 @@ var CR=(function(){
   function save(){
     var msg=document.getElementById('cr-msg');
     var ctype=(document.querySelector('input[name="cr-ctype"]:checked')||{}).value||'months';
-    var body={
-      id:(editing&&editing.id)||undefined,
-      country:val('cr-country'), name:val('cr-name')||null,
+    var selEl=document.getElementById('cr-country');
+    var countries=selEl?Array.prototype.slice.call(selEl.selectedOptions).map(function(o){return o.value;}):[];
+    if(!countries.length){if(msg)msg.textContent='Pick at least one country.';return;}
+    var rf=ctype==='range'?ym(val('cr-range-from')):null, rt=ctype==='range'?ym(val('cr-range-to')):null;
+    var base={
+      name:val('cr-name')||null,
       sku:val('cr-sku')||null, category:val('cr-category')||null, tier:val('cr-tier')||null, season:val('cr-season')||null,
       window_from:val('cr-wfrom')||null, window_to:val('cr-wto')||null,
       coverage_type:ctype,
       cover_months:ctype==='months'?val('cr-cover-months'):null,
-      range_from:ctype==='range'?val('cr-range-from'):null, range_to:ctype==='range'?val('cr-range-to'):null,
+      range_from:rf, range_to:rt,
       enabled:!!document.getElementById('cr-enabled').checked
     };
-    if(ctype==='months'&&!body.cover_months){if(msg)msg.textContent='Enter cover months.';return;}
-    if(ctype==='range'&&(!body.range_from||!body.range_to)){if(msg)msg.textContent='Enter both range months (YYYY_MM).';return;}
+    if(ctype==='months'&&!base.cover_months){if(msg)msg.textContent='Enter cover months.';return;}
+    if(ctype==='range'&&(!rf||!rt)){if(msg)msg.textContent='Pick both range dates.';return;}
     if(msg)msg.textContent='Saving…';
-    fetch('/api/buy-complex-rules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-      .then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j};});})
-      .then(function(res){
-        if(!res.ok){if(msg)msg.textContent=res.j.error||'Save failed';return;}
-        reload();
-      }).catch(function(e){if(msg)msg.textContent=String(e);});
+    // One rule per selected country. On edit the first selected country keeps the edited row; any extras become new rules.
+    var reqs=countries.map(function(co,idx){
+      var b={};for(var k in base)b[k]=base[k];b.country=co;
+      if(editing&&editing.id&&idx===0)b.id=editing.id;
+      return fetch('/api/buy-complex-rules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})
+        .then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j};});});
+    });
+    Promise.all(reqs).then(function(results){
+      var bad=results.filter(function(x){return !x.ok;});
+      if(bad.length){if(msg)msg.textContent=(bad[0].j&&bad[0].j.error)||'Save failed';return;}
+      reload();
+    }).catch(function(e){if(msg)msg.textContent=String(e);});
   }
   function del(id){
     if(!window.confirm('Delete this rule?'))return;
@@ -3131,7 +3147,8 @@ var CR=(function(){
 if(typeof window!=='undefined'){
   window.CR=CR;
   try{ window.CR_CATS=(typeof CATS_META!=='undefined')?Object.keys(CATS_META).sort():[]; }catch(e){ window.CR_CATS=[]; }
-  function _crInit(){ try{ CR.updateBtn(); }catch(e){} }
+  try{ window.CR_SEASONS=(window.BP&&BP.seasons)?BP.seasons():[]; }catch(e){ window.CR_SEASONS=[]; }
+  function _crInit(){ try{ if((!window.CR_SEASONS||!window.CR_SEASONS.length)&&window.BP&&BP.seasons)window.CR_SEASONS=BP.seasons(); }catch(e){} try{ CR.updateBtn(); }catch(e){} }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',_crInit); else _crInit();
 }
 
@@ -11073,6 +11090,7 @@ var _rfBtn=document.getElementById('rf'); if(_rfBtn)_rfBtn.onclick=function(){
         else if(isCfg){ waitBuild(function(){ return !!(window.__configNav && window.__configNav.items && window.__configNav.items.length); }); }
         else if(isScen){ waitBuild(function(){ return document.querySelectorAll('#scenario-subnav .stab').length>0; }); }
         else if(vb.dataset.view==='planning'){ waitBuild(function(){ return document.querySelectorAll('#demand-tabs .dnav').length>0; }); }
+        else if(vb.dataset.group==='buymove'){ waitBuild(function(){ return document.querySelectorAll('#buymove-tabs .dnav').length>0; }); }
         else { close(); }
       }));
       // nest the active view's sub-nav directly UNDER its button (indented), rather than at the bottom of the drawer
@@ -11081,6 +11099,8 @@ var _rfBtn=document.getElementById('rf'); if(_rfBtn)_rfBtn.onclick=function(){
           nav.sections.forEach(function(s){ drawer.appendChild(subItem(s[1], s[0]===cur, function(){ clearSearch(); nav.select(s[0]); close(); })); }); }
       } else if(active && vb.dataset.view==='planning'){   // DEMAND: Plan / KPIs / Targets / Actions / Calendar
         Array.prototype.slice.call(document.querySelectorAll('#demand-tabs .dnav')).forEach(function(db){ drawer.appendChild(subItem(db.textContent.trim(), db.classList.contains('active'), function(){ db.click(); close(); })); });
+      } else if(active && vb.dataset.group==='buymove'){   // BUY & MOVE sub-nav — Actions / Buy / FBA / Transfer
+        Array.prototype.slice.call(document.querySelectorAll('#buymove-tabs .dnav')).forEach(function(bb){ drawer.appendChild(subItem(bb.textContent.trim(), bb.classList.contains('active'), function(){ bb.click(); close(); })); });
       } else if(active && isScen){   // SCENARIO sub-nav
         Array.prototype.slice.call(document.querySelectorAll('#scenario-subnav .stab')).forEach(function(sb){ drawer.appendChild(subItem(sb.textContent.trim(), sb.classList.contains('active'), function(){ sb.click(); close(); })); });
       } else if(active && isCfg){   // CONFIG sub-nav — from the __configNav bridge (renders immediately, even while CONFIG is still loading)

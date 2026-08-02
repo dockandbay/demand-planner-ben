@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.419 - Complex Rules form polish + mobile nav ⚠️ NEEDS TESTING
+- **Complex Rules — countries multi-select:** pick several countries for one rule; on save it writes **one rule per country** (keeps the per-country table + "highest coverage wins"). On edit, the first selected country keeps the edited row and any extras become new rules.
+- **Complex Rules — Season is now a dropdown** built from the distinct **release windows of active + future products** (`BP.seasons()` → `window.CR_SEASONS`); an old rule's season is preserved even if no longer active.
+- **Complex Rules — coverage range uses date pickers:** two `type=date` inputs; the **month is inferred** (`YYYY_MM`) from the picked dates (stored/compared unchanged). Editing shows the stored months as the 1st of the month.
+- **Mobile drawer:** BUY & MOVE now expands its sub-nav (**Actions / Buy / FBA / Transfer**) inline, like DEMAND/SCENARIO/CONFIG.
+- **Mobile:** the HORIZON version badge shows **only in the top bar** — the redundant sub-nav badge (`#ver`/`.ver`) is hidden on phones.
+- Files: `artifact_v16.7.html` only. No schema/migration change.
+
 ## v26.418 - Complex Rules (Phase 1: foundation + CRUD UI) ⚠️ NEEDS TESTING · NEW MIGRATION
 - **New BUY-tab feature "Complex Rules"** (will replace First Buy) — cover-target override rules by **scope × window × coverage**, grouped by country. Phase 1 = foundation + full CRUD UI; **no buy-quantity change yet** (engine wiring is Phase 2).
 - **⚠️ MIGRATION 170** `170_buy_complex_rules.sql` — new table `planner.buy_complex_rules`. Diviyaj must run it on live (already applied to sandbox). Fields: country, name, scope (sku/category/tier/season, all optional & AND'd), window_from/to, coverage_type ('months'|'range'), cover_months | range_from/range_to, enabled.
