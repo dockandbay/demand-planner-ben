@@ -625,8 +625,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
 <div style="display:flex;flex-direction:column;gap:4px;padding-bottom:8px;border-bottom:1px solid #e8e8e8;margin-bottom:6px">
   <div id="view-tabs-row" style="display:flex;align-items:center;gap:6px;background:#374151;border-radius:7px;padding:5px 8px">
     <button class="view-toggle" data-view="planning">DEMAND</button>
-    <button class="view-toggle" data-view="buy">BUY</button>
-    <button class="view-toggle" data-view="fba">FBA</button>
+    <button class="view-toggle" data-view="buy" data-group="buymove">BUY &amp; MOVE</button>
     <button class="view-toggle" data-view="exec">REPORTS</button>
     <div style="flex:1"></div>
     <button id="sa-drawer-btn" title="Stock Availability" onclick="openSADrawer()" style="margin-right:4px;height:24px;padding:0 9px;border-radius:12px;border:1px solid #2563eb;background:#1d4ed8;color:#fff;cursor:pointer;font-weight:700;font-size:11px;letter-spacing:.03em;line-height:1;flex:0 0 auto">SA</button>
@@ -6878,14 +6877,14 @@ function render(){
   if(CAL_EVENTS===null){ CAL_EVENTS=[]; fetch('/api/trading-calendar').then(function(r){return r.json();}).then(function(d){ CAL_EVENTS=(d&&d.events)||[]; if(VIEW_MODE==='planning')render(); }).catch(function(){}); }
   // Toggle filter rows visibility based on view mode.
   // PLAN shows filters; BUY and REPORT hide the PLAN filter rows (BUY gets its own in a later part).
-  var filtersHide=(VIEW_MODE==='exec'||VIEW_MODE==='buy'||VIEW_MODE==='fba');
+  var filtersHide=(VIEW_MODE==='exec'||VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer');
   ['ctabs-row','filters-row2','catrow1-wrap'].forEach(function(id){
     var el=document.getElementById(id);
     if(el)el.style.display=filtersHide?'none':'';
   });
   // Update view toggle button states
   document.querySelectorAll('.view-toggle').forEach(function(b){
-    b.classList.toggle('active',b.dataset.view===VIEW_MODE);
+    b.classList.toggle('active',b.dataset.view===VIEW_MODE||(b.dataset.group==='buymove'&&(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer')));
   });
   // Show the top-right AI tool-bar (Insights) on the PLAN/DEMAND view only; REPORTS/BUY/FBA get none.
   var _pt=document.getElementById('plan-tools');
@@ -6901,12 +6900,16 @@ function render(){
     if(_sb)_sb.style.display='';
     ['demand-tabs','demand-body'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
   }
+  // Leaving the BUY & MOVE group → tear down its sub-nav + the TRANSFER placeholder.
+  if(VIEW_MODE!=='buy'&&VIEW_MODE!=='fba'&&VIEW_MODE!=='transfer'){ ['buymove-tabs','transfer-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();}); }
   if(VIEW_MODE==='exec'){renderReportView();return;}
   // leaving the REPORTS area — tear down its sub-tab bar + any report body
   ['report-tabs','report-body','exec-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
-  if(VIEW_MODE==='buy'||VIEW_MODE==='fba'){
-    if(window.BP)BP.BP_VIEW=VIEW_MODE; // hint; renderBuyView sets the engine flag
-    renderBuyView(VIEW_MODE==='fba'?'fba':'buy');
+  if(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'){
+    if(window.BP)BP.BP_VIEW=(VIEW_MODE==='fba'?'fba':'buy'); // hint; renderBuyView sets the engine flag
+    if(VIEW_MODE==='transfer'){ var _tw=document.getElementById('tw'); if(_tw)_tw.style.display='none'; var _bw=document.getElementById('buy-wrap'); if(_bw)_bw.remove(); renderTransferView(); }
+    else { var _tvw=document.getElementById('transfer-wrap'); if(_tvw)_tvw.remove(); renderBuyView(VIEW_MODE==='fba'?'fba':'buy'); }
+    renderBuyMoveTabs();
     return;
   }
   // Planning mode — ensure exec/buy scaffolding is torn down
@@ -7317,6 +7320,29 @@ function renderDemandTabs(){
   var _ver=document.getElementById('ver');
   if(_ver){ _ver.style.cssText='color:#0f172a;background:#fbbf24;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:800;line-height:1.2;letter-spacing:.02em;flex:0 0 auto;margin-left:10px;white-space:nowrap;position:relative'; bar.appendChild(_ver); }   // amber badge, matches SUPPLY
   if(_sb)_sb.style.display='none';   // its contents now live on nav-2
+}
+// ── BUY & MOVE group: second-level sub-nav (BUY / FBA / TRANSFER) + the TRANSFER placeholder page ──
+var BUYMOVE_TABS=[['buy','BUY'],['fba','FBA'],['transfer','TRANSFER']];
+function renderBuyMoveTabs(){
+  var _vtr=document.getElementById('view-tabs-row');
+  var bar=document.getElementById('buymove-tabs');
+  if(!bar){ bar=document.createElement('div'); bar.id='buymove-tabs';
+    bar.style.cssText='display:flex;gap:2px;align-items:center;margin:2px 0 10px;border-bottom:1px solid #e0e0e0;flex-wrap:wrap';   // match #demand-tabs
+    if(_vtr&&_vtr.parentNode)_vtr.parentNode.insertBefore(bar,_vtr.nextSibling); }
+  bar.innerHTML=BUYMOVE_TABS.map(function(t){return '<button class="dnav'+(t[0]===VIEW_MODE?' active':'')+'" data-bm="'+t[0]+'">'+t[1]+'</button>';}).join('');
+  bar.querySelectorAll('.dnav').forEach(function(b){ b.onclick=function(){ VIEW_MODE=b.dataset.bm; if(window.writeHash&&(VIEW_MODE==='buy'||VIEW_MODE==='fba'))window.writeHash([VIEW_MODE,String(typeof CUR!=='undefined'?CUR:'uk').toLowerCase()]); render(); }; });
+}
+function renderTransferView(){
+  var host=document.querySelector('.wrap');
+  var ex=document.getElementById('transfer-wrap'); if(ex)ex.remove();
+  var wrap=document.createElement('div'); wrap.id='transfer-wrap';
+  wrap.innerHTML='<div style="max-width:760px;margin:22px auto;padding:30px;border:1px dashed #cbd5e1;border-radius:14px;background:#f8fafc;text-align:center">'
+    +'<div style="font-size:36px">🔄</div>'
+    +'<div style="font-weight:800;font-size:19px;margin-top:6px;letter-spacing:.02em">TRANSFER</div>'
+    +'<div style="color:#334155;font-size:14px;margin-top:10px;font-weight:600">Function to be confirmed.</div>'
+    +'<div style="color:#94a3b8;font-size:12px;margin-top:12px;line-height:1.65;max-width:560px;margin-left:auto;margin-right:auto">Planned: a stock-transfer analysis from each warehouse to the others — which SKUs to move where to balance cover across 3PL / FBA / markets, similar to the buy-plan transfer columns.</div>'
+    +'</div>';
+  if(host)host.appendChild(wrap); else document.body.appendChild(wrap);
 }
 // ─── DEMAND ▸ TARGETS: sell-through % targets by category × market ─────────
 function tHesc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
