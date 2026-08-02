@@ -1261,13 +1261,17 @@ function getBuyQtys(sku,mkt){
     b3u+=proj[i].bQu||0;
     bf+=proj[i].fdQ||0;
   }
+  // Future buys the engine has SCHEDULED beyond the current order-now window — surfaced as a "(+N future)" flag so
+  // long-lead SKUs whose next buy isn't due yet aren't invisible. NOT summed into b3 (Buy 3PL stays "order now").
+  let futQty=0,futN=0;
+  for(let i=START_IDX+idxCount;i<proj.length;i++){ if((proj[i].bQ||0)>0){ futQty+=proj[i].bQ; futN++; } }
   // Buy FBA is bought in WHOLE CARTONS: if the forward-window FBA need is MORE than one carton, round it UP to
   // full cartons; if it fits within a single carton (≤1), that top-up is taken as a 3PL→FBA transfer instead, so
   // Buy FBA shows 0. (cp = units per carton from planner.products; falls back to 1 when unknown.)
   const _cpF=(pd.cp)||1;
   if(bf>0){ const _ctF=Math.ceil(bf/_cpF); bf=_ctF>1?_ctF*_cpF:0; }
   const tx=(proj[START_IDX]&&proj[START_IDX].tx)||0; // recommended 3PL->FBA transfer NOW (M+0)
-  return BUY_CACHE[cacheKey]={b3,b3u,bf,tx};
+  return BUY_CACHE[cacheKey]={b3,b3u,bf,tx,futQty,futN};
 }
 
 // Split FBA-bound inbound into arriving within 14 days vs 15+ days out (by ETA).
@@ -1742,7 +1746,7 @@ function render(){
       const i3=md.i3,ifv=md['if_'],oo=md.oo||0;
       const tc=tiCls(s.ti),sc2=stCls(st);
       const launch=md.launch,disc=md.disc;
-      const {b3,b3u,bf}=getBuyQtys(s.s,CUR);
+      const {b3,b3u,bf,futN,futQty}=getBuyQtys(s.s,CUR);
           // Transfer opportunity: per fixed target market columns
       function getTrfCell(om){
         const txH2=parseInt(document.getElementById('txh')?.value)||20;
@@ -1788,7 +1792,7 @@ function render(){
         <td class="iv"><span class="iv-v">${later>0?fmt(later):'—'}</span></td>`;
       } else {
         trail=`
-        <td class="bq">${b3>0?`<span class="bq-v">${fmt(b3)}</span>`:`<span class="bq-nil">—</span>`}</td>
+        <td class="bq">${b3>0?`<span class="bq-v">${fmt(b3)}</span>`:`<span class="bq-nil">—</span>`}${futN>0?`<span title="${futN} further buy(s) scheduled later in the plan (${fmt(futQty)}u) — not due to order this cycle" style="font-size:8px;color:#2563eb;margin-left:2px;white-space:nowrap">+${futN}f</span>`:``}</td>
         <td class="bq">${b3u>0?`<span class="bq-v" style="color:#dc2626;font-weight:700">${fmt(b3u)}</span>`:`<span class="bq-nil">—</span>`}</td>
         <td class="bq">${bf>0?`<span class="bq-fba">${fmt(bf)}</span>`:`<span class="bq-nil">—</span>`}</td>
         ${getTrfCell(pairs[0])}
@@ -2028,7 +2032,7 @@ function buildReport(type){
   else { // ALL
     rows=[['SKU','Subcategory','Tier','Status','SOH 3PL','SOH FBA','On Order','Buy 3PL','Buy Urgent','Buy FBA','Supplier']];
     vis.forEach(s=>{
-      const {b3,b3u,bf}=getBuyQtys(s.s,CUR);
+      const {b3,b3u,bf,futN,futQty}=getBuyQtys(s.s,CUR);
       const md=s.ms[CUR]||{};
       rows.push([s.s,s.sc||'',s.ti||'',getSt(s.ms,CUR),md.i3||0,md.if_||0,md.oo||0,b3||'',b3u||'',bf||'',(PD[s.s]&&PD[s.s].supp)||'']);
     });
@@ -2492,6 +2496,11 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     }
 
     if(urgentQtyNeeded>0){
+      // Bridge WITH cover, not just survival (per Ben): add a safety buffer (~URGENT_THRESHOLD_WKS of cover at the
+      // rush-arrival demand rate) so the rush doesn't leave the SKU at ~0 until the next normal order lands — a
+      // forecast miss during the bridge would otherwise stock it out. Avoids back-to-back rushes.
+      var _bufWk=(stockTrace[injPos]||stockTrace[dangerStart]||{weekly:0}).weekly||0;
+      urgentQtyNeeded+=_bufWk*URGENT_THRESHOLD_WKS;
       // Round up to case pack
       urgentQtyNeeded=Math.max(Math.ceil(urgentQtyNeeded/cp)*cp,moq);
       buyUrgent[1]=urgentQtyNeeded;

@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.395 - BUY (HIGH-1 + HIGH-2): urgent bridges with cover + future-buy flag ⚠️ NEEDS BEN'S REVIEW
+- **HIGH-1 (your call = "bridge with cover"):** urgent/rush was sized only to keep stock ≥ 0 until the next normal order — leaving the SKU at ~0 cover. Now adds a ~`URGENT_THRESHOLD_WKS` (3wk) safety buffer at the rush-arrival demand rate. Impact: urgent total 103,266 → **131,058 (+27%)**; PICNIC urgent 38,640 → 45,444. ⚠️ changes real urgent quantities.
+- **HIGH-2 (your call = "order-now + flag future"):** `getBuyQtys` returns `futN`/`futQty`; Buy 3PL cell shows a small **"+Nf"** flag for scheduled-but-not-due buys (382 SKUs). Buy 3PL number unchanged. `artifact_v16.7.html`.
+
+## v26.394 - BUY (HIGH-3): rebuild demand overlay after a forecast edit
+- `buildLiveDemand` only ran on BUY-tab entry, so a PLAN forecast edit left the buy demand stale on subsequent `BP.render`. Added `BUY_FC_STALE` flag (set in `refreshRow`) checked at top of `BP.render` so demand rebuilds only when the forecast changed. Low-risk. `artifact_v16.7.html`.
+
 ## v26.393 - BUY: fix target-cover off-by-one (fwdDemand excluded the arrival month) ⚠️ NEEDS BEN'S REVIEW
 - `fwdDemand(wks,startIdx,demFn)` looped from `startIdx+1`, so the buy/transfer **target cover excluded the arrival month's own demand**. Invisible on smooth demand, but at a demand cliff it dropped the whole high month — a SKU forecast 10k in Jan (reachable by an ~Aug order at 5-mo lead) showed Buy 3PL = **144** with the 10k stuck in Urgent/nowhere. Changed to `startIdx` (arrival month included).
 - **Impact (sandbox, all SKUs×markets):** PICNIC-CAB-XL-NAVY UK Buy 3PL **144 → 10,080** (correct); **70 SKUs moved urgent→normal**; total Buy 3PL **45,866 → 78,380 (+71%)**, urgent 112,384 → 103,266. The +71% is systemic (every target gains ~1 month cover) — **needs Ben's sign-off** that this is the intended sizing, or we narrow it. `artifact_v16.7.html`. ⚠️ Changes real order quantities.
