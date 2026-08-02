@@ -721,6 +721,9 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
     <button id="cat-btn" class="pill" style="display:inline-flex;align-items:center;gap:8px" onclick="toggleCatPop(event)"><span id="cat-btn-lbl">All categories</span><span style="opacity:.55;font-size:9px">▾</span></button>
     <div id="cat-chips" style="display:flex;gap:4px;flex-wrap:nowrap"></div>
     <div id="cat-pop" style="display:none;position:absolute;top:30px;left:64px;z-index:300;background:#fff;border:1px solid #d0d0d0;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.18);width:440px;padding:8px"></div>
+    <span style="width:1px;height:14px;background:#e0e0e0;margin:0 4px;flex-shrink:0"></span>
+    <span class="pill-lbl">Release Window</span>
+    <select id="plan-rw-sel" onchange="setPlanRw(this.value)" style="font-size:11px;padding:2px 6px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;cursor:pointer"><option value="ALL">All</option></select>
   </div>
 </div>
 <div id="sa-drawer-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:5900" onclick="closeSADrawer()"></div>
@@ -3469,6 +3472,7 @@ let SKU_SORT='alpha';
 let EXPANDED=new Set((function(){try{return JSON.parse(localStorage.getItem('db_layout_expanded_v1'))||[];}catch(e){return [];}})()); // 'subcat|co|ch' combos with SKU rows expanded — restored from last session
 function saveLayout(){ try{ localStorage.setItem('db_layout_expanded_v1',JSON.stringify(Array.from(EXPANDED))); }catch(e){} }
 var PLAN_SKU_QRY=''; // planner SKU filter text (matches sku code or product name)
+var PLAN_RW='ALL';   // planner Release Window filter (dd next to Category); 'ALL' = no filter
 var SHOW_CAT_TOT=(function(){try{return localStorage.getItem('hzShowCatTot')==='1';}catch(e){return false;}})(); // category-total rows hidden by default; toggle in the plan toolbar
 function setShowCatTot(on){SHOW_CAT_TOT=!!on;try{localStorage.setItem('hzShowCatTot',SHOW_CAT_TOT?'1':'0');}catch(e){}var b=document.getElementById('cat-tot-toggle');if(b){b.classList.toggle('active',SHOW_CAT_TOT);b.setAttribute('aria-pressed',SHOW_CAT_TOT?'true':'false');}renderMain();}
 var SMOOTH_PREVIEW=null; // {pk:'subcat|co|ch', fy:startY|null, months:{'YYYY_MM':{sku:units}}} — one pending smooth preview at a time (fy set = whole-FY smooth)
@@ -5465,6 +5469,7 @@ function filteredSkus(s,co,ch,all){
     if(!skuHasAnyActivity(sku,co))return false;
     // SKU text filter (matches sku code or product name)
     if(PLAN_SKU_QRY){var _q=PLAN_SKU_QRY.toLowerCase();if(sku.toLowerCase().indexOf(_q)<0&&(p.n||'').toLowerCase().indexOf(_q)<0)return false;}
+    if(PLAN_RW!=='ALL'&&(p.rw||'')!==PLAN_RW)return false;   // Release Window filter (DEMAND plan)
     // Channel availability
     var av=p.av||{};
     var ctry=co.toLowerCase();
@@ -6315,7 +6320,9 @@ function insertInlineSkuRows(s,co,ch,afterTr){
             +(launchDate&&discDate?' — ':'')
             +(discDate?'<span style="color:'+(discDate<TODAY?'#dc2626':'#888')+'">'+dateShort(discDate)+'</span>':'')
             +'</span>':'')
-          +'</div></div>';
+          +'</div>'
+          +(p.rw?'<div style="font-size:7px;color:#7c3aed;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="Release window / season">RW: '+p.rw+'</div>':'')
+          +'</div>';
 
       } else if(ci===1){
         // Sticky stock col: SKU on-hand / inbound at the channel warehouse
@@ -6875,7 +6882,7 @@ function buildBody(){
   const cm=filteredCats(),frag=document.createDocumentFragment();
   // Grand total row — built by _makeGrandTotRow() so refreshRow() can rebuild it in place on an edit
   _makeGrandTotRow=function(){
-    if(!(SEL.has('ALL')&&!PLAN_SKU_QRY))return null;
+    if(!(SEL.has('ALL')&&!PLAN_SKU_QRY&&PLAN_RW==='ALL'))return null;
     var allRows=DATA.filter(function(r){return r.co===CUR&&(!CF||r.ch===CF);});
     var gt24u=0,gt25u=0,gty25u=0,gty26u=0,gty26r=0,gtf26u=0,gtf27u=0,gtf28u=0,gt24r=0,gt25r=0,gtf26r=0,gtf27r=0,gtf28r=0;
     var gtm1_25=0,gtm1_26=0,gtm3_25=0,gtm3_26=0;
@@ -6972,7 +6979,7 @@ function buildBody(){
   const fu_cache={};
   Object.keys(cm).forEach(function(cat){
     var rows=cm[cat].sort(function(a,b){return a.s.localeCompare(b.s)||(a.ch.localeCompare(b.ch));});
-    if(PLAN_SKU_QRY){rows=rows.filter(function(row){return filteredSkus(row.s,CUR,row.ch).length>0;});if(!rows.length)return;}
+    if(PLAN_SKU_QRY||PLAN_RW!=='ALL'){rows=rows.filter(function(row){return filteredSkus(row.s,CUR,row.ch).length>0;});if(!rows.length)return;}
     // Category header — skip when redundant (the category's only subcategory has the same name, e.g. "Bag - Cooling"),
     // since the data row already labels it. Otherwise render it with the name PINNED left (sticky) so it stays visible
     // when the grid is scrolled right — previously the name scrolled out of view leaving a blank grey bar.
@@ -6995,9 +7002,9 @@ function buildBody(){
       // a full-width horizontal line between one category and the next (e.g. Bag - Beach → Bag - Cooling).
       if(ri===0 && _redundantHdr) drow.classList.add('cat-start');
       frag.appendChild(drow);
-      if(PLAN_SKU_QRY)insertInlineSkuRows(row.s,CUR,row.ch,drow);
+      if(PLAN_SKU_QRY||PLAN_RW!=='ALL')insertInlineSkuRows(row.s,CUR,row.ch,drow);
     });
-    if(PLAN_SKU_QRY)return; // filter mode: skip category totals
+    if(PLAN_SKU_QRY||PLAN_RW!=='ALL')return; // filter mode: skip category totals
     if(!SHOW_CAT_TOT)return; // category-total rows hidden by default (toolbar toggle)
     var _ctr0=_makeCatTotRow(cat); if(_ctr0)frag.appendChild(_ctr0);
   });
@@ -7158,6 +7165,9 @@ function renderMain(){
 // Planner SKU filter: re-render body to surface matching SKUs (input lives in the toolbar so it keeps focus)
 var _skuQryTimer=null;
 function setPlanSkuQry(v){PLAN_SKU_QRY=(v||'').trim();clearTimeout(_skuQryTimer);_skuQryTimer=setTimeout(function(){renderMain();},300);}   // debounce the re-render ~300ms so typing doesn't refilter on every keystroke
+// Planner Release Window filter (dropdown next to Category) — filters SKUs by release window, surfacing matching SKU rows.
+function setPlanRw(v){PLAN_RW=v||'ALL';renderMain();}
+function fillPlanRwSel(){ var sel=document.getElementById('plan-rw-sel'); if(!sel)return; var seen={}; Object.keys(SKUM).forEach(function(sku){var p=SKUM[sku];if(p&&p.rw)seen[p.rw]=1;}); var opts=Object.keys(seen).sort(); if(PLAN_RW!=='ALL'&&opts.indexOf(PLAN_RW)<0)PLAN_RW='ALL'; sel.innerHTML='<option value="ALL">All</option>'+opts.map(function(o){return '<option value="'+String(o).replace(/"/g,'&quot;')+'"'+(o===PLAN_RW?' selected':'')+'>'+o+'</option>';}).join(''); sel.value=PLAN_RW; }
 // DEMAND plan filter persistence — remember country / channel / categories / SKU filter for 1h so returning to the
 // page keeps your view. Saved on each plan render; restored in init() before the first render (syncTabs +
 // renderCatControl then redraw the pills from the restored state).
@@ -7218,6 +7228,7 @@ function syncTabs(){
   document.querySelectorAll('#ctabs .pill').forEach(function(b){b.className='pill'+(b.dataset.co===CUR?' active':'');});
   document.querySelectorAll('#chtabs .pill').forEach(function(b){b.className='pill'+(b.dataset.ch===CF?' active':'');});
   renderCatControl();
+  fillPlanRwSel();
 }
 
 function st(msg){var e=document.getElementById('st');if(e)e.textContent=msg;}

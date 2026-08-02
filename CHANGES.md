@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.427 - DEMAND plan: Release Window filter + RW in column 1 ⚠️ NEEDS TESTING
+- **Release Window dropdown filter** on the DEMAND plan, next to the Category filter (`PLAN_RW`). Selecting a window surfaces the matching SKU rows (same behaviour as the SKU search box); "All" clears it. Options built from the release windows present in the SKU master.
+- **Release Window shown in column 1** (under "Subcategory / Channel") on each SKU row — a small purple `RW: <window>` line beneath the tier/status/dates.
+- Wired into `filteredSkus` + the SKU-row display gates (grand-total, category totals, inline SKU rows) so it filters consistently. `artifact_v16.7.html` only.
+
 ## v26.426 - BUY/FBA Release Window filter + centred column + popup dates ⚠️ NEEDS TESTING
 - **Release Window dropdown filter** on the BUY and FBA tabs (in the Filters row, after Core/Seasonal): pick a release window to filter the grid to those SKUs (`RW_SEL`; options built from the windows present in the current market; hidden on TRANSFER). Applied in both filter chains (grid render + `getFilteredVis`).
 - **Release Window column centred** — header and cell were left-aligned, now `text-align:center`.
