@@ -1566,8 +1566,10 @@ function buildBuPills(){
   var bup=document.getElementById('bup'); if(!bup)return; bup.innerHTML='';
   var BU_PILLS=(BP_VIEW==='fba')
     ? [['All','ALL'],['Transfer FBA','TRFFBA'],['Transfer FBA (non GRS)','TRFFBA_NG']].concat(String(CUR).toUpperCase()==='US'?[['AWD · FBA <3wk','AWDLOW']]:[])   // US only: AWD on hand + FBA under 3 weeks
-    : [['All','ALL'],['Urgent','URGENT'],['Urg Sea','URGENT_SEA'],['Urg Air','URGENT_AIR'],['Buy 3PL','3PL'],['Buy FBA','FBA'],['First Buy','FIRST'],['Transfer','TRF']];
-  if(!BU_PILLS.some(function(p){return p[1]===BU_SEL;}))BU_SEL=(BP_VIEW==='fba')?'TRFFBA':'ALL';   // FBA view defaults to Transfer FBA
+    : (BP_VIEW==='transfer')
+      ? [['All','ALL'],['Transfer','TRF']]   // TRANSFER view: only All / Transfer (buy pills removed per Ben)
+      : [['All','ALL'],['Urgent','URGENT'],['Urg Sea','URGENT_SEA'],['Urg Air','URGENT_AIR'],['Buy 3PL','3PL'],['Buy FBA','FBA'],['First Buy','FIRST'],['Transfer','TRF']];
+  if(!BU_PILLS.some(function(p){return p[1]===BU_SEL;}))BU_SEL=(BP_VIEW==='fba')?'TRFFBA':(BP_VIEW==='transfer'?'TRF':'ALL');   // FBA→Transfer FBA, Transfer→Transfer
   BU_PILLS.forEach(function(pr){ var lbl=pr[0],val=pr[1];
     var b=mk('button','pill'+(val===BU_SEL?' active':''),lbl);
     b.onclick=function(){ BU_SEL=val;
@@ -1715,9 +1717,11 @@ function render(){
   if(_dl)_dl.style.display=(BP_VIEW==='fba')?'':'none';
   var _cr=document.getElementById('fba-create-btn');
   if(_cr)_cr.style.display=(BP_VIEW==='fba')?'':'none';
-  // Create PO / Refresh / Download (now in the controls row as #bp-buy-actions) are BUY-only — hide on FBA.
-  var _bt=document.getElementById('bp-buy-actions');
-  if(_bt)_bt.style.display=(BP_VIEW==='fba')?'none':'inline-flex';
+  // Create PO / Refresh / multi-Download (#bp-buy-actions) are BUY-only. FBA Transfer Logic → FBA only.
+  // A single "Download CSV (data in view)" button shows on FBA + TRANSFER instead.
+  var _bt=document.getElementById('bp-buy-actions'); if(_bt)_bt.style.display=(BP_VIEW==='buy')?'inline-flex':'none';
+  var _fh=document.getElementById('bp-fba-help-btn'); if(_fh)_fh.style.display=(BP_VIEW==='fba')?'':'none';
+  var _vdl=document.getElementById('bp-view-dl'); if(_vdl)_vdl.style.display=(BP_VIEW==='fba'||BP_VIEW==='transfer')?'inline-flex':'none';
   updateFbaSelBox();
   updateTrfHeaders();
   updateDlMenuLabels();
@@ -2147,6 +2151,26 @@ function downloadReportCSV(type){ var m=document.getElementById('dl-menu'); if(m
   const blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'}), url=URL.createObjectURL(blob), a=document.createElement('a');
   a.href=url; a.download=(r.title||'report').replace(/[^a-z0-9]+/gi,'_').replace(/^_|_$/g,'')+'.csv';
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(url);},1000); }
+
+// One 3PL→3PL transfer amount (donor spares, recipient below txl-week cover) — mirrors the grid's getTrfCell/getInbCell.
+function _trfAmt(sku,donor,recip){ var pdd=PD[sku]; if(!pdd)return 0; var dd=pdd.mkts&&pdd.mkts[donor], rd=pdd.mkts&&pdd.mkts[recip]; if(!dd||!rd)return 0;
+  var txL=parseInt(document.getElementById('txl')?.value)||6, curKey=PROJ[2].key;
+  var rD3=((rd.demand&&rd.demand.DTC&&rd.demand.DTC[curKey])||0)+((rd.demand&&rd.demand.B2B&&rd.demand.B2B[curKey])||0);
+  var rWkly=rD3/4.33, recipCov=rWkly>0?(rd.i3||0)/rWkly:999, ocp=pdd.cp||1;
+  var need=rWkly>0?Math.max((rd.t3||12)*rWkly-(rd.i3||0),0):0, spare=donorSpare(dd), sendable=Math.floor(Math.min(need,spare)/ocp)*ocp;
+  return (recipCov<txL&&sendable>0)?sendable:0; }
+// Download the data currently in view (FBA or TRANSFER grid) as CSV.
+function downloadViewCSV(){ var vis=getFilteredVis()||[], co=CUR, rows=[], oth=MKTS.filter(function(m){return m!==co;});
+  if(BP_VIEW==='fba'){ rows.push(['SKU','Release Window','SOH 3PL','SOH FBA','Transfer FBA','FBA inbound <=14d','FBA inbound 15+d']);
+    vis.forEach(function(s){ var md=PD[s.s]&&PD[s.s].mkts&&PD[s.s].mkts[co]; if(!md)return;
+      var rec=(BU_SEL==='TRFFBA_NG')?nonGrsOf(s.s,co):fbaTransferRec(s.s,co), fis=fbaInbSplit(s.s,co);
+      rows.push([s.s,s.rw||'',md.i3||0,md['if_']||0,rec||0,fis.soon||0,fis.later||0]); });
+  } else { var hdr=['SKU','Release Window','SOH 3PL']; oth.forEach(function(m){hdr.push('Out->'+m);}); oth.forEach(function(m){hdr.push('In<-'+m);}); rows.push(hdr);
+    vis.forEach(function(s){ var md=PD[s.s]&&PD[s.s].mkts&&PD[s.s].mkts[co]; if(!md)return;
+      var row=[s.s,s.rw||'',md.i3||0]; oth.forEach(function(m){row.push(_trfAmt(s.s,co,m));}); oth.forEach(function(m){row.push(_trfAmt(s.s,m,co));}); rows.push(row); }); }
+  var csv=rows.map(function(r){return r.map(function(c){var v=String(c==null?'':c); return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',');}).join('\r\n');
+  var blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'}), url=URL.createObjectURL(blob), a=document.createElement('a');
+  a.href=url; a.download=(BP_VIEW==='fba'?'fba_transfer':'transfer')+'_'+co+'_view.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(url);},1000); }
 
 // Update trf dropdown labels when country changes
 function updateDlMenuLabels(){
@@ -2953,9 +2977,9 @@ function fmt(n){if(n===null||n===undefined)return'\u2014';const r=Math.round(n);
 function buyplanItems(mode){ var out=[], fba=(mode==='fba'); try{ for(var sku in PD){ var qq=getBuyQtys(sku,CUR); var q=fba?(qq&&qq.bf):(qq&&qq.b3); if(q>0) out.push({sku:sku, qty:Math.round(q)}); } }catch(e){} return out; }
 return {project:project, getBuyQtys:getBuyQtys, buyplanItems:buyplanItems, render:render, initUI:initUI, setFilters:setFilters, restoreFilters:bpRestoreFilters, donorSpare:donorSpare,
   open_:open_, close_:close_, renderPanel:renderPanel, swM:swM, rpc:rpc,
-  downloadReport:downloadReport, downloadReportCSV:downloadReportCSV, updateDlMenuLabels:updateDlMenuLabels,
+  downloadReport:downloadReport, downloadReportCSV:downloadReportCSV, downloadViewCSV:downloadViewCSV, updateDlMenuLabels:updateDlMenuLabels,
   updateTrfHeaders:updateTrfHeaders, getFilteredVis:getFilteredVis,
-  BUY_CACHE:BUY_CACHE, D:D, setView:function(v){var was=BP_VIEW;BP_VIEW=(v==='fba')?'fba':(v==='transfer'?'transfer':'buy');if(BP_VIEW==='fba'&&was!=='fba')BU_SEL='TRFFBA';}, fbaClearAll:fbaClearAll, fbaSelectAll:fbaSelectAll, fbaClearOverrides:fbaClearOverrides, fbaClearTicks:fbaClearTicks, downloadFbaTransfer:downloadFbaTransfer,
+  BUY_CACHE:BUY_CACHE, D:D, setView:function(v){var was=BP_VIEW;BP_VIEW=(v==='fba')?'fba':(v==='transfer'?'transfer':'buy');if(BP_VIEW==='fba'&&was!=='fba')BU_SEL='TRFFBA';if(BP_VIEW==='transfer'&&was!=='transfer')BU_SEL='TRF';}, fbaClearAll:fbaClearAll, fbaSelectAll:fbaSelectAll, fbaClearOverrides:fbaClearOverrides, fbaClearTicks:fbaClearTicks, downloadFbaTransfer:downloadFbaTransfer,
   open_:open_, close_:close_,
   get CUR(){return CUR;}, set CUR(v){CUR=v;}};
 })();
@@ -3000,7 +3024,8 @@ var BUY_SCAFFOLD=`<div class="wrap">
   <div style="display:flex;align-items:center;gap:6px;font-size:11px;flex-wrap:wrap">
     <button type="button" id="bp-filt-toggle" onclick="(function(){var w=document.getElementById('buy-wrap');if(w)w.classList.toggle('bpf-open');})()" style="font-size:10px;padding:3px 11px;border:1px solid #cbd5e1;border-radius:4px;background:#f1f5f9;color:#0f172a;cursor:pointer;font-weight:700">&#9881; Filters &#9662;</button>
     <button type="button" id="set-btn" onclick="(function(){var p=document.getElementById('set-panel');p.style.display=(p.style.display==='none'||!p.style.display?'block':'none');})()" title="Buy plan settings" style="font-size:10px;padding:2px 9px;border:1px solid #cbd5e1;border-radius:3px;background:#f1f5f9;color:#0f172a;cursor:pointer;font-weight:600">&#9881; Settings &#9662;</button>
-    <button type="button" onclick="document.getElementById('fba-help').style.display=(document.getElementById('fba-help').style.display==='none'?'block':'none')" title="How Transfer FBA is calculated" style="font-size:10px;padding:2px 9px;border:1px solid #cbd5e1;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer">&#9432; FBA Transfer Logic</button>
+    <button type="button" id="bp-view-dl" onclick="BP.downloadViewCSV()" title="Download the data in view as CSV" style="display:none;font-size:10px;padding:2px 10px;border:1px solid #16a34a;border-radius:3px;background:#dcfce7;color:#166534;cursor:pointer;font-weight:600">&#11015; Download CSV</button>
+    <button type="button" id="bp-fba-help-btn" onclick="document.getElementById('fba-help').style.display=(document.getElementById('fba-help').style.display==='none'?'block':'none')" title="How Transfer FBA is calculated" style="font-size:10px;padding:2px 9px;border:1px solid #cbd5e1;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer">&#9432; FBA Transfer Logic</button>
     <span id="bp-buy-actions" style="display:inline-flex;align-items:center;gap:6px;margin-left:6px;border-left:1px solid #e2e8f0;padding-left:8px">
       <button type="button" id="bp-make-po-3pl" onclick="(function(){var it=BP.buyplanItems('3pl');if(!it.length){alert('No Buy 3PL quantities in the current plan.');return;}if(window.openBuyplanModal){window.openBuyplanModal(BP.CUR,it,'3pl');}else{alert('Supply module not ready — open the SUPPLY tab once, then retry.');}})()" title="Create 3PL purchase orders from the Buy 3PL quantities, split into 20-pallet containers" style="font-size:10px;padding:2px 10px;border:1px solid #1d4ed8;border-radius:3px;background:#1d4ed8;color:#fff;cursor:pointer;font-weight:600">3PL - Create POs</button>
       <button type="button" id="bp-make-po-fba" onclick="(function(){if((BP.CUR||'').toUpperCase()==='EU'){alert('FBA-direct PO creation is not available for EU yet (no DE FBA branch).');return;}var it=BP.buyplanItems('fba');if(!it.length){alert('No Buy FBA quantities in the current plan.');return;}if(window.openBuyplanModal){window.openBuyplanModal(BP.CUR,it,'fba');}else{alert('Supply module not ready — open the SUPPLY tab once, then retry.');}})()" title="Create FBA-direct purchase orders from the Buy FBA quantities, split into 20-pallet containers" style="font-size:10px;padding:2px 10px;border:1px solid #16a34a;border-radius:3px;background:#16a34a;color:#fff;cursor:pointer;font-weight:600">FBA - Create POs</button>
@@ -7406,11 +7431,11 @@ function renderBuyMoveActions(){
       var rid='bma-'+m+'-'+a[0];
       html+='<tr class="bma-row" data-t="'+rid+'" style="cursor:pointer;border-top:1px solid #f1f5f9">'
         +'<td style="padding:6px 12px;font-weight:700;color:'+a[2]+'">'+a[1]+'</td>'
-        +'<td style="padding:6px 12px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700">'+fn(tot)+' <span style="color:#94a3b8;font-weight:400">units</span></td>'
-        +'<td style="padding:6px 12px;text-align:right;color:#64748b">'+list.length+' SKU'+(list.length>1?'s':'')+'</td>'
-        +'<td style="padding:6px 12px;text-align:right;color:#94a3b8;width:22px"><span class="bma-chev">&#9656;</span></td></tr>'
+        +'<td style="padding:6px 12px;text-align:left;font-variant-numeric:tabular-nums;font-weight:700">'+fn(tot)+' <span style="color:#94a3b8;font-weight:400">units</span></td>'
+        +'<td style="padding:6px 12px;text-align:left;color:#64748b">'+list.length+' SKU'+(list.length>1?'s':'')+'</td>'
+        +'<td style="padding:6px 12px;text-align:left;color:#94a3b8;width:22px"><span class="bma-chev">&#9656;</span></td></tr>'
         +'<tr id="'+rid+'" style="display:none"><td colspan="4" style="padding:0 12px 8px 24px;background:#fbfdff"><div style="max-height:230px;overflow:auto">'
-        +list.map(function(x){return '<div style="display:flex;justify-content:space-between;padding:1px 0;font-size:11px;border-bottom:1px solid #f4f6f9"><span>'+esc(x.sku)+'</span><span style="font-variant-numeric:tabular-nums">'+fn(x.qty)+'</span></div>';}).join('')
+        +list.map(function(x){return '<div style="display:flex;gap:14px;padding:1px 0;font-size:11px;border-bottom:1px solid #f4f6f9;text-align:left"><span style="min-width:200px">'+esc(x.sku)+'</span><span style="font-variant-numeric:tabular-nums">'+fn(x.qty)+'</span></div>';}).join('')
         +'</div></td></tr>';
     });
     html+='</tbody></table></div>';

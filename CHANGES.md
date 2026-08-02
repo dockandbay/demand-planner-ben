@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.416 - TRANSFER/FBA toolbar tidy + ACTIONS left-align ⚠️ NEEDS TESTING
+- **TRANSFER tab:** removed the ⓘ FBA Transfer Logic / 3PL-Create-POs / FBA-Create-POs / multi-Download buttons and the Urgent/Urg Sea/Urg Air/Buy 3PL/Buy FBA/First Buy pills. Pills are now just **All / Transfer** (defaults to **Transfer**).
+- **FBA tab** defaults to the **Transfer FBA** pill.
+- **FBA + TRANSFER:** single green **⬇ Download CSV** button (same style as BUY), exporting exactly the columns in view (FBA: SKU/Release Window/SOH 3PL/SOH FBA/Transfer FBA/inbound; Transfer: SKU/RW/SOH 3PL/Outbound→each/Inbound←each). `BP.downloadViewCSV()`.
+- **BUY & MOVE ▸ ACTIONS:** all content now **left-aligned** ("No actions", unit totals, SKU counts, expand rows) per house style.
+- Files: `artifact_v16.7.html` only. No migration.
+
 ## v26.415 - Release Window (season) column on BUY / FBA / TRANSFER grids ⚠️ NEEDS TESTING
 - Added a **Release Window** column (from `sku_labels.release_window`) to the buy-plan grid, right **after Type**. Shows on BUY, FBA and TRANSFER (shared lead column). `server.mjs` (SKU query + object now carry `rw`), `artifact_v16.7.html` (header/row + COLS/nameCol +1). Verified header + row alignment (13 cols).
 
