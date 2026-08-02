@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.396 - DEMAND plan: report buttons moved to filters row + Executive Summary drawer ⚠️ NEEDS TESTING
+- **Revenue vs target button relocated:** was a floating pill bottom-right of the screen; now sits **right-aligned in the plan's Filters row** (`#catrow1-wrap`), **desktop only** (hidden on mobile, as requested).
+- **New "📊 Executive summary" pop-out drawer** next to it: compact FY summary (FY26 last-year → FY27 → FY28 partial) with revenue/units + YoY badges, a per-channel FY27 breakdown (DTC/FBA/B2B), and a link to open the full Exec Summary report. Two report drawers now available from the plan.
+- Both follow the plan and refresh with forecast/scope changes. DEMAND-render/UI only — buy plan untouched. `artifact_v16.7.html`.
+
 ## v26.395 - BUY (HIGH-1 + HIGH-2): urgent bridges with cover + future-buy flag ⚠️ NEEDS BEN'S REVIEW
 - **HIGH-1 (your call = "bridge with cover"):** urgent/rush was sized only to keep stock ≥ 0 until the next normal order — leaving the SKU at ~0 cover. Now adds a ~`URGENT_THRESHOLD_WKS` (3wk) safety buffer at the rush-arrival demand rate. Impact: urgent total 103,266 → **131,058 (+27%)**; PICNIC urgent 38,640 → 45,444. ⚠️ changes real urgent quantities.
 - **HIGH-2 (your call = "order-now + flag future"):** `getBuyQtys` returns `futN`/`futQty`; Buy 3PL cell shows a small **"+Nf"** flag for scheduled-but-not-due buys (382 SKUs). Buy 3PL number unchanged. `artifact_v16.7.html`.

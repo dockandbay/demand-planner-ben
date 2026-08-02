@@ -7269,19 +7269,65 @@ var PLAN_REV_FY=null;
 function ensureRevTargets(cb){ fetch('/api/demand-revenue-targets').then(function(r){return r.json();}).then(function(rows){
     REV_TARGETS={}; (rows||[]).forEach(function(t){ REV_TARGETS[t.country+'|'+t.channel+'|'+t.fy]={type:t.target_type,pct:t.target_pct,value:t.target_value}; }); cb&&cb();
   }).catch(function(){ cb&&cb(); }); }
+// Two report buttons ("Revenue vs target", "Executive summary") live right-aligned in the plan's
+// filters row (#catrow1-wrap). DESKTOP ONLY — hidden on mobile (Ben's requirement); the plan's filter
+// bar collapses behind "⚙ Filters" on mobile anyway. Each opens a pop-out drawer.
 function planRevBtnSync(){ var show=(typeof VIEW_MODE!=='undefined'&&VIEW_MODE==='planning'&&typeof DEMAND_VIEW!=='undefined'&&DEMAND_VIEW==='plan');
-  var b=document.getElementById('plan-rev-btn');
-  if(show){ if(!b){ b=document.createElement('button'); b.id='plan-rev-btn'; b.type='button'; b.innerHTML='📈 Revenue vs target';
-      b.title='Compare the plan’s forecast to the revenue growth target for this country / channel';
-      b.style.cssText='position:fixed;right:20px;bottom:20px;z-index:1200;background:#2563eb;color:#fff;border:none;border-radius:22px;padding:10px 17px;font-size:13px;font-weight:700;font-family:inherit;cursor:pointer;box-shadow:0 4px 12px rgba(37,99,235,.35)';
-      b.onclick=openPlanRevPopout; document.body.appendChild(b); } }
-  else { if(b)b.remove(); var p=document.getElementById('plan-rev-pop'); if(p)p.remove(); } }
+  var legacy=document.getElementById('plan-rev-btn'); if(legacy)legacy.remove();   // drop the old floating button
+  var wrap=document.getElementById('catrow1-wrap'), c=document.getElementById('plan-report-btns');
+  var isMobile=!!(window.matchMedia&&window.matchMedia('(max-width:640px)').matches);
+  if(show&&wrap&&!isMobile){
+    if(!c){ c=document.createElement('div'); c.id='plan-report-btns'; c.style.cssText='margin-left:auto;display:flex;gap:6px;align-items:center';
+      c.innerHTML='<button id="plan-rev-btn2" type="button" title="Compare the plan’s forecast to the revenue growth target for this country / channel" style="background:#2563eb;color:#fff;border:none;border-radius:16px;padding:6px 13px;font-size:12px;font-weight:700;font-family:inherit;cursor:pointer">📈 Revenue vs target</button>'
+        +'<button id="plan-exec-btn" type="button" title="Executive summary — FY revenue &amp; units vs last year" style="background:#0f766e;color:#fff;border:none;border-radius:16px;padding:6px 13px;font-size:12px;font-weight:700;font-family:inherit;cursor:pointer">📊 Executive summary</button>';
+      wrap.appendChild(c);
+      c.querySelector('#plan-rev-btn2').onclick=openPlanRevPopout;
+      c.querySelector('#plan-exec-btn').onclick=openExecSummaryPopout; }
+  } else { if(c)c.remove(); var p=document.getElementById('plan-rev-pop'); if(p)p.remove(); var e=document.getElementById('exec-sum-pop'); if(e)e.remove(); } }
 function openPlanRevPopout(){ if(PLAN_REV_FY==null)PLAN_REV_FY=CUR_FY_START;
   var p=document.getElementById('plan-rev-pop'); if(p){ p.remove(); return; }   // click again to close
   p=document.createElement('div'); p.id='plan-rev-pop';
   p.style.cssText='position:fixed;right:20px;bottom:70px;z-index:1201;width:390px;max-height:80vh;overflow:auto;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 10px 34px rgba(15,23,42,.28);font-size:12px';
   document.body.appendChild(p); planRevPopRender(); ensureRevTargets(function(){ planRevPopRender(); }); }
-function planRevPopRefresh(){ if(document.getElementById('plan-rev-pop'))planRevPopRender(); }
+function planRevPopRefresh(){ if(document.getElementById('plan-rev-pop'))planRevPopRender(); if(document.getElementById('exec-sum-pop'))execSumPopRender(); }
+
+// ── Plan ▸ "Executive summary" pop-out drawer ──────────────────────────────────────────────────
+// A compact FY revenue/units summary (FY26 LY → FY27 → FY28 partial) plus a per-channel breakdown,
+// derived from buildExecData(). A link opens the full Exec Summary report in the Reports tab.
+function openExecSummaryPopout(){ var p=document.getElementById('exec-sum-pop'); if(p){ p.remove(); return; }   // click again to close
+  p=document.createElement('div'); p.id='exec-sum-pop';
+  p.style.cssText='position:fixed;right:20px;bottom:70px;z-index:1201;width:430px;max-height:82vh;overflow:auto;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 10px 34px rgba(15,23,42,.28);font-size:12px';
+  document.body.appendChild(p); execSumPopRender(); }
+function execSumPopRender(){ var p=document.getElementById('exec-sum-pop'); if(!p)return;
+  var d=buildExecData();
+  var gbp=function(v){ if(Math.abs(v)>=1e6)return '£'+(v/1e6).toFixed(2)+'M'; if(Math.abs(v)>=1e3)return '£'+Math.round(v/1e3)+'k'; return '£'+Math.round(v); };
+  var FY27=['2026_03','2026_04','2026_05','2026_06','2026_07','2026_08','2026_09','2026_10','2026_11','2026_12','2027_01','2027_02'];
+  var FY28=['2027_03','2027_04','2027_05','2027_06','2027_07','2027_08','2027_09','2027_10','2027_11','2027_12'];
+  function psum(mm,mons){ var u=0,r=0,lu=0,lr=0; mons.forEach(function(m){ if(mm&&mm[m]){ u+=mm[m].u; r+=mm[m].r; lu+=mm[m].lyU||0; lr+=mm[m].lyR||0; } }); return {u:u,r:r,lu:lu,lr:lr}; }
+  var t27=psum(d.tot,FY27), t28=psum(d.tot,FY28);
+  var pct=function(a,b){ return b>0?Math.round((a-b)/b*100):null; };
+  var badge=function(g){ if(g==null)return '<span style="color:#94a3b8">—</span>'; var up=g>=0; return '<span style="color:'+(up?'#166534':'#b91c1c')+';font-weight:700">'+(up?'▲ +':'▼ ')+g+'%</span>'; };
+  // 3-year card: FY26 (last year, from lyR) → FY27 → FY28 (partial)
+  var card='<div style="display:flex;gap:6px;padding:10px 13px">'
+    +'<div style="flex:1;background:#f8fafc;border:1px solid #eef2f7;border-radius:9px;padding:8px"><div style="color:#64748b;font-size:10px;font-weight:700">FY26 · last year</div><div style="font-weight:800;font-size:14px">'+gbp(t27.lr)+'</div><div style="color:#64748b;font-size:10px">'+fn(Math.round(t27.lu))+' u</div></div>'
+    +'<div style="flex:1;background:#eff6ff;border:1px solid #dbeafe;border-radius:9px;padding:8px"><div style="color:#2563eb;font-size:10px;font-weight:700">FY27</div><div style="font-weight:800;font-size:14px">'+gbp(t27.r)+'</div><div style="font-size:10px">'+badge(pct(t27.r,t27.lr))+' rev · '+badge(pct(t27.u,t27.lu))+' u</div></div>'
+    +'<div style="flex:1;background:#f0fdfa;border:1px solid #ccfbf1;border-radius:9px;padding:8px"><div style="color:#0f766e;font-size:10px;font-weight:700">FY28 · partial</div><div style="font-weight:800;font-size:14px">'+gbp(t28.r)+'</div><div style="color:#64748b;font-size:10px">'+fn(Math.round(t28.u))+' u</div></div>'
+    +'</div>';
+  // Per-channel FY27 breakdown
+  var chOrder=['DTC','FBA','B2B'], rows=chOrder.map(function(cn){ var s=psum(d.ch[cn],FY27);
+    return '<tr><td style="padding:4px 13px;font-weight:700">'+cn+'</td>'
+      +'<td style="padding:4px 13px;text-align:right;font-variant-numeric:tabular-nums">'+gbp(s.r)+'</td>'
+      +'<td style="padding:4px 13px;text-align:right;font-variant-numeric:tabular-nums">'+fn(Math.round(s.u))+'</td>'
+      +'<td style="padding:4px 13px;text-align:right">'+badge(pct(s.r,s.lr))+'</td></tr>'; }).join('');
+  p.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 13px;border-bottom:1px solid #eef2f7;position:sticky;top:0;background:#fff;border-radius:12px 12px 0 0">'
+      +'<div><div style="font-weight:800;font-size:13px">Executive summary</div><div style="color:#64748b;font-size:11px">All markets · FY revenue &amp; units vs last year</div></div>'
+      +'<button id="esp-x" style="border:none;background:#f1f5f9;border-radius:8px;width:26px;height:26px;cursor:pointer;font-size:15px;line-height:1">✕</button></div>'
+    +card
+    +'<div style="padding:2px 13px 4px;color:#64748b;font-weight:700">By channel · FY27</div>'
+    +'<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:#64748b;font-size:10px;text-transform:uppercase"><th style="padding:2px 13px;text-align:left">Channel</th><th style="padding:2px 13px;text-align:right">Revenue</th><th style="padding:2px 13px;text-align:right">Units</th><th style="padding:2px 13px;text-align:right">YoY</th></tr></thead><tbody>'+rows+'</tbody></table>'
+    +'<div style="padding:9px 13px 12px;border-top:1px solid #eef2f7;margin-top:6px"><button id="esp-goto" style="width:100%;border:1px solid #0f766e;background:#f0fdfa;color:#0f766e;border-radius:8px;padding:7px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">Open full Executive Summary report →</button></div>';
+  p.querySelector('#esp-x').onclick=function(){ p.remove(); };
+  p.querySelector('#esp-goto').onclick=function(){ p.remove(); REPORT_VIEW='ex'; if(window.writeHash)window.writeHash(['reports','ex']); render(); }; }
 function planRevPopRender(){ var p=document.getElementById('plan-rev-pop'); if(!p)return; _revCache={};
   var fy=PLAN_REV_FY, co=CUR, ch=CF, fys=[CUR_FY_START,CUR_FY_START+1,CUR_FY_START+2];
   var fyLbl=function(y){return 'FY'+String(y).slice(2)+'/'+String(y+1).slice(2);};
