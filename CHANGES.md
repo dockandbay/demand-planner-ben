@@ -3,6 +3,19 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.400 - Forecast reports audit fixes (Auto Forecast + Exec Summary) ⚠️ NEEDS TESTING
+From `FORECAST_REPORTS_AUDIT.md`. Both reports are read-only — no buy-plan/save impact.
+**Auto Forecast (`server.mjs`):**
+- **F2 (HIGH) — run_id pin:** the subcategory forecast (`planner.forecasts`) was summed with NO run_id filter; a 2nd forecast run would have silently multiplied every buy number. Now pinned to `max(run_id)`. (Latent today — only 1 run — but now safe.)
+- **F4 (MED) — overdue units surfaced:** gaps whose order month is already past the window were silently dropped from the units grid while their cash still showed. Now counted (`assumptions.overdue_units`) and flagged in the report note (sandbox: **25,491 units** were being hidden).
+- **F8 — reference now includes the year** (`FC-US-2027-01-XR`) so refs stay unique beyond 12 months.
+- **F7 — header comment rewritten** to match the actual differencing model (the old comment described a forward-cover model the code doesn't implement); noted the `cover` param is legacy/unused.
+- **F3 (MED) — currency caveat surfaced** in the model note (cash uses avg PO cost per subcat, may blend supplier currencies — indicative). Full FX normalisation deferred (needs an FX source decision).
+**Exec Summary (`artifact_v16.7.html`):**
+- **NaN-safety** coercion on ASP×units and LY revenue.
+- **"FY26 · Actual" → "FY26 · prior year"** (it's partly forecast-derived LY, not pure actual).
+**Still needs your call (2 items that change reported numbers — asked separately):** exec BI_CACHE basis (exec silently uses AI-adjusted forecast; plan + Revenue tab don't) and the current partial-month basis (exec uses MTD actual; the plan uses full-month forecast). F1 (gap model) left as-is — it's your intended design.
+
 ## v26.399 - Manufacturing tab: grouped by production + In-production/Completed coverage ⚠️ NEEDS TESTING
 Reworks SUPPLY ▸ Purchase Orders ▸ Manufacturing per Ben's steer.
 - **Ready-to-ship = production:** the old status filter used `NOT ILIKE '%ship%'`, which wrongly dropped **"READY TO SHIP"** POs (still at the factory, not dispatched). Demand now includes FUTURE / PRODUCTION / READY TO SHIP; only Shipping/Delivered/Complete are excluded.

@@ -7137,14 +7137,16 @@ app.get('/api/scenario/po-stock-priority/:po', async (req, res) => {
 
 // Auto Forecast — a 12-month buy plan by subcategory × primary supplier, and the resulting
 // cash-flow (deposit / completion / balance / freight+duty). Model (all transparent, v1):
-//   demand[subcat,month] from saved SKU forecast (forecast_outputs) aggregated to subcategory × market.
-//   forward-cover netting by ARRIVAL month: arrive[m] = max(0, cover_target + demand[m] − stock_before),
-//     where cover_target = next COVER_MONTHS of demand; stock_before[0] = current on-hand.
-//   order month = arrival − lead (lead = production_lead_time_weeks + china_to_<market>_lead_time_weeks).
+//   gap[subcat,month] = max(0, subcategory_forecast − Σ SKU_forecast)  → the "top-up" the SKU-level plan
+//     hasn't captured yet (future/undiscontinued SKUs). This is a DIFFERENCING model driven by lead time —
+//     NO stock netting and NO forward-cover target (per Ben). The `cover` query param is legacy/unused (only
+//     echoed back in assumptions); there is deliberately no cover_target term in the math.
+//   order month = demand month − lead (lead = production_lead_time_weeks + china_to_<market>_lead_time_weeks).
 //   value = units × avg PO cost_price for the subcat. Payments phased off the primary supplier's terms:
-//     deposit (start%) at order month · completion% at order+production_days · balance% at arrival+credit_days.
-//   freight+duty estimated as FREIGHT_PCT of value at arrival month (flagged as an estimate — the precise
+//     deposit (start%) at order month · completion% at order+production_days · balance% at demand+credit_days.
+//   freight+duty estimated as FREIGHT_PCT of value at demand month (flagged as an estimate — the precise
 //     landed-cost engine lives on the PO view; this report uses a flat uplift for the cash-flow).
+// NOTE (read-only report): never written back to forecast_outputs/forecasts — a decision view + CSV only.
 const AF_COVER_MONTHS = 2, AF_FREIGHT_PCT = 0.15;
 function afAddMonths(ym, n){ let [y,m]=ym.split('-').map(Number); let t=(y*12+(m-1))+n; return Math.floor(t/12)+'-'+String(t%12+1).padStart(2,'0'); }
 app.get('/api/scenario/auto-forecast', async (req, res) => {
@@ -7170,7 +7172,7 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
     const addTxn=(ref,type,mo,v,mk2,sup)=>{ if(win.indexOf(mo)<0||!(v>0))return; const k=ref+'|'+type+'|'+mo;
       if(!txMap[k])txMap[k]={reference:ref, type, amount_usd:0, date:mo+'-01', country:(mk2||'').toUpperCase(), supplier:sup||'—', month:mo};
       txMap[k].amount_usd+=v; };
-    let truncated=false;
+    let truncated=false, overdueUnits=0;   // overdueUnits = gap whose order month is already past the window start → shows in cash but not in the units grid (surface it, don't hide it)
     // market-independent lookups — compute ONCE (previously re-queried inside every market iteration):
     // avg cost per subcat, the volume-dominant supplier per subcat, and supplier payment terms.
     const [costRows, supRows, termsRows] = await Promise.all([
@@ -7197,9 +7199,13 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
         pool.query(`SELECT p.subcategory s, to_char(fo.month,'YYYY-MM') m, sum(fo.units)::numeric u
           FROM planner.forecast_outputs fo JOIN planner.products p ON p.sku=fo.sku
           WHERE split_part(fo.warehouse,'_',1)=$1 AND p.subcategory IS NOT NULL GROUP BY 1,2`,[mk]),
-        // CATEGORY (subcategory) forecast (units) for this market — planner.forecasts level='subcategory'
+        // CATEGORY (subcategory) forecast (units) for this market — planner.forecasts level='subcategory'.
+        // PIN to the LATEST run_id: `forecasts` is run-versioned (run_id is bigint), and summing across runs
+        // would multiply every buy number by the run count. max(run_id) = newest run (numeric ordering).
         pool.query(`SELECT subcategory s, to_char(month,'YYYY-MM') m, sum(units)::numeric u
-          FROM planner.forecasts WHERE level='subcategory' AND upper(country)=$1 GROUP BY 1,2`,[mk.toUpperCase()]),
+          FROM planner.forecasts WHERE level='subcategory' AND upper(country)=$1
+            AND run_id = (SELECT max(run_id) FROM planner.forecasts WHERE level='subcategory')
+          GROUP BY 1,2`,[mk.toUpperCase()]),
         // lead = supplier production lead + China→market sea lead (weeks → months)
         pool.query(`SELECT subcategory s, avg(coalesce(production_lead_time_weeks,0)+coalesce(${lc},0)) wk
           FROM planner.products WHERE subcategory IS NOT NULL GROUP BY 1`),
@@ -7221,7 +7227,7 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
           const om=afAddMonths(m,-lm);                       // order month = demand month − lead
           if(win.indexOf(om)>=0){
             const u=unitsBy[nm]||(unitsBy[nm]={t:0}); u[om]=(u[om]||0)+arrive; u.t+=arrive;   // 1 row per supplier (summed across subcats + markets)
-          } else if(om<win[0]) { /* order month already passed — skip display */ }
+          } else if(om<win[0]) { overdueUnits+=arrive; /* order month already past the window start — order is overdue; its cash legs may still land in-window, so surface the unit count */ }
           else truncated=true;
           const val=arrive*c;
           const _dep=val*Number(t.start_deposit_pct||0)/100, _com=val*Number(t.completion_pct||0)/100,
@@ -7231,9 +7237,10 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
           addPay('completion', _comM, _com);
           addPay('balance', _balM, _bal);
           addPay('freight', m, _frt);
-          // reference code: FC-<COUNTRY>-<order-month-num>-<supplier code>  (e.g. FC-US-01-XR)
+          // reference code: FC-<COUNTRY>-<order-month YYYY-MM>-<supplier code>  (e.g. FC-US-2027-01-XR).
+          // Year included so refs stay unique if the window is ever widened past 12 months.
           const _sc=(t.code||'').trim()||nm.replace(/[^A-Za-z0-9]/g,'').slice(0,3).toUpperCase()||'??';
-          const _ref='FC-'+mk.toUpperCase()+'-'+(om.split('-')[1]||'')+'-'+_sc;
+          const _ref='FC-'+mk.toUpperCase()+'-'+om+'-'+_sc;
           addTxn(_ref,'Starting deposit',om,_dep,mk,nm);
           addTxn(_ref,'Completion deposit',_comM,_com,mk,nm);
           addTxn(_ref,'Balance payment',_balM,_bal,mk,nm);
@@ -7251,7 +7258,7 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
     res.json({ months:win, units:unitRows,
       payments:{deposit:dep,completion:comp,balance:bal,freight:frt,total},
       transactions:txns,
-      assumptions:{cover_months:COVER,freight_pct:FREIGHT,truncated} });
+      assumptions:{freight_pct:FREIGHT,truncated,overdue_units:Math.round(overdueUnits)} });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
