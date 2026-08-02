@@ -253,7 +253,7 @@ table{border-collapse:collapse;font-size:11px;table-layout:fixed}
 thead th{position:sticky;top:0;z-index:2;background:#f3f3f1;padding:3px 4px;font-weight:500;font-size:10px;color:#666;border-bottom:2px solid #d5d5d5;white-space:nowrap;overflow:hidden;text-align:right;vertical-align:bottom}
 thead th.lft{text-align:left}
 thead th.stk{position:sticky;left:0;z-index:3;background:#f3f3f1;text-align:left;width:160px;min-width:160px;max-width:160px}
-thead th.stk2{position:sticky;left:160px;z-index:3;background:#f3f3f1;text-align:right;width:62px;min-width:62px;max-width:62px;border-right:2px solid #b0b0ae}
+thead th.stk2{position:sticky;left:160px;z-index:3;background:#f3f3f1;text-align:right;width:96px;min-width:96px;max-width:96px;border-right:2px solid #b0b0ae}
 thead tr.grp th{top:0;padding:2px 4px;font-size:8.5px;font-weight:700;background:#eaeae8;border-bottom:0;color:#555;text-transform:uppercase;letter-spacing:.03em;height:16px;box-sizing:border-box;line-height:1.1}
 thead tr.grp th.stk{background:#eaeae8}
 thead tr.grp th.stk2{background:#eaeae8}
@@ -307,7 +307,7 @@ td{padding:0;border-bottom:1px solid #f0f0f0;vertical-align:middle;overflow:hidd
 #fc-note-pop{position:absolute;z-index:100050;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 30px rgba(15,23,42,.18);padding:10px 12px;width:300px;font-size:12px;color:#0f172a;text-align:left}
 #fc-note-tip{position:fixed;z-index:100060;max-width:300px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:7px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none;display:none;text-align:left}
 td.stk{position:sticky;left:0;z-index:1;background:#fff;text-align:left;width:160px;min-width:160px;max-width:160px}
-td.stk2{position:sticky;left:160px;z-index:1;background:#fff;text-align:right;width:62px;min-width:62px;max-width:62px;border-right:2px solid #b0b0ae}
+td.stk2{position:sticky;left:160px;z-index:1;background:#fff;text-align:right;width:96px;min-width:96px;max-width:96px;border-right:2px solid #b0b0ae}
 .nm{padding:3px 4px 3px 14px;display:flex;align-items:flex-start;gap:3px;white-space:normal;font-size:11px}
 .nmc{padding:3px 6px;font-style:italic;color:#444;font-size:11px;white-space:nowrap}
 .chbg{font-size:9px;padding:0 3px;background:#efefef;border-radius:2px;color:#888;flex-shrink:0}
@@ -4797,8 +4797,8 @@ function stockFor(s,co,ch){
 // Two-line "3PL: N / FBA: N" stock cell (per Ben — replaces the single OH number). color for the digits.
 function stock2Line(oh3,ohF,color,bold){ var c=color||'#334155', fw=bold?'font-weight:700':'';
   return '<div style="padding:2px 5px;text-align:right;font-size:9px;line-height:1.35;font-variant-numeric:tabular-nums;color:'+c+';'+fw+'">'
-    +'<div><span style="opacity:.6;font-weight:400">3PL:</span> '+fn(oh3)+'</div>'
-    +'<div><span style="opacity:.6;font-weight:400">FBA:</span> '+fn(ohF)+'</div></div>';
+    +'<div style="white-space:nowrap"><span style="opacity:.6;font-weight:400">3PL:</span> '+fn(oh3)+'</div>'
+    +'<div style="white-space:nowrap"><span style="opacity:.6;font-weight:400">FBA:</span> '+fn(ohF)+'</div></div>';
 }
 // Two-line OH / +inbound cell HTML for the sticky stock column (+ next-inbound date & hover list).
 function stockCellHTML(oh,inb,entries){

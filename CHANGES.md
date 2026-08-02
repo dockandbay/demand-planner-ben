@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.406 - FIX: widen DEMAND stock column so both 3PL & FBA lines are visible ⚠️ NEEDS TESTING
+- The stock column ("3PL / FBA") was only 62px wide, so "3PL: 236,411 / FBA: 20,582" was clipping and looked like it wasn't showing both. Widened to 96px + `white-space:nowrap` on each line, so both 3PL and FBA on-hand display in full. (Feature landed v26.403; this fixes the display.) `artifact_v16.7.html`.
+
 ## v26.405 - DEMAND report buttons → Country row; Revenue full-report drawer; Buy FBA = purchases only; version badge in sub-nav ⚠️ NEEDS TESTING
 - **Report buttons** ("Revenue vs target" / "Executive summary") moved onto the **top Country row, right-aligned** (desktop only) — no longer floating.
 - **"Revenue vs target" now opens the FULL revenue report** (targets & tracking + price changes) in a **50% drawer** (`renderRevenueView`) — the compact summary card is deprecated. (Exec Summary already full-drawer.)
