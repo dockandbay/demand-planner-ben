@@ -9,6 +9,9 @@ Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 ## v26.436 - Auto Forecast: cost = forecast-weighted current product cost ⚠️ NEEDS TESTING
 - The Auto Forecast now prices its suggested-buy units at the **forecast-weighted current product cost** per subcategory — Σ(SKU forecast units × SKU cost) ÷ Σ(units), using the live `planner.products` cost (`cost` → `cost_lx`/`cost_xr` fallbacks, same source as the order-plan Est. cost). Falls back to the historical avg PO cost only where a subcat has no product cost. Was: plain historical average of past PO `cost_price`. `server.mjs`. No migration.
 
+## v26.439 - Auto Forecast: extend window 12 → up to 18 months ⚠️ NEEDS TESTING
+- The Auto Forecast display window now runs **up to 18 months** (was 12), capped at the last forecast month so it never shows empty tails. With the current forecast data (ends Dec 2027) it shows 17 months; it'll reach 18 once the forecast extends further. `server.mjs` + footnote text in `artifact_v16.7.html`. No migration.
+
 ## v26.438 - Auto Forecast: rolling monthly buy plan (net stock + open POs) ⚠️ NEEDS TESTING · CHANGES NUMBERS
 - The Auto Forecast is now a **rolling monthly buy plan** per subcategory instead of just the category gap. Demand = the **full forecast** (existing SKUs' forecast **+** the category gap for future SKUs = max(subcat forecast, SKU forecast)). Stock rolls forward month by month, crediting **open-PO arrivals** by arrival month (they're already in the cash-flow forecast), and each month buys the **shortfall — the unconfirmed PO on top**. Ordered at demand month − lead.
 - New queries (reusing the OTB sources): on-hand per subcat×market (`v_product_inventory`), open-PO arrivals per subcat×market×month (`purchase_orders`, undated→current month).

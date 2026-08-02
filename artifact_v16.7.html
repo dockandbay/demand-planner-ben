@@ -9072,7 +9072,7 @@ function renderAutoForecastReport(body){
       +'order month = demand month − lead time (supplier production + China→market sea shipping). Payments phased off each subcategory’s primary supplier’s terms '
       +'(deposit at order · completion at order+production days · balance at arrival+credit days). <b>Freight</b> = each market’s monthly delivery pallets packed into the cheapest containers (CONFIG ▸ freight table); <b>Duty</b> = value × duty % (category × country, CONFIG ▸ Import duty), both at the delivery month. '
       +'<span style="color:#94a3b8">Cost = forecast-weighted current product cost per subcategory (USD) and may blend supplier currencies — treat as indicative.</span>'
-      +(a.truncated?' <span style="color:#b45309">Some orders fall outside the 12-month window and are not shown.</span>':'')
+      +(a.truncated?' <span style="color:#b45309">Some orders fall outside the window and are not shown.</span>':'')
       +(a.overdue_units>0?' <span style="color:#b45309">'+fn(a.overdue_units)+' units have an order date already in the past (overdue) — their cash still shows below, but they’re omitted from the units grid above.</span>':'')+'</div>';
     content.innerHTML=u+pay+note;
     var afCopyCur=function(btn,div){ var tsv=afPayCur(div).map(function(r){return r.join('\t');}).join('\n');

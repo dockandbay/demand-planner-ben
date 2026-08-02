@@ -7174,8 +7174,8 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
       SELECT month FROM planner.forecast_outputs UNION ALL SELECT month FROM planner.forecasts WHERE level='subcategory') z`)).rows[0] || {};
     const _fMin = _fr.mn || '2026-06', _fMax = _fr.mx || '2027-12', _now = new Date().toISOString().slice(0, 7);
     const dataMin = (_now > _fMin ? _now : _fMin), dataMax = (dataMin > _fMax ? dataMin : _fMax);
-    // display window = 12 months from the window start (current month)
-    const win=[]; for(let i=0;i<12;i++) win.push(afAddMonths(dataMin,i));
+    // display window = up to 18 months from the window start (current month), capped at the last forecast month.
+    const win=[]; for(let i=0;i<18;i++){ const _mm=afAddMonths(dataMin,i); if(_mm>dataMax)break; win.push(_mm); }
     const allMonths=[]; { let m=dataMin; while(m<=dataMax){ allMonths.push(m); m=afAddMonths(m,1); } }
     const leadCol={uk:'china_to_uk_lead_time_weeks',us:'china_to_us_lead_time_weeks',eu:'china_to_eu_lead_time_weeks',au:'china_to_au_lead_time_weeks'};
     // one combined pass per market then aggregate the output tables
