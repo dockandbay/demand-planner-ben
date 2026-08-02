@@ -1693,11 +1693,13 @@ function render(){
         +'<th class="r" style="min-width:64px">Override<br><button type="button" onclick="BP.fbaClearOverrides()" title="Clear all override numbers" style="font-size:8px;font-weight:400;padding:1px 5px;margin-top:1px;border:1px solid #cbd5e1;border-radius:3px;background:#f8fafc;color:#475569;cursor:pointer">Clear all</button></th>'
         +'<th class="r" style="min-width:78px">FBA inbound<br>\u226414 days</th>'
         +'<th class="r" style="min-width:78px">FBA inbound<br>15+ days</th>'
-      : '<th class="r" style="min-width:64px">Buy 3PL</th>'
+      : (BP_VIEW==='transfer'
+        ? '<th class="r" style="min-width:60px" id="trfh1"></th><th class="r" style="min-width:60px" id="trfh2"></th>'   // TRANSFER = buy grid minus the 3 Buy columns
+        : '<th class="r" style="min-width:64px">Buy 3PL</th>'
         +'<th class="r" style="min-width:68px">Buy 3PL<br>Urgent</th>'
         +'<th class="r" style="min-width:64px">Buy FBA</th>'
         +'<th class="r" style="min-width:60px" id="trfh1"></th>'
-        +'<th class="r" style="min-width:60px" id="trfh2"></th>';
+        +'<th class="r" style="min-width:60px" id="trfh2"></th>');
     _hdr.innerHTML=_lead+_trail+'</tr>';
   }
   var _dl=document.getElementById('fba-dl-btn');
@@ -1761,7 +1763,7 @@ function render(){
   vis.forEach(s=>{const k=s.c||'?';if(!grp[k])grp[k]=[];grp[k].push(s);});
   const gk=Object.keys(grp).sort((a,b)=>{const ai=CAT_ORDER.indexOf(a),bi=CAT_ORDER.indexOf(b);if(ai<0&&bi<0)return a.localeCompare(b);if(ai<0)return 1;if(bi<0)return-1;return ai-bi;});
   let h='';
-  const COLS=(BP_VIEW==='fba')?(14+_extra):13;
+  const COLS=(BP_VIEW==='fba')?(14+_extra):(BP_VIEW==='transfer'?10:13);   // transfer = buy (13) minus the 3 Buy columns
   const COLS_EFF=COLS-(_MERGE?2:0);   // mobile FBA merges 2 column pairs → 2 fewer columns
   if(!vis.length){h='<tr><td colspan="'+COLS_EFF+'" class="nd">No SKUs match filters</td></tr>';}
   else gk.forEach(sc=>{
@@ -1825,7 +1827,9 @@ function render(){
         ${fbaInbCell(fis.soon, fis.soonL, fis.soonFirst)}
         ${fbaInbCell(fis.later, fis.laterL, fis.laterFirst)}`;
       } else {
-        trail=`
+        trail=(BP_VIEW==='transfer')
+        ? `${getTrfCell(pairs[0])}${getTrfCell(pairs[1])}`   // TRANSFER view: buy grid minus the 3 Buy columns
+        : `
         <td class="bq">${b3>0?`<span class="bq-v">${fmt(b3)}</span>`:`<span class="bq-nil">—</span>`}${futN>0?`<span title="${futN} further buy(s) scheduled later in the plan (${fmt(futQty)}u) — not due to order this cycle" style="font-size:8px;color:#2563eb;margin-left:2px;white-space:nowrap">+${futN}f</span>`:``}</td>
         <td class="bq">${b3u>0?`<span class="bq-v" style="color:#dc2626;font-weight:700">${fmt(b3u)}</span>`:`<span class="bq-nil">—</span>`}</td>
         <td class="bq">${bf>0?`<span class="bq-fba">${fmt(bf)}</span>`:`<span class="bq-nil">—</span>`}</td>${/* Buy FBA = new-stock purchases only (become POs). The 3PL→FBA transfer of EXISTING stock lives in the FBA / Transfer FBA view, NOT here. */''}
@@ -2912,7 +2916,7 @@ return {project:project, getBuyQtys:getBuyQtys, buyplanItems:buyplanItems, rende
   open_:open_, close_:close_, renderPanel:renderPanel, swM:swM, rpc:rpc,
   downloadReport:downloadReport, downloadReportCSV:downloadReportCSV, updateDlMenuLabels:updateDlMenuLabels,
   updateTrfHeaders:updateTrfHeaders, getFilteredVis:getFilteredVis,
-  BUY_CACHE:BUY_CACHE, D:D, setView:function(v){var was=BP_VIEW;BP_VIEW=(v==='fba')?'fba':'buy';if(BP_VIEW==='fba'&&was!=='fba')BU_SEL='TRFFBA';}, fbaClearAll:fbaClearAll, fbaSelectAll:fbaSelectAll, fbaClearOverrides:fbaClearOverrides, fbaClearTicks:fbaClearTicks, downloadFbaTransfer:downloadFbaTransfer,
+  BUY_CACHE:BUY_CACHE, D:D, setView:function(v){var was=BP_VIEW;BP_VIEW=(v==='fba')?'fba':(v==='transfer'?'transfer':'buy');if(BP_VIEW==='fba'&&was!=='fba')BU_SEL='TRFFBA';}, fbaClearAll:fbaClearAll, fbaSelectAll:fbaSelectAll, fbaClearOverrides:fbaClearOverrides, fbaClearTicks:fbaClearTicks, downloadFbaTransfer:downloadFbaTransfer,
   open_:open_, close_:close_,
   get CUR(){return CUR;}, set CUR(v){CUR=v;}};
 })();
@@ -6913,9 +6917,9 @@ function render(){
   // leaving the REPORTS area — tear down its sub-tab bar + any report body
   ['report-tabs','report-body','exec-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
   if(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'){
-    if(window.BP)BP.BP_VIEW=(VIEW_MODE==='fba'?'fba':'buy'); // hint; renderBuyView sets the engine flag
-    if(VIEW_MODE==='transfer'){ var _tw=document.getElementById('tw'); if(_tw)_tw.style.display='none'; var _bw=document.getElementById('buy-wrap'); if(_bw)_bw.remove(); renderTransferView(); }
-    else { var _tvw=document.getElementById('transfer-wrap'); if(_tvw)_tvw.remove(); renderBuyView(VIEW_MODE==='fba'?'fba':'buy'); }
+    if(window.BP)BP.BP_VIEW=VIEW_MODE; // hint; renderBuyView sets the engine flag
+    var _tvw=document.getElementById('transfer-wrap'); if(_tvw)_tvw.remove();
+    renderBuyView(VIEW_MODE);   // 'buy' | 'fba' | 'transfer' (transfer = buy grid minus the 3 Buy columns)
     renderBuyMoveTabs();
     return;
   }
@@ -9040,7 +9044,7 @@ function renderBuyView(mode){
   wrap.innerHTML=BUY_SCAFFOLD;
   document.querySelector('.wrap').appendChild(wrap);
   // Set the buy/FBA view before building so headers + rows render the right columns.
-  if(BP.setView)BP.setView(mode==='fba'?'fba':'buy');
+  if(BP.setView)BP.setView(mode);
   // Synergy: carry the country + category selection over from the PLAN tab.
   BP.setFilters(CUR,[...SEL]);
   // Restore the Buy/FBA-specific filters (tier/status/core-seasonal/buy-type + SKU query) from the

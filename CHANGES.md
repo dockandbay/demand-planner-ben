@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.408 - TRANSFER tab = the BUY grid minus the 3 Buy columns ⚠️ NEEDS TESTING
+- TRANSFER (under BUY & MOVE) is no longer a placeholder — it now renders the **same grid as BUY, minus the "Buy 3PL", "Buy 3PL Urgent" and "Buy FBA" columns** (keeps SKU, status, SOH 3PL/FBA, On Order, and the transfer-opportunity columns). New BP_VIEW `transfer` (buy path everywhere except those columns; COLS 13→10). `artifact_v16.7.html`.
+
 ## v26.407 - FBA inbound tooltip PO links + BUY & MOVE URL slugs ⚠️ NEEDS TESTING
 - **FBA inbound hover tooltip**: the PO/shipment reference is now a **clickable link** that opens that PO's drawer (`#/supply/purchase-orders/<ref>`). Tooltip still copies the full detail on click elsewhere. `artifact_v16.7.html`.
 - **URL slugs for the BUY & MOVE group**: BUY → `#/buy-move/buy`, FBA → `#/buy-move/fba`, TRANSFER → `#/buy-move/transfer`. Also fixes routing that the tab-merge broke (there was no `data-view="fba"` button anymore). Legacy `#/buy/<ctry>` and `#/fba/<ctry>` still resolve into the group. `supply/inject.html` (writer + router + regex), `artifact_v16.7.html`.
