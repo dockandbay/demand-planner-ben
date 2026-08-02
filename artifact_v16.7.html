@@ -1429,7 +1429,7 @@ const FBA_TICK={};
 // Clear all overrides + ticks, then re-render.
 // SKU filter supports a LIST: split on whitespace/commas/semicolons/newlines; match if the SKU
 // contains ANY token (so you can paste many SKUs to filter the view).
-function skuMatchQ(skuLower,q){ if(!q)return true; var toks=q.split(/[\s,;]+/).filter(Boolean); if(!toks.length)return true; return toks.some(function(t){return skuLower.indexOf(t)>=0;}); }
+function skuMatchQ(sku,q){ if(!q)return true; var toks=q.split(/[\s,;]+/).filter(Boolean); if(!toks.length)return true; var sl=String(sku).toLowerCase(); var m=(typeof SKUM!=='undefined')?SKUM[sku]:null; var nl=(m&&m.n)?String(m.n).toLowerCase():''; return toks.some(function(t){return sl.indexOf(t)>=0||(nl&&nl.indexOf(t)>=0);}); }   // match SKU code OR product name
 function fbaClearAll(){
   for(const k in FBA_OV)delete FBA_OV[k];
   for(const k in FBA_TICK)delete FBA_TICK[k];
@@ -1843,13 +1843,13 @@ function render(){
   const q=(document.getElementById('qry')?.value||'').toLowerCase().trim();
   const vis=SL.filter(s=>{
     if(!s.ms||!s.ms[CUR])return false;
-    if(q)return skuMatchQ(s.s.toLowerCase(),q);   // SKU search OVERRIDES all pills (category/tier/status/core/RW/buy-type)
+    if(q)return skuMatchQ(s.s,q);   // SKU search OVERRIDES all pills (category/tier/status/core/RW/buy-type)
     if(!SC_SEL.has('ALL')&&!SC_SEL.has(s.c))return false;
     if(!TI_SEL.has('ALL')&&!TI_SEL.has(s.ti))return false;
     if(!ST_SEL.has(getSt(s.ms,CUR)))return false;
     if(!CS_SEL.has('ALL')){const cs=s.csf||null;if(cs!==null&&!CS_SEL.has(cs))return false;}
     if(RW_SEL!=='ALL'&&(s.rw||'')!==RW_SEL)return false;   // Release Window filter (BUY/FBA)
-    if(q&&!skuMatchQ(s.s.toLowerCase(),q))return false;
+    if(q&&!skuMatchQ(s.s,q))return false;
     if(BU_SEL!=='ALL'){
       const bq=getBuyQtys(s.s,CUR);
       if(BU_SEL==='TRFFBA'&&!(fbaTransferEff(s.s,CUR)>0))return false;
@@ -2052,13 +2052,13 @@ function getFilteredVis(ignoreBuy){
   const q=(document.getElementById('qry')?.value||'').toLowerCase().trim();
   return SL.filter(s=>{
     if(!s.ms||!s.ms[CUR])return false;
-    if(q)return skuMatchQ(s.s.toLowerCase(),q);   // SKU search OVERRIDES all pills (category/tier/status/core/RW/buy-type)
+    if(q)return skuMatchQ(s.s,q);   // SKU search OVERRIDES all pills (category/tier/status/core/RW/buy-type)
     if(!SC_SEL.has('ALL')&&!SC_SEL.has(s.c))return false;
     if(!TI_SEL.has('ALL')&&!TI_SEL.has(s.ti))return false;
     if(!ST_SEL.has(getSt(s.ms,CUR)))return false;
     if(!CS_SEL.has('ALL')){const cs=s.csf||null;if(cs!==null&&!CS_SEL.has(cs))return false;}
     if(RW_SEL!=='ALL'&&(s.rw||'')!==RW_SEL)return false;   // Release Window filter (BUY/FBA)
-    if(q&&!skuMatchQ(s.s.toLowerCase(),q))return false;
+    if(q&&!skuMatchQ(s.s,q))return false;
     return true;
   }).sort((a,b)=>String(a.s).localeCompare(String(b.s)));
 }

@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.434 - BUY/FBA/TRANSFER SKU search also matches product name ⚠️ NEEDS TESTING
+- The SKU search box on BUY / FBA / TRANSFER now matches by **product name** as well as SKU code (`skuMatchQ` looks up `SKUM[sku].n`), so e.g. "beach" or "cooling" surfaces the right SKUs even though the code doesn't contain those words. (The DEMAND plan already did this.) Verified: "beach"→22, "cooling"→14; empty query unchanged (472). `artifact_v16.7.html` only.
+
 ## v26.433 - DEMAND plan: product title on 120ms hover over SKU name ⚠️ NEEDS TESTING
 - The product title (removed from column 1 in v26.432) now shows as a **120ms hover tooltip** over the SKU name. Reuses the existing fast-tooltip handler (extended to `.dp-sku-tip` alongside `.crc-tip`). `artifact_v16.7.html` only.
 
