@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.420 - Complex Rules Phase 2: engine reads the rules ⚠️ NEEDS TESTING · CHANGES BUY QTY
+- The buy engine now **applies Complex Rules to the 3PL cover target** per SKU × market × month. `crMatch(sku,mkt)` filters enabled rules by scope (sku/category/tier/season AND'd, per country); `crCoverWeeks(i,base,matched)` returns the effective cover target (weeks) for each projection month, gated by the rule's window.
+  - **'months'** rule → target = `cover_months × 4.33` weeks. **'range'** rule → target = weeks from the month to the end of `range_to`, applied only while the month is within `[range_from, range_to]`.
+  - **Raise-only + highest-coverage-wins:** a rule can only *increase* cover (never silently drop a buy below the base target); across matching rules the largest wins. Applied in both buy passes (sizing + display) so the shown target matches the sized buy.
+- **Verified before/after (all 5 markets):** with **zero rules the buy plan is byte-identical** to v26.417 (Buy 3PL 78,920 · Urgent 136,394 · Buy FBA 4,828). A test rule (HAIRW-CAB-LTBLU-NB/UK → 12-mo cover) changed **only that SKU·market**: Buy 3PL 420→720, Urgent 10,620→10,320 (more normal cover ⇒ less urgent), FBA unchanged. Range rule behaves identically.
+- First Buy still runs alongside (removed in Phase 3). No migration. `artifact_v16.7.html` only.
+
 ## v26.419 - Complex Rules form polish + mobile nav ⚠️ NEEDS TESTING
 - **Complex Rules — countries multi-select:** pick several countries for one rule; on save it writes **one rule per country** (keeps the per-country table + "highest coverage wins"). On edit, the first selected country keeps the edited row and any extras become new rules.
 - **Complex Rules — Season is now a dropdown** built from the distinct **release windows of active + future products** (`BP.seasons()` → `window.CR_SEASONS`); an old rule's season is preserved even if no longer active.

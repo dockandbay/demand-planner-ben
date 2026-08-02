@@ -1199,6 +1199,55 @@ const PROJ=(()=>{
 const TRF_PAIRS={'UK':['EU','AU'],'US':['UK','CA'],'EU':['UK','US'],'AU':['UK','US'],'CA':[]};
 // Lookup: SKU → tier (A/B/C) for first-buy A-tier boost
 const TIER_MAP={};SL.forEach(s=>{TIER_MAP[s.s]=s.ti;});
+// Lookup: SKU → {cat, tier, rw(season)} for Complex Rules scope matching (BUY ▸ Complex Rules, replaces First Buy).
+const CR_SKUMETA={};SL.forEach(s=>{CR_SKUMETA[s.s]={cat:s.c||'',tier:s.ti||'',rw:s.rw||''};});
+// Complex Rules — return the enabled rules (with parsed dates) whose SCOPE matches this SKU in this market.
+// Scope filters (sku/category/tier/season) are optional and AND'd; a rule with no scope matches every SKU.
+function crMatch(sku,mkt){
+  if(typeof COMPLEX_RULES==='undefined'||!COMPLEX_RULES||!COMPLEX_RULES.length)return [];
+  var meta=CR_SKUMETA[sku]||{cat:'',tier:'',rw:''};
+  var out=[];
+  for(var i=0;i<COMPLEX_RULES.length;i++){ var r=COMPLEX_RULES[i];
+    if(r.enabled===false)continue;
+    if(r.country!==mkt)continue;
+    if(r.sku && r.sku!==sku)continue;
+    if(r.category && r.category!==meta.cat)continue;
+    if(r.tier && r.tier!==meta.tier)continue;
+    if(r.season && r.season!==meta.rw)continue;
+    var wf=r.window_from?new Date(r.window_from+'T00:00:00'):null;
+    var wt=r.window_to?new Date(r.window_to+'T23:59:59'):null;
+    var rf=null,rt=null;
+    if(r.coverage_type==='range'){
+      if(r.range_from){var a=String(r.range_from).split('_');rf=new Date(Number(a[0]),Number(a[1])-1,1);}
+      if(r.range_to){var b=String(r.range_to).split('_');rt=new Date(Number(b[0]),Number(b[1]),0,23,59,59);} // day 0 of next month = last day of range_to
+    }
+    out.push({r:r,wf:wf,wt:wt,rf:rf,rt:rt});
+  }
+  return out;
+}
+// Complex Rules — effective 3PL cover target (weeks) for PROJ month `i`, given the base target and this SKU's
+// matched rules. RAISE-ONLY: rules can only increase cover (never drop it below base); highest coverage wins.
+function crCoverWeeks(i,base,matched){
+  if(!matched||!matched.length)return base;
+  var p=PROJ[i]; if(!p||!p.key)return base;
+  var parts=String(p.key).split('_'); var mDate=new Date(Number(parts[0]),Number(parts[1])-1,1);
+  var best=base;
+  for(var j=0;j<matched.length;j++){ var m=matched[j], r=m.r;
+    if(m.wf && mDate<m.wf)continue;         // before the rule's window
+    if(m.wt && mDate>m.wt)continue;         // after the rule's window
+    var wks;
+    if(r.coverage_type==='range'){
+      if(!m.rt)continue;
+      if(m.rf && mDate<m.rf)continue;       // before the covered range
+      if(mDate>m.rt)continue;               // past the covered range
+      wks=Math.max((m.rt-mDate)/(7*86400000),0);   // weeks from this month to the end of range_to
+    } else {
+      wks=(Number(r.cover_months)||0)*4.33; // months → weeks
+    }
+    if(wks>best)best=wks;
+  }
+  return best;
+}
 
 // After-15th logic: include M+0 and M+1
 const TODAY=new Date();
@@ -2360,6 +2409,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
   const ltWks=md.lt||2;
   const lt=ltWks<=2?0:Math.round(ltWks/4.33);
   const t3=t3base+fbCoverExtra+tierAExtra;             // effective 3PL target cover (wks)
+  const crMatched=crMatch(skuKey,mkt);                 // Complex Rules matching this SKU's scope in this market (per-month window applied in the loop)
   const tf=(tfOverride!==undefined&&tfOverride!==null)?tfOverride:(md.tf||4);
   const fm=md.fm||24;
   const hasFBA=(md.ch||[]).includes('FBA');
@@ -2521,7 +2571,8 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     // 3PL target: forward-looking sum of DTC+B2B demand over t3 weeks + FBA top-up need (buy-target, no
     // buying past disc). nextFbaNeed stays IN tg3 — Buy FBA is shown as a slice of it, not stripped out.
     const nextFbaNeed=Math.max(tgFbuy-cF,0);
-    const tg3=fwdDemand(t3,i,d3DemFn)+nextFbaNeed;
+    const t3eff=crMatched.length?crCoverWeeks(i,t3,crMatched):t3;   // Complex Rules override (raise-only, per-month window)
+    const tg3=fwdDemand(t3eff,i,d3DemFn)+nextFbaNeed;
 
     let bQ=0,bPi=-1;
     const gap=tg3-c3;
@@ -2813,7 +2864,8 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     const trfIn=tA2[i]||0;
     const c3=Math.max(pAD-fTx,0),cF=fAD+trfIn;
     const nextFbaNeed=Math.max(tgFbuy-cF,0);
-    const tg3=fwdDemand(t3,i,d3DemFn)+nextFbaNeed;
+    const t3eff=crMatched.length?crCoverWeeks(i,t3,crMatched):t3;   // Complex Rules override (raise-only, per-month window)
+    const tg3=fwdDemand(t3eff,i,d3DemFn)+nextFbaNeed;
     // Cover: forward-looking — count how many weeks of future demand SOH covers
     // cover-weeks (display): count REAL future demand including post-discontinue, so cover runs down
     // realistically rather than looking infinite once the disc cutoff zeroes demand. (Buy decisions keep
