@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.433 - DEMAND plan: product title on 120ms hover over SKU name ⚠️ NEEDS TESTING
+- The product title (removed from column 1 in v26.432) now shows as a **120ms hover tooltip** over the SKU name. Reuses the existing fast-tooltip handler (extended to `.dp-sku-tip` alongside `.crc-tip`). `artifact_v16.7.html` only.
+
 ## v26.432 - Release Window filter onto Category row + DEMAND col-1 tidy ⚠️ NEEDS TESTING
 - **Release Window filter** moved onto the **Category row** (right after the category filter) on BUY / FBA / TRANSFER (was in the Filters row) and confirmed there on the DEMAND plan. Now also shows on **TRANSFER** (was buy/fba only).
 - **DEMAND plan column 1:** removed the product-title line; the release window now shows as a small purple **badge** with just the value (e.g. `SS27`, was `RW: SS27`) placed after the launch/disc dates; removed the left indent padding in the cell.

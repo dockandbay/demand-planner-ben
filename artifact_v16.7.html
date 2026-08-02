@@ -5247,12 +5247,13 @@ function inbDiv(inb, entries, color){
   document.addEventListener('mouseout',function(e){ var n=e.target&&e.target.closest?e.target.closest('.stk-inb[data-tip]'):null; if(n){clearTimeout(t); hide();} });
   document.addEventListener('scroll',hide,true);
 })();
-// Complex-rule cover cells (.crc-tip[data-tip]) in the SKU popup — 120ms hover tooltip naming the rule (bound once).
-(function(){ var el=null,t=null;
+// 120ms hover tooltip for complex-rule cover cells (.crc-tip) in the SKU popup AND the demand-plan SKU name
+// (.dp-sku-tip → product title). Bound once, renders the element's data-tip HTML.
+(function(){ var el=null,t=null; var SEL='.crc-tip[data-tip], .dp-sku-tip[data-tip]';
   function hide(){ if(el)el.style.display='none'; }
-  document.addEventListener('mouseover',function(e){ var n=e.target&&e.target.closest?e.target.closest('.crc-tip[data-tip]'):null; if(!n)return;
+  document.addEventListener('mouseover',function(e){ var n=e.target&&e.target.closest?e.target.closest(SEL):null; if(!n)return;
     clearTimeout(t); t=setTimeout(function(){ if(!el){el=document.createElement('div'); el.style.cssText='position:fixed;z-index:100006;max-width:300px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:7px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none'; document.body.appendChild(el);} el.innerHTML=n.getAttribute('data-tip'); el.style.display='block'; var r=n.getBoundingClientRect(); el.style.left=Math.max(6,Math.min(r.left,window.innerWidth-306))+'px'; el.style.top=(r.bottom+5)+'px'; },120); });
-  document.addEventListener('mouseout',function(e){ var n=e.target&&e.target.closest?e.target.closest('.crc-tip[data-tip]'):null; if(n){clearTimeout(t); hide();} });
+  document.addEventListener('mouseout',function(e){ var n=e.target&&e.target.closest?e.target.closest(SEL):null; if(n){clearTimeout(t); hide();} });
   document.addEventListener('scroll',hide,true);
 })();
 // Persistent, click-to-copy tooltip for FBA-inbound cells (.fba-inb[data-copy]) — 120ms hover to show;
@@ -6376,7 +6377,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         td.style.cssText='position:sticky;left:0;background:#fafafa;border-bottom:1px solid #f0f0ee;padding:0;min-width:160px;max-width:160px;z-index:1';
         var tierCls='tier-'+(p.ti||'c').toLowerCase();
         td.innerHTML='<div style="padding:2px 4px;text-align:left">'
-          +'<div style="font-size:9px;font-weight:700;color:#1a1a1a;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left">'+sku+'</div>'
+          +'<div class="dp-sku-tip"'+(p.n?' data-tip="'+String(p.n).replace(/"/g,'&quot;').replace(/</g,'&lt;')+'"':'')+' style="font-size:9px;font-weight:700;color:#1a1a1a;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left'+(p.n?';cursor:help':'')+'">'+sku+'</div>'
           +'<div style="display:flex;gap:2px;align-items:center;flex-wrap:wrap">'
           +'<span class="sku-tier '+tierCls+'" style="font-size:7px">'+(p.ti||'C')+'</span>'
           +skuStatusBadge(launchDate,discDate)
