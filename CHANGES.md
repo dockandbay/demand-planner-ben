@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.412 - Buy 3PL Urgent split into Urgent Sea + Urgent Air (columns + pills) ⚠️ NEEDS TESTING
+- The BUY tab's single "Buy 3PL Urgent" column is now **two columns — Urgent Sea + Urgent Air** — with a **filter pill for each** ("Urg Sea" / "Urg Air"; "Urgent" combined kept).
+- **Routing:** the urgent qty goes to **Sea** if sea-expedite (supplier `exped` + branch sea freight) lands before the stockout month, else **Air** (exped + air freight). Uses the v26.411 data (BRANCH_FREIGHT + per-SKU expedite weeks).
+- **Urgent quantities are UNCHANGED** — this is a split/relabel only, verified: total urgent 140,558 = 8,990 Sea + 131,568 Air (mostly Air, since urgent needs are imminent). getBuyQtys now returns `b3uSea`/`b3uAir` (b3u kept as the sum). `artifact_v16.7.html`.
+- **Deferred (separate follow-up):** the "fire below 2wk cover / restore cover for SKUs held at ~0 by just-in-time arrivals" enhancement (e.g. TOWLB) — my first sizing attempt undersized (−35% urgent) and still missed TOWLB, so I reverted it. Needs a stockTrace debug with Ben rather than a guess.
+
 ## v26.411 - Urgent Air/Sea: data foundation (expedite weeks + branch freight) — no behaviour change yet
 Plumbing for the upcoming Buy 3PL Urgent Air/Sea split. `server.mjs`: PROD_CONST now carries `exped` (supplier `expedited_production_weeks`, default 6) per SKU; new injected global **`BRANCH_FREIGHT`** = per-market air/sea freight days (from `planner.branches`; air ~7d, sea UK 60 / EU 70 / US·AU 28 / CA 42). `artifact_v16.7.html`: reads `pc.exped` into `pd.exped`, adds the `BRANCH_FREIGHT` global. Nothing consumes these yet → buy plan unchanged. Next: the urgent-scan split (fires <2wk cover; Sea-else-Air routing) + the two columns.
 

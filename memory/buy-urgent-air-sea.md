@@ -22,3 +22,10 @@ metadata:
 3. UI: replace the "Buy 3PL Urgent" column with two — "Urgent Air" / "Urgent Sea" (header + row + COLS). Relates to [[expedite-recommendations]] (SUPPLY Actions already has air-freight/expedite recs).
 
 Ben's example: TOWLB — Urgent Air good for October, Urgent Sea good for November.
+
+**PROGRESS (v26.411): DATA FOUNDATION BUILT + verified.** server.mjs `buildPROD_CONST` adds `exped` per SKU (supplier `expedited_production_weeks`, default 6); new `buildBRANCH_FREIGHT()` + injected global `BRANCH_FREIGHT` = {uk:{air:7,sea:60},us:{air:7,sea:28},eu:{air:7,sea:70},au:{air:7,sea:28},ca:{air:7,sea:42}} (days). artifact reads `pc.exped`→`pd.exped`, has `var BRANCH_FREIGHT={}`. All 723 SKUs have exped. NO behaviour change yet.
+
+**REMAINING (engine + UI): the urgent scan is at artifact ~2535–2600.** Key finding — the trigger ALREADY fires at `<URGENT_THRESHOLD_WKS` cover (currently 3wk) via `dangerStart=stockTrace.findIndex(t=>t.closing/t.weekly<THRESH)`, BUT sizing only accumulates when `stockAfter<0` (line ~2586), so a SKU held at ~0 by just-in-time arrivals (TOWLB) sizes to 0 → no urgent. So the build:
+1. Set `URGENT_THRESHOLD_WKS=2` (Ben) and SIZE the urgent to RESTORE cover to the threshold at the danger point (not only cover negatives) — reuse the existing buffer add.
+2. Compute two expedite leads (weeks): `seaLead = pd.exped + BRANCH_FREIGHT[co].sea/7`, `airLead = pd.exped + BRANCH_FREIGHT[co].air/7`. Route each shortfall: **Sea if seaLead lands before the stockout month, else Air**, else true stockout.
+3. Split `buyUrgent`/`bQu` into `bQuSea`+`bQuAir`; getBuyQtys returns `b3uSea`/`b3uAir`; replace the single "Buy 3PL Urgent" column (header ~1696, row ~1853, COLS) with **Urgent Sea + Urgent Air**. Snapshot before/after ([[buy-plan-before-after]]): BEFORE b3u total=140,558; HAIRW b3u=1,260.

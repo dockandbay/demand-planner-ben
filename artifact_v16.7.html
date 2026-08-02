@@ -1249,17 +1249,17 @@ function dateDMY(d){if(!d||typeof d!=='string')return'';var s=d.slice(0,10),p=s.
 function getBuyQtys(sku,mkt){
   const cacheKey=sku+'|'+mkt;
   if(BUY_CACHE[cacheKey])return BUY_CACHE[cacheKey];
-  const pd=PD[sku];if(!pd){return BUY_CACHE[cacheKey]={b3:0,b3u:0,bf:0};}
-  const md=pd.mkts&&pd.mkts[mkt];if(!md){return BUY_CACHE[cacheKey]={b3:0,b3u:0,bf:0};}
+  const pd=PD[sku];if(!pd){return BUY_CACHE[cacheKey]={b3:0,b3u:0,b3uSea:0,b3uAir:0,bf:0};}
+  const md=pd.mkts&&pd.mkts[mkt];if(!md){return BUY_CACHE[cacheKey]={b3:0,b3u:0,b3uSea:0,b3uAir:0,bf:0};}
   const ple=parseInt(document.getElementById('plw')?.value)||0;
   const tfOv=parseInt(document.getElementById('fbw')?.value)||null;
   const proj=project(md,pd,ple,mkt,tfOv,sku);
   const START_IDX=1;
   const idxCount=AFTER15?2:1;
-  let b3=0,b3u=0,bf=0;
+  let b3=0,b3u=0,b3uSea=0,b3uAir=0,bf=0;
   for(let i=START_IDX;i<START_IDX+idxCount&&i<proj.length;i++){
     b3+=proj[i].bQ||0;
-    b3u+=proj[i].bQu||0;
+    b3u+=proj[i].bQu||0; b3uSea+=proj[i].bQuSea||0; b3uAir+=proj[i].bQuAir||0;
     bf+=proj[i].fdQ||0;
   }
   // Future buys the engine has SCHEDULED beyond the current order-now window — surfaced as a "(+N future)" flag so
@@ -1272,7 +1272,7 @@ function getBuyQtys(sku,mkt){
   const _cpF=(pd.cp)||1;
   if(bf>0){ const _ctF=Math.ceil(bf/_cpF); bf=_ctF>1?_ctF*_cpF:0; }
   const tx=(proj[START_IDX]&&proj[START_IDX].tx)||0; // recommended 3PL->FBA transfer NOW (M+0)
-  return BUY_CACHE[cacheKey]={b3,b3u,bf,tx,futQty,futN};
+  return BUY_CACHE[cacheKey]={b3,b3u,b3uSea,b3uAir,bf,tx,futQty,futN};
 }
 
 // Split FBA-bound inbound into arriving within 14 days vs 15+ days out (by ETA).
@@ -1566,7 +1566,7 @@ function buildBuPills(){
   var bup=document.getElementById('bup'); if(!bup)return; bup.innerHTML='';
   var BU_PILLS=(BP_VIEW==='fba')
     ? [['All','ALL'],['Transfer FBA','TRFFBA'],['Transfer FBA (non GRS)','TRFFBA_NG']].concat(String(CUR).toUpperCase()==='US'?[['AWD · FBA <3wk','AWDLOW']]:[])   // US only: AWD on hand + FBA under 3 weeks
-    : [['All','ALL'],['Urgent','URGENT'],['Buy 3PL','3PL'],['Buy FBA','FBA'],['First Buy','FIRST'],['Transfer','TRF']];
+    : [['All','ALL'],['Urgent','URGENT'],['Urg Sea','URGENT_SEA'],['Urg Air','URGENT_AIR'],['Buy 3PL','3PL'],['Buy FBA','FBA'],['First Buy','FIRST'],['Transfer','TRF']];
   if(!BU_PILLS.some(function(p){return p[1]===BU_SEL;}))BU_SEL=(BP_VIEW==='fba')?'TRFFBA':'ALL';   // FBA view defaults to Transfer FBA
   BU_PILLS.forEach(function(pr){ var lbl=pr[0],val=pr[1];
     var b=mk('button','pill'+(val===BU_SEL?' active':''),lbl);
@@ -1705,7 +1705,8 @@ function render(){
             var n=oth.map(function(m,i){return '<th class="r" style="min-width:50px;background:#dcfce7;color:#166534;font-size:9px'+(i===0?';border-left:3px solid #86efac':'')+'">'+(i===0?'IN ':'')+m+'&rarr;</th>';}).join('');
             return o+n; })()
         : '<th class="r" style="min-width:64px">Buy 3PL</th>'
-        +'<th class="r" style="min-width:68px">Buy 3PL<br>Urgent</th>'
+        +'<th class="r" style="min-width:58px" title="Buy 3PL Urgent — SEA-expedite (expedited production + sea freight); used when sea still lands before the stockout">Urgent<br>Sea</th>'
+        +'<th class="r" style="min-width:58px" title="Buy 3PL Urgent — AIR-expedite (expedited production + air freight); used when sea can no longer land in time">Urgent<br>Air</th>'
         +'<th class="r" style="min-width:64px">Buy FBA</th>'
         +'<th class="r" style="min-width:60px" id="trfh1"></th>'
         +'<th class="r" style="min-width:60px" id="trfh2"></th>');
@@ -1738,6 +1739,8 @@ function render(){
         var _cov=_wk>0?((_md['if_']||0)+(_md.oof||0))/_wk:Infinity;   // FBA on-hand + inbound, in weeks
         if(!(_cov<3))return false; }
       if(BU_SEL==='URGENT'&&!bq.b3u)return false;
+      if(BU_SEL==='URGENT_SEA'&&!bq.b3uSea)return false;
+      if(BU_SEL==='URGENT_AIR'&&!bq.b3uAir)return false;
       if(BU_SEL==='3PL'&&!bq.b3)return false;
       if(BU_SEL==='FBA'&&!bq.bf)return false;
       if(BU_SEL==='FIRST'){
@@ -1772,7 +1775,7 @@ function render(){
   vis.forEach(s=>{const k=s.c||'?';if(!grp[k])grp[k]=[];grp[k].push(s);});
   const gk=Object.keys(grp).sort((a,b)=>{const ai=CAT_ORDER.indexOf(a),bi=CAT_ORDER.indexOf(b);if(ai<0&&bi<0)return a.localeCompare(b);if(ai<0)return 1;if(bi<0)return-1;return ai-bi;});
   let h='';
-  const COLS=(BP_VIEW==='fba')?(14+_extra):(BP_VIEW==='transfer'?(8+(MKTS.length-1)*2):13);   // transfer = 8 lead cols + OUTBOUND/INBOUND per other market
+  const COLS=(BP_VIEW==='fba')?(14+_extra):(BP_VIEW==='transfer'?(8+(MKTS.length-1)*2):14);   // buy = 14 (Urgent split into Sea+Air); transfer = 8 lead + OUT/IN per other market
   const COLS_EFF=COLS-(_MERGE?2:0);   // mobile FBA merges 2 column pairs → 2 fewer columns
   if(!vis.length){h='<tr><td colspan="'+COLS_EFF+'" class="nd">No SKUs match filters</td></tr>';}
   else gk.forEach(sc=>{
@@ -1791,7 +1794,7 @@ function render(){
       const i3=md.i3,ifv=md['if_'],oo=md.oo||0;
       const tc=tiCls(s.ti),sc2=stCls(st);
       const launch=md.launch,disc=md.disc;
-      const {b3,b3u,bf,futN,futQty,tx}=getBuyQtys(s.s,CUR);
+      const {b3,b3u,b3uSea,b3uAir,bf,futN,futQty,tx}=getBuyQtys(s.s,CUR);
           // Transfer opportunity: per fixed target market columns
       function getTrfCell(om){
         const txH2=parseInt(document.getElementById('txh')?.value)||20;
@@ -1859,7 +1862,8 @@ function render(){
         ? OTH.map(function(m,i){return outCell(m,i===0);}).join('')+OTH.map(function(m,i){return getInbCell(m,i===0);}).join('')   // TRANSFER: OUTBOUND (CUR→all) then INBOUND (all→CUR)
         : `
         <td class="bq">${b3>0?`<span class="bq-v">${fmt(b3)}</span>`:`<span class="bq-nil">—</span>`}${futN>0?`<span title="${futN} further buy(s) scheduled later in the plan (${fmt(futQty)}u) — not due to order this cycle" style="font-size:8px;color:#2563eb;margin-left:2px;white-space:nowrap">+${futN}f</span>`:``}</td>
-        <td class="bq">${b3u>0?`<span class="bq-v" style="color:#dc2626;font-weight:700">${fmt(b3u)}</span>`:`<span class="bq-nil">—</span>`}</td>
+        <td class="bq">${b3uSea>0?`<span class="bq-v" style="color:#0f766e;font-weight:700">${fmt(b3uSea)}</span>`:`<span class="bq-nil">—</span>`}</td>
+        <td class="bq">${b3uAir>0?`<span class="bq-v" style="color:#dc2626;font-weight:700">${fmt(b3uAir)}</span>`:`<span class="bq-nil">—</span>`}</td>
         <td class="bq">${bf>0?`<span class="bq-fba">${fmt(bf)}</span>`:`<span class="bq-nil">—</span>`}</td>${/* Buy FBA = new-stock purchases only (become POs). The 3PL→FBA transfer of EXISTING stock lives in the FBA / Transfer FBA view, NOT here. */''}
         ${getTrfCell(pairs[0])}
         ${getTrfCell(pairs[1])}`;
@@ -2118,7 +2122,7 @@ function buildReport(type){
   else { // ALL
     rows=[['SKU','Subcategory','Tier','Status','SOH 3PL','SOH FBA','On Order','Buy 3PL','Buy Urgent','Buy FBA','Supplier']];
     vis.forEach(s=>{
-      const {b3,b3u,bf,futN,futQty,tx}=getBuyQtys(s.s,CUR);
+      const {b3,b3u,b3uSea,b3uAir,bf,futN,futQty,tx}=getBuyQtys(s.s,CUR);
       const md=s.ms[CUR]||{};
       rows.push([s.s,s.sc||'',s.ti||'',getSt(s.ms,CUR),md.i3||0,md.if_||0,md.oo||0,b3||'',b3u||'',bf||'',(PD[s.s]&&PD[s.s].supp)||'']);
     });
@@ -2365,7 +2369,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
   // buyOverdue[pi]= true if placement is already overdue
   // buyFromLbl[i] = "from Jun 26 order" label for inbound tooltip at ARRIVAL month i
   const assumedArr={},tA1={},transferOut={};
-  const buyDisplay={},buyUrgent={},buyUrgentLead={},buyUrgentMonth={},buyUrgentArr={},buyOverdue={},buyFromLbl={};
+  const buyDisplay={},buyUrgent={},buyUrgentSea={},buyUrgentAir={},buyUrgentLead={},buyUrgentMonth={},buyUrgentArr={},buyOverdue={},buyFromLbl={};
   const MAY_OFFSET=2; // legacy alias, retained for backward-compat; semantically the
                       // offset past PROJ[0]=Actuals + PROJ[1]=Remaining to the first
                       // future month, NOT a May-specific value
@@ -2532,7 +2536,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
   // Only looks 3 months forward. Triggers if cover drops below 3 weeks
   // in that window. Plugs actual zero-stock months only, stopping at
   // the first assumed inbound arrival.
-  const URGENT_THRESHOLD_WKS=3;
+  const URGENT_THRESHOLD_WKS=3;   // danger trigger (cover wks) — kept at 3 for now; the <2wk "restore cover for held-at-~0 SKUs" enhancement is a separate follow-up (needs trace debug, see TOWLB)
   const URGENT_LOOKAHEAD=3; // months forward to scan
   let ts3=md.i3||0,tsF=md['if_']||0;
   const stockTrace=[];
@@ -2589,16 +2593,25 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
 
     if(urgentQtyNeeded>0){
       // Bridge WITH cover, not just survival (per Ben): add a safety buffer (~URGENT_THRESHOLD_WKS of cover at the
-      // rush-arrival demand rate) so the rush doesn't leave the SKU at ~0 until the next normal order lands — a
-      // forecast miss during the bridge would otherwise stock it out. Avoids back-to-back rushes.
+      // rush-arrival demand rate) so the rush doesn't leave the SKU at ~0 until the next normal order lands.
       var _bufWk=(stockTrace[injPos]||stockTrace[dangerStart]||{weekly:0}).weekly||0;
       urgentQtyNeeded+=_bufWk*URGENT_THRESHOLD_WKS;
-      // Round up to case pack
       urgentQtyNeeded=Math.max(Math.ceil(urgentQtyNeeded/cp)*cp,moq);
-      buyUrgent[1]=urgentQtyNeeded;
-      buyUrgentLead[1]=RUSH_LEAD_WKS;                       // rush lead (4–5 wk minimum)
-      buyUrgentMonth[1]=PROJ[firstDangerIdx].lbl;           // when the stockout first bites
-      buyUrgentArr[1]=PROJ[injIdx]?PROJ[injIdx].lbl:'';     // earliest a rush could land
+      // Air/Sea SPLIT of the (unchanged) urgent qty (Ben): SEA-expedite if it lands before the stockout month
+      // (cheaper), else AIR. Lead = supplier expedited_production_weeks (pd.exped, default 6) + branch air/sea freight.
+      var _co=String(mkt).toLowerCase();
+      var _bf=(typeof BRANCH_FREIGHT!=='undefined'&&BRANCH_FREIGHT[_co])||{air:7,sea:42};
+      var _exp=(pd&&pd.exped!=null)?Number(pd.exped):6;
+      var _seaWks=_exp+(Number(_bf.sea)||42)/7, _airWks=_exp+(Number(_bf.air)||7)/7;
+      var _dm=PROJ[firstDangerIdx]&&PROJ[firstDangerIdx].key?PROJ[firstDangerIdx].key.split('_'):null;
+      var _dangerDate=_dm?new Date(Number(_dm[0]),Number(_dm[1])-1,15):null;   // ~mid the stockout month
+      var _seaArr=new Date(TODAY); _seaArr.setDate(_seaArr.getDate()+Math.round(_seaWks*7));
+      var _mode=(_dangerDate&&_seaArr<=_dangerDate)?'sea':'air';               // Sea if it lands in time, else Air
+      if(_mode==='sea'){ buyUrgentSea[1]=urgentQtyNeeded; buyUrgentLead[1]=Math.round(_seaWks); }
+      else { buyUrgentAir[1]=urgentQtyNeeded; buyUrgentLead[1]=Math.round(_airWks); }
+      buyUrgent[1]=urgentQtyNeeded;                          // combined (kept for downloads / detail row)
+      buyUrgentMonth[1]=PROJ[firstDangerIdx].lbl;            // when the stockout first bites
+      buyUrgentArr[1]=PROJ[injIdx]?PROJ[injIdx].lbl:'';      // earliest a rush could land
     }
   }
 
@@ -2659,7 +2672,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
         dtc:mtdDTC,b2b:mtdB2B,fba:mtdFBA,tot:mtdDTC+mtdB2B+mtdFBA,pka:(md.pka&&md.pka[key])||0,
         a3:0,aF:0,confQty3:0,confQtyF:0,assumedQty3:0,assumedLabel:'',trfIn:0,
         fTx:0,fSh:0,tot3pl:0,c3:s3,cF:sF,tg3:0,tgF:0,cv3:999,cvF:999,isDisc:false,
-        bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],bPM:buyDisplay[i]?`arrives ${PROJ[Math.min(i+lm,PROJ.length-1)].lbl}`:'',
+        bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,bQuSea:buyUrgentSea[i]||0,bQuAir:buyUrgentAir[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],bPM:buyDisplay[i]?`arrives ${PROJ[Math.min(i+lm,PROJ.length-1)].lbl}`:'',
         fdQ:fbaBuyDisp[i]||0,tx:transferOut[i]||0,overdue:buyOverdue[i]||false,inbLines3:[],inbLinesF:[]};
     }
     if(isForecast){
@@ -2682,7 +2695,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
         confQty3:remInb3.reduce((s,x)=>s+(x.qty||0),0),confQtyF:remInbF.reduce((s,x)=>s+(x.qty||0),0),
         assumedQty3:0,assumedLabel:'',trfIn:0,fTx:0,fSh:0,tot3pl:dtc+b2b,c3:rc3,cF:rcF,
         tg3:t3*wA2,tgF:tf*wF2,cv3:wA2>0?rc3/wA2:999,cvF:wF2>0?rcF/wF2:999,isDisc:false,
-        bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],bPM:buyDisplay[i]?`arrives ${PROJ[Math.min(i+lm,PROJ.length-1)].lbl}`:'',
+        bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,bQuSea:buyUrgentSea[i]||0,bQuAir:buyUrgentAir[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],bPM:buyDisplay[i]?`arrives ${PROJ[Math.min(i+lm,PROJ.length-1)].lbl}`:'',
         fdQ:fbaBuyDisp[i]||0,tx:transferOut[i]||0,overdue:buyOverdue[i]||false,
         inbLines3:remInb3.map(s=>`${s.ref} \u00b7 ${fmt(s.qty)} units \u00b7 ${dateDMY(s.eta)} \u00b7 ${s.supplier||(((s.type||'').startsWith('supplier'))?'supplier':((s.type||'').includes('transfer'))?'transfer':(s.type||''))}`),
         inbLinesF:remInbF.map(s=>`${s.ref} \u00b7 ${fmt(s.qty)} units \u00b7 ${dateDMY(s.eta)} \u00b7 ${s.supplier||(((s.type||'').startsWith('supplier'))?'supplier':((s.type||'').includes('transfer'))?'transfer':(s.type||''))}`)};
@@ -2800,7 +2813,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
       fTx,trfIn,fSh,c3,cF,tg3,tgF,tot3pl:dtc+b2b+fTx,
       cv3:isFinite(cv3)?cv3:999,cvF:isFinite(cvF)?cvF:999,
       isDisc:!!(discCutoff&&key>=discCutoff),
-      bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],bPM,
+      bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,bQuSea:buyUrgentSea[i]||0,bQuAir:buyUrgentAir[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],bPM,
       fdQ:fbaBuyDisp[i]||0,tx:transferOut[i]||0,overdue:buyOverdue[i]||false,
       inbLines3,inbLinesF};
     // Advance s3 including assumed inbound so future months see the benefit (matches pass 1)
