@@ -9068,7 +9068,7 @@ function renderAutoForecastReport(body){
       +payTbl('USD',1)+payTbl('GBP',AF_GBP);
     var a=d.assumptions;
     var note='<div style="font-size:11px;color:#888;margin-top:12px;line-height:1.5">'
-      +'<b>Model:</b> buy = <b>category (subcategory) forecast − SKU forecast</b>, floored at 0 — the top-up the SKU-level plan hasn’t captured yet (future / discontinued SKUs). '
+      +'<b>Model:</b> a <b>rolling monthly buy plan</b> per subcategory. Demand = the <b>full forecast</b> (existing SKUs’ forecast + the category gap for future SKUs). Stock rolls forward crediting open-PO arrivals (already in the cash-flow forecast); each month buys the shortfall — the <b>unconfirmed PO</b> on top. '
       +'order month = demand month − lead time (supplier production + China→market sea shipping). Payments phased off each subcategory’s primary supplier’s terms '
       +'(deposit at order · completion at order+production days · balance at arrival+credit days). <b>Freight</b> = each market’s monthly delivery pallets packed into the cheapest containers (CONFIG ▸ freight table); <b>Duty</b> = value × duty % (category × country, CONFIG ▸ Import duty), both at the delivery month. '
       +'<span style="color:#94a3b8">Cost = forecast-weighted current product cost per subcategory (USD) and may blend supplier currencies — treat as indicative.</span>'

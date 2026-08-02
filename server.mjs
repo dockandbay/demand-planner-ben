@@ -7193,7 +7193,7 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
     // SKU product cost) ÷ Σ(SKU forecast units), where the cost is the live planner.products cost (cost, then
     // cost_lx/cost_xr fallbacks — same source the order plan uses). Falls back to the historical avg PO cost
     // only for subcats that have no product cost. (Was: plain historical avg of past PO cost_price.)
-    const [costRows, supRows, termsRows, frtRows, dutyRows, ppuRows, scatRows] = await Promise.all([
+    const [costRows, supRows, termsRows, frtRows, dutyRows, ppuRows, scatRows, ohRows, ooRows] = await Promise.all([
       pool.query(`SELECT sub s, coalesce(wcost, pocost) c FROM
         (SELECT pr.subcategory sub, avg(l.cost_price) pocost FROM planner.purchase_order_lines l
            JOIN planner.products pr ON pr.sku=l.sku WHERE pr.subcategory IS NOT NULL AND l.cost_price>0 GROUP BY 1) po
@@ -7227,6 +7227,23 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
       pool.query(`SELECT s, category FROM (SELECT subcategory s, category,
           row_number() OVER (PARTITION BY subcategory ORDER BY count(*) DESC) rn
         FROM planner.products WHERE subcategory IS NOT NULL AND category IS NOT NULL GROUP BY 1,2) q WHERE rn=1`),
+      // ON-HAND stock per subcat × market (rolling buy plan opening balance).
+      pool.query(`SELECT p.subcategory s, split_part(i.warehouse,'_',1) market,
+          sum(i.available + CASE WHEN i.warehouse='us_fba' THEN coalesce(p.inventory_us_awd,0)::int ELSE 0 END)::numeric onhand
+        FROM planner.v_product_inventory i JOIN planner.products p ON p.sku=i.sku
+        WHERE p.in_planning_scope AND p.subcategory IS NOT NULL GROUP BY 1,2`),
+      // ON-ORDER (open POs already in the cash-flow forecast) per subcat × market × ARRIVAL month — credited to
+      // the rolling plan so the AF only surfaces the UNCONFIRMED buy on top. Undated open POs → current month.
+      pool.query(`SELECT p.subcategory s, lower(coalesce(nullif(po.country_code,''), b.country_code,'')) market,
+          to_char(coalesce(sh.arrival_date,sh.delivery_date,sh.landing_date,po.landing_date_overide,date_trunc('month',CURRENT_DATE)),'YYYY-MM') m,
+          sum(l.qty)::numeric qty
+        FROM planner.purchase_orders po
+        JOIN planner.purchase_order_lines l ON l.po=po.po
+        JOIN planner.products p ON p.sku=l.sku
+        LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
+        LEFT JOIN planner.branches b ON b.name=po.branch
+        WHERE coalesce(po.status,'') NOT ILIKE '%complete%' AND p.subcategory IS NOT NULL
+        GROUP BY 1,2,3`),
     ]);
     const unitCost={}; costRows.rows.forEach(r=> unitCost[r.s]=Number(r.c));
     const supName={}; supRows.rows.forEach(r=> supName[r.s]=r.nm);
@@ -7235,6 +7252,8 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
     const dutyPct={}; dutyRows.rows.forEach(r=> dutyPct[(r.category||'')+'|'+r.country]=Number(r.duty_pct)||0);   // category|COUNTRY → %
     const ppu={}; ppuRows.rows.forEach(r=> ppu[r.s]=(Number(r.u)>0)?(Number(r.pall)/Number(r.u)):0);              // pallets per unit, per subcat
     const catOf={}; scatRows.rows.forEach(r=> catOf[r.s]=r.category);
+    const onHand={}; ohRows.rows.forEach(r=> onHand[r.s+'|'+r.market]=Number(r.onhand)||0);              // subcat|market → current stock
+    const onOrder={}; ooRows.rows.forEach(r=>{ const k=r.s+'|'+r.market; (onOrder[k]||(onOrder[k]={}))[r.m]=(onOrder[k][r.m]||0)+(Number(r.qty)||0); });   // subcat|market → arrivalMonth → open-PO qty
     const monthPallets={};   // market → delivery month → pallets (containerised into freight after the loop)
     // per-market pass — run all markets in PARALLEL. The only shared writes (unitsBy / pay / txMap / truncated)
     // are additive and commutative, and each market's synchronous aggregation block runs to completion without
@@ -7261,15 +7280,22 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
       dem.rows.forEach(r=>{ (skuDem[r.s]||(skuDem[r.s]={}))[r.m]=Number(r.u); });
       cat.rows.forEach(r=>{ (catDem[r.s]||(catDem[r.s]={}))[r.m]=Number(r.u); });
       lead.rows.forEach(r=> leadM[r.s]=Math.max(1,Math.round(Number(r.wk)/4.345)));   // weeks→months
-      // AUTO FORECAST = category (subcategory) forecast − SKU forecast, floored at 0 → the top-up the SKU-level
-      // plan hasn't captured yet (future/undiscontinued SKUs). Order each month's gap at (demand month − lead).
-      // Pure incremental demand: no stock netting, no forward cover (per Ben — buying is driven by lead time).
-      for(const s of Object.keys(catDem)){
+      // AUTO FORECAST = a ROLLING monthly buy plan per subcategory (Ben). Demand = the FULL forecast (existing
+      // SKUs' forecast + the category gap for future SKUs = max(subcat forecast, SKU forecast)). Roll stock forward
+      // month by month, crediting open-PO arrivals (already in the cash-flow forecast), and buy each month's
+      // shortfall — the UNCONFIRMED PO on top. Order that buy at (demand month − lead).
+      const subcats=new Set([...Object.keys(catDem), ...Object.keys(skuDem)]);
+      for(const s of subcats){
         const lm=leadM[s]||2, c=unitCost[s]||0, nm=supName[s]||'—';
         const t=terms[nm]||{start_deposit_pct:30,completion_pct:0,balance_pct:70,production_days:60,credit_days:0};
+        let stock=onHand[s+'|'+mk]||0;   // opening on-hand
         for(let i=0;i<allMonths.length;i++){
           const m=allMonths[i];
-          const arrive=Math.max(0, ((catDem[s]||{})[m]||0) - ((skuDem[s]||{})[m]||0));   // the gap = units to buy this month
+          const demand=Math.max(((catDem[s]||{})[m]||0), ((skuDem[s]||{})[m]||0));   // full forecast demand
+          const inbound=(onOrder[s+'|'+mk]||{})[m]||0;                                // open POs arriving this month (already costed elsewhere)
+          const avail=stock+inbound;
+          const arrive=Math.max(0, demand-avail);                                     // NEW buy needed = unconfirmed PO
+          stock=Math.max(0, avail-demand);                                            // carry closing stock forward
           if(arrive<=0) continue;
           const om=afAddMonths(m,-lm);                       // order month = demand month − lead
           if(win.indexOf(om)>=0){
