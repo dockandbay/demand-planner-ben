@@ -1560,7 +1560,8 @@ function initUI(){
   bpRenderCatControl();
   const tp=document.getElementById('tip');
   ['All','A','B','C'].forEach(t=>{
-    const b=mk('button','pill'+(t==='All'?' active':''),t==='All'?'All':'Tier '+t);
+    const on=(t==='All')?TI_SEL.has('ALL'):TI_SEL.has(t);   // reflect restored state
+    const b=mk('button','pill'+(on?' active':''),t==='All'?'All':'Tier '+t);
     b.onclick=()=>{TI_SEL=t==='All'?new Set(['ALL']):new Set([t]);tp.querySelectorAll('.pill').forEach(p=>p.classList.remove('active'));b.classList.add('active');render();};
     tp.appendChild(b);
   });
@@ -1580,7 +1581,9 @@ function initUI(){
   });
   const csp=document.getElementById('csp');
   ['Core','Seasonal','Non-Core'].forEach(cs=>{
-    const b=mk('button','pill active',cs);
+    const on=CS_SEL.has('ALL')||CS_SEL.has(cs);   // reflect restored state
+    const b=mk('button','pill'+(on?' active':''),cs);
+    if(!on)b.style.opacity='.55';
     b.onclick=()=>{
       if(CS_SEL.has('ALL'))CS_SEL=new Set(['Core','Seasonal','Non-Core']);
       CS_SEL.has(cs)?CS_SEL.delete(cs):CS_SEL.add(cs);
@@ -1824,7 +1827,27 @@ function render(){
   document.getElementById('bpst').textContent=
     `${vis.length} SKUs \u00b7 ${CUR} \u00b7 ${cnt.ACTIVE} active, ${cnt.FUTURE} future, ${cnt.DISC} disc`+
     (buyCount>0?` \u00b7 ${buyCount} with buy recommendation (${BUY_LBL})`:'');
+  bpSaveFilters();   // persist Buy/FBA filters (tier/status/core-seasonal/buy-type + SKU query) for 1h
 }
+
+// \u2500\u2500 Buy/FBA filter persistence (1h) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// Country + category are carried from the DEMAND plan (setFilters) and persisted there. Here we
+// persist the Buy/FBA-specific pills \u2014 tier, status, core-seasonal, buy-type \u2014 plus the SKU query.
+// Buy-type (BU_SEL) is kept per-view (buy vs fba); the rest are shared (same vars across both views).
+function bpSaveFilters(){ try{
+  var bu={}; try{ var o=JSON.parse(localStorage.getItem('hzBuyFilters')||'null'); if(o&&o.bu)bu=o.bu; }catch(e){}
+  bu[BP_VIEW]=BU_SEL;
+  var qi=document.getElementById('qry');
+  localStorage.setItem('hzBuyFilters',JSON.stringify({ti:[...TI_SEL],st:[...ST_SEL],cs:[...CS_SEL],bu:bu,qry:qi?qi.value:'',ts:Date.now()}));
+}catch(e){} }
+function bpRestoreFilters(){ try{
+  var o=JSON.parse(localStorage.getItem('hzBuyFilters')||'null'); if(!o||!o.ts||Date.now()-o.ts>3600000)return;
+  if(Array.isArray(o.ti)&&o.ti.length)TI_SEL=new Set(o.ti);
+  if(Array.isArray(o.st)&&o.st.length)ST_SEL=new Set(o.st);
+  if(Array.isArray(o.cs)&&o.cs.length)CS_SEL=new Set(o.cs);
+  if(o.bu&&o.bu[BP_VIEW]!=null)BU_SEL=o.bu[BP_VIEW];   // per-view buy-type
+  var qi=document.getElementById('qry'); if(qi&&typeof o.qry==='string')qi.value=o.qry;
+}catch(e){} }
 
 function _bindTb(){var _tb=document.getElementById('tb');if(_tb){_tb.addEventListener('click',function(e){var ca=e.target.closest('.cat-selall');if(ca){var cat=ca.dataset.cat;document.querySelectorAll('#tb .fba-tick').forEach(function(tk){if(tk.dataset.cat===cat)FBA_TICK[tk.dataset.sku+'|'+CUR]=true;});render();updateFbaSelBox();return;}var b=e.target.closest('.ob');if(b)open_(b.dataset.sku);});_tb.addEventListener('change',function(e){var inp=e.target.closest('.fba-ov');if(inp){var v=inp.value.trim();FBA_OV[inp.dataset.sku+'|'+CUR]=(v===''?'':String(parseInt(v)||0));updateFbaSelBox();return;}var tk=e.target.closest('.fba-tick');if(tk){if(tk.checked)FBA_TICK[tk.dataset.sku+'|'+CUR]=true;else delete FBA_TICK[tk.dataset.sku+'|'+CUR];updateFbaSelBox();}});}}
 
@@ -2848,7 +2871,7 @@ function card(l,v,s,w){return`<div class="sc2 ${w}"><div class="l">${l}</div><di
 function fmt(n){if(n===null||n===undefined)return'\u2014';const r=Math.round(n);return Math.abs(r)>=1000?r.toLocaleString():String(r);}
 // Buy-plan items for BUY\u2192PO in the current market. mode '3pl' \u2192 Buy 3PL (b3); 'fba' \u2192 Buy FBA (bf).
 function buyplanItems(mode){ var out=[], fba=(mode==='fba'); try{ for(var sku in PD){ var qq=getBuyQtys(sku,CUR); var q=fba?(qq&&qq.bf):(qq&&qq.b3); if(q>0) out.push({sku:sku, qty:Math.round(q)}); } }catch(e){} return out; }
-return {project:project, getBuyQtys:getBuyQtys, buyplanItems:buyplanItems, render:render, initUI:initUI, setFilters:setFilters, donorSpare:donorSpare,
+return {project:project, getBuyQtys:getBuyQtys, buyplanItems:buyplanItems, render:render, initUI:initUI, setFilters:setFilters, restoreFilters:bpRestoreFilters, donorSpare:donorSpare,
   open_:open_, close_:close_, renderPanel:renderPanel, swM:swM, rpc:rpc,
   downloadReport:downloadReport, downloadReportCSV:downloadReportCSV, updateDlMenuLabels:updateDlMenuLabels,
   updateTrfHeaders:updateTrfHeaders, getFilteredVis:getFilteredVis,
@@ -2872,7 +2895,7 @@ var BUY_SCAFFOLD=`<div class="wrap">
   <div style="display:flex;align-items:center;gap:6px">
     <span class="pill-lbl">SKU</span>
     <input type="text" id="qry" placeholder="Filter by SKU(s) — paste a list, space/comma separated…"
-      style="font-size:11px;padding:3px 8px;border:1px solid #d0d0d0;border-radius:4px;width:340px"
+      style="font-size:11px;padding:3px 8px;border:1px solid #86efac;background:#f0fdf4;border-radius:4px;width:340px"
       oninput="BP.render()">
     <div style="width:1px;height:14px;background:#e0e0e0;margin:0 4px;flex-shrink:0"></div>
     <span class="pill-lbl">Category</span>
@@ -8883,6 +8906,10 @@ function renderBuyView(mode){
   if(BP.setView)BP.setView(mode==='fba'?'fba':'buy');
   // Synergy: carry the country + category selection over from the PLAN tab.
   BP.setFilters(CUR,[...SEL]);
+  // Restore the Buy/FBA-specific filters (tier/status/core-seasonal/buy-type + SKU query) from the
+  // last hour, so returning to the page remembers them. Runs after setFilters (country/category from
+  // the plan) and before initUI so the pills build in the restored state.
+  if(BP.restoreFilters)BP.restoreFilters();
   // Build pills, bind table clicks, and render the buy list. initUI() reads the freshly
   // injected (empty) pill containers, so rebuilding on each BUY/FBA-tab entry is correct.
   BP.initUI();

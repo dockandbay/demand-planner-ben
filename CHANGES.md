@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.397 - BUY/FBA: 1h filter persistence + light-green SKU field ⚠️ NEEDS TESTING
+- **Filter persistence (1h):** Buy & FBA now remember tier / status / core-seasonal / buy-type pills + the SKU query on returning to the page (localStorage `hzBuyFilters`, 1h TTL). Buy-type is remembered per-view (Buy vs FBA); the rest are shared. Country + category still follow the DEMAND plan (persisted there since v26.392). Restore runs in `renderBuyView` after the plan-sync, before the pills build.
+- **Tier & Core/Seasonal pills now reflect their restored (or current) state** on build — previously always drew "All"/all-active regardless.
+- **SKU filter field** now light green (`#86efac`/`#f0fdf4`) matching Order Plan & the demand plan. UI/filter only — buy plan quantities untouched. `artifact_v16.7.html`.
+
 ## v26.396 - DEMAND plan: report buttons moved to filters row + Executive Summary drawer ⚠️ NEEDS TESTING
 - **Revenue vs target button relocated:** was a floating pill bottom-right of the screen; now sits **right-aligned in the plan's Filters row** (`#catrow1-wrap`), **desktop only** (hidden on mobile, as requested).
 - **New "📊 Executive summary" pop-out drawer** next to it: compact FY summary (FY26 last-year → FY27 → FY28 partial) with revenue/units + YoY badges, a per-channel FY27 breakdown (DTC/FBA/B2B), and a link to open the full Exec Summary report. Two report drawers now available from the plan.
