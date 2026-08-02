@@ -976,6 +976,7 @@ var BP_DATA={products:{},sku_list:[],built:'',demand_source:'',may_days:{elapsed
 // Static per-SKU fields (cp/moq/supp + per-market t3/tf/fm/l3/lt). Pulled via MCP at build time,
 // independent of buy_plan_data extraction. Refresh by re-running the MCP pull when products change.
 var PROD_CONST={};
+var BRANCH_FREIGHT={};   // {uk:{air,sea days},…} — expedite freight leads for Buy 3PL Urgent Air/Sea (server-injected)
 // Categories + subcategories metadata — pulled via MCP each rebuild from
 // Airtable's categories/subcategories tables. CATS_META keyed by category
 // name: {a:is_active, g:grouping}. SUBS_META keyed by subcategory name:
@@ -1074,6 +1075,7 @@ DATA=(DATA||[]).filter(function(r){
     // Static SKU-level fields from PROD_CONST
     if(pc.cp!=null)pd.cp=pc.cp;
     if(pc.moq!=null)pd.moq=pc.moq;
+    if(pc.exped!=null)pd.exped=pc.exped;   // supplier expedited production weeks (Buy 3PL Urgent Air/Sea)
     if(pc.supp)pd.supp=Array.isArray(pc.supp)?pc.supp:[pc.supp];
     if(!pd.mkts)pd.mkts={};
     MK.forEach(function(mkt){

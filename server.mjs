@@ -407,6 +407,8 @@ async function buildPROD_CONST() {
       fba_transfer_min_units_uk fm_uk, fba_transfer_min_units_us fm_us, fba_transfer_min_units_eu fm_eu, fba_transfer_min_units_au fm_au, fba_transfer_min_units_ca fm_ca
     FROM planner.products WHERE in_planning_scope`);
   const num1 = v => { if (v == null) return null; const m = String(v).match(/-?\d+(\.\d+)?/); return m ? Number(m[0]) : null; };
+  // Supplier expedited production weeks (for Buy 3PL Urgent Air/Sea). Blank/no-supplier → default 6 weeks (Ben).
+  const supEx = {}; try { (await pool.query(`SELECT name, expedited_production_weeks x FROM planner.suppliers`)).rows.forEach(r => { if (r.name != null && r.x != null) supEx[r.name] = Number(r.x); }); } catch (e) {}
   const out = {};
   for (const p of rows) {
     const t3 = {}, tf = {}, l3 = {}, fm = {};
@@ -416,9 +418,18 @@ async function buildPROD_CONST() {
       tf[co] = num1(p['tf_' + co]) ?? 4;
       fm[co] = num1(p['fm_' + co]) ?? 2;
     }
-    out[p.sku] = { cp: p.cp ?? null, moq: p.moq ?? 1, supp: p.supp ?? null, lt: p.lt != null ? Number(p.lt) : 2, t3, tf, fm, l3 };
+    out[p.sku] = { cp: p.cp ?? null, moq: p.moq ?? 1, supp: p.supp ?? null, lt: p.lt != null ? Number(p.lt) : 2, exped: (p.supp != null && supEx[p.supp] != null) ? supEx[p.supp] : 6, t3, tf, fm, l3 };
   }
   return out;
+}
+// Branch freight lead times per market (days) for Buy 3PL Urgent Air/Sea. Air ~7d everywhere; sea varies by market.
+async function buildBRANCH_FREIGHT() {
+  const o = {};
+  try { (await pool.query(`SELECT lower(country_code) co, min(air_lead_time_days) air, min(sea_lead_time_days) sea
+    FROM planner.branches WHERE country_code IS NOT NULL GROUP BY 1`)).rows.forEach(r => {
+    if (['uk','us','eu','au','ca'].includes(r.co)) o[r.co] = { air: r.air != null ? Number(r.air) : 7, sea: r.sea != null ? Number(r.sea) : 42 };
+  }); } catch (e) {}
+  return o;
 }
 
 // FBA carton dims for the FBA Transfer Upload (box L/W/H/weight per region) + units-per-box.
@@ -544,9 +555,9 @@ app.get('/', async (_req, res) => {
     if (_dataCache && Date.now() - _dataCache.at < DATA_TTL_MS) _vals = _dataCache.vals;
     else { _vals = await Promise.all([
       buildDATA(), buildFC_CURRENT(), buildFC_OUTPUTS(), buildSKURAW(),
-      buildCATS_META(), buildSUBS_META(), buildBI_RULES(), buildPROD_CONST(), freshness(), buildFBADIMS(), buildSAEXTRA(), gbpRate(),
+      buildCATS_META(), buildSUBS_META(), buildBI_RULES(), buildPROD_CONST(), freshness(), buildFBADIMS(), buildSAEXTRA(), gbpRate(), buildBRANCH_FREIGHT(),
     ]); _dataCache = { at: Date.now(), vals: _vals }; }
-    const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts, FBADIMS, SA_EXTRA, GBP_RATE] = _vals;
+    const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts, FBADIMS, SA_EXTRA, GBP_RATE, BRANCH_FREIGHT] = _vals;
     let html = DEV ? loadHTML() : HTML;
     html = replaceGlobal(html, 'DATA', JSON.stringify(DATA));
     html = replaceGlobal(html, 'FC_CURRENT', JSON.stringify(FC_CURRENT));
@@ -557,6 +568,7 @@ app.get('/', async (_req, res) => {
     html = replaceGlobal(html, 'SUBS_META', JSON.stringify(SUBS));
     html = replaceGlobal(html, 'BI_RULES', JSON.stringify(BI));
     html = replaceGlobal(html, 'PROD_CONST', JSON.stringify(PROD_CONST));
+    html = replaceGlobal(html, 'BRANCH_FREIGHT', JSON.stringify(BRANCH_FREIGHT || {}));
     // Definitive price changes (DEMAND ▸ Revenue) — injected fresh (not in the 5-min data cache) so an edit shows
     // on the next load. getASP applies these to lift the revenue forecast.
     try { const PRICE_CHANGES = await buildPriceChanges(); html = replaceGlobal(html, 'PRICE_CHANGES', JSON.stringify(PRICE_CHANGES)); } catch (e) { /* leave the [] default */ }
