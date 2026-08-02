@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.409 - TRANSFER tab: Outbound + Inbound sections across all 3PLs ⚠️ NEEDS TESTING
+- The TRANSFER grid's transfer columns are reworked into two visually-delineated sections:
+  - **OUTBOUND** (blue) — current 3PL → **every other 3PL** (for UK: →US, →EU, →AU, →CA), replacing the old fixed 2-market "Trf→" columns.
+  - **INBOUND** (green) — **every other 3PL** → current (US→, EU→, AU→, CA→).
+  Each section has a bold left divider + colour + OUT/IN label. Inbound uses the same donor/recipient logic as outbound with roles swapped. COLS auto-size to the market count. `artifact_v16.7.html`.
+
 ## v26.408 - TRANSFER tab = the BUY grid minus the 3 Buy columns ⚠️ NEEDS TESTING
 - TRANSFER (under BUY & MOVE) is no longer a placeholder — it now renders the **same grid as BUY, minus the "Buy 3PL", "Buy 3PL Urgent" and "Buy FBA" columns** (keeps SKU, status, SOH 3PL/FBA, On Order, and the transfer-opportunity columns). New BP_VIEW `transfer` (buy path everywhere except those columns; COLS 13→10). `artifact_v16.7.html`.
 

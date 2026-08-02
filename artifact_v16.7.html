@@ -1694,7 +1694,10 @@ function render(){
         +'<th class="r" style="min-width:78px">FBA inbound<br>\u226414 days</th>'
         +'<th class="r" style="min-width:78px">FBA inbound<br>15+ days</th>'
       : (BP_VIEW==='transfer'
-        ? '<th class="r" style="min-width:60px" id="trfh1"></th><th class="r" style="min-width:60px" id="trfh2"></th>'   // TRANSFER = buy grid minus the 3 Buy columns
+        ? (function(){ var oth=MKTS.filter(function(m){return m!==CUR;});   // TRANSFER: OUTBOUND (CUR→each other 3PL) + INBOUND (each→CUR)
+            var o=oth.map(function(m,i){return '<th class="r" style="min-width:50px;background:#dbeafe;color:#1e40af;font-size:9px'+(i===0?';border-left:3px solid #93c5fd':'')+'">'+(i===0?'OUT ':'')+'&rarr;'+m+'</th>';}).join('');
+            var n=oth.map(function(m,i){return '<th class="r" style="min-width:50px;background:#dcfce7;color:#166534;font-size:9px'+(i===0?';border-left:3px solid #86efac':'')+'">'+(i===0?'IN ':'')+m+'&rarr;</th>';}).join('');
+            return o+n; })()
         : '<th class="r" style="min-width:64px">Buy 3PL</th>'
         +'<th class="r" style="min-width:68px">Buy 3PL<br>Urgent</th>'
         +'<th class="r" style="min-width:64px">Buy FBA</th>'
@@ -1763,7 +1766,7 @@ function render(){
   vis.forEach(s=>{const k=s.c||'?';if(!grp[k])grp[k]=[];grp[k].push(s);});
   const gk=Object.keys(grp).sort((a,b)=>{const ai=CAT_ORDER.indexOf(a),bi=CAT_ORDER.indexOf(b);if(ai<0&&bi<0)return a.localeCompare(b);if(ai<0)return 1;if(bi<0)return-1;return ai-bi;});
   let h='';
-  const COLS=(BP_VIEW==='fba')?(14+_extra):(BP_VIEW==='transfer'?10:13);   // transfer = buy (13) minus the 3 Buy columns
+  const COLS=(BP_VIEW==='fba')?(14+_extra):(BP_VIEW==='transfer'?(8+(MKTS.length-1)*2):13);   // transfer = 8 lead cols + OUTBOUND/INBOUND per other market
   const COLS_EFF=COLS-(_MERGE?2:0);   // mobile FBA merges 2 column pairs → 2 fewer columns
   if(!vis.length){h='<tr><td colspan="'+COLS_EFF+'" class="nd">No SKUs match filters</td></tr>';}
   else gk.forEach(sc=>{
@@ -1808,6 +1811,25 @@ function render(){
         }
         return '<td class="bq"><span class="bq-nil">—</span></td>';
       }
+      // INBOUND: transfer FROM another market's 3PL INTO the current market (roles swapped: recipient=CUR, donor=om).
+      function getInbCell(om,firstInSect){
+        const txL2=parseInt(document.getElementById('txl')?.value)||6;
+        const pdd=PD[s.s]; const bd=firstInSect?';border-left:3px solid #86efac':'';
+        if(!pdd||!om)return '<td class="bq" style="'+(bd?bd.slice(1):'')+'"><span class="bq-nil">—</span></td>';
+        const mmd=pdd.mkts&&pdd.mkts[CUR], od=pdd.mkts&&pdd.mkts[om];
+        if(!mmd||!od)return '<td class="bq" style="'+(bd?bd.slice(1):'')+'"><span class="bq-nil">—</span></td>';
+        const curKey=PROJ[2].key;
+        const curD3=((mmd.demand&&mmd.demand.DTC&&mmd.demand.DTC[curKey])||0)+((mmd.demand&&mmd.demand.B2B&&mmd.demand.B2B[curKey])||0);
+        const curWkly=curD3/4.33, thisCov=curWkly>0?(mmd.i3||0)/curWkly:999, ocp=pdd.cp||1;
+        const need=curWkly>0?Math.max((mmd.t3||12)*curWkly-(mmd.i3||0),0):0;
+        const spare=donorSpare(od), sendable=Math.floor(Math.min(need,spare)/ocp)*ocp;
+        if(thisCov<txL2&&sendable>0)
+          return `<td class="bq" style="${bd?bd.slice(1):''}" title="${CUR} SOH ${Math.round(thisCov)}w needs stock; ${om} can spare ${fmt(spare)}"><span class="bq-v" style="color:#166534;background:#dcfce7;padding:1px 4px;border-radius:3px">${fmt(sendable)}</span></td>`;
+        return `<td class="bq" style="${bd?bd.slice(1):''}"><span class="bq-nil">—</span></td>`;
+      }
+      // OUTBOUND wrapper: adds the section's left divider on the first cell.
+      function outCell(om,firstInSect){ var c=getTrfCell(om); if(firstInSect)c=c.replace('<td class="bq"','<td class="bq" style="border-left:3px solid #93c5fd"'); return c; }
+      const OTH=MKTS.filter(function(m){return m!==CUR;});   // all OTHER 3PLs
       const pairs=TRF_PAIRS[CUR]||[];
       const launchStr=dateDMY(launch),discStr=dateDMY(disc);
       let trail;
@@ -1828,7 +1850,7 @@ function render(){
         ${fbaInbCell(fis.later, fis.laterL, fis.laterFirst)}`;
       } else {
         trail=(BP_VIEW==='transfer')
-        ? `${getTrfCell(pairs[0])}${getTrfCell(pairs[1])}`   // TRANSFER view: buy grid minus the 3 Buy columns
+        ? OTH.map(function(m,i){return outCell(m,i===0);}).join('')+OTH.map(function(m,i){return getInbCell(m,i===0);}).join('')   // TRANSFER: OUTBOUND (CUR→all) then INBOUND (all→CUR)
         : `
         <td class="bq">${b3>0?`<span class="bq-v">${fmt(b3)}</span>`:`<span class="bq-nil">—</span>`}${futN>0?`<span title="${futN} further buy(s) scheduled later in the plan (${fmt(futQty)}u) — not due to order this cycle" style="font-size:8px;color:#2563eb;margin-left:2px;white-space:nowrap">+${futN}f</span>`:``}</td>
         <td class="bq">${b3u>0?`<span class="bq-v" style="color:#dc2626;font-weight:700">${fmt(b3u)}</span>`:`<span class="bq-nil">—</span>`}</td>
