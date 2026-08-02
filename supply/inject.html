@@ -7982,7 +7982,7 @@
   function writeViewHash(v){
     if(v==='planning')writeHash(['demand',(typeof DEMAND_VIEW!=='undefined'&&DEMAND_VIEW)||'plan']);
     else if(v==='exec')writeHash(['reports',(typeof REPORT_VIEW!=='undefined'&&REPORT_VIEW)||'ex']);
-    else if(v==='buy'||v==='fba'||v==='transfer')writeHash(['buy-move',v]);   // BUY & MOVE group: #/buy-move/<buy|fba|transfer>
+    else if(v==='actions'||v==='buy'||v==='fba'||v==='transfer')writeHash(['buy-move',v]);   // BUY & MOVE group: #/buy-move/<actions|buy|fba|transfer>
     else writeHash([v]);
   }
   function syncHash(){ if(current==='reports') writeHash(['supply','reports',reportTab]);

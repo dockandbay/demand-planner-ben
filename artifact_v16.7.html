@@ -1800,7 +1800,7 @@ function render(){
   updateFbaSelBox();
   updateTrfHeaders();
   updateDlMenuLabels();
-  const q=(document.getElementById('qry').value||'').toLowerCase().trim();
+  const q=(document.getElementById('qry')?.value||'').toLowerCase().trim();
   const vis=SL.filter(s=>{
     if(!s.ms||!s.ms[CUR])return false;
     if(!SC_SEL.has('ALL')&&!SC_SEL.has(s.c))return false;
@@ -1992,7 +1992,7 @@ function _bindTb(){var _tb=document.getElementById('tb');if(_tb){_tb.addEventLis
 
 // CSV download
 function getFilteredVis(ignoreBuy){
-  const q=(document.getElementById('qry').value||'').toLowerCase().trim();
+  const q=(document.getElementById('qry')?.value||'').toLowerCase().trim();
   return SL.filter(s=>{
     if(!s.ms||!s.ms[CUR])return false;
     if(!SC_SEL.has('ALL')&&!SC_SEL.has(s.c))return false;
@@ -7627,12 +7627,12 @@ function renderBuyMoveActions(){
     html+='<div style="border:1px solid #e2e8f0;border-radius:10px;margin-bottom:12px;overflow:hidden">'
       +'<div style="background:#f8fafc;padding:8px 12px;font-weight:800;font-size:13px;border-bottom:1px solid #eef2f7">'+m+'</div>'
       +'<table style="width:100%;border-collapse:collapse;font-size:12px"><tbody>';
-    if(!any){ html+='<tr><td style="padding:8px 12px;color:#94a3b8">No actions</td></tr>'; }
+    if(!any){ html+='<tr><td style="padding:8px 12px;color:#94a3b8;text-align:left">No actions</td></tr>'; }
     ACTS.forEach(function(a){ var list=acts[a[0]]; if(!list.length)return;
       var tot=list.reduce(function(t,x){return t+x.qty;},0); list.sort(function(x,y){return y.qty-x.qty;});
       var rid='bma-'+m+'-'+a[0];
       html+='<tr class="bma-row" data-t="'+rid+'" style="cursor:pointer;border-top:1px solid #f1f5f9">'
-        +'<td style="padding:6px 12px;font-weight:700;color:'+a[2]+'">'+a[1]+'</td>'
+        +'<td style="padding:6px 12px;text-align:left;font-weight:700;color:'+a[2]+'">'+a[1]+'</td>'
         +'<td style="padding:6px 12px;text-align:left;font-variant-numeric:tabular-nums;font-weight:700">'+fn(tot)+' <span style="color:#94a3b8;font-weight:400">units</span></td>'
         +'<td style="padding:6px 12px;text-align:left;color:#64748b">'+list.length+' SKU'+(list.length>1?'s':'')+'</td>'
         +'<td style="padding:6px 12px;text-align:left;color:#94a3b8;width:22px"><span class="bma-chev">&#9656;</span></td></tr>'

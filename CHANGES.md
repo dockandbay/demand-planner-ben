@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.424 - BUY & MOVE ▸ ACTIONS: fix empty "No actions" + URL + left-align ⚠️ NEEDS TESTING
+- **ACTIONS showed "No actions" for every country** — root cause: `getFilteredVis` read `document.getElementById('qry').value` (the buy-grid search box) unguarded, but on the ACTIONS tab `buy-wrap` is removed so `#qry` is null → it threw → `renderBuyMoveActions` swallowed the error → empty. Guarded both reads with `?.value`. Now populates (UK ~472 SKUs scanned → Buy 3PL / Urgent Sea / Urgent Air / Buy FBA / FBA Transfer per country with SKU counts + expand).
+- **URL fix:** landing on ACTIONS wrote `#/actions`; now writes **`#/buy-move/actions`** (added `actions` to `writeViewHash`). `supply/inject.html`.
+- **Left-align:** the "No actions" cell and the action-row label cell now explicitly `text-align:left` (no more right-aligned "No actions").
+- Files: `artifact_v16.7.html`, `supply/inject.html`. No migration.
+
 ## v26.423 - Urgent trigger: fire below 2wk cover, size to demand (no buffer) ⚠️ NEEDS TESTING · CHANGES BUY QTY
 - **Trigger lowered 3wk → 2wk** (`URGENT_THRESHOLD_WKS`): a Buy-3PL-Urgent fires when projected 3PL cover drops below **2 weeks** (was 3).
 - **Removed the 3-week safety buffer** — the urgent is now sized to the **demand that would otherwise go unmet** (the urgent forecast) from the rush arrival **until the next resupply**: an existing shipment (confirmed inbound, already in the sim) or a Buy-3PL order (the sizing loop stops when one lands). Restore just enough to cover demand, no extra cushion (Ben).
