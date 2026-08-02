@@ -3488,7 +3488,7 @@ var _da={sec:'actions',mkt:'all',cat:'all',status:'open'}; // DEMAND ▸ Actions
 // stock-outs, anomalies). INSIGHTS = trends to read (trading vs LY, divergent growth). Default → actions.
 var DA_INSIGHT_TYPES={'Trading behind last year':1,'Trading ahead of last year':1,'Forecast vs trend':1};
 function daSection(x){ return DA_INSIGHT_TYPES[x.type]?'insights':'actions'; }
-let AF_MARKET='all'; let AF_FREIGHT=15; var AF_CACHE={}; // Auto Forecast: market + freight% + response cache (keyed market|freight). Cover-months control removed — units come from the forecast gap, not a cover target.
+let AF_MARKET='all'; var AF_CACHE={}; // Auto Forecast: market + response cache (keyed by market). Cover-months + freight% controls removed — units come from the forecast gap; freight is containerised + duty is category×country, both server-side.
 var SM_CACHE=null; var SM={market:'uk',whtype:'3pl',basis:'trail',cat:'all',cover:26,days:'',vel:'',units:50,sort:'value'}; // Slow Moving state (defaults: UK · 3PL)
 var ME={market:'all',status:'all',basis:'fc',end:''}; var ME_CACHE={}; // Markdown & EOS state (cache keyed market|basis|end; status filtered client-side)
 var OTB={market:'all',status:'all',months:6,defcover:8}; var OTB_CACHE={}; // Open-to-Buy state (cache keyed market|months|defcover; status filtered client-side)
@@ -9005,16 +9005,12 @@ function afN(n){ return n? Math.round(n).toLocaleString() : '–'; }   // whole 
 var AF_GBP=1.34;   // USD → GBP rate for the payments plan GBP summary
 function renderAutoForecastReport(body){
   var MKTS=[['all','All'],['uk','UK'],['us','US'],['eu','EU'],['au','AU']];
-  var afInp=function(k,lbl,val,suf){ return '<label style="font-size:11px;color:#555;display:inline-flex;align-items:center;gap:3px">'+lbl
-    +' <input class="af-num" data-k="'+k+'" value="'+val+'" style="width:42px;padding:2px 4px;border:1px solid #ccc;border-radius:4px;font-size:11px;text-align:right">'+(suf||'')+'</label>'; };
   body.innerHTML='<div style="display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin-bottom:10px">'
     +'<span style="display:inline-flex;gap:6px;align-items:center"><span style="font-size:11px;font-weight:700;color:#888;letter-spacing:.04em">MARKET</span>'
     +MKTS.map(function(m){return '<button class="view-toggle af-mkt'+(m[0]===AF_MARKET?' active':'')+'" data-mkt="'+m[0]+'">'+m[1]+'</button>';}).join('')+'</span>'
-    +'<span style="display:inline-flex;gap:14px;align-items:center;padding:6px 10px;background:#f6f7f9;border-radius:6px">'
-    +afInp('freight','freight+duty',AF_FREIGHT,'%')+'</span>'
+    +'<span style="font-size:11px;color:#94a3b8">Freight = containerised from the config freight table · Duty = category × country</span>'
     +'</div><div id="af-content" style="color:#666;font-size:12px;padding:8px">Loading…</div>';
   body.querySelectorAll('.af-mkt').forEach(function(b){ b.onclick=function(){ AF_MARKET=b.dataset.mkt; renderAutoForecastReport(body); }; });
-  body.querySelectorAll('.af-num').forEach(function(el){ el.onchange=function(){ AF_FREIGHT=Math.max(0,Number(el.value.trim())||0); renderAutoForecastReport(body); }; });
   var content=body.querySelector('#af-content');
   var draw=function(d){
     if(!d||d.error||!d.months||!d.payments||!d.assumptions){ content.innerHTML='<div style="color:#b91c1c">Could not load: '+((d&&d.error)||'incomplete response')+'</div>'; return; }
@@ -9036,7 +9032,7 @@ function renderAutoForecastReport(body){
       +'<td style="text-align:right;padding:4px 6px;border-left:2px solid #ccc">'+grand.toLocaleString()+'</td></tr></tbody></table></div>';
     // Payments plan — whole numbers (not 174k), with a matching GBP summary + CSV/copy export.
     var p=d.payments;
-    var PAY_ROWS=[['Starting deposits',p.deposit],['Completion deposits',p.completion],['Balance payments',p.balance],['Freight + duty (est)',p.freight],['TOTAL CASH OUT',p.total]];
+    var PAY_ROWS=[['Starting deposits',p.deposit],['Completion deposits',p.completion],['Balance payments',p.balance],['Freight (containers)',p.freight],['Import duty',p.duty],['TOTAL CASH OUT',p.total]];
     var prow=function(lbl,arr,bold,div){ div=div||1; var t=arr.reduce(function(a,b){return a+b;},0);
       return '<tr'+(bold?' style="border-top:2px solid #999;font-weight:700;background:#fafafa"':'')+'>'
         +'<td style="padding:3px 6px'+(bold?'':';color:#444')+'">'+lbl+'</td>'
@@ -9074,8 +9070,8 @@ function renderAutoForecastReport(body){
     var note='<div style="font-size:11px;color:#888;margin-top:12px;line-height:1.5">'
       +'<b>Model:</b> buy = <b>category (subcategory) forecast − SKU forecast</b>, floored at 0 — the top-up the SKU-level plan hasn’t captured yet (future / discontinued SKUs). '
       +'order month = demand month − lead time (supplier production + China→market sea shipping). Payments phased off each subcategory’s primary supplier’s terms '
-      +'(deposit at order · completion at order+production days · balance at arrival+credit days). Freight+duty estimated at '+Math.round(a.freight_pct*100)+'% of cost (flat uplift — precise landed cost is on the PO view). '
-      +'<span style="color:#94a3b8">Cash uses avg PO cost per subcategory and may blend supplier currencies — treat as indicative.</span>'
+      +'(deposit at order · completion at order+production days · balance at arrival+credit days). <b>Freight</b> = each market’s monthly delivery pallets packed into the cheapest containers (CONFIG ▸ freight table); <b>Duty</b> = value × duty % (category × country, CONFIG ▸ Import duty), both at the delivery month. '
+      +'<span style="color:#94a3b8">Cost = forecast-weighted current product cost per subcategory (USD) and may blend supplier currencies — treat as indicative.</span>'
       +(a.truncated?' <span style="color:#b45309">Some orders fall outside the 12-month window and are not shown.</span>':'')
       +(a.overdue_units>0?' <span style="color:#b45309">'+fn(a.overdue_units)+' units have an order date already in the past (overdue) — their cash still shows below, but they’re omitted from the units grid above.</span>':'')+'</div>';
     content.innerHTML=u+pay+note;
@@ -9089,9 +9085,9 @@ function renderAutoForecastReport(body){
       navigator.clipboard.writeText(tsv).then(function(){var o=txCp.textContent;txCp.textContent='✓ Copied';setTimeout(function(){txCp.textContent=o;},1400);}).catch(function(){alert('Copy blocked by the browser.');}); };
     var txCsv=content.querySelector('#af-txn-csv'); if(txCsv)txCsv.onclick=function(){ afDl(afToCsv(afTxnRows()),'auto_forecast_transactions.csv'); afFlash(txCsv); };
   };
-  var key=AF_MARKET+'|'+AF_FREIGHT;
+  var key=AF_MARKET;
   if(AF_CACHE[key]) return draw(AF_CACHE[key]);
-  fetch('/api/scenario/auto-forecast?market='+AF_MARKET+'&freight='+AF_FREIGHT).then(function(r){return r.json();}).then(function(d){ AF_CACHE[key]=d; if((AF_MARKET+'|'+AF_FREIGHT)===key) draw(d); }).catch(function(e){ draw({error:String(e)}); });
+  fetch('/api/scenario/auto-forecast?market='+AF_MARKET).then(function(r){return r.json();}).then(function(d){ AF_CACHE[key]=d; if(AF_MARKET===key) draw(d); }).catch(function(e){ draw({error:String(e)}); });
 }
 
 function kaPills(name,opts){ return opts.map(function(o){return '<button class="view-toggle ka-'+name+(o[0]===KA[name]?' active':'')+'" data-v="'+o[0]+'">'+o[1]+'</button>';}).join(''); }

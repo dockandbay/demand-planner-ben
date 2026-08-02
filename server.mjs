@@ -7159,16 +7159,14 @@ app.get('/api/scenario/po-stock-priority/:po', async (req, res) => {
 //     NO stock netting and NO forward-cover target (per Ben). The `cover` query param is legacy/unused (only
 //     echoed back in assumptions); there is deliberately no cover_target term in the math.
 //   order month = demand month − lead (lead = production_lead_time_weeks + china_to_<market>_lead_time_weeks).
-//   value = units × avg PO cost_price for the subcat. Payments phased off the primary supplier's terms:
-//     deposit (start%) at order month · completion% at order+production_days · balance% at demand+credit_days.
-//   freight+duty estimated as FREIGHT_PCT of value at demand month (flagged as an estimate — the precise
-//     landed-cost engine lives on the PO view; this report uses a flat uplift for the cash-flow).
+//   value = units × forecast-weighted current product cost for the subcat. Payments phased off the primary
+//     supplier's terms: deposit (start%) at order month · completion% at order+production_days · balance% at demand+credit_days.
+//   FREIGHT = each market's monthly delivery pallets packed into the cheapest containers (config freight table).
+//   DUTY = value × duty%(category, country) from CONFIG ▸ Import duty. Both land at the delivery month.
 // NOTE (read-only report): never written back to forecast_outputs/forecasts — a decision view + CSV only.
-const AF_FREIGHT_PCT = 0.15;
 function afAddMonths(ym, n){ let [y,m]=ym.split('-').map(Number); let t=(y*12+(m-1))+n; return Math.floor(t/12)+'-'+String(t%12+1).padStart(2,'0'); }
 app.get('/api/scenario/auto-forecast', async (req, res) => {
   const markets = (req.query.market||'all').toLowerCase()==='all' ? ['uk','us','eu','au'] : [(req.query.market||'uk').toLowerCase()];
-  const FREIGHT = (req.query.freight!=null && req.query.freight!=='' && isFinite(+req.query.freight)) ? Math.max(0, +req.query.freight/100) : AF_FREIGHT_PCT;
   try {
     // window START = the CURRENT month (don't plan months already in the past), clamped to the forecast data
     // range; END = the last forecast month. (Was hardcoded 2026-06, which went stale once we passed it.)
@@ -7182,7 +7180,7 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
     const leadCol={uk:'china_to_uk_lead_time_weeks',us:'china_to_us_lead_time_weeks',eu:'china_to_eu_lead_time_weeks',au:'china_to_au_lead_time_weeks'};
     // one combined pass per market then aggregate the output tables
     const unitsBy={};                                     // supplier -> {month->units, total}
-    const pay={deposit:{},completion:{},balance:{},freight:{}}; // bucket -> month -> amount
+    const pay={deposit:{},completion:{},balance:{},freight:{},duty:{}}; // bucket -> month -> amount
     const addPay=(b,mo,v)=>{ if(win.indexOf(mo)<0||!(v>0))return; (pay[b][mo]=(pay[b][mo]||0)+v); };
     const txMap={};  // transaction detail, aggregated 1 row per supplier: key = reference|type|month
     const addTxn=(ref,type,mo,v,mk2,sup)=>{ if(win.indexOf(mo)<0||!(v>0))return; const k=ref+'|'+type+'|'+mo;
@@ -7195,7 +7193,7 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
     // SKU product cost) ÷ Σ(SKU forecast units), where the cost is the live planner.products cost (cost, then
     // cost_lx/cost_xr fallbacks — same source the order plan uses). Falls back to the historical avg PO cost
     // only for subcats that have no product cost. (Was: plain historical avg of past PO cost_price.)
-    const [costRows, supRows, termsRows] = await Promise.all([
+    const [costRows, supRows, termsRows, frtRows, dutyRows, ppuRows, scatRows] = await Promise.all([
       pool.query(`SELECT sub s, coalesce(wcost, pocost) c FROM
         (SELECT pr.subcategory sub, avg(l.cost_price) pocost FROM planner.purchase_order_lines l
            JOIN planner.products pr ON pr.sku=l.sku WHERE pr.subcategory IS NOT NULL AND l.cost_price>0 GROUP BY 1) po
@@ -7213,10 +7211,31 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
           JOIN planner.products pr ON pr.sku=l.sku
           WHERE pr.subcategory IS NOT NULL AND coalesce(po.supplier_name,'')<>'' GROUP BY 1,2) q WHERE rn=1`),
       pool.query(`SELECT name,code,start_deposit_pct,completion_pct,balance_pct,production_days,credit_days FROM planner.suppliers`),
+      // FREIGHT (Ben): container tiers per destination/market — a delivery month's pallets are packed into the
+      // cheapest container combo (seaEstSrv) after the loop. Replaces the flat freight %.
+      pool.query(`SELECT upper(destination) d, json_agg(json_build_object('cap',pallets,'cost',cost,'sz',container_size)) tiers
+        FROM planner.freight_rates WHERE cost IS NOT NULL GROUP BY 1`),
+      // DUTY (Ben): import-duty % by category × country (CONFIG ▸ Import duty) — its own cash line.
+      pool.query(`SELECT category, upper(country) country, duty_pct FROM planner.duty_rates WHERE duty_pct IS NOT NULL`),
+      // pallets-per-unit per subcat, forecast-weighted: Σ(units ÷ pallet_qty) ÷ Σ(units that have a pallet_qty).
+      pool.query(`SELECT p.subcategory s, sum(fo.units/nullif(sl.pallet_qty,0)) pall,
+          sum(CASE WHEN coalesce(sl.pallet_qty,0)>0 THEN fo.units ELSE 0 END) u
+        FROM planner.forecast_outputs fo JOIN planner.products p ON p.sku=fo.sku
+        LEFT JOIN planner.sku_labels sl ON sl.sku=fo.sku
+        WHERE p.subcategory IS NOT NULL AND fo.units>0 GROUP BY 1`),
+      // dominant category per subcat (for the duty lookup).
+      pool.query(`SELECT s, category FROM (SELECT subcategory s, category,
+          row_number() OVER (PARTITION BY subcategory ORDER BY count(*) DESC) rn
+        FROM planner.products WHERE subcategory IS NOT NULL AND category IS NOT NULL GROUP BY 1,2) q WHERE rn=1`),
     ]);
     const unitCost={}; costRows.rows.forEach(r=> unitCost[r.s]=Number(r.c));
     const supName={}; supRows.rows.forEach(r=> supName[r.s]=r.nm);
     const terms=termsRows.rows.reduce((a,t)=>{a[t.name]=t;return a;},{});
+    const freightTiers={}; frtRows.rows.forEach(r=> freightTiers[r.d]=r.tiers||[]);
+    const dutyPct={}; dutyRows.rows.forEach(r=> dutyPct[(r.category||'')+'|'+r.country]=Number(r.duty_pct)||0);   // category|COUNTRY → %
+    const ppu={}; ppuRows.rows.forEach(r=> ppu[r.s]=(Number(r.u)>0)?(Number(r.pall)/Number(r.u)):0);              // pallets per unit, per subcat
+    const catOf={}; scatRows.rows.forEach(r=> catOf[r.s]=r.category);
+    const monthPallets={};   // market → delivery month → pallets (containerised into freight after the loop)
     // per-market pass — run all markets in PARALLEL. The only shared writes (unitsBy / pay / txMap / truncated)
     // are additive and commutative, and each market's synchronous aggregation block runs to completion without
     // awaiting, so there's no interleaving/race.
@@ -7259,12 +7278,15 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
           else truncated=true;
           const val=arrive*c;
           const _dep=val*Number(t.start_deposit_pct||0)/100, _com=val*Number(t.completion_pct||0)/100,
-                _bal=val*Number(t.balance_pct||0)/100, _frt=val*FREIGHT;
+                _bal=val*Number(t.balance_pct||0)/100;
+          const _dutyRate=dutyPct[(catOf[s]||'')+'|'+mk.toUpperCase()]||0, _duty=val*_dutyRate/100;   // duty = value × duty%(category,country)
           const _comM=afAddMonths(om, Math.round((t.production_days||0)/30)), _balM=afAddMonths(m, Math.round((t.credit_days||0)/30));
           addPay('deposit', om, _dep);
           addPay('completion', _comM, _com);
           addPay('balance', _balM, _bal);
-          addPay('freight', m, _frt);
+          addPay('duty', m, _duty);                               // duty due on landing (delivery month)
+          // FREIGHT is containerised per market per delivery month AFTER the loop — accumulate this month's pallets.
+          (monthPallets[mk]||(monthPallets[mk]={}))[m]=((monthPallets[mk]||{})[m]||0)+arrive*(ppu[s]||0);
           // reference code: FC-<COUNTRY>-<order-month YYYY-MM>-<supplier code>  (e.g. FC-US-2027-01-XR).
           // Year included so refs stay unique if the window is ever widened past 12 months.
           const _sc=(t.code||'').trim()||nm.replace(/[^A-Za-z0-9]/g,'').slice(0,3).toUpperCase()||'??';
@@ -7272,21 +7294,29 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
           addTxn(_ref,'Starting deposit',om,_dep,mk,nm);
           addTxn(_ref,'Completion deposit',_comM,_com,mk,nm);
           addTxn(_ref,'Balance payment',_balM,_bal,mk,nm);
-          addTxn(_ref,'Freight + duty',m,_frt,mk,nm);
+          if(_duty>0)addTxn(_ref,'Import duty',m,_duty,mk,nm);
         }
       }
     }));
+    // FREIGHT: pack each market's monthly pallet total into the cheapest container combo from the config freight
+    // table (seaEstSrv) → that delivery month's freight cost. One freight txn per market·month.
+    for(const mk of markets){ const tiers=freightTiers[mk.toUpperCase()]||[]; const mp=monthPallets[mk]||{};
+      for(const m of Object.keys(mp)){ const pallets=mp[m]; if(!(pallets>0)||!tiers.length)continue;
+        const frtCost=seaEstSrv(tiers, pallets); if(!(frtCost>0))continue;
+        addPay('freight', m, frtCost);
+        addTxn('FC-'+mk.toUpperCase()+'-'+m+'-FRT','Freight (containers)',m,frtCost,mk,'—');
+      } }
     const unitRows=Object.keys(unitsBy).filter(nm=>unitsBy[nm].t>0).sort().map(nm=>({
       supplier:nm, months:win.map(m=>Math.round(unitsBy[nm][m]||0)), total:Math.round(unitsBy[nm].t) }));
     const payRow=b=>win.map(m=>Math.round(pay[b][m]||0));
-    const dep=payRow('deposit'),comp=payRow('completion'),bal=payRow('balance'),frt=payRow('freight');
-    const total=win.map((m,i)=>dep[i]+comp[i]+bal[i]+frt[i]);
+    const dep=payRow('deposit'),comp=payRow('completion'),bal=payRow('balance'),frt=payRow('freight'),dty=payRow('duty');
+    const total=win.map((m,i)=>dep[i]+comp[i]+bal[i]+frt[i]+dty[i]);
     const txns=Object.values(txMap).map(t=>({...t, amount_usd:Math.round(t.amount_usd*100)/100}));
     txns.sort((a,b)=> a.date<b.date?-1 : a.date>b.date?1 : (a.reference<b.reference?-1 : a.reference>b.reference?1 : 0));
     res.json({ months:win, units:unitRows,
-      payments:{deposit:dep,completion:comp,balance:bal,freight:frt,total},
+      payments:{deposit:dep,completion:comp,balance:bal,freight:frt,duty:dty,total},
       transactions:txns,
-      assumptions:{freight_pct:FREIGHT,truncated,overdue_units:Math.round(overdueUnits)} });
+      assumptions:{truncated,overdue_units:Math.round(overdueUnits)} });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

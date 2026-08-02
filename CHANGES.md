@@ -8,7 +8,12 @@ Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
 ## v26.436 - Auto Forecast: cost = forecast-weighted current product cost ⚠️ NEEDS TESTING
 - The Auto Forecast now prices its suggested-buy units at the **forecast-weighted current product cost** per subcategory — Σ(SKU forecast units × SKU cost) ÷ Σ(units), using the live `planner.products` cost (`cost` → `cost_lx`/`cost_xr` fallbacks, same source as the order-plan Est. cost). Falls back to the historical avg PO cost only where a subcat has no product cost. Was: plain historical average of past PO `cost_price`. `server.mjs`. No migration.
-- ⏳ NEXT (Ben): the freight+duty % is also invalid — freight should be containerised (monthly deliveries → containers → cost from the config freight table) and duty is product×country. Reworking.
+
+## v26.437 - Auto Forecast: containerised freight + real duty (drop freight %) ⚠️ NEEDS TESTING
+- **Freight** is now **containerised** instead of a flat % of value: each market's delivery-month pallet total (forecast units ÷ `sku_labels.pallet_qty`, forecast-weighted per subcat) is packed into the cheapest container combo from the **config freight table** (`freight_rates`, via the same `seaEstSrv` the shipment model uses) → that month's freight cost.
+- **Duty** is now its **own cash line** = goods value × **duty %(category, country)** from `planner.duty_rates` (CONFIG ▸ Import duty), landing at the delivery month.
+- Removed the **freight+duty % input** (and the earlier dead cover-months control). The cash plan now shows Starting deposits · Completion · Balance · **Freight (containers)** · **Import duty** · Total.
+- Verified end-to-end (all markets): deposit 968k · completion 509k · balance 400k · freight 33k · duty 238k. `server.mjs` + `artifact_v16.7.html`. No migration.
 
 ## v26.434 - BUY/FBA/TRANSFER SKU search also matches product name ⚠️ NEEDS TESTING
 - The SKU search box on BUY / FBA / TRANSFER now matches by **product name** as well as SKU code (`skuMatchQ` looks up `SKUM[sku].n`), so e.g. "beach" or "cooling" surfaces the right SKUs even though the code doesn't contain those words. (The DEMAND plan already did this.) Verified: "beach"→22, "cooling"→14; empty query unchanged (472). `artifact_v16.7.html` only.
