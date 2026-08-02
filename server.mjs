@@ -7164,11 +7164,10 @@ app.get('/api/scenario/po-stock-priority/:po', async (req, res) => {
 //   freight+duty estimated as FREIGHT_PCT of value at demand month (flagged as an estimate — the precise
 //     landed-cost engine lives on the PO view; this report uses a flat uplift for the cash-flow).
 // NOTE (read-only report): never written back to forecast_outputs/forecasts — a decision view + CSV only.
-const AF_COVER_MONTHS = 2, AF_FREIGHT_PCT = 0.15;
+const AF_FREIGHT_PCT = 0.15;
 function afAddMonths(ym, n){ let [y,m]=ym.split('-').map(Number); let t=(y*12+(m-1))+n; return Math.floor(t/12)+'-'+String(t%12+1).padStart(2,'0'); }
 app.get('/api/scenario/auto-forecast', async (req, res) => {
   const markets = (req.query.market||'all').toLowerCase()==='all' ? ['uk','us','eu','au'] : [(req.query.market||'uk').toLowerCase()];
-  const COVER = Math.max(1, Math.min(12, parseInt(req.query.cover,10) || AF_COVER_MONTHS));   // cover-target months (1–12)
   const FREIGHT = (req.query.freight!=null && req.query.freight!=='' && isFinite(+req.query.freight)) ? Math.max(0, +req.query.freight/100) : AF_FREIGHT_PCT;
   try {
     // window START = the CURRENT month (don't plan months already in the past), clamped to the forecast data

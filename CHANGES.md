@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.435 - Auto Forecast: remove the dead cover-months control ⚠️ NEEDS TESTING
+- Removed the orphaned **cover-months** input/param from the Auto Forecast (client `AF_COVER` + server `COVER`/`AF_COVER_MONTHS`) — it was already absent from the UI and unused in the calc (units come from the subcategory-vs-SKU forecast gap, not a cover target). Cache key + fetch no longer send `cover`. `artifact_v16.7.html`, `server.mjs`. No migration.
+- (Cost-basis rework — pricing units off actual product cost vs historical PO average — pending Ben's confirmation.)
+
 ## v26.434 - BUY/FBA/TRANSFER SKU search also matches product name ⚠️ NEEDS TESTING
 - The SKU search box on BUY / FBA / TRANSFER now matches by **product name** as well as SKU code (`skuMatchQ` looks up `SKUM[sku].n`), so e.g. "beach" or "cooling" surfaces the right SKUs even though the code doesn't contain those words. (The DEMAND plan already did this.) Verified: "beach"→22, "cooling"→14; empty query unchanged (472). `artifact_v16.7.html` only.
 

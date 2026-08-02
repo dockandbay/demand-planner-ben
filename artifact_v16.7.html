@@ -3488,7 +3488,7 @@ var _da={sec:'actions',mkt:'all',cat:'all',status:'open'}; // DEMAND ▸ Actions
 // stock-outs, anomalies). INSIGHTS = trends to read (trading vs LY, divergent growth). Default → actions.
 var DA_INSIGHT_TYPES={'Trading behind last year':1,'Trading ahead of last year':1,'Forecast vs trend':1};
 function daSection(x){ return DA_INSIGHT_TYPES[x.type]?'insights':'actions'; }
-let AF_MARKET='all'; let AF_COVER=2; let AF_FREIGHT=15; var AF_CACHE={}; // Auto Forecast: market, cover-months, freight% + response cache (keyed market|cover|freight)
+let AF_MARKET='all'; let AF_FREIGHT=15; var AF_CACHE={}; // Auto Forecast: market + freight% + response cache (keyed market|freight). Cover-months control removed — units come from the forecast gap, not a cover target.
 var SM_CACHE=null; var SM={market:'uk',whtype:'3pl',basis:'trail',cat:'all',cover:26,days:'',vel:'',units:50,sort:'value'}; // Slow Moving state (defaults: UK · 3PL)
 var ME={market:'all',status:'all',basis:'fc',end:''}; var ME_CACHE={}; // Markdown & EOS state (cache keyed market|basis|end; status filtered client-side)
 var OTB={market:'all',status:'all',months:6,defcover:8}; var OTB_CACHE={}; // Open-to-Buy state (cache keyed market|months|defcover; status filtered client-side)
@@ -9014,7 +9014,7 @@ function renderAutoForecastReport(body){
     +afInp('freight','freight+duty',AF_FREIGHT,'%')+'</span>'
     +'</div><div id="af-content" style="color:#666;font-size:12px;padding:8px">Loading…</div>';
   body.querySelectorAll('.af-mkt').forEach(function(b){ b.onclick=function(){ AF_MARKET=b.dataset.mkt; renderAutoForecastReport(body); }; });
-  body.querySelectorAll('.af-num').forEach(function(el){ el.onchange=function(){ var v=el.value.trim(); if(el.dataset.k==='cover') AF_COVER=Math.max(1,Math.min(12,Number(v)||2)); else AF_FREIGHT=Math.max(0,Number(v)||0); renderAutoForecastReport(body); }; });
+  body.querySelectorAll('.af-num').forEach(function(el){ el.onchange=function(){ AF_FREIGHT=Math.max(0,Number(el.value.trim())||0); renderAutoForecastReport(body); }; });
   var content=body.querySelector('#af-content');
   var draw=function(d){
     if(!d||d.error||!d.months||!d.payments||!d.assumptions){ content.innerHTML='<div style="color:#b91c1c">Could not load: '+((d&&d.error)||'incomplete response')+'</div>'; return; }
@@ -9089,9 +9089,9 @@ function renderAutoForecastReport(body){
       navigator.clipboard.writeText(tsv).then(function(){var o=txCp.textContent;txCp.textContent='✓ Copied';setTimeout(function(){txCp.textContent=o;},1400);}).catch(function(){alert('Copy blocked by the browser.');}); };
     var txCsv=content.querySelector('#af-txn-csv'); if(txCsv)txCsv.onclick=function(){ afDl(afToCsv(afTxnRows()),'auto_forecast_transactions.csv'); afFlash(txCsv); };
   };
-  var key=AF_MARKET+'|'+AF_COVER+'|'+AF_FREIGHT;
+  var key=AF_MARKET+'|'+AF_FREIGHT;
   if(AF_CACHE[key]) return draw(AF_CACHE[key]);
-  fetch('/api/scenario/auto-forecast?market='+AF_MARKET+'&cover='+AF_COVER+'&freight='+AF_FREIGHT).then(function(r){return r.json();}).then(function(d){ AF_CACHE[key]=d; if((AF_MARKET+'|'+AF_COVER+'|'+AF_FREIGHT)===key) draw(d); }).catch(function(e){ draw({error:String(e)}); });
+  fetch('/api/scenario/auto-forecast?market='+AF_MARKET+'&freight='+AF_FREIGHT).then(function(r){return r.json();}).then(function(d){ AF_CACHE[key]=d; if((AF_MARKET+'|'+AF_FREIGHT)===key) draw(d); }).catch(function(e){ draw({error:String(e)}); });
 }
 
 function kaPills(name,opts){ return opts.map(function(o){return '<button class="view-toggle ka-'+name+(o[0]===KA[name]?' active':'')+'" data-v="'+o[0]+'">'+o[1]+'</button>';}).join(''); }
