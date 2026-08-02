@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.403 - DEMAND stock column = 3PL/FBA 2-line + FBA inbound arrival dates & copyable tooltip ⚠️ NEEDS TESTING
+- **DEMAND plan stock column** ("Stock", 2nd col) now shows **3PL: N / FBA: N on two lines** (was single OH number). Header relabelled "3PL / FBA". `stockFor` returns both pools; SKU rows + category + grand-total updated. (The inbound next-arrival line moved off this column — say if you want it back as a 3rd line.)
+- **BUY ▸ FBA tab inbound columns** (≤14 days / 15+ days): each amount now shows the **first arrival date (dd-mmm-yy)** underneath, and a **120ms-hover tooltip** listing qty · date · reference per shipment that **persists and copies to clipboard on click**. `artifact_v16.7.html`.
+
 ## v26.402 - DEMAND plan: report buttons float top + full Exec Summary drawer + filter debounce + drop save toast ⚠️ NEEDS TESTING
 - **Report buttons float pinned top-right** of the screen (over the filters row), desktop only — moved out of the filters row. `#plan-report-float`.
 - **Executive Summary now opens the FULL report in a 50%-screen right drawer** (was a compact card). `renderExecView` refactored to render into any container; reuses the half-screen drawer pattern; FY toggle re-renders inside the drawer. (Compact `execSumPopRender` retired.)

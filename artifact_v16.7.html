@@ -1277,16 +1277,28 @@ function getBuyQtys(sku,mkt){
 // Split FBA-bound inbound into arriving within 14 days vs 15+ days out (by ETA).
 function fbaInbSplit(sku,mkt){
   const pd=PD[sku];const md=pd&&pd.mkts&&pd.mkts[mkt];
-  let soon=0,later=0;
+  let soon=0,later=0; const soonL=[],laterL=[];
   if(md&&Array.isArray(md.inb)){
     const cut=new Date(Date.now()+14*864e5);
     md.inb.forEach(x=>{
       if(!x.eta||!((x.wh||'').includes('fba')))return;
-      const d=new Date(x.eta);
-      if(d<=cut)soon+=(x.qty||0); else later+=(x.qty||0);
+      const qty=x.qty||0, line={qty:qty, eta:x.eta, ref:x.ref||x.reference||x.po||''};
+      if(new Date(x.eta)<=cut){ soon+=qty; soonL.push(line); } else { later+=qty; laterL.push(line); }
     });
   }
-  return {soon,later};
+  const bySort=(a,b)=>String(a.eta||'9999').localeCompare(String(b.eta||'9999'));
+  soonL.sort(bySort); laterL.sort(bySort);
+  return {soon,later,soonL,laterL,soonFirst:(soonL[0]||{}).eta,laterFirst:(laterL[0]||{}).eta};
+}
+// FBA-inbound cell: amount + first-arrival date (dd-mmm-yy) + a 120ms-hover tooltip (qty · date · ref per line)
+// that PERSISTS and copies to clipboard on click. `lines` = [{qty,eta,ref}], firstEta = earliest arrival.
+function fbaInbCell(amount, lines, firstEta){
+  if(!(amount>0)) return '<td class="iv"><span class="iv-v">—</span></td>';
+  var copy=(lines.length)+' FBA inbound shipment'+(lines.length>1?'s':'')+':\n'
+    + lines.map(function(l){ return dateDMY(l.eta)+'  ·  '+fmt(l.qty)+' units'+(l.ref?('  ·  '+l.ref):''); }).join('\n');
+  return '<td class="iv"><span class="fba-inb" data-copy="'+esc(copy)+'" style="cursor:pointer">'
+    +'<span class="iv-v">'+fmt(amount)+'</span>'
+    +'<span style="display:block;font-size:8px;opacity:.85;white-space:nowrap">↙ '+(firstEta?dateDMY(firstEta):'TBC')+'</span></span></td>';
 }
 
 // Manual per-SKU transfer overrides on the FBA view (session-only), keyed "sku|CUR".
@@ -1799,7 +1811,7 @@ function render(){
         const rec=(BU_SEL==='TRFFBA_NG')?nonGrsOf(s.s,CUR):fbaTransferRec(s.s,CUR);   // NG mode: transfer = all non-GRS stock
         const ovKey=s.s+'|'+CUR;
         const ovVal=(FBA_OV[ovKey]!=null?FBA_OV[ovKey]:'');
-        const {soon,later}=fbaInbSplit(s.s,CUR);
+        const fis=fbaInbSplit(s.s,CUR);
         const tickKey=s.s+'|'+CUR;
         const tickOn=FBA_TICK[tickKey]?'checked':'';
         trail=`
@@ -1807,8 +1819,8 @@ function render(){
         <td class="bq" style="text-align:center"><input type="checkbox" class="fba-tick" data-sku="${s.s}" data-cat="${String(s.c||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" ${tickOn} style="cursor:pointer"></td>
         <td class="bq">${rec>0?`<span class="bq-fba">${fmt(rec)}</span>`:`<span class="bq-nil">—</span>`}</td>
         <td class="bq" style="padding:2px 4px"><input type="text" class="fba-ov" data-sku="${s.s}" value="${ovVal}" placeholder="—" style="width:46px;text-align:right;font-size:11px;border:1px solid #d0d0d0;border-radius:3px;padding:1px 3px;font-variant-numeric:tabular-nums"></td>
-        <td class="iv"><span class="iv-v">${soon>0?fmt(soon):'—'}</span></td>
-        <td class="iv"><span class="iv-v">${later>0?fmt(later):'—'}</span></td>`;
+        ${fbaInbCell(fis.soon, fis.soonL, fis.soonFirst)}
+        ${fbaInbCell(fis.later, fis.laterL, fis.laterFirst)}`;
       } else {
         trail=`
         <td class="bq">${b3>0?`<span class="bq-v">${fmt(b3)}</span>`:`<span class="bq-nil">—</span>`}${futN>0?`<span title="${futN} further buy(s) scheduled later in the plan (${fmt(futQty)}u) — not due to order this cycle" style="font-size:8px;color:#2563eb;margin-left:2px;white-space:nowrap">+${futN}f</span>`:``}</td>
@@ -3604,7 +3616,7 @@ function buildHdr(){
   const r2=document.createElement('tr');r2.className='sub';
   function s2(txt,cls,data){const e=document.createElement('th');e.textContent=txt;if(cls)e.className=cls;if(data)for(var dk in data)e.dataset[dk]=data[dk];r2.appendChild(e);}
   s2('Subcategory / Channel','stk lft');
-  s2('OH / In','stk2');
+  s2('3PL / FBA','stk2');
   s2('U · R','sep2');
   s2('U · R · %','sep2');
   s2('U · R · %','sep2');
@@ -4633,7 +4645,7 @@ function buildDataRow(s,co,ch,x,fu_cache){
   // col1: sticky stock (OH / inbound) at the channel warehouse
   var stk=stockFor(s,co,ch);
   var stkTd=document.createElement('td');stkTd.className='stk2';
-  stkTd.innerHTML=stockCellHTML(stk.oh,stk.inb,inbEntries(_skuSetForSubcat(s,co,ch),co,ch));
+  stkTd.innerHTML=stock2Line(stk.oh3,stk.ohF);   // 2-line 3PL / FBA on-hand
   tr.appendChild(stkTd);
 
   // Stacked actuals: each year/period is one column (Units / Revenue / YoY%)
@@ -4773,13 +4785,21 @@ function skuSales(sku,co,ch){
 // Sums on-hand (inv) and inbound (on_order) over all SKUs available in this country+channel.
 function stockFor(s,co,ch){
   var wh=skuWh(co,ch), ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':'b';
-  var oh=0,inb=0;
+  var wh3=skuWh(co,'DTC'), whF=skuWh(co,'FBA');   // 3PL + FBA warehouse codes for this country
+  var oh=0,inb=0,oh3=0,ohF=0;
   Object.keys(SKUM).forEach(function(sku){
     var p=SKUM[sku]; if(!p||p.s!==s)return;
+    oh3+=(p.inv&&p.inv[wh3]||0); ohF+=(p.inv&&p.inv[whF]||0);   // whole-subcat 3PL / FBA on-hand (any channel) for the 2-line stock cell
     var av=(p.av||{})[ctry]||''; if(av.indexOf(chKey)<0)return;
     oh+=(p.inv&&p.inv[wh]||0); inb+=(p.oo&&p.oo[wh]||0);
   });
-  return {oh:oh,inb:inb};
+  return {oh:oh,inb:inb,oh3:oh3,ohF:ohF};
+}
+// Two-line "3PL: N / FBA: N" stock cell (per Ben — replaces the single OH number). color for the digits.
+function stock2Line(oh3,ohF,color,bold){ var c=color||'#334155', fw=bold?'font-weight:700':'';
+  return '<div style="padding:2px 5px;text-align:right;font-size:9px;line-height:1.35;font-variant-numeric:tabular-nums;color:'+c+';'+fw+'">'
+    +'<div><span style="opacity:.6;font-weight:400">3PL:</span> '+fn(oh3)+'</div>'
+    +'<div><span style="opacity:.6;font-weight:400">FBA:</span> '+fn(ohF)+'</div></div>';
 }
 // Two-line OH / +inbound cell HTML for the sticky stock column (+ next-inbound date & hover list).
 function stockCellHTML(oh,inb,entries){
@@ -4817,6 +4837,21 @@ function inbDiv(inb, entries, color){
     clearTimeout(t); t=setTimeout(function(){ if(!el){el=document.createElement('div'); el.style.cssText='position:fixed;z-index:100001;max-width:260px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:7px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none'; document.body.appendChild(el);} el.innerHTML=n.getAttribute('data-tip'); el.style.display='block'; var r=n.getBoundingClientRect(); el.style.left=Math.max(6,Math.min(r.left,window.innerWidth-266))+'px'; el.style.top=(r.bottom+5)+'px'; },120); });
   document.addEventListener('mouseout',function(e){ var n=e.target&&e.target.closest?e.target.closest('.stk-inb[data-tip]'):null; if(n){clearTimeout(t); hide();} });
   document.addEventListener('scroll',hide,true);
+})();
+// Persistent, click-to-copy tooltip for FBA-inbound cells (.fba-inb[data-copy]) — 120ms hover to show;
+// stays while hovering the cell OR the tooltip; click copies the detail (qty · date · ref) to the clipboard.
+(function(){ var el=null,t=null,cur=null,hideT=null;
+  function scheduleHide(){ clearTimeout(hideT); hideT=setTimeout(function(){ if(el && !el.matches(':hover') && !(cur&&cur.matches&&cur.matches(':hover'))) el.style.display='none'; },220); }
+  function build(){ if(el)return el; el=document.createElement('div'); el.id='fba-inb-tip'; el.title='Click to copy';
+    el.style.cssText='position:fixed;z-index:100002;max-width:320px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:8px 10px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.35);white-space:pre-line;cursor:copy;display:none';
+    el.addEventListener('mouseover',function(){ clearTimeout(hideT); });
+    el.addEventListener('mouseout',scheduleHide);
+    el.addEventListener('click',function(){ try{ navigator.clipboard.writeText(el.dataset.copy||el.textContent); }catch(e){} el.style.background='#065f46'; setTimeout(function(){ el.style.background='#111827'; },800); });
+    document.body.appendChild(el); return el; }
+  document.addEventListener('mouseover',function(ev){ var n=ev.target&&ev.target.closest?ev.target.closest('.fba-inb[data-copy]'):null; if(!n)return; cur=n; clearTimeout(hideT); clearTimeout(t);
+    t=setTimeout(function(){ var e=build(); e.textContent=n.getAttribute('data-copy')||''; e.dataset.copy=n.getAttribute('data-copy')||''; e.style.display='block'; var r=n.getBoundingClientRect(); e.style.left=Math.max(6,Math.min(r.left,window.innerWidth-326))+'px'; e.style.top=(r.bottom+5)+'px'; },120); });
+  document.addEventListener('mouseout',function(ev){ var n=ev.target&&ev.target.closest?ev.target.closest('.fba-inb[data-copy]'):null; if(n){ clearTimeout(t); scheduleHide(); } });
+  document.addEventListener('scroll',function(){ if(el)el.style.display='none'; },true);
 })();
 
 // Compute SKU forecast for a given month using subcat growth assumption
@@ -6541,11 +6576,10 @@ function buildBody(){
         +(y?'<div style="font-size:8px;font-weight:600;color:#fff">'+y+'</div>':'')+'</div>',cls);
     }
     // col1: sticky stock total across all categories in scope
-    var allOH=0,allIN=0,gEnt=[];DATA.forEach(function(r){if(r.co!==CUR)return;if(CF&&r.ch!==CF)return;var st=stockFor(r.s,CUR,r.ch);allOH+=st.oh;allIN+=st.inb;gEnt=gEnt.concat(inbEntries(_skuSetForSubcat(r.s,CUR,r.ch),CUR,r.ch));});
-    gEnt.sort(function(a,b){return String(a.eta||'9999-99-99').localeCompare(String(b.eta||'9999-99-99'));});
+    var all3=0,allF=0;DATA.forEach(function(r){if(r.co!==CUR)return;if(CF&&r.ch!==CF)return;var st=stockFor(r.s,CUR,r.ch);all3+=st.oh3;allF+=st.ohF;});
     var gstk=document.createElement('td');gstk.className='stk2';
-    gstk.style.cssText='position:sticky;left:160px;z-index:1;background:#1a1a1a;border-right:2px solid #b0b0ae;padding:2px 5px;text-align:right;font-size:9px;line-height:1.25;font-variant-numeric:tabular-nums;color:#fff';
-    gstk.innerHTML='<div style="font-weight:700">'+fn(allOH)+'</div>'+inbDiv(allIN, gEnt, '#93c5fd');
+    gstk.style.cssText='position:sticky;left:160px;z-index:1;background:#1a1a1a;border-right:2px solid #b0b0ae';
+    gstk.innerHTML=stock2Line(all3,allF,'#fff',true);
     gtr.appendChild(gstk);
     gtStack(fn(gt24u),fr(gt24r),'','sep2');
     gtStack(fn(gt25u),fr(gt25r),fp(gt25u,gt24u),'sep2');
@@ -6656,11 +6690,10 @@ function _makeCatTotRow(cat){
         +(y?'<div class="'+fpc(y)+'" style="font-size:8px;font-weight:600">'+y+'</div>':'')+'</div>',cls);
     }
     // col1: sticky stock total for this category
-    var catOH=0,catIN=0,cEnt=[];allR.forEach(function(r){var st=stockFor(r.s,CUR,r.ch);catOH+=st.oh;catIN+=st.inb;cEnt=cEnt.concat(inbEntries(_skuSetForSubcat(r.s,CUR,r.ch),CUR,r.ch));});
-    cEnt.sort(function(a,b){return String(a.eta||'9999-99-99').localeCompare(String(b.eta||'9999-99-99'));});
+    var cat3=0,catF=0;allR.forEach(function(r){var st=stockFor(r.s,CUR,r.ch);cat3+=st.oh3;catF+=st.ohF;});
     var cstk=document.createElement('td');cstk.className='stk2';
-    cstk.style.cssText='position:sticky;left:160px;z-index:1;background:#eaeae8;border-right:2px solid #b0b0ae;padding:2px 5px;text-align:right;font-size:9px;line-height:1.25;font-variant-numeric:tabular-nums';
-    cstk.innerHTML='<div style="color:#334155;font-weight:600">'+fn(catOH)+'</div>'+inbDiv(catIN, cEnt, '#94a3b8');
+    cstk.style.cssText='position:sticky;left:160px;z-index:1;background:#eaeae8;border-right:2px solid #b0b0ae';
+    cstk.innerHTML=stock2Line(cat3,catF,'#334155',true);
     totr.appendChild(cstk);
     tStack(fn(c24u),fr(c24r),'','sep2');
     tStack(fn(c25u),fr(c25r),fp(c25u,c24u),'sep2');
