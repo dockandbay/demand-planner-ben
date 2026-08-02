@@ -1297,7 +1297,11 @@ function fbaInbCell(amount, lines, firstEta){
     + lines.map(function(l){ return dateDMY(l.eta)+'  ·  '+fmt(l.qty)+' units'+(l.ref?('  ·  '+l.ref):''); }).join('\n');
   // HTML tip: each PO reference is a clickable link that opens the PO drawer.
   var tip='<b>'+lines.length+' FBA inbound'+(lines.length>1?' shipments':'')+'</b><br>'
-    + lines.map(function(l){ var r=l.ref?esc(String(l.ref)):''; return dateDMY(l.eta)+' &middot; '+fmt(l.qty)+'u'+(r?(" &middot; <a class='fba-inb-po' data-po='"+r+"' style='color:#93c5fd;text-decoration:underline;cursor:pointer'>"+r+'</a>'):''); }).join('<br>')
+    + lines.map(function(l){ var rref=l.ref?String(l.ref):'', r=rref?esc(rref):'';
+        var refHtml = !r ? '' : ((typeof window!=='undefined'&&window.hzPoExists&&window.hzPoExists(rref))
+          ? " &middot; <a class='fba-inb-po' data-po='"+r+"' style='color:#93c5fd;text-decoration:underline;cursor:pointer'>"+r+'</a>'   // active PO → link to its drawer
+          : " &middot; <span style='color:#cbd5e1'>"+r+'</span>');   // not an active PO in the grid → plain text, no link
+        return dateDMY(l.eta)+' &middot; '+fmt(l.qty)+'u'+refHtml; }).join('<br>')
     + "<div style='margin-top:6px;font-size:9px;color:#9ca3af'>click a PO to open · click elsewhere to copy</div>";
   return '<td class="iv"><span class="fba-inb" data-tip="'+String(tip).replace(/"/g,'&quot;')+'" data-copy="'+esc(copy)+'" style="cursor:pointer">'
     +'<span class="iv-v">'+fmt(amount)+'</span>'
@@ -4877,7 +4881,7 @@ function inbDiv(inb, entries, color){
     el.addEventListener('mouseout',scheduleHide);
     el.addEventListener('click',function(ev){
       var po=ev.target&&ev.target.closest?ev.target.closest('.fba-inb-po'):null;   // clicking a PO ref opens its drawer
-      if(po&&po.dataset.po){ ev.stopPropagation(); el.style.display='none'; location.hash='#/supply/purchase-orders/'+encodeURIComponent(po.dataset.po); return; }
+      if(po&&po.dataset.po){ ev.stopPropagation(); el.style.display='none'; if(window.openPODrawer)window.openPODrawer(po.dataset.po); else location.hash='#/supply/purchase-orders/'+encodeURIComponent(po.dataset.po); return; }
       try{ navigator.clipboard.writeText(el.dataset.copy||el.textContent); }catch(e){} el.style.background='#065f46'; setTimeout(function(){ el.style.background='#111827'; },800); });
     document.body.appendChild(el); return el; }
   document.addEventListener('mouseover',function(ev){ var n=ev.target&&ev.target.closest?ev.target.closest('.fba-inb[data-tip]'):null; if(!n)return; cur=n; clearTimeout(hideT); clearTimeout(t);
@@ -9076,6 +9080,8 @@ function renderBuyView(mode){
   // Build pills, bind table clicks, and render the buy list. initUI() reads the freshly
   // injected (empty) pill containers, so rebuilding on each BUY/FBA-tab entry is correct.
   BP.initUI();
+  // FBA view: make sure the active-PO list is loaded so the inbound-tooltip refs can link to real POs; re-render once when it lands.
+  if(mode==='fba' && typeof window!=='undefined' && window.hzEnsurePoList && !window._hzPoListDone){ window.hzEnsurePoList(function(){ window._hzPoListDone=true; try{ if(window.BP && BP.BP_VIEW==='fba')BP.render(); }catch(e){} }); }
   // keep --bp-hdr-h in sync with the sticky header's height so the sticky category titles sit just below it
   try{ var hdr=document.getElementById('main-hdr');
     if(hdr && window.ResizeObserver){ var setH=function(){ wrap.style.setProperty('--bp-hdr-h', (hdr.offsetHeight||30)+'px'); };

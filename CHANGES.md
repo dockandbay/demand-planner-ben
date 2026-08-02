@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.410 - FBA inbound tooltip: PO link opens the drawer + only links real POs ⚠️ NEEDS TESTING
+- The PO reference in the FBA-inbound hover tooltip now (1) opens the **PO drawer** (`window.openPODrawer`) instead of navigating to the grid, and (2) is only a **clickable link if that PO is an active PO in the grid** — non-PO refs (e.g. FBA shipment tracking codes) show as plain grey text. Existence checked against `poLookupList` (/api/supply/lookups). `supply/inject.html` exposes `openPODrawer` / `hzPoExists` / `hzEnsurePoList`; `artifact_v16.7.html` uses them (loads the PO list on FBA entry, re-renders once).
+
 ## v26.409 - TRANSFER tab: Outbound + Inbound sections across all 3PLs ⚠️ NEEDS TESTING
 - The TRANSFER grid's transfer columns are reworked into two visually-delineated sections:
   - **OUTBOUND** (blue) — current 3PL → **every other 3PL** (for UK: →US, →EU, →AU, →CA), replacing the old fixed 2-market "Trf→" columns.

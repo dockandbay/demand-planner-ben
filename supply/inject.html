@@ -7970,6 +7970,9 @@
   var _expectedHash=null, _routed=false;
   function writeHash(parts){ var h='#/'+parts.filter(function(p){return p!=null&&p!=='';}).join('/'); _expectedHash=h; if(location.hash!==h){ try{ location.hash=h; }catch(e){} } }
   window.writeHash=writeHash; // exposed so the core artifact's DEMAND/REPORTS sub-tabs can sync the URL
+  window.openPODrawer=openPODrawer;   // let the DEMAND buy-plan (FBA inbound tooltip) open a PO in the drawer
+  window.hzPoExists=function(po){ try{ return !!po && Array.isArray(poLookupList) && poLookupList.indexOf(String(po))>=0; }catch(e){ return false; } };   // is this an ACTIVE PO in the grid? (poLookupList = /api/supply/lookups d.pos)
+  window.hzEnsurePoList=function(cb){ try{ fetchLookups(cb||function(){}); }catch(e){ if(cb)cb(); } };   // ensure the active-PO list is loaded (async)
   // PO detail sub-tabs are deep-linkable: #/supply/purchase-orders/<slug>/<PO> (e.g. .../payments/PO-… ,
   // .../dates/PO-…). Map the internal potab keys to URL-friendly slugs both ways.
   var POTAB_SLUG={pay:'payments',dates:'dates',client:'client',oplan:'order-plan',shipments:'shipments',documents:'documents',masterdata:'master-data',landed:'landed',timeline:'timeline',linked:'linked'};
