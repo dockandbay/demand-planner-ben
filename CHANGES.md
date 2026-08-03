@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.456 - Demand grid: sticky header sits above body rows (z-index) ⚠️ NEEDS TESTING
+- Raised the demand-plan grid header z-index (`thead th` 2→20, sticky stock columns 3→21) so body rows no longer paint over the sticky header when scrolling. `artifact_v16.7.html`. No migration.
+
 ## v26.455 - Demand plan: SKU stock column shows 3PL + FBA on-hand (two lines) ⚠️ NEEDS TESTING
 - The SKU-level stock cell on the demand plan now shows **3PL and FBA on-hand on separate lines** (e.g. `3PL: 885 / FBA: 58`) like the subcategory rows, instead of only the channel warehouse (3PL on the DTC tab). Channel inbound line kept. `artifact_v16.7.html`. No migration.
 
