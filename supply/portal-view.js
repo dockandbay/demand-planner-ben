@@ -770,6 +770,13 @@
         +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><input type="file" class="pp-inv-parse-file" data-po="'+po+'" accept=".xlsx" style="font-size:11px;max-width:280px"><button class="save-btn pp-inv-parse-go" data-po="'+po+'">Parse file</button></div>'
         +'<div class="pp-inv-parse-out" data-po="'+po+'" style="margin-top:6px"></div>'
         +'<div class="tiny mut" style="margin-top:3px">Reads the SKU / Q’TY (PCS) / Unit Price columns and proposes qty + price overrides. You review, then apply — it then goes to Dock &amp; Bay to approve.</div></div>';
+      // Paste-from-spreadsheet: paste SKU / Qty / Price rows straight from Excel or Google Sheets → updates qty +
+      // your cost per matching SKU (added as a new line if not on the order); changes go to Dock & Bay to approve.
+      var pasteBox='<div style="margin:0 0 10px;padding:8px 11px;border:1px solid #cdd9ea;border-radius:7px;background:#f8fafc">'
+        +'<div class="ppx-h" style="font-weight:600;font-size:12px;margin-bottom:4px">📋 Paste from spreadsheet (SKU, Qty, Price)</div>'
+        +'<textarea class="pp-paste-op" data-po="'+po+'" placeholder="Paste rows from Excel / Google Sheets — one per line:\nSKU&#9;Qty&#9;Price" style="width:100%;max-width:420px;height:66px;font-size:11px;font-family:ui-monospace,Menlo,monospace;border:1px solid #cbd5e1;border-radius:6px;padding:6px;box-sizing:border-box;text-align:left"></textarea>'
+        +'<div style="display:flex;gap:8px;align-items:center;margin-top:5px"><button class="save-btn pp-paste-op-go" data-po="'+po+'">Apply pasted rows</button><span class="pp-paste-op-msg tiny mut" data-po="'+po+'"></span></div>'
+        +'<div class="tiny mut" style="margin-top:3px">Three columns — SKU, Qty, your unit Price (tab or comma separated; a header row is ignored). Updates qty &amp; your cost per SKU; changes go to Dock &amp; Bay to approve.</div></div>';
       // "What changed since you approved" — compare the current SKUs/qtys against the snapshot taken when the
       // supplier last confirmed this order (_ppData.approvedByPo[po]). Only shown once they've approved before
       // (so a first-time order isn't flagged) and something has since changed.
@@ -782,7 +789,7 @@
         +'<div style="overflow-x:auto"><table style="font-size:11px;border-collapse:collapse;width:auto"><thead><tr><th class="l" style="padding:2px 12px 3px 0;min-width:30ch;white-space:nowrap">SKU</th><th style="text-align:right;padding:2px 12px 3px">Was</th><th style="text-align:right;padding:2px 12px 3px">Now</th><th class="l" style="padding:2px 0 3px">Change</th></tr></thead><tbody>'
         +_chgs.map(function(c){ var d=c.nw-c.old; return '<tr><td class="l" style="padding:1px 12px 1px 0;min-width:30ch;white-space:nowrap">'+esc(c.sku)+'</td><td style="text-align:right;padding:1px 12px">'+(c.kind==='new'?'<span class="mut">—</span>':c.old)+'</td><td style="text-align:right;padding:1px 12px">'+c.nw+'</td><td class="l" style="font-weight:600;color:'+(c.kind==='removed'?'#b91c1c':d>0?'#166534':'#b45309')+'">'+(c.kind==='new'?'added':c.kind==='removed'?'removed':(d>0?'+':'')+d)+'</td></tr>'; }).join('')
         +'</tbody></table></div></div>' : '';
-      var skus=chgHtml+invUpload
+      var skus=chgHtml+invUpload+pasteBox
         +'<div style="margin:3px 0 4px"><button class="lnk-btn pp-op-csv" data-po="'+po+'" style="font-size:11px">⤓ Download to CSV</button></div>'
         +'<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table style="font-size:11px;margin:3px 0 6px;width:auto"><thead><tr><th class="l" style="white-space:nowrap;min-width:30ch">SKU</th><th style="text-align:right">Qty</th><th style="text-align:right">Est. cost</th><th style="text-align:right">Your cost</th><th style="text-align:right">Line total</th><th></th></tr></thead><tbody>'
         +rws
@@ -2372,6 +2379,23 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                         alert('Applied to your order plan: '+r.applied+' line(s)'+(r.added?' ('+r.added+' new)':'')+'. Review the qty & cost below, then confirm the order — Dock & Bay will approve the change.');
                         rerenderRow(row,po,'orderplan'); }); }; }); };
                 rd.readAsDataURL(f); }; });
+              // Paste-from-spreadsheet (SKU · Qty · Price) → apply each row via lineCost (→ Dock & Bay to approve).
+              scope.querySelectorAll('.pp-paste-op-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]');
+                var ta=scope.querySelector('.pp-paste-op[data-po="'+CSS.escape(po)+'"]'), msg=scope.querySelector('.pp-paste-op-msg[data-po="'+CSS.escape(po)+'"]');
+                var txt=((ta&&ta.value)||'').trim(); if(!txt){ if(msg)msg.textContent='Paste some rows first.'; return; }
+                var known={}; scope.querySelectorAll('.pp-qty[data-po="'+CSS.escape(po)+'"]').forEach(function(q){ known[String(q.dataset.sku).toUpperCase()]=1; });
+                var parsed=txt.split(/\r?\n/).map(function(ln){ return ln.split(/\t|,|;/).map(function(x){return x.trim();}); })
+                  .map(function(r){ return { sku:(r[0]||''), qty:(r[1]!=null?r[1].replace(/[^0-9.\-]/g,''):''), price:(r[2]!=null?r[2].replace(/[^0-9.\-]/g,''):'') }; })
+                  .filter(function(r){ return r.sku && (r.qty!==''||r.price!==''); });
+                if(parsed.length && /^(sku|code|item|product)$/i.test(parsed[0].sku) && parsed[0].qty===''){ parsed.shift(); }   // drop a header row
+                if(!parsed.length){ if(msg)msg.textContent='No SKU / Qty / Price rows found.'; return; }
+                btn.disabled=true; if(msg){ msg.style.color='#64748b'; msg.textContent='Applying '+parsed.length+' row(s)…'; }
+                var i=0, applied=0;
+                (function next(){ if(i>=parsed.length){ btn.disabled=false; if(ta)ta.value=''; if(msg){ msg.style.color='#16a34a'; msg.textContent='✓ Applied '+applied+' row(s). Review below and confirm — Dock & Bay will approve.'; } rerenderRow(row,po,'orderplan'); return; }
+                  var r=parsed[i++]; var isAdded=!known[String(r.sku).toUpperCase()];
+                  postJSON(EP.lineCost,{po:po,sku:r.sku,amended_qty:(r.qty||null),actual_cost:(r.price||null),is_added:(isAdded?true:undefined),submitted_by:by},function(j){
+                    if(!(j&&j.error)){ applied++; (_ppData.costsByPo[po]=_ppData.costsByPo[po]||{})[r.sku]={amended_qty:(r.qty!==''?Number(r.qty):null),actual_cost:(r.price!==''?Number(r.price):null),is_added:isAdded}; }
+                    next(); }); })(); }; });
               scope.querySelectorAll('.pp-rm').forEach(function(b){ b.onclick=function(){ if(!confirm('Remove '+b.dataset.sku+' from this order?'))return; var po=b.dataset.po, sku=b.dataset.sku, row=b.closest('tr[id^="pp-"]');
                 postJSON(EP.lineRemove,{po:po,sku:sku},function(){  if(_ppData.costsByPo[po])delete _ppData.costsByPo[po][sku]; rerenderRow(row,po); }); }; });
               // crossdock shipped quantity per SKU → save + re-render (updates the open-action badge), no full reload
