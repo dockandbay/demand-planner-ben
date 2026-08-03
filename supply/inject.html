@@ -2771,7 +2771,6 @@
       +'<td class="l" style="font-size:10px;line-height:1.05;max-width:130px;white-space:normal">'+(r.client?esc(r.client):'<span class="mut">—</span>')+'<br>'+(r.sales_order_ref?'<span class="mut">'+esc(r.sales_order_ref)+'</span>':'<span class="mut">—</span>')+'</td>'
       +'<td class="l">'+statusSel(ep,r.status)
         +(((r.status==='PRODUCTION'||r.status==='SHIPPED TO MASTER')&&r.ship_status==='Shipping')?'<div style="margin-top:3px"><button class="po-set-shipping" data-po="'+esc(r.po)+'" title="This PO&rsquo;s shipment has departed (Shipping) but the PO is still upstream — set this PO and every PO on the same shipment still upstream to SHIPPING">→ set shipping</button></div>':'')
-        +((r.shipment&&!r.is_master&&r.production_status==='shipped'&&r.ship_status!=='Shipping'&&r.ship_status!=='Delivered'&&['SHIPPED TO MASTER','SHIPPING','DELIVERED','COMPLETE'].indexOf(r.status)<0)?'<div style="margin-top:3px"><button class="po-set-stm" data-po="'+esc(r.po)+'" title="Supplier marked this PO shipped to the master-shipment consolidator, but the master hasn&rsquo;t departed yet — set it to SHIPPED TO MASTER (still yours until the master sails).">→ set shipped to master</button></div>':'')
         +'</td>'
       +'<td class="l">'+shipcell+'</td>'
       +'<td class="l">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0 && !poFullyPaid(r))+'</td>'
@@ -3344,9 +3343,14 @@
       +'<tr'+(_pseStart?' style="background:#fff7ed"':'')+'><td class="l"><b>Production start</b></td><td class="l">'+payIn(ep,'start_production',r.prod_start,true)+'</td><td class="l mut tiny">manual'+_alert(_pseStart)+'</td></tr>'
       +'<tr'+(_pseEnd?' style="background:#fff7ed"':'')+'><td class="l"><b>Production end</b></td><td class="l">'+payIn(ep,'end_production_overide',r.end_override,true)+'</td><td class="l mut tiny">'+(r.end_override?'override':'start + supplier days')+_alert(_pseEnd)+'</td></tr>'
       +(function(){ var pse=(_pseStart||_pseEnd);
+        var _stm=(r.shipment&&!r.is_master&&r.production_status==='shipped'&&r.ship_status!=='Shipping'&&r.ship_status!=='Delivered'&&['SHIPPED TO MASTER','SHIPPING','DELIVERED','COMPLETE'].indexOf(r.status)<0)
+          ?'<button class="save-btn po-set-stm" data-po="'+esc(r.po)+'" title="Supplier marked this PO shipped to the master-shipment consolidator, but the master hasn&rsquo;t departed — set it to SHIPPED TO MASTER (still yours until the master sails).">→ set shipped to master</button> ':'';
         return '<tr'+(pse?' style="background:#fff7ed"':'')+'><td class="l"><b>Supplier production status</b><br><span class="mut tiny">(set by supplier / here)</span></td>'
-          +'<td class="l">'+prodStatusSel(ep+'/prod-status', r.production_status)+(PO_ACTCOND.shipped_to_master(r)?actMark(r.po,'shipped_to_master'):'')+'</td>'
-          +'<td class="l mut tiny">'+(r.production_status?(r.prod_confirmed_age!=null?'confirmed '+r.prod_confirmed_age+'d ago':'supplier-set'):'not set')+'</td></tr>'; })()
+          +'<td class="l">'+prodStatusSel(ep+'/prod-status', r.production_status)+'</td>'
+          +'<td class="l mut tiny">'+(r.production_status?(r.prod_confirmed_age!=null?'confirmed '+r.prod_confirmed_age+'d ago':'supplier-set'):'not set')+'</td></tr>'
+          +'<tr><td class="l"><b>Our status</b><br><span class="mut tiny">(PO status — same as the grid)</span></td>'
+          +'<td class="l">'+statusSel(ep, r.status)+'</td>'
+          +'<td class="l" style="white-space:nowrap">'+_stm+(PO_ACTCOND.shipped_to_master(r)?actMark(r.po,'shipped_to_master'):'')+'</td></tr>'; })()
       +(function(){ var sc=d&&d.sup_completion; if(!sc)return ''; var pend=(sc.status==='pending');
         return '<tr'+(pend?' style="background:#fff7ed"':'')+'><td class="l">Supplier completion date <span class="mut tiny">(submitted in portal)</span></td>'
           +'<td class="l">'+(sc.value?'<b>'+fd(sc.value)+'</b>':'—')+' '+(pend?'<span class="tool-badge bg-amber">awaiting approval</span>':sc.status==='applied'?'<span class="tool-badge bg-green">applied to production end</span>':'<span class="tool-badge bg-neutral">rejected</span>')+'</td>'
@@ -3742,6 +3746,11 @@
       fetch('/api/supply/submission/'+b.dataset.id+'/dismiss',{method:'POST'}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error); poRefetchPanel(po,i); })
         .catch(function(e){ b.disabled=false; alert('Could not reject: '+(e.message||e)); }); }; });
+    // DATES ▸ Our status: "→ set shipped to master" (rider shipped to the consolidator, master not departed)
+    document.querySelectorAll('#podet-'+i+' .po-set-stm').forEach(function(b){ b.onclick=function(){ b.disabled=true; b.textContent='…';
+      fetch('/api/supply/po/'+encodeURIComponent(b.dataset.po)+'/set-shipped-to-master',{method:'POST'}).then(function(r){return r.json();})
+        .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); if(window._poPatchRow)try{window._poPatchRow(po);}catch(e){} })
+        .catch(function(e){ b.disabled=false; b.textContent='→ set shipped to master'; alert('Failed: '+(e.message||e)); }); }; });
     // Upload + parse a supplier invoice (.xlsx) → preview qty/price diffs vs the order plan, then Apply as
     // portal_line_costs overrides that surface as UNCONFIRMED changes in the ORDER PLAN tab. Reuses the same
     // server parse/apply endpoints as the supplier portal (single source of truth).

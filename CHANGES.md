@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.492 - Move shipped-to-master action into DATES tab; replicate the PO status dropdown there ⚠️ NEEDS TESTING
+- DATES sub-tab now has an "Our status" row = the PO status dropdown (same statusSel as the grid, bonded to the same field via the drawer's .fci save), placed under the Supplier production status row.
+- The "→ set shipped to master" action button + its ⒜ indicator/snooze now live on that DATES row (with a drawer click handler), and were REMOVED from the main PO grid status column. ("→ set shipping" stays on the grid.) supply/inject.html. No migration.
+
 ## v26.491 - DATES tab: show the shipped-to-master action indicator (⒜ + tooltip + snooze) ⚠️ NEEDS TESTING
 - The shipped-to-master action was mapped to the DATES sub-tab (counted in its badge) but had no inline marker. Now renders the red Ⓐ indicator (tooltip + snooze) on the Supplier production status row, so the count matches a locatable, snoozeable action. (The supplier-completion-date item on the same tab is actioned by its existing Approve/Reject buttons.) supply/inject.html. No migration.
 
