@@ -255,9 +255,9 @@ thead th{position:sticky;top:0;z-index:20;background:#f3f3f1;padding:3px 4px;fon
 thead th.lft{text-align:left}
 thead th.stk{position:sticky;left:0;z-index:21;background:#f3f3f1;text-align:left;width:160px;min-width:160px;max-width:160px}
 thead th.stk2{position:sticky;left:160px;z-index:21;background:#f3f3f1;text-align:right;width:96px;min-width:96px;max-width:96px;border-right:2px solid #b0b0ae}
-thead tr.grp th{top:0;padding:2px 4px;font-size:8.5px;font-weight:700;background:#eaeae8;border-bottom:0;color:#555;text-transform:uppercase;letter-spacing:.03em;height:16px;box-sizing:border-box;line-height:1.1}
-thead tr.grp th.stk{background:#eaeae8}
-thead tr.grp th.stk2{background:#eaeae8}
+thead tr.grp th{top:0;padding:2px 4px;font-size:8.5px;font-weight:700;background:#fff;border-bottom:0;color:#555;text-transform:uppercase;letter-spacing:.03em;height:16px;box-sizing:border-box;line-height:1.1}
+thead tr.grp th.stk{background:#fff}
+thead tr.grp th.stk2{background:#fff}
 thead tr.sub th{top:16px;background:#f3f3f1}
 thead tr.sub th.stk{background:#f3f3f1}
 thead tr.sub th.stk2{background:#f3f3f1}
@@ -296,7 +296,7 @@ tr.sku-inline:not(.subtot-row) td{border-bottom-color:#cfcfcf !important}
 .fy-toggle:hover .fyt-act{filter:brightness(.96)}
 /* Google-Sheets-style fiscal-year column grouping: a bar on top of the month columns with a − (minimise) when
    expanded, or a + (expand) on the lone total column when collapsed. */
-tr.grp th.grpbar{padding:0 2px 0;vertical-align:bottom;background:transparent}
+tr.grp th.grpbar{padding:0 2px 0;vertical-align:bottom;background:#fff}   /* opaque so body rows don't show through the sticky FY-bar header row */
 th.grpbar-exp{border-bottom:2px solid #9aa8c2}   /* bracket line spanning the grouped month columns */
 .grp-tog{display:inline-flex;align-items:center;gap:4px;justify-content:center;width:100%;border:none;background:transparent;cursor:pointer;font-family:inherit;font-size:8px;font-weight:700;color:#475569;padding:1px 2px 2px;letter-spacing:-.02em;white-space:nowrap}
 .grp-tog:hover{color:#1e40af}

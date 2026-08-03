@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.457 - Demand grid: FY-bar header row is opaque white ⚠️ NEEDS TESTING
+- The first header row (FY24/25 · FY25/26 · FY26/27 group bars) had `background:transparent`, so body rows showed through the sticky header when scrolling. Made that whole row solid white — completes the sticky-header fix. `artifact_v16.7.html`. No migration.
+
 ## v26.456 - Demand grid: sticky header sits above body rows (z-index) ⚠️ NEEDS TESTING
 - Raised the demand-plan grid header z-index (`thead th` 2→20, sticky stock columns 3→21) so body rows no longer paint over the sticky header when scrolling. `artifact_v16.7.html`. No migration.
 
