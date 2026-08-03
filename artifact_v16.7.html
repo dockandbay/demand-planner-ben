@@ -2558,6 +2558,22 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     if((s.wh||'').includes('fba')){if(!ibF[k])ibF[k]=[];ibF[k].push(s);}
     else{if(!ib3[k])ib3[k]=[];ib3[k].push(s);}
   });
+  // Inbound line for the popup tooltip: ref (clickable → PO grid) · qty · date · supplier. If the shipment ETA
+  // was in the past we flag it with ⚠ + an explanation and show the effective (adjusted) date it's counted on.
+  function inbLineHtml(s){
+    var e=inbEffEta(s);
+    var sup=s.supplier||(((s.type||'').startsWith('supplier'))?'supplier':((s.type||'').includes('transfer'))?'transfer':(s.type||''));
+    var refHtml=s.ref?('<a class="inb-po" data-po="'+s.ref+'" style="color:#1d4ed8;font-weight:600;cursor:pointer">'+s.ref+'</a>'):'';
+    var warn='', dateShown=dateDMY(s.eta);
+    if(e.adj){
+      var msg=(e.adj==='po')
+        ? 'Shipment ETA '+dateDMY(e.orig)+' is in the past — using the PO grid date '+dateDMY(e.date)+' instead. Click the PO ref to check it.'
+        : 'Shipment ETA '+(e.orig?dateDMY(e.orig):'unknown')+' is in the past — brought forward to this month. Click the PO ref to check it.';
+      warn='<span title="'+msg+'" style="cursor:help;color:#b45309">⚠ </span>';
+      dateShown=dateDMY(e.date)+' <span style="color:#b45309">(was '+(e.orig?dateDMY(e.orig):'—')+')</span>';
+    }
+    return warn+refHtml+' · '+fmt(s.qty)+' units · '+dateShown+' · '+sup;
+  }
 
   const discCutoff=discCutoffMo(md.disc);
   // The calendar month the disc date falls in (YYYY_MM). Demand in this final selling month is clearance of
@@ -2923,8 +2939,8 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
         tg3:t3*wA2,tgF:tf*wF2,cv3:wA2>0?rc3/wA2:999,cvF:wF2>0?rcF/wF2:999,isDisc:false,
         bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,bQuSea:buyUrgentSea[i]||0,bQuAir:buyUrgentAir[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],urgentProd:buyUrgentProd[i],urgentFreight:buyUrgentFreight[i],urgentMode:buyUrgentMode[i],bPM:_buyPlaceTip(i),
         fdQ:fbaBuyDisp[i]||0,tx:transferOut[i]||0,overdue:buyOverdue[i]||false,
-        inbLines3:remInb3.map(s=>`${s.ref} \u00b7 ${fmt(s.qty)} units \u00b7 ${dateDMY(s.eta)} \u00b7 ${s.supplier||(((s.type||'').startsWith('supplier'))?'supplier':((s.type||'').includes('transfer'))?'transfer':(s.type||''))}`),
-        inbLinesF:remInbF.map(s=>`${s.ref} \u00b7 ${fmt(s.qty)} units \u00b7 ${dateDMY(s.eta)} \u00b7 ${s.supplier||(((s.type||'').startsWith('supplier'))?'supplier':((s.type||'').includes('transfer'))?'transfer':(s.type||''))}`)};
+        inbLines3:remInb3.map(inbLineHtml),
+        inbLinesF:remInbF.map(inbLineHtml)};
     }
 
     const afterDisc=discCutoff&&key>=discCutoff;
@@ -3025,10 +3041,10 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     });
 
     const inbLines3=[
-      ...conf3.map(s=>`${s.ref} \u00b7 ${fmt(s.qty)} units \u00b7 ${dateDMY(s.eta)} \u00b7 ${s.supplier||(((s.type||'').startsWith('supplier'))?'supplier':((s.type||'').includes('transfer'))?'transfer':(s.type||''))}`),
+      ...conf3.map(inbLineHtml),
       ...(assumedQty3>0?[`Buy Plan Assumed \u00b7 ${fmt(assumedQty3)} units \u00b7 from ${buyFromLbl[i]||'order'}`]:[])
     ];
-    const inbLinesF=confF.map(s=>`${s.ref} \u00b7 ${fmt(s.qty)} units \u00b7 ${dateDMY(s.eta)} \u00b7 ${s.supplier||(((s.type||'').startsWith('supplier'))?'supplier':((s.type||'').includes('transfer'))?'transfer':(s.type||''))}`);
+    const inbLinesF=confF.map(inbLineHtml);
 
     // bPM for Buy 3PL tooltip: "place order <date>, arrives <date>"
     const bPM=_buyPlaceTip(i)||null;
@@ -5386,6 +5402,9 @@ function inbEntries(skuList,co,ch){ var wh=skuWh(co,ch), out=[];
   out.sort(function(a,b){ return String(a.eta||'9999-99-99').localeCompare(String(b.eta||'9999-99-99')); }); return out; }
 function _etaShort(d){ if(!d)return 'TBC'; var p=String(d).split('-'); if(p.length<3)return String(d);
   var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return (+p[2])+' '+(mn[(+p[1])-1]||'')+" '"+p[0].slice(2); }
+// Inbound-line PO ref (in the SKU popup inbound tooltip) → open that PO. Delegated so it works on lines rendered
+// inside hover tooltips. Opens the PO drawer if available, else navigates to the SUPPLY PO grid.
+document.addEventListener('click',function(e){ var a=e.target&&e.target.closest?e.target.closest('.inb-po[data-po]'):null; if(!a)return; e.preventDefault(); e.stopPropagation(); var po=a.getAttribute('data-po'); if(!po)return; if(window.openPODrawer){ try{ window.openPODrawer(po); return; }catch(_){} } location.hash='#/supply/purchase-orders/'+encodeURIComponent(po); });
 // The ">>inbound" div, with a next-arrival sub-line + hover tooltip (data-tip) listing all shipments.
 function inbDiv(inb, entries, color){
   var base='color:'+(color||'#94a3b8');

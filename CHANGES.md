@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.487 - Inbound line: warning + PO link when the shipment date is in the past ⚠️ NEEDS TESTING
+- In the SKU buy-plan popup inbound tooltip, any shipment whose ETA is in the past is flagged with a ⚠ icon + a hover explanation ("ETA <date> is in the past — using the PO grid date / brought forward to this month"), shows the effective date it is counted on (with the original in brackets), and the PO ref is now a clickable link that opens the PO (drawer, else the SUPPLY PO grid). artifact_v16.7.html. No migration.
+
 ## v26.486 - Fix: overdue/past-dated inbound no longer dropped (was causing phantom stockouts + false urgent) ⚠️ NEEDS TESTING · BUY-PLAN IMPACT · SERVER
 - The buy projection bucketed inbound by ETA month, and the forward scan skips past months — so a shipment whose ETA is in the past but which is NOT yet received got dropped, making the engine see a phantom stockout and fire a false urgent (often expensive urgent AIR).
 - Inbound arrival date now resolves by priority: estimated_delivery_date if still future -> else the PO-grid (shipment arrival/landing/completion) date -> else THIS month. server.mjs adds po_eta to the inbound feed (joins shipments+branches); artifact inbEffEta() + bucketing clamp.
