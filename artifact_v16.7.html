@@ -563,10 +563,21 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
 #buy-wrap table.pt td.disc-row{color:#7c2d12;font-size:10px;font-style:italic}
 #buy-wrap table.pt td.clo{background:#fee2e2;color:#dc2626;font-size:10px;font-weight:600}
 #buy-wrap table.pt td.cok{color:#166534;font-size:10px}
+#buy-wrap table.pt td.camb{background:#fef3c7;color:#b45309;font-size:10px;font-weight:600}
+#buy-wrap table.pt td.amb{background:#fef3c7;color:#b45309;font-weight:700}
 #buy-wrap table.pt td.chi{color:#9333ea;font-size:10px}
 #buy-wrap table.pt tr:hover td{background:#fafaf8}
 #buy-wrap table.pt tr:hover td.rl{background:#fafaf8}
 #buy-wrap table.pt tr:hover td.rl.sec, #buy-wrap table.pt tr:hover td.sx{background:#e0e0de}
+/* Keep coloured status cells their own colour on row-hover (don't wash them to near-white). */
+#buy-wrap table.pt tr:hover td.red,#buy-wrap table.pt tr:hover td.clo{background:#fee2e2}
+#buy-wrap table.pt tr:hover td.amb,#buy-wrap table.pt tr:hover td.camb{background:#fef3c7}
+#buy-wrap table.pt tr:hover td.buy{background:#dbeafe}
+#buy-wrap table.pt tr:hover td.fbd{background:#f5f3ff}
+#buy-wrap table.pt tr:hover td.crc-tip{background:#FFFFC5}
+/* Spreadsheet-style cell selection: drag to select numeric cells and see their sum in the popup header. */
+#buy-wrap table.pt td.cellsel,#buy-wrap table.pt tr:hover td.cellsel{background:#bfdbfe !important;outline:1px solid #3b82f6;outline-offset:-1px}
+#buy-wrap table.pt td:not(.rl){user-select:none;-webkit-user-select:none}
 #buy-wrap .txb{margin-top:6px;background:#fef9c3;border:1px solid #fcd34d;border-radius:4px;padding:5px 10px;font-size:11px;color:#854d0e}
 /* Complex Rules list — flex rows: one line on desktop, stacks over ~2 lines on mobile */
 #cr-panel .cr-grp{font-weight:700;color:#0f172a;font-size:11px;margin:9px 0 2px}
@@ -3034,22 +3045,31 @@ function buildTable(proj,md,pd,is3,hasFBA){
       const inner=lines.map(l=>`<div>${l}</div>`).join('');
       return `<td><div class="tip-wrap inb-tip" style="cursor:default"><span style="${clr};font-weight:500">${fmt(total)}</span><div class="tip-box">${inner}</div></div></td>`;
     }));
+    // Colour by how far CLOSING 3PL stock sits vs its 3PL Target Units — the true "are we on plan?" signal.
+    // Weeks-cover alone is unreliable once a complex rule sets a custom target, but Target Units already embeds
+    // that rule, so stock-vs-target stays aligned. Bands, dev=(stock-target)/target:
+    //   green -20%..+10% | amber -50%..-20% OR +10%..+30% | red <-50% OR >=+30%. No target (clearance/disc) -> not flagged.
+    const covDevTier=(stock,target)=>{
+      if(!(target>0))return 'ok';
+      const d=(stock-target)/target;
+      if(d>=-0.20&&d<=0.10)return 'ok';
+      if((d>=-0.50&&d<-0.20)||(d>0.10&&d<0.30))return 'amb';
+      return 'lo';
+    };
     // SOH 3PL closing
     rows.push(dr('SOH 3PL (closing)',proj,p=>{
       if(p.isActual)return `<td style="background:#f0fdf4;color:#166534;font-weight:700">${fmt(p.c3)}</td>`;
-      const w=p.cv3,tol=t3*0.2;
-      const cls=w>=999?'grn':Math.abs(w-t3)<=tol?'grn':'red';
+      const cls={ok:'grn',amb:'amb',lo:'red'}[covDevTier(p.c3,p.tg3)];
       return c(fmt(p.c3),cls);
     }));
     // Cover weeks
     rows.push(dr('Cover (weeks)',proj,p=>{
       const w=p.cv3;if(w>=999)return c('\u221e','cok');
-      // Colour reflects whether the SKU meets its target cover: green within ±20% of target, red otherwise. (No complex-rule highlight here.)
-      const tol=t3*0.2;
-      const cls=Math.abs(w-t3)<=tol?'cok':'clo';
+      // Value shown in weeks; colour driven by stock-vs-target-units (covDevTier), so it agrees with SOH closing even under a complex rule.
+      const cls={ok:'cok',amb:'camb',lo:'clo'}[covDevTier(p.c3,p.tg3)];
       return c(Math.round(w)+'w',cls);
     }));
-    // 3PL Target Units — light-purple background + 120ms hover tooltip on months whose target is raised by a complex rule.
+    // 3PL Target Units — light-yellow background + 120ms hover tooltip on months whose target is raised by a complex rule.
     rows.push(dr('3PL Target Units',proj,p=>{
       if(p.crRule)return '<td class="tgt crc-tip" data-tip="'+crRuleTip(p.crRule)+'" style="background:#FFFFC5;cursor:help">'+fmt(Math.round(p.tg3))+'</td>';
       return c(fmt(Math.round(p.tg3)),'tgt');
@@ -3354,6 +3374,8 @@ var BUY_SCAFFOLD=`<div class="wrap">
     <button type="button" id="cr-btn" onclick="CR.toggle()" title="Complex Rules — override buy cover targets by SKU / category / tier / season × window, per country" style="font-size:10px;padding:2px 9px;border:1px solid #7c3aed;border-radius:3px;background:#f5f3ff;color:#5b21b6;cursor:pointer;font-weight:600">&#9819; Complex Rules (0) &#9662;</button>
     <button type="button" id="bp-view-dl" onclick="BP.downloadViewCSV()" title="Download the data in view as CSV" style="display:none;font-size:10px;padding:2px 10px;border:1px solid #16a34a;border-radius:3px;background:#dcfce7;color:#166534;cursor:pointer;font-weight:600">&#11015; Download CSV</button>
     <button type="button" id="bp-fba-help-btn" onclick="document.getElementById('fba-help').style.display=(document.getElementById('fba-help').style.display==='none'?'block':'none')" title="How Transfer FBA is calculated" style="font-size:10px;padding:2px 9px;border:1px solid #cbd5e1;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer">&#9432; FBA Transfer Logic</button>
+    <button type="button" id="bp-buy-help-btn" onclick="document.getElementById('buy-help').style.display=(document.getElementById('buy-help').style.display==='none'?'block':'none')" title="How the buy plan, targets and cell colours work" style="font-size:10px;padding:2px 9px;border:1px solid #cbd5e1;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer">&#9432; Buy Plan Logic</button>
+    <button type="button" id="bp-trf-help-btn" onclick="document.getElementById('trf-help').style.display=(document.getElementById('trf-help').style.display==='none'?'block':'none')" title="How 3PL-to-3PL transfers are calculated" style="font-size:10px;padding:2px 9px;border:1px solid #cbd5e1;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer">&#9432; Transfer Logic</button>
     <span id="bp-buy-actions" style="display:inline-flex;align-items:center;gap:6px;margin-left:6px;border-left:1px solid #e2e8f0;padding-left:8px">
       <button type="button" id="bp-make-po-3pl" onclick="(function(){var it=BP.buyplanItems('3pl');if(!it.length){alert('No Buy 3PL quantities in the current plan.');return;}if(window.openBuyplanModal){window.openBuyplanModal(BP.CUR,it,'3pl');}else{alert('Supply module not ready — open the SUPPLY tab once, then retry.');}})()" title="Create 3PL purchase orders from the Buy 3PL quantities, split into 20-pallet containers" style="font-size:10px;padding:2px 10px;border:1px solid #1d4ed8;border-radius:3px;background:#1d4ed8;color:#fff;cursor:pointer;font-weight:600">3PL - Create POs</button>
       <button type="button" id="bp-make-po-fba" onclick="(function(){if((BP.CUR||'').toUpperCase()==='EU'){alert('FBA-direct PO creation is not available for EU yet (no DE FBA branch).');return;}var it=BP.buyplanItems('fba');if(!it.length){alert('No Buy FBA quantities in the current plan.');return;}if(window.openBuyplanModal){window.openBuyplanModal(BP.CUR,it,'fba');}else{alert('Supply module not ready — open the SUPPLY tab once, then retry.');}})()" title="Create FBA-direct purchase orders from the Buy FBA quantities, split into 20-pallet containers" style="font-size:10px;padding:2px 10px;border:1px solid #16a34a;border-radius:3px;background:#16a34a;color:#fff;cursor:pointer;font-weight:600">FBA - Create POs</button>
@@ -3416,6 +3438,39 @@ var BUY_SCAFFOLD=`<div class="wrap">
   <div>&bull; <b>Override:</b> type a quantity in the Override column to set the transfer manually (session only, not yet saved). It supersedes the recommendation.</div>
   <div>&bull; <b>FBA target weeks:</b> sets how many weeks of FBA cover a shipment aims for (default 8). Use the 12 preset to build a larger one-off shipment, then revert to 8.</div>
 </div>
+<div id="buy-help" style="display:none;margin:4px 0 8px;padding:10px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-left:3px solid #1d4ed8;border-radius:4px;font-size:11px;line-height:1.55;color:#334155;max-width:900px">
+  <div style="font-weight:700;color:#0f172a;margin-bottom:4px">How the buy plan works</div>
+  <div style="margin-bottom:6px">The plan projects each SKU's stock forward per market and buys to hold a target cover. Open in a SKU row to see the monthly projection; the numbers below explain what drives the cells and their colours.</div>
+  <div style="font-weight:600;color:#0f172a;margin-top:6px">Targets</div>
+  <div>&bull; <b>3PL Target Units</b> = the target cover (weeks) &times; weekly demand at that month, plus any upcoming FBA top-up need. This is the number the plan steers stock toward.</div>
+  <div>&bull; <b>Cover target (weeks)</b> comes from the SKU's setting in the products table (A-tier gets an extra boost), and can be overridden by a <b>&#9819; Complex Rule</b> for a launch / season / category window.</div>
+  <div>&bull; <b>&#9819; Complex Rules</b> raise the 3PL cover target by scope (SKU / category / tier / season) &times; window, per country; highest coverage wins. A month whose target is set by a rule is flagged <span style="background:#FFFFC5;padding:0 3px;border-radius:2px">light-yellow</span> on the <b>3PL Target Units</b> row &mdash; hover to see which rule.</div>
+  <div style="font-weight:600;color:#0f172a;margin-top:6px">Cell colours (SOH 3PL closing &amp; Cover weeks)</div>
+  <div>Both rows are coloured by how far <b>closing 3PL stock</b> sits vs its <b>3PL Target Units</b> &mdash; not by the raw weeks number, so the colour stays honest even when a complex rule makes the weeks-cover look odd. With <code>dev = (stock &minus; target) &divide; target</code>:</div>
+  <div>&bull; <span style="color:#166534;font-weight:700">Green</span> &mdash; on plan: <b>&minus;20% to +10%</b> of target.</div>
+  <div>&bull; <span style="color:#b45309;font-weight:700">Amber</span> &mdash; drifting: <b>&minus;50% to &minus;20%</b> (getting short) or <b>+10% to +30%</b> (building up).</div>
+  <div>&bull; <span style="color:#dc2626;font-weight:700">Red</span> &mdash; off plan: <b>below &minus;50%</b> (stockout risk) or <b>+30% or more</b> (overstock).</div>
+  <div style="color:#64748b;margin-top:2px">A SKU with no target (e.g. a clearance / discontinue month) isn't flagged. Infinite cover (no demand) shows &infin; in green.</div>
+  <div style="font-weight:600;color:#0f172a;margin-top:6px">Buy passes</div>
+  <div>&bull; <b>Buy 3PL</b> &mdash; the scheduled replenishment to keep each month at target cover, placed back by the SKU's production + shipping lead time.</div>
+  <div>&bull; <b>Buy 3PL Urgent</b> &mdash; a shortfall inside the lead time that a scheduled buy can't fix in time (excludes a SKU's own discontinue-month clearance).</div>
+  <div>&bull; <b>Buy FBA</b> &mdash; buys placed direct to Amazon FBA where run separately from 3PL.</div>
+  <div>&bull; <b>On-order = shipped:</b> confirmed and unconfirmed open POs are treated as inbound (they land on their calculated ETA), so the plan doesn't double-buy what's already ordered.</div>
+</div>
+<div id="trf-help" style="display:none;margin:4px 0 8px;padding:10px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-left:3px solid #1d4ed8;border-radius:4px;font-size:11px;line-height:1.55;color:#334155;max-width:900px">
+  <div style="font-weight:700;color:#0f172a;margin-bottom:4px">How 3PL-to-3PL transfers work</div>
+  <div style="margin-bottom:6px">Transfers move stock between markets' 3PLs (e.g. UK &rarr; US) to use existing inventory before buying more. FBA transfers (3PL &rarr; Amazon) are separate &mdash; see <b>FBA Transfer Logic</b>.</div>
+  <div style="font-weight:600;color:#0f172a;margin-top:6px">How a transfer is sized</div>
+  <div>&bull; <b>Recipient need</b> = the receiving market's target units minus its own stock (it's short of cover).</div>
+  <div>&bull; <b>Donor spare</b> = stock the sending market can give up without dropping below its own target over the transfer + lead-time horizon (we roll its stock forward and only lend the trough surplus).</div>
+  <div>&bull; <b>Transfer qty</b> = the smaller of need and spare, rounded down to whole cartons.</div>
+  <div style="font-weight:600;color:#0f172a;margin-top:6px">Two classes (in build)</div>
+  <div>&bull; <b>Rebalance (overstock):</b> a market sitting on excess cover sends surplus to a market that would otherwise buy &mdash; cost-saving, not time-critical.</div>
+  <div>&bull; <b>Urgent (out-of-stock):</b> a market projected to stock out; transfer only if it can <b>land before the stockout</b> given the lane lead time &mdash; otherwise it falls through to an urgent air / sea buy.</div>
+  <div style="font-weight:600;color:#0f172a;margin-top:6px">Lanes &amp; lead times</div>
+  <div>&bull; Inter-market lead times (weeks) are held per lane: UK&rarr;EU 2, UK/EU&rarr;US 6, UK&rarr;AU 8, US&rarr;CA 2, all&rarr;AU 8, AU&rarr;US 8, etc. A lane with <b>no</b> entry means we don't transfer that way, so it's skipped.</div>
+  <div>&bull; A market's outbound to the US equals another's inbound from it by construction (same formula both directions), so UK&rarr;US and US&rarr;UK stay consistent.</div>
+</div>
 <div style="margin-bottom:4px"><span class="status-bar" id="bpst"></span></div>
 <div class="tw">
   <table id="main-tbl">
@@ -3447,6 +3502,7 @@ var BUY_SCAFFOLD=`<div class="wrap">
       <span id="ph-ti"></span>
       <span id="ph-st"></span>
       <span style="font-size:10px;color:#888" id="ph-sc"></span>
+      <span id="bp-cellsum" title="Sum of the selected cells — drag across cells like a spreadsheet (Cmd/Ctrl-click to add individual cells)" style="display:none;margin-left:auto;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#1d4ed8;background:#eff6ff;border:1px solid #bfdbfe;border-radius:5px;padding:3px 10px;white-space:nowrap"></span>
       <span class="ph-c" onclick="BP.close_()">&#x2715;</span>
     </div>
     <div class="pb" id="pb"></div>
@@ -5255,6 +5311,55 @@ function inbDiv(inb, entries, color){
     clearTimeout(t); t=setTimeout(function(){ if(!el){el=document.createElement('div'); el.style.cssText='position:fixed;z-index:100006;max-width:300px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:7px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none'; document.body.appendChild(el);} el.innerHTML=n.getAttribute('data-tip'); el.style.display='block'; var r=n.getBoundingClientRect(); el.style.left=Math.max(6,Math.min(r.left,window.innerWidth-306))+'px'; el.style.top=(r.bottom+5)+'px'; },120); });
   document.addEventListener('mouseout',function(e){ var n=e.target&&e.target.closest?e.target.closest(SEL):null; if(n){clearTimeout(t); hide();} });
   document.addEventListener('scroll',hide,true);
+})();
+// ── Spreadsheet-style cell selection + running sum in the SKU buy-plan popup ──────────────────────────
+// Drag across numeric cells (or Cmd/Ctrl-click individual ones) to select them; the header badge shows the
+// sum / count / average of the selection, like highlighting a range in a spreadsheet.
+(function(){
+  var anchor=null, dragging=false;
+  var TDSEL='#buy-wrap table.pt td';
+  function td(e){ return (e.target&&e.target.closest)?e.target.closest(TDSEL):null; }
+  function numOf(cell){
+    if(!cell||cell.classList.contains('rl')||cell.classList.contains('sx'))return null;   // skip label / section cells
+    var m=(cell.textContent||'').replace(/,/g,'').match(/-?\d+(?:\.\d+)?/);
+    return m?parseFloat(m[0]):null;
+  }
+  function clearSel(){ document.querySelectorAll(TDSEL+'.cellsel').forEach(function(c){c.classList.remove('cellsel');}); }
+  function selectRect(a,b){
+    var tbl=a.closest('table.pt'); if(!tbl||b.closest('table.pt')!==tbl)return;
+    var r0=Math.min(a.parentElement.rowIndex,b.parentElement.rowIndex), r1=Math.max(a.parentElement.rowIndex,b.parentElement.rowIndex);
+    var c0=Math.min(a.cellIndex,b.cellIndex), c1=Math.max(a.cellIndex,b.cellIndex);
+    clearSel();
+    Array.prototype.forEach.call(tbl.rows,function(tr){
+      if(tr.rowIndex<r0||tr.rowIndex>r1)return;
+      Array.prototype.forEach.call(tr.cells,function(c){
+        if(c.cellIndex<c0||c.cellIndex>c1)return;
+        if(numOf(c)!==null)c.classList.add('cellsel');
+      });
+    });
+    updateBadge();
+  }
+  function updateBadge(){
+    var badge=document.getElementById('bp-cellsum'); if(!badge)return;
+    var sum=0,n=0;
+    document.querySelectorAll(TDSEL+'.cellsel').forEach(function(c){ var v=numOf(c); if(v!==null){sum+=v;n++;} });
+    if(n<2){ badge.style.display='none'; return; }
+    var fmt=function(x){return x.toLocaleString(undefined,{maximumFractionDigits:2});};
+    badge.innerHTML='&Sigma; '+fmt(sum)+' <span style="opacity:.65;font-weight:500">&middot; n='+n+' &middot; avg '+fmt(sum/n)+'</span>';
+    badge.style.display='inline-flex';
+  }
+  document.addEventListener('mousedown',function(e){
+    var cell=td(e);
+    if(cell&&numOf(cell)!==null){
+      e.preventDefault();
+      if(e.metaKey||e.ctrlKey){ cell.classList.toggle('cellsel'); updateBadge(); anchor=cell; dragging=false; return; }
+      anchor=cell; dragging=true; selectRect(cell,cell);
+    } else if(!(e.target&&e.target.closest&&e.target.closest('#bp-cellsum'))){
+      clearSel(); updateBadge();   // clicking anywhere that isn't a cell or the badge clears the selection
+    }
+  });
+  document.addEventListener('mouseover',function(e){ if(!dragging||!anchor)return; var cell=td(e); if(cell)selectRect(anchor,cell); });
+  document.addEventListener('mouseup',function(){ dragging=false; });
 })();
 // Persistent, click-to-copy tooltip for FBA-inbound cells (.fba-inb[data-copy]) — 120ms hover to show;
 // stays while hovering the cell OR the tooltip; click copies the detail (qty · date · ref) to the clipboard.

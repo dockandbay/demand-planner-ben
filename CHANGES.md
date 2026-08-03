@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.445 - Buy-plan popup: stock-vs-target cell colours, hover fix, logic pop-downs, spreadsheet sum ⚠️ NEEDS TESTING
+- **Cell colours now compare closing 3PL stock to 3PL Target Units** (not raw weeks cover), so they stay honest when a complex rule sets a custom target (Target Units already embeds the rule; weeks cover doesn't). Applies to both **SOH 3PL (closing)** and **Cover (weeks)**. Bands on `dev=(stock−target)/target`: **green** −20%…+10%, **amber** −50%…−20% or +10%…+30%, **red** <−50% or ≥+30%. No target (clearance/disc month) = not flagged; ∞ cover = green. New `.camb`/`.amb` amber classes.
+- **Hover no longer washes coloured cells to near-white.** Row-hover kept the near-white background over red/amber/blue/yellow status cells; added hover-preserving rules so the colour stays.
+- **Two logic pop-downs** on the BUY & MOVE toolbar (like FBA Transfer Logic): **ⓘ Buy Plan Logic** (targets, complex rules, the colour bands, buy passes, on-order=shipped) and **ⓘ Transfer Logic** (how transfers are sized, the two classes, lanes & lead times).
+- **Spreadsheet-style cell sum in the SKU popup.** Drag across numeric cells (or Cmd/Ctrl-click individual ones) to select them — a badge in the popup header shows **Σ sum · n · avg**. Selection clears on click-away; ignores label/section cells. `artifact_v16.7.html` only. No migration.
+
 ## v26.444 - Complex-rule indicator colour → light yellow ⚠️ NEEDS TESTING
 - Buy-plan SKU popup: the complex-rule indicator on the **3PL Target Units** row is now **light yellow `#FFFFC5`** instead of light purple. `artifact_v16.7.html`. No migration.
 
