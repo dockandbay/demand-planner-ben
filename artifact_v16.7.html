@@ -718,8 +718,8 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
     <span style="display:inline-flex;align-items:center;gap:3px;margin-left:8px" title="Active: today &rarr; today+180 days. All: clears the window, shows everything that isn't permanently inactive (discontinued + no stock + no inbound + no forecast)."
     ><button id="plan-active-btn" class="pill catpill active" onclick="setPlanActiveMode('active')">Active</button
     ><button id="plan-all-btn" class="pill catpill" onclick="setPlanActiveMode('all')">All</button></span>
-    <input type="text" id="plan-sku-qry" placeholder="Filter by SKU…" autocomplete="off"
-      style="margin-left:10px;font-size:11px;padding:3px 8px;border:1px solid #86efac;background:#f0fdf4;border-radius:4px;width:170px"
+    <input type="text" id="plan-sku-qry" placeholder="Filter by SKU(s) — comma separated…" autocomplete="off"
+      style="margin-left:10px;font-size:11px;padding:3px 8px;border:1px solid #86efac;background:#f0fdf4;border-radius:4px;width:200px"
       oninput="setPlanSkuQry(this.value)">
     <span style="display:inline-flex;align-items:center;gap:6px;flex-shrink:0;margin-left:10px">
       <span class="pill-lbl">Tier</span>
@@ -5731,7 +5731,7 @@ function filteredSkus(s,co,ch,all){
     var ctryAvail=av[ctry]||'';
     if(!ctryAvail.includes(chKey))return false;
     // SKU text filter — when active it OVERRIDES all pills (RW / tier / core-seasonal / status): match by code or name only.
-    if(PLAN_SKU_QRY){var _q=PLAN_SKU_QRY.toLowerCase();return sku.toLowerCase().indexOf(_q)>=0||(p.n||'').toLowerCase().indexOf(_q)>=0;}
+    if(PLAN_SKU_QRY){return skuMatchQ(sku,PLAN_SKU_QRY);}   // multi-SKU OR search (comma/space/newline separated), code or name
     if(PLAN_RW!=='ALL'&&(p.rw||'')!==PLAN_RW)return false;   // Release Window filter (DEMAND plan)
     // all=true => show every SKU in the subcat (so the subtotal = sum of all rows, matching Smooth).
     if(all)return true;
@@ -11574,6 +11574,26 @@ var _rfBtn=document.getElementById('rf'); if(_rfBtn)_rfBtn.onclick=function(){
   });
 })();
 
+// Reusable "paste many SKUs" expander (same method as the PO grid): adds a ⤢ button + popover textarea
+// next to a SKU filter input. Tokens are comma/space/newline separated → normalised to a comma list, then
+// onApply(value) runs the tab's own filter (which OR-matches via skuMatchQ).
+function attachSkuMultiExpand(inputId,onApply){
+  var inp=document.getElementById(inputId); if(!inp||inp._skuExp)return; inp._skuExp=1;
+  var wrap=document.createElement('span'); wrap.style.cssText='position:relative;display:inline-flex;align-items:center;gap:3px';
+  if(inp.style.marginLeft){ wrap.style.marginLeft=inp.style.marginLeft; inp.style.marginLeft='0'; }
+  inp.parentNode.insertBefore(wrap,inp); wrap.appendChild(inp);
+  var btn=document.createElement('button'); btn.type='button'; btn.title='Expand — paste many SKUs'; btn.textContent='⤢';
+  btn.style.cssText='padding:2px 7px;background:#f0fdf4;border:1px solid #86efac;color:#166534;border-radius:4px;cursor:pointer;font-size:11px;line-height:1;flex:0 0 auto';
+  wrap.appendChild(btn);
+  var pop=document.createElement('div'); pop.style.cssText='display:none;position:absolute;top:100%;left:0;z-index:100010;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 10px 26px rgba(0,0,0,.16);padding:10px;width:340px;text-align:left';
+  pop.innerHTML='<div style="font-size:10px;color:#888;margin-bottom:4px">SKUs — comma / space / newline separated (OR search, partial match)</div><textarea rows="6" style="width:100%;box-sizing:border-box;font-size:12px;text-align:left" placeholder="TOWLB-CAB, PONCHK-STD"></textarea><div style="margin-top:6px;display:flex;justify-content:flex-end;gap:6px"><button type="button" class="_se-clr" style="padding:2px 9px;border:1px solid #cbd5e1;background:#fff;border-radius:5px;cursor:pointer;font-size:11px">Clear</button><button type="button" class="_se-apply" style="padding:2px 9px;background:#dcfce7;color:#166534;border:1px solid #16a34a;border-radius:5px;cursor:pointer;font-size:11px">Apply</button></div>';
+  wrap.appendChild(pop);
+  var ta=pop.querySelector('textarea');
+  btn.onclick=function(e){ e.stopPropagation(); if(pop.style.display!=='none'){pop.style.display='none';return;} ta.value=inp.value||''; pop.style.display='block'; ta.focus(); };
+  pop.querySelector('._se-apply').onclick=function(){ var v=String(ta.value||'').split(/[\s,;]+/).filter(Boolean).join(', '); inp.value=v; pop.style.display='none'; onApply(v); };
+  pop.querySelector('._se-clr').onclick=function(){ ta.value=''; inp.value=''; pop.style.display='none'; onApply(''); };
+  document.addEventListener('click',function(ev){ if(pop.style.display!=='none'&&!wrap.contains(ev.target))pop.style.display='none'; });
+}
 (function init(){
   // Embedded saved inputs from Airtable (updated on each rebuild)
   var SAVED_INPUTS={};
@@ -11588,6 +11608,9 @@ var _rfBtn=document.getElementById('rf'); if(_rfBtn)_rfBtn.onclick=function(){
   FC_INITIAL=Object.assign({},IV);
   syncPlanActiveDates();
   if(typeof hzPlanRestore==='function')hzPlanRestore();   // restore last plan filters (country/channel/categories/SKU) if within 1h
+  // Add the "paste many SKUs" expander to the demand-plan and BUY & MOVE (buy/fba/transfer share #qry) filters
+  attachSkuMultiExpand('plan-sku-qry',function(v){ setPlanSkuQry(v); });
+  attachSkuMultiExpand('qry',function(){ if(typeof BP!=='undefined'&&BP.render)BP.render(); });
   // HORIZON default landing is SUPPLY (the harness routes to it). Only paint a demand-side view up front when
   // the URL explicitly asks for one — avoids the DEMAND flash/redirect on a plain first load.
   if(/^#\/?(planning|demand|buy-move|buy|fba|exec|reports)(\/|$)/.test(location.hash||'')) render();
