@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.464 - Supplier portal: bound the sample-contents SKU picker width ⚠️ NEEDS TESTING
+- The "Add contents" / new-sample-shipment SKU picker (dev samples + bulk SKUs + free text) was full-screen wide, pushing the qty input off to the far right. Bounded the panel to **max-width 520px**, so the search boxes are shorter, the qty is visible, and the table is a manageable width. Shared picker → fixes both "add contents" and "create new shipment". `supply/portal-view.js`. No migration.
+
 ## v26.463 - Demand: "Forecast Logic" pop-down + refreshed help ⚠️ NEEDS TESTING
 - New **◫ Forecast Logic** button on the demand toolbar opens a pop-down documenting exactly how every forecast number is calculated: actuals-vs-forecast boundary, precedence (override → continuing-SKU chained last-year rule → new-SKU replacement/contribution), launch/discontinue handling, the category cascade + gap + smoothing, and how committed Preorder/KA demand and the buy plan tie in.
 - "What to do & when" help: added a banner pointing to Forecast Logic and refreshed the Forecasts-in-PLAN section (override-else-calculated; chained/contribution). `artifact_v16.7.html`. No migration.

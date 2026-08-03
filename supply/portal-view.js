@@ -1816,7 +1816,7 @@
             var haveSku={}; ((have&&have.lines)||[]).forEach(function(l){ haveSku[l.sku]=1; });
             var qcell='style="width:52px;text-align:left" inputmode="numeric" placeholder="qty"';
             getJSON(EP.productOpenSamples+(supQ?'?'+supQ.slice(1):'')).then(function(samples){ samples=(Array.isArray(samples)?samples:[]).filter(function(s){return !haveDev[String(s.id)];});
-              host.innerHTML='<div style="border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;background:#f8fafc;text-align:left">'
+              host.innerHTML='<div style="border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;background:#f8fafc;text-align:left;max-width:520px">'
                 +'<div style="font-weight:700;font-size:12px;margin-bottom:6px">Add contents</div>'
                 +'<div style="font-size:11px;color:#64748b;margin-bottom:3px">Product development samples <span class="mut">(products still in development)</span></div>'
                 +'<input class="fci ssh-pk-sq" placeholder="filter samples…" style="width:100%;text-align:left;margin-bottom:5px">'
