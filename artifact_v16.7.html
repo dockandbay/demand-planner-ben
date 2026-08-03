@@ -5407,6 +5407,18 @@ function inbDiv(inb, entries, color){
 // SKU-level loaded forecast from forecast_outputs (in-memory working store).
 // Returns the unit value for a month, or null if this SKU/wh/channel has no loaded forecast.
 function skuOutFC(sku,co,ch,m){var o=FC_OUTPUTS[sku+'|'+skuWh(co,ch)+'|'+ch];return(o&&o[m]!=null)?o[m]:null;}
+// Last complete actual year (2025), used for the flat-LY forecast fallback.
+var _LY25_MONTHS=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
+// Fallback SKU forecast for a month when there's NO saved override: the SKU's OWN last-year (2025) actual for
+// the same calendar month (flat, +0% growth) if it has any 2025 history; otherwise the subcat cascade
+// (share × subcat forecast) so new/no-history SKUs still get a number. `salesMap` = skuSales(sku,co,ch);
+// `hasLY` = precomputed (any 2025 actual ≠ 0). Used by BOTH the demand-plan rows and buildLiveDemand so the
+// plan and the buy plan agree.
+function skuFbFC(salesMap,hasLY,m,subcatFUm,share){
+  if(hasLY)return Math.round(salesMap['2025_'+m.slice(5,7)]||0);   // flat last-year actual for this month
+  return Math.round((subcatFUm||0)*(share||0));                    // new SKU → subcat cascade
+}
+function skuHasLY(salesMap){for(var i=0;i<_LY25_MONTHS.length;i++){if((salesMap[_LY25_MONTHS[i]]||0)!==0)return true;}return false;}
 // Read/write a SKU forecast override directly into the FC_OUTPUTS working store.
 // Replaces the old localStorage layer so an edit moves BOTH the planner and the buy plan
 // (buildLiveDemand reads FC_OUTPUTS) and can be persisted to forecast_outputs on Save.
@@ -6468,6 +6480,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
     var p=SKUM[sku];if(!p)return;
     var sales=skuSales(sku,co,ch);
     var share=shares[sku]||0;
+    var _hasLY=skuHasLY(sales);   // flat-LY fallback basis (see skuFbFC) — keeps the plan in step with buildLiveDemand
     var discDate=p.disc&&p.disc[ctry]?p.disc[ctry]:null;
     var launchDate=p.lch&&p.lch[ctry]?p.lch[ctry]:null;
     var preLaunchM=function(mo){return launchDate&&(mo.slice(0,4)+'-'+mo.slice(5,7)+'-01')<launchDate;}; // pre-launch only for months before the launch date
@@ -6482,7 +6495,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
     FM_CALC.forEach(function(m){ // incl. Jan/Feb 2029 spill so the FY28/29 SKU total is complete
       var ms=m.slice(0,4)+'-'+m.slice(5,7)+'-01';
       var _fo=skuOutFC(sku,co,ch,m);
-      var raw=(_fo!=null)?_fo:Math.round((subcatFU[m]||0)*share);
+      var raw=(_fo!=null)?_fo:skuFbFC(sales,_hasLY,m,subcatFU[m],share);   // flat last-year actual (or cascade for new SKUs)
       if(launchDate&&ms<launchDate){skuFC[m]=0;}
       else if(discDate&&ms>discDate){
         if(rem<=0){skuFC[m]=0;skuRundown[m]=true;skuDiscOut[m]=true;return;} // no stock left -> disc
@@ -9515,7 +9528,7 @@ function buildLiveDemand(){
         var fu=calc(subcat,co,ch).fu;if(!fu)return;
         var shares=buildSkuShares(skus,co,ch,lyYearMonths);
         skus.forEach(function(s2){
-          var sh=shares[s2]||0;if(sh<=0)return;
+          var sh=shares[s2]||0;
           var prod=BP_DATA.products[s2];if(!prod||!prod.mkts||!prod.mkts[co])return;
           var md=prod.mkts[co];if(!md.demand)md.demand={};if(!md.demand[ch])md.demand[ch]={};
           // Match the PLAN cascade (skuFC): zero pre-launch months, run down stock after discontinue.
@@ -9523,9 +9536,11 @@ function buildLiveDemand(){
           var launchDate=sp.lch&&sp.lch[ctry]?sp.lch[ctry]:null;
           var discDate=sp.disc&&sp.disc[ctry]?sp.disc[ctry]:null;
           var rem=(sp.inv&&sp.inv[skuWh(co,ch)])||0;
+          var s2sales=skuSales(s2,co,ch), s2HasLY=skuHasLY(s2sales);   // flat-LY fallback basis (see skuFbFC)
+          if(!s2HasLY&&sh<=0)return;   // new SKU with no share and no LY → nothing to forecast
           LIVE_FC_MONTHS.forEach(function(fym){
             var ms=fym.slice(0,4)+'-'+fym.slice(5,7)+'-01';
-            var raw=Math.round((fu[fym]||0)*sh);
+            var raw=skuFbFC(s2sales,s2HasLY,fym,fu[fym],sh);   // flat last-year actual (or cascade for new SKUs)
             var fc;
             if(launchDate&&ms<launchDate){fc=0;}
             else if(discDate&&ms>discDate){fc=Math.max(0,Math.min(raw,rem));rem=Math.max(0,rem-fc);}
