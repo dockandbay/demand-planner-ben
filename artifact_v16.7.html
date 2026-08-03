@@ -1215,7 +1215,7 @@ DATA=(DATA||[]).filter(function(r){
         if(!wh)return;
         var v=SKUI[sku+'|'+wh];
         if(v){ var arr=Array.isArray(v)?v:[v];
-          arr.forEach(function(s){md.inb.push({ref:s.ref||'',qty:s.qty||0,eta:s.eta||null,type:s.type||'supplier_china',supplier:s.supplier||'',wh:wh});}); }
+          arr.forEach(function(s){md.inb.push({ref:s.ref||'',qty:s.qty||0,eta:s.eta||null,poEta:s.poEta||null,type:s.type||'supplier_china',supplier:s.supplier||'',wh:wh});}); }
         // open POs not yet shipped/in the inbound feed — counted in On Order, shown here so the list reconciles
         var op=SKUOI[sku+'|'+wh];
         if(op){ (Array.isArray(op)?op:[op]).forEach(function(s){md.inb.push({ref:s.ref||'',qty:s.qty||0,eta:s.eta||null,type:'open_po',status:s.status||'',supplier:s.supplier||'',wh:wh});}); }
@@ -1413,6 +1413,18 @@ function getSt(ms,mkt){return(ms&&ms[mkt]&&ms[mkt].st)||'ACTIVE';}
 // (Removed dead duplicate fmtDate — shadowed by the weather-panel fmtDate below. v25.652)
 function dateDMY(d){if(!d||typeof d!=='string')return'';var s=d.slice(0,10),p=s.split('-');if(p.length<3)return s;var mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];return p[2]+'-'+(mo[parseInt(p[1],10)-1]||p[1])+'-'+(p[0].length===4?p[0].slice(2):p[0]);}  // dd-mmm-yy (BUY/FBA grid dates)
 
+// Effective inbound arrival date + adjustment flag. Priority (Ben): the shipment's estimated date if still in
+// the FUTURE; else the PO-grid (into-stock) date if in the future; else "this month" — an overdue, still-unreceived
+// shipment lands imminently, not dropped. adj: null (as-dated) | 'po' (used the PO-grid date) | 'now' (brought forward).
+function inbEffEta(s){
+  var orig=(s&&s.eta)||null, po=(s&&s.poEta)||null;
+  var t=new Date(); t.setHours(0,0,0,0);
+  var mm=String(t.getMonth()+1).padStart(2,'0'), dd=String(t.getDate()).padStart(2,'0');
+  var fut=function(d){ return d && new Date(d)>=t; };
+  if(fut(orig)) return {date:orig, key:orig.slice(0,7).replace('-','_'), adj:null, orig:orig, po:po};
+  if(fut(po))   return {date:po,   key:po.slice(0,7).replace('-','_'),   adj:'po',  orig:orig, po:po};
+  return {date:t.getFullYear()+'-'+mm+'-'+dd, key:t.getFullYear()+'_'+mm, adj:'now', orig:orig, po:po};
+}
 // Urgent lead-time phrasing: split into rush production + freight so it reads clearly, e.g.
 // "4wk rush production + 8wk sea shipping" (or "+ 1wk air freight") instead of the opaque "12wk rush lead".
 function urgentLeadText(p){
@@ -2537,10 +2549,12 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
   const fm=md.fm||24;
   const hasFBA=(md.ch||[]).includes('FBA');
 
+  const _firstFwdKey=(function(){ for(var _i=0;_i<PROJ.length;_i++){ if(!PROJ[_i].isActual&&!PROJ[_i].isForecast) return PROJ[_i].key; } return null; })();
   const ib3={},ibF={};
   (md.inb||[]).forEach(s=>{
-    if(!s.eta)return;
-    const d=new Date(s.eta),k=`${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,'0')}`;
+    if(!s.eta&&!s.poEta)return;
+    let k=inbEffEta(s).key;                              // effective arrival month (past → PO-grid date → this month)
+    if(_firstFwdKey&&k<_firstFwdKey)k=_firstFwdKey;      // clamp into a month the forward projection actually reads, so overdue stock is counted (no phantom stockout)
     if((s.wh||'').includes('fba')){if(!ibF[k])ibF[k]=[];ibF[k].push(s);}
     else{if(!ib3[k])ib3[k]=[];ib3[k].push(s);}
   });

@@ -244,10 +244,20 @@ async function buildSKURAW() {
                 FROM planner.sales_actuals`),
     pool.query(`SELECT i.sku, i.destination_warehouse wh, i.reference ref, i.quantity::int qty,
                        to_char(i.estimated_delivery_date,'YYYY-MM-DD') eta, i.source_type type,
-                       coalesce(su.name,'') supplier
+                       coalesce(su.name,'') supplier,
+                       -- PO-grid (into-stock) date, used as the fallback when estimated_delivery_date is in the past:
+                       -- shipment arrival/landing (shipment-date authority), else PO landing override, else the
+                       -- calculated landing (prod_end + 7 ship + branch sea transit) — same basis as the SUPPLY PO view.
+                       to_char(coalesce(sh.arrival_date, sh.delivery_date, sh.landing_date, po.landing_date_overide,
+                                 (coalesce(po.end_production_overide,
+                                    CASE WHEN po.start_production IS NOT NULL AND su.production_days IS NOT NULL
+                                         THEN (po.start_production + (su.production_days||' days')::interval)::date END)
+                                  + interval '7 days' + (b.sea_lead_time_days||' days')::interval)::date),'YYYY-MM-DD') po_eta
                 FROM planner.inbound_shipments i
                 LEFT JOIN planner.purchase_orders po ON po.po = i.reference
                 LEFT JOIN planner.suppliers su ON su.id = po.supplier_id
+                LEFT JOIN planner.branches b ON b.name = po.branch
+                LEFT JOIN planner.shipments sh ON sh.shipment_ref = po.shipment_ref
                 WHERE coalesce(i.received_quantity,0) < i.quantity
                 ORDER BY i.estimated_delivery_date`),
     // Open POs counted in on-order but NOT yet in the inbound feed — shown as "on order / not shipped" line items
@@ -291,7 +301,7 @@ async function buildSKURAW() {
   const i = {};
   for (const r of inbound.rows) {
     const k = r.sku + '|' + r.wh;
-    (i[k] || (i[k] = [])).push({ ref: r.ref || '', qty: r.qty || 0, eta: r.eta || null, type: r.type || 'supplier_china', supplier: r.supplier || '' });
+    (i[k] || (i[k] = [])).push({ ref: r.ref || '', qty: r.qty || 0, eta: r.eta || null, poEta: r.po_eta || null, type: r.type || 'supplier_china', supplier: r.supplier || '' });
   }
   // Open POs not yet in the inbound feed — same key shape as `i`, tagged so the UI can label them "on order".
   const oi = {};

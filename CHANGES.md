@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.486 - Fix: overdue/past-dated inbound no longer dropped (was causing phantom stockouts + false urgent) ⚠️ NEEDS TESTING · BUY-PLAN IMPACT · SERVER
+- The buy projection bucketed inbound by ETA month, and the forward scan skips past months — so a shipment whose ETA is in the past but which is NOT yet received got dropped, making the engine see a phantom stockout and fire a false urgent (often expensive urgent AIR).
+- Inbound arrival date now resolves by priority: estimated_delivery_date if still future -> else the PO-grid (shipment arrival/landing/completion) date -> else THIS month. server.mjs adds po_eta to the inbound feed (joins shipments+branches); artifact inbEffEta() + bucketing clamp.
+- Before/after snapshot (sandbox): SKUs firing urgent 277->30; buy 3PL 69,418->23,732 units. Magnitude is sandbox-inflated (many stale past dates); live impact is limited to genuinely-overdue POs. artifact_v16.7.html + server.mjs. No migration.
+
 ## v26.485 - Urgent tooltip wording (rush production + shipping) + red shades + non-GRS carton pills ⚠️ NEEDS TESTING
 - Urgent tooltip now reads e.g. "needs 4wk rush production + 8wk sea shipping" (or "+ 1wk air freight") instead of the opaque "12wk rush lead". Split from supplier expedited-production weeks + branch sea/air freight; shared urgentLeadText() used by the popup and the main grid.
 - Cover-band reds: understock #FFD6D1, overstock #FF746C (was #fee2e2 / #b91c1c). SOH FBA <=2 fill also #FFD6D1.
