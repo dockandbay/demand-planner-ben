@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.499 - Payments Due: Likely pay date editable for overdue rows ⚠️ NEEDS TESTING
+- The Likely pay date column is now an input box for OVERDUE payments only (read-only otherwise). PO milestones save to payment_likely_dates via line_key (comp:/bal:); deposits/other save their date_likely_pay. Silent save. supply/inject.html. No migration.
+
 ## v26.498 - Deposits register: row Save relocks silently (no full refresh) ⚠️ NEEDS TESTING
 - The per-row Save on the Deposits register no longer refetches + re-renders the whole page. Cell edits already auto-save inline; Save now syncs the in-memory row from its inputs and relocks in place (local redraw, no loading flash). supply/inject.html. No migration.
 
