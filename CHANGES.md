@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.471 - Demand toolbar: AI Insights as a normal tab; Forecast Logic on Plan only ⚠️ NEEDS TESTING
+- **AI Insights** is now styled as a normal demand sub-tab (`.dnav`) instead of the floating AI-tools button.
+- **Forecast Logic** button now shows **only on DEMAND ▸ Plan** (hidden on the other demand sub-tabs). `artifact_v16.7.html`. No migration.
+
 ## v26.470 - DEMAND sub-tabs: group Targets/Key accounts/Calendar/Revenue under "Inputs" ⚠️ NEEDS TESTING
 - The DEMAND sub-nav now shows primary tabs inline (**Plan · Summary · KPIs · Actions**) and groups the reference/input views — **Sell-through targets, Key accounts, Calendar, Revenue** — under an **Inputs ▾** dropdown (shows the active one's name when selected). `artifact_v16.7.html`. No migration.
 - NOTE (not changed): the "HORIZON badge showing twice" on the LIVE demand/actions page couldn't be reproduced in the artifact/sandbox (desktop shows a single `#ver`; the shell's `.ver` is scoped to Supply/Config/Scenario/Product subnavs). It looks like the deployed harness renders its own badge on top of the artifact's — likely a Diviyaj/harness item. Flagged for Ben.
