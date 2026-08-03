@@ -2785,6 +2785,19 @@ app.get('/api/supply/:section', async (req, res) => {
                   LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
                   WHERE coalesce(po.status,'') NOT ILIKE '%complete%') y
             WHERE y.shipd IS NOT NULL AND y.shipd <= current_date + 7 AND y.ps='ready_to_ship'
+          UNION ALL
+          -- Rider PO the supplier shipped to the master consolidator, but the master hasn't sailed → nudge to
+          -- set OUR status to SHIPPED TO MASTER (still upstream). When the master departs, set-shipping flips it.
+          SELECT 'amber','Shipped to master', p.po,
+            'Supplier marked this PO shipped to the master-shipment consolidator; master '||coalesce(nullif(sh.master_po,''), p.shipment_ref)||' has not departed yet — set it to SHIPPED TO MASTER',
+            'setstm','po','', p.po
+            FROM planner.purchase_orders p
+            JOIN planner.shipments sh ON sh.shipment_ref = p.shipment_ref
+            WHERE coalesce(p.shipment_ref,'') <> ''
+              AND p.po <> coalesce(nullif(sh.master_po,''), p.shipment_ref)          -- rider, not the master
+              AND coalesce(p.production_status,'') = 'shipped'                        -- supplier signalled shipped
+              AND coalesce(sh.status,'') NOT ILIKE '%shipping%' AND coalesce(sh.status,'') NOT ILIKE '%complete%' AND coalesce(sh.status,'') NOT ILIKE '%deliver%'   -- master not departed
+              AND upper(coalesce(p.status,'')) NOT IN ('SHIPPED TO MASTER','SHIPPING','DELIVERED') AND coalesce(p.status,'') NOT ILIKE '%complete%'
           -- (removed) "Shipment missing dates" — a shipment lacking its own departure/ETA is normal: those dates
           -- are inherited/calculated from the PO. Only *past/exceeded* dates matter, and those are already caught by
           -- "Ship check-in" (calculated ship date passed) and "Shipment ETA passed" below.
@@ -2799,7 +2812,7 @@ app.get('/api/supply/:section', async (req, res) => {
               AND EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.shipment_ref=s.shipment_ref
                           AND coalesce(p.status,'') NOT ILIKE '%complete%')
           UNION ALL
-          SELECT 'amber','Shipment delivered — update PO', po.po,
+          SELECT 'high','Shipment delivered — update PO', po.po,
             'Shipment '||po.shipment_ref||' has landed/completed but this PO is still '''||coalesce(nullif(po.status,''),'?')||''' — mark it delivered',
             'podeliver','po','status', po.po
             FROM planner.purchase_orders po
@@ -6298,6 +6311,20 @@ app.post('/api/supply/po/:po/set-shipping', async (req, res) => {
     res.json({ updated: rows.length, pos: rows.map(x => x.po), shipment: r.shipment_ref || null });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// "Shipped to master": a rider PO the supplier shipped to the consolidator, but the master hasn't sailed. OUR
+// side stays upstream (≈ ready to ship) — set the single PO to SHIPPED TO MASTER. When the master departs, the
+// existing set-shipping / propagateShipping flow flips it (and the rest of the shipment) to SHIPPING.
+app.post('/api/supply/po/:po/set-shipped-to-master', async (req, res) => {
+  try {
+    const rows = (await pool.query(
+      `UPDATE planner.purchase_orders SET status='SHIPPED TO MASTER', updated_at=now()
+        WHERE po=$1 AND coalesce(status,'') NOT ILIKE '%complete%'
+          AND upper(coalesce(status,'')) NOT IN ('SHIPPING','DELIVERED','SHIPPED TO MASTER')
+        RETURNING po`, [req.params.po])).rows;
+    if (!rows.length) return res.status(409).json({ error: 'PO not eligible (already shipped/complete, or not found)' });
+    res.json({ updated: rows.length, po: req.params.po });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // Shared: advance every PO on a shipment still in PRODUCTION to SHIPPING + production_status 'shipped'.
 // Matches the shipment's children (shipment_ref=ref), the ref itself (self-master), and the shipment's
 // master_po (a master PO whose own shipment_ref is blank). Never re-opens completed/delivered POs.
@@ -8904,7 +8931,9 @@ async function logPoFieldChanges(po, keys, oldRow, body, by) {
       const dl = dateDeltaLabel(ov, nv); if (dl) fnv = fnv + ' ' + dl; }   // append (DELAY of N days) / (BROUGHT FORWARD N days)
     else if (MONEY_FIELDS.has(k)) { const c = await supCcy(); if (numish(ov)) fov = money2(ov, c); if (numish(nv)) fnv = money2(nv, c); }
     const f = (v) => v === '' ? '(blank)' : v;
-    await logPoChange(po, PO_TRACK[k] || k, f(fov) + ' → ' + f(fnv), by);
+    // First-time set (no prior value): read "set to X" rather than "(blank) → X".
+    const msg = (fov === '' || fov == null) ? ('set to ' + f(fnv)) : (f(fov) + ' → ' + f(fnv));
+    await logPoChange(po, PO_TRACK[k] || k, msg, by);
   }
 }
 // Shared PO grid-row query (WITH mastered ... FROM mastered calc4). Reused by the full grid endpoint

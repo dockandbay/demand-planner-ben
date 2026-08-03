@@ -3,6 +3,12 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.488 - New "SHIPPED TO MASTER" PO status + action; high-priority delivered/payment badges; change-log wording ⚠️ NEEDS TESTING · SERVER
+- New PO status **SHIPPED TO MASTER** (≈ Ready to ship, deeper blue #4C9BE0): a rider PO the supplier shipped to the consolidator while the master hasn't sailed. Added to the status list/dropdown/order/grouping (groups with Ready-to-ship; still counted on-order in the buy plan). When the master departs, the existing set-shipping flow flips it to SHIPPING.
+- Auto-detect + nudge: a rider whose supplier marked it shipped (master not departed) gets a "→ set shipped to master" button on the PO grid AND a SUPPLY ▸ Actions card (fix + PO-ref badge). New endpoint /api/supply/po/:po/set-shipped-to-master. server.mjs + supply/inject.html.
+- "Shipment delivered — update PO" promoted amber→**high** and now shows a PO-grid action badge. "Payment invalid" (amount set with no date) now shows a PO-grid badge too.
+- PO timeline record-of-change: a first-time set now reads "set to X" instead of "(blank) → X". No migration.
+
 ## v26.487 - Inbound line: warning + PO link when the shipment date is in the past ⚠️ NEEDS TESTING
 - In the SKU buy-plan popup inbound tooltip, any shipment whose ETA is in the past is flagged with a ⚠ icon + a hover explanation ("ETA <date> is in the past — using the PO grid date / brought forward to this month"), shows the effective date it is counted on (with the original in brackets), and the PO ref is now a clickable link that opens the PO (drawer, else the SUPPLY PO grid). artifact_v16.7.html. No migration.
 

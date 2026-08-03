@@ -228,6 +228,8 @@
 #product-root .ex-badge{display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:#dc2626;color:#fff;font-size:9px;font-weight:700;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px}
 #product-root .pd-tabs .pd-tab .ex-badge{vertical-align:middle}
 #supply-root .po-set-shipping{font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:#dbeafe;border:1px solid #60a5fa;color:#1d4ed8;cursor:pointer;white-space:nowrap}
+#supply-root .po-set-stm{font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:#e0f0fb;border:1px solid #4C9BE0;color:#06283d;cursor:pointer;white-space:nowrap}
+#supply-root .po-set-stm:hover{background:#c9e5f7}
 #supply-root .datewrap{display:inline-flex;align-items:center;gap:2px;position:relative}
 #supply-root .datepick{border:1px solid #cbd5e1;background:#f8fafc;border-radius:4px;cursor:pointer;font-size:11px;line-height:1;padding:3px 4px}
 #supply-root .datepick:hover{background:#eef2f7}
@@ -749,7 +751,7 @@
     barcodes:'<b>SUPPLY ▸ Barcodes.</b> Three EAN-13s per SKU + label data; generator next.',
     config:'<b>SUPPLY ▸ Config.</b> Reference data, one table per sub-tab: import tax, freight rates, import duty, branches (lead times), suppliers (payment terms + production lead time), batches, productions (source table) and the full products master. Editable inline where it makes sense; productions &amp; products are read-only source views.'
   };
-  var PO_STATUSES=['FUTURE','PRODUCTION','READY TO SHIP','SHIPPING','DELIVERED','COMPLETE'];
+  var PO_STATUSES=['FUTURE','PRODUCTION','READY TO SHIP','SHIPPED TO MASTER','SHIPPING','DELIVERED','COMPLETE'];
   // PO ▸ DOCUMENTS type list [value,label]. 'invoice' is what the Payments ▸ Invoice tab shows.
   var PO_DOC_TYPES=[['invoice','Commercial Invoice'],['packing_list','Packing List'],['pallet_details','Pallet Details'],['labels','Barcodes / Labels'],['client','Client / FBA doc'],['document','Other / general']];
   var PO_DOC_INVOICE=['invoice','commercial_invoice'];   // categories the Payments ▸ Invoice tab surfaces
@@ -944,6 +946,7 @@
     _lookupsInflight.then(function(){ _lookupsInflight=null; cb(); },function(){ _lookupsInflight=null; cb(); }); }
   // explicit per-status colours for the PO grid Status dropdown (Ben's palette). [background, text]
   var PO_STATUS_BG={'FUTURE':['#D3D3FF','#2a2a55'],'PRODUCTION':['#F2B949','#5a3a00'],'READY TO SHIP':['#8FD9FB','#0a3a4a'],
+    'SHIPPED TO MASTER':['#4C9BE0','#06283d'],   /* ≈ ready-to-ship, deeper blue: at the consolidator, master not yet sailed */
     'SHIPPING':['#50C878','#0f3d22'],'DELIVERED':['#2E8B57','#ffffff'],'COMPLETE':['#305CDE','#ffffff']};
   function statusSel(ep,val){ var opts=PO_STATUSES.slice(); if(val&&opts.indexOf(val)<0)opts.unshift(val);
     var bg=PO_STATUS_BG[String(val||'').toUpperCase()]||STBG[statusBg(val)]||STBG['bg-blue'];
@@ -1218,6 +1221,7 @@
     else if(r.fix==='supplier'){ fix='<span class="tiny mut">set supplier</span> <input class="fci txt act-in" list="supplierlist" placeholder="pick supplier…" data-id="'+r._id+'"> '+applyBtn(r._id); }
     else if(r.fix==='upload'){ fix='<button class="save-btn act-up" data-id="'+r._id+'" data-po="'+esc(r.ref||r.target_key||'')+'" style="background:#16a34a;color:#fff;border-color:#16a34a">⬆ Upload to ERP</button>'; }
     else if(r.fix==='arrived'){ fix='<button class="save-btn act-arrived" data-id="'+r._id+'">✓ Mark arrived</button>'; }
+    else if(r.fix==='setstm'){ fix='<button class="save-btn act-setstm" data-po="'+esc(r.target_key||r.ref)+'" data-id="'+r._id+'">→ set shipped to master</button>'; }
     else if(r.fix==='podeliver'){ fix='<button class="save-btn act-podeliver" data-id="'+r._id+'">✓ Mark PO delivered</button>'; }
     else if(r.fix==='prodstatus'){ fix='<span class="tiny mut">supplier status</span> <select class="fci act-in" data-id="'+r._id+'"><option value="">—</option>'+prodStatusOpts('')+'</select> '+applyBtn(r._id); }
     else if(r.fix==='applysub'){ fix='<button class="save-btn act-applysub" data-id="'+r._id+'">✓ Apply</button> <button class="save-btn light act-dismisssub" data-id="'+r._id+'">Dismiss</button>'+(r.attachment_id?' <a class="lnk-btn" href="/api/supply/portal-attachment/'+r.attachment_id+'" target="_blank">view doc</a>':''); }
@@ -1312,6 +1316,8 @@
     document.querySelectorAll('#act-sub .act-up').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po); }; });
     document.querySelectorAll('#act-sub .act-arrived').forEach(function(b){ b.onclick=function(){ var id=b.dataset.id, r=actRows[id]; b.disabled=true; b.textContent='…';
       fetch('/api/supply/shipment/'+encodeURIComponent(r.target_key||r.ref),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({status:'ARRIVED'})}).then(function(x){return x.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); actResolve(id,'arrived'); }).catch(function(e){ b.disabled=false; b.textContent='✓ Mark arrived'; alert('Failed: '+(e.message||e)); }); }; });
+    document.querySelectorAll('#act-sub .act-setstm').forEach(function(b){ b.onclick=function(){ var id=b.dataset.id, r=actRows[id]; b.disabled=true; b.textContent='…';
+      fetch('/api/supply/po/'+encodeURIComponent(r.target_key||r.ref)+'/set-shipped-to-master',{method:'POST'}).then(function(x){return x.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); actResolve(id,'shipped to master'); }).catch(function(e){ b.disabled=false; b.textContent='→ set shipped to master'; alert('Failed: '+(e.message||e)); }); }; });
     document.querySelectorAll('#act-sub .act-postatus').forEach(function(sel){ sel.onchange=function(){ var v=sel.value; if(!v)return; var id=sel.dataset.id; sel.disabled=true;
       fetch('/api/supply/po/'+encodeURIComponent(sel.dataset.po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({status:v})}).then(function(x){return x.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); actResolve(id,'status '+v); }).catch(function(e){ sel.disabled=false; alert('Failed: '+(e.message||e)); }); }; });
     document.querySelectorAll('#act-sub .act-podeliver').forEach(function(b){ b.onclick=function(){ var id=b.dataset.id, r=actRows[id]; b.disabled=true; b.textContent='…';
@@ -1969,10 +1975,19 @@
       // (handled by payment_overdue + the PAYMENTS tab). Flagging every not-yet-due balance over-counted the
       // PO badge vs the PAYMENTS tab (e.g. PO-55UKLX2: invoiced, balance not yet due → tab shows no action).
       return Number(r.start_calc)>0.009 && r.start_assigned==null && !r.deposit_ref; },
+    // Payment invalid: a payment amount is set with no payment date (mirrors the Actions feed + PAYMENTS-tab red flag).
+    // Surfaced for open POs, and for completed POs from production 55 onwards (payment issues still matter).
+    payment_invalid:function(r){ if(!(r.progress!=='complete'||(/^[0-9]+$/.test(String(r.prod_no||''))&&parseInt(r.prod_no,10)>=55)))return false;
+      var A=function(x){return Number(x)>0;};
+      return (A(r.start_assigned)&&!r.start_date)||(A(r.completion_assigned)&&!r.completion_date)||(A(r.balance_1_amount)&&!r.balance_1_date)||(A(r.balance_2_amount)&&!r.balance_2_date)||(A(r.final_invoice)&&!r.final_payment_due); },
     // "Late - should be Completed": the COMPLETION date (checkin = delivery + 7, the Fulfil/Cin7 completion) has
     // passed but the PO isn't marked complete yet. (Was wrongly keyed on the production-end date.)
     late:function(r){ var t=new Date().toISOString().slice(0,10); return r.progress!=='complete' && r.checkin && r.checkin<t; },
     unassigned_shipment:function(r){return r.unassigned_shipment;},
+    // Rider PO the supplier shipped to the master consolidator, master not yet departed → set SHIPPED TO MASTER.
+    shipped_to_master:function(r){ return r.progress!=='complete' && r.shipment_ref && !r.is_master && r.production_status==='shipped' && r.ship_status!=='Shipping' && r.ship_status!=='Delivered' && ['SHIPPED TO MASTER','SHIPPING','DELIVERED','COMPLETE'].indexOf(r.status)<0; },
+    // Shipment has landed/completed but this PO isn't marked delivered/complete yet (high priority).
+    shipment_delivered:function(r){ return r.ship_status==='Completed' && r.progress!=='complete' && !/complet|deliver/i.test(String(r.status||'')); },
     // "Late - should have Shipped": still in PRODUCTION and the ship date has passed.
     production:function(r){ var t=new Date().toISOString().slice(0,10); return /production/i.test(r.status||'') && r.ship && r.ship<t; },
     // Direct to Client details not yet approved — only for Direct-to-Client POs with a client sales ref
@@ -1996,8 +2011,8 @@
   // Manufacturing = FOB → the PO is never pushed to Cin7/Fulfil, so it has NO ERP state at all (no deviation, no "in sync").
   function poErpNa(r){ return /manufactur/i.test((r&&r.branch)||''); }
   // PO-row action badge: label + which PO detail sub-tab each condition deep-links to.
-  var PO_ACT_LABEL={payment_overdue:'Payment overdue',unpaid_payment:'Unpaid payment',late:'Late — should be completed',unassigned_shipment:'Unassigned shipment',production:'Late — should have shipped',dtc_not_approved:'Direct-to-Client not approved',po_not_approved:'Not confirmed by supplier',preship:'Pre-shipment documents overdue',erp_date:'ERP delivery date differs',erp_lines:'Order plan differs from ERP — push to align'};
-  var PO_ACT_TAB={payment_overdue:'pay',unpaid_payment:'pay',late:'dates',unassigned_shipment:'shipments',production:'dates',dtc_not_approved:'client',po_not_approved:'masterdata',preship:'shipments',erp_date:'dates',erp_lines:'oplan'};
+  var PO_ACT_LABEL={payment_overdue:'Payment overdue',unpaid_payment:'Unpaid payment',late:'Late — should be completed',unassigned_shipment:'Unassigned shipment',production:'Late — should have shipped',dtc_not_approved:'Direct-to-Client not approved',po_not_approved:'Not confirmed by supplier',preship:'Pre-shipment documents overdue',erp_date:'ERP delivery date differs',erp_lines:'Order plan differs from ERP — push to align',shipped_to_master:'Shipped to master — set status',shipment_delivered:'Shipment delivered — mark PO delivered',payment_invalid:'Payment invalid — amount set with no date'};
+  var PO_ACT_TAB={payment_overdue:'pay',unpaid_payment:'pay',late:'dates',unassigned_shipment:'shipments',production:'dates',dtc_not_approved:'client',po_not_approved:'masterdata',preship:'shipments',erp_date:'dates',erp_lines:'oplan',payment_invalid:'pay',shipment_delivered:'dates',shipped_to_master:'dates'};
   // ── PO-grid action-item snooze ── keyed poact|<po>|<condition> in supply_action_state (shared store).
   var _poActState={}, _poActStateLoaded=false, _poShowSnoozed=false;
   function poActKey(po,cond){ return 'poact|'+po+'|'+cond; }
@@ -2085,7 +2100,10 @@
     dtc_not_approved:'Direct-to-Client details not approved — a DtC order whose packing/requirements the supplier hasn’t approved in the portal.',
     po_not_approved:'Not confirmed by supplier — this production requires supplier confirmation and it hasn’t been given.',
     preship:'Pre-shipment documents overdue — production has ended and the required branch document (AU Coghlans ASN, FBA/AWD barcodes, or EU iFulfillment IDN labels) is missing.',
-    erp_date:'ERP delivery date differs — the planner’s completion date doesn’t match Cin7’s EstimatedDeliveryDate. Resolve by pushing the date to Cin7 (⬆ Update ERP), or snooze to defer the reminder. Separate from the PO-grid ACTION ITEMS filter.'
+    erp_date:'ERP delivery date differs — the planner’s completion date doesn’t match Cin7’s EstimatedDeliveryDate. Resolve by pushing the date to Cin7 (⬆ Update ERP), or snooze to defer the reminder. Separate from the PO-grid ACTION ITEMS filter.',
+    shipped_to_master:'Shipped to master — the supplier marked this rider PO shipped to the consolidator, but the master hasn’t sailed. Use the “→ set shipped to master” button to set our status (still upstream until the master ships).',
+    shipment_delivered:'Shipment delivered — this PO’s shipment has landed/completed but the PO isn’t marked delivered/complete yet.',
+    payment_invalid:'Payment invalid — a payment amount is set with no payment date (start deposit, completion, a balance, or a final invoice with no final-payment-due date). Add the date in PLAN ▸ Payments.'
   };
   function actMark(po,code){
     var help=ACT_HELP[code]||'Action required.', s=_poActState[poActKey(po,code)]||{}, sn=poActSnoozed(po,code);
@@ -2246,7 +2264,7 @@
       var lm=document.getElementById('po-loadmore'); if(lm)lm.onclick=function(){ _poLimit+=PO_PAGE; view(); };
       var sa=document.getElementById('po-showall'); if(sa)sa.onclick=function(){ _poShowAll=true; view(); };
       bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindPoNotes(); bindPoActBadge(); bindPoCopy(); bindPoScrollPin(); bindPoGrpToggle();
-      bindDepPick(patchPoRow); bindPoStars(); bindSetShipping();
+      bindDepPick(patchPoRow); bindPoStars(); bindSetShipping(); bindSetStm();
       _navCounts.plan=actItemsCount(); updateNavBadges();   // PLAN sub-menu action counter (POs with open actions)
       if(_pendingPO){ var want=_pendingPO; _pendingPO=null; setTimeout(function(){
         // if the target PO is past the render cap it isn't in the DOM yet — reveal all rows and retry so the
@@ -2266,6 +2284,12 @@
       fetch('/api/supply/po/'+encodeURIComponent(b.dataset.po)+'/set-shipping',{method:'POST'}).then(function(r){return r.json();}).then(function(j){
         if(j&&j.error){ alert(j.error); b.disabled=false; b.textContent='→ set shipping'; return; }
         refreshGrid(); }).catch(function(err){ alert('Failed: '+(err.message||err)); b.disabled=false; b.textContent='→ set shipping'; }); }; }); }
+    // "→ set shipped to master": rider PO the supplier shipped to the consolidator, master not yet departed → SHIPPED TO MASTER
+    function bindSetStm(){ document.querySelectorAll('#sup-grid .po-set-stm').forEach(function(b){ b.onclick=function(e){ e.stopPropagation();
+      b.disabled=true; b.textContent='…';
+      fetch('/api/supply/po/'+encodeURIComponent(b.dataset.po)+'/set-shipped-to-master',{method:'POST'}).then(function(r){return r.json();}).then(function(j){
+        if(j&&j.error){ alert(j.error); b.disabled=false; b.textContent='→ set shipped to master'; return; }
+        refreshGrid(); }).catch(function(err){ alert('Failed: '+(err.message||err)); b.disabled=false; b.textContent='→ set shipped to master'; }); }; }); }
     // Production grouping headers ("P# 54 — 2 PO's") expand / collapse their POs (default expanded) — collapse
     // hides the group's PO rows + any open detail rows; expand shows the PO rows (detail rows stay closed).
     function bindPoGrpToggle(){ document.querySelectorAll('#sup-grid tr.po-grp').forEach(function(row){ if(row._b)return; row._b=1; row.onclick=function(){
@@ -2291,7 +2315,7 @@
       var wasOpen=mainTr.classList.contains('row-open');
       mainTr.parentNode.replaceChild(newMain, mainTr);
       if(wasOpen){ newMain.classList.add('row-open'); var eb=newMain.querySelector('.po-exp'); if(eb)eb.classList.add('open'); }
-      bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindDepPick(patchPoRow); bindPoStars(); bindPoNotes(); bindPoActBadge(); bindSetShipping(); bindPoCopy(); bindPoScrollPin(); }
+      bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindDepPick(patchPoRow); bindPoStars(); bindPoNotes(); bindPoActBadge(); bindSetShipping(); bindSetStm(); bindPoCopy(); bindPoScrollPin(); }
     // Fallback path: fetch one PO's row then apply it (used when a caller only has the PO id, e.g. a deposit assign).
     function silentRowRefresh(po){
       fetch('/api/supply/po-row/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(arr){
@@ -2320,7 +2344,7 @@
         var exOpen=(function(){var e=document.getElementById('poexp-'+btn.dataset.i);return e&&e.style.display!=='none';})();
         var nm=tmp.querySelector('tr'); if(nm&&tr&&tr.parentNode){ tr.parentNode.replaceChild(nm,tr); }
         if(exOpen&&nm){ nm.classList.add('row-open'); var eb=nm.querySelector('.po-exp'); if(eb)eb.classList.add('open'); }   // keep the open-row highlight after an in-place patch
-        bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindDepPick(patchPoRow); bindPoStars(); bindPoNotes(); bindPoActBadge(); bindSetShipping(); bindPoCopy(); bindPoScrollPin();
+        bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindDepPick(patchPoRow); bindPoStars(); bindPoNotes(); bindPoActBadge(); bindSetShipping(); bindSetStm(); bindPoCopy(); bindPoScrollPin();
       }).catch(function(){ refreshGrid(); }); }
     _poRefresh=refreshGrid; _poPatchRow=patchPoRow;
     c.querySelectorAll('#po-prog .pill:not(.po-recent):not(.po-focus)').forEach(function(p){p.onclick=function(){
@@ -2739,14 +2763,17 @@
       +'<td class="l">'+cellPickBtn(r.po,ep,'country_code',cgridLabel(r.country),'country')+(r.country_src==='branch'&&r.country?'<div class="mut tiny" style="margin-top:1px" title="inherited from branch country">(branch)</div>':'')+'</td>'
       +'<td class="l">'+cellPickBtn(r.po,ep,'branch',r.branch,'branch')+'</td>'
       +'<td class="l" style="font-size:10px;line-height:1.05;max-width:130px;white-space:normal">'+(r.client?esc(r.client):'<span class="mut">—</span>')+'<br>'+(r.sales_order_ref?'<span class="mut">'+esc(r.sales_order_ref)+'</span>':'<span class="mut">—</span>')+'</td>'
-      +'<td class="l">'+statusSel(ep,r.status)+((r.status==='PRODUCTION'&&r.ship_status==='Shipping')?'<div style="margin-top:3px"><button class="po-set-shipping" data-po="'+esc(r.po)+'" title="This PO&rsquo;s shipment has departed (Shipping) but the PO is still in Production — set this PO and every PO on the same shipment still in Production to SHIPPING">→ set shipping</button></div>':'')+'</td>'
+      +'<td class="l">'+statusSel(ep,r.status)
+        +(((r.status==='PRODUCTION'||r.status==='SHIPPED TO MASTER')&&r.ship_status==='Shipping')?'<div style="margin-top:3px"><button class="po-set-shipping" data-po="'+esc(r.po)+'" title="This PO&rsquo;s shipment has departed (Shipping) but the PO is still upstream — set this PO and every PO on the same shipment still upstream to SHIPPING">→ set shipping</button></div>':'')
+        +((r.shipment_ref&&!r.is_master&&r.production_status==='shipped'&&r.ship_status!=='Shipping'&&r.ship_status!=='Delivered'&&['SHIPPED TO MASTER','SHIPPING','DELIVERED','COMPLETE'].indexOf(r.status)<0)?'<div style="margin-top:3px"><button class="po-set-stm" data-po="'+esc(r.po)+'" title="Supplier marked this PO shipped to the master-shipment consolidator, but the master hasn&rsquo;t departed yet — set it to SHIPPED TO MASTER (still yours until the master sails).">→ set shipped to master</button></div>':'')
+        +'</td>'
       +'<td class="l">'+shipcell+'</td>'
       +'<td class="l">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0 && !poFullyPaid(r))+'</td>'
       +gDate(r,'start_production',r.prod_start,'',(r.status==='FUTURE'&&datePast(r.prod_start))?DTD_LRED:'')
       +gDate(r,'end_production_overide',r.prod_end,(r.status==='PRODUCTION'?endDaysBadge(r.prod_end):''),(r.status==='PRODUCTION'&&datePast(r.prod_end))?DTD_LRED:'')
       +'<td class="l">'+dcell(r.ship)+srctagLink(r.ship_src,r)+'</td>'
       +'<td class="l">'+dcell(r.delivery)+srctagLink(r.delivery_src,r)+'</td>'
-      +dTd(r.checkin,(['READY TO SHIP','SHIPPING','DELIVERED'].indexOf(r.status)>=0?endDaysBadge(r.checkin,'completion'):''),((r.status==='PRODUCTION'||r.status==='SHIPPING')&&datePast(r.checkin))?DTD_RED:'')
+      +dTd(r.checkin,(['READY TO SHIP','SHIPPED TO MASTER','SHIPPING','DELIVERED'].indexOf(r.status)>=0?endDaysBadge(r.checkin,'completion'):''),((r.status==='PRODUCTION'||r.status==='SHIPPING')&&datePast(r.checkin))?DTD_RED:'')
       +'<td>'+(r.is_final?money(r.value_used)+' <span class="tool-badge bg-green" title="final supplier invoice amount (overrides estimate)">final</span>':money(r.value_est)+' '+valnote)+'</td>'
       +'<td'+(Number(r.pallets)>20?' style="color:#dc2626;font-weight:700" title="over 20 pallets — more than one container; rebalance the production POs"':'')+'>'+(r.pallets!=null&&r.pallets!==''?r.pallets:'<span class="mut tiny">—</span>')+'</td>'
       +'<td class="l">'+cellPickBtn(r.po,ep,'prod_no',r.prod_no,'prod')+'</td>'
@@ -2762,7 +2789,7 @@
     if(!groupBy||groupBy==='none'){ rows.forEach(function(r,i){ body+=poRowHtml(r,i,false,null); }); }
     else if(groupBy==='status'){
       // group under status sub-labels (used during a search, which spans all statuses)
-      var SORDER=['PRODUCTION','READY TO SHIP','FUTURE','SHIPPING','DELIVERED','COMPLETE'];   // Ben's order: Production ▸ Ready to ship ▸ Future ▸ Shipping ▸ (Delivered) ▸ Complete
+      var SORDER=['PRODUCTION','READY TO SHIP','SHIPPED TO MASTER','FUTURE','SHIPPING','DELIVERED','COMPLETE'];   // Ben's order: Production ▸ Ready to ship ▸ Shipped to master ▸ Future ▸ Shipping ▸ (Delivered) ▸ Complete
       var smap={}, sextra=[];
       rows.forEach(function(r){ var s=(r.status||'').toUpperCase()||'—'; if(!smap[s]){smap[s]=[]; if(SORDER.indexOf(s)<0)sextra.push(s);} smap[s].push(r); });
       var sseq=SORDER.filter(function(s){return smap[s];}).concat(sextra.sort());
