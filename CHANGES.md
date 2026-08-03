@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.475 - Anomalies: group a SKUs multiple anomalies into one card ⚠️ NEEDS TESTING
+- One card per SKU now, with a row per (country/channel/month) anomaly, instead of a separate card each. Header shows the SKU + subcategory + an "N anomalies" badge; card left-border + severity grouping use the SKUs worst row. Each row keeps its own hover strip, override input, set-to-recommended link and snooze/dismiss buttons. artifact_v16.7.html. No migration.
+
 ## v26.474 - Anomalies: silent override + faster horizon filtering ⚠️ NEEDS TESTING
 - Setting a cell (override input or "set … to N" link) now applies SILENTLY — no reload/recompute, the row stays in place; the input flashes green as confirmation. Previously it re-ran the whole report and dropped the fixed item.
 - Horizon-pill / filter switches are much faster: the hover strip (last-6/next-6 fcst vs LY) is now built LAZILY on first hover instead of eagerly for every card. artifact_v16.7.html. No migration.

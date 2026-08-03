@@ -8592,22 +8592,34 @@ function renderDemandActionsView(body){
       function mlbl(fym){ var p=fym.split('_'); return (MN[parseInt(p[1],10)-1]||p[1])+' '+p[0].slice(2); }
       function _addM(fym,n){ var p=fym.split('_'),y=parseInt(p[0],10),m=parseInt(p[1],10)-1+n; y+=Math.floor(m/12); m=((m%12)+12)%12; return y+'_'+(m+1<10?'0':'')+(m+1); }
       // 120ms-hover strip is built lazily on first hover via window._anTipHtml (see the shared .crc-tip handler).
-      function renderAnCard(it){ var key=_anKey(it), st=_anStatus(it,sm), resolved=(st!=='open'), col=it.type==='hi'?'#d97706':'#0369a1', arrow=it.type==='hi'?'▲ spike':'▼ dip', ov=skuOvGet(it.sku,it.co,it.ch,it.fym);
+      function _anRow(it,first){ var key=_anKey(it), st=_anStatus(it,sm), resolved=(st!=='open'), col=it.type==='hi'?'#d97706':'#0369a1', arrow=it.type==='hi'?'▲ spike':'▼ dip', ov=skuOvGet(it.sku,it.co,it.ch,it.fym);
         var btns=resolved
-          ? '<button class="an-act" data-k="'+tHesc(key)+'" data-s="open" style="border:1px solid #1d4ed8;color:#1d4ed8;background:#fff;border-radius:5px;padding:3px 9px;cursor:pointer;font:inherit;font-size:11px">↺ Restore</button>'
-          : '<button class="an-act" data-k="'+tHesc(key)+'" data-s="snoozed" data-days="30" style="border:1px solid #cbd5e1;background:#fff;border-radius:5px;padding:3px 9px;cursor:pointer;font:inherit;font-size:11px">Snooze 30d</button>'
-            +' <button class="an-act" data-k="'+tHesc(key)+'" data-s="snoozed" data-days="-1" title="snooze indefinitely" style="border:1px solid #cbd5e1;background:#fff;border-radius:5px;padding:3px 9px;cursor:pointer;font:inherit;font-size:11px">Snooze ∞</button>'
-            +' <button class="an-act" data-k="'+tHesc(key)+'" data-s="dismissed" style="border:1px solid #cbd5e1;background:#fff;border-radius:5px;padding:3px 9px;cursor:pointer;font:inherit;font-size:11px">Dismiss</button>';
-        return '<div style="border:1px solid #e8e8e8;border-left:4px solid '+col+';border-radius:7px;padding:8px 12px;margin-bottom:7px;'+(resolved?'opacity:.7':'')+'">'
-          +'<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><span style="font-weight:700;font-size:12px;font-family:monospace">'+tHesc(it.sku)+'</span>'
-          +'<span style="font-size:10px;color:#64748b">'+it.co+' · '+it.ch+' · '+tHesc(it.subcat)+'</span>'
-          +'<span class="crc-tip" data-antip="'+tHesc(it.sku)+'|'+it.co+'|'+it.ch+'|'+it.fym+'" style="font-weight:700;font-size:11px;color:'+col+';cursor:help;border-bottom:1px dotted '+col+'">'+arrow+' '+mlbl(it.fym)+'</span>'+(resolved?'<span style="font-size:10px;color:#999"> · '+st+(st==='snoozed'&&sm[key]&&sm[key].snooze_until?' until '+sm[key].snooze_until:'')+'</span>':'')+'</div>'
-          +'<div style="font-size:11px;color:#444;margin:3px 0 6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">Forecast <b>'+fn(it.cur)+'</b> vs expected <b>'+fn(it.expected)+'</b>'
-          +' <span style="color:#64748b">· set '+mlbl(it.fym)+' →</span> <input class="an-ov" data-sku="'+tHesc(it.sku)+'" data-co="'+it.co+'" data-ch="'+it.ch+'" data-m="'+it.fym+'" value="'+(ov!=null?tHesc(ov):'')+'" placeholder="'+fn(it.cur)+'" title="Override this month’s forecast — saves to your plan &amp; the buy plan" style="width:66px;text-align:right;font-size:11px;border:1px solid #cbd5e1;border-radius:4px;padding:2px 5px" inputmode="numeric">'
-          +' <a href="#" class="an-setrec" data-sku="'+tHesc(it.sku)+'" data-co="'+it.co+'" data-ch="'+it.ch+'" data-m="'+it.fym+'" data-v="'+it.expected+'" title="Set '+mlbl(it.fym)+' to the seasonal-expected value" style="color:#7c3aed;text-decoration:underline;white-space:nowrap">set '+mlbl(it.fym)+' to '+fn(it.expected)+'</a>'
-          +' <a href="#" class="an-jump" data-sku="'+tHesc(it.sku)+'" style="color:#1d4ed8;text-decoration:none;font-weight:600;white-space:nowrap">Open in Plan ↗</a></div>'+btns+'</div>'; }
-      var SEVLBL={high:'🔴 High',med:'🟠 Medium',low:'🟡 Low'}, cards='', _lastSev=null;
-      list.forEach(function(it){ if(selSt==='open'&&it.sev!==_lastSev){ _lastSev=it.sev; cards+='<div style="font-size:11px;font-weight:800;letter-spacing:.04em;color:#475569;margin:12px 0 5px">'+(SEVLBL[it.sev]||it.sev)+'</div>'; } cards+=renderAnCard(it); });
+          ? '<button class="an-act" data-k="'+tHesc(key)+'" data-s="open" style="border:1px solid #1d4ed8;color:#1d4ed8;background:#fff;border-radius:5px;padding:2px 7px;cursor:pointer;font:inherit;font-size:10px">↺ Restore</button>'
+          : '<button class="an-act" data-k="'+tHesc(key)+'" data-s="snoozed" data-days="30" style="border:1px solid #cbd5e1;background:#fff;border-radius:5px;padding:2px 7px;cursor:pointer;font:inherit;font-size:10px">Snooze 30d</button> <button class="an-act" data-k="'+tHesc(key)+'" data-s="snoozed" data-days="-1" title="snooze indefinitely" style="border:1px solid #cbd5e1;background:#fff;border-radius:5px;padding:2px 7px;cursor:pointer;font:inherit;font-size:10px">Snooze ∞</button> <button class="an-act" data-k="'+tHesc(key)+'" data-s="dismissed" style="border:1px solid #cbd5e1;background:#fff;border-radius:5px;padding:2px 7px;cursor:pointer;font:inherit;font-size:10px">Dismiss</button>';
+        return '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:11px;color:#444;padding:5px 0'+(first?'':';border-top:1px solid #f1f5f9')+(resolved?';opacity:.6':'')+'">'
+          +'<span style="font-size:10px;color:#64748b;min-width:56px;font-weight:600">'+it.co+' · '+it.ch+'</span>'
+          +'<span class="crc-tip" data-antip="'+tHesc(it.sku)+'|'+it.co+'|'+it.ch+'|'+it.fym+'" style="font-weight:700;color:'+col+';cursor:help;border-bottom:1px dotted '+col+'">'+arrow+' '+mlbl(it.fym)+'</span>'
+          +'<span>fcst <b>'+fn(it.cur)+'</b> vs exp <b>'+fn(it.expected)+'</b></span>'
+          +'<input class="an-ov" data-sku="'+tHesc(it.sku)+'" data-co="'+it.co+'" data-ch="'+it.ch+'" data-m="'+it.fym+'" value="'+(ov!=null?tHesc(ov):'')+'" placeholder="'+fn(it.cur)+'" title="Override this month forecast (saves to your plan and the buy plan)" style="width:62px;text-align:right;font-size:11px;border:1px solid #cbd5e1;border-radius:4px;padding:2px 5px" inputmode="numeric">'
+          +'<a href="#" class="an-setrec" data-sku="'+tHesc(it.sku)+'" data-co="'+it.co+'" data-ch="'+it.ch+'" data-m="'+it.fym+'" data-v="'+it.expected+'" title="Set to the seasonal-expected value" style="color:#7c3aed;text-decoration:underline;white-space:nowrap">set '+fn(it.expected)+'</a>'
+          +(resolved?'<span style="font-size:10px;color:#999">'+st+(st==='snoozed'&&sm[key]&&sm[key].snooze_until?' until '+sm[key].snooze_until:'')+'</span>':'')
+          +'<span style="margin-left:auto;display:flex;gap:4px;flex-wrap:wrap">'+btns+'</span></div>'; }
+      function _anGroup(g){ var scol=SEVCOL[g.sev]||'#94a3b8';
+        var h='<div style="border:1px solid #e8e8e8;border-left:4px solid '+scol+';border-radius:7px;padding:8px 12px;margin-bottom:7px">'
+          +'<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:2px">'
+          +'<span style="font-weight:700;font-size:12px;font-family:monospace">'+tHesc(g.sku)+'</span>'
+          +'<span style="font-size:10px;color:#64748b">'+tHesc(g.subcat||'')+'</span>'
+          +(g.items.length>1?'<span style="font-size:10px;font-weight:700;color:'+scol+';background:'+scol+'1a;border-radius:9px;padding:1px 8px">'+g.items.length+' anomalies</span>':'')
+          +'<a href="#" class="an-jump" data-sku="'+tHesc(g.sku)+'" style="margin-left:auto;color:#1d4ed8;text-decoration:none;font-weight:600;white-space:nowrap;font-size:11px">Open in Plan ↗</a></div>';
+        g.items.forEach(function(it,i){ h+=_anRow(it,i===0); });
+        return h+'</div>'; }
+      var SEVLBL={high:'🔴 High',med:'🟠 Medium',low:'🟡 Low'}, SEVCOL={high:'#dc2626',med:'#ea580c',low:'#eab308'};
+      // group anomalies by SKU: one card per SKU, one row per (co·ch·month) anomaly; card severity = its worst row
+      var _grp={}, _ord=[]; list.forEach(function(it){ if(!_grp[it.sku]){_grp[it.sku]=[];_ord.push(it.sku);} _grp[it.sku].push(it); });
+      var glist=_ord.map(function(sk){ var arr=_grp[sk]; arr.sort(function(a,b){return a.fym<b.fym?-1:a.fym>b.fym?1:0;}); var top=arr.reduce(function(m,x){return x.svRank<m.svRank?x:m;},arr[0]); return {sku:sk,items:arr,svRank:top.svRank,sev:top.sev,subcat:top.subcat}; });
+      glist.sort(function(a,b){ return (a.svRank-b.svRank)||(a.sku<b.sku?-1:a.sku>b.sku?1:0); });
+      var cards='', _lastSev=null;
+      glist.forEach(function(g){ if(selSt==='open'&&g.sev!==_lastSev){ _lastSev=g.sev; cards+='<div style="font-size:11px;font-weight:800;letter-spacing:.04em;color:#475569;margin:12px 0 5px">'+(SEVLBL[g.sev]||g.sev)+'</div>'; } cards+=_anGroup(g); });
       var HOZ=[['all','All'],['<1','≤1 mo'],['2-3','2-3 mo'],['3-6','3-6 mo'],['7+','7+ mo']];
       var _selHtml=function(cls,cur,opts){ return '<select class="'+cls+' flt" style="font-size:12px;padding:3px 6px;border:1px solid #d0d0d0;border-radius:5px">'+opts.map(function(o){return '<option value="'+tHesc(o[0])+'"'+(cur===o[0]?' selected':'')+'>'+tHesc(o[1])+'</option>';}).join('')+'</select>'; };
       var filtBar='<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:9px">'
