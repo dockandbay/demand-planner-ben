@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.495 - Awaiting-confirmation action: one-click "Send timeline message to supplier" ⚠️ NEEDS TESTING · SERVER
+- The "Awaiting supplier confirmation" action (Actions tab) and the Master & Docs ▸ Supplier confirmation row now have a ✉ "Send timeline message to supplier" button that posts "Reminder to review and confirm this PO" to the supplier portal timeline (internal note). server.mjs (fix=remindconfirm) + supply/inject.html. No migration.
+
 ## v26.494 - Actions: supplier-proposed completion date shows the delta vs current ⚠️ NEEDS TESTING · SERVER
 - The "Supplier completion date" action now reads e.g. "ACME Ltd proposed completion date 29-Aug-26 (was 24-Aug-26 - delay of 5 days) — apply to the PO’s production-end override?" — comparing the proposal to the PO’s current production-end (delay / brought forward N days). server.mjs (submissionActions). No migration.
 

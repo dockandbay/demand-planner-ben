@@ -2693,7 +2693,7 @@ app.get('/api/supply/:section', async (req, res) => {
           UNION ALL
           -- supplier hasn't confirmed the order (SKUs / qty / dates) yet — chase confirmation
           SELECT 'low','Awaiting supplier confirmation', po,
-            'Supplier has not yet confirmed this order (SKUs / qty / dates)', '','po','', po
+            'Supplier has not yet confirmed this order (SKUs / qty / dates)', 'remindconfirm','po','', po
             FROM planner.purchase_orders
             WHERE supplier_confirmed_at IS NULL AND coalesce(supplier_name,'')<>''
               AND coalesce(status,'') NOT ILIKE '%complete%' AND coalesce(status,'') NOT ILIKE '%future%'

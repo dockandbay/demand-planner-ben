@@ -1231,6 +1231,7 @@
     else if(r.fix==='upload'){ fix='<button class="save-btn act-up" data-id="'+r._id+'" data-po="'+esc(r.ref||r.target_key||'')+'" style="background:#16a34a;color:#fff;border-color:#16a34a">⬆ Upload to ERP</button>'; }
     else if(r.fix==='arrived'){ fix='<button class="save-btn act-arrived" data-id="'+r._id+'">✓ Mark arrived</button>'; }
     else if(r.fix==='setstm'){ fix='<button class="save-btn act-setstm" data-po="'+esc(r.target_key||r.ref)+'" data-id="'+r._id+'">→ set shipped to master</button>'; }
+    else if(r.fix==='remindconfirm'){ fix='<button class="save-btn po-remind-confirm" data-po="'+esc(r.target_key||r.ref)+'" style="background:#7c3aed;color:#fff;border-color:#6d28d9">✉ Send timeline message to supplier</button>'; }
     else if(r.fix==='podeliver'){ fix='<button class="save-btn act-podeliver" data-id="'+r._id+'">✓ Mark PO delivered</button>'; }
     else if(r.fix==='prodstatus'){ fix='<span class="tiny mut">supplier status</span> <select class="fci act-in" data-id="'+r._id+'"><option value="">—</option>'+prodStatusOpts('')+'</select> '+applyBtn(r._id); }
     else if(r.fix==='applysub'){ fix='<button class="save-btn act-applysub" data-id="'+r._id+'">✓ Apply</button> <button class="save-btn light act-dismisssub" data-id="'+r._id+'">Dismiss</button>'+(r.attachment_id?' <a class="lnk-btn" href="/api/supply/portal-attachment/'+r.attachment_id+'" target="_blank">view doc</a>':''); }
@@ -1327,6 +1328,7 @@
       fetch('/api/supply/shipment/'+encodeURIComponent(r.target_key||r.ref),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({status:'ARRIVED'})}).then(function(x){return x.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); actResolve(id,'arrived'); }).catch(function(e){ b.disabled=false; b.textContent='✓ Mark arrived'; alert('Failed: '+(e.message||e)); }); }; });
     document.querySelectorAll('#act-sub .act-setstm').forEach(function(b){ b.onclick=function(){ var id=b.dataset.id, r=actRows[id]; b.disabled=true; b.textContent='…';
       fetch('/api/supply/po/'+encodeURIComponent(r.target_key||r.ref)+'/set-shipped-to-master',{method:'POST'}).then(function(x){return x.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); actResolve(id,'shipped to master'); }).catch(function(e){ b.disabled=false; b.textContent='→ set shipped to master'; alert('Failed: '+(e.message||e)); }); }; });
+    document.querySelectorAll('#act-sub .po-remind-confirm').forEach(function(b){ b.onclick=function(){ sendConfirmReminder(b); }; });
     document.querySelectorAll('#act-sub .act-postatus').forEach(function(sel){ sel.onchange=function(){ var v=sel.value; if(!v)return; var id=sel.dataset.id; sel.disabled=true;
       fetch('/api/supply/po/'+encodeURIComponent(sel.dataset.po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({status:v})}).then(function(x){return x.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); actResolve(id,'status '+v); }).catch(function(e){ sel.disabled=false; alert('Failed: '+(e.message||e)); }); }; });
     document.querySelectorAll('#act-sub .act-podeliver').forEach(function(b){ b.onclick=function(){ var id=b.dataset.id, r=actRows[id]; b.disabled=true; b.textContent='…';
@@ -1499,7 +1501,7 @@
       +row('Supplier',cellPickBtn(po,'/api/supply/po/'+encodeURIComponent(po)+'/supplier','supplier_name',r.supplier_name,'supplier')+(r.supplier_name?' <button class="lnk-btn pom-mng-sup" data-sup="'+esc(r.supplier_name)+'" title="edit this supplier in a popout" style="margin-left:8px;color:#2563eb">⚙ manage supplier</button>':''))
       +row('Production',cellPickBtn(po,ep,'prod_no',r.prod_no,'prod'))
       +row('Batch ID',cellPickBtn(po,ep,'batch_id',r.batch_id,'batch'))
-      +row('Supplier confirmation',(r.supplier_confirmed?'<span class="tool-badge bg-green">✓ confirmed '+esc(r.supplier_confirmed)+(r.supplier_confirmed_by?' · '+esc(r.supplier_confirmed_by):'')+'</span> <button class="save-btn light pom-unconfirm" data-po="'+esc(po)+'" title="reset so the supplier must re-confirm">reset</button>':'<span class="tool-badge bg-amber">⏳ awaiting supplier confirmation</span>'+(PO_ACTCOND.po_not_approved(r)?actMark(po,'po_not_approved'):'')))
+      +row('Supplier confirmation',(r.supplier_confirmed?'<span class="tool-badge bg-green">✓ confirmed '+esc(r.supplier_confirmed)+(r.supplier_confirmed_by?' · '+esc(r.supplier_confirmed_by):'')+'</span> <button class="save-btn light pom-unconfirm" data-po="'+esc(po)+'" title="reset so the supplier must re-confirm">reset</button>':'<span class="tool-badge bg-amber">⏳ awaiting supplier confirmation</span>'+(PO_ACTCOND.po_not_approved(r)?actMark(po,'po_not_approved')+' <button class="save-btn po-remind-confirm" data-po="'+esc(po)+'" style="background:#7c3aed;color:#fff;border-color:#6d28d9" title="Post &ldquo;Reminder to review and confirm this PO&rdquo; to the supplier&rsquo;s portal timeline">✉ Send timeline message to supplier</button>':'')))
       +row('<span class="po-note-badge" style="cursor:default">N</span> Notes <span class="mut tiny">(internal — shows as a purple N on the PO row; separate from the Timeline)</span>',txtIn(ep,'notes',r.notes,540,true))
       +'</div><div style="margin-top:14px"><button class="save-btn light pom-del" data-po="'+esc(po)+'" title="delete this PO + its lines" style="color:#dc2626;border-color:#fca5a5">🗑 Delete this PO</button></div>'; }
   // PLAN-panel SHIPMENTS tab (#10): assign a shipment / FOB, ASN numbers, iFulfillment pallet labels — this PO.
@@ -2111,6 +2113,12 @@
     shipped_to_master:'Shipped to master — the supplier marked this rider PO shipped to the consolidator, but the master hasn’t sailed. Use the “→ set shipped to master” button to set our status (still upstream until the master ships).',
     payment_invalid:'Payment invalid — a payment amount is set with no payment date (start deposit, completion, a balance, or a final invoice with no final-payment-due date). Add the date in PLAN ▸ Payments.'
   };
+  // Quick action for "Awaiting supplier confirmation" (Actions tab + Master & Docs): post a reminder to the
+  // supplier's portal timeline. Shared by both button locations.
+  function sendConfirmReminder(btn){ if(btn._busy)return; btn._busy=true; var o=btn.textContent; btn.disabled=true; btn.textContent='…';
+    fetch('/api/supply/portal-note',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:btn.dataset.po,body:'Reminder to review and confirm this PO',author_kind:'internal',author_email:(window.ME&&ME.email)||'Dock & Bay'})})
+      .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); btn.textContent='✓ reminder sent'; })
+      .catch(function(e){ btn._busy=false; btn.disabled=false; btn.textContent=o; alert('Failed: '+(e.message||e)); }); }
   function actMark(po,code){
     var help=ACT_HELP[code]||'Action required.', s=_poActState[poActKey(po,code)]||{}, sn=poActSnoozed(po,code);
     // The Ⓐ stays visible even when snoozed (muted); the count badges drop it, but the marker still reads "Snoozed".
@@ -3739,6 +3747,7 @@
       var pick=b.closest('.xd-pick'); var cur=Array.prototype.map.call(pick.querySelectorAll('.chip'),function(c){return c.dataset.sku;});
       openXdPick(b, cur, function(sku){ if(cur.indexOf(sku)<0){ cur.push(sku); saveXd(cur); } }, (poBy[po]||{}).country); }; });
     // supplier invoice — Approve (apply value → Final Invoice Amount) / Reject
+    document.querySelectorAll('#podet-'+i+' .po-remind-confirm').forEach(function(b){ b.onclick=function(){ sendConfirmReminder(b); }; });
     document.querySelectorAll('#podet-'+i+' .inv-approve').forEach(function(b){ b.onclick=function(){ b.disabled=true;
       fetch('/api/supply/submission/'+b.dataset.id+'/apply',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({by:'PO PLAN'})}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); })
