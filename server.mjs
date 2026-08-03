@@ -2812,17 +2812,6 @@ app.get('/api/supply/:section', async (req, res) => {
               AND EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.shipment_ref=s.shipment_ref
                           AND coalesce(p.status,'') NOT ILIKE '%complete%')
           UNION ALL
-          SELECT 'high','Shipment delivered — update PO', po.po,
-            'Shipment '||po.shipment_ref||' has landed/completed but this PO is still '''||coalesce(nullif(po.status,''),'?')||''' — mark it delivered',
-            'podeliver','po','status', po.po
-            FROM planner.purchase_orders po
-            JOIN planner.shipments s2 ON s2.shipment_ref=po.shipment_ref
-            LEFT JOIN LATERAL (SELECT f.arrival_date, f.landing_date FROM planner.flexport_shipments f
-              WHERE f.flex_id=s2.carrier_ref OR f.shipment_name=s2.shipment_ref LIMIT 1) fx2 ON true
-            WHERE coalesce(po.status,'') NOT ILIKE '%complete%' AND coalesce(po.status,'') NOT ILIKE '%deliver%'
-              AND (lower(coalesce(s2.status,'')) LIKE 'complet%' OR coalesce(s2.arrival_date, fx2.arrival_date, s2.landing_date, fx2.landing_date) < current_date)
-              AND NOT (upper(coalesce(po.country_code,''))='DIRECT' AND po.branch IN ('UK ILG','US Geneva','EU iFulfillment','AU Coghlans'))
-          UNION ALL
           -- PO sat in DELIVERED past its completion (arrival + 7) but not yet Received in Cin7/Fulfil → chase the receipt
           SELECT 'amber','Awaiting ERP receipt', po.po,
             'Delivered & completion ('||to_char((coalesce(s2.arrival_date, fx2.arrival_date, s2.landing_date, fx2.landing_date) + interval '7 days')::date,'YYYY-MM-DD')

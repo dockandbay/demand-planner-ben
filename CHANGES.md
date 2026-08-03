@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.490 - Fix shipped-to-master indicator + PO timeline sort; remove "Shipment delivered" action ⚠️ NEEDS TESTING · SERVER
+- Fix: the "→ set shipped to master" grid button / badge condition used r.shipment_ref (undefined on the grid row) — now r.shipment. PO-58AMCEUS1 (rider on PO-56UKBE1, supplier-shipped, master Planned) now shows it.
+- Fix: PO timeline now truly newest-first. Notes carry dd-Mmm-yy timestamps and record-of-change entries ISO, so the string sort mixed formats (and sorted notes by day-of-month). New tlTs() normalises both to a sortable key.
+- Removed the "Shipment delivered — update PO" action entirely (Ben: not wanted) — server feed entry + client badge/label/help. server.mjs + supply/inject.html. No migration.
+
 ## v26.489 - Payments Report: mobile horizontal scroll + hide notify once paid ⚠️ NEEDS TESTING
 - Mobile: the report table now has a min-width so it scrolls sideways instead of squishing into one unreadable page. This also fixes the Bank amount / Bank ccy columns showing blank on mobile (the input + select were being clipped to zero width by the squish — the data was there).
 - The "✉ Mark paid & notify" button is now hidden once a run is paid (a bank amount is recorded in payment_fx), replaced with a "✓ paid" tag. supply/inject.html. No migration.

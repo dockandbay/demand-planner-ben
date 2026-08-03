@@ -793,8 +793,17 @@
   function datePast(v){ if(!v)return false; var m=/^(\d{4}-\d{2}-\d{2})/.exec(String(v)); return m?m[1]<new Date().toISOString().slice(0,10):false; }
   // date cell with an optional background highlight (overdue milestone vs PO status)
   function dTd(v,src,hot){ return '<td class="l"'+(hot?' style="'+hot+'"':'')+'>'+dcell(v)+(src||'')+'</td>'; }
+  // Normalise a timeline timestamp to a sortable YYYYMMDDHHMM key. Notes come as dd-Mmm-yy HH:MM ("03-Aug-26 20:02"),
+  // record-of-change entries as ISO ("2026-08-03 20:02") — a raw string compare mixed them (and sorted notes by
+  // day-of-month). This makes both comparable so the timeline is truly newest-first.
+  var _TLMON={jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
+  function tlTs(s){ s=String(s||'');
+    var iso=s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/); if(iso)return iso[1]+iso[2]+iso[3]+iso[4]+iso[5];
+    var dm=s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2,4})(?:\s+(\d{1,2}):(\d{2}))?/);
+    if(dm){ var yr=dm[3].length===2?('20'+dm[3]):dm[3]; return yr+(_TLMON[dm[2].toLowerCase()]||'00')+('0'+dm[1]).slice(-2)+('0'+(dm[4]||'0')).slice(-2)+(dm[5]||'00'); }
+    return s.replace(/[^0-9]/g,''); }
   // timeline notes shown newest-first (descending by created_at)
-  function tlDesc(a){ return (a||[]).slice().sort(function(x,y){ var cx=String(x.created_at||''), cy=String(y.created_at||''); return cx<cy?1:(cx>cy?-1:0); }); }
+  function tlDesc(a){ return (a||[]).slice().sort(function(x,y){ var cx=tlTs(x.created_at), cy=tlTs(y.created_at); return cx<cy?1:(cx>cy?-1:0); }); }
   // Dock & Bay teammates for internal-note @-mentions (loaded once). handle = email local-part.
   var _team=[]; function ensureTeam(){ if(_team.length)return Promise.resolve(_team); return fetch('/api/supply/team').then(function(r){return r.json();}).then(function(t){ _team=Array.isArray(t)?t:[]; return _team; }).catch(function(){ return []; }); }
   // Render a note body, bolding any @handle that resolved to a tagged teammate (mentions = full emails).
@@ -1985,9 +1994,7 @@
     late:function(r){ var t=new Date().toISOString().slice(0,10); return r.progress!=='complete' && r.checkin && r.checkin<t; },
     unassigned_shipment:function(r){return r.unassigned_shipment;},
     // Rider PO the supplier shipped to the master consolidator, master not yet departed → set SHIPPED TO MASTER.
-    shipped_to_master:function(r){ return r.progress!=='complete' && r.shipment_ref && !r.is_master && r.production_status==='shipped' && r.ship_status!=='Shipping' && r.ship_status!=='Delivered' && ['SHIPPED TO MASTER','SHIPPING','DELIVERED','COMPLETE'].indexOf(r.status)<0; },
-    // Shipment has landed/completed but this PO isn't marked delivered/complete yet (high priority).
-    shipment_delivered:function(r){ return r.ship_status==='Completed' && r.progress!=='complete' && !/complet|deliver/i.test(String(r.status||'')); },
+    shipped_to_master:function(r){ return r.progress!=='complete' && r.shipment && !r.is_master && r.production_status==='shipped' && r.ship_status!=='Shipping' && r.ship_status!=='Delivered' && ['SHIPPED TO MASTER','SHIPPING','DELIVERED','COMPLETE'].indexOf(r.status)<0; },
     // "Late - should have Shipped": still in PRODUCTION and the ship date has passed.
     production:function(r){ var t=new Date().toISOString().slice(0,10); return /production/i.test(r.status||'') && r.ship && r.ship<t; },
     // Direct to Client details not yet approved — only for Direct-to-Client POs with a client sales ref
@@ -2011,8 +2018,8 @@
   // Manufacturing = FOB → the PO is never pushed to Cin7/Fulfil, so it has NO ERP state at all (no deviation, no "in sync").
   function poErpNa(r){ return /manufactur/i.test((r&&r.branch)||''); }
   // PO-row action badge: label + which PO detail sub-tab each condition deep-links to.
-  var PO_ACT_LABEL={payment_overdue:'Payment overdue',unpaid_payment:'Unpaid payment',late:'Late — should be completed',unassigned_shipment:'Unassigned shipment',production:'Late — should have shipped',dtc_not_approved:'Direct-to-Client not approved',po_not_approved:'Not confirmed by supplier',preship:'Pre-shipment documents overdue',erp_date:'ERP delivery date differs',erp_lines:'Order plan differs from ERP — push to align',shipped_to_master:'Shipped to master — set status',shipment_delivered:'Shipment delivered — mark PO delivered',payment_invalid:'Payment invalid — amount set with no date'};
-  var PO_ACT_TAB={payment_overdue:'pay',unpaid_payment:'pay',late:'dates',unassigned_shipment:'shipments',production:'dates',dtc_not_approved:'client',po_not_approved:'masterdata',preship:'shipments',erp_date:'dates',erp_lines:'oplan',payment_invalid:'pay',shipment_delivered:'dates',shipped_to_master:'dates'};
+  var PO_ACT_LABEL={payment_overdue:'Payment overdue',unpaid_payment:'Unpaid payment',late:'Late — should be completed',unassigned_shipment:'Unassigned shipment',production:'Late — should have shipped',dtc_not_approved:'Direct-to-Client not approved',po_not_approved:'Not confirmed by supplier',preship:'Pre-shipment documents overdue',erp_date:'ERP delivery date differs',erp_lines:'Order plan differs from ERP — push to align',shipped_to_master:'Shipped to master — set status',payment_invalid:'Payment invalid — amount set with no date'};
+  var PO_ACT_TAB={payment_overdue:'pay',unpaid_payment:'pay',late:'dates',unassigned_shipment:'shipments',production:'dates',dtc_not_approved:'client',po_not_approved:'masterdata',preship:'shipments',erp_date:'dates',erp_lines:'oplan',payment_invalid:'pay',shipped_to_master:'dates'};
   // ── PO-grid action-item snooze ── keyed poact|<po>|<condition> in supply_action_state (shared store).
   var _poActState={}, _poActStateLoaded=false, _poShowSnoozed=false;
   function poActKey(po,cond){ return 'poact|'+po+'|'+cond; }
@@ -2102,7 +2109,6 @@
     preship:'Pre-shipment documents overdue — production has ended and the required branch document (AU Coghlans ASN, FBA/AWD barcodes, or EU iFulfillment IDN labels) is missing.',
     erp_date:'ERP delivery date differs — the planner’s completion date doesn’t match Cin7’s EstimatedDeliveryDate. Resolve by pushing the date to Cin7 (⬆ Update ERP), or snooze to defer the reminder. Separate from the PO-grid ACTION ITEMS filter.',
     shipped_to_master:'Shipped to master — the supplier marked this rider PO shipped to the consolidator, but the master hasn’t sailed. Use the “→ set shipped to master” button to set our status (still upstream until the master ships).',
-    shipment_delivered:'Shipment delivered — this PO’s shipment has landed/completed but the PO isn’t marked delivered/complete yet.',
     payment_invalid:'Payment invalid — a payment amount is set with no payment date (start deposit, completion, a balance, or a final invoice with no final-payment-due date). Add the date in PLAN ▸ Payments.'
   };
   function actMark(po,code){
@@ -2765,7 +2771,7 @@
       +'<td class="l" style="font-size:10px;line-height:1.05;max-width:130px;white-space:normal">'+(r.client?esc(r.client):'<span class="mut">—</span>')+'<br>'+(r.sales_order_ref?'<span class="mut">'+esc(r.sales_order_ref)+'</span>':'<span class="mut">—</span>')+'</td>'
       +'<td class="l">'+statusSel(ep,r.status)
         +(((r.status==='PRODUCTION'||r.status==='SHIPPED TO MASTER')&&r.ship_status==='Shipping')?'<div style="margin-top:3px"><button class="po-set-shipping" data-po="'+esc(r.po)+'" title="This PO&rsquo;s shipment has departed (Shipping) but the PO is still upstream — set this PO and every PO on the same shipment still upstream to SHIPPING">→ set shipping</button></div>':'')
-        +((r.shipment_ref&&!r.is_master&&r.production_status==='shipped'&&r.ship_status!=='Shipping'&&r.ship_status!=='Delivered'&&['SHIPPED TO MASTER','SHIPPING','DELIVERED','COMPLETE'].indexOf(r.status)<0)?'<div style="margin-top:3px"><button class="po-set-stm" data-po="'+esc(r.po)+'" title="Supplier marked this PO shipped to the master-shipment consolidator, but the master hasn&rsquo;t departed yet — set it to SHIPPED TO MASTER (still yours until the master sails).">→ set shipped to master</button></div>':'')
+        +((r.shipment&&!r.is_master&&r.production_status==='shipped'&&r.ship_status!=='Shipping'&&r.ship_status!=='Delivered'&&['SHIPPED TO MASTER','SHIPPING','DELIVERED','COMPLETE'].indexOf(r.status)<0)?'<div style="margin-top:3px"><button class="po-set-stm" data-po="'+esc(r.po)+'" title="Supplier marked this PO shipped to the master-shipment consolidator, but the master hasn&rsquo;t departed yet — set it to SHIPPED TO MASTER (still yours until the master sails).">→ set shipped to master</button></div>':'')
         +'</td>'
       +'<td class="l">'+shipcell+'</td>'
       +'<td class="l">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0 && !poFullyPaid(r))+'</td>'
@@ -3526,9 +3532,9 @@
     // Record-of-change entries (status / dates / shipment / payment / ERP upload) render distinctly and interleave with notes by time.
     function fmtChangeTime(s){ s=String(s||''); var d=s.slice(0,10), t=s.slice(11,16); return (d?fd(d):s)+(t?' '+t:''); }
     function renderChange(c){ return '<div class="tl-change" style="font-size:11px;margin:3px 0;max-width:640px;padding:4px 8px;background:#f8fafc;border:1px solid #e5e7eb;border-left:3px solid #94a3b8;border-radius:5px'+(rocIsHidden(po)?';display:none':'')+'"><span class="mut tiny">🕓 '+esc(fmtChangeTime(c.created_at))+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span> <span class="ex-badge" style="background:#e2e8f0;color:#475569">record of change</span><br><span style="color:#334155"><b>'+esc(c.event)+'</b>'+(c.detail?': '+esc(c.detail):'')+'</span></div>'; }
-    var _tlItems=tlDesc(notes).map(function(n){ return {ts:String(n.created_at||'')+'~'+String(n.id||''), h:renderNote(n)}; })
-      .concat(((d&&d.changes)||[]).map(function(c){ return {ts:String(c.created_at||'')+'~0', h:renderChange(c)}; }));
-    _tlItems.sort(function(a,b){ return b.ts.localeCompare(a.ts); });   // newest first, notes + changes interleaved
+    var _tlItems=tlDesc(notes).map(function(n){ return {ts:tlTs(n.created_at)+'~'+('000000'+String(n.id||'')).slice(-6), h:renderNote(n)}; })
+      .concat(((d&&d.changes)||[]).map(function(c){ return {ts:tlTs(c.created_at)+'~000000', h:renderChange(c)}; }));
+    _tlItems.sort(function(a,b){ return b.ts.localeCompare(a.ts); });   // newest first, notes + changes interleaved (normalised ts)
     var list=_tlItems.length?_tlItems.map(function(x){return x.h;}).join(''):'<div class="mut tiny">No timeline activity yet.</div>';
     var compose='<div class="po-compose-row" style="display:flex;gap:16px;flex-wrap:wrap;margin:2px 0 8px">'
       +'<div style="flex:1 1 300px;min-width:0;max-width:440px">'
