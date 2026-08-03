@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.444 - Complex-rule indicator colour → light yellow ⚠️ NEEDS TESTING
+- Buy-plan SKU popup: the complex-rule indicator on the **3PL Target Units** row is now **light yellow `#FFFFC5`** instead of light purple. `artifact_v16.7.html`. No migration.
+
 ## v26.443 - Complex Rules: one rule for multiple countries + purple highlight moved to 3PL Target Units ⚠️ NEEDS TESTING
 - **Complex Rules multi-country is now ONE rule.** Selecting several countries on a rule no longer splits it into N separate rows — it saves a single rule with the countries stored comma-separated in `country`. The rule shows under each of its countries in the CONFIG list (with a small blue chip listing all the countries it spans so it's clear it's one shared rule), and editing it keeps the same row/id. Engine `crMatch()` already matches membership. `artifact_v16.7.html`. No migration (uses existing `buy_complex_rules`, migration 170).
 - **Buy-plan SKU popup: complex-rule purple highlight moved.** The light-purple background + hover tooltip that flags a complex-rule-driven month now sits on the **3PL Target Units** row (the value the rule actually sets), not the **Cover (weeks)** row. Cover (weeks) keeps its own meaning: green when the SKU is within ±20% of its target cover, red otherwise. `artifact_v16.7.html`. No migration.

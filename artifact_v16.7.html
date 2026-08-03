@@ -3051,7 +3051,7 @@ function buildTable(proj,md,pd,is3,hasFBA){
     }));
     // 3PL Target Units — light-purple background + 120ms hover tooltip on months whose target is raised by a complex rule.
     rows.push(dr('3PL Target Units',proj,p=>{
-      if(p.crRule)return '<td class="tgt crc-tip" data-tip="'+crRuleTip(p.crRule)+'" style="background:#f5f3ff;cursor:help">'+fmt(Math.round(p.tg3))+'</td>';
+      if(p.crRule)return '<td class="tgt crc-tip" data-tip="'+crRuleTip(p.crRule)+'" style="background:#FFFFC5;cursor:help">'+fmt(Math.round(p.tg3))+'</td>';
       return c(fmt(Math.round(p.tg3)),'tgt');
     }));
   }
