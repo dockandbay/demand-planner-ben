@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.491 - DATES tab: show the shipped-to-master action indicator (⒜ + tooltip + snooze) ⚠️ NEEDS TESTING
+- The shipped-to-master action was mapped to the DATES sub-tab (counted in its badge) but had no inline marker. Now renders the red Ⓐ indicator (tooltip + snooze) on the Supplier production status row, so the count matches a locatable, snoozeable action. (The supplier-completion-date item on the same tab is actioned by its existing Approve/Reject buttons.) supply/inject.html. No migration.
+
 ## v26.490 - Fix shipped-to-master indicator + PO timeline sort; remove "Shipment delivered" action ⚠️ NEEDS TESTING · SERVER
 - Fix: the "→ set shipped to master" grid button / badge condition used r.shipment_ref (undefined on the grid row) — now r.shipment. PO-58AMCEUS1 (rider on PO-56UKBE1, supplier-shipped, master Planned) now shows it.
 - Fix: PO timeline now truly newest-first. Notes carry dd-Mmm-yy timestamps and record-of-change entries ISO, so the string sort mixed formats (and sorted notes by day-of-month). New tlTs() normalises both to a sortable key.

@@ -3345,7 +3345,7 @@
       +'<tr'+(_pseEnd?' style="background:#fff7ed"':'')+'><td class="l"><b>Production end</b></td><td class="l">'+payIn(ep,'end_production_overide',r.end_override,true)+'</td><td class="l mut tiny">'+(r.end_override?'override':'start + supplier days')+_alert(_pseEnd)+'</td></tr>'
       +(function(){ var pse=(_pseStart||_pseEnd);
         return '<tr'+(pse?' style="background:#fff7ed"':'')+'><td class="l"><b>Supplier production status</b><br><span class="mut tiny">(set by supplier / here)</span></td>'
-          +'<td class="l">'+prodStatusSel(ep+'/prod-status', r.production_status)+'</td>'
+          +'<td class="l">'+prodStatusSel(ep+'/prod-status', r.production_status)+(PO_ACTCOND.shipped_to_master(r)?actMark(r.po,'shipped_to_master'):'')+'</td>'
           +'<td class="l mut tiny">'+(r.production_status?(r.prod_confirmed_age!=null?'confirmed '+r.prod_confirmed_age+'d ago':'supplier-set'):'not set')+'</td></tr>'; })()
       +(function(){ var sc=d&&d.sup_completion; if(!sc)return ''; var pend=(sc.status==='pending');
         return '<tr'+(pend?' style="background:#fff7ed"':'')+'><td class="l">Supplier completion date <span class="mut tiny">(submitted in portal)</span></td>'
