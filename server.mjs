@@ -3769,11 +3769,13 @@ app.post('/api/supply/suggestion', async (req, res) => {
   const b = req.body || {};
   const body = (b.body || '').trim(), area = (b.area || '').trim() || null, by = (b.created_by || '').trim() || null;
   if (!body) return res.status(400).json({ error: 'Suggestion text is required.' });
+  const ownStake = parseEmails(b.stakeholders);   // per-suggestion stakeholders entered on the submit form (mig 162)
+  const ownStakeStr = ownStake.join(', ') || null;
   try {
-    const r = await pool.query(`INSERT INTO planner.suggestions (body, area, created_by) VALUES ($1,$2,$3) RETURNING id, ref`, [body, area, by]);
+    const r = await pool.query(`INSERT INTO planner.suggestions (body, area, created_by, stakeholders) VALUES ($1,$2,$3,$4) RETURNING id, ref`, [body, area, by, ownStakeStr]);
     const ref = r.rows[0].ref;
     try {
-      const stake = await suggestionStakeholders();
+      const stake = Array.from(new Set([...(await suggestionStakeholders()), ...ownStake]));   // global + this suggestion's own stakeholders
       if (stake.length) {
         const html = `<p><b>New suggestion logged in HORIZON.</b></p>`
           + `<p><b>${_sugEsc(ref)}</b>${area ? (' &middot; ' + _sugEsc(area)) : ''}</p>`

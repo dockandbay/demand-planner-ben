@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.465 - Suggestion box: add stakeholders on submit ⚠️ NEEDS TESTING
+- The top-bar 💡 **Suggestion box** "add new" form now has a **Stakeholders** field — enter one or more emails (comma-separated) when submitting. They're stored on the suggestion (mig 162 `stakeholders` column) and notified on its status changes, in addition to the global stakeholder list; they're also cc'd the new-suggestion email. Previously followers could only be added later in CONFIG ▸ Suggestions. `supply/inject.html` + `server.mjs`. Verified end-to-end. No new migration.
+
 ## v26.464 - Supplier portal: bound the sample-contents SKU picker width ⚠️ NEEDS TESTING
 - The "Add contents" / new-sample-shipment SKU picker (dev samples + bulk SKUs + free text) was full-screen wide, pushing the qty input off to the far right. Bounded the panel to **max-width 520px**, so the search boxes are shorter, the qty is visible, and the table is a manageable width. Shared picker → fixes both "add contents" and "create new shipment". `supply/portal-view.js`. No migration.
 

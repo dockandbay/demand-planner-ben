@@ -8817,6 +8817,8 @@
         +'<textarea id="sug-body" rows="4" style="width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:6px;padding:8px;font-family:inherit;font-size:13px;text-align:left" placeholder="Describe the idea or issue…"></textarea>'
         +'<label style="display:block;font-size:11px;font-weight:700;color:#475569;margin:9px 0 3px">Area <span style="font-weight:400;color:#94a3b8">(optional — e.g. DEMAND, Purchase Orders, Portal)</span></label>'
         +'<input id="sug-area" style="width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:6px;padding:7px 8px;font-family:inherit;font-size:13px;text-align:left" placeholder="which part of the app?">'
+        +'<label style="display:block;font-size:11px;font-weight:700;color:#475569;margin:9px 0 3px">Stakeholders <span style="font-weight:400;color:#94a3b8">(optional — one or more emails, comma-separated; they&rsquo;re notified on this suggestion&rsquo;s status changes)</span></label>'
+        +'<input id="sug-stk" style="width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:6px;padding:7px 8px;font-family:inherit;font-size:13px;text-align:left" placeholder="email, email…">'
         +'<div id="sug-msg" style="font-size:12px;margin-top:9px;min-height:16px"></div>'
       +'</div>'
       +'<div style="padding:12px 16px;border-top:1px solid #eef2f7;display:flex;gap:8px;justify-content:flex-end"><button id="sug-cancel" class="save-btn light">Cancel</button><button id="sug-send" class="save-btn" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Submit suggestion</button></div>'
@@ -8831,10 +8833,10 @@
     bg.querySelector('#sug-send').onclick=function(){ var body=ta.value.trim(); var msg=bg.querySelector('#sug-msg');
       if(!body){ msg.style.color='#dc2626'; msg.textContent='Please enter a suggestion.'; ta.focus(); return; }
       var btn=this; btn.disabled=true; msg.style.color='#64748b'; msg.textContent='Submitting…';
-      fetch('/api/supply/suggestion',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({body:body,area:bg.querySelector('#sug-area').value.trim(),created_by:(window.ME&&ME.email)||''})})
+      fetch('/api/supply/suggestion',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({body:body,area:bg.querySelector('#sug-area').value.trim(),stakeholders:bg.querySelector('#sug-stk').value.trim(),created_by:(window.ME&&ME.email)||''})})
         .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error);
           msg.style.color='#16a34a'; msg.innerHTML='Thanks! Logged as <b>'+esc(j.ref)+'</b> — quote that reference to push it forward. Add another below, or Close.';
-          ta.value=''; bg.querySelector('#sug-area').value=''; ta.disabled=false; bg.querySelector('#sug-area').disabled=false; btn.disabled=false; ta.focus(); bg.querySelector('#sug-cancel').textContent='Close'; })   // SUG-0004: reset so another can be added without refreshing
+          ta.value=''; bg.querySelector('#sug-area').value=''; bg.querySelector('#sug-stk').value=''; ta.disabled=false; bg.querySelector('#sug-area').disabled=false; btn.disabled=false; ta.focus(); bg.querySelector('#sug-cancel').textContent='Close'; })   // SUG-0004: reset so another can be added without refreshing
         .catch(function(e){ msg.style.color='#dc2626'; msg.textContent='Failed: '+(e.message||e); btn.disabled=false; }); }; }
   try{ window.HZ_SUGGEST={ open:openSuggestBox }; }catch(e){}
   function ensureSuggestButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('sug-btn'))return;
