@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.477 - PO creation popup: category select all/none left-aligned next to the name ⚠️ NEEDS TESTING
+- The per-category "select all · none" links now sit inline just after the category name (left-aligned) instead of floated to the right of the row. supply/inject.html. No migration.
+
 ## v26.476 - Anomalies: only merge same SKU + country + channel ⚠️ NEEDS TESTING
 - Fix v26.475: cards now group by SKU+country+channel (multiple MONTHS merge into one card); different country/channel combos stay separate. Header shows SKU + country/channel + subcategory; per-row country/channel label dropped (now redundant). artifact_v16.7.html. No migration.
 
