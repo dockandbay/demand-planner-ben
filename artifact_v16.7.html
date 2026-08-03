@@ -513,6 +513,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
 /* Panel */
 #buy-wrap .ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.15);z-index:100}
 #buy-wrap .ov.open{display:flex;align-items:flex-start;justify-content:center;padding-top:24px}
+#buy-wrap[data-scaffold] .ov.open{visibility:visible;pointer-events:auto}   /* popup opened from DEMAND/SUPPLY: grid stays hidden, only the modal shows */
 #buy-wrap .pn{background:#fff;border:1px solid #d0d0d0;border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,.12);width:min(1120px,96vw);max-height:92vh;display:flex;flex-direction:column}
 #buy-wrap .ph{padding:10px 14px;border-bottom:1px solid #e8e8e8;display:flex;align-items:center;gap:6px;flex-shrink:0;flex-wrap:wrap}
 #buy-wrap .ph-t{font-size:13px;font-weight:600}
@@ -9841,16 +9842,19 @@ document.addEventListener('click',function(e){
 },true); // capture phase: fires before the panel's .pn stopPropagation
 document.addEventListener('keydown',function(e){if(e.key==='Escape')hideInbPop();});
 
-function renderBuyView(mode){
+function renderBuyView(mode,scaffoldOnly){
+  // scaffoldOnly: build the buy grid ONLY to host the SKU popup (#ov), invisibly — used when opening the
+  // buy-plan popup from the DEMAND plan / SUPPLY, so the buy grid never flashes over the current view.
   // Feed the buy plan from the live forecast before rendering (independent of Airtable save).
   try{buildLiveDemand();}catch(e){console.error('buildLiveDemand failed',e);}
   var origTw=document.getElementById('tw');
-  if(origTw)origTw.style.display='none';
+  if(origTw&&!scaffoldOnly)origTw.style.display='none';   // scaffoldOnly: leave the demand table visible behind the popup
   var execWrap=document.getElementById('exec-wrap');
-  if(execWrap)execWrap.remove();
+  if(execWrap&&!scaffoldOnly)execWrap.remove();
   var existing=document.getElementById('buy-wrap');
   if(existing)existing.remove();
   var wrap=document.createElement('div');wrap.id='buy-wrap';
+  if(scaffoldOnly){ wrap.setAttribute('data-scaffold','1'); wrap.style.cssText='position:absolute;visibility:hidden;pointer-events:none;height:0;overflow:hidden'; }
   wrap.innerHTML=BUY_SCAFFOLD;
   document.querySelector('.wrap').appendChild(wrap);
   // Set the buy/FBA view before building so headers + rows render the right columns.
@@ -9877,7 +9881,7 @@ function renderBuyView(mode){
 // helper that builds the scaffold (data — PD/SL — is already loaded) WITHOUT switching the visible view,
 // so SUPPLY can pop the plan over itself. Leaving SUPPLY calls render(), which rebuilds cleanly.
 if(typeof window!=='undefined'){
-  window.ensureBuyPlanScaffold=function(){ if(!document.getElementById('ov')){ try{renderBuyView('buy');}catch(e){console.error('ensureBuyPlanScaffold failed',e);} } };
+  window.ensureBuyPlanScaffold=function(){ if(!document.getElementById('ov')){ try{renderBuyView('buy',true);}catch(e){console.error('ensureBuyPlanScaffold failed',e);} } };
 }
 
 // View mode toggle (Planning / Exec)

@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.480 - Demand plan: "Plan" button no longer flashes the buy grid ⚠️ NEEDS TESTING
+- Opening the buy-plan popup from a demand-plan SKU (or from SUPPLY) now builds the buy scaffold INVISIBLY (position:absolute;visibility:hidden;height:0) and keeps the demand table visible behind the modal, so the buy grid never flashes into view before the popup. New scaffoldOnly mode on renderBuyView(); #ov re-shown via a scoped CSS rule. artifact_v16.7.html. No migration.
+
 ## v26.479 - Demand plan: completed past-FY totals show green (Actuals) ⚠️ NEEDS TESTING
 - Collapsed year-total cell + header for fully-complete past fiscal years (FY24/25, FY25/26 — any FY before the current one) now use the green Actuals styling instead of grey year-total styling, since those FYs are 100% actuals. artifact_v16.7.html. No migration.
 
