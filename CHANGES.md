@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.454 - Fix flat-LY fallback basis: trailing 12 actual months, not the 2025 calendar year ⚠️ NEEDS TESTING · BUY-PLAN IMPACT
+- The flat last-year fallback (v26.452) hardcoded "last year = 2025". A SKU launched in 2026 (no 2025 history) therefore failed the `skuHasLY` check and fell back to the **subcat cascade** — e.g. `HAIRW-CAB-LTPPL-NB` Mar 2028 showed **90** (cascade) instead of its own **Mar 2026 actual = 37**.
+- Flat-LY now uses the **trailing 12 COMPLETE actual months** via `CUR_YTD_END`: for a calendar month, the most recent complete actual is **this year** if that month has already finished, else last year (new `_flatLyKey`). `skuHasLY` checks the same trailing window, so 2026-launched SKUs are recognised. Applies to both the demand-plan rows and the buy plan. Verified: March → 2026 actual, later-in-year months → 2025. `artifact_v16.7.html`. No migration.
+
 ## v26.453 - Demand plan: Release Window before Category; Plan button opens popup only ⚠️ NEEDS TESTING
 - **Release Window filter moved before the Category filter** on the demand-plan filter row (category popup now aligns under its button dynamically). `artifact_v16.7.html`.
 - **The SKU "Plan ▸" button on the demand plan now opens the buy-plan detail as a modal only** — on close it restores the demand plan instead of leaving you on the buy grid the scaffold built behind the popup (`close_` fires a one-shot `_onPlanPopupClose`; `openDemandPlanPopup` registers a re-render when opened from planning mode). `artifact_v16.7.html`. No migration.

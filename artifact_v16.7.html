@@ -5411,18 +5411,20 @@ function inbDiv(inb, entries, color){
 // SKU-level loaded forecast from forecast_outputs (in-memory working store).
 // Returns the unit value for a month, or null if this SKU/wh/channel has no loaded forecast.
 function skuOutFC(sku,co,ch,m){var o=FC_OUTPUTS[sku+'|'+skuWh(co,ch)+'|'+ch];return(o&&o[m]!=null)?o[m]:null;}
-// Last complete actual year (2025), used for the flat-LY forecast fallback.
-var _LY25_MONTHS=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
-// Fallback SKU forecast for a month when there's NO saved override: the SKU's OWN last-year (2025) actual for
-// the same calendar month (flat, +0% growth) if it has any 2025 history; otherwise the subcat cascade
+// Flat-LY basis = the trailing 12 COMPLETE actual months (NOT the 2025 calendar year — a SKU launched in 2026
+// has no 2025 history but should still forecast off its own actuals). For a calendar month 'MM', the most
+// recent complete actual is THIS year if that month has already finished (MM ≤ CUR_YTD_END's month), else last
+// year. CUR_YTD_END = last complete actual month.
+function _flatLyKey(mm){var ey=+String(CUR_YTD_END).slice(0,4),em=+String(CUR_YTD_END).slice(5,7),mi=+mm;return ((mi<=em)?ey:ey-1)+'_'+mm;}
+// Fallback SKU forecast for a month when there's NO saved override: the SKU's OWN most-recent actual for that
+// calendar month (flat, +0% growth) if it has any trailing-12 history; otherwise the subcat cascade
 // (share × subcat forecast) so new/no-history SKUs still get a number. `salesMap` = skuSales(sku,co,ch);
-// `hasLY` = precomputed (any 2025 actual ≠ 0). Used by BOTH the demand-plan rows and buildLiveDemand so the
-// plan and the buy plan agree.
+// `hasLY` = precomputed. Used by BOTH the demand-plan rows and buildLiveDemand so the plan and buy plan agree.
 function skuFbFC(salesMap,hasLY,m,subcatFUm,share){
-  if(hasLY)return Math.round(salesMap['2025_'+m.slice(5,7)]||0);   // flat last-year actual for this month
-  return Math.round((subcatFUm||0)*(share||0));                    // new SKU → subcat cascade
+  if(hasLY)return Math.round(salesMap[_flatLyKey(m.slice(5,7))]||0);   // flat: SKU's most-recent actual for this month
+  return Math.round((subcatFUm||0)*(share||0));                        // new SKU with no actuals → subcat cascade
 }
-function skuHasLY(salesMap){for(var i=0;i<_LY25_MONTHS.length;i++){if((salesMap[_LY25_MONTHS[i]]||0)!==0)return true;}return false;}
+function skuHasLY(salesMap){for(var mi=1;mi<=12;mi++){var mm=(mi<10?'0':'')+mi;if((salesMap[_flatLyKey(mm)]||0)!==0)return true;}return false;}
 // Read/write a SKU forecast override directly into the FC_OUTPUTS working store.
 // Replaces the old localStorage layer so an edit moves BOTH the planner and the buy plan
 // (buildLiveDemand reads FC_OUTPUTS) and can be persisted to forecast_outputs on Save.
