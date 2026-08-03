@@ -8417,6 +8417,35 @@ function daAnomalies(){
   });
   return out;
 }
+// Forward-forecast anomalies (DEMAND ▸ Actions ▸ Anomalies): SKU × market × channel where a month in the
+// FORWARD 6 months is out of line with the SKU's own seasonal flow (anomalyFlags: ratio to seasonal-expected
+// > 3 = spike, < 0.25 = dip). Reads the live buy-plan forecast (buildLiveDemand → md.demand[ch]).
+function daAnomalyReport(){
+  try{ buildLiveDemand(); }catch(e){}
+  var fwd=(typeof LIVE_FC_MONTHS!=='undefined'?LIVE_FC_MONTHS:[]).slice(0,6);
+  if(!fwd.length||typeof BP_DATA==='undefined'||!BP_DATA.products)return [];
+  var items=[];
+  Object.keys(BP_DATA.products).forEach(function(sku){
+    var pm=BP_DATA.products[sku]&&BP_DATA.products[sku].mkts; if(!pm)return;
+    var subcat=(SKUM[sku]&&SKUM[sku].s)||'', ti=(SKUM[sku]&&SKUM[sku].ti)||'C';
+    Object.keys(pm).forEach(function(co){
+      var d=pm[co].demand; if(!d)return;
+      ['DTC','FBA','B2B'].forEach(function(ch){
+        if(!d[ch])return;
+        var af; try{ af=anomalyFlags(d[ch],subcat,co,ch); }catch(e){ return; }
+        fwd.forEach(function(fym){ var fl=af[fym]; if(!fl)return;
+          var mag=(fl.type==='hi')?(fl.expected>0?fl.cur/fl.expected:9):(fl.cur>0?fl.expected/fl.cur:9);   // how far off (both directions → >1)
+          var sev=mag>=8?'high':mag>=5?'med':'low', svRank=sev==='high'?0:sev==='med'?1:2;
+          items.push({sku:sku,co:co,ch:ch,fym:fym,type:fl.type,cur:fl.cur,expected:fl.expected,ratio:fl.ratio,prev:fl.prev,next:fl.next,ti:ti,subcat:subcat,mag:Math.round(mag*10)/10,sev:sev,svRank:svRank}); });
+      });
+    });
+  });
+  return items;
+}
+function _anKey(it){ return 'anomaly|'+it.sku+'|'+it.co+'|'+it.ch+'|'+it.fym; }
+function _anStatus(it,sm){ var st=(sm||{})[_anKey(it)]; if(!st)return 'open'; if(st.status==='snoozed')return (!st.snooze_until||st.snooze_until>=TODAY)?'snoozed':'open'; return st.status||'open'; }
+function daAnomalyItems(){ if(!window._daAnom){ try{window._daAnom=daAnomalyReport();}catch(e){window._daAnom=[];} } return window._daAnom; }
+function daAnomalyOpenCount(){ var sm=window._daSM||{}; return daAnomalyItems().filter(function(it){return _anStatus(it,sm)==='open';}).length; }
 // A-player stock-out (ACTIONS): a Tier-A SKU that's running out of 3PL cover (on-hand + on-order
 // consumed against demand — the buy plan's own compute3plWeeksRemaining) AND whose recent run-rate
 // is outpacing its forecast — i.e. selling out because the forecast (and so the buy) was too low.
@@ -8481,14 +8510,16 @@ function renderDemandActionsView(body){
       fetch('/api/demand-actions').then(function(r){return r.json();}),
       fetch('/api/demand-actions/state').then(function(r){return r.json();}).catch(function(){return {state:{}};})
     ]).then(function(res){ var d=res[0], sm=(res[1]&&res[1].state)||{};
+      window._daSM=sm;   // shared with the Anomalies section (same demand_action_state store, keys anomaly|…)
       if(d&&d.error){body.innerHTML='<div style="padding:18px;color:#b91c1c">'+tHesc(d.error)+'</div>';return;}
       var all=(Array.isArray(d)?d:[]).concat(daClientDetectors(sm));
       draw(all);
     }).catch(function(e){ body.innerHTML='<div style="padding:18px;color:#b91c1c">'+tHesc(String(e))+'</div>'; }); }
   // level-3 sub-nav: ACTIONS · INSIGHTS · WEATHER (same .dnav style as the DEMAND/SUPPLY/REPORTS menus)
   function secNav(){
-    var SEC=[['actions','Actions'],['insights','Insights'],['weather','Weather']];
-    return '<div class="d3nav">'+SEC.map(function(s){return '<button class="d3tab'+(_da.sec===s[0]?' active':'')+'" data-sec="'+s[0]+'">'+s[1]+'</button>';}).join('')+'</div>';
+    var SEC=[['actions','Actions'],['insights','Insights'],['anomalies','Anomalies'],['weather','Weather']];
+    var anN=(typeof daAnomalyOpenCount==='function')?daAnomalyOpenCount():0;   // open items to review → badge
+    return '<div class="d3nav">'+SEC.map(function(s){var bdg=(s[0]==='anomalies'&&anN>0)?' <span class="ex-badge" style="background:#7c3aed;color:#fff">'+anN+'</span>':'';return '<button class="d3tab'+(_da.sec===s[0]?' active':'')+'" data-sec="'+s[0]+'">'+s[1]+bdg+'</button>';}).join('')+'</div>';
   }
   function wireSecNav(){ body.querySelectorAll('[data-sec]').forEach(function(b){ b.onclick=function(){ _da.sec=b.dataset.sec; draw(window._daAll||[]); }; }); }
   function draw(all){
@@ -8508,6 +8539,62 @@ function renderDemandActionsView(body){
       body.querySelectorAll('.weather-tab').forEach(function(b){ b.onclick=function(){ WEATHER_TAB=b.dataset.market; body.querySelectorAll('.weather-tab').forEach(function(x){x.classList.remove('active');}); b.classList.add('active'); renderWeatherPanel(); }; });
       var _wr=document.getElementById('weather-refresh'); if(_wr)_wr.onclick=function(){ WX_RAW=null; WEATHER_DATA={}; renderWeatherPanel(); };
       try{ renderWeatherPanel(); }catch(e){ var wb=document.getElementById('weather-body'); if(wb)wb.innerHTML='<div style="padding:18px;color:#b91c1c;font-size:12px">Weather data unavailable: '+tHesc(String(e&&e.message||e))+'</div>'; }
+      return;
+    }
+    if(_da.sec==='anomalies'){
+      var sm=window._daSM||{}, items=daAnomalyItems();
+      var CO=['UK','US','EU','AU','CA'], CH=['DTC','FBA','B2B'];
+      var mtx={}, colTot={DTC:0,FBA:0,B2B:0}, rowTot={}, grand=0;
+      CO.forEach(function(c){mtx[c]={DTC:0,FBA:0,B2B:0};rowTot[c]=0;});
+      items.forEach(function(it){ if(_anStatus(it,sm)!=='open')return; if(!mtx[it.co])return; mtx[it.co][it.ch]++; rowTot[it.co]++; colTot[it.ch]=(colTot[it.ch]||0)+1; grand++; });
+      var selCo=_da.anCo||'ALL', selCh=_da.anCh||'ALL', selSt=_da.anStatus||'open';
+      function cellBtn(c,h,n){ var on=(selCo===c&&selCh===h); return '<td style="padding:0;border-top:1px solid #eef2f7"><button class="an-cell" data-co="'+c+'" data-ch="'+h+'" style="width:100%;border:0;background:'+(on?'#ede9fe':(n>0?'#fef3c7':'#fff'))+';cursor:pointer;font:inherit;font-size:12px;padding:5px 12px;color:'+(n>0?'#7c2d12':'#cbd5e1')+';font-weight:'+(n>0?'700':'400')+'">'+n+'</button></td>'; }
+      var mtxHtml='<div style="overflow-x:auto;margin-bottom:10px"><table style="border-collapse:collapse;font-size:11px;border:1px solid #e5e7eb">'
+        +'<thead><tr><th style="text-align:left;padding:5px 12px;background:#f8fafc;font-size:10px;color:#64748b">Open items</th>'+CH.map(function(h){return '<th style="padding:5px 12px;background:#f8fafc;font-size:10px;color:#64748b">'+h+'</th>';}).join('')+'<th style="padding:5px 12px;background:#f1f5f9;font-size:10px;color:#334155">All</th></tr></thead><tbody>'
+        +CO.map(function(c){ return '<tr><td style="padding:5px 12px;font-weight:700;border-top:1px solid #eef2f7">'+c+'</td>'+CH.map(function(h){return cellBtn(c,h,mtx[c][h]);}).join('')+'<td style="padding:0;border-top:1px solid #eef2f7"><button class="an-cell" data-co="'+c+'" data-ch="ALL" style="width:100%;border:0;background:'+((selCo===c&&selCh==='ALL')?'#ede9fe':'#f8fafc')+';cursor:pointer;font:inherit;font-weight:700;font-size:12px;padding:5px 12px">'+rowTot[c]+'</button></td></tr>'; }).join('')
+        +'<tr><td style="padding:5px 12px;font-weight:700;background:#f1f5f9;border-top:2px solid #cbd5e1">All</td>'+CH.map(function(h){return '<td style="padding:0;background:#f8fafc;border-top:2px solid #cbd5e1"><button class="an-cell" data-co="ALL" data-ch="'+h+'" style="width:100%;border:0;background:'+((selCo==='ALL'&&selCh===h)?'#ede9fe':'none')+';cursor:pointer;font:inherit;font-weight:700;font-size:12px;padding:5px 12px">'+colTot[h]+'</button></td>';}).join('')+'<td style="padding:0;background:#ede9fe;border-top:2px solid #cbd5e1"><button class="an-cell" data-co="ALL" data-ch="ALL" style="width:100%;border:0;background:'+((selCo==='ALL'&&selCh==='ALL')?'#ddd6fe':'none')+';cursor:pointer;font:inherit;font-weight:800;font-size:12px;padding:5px 12px">'+grand+'</button></td></tr>'
+        +'</tbody></table></div>';
+      var scoped=items.filter(function(it){ return (selCo==='ALL'||it.co===selCo)&&(selCh==='ALL'||it.ch===selCh); });
+      var stCnt=function(s){ return s==='all'?scoped.length:scoped.filter(function(it){return _anStatus(it,sm)===s;}).length; };
+      var STAT=[['open','Open'],['snoozed','Snoozed'],['dismissed','Dismissed'],['all','All']];
+      var stBar='<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><span style="font-size:11px;font-weight:700;color:#888">STATUS</span>'+STAT.map(function(s){return '<button class="an-st dsub'+(selSt===s[0]?' active':'')+'" data-st="'+s[0]+'">'+s[1]+' ('+stCnt(s[0])+')</button>';}).join('')+'</div>';
+      var list=scoped.filter(function(it){ return selSt==='all'?true:_anStatus(it,sm)===selSt; });
+      list.sort(function(a,b){ return (a.svRank-b.svRank)||(a.sku<b.sku?-1:a.sku>b.sku?1:0)||(a.co<b.co?-1:a.co>b.co?1:0)||(a.ch<b.ch?-1:a.ch>b.ch?1:0)||(a.fym<b.fym?-1:1); });   // biggest anomaly first (High→Low), then SKU
+      function mlbl(fym){ var p=fym.split('_'); return (MN[parseInt(p[1],10)-1]||p[1])+' '+p[0].slice(2); }
+      function _addM(fym,n){ var p=fym.split('_'),y=parseInt(p[0],10),m=parseInt(p[1],10)-1+n; y+=Math.floor(m/12); m=((m%12)+12)%12; return y+'_'+(m+1<10?'0':'')+(m+1); }
+      // 120ms-hover strip: last 6 → anomaly → next 6 months (forecast, actual where past) + last-year actuals.
+      function anTip(it){ var dm=(((BP_DATA.products[it.sku]||{}).mkts||{})[it.co]||{}).demand; dm=(dm&&dm[it.ch])||{}; var sl=skuSales(it.sku,it.co,it.ch)||{}; var head='',fc='',ly='';
+        for(var i=-6;i<=6;i++){ var m=_addM(it.fym,i), act=isActualMonth(m), v=act?(sl[m]||0):(dm[m]||0), lyv=sl[(parseInt(m.slice(0,4),10)-1)+'_'+m.slice(5,7)]||0, hl=(i===0);
+          head+='<td style="padding:1px 4px;text-align:right;font-size:9px;color:'+(hl?'#fbbf24':'#94a3b8')+'">'+mlbl(m).split(' ')[0]+(act?'':'*')+'</td>';
+          fc+='<td style="padding:1px 4px;text-align:right'+(hl?';color:#fbbf24;font-weight:700':';color:#fff')+'">'+fn(Math.round(v))+'</td>';
+          ly+='<td style="padding:1px 4px;text-align:right;color:#94a3b8">'+fn(Math.round(lyv))+'</td>'; }
+        return '<div style="font-weight:700;margin-bottom:3px">'+it.sku+' · '+it.co+' '+it.ch+' — fcst vs last-year actual (*=forecast month)</div><table style="border-collapse:collapse;font-size:10px"><tr><td style="color:#64748b;padding-right:5px"></td>'+head+'</tr><tr><td style="color:#94a3b8;padding-right:5px">fcst</td>'+fc+'</tr><tr><td style="color:#94a3b8;padding-right:5px">LY act</td>'+ly+'</tr></table>'; }
+      function renderAnCard(it){ var key=_anKey(it), st=_anStatus(it,sm), resolved=(st!=='open'), col=it.type==='hi'?'#d97706':'#0369a1', arrow=it.type==='hi'?'▲ spike':'▼ dip', ov=skuOvGet(it.sku,it.co,it.ch,it.fym);
+        var btns=resolved
+          ? '<button class="an-act" data-k="'+tHesc(key)+'" data-s="open" style="border:1px solid #1d4ed8;color:#1d4ed8;background:#fff;border-radius:5px;padding:3px 9px;cursor:pointer;font:inherit;font-size:11px">↺ Restore</button>'
+          : '<button class="an-act" data-k="'+tHesc(key)+'" data-s="snoozed" data-days="30" style="border:1px solid #cbd5e1;background:#fff;border-radius:5px;padding:3px 9px;cursor:pointer;font:inherit;font-size:11px">Snooze 30d</button>'
+            +' <button class="an-act" data-k="'+tHesc(key)+'" data-s="snoozed" data-days="-1" title="snooze indefinitely" style="border:1px solid #cbd5e1;background:#fff;border-radius:5px;padding:3px 9px;cursor:pointer;font:inherit;font-size:11px">Snooze ∞</button>'
+            +' <button class="an-act" data-k="'+tHesc(key)+'" data-s="dismissed" style="border:1px solid #cbd5e1;background:#fff;border-radius:5px;padding:3px 9px;cursor:pointer;font:inherit;font-size:11px">Dismiss</button>';
+        return '<div style="border:1px solid #e8e8e8;border-left:4px solid '+col+';border-radius:7px;padding:8px 12px;margin-bottom:7px;'+(resolved?'opacity:.7':'')+'">'
+          +'<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><span style="font-weight:700;font-size:12px;font-family:monospace">'+tHesc(it.sku)+'</span>'
+          +'<span style="font-size:10px;color:#64748b">'+it.co+' · '+it.ch+' · '+tHesc(it.subcat)+'</span>'
+          +'<span class="crc-tip" data-tip="'+anTip(it).replace(/"/g,'&quot;')+'" style="font-weight:700;font-size:11px;color:'+col+';cursor:help;border-bottom:1px dotted '+col+'">'+arrow+' '+mlbl(it.fym)+'</span>'+(resolved?'<span style="font-size:10px;color:#999"> · '+st+(st==='snoozed'&&sm[key]&&sm[key].snooze_until?' until '+sm[key].snooze_until:'')+'</span>':'')+'</div>'
+          +'<div style="font-size:11px;color:#444;margin:3px 0 6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">Forecast <b>'+fn(it.cur)+'</b> vs expected <b>'+fn(it.expected)+'</b>'
+          +' <span style="color:#64748b">· set '+mlbl(it.fym)+' →</span> <input class="an-ov" data-sku="'+tHesc(it.sku)+'" data-co="'+it.co+'" data-ch="'+it.ch+'" data-m="'+it.fym+'" value="'+(ov!=null?tHesc(ov):'')+'" placeholder="'+fn(it.cur)+'" title="Override this month’s forecast — saves to your plan &amp; the buy plan" style="width:66px;text-align:right;font-size:11px;border:1px solid #cbd5e1;border-radius:4px;padding:2px 5px" inputmode="numeric">'
+          +' <a href="#" class="an-jump" data-sku="'+tHesc(it.sku)+'" style="color:#1d4ed8;text-decoration:none;font-weight:600;white-space:nowrap">Open in Plan ↗</a></div>'+btns+'</div>'; }
+      var SEVLBL={high:'🔴 High',med:'🟠 Medium',low:'🟡 Low'}, cards='', _lastSev=null;
+      list.forEach(function(it){ if(selSt==='open'&&it.sev!==_lastSev){ _lastSev=it.sev; cards+='<div style="font-size:11px;font-weight:800;letter-spacing:.04em;color:#475569;margin:12px 0 5px">'+(SEVLBL[it.sev]||it.sev)+'</div>'; } cards+=renderAnCard(it); });
+      body.innerHTML=secNav()+mtxHtml
+        +'<div style="font-size:12px;margin-bottom:8px"><b>'+grand+'</b> open anomal'+(grand===1?'y':'ies')+' to review'+((selCo!=='ALL'||selCh!=='ALL')?' · showing '+(selCo==='ALL'?'all countries':selCo)+' / '+(selCh==='ALL'?'all channels':selCh):'')+'</div>'
+        +stBar
+        +(cards||'<div style="padding:22px;text-align:center;color:#666">No anomalies for this filter — the forward-6-month forecast tracks each SKU’s seasonal flow.</div>')
+        +'<div style="font-size:11px;color:#888;margin-top:8px;line-height:1.5">SKU-level check over the next 6 forecast months: a month is flagged when it’s a spike (&gt;3×) or dip (&lt;¼) vs the SKU’s own seasonal-expected share. Click a matrix cell to filter by country / channel; Snooze or Dismiss to clear it from the open list.</div>';
+      wireSecNav();
+      body.querySelectorAll('.an-cell').forEach(function(b){ b.onclick=function(){ _da.anCo=b.dataset.co; _da.anCh=b.dataset.ch; _da.anStatus='open'; draw(all); }; });
+      body.querySelectorAll('.an-st').forEach(function(b){ b.onclick=function(){ _da.anStatus=b.dataset.st; draw(all); }; });
+      body.querySelectorAll('.an-act').forEach(function(b){ b.onclick=function(){ b.disabled=true; setState(b.dataset.k,b.dataset.s,b.dataset.days).then(function(j){ if(j&&j.error){alert(j.error);b.disabled=false;return;} load(); }); }; });
+      body.querySelectorAll('.an-ov').forEach(function(inp){ inp.onchange=function(){ var v=inp.value.trim(); skuOvSet(inp.dataset.sku,inp.dataset.co,inp.dataset.ch,inp.dataset.m,(v===''?null:v)); window._daAnom=null; load(); }; });   // override → auto-saves (markDirty) + recompute the anomalies
+      body.querySelectorAll('.an-jump').forEach(function(b){ b.onclick=function(e){ e.preventDefault(); daJumpToPlan(b.dataset.sku); }; });
       return;
     }
     var MK=[['all','All'],['UK','UK'],['US','US'],['EU','EU'],['AU','AU']];

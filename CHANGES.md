@@ -3,6 +3,14 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.469 - DEMAND ▸ Actions ▸ Anomalies report ⚠️ NEEDS TESTING
+- New **Anomalies** tab under DEMAND ▸ Actions: SKU-level forward-forecast anomalies — a month in the next 6 forecast months that's a **spike (>3×)** or **dip (<¼)** vs the SKU's own seasonal-expected share (reuses `anomalyFlags` over the live buy-plan forecast).
+- **Country × channel matrix** of open counts (click a cell to filter) + a **badge counter** on the tab (total open to review).
+- **Grouped & sorted by severity** (🔴 High / 🟠 Medium / 🟡 Low, by how far off) then SKU.
+- **120ms hover** on each anomaly shows a strip: last 6 → the month → next 6 (forecast, actual where past) + last-year actuals.
+- **Inline override input** per anomaly — set that month's forecast; auto-saves to the plan + buy plan and recomputes the anomaly.
+- **Dismiss / Snooze (30d / ∞)** per anomaly, persisted via the existing `demand_action_state` store; status pills (Open/Snoozed/Dismissed/All). `artifact_v16.7.html`. No migration.
+
 ## v26.468 - Demand plan: "From replacement" filter + predecessor shown on the SKU ⚠️ NEEDS TESTING
 - New **↩ From replacement** filter pill (demand toolbar, by Tier) shows only SKUs that inherit a predecessor's history (`replacement_sku` set). Behaves like the search/RW filters — hides subcats with none, auto-expands the SKU rows.
 - The inline SKU label (column 1) now shows the predecessor in small purple italics: **↩ from &lt;replacement SKU&gt;** (with a hover tooltip explaining the inheritance). `artifact_v16.7.html`. No migration.
