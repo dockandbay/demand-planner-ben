@@ -3956,7 +3956,7 @@
     if(root) root.querySelectorAll('.potab').forEach(function(b){ b.onclick=function(){ var pt=b.dataset.pt;
       root.querySelectorAll('.potab').forEach(function(x){x.classList.toggle('active',x===b);});
       root.querySelectorAll('.potab-panel').forEach(function(p){p.style.display=(p.dataset.pt===pt)?'':'none';});
-      if(b.dataset.po) writePoTabHash(b.dataset.po, pt);
+      if(i!=='DRAWER' && b.dataset.po) writePoTabHash(b.dataset.po, pt);   // deep-link only the INLINE PO detail; the drawer is a transient overlay — don't hijack the current route (Actions/Payments/…) or a refresh would jump to the PO
       // an order-plan final-cost edit marks the panel stale → rebuild the value-driven tabs (Payments/Landed)
       // with fresh figures when they're opened (poRefetchPanel keeps the just-activated tab)
       var pd=document.getElementById('podet-'+i);
