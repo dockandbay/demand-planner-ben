@@ -687,6 +687,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
     <button id="ctx-help-btn" title="Help for this page" onclick="openCtxHelp(event)" style="margin-right:2px;width:24px;height:24px;border-radius:50%;border:1px solid #6b7280;background:#4b5563;color:#fff;cursor:pointer;font-weight:700;font-size:13px;line-height:1;flex:0 0 auto">?</button>
     <div class="tool-bar" id="plan-tools" role="group" aria-label="AI tools">
       <button class="tool-btn" id="insights-btn" title="Get AI insights"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 1 4 12.7c-.7.5-1 1.3-1 2.1V18H9v-1.2c0-.8-.3-1.6-1-2.1A7 7 0 0 1 12 2z"/></svg>AI Insights</button>
+      <button class="tool-btn" id="fclogic-btn" title="How the forecast numbers are calculated" onclick="openFcLogic(event)" style="border-color:#7c3aed;color:#5b21b6">&#9635; Forecast Logic</button>
     </div>
   </div>
   <div id="ctabs-row" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
@@ -759,6 +760,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
       <div style="font-size:15px;font-weight:700">What to do &amp; when</div>
       <button onclick="closeHelp()" style="margin-left:auto;border:none;background:#f0f0f0;border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:18px;line-height:1">&times;</button>
     </div>
+    <div style="margin:0 0 12px;padding:9px 12px;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;font-size:12px;color:#4c1d95"><b>&#9635; How are the forecast numbers calculated?</b> See the <b>Forecast Logic</b> button on the demand toolbar — it documents the chained last-year rule, new-SKU contribution, overrides, launch/discontinue and smoothing in full.</div>
     <div style="display:flex;flex-direction:column;gap:12px">
       <div>
         <div style="font-weight:700;color:#0a0a0a">1 &middot; Update sales actuals (roll the month forward)</div>
@@ -772,8 +774,8 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
       </div>
       <div>
         <div style="font-weight:700;color:#0a0a0a">3 &middot; Forecasts in PLAN</div>
-        <div style="color:#555">Pre-loaded forecasts (current_forecasts) load on open; edit any cell to override.</div>
-        <div><b>Save Forecasts</b> writes your view back to Airtable. The buy plan reflects edits live.</div>
+        <div style="color:#555">Each SKU/month is your saved override where you've set one, otherwise the calculated forecast (chained last-year for continuing SKUs, subcategory contribution for new ones &mdash; see <b>&#9635; Forecast Logic</b>).</div>
+        <div>Edit any cell to override it (a literal number, or a <b>%</b> growth on last year). <b>Save Forecasts</b> persists your overrides; the buy plan reflects them live.</div>
       </div>
       <div>
         <div style="font-weight:700;color:#0a0a0a">4 &middot; Buy plan demand</div>
@@ -815,6 +817,40 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
     <div style="margin-top:14px;color:#888;font-size:11px">Refresh data &amp; Save write to Airtable directly. Actuals need a rebuild because they're embedded in the app.</div>
   </div>
 </div>
+<div id="fclogic-ov" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:flex-start;justify-content:center" onclick="if(event.target===this)closeFcLogic()">
+  <div style="background:#fff;max-width:660px;width:94%;margin-top:40px;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.25);padding:18px 22px;max-height:86vh;overflow:auto;font-size:13px;line-height:1.55;color:#222">
+    <div style="display:flex;align-items:center;margin-bottom:10px">
+      <div style="font-size:15px;font-weight:700">&#9635; Forecast logic — how every number is calculated</div>
+      <button onclick="closeFcLogic()" style="margin-left:auto;border:none;background:#f0f0f0;border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:18px;line-height:1">&times;</button>
+    </div>
+    <div style="color:#555;margin-bottom:12px">Every SKU × market × channel × month cell is either a real actual or a calculated forecast. The demand plan and the buy plan use the <b>same</b> forecast, so they always agree.</div>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <div>
+        <div style="font-weight:700;color:#0a0a0a">1 &middot; Actuals vs forecast</div>
+        <div style="color:#444">Months up to and including the <b>last complete month</b> are <b>actuals</b> (read-only). The current (part-way) month and everything after are <b>forecast</b>.</div>
+      </div>
+      <div>
+        <div style="font-weight:700;color:#0a0a0a">2 &middot; A SKU's forecast — in order of precedence</div>
+        <div style="margin-top:3px"><b>a) Your override</b> &mdash; type in any forecast cell (a literal number, or a <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">%</code> growth on last year). A saved SKU forecast always wins for that month.</div>
+        <div style="margin-top:4px"><b>b) Continuing SKU</b> (has last-year sales) &mdash; <b>chained last-year rule</b>: the same month last year. If that month has <b>fully completed</b>, use its <b>actual</b> (e.g. a Jun-2027 cell uses the Jun-2026 actual). If it's <b>incomplete</b> (e.g. Aug-2026, part-way), use last year's <b>forecast</b> for that month, carried forward. No growth is added by default &mdash; growth comes from your overrides or the category assumptions below.</div>
+        <div style="margin-top:4px"><b>c) New SKU</b> (no last-year sales) &mdash; two paths, in order: <b>(i) replacement SKU</b> inherits its predecessor's history (set <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">replacement_sku</code> in the product master); else <b>(ii) subcategory contribution</b> &mdash; a share of the subcategory forecast, scaled by market tier <b>A / B / C</b> (default <b>3 / 2 / 1</b>).</div>
+      </div>
+      <div>
+        <div style="font-weight:700;color:#0a0a0a">3 &middot; Launch &amp; discontinue</div>
+        <div style="color:#444"><b>Pre-launch</b>: any month before a SKU's launch date is <b>0</b>. <b>Discontinued</b>: after the discontinue date the forecast is <b>capped by remaining stock</b> (on-hand + inbound, run down month by month) &mdash; never more than it can ship.</div>
+      </div>
+      <div>
+        <div style="font-weight:700;color:#0a0a0a">4 &middot; Category / subcategory forecast (the cascade)</div>
+        <div style="color:#444">Set a subcategory's monthly number as a <b>growth %</b> vs last year (e.g. <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">0.25</code> = +25%) or an absolute. Where the sum of the SKU forecasts doesn't match the subcategory forecast, a <b>gap</b> shows on the &ldquo;&#8627; total&rdquo; line. <b>Smoothing</b> a month rescales that month's SKUs (in proportion to their current forecast, capped by pre-launch = 0 and discontinued stock) so they sum to the subcategory target.</div>
+      </div>
+      <div>
+        <div style="font-weight:700;color:#0a0a0a">5 &middot; Committed demand &amp; the buy plan</div>
+        <div style="color:#444">Committed <b>Preorder &amp; Key-account</b> orders are folded into <b>B2B</b> demand. The <b>buy plan</b> reads these exact SKU forecasts (saved overrides where set, otherwise the chained/cascade rules above), so what you see on the plan is what it buys to.</div>
+      </div>
+    </div>
+    <div style="margin-top:14px;color:#888;font-size:11px">Tier weights (new-SKU split) are set in the &ldquo;What to do &amp; when&rdquo; help (the <b>?</b> button). Overrides persist with <b>Save Forecasts</b>.</div>
+  </div>
+</div>
 <div class="bar" id="statusbar"><span class="status" id="st"></span><span id="ver" style="font-size:10px;color:#bbb;margin-left:auto"></span></div>
 <div class="tw" id="tw"><table id="t"></table></div>
 </div>
@@ -829,6 +865,8 @@ var TIER_W={A:3,B:2,C:1};
 // sendPrompt exists in Claude.ai artifact sandbox; graceful fallback otherwise
 function openHelp(){var e=document.getElementById('help-ov');if(e)e.style.display='flex';syncTierW();}
 function closeHelp(){var e=document.getElementById('help-ov');if(e)e.style.display='none';}
+function openFcLogic(ev){ if(ev)ev.stopPropagation(); var e=document.getElementById('fclogic-ov'); if(e)e.style.display='flex'; }
+function closeFcLogic(){ var e=document.getElementById('fclogic-ov'); if(e)e.style.display='none'; }
 // Context help — one icon in the top nav; content matches the current tab / sub-tab.
 var CTX_HELP={
   'planning|plan':{t:'DEMAND ▸ Plan',h:'The monthly demand plan, category → SKU × market. Edit a forecast input (growth % like 0.3, an absolute like &gt;=4, or a literal) and the cascade rebuilds the SKU-level forecast. In a month cell, <b>i</b> = a BI rule applies, <b>C</b> = a trading-calendar event for that category × market × month.'},

@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.463 - Demand: "Forecast Logic" pop-down + refreshed help ⚠️ NEEDS TESTING
+- New **◫ Forecast Logic** button on the demand toolbar opens a pop-down documenting exactly how every forecast number is calculated: actuals-vs-forecast boundary, precedence (override → continuing-SKU chained last-year rule → new-SKU replacement/contribution), launch/discontinue handling, the category cascade + gap + smoothing, and how committed Preorder/KA demand and the buy plan tie in.
+- "What to do & when" help: added a banner pointing to Forecast Logic and refreshed the Forecasts-in-PLAN section (override-else-calculated; chained/contribution). `artifact_v16.7.html`. No migration.
+- NOTE: the ops steps 1/2/5 in "What to do & when" still describe the old Apps Script / sku_data.json flow — left as-is pending Ben's confirmation of the current n8n/Supabase process.
+
 ## v26.462 - Samples: change-log dates dd-mmm-yy + SKU search filter ⚠️ NEEDS TESTING
 - **Sample record-of-change dates** now render **dd-mmm-yy** — the log detail formats date fields (e.g. "Expected completion updated: 30-Jul-26 → 15-Sep-26") and the entry timestamp shows dd-mmm-yy HH:MM. `server.mjs` + `supply/inject.html`.
 - **Samples search now matches SKUs.** The admin samples grid filter and the supplier-portal samples filter now include each sample's SKUs (via `cur_lines`), so typing a SKU narrows the list. Admin placeholder updated to "ref / supplier / recipient / SKU". `supply/inject.html` + `supply/portal-view.js`. No migration.
