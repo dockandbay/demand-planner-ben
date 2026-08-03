@@ -1601,8 +1601,10 @@ function fbaTransferRec(sku,mkt){
 }
 // Non-GRS transfer: demand-driven (FBA shortfall over the target weeks), drawn from the non-GRS pool.
 //  - no 3PL protection cap (3PL never uses non-GRS stock)
-//  - round UP to whole cartons where possible (capped at what we hold)
-//  - if the demand requirement is > 65% of the whole non-GRS pool, just send it all
+//  - WHOLE CARTONS first (floor): if the need is ≥ a carton, send only whole cartons and DEFER the sub-carton
+//    remainder to a future transfer (never full + partial in one go). Only when the entire remaining need is
+//    itself sub-carton do we send that partial. (Ben — "same logic for any transfer".)
+//  - sized to demand, never the whole pool: capped at what we hold, but no "send the lot" dump.
 function fbaTransferNonGrs(sku,mkt){
   const pool=nonGrsOf(sku,mkt);
   if(pool<=0)return 0;
@@ -1615,8 +1617,8 @@ function fbaTransferNonGrs(sku,mkt){
   const need=Math.max(0,target-(iF+oof+awd));   // demand-driven requirement
   if(need<=0)return 0;
   const base=Math.min(need,pool);               // can't send more than we hold
-  if(base>0.65*pool)return pool;                // demand needs >65% of the pool → send the lot
-  return Math.min(Math.ceil(base/cp)*cp,pool);  // else round UP to whole cartons (capped at the pool)
+  const qty=(base>=cp)?Math.floor(base/cp)*cp:base;   // ≥1 carton → whole cartons only (defer the remainder); else send the trailing partial
+  return Math.min(qty,pool);
 }
 // Effective transfer = manual override if entered, else the recommendation.
 function fbaTransferEff(sku,mkt){
@@ -1987,7 +1989,7 @@ function render(){
       let trail;
       if(BP_VIEW==='fba'){
         const cp=(PD[s.s]&&PD[s.s].cp)||0;
-        const rec=(BU_SEL==='TRFFBA_NG')?nonGrsOf(s.s,CUR):fbaTransferRec(s.s,CUR);   // NG mode: transfer = all non-GRS stock
+        const rec=(BU_SEL==='TRFFBA_NG')?fbaTransferNonGrs(s.s,CUR):fbaTransferRec(s.s,CUR);   // NG mode: demand-driven whole-carton transfer from the non-GRS pool (NOT the whole pool)
         const ovKey=s.s+'|'+CUR;
         const ovVal=(FBA_OV[ovKey]!=null?FBA_OV[ovKey]:'');
         const fis=fbaInbSplit(s.s,CUR);
@@ -2024,7 +2026,7 @@ function render(){
           ? MKTS.map(function(m){var mm=PD[s.s]&&PD[s.s].mkts&&PD[s.s].mkts[m];var v=mm?(mm.i3||0):0;return '<td class="iv"'+(m===CUR?' style="background:#eff6ff"':'')+'><span class="iv-v '+(v<0?'iv-neg':'iv-pos')+'">'+(mm?fmt(v):'—')+'</span></td>';}).join('')
           : `<td class="iv"><span class="iv-v ${i3<0?'iv-neg':'iv-pos'}">${fmt(i3)}</span></td>`}
         ${showNonGRS?`<td class="iv"><span class="iv-v" style="color:#475569" title="Non-GRS on-hand (sellable via 3PL; display only)">${(function(){var ng=nonGrsOf(s.s,CUR);return ng>0?fmt(ng):'—';})()}</span></td>`:''}
-        <td class="iv"${BP_VIEW==='fba'?' style="background:#fef9c3"':''}><span class="iv-v ${ifv<0?'iv-neg':'iv-pos'}">${fmt(ifv)}</span></td>
+        <td class="iv"${BP_VIEW==='fba'?` style="background:${ifv<=2?'#fee2e2':'#fef9c3'}"`:''}><span class="iv-v ${ifv<0?'iv-neg':'iv-pos'}">${fmt(ifv)}</span></td>
         ${showAWD?`<td class="iv" style="background:#fef9c3"><span class="iv-v" style="color:#475569" title="AWD (US upstream) — pooled into FBA cover for the transfer calc">${(function(){var a=awdOf(s.s,CUR);return a>0?fmt(a):'—';})()}</span></td>`:''}
         <td class="iv"><span class="iv-v">${oo>0?fmt(oo):'—'}</span></td>
         ${trail}
@@ -2362,7 +2364,7 @@ function _trfAmt(sku,donor,recip){ var r=trfLane(sku,donor,recip); return r?r.qt
 function downloadViewCSV(){ var vis=getFilteredVis()||[], co=CUR, rows=[], oth=MKTS.filter(function(m){return m!==co;});
   if(BP_VIEW==='fba'){ rows.push(['SKU','Release Window','SOH 3PL','SOH FBA','Transfer FBA','FBA inbound <=14d','FBA inbound 15+d']);
     vis.forEach(function(s){ var md=PD[s.s]&&PD[s.s].mkts&&PD[s.s].mkts[co]; if(!md)return;
-      var rec=(BU_SEL==='TRFFBA_NG')?nonGrsOf(s.s,co):fbaTransferRec(s.s,co), fis=fbaInbSplit(s.s,co);
+      var rec=(BU_SEL==='TRFFBA_NG')?fbaTransferNonGrs(s.s,co):fbaTransferRec(s.s,co), fis=fbaInbSplit(s.s,co);
       rows.push([s.s,s.rw||'',md.i3||0,md['if_']||0,rec||0,fis.soon||0,fis.later||0]); });
   } else { // TRANSFER view: export every field shown in the grid + the SKU's transfer class(es).
     var hdr=['SKU','Title','Status','Type','Release Window','Launch','Disc'].concat(MKTS.map(function(m){return 'SOH '+m;})).concat(['SOH FBA','On Order','Class']);

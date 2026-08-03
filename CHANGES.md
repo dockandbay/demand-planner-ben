@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.484 - FBA transfer (non-GRS): demand-driven whole-carton transfer + SOH FBA <=2 light red ⚠️ NEEDS TESTING
+- BUG FIX: in "Transfer FBA (non GRS)" the recommended transfer showed the ENTIRE non-GRS pool (e.g. TOWLB-SUM-XL-UNICN-R US ~1400) regardless of FBA demand. The grid + download now use fbaTransferNonGrs (demand-driven), matching the effective/selected value.
+- Carton logic: non-GRS now sends WHOLE cartons first (floor) and defers the sub-carton remainder to a future transfer (never full+partial at once); only a sub-carton total is sent as a partial. Dropped the 65%-of-pool "send the lot" dump and the round-UP.
+- FBA transfer tab: SOH FBA cell is light red when <=2. artifact_v16.7.html. No migration. (Transfers are display/report only — buy quantities unaffected.)
+
 ## v26.483 - Buy tooltips: click-to-show + urgent/placement tips on the main grid ⚠️ NEEDS TESTING
 - The 120ms tooltip now also shows on CLICK (a clicked cell is also selected, so a selected cell shows its tooltip); click elsewhere hides it.
 - Main BUY grid: Buy 3PL cell shows the place-order/arrival tip and the Urgent Sea/Air cells show the urgent tip (stockout month + rush lead + earliest landing), same content as the popup. getBuyQtys now returns buyTip/urgTip. artifact_v16.7.html. No migration.
