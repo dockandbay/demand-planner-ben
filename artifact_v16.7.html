@@ -8597,7 +8597,6 @@ function renderDemandActionsView(body){
           ? '<button class="an-act" data-k="'+tHesc(key)+'" data-s="open" style="border:1px solid #1d4ed8;color:#1d4ed8;background:#fff;border-radius:5px;padding:2px 7px;cursor:pointer;font:inherit;font-size:10px">↺ Restore</button>'
           : '<button class="an-act" data-k="'+tHesc(key)+'" data-s="snoozed" data-days="30" style="border:1px solid #cbd5e1;background:#fff;border-radius:5px;padding:2px 7px;cursor:pointer;font:inherit;font-size:10px">Snooze 30d</button> <button class="an-act" data-k="'+tHesc(key)+'" data-s="snoozed" data-days="-1" title="snooze indefinitely" style="border:1px solid #cbd5e1;background:#fff;border-radius:5px;padding:2px 7px;cursor:pointer;font:inherit;font-size:10px">Snooze ∞</button> <button class="an-act" data-k="'+tHesc(key)+'" data-s="dismissed" style="border:1px solid #cbd5e1;background:#fff;border-radius:5px;padding:2px 7px;cursor:pointer;font:inherit;font-size:10px">Dismiss</button>';
         return '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:11px;color:#444;padding:5px 0'+(first?'':';border-top:1px solid #f1f5f9')+(resolved?';opacity:.6':'')+'">'
-          +'<span style="font-size:10px;color:#64748b;min-width:56px;font-weight:600">'+it.co+' · '+it.ch+'</span>'
           +'<span class="crc-tip" data-antip="'+tHesc(it.sku)+'|'+it.co+'|'+it.ch+'|'+it.fym+'" style="font-weight:700;color:'+col+';cursor:help;border-bottom:1px dotted '+col+'">'+arrow+' '+mlbl(it.fym)+'</span>'
           +'<span>fcst <b>'+fn(it.cur)+'</b> vs exp <b>'+fn(it.expected)+'</b></span>'
           +'<input class="an-ov" data-sku="'+tHesc(it.sku)+'" data-co="'+it.co+'" data-ch="'+it.ch+'" data-m="'+it.fym+'" value="'+(ov!=null?tHesc(ov):'')+'" placeholder="'+fn(it.cur)+'" title="Override this month forecast (saves to your plan and the buy plan)" style="width:62px;text-align:right;font-size:11px;border:1px solid #cbd5e1;border-radius:4px;padding:2px 5px" inputmode="numeric">'
@@ -8608,15 +8607,15 @@ function renderDemandActionsView(body){
         var h='<div style="border:1px solid #e8e8e8;border-left:4px solid '+scol+';border-radius:7px;padding:8px 12px;margin-bottom:7px">'
           +'<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:2px">'
           +'<span style="font-weight:700;font-size:12px;font-family:monospace">'+tHesc(g.sku)+'</span>'
-          +'<span style="font-size:10px;color:#64748b">'+tHesc(g.subcat||'')+'</span>'
+          +'<span style="font-size:10px;color:#64748b">'+g.co+' · '+g.ch+' · '+tHesc(g.subcat||'')+'</span>'
           +(g.items.length>1?'<span style="font-size:10px;font-weight:700;color:'+scol+';background:'+scol+'1a;border-radius:9px;padding:1px 8px">'+g.items.length+' anomalies</span>':'')
           +'<a href="#" class="an-jump" data-sku="'+tHesc(g.sku)+'" style="margin-left:auto;color:#1d4ed8;text-decoration:none;font-weight:600;white-space:nowrap;font-size:11px">Open in Plan ↗</a></div>';
         g.items.forEach(function(it,i){ h+=_anRow(it,i===0); });
         return h+'</div>'; }
       var SEVLBL={high:'🔴 High',med:'🟠 Medium',low:'🟡 Low'}, SEVCOL={high:'#dc2626',med:'#ea580c',low:'#eab308'};
       // group anomalies by SKU: one card per SKU, one row per (co·ch·month) anomaly; card severity = its worst row
-      var _grp={}, _ord=[]; list.forEach(function(it){ if(!_grp[it.sku]){_grp[it.sku]=[];_ord.push(it.sku);} _grp[it.sku].push(it); });
-      var glist=_ord.map(function(sk){ var arr=_grp[sk]; arr.sort(function(a,b){return a.fym<b.fym?-1:a.fym>b.fym?1:0;}); var top=arr.reduce(function(m,x){return x.svRank<m.svRank?x:m;},arr[0]); return {sku:sk,items:arr,svRank:top.svRank,sev:top.sev,subcat:top.subcat}; });
+      var _grp={}, _ord=[]; list.forEach(function(it){ var gk=it.sku+'|'+it.co+'|'+it.ch; if(!_grp[gk]){_grp[gk]=[];_ord.push(gk);} _grp[gk].push(it); });
+      var glist=_ord.map(function(gk){ var arr=_grp[gk]; arr.sort(function(a,b){return a.fym<b.fym?-1:a.fym>b.fym?1:0;}); var top=arr.reduce(function(m,x){return x.svRank<m.svRank?x:m;},arr[0]); return {sku:top.sku,co:top.co,ch:top.ch,items:arr,svRank:top.svRank,sev:top.sev,subcat:top.subcat}; });
       glist.sort(function(a,b){ return (a.svRank-b.svRank)||(a.sku<b.sku?-1:a.sku>b.sku?1:0); });
       var cards='', _lastSev=null;
       glist.forEach(function(g){ if(selSt==='open'&&g.sev!==_lastSev){ _lastSev=g.sev; cards+='<div style="font-size:11px;font-weight:800;letter-spacing:.04em;color:#475569;margin:12px 0 5px">'+(SEVLBL[g.sev]||g.sev)+'</div>'; } cards+=_anGroup(g); });

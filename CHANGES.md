@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.476 - Anomalies: only merge same SKU + country + channel ⚠️ NEEDS TESTING
+- Fix v26.475: cards now group by SKU+country+channel (multiple MONTHS merge into one card); different country/channel combos stay separate. Header shows SKU + country/channel + subcategory; per-row country/channel label dropped (now redundant). artifact_v16.7.html. No migration.
+
 ## v26.475 - Anomalies: group a SKUs multiple anomalies into one card ⚠️ NEEDS TESTING
 - One card per SKU now, with a row per (country/channel/month) anomaly, instead of a separate card each. Header shows the SKU + subcategory + an "N anomalies" badge; card left-border + severity grouping use the SKUs worst row. Each row keeps its own hover strip, override input, set-to-recommended link and snooze/dismiss buttons. artifact_v16.7.html. No migration.
 
