@@ -793,7 +793,7 @@
         +'<div class="tiny mut" style="margin:2px 0 6px">Amend the quantity or enter your cost per line in the table above, or use <b>+ Add new line</b> to add SKUs you supply (enter the cost in the table after).</div>';
       // ---- Additional costs (freight, tooling, surcharges…) → sum into the total invoice cost ----
       var addTot=0; var acRows=add.map(function(a){ var q=Number(a.qty)||0, pr=Number(a.price)||0, lt=q*pr; addTot+=lt;
-        return '<tr><td class="l"><input class="fci pp-ac-desc" data-id="'+a.id+'" data-po="'+po+'" value="'+esc(a.description||'')+'" placeholder="description" style="width:190px"></td>'
+        return '<tr><td class="l"><input class="fci pp-ac-desc" data-id="'+a.id+'" data-po="'+po+'" value="'+esc(a.description||'')+'" placeholder="description" style="width:190px;text-align:left"></td>'
           +'<td style="text-align:right"><input class="fci pp-ac-qty" data-id="'+a.id+'" value="'+(a.qty!=null?esc(a.qty):'')+'" style="width:56px;text-align:right" inputmode="numeric"></td>'
           +'<td style="text-align:right"><input class="fci pp-ac-price" data-id="'+a.id+'" value="'+(a.price!=null?esc(a.price):'')+'" style="width:74px;text-align:right" inputmode="decimal"></td>'
           +'<td style="text-align:right">$'+money(lt)+'</td>'
@@ -802,7 +802,7 @@
       skus+='<div class="sect-h" style="margin-top:12px">Additional costs <span class="mut tiny">(freight, tooling, surcharges… — added to the invoice)</span></div>'
         +'<table style="font-size:11px;border-collapse:collapse;text-align:left;table-layout:fixed;width:540px;max-width:100%"><colgroup><col style="width:200px"><col style="width:72px"><col style="width:90px"><col style="width:88px"><col style="width:70px"></colgroup><thead><tr><th class="l">Description</th><th class="l">Qty</th><th class="l">Price</th><th class="l">Total</th><th></th></tr></thead><tbody>'
         +acRows
-        +'<tr><td class="l"><input class="fci pp-ac-ndesc" data-po="'+po+'" placeholder="+ add a cost…" style="width:190px"></td><td style="text-align:right"><input class="fci pp-ac-nqty" data-po="'+po+'" placeholder="qty" style="width:56px;text-align:right" inputmode="numeric"></td><td style="text-align:right"><input class="fci pp-ac-nprice" data-po="'+po+'" placeholder="price" style="width:74px;text-align:right" inputmode="decimal"></td><td></td><td class="l"><button class="save-btn pp-ac-add" data-po="'+po+'">Add</button></td></tr>'
+        +'<tr><td class="l"><input class="fci pp-ac-ndesc" data-po="'+po+'" placeholder="+ add a cost…" style="width:190px;text-align:left"></td><td style="text-align:right"><input class="fci pp-ac-nqty" data-po="'+po+'" placeholder="qty" style="width:56px;text-align:right" inputmode="numeric"></td><td style="text-align:right"><input class="fci pp-ac-nprice" data-po="'+po+'" placeholder="price" style="width:74px;text-align:right" inputmode="decimal"></td><td></td><td class="l"><button class="save-btn pp-ac-add" data-po="'+po+'">Add</button></td></tr>'
         +(add.length?'<tr style="font-weight:700;border-top:1px solid #ccc"><td class="l">Additional total</td><td></td><td></td><td style="text-align:right">$'+money(addTot)+'</td><td></td></tr>':'')
         +'</tbody></table>'
         +'<div style="margin:12px 0 4px;padding:10px 12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-weight:800;font-size:18px">Total invoice amount: <span class="pp-inv-tot" data-add="'+addTot+'">$'+money(invTot)+'</span> <span class="mut" style="font-weight:400;font-size:12px">(line items $'+money(totP)+' + additional $'+money(addTot)+')</span></div>';
@@ -906,7 +906,8 @@
         +CARS_PP.map(function(o){return '<option'+(o===carVal?' selected':'')+'>'+o+'</option>';}).join('');
       var shipHead=hasShip
         ? '<div style="font-size:12px;margin-bottom:8px"><b>Shipment '+esc(p.shipment)+'</b>'
-            +(p.ships_with_supplier?' &nbsp;·&nbsp; ships with supplier: <b>'+esc(p.ships_with_supplier)+'</b>':'')
+            +(p.ship_mode?'<br>Freight Mode: <b>'+esc(String(p.ship_mode).toUpperCase())+'</b>':'')
+            +(p.ships_with_supplier?'<br>ships with supplier: <b>'+esc(p.ships_with_supplier)+'</b>':'')
             +'<br>Ship date: '+(p.ship?esc(fd(p.ship)):'<span class="mut">—</span>')+' · Est. completion: '+(p.prod_end?esc(fd(p.prod_end)):'<span class="mut">—</span>')
             +' &nbsp; <button class="lnk-btn pp-go-shipplan" data-ref="'+esc(p.shipment)+'" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;background:none;border:none;padding:0;font:inherit">View in Shipment Plan →</button></div>'
         : '<div style="font-size:13px;color:#334155;margin-bottom:8px">No shipment assigned yet — enter the carrier &amp; tracking below and we’ll create the shipment for this PO.</div>';
@@ -1019,10 +1020,12 @@
       var _pd=function(v){ return v?esc(fd(v)):'<span class="mut">—</span>'; };
       var startAmt=(p.start_assigned!=null?p.start_assigned:p.start_dep), compAmt=(p.completion_assigned!=null?p.completion_assigned:p.completion), balAmt=p.balance_1_amount;
       var paidTot=(p.start_date?Number(startAmt)||0:0)+(p.completion_date?Number(compAmt)||0:0)+(p.balance_1_date?Number(balAmt)||0:0);
-      // Amount due = order value − amounts actually PAID (paidTot counts only milestones with a recorded paid date),
-      // so paid + due = the full order value. A scheduled-but-unpaid deposit/completion is still owed — the old
-      // balance_owing netted those off even when unpaid, understating what the supplier is still due.
-      var dueTot=(p.value_used!=null?Number(p.value_used)-paidTot:null);
+      // Amount due is against the supplier's FINAL INVOICE, not the order value. Until they submit a final invoice
+      // amount nothing is formally due → $0. Once invoiced: invoice total − amounts actually PAID (paidTot counts
+      // only milestones with a recorded paid date). (Was value_used, which falls back to the order value when
+      // uninvoiced, so an uninvoiced PO wrongly showed the whole order value as due.)
+      var _invAmt=(p.supplier_invoice_total!=null&&p.supplier_invoice_total!=='')?Number(p.supplier_invoice_total):null;
+      var dueTot=(_invAmt!=null?_invAmt-paidTot:0);
       var _prow=function(lbl,amt,dt,ref){ return '<tr><td class="l" style="padding:4px 16px 4px 0;white-space:nowrap">'+lbl+'</td><td class="l" style="padding:4px 16px 4px 0"><b>'+_pm(amt)+'</b></td><td class="l" style="padding:4px 16px 4px 0">'+_pd(dt)+'</td><td class="l" style="padding:4px 0">'+(ref?esc(ref):'<span class="mut">—</span>')+'</td></tr>'; };
       var payments='<div class="sect-h">Payments</div>'
         +'<table style="font-size:12px;border-collapse:collapse;text-align:left;table-layout:fixed;width:600px;max-width:100%">'
@@ -1128,7 +1131,7 @@
       var total=rows.reduce(function(a,r){return a+(Number(r.amount)||0);},0);
       var head='<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">'+ppCard('Total paid','$'+money(total))+ppCard('Payments',String(rows.length))+'</div>';
       var cards=order.map(function(k){ var items=groups[k]; var gtot=items.reduce(function(a,r){return a+(Number(r.amount)||0);},0); var dt=items[0].payment_date;
-        var body=items.map(function(r){ return '<tr><td class="l">'+esc(poRef(r)||'—')+'</td><td class="l">'+(r.type?esc(r.type):'<span class="mut">—</span>')+'</td><td style="text-align:right">$'+money(r.amount||0)+'</td><td class="l">'+(r.deposit_ref?esc(r.deposit_ref):'<span class="mut">—</span>')+'</td></tr>'; }).join('');
+        var body=items.map(function(r){ return '<tr><td class="l" style="white-space:normal;overflow-wrap:anywhere;word-break:break-word">'+esc(poRef(r)||'—')+'</td><td class="l">'+(r.type?esc(r.type):'<span class="mut">—</span>')+'</td><td style="text-align:right">$'+money(r.amount||0)+'</td><td class="l">'+(r.deposit_ref?esc(r.deposit_ref):'<span class="mut">—</span>')+'</td></tr>'; }).join('');
         return '<div class="sp-card" style="border:1px solid #e0e0e0;border-radius:8px;margin-bottom:8px;background:#fff">'
           +'<div class="pay-head" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:9px 12px;cursor:pointer">'
             +'<span class="pay-toggle" style="font-size:12px;color:#475569">▸</span>'
@@ -1311,7 +1314,7 @@
                 +(s.escalated?'<span class="tool-badge bg-red" style="margin-left:auto">⚑ ESCALATED</span>':'')
                 +'</div>'
                 +'<div class="sp-body" style="display:none;padding:0 12px 12px">'
-                +(s.delivery_notes?'<div style="margin:8px 0;padding:8px 11px;border-radius:6px;font-size:12px;background:#eff6ff;border:1px solid #bfdbfe;white-space:pre-wrap;text-align:left"><b>Delivery notes</b><br>'+esc(s.delivery_notes)+'</div>':'')
+                +((s.branch||s.delivery_notes)?'<div style="margin:8px 0;padding:8px 11px;border-radius:6px;font-size:12px;background:#eff6ff;border:1px solid #bfdbfe;white-space:pre-wrap;text-align:left">'+(s.branch?'<div style="font-weight:700;font-size:13px;margin-bottom:'+(s.delivery_notes?'5px':'0')+'">BRANCH: '+esc(s.branch)+'</div>':'')+(s.delivery_notes?'<b>Delivery notes</b><br>'+esc(s.delivery_notes):'')+'</div>':'')
                 +editPanel+datesStrip+'<div style="margin-top:8px">'+members+'</div>'
                 +(s.members||[]).map(function(m){return dtcBlock(m.po);}).join('')
                 +chgPanel

@@ -1786,7 +1786,7 @@ async function buildShipmentPlan() {
       to_char(coalesce(sh.landing_date, fx.landing_date),'YYYY-MM-DD') landing,
       to_char(coalesce(sh.arrival_date, fx.arrival_date),'YYYY-MM-DD') arrival,
       to_char(coalesce(p.end_production_overide, p.start_production + (coalesce(sup.production_days,0)||' days')::interval)::date,'YYYY-MM-DD') prod_end,
-      p.po, coalesce(p.supplier_name,'') supplier_name, coalesce(p.client,'') client,
+      p.po, coalesce(p.supplier_name,'') supplier_name, coalesce(p.client,'') client, coalesce(p.branch,'') branch,
       upper(coalesce(nullif(p.country_code,''), b.country_code, '')) country,
       b.sea_lead_time_days sea_lead, b.air_lead_time_days air_lead,
       to_char(p.client_deadline_date,'YYYY-MM-DD') client_deadline,
@@ -1806,11 +1806,12 @@ async function buildShipmentPlan() {
     ORDER BY p.shipment_ref, (p.po = coalesce(sh.master_po, p.shipment_ref)) DESC, p.po`);
   const byRef = {};
   rows.forEach(r => { let s = byRef[r.shipment_ref];
-    if (!s) s = byRef[r.shipment_ref] = { shipment_ref: r.shipment_ref, master_po: r.master_po, mode: r.mode, carrier: r.carrier, carrier_ref: r.carrier_ref, flex_id: r.flex_id, status: r.status, departure: r.departure, landing: r.landing, arrival: r.arrival, sea_lead: r.sea_lead, air_lead: r.air_lead, prod_end: '', escalated: !!r.escalated, master_client: '', master_deadline: '', master_supplier: '', country: '', total_pallets: 0, delivery_notes: r.sh_delivery_notes || '', suppliers: [], members: [] };
+    if (!s) s = byRef[r.shipment_ref] = { shipment_ref: r.shipment_ref, master_po: r.master_po, mode: r.mode, carrier: r.carrier, carrier_ref: r.carrier_ref, flex_id: r.flex_id, status: r.status, departure: r.departure, landing: r.landing, arrival: r.arrival, sea_lead: r.sea_lead, air_lead: r.air_lead, prod_end: '', escalated: !!r.escalated, master_client: '', master_deadline: '', master_supplier: '', country: '', branch: '', total_pallets: 0, delivery_notes: r.sh_delivery_notes || '', suppliers: [], members: [] };
     if (r.prod_end && r.prod_end > s.prod_end) s.prod_end = r.prod_end;   // shipment production-end = latest across its POs (drives the portal date bands)
     s.total_pallets += Number(r.pallets) || 0;
     if (s.suppliers.indexOf(r.supplier_name) < 0 && r.supplier_name) s.suppliers.push(r.supplier_name);
     if (r.country && (r.is_master || !s.country)) s.country = r.country;
+    if (r.branch && (r.is_master || !s.branch)) s.branch = r.branch;   // destination branch (from the master PO) → shown in the portal delivery-notes heading
     if (r.is_master) { s.master_client = r.client; s.master_deadline = r.client_deadline; s.master_supplier = r.supplier_name; if (!s.delivery_notes) s.delivery_notes = r.po_delivery_notes || ''; }   // shipment inherits the master PO's branch delivery notes (unless overridden on the shipment)
     s.members.push({ po: r.po, supplier: r.supplier_name, pallets: Number(r.pallets) || 0, client: r.client, is_master: !!r.is_master });
   });
@@ -8141,8 +8142,12 @@ app.post('/api/supply/sample/:id/lines', async (req, res) => {   // replace all 
     for (const l of lines) { if (!l || !l.sku) continue;
       await client.query(`INSERT INTO planner.sample_request_lines (sample_id, sku, qty) VALUES ($1::bigint,$2,$3)`,
         [req.params.id, String(l.sku).trim(), qtyOrOne(l.qty)]); }
-    // SKUs/qty changed after acceptance → flag for re-acceptance (treated like not-yet-accepted)
-    await client.query(`UPDATE planner.sample_requests SET change_requested=true, updated_at=now() WHERE id=$1::bigint AND accepted_at IS NOT NULL`, [req.params.id]);
+    // SKUs/qty ACTUALLY changed after acceptance → flag for re-acceptance. Only when the new line set differs from
+    // the approved snapshot (jsonb, order-independent) — a no-op re-save (e.g. the admin grid re-posting lines while
+    // editing another field, or a supplier-side edit that doesn't touch SKUs) must NOT force a re-confirm.
+    await client.query(`UPDATE planner.sample_requests s SET change_requested=true, updated_at=now()
+      WHERE s.id=$1::bigint AND s.accepted_at IS NOT NULL
+        AND s.approved_lines IS DISTINCT FROM (SELECT jsonb_object_agg(sku,qty) FROM (SELECT sku, sum(qty) qty FROM planner.sample_request_lines WHERE sample_id=$1::bigint GROUP BY sku) z)`, [req.params.id]);
     await client.query('COMMIT'); res.json({ ok:true, count: lines.length });
   } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); }
   finally { client.release(); }

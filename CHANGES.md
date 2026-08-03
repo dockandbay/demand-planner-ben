@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.458 - Supplier portal: 6 fixes (amount due, align, wrap, branch, freight mode, sample reconfirm) ⚠️ NEEDS TESTING
+- **Amount due** on Payments & Documents now = supplier's **final invoice** total − paid (was order value); **$0 until a final invoice amount is entered**. `portal-view.js`.
+- **Additional costs** description inputs left-aligned. `portal-view.js`.
+- **Payments tab** PO-reference cell now **wraps** instead of overflowing into Type. `portal-view.js`.
+- **Shipment delivery notes** heading now shows the **destination branch** (`BRANCH: <name>`). Server: added `branch` to the shipment-plan payload; `portal-view.js` renders it. `server.mjs` + `portal-view.js`.
+- **Assigned-shipment header** now shows **Freight Mode** and **ships-with supplier** on their own lines (uses existing `ship_mode`). `portal-view.js`.
+- **Sample re-confirm** no longer fires on a no-op line re-save — `change_requested` is only set when the SKUs/qty **actually differ** from the approved snapshot (so supplier field edits / incidental saves don't force a re-confirm; only genuine Dock&Bay SKU changes do). `server.mjs`.
+- No migration.
+
 ## v26.457 - Demand grid: FY-bar header row is opaque white ⚠️ NEEDS TESTING
 - The first header row (FY24/25 · FY25/26 · FY26/27 group bars) had `background:transparent`, so body rows showed through the sticky header when scrolling. Made that whole row solid white — completes the sticky-header fix. `artifact_v16.7.html`. No migration.
 
