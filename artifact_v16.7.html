@@ -791,7 +791,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
       <div>
         <div style="font-weight:700;color:#0a0a0a">6 &middot; How new SKUs get a forecast</div>
         <div style="color:#555">A SKU with little or no sales history still needs a number. Two paths, in order:</div>
-        <div style="margin-top:3px"><b>a) Replacement SKU</b> &mdash; if the product master sets a <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">replacement_sku</code>, the new SKU inherits that predecessor's sales history as its forecast basis. Applied during <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">extract_sku_data.gs</code>, so it needs the usual extract &rarr; rebuild.</div>
+        <div style="margin-top:3px"><b>a) Replacement SKU</b> &mdash; if the product master sets a <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">replacement_sku</code>, the new SKU inherits that predecessor's sales history as its forecast basis (applied automatically from the field; the new SKU's own actuals take over month by month as they come in).</div>
         <div style="margin-top:3px"><b>b) Subcategory contribution</b> &mdash; otherwise the SKU takes a share of its subcategory forecast, scaled by its market tier. Tiers are weighted <b>A / B / C</b> (default <b>3 / 2 / 1</b>): an A-tier SKU is seeded at 3&times; the weight of a C-tier one. This is what the BUY plan, the SKU drill-down and the inline expander all use, so a brand-new SKU shows a non-zero number everywhere.</div>
         <div style="margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <span style="font-size:12px;color:#555;font-weight:600">Tier weights:</span>
@@ -5303,9 +5303,22 @@ var _SKUS_NEW_FORMAT = (function(){
   }
   return false;
 })();
-function skuSales(sku,co,ch){
+var _SKUSALES_CACHE={};
+function _skuSalesRaw(sku,co,ch){
   if(_SKUS_NEW_FORMAT) return SKUS[sku+'|'+co+'|'+ch] || {};
   return SKUS[sku+'|'+skuWh(co,ch)] || {};
+}
+// Sales history for a SKU/market/channel. REPLACEMENT SKUs (products.replacement_sku → SKUM[sku].rep) inherit
+// their predecessor's history as the forecast basis: own actuals win per month, the predecessor fills the gaps.
+// This is what the old extract did by pre-stamping; now inferred live from the replacement_sku field.
+function skuSales(sku,co,ch){
+  var rep=SKUM[sku]&&SKUM[sku].rep;
+  if(!rep) return _skuSalesRaw(sku,co,ch);
+  var ck=sku+'|'+co+'|'+ch; if(_SKUSALES_CACHE[ck]) return _SKUSALES_CACHE[ck];
+  var own=_skuSalesRaw(sku,co,ch), pred=(SKUM[rep]?_skuSalesRaw(rep,co,ch):null);
+  var out=own;
+  if(pred&&Object.keys(pred).length){ out={}; for(var k in pred)out[k]=pred[k]; for(var k2 in own)out[k2]=own[k2]; }  // predecessor base, own overrides
+  _SKUSALES_CACHE[ck]=out; return out;
 }
 
 // Stock for a subcategory at the channel's warehouse (DTC/B2B -> 3PL, FBA -> FBA).

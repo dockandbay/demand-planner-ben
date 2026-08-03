@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.467 - Replacement-SKU forecast inheritance, live from products.replacement_sku ⚠️ NEEDS TESTING · BUY-PLAN IMPACT
+- **A new SKU that sets `replacement_sku` now inherits its predecessor's sales history as its forecast basis — inferred live in the app** (the old Apps-Script pre-stamp is gone and n8n doesn't replicate it, so replacement SKUs had been falling through to the subcat-contribution guess). Server now injects `rep` on the SKU master from `planner.products.replacement_sku`; `skuSales()` merges the predecessor's history under the SKU's own (own actuals win per month). So a replacement SKU is treated as **continuing** (chained last-year rule off the predecessor) instead of new, and its own sales take over month by month as they come in. Affects the 12 SKUs with a replacement set. `server.mjs` + `artifact_v16.7.html`. Verified against live data (e.g. `PONCHK-CAB-MD-PALP` → `PONCHK-CAB-MD-LTPNK-NS`). Help text (§6a + Forecast Logic pop-down) updated to "automatic". No migration.
+
 ## v26.466 - "What to do & when" help rewritten for the n8n/Supabase estate ⚠️ NEEDS TESTING
 - Replaced the outdated Apps Script / `sku_data.json` / Airtable-refresh steps. Now: **product data, sales actuals & inventory import daily via n8n → Supabase** (no manual extract/rebuild); sales lag slightly (manual Cin7 feed, tightening with Fulfil); everything else (forecasts, POs, shipments, preorders, key accounts) is live in Supabase; forecast edits save with Save Forecasts to `forecast_outputs`. Steps 1, 2, 5 + footer. `artifact_v16.7.html`. No migration.
 
