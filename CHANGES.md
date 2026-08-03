@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.461 - Forecast: chained last-year rule for continuing SKUs ⚠️ NEEDS TESTING · BUY-PLAN IMPACT
+- **A continuing SKU's no-override future forecast now uses the SAME month LAST YEAR — its ACTUAL if that month has fully completed, else last year's FORECAST (chained).** Replaces the previous "most-recent-complete-actual" (trailing-12) rule, which wrongly pulled a 2-year-old actual for calendar months not yet complete this year. E.g. `HAIRW-CAB-LTPPL-NB` Aug 2027 now reads **152** (the Aug 2026 forecast) instead of 123 (the Aug 2025 actual); June 2027 uses the June 2026 actual (complete). New SKUs (no last-year history) still use the subcat-contribution cascade (A/B/C tiers); pre-launch months still zero.
+- Mechanism: `buildLiveDemand` §2 now applies saved overrides **inline** and runs each SKU's window **chronologically**, so the chained rule reads a month's finalised value (incl. its override) when computing the same month a year later. Old §2b (separate override pass) removed. Same rule mirrored in the demand-plan rows (`insertInlineSkuRows`). Chained logic unit-tested. `artifact_v16.7.html`. No migration. **Please spot-check buy quantities.**
+
 ## v26.460 - Supplier portal: paste-from-spreadsheet on Confirm order plan ⚠️ NEEDS TESTING
 - The **Confirm order plan** step now has a **📋 Paste from spreadsheet (SKU, Qty, Price)** box alongside the Excel upload. Paste rows straight from Excel / Google Sheets (tab / comma / semicolon separated; header row ignored) → each row updates the SKU's **qty** and **your cost** (added as a new line if not on the order). Changes flow through the existing `lineCost` path, so they **go to Dock & Bay to approve**. `supply/portal-view.js`. No migration.
 

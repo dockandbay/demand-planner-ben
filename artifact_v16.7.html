@@ -5411,19 +5411,11 @@ function inbDiv(inb, entries, color){
 // SKU-level loaded forecast from forecast_outputs (in-memory working store).
 // Returns the unit value for a month, or null if this SKU/wh/channel has no loaded forecast.
 function skuOutFC(sku,co,ch,m){var o=FC_OUTPUTS[sku+'|'+skuWh(co,ch)+'|'+ch];return(o&&o[m]!=null)?o[m]:null;}
-// Flat-LY basis = the trailing 12 COMPLETE actual months (NOT the 2025 calendar year — a SKU launched in 2026
-// has no 2025 history but should still forecast off its own actuals). For a calendar month 'MM', the most
-// recent complete actual is THIS year if that month has already finished (MM ≤ CUR_YTD_END's month), else last
-// year. CUR_YTD_END = last complete actual month.
+// "Continuing SKU" = has any actuals in the trailing 12 complete months. For a calendar month 'MM', the most
+// recent complete actual is THIS year if that month has finished (MM ≤ CUR_YTD_END's month), else last year.
+// (The no-override forecast itself uses the CHAINED last-year rule — see buildLiveDemand §2 / insertInlineSkuRows:
+//  same month last year → its ACTUAL if that month completed, else its FORECAST — not this flat lookup.)
 function _flatLyKey(mm){var ey=+String(CUR_YTD_END).slice(0,4),em=+String(CUR_YTD_END).slice(5,7),mi=+mm;return ((mi<=em)?ey:ey-1)+'_'+mm;}
-// Fallback SKU forecast for a month when there's NO saved override: the SKU's OWN most-recent actual for that
-// calendar month (flat, +0% growth) if it has any trailing-12 history; otherwise the subcat cascade
-// (share × subcat forecast) so new/no-history SKUs still get a number. `salesMap` = skuSales(sku,co,ch);
-// `hasLY` = precomputed. Used by BOTH the demand-plan rows and buildLiveDemand so the plan and buy plan agree.
-function skuFbFC(salesMap,hasLY,m,subcatFUm,share){
-  if(hasLY)return Math.round(salesMap[_flatLyKey(m.slice(5,7))]||0);   // flat: SKU's most-recent actual for this month
-  return Math.round((subcatFUm||0)*(share||0));                        // new SKU with no actuals → subcat cascade
-}
 function skuHasLY(salesMap){for(var mi=1;mi<=12;mi++){var mm=(mi<10?'0':'')+mi;if((salesMap[_flatLyKey(mm)]||0)!==0)return true;}return false;}
 // Read/write a SKU forecast override directly into the FC_OUTPUTS working store.
 // Replaces the old localStorage layer so an edit moves BOTH the planner and the buy plan
@@ -6486,7 +6478,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
     var p=SKUM[sku];if(!p)return;
     var sales=skuSales(sku,co,ch);
     var share=shares[sku]||0;
-    var _hasLY=skuHasLY(sales);   // flat-LY fallback basis (see skuFbFC) — keeps the plan in step with buildLiveDemand
+    var _hasLY=skuHasLY(sales);   // continuing SKU? drives the chained last-year rule below (keeps the plan in step with buildLiveDemand)
     var discDate=p.disc&&p.disc[ctry]?p.disc[ctry]:null;
     var launchDate=p.lch&&p.lch[ctry]?p.lch[ctry]:null;
     var preLaunchM=function(mo){return launchDate&&(mo.slice(0,4)+'-'+mo.slice(5,7)+'-01')<launchDate;}; // pre-launch only for months before the launch date
@@ -6501,7 +6493,11 @@ function insertInlineSkuRows(s,co,ch,afterTr){
     FM_CALC.forEach(function(m){ // incl. Jan/Feb 2029 spill so the FY28/29 SKU total is complete
       var ms=m.slice(0,4)+'-'+m.slice(5,7)+'-01';
       var _fo=skuOutFC(sku,co,ch,m);
-      var raw=(_fo!=null)?_fo:skuFbFC(sales,_hasLY,m,subcatFU[m],share);   // flat last-year actual (or cascade for new SKUs)
+      var raw;
+      if(_fo!=null){ raw=_fo; }                                                   // saved override wins
+      else if(_hasLY){ var lyM=(parseInt(m.slice(0,4),10)-1)+'_'+m.slice(5,7);    // continuing SKU: same month, last year
+        raw=(lyM<=CUR_YTD_END)?(sales[lyM]||0):(skuFC[lyM]||0); }                 // complete → last-year ACTUAL; incomplete → last-year FORECAST (chained)
+      else { raw=Math.round((subcatFU[m]||0)*share); }                           // new SKU → subcat cascade × share
       if(launchDate&&ms<launchDate){skuFC[m]=0;}
       else if(discDate&&ms>discDate){
         if(rem<=0){skuFC[m]=0;skuRundown[m]=true;skuDiscOut[m]=true;return;} // no stock left -> disc
@@ -9547,42 +9543,29 @@ function buildLiveDemand(){
           var launchDate=sp.lch&&sp.lch[ctry]?sp.lch[ctry]:null;
           var discDate=sp.disc&&sp.disc[ctry]?sp.disc[ctry]:null;
           var rem=(sp.inv&&sp.inv[skuWh(co,ch)])||0;
-          var s2sales=skuSales(s2,co,ch), s2HasLY=skuHasLY(s2sales);   // flat-LY fallback basis (see skuFbFC)
-          if(!s2HasLY&&sh<=0)return;   // new SKU with no share and no LY → nothing to forecast
+          var s2sales=skuSales(s2,co,ch), s2HasLY=skuHasLY(s2sales);
+          var ovMap=FC_OUTPUTS[s2+'|'+skuWh(co,ch)+'|'+ch]||{};   // saved SKU-level overrides (forecast_outputs)
+          if(!s2HasLY&&sh<=0&&!Object.keys(ovMap).length)return;   // new SKU with no share, no LY and no override → nothing to forecast
+          // Chronological pass so the CHAINED last-year rule can read md.demand[ch][lyM] computed earlier this loop.
           LIVE_FC_MONTHS.forEach(function(fym){
             var ms=fym.slice(0,4)+'-'+fym.slice(5,7)+'-01';
-            var raw=skuFbFC(s2sales,s2HasLY,fym,fu[fym],sh);   // flat last-year actual (or cascade for new SKUs)
+            var raw;
+            if(ovMap[fym]!=null){ raw=ovMap[fym]; }                                        // saved SKU override wins
+            else if(s2HasLY){ var lyM=(parseInt(fym.slice(0,4),10)-1)+'_'+fym.slice(5,7);   // continuing SKU: same month, last year
+              raw=(lyM<=CUR_YTD_END)?(s2sales[lyM]||0):(md.demand[ch][lyM]||0); }           // complete → last-year ACTUAL; incomplete → last-year FORECAST (chained)
+            else { raw=(fu[fym]||0)*sh; }                                                  // new SKU → subcat cascade × share
             var fc;
             if(launchDate&&ms<launchDate){fc=0;}
-            else if(discDate&&ms>discDate){fc=Math.max(0,Math.min(raw,rem));rem=Math.max(0,rem-fc);}
-            else{fc=raw;}
+            else if(discDate&&ms>discDate){fc=Math.max(0,Math.min(Math.round(raw),rem));rem=Math.max(0,rem-fc);}
+            else{fc=Math.round(raw);}
             if(fc>0)md.demand[ch][fym]=fc;else delete md.demand[ch][fym];
           });
         });
       });
     });
   });
-  // 2b) Override with authoritative SKU-level forecast_outputs where present (v7.0).
-  //     For any SKU/warehouse/channel in FC_OUTPUTS, write the loaded SKU forecast where a month is
-  //     saved. A month NOT in the saved set keeps the section-2 cascade as fallback (a saved forecast
-  //     that only covers part of the window no longer blanks the rest — fixed: buy plan showed no
-  //     forecast past the saved horizon). Pre-launch months are still zeroed.
-  Object.keys(FC_OUTPUTS||{}).forEach(function(key){
-    var parts=key.split('|');if(parts.length<3)return;
-    var sku=parts[0],wh=parts[1],ch=parts[2];
-    var co=(wh.split('_')[0]||'').toUpperCase();
-    var prod=BP_DATA.products[sku];if(!prod||!prod.mkts||!prod.mkts[co])return;
-    var md=prod.mkts[co];if(!md.demand)md.demand={};if(!md.demand[ch])md.demand[ch]={};
-    var sp=SKUM[sku]||{};var lch=sp.lch&&sp.lch[co.toLowerCase()]?sp.lch[co.toLowerCase()]:null;
-    var mo=FC_OUTPUTS[key]||{};
-    LIVE_FC_MONTHS.forEach(function(fym){
-      var ms=fym.slice(0,4)+'-'+fym.slice(5,7)+'-01';
-      if(lch&&ms<lch){delete md.demand[ch][fym];return;}   // pre-launch = no demand
-      if(!(fym in mo))return;                               // month not saved → keep the section-2 cascade fallback
-      var v=mo[fym];
-      if(v>0)md.demand[ch][fym]=Math.round(v);else delete md.demand[ch][fym];
-    });
-  });
+  // (2b removed v26.461 — saved SKU overrides (forecast_outputs) are now applied INLINE in section 2's
+  //  chronological pass, so the chained last-year rule can read a month's final value incl. its override.)
   // 3) Re-fold committed Preorder/KA demand into B2B (pka stays on each market)
   Object.keys(BP_DATA.products).forEach(function(sku){
     var mk=BP_DATA.products[sku].mkts;if(!mk)return;
