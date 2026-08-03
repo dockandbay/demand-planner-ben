@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.479 - Demand plan: completed past-FY totals show green (Actuals) ⚠️ NEEDS TESTING
+- Collapsed year-total cell + header for fully-complete past fiscal years (FY24/25, FY25/26 — any FY before the current one) now use the green Actuals styling instead of grey year-total styling, since those FYs are 100% actuals. artifact_v16.7.html. No migration.
+
 ## v26.478 - Multi-SKU filter + paste-many expander on demand plan & BUY & MOVE ⚠️ NEEDS TESTING
 - Demand plan SKU filter now does the same comma/space-separated OR search (code or name) as the PO grid (via skuMatchQ); BUY/FBA/TRANSFER already did.
 - Added the PO-style ⤢ expand popover (paste a list of SKUs, comma/space/newline separated) next to the demand-plan filter and the shared BUY & MOVE #qry filter. Reusable attachSkuMultiExpand() helper. artifact_v16.7.html. No migration.
