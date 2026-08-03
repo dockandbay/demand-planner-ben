@@ -1022,6 +1022,7 @@ var BP_DATA={products:{},sku_list:[],built:'',demand_source:'',may_days:{elapsed
 // independent of buy_plan_data extraction. Refresh by re-running the MCP pull when products change.
 var PROD_CONST={};
 var BRANCH_FREIGHT={};   // {uk:{air,sea days},…} — expedite freight leads for Buy 3PL Urgent Air/Sea (server-injected)
+var TRANSFER_LEADS={};   // {UK:{US:6,EU:2,AU:8},…} — inter-market 3PL→3PL transfer lead times (weeks); missing lane = we don't transfer that way. Server-injected (migration 171).
 var COMPLEX_RULES=[];    // BUY ▸ Complex Rules: cover-target override rules (server-injected). Buy engine reads these to override the 3PL cover target per SKU/window. Replaces First Buy.
 // Categories + subcategories metadata — pulled via MCP each rebuild from
 // Airtable's categories/subcategories tables. CATS_META keyed by category

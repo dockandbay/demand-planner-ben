@@ -433,6 +433,15 @@ async function buildBRANCH_FREIGHT() {
   return o;
 }
 
+// Inter-market (3PL→3PL) transfer lead times (weeks) per lane, for the Rebalance / Urgent transfer classes.
+// Shape: { UK:{US:6,EU:2,AU:8}, US:{UK:6,EU:6,AU:8,CA:2}, … }. A missing lane = we don't transfer that way.
+async function buildTRANSFER_LEADS() {
+  const o = {};
+  try { (await pool.query(`SELECT upper(from_market) f, upper(to_market) t, weeks FROM planner.transfer_lead_times`)).rows
+    .forEach(r => { (o[r.f] || (o[r.f] = {}))[r.t] = Number(r.weeks); }); } catch (e) {}
+  return o;
+}
+
 // FBA carton dims for the FBA Transfer Upload (box L/W/H/weight per region) + units-per-box.
 async function buildFBADIMS() {
   // Carton dims/weights for the FBA Transfer download. Source = planner.products (live-updated from Airtable
@@ -558,9 +567,9 @@ app.get('/', async (_req, res) => {
     if (_dataCache && Date.now() - _dataCache.at < DATA_TTL_MS) _vals = _dataCache.vals;
     else { _vals = await Promise.all([
       buildDATA(), buildFC_CURRENT(), buildFC_OUTPUTS(), buildSKURAW(),
-      buildCATS_META(), buildSUBS_META(), buildBI_RULES(), buildPROD_CONST(), freshness(), buildFBADIMS(), buildSAEXTRA(), gbpRate(), buildBRANCH_FREIGHT(),
+      buildCATS_META(), buildSUBS_META(), buildBI_RULES(), buildPROD_CONST(), freshness(), buildFBADIMS(), buildSAEXTRA(), gbpRate(), buildBRANCH_FREIGHT(), buildTRANSFER_LEADS(),
     ]); _dataCache = { at: Date.now(), vals: _vals }; }
-    const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts, FBADIMS, SA_EXTRA, GBP_RATE, BRANCH_FREIGHT] = _vals;
+    const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts, FBADIMS, SA_EXTRA, GBP_RATE, BRANCH_FREIGHT, TRANSFER_LEADS] = _vals;
     let html = DEV ? loadHTML() : HTML;
     html = replaceGlobal(html, 'DATA', JSON.stringify(DATA));
     html = replaceGlobal(html, 'FC_CURRENT', JSON.stringify(FC_CURRENT));
@@ -572,6 +581,7 @@ app.get('/', async (_req, res) => {
     html = replaceGlobal(html, 'BI_RULES', JSON.stringify(BI));
     html = replaceGlobal(html, 'PROD_CONST', JSON.stringify(PROD_CONST));
     html = replaceGlobal(html, 'BRANCH_FREIGHT', JSON.stringify(BRANCH_FREIGHT || {}));
+    html = replaceGlobal(html, 'TRANSFER_LEADS', JSON.stringify(TRANSFER_LEADS || {}));
     // Definitive price changes (DEMAND ▸ Revenue) — injected fresh (not in the 5-min data cache) so an edit shows
     // on the next load. getASP applies these to lift the revenue forecast.
     try { const PRICE_CHANGES = await buildPriceChanges(); html = replaceGlobal(html, 'PRICE_CHANGES', JSON.stringify(PRICE_CHANGES)); } catch (e) { /* leave the [] default */ }

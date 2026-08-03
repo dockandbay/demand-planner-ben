@@ -9,6 +9,10 @@ Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 ## v26.436 - Auto Forecast: cost = forecast-weighted current product cost ⚠️ NEEDS TESTING
 - The Auto Forecast now prices its suggested-buy units at the **forecast-weighted current product cost** per subcategory — Σ(SKU forecast units × SKU cost) ÷ Σ(units), using the live `planner.products` cost (`cost` → `cost_lx`/`cost_xr` fallbacks, same source as the order-plan Est. cost). Falls back to the historical avg PO cost only where a subcat has no product cost. Was: plain historical average of past PO `cost_price`. `server.mjs`. No migration.
 
+## v26.442 - Transfer lead-times foundation (migration 171) ⚠️ NEEDS TESTING · NEW MIGRATION
+- **⚠️ MIGRATION 171** `171_transfer_lead_times.sql` — new `planner.transfer_lead_times` (from_market, to_market, weeks). Diviyaj runs on live (applied to sandbox). Seeded: UK→US 6·EU 2·AU 8 · US→UK 6·EU 6·AU 8·CA 2 · EU→UK 2·US 6·AU 8 · AU→US 8. A missing lane = we don't transfer that way.
+- Server `buildTRANSFER_LEADS()` + inject `TRANSFER_LEADS` global. Foundation for the two transfer classes (Rebalance / Urgent) — no behaviour change yet. `server.mjs` + `artifact_v16.7.html`.
+
 ## v26.441 - Auto Forecast email + recipients in admin ⚠️ NEEDS TESTING
 - New **Auto Forecast email**: sends the rolling buy plan (payments plan + transactions as a CSV attachment, all markets, full 18-month window) to configured recipients. `POST /api/auto-forecast/email` (gated `demand`); refactored the AF computation into `computeAutoForecast(markets)` shared by the GET report and the email.
 - **Recipients + "Send Auto Forecast now"** live in **CONFIG ▸ General settings** (new "Auto Forecast email" section). Recipients stored in `app_settings.af_email_recipients` (comma-separated). Uses the existing Resend helper — sandbox with no `RESEND_API_KEY` stubs the send (returns `sandbox:true`); live sends for real when the button is clicked.
