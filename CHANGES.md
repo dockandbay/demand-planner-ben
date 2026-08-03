@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.462 - Samples: change-log dates dd-mmm-yy + SKU search filter ⚠️ NEEDS TESTING
+- **Sample record-of-change dates** now render **dd-mmm-yy** — the log detail formats date fields (e.g. "Expected completion updated: 30-Jul-26 → 15-Sep-26") and the entry timestamp shows dd-mmm-yy HH:MM. `server.mjs` + `supply/inject.html`.
+- **Samples search now matches SKUs.** The admin samples grid filter and the supplier-portal samples filter now include each sample's SKUs (via `cur_lines`), so typing a SKU narrows the list. Admin placeholder updated to "ref / supplier / recipient / SKU". `supply/inject.html` + `supply/portal-view.js`. No migration.
+
 ## v26.461 - Forecast: chained last-year rule for continuing SKUs ⚠️ NEEDS TESTING · BUY-PLAN IMPACT
 - **A continuing SKU's no-override future forecast now uses the SAME month LAST YEAR — its ACTUAL if that month has fully completed, else last year's FORECAST (chained).** Replaces the previous "most-recent-complete-actual" (trailing-12) rule, which wrongly pulled a 2-year-old actual for calendar months not yet complete this year. E.g. `HAIRW-CAB-LTPPL-NB` Aug 2027 now reads **152** (the Aug 2026 forecast) instead of 123 (the Aug 2025 actual); June 2027 uses the June 2026 actual (complete). New SKUs (no last-year history) still use the subcat-contribution cascade (A/B/C tiers); pre-launch months still zero.
 - Mechanism: `buildLiveDemand` §2 now applies saved overrides **inline** and runs each SKU's window **chronologically**, so the chained rule reads a month's finalised value (incl. its override) when computing the same month a year later. Old §2b (separate override pass) removed. Same rule mirrored in the demand-plan rows (`insertInlineSkuRows`). Chained logic unit-tested. `artifact_v16.7.html`. No migration. **Please spot-check buy quantities.**

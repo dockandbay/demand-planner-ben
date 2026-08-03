@@ -8859,11 +8859,13 @@ async function logSampleFieldChanges(sampleId, body, by) {
   const keys = Object.keys(SAMPLE_TRACK).filter(k => k in body);
   if (!keys.length) return;
   let oldRow = {}; try { oldRow = (await pool.query(`SELECT ${keys.join(',')} FROM planner.sample_requests WHERE id=$1::bigint`, [sampleId])).rows[0] || {}; } catch (e) { return; }
+  const isDate = k => /completion$|_date$/.test(k);
+  const toYmd = v => { if (v == null || v === '') return ''; if (v instanceof Date) return v.toISOString().slice(0, 10); return String(v).slice(0, 10); };
   for (const k of keys) {
-    let nv = (body[k] === '' || body[k] == null) ? '' : String(body[k]).trim();
-    let ov = (oldRow[k] == null) ? '' : String(oldRow[k]).trim();
-    if (/completion$|_date$/.test(k)) { ov = ov.slice(0, 10); nv = nv.slice(0, 10); }
-    if (ov === nv) continue;
+    let nv, ov;
+    if (isDate(k)) { ov = toYmd(oldRow[k]); nv = toYmd(body[k]); if (ov === nv) continue;   // date fields: compare Y-M-D, display dd-mmm-yy
+      ov = ov ? ddMonYy(ov) : ''; nv = nv ? ddMonYy(nv) : ''; }
+    else { nv = (body[k] === '' || body[k] == null) ? '' : String(body[k]).trim(); ov = (oldRow[k] == null) ? '' : String(oldRow[k]).trim(); if (ov === nv) continue; }
     await logSampleChange(sampleId, SAMPLE_TRACK[k] + ' updated', (ov ? ov + ' → ' : '') + (nv || '(cleared)'), by);
   }
 }

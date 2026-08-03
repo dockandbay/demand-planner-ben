@@ -8382,7 +8382,7 @@
   function renderSamples(data){ var c=document.getElementById('supply-content'); var _tk=_navToken; fetchLookups(function(){ if(_tk!==_navToken)return; samplesInner(data,c); }); }
   function samplesInner(rows,c){
     var st={f:(_pendingSampleRef?'all':'open'),q:''};   // when deep-linking/navigating to a specific sample, show 'all' so it's not filtered out
-    function cur(){ return rows.filter(function(r){ if(st.q){ var hay=((r.ref||'')+' '+(r.supplier_name||'')+' '+(r.recipient_company||'')+' '+(r.recipient_name||'')).toLowerCase(); if(hay.indexOf(st.q)<0)return false; }
+    function cur(){ return rows.filter(function(r){ if(st.q){ var hay=((r.ref||'')+' '+(r.supplier_name||'')+' '+(r.recipient_company||'')+' '+(r.recipient_name||'')+' '+Object.keys(r.cur_lines||{}).join(' ')).toLowerCase(); if(hay.indexOf(st.q)<0)return false; }   // includes the sample's SKUs
       if(st.f==='all')return true; if(st.f==='closed')return !r.is_open; return r.is_open; }); }
     var FILT=[['open','Open'],['closed','Closed'],['all','All']];
     function rowHTML(r,i){
@@ -8483,7 +8483,7 @@
       var bar='<div class="bar">'+FILT.map(function(x){return '<span class="pill'+(x[0]===st.f?' active':'')+'" data-f="'+x[0]+'">'+x[1]+'</span>';}).join('')
         +'<button class="save-btn" id="samp-new" style="margin-left:6px;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd">+ New sample</button>'
         +'<label style="font-size:12px;cursor:pointer;white-space:nowrap;margin-left:8px" title="show snoozed exceptions as active in the badges"><input type="checkbox" id="samp-showsnz"'+(_poShowSnoozed?' checked':'')+' style="vertical-align:middle;margin-right:4px">show snoozed</label>'
-        +'<input class="flt" id="samp-q" placeholder="Filter ref / supplier / recipient…" value="'+esc(st.q)+'"><span class="count">'+f.length+' / '+rows.length+'</span></div>';
+        +'<input class="flt" id="samp-q" placeholder="Filter ref / supplier / recipient / SKU…" value="'+esc(st.q)+'"><span class="count">'+f.length+' / '+rows.length+'</span></div>';
       var tbl='<div class="tw"><table class="samp-tbl samp-grid"><thead><tr><th></th><th>Ref</th><th>Status</th><th>Supplier</th><th>Recipient</th><th>Ship to</th><th>Completion req.</th><th>Supplier ETA</th><th>Units</th><th>Tracking</th><th>Charges</th></tr></thead><tbody>'
         +(f.length?f.map(rowHTML).join(''):'<tr><td colspan="11" class="count">No '+st.f+' samples.</td></tr>')+'</tbody></table></div>';
       c.innerHTML=lookupDatalists()+'<datalist id="samp-carrierlist"><option value="DHL"><option value="FedEx"><option value="UPS"><option value="Flexport"><option value="SF Express"><option value="Other"></datalist><div id="samp-form"></div>'+bar+tbl;
@@ -8612,7 +8612,8 @@
               var _h=rocIsHidden(s.ref);
               return '<div class="sect-h" style="font-size:13px">Record of change <span class="mut tiny" style="font-weight:400">(admin only — not shown to the supplier)</span>'
                 +' <label style="font-size:11px;font-weight:400;margin-left:8px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="samp-hide-chg"'+(_h?' checked':'')+' style="vertical-align:middle;margin-right:3px">hide record of change</label></div>'
-                +(_cl.length?_cl.map(function(c){ return '<div class="tl-change tiny" style="margin:2px 0;max-width:640px;padding:3px 8px;background:#f8fafc;border:1px solid #e5e7eb;border-left:3px solid #94a3b8;border-radius:5px'+(_h?';display:none':'')+'"><span class="mut">🕓 '+esc(c.changed_at)+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span> <span class="ex-badge" style="background:#e2e8f0;color:#475569">record of change</span> — <b>'+esc(c.event)+'</b>'+(c.detail?': '+esc(c.detail):'')+'</div>'; }).join(''):'<div class="mut tiny" style="margin-bottom:8px">No recorded changes yet.</div>')
+                +(_cl.length?_cl.map(function(c){ var _ca=String(c.changed_at||''), _cad=(_ca.slice(0,10)?fd(_ca.slice(0,10)):_ca)+(_ca.slice(11,16)?' '+_ca.slice(11,16):'');   // dd-mmm-yy HH:MM
+                    return '<div class="tl-change tiny" style="margin:2px 0;max-width:640px;padding:3px 8px;background:#f8fafc;border:1px solid #e5e7eb;border-left:3px solid #94a3b8;border-radius:5px'+(_h?';display:none':'')+'"><span class="mut">🕓 '+esc(_cad)+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span> <span class="ex-badge" style="background:#e2e8f0;color:#475569">record of change</span> — <b>'+esc(c.event)+'</b>'+(c.detail?': '+esc(c.detail):'')+'</div>'; }).join(''):'<div class="mut tiny" style="margin-bottom:8px">No recorded changes yet.</div>')
                 +'<div class="sect-h" style="font-size:13px;margin-top:12px">Timeline</div><div class="sp-timeline" data-ref="'+esc(s.ref)+'"></div>'; })());
         box.querySelectorAll('.samp-tab').forEach(function(t){ t.onclick=function(){ curTab=t.dataset.st; box._sampTab=curTab;
           box.querySelectorAll('.samp-tab').forEach(function(x){x.classList.toggle('active',x===t);});

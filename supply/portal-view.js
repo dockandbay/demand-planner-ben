@@ -1474,7 +1474,7 @@
           function ppSamples(samples){
             var F=[['open','Open'],['closed','Closed'],['all','All']];
             var q=(PORTAL_SAMP_Q||'').toLowerCase();
-            var rows=samples.filter(function(s){ if(!sampInFilt(s,PORTAL_SAMP_F))return false; if(q){ var hay=((s.ref||'')+' '+(s.recipient_company||'')+' '+(s.recipient_name||'')+' '+(s.lines||[]).map(function(l){return l.sku;}).join(' ')).toLowerCase(); if(hay.indexOf(q)<0)return false; } return true; });
+            var rows=samples.filter(function(s){ if(!sampInFilt(s,PORTAL_SAMP_F))return false; if(q){ var hay=((s.ref||'')+' '+(s.recipient_company||'')+' '+(s.recipient_name||'')+' '+(s.lines||[]).map(function(l){return l.sku;}).join(' ')+' '+Object.keys(s.cur_lines||{}).join(' ')).toLowerCase(); if(hay.indexOf(q)<0)return false; } return true; });   // cur_lines: SKUs are searchable even before the row is expanded
             var bar='<div class="bar" style="margin-bottom:8px;flex-wrap:wrap;gap:6px;align-items:center">'
               +F.map(function(f){return '<span class="rtab ps-filt'+(PORTAL_SAMP_F===f[0]?' active':'')+'" data-f="'+f[0]+'" style="cursor:pointer">'+f[1]+' ('+samples.filter(function(s){return sampInFilt(s,f[0]);}).length+')</span>';}).join('')
               +'<input class="fci txt ps-q" placeholder="search ref / recipient / SKU…" value="'+esc(PORTAL_SAMP_Q||'')+'" style="width:220px">'
