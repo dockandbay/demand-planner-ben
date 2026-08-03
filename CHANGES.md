@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.498 - Deposits register: row Save relocks silently (no full refresh) ⚠️ NEEDS TESTING
+- The per-row Save on the Deposits register no longer refetches + re-renders the whole page. Cell edits already auto-save inline; Save now syncs the in-memory row from its inputs and relocks in place (local redraw, no loading flash). supply/inject.html. No migration.
+
 ## v26.497 - Payments Due: add Likely pay date column ⚠️ NEEDS TESTING
 - The Payments Due report now shows a "Likely pay date" column next to Due date (PO milestones use likely_completion / likely_balance_1; deposits/other use date_likely_pay). Read-only display. supply/inject.html. No migration.
 

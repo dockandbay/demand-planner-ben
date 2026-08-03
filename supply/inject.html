@@ -4865,7 +4865,12 @@
       b.querySelectorAll('.dep-prod-pick').forEach(function(btn){ btn.onclick=function(e){ e.stopPropagation(); openDepProdNoPick(btn); }; });   // searchable active-productions picker
       b.querySelectorAll('.dep-po-link').forEach(function(btn){ btn.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(btn.dataset.po,'pay'); else gotoPO(btn.dataset.po,'pay'); }; });   // popout drawer (Payments tab), not a full navigation
       b.querySelectorAll('.dep-edit').forEach(function(btn){ btn.onclick=function(){ DEP_EDIT[btn.dataset.id]=true; draw(); }; });   // unlock this row in place
-      b.querySelectorAll('.dep-save').forEach(function(btn){ btn.onclick=function(){ delete DEP_EDIT[btn.dataset.id]; delete cache['productions']; showPoSub('deposits'); }; });   // relock + refresh (edits auto-saved inline)
+      b.querySelectorAll('.dep-save').forEach(function(btn){ btn.onclick=function(){ var id=btn.dataset.id;
+        // Cell edits are auto-saved inline (bindEdits). Sync the in-memory row from its inputs, then relock in
+        // place — no full refetch / page refresh. Derived columns (remaining / est. alloc.) refresh on next load.
+        var tr=btn.closest('tr'), d=deps.filter(function(x){return String(x.id)===String(id);})[0];
+        if(tr&&d)tr.querySelectorAll('.fci[data-field]').forEach(function(inp){ d[inp.dataset.field]=(inp.type==='checkbox')?inp.checked:inp.value; });
+        delete DEP_EDIT[id]; delete cache['productions']; draw(); }; });   // relock silently (edits already saved)
       // custom confirm for closing a deposit that still holds money (native confirm can't relabel buttons)
       function depCloseConfirm(rem,onYes){
         var ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200001;display:flex;align-items:center;justify-content:center;padding:20px';
