@@ -1424,11 +1424,13 @@ function getBuyQtys(sku,mkt){
   const proj=project(md,pd,ple,mkt,tfOv,sku);
   const START_IDX=1;
   const idxCount=AFTER15?2:1;
-  let b3=0,b3u=0,b3uSea=0,b3uAir=0,bf=0;
+  let b3=0,b3u=0,b3uSea=0,b3uAir=0,bf=0,buyTip='',urgTip='';
   for(let i=START_IDX;i<START_IDX+idxCount&&i<proj.length;i++){
     b3+=proj[i].bQ||0;
     b3u+=proj[i].bQu||0; b3uSea+=proj[i].bQuSea||0; b3uAir+=proj[i].bQuAir||0;
     bf+=proj[i].fdQ||0;
+    if(!buyTip&&(proj[i].bQ||0)>0)buyTip=proj[i].bPM||'';   // Buy 3PL placement/arrival tip (main-grid parity with the popup)
+    if(!urgTip&&(proj[i].bQu||0)>0){ var _um=proj[i].urgentMonth,_ul=proj[i].urgentLead,_ua=proj[i].urgentArr; urgTip='URGENT — '+(_um?'stockout in '+_um:'stockout risk')+(_ul?' — needs '+_ul+'wk rush lead':'')+(_ua?' · earliest rush lands '+_ua:''); }
   }
   // Future buys the engine has SCHEDULED beyond the current order-now window — surfaced as a "(+N future)" flag so
   // long-lead SKUs whose next buy isn't due yet aren't invisible. NOT summed into b3 (Buy 3PL stays "order now").
@@ -1440,7 +1442,7 @@ function getBuyQtys(sku,mkt){
   const _cpF=(pd.cp)||1;
   if(bf>0){ const _ctF=Math.ceil(bf/_cpF); bf=_ctF>1?_ctF*_cpF:0; }
   const tx=(proj[START_IDX]&&proj[START_IDX].tx)||0; // recommended 3PL->FBA transfer NOW (M+0)
-  return BUY_CACHE[cacheKey]={b3,b3u,b3uSea,b3uAir,bf,tx,futQty,futN};
+  return BUY_CACHE[cacheKey]={b3,b3u,b3uSea,b3uAir,bf,tx,futQty,futN,buyTip,urgTip};
 }
 
 // Split FBA-bound inbound into arriving within 14 days vs 15+ days out (by ETA).
@@ -1961,7 +1963,7 @@ function render(){
       const i3=md.i3,ifv=md['if_'],oo=md.oo||0;
       const tc=tiCls(s.ti),sc2=stCls(st);
       const launch=md.launch,disc=md.disc;
-      const {b3,b3u,b3uSea,b3uAir,bf,futN,futQty,tx}=getBuyQtys(s.s,CUR);
+      const {b3,b3u,b3uSea,b3uAir,bf,futN,futQty,tx,buyTip,urgTip}=getBuyQtys(s.s,CUR);
           // Transfer cell: classified (Urgent red / Rebalance blue), filtered to the selected pill. donor→recip.
       function trfCellHtml(donor,recip,bd){
         const dash='<td class="bq" style="'+bd+'"><span class="bq-nil">—</span></td>';
@@ -2002,9 +2004,9 @@ function render(){
         trail=(BP_VIEW==='transfer')
         ? OTH.map(function(m,i){return outCell(m,i===0);}).join('')+OTH.map(function(m,i){return getInbCell(m,i===0);}).join('')   // TRANSFER: OUTBOUND (CUR→all) then INBOUND (all→CUR)
         : `
-        <td class="bq">${b3>0?`<span class="bq-v">${fmt(b3)}</span>`:`<span class="bq-nil">—</span>`}${futN>0?`<span title="${futN} further buy(s) scheduled later in the plan (${fmt(futQty)}u) — not due to order this cycle" style="font-size:8px;color:#2563eb;margin-left:2px;white-space:nowrap">+${futN}f</span>`:``}</td>
-        <td class="bq">${b3uSea>0?`<span class="bq-v" style="color:#0f766e;font-weight:700">${fmt(b3uSea)}</span>`:`<span class="bq-nil">—</span>`}</td>
-        <td class="bq">${b3uAir>0?`<span class="bq-v" style="color:#dc2626;font-weight:700">${fmt(b3uAir)}</span>`:`<span class="bq-nil">—</span>`}</td>
+        <td class="bq${b3>0&&buyTip?' tip120':''}"${b3>0&&buyTip?` data-tip="${buyTip}"`:''}>${b3>0?`<span class="bq-v">${fmt(b3)}</span>`:`<span class="bq-nil">—</span>`}${futN>0?`<span title="${futN} further buy(s) scheduled later in the plan (${fmt(futQty)}u) — not due to order this cycle" style="font-size:8px;color:#2563eb;margin-left:2px;white-space:nowrap">+${futN}f</span>`:``}</td>
+        <td class="bq${b3uSea>0&&urgTip?' tip120':''}"${b3uSea>0&&urgTip?` data-tip="${urgTip}"`:''}>${b3uSea>0?`<span class="bq-v" style="color:#0f766e;font-weight:700">${fmt(b3uSea)}</span>`:`<span class="bq-nil">—</span>`}</td>
+        <td class="bq${b3uAir>0&&urgTip?' tip120':''}"${b3uAir>0&&urgTip?` data-tip="${urgTip}"`:''}>${b3uAir>0?`<span class="bq-v" style="color:#dc2626;font-weight:700">${fmt(b3uAir)}</span>`:`<span class="bq-nil">—</span>`}</td>
         <td class="bq">${bf>0?`<span class="bq-fba">${fmt(bf)}</span>`:`<span class="bq-nil">—</span>`}</td>`;   // inter-market Trf columns removed from BUY (now the TRANSFER tab)
       }
       h+=`<tr class="sr">
@@ -2281,7 +2283,7 @@ function buildReport(type){
   else { // ALL
     rows=[['SKU','Subcategory','Tier','Status','SOH 3PL','SOH FBA','On Order','Buy 3PL','Buy Urgent','Buy FBA','Supplier']];
     vis.forEach(s=>{
-      const {b3,b3u,b3uSea,b3uAir,bf,futN,futQty,tx}=getBuyQtys(s.s,CUR);
+      const {b3,b3u,b3uSea,b3uAir,bf,futN,futQty,tx,buyTip,urgTip}=getBuyQtys(s.s,CUR);
       const md=s.ms[CUR]||{};
       rows.push([s.s,s.sc||'',s.ti||'',getSt(s.ms,CUR),md.i3||0,md.if_||0,md.oo||0,b3||'',b3u||'',bf||'',(PD[s.s]&&PD[s.s].supp)||'']);
     });
@@ -5395,11 +5397,14 @@ function inbDiv(inb, entries, color){
 // (.dp-sku-tip → product title). Bound once, renders the element's data-tip HTML.
 (function(){ var el=null,t=null; var SEL='.crc-tip[data-tip], .dp-sku-tip[data-tip], .crc-tip[data-antip], .tip120[data-tip]';
   function hide(){ if(el)el.style.display='none'; }
-  document.addEventListener('mouseover',function(e){ var n=e.target&&e.target.closest?e.target.closest(SEL):null; if(!n)return;
-    clearTimeout(t); t=setTimeout(function(){ var tip=n.getAttribute('data-tip');
-      if(tip==null&&n.hasAttribute('data-antip')&&window._anTipHtml){ var pp=n.getAttribute('data-antip').split('|'); tip=window._anTipHtml(pp[0],pp[1],pp[2],pp[3]); n.setAttribute('data-tip',tip); }   // lazy: build the anomaly strip on first hover, then cache
-      if(!el){el=document.createElement('div'); el.style.cssText='position:fixed;z-index:100006;max-width:300px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:7px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none'; document.body.appendChild(el);} el.innerHTML=tip; el.style.display='block'; var r=n.getBoundingClientRect(); el.style.left=Math.max(6,Math.min(r.left,window.innerWidth-306))+'px'; el.style.top=(r.bottom+5)+'px'; },120); });
+  function show(n){ var tip=n.getAttribute('data-tip');
+    if(tip==null&&n.hasAttribute('data-antip')&&window._anTipHtml){ var pp=n.getAttribute('data-antip').split('|'); tip=window._anTipHtml(pp[0],pp[1],pp[2],pp[3]); n.setAttribute('data-tip',tip); }   // lazy: build the anomaly strip on first hover, then cache
+    if(tip==null)return;
+    if(!el){el=document.createElement('div'); el.style.cssText='position:fixed;z-index:100006;max-width:300px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:7px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none'; document.body.appendChild(el);}
+    el.innerHTML=tip; el.style.display='block'; var r=n.getBoundingClientRect(); el.style.left=Math.max(6,Math.min(r.left,window.innerWidth-306))+'px'; el.style.top=(r.bottom+5)+'px'; }
+  document.addEventListener('mouseover',function(e){ var n=e.target&&e.target.closest?e.target.closest(SEL):null; if(!n)return; clearTimeout(t); t=setTimeout(function(){show(n);},120); });
   document.addEventListener('mouseout',function(e){ var n=e.target&&e.target.closest?e.target.closest(SEL):null; if(n){clearTimeout(t); hide();} });
+  document.addEventListener('click',function(e){ var n=e.target&&e.target.closest?e.target.closest(SEL):null; clearTimeout(t); if(n)show(n); else hide(); });   // clicking a cell also selects it → show its tooltip immediately; click elsewhere hides
   document.addEventListener('scroll',hide,true);
 })();
 // ── Spreadsheet-style cell selection + running sum in the SKU buy-plan popup ──────────────────────────

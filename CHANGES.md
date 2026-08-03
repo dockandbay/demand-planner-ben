@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.483 - Buy tooltips: click-to-show + urgent/placement tips on the main grid ⚠️ NEEDS TESTING
+- The 120ms tooltip now also shows on CLICK (a clicked cell is also selected, so a selected cell shows its tooltip); click elsewhere hides it.
+- Main BUY grid: Buy 3PL cell shows the place-order/arrival tip and the Urgent Sea/Air cells show the urgent tip (stockout month + rush lead + earliest landing), same content as the popup. getBuyQtys now returns buyTip/urgTip. artifact_v16.7.html. No migration.
+
 ## v26.482 - Buy-plan popup: Buy 3PL tooltip (place-order + arrival dates, 120ms) + darker-red overstock ⚠️ NEEDS TESTING
 - Buy 3PL cell tooltip now shows "place order <dd-mmm-yy>, arrives <dd-mmm-yy>" (placement = 1st of month, or TODAY for the current month; arrival = placement + full 3PL lead in weeks) and appears fast (120ms) via a new .tip120 hover class (was a slow native title). Buy Urgent cell also moved to .tip120.
 - Cover(weeks) / SOH-closing overstock band (+30% or more) now renders DARKER red (#b91c1c, white text) to distinguish it from the stockout-risk red. covDevTier splits lo→lo/hi; help text updated. artifact_v16.7.html. No migration.
