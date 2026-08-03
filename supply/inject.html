@@ -5715,6 +5715,18 @@
         +'<td class="l">'+editCell(ep,'delivery_notes',r.delivery_notes,'txt')+'</td></tr>';}).join('');
       return '<div class="sect-h">Branches — shipping lead times <span class="mut tiny">(sea lead drives a PO\'s delivery date: ship + sea days · delivery notes flow onto a PO when its branch is set)</span></div>'
         +'<div class="tw" style="max-width:900px"><table><thead><tr><th class="l">Branch</th><th class="l">Country</th><th class="l">Sea lead (days)</th><th class="l">Air lead (days)</th><th class="l">Notes</th><th class="l">Delivery notes</th></tr></thead><tbody>'+rows+'</tbody></table></div>'; }
+    // Inter-market transfer lead times, in WEEKS, as a from → to matrix. Each cell upserts a transfer_lead_times
+    // lane (blank = delete the lane = "we don't transfer that way"). Drives the TRANSFER tab's Rebalance/Urgent plan.
+    function tlTbl(){ var tl=d.transfer_leads||[], MK=['UK','US','EU','AU','CA'];
+      var m={}; tl.forEach(function(r){ if(r.from_market&&r.to_market) m[r.from_market+'|'+r.to_market]=r.weeks; });
+      var head='<tr><th class="l">From \\ To</th>'+MK.map(function(c){return '<th class="l" style="min-width:50px;text-align:right">'+esc(c)+'</th>';}).join('')+'</tr>';
+      var body=MK.map(function(fr){ return '<tr><td class="l"><b>'+esc(fr)+'</b></td>'+MK.map(function(to){
+        if(fr===to)return '<td class="l" style="background:#f3f4f6"></td>';
+        var v=m[fr+'|'+to];
+        return '<td class="l"><input class="tl-cell" data-from="'+fr+'" data-to="'+to+'" value="'+esc(v==null?'':v)+'" placeholder="—" inputmode="decimal" style="width:44px;text-align:right;padding:2px 4px;border:1px solid #d0d0d0;border-radius:4px;font-size:11px"></td>';}).join('')+'</tr>';}).join('');
+      return '<div class="sect-h">Transfer lead times — market &rarr; market <span class="mut tiny">(weeks for a 3PL&rarr;3PL stock transfer; drives the TRANSFER tab&rsquo;s Rebalance / Urgent plan)</span></div>'
+        +'<div class="tw" style="max-width:520px"><table><thead>'+head+'</thead><tbody>'+body+'</tbody></table></div>'
+        +'<div class="mut tiny" style="margin-top:6px;margin-bottom:16px">Row = origin market, column = destination. Enter the transit time in weeks; clear a cell to remove that lane (a missing lane = we don&rsquo;t transfer that way). Saves on change.</div>'; }
     // (Suppliers + Key accounts now use dedicated card lists + edit forms — see their CONFIG_SUB blocks — not editTbl.)
     var PROD_COLS=[{f:'prod_no',h:'Production #',w:96},{f:'status',h:'Status',t:'select',opts:['','ACTIVE','CLOSED']},
       {f:'require_supplier_confirmation',h:'Require supplier confirmation',t:'bool',w:120},
@@ -6032,7 +6044,7 @@
             +'</div>'; }
         function listHtml(cq){ var f=cq?rows.filter(function(x){return String(JSON.stringify(x)||'').toLowerCase().indexOf(cq)>=0;}):rows;
           var cards=f.length?('<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-top:12px">'+f.map(cardHtml).join('')+'</div>'):'<div class="count" style="padding:10px 2px">No branches'+(cq?' match your search':'')+'.</div>';
-          return '<div class="sect-h">Branches <span class="mut tiny">(shipping lead times + notes · delivery notes flow onto a PO when its branch is set, and show to the supplier)</span></div>'
+          return tlTbl()+'<div class="sect-h">Branches <span class="mut tiny">(shipping lead times + notes · delivery notes flow onto a PO when its branch is set, and show to the supplier)</span></div>'
             +'<div class="bar"><input class="flt" id="br-q" placeholder="Search branch / country / notes…" value="'+esc(cq)+'" style="width:320px;background:#eff6ff;border-color:#93c5fd"><span class="count" style="margin-left:8px">'+f.length+(cq?' / '+rows.length:'')+' branch'+(f.length===1?'':'es')+'</span></div>'+cards; }
         function ta(f,val,ph){ return '<textarea class="br-in" data-f="'+f+'" rows="4" placeholder="'+esc(ph||'')+'" style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;font-family:inherit;resize:vertical">'+esc(val==null?'':val)+'</textarea>'; }
         function inp(f,val,ph,w){ return '<input class="br-in" data-f="'+f+'" value="'+esc(val==null?'':val)+'" placeholder="'+esc(ph||'')+'" style="width:'+(w||120)+'px;max-width:100%;box-sizing:border-box;padding:6px 9px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px">'; }
@@ -6057,6 +6069,11 @@
           listHtml:listHtml, editHtml:editHtml, editSel:'.br-edit', idAttr:'b',
           ids:{save:'br-save',back:'br-back',cancel:'br-cancel',msg:'br-msg'},
           saveUrl:function(id){ return '/api/supply/branch/'+encodeURIComponent(id); } });
+        // Transfer lead-time matrix cells (delegated so it survives the cardEditor's re-renders on search).
+        if(!b._tlWired){ b._tlWired=true; b.addEventListener('change',function(e){ var inp=e.target&&e.target.closest?e.target.closest('.tl-cell'):null; if(!inp)return;
+          var v=inp.value.trim().replace(/[^0-9.]/g,''); inp.style.borderColor='#d0d0d0';
+          fetch('/api/supply/transfer-lead-upsert',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({from_market:inp.dataset.from,to_market:inp.dataset.to,weeks:v})})
+            .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw 0; inp.style.borderColor='#16a34a'; delete cache['config']; }).catch(function(){ inp.style.borderColor='#dc2626'; }); }); }
       };
       SUBS['suppliers']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         Promise.all([fetch('/api/supply/suppliers').then(function(r){return r.json();}),fetch('/api/supply/portal-users').then(function(r){return r.json();}).catch(function(){return [];})]).then(function(_sr){ var rows=_sr[0], PUSERS=_sr[1]||[];

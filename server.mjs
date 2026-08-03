@@ -2952,7 +2952,7 @@ app.get('/api/supply/:section', async (req, res) => {
       }
       case 'config':      // CONFIG view (rate-card sub-tabs); suppliers/batches fetched separately
       case 'settings': {  // editable cards: import tax, freight, duty, branches (lead times)
-        const [tax, freight, duty, branches] = await Promise.all([
+        const [tax, freight, duty, branches, transfer_leads] = await Promise.all([
           q(`SELECT country, tax_pct, coalesce(base,'landed') base, coalesce(notes,'') notes
              FROM planner.import_tax_rates ORDER BY country`),
           q(`SELECT id, coalesce(destination,'') destination, coalesce(container_size,'') container_size,
@@ -2962,9 +2962,11 @@ app.get('/api/supply/:section', async (req, res) => {
              FROM planner.duty_rates ORDER BY category, country`),
           q(`SELECT name, coalesce(country_code,'') country_code, sea_lead_time_days, air_lead_time_days,
              coalesce(shipping_notes,'') shipping_notes, coalesce(delivery_notes,'') delivery_notes, coalesce(fulfil_id,'') fulfil_id FROM planner.branches ORDER BY name`),
+          q(`SELECT upper(from_market) from_market, upper(to_market) to_market, weeks
+             FROM planner.transfer_lead_times ORDER BY from_market, to_market`).catch(() => []),
         ]);
         const air = await q(`SELECT id, min_kg, max_kg, rate_per_kg FROM planner.air_freight_rates ORDER BY min_kg`).catch(() => []);
-        return res.json({ tax, freight, duty, branches, air, sizes: ['20ft','40ft','LCL'] });
+        return res.json({ tax, freight, duty, branches, transfer_leads, air, sizes: ['20ft','40ft','LCL'] });
       }
       case 'order-plan-exceptions': {   // # POs with unapproved partial/supplier/discontinue/country exceptions → nav + sub-tab badges
         const exr = (await pool.query(OP_EXC_SQL)).rows;
@@ -5307,6 +5309,25 @@ app.post('/api/supply/duty-upsert', async (req, res) => {
     const ex = await pool.query(`SELECT id FROM planner.duty_rates WHERE category=$1 AND country=$2 LIMIT 1`, [cat, country]);
     if (ex.rowCount) await pool.query(`UPDATE planner.duty_rates SET duty_pct=$1 WHERE id=$2`, [dv, ex.rows[0].id]);
     else await pool.query(`INSERT INTO planner.duty_rates (category, country, duty_pct) VALUES ($1,$2,$3)`, [cat, country, dv]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Transfer lead-time matrix (CONFIG ▸ Branches ▸ Transfer lead times): set the weeks for one from→to lane.
+// Empty/blank weeks DELETES the lane (a missing lane = "we don't transfer that way", so the recommendations skip it).
+app.post('/api/supply/transfer-lead-upsert', async (req, res) => {
+  const b = req.body || {}, from = (b.from_market || '').trim().toUpperCase(), to = (b.to_market || '').trim().toUpperCase();
+  if (!from || !to) return res.status(400).json({ error: 'from_market + to_market required' });
+  if (from === to) return res.status(400).json({ error: 'from and to cannot be the same market' });
+  const wk = (b.weeks === '' || b.weeks == null) ? null : Number(b.weeks);
+  try {
+    if (wk == null || !(wk >= 0)) {
+      await pool.query(`DELETE FROM planner.transfer_lead_times WHERE upper(from_market)=$1 AND upper(to_market)=$2`, [from, to]);
+    } else {
+      await pool.query(`INSERT INTO planner.transfer_lead_times (from_market, to_market, weeks, updated_by, updated_at)
+        VALUES ($1,$2,$3,$4,now())
+        ON CONFLICT (from_market, to_market) DO UPDATE SET weeks=excluded.weeks, updated_by=excluded.updated_by, updated_at=now()`,
+        [from, to, wk, authUser(req) || null]);
+    }
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

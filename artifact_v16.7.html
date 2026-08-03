@@ -2314,9 +2314,14 @@ function downloadViewCSV(){ var vis=getFilteredVis()||[], co=CUR, rows=[], oth=M
     vis.forEach(function(s){ var md=PD[s.s]&&PD[s.s].mkts&&PD[s.s].mkts[co]; if(!md)return;
       var rec=(BU_SEL==='TRFFBA_NG')?nonGrsOf(s.s,co):fbaTransferRec(s.s,co), fis=fbaInbSplit(s.s,co);
       rows.push([s.s,s.rw||'',md.i3||0,md['if_']||0,rec||0,fis.soon||0,fis.later||0]); });
-  } else { var hdr=['SKU','Release Window','SOH 3PL']; oth.forEach(function(m){hdr.push('Out->'+m);}); oth.forEach(function(m){hdr.push('In<-'+m);}); rows.push(hdr);
+  } else { // TRANSFER view: export every field shown in the grid + the SKU's transfer class(es).
+    var hdr=['SKU','Title','Status','Type','Release Window','Launch','Disc','SOH 3PL','SOH FBA','On Order','Class'];
+    oth.forEach(function(m){hdr.push('Out->'+m);}); oth.forEach(function(m){hdr.push('In<-'+m);}); rows.push(hdr);
     vis.forEach(function(s){ var md=PD[s.s]&&PD[s.s].mkts&&PD[s.s].mkts[co]; if(!md)return;
-      var row=[s.s,s.rw||'',md.i3||0]; oth.forEach(function(m){row.push(_trfAmt(s.s,co,m));}); oth.forEach(function(m){row.push(_trfAmt(s.s,m,co));}); rows.push(row); }); }
+      var ms=(s.ms&&s.ms[co])||{}, cl=trfClassesOf(s.s);
+      var cls=[cl.urgent?'Urgent':'',cl.rebalance?'Rebalance':''].filter(Boolean).join(' + ');
+      var row=[s.s,s.ti||'',ms.st||'ACTIVE',s.cs||'',s.rw||'',dateDMY(ms.launch)||'',dateDMY(ms.disc)||'',md.i3||0,md['if_']||0,md.oo||0,cls];
+      oth.forEach(function(m){row.push(_trfAmt(s.s,co,m));}); oth.forEach(function(m){row.push(_trfAmt(s.s,m,co));}); rows.push(row); }); }
   var csv=rows.map(function(r){return r.map(function(c){var v=String(c==null?'':c); return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',');}).join('\r\n');
   var blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'}), url=URL.createObjectURL(blob), a=document.createElement('a');
   a.href=url; a.download=(BP_VIEW==='fba'?'fba_transfer':'transfer')+'_'+co+'_view.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(url);},1000); }

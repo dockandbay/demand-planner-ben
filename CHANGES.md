@@ -3,6 +3,13 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.448 - Transfer download = full grid + CONFIG matrix editor for transfer lead times ⚠️ NEEDS TESTING
+- **Transfer download** now exports **all fields in the grid** (SKU, Title, Status, Type, Release Window, Launch, Disc, SOH 3PL, SOH FBA, On Order, Class, and Out→/In← per market) rather than the old 3-column subset. Respects the active pill filter. `artifact_v16.7.html`.
+- **CONFIG ▸ Branches now has a Transfer lead-times matrix** (market → market, in weeks) to edit `planner.transfer_lead_times` inline — the same data that drives the TRANSFER tab's Rebalance/Urgent plan. Row = origin, column = destination; clear a cell to remove that lane (missing lane = we don't transfer that way). Saves on change.
+  - Server: `transfer_leads` added to the `/api/supply/config` payload; new `POST /api/supply/transfer-lead-upsert` (upsert, or delete when blank). `server.mjs`.
+  - Client: `tlTbl()` matrix + delegated `.tl-cell` save handler in the Branches sub-tab. `supply/inject.html`.
+  - Verified: config payload returns 11 lanes; upsert round-trips (set 7 → read 7 → restored 6). Writes go to the sandbox DB. Needs migration 171 on live.
+
 ## v26.447 - TRANSFER tab: two classes (Rebalance / Urgent) with pills, tags & coloured cells ⚠️ NEEDS TESTING
 - The TRANSFER tab now splits transfers into **two classes**, selected with pills **All · Rebalance · Urgent** (replaces the old single All · Transfer):
   - **Urgent** (red) — recipient projected to stock out **within the lane lead + 2 wks** AND the transfer can **land before the stockout** (lane lead ≤ weeks of cover left). If it can't land in time it's *not* shown — it drops to the buy plan's Urgent Air/Sea.
