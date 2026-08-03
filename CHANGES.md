@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.451 - Fix: forecast horizon in buy plan (Bug 1) + search shows SKU not category forecast (Bug 2) ⚠️ NEEDS TESTING
+- **Bug 1 — buy plan showed no forecast past the saved horizon.** `buildLiveDemand` section 2b wrote/deleted every month of the 18-month window for any SKU in `forecast_outputs`; where a month wasn't saved it *deleted* the section-2 cascade. Saved SKU forecasts only cover 12 months (e.g. `TOWLB-CAB-LG-LTBLU-R` = 2026_06→2027_05, verified in live data), so June 2027 onward was blanked. Now an unsaved month **keeps the cascade fallback**; saved months still override. Pre-launch months still zeroed. **This adds forecast (and therefore buy) in the later window for SKUs with partial saved forecasts — intended.** `artifact_v16.7.html`.
+- **Bug 2 — searching (or any narrowing filter) made a SKU's plan cell show the whole subcategory forecast.** `insertInlineSkuRows` computed the SKU share basis from the *filtered* rows, so a single searched SKU got share 1.0 → cell = full subcat forecast (the 9,926 / 20,453 Ben saw). Share basis is now the **whole subcat** (activity + channel available), independent of the filters — matching `buildLiveDemand`. Display-only; unfiltered view unchanged. `artifact_v16.7.html`.
+- Bug 3 (0%/191 vs 269) is partly resolved by Bug 2 (searched value now ~269, not 9,926); the remaining 2027-YoY-basis + cleared-override-fallback are semantics decisions awaiting Ben. No migration.
+
 ## v26.450 - Fix: DEMAND sub-tabs no longer render the Buy&Move grid ⚠️ NEEDS TESTING
 - Clicking a **DEMAND sub-tab (Plan/Summary/etc.)** now forces `VIEW_MODE='planning'`. Previously it set `DEMAND_VIEW` but left a stale `VIEW_MODE` from Buy & Move, so `render()` still drew the buy-plan grid while the menu didn't change. `artifact_v16.7.html`. No migration.
 

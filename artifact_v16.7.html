@@ -6339,11 +6339,17 @@ function insertInlineSkuRows(s,co,ch,afterTr){
   var wh=skuWh(co,ch);
   var ctry=co.toLowerCase();
   var skus=filteredSkus(s,co,ch); // rows respect the SKU filters; subtotal/gap (eff) covers ALL subcat SKUs
+  // Share basis = the WHOLE subcat (activity + channel available), NOT the filtered rows — otherwise a search or
+  // pill that narrows to one SKU gives it share 1.0, so its cell shows the entire subcat forecast (was a bug).
+  var _chKey=ch.toLowerCase()==='dtc'?'d':ch.toLowerCase()==='fba'?'f':'b';
+  var shareSkus=Object.keys(SKUM).filter(function(sk){var pp=SKUM[sk];if(!pp||pp.s!==s)return false;
+    if(typeof skuHasAnyActivity==='function'&&!skuHasAnyActivity(sk,co))return false;
+    return ((pp.av||{})[ctry]||'').includes(_chKey);});
   var subcatCalc=calc(s,co,ch);
   var subcatFU=subcatCalc.fu;
   var lyYearMonths=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06',
                     '2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
-  var shares=buildSkuShares(skus,co,ch,lyYearMonths);
+  var shares=buildSkuShares(shareSkus,co,ch,lyYearMonths);
   var parentKey=s+'|'+co+'|'+ch;
   var insertRef=afterTr.nextSibling;
   var tbody=afterTr.parentNode;
@@ -9531,9 +9537,10 @@ function buildLiveDemand(){
     });
   });
   // 2b) Override with authoritative SKU-level forecast_outputs where present (v7.0).
-  //     For any SKU/warehouse/channel in FC_OUTPUTS, clear the cascade-derived forecast
-  //     months and write the loaded SKU forecast (absent month = 0). SKUs not in
-  //     FC_OUTPUTS keep the planner-derived cascade above as fallback.
+  //     For any SKU/warehouse/channel in FC_OUTPUTS, write the loaded SKU forecast where a month is
+  //     saved. A month NOT in the saved set keeps the section-2 cascade as fallback (a saved forecast
+  //     that only covers part of the window no longer blanks the rest — fixed: buy plan showed no
+  //     forecast past the saved horizon). Pre-launch months are still zeroed.
   Object.keys(FC_OUTPUTS||{}).forEach(function(key){
     var parts=key.split('|');if(parts.length<3)return;
     var sku=parts[0],wh=parts[1],ch=parts[2];
@@ -9544,7 +9551,9 @@ function buildLiveDemand(){
     var mo=FC_OUTPUTS[key]||{};
     LIVE_FC_MONTHS.forEach(function(fym){
       var ms=fym.slice(0,4)+'-'+fym.slice(5,7)+'-01';
-      var v=(lch&&ms<lch)?0:mo[fym];
+      if(lch&&ms<lch){delete md.demand[ch][fym];return;}   // pre-launch = no demand
+      if(!(fym in mo))return;                               // month not saved → keep the section-2 cascade fallback
+      var v=mo[fym];
       if(v>0)md.demand[ch][fym]=Math.round(v);else delete md.demand[ch][fym];
     });
   });
