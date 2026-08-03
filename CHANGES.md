@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.473 - Remove the empty AI-tools slot from the DEMAND sub-nav ⚠️ NEEDS TESTING
+- Removed the now-empty #plan-tools container (left behind an empty slot on the DEMAND nav after AI Insights/Forecast Logic were relocated in v26.472). All references were null-guarded. artifact_v16.7.html. No migration.
+
 ## v26.472 - Anomalies filters + AI Insights → Actions nav-3 + Forecast Logic → plan filter button ⚠️ NEEDS TESTING
 - **Anomalies report filters:** horizon pills (**≤1 / 2-3 / 3-6 / 7+ months** out), plus **Country / Channel / Category** dropdowns and a **SKU** search (the country×channel matrix still counts + filters and stays in sync). Detection now spans the full forward window (so 7+ has data). Grouping/sort by severity then SKU unchanged.
 - **"Set to recommended" link** per anomaly — e.g. "set Nov-26 to 9" applies the seasonal-expected value as the override (auto-saves + recomputes), alongside the free-form override input.
