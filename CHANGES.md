@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.481 - Fix: Complex Rules button count showed (0) until you expanded ⚠️ NEEDS TESTING
+- The buy scaffold ships the ♛ Complex Rules button hardcoded (0); updateBtn() only ran on panel-expand (or at DOMContentLoaded before the button existed). Now called right after the buy view renders, so the badge shows the real rule count immediately. artifact_v16.7.html. No migration.
+
 ## v26.480 - Demand plan: "Plan" button no longer flashes the buy grid ⚠️ NEEDS TESTING
 - Opening the buy-plan popup from a demand-plan SKU (or from SUPPLY) now builds the buy scaffold INVISIBLY (position:absolute;visibility:hidden;height:0) and keeps the demand table visible behind the modal, so the buy grid never flashes into view before the popup. New scaffoldOnly mode on renderBuyView(); #ov re-shown via a scoped CSS rule. artifact_v16.7.html. No migration.
 

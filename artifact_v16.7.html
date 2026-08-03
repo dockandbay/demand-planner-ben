@@ -9868,6 +9868,9 @@ function renderBuyView(mode,scaffoldOnly){
   // Build pills, bind table clicks, and render the buy list. initUI() reads the freshly
   // injected (empty) pill containers, so rebuilding on each BUY/FBA-tab entry is correct.
   BP.initUI();
+  // Complex Rules badge: the scaffold ships the button hardcoded "(0)"; sync the real count now that the
+  // button exists (it was only refreshed on panel-expand before, so the count looked wrong until you opened it).
+  try{ if(window.CR&&CR.updateBtn)CR.updateBtn(); }catch(e){}
   // FBA view: make sure the active-PO list is loaded so the inbound-tooltip refs can link to real POs; re-render once when it lands.
   if(mode==='fba' && typeof window!=='undefined' && window.hzEnsurePoList && !window._hzPoListDone){ window.hzEnsurePoList(function(){ window._hzPoListDone=true; try{ if(window.BP && BP.BP_VIEW==='fba')BP.render(); }catch(e){} }); }
   // keep --bp-hdr-h in sync with the sticky header's height so the sticky category titles sit just below it
