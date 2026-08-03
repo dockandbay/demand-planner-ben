@@ -9,6 +9,10 @@ Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 ## v26.436 - Auto Forecast: cost = forecast-weighted current product cost ⚠️ NEEDS TESTING
 - The Auto Forecast now prices its suggested-buy units at the **forecast-weighted current product cost** per subcategory — Σ(SKU forecast units × SKU cost) ÷ Σ(units), using the live `planner.products` cost (`cost` → `cost_lx`/`cost_xr` fallbacks, same source as the order-plan Est. cost). Falls back to the historical avg PO cost only where a subcat has no product cost. Was: plain historical average of past PO `cost_price`. `server.mjs`. No migration.
 
+## v26.440 - Auto Forecast: exports follow the full window; fix "12-mo" total label ⚠️ NEEDS TESTING
+- Confirmed the Copy / CSV exports (payments plan + transactions) serialise the endpoint response (`d.months` / `d.payments` / `d.transactions`), so they already carry the full 18-month window and the reworked rolling/freight/duty numbers — no separate hardcoded range.
+- Fixed the stale **"12-mo"** total-column label (payments table USD + GBP + copy header) → **"Total"**, since the window is now up to 18 months. `artifact_v16.7.html`.
+
 ## v26.439 - Auto Forecast: extend window 12 → up to 18 months ⚠️ NEEDS TESTING
 - The Auto Forecast display window now runs **up to 18 months** (was 12), capped at the last forecast month so it never shows empty tails. With the current forecast data (ends Dec 2027) it shows 17 months; it'll reach 18 once the forecast extends further. `server.mjs` + footnote text in `artifact_v16.7.html`. No migration.
 

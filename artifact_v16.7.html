@@ -9019,7 +9019,7 @@ function renderAutoForecastReport(body){
     var u='<div style="font-weight:700;font-size:13px;margin:6px 0 4px">Units to order — by supplier</div>'
       +'<div style="overflow-x:auto"><table class="tw" style="font-size:11px;min-width:900px"><thead><tr>'
       +'<th style="text-align:left;padding:4px 6px">Supplier</th>'
-      +th+'<th style="text-align:right;padding:4px 6px;border-left:2px solid #ccc">12-mo</th></tr></thead><tbody>';
+      +th+'<th style="text-align:right;padding:4px 6px;border-left:2px solid #ccc">Total</th></tr></thead><tbody>';
     var colTot=mo.map(function(){return 0;}), grand=0;
     d.units.forEach(function(r){
       u+='<tr><td style="padding:3px 6px;font-weight:600">'+r.supplier+'</td>'
@@ -9040,10 +9040,10 @@ function renderAutoForecastReport(body){
         +'<td style="text-align:right;padding:3px 6px;font-weight:700;border-left:2px solid #ccc">'+afN(t/div)+'</td></tr>'; };
     var payTbl=function(cur,div){ return '<div style="font-weight:700;font-size:13px;margin:18px 0 4px">Payments plan — cash out by month ('+cur+')</div>'
       +'<div style="overflow-x:auto"><table class="tw" style="font-size:11px;min-width:900px"><thead><tr><th style="text-align:left;padding:4px 6px">Payment</th>'
-      +th+'<th style="text-align:right;padding:4px 6px;border-left:2px solid #ccc">12-mo</th></tr></thead><tbody>'
+      +th+'<th style="text-align:right;padding:4px 6px;border-left:2px solid #ccc">Total</th></tr></thead><tbody>'
       +PAY_ROWS.map(function(r){return prow(r[0],r[1],r[0].indexOf('TOTAL')===0,div);}).join('')+'</tbody></table></div>'; };
-    // single-currency summary matrix: Payment, [months…], 12-mo (whole numbers)
-    var afPayCur=function(div){ var hdr=['Payment'].concat(mo.map(afMonthLabel)).concat(['12-mo']); var rows=[hdr];
+    // single-currency summary matrix: Payment, [months…], Total (whole numbers)
+    var afPayCur=function(div){ var hdr=['Payment'].concat(mo.map(afMonthLabel)).concat(['Total']); var rows=[hdr];
       PAY_ROWS.forEach(function(r){ var arr=r[1], t=arr.reduce(function(a,b){return a+b;},0);
         rows.push([r[0]].concat(arr.map(function(v){return Math.round(v/div);})).concat([Math.round(t/div)])); });
       return rows; };
