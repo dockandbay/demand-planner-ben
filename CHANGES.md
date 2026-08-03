@@ -9,6 +9,11 @@ Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 ## v26.436 - Auto Forecast: cost = forecast-weighted current product cost ⚠️ NEEDS TESTING
 - The Auto Forecast now prices its suggested-buy units at the **forecast-weighted current product cost** per subcategory — Σ(SKU forecast units × SKU cost) ÷ Σ(units), using the live `planner.products` cost (`cost` → `cost_lx`/`cost_xr` fallbacks, same source as the order-plan Est. cost). Falls back to the historical avg PO cost only where a subcat has no product cost. Was: plain historical average of past PO `cost_price`. `server.mjs`. No migration.
 
+## v26.441 - Auto Forecast email + recipients in admin ⚠️ NEEDS TESTING
+- New **Auto Forecast email**: sends the rolling buy plan (payments plan + transactions as a CSV attachment, all markets, full 18-month window) to configured recipients. `POST /api/auto-forecast/email` (gated `demand`); refactored the AF computation into `computeAutoForecast(markets)` shared by the GET report and the email.
+- **Recipients + "Send Auto Forecast now"** live in **CONFIG ▸ General settings** (new "Auto Forecast email" section). Recipients stored in `app_settings.af_email_recipients` (comma-separated). Uses the existing Resend helper — sandbox with no `RESEND_API_KEY` stubs the send (returns `sandbox:true`); live sends for real when the button is clicked.
+- Verified: recipients save, send stubs in sandbox, clear error when no recipients set. `server.mjs` + `supply/inject.html`. No migration (dynamic app_settings key).
+
 ## v26.440 - Auto Forecast: exports follow the full window; fix "12-mo" total label ⚠️ NEEDS TESTING
 - Confirmed the Copy / CSV exports (payments plan + transactions) serialise the endpoint response (`d.months` / `d.payments` / `d.transactions`), so they already carry the full 18-month window and the reworked rolling/freight/duty numbers — no separate hardcoded range.
 - Fixed the stale **"12-mo"** total-column label (payments table USD + GBP + copy header) → **"Total"**, since the window is now up to 18 months. `artifact_v16.7.html`.

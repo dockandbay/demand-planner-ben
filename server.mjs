@@ -519,6 +519,7 @@ function requiredCap(method, p) {
       || p === '/api/demand-actions/state' || p.startsWith('/api/trading-calendar')
       || p.startsWith('/api/price-changes') || p.startsWith('/api/demand-revenue-targets')
       || p.startsWith('/api/buy-complex-rules')
+      || p.startsWith('/api/auto-forecast/')
       || p.startsWith('/api/forecast/')) return 'demand';    // DEMAND / forecasting domain
   if (p === '/api/consignee' || p.startsWith('/api/consignee/')) return 'config'; // CONFIG ▸ Consignees
   if (p === '/api/app-settings') return 'config';            // CONFIG ▸ General settings
@@ -7165,9 +7166,8 @@ app.get('/api/scenario/po-stock-priority/:po', async (req, res) => {
 //   DUTY = value × duty%(category, country) from CONFIG ▸ Import duty. Both land at the delivery month.
 // NOTE (read-only report): never written back to forecast_outputs/forecasts — a decision view + CSV only.
 function afAddMonths(ym, n){ let [y,m]=ym.split('-').map(Number); let t=(y*12+(m-1))+n; return Math.floor(t/12)+'-'+String(t%12+1).padStart(2,'0'); }
-app.get('/api/scenario/auto-forecast', async (req, res) => {
-  const markets = (req.query.market||'all').toLowerCase()==='all' ? ['uk','us','eu','au'] : [(req.query.market||'uk').toLowerCase()];
-  try {
+async function computeAutoForecast(markets) {
+  {
     // window START = the CURRENT month (don't plan months already in the past), clamped to the forecast data
     // range; END = the last forecast month. (Was hardcoded 2026-06, which went stale once we passed it.)
     const _fr = (await pool.query(`SELECT to_char(min(month),'YYYY-MM') mn, to_char(max(month),'YYYY-MM') mx FROM (
@@ -7339,10 +7339,46 @@ app.get('/api/scenario/auto-forecast', async (req, res) => {
     const total=win.map((m,i)=>dep[i]+comp[i]+bal[i]+frt[i]+dty[i]);
     const txns=Object.values(txMap).map(t=>({...t, amount_usd:Math.round(t.amount_usd*100)/100}));
     txns.sort((a,b)=> a.date<b.date?-1 : a.date>b.date?1 : (a.reference<b.reference?-1 : a.reference>b.reference?1 : 0));
-    res.json({ months:win, units:unitRows,
+    return { months:win, units:unitRows,
       payments:{deposit:dep,completion:comp,balance:bal,freight:frt,duty:dty,total},
       transactions:txns,
-      assumptions:{truncated,overdue_units:Math.round(overdueUnits)} });
+      assumptions:{truncated,overdue_units:Math.round(overdueUnits)} };
+  }
+}
+app.get('/api/scenario/auto-forecast', async (req, res) => {
+  const markets = (req.query.market||'all').toLowerCase()==='all' ? ['uk','us','eu','au'] : [(req.query.market||'uk').toLowerCase()];
+  try { res.json(await computeAutoForecast(markets)); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Auto Forecast EMAIL — sends the payments plan + transactions CSV to the recipients configured in
+// CONFIG ▸ General settings (app_settings.af_email_recipients, comma-separated). Gated on RESEND_API_KEY (sandbox stubs).
+function afEmailCsv(d){
+  const esc=v=>{ v=v==null?'':String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+  const lines=[];
+  lines.push('PAYMENTS PLAN (USD)');
+  lines.push(['Payment'].concat(d.months).concat(['Total']).map(esc).join(','));
+  const rowsum=a=>a.reduce((x,y)=>x+y,0);
+  [['Starting deposits','deposit'],['Completion deposits','completion'],['Balance payments','balance'],['Freight (containers)','freight'],['Import duty','duty'],['TOTAL CASH OUT','total']]
+    .forEach(([lbl,k])=>{ const a=d.payments[k]||[]; lines.push([lbl].concat(a).concat([rowsum(a)]).map(esc).join(',')); });
+  lines.push(''); lines.push('TRANSACTIONS');
+  lines.push(['Reference','Type','Amount USD','Date','Country','Supplier','Month'].map(esc).join(','));
+  (d.transactions||[]).forEach(t=> lines.push([t.reference,t.type,t.amount_usd,t.date,t.country,t.supplier,t.month].map(esc).join(',')));
+  return lines.join('\n');
+}
+app.post('/api/auto-forecast/email', async (req, res) => {
+  try {
+    const rec = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='af_email_recipients'`)).rows[0];
+    const emails = String((rec&&rec.value)||'').split(/[,;\s]+/).map(s=>s.trim()).filter(Boolean);
+    if(!emails.length) return res.status(400).json({ error: 'No Auto Forecast email recipients set (CONFIG ▸ General settings).' });
+    const d = await computeAutoForecast(['uk','us','eu','au']);
+    const total = (d.payments.total||[]).reduce((a,b)=>a+b,0);
+    const csv = afEmailCsv(d);
+    const mo = (d.months||[]);
+    const subject = 'Dock & Bay — Auto Forecast buy plan ('+(mo[0]||'')+' → '+(mo[mo.length-1]||'')+')';
+    const html = '<p>Attached is the latest <b>Auto Forecast</b> rolling buy plan across all markets ('+mo.length+' months).</p>'
+      + '<p>Total projected cash out: <b>$'+Math.round(total).toLocaleString()+'</b> · '+(d.units||[]).reduce((a,r)=>a+r.total,0).toLocaleString()+' units to buy.</p>';
+    const r = await sendResendEmail({ to: emails, subject, html, kind: 'auto-forecast', by: authUser(req),
+      attachments: [{ filename: 'auto_forecast_buy_plan.csv', content: Buffer.from(csv).toString('base64') }] });
+    res.json({ ok: true, recipients: emails, sent: r.sandbox ? 0 : emails.length, sandbox: !!r.sandbox });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

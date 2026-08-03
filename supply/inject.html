@@ -5924,11 +5924,21 @@
             +'<div class="sect-h" style="margin-top:18px">Finance</div>'
             +'<div style="max-width:720px"><div style="margin:0 0 12px"><div style="font-weight:600;font-size:13px">USD → GBP exchange rate</div>'
               +'<div class="mut tiny" style="margin:1px 0 4px">Used for the GBP columns in the Cash Flow &amp; Auto Forecast reports (GBP = USD ÷ this rate). Takes effect on the next page reload.</div>'
-              +'<input class="fci gs-set" data-key="usd_gbp_rate" value="'+esc(s.usd_gbp_rate||'')+'" placeholder="1.34" inputmode="decimal" style="width:120px;box-sizing:border-box;text-align:left"></div></div>';
+              +'<input class="fci gs-set" data-key="usd_gbp_rate" value="'+esc(s.usd_gbp_rate||'')+'" placeholder="1.34" inputmode="decimal" style="width:120px;box-sizing:border-box;text-align:left"></div></div>'
+            +'<div class="sect-h" style="margin-top:18px">Auto Forecast email</div>'
+            +'<div style="max-width:720px"><div style="margin:0 0 8px"><div style="font-weight:600;font-size:13px">Recipients</div>'
+              +'<div class="mut tiny" style="margin:1px 0 4px">Who receives the <b>Auto Forecast</b> rolling buy plan (payments plan + transactions CSV, all markets, full window). Comma-separate multiple addresses.</div>'
+              +'<input class="fci gs-set" data-key="af_email_recipients" value="'+esc(s.af_email_recipients||'')+'" placeholder="email@dockandbay.com, other@dockandbay.com" style="width:100%;box-sizing:border-box;text-align:left"></div>'
+              +'<div style="margin:2px 0 12px"><button type="button" id="af-email-send" class="pill" style="font-weight:600">&#9993; Send Auto Forecast now</button> <span id="af-email-msg" class="mut tiny" style="margin-left:8px"></span></div></div>';
           b.querySelectorAll('.gs-set').forEach(function(inp){ inp.onchange=function(){ inp.style.borderColor='#d0d0d0';
             fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:inp.dataset.key,value:inp.value})})
               .then(function(r){return r.json();}).then(function(j){ inp.style.borderColor=(j&&j.error)?'#dc2626':'#16a34a'; setTimeout(function(){inp.style.borderColor='';},900); })
               .catch(function(){ inp.style.borderColor='#dc2626'; }); }; });
+          var afBtn=document.getElementById('af-email-send'); if(afBtn)afBtn.onclick=function(){ var msg=document.getElementById('af-email-msg'); afBtn.disabled=true; if(msg){msg.style.color='#888';msg.textContent='Sending…';}
+            fetch('/api/auto-forecast/email',{method:'POST'}).then(function(r){return r.json();}).then(function(j){ afBtn.disabled=false;
+              if(j&&j.error){ if(msg){msg.style.color='#dc2626';msg.textContent=j.error;} return; }
+              if(msg){ msg.style.color='#16a34a'; msg.textContent=j.sandbox?('Sandbox — would send to '+(j.recipients||[]).join(', ')):('Sent ✓ to '+(j.recipients||[]).join(', ')); } })
+            .catch(function(e){ afBtn.disabled=false; if(msg){msg.style.color='#dc2626';msg.textContent=String(e);} }); };
           fetch('/api/supply/erp-status').then(function(r){return r.json();}).then(function(st){ var el=document.getElementById('erp-status'); if(!el)return;
             function dot(ok){ return ok?'<span style="color:#16a34a">✓ configured</span>':'<span style="color:#b45309">⚠ keys missing</span>'; }
             el.innerHTML='Fulfil API keys in server env — Sandbox: '+dot(st&&st.fulfil&&st.fulfil.sandbox)+' &nbsp;·&nbsp; Live: '+dot(st&&st.fulfil&&st.fulfil.live); }).catch(function(){});
