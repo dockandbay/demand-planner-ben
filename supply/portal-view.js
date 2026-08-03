@@ -911,7 +911,7 @@
             +'<br>Ship date: '+(p.ship?esc(fd(p.ship)):'<span class="mut">—</span>')+' · Est. completion: '+(p.prod_end?esc(fd(p.prod_end)):'<span class="mut">—</span>')
             +' &nbsp; <button class="lnk-btn pp-go-shipplan" data-ref="'+esc(p.shipment)+'" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;background:none;border:none;padding:0;font:inherit">View in Shipment Plan →</button></div>'
         : '<div style="font-size:13px;color:#334155;margin-bottom:8px">No shipment assigned yet — enter the carrier &amp; tracking below and we’ll create the shipment for this PO.</div>';
-      if(p.branch_delivery_notes) shipHead += '<div style="margin:0 0 10px;padding:8px 11px;border-radius:6px;font-size:12px;background:#eff6ff;border:1px solid #bfdbfe;white-space:pre-wrap"><b>Delivery notes</b><br>'+esc(p.branch_delivery_notes)+'</div>';   // branch delivery notes (from the PO's branch)
+      if(p.branch_delivery_notes) shipHead += '<div style="margin:0 0 10px;padding:8px 11px;border-radius:6px;font-size:12px;background:#eff6ff;border:1px solid #bfdbfe;white-space:pre-wrap"><b>Delivery notes'+(p.branch?' for '+esc(p.branch):'')+'</b><br>'+esc(p.branch_delivery_notes)+'</div>';   // branch delivery notes (from the PO's branch)
       var flexRef=p.flexport_reference||p.flex_id||((carVal==='Flexport')?trkVal:'');
       var shipment=hasShip
         // shipment already linked → carrier / tracking / Flexport ref are READ-ONLY (managed on the shipment centrally)
@@ -1314,7 +1314,7 @@
                 +(s.escalated?'<span class="tool-badge bg-red" style="margin-left:auto">⚑ ESCALATED</span>':'')
                 +'</div>'
                 +'<div class="sp-body" style="display:none;padding:0 12px 12px">'
-                +((s.branch||s.delivery_notes)?'<div style="margin:8px 0;padding:8px 11px;border-radius:6px;font-size:12px;background:#eff6ff;border:1px solid #bfdbfe;white-space:pre-wrap;text-align:left">'+(s.branch?'<div style="font-weight:700;font-size:13px;margin-bottom:'+(s.delivery_notes?'5px':'0')+'">BRANCH: '+esc(s.branch)+'</div>':'')+(s.delivery_notes?'<b>Delivery notes</b><br>'+esc(s.delivery_notes):'')+'</div>':'')
+                +((s.branch||s.delivery_notes)?'<div style="margin:8px 0;padding:8px 11px;border-radius:6px;font-size:12px;background:#eff6ff;border:1px solid #bfdbfe;white-space:pre-wrap;text-align:left"><b>Delivery notes'+(s.branch?' for '+esc(s.branch):'')+'</b>'+(s.delivery_notes?'<br>'+esc(s.delivery_notes):'')+'</div>':'')
                 +editPanel+datesStrip+'<div style="margin-top:8px">'+members+'</div>'
                 +(s.members||[]).map(function(m){return dtcBlock(m.po);}).join('')
                 +chgPanel

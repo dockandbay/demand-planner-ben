@@ -8608,11 +8608,17 @@
             // badges only flag ACTIONS/exceptions (date overdue, pending charges, unread notes) — not plain counts
             +tb('details','Details'+bdge(dateExc))+tb('charges','Charges'+bdge(pend))+tb('attachments','Attachments')+tb('timeline','Timeline'+bdge(_unread))+'</div>'
           +panel('details',detailsPanel)+panel('charges',chargesPanel)+panel('attachments',attachPanel)
-          +panel('timeline','<div class="sp-timeline" data-ref="'+esc(s.ref)+'"></div>');
+          +panel('timeline',(function(){ var _cl=(d.change_log||[]);   // Record of change (admin view only) — captures D&B + supplier edits; hideable per-sample like POs
+              var _h=rocIsHidden(s.ref);
+              return '<div class="sect-h" style="font-size:13px">Record of change <span class="mut tiny" style="font-weight:400">(admin only — not shown to the supplier)</span>'
+                +' <label style="font-size:11px;font-weight:400;margin-left:8px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="samp-hide-chg"'+(_h?' checked':'')+' style="vertical-align:middle;margin-right:3px">hide record of change</label></div>'
+                +(_cl.length?_cl.map(function(c){ return '<div class="tl-change tiny" style="margin:2px 0;max-width:640px;padding:3px 8px;background:#f8fafc;border:1px solid #e5e7eb;border-left:3px solid #94a3b8;border-radius:5px'+(_h?';display:none':'')+'"><span class="mut">🕓 '+esc(c.changed_at)+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span> <span class="ex-badge" style="background:#e2e8f0;color:#475569">record of change</span> — <b>'+esc(c.event)+'</b>'+(c.detail?': '+esc(c.detail):'')+'</div>'; }).join(''):'<div class="mut tiny" style="margin-bottom:8px">No recorded changes yet.</div>')
+                +'<div class="sect-h" style="font-size:13px;margin-top:12px">Timeline</div><div class="sp-timeline" data-ref="'+esc(s.ref)+'"></div>'; })());
         box.querySelectorAll('.samp-tab').forEach(function(t){ t.onclick=function(){ curTab=t.dataset.st; box._sampTab=curTab;
           box.querySelectorAll('.samp-tab').forEach(function(x){x.classList.toggle('active',x===t);});
           box.querySelectorAll('.samp-panel').forEach(function(p){p.style.display=(p.dataset.st===curTab)?'':'none';}); }; });
         try{ bindActMark(box); }catch(e){}   // wire the inline Ⓐ tooltip + SNOOZE ▾ (same as the PO drawer)
+        var _shc=box.querySelector('.samp-hide-chg'); if(_shc)_shc.onchange=function(){ rocSetHidden(s.ref, _shc.checked); box.querySelectorAll('.tl-change').forEach(function(el){ el.style.display=_shc.checked?'none':''; }); };   // hide record of change (per-sample, persisted)
         var eb=box.querySelector('.samp-edit'); if(eb)eb.onclick=function(){ editing=true; paint(); };
         var db=box.querySelector('.samp-done'); if(db)db.onclick=function(){ db.disabled=true;   // ✓ Done also persists the SKU lines (fields already auto-save on change)
           shipPost('/api/supply/sample/'+id+'/lines',{lines:slines.filter(function(l){return l.sku&&String(l.sku).trim();}).map(function(l){return {sku:String(l.sku).trim(),qty:Number(l.qty)||0};})},function(){ editing=false; paint(); }); };   // silent: re-render this drawer in place, keep it open (no grid reload / no tab close)

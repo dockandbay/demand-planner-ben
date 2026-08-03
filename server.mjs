@@ -1718,7 +1718,10 @@ app.get('/api/supply/sample-detail/:id', async (req, res) => {
       FROM planner.supplier_charges WHERE source_type='sample' AND source_ref=$1 ORDER BY created_at`, [s.ref])).rows;
     const attachments = (await pool.query(`SELECT id, filename, coalesce(uploaded_by,'') uploaded_by, to_char(uploaded_at,'YYYY-MM-DD') uploaded_at
       FROM planner.portal_attachments WHERE category='sample' AND po=$1 ORDER BY uploaded_at`, [s.ref])).rows;
-    res.json({ sample: s, lines, notes, charges, attachments });
+    // Record-of-change audit (migration 172) — admin view only, newest first. Defensive if the table isn't there yet.
+    const change_log = (await pool.query(`SELECT event, coalesce(detail,'') detail, coalesce(changed_by,'') changed_by,
+      to_char(changed_at,'YYYY-MM-DD HH24:MI') changed_at FROM planner.sample_change_log WHERE sample_id=$1::bigint ORDER BY changed_at DESC LIMIT 200`, [id]).catch(() => ({ rows: [] }))).rows;
+    res.json({ sample: s, lines, notes, charges, attachments, change_log });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/supply/sample-addresses', async (req, res) => {
@@ -8148,20 +8151,24 @@ app.post('/api/supply/sample/:id/lines', async (req, res) => {   // replace all 
     await client.query(`UPDATE planner.sample_requests s SET change_requested=true, updated_at=now()
       WHERE s.id=$1::bigint AND s.accepted_at IS NOT NULL
         AND s.approved_lines IS DISTINCT FROM (SELECT jsonb_object_agg(sku,qty) FROM (SELECT sku, sum(qty) qty FROM planner.sample_request_lines WHERE sample_id=$1::bigint GROUP BY sku) z)`, [req.params.id]);
-    await client.query('COMMIT'); res.json({ ok:true, count: lines.length });
+    await client.query('COMMIT');
+    await logSampleChange(req.params.id, 'SKUs / quantities updated', null, authUser(req) || 'Dock & Bay');   // record of change (D&B side)
+    res.json({ ok:true, count: lines.length });
   } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 app.post('/api/supply/sample/:id/accept', async (req, res) => {   // supplier accepts the request
   try { await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), change_requested=false, approved_lines=(SELECT jsonb_object_agg(sku,qty) FROM (SELECT sku, sum(qty) qty FROM planner.sample_request_lines WHERE sample_id=$1::bigint GROUP BY sku) z), updated_at=now() WHERE id=$1::bigint`, [req.params.id]);
+    await logSampleChange(req.params.id, 'Confirmed sample request', null, authUser(req) || 'Dock & Bay');   // record of change
     res.json({ ok:true }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/sample/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.sample_requests WHERE id=$1::bigint`, [req.params.id]); res.json({ ok:true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.post('/api/supply/sample/:id', (req, res) =>     // patch fields (admin edits + supplier expected/tracking/carrier)
-  patch(res, 'planner.sample_requests', 'id', req.params.id, SAMPLE_FIELDS, req.body, 'bigint'));
+app.post('/api/supply/sample/:id', async (req, res) => {   // patch fields (admin edits + supplier expected/tracking/carrier)
+  await logSampleFieldChanges(req.params.id, req.body || {}, authUser(req) || 'Dock & Bay');   // record of change (D&B side)
+  patch(res, 'planner.sample_requests', 'id', req.params.id, SAMPLE_FIELDS, req.body, 'bigint'); });
 app.post('/api/supply/sample-note', async (req, res) => {
   const b = req.body || {}; const sid = b.sample_id || b.id;   // accept either key (admin grid vs portal preview)
   if (!sid || !b.body) return res.status(400).json({ error: 'sample_id and body required' });
@@ -8839,6 +8846,26 @@ const PO_TRACK = { status: 'Status', end_production_overide: 'Production end dat
 async function logPoChange(po, event, detail, by) {
   try { await pool.query(`INSERT INTO planner.po_change_log (po,event,detail,changed_by) VALUES ($1,$2,$3,$4)`, [po, event, detail || null, by || null]); }
   catch (e) { /* table absent pre-migration 158 — non-fatal, never breaks the underlying save */ }
+}
+// Sample "record of change" audit (migration 172). Captures edits from BOTH sides (admin + supplier portal);
+// shown on the ADMIN sample view only. Non-fatal if the table isn't there yet.
+async function logSampleChange(sampleId, event, detail, by) {
+  try { await pool.query(`INSERT INTO planner.sample_change_log (sample_id,event,detail,changed_by) VALUES ($1::bigint,$2,$3,$4)`, [sampleId, event, detail || null, by || null]); }
+  catch (e) { /* table absent pre-migration 172 — non-fatal */ }
+}
+const SAMPLE_TRACK = { production_status:'Production status', tracking_code:'Tracking code', carrier:'Carrier', supplier_expected_completion:'Expected completion', status:'Status' };
+// Diff the tracked sample fields (current DB row vs incoming body) and log each actual change. Call BEFORE the patch.
+async function logSampleFieldChanges(sampleId, body, by) {
+  const keys = Object.keys(SAMPLE_TRACK).filter(k => k in body);
+  if (!keys.length) return;
+  let oldRow = {}; try { oldRow = (await pool.query(`SELECT ${keys.join(',')} FROM planner.sample_requests WHERE id=$1::bigint`, [sampleId])).rows[0] || {}; } catch (e) { return; }
+  for (const k of keys) {
+    let nv = (body[k] === '' || body[k] == null) ? '' : String(body[k]).trim();
+    let ov = (oldRow[k] == null) ? '' : String(oldRow[k]).trim();
+    if (/completion$|_date$/.test(k)) { ov = ov.slice(0, 10); nv = nv.slice(0, 10); }
+    if (ov === nv) continue;
+    await logSampleChange(sampleId, SAMPLE_TRACK[k] + ' updated', (ov ? ov + ' → ' : '') + (nv || '(cleared)'), by);
+  }
 }
 async function logPoFieldChanges(po, keys, oldRow, body, by) {
   const numish = (s) => s !== '' && s != null && !isNaN(Number(s));
@@ -9861,7 +9888,9 @@ app.get('/api/portal/product-skus', portalAuth, async (req, res) => {   // bulk-
   try { res.json(await supplierSkuCandidates(req.portal.suppliers, (req.query.q || '').trim(), !!req.query.dev)); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample/:id/lines', portalAuth, async (req, res) => {   // replace-all bulk-SKU lines
   try { const s = await portalOwnsSample(req, req.params.id); if (!s) return res.status(403).json({ error: 'not your sample' });
-    await setSampleLines(req.params.id, (req.body || {}).lines); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
+    await setSampleLines(req.params.id, (req.body || {}).lines);
+    await logSampleChange(req.params.id, 'SKUs / quantities updated', null, req.portal.email || 'supplier');   // record of change (supplier side)
+    res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample/:id/dev-samples', portalAuth, async (req, res) => {   // replace-all product-development sample links
   const b = req.body || {};
   try { const s = await portalOwnsSample(req, req.params.id); if (!s) return res.status(403).json({ error: 'not your sample' });
@@ -9910,12 +9939,15 @@ app.post('/api/portal/sample-note-read/:id', portalAuth, async (req, res) => {  
   catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample-accept', portalAuth, async (req, res) => {
   try { const s = await portalOwnsSample(req, req.body && req.body.id); if(!s) return res.status(403).json({ error: 'not your sample' });
-    await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), change_requested=false, approved_lines=(SELECT jsonb_object_agg(sku,qty) FROM (SELECT sku, sum(qty) qty FROM planner.sample_request_lines WHERE sample_id=$1::bigint GROUP BY sku) z), updated_at=now() WHERE id=$1::bigint`, [s.id]); res.json({ ok: true }); }
+    await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), change_requested=false, approved_lines=(SELECT jsonb_object_agg(sku,qty) FROM (SELECT sku, sum(qty) qty FROM planner.sample_request_lines WHERE sample_id=$1::bigint GROUP BY sku) z), updated_at=now() WHERE id=$1::bigint`, [s.id]);
+    await logSampleChange(s.id, 'Confirmed sample request', null, req.portal.email || 'supplier');   // record of change (supplier side)
+    res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample-update', portalAuth, async (req, res) => {   // supplier: expected completion / tracking / carrier
   const b = req.body || {};
   try { const s = await portalOwnsSample(req, b.id); if(!s) return res.status(403).json({ error: 'not your sample' });
     await maybeShippedNote(s.id, b, 'supplier', req.portal.email);
+    await logSampleFieldChanges(s.id, b, req.portal.email || 'supplier');   // record of change (supplier side)
     patch(res, 'planner.sample_requests', 'id', s.id, { supplier_expected_completion:'date', tracking_code:'text', carrier:'text', production_status:'text' }, b, 'bigint'); }
   catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample-note', portalAuth, async (req, res) => {

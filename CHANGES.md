@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.459 - Samples: record-of-change audit (admin-only) + delivery-notes heading with branch ⚠️ NEEDS TESTING · NEW MIGRATION
+- **Samples now have a "record of change" audit trail** (migration 172 `planner.sample_change_log`), mirroring Purchase Orders. Captures edits from **both** sides — Dock & Bay admin AND the supplier portal (changed_by = admin user or supplier email): field changes (production status / tracking / carrier / expected completion / status), SKU/qty changes, and confirmations. **Shown on the ADMIN sample view only** (Timeline tab), **not in the supplier portal**, with a per-sample **"hide record of change"** toggle (same as POs). Server: `logSampleChange`/`logSampleFieldChanges` wired into the portal + admin sample endpoints; `change_log` added to `/api/supply/sample-detail`. `server.mjs` + `supply/inject.html`. Verified end-to-end.
+- **Delivery-notes heading now reads "Delivery notes for &lt;branch&gt;"** (e.g. "Delivery notes for UK ILG") on both the shipment card and the PO-detail shipment section — replacing the separate BRANCH line from v26.458. `supply/portal-view.js`.
+- **Migration 172 must be run on live by Diviyaj.**
+
 ## v26.458 - Supplier portal: 6 fixes (amount due, align, wrap, branch, freight mode, sample reconfirm) ⚠️ NEEDS TESTING
 - **Amount due** on Payments & Documents now = supplier's **final invoice** total − paid (was order value); **$0 until a final invoice amount is entered**. `portal-view.js`.
 - **Additional costs** description inputs left-aligned. `portal-view.js`.
