@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.449 - Transfer grid: per-market 3PL SOH columns + demand-row highlight ⚠️ NEEDS TESTING
+- **TRANSFER tab now shows 3PL SOH for every market** (SOH UK / US / EU / AU / CA) instead of just the current market's SOH 3PL — so you can see donor/recipient stock across all 3PLs at a glance. Current market column is highlighted. The transfer download CSV matches (a SOH column per market). `artifact_v16.7.html`.
+- **Buy-plan popup: DTC demand / B2B demand / FBA demand rows highlighted light yellow `#FFFF99`** across the whole row (applied in the shared `dr()` row builder, so every popup instance is covered). `artifact_v16.7.html`. No migration.
+
 ## v26.448 - Transfer download = full grid + CONFIG matrix editor for transfer lead times ⚠️ NEEDS TESTING
 - **Transfer download** now exports **all fields in the grid** (SKU, Title, Status, Type, Release Window, Launch, Disc, SOH 3PL, SOH FBA, On Order, Class, and Out→/In← per market) rather than the old 3-column subset. Respects the active pill filter. `artifact_v16.7.html`.
 - **CONFIG ▸ Branches now has a Transfer lead-times matrix** (market → market, in weeks) to edit `planner.transfer_lead_times` inline — the same data that drives the TRANSFER tab's Rebalance/Urgent plan. Row = origin, column = destination; clear a cell to remove that lane (missing lane = we don't transfer that way). Saves on change.

@@ -578,6 +578,8 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
 /* Spreadsheet-style cell selection: drag to select numeric cells and see their sum in the popup header. */
 #buy-wrap table.pt td.cellsel,#buy-wrap table.pt tr:hover td.cellsel{background:#bfdbfe !important;outline:1px solid #3b82f6;outline-offset:-1px}
 #buy-wrap table.pt td:not(.rl){user-select:none;-webkit-user-select:none}
+/* Demand source rows (DTC / B2B / FBA demand) highlighted light yellow across the whole row. */
+#buy-wrap table.pt tr.dmd-hl td,#buy-wrap table.pt tr.dmd-hl:hover td{background:#FFFF99 !important}
 #buy-wrap .txb{margin-top:6px;background:#fef9c3;border:1px solid #fcd34d;border-radius:4px;padding:5px 10px;font-size:11px;color:#854d0e}
 /* Complex Rules list — flex rows: one line on desktop, stacks over ~2 lines on mobile */
 #cr-panel .cr-grp{font-weight:700;color:#0f172a;font-size:11px;margin:9px 0 2px}
@@ -1814,7 +1816,9 @@ function render(){
       +(_MERGE?'<th style="min-width:60px">Status<br><span class="tip-wrap" style="width:auto">Type<span class="tip-box">Core or seasonal</span></span></th>':'<th style="min-width:52px">Status</th><th style="min-width:64px"><span class="tip-wrap" style="width:auto">Type<span class="tip-box">Core or seasonal</span></span></th>')
       +'<th style="min-width:74px;text-align:center">Release<br>Window</th>'
       +(_MERGE?'<th style="min-width:58px">Launch<br>Disc</th>':'<th style="min-width:60px">Launch</th><th style="min-width:60px">Disc</th>')
-      +'<th class="r" style="min-width:60px">SOH 3PL</th>'
+      +((BP_VIEW==='transfer')   // TRANSFER: show 3PL on-hand for EVERY market (current market highlighted), not just SOH 3PL
+        ? MKTS.map(function(m){return '<th class="r" style="min-width:46px;font-size:9px'+(m===CUR?';background:#eff6ff;color:#1e40af;font-weight:700':'')+'" title="3PL on-hand — '+m+'">SOH '+m+'</th>';}).join('')
+        : '<th class="r" style="min-width:60px">SOH 3PL</th>')
       +(showNonGRS?'<th class="r" style="min-width:72px">SOH NON GRS</th>':'')
       +'<th class="r" style="min-width:60px'+(BP_VIEW==='fba'?';background:#fef9c3':'')+'">SOH FBA</th>'
       +(showAWD?'<th class="r" style="min-width:60px;background:#fef9c3">SOH AWD</th>':'')
@@ -1896,7 +1900,7 @@ function render(){
   vis.forEach(s=>{const k=s.c||'?';if(!grp[k])grp[k]=[];grp[k].push(s);});
   const gk=Object.keys(grp).sort((a,b)=>{const ai=CAT_ORDER.indexOf(a),bi=CAT_ORDER.indexOf(b);if(ai<0&&bi<0)return a.localeCompare(b);if(ai<0)return 1;if(bi<0)return-1;return ai-bi;});
   let h='';
-  const COLS=(BP_VIEW==='fba')?(15+_extra):(BP_VIEW==='transfer'?(9+(MKTS.length-1)*2):13);   // 9 lead cols (incl. Release Window); buy adds Buy 3PL/Urgent Sea/Urgent Air/Buy FBA; transfer adds OUT/IN per other market
+  const COLS=(BP_VIEW==='fba')?(15+_extra):(BP_VIEW==='transfer'?(9+(MKTS.length-1)*3):13);   // 9 lead cols (incl. Release Window); buy adds Buy 3PL/Urgent Sea/Urgent Air/Buy FBA; transfer expands SOH 3PL→per-market (+MKTS-1) and adds OUT/IN per other market
   const COLS_EFF=COLS-(_MERGE?2:0);   // mobile FBA merges 2 column pairs → 2 fewer columns
   if(!vis.length){h='<tr><td colspan="'+COLS_EFF+'" class="nd">No SKUs match filters</td></tr>';}
   else gk.forEach(sc=>{
@@ -1972,7 +1976,9 @@ function render(){
           ? `<td class="dt" style="line-height:1.3">${launchStr?`<span class="${st==='FUTURE'?'dt-launch':''}">${launchStr}</span>`:'<span style="color:#bbb">—</span>'}<br>${discStr?`<span class="${st==='DISC'?'dt-disc':''}">${discStr}</span>`:'<span style="color:#bbb">—</span>'}</td>`
           : `<td class="dt">${launchStr?`<span class="${st==='FUTURE'?'dt-launch':''}">${launchStr}</span>`:''}</td>
         <td class="dt">${discStr?`<span class="${st==='DISC'?'dt-disc':''}">${discStr}</span>`:''}</td>`}
-        <td class="iv"><span class="iv-v ${i3<0?'iv-neg':'iv-pos'}">${fmt(i3)}</span></td>
+        ${BP_VIEW==='transfer'
+          ? MKTS.map(function(m){var mm=PD[s.s]&&PD[s.s].mkts&&PD[s.s].mkts[m];var v=mm?(mm.i3||0):0;return '<td class="iv"'+(m===CUR?' style="background:#eff6ff"':'')+'><span class="iv-v '+(v<0?'iv-neg':'iv-pos')+'">'+(mm?fmt(v):'—')+'</span></td>';}).join('')
+          : `<td class="iv"><span class="iv-v ${i3<0?'iv-neg':'iv-pos'}">${fmt(i3)}</span></td>`}
         ${showNonGRS?`<td class="iv"><span class="iv-v" style="color:#475569" title="Non-GRS on-hand (sellable via 3PL; display only)">${(function(){var ng=nonGrsOf(s.s,CUR);return ng>0?fmt(ng):'—';})()}</span></td>`:''}
         <td class="iv"${BP_VIEW==='fba'?' style="background:#fef9c3"':''}><span class="iv-v ${ifv<0?'iv-neg':'iv-pos'}">${fmt(ifv)}</span></td>
         ${showAWD?`<td class="iv" style="background:#fef9c3"><span class="iv-v" style="color:#475569" title="AWD (US upstream) — pooled into FBA cover for the transfer calc">${(function(){var a=awdOf(s.s,CUR);return a>0?fmt(a):'—';})()}</span></td>`:''}
@@ -2315,12 +2321,12 @@ function downloadViewCSV(){ var vis=getFilteredVis()||[], co=CUR, rows=[], oth=M
       var rec=(BU_SEL==='TRFFBA_NG')?nonGrsOf(s.s,co):fbaTransferRec(s.s,co), fis=fbaInbSplit(s.s,co);
       rows.push([s.s,s.rw||'',md.i3||0,md['if_']||0,rec||0,fis.soon||0,fis.later||0]); });
   } else { // TRANSFER view: export every field shown in the grid + the SKU's transfer class(es).
-    var hdr=['SKU','Title','Status','Type','Release Window','Launch','Disc','SOH 3PL','SOH FBA','On Order','Class'];
+    var hdr=['SKU','Title','Status','Type','Release Window','Launch','Disc'].concat(MKTS.map(function(m){return 'SOH '+m;})).concat(['SOH FBA','On Order','Class']);
     oth.forEach(function(m){hdr.push('Out->'+m);}); oth.forEach(function(m){hdr.push('In<-'+m);}); rows.push(hdr);
     vis.forEach(function(s){ var md=PD[s.s]&&PD[s.s].mkts&&PD[s.s].mkts[co]; if(!md)return;
       var ms=(s.ms&&s.ms[co])||{}, cl=trfClassesOf(s.s);
       var cls=[cl.urgent?'Urgent':'',cl.rebalance?'Rebalance':''].filter(Boolean).join(' + ');
-      var row=[s.s,s.ti||'',ms.st||'ACTIVE',s.cs||'',s.rw||'',dateDMY(ms.launch)||'',dateDMY(ms.disc)||'',md.i3||0,md['if_']||0,md.oo||0,cls];
+      var row=[s.s,s.ti||'',ms.st||'ACTIVE',s.cs||'',s.rw||'',dateDMY(ms.launch)||'',dateDMY(ms.disc)||''].concat(MKTS.map(function(m){var mm=PD[s.s]&&PD[s.s].mkts&&PD[s.s].mkts[m];return mm?(mm.i3||0):'';})).concat([md['if_']||0,md.oo||0,cls]);
       oth.forEach(function(m){row.push(_trfAmt(s.s,co,m));}); oth.forEach(function(m){row.push(_trfAmt(s.s,m,co));}); rows.push(row); }); }
   var csv=rows.map(function(r){return r.map(function(c){var v=String(c==null?'':c); return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',');}).join('\r\n');
   var blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'}), url=URL.createObjectURL(blob), a=document.createElement('a');
@@ -3129,7 +3135,7 @@ function buildTable(proj,md,pd,is3,hasFBA){
   return `<div class="pw"><table class="pt"><thead>${hdr}</thead><tbody>${rows.join('')}</tbody></table></div>`;
 }
 function sec(l,n){return`<tr><td class="rl sec">${l}</td>${Array(n).fill('<td class="sx"></td>').join('')}</tr>`;}
-function dr(l,proj,fn,ind){return`<tr><td class="rl${ind?' ind':''}">${l}</td>${proj.map(p=>fn(p)).join('')}</tr>`;}
+function dr(l,proj,fn,ind){var hl=(l==='DTC demand'||l==='B2B demand'||l==='FBA demand');return`<tr${hl?' class="dmd-hl"':''}><td class="rl${ind?' ind':''}">${l}</td>${proj.map(p=>fn(p)).join('')}</tr>`;}
 function c(v,cls){return`<td class="${cls}">${v}</td>`;}
 function card(l,v,s,w){return`<div class="sc2 ${w}"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;}
 function fmt(n){if(n===null||n===undefined)return'\u2014';const r=Math.round(n);return Math.abs(r)>=1000?r.toLocaleString():String(r);}
