@@ -5382,10 +5382,12 @@ function inbDiv(inb, entries, color){
 })();
 // 120ms hover tooltip for complex-rule cover cells (.crc-tip) in the SKU popup AND the demand-plan SKU name
 // (.dp-sku-tip → product title). Bound once, renders the element's data-tip HTML.
-(function(){ var el=null,t=null; var SEL='.crc-tip[data-tip], .dp-sku-tip[data-tip]';
+(function(){ var el=null,t=null; var SEL='.crc-tip[data-tip], .dp-sku-tip[data-tip], .crc-tip[data-antip]';
   function hide(){ if(el)el.style.display='none'; }
   document.addEventListener('mouseover',function(e){ var n=e.target&&e.target.closest?e.target.closest(SEL):null; if(!n)return;
-    clearTimeout(t); t=setTimeout(function(){ if(!el){el=document.createElement('div'); el.style.cssText='position:fixed;z-index:100006;max-width:300px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:7px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none'; document.body.appendChild(el);} el.innerHTML=n.getAttribute('data-tip'); el.style.display='block'; var r=n.getBoundingClientRect(); el.style.left=Math.max(6,Math.min(r.left,window.innerWidth-306))+'px'; el.style.top=(r.bottom+5)+'px'; },120); });
+    clearTimeout(t); t=setTimeout(function(){ var tip=n.getAttribute('data-tip');
+      if(tip==null&&n.hasAttribute('data-antip')&&window._anTipHtml){ var pp=n.getAttribute('data-antip').split('|'); tip=window._anTipHtml(pp[0],pp[1],pp[2],pp[3]); n.setAttribute('data-tip',tip); }   // lazy: build the anomaly strip on first hover, then cache
+      if(!el){el=document.createElement('div'); el.style.cssText='position:fixed;z-index:100006;max-width:300px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:7px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none'; document.body.appendChild(el);} el.innerHTML=tip; el.style.display='block'; var r=n.getBoundingClientRect(); el.style.left=Math.max(6,Math.min(r.left,window.innerWidth-306))+'px'; el.style.top=(r.bottom+5)+'px'; },120); });
   document.addEventListener('mouseout',function(e){ var n=e.target&&e.target.closest?e.target.closest(SEL):null; if(n){clearTimeout(t); hide();} });
   document.addEventListener('scroll',hide,true);
 })();
@@ -8455,6 +8457,19 @@ function _anKey(it){ return 'anomaly|'+it.sku+'|'+it.co+'|'+it.ch+'|'+it.fym; }
 function _anStatus(it,sm){ var st=(sm||{})[_anKey(it)]; if(!st)return 'open'; if(st.status==='snoozed')return (!st.snooze_until||st.snooze_until>=TODAY)?'snoozed':'open'; return st.status||'open'; }
 function daAnomalyItems(){ if(!window._daAnom){ try{window._daAnom=daAnomalyReport();}catch(e){window._daAnom=[];} } return window._daAnom; }
 function daAnomalyOpenCount(){ var sm=window._daSM||{}; return daAnomalyItems().filter(function(it){return _anStatus(it,sm)==='open';}).length; }
+// Anomaly hover strip (last 6 → month → next 6, fcst vs LY actual) — built LAZILY on first hover so a large
+// filtered list doesn't pay this per-card up front. Called from the shared .crc-tip hover handler.
+window._anTipHtml=function(sku,co,ch,fym){ try{
+  var MNL=(typeof MN!=='undefined'&&MN)||['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function mlbl(f){ var p=f.split('_'); return (MNL[parseInt(p[1],10)-1]||p[1])+' '+p[0].slice(2); }
+  function addM(f,n){ var p=f.split('_'),y=parseInt(p[0],10),m=parseInt(p[1],10)-1+n; y+=Math.floor(m/12); m=((m%12)+12)%12; return y+'_'+(m+1<10?'0':'')+(m+1); }
+  var dm=(((BP_DATA.products[sku]||{}).mkts||{})[co]||{}).demand; dm=(dm&&dm[ch])||{}; var sl=skuSales(sku,co,ch)||{}; var head='',fc='',ly='';
+  for(var i=-6;i<=6;i++){ var m=addM(fym,i), act=isActualMonth(m), v=act?(sl[m]||0):(dm[m]||0), lyv=sl[(parseInt(m.slice(0,4),10)-1)+'_'+m.slice(5,7)]||0, hl=(i===0);
+    head+='<td style="padding:1px 4px;text-align:right;font-size:9px;color:'+(hl?'#fbbf24':'#94a3b8')+'">'+mlbl(m).split(' ')[0]+(act?'':'*')+'</td>';
+    fc+='<td style="padding:1px 4px;text-align:right'+(hl?';color:#fbbf24;font-weight:700':';color:#fff')+'">'+fn(Math.round(v))+'</td>';
+    ly+='<td style="padding:1px 4px;text-align:right;color:#94a3b8">'+fn(Math.round(lyv))+'</td>'; }
+  return '<div style="font-weight:700;margin-bottom:3px">'+sku+' · '+co+' '+ch+' — fcst vs last-year actual (*=forecast month)</div><table style="border-collapse:collapse;font-size:10px"><tr><td style="color:#64748b;padding-right:5px"></td>'+head+'</tr><tr><td style="color:#94a3b8;padding-right:5px">fcst</td>'+fc+'</tr><tr><td style="color:#94a3b8;padding-right:5px">LY act</td>'+ly+'</tr></table>';
+}catch(e){ return sku+' · '+co+' '+ch; } };
 // A-player stock-out (ACTIONS): a Tier-A SKU that's running out of 3PL cover (on-hand + on-order
 // consumed against demand — the buy plan's own compute3plWeeksRemaining) AND whose recent run-rate
 // is outpacing its forecast — i.e. selling out because the forecast (and so the buy) was too low.
@@ -8576,13 +8591,7 @@ function renderDemandActionsView(body){
       list.sort(function(a,b){ return (a.svRank-b.svRank)||(a.sku<b.sku?-1:a.sku>b.sku?1:0)||(a.co<b.co?-1:a.co>b.co?1:0)||(a.ch<b.ch?-1:a.ch>b.ch?1:0)||(a.fym<b.fym?-1:1); });   // biggest anomaly first (High→Low), then SKU
       function mlbl(fym){ var p=fym.split('_'); return (MN[parseInt(p[1],10)-1]||p[1])+' '+p[0].slice(2); }
       function _addM(fym,n){ var p=fym.split('_'),y=parseInt(p[0],10),m=parseInt(p[1],10)-1+n; y+=Math.floor(m/12); m=((m%12)+12)%12; return y+'_'+(m+1<10?'0':'')+(m+1); }
-      // 120ms-hover strip: last 6 → anomaly → next 6 months (forecast, actual where past) + last-year actuals.
-      function anTip(it){ var dm=(((BP_DATA.products[it.sku]||{}).mkts||{})[it.co]||{}).demand; dm=(dm&&dm[it.ch])||{}; var sl=skuSales(it.sku,it.co,it.ch)||{}; var head='',fc='',ly='';
-        for(var i=-6;i<=6;i++){ var m=_addM(it.fym,i), act=isActualMonth(m), v=act?(sl[m]||0):(dm[m]||0), lyv=sl[(parseInt(m.slice(0,4),10)-1)+'_'+m.slice(5,7)]||0, hl=(i===0);
-          head+='<td style="padding:1px 4px;text-align:right;font-size:9px;color:'+(hl?'#fbbf24':'#94a3b8')+'">'+mlbl(m).split(' ')[0]+(act?'':'*')+'</td>';
-          fc+='<td style="padding:1px 4px;text-align:right'+(hl?';color:#fbbf24;font-weight:700':';color:#fff')+'">'+fn(Math.round(v))+'</td>';
-          ly+='<td style="padding:1px 4px;text-align:right;color:#94a3b8">'+fn(Math.round(lyv))+'</td>'; }
-        return '<div style="font-weight:700;margin-bottom:3px">'+it.sku+' · '+it.co+' '+it.ch+' — fcst vs last-year actual (*=forecast month)</div><table style="border-collapse:collapse;font-size:10px"><tr><td style="color:#64748b;padding-right:5px"></td>'+head+'</tr><tr><td style="color:#94a3b8;padding-right:5px">fcst</td>'+fc+'</tr><tr><td style="color:#94a3b8;padding-right:5px">LY act</td>'+ly+'</tr></table>'; }
+      // 120ms-hover strip is built lazily on first hover via window._anTipHtml (see the shared .crc-tip handler).
       function renderAnCard(it){ var key=_anKey(it), st=_anStatus(it,sm), resolved=(st!=='open'), col=it.type==='hi'?'#d97706':'#0369a1', arrow=it.type==='hi'?'▲ spike':'▼ dip', ov=skuOvGet(it.sku,it.co,it.ch,it.fym);
         var btns=resolved
           ? '<button class="an-act" data-k="'+tHesc(key)+'" data-s="open" style="border:1px solid #1d4ed8;color:#1d4ed8;background:#fff;border-radius:5px;padding:3px 9px;cursor:pointer;font:inherit;font-size:11px">↺ Restore</button>'
@@ -8592,7 +8601,7 @@ function renderDemandActionsView(body){
         return '<div style="border:1px solid #e8e8e8;border-left:4px solid '+col+';border-radius:7px;padding:8px 12px;margin-bottom:7px;'+(resolved?'opacity:.7':'')+'">'
           +'<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><span style="font-weight:700;font-size:12px;font-family:monospace">'+tHesc(it.sku)+'</span>'
           +'<span style="font-size:10px;color:#64748b">'+it.co+' · '+it.ch+' · '+tHesc(it.subcat)+'</span>'
-          +'<span class="crc-tip" data-tip="'+anTip(it).replace(/"/g,'&quot;')+'" style="font-weight:700;font-size:11px;color:'+col+';cursor:help;border-bottom:1px dotted '+col+'">'+arrow+' '+mlbl(it.fym)+'</span>'+(resolved?'<span style="font-size:10px;color:#999"> · '+st+(st==='snoozed'&&sm[key]&&sm[key].snooze_until?' until '+sm[key].snooze_until:'')+'</span>':'')+'</div>'
+          +'<span class="crc-tip" data-antip="'+tHesc(it.sku)+'|'+it.co+'|'+it.ch+'|'+it.fym+'" style="font-weight:700;font-size:11px;color:'+col+';cursor:help;border-bottom:1px dotted '+col+'">'+arrow+' '+mlbl(it.fym)+'</span>'+(resolved?'<span style="font-size:10px;color:#999"> · '+st+(st==='snoozed'&&sm[key]&&sm[key].snooze_until?' until '+sm[key].snooze_until:'')+'</span>':'')+'</div>'
           +'<div style="font-size:11px;color:#444;margin:3px 0 6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">Forecast <b>'+fn(it.cur)+'</b> vs expected <b>'+fn(it.expected)+'</b>'
           +' <span style="color:#64748b">· set '+mlbl(it.fym)+' →</span> <input class="an-ov" data-sku="'+tHesc(it.sku)+'" data-co="'+it.co+'" data-ch="'+it.ch+'" data-m="'+it.fym+'" value="'+(ov!=null?tHesc(ov):'')+'" placeholder="'+fn(it.cur)+'" title="Override this month’s forecast — saves to your plan &amp; the buy plan" style="width:66px;text-align:right;font-size:11px;border:1px solid #cbd5e1;border-radius:4px;padding:2px 5px" inputmode="numeric">'
           +' <a href="#" class="an-setrec" data-sku="'+tHesc(it.sku)+'" data-co="'+it.co+'" data-ch="'+it.ch+'" data-m="'+it.fym+'" data-v="'+it.expected+'" title="Set '+mlbl(it.fym)+' to the seasonal-expected value" style="color:#7c3aed;text-decoration:underline;white-space:nowrap">set '+mlbl(it.fym)+' to '+fn(it.expected)+'</a>'
@@ -8617,8 +8626,10 @@ function renderDemandActionsView(body){
       body.querySelectorAll('.an-cell').forEach(function(b){ b.onclick=function(){ _da.anCo=b.dataset.co; _da.anCh=b.dataset.ch; _da.anStatus='open'; draw(all); }; });
       body.querySelectorAll('.an-st').forEach(function(b){ b.onclick=function(){ _da.anStatus=b.dataset.st; draw(all); }; });
       body.querySelectorAll('.an-act').forEach(function(b){ b.onclick=function(){ b.disabled=true; setState(b.dataset.k,b.dataset.s,b.dataset.days).then(function(j){ if(j&&j.error){alert(j.error);b.disabled=false;return;} load(); }); }; });
-      body.querySelectorAll('.an-ov').forEach(function(inp){ inp.onchange=function(){ var v=inp.value.trim(); skuOvSet(inp.dataset.sku,inp.dataset.co,inp.dataset.ch,inp.dataset.m,(v===''?null:v)); window._daAnom=null; load(); }; });   // override → auto-saves (markDirty) + recompute the anomalies
-      body.querySelectorAll('.an-setrec').forEach(function(a){ a.onclick=function(e){ e.preventDefault(); skuOvSet(a.dataset.sku,a.dataset.co,a.dataset.ch,a.dataset.m,a.dataset.v); window._daAnom=null; load(); }; });   // set the recommended (seasonal-expected) value as the override
+      // Silent override — apply (auto-saves via markDirty) WITHOUT reloading/recomputing, and keep the row in place.
+      body.querySelectorAll('.an-ov').forEach(function(inp){ inp.onchange=function(){ var v=inp.value.trim(); skuOvSet(inp.dataset.sku,inp.dataset.co,inp.dataset.ch,inp.dataset.m,(v===''?null:v)); inp.style.borderColor='#16a34a'; inp.style.background='#f0fdf4'; }; });
+      body.querySelectorAll('.an-setrec').forEach(function(a){ a.onclick=function(e){ e.preventDefault(); skuOvSet(a.dataset.sku,a.dataset.co,a.dataset.ch,a.dataset.m,a.dataset.v);
+        var inp=a.parentNode&&a.parentNode.querySelector('.an-ov'); if(inp){ inp.value=a.dataset.v; inp.style.borderColor='#16a34a'; inp.style.background='#f0fdf4'; } a.textContent='✓ set to '+a.dataset.v; a.style.color='#16a34a'; }; });
       body.querySelectorAll('.an-hoz').forEach(function(b){ b.onclick=function(){ _da.anHoz=b.dataset.h; draw(all); }; });
       var _acos=body.querySelector('.an-co-sel'); if(_acos)_acos.onchange=function(){ _da.anCo=this.value; draw(all); };
       var _achs=body.querySelector('.an-ch-sel'); if(_achs)_achs.onchange=function(){ _da.anCh=this.value; draw(all); };

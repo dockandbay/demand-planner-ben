@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.474 - Anomalies: silent override + faster horizon filtering ⚠️ NEEDS TESTING
+- Setting a cell (override input or "set … to N" link) now applies SILENTLY — no reload/recompute, the row stays in place; the input flashes green as confirmation. Previously it re-ran the whole report and dropped the fixed item.
+- Horizon-pill / filter switches are much faster: the hover strip (last-6/next-6 fcst vs LY) is now built LAZILY on first hover instead of eagerly for every card. artifact_v16.7.html. No migration.
+
 ## v26.473 - Remove the empty AI-tools slot from the DEMAND sub-nav ⚠️ NEEDS TESTING
 - Removed the now-empty #plan-tools container (left behind an empty slot on the DEMAND nav after AI Insights/Forecast Logic were relocated in v26.472). All references were null-guarded. artifact_v16.7.html. No migration.
 
