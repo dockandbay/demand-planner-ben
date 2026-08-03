@@ -7142,11 +7142,11 @@
     // PO payments only surface once the FINAL INVOICE AMOUNT is confirmed (is_final) AND the milestone has a due date.
     // Completed POs ARE included — an unpaid balance shouldn't hide behind a COMPLETE flag. Old payments are cut below.
     (pos||[]).forEach(function(p){ if(!p.is_final)return; var ep='/api/supply/po/'+encodeURIComponent(p.po);
-      if(Number(p.completion_calc)>0.009 && p.completion_due) rows.push({sup:p.supplier_name||'',type:'Completion',ref:p.po,due_amt:Number(p.completion_calc),due:p.completion_due,ep:ep,amt_field:'pay_completion_assigned',amt_val:p.completion_assigned,dt_field:'pay_completion_date',dt_val:p.completion_date,po:true});
-      if(Number(p.balance_owing)>0.009 && p.balance_due) rows.push({sup:p.supplier_name||'',type:'Balance',ref:p.po,due_amt:Number(p.balance_owing),due:p.balance_due,ep:ep,amt_field:'pay_balance_1_amount',amt_val:p.balance_1_amount,dt_field:'pay_balance_1_date',dt_val:p.balance_1_date,po:true}); });
+      if(Number(p.completion_calc)>0.009 && p.completion_due) rows.push({sup:p.supplier_name||'',type:'Completion',ref:p.po,due_amt:Number(p.completion_calc),due:p.completion_due,likely:p.likely_completion,ep:ep,amt_field:'pay_completion_assigned',amt_val:p.completion_assigned,dt_field:'pay_completion_date',dt_val:p.completion_date,po:true});
+      if(Number(p.balance_owing)>0.009 && p.balance_due) rows.push({sup:p.supplier_name||'',type:'Balance',ref:p.po,due_amt:Number(p.balance_owing),due:p.balance_due,likely:p.likely_balance_1,ep:ep,amt_field:'pay_balance_1_amount',amt_val:p.balance_1_amount,dt_field:'pay_balance_1_date',dt_val:p.balance_1_date,po:true}); });
     (deps||[]).forEach(function(d){ if(d.status==='closed')return;
       if(!(Number(d.amount)>0.009) && !d.date_paid && !d.date_due) return;   // skip empty stubs
-      rows.push({sup:d.supplier_name||'',type:d.is_deposit?'Deposit':'Other',ref:d.reference||d.description||('#'+d.id),due_amt:Number(d.amount)||0,due:d.date_due||'',ep:'/api/supply/deposit/'+encodeURIComponent(d.id),amt_field:'amount',amt_val:d.amount,dt_field:'date_paid',dt_val:d.date_paid,po:false}); });
+      rows.push({sup:d.supplier_name||'',type:d.is_deposit?'Deposit':'Other',ref:d.reference||d.description||('#'+d.id),due_amt:Number(d.amount)||0,due:d.date_due||'',likely:d.date_likely_pay,ep:'/api/supply/deposit/'+encodeURIComponent(d.id),amt_field:'amount',amt_val:d.amount,dt_field:'date_paid',dt_val:d.date_paid,po:false}); });
     rows=rows.filter(function(r){ return !(r.due && r.due<PDUE_MIN_DUE); });   // exclude old payments (due date before 2026-01-01); no-due-date rows are kept
     // PO milestone = paid once an AMOUNT is assigned (matches the PO detail); a scheduled date with no amount is NOT paid → still due. Deposits/other = date_paid.
     rows.forEach(function(r){ r.paid = r.po ? (Number(r.amt_val)>0.009) : !!r.dt_val; r.overdue=!r.paid && !!r.due && r.due<today; });
@@ -7168,11 +7168,11 @@
       document.getElementById('pdue-bar').innerHTML='<span class="pill-lbl">Status</span>'+stP
         +' <span class="pill-lbl" style="margin-left:8px">Supplier</span><select class="flt" id="pdue-sup" style="width:auto">'+supOpts+'</select>'
         +'<span class="count" style="margin-left:auto">'+f.length+' payments · '+order.length+' suppliers</span>';
-      var h='<div class="tw"><table class="pay-tbl"><thead><tr><th class="l">Type</th><th class="l">Reference</th><th>Amount due</th><th class="l">Due date</th><th>Assigned</th><th class="l">Payment date</th></tr></thead><tbody>';
-      if(!f.length) h+='<tr><td colspan="6" class="l mut">No payments match this filter.</td></tr>';
+      var h='<div class="tw"><table class="pay-tbl"><thead><tr><th class="l">Type</th><th class="l">Reference</th><th>Amount due</th><th class="l">Due date</th><th class="l">Likely pay date</th><th>Assigned</th><th class="l">Payment date</th></tr></thead><tbody>';
+      if(!f.length) h+='<tr><td colspan="7" class="l mut">No payments match this filter.</td></tr>';
       order.forEach(function(s){ var gr=groups[s].slice().sort(function(a,c){return (a.due||'9999').localeCompare(c.due||'9999')||a.type.localeCompare(c.type);});
         var sub=gr.reduce(function(t,r){return t+(r.due_amt||0);},0); grand+=sub;
-        h+='<tr class="batchrow"><td class="l" colspan="3"><b>'+esc(s)+'</b> <span class="tiny mut">'+gr.length+' payment(s)</span></td><td class="l" colspan="3"><span class="tiny mut">subtotal due '+fmtCur(sub, supCcyOf(s))+'</span></td></tr>';
+        h+='<tr class="batchrow"><td class="l" colspan="3"><b>'+esc(s)+'</b> <span class="tiny mut">'+gr.length+' payment(s)</span></td><td class="l" colspan="4"><span class="tiny mut">subtotal due '+fmtCur(sub, supCcyOf(s))+'</span></td></tr>';
         gr.forEach(function(r){
           var dueCell=r.due?(r.overdue?'<span style="color:#dc2626;font-weight:700">'+esc(fd(r.due))+'</span>':esc(fd(r.due))):'<span class="mut">—</span>';
           // reference → its source: PO opens the PO with the PLAN expanded on the PAYMENTS tab; deposit/other open their register
@@ -7186,13 +7186,14 @@
             +'<td class="l">'+refCell+'</td>'
             +'<td>'+fmtCur(r.due_amt, supCcyOf(r.sup))+'</td>'
             +'<td class="l">'+dueCell+'</td>'
+            +'<td class="l">'+(r.likely?esc(fd(r.likely)):'<span class="mut">—</span>')+'</td>'
             +'<td>'+editCell(r.ep,r.amt_field,r.amt_val)+'</td>'
             +'<td class="l">'+editCell(r.ep,r.dt_field,r.dt_val,'date')
               +(!r.paid?' <button class="save-btn pdue-pay" data-ep="'+esc(r.ep)+'" data-af="'+esc(r.amt_field)+'" data-amt="'+esc(r.due_amt)+'" data-df="'+esc(r.dt_field)+'" style="background:#16a34a;color:#fff;border-color:#15803d;padding:2px 9px;font-size:11px" title="mark paid — set amount to '+money(r.due_amt)+' and date to today ('+localToday()+')">pay</button>':'')
               +'</td></tr>'; }); });
       var _curs=Array.from(new Set(f.map(function(r){return supCcyOf(r.sup);})));   // one symbol only if every visible row shares a currency; else flag mixed
       var _totCell=_curs.length===1?fmtCur(grand,_curs[0]):(money(grand)+' <span class="tiny mut">(mixed currencies)</span>');
-      h+='<tr class="batchrow"><td class="l" colspan="2"><b>TOTAL DUE</b></td><td><b>'+_totCell+'</b></td><td colspan="3"></td></tr>';
+      h+='<tr class="batchrow"><td class="l" colspan="2"><b>TOTAL DUE</b></td><td><b>'+_totCell+'</b></td><td colspan="4"></td></tr>';
       document.getElementById('pdue-wrap').innerHTML=h+'</tbody></table></div>';
       bindEdits();
       document.querySelectorAll('#pdue-wrap .pdue-ref').forEach(function(x){ x.onclick=function(){ var g=x.dataset.go;

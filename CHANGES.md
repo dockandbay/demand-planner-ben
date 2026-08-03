@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.497 - Payments Due: add Likely pay date column ⚠️ NEEDS TESTING
+- The Payments Due report now shows a "Likely pay date" column next to Due date (PO milestones use likely_completion / likely_balance_1; deposits/other use date_likely_pay). Read-only display. supply/inject.html. No migration.
+
 ## v26.496 - PO drawer no longer hijacks the URL/route ⚠️ NEEDS TESTING
 - Opening a PO in the popout drawer (from Actions, Payments, reports, etc.) no longer rewrites the URL to #/supply/purchase-orders/<tab>/<PO> — a refresh now stays on the current tab (e.g. Actions) instead of jumping to the PO. Deep-linking still applies to the INLINE PO grid detail. supply/inject.html. No migration.
 
