@@ -1691,9 +1691,9 @@ function buildBuPills(){
   var BU_PILLS=(BP_VIEW==='fba')
     ? [['All','ALL'],['Transfer FBA','TRFFBA'],['Transfer FBA (non GRS)','TRFFBA_NG']].concat(String(CUR).toUpperCase()==='US'?[['AWD · FBA <3wk','AWDLOW']]:[])   // US only: AWD on hand + FBA under 3 weeks
     : (BP_VIEW==='transfer')
-      ? [['All','ALL'],['Transfer','TRF']]   // TRANSFER view: only All / Transfer (buy pills removed per Ben)
+      ? [['All','ALL'],['Rebalance','TRF_REBAL'],['Urgent','TRF_URGENT']]   // TRANSFER view: two transfer classes + All
       : [['All','ALL'],['Urgent','URGENT'],['Urg Sea','URGENT_SEA'],['Urg Air','URGENT_AIR'],['Buy 3PL','3PL'],['Buy FBA','FBA'],['Transfer','TRF']];
-  if(!BU_PILLS.some(function(p){return p[1]===BU_SEL;}))BU_SEL=(BP_VIEW==='fba')?'TRFFBA':(BP_VIEW==='transfer'?'TRF':'ALL');   // FBA→Transfer FBA, Transfer→Transfer
+  if(!BU_PILLS.some(function(p){return p[1]===BU_SEL;}))BU_SEL=(BP_VIEW==='fba')?'TRFFBA':'ALL';   // FBA→Transfer FBA; Transfer→All (both classes)
   BU_PILLS.forEach(function(pr){ var lbl=pr[0],val=pr[1];
     var b=mk('button','pill'+(val===BU_SEL?' active':''),lbl);
     b.onclick=function(){ BU_SEL=val;
@@ -1881,24 +1881,12 @@ function render(){
       if(BU_SEL==='URGENT_AIR'&&!bq.b3uAir)return false;
       if(BU_SEL==='3PL'&&!bq.b3)return false;
       if(BU_SEL==='FBA'&&!bq.bf)return false;
-      if(BU_SEL==='TRF'){
-        const txL3=parseInt(document.getElementById('txl')?.value)||6;
-        const pdd3=PD[s.s];if(!pdd3)return false;
-        const mmd3=pdd3.mkts&&pdd3.mkts[CUR];if(!mmd3)return false;
-        const spare3=donorSpare(mmd3);
-        if(spare3<=0)return false;
-        const ocp3=pdd3.cp||1;
-        const curKey3=PROJ[2].key;
-        const pairs3=TRF_PAIRS[CUR]||[];
-        const hasTrfOpp=pairs3.some(om=>{
-          const od3=pdd3.mkts&&pdd3.mkts[om];if(!od3)return false;
-          const oD3b=((od3.demand&&od3.demand.DTC&&od3.demand.DTC[curKey3])||0)+((od3.demand&&od3.demand.B2B&&od3.demand.B2B[curKey3])||0);
-          const oWkly3=oD3b/4.33;
-          if(!(oWkly3>0&&(od3.i3||0)/oWkly3<txL3))return false;
-          const need3=Math.max((od3.t3||12)*oWkly3-(od3.i3||0),0);
-          return Math.floor(Math.min(need3,spare3)/ocp3)*ocp3>0;
-        });
-        if(!hasTrfOpp)return false;
+      // TRANSFER view: filter to rows that have a transfer of the selected class (dual-class rows appear in both).
+      if(BP_VIEW==='transfer'&&(BU_SEL==='ALL'||BU_SEL==='TRF_REBAL'||BU_SEL==='TRF_URGENT')){
+        const cl=trfClassesOf(s.s);
+        if(BU_SEL==='TRF_REBAL'&&!cl.rebalance)return false;
+        if(BU_SEL==='TRF_URGENT'&&!cl.urgent)return false;
+        if(BU_SEL==='ALL'&&!(cl.rebalance||cl.urgent))return false;
       }
     }
     return true;
@@ -1928,49 +1916,23 @@ function render(){
       const tc=tiCls(s.ti),sc2=stCls(st);
       const launch=md.launch,disc=md.disc;
       const {b3,b3u,b3uSea,b3uAir,bf,futN,futQty,tx}=getBuyQtys(s.s,CUR);
-          // Transfer opportunity: per fixed target market columns
-      function getTrfCell(om){
-        const txH2=parseInt(document.getElementById('txh')?.value)||20;
-        const txL2=parseInt(document.getElementById('txl')?.value)||6;
-        const pdd=PD[s.s];
-        if(!pdd||!om)return '<td class="bq"><span class="bq-nil">—</span></td>';
-        const mmd=pdd.mkts&&pdd.mkts[CUR];
-        const od=pdd.mkts&&pdd.mkts[om];
-        if(!mmd||!od)return '<td class="bq"><span class="bq-nil">—</span></td>';
-        const curKey=PROJ[2].key;
-        const curD3=((mmd.demand&&mmd.demand.DTC&&mmd.demand.DTC[curKey])||0)+((mmd.demand&&mmd.demand.B2B&&mmd.demand.B2B[curKey])||0);
-        const curWkly=curD3/4.33;
-        const thisCov=curWkly>0?(mmd.i3||0)/curWkly:999;
-        const oD3=((od.demand&&od.demand.DTC&&od.demand.DTC[curKey])||0)+((od.demand&&od.demand.B2B&&od.demand.B2B[curKey])||0);
-        const oWkly=oD3/4.33;
-        const otherCov=oWkly>0?(od.i3||0)/oWkly:999;
-        const ocp=pdd.cp||1;
-        const need=oWkly>0?Math.max((od.t3||12)*oWkly-(od.i3||0),0):0;
-        const spare=donorSpare(mmd);
-        const sendable=Math.floor(Math.min(need,spare)/ocp)*ocp;
-        if(otherCov<txL2&&sendable>0){
-          return `<td class="bq" title="${om} SOH ${Math.round(otherCov)}w needs stock; ${CUR} can spare ${fmt(spare)} (incl. inbound)"><span class="bq-v" style="color:#92400e;background:#fef9c3;padding:1px 4px;border-radius:3px">${fmt(sendable)}</span></td>`;
-        }
-        return '<td class="bq"><span class="bq-nil">—</span></td>';
+          // Transfer cell: classified (Urgent red / Rebalance blue), filtered to the selected pill. donor→recip.
+      function trfCellHtml(donor,recip,bd){
+        const dash='<td class="bq" style="'+bd+'"><span class="bq-nil">—</span></td>';
+        const r=trfLane(s.s,donor,recip);
+        if(!r)return dash;
+        if(BU_SEL==='TRF_REBAL'&&r.cls!=='rebalance')return dash;   // pill filter: show only the selected class
+        if(BU_SEL==='TRF_URGENT'&&r.cls!=='urgent')return dash;
+        const col=r.cls==='urgent'?'color:#dc2626;background:#fee2e2':'color:#1d4ed8;background:#dbeafe';
+        const tip=(r.cls==='urgent'?'Urgent':'Rebalance')+' · '+donor+'→'+recip+' · '+fmt(r.qty)+' units';
+        return '<td class="bq" style="'+bd+'" title="'+tip+'"><span class="bq-v" style="'+col+';padding:1px 4px;border-radius:3px">'+fmt(r.qty)+'</span></td>';
       }
-      // INBOUND: transfer FROM another market's 3PL INTO the current market (roles swapped: recipient=CUR, donor=om).
-      function getInbCell(om,firstInSect){
-        const txL2=parseInt(document.getElementById('txl')?.value)||6;
-        const pdd=PD[s.s]; const bd=firstInSect?';border-left:3px solid #86efac':'';
-        if(!pdd||!om)return '<td class="bq" style="'+(bd?bd.slice(1):'')+'"><span class="bq-nil">—</span></td>';
-        const mmd=pdd.mkts&&pdd.mkts[CUR], od=pdd.mkts&&pdd.mkts[om];
-        if(!mmd||!od)return '<td class="bq" style="'+(bd?bd.slice(1):'')+'"><span class="bq-nil">—</span></td>';
-        const curKey=PROJ[2].key;
-        const curD3=((mmd.demand&&mmd.demand.DTC&&mmd.demand.DTC[curKey])||0)+((mmd.demand&&mmd.demand.B2B&&mmd.demand.B2B[curKey])||0);
-        const curWkly=curD3/4.33, thisCov=curWkly>0?(mmd.i3||0)/curWkly:999, ocp=pdd.cp||1;
-        const need=curWkly>0?Math.max((mmd.t3||12)*curWkly-(mmd.i3||0),0):0;
-        const spare=donorSpare(od), sendable=Math.floor(Math.min(need,spare)/ocp)*ocp;
-        if(thisCov<txL2&&sendable>0)
-          return `<td class="bq" style="${bd?bd.slice(1):''}" title="${CUR} SOH ${Math.round(thisCov)}w needs stock; ${om} can spare ${fmt(spare)}"><span class="bq-v" style="color:#166534;background:#dcfce7;padding:1px 4px;border-radius:3px">${fmt(sendable)}</span></td>`;
-        return `<td class="bq" style="${bd?bd.slice(1):''}"><span class="bq-nil">—</span></td>`;
-      }
+      // OUTBOUND: CUR (donor) → om (recipient).
+      function getTrfCell(om){ if(!om||!PD[s.s])return '<td class="bq"><span class="bq-nil">—</span></td>'; return trfCellHtml(CUR,om,''); }
+      // INBOUND: om (donor) → CUR (recipient).
+      function getInbCell(om,firstInSect){ const bd=firstInSect?'border-left:3px solid #86efac':''; if(!om||!PD[s.s])return '<td class="bq" style="'+bd+'"><span class="bq-nil">—</span></td>'; return trfCellHtml(om,CUR,bd); }
       // OUTBOUND wrapper: adds the section's left divider on the first cell.
-      function outCell(om,firstInSect){ var c=getTrfCell(om); if(firstInSect)c=c.replace('<td class="bq"','<td class="bq" style="border-left:3px solid #93c5fd"'); return c; }
+      function outCell(om,firstInSect){ if(!om||!PD[s.s])return '<td class="bq"><span class="bq-nil">—</span></td>'; return trfCellHtml(CUR,om,firstInSect?'border-left:3px solid #93c5fd':''); }
       const OTH=MKTS.filter(function(m){return m!==CUR;});   // all OTHER 3PLs
       const pairs=TRF_PAIRS[CUR]||[];
       const launchStr=dateDMY(launch),discStr=dateDMY(disc);
@@ -2000,7 +1962,7 @@ function render(){
         <td class="bq">${bf>0?`<span class="bq-fba">${fmt(bf)}</span>`:`<span class="bq-nil">—</span>`}</td>`;   // inter-market Trf columns removed from BUY (now the TRANSFER tab)
       }
       h+=`<tr class="sr">
-        <td class="stk"><div class="snm"><button class="ob" data-sku="${s.s}">Plan \u25b8</button><span class="${tc}">${s.ti}</span><span class="scode">${s.s}</span></div></td>
+        <td class="stk"><div class="snm"><button class="ob" data-sku="${s.s}">Plan \u25b8</button><span class="${tc}">${s.ti}</span><span class="scode">${s.s}</span>${BP_VIEW==='transfer'?trfChips(s.s):''}</div></td>
         ${_MERGE
           ? `<td style="padding:2px 6px;font-size:10px;line-height:1.3"><span class="${sc2}">${st}</span><br>${s.cs?`<span class="cs-${s.cs.toLowerCase().replace('-','')}" title="${s.cs}">${s.cs==='Seasonal'?'S':'C'}</span>`:'<span style="color:#bbb">—</span>'}</td>`
           : `<td style="padding:2px 8px"><span class="${sc2}">${st}</span></td>
@@ -2299,13 +2261,53 @@ function downloadReportCSV(type){ var m=document.getElementById('dl-menu'); if(m
   a.href=url; a.download=(r.title||'report').replace(/[^a-z0-9]+/gi,'_').replace(/^_|_$/g,'')+'.csv';
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(url);},1000); }
 
-// One 3PL→3PL transfer amount (donor spares, recipient below txl-week cover) — mirrors the grid's getTrfCell/getInbCell.
-function _trfAmt(sku,donor,recip){ var pdd=PD[sku]; if(!pdd)return 0; var dd=pdd.mkts&&pdd.mkts[donor], rd=pdd.mkts&&pdd.mkts[recip]; if(!dd||!rd)return 0;
-  var txL=parseInt(document.getElementById('txl')?.value)||6, curKey=PROJ[2].key;
-  var rD3=((rd.demand&&rd.demand.DTC&&rd.demand.DTC[curKey])||0)+((rd.demand&&rd.demand.B2B&&rd.demand.B2B[curKey])||0);
-  var rWkly=rD3/4.33, recipCov=rWkly>0?(rd.i3||0)/rWkly:999, ocp=pdd.cp||1;
-  var need=rWkly>0?Math.max((rd.t3||12)*rWkly-(rd.i3||0),0):0, spare=donorSpare(dd), sendable=Math.floor(Math.min(need,spare)/ocp)*ocp;
-  return (recipCov<txL&&sendable>0)?sendable:0; }
+// Classify one directed 3PL→3PL lane (donor→recip) for the plan's start month. Returns {qty,cls} or null.
+//   cls 'urgent'   = recipient projected to stock out within (lane lead + 2) wks AND the transfer can still land
+//                    in time (lane lead ≤ weeks of cover left). If it can't land in time it's NOT a transfer —
+//                    it drops to the buy plan's Urgent Air/Sea. Tested first, to protect stockouts.
+//   cls 'rebalance'= not time-critical: donor is >30% ABOVE its target units (overstock) and the recipient is
+//                    below its target units. Moves surplus before we buy more.
+// A lane with no TRANSFER_LEADS entry (migration 171) = we don't transfer that way → null.
+function trfLane(sku,donor,recip){
+  var pdd=PD[sku]; if(!pdd)return null;
+  var dd=pdd.mkts&&pdd.mkts[donor], rd=pdd.mkts&&pdd.mkts[recip];
+  if(!dd||!rd)return null;
+  var lane=(TRANSFER_LEADS[donor]||{})[recip];
+  if(lane==null)return null;                                   // no lane = not a transfer route
+  var curKey=PROJ[2].key, ocp=pdd.cp||1;
+  var rD=((rd.demand&&rd.demand.DTC&&rd.demand.DTC[curKey])||0)+((rd.demand&&rd.demand.B2B&&rd.demand.B2B[curKey])||0);
+  var rWkly=rD/4.33; if(!(rWkly>0))return null;                // no recipient demand → nothing to feed
+  var rStock=rd.i3||0, rTargetU=(rd.t3||12)*rWkly, rCov=rStock/rWkly;
+  var need=Math.max(rTargetU-rStock,0);
+  var qty=Math.floor(Math.min(need,donorSpare(dd))/ocp)*ocp;   // never lets the donor drop below its own target
+  if(qty<=0)return null;
+  if(rCov<lane+2){                                             // urgent territory (stockout within lane+2 wks)
+    return (lane<=rCov)?{qty:qty,cls:'urgent'}:null;           // feasible → urgent; can't land in time → air/sea (null)
+  }
+  // not time-critical → rebalance only if donor is overstocked (>30% above target units) & recipient below target
+  var dD=((dd.demand&&dd.demand.DTC&&dd.demand.DTC[curKey])||0)+((dd.demand&&dd.demand.B2B&&dd.demand.B2B[curKey])||0);
+  var dWkly=dD/4.33, dTargetU=(dd.t3||12)*dWkly, dStock=dd.i3||0;
+  if(dTargetU>0 && dStock>=1.30*dTargetU && rStock<rTargetU)return {qty:qty,cls:'rebalance'};
+  return null;
+}
+// Which transfer classes a SKU has in the CURRENT market view (any outbound CUR→om or inbound om→CUR lane).
+function trfClassesOf(sku){
+  var out={urgent:false,rebalance:false};
+  MKTS.filter(function(m){return m!==CUR;}).forEach(function(om){
+    var a=trfLane(sku,CUR,om); if(a)out[a.cls]=true;
+    var b=trfLane(sku,om,CUR); if(b)out[b.cls]=true;
+  });
+  return out;
+}
+// Small class chip(s) shown against the SKU in the transfer view (a SKU can be both — urgent in, rebalance out).
+function trfChips(sku){
+  var cl=trfClassesOf(sku),out='';
+  if(cl.urgent)out+='<span title="Has an urgent (stockout-protection) transfer" style="margin-left:5px;font-size:8px;font-weight:700;color:#dc2626;background:#fee2e2;border-radius:3px;padding:0 4px;vertical-align:middle">URGENT</span>';
+  if(cl.rebalance)out+='<span title="Has a rebalance (overstock) transfer" style="margin-left:5px;font-size:8px;font-weight:700;color:#1d4ed8;background:#dbeafe;border-radius:3px;padding:0 4px;vertical-align:middle">REBAL</span>';
+  return out;
+}
+// One 3PL→3PL transfer amount for reports/CSV — the classified qty (either class), 0 if no transfer.
+function _trfAmt(sku,donor,recip){ var r=trfLane(sku,donor,recip); return r?r.qty:0; }
 // Download the data currently in view (FBA or TRANSFER grid) as CSV.
 function downloadViewCSV(){ var vis=getFilteredVis()||[], co=CUR, rows=[], oth=MKTS.filter(function(m){return m!==co;});
   if(BP_VIEW==='fba'){ rows.push(['SKU','Release Window','SOH 3PL','SOH FBA','Transfer FBA','FBA inbound <=14d','FBA inbound 15+d']);
@@ -3135,7 +3137,7 @@ return {project:project, getBuyQtys:getBuyQtys, buyplanItems:buyplanItems, rende
   seasons:function(){ var out={}; SL.forEach(function(s){ if(!s.rw)return; var ok=false; for(var m in (s.ms||{})){ if(s.ms[m]&&(s.ms[m].st==='ACTIVE'||s.ms[m].st==='FUTURE')){ok=true;break;} } if(ok)out[s.rw]=1; }); return Object.keys(out).sort(); },
   skuOptions:function(){ return SL.map(function(s){ return {s:s.s, sc:s.sc||s.c||''}; }).sort(function(a,b){ return a.s<b.s?-1:a.s>b.s?1:0; }); },   // for the Complex Rules SKU picker: {sku, subcat/cat}
 
-  BUY_CACHE:BUY_CACHE, D:D, setView:function(v){var was=BP_VIEW;BP_VIEW=(v==='fba')?'fba':(v==='transfer'?'transfer':'buy');if(BP_VIEW==='fba'&&was!=='fba')BU_SEL='TRFFBA';if(BP_VIEW==='transfer'&&was!=='transfer')BU_SEL='TRF';}, fbaClearAll:fbaClearAll, fbaSelectAll:fbaSelectAll, fbaClearOverrides:fbaClearOverrides, fbaClearTicks:fbaClearTicks, downloadFbaTransfer:downloadFbaTransfer,
+  BUY_CACHE:BUY_CACHE, D:D, setView:function(v){var was=BP_VIEW;BP_VIEW=(v==='fba')?'fba':(v==='transfer'?'transfer':'buy');if(BP_VIEW==='fba'&&was!=='fba')BU_SEL='TRFFBA';if(BP_VIEW==='transfer'&&was!=='transfer')BU_SEL='ALL';}, fbaClearAll:fbaClearAll, fbaSelectAll:fbaSelectAll, fbaClearOverrides:fbaClearOverrides, fbaClearTicks:fbaClearTicks, downloadFbaTransfer:downloadFbaTransfer,
   open_:open_, close_:close_,
   get CUR(){return CUR;}, set CUR(v){CUR=v;}};
 })();
@@ -3470,9 +3472,10 @@ var BUY_SCAFFOLD=`<div class="wrap">
   <div>&bull; <b>Recipient need</b> = the receiving market's target units minus its own stock (it's short of cover).</div>
   <div>&bull; <b>Donor spare</b> = stock the sending market can give up without dropping below its own target over the transfer + lead-time horizon (we roll its stock forward and only lend the trough surplus).</div>
   <div>&bull; <b>Transfer qty</b> = the smaller of need and spare, rounded down to whole cartons.</div>
-  <div style="font-weight:600;color:#0f172a;margin-top:6px">Two classes (in build)</div>
-  <div>&bull; <b>Rebalance (overstock):</b> a market sitting on excess cover sends surplus to a market that would otherwise buy &mdash; cost-saving, not time-critical.</div>
-  <div>&bull; <b>Urgent (out-of-stock):</b> a market projected to stock out; transfer only if it can <b>land before the stockout</b> given the lane lead time &mdash; otherwise it falls through to an urgent air / sea buy.</div>
+  <div style="font-weight:600;color:#0f172a;margin-top:6px">Two classes &mdash; pick with the <b>All / Rebalance / Urgent</b> pills</div>
+  <div>&bull; <span style="color:#1d4ed8;font-weight:700">Rebalance</span> (blue) &mdash; not time-critical: the donor is <b>&gt;30% above its target units</b> (overstock) and the recipient is below target. Moves surplus before we buy more.</div>
+  <div>&bull; <span style="color:#dc2626;font-weight:700">Urgent</span> (red) &mdash; the recipient is projected to <b>stock out within the lane lead time + 2 weeks</b>, and the transfer can still <b>land before the stockout</b>. If the lane is too slow to arrive in time it's <b>not</b> shown here &mdash; it drops to an urgent air / sea buy instead.</div>
+  <div>&bull; A SKU can be <b>both</b> (urgent into one market, rebalance out of another) &mdash; it then appears under both pills, tagged 🔴/🔵. In <b>All</b>, cells are coloured by class.</div>
   <div style="font-weight:600;color:#0f172a;margin-top:6px">Lanes &amp; lead times</div>
   <div>&bull; Inter-market lead times (weeks) are held per lane: UK&rarr;EU 2, UK/EU&rarr;US 6, UK&rarr;AU 8, US&rarr;CA 2, all&rarr;AU 8, AU&rarr;US 8, etc. A lane with <b>no</b> entry means we don't transfer that way, so it's skipped.</div>
   <div>&bull; A market's outbound to the US equals another's inbound from it by construction (same formula both directions), so UK&rarr;US and US&rarr;UK stay consistent.</div>

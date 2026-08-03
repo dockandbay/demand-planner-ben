@@ -3,6 +3,15 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.447 - TRANSFER tab: two classes (Rebalance / Urgent) with pills, tags & coloured cells ⚠️ NEEDS TESTING
+- The TRANSFER tab now splits transfers into **two classes**, selected with pills **All · Rebalance · Urgent** (replaces the old single All · Transfer):
+  - **Urgent** (red) — recipient projected to stock out **within the lane lead + 2 wks** AND the transfer can **land before the stockout** (lane lead ≤ weeks of cover left). If it can't land in time it's *not* shown — it drops to the buy plan's Urgent Air/Sea.
+  - **Rebalance** (blue) — not time-critical: donor is **>30% above its target units** (overstock) and recipient is below target. Uses the confirmed units-vs-target basis (same as the popup colour bands).
+  - Classification uses the per-lane inter-market lead times (`TRANSFER_LEADS`, migration 171); a lane with no entry = we don't transfer that way.
+- **All view:** each row carries a 🔴 URGENT / 🔵 REBAL tag by the SKU, and the OUT/IN cells are coloured by class. A SKU that's **urgent into one market and a rebalance donor out of another shows under both pills** (tagged both).
+- New engine helper `trfLane(donor,recip)` is the single source for the grid cells, the row filter, and the CSV (`_trfAmt`). Transfers remain a **display/report overlay** — buy quantities are unchanged. `artifact_v16.7.html` only. No new migration (needs 171 on live).
+- **Follow-ups (Phase 2):** align the TRF1/TRF2 download reports to the two classes (still use the old TRF_PAIRS list), and add a CONFIG grid to edit the `transfer_lead_times` matrix.
+
 ## v26.446 - Logic pop-downs scoped to their own tab ⚠️ NEEDS TESTING
 - **Buy Plan Logic** button now shows only on the **BUY** tab, **Transfer Logic** only on the **TRANSFER** tab (FBA Transfer Logic was already FBA-only). Their panels also auto-close when you switch tabs. `artifact_v16.7.html`. No migration.
 
