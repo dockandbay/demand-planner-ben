@@ -953,20 +953,36 @@ async function cashflowResponse(pos, q) {
 // one-click apply. Tracking/carrier already auto-applied in Phase 3, so they're not here.
 async function submissionActions() {
   const rows = (await pool.query(`
-    SELECT ss.id, ss.po, ss.kind, ss.value, ss.attachment_id, coalesce(s.name,'') supplier
-    FROM planner.supplier_submissions ss LEFT JOIN planner.suppliers s ON s.id=ss.supplier_id
+    SELECT ss.id, ss.po, ss.kind, ss.value, ss.attachment_id, coalesce(s.name,'') supplier,
+      to_char(coalesce(po.end_production_overide,
+        CASE WHEN po.start_production IS NOT NULL AND sup.production_days IS NOT NULL
+             THEN (po.start_production + (sup.production_days||' days')::interval)::date END),'YYYY-MM-DD') cur_end
+    FROM planner.supplier_submissions ss
+    LEFT JOIN planner.suppliers s ON s.id=ss.supplier_id
+    LEFT JOIN planner.purchase_orders po ON po.po=ss.po
+    LEFT JOIN planner.suppliers sup ON sup.id=po.supplier_id
     WHERE ss.status='pending' AND ss.kind IN ('completion_date','invoice_value')`)).rows;
-  return rows.map(r => ({
+  return rows.map(r => {
+    // "(was <current end> - delay/brought forward of N days)" vs the PO's current production-end. Dates stay ISO;
+    // the client's actDates() renders them dd-mmm-yy. No clause when there's no current end or no change.
+    let wasClause = '';
+    if (r.kind === 'completion_date' && r.cur_end && r.value) {
+      const dd = Math.round((new Date(r.value) - new Date(r.cur_end)) / 86400000);
+      const delta = dd > 0 ? ' - delay of ' + dd + ' day' + (dd === 1 ? '' : 's')
+                  : dd < 0 ? ' - brought forward ' + (-dd) + ' day' + (dd === -1 ? '' : 's') : '';
+      wasClause = ' (was ' + r.cur_end + delta + ')';
+    }
+    return {
     severity: 'amber',
     type: r.kind === 'completion_date' ? 'Supplier completion date' : 'Supplier invoice',
     ref: r.po,
     detail: (r.supplier ? r.supplier + ' ' : 'Supplier ') + (r.kind === 'completion_date'
-      ? 'proposed completion date ' + r.value + ' — apply to the PO’s production-end override?'
+      ? 'proposed completion date ' + r.value + wasClause + ' — apply to the PO’s production-end override?'
       : 'submitted invoice value $' + r.value + ' — apply as the PO invoice total?'),
     fix: 'applysub', target: 'po',
     field: r.kind === 'completion_date' ? 'end_production_overide' : 'supplier_invoice_total',
     target_key: String(r.id), attachment_id: r.attachment_id,
-  }));
+  }; });
 }
 // SUPPLY ▸ Manufacturing data: finished-bundle demand (open finished POs) vs open Manufacturing-branch
 // component supply, via the BOM. Shared by the `manufacturing` endpoint and the mismatch action generator.

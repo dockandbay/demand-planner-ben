@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.494 - Actions: supplier-proposed completion date shows the delta vs current ⚠️ NEEDS TESTING · SERVER
+- The "Supplier completion date" action now reads e.g. "ACME Ltd proposed completion date 29-Aug-26 (was 24-Aug-26 - delay of 5 days) — apply to the PO’s production-end override?" — comparing the proposal to the PO’s current production-end (delay / brought forward N days). server.mjs (submissionActions). No migration.
+
 ## v26.493 - DATES tab: completion-date row under Production end + wrapped label; action buttons coloured ⚠️ NEEDS TESTING
 - Moved the "Supplier completion date (submitted in portal)" row up to sit directly under Production end; label now wraps (bold title + sub-line) instead of being cut off.
 - Action buttons given clear action colours: "Approve → production end" green, "→ set shipped to master" filled blue. supply/inject.html. No migration.
