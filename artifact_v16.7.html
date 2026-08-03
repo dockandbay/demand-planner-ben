@@ -735,6 +735,9 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
       </div>
     </span>
     <span style="display:inline-flex;align-items:center;gap:6px;flex-shrink:0;margin-left:12px">
+      <button id="plan-fromrep-btn" class="pill catpill" title="Show only SKUs that inherit a predecessor's history (products.replacement_sku)" onclick="setPlanFromRep(!PLAN_FROM_REP)">&#8617; From replacement</button>
+    </span>
+    <span style="display:inline-flex;align-items:center;gap:6px;flex-shrink:0;margin-left:12px">
       <span class="pill-lbl" title="Show a &lsquo;— total&rsquo; row at the foot of each category">Cat&nbsp;totals</span>
       <button id="cat-tot-toggle" class="pill catpill" aria-pressed="false" title="Show / hide a total row under each category (e.g. &ldquo;Hair Wrap — total&rdquo;). Hidden by default." onclick="setShowCatTot(!SHOW_CAT_TOT)">Show</button>
     </span>
@@ -3639,6 +3642,8 @@ let EXPANDED=new Set((function(){try{return JSON.parse(localStorage.getItem('db_
 function saveLayout(){ try{ localStorage.setItem('db_layout_expanded_v1',JSON.stringify(Array.from(EXPANDED))); }catch(e){} }
 var PLAN_SKU_QRY=''; // planner SKU filter text (matches sku code or product name)
 var PLAN_RW='ALL';   // planner Release Window filter (dd next to Category); 'ALL' = no filter
+var PLAN_FROM_REP=false;   // "From replacement SKU" filter — show only SKUs that inherit a predecessor (products.replacement_sku)
+function setPlanFromRep(v){ PLAN_FROM_REP=!!v; var b=document.getElementById('plan-fromrep-btn'); if(b)b.classList.toggle('active',PLAN_FROM_REP); render(); }
 var SHOW_CAT_TOT=(function(){try{return localStorage.getItem('hzShowCatTot')==='1';}catch(e){return false;}})(); // category-total rows hidden by default; toggle in the plan toolbar
 function setShowCatTot(on){SHOW_CAT_TOT=!!on;try{localStorage.setItem('hzShowCatTot',SHOW_CAT_TOT?'1':'0');}catch(e){}var b=document.getElementById('cat-tot-toggle');if(b){b.classList.toggle('active',SHOW_CAT_TOT);b.setAttribute('aria-pressed',SHOW_CAT_TOT?'true':'false');}renderMain();}
 var SMOOTH_PREVIEW=null; // {pk:'subcat|co|ch', fy:startY|null, months:{'YYYY_MM':{sku:units}}} — one pending smooth preview at a time (fy set = whole-FY smooth)
@@ -5732,6 +5737,7 @@ function filteredSkus(s,co,ch,all){
     // all=true => show every SKU in the subcat (so the subtotal = sum of all rows, matching Smooth).
     if(all)return true;
     // Filters
+    if(PLAN_FROM_REP&&!p.rep)return false;   // "From replacement SKU" — only SKUs that inherit a predecessor's history
     if(SKU_FILTER.tier!=='ALL'&&p.ti!==SKU_FILTER.tier)return false;
     if(SKU_FILTER.cs!=='ALL'){
       var isCore=(p.cs||'').startsWith('C');
@@ -6575,6 +6581,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         var tierCls='tier-'+(p.ti||'c').toLowerCase();
         td.innerHTML='<div style="padding:2px 4px;text-align:left">'
           +'<div class="dp-sku-tip"'+(p.n?' data-tip="'+String(p.n).replace(/"/g,'&quot;').replace(/</g,'&lt;')+'"':'')+' style="font-size:9px;font-weight:700;color:#1a1a1a;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left'+(p.n?';cursor:help':'')+'">'+sku+'</div>'
+          +(p.rep?'<div style="font-size:7px;font-style:italic;color:#7c3aed;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="Forecast inherits the sales history of the replaced SKU '+String(p.rep).replace(/"/g,'&quot;')+'">&#8617; from '+String(p.rep).replace(/</g,'&lt;')+'</div>':'')
           +'<div style="display:flex;gap:2px;align-items:center;flex-wrap:wrap">'
           +'<span class="sku-tier '+tierCls+'" style="font-size:7px">'+(p.ti||'C')+'</span>'
           +skuStatusBadge(launchDate,discDate)
@@ -7245,7 +7252,7 @@ function buildBody(){
   const fu_cache={};
   Object.keys(cm).forEach(function(cat){
     var rows=cm[cat].sort(function(a,b){return a.s.localeCompare(b.s)||(a.ch.localeCompare(b.ch));});
-    if(PLAN_SKU_QRY||PLAN_RW!=='ALL'){rows=rows.filter(function(row){return filteredSkus(row.s,CUR,row.ch).length>0;});if(!rows.length)return;}
+    if(PLAN_SKU_QRY||PLAN_RW!=='ALL'||PLAN_FROM_REP){rows=rows.filter(function(row){return filteredSkus(row.s,CUR,row.ch).length>0;});if(!rows.length)return;}
     // Category header — skip when redundant (the category's only subcategory has the same name, e.g. "Bag - Cooling"),
     // since the data row already labels it. Otherwise render it with the name PINNED left (sticky) so it stays visible
     // when the grid is scrolled right — previously the name scrolled out of view leaving a blank grey bar.
@@ -7268,9 +7275,9 @@ function buildBody(){
       // a full-width horizontal line between one category and the next (e.g. Bag - Beach → Bag - Cooling).
       if(ri===0 && _redundantHdr) drow.classList.add('cat-start');
       frag.appendChild(drow);
-      if(PLAN_SKU_QRY||PLAN_RW!=='ALL')insertInlineSkuRows(row.s,CUR,row.ch,drow);
+      if(PLAN_SKU_QRY||PLAN_RW!=='ALL'||PLAN_FROM_REP)insertInlineSkuRows(row.s,CUR,row.ch,drow);
     });
-    if(PLAN_SKU_QRY||PLAN_RW!=='ALL')return; // filter mode: skip category totals
+    if(PLAN_SKU_QRY||PLAN_RW!=='ALL'||PLAN_FROM_REP)return; // filter mode: skip category totals
     if(!SHOW_CAT_TOT)return; // category-total rows hidden by default (toolbar toggle)
     var _ctr0=_makeCatTotRow(cat); if(_ctr0)frag.appendChild(_ctr0);
   });

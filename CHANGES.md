@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.468 - Demand plan: "From replacement" filter + predecessor shown on the SKU ⚠️ NEEDS TESTING
+- New **↩ From replacement** filter pill (demand toolbar, by Tier) shows only SKUs that inherit a predecessor's history (`replacement_sku` set). Behaves like the search/RW filters — hides subcats with none, auto-expands the SKU rows.
+- The inline SKU label (column 1) now shows the predecessor in small purple italics: **↩ from &lt;replacement SKU&gt;** (with a hover tooltip explaining the inheritance). `artifact_v16.7.html`. No migration.
+
 ## v26.467 - Replacement-SKU forecast inheritance, live from products.replacement_sku ⚠️ NEEDS TESTING · BUY-PLAN IMPACT
 - **A new SKU that sets `replacement_sku` now inherits its predecessor's sales history as its forecast basis — inferred live in the app** (the old Apps-Script pre-stamp is gone and n8n doesn't replicate it, so replacement SKUs had been falling through to the subcat-contribution guess). Server now injects `rep` on the SKU master from `planner.products.replacement_sku`; `skuSales()` merges the predecessor's history under the SKU's own (own actuals win per month). So a replacement SKU is treated as **continuing** (chained last-year rule off the predecessor) instead of new, and its own sales take over month by month as they come in. Affects the 12 SKUs with a replacement set. `server.mjs` + `artifact_v16.7.html`. Verified against live data (e.g. `PONCHK-CAB-MD-PALP` → `PONCHK-CAB-MD-LTPNK-NS`). Help text (§6a + Forecast Logic pop-down) updated to "automatic". No migration.
 
