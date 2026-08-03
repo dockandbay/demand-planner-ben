@@ -566,12 +566,15 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
 #buy-wrap table.pt td.cok{color:#166534;font-size:10px}
 #buy-wrap table.pt td.camb{background:#fef3c7;color:#b45309;font-size:10px;font-weight:600}
 #buy-wrap table.pt td.amb{background:#fef3c7;color:#b45309;font-weight:700}
+#buy-wrap table.pt td.red-dk{background:#b91c1c;color:#fff;font-weight:700}                       /* overstock (+30%+): darker red than the stockout red */
+#buy-wrap table.pt td.clo-dk{background:#b91c1c;color:#fff;font-size:10px;font-weight:600}
 #buy-wrap table.pt td.chi{color:#9333ea;font-size:10px}
 #buy-wrap table.pt tr:hover td{background:#fafaf8}
 #buy-wrap table.pt tr:hover td.rl{background:#fafaf8}
 #buy-wrap table.pt tr:hover td.rl.sec, #buy-wrap table.pt tr:hover td.sx{background:#e0e0de}
 /* Keep coloured status cells their own colour on row-hover (don't wash them to near-white). */
 #buy-wrap table.pt tr:hover td.red,#buy-wrap table.pt tr:hover td.clo{background:#fee2e2}
+#buy-wrap table.pt tr:hover td.red-dk,#buy-wrap table.pt tr:hover td.clo-dk{background:#b91c1c}
 #buy-wrap table.pt tr:hover td.amb,#buy-wrap table.pt tr:hover td.camb{background:#fef3c7}
 #buy-wrap table.pt tr:hover td.buy{background:#dbeafe}
 #buy-wrap table.pt tr:hover td.fbd{background:#f5f3ff}
@@ -2574,6 +2577,14 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
                       // future month, NOT a May-specific value
   const lm=Math.round(l3/4.33);
   const firstPossibleArrival=MAY_OFFSET+lm;
+  // Buy 3PL cell tooltip: placement date (1st of the month, or TODAY for the current month) + arrival date
+  // (placement + the full 3PL lead in weeks). e.g. "place order 01-Dec-26, arrives 27-May-27".
+  function _buyPlaceTip(i){ if(!buyDisplay[i])return ''; var pj=PROJ[Math.min(i,PROJ.length-1)]; if(!pj)return '';
+    var td=new Date(), ck=td.getFullYear()+'_'+('0'+(td.getMonth()+1)).slice(-2);
+    var pd=(pj.key===ck)?td:new Date(pj.y,pj.m,1);
+    var ar=new Date(pd.getTime()); ar.setDate(ar.getDate()+Math.round(l3*7));
+    var _f=function(d){return ('0'+d.getDate()).slice(-2)+'-'+MN[d.getMonth()]+'-'+String(d.getFullYear()).slice(2);};
+    return 'place order '+_f(pd)+', arrives '+_f(ar); }
 
   // Buy FBA is NOT an independent buy. It is the FBA top-up portion of the 3PL buy made VISIBLE — the future
   // FBA cover that existing 3PL on-hand + inbound can't transfer-cover (nextFbaNeed), which the 3PL buy already
@@ -2872,7 +2883,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
         dtc:mtdDTC,b2b:mtdB2B,fba:mtdFBA,tot:mtdDTC+mtdB2B+mtdFBA,pka:(md.pka&&md.pka[key])||0,
         a3:0,aF:0,confQty3:0,confQtyF:0,assumedQty3:0,assumedLabel:'',trfIn:0,
         fTx:0,fSh:0,tot3pl:0,c3:s3,cF:sF,tg3:0,tgF:0,cv3:999,cvF:999,isDisc:false,
-        bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,bQuSea:buyUrgentSea[i]||0,bQuAir:buyUrgentAir[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],bPM:buyDisplay[i]?`arrives ${PROJ[Math.min(i+lm,PROJ.length-1)].lbl}`:'',
+        bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,bQuSea:buyUrgentSea[i]||0,bQuAir:buyUrgentAir[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],bPM:_buyPlaceTip(i),
         fdQ:fbaBuyDisp[i]||0,tx:transferOut[i]||0,overdue:buyOverdue[i]||false,inbLines3:[],inbLinesF:[]};
     }
     if(isForecast){
@@ -2895,7 +2906,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
         confQty3:remInb3.reduce((s,x)=>s+(x.qty||0),0),confQtyF:remInbF.reduce((s,x)=>s+(x.qty||0),0),
         assumedQty3:0,assumedLabel:'',trfIn:0,fTx:0,fSh:0,tot3pl:dtc+b2b,c3:rc3,cF:rcF,
         tg3:t3*wA2,tgF:tf*wF2,cv3:wA2>0?rc3/wA2:999,cvF:wF2>0?rcF/wF2:999,isDisc:false,
-        bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,bQuSea:buyUrgentSea[i]||0,bQuAir:buyUrgentAir[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],bPM:buyDisplay[i]?`arrives ${PROJ[Math.min(i+lm,PROJ.length-1)].lbl}`:'',
+        bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,bQuSea:buyUrgentSea[i]||0,bQuAir:buyUrgentAir[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],bPM:_buyPlaceTip(i),
         fdQ:fbaBuyDisp[i]||0,tx:transferOut[i]||0,overdue:buyOverdue[i]||false,
         inbLines3:remInb3.map(s=>`${s.ref} \u00b7 ${fmt(s.qty)} units \u00b7 ${dateDMY(s.eta)} \u00b7 ${s.supplier||(((s.type||'').startsWith('supplier'))?'supplier':((s.type||'').includes('transfer'))?'transfer':(s.type||''))}`),
         inbLinesF:remInbF.map(s=>`${s.ref} \u00b7 ${fmt(s.qty)} units \u00b7 ${dateDMY(s.eta)} \u00b7 ${s.supplier||(((s.type||'').startsWith('supplier'))?'supplier':((s.type||'').includes('transfer'))?'transfer':(s.type||''))}`)};
@@ -3004,9 +3015,8 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     ];
     const inbLinesF=confF.map(s=>`${s.ref} \u00b7 ${fmt(s.qty)} units \u00b7 ${dateDMY(s.eta)} \u00b7 ${s.supplier||(((s.type||'').startsWith('supplier'))?'supplier':((s.type||'').includes('transfer'))?'transfer':(s.type||''))}`);
 
-    // bPM for Buy 3PL tooltip: "arrives [arrivalMonth]"
-    const arrivalLbl=buyDisplay[i]?PROJ[Math.min(i+lm,PROJ.length-1)].lbl:'';
-    const bPM=buyDisplay[i]?`arrives ${arrivalLbl}`:null;
+    // bPM for Buy 3PL tooltip: "place order <date>, arrives <date>"
+    const bPM=_buyPlaceTip(i)||null;
 
     const crRule=crMatched.length?crWinRule(i,t3,crMatched):null;   // Complex Rule driving this month's cover target (or null)
     const row={key,lbl,lbl2,now,isActual:false,isForecast:!!isForecast,crRule,
@@ -3116,19 +3126,19 @@ function buildTable(proj,md,pd,is3,hasFBA){
       const d=(stock-target)/target;
       if(d>=-0.20&&d<=0.10)return 'ok';
       if((d>=-0.50&&d<-0.20)||(d>0.10&&d<0.30))return 'amb';
-      return 'lo';
+      return d>=0.30?'hi':'lo';   // hi = overstock (+30%+, darker red) vs lo = stockout risk (below -50%, standard red)
     };
     // SOH 3PL closing
     rows.push(dr('SOH 3PL (closing)',proj,p=>{
       if(p.isActual)return `<td style="background:#f0fdf4;color:#166534;font-weight:700">${fmt(p.c3)}</td>`;
-      const cls={ok:'grn',amb:'amb',lo:'red'}[covDevTier(p.c3,p.tg3)];
+      const cls={ok:'grn',amb:'amb',lo:'red',hi:'red-dk'}[covDevTier(p.c3,p.tg3)];
       return c(fmt(p.c3),cls);
     }));
     // Cover weeks
     rows.push(dr('Cover (weeks)',proj,p=>{
       const w=p.cv3;if(w>=999)return c('\u221e','cok');
       // Value shown in weeks; colour driven by stock-vs-target-units (covDevTier), so it agrees with SOH closing even under a complex rule.
-      const cls={ok:'cok',amb:'camb',lo:'clo'}[covDevTier(p.c3,p.tg3)];
+      const cls={ok:'cok',amb:'camb',lo:'clo',hi:'clo-dk'}[covDevTier(p.c3,p.tg3)];
       return c(Math.round(w)+'w',cls);
     }));
     // 3PL Target Units — light-yellow background + 120ms hover tooltip on months whose target is raised by a complex rule.
@@ -3151,9 +3161,9 @@ function buildTable(proj,md,pd,is3,hasFBA){
     if(p.overdue){
       // Placement clamped to current month because the ideal order date is already past:
       // ship now, but it will land late — surface in amber with a "late" marker.
-      return `<td class="buy" style="${hi?'border-top:2px solid #f59e0b':''};background:#fef3c7;color:#92400e;font-weight:700" title="Ship now — order date already past, will land late. Place: ${p.bPM||'now'}">${fmt(p.bQ)}<span style="font-size:8px;font-weight:700;color:#b45309"> &#9888;late</span></td>`;
+      return `<td class="buy tip120" style="${hi?'border-top:2px solid #f59e0b':''};background:#fef3c7;color:#92400e;font-weight:700" data-tip="Ship now — order date already past, will land late. ${p.bPM||'order now'}">${fmt(p.bQ)}<span style="font-size:8px;font-weight:700;color:#b45309"> &#9888;late</span></td>`;
     }
-    return `<td class="buy" style="${hi?'border-top:2px solid #1d4ed8':''}" title="Place: ${p.bPM||'now'}">${fmt(p.bQ)}</td>`;
+    return `<td class="buy tip120" style="${hi?'border-top:2px solid #1d4ed8':''}" data-tip="${p.bPM||'order now'}">${fmt(p.bQ)}</td>`;
   }));
   rows.push(dr('Buy 3PL URGENT',proj,p=>{
     if(p.isActual)return c('\u2014','cv0');
@@ -3162,7 +3172,7 @@ function buildTable(proj,md,pd,is3,hasFBA){
     const lead=p.urgentLead?`${p.urgentLead}wk rush lead`:'';
     const danger=p.urgentMonth?`stockout in ${p.urgentMonth}`:'stockout risk';
     const arr=p.urgentArr?` · earliest rush lands ${p.urgentArr}`:'';
-    return `<td style="background:#fee2e2;color:#dc2626;font-weight:700;border-left:2px solid #dc2626" title="URGENT — ${danger} — needs ${lead}${arr}">${fmt(p.bQu)}</td>`;
+    return `<td class="tip120" style="background:#fee2e2;color:#dc2626;font-weight:700;border-left:2px solid #dc2626" data-tip="URGENT — ${danger} — needs ${lead}${arr}">${fmt(p.bQu)}</td>`;
   }));
   if(hasFBA){
     rows.push(dr('Buy FBA',proj,p=>{
@@ -3511,7 +3521,7 @@ var BUY_SCAFFOLD=`<div class="wrap">
   <div>Both rows are coloured by how far <b>closing 3PL stock</b> sits vs its <b>3PL Target Units</b> &mdash; not by the raw weeks number, so the colour stays honest even when a complex rule makes the weeks-cover look odd. With <code>dev = (stock &minus; target) &divide; target</code>:</div>
   <div>&bull; <span style="color:#166534;font-weight:700">Green</span> &mdash; on plan: <b>&minus;20% to +10%</b> of target.</div>
   <div>&bull; <span style="color:#b45309;font-weight:700">Amber</span> &mdash; drifting: <b>&minus;50% to &minus;20%</b> (getting short) or <b>+10% to +30%</b> (building up).</div>
-  <div>&bull; <span style="color:#dc2626;font-weight:700">Red</span> &mdash; off plan: <b>below &minus;50%</b> (stockout risk) or <b>+30% or more</b> (overstock).</div>
+  <div>&bull; <span style="color:#dc2626;font-weight:700">Red</span> &mdash; off plan: <b>below &minus;50%</b> (stockout risk). <span style="background:#b91c1c;color:#fff;font-weight:700;padding:0 4px;border-radius:2px">Darker red</span> &mdash; <b>+30% or more</b> (overstock).</div>
   <div style="color:#64748b;margin-top:2px">A SKU with no target (e.g. a clearance / discontinue month) isn't flagged. Infinite cover (no demand) shows &infin; in green.</div>
   <div style="font-weight:600;color:#0f172a;margin-top:6px">Buy passes</div>
   <div>&bull; <b>Buy 3PL</b> &mdash; the scheduled replenishment to keep each month at target cover, placed back by the SKU's production + shipping lead time.</div>
@@ -5383,7 +5393,7 @@ function inbDiv(inb, entries, color){
 })();
 // 120ms hover tooltip for complex-rule cover cells (.crc-tip) in the SKU popup AND the demand-plan SKU name
 // (.dp-sku-tip → product title). Bound once, renders the element's data-tip HTML.
-(function(){ var el=null,t=null; var SEL='.crc-tip[data-tip], .dp-sku-tip[data-tip], .crc-tip[data-antip]';
+(function(){ var el=null,t=null; var SEL='.crc-tip[data-tip], .dp-sku-tip[data-tip], .crc-tip[data-antip], .tip120[data-tip]';
   function hide(){ if(el)el.style.display='none'; }
   document.addEventListener('mouseover',function(e){ var n=e.target&&e.target.closest?e.target.closest(SEL):null; if(!n)return;
     clearTimeout(t); t=setTimeout(function(){ var tip=n.getAttribute('data-tip');

@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.482 - Buy-plan popup: Buy 3PL tooltip (place-order + arrival dates, 120ms) + darker-red overstock ⚠️ NEEDS TESTING
+- Buy 3PL cell tooltip now shows "place order <dd-mmm-yy>, arrives <dd-mmm-yy>" (placement = 1st of month, or TODAY for the current month; arrival = placement + full 3PL lead in weeks) and appears fast (120ms) via a new .tip120 hover class (was a slow native title). Buy Urgent cell also moved to .tip120.
+- Cover(weeks) / SOH-closing overstock band (+30% or more) now renders DARKER red (#b91c1c, white text) to distinguish it from the stockout-risk red. covDevTier splits lo→lo/hi; help text updated. artifact_v16.7.html. No migration.
+
 ## v26.481 - Fix: Complex Rules button count showed (0) until you expanded ⚠️ NEEDS TESTING
 - The buy scaffold ships the ♛ Complex Rules button hardcoded (0); updateBtn() only ran on panel-expand (or at DOMContentLoaded before the button existed). Now called right after the buy view renders, so the badge shows the real rule count immediately. artifact_v16.7.html. No migration.
 
