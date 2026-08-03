@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.485 - Urgent tooltip wording (rush production + shipping) + red shades + non-GRS carton pills ⚠️ NEEDS TESTING
+- Urgent tooltip now reads e.g. "needs 4wk rush production + 8wk sea shipping" (or "+ 1wk air freight") instead of the opaque "12wk rush lead". Split from supplier expedited-production weeks + branch sea/air freight; shared urgentLeadText() used by the popup and the main grid.
+- Cover-band reds: understock #FFD6D1, overstock #FF746C (was #fee2e2 / #b91c1c). SOH FBA <=2 fill also #FFD6D1.
+- FBA non-GRS transfer now routes through fbaTransferSized, so the Cartons pills (Any/Full/Partial) apply to it (they did nothing before). artifact_v16.7.html. No migration.
+
 ## v26.484 - FBA transfer (non-GRS): demand-driven whole-carton transfer + SOH FBA <=2 light red ⚠️ NEEDS TESTING
 - BUG FIX: in "Transfer FBA (non GRS)" the recommended transfer showed the ENTIRE non-GRS pool (e.g. TOWLB-SUM-XL-UNICN-R US ~1400) regardless of FBA demand. The grid + download now use fbaTransferNonGrs (demand-driven), matching the effective/selected value.
 - Carton logic: non-GRS now sends WHOLE cartons first (floor) and defers the sub-carton remainder to a future transfer (never full+partial at once); only a sub-carton total is sent as a partial. Dropped the 65%-of-pool "send the lot" dump and the round-UP.

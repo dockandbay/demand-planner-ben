@@ -555,26 +555,26 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
 #buy-wrap table.pt td.sx{background:#eaeae8;border-top:1px solid #ccc}
 #buy-wrap table.pt td.cv{color:#1a1a1a;font-weight:500}
 #buy-wrap table.pt td.cv0{color:#ccc}
-#buy-wrap table.pt td.red{background:#fee2e2;color:#dc2626;font-weight:700}
+#buy-wrap table.pt td.red{background:#FFD6D1;color:#b91c1c;font-weight:700}
 #buy-wrap table.pt td.grn{color:#166534;font-weight:500}
 #buy-wrap table.pt td.blu{color:#0891b2;font-weight:500}
 #buy-wrap table.pt td.tgt{color:#94a3b8;font-size:10px}
 #buy-wrap table.pt td.buy{background:#dbeafe;color:#1d4ed8;font-weight:700;border-left:2px solid #93c5fd}
 #buy-wrap table.pt td.fbd{background:#f5f3ff;color:#7c3aed;font-weight:700;border-left:2px solid #a78bfa}
 #buy-wrap table.pt td.disc-row{color:#7c2d12;font-size:10px;font-style:italic}
-#buy-wrap table.pt td.clo{background:#fee2e2;color:#dc2626;font-size:10px;font-weight:600}
+#buy-wrap table.pt td.clo{background:#FFD6D1;color:#b91c1c;font-size:10px;font-weight:600}
 #buy-wrap table.pt td.cok{color:#166534;font-size:10px}
 #buy-wrap table.pt td.camb{background:#fef3c7;color:#b45309;font-size:10px;font-weight:600}
 #buy-wrap table.pt td.amb{background:#fef3c7;color:#b45309;font-weight:700}
-#buy-wrap table.pt td.red-dk{background:#b91c1c;color:#fff;font-weight:700}                       /* overstock (+30%+): darker red than the stockout red */
-#buy-wrap table.pt td.clo-dk{background:#b91c1c;color:#fff;font-size:10px;font-weight:600}
+#buy-wrap table.pt td.red-dk{background:#FF746C;color:#7f1d1d;font-weight:700}                     /* overstock (+30%+): stronger red than the understock red */
+#buy-wrap table.pt td.clo-dk{background:#FF746C;color:#7f1d1d;font-size:10px;font-weight:600}
 #buy-wrap table.pt td.chi{color:#9333ea;font-size:10px}
 #buy-wrap table.pt tr:hover td{background:#fafaf8}
 #buy-wrap table.pt tr:hover td.rl{background:#fafaf8}
 #buy-wrap table.pt tr:hover td.rl.sec, #buy-wrap table.pt tr:hover td.sx{background:#e0e0de}
 /* Keep coloured status cells their own colour on row-hover (don't wash them to near-white). */
-#buy-wrap table.pt tr:hover td.red,#buy-wrap table.pt tr:hover td.clo{background:#fee2e2}
-#buy-wrap table.pt tr:hover td.red-dk,#buy-wrap table.pt tr:hover td.clo-dk{background:#b91c1c}
+#buy-wrap table.pt tr:hover td.red,#buy-wrap table.pt tr:hover td.clo{background:#FFD6D1}
+#buy-wrap table.pt tr:hover td.red-dk,#buy-wrap table.pt tr:hover td.clo-dk{background:#FF746C}
 #buy-wrap table.pt tr:hover td.amb,#buy-wrap table.pt tr:hover td.camb{background:#fef3c7}
 #buy-wrap table.pt tr:hover td.buy{background:#dbeafe}
 #buy-wrap table.pt tr:hover td.fbd{background:#f5f3ff}
@@ -1413,6 +1413,14 @@ function getSt(ms,mkt){return(ms&&ms[mkt]&&ms[mkt].st)||'ACTIVE';}
 // (Removed dead duplicate fmtDate — shadowed by the weather-panel fmtDate below. v25.652)
 function dateDMY(d){if(!d||typeof d!=='string')return'';var s=d.slice(0,10),p=s.split('-');if(p.length<3)return s;var mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];return p[2]+'-'+(mo[parseInt(p[1],10)-1]||p[1])+'-'+(p[0].length===4?p[0].slice(2):p[0]);}  // dd-mmm-yy (BUY/FBA grid dates)
 
+// Urgent lead-time phrasing: split into rush production + freight so it reads clearly, e.g.
+// "4wk rush production + 8wk sea shipping" (or "+ 1wk air freight") instead of the opaque "12wk rush lead".
+function urgentLeadText(p){
+  var prod=(p&&p.urgentProd)||0, fr=(p&&p.urgentFreight)||0;
+  if(!prod&&!fr)return (p&&p.urgentLead)?(p.urgentLead+'wk rush lead'):'';
+  var ship=(p&&p.urgentMode==='air')?(fr+'wk air freight'):(fr+'wk sea shipping');
+  return prod+'wk rush production + '+ship;
+}
 // Compute buy qtys for a SKU+market (sum over BUY_KEYS)
 function getBuyQtys(sku,mkt){
   const cacheKey=sku+'|'+mkt;
@@ -1430,7 +1438,7 @@ function getBuyQtys(sku,mkt){
     b3u+=proj[i].bQu||0; b3uSea+=proj[i].bQuSea||0; b3uAir+=proj[i].bQuAir||0;
     bf+=proj[i].fdQ||0;
     if(!buyTip&&(proj[i].bQ||0)>0)buyTip=proj[i].bPM||'';   // Buy 3PL placement/arrival tip (main-grid parity with the popup)
-    if(!urgTip&&(proj[i].bQu||0)>0){ var _um=proj[i].urgentMonth,_ul=proj[i].urgentLead,_ua=proj[i].urgentArr; urgTip='URGENT — '+(_um?'stockout in '+_um:'stockout risk')+(_ul?' — needs '+_ul+'wk rush lead':'')+(_ua?' · earliest rush lands '+_ua:''); }
+    if(!urgTip&&(proj[i].bQu||0)>0){ var _um=proj[i].urgentMonth,_lt=urgentLeadText(proj[i]),_ua=proj[i].urgentArr; urgTip='URGENT — '+(_um?'stockout in '+_um:'stockout risk')+(_lt?' — needs '+_lt:'')+(_ua?' · earliest rush lands '+_ua:''); }
   }
   // Future buys the engine has SCHEDULED beyond the current order-now window — surfaced as a "(+N future)" flag so
   // long-lead SKUs whose next buy isn't due yet aren't invisible. NOT summed into b3 (Buy 3PL stays "order now").
@@ -1599,26 +1607,14 @@ function fbaTransferRec(sku,mkt){
     cap=Math.min(Math.floor(0.5*i3),Math.max(0,i3-minCover3PL)); }
   return fbaTransferSized(sku,mkt,cap);
 }
-// Non-GRS transfer: demand-driven (FBA shortfall over the target weeks), drawn from the non-GRS pool.
-//  - no 3PL protection cap (3PL never uses non-GRS stock)
-//  - WHOLE CARTONS first (floor): if the need is ≥ a carton, send only whole cartons and DEFER the sub-carton
-//    remainder to a future transfer (never full + partial in one go). Only when the entire remaining need is
-//    itself sub-carton do we send that partial. (Ben — "same logic for any transfer".)
-//  - sized to demand, never the whole pool: capped at what we hold, but no "send the lot" dump.
+// Non-GRS transfer: demand-driven, drawn from the non-GRS pool as the cap. Uses the SAME sizing as the normal
+// 3PL→FBA transfer (Ben — "same logic for any transfer"), so the Cartons pills (Any / Full / Partial) apply:
+//   Full = whole cartons only (floor, defer the sub-carton remainder); Partial = send the partial; Any = exact need.
+// No 3PL protection cap (3PL never uses non-GRS stock), and never the whole pool — sized to demand, capped at what we hold.
 function fbaTransferNonGrs(sku,mkt){
   const pool=nonGrsOf(sku,mkt);
   if(pool<=0)return 0;
-  const pd=PD[sku];const md=pd&&pd.mkts&&pd.mkts[mkt];if(!md)return 0;
-  const cp=pd.cp||1;
-  const iF=md['if_']||0, oof=md.oof||0, awd=awdOf(sku,mkt);
-  const fbw=parseInt(document.getElementById('fbw')?.value)||8;
-  const targetMonths=Math.max(1,Math.round(fbw/4.33));
-  const target=fbaFwdDemand(md,targetMonths);
-  const need=Math.max(0,target-(iF+oof+awd));   // demand-driven requirement
-  if(need<=0)return 0;
-  const base=Math.min(need,pool);               // can't send more than we hold
-  const qty=(base>=cp)?Math.floor(base/cp)*cp:base;   // ≥1 carton → whole cartons only (defer the remainder); else send the trailing partial
-  return Math.min(qty,pool);
+  return fbaTransferSized(sku,mkt,pool);
 }
 // Effective transfer = manual override if entered, else the recommendation.
 function fbaTransferEff(sku,mkt){
@@ -2026,7 +2022,7 @@ function render(){
           ? MKTS.map(function(m){var mm=PD[s.s]&&PD[s.s].mkts&&PD[s.s].mkts[m];var v=mm?(mm.i3||0):0;return '<td class="iv"'+(m===CUR?' style="background:#eff6ff"':'')+'><span class="iv-v '+(v<0?'iv-neg':'iv-pos')+'">'+(mm?fmt(v):'—')+'</span></td>';}).join('')
           : `<td class="iv"><span class="iv-v ${i3<0?'iv-neg':'iv-pos'}">${fmt(i3)}</span></td>`}
         ${showNonGRS?`<td class="iv"><span class="iv-v" style="color:#475569" title="Non-GRS on-hand (sellable via 3PL; display only)">${(function(){var ng=nonGrsOf(s.s,CUR);return ng>0?fmt(ng):'—';})()}</span></td>`:''}
-        <td class="iv"${BP_VIEW==='fba'?` style="background:${ifv<=2?'#fee2e2':'#fef9c3'}"`:''}><span class="iv-v ${ifv<0?'iv-neg':'iv-pos'}">${fmt(ifv)}</span></td>
+        <td class="iv"${BP_VIEW==='fba'?` style="background:${ifv<=2?'#FFD6D1':'#fef9c3'}"`:''}><span class="iv-v ${ifv<0?'iv-neg':'iv-pos'}">${fmt(ifv)}</span></td>
         ${showAWD?`<td class="iv" style="background:#fef9c3"><span class="iv-v" style="color:#475569" title="AWD (US upstream) — pooled into FBA cover for the transfer calc">${(function(){var a=awdOf(s.s,CUR);return a>0?fmt(a):'—';})()}</span></td>`:''}
         <td class="iv"><span class="iv-v">${oo>0?fmt(oo):'—'}</span></td>
         ${trail}
@@ -2575,7 +2571,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
   // buyOverdue[pi]= true if placement is already overdue
   // buyFromLbl[i] = "from Jun 26 order" label for inbound tooltip at ARRIVAL month i
   const assumedArr={},tA1={},transferOut={};
-  const buyDisplay={},buyUrgent={},buyUrgentSea={},buyUrgentAir={},buyUrgentLead={},buyUrgentMonth={},buyUrgentArr={},buyOverdue={},buyFromLbl={};
+  const buyDisplay={},buyUrgent={},buyUrgentSea={},buyUrgentAir={},buyUrgentLead={},buyUrgentMonth={},buyUrgentArr={},buyOverdue={},buyFromLbl={},buyUrgentProd={},buyUrgentFreight={},buyUrgentMode={};
   const MAY_OFFSET=2; // legacy alias, retained for backward-compat; semantically the
                       // offset past PROJ[0]=Actuals + PROJ[1]=Remaining to the first
                       // future month, NOT a May-specific value
@@ -2822,8 +2818,9 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
       var _dangerDate=_dm?new Date(Number(_dm[0]),Number(_dm[1])-1,15):null;   // ~mid the stockout month
       var _seaArr=new Date(TODAY); _seaArr.setDate(_seaArr.getDate()+Math.round(_seaWks*7));
       var _mode=(_dangerDate&&_seaArr<=_dangerDate)?'sea':'air';               // Sea if it lands in time, else Air
-      if(_mode==='sea'){ buyUrgentSea[1]=urgentQtyNeeded; buyUrgentLead[1]=Math.round(_seaWks); }
-      else { buyUrgentAir[1]=urgentQtyNeeded; buyUrgentLead[1]=Math.round(_airWks); }
+      var _prodW=Math.round(_exp), _seaFW=Math.round((Number(_bf.sea)||42)/7), _airFW=Math.round((Number(_bf.air)||7)/7);   // rush production + freight, split so the tooltip can read "Xwk rush production + Ywk sea shipping / air freight"
+      if(_mode==='sea'){ buyUrgentSea[1]=urgentQtyNeeded; buyUrgentLead[1]=Math.round(_seaWks); buyUrgentProd[1]=_prodW; buyUrgentFreight[1]=_seaFW; buyUrgentMode[1]='sea'; }
+      else { buyUrgentAir[1]=urgentQtyNeeded; buyUrgentLead[1]=Math.round(_airWks); buyUrgentProd[1]=_prodW; buyUrgentFreight[1]=_airFW; buyUrgentMode[1]='air'; }
       buyUrgent[1]=urgentQtyNeeded;                          // combined (kept for downloads / detail row)
       buyUrgentMonth[1]=PROJ[firstDangerIdx].lbl;            // when the stockout first bites
       buyUrgentArr[1]=PROJ[injIdx]?PROJ[injIdx].lbl:'';      // earliest a rush could land
@@ -2887,7 +2884,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
         dtc:mtdDTC,b2b:mtdB2B,fba:mtdFBA,tot:mtdDTC+mtdB2B+mtdFBA,pka:(md.pka&&md.pka[key])||0,
         a3:0,aF:0,confQty3:0,confQtyF:0,assumedQty3:0,assumedLabel:'',trfIn:0,
         fTx:0,fSh:0,tot3pl:0,c3:s3,cF:sF,tg3:0,tgF:0,cv3:999,cvF:999,isDisc:false,
-        bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,bQuSea:buyUrgentSea[i]||0,bQuAir:buyUrgentAir[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],bPM:_buyPlaceTip(i),
+        bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,bQuSea:buyUrgentSea[i]||0,bQuAir:buyUrgentAir[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],urgentProd:buyUrgentProd[i],urgentFreight:buyUrgentFreight[i],urgentMode:buyUrgentMode[i],bPM:_buyPlaceTip(i),
         fdQ:fbaBuyDisp[i]||0,tx:transferOut[i]||0,overdue:buyOverdue[i]||false,inbLines3:[],inbLinesF:[]};
     }
     if(isForecast){
@@ -2910,7 +2907,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
         confQty3:remInb3.reduce((s,x)=>s+(x.qty||0),0),confQtyF:remInbF.reduce((s,x)=>s+(x.qty||0),0),
         assumedQty3:0,assumedLabel:'',trfIn:0,fTx:0,fSh:0,tot3pl:dtc+b2b,c3:rc3,cF:rcF,
         tg3:t3*wA2,tgF:tf*wF2,cv3:wA2>0?rc3/wA2:999,cvF:wF2>0?rcF/wF2:999,isDisc:false,
-        bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,bQuSea:buyUrgentSea[i]||0,bQuAir:buyUrgentAir[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],bPM:_buyPlaceTip(i),
+        bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,bQuSea:buyUrgentSea[i]||0,bQuAir:buyUrgentAir[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],urgentProd:buyUrgentProd[i],urgentFreight:buyUrgentFreight[i],urgentMode:buyUrgentMode[i],bPM:_buyPlaceTip(i),
         fdQ:fbaBuyDisp[i]||0,tx:transferOut[i]||0,overdue:buyOverdue[i]||false,
         inbLines3:remInb3.map(s=>`${s.ref} \u00b7 ${fmt(s.qty)} units \u00b7 ${dateDMY(s.eta)} \u00b7 ${s.supplier||(((s.type||'').startsWith('supplier'))?'supplier':((s.type||'').includes('transfer'))?'transfer':(s.type||''))}`),
         inbLinesF:remInbF.map(s=>`${s.ref} \u00b7 ${fmt(s.qty)} units \u00b7 ${dateDMY(s.eta)} \u00b7 ${s.supplier||(((s.type||'').startsWith('supplier'))?'supplier':((s.type||'').includes('transfer'))?'transfer':(s.type||''))}`)};
@@ -3029,7 +3026,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
       fTx,trfIn,fSh,c3,cF,tg3,tgF,tot3pl:dtc+b2b+fTx,
       cv3:isFinite(cv3)?cv3:999,cvF:isFinite(cvF)?cvF:999,
       isDisc:!!(discCutoff&&key>=discCutoff),
-      bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,bQuSea:buyUrgentSea[i]||0,bQuAir:buyUrgentAir[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],bPM,
+      bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,bQuSea:buyUrgentSea[i]||0,bQuAir:buyUrgentAir[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],urgentProd:buyUrgentProd[i],urgentFreight:buyUrgentFreight[i],urgentMode:buyUrgentMode[i],bPM,
       fdQ:fbaBuyDisp[i]||0,tx:transferOut[i]||0,overdue:buyOverdue[i]||false,
       inbLines3,inbLinesF};
     // Advance s3 including assumed inbound so future months see the benefit (matches pass 1)
@@ -3173,7 +3170,7 @@ function buildTable(proj,md,pd,is3,hasFBA){
     if(p.isActual)return c('\u2014','cv0');
     if(p.isDisc)return discCell;
     if(!p.bQu)return c('\u2014','cv0');
-    const lead=p.urgentLead?`${p.urgentLead}wk rush lead`:'';
+    const lead=urgentLeadText(p);
     const danger=p.urgentMonth?`stockout in ${p.urgentMonth}`:'stockout risk';
     const arr=p.urgentArr?` · earliest rush lands ${p.urgentArr}`:'';
     return `<td class="tip120" style="background:#fee2e2;color:#dc2626;font-weight:700;border-left:2px solid #dc2626" data-tip="URGENT — ${danger} — needs ${lead}${arr}">${fmt(p.bQu)}</td>`;
@@ -3525,7 +3522,7 @@ var BUY_SCAFFOLD=`<div class="wrap">
   <div>Both rows are coloured by how far <b>closing 3PL stock</b> sits vs its <b>3PL Target Units</b> &mdash; not by the raw weeks number, so the colour stays honest even when a complex rule makes the weeks-cover look odd. With <code>dev = (stock &minus; target) &divide; target</code>:</div>
   <div>&bull; <span style="color:#166534;font-weight:700">Green</span> &mdash; on plan: <b>&minus;20% to +10%</b> of target.</div>
   <div>&bull; <span style="color:#b45309;font-weight:700">Amber</span> &mdash; drifting: <b>&minus;50% to &minus;20%</b> (getting short) or <b>+10% to +30%</b> (building up).</div>
-  <div>&bull; <span style="color:#dc2626;font-weight:700">Red</span> &mdash; off plan: <b>below &minus;50%</b> (stockout risk). <span style="background:#b91c1c;color:#fff;font-weight:700;padding:0 4px;border-radius:2px">Darker red</span> &mdash; <b>+30% or more</b> (overstock).</div>
+  <div>&bull; <span style="background:#FFD6D1;color:#b91c1c;font-weight:700;padding:0 4px;border-radius:2px">Red</span> &mdash; off plan: <b>below &minus;50%</b> (understock / stockout risk). <span style="background:#FF746C;color:#7f1d1d;font-weight:700;padding:0 4px;border-radius:2px">Stronger red</span> &mdash; <b>+30% or more</b> (overstock).</div>
   <div style="color:#64748b;margin-top:2px">A SKU with no target (e.g. a clearance / discontinue month) isn't flagged. Infinite cover (no demand) shows &infin; in green.</div>
   <div style="font-weight:600;color:#0f172a;margin-top:6px">Buy passes</div>
   <div>&bull; <b>Buy 3PL</b> &mdash; the scheduled replenishment to keep each month at target cover, placed back by the SKU's production + shipping lead time.</div>
