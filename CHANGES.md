@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.466 - "What to do & when" help rewritten for the n8n/Supabase estate ⚠️ NEEDS TESTING
+- Replaced the outdated Apps Script / `sku_data.json` / Airtable-refresh steps. Now: **product data, sales actuals & inventory import daily via n8n → Supabase** (no manual extract/rebuild); sales lag slightly (manual Cin7 feed, tightening with Fulfil); everything else (forecasts, POs, shipments, preorders, key accounts) is live in Supabase; forecast edits save with Save Forecasts to `forecast_outputs`. Steps 1, 2, 5 + footer. `artifact_v16.7.html`. No migration.
+
 ## v26.465 - Suggestion box: add stakeholders on submit ⚠️ NEEDS TESTING
 - The top-bar 💡 **Suggestion box** "add new" form now has a **Stakeholders** field — enter one or more emails (comma-separated) when submitting. They're stored on the suggestion (mig 162 `stakeholders` column) and notified on its status changes, in addition to the global stakeholder list; they're also cc'd the new-suggestion email. Previously followers could only be added later in CONFIG ▸ Suggestions. `supply/inject.html` + `server.mjs`. Verified end-to-end. No new migration.
 

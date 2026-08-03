@@ -763,14 +763,14 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
     <div style="margin:0 0 12px;padding:9px 12px;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;font-size:12px;color:#4c1d95"><b>&#9635; How are the forecast numbers calculated?</b> See the <b>Forecast Logic</b> button on the demand toolbar — it documents the chained last-year rule, new-SKU contribution, overrides, launch/discontinue and smoothing in full.</div>
     <div style="display:flex;flex-direction:column;gap:12px">
       <div>
-        <div style="font-weight:700;color:#0a0a0a">1 &middot; Update sales actuals (roll the month forward)</div>
-        <div style="color:#555">Monthly, once sales are loaded. The app does <b>not</b> read actuals live.</div>
-        <div>Run <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">extract_sku_data.gs</code> in Apps Script &rarr; upload the <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">sku_data.json</code> it saves to this chat &rarr; ask to rebuild.</div>
+        <div style="font-weight:700;color:#0a0a0a">1 &middot; Data updates &mdash; actuals, product &amp; inventory</div>
+        <div style="color:#555">Automatic. <b>Product data, sales actuals and inventory</b> import into Supabase <b>every day</b> via n8n &mdash; no manual extract, upload or rebuild.</div>
+        <div>Sales lag slightly: actuals still come in <b>manually from Cin7</b>, so the most recent week or two may not be in yet. This tightens up when we move to <b>Fulfil</b> / a more automated feed.</div>
       </div>
       <div>
-        <div style="font-weight:700;color:#0a0a0a">2 &middot; Refresh Preorder &amp; Key&#8209;account orders</div>
-        <div style="color:#555">Anytime you change those Airtable tables.</div>
-        <div><b>BUY</b> tab &rarr; <b>Refresh data</b>. Pulls live from Airtable &mdash; no rebuild.</div>
+        <div style="font-weight:700;color:#0a0a0a">2 &middot; Preorder, Key&#8209;account &amp; everything else</div>
+        <div style="color:#555">Live in Supabase. Forecasts, POs, shipments, preorders and key-account orders are all read live &mdash; no rebuild.</div>
+        <div>Refresh the page (or <b>BUY</b> tab &rarr; <b>Refresh data</b>) to pull the very latest.</div>
       </div>
       <div>
         <div style="font-weight:700;color:#0a0a0a">3 &middot; Forecasts in PLAN</div>
@@ -784,9 +784,9 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
       </div>
       <div>
         <div style="font-weight:700;color:#0a0a0a">5 &middot; Remove a SKU from the plans</div>
-        <div style="color:#555">Both plans mirror the Airtable product master &mdash; a SKU shows while it's available for that country/channel and not discontinued. The app doesn't read the master live, so a rebuild is needed to drop it.</div>
+        <div style="color:#555">Both plans mirror the product master (the Airtable PIM), imported daily &mdash; a SKU shows while it's available for that country/channel and not discontinued.</div>
         <div><b>Hide it now (view only):</b> PLAN &mdash; keep the <b>Active only</b> pill on (hides discontinued SKUs). BUY &mdash; turn off the <b>DISC</b> status pill.</div>
-        <div><b>Remove it for good:</b> in the product master set the SKU's <b>discontinue date</b> (a past date) for that country &mdash; or clear its <b>channel availability</b> / remove the SKU &mdash; then run <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">extract_sku_data.gs</code> &rarr; upload <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">sku_data.json</code> &rarr; ask to rebuild. Discontinuing drops it from PLAN; clearing availability also drops it from BUY.</div>
+        <div><b>Remove it for good:</b> in the product master set the SKU's <b>discontinue date</b> (a past date) for that country &mdash; or clear its <b>channel availability</b> / remove the SKU. The daily import picks it up automatically (no manual rebuild). Discontinuing drops it from PLAN; clearing availability also drops it from BUY.</div>
       </div>
       <div>
         <div style="font-weight:700;color:#0a0a0a">6 &middot; How new SKUs get a forecast</div>
@@ -814,7 +814,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
         <div style="color:#888;font-size:11px;margin-top:3px">Smoothing writes per-SKU overrides &mdash; <b>Save Forecasts</b> persists them. It never exceeds the subcategory total or a discontinued SKU&rsquo;s stock.</div>
       </div>
     </div>
-    <div style="margin-top:14px;color:#888;font-size:11px">Refresh data &amp; Save write to Airtable directly. Actuals need a rebuild because they're embedded in the app.</div>
+    <div style="margin-top:14px;color:#888;font-size:11px">Product, sales actuals &amp; inventory import daily via n8n &rarr; Supabase; everything else is live. Your forecast edits save with <b>Save Forecasts</b> (to <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px">forecast_outputs</code>). No manual rebuilds.</div>
   </div>
 </div>
 <div id="fclogic-ov" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:flex-start;justify-content:center" onclick="if(event.target===this)closeFcLogic()">
