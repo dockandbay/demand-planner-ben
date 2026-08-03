@@ -1254,7 +1254,7 @@ function crMatch(sku,mkt){
   var out=[];
   for(var i=0;i<COMPLEX_RULES.length;i++){ var r=COMPLEX_RULES[i];
     if(r.enabled===false)continue;
-    if(r.country!==mkt)continue;
+    if(r.country&&String(r.country).split(',').map(function(x){return x.trim();}).indexOf(mkt)<0)continue;   // multi-country rule: match if mkt is in the list
     if(r.sku){ var _sks=String(r.sku).split(',').map(function(x){return x.trim();}).filter(Boolean); if(_sks.indexOf(sku)<0)continue; }   // multi-SKU scope (comma-separated)
     if(r.category && r.category!==meta.cat)continue;
     if(r.tier && r.tier!==meta.tier)continue;
@@ -3044,15 +3044,16 @@ function buildTable(proj,md,pd,is3,hasFBA){
     // Cover weeks
     rows.push(dr('Cover (weeks)',proj,p=>{
       const w=p.cv3;if(w>=999)return c('\u221e','cok');
-      // Green within ±20% of target, red otherwise
+      // Colour reflects whether the SKU meets its target cover: green within ±20% of target, red otherwise. (No complex-rule highlight here.)
       const tol=t3*0.2;
       const cls=Math.abs(w-t3)<=tol?'cok':'clo';
-      // Complex-rule-impacted month: light-purple background + 120ms hover tooltip naming the rule.
-      if(p.crRule)return '<td class="'+cls+' crc-tip" data-tip="'+crRuleTip(p.crRule)+'" style="background:#f5f3ff;cursor:help">'+Math.round(w)+'w</td>';
       return c(Math.round(w)+'w',cls);
     }));
-    // 3PL Target Units
-    rows.push(dr('3PL Target Units',proj,p=>c(fmt(Math.round(p.tg3)),'tgt')));
+    // 3PL Target Units — light-purple background + 120ms hover tooltip on months whose target is raised by a complex rule.
+    rows.push(dr('3PL Target Units',proj,p=>{
+      if(p.crRule)return '<td class="tgt crc-tip" data-tip="'+crRuleTip(p.crRule)+'" style="background:#f5f3ff;cursor:help">'+fmt(Math.round(p.tg3))+'</td>';
+      return c(fmt(Math.round(p.tg3)),'tgt');
+    }));
   }
 
   // ── Buy Plan ──
@@ -3158,13 +3159,15 @@ var CR=(function(){
       +'<div style="font-weight:700;color:#5b21b6;font-size:12px">&#9819; Complex Rules <span style="color:#94a3b8;font-weight:400">— override the 3PL cover target by scope × window, per country. Highest coverage wins.</span></div>'
       +'<button type="button" onclick="CR.add()" style="font-size:10px;padding:3px 11px;border:1px solid #7c3aed;border-radius:3px;background:#7c3aed;color:#fff;cursor:pointer;font-weight:700">&#43; Add rule</button></div>';
     if(!rules.length){h+='<div style="color:#94a3b8;text-align:left;padding:8px 0">No rules yet. Add one to override buy cover targets for a launch, a season, or a specific SKU.</div>';return h;}
+    function ruleCountries(r){ return String(r.country||'').split(',').map(function(x){return x.trim();}).filter(Boolean); }
+    function countryChip(r){ var cs=ruleCountries(r); if(cs.length<=1)return ''; return '<span title="One rule applying to '+esc(cs.join(', '))+'" style="display:inline-block;background:#e0e7ff;color:#3730a3;border-radius:3px;padding:0 5px;margin-left:6px;font-size:9px;font-weight:600;vertical-align:middle">'+esc(cs.join(' · '))+'</span>'; }
     CTRS_CR.forEach(function(co){
-      var rs=rules.filter(function(r){return r.country===co;});
+      var rs=rules.filter(function(r){return ruleCountries(r).indexOf(co)>=0;});   // a multi-country rule shows under EACH of its countries (same rule/id)
       if(!rs.length)return;
       h+='<div style="margin-top:8px"><div class="cr-grp">'+co+'</div>';
       rs.forEach(function(r){
         h+='<div class="cr-rule'+(r.enabled===false?' cr-off':'')+'">'
-          +'<span class="cr-name">'+(r.name?esc(r.name):'<span style="color:#94a3b8;font-weight:400">(rule)</span>')+'</span>'
+          +'<span class="cr-name">'+(r.name?esc(r.name):'<span style="color:#94a3b8;font-weight:400">(rule)</span>')+countryChip(r)+'</span>'
           +'<span class="cr-scope">'+scopeChips(r)+'</span>'
           +'<span class="cr-win">'+windowText(r)+'</span>'
           +'<span class="cr-cov">'+coverText(r)+'</span>'
@@ -3187,7 +3190,7 @@ var CR=(function(){
     var catList=(typeof window.CR_CATS!=='undefined'&&window.CR_CATS.length)?window.CR_CATS:[];
     var seasonList=(typeof window.CR_SEASONS!=='undefined'&&window.CR_SEASONS.length)?window.CR_SEASONS.slice():[];
     if(r.season&&seasonList.indexOf(r.season)<0)seasonList.unshift(r.season);   // keep an old rule's season even if no longer active
-    var selCo=r.country?[String(r.country)]:['UK'];
+    var selCo=r.country?String(r.country).split(',').map(function(x){return x.trim();}).filter(Boolean):['UK'];
     var h='<div style="font-weight:700;color:#5b21b6;font-size:12px;margin-bottom:8px">&#9819; '+(r.id?'Edit rule':'New rule')+'</div>'
       +'<div class="cr-fgrid" style="display:grid;grid-template-columns:130px 1fr;gap:7px 12px;align-items:start">'
       +'<span class="sl" style="padding-top:4px">Countries:</span><span><select id="cr-country" multiple size="5" style="width:110px;vertical-align:top">'+CTRS_CR.map(function(c){return '<option value="'+c+'"'+(selCo.indexOf(c)>=0?' selected':'')+'>'+c+'</option>';}).join('')+'</select> <span class="sl">Ctrl/Cmd-click for several'+(r.id?' — first stays this rule, extras become new rules':'')+'</span></span>'
@@ -3278,18 +3281,14 @@ var CR=(function(){
     if(ctype==='months'&&!base.cover_months){if(msg)msg.textContent='Enter cover months.';return;}
     if(ctype==='range'&&(!rf||!rt)){if(msg)msg.textContent='Pick both range dates.';return;}
     if(msg)msg.textContent='Saving…';
-    // One rule per selected country. On edit the first selected country keeps the edited row; any extras become new rules.
-    var reqs=countries.map(function(co,idx){
-      var b={};for(var k in base)b[k]=base[k];b.country=co;
-      if(editing&&editing.id&&idx===0)b.id=editing.id;
-      return fetch('/api/buy-complex-rules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})
-        .then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j};});});
-    });
-    Promise.all(reqs).then(function(results){
-      var bad=results.filter(function(x){return !x.ok;});
-      if(bad.length){if(msg)msg.textContent=(bad[0].j&&bad[0].j.error)||'Save failed';return;}
-      reload();
-    }).catch(function(e){if(msg)msg.textContent=String(e);});
+    // ONE rule that applies to all selected countries (stored comma-separated in `country`; the engine matches
+    // membership and the list shows it under each of its countries). On edit it stays the same rule (same id).
+    var b={};for(var k in base)b[k]=base[k];b.country=countries.join(',');
+    if(editing&&editing.id)b.id=editing.id;
+    fetch('/api/buy-complex-rules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})
+      .then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j};});})
+      .then(function(res){ if(!res.ok){if(msg)msg.textContent=(res.j&&res.j.error)||'Save failed';return;} reload(); })
+      .catch(function(e){if(msg)msg.textContent=String(e);});
   }
   function del(id){
     if(!window.confirm('Delete this rule?'))return;
