@@ -685,10 +685,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
     <div style="flex:1"></div>
     <button id="sa-drawer-btn" title="Stock Availability" onclick="openSADrawer()" style="margin-right:4px;height:24px;padding:0 9px;border-radius:12px;border:1px solid #2563eb;background:#1d4ed8;color:#fff;cursor:pointer;font-weight:700;font-size:11px;letter-spacing:.03em;line-height:1;flex:0 0 auto">SA</button>
     <button id="ctx-help-btn" title="Help for this page" onclick="openCtxHelp(event)" style="margin-right:2px;width:24px;height:24px;border-radius:50%;border:1px solid #6b7280;background:#4b5563;color:#fff;cursor:pointer;font-weight:700;font-size:13px;line-height:1;flex:0 0 auto">?</button>
-    <div class="tool-bar" id="plan-tools" role="group" aria-label="AI tools">
-      <button class="dnav" id="insights-btn" title="Get AI insights">💡 AI Insights</button>
-      <button class="dnav" id="fclogic-btn" title="How the forecast numbers are calculated" onclick="openFcLogic(event)" style="color:#5b21b6">&#9635; Forecast Logic</button>
-    </div>
+    <div class="tool-bar" id="plan-tools" role="group" aria-label="AI tools"></div>
   </div>
   <div id="ctabs-row" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
     <span class="pill-lbl">Country</span>
@@ -741,6 +738,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
       <span class="pill-lbl" title="Show a &lsquo;— total&rsquo; row at the foot of each category">Cat&nbsp;totals</span>
       <button id="cat-tot-toggle" class="pill catpill" aria-pressed="false" title="Show / hide a total row under each category (e.g. &ldquo;Hair Wrap — total&rdquo;). Hidden by default." onclick="setShowCatTot(!SHOW_CAT_TOT)">Show</button>
     </span>
+    <button id="fclogic-btn" onclick="openFcLogic(event)" title="How the forecast numbers are calculated" style="margin-left:12px;font-size:10px;padding:2px 9px;border:1px solid #c4b5fd;border-radius:3px;background:#f5f3ff;color:#5b21b6;cursor:pointer;flex-shrink:0">&#9635; Forecast Logic</button>
   </div>
   <div id="catrow1-wrap" style="display:flex;align-items:center;gap:6px;position:relative">
     <span class="pill-lbl">Release Window</span>
@@ -7974,7 +7972,6 @@ function renderDemandTabs(){
   if(!window._dnavInpBound){ window._dnavInpBound=true; document.addEventListener('click',function(){ var m=document.getElementById('dnav-inputs-menu'); if(m)m.style.display='none'; }); }
   // relocate the demand-plan AI tool-bar into this secondary menu (moved back on teardown)
   var pt=document.getElementById('plan-tools'); if(pt)bar.appendChild(pt);
-  var _fc=document.getElementById('fclogic-btn'); if(_fc)_fc.style.display=(DEMAND_VIEW==='plan')?'':'none';   // Forecast Logic button only on DEMAND ▸ Plan
   // relocate the status note (#st) + last-updated/version (#ver) onto this nav row, right-aligned (all DEMAND pages)
   var _st=document.getElementById('st');
   if(_st){ _st.className=''; _st.style.cssText='font-size:11px;color:#888;margin-left:auto;flex:0 0 auto;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:46%'; bar.appendChild(_st); }
@@ -8433,12 +8430,14 @@ function daAnomalies(){
 // > 3 = spike, < 0.25 = dip). Reads the live buy-plan forecast (buildLiveDemand → md.demand[ch]).
 function daAnomalyReport(){
   try{ buildLiveDemand(); }catch(e){}
-  var fwd=(typeof LIVE_FC_MONTHS!=='undefined'?LIVE_FC_MONTHS:[]).slice(0,6);
+  var fwd=(typeof LIVE_FC_MONTHS!=='undefined'?LIVE_FC_MONTHS:[]);   // full forward window (so the horizon filter incl. 7+ has data)
   if(!fwd.length||typeof BP_DATA==='undefined'||!BP_DATA.products)return [];
+  var moIdx={}; fwd.forEach(function(m,i){moIdx[m]=i;});   // months-out (0 = this month)
+  function hozOf(i){ return i<=1?'<1':(i<=3?'2-3':(i<=6?'3-6':'7+')); }
   var items=[];
   Object.keys(BP_DATA.products).forEach(function(sku){
     var pm=BP_DATA.products[sku]&&BP_DATA.products[sku].mkts; if(!pm)return;
-    var subcat=(SKUM[sku]&&SKUM[sku].s)||'', ti=(SKUM[sku]&&SKUM[sku].ti)||'C';
+    var subcat=(SKUM[sku]&&SKUM[sku].s)||'', cat=(SKUM[sku]&&SKUM[sku].c)||'', ti=(SKUM[sku]&&SKUM[sku].ti)||'C';
     Object.keys(pm).forEach(function(co){
       var d=pm[co].demand; if(!d)return;
       ['DTC','FBA','B2B'].forEach(function(ch){
@@ -8446,8 +8445,8 @@ function daAnomalyReport(){
         var af; try{ af=anomalyFlags(d[ch],subcat,co,ch); }catch(e){ return; }
         fwd.forEach(function(fym){ var fl=af[fym]; if(!fl)return;
           var mag=(fl.type==='hi')?(fl.expected>0?fl.cur/fl.expected:9):(fl.cur>0?fl.expected/fl.cur:9);   // how far off (both directions → >1)
-          var sev=mag>=8?'high':mag>=5?'med':'low', svRank=sev==='high'?0:sev==='med'?1:2;
-          items.push({sku:sku,co:co,ch:ch,fym:fym,type:fl.type,cur:fl.cur,expected:fl.expected,ratio:fl.ratio,prev:fl.prev,next:fl.next,ti:ti,subcat:subcat,mag:Math.round(mag*10)/10,sev:sev,svRank:svRank}); });
+          var sev=mag>=8?'high':mag>=5?'med':'low', svRank=sev==='high'?0:sev==='med'?1:2, mi=moIdx[fym];
+          items.push({sku:sku,co:co,ch:ch,fym:fym,type:fl.type,cur:fl.cur,expected:fl.expected,ratio:fl.ratio,prev:fl.prev,next:fl.next,ti:ti,subcat:subcat,cat:cat,moOut:mi,hoz:hozOf(mi),mag:Math.round(mag*10)/10,sev:sev,svRank:svRank}); });
       });
     });
   });
@@ -8530,9 +8529,11 @@ function renderDemandActionsView(body){
   function secNav(){
     var SEC=[['actions','Actions'],['insights','Insights'],['anomalies','Anomalies'],['weather','Weather']];
     var anN=(typeof daAnomalyOpenCount==='function')?daAnomalyOpenCount():0;   // open items to review → badge
-    return '<div class="d3nav">'+SEC.map(function(s){var bdg=(s[0]==='anomalies'&&anN>0)?' <span class="ex-badge" style="background:#7c3aed;color:#fff">'+anN+'</span>':'';return '<button class="d3tab'+(_da.sec===s[0]?' active':'')+'" data-sec="'+s[0]+'">'+s[1]+bdg+'</button>';}).join('')+'</div>';
+    return '<div class="d3nav" style="display:flex;align-items:center;flex-wrap:wrap">'+SEC.map(function(s){var bdg=(s[0]==='anomalies'&&anN>0)?' <span class="ex-badge" style="background:#7c3aed;color:#fff">'+anN+'</span>':'';return '<button class="d3tab'+(_da.sec===s[0]?' active':'')+'" data-sec="'+s[0]+'">'+s[1]+bdg+'</button>';}).join('')
+      +'<button class="d3tab" id="da-ai-insights" title="Generate AI insights for the current market" style="margin-left:auto;color:#5b21b6;font-weight:600">💡 AI Insights</button></div>';
   }
-  function wireSecNav(){ body.querySelectorAll('[data-sec]').forEach(function(b){ b.onclick=function(){ _da.sec=b.dataset.sec; draw(window._daAll||[]); }; }); }
+  function wireSecNav(){ body.querySelectorAll('[data-sec]').forEach(function(b){ b.onclick=function(){ _da.sec=b.dataset.sec; draw(window._daAll||[]); }; });
+    var _ai=body.querySelector('#da-ai-insights'); if(_ai)_ai.onclick=function(){ try{openInsightsPanel();}catch(e){} }; }
   function draw(all){
     window._daAll=all;
     if(_da.sec==='weather'){
@@ -8555,17 +8556,20 @@ function renderDemandActionsView(body){
     if(_da.sec==='anomalies'){
       var sm=window._daSM||{}, items=daAnomalyItems();
       var CO=['UK','US','EU','AU','CA'], CH=['DTC','FBA','B2B'];
+      var selCo=_da.anCo||'ALL', selCh=_da.anCh||'ALL', selSt=_da.anStatus||'open', selHoz=_da.anHoz||'all', selCat=_da.anCat||'all', selSku=(_da.anSku||'').toLowerCase();
+      var cats=Array.from(new Set(items.map(function(it){return it.cat;}).filter(Boolean))).sort();
+      // base = filtered by horizon / category / SKU (NOT country/channel/status) → drives the matrix counts
+      var base=items.filter(function(it){ if(selHoz!=='all'&&it.hoz!==selHoz)return false; if(selCat!=='all'&&it.cat!==selCat)return false; if(selSku&&it.sku.toLowerCase().indexOf(selSku)<0)return false; return true; });
       var mtx={}, colTot={DTC:0,FBA:0,B2B:0}, rowTot={}, grand=0;
       CO.forEach(function(c){mtx[c]={DTC:0,FBA:0,B2B:0};rowTot[c]=0;});
-      items.forEach(function(it){ if(_anStatus(it,sm)!=='open')return; if(!mtx[it.co])return; mtx[it.co][it.ch]++; rowTot[it.co]++; colTot[it.ch]=(colTot[it.ch]||0)+1; grand++; });
-      var selCo=_da.anCo||'ALL', selCh=_da.anCh||'ALL', selSt=_da.anStatus||'open';
+      base.forEach(function(it){ if(_anStatus(it,sm)!=='open')return; if(!mtx[it.co])return; mtx[it.co][it.ch]++; rowTot[it.co]++; colTot[it.ch]=(colTot[it.ch]||0)+1; grand++; });
       function cellBtn(c,h,n){ var on=(selCo===c&&selCh===h); return '<td style="padding:0;border-top:1px solid #eef2f7"><button class="an-cell" data-co="'+c+'" data-ch="'+h+'" style="width:100%;border:0;background:'+(on?'#ede9fe':(n>0?'#fef3c7':'#fff'))+';cursor:pointer;font:inherit;font-size:12px;padding:5px 12px;color:'+(n>0?'#7c2d12':'#cbd5e1')+';font-weight:'+(n>0?'700':'400')+'">'+n+'</button></td>'; }
       var mtxHtml='<div style="overflow-x:auto;margin-bottom:10px"><table style="border-collapse:collapse;font-size:11px;border:1px solid #e5e7eb">'
         +'<thead><tr><th style="text-align:left;padding:5px 12px;background:#f8fafc;font-size:10px;color:#64748b">Open items</th>'+CH.map(function(h){return '<th style="padding:5px 12px;background:#f8fafc;font-size:10px;color:#64748b">'+h+'</th>';}).join('')+'<th style="padding:5px 12px;background:#f1f5f9;font-size:10px;color:#334155">All</th></tr></thead><tbody>'
         +CO.map(function(c){ return '<tr><td style="padding:5px 12px;font-weight:700;border-top:1px solid #eef2f7">'+c+'</td>'+CH.map(function(h){return cellBtn(c,h,mtx[c][h]);}).join('')+'<td style="padding:0;border-top:1px solid #eef2f7"><button class="an-cell" data-co="'+c+'" data-ch="ALL" style="width:100%;border:0;background:'+((selCo===c&&selCh==='ALL')?'#ede9fe':'#f8fafc')+';cursor:pointer;font:inherit;font-weight:700;font-size:12px;padding:5px 12px">'+rowTot[c]+'</button></td></tr>'; }).join('')
         +'<tr><td style="padding:5px 12px;font-weight:700;background:#f1f5f9;border-top:2px solid #cbd5e1">All</td>'+CH.map(function(h){return '<td style="padding:0;background:#f8fafc;border-top:2px solid #cbd5e1"><button class="an-cell" data-co="ALL" data-ch="'+h+'" style="width:100%;border:0;background:'+((selCo==='ALL'&&selCh===h)?'#ede9fe':'none')+';cursor:pointer;font:inherit;font-weight:700;font-size:12px;padding:5px 12px">'+colTot[h]+'</button></td>';}).join('')+'<td style="padding:0;background:#ede9fe;border-top:2px solid #cbd5e1"><button class="an-cell" data-co="ALL" data-ch="ALL" style="width:100%;border:0;background:'+((selCo==='ALL'&&selCh==='ALL')?'#ddd6fe':'none')+';cursor:pointer;font:inherit;font-weight:800;font-size:12px;padding:5px 12px">'+grand+'</button></td></tr>'
         +'</tbody></table></div>';
-      var scoped=items.filter(function(it){ return (selCo==='ALL'||it.co===selCo)&&(selCh==='ALL'||it.ch===selCh); });
+      var scoped=base.filter(function(it){ return (selCo==='ALL'||it.co===selCo)&&(selCh==='ALL'||it.ch===selCh); });
       var stCnt=function(s){ return s==='all'?scoped.length:scoped.filter(function(it){return _anStatus(it,sm)===s;}).length; };
       var STAT=[['open','Open'],['snoozed','Snoozed'],['dismissed','Dismissed'],['all','All']];
       var stBar='<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><span style="font-size:11px;font-weight:700;color:#888">STATUS</span>'+STAT.map(function(s){return '<button class="an-st dsub'+(selSt===s[0]?' active':'')+'" data-st="'+s[0]+'">'+s[1]+' ('+stCnt(s[0])+')</button>';}).join('')+'</div>';
@@ -8592,10 +8596,20 @@ function renderDemandActionsView(body){
           +'<span class="crc-tip" data-tip="'+anTip(it).replace(/"/g,'&quot;')+'" style="font-weight:700;font-size:11px;color:'+col+';cursor:help;border-bottom:1px dotted '+col+'">'+arrow+' '+mlbl(it.fym)+'</span>'+(resolved?'<span style="font-size:10px;color:#999"> · '+st+(st==='snoozed'&&sm[key]&&sm[key].snooze_until?' until '+sm[key].snooze_until:'')+'</span>':'')+'</div>'
           +'<div style="font-size:11px;color:#444;margin:3px 0 6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">Forecast <b>'+fn(it.cur)+'</b> vs expected <b>'+fn(it.expected)+'</b>'
           +' <span style="color:#64748b">· set '+mlbl(it.fym)+' →</span> <input class="an-ov" data-sku="'+tHesc(it.sku)+'" data-co="'+it.co+'" data-ch="'+it.ch+'" data-m="'+it.fym+'" value="'+(ov!=null?tHesc(ov):'')+'" placeholder="'+fn(it.cur)+'" title="Override this month’s forecast — saves to your plan &amp; the buy plan" style="width:66px;text-align:right;font-size:11px;border:1px solid #cbd5e1;border-radius:4px;padding:2px 5px" inputmode="numeric">'
+          +' <a href="#" class="an-setrec" data-sku="'+tHesc(it.sku)+'" data-co="'+it.co+'" data-ch="'+it.ch+'" data-m="'+it.fym+'" data-v="'+it.expected+'" title="Set '+mlbl(it.fym)+' to the seasonal-expected value" style="color:#7c3aed;text-decoration:underline;white-space:nowrap">set '+mlbl(it.fym)+' to '+fn(it.expected)+'</a>'
           +' <a href="#" class="an-jump" data-sku="'+tHesc(it.sku)+'" style="color:#1d4ed8;text-decoration:none;font-weight:600;white-space:nowrap">Open in Plan ↗</a></div>'+btns+'</div>'; }
       var SEVLBL={high:'🔴 High',med:'🟠 Medium',low:'🟡 Low'}, cards='', _lastSev=null;
       list.forEach(function(it){ if(selSt==='open'&&it.sev!==_lastSev){ _lastSev=it.sev; cards+='<div style="font-size:11px;font-weight:800;letter-spacing:.04em;color:#475569;margin:12px 0 5px">'+(SEVLBL[it.sev]||it.sev)+'</div>'; } cards+=renderAnCard(it); });
-      body.innerHTML=secNav()+mtxHtml
+      var HOZ=[['all','All'],['<1','≤1 mo'],['2-3','2-3 mo'],['3-6','3-6 mo'],['7+','7+ mo']];
+      var _selHtml=function(cls,cur,opts){ return '<select class="'+cls+' flt" style="font-size:12px;padding:3px 6px;border:1px solid #d0d0d0;border-radius:5px">'+opts.map(function(o){return '<option value="'+tHesc(o[0])+'"'+(cur===o[0]?' selected':'')+'>'+tHesc(o[1])+'</option>';}).join('')+'</select>'; };
+      var filtBar='<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:9px">'
+        +'<span style="font-size:11px;font-weight:700;color:#888">HORIZON</span>'+HOZ.map(function(h){return '<button class="an-hoz dsub'+(selHoz===h[0]?' active':'')+'" data-h="'+h[0]+'">'+h[1]+'</button>';}).join('')
+        +'<span style="font-size:11px;font-weight:700;color:#888;margin-left:6px">COUNTRY</span>'+_selHtml('an-co-sel',selCo,[['ALL','All']].concat(CO.map(function(c){return [c,c];})))
+        +'<span style="font-size:11px;font-weight:700;color:#888">CHANNEL</span>'+_selHtml('an-ch-sel',selCh,[['ALL','All']].concat(CH.map(function(c){return [c,c];})))
+        +'<span style="font-size:11px;font-weight:700;color:#888">CATEGORY</span>'+_selHtml('an-cat-sel',selCat,[['all','All']].concat(cats.map(function(c){return [c,c];})))
+        +'<input class="an-sku flt" placeholder="SKU…" value="'+tHesc(_da.anSku||'')+'" style="font-size:12px;padding:3px 8px;border:1px solid #86efac;background:#f0fdf4;border-radius:5px;width:130px">'
+        +'</div>';
+      body.innerHTML=secNav()+filtBar+mtxHtml
         +'<div style="font-size:12px;margin-bottom:8px"><b>'+grand+'</b> open anomal'+(grand===1?'y':'ies')+' to review'+((selCo!=='ALL'||selCh!=='ALL')?' · showing '+(selCo==='ALL'?'all countries':selCo)+' / '+(selCh==='ALL'?'all channels':selCh):'')+'</div>'
         +stBar
         +(cards||'<div style="padding:22px;text-align:center;color:#666">No anomalies for this filter — the forward-6-month forecast tracks each SKU’s seasonal flow.</div>')
@@ -8605,6 +8619,12 @@ function renderDemandActionsView(body){
       body.querySelectorAll('.an-st').forEach(function(b){ b.onclick=function(){ _da.anStatus=b.dataset.st; draw(all); }; });
       body.querySelectorAll('.an-act').forEach(function(b){ b.onclick=function(){ b.disabled=true; setState(b.dataset.k,b.dataset.s,b.dataset.days).then(function(j){ if(j&&j.error){alert(j.error);b.disabled=false;return;} load(); }); }; });
       body.querySelectorAll('.an-ov').forEach(function(inp){ inp.onchange=function(){ var v=inp.value.trim(); skuOvSet(inp.dataset.sku,inp.dataset.co,inp.dataset.ch,inp.dataset.m,(v===''?null:v)); window._daAnom=null; load(); }; });   // override → auto-saves (markDirty) + recompute the anomalies
+      body.querySelectorAll('.an-setrec').forEach(function(a){ a.onclick=function(e){ e.preventDefault(); skuOvSet(a.dataset.sku,a.dataset.co,a.dataset.ch,a.dataset.m,a.dataset.v); window._daAnom=null; load(); }; });   // set the recommended (seasonal-expected) value as the override
+      body.querySelectorAll('.an-hoz').forEach(function(b){ b.onclick=function(){ _da.anHoz=b.dataset.h; draw(all); }; });
+      var _acos=body.querySelector('.an-co-sel'); if(_acos)_acos.onchange=function(){ _da.anCo=this.value; draw(all); };
+      var _achs=body.querySelector('.an-ch-sel'); if(_achs)_achs.onchange=function(){ _da.anCh=this.value; draw(all); };
+      var _acat=body.querySelector('.an-cat-sel'); if(_acat)_acat.onchange=function(){ _da.anCat=this.value; draw(all); };
+      var _asku=body.querySelector('.an-sku'); if(_asku)_asku.onchange=function(){ _da.anSku=this.value.trim(); draw(all); };
       body.querySelectorAll('.an-jump').forEach(function(b){ b.onclick=function(e){ e.preventDefault(); daJumpToPlan(b.dataset.sku); }; });
       return;
     }
@@ -10206,7 +10226,7 @@ async function getInsights(){
   var hdrBtn=document.getElementById('insights-btn');
   var statusEl=document.getElementById('insights-status');
   if(btn)btn.disabled=true;
-  hdrBtn.disabled=true;hdrBtn.textContent='Analysing...';
+  if(hdrBtn){hdrBtn.disabled=true;hdrBtn.textContent='Analysing...';}
   statusEl.textContent='Building dataset...';
   document.getElementById('insights-list').innerHTML='<div style="padding:20px;text-align:center;color:#888;font-size:12px">Generating insights for '+CUR+'...</div>';
 
@@ -10270,7 +10290,7 @@ async function getInsights(){
     statusEl.textContent='Error';
     document.getElementById('insights-list').innerHTML='<div style="padding:20px;color:#dc2626;font-size:11px">Failed to generate insights: '+e.message+'</div>';
   }
-  hdrBtn.disabled=false;hdrBtn.textContent='💡 Get Insights';
+  if(hdrBtn){hdrBtn.disabled=false;hdrBtn.textContent='💡 Get Insights';}
   if(btn)btn.disabled=false;
 }
 
@@ -10437,7 +10457,7 @@ function unapplyInsight(idx){
   render();
 }
 
-document.getElementById('insights-btn').onclick=function(){openInsightsPanel();};
+(function(){var _ib=document.getElementById('insights-btn'); if(_ib)_ib.onclick=function(){openInsightsPanel();};})();   // AI Insights now lives in the DEMAND ▸ Actions nav-3 (added in renderDemandActionsView); guarded in case the header button is absent
 document.getElementById('insights-close').onclick=function(){closeInsightsPanel();};
 
 // ─── BI Rule Suggestions ───
