@@ -7960,8 +7960,18 @@ function renderDemandTabs(){
     bar.style.cssText='display:flex;gap:2px;align-items:center;margin:2px 0 10px;border-bottom:1px solid #e0e0e0;flex-wrap:wrap';   // match SUPPLY #supply-subnav exactly
     // sit directly below the main tabs but ABOVE the filters (same header column, right after the tab row)
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
-  bar.innerHTML=DEMAND_TABS.map(function(t){return '<button class="dnav'+(t[0]===DEMAND_VIEW?' active':'')+'" data-d="'+t[0]+'">'+t[1]+'</button>';}).join('');
-  bar.querySelectorAll('.dnav').forEach(function(b){ b.onclick=function(){ VIEW_MODE='planning'; DEMAND_VIEW=b.dataset.d; if(window.writeHash)window.writeHash(['demand',DEMAND_VIEW]); render(); }; });   // a demand sub-tab is a planning view — force planning mode so a stale Buy&Move VIEW_MODE doesn't render the buy grid
+  // Primary tabs inline; the reference/input views (Sell-through targets, Key accounts, Calendar, Revenue) are grouped under an "Inputs ▾" dropdown.
+  var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];});
+  var PRIMARY=['plan','summary','kpis','actions'], INPUTS=['targets','keyaccounts','calendar','revenue'];
+  var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0;
+  bar.innerHTML=PRIMARY.map(function(k){return _dlbl[k]?'<button class="dnav'+(k===DEMAND_VIEW?' active':'')+'" data-d="'+k+'">'+_dlbl[k]+'</button>':'';}).join('')
+    +'<span style="position:relative;display:inline-block"><button class="dnav'+(_inpActive?' active':'')+'" id="dnav-inputs-btn" title="Sell-through targets, Key accounts, Calendar, Revenue">Inputs'+(_inpActive?': '+_dlbl[DEMAND_VIEW]:'')+' &#9662;</button>'
+      +'<div id="dnav-inputs-menu" style="display:none;position:absolute;top:100%;left:0;z-index:300;background:#fff;border:1px solid #d0d0d0;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.16);min-width:190px;padding:4px;margin-top:2px">'
+      +INPUTS.map(function(k){return '<button class="dnav-input-opt" data-d="'+k+'" style="display:block;width:100%;text-align:left;border:0;background:'+(k===DEMAND_VIEW?'#eff6ff':'none')+';padding:6px 12px;font:inherit;font-size:12px;cursor:pointer;border-radius:5px;color:'+(k===DEMAND_VIEW?'#1d4ed8':'#334155')+'">'+_dlbl[k]+'</button>';}).join('')
+      +'</div></span>';
+  bar.querySelectorAll('[data-d]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); VIEW_MODE='planning'; DEMAND_VIEW=b.dataset.d; if(window.writeHash)window.writeHash(['demand',DEMAND_VIEW]); render(); }; });   // a demand sub-tab is a planning view — force planning mode
+  var _ib=document.getElementById('dnav-inputs-btn'); if(_ib)_ib.onclick=function(e){ e.stopPropagation(); var m=document.getElementById('dnav-inputs-menu'); if(m)m.style.display=(m.style.display==='block')?'none':'block'; };
+  if(!window._dnavInpBound){ window._dnavInpBound=true; document.addEventListener('click',function(){ var m=document.getElementById('dnav-inputs-menu'); if(m)m.style.display='none'; }); }
   // relocate the demand-plan AI tool-bar into this secondary menu (moved back on teardown)
   var pt=document.getElementById('plan-tools'); if(pt)bar.appendChild(pt);
   // relocate the status note (#st) + last-updated/version (#ver) onto this nav row, right-aligned (all DEMAND pages)
