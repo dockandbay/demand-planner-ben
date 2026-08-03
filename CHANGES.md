@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.500 - FBA grid: Carton qty after Disc; On Order → last column "3PL Inbound" with hover detail ⚠️ NEEDS TESTING
+- FBA tab columns reordered: Carton qty now sits directly after Disc; On Order moved to the LAST column and renamed 3PL Inbound.
+- 3PL Inbound cell has a 120ms hover tooltip listing each inbound line (PO ref · qty · date, one line per shipment). Buy/Transfer views unchanged. artifact_v16.7.html. No migration.
+
 ## v26.499 - Payments Due: Likely pay date editable for overdue rows ⚠️ NEEDS TESTING
 - The Likely pay date column is now an input box for OVERDUE payments only (read-only otherwise). PO milestones save to payment_likely_dates via line_key (comp:/bal:); deposits/other save their date_likely_pay. Silent save. supply/inject.html. No migration.
 
