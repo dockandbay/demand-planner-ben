@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.453 - Demand plan: Release Window before Category; Plan button opens popup only ⚠️ NEEDS TESTING
+- **Release Window filter moved before the Category filter** on the demand-plan filter row (category popup now aligns under its button dynamically). `artifact_v16.7.html`.
+- **The SKU "Plan ▸" button on the demand plan now opens the buy-plan detail as a modal only** — on close it restores the demand plan instead of leaving you on the buy grid the scaffold built behind the popup (`close_` fires a one-shot `_onPlanPopupClose`; `openDemandPlanPopup` registers a re-render when opened from planning mode). `artifact_v16.7.html`. No migration.
+
 ## v26.452 - Bug 3: no-override SKU forecast falls back to flat last-year actual (plan + buy plan) ⚠️ NEEDS TESTING · BUY-PLAN IMPACT
 - **When a SKU has no saved override for a month, its forecast now falls back to its OWN last-year (2025) actual for that calendar month (flat, +0% growth)** instead of the subcat cascade (share × subcat forecast). New/short-history SKUs (no 2025 actual) still use the cascade so they aren't forecast at zero. Ben's decision (269 → 191). Shared `skuFbFC()` / `skuHasLY()` used by BOTH the demand-plan SKU rows (`insertInlineSkuRows`) and the buy plan (`buildLiveDemand` §2), so the plan and buy plan agree.
 - **Buy-plan impact:** most SKUs have 12-month saved forecasts (2026_06–2027_05), so this mainly changes the **forward tail (2027_06+)** and any explicitly-cleared SKU/month — those now carry flat last-year demand rather than the cascade. This unifies with the Bug 1 fix (the post-horizon window is now flat-LY, consistent with the display). Category/subcat growth still shows via the subcat forecast and the SKU-gap row. Verified: fallback returns the SKU's own LY (191) for established SKUs, cascade for new ones. **Please spot-check buy quantities.** `artifact_v16.7.html`. No migration.

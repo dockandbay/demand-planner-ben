@@ -739,13 +739,13 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
     </span>
   </div>
   <div id="catrow1-wrap" style="display:flex;align-items:center;gap:6px;position:relative">
+    <span class="pill-lbl">Release Window</span>
+    <select id="plan-rw-sel" onchange="setPlanRw(this.value)" style="font-size:11px;padding:2px 6px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;cursor:pointer"><option value="ALL">All</option></select>
+    <span style="width:1px;height:14px;background:#e0e0e0;margin:0 4px;flex-shrink:0"></span>
     <span class="pill-lbl">Category</span>
     <button id="cat-btn" class="pill" style="display:inline-flex;align-items:center;gap:8px" onclick="toggleCatPop(event)"><span id="cat-btn-lbl">All categories</span><span style="opacity:.55;font-size:9px">▾</span></button>
     <div id="cat-chips" style="display:flex;gap:4px;flex-wrap:nowrap"></div>
     <div id="cat-pop" style="display:none;position:absolute;top:30px;left:64px;z-index:300;background:#fff;border:1px solid #d0d0d0;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.18);width:440px;padding:8px"></div>
-    <span style="width:1px;height:14px;background:#e0e0e0;margin:0 4px;flex-shrink:0"></span>
-    <span class="pill-lbl">Release Window</span>
-    <select id="plan-rw-sel" onchange="setPlanRw(this.value)" style="font-size:11px;padding:2px 6px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;cursor:pointer"><option value="ALL">All</option></select>
   </div>
 </div>
 <div id="sa-drawer-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:5900" onclick="closeSADrawer()"></div>
@@ -2365,7 +2365,11 @@ function open_(sku){
   document.getElementById('ov').classList.add('open');
   renderPanel();
 }
-function close_(){document.getElementById('ov').classList.remove('open');}
+function close_(){document.getElementById('ov').classList.remove('open');
+  // One-shot: when the popup was opened OVER another view (e.g. the DEMAND plan), restore that view on close
+  // so the user lands back where they were instead of on the buy grid the scaffold built behind the popup.
+  if(typeof window!=='undefined'&&window._onPlanPopupClose){var _f=window._onPlanPopupClose;window._onPlanPopupClose=null;try{_f();}catch(e){}}
+}
 
 function renderPanel(){
   const pd=PD[PSKU];if(!pd){document.getElementById('pb').innerHTML='<div class="nd">No data</div>';return;}
@@ -7382,11 +7386,14 @@ function setPlanRw(v){PLAN_RW=v||'ALL';renderMain();}
 // on demand (without switching the visible view) and syncs the buy market to the demand plan's country.
 function openDemandPlanPopup(sku){
   try{
+    // When opened from the DEMAND plan, pop the buy-plan detail as a modal only — don't leave the user on the
+    // buy grid the scaffold builds behind it. Register a one-shot restore that re-renders the plan on close.
+    if(VIEW_MODE==='planning'){ window._onPlanPopupClose=function(){ try{ if(VIEW_MODE==='planning')render(); }catch(e){} }; }
     if(window.ensureBuyPlanScaffold)window.ensureBuyPlanScaffold();
     if(window.BP){ try{ BP.CUR=CUR; }catch(e){} }
-    if(!document.getElementById('ov'))return;
+    if(!document.getElementById('ov')){ window._onPlanPopupClose=null; return; }
     if(window.open_)window.open_(sku);
-  }catch(e){ if(window.console)console.error('openDemandPlanPopup',e); }
+  }catch(e){ window._onPlanPopupClose=null; if(window.console)console.error('openDemandPlanPopup',e); }
 }
 function fillPlanRwSel(){ var sel=document.getElementById('plan-rw-sel'); if(!sel)return; var seen={}; Object.keys(SKUM).forEach(function(sku){var p=SKUM[sku];if(p&&p.rw)seen[p.rw]=1;}); var opts=Object.keys(seen).sort(); if(PLAN_RW!=='ALL'&&opts.indexOf(PLAN_RW)<0)PLAN_RW='ALL'; sel.innerHTML='<option value="ALL">All</option>'+opts.map(function(o){return '<option value="'+String(o).replace(/"/g,'&quot;')+'"'+(o===PLAN_RW?' selected':'')+'>'+o+'</option>';}).join(''); sel.value=PLAN_RW; }
 // DEMAND plan filter persistence — remember country / channel / categories / SKU filter for 1h so returning to the
@@ -9783,7 +9790,7 @@ var _catDocBound=false;
 function toggleCatPop(e){
   if(e)e.stopPropagation();
   var p=document.getElementById('cat-pop');if(!p)return;
-  if(p.style.display!=='block'){buildCatPop();p.style.display='block';var s=document.getElementById('cat-search');if(s)s.focus();}
+  if(p.style.display!=='block'){buildCatPop();var _cb=document.getElementById('cat-btn');if(_cb)p.style.left=_cb.offsetLeft+'px';p.style.display='block';var s=document.getElementById('cat-search');if(s)s.focus();}
   else p.style.display='none';
   // close when clicking anywhere outside the category control (bind once). Clicks on the button, chips or
   // inside the popup stay open because they're all within #catrow1-wrap (the popup's parent).
