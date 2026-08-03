@@ -1845,6 +1845,12 @@ function render(){
   // A single "Download CSV (data in view)" button shows on FBA + TRANSFER instead.
   var _bt=document.getElementById('bp-buy-actions'); if(_bt)_bt.style.display=(BP_VIEW==='buy')?'inline-flex':'none';
   var _fh=document.getElementById('bp-fba-help-btn'); if(_fh)_fh.style.display=(BP_VIEW==='fba')?'':'none';
+  // Buy Plan Logic → BUY tab only; Transfer Logic → TRANSFER tab only. Hide the panel too when its tab isn't active.
+  var _bh=document.getElementById('bp-buy-help-btn'); if(_bh)_bh.style.display=(BP_VIEW==='buy')?'':'none';
+  var _bhp=document.getElementById('buy-help'); if(_bhp&&BP_VIEW!=='buy')_bhp.style.display='none';
+  var _th=document.getElementById('bp-trf-help-btn'); if(_th)_th.style.display=(BP_VIEW==='transfer')?'':'none';
+  var _thp=document.getElementById('trf-help'); if(_thp&&BP_VIEW!=='transfer')_thp.style.display='none';
+  var _fhp=document.getElementById('fba-help'); if(_fhp&&BP_VIEW!=='fba')_fhp.style.display='none';
   var _vdl=document.getElementById('bp-view-dl'); if(_vdl)_vdl.style.display=(BP_VIEW==='fba'||BP_VIEW==='transfer')?'inline-flex':'none';
   var _crb=document.getElementById('cr-btn'); if(_crb)_crb.style.display=(BP_VIEW==='buy')?'':'none';   // Complex Rules — BUY tab only
   var _crp=document.getElementById('cr-panel'); if(_crp&&BP_VIEW!=='buy')_crp.style.display='none';

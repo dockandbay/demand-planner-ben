@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.446 - Logic pop-downs scoped to their own tab ⚠️ NEEDS TESTING
+- **Buy Plan Logic** button now shows only on the **BUY** tab, **Transfer Logic** only on the **TRANSFER** tab (FBA Transfer Logic was already FBA-only). Their panels also auto-close when you switch tabs. `artifact_v16.7.html`. No migration.
+
 ## v26.445 - Buy-plan popup: stock-vs-target cell colours, hover fix, logic pop-downs, spreadsheet sum ⚠️ NEEDS TESTING
 - **Cell colours now compare closing 3PL stock to 3PL Target Units** (not raw weeks cover), so they stay honest when a complex rule sets a custom target (Target Units already embeds the rule; weeks cover doesn't). Applies to both **SOH 3PL (closing)** and **Cover (weeks)**. Bands on `dev=(stock−target)/target`: **green** −20%…+10%, **amber** −50%…−20% or +10%…+30%, **red** <−50% or ≥+30%. No target (clearance/disc month) = not flagged; ∞ cover = green. New `.camb`/`.amb` amber classes.
 - **Hover no longer washes coloured cells to near-white.** Row-hover kept the near-white background over red/amber/blue/yellow status cells; added hover-preserving rules so the colour stays.
