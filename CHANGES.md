@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.489 - Payments Report: mobile horizontal scroll + hide notify once paid ⚠️ NEEDS TESTING
+- Mobile: the report table now has a min-width so it scrolls sideways instead of squishing into one unreadable page. This also fixes the Bank amount / Bank ccy columns showing blank on mobile (the input + select were being clipped to zero width by the squish — the data was there).
+- The "✉ Mark paid & notify" button is now hidden once a run is paid (a bank amount is recorded in payment_fx), replaced with a "✓ paid" tag. supply/inject.html. No migration.
+
 ## v26.488 - New "SHIPPED TO MASTER" PO status + action; high-priority delivered/payment badges; change-log wording ⚠️ NEEDS TESTING · SERVER
 - New PO status **SHIPPED TO MASTER** (≈ Ready to ship, deeper blue #4C9BE0): a rider PO the supplier shipped to the consolidator while the master hasn't sailed. Added to the status list/dropdown/order/grouping (groups with Ready-to-ship; still counted on-order in the buy plan). When the master departs, the existing set-shipping flow flips it to SHIPPING.
 - Auto-detect + nudge: a rider whose supplier marked it shipped (master not departed) gets a "→ set shipped to master" button on the PO grid AND a SUPPLY ▸ Actions card (fix + PO-ref badge). New endpoint /api/supply/po/:po/set-shipped-to-master. server.mjs + supply/inject.html.

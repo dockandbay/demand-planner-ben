@@ -7429,6 +7429,7 @@
       else if(em && em.status==='sending'){ notifyHtml='<span class="tool-badge bg-amber">✉ sending…</span>'; }
       else if(em && em.status==='sent'){ notifyHtml='<span class="tool-badge bg-green" title="sent '+esc(em.sent_at||'')+' → '+esc(em.to_emails||'')+'">✉ sent</span>'; }
       else if(em && em.status==='failed'){ notifyHtml='<span class="tool-badge" style="background:#fee2e2;color:#b91c1c" title="'+esc(em.error||'')+'">✉ failed</span> <button class="save-btn light pr-notify" '+ndata+'>retry</button>'; }
+      else if(r.other_amount!=null){ notifyHtml='<span class="tool-badge bg-green" title="Marked paid — bank amount recorded. (The supplier is emailed separately.)">✓ paid</span>'; }   // once paid (bank amount recorded), drop the "Mark paid & notify" button
       else { notifyHtml='<button class="save-btn pr-notify" '+ndata+' title="Email the supplier a paid confirmation — sends in 5 min so you can upload a remittance first" style="background:#7c3aed;color:#fff;border-color:#6d28d9;white-space:nowrap">✉ Mark paid &amp; notify</button>'; }
       var lines=(r.lines||[]).map(function(l){
         var depKey=(l.reference||'').split(',')[0].trim();   // register reference is just the code (e.g. P55-UK-WK2); line ref may append the description
@@ -7459,7 +7460,7 @@
         +'<td class="l"><button class="save-btn pay-usd" '+dk+' data-total="'+esc(r.total)+'" title="Mark this run paid in USD — sets bank amount to the base total and currency to USD" style="background:#16a34a;color:#fff;border-color:#15803d;white-space:nowrap">Paid USD</button></td>'
         +'<td class="l" style="white-space:nowrap;min-width:210px">'+remHtml+'<div style="margin-top:4px">'+notifyHtml+'</div></td></tr>'+det; }).join('');
     return '<div style="max-width:1220px"><div class="bar"><span class="count">'+rows.length+' payments · grouped by date + supplier · expand a row to see the individual payments</span></div>'
-      +'<div class="tw"><table><thead><tr><th class="l"></th><th class="l">Date</th><th class="l">Supplier</th><th>Total (base)</th><th class="l">Base ccy</th><th class="l">Bank amount</th><th class="l">Bank ccy</th><th class="l"></th><th class="l">Remittance &amp; notify</th></tr></thead><tbody>'
+      +'<div class="tw"><table style="min-width:900px"><thead><tr><th class="l"></th><th class="l">Date</th><th class="l">Supplier</th><th>Total (base)</th><th class="l">Base ccy</th><th class="l">Bank amount</th><th class="l">Bank ccy</th><th class="l"></th><th class="l">Remittance &amp; notify</th></tr></thead><tbody>'
       +body
       +'<tr class="batchrow"><td></td><td class="l" colspan="2"><b>TOTAL</b></td><td><b>'+money(tT)+'</b></td><td colspan="5"></td></tr>'
       +'</tbody></table></div></div>'; }
