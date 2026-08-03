@@ -7877,7 +7877,7 @@ function renderDemandTabs(){
     // sit directly below the main tabs but ABOVE the filters (same header column, right after the tab row)
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
   bar.innerHTML=DEMAND_TABS.map(function(t){return '<button class="dnav'+(t[0]===DEMAND_VIEW?' active':'')+'" data-d="'+t[0]+'">'+t[1]+'</button>';}).join('');
-  bar.querySelectorAll('.dnav').forEach(function(b){ b.onclick=function(){ DEMAND_VIEW=b.dataset.d; if(window.writeHash)window.writeHash(['demand',DEMAND_VIEW]); render(); }; });
+  bar.querySelectorAll('.dnav').forEach(function(b){ b.onclick=function(){ VIEW_MODE='planning'; DEMAND_VIEW=b.dataset.d; if(window.writeHash)window.writeHash(['demand',DEMAND_VIEW]); render(); }; });   // a demand sub-tab is a planning view — force planning mode so a stale Buy&Move VIEW_MODE doesn't render the buy grid
   // relocate the demand-plan AI tool-bar into this secondary menu (moved back on teardown)
   var pt=document.getElementById('plan-tools'); if(pt)bar.appendChild(pt);
   // relocate the status note (#st) + last-updated/version (#ver) onto this nav row, right-aligned (all DEMAND pages)

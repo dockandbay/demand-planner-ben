@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.450 - Fix: DEMAND sub-tabs no longer render the Buy&Move grid ⚠️ NEEDS TESTING
+- Clicking a **DEMAND sub-tab (Plan/Summary/etc.)** now forces `VIEW_MODE='planning'`. Previously it set `DEMAND_VIEW` but left a stale `VIEW_MODE` from Buy & Move, so `render()` still drew the buy-plan grid while the menu didn't change. `artifact_v16.7.html`. No migration.
+
 ## v26.449 - Transfer grid: per-market 3PL SOH columns + demand-row highlight ⚠️ NEEDS TESTING
 - **TRANSFER tab now shows 3PL SOH for every market** (SOH UK / US / EU / AU / CA) instead of just the current market's SOH 3PL — so you can see donor/recipient stock across all 3PLs at a glance. Current market column is highlighted. The transfer download CSV matches (a SOH column per market). `artifact_v16.7.html`.
 - **Buy-plan popup: DTC demand / B2B demand / FBA demand rows highlighted light yellow `#FFFF99`** across the whole row (applied in the shared `dr()` row builder, so every popup instance is covered). `artifact_v16.7.html`. No migration.
