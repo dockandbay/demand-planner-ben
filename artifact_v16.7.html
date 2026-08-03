@@ -6542,10 +6542,12 @@ function insertInlineSkuRows(s,co,ch,afterTr){
           +'</div>';
 
       } else if(ci===1){
-        // Sticky stock col: SKU on-hand / inbound at the channel warehouse
-        var sOh=p.inv&&p.inv[wh]||0, sOo=p.oo&&p.oo[wh]||0;
+        // Sticky stock col: SKU 3PL + FBA on-hand (two lines, like the subcat rows) + channel inbound.
+        var wh3=ctry+'_3pl', whF=ctry+'_fba';
+        var oh3=(p.inv&&p.inv[wh3])||0, ohF=(p.inv&&p.inv[whF])||0, sOo=p.oo&&p.oo[wh]||0;
         td.style.cssText='position:sticky;left:160px;background:#fafafa;border-bottom:1px solid #f0f0ee;border-right:2px solid #b0b0ae;padding:2px 5px;text-align:right;font-size:9px;line-height:1.25;font-variant-numeric:tabular-nums;z-index:1';
-        td.innerHTML='<div style="color:'+(sOh<0?'#dc2626':'#334155')+';font-weight:600">'+fn(sOh)+'</div>'
+        td.innerHTML='<div style="white-space:nowrap;color:'+(oh3<0?'#dc2626':'#334155')+';font-weight:600"><span style="opacity:.55;font-weight:400">3PL:</span> '+fn(oh3)+'</div>'
+          +'<div style="white-space:nowrap;color:'+(ohF<0?'#dc2626':'#334155')+';font-weight:600"><span style="opacity:.55;font-weight:400">FBA:</span> '+fn(ohF)+'</div>'
           +inbDiv(sOo, inbEntries([sku],co,ch), '#94a3b8');
 
       } else if(ci===2){

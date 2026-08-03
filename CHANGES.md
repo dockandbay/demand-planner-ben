@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.455 - Demand plan: SKU stock column shows 3PL + FBA on-hand (two lines) ⚠️ NEEDS TESTING
+- The SKU-level stock cell on the demand plan now shows **3PL and FBA on-hand on separate lines** (e.g. `3PL: 885 / FBA: 58`) like the subcategory rows, instead of only the channel warehouse (3PL on the DTC tab). Channel inbound line kept. `artifact_v16.7.html`. No migration.
+
 ## v26.454 - Fix flat-LY fallback basis: trailing 12 actual months, not the 2025 calendar year ⚠️ NEEDS TESTING · BUY-PLAN IMPACT
 - The flat last-year fallback (v26.452) hardcoded "last year = 2025". A SKU launched in 2026 (no 2025 history) therefore failed the `skuHasLY` check and fell back to the **subcat cascade** — e.g. `HAIRW-CAB-LTPPL-NB` Mar 2028 showed **90** (cascade) instead of its own **Mar 2026 actual = 37**.
 - Flat-LY now uses the **trailing 12 COMPLETE actual months** via `CUR_YTD_END`: for a calendar month, the most recent complete actual is **this year** if that month has already finished, else last year (new `_flatLyKey`). `skuHasLY` checks the same trailing window, so 2026-launched SKUs are recognised. Applies to both the demand-plan rows and the buy plan. Verified: March → 2026 actual, later-in-year months → 2025. `artifact_v16.7.html`. No migration.
