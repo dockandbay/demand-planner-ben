@@ -3,6 +3,11 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.502 - FBA grid: fix 3PL Inbound (blank) + category select-all alignment/toggle + group borders ⚠️ NEEDS TESTING
+- Fix v26.500 regression: 3PL Inbound was blank — it read md.inb (the lightweight ms summary) instead of PD[sku].mkts[CUR].inb.
+- Category "select all" now sits centred in the Ship (tick) column (Carton moving to the lead had shifted it); toggles to "select none" when every row in that category is ticked.
+- Black vertical borders left of Ship and right of Override to group the Ship / Transfer / Override columns. artifact_v16.7.html. No migration.
+
 ## v26.501 - DEMAND Inputs: light-blue level-3 nav + #/demand/inputs/<slug> deep links ⚠️ NEEDS TESTING
 - The Inputs pop-down dropdown is now a consistent light-blue level-3 (d3nav) bar — clicking Inputs enters the group and shows Sell-through targets / Key accounts / Calendar / Revenue as d3tabs.
 - Each input view deep-links as #/demand/inputs/<slug> (e.g. #/demand/inputs/keyaccounts); router (writeViewHash + applyRoute) handles it both ways. artifact_v16.7.html + supply/inject.html. No migration.

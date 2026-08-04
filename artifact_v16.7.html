@@ -1879,9 +1879,9 @@ function render(){
       +(showAWD?'<th class="r" style="min-width:60px;background:#fef9c3">SOH AWD</th>':'')
       +(BP_VIEW==='fba'?'':'<th class="r" style="min-width:60px">On Order</th>');
     var _trail=(BP_VIEW==='fba')
-      ? '<th class="r" style="min-width:88px">Ship<br><button type="button" onclick="BP.fbaSelectAll()" title="Tick all visible rows" style="font-size:8px;font-weight:400;padding:1px 4px;margin-top:1px;border:1px solid #cbd5e1;border-radius:3px;background:#f8fafc;color:#475569;cursor:pointer">Select all</button> <button type="button" onclick="BP.fbaClearTicks()" title="Clear all tick boxes" style="font-size:8px;font-weight:400;padding:1px 4px;border:1px solid #cbd5e1;border-radius:3px;background:#f8fafc;color:#475569;cursor:pointer">Clear</button></th>'
+      ? '<th class="r" style="min-width:88px;border-left:2px solid #000">Ship<br><button type="button" onclick="BP.fbaSelectAll()" title="Tick all visible rows" style="font-size:8px;font-weight:400;padding:1px 4px;margin-top:1px;border:1px solid #cbd5e1;border-radius:3px;background:#f8fafc;color:#475569;cursor:pointer">Select all</button> <button type="button" onclick="BP.fbaClearTicks()" title="Clear all tick boxes" style="font-size:8px;font-weight:400;padding:1px 4px;border:1px solid #cbd5e1;border-radius:3px;background:#f8fafc;color:#475569;cursor:pointer">Clear</button></th>'
         +'<th class="r" style="min-width:74px">Transfer<br>FBA</th>'
-        +'<th class="r" style="min-width:64px">Override<br><button type="button" onclick="BP.fbaClearOverrides()" title="Clear all override numbers" style="font-size:8px;font-weight:400;padding:1px 5px;margin-top:1px;border:1px solid #cbd5e1;border-radius:3px;background:#f8fafc;color:#475569;cursor:pointer">Clear all</button></th>'
+        +'<th class="r" style="min-width:64px;border-right:2px solid #000">Override<br><button type="button" onclick="BP.fbaClearOverrides()" title="Clear all override numbers" style="font-size:8px;font-weight:400;padding:1px 5px;margin-top:1px;border:1px solid #cbd5e1;border-radius:3px;background:#f8fafc;color:#475569;cursor:pointer">Clear all</button></th>'
         +'<th class="r" style="min-width:78px">FBA inbound<br>\u226414 days</th>'
         +'<th class="r" style="min-width:78px">FBA inbound<br>15+ days</th>'
         +'<th class="r" style="min-width:74px">3PL<br>Inbound</th>'
@@ -1963,8 +1963,9 @@ function render(){
     const _catEsc=String(sc).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
     if(BP_VIEW==='fba'){
       // category header: name spans up to the Ship column, the per-category "select all" sits in the Ship column itself
-      var _nameCol=(10+_extra)-(_MERGE?2:0);   // Ship column index: 10 lead (incl. Release Window) + extra SOH cols − mobile merge (2 fewer)
-      h+=`<tr class="sch"><td colspan="${_nameCol}">${_catNm}</td><td class="r"><span class="cat-selall" data-cat="${_catEsc}" title="Tick all ${_catEsc} rows for shipping" style="cursor:pointer;color:#94a3b8;font-weight:400;font-size:8px;white-space:nowrap">select all</span></td><td colspan="4"></td></tr>`;
+      var _nameCol=(9+_extra)-(_MERGE?2:0);
+      var _allTk=grp[sc].length>0 && grp[sc].every(function(x){return FBA_TICK[x.s+'|'+CUR];});   // Ship column index: 10 lead (incl. Release Window) + extra SOH cols − mobile merge (2 fewer)
+      h+=`<tr class="sch"><td colspan="${_nameCol}">${_catNm}</td><td style="text-align:center;border-left:2px solid #000"><span class="cat-selall" data-cat="${_catEsc}" title="Tick / untick all ${_catEsc} rows for shipping" style="cursor:pointer;color:#94a3b8;font-weight:400;font-size:8px;white-space:nowrap">${_allTk?'select none':'select all'}</span></td><td colspan="5"></td></tr>`;
     } else {
       h+=`<tr class="sch"><td colspan="${COLS_EFF}">${_catNm}</td></tr>`;
     }
@@ -2005,12 +2006,12 @@ function render(){
         const tickKey=s.s+'|'+CUR;
         const tickOn=FBA_TICK[tickKey]?'checked':'';
         trail=`
-        <td class="bq" style="text-align:center"><input type="checkbox" class="fba-tick" data-sku="${s.s}" data-cat="${String(s.c||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" ${tickOn} style="cursor:pointer"></td>
+        <td class="bq" style="text-align:center;border-left:2px solid #000"><input type="checkbox" class="fba-tick" data-sku="${s.s}" data-cat="${String(s.c||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" ${tickOn} style="cursor:pointer"></td>
         <td class="bq">${rec>0?`<span class="bq-fba">${fmt(rec)}</span>`:`<span class="bq-nil">—</span>`}</td>
-        <td class="bq" style="padding:2px 4px"><input type="text" class="fba-ov" data-sku="${s.s}" value="${ovVal}" placeholder="—" style="width:46px;text-align:right;font-size:11px;border:1px solid #d0d0d0;border-radius:3px;padding:1px 3px;font-variant-numeric:tabular-nums"></td>
+        <td class="bq" style="padding:2px 4px;border-right:2px solid #000"><input type="text" class="fba-ov" data-sku="${s.s}" value="${ovVal}" placeholder="—" style="width:46px;text-align:right;font-size:11px;border:1px solid #d0d0d0;border-radius:3px;padding:1px 3px;font-variant-numeric:tabular-nums"></td>
         ${fbaInbCell(fis.soon, fis.soonL, fis.soonFirst)}
         ${fbaInbCell(fis.later, fis.laterL, fis.laterFirst)}
-        ${(function(){var _i3=(md.inb||[]).filter(function(x){return !String(x.wh||'').toLowerCase().includes('fba');});var _t=_i3.reduce(function(a,x){return a+(x.qty||0);},0);var _tip=_i3.map(function(x){var e=inbEffEta(x);return (x.ref||'—')+' · '+fmt(x.qty||0)+'u · '+(e.date?dateDMY(e.date):(x.eta?dateDMY(x.eta):'—'))+(e.adj?' ⚠':'');}).join('<br>');return '<td class="iv'+(_tip?' tip120':'')+'"'+(_tip?' data-tip="'+_tip.replace(/"/g,'&quot;')+'"':'')+'><span class="iv-v">'+(_t>0?fmt(_t):'—')+'</span></td>';})()}`;
+        ${(function(){var _mm=PD[s.s]&&PD[s.s].mkts&&PD[s.s].mkts[CUR];var _i3=((_mm&&_mm.inb)||[]).filter(function(x){return !String(x.wh||'').toLowerCase().includes('fba');});var _t=_i3.reduce(function(a,x){return a+(x.qty||0);},0);var _tip=_i3.map(function(x){var e=inbEffEta(x);return (x.ref||'—')+' · '+fmt(x.qty||0)+'u · '+(e.date?dateDMY(e.date):(x.eta?dateDMY(x.eta):'—'))+(e.adj?' ⚠':'');}).join('<br>');return '<td class="iv'+(_tip?' tip120':'')+'"'+(_tip?' data-tip="'+_tip.replace(/"/g,'&quot;')+'"':'')+'><span class="iv-v">'+(_t>0?fmt(_t):'—')+'</span></td>';})()}`;
       } else {
         trail=(BP_VIEW==='transfer')
         ? OTH.map(function(m,i){return outCell(m,i===0);}).join('')+OTH.map(function(m,i){return getInbCell(m,i===0);}).join('')   // TRANSFER: OUTBOUND (CUR→all) then INBOUND (all→CUR)
@@ -2072,7 +2073,7 @@ function bpRestoreFilters(){ try{
   var qi=document.getElementById('qry'); if(qi&&typeof o.qry==='string')qi.value=o.qry;
 }catch(e){} }
 
-function _bindTb(){var _tb=document.getElementById('tb');if(_tb){_tb.addEventListener('click',function(e){var ca=e.target.closest('.cat-selall');if(ca){var cat=ca.dataset.cat;document.querySelectorAll('#tb .fba-tick').forEach(function(tk){if(tk.dataset.cat===cat)FBA_TICK[tk.dataset.sku+'|'+CUR]=true;});render();updateFbaSelBox();return;}var b=e.target.closest('.ob');if(b)open_(b.dataset.sku);});_tb.addEventListener('change',function(e){var inp=e.target.closest('.fba-ov');if(inp){var v=inp.value.trim();FBA_OV[inp.dataset.sku+'|'+CUR]=(v===''?'':String(parseInt(v)||0));updateFbaSelBox();return;}var tk=e.target.closest('.fba-tick');if(tk){if(tk.checked)FBA_TICK[tk.dataset.sku+'|'+CUR]=true;else delete FBA_TICK[tk.dataset.sku+'|'+CUR];updateFbaSelBox();}});}}
+function _bindTb(){var _tb=document.getElementById('tb');if(_tb){_tb.addEventListener('click',function(e){var ca=e.target.closest('.cat-selall');if(ca){var cat=ca.dataset.cat;var _tks=Array.prototype.slice.call(document.querySelectorAll('#tb .fba-tick')).filter(function(tk){return tk.dataset.cat===cat;});var _on=_tks.length>0&&_tks.every(function(tk){return FBA_TICK[tk.dataset.sku+'|'+CUR];});_tks.forEach(function(tk){if(_on)delete FBA_TICK[tk.dataset.sku+'|'+CUR];else FBA_TICK[tk.dataset.sku+'|'+CUR]=true;});render();updateFbaSelBox();return;}var b=e.target.closest('.ob');if(b)open_(b.dataset.sku);});_tb.addEventListener('change',function(e){var inp=e.target.closest('.fba-ov');if(inp){var v=inp.value.trim();FBA_OV[inp.dataset.sku+'|'+CUR]=(v===''?'':String(parseInt(v)||0));updateFbaSelBox();return;}var tk=e.target.closest('.fba-tick');if(tk){if(tk.checked)FBA_TICK[tk.dataset.sku+'|'+CUR]=true;else delete FBA_TICK[tk.dataset.sku+'|'+CUR];updateFbaSelBox();}});}}
 
 // CSV download
 // Release Window dropdown filter (BUY + FBA views): populate from the release windows present in the current
