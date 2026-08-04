@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.504 - FBA grid: Ship / Transfer FBA / Override headers medium blue ⚠️ NEEDS TESTING
+- The three grouped column headers (Ship, Transfer FBA, Override) now have a medium-blue background to match the black group borders. artifact_v16.7.html. No migration.
+
 ## v26.503 - Payments Report: highlight non-USD currencies ⚠️ NEEDS TESTING
 - Base ccy + Bank ccy cells now show amber (background/bold text) when the currency is not USD, so non-USD payments stand out. supply/inject.html. No migration.
 
