@@ -1,3 +1,7 @@
+## v26.508 — DEMAND Summary: Units/Revenue + Month/Quarter/Half toggles
+- Units <-> Revenue toggle (revenue = units x ASP incl. price changes; actual/LY months reproduce booked revenue, SKUs priced at their subcategory ASP).
+- Grouping toggle Month / Quarter (Mar-May) / Half (Mar-Aug) within each FY; cells + FY total roll up accordingly.
+
 ## v26.507 — 3PL Invoicing (Phase 1): parse & sum all fields
 - REPORTS slug renamed /reports/tpl -> /reports/3pl-invoicing (tab "3PL Invoicing"; old slug aliased). Default 3PL = EU iFulfilment.
 - New per-file Summary action parses the uploaded xlsx/csv server-side and sums EVERY numeric field per sheet (Orders/Goods In/Returns/Storage/Other). Surfaces freight (Shipping Fee) vs fulfilment (Total Excl Shipping) + Total per sheet, grand total by currency, and a live PDF-total reconcile input.

@@ -7642,12 +7642,16 @@ function render(){
 // to planner.key_account_forecasts (replaces the old n8n Airtable flow). SKU is a type-to-search dropdown from SKUM.
 // ── DEMAND ▸ SUMMARY — clean read-only rollup of the PLAN forecast, by country/channel, grouped by
 //    subcategory (expand → SKU), across financial years (past FYs minimised) or a custom month range.
-var SUMM_FROM='', SUMM_TO='', SUMM_OPEN={}, SUMM_FYOPEN={};
+var SUMM_FROM='', SUMM_TO='', SUMM_OPEN={}, SUMM_FYOPEN={}, SUMM_METRIC='units', SUMM_GROUP='month';
 function renderSummaryView(body){
   function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function fn2(n){ n=Math.round(Number(n)||0); return n?n.toLocaleString():''; }
+  function mf(n){ var t=fn2(n); return t?((SUMM_METRIC==='rev'?'£':'')+t):''; }
   var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   function mlab(m){ return MON[(+m.slice(5,7))-1]+" '"+m.slice(2,4); }
+  function bucketize(ms,g){ if(g==='quarter'){ var o=[]; for(var i=0;i<ms.length;i+=3)o.push({label:'Q'+(i/3+1),months:ms.slice(i,i+3)}); return o; }
+    if(g==='half'){ var o=[]; for(var i=0;i<ms.length;i+=6)o.push({label:'H'+(i/6+1),months:ms.slice(i,i+6)}); return o; }
+    return ms.map(function(m){return {label:MON[(+m.slice(5,7))-1],months:[m],single:m};}); }
   function fdate(v){ var m=String(v||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m?(m[3]+'-'+MON[(+m[2])-1]+'-'+m[1].slice(2)):''; }
   function prevY(m){ return (+m.slice(0,4)-1)+'_'+m.slice(5,7); }
   var co=CUR, ch=CF;
@@ -7656,7 +7660,9 @@ function renderSummaryView(body){
   var LYYM=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
   // per-subcat: actuals map (a), forecast (fu) → unified value per month (actual months = actuals, else forecast) + LY (prior-year same month, from actuals)
   var sdCache={}; function subData(s){ if(!(s in sdCache)){ var a=ga(co,ch,s)||{}, fu=(calc(s,co,ch).fu)||{}, val={}, ly={};
-      DISP_MONTHS.forEach(function(m){ val[m]=isActualMonth(m)?((a[m]&&a[m][0])||0):(fu[m]||0); ly[m]=(a[prevY(m)]&&a[prevY(m)][0])||0; });
+      DISP_MONTHS.forEach(function(m){ var u=isActualMonth(m)?((a[m]&&a[m][0])||0):(fu[m]||0), lu=(a[prevY(m)]&&a[prevY(m)][0])||0;
+        if(SUMM_METRIC==='rev'){ val[m]=isActualMonth(m)?((a[m]&&a[m][1])||0):(u*getASP(co,ch,s,pa(m).y,pa(m).mo)); ly[m]=(a[prevY(m)]&&a[prevY(m)][1])||0; }
+        else { val[m]=u; ly[m]=lu; } });
       sdCache[s]={a:a,fu:fu,val:val,ly:ly}; } return sdCache[s]; }
   function skuRows(s){ var wh=skuWh(co,ch), ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':'b'; var sd=subData(s), a=sd.a, fu=sd.fu;
     var all=Object.keys(SKUM).filter(function(sku){var p=SKUM[sku];if(!p||p.s!==s)return false;var av=(p.av||{})[ctry]||'';return av.indexOf(chKey)>=0;});
@@ -7668,7 +7674,9 @@ function renderSummaryView(body){
         var fo=isActualMonth(m)?null:skuOutFC(sku,co,ch,m);   // per-SKU override applies to forecast months only
         var raw=(fo!=null)?fo:Math.round(base*sh), v;
         if(lch&&ms<lch)v=0; else if(disc&&ms>disc){ if(rem<=0)v=0; else {v=Math.max(0,Math.min(raw,rem));rem=Math.max(0,rem-v);} } else v=raw;
-        val[m]=v; ly[m]=Math.round(((a[prevY(m)]&&a[prevY(m)][0])||0)*sh); });
+        var luU=Math.round(((a[prevY(m)]&&a[prevY(m)][0])||0)*sh);
+        if(SUMM_METRIC==='rev'){ val[m]=Math.round(v*getASP(co,ch,s,pa(m).y,pa(m).mo)); ly[m]=Math.round(luU*getASP(co,ch,s,pa(m).y-1,pa(m).mo)); }
+        else { val[m]=v; ly[m]=luU; } });
       return {sku:sku,tier:(p.ti||''),lch:lch,disc:disc,val:val,ly:ly}; }).sort(function(a,b){return a.sku<b.sku?-1:1;}); }
   // column model
   var rangeMode=SUMM_FROM&&SUMM_TO&&SUMM_FROM<=SUMM_TO;
@@ -7682,12 +7690,16 @@ function renderSummaryView(body){
     +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px"><div style="font-weight:700;font-size:15px">Summary</div>'
     +'<span style="display:flex;gap:3px">'+CO_PILLS.map(function(c){return '<button class="sm-co'+(c===co?' on':'')+'" data-c="'+c+'">'+c+'</button>';}).join('')+'</span>'
     +'<span style="display:flex;gap:3px">'+CH_PILLS.map(function(c){return '<button class="sm-ch'+(c===ch?' on':'')+'" data-c="'+c+'">'+c+'</button>';}).join('')+'</span>'
+    +'<span style="display:flex;gap:3px;margin-left:8px">'+[['units','Units'],['rev','Revenue']].map(function(x){return '<button class="sm-metric'+(x[0]===SUMM_METRIC?' on':'')+'" data-m="'+x[0]+'">'+x[1]+'</button>';}).join('')+'</span>'
+    +'<span style="display:flex;gap:3px">'+[['month','Month'],['quarter','Quarter'],['half','Half']].map(function(x){return '<button class="sm-group'+(x[0]===SUMM_GROUP?' on':'')+'" data-g="'+x[0]+'">'+x[1]+'</button>';}).join('')+'</span>'
     +'<span style="margin-left:14px;font-size:12px;color:#475569;display:flex;align-items:center;gap:5px">Show from <select id="sm-from" style="padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px">'+moOpts(SUMM_FROM)+'</select> to <select id="sm-to" style="padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px">'+moOpts(SUMM_TO)+'</select>'+(rangeMode?' <button id="sm-clear" style="font-size:11px;padding:3px 9px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;cursor:pointer">✕ clear · FY view</button>':'')+'</span>'
     +'</div>'
     +'<div style="font-size:12px;color:#666;margin:0 0 10px">'+e(co)+' · '+e(ch)+' — each cell stacks <b>LY actual</b> / <b>forecast</b> / <b>growth%</b>. Click a subcategory to see its SKUs. '+(rangeMode?('Showing '+mlab(SUMM_FROM)+' → '+mlab(SUMM_TO)+' with a period total.'):'FYs Mar–Feb; past years minimised (click a year to expand). ')+'<span style="background:#ecfdf5;padding:0 4px">actual</span> <span style="background:#f1f5f9;padding:0 4px">pre-launch</span> <span style="background:#fee2e2;padding:0 4px">discontinued</span></div>'
     +'<div id="smc" style="overflow-x:auto"></div></div>';
   body.querySelectorAll('.sm-co').forEach(function(b){ b.onclick=function(){ CUR=b.dataset.c; render(); }; });
   body.querySelectorAll('.sm-ch').forEach(function(b){ b.onclick=function(){ CF=b.dataset.c; render(); }; });
+  body.querySelectorAll('.sm-metric').forEach(function(b){ b.onclick=function(){ SUMM_METRIC=b.dataset.m; renderSummaryView(body); }; });
+  body.querySelectorAll('.sm-group').forEach(function(b){ b.onclick=function(){ SUMM_GROUP=b.dataset.g; renderSummaryView(body); }; });
   var fSel=body.querySelector('#sm-from'), tSel=body.querySelector('#sm-to');
   function applyRange(){ SUMM_FROM=fSel.value; SUMM_TO=tSel.value; renderSummaryView(body); }   // full silent re-render so the month range + header/clear update immediately
   fSel.onchange=applyRange; tSel.onchange=applyRange;
@@ -7703,24 +7715,28 @@ function renderSummaryView(body){
       +'#smc .c3ly{font-size:8px;color:#94a3b8;line-height:1.1}#smc .c3f{font-size:11px;font-weight:600;line-height:1.2;color:#0f172a}#smc .c3g{font-size:8px;font-weight:600;line-height:1.1}'
       +'#smc tr.sub td{border-top:1px solid #eef2f7}#smc tr.sub td.lbl{font-weight:700;color:#0f172a;cursor:pointer}#smc tr.gt td{border-top:2px solid #cbd5e1}#smc tr.gt td.lbl{background:#eef2ff;font-weight:700}#smc tr.gt .c3f{font-weight:700}'
       +'#smc tr.sku td.lbl{padding-left:22px;font-family:ui-monospace,Menlo,monospace;color:#475569}#smc .smx{color:#94a3b8;font-size:10px;display:inline-block;width:11px}'
-      +'.sm-co,.sm-ch{border:1px solid #cbd5e1;background:#fff;color:#334155;font-size:11px;padding:3px 10px;border-radius:12px;cursor:pointer;font-weight:600}.sm-co.on,.sm-ch.on{background:#0f172a;color:#fff;border-color:#0f172a}</style>';
+      +'.sm-co,.sm-ch,.sm-metric,.sm-group{border:1px solid #cbd5e1;background:#fff;color:#334155;font-size:11px;padding:3px 10px;border-radius:12px;cursor:pointer;font-weight:600}.sm-co.on,.sm-ch.on,.sm-metric.on,.sm-group.on{background:#0f172a;color:#fff;border-color:#0f172a}</style>';
     if(!subs.length){ host.innerHTML=STY+'<div style="color:#888;font-size:12px;padding:12px 2px">No forecast data for '+e(co)+' · '+e(ch)+'.</div>'; return; }
     var h1='', h2='', cols=[];   // cols: {type:'m',m} | {type:'tot',Y} | {type:'ptot'}
     if(rangeMode){
       h2='<th class="lbl">Subcategory / SKU</th>'+rangeMonths.map(function(m){return '<th class="'+(isActualMonth(m)?'act':'')+'">'+mlab(m)+'</th>';}).join('')+'<th class="tot">Total</th>';
       rangeMonths.forEach(function(m){ cols.push({type:'m',m:m}); }); cols.push({type:'ptot'});
     } else {
-      DISP_FY_STARTS.forEach(function(Y){ var op=fyOpen(Y); h1+='<th class="fyh" data-fy="'+Y+'" colspan="'+(op?fyMonths(Y).length+1:1)+'">'+(op?'▾ ':'▸ ')+fyLabel(Y)+'</th>';
-        if(op){ fyMonths(Y).forEach(function(m){ h2+='<th class="'+(isActualMonth(m)?'act':'')+'">'+MON[(+m.slice(5,7))-1]+'</th>'; cols.push({type:'m',m:m}); }); }
+      DISP_FY_STARTS.forEach(function(Y){ var op=fyOpen(Y), bkts=op?bucketize(fyMonths(Y),SUMM_GROUP):[];
+        h1+='<th class="fyh" data-fy="'+Y+'" colspan="'+(op?bkts.length+1:1)+'">'+(op?'▾ ':'▸ ')+fyLabel(Y)+'</th>';
+        if(op){ bkts.forEach(function(bk){ var allAct=bk.months.length>0&&bk.months.every(function(m){return isActualMonth(m);}); h2+='<th class="'+(allAct?'act':'')+'">'+e(bk.label)+'</th>'; cols.push(bk.single?{type:'m',m:bk.single}:{type:'grp',months:bk.months}); }); }
         h2+='<th class="tot">'+(op?'Total':fyLabel(Y).replace('FY',''))+'</th>'; cols.push({type:'tot',Y:Y}); });
       h1='<th class="lbl" rowspan="2">Subcategory / SKU</th>'+h1;
     }
     // 3-value cell: LY actual / value (actual or forecast) / growth%
     function c3(ly,val,shade){ var g=ly>0?Math.round((val/ly-1)*100):null, tot=(shade==='tot');
       var gc=g==null?'#cbd5e1':g>0?(tot?'#86efac':'#15803d'):g<0?(tot?'#fca5a5':'#b91c1c'):(tot?'#c7d2fe':'#64748b');
-      return '<td class="'+shade+'"><div class="c3ly">'+fn2(ly)+'</div><div class="c3f">'+(val?fn2(val):'<span style="color:#cbd5e1">–</span>')+'</div><div class="c3g" style="color:'+gc+'">'+(g==null?'':(g>0?'+':'')+g+'%')+'</div></td>'; }
+      return '<td class="'+shade+'"><div class="c3ly">'+mf(ly)+'</div><div class="c3f">'+(val?mf(val):'<span style="color:#cbd5e1">–</span>')+'</div><div class="c3g" style="color:'+gc+'">'+(g==null?'':(g>0?'+':'')+g+'%')+'</div></td>'; }
     function cells(val,ly,lch,disc){ return cols.map(function(c){
         if(c.type==='m')return c3(ly[c.m]||0, val[c.m]||0, shadeOf(c.m,lch,disc));
+        if(c.type==='grp'){ var vG=0,lG=0,allAct=true; c.months.forEach(function(m){ vG+=(val[m]||0); lG+=(ly[m]||0); if(!isActualMonth(m))allAct=false; });
+          var sh2=allAct?'act':''; if(disc){ var dm=disc.slice(0,7).replace('-','_'); if(c.months.every(function(m){return m>dm;}))sh2='disc'; } else if(lch){ var lm=lch.slice(0,7).replace('-','_'); if(c.months.every(function(m){return m<lm;}))sh2='pre'; }
+          return c3(lG,vG,sh2); }
         var months=c.type==='ptot'?rangeMonths:fyMonths(c.Y), vT=0,lT=0;
         months.forEach(function(m){ vT+=(val[m]||0); lT+=(ly[m]||0); }); return c3(lT,vT,'tot'); }).join(''); }
     // grand total = sum of subcats

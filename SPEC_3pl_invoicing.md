@@ -41,9 +41,12 @@ Storage, Returns, Purchase Orders & Rework (inbounding stock), plus any Addition
 Duty & Taxes / Channel Labels. These need their own account treatment (likely not order-mapped).
 
 ## Phased plan (Ben's staging)
-- **Phase 1 — Parse & total.** Parse the raw data file(s); present the **sum of every field**
-  (all fee columns + freight vs fulfilment split + the non-order cost buckets). Reconcile to the
-  invoice PDF total. No ERP/Xero yet. This is the first pass.
+- **Phase 1 — Parse & total. ✅ DONE (v26.507).** Per-file "Summary" parses the uploaded workbook
+  (`POST /api/supply/tpl/parse/:id`, exceljs) and sums **every numeric field per sheet** (Orders,
+  Goods In, Returns, Storage, Other). Surfaces freight (`Shipping Fee`) vs fulfilment
+  (`Total Excl Shipping`), each sheet's Total, **grand total by currency** (EUR/GBP kept separate),
+  and a live reconcile input vs the invoice PDF total. Read-only, no ERP/Xero yet.
+  Slug renamed `/reports/tpl` → `/reports/3pl-invoicing`; default 3PL = EU iFulfilment.
 - **Phase 2 — Map to Cin7.** Match Reference → Cin7 salesorder.CostCenter (EU iFulfillment branch),
   two-pass matching, surface unmapped. Produce cost-by-CostCenter summary (freight/fulfilment split).
 - **Phase 3 — Map to Xero.** Turn the mapped summary into a **Xero bill** (draft; gated write).
