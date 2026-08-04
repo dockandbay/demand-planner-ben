@@ -1,3 +1,8 @@
+## v26.554 — DEMAND plan download (SUG-0016)
+- New '⬇ Download plan' button on the DEMAND ▸ Plan toolbar → FY-selection popup (pick one or more fiscal years) → xlsx: SKU × month, Units + Revenue, respecting the on-screen country/channel/category(+SKU) filters. Past months = actuals, future = forecast, each flagged (A)/(F). Revenue = units × subcategory ASP.
+- Extracted the plan's per-SKU monthly forecast into a shared skuMonthlyMap() helper (launch=0 / disc run-down capped by stock / saved output / subcatFU×tier-share); renderSkuView now uses it too, so the download and the grid always agree. DEMAND drill-down only — buy plan untouched.
+- Also: SUG-0017 marked complete in the live suggestion box (per Ben).
+
 ## v26.553 — FBA in-flight transfers: client overlay, panel + auto/manual triggers (Ben #2/#4)
 - Moved the item-3 fold from the server build to a CLIENT overlay (single source, no double-count, enables silent in-place updates). fbaTransferSized/fbaTransferNonGrs subtract in-flight transfer qty from the FBA shortfall via _fbaPendingOf(sku,mkt); only the transfer calc reads it → buy plan unaffected.
 - FBA toolbar box: 'N in-flight (Xu) · updated Ym ago' (click for the list of ref/warehouse/sku/qty/eta), a manual 'refresh from Cin7' button, and an 'inbound data updating…' indicator.

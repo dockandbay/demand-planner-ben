@@ -745,6 +745,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
       <button id="cat-tot-toggle" class="pill catpill" aria-pressed="false" title="Show / hide a total row under each category (e.g. &ldquo;Hair Wrap — total&rdquo;). Hidden by default." onclick="setShowCatTot(!SHOW_CAT_TOT)">Show</button>
     </span>
     <button id="fclogic-btn" onclick="openFcLogic(event)" title="How the forecast numbers are calculated" style="margin-left:12px;font-size:10px;padding:2px 9px;border:1px solid #c4b5fd;border-radius:3px;background:#f5f3ff;color:#5b21b6;cursor:pointer;flex-shrink:0">&#9635; Forecast Logic</button>
+    <button id="plan-dl-btn" onclick="openPlanDownload(event)" title="Download the demand plan (SKU × month, units + revenue) for chosen fiscal year(s)" style="margin-left:8px;font-size:10px;padding:2px 9px;border:1px solid #16a34a;border-radius:3px;background:#dcfce7;color:#166534;cursor:pointer;flex-shrink:0">&#11015; Download plan</button>
   </div>
   <div id="catrow1-wrap" style="display:flex;align-items:center;gap:6px;position:relative">
     <span class="pill-lbl">Release Window</span>
@@ -5686,6 +5687,77 @@ function buildSkuShares(skus,co,ch,lyMonths){
   });
   return shares;
 }
+// SINGLE SOURCE for a SKU's monthly forecast BASE (pre in-session override) — used by the plan grid
+// (renderSkuView) AND the DEMAND download so the numbers always agree. Reproduces exactly: 0 before launch;
+// discontinued run-down capped by remaining stock (in month order); else the saved forecast output (skuOutFC)
+// or subcatFU × tier-weighted share. `months` MUST be chronological (the run-down cap accumulates).
+function skuMonthlyMap(sku,co,ch,months,subcatFU,share,invOH){
+  var p=SKUM[sku]||{}, ctry=co.toLowerCase();
+  var discDate=(p.disc&&p.disc[ctry])||null, launchDate=(p.lch&&p.lch[ctry])||null;
+  var rem=(invOH!=null?invOH:((p.inv&&p.inv[skuWh(co,ch)])||0)), out={};
+  (months||[]).forEach(function(m){
+    var base;
+    if(discDate||launchDate){
+      var monthStart=m.slice(0,4)+'-'+m.slice(5,7)+'-01';
+      if(launchDate&&monthStart<launchDate){ base=0; }
+      else if(discDate&&monthStart>discDate){ var raw=Math.round((subcatFU[m]||0)*share); base=Math.max(0,Math.min(raw,rem)); rem=Math.max(0,rem-base); }
+      else { var fo3=skuOutFC(sku,co,ch,m); base=(fo3!=null)?fo3:Math.round((subcatFU[m]||0)*share); }
+    } else { var foB=skuOutFC(sku,co,ch,m); base=(foB!=null)?foB:Math.round((subcatFU[m]||0)*share); }
+    out[m]=base;
+  });
+  return out;
+}
+// SUG-0016 — DEMAND plan download. SKU × month (Units + Revenue), for the chosen fiscal year(s), respecting the
+// on-screen country/channel/category (+ SKU) filters. Past months = actuals (skuSales), future = forecast
+// (skuMonthlyMap + in-session override) — the SAME numbers the grid shows. Revenue = units × subcategory ASP.
+function _planMonLabel(m){ var p=pa(m); return ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][p.mo]+'-'+String(p.y).slice(2); }
+function buildPlanDownload(fyStarts){
+  var co=CUR, ch=CF; fyStarts=fyStarts.slice().sort(function(a,b){return a-b;});
+  var months=[]; fyStarts.forEach(function(Y){ fyMonths(Y).forEach(function(m){ months.push(m); }); });
+  var futureMonths=months.filter(function(m){ return !isActualMonth(m); });
+  var selAll=SEL.has('ALL'), q=(PLAN_SKU_QRY||'').trim();
+  var subs=[], seen={};
+  DATA.forEach(function(d){ if(d.co!==co||d.ch!==ch)return; var sub=d.s; if(!sub||seen[sub])return; var cat=_subcatParent(sub); if(!selAll&&!(SEL.has(cat)||SEL.has(sub)))return; seen[sub]=1; subs.push(sub); });
+  subs.sort();
+  var lyYM=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
+  var head=['SKU','Product','Subcategory','Category','Country','Channel','Metric'];
+  months.forEach(function(m){ head.push(_planMonLabel(m)+(isActualMonth(m)?' (A)':' (F)')); });
+  var grid=[head], nSku=0;
+  subs.forEach(function(sub){
+    var cat=_subcatParent(sub)||'', subcatFU=(calc(sub,co,ch).fu)||{}, skus=filteredSkus(sub,co,ch)||[];
+    var shares=buildSkuShares(skus,co,ch,lyYM);
+    skus.forEach(function(sku){
+      if(q&&!skuMatchQ(sku,q))return;
+      var p=SKUM[sku]||{}, invOH=(p.inv&&p.inv[skuWh(co,ch)])||0;
+      var fcMap=skuMonthlyMap(sku,co,ch,futureMonths,subcatFU,shares[sku]||0,invOH), sales=skuSales(sku,co,ch);
+      var uRow=[sku,p.n||'',sub,cat,co,ch,'Units'], rRow=[sku,p.n||'',sub,cat,co,ch,'Revenue'];
+      months.forEach(function(m){
+        var units; if(isActualMonth(m)){ units=sales[m]||0; } else { var ov=skuOvGetK(sku+'|'+co+'|'+ch+'|'+m); units=ov?parseInt(ov):(fcMap[m]||0); }
+        var pm=pa(m), asp=getASP(co,ch,sub,pm.y,pm.mo)||0;   // subcategory ASP (getASP resolves by subcat)
+        uRow.push(units); rRow.push(Math.round(units*asp));
+      });
+      grid.push(uRow); grid.push(rRow); nSku++;
+    });
+  });
+  if(nSku===0){ alert('No SKUs in the current filters to download.'); return; }
+  var fname='demand_plan_'+co+'_'+ch+'_'+fyStarts.map(function(Y){return fyLabel(Y).replace('/','-');}).join('_')+'.xlsx';
+  var bytes=buildXlsx('Demand plan', grid), blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  var url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download=fname; document.body.appendChild(a); a.click(); setTimeout(function(){URL.revokeObjectURL(url);a.remove();},150);
+}
+function openPlanDownload(ev){ if(ev)ev.stopPropagation(); var p=document.getElementById('plan-dl-pop');
+  if(p&&p.style.display==='block'){ p.style.display='none'; return; }
+  if(!p){ p=document.createElement('div'); p.id='plan-dl-pop'; p.style.cssText='position:fixed;z-index:9000;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.18);padding:12px 14px;font-size:12px;width:300px;text-align:left'; document.body.appendChild(p); }
+  var fys=DISP_FY_STARTS.filter(function(Y){ return Y<=CUR_FY_START+1; });
+  var boxes=fys.map(function(Y){ var def=(Y===CUR_FY_START||Y===CUR_FY_START-1); return '<label style="display:block;padding:2px 0;cursor:pointer"><input type="checkbox" class="pdl-fy" value="'+Y+'"'+(def?' checked':'')+'> '+fyLabel(Y)+'</label>'; }).join('');
+  p.innerHTML='<div style="font-weight:700;margin-bottom:5px">Download demand plan</div>'
+    +'<div class="mut" style="font-size:10px;margin-bottom:7px;line-height:1.4">SKU × month, Units + Revenue. Past months = actuals, future = forecast (flagged A/F). Uses the current country ('+CUR+') / channel ('+CF+') / category filters.</div>'
+    +'<div style="font-weight:600;margin-bottom:3px">Fiscal year(s)</div>'+boxes
+    +'<div style="margin-top:10px;display:flex;gap:10px;align-items:center"><button id="pdl-go" style="background:#16a34a;color:#fff;border:1px solid #15803d;border-radius:5px;padding:4px 12px;font-weight:700;cursor:pointer">&#11015; Download</button><a id="pdl-cancel" style="color:#dc2626;cursor:pointer">Cancel</a><span id="pdl-msg" class="mut" style="font-size:10px"></span></div>';
+  var r=(ev&&ev.target&&ev.target.getBoundingClientRect)?ev.target.getBoundingClientRect():{left:200,bottom:110};
+  p.style.left=Math.max(8,Math.min(window.innerWidth-320,r.left))+'px'; p.style.top=(r.bottom+6)+'px'; p.style.display='block';
+  p.querySelector('#pdl-cancel').onclick=function(){ p.style.display='none'; };
+  p.querySelector('#pdl-go').onclick=function(){ var ys=Array.prototype.slice.call(p.querySelectorAll('.pdl-fy:checked')).map(function(x){return parseInt(x.value);}); if(!ys.length){ p.querySelector('#pdl-msg').textContent='Pick at least one FY.'; return; } p.querySelector('#pdl-msg').textContent='Building…'; setTimeout(function(){ try{ buildPlanDownload(ys); p.style.display='none'; }catch(e){ p.querySelector('#pdl-msg').textContent='Failed'; } },20); };
+}
 
 // Active SKU months (past 6 actuals: Nov25-May26, next 12 forecast: Jun26-May27)
 // Dynamic: last 6 completed actuals months + current month
@@ -6118,31 +6190,10 @@ function renderSkuView(){
       sku, co, ch
     );
 
-    // ── Discontinued run-down logic ───────────────────────────────────────
-    // For discontinued SKUs: cap forecast by remaining stock, zeroing out after stock runs out
+    // ── Per-SKU monthly forecast base — SINGLE SOURCE (skuMonthlyMap), shared with the DEMAND download ──
     var discDate=p.disc&&p.disc[co.toLowerCase()]?p.disc[co.toLowerCase()]:null;
     var launchDate=p.lch&&p.lch[co.toLowerCase()]?p.lch[co.toLowerCase()]:null;
-    var rundownFC={}; // month -> capped forecast
-    if(discDate||launchDate){
-      var remainingStock=invOH;
-      SKU_FC_MONTHS.forEach(function(fcm){
-        var fcYM=fcm.slice(0,4)+'-'+fcm.slice(5,7);
-        var monthStart=fcYM+'-01';
-        // Zero before launch date
-        if(launchDate&&monthStart<launchDate){
-          rundownFC[fcm]=0;
-        // Cap to remaining stock after disc date
-        } else if(discDate&&monthStart>discDate){
-          var rawFC=Math.round((subcatFU[fcm]||0)*share);
-          var capped=Math.max(0,Math.min(rawFC,remainingStock));
-          rundownFC[fcm]=capped;
-          remainingStock=Math.max(0,remainingStock-capped);
-        } else {
-          var _fo3=skuOutFC(sku,co,ch,fcm);
-          rundownFC[fcm]=(_fo3!=null)?_fo3:Math.round((subcatFU[fcm]||0)*share);
-        }
-      });
-    }
+    var _fcBase=skuMonthlyMap(sku,co,ch,SKU_FC_MONTHS,subcatFU,share,invOH);
 
     // Forecast-vs-stock: project on-hand (+ timed inbound) forward; a forecast month with no stock
     // to cover it is flagged red (visibility only — does not change the forecast).
@@ -6152,8 +6203,7 @@ function renderSkuView(){
       arr.forEach(function(s){ if(!s||!s.qty)return; var ym=s.eta?String(s.eta).slice(0,7).replace('-','_'):first; if(ym<first)ym=first; _fsIn[ym]=(_fsIn[ym]||0)+Number(s.qty); }); })();
     SKU_FC_MONTHS.forEach(function(m,i){
       var td=document.createElement('td');
-      var _foB=skuOutFC(sku,co,ch,m);
-      var baseFC=(discDate||launchDate)?(rundownFC[m]||0):((_foB!=null)?_foB:Math.round((subcatFU[m]||0)*share));
+      var baseFC=_fcBase[m]||0;
       // Check for override
       var overrideKey=sku+'|'+co+'|'+ch+'|'+m;
       var stored=skuOvGetK(overrideKey);
