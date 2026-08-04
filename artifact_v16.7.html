@@ -7599,7 +7599,7 @@ function render(){
     var _sb=document.getElementById('statusbar');
     ['st','ver'].forEach(function(id){ var el=document.getElementById(id); if(_sb&&el&&el.parentNode!==_sb){ if(id==='st'){el.removeAttribute('style');el.className='status';} else {el.style.cssText='color:#0f172a;background:#fbbf24;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:800;line-height:1.2;letter-spacing:.02em;margin-left:auto;white-space:nowrap;position:relative';} _sb.appendChild(el); } });   // amber badge, matches SUPPLY
     if(_sb)_sb.style.display='';
-    ['demand-tabs','demand-body'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
+    ['demand-tabs','demand-inputs-nav','demand-body'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
   }
   // Leaving the BUY & MOVE group → tear down its sub-nav + the ACTIONS/TRANSFER pages.
   var _inBM=(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions');

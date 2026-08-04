@@ -1,3 +1,6 @@
+## v26.510 — Fix: DEMAND Inputs sub-menu leaking onto other views
+- The #demand-inputs-nav level-3 menu (Sell-through targets / Key Accts / Calendar / Revenue) was only hidden inside renderDemandTabs, so it persisted on REPORTS (e.g. /reports/ka) and other non-DEMAND views. Added it to the planning-mode teardown so it is removed when leaving DEMAND.
+
 ## v26.509 — Markdown & EOS report: pill-style filters + defaults
 - Filter pills (Market/Action/Project by) restyled from flat tabs to clear selectable pills (.fpill: bordered, rounded, dark when active, hover feedback).
 - Default filters set to UK / Markdown / Seasonal forecast.
