@@ -1,3 +1,6 @@
+## v26.549 — Portal amount-due: include credit_amount (Diviyaj backlog 3)
+- POS_SQL_PORTAL now exposes credit_amount to the portal (was folded into balance_owing but not shown). Portal Payments tab adds it to the amount due and, when credit_amount > 0, shows a dedicated 'Additional credit / charge (added to amount due)' line (+$X). Fixes the wrong balance a supplier saw when their PO had a credit note.
+
 ## v26.548 — Harden Payments Due / portal actions against a non-array response
 - buildPaymentsDue, paymentsDueOverdueCount and supPortalActions now guard their pos argument with Array.isArray (was (pos||[]).forEach — which still throws if pos is a truthy non-array error object). Completes Diviyaj's backlog item 1: a bad endpoint response can never blank these pages.
 

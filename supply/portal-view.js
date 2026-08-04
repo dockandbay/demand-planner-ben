@@ -1032,7 +1032,8 @@
       // only milestones with a recorded paid date). (Was value_used, which falls back to the order value when
       // uninvoiced, so an uninvoiced PO wrongly showed the whole order value as due.)
       var _invAmt=(p.supplier_invoice_total!=null&&p.supplier_invoice_total!=='')?Number(p.supplier_invoice_total):null;
-      var dueTot=(_invAmt!=null?_invAmt-paidTot:0);
+      var _credit=Number(p.credit_amount)||0;   // additional charge added to the invoice — increases the amount due
+      var dueTot=(_invAmt!=null?_invAmt-paidTot+_credit:0);
       var _prow=function(lbl,amt,dt,ref){ return '<tr><td class="l" style="padding:4px 16px 4px 0;white-space:nowrap">'+lbl+'</td><td class="l" style="padding:4px 16px 4px 0"><b>'+_pm(amt)+'</b></td><td class="l" style="padding:4px 16px 4px 0">'+_pd(dt)+'</td><td class="l" style="padding:4px 0">'+(ref?esc(ref):'<span class="mut">—</span>')+'</td></tr>'; };
       var payments='<div class="sect-h">Payments</div>'
         +'<table style="font-size:12px;border-collapse:collapse;text-align:left;table-layout:fixed;width:600px;max-width:100%">'
@@ -1040,6 +1041,7 @@
           +'<thead><tr>'
           +'<th class="l" style="padding:3px 10px 3px 0">Milestone</th><th class="l" style="padding:3px 10px 3px 0">Amount</th><th class="l" style="padding:3px 10px 3px 0">Date</th><th class="l">Deposit reference</th></tr></thead><tbody>'
         +_prow('Total invoice value', p.supplier_invoice_total, p.balance_due, '')
+        +(_credit>0?'<tr><td class="l" style="padding:4px 16px 4px 0;white-space:nowrap">Additional credit / charge <span class="mut">(added to amount due)</span></td><td class="l" style="padding:4px 16px 4px 0"><b>+$'+units(_credit)+'</b></td><td class="l" style="padding:4px 16px 4px 0"><span class="mut">—</span></td><td class="l" style="padding:4px 0"><span class="mut">—</span></td></tr>':'')
         // only show a deposit/balance milestone once it's a CONFIRMED payment (a paid date is set) — the
         // calculated-but-undated amounts are projections, not payments to show the supplier
         +(p.start_date?_prow('Starting deposit', startAmt, p.start_date, p.deposit_ref):'')

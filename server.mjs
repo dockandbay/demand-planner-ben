@@ -8787,6 +8787,7 @@ const POS_SQL_PORTAL = `
     start_paid start_dep,
     CASE WHEN val>0 THEN coalesce(pay_completion_assigned, completion_calc) END completion,
     CASE WHEN val>0 THEN round(val + coalesce(credit_amount,0) - start_paid - coalesce(pay_completion_assigned, completion_calc),2) END balance_owing,
+    round(coalesce(credit_amount,0),2) credit_amount,   -- additional charge added to the invoice/amount due (portal shows it as a line)
     start_calc, round(pay_start_deposit_assigned,2) start_assigned, to_char(pay_start_deposit_date,'YYYY-MM-DD') start_date,
     completion_calc, round(pay_completion_assigned,2) completion_assigned, to_char(pay_completion_date,'YYYY-MM-DD') completion_date,
     round(pay_balance_1_amount,2) balance_1_amount, to_char(pay_balance_1_date,'YYYY-MM-DD') balance_1_date,
