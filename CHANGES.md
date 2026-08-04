@@ -1,3 +1,7 @@
+## v26.506 — Revenue quarterly targets: quarter-grouped LY / Target / Forecast / delta
+- Months now grouped into 4 quarter columns. Each quarter (and the full year) shows Last year, Target (LY x growth %), Forecast (incl. price changes) and Delta (forecast - target).
+- Target, Delta and RAG recompute live as you type the growth %. Total row sums quarters + FY. Blank quarter = flat (last year).
+
 ## v26.505 — DEMAND ▸ Inputs ▸ Revenue: quarterly growth-% targets
 - Targets & tracking now takes a growth % per quarter (vs last-year same quarter), FY starts March: Q1 Mar-May, Q2 Jun-Aug, Q3 Sep-Nov, Q4 Dec-Feb.
 - Quarter £ target + FY £ target + gap + RAG update LIVE as you type the %, so you can dial the % to hit a number. Blank quarter = flat (last year).
