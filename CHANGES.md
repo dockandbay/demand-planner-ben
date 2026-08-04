@@ -1,3 +1,10 @@
+## v26.556 — Custom orders (SUG-0015): all 4 UI surfaces
+- PRODUCT: Approval method control on a dev item (Approval by photo | Send samples → existing recipients), auto-saves.
+- PURCHASE ORDERS ▸ Client/FBA: multi-select of product developments (chips + add dropdown) → custom_dev_ref (CSV, multiple).
+- REPORTS: new CUSTOM ORDERS report next to Direct to Client — in-progress dtc_custom POs with their linked product development(s).
+- Supplier portal: prominent Approval method on the dev item (📷 Approval by photo); custom-order banner + linked product development(s) on the PO Order Plan tab.
+- Fix: custom_dev_ref / dtc_custom read via subquery in PO grid + portal queries (calc4 CTE does not forward them).
+
 ## v26.555 — Custom orders (SUG-0015): schema + server foundation
 - Migration 180: product_dev_items.approval_method (photo|samples) + purchase_orders.custom_dev_ref (CSV of product_dev_items.ref — a custom order can link to MULTIPLE product developments).
 - Server: product-dev item read/write now carries approval_method; PO update accepts custom_dev_ref (cosmetic field); PO grid + portal queries expose dtc_custom + custom_dev_ref. Where-to-send reuses existing sample recipients. UI (PRODUCT approval-method control, PO multi-product picker, new Custom Orders report, portal surfacing) next.

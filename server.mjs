@@ -8858,7 +8858,8 @@ const POS_SQL_PORTAL = `
        WHERE m.po = coalesce((SELECT s.master_po FROM planner.shipments s WHERE s.shipment_ref=calc4.shipment_ref), calc4.shipment_ref)),'') ships_with_supplier,
     coalesce(client,'') client, coalesce(dispatch_order_ref,'') dispatch_order_ref,
     coalesce(final_delivery_address,'') final_delivery_address, coalesce(crossdock_skus,'') crossdock_skus,
-    coalesce(dtc_custom,false) dtc_custom, coalesce(custom_dev_ref,'') custom_dev_ref,   -- custom order + its product developments (portal shows the linked dev refs)
+    coalesce((SELECT pcd.dtc_custom FROM planner.purchase_orders pcd WHERE pcd.po=calc4.po),false) dtc_custom,
+    coalesce((SELECT pcd.custom_dev_ref FROM planner.purchase_orders pcd WHERE pcd.po=calc4.po),'') custom_dev_ref,   -- custom order + its product developments (portal shows the linked dev refs)
     coalesce(prod_no,'') prod_no, coalesce(batch_id,'') batch_id,
     coalesce(branch,'') branch, coalesce(nullif(country_code,''), branch_country, '') country,
     coalesce(calc4.client_requirements,'') client_requirements, coalesce(sales_order_ref,'') sales_order_ref,
@@ -9520,7 +9521,8 @@ const PO_ROWS_SQL = `
             approved_lines,   -- snapshot of SKUs/qtys at supplier approval → CONFIG portal preview builds approvedByPo for the "changes since you approved" diff (parity with /api/portal/bootstrap)
             coalesce(dispatch_order_ref,'') dispatch_order_ref, coalesce(final_delivery_address,'') final_delivery_address,
             coalesce(crossdock_skus,'') crossdock_skus,
-            coalesce(dtc_custom,false) dtc_custom, coalesce(dtc_key_account,false) dtc_key_account, coalesce(custom_dev_ref,'') custom_dev_ref,   -- Direct-to-Client tags + custom-order product developments (CSV of product_dev_items.ref)
+            coalesce(dtc_custom,false) dtc_custom, coalesce(dtc_key_account,false) dtc_key_account,
+            coalesce((SELECT pcd.custom_dev_ref FROM planner.purchase_orders pcd WHERE pcd.po=calc4.po),'') custom_dev_ref,   -- custom-order product developments (CSV of product_dev_items.ref); subquery since calc4 doesn't forward the column
             -- Forwarder contact details — read LIVE from the matching key account (by client name), not snapshotted
             (SELECT coalesce(ka.forwarder_name,'')  FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) forwarder_name,
             (SELECT coalesce(ka.forwarder_email,'') FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) forwarder_email,
