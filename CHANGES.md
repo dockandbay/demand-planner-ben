@@ -1,3 +1,6 @@
+## v26.531 — Summary Add-targets: download template + import
+- Add-targets editor now has Download template (CSV with a row for EVERY subcategory + market total, columns = each open FY x the current Month/Quarter/Half periods, pre-filled with existing %s) and Import targets (paste the filled CSV -> bulk save). New bulk endpoint /api/demand-revenue-targets/periods/bulk (transactional upsert/clear).
+
 ## v26.530 — 3PL Cin7 sweep: retry transient network errors
 - The reference clean-up sweep now retries transient network errors (EADDRNOTAVAIL etc) up to 3x per chunk, so it completes in one pass instead of aborting partway.
 

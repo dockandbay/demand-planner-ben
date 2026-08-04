@@ -8108,6 +8108,26 @@ app.post('/api/demand-revenue-targets/periods', async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Bulk upsert/clear of per-subcategory period targets (used by the Summary ▸ Add targets CSV import).
+app.post('/api/demand-revenue-targets/periods/bulk', async (req, res) => {
+  const rows = Array.isArray(req.body && req.body.rows) ? req.body.rows : [];
+  if (!rows.length) return res.json({ ok: true, saved: 0 });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    let saved = 0;
+    for (const b of rows) {
+      if (!b.country || !b.channel || b.fy == null || !b.level || b.idx == null || !['half', 'quarter', 'month'].includes(b.level)) continue;
+      const sub = (b.subcategory == null ? '' : String(b.subcategory));
+      const g = (b.growth_pct !== '' && b.growth_pct != null && !isNaN(Number(b.growth_pct))) ? Number(b.growth_pct) : null;
+      if (g == null) { await client.query(`DELETE FROM planner.demand_revenue_target_periods WHERE country=$1 AND channel=$2 AND fy=$3 AND subcategory=$4 AND level=$5 AND idx=$6`, [b.country, b.channel, b.fy, sub, b.level, b.idx]); }
+      else { await client.query(`INSERT INTO planner.demand_revenue_target_periods (country, channel, fy, subcategory, level, idx, growth_pct, updated_by, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now()) ON CONFLICT (country, channel, fy, subcategory, level, idx) DO UPDATE SET growth_pct=excluded.growth_pct, updated_by=excluded.updated_by, updated_at=now()`, [b.country, b.channel, b.fy, sub, b.level, b.idx, g, authUser(req) || null]); saved++; }
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true, saved });
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
 // Sell-through targets (DEMAND ▸ Sell-through targets) — target % by category × market. GET returns the in-scope
 // category list + markets + the saved targets; POST upserts one cell.
 const TARGET_MARKETS = ['UK', 'US', 'EU', 'AU'];
