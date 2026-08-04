@@ -1,3 +1,6 @@
+## v26.544 — Payments Report: tolerate non-array API response (harden)
+- renderPaymentsReport now guards the payments-report fetch: if the endpoint returns a non-array (error/shape), it falls back to [] instead of throwing and crashing the page. Prevents the class of '(x||[]).forEach/filter is not a function' failure seen on an older live build.
+
 ## v26.543 — FBA override: carton shortcuts (2c / 50r), same as Order Plan
 - FBA transfer override cell now accepts '2c' = 2 x carton qty and '50r' = round up to the nearest full carton (identical to SUPPLY ▸ Order Plan). Raw shortcut persists in the cell; resolved value flows through fbaTransferEff to the transfer total, ticked-row summary and the FBA Transfer Upload. Tooltip shows the resolved units.
 

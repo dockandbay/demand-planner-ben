@@ -7332,7 +7332,7 @@
       fetch('/api/supply/payments-report').then(function(r){return r.json();}),
       fetch('/api/supply/remittances').then(function(r){return r.json();}).catch(function(){return [];}),
       fetch('/api/supply/payment-emails').then(function(r){return r.json();}).catch(function(){return [];})
-    ]).then(function(_res){ payBuildMaps(_res[1],_res[2]); var rows=_res[0];
+    ]).then(function(_res){ payBuildMaps(_res[1],_res[2]); var rows=Array.isArray(_res[0])?_res[0]:((_res[0]&&(_res[0].rows||_res[0].payments))||[]);   // tolerate a non-array response (error/shape) instead of crashing the page
       // date filter: type a date (or partial, e.g. 2026-06) into From / To — no date picker
       b.innerHTML='<div class="bar"><span class="pill-lbl">Date</span><span class="tiny mut">from</span> <input class="flt" id="pay-from" placeholder="YYYY-MM-DD" value="'+esc(PAY_FROM)+'" style="width:118px"> <span class="tiny mut">to</span> <input class="flt" id="pay-to" placeholder="YYYY-MM-DD" value="'+esc(PAY_TO)+'" style="width:118px"> <button class="save-btn light" id="pay-clear">Clear</button>'
         +'<span class="pill-lbl" style="margin-left:14px">Search</span><input class="flt" id="pay-q" placeholder="supplier / amount…" value="'+esc(PAY_Q)+'" style="width:180px;background:#eff6ff;border-color:#93c5fd" title="search by supplier name or amount — overrides the date filter (spans all history)"> <span class="tiny mut">supplier or amount (spans all dates)</span></div><div id="pay-rep"></div>';
