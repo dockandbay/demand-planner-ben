@@ -1647,10 +1647,16 @@ function fbaTransferNonGrs(sku,mkt){
   if(FBA_CARTON_MODE==='PARTIAL')return isFullCarton?0:Math.round(base);   // stragglers only
   return isFullCarton?Math.floor(base/cp)*cp:0;                        // FULL: whole cartons only
 }
-// Effective transfer = manual override if entered, else the recommendation.
+// Override cell shortcuts (same as SUPPLY ▸ Order Plan): "2c" = 2 × carton qty; "50r" = round 50 UP to the
+// nearest full carton. Plain numbers pass through. cp = the SKU's carton quantity.
+function fbaResolveQty(raw,cp){ raw=String(raw==null?'':raw).trim().toLowerCase(); if(!raw)return 0; var m;
+  if((m=raw.match(/^(\d+(?:\.\d+)?)c$/))&&cp>0)return Math.round(parseFloat(m[1])*cp);
+  if((m=raw.match(/^(\d+(?:\.\d+)?)r$/))&&cp>0)return Math.ceil(parseFloat(m[1])/cp)*cp;
+  return parseInt(raw,10)||0; }
+// Effective transfer = manual override if entered (resolving c/r shortcuts), else the recommendation.
 function fbaTransferEff(sku,mkt){
   const k=sku+'|'+mkt;
-  if(FBA_OV[k]!=null&&FBA_OV[k]!=='')return parseInt(FBA_OV[k])||0;
+  if(FBA_OV[k]!=null&&FBA_OV[k]!=='')return fbaResolveQty(FBA_OV[k],(PD[sku]&&PD[sku].cp)||0);
   // "Transfer FBA (non GRS)" mode: demand-driven, carton-rounded-up, drawn from the non-GRS pool.
   if(BU_SEL==='TRFFBA_NG')return fbaTransferNonGrs(sku,mkt);
   return fbaTransferRec(sku,mkt);
@@ -2027,7 +2033,7 @@ function render(){
         trail=`
         <td class="bq" style="text-align:center;border-left:2px solid #000"><input type="checkbox" class="fba-tick" data-sku="${s.s}" data-cat="${String(s.c||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" ${tickOn} style="cursor:pointer"></td>
         <td class="bq">${rec>0?`<span class="bq-fba">${fmt(rec)}</span>`:`<span class="bq-nil">—</span>`}</td>
-        <td class="bq" style="padding:2px 4px;border-right:2px solid #000"><input type="text" class="fba-ov" data-sku="${s.s}" value="${ovVal}" placeholder="—" style="width:46px;text-align:right;font-size:11px;border:1px solid #d0d0d0;border-radius:3px;padding:1px 3px;font-variant-numeric:tabular-nums"></td>
+        <td class="bq" style="padding:2px 4px;border-right:2px solid #000"><input type="text" class="fba-ov" data-sku="${s.s}" value="${ovVal}" placeholder="—" title="${(function(){var _r=fbaResolveQty(ovVal,cp);return (ovVal&&/[cr]$/i.test(String(ovVal)))?('= '+_r+' units — shortcuts 2c / 50r'):'Override. Shortcuts: 2c = 2 cartons (2 x carton qty) · 50r = round up to nearest carton'})()}" style="width:46px;text-align:right;font-size:11px;border:1px solid #d0d0d0;border-radius:3px;padding:1px 3px;font-variant-numeric:tabular-nums"></td>
         ${fbaInbCell(fis.soon, fis.soonL, fis.soonFirst)}
         ${fbaInbCell(fis.later, fis.laterL, fis.laterFirst)}
         ${(function(){var _mm=PD[s.s]&&PD[s.s].mkts&&PD[s.s].mkts[CUR];var _i3=((_mm&&_mm.inb)||[]).filter(function(x){return !String(x.wh||'').toLowerCase().includes('fba');});var _t=_i3.reduce(function(a,x){return a+(x.qty||0);},0);var _tip=_i3.map(function(x){var e=inbEffEta(x);return (x.ref||'—')+' · '+fmt(x.qty||0)+'u · '+(e.date?dateDMY(e.date):(x.eta?dateDMY(x.eta):'—'))+(e.adj?' ⚠':'');}).join('<br>');return '<td class="iv'+(_tip?' tip120':'')+'"'+(_tip?' data-tip="'+_tip.replace(/"/g,'&quot;')+'"':'')+'><span class="iv-v">'+(_t>0?fmt(_t):'—')+'</span></td>';})()}`;
@@ -2092,7 +2098,7 @@ function bpRestoreFilters(){ try{
   var qi=document.getElementById('qry'); if(qi&&typeof o.qry==='string')qi.value=o.qry;
 }catch(e){} }
 
-function _bindTb(){var _tb=document.getElementById('tb');if(_tb){_tb.addEventListener('click',function(e){var ca=e.target.closest('.cat-selall');if(ca){var cat=ca.dataset.cat;var _tks=Array.prototype.slice.call(document.querySelectorAll('#tb .fba-tick')).filter(function(tk){return tk.dataset.cat===cat;});var _on=_tks.length>0&&_tks.every(function(tk){return FBA_TICK[tk.dataset.sku+'|'+CUR];});_tks.forEach(function(tk){if(_on)delete FBA_TICK[tk.dataset.sku+'|'+CUR];else FBA_TICK[tk.dataset.sku+'|'+CUR]=true;});render();updateFbaSelBox();return;}var b=e.target.closest('.ob');if(b)open_(b.dataset.sku);});_tb.addEventListener('change',function(e){var inp=e.target.closest('.fba-ov');if(inp){var v=inp.value.trim();FBA_OV[inp.dataset.sku+'|'+CUR]=(v===''?'':String(parseInt(v)||0));updateFbaSelBox();return;}var tk=e.target.closest('.fba-tick');if(tk){if(tk.checked)FBA_TICK[tk.dataset.sku+'|'+CUR]=true;else delete FBA_TICK[tk.dataset.sku+'|'+CUR];updateFbaSelBox();}});}}
+function _bindTb(){var _tb=document.getElementById('tb');if(_tb){_tb.addEventListener('click',function(e){var ca=e.target.closest('.cat-selall');if(ca){var cat=ca.dataset.cat;var _tks=Array.prototype.slice.call(document.querySelectorAll('#tb .fba-tick')).filter(function(tk){return tk.dataset.cat===cat;});var _on=_tks.length>0&&_tks.every(function(tk){return FBA_TICK[tk.dataset.sku+'|'+CUR];});_tks.forEach(function(tk){if(_on)delete FBA_TICK[tk.dataset.sku+'|'+CUR];else FBA_TICK[tk.dataset.sku+'|'+CUR]=true;});render();updateFbaSelBox();return;}var b=e.target.closest('.ob');if(b)open_(b.dataset.sku);});_tb.addEventListener('change',function(e){var inp=e.target.closest('.fba-ov');if(inp){var v=inp.value.trim();FBA_OV[inp.dataset.sku+'|'+CUR]=v;var _cp=(PD[inp.dataset.sku]&&PD[inp.dataset.sku].cp)||0;inp.title=(v&&/[cr]$/i.test(v))?('= '+fbaResolveQty(v,_cp)+' units ('+v+')'):'';updateFbaSelBox();return;}var tk=e.target.closest('.fba-tick');if(tk){if(tk.checked)FBA_TICK[tk.dataset.sku+'|'+CUR]=true;else delete FBA_TICK[tk.dataset.sku+'|'+CUR];updateFbaSelBox();}});}}
 
 // CSV download
 // Release Window dropdown filter (BUY + FBA views): populate from the release windows present in the current

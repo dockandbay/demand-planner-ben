@@ -1,3 +1,6 @@
+## v26.543 — FBA override: carton shortcuts (2c / 50r), same as Order Plan
+- FBA transfer override cell now accepts '2c' = 2 x carton qty and '50r' = round up to the nearest full carton (identical to SUPPLY ▸ Order Plan). Raw shortcut persists in the cell; resolved value flows through fbaTransferEff to the transfer total, ticked-row summary and the FBA Transfer Upload. Tooltip shows the resolved units.
+
 ## v26.542 — FBA non-GRS transfer: pure carton math (no demand floors)
 - Transfer FBA (non GRS) now uses pure carton sizing split by the pills, sized to FBA shortfall capped at the non-GRS pool. Removed the normal transfer's d90/d60 demand gates from the non-GRS path (they were wrongly deferring whole cartons under Full and dropping small stragglers under Partial). Any = need; Full = whole-carton SKUs (floor to cartons); Partial = sub-carton stragglers only. Normal transfer + buy plan unaffected (separate fbaTransferRec path).
 
