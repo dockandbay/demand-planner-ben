@@ -1,3 +1,6 @@
+## v26.542 — FBA non-GRS transfer: pure carton math (no demand floors)
+- Transfer FBA (non GRS) now uses pure carton sizing split by the pills, sized to FBA shortfall capped at the non-GRS pool. Removed the normal transfer's d90/d60 demand gates from the non-GRS path (they were wrongly deferring whole cartons under Full and dropping small stragglers under Partial). Any = need; Full = whole-carton SKUs (floor to cartons); Partial = sub-carton stragglers only. Normal transfer + buy plan unaffected (separate fbaTransferRec path).
+
 ## v26.541 — FBA transfer: fix NonGRS/FULL empty rows + partial/full double-send
 - Transfer FBA (non GRS) now only lists SKUs with an actual transfer to send (was listing any SKU merely holding non-GRS stock, even when the FULL-carton transfer was 0).
 - PARTIAL now excludes SKUs that fill >=1 whole carton — those belong to FULL. A SKU is no longer shown as e.g. 124 in Partial AND 120 in Full; carton-fillers show only under Full, and Partial carries just the sub-carton stragglers. FULL/ANY sizing unchanged (buy plan unaffected — default mode is FULL).

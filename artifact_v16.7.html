@@ -1627,14 +1627,25 @@ function fbaTransferRec(sku,mkt){
     cap=Math.min(Math.floor(0.5*i3),Math.max(0,i3-minCover3PL)); }
   return fbaTransferSized(sku,mkt,cap);
 }
-// Non-GRS transfer: demand-driven, drawn from the non-GRS pool as the cap. Uses the SAME sizing as the normal
-// 3PL→FBA transfer (Ben — "same logic for any transfer"), so the Cartons pills (Any / Full / Partial) apply:
-//   Full = whole cartons only (floor, defer the sub-carton remainder); Partial = send the partial; Any = exact need.
-// No 3PL protection cap (3PL never uses non-GRS stock), and never the whole pool — sized to demand, capped at what we hold.
+// Non-GRS transfer: push non-GRS stock to FBA, sized to the FBA shortfall but capped at the pool we hold.
+// Pure CARTON math split by the pills — NO demand floors (unlike the normal transfer, whose d90/d60 gates would
+// wrongly defer whole cartons / drop small stragglers here). Any = exact need; Full = whole-carton SKUs only
+// (floor to cartons); Partial = sub-carton stragglers only (a carton-filler shows under Full, never both).
 function fbaTransferNonGrs(sku,mkt){
+  const pd=PD[sku];const md=pd&&pd.mkts&&pd.mkts[mkt];if(!md)return 0;
   const pool=nonGrsOf(sku,mkt);
   if(pool<=0)return 0;
-  return fbaTransferSized(sku,mkt,pool);
+  const cp=pd.cp||1;
+  const iF=md['if_']||0, oof=md.oof||0, awd=awdOf(sku,mkt);
+  const fbw=parseInt(document.getElementById('fbw')?.value)||8;
+  const targetMonths=Math.max(1,Math.round(fbw/4.33));
+  const need=Math.max(0,fbaFwdDemand(md,targetMonths)-(iF+oof+awd));   // FBA shortfall vs target
+  const base=Math.min(need,pool);                                      // capped at the non-GRS pool we hold
+  if(base<=0)return 0;
+  if(FBA_CARTON_MODE==='ANY')return Math.round(base);
+  const isFullCarton=base>=cp;                                         // fills at least one whole carton?
+  if(FBA_CARTON_MODE==='PARTIAL')return isFullCarton?0:Math.round(base);   // stragglers only
+  return isFullCarton?Math.floor(base/cp)*cp:0;                        // FULL: whole cartons only
 }
 // Effective transfer = manual override if entered, else the recommendation.
 function fbaTransferEff(sku,mkt){
