@@ -8115,7 +8115,7 @@ var _tgtView='score'; // Targets view: 'score' (scorecard + recommendations) | '
 var _tgtStatus='all'; // scorecard status filter
 function applyTarget(cat,mkt,pct){ return fetch('/api/targets',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({category:cat,market:mkt,metric:'st',value:pct})}).then(function(r){return r.json();}); }
 // ── DEMAND ▸ Revenue: revenue-growth targets + tracking, and definitive price changes ──────────────────────
-var REV_SUB='targets', REV_FY=null, REV_TARGETS={}, _revBody=null;
+var REV_SUB='targets', REV_FY=null, REV_TARGETS={}, _revBody=null, REV_ROWS=[];
 function revReload(){ if(_revBody)renderRevenueView(_revBody); }
 function revCombos(){ var seen={}, out=[]; (DATA||[]).forEach(function(r){ if(!r.co||!r.ch)return; var k=r.co+'|'+r.ch; if(!seen[k]){ seen[k]=1; out.push({co:r.co,ch:r.ch}); } });
   out.sort(function(a,b){ var ia=CTRS.indexOf(a.co),ib=CTRS.indexOf(b.co); ia=ia<0?99:ia; ib=ib<0?99:ib; return ia!==ib?ia-ib:String(a.ch).localeCompare(String(b.ch)); }); return out; }
@@ -8124,11 +8124,20 @@ function revSubcats(){ var seen={}, out=[]; (DATA||[]).forEach(function(r){ if(r
 // incl. price changes), FY total, and last-year FY actual. Cached per (co|ch|fy) within a render pass.
 var _revCache={};
 function revMonthly(co,ch,fy){ var ck=co+'|'+(ch||'*')+'|'+fy; if(_revCache[ck])return _revCache[ck];
-  var fmC=fyMonths(fy), fmL=fyMonths(fy-1), mon={}, fc=0, ly=0; fmC.forEach(function(m){mon[m]=0;});
+  var fmC=fyMonths(fy), fmL=fyMonths(fy-1), mon={}, fc=0, ly=0, lyPos=[0,0,0,0,0,0,0,0,0,0,0,0]; fmC.forEach(function(m){mon[m]=0;});
   (DATA||[]).forEach(function(r){ if(r.co!==co)return; if(ch&&r.ch!==ch)return; var s=r.s, a=ga(co,r.ch,s), fu=(calc(s,co,r.ch)||{}).fu||{};
     fmC.forEach(function(m){ var v=(isActualMonth(m)&&m!==CUR_MONTH)?(a[m]?a[m][1]:0):((m===CUR_MONTH?curMonthForecast(s,co,r.ch):(fu[m]||0))*getASP(co,r.ch,s,pa(m).y,pa(m).mo)); mon[m]+=v; fc+=v; });   // current partial month → full-month forecast (matches plan + exec)
-    fmL.forEach(function(m){ ly+=(a[m]?a[m][1]:0); }); });
-  var out={mon:mon, fc:fc, ly:ly}; _revCache[ck]=out; return out; }
+    fmL.forEach(function(m,ix){ var add=(a[m]?a[m][1]:0); ly+=add; lyPos[ix]+=add; }); });
+  var out={mon:mon, fc:fc, ly:ly, lyPos:lyPos}; _revCache[ck]=out; return out; }
+// Quarter helpers (FY starts March): Q1 Mar-May, Q2 Jun-Aug, Q3 Sep-Nov, Q4 Dec-Feb. Growth % is vs LY same quarter.
+function revQtrLy(rev,q){ var lp=(rev&&rev.lyPos)||[]; return (lp[q*3]||0)+(lp[q*3+1]||0)+(lp[q*3+2]||0); }
+function revTargetQ(t,rev,q){ if(!t)return null; var ly=revQtrLy(rev,q);
+  if(t.type==='quarterly'){ var p=t['q'+(q+1)]; return (p==null||p==='')?null:ly*(1+Number(p)/100); }
+  if(t.type==='value')return null; return (t.pct!=null&&t.pct!=='')?ly*(1+Number(t.pct)/100):null; }
+function revTargetFY(t,rev){ if(!t)return null;
+  if(t.type==='value')return Number(t.value||0);
+  if(t.type==='quarterly'){ var s2=0; for(var q=0;q<4;q++){ var ly=revQtrLy(rev,q),p=t['q'+(q+1)]; s2+=(p==null||p==='')?ly:ly*(1+Number(p)/100); } return s2; }
+  return rev.ly*(1+Number(t.pct||0)/100); }
 
 // ── Plan ▸ floating "Revenue vs target" pop-out ────────────────────────────────────────────────
 // A pill button on the demand plan that pops a compact card comparing the plan's live forecast
@@ -8136,7 +8145,7 @@ function revMonthly(co,ch,fy){ var ck=co+'|'+(ch||'*')+'|'+fy; if(_revCache[ck])
 // CURRENT country (CUR) + channel (CF). Defaults to the current FY; follows the plan's scope.
 var PLAN_REV_FY=null;
 function ensureRevTargets(cb){ fetch('/api/demand-revenue-targets').then(function(r){return r.json();}).then(function(rows){
-    REV_TARGETS={}; (rows||[]).forEach(function(t){ REV_TARGETS[t.country+'|'+t.channel+'|'+t.fy]={type:t.target_type,pct:t.target_pct,value:t.target_value}; }); cb&&cb();
+    REV_TARGETS={}; (rows||[]).forEach(function(t){ REV_TARGETS[t.country+'|'+t.channel+'|'+t.fy]={type:t.target_type,pct:t.target_pct,value:t.target_value,q1:t.target_q1_pct,q2:t.target_q2_pct,q3:t.target_q3_pct,q4:t.target_q4_pct}; }); cb&&cb();
   }).catch(function(){ cb&&cb(); }); }
 // Two report buttons ("Revenue vs target", "Executive summary") live right-aligned in the plan's
 // filters row (#catrow1-wrap). DESKTOP ONLY — hidden on mobile (Ben's requirement); the plan's filter
@@ -8233,8 +8242,7 @@ function planRevPopRender(){ var p=document.getElementById('plan-rev-pop'); if(!
   var fyLbl=function(y){return 'FY'+String(y).slice(2)+'/'+String(y+1).slice(2);};
   var MON=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], months=fyMonths(fy);
   var rCh=revMonthly(co,ch,fy), rCo=revMonthly(co,null,fy);
-  function tgtVal(t,ly){ return t?(t.type==='pct'?ly*(1+Number(t.pct||0)/100):Number(t.value||0)):null; }
-  var tgtCh=tgtVal(REV_TARGETS[co+'|'+ch+'|'+fy],rCh.ly), tgtCo=tgtVal(REV_TARGETS[co+'|ALL|'+fy],rCo.ly);
+  var tgtCh=revTargetFY(REV_TARGETS[co+'|'+ch+'|'+fy],rCh), tgtCo=revTargetFY(REV_TARGETS[co+'|ALL|'+fy],rCo);
   function ragC(fc,t){ return fc>=t?'#16a34a':(fc>=t*0.95?'#f59e0b':'#dc2626'); }
   function grow(fc,ly){ return ly>0?Math.round((fc-ly)/ly*100):null; }
   function statusLine(fc,t,lbl){ if(t==null)return '<span style="color:#64748b">No '+fyLbl(fy)+' target set for '+esc(lbl)+' — add one in the Revenue tab.</span>';
@@ -8271,7 +8279,7 @@ function renderRevenueView(body){ _revBody=body; if(REV_FY==null)REV_FY=CUR_FY_S
   Promise.all([fetch('/api/price-changes').then(function(r){return r.json();}).catch(function(){return [];}),
                fetch('/api/demand-revenue-targets').then(function(r){return r.json();}).catch(function(){return [];})]).then(function(res){
     PRICE_CHANGES=res[0]||[];   // refresh so the tracking reflects the latest price changes without a page reload
-    REV_TARGETS={}; (res[1]||[]).forEach(function(t){ REV_TARGETS[t.country+'|'+t.channel+'|'+t.fy]={type:t.target_type,pct:t.target_pct,value:t.target_value}; });
+    REV_TARGETS={}; (res[1]||[]).forEach(function(t){ REV_TARGETS[t.country+'|'+t.channel+'|'+t.fy]={type:t.target_type,pct:t.target_pct,value:t.target_value,q1:t.target_q1_pct,q2:t.target_q2_pct,q3:t.target_q3_pct,q4:t.target_q4_pct}; });
     var rb=document.getElementById('rev-body'); if(!rb)return;
     try { if(REV_SUB==='prices')renderPriceChanges(rb); else renderRevTargets(rb); }
     catch(err){ rb.innerHTML='<div style="padding:12px;color:#b91c1c;font-size:12px">Could not render this view: '+esc(String(err&&err.message||err))+'</div>'; if(window.console)console.error('[revenue] render error',err); }
@@ -8284,32 +8292,57 @@ function saveRevTarget(co,ch,fy,str){ var v=String(str||'').trim(), b={country:c
 function renderRevTargets(el){ _revCache={}; var combos=revCombos(), fys=[CUR_FY_START,CUR_FY_START+1,CUR_FY_START+2], fy=REV_FY;
   var fyLbl=function(y){return 'FY'+String(y).slice(2)+'/'+String(y+1).slice(2);};
   var months=fyMonths(fy), MON=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  var sel='<span style="font-weight:700;font-size:13px;margin-right:8px">Targets for financial year:</span> '+fys.map(function(y){return '<button class="pill catpill'+(y===fy?' active':'')+'" data-fy="'+y+'" style="font-weight:600'+(y===fy?';box-shadow:0 0 0 2px #2563eb inset':'')+'">'+fyLbl(y)+'</button>';}).join(' ')+'<span style="font-size:11px;color:#888;margin-left:10px">each year keeps its own targets</span>';
+  var qMonLbl=function(q){return MON[pa(months[q*3]).mo]+'-'+MON[pa(months[q*3+2]).mo];};
+  var sel='<span style="font-weight:700;font-size:13px;margin-right:8px">Targets for financial year:</span> '+fys.map(function(y){return '<button class="pill catpill'+(y===fy?' active':'')+'" data-fy="'+y+'" style="font-weight:600'+(y===fy?';box-shadow:0 0 0 2px #2563eb inset':'')+'">'+fyLbl(y)+'</button>';}).join(' ')+'<span style="font-size:11px;color:#888;margin-left:10px">quarterly growth % vs last year &middot; each year keeps its own targets</span>';
   var byCo={}; combos.forEach(function(c){ (byCo[c.co]=byCo[c.co]||[]).push(c.ch); });
   var cos=Object.keys(byCo).sort(function(a,b){var ia=CTRS.indexOf(a),ib=CTRS.indexOf(b);ia=ia<0?99:ia;ib=ib<0?99:ib;return ia-ib;});
-  function tgtOf(co,ch,ly){ var t=REV_TARGETS[co+'|'+ch+'|'+fy]; return t?(t.type==='pct'?ly*(1+Number(t.pct||0)/100):Number(t.value||0)):null; }
-  function tgtInput(co,ch){ var t=REV_TARGETS[co+'|'+ch+'|'+fy], iv=t?(t.type==='pct'?((Number(t.pct)>=0?'+':'')+Number(t.pct)+'%'):Math.round(Number(t.value))):'';
-    return '<input class="rev-tgt" data-co="'+esc(co)+'" data-ch="'+esc(ch)+'" value="'+esc(iv)+'" placeholder="+% / val" style="width:80px;text-align:right;padding:2px 4px;border:1px solid #cbd5e1;border-radius:4px">'; }
-  function rag(fc,t){ if(t==null)return ''; var c=fc>=t?'#16a34a':(fc>=t*0.95?'#f59e0b':'#dc2626'); return '<span title="green ≥ target · amber within 5% · red below" style="display:inline-block;width:11px;height:11px;border-radius:50%;background:'+c+'"></span>'; }
+  function qInit(t,q){ if(!t)return ''; if(t.type==='quarterly'){ var p=t['q'+(q+1)]; return (p==null||p==='')?'':((Number(p)>=0?'+':'')+Number(p)); } if(t.type==='pct'&&t.pct!=null&&t.pct!==''){ return (Number(t.pct)>=0?'+':'')+Number(t.pct); } return ''; }
+  REV_ROWS=[];
   var totMon={}; months.forEach(function(m){totMon[m]=0;}); var totFc=0, totLy=0;
-  function row(co,ch,isCo){ var r=revMonthly(co,isCo?null:ch,fy), tKey=isCo?'ALL':ch, tgt=tgtOf(co,tKey,r.ly), gap=tgt!=null?r.fc-tgt:null, grw=r.ly>0?Math.round((r.fc-r.ly)/r.ly*100):null;
+  function qCell(rowid,q,initv){
+    return '<td class="c revq" style="border-left:1px solid #eef2f7"><input id="rq_'+rowid+'_'+q+'" class="revqi" data-rid="'+rowid+'" value="'+esc(initv)+'" placeholder="%" style="width:46px;text-align:right;padding:2px 3px;border:1px solid #cbd5e1;border-radius:4px">'
+      +'<div class="tiny" style="margin-top:2px;white-space:nowrap"><span id="rqt_'+rowid+'_'+q+'"></span> <span id="rqd_'+rowid+'_'+q+'"></span></div></td>'; }
+  function row(co,ch,isCo){ var r=revMonthly(co,isCo?null:ch,fy), tKey=isCo?'ALL':ch, t=REV_TARGETS[co+'|'+tKey+'|'+fy];
+    var rowid=co+'_'+tKey, grw=r.ly>0?Math.round((r.fc-r.ly)/r.ly*100):null;
+    var qLy=[0,0,0,0],qFc=[0,0,0,0]; for(var q=0;q<4;q++){ qLy[q]=revQtrLy(r,q); qFc[q]=(r.mon[months[q*3]]||0)+(r.mon[months[q*3+1]]||0)+(r.mon[months[q*3+2]]||0); }
+    REV_ROWS.push({rowid:rowid,co:co,tKey:tKey,isCo:isCo,qLy:qLy,qFc:qFc,fc:r.fc,ly:r.ly});
     if(isCo){ months.forEach(function(m){totMon[m]+=r.mon[m];}); totFc+=r.fc; totLy+=r.ly; }
-    var mc=months.map(function(m){return '<td class="r">'+(r.mon[m]?fr(r.mon[m]):'<span class="mut">–</span>')+'</td>';}).join('');
+    var mc=months.map(function(m){return '<td class="r">'+(r.mon[m]?fr(r.mon[m]):'<span class="mut">&ndash;</span>')+'</td>';}).join('');
+    var qc=''; for(var q2=0;q2<4;q2++){ qc+=qCell(rowid,q2,qInit(t,q2)); }
     return '<tr'+(isCo?' class="rev-cotot"':'')+'><td>'+(isCo?'<b>'+esc(co)+'</b> <span class="mut tiny">all channels</span>':'<span style="padding-left:16px">'+esc(ch)+'</span>')+'</td>'
-      +'<td class="r">'+fr(r.ly)+'</td><td class="r">'+tgtInput(co,tKey)+'</td><td class="r">'+(tgt!=null?fr(tgt):'<span class="mut">—</span>')+'</td>'
-      +mc+'<td class="r"><b>'+fr(r.fc)+'</b></td><td class="r" style="color:'+(gap==null?'':(gap>=0?'#166534':'#b91c1c'))+'">'+(gap!=null?((gap>=0?'+':'')+fr(gap)):'—')+'</td>'
-      +'<td class="r">'+(grw!=null?((grw>=0?'+':'')+grw+'%'):'—')+'</td><td class="c">'+rag(r.fc,tgt)+'</td></tr>'; }
+      +'<td class="r">'+fr(r.ly)+'</td>'+qc
+      +'<td class="r" style="border-left:2px solid #cbd5e1"><b id="rfyt_'+rowid+'"></b></td>'
+      +mc+'<td class="r"><b>'+fr(r.fc)+'</b></td><td class="r" id="rgap_'+rowid+'"></td>'
+      +'<td class="r">'+(grw!=null?((grw>=0?'+':'')+grw+'%'):'&mdash;')+'</td><td class="c" id="rfyd_'+rowid+'"></td></tr>'; }
   var body='';
   cos.forEach(function(co){ body+=row(co,'ALL',true); byCo[co].sort().forEach(function(ch){ body+=row(co,ch,false); }); });
   var monHdr=months.map(function(m){var p=pa(m);return '<th class="r">'+MON[p.mo]+'<br>'+String(p.y).slice(2)+'</th>';}).join('');
-  var totCells=months.map(function(m){return '<td class="r">'+(totMon[m]?fr(totMon[m]):'–')+'</td>';}).join('');
+  var qHdr=''; for(var q3=0;q3<4;q3++){ qHdr+='<th class="c" style="border-left:1px solid #eef2f7">Q'+(q3+1)+'<br><span class="tiny mut">'+qMonLbl(q3)+'</span></th>'; }
+  var totCells=months.map(function(m){return '<td class="r">'+(totMon[m]?fr(totMon[m]):'&ndash;')+'</td>';}).join('');
   el.innerHTML='<div class="bar" style="margin-bottom:6px;padding:7px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;align-items:center;flex-wrap:wrap">'+sel+'</div>'
-    +'<div style="font-size:11px;color:#888;margin:2px 0 6px">Revenue by month + '+fyLbl(fy)+' total, per country (all channels) and per country × channel. Set a target (+% on last-year or an absolute value) on either level. <b>Forecast</b> includes price changes. RAG: <span style="color:#16a34a">■</span> ≥ target · <span style="color:#f59e0b">■</span> within 5% · <span style="color:#dc2626">■</span> below.</div>'
-    +'<div style="overflow-x:auto"><table class="rev-tbl"><thead><tr><th style="position:sticky;left:0;background:#fff;z-index:1">Country / channel</th><th class="r">LY</th><th class="r">Target</th><th class="r">Tgt</th>'+monHdr+'<th class="r">'+fyLbl(fy)+'</th><th class="r">Gap</th><th class="r">Grw</th><th class="c">●</th></tr></thead><tbody>'+body
-    +'<tr class="tot"><td style="position:sticky;left:0;background:#eef2f7">Total</td><td class="r">'+fr(totLy)+'</td><td></td><td></td>'+totCells+'<td class="r">'+fr(totFc)+'</td><td colspan="3"></td></tr>'
+    +'<div style="font-size:11px;color:#888;margin:2px 0 6px">Set a <b>growth %</b> per quarter (vs last-year same quarter) at country (all channels) or country &times; channel level. The quarter and <b>'+fyLbl(fy)+' target &pound;</b> update live as you type, so you can dial the % to hit a number. Blank quarter = flat (last year). <b>Forecast</b> includes price changes. RAG: <span style="color:#16a34a">&#9632;</span> &ge; target &middot; <span style="color:#f59e0b">&#9632;</span> within 5% &middot; <span style="color:#dc2626">&#9632;</span> below.</div>'
+    +'<div style="overflow-x:auto"><table class="rev-tbl"><thead><tr><th style="position:sticky;left:0;background:#fff;z-index:1">Country / channel</th><th class="r">LY</th>'+qHdr+'<th class="r" style="border-left:2px solid #cbd5e1">'+fyLbl(fy)+'<br><span class="tiny mut">target</span></th>'+monHdr+'<th class="r">'+fyLbl(fy)+'<br><span class="tiny mut">fcast</span></th><th class="r">Gap</th><th class="r">Grw</th><th class="c">&#9679;</th></tr></thead><tbody>'+body
+    +'<tr class="tot"><td style="position:sticky;left:0;background:#eef2f7">Total</td><td class="r">'+fr(totLy)+'</td><td colspan="4"></td><td class="r" style="border-left:2px solid #cbd5e1"><b id="rtot_tgt"></b></td>'+totCells+'<td class="r">'+fr(totFc)+'</td><td colspan="3"></td></tr>'
     +'</tbody></table></div>';
   el.querySelectorAll('.pill[data-fy]').forEach(function(b){ b.onclick=function(){ REV_FY=+b.dataset.fy; renderRevTargets(el); }; });
-  el.querySelectorAll('.rev-tgt').forEach(function(inp){ inp.onchange=function(){ saveRevTarget(inp.dataset.co,inp.dataset.ch,fy,inp.value); }; }); }
+  el.querySelectorAll('.revqi').forEach(function(inp){ inp.oninput=function(){ recalcRev(); }; inp.onchange=function(){ saveRevTargetQ(inp.dataset.rid); }; });
+  recalcRev(); }
+function recalcRev(){ var grand=0, haveGrand=false;
+  function ragDot(fc,t){ if(t==null||!isFinite(t))return ''; var c=fc>=t?'#16a34a':(fc>=t*0.95?'#f59e0b':'#dc2626'); return '<span title="green >= target, amber within 5%, red below" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:'+c+'"></span>'; }
+  (REV_ROWS||[]).forEach(function(rw){ var fyt=0, anySet=false;
+    for(var q=0;q<4;q++){ var inp=document.getElementById('rq_'+rw.rowid+'_'+q); var raw=inp?String(inp.value).trim():''; var pct=(raw===''||isNaN(parseFloat(raw)))?null:parseFloat(raw); if(pct!=null)anySet=true;
+      var qt=(pct==null)?rw.qLy[q]:rw.qLy[q]*(1+pct/100); fyt+=qt;
+      var ts=document.getElementById('rqt_'+rw.rowid+'_'+q); if(ts)ts.innerHTML=(pct==null)?('<span class="mut">'+fr(rw.qLy[q])+'</span>'):fr(qt);
+      var dt=document.getElementById('rqd_'+rw.rowid+'_'+q); if(dt)dt.innerHTML=(pct==null)?'':ragDot(rw.qFc[q],qt); }
+    var fytEl=document.getElementById('rfyt_'+rw.rowid); if(fytEl)fytEl.innerHTML=anySet?fr(fyt):'<span class="mut">&mdash;</span>';
+    var gapEl=document.getElementById('rgap_'+rw.rowid); if(gapEl){ if(anySet){ var g=rw.fc-fyt; gapEl.style.color=g>=0?'#166534':'#b91c1c'; gapEl.innerHTML=(g>=0?'+':'')+fr(g); } else { gapEl.style.color=''; gapEl.innerHTML='<span class="mut">&mdash;</span>'; } }
+    var fyd=document.getElementById('rfyd_'+rw.rowid); if(fyd)fyd.innerHTML=anySet?ragDot(rw.fc,fyt):'';
+    if(rw.isCo&&anySet){ grand+=fyt; haveGrand=true; } });
+  var tot=document.getElementById('rtot_tgt'); if(tot)tot.innerHTML=haveGrand?fr(grand):''; }
+function saveRevTargetQ(rowid){ var rw=null; (REV_ROWS||[]).forEach(function(x){ if(x.rowid===rowid)rw=x; }); if(!rw)return;
+  var b={country:rw.co,channel:rw.tKey,fy:REV_FY,target_type:'quarterly'};
+  for(var q=0;q<4;q++){ var inp=document.getElementById('rq_'+rowid+'_'+q); var raw=inp?String(inp.value).replace(/[^0-9.\-]/g,''):''; b['target_q'+(q+1)+'_pct']=raw; }
+  fetch('/api/demand-revenue-targets',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b)}).then(function(r){return r.json();}).then(function(){ if(typeof ensureRevTargets==='function')ensureRevTargets(); }).catch(function(){}); }
 function renderPriceChanges(el){
   var rows=(PRICE_CHANGES||[]).map(function(p){ return '<tr><td><b>'+esc(p.country)+'</b></td><td>'+(p.channel?esc(p.channel):'<span class="mut">all</span>')+'</td><td>'+(p.subcategory?esc(p.subcategory):'<span class="mut">all</span>')+'</td><td>'+esc(p.effective_month)+'</td><td class="r" style="font-weight:600;color:'+(Number(p.uplift_pct)>=0?'#166534':'#b91c1c')+'">'+(Number(p.uplift_pct)>=0?'+':'')+Number(p.uplift_pct)+'%</td><td>'+esc(p.note||'')+'</td><td class="c"><button class="pc-del" data-id="'+p.id+'" title="delete" style="color:#dc2626;cursor:pointer;border:none;background:none;font-size:13px">✕</button></td></tr>'; }).join('')||'<tr><td colspan="7" class="mut" style="padding:10px">No price changes yet.</td></tr>';
   el.innerHTML='<div style="font-size:11px;color:#888;margin-bottom:8px">Definitive price changes lift the revenue forecast (ASP) from the effective month forward — units are unchanged. Country is required; leave channel / subcategory blank for "all". Multiple changes <b>compound</b>.</div>'

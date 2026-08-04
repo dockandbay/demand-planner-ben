@@ -1,3 +1,8 @@
+## v26.505 — DEMAND ▸ Inputs ▸ Revenue: quarterly growth-% targets
+- Targets & tracking now takes a growth % per quarter (vs last-year same quarter), FY starts March: Q1 Mar-May, Q2 Jun-Aug, Q3 Sep-Nov, Q4 Dec-Feb.
+- Quarter £ target + FY £ target + gap + RAG update LIVE as you type the %, so you can dial the % to hit a number. Blank quarter = flat (last year).
+- %-only (absolute-£ FY targets retired from the input; old rows stay readable). Migration 174 adds target_q1..q4_pct; server GET/POST handle target_type=quarterly (backward-compatible).
+
 # CHANGES
 
 Version log for the demand planner (bump on every change so we can revert).

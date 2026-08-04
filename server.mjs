@@ -7801,21 +7801,33 @@ app.post('/api/buy-complex-rules/:id/delete', async (req, res) => {
 });
 // Revenue-growth targets per country × channel × FY. GET returns all; POST upserts one cell (blank clears it).
 app.get('/api/demand-revenue-targets', async (_req, res) => {
-  try { res.json((await pool.query(`SELECT country, channel, fy, target_type, target_pct, target_value FROM planner.demand_revenue_targets`)).rows); }
-  catch (e) { res.json([]); }
+  // Try the extended (quarterly) shape; fall back to the base shape if migration 174 isn't applied yet.
+  try { res.json((await pool.query(`SELECT country, channel, fy, target_type, target_pct, target_value, target_q1_pct, target_q2_pct, target_q3_pct, target_q4_pct FROM planner.demand_revenue_targets`)).rows); }
+  catch (e) {
+    try { res.json((await pool.query(`SELECT country, channel, fy, target_type, target_pct, target_value FROM planner.demand_revenue_targets`)).rows); }
+    catch (e2) { res.json([]); }
+  }
 });
 app.post('/api/demand-revenue-targets', async (req, res) => {
   const b = req.body || {};
   if (!b.country || !b.channel || b.fy == null) return res.status(400).json({ error: 'country, channel and fy are required' });
+  const numOrNull = v => (v !== '' && v != null && !isNaN(Number(v))) ? Number(v) : null;
   try {
-    const type = b.target_type === 'value' ? 'value' : 'pct';
-    const pct = (type === 'pct' && b.target_pct !== '' && b.target_pct != null) ? Number(b.target_pct) : null;
-    const val = (type === 'value' && b.target_value !== '' && b.target_value != null) ? Number(b.target_value) : null;
-    if (pct == null && val == null) { await pool.query(`DELETE FROM planner.demand_revenue_targets WHERE country=$1 AND channel=$2 AND fy=$3`, [b.country, b.channel, b.fy]); return res.json({ cleared: true }); }
-    await pool.query(`INSERT INTO planner.demand_revenue_targets (country, channel, fy, target_type, target_pct, target_value, updated_by, updated_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,now()) ON CONFLICT (country, channel, fy)
-      DO UPDATE SET target_type=excluded.target_type, target_pct=excluded.target_pct, target_value=excluded.target_value, updated_by=excluded.updated_by, updated_at=now()`,
-      [b.country, b.channel, b.fy, type, pct, val, authUser(req) || null]);
+    let type, pct = null, val = null, q1 = null, q2 = null, q3 = null, q4 = null;
+    if (b.target_type === 'quarterly') {
+      type = 'quarterly';
+      q1 = numOrNull(b.target_q1_pct); q2 = numOrNull(b.target_q2_pct); q3 = numOrNull(b.target_q3_pct); q4 = numOrNull(b.target_q4_pct);
+      if (q1 == null && q2 == null && q3 == null && q4 == null) { await pool.query(`DELETE FROM planner.demand_revenue_targets WHERE country=$1 AND channel=$2 AND fy=$3`, [b.country, b.channel, b.fy]); return res.json({ cleared: true }); }
+    } else {
+      type = b.target_type === 'value' ? 'value' : 'pct';
+      pct = (type === 'pct') ? numOrNull(b.target_pct) : null;
+      val = (type === 'value') ? numOrNull(b.target_value) : null;
+      if (pct == null && val == null) { await pool.query(`DELETE FROM planner.demand_revenue_targets WHERE country=$1 AND channel=$2 AND fy=$3`, [b.country, b.channel, b.fy]); return res.json({ cleared: true }); }
+    }
+    await pool.query(`INSERT INTO planner.demand_revenue_targets (country, channel, fy, target_type, target_pct, target_value, target_q1_pct, target_q2_pct, target_q3_pct, target_q4_pct, updated_by, updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now()) ON CONFLICT (country, channel, fy)
+      DO UPDATE SET target_type=excluded.target_type, target_pct=excluded.target_pct, target_value=excluded.target_value, target_q1_pct=excluded.target_q1_pct, target_q2_pct=excluded.target_q2_pct, target_q3_pct=excluded.target_q3_pct, target_q4_pct=excluded.target_q4_pct, updated_by=excluded.updated_by, updated_at=now()`,
+      [b.country, b.channel, b.fy, type, pct, val, q1, q2, q3, q4, authUser(req) || null]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
