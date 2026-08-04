@@ -8080,7 +8080,7 @@
   function writePoTabHash(po,tab){ if(!po)return; writeHash(['supply','purchase-orders',POTAB_SLUG[tab]||tab,po]); }
   // Friendly top-level view URLs: planning→#/demand/<sub>, exec→#/reports/<sub>, others as-is.
   function writeViewHash(v){
-    if(v==='planning')writeHash(['demand',(typeof DEMAND_VIEW!=='undefined'&&DEMAND_VIEW)||'plan']);
+    if(v==='planning'){ var _dv=(typeof DEMAND_VIEW!=='undefined'&&DEMAND_VIEW)||'plan'; var _dinp=['targets','keyaccounts','calendar','revenue']; writeHash(_dinp.indexOf(_dv)>=0?['demand','inputs',_dv]:['demand',_dv]); }   // input views deep-link as #/demand/inputs/<slug>
     else if(v==='exec')writeHash(['reports',(typeof REPORT_VIEW!=='undefined'&&REPORT_VIEW)||'ex']);
     else if(v==='actions'||v==='buy'||v==='fba'||v==='transfer'){   // BUY & MOVE group: #/buy-move/<actions|buy|fba|transfer>
       var _sub=v;   // entering via the top BUY & MOVE button (data-view='actions') → restore the last sub-tab the user was on
@@ -8110,7 +8110,7 @@
       else selectSection(sec);
     } else if(seg[0]==='config'){ if(seg[1])CONFIG_SUB=seg[1]; if(seg[1]==='portal'&&seg[2])_pendingPortalSup=decodeURIComponent(seg[2]); if(typeof enterConfig==='function')enterConfig(); }
     else if(seg[0]==='scenario'){ if(typeof showScenario==='function'){ showScenario(); if(seg[1])scenSelect(seg[1]); } }
-    else if(seg[0]==='demand'){ if(seg[1]&&typeof DEMAND_VIEW!=='undefined')DEMAND_VIEW=seg[1]; var _db=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]'); if(_db)_db.click(); }
+    else if(seg[0]==='demand'){ if(typeof DEMAND_VIEW!=='undefined'){ if(seg[1]==='inputs'&&seg[2])DEMAND_VIEW=seg[2]; else if(seg[1])DEMAND_VIEW=seg[1]; } var _db=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]'); if(_db)_db.click(); }   // #/demand/inputs/<slug> deep-links an input view
     else if(seg[0]==='reports'){ if(seg[1]&&typeof REPORT_VIEW!=='undefined')REPORT_VIEW=seg[1]; var _rb=document.querySelector('#view-tabs-row .view-toggle[data-view="exec"]'); if(_rb)_rb.click(); }
     else if(seg[0]==='product'){ if(typeof showProduct==='function'){ if(seg[2])_pendingProdRef=decodeURIComponent(seg[2]); showProduct(); selectProductSub(seg[1]||'plan'); } }
     else if(seg[0]==='buy-move'||seg[0]==='buy'||seg[0]==='fba'){

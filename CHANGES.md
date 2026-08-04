@@ -3,6 +3,10 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.501 - DEMAND Inputs: light-blue level-3 nav + #/demand/inputs/<slug> deep links ⚠️ NEEDS TESTING
+- The Inputs pop-down dropdown is now a consistent light-blue level-3 (d3nav) bar — clicking Inputs enters the group and shows Sell-through targets / Key accounts / Calendar / Revenue as d3tabs.
+- Each input view deep-links as #/demand/inputs/<slug> (e.g. #/demand/inputs/keyaccounts); router (writeViewHash + applyRoute) handles it both ways. artifact_v16.7.html + supply/inject.html. No migration.
+
 ## v26.500 - FBA grid: Carton qty after Disc; On Order → last column "3PL Inbound" with hover detail ⚠️ NEEDS TESTING
 - FBA tab columns reordered: Carton qty now sits directly after Disc; On Order moved to the LAST column and renamed 3PL Inbound.
 - 3PL Inbound cell has a 120ms hover tooltip listing each inbound line (PO ref · qty · date, one line per shipment). Buy/Transfer views unchanged. artifact_v16.7.html. No migration.
