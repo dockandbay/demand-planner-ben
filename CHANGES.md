@@ -1,3 +1,6 @@
+## v26.533 — 3PL Invoicing: streamline Phase 1+2 (auto-map)
+- Analyse now auto-runs the Cost Centre mapping (no separate Map button). Import also auto-refreshes the analysed invoice map. You only manage exceptions (unmapped) + Clean-up sweep. Removed the redundant Map button.
+
 ## v26.532 — 3PL Invoicing Phase 3: Xero bill CSV download
 - Download CSV now builds a Xero bills-import CSV (27-col format): non-order cost types (account codes from Config cost-type accounts) + two lines per cost centre (Freight + Fulfilment) using the Account Map fulfilment_account for that region x channel. Header/fields match the Xero template (ContactName, FULFILLMENT-<region>-<period-end>, dates, 20% VAT on Expenses, currency). No Xero write. Unmapped freight/fulfilment surfaced as flagged lines.
 

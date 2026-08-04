@@ -9407,6 +9407,7 @@ function render3plInvoice(body){
         +'<div style="margin-top:6px">Invoice total (from PDF)'+(_reconCur?(' — '+e(_reconCur)):'')+': <input id="tpl-recon" type="text" placeholder="0.00" style="width:130px;text-align:right;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px"> <span id="tpl-recon-var" class="mut"></span></div></div></div>';
       html+='</div>';
       cont.innerHTML=html; cont.dataset.aid=String(id);
+      var _mo=document.getElementById('tpl-map-out'); if(_mo)renderMap(_mo, id);   // auto-map on analyse — only exceptions + sweep to manage
       var ri=cont.querySelector('#tpl-recon'), rv=cont.querySelector('#tpl-recon-var');
       if(ri)ri.oninput=function(){ var v=parseFloat(String(ri.value).replace(/[^0-9.\-]/g,'')); if(!isFinite(v)){rv.textContent='';return;} var diff=v-_reconBase; rv.style.color=Math.abs(diff)<0.01?'#166534':'#b91c1c'; rv.textContent=(Math.abs(diff)<0.01?'matches':('variance '+(diff>=0?'+':'')+fmt(diff))); };
   }
@@ -9450,7 +9451,6 @@ function render3plInvoice(body){
         +'<button id="tpl-cin7imp" title="Import new (not-yet-imported) sales orders for this month by invoice date" style="border:1px solid #0f766e;background:#f0fdfa;color:#0f766e;border-radius:6px;padding:5px 13px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">⟳ Import Cin7 orders</button>'
         +'<button id="tpl-cin7sweep" title="Clean-up: fetch this invoice&rsquo;s still-unmapped order references directly from Cin7 (any date / branch)" style="border:1px solid #7c3aed;background:#fff;color:#7c3aed;border-radius:6px;padding:5px 11px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">🧹 Clean-up sweep</button>'
         +'<span style="width:1px;height:16px;background:#e0e0e0;margin:0 2px"></span>'
-        +'<button id="tpl-map" style="border:1px solid #1d4ed8;background:#eff6ff;color:#1e40af;border-radius:6px;padding:5px 13px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">Map to Cost Centres (Cin7) →</button>'
         +'<button id="tpl-csv" title="Export the mapped account summary as CSV (Phase 3)" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:6px;padding:5px 13px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">⬇ Download CSV</button>'
         +'<a id="tpl-clear" title="Clear the current analysis" style="font-size:11px;color:#dc2626;cursor:pointer;font-weight:600">Clear</a>'
         +'<span id="tpl-cin7msg" style="font-size:11px;color:#94a3b8"></span>'
@@ -9475,7 +9475,7 @@ function render3plInvoice(body){
     showSum(d.cin7_summary);
     function doImport(sweep){ var btn=sweep?sw:ci; if(btn)btn.disabled=true; cim.style.color='#64748b'; cim.textContent=sweep?'Sweeping the whole month…':'Importing new orders…';
       fetch('/api/supply/tpl/cin7-import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({tpl:TPL3_STATE.tpl,period:TPL3_STATE.period,sweep:!!sweep})}).then(function(r){return r.json();}).then(function(j){ if(btn)btn.disabled=false;
-        if(j&&j.ok){ cim.style.color='#166534'; cim.textContent=(j.note?j.note:('Imported '+(j.imported||0)+' orders'+(j.from?(' ('+ddmy(j.from)+' → '+ddmy(j.to)+')'):''))); showSum(j.summary); }
+        if(j&&j.ok){ cim.style.color='#166534'; cim.textContent=(j.note?j.note:('Imported '+(j.imported||0)+' orders'+(j.from?(' ('+ddmy(j.from)+' → '+ddmy(j.to)+')'):''))); showSum(j.summary); var _pc=b.querySelector('#tpl-parse'), _aid=_pc&&_pc.dataset.aid, _mo2=b.querySelector('#tpl-map-out'); if(_aid&&_mo2)renderMap(_mo2,_aid); }
         else { cim.style.color='#b45309'; cim.textContent=(j&&j.error)||'Import failed'; } }).catch(function(err){ if(btn)btn.disabled=false; cim.style.color='#dc2626'; cim.textContent=String(err.message||err); }); }
     if(ci)ci.onclick=function(){ doImport(false); };
     if(sw)sw.onclick=function(){ var pc=b.querySelector('#tpl-parse'), aid=pc&&pc.dataset.aid, mo=b.querySelector('#tpl-map-out'); if(!aid){ cim.style.color='#b45309'; cim.textContent='Analyse a file first, then Clean-up sweep.'; return; } sw.disabled=true; cim.style.color='#64748b'; cim.textContent='Fetching unmapped references from Cin7…'; fetch('/api/supply/tpl/cin7-sweep/'+aid,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({tpl:TPL3_STATE.tpl,period:TPL3_STATE.period})}).then(function(r){return r.json();}).then(function(j){ sw.disabled=false; if(j&&j.ok){ cim.style.color='#166534'; cim.textContent='Swept '+j.fetched+' order(s) by reference ('+j.missing_before+' were unmapped) — re-mapping…'; if(mo)renderMap(mo, aid); } else { cim.style.color='#b45309'; cim.textContent=(j&&j.error)||'Sweep failed'; } }).catch(function(err){ sw.disabled=false; cim.style.color='#dc2626'; cim.textContent=String(err.message||err); }); };
