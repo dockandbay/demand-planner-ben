@@ -1,3 +1,6 @@
+## v26.534 — Demand plan report buttons: tidier
+- The 4 plan report buttons (Revenue vs target / Exec summary / Summary + targets / Target recs) are smaller, outline-style (colored border+text on white, 11px) and wrap, to align with the page UI. Labels shortened, emojis dropped.
+
 ## v26.533 — 3PL Invoicing: streamline Phase 1+2 (auto-map)
 - Analyse now auto-runs the Cost Centre mapping (no separate Map button). Import also auto-refreshes the analysed invoice map. You only manage exceptions (unmapped) + Clean-up sweep. Removed the redundant Map button.
 
