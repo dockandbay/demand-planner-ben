@@ -1,3 +1,6 @@
+## v26.528 — 3PL Cin7 import: filter by 3PL branch
+- Import now scopes to the 3PL's Cin7 branch (eu_ifulfilment=25073, us_geneva=5055, uk_ilg=5053, au_coghlans=16288) so it only pulls that 3PL's sales orders instead of all branches. Fixes the low match rate (was importing every branch).
+
 ## v26.527 — 3PL Cin7 import log tab + clearer unmapped
 - New Import log tab: every Cin7 import documented (ran-at, 3PL, period, invoice-date range, kind, orders, status, Cin7 calls, error). Import endpoint now logs all outcomes (ok/skipped/error), migration 178 adds status/error/cin7_calls.
 - Map: unmapped section no longer dumps order refs; it states the unmapped orders + freight/fulfilment (= the gap vs the invoice total) and points to the unique cost-centre rows.

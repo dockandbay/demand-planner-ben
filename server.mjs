@@ -5463,6 +5463,8 @@ async function tplCin7Summary(period) {
 }
 app.post('/api/supply/tpl/cin7-import', async (req, res) => {
   const tpl0 = String((req.body && req.body.tpl) || req.query.tpl || '') || null;
+  const TPL_CIN7_BRANCH = { eu_ifulfilment: 25073, us_geneva: 5055, uk_ilg: 5053, au_coghlans: 16288 };   // Cin7 BranchId per 3PL — scope the import so we only pull that 3PL's orders
+  const branchId = Number((req.body && req.body.branch_id) || req.query.branch_id) || TPL_CIN7_BRANCH[tpl0] || null;
   let logPeriod = String((req.body && req.body.period) || req.query.period || '').trim();
   const logImport = (from, to, kind, orders, status, error, calls) => pool.query(
     `INSERT INTO planner.tpl_cin7_imports (tpl, period, from_date, to_date, orders, kind, status, error, cin7_calls) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
@@ -5490,7 +5492,7 @@ app.post('/api/supply/tpl/cin7-import', async (req, res) => {
       }
     }
     logPeriod = period;
-    const where = encodeURIComponent("InvoiceDate>='" + start + "T00:00:00Z' AND InvoiceDate<='" + end + "T23:59:59Z'");
+    const where = encodeURIComponent("InvoiceDate>='" + start + "T00:00:00Z' AND InvoiceDate<='" + end + "T23:59:59Z'" + (branchId ? " AND BranchId=" + branchId : ""));
     let page = 1, imported = 0, calls = 0; const MAXP = 80;
     while (page <= MAXP) {
       const r = await cin7Fetch('https://api.cin7.com/api/v1/SalesOrders?rows=250&page=' + page + '&fields=id,reference,customerOrderNo,costCenter,memberCostCenter,invoiceDate,branchId,total,freightTotal&where=' + where, { method: 'GET', headers: { Authorization: auth, 'content-type': 'application/json' } });
