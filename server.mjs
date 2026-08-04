@@ -5337,10 +5337,10 @@ function _tplNum(v) {
   return Number.isFinite(n) ? n : null;
 }
 function _tplGridSummary(name, grid) {
-  let hr = 0;
-  for (let i = 0; i < Math.min(8, grid.length); i++) {
+  let hr = 0, best = -1;   // header = the fullest row in the first dozen (handles multi-row-header 3PL sheets)
+  for (let i = 0; i < Math.min(12, grid.length); i++) {
     const c = (grid[i] || []).filter(x => x != null && String(x).trim() !== '').length;
-    if (c > 3) { hr = i; break; }
+    if (c > best) { best = c; hr = i; }
   }
   const headers = grid[hr] || [];
   // A data row must have a non-empty KEY (first column). This drops embedded totals/summary rows
@@ -5358,16 +5358,18 @@ function _tplGridSummary(name, grid) {
     return { name: String(h == null ? ('col' + (ci + 1)) : h).trim(), numeric, sum: numeric ? sum : null, count: ncount + tcount, samples: numeric ? null : Array.from(samples) };
   }).filter(c => c.name !== '' && c.name != null && !/^col\d+$/.test(c.name));
   const find = nm => cols.find(c => c.name.toLowerCase() === nm);
-  const normCur = x => { x = String(x || '').trim().toUpperCase(); if (x === 'EURO' || x === 'EUR' || x === '€') return 'EUR'; if (x === 'GBP' || x === '£') return 'GBP'; if (x === 'USD' || x === '$') return 'USD'; return x || null; };
+  const normCur = x => { x = String(x || '').trim().toUpperCase(); if (x === 'EURO' || x === 'EUR' || x === '€') return 'EUR'; if (x === 'GBP' || x === '£') return 'GBP'; if (x === 'USD' || x === '$') return 'USD'; if (x === 'AUD' || x === 'AU$' || x === 'A$') return 'AUD'; return x || null; };
   const cidx = headers.findIndex(h => String(h).trim().toLowerCase() === 'currency');
   let currencies = null;
   if (cidx >= 0) { const s = new Set(); data.forEach(r => { const c = normCur(r && r[cidx]); if (c) s.add(c); }); currencies = Array.from(s); }
   let currency = (currencies && currencies[0]) || null;
   if (!currency) { const m = String(name).toUpperCase(); currency = /GBP/.test(m) ? 'GBP' : (/EUR/.test(m) ? 'EUR' : (/USD/.test(m) ? 'USD' : null)); }
-  const totCol = find('total cost') || find('total');
+  const totCol = find('total cost') || find('total') || find('total ($)') || cols.find(c => /^total\b/i.test(c.name));
+  const frCol = find('shipping fee') || find('carrier cost ($)') || find('carrier cost');
+  const fuCol = find('total excl shipping') || find('fulfilment cost ($)') || find('fulfillment cost ($)') || find('fulfilment cost');
   return {
     name, headerRow: hr + 1, dataRows: data.length, columns: cols, currencies, currency,
-    highlights: { freight: (find('shipping fee') || {}).sum ?? null, fulfilment: (find('total excl shipping') || {}).sum ?? null, total: (totCol || {}).sum ?? null }
+    highlights: { freight: (frCol || {}).sum ?? null, fulfilment: (fuCol || {}).sum ?? null, total: (totCol || {}).sum ?? null }
   };
 }
 app.post('/api/supply/tpl/parse/:id', async (req, res) => {
@@ -5405,12 +5407,20 @@ async function _tplOrderRows(buf, isCsv) {
     const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf);
     wb.eachSheet(ws => { const grid = []; ws.eachRow({ includeEmpty: false }, r => { const arr = []; r.eachCell({ includeEmpty: true }, (cell, col) => { arr[col - 1] = _tplCellVal(cell); }); grid.push(arr); }); if (grid.length) grids.push({ grid }); });
   }
+  // Column-name candidates so the same parser handles iFulfilment (Reference/Shipping Fee/Total Excl Shipping)
+  // and Coghlans (Customer Ref/Carrier Cost ($)/Fulfilment Cost ($)) etc.
+  const REF = ['reference', 'customer ref', 'customer reference', 'customerref', 'order ref'];
+  const FRT = ['shipping fee', 'carrier cost ($)', 'carrier cost', 'freight'];
+  const FUL = ['total excl shipping', 'fulfilment cost ($)', 'fulfillment cost ($)', 'fulfilment cost', 'fulfillment cost'];
+  const idxOf = (hs, cands) => { for (const cnd of cands) { const ix = hs.indexOf(cnd); if (ix >= 0) return ix; } return -1; };
   for (const { grid } of grids) {
-    let hr = -1;
-    for (let i = 0; i < Math.min(8, grid.length); i++) { const hs = (grid[i] || []).map(x => String(x == null ? '' : x).trim().toLowerCase()); if (hs.includes('reference') && hs.includes('shipping fee')) { hr = i; break; } }
+    let hr = -1, ri = -1, si = -1, fi = -1;
+    for (let i = 0; i < Math.min(20, grid.length); i++) {
+      const hs = (grid[i] || []).map(x => String(x == null ? '' : x).trim().toLowerCase());
+      const r = idxOf(hs, REF), s = idxOf(hs, FRT);
+      if (r >= 0 && s >= 0) { hr = i; ri = r; si = s; fi = idxOf(hs, FUL); break; }
+    }
     if (hr < 0) continue;
-    const hs = (grid[hr] || []).map(x => String(x == null ? '' : x).trim().toLowerCase());
-    const ri = hs.indexOf('reference'), si = hs.indexOf('shipping fee'), fi = hs.indexOf('total excl shipping');
     const out = [];
     for (let r = hr + 1; r < grid.length; r++) {
       const row = grid[r] || []; const k = (row[0] != null ? String(row[0]).trim() : '');
@@ -5580,18 +5590,18 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
     let grids = [];
     if (isCsv) { grids = [{ name: 'CSV', grid: String(row.content.toString('utf8')).split(/\r?\n/).filter(l => l.length).map(l => l.split(',').map(c => c.replace(/^"|"$/g, ''))) }]; }
     else { const ExcelJS = (await import('exceljs')).default; const wb = new ExcelJS.Workbook(); await wb.xlsx.load(row.content); wb.eachSheet(ws => { const grid = []; ws.eachRow({ includeEmpty: false }, r => { const arr = []; r.eachCell({ includeEmpty: true }, (cell, col) => { arr[col - 1] = _tplCellVal(cell); }); grid.push(arr); }); if (grid.length) grids.push({ name: ws.name, grid }); }); }
-    const ctype = nm => { nm = String(nm || ''); if (/order/i.test(nm)) return 'orders'; if (/storage/i.test(nm)) return 'storage'; if (/return/i.test(nm)) return 'returns'; if (/goods\s*in|inbound|rework/i.test(nm)) return 'inbound'; return 'other'; };
+    const ctype = nm => { nm = String(nm || ''); if (/invoice|layout|setting|summary/i.test(nm)) return 'skip'; if (/order/i.test(nm)) return 'orders'; if (/storage/i.test(nm)) return 'storage'; if (/return/i.test(nm)) return 'returns'; if (/goods\s*in|inbound|rework/i.test(nm)) return 'inbound'; return 'other'; };
     const sheetSums = grids.map(g => ({ ct: ctype(g.name), sum: _tplGridSummary(g.name, g.grid) }));
     // account map (fulfilment_account by "region - channel") + cost-type accounts
     const amap = {}; (await pool.query(`SELECT label, fulfilment_account FROM planner.tpl_account_map`)).rows.forEach(r => { amap[String(r.label || '').trim().toLowerCase()] = r.fulfilment_account || ''; });
     const cacc = {}; (await pool.query(`SELECT cost_type, account_code FROM planner.tpl_cost_accounts WHERE tpl=$1`, [tpl0 || ''])).rows.forEach(r => { cacc[r.cost_type] = r.account_code || ''; });
-    const XERO = { eu_ifulfilment: { contact: 'I-Fulfilment', region: 'EU' }, us_geneva: { contact: 'Geneva', region: 'US' }, uk_ilg: { contact: 'ILG', region: 'UK' }, au_coghlans: { contact: 'Coghlans', region: 'AU' } };
+    const XERO = { eu_ifulfilment: { contact: 'I-Fulfilment', region: 'EU', currency: 'EUR' }, us_geneva: { contact: 'Geneva', region: 'US', currency: 'USD' }, uk_ilg: { contact: 'ILG', region: 'UK', currency: 'GBP' }, au_coghlans: { contact: 'Coghlan Sydney Pty Ltd', region: 'AU', currency: 'AUD' } };
     const meta = XERO[tpl0] || { contact: tpl0 || '3PL', region: 'EU' };
     const pm = /^\d{4}-\d{2}$/.test(period) ? period : (new Date().toISOString().slice(0, 7));
     const [py, pmo] = pm.split('-').map(Number); const endISO = new Date(Date.UTC(py, pmo, 0)).toISOString().slice(0, 10);
     const dd = endISO.slice(8, 10) + '/' + endISO.slice(5, 7) + '/' + endISO.slice(0, 4);
     const invNo = 'FULFILLMENT-' + meta.region + '-' + endISO;
-    const ordSheet = sheetSums.find(s => s.ct === 'orders'); const cur = (ordSheet && ordSheet.sum.currency) || 'EUR';
+    const ordSheet = sheetSums.find(s => s.ct === 'orders'); const cur = (ordSheet && ordSheet.sum.currency) || meta.currency || 'EUR';
     const tax = '20% (VAT on Expenses)';
     const HDR = '*ContactName,EmailAddress,POAddressLine1,POAddressLine2,POAddressLine3,POAddressLine4,POCity,PORegion,POPostalCode,POCountry,*InvoiceNumber,*InvoiceDate,*DueDate,Total,InventoryItemCode,Description,*Quantity,*UnitAmount,*AccountCode,*TaxType,TaxAmount,TrackingName1,TrackingOption1,TrackingName2,TrackingOption2,Currency,*OriginalAmount';
     const esc = x => { x = String(x == null ? '' : x); return /[",\n]/.test(x) ? ('"' + x.replace(/"/g, '""') + '"') : x; };
@@ -5599,7 +5609,7 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
     const lines = [];
     const push = (desc, amt, code, lineCur) => { lines.push([meta.contact, '', '', '', '', '', '', '', '', '', invNo, dd, dd, '', '', desc, '1', money(amt), code || '', tax, '', '', '', '', '', (lineCur || cur), money(amt)].map(esc).join(',')); };
     const NOD = { inbound: 'Purchase Orders & Rework', returns: 'Returns', storage: 'Storage Fees', other: 'Other Fees (manual adjustment)' };
-    sheetSums.forEach(s => { if (s.ct === 'orders') return; const t = s.sum.highlights && s.sum.highlights.total; if (t == null) return; push(NOD[s.ct] || s.sum.name, t, cacc[s.ct] || '', s.sum.currency); });
+    sheetSums.forEach(s => { if (s.ct === 'orders' || s.ct === 'skip') return; const t = s.sum.highlights && s.sum.highlights.total; if (t == null) return; push(NOD[s.ct] || s.sum.name, t, cacc[s.ct] || '', s.sum.currency); });
     (agg.costCenters || []).forEach(cc => { const label = String(cc.costCenter).replace(/^COGS\s*-\s*/i, ''); const code = amap[label.toLowerCase()] || ''; push('Freight - Fulfilment - ' + label, cc.freight, code); push('Fulfilment - Fulfilment - ' + label, cc.fulfilment, code); });
     if (agg.unmapped && (agg.unmapped.freight || agg.unmapped.fulfilment)) { push('Freight - Fulfilment - UNMAPPED (assign account)', agg.unmapped.freight, ''); push('Fulfilment - Fulfilment - UNMAPPED (assign account)', agg.unmapped.fulfilment, ''); }
     const csv = HDR + '\n' + lines.join('\n');

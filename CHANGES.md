@@ -1,3 +1,6 @@
+## v26.537 — 3PL Invoicing: support AU Coghlans (generalised parser)
+- Parser now handles Coghlans format alongside iFulfilment: per-order columns detected from candidates (Reference/Customer Ref, Shipping Fee/Carrier Cost, Total Excl Shipping/Fulfilment Cost); sheet header = fullest row (multi-header sheets); Total ($) totals; AUD; branch 16288; skip Invoice/Layout/Settings summary sheets. Coghlans reconciles: 260 orders, freight 2,695.47, fulfilment 1,093.34, Goods In 2,488.79, Other 1,401.26. Same import/map/sweep/Xero-CSV flow.
+
 ## v26.536 — 3PL Cin7 import: only completed days
 - Monthly import now caps at the last COMPLETED day (yesterday) — it never pulls today's partial day. Past months still import the full month. (Parsing already auto-maps against previously-imported orders, e.g. weekly Coghlans invoices vs monthly imports.)
 
