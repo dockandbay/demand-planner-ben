@@ -5703,6 +5703,58 @@ app.get('/api/supply/tpl/cin7-log', async (req, res) => {
     res.json({ ok: true, runs: rows });
   } catch (e) { res.json({ ok: false, error: e.message, runs: [] }); }
 });
+// ── FBA pending branch transfers (migration 179) ────────────────────────────────────────────────────────
+// A just-processed Cin7 branch transfer INTO an FBA/AWD branch isn't reflected as inbound straight away, so the
+// FBA transfer recommendation wrongly re-suggests it. This imports approved BranchTransfers created in the last
+// 48h (dest branch in the FBA/AWD set) into planner.fba_pending_transfers, then prunes any that have since landed
+// in inbound_shipments (matched by reference) or been received — so the table = in-flight, not-yet-inbound.
+const FBA_TRANSFER_BRANCH = { 5052: { market: 'uk', pool: 'fba' }, 5056: { market: 'us', pool: 'fba' }, 16289: { market: 'au', pool: 'fba' }, 27816: { market: 'us', pool: 'awd' }, 10879: { market: 'eu', pool: 'fba' } };
+app.post('/api/supply/fba-transfers/refresh', async (req, res) => {
+  try {
+    const auth = cin7Auth(); if (!auth) return res.json({ ok: false, error: 'Cin7 is not configured in this environment (no CIN7 credentials).' });
+    const since = new Date(Date.now() - 48 * 3600 * 1000).toISOString().slice(0, 19) + 'Z';   // Cin7 needs yyyy-MM-ddTHH:mm:ssZ
+    let page = 1, calls = 0, kept = 0, lines = 0;
+    for (; ;) {
+      const where = encodeURIComponent("CreatedDate>='" + since + "'");
+      const url = 'https://api.cin7.com/api/v1/BranchTransfers?rows=250&page=' + page + '&fields=id,reference,sourceBranchId,destinationBranchId,stage,approvalDate,createdDate,dispatchedDate,receivedDate,isApproved,lineItems&where=' + where;
+      const r = await cin7Fetch(url, { method: 'GET', headers: { Authorization: auth, 'content-type': 'application/json' } }); calls++;
+      if (r.status >= 400) return res.json({ ok: false, error: 'Cin7 HTTP ' + r.status });
+      let arr = []; try { arr = await r.json(); } catch (e) { arr = []; }
+      if (!Array.isArray(arr) || !arr.length) break;
+      for (const t of arr) {
+        const meta = FBA_TRANSFER_BRANCH[t.destinationBranchId]; if (!meta || !t.isApproved) continue;
+        const wh = meta.market + '_' + meta.pool, bySku = {};
+        (t.lineItems || []).forEach(li => { const sku = String(li.code || '').trim(); if (!sku) return; bySku[sku] = (bySku[sku] || 0) + (Number(li.qty) || 0); });
+        kept++;
+        for (const sku in bySku) {
+          await pool.query(`INSERT INTO planner.fba_pending_transfers (cin7_id,sku,qty,reference,source_branch_id,dest_branch_id,market,pool,warehouse,stage,eta,created_date,dispatched_date,received_date,imported_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())
+            ON CONFLICT (cin7_id,sku) DO UPDATE SET qty=excluded.qty,reference=excluded.reference,stage=excluded.stage,eta=excluded.eta,dispatched_date=excluded.dispatched_date,received_date=excluded.received_date,imported_at=now()`,
+            [t.id, sku, bySku[sku], t.reference || null, t.sourceBranchId || null, t.destinationBranchId || null, meta.market, meta.pool, wh, t.stage || null, (t.approvalDate ? String(t.approvalDate).slice(0, 10) : null), t.createdDate || null, t.dispatchedDate || null, t.receivedDate || null]);
+          lines++;
+        }
+      }
+      if (arr.length < 250) break; page++; if (page > 20) break;
+    }
+    // prune anything that has since landed in the normal inbound feed (same reference) or been received
+    const pr = await pool.query(`DELETE FROM planner.fba_pending_transfers WHERE received_date IS NOT NULL OR (reference IS NOT NULL AND reference IN (SELECT DISTINCT reference FROM planner.inbound_shipments WHERE reference IS NOT NULL))`);
+    await pool.query(`INSERT INTO planner.app_settings (key,value,updated_at) VALUES ('fba_transfers_last_run',$1,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_at=now()`, [new Date().toISOString()]);
+    res.json({ ok: true, transfers: kept, lines, pruned: pr.rowCount, cin7_calls: calls });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Serve the in-flight (not-yet-inbound) FBA transfers for the FBA tab + last-run stamp. Only rows whose
+// reference isn't already in inbound_shipments (defensive — the refresh also prunes them).
+app.get('/api/supply/fba-transfers/list', async (req, res) => {
+  try {
+    const rows = (await pool.query(`SELECT cin7_id, sku, qty, reference, market, pool, warehouse, stage,
+        to_char(eta,'YYYY-MM-DD') eta, to_char(created_date,'YYYY-MM-DD') created, to_char(dispatched_date,'YYYY-MM-DD') dispatched
+      FROM planner.fba_pending_transfers t
+      WHERE received_date IS NULL AND (reference IS NULL OR NOT EXISTS (SELECT 1 FROM planner.inbound_shipments i WHERE i.reference=t.reference))
+      ORDER BY created_date DESC, reference, sku`)).rows;
+    const lr = (await pool.query(`SELECT value, to_char(updated_at,'YYYY-MM-DD HH24:MI') at FROM planner.app_settings WHERE key='fba_transfers_last_run'`)).rows[0];
+    res.json({ ok: true, rows, last_run: lr ? (lr.value || lr.at) : null });
+  } catch (e) { res.json({ ok: false, error: e.message, rows: [] }); }
+});
 // Full snooze/dismiss state map (used by the PO grid so its badges/counter respect snooze).
 app.get('/api/supply/actions/state', async (req, res) => {
   try {

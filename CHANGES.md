@@ -1,3 +1,6 @@
+## v26.551 — FBA pending branch transfers: backend (import + serve)
+- Migration 179: planner.fba_pending_transfers. New endpoints: POST /api/supply/fba-transfers/refresh (imports approved Cin7 BranchTransfers created in the last 48h into the FBA/AWD branches — UK FBA 5052 / US FBA 5056 / AU FBA 16289 / US AWD 27816 / EU FBA 10879 — then prunes any that landed in inbound_shipments (by reference) or were received) and GET /api/supply/fba-transfers/list (in-flight transfers + last-run stamp). approvalDate = expected delivery (eta). Verified live: pulled 2 in-flight US FBA transfers not yet inbound. Calc inclusion + FBA-tab UI + auto-run triggers next.
+
 ## v26.550 — Portal MANAGE badge: single count source (Diviyaj backlog 4)
 - poActCount (in-place refresh after a write) now delegates to poActionCount (the render / exceptions-filter / samples-total count). It was a divergent reimplementation that added a 'no shipment yet' term + dtcShipDataDue and skipped the prodActionable(<=54) guard, so the MANAGE badge jumped to a different number after any edit. Now consistent before/after and matches the exceptions filter.
 
