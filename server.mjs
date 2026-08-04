@@ -471,6 +471,13 @@ async function buildFBADIMS() {
 
 const app = express();
 app.use(express.json({ limit: '25mb' }));   // 25mb: document/invoice uploads arrive as base64 JSON (~33% inflation). NOTE for Diviyaj: Vercel serverless caps the request body at ~4.5MB regardless — large doc uploads need direct-to-storage (Supabase signed URL) on live; this limit only helps local/self-hosted.
+// Supplier-entered money fields can arrive with thousands separators / currency symbols (e.g. "3,262.35" or
+// "$1,200"). Strip everything but digits/dot/minus, then validate — returns a clean numeric string, or null if
+// it isn't a number. Guarantees a stray comma never reaches a ::numeric cast (which 500'd the PO/cashflow
+// queries when a supplier typed "3,262.35" for PO-55AUWK3). SQL twin: SAFE_NUM_SQL below.
+function sanitiseMoney(v) { const s = String(v == null ? '' : v).replace(/[^0-9.\-]/g, ''); return /^-?[0-9]+(\.[0-9]+)?$/.test(s) ? s : null; }
+// Same rule in SQL for casting a stored text value → numeric safely (garbage → NULL, never an error).
+const SAFE_NUM_SQL = col => `(CASE WHEN regexp_replace(coalesce(${col},''),'[^0-9.-]','','g') ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN regexp_replace(${col},'[^0-9.-]','','g')::numeric END)`;
 
 // gzip large JSON responses (built-in zlib — no dependency). The PO grid payload is ~3.6MB of JSON;
 // gzip cuts it ~10x over the wire. Only kicks in when the client accepts gzip and the body is worth it.
@@ -4928,6 +4935,8 @@ app.post('/api/supply/portal-submit', async (req, res) => {
     const st = String(b.production_status).trim();
     if (st !== '' && !PROD_STATUSES.includes(st)) return res.status(400).json({ error: 'bad production_status' });
   }
+  // reject a non-numeric invoice value up front (commas/currency are stripped; letters/garbage are refused)
+  if (b.invoice_value != null && String(b.invoice_value).trim() !== '' && sanitiseMoney(b.invoice_value) == null) return res.status(400).json({ error: 'Invoice value must be a number (no currency symbols or letters).' });
   const out = { staged: [], applied: [] }; let _invoiceSubmit = null;
   // one transaction for the whole submit so a mid-way failure can't leave a half-created shipment / orphan PO
   const client = await pool.connect();
@@ -4946,7 +4955,7 @@ app.post('/api/supply/portal-submit', async (req, res) => {
       if (kind === 'invoice_value') _invoiceSubmit = String(value);
     };
     await stage('completion_date', b.completion_date);
-    await stage('invoice_value', b.invoice_value, b.invoice_attachment_id);
+    await stage('invoice_value', b.invoice_value == null ? null : sanitiseMoney(b.invoice_value), b.invoice_attachment_id);
     // tracking / carrier → applies to the PO's SHIPMENT (not the PO). If the PO has no shipment yet, the
     // supplier's submission CREATES a master shipment named after the PO and assigns this PO to it, so the
     // carrier/tracking flows straight onto that new shipment (and it shows up in the portal Shipment Plan).
@@ -5242,7 +5251,7 @@ app.post('/api/supply/submission/:id/apply', async (req, res) => {
     if (s.status === 'dismissed') return res.status(400).json({ error: 'this submission was rejected' });
     let applied;
     if (s.kind === 'completion_date') { await pool.query(`UPDATE planner.purchase_orders SET end_production_overide=$1::date, updated_at=now() WHERE po=$2`, [s.value, s.po]); applied = 'production-end → ' + s.value; }
-    else if (s.kind === 'invoice_value') { await pool.query(`UPDATE planner.purchase_orders SET supplier_invoice_total=$1::numeric, updated_at=now() WHERE po=$2`, [s.value, s.po]); applied = 'invoice total → $' + s.value; }
+    else if (s.kind === 'invoice_value') { const clean = sanitiseMoney(s.value); if (clean == null) return res.status(400).json({ error: 'Stored invoice value "' + s.value + '" is not a number — fix it on the PO before approving.' }); await pool.query(`UPDATE planner.purchase_orders SET supplier_invoice_total=$1::numeric, updated_at=now() WHERE po=$2`, [clean, s.po]); applied = 'invoice total → $' + clean; }
     else return res.status(400).json({ error: 'kind ' + s.kind + ' is not applyable here' });
     await pool.query(`UPDATE planner.supplier_submissions SET status='applied', applied_at=now(), applied_by=$1 WHERE id=$2`, [(req.body && req.body.by) || 'internal', req.params.id]);
     res.json({ applied });
@@ -9527,7 +9536,7 @@ const PO_ROWS_SQL = `
             (SELECT to_char(likely_date,'YYYY-MM-DD') FROM planner.payment_likely_dates WHERE line_key='bal:'||calc4.po) likely_balance_1,
             (SELECT to_char(likely_date,'YYYY-MM-DD') FROM planner.payment_likely_dates WHERE line_key='bal2:'||calc4.po) likely_balance_2,
             -- supplier-portal: latest PENDING invoice value awaiting approve/reject, and unread supplier notes (Timeline action)
-            (SELECT round(value::numeric,2) FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='invoice_value' AND ss.status='pending'
+            (SELECT round(${SAFE_NUM_SQL('value')},2) FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='invoice_value' AND ss.status='pending'
                ORDER BY ss.id DESC LIMIT 1) sup_invoice_pending,
             (SELECT value FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='completion_date' AND ss.status='pending'
                ORDER BY ss.id DESC LIMIT 1) sup_completion_pending,
@@ -10734,6 +10743,7 @@ app.post('/api/portal/upload', portalAuth, async (req, res) => {
 app.post('/api/portal/submit', portalAuth, async (req, res) => {
   const b = req.body || {}; if (!b.po) return res.status(400).json({ error: 'po required' });
   if (!await portalOwnsPO(req, b.po)) return portalDeny(res);
+  if (b.invoice_value != null && String(b.invoice_value).trim() !== '' && sanitiseMoney(b.invoice_value) == null) return res.status(400).json({ error: 'Invoice value must be a number (no currency symbols or letters).' });
   const sid = req.portal.supplierIds[0] || null, by = req.portal.email, out = { staged: [], applied: [] }; let _invoiceSubmit = null;
   try {
     const stage = async (kind, value, attId) => {
@@ -10747,7 +10757,7 @@ app.post('/api/portal/submit', portalAuth, async (req, res) => {
       if (kind === 'invoice_value') _invoiceSubmit = String(value);
     };
     await stage('completion_date', b.completion_date);
-    await stage('invoice_value', b.invoice_value, b.invoice_attachment_id);
+    await stage('invoice_value', b.invoice_value == null ? null : sanitiseMoney(b.invoice_value), b.invoice_attachment_id);
     if ((b.tracking != null && b.tracking !== '') || (b.carrier != null && b.carrier !== '')) {
       const sh = (await pool.query(`SELECT shipment_ref FROM planner.purchase_orders WHERE po=$1`, [b.po])).rows[0];
       const ref = b.shipment_ref || (sh && sh.shipment_ref);

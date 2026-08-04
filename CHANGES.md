@@ -1,3 +1,11 @@
+## v26.547 — Harden supplier invoice-value entry (comma/currency) — the real live-crash root cause
+- Root cause (Diviyaj): a supplier typed '3,262.35' (comma) for PO-55AUWK3; round(value::numeric,2) on the pending invoice submission could not cast the comma → PO grid + cashflow 500'd server-side and the client crashed rendering the error. Deploying HEAD alone would NOT have fixed it.
+- New sanitiseMoney() + SAFE_NUM_SQL(): strip separators/currency, validate, NULL on garbage (never an error).
+- The crashing SELECT (sup_invoice_pending) now uses the null-safe SQL cast.
+- BOTH portal submit paths (admin + portal-authenticated) sanitise invoice_value on staging and reject non-numeric with a clean 400. Approve path validates before the ::numeric cast (400 on garbage).
+- Portal client strips commas/currency and blocks a non-numeric invoice amount before submit.
+- Verified: '3,262.35'→3262.35, '$1,200'→1200, abc/blank/12.3.4→NULL (no error) in both JS and SQL.
+
 ## v26.546 — FBA ANY mode: carton-round the whole-carton part
 - ANY now shows the carton-rounded quantity for SKUs that fill whole cartons (e.g. TOWLB-CAB-LG-LTBLU-R UK shows 560, not 589) — Amazon ships in cartons. Sub-carton stragglers still send the raw amount. FULL/PARTIAL unchanged; buy plan unaffected (default mode FULL).
 
