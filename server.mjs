@@ -5313,6 +5313,83 @@ app.post('/api/supply/tpl/cost-account', async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// 3PL invoice — Phase 1: parse an uploaded file and return the sum of every numeric field per sheet.
+// Generic (works for any 3PL export): finds each sheet's header row, then sums numeric columns. Named
+// highlights (Shipping Fee = freight, Total Excl Shipping = fulfilment, Total Cost) are surfaced for the
+// per-order sheet. No DB writes — parse on demand. Cin7 order-matching + Xero mapping are later phases.
+function _tplCellVal(cell) {
+  let v = cell == null ? null : cell.value;
+  if (v == null) return null;
+  if (typeof v === 'object') {
+    if ('result' in v) return v.result;
+    if ('text' in v) return v.text;
+    if (Array.isArray(v.richText)) return v.richText.map(t => t.text).join('');
+    if (v instanceof Date) return v.toISOString().slice(0, 10);
+    return null;
+  }
+  return v;
+}
+function _tplNum(v) {
+  if (v == null) return null;
+  if (typeof v === 'string') { v = v.replace(/[£$€,\s]/g, ''); if (v === '' || v === '-') return null; }
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+function _tplGridSummary(name, grid) {
+  let hr = 0;
+  for (let i = 0; i < Math.min(8, grid.length); i++) {
+    const c = (grid[i] || []).filter(x => x != null && String(x).trim() !== '').length;
+    if (c > 3) { hr = i; break; }
+  }
+  const headers = grid[hr] || [];
+  const data = grid.slice(hr + 1).filter(row => (row || []).some(x => x != null && String(x).trim() !== ''));
+  const cols = headers.map((h, ci) => {
+    let sum = 0, ncount = 0, tcount = 0; const samples = new Set();
+    data.forEach(row => {
+      const raw = row ? row[ci] : null;
+      if (raw == null || String(raw).trim() === '') return;
+      const n = _tplNum(raw);
+      if (n != null) { sum += n; ncount++; } else { tcount++; if (samples.size < 5) samples.add(String(raw).slice(0, 40)); }
+    });
+    const numeric = ncount > 0 && ncount >= tcount;
+    return { name: String(h == null ? ('col' + (ci + 1)) : h).trim(), numeric, sum: numeric ? sum : null, count: ncount + tcount, samples: numeric ? null : Array.from(samples) };
+  }).filter(c => c.name !== '' && c.name != null && !/^col\d+$/.test(c.name));
+  const find = nm => cols.find(c => c.name.toLowerCase() === nm);
+  const normCur = x => { x = String(x || '').trim().toUpperCase(); if (x === 'EURO' || x === 'EUR' || x === '€') return 'EUR'; if (x === 'GBP' || x === '£') return 'GBP'; if (x === 'USD' || x === '$') return 'USD'; return x || null; };
+  const cidx = headers.findIndex(h => String(h).trim().toLowerCase() === 'currency');
+  let currencies = null;
+  if (cidx >= 0) { const s = new Set(); data.forEach(r => { const c = normCur(r && r[cidx]); if (c) s.add(c); }); currencies = Array.from(s); }
+  let currency = (currencies && currencies[0]) || null;
+  if (!currency) { const m = String(name).toUpperCase(); currency = /GBP/.test(m) ? 'GBP' : (/EUR/.test(m) ? 'EUR' : (/USD/.test(m) ? 'USD' : null)); }
+  const totCol = find('total cost') || find('total');
+  return {
+    name, headerRow: hr + 1, dataRows: data.length, columns: cols, currencies, currency,
+    highlights: { freight: (find('shipping fee') || {}).sum ?? null, fulfilment: (find('total excl shipping') || {}).sum ?? null, total: (totCol || {}).sum ?? null }
+  };
+}
+app.post('/api/supply/tpl/parse/:id', async (req, res) => {
+  try {
+    const row = (await pool.query(`SELECT filename, content_type, content FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
+    if (!row) return res.status(404).json({ error: 'not found' });
+    const buf = row.content, fname = String(row.filename || '');
+    const isCsv = /\.csv$/i.test(fname) || /csv/i.test(row.content_type || '');
+    const sheets = [];
+    if (isCsv) {
+      const grid = String(buf.toString('utf8')).split(/\r?\n/).filter(l => l.length).map(l => l.split(',').map(c => c.replace(/^"|"$/g, '')));
+      sheets.push(_tplGridSummary('CSV', grid));
+    } else {
+      const ExcelJS = (await import('exceljs')).default;
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(buf);
+      wb.eachSheet(ws => {
+        const grid = [];
+        ws.eachRow({ includeEmpty: false }, r => { const arr = []; r.eachCell({ includeEmpty: true }, (cell, col) => { arr[col - 1] = _tplCellVal(cell); }); grid.push(arr); });
+        if (grid.length) sheets.push(_tplGridSummary(ws.name, grid));
+      });
+    }
+    res.json({ ok: true, filename: fname, sheets });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // Full snooze/dismiss state map (used by the PO grid so its badges/counter respect snooze).
 app.get('/api/supply/actions/state', async (req, res) => {
   try {

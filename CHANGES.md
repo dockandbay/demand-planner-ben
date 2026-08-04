@@ -1,3 +1,8 @@
+## v26.507 — 3PL Invoicing (Phase 1): parse & sum all fields
+- REPORTS slug renamed /reports/tpl -> /reports/3pl-invoicing (tab "3PL Invoicing"; old slug aliased). Default 3PL = EU iFulfilment.
+- New per-file Summary action parses the uploaded xlsx/csv server-side and sums EVERY numeric field per sheet (Orders/Goods In/Returns/Storage/Other). Surfaces freight (Shipping Fee) vs fulfilment (Total Excl Shipping) + Total per sheet, grand total by currency, and a live PDF-total reconcile input.
+- Server: POST /api/supply/tpl/parse/:id (read-only; exceljs; currency-normalised). Cin7 order->CostCenter matching = Phase 2, Xero bill = Phase 3.
+
 ## v26.506 — Revenue quarterly targets: quarter-grouped LY / Target / Forecast / delta
 - Months now grouped into 4 quarter columns. Each quarter (and the full year) shows Last year, Target (LY x growth %), Forecast (incl. price changes) and Delta (forecast - target).
 - Target, Delta and RAG recompute live as you type the growth %. Total row sums quarters + FY. Blank quarter = flat (last year).
