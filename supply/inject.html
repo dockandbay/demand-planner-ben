@@ -4576,7 +4576,7 @@
   // count of OVERDUE payments — mirrors buildPaymentsDue's r.overdue (unpaid, has a due date, 2026-01-01 ≤ due < today).
   var PDUE_MIN_DUE='2026-01-01';   // Payments Due cutoff: hide payments whose due date is before this (old/legacy)
   function paymentsDueOverdueCount(pos, deps){ var today=new Date().toISOString().slice(0,10), n=0;
-    (pos||[]).forEach(function(p){ if(!p.is_final)return;
+    (Array.isArray(pos)?pos:[]).forEach(function(p){ if(!p.is_final)return;
       if(Number(p.completion_calc)>0.009 && p.completion_due && !(Number(p.completion_assigned)>0.009) && p.completion_due>=PDUE_MIN_DUE && p.completion_due<today)n++;
       if(Number(p.balance_owing)>0.009 && p.balance_due && !(Number(p.balance_1_amount)>0.009) && p.balance_due>=PDUE_MIN_DUE && p.balance_due<today)n++; });
     (deps||[]).forEach(function(d){ if(d.status==='closed')return; if(!(Number(d.amount)>0.009)&&!d.date_paid&&!d.date_due)return;
@@ -5887,7 +5887,7 @@
       var xdByPo={}; (xd||[]).forEach(function(x){(xdByPo[x.po]=xdByPo[x.po]||{})[x.sku]=x.qty;});
       var out={};
       function add(nm,cat,ref,label){ if(!nm)return; var o=out[nm]||(out[nm]={count:0,items:[]}); o.items.push({cat:cat,ref:ref,label:label}); o.count++; }
-      (pos||[]).forEach(function(p){ if(/complete/i.test(p.status||''))return; var nm=p.supplier_name||''; if(!nm)return; var subs=subsByPo[p.po]||[];
+      (Array.isArray(pos)?pos:[]).forEach(function(p){ if(/complete/i.test(p.status||''))return; var nm=p.supplier_name||''; if(!nm)return; var subs=subsByPo[p.po]||[];
         var supEnd=''; subs.forEach(function(s){ if(s.kind==='completion_date'&&s.status!=='dismissed'&&s.value)supEnd=s.value; });
         var effEnd=supEnd||p.prod_end||'';
         if(!/future/i.test(p.status||'') && !subs.some(function(s){return s.kind==='invoice_value';}) && effEnd && effEnd<today) add(nm,'PO',p.po,'Submit your invoice');
@@ -7146,7 +7146,7 @@
     var rows=[];
     // PO payments only surface once the FINAL INVOICE AMOUNT is confirmed (is_final) AND the milestone has a due date.
     // Completed POs ARE included — an unpaid balance shouldn't hide behind a COMPLETE flag. Old payments are cut below.
-    (pos||[]).forEach(function(p){ if(!p.is_final)return; var ep='/api/supply/po/'+encodeURIComponent(p.po);
+    (Array.isArray(pos)?pos:[]).forEach(function(p){ if(!p.is_final)return; var ep='/api/supply/po/'+encodeURIComponent(p.po);
       if(Number(p.completion_calc)>0.009 && p.completion_due) rows.push({sup:p.supplier_name||'',type:'Completion',ref:p.po,due_amt:Number(p.completion_calc),due:p.completion_due,likely:p.likely_completion,ep:ep,amt_field:'pay_completion_assigned',amt_val:p.completion_assigned,dt_field:'pay_completion_date',dt_val:p.completion_date,po:true});
       if(Number(p.balance_owing)>0.009 && p.balance_due) rows.push({sup:p.supplier_name||'',type:'Balance',ref:p.po,due_amt:Number(p.balance_owing),due:p.balance_due,likely:p.likely_balance_1,ep:ep,amt_field:'pay_balance_1_amount',amt_val:p.balance_1_amount,dt_field:'pay_balance_1_date',dt_val:p.balance_1_date,po:true}); });
     (deps||[]).forEach(function(d){ if(d.status==='closed')return;

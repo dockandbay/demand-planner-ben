@@ -1,3 +1,6 @@
+## v26.548 — Harden Payments Due / portal actions against a non-array response
+- buildPaymentsDue, paymentsDueOverdueCount and supPortalActions now guard their pos argument with Array.isArray (was (pos||[]).forEach — which still throws if pos is a truthy non-array error object). Completes Diviyaj's backlog item 1: a bad endpoint response can never blank these pages.
+
 ## v26.547 — Harden supplier invoice-value entry (comma/currency) — the real live-crash root cause
 - Root cause (Diviyaj): a supplier typed '3,262.35' (comma) for PO-55AUWK3; round(value::numeric,2) on the pending invoice submission could not cast the comma → PO grid + cashflow 500'd server-side and the client crashed rendering the error. Deploying HEAD alone would NOT have fixed it.
 - New sanitiseMoney() + SAFE_NUM_SQL(): strip separators/currency, validate, NULL on garbage (never an error).
