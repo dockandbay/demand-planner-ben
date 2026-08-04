@@ -9257,18 +9257,25 @@ function render3plInvoice(body){
       +'<td class="l" style="padding:5px 10px"><span style="font-size:10px;background:#eef2f7;color:#475569;border-radius:5px;padding:1px 7px">'+e(f.parse_status||'uploaded')+'</span></td>'
       +'<td class="l" style="padding:5px 10px;white-space:nowrap"><a class="tpl-sum" data-id="'+f.id+'" style="color:#1d4ed8;cursor:pointer;margin-right:12px">Summary</a><a class="tpl-del" data-id="'+f.id+'" title="delete" style="color:#dc2626;cursor:pointer">✕</a></td></tr>'; }).join('')
       :'<tr><td colspan="6" style="padding:14px 10px;color:#94a3b8;font-size:12px;text-align:center">No invoice files for '+e(TPL3_STATE.period)+' yet — upload one below.</td></tr>';
-    b.innerHTML='<div style="border:1px dashed #cbd5e1;border-radius:8px;padding:12px 14px;margin-bottom:14px;background:#f8fafc">'
+    b.innerHTML='<div id="tpl-drop" style="border:2px dashed #cbd5e1;border-radius:8px;padding:14px 16px;margin-bottom:14px;background:#f8fafc;transition:background .12s,border-color .12s">'
         +'<div style="font-size:12px;font-weight:700;color:#334155;margin-bottom:6px">Upload invoice for '+e(TPL3.filter(function(t){return t[0]===TPL3_STATE.tpl;})[0][1])+' · '+e(TPL3_STATE.period)+'</div>'
         +'<input type="file" id="tpl-file" style="font-size:12px"> <button id="tpl-up" class="save-btn" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Upload</button>'
+        +'<span style="font-size:11px;color:#94a3b8;margin-left:8px">or drag &amp; drop a file anywhere in this box</span>'
         +'<span id="tpl-upmsg" style="font-size:12px;margin-left:10px"></span></div>'
       +'<div class="tw"><table style="border-collapse:collapse;font-size:12px;width:100%;max-width:820px"><thead><tr style="background:#e9eef5;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#475569">'
         +['File','Size','By','Uploaded','Status',''].map(function(h){return '<th class="l" style="padding:5px 10px;text-align:left">'+h+'</th>';}).join('')+'</tr></thead><tbody>'+rows+'</tbody></table></div><div id="tpl-parse"></div>';
-    var fi=b.querySelector('#tpl-file'), up=b.querySelector('#tpl-up'), msg=b.querySelector('#tpl-upmsg');
-    up.onclick=function(){ var f=fi&&fi.files&&fi.files[0]; if(!f){ msg.style.color='#dc2626'; msg.textContent='Choose a file first.'; return; }
-      up.disabled=true; msg.style.color='#64748b'; msg.textContent='Uploading…'; var rd=new FileReader();
+    var fi=b.querySelector('#tpl-file'), up=b.querySelector('#tpl-up'), msg=b.querySelector('#tpl-upmsg'), drop=b.querySelector('#tpl-drop');
+    function doUpload(f){ if(!f){ msg.style.color='#dc2626'; msg.textContent='Choose a file first.'; return; }
+      up.disabled=true; msg.style.color='#64748b'; msg.textContent='Uploading '+f.name+'…'; var rd=new FileReader();
       rd.onload=function(){ fetch('/api/supply/tpl/upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({tpl:TPL3_STATE.tpl,period:TPL3_STATE.period,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),uploaded_by:(window.ME&&ME.email)||''})})
         .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); load(); }).catch(function(err){ msg.style.color='#dc2626'; msg.textContent='Failed: '+(err.message||err); up.disabled=false; }); };
-      rd.readAsDataURL(f); };
+      rd.readAsDataURL(f); }
+    up.onclick=function(){ doUpload(fi&&fi.files&&fi.files[0]); };
+    if(fi)fi.onchange=function(){ if(fi.files&&fi.files[0]){ msg.style.color='#64748b'; msg.textContent=fi.files[0].name+' ready — click Upload'; } };
+    if(drop){ var hi=function(on){ drop.style.background=on?'#eff6ff':'#f8fafc'; drop.style.borderColor=on?'#2563eb':'#cbd5e1'; };
+      ['dragenter','dragover'].forEach(function(ev){ drop.addEventListener(ev,function(e){ e.preventDefault(); e.stopPropagation(); hi(true); }); });
+      ['dragleave','dragend'].forEach(function(ev){ drop.addEventListener(ev,function(e){ e.preventDefault(); e.stopPropagation(); if(ev==='dragleave'&&drop.contains(e.relatedTarget))return; hi(false); }); });
+      drop.addEventListener('drop',function(e){ e.preventDefault(); e.stopPropagation(); hi(false); var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]; if(f)doUpload(f); }); }
     b.querySelectorAll('.tpl-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this invoice file?'))return; fetch('/api/supply/tpl/file/'+a.dataset.id+'/delete',{method:'POST'}).then(function(r){return r.json();}).then(function(){ load(); }); }; });
     b.querySelectorAll('.tpl-sum').forEach(function(a){ a.onclick=function(){ renderParse(b.querySelector('#tpl-parse'),a.dataset.id); }; });
   }

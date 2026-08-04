@@ -1,3 +1,6 @@
+## v26.511 — 3PL Invoicing: drag & drop upload
+- The upload box is now a drop zone: drag a file anywhere into it to upload (highlights on hover-over). File picker + Upload button still work; picker shows a ready hint.
+
 ## v26.510 — Fix: DEMAND Inputs sub-menu leaking onto other views
 - The #demand-inputs-nav level-3 menu (Sell-through targets / Key Accts / Calendar / Revenue) was only hidden inside renderDemandTabs, so it persisted on REPORTS (e.g. /reports/ka) and other non-DEMAND views. Added it to the planning-mode teardown so it is removed when leaving DEMAND.
 
