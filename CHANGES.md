@@ -1,3 +1,6 @@
+## v26.530 — 3PL Cin7 sweep: retry transient network errors
+- The reference clean-up sweep now retries transient network errors (EADDRNOTAVAIL etc) up to 3x per chunk, so it completes in one pass instead of aborting partway.
+
 ## v26.529 — 3PL Cin7: reference-based clean-up sweep
 - Monthly Import stays incremental by InvoiceDate + branch-filtered. The Sweep button is now a reference-based clean-up: it fetches the analysed invoice&apos;s still-unmapped order references directly from Cin7 (Reference IN, then CustomerOrderNo IN; NO branch/date filter) so cross-month orders are caught, then re-maps. Chunked to 50 refs/call (Cin7 URL-length limit).
 

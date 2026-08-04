@@ -5538,7 +5538,8 @@ app.post('/api/supply/tpl/cin7-sweep/:id', async (req, res) => {
       for (let i = 0; i < keys.length; i += 50) {   // Cin7/IIS rejects long URLs — keep the IN() list small (~60 max)
         const chunk = keys.slice(i, i + 50);
         const where = encodeURIComponent(field + " IN ('" + chunk.map(k => String(k).replace(/'/g, "''")).join("','") + "')");
-        const r = await cin7Fetch('https://api.cin7.com/api/v1/SalesOrders?rows=250&fields=id,reference,customerOrderNo,costCenter,memberCostCenter,invoiceDate,branchId,total,freightTotal&where=' + where, { method: 'GET', headers: { Authorization: auth, 'content-type': 'application/json' } });
+        const url = 'https://api.cin7.com/api/v1/SalesOrders?rows=250&fields=id,reference,customerOrderNo,costCenter,memberCostCenter,invoiceDate,branchId,total,freightTotal&where=' + where;
+        let r; for (let att = 0; ; att++) { try { r = await cin7Fetch(url, { method: 'GET', headers: { Authorization: auth, 'content-type': 'application/json' } }); break; } catch (ne) { if (att >= 3) throw ne; await new Promise(x => setTimeout(x, 700 * (att + 1))); } }   // retry transient network errors
         calls++;
         if (r.status >= 400) throw new Error('Cin7 HTTP ' + r.status);
         let arr = []; try { arr = await r.json(); } catch (e) { arr = []; }
