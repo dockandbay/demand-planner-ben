@@ -1,3 +1,6 @@
+## v26.552 — FBA transfer calc: count in-flight branch transfers (Ben #3)
+- buildSKURAW folds fba_pending_transfers (in-flight, not-yet-inbound, deduped vs inbound_shipments by reference) into FBA on-order (oo[<mkt>_fba]) + the inbound list, so the FBA transfer recommendation no longer re-suggests a transfer already in flight. Only *_fba keys are touched — *_3pl on-order is untouched, so the 3PL buy plan is unchanged by construction. Verified: the 2 sandbox pending SKUs each get +30 on us_fba on-order; us_3pl unchanged.
+
 ## v26.551 — FBA pending branch transfers: backend (import + serve)
 - Migration 179: planner.fba_pending_transfers. New endpoints: POST /api/supply/fba-transfers/refresh (imports approved Cin7 BranchTransfers created in the last 48h into the FBA/AWD branches — UK FBA 5052 / US FBA 5056 / AU FBA 16289 / US AWD 27816 / EU FBA 10879 — then prunes any that landed in inbound_shipments (by reference) or were received) and GET /api/supply/fba-transfers/list (in-flight transfers + last-run stamp). approvalDate = expected delivery (eta). Verified live: pulled 2 in-flight US FBA transfers not yet inbound. Calc inclusion + FBA-tab UI + auto-run triggers next.
 
