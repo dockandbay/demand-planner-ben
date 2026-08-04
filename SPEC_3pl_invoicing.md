@@ -47,8 +47,7 @@ Duty & Taxes / Channel Labels. These need their own account treatment (likely no
   (`Total Excl Shipping`), each sheet's Total, **grand total by currency** (EUR/GBP kept separate),
   and a live reconcile input vs the invoice PDF total. Read-only, no ERP/Xero yet.
   Slug renamed `/reports/tpl` → `/reports/3pl-invoicing`; default 3PL = EU iFulfilment.
-- **Phase 2 — Map to Cin7.** Match Reference → Cin7 salesorder.CostCenter (EU iFulfillment branch),
-  two-pass matching, surface unmapped. Produce cost-by-CostCenter summary (freight/fulfilment split).
+- **Phase 2 — Map to Cin7. BUILT (v26.515/516), live-fetch UNVERIFIED.** "Map to Cost Centres (Cin7)" button under the parsed summary -> POST /api/supply/tpl/map/:id: extracts per-order Reference + Shipping Fee + Total Excl Shipping, then a 2-pass Cin7 SalesOrders lookup (exact Reference, then CustomerOrderNo; chunked 200/call, throttled) reads CostCenter (fallback MemberCostCenter), groups freight vs fulfilment by Cost Centre, surfaces COST CENTRE MISSING + unmatched refs. Aggregation unit-tested offline (freight reconciles exactly). SANDBOX .env has DUMMY Cin7 creds -> 401/404, so the live fetch can only be verified with real creds (prod/Diviyaj). Cin7 fields confirmed from the Omni SalesOrder model: Reference, CustomerOrderNo, CostCenter, MemberCostCenter, BranchId.
 - **Phase 3 — Map to Xero.** Turn the mapped summary into a **Xero bill** (draft; gated write).
 
 ## Open questions (for Ben, before Phase 1 build)
