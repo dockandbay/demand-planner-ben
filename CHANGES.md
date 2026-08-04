@@ -1,3 +1,6 @@
+## v26.523 — Target recommendations: show recommended units
+- Each month line now presents the hard units forecast (current -> recommended units) alongside the % change, since Apply writes exact unit values.
+
 ## v26.522 — Summary targets polish (feedback)
 - Add-targets editor: each cell now shows the resulting target £ live (blank = 0% growth shows LY value); grid borders (spreadsheet feel).
 - Rev+targets cells: fc/tgt labels smaller/italic/lowercase; white text on the dark-blue FY total column; blank target = 0% (shows value + variance, not a dash).
