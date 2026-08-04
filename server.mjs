@@ -5560,6 +5560,54 @@ app.post('/api/supply/tpl/cin7-sweep/:id', async (req, res) => {
     res.json({ ok: true, refs: refs.length, missing_before: missingBefore, fetched, cin7_calls: calls });
   } catch (e) { await logRun(0, 'error', e.message, 0); res.status(500).json({ error: e.message }); }
 });
+// 3PL invoice — Xero bill CSV (Phase 3). Assembles a Xero bills-import CSV: one line per non-order cost type
+// (Storage/Returns/Inbound/Other → the cost-type account codes) + two lines per cost centre (Freight + Fulfilment
+// → the Account Map's fulfilment_account for that region×channel). No Xero write — download only.
+app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
+  try {
+    const period = String((req.body && req.body.period) || req.query.period || '').trim();
+    const tpl0 = String((req.body && req.body.tpl) || req.query.tpl || '') || null;
+    const row = (await pool.query(`SELECT filename, content_type, content FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
+    if (!row) return res.status(404).json({ error: 'not found' });
+    const isCsv = /\.csv$/i.test(row.filename || '') || /csv/i.test(row.content_type || '');
+    // order lines → cost-centre freight/fulfilment (map against the imported Cin7 cache)
+    const orders = await _tplOrderRows(row.content, isCsv);
+    const refs = [...new Set(orders.map(o => o.reference).filter(Boolean))];
+    let refCC = {};
+    if (refs.length) { const dbrows = (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [refs])).rows; const byRef = {}, byCon = {}; dbrows.forEach(r => { const cc = String(r.cc || '').trim(); if (r.reference) byRef[r.reference] = cc; if (r.customer_order_no) byCon[r.customer_order_no] = cc; }); refs.forEach(rf => { refCC[rf] = (byRef[rf] != null) ? byRef[rf] : (byCon[rf] != null ? byCon[rf] : null); }); }
+    const agg = _tplAggregateAccounts(orders, refCC);
+    // non-order sheet totals
+    let grids = [];
+    if (isCsv) { grids = [{ name: 'CSV', grid: String(row.content.toString('utf8')).split(/\r?\n/).filter(l => l.length).map(l => l.split(',').map(c => c.replace(/^"|"$/g, ''))) }]; }
+    else { const ExcelJS = (await import('exceljs')).default; const wb = new ExcelJS.Workbook(); await wb.xlsx.load(row.content); wb.eachSheet(ws => { const grid = []; ws.eachRow({ includeEmpty: false }, r => { const arr = []; r.eachCell({ includeEmpty: true }, (cell, col) => { arr[col - 1] = _tplCellVal(cell); }); grid.push(arr); }); if (grid.length) grids.push({ name: ws.name, grid }); }); }
+    const ctype = nm => { nm = String(nm || ''); if (/order/i.test(nm)) return 'orders'; if (/storage/i.test(nm)) return 'storage'; if (/return/i.test(nm)) return 'returns'; if (/goods\s*in|inbound|rework/i.test(nm)) return 'inbound'; return 'other'; };
+    const sheetSums = grids.map(g => ({ ct: ctype(g.name), sum: _tplGridSummary(g.name, g.grid) }));
+    // account map (fulfilment_account by "region - channel") + cost-type accounts
+    const amap = {}; (await pool.query(`SELECT label, fulfilment_account FROM planner.tpl_account_map`)).rows.forEach(r => { amap[String(r.label || '').trim().toLowerCase()] = r.fulfilment_account || ''; });
+    const cacc = {}; (await pool.query(`SELECT cost_type, account_code FROM planner.tpl_cost_accounts WHERE tpl=$1`, [tpl0 || ''])).rows.forEach(r => { cacc[r.cost_type] = r.account_code || ''; });
+    const XERO = { eu_ifulfilment: { contact: 'I-Fulfilment', region: 'EU' }, us_geneva: { contact: 'Geneva', region: 'US' }, uk_ilg: { contact: 'ILG', region: 'UK' }, au_coghlans: { contact: 'Coghlans', region: 'AU' } };
+    const meta = XERO[tpl0] || { contact: tpl0 || '3PL', region: 'EU' };
+    const pm = /^\d{4}-\d{2}$/.test(period) ? period : (new Date().toISOString().slice(0, 7));
+    const [py, pmo] = pm.split('-').map(Number); const endISO = new Date(Date.UTC(py, pmo, 0)).toISOString().slice(0, 10);
+    const dd = endISO.slice(8, 10) + '/' + endISO.slice(5, 7) + '/' + endISO.slice(0, 4);
+    const invNo = 'FULFILLMENT-' + meta.region + '-' + endISO;
+    const ordSheet = sheetSums.find(s => s.ct === 'orders'); const cur = (ordSheet && ordSheet.sum.currency) || 'EUR';
+    const tax = '20% (VAT on Expenses)';
+    const HDR = '*ContactName,EmailAddress,POAddressLine1,POAddressLine2,POAddressLine3,POAddressLine4,POCity,PORegion,POPostalCode,POCountry,*InvoiceNumber,*InvoiceDate,*DueDate,Total,InventoryItemCode,Description,*Quantity,*UnitAmount,*AccountCode,*TaxType,TaxAmount,TrackingName1,TrackingOption1,TrackingName2,TrackingOption2,Currency,*OriginalAmount';
+    const esc = x => { x = String(x == null ? '' : x); return /[",\n]/.test(x) ? ('"' + x.replace(/"/g, '""') + '"') : x; };
+    const money = n => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2);
+    const lines = [];
+    const push = (desc, amt, code, lineCur) => { lines.push([meta.contact, '', '', '', '', '', '', '', '', '', invNo, dd, dd, '', '', desc, '1', money(amt), code || '', tax, '', '', '', '', '', (lineCur || cur), money(amt)].map(esc).join(',')); };
+    const NOD = { inbound: 'Purchase Orders & Rework', returns: 'Returns', storage: 'Storage Fees', other: 'Other Fees (manual adjustment)' };
+    sheetSums.forEach(s => { if (s.ct === 'orders') return; const t = s.sum.highlights && s.sum.highlights.total; if (t == null) return; push(NOD[s.ct] || s.sum.name, t, cacc[s.ct] || '', s.sum.currency); });
+    (agg.costCenters || []).forEach(cc => { const label = String(cc.costCenter).replace(/^COGS\s*-\s*/i, ''); const code = amap[label.toLowerCase()] || ''; push('Freight - Fulfilment - ' + label, cc.freight, code); push('Fulfilment - Fulfilment - ' + label, cc.fulfilment, code); });
+    if (agg.unmapped && (agg.unmapped.freight || agg.unmapped.fulfilment)) { push('Freight - Fulfilment - UNMAPPED (assign account)', agg.unmapped.freight, ''); push('Fulfilment - Fulfilment - UNMAPPED (assign account)', agg.unmapped.fulfilment, ''); }
+    const csv = HDR + '\n' + lines.join('\n');
+    res.setHeader('Content-Type', 'text/csv;charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="xero-bill-' + meta.region + '-' + endISO + '.csv"');
+    res.send(csv);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // Cin7 import audit log — every import run (range, kind, orders, status, error, calls).
 app.get('/api/supply/tpl/cin7-log', async (req, res) => {
   try {

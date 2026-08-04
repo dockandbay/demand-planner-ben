@@ -1,3 +1,6 @@
+## v26.532 — 3PL Invoicing Phase 3: Xero bill CSV download
+- Download CSV now builds a Xero bills-import CSV (27-col format): non-order cost types (account codes from Config cost-type accounts) + two lines per cost centre (Freight + Fulfilment) using the Account Map fulfilment_account for that region x channel. Header/fields match the Xero template (ContactName, FULFILLMENT-<region>-<period-end>, dates, 20% VAT on Expenses, currency). No Xero write. Unmapped freight/fulfilment surfaced as flagged lines.
+
 ## v26.531 — Summary Add-targets: download template + import
 - Add-targets editor now has Download template (CSV with a row for EVERY subcategory + market total, columns = each open FY x the current Month/Quarter/Half periods, pre-filled with existing %s) and Import targets (paste the filled CSV -> bulk save). New bulk endpoint /api/demand-revenue-targets/periods/bulk (transactional upsert/clear).
 
