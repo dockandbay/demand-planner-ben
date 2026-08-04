@@ -5277,7 +5277,8 @@ app.get('/api/supply/tpl/data', async (req, res) => {
       coalesce(cogs_account,'') cogs_account, coalesce(sales_account,'') sales_account,
       coalesce(fulfilment_account,'') fulfilment_account, coalesce(cost_of_sales_account,'') cost_of_sales_account
       FROM planner.tpl_account_map ORDER BY region NULLS LAST, channel NULLS LAST, label`)).rows;
-    res.json({ ok: true, files, cost_accounts: cost, account_map: map });
+    const cin7_summary = /^\d{4}-\d{2}$/.test(period) ? await tplCin7Summary(period) : null;
+    res.json({ ok: true, files, cost_accounts: cost, account_map: map, cin7_summary });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/tpl/upload', async (req, res) => {
@@ -5455,22 +5456,36 @@ app.post('/api/supply/tpl/map/:id', async (req, res) => {
 // 3PL invoice — MANUAL Cin7 sales-order import for the previous month (by InvoiceDate). Populates
 // planner.tpl_cin7_orders so the Map step can resolve Reference -> CostCenter offline. Paginated, throttled,
 // read-only from Cin7. Aborts cleanly on auth failure (sandbox has dummy creds).
+async function tplCin7Summary(period) {
+  const o = (await pool.query(`SELECT count(*)::int n, to_char(min(invoice_date),'YYYY-MM-DD') mn, to_char(max(invoice_date),'YYYY-MM-DD') mx FROM planner.tpl_cin7_orders WHERE period=$1`, [period])).rows[0] || {};
+  const r = (await pool.query(`SELECT count(*)::int runs, to_char(min(from_date),'YYYY-MM-DD') cf, to_char(max(to_date),'YYYY-MM-DD') ct FROM planner.tpl_cin7_imports WHERE period=$1`, [period])).rows[0] || {};
+  return { orders: o.n || 0, min_date: o.mn || null, max_date: o.mx || null, runs: r.runs || 0, covered_from: r.cf || null, covered_to: r.ct || null };
+}
 app.post('/api/supply/tpl/cin7-import', async (req, res) => {
   try {
     const auth = cin7Auth(); if (!auth) return res.json({ ok: false, error: 'Cin7 is not configured in this environment (no CIN7 credentials).' });
     let period = String((req.body && req.body.period) || req.query.period || '').trim();
     const bf = String((req.body && req.body.from) || req.query.from || '').trim(), bt = String((req.body && req.body.to) || req.query.to || '').trim();
-    let where;   // Cin7 requires UTC datetime format yyyy-MM-ddTHH:mm:ssZ for date filters
-    if (/^\d{4}-\d{2}-\d{2}$/.test(bf) && /^\d{4}-\d{2}-\d{2}$/.test(bt)) {
-      period = bf.slice(0, 7);
-      where = encodeURIComponent("InvoiceDate>='" + bf + "T00:00:00Z' AND InvoiceDate<='" + bt + "T23:59:59Z'");   // inclusive range by InvoiceDate
-    } else {
-      if (!/^\d{4}-\d{2}$/.test(period)) { const d = new Date(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - 1); period = d.toISOString().slice(0, 7); }   // default: previous calendar month
+    const sweep = !!(req.body && req.body.sweep);
+    let start, end, kind;   // inclusive YYYY-MM-DD bounds, filtered on InvoiceDate
+    if (/^\d{4}-\d{2}-\d{2}$/.test(bf) && /^\d{4}-\d{2}-\d{2}$/.test(bt)) { start = bf; end = bt; period = bf.slice(0, 7); kind = 'range'; }
+    else {
+      if (!/^\d{4}-\d{2}$/.test(period)) { const d = new Date(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - 1); period = d.toISOString().slice(0, 7); }
       const [py, pm] = period.split('-').map(Number);
-      const nx = new Date(Date.UTC(py, pm, 1)).toISOString().slice(0, 10);
-      where = encodeURIComponent("InvoiceDate>='" + period + "-01T00:00:00Z' AND InvoiceDate<'" + nx + "T00:00:00Z'");
+      const monStart = period + '-01';
+      const lastDay = new Date(Date.UTC(py, pm, 0)).toISOString().slice(0, 10);   // last day of the period's month
+      const today = new Date().toISOString().slice(0, 10);
+      const monEnd = today < lastDay ? today : lastDay;                            // never fetch beyond today
+      if (sweep) { start = monStart; end = monEnd; kind = 'sweep'; }
+      else {
+        const cov = (await pool.query(`SELECT to_char(max(to_date),'YYYY-MM-DD') ct FROM planner.tpl_cin7_imports WHERE period=$1`, [period])).rows[0];
+        if (cov && cov.ct) { const d = new Date(cov.ct + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); start = d.toISOString().slice(0, 10); } else start = monStart;
+        end = monEnd; kind = 'incremental';
+        if (start > end) { const summary = await tplCin7Summary(period); return res.json({ ok: true, imported: 0, period, kind, note: 'Already imported through ' + cov.ct + ' — nothing new. Use Sweep up to re-scan the month.', summary }); }
+      }
     }
-    let page = 1, imported = 0, calls = 0; const MAXP = 60;
+    const where = encodeURIComponent("InvoiceDate>='" + start + "T00:00:00Z' AND InvoiceDate<='" + end + "T23:59:59Z'");
+    let page = 1, imported = 0, calls = 0; const MAXP = 80;
     while (page <= MAXP) {
       const r = await cin7Fetch('https://api.cin7.com/api/v1/SalesOrders?rows=250&page=' + page + '&fields=id,reference,customerOrderNo,costCenter,memberCostCenter,invoiceDate,branchId,total,freightTotal&where=' + where, { method: 'GET', headers: { Authorization: auth, 'content-type': 'application/json' } });
       calls++;
@@ -5486,7 +5501,10 @@ app.post('/api/supply/tpl/cin7-import', async (req, res) => {
       if (arr.length < 250) break;
       page++;
     }
-    res.json({ ok: true, period, imported, cin7_calls: calls });
+    await pool.query(`INSERT INTO planner.tpl_cin7_imports (tpl, period, from_date, to_date, orders, kind) VALUES ($1,$2,$3,$4,$5,$6)`,
+      [String((req.body && req.body.tpl) || req.query.tpl || '') || null, period, start, end, imported, kind]);
+    const summary = await tplCin7Summary(period);
+    res.json({ ok: true, period, from: start, to: end, kind, imported, cin7_calls: calls, summary });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Full snooze/dismiss state map (used by the PO grid so its badges/counter respect snooze).

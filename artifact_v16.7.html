@@ -9361,9 +9361,7 @@ function render3plInvoice(body){
       function ctype(nm){ nm=String(nm||''); if(/order/i.test(nm))return 'orders'; if(/storage/i.test(nm))return 'storage'; if(/return/i.test(nm))return 'returns'; if(/goods\s*in|inbound|rework/i.test(nm))return 'inbound'; return 'other'; }
       var grand={};
       var html='<div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-top:12px;background:#fff;max-width:820px;text-align:left">'
-        +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap"><div style="font-weight:700;font-size:13px">Parsed summary — '+e(d.filename)+'</div>'
-        +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button id="tpl-map" style="border:1px solid #1d4ed8;background:#eff6ff;color:#1e40af;border-radius:6px;padding:5px 13px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">Map to Cost Centres (Cin7) →</button><button id="tpl-csv" title="Export the mapped account summary as CSV (Phase 3)" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:6px;padding:5px 13px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">⬇ Download CSV</button><a id="tpl-clear" title="Clear this analysis" style="font-size:11px;color:#dc2626;cursor:pointer;font-weight:600">Clear</a></div></div>'
-        +'<div id="tpl-csv-note" style="font-size:11px;color:#94a3b8;margin-top:2px"></div><div id="tpl-map-out"></div>';
+        +'<div style="font-weight:700;font-size:13px;margin-bottom:4px">Parsed summary — '+e(d.filename)+'</div>';
       (d.sheets||[]).forEach(function(sh){ var h=sh.highlights||{}; if(h.total!=null){ var _c=sh.currency||'?'; grand[_c]=(grand[_c]||0)+Number(h.total); }
         var cur=(sh.currencies&&sh.currencies.length)?(' · '+sh.currencies.join('/')):'';
         html+='<div style="margin:12px 0 4px;font-weight:600;font-size:12px;border-top:1px solid #f1f5f9;padding-top:8px">'+e(sh.name)+' <span class="mut" style="font-weight:400">— '+sh.dataRows+' rows'+e(cur)+'</span></div>';
@@ -9388,10 +9386,7 @@ function render3plInvoice(body){
         +'Grand total (sum of each sheet&rsquo;s Total column, by currency): <b>'+_grandStr+'</b>'
         +'<div style="margin-top:6px">Invoice total (from PDF)'+(_reconCur?(' — '+e(_reconCur)):'')+': <input id="tpl-recon" type="text" placeholder="0.00" style="width:130px;text-align:right;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px"> <span id="tpl-recon-var" class="mut"></span></div></div></div>';
       html+='</div>';
-      cont.innerHTML=html;
-      var mb=cont.querySelector('#tpl-map'); if(mb)mb.onclick=function(){ renderMap(cont.querySelector('#tpl-map-out'), id); };
-      var cb=cont.querySelector('#tpl-csv'); if(cb)cb.onclick=function(){ var n=cont.querySelector('#tpl-csv-note'); if(n){ n.style.color='#94a3b8'; n.textContent='CSV export — coming in Phase 3.'; } };
-      var xb=cont.querySelector('#tpl-clear'); if(xb)xb.onclick=function(){ try{ localStorage.removeItem(tplCacheKey(id)); localStorage.removeItem('tplanlast_'+TPL3_STATE.tpl+'_'+TPL3_STATE.period); }catch(e){} cont.innerHTML=''; };
+      cont.innerHTML=html; cont.dataset.aid=String(id);
       var ri=cont.querySelector('#tpl-recon'), rv=cont.querySelector('#tpl-recon-var');
       if(ri)ri.oninput=function(){ var v=parseFloat(String(ri.value).replace(/[^0-9.\-]/g,'')); if(!isFinite(v)){rv.textContent='';return;} var diff=v-_reconBase; rv.style.color=Math.abs(diff)<0.01?'#166534':'#b91c1c'; rv.textContent=(Math.abs(diff)<0.01?'matches':('variance '+(diff>=0?'+':'')+fmt(diff))); };
   }
@@ -9430,7 +9425,15 @@ function render3plInvoice(body){
         +'<input type="file" id="tpl-file" style="font-size:12px"> <button id="tpl-up" class="save-btn" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Upload</button>'
         +'<span style="font-size:11px;color:#94a3b8;margin-left:8px">or drag &amp; drop a file anywhere in this box</span>'
         +'<span id="tpl-upmsg" style="font-size:12px;margin-left:10px"></span></div>'
-      +'<div style="margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button id="tpl-cin7imp" style="border:1px solid #0f766e;background:#f0fdfa;color:#0f766e;border-radius:6px;padding:5px 13px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">⟳ Import Cin7 orders for '+e(TPL3_STATE.period)+'</button><span id="tpl-cin7msg" style="font-size:11px;color:#94a3b8">manual fetch of that month&rsquo;s sales orders (by invoice date) for Cost-Centre matching</span></div>'
+      +'<div style="margin-bottom:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+        +'<button id="tpl-cin7imp" title="Import new (not-yet-imported) sales orders for this month by invoice date" style="border:1px solid #0f766e;background:#f0fdfa;color:#0f766e;border-radius:6px;padding:5px 13px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">⟳ Import Cin7 orders</button>'
+        +'<button id="tpl-cin7sweep" title="End-of-month sweep: re-scan the whole month for any missed / late-invoiced orders" style="border:1px solid #0f766e;background:#fff;color:#0f766e;border-radius:6px;padding:5px 11px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">Sweep up '+e(TPL3_STATE.period)+'</button>'
+        +'<span style="width:1px;height:16px;background:#e0e0e0;margin:0 2px"></span>'
+        +'<button id="tpl-map" style="border:1px solid #1d4ed8;background:#eff6ff;color:#1e40af;border-radius:6px;padding:5px 13px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">Map to Cost Centres (Cin7) →</button>'
+        +'<button id="tpl-csv" title="Export the mapped account summary as CSV (Phase 3)" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:6px;padding:5px 13px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">⬇ Download CSV</button>'
+        +'<a id="tpl-clear" title="Clear the current analysis" style="font-size:11px;color:#dc2626;cursor:pointer;font-weight:600">Clear</a>'
+        +'<span id="tpl-cin7msg" style="font-size:11px;color:#94a3b8"></span>'
+      +'</div><div id="tpl-cin7sum" style="font-size:11px;color:#64748b;margin-bottom:10px"></div><div id="tpl-map-out"></div>'
       +'<div class="tw"><table style="border-collapse:collapse;font-size:12px;width:100%;max-width:820px;text-align:left"><thead><tr style="background:#e9eef5;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#475569">'
         +['File','Size','By','Uploaded','Status',''].map(function(h){return '<th class="l" style="padding:5px 10px;text-align:left">'+h+'</th>';}).join('')+'</tr></thead><tbody>'+rows+'</tbody></table></div><div id="tpl-parse"></div>';
     var fi=b.querySelector('#tpl-file'), up=b.querySelector('#tpl-up'), msg=b.querySelector('#tpl-upmsg'), drop=b.querySelector('#tpl-drop');
@@ -9445,8 +9448,19 @@ function render3plInvoice(body){
       ['dragenter','dragover'].forEach(function(ev){ drop.addEventListener(ev,function(e){ e.preventDefault(); e.stopPropagation(); hi(true); }); });
       ['dragleave','dragend'].forEach(function(ev){ drop.addEventListener(ev,function(e){ e.preventDefault(); e.stopPropagation(); if(ev==='dragleave'&&drop.contains(e.relatedTarget))return; hi(false); }); });
       drop.addEventListener('drop',function(e){ e.preventDefault(); e.stopPropagation(); hi(false); var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]; if(f)doUpload(f); }); }
-    var ci=b.querySelector('#tpl-cin7imp'), cim=b.querySelector('#tpl-cin7msg');
-    if(ci)ci.onclick=function(){ ci.disabled=true; cim.style.color='#64748b'; cim.textContent='Fetching from Cin7…'; fetch('/api/supply/tpl/cin7-import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({period:TPL3_STATE.period})}).then(function(r){return r.json();}).then(function(j){ ci.disabled=false; if(j&&j.ok){ cim.style.color='#166534'; cim.textContent='Imported '+j.imported+' orders for '+j.period+' — now Analyse + Map.'; } else { cim.style.color='#b45309'; cim.textContent=(j&&j.error)||'Import failed'; } }).catch(function(err){ ci.disabled=false; cim.style.color='#dc2626'; cim.textContent=String(err.message||err); }); };
+    var ci=b.querySelector('#tpl-cin7imp'), sw=b.querySelector('#tpl-cin7sweep'), cim=b.querySelector('#tpl-cin7msg'), sumEl=b.querySelector('#tpl-cin7sum');
+    function ddmy(x){ if(!x)return ''; var p=String(x).split('-'); return p[2]+'-'+['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+p[1]]+'-'+p[0].slice(2); }
+    function showSum(sm){ if(!sumEl)return; if(!sm||!sm.orders){ sumEl.innerHTML='<span style="color:#b45309">No Cin7 orders imported for '+e(TPL3_STATE.period)+' yet — click Import.</span>'; return; } sumEl.innerHTML='Imported <b>'+Number(sm.orders).toLocaleString()+'</b> orders &middot; invoice dates '+ddmy(sm.min_date)+' &rarr; '+ddmy(sm.max_date)+' &middot; '+sm.runs+' run'+(sm.runs===1?'':'s')+(sm.covered_to?(' &middot; covered to '+ddmy(sm.covered_to)):''); }
+    showSum(d.cin7_summary);
+    function doImport(sweep){ var btn=sweep?sw:ci; if(btn)btn.disabled=true; cim.style.color='#64748b'; cim.textContent=sweep?'Sweeping the whole month…':'Importing new orders…';
+      fetch('/api/supply/tpl/cin7-import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({tpl:TPL3_STATE.tpl,period:TPL3_STATE.period,sweep:!!sweep})}).then(function(r){return r.json();}).then(function(j){ if(btn)btn.disabled=false;
+        if(j&&j.ok){ cim.style.color='#166534'; cim.textContent=(j.note?j.note:('Imported '+(j.imported||0)+' orders'+(j.from?(' ('+ddmy(j.from)+' → '+ddmy(j.to)+')'):''))); showSum(j.summary); }
+        else { cim.style.color='#b45309'; cim.textContent=(j&&j.error)||'Import failed'; } }).catch(function(err){ if(btn)btn.disabled=false; cim.style.color='#dc2626'; cim.textContent=String(err.message||err); }); }
+    if(ci)ci.onclick=function(){ doImport(false); };
+    if(sw)sw.onclick=function(){ doImport(true); };
+    var mb=b.querySelector('#tpl-map'); if(mb)mb.onclick=function(){ var pc=b.querySelector('#tpl-parse'), aid=pc&&pc.dataset.aid, mo=b.querySelector('#tpl-map-out'); if(!aid){ cim.style.color='#b45309'; cim.textContent='Analyse a file first, then Map.'; return; } renderMap(mo, aid); };
+    var cvb=b.querySelector('#tpl-csv'); if(cvb)cvb.onclick=function(){ cim.style.color='#94a3b8'; cim.textContent='CSV export — coming in Phase 3.'; };
+    var clb=b.querySelector('#tpl-clear'); if(clb)clb.onclick=function(){ var pc=b.querySelector('#tpl-parse'), aid=pc&&pc.dataset.aid, mo=b.querySelector('#tpl-map-out'); try{ if(aid)localStorage.removeItem('tplan_'+aid); localStorage.removeItem('tplanlast_'+TPL3_STATE.tpl+'_'+TPL3_STATE.period); }catch(e){} if(pc){pc.innerHTML='';pc.removeAttribute('data-aid');} if(mo)mo.innerHTML=''; if(cim)cim.textContent=''; };
     b.querySelectorAll('.tpl-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this invoice file?'))return; fetch('/api/supply/tpl/file/'+a.dataset.id+'/delete',{method:'POST'}).then(function(r){return r.json();}).then(function(){ load(); }); }; });
     b.querySelectorAll('.tpl-sum').forEach(function(a){ a.onclick=function(){ renderParse(b.querySelector('#tpl-parse'),a.dataset.id); }; });
     try{ var _lid=localStorage.getItem('tplanlast_'+TPL3_STATE.tpl+'_'+TPL3_STATE.period); if(_lid && files.some(function(f){return String(f.id)===String(_lid);})){ var _c=localStorage.getItem('tplan_'+_lid); if(_c){ var _p=JSON.parse(_c); renderParseData(b.querySelector('#tpl-parse'), _lid, _p.d, _p.cfg); } } }catch(e){}

@@ -1,3 +1,8 @@
+## v26.526 — 3PL Cin7 import: per-month summary, incremental, sweep-up + unified action bar
+- Import bar now shows a per-month summary (orders imported + invoice-date range + runs).
+- Import is incremental: it skips dates already covered for that month (logged in tpl_cin7_imports, migration 177). A "Sweep up <month>" button re-scans the whole month for missed / late-invoiced orders.
+- Import / Sweep up / Map to Cost Centres / Download CSV / Clear are all on one row (Map/CSV/Clear act on the analysed file).
+
 ## v26.525 — 3PL Cin7 import: fix auth + date filter (now works live)
 - The Cin7 sales-order import was missing the Authorization header (401) and used a bare date (Cin7 needs UTC yyyy-MM-ddTHH:mm:ssZ, 400). Both fixed — verified live: 1-5 May 2026 imported 643 orders, all carrying a CostCenter.
 
