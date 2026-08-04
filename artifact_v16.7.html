@@ -9350,13 +9350,20 @@ function render3plInvoice(body){
       if(um.orders>0 && um.refs && um.refs.length){ html+='<div style="font-size:11px;color:#94a3b8;margin-top:8px">Unmatched refs (first '+um.refs.length+'): '+um.refs.map(e).join(', ')+'</div>'; }
       html+='</div>'; cont.innerHTML=html;
     }).catch(function(err){ cont.innerHTML='<div style="color:#dc2626;font-size:12px;padding:8px 0">Mapping failed: '+e(err.message||err)+'</div>'; }); }
+  function tplCacheKey(id){ return 'tplan_'+id; }
   function renderParse(cont,id){ if(!cont)return; cont.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:8px">Parsing…</div>';
     Promise.all([fetch('/api/supply/tpl/parse/'+id,{method:'POST'}).then(function(r){return r.json();}),fetch('/api/supply/tpl/data?tpl='+encodeURIComponent(TPL3_STATE.tpl)+'&period=').then(function(r){return r.json();}).catch(function(){return {};})]).then(function(_res){ var d=_res[0], _cfg=_res[1]||{}; if(!d||!d.ok)throw new Error((d&&d.error)||'parse failed');
-      var costAcc={}; (_cfg.cost_accounts||[]).forEach(function(c){ costAcc[c.cost_type]={code:c.account_code||'',name:c.account_name||''}; });
+      try{ localStorage.setItem(tplCacheKey(id), JSON.stringify({d:d,cfg:_cfg})); localStorage.setItem('tplanlast_'+TPL3_STATE.tpl+'_'+TPL3_STATE.period, String(id)); }catch(e){}
+      renderParseData(cont,id,d,_cfg);
+    }).catch(function(err){ cont.innerHTML='<div style="color:#dc2626;font-size:12px;padding:8px">Parse failed: '+e(err.message||err)+'</div>'; }); }
+  function renderParseData(cont,id,d,_cfg){ if(!cont||!d)return;
+      var costAcc={}; ((_cfg&&_cfg.cost_accounts)||[]).forEach(function(c){ costAcc[c.cost_type]={code:c.account_code||'',name:c.account_name||''}; });
       function ctype(nm){ nm=String(nm||''); if(/order/i.test(nm))return 'orders'; if(/storage/i.test(nm))return 'storage'; if(/return/i.test(nm))return 'returns'; if(/goods\s*in|inbound|rework/i.test(nm))return 'inbound'; return 'other'; }
       var grand={};
-      var html='<div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-top:12px;background:#fff;max-width:820px">'
-        +'<div style="font-weight:700;font-size:13px;margin-bottom:4px">Parsed summary — '+e(d.filename)+'</div>';
+      var html='<div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-top:12px;background:#fff;max-width:820px;text-align:left">'
+        +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap"><div style="font-weight:700;font-size:13px">Parsed summary — '+e(d.filename)+'</div>'
+        +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button id="tpl-map" style="border:1px solid #1d4ed8;background:#eff6ff;color:#1e40af;border-radius:6px;padding:5px 13px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">Map to Cost Centres (Cin7) →</button><button id="tpl-csv" title="Export the mapped account summary as CSV (Phase 3)" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:6px;padding:5px 13px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">⬇ Download CSV</button><a id="tpl-clear" title="Clear this analysis" style="font-size:11px;color:#dc2626;cursor:pointer;font-weight:600">Clear</a></div></div>'
+        +'<div id="tpl-csv-note" style="font-size:11px;color:#94a3b8;margin-top:2px"></div><div id="tpl-map-out"></div>';
       (d.sheets||[]).forEach(function(sh){ var h=sh.highlights||{}; if(h.total!=null){ var _c=sh.currency||'?'; grand[_c]=(grand[_c]||0)+Number(h.total); }
         var cur=(sh.currencies&&sh.currencies.length)?(' · '+sh.currencies.join('/')):'';
         html+='<div style="margin:12px 0 4px;font-weight:600;font-size:12px;border-top:1px solid #f1f5f9;padding-top:8px">'+e(sh.name)+' <span class="mut" style="font-weight:400">— '+sh.dataRows+' rows'+e(cur)+'</span></div>';
@@ -9380,13 +9387,14 @@ function render3plInvoice(body){
       html+='<div style="border-top:2px solid #cbd5e1;margin-top:12px;padding-top:8px;font-size:12px">'
         +'Grand total (sum of each sheet&rsquo;s Total column, by currency): <b>'+_grandStr+'</b>'
         +'<div style="margin-top:6px">Invoice total (from PDF)'+(_reconCur?(' — '+e(_reconCur)):'')+': <input id="tpl-recon" type="text" placeholder="0.00" style="width:130px;text-align:right;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px"> <span id="tpl-recon-var" class="mut"></span></div></div></div>';
-      html+='<div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button id="tpl-map" style="border:1px solid #1d4ed8;background:#eff6ff;color:#1e40af;border-radius:6px;padding:5px 13px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">Map to Cost Centres (Cin7) →</button><button id="tpl-csv" title="Export the mapped account summary as CSV (Phase 3)" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:6px;padding:5px 13px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">⬇ Download CSV</button><span id="tpl-csv-note" style="font-size:11px;color:#94a3b8"></span></div><div id="tpl-map-out"></div>';
+      html+='</div>';
       cont.innerHTML=html;
       var mb=cont.querySelector('#tpl-map'); if(mb)mb.onclick=function(){ renderMap(cont.querySelector('#tpl-map-out'), id); };
       var cb=cont.querySelector('#tpl-csv'); if(cb)cb.onclick=function(){ var n=cont.querySelector('#tpl-csv-note'); if(n){ n.style.color='#94a3b8'; n.textContent='CSV export — coming in Phase 3.'; } };
+      var xb=cont.querySelector('#tpl-clear'); if(xb)xb.onclick=function(){ try{ localStorage.removeItem(tplCacheKey(id)); localStorage.removeItem('tplanlast_'+TPL3_STATE.tpl+'_'+TPL3_STATE.period); }catch(e){} cont.innerHTML=''; };
       var ri=cont.querySelector('#tpl-recon'), rv=cont.querySelector('#tpl-recon-var');
       if(ri)ri.oninput=function(){ var v=parseFloat(String(ri.value).replace(/[^0-9.\-]/g,'')); if(!isFinite(v)){rv.textContent='';return;} var diff=v-_reconBase; rv.style.color=Math.abs(diff)<0.01?'#166534':'#b91c1c'; rv.textContent=(Math.abs(diff)<0.01?'matches':('variance '+(diff>=0?'+':'')+fmt(diff))); };
-    }).catch(function(err){ cont.innerHTML='<div style="color:#dc2626;font-size:12px;padding:8px">Parse failed: '+e(err.message||err)+'</div>'; }); }
+  }
   var host=body;
   function shell(){
     var tabs=TPL3.map(function(t){return '<button class="view-toggle rtab'+(t[0]===TPL3_STATE.tpl?' active':'')+'" data-tpl="'+t[0]+'" style="font-size:11px">'+e(t[1])+'</button>';}).join('');
@@ -9423,7 +9431,7 @@ function render3plInvoice(body){
         +'<span style="font-size:11px;color:#94a3b8;margin-left:8px">or drag &amp; drop a file anywhere in this box</span>'
         +'<span id="tpl-upmsg" style="font-size:12px;margin-left:10px"></span></div>'
       +'<div style="margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button id="tpl-cin7imp" style="border:1px solid #0f766e;background:#f0fdfa;color:#0f766e;border-radius:6px;padding:5px 13px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">⟳ Import Cin7 orders for '+e(TPL3_STATE.period)+'</button><span id="tpl-cin7msg" style="font-size:11px;color:#94a3b8">manual fetch of that month&rsquo;s sales orders (by invoice date) for Cost-Centre matching</span></div>'
-      +'<div class="tw"><table style="border-collapse:collapse;font-size:12px;width:100%;max-width:820px"><thead><tr style="background:#e9eef5;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#475569">'
+      +'<div class="tw"><table style="border-collapse:collapse;font-size:12px;width:100%;max-width:820px;text-align:left"><thead><tr style="background:#e9eef5;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#475569">'
         +['File','Size','By','Uploaded','Status',''].map(function(h){return '<th class="l" style="padding:5px 10px;text-align:left">'+h+'</th>';}).join('')+'</tr></thead><tbody>'+rows+'</tbody></table></div><div id="tpl-parse"></div>';
     var fi=b.querySelector('#tpl-file'), up=b.querySelector('#tpl-up'), msg=b.querySelector('#tpl-upmsg'), drop=b.querySelector('#tpl-drop');
     function doUpload(f){ if(!f){ msg.style.color='#dc2626'; msg.textContent='Choose a file first.'; return; }
@@ -9441,6 +9449,7 @@ function render3plInvoice(body){
     if(ci)ci.onclick=function(){ ci.disabled=true; cim.style.color='#64748b'; cim.textContent='Fetching from Cin7…'; fetch('/api/supply/tpl/cin7-import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({period:TPL3_STATE.period})}).then(function(r){return r.json();}).then(function(j){ ci.disabled=false; if(j&&j.ok){ cim.style.color='#166534'; cim.textContent='Imported '+j.imported+' orders for '+j.period+' — now Analyse + Map.'; } else { cim.style.color='#b45309'; cim.textContent=(j&&j.error)||'Import failed'; } }).catch(function(err){ ci.disabled=false; cim.style.color='#dc2626'; cim.textContent=String(err.message||err); }); };
     b.querySelectorAll('.tpl-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this invoice file?'))return; fetch('/api/supply/tpl/file/'+a.dataset.id+'/delete',{method:'POST'}).then(function(r){return r.json();}).then(function(){ load(); }); }; });
     b.querySelectorAll('.tpl-sum').forEach(function(a){ a.onclick=function(){ renderParse(b.querySelector('#tpl-parse'),a.dataset.id); }; });
+    try{ var _lid=localStorage.getItem('tplanlast_'+TPL3_STATE.tpl+'_'+TPL3_STATE.period); if(_lid && files.some(function(f){return String(f.id)===String(_lid);})){ var _c=localStorage.getItem('tplan_'+_lid); if(_c){ var _p=JSON.parse(_c); renderParseData(b.querySelector('#tpl-parse'), _lid, _p.d, _p.cfg); } } }catch(e){}
   }
   function drawConfig(b,d){
     var cost=d.cost_accounts||[], map=d.account_map||[];

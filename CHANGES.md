@@ -1,3 +1,8 @@
+## v26.524 — 3PL analyser: persist analysis, actions on top, date-range import
+- The parsed analysis now persists across page refresh (localStorage cache, auto-restored) with a Clear link; no longer lost on reload.
+- Map to Cost Centres + Download CSV actions moved to the top of the analysis; files table fully left-aligned.
+- Cin7 import accepts an explicit from/to date range (by invoice date) in addition to a month.
+
 ## v26.523 — Target recommendations: show recommended units
 - Each month line now presents the hard units forecast (current -> recommended units) alongside the % change, since Apply writes exact unit values.
 
