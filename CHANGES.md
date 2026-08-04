@@ -3,6 +3,9 @@
 Version log for the demand planner (bump on every change so we can revert).
 Deploy notes for Diviyaj: new env vars, migrations, and files to wire in.
 
+## v26.503 - Payments Report: highlight non-USD currencies ⚠️ NEEDS TESTING
+- Base ccy + Bank ccy cells now show amber (background/bold text) when the currency is not USD, so non-USD payments stand out. supply/inject.html. No migration.
+
 ## v26.502 - FBA grid: fix 3PL Inbound (blank) + category select-all alignment/toggle + group borders ⚠️ NEEDS TESTING
 - Fix v26.500 regression: 3PL Inbound was blank — it read md.inb (the lightweight ms summary) instead of PD[sku].mkts[CUR].inb.
 - Category "select all" now sits centred in the Ship (tick) column (Carton moving to the lead had shifted it); toggles to "select none" when every row in that category is ticked.
