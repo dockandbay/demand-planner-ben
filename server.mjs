@@ -3940,7 +3940,8 @@ app.get('/api/product/item/:ref', async (req, res) => {
         coalesce(supplier,'') supplier, coalesce(supplier_code,'') supplier_code,
         status, (swatch IS NOT NULL) has_swatch, coalesce(created_by,'') created_by,
         to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at,
-        to_char(dev_start_override,'YYYY-MM-DD') dev_start_override, to_char(approved_at,'YYYY-MM-DD HH24:MI') approved_at
+        to_char(dev_start_override,'YYYY-MM-DD') dev_start_override, to_char(approved_at,'YYYY-MM-DD HH24:MI') approved_at,
+        coalesce(approval_method,'') approval_method
         FROM planner.product_dev_items WHERE ref=$1`, [ref]),
       pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort, coalesce(mapped_sku,'') mapped_sku, approved_sample_id
         FROM planner.product_dev_sizes WHERE item_id=(SELECT id FROM planner.product_dev_items WHERE ref=$1) ORDER BY sort, id`, [ref]),
@@ -3983,7 +3984,8 @@ app.get('/api/product/item/:ref/core', async (req, res) => {
         coalesce(supplier,'') supplier, coalesce(supplier_code,'') supplier_code,
         status, (swatch IS NOT NULL) has_swatch, coalesce(created_by,'') created_by,
         to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at,
-        to_char(dev_start_override,'YYYY-MM-DD') dev_start_override, to_char(approved_at,'YYYY-MM-DD HH24:MI') approved_at
+        to_char(dev_start_override,'YYYY-MM-DD') dev_start_override, to_char(approved_at,'YYYY-MM-DD HH24:MI') approved_at,
+        coalesce(approval_method,'') approval_method
         FROM planner.product_dev_items WHERE ref=$1`, [ref]),
       pool.query(`SELECT count(*)::int n FROM planner.supplier_notes WHERE po=$1 AND author_kind='supplier' AND read_at IS NULL`, [ref]),
     ]);
@@ -4056,7 +4058,7 @@ app.post('/api/product/item', async (req, res) => {
 });
 app.post('/api/product/item/:ref', async (req, res) => {
   const b = req.body || {}, ref = req.params.ref, sets = [], vals = []; let i = 1;
-  const allow = { colour_name: 'text', description: 'text', status: 'text', season: 'text', category: 'text', dev_start_override: 'date', recipient_countries: 'text' };
+  const allow = { colour_name: 'text', description: 'text', status: 'text', season: 'text', category: 'text', dev_start_override: 'date', recipient_countries: 'text', approval_method: 'text' };
   for (const k of Object.keys(allow)) { if (k in b) { sets.push(`${k}=$${i}${allow[k] === 'date' ? '::date' : ''}`); vals.push(b[k] === '' ? null : b[k]); i++; } }
   // stamp / clear the approval time when status changes (drives Reports' time-to-approve)
   if ('status' in b) sets.push(b.status === 'approved' ? 'approved_at=coalesce(approved_at, now())' : 'approved_at=NULL');
@@ -6719,7 +6721,7 @@ app.post('/api/supply/po/:po', async (req, res) => {
     pack_polybags: 'boolean', pack_polybags_notes: 'text', pack_dnb_barcodes: 'boolean', pack_dnb_barcodes_notes: 'text',
     pack_rfid_barcodes: 'boolean', pack_rfid_barcodes_notes: 'text', pack_dnb_carton: 'boolean', pack_dnb_carton_notes: 'text',
     pack_client_carton: 'boolean', pack_client_carton_notes: 'text', pack_pallet_notes: 'text', pack_other_notes: 'text',
-    dtc_custom: 'boolean', dtc_key_account: 'boolean',
+    dtc_custom: 'boolean', dtc_key_account: 'boolean', custom_dev_ref: 'text',   // custom_dev_ref = comma-separated product_dev_items.ref list (custom order → its product developments)
     order_value_estimation: 'numeric', supplier_invoice_total: 'numeric',
     start_production: 'date', end_production_overide: 'date', landing_date_overide: 'date',
     delivery_date_overide: 'date', balance_due_date_overide: 'date', supplier_ship_date: 'date',
@@ -8856,6 +8858,7 @@ const POS_SQL_PORTAL = `
        WHERE m.po = coalesce((SELECT s.master_po FROM planner.shipments s WHERE s.shipment_ref=calc4.shipment_ref), calc4.shipment_ref)),'') ships_with_supplier,
     coalesce(client,'') client, coalesce(dispatch_order_ref,'') dispatch_order_ref,
     coalesce(final_delivery_address,'') final_delivery_address, coalesce(crossdock_skus,'') crossdock_skus,
+    coalesce(dtc_custom,false) dtc_custom, coalesce(custom_dev_ref,'') custom_dev_ref,   -- custom order + its product developments (portal shows the linked dev refs)
     coalesce(prod_no,'') prod_no, coalesce(batch_id,'') batch_id,
     coalesce(branch,'') branch, coalesce(nullif(country_code,''), branch_country, '') country,
     coalesce(calc4.client_requirements,'') client_requirements, coalesce(sales_order_ref,'') sales_order_ref,
@@ -9377,7 +9380,7 @@ app.post('/api/supply/bi/erp-compare/ignore', async (req, res) => {
 // one skips the recomputed-row query in the save response (client just repaints the cell it already changed).
 // Deliberately small/conservative: anything touching DtC approval (pack_*, sales/client refs), dates, amounts,
 // %, deposit, shipment, branch, status, prod#/batch is NOT here, so those still refresh the row.
-const PO_COSMETIC_FIELDS = new Set(['client', 'dispatch_order_ref', 'final_delivery_address', 'branch_delivery_notes', 'notes']);
+const PO_COSMETIC_FIELDS = new Set(['client', 'dispatch_order_ref', 'final_delivery_address', 'branch_delivery_notes', 'notes', 'custom_dev_ref']);
 // PO audit log (migration 158): fields whose edits are recorded on the timeline as a "record of change".
 const PO_TRACK = { status: 'Status', end_production_overide: 'Production end date', shipment_ref: 'Shipment assignment',
   deposit_ref: 'Deposit assignment',
@@ -9517,7 +9520,7 @@ const PO_ROWS_SQL = `
             approved_lines,   -- snapshot of SKUs/qtys at supplier approval → CONFIG portal preview builds approvedByPo for the "changes since you approved" diff (parity with /api/portal/bootstrap)
             coalesce(dispatch_order_ref,'') dispatch_order_ref, coalesce(final_delivery_address,'') final_delivery_address,
             coalesce(crossdock_skus,'') crossdock_skus,
-            coalesce(dtc_custom,false) dtc_custom, coalesce(dtc_key_account,false) dtc_key_account,   -- Direct-to-Client tags
+            coalesce(dtc_custom,false) dtc_custom, coalesce(dtc_key_account,false) dtc_key_account, coalesce(custom_dev_ref,'') custom_dev_ref,   -- Direct-to-Client tags + custom-order product developments (CSV of product_dev_items.ref)
             -- Forwarder contact details — read LIVE from the matching key account (by client name), not snapshotted
             (SELECT coalesce(ka.forwarder_name,'')  FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) forwarder_name,
             (SELECT coalesce(ka.forwarder_email,'') FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) forwarder_email,

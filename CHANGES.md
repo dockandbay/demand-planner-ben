@@ -1,3 +1,7 @@
+## v26.555 — Custom orders (SUG-0015): schema + server foundation
+- Migration 180: product_dev_items.approval_method (photo|samples) + purchase_orders.custom_dev_ref (CSV of product_dev_items.ref — a custom order can link to MULTIPLE product developments).
+- Server: product-dev item read/write now carries approval_method; PO update accepts custom_dev_ref (cosmetic field); PO grid + portal queries expose dtc_custom + custom_dev_ref. Where-to-send reuses existing sample recipients. UI (PRODUCT approval-method control, PO multi-product picker, new Custom Orders report, portal surfacing) next.
+
 ## v26.554 — DEMAND plan download (SUG-0016)
 - New '⬇ Download plan' button on the DEMAND ▸ Plan toolbar → FY-selection popup (pick one or more fiscal years) → xlsx: SKU × month, Units + Revenue, respecting the on-screen country/channel/category(+SKU) filters. Past months = actuals, future = forecast, each flagged (A)/(F). Revenue = units × subcategory ASP.
 - Extracted the plan's per-SKU monthly forecast into a shared skuMonthlyMap() helper (launch=0 / disc run-down capped by stock / saved output / subcatFU×tier-share); renderSkuView now uses it too, so the download and the grid always agree. DEMAND drill-down only — buy plan untouched.
