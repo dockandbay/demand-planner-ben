@@ -7704,8 +7704,8 @@ function renderSummaryView(body){
     +'</div>'
     +'<div style="font-size:12px;color:#666;margin:0 0 10px">'+e(co)+' · '+e(ch)+' — each cell stacks <b>LY actual</b> / <b>forecast</b> / <b>growth%</b>. Click a subcategory to see its SKUs. '+(rangeMode?('Showing '+mlab(SUMM_FROM)+' → '+mlab(SUMM_TO)+' with a period total.'):'FYs Mar–Feb; past years minimised (click a year to expand). ')+'<span style="background:#ecfdf5;padding:0 4px">actual</span> <span style="background:#f1f5f9;padding:0 4px">pre-launch</span> <span style="background:#fee2e2;padding:0 4px">discontinued</span></div>'
     +'<div id="smc" style="overflow-x:auto"></div></div>';
-  body.querySelectorAll('.sm-co').forEach(function(b){ b.onclick=function(){ CUR=b.dataset.c; render(); }; });
-  body.querySelectorAll('.sm-ch').forEach(function(b){ b.onclick=function(){ CF=b.dataset.c; render(); }; });
+  body.querySelectorAll('.sm-co').forEach(function(b){ b.onclick=function(){ CUR=b.dataset.c; renderSummaryView(body); }; });
+  body.querySelectorAll('.sm-ch').forEach(function(b){ b.onclick=function(){ CF=b.dataset.c; renderSummaryView(body); }; });
   body.querySelectorAll('.sm-metric').forEach(function(b){ b.onclick=function(){ SUMM_METRIC=b.dataset.m; try{localStorage.setItem('summ_metric',SUMM_METRIC);}catch(e){} renderSummaryView(body); }; });
   body.querySelectorAll('.sm-group').forEach(function(b){ b.onclick=function(){ SUMM_GROUP=b.dataset.g; try{localStorage.setItem('summ_group',SUMM_GROUP);}catch(e){} renderSummaryView(body); }; });
   var _te=body.querySelector('#sm-tgtedit'); if(_te)_te.onclick=function(){ SUMM_TGT_EDIT=!SUMM_TGT_EDIT; if(SUMM_TGT_EDIT&&SUMM_METRIC==='units')SUMM_METRIC='revtgt'; renderSummaryView(body); };
@@ -7743,13 +7743,14 @@ function renderSummaryView(body){
       var gc=g==null?'#cbd5e1':g>0?(tot?'#86efac':'#15803d'):g<0?(tot?'#fca5a5':'#b91c1c'):(tot?'#c7d2fe':'#64748b');
       return '<td class="'+shade+'"><div class="c3ly">'+mf(ly)+'</div><div class="c3f">'+(val?mf(val):'<span style="color:#cbd5e1">–</span>')+'</div><div class="c3g" style="color:'+gc+'">'+(g==null?'':(g>0?'+':'')+g+'%')+'</div></td>'; }
     function tcell(fc,ly,has,tgt,shade){ var tot=(shade==='tot');
-      var col=function(g){return g==null?'#94a3b8':g>0?(tot?'#86efac':'#15803d'):g<0?(tot?'#fca5a5':'#b91c1c'):'#64748b';};
+      var col=function(g){return g==null?(tot?'#c7d2fe':'#94a3b8'):g>0?(tot?'#86efac':'#15803d'):g<0?(tot?'#fca5a5':'#b91c1c'):(tot?'#c7d2fe':'#64748b');};
       var lab=function(g){return g==null?'':(g>0?'+':'')+g+'%';};
-      var fg=ly>0?Math.round((fc/ly-1)*100):null, tg=(has&&ly>0)?Math.round((tgt/ly-1)*100):null, vv=has?(fc-tgt):null;
-      var vc=vv==null?'#94a3b8':vv>=0?(tot?'#86efac':'#15803d'):(tot?'#fca5a5':'#b91c1c');
-      return '<td class="'+shade+' tgcell"><div class="c3t"><span style="color:#94a3b8">Fc</span> <b>'+mf(fc)+'</b> <span style="color:'+col(fg)+'">'+lab(fg)+'</span></div>'
-        +'<div class="c3t"><span style="color:#94a3b8">Tgt</span> '+(has?('<b>'+mf(tgt)+'</b> <span style="color:'+col(tg)+'">'+lab(tg)+'</span>'):'<span style="color:#cbd5e1">—</span>')+'</div>'
-        +'<div class="c3t"><span style="color:#94a3b8">&Delta;</span> '+(has?('<span style="color:'+vc+';font-weight:600">'+(vv>=0?'+':'')+mf(vv)+'</span>'):'')+'</div></td>'; }
+      var vtxt=tot?'#ffffff':'#0f172a', L='font-style:italic;font-size:8px;color:'+(tot?'#c7d2fe':'#94a3b8');
+      var fg=ly>0?Math.round((fc/ly-1)*100):null, tg=(ly>0)?Math.round((tgt/ly-1)*100):null, vv=(fc-tgt);
+      var vc=vv>=0?(tot?'#86efac':'#15803d'):(tot?'#fca5a5':'#b91c1c');
+      return '<td class="'+shade+' tgcell"><div class="c3t"><span style="'+L+'">fc</span> <b style="color:'+vtxt+'">'+mf(fc)+'</b> <span style="color:'+col(fg)+'">'+lab(fg)+'</span></div>'
+        +'<div class="c3t"><span style="'+L+'">tgt</span> <b style="color:'+vtxt+'">'+mf(tgt)+'</b> <span style="color:'+col(tg)+'">'+lab(tg)+'</span></div>'
+        +'<div class="c3t"><span style="'+L+'">&Delta;</span> <span style="color:'+vc+';font-weight:600">'+(vv>=0?'+':'')+mf(vv)+'</span></div></td>'; }
     function cells(val,ly,lch,disc,sub){ return cols.map(function(c){
         var months=(c.type==='m')?[c.m]:(c.type==='grp')?c.months:(c.type==='ptot'?rangeMonths:fyMonths(c.Y));
         var vT=0,lT=0; months.forEach(function(m){ vT+=(val[m]||0); lT+=(ly[m]||0); });
@@ -7757,20 +7758,26 @@ function renderSummaryView(body){
         if(c.type==='tot'||c.type==='ptot')shade='tot';
         else if(c.type==='m')shade=shadeOf(c.m,lch,disc);
         else { var allAct=true; months.forEach(function(m){ if(!isActualMonth(m))allAct=false; }); shade=allAct?'act':''; if(disc){ var dm=disc.slice(0,7).replace('-','_'); if(months.every(function(m){return m>dm;}))shade='disc'; } else if(lch){ var lm=lch.slice(0,7).replace('-','_'); if(months.every(function(m){return m<lm;}))shade='pre'; } }
-        if(SUMM_METRIC==='revtgt'&&sub!=null&&!rangeMode){ var tgt=0,has=false; months.forEach(function(m){ var fi=monFyIdx(m); var g=resolveG(fi.Y,sub,fi.idx); var lyv=(ly[m]||0); if(g!=null){has=true;tgt+=lyv*(1+g/100);} else tgt+=lyv; }); return tcell(vT,lT,has,tgt,shade); }
+        if(SUMM_METRIC==='revtgt'&&sub!=null&&!rangeMode){ var tgt=0; months.forEach(function(m){ var fi=monFyIdx(m); var g=resolveG(fi.Y,sub,fi.idx); if(g==null)g=0; tgt+=(ly[m]||0)*(1+g/100); }); return tcell(vT,lT,true,tgt,shade); }
         return c3(lT,vT,shade); }).join(''); }
-    function ecell(sub,c){ if(c.type==='tot'||c.type==='ptot')return '<td class="tot"></td>';
+    function ecell(sub,c){ if(c.type==='tot'||c.type==='ptot')return '<td class="tot" style="background:#f1f5f9"></td>';
       var Y=c.Y, lvl=c.level, idx=c.idx; if(Y==null||!lvl)return '<td></td>';
       var stored=SUMM_TGT[tgKey(Y,sub,lvl,idx)], inh=inheritG(Y,sub,lvl,idx);
+      var mths=c.single?[c.single]:c.months, ly=0; mths.forEach(function(m){ ly+=((_lyRev[sub]&&_lyRev[sub][m])||0); });
+      var eff=(stored!=null)?Number(stored):(inh!=null?inh:0);
       var v=(stored!=null)?((Number(stored)>=0?'+':'')+Number(stored)):'';
-      var ph=(inh!=null)?('↳'+(inh>=0?'+':'')+inh):'gr%';
-      return '<td class="ecell"><input class="tgin" data-sub="'+encodeURIComponent(sub)+'" data-fy="'+Y+'" data-lvl="'+lvl+'" data-idx="'+idx+'" value="'+v+'" placeholder="'+ph+'" title="revenue growth % vs last year"></td>'; }
+      var ph=(inh!=null)?('↳'+(inh>=0?'+':'')+inh):'0%';
+      var tgt=ly*(1+eff/100);
+      return '<td class="ecell" style="padding:2px 4px;border:1px solid #e5e7eb;text-align:right"><input class="tgin" data-sub="'+encodeURIComponent(sub)+'" data-fy="'+Y+'" data-lvl="'+lvl+'" data-idx="'+idx+'" data-ly="'+Math.round(ly)+'" data-inh="'+(inh!=null?inh:'')+'" value="'+v+'" placeholder="'+ph+'" title="revenue growth % vs last year (blank = inherit)"><div class="ttgt" style="font-size:9px;color:#64748b;text-align:right;font-variant-numeric:tabular-nums;margin-top:1px">'+(ly>0?('&pound;'+Math.round(tgt).toLocaleString()):'')+'</div></td>'; }
     if(SUMM_TGT_EDIT&&!rangeMode){
+      var _lyRev={}; subs.forEach(function(_s){ var _a=ga(co,ch,_s)||{}, _mm={}; DISP_MONTHS.forEach(function(m){ _mm[m]=_a[prevY(m)]?_a[prevY(m)][1]:0; }); _lyRev[_s]=_mm; });
+      var _mmT={}; DISP_MONTHS.forEach(function(m){ var _t=0; subs.forEach(function(_s){ _t+=_lyRev[_s][m]||0; }); _mmT[m]=_t; }); _lyRev['']=_mmT;
       var eThead='<thead><tr>'+h1+'</tr><tr>'+h2+'</tr></thead>';
       var eRows='<tr class="gt"><td class="lbl">ALL SUBCATEGORIES <span style="font-weight:400;color:#94a3b8">(market total)</span></td>'+cols.map(function(c){return ecell('',c);}).join('')+'</tr>';
       subs.forEach(function(s){ eRows+='<tr class="sub"><td class="lbl">'+e(s)+'</td>'+cols.map(function(c){return ecell(s,c);}).join('')+'</tr>'; });
       host.innerHTML=STY+'<div style="font-size:11px;color:#666;margin:0 0 8px">Enter a revenue <b>growth %</b> (vs last year, + or -) per <b>'+SUMM_GROUP+'</b> for the market total and each subcategory. Set a coarser level (switch to Half/Quarter) and finer levels <b>inherit</b> it (shown as <span style="color:#94a3b8">↳</span>) until you type an override. Blank = clear.</div><table>'+eThead+'<tbody>'+eRows+'</tbody></table>';
-      host.querySelectorAll('input.tgin').forEach(function(inp){ inp.onchange=function(){ var sub=decodeURIComponent(inp.dataset.sub); var raw=String(inp.value).replace(/[^0-9.\-]/g,'');
+      host.querySelectorAll('input.tgin').forEach(function(inp){ inp.oninput=function(){ var lyv=Number(inp.dataset.ly)||0, ih=inp.dataset.inh, rr=String(inp.value).replace(/[^0-9.\-]/g,''); var g=(rr===''?((ih!==''&&ih!=null)?parseFloat(ih):0):parseFloat(rr)); if(isNaN(g))g=0; var sib=inp.parentNode.querySelector('.ttgt'); if(sib)sib.innerHTML=lyv>0?('£'+Math.round(lyv*(1+g/100)).toLocaleString()):''; };
+        inp.onchange=function(){ var sub=decodeURIComponent(inp.dataset.sub); var raw=String(inp.value).replace(/[^0-9.\-]/g,'');
         fetch('/api/demand-revenue-targets/periods',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({country:co,channel:ch,fy:+inp.dataset.fy,subcategory:sub,level:inp.dataset.lvl,idx:+inp.dataset.idx,growth_pct:raw})})
           .then(function(r){return r.json();}).then(function(){ var k=tgKey(+inp.dataset.fy,sub,inp.dataset.lvl,+inp.dataset.idx); if(raw==='')delete SUMM_TGT[k]; else SUMM_TGT[k]=Number(raw); draw(); }).catch(function(){}); }; });
       host.querySelectorAll('th.fyh[data-fy]').forEach(function(th){ th.onclick=function(){ var Y=+th.dataset.fy; SUMM_FYOPEN[Y]=!fyOpen(Y); draw(); }; });
@@ -8320,14 +8327,19 @@ function renderTargetRecs(body){ if(TREC_FY==null)TREC_FY=CUR_FY_START;
   trecLoad(function(){
     var recs=computeTargetRecs(TREC_FY);
     var pills=fys.map(function(y){return '<button class="trec-fy" data-fy="'+y+'" style="border:1px solid '+(y===TREC_FY?'#b45309':'#cbd5e1')+';background:'+(y===TREC_FY?'#b45309':'#fff')+';color:'+(y===TREC_FY?'#fff':'#475569')+';border-radius:14px;padding:2px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;margin-right:4px">'+fyLbl(y)+'</button>';}).join('');
-    function wireFy(){ body.querySelectorAll('.trec-fy').forEach(function(b){ b.onclick=function(){ TREC_FY=+b.dataset.fy; renderTargetRecs(body); }; }); }
-    if(!recs.length){ body.innerHTML='<div style="padding:4px 2px 10px">'+pills+'</div><div style="padding:12px 2px;color:#888;font-size:12px">No revenue targets set for '+esc(co)+' · '+esc(ch)+' in '+fyLbl(TREC_FY)+'. Set them in <b>Summary ▸ Add targets</b> first.</div>'; wireFy(); return; }
+    var _CO=(typeof CTRS!=='undefined'?CTRS:['UK','US','EU','AU','CA']), _CH=['DTC','FBA','B2B'];
+    var _pb=function(v,on,cls){return '<button class="'+cls+'" data-v="'+v+'" style="border:1px solid '+(on?'#0f172a':'#cbd5e1')+';background:'+(on?'#0f172a':'#fff')+';color:'+(on?'#fff':'#475569')+';border-radius:12px;padding:2px 9px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;margin-right:3px">'+esc(v)+'</button>';};
+    var coPills=_CO.map(function(x){return _pb(x,x===co,'trec-co');}).join('')+'<span style="display:inline-block;width:12px"></span>'+_CH.map(function(x){return _pb(x,x===ch,'trec-ch');}).join('');
+    function wireFy(){ body.querySelectorAll('.trec-fy').forEach(function(b){ b.onclick=function(){ TREC_FY=+b.dataset.fy; renderTargetRecs(body); }; });
+      body.querySelectorAll('.trec-co').forEach(function(b){ b.onclick=function(){ CUR=b.dataset.v; renderTargetRecs(body); }; });
+      body.querySelectorAll('.trec-ch').forEach(function(b){ b.onclick=function(){ CF=b.dataset.v; renderTargetRecs(body); }; }); }
+    if(!recs.length){ body.innerHTML='<div style="padding:4px 2px 4px">'+coPills+'</div><div style="padding:0 2px 8px">'+pills+'</div><div style="padding:12px 2px;color:#888;font-size:12px">No revenue targets set for '+esc(co)+' · '+esc(ch)+' in '+fyLbl(TREC_FY)+'. Set them in <b>Summary ▸ Add targets</b> first.</div>'; wireFy(); return; }
     var rowsH=recs.map(function(rc){ var gap=rc.fyTgt-rc.fyCur, gp=rc.fyCur>0?Math.round((rc.fyTgt/rc.fyCur-1)*100):null;
       var per=rc.rows.map(function(r){ var p=pa(r.m); return MON[p.mo]+' '+(r.pctCur==null?'—':((r.pctCur>=0?'+':'')+Math.round(r.pctCur*100)+'%')); }).join(' &middot; ');
       return '<tr style="border-top:1px solid #eef2f7"><td style="padding:5px 10px;font-weight:600;text-align:left">'+esc(rc.s)+'</td><td style="padding:5px 10px;text-align:right;font-variant-numeric:tabular-nums">'+money(rc.fyCur)+'</td><td style="padding:5px 10px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums">'+money(rc.fyTgt)+'</td><td style="padding:5px 10px;text-align:right;color:'+(gap>=0?'#166534':'#b91c1c')+';font-variant-numeric:tabular-nums">'+(gap>=0?'+':'')+money(gap)+(gp!=null?(' ('+(gp>=0?'+':'')+gp+'%)'):'')+'</td></tr>'
         +'<tr><td colspan="4" style="padding:0 10px 6px 22px;font-size:10px;color:#94a3b8;text-align:left">'+per+'</td></tr>'; }).join('');
     var tCur=recs.reduce(function(a,b){return a+b.fyCur;},0), tTgt=recs.reduce(function(a,b){return a+b.fyTgt;},0), tGap=tTgt-tCur;
-    body.innerHTML='<div style="padding:4px 2px 10px">'+pills+'</div>'
+    body.innerHTML='<div style="padding:4px 2px 4px">'+coPills+'</div><div style="padding:0 2px 8px">'+pills+'</div>'
       +'<div style="font-size:11px;color:#666;margin:0 0 8px">Recommended <b>subcategory</b> forecast changes to meet your revenue targets in '+fyLbl(TREC_FY)+' &middot; '+esc(co)+' &middot; '+esc(ch)+'. Units come from <b>target &pound; &divide; ASP</b>, so <b>price changes are accounted for</b>. The per-month % is the change vs the current forecast. Forecast months only. Applying writes subcategory overrides (cascade to SKUs) &mdash; then <b>Save Forecasts</b> to persist.</div>'
       +'<table style="border-collapse:collapse;font-size:12px;width:100%"><thead><tr style="background:#f8fafc;font-size:10px;text-transform:uppercase;color:#475569"><th style="padding:5px 10px;text-align:left">Subcategory</th><th style="padding:5px 10px;text-align:right">Forecast</th><th style="padding:5px 10px;text-align:right">Target</th><th style="padding:5px 10px;text-align:right">Gap</th></tr></thead><tbody>'+rowsH
       +'<tr style="border-top:2px solid #cbd5e1;font-weight:700"><td style="padding:5px 10px;text-align:left">Total</td><td style="padding:5px 10px;text-align:right;font-variant-numeric:tabular-nums">'+money(tCur)+'</td><td style="padding:5px 10px;text-align:right;font-variant-numeric:tabular-nums">'+money(tTgt)+'</td><td style="padding:5px 10px;text-align:right;color:'+(tGap>=0?'#166534':'#b91c1c')+';font-variant-numeric:tabular-nums">'+(tGap>=0?'+':'')+money(tGap)+'</td></tr>'

@@ -1,3 +1,9 @@
+## v26.522 — Summary targets polish (feedback)
+- Add-targets editor: each cell now shows the resulting target £ live (blank = 0% growth shows LY value); grid borders (spreadsheet feel).
+- Rev+targets cells: fc/tgt labels smaller/italic/lowercase; white text on the dark-blue FY total column; blank target = 0% (shows value + variance, not a dash).
+- Summary pop-out: country/channel pills now re-render the drawer (were only changing the plan behind).
+- Target recommendations drawer: added country + channel pills.
+
 ## v26.521 — Demand plan: Target recommendations
 - New Target recommendations button (plan report row): recommends subcategory forecast changes to meet your revenue targets, per month, for a chosen FY. Units derived from target £ ÷ ASP so price changes are accounted for (revenue growth != unit growth unless price flat).
 - Review drawer shows forecast vs target £ + gap + per-month % change; Apply writes subcategory overrides (cascade to SKUs), then Save Forecasts persists. Review-then-apply like Smooth.
