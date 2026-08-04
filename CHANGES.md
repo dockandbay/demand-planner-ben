@@ -1,3 +1,6 @@
+## v26.539 — 3PL Import log: left-align all fields
+- Import log table now left-aligns every column (Orders, Status, Cin7 calls were right-aligned).
+
 ## v26.538 — 3PL Invoicing: Xero-bill preview (2-col), region tax, invoice-recap lines, UI polish
 - 2-column analysis: LEFT = faithful "what goes to Xero" bill preview (same source as the CSV), RIGHT = parsed data analysis.
 - Region-aware tax on the Xero bill: EU/UK = 20% (VAT on Expenses) with blank amount (Xero computes); AU = GST on Expenses with amount supplied (=line/11, 10% inclusive); US = Tax Exempt. Matches the COGHLANS_BILL / BLADE_BILL examples.

@@ -9547,9 +9547,9 @@ function render3plInvoice(body){
         +'<td class="l" style="padding:4px 10px">'+e(r.period||'')+'</td>'
         +'<td class="l" style="padding:4px 10px;white-space:nowrap">'+e(r.from_date||'')+(r.to_date?(' → '+e(r.to_date)):'')+'</td>'
         +'<td class="l" style="padding:4px 10px">'+e(r.kind||'')+'</td>'
-        +'<td class="l" style="padding:4px 10px;text-align:right">'+(r.orders!=null?Number(r.orders).toLocaleString():'')+'</td>'
-        +'<td class="l" style="padding:4px 10px">'+badge(r.status)+'</td>'
-        +'<td class="l" style="padding:4px 10px;text-align:right">'+(r.cin7_calls!=null?r.cin7_calls:'')+'</td>'
+        +'<td class="l" style="padding:4px 10px;text-align:left">'+(r.orders!=null?Number(r.orders).toLocaleString():'')+'</td>'
+        +'<td class="l" style="padding:4px 10px;text-align:left">'+badge(r.status)+'</td>'
+        +'<td class="l" style="padding:4px 10px;text-align:left">'+(r.cin7_calls!=null?r.cin7_calls:'')+'</td>'
         +'<td class="l" style="padding:4px 10px;color:#b91c1c;max-width:340px">'+e(r.error||'')+'</td></tr>'; }).join('')
         :'<tr><td colspan="9" style="padding:14px 10px;color:#94a3b8;text-align:center">No Cin7 imports logged yet.</td></tr>';
       b.innerHTML='<div style="font-size:13px;font-weight:700;margin-bottom:4px">Cin7 import log</div>'
