@@ -1,3 +1,6 @@
+## v26.512 — 3PL Invoicing: clearer Analyse button
+- Replaced the subtle Summary text link with a blue Analyse button on each data file row. Non-data files (e.g. the invoice PDF) show "not analysable" instead.
+
 ## v26.511 — 3PL Invoicing: drag & drop upload
 - The upload box is now a drop zone: drag a file anywhere into it to upload (highlights on hover-over). File picker + Upload button still work; picker shows a ready hint.
 
