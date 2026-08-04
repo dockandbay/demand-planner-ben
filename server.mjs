@@ -5342,7 +5342,9 @@ function _tplGridSummary(name, grid) {
     if (c > 3) { hr = i; break; }
   }
   const headers = grid[hr] || [];
-  const data = grid.slice(hr + 1).filter(row => (row || []).some(x => x != null && String(x).trim() !== ''));
+  // A data row must have a non-empty KEY (first column). This drops embedded totals/summary rows
+  // (blank key, or a "Total" label) that these 3PL exports append — otherwise column sums double-count.
+  const data = grid.slice(hr + 1).filter(row => { const k = (row && row[0] != null) ? String(row[0]).trim() : ''; return k !== '' && !/^total/i.test(k); });
   const cols = headers.map((h, ci) => {
     let sum = 0, ncount = 0, tcount = 0; const samples = new Set();
     data.forEach(row => {

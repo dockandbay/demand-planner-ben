@@ -1,3 +1,7 @@
+## v26.514 — 3PL analyser: exclude totals rows + left-align
+- Parser now drops embedded totals/summary rows (blank or "Total" key column) so column sums no longer double-count. Fixes Shipping Fee (was 41,123 -> 20,561.57), Storage (was 47,714 -> 5,379.27), etc.
+- 3PL invoice page + parsed summary left-aligned as standard.
+
 ## v26.513 — DEMAND Summary: per-subcategory revenue targets
 - New ADD TARGETS editor: enter revenue growth % (+/-) per subcategory (and market total) at month/quarter/half; coarser levels inherit to finer unless overridden (half->quarter->month).
 - New Rev + targets metric: each period cell shows Forecast $/%growth, Target $/%growth, and variance (Fc - Tgt).
