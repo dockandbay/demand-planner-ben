@@ -1,3 +1,7 @@
+## v26.521 — Demand plan: Target recommendations
+- New Target recommendations button (plan report row): recommends subcategory forecast changes to meet your revenue targets, per month, for a chosen FY. Units derived from target £ ÷ ASP so price changes are accounted for (revenue growth != unit growth unless price flat).
+- Review drawer shows forecast vs target £ + gap + per-month % change; Apply writes subcategory overrides (cascade to SKUs), then Save Forecasts persists. Review-then-apply like Smooth.
+
 ## v26.520 — Demand plan: "Summary with targets" pop-out
 - New button on the demand plan (beside Revenue vs target / Executive summary) opens the Summary report in a right-hand drawer, like Exec Summary. Opens on the Rev+targets view the first time.
 - Summary metric + grouping pills now persist in the browser (localStorage) across reopen/reload.

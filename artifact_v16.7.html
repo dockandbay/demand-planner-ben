@@ -8215,12 +8215,14 @@ function planRevBtnSync(){ var show=(typeof VIEW_MODE!=='undefined'&&VIEW_MODE==
       var btn='border:none;border-radius:16px;padding:5px 12px;font-size:12px;font-weight:700;font-family:inherit;cursor:pointer;white-space:nowrap;color:#fff';
       c.innerHTML='<button id="plan-rev-btn2" type="button" title="Revenue growth targets & tracking — full report" style="'+btn+';background:#2563eb">📈 Revenue vs target</button>'
         +'<button id="plan-exec-btn" type="button" title="Executive summary — FY revenue &amp; units vs last year" style="'+btn+';background:#0f766e">📊 Executive summary</button>'
-        +'<button id="plan-summ-btn" type="button" title="Summary report with revenue targets" style="'+btn+';background:#7c3aed">🧾 Summary with targets</button>';
+        +'<button id="plan-summ-btn" type="button" title="Summary report with revenue targets" style="'+btn+';background:#7c3aed">🧾 Summary with targets</button>'
+        +'<button id="plan-trec-btn" type="button" title="Recommend forecast changes to meet your revenue targets" style="'+btn+';background:#b45309">🎯 Target recommendations</button>';
       row.appendChild(c);
       c.querySelector('#plan-rev-btn2').onclick=openPlanRevPopout;
       c.querySelector('#plan-exec-btn').onclick=openExecSummaryPopout;
-      c.querySelector('#plan-summ-btn').onclick=openSummaryPopout; }
-  } else { if(c)c.remove(); if(typeof closeExecDrawer==='function')closeExecDrawer(); if(typeof closeRevDrawer==='function')closeRevDrawer(); if(typeof closeSummDrawer==='function')closeSummDrawer(); } }
+      c.querySelector('#plan-summ-btn').onclick=openSummaryPopout;
+      c.querySelector('#plan-trec-btn').onclick=openTargetRecs; }
+  } else { if(c)c.remove(); if(typeof closeExecDrawer==='function')closeExecDrawer(); if(typeof closeRevDrawer==='function')closeRevDrawer(); if(typeof closeSummDrawer==='function')closeSummDrawer(); if(typeof closeTrecDrawer==='function')closeTrecDrawer(); } }
 // "Revenue vs target" opens the FULL revenue report (targets & tracking + price changes) in a 50% drawer —
 // the compact planRevPopRender card is deprecated.
 function revEnsureDrawer(){ var d=document.getElementById('rev-drawer');
@@ -8281,6 +8283,75 @@ function openSummaryPopout(){ var d=document.getElementById('summ-drawer');
   var body=document.getElementById('summ-drawer-body'); if(body)body.innerHTML='<div class="count" style="padding:14px;color:#888">Loading…</div>';
   setTimeout(function(){ try{ renderSummaryView(document.getElementById('summ-drawer-body')); }
     catch(e){ var b=document.getElementById('summ-drawer-body'); if(b)b.innerHTML='<div style="padding:14px;color:#dc2626">Could not load Summary: '+String(e&&e.message||e)+'</div>'; } }, 20); }
+// ── Plan ▸ "Target recommendations" — recommend subcategory forecast changes to meet revenue targets ──
+// Units are derived from target £ ÷ ASP (ASP includes price changes), so the unit change is revenue growth
+// net of price. Review-then-apply: Apply writes subcategory overrides into IV (cascade to SKUs); Save persists.
+var TREC_FY=null, TREC_MAP={}, TREC_KEY='';
+function trecPrevY(m){ return (+m.slice(0,4)-1)+'_'+m.slice(5,7); }
+function trecMonFyIdx(m){ var mo=+m.slice(5,7),y=+m.slice(0,4); return {Y:(mo>=3?y:y-1), idx:(mo>=3?mo-2:mo+10)}; }
+function trecResolve(Y,sub,mIdx){ var k; k=Y+'|'+sub+'|month|'+mIdx; if(TREC_MAP[k]!=null)return Number(TREC_MAP[k]); k=Y+'|'+sub+'|quarter|'+Math.ceil(mIdx/3); if(TREC_MAP[k]!=null)return Number(TREC_MAP[k]); k=Y+'|'+sub+'|half|'+Math.ceil(mIdx/6); if(TREC_MAP[k]!=null)return Number(TREC_MAP[k]); return null; }
+function trecLoad(cb){ var co=CUR,ch=CF; if(TREC_KEY===co+'|'+ch){cb();return;}
+  fetch('/api/demand-revenue-targets/periods?country='+encodeURIComponent(co)+'&channel='+encodeURIComponent(ch)).then(function(r){return r.json();}).then(function(rows){ TREC_MAP={}; (rows||[]).forEach(function(t){ TREC_MAP[t.fy+'|'+(t.subcategory||'')+'|'+t.level+'|'+t.idx]=t.growth_pct; }); TREC_KEY=co+'|'+ch; cb(); }).catch(function(){ TREC_KEY=co+'|'+ch; cb(); }); }
+function computeTargetRecs(fy){ var co=CUR,ch=CF;
+  var subs=[]; (typeof DATA!=='undefined'?DATA:[]).forEach(function(d){ if(d.co===co&&d.ch===ch&&d.s&&subs.indexOf(d.s)<0)subs.push(d.s); }); subs.sort();
+  var months=fyMonths(fy).filter(function(m){ return !isActualMonth(m); });
+  var out=[];
+  subs.forEach(function(s){ var a=ga(co,ch,s)||{}, cr=calc(s,co,ch); var rows=[], fyCur=0, fyTgt=0;
+    months.forEach(function(m){ var fi=trecMonFyIdx(m); var g=trecResolve(fi.Y,s,fi.idx); if(g==null)return;
+      var lyRev=a[trecPrevY(m)]?a[trecPrevY(m)][1]:0, lyU=a[trecPrevY(m)]?a[trecPrevY(m)][0]:0;
+      if(!(lyRev>0))return;
+      var p=pa(m), asp=getASP(co,ch,s,p.y,p.mo); if(!(asp>0))return;
+      var tgtRev=lyRev*(1+g/100), reqU=Math.max(0,Math.round(tgtRev/asp));
+      var curU=cr.fu[m]||0, curRev=curU*asp;
+      rows.push({m:m, curU:curU, curRev:curRev, tgtRev:tgtRev, reqU:reqU, g:g, pctCur:(curU>0?(reqU/curU-1):null), pctLY:(lyU>0?(reqU/lyU-1):null)});
+      fyCur+=curRev; fyTgt+=tgtRev; });
+    if(rows.length)out.push({s:s, rows:rows, fyCur:fyCur, fyTgt:fyTgt}); });
+  return out; }
+function applyTargetRecs(recs){ var co=CUR,ch=CF;
+  recs.forEach(function(rc){ rc.rows.forEach(function(r){ var ik=rc.s+'|'+co+'|'+ch+'|'+r.m; var u=Math.max(0,Math.round(r.reqU)); IV[ik]=(u>=4?String(u):("'"+u)); }); });
+  if(typeof markDirty==='function')markDirty();
+  render(); }
+function renderTargetRecs(body){ if(TREC_FY==null)TREC_FY=CUR_FY_START;
+  var co=CUR,ch=CF, fys=[CUR_FY_START,CUR_FY_START+1,CUR_FY_START+2];
+  var fyLbl=function(y){return 'FY'+String(y).slice(2)+'/'+String(y+1).slice(2);};
+  var money=function(x){return '£'+Math.round(x||0).toLocaleString();};
+  var MON=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  body.innerHTML='<div style="padding:10px 2px;color:#888;font-size:12px">Loading targets…</div>';
+  trecLoad(function(){
+    var recs=computeTargetRecs(TREC_FY);
+    var pills=fys.map(function(y){return '<button class="trec-fy" data-fy="'+y+'" style="border:1px solid '+(y===TREC_FY?'#b45309':'#cbd5e1')+';background:'+(y===TREC_FY?'#b45309':'#fff')+';color:'+(y===TREC_FY?'#fff':'#475569')+';border-radius:14px;padding:2px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;margin-right:4px">'+fyLbl(y)+'</button>';}).join('');
+    function wireFy(){ body.querySelectorAll('.trec-fy').forEach(function(b){ b.onclick=function(){ TREC_FY=+b.dataset.fy; renderTargetRecs(body); }; }); }
+    if(!recs.length){ body.innerHTML='<div style="padding:4px 2px 10px">'+pills+'</div><div style="padding:12px 2px;color:#888;font-size:12px">No revenue targets set for '+esc(co)+' · '+esc(ch)+' in '+fyLbl(TREC_FY)+'. Set them in <b>Summary ▸ Add targets</b> first.</div>'; wireFy(); return; }
+    var rowsH=recs.map(function(rc){ var gap=rc.fyTgt-rc.fyCur, gp=rc.fyCur>0?Math.round((rc.fyTgt/rc.fyCur-1)*100):null;
+      var per=rc.rows.map(function(r){ var p=pa(r.m); return MON[p.mo]+' '+(r.pctCur==null?'—':((r.pctCur>=0?'+':'')+Math.round(r.pctCur*100)+'%')); }).join(' &middot; ');
+      return '<tr style="border-top:1px solid #eef2f7"><td style="padding:5px 10px;font-weight:600;text-align:left">'+esc(rc.s)+'</td><td style="padding:5px 10px;text-align:right;font-variant-numeric:tabular-nums">'+money(rc.fyCur)+'</td><td style="padding:5px 10px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums">'+money(rc.fyTgt)+'</td><td style="padding:5px 10px;text-align:right;color:'+(gap>=0?'#166534':'#b91c1c')+';font-variant-numeric:tabular-nums">'+(gap>=0?'+':'')+money(gap)+(gp!=null?(' ('+(gp>=0?'+':'')+gp+'%)'):'')+'</td></tr>'
+        +'<tr><td colspan="4" style="padding:0 10px 6px 22px;font-size:10px;color:#94a3b8;text-align:left">'+per+'</td></tr>'; }).join('');
+    var tCur=recs.reduce(function(a,b){return a+b.fyCur;},0), tTgt=recs.reduce(function(a,b){return a+b.fyTgt;},0), tGap=tTgt-tCur;
+    body.innerHTML='<div style="padding:4px 2px 10px">'+pills+'</div>'
+      +'<div style="font-size:11px;color:#666;margin:0 0 8px">Recommended <b>subcategory</b> forecast changes to meet your revenue targets in '+fyLbl(TREC_FY)+' &middot; '+esc(co)+' &middot; '+esc(ch)+'. Units come from <b>target &pound; &divide; ASP</b>, so <b>price changes are accounted for</b>. The per-month % is the change vs the current forecast. Forecast months only. Applying writes subcategory overrides (cascade to SKUs) &mdash; then <b>Save Forecasts</b> to persist.</div>'
+      +'<table style="border-collapse:collapse;font-size:12px;width:100%"><thead><tr style="background:#f8fafc;font-size:10px;text-transform:uppercase;color:#475569"><th style="padding:5px 10px;text-align:left">Subcategory</th><th style="padding:5px 10px;text-align:right">Forecast</th><th style="padding:5px 10px;text-align:right">Target</th><th style="padding:5px 10px;text-align:right">Gap</th></tr></thead><tbody>'+rowsH
+      +'<tr style="border-top:2px solid #cbd5e1;font-weight:700"><td style="padding:5px 10px;text-align:left">Total</td><td style="padding:5px 10px;text-align:right;font-variant-numeric:tabular-nums">'+money(tCur)+'</td><td style="padding:5px 10px;text-align:right;font-variant-numeric:tabular-nums">'+money(tTgt)+'</td><td style="padding:5px 10px;text-align:right;color:'+(tGap>=0?'#166534':'#b91c1c')+';font-variant-numeric:tabular-nums">'+(tGap>=0?'+':'')+money(tGap)+'</td></tr>'
+      +'</tbody></table>'
+      +'<div style="margin-top:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button id="trec-apply" style="border:1px solid #b45309;background:#b45309;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">Apply to forecast</button><span id="trec-msg" style="font-size:11px;color:#94a3b8"></span></div>';
+    wireFy();
+    var ab=document.getElementById('trec-apply'); if(ab)ab.onclick=function(){ if(!confirm('Apply recommended forecast changes for '+recs.length+' subcategories in '+fyLbl(TREC_FY)+'? This sets subcategory overrides — Save Forecasts to persist.'))return; applyTargetRecs(recs); var m=document.getElementById('trec-msg'); if(m){ m.style.color='#166534'; m.textContent='Applied — now Save Forecasts to persist. Buy plan will update.'; } };
+  }); }
+function trecEnsureDrawer(){ var d=document.getElementById('trec-drawer');
+  if(!d){ d=document.createElement('div'); d.id='trec-drawer';
+    d.style.cssText='position:fixed;top:0;right:0;height:100%;width:clamp(400px,55vw,1000px);background:#fff;box-shadow:-8px 0 28px rgba(0,0,0,.22);z-index:6000;flex-direction:column;display:none';
+    d.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;border-bottom:1px solid #e5e5e5;flex:0 0 auto"><b style="font-size:15px">🎯 Target recommendations</b><button id="trec-drawer-x" title="Close" style="width:28px;height:28px;border-radius:6px;border:1px solid #cbd5e1;background:#f8fafc;cursor:pointer;font-size:16px;line-height:1">&times;</button></div><div id="trec-drawer-body" style="flex:1 1 auto;overflow:auto;padding:0 16px 12px">Loading…</div>';
+    document.body.appendChild(d); var x=d.querySelector('#trec-drawer-x'); if(x)x.onclick=closeTrecDrawer; }
+  else if(d.parentNode!==document.body)document.body.appendChild(d);
+  var bk=document.getElementById('trec-drawer-backdrop');
+  if(!bk){ bk=document.createElement('div'); bk.id='trec-drawer-backdrop'; bk.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:5900;display:none'; bk.onclick=closeTrecDrawer; document.body.appendChild(bk); }
+  else if(bk.parentNode!==document.body)document.body.appendChild(bk);
+  return d; }
+function closeTrecDrawer(){ var d=document.getElementById('trec-drawer'); if(d)d.style.display='none'; var bk=document.getElementById('trec-drawer-backdrop'); if(bk)bk.style.display='none'; }
+function openTargetRecs(){ var d=document.getElementById('trec-drawer');
+  if(d && d.style.display!=='none'){ closeTrecDrawer(); return; }
+  d=trecEnsureDrawer(); var bk=document.getElementById('trec-drawer-backdrop'); if(bk)bk.style.display='block'; d.style.display='flex';
+  setTimeout(function(){ try{ renderTargetRecs(document.getElementById('trec-drawer-body')); }
+    catch(e){ var b=document.getElementById('trec-drawer-body'); if(b)b.innerHTML='<div style="padding:14px;color:#dc2626">Could not load Target recommendations: '+String(e&&e.message||e)+'</div>'; } }, 20); }
 function execSumPopRender(){ var p=document.getElementById('exec-sum-pop'); if(!p)return;
   var d=buildExecData();
   var gbp=function(v){ if(Math.abs(v)>=1e6)return '£'+(v/1e6).toFixed(2)+'M'; if(Math.abs(v)>=1e3)return '£'+Math.round(v/1e3)+'k'; return '£'+Math.round(v); };
