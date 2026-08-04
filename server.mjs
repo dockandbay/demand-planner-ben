@@ -5447,6 +5447,7 @@ app.post('/api/supply/tpl/map/:id', async (req, res) => {
         const where = encodeURIComponent(field + " IN ('" + chunk.map(k => String(k).replace(/'/g, "''")).join("','") + "')");
         const r = await cin7Fetch('https://api.cin7.com/api/v1/SalesOrders?rows=250&fields=id,reference,customerOrderNo,costCenter,memberCostCenter,branchId&where=' + where, { method: 'GET' });
         calls++;
+        if (r.status >= 400) throw new Error('Cin7 lookup failed (HTTP ' + r.status + ') — check the CIN7 credentials for this environment (the sandbox has dummy creds).');
         let arr = []; try { arr = await r.json(); } catch (e) { arr = []; }
         if (Array.isArray(arr)) arr.forEach(o => {
           const cc = String(o.costCenter || o.memberCostCenter || '').trim();
@@ -5455,9 +5456,11 @@ app.post('/api/supply/tpl/map/:id', async (req, res) => {
         });
       }
     };
-    await lookup('Reference', refs);                                   // pass 1
-    const miss = refs.filter(r => refCC[r] == null);
-    if (miss.length) await lookup('CustomerOrderNo', miss);            // pass 2
+    try {
+      await lookup('Reference', refs);                                 // pass 1: exact Reference
+      const miss = refs.filter(r => refCC[r] == null);
+      if (miss.length) await lookup('CustomerOrderNo', miss);          // pass 2: CustomerOrderNo
+    } catch (e) { return res.json({ ok: false, error: e.message, cin7_calls: calls }); }
     const summary = _tplAggregateAccounts(orders, refCC);
     res.json({ ok: true, cin7_calls: calls, ...summary });
   } catch (e) { res.status(500).json({ error: e.message }); }

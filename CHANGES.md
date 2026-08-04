@@ -1,3 +1,6 @@
+## v26.516 — 3PL map: abort cleanly on Cin7 auth failure
+- The Cost Centre mapping now stops after the first failed Cin7 call (HTTP >=400) with a clear message, instead of grinding through every chunk. Sandbox has dummy Cin7 creds so this returns a graceful error; live creds needed to actually resolve Cost Centres.
+
 ## v26.515 — 3PL Invoicing Phase 2: map Reference -> Cin7 CostCentre
 - New "Map to Cost Centres (Cin7)" step: matches each order line Reference to its Cin7 sales order CostCenter (2-pass: Reference then CustomerOrderNo), groups freight (Shipping Fee) vs fulfilment (Total Excl Shipping) by Cost Centre, surfaces COST CENTRE MISSING + unmatched refs.
 - Server: read-only POST /api/supply/tpl/map/:id (chunked Cin7 SalesOrders lookups, throttled). Aggregation verified offline (freight reconciles exactly). Needs CIN7 creds to run the live fetch (sandbox has none -> graceful message).
