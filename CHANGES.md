@@ -1,3 +1,8 @@
+## v26.540 — 3PL Invoices: 4-step stepped layout
+- Merged the upload box + files table into Step 1, and reorganised the whole tab into numbered steps: 1 Upload invoice, 2 Import Cin7 orders, 3 Clean-up sweep, 4 Review Xero summary & download.
+- Step 3 is conditional: after mapping, if no orders are unmapped it hides the sweep button and shows a green 'All orders mapped — no sweep needed'; otherwise it shows the count + button.
+- Files table fully left-aligned (explicit per-cell); each step in its own card with a numbered badge. Per-step status messages (import / sweep / download) instead of one shared line.
+
 ## v26.539 — 3PL Import log: left-align all fields
 - Import log table now left-aligns every column (Orders, Status, Cin7 calls were right-aligned).
 
