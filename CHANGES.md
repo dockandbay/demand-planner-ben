@@ -1,3 +1,7 @@
+## v26.527 — 3PL Cin7 import log tab + clearer unmapped
+- New Import log tab: every Cin7 import documented (ran-at, 3PL, period, invoice-date range, kind, orders, status, Cin7 calls, error). Import endpoint now logs all outcomes (ok/skipped/error), migration 178 adds status/error/cin7_calls.
+- Map: unmapped section no longer dumps order refs; it states the unmapped orders + freight/fulfilment (= the gap vs the invoice total) and points to the unique cost-centre rows.
+
 ## v26.526 — 3PL Cin7 import: per-month summary, incremental, sweep-up + unified action bar
 - Import bar now shows a per-month summary (orders imported + invoice-date range + runs).
 - Import is incremental: it skips dates already covered for that month (logged in tpl_cin7_imports, migration 177). A "Sweep up <month>" button re-scans the whole month for missed / late-invoiced orders.

@@ -5462,9 +5462,14 @@ async function tplCin7Summary(period) {
   return { orders: o.n || 0, min_date: o.mn || null, max_date: o.mx || null, runs: r.runs || 0, covered_from: r.cf || null, covered_to: r.ct || null };
 }
 app.post('/api/supply/tpl/cin7-import', async (req, res) => {
+  const tpl0 = String((req.body && req.body.tpl) || req.query.tpl || '') || null;
+  let logPeriod = String((req.body && req.body.period) || req.query.period || '').trim();
+  const logImport = (from, to, kind, orders, status, error, calls) => pool.query(
+    `INSERT INTO planner.tpl_cin7_imports (tpl, period, from_date, to_date, orders, kind, status, error, cin7_calls) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [tpl0, logPeriod || null, from || null, to || null, orders || 0, kind || null, status, error ? String(error).slice(0, 500) : null, calls || 0]).catch(() => {});
   try {
-    const auth = cin7Auth(); if (!auth) return res.json({ ok: false, error: 'Cin7 is not configured in this environment (no CIN7 credentials).' });
-    let period = String((req.body && req.body.period) || req.query.period || '').trim();
+    const auth = cin7Auth(); if (!auth) { await logImport(null, null, 'incremental', 0, 'error', 'No CIN7 credentials', 0); return res.json({ ok: false, error: 'Cin7 is not configured in this environment (no CIN7 credentials).' }); }
+    let period = logPeriod;
     const bf = String((req.body && req.body.from) || req.query.from || '').trim(), bt = String((req.body && req.body.to) || req.query.to || '').trim();
     const sweep = !!(req.body && req.body.sweep);
     let start, end, kind;   // inclusive YYYY-MM-DD bounds, filtered on InvoiceDate
@@ -5478,18 +5483,19 @@ app.post('/api/supply/tpl/cin7-import', async (req, res) => {
       const monEnd = today < lastDay ? today : lastDay;                            // never fetch beyond today
       if (sweep) { start = monStart; end = monEnd; kind = 'sweep'; }
       else {
-        const cov = (await pool.query(`SELECT to_char(max(to_date),'YYYY-MM-DD') ct FROM planner.tpl_cin7_imports WHERE period=$1`, [period])).rows[0];
+        const cov = (await pool.query(`SELECT to_char(max(to_date),'YYYY-MM-DD') ct FROM planner.tpl_cin7_imports WHERE period=$1 AND status<>'error'`, [period])).rows[0];
         if (cov && cov.ct) { const d = new Date(cov.ct + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); start = d.toISOString().slice(0, 10); } else start = monStart;
         end = monEnd; kind = 'incremental';
-        if (start > end) { const summary = await tplCin7Summary(period); return res.json({ ok: true, imported: 0, period, kind, note: 'Already imported through ' + cov.ct + ' — nothing new. Use Sweep up to re-scan the month.', summary }); }
+        if (start > end) { await logImport(start, end, kind, 0, 'skipped', 'Already covered through ' + cov.ct, 0); const summary = await tplCin7Summary(period); return res.json({ ok: true, imported: 0, period, kind, note: 'Already imported through ' + cov.ct + ' — nothing new. Use Sweep up to re-scan the month.', summary }); }
       }
     }
+    logPeriod = period;
     const where = encodeURIComponent("InvoiceDate>='" + start + "T00:00:00Z' AND InvoiceDate<='" + end + "T23:59:59Z'");
     let page = 1, imported = 0, calls = 0; const MAXP = 80;
     while (page <= MAXP) {
       const r = await cin7Fetch('https://api.cin7.com/api/v1/SalesOrders?rows=250&page=' + page + '&fields=id,reference,customerOrderNo,costCenter,memberCostCenter,invoiceDate,branchId,total,freightTotal&where=' + where, { method: 'GET', headers: { Authorization: auth, 'content-type': 'application/json' } });
       calls++;
-      if (r.status >= 400) return res.json({ ok: false, error: 'Cin7 fetch failed (HTTP ' + r.status + '). Imported ' + imported + ' before failure.', period, imported });
+      if (r.status >= 400) { let eb = ''; try { eb = (await r.text()).slice(0, 200); } catch (e) {} await logImport(start, end, kind, imported, 'error', 'Cin7 HTTP ' + r.status + ' ' + eb, calls); return res.json({ ok: false, error: 'Cin7 fetch failed (HTTP ' + r.status + '). Imported ' + imported + ' before failure.', period, imported }); }
       let arr = []; try { arr = await r.json(); } catch (e) { arr = []; }
       if (!Array.isArray(arr) || !arr.length) break;
       for (const o of arr) {
@@ -5501,11 +5507,18 @@ app.post('/api/supply/tpl/cin7-import', async (req, res) => {
       if (arr.length < 250) break;
       page++;
     }
-    await pool.query(`INSERT INTO planner.tpl_cin7_imports (tpl, period, from_date, to_date, orders, kind) VALUES ($1,$2,$3,$4,$5,$6)`,
-      [String((req.body && req.body.tpl) || req.query.tpl || '') || null, period, start, end, imported, kind]);
+    await logImport(start, end, kind, imported, 'ok', null, calls);
     const summary = await tplCin7Summary(period);
     res.json({ ok: true, period, from: start, to: end, kind, imported, cin7_calls: calls, summary });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { await logImport(null, null, 'error', 0, 'error', e.message, 0); res.status(500).json({ error: e.message }); }
+});
+// Cin7 import audit log — every import run (range, kind, orders, status, error, calls).
+app.get('/api/supply/tpl/cin7-log', async (req, res) => {
+  try {
+    const lim = Math.min(500, Math.max(1, parseInt(req.query.limit) || 200));
+    const rows = (await pool.query(`SELECT id, coalesce(tpl,'') tpl, period, to_char(from_date,'YYYY-MM-DD') from_date, to_char(to_date,'YYYY-MM-DD') to_date, orders, coalesce(kind,'') kind, coalesce(status,'') status, coalesce(error,'') error, cin7_calls, to_char(ran_at,'YYYY-MM-DD HH24:MI') ran_at FROM planner.tpl_cin7_imports ORDER BY ran_at DESC, id DESC LIMIT $1`, [lim])).rows;
+    res.json({ ok: true, runs: rows });
+  } catch (e) { res.json({ ok: false, error: e.message, runs: [] }); }
 });
 // Full snooze/dismiss state map (used by the PO grid so its badges/counter respect snooze).
 app.get('/api/supply/actions/state', async (req, res) => {
