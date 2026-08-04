@@ -1,3 +1,6 @@
+## v26.529 — 3PL Cin7: reference-based clean-up sweep
+- Monthly Import stays incremental by InvoiceDate + branch-filtered. The Sweep button is now a reference-based clean-up: it fetches the analysed invoice&apos;s still-unmapped order references directly from Cin7 (Reference IN, then CustomerOrderNo IN; NO branch/date filter) so cross-month orders are caught, then re-maps. Chunked to 50 refs/call (Cin7 URL-length limit).
+
 ## v26.528 — 3PL Cin7 import: filter by 3PL branch
 - Import now scopes to the 3PL's Cin7 branch (eu_ifulfilment=25073, us_geneva=5055, uk_ilg=5053, au_coghlans=16288) so it only pulls that 3PL's sales orders instead of all branches. Fixes the low match rate (was importing every branch).
 

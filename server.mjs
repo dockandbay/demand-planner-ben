@@ -5514,6 +5514,51 @@ app.post('/api/supply/tpl/cin7-import', async (req, res) => {
     res.json({ ok: true, period, from: start, to: end, kind, imported, cin7_calls: calls, summary });
   } catch (e) { await logImport(null, null, 'error', 0, 'error', e.message, 0); res.status(500).json({ error: e.message }); }
 });
+// 3PL invoice — reference-based CLEAN-UP SWEEP for one invoice file. Fetches the invoice's references that
+// aren't yet cached, directly from Cin7 (Reference IN, then CustomerOrderNo IN) with NO branch/date filter,
+// so cross-month orders (e.g. despatched in Feb but on the May invoice) are caught. Upserts into the cache.
+app.post('/api/supply/tpl/cin7-sweep/:id', async (req, res) => {
+  const tpl0 = String((req.body && req.body.tpl) || req.query.tpl || '') || null;
+  const logRun = (orders, status, error, calls) => pool.query(
+    `INSERT INTO planner.tpl_cin7_imports (tpl, period, from_date, to_date, orders, kind, status, error, cin7_calls) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [tpl0, 'ref-sweep', null, null, orders || 0, 'ref-sweep', status, error ? String(error).slice(0, 500) : null, calls || 0]).catch(() => {});
+  try {
+    const auth = cin7Auth(); if (!auth) { await logRun(0, 'error', 'No CIN7 credentials', 0); return res.json({ ok: false, error: 'Cin7 is not configured in this environment (no CIN7 credentials).' }); }
+    const row = (await pool.query(`SELECT filename, content_type, content FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
+    if (!row) return res.status(404).json({ error: 'not found' });
+    const isCsv = /\.csv$/i.test(row.filename || '') || /csv/i.test(row.content_type || '');
+    const orders = await _tplOrderRows(row.content, isCsv);
+    const refs = [...new Set(orders.map(o => o.reference).filter(Boolean))];
+    if (!refs.length) return res.json({ ok: false, error: 'No order references found on this invoice to sweep.' });
+    const covOf = async keys => { const have = (await pool.query(`SELECT reference, customer_order_no FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [keys])).rows; const s = new Set(); have.forEach(h => { if (h.reference) s.add(h.reference); if (h.customer_order_no) s.add(h.customer_order_no); }); return s; };
+    let missing = refs.filter(r => true); { const cov = await covOf(refs); missing = refs.filter(r => !cov.has(r)); }
+    const missingBefore = missing.length;
+    let fetched = 0, calls = 0;
+    const grab = async (field, keys) => {
+      for (let i = 0; i < keys.length; i += 50) {   // Cin7/IIS rejects long URLs — keep the IN() list small (~60 max)
+        const chunk = keys.slice(i, i + 50);
+        const where = encodeURIComponent(field + " IN ('" + chunk.map(k => String(k).replace(/'/g, "''")).join("','") + "')");
+        const r = await cin7Fetch('https://api.cin7.com/api/v1/SalesOrders?rows=250&fields=id,reference,customerOrderNo,costCenter,memberCostCenter,invoiceDate,branchId,total,freightTotal&where=' + where, { method: 'GET', headers: { Authorization: auth, 'content-type': 'application/json' } });
+        calls++;
+        if (r.status >= 400) throw new Error('Cin7 HTTP ' + r.status);
+        let arr = []; try { arr = await r.json(); } catch (e) { arr = []; }
+        if (Array.isArray(arr)) for (const o of arr) {
+          await pool.query(`INSERT INTO planner.tpl_cin7_orders (cin7_id, reference, customer_order_no, cost_center, member_cost_center, invoice_date, branch_id, total, freight_total, period, imported_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now()) ON CONFLICT (cin7_id) DO UPDATE SET reference=excluded.reference, customer_order_no=excluded.customer_order_no, cost_center=excluded.cost_center, member_cost_center=excluded.member_cost_center, invoice_date=excluded.invoice_date, branch_id=excluded.branch_id, total=excluded.total, freight_total=excluded.freight_total, period=excluded.period, imported_at=now()`,
+            [o.id, o.reference || null, o.customerOrderNo || null, o.costCenter || null, o.memberCostCenter || null, (o.invoiceDate ? String(o.invoiceDate).slice(0, 10) : null), o.branchId || null, o.total != null ? Number(o.total) : null, o.freightTotal != null ? Number(o.freightTotal) : null, (o.invoiceDate ? String(o.invoiceDate).slice(0, 7) : null)]);
+          fetched++;
+        }
+      }
+    };
+    try {
+      await grab('Reference', missing);
+      const cov2 = await covOf(missing); const still = missing.filter(r => !cov2.has(r));
+      if (still.length) await grab('CustomerOrderNo', still);
+    } catch (e) { await logRun(fetched, 'error', e.message, calls); return res.json({ ok: false, error: e.message, fetched }); }
+    await logRun(fetched, 'ok', null, calls);
+    res.json({ ok: true, refs: refs.length, missing_before: missingBefore, fetched, cin7_calls: calls });
+  } catch (e) { await logRun(0, 'error', e.message, 0); res.status(500).json({ error: e.message }); }
+});
 // Cin7 import audit log — every import run (range, kind, orders, status, error, calls).
 app.get('/api/supply/tpl/cin7-log', async (req, res) => {
   try {
