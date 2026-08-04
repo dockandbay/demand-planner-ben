@@ -9248,7 +9248,9 @@ function render3plInvoice(body){
       html+='</div>'; cont.innerHTML=html;
     }).catch(function(err){ cont.innerHTML='<div style="color:#dc2626;font-size:12px;padding:8px 0">Mapping failed: '+e(err.message||err)+'</div>'; }); }
   function renderParse(cont,id){ if(!cont)return; cont.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:8px">Parsing…</div>';
-    fetch('/api/supply/tpl/parse/'+id,{method:'POST'}).then(function(r){return r.json();}).then(function(d){ if(!d||!d.ok)throw new Error((d&&d.error)||'parse failed');
+    Promise.all([fetch('/api/supply/tpl/parse/'+id,{method:'POST'}).then(function(r){return r.json();}),fetch('/api/supply/tpl/data?tpl='+encodeURIComponent(TPL3_STATE.tpl)+'&period=').then(function(r){return r.json();}).catch(function(){return {};})]).then(function(_res){ var d=_res[0], _cfg=_res[1]||{}; if(!d||!d.ok)throw new Error((d&&d.error)||'parse failed');
+      var costAcc={}; (_cfg.cost_accounts||[]).forEach(function(c){ costAcc[c.cost_type]={code:c.account_code||'',name:c.account_name||''}; });
+      function ctype(nm){ nm=String(nm||''); if(/order/i.test(nm))return 'orders'; if(/storage/i.test(nm))return 'storage'; if(/return/i.test(nm))return 'returns'; if(/goods\s*in|inbound|rework/i.test(nm))return 'inbound'; return 'other'; }
       var grand={};
       var html='<div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-top:12px;background:#fff;max-width:820px">'
         +'<div style="font-weight:700;font-size:13px;margin-bottom:4px">Parsed summary — '+e(d.filename)+'</div>';
@@ -9265,6 +9267,11 @@ function render3plInvoice(body){
           html+='</tbody></table>'; }
         else { html+='<div class="mut" style="font-size:11px">No numeric fields.</div>'; }
       });
+      var _noRows='';
+      (d.sheets||[]).forEach(function(sh){ var ct=ctype(sh.name); if(ct==='orders')return; var h=sh.highlights||{}; if(h.total==null)return;
+        var acc=costAcc[ct]||{}; var accTxt=(acc.code||acc.name)?(e(acc.code||'')+(acc.name?(' '+e(acc.name)):'')):'<span style="color:#b45309">set in Config / Accounts</span>';
+        _noRows+='<tr><td style="padding:2px 16px 2px 0;text-align:left">'+e(sh.name)+'</td><td style="padding:2px 16px 2px 0;text-align:left;text-transform:capitalize">'+ct+'</td><td style="padding:2px 16px 2px 0;text-align:left">'+((sh.currency?e(sh.currency)+' ':'')+fmt(h.total))+'</td><td style="padding:2px 0;text-align:left">'+accTxt+'</td></tr>'; });
+      if(_noRows){ html+='<div style="margin-top:14px"><div style="font-weight:700;font-size:13px;margin-bottom:4px">Non-order costs &rarr; account</div><div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Storage / Returns / Inbound / Other charges map to a fixed Cost Centre account (set per 3PL in Config / Accounts). Orders map per-line via Cin7 above.</div><table style="border-collapse:collapse;font-size:11px"><thead><tr style="color:#64748b;text-transform:uppercase;font-size:10px"><th style="padding:2px 16px 2px 0;text-align:left">Sheet</th><th style="padding:2px 16px 2px 0;text-align:left">Cost type</th><th style="padding:2px 16px 2px 0;text-align:left">Total</th><th style="padding:2px 0;text-align:left">Account</th></tr></thead><tbody>'+_noRows+'</tbody></table></div>'; }
       var _gk=Object.keys(grand), _grandStr=_gk.length?_gk.map(function(c){return e(c)+' '+fmt(grand[c]);}).join(' · '):'—';
       var _reconCur=(_gk.indexOf('EUR')>=0)?'EUR':(_gk[0]||null), _reconBase=_reconCur?grand[_reconCur]:0;
       html+='<div style="border-top:2px solid #cbd5e1;margin-top:12px;padding-top:8px;font-size:12px">'
@@ -9341,7 +9348,7 @@ function render3plInvoice(body){
     b.innerHTML='<div style="font-size:13px;font-weight:700;margin-bottom:4px">'+e(TPL3.filter(function(t){return t[0]===TPL3_STATE.tpl;})[0][1])+' — storage &amp; other cost accounts</div>'
       +'<div style="font-size:11px;color:#94a3b8;margin-bottom:8px">Xero account for this 3PL’s storage and other (non-order) charges. Saved on change.</div>'
       +'<div class="tw" style="margin-bottom:22px"><table style="border-collapse:collapse;font-size:12px"><thead><tr style="background:#e9eef5;font-size:10px;text-transform:uppercase;color:#475569">'
-        +['Cost type','Account code','Account name'].map(function(h){return '<th class="l" style="padding:5px 10px;text-align:left">'+h+'</th>';}).join('')+'</tr></thead><tbody>'+costRow('storage')+costRow('other')+'</tbody></table></div>'
+        +['Cost type','Account code','Account name'].map(function(h){return '<th class="l" style="padding:5px 10px;text-align:left">'+h+'</th>';}).join('')+'</tr></thead><tbody>'+costRow('storage')+costRow('returns')+costRow('inbound')+costRow('other')+'</tbody></table></div>'
       +'<div style="font-size:13px;font-weight:700;margin-bottom:4px">Account map <span style="font-weight:400;color:#94a3b8;font-size:11px">(region × channel → COGS / Sales / Fulfilment / Cost of Sales — read-only)</span></div>'
       +'<div class="tw" style="max-height:52vh;overflow:auto"><table style="border-collapse:collapse;font-size:11px;width:max-content"><thead><tr style="background:#e9eef5;position:sticky;top:0;font-size:10px;text-transform:uppercase;color:#475569">'
         +['Label','Region','Channel','COGS','Sales','Fulfilment','Cost of Sales'].map(function(h){return '<th class="l" style="padding:5px 9px;text-align:left;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'+mapRows+'</tbody></table></div>';

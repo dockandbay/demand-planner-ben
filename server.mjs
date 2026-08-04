@@ -5305,7 +5305,7 @@ app.post('/api/supply/tpl/file/:id/delete', async (req, res) => {
 });
 app.post('/api/supply/tpl/cost-account', async (req, res) => {
   const b = req.body || {};
-  if (!TPL_KEYS.includes(b.tpl) || !['storage', 'other'].includes(b.cost_type)) return res.status(400).json({ error: 'bad tpl/cost_type' });
+  if (!TPL_KEYS.includes(b.tpl) || !['storage', 'returns', 'inbound', 'other'].includes(b.cost_type)) return res.status(400).json({ error: 'bad tpl/cost_type' });
   try {
     await pool.query(`INSERT INTO planner.tpl_cost_accounts (tpl, cost_type, account_code, account_name) VALUES ($1,$2,$3,$4)
       ON CONFLICT (tpl, cost_type) DO UPDATE SET account_code=excluded.account_code, account_name=excluded.account_name`,

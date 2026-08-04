@@ -1,3 +1,7 @@
+## v26.517 — 3PL Invoicing: non-order costs -> account
+- Added cost types Returns + Inbound (Goods In/rework) alongside Storage + Other in Config / Accounts.
+- Analyse now shows a "Non-order costs -> account" table: each non-order sheet (Storage/Returns/Goods In/Other) mapped to its configured Cost Centre account by cost type; Orders map per-line via Cin7. Fully testable without Cin7.
+
 ## v26.516 — 3PL map: abort cleanly on Cin7 auth failure
 - The Cost Centre mapping now stops after the first failed Cin7 call (HTTP >=400) with a clear message, instead of grinding through every chunk. Sandbox has dummy Cin7 creds so this returns a graceful error; live creds needed to actually resolve Cost Centres.
 
