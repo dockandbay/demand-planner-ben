@@ -8238,12 +8238,12 @@ function planRevBtnSync(){ var show=(typeof VIEW_MODE!=='undefined'&&VIEW_MODE==
   var isMobile=!!(window.matchMedia&&window.matchMedia('(max-width:640px)').matches);
   // The two report buttons sit on the top Country row, right-aligned (desktop only).
   if(show&&row&&!isMobile){
-    if(!c){ c=document.createElement('div'); c.id='plan-report-btns'; c.style.cssText='margin-left:auto;display:flex;gap:6px;align-items:center';
-      var btn='border:none;border-radius:16px;padding:5px 12px;font-size:12px;font-weight:700;font-family:inherit;cursor:pointer;white-space:nowrap;color:#fff';
-      c.innerHTML='<button id="plan-rev-btn2" type="button" title="Revenue growth targets & tracking — full report" style="'+btn+';background:#2563eb">📈 Revenue vs target</button>'
-        +'<button id="plan-exec-btn" type="button" title="Executive summary — FY revenue &amp; units vs last year" style="'+btn+';background:#0f766e">📊 Executive summary</button>'
-        +'<button id="plan-summ-btn" type="button" title="Summary report with revenue targets" style="'+btn+';background:#7c3aed">🧾 Summary with targets</button>'
-        +'<button id="plan-trec-btn" type="button" title="Recommend forecast changes to meet your revenue targets" style="'+btn+';background:#b45309">🎯 Target recommendations</button>';
+    if(!c){ c=document.createElement('div'); c.id='plan-report-btns'; c.style.cssText='margin-left:auto;display:flex;gap:4px;align-items:center;flex-wrap:wrap';
+      var btn='border:1px solid #cbd5e1;background:#fff;border-radius:6px;padding:3px 9px;font-size:11px;font-weight:600;font-family:inherit;cursor:pointer;white-space:nowrap;line-height:1.5';
+      c.innerHTML='<button id="plan-rev-btn2" type="button" title="Revenue growth targets & tracking — full report" style="'+btn+';border-color:#2563eb;color:#2563eb">Revenue vs target</button>'
+        +'<button id="plan-exec-btn" type="button" title="Executive summary — FY revenue &amp; units vs last year" style="'+btn+';border-color:#0f766e;color:#0f766e">Exec summary</button>'
+        +'<button id="plan-summ-btn" type="button" title="Summary report with revenue targets" style="'+btn+';border-color:#7c3aed;color:#7c3aed">Summary + targets</button>'
+        +'<button id="plan-trec-btn" type="button" title="Recommend forecast changes to meet your revenue targets" style="'+btn+';border-color:#b45309;color:#b45309">Target recs</button>';
       row.appendChild(c);
       c.querySelector('#plan-rev-btn2').onclick=openPlanRevPopout;
       c.querySelector('#plan-exec-btn').onclick=openExecSummaryPopout;

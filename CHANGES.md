@@ -1,3 +1,6 @@
+## v26.535 — Demand plan report buttons actually restyled (v26.534 missed the artifact)
+- 4 report buttons now small outline pills (colored border+text on white, 11px, 6px radius), labels shortened, emojis dropped, wrap on narrow. v26.534 only bumped the version.
+
 ## v26.534 — Demand plan report buttons: tidier
 - The 4 plan report buttons (Revenue vs target / Exec summary / Summary + targets / Target recs) are smaller, outline-style (colored border+text on white, 11px) and wrap, to align with the page UI. Labels shortened, emojis dropped.
 
