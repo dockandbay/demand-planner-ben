@@ -7908,6 +7908,28 @@ app.post('/api/demand-revenue-targets', async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Per-subcategory month/quarter/half revenue growth-% targets (migration 175). subcategory='' = market total.
+app.get('/api/demand-revenue-targets/periods', async (req, res) => {
+  const country = String(req.query.country || ''), channel = String(req.query.channel || '');
+  if (!country || !channel) return res.status(400).json({ error: 'country and channel required' });
+  try { res.json((await pool.query(`SELECT fy, subcategory, level, idx, growth_pct FROM planner.demand_revenue_target_periods WHERE country=$1 AND channel=$2`, [country, channel])).rows); }
+  catch (e) { res.json([]); }   // table may not exist until migration 175 is applied
+});
+app.post('/api/demand-revenue-targets/periods', async (req, res) => {
+  const b = req.body || {};
+  if (!b.country || !b.channel || b.fy == null || !b.level || b.idx == null) return res.status(400).json({ error: 'country, channel, fy, level, idx required' });
+  if (!['half', 'quarter', 'month'].includes(b.level)) return res.status(400).json({ error: 'bad level' });
+  const sub = (b.subcategory == null ? '' : String(b.subcategory));
+  const g = (b.growth_pct !== '' && b.growth_pct != null && !isNaN(Number(b.growth_pct))) ? Number(b.growth_pct) : null;
+  try {
+    if (g == null) { await pool.query(`DELETE FROM planner.demand_revenue_target_periods WHERE country=$1 AND channel=$2 AND fy=$3 AND subcategory=$4 AND level=$5 AND idx=$6`, [b.country, b.channel, b.fy, sub, b.level, b.idx]); return res.json({ cleared: true }); }
+    await pool.query(`INSERT INTO planner.demand_revenue_target_periods (country, channel, fy, subcategory, level, idx, growth_pct, updated_by, updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now()) ON CONFLICT (country, channel, fy, subcategory, level, idx)
+      DO UPDATE SET growth_pct=excluded.growth_pct, updated_by=excluded.updated_by, updated_at=now()`,
+      [b.country, b.channel, b.fy, sub, b.level, b.idx, g, authUser(req) || null]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // Sell-through targets (DEMAND ▸ Sell-through targets) — target % by category × market. GET returns the in-scope
 // category list + markets + the saved targets; POST upserts one cell.
 const TARGET_MARKETS = ['UK', 'US', 'EU', 'AU'];

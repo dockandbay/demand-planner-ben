@@ -1,3 +1,8 @@
+## v26.513 — DEMAND Summary: per-subcategory revenue targets
+- New ADD TARGETS editor: enter revenue growth % (+/-) per subcategory (and market total) at month/quarter/half; coarser levels inherit to finer unless overridden (half->quarter->month).
+- New Rev + targets metric: each period cell shows Forecast $/%growth, Target $/%growth, and variance (Fc - Tgt).
+- Migration 175 adds planner.demand_revenue_target_periods; endpoints /api/demand-revenue-targets/periods (GET/POST). Backward-compatible (empty until migration applied).
+
 ## v26.512 — 3PL Invoicing: clearer Analyse button
 - Replaced the subtle Summary text link with a blue Analyse button on each data file row. Non-data files (e.g. the invoice PDF) show "not analysable" instead.
 
