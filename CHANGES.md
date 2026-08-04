@@ -1,3 +1,7 @@
+## v26.518 — 3PL Invoicing: manual Cin7 sales-order import
+- New manual fetch POST /api/supply/tpl/cin7-import: pulls Cin7 SalesOrders for a month (by InvoiceDate; defaults to previous calendar month), paginated + throttled, into planner.tpl_cin7_orders (migration 176). Button "Import Cin7 orders for <period>" in the invoices view.
+- Map to Cost Centres now resolves Reference -> CostCenter against the imported table (offline, no live call per analyse); prompts to import first if empty. Verified offline with mock orders.
+
 ## v26.517 — 3PL Invoicing: non-order costs -> account
 - Added cost types Returns + Inbound (Goods In/rework) alongside Storage + Other in Config / Accounts.
 - Analyse now shows a "Non-order costs -> account" table: each non-order sheet (Storage/Returns/Goods In/Other) mapped to its configured Cost Centre account by cost type; Orders map per-line via Cin7. Fully testable without Cin7.

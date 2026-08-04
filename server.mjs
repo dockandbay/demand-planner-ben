@@ -5433,36 +5433,54 @@ function _tplAggregateAccounts(orders, refCC) {
 }
 app.post('/api/supply/tpl/map/:id', async (req, res) => {
   try {
-    if (!cin7Auth()) return res.json({ ok: false, error: 'Cin7 is not configured in this environment (no CIN7 credentials). Run on live, or add sandbox creds, to map Cost Centres.' });
     const row = (await pool.query(`SELECT filename, content_type, content FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
     if (!row) return res.status(404).json({ error: 'not found' });
     const isCsv = /\.csv$/i.test(row.filename || '') || /csv/i.test(row.content_type || '');
     const orders = await _tplOrderRows(row.content, isCsv);
     if (!orders.length) return res.json({ ok: false, error: 'No order rows with a Reference + Shipping Fee column were found to map.' });
     const refs = [...new Set(orders.map(o => o.reference).filter(Boolean))];
-    const refCC = {}; let calls = 0;
-    const lookup = async (field, keys) => {
-      for (let i = 0; i < keys.length; i += 200) {
-        const chunk = keys.slice(i, i + 200);
-        const where = encodeURIComponent(field + " IN ('" + chunk.map(k => String(k).replace(/'/g, "''")).join("','") + "')");
-        const r = await cin7Fetch('https://api.cin7.com/api/v1/SalesOrders?rows=250&fields=id,reference,customerOrderNo,costCenter,memberCostCenter,branchId&where=' + where, { method: 'GET' });
-        calls++;
-        if (r.status >= 400) throw new Error('Cin7 lookup failed (HTTP ' + r.status + ') — check the CIN7 credentials for this environment (the sandbox has dummy creds).');
-        let arr = []; try { arr = await r.json(); } catch (e) { arr = []; }
-        if (Array.isArray(arr)) arr.forEach(o => {
-          const cc = String(o.costCenter || o.memberCostCenter || '').trim();
-          if (field === 'Reference' && o.reference && refCC[o.reference] == null) refCC[o.reference] = cc;
-          if (field === 'CustomerOrderNo' && o.customerOrderNo && refCC[o.customerOrderNo] == null) refCC[o.customerOrderNo] = cc;
-        });
-      }
-    };
-    try {
-      await lookup('Reference', refs);                                 // pass 1: exact Reference
-      const miss = refs.filter(r => refCC[r] == null);
-      if (miss.length) await lookup('CustomerOrderNo', miss);          // pass 2: CustomerOrderNo
-    } catch (e) { return res.json({ ok: false, error: e.message, cin7_calls: calls }); }
+    // Resolve CostCentre against the locally-imported Cin7 orders (populated by the manual import) — no live call.
+    let dbrows = [];
+    try { dbrows = (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [refs])).rows; }
+    catch (e) { dbrows = []; }
+    if (!dbrows.length) return res.json({ ok: false, error: 'No imported Cin7 orders match this invoice yet — run "Import Cin7 orders" for the period first (previous-month manual fetch).', imported_matched: 0 });
+    const byRef = {}, byCon = {};
+    dbrows.forEach(r => { const cc = String(r.cc || '').trim(); if (r.reference) byRef[r.reference] = cc; if (r.customer_order_no) byCon[r.customer_order_no] = cc; });
+    const refCC = {};
+    refs.forEach(ref => { refCC[ref] = (byRef[ref] != null) ? byRef[ref] : (byCon[ref] != null ? byCon[ref] : null); });
     const summary = _tplAggregateAccounts(orders, refCC);
-    res.json({ ok: true, cin7_calls: calls, ...summary });
+    res.json({ ok: true, imported_matched: dbrows.length, ...summary });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// 3PL invoice — MANUAL Cin7 sales-order import for the previous month (by InvoiceDate). Populates
+// planner.tpl_cin7_orders so the Map step can resolve Reference -> CostCenter offline. Paginated, throttled,
+// read-only from Cin7. Aborts cleanly on auth failure (sandbox has dummy creds).
+app.post('/api/supply/tpl/cin7-import', async (req, res) => {
+  try {
+    if (!cin7Auth()) return res.json({ ok: false, error: 'Cin7 is not configured in this environment (no CIN7 credentials).' });
+    let period = String((req.body && req.body.period) || req.query.period || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(period)) { const d = new Date(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - 1); period = d.toISOString().slice(0, 7); }   // default: previous calendar month
+    const [py, pm] = period.split('-').map(Number);
+    const start = period + '-01';
+    const end = new Date(Date.UTC(py, pm, 1)).toISOString().slice(0, 10);   // first of the NEXT month
+    const where = encodeURIComponent("InvoiceDate>='" + start + "' AND InvoiceDate<'" + end + "'");
+    let page = 1, imported = 0, calls = 0; const MAXP = 60;
+    while (page <= MAXP) {
+      const r = await cin7Fetch('https://api.cin7.com/api/v1/SalesOrders?rows=250&page=' + page + '&fields=id,reference,customerOrderNo,costCenter,memberCostCenter,invoiceDate,branchId,total,freightTotal&where=' + where, { method: 'GET' });
+      calls++;
+      if (r.status >= 400) return res.json({ ok: false, error: 'Cin7 fetch failed (HTTP ' + r.status + ') — check credentials (the sandbox has dummy creds). Imported ' + imported + ' before failure.', period, imported });
+      let arr = []; try { arr = await r.json(); } catch (e) { arr = []; }
+      if (!Array.isArray(arr) || !arr.length) break;
+      for (const o of arr) {
+        await pool.query(`INSERT INTO planner.tpl_cin7_orders (cin7_id, reference, customer_order_no, cost_center, member_cost_center, invoice_date, branch_id, total, freight_total, period, imported_at)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now()) ON CONFLICT (cin7_id) DO UPDATE SET reference=excluded.reference, customer_order_no=excluded.customer_order_no, cost_center=excluded.cost_center, member_cost_center=excluded.member_cost_center, invoice_date=excluded.invoice_date, branch_id=excluded.branch_id, total=excluded.total, freight_total=excluded.freight_total, period=excluded.period, imported_at=now()`,
+          [o.id, o.reference || null, o.customerOrderNo || null, o.costCenter || null, o.memberCostCenter || null, (o.invoiceDate ? String(o.invoiceDate).slice(0, 10) : null), o.branchId || null, o.total != null ? Number(o.total) : null, o.freightTotal != null ? Number(o.freightTotal) : null, period]);
+        imported++;
+      }
+      if (arr.length < 250) break;
+      page++;
+    }
+    res.json({ ok: true, period, imported, cin7_calls: calls });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Full snooze/dismiss state map (used by the PO grid so its badges/counter respect snooze).
