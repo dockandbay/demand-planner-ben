@@ -1,3 +1,8 @@
+## v26.553 — FBA in-flight transfers: client overlay, panel + auto/manual triggers (Ben #2/#4)
+- Moved the item-3 fold from the server build to a CLIENT overlay (single source, no double-count, enables silent in-place updates). fbaTransferSized/fbaTransferNonGrs subtract in-flight transfer qty from the FBA shortfall via _fbaPendingOf(sku,mkt); only the transfer calc reads it → buy plan unaffected.
+- FBA toolbar box: 'N in-flight (Xu) · updated Ym ago' (click for the list of ref/warehouse/sku/qty/eta), a manual 'refresh from Cin7' button, and an 'inbound data updating…' indicator.
+- Triggers: on FBA-tab visit auto-refresh if last run > 1h; 10 min after downloading the FBA Transfer file. A manual refresh cancels any scheduled post-download run. Last run remembered server-side (app_settings).
+
 ## v26.552 — FBA transfer calc: count in-flight branch transfers (Ben #3)
 - buildSKURAW folds fba_pending_transfers (in-flight, not-yet-inbound, deduped vs inbound_shipments by reference) into FBA on-order (oo[<mkt>_fba]) + the inbound list, so the FBA transfer recommendation no longer re-suggests a transfer already in flight. Only *_fba keys are touched — *_3pl on-order is untouched, so the 3PL buy plan is unchanged by construction. Verified: the 2 sandbox pending SKUs each get +30 on us_fba on-order; us_3pl unchanged.
 

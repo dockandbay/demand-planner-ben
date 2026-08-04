@@ -198,7 +198,7 @@ async function buildFC_OUTPUTS() {
 // av (channel-availability string e.g. "dfb") derived from v_product_availability;
 // oo (on-order) derived from outstanding inbound — both fill gaps the baked snapshot lacked.
 async function buildSKURAW() {
-  const [prods, pcs, inv, avail, oo, sales, inbound, openpo, ptrans] = await Promise.all([
+  const [prods, pcs, inv, avail, oo, sales, inbound, openpo] = await Promise.all([
     pool.query(`SELECT p.sku, p.product_name n, p.subcategory s, p.category c, p.market_tier ti, p.core_seasonal cs, coalesce(sl.release_window,'') rw,
                        nullif(trim(p.replacement_sku),'') rep
                 FROM planner.products p LEFT JOIN planner.sku_labels sl ON sl.sku=p.sku WHERE p.in_planning_scope`),
@@ -280,13 +280,6 @@ async function buildSKURAW() {
                   AND coalesce(po.status,'') NOT ILIKE '%complete%'
                   AND coalesce(nullif(po.country_code,''), b.country_code) IN ('UK','US','EU','AU','CA')
                   AND NOT EXISTS (SELECT 1 FROM planner.inbound_shipments i WHERE i.reference = po.po)`),
-    // FBA pending branch transfers (mig 179): in-flight Cin7 transfers into FBA/AWD not yet in inbound_shipments.
-    // Folded into FBA on-order + the inbound list below so the transfer recommendation reflects stock already
-    // in flight. Defensive .catch so a pre-migration env still builds. AWD-dest counts as FBA cover (AWD pools in).
-    pool.query(`SELECT sku, market, reference ref, sum(qty)::int qty, to_char(min(eta),'YYYY-MM-DD') eta
-                FROM planner.fba_pending_transfers t
-                WHERE received_date IS NULL AND (reference IS NULL OR NOT EXISTS (SELECT 1 FROM planner.inbound_shipments i WHERE i.reference=t.reference))
-                GROUP BY sku, market, reference`).catch(() => ({ rows: [] })),
   ]);
   const p = {};
   for (const r of prods.rows)
@@ -316,14 +309,6 @@ async function buildSKURAW() {
     if (!r.wh) continue;
     const k = r.sku + '|' + r.wh;
     (oi[k] || (oi[k] = [])).push({ ref: r.ref || '', qty: r.qty || 0, eta: r.eta || null, type: 'open_po', status: r.status || '', supplier: r.supplier || '' });
-  }
-  // Fold in-flight FBA branch transfers into FBA on-order (oo[mkt_fba]) so cover reflects them, and into the
-  // inbound list (i) for display. ONLY touches *_fba keys — never *_3pl — so the 3PL buy plan is unchanged.
-  for (const r of (ptrans.rows || [])) {
-    if (!p[r.sku] || !(r.qty > 0)) continue;
-    const wh = r.market + '_fba', k = r.sku + '|' + wh;
-    p[r.sku].oo[wh] = (p[r.sku].oo[wh] || 0) + r.qty;
-    (i[k] || (i[k] = [])).push({ ref: r.ref || '', qty: r.qty, eta: r.eta || null, poEta: null, type: 'branch_transfer', supplier: '' });
   }
   return { p, s, i, oi };
 }

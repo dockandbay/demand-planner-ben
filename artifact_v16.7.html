@@ -1507,6 +1507,38 @@ function fbaInbCell(amount, lines, firstEta){
 const FBA_OV={};
 // Per-SKU tick/selection state on the FBA view, keyed "sku|CUR".
 const FBA_TICK={};
+// ── In-flight Cin7 branch transfers into FBA/AWD not yet in inbound_shipments (server: /api/supply/fba-transfers).
+// Client OVERLAY: a just-processed transfer counts as FBA cover (so it isn't re-recommended) and the grid updates
+// silently after a background refresh — without a page reload. Keyed sku|<mkt>_fba (AWD-dest pools into FBA cover).
+// Only read by the FBA transfer calc → the 3PL/FBA buy plan is unaffected.
+var FBA_PENDING={}, FBA_PENDING_ROWS=[], FBA_PENDING_LR=null, _fbaTrfLoaded=false, _fbaTrfBusy=false, _fbaDlTimer=null;
+function _fbaPendingOf(sku,mkt){ return FBA_PENDING[sku+'|'+String(mkt).toLowerCase()+'_fba']||0; }
+function fbaTrfLoad(cb){ fetch('/api/supply/fba-transfers/list').then(function(r){return r.json();}).then(function(d){
+    FBA_PENDING={}; FBA_PENDING_ROWS=(d&&d.rows)||[]; FBA_PENDING_LR=(d&&d.last_run)||null; _fbaTrfLoaded=true;
+    FBA_PENDING_ROWS.forEach(function(r){ var k=r.sku+'|'+String(r.market||'').toLowerCase()+'_fba'; FBA_PENDING[k]=(FBA_PENDING[k]||0)+(Number(r.qty)||0); });
+    if(cb)cb();
+  }).catch(function(){ _fbaTrfLoaded=true; if(cb)cb(); }); }
+function fbaTrfRefresh(silent){ if(_fbaTrfBusy)return; if(_fbaDlTimer){clearTimeout(_fbaDlTimer);_fbaDlTimer=null;}   // any refresh (esp. manual) supersedes a scheduled post-download run
+  _fbaTrfBusy=true; _fbaTrfRenderBox();
+  fetch('/api/supply/fba-transfers/refresh',{method:'POST'}).then(function(r){return r.json();}).then(function(){ fbaTrfLoad(function(){ _fbaTrfBusy=false; if(typeof render==='function')render(); }); }).catch(function(){ _fbaTrfBusy=false; _fbaTrfRenderBox(); }); }
+function _fbaTrfAgo(iso){ var t=Date.parse(iso); if(!t)return ''; var m=Math.round((Date.now()-t)/60000); return m<1?'just now':(m<60?(m+'m ago'):(Math.round(m/60)+'h ago')); }
+function _fbaTrfMaybeRefresh(){ if(_fbaTrfBusy)return; var lr=FBA_PENDING_LR?Date.parse(FBA_PENDING_LR):0; if(!lr||(Date.now()-lr)>3600000)fbaTrfRefresh(true); }   // auto-refresh on FBA visit if last run > 1h
+function _fbaTrfOnView(){ if(!_fbaTrfLoaded){ fbaTrfLoad(function(){ if(typeof render==='function')render(); _fbaTrfMaybeRefresh(); }); } else { _fbaTrfMaybeRefresh(); } _fbaTrfRenderBox(); }
+function _fbaTrfRenderBox(){ var el=document.getElementById('fba-trf-box'); if(!el)return;
+  var n=FBA_PENDING_ROWS.length, u=FBA_PENDING_ROWS.reduce(function(a,r){return a+(Number(r.qty)||0);},0), lr=FBA_PENDING_LR?(' · '+_fbaTrfAgo(FBA_PENDING_LR)):'';
+  el.innerHTML=(_fbaTrfBusy?'<span style="color:#b45309;font-weight:700">⟳ inbound data updating…</span>':'')
+    +'<span id="fba-trf-sum" title="Recent Cin7 branch transfers into FBA/AWD not yet in the inbound feed — counted as FBA cover" style="cursor:pointer;color:#0369a1;font-weight:600;border:1px solid #bae6fd;background:#f0f9ff;border-radius:4px;padding:2px 8px">🚚 '+n+' in-flight'+(u?(' · '+u.toLocaleString()+'u'):'')+lr+'</span>'
+    +'<button id="fba-trf-refresh" title="Refresh in-flight transfers from Cin7 now" style="font-size:10px;padding:2px 7px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;cursor:pointer">⟳</button>';
+  var s=document.getElementById('fba-trf-sum'); if(s)s.onclick=_fbaTrfShowList;
+  var b=document.getElementById('fba-trf-refresh'); if(b)b.onclick=function(){ fbaTrfRefresh(false); };
+}
+function _fbaTrfShowList(){ var p=document.getElementById('fba-trf-list');
+  if(!p){ p=document.createElement('div'); p.id='fba-trf-list'; p.style.cssText='position:fixed;z-index:9000;right:12px;top:96px;max-height:70vh;overflow:auto;background:#fff;border:1px solid #bae6fd;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.18);padding:10px 12px;font-size:11px;width:440px;text-align:left'; document.body.appendChild(p); }
+  if(p.style.display==='block'){ p.style.display='none'; return; }
+  var rows=FBA_PENDING_ROWS.map(function(r){ return '<tr><td style="padding:2px 8px 2px 0">'+(r.reference||'')+'</td><td style="padding:2px 8px 2px 0">'+(r.warehouse||'')+'</td><td style="padding:2px 8px 2px 0">'+(r.sku||'')+'</td><td style="padding:2px 8px 2px 0;text-align:right">'+(r.qty||0)+'</td><td style="padding:2px 0;color:#64748b;white-space:nowrap">'+(r.eta||'')+'</td></tr>'; }).join('')||'<tr><td colspan="5" style="color:#94a3b8;padding:6px 0">No in-flight transfers not yet in the inbound feed.</td></tr>';
+  p.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b>In-flight FBA transfers (not yet inbound)</b><a id="fba-trf-close" style="cursor:pointer;color:#dc2626">✕</a></div><div class="mut" style="font-size:10px;margin-bottom:6px">Processed in Cin7 in the last 48h, into FBA/AWD, not yet showing as inbound. Counted as FBA cover so they aren’t re-recommended.</div><table style="border-collapse:collapse;width:100%"><thead><tr style="color:#64748b;text-transform:uppercase;font-size:9px"><th style="text-align:left;padding:2px 8px 2px 0">Ref</th><th style="text-align:left;padding:2px 8px 2px 0">Warehouse</th><th style="text-align:left;padding:2px 8px 2px 0">SKU</th><th style="text-align:right;padding:2px 8px 2px 0">Qty</th><th style="text-align:left">ETA</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  p.style.display='block'; var c=document.getElementById('fba-trf-close'); if(c)c.onclick=function(){ p.style.display='none'; };
+}
 // Clear all overrides + ticks, then re-render.
 // SKU filter supports a LIST: split on whitespace/commas/semicolons/newlines; match if the SKU
 // contains ANY token (so you can paste many SKUs to filter the view).
@@ -1589,7 +1621,7 @@ function fbaTransferSized(sku,mkt,capUnits){
   const fbw=parseInt(document.getElementById('fbw')?.value)||8;
   const targetMonths=Math.max(1,Math.round(fbw/4.33));
   const target=fbaFwdDemand(md,targetMonths);
-  const need=Math.max(0,target-(iF+oof+awd));   // FBA shortfall vs the target — this is the demand-driven ceiling
+  const need=Math.max(0,target-(iF+oof+awd+_fbaPendingOf(sku,mkt)));   // FBA shortfall vs target — includes in-flight branch transfers not yet inbound (overlay)
   if(need<=0)return 0;
   let base=Math.min(need,Math.max(capUnits,0));
   if(base<=0)return 0;
@@ -1641,7 +1673,7 @@ function fbaTransferNonGrs(sku,mkt){
   const iF=md['if_']||0, oof=md.oof||0, awd=awdOf(sku,mkt);
   const fbw=parseInt(document.getElementById('fbw')?.value)||8;
   const targetMonths=Math.max(1,Math.round(fbw/4.33));
-  const need=Math.max(0,fbaFwdDemand(md,targetMonths)-(iF+oof+awd));   // FBA shortfall vs target
+  const need=Math.max(0,fbaFwdDemand(md,targetMonths)-(iF+oof+awd+_fbaPendingOf(sku,mkt)));   // FBA shortfall vs target — includes in-flight transfers (overlay)
   const base=Math.min(need,pool);                                      // capped at the non-GRS pool we hold
   if(base<=0)return 0;
   const isFullCarton=base>=cp;                                         // fills at least one whole carton?
@@ -1938,6 +1970,8 @@ function render(){
   var _thp=document.getElementById('trf-help'); if(_thp&&BP_VIEW!=='transfer')_thp.style.display='none';
   var _fhp=document.getElementById('fba-help'); if(_fhp&&BP_VIEW!=='fba')_fhp.style.display='none';
   var _vdl=document.getElementById('bp-view-dl'); if(_vdl)_vdl.style.display=(BP_VIEW==='fba'||BP_VIEW==='transfer')?'inline-flex':'none';
+  var _tbx=document.getElementById('fba-trf-box'); if(_tbx)_tbx.style.display=(BP_VIEW==='fba')?'inline-flex':'none';   // in-flight branch-transfer overlay box (FBA only)
+  if(BP_VIEW==='fba')_fbaTrfOnView();
   var _crb=document.getElementById('cr-btn'); if(_crb)_crb.style.display=(BP_VIEW==='buy')?'':'none';   // Complex Rules — BUY tab only
   var _crp=document.getElementById('cr-panel'); if(_crp&&BP_VIEW!=='buy')_crp.style.display='none';
   updateFbaSelBox();
@@ -2225,6 +2259,9 @@ function downloadFbaTransfer(){
     var a=document.createElement('a');a.href=url;a.download=fname;
     document.body.appendChild(a);a.click();
     setTimeout(function(){URL.revokeObjectURL(url);a.remove();},150);
+    // the team just processed a transfer → re-import in-flight transfers 10 min later so the grid reflects it.
+    // A manual refresh (⟳) cancels this pending run (see fbaTrfRefresh).
+    if(_fbaDlTimer)clearTimeout(_fbaDlTimer); _fbaDlTimer=setTimeout(function(){ fbaTrfRefresh(true); },600000);
   }catch(e){ alert('FBA Transfer Upload could not be built: '+(e&&e.message||e)); }
 }
 
@@ -3506,6 +3543,7 @@ var BUY_SCAFFOLD=`<div class="wrap">
     <button type="button" id="set-btn" onclick="(function(){var p=document.getElementById('set-panel');p.style.display=(p.style.display==='none'||!p.style.display?'block':'none');})()" title="Buy plan settings" style="font-size:10px;padding:2px 9px;border:1px solid #cbd5e1;border-radius:3px;background:#f1f5f9;color:#0f172a;cursor:pointer;font-weight:600">&#9881; Settings &#9662;</button>
     <button type="button" id="cr-btn" onclick="CR.toggle()" title="Complex Rules — override buy cover targets by SKU / category / tier / season × window, per country" style="font-size:10px;padding:2px 9px;border:1px solid #7c3aed;border-radius:3px;background:#f5f3ff;color:#5b21b6;cursor:pointer;font-weight:600">&#9819; Complex Rules (0) &#9662;</button>
     <button type="button" id="bp-view-dl" onclick="BP.downloadViewCSV()" title="Download the data in view as CSV" style="display:none;font-size:10px;padding:2px 10px;border:1px solid #16a34a;border-radius:3px;background:#dcfce7;color:#166534;cursor:pointer;font-weight:600">&#11015; Download CSV</button>
+    <span id="fba-trf-box" style="display:none;align-items:center;gap:6px;font-size:10px"></span>
     <button type="button" id="bp-fba-help-btn" onclick="document.getElementById('fba-help').style.display=(document.getElementById('fba-help').style.display==='none'?'block':'none')" title="How Transfer FBA is calculated" style="font-size:10px;padding:2px 9px;border:1px solid #cbd5e1;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer">&#9432; FBA Transfer Logic</button>
     <button type="button" id="bp-buy-help-btn" onclick="document.getElementById('buy-help').style.display=(document.getElementById('buy-help').style.display==='none'?'block':'none')" title="How the buy plan, targets and cell colours work" style="font-size:10px;padding:2px 9px;border:1px solid #cbd5e1;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer">&#9432; Buy Plan Logic</button>
     <button type="button" id="bp-trf-help-btn" onclick="document.getElementById('trf-help').style.display=(document.getElementById('trf-help').style.display==='none'?'block':'none')" title="How 3PL-to-3PL transfers are calculated" style="font-size:10px;padding:2px 9px;border:1px solid #cbd5e1;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer">&#9432; Transfer Logic</button>
