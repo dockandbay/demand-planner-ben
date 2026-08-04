@@ -1,3 +1,6 @@
+## v26.519 — 3PL Invoicing: Download CSV button (placeholder)
+- Added a Download CSV button next to Map to Cost Centres in the Analyse summary; export logic is Phase 3 (button shows a coming-soon note for now).
+
 ## v26.518 — 3PL Invoicing: manual Cin7 sales-order import
 - New manual fetch POST /api/supply/tpl/cin7-import: pulls Cin7 SalesOrders for a month (by InvoiceDate; defaults to previous calendar month), paginated + throttled, into planner.tpl_cin7_orders (migration 176). Button "Import Cin7 orders for <period>" in the invoices view.
 - Map to Cost Centres now resolves Reference -> CostCenter against the imported table (offline, no live call per analyse); prompts to import first if empty. Verified offline with mock orders.
