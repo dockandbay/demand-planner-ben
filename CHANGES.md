@@ -1,3 +1,6 @@
+## v26.557 — 3PL invoice tab: condensed desktop layout (Option B)
+- Steps 1 & 2/3 no longer stack full-width: Step 1 (Upload + files) sits left; Steps 2 (Import) + 3 (Clean-up sweep) stack in a narrower right column; Step 4 (Review) stays full width. Responsive — flex-wraps to full-width stacked on mobile. Data-weighted per Ben's mockup approval.
+
 ## v26.556 — Custom orders (SUG-0015): all 4 UI surfaces
 - PRODUCT: Approval method control on a dev item (Approval by photo | Send samples → existing recipients), auto-saves.
 - PURCHASE ORDERS ▸ Client/FBA: multi-select of product developments (chips + add dropdown) → custom_dev_ref (CSV, multiple).

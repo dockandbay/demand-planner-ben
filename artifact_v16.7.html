@@ -9590,8 +9590,9 @@ function render3plInvoice(body){
       :'<tr><td colspan="6" style="padding:14px 12px;color:#94a3b8;font-size:12px;text-align:left">No invoice files for '+e(TPL3_STATE.period)+' yet — upload one below.</td></tr>';
     var _lbl=TPL3.filter(function(t){return t[0]===TPL3_STATE.tpl;})[0][1];
     var _card='border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;margin-bottom:12px;background:#fff;text-align:left';
+    var _cardF='border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;background:#fff;text-align:left';   // flex-row card (no bottom margin — the row/column gap spaces them)
     function _step(nu,ti,su2){ return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><span style="flex:none;width:22px;height:22px;border-radius:50%;background:#0f172a;color:#fff;font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center">'+nu+'</span><span style="font-weight:700;font-size:13px">'+ti+'</span>'+(su2?'<span style="font-size:11px;color:#94a3b8;font-weight:400">'+su2+'</span>':'')+'</div>'; }
-    b.innerHTML='<div style="'+_card+'">'+_step('1','Upload invoice',e(_lbl)+' · '+e(TPL3_STATE.period))
+    b.innerHTML='<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start;margin-bottom:12px"><div style="'+_cardF+';flex:1 1 440px;min-width:360px">'+_step('1','Upload invoice',e(_lbl)+' · '+e(TPL3_STATE.period))
         +'<div id="tpl-drop" style="border:2px dashed #cbd5e1;border-radius:8px;padding:12px 14px;margin-bottom:12px;background:#f8fafc;transition:background .12s,border-color .12s">'
           +'<input type="file" id="tpl-file" style="font-size:12px"> <button id="tpl-up" class="save-btn" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Upload</button>'
           +'<span style="font-size:11px;color:#94a3b8;margin-left:8px">or drag &amp; drop a file anywhere in this box</span>'
@@ -9599,15 +9600,17 @@ function render3plInvoice(body){
         +'<div class="tw"><table style="border-collapse:collapse;font-size:12px;width:100%;text-align:left"><thead><tr style="background:#e9eef5;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#475569">'
           +['File','Size','By','Uploaded','Status','Action'].map(function(h){return '<th style="padding:6px 12px;text-align:left;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'+rows+'</tbody></table></div>'
       +'</div>'
-      +'<div style="'+_card+'">'+_step('2','Import Cin7 orders','match each order&rsquo;s reference to its Cin7 cost centre')
+      +'<div style="flex:1 1 300px;min-width:280px;display:flex;flex-direction:column;gap:12px">'
+      +'<div style="'+_cardF+'">'+_step('2','Import Cin7 orders','match each order&rsquo;s reference to its Cin7 cost centre')
         +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button id="tpl-cin7imp" data-tip="Import new (not-yet-imported) sales orders for this month, by invoice date" style="border:1px solid #0f766e;background:#f0fdfa;color:#0f766e;border-radius:6px;padding:5px 13px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">⟳ Import Cin7 orders</button>'
           +'<span id="tpl-cin7msg" style="font-size:11px;color:#94a3b8"></span></div>'
         +'<div id="tpl-cin7sum" style="font-size:11px;color:#64748b;margin-top:8px"></div>'
       +'</div>'
-      +'<div style="'+_card+'">'+_step('3','Clean-up sweep','only if some orders are still unmapped')
+      +'<div style="'+_cardF+'">'+_step('3','Clean-up sweep','only if some orders are still unmapped')
         +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button id="tpl-cin7sweep" data-tip="Fetch this invoice&rsquo;s still-unmapped order references directly from Cin7 (any date / branch)" style="border:1px solid #7c3aed;background:#fff;color:#7c3aed;border-radius:6px;padding:5px 11px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">🧹 Clean-up sweep</button>'
           +'<span id="tpl-sweep-msg" style="font-size:11px;color:#94a3b8">Analyse a file to check for unmapped orders.</span></div>'
       +'</div>'
+      +'</div></div>'
       +'<div style="'+_card+'">'+_step('4','Review Xero summary &amp; download')
         +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px"><button id="tpl-csv" data-tip="Build a Xero bill-import CSV (mapped accounts + tax) ready to upload into Xero" style="border:1px solid #7dd3fc;background:#e0f2fe;color:#075985;border-radius:6px;padding:5px 13px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">⬇ Download CSV for Xero Bill Upload</button>'
           +'<a id="tpl-clear" data-tip="Clear the current analysis" style="font-size:11px;color:#dc2626;cursor:pointer;font-weight:600">Clear</a>'
