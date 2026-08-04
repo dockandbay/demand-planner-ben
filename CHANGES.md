@@ -1,3 +1,6 @@
+## v26.536 — 3PL Cin7 import: only completed days
+- Monthly import now caps at the last COMPLETED day (yesterday) — it never pulls today's partial day. Past months still import the full month. (Parsing already auto-maps against previously-imported orders, e.g. weekly Coghlans invoices vs monthly imports.)
+
 ## v26.535 — Demand plan report buttons actually restyled (v26.534 missed the artifact)
 - 4 report buttons now small outline pills (colored border+text on white, 11px, 6px radius), labels shortened, emojis dropped, wrap on narrow. v26.534 only bumped the version.
 

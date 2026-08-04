@@ -5481,8 +5481,8 @@ app.post('/api/supply/tpl/cin7-import', async (req, res) => {
       const [py, pm] = period.split('-').map(Number);
       const monStart = period + '-01';
       const lastDay = new Date(Date.UTC(py, pm, 0)).toISOString().slice(0, 10);   // last day of the period's month
-      const today = new Date().toISOString().slice(0, 10);
-      const monEnd = today < lastDay ? today : lastDay;                            // never fetch beyond today
+      const yd = new Date(); yd.setUTCDate(yd.getUTCDate() - 1); const lastComplete = yd.toISOString().slice(0, 10);   // last COMPLETED day — never import today's partial day
+      const monEnd = lastComplete < lastDay ? lastComplete : lastDay;
       if (sweep) { start = monStart; end = monEnd; kind = 'sweep'; }
       else {
         const cov = (await pool.query(`SELECT to_char(max(to_date),'YYYY-MM-DD') ct FROM planner.tpl_cin7_imports WHERE period=$1 AND status<>'error'`, [period])).rows[0];
