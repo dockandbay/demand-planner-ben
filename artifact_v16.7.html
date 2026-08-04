@@ -1595,12 +1595,17 @@ function fbaTransferSized(sku,mkt,capUnits){
   if(base<=0)return 0;
   const d90=fbaFwdDemand(md,3), d60=fbaFwdDemand(md,2);
   if(FBA_CARTON_MODE==='ANY')return Math.round(base);                 // full shortfall within cap, no rounding
-  if(FBA_CARTON_MODE==='PARTIAL'){ const q=Math.round(base); return q<0.2*d60?0:q; }   // raw, keep min-size floor
-  if(d90<0.7*cp)return 0;                                             // FULL: too small for a whole carton
-  const cartons=Math.min(Math.floor(base/cp),Math.floor(d90/cp));
-  const qty=cartons*cp;
-  if(qty<0.2*d60)return 0;                                            // below the 20% forward-demand floor
-  return qty;
+  // Whole-carton amount (this IS the FULL result). Also used to gate PARTIAL: a SKU that fills >=1 whole carton
+  // belongs to FULL and is EXCLUDED from Partial, so it is never sent as both (e.g. 120 full AND 124 partial).
+  const cartons=(d90<0.7*cp)?0:Math.min(Math.floor(base/cp),Math.floor(d90/cp));
+  const fullQty=cartons*cp;
+  if(FBA_CARTON_MODE==='PARTIAL'){
+    if(fullQty>0)return 0;                                            // carton-filler → send under FULL, not here
+    const q=Math.round(base); return q<0.2*d60?0:q;                   // sub-carton straggler: send the raw partial
+  }
+  if(fullQty<=0)return 0;                                             // FULL: too small for a whole carton
+  if(fullQty<0.2*d60)return 0;                                        // below the 20% forward-demand floor
+  return fullQty;
 }
 // Recommended units to transfer 3PL -> FBA now, per the agreed rules:
 //  - size the shipment to forecast FBA demand over the FBA-target weeks (from the demand plan)
@@ -1933,7 +1938,7 @@ function render(){
     if(BU_SEL!=='ALL'){
       const bq=getBuyQtys(s.s,CUR);
       if(BU_SEL==='TRFFBA'&&!(fbaTransferEff(s.s,CUR)>0))return false;
-      if(BU_SEL==='TRFFBA_NG'&&!(nonGrsOf(s.s,CUR)>0))return false;   // only SKUs with non-GRS stock in this country
+      if(BU_SEL==='TRFFBA_NG'&&!(fbaTransferEff(s.s,CUR)>0))return false;   // only SKUs with an actual non-GRS transfer to send (not merely holding non-GRS stock)
       if(BU_SEL==='AWDLOW'){ if(!(awdOf(s.s,CUR)>0))return false;   // US only: AWD on hand AND FBA under 3 weeks cover
         var _md=PD[s.s]&&PD[s.s].mkts&&PD[s.s].mkts[CUR]; var _wk=_md?fbaFwdDemand(_md,3)/13:0;   // avg weekly FBA demand (next 90 days)
         var _cov=_wk>0?((_md['if_']||0)+(_md.oof||0))/_wk:Infinity;   // FBA on-hand + inbound, in weeks

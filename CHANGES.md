@@ -1,3 +1,7 @@
+## v26.541 — FBA transfer: fix NonGRS/FULL empty rows + partial/full double-send
+- Transfer FBA (non GRS) now only lists SKUs with an actual transfer to send (was listing any SKU merely holding non-GRS stock, even when the FULL-carton transfer was 0).
+- PARTIAL now excludes SKUs that fill >=1 whole carton — those belong to FULL. A SKU is no longer shown as e.g. 124 in Partial AND 120 in Full; carton-fillers show only under Full, and Partial carries just the sub-carton stragglers. FULL/ANY sizing unchanged (buy plan unaffected — default mode is FULL).
+
 ## v26.540 — 3PL Invoices: 4-step stepped layout
 - Merged the upload box + files table into Step 1, and reorganised the whole tab into numbered steps: 1 Upload invoice, 2 Import Cin7 orders, 3 Clean-up sweep, 4 Review Xero summary & download.
 - Step 3 is conditional: after mapping, if no orders are unmapped it hides the sweep button and shows a green 'All orders mapped — no sweep needed'; otherwise it shows the count + button.
