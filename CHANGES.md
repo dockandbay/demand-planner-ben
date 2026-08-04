@@ -1,3 +1,6 @@
+## v26.525 — 3PL Cin7 import: fix auth + date filter (now works live)
+- The Cin7 sales-order import was missing the Authorization header (401) and used a bare date (Cin7 needs UTC yyyy-MM-ddTHH:mm:ssZ, 400). Both fixed — verified live: 1-5 May 2026 imported 643 orders, all carrying a CostCenter.
+
 ## v26.524 — 3PL analyser: persist analysis, actions on top, date-range import
 - The parsed analysis now persists across page refresh (localStorage cache, auto-restored) with a Clear link; no longer lost on reload.
 - Map to Cost Centres + Download CSV actions moved to the top of the analysis; files table fully left-aligned.

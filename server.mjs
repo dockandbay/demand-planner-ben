@@ -5457,23 +5457,24 @@ app.post('/api/supply/tpl/map/:id', async (req, res) => {
 // read-only from Cin7. Aborts cleanly on auth failure (sandbox has dummy creds).
 app.post('/api/supply/tpl/cin7-import', async (req, res) => {
   try {
-    if (!cin7Auth()) return res.json({ ok: false, error: 'Cin7 is not configured in this environment (no CIN7 credentials).' });
+    const auth = cin7Auth(); if (!auth) return res.json({ ok: false, error: 'Cin7 is not configured in this environment (no CIN7 credentials).' });
     let period = String((req.body && req.body.period) || req.query.period || '').trim();
     const bf = String((req.body && req.body.from) || req.query.from || '').trim(), bt = String((req.body && req.body.to) || req.query.to || '').trim();
-    let where;
+    let where;   // Cin7 requires UTC datetime format yyyy-MM-ddTHH:mm:ssZ for date filters
     if (/^\d{4}-\d{2}-\d{2}$/.test(bf) && /^\d{4}-\d{2}-\d{2}$/.test(bt)) {
       period = bf.slice(0, 7);
-      where = encodeURIComponent("InvoiceDate>='" + bf + "' AND InvoiceDate<='" + bt + "'");   // inclusive date range by InvoiceDate
+      where = encodeURIComponent("InvoiceDate>='" + bf + "T00:00:00Z' AND InvoiceDate<='" + bt + "T23:59:59Z'");   // inclusive range by InvoiceDate
     } else {
       if (!/^\d{4}-\d{2}$/.test(period)) { const d = new Date(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - 1); period = d.toISOString().slice(0, 7); }   // default: previous calendar month
       const [py, pm] = period.split('-').map(Number);
-      where = encodeURIComponent("InvoiceDate>='" + period + "-01' AND InvoiceDate<'" + new Date(Date.UTC(py, pm, 1)).toISOString().slice(0, 10) + "'");
+      const nx = new Date(Date.UTC(py, pm, 1)).toISOString().slice(0, 10);
+      where = encodeURIComponent("InvoiceDate>='" + period + "-01T00:00:00Z' AND InvoiceDate<'" + nx + "T00:00:00Z'");
     }
     let page = 1, imported = 0, calls = 0; const MAXP = 60;
     while (page <= MAXP) {
-      const r = await cin7Fetch('https://api.cin7.com/api/v1/SalesOrders?rows=250&page=' + page + '&fields=id,reference,customerOrderNo,costCenter,memberCostCenter,invoiceDate,branchId,total,freightTotal&where=' + where, { method: 'GET' });
+      const r = await cin7Fetch('https://api.cin7.com/api/v1/SalesOrders?rows=250&page=' + page + '&fields=id,reference,customerOrderNo,costCenter,memberCostCenter,invoiceDate,branchId,total,freightTotal&where=' + where, { method: 'GET', headers: { Authorization: auth, 'content-type': 'application/json' } });
       calls++;
-      if (r.status >= 400) return res.json({ ok: false, error: 'Cin7 fetch failed (HTTP ' + r.status + ') — check credentials (the sandbox has dummy creds). Imported ' + imported + ' before failure.', period, imported });
+      if (r.status >= 400) return res.json({ ok: false, error: 'Cin7 fetch failed (HTTP ' + r.status + '). Imported ' + imported + ' before failure.', period, imported });
       let arr = []; try { arr = await r.json(); } catch (e) { arr = []; }
       if (!Array.isArray(arr) || !arr.length) break;
       for (const o of arr) {
