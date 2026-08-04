@@ -7645,7 +7645,7 @@ function render(){
 // to planner.key_account_forecasts (replaces the old n8n Airtable flow). SKU is a type-to-search dropdown from SKUM.
 // ── DEMAND ▸ SUMMARY — clean read-only rollup of the PLAN forecast, by country/channel, grouped by
 //    subcategory (expand → SKU), across financial years (past FYs minimised) or a custom month range.
-var SUMM_FROM='', SUMM_TO='', SUMM_OPEN={}, SUMM_FYOPEN={}, SUMM_METRIC='units', SUMM_GROUP='month', SUMM_TGT_EDIT=false, SUMM_TGT={}, SUMM_TGT_KEY='';
+var SUMM_FROM='', SUMM_TO='', SUMM_OPEN={}, SUMM_FYOPEN={}, SUMM_METRIC=(function(){try{return localStorage.getItem('summ_metric')||'units';}catch(e){return 'units';}})(), SUMM_GROUP=(function(){try{return localStorage.getItem('summ_group')||'month';}catch(e){return 'month';}})(), SUMM_TGT_EDIT=false, SUMM_TGT={}, SUMM_TGT_KEY='';
 function renderSummaryView(body){
   function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function fn2(n){ n=Math.round(Number(n)||0); return n?n.toLocaleString():''; }
@@ -7706,8 +7706,8 @@ function renderSummaryView(body){
     +'<div id="smc" style="overflow-x:auto"></div></div>';
   body.querySelectorAll('.sm-co').forEach(function(b){ b.onclick=function(){ CUR=b.dataset.c; render(); }; });
   body.querySelectorAll('.sm-ch').forEach(function(b){ b.onclick=function(){ CF=b.dataset.c; render(); }; });
-  body.querySelectorAll('.sm-metric').forEach(function(b){ b.onclick=function(){ SUMM_METRIC=b.dataset.m; renderSummaryView(body); }; });
-  body.querySelectorAll('.sm-group').forEach(function(b){ b.onclick=function(){ SUMM_GROUP=b.dataset.g; renderSummaryView(body); }; });
+  body.querySelectorAll('.sm-metric').forEach(function(b){ b.onclick=function(){ SUMM_METRIC=b.dataset.m; try{localStorage.setItem('summ_metric',SUMM_METRIC);}catch(e){} renderSummaryView(body); }; });
+  body.querySelectorAll('.sm-group').forEach(function(b){ b.onclick=function(){ SUMM_GROUP=b.dataset.g; try{localStorage.setItem('summ_group',SUMM_GROUP);}catch(e){} renderSummaryView(body); }; });
   var _te=body.querySelector('#sm-tgtedit'); if(_te)_te.onclick=function(){ SUMM_TGT_EDIT=!SUMM_TGT_EDIT; if(SUMM_TGT_EDIT&&SUMM_METRIC==='units')SUMM_METRIC='revtgt'; renderSummaryView(body); };
   var fSel=body.querySelector('#sm-from'), tSel=body.querySelector('#sm-to');
   function applyRange(){ SUMM_FROM=fSel.value; SUMM_TO=tSel.value; renderSummaryView(body); }   // full silent re-render so the month range + header/clear update immediately
@@ -8214,11 +8214,13 @@ function planRevBtnSync(){ var show=(typeof VIEW_MODE!=='undefined'&&VIEW_MODE==
     if(!c){ c=document.createElement('div'); c.id='plan-report-btns'; c.style.cssText='margin-left:auto;display:flex;gap:6px;align-items:center';
       var btn='border:none;border-radius:16px;padding:5px 12px;font-size:12px;font-weight:700;font-family:inherit;cursor:pointer;white-space:nowrap;color:#fff';
       c.innerHTML='<button id="plan-rev-btn2" type="button" title="Revenue growth targets & tracking — full report" style="'+btn+';background:#2563eb">📈 Revenue vs target</button>'
-        +'<button id="plan-exec-btn" type="button" title="Executive summary — FY revenue &amp; units vs last year" style="'+btn+';background:#0f766e">📊 Executive summary</button>';
+        +'<button id="plan-exec-btn" type="button" title="Executive summary — FY revenue &amp; units vs last year" style="'+btn+';background:#0f766e">📊 Executive summary</button>'
+        +'<button id="plan-summ-btn" type="button" title="Summary report with revenue targets" style="'+btn+';background:#7c3aed">🧾 Summary with targets</button>';
       row.appendChild(c);
       c.querySelector('#plan-rev-btn2').onclick=openPlanRevPopout;
-      c.querySelector('#plan-exec-btn').onclick=openExecSummaryPopout; }
-  } else { if(c)c.remove(); if(typeof closeExecDrawer==='function')closeExecDrawer(); if(typeof closeRevDrawer==='function')closeRevDrawer(); } }
+      c.querySelector('#plan-exec-btn').onclick=openExecSummaryPopout;
+      c.querySelector('#plan-summ-btn').onclick=openSummaryPopout; }
+  } else { if(c)c.remove(); if(typeof closeExecDrawer==='function')closeExecDrawer(); if(typeof closeRevDrawer==='function')closeRevDrawer(); if(typeof closeSummDrawer==='function')closeSummDrawer(); } }
 // "Revenue vs target" opens the FULL revenue report (targets & tracking + price changes) in a 50% drawer —
 // the compact planRevPopRender card is deprecated.
 function revEnsureDrawer(){ var d=document.getElementById('rev-drawer');
@@ -8261,6 +8263,24 @@ function openExecSummaryPopout(){ var d=document.getElementById('exec-drawer');
   var body=document.getElementById('exec-drawer-body'); if(body)body.innerHTML='<div class="count" style="padding:14px;color:#888">Loading…</div>';
   setTimeout(function(){ try{ renderExecView(document.getElementById('exec-drawer-body')); }
     catch(e){ var b=document.getElementById('exec-drawer-body'); if(b)b.innerHTML='<div style="padding:14px;color:#dc2626">Could not load Executive Summary: '+String(e&&e.message||e)+'</div>'; } }, 20); }
+function summEnsureDrawer(){ var d=document.getElementById('summ-drawer');
+  if(!d){ d=document.createElement('div'); d.id='summ-drawer';
+    d.style.cssText='position:fixed;top:0;right:0;height:100%;width:clamp(400px,60vw,1200px);background:#fff;box-shadow:-8px 0 28px rgba(0,0,0,.22);z-index:6000;flex-direction:column;display:none';
+    d.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;border-bottom:1px solid #e5e5e5;flex:0 0 auto"><b style="font-size:15px">Summary with targets</b><button id="summ-drawer-x" title="Close" style="width:28px;height:28px;border-radius:6px;border:1px solid #cbd5e1;background:#f8fafc;cursor:pointer;font-size:16px;line-height:1">&times;</button></div><div id="summ-drawer-body" style="flex:1 1 auto;overflow:auto;padding:0 16px 12px">Loading…</div>';
+    document.body.appendChild(d); var x=d.querySelector('#summ-drawer-x'); if(x)x.onclick=closeSummDrawer; }
+  else if(d.parentNode!==document.body)document.body.appendChild(d);
+  var bk=document.getElementById('summ-drawer-backdrop');
+  if(!bk){ bk=document.createElement('div'); bk.id='summ-drawer-backdrop'; bk.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:5900;display:none'; bk.onclick=closeSummDrawer; document.body.appendChild(bk); }
+  else if(bk.parentNode!==document.body)document.body.appendChild(bk);
+  return d; }
+function closeSummDrawer(){ var d=document.getElementById('summ-drawer'); if(d)d.style.display='none'; var bk=document.getElementById('summ-drawer-backdrop'); if(bk)bk.style.display='none'; }
+function openSummaryPopout(){ var d=document.getElementById('summ-drawer');
+  if(d && d.style.display!=='none'){ closeSummDrawer(); return; }   // click again to close
+  try{ if(localStorage.getItem('summ_metric')==null){ SUMM_METRIC='revtgt'; } }catch(e){ SUMM_METRIC='revtgt'; }   // first open shows targets
+  d=summEnsureDrawer(); var bk=document.getElementById('summ-drawer-backdrop'); if(bk)bk.style.display='block'; d.style.display='flex';
+  var body=document.getElementById('summ-drawer-body'); if(body)body.innerHTML='<div class="count" style="padding:14px;color:#888">Loading…</div>';
+  setTimeout(function(){ try{ renderSummaryView(document.getElementById('summ-drawer-body')); }
+    catch(e){ var b=document.getElementById('summ-drawer-body'); if(b)b.innerHTML='<div style="padding:14px;color:#dc2626">Could not load Summary: '+String(e&&e.message||e)+'</div>'; } }, 20); }
 function execSumPopRender(){ var p=document.getElementById('exec-sum-pop'); if(!p)return;
   var d=buildExecData();
   var gbp=function(v){ if(Math.abs(v)>=1e6)return '£'+(v/1e6).toFixed(2)+'M'; if(Math.abs(v)>=1e3)return '£'+Math.round(v/1e3)+'k'; return '£'+Math.round(v); };

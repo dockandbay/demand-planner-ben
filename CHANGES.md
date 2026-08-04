@@ -1,3 +1,7 @@
+## v26.520 — Demand plan: "Summary with targets" pop-out
+- New button on the demand plan (beside Revenue vs target / Executive summary) opens the Summary report in a right-hand drawer, like Exec Summary. Opens on the Rev+targets view the first time.
+- Summary metric + grouping pills now persist in the browser (localStorage) across reopen/reload.
+
 ## v26.519 — 3PL Invoicing: Download CSV button (placeholder)
 - Added a Download CSV button next to Map to Cost Centres in the Analyse summary; export logic is Phase 3 (button shows a coming-soon note for now).
 
