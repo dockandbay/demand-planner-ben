@@ -5392,6 +5392,76 @@ app.post('/api/supply/tpl/parse/:id', async (req, res) => {
     res.json({ ok: true, filename: fname, sheets });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// 3PL invoice — Phase 2: map each order line's Reference to its Cin7 sales-order CostCenter, then group the
+// freight (Shipping Fee) + fulfilment (Total Excl Shipping) cost by CostCenter. 2-pass match (Reference, then
+// CustomerOrderNo). Read-only Cin7 lookups. Needs CIN7 creds in the environment.
+async function _tplOrderRows(buf, isCsv) {
+  let grids = [];
+  if (isCsv) {
+    grids = [{ grid: String(buf.toString('utf8')).split(/\r?\n/).filter(l => l.length).map(l => l.split(',').map(c => c.replace(/^"|"$/g, ''))) }];
+  } else {
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf);
+    wb.eachSheet(ws => { const grid = []; ws.eachRow({ includeEmpty: false }, r => { const arr = []; r.eachCell({ includeEmpty: true }, (cell, col) => { arr[col - 1] = _tplCellVal(cell); }); grid.push(arr); }); if (grid.length) grids.push({ grid }); });
+  }
+  for (const { grid } of grids) {
+    let hr = -1;
+    for (let i = 0; i < Math.min(8, grid.length); i++) { const hs = (grid[i] || []).map(x => String(x == null ? '' : x).trim().toLowerCase()); if (hs.includes('reference') && hs.includes('shipping fee')) { hr = i; break; } }
+    if (hr < 0) continue;
+    const hs = (grid[hr] || []).map(x => String(x == null ? '' : x).trim().toLowerCase());
+    const ri = hs.indexOf('reference'), si = hs.indexOf('shipping fee'), fi = hs.indexOf('total excl shipping');
+    const out = [];
+    for (let r = hr + 1; r < grid.length; r++) {
+      const row = grid[r] || []; const k = (row[0] != null ? String(row[0]).trim() : '');
+      if (k === '' || /^total/i.test(k)) continue;
+      out.push({ reference: (ri >= 0 && row[ri] != null) ? String(row[ri]).trim() : '', shipping: _tplNum(row[si]) || 0, fulfilment: fi >= 0 ? (_tplNum(row[fi]) || 0) : 0 });
+    }
+    return out;
+  }
+  return [];
+}
+function _tplAggregateAccounts(orders, refCC) {
+  const byCC = {}, unmapped = { orders: 0, freight: 0, fulfilment: 0, refs: [] };
+  let mFreight = 0, mFulfil = 0, mCount = 0;
+  orders.forEach(o => {
+    const cc = (o.reference != null ? refCC[o.reference] : '') || '';
+    if (cc === '') { unmapped.orders++; unmapped.freight += o.shipping; unmapped.fulfilment += o.fulfilment; if (unmapped.refs.length < 100 && o.reference) unmapped.refs.push(o.reference); }
+    else { if (!byCC[cc]) byCC[cc] = { costCenter: cc, orders: 0, freight: 0, fulfilment: 0 }; byCC[cc].orders++; byCC[cc].freight += o.shipping; byCC[cc].fulfilment += o.fulfilment; mFreight += o.shipping; mFulfil += o.fulfilment; mCount++; }
+  });
+  const costCenters = Object.values(byCC).map(x => ({ ...x, total: x.freight + x.fulfilment })).sort((a, b) => b.total - a.total);
+  return { costCenters, unmapped: { ...unmapped, total: unmapped.freight + unmapped.fulfilment }, totals: { orders: orders.length, matched: mCount, freight: mFreight, fulfilment: mFulfil } };
+}
+app.post('/api/supply/tpl/map/:id', async (req, res) => {
+  try {
+    if (!cin7Auth()) return res.json({ ok: false, error: 'Cin7 is not configured in this environment (no CIN7 credentials). Run on live, or add sandbox creds, to map Cost Centres.' });
+    const row = (await pool.query(`SELECT filename, content_type, content FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
+    if (!row) return res.status(404).json({ error: 'not found' });
+    const isCsv = /\.csv$/i.test(row.filename || '') || /csv/i.test(row.content_type || '');
+    const orders = await _tplOrderRows(row.content, isCsv);
+    if (!orders.length) return res.json({ ok: false, error: 'No order rows with a Reference + Shipping Fee column were found to map.' });
+    const refs = [...new Set(orders.map(o => o.reference).filter(Boolean))];
+    const refCC = {}; let calls = 0;
+    const lookup = async (field, keys) => {
+      for (let i = 0; i < keys.length; i += 200) {
+        const chunk = keys.slice(i, i + 200);
+        const where = encodeURIComponent(field + " IN ('" + chunk.map(k => String(k).replace(/'/g, "''")).join("','") + "')");
+        const r = await cin7Fetch('https://api.cin7.com/api/v1/SalesOrders?rows=250&fields=id,reference,customerOrderNo,costCenter,memberCostCenter,branchId&where=' + where, { method: 'GET' });
+        calls++;
+        let arr = []; try { arr = await r.json(); } catch (e) { arr = []; }
+        if (Array.isArray(arr)) arr.forEach(o => {
+          const cc = String(o.costCenter || o.memberCostCenter || '').trim();
+          if (field === 'Reference' && o.reference && refCC[o.reference] == null) refCC[o.reference] = cc;
+          if (field === 'CustomerOrderNo' && o.customerOrderNo && refCC[o.customerOrderNo] == null) refCC[o.customerOrderNo] = cc;
+        });
+      }
+    };
+    await lookup('Reference', refs);                                   // pass 1
+    const miss = refs.filter(r => refCC[r] == null);
+    if (miss.length) await lookup('CustomerOrderNo', miss);            // pass 2
+    const summary = _tplAggregateAccounts(orders, refCC);
+    res.json({ ok: true, cin7_calls: calls, ...summary });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // Full snooze/dismiss state map (used by the PO grid so its badges/counter respect snooze).
 app.get('/api/supply/actions/state', async (req, res) => {
   try {

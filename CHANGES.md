@@ -1,3 +1,7 @@
+## v26.515 — 3PL Invoicing Phase 2: map Reference -> Cin7 CostCentre
+- New "Map to Cost Centres (Cin7)" step: matches each order line Reference to its Cin7 sales order CostCenter (2-pass: Reference then CustomerOrderNo), groups freight (Shipping Fee) vs fulfilment (Total Excl Shipping) by Cost Centre, surfaces COST CENTRE MISSING + unmatched refs.
+- Server: read-only POST /api/supply/tpl/map/:id (chunked Cin7 SalesOrders lookups, throttled). Aggregation verified offline (freight reconciles exactly). Needs CIN7 creds to run the live fetch (sandbox has none -> graceful message).
+
 ## v26.514 — 3PL analyser: exclude totals rows + left-align
 - Parser now drops embedded totals/summary rows (blank or "Total" key column) so column sums no longer double-count. Fixes Shipping Fee (was 41,123 -> 20,561.57), Storage (was 47,714 -> 5,379.27), etc.
 - 3PL invoice page + parsed summary left-aligned as standard.
