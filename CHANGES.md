@@ -1,3 +1,6 @@
+## v26.550 — Portal MANAGE badge: single count source (Diviyaj backlog 4)
+- poActCount (in-place refresh after a write) now delegates to poActionCount (the render / exceptions-filter / samples-total count). It was a divergent reimplementation that added a 'no shipment yet' term + dtcShipDataDue and skipped the prodActionable(<=54) guard, so the MANAGE badge jumped to a different number after any edit. Now consistent before/after and matches the exceptions filter.
+
 ## v26.549 — Portal amount-due: include credit_amount (Diviyaj backlog 3)
 - POS_SQL_PORTAL now exposes credit_amount to the portal (was folded into balance_owing but not shown). Portal Payments tab adds it to the amount due and, when credit_amount > 0, shows a dedicated 'Additional credit / charge (added to amount due)' line (+$X). Fixes the wrong balance a supplier saw when their PO had a credit note.
 

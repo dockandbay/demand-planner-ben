@@ -2220,15 +2220,8 @@
               var cur=cell.querySelector('.pptab.active'); var want=keepPt||(cur&&cur.dataset.pt)||'orderplan';   // keep the tab the user was on
               cell.innerHTML=ppExpand(p,_ppData.lb[po]||[],_ppData.notesByPo[po]||[],_ppData.subsByPo[po]||[],i,_ppData.costsByPo[po]||{},_ppData.supSkus||[],_ppData.xdByPo[po]||{},_ppData.addByPo[po]||[]);
               wireDetail(cell); var t=cell.querySelector('.pptab[data-pt="'+want+'"]'); if(t)t.onclick(); }
-            // recompute a PO's MANAGE action-badge count from current _ppData (mirrors the inline calc in ppPOs)
-            function poActCount(p){ if(!p)return 0; var po=p.po, today=new Date().toISOString().slice(0,10);
-              var sb=_ppData.subsByPo[po]||[], nts=_ppData.notesByPo[po]||[];
-              var unreadInt=nts.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
-              var cdS=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean), xdm=_ppData.xdByPo[po]||{};
-              var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
-              var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end, sb):'';
-              var dtcPend=dtcActionDue(p);
-              return (invoiceDue(p,sb)?1:0)+((p.shipment||p.flexport_reference||sb.some(function(s){return s.kind==='tracking';}))?0:1)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcPend?1:0)+(poCdMissing(p,sb)?1:0)+(dtcShipDataDue(p)?1:0); }
+            // recompute a PO's MANAGE action-badge count — SINGLE source of truth = poActionCount (the render + exceptions-filter + samples-total count). Was a divergent reimplementation that added a "no shipment yet" term + dtcShipDataDue and skipped the prodActionable(≤54) guard, so the badge jumped after any in-place edit.
+            function poActCount(p){ return poActionCount(p); }
             // in-place row refresh after a write: re-render the open expanded cell + sync the MANAGE badge (no full reload)
             function refreshRow(row,po){ if(!row)return; var i=row.id.replace('pp-',''); rerenderRow(row,po);
               var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; var mb=document.querySelector('#supply-root .pp-exp[data-i="'+i+'"]')||document.querySelector('.pp-exp[data-i="'+i+'"]'); if(!mb||!p)return;
