@@ -109,6 +109,9 @@ body{font-family:system-ui,-apple-system,sans-serif;font-size:12px;color:#1a1a1a
 .view-toggle{background:transparent;border:none;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;color:#475569;border-bottom:2px solid transparent;font-family:inherit;letter-spacing:.01em}
 .view-toggle:hover{color:#0f172a}
 .view-toggle.active{color:#0f172a;border-bottom-color:#0f172a}
+.fpill{border:1px solid #cbd5e1;background:#fff;color:#334155;font-size:11px;padding:4px 13px;border-radius:14px;cursor:pointer;font-weight:600;font-family:inherit;transition:background .1s,border-color .1s}
+.fpill:hover{border-color:#64748b;background:#f8fafc}
+.fpill.active{background:#0f172a;color:#fff;border-color:#0f172a}
 #view-tabs-row .view-toggle{color:#cbd5e1;border-bottom-color:transparent}
 #view-tabs-row .view-toggle:hover{color:#fff}
 #view-tabs-row .view-toggle.active{color:#fff;border-bottom-color:#fff}
@@ -3653,7 +3656,7 @@ var DA_INSIGHT_TYPES={'Trading behind last year':1,'Trading ahead of last year':
 function daSection(x){ return DA_INSIGHT_TYPES[x.type]?'insights':'actions'; }
 let AF_MARKET='all'; var AF_CACHE={}; // Auto Forecast: market + response cache (keyed by market). Cover-months + freight% controls removed — units come from the forecast gap; freight is containerised + duty is category×country, both server-side.
 var SM_CACHE=null; var SM={market:'uk',whtype:'3pl',basis:'trail',cat:'all',cover:26,days:'',vel:'',units:50,sort:'value'}; // Slow Moving state (defaults: UK · 3PL)
-var ME={market:'all',status:'all',basis:'fc',end:''}; var ME_CACHE={}; // Markdown & EOS state (cache keyed market|basis|end; status filtered client-side)
+var ME={market:'uk',status:'markdown',basis:'fc',end:''}; var ME_CACHE={}; // Markdown & EOS state (defaults UK · Markdown · Seasonal forecast; cache keyed market|basis|end; status filtered client-side)
 var OTB={market:'all',status:'all',months:6,defcover:8}; var OTB_CACHE={}; // Open-to-Buy state (cache keyed market|months|defcover; status filtered client-side)
 var KA_CACHE=null; var KA={weeks:4,market:'all',risk:'critical'}; // Key Stock Arrivals state
 var BI_CACHE={}; // subcat|co|ch -> adjusted fu map from Claude
@@ -9385,7 +9388,7 @@ function renderSlowMovingReport(body){
   body.innerHTML='<div style="padding:18px;color:#666;font-size:12px">Loading…</div>';
   fetch('/api/scenario/slow-moving').then(function(r){return r.json();}).then(function(d){ if(d.error){body.innerHTML='<div style="padding:18px;color:#b91c1c">Could not load: '+d.error+'</div>';return;} SM_CACHE=d.rows; draw(d.rows); }).catch(function(e){ body.innerHTML='<div style="padding:18px;color:#b91c1c">'+e+'</div>'; });
 }
-function mePills(name,opts){ return opts.map(function(o){return '<button class="view-toggle me-'+name+(o[0]===ME[name]?' active':'')+'" data-v="'+o[0]+'">'+o[1]+'</button>';}).join(''); }
+function mePills(name,opts){ return opts.map(function(o){return '<button class="fpill me-'+name+(o[0]===ME[name]?' active':'')+'" data-v="'+o[0]+'">'+o[1]+'</button>';}).join(''); }
 function renderMarkdownEosReport(body){
   var key=ME.market+'|'+ME.basis+'|'+ME.end;
   var draw=function(d){

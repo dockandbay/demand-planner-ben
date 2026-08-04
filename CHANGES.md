@@ -1,3 +1,7 @@
+## v26.509 — Markdown & EOS report: pill-style filters + defaults
+- Filter pills (Market/Action/Project by) restyled from flat tabs to clear selectable pills (.fpill: bordered, rounded, dark when active, hover feedback).
+- Default filters set to UK / Markdown / Seasonal forecast.
+
 ## v26.508 — DEMAND Summary: Units/Revenue + Month/Quarter/Half toggles
 - Units <-> Revenue toggle (revenue = units x ASP incl. price changes; actual/LY months reproduce booked revenue, SKUs priced at their subcategory ASP).
 - Grouping toggle Month / Quarter (Mar-May) / Half (Mar-Aug) within each FY; cells + FY total roll up accordingly.
