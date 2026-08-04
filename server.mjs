@@ -5471,6 +5471,15 @@ async function _tplOrderRows(buf, isCsv) {
   }
   return [];
 }
+// Reference-prefix STANDING RULES (these are not Cin7 sales orders): FBA* = Amazon fulfilment for the region
+// (EU→"COGS - DE - Amazon", UK→"COGS - UK - Amazon", US/AU likewise); TRF* = branch transfer → "OTHER COSTS".
+// Assigned by rule, and EXCLUDED from the Cin7 clean-up sweep (they'd never resolve as sales orders).
+function _tplRefOverride(ref, tpl) {
+  const r = String(ref || '').trim().toUpperCase();
+  if (/^FBA/.test(r)) { const REG = { eu_ifulfilment: 'DE', uk_ilg: 'UK', us_geneva: 'US', au_coghlans: 'AU' }[tpl]; return REG ? ('COGS - ' + REG + ' - Amazon') : null; }
+  if (/^TRF/.test(r)) return 'OTHER COSTS';
+  return null;
+}
 function _tplAggregateAccounts(orders, refCC) {
   const byCC = {}, unmapped = { orders: 0, freight: 0, fulfilment: 0, refs: [] };
   let mFreight = 0, mFulfil = 0, mCount = 0;
@@ -5484,23 +5493,25 @@ function _tplAggregateAccounts(orders, refCC) {
 }
 app.post('/api/supply/tpl/map/:id', async (req, res) => {
   try {
-    const row = (await pool.query(`SELECT filename, content_type, content FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
+    const row = (await pool.query(`SELECT filename, content_type, content, tpl FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
     if (!row) return res.status(404).json({ error: 'not found' });
+    const tpl0 = row.tpl || null;
     const isCsv = /\.csv$/i.test(row.filename || '') || /csv/i.test(row.content_type || '');
     const orders = await _tplOrderRows(row.content, isCsv);
     if (!orders.length) return res.json({ ok: false, error: 'No order rows with a Reference + Shipping Fee column were found to map.' });
     const refs = [...new Set(orders.map(o => o.reference).filter(Boolean))];
-    // Resolve CostCentre against the locally-imported Cin7 orders (populated by the manual import) — no live call.
+    // FBA*/TRF* are assigned by standing rule (not Cin7). Only the remaining refs need a Cin7 CostCentre lookup.
+    const needCin7 = refs.filter(r => !_tplRefOverride(r, tpl0));
     let dbrows = [];
-    try { dbrows = (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [refs])).rows; }
+    try { dbrows = (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [needCin7])).rows; }
     catch (e) { dbrows = []; }
-    if (!dbrows.length) return res.json({ ok: false, error: 'No imported Cin7 orders match this invoice yet — run "Import Cin7 orders" for the period first (previous-month manual fetch).', imported_matched: 0 });
+    if (needCin7.length && !dbrows.length) return res.json({ ok: false, error: 'No imported Cin7 orders match this invoice yet — run "Import Cin7 orders" for the period first (previous-month manual fetch).', imported_matched: 0 });
     const byRef = {}, byCon = {};
     dbrows.forEach(r => { const cc = String(r.cc || '').trim(); if (r.reference) byRef[r.reference] = cc; if (r.customer_order_no) byCon[r.customer_order_no] = cc; });
-    const refCC = {};
-    refs.forEach(ref => { refCC[ref] = (byRef[ref] != null) ? byRef[ref] : (byCon[ref] != null ? byCon[ref] : null); });
+    const refCC = {}; let ruleFba = 0, ruleTrf = 0;
+    refs.forEach(ref => { const ov = _tplRefOverride(ref, tpl0); if (ov) { refCC[ref] = ov; if (/^OTHER/.test(ov)) ruleTrf++; else ruleFba++; } else refCC[ref] = (byRef[ref] != null) ? byRef[ref] : (byCon[ref] != null ? byCon[ref] : null); });
     const summary = _tplAggregateAccounts(orders, refCC);
-    res.json({ ok: true, imported_matched: dbrows.length, ...summary });
+    res.json({ ok: true, imported_matched: dbrows.length, ruleAssigned: { fba: ruleFba, trf: ruleTrf }, ...summary });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // 3PL invoice — MANUAL Cin7 sales-order import for the previous month (by InvoiceDate). Populates
@@ -5581,7 +5592,10 @@ app.post('/api/supply/tpl/cin7-sweep/:id', async (req, res) => {
     const refs = [...new Set(orders.map(o => o.reference).filter(Boolean))];
     if (!refs.length) return res.json({ ok: false, error: 'No order references found on this invoice to sweep.' });
     const covOf = async keys => { const have = (await pool.query(`SELECT reference, customer_order_no FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [keys])).rows; const s = new Set(); have.forEach(h => { if (h.reference) s.add(h.reference); if (h.customer_order_no) s.add(h.customer_order_no); }); return s; };
-    let missing = refs.filter(r => true); { const cov = await covOf(refs); missing = refs.filter(r => !cov.has(r)); }
+    // FBA*/TRF* are assigned by standing rule (not sales orders) — never sweep them from Cin7.
+    const ruleRefs = refs.filter(r => _tplRefOverride(r, tpl0));
+    const sweepable = refs.filter(r => !_tplRefOverride(r, tpl0));
+    let missing; { const cov = await covOf(sweepable); missing = sweepable.filter(r => !cov.has(r)); }
     const missingBefore = missing.length;
     let fetched = 0, calls = 0;
     const grab = async (field, keys) => {
@@ -5607,7 +5621,8 @@ app.post('/api/supply/tpl/cin7-sweep/:id', async (req, res) => {
       if (still.length) await grab('CustomerOrderNo', still);
     } catch (e) { await logRun(fetched, 'error', e.message, calls); return res.json({ ok: false, error: e.message, fetched }); }
     await logRun(fetched, 'ok', null, calls);
-    res.json({ ok: true, refs: refs.length, missing_before: missingBefore, fetched, cin7_calls: calls });
+    const cov3 = await covOf(sweepable); const stillMissing = sweepable.filter(r => !cov3.has(r));
+    res.json({ ok: true, refs: refs.length, missing_before: missingBefore, fetched, cin7_calls: calls, rule_excluded: ruleRefs.length, still_missing: stillMissing.length, still_missing_refs: stillMissing.slice(0, 50) });
   } catch (e) { await logRun(0, 'error', e.message, 0); res.status(500).json({ error: e.message }); }
 });
 // 3PL invoice — Xero bill CSV (Phase 3). Assembles a Xero bills-import CSV: one line per non-order cost type
@@ -5624,7 +5639,7 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
     const orders = await _tplOrderRows(row.content, isCsv);
     const refs = [...new Set(orders.map(o => o.reference).filter(Boolean))];
     let refCC = {};
-    if (refs.length) { const dbrows = (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [refs])).rows; const byRef = {}, byCon = {}; dbrows.forEach(r => { const cc = String(r.cc || '').trim(); if (r.reference) byRef[r.reference] = cc; if (r.customer_order_no) byCon[r.customer_order_no] = cc; }); refs.forEach(rf => { refCC[rf] = (byRef[rf] != null) ? byRef[rf] : (byCon[rf] != null ? byCon[rf] : null); }); }
+    if (refs.length) { const needCin7 = refs.filter(r => !_tplRefOverride(r, tpl0)); const dbrows = needCin7.length ? (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [needCin7])).rows : []; const byRef = {}, byCon = {}; dbrows.forEach(r => { const cc = String(r.cc || '').trim(); if (r.reference) byRef[r.reference] = cc; if (r.customer_order_no) byCon[r.customer_order_no] = cc; }); refs.forEach(rf => { const ov = _tplRefOverride(rf, tpl0); refCC[rf] = ov || ((byRef[rf] != null) ? byRef[rf] : (byCon[rf] != null ? byCon[rf] : null)); }); }
     const agg = _tplAggregateAccounts(orders, refCC);
     // non-order sheet totals
     let grids = [];
@@ -5653,7 +5668,12 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
     sheetSums.forEach(s => { if (s.ct === 'orders' || s.ct === 'skip') return; const t = s.sum.highlights && s.sum.highlights.total; if (t == null) return; push(NOD[s.ct] || s.sum.name, t, cacc[s.ct] || '', s.sum.currency, 'non-order'); });
     // Invoice-recap-only lines (Support / Storage / Returns / Packaging) not present on their own sheet.
     _tplInvoiceExtras(grids).forEach(x => push(x.desc, x.amount, cacc[x.costType] || '', cur, 'non-order'));
-    (agg.costCenters || []).forEach(cc => { const label = String(cc.costCenter).replace(/^COGS\s*-\s*/i, ''); const code = amap[label.toLowerCase()] || ''; push('Freight - Fulfilment - ' + label, cc.freight, code, null, 'cost-centre'); push('Fulfilment - Fulfilment - ' + label, cc.fulfilment, code, null, 'cost-centre'); });
+    (agg.costCenters || []).forEach(cc => {
+      let label, code, grp;
+      if (/^OTHER COSTS$/i.test(cc.costCenter)) { label = 'Other Costs (branch transfers)'; code = cacc['other'] || ''; grp = 'non-order'; }   // TRF* rule → the 'other' cost-type account
+      else { label = String(cc.costCenter).replace(/^COGS\s*-\s*/i, ''); code = amap[label.toLowerCase()] || ''; grp = 'cost-centre'; }
+      push('Freight - Fulfilment - ' + label, cc.freight, code, null, grp); push('Fulfilment - Fulfilment - ' + label, cc.fulfilment, code, null, grp);
+    });
     if (agg.unmapped && (agg.unmapped.freight || agg.unmapped.fulfilment)) { push('Freight - Fulfilment - UNMAPPED (assign account)', agg.unmapped.freight, '', null, 'unmapped'); push('Fulfilment - Fulfilment - UNMAPPED (assign account)', agg.unmapped.fulfilment, '', null, 'unmapped'); }
     // Preview mode: return the structured bill so the UI can show "what goes to Xero" without downloading.
     if (req.body && req.body.preview) return res.json({ ok: true, bill: { contact: meta.contact, invNo, date: dd, currency: cur, region: meta.region, taxType: taxCfg.type, total: Math.round(blines.reduce((s, l) => s + l.amount, 0) * 100) / 100, lines: blines } });

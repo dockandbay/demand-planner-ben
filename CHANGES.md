@@ -1,3 +1,11 @@
+## v26.546 — FBA ANY mode: carton-round the whole-carton part
+- ANY now shows the carton-rounded quantity for SKUs that fill whole cartons (e.g. TOWLB-CAB-LG-LTBLU-R UK shows 560, not 589) — Amazon ships in cartons. Sub-carton stragglers still send the raw amount. FULL/PARTIAL unchanged; buy plan unaffected (default mode FULL).
+
+## v26.545 — 3PL Invoicing: FBA/TRF standing rules + sweep exclusion + unmapped-ref transparency
+- Reference prefix rules (not Cin7 sales orders): FBA* → Amazon fulfilment for the region (EU→COGS - DE - Amazon, UK→COGS - UK - Amazon, US/AU likewise); TRF* → Other costs (branch transfers, the 'other' account). Assigned by rule in both map + Xero bill.
+- Clean-up sweep now EXCLUDES FBA*/TRF* refs (never counted as missing/unmapped — they would never resolve as sales orders) and reports how many were rule-excluded.
+- Map/sweep now list the first 50 genuinely-unmapped order refs + a rule-assignment note (transparency). Verified on EU May: the 4 previously-unmapped orders were the FBA refs → now COGS - DE - Amazon, 1655/1655 mapped.
+
 ## v26.544 — Payments Report: tolerate non-array API response (harden)
 - renderPaymentsReport now guards the payments-report fetch: if the endpoint returns a non-array (error/shape), it falls back to [] instead of throwing and crashing the page. Prevents the class of '(x||[]).forEach/filter is not a function' failure seen on an older live build.
 
