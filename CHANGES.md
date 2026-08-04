@@ -1,3 +1,9 @@
+## v26.538 — 3PL Invoicing: Xero-bill preview (2-col), region tax, invoice-recap lines, UI polish
+- 2-column analysis: LEFT = faithful "what goes to Xero" bill preview (same source as the CSV), RIGHT = parsed data analysis.
+- Region-aware tax on the Xero bill: EU/UK = 20% (VAT on Expenses) with blank amount (Xero computes); AU = GST on Expenses with amount supplied (=line/11, 10% inclusive); US = Tax Exempt. Matches the COGHLANS_BILL / BLADE_BILL examples.
+- Invoice-recap lines: pulls Support / Storage / Returns / Packaging from an Invoice summary sheet when they have no data sheet of their own (flexible; skips already-captured + date/junk cells). Coghlans now reconciles to 7,910.62 exactly.
+- Download button renamed 'Download CSV for Xero Bill Upload' (light blue). Fast custom tooltips (120ms) on the 3PL action buttons. Removed the dash from 3PL tab labels (UK ILG / US Geneva / EU iFulfilment / AU Coghlans).
+
 ## v26.537 — 3PL Invoicing: support AU Coghlans (generalised parser)
 - Parser now handles Coghlans format alongside iFulfilment: per-order columns detected from candidates (Reference/Customer Ref, Shipping Fee/Carrier Cost, Total Excl Shipping/Fulfilment Cost); sheet header = fullest row (multi-header sheets); Total ($) totals; AUD; branch 16288; skip Invoice/Layout/Settings summary sheets. Coghlans reconciles: 260 orders, freight 2,695.47, fulfilment 1,093.34, Goods In 2,488.79, Other 1,401.26. Same import/map/sweep/Xero-CSV flow.
 

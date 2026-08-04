@@ -5372,6 +5372,46 @@ function _tplGridSummary(name, grid) {
     highlights: { freight: (frCol || {}).sum ?? null, fulfilment: (fuCol || {}).sum ?? null, total: (totCol || {}).sum ?? null }
   };
 }
+// Some 3PLs (e.g. Coghlans) list small cost lines ONLY on a summary "Invoice" recap sheet — Support fee,
+// Storage, Returns, Packaging — with no data sheet of their own. Pull those out so they land on the Xero bill.
+// Flexible: fires only on an "Invoice" recap sheet, finds the Description/Total table by header, and skips any
+// line already captured from its own sheet (Goods In, Order Processing/Fulfilment/Freight, Other Requests) or
+// aggregate/total rows. Anything left becomes its own line, classified to a cost type for its account code.
+function _tplInvoiceExtras(grids) {
+  const out = [];
+  // Lines already summed elsewhere, or that aren't cost lines (address/payment/total/tax rows).
+  const CAPTURED = /goods\s*in|order processing|fulfil|postage|freight|other request|other credit|discount|surcharge|number of|payment|remit|account|\bbsb\b|swift|\babn\b|period|^\s*date|inv\s*#|dock\s*&|^to\b|^total|amount|\bgst\b|\bvat\b/i;
+  grids.forEach(g => {
+    if (!/invoice/i.test(g.name)) return;                 // only an "Invoice" recap sheet
+    const grid = g.grid || [];
+    let hr = -1, dCol = -1, tCol = -1;                    // header row = has both a "Description" and a "Total" cell
+    for (let i = 0; i < Math.min(20, grid.length); i++) {
+      const r = grid[i] || [];
+      const di = r.findIndex(c => /description/i.test(String(c == null ? '' : c)));
+      const ti = r.findIndex(c => /^total$/i.test(String(c == null ? '' : c).trim()));
+      if (di >= 0 && ti >= 0) { hr = i; dCol = di; tCol = ti; break; }
+    }
+    if (hr < 0) return;
+    for (let i = hr + 1; i < grid.length; i++) {
+      const r = grid[i] || [];
+      let desc = String(r[dCol] == null ? '' : r[dCol]).trim();
+      // indented sub-items put the label in a column to the right of Description — pick the first text cell.
+      if (!desc) { for (let j = dCol + 1; j < tCol; j++) { const v = String(r[j] == null ? '' : r[j]).trim(); if (v && isNaN(Number(v))) { desc = v; break; } } }
+      if (!desc) continue;
+      if (CAPTURED.test(desc) || /\bcpi\b|increase|due\b|terms/i.test(desc)) continue;
+      const amt = _tplNum(r[tCol]);
+      // skip blank / zero (e.g. storage with no pallets) and non-money cells — a date in the Total column
+      // parses to a huge epoch number, so anything implausibly large is junk, not an invoice line.
+      if (amt == null || Math.abs(amt) < 0.005 || Math.abs(amt) > 1e7) continue;
+      let ct = 'other';
+      if (/storage/i.test(desc)) ct = 'storage';
+      else if (/return/i.test(desc)) ct = 'returns';
+      const clean = desc.replace(/\s*\(see attached\)/i, '').replace(/\s*\(weekly\)/i, '').trim();
+      out.push({ desc: clean, amount: amt, costType: ct });
+    }
+  });
+  return out;
+}
 app.post('/api/supply/tpl/parse/:id', async (req, res) => {
   try {
     const row = (await pool.query(`SELECT filename, content_type, content FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
@@ -5602,17 +5642,25 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
     const dd = endISO.slice(8, 10) + '/' + endISO.slice(5, 7) + '/' + endISO.slice(0, 4);
     const invNo = 'FULFILLMENT-' + meta.region + '-' + endISO;
     const ordSheet = sheetSums.find(s => s.ct === 'orders'); const cur = (ordSheet && ordSheet.sum.currency) || meta.currency || 'EUR';
-    const tax = '20% (VAT on Expenses)';
+    // Tax is region-specific: EU/UK book 20% VAT (Xero auto-computes the amount → left blank); AU books GST at
+    // 10% inclusive so the amount is supplied (= line/11); US is tax-exempt. Default = 20% VAT.
+    const TAX = { eu_ifulfilment: { type: '20% (VAT on Expenses)', div: null }, uk_ilg: { type: '20% (VAT on Expenses)', div: null }, us_geneva: { type: 'Tax Exempt', div: null }, au_coghlans: { type: 'GST on Expenses', div: 11 } };
+    const taxCfg = TAX[tpl0] || { type: '20% (VAT on Expenses)', div: null };
+    const money = n => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2);
+    const blines = [];   // structured bill lines — the single source for BOTH the CSV and the preview JSON
+    const push = (desc, amt, code, lineCur, group) => { const a = Number(amt) || 0; blines.push({ desc, amount: a, code: code || '', taxType: taxCfg.type, taxAmount: taxCfg.div ? (Math.round(a / taxCfg.div * 100) / 100) : null, currency: (lineCur || cur), group: group || '' }); };
+    const NOD = { inbound: 'Purchase Orders & Rework', returns: 'Returns', storage: 'Storage Fees', other: 'Other Fees (manual adjustment)' };
+    sheetSums.forEach(s => { if (s.ct === 'orders' || s.ct === 'skip') return; const t = s.sum.highlights && s.sum.highlights.total; if (t == null) return; push(NOD[s.ct] || s.sum.name, t, cacc[s.ct] || '', s.sum.currency, 'non-order'); });
+    // Invoice-recap-only lines (Support / Storage / Returns / Packaging) not present on their own sheet.
+    _tplInvoiceExtras(grids).forEach(x => push(x.desc, x.amount, cacc[x.costType] || '', cur, 'non-order'));
+    (agg.costCenters || []).forEach(cc => { const label = String(cc.costCenter).replace(/^COGS\s*-\s*/i, ''); const code = amap[label.toLowerCase()] || ''; push('Freight - Fulfilment - ' + label, cc.freight, code, null, 'cost-centre'); push('Fulfilment - Fulfilment - ' + label, cc.fulfilment, code, null, 'cost-centre'); });
+    if (agg.unmapped && (agg.unmapped.freight || agg.unmapped.fulfilment)) { push('Freight - Fulfilment - UNMAPPED (assign account)', agg.unmapped.freight, '', null, 'unmapped'); push('Fulfilment - Fulfilment - UNMAPPED (assign account)', agg.unmapped.fulfilment, '', null, 'unmapped'); }
+    // Preview mode: return the structured bill so the UI can show "what goes to Xero" without downloading.
+    if (req.body && req.body.preview) return res.json({ ok: true, bill: { contact: meta.contact, invNo, date: dd, currency: cur, region: meta.region, taxType: taxCfg.type, total: Math.round(blines.reduce((s, l) => s + l.amount, 0) * 100) / 100, lines: blines } });
     const HDR = '*ContactName,EmailAddress,POAddressLine1,POAddressLine2,POAddressLine3,POAddressLine4,POCity,PORegion,POPostalCode,POCountry,*InvoiceNumber,*InvoiceDate,*DueDate,Total,InventoryItemCode,Description,*Quantity,*UnitAmount,*AccountCode,*TaxType,TaxAmount,TrackingName1,TrackingOption1,TrackingName2,TrackingOption2,Currency,*OriginalAmount';
     const esc = x => { x = String(x == null ? '' : x); return /[",\n]/.test(x) ? ('"' + x.replace(/"/g, '""') + '"') : x; };
-    const money = n => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2);
-    const lines = [];
-    const push = (desc, amt, code, lineCur) => { lines.push([meta.contact, '', '', '', '', '', '', '', '', '', invNo, dd, dd, '', '', desc, '1', money(amt), code || '', tax, '', '', '', '', '', (lineCur || cur), money(amt)].map(esc).join(',')); };
-    const NOD = { inbound: 'Purchase Orders & Rework', returns: 'Returns', storage: 'Storage Fees', other: 'Other Fees (manual adjustment)' };
-    sheetSums.forEach(s => { if (s.ct === 'orders' || s.ct === 'skip') return; const t = s.sum.highlights && s.sum.highlights.total; if (t == null) return; push(NOD[s.ct] || s.sum.name, t, cacc[s.ct] || '', s.sum.currency); });
-    (agg.costCenters || []).forEach(cc => { const label = String(cc.costCenter).replace(/^COGS\s*-\s*/i, ''); const code = amap[label.toLowerCase()] || ''; push('Freight - Fulfilment - ' + label, cc.freight, code); push('Fulfilment - Fulfilment - ' + label, cc.fulfilment, code); });
-    if (agg.unmapped && (agg.unmapped.freight || agg.unmapped.fulfilment)) { push('Freight - Fulfilment - UNMAPPED (assign account)', agg.unmapped.freight, ''); push('Fulfilment - Fulfilment - UNMAPPED (assign account)', agg.unmapped.fulfilment, ''); }
-    const csv = HDR + '\n' + lines.join('\n');
+    const rows = blines.map(l => [meta.contact, '', '', '', '', '', '', '', '', '', invNo, dd, dd, '', '', l.desc, '1', money(l.amount), l.code, l.taxType, (l.taxAmount == null ? '' : money(l.taxAmount)), '', '', '', '', l.currency, money(l.amount)].map(esc).join(','));
+    const csv = HDR + '\n' + rows.join('\n');
     res.setHeader('Content-Type', 'text/csv;charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="xero-bill-' + meta.region + '-' + endISO + '.csv"');
     res.send(csv);

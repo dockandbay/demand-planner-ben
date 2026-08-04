@@ -9349,7 +9349,7 @@ function renderReportView(){
 // REPORTS ▸ 3PL Invoice — per-3PL (UK ILG / US Geneva / EU iFulfilment / AU Coghlans) monthly invoice files +
 // account config. Upload/list/delete invoice files for a chosen month; edit per-3PL storage/other cost accounts;
 // view the region×channel account map. Parse + Cin7 order matching land in a later phase.
-var TPL3=[['uk_ilg','UK — ILG'],['us_geneva','US — Geneva'],['eu_ifulfilment','EU — iFulfilment'],['au_coghlans','AU — Coghlans']];
+var TPL3=[['uk_ilg','UK ILG'],['us_geneva','US Geneva'],['eu_ifulfilment','EU iFulfilment'],['au_coghlans','AU Coghlans']];
 var TPL3_STATE={tpl:'eu_ifulfilment',period:'',mode:'invoices'};
 function render3plInvoice(body){
   function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
@@ -9370,6 +9370,30 @@ function render3plInvoice(body){
       if(um.orders>0){ html+='<div style="font-size:11px;color:#b45309;margin-top:8px">'+um.orders+' order(s) unmapped (freight '+fmt(um.freight)+' / fulfilment '+fmt(um.fulfilment)+') — their reference isn&rsquo;t in the imported Cin7 set, or the Cin7 order has no Cost Centre. <b>This is the gap vs the invoice freight total.</b> Run Import / Sweep up for the month, or set the Cost Centre in Cin7. The rows above are the unique list of cost centres.</div>'; }
       html+='</div>'; cont.innerHTML=html;
     }).catch(function(err){ cont.innerHTML='<div style="color:#dc2626;font-size:12px;padding:8px 0">Mapping failed: '+e(err.message||err)+'</div>'; }); }
+  // LEFT column: a faithful preview of the Xero bill (same source as the CSV — server preview:true), grouped
+  // into non-order costs, per-cost-centre freight/fulfilment, and any unmapped lines, with the tax column.
+  function renderXero(cont,id){ if(!cont)return; cont.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:8px 0">Building Xero bill preview…</div>';
+    fetch('/api/supply/tpl/xero-bill/'+id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({tpl:TPL3_STATE.tpl,period:TPL3_STATE.period,preview:true})}).then(function(r){return r.json();}).then(function(j){
+      if(!j||!j.ok){ cont.innerHTML='<div style="font-size:12px;color:#b45309;padding:8px 0">'+e((j&&j.error)||'Preview failed')+'</div>'; return; }
+      var bill=j.bill||{}, L=bill.lines||[], TD='padding:3px 10px 3px 0;text-align:left;vertical-align:top';
+      function grp(n){ return L.filter(function(l){return l.group===n;}); }
+      function row(l){ return '<tr'+(l.group==='unmapped'?' style="color:#b45309"':'')+'><td style="'+TD+'">'+e(l.desc)+'</td><td style="'+TD+';white-space:nowrap">'+(l.code?e(l.code):'<span style="color:#b45309">set acct</span>')+'</td><td style="'+TD+';text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums">'+fmt(l.amount)+'</td><td style="'+TD+';text-align:right;white-space:nowrap;color:#94a3b8">'+(l.taxAmount==null?'':fmt(l.taxAmount))+'</td></tr>'; }
+      function block(title,arr){ if(!arr.length)return ''; return '<tr style="background:#e0f2fe"><td colspan="4" style="padding:4px 10px 3px 0;font-weight:700;font-size:9px;text-transform:uppercase;color:#0369a1">'+e(title)+'</td></tr>'+arr.map(row).join(''); }
+      var html='<div style="border:1px solid #bae6fd;border-radius:8px;padding:12px 14px;background:#f0f9ff;text-align:left">'
+        +'<div style="font-weight:700;font-size:13px;margin-bottom:1px;color:#075985">Xero bill preview</div>'
+        +'<div style="font-size:11px;color:#0369a1;margin-bottom:8px">'+e(bill.contact||'')+' &middot; '+e(bill.invNo||'')+' &middot; '+e(bill.date||'')+' &middot; '+e(bill.currency||'')+' &middot; '+e(bill.taxType||'')+'</div>'
+        +'<table style="border-collapse:collapse;font-size:11px;width:100%"><thead><tr style="color:#64748b;text-transform:uppercase;font-size:9px"><th style="'+TD+'">Description</th><th style="'+TD+'">Account</th><th style="'+TD+';text-align:right">Amount</th><th style="'+TD+';text-align:right">Tax</th></tr></thead><tbody>'
+        +block('Non-order costs',grp('non-order'))+block('Freight &amp; fulfilment by cost centre',grp('cost-centre'))+block('Unmapped — assign account',grp('unmapped'))
+        +'</tbody><tfoot><tr style="border-top:2px solid #7dd3fc;font-weight:700"><td style="'+TD+'">Total</td><td></td><td style="'+TD+';text-align:right">'+fmt(bill.total)+'</td><td></td></tr></tfoot></table>'
+        +'<div style="font-size:10px;color:#0369a1;margin-top:8px">Exactly what the CSV upload will contain. Lines marked <b>set acct</b> need a code — map in Config / Accounts, or Import / Clean-up sweep the Cin7 orders.</div></div>';
+      cont.innerHTML=html;
+    }).catch(function(err){ cont.innerHTML='<div style="color:#dc2626;font-size:12px;padding:8px 0">Preview failed: '+e(err.message||err)+'</div>'; }); }
+  // Fast custom tooltips (native title waits ~500ms) — show any [data-tip] element after 120ms. Init once.
+  if(!window.__fastTip){ window.__fastTip=true; var _tip=null,_tt=null;
+    function _mk(){ if(_tip)return _tip; _tip=document.createElement('div'); _tip.style.cssText='position:fixed;z-index:99999;background:#0f172a;color:#fff;font-size:11px;line-height:1.35;padding:5px 8px;border-radius:5px;max-width:260px;pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.25);opacity:0;transition:opacity .1s'; document.body.appendChild(_tip); return _tip; }
+    document.addEventListener('mouseover',function(ev){ var el=ev.target&&ev.target.closest&&ev.target.closest('[data-tip]'); if(!el)return; if(_tt)clearTimeout(_tt); _tt=setTimeout(function(){ var t=_mk(); t.textContent=el.getAttribute('data-tip'); t.style.opacity='0'; t.style.left='-9999px'; t.style.top='0px'; var r=el.getBoundingClientRect(); var top=r.bottom+6; if(top+t.offsetHeight>window.innerHeight-8)top=r.top-t.offsetHeight-6; t.style.left=Math.max(8,Math.min(window.innerWidth-t.offsetWidth-8,r.left))+'px'; t.style.top=top+'px'; t.style.opacity='1'; },120); });
+    document.addEventListener('mouseout',function(ev){ var el=ev.target&&ev.target.closest&&ev.target.closest('[data-tip]'); if(!el)return; if(_tt){clearTimeout(_tt);_tt=null;} if(_tip)_tip.style.opacity='0'; });
+    document.addEventListener('mousedown',function(){ if(_tt){clearTimeout(_tt);_tt=null;} if(_tip)_tip.style.opacity='0'; }); }
   function tplCacheKey(id){ return 'tplan_'+id; }
   function renderParse(cont,id){ if(!cont)return; cont.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:8px">Parsing…</div>';
     Promise.all([fetch('/api/supply/tpl/parse/'+id,{method:'POST'}).then(function(r){return r.json();}),fetch('/api/supply/tpl/data?tpl='+encodeURIComponent(TPL3_STATE.tpl)+'&period=').then(function(r){return r.json();}).catch(function(){return {};})]).then(function(_res){ var d=_res[0], _cfg=_res[1]||{}; if(!d||!d.ok)throw new Error((d&&d.error)||'parse failed');
@@ -9405,8 +9429,12 @@ function render3plInvoice(body){
       html+='<div style="border-top:2px solid #cbd5e1;margin-top:12px;padding-top:8px;font-size:12px">'
         +'Grand total (sum of each sheet&rsquo;s Total column, by currency): <b>'+_grandStr+'</b>'
         +'<div style="margin-top:6px">Invoice total (from PDF)'+(_reconCur?(' — '+e(_reconCur)):'')+': <input id="tpl-recon" type="text" placeholder="0.00" style="width:130px;text-align:right;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px"> <span id="tpl-recon-var" class="mut"></span></div></div></div>';
-      html+='</div>';
-      cont.innerHTML=html; cont.dataset.aid=String(id);
+      // 2-column: LEFT = what will go to Xero (bill preview), RIGHT = the parsed data analysis.
+      var wrap='<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;margin-top:12px">'
+        +'<div id="tpl-xero" style="flex:1 1 380px;min-width:330px"></div>'
+        +'<div id="tpl-analysis" style="flex:1 1 380px;min-width:330px">'+html+'</div></div>';
+      cont.innerHTML=wrap; cont.dataset.aid=String(id);
+      var _xo=cont.querySelector('#tpl-xero'); if(_xo)renderXero(_xo, id);          // left: Xero bill preview
       var _mo=document.getElementById('tpl-map-out'); if(_mo)renderMap(_mo, id);   // auto-map on analyse — only exceptions + sweep to manage
       var ri=cont.querySelector('#tpl-recon'), rv=cont.querySelector('#tpl-recon-var');
       if(ri)ri.oninput=function(){ var v=parseFloat(String(ri.value).replace(/[^0-9.\-]/g,'')); if(!isFinite(v)){rv.textContent='';return;} var diff=v-_reconBase; rv.style.color=Math.abs(diff)<0.01?'#166534':'#b91c1c'; rv.textContent=(Math.abs(diff)<0.01?'matches':('variance '+(diff>=0?'+':'')+fmt(diff))); };
@@ -9448,10 +9476,10 @@ function render3plInvoice(body){
         +'<span style="font-size:11px;color:#94a3b8;margin-left:8px">or drag &amp; drop a file anywhere in this box</span>'
         +'<span id="tpl-upmsg" style="font-size:12px;margin-left:10px"></span></div>'
       +'<div style="margin-bottom:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
-        +'<button id="tpl-cin7imp" title="Import new (not-yet-imported) sales orders for this month by invoice date" style="border:1px solid #0f766e;background:#f0fdfa;color:#0f766e;border-radius:6px;padding:5px 13px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">⟳ Import Cin7 orders</button>'
-        +'<button id="tpl-cin7sweep" title="Clean-up: fetch this invoice&rsquo;s still-unmapped order references directly from Cin7 (any date / branch)" style="border:1px solid #7c3aed;background:#fff;color:#7c3aed;border-radius:6px;padding:5px 11px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">🧹 Clean-up sweep</button>'
+        +'<button id="tpl-cin7imp" data-tip="Import new (not-yet-imported) sales orders for this month, by invoice date" style="border:1px solid #0f766e;background:#f0fdfa;color:#0f766e;border-radius:6px;padding:5px 13px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">⟳ Import Cin7 orders</button>'
+        +'<button id="tpl-cin7sweep" data-tip="Clean-up: fetch this invoice&rsquo;s still-unmapped order references directly from Cin7 (any date / branch)" style="border:1px solid #7c3aed;background:#fff;color:#7c3aed;border-radius:6px;padding:5px 11px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">🧹 Clean-up sweep</button>'
         +'<span style="width:1px;height:16px;background:#e0e0e0;margin:0 2px"></span>'
-        +'<button id="tpl-csv" title="Export the mapped account summary as CSV (Phase 3)" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:6px;padding:5px 13px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">⬇ Download CSV</button>'
+        +'<button id="tpl-csv" data-tip="Build a Xero bill-import CSV (mapped accounts + tax) ready to upload into Xero" style="border:1px solid #7dd3fc;background:#e0f2fe;color:#075985;border-radius:6px;padding:5px 13px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit">⬇ Download CSV for Xero Bill Upload</button>'
         +'<a id="tpl-clear" title="Clear the current analysis" style="font-size:11px;color:#dc2626;cursor:pointer;font-weight:600">Clear</a>'
         +'<span id="tpl-cin7msg" style="font-size:11px;color:#94a3b8"></span>'
       +'</div><div id="tpl-cin7sum" style="font-size:11px;color:#64748b;margin-bottom:10px"></div><div id="tpl-map-out"></div>'
