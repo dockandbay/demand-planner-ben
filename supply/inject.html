@@ -2196,6 +2196,7 @@
     function actNoPay(r){ return poActions(r).some(function(a){ return PO_ACT_TAB[a]!=='pay'; }); }   // has ≥1 open action that isn't a payment (pay-tab) action
     function excMatch(k,r){ if(k==='has_crossdock')return hasCrossdock(r); if(k==='shipped_no_invoice')return shippedNoInvoice(r); if(k==='act_no_pay')return actNoPay(r); if(k==='timeline_unread')return Number(r.unread_notes)>0; var fn=PO_ACTCOND[k]; return fn?fn(r):true; }
     // unified "has any open action item" — same as the red badge next to each PO ref (poExceptions)
+    function _hideCount(){ return (!_poShowSnoozed?1:0)+(_hidePayDue?1:0)+(_hideTimelineUnread?1:0); }   // active Hide toggles → dropdown badge
     function hasActions(r){ return poActions(r).length>0; }   // snooze-aware, mirrors the red PO-ref badge
     function actItemsCount(){ return rows.reduce(function(a,r){ return a+poActions(r).length; },0); }   // total ACTION ITEMS across all POs (snooze-aware) — so closing one item decrements the badge (Ben). Was POs-with-actions.
     // ERP misalignment: PO has lines but none mirrored from ERP (never pushed → "upload entire PO"),
@@ -2249,10 +2250,13 @@
         +'<option value="act_no_pay"'+(state.act.act_no_pay?' selected':'')+'>All actions except payment due ('+rows.filter(actNoPay).length+')</option>'
         +'<option value="timeline_unread"'+(state.act.timeline_unread?' selected':'')+'>Timeline unread ('+rows.filter(function(r){return Number(r.unread_notes)>0;}).length+')</option>'
       +'</select></span>'
-      +'<span class="po-filt-item" style="white-space:nowrap"><span class="pill-lbl">Hide</span>'
-        +'<label style="font-size:12px;cursor:pointer;margin:0 5px" title="hide snoozed action items from the badges + ACTION ITEMS count"><input type="checkbox" id="po-hide-snz"'+(!_poShowSnoozed?' checked':'')+' style="vertical-align:middle;margin-right:3px">snoozed</label>'
-        +'<label style="font-size:12px;cursor:pointer;margin:0 5px" title="hide payment-due actions (overdue / unpaid / invalid) from the badges + ACTION ITEMS count"><input type="checkbox" id="po-hide-pay"'+(_hidePayDue?' checked':'')+' style="vertical-align:middle;margin-right:3px">payment due</label>'
-        +'<label style="font-size:12px;cursor:pointer;margin:0 5px" title="hide unread-supplier-note action items from the badges + ACTION ITEMS count"><input type="checkbox" id="po-hide-tl"'+(_hideTimelineUnread?' checked':'')+' style="vertical-align:middle;margin-right:3px">timeline unread</label></span>'
+      +'<span class="po-filt-item" style="position:relative;white-space:nowrap">'
+        +'<button type="button" id="po-hide-btn" class="flt" style="cursor:pointer;text-align:left;width:auto" title="hide categories from the ACTION ITEMS count, red badges + filter">Hide'+(_hideCount()?' ('+_hideCount()+')':'')+' ▾</button>'
+        +'<div id="po-hide-menu" style="display:none;position:absolute;z-index:40;left:0;top:26px;min-width:180px;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,.18);padding:6px 8px">'
+          +'<label style="display:block;font-size:12px;cursor:pointer;padding:3px 2px" title="hide snoozed action items"><input type="checkbox" id="po-hide-snz"'+(!_poShowSnoozed?' checked':'')+' style="margin-right:6px;vertical-align:middle">snoozed</label>'
+          +'<label style="display:block;font-size:12px;cursor:pointer;padding:3px 2px" title="hide payment-due actions (overdue / unpaid / invalid)"><input type="checkbox" id="po-hide-pay"'+(_hidePayDue?' checked':'')+' style="margin-right:6px;vertical-align:middle">payment due</label>'
+          +'<label style="display:block;font-size:12px;cursor:pointer;padding:3px 2px" title="hide unread-supplier-note action items"><input type="checkbox" id="po-hide-tl"'+(_hideTimelineUnread?' checked':'')+' style="margin-right:6px;vertical-align:middle">timeline unread</label>'
+        +'</div></span>'
       +'<span class="po-filt-item"><span class="pill-lbl">Group</span><select class="flt" id="po-grp" style="width:auto;cursor:pointer">'+GRP.map(function(g){return '<option value="'+g[0]+'"'+(g[0]===state.grp?' selected':'')+'>'+esc(g[1])+'</option>';}).join('')+'</select></span></div>'
       +'<div id="sup-grid"></div>';
     bindPoSubNav();
@@ -2412,9 +2416,15 @@
         c.querySelectorAll('#po-prog .pill').forEach(function(p){ p.classList.toggle('active', !!state.f[p.dataset.f]); }); }
       if(this.value){ selHi(this,true); } else { this.style.background='#fef2f2'; this.style.color='#991b1b'; this.style.borderColor='#fca5a5'; this.style.fontWeight='700'; } view(); };
     var pgrp=document.getElementById('po-grp'); if(pgrp)pgrp.onchange=function(){state.grp=this.value;view();};
-    var ph1=document.getElementById('po-hide-snz'); if(ph1)ph1.onchange=function(){ _poShowSnoozed=!this.checked; view(); };
-    var ph2=document.getElementById('po-hide-pay'); if(ph2)ph2.onchange=function(){ _hidePayDue=this.checked; view(); };
-    var ph3=document.getElementById('po-hide-tl'); if(ph3)ph3.onchange=function(){ _hideTimelineUnread=this.checked; view(); };
+    var hBtn=document.getElementById('po-hide-btn'), hMenu=document.getElementById('po-hide-menu');
+    if(hBtn&&hMenu){
+      hBtn.onclick=function(e){ e.stopPropagation(); hMenu.style.display=(hMenu.style.display==='none'?'block':'none'); };
+      document.addEventListener('click',function(e){ if(hMenu.style.display!=='none' && !hMenu.contains(e.target) && e.target!==hBtn) hMenu.style.display='none'; });
+      function syncHide(){ var n=_hideCount(); hBtn.textContent='Hide'+(n?' ('+n+')':'')+' ▾'; hBtn.style.background=n?'#0f172a':''; hBtn.style.color=n?'#fff':''; hBtn.style.borderColor=n?'#0f172a':''; hBtn.style.fontWeight=n?'700':''; }
+      var ph1=document.getElementById('po-hide-snz'); if(ph1)ph1.onchange=function(){ _poShowSnoozed=!this.checked; syncHide(); view(); };
+      var ph2=document.getElementById('po-hide-pay'); if(ph2)ph2.onchange=function(){ _hidePayDue=this.checked; syncHide(); view(); };
+      var ph3=document.getElementById('po-hide-tl'); if(ph3)ph3.onchange=function(){ _hideTimelineUnread=this.checked; syncHide(); view(); };
+    }
     try{ window.__poView=view; }catch(e){}   // so the module-level badge popover can re-render the grid after a snooze
     c.querySelectorAll('#po-ctry .pill').forEach(function(p){p.onclick=function(){var k=p.dataset.c;state.ctry[k]=!state.ctry[k];p.classList.toggle('active',state.ctry[k]);view();};});
     var psup=document.getElementById('po-sup'); if(psup)psup.onchange=function(){state.sup=this.value;selHi(this,!!this.value);view();};

@@ -1,3 +1,6 @@
+## v26.610.0 — PO grid: Hide is now a multi-select dropdown
+- The three Hide toggles (snoozed / payment due / timeline unread) moved from inline checkboxes into a "Hide (N) ▾" dropdown — button shows the active count, opens a checkbox menu, closes on outside-click. Same effect on the ACTION ITEMS count / red badges / filter.
+
 ## v26.609.0 — PO grid: multi-select Hide (snoozed / payment due / timeline unread) + "Timeline unread" exceptions filter
 - The single "show snoozed" checkbox is now a **Hide** multi-select: **snoozed · payment due · timeline unread** (checkboxes). Each removes that category from the ACTION ITEMS pill count, the per-PO red badge, and the ACTION ITEMS filter. "Hide snoozed" is on by default (= previous behaviour).
 - UNIFIED action model: unread supplier notes now count as an ACTION ITEM (`timeline_unread`, tab = Timeline), so the ACTION ITEMS pill / red badge / popover all agree on one number (was: badge = broad notifications, pill = narrower actions). The per-PO red badge now = the ACTION ITEMS set.
