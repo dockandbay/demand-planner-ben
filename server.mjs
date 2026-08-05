@@ -2476,7 +2476,11 @@ app.get('/api/supply/:section', async (req, res) => {
         // batches carry the data a barcode label can be stamped with (batch no + date + release window)
         const batches = await q(`SELECT batch, to_char(batch_date,'YYYY-MM-DD') batch_date,
           coalesce(first_release_window,'') first_release_window FROM planner.batches ORDER BY batch`).catch(() => []);
-        return res.json({ rows, batches });
+        // supplier NAME → 2-letter code map, so a multi-supplier SKU's barcodes can be foldered + filename-suffixed per supplier
+        const codes = {};
+        (await q(`SELECT name, coalesce(code,'') code FROM planner.suppliers WHERE coalesce(code,'')<>''`).catch(() => []))
+          .forEach(s => { codes[String(s.name || '').toLowerCase().trim()] = s.code; });
+        return res.json({ rows, batches, codes });
       }
       case 'payments': {
         // Engine model: a "run" = all txns sharing a date (grouped client-side). Run-level

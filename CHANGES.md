@@ -1,3 +1,6 @@
+## v26.597.0 — Barcodes: multi-supplier SKUs download per supplier with the code in the filename
+- SUPPLY ▸ PURCHASE ORDERS ▸ Barcodes: a SKU sourced from >1 supplier now produces a barcode PER supplier, each labelled with THAT supplier's short code, and the filename ends with the code — e.g. TOWLB-CAB-MD-AMALG-LX and TOWLB-CAB-MD-AMALG-XR (still foldered by supplier). Single-supplier SKUs are unchanged (no suffix, main-supplier code as before).
+- Server: /api/supply/barcodes now returns a supplier NAME→short-code map (`codes`). Client (bcDownloadAll) renders once per supplier, stamps that supplier's code on the label, and appends `-<CODE>` to the filename when a SKU spans >1 supplier. Verified against live: TOWLB-CAB-MD-AMALG → Lixin/XR Textile → LX/XR.
 ## v26.596.0 — Barcode size circle: guard against XL/XS size_short PIM typos
 - The barcode "size circle" prints products.size_short verbatim. PICNIC-CAB-XL-AMALG (+ TOWLB-CAB-XL-AMALG-R) had size_short='L' in the PIM despite size_long='Extra Large', so the circle showed "L" for an XL product.
 - lblCircle now derives the size from the size NAME and, when the name clearly says XL/XS but size_short dropped the "extra" (L/S), trusts the name. Any other size_short value is still used verbatim; genuine L/S/M unaffected. 9/9 logic tests pass.
