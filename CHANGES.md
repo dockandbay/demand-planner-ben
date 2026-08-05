@@ -1,3 +1,6 @@
+## v26.573.0 — PRODUCT Size tab: component rows white
+- Component rows (Product/Packaging/Labels/Polybags/Other) now have an explicit white background; dropped the green/red approval FILL on the label cell so rows read uniformly white against the grey size-header band. Approval still signalled by the ✓/✗/● icon + coloured label text + the Status dropdown colour.
+
 ## v26.572.0 — PRODUCT Size & variants: fix clipped component labels + header-style size rows
 - Size/component table column widths were set via th styles under table-layout:fixed and not reliably honoured, clipping the Component labels (Labels/wraps, ✓ Product, ● Packaging). Switched to an authoritative <colgroup> (Component col = 230px) so labels always fit.
 - Each SIZE row is now a darker grey band (background #e2e8f0, thicker top border) so it reads as a little sub-header above its component rows.

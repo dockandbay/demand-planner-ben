@@ -10080,8 +10080,8 @@
       if(req&&appr==='approved'){ _lblIcon='<span style="font-size:15px;font-weight:900;color:#16a34a;margin-right:5px">✓</span>'; _lblBg='background:#dcfce7;'; _lblFg='#166534'; }
       else if(req&&appr==='rejected'){ _lblIcon='<span style="font-size:15px;font-weight:900;color:#dc2626;margin-right:5px">✗</span>'; _lblBg='background:#fee2e2;'; _lblFg='#991b1b'; }
       else if(req){ _lblIcon='<span style="font-size:12px;color:#f59e0b;margin-right:5px" title="pending approval">●</span>'; }
-      return '<tr class="pm-comprow" style="'+(req?'':'opacity:.6')+'">'
-        +'<td style="padding:4px 8px 4px 16px;font-size:12px;font-weight:700;color:'+_lblFg+';white-space:nowrap;'+_lblBg+'">'+_lblIcon+COMP_LBL[dim]+'</td>'
+      return '<tr class="pm-comprow" style="background:#fff;'+(req?'':'opacity:.6')+'">'
+        +'<td style="padding:4px 8px 4px 16px;font-size:12px;font-weight:700;color:'+_lblFg+';white-space:nowrap">'+_lblIcon+COMP_LBL[dim]+'</td>'
         +'<td style="padding:2px 8px 2px 28px"><input class="fci pm-comp-desc" data-id="'+s.id+'" data-dim="'+dim+'" value="'+esc(sd.description||'')+'" placeholder="description…" style="width:100%;font-size:11px;box-sizing:border-box"></td>'
         +'<td style="padding:2px 8px;text-align:left;white-space:nowrap">'+reqCell+'</td>'
         +'<td style="padding:2px 8px;text-align:left">'+(req?apprCell:'<span class="mut tiny">—</span>')+'</td>'
