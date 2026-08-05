@@ -1,3 +1,7 @@
+## v26.583.0 — UK ILG 3PL: DI-invoice allocation + missing-file highlighting
+- ILG DI invoice PDFs parsed (_tplIlgDiItems, handles ILG's wrapped multi-line charge rows) → charge-code→account map (GOODS-IN/MANAGEMENT/REWORK/Packaging→Other Fees; STORAGE-WK*→Storage Fees; PERSONALISATION/LABOUR/RETURN/TICKETING/FUSION→Shopify fulfilment; customs/duty→Other Fees; delivery→channel Freight; Order Charge→channel Fulfilment). Per-line VAT (20%, amount=total/6) vs No VAT. tpl/map + xero-bill branch for uk_ilg (Cin7-independent — DIs carry channel+codes). Verified vs the 4 June DIs: reconciles to £25,551.90; Storage £11,600.28 matches ILG_BILL exactly.
+- Missing-file detection surfaced in the UI: amber banner on the Map result lists what's absent (shipping-detail invoice_00 xlsx = the big Ecom/Shopify freight; channels with no freight; unreadable old .xls files). So a partial file set is processed AND the gaps are flagged.
+
 ## v26.582.0 — US Geneva Xero bill CSV matches Ben's format
 - Xero-bill export branches for tpl=us_geneva: uses _tplGenevaAllocate → separate Freight + Fulfilment lines per cost centre (alphabetical), then overhead accounts (Storage 309 / Other fees 303.26), then a Manual Other Fees plug = unmapped-freight residual. Account codes 303.21/22/24/25/27 + 309. TaxType Zero Rated Expenses; ContactName Geneva; InvoiceNumber FULFILLMENT-US-<period-end>; USD. Header ContactName no longer has a leading asterisk (matches Ben's file; Xero ignores it either way). Row order + values reproduce Ben's GENEVA_BILL.csv exactly.
 

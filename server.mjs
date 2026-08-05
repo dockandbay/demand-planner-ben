@@ -5626,12 +5626,75 @@ async function _tplGenevaAllocate(period) {
   const allocated = costCenters.reduce((s, c) => s + c.total, 0) + unmappedFreight;
   return { ok: true, geneva: true, costCenters, unmapped: { orders: unmappedRefs.length, freight: Math.round(unmappedFreight * 100) / 100, fulfilment: 0, total: Math.round(unmappedFreight * 100) / 100, refs: unmappedRefs }, totals: { orders: refs.length, matched: refs.length - unmappedRefs.length, freight: 0, fulfilment: 0 }, invoiceTotal: Math.round(items.reduce((s, i) => s + i.amount, 0) * 100) / 100, allocated: Math.round(allocated * 100) / 100, faireSharePct: Math.round(faireShare * 1000) / 10 };
 }
+// ── UK ILG accounting. Charge-code → Xero account (from Ben's ILG.csv mapping); channel delivery/order charges →
+// the DI's channel Freight/Fulfilment; VAT split by whether the line carries 20% VAT. Cin7-independent — the DI
+// invoices already carry the channel + charge codes. FREIGHT DETAIL (the big Ecom/Shopify shipping) comes from a
+// separate "invoice_00" per-order spreadsheet that's usually supplied on top of the DI summary invoices.
+const ILG_CODE = { 'Other Fees': '303.33', 'Storage Fees': '308.00', 'Fulfilment - UK - Amazon': '1000.80', 'Fulfilment - UK - Co-Brand/Custom': '303.37', 'Fulfilment - UK - Dropship': '303.32', 'Fulfilment - UK - Faire': '303.31', 'Fulfilment - UK - Marketplace': '303.38', 'Fulfilment - UK - Shopify': '303.35', 'Fulfilment - UK - Wholesale': '303.34', 'Fulfilment - EU - Wholesale (excl. DE, FR, Dist)': '1000.76' };
+const ILG_FEEMAP = { 'GOODS-IN': 'Other Fees', 'MANAGEMENT-FEE': 'Other Fees', 'MANAGEMENT FEE': 'Other Fees', 'REWORK': 'Other Fees', 'PACKAGING': 'Other Fees', 'PERSONALISATION FEE': 'Fulfilment - UK - Shopify', 'PERSONALISATION-FEE': 'Fulfilment - UK - Shopify', 'PERSONALISATION': 'Fulfilment - UK - Shopify', 'RETURN-CHARGES': 'Fulfilment - UK - Shopify', 'LABOUR-CHARGE': 'Fulfilment - UK - Shopify', 'TICKETING': 'Fulfilment - UK - Shopify', 'FUSION INTEGRATION': 'Fulfilment - UK - Shopify' };
+const ILG_CHAN = { WHOLESALE: 'Wholesale', FBA: 'Amazon', AMAZON: 'Amazon', ECOM: 'Shopify', RETAIL: 'Shopify' };
+async function _tplIlgDiItems(buf) {
+  const { PDFParse } = await import('pdf-parse');
+  const t = (await new PDFParse({ data: new Uint8Array(buf) }).getText()).text || '';
+  const lines = t.split(/\n/).map(l => l.trim()).filter(Boolean);
+  const num = s => parseFloat(String(s).replace(/[,£\s]/g, '')) || 0;
+  const diRef = (t.match(/DI\d{7}/) || [])[0] || '', siRef = (t.match(/SI\d{7}/) || [])[0] || '';
+  const chan = (t.match(/Dock & Bay ([A-Za-z]+)/) || [])[1] || '';
+  const items = []; let pending = '';   // ILG wraps long descriptions onto extra lines; amounts can land on their own line
+  const AMT = '(-?[\\d,]+\\.\\d{2})';
+  for (const l of lines) {
+    const only3 = new RegExp('^' + AMT + '\\s+' + AMT + '\\s+' + AMT + '$').exec(l);
+    if (only3) { const label = (pending || '').trim(); pending = ''; if (label && !/^total$/i.test(label)) items.push({ label, price: num(only3[1]), vat: num(only3[2]), total: num(only3[3]) }); continue; }
+    const inline = new RegExp('^(.+?)\\s+' + AMT + '\\s+' + AMT + '\\s+' + AMT + '$').exec(l);
+    if (inline) { const lab = ((pending ? pending + ' ' : '') + inline[1]).trim(); pending = ''; if (!/^total$/i.test(inline[1].trim())) items.push({ label: lab, price: num(inline[2]), vat: num(inline[3]), total: num(inline[4]) }); continue; }
+    if (/charge code|international logistics|invoice to|all figures|terms|www\.|tel:|email|registered|payments|bank|sort code|standard trad|page \d|invoice no|invoice date|other reference|account code|sales invoice/i.test(l)) { pending = ''; continue; }   // structural / footer lines reset the pending label
+    pending = (pending ? pending + ' ' : '') + l;
+  }
+  return { diRef, siRef, channel: chan, items };
+}
+// Classify a DI charge line → { account, kind:'freight'|'fulfilment'|'overhead' }.
+function _ilgClassify(label, channel) {
+  const U = label.toUpperCase();
+  for (const code of Object.keys(ILG_FEEMAP)) { if (U.startsWith(code)) return { account: ILG_FEEMAP[code], kind: /Storage|Other Fees/.test(ILG_FEEMAP[code]) ? 'overhead' : 'fulfilment' }; }
+  if (/^STORAGE-WK/i.test(label)) return { account: 'Storage Fees', kind: 'overhead' };
+  if (/brokerage|customs admin|deferment|export duty|^duty/i.test(label)) return { account: 'Other Fees', kind: 'overhead' };   // customs/duty
+  const acc = 'Fulfilment - UK - ' + (ILG_CHAN[String(channel).toUpperCase()] || channel || 'Wholesale');
+  if (/order charge/i.test(label)) return { account: acc, kind: 'fulfilment' };   // pick/pack per-order
+  return { account: acc, kind: 'freight' };   // delivery / shipping charge
+}
+async function _tplIlgAllocate(period) {
+  const files = (await pool.query(`SELECT filename, content_type, content FROM planner.tpl_invoice_files WHERE tpl='uk_ilg' AND period=$1 ORDER BY uploaded_at DESC`, [period])).rows;
+  const pdfs = files.filter(f => /\.pdf$/i.test(f.filename || '') || /pdf/i.test(f.content_type || ''));
+  const hasShipDetail = files.some(f => /invoice_0|shipping/i.test(f.filename || '') && /\.xlsx?$/i.test(f.filename || ''));
+  if (!pdfs.length) return { ok: false, error: 'Upload the ILG DI invoice PDFs for this period first.' };
+  const bucket = {}; const key = (a, k, v) => a + '|' + k + '|' + (v ? 'V' : 'N');
+  const add = (a, k, v, amt, tax) => { const kk = key(a, k, v); if (!bucket[kk]) bucket[kk] = { account: a, kind: k, vat: v, amount: 0, tax: 0 }; bucket[kk].amount += amt; bucket[kk].tax += tax; };
+  const seen = [], channels = new Set();
+  for (const f of pdfs) { let di; try { di = await _tplIlgDiItems(f.content); } catch (e) { continue; } if (!di.items.length) continue;
+    seen.push({ di: di.diRef, si: di.siRef, channel: di.channel, total: Math.round(di.items.reduce((s, i) => s + i.total, 0) * 100) / 100 });
+    if (di.channel) channels.add(ILG_CHAN[di.channel.toUpperCase()] || di.channel);
+    di.items.forEach(it => { const c = _ilgClassify(it.label, di.channel); add(c.account, c.kind, it.vat > 0.005, it.total, it.vat); }); }
+  const lines = Object.values(bucket).filter(b => Math.abs(b.amount) > 0.005).map(b => ({ ...b, amount: Math.round(b.amount * 100) / 100, tax: Math.round(b.tax * 100) / 100, code: ILG_CODE[b.account] || '' }));
+  const total = Math.round(lines.reduce((s, l) => s + l.amount, 0) * 100) / 100;
+  // Missing-file detection: the big Ecom/Shopify/Marketplace freight comes from the shipping-detail file; flag its absence.
+  const missing = [];
+  if (!hasShipDetail) missing.push('Shipping-detail spreadsheet (invoice_00, .xlsx) — the per-order Ecom/Shopify/Marketplace freight (usually the largest part of the bill). Not uploaded.');
+  const covered = new Set(lines.map(l => l.account));
+  ['Fulfilment - UK - Shopify', 'Fulfilment - UK - Marketplace'].forEach(a => { const hasFreight = Object.values(bucket).some(b => b.account === a && b.kind === 'freight'); if (!hasFreight) missing.push('No freight for ' + a.replace('Fulfilment - UK - ', 'UK ') + ' — its DI invoice / shipping detail appears to be missing.'); });
+  const xlsUnread = files.filter(f => /\.xls$/i.test(f.filename || '')).map(f => f.filename);
+  if (xlsUnread.length) missing.push('Old-format .xls file(s) can\'t be read — re-export as .xlsx: ' + xlsUnread.join(', '));
+  const ccAgg = {};   // aggregate the per-fee lines to a per-account cost-centre view (so the Map table renders)
+  lines.forEach(l => { if (!ccAgg[l.account]) ccAgg[l.account] = { costCenter: l.account, orders: 0, freight: 0, fulfilment: 0 }; if (l.kind === 'freight') ccAgg[l.account].freight += l.amount; else ccAgg[l.account].fulfilment += l.amount; });
+  const costCenters = Object.values(ccAgg).map(c => ({ ...c, freight: Math.round(c.freight * 100) / 100, fulfilment: Math.round(c.fulfilment * 100) / 100, total: Math.round((c.freight + c.fulfilment) * 100) / 100 })).sort((a, b) => b.total - a.total);
+  return { ok: true, ilg: true, costCenters, lines, total, totals: { orders: 0, matched: 0, freight: 0, fulfilment: 0 }, invoicesSeen: seen, channelsCovered: [...channels], missing };
+}
 app.post('/api/supply/tpl/map/:id', async (req, res) => {
   try {
     const row = (await pool.query(`SELECT filename, content_type, content, tpl, period FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
     if (!row) return res.status(404).json({ error: 'not found' });
     const tpl0 = row.tpl || null;
     if (tpl0 === 'us_geneva') { try { return res.json(await _tplGenevaAllocate(row.period)); } catch (e) { return res.json({ ok: false, error: 'Geneva allocation failed: ' + (e.message || e) }); } }
+    if (tpl0 === 'uk_ilg') { try { return res.json(await _tplIlgAllocate(row.period)); } catch (e) { return res.json({ ok: false, error: 'ILG allocation failed: ' + (e.message || e) }); } }
     const isCsv = /\.csv$/i.test(row.filename || '') || /csv/i.test(row.content_type || '');
     const orders = await _tplOrderRows(row.content, isCsv, tpl0, row.period);
     if (!orders.length) return res.json({ ok: false, error: 'No order rows with a Reference + Shipping Fee column were found to map.' });
@@ -5814,6 +5877,11 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
       ['Geneva USA - Storage Fees - Other', 'Geneva USA - Other fees'].forEach(n => { const c = gm[n]; if (!c) return; const amt = c.freight + c.fulfilment; if (Math.abs(amt) > 0.005) push(GENEVA_XERO[n].desc, amt, GENEVA_XERO[n].code, null, 'overhead'); });   // overhead accounts (single line each)
       (g.costCenters || []).forEach(c => { if (CCS.indexOf(c.costCenter) >= 0 || /Geneva USA/.test(c.costCenter)) return; const x = GENEVA_XERO[c.costCenter] || { code: '', desc: c.costCenter }; const amt = c.freight + c.fulfilment; if (Math.abs(amt) > 0.005) push(x.desc, amt, x.code, null, 'other'); });   // any unexpected account (safety)
       if (g.unmapped && g.unmapped.freight > 0.005) push('Manual Other Fees', g.unmapped.freight, '303.26', null, 'unmapped');   // freight of orders with no resolved CostCentre → manual plug (matches Ben's sheet)
+    } else if (tpl0 === 'uk_ilg') {
+      // ILG books by charge-code from the DI invoices (Cin7-independent); per-line VAT (20% amount = total/6) or No VAT.
+      const gi = await _tplIlgAllocate(period);
+      if (!gi.ok) return res.status(400).json({ error: gi.error || 'ILG allocation failed' });
+      (gi.lines || []).forEach(l => { const desc = l.kind === 'freight' ? ('Freight - ' + l.account) : (l.kind === 'fulfilment' ? ('Fulfilment - ' + l.account) : l.account); blines.push({ desc, amount: l.amount, code: l.code || '', taxType: l.vat ? '20% (VAT on Expenses)' : 'No VAT', taxAmount: l.vat ? l.tax : 0, currency: cur, group: l.kind }); });
     } else {
     sheetSums.forEach(s => { if (s.ct === 'orders' || s.ct === 'skip') return; const t = s.sum.highlights && s.sum.highlights.total; if (t == null) return; push(NOD[s.ct] || s.sum.name, t, cacc[s.ct] || '', s.sum.currency, 'non-order'); });
     // Invoice-recap-only lines (Support / Storage / Returns / Packaging) not present on their own sheet.
