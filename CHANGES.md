@@ -1,3 +1,6 @@
+## v26.585.0 — ILG tab: monthly-files guidance panel
+- The UK ILG invoices view now shows a guidance box: (1) DI invoice PDFs, (2) the month's invoice_00 shipping-detail file (.csv/.xlsx), (3) run Import Cin7 orders to split freight by channel; plus notes that .xls cannot be read (re-export .xlsx) and that missing pieces are flagged in the Map result. ILG tab only.
+
 ## v26.584.0 — UK ILG: shipping-detail (invoice_00) freight ingestion
 - _tplIlgShipDetail parses the per-order shipping-detail file (invoice_00 .csv/.xlsx: Your reference / Gross / VAT% / VAT); freight allocates per order → the order's Cin7 cost centre → channel Freight (VAT vs No-VAT). Integrated into _tplIlgAllocate alongside the DI fees/storage. Missing-file banner updated: flags absent shipping detail, or £X of freight with no Cin7 cost centre (run import), or unreadable .xls.
 - Verified vs May reference invoice_00031308.csv: parser reconciles to £56,212.54 (= the statement 31308 line), 13,750 rows, VAT £53,694.69 / No-VAT £2,517.85. Channel split is Cin7-dependent (needs the month import). ILG now ingests both sides: DI fees/storage (£25,551.90) + shipping-detail freight (£56,212.54).
