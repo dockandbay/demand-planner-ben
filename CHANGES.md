@@ -1,3 +1,6 @@
+## v26.570.0 — PRODUCT detail crash FIXED (Cannot set properties of null onclick)
+- renderProdMaster wires #pm-del/#pm-swatch (master-mode only) and #pm-addsz (sizes-mode only) unconditionally, but body renders only one mode. Since Size & variants split into its own tab (v26.560), #pm-addsz is absent in master mode → body.querySelector(#pm-addsz).onclick threw on every product master tab ("Failed: Cannot set properties of null"). All three now null-guarded (if(el)).
+
 ## v26.569.0 — Portal PAYMENTS: amount due wrongly $0 on invoiced POs + credit line tidy
 - BUG: portal Amount due showed $0 on every invoiced PO. POS_SQL_PORTAL aliases supplier_invoice_total AS final_invoice, but portal-view.js read p.supplier_invoice_total (undefined) → _invAmt=null → dueTot collapsed to 0 and the credit was dropped. Now reads p.final_invoice; credit is always added (a D&B charge is due even pre-invoice). Verified on PO-55EUBL1: invoice 1872 fully paid + 55 credit → Amount due = $55 (was $0).
 - Credit line: label shortened to "Additional credit / charge" (dropped "(added to amount due)") and column 1 now wraps (was nowrap → cut off on the portal).

@@ -10135,8 +10135,8 @@
           prodItemInvalidate(it.ref); _prodCfg=null; if(_prodRows){ var ro=_prodRows.filter(function(x){return x.ref===it.ref;})[0]; if(ro)ro.ref=nv; }
           if(typeof renderProductPlan==='function'&&document.getElementById('pg-grid')){ renderProductPlan(document.getElementById('product-content')); _pendingProdRef=nv; }
           else { renderProductDetail(nv); } }); }; })();
-    body.querySelector('#pm-del').onclick=function(){ if(!confirm('Delete '+it.ref+'? This removes its sizes, documents and timeline.'))return; shipPost('/api/product/item/'+encodeURIComponent(it.ref)+'/delete',{},function(){ selectProductSub('plan'); }); };
-    body.querySelector('#pm-addsz').onclick=function(){ var v=body.querySelector('#pm-newsz').value.trim(); if(!v)return; shipPost('/api/product/size',{ref:it.ref,size_label:v},function(){ renderProductDetail(it.ref); }); };
+    var _pmDel=body.querySelector('#pm-del'); if(_pmDel)_pmDel.onclick=function(){ if(!confirm('Delete '+it.ref+'? This removes its sizes, documents and timeline.'))return; shipPost('/api/product/item/'+encodeURIComponent(it.ref)+'/delete',{},function(){ selectProductSub('plan'); }); };   // #pm-del only in master mode — guard so sizes mode doesn't throw
+    var _pmAddSz=body.querySelector('#pm-addsz'); if(_pmAddSz)_pmAddSz.onclick=function(){ var v=body.querySelector('#pm-newsz').value.trim(); if(!v)return; shipPost('/api/product/size',{ref:it.ref,size_label:v},function(){ renderProductDetail(it.ref); }); };   // #pm-addsz only in sizes mode — guard so master mode doesn't throw (was the "Cannot set properties of null" bug)
     // Silent per-row updates — an approval / mapped-SKU / approved-sample change re-renders JUST that row (no tab flash).
     function szObj(id){ return (d.sizes||[]).filter(function(x){return String(x.id)===String(id);})[0]; }
     function sizeDimObj(id,dim){ var so=szObj(id); if(!so)return null; so.dimensions=so.dimensions||[]; var sd=so.dimensions.filter(function(x){return x.dimension===dim;})[0]; if(!sd){ sd={dimension:dim}; so.dimensions.push(sd); } return sd; }
@@ -10192,7 +10192,7 @@
         }catch(e){ post(f.type, src); }
       };
       rd.readAsDataURL(f); }
-    body.querySelector('#pm-swatch').onchange=function(){ swUp(this.files[0]); };
+    var _pmSw=body.querySelector('#pm-swatch'); if(_pmSw)_pmSw.onchange=function(){ swUp(this.files[0]); };   // #pm-swatch only in master mode — guard so sizes mode doesn't throw
     var _pz=body.querySelector('#pm-swatch-paste'); if(_pz)_pz.addEventListener('paste',function(e){ var items=(e.clipboardData&&e.clipboardData.items)||[]; for(var k=0;k<items.length;k++){ if(items[k].type&&items[k].type.indexOf('image')===0){ var f=items[k].getAsFile(); if(f){ e.preventDefault(); swUp(f); return; } } } });
   }); }); }
   function renderProdDocs(body,ref){ body.innerHTML='<div class="count" style="color:#94a3b8;padding:6px 2px">Loading…</div>';
