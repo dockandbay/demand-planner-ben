@@ -1566,8 +1566,9 @@
     }
     // Rule 2/3 doc block: list uploaded files of a category (admin uploads → supplier downloads), + upload control.
     function docBlock(cat,label){ var ds=((d&&d.all_docs)||[]).filter(function(x){return x.category===cat;});
-      var over=(r.status==='PRODUCTION'||r.production_status==='ready_to_ship')&&!r.preship_not_required&&r.prod_end&&r.prod_end<today&&!ds.length;
-      return row(label,(over?'<div style="color:#b91c1c;font-weight:700;margin-bottom:4px">⚠ overdue — production ended '+fd(r.prod_end)+'</div>':'')
+      var _preThr=new Date(Date.now()+7*86400000).toISOString().slice(0,10);   // preship due 1 week before production end (Ben)
+      var over=(r.status==='PRODUCTION'||r.production_status==='ready_to_ship')&&!r.preship_not_required&&r.prod_end&&r.prod_end<_preThr&&!ds.length;
+      return row(label,(over?'<div style="color:#b91c1c;font-weight:700;margin-bottom:4px">⚠ '+(r.prod_end<today?'overdue — production ended ':'due soon — production ends ')+fd(r.prod_end)+'</div>':'')
         +(ds.length?ds.map(function(x){return '<a href="/api/supply/portal-attachment/'+esc(x.id)+'" target="_blank" rel="noopener">⤓ '+esc(x.filename||'file')+'</a> <button class="lnk-btn podoc-del" data-id="'+esc(x.id)+'" data-po="'+esc(po)+'" data-name="'+esc(x.filename||'')+'" style="color:#b91c1c">✕</button>';}).join(' &nbsp; ')+'<br>':'<span class="mut tiny">none uploaded — </span>')
         +'<input type="file" class="shdoc-file" data-po="'+esc(po)+'" data-category="'+cat+'" style="font-size:11px"> <button class="save-btn shdoc-up" data-po="'+esc(po)+'" data-category="'+cat+'">⬆ Upload</button>'); }
     return '<div class="sect-h">Shipments <span class="mut tiny">— assign a shipment or mark FOB, ASN numbers, Ships With Supplier pallet labels</span></div>'
@@ -2006,7 +2007,7 @@
     po_not_approved:function(r){ return r.progress!=='complete' && !/^shipping|deliver/i.test(r.status||'') && !!r.require_confirmation && !r.supplier_confirmed; },   // once shipping/delivered, supplier confirmation is moot (READY TO SHIP still chases it)
     // Pre-shipment documents overdue: PRODUCTION/ready-to-ship, production end passed, required branch doc missing, not waived.
     preship:function(r){ if(!(r.status==='PRODUCTION'||r.production_status==='ready_to_ship')||r.preship_not_required)return false;
-      var t=new Date().toISOString().slice(0,10); if(!(r.prod_end&&r.prod_end<t))return false;
+      var t=new Date(Date.now()+7*86400000).toISOString().slice(0,10); if(!(r.prod_end&&r.prod_end<t))return false;   // fire 1 week BEFORE production end (Ben), not just after
       var br=r.branch||'', dc=String(r.doc_cats||'');
       if(/coghlans/i.test(br))return !String(r.asn_numbers||'').trim();
       if(/fba|awd/i.test(br))return dc.indexOf('carton_barcode')<0||dc.indexOf('pallet_barcode')<0;
@@ -3110,8 +3111,9 @@
     // Only PRODUCTION / ready-to-ship orders raise a pre-shipment-docs action; a "not required" tick suppresses it.
     var ship=[];
     var _preshipActive=(r.status==='PRODUCTION'||r.production_status==='ready_to_ship') && !r.preship_not_required;
-    if(_preshipActive && r.prod_end && r.prod_end<today){
-      var _br=r.branch||'', _dc=String(r.doc_cats||''), _late=' overdue — production ended '+fd(r.prod_end);
+    var _preThresh=new Date(Date.now()+7*86400000).toISOString().slice(0,10);   // preship due 1 week before production end (Ben)
+    if(_preshipActive && r.prod_end && r.prod_end<_preThresh){
+      var _br=r.branch||'', _dc=String(r.doc_cats||''), _late=(r.prod_end<today?' overdue — production ended '+fd(r.prod_end):' due soon — production ends '+fd(r.prod_end));
       if(/coghlans/i.test(_br)){ if(!String(r.asn_numbers||'').trim()) ship.push('ASN pallet labels'+_late+', no ASN numbers entered'); }
       else if(/fba|awd/i.test(_br)){ if(_dc.indexOf('carton_barcode')<0) ship.push('Carton barcodes'+_late+', not uploaded'); if(_dc.indexOf('pallet_barcode')<0) ship.push('Pallet barcodes'+_late+', not uploaded'); }
       else if(/ifulfillment/i.test(_br)){ if(_dc.indexOf('idn_pallet_label')<0) ship.push('IDN pallet labels'+_late+', not uploaded'); }
