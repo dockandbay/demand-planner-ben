@@ -5857,6 +5857,45 @@ app.post('/api/supply/tpl/cin7-sweep/:id', async (req, res) => {
 // 3PL invoice — Xero bill CSV (Phase 3). Assembles a Xero bills-import CSV: one line per non-order cost type
 // (Storage/Returns/Inbound/Other → the cost-type account codes) + two lines per cost centre (Freight + Fulfilment
 // → the Account Map's fulfilment_account for that region×channel). No Xero write — download only.
+// Cross-month reclass JOURNAL (all 3PLs): orders on this invoice whose Cin7/Fulfil invoice-date (ship date) falls in a
+// month BEFORE the invoice period → their 3PL cost is reclassed OUT of the invoice month INTO the order's month. Xero
+// manual-journal CSV (balanced: debit the prior month, credit the invoice month, per account). Reclass is tax-neutral (No VAT).
+app.post('/api/supply/tpl/journal/:id', async (req, res) => {
+  try {
+    const row = (await pool.query(`SELECT filename, content_type, content, tpl, period FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
+    if (!row) return res.status(404).json({ error: 'not found' });
+    const tpl0 = row.tpl || null, period = row.period;
+    if (!/^\d{4}-\d{2}$/.test(String(period || ''))) return res.json({ ok: false, error: 'Invoice period (month) is not set for this file.' });
+    const isCsv = /\.csv$/i.test(row.filename || '') || /csv/i.test(row.content_type || '');
+    const orders = await _tplOrderRows(row.content, isCsv, tpl0, period);   // per-order {reference, shipping, fulfilment}
+    if (!orders.length) return res.json({ ok: false, error: 'No per-order cost lines to journal (ILG shipping-detail dating is a follow-up).' });
+    const refs = [...new Set(orders.map(o => o.reference).filter(Boolean))];
+    const dbrows = refs.length ? (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc, to_char(invoice_date,'YYYY-MM') ym FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [refs])).rows : [];
+    const byRef = {}, byCon = {}; dbrows.forEach(r => { const v = { cc: String(r.cc || '').trim(), ym: r.ym }; if (r.reference) byRef[r.reference] = v; if (r.customer_order_no) byCon[r.customer_order_no] = v; });
+    const amap = {}; (await pool.query(`SELECT label, fulfilment_account FROM planner.tpl_account_map`)).rows.forEach(r => { amap[String(r.label || '').trim().toLowerCase()] = r.fulfilment_account || ''; });
+    const j = {}; let crossTotal = 0, matched = 0, noDate = 0;   // j: ym -> code -> amount
+    orders.forEach(o => { const info = (o.reference != null ? (byRef[o.reference] || byCon[o.reference]) : null); const cost = (o.shipping || 0) + (o.fulfilment || 0); if (!(cost > 0)) return;
+      const ov = _tplRefOverride(o.reference, tpl0); const cc = ov || (info ? info.cc : ''); const ym = info ? info.ym : null;
+      if (!ym) { noDate++; return; } if (ym === period) return;   // same month → no journal
+      matched++; crossTotal += cost;
+      const label = String(cc || '').replace(/^COGS\s*-\s*/i, ''); const code = /^OTHER/i.test(cc || '') ? '' : (amap[label.toLowerCase()] || '');
+      const key = code || '(no account)'; if (!j[ym]) j[ym] = {}; if (!j[ym][key]) j[ym][key] = 0; j[ym][key] += cost; });
+    const endOf = ym => { const [y, m] = ym.split('-').map(Number); return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); };
+    const dd = iso => iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4);
+    const REG = { eu_ifulfilment: 'EU', uk_ilg: 'UK', us_geneva: 'US', au_coghlans: 'AU' }[tpl0] || (tpl0 || '');
+    const lines = [], screen = [];
+    Object.keys(j).sort().forEach(ym => { const narr = '3PL ' + REG + ' ' + period + ' reclass to ' + ym; let mtot = 0;
+      Object.keys(j[ym]).sort().forEach(code => { const amt = Math.round(j[ym][code] * 100) / 100; if (!(amt > 0.005)) return; mtot += amt;
+        lines.push({ narration: narr, date: dd(endOf(ym)), desc: 'Reclass ' + ym + ' orders out of ' + period, code: (code === '(no account)' ? '' : code), taxRate: 'No VAT', amount: amt });          // DR the order's (prior) month
+        lines.push({ narration: narr, date: dd(endOf(period)), desc: 'Reclass ' + ym + ' orders out of ' + period, code: (code === '(no account)' ? '' : code), taxRate: 'No VAT', amount: -amt }); }); // CR the invoice month
+      screen.push({ month: ym, amount: Math.round(mtot * 100) / 100 }); });
+    if (req.body && req.body.preview) return res.json({ ok: true, period, region: REG, months: screen, crossTotal: Math.round(crossTotal * 100) / 100, matched, noDate, journals: Object.keys(j).length, lineCount: lines.length });
+    const HDR = '*Narration,*Date,Description,*AccountCode,*TaxRate,*Amount,TrackingName1,TrackingOption1,TrackingName2,TrackingOption2';
+    const esc = x => { x = String(x == null ? '' : x); return /[",\n]/.test(x) ? ('"' + x.replace(/"/g, '""') + '"') : x; };
+    const csv = HDR + '\n' + lines.map(l => [l.narration, l.date, l.desc, l.code, l.taxRate, l.amount.toFixed(2), '', '', '', ''].map(esc).join(',')).join('\n');
+    res.setHeader('Content-Type', 'text/csv;charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="journal-' + (REG || tpl0) + '-' + period + '.csv"'); res.send(csv);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
   try {
     const period = String((req.body && req.body.period) || req.query.period || '').trim();
