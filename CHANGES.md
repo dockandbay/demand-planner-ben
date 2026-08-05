@@ -1,3 +1,6 @@
+## v26.574.0 — Completion-payment ACTION only fires when a final invoice amount exists
+- BUG (Ben, PO-57EULX4): a completion-payment action opened purely because the production end date was past, even with NO final invoice (order value fell back to PO line costs, so completion_calc>0). Now the completion payment_overdue action is gated on a final invoice amount being present (supplier_invoice_total IS NOT NULL / r.is_final) — server payment_overdue flag (MANAGE badge / Payments Due) + the client "Completion payment overdue" item. No final invoice → no completion ACTION; the completion payment can still SHOW in cashflow by production date, just not as an action. Start-deposit + balance branches unchanged (deposit is due upfront; balance already checks owing).
+
 ## v26.573.0 — PRODUCT Size tab: component rows white
 - Component rows (Product/Packaging/Labels/Polybags/Other) now have an explicit white background; dropped the green/red approval FILL on the label cell so rows read uniformly white against the grey size-header band. Approval still signalled by the ✓/✗/● icon + coloured label text + the Status dropdown colour.
 

@@ -3084,7 +3084,7 @@
     // PDUE_MIN_DUE (old payments excluded). Non-payment freight/date actions keep the `open` (not-complete) gate.
     if(!_payOverSnz){
       if(totalDue>0.02 && r.start_due && r.start_due>=PDUE_MIN_DUE && r.start_due<today && startUnpaid && n(r.start_calc)>0.009) pay.push('Start deposit overdue ('+fd(r.start_due)+')');
-      if(totalDue>0.02 && r.completion_due && r.completion_due>=PDUE_MIN_DUE && r.completion_due<today && compUnpaid && n(r.completion_calc)>0.009) pay.push('Completion payment overdue ('+fd(r.completion_due)+')');
+      if(r.is_final && totalDue>0.02 && r.completion_due && r.completion_due>=PDUE_MIN_DUE && r.completion_due<today && compUnpaid && n(r.completion_calc)>0.009) pay.push('Completion payment overdue ('+fd(r.completion_due)+')');   // completion ACTION only when a final invoice amount is showing (Ben) — the payment can still appear in cashflow by production date, just not as an action
       if(r.balance_due && r.balance_due>=PDUE_MIN_DUE && r.balance_due<today && totalDue>0.02 && n(r.balance_owing)>0.009) pay.push('Balance overdue ('+fd(r.balance_due)+')');   // only if the BALANCE milestone actually owes something (was firing on $0 balances when the completion drove totalDue>0)
     }
     // supplier-submitted invoice awaiting approve/reject (actionable on any PO — shows on the grid flag and the PAYMENTS badge)

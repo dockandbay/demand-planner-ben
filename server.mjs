@@ -9614,7 +9614,7 @@ const PO_ROWS_SQL = `
             -- old payments are cut off at 2026-01-01 (matches the Payments Due report's PDUE_MIN_DUE).
             ((
                ((start_production + 7) >= DATE '2026-01-01' AND (start_production + 7) < current_date AND pay_start_deposit_assigned IS NULL AND coalesce(deposit_ref,'')='' AND start_calc > 0)
-               OR (eff_prod_end >= DATE '2026-01-01' AND eff_prod_end < current_date AND pay_completion_assigned IS NULL AND completion_calc > 0)
+               OR (eff_prod_end >= DATE '2026-01-01' AND eff_prod_end < current_date AND pay_completion_assigned IS NULL AND completion_calc > 0 AND supplier_invoice_total IS NOT NULL)   -- completion ACTION only once a final invoice amount is entered (Ben): no final invoice -> no completion action (the payment can still SHOW in cashflow by production date, just not as an action)
                OR (bal_due_date >= DATE '2026-01-01' AND bal_due_date < current_date AND pay_balance_1_amount IS NULL
                    AND round(val + coalesce(credit_amount,0) - start_paid - coalesce(pay_completion_assigned, completion_calc),2) > 0.01))) payment_overdue,
             (coalesce(status,'') ILIKE '%production%') is_production,
