@@ -1,3 +1,6 @@
+## v26.566.0 — DEMAND plan SKU search: FIXED (was returning nothing)
+- Two stacked bugs made the DEMAND plan SKU-search box (and anything that filters by SKU) return an empty grid — "pretty much nothing shows". (1) SCOPE: skuMatchQ() is defined inside the BP IIFE, so the DEMAND module (filteredSkus / buildPlanDownload) threw ReferenceError: skuMatchQ is not defined whenever a search/RW filter was active, aborting the entire grid render. Now exposed via window.skuMatchQ. (2) CASE: skuMatchQ lowercased the SKU code + name but NOT the query tokens, so a normal UPPERCASE search (e.g. TOWLF-ESS-LG-DKBLU) matched nothing. Query is now lowercased too. Verified in a jsdom render harness: uppercase search now renders the SKU under Towel - Beach CORE in UK DTC (was 0 rows). Also fixes the BUY/FBA SKU search case-sensitivity.
+
 ## v26.565.0 — CONFIG ▸ Suppliers: magic-link button in edit view
 - Each portal user in the supplier EDIT view (bottom of the record, Portal users section) now has a 🔗 link button that creates & copies a 7-day magic login link (same /api/supply/portal-magic/:id endpoint as the Portal Users table + PO drawer). Previously the edit view could add/remove users but not issue a link.
 

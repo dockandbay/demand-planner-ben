@@ -1544,7 +1544,8 @@ function _fbaTrfShowList(){ var p=document.getElementById('fba-trf-list');
 // Clear all overrides + ticks, then re-render.
 // SKU filter supports a LIST: split on whitespace/commas/semicolons/newlines; match if the SKU
 // contains ANY token (so you can paste many SKUs to filter the view).
-function skuMatchQ(sku,q){ if(!q)return true; var toks=q.split(/[\s,;]+/).filter(Boolean); if(!toks.length)return true; var sl=String(sku).toLowerCase(); var m=(typeof SKUM!=='undefined')?SKUM[sku]:null; var nl=(m&&m.n)?String(m.n).toLowerCase():''; return toks.some(function(t){return sl.indexOf(t)>=0||(nl&&nl.indexOf(t)>=0);}); }   // match SKU code OR product name
+function skuMatchQ(sku,q){ if(!q)return true; var toks=String(q).toLowerCase().split(/[\s,;]+/).filter(Boolean); if(!toks.length)return true; var sl=String(sku).toLowerCase(); var m=(typeof SKUM!=='undefined')?SKUM[sku]:null; var nl=(m&&m.n)?String(m.n).toLowerCase():''; return toks.some(function(t){return sl.indexOf(t)>=0||(nl&&nl.indexOf(t)>=0);}); }   // match SKU code OR product name
+try{ window.skuMatchQ=skuMatchQ; }catch(_e){}   // BUGFIX: skuMatchQ is defined INSIDE the BP IIFE; expose it globally so the DEMAND module (filteredSkus / buildPlanDownload) can call it. Without this, any SKU-search in the DEMAND plan threw ReferenceError and aborted the whole grid render → "nothing shows".
 function fbaClearAll(){
   for(const k in FBA_OV)delete FBA_OV[k];
   for(const k in FBA_TICK)delete FBA_TICK[k];
