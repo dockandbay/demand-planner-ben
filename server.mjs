@@ -5662,10 +5662,24 @@ function _ilgClassify(label, channel) {
   if (/order charge/i.test(label)) return { account: acc, kind: 'fulfilment' };   // pick/pack per-order
   return { account: acc, kind: 'freight' };   // delivery / shipping charge
 }
+// ILG shipping-detail (invoice_00 .csv/.xlsx) → per-order freight rows {ref, gross, vatAmt, vat}. The per-order
+// Gross is the freight; the order ref ("Your reference", e.g. UK-805691) maps to its Cin7 cost centre for the channel split.
+async function _tplIlgShipDetail(buf, isCsv) {
+  let grid = [];
+  if (isCsv) {
+    const parse = l => { const o = []; let c = '', q = false; for (let i = 0; i < l.length; i++) { const ch = l[i]; if (ch === '"') { if (q && l[i + 1] === '"') { c += '"'; i++; } else q = !q; } else if (ch === ',' && !q) { o.push(c); c = ''; } else c += ch; } o.push(c); return o; };
+    grid = String(buf.toString('utf8')).split(/\r?\n/).filter(l => l.length).map(parse);
+  } else { const ExcelJS = (await import('exceljs')).default; const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf); const ws = wb.worksheets[0]; if (ws) ws.eachRow({ includeEmpty: false }, r => { const a = []; r.eachCell({ includeEmpty: true }, (c, col) => { a[col - 1] = _tplCellVal(c); }); grid.push(a); }); }
+  if (!grid.length) return [];
+  const H = grid[0].map(x => String(x == null ? '' : x).trim().toLowerCase());
+  const ri = H.findIndex(h => /your reference/.test(h)), gi = H.indexOf('gross'), vpi = H.indexOf('vat%'), vai = H.indexOf('vat');
+  const out = [];
+  for (let r = 1; r < grid.length; r++) { const row = grid[r] || []; const ref = String(row[ri] == null ? '' : row[ri]).trim(); const g = _tplNum(row[gi]); if (!ref || g == null) continue; out.push({ ref, gross: g, vatAmt: vai >= 0 ? (_tplNum(row[vai]) || 0) : 0, vat: (vpi >= 0 ? (_tplNum(row[vpi]) || 0) : 0) > 0 }); }
+  return out;
+}
 async function _tplIlgAllocate(period) {
   const files = (await pool.query(`SELECT filename, content_type, content FROM planner.tpl_invoice_files WHERE tpl='uk_ilg' AND period=$1 ORDER BY uploaded_at DESC`, [period])).rows;
   const pdfs = files.filter(f => /\.pdf$/i.test(f.filename || '') || /pdf/i.test(f.content_type || ''));
-  const hasShipDetail = files.some(f => /invoice_0|shipping/i.test(f.filename || '') && /\.xlsx?$/i.test(f.filename || ''));
   if (!pdfs.length) return { ok: false, error: 'Upload the ILG DI invoice PDFs for this period first.' };
   const bucket = {}; const key = (a, k, v) => a + '|' + k + '|' + (v ? 'V' : 'N');
   const add = (a, k, v, amt, tax) => { const kk = key(a, k, v); if (!bucket[kk]) bucket[kk] = { account: a, kind: k, vat: v, amount: 0, tax: 0 }; bucket[kk].amount += amt; bucket[kk].tax += tax; };
@@ -5674,13 +5688,24 @@ async function _tplIlgAllocate(period) {
     seen.push({ di: di.diRef, si: di.siRef, channel: di.channel, total: Math.round(di.items.reduce((s, i) => s + i.total, 0) * 100) / 100 });
     if (di.channel) channels.add(ILG_CHAN[di.channel.toUpperCase()] || di.channel);
     di.items.forEach(it => { const c = _ilgClassify(it.label, di.channel); add(c.account, c.kind, it.vat > 0.005, it.total, it.vat); }); }
+  // Shipping detail (invoice_00) → per-order Gross freight → Cin7 cost centre → channel freight (VAT / No-VAT).
+  const shipFile = files.find(f => /invoice_0/i.test(f.filename || ''));
+  let shipUnmapped = 0, shipTotal = 0;
+  if (shipFile) {
+    const isCsv = /\.csv$/i.test(shipFile.filename || '') || /csv/i.test(shipFile.content_type || '');
+    let ship = []; try { ship = await _tplIlgShipDetail(shipFile.content, isCsv); } catch (e) { ship = []; }
+    const refs = [...new Set(ship.map(s => s.ref).filter(Boolean))];
+    const dbrows = refs.length ? (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [refs])).rows : [];
+    const byRef = {}, byCon = {}; dbrows.forEach(r => { const cc = String(r.cc || '').trim(); if (r.reference) byRef[r.reference] = cc; if (r.customer_order_no) byCon[r.customer_order_no] = cc; });
+    ship.forEach(s => { shipTotal += s.gross; const cc = (byRef[s.ref] != null) ? byRef[s.ref] : (byCon[s.ref] != null ? byCon[s.ref] : null);
+      if (cc) add('Fulfilment - ' + String(cc).replace(/^COGS\s*-\s*/i, ''), 'freight', s.vat, s.gross, s.vatAmt); else shipUnmapped += s.gross; });
+  }
   const lines = Object.values(bucket).filter(b => Math.abs(b.amount) > 0.005).map(b => ({ ...b, amount: Math.round(b.amount * 100) / 100, tax: Math.round(b.tax * 100) / 100, code: ILG_CODE[b.account] || '' }));
   const total = Math.round(lines.reduce((s, l) => s + l.amount, 0) * 100) / 100;
   // Missing-file detection: the big Ecom/Shopify/Marketplace freight comes from the shipping-detail file; flag its absence.
   const missing = [];
-  if (!hasShipDetail) missing.push('Shipping-detail spreadsheet (invoice_00, .xlsx) — the per-order Ecom/Shopify/Marketplace freight (usually the largest part of the bill). Not uploaded.');
-  const covered = new Set(lines.map(l => l.account));
-  ['Fulfilment - UK - Shopify', 'Fulfilment - UK - Marketplace'].forEach(a => { const hasFreight = Object.values(bucket).some(b => b.account === a && b.kind === 'freight'); if (!hasFreight) missing.push('No freight for ' + a.replace('Fulfilment - UK - ', 'UK ') + ' — its DI invoice / shipping detail appears to be missing.'); });
+  if (!shipFile) missing.push('Shipping-detail file (invoice_00 .csv/.xlsx) — the per-order Ecom/Shopify/Marketplace freight (the largest part of the bill). Not uploaded.');
+  else if (shipUnmapped > 0.5) missing.push('£' + shipUnmapped.toFixed(2) + ' of shipping-detail freight has no Cin7 cost centre yet — run "Import Cin7 orders" for the month so it can be split by channel.');
   const xlsUnread = files.filter(f => /\.xls$/i.test(f.filename || '')).map(f => f.filename);
   if (xlsUnread.length) missing.push('Old-format .xls file(s) can\'t be read — re-export as .xlsx: ' + xlsUnread.join(', '));
   const ccAgg = {};   // aggregate the per-fee lines to a per-account cost-centre view (so the Map table renders)
