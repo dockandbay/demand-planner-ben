@@ -3213,7 +3213,8 @@
       +(function(){ var xs=(d&&d.crossdock_shipped)||[]; if(!xs.length)return '';
         return cliRow('Crossdock shipped <span class="mut tiny">(qty entered by supplier in portal)</span>', xs.map(function(x){return esc(x.sku)+': <b>'+(x.qty!=null&&x.qty!==''?units(x.qty):'—')+'</b>';}).join(' &nbsp;·&nbsp; ')); })()
       +cliRow('Labels <span class="mut tiny">(A4 print mould)</span>',
-          '<button class="save-btn po-dl-xd" data-po="'+esc(r.po)+'" title="crossdock box labels for this PO\'s crossdock SKUs (PO / sales order / client overlaid) — same as the supplier portal">⤓ Crossdock</button> <span class="mut tiny">(Ships With Supplier labels are on the SHIPMENTS tab)</span>')
+          '<button class="save-btn po-dl-xd" data-po="'+esc(r.po)+'" title="crossdock box labels for this PO\'s crossdock SKUs (PO / sales order / client overlaid) — same as the supplier portal">⤓ Crossdock</button> <span class="mut tiny">(Ships With Supplier labels are on the SHIPMENTS tab)</span>'
+          +(/paper\s*store/i.test(r.client||'')?' <button class="save-btn po-dl-ps" data-po="'+esc(r.po)+'" style="background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;font-weight:700" title="Paper Store carton labels — one label per carton (full + odd/mixed), client PO # / DC format">⤓ Paper Store carton labels</button>':''))
       +cliRow('Attachments <span class="mut tiny">(client / FBA docs)</span>',
           (function(){ var cd=(d&&d.client_docs)||[]; return (cd.length?cd.map(function(x){return '<a href="/api/supply/portal-attachment/'+x.id+'" target="_blank" rel="noopener">'+esc(x.filename||'view')+'</a>';}).join(' · ')+' &nbsp; ':'<span class="mut tiny">none yet — </span>')
             +'<input type="file" class="cli-attach" data-po="'+esc(r.po)+'" style="font-size:11px">'; })())
@@ -3990,6 +3991,7 @@
         if(!rows||!rows.length||rows.error){ alert('No crossdock barcodes found for these SKUs'); return; }
         bcDownloadCrossdock(rows, po, (poBy[po].dispatch_order_ref||''), (poBy[po].client||''), (poBy[po].final_delivery_address||''), b, po+'_crossdock_labels.zip'); })
         .catch(function(){ b.textContent=orig; b.disabled=false; alert('Could not load crossdock labels'); }); }; });
+    document.querySelectorAll('#podet-'+i+' .po-dl-ps').forEach(function(b){ b.onclick=function(){ paperStoreLabels(po,b); }; });   // Paper Store carton labels
     document.querySelectorAll('#podet-'+i+' .po-dl-sw').forEach(function(b){ b.onclick=function(){ dlShipsWith(po,b); }; });
     document.querySelectorAll('#podet-'+i+' .po-dl-air').forEach(function(b){ b.onclick=function(){ dlShipsWith(po,b,true); }; });
     // PLAN sub-tabs (PAYMENTS / DATES / CLIENT / ORDER PLAN / LANDED COSTS / TIMELINE) — toggle panels
@@ -7867,6 +7869,57 @@
     img.onload=function(){ var w=img.naturalWidth||img.width, h=img.naturalHeight||img.height; var cv=document.createElement('canvas'); cv.width=w*scale; cv.height=h*scale; var ctx=cv.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height); ctx.scale(scale,scale); ctx.drawImage(img,0,0); URL.revokeObjectURL(url); try{ cv.toBlob(function(b){cb(b);},'image/png'); }catch(e){ cb(null); } };
     img.onerror=function(){ URL.revokeObjectURL(url); cb(null); }; img.src=url; }
   function bcDownloadBlob(filename,blob){ var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(a.href);},2000); }
+
+  // ── Paper Store carton labels (client-specific). Popup for DC# + editable DC address; then one label per carton. ──
+  function psLabelPopup(defaults,onGo){
+    var ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:2147483000;display:flex;align-items:center;justify-content:center';
+    function fld(id,lbl,val){ return '<label style="display:block;font-size:12px;color:#475569;margin-bottom:2px">'+lbl+'</label><input id="'+id+'" value="'+esc(val||'')+'" style="width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:6px;padding:6px 9px;font-size:13px;margin-bottom:10px">'; }
+    ov.innerHTML='<div style="background:#fff;border-radius:10px;padding:18px 20px;width:440px;max-width:92vw;box-shadow:0 10px 40px rgba(0,0,0,.3)">'
+      +'<div style="font-weight:700;font-size:15px;margin-bottom:10px">Paper Store carton labels</div>'
+      +fld('ps-dc','Distribution Center Number',defaults.dc)+fld('ps-a1','DC Address Line 1',defaults.a1)+fld('ps-a2','DC Address Line 2',defaults.a2)
+      +'<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px"><button id="ps-cancel" class="save-btn light">Cancel</button><button id="ps-go" class="save-btn" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;font-weight:700">Generate PDF</button></div></div>';
+    document.body.appendChild(ov); var dcI=ov.querySelector('#ps-dc'); dcI.focus();
+    function close(){ ov.remove(); }
+    ov.querySelector('#ps-cancel').onclick=close; ov.onclick=function(e){ if(e.target===ov)close(); };
+    ov.querySelector('#ps-go').onclick=function(){ var dc=dcI.value.trim(); if(!dc){ dcI.style.borderColor='#dc2626'; dcI.focus(); return; }
+      close(); onGo({dc:dc, a1:ov.querySelector('#ps-a1').value.trim(), a2:ov.querySelector('#ps-a2').value.trim()}); };
+  }
+  function buildPaperStoreLabelSVG(c,hdr){ var W=1000,H=560,el=[];
+    function T(x,y,s,o){ return svgText(x,y,s,o); }
+    el.push('<rect x="0" y="0" width="'+W+'" height="'+H+'" fill="#fff"/><rect x="8" y="8" width="'+(W-16)+'" height="'+(H-16)+'" fill="none" stroke="#111" stroke-width="2"/>');
+    var x=36,y=52,rx=610;
+    el.push(T(x,y,hdr.client,{size:30,bold:true})); y+=32;
+    el.push(T(x,y,'PO# '+hdr.po_ref+' - '+hdr.dc+' DISTRIBUTION CENTER',{size:17,bold:true})); y+=22;
+    if(hdr.a1)el.push(T(x,y,hdr.a1,{size:14})); y+=18; if(hdr.a2)el.push(T(x,y,hdr.a2,{size:14})); y+=16;
+    el.push('<line x1="24" y1="'+y+'" x2="'+(W-24)+'" y2="'+y+'" stroke="#111" stroke-width="1"/>'); y+=30;
+    el.push(T(x,y,'CTN#  '+c.ctn+'   OF   '+c.total,{size:18,bold:true})); el.push(T(rx,y,'N.W  ________ lbs',{size:14})); y+=28;
+    el.push(T(x,y,'ITEM#  '+c.sku,{size:16,bold:true})); el.push(T(rx,y,'G.W  '+(c.gw!=null?c.gw:'________')+' lbs',{size:14})); y+=26;
+    var desc=String(c.desc||''); if(desc.length>54)desc=desc.slice(0,52)+'…';
+    el.push(T(x,y,'DESC  '+desc,{size:13})); el.push(T(rx,y,'MEAS  '+(c.meas||'________')+' in',{size:14})); y+=24;
+    el.push(T(x,y,'UPC',{size:14,bold:true}));
+    if(c.upc){ var bars=eanBars(c.upc,x+52,y-16,2,46,8); if(bars){ el.push(bars); el.push(T(x+52,y+40,c.upc,{size:13,mono:true})); } else el.push(T(x+52,y,c.upc,{size:14,mono:true})); }
+    y+=66;
+    el.push(T(x,y,'MASTER QTY  '+c.master_qty+'  PCS',{size:16,bold:true}));
+    el.push(T(rx,y,(c.odd?'ODD / MIXED CARTON':'MASTER CARTON'),{size:18,bold:true,fill:'#dc2626'})); y+=26;
+    el.push(T(x,y,'INNER QTY  ________  PCS',{size:14}));
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">'+el.join('')+'</svg>';
+  }
+  function paperStoreLabels(po,btn){ var orig=btn?btn.textContent:''; if(btn){btn.disabled=true;btn.textContent='Loading…';}
+    fetch('/api/supply/paperstore-labels/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(d){
+      if(btn){btn.disabled=false;btn.textContent=orig;}
+      if(!d||!d.ok||d.error){ alert('Could not load labels: '+((d&&d.error)||'no data')); return; }
+      if(!d.cartons||!d.cartons.length){ alert('No cartons to label on this PO (need order-plan SKUs with quantities).'); return; }
+      psLabelPopup({dc:'',a1:d.dc_addr1,a2:d.dc_addr2},function(inp){
+        if(btn){btn.disabled=true;btn.textContent='Rendering…';}
+        var hdr={client:d.client,po_ref:d.po_ref,dc:inp.dc,a1:inp.a1,a2:inp.a2}, pages=[], i=0;
+        function next(){ if(i>=d.cartons.length)return finish(); var c=d.cartons[i++];
+          rasterizeSVGCanvas(buildPaperStoreLabelSVG(c,hdr),2.2,function(cv){ if(!cv)return next(); cv.toBlob(function(jb){ if(!jb)return next(); jb.arrayBuffer().then(function(ab){ pages.push({jpeg:new Uint8Array(ab),imgW:cv.width,imgH:cv.height}); next(); }); },'image/jpeg',0.92); }); }
+        function finish(){ if(btn){btn.disabled=false;btn.textContent=orig;} if(!pages.length){ alert('Nothing rendered'); return; }
+          bcDownloadBlob(po+'_Paper_Store_carton_labels.pdf', new Blob([pdfA4Multi(pages,[[140,140,2200,3225]])],{type:'application/pdf'})); }
+        next();
+      });
+    }).catch(function(e){ if(btn){btn.disabled=false;btn.textContent=orig;} alert('Failed: '+((e&&e.message)||e)); });
+  }
   // fetch a same-origin image URL → data URI (keeps the rasterised canvas un-tainted)
   function fetchImgDataUri(url){ return fetch(url).then(function(resp){ if(!resp.ok)throw 0; return resp.blob(); }).then(function(blob){ return new Promise(function(res){ var fr=new FileReader(); fr.onload=function(){res(fr.result);}; fr.onerror=function(){res('');}; fr.readAsDataURL(blob); }); }).catch(function(){ return ''; }); }
   // gather the data-URI assets a label needs (swatch / GRS logo / D&B logo), then call cb(opts)

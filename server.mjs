@@ -1756,6 +1756,36 @@ app.post('/api/supply/xero-compare/clear', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Paper Store carton labels — client-specific carton labels for a PO's order-plan lines. One carton record per
+// full carton (MASTER, qty = carton_qty) + one ODD/MIXED carton for the remainder. Uses US carton weight (lb) +
+// dims (in) to match the Paper Store template. DC# / DC address are supplied by the client (popup). Two-segment path.
+app.get('/api/supply/paperstore-labels/:po', async (req, res) => {
+  try {
+    const po = req.params.po;
+    const poRow = (await pool.query(`SELECT coalesce(client,'') client, coalesce(client_po_ref,'') client_po_ref,
+      coalesce(final_delivery_address,'') final_delivery_address FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0];
+    if (!poRow) return res.status(404).json({ error: 'PO not found' });
+    const poRef = String(poRow.client_po_ref).split(/\s+/).filter(Boolean)[0] || '';   // strip the tab/duplicate paste junk → first token
+    const addr = String(poRow.final_delivery_address).split(/\r?\n/).map(s => s.replace(/\t+/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean);
+    const lines = (await pool.query(`SELECT l.sku, l.qty, coalesce(nullif(l.carton_qty,0), nullif(p.carton_qty,'')::int) carton_qty,
+        coalesce(p.product_ean,'') ean, coalesce(p.product_name,'') name,
+        nullif(p.us_carton_weight::text,'') gw, nullif(p.us_carton_length::text,'') cl, nullif(p.us_carton_width::text,'') cw, nullif(p.us_carton_height::text,'') ch
+      FROM planner.purchase_order_lines l LEFT JOIN planner.products p ON p.sku=l.sku WHERE l.po=$1 ORDER BY l.sku`, [po])).rows;
+    const cartons = [];
+    lines.forEach(l => {
+      const cq = Number(l.carton_qty) || 0, q = Number(l.qty) || 0; if (!q) return;
+      const upc = String(l.ean || '').replace(/[^0-9]/g, '');
+      const meas = (l.cl && l.cw && l.ch) ? (l.cl + ' x ' + l.cw + ' x ' + l.ch) : '';
+      const gwFull = l.gw ? Number(l.gw) : null;
+      const full = cq > 0 ? Math.floor(q / cq) : 0, rem = cq > 0 ? (q % cq) : q;
+      for (let i = 0; i < full; i++) cartons.push({ sku: l.sku, desc: l.name, upc, master_qty: cq, odd: false, gw: gwFull, meas });
+      if (rem > 0) cartons.push({ sku: l.sku, desc: l.name, upc, master_qty: rem, odd: true, gw: (gwFull && cq) ? Math.round(gwFull * rem / cq * 10) / 10 : null, meas });
+    });
+    cartons.forEach((c, i) => { c.ctn = i + 1; c.total = cartons.length; });
+    res.set('Cache-Control', 'no-store').json({ ok: true, client: 'The Paper Store', po_ref: poRef, dc_addr1: addr[0] || '', dc_addr2: addr.slice(1).join(', ') || '', cartons });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── SAMPLES — detail / address autocomplete / timeline (specific routes BEFORE the :section catch-all)
 app.get('/api/supply/sample-detail/:id', async (req, res) => {
   try {
