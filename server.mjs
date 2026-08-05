@@ -2857,9 +2857,8 @@ app.get('/api/supply/:section', async (req, res) => {
               (coalesce(pay_start_deposit_assigned,0)>0 AND pay_start_deposit_date IS NULL) OR
               (coalesce(pay_completion_assigned,0)>0 AND pay_completion_date IS NULL) OR
               (coalesce(pay_balance_1_amount,0)>0 AND pay_balance_1_date IS NULL) OR
-              (coalesce(pay_balance_2_amount,0)>0 AND pay_balance_2_date IS NULL) OR
-              -- Final invoice amount entered but no Final payment due (balance_due_date_overide) — same rule as the PAYMENTS-tab red flag
-              (coalesce(supplier_invoice_total,0)>0 AND balance_due_date_overide IS NULL) )
+              (coalesce(pay_balance_2_amount,0)>0 AND pay_balance_2_date IS NULL) )
+              -- (removed the "final invoice entered but no Final payment due" branch: balance_due_date_overide is an OPTIONAL override — blank = calculated balance due date — so it false-positived on every invoiced PO)
           UNION ALL
           SELECT 'amber','Over 20 pallets', z.po,
             'Estimated '||round(z.pal,1)||' pallets (>20 = over one container) — rebalance across this production''s POs',

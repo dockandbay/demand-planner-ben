@@ -1,3 +1,7 @@
+## v26.577.0 — ACTION ITEMS counts items (not POs) + fix Payment-invalid false positives
+- ACTION ITEMS badge/count now counts total action ITEMS across all POs (sum of poActions per PO), so closing one item decrements it. Was counting POs-with-actions, so it barely moved when you resolved individual items.
+- "Payment invalid — amount set with no date": dropped the final-invoice branch (final_payment_due / balance_due_date_overide is an OPTIONAL override — blank = calculated balance due date), which was firing on essentially every invoiced PO (e.g. PO-1672805). A genuinely assigned-but-undated balance is still caught by the balance milestone checks. Fixed in both the client action condition AND the server ACTIONS-feed UNION query.
+
 ## v26.576.0 — Direct-to-Client supplier approval gated on "Require supplier confirmation"
 - The DtC "Supplier approval" row + dtc_not_approved action fired for every Direct-to-Client PO regardless of the production setting, so e.g. PO-1731760 (prod 56, off until P58) showed "Awaiting supplier approval" when it should not. Now gated on the production’s CONFIG ▸ Productions "Require supplier confirmation" flag (r.require_confirmation), aligning it with the PO-confirmation action (po_not_approved). When off, the row shows "Not required" and raises no action; when on (P58+), it behaves as before.
 

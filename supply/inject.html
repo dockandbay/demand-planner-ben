@@ -1992,7 +1992,7 @@
     // Surfaced for open POs, and for completed POs from production 55 onwards (payment issues still matter).
     payment_invalid:function(r){ if(!(r.progress!=='complete'||(/^[0-9]+$/.test(String(r.prod_no||''))&&parseInt(r.prod_no,10)>=55)))return false;
       var A=function(x){return Number(x)>0;};
-      return (A(r.start_assigned)&&!r.start_date)||(A(r.completion_assigned)&&!r.completion_date)||(A(r.balance_1_amount)&&!r.balance_1_date)||(A(r.balance_2_amount)&&!r.balance_2_date)||(A(r.final_invoice)&&!r.final_payment_due); },
+      return (A(r.start_assigned)&&!r.start_date)||(A(r.completion_assigned)&&!r.completion_date)||(A(r.balance_1_amount)&&!r.balance_1_date)||(A(r.balance_2_amount)&&!r.balance_2_date); },   // DROPPED the final-invoice branch: it checked final_payment_due (balance_due_date_overide), an OPTIONAL override (blank = calculated balance due date), so it false-positived on every invoiced PO. A genuinely assigned-but-undated balance is still caught by the balance_1/balance_2 checks.
     // "Late - should be Completed": the COMPLETION date (checkin = delivery + 7, the Fulfil/Cin7 completion) has
     // passed but the PO isn't marked complete yet. (Was wrongly keyed on the production-end date.)
     late:function(r){ var t=new Date().toISOString().slice(0,10); return r.progress!=='complete' && r.checkin && r.checkin<t; },
@@ -2190,7 +2190,7 @@
     function excMatch(k,r){ if(k==='has_crossdock')return hasCrossdock(r); if(k==='shipped_no_invoice')return shippedNoInvoice(r); var fn=PO_ACTCOND[k]; return fn?fn(r):true; }
     // unified "has any open action item" — same as the red badge next to each PO ref (poExceptions)
     function hasActions(r){ return poActions(r).length>0; }   // snooze-aware, mirrors the red PO-ref badge
-    function actItemsCount(){ return rows.filter(hasActions).length; }
+    function actItemsCount(){ return rows.reduce(function(a,r){ return a+poActions(r).length; },0); }   // total ACTION ITEMS across all POs (snooze-aware) — so closing one item decrements the badge (Ben). Was POs-with-actions.
     // ERP misalignment: PO has lines but none mirrored from ERP (never pushed → "upload entire PO"),
     // OR has lines whose planned qty/cost differ from the ERP (pending → "update"). Excludes complete POs.
     function poErpMisaligned(r){ return r.progress!=='complete' && !poErpNa(r) && ((r.erp_total>0 && (!(r.erp_in>0) || r.erp_pending>0)) || r.erp_date_pending>0); }
