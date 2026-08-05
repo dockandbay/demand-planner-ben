@@ -8271,8 +8271,9 @@ function renderDemandTabs(){
 var BUYMOVE_TABS=[['actions','ACTIONS'],['buy','BUY'],['fba','FBA'],['transfer','TRANSFER'],['zalando','ZALANDO']];
 // ── Zalando send-to-Zalando (P1/P2): baked per-SKU forecast (ZAL_FC) vs uploaded stock-on-hand → suggested send
 // (3-month cover, NO minimum), FBA-style tick/override, download EAN,Quantity (ZALANDO_UP format). Self-contained panel.
-var ZAL_TICK={}, ZAL_OV={}, ZAL_COVER=2;   // months of cover the suggested send targets (default 2; toggle 1-6)
+var ZAL_TICK={}, ZAL_OV={}, ZAL_COVER=2, ZAL_Q='';   // months of cover the suggested send targets (default 2; toggle 1-6); ZAL_Q = SKU search filter
 function _zalEff(sku,sugg){ var o=ZAL_OV[sku]; if(o!=null&&String(o).trim()!=='')return Math.max(0,Math.round(Number(o)||0)); return sugg; }
+function _zalFilter(wrap){ var q=String(ZAL_Q||'').trim().toLowerCase(); (wrap||document).querySelectorAll('tr[data-sku]').forEach(function(tr){ tr.style.display=(!q||String(tr.getAttribute('data-sku')||'').toLowerCase().indexOf(q)>=0)?'':'none'; }); }   // (2) SKU search filter — show/hide rows without a re-render (keeps input focus)
 function renderZalando(){
   var tw=document.getElementById('tw'); if(tw)tw.style.display='none';
   var bw=document.getElementById('buy-wrap'); if(bw)bw.remove();
@@ -8294,19 +8295,42 @@ function _zalRender(wrap,d){
   var rows=Object.keys(fc).sort().map(function(sku){ var disc=discOf(sku); var dm=disc?disc.slice(0,7).replace('-','_'):null;   // EU discontinue — never send stock to cover months AFTER it
     var cover=win.reduce(function(a,m){ if(dm&&m>dm)return a; return a+(fc[sku][m]||0); },0); var soh=stock[sku]||0; return {sku:sku,disc:disc,cover:cover,soh:soh,sugg:Math.max(0,Math.round(cover-soh)),ean:eans[sku]||''}; }).filter(function(r){return r.cover>0||r.soh>0;});
   var TD='padding:4px 10px 4px 0;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums';
-  var covBtns=[1,2,3,4,5,6].map(function(n){return '<button class="zal-cov" data-n="'+n+'" style="font-size:11px;padding:2px 9px;border:1px solid '+(n===ZAL_COVER?'#7c3aed':'#cbd5e1')+';border-radius:4px;background:'+(n===ZAL_COVER?'#ede9fe':'#fff')+';color:'+(n===ZAL_COVER?'#5b21b6':'#475569')+';cursor:pointer;font-weight:'+(n===ZAL_COVER?'700':'400')+';margin-right:3px">'+n+'</button>';}).join('');
-  var head='<div style="font-weight:700;font-size:15px;margin-bottom:2px">Zalando &mdash; send-to-Zalando</div>'
-    +'<div style="font-size:12px;color:#666;margin-bottom:8px">Forecast is hard-coded (baked). Stock-on-hand is your uploaded Zalando/Sello file. Suggested send = <b>'+ZAL_COVER+'-month</b> cover &minus; stock, <b>no minimum</b>. Respects EU discontinue dates (no send to cover months after discontinue). Override or tick rows, then download the EAN/Quantity upload.</div>'
-    +'<div style="margin-bottom:10px;font-size:12px;color:#475569">Months cover: '+covBtns+'</div>';
+  var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var fdmy=function(s){ if(!s)return ''; var p=String(s).slice(0,10).split('-'); if(p.length<3)return String(s); return p[2]+'-'+(MON[(+p[1])-1]||'?')+'-'+p[0].slice(2); };   // 2026-07-29 -> 29-Jul-26
+  // (4) a stock file must be uploaded before any forecast / send analysis shows — without stock-on-hand the suggested send is meaningless
+  var hasStock=(Number(d.stock_skus)>0);
+  var upInfo;
+  if(hasStock){ var _ts=d.stock_updated_ts?new Date(d.stock_updated_ts):null;
+    if(_ts && !isNaN(_ts.getTime())){ var _days=Math.max(0,Math.floor((Date.now()-_ts.getTime())/86400000)); var _hh=String(_ts.getHours()).padStart(2,'0'), _mm=String(_ts.getMinutes()).padStart(2,'0');
+      upInfo=(d.stock_skus||0)+' SKUs &middot; uploaded <b>'+esc(fdmy(d.stock_updated_ts))+'</b> '+_hh+':'+_mm+' &middot; '+_days+' day'+(_days===1?'':'s')+' old'; }
+    else { upInfo=(d.stock_skus||0)+' SKUs &middot; uploaded '+esc(fdmy(d.stock_updated||'')); } }
+  else { upInfo='<span style="color:#b45309;font-weight:600">none uploaded yet</span>'; }
   var upBox='<div style="border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin-bottom:12px;background:#fff;display:flex;gap:12px;align-items:center;flex-wrap:wrap">'
-    +'<div><div style="font-weight:700;font-size:13px">Stock on hand</div><div style="font-size:11px;color:#94a3b8">'+(d.stock_skus||0)+' SKUs &middot; '+(d.stock_updated?('updated '+esc(d.stock_updated)):'none uploaded yet')+'</div></div>'
+    +'<div><div style="font-weight:700;font-size:13px">Stock on hand</div><div style="font-size:11px;color:#94a3b8">'+upInfo+'</div></div>'
     +'<label class="save-btn light" style="cursor:pointer">&#8593; Upload stock file<input type="file" id="zal-stock-file" accept=".csv,.xls,.xlsx" style="display:none"></label>'
     +'<span id="zal-up-msg" class="mut tiny"></span></div>';
+  function wireUpload(){ var fileEl=wrap.querySelector('#zal-stock-file');
+    if(fileEl)fileEl.onchange=function(){ var f=this.files[0]; if(!f)return; var msg=wrap.querySelector('#zal-up-msg'); msg.style.color='#64748b'; msg.textContent='Uploading…';
+      var rd=new FileReader(); rd.onload=function(){ var b64=String(rd.result).split(',')[1]||''; fetch('/api/supply/zalando/stock-upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({filename:f.name,content_base64:b64})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;return;} msg.style.color='#16a34a'; msg.textContent='✓ '+(j.count||0)+' SKUs updated'; renderZalando(); }).catch(function(e){msg.style.color='#dc2626';msg.textContent='Failed: '+((e&&e.message)||e);}); }; rd.readAsDataURL(f); }; }
+  var title='<div style="font-weight:700;font-size:15px;margin-bottom:2px">Zalando &mdash; send-to-Zalando</div>';
+  // (4) no stock file yet → warning + upload box only; no forecast/analysis
+  if(!hasStock){
+    wrap.innerHTML=title
+      +'<div style="border:1px solid #f59e0b;background:#fffbeb;border-radius:8px;padding:12px 14px;margin-bottom:12px;color:#92400e;font-size:13px;font-weight:600">&#9888; No stock file uploaded &mdash; upload a Zalando/Sello stock file to generate the send analysis. Forecast is hidden until stock-on-hand is known.</div>'
+      +upBox;
+    wireUpload(); return;
+  }
+  var covBtns=[1,2,3,4,5,6].map(function(n){return '<button class="zal-cov" data-n="'+n+'" style="font-size:11px;padding:2px 9px;border:1px solid '+(n===ZAL_COVER?'#7c3aed':'#cbd5e1')+';border-radius:4px;background:'+(n===ZAL_COVER?'#ede9fe':'#fff')+';color:'+(n===ZAL_COVER?'#5b21b6':'#475569')+';cursor:pointer;font-weight:'+(n===ZAL_COVER?'700':'400')+';margin-right:3px">'+n+'</button>';}).join('');
+  var head=title
+    +'<div style="font-size:12px;color:#666;margin-bottom:8px">Forecast is hard-coded (baked). Stock-on-hand is your uploaded Zalando/Sello file. Suggested send = <b>'+ZAL_COVER+'-month</b> cover &minus; stock, <b>no minimum</b>. Respects EU discontinue dates (no send to cover months after discontinue). Override or tick rows, then download the EAN/Quantity upload.</div>'
+    +'<div style="margin-bottom:10px;font-size:12px;color:#475569">Months cover: '+covBtns+'</div>';
+  var searchBox='<div style="margin-bottom:8px"><input id="zal-q" type="text" placeholder="Filter SKU…" value="'+esc(ZAL_Q)+'" style="width:260px;border:1px solid #cbd5e1;border-radius:6px;padding:5px 10px;font-size:12px"></div>';
+  var SKUW='min-width:320px;white-space:nowrap';
   var hdrCols=win.map(function(m){return '<th style="'+TD+'">'+_ml(m)+'</th>';}).join('');
   var body=rows.map(function(r){ var tk=!!ZAL_TICK[r.sku], ov=ZAL_OV[r.sku];
-    return '<tr'+(tk?' style="background:#f0fdf4"':'')+'><td style="padding:4px 12px 4px 0;text-align:left;font-family:ui-monospace,Menlo,monospace;min-width:230px">'+esc(r.sku)+'</td>'
+    return '<tr data-sku="'+esc(r.sku)+'"'+(tk?' style="background:#f0fdf4"':'')+'><td style="padding:4px 12px 4px 0;text-align:left;font-family:ui-monospace,Menlo,monospace;'+SKUW+'">'+esc(r.sku)+'</td>'
       +'<td style="padding:4px 12px 4px 0;text-align:left;color:#94a3b8;font-size:10px">'+esc(r.ean||'—')+'</td>'
-      +'<td style="padding:4px 12px 4px 0;text-align:left;font-size:10px;white-space:nowrap;color:'+(r.disc?'#b45309':'#cbd5e1')+'" title="EU discontinue date">'+(r.disc?esc(r.disc):'—')+'</td>'
+      +'<td style="padding:4px 12px 4px 0;text-align:left;font-size:10px;white-space:nowrap;color:'+(r.disc?'#b45309':'#cbd5e1')+'" title="EU discontinue date">'+(r.disc?esc(fdmy(r.disc)):'—')+'</td>'
       +win.map(function(m){return '<td style="'+TD+';color:#94a3b8">'+fmt(fc[r.sku][m]||0)+'</td>';}).join('')
       +'<td style="'+TD+';font-weight:600">'+fmt(r.cover)+'</td>'
       +'<td style="'+TD+'">'+fmt(r.soh)+'</td>'
@@ -8315,14 +8339,16 @@ function _zalRender(wrap,d){
       +'<td style="padding:4px 0 4px 8px;text-align:center"><input type="checkbox" class="zal-tk" data-sku="'+esc(r.sku)+'"'+(tk?' checked':'')+(r.ean?'':' disabled title="no EAN on this SKU"')+'></td></tr>';
   }).join('');
   var table='<div class="tw" style="max-width:1000px"><table style="border-collapse:collapse;font-size:12px;width:100%"><thead><tr style="color:#64748b;text-transform:uppercase;font-size:10px;border-bottom:1px solid #e2e8f0">'
-    +'<th style="padding:2px 12px 4px 0;text-align:left;min-width:230px">SKU</th><th style="padding:2px 12px 4px 0;text-align:left">EAN</th><th style="padding:2px 12px 4px 0;text-align:left">Disc (EU)</th>'+hdrCols
+    +'<th style="padding:2px 12px 4px 0;text-align:left;'+SKUW+'">SKU</th><th style="padding:2px 12px 4px 0;text-align:left">EAN</th><th style="padding:2px 12px 4px 0;text-align:left">Disc (EU)</th>'+hdrCols
     +'<th style="'+TD+'">Cover '+ZAL_COVER+'mo</th><th style="'+TD+'">Stock</th><th style="'+TD+'">Suggested</th><th style="'+TD+'">Override</th><th style="padding:2px 0 4px 8px;text-align:center">Send</th></tr></thead><tbody>'+(body||'<tr><td colspan="14" style="padding:12px;color:#94a3b8">No Zalando forecast SKUs.</td></tr>')+'</tbody></table></div>';
   var actions='<div style="margin:12px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button id="zal-all" class="save-btn light">Tick all with a suggested send</button><button id="zal-clear" class="save-btn light">Clear ticks</button><button id="zal-dl" class="save-btn" style="background:#dcfce7;border:1px solid #16a34a;color:#166534;font-weight:700">&#8595; Download Zalando upload (EAN, Quantity)</button><span id="zal-dl-msg" class="mut tiny"></span></div>';
-  wrap.innerHTML=head+upBox+actions+table;
+  wrap.innerHTML=head+upBox+searchBox+actions+table;
+  _zalFilter(wrap);   // (2) re-apply the persisted SKU filter after (re)render
   var fileEl=wrap.querySelector('#zal-stock-file');
   if(fileEl)fileEl.onchange=function(){ var f=this.files[0]; if(!f)return; var msg=wrap.querySelector('#zal-up-msg'); msg.style.color='#64748b'; msg.textContent='Uploading…';
     var rd=new FileReader(); rd.onload=function(){ var b64=String(rd.result).split(',')[1]||''; fetch('/api/supply/zalando/stock-upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({filename:f.name,content_base64:b64})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;return;} msg.style.color='#16a34a'; msg.textContent='✓ '+(j.count||0)+' SKUs updated'; renderZalando(); }).catch(function(e){msg.style.color='#dc2626';msg.textContent='Failed: '+((e&&e.message)||e);}); }; rd.readAsDataURL(f); };
   wrap.querySelectorAll('.zal-cov').forEach(function(b){ b.onclick=function(){ ZAL_COVER=+this.dataset.n; _zalRender(wrap,d); }; });
+  var qEl=wrap.querySelector('#zal-q'); if(qEl)qEl.oninput=function(){ ZAL_Q=this.value; _zalFilter(wrap); };   // (2) live SKU filter
   wrap.querySelectorAll('.zal-ov').forEach(function(inp){ inp.onchange=function(){ var v=this.value.trim(); if(v==='')delete ZAL_OV[this.dataset.sku]; else ZAL_OV[this.dataset.sku]=v; }; });
   wrap.querySelectorAll('.zal-tk').forEach(function(cb){ cb.onchange=function(){ if(this.checked)ZAL_TICK[this.dataset.sku]=true; else delete ZAL_TICK[this.dataset.sku]; var tr=this.closest('tr'); if(tr)tr.style.background=this.checked?'#f0fdf4':''; }; });
   var allBtn=wrap.querySelector('#zal-all'); if(allBtn)allBtn.onclick=function(){ rows.forEach(function(r){ if(r.ean&&_zalEff(r.sku,r.sugg)>0)ZAL_TICK[r.sku]=true; }); _zalRender(wrap,d); };

@@ -1,3 +1,9 @@
+## v26.593.0 — Zalando tab: wider SKU col + SKU search + dd-mmm-yy discontinue + upload-gated analysis
+- (1) SKU column widened to 320px + no-wrap so long SKUs fit (re-ask; 230px was still clipping).
+- (2) SKU search filter above the table — live show/hide of rows, keeps input focus (no re-render), persists across cover-toggle re-renders.
+- (3) EU discontinue date now shows dd-mmm-yy (e.g. 29-Jul-26) instead of raw ISO.
+- (4) No forecast / send-analysis until a stock file is uploaded — an amber "no stock file uploaded" warning + the upload box show instead. Once uploaded, the Stock-on-hand line shows "uploaded <dd-mmm-yy> HH:MM · N days old". Server /api/supply/zalando/data now returns the upload timestamp (stock_updated_ts).
+
 ## v26.592.0 — Fix: SMOOTH lost on refresh + Complex Rules pull-forward not firing in its window
 - DEMAND SMOOTH persistence: a smooth now saves IMMEDIATELY (was only a 60s debounced autosave), AND the 30-min auto-refresh (supply/inject.html auto-updater) now flushes unsaved forecast edits via saveForecasts() BEFORE it reloads. Previously a smooth + refresh inside the 60s window silently discarded the smoothed SKU numbers. (artifact + inject; the sendBeacon-on-unload was only best-effort.)
 - BUY Complex Rules pull-forward: a windowed "range" rule (e.g. "SS27 - 7 months up front": build cover during the Aug–Dec'26 window for the Dec'26–Jul'27 range) was being skipped for every projection month BEFORE range_from, so 3PL Target Units stayed at base cover and buys only appeared from December. Now when a rule has a window (window_from/to), the WINDOW governs activation — cover builds to the end of the range across the whole window. Range-only rules (no window) are unchanged. Fix in crCoverWeeks + crWinRule (raise-only preserved).

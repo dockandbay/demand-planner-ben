@@ -6025,10 +6025,10 @@ app.post('/api/supply/fba-transfers/refresh', async (req, res) => {
 app.get('/api/supply/zalando/data', async (req, res) => {   // /data suffix: single-segment /api/supply/zalando is caught by the :section catch-all
   try {
     const stock = {}; (await pool.query(`SELECT sku, qty FROM planner.zalando_stock`)).rows.forEach(r => { stock[r.sku] = Number(r.qty) || 0; });
-    const up = (await pool.query(`SELECT to_char(max(updated_at),'YYYY-MM-DD') d, count(*)::int n FROM planner.zalando_stock`)).rows[0] || {};
+    const up = (await pool.query(`SELECT to_char(max(updated_at),'YYYY-MM-DD') d, max(updated_at) ts, count(*)::int n FROM planner.zalando_stock`)).rows[0] || {};
     const skus = Object.keys(ZAL_DATA.forecast || {}); const eans = {};   // SKU → EAN (strip the leading apostrophe Sheets adds) for the ZALANDO_UP (EAN,Quantity) download
     if (skus.length) (await pool.query(`SELECT sku, replace(coalesce(product_ean,''), chr(39), '') ean FROM planner.products WHERE sku = ANY($1)`, [skus])).rows.forEach(r => { if (r.ean) eans[r.sku] = r.ean; });
-    res.set('Cache-Control', 'no-store').json({ ok: true, forecast: ZAL_DATA.forecast || {}, months: ZAL_DATA.months || [], stock, eans, stock_updated: up.d || null, stock_skus: up.n || 0 });
+    res.set('Cache-Control', 'no-store').json({ ok: true, forecast: ZAL_DATA.forecast || {}, months: ZAL_DATA.months || [], stock, eans, stock_updated: up.d || null, stock_updated_ts: up.ts || null, stock_skus: up.n || 0 });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Upload the combined Zalando stock file (csv/xls/xlsx). Flexible: finds the header row with a "Sku" + "…sellable_stock" column.
