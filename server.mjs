@@ -5795,12 +5795,26 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
     const ordSheet = sheetSums.find(s => s.ct === 'orders'); const cur = (ordSheet && ordSheet.sum.currency) || meta.currency || 'EUR';
     // Tax is region-specific: EU/UK book 20% VAT (Xero auto-computes the amount → left blank); AU books GST at
     // 10% inclusive so the amount is supplied (= line/11); US is tax-exempt. Default = 20% VAT.
-    const TAX = { eu_ifulfilment: { type: '20% (VAT on Expenses)', div: null }, uk_ilg: { type: '20% (VAT on Expenses)', div: null }, us_geneva: { type: 'Tax Exempt', div: null }, au_coghlans: { type: 'GST on Expenses', div: 11 } };
+    const TAX = { eu_ifulfilment: { type: '20% (VAT on Expenses)', div: null }, uk_ilg: { type: '20% (VAT on Expenses)', div: null }, us_geneva: { type: 'Zero Rated Expenses', div: null }, au_coghlans: { type: 'GST on Expenses', div: 11 } };
     const taxCfg = TAX[tpl0] || { type: '20% (VAT on Expenses)', div: null };
     const money = n => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2);
     const blines = [];   // structured bill lines — the single source for BOTH the CSV and the preview JSON
     const push = (desc, amt, code, lineCur, group) => { const a = Number(amt) || 0; blines.push({ desc, amount: a, code: code || '', taxType: taxCfg.type, taxAmount: taxCfg.div ? (Math.round(a / taxCfg.div * 100) / 100) : null, currency: (lineCur || cur), group: group || '' }); };
     const NOD = { inbound: 'Purchase Orders & Rework', returns: 'Returns', storage: 'Storage Fees', other: 'Other Fees (manual adjustment)' };
+    if (tpl0 === 'us_geneva') {
+      // Geneva books by FEE TYPE (not the generic per-order aggregation): freight per-order→CostCentre, fulfilment by
+      // fee-type, B2B split Wholesale/Faire by units, overhead→Geneva accounts, unmapped freight residual→Manual Other Fees.
+      const GENEVA_XERO = { 'COGS - US - Amazon': { code: '303.27', desc: 'Fulfilment - US - Amazon', cc: true }, 'COGS - US - Co-Brand/Custom': { code: '303.22', desc: 'Fulfilment - US - Co-Brand/Custom', cc: true }, 'COGS - US - Faire': { code: '303.21', desc: 'Fulfilment - US - Faire', cc: true }, 'COGS - US - Shopify': { code: '303.25', desc: 'Fulfilment - US - Shopify', cc: true }, 'COGS - US - Wholesale': { code: '303.24', desc: 'Fulfilment - US - Wholesale', cc: true }, 'Geneva USA - Other fees': { code: '303.26', desc: 'Geneva USA - Other fees', cc: false }, 'Geneva USA - Storage Fees - Other': { code: '309', desc: 'Geneva USA - Storage Fees - Other', cc: false } };
+      const g = await _tplGenevaAllocate(period);
+      if (!g.ok) return res.status(400).json({ error: g.error || 'Geneva allocation failed' });
+      const gm = {}; (g.costCenters || []).forEach(c => { gm[c.costCenter] = c; });
+      const CCS = ['COGS - US - Amazon', 'COGS - US - Co-Brand/Custom', 'COGS - US - Faire', 'COGS - US - Shopify', 'COGS - US - Wholesale'];   // alphabetical, matching Ben's sheet
+      CCS.forEach(n => { const c = gm[n]; if (c && Math.abs(c.freight) > 0.005) push('Freight - ' + GENEVA_XERO[n].desc, c.freight, GENEVA_XERO[n].code, null, 'cost-centre'); });   // all FREIGHT lines first
+      CCS.forEach(n => { const c = gm[n]; if (c && Math.abs(c.fulfilment) > 0.005) push('Fulfilment - ' + GENEVA_XERO[n].desc, c.fulfilment, GENEVA_XERO[n].code, null, 'cost-centre'); });   // then all FULFILMENT lines
+      ['Geneva USA - Storage Fees - Other', 'Geneva USA - Other fees'].forEach(n => { const c = gm[n]; if (!c) return; const amt = c.freight + c.fulfilment; if (Math.abs(amt) > 0.005) push(GENEVA_XERO[n].desc, amt, GENEVA_XERO[n].code, null, 'overhead'); });   // overhead accounts (single line each)
+      (g.costCenters || []).forEach(c => { if (CCS.indexOf(c.costCenter) >= 0 || /Geneva USA/.test(c.costCenter)) return; const x = GENEVA_XERO[c.costCenter] || { code: '', desc: c.costCenter }; const amt = c.freight + c.fulfilment; if (Math.abs(amt) > 0.005) push(x.desc, amt, x.code, null, 'other'); });   // any unexpected account (safety)
+      if (g.unmapped && g.unmapped.freight > 0.005) push('Manual Other Fees', g.unmapped.freight, '303.26', null, 'unmapped');   // freight of orders with no resolved CostCentre → manual plug (matches Ben's sheet)
+    } else {
     sheetSums.forEach(s => { if (s.ct === 'orders' || s.ct === 'skip') return; const t = s.sum.highlights && s.sum.highlights.total; if (t == null) return; push(NOD[s.ct] || s.sum.name, t, cacc[s.ct] || '', s.sum.currency, 'non-order'); });
     // Invoice-recap-only lines (Support / Storage / Returns / Packaging) not present on their own sheet.
     _tplInvoiceExtras(grids).forEach(x => push(x.desc, x.amount, cacc[x.costType] || '', cur, 'non-order'));
@@ -5811,9 +5825,10 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
       push('Freight - Fulfilment - ' + label, cc.freight, code, null, grp); push('Fulfilment - Fulfilment - ' + label, cc.fulfilment, code, null, grp);
     });
     if (agg.unmapped && (agg.unmapped.freight || agg.unmapped.fulfilment)) { push('Freight - Fulfilment - UNMAPPED (assign account)', agg.unmapped.freight, '', null, 'unmapped'); push('Fulfilment - Fulfilment - UNMAPPED (assign account)', agg.unmapped.fulfilment, '', null, 'unmapped'); }
+    }
     // Preview mode: return the structured bill so the UI can show "what goes to Xero" without downloading.
     if (req.body && req.body.preview) return res.json({ ok: true, bill: { contact: meta.contact, invNo, date: dd, currency: cur, region: meta.region, taxType: taxCfg.type, total: Math.round(blines.reduce((s, l) => s + l.amount, 0) * 100) / 100, lines: blines } });
-    const HDR = '*ContactName,EmailAddress,POAddressLine1,POAddressLine2,POAddressLine3,POAddressLine4,POCity,PORegion,POPostalCode,POCountry,*InvoiceNumber,*InvoiceDate,*DueDate,Total,InventoryItemCode,Description,*Quantity,*UnitAmount,*AccountCode,*TaxType,TaxAmount,TrackingName1,TrackingOption1,TrackingName2,TrackingOption2,Currency,*OriginalAmount';
+    const HDR = 'ContactName,EmailAddress,POAddressLine1,POAddressLine2,POAddressLine3,POAddressLine4,POCity,PORegion,POPostalCode,POCountry,*InvoiceNumber,*InvoiceDate,*DueDate,Total,InventoryItemCode,Description,*Quantity,*UnitAmount,*AccountCode,*TaxType,TaxAmount,TrackingName1,TrackingOption1,TrackingName2,TrackingOption2,Currency,*OriginalAmount';
     const esc = x => { x = String(x == null ? '' : x); return /[",\n]/.test(x) ? ('"' + x.replace(/"/g, '""') + '"') : x; };
     const rows = blines.map(l => [meta.contact, '', '', '', '', '', '', '', '', '', invNo, dd, dd, '', '', l.desc, '1', money(l.amount), l.code, l.taxType, (l.taxAmount == null ? '' : money(l.taxAmount)), '', '', '', '', l.currency, money(l.amount)].map(esc).join(','));
     const csv = HDR + '\n' + rows.join('\n');
