@@ -5445,10 +5445,13 @@ function _tplInvoiceExtras(grids) {
 }
 app.post('/api/supply/tpl/parse/:id', async (req, res) => {
   try {
-    const row = (await pool.query(`SELECT filename, content_type, content FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
+    const row = (await pool.query(`SELECT filename, content_type, content, tpl, period FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
     if (!row) return res.status(404).json({ error: 'not found' });
     const buf = row.content, fname = String(row.filename || '');
     const isCsv = /\.csv$/i.test(fname) || /csv/i.test(row.content_type || '');
+    // US Geneva: one workbook holds every month → only summarise the invoice period's sheets in Analyse (else 12 months of noise).
+    let genPref = null;
+    if (row.tpl === 'us_geneva') { const mm = /^\d{4}-(\d{2})/.exec(String(row.period || '')); if (mm) genPref = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'][Number(mm[1]) - 1]; }
     const sheets = [];
     if (isCsv) {
       const grid = String(buf.toString('utf8')).split(/\r?\n/).filter(l => l.length).map(l => l.split(',').map(c => c.replace(/^"|"$/g, '')));
@@ -5458,6 +5461,7 @@ app.post('/api/supply/tpl/parse/:id', async (req, res) => {
       const wb = new ExcelJS.Workbook();
       await wb.xlsx.load(buf);
       wb.eachSheet(ws => {
+        if (genPref && String(ws.name || '').toUpperCase().indexOf(genPref) < 0) return;   // Geneva: only the invoice month's sheets
         const grid = [];
         ws.eachRow({ includeEmpty: false }, r => { const arr = []; r.eachCell({ includeEmpty: true }, (cell, col) => { arr[col - 1] = _tplCellVal(cell); }); grid.push(arr); });
         if (grid.length) sheets.push(_tplGridSummary(ws.name, grid));
@@ -5469,7 +5473,36 @@ app.post('/api/supply/tpl/parse/:id', async (req, res) => {
 // 3PL invoice — Phase 2: map each order line's Reference to its Cin7 sales-order CostCenter, then group the
 // freight (Shipping Fee) + fulfilment (Total Excl Shipping) cost by CostCenter. 2-pass match (Reference, then
 // CustomerOrderNo). Read-only Cin7 lookups. Needs CIN7 creds in the environment.
-async function _tplOrderRows(buf, isCsv) {
+// US Geneva (G10 Inc.) uses a different layout to iFulfilment/Coghlans: per-order FULFILMENT fees on a
+// "<MONTH> - Pick Detail" sheet and per-order FREIGHT (Carrier Amount Due) on a "<MONTH> - Small Parcel" sheet,
+// with ONE workbook holding every month. Merge the two sheets for the invoice's period by OrderID → the same
+// {reference, shipping(freight), fulfilment} rows the mapper already consumes. (Overhead lines — storage, packaging,
+// admin, embroidering, personalization, returns, SSCC, labour — are not per-order; they go in as recap lines.)
+async function _tplGenevaRows(buf, period) {
+  const ExcelJS = (await import('exceljs')).default;
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf);
+  const MON = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  const mm = /^\d{4}-(\d{2})/.exec(String(period || '')); const pref = mm ? MON[Number(mm[1]) - 1] : null;
+  const gridOf = ws => { const g = []; ws.eachRow({ includeEmpty: false }, r => { const a = []; r.eachCell({ includeEmpty: true }, (c, col) => { a[col - 1] = _tplCellVal(c); }); g.push(a); }); return g; };
+  let pick = null, parcel = null;   // with a period → only that month's sheets; without → the LATEST month wins (last match)
+  wb.eachSheet(ws => { const n = String(ws.name || '').toUpperCase(); if (pref && n.indexOf(pref) < 0) return;
+    if (n.indexOf('PICK') >= 0) pick = gridOf(ws);
+    else if (n.indexOf('PARCEL') >= 0 || n.indexOf('SMALL') >= 0) parcel = gridOf(ws); });
+  const byOrder = {}; const ensure = ref => { ref = String(ref == null ? '' : ref).trim(); if (!ref) return null; if (!byOrder[ref]) byOrder[ref] = { reference: ref, shipping: 0, fulfilment: 0 }; return byOrder[ref]; };
+  if (pick && pick.length) {   // FULFILMENT = sum of every "… Fee" column, per OrderID
+    const hdr = (pick[0] || []).map(x => String(x == null ? '' : x).trim());
+    const oi = hdr.findIndex(h => /order\s*id/i.test(h)); const feeCols = []; hdr.forEach((h, i) => { if (/fee$/i.test(h)) feeCols.push(i); });
+    for (let r = 1; r < pick.length; r++) { const row = pick[r] || []; const o = ensure(oi >= 0 ? row[oi] : null); if (!o) continue; feeCols.forEach(ci => { o.fulfilment += _tplNum(row[ci]) || 0; }); }
+  }
+  if (parcel && parcel.length) {   // FREIGHT = sum of the per-row "Carrier Amount Due", per OrderID; the appended pivot summary has no OrderID → skipped
+    const hdr = (parcel[0] || []).map(x => String(x == null ? '' : x).trim());
+    const oi = hdr.findIndex(h => /order\s*id/i.test(h)); const ci = hdr.findIndex(h => /carrier\s*amount\s*due/i.test(h));
+    if (oi >= 0 && ci >= 0) for (let r = 1; r < parcel.length; r++) { const row = parcel[r] || []; const ref = row[oi]; if (ref == null || !/^[A-Za-z0-9]/.test(String(ref).trim())) continue; const amt = _tplNum(row[ci]); if (amt == null) continue; const o = ensure(ref); if (o) o.shipping += amt; }
+  }
+  return Object.values(byOrder);
+}
+async function _tplOrderRows(buf, isCsv, tpl, period) {
+  if (tpl === 'us_geneva' && !isCsv) { try { const g = await _tplGenevaRows(buf, period); if (g.length) return g; } catch (e) {} }
   let grids = [];
   if (isCsv) {
     grids = [{ grid: String(buf.toString('utf8')).split(/\r?\n/).filter(l => l.length).map(l => l.split(',').map(c => c.replace(/^"|"$/g, ''))) }];
@@ -5524,11 +5557,11 @@ function _tplAggregateAccounts(orders, refCC) {
 }
 app.post('/api/supply/tpl/map/:id', async (req, res) => {
   try {
-    const row = (await pool.query(`SELECT filename, content_type, content, tpl FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
+    const row = (await pool.query(`SELECT filename, content_type, content, tpl, period FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
     if (!row) return res.status(404).json({ error: 'not found' });
     const tpl0 = row.tpl || null;
     const isCsv = /\.csv$/i.test(row.filename || '') || /csv/i.test(row.content_type || '');
-    const orders = await _tplOrderRows(row.content, isCsv);
+    const orders = await _tplOrderRows(row.content, isCsv, tpl0, row.period);
     if (!orders.length) return res.json({ ok: false, error: 'No order rows with a Reference + Shipping Fee column were found to map.' });
     const refs = [...new Set(orders.map(o => o.reference).filter(Boolean))];
     // FBA*/TRF* are assigned by standing rule (not Cin7). Only the remaining refs need a Cin7 CostCentre lookup.
@@ -5616,10 +5649,10 @@ app.post('/api/supply/tpl/cin7-sweep/:id', async (req, res) => {
     [tpl0, 'ref-sweep', null, null, orders || 0, 'ref-sweep', status, error ? String(error).slice(0, 500) : null, calls || 0]).catch(() => {});
   try {
     const auth = cin7Auth(); if (!auth) { await logRun(0, 'error', 'No CIN7 credentials', 0); return res.json({ ok: false, error: 'Cin7 is not configured in this environment (no CIN7 credentials).' }); }
-    const row = (await pool.query(`SELECT filename, content_type, content FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
+    const row = (await pool.query(`SELECT filename, content_type, content, tpl, period FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
     if (!row) return res.status(404).json({ error: 'not found' });
     const isCsv = /\.csv$/i.test(row.filename || '') || /csv/i.test(row.content_type || '');
-    const orders = await _tplOrderRows(row.content, isCsv);
+    const orders = await _tplOrderRows(row.content, isCsv, row.tpl, row.period);
     const refs = [...new Set(orders.map(o => o.reference).filter(Boolean))];
     if (!refs.length) return res.json({ ok: false, error: 'No order references found on this invoice to sweep.' });
     const covOf = async keys => { const have = (await pool.query(`SELECT reference, customer_order_no FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [keys])).rows; const s = new Set(); have.forEach(h => { if (h.reference) s.add(h.reference); if (h.customer_order_no) s.add(h.customer_order_no); }); return s; };
@@ -5667,7 +5700,7 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
     if (!row) return res.status(404).json({ error: 'not found' });
     const isCsv = /\.csv$/i.test(row.filename || '') || /csv/i.test(row.content_type || '');
     // order lines → cost-centre freight/fulfilment (map against the imported Cin7 cache)
-    const orders = await _tplOrderRows(row.content, isCsv);
+    const orders = await _tplOrderRows(row.content, isCsv, tpl0, period);
     const refs = [...new Set(orders.map(o => o.reference).filter(Boolean))];
     let refCC = {};
     if (refs.length) { const needCin7 = refs.filter(r => !_tplRefOverride(r, tpl0)); const dbrows = needCin7.length ? (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [needCin7])).rows : []; const byRef = {}, byCon = {}; dbrows.forEach(r => { const cc = String(r.cc || '').trim(); if (r.reference) byRef[r.reference] = cc; if (r.customer_order_no) byCon[r.customer_order_no] = cc; }); refs.forEach(rf => { const ov = _tplRefOverride(rf, tpl0); refCC[rf] = ov || ((byRef[rf] != null) ? byRef[rf] : (byCon[rf] != null ? byCon[rf] : null)); }); }
