@@ -3212,9 +3212,10 @@
         return '<div class="cli-xd-exc" style="margin:6px 0 4px;background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;border-radius:6px;padding:8px 11px;font-size:12px;line-height:1.45"><b>⚠ Crossdock destination exception</b><br>This PO carries crossdock SKUs but its ship-to is <b>'+esc(r.country||'—')+'</b> (Other). Crossdock must go to a real delivery market — set the Ship-to country to the actual <b>delivery country (UK, US, EU, AU or CA)</b>, not the generic “Other”.</div>'; })()
       +(function(){ var xs=(d&&d.crossdock_shipped)||[]; if(!xs.length)return '';
         return cliRow('Crossdock shipped <span class="mut tiny">(qty entered by supplier in portal)</span>', xs.map(function(x){return esc(x.sku)+': <b>'+(x.qty!=null&&x.qty!==''?units(x.qty):'—')+'</b>';}).join(' &nbsp;·&nbsp; ')); })()
-      +cliRow('Labels <span class="mut tiny">(A4 print mould)</span>',
-          '<button class="save-btn po-dl-xd" data-po="'+esc(r.po)+'" title="crossdock box labels for this PO\'s crossdock SKUs (PO / sales order / client overlaid) — same as the supplier portal">⤓ Crossdock</button> <span class="mut tiny">(Ships With Supplier labels are on the SHIPMENTS tab)</span>'
-          +(/paper\s*store/i.test(r.client||'')?' <button class="save-btn po-dl-ps" data-po="'+esc(r.po)+'" style="background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;font-weight:700" title="Paper Store carton labels — one label per carton (full + odd/mixed), client PO # / DC format">⤓ Paper Store carton labels</button>':''))
+      +cliRow('Labels <span class="mut tiny">(A4 print mould)</span>', (function(){ var btns=[];
+          if(xdList.length) btns.push('<button class="save-btn po-dl-xd" data-po="'+esc(r.po)+'" title="crossdock box labels for this PO\'s crossdock SKUs (PO / sales order / client overlaid) — same as the supplier portal">⤓ Crossdock</button>');   // only when crossdock SKUs are assigned
+          if(r.client_label_format==='paper_store') btns.push('<button class="save-btn po-dl-ps" data-po="'+esc(r.po)+'" style="background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;font-weight:700" title="Paper Store carton labels — one label per carton (full + odd/mixed), client PO # / DC format">⤓ Paper Store carton labels</button>');   // only for a key account linked to the Paper Store label format (CONFIG ▸ Key Accounts)
+          return (btns.length?btns.join(' '):'<span class="mut tiny">— none for this PO</span>')+' <span class="mut tiny">(Ships With Supplier labels are on the SHIPMENTS tab)</span>'; })())
       +cliRow('Attachments <span class="mut tiny">(client / FBA docs)</span>',
           (function(){ var cd=(d&&d.client_docs)||[]; return (cd.length?cd.map(function(x){return '<a href="/api/supply/portal-attachment/'+x.id+'" target="_blank" rel="noopener">'+esc(x.filename||'view')+'</a>';}).join(' · ')+' &nbsp; ':'<span class="mut tiny">none yet — </span>')
             +'<input type="file" class="cli-attach" data-po="'+esc(r.po)+'" style="font-size:11px">'; })())
@@ -6372,6 +6373,7 @@
               +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px">'
               +lblBlk('Delivery address','Full address this client ships to.', ta('address', fieldOf(r,'address'),'Street, city, postcode, country…'))
               +lblBlk('Client requirements','Any special handling / compliance the client demands.', ta('client_requirements', fieldOf(r,'client_requirements'),'e.g. GS1 labels, appointment booking…'))
+              +lblBlk('Carton label format','Client-specific carton labels on this client’s POs (Client/FBA tab).', '<select class="ka-in" data-f="carton_label_format" style="width:100%;max-width:280px;box-sizing:border-box;padding:6px 9px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px"><option value="">None (standard)</option><option value="paper_store"'+(fieldOf(r,'carton_label_format')==='paper_store'?' selected':'')+'>Paper Store carton labels</option></select>')
               +'</div>'
               +'<div style="border-top:1px solid #eef2f7;margin:2px 0 14px"></div>'
               +'<div style="font-weight:700;font-size:13px;color:#334155;margin-bottom:10px">Forwarder details</div>'

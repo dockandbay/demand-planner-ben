@@ -1,3 +1,8 @@
+## v26.603.0 — Paper Store labels: key-account-linked gating + hide Crossdock when no crossdock SKUs
+- CONFIG ▸ Key Accounts: new "Carton label format" dropdown (None / Paper Store carton labels). Migration 185 adds planner.key_accounts.carton_label_format; KA_FIELDS += carton_label_format.
+- The "Paper Store carton labels" button on a PO's Client/FBA ▸ Labels row now shows ONLY when the PO's client is a key account linked to 'paper_store' (was a hardcoded name match). PO_ROWS_SQL exposes client_label_format (key_accounts join by client name).
+- The "Crossdock" labels button now shows ONLY when crossdock SKUs are assigned to the PO (was always shown, even with none). If neither label applies, the Labels row shows "— none for this PO".
+- Migration 185 applied to sandbox; Paper Store key account flagged carton_label_format='paper_store' for testing.
 ## v26.602.0 — SCENARIO ▸ B2B: shared recent analyses + SKU picker + default cover 9wk
 - "💾 Save & share" button (appears after a run) stores the analysis to a SHARED log (planner.b2b_analysis — migration 184). A "Recent analyses (shared with the team)" panel lists the last 20 (client · market · required-by · #SKUs · by whom · when). Click one → repopulates client/market/date/SKUs and shows the saved point-in-time result with a "↻ Re-run live" button.
 - SKU picker (like samples): search box → results with checkbox + qty → "+ Add selected" appends "SKU, qty" lines into the entry box (coexists with paste entry). All-SKU search (not supplier-scoped) via new GET /api/scenario/b2b/sku-search.

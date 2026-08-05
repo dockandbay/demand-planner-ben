@@ -3284,6 +3284,7 @@ app.post('/api/supply/supplier-create', async (req, res) => {
 // Direct-to-Client details when selected. List / create / edit / delete, plus apply-to-PO.
 const KA_FIELDS = {
   name: 'text', client_requirements: 'text', address: 'text', pack_pallet_notes: 'text', pack_other_notes: 'text',
+  carton_label_format: 'text',
   forwarder_name: 'text', forwarder_email: 'text', forwarder_phone: 'text',
   pack_polybags: 'boolean', pack_polybags_notes: 'text', pack_dnb_barcodes: 'boolean', pack_dnb_barcodes_notes: 'text',
   pack_rfid_barcodes: 'boolean', pack_rfid_barcodes_notes: 'text', pack_dnb_carton: 'boolean', pack_dnb_carton_notes: 'text',
@@ -9941,6 +9942,7 @@ const PO_ROWS_SQL = `
             coalesce(dtc_custom,false) dtc_custom, coalesce(dtc_key_account,false) dtc_key_account,
             coalesce((SELECT pcd.custom_dev_ref FROM planner.purchase_orders pcd WHERE pcd.po=calc4.po),'') custom_dev_ref,   -- custom-order product developments (CSV of product_dev_items.ref); subquery since calc4 doesn't forward the column
             -- Forwarder contact details — read LIVE from the matching key account (by client name), not snapshotted
+            (SELECT coalesce(ka.carton_label_format,'') FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) client_label_format,   -- key-account link to a client-specific carton-label format (e.g. 'paper_store')
             (SELECT coalesce(ka.forwarder_name,'')  FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) forwarder_name,
             (SELECT coalesce(ka.forwarder_email,'') FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) forwarder_email,
             (SELECT coalesce(ka.forwarder_phone,'') FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) forwarder_phone,
