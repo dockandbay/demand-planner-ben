@@ -7892,23 +7892,23 @@
     function T(x,y,s,o){ return svgText(x,y,s,o); }
     var L=28, RX=560, RV=650;   // left margin, right-block label x, right-block value x
     el.push('<rect x="0" y="0" width="'+W+'" height="'+H+'" fill="#fff"/><rect x="6" y="6" width="'+(W-12)+'" height="'+(H-12)+'" fill="none" stroke="#111" stroke-width="2"/>');
-    var y=48;
+    var y=54;
     el.push(T(L,y,hdr.client,{size:26,bold:true}));
-    el.push(T(W-26,y,(c.odd?'ODD / MIXED CARTON':'MASTER CARTON'),{size:18,bold:true,fill:'#dc2626',anchor:'end'})); y+=30;
-    el.push(T(L,y,'PO# '+hdr.po_ref+' - '+hdr.dc+' DISTRIBUTION CENTER',{size:15,bold:true})); y+=22;
-    if(hdr.a1)el.push(T(L,y,hdr.a1,{size:13})); y+=19; if(hdr.a2)el.push(T(L,y,hdr.a2,{size:13})); y+=14;
-    el.push('<line x1="'+L+'" y1="'+y+'" x2="'+(W-26)+'" y2="'+y+'" stroke="#111" stroke-width="1.2"/>'); y+=30;
+    el.push(T(W-26,y,(c.odd?'ODD / MIXED CARTON':'MASTER CARTON'),{size:18,bold:true,fill:'#dc2626',anchor:'end'})); y+=38;
+    el.push(T(L,y,'PO# '+hdr.po_ref+' - '+hdr.dc+' DISTRIBUTION CENTER',{size:15,bold:true})); y+=27;
+    if(hdr.a1)el.push(T(L,y,hdr.a1,{size:13})); y+=23; if(hdr.a2)el.push(T(L,y,hdr.a2,{size:13})); y+=20;
+    el.push('<line x1="'+L+'" y1="'+y+'" x2="'+(W-26)+'" y2="'+y+'" stroke="#111" stroke-width="1.2"/>'); y+=38;
     function row(lbl,val,rlbl,rval,opt){ opt=opt||{};
       el.push(T(L,y,lbl,{size:13,bold:true})); el.push(T(L+92,y,val,{size:opt.vsize||14,bold:!!opt.vbold}));
       if(rlbl!=null){ el.push(T(RX,y,rlbl,{size:13,bold:true})); el.push(T(RV,y,rval,{size:13})); }
-      y+=opt.gap||27; }
+      y+=opt.gap||35; }   // rows spread to fill the box
     row('CTN#', c.ctn+'    OF    '+c.total, 'N.W', (c.nw?c.nw+' lbs':''), {vbold:true});
     row('ITEM#', c.sku, 'G.W', (c.gw?c.gw+' lbs':''), {vbold:true,vsize:15});
     var desc=String(c.desc||''); if(desc.length>60)desc=desc.slice(0,58)+'…';
     row('DESC', desc, 'MEAS', (c.meas||''), {vsize:12});
     row('UPC', String(c.upc||''), null, null, {vsize:13});
     row('MASTER QTY', c.master_qty+'    PCS', null, null, {vbold:true,vsize:15});
-    row('INNER QTY', 'PCS', null, null, {vsize:13});
+    row('INNER QTY', '', null, null, {vsize:13});   // blank — no "PCS" when there's no inner qty (Ben)
     return '<svg xmlns="http://www.w3.org/2000/svg" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">'+el.join('')+'</svg>';
   }
   function paperStoreLabels(po,btn){ var orig=btn?btn.textContent:''; if(btn){btn.disabled=true;btn.textContent='Loading…';}

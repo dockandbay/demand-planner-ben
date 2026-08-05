@@ -1,3 +1,7 @@
+## v26.607.0 — Paper Store labels: blank INNER QTY (no "PCS") + spread lines to fill the box
+- INNER QTY no longer prints "PCS" when there is no inner quantity (blank). MASTER QTY keeps its "N PCS".
+- Increased the vertical spacing (header + row gaps) so the label content fills the box more evenly top-to-bottom.
+
 ## v26.606.0 — Paper Store carton labels: 3-up per A4 page (matches template tiling)
 - Now tiles 3 carton labels per A4 page (was one per page), matching the source PDF layout. Labels render to canvases then composite onto each A4 page; last page holds the remainder. (Ben: continue with 3, changeable later.)
 
