@@ -1,3 +1,6 @@
+## v26.563 — Auto Forecast (F3): normalise goods cost to USD
+- The payments-plan cash-out is a USD report (GBP report = USD ÷ usd_gbp_rate). Costs are held in each supplier default_currency; now every subcategory unit cost is converted to USD via its dominant supplier currency (USD ×1, GBP ×usd_gbp_rate, AUD ×usd_aud_rate). Freight (container tiers) + duty were already USD. New config key usd_aud_rate (default 0.66 USD/AUD) alongside usd_gbp_rate. Fixes the currency-blended USD total.
+
 ## v26.562 — Deep-link sub-tab slugs: consistent <ref>/<tab> for Product, Samples, PO
 - Product detail: #/product/<ref>/<tab> (e.g. /product/SS27-TOWLB-BL-01/timeline) — written on open + tab switch, restored on load. /product/plan|reports still the grid/reports sub-nav.
 - Samples detail: #/supply/samples/<ref>/<tab> — open + tab switch write it; deep-link opens the sample on that tab.

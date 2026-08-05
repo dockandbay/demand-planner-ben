@@ -7756,7 +7756,7 @@ async function computeAutoForecast(markets) {
           FROM planner.purchase_order_lines l JOIN planner.purchase_orders po ON po.po=l.po
           JOIN planner.products pr ON pr.sku=l.sku
           WHERE pr.subcategory IS NOT NULL AND coalesce(po.supplier_name,'')<>'' GROUP BY 1,2) q WHERE rn=1`),
-      pool.query(`SELECT name,code,start_deposit_pct,completion_pct,balance_pct,production_days,credit_days FROM planner.suppliers`),
+      pool.query(`SELECT name,code,start_deposit_pct,completion_pct,balance_pct,production_days,credit_days, upper(coalesce(nullif(default_currency,''),'USD')) ccy FROM planner.suppliers`),
       // FREIGHT (Ben): container tiers per destination/market — a delivery month's pallets are packed into the
       // cheapest container combo (seaEstSrv) after the loop. Replaces the flat freight %.
       pool.query(`SELECT upper(destination) d, json_agg(json_build_object('cap',pallets,'cost',cost,'sz',container_size)) tiers
@@ -7794,6 +7794,13 @@ async function computeAutoForecast(markets) {
     const unitCost={}; costRows.rows.forEach(r=> unitCost[r.s]=Number(r.c));
     const supName={}; supRows.rows.forEach(r=> supName[r.s]=r.nm);
     const terms=termsRows.rows.reduce((a,t)=>{a[t.name]=t;return a;},{});
+    // F3 — NORMALISE goods cost to USD (the payments plan is a USD report; the GBP report divides by usd_gbp_rate).
+    // Costs are held in each supplier's default_currency; convert every subcategory's unit cost to USD using its
+    // dominant supplier's currency. Rates are USD-per-unit-of-currency (usd_gbp_rate / usd_aud_rate in CONFIG).
+    const _usdPerGbp = await gbpRate();
+    const _usdPerAud = await (async () => { try { const r = await pool.query(`SELECT value FROM planner.app_settings WHERE key='usd_aud_rate'`); const v = parseFloat(r.rows[0] && r.rows[0].value); return (isFinite(v) && v > 0) ? v : 0.66; } catch { return 0.66; } })();
+    const _usdRate = { USD: 1, GBP: _usdPerGbp, AUD: _usdPerAud };
+    Object.keys(unitCost).forEach(s => { const ccy = (terms[supName[s]] || {}).ccy || 'USD'; const fx = _usdRate[ccy] || 1; if (fx !== 1) unitCost[s] = unitCost[s] * fx; });
     const freightTiers={}; frtRows.rows.forEach(r=> freightTiers[r.d]=r.tiers||[]);
     const dutyPct={}; dutyRows.rows.forEach(r=> dutyPct[(r.category||'')+'|'+r.country]=Number(r.duty_pct)||0);   // category|COUNTRY → %
     const ppu={}; ppuRows.rows.forEach(r=> ppu[r.s]=(Number(r.u)>0)?(Number(r.pall)/Number(r.u)):0);              // pallets per unit, per subcat
