@@ -764,7 +764,7 @@
   var _opExc={count:0,byPo:{}};   // ORDER PLAN unapproved exceptions (partials/suprisk/disc/country) per PO → nav counter + sub-tab badge
   var cache={},current=null,depRefs=null,poBy={},shipBy={},batchList=[],prodList=[],shipList=[],supplierList=[],branchList=[],crossdockList=[],poLookupList=[],supplierCcy={};
   var _navToken=0;   // bumps on every section / PO sub-tab navigation; async renders check it so a slow fetch from a view you've left can't overwrite the newer one (fixes fast-clicking loading the wrong view)
-  var _pendingPO=null,_pendingPOTab=null,_pendingShip=null,_pendingOP=null,_pendingDep=null,_pendingSampleRef=null;
+  var _pendingPO=null,_pendingPOTab=null,_pendingShip=null,_pendingOP=null,_pendingDep=null,_pendingSampleRef=null,_pendingSampleTab=null;
   var _poInclArch=false;   // "Show archived" toggle on the PO grid → appends ?includeArchived=1 (archive cutoff set in CONFIG ▸ Admin ▸ General)   // cross-view navigation: expand this PO / shipment, pre-filter order plan / deposit register, after the target view renders
   var _poRefresh=null;   // set by the PO grid to refresh itself in place (no full section reload) after an assign
   var _poShowClient=false;   // PO grid: show Client name + Client sales ref columns when the DIRECT pill is active
@@ -8126,7 +8126,7 @@
   // .../dates/PO-…). Map the internal potab keys to URL-friendly slugs both ways.
   var POTAB_SLUG={pay:'payments',dates:'dates',client:'client',oplan:'order-plan',shipments:'shipments',documents:'documents',masterdata:'master-data',landed:'landed',timeline:'timeline',linked:'linked'};
   var POTAB_FROM_SLUG={}; Object.keys(POTAB_SLUG).forEach(function(k){POTAB_FROM_SLUG[POTAB_SLUG[k]]=k;});
-  function writePoTabHash(po,tab){ if(!po)return; writeHash(['supply','purchase-orders',POTAB_SLUG[tab]||tab,po]); }
+  function writePoTabHash(po,tab){ if(!po)return; writeHash(['supply','purchase-orders',po,POTAB_SLUG[tab]||tab]); }   // #/supply/purchase-orders/<PO>/<tab-slug>
   // Friendly top-level view URLs: planning→#/demand/<sub>, exec→#/reports/<sub>, others as-is.
   function writeViewHash(v){
     if(v==='planning'){ var _dv=(typeof DEMAND_VIEW!=='undefined'&&DEMAND_VIEW)||'plan'; var _dinp=['targets','keyaccounts','calendar','revenue']; writeHash(_dinp.indexOf(_dv)>=0?['demand','inputs',_dv]:['demand',_dv]); }   // input views deep-link as #/demand/inputs/<slug>
@@ -8150,18 +8150,21 @@
       else if(sec==='payments'){ showPoSub(seg[2]&&PAY_SUB_KEYS.indexOf(seg[2])>=0?seg[2]:'paydue'); }   // PAYMENTS umbrella (default Payments Due)
       else if(sec==='config'){ if(seg[2])CONFIG_SUB=seg[2]; enterConfig(); }   // legacy #/supply/config → top-level CONFIG
       else if(sec==='purchase-orders'){ var _s2=seg[2]?decodeURIComponent(seg[2]):null, _s3=seg[3]?decodeURIComponent(seg[3]):null;
-        if(_s2 && POTAB_FROM_SLUG[_s2] && _s3){ _pendingPO=_s3; _pendingPOTab=POTAB_FROM_SLUG[_s2]; showPoSub('plan'); }   // deep-link a PO detail sub-tab: .../<slug>/<PO>
+        if(_s2 && POTAB_FROM_SLUG[_s2] && _s3){ _pendingPO=_s3; _pendingPOTab=POTAB_FROM_SLUG[_s2]; showPoSub('plan'); }   // LEGACY deep-link: .../<slug>/<PO>
         else if(_s2 && PO_SUB_KEYS.indexOf(_s2)>=0){ showPoSub(_s2); }   // PURCHASE ORDERS umbrella sub-tab
         else if(_s2 && PAY_SUB_KEYS.indexOf(_s2)>=0){ showPoSub(_s2); }   // legacy /supply/purchase-orders/<deposits|other|paydue|payreport> → PAYMENTS umbrella
-        else { if(_s2)_pendingPO=_s2; showPoSub('plan'); } }   // just a PO → open it in PLAN, default tab
+        else if(_s2){ _pendingPO=_s2; if(_s3 && POTAB_FROM_SLUG[_s3])_pendingPOTab=POTAB_FROM_SLUG[_s3]; showPoSub('plan'); }   // NEW: .../<PO>/<tab-slug> (or just .../<PO>)
+        else { showPoSub('plan'); } }
       else if(sec==='shipments'){ if(seg[2])_pendingShip=decodeURIComponent(seg[2]); showPoSub('shipments'); }   // legacy: shipments moved under purchase-orders
-      else if(sec==='samples'){ if(seg[2])_pendingSampleRef=decodeURIComponent(seg[2]); selectSection('samples'); }   // #/supply/samples/<ref> → open & expand that sample
+      else if(sec==='samples'){ if(seg[2])_pendingSampleRef=decodeURIComponent(seg[2]); if(seg[3])_pendingSampleTab=decodeURIComponent(seg[3]); selectSection('samples'); }   // #/supply/samples/<ref>[/<tab>] → open & expand that sample on the tab
       else selectSection(sec);
     } else if(seg[0]==='config'){ if(seg[1])CONFIG_SUB=seg[1]; if(seg[1]==='portal'&&seg[2])_pendingPortalSup=decodeURIComponent(seg[2]); if(typeof enterConfig==='function')enterConfig(); }
     else if(seg[0]==='scenario'){ if(typeof showScenario==='function'){ showScenario(); if(seg[1])scenSelect(seg[1]); } }
     else if(seg[0]==='demand'){ if(typeof DEMAND_VIEW!=='undefined'){ if(seg[1]==='inputs'&&seg[2])DEMAND_VIEW=seg[2]; else if(seg[1])DEMAND_VIEW=seg[1]; } var _db=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]'); if(_db)_db.click(); }   // #/demand/inputs/<slug> deep-links an input view
     else if(seg[0]==='reports'){ if(seg[1]&&typeof REPORT_VIEW!=='undefined')REPORT_VIEW=seg[1]; var _rb=document.querySelector('#view-tabs-row .view-toggle[data-view="exec"]'); if(_rb)_rb.click(); }
-    else if(seg[0]==='product'){ if(typeof showProduct==='function'){ if(seg[2])_pendingProdRef=decodeURIComponent(seg[2]); showProduct(); selectProductSub(seg[1]||'plan'); } }
+    else if(seg[0]==='product'){ if(typeof showProduct==='function'){ showProduct();
+      if(seg[1]&&seg[1]!=='plan'&&seg[1]!=='reports'){ _pendingProdRef=decodeURIComponent(seg[1]); if(seg[2])_pendingProdTab=decodeURIComponent(seg[2]); selectProductSub('plan'); }   // #/product/<ref>[/<tab>]
+      else { if(seg[2])_pendingProdRef=decodeURIComponent(seg[2]); selectProductSub(seg[1]||'plan'); } } }   // #/product/<plan|reports>[/<ref>] (legacy)
     else if(seg[0]==='buy-move'||seg[0]==='buy'||seg[0]==='fba'){
       // BUY & MOVE group. New URLs: #/buy-move/<buy|fba|transfer>. Legacy #/buy/<ctry>, #/fba/<ctry> still work.
       var sub, ctry=null;
@@ -8622,7 +8625,7 @@
         try{ writeHash(!open && b.dataset.ref ? ['supply','samples',b.dataset.ref] : ['supply','samples']); }catch(e){}   // shareable slug for the open sample
         if(!open && !ex.dataset.loaded){ ex.dataset.loaded='1'; loadSampleDetail(b.dataset.id,i); } }; });
       // cross-nav / deep link (#/supply/samples/<ref>): expand the requested sample once the grid is rendered
-      if(_pendingSampleRef){ var _pr=_pendingSampleRef; _pendingSampleRef=null; var _pb=c.querySelector('.samp-exp[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(_pr):_pr)+'"]'); if(_pb){ _pb.click(); try{ _pb.closest('tr').scrollIntoView({block:'center',behavior:'smooth'}); }catch(e){} } }
+      if(_pendingSampleRef){ var _pr=_pendingSampleRef; _pendingSampleRef=null; var _pb=c.querySelector('.samp-exp[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(_pr):_pr)+'"]'); if(_pb){ _pb.click(); try{ _pb.closest('tr').scrollIntoView({block:'center',behavior:'smooth'}); }catch(e){} } _pendingSampleTab=null; }
       samplesNavBadge(rows);
     }
     if(!_poActStateLoaded)loadPoActState(function(){ view(); });   // load snooze state so exception badges reflect snoozes
@@ -8643,7 +8646,7 @@
     }).catch(function(){}); }
   function loadSampleDetail(id,i){ var box=document.getElementById('sampdet-'+i);
     fetch('/api/supply/sample-detail/'+id).then(function(r){return r.json();}).then(function(d){ if(!d||d.error){box.innerHTML='<div style="color:#dc2626">'+esc((d&&d.error)||'load failed')+'</div>';return;}
-      var s=d.sample, ep='/api/supply/sample/'+id, editing=false, curTab=(box._sampTab||'details');
+      var s=d.sample, ep='/api/supply/sample/'+id, editing=false, curTab=(box._sampTab||_pendingSampleTab||'details'); box._sampTab=curTab;
       var slines=(d.lines||[]).map(function(l){return {sku:l.sku,qty:l.qty};});
       var PURP=['sales','product','photography','marketing','operations'];
       function fld(f,val,w,ph){ return '<span style="display:inline-block;margin:0 6px 5px 0;vertical-align:top"><span style="display:block;font-size:9px;text-transform:uppercase;letter-spacing:.03em;color:#94a3b8;margin-bottom:1px">'+esc(ph||f)+'</span><input class="fci txt samp-fld" data-field="'+f+'" value="'+esc(val||'')+'" style="width:'+(w||150)+'px"></span>'; }
@@ -8737,7 +8740,7 @@
               return '<div class="sect-h" style="font-size:13px">Timeline <span class="mut tiny" style="font-weight:400">— shared with the supplier; record of change is admin-only</span>'
                 +' <label style="font-size:11px;font-weight:400;margin-left:8px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="samp-hide-chg"'+(_h?' checked':'')+' style="vertical-align:middle;margin-right:3px">hide record of change</label></div>'
                 +'<div class="sp-timeline" data-ref="'+esc(s.ref)+'"></div>'; })());
-        box.querySelectorAll('.samp-tab').forEach(function(t){ t.onclick=function(){ curTab=t.dataset.st; box._sampTab=curTab;
+        box.querySelectorAll('.samp-tab').forEach(function(t){ t.onclick=function(){ curTab=t.dataset.st; box._sampTab=curTab; try{ writeHash(curTab==='details'?['supply','samples',s.ref]:['supply','samples',s.ref,curTab]); }catch(e){}
           box.querySelectorAll('.samp-tab').forEach(function(x){x.classList.toggle('active',x===t);});
           box.querySelectorAll('.samp-panel').forEach(function(p){p.style.display=(p.dataset.st===curTab)?'':'none';}); }; });
         try{ bindActMark(box); }catch(e){}   // wire the inline Ⓐ tooltip + SNOOZE ▾ (same as the PO drawer)
@@ -9523,7 +9526,7 @@
     if(m){ t=m[1].replace(/[.\s]+$/,''); h=m[2]; }
     return {t:t, h:h||'This SUPPLY section.'}; };
   // ════════ PRODUCT module (top-level; migration 128) ════════
-  var PRODUCT_SUB='plan', _prodCfg=null, _prodDetail=null, _prodSeed=null, _prodDetailTab='master', _prodDetailBox=null, _pendingProdRef=null, _prodDraw=null, _prodRows=null;
+  var PRODUCT_SUB='plan', _prodCfg=null, _prodDetail=null, _prodSeed=null, _prodDetailTab='master', _prodDetailBox=null, _pendingProdRef=null, _pendingProdTab=null, _prodDraw=null, _prodRows=null;
   // Per-tab JSON cache: switching between a product's tabs used to re-fetch every click (slow on the remote pooler).
   // Cache the payload per URL (2-min TTL); _prodJsonBust(ref) clears a product's entries after a write (upload/note/sample).
   var _prodJsonCache={};
@@ -9934,7 +9937,7 @@
               var rc=g.querySelector('.pg-ref[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(rc){ rc.innerHTML=esc(ro.ref)+prodComboBadge(ro);
                 var nb=rc.querySelector('.pg-actbadge'); if(nb)nb.onclick=function(e){ e.stopPropagation(); var pb=g.querySelector('.pg-open[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(pb)pb.click(); }; }
             }).catch(function(){}); }); }; });
-        if(_pendingProdRef){ var _pr=_pendingProdRef; _pendingProdRef=null; var _pb=g.querySelector('.pg-open[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(_pr):_pr)+'"]'); if(_pb)_pb.click(); }
+        if(_pendingProdRef){ var _pr=_pendingProdRef; _pendingProdRef=null; _prodDetailTab=_pendingProdTab||'master'; _pendingProdTab=null; var _pb=g.querySelector('.pg-open[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(_pr):_pr)+'"]'); if(_pb)_pb.click(); }
       }
       _prodDraw=draw;
       var _pgDark=function(el){ el.setAttribute('style','text-align:left'+(el.value?';background:#0f172a;color:#fff;font-weight:600':'')); };
@@ -9974,7 +9977,7 @@
           if(j&&j.ref)created.push(j.ref); i++; msg.textContent='Created '+created.length+' of '+colours.length+'…'; next(); });
       })(); }; }); }); }
   function renderProductDetail(ref, box, seed){ box=box||_prodDetailBox||document.getElementById('product-content'); _prodDetailBox=box; _prodSeed=seed||null;
-    try{ writeHash(['product','plan',ref]); }catch(e){}
+    try{ writeHash(_prodDetailTab&&_prodDetailTab!=='master'?['product',ref,_prodDetailTab]:['product',ref]); }catch(e){}
     try{ ensureSuppliers(function(){}); loadProdCfg(function(){}); }catch(e){}   // warm suppliers + config
     var cached=prodItemCached(ref);
     if(cached&&cached.item){ _prodDetail=cached; renderProdDetailShell(box,cached,seed); return; }   // instant re-open from cache
@@ -10000,7 +10003,7 @@
       +'<span style="margin-left:auto">'+prodStatusChip(it.status)+'</span></div>');
     c.innerHTML=header+'<div class="pd-tabs">'+tabs.map(function(t){return '<button class="pd-tab'+(t[0]===_prodDetailTab?' active':'')+'" data-t="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div><div class="pd-body"></div>';
     if(!inline){ var bk=c.querySelector('#pd-back'); if(bk)bk.onclick=function(){ selectProductSub('plan'); }; }
-    c.querySelectorAll('.pd-tab').forEach(function(b){ b.onclick=function(){ _prodDetailTab=b.dataset.t; renderProdDetailShell(c,_prodDetail,_prodSeed); }; });
+    c.querySelectorAll('.pd-tab').forEach(function(b){ b.onclick=function(){ _prodDetailTab=b.dataset.t; try{ if(it&&it.ref)writeHash(_prodDetailTab==='master'?['product',it.ref]:['product',it.ref,_prodDetailTab]); }catch(e){} renderProdDetailShell(c,_prodDetail,_prodSeed); }; });
     var body=c.querySelector('.pd-body');
     if(_prodDetailTab==='timeline')return renderProdTimeline(body,it.ref);
     if(_prodDetailTab==='documents')return renderProdDocs(body,it.ref);

@@ -1,3 +1,8 @@
+## v26.562 — Deep-link sub-tab slugs: consistent <ref>/<tab> for Product, Samples, PO
+- Product detail: #/product/<ref>/<tab> (e.g. /product/SS27-TOWLB-BL-01/timeline) — written on open + tab switch, restored on load. /product/plan|reports still the grid/reports sub-nav.
+- Samples detail: #/supply/samples/<ref>/<tab> — open + tab switch write it; deep-link opens the sample on that tab.
+- Purchase orders: changed from /purchase-orders/<slug>/<PO> to /purchase-orders/<PO>/<tab-slug> (PO first, matching the others). Legacy <slug>/<PO> links still resolve; umbrella sub-tabs unchanged.
+
 ## v26.561 — PRODUCT: record of change (Ben)
 - Migration 181: product_dev_change_log. Server logProductChange() captures D&B edits to a product dev item (per changed field on POST /api/product/item/:ref, + rename); new light GET /api/product/item/:ref/changes.
 - PRODUCT ▸ Timeline now merges the record of change INTO the note thread in one descending-time list (record-of-change badge before date · user), with a per-item hide-record-of-change checkbox (mirrors Samples). Timeline dates now dd-mmm-yy HH:MM. Change cache busts on a field edit so the new entry shows.
