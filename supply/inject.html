@@ -7876,8 +7876,12 @@
     Promise.all(jobs).then(function(){ preloadFonts(opts).then(function(){ cb(opts); }); }); }
   // warn if no batch is selected (label's BATCH / DATE OF PRODUCTION will be blank) — proceed/cancel
   function confirmNoBatch(batch){ return batch ? true : window.confirm('No BATCH selected — the label’s BATCH and DATE OF PRODUCTION will be blank. Download anyway?'); }
-  function bcMakeLabel(kind,r,batch,rrp){ if(!r||!confirmNoBatch(batch))return; bcGatherAssets(kind,r,batch,rrp,function(opts){
-    rasterizeSVG(buildLabelSVG(kind,r,opts),2,function(blob){ if(!blob){ alert('Could not render label PNG'); return; } bcDownloadBlob(kindPrefix(kind)+r.sku+'_label.png',blob); }); }); }
+  // code (optional): render THIS supplier's variant (its short code on the label + appended to the filename). When
+  // code is passed the batch-confirm is skipped (the multi-supplier caller confirmed once for the whole fan-out).
+  function bcMakeLabel(kind,r,batch,rrp,code){ if(!r||(!code&&!confirmNoBatch(batch)))return;
+    var rr=code?Object.assign({},r,{supplier_code:code}):r, suf=code?('-'+zipSafe(code)):'';
+    bcGatherAssets(kind,rr,batch,rrp,function(opts){
+    rasterizeSVG(buildLabelSVG(kind,rr,opts),2,function(blob){ if(!blob){ alert('Could not render label PNG'); return; } bcDownloadBlob(kindPrefix(kind)+r.sku+suf+'_label.png',blob); }); }); }
   // ---- A4 merge sheet (PDF) — exact cell rects from the PSD molds (px @ 300 DPI, page 2480×3505) ----
   var MOLD_4=[[1256,59,1178,1652],[49,60,1178,1652],[1251,1738,1178,1652],[44,1739,1178,1652]];
   var MOLD_36=[[76,89,564,370],[663,89,564,370],[1253,89,564,370],[1840,89,564,370],[76,461,564,370],[663,461,564,370],[1253,461,564,370],[1840,461,564,370],[76,830,564,370],[663,830,564,370],[1253,830,564,370],[1840,830,564,370],[76,1200,564,370],[663,1200,564,370],[1253,1200,564,370],[1840,1200,564,370],[76,1569,564,370],[663,1569,564,370],[1253,1569,564,370],[1840,1569,564,370],[76,1941,564,370],[663,1941,564,370],[1253,1941,564,370],[1840,1941,564,370],[76,2310,564,370],[663,2310,564,370],[1253,2310,564,370],[1840,2310,564,370],[76,2680,564,370],[663,2680,564,370],[1253,2680,564,370],[1840,2680,564,370],[76,3049,564,370],[663,3049,564,370],[1253,3049,564,370],[1840,3049,564,370]];
@@ -7901,10 +7905,11 @@
     var xo=len, xref='xref\n0 6\n0000000000 65535 f \n'; for(var i=1;i<=5;i++)xref+=pad(off[i])+' 00000 n \n';
     push(xref); push('trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n'+xo+'\n%%EOF');
     var out=new Uint8Array(len),o=0; parts.forEach(function(u){ out.set(u,o); o+=u.length; }); return out; }
-  function bcMakeSheet(kind,r,batch,rrp){ if(!r||!confirmNoBatch(batch))return; var cells=kind==='product'?MOLD_36:MOLD_4;
-    bcGatherAssets(kind,r,batch,rrp,function(opts){ rasterizeSVGCanvas(buildLabelSVG(kind,r,opts),2.5,function(cv){ if(!cv){ alert('Could not render label'); return; }
+  function bcMakeSheet(kind,r,batch,rrp,code){ if(!r||(!code&&!confirmNoBatch(batch)))return; var cells=kind==='product'?MOLD_36:MOLD_4;
+    var rr=code?Object.assign({},r,{supplier_code:code}):r, suf=code?('-'+zipSafe(code)):'';
+    bcGatherAssets(kind,rr,batch,rrp,function(opts){ rasterizeSVGCanvas(buildLabelSVG(kind,rr,opts),2.5,function(cv){ if(!cv){ alert('Could not render label'); return; }
       cv.toBlob(function(jb){ if(!jb){ alert('Could not encode label'); return; } jb.arrayBuffer().then(function(ab){
-        var pdf=pdfA4(new Uint8Array(ab),cv.width,cv.height,cells); bcDownloadBlob(kindPrefix(kind)+r.sku+'_A4.pdf', new Blob([pdf],{type:'application/pdf'})); }); },'image/jpeg',0.92); }); }); }
+        var pdf=pdfA4(new Uint8Array(ab),cv.width,cv.height,cells); bcDownloadBlob(kindPrefix(kind)+r.sku+suf+'_A4.pdf', new Blob([pdf],{type:'application/pdf'})); }); },'image/jpeg',0.92); }); }); }
   // Multi-page A4 PDF: one page per {jpeg,imgW,imgH}, same cell layout — for a consolidated (no-zip) batch download.
   function pdfA4Multi(pages,cells){ var enc=new TextEncoder(), parts=[], off=[], len=0, P=0.24, pageW=2480*P, pageH=3505*P;
     function push(x){ var u=(x instanceof Uint8Array)?x:enc.encode(x); parts.push(u); len+=u.length; }
@@ -8108,9 +8113,12 @@
     document.getElementById('bc-mkt').onchange=function(){ st.rmkt=this.value; if(st.rrp)apply(); };
     // label download buttons (delegated — survives grid re-renders on filter)
     var bySku={}; rows.forEach(function(r){ bySku[r.sku]=r; });
-    document.getElementById('sup-grid').onclick=function(e){ var b=e.target.closest('.bc-lbl'); if(!b)return; var r=bySku[b.dataset.sku], batch=st.batch?batchBy[st.batch]:null;
-      if(st.dlfmt==='png'||e.altKey) bcMakeLabel(b.dataset.kind,r,batch,st.rrp);   // File Download = Individual PNG (or Alt-click) → single-label PNG
-      else bcMakeSheet(b.dataset.kind,r,batch,st.rrp); }; }                        // default A4 Print Mold → merge sheet PDF
+    document.getElementById('sup-grid').onclick=function(e){ var b=e.target.closest('.bc-lbl'); if(!b)return; var r=bySku[b.dataset.sku], batch=st.batch?batchBy[st.batch]:null, kind=b.dataset.kind, png=(st.dlfmt==='png'||e.altKey);
+      // multi-supplier SKU → download ONE file per supplier (each with its own code on the label + in the filename); else single, unchanged
+      var sn=String(r.supplier_multiple||'').split(',').map(function(s){return s.trim();}).filter(Boolean), codeList=[];
+      if(sn.length>1)sn.forEach(function(nm){ var c=CODES[nm.toLowerCase().trim()]||''; if(c&&codeList.indexOf(c)<0)codeList.push(c); });
+      if(codeList.length>1){ if(!confirmNoBatch(batch))return; codeList.forEach(function(c){ if(png)bcMakeLabel(kind,r,batch,st.rrp,c); else bcMakeSheet(kind,r,batch,st.rrp,c); }); }
+      else { if(png)bcMakeLabel(kind,r,batch,st.rrp); else bcMakeSheet(kind,r,batch,st.rrp); } }; }
   function bcTable(rows,opts){ opts=opts||{}; if(!rows.length)return '<div class="count">No rows.</div>';
     var rrpCols = opts.rrp ? (opts.rmkt==='All' ? RRP_MKTS : RRP_MKTS.filter(function(m){return m[0]===opts.rmkt;})) : [];
     var head='<div class="tw"><table class="bc-tbl"><thead><tr><th class="l">labels</th><th class="l" style="width:30px"></th><th class="l" style="min-width:280px">sku</th><th class="l">name</th><th class="l">size</th><th class="l">category</th><th class="l">supplier (multiple)</th>'
