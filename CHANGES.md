@@ -1,3 +1,7 @@
+## v26.569.0 — Portal PAYMENTS: amount due wrongly $0 on invoiced POs + credit line tidy
+- BUG: portal Amount due showed $0 on every invoiced PO. POS_SQL_PORTAL aliases supplier_invoice_total AS final_invoice, but portal-view.js read p.supplier_invoice_total (undefined) → _invAmt=null → dueTot collapsed to 0 and the credit was dropped. Now reads p.final_invoice; credit is always added (a D&B charge is due even pre-invoice). Verified on PO-55EUBL1: invoice 1872 fully paid + 55 credit → Amount due = $55 (was $0).
+- Credit line: label shortened to "Additional credit / charge" (dropped "(added to amount due)") and column 1 now wraps (was nowrap → cut off on the portal).
+
 ## v26.568.0 — DEMAND plan download: FIXED (buildXlsx is not defined)
 - Same scope bug class as the SKU-search fix: buildXlsx() is defined INSIDE the BP IIFE, but the DEMAND module buildPlanDownload() calls it → "Failed: buildXlsx is not defined". Now exposed via window.buildXlsx (closure still supplies _xlsxEsc/_xlsxSheet/_zipStore). Verified in a jsdom harness: buildPlanDownload([2027]) produces a 663KB xlsx + triggers the download.
 
