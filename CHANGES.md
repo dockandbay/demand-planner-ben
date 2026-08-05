@@ -1,3 +1,7 @@
+## v26.594.0 — Zalando tab polish: SKU column width fix + grey zero-suggested + ticked total
+- SKU column width now actually expands. Root cause of the clipping: a GLOBAL `table{table-layout:fixed}` (+ `td{overflow:hidden}`) was overriding the inline `min-width:320px`, so the SKU was clipped under the EAN. Set this table to `table-layout:auto;width:max-content;min-width:100%` → column sizes to the SKU (no-wrap) and the .tw wrapper scrolls if needed.
+- Suggested send of 0 is now grey (#94a3b8); blue only when there's a real send (>0).
+- Live "Ticked: N units · M SKUs" total shown next to the Download button; updates on tick/untick, override edits, tick-all, and clear.
 ## v26.593.0 — Zalando tab: wider SKU col + SKU search + dd-mmm-yy discontinue + upload-gated analysis
 - (1) SKU column widened to 320px + no-wrap so long SKUs fit (re-ask; 230px was still clipping).
 - (2) SKU search filter above the table — live show/hide of rows, keeps input focus (no re-render), persists across cover-toggle re-renders.
