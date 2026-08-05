@@ -1,3 +1,6 @@
+## v26.568.0 — DEMAND plan download: FIXED (buildXlsx is not defined)
+- Same scope bug class as the SKU-search fix: buildXlsx() is defined INSIDE the BP IIFE, but the DEMAND module buildPlanDownload() calls it → "Failed: buildXlsx is not defined". Now exposed via window.buildXlsx (closure still supplies _xlsxEsc/_xlsxSheet/_zipStore). Verified in a jsdom harness: buildPlanDownload([2027]) produces a 663KB xlsx + triggers the download.
+
 ## v26.567.0 — Supplier edit view: magic-link button label "link" → "magic link"
 - Renamed the per-portal-user button in CONFIG ▸ Suppliers edit view from 🔗 link to 🔗 magic link (clearer). No behaviour change.
 

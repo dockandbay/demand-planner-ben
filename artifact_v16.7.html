@@ -2202,6 +2202,7 @@ function buildXlsx(sheetName, grid){ var enc=new TextEncoder();
     {name:'xl/worksheets/sheet1.xml', str:_xlsxSheet(grid)}
   ];
   return _zipStore(files.map(function(f){ return {name:f.name, data:enc.encode(f.str)}; })); }
+try{ window.buildXlsx=buildXlsx; }catch(_e){}   // BUGFIX (same class as skuMatchQ): buildXlsx is defined INSIDE the BP IIFE; the DEMAND module's buildPlanDownload calls it → was "buildXlsx is not defined". Closure still supplies _xlsxEsc/_xlsxSheet/_zipStore.
 
 // FBA Transfer Upload: Amazon's official send-to-Amazon manifest as an XLSX (sheet "Create workflow –
 // template"). UK/EU/AU = metric (cm/kg) + Default prep/labeling rows; US/CA = imperial (in/lb). Columns:
