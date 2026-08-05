@@ -2022,10 +2022,10 @@
   // Manufacturing = FOB → the PO is never pushed to Cin7/Fulfil, so it has NO ERP state at all (no deviation, no "in sync").
   function poErpNa(r){ return /manufactur/i.test((r&&r.branch)||''); }
   // PO-row action badge: label + which PO detail sub-tab each condition deep-links to.
-  var PO_ACT_LABEL={payment_overdue:'Payment overdue',unpaid_payment:'Unpaid payment',late:'Late — should be completed',unassigned_shipment:'Unassigned shipment',production:'Late — should have shipped',dtc_not_approved:'Direct-to-Client not approved',po_not_approved:'Not confirmed by supplier',preship:'Pre-shipment documents overdue',erp_date:'ERP delivery date differs',erp_lines:'Order plan differs from ERP — push to align',shipped_to_master:'Shipped to master — set status',payment_invalid:'Payment invalid — amount set with no date'};
-  var PO_ACT_TAB={payment_overdue:'pay',unpaid_payment:'pay',late:'dates',unassigned_shipment:'shipments',production:'dates',dtc_not_approved:'client',po_not_approved:'masterdata',preship:'shipments',erp_date:'dates',erp_lines:'oplan',payment_invalid:'pay',shipped_to_master:'dates'};
+  var PO_ACT_LABEL={payment_overdue:'Payment overdue',unpaid_payment:'Unpaid payment',late:'Late — should be completed',unassigned_shipment:'Unassigned shipment',production:'Late — should have shipped',dtc_not_approved:'Direct-to-Client not approved',po_not_approved:'Not confirmed by supplier',preship:'Pre-shipment documents overdue',erp_date:'ERP delivery date differs',erp_lines:'Order plan differs from ERP — push to align',shipped_to_master:'Shipped to master — set status',payment_invalid:'Payment invalid — amount set with no date',timeline_unread:'Unread supplier note(s)'};
+  var PO_ACT_TAB={payment_overdue:'pay',unpaid_payment:'pay',late:'dates',unassigned_shipment:'shipments',production:'dates',dtc_not_approved:'client',po_not_approved:'masterdata',preship:'shipments',erp_date:'dates',erp_lines:'oplan',payment_invalid:'pay',shipped_to_master:'dates',timeline_unread:'timeline'};
   // ── PO-grid action-item snooze ── keyed poact|<po>|<condition> in supply_action_state (shared store).
-  var _poActState={}, _poActStateLoaded=false, _poShowSnoozed=false;
+  var _poActState={}, _poActStateLoaded=false, _poShowSnoozed=false, _hidePayDue=false, _hideTimelineUnread=false;   // PO-grid ACTION ITEMS hide toggles
   function poActKey(po,cond){ return 'poact|'+po+'|'+cond; }
   // a snoozed action with NO expiry (snooze_until null) = snoozed indefinitely
   function snzActive(s){ var t=new Date().toISOString().slice(0,10); return !!(s&&s.status==='snoozed'&&(!s.snooze_until||s.snooze_until>=t)); }
@@ -2058,8 +2058,14 @@
     // an OVERDUE payment is inherently unpaid — count it once (matches the PAYMENTS tab, which lists the
     // overdue milestone and snoozes both as a single unit) rather than double-counting on the PO badge
     if(out.indexOf('payment_overdue')>=0) out=out.filter(function(k){return k!=='unpaid_payment';});
+    if(Number(r.unread_notes)>0) out.push('timeline_unread');   // unread supplier note(s) count as an action item (hide via the "timeline unread" toggle)
     return out; }
-  function poActions(r){ return poActionsAll(r).filter(function(k){ return _poShowSnoozed || !poActSnoozed(r.po,k); }); }
+  // poActions = the ACTION ITEMS set, honouring the hide toggles: snoozed (unless "show"), payment-due (pay-tab), timeline-unread.
+  function poActions(r){ return poActionsAll(r).filter(function(k){
+    if(!_poShowSnoozed && poActSnoozed(r.po,k))return false;
+    if(_hidePayDue && PO_ACT_TAB[k]==='pay')return false;
+    if(_hideTimelineUnread && k==='timeline_unread')return false;
+    return true; }); }
   // ── SAMPLE exceptions (mirror the PO action model; reuse _poActState + _poShowSnoozed + the actions/state API) ──
   var SAMP_ACT_LABEL={supplier_shipped:'Supplier signalled shipped (marked shipped OR entered a tracking number) — set our status to SHIPPED',date_overdue:'Date overdue — completion/expected date has passed',charge_review:'Charge to review',unread:'Unread supplier note'};
   function sampActionsAll(s){ var out=[]; var us=String(s.status_calc||s.status||'').toUpperCase(); var active=(us!=='SHIPPED'&&us!=='CANCELLED');
@@ -2188,7 +2194,7 @@
     function shippedNoInvoice(r){ var st=String(r.status||'').toUpperCase(); if(st!=='SHIPPING'&&st!=='DELIVERED'&&st!=='COMPLETE')return false;
       if(r.final_invoice!=null&&String(r.final_invoice).trim()!=='')return false; var pn=parseFloat(r.prod_no); return !isNaN(pn)&&pn>=50; }
     function actNoPay(r){ return poActions(r).some(function(a){ return PO_ACT_TAB[a]!=='pay'; }); }   // has ≥1 open action that isn't a payment (pay-tab) action
-    function excMatch(k,r){ if(k==='has_crossdock')return hasCrossdock(r); if(k==='shipped_no_invoice')return shippedNoInvoice(r); if(k==='act_no_pay')return actNoPay(r); var fn=PO_ACTCOND[k]; return fn?fn(r):true; }
+    function excMatch(k,r){ if(k==='has_crossdock')return hasCrossdock(r); if(k==='shipped_no_invoice')return shippedNoInvoice(r); if(k==='act_no_pay')return actNoPay(r); if(k==='timeline_unread')return Number(r.unread_notes)>0; var fn=PO_ACTCOND[k]; return fn?fn(r):true; }
     // unified "has any open action item" — same as the red badge next to each PO ref (poExceptions)
     function hasActions(r){ return poActions(r).length>0; }   // snooze-aware, mirrors the red PO-ref badge
     function actItemsCount(){ return rows.reduce(function(a,r){ return a+poActions(r).length; },0); }   // total ACTION ITEMS across all POs (snooze-aware) — so closing one item decrements the badge (Ben). Was POs-with-actions.
@@ -2241,8 +2247,12 @@
         +'<option value="has_crossdock"'+(state.act.has_crossdock?' selected':'')+'>Includes crossdock ('+rows.filter(hasCrossdock).length+')</option>'
         +'<option value="shipped_no_invoice"'+(state.act.shipped_no_invoice?' selected':'')+'>Shipped · no final invoice ('+rows.filter(shippedNoInvoice).length+')</option>'
         +'<option value="act_no_pay"'+(state.act.act_no_pay?' selected':'')+'>All actions except payment due ('+rows.filter(actNoPay).length+')</option>'
+        +'<option value="timeline_unread"'+(state.act.timeline_unread?' selected':'')+'>Timeline unread ('+rows.filter(function(r){return Number(r.unread_notes)>0;}).length+')</option>'
       +'</select></span>'
-      +'<span class="po-filt-item"><label style="font-size:12px;cursor:pointer;white-space:nowrap" title="show snoozed action items as active in the badges + ACTION ITEMS count"><input type="checkbox" id="po-showsnz"'+(_poShowSnoozed?' checked':'')+' style="vertical-align:middle;margin-right:4px">show snoozed</label></span>'
+      +'<span class="po-filt-item" style="white-space:nowrap"><span class="pill-lbl">Hide</span>'
+        +'<label style="font-size:12px;cursor:pointer;margin:0 5px" title="hide snoozed action items from the badges + ACTION ITEMS count"><input type="checkbox" id="po-hide-snz"'+(!_poShowSnoozed?' checked':'')+' style="vertical-align:middle;margin-right:3px">snoozed</label>'
+        +'<label style="font-size:12px;cursor:pointer;margin:0 5px" title="hide payment-due actions (overdue / unpaid / invalid) from the badges + ACTION ITEMS count"><input type="checkbox" id="po-hide-pay"'+(_hidePayDue?' checked':'')+' style="vertical-align:middle;margin-right:3px">payment due</label>'
+        +'<label style="font-size:12px;cursor:pointer;margin:0 5px" title="hide unread-supplier-note action items from the badges + ACTION ITEMS count"><input type="checkbox" id="po-hide-tl"'+(_hideTimelineUnread?' checked':'')+' style="vertical-align:middle;margin-right:3px">timeline unread</label></span>'
       +'<span class="po-filt-item"><span class="pill-lbl">Group</span><select class="flt" id="po-grp" style="width:auto;cursor:pointer">'+GRP.map(function(g){return '<option value="'+g[0]+'"'+(g[0]===state.grp?' selected':'')+'>'+esc(g[1])+'</option>';}).join('')+'</select></span></div>'
       +'<div id="sup-grid"></div>';
     bindPoSubNav();
@@ -2402,7 +2412,9 @@
         c.querySelectorAll('#po-prog .pill').forEach(function(p){ p.classList.toggle('active', !!state.f[p.dataset.f]); }); }
       if(this.value){ selHi(this,true); } else { this.style.background='#fef2f2'; this.style.color='#991b1b'; this.style.borderColor='#fca5a5'; this.style.fontWeight='700'; } view(); };
     var pgrp=document.getElementById('po-grp'); if(pgrp)pgrp.onchange=function(){state.grp=this.value;view();};
-    var pss=document.getElementById('po-showsnz'); if(pss)pss.onchange=function(){ _poShowSnoozed=this.checked; view(); };
+    var ph1=document.getElementById('po-hide-snz'); if(ph1)ph1.onchange=function(){ _poShowSnoozed=!this.checked; view(); };
+    var ph2=document.getElementById('po-hide-pay'); if(ph2)ph2.onchange=function(){ _hidePayDue=this.checked; view(); };
+    var ph3=document.getElementById('po-hide-tl'); if(ph3)ph3.onchange=function(){ _hideTimelineUnread=this.checked; view(); };
     try{ window.__poView=view; }catch(e){}   // so the module-level badge popover can re-render the grid after a snooze
     c.querySelectorAll('#po-ctry .pill').forEach(function(p){p.onclick=function(){var k=p.dataset.c;state.ctry[k]=!state.ctry[k];p.classList.toggle('active',state.ctry[k]);view();};});
     var psup=document.getElementById('po-sup'); if(psup)psup.onchange=function(){state.sup=this.value;selHi(this,!!this.value);view();};
@@ -2754,10 +2766,9 @@
     // action-items counter: red badge with the count of open actions on this PO; click deep-links to the
     // most relevant detail sub-tab (payment→PAYMENTS, date→DATES, shipping→SHIPMENTS).
     var _acts=poActions(r);
-    // PO-ref badge counts the TOTAL notifications shown across the detail sub-tabs (payments/dates/timeline/…),
-    // not just snoozeable "actions" — so it matches the sub-tab badges. e.g. a pending supplier invoice /
-    // completion date, an unread note, or an unconfirmed order-plan change all count even without a formal action.
-    var _exc=poExceptions(r), _notif=_exc.all.length;
+    // PO-ref badge counts the unified ACTION ITEMS set (poActions, incl unread-note "timeline_unread"), honouring the
+    // Hide toggles (snoozed / payment due / timeline unread) — so the badge, the ACTION ITEMS pill and the popover agree.
+    var _exc=poExceptions(r), _notif=_acts.length;
     var _firstTab=_acts.length?(PO_ACT_TAB[_acts[0]]||''):(_exc.pay.length?'pay':_exc.dates.length?'dates':_exc.timeline.length?'timeline':_exc.ship.length?'shipments':_exc.oplan.length?'oplan':_exc.client.length?'client':_exc.master.length?'masterdata':'');
     var _noteTxt=_notif+' notification'+(_notif>1?'s':'')+(_acts.length?' — '+_acts.map(function(k){return PO_ACT_LABEL[k]||k;}).join('; '):'')+' (click to open)';
     var actFlag=_notif?' <button class="po-act-badge ex-badge" style="cursor:pointer;border:none" data-po="'+esc(r.po)+'" data-tab="'+_firstTab+'" data-allacts="'+esc(poActionsAll(r).join(','))+'" data-note="'+esc(_noteTxt)+'">'+_notif+'</button>':'';

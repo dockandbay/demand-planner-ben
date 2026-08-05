@@ -1,3 +1,7 @@
+## v26.609.0 — PO grid: multi-select Hide (snoozed / payment due / timeline unread) + "Timeline unread" exceptions filter
+- The single "show snoozed" checkbox is now a **Hide** multi-select: **snoozed · payment due · timeline unread** (checkboxes). Each removes that category from the ACTION ITEMS pill count, the per-PO red badge, and the ACTION ITEMS filter. "Hide snoozed" is on by default (= previous behaviour).
+- UNIFIED action model: unread supplier notes now count as an ACTION ITEM (`timeline_unread`, tab = Timeline), so the ACTION ITEMS pill / red badge / popover all agree on one number (was: badge = broad notifications, pill = narrower actions). The per-PO red badge now = the ACTION ITEMS set.
+- ⚠ exceptions dropdown: new option **"Timeline unread (N)"** — POs with unread supplier notes (unread_notes>0).
 ## v26.608.0 — PO grid: exceptions filter "All actions except payment due"
 - New option in the PO-grid ⚠ exceptions dropdown: "All actions except payment due (N)" — shows POs that have at least one open action that is NOT a payment action (payment overdue / unpaid payment / payment invalid, i.e. the pay-tab set). Lets you work the non-payment action backlog without the payments noise.
 
