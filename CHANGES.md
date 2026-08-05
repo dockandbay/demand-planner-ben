@@ -1,3 +1,7 @@
+## v26.559 — SUPPLY ▸ Samples detail: sectioned 2-col grid + merged timeline
+- Details sub-tab: 4 distinct bordered sections in a responsive 2-col grid — Recipient & address · SKUs & quantities · Status & Fulfilment · Other details (Purpose + Notes moved here). Second recipient is its own card when present.
+- Timeline: record of change is now integrated INTO the timeline in one descending-time list (was a separate block on top); the record-of-change badge sits before the date/time · user; per-sample hide-record-of-change checkbox retained. Timeline dates now dd-mmm-yy HH:MM (were raw ISO); internal author shows the user (ben@) not 'D&B'.
+
 ## v26.558 — PRODUCT: perf, approval on create, 2-col master
 - PERF: product tabs no longer re-fetch on every click. New light GET /api/product/item/:ref/docs (1 query vs the 5-query full item — Documents tab was 2.5-4s). Per-tab JSON cache (_prodCachedJson, 2-min TTL) makes re-clicking Documents/Samples/Timeline instant; invalidated on writes (upload/note/sample) via prodItemInvalidate + _prodJsonBust.
 - Add-new-product form now has an Approval method field (photo|samples), saved on create (server insert updated).

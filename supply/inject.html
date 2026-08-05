@@ -8701,12 +8701,13 @@
         if(curTab==='contents')curTab='details';   // Contents merged into Details
         function tb(k,label){ return '<button class="rtab samp-tab'+(curTab===k?' active':'')+'" data-st="'+k+'">'+label+'</button>'; }
         function panel(k,html){ return '<div class="samp-panel" data-st="'+k+'"'+(curTab===k?'':' style="display:none"')+'>'+html+'</div>'; }
-        var detailsPanel='<div style="display:flex;gap:24px;flex-wrap:wrap">'
-          +'<div style="min-width:250px"><div class="sect-h">Recipient &amp; address</div>'+recip+L('Purpose')+purpose+L('Notes')+notes+'</div>'
-          +((s.recipient_company_2||s.tracking_code_2||s.address_line1_2)?'<div style="min-width:230px"><div class="sect-h">Second recipient &amp; tracking <span class="mut tiny" style="font-weight:400">(supplier-added)</span></div>'
+        var _scard='border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;background:#fff';
+        var detailsPanel='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;align-items:start">'
+          +'<div style="'+_scard+'"><div class="sect-h">Recipient &amp; address</div>'+recip+'</div>'
+          +((s.recipient_company_2||s.tracking_code_2||s.address_line1_2)?'<div style="'+_scard+'"><div class="sect-h">Second recipient &amp; tracking <span class="mut tiny" style="font-weight:400">(supplier-added)</span></div>'
             +'<div class="tiny" style="line-height:1.65"><b>'+esc(s.recipient_company_2||'—')+'</b>'+(((s.first_name_2||'')+' '+(s.last_name_2||'')).trim()?'<br>'+esc(((s.first_name_2||'')+' '+(s.last_name_2||'')).trim()):'')+([s.address_line1_2,s.address_line2_2,s.city_2,s.region_2,s.postcode_2,s.country_2].filter(Boolean).length?'<br>'+esc([s.address_line1_2,s.address_line2_2,s.city_2,s.region_2,s.postcode_2,s.country_2].filter(Boolean).join(', ')):'')+(s.phone_2?'<br>☏ '+esc(s.phone_2):'')+'</div>'
             +'<div class="cli-row" style="margin-top:6px"><div class="cli-lbl">2nd tracking</div><div class="cli-val"><span class="tiny">'+(s.tracking_code_2?((carrierTrackUrl(s.carrier_2,s.tracking_code_2)?'<a href="'+carrierTrackUrl(s.carrier_2,s.tracking_code_2)+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;font-weight:700">'+esc(s.tracking_code_2)+' ↗</a>':esc(s.tracking_code_2))+(s.carrier_2?' <span class="mut tiny">'+esc(s.carrier_2)+'</span>':'')):'<span class="mut">—</span>')+'</span></div></div></div>':'')
-          +'<div style="min-width:240px"><div class="sect-h">Fulfilment</div>'
+          +'<div style="'+_scard+'"><div class="sect-h">Status &amp; Fulfilment</div>'
             +'<div class="cli-row"><div class="cli-lbl">Requested Completion Date</div><div class="cli-val">'+completion+'</div></div>'
             +'<div class="cli-row"><div class="cli-lbl">Tracking</div><div class="cli-val">'+tracking+'</div></div>'
             +'<div class="cli-row"><div class="cli-lbl">Carrier</div><div class="cli-val">'+carrier+'</div></div>'
@@ -8722,7 +8723,8 @@
             +(setShip?'<div>'+setShip+'</div>':'')
             +(dateExc?'<div style="color:#dc2626;font-weight:700;font-size:11px;margin-top:4px">⚠ Overdue — completion / supplier-expected date has passed'+_sMk('date_overdue')+'</div>':'')
             +'<div style="margin-top:10px">'+actBtn+' <button class="save-btn light samp-del" data-id="'+id+'" style="color:#dc2626">Delete</button></div></div>'
-          +'<div style="min-width:220px"><div class="sect-h">SKUs</div>'+skus+'</div>'
+          +'<div style="'+_scard+'"><div class="sect-h">SKUs &amp; quantities</div>'+skus+'</div>'
+          +'<div style="'+_scard+'"><div class="sect-h">Other details</div>'+L('Purpose')+purpose+L('Notes')+notes+'</div>'
           +'</div>';
         var attachPanel='<div class="tiny" style="margin-bottom:6px">'+((d.attachments||[]).map(function(a){return '<span style="display:inline-block;margin:0 12px 4px 0"><a href="/api/supply/portal-attachment/'+a.id+'" target="_blank" rel="noopener">'+esc(a.filename||'file')+'</a> <a class="samp-att-rm" data-aid="'+a.id+'" title="remove" style="color:#dc2626;cursor:pointer">×</a></span>';}).join('')||'<span class="mut">no attachments yet</span>')+'</div>'
           +'<div><input type="file" class="samp-att-file" style="font-size:11px"> <button class="save-btn samp-att-up">Upload attachment</button></div>';
@@ -8731,13 +8733,10 @@
             // badges only flag ACTIONS/exceptions (date overdue, pending charges, unread notes) — not plain counts
             +tb('details','Details'+bdge(dateExc))+tb('charges','Charges'+bdge(pend))+tb('attachments','Attachments')+tb('timeline','Timeline'+bdge(_unread))+'</div>'
           +panel('details',detailsPanel)+panel('charges',chargesPanel)+panel('attachments',attachPanel)
-          +panel('timeline',(function(){ var _cl=(d.change_log||[]);   // Record of change (admin view only) — captures D&B + supplier edits; hideable per-sample like POs
-              var _h=rocIsHidden(s.ref);
-              return '<div class="sect-h" style="font-size:13px">Record of change <span class="mut tiny" style="font-weight:400">(admin only — not shown to the supplier)</span>'
+          +panel('timeline',(function(){ _sampChangeLog[s.ref]=(d.change_log||[]); var _h=rocIsHidden(s.ref);
+              return '<div class="sect-h" style="font-size:13px">Timeline <span class="mut tiny" style="font-weight:400">— shared with the supplier; record of change is admin-only</span>'
                 +' <label style="font-size:11px;font-weight:400;margin-left:8px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="samp-hide-chg"'+(_h?' checked':'')+' style="vertical-align:middle;margin-right:3px">hide record of change</label></div>'
-                +(_cl.length?_cl.map(function(c){ var _ca=String(c.changed_at||''), _cad=(_ca.slice(0,10)?fd(_ca.slice(0,10)):_ca)+(_ca.slice(11,16)?' '+_ca.slice(11,16):'');   // dd-mmm-yy HH:MM
-                    return '<div class="tl-change tiny" style="margin:2px 0;max-width:640px;padding:3px 8px;background:#f8fafc;border:1px solid #e5e7eb;border-left:3px solid #94a3b8;border-radius:5px'+(_h?';display:none':'')+'"><span class="mut">🕓 '+esc(_cad)+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span> <span class="ex-badge" style="background:#e2e8f0;color:#475569">record of change</span> — <b>'+esc(c.event)+'</b>'+(c.detail?': '+esc(c.detail):'')+'</div>'; }).join(''):'<div class="mut tiny" style="margin-bottom:8px">No recorded changes yet.</div>')
-                +'<div class="sect-h" style="font-size:13px;margin-top:12px">Timeline</div><div class="sp-timeline" data-ref="'+esc(s.ref)+'"></div>'; })());
+                +'<div class="sp-timeline" data-ref="'+esc(s.ref)+'"></div>'; })());
         box.querySelectorAll('.samp-tab').forEach(function(t){ t.onclick=function(){ curTab=t.dataset.st; box._sampTab=curTab;
           box.querySelectorAll('.samp-tab').forEach(function(x){x.classList.toggle('active',x===t);});
           box.querySelectorAll('.samp-panel').forEach(function(p){p.style.display=(p.dataset.st===curTab)?'':'none';}); }; });
@@ -8775,19 +8774,27 @@
       }
       paint();
     }).catch(function(e){ box.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>'; }); }
+  var _sampChangeLog={};
   function loadSampleTimeline(ref, sampleId, authorKind, supName){ var box=document.querySelector('.sp-timeline[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(!box)return;
     var admin=(authorKind||'internal')==='internal';
     fetch('/api/supply/sample-notes?id='+sampleId).then(function(r){return r.json();}).then(function(notes){
       shortNotes(notes);
       var _ownN=(notes||[]).filter(function(n){return n.author_kind!=='supplier';});   // escalate only on YOUR OWN latest note
       var recentOwnId=_ownN.length?_ownN.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0].id:null;
-      var list=(notes&&notes.length)?tlDesc(notes).map(function(n){ var supSide=(n.author_kind==='supplier'); var onBehalf=(supSide&&n.author_email==='D&B'); var nu=supSide&&!n.read;
+      var _changes=(_sampChangeLog[ref]||[]), _hid=rocIsHidden(ref);
+      function _noteRow(n){ var supSide=(n.author_kind==='supplier'); var onBehalf=(supSide&&n.author_email==='D&B'); var nu=supSide&&!n.read;
         var who=onBehalf?('D&amp;B as '+esc(supName||'supplier'))
-          :supSide?(esc(supName||'Supplier')+(n.author_email&&n.author_email!=='D&B'?' ('+esc(n.author_email)+')':''))   // which supplier + which portal user
-          :'D&amp;B';
+          :supSide?(esc(supName||'Supplier')+(n.author_email&&n.author_email!=='D&B'?' ('+esc(n.author_email)+')':''))
+          :(n.author_email&&n.author_email!=='D&B'&&n.author_email!=='Dock & Bay'?esc(n.author_email):'D&amp;B');
         var ctrl=(admin&&supSide)?(n.read?'<a class="ssp-read" data-id="'+n.id+'" data-read="1" style="font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline">mark unread</a>':'<button class="save-btn light ssp-read" data-id="'+n.id+'" data-read="0">Mark read</button>')
           :((admin&&n.id===recentOwnId)?'<button class="save-btn light samp-esc" data-ref="'+esc(ref)+'" data-msg="'+esc(n.body)+'" title="Escalate this message to the supplier by email" style="flex:0 0 auto;color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'');
-        return '<div style="font-size:13px;line-height:1.5;text-align:left;margin:4px 0;max-width:640px;display:flex;gap:10px;align-items:flex-start'+(nu?';background:#fff7ed;border:1px solid #fdba74;border-radius:6px;padding:6px 9px':'')+'">'+(ctrl?'<div style="flex:0 0 auto;min-width:70px">'+ctrl+'</div>':'')+'<div style="flex:1"><span class="mut" style="font-size:11px">'+esc(n.created_at)+' · '+who+'</span>'+(nu?' <span class="ex-badge">new</span>':'')+'<br>'+esc(n.body)+'</div></div>'; }).join(''):'<div class="mut" style="font-size:12px">No timeline entries yet.</div>';
+        var _nc=String(n.created_at||''), _nw=(_nc.slice(0,10)?fd(_nc.slice(0,10)):_nc)+(_nc.slice(11,16)?' '+_nc.slice(11,16):'');
+        return '<div style="font-size:13px;line-height:1.5;text-align:left;margin:4px 0;max-width:640px;display:flex;gap:10px;align-items:flex-start'+(nu?';background:#fff7ed;border:1px solid #fdba74;border-radius:6px;padding:6px 9px':'')+'">'+(ctrl?'<div style="flex:0 0 auto;min-width:70px">'+ctrl+'</div>':'')+'<div style="flex:1"><span class="mut" style="font-size:11px">'+esc(_nw)+' · '+who+'</span>'+(nu?' <span class="ex-badge">new</span>':'')+'<br>'+esc(n.body)+'</div></div>'; }
+      function _changeRow(c){ var _ca=String(c.changed_at||''), _cw=(_ca.slice(0,10)?fd(_ca.slice(0,10)):_ca)+(_ca.slice(11,16)?' '+_ca.slice(11,16):'');
+        return '<div class="tl-change" style="font-size:12px;margin:4px 0;max-width:640px;padding:5px 9px;background:#f8fafc;border:1px solid #e5e7eb;border-left:3px solid #94a3b8;border-radius:6px'+(_hid?';display:none':'')+'"><span class="ex-badge" style="background:#e2e8f0;color:#475569;margin-right:6px">record of change</span><span class="mut" style="font-size:11px">'+esc(_cw)+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span><br><span style="color:#334155"><b>'+esc(c.event)+'</b>'+(c.detail?': '+esc(c.detail):'')+'</span></div>'; }
+      var _items=[]; (notes||[]).forEach(function(n){ _items.push({t:String(n.created_at||''),h:_noteRow(n)}); }); _changes.forEach(function(c){ _items.push({t:String(c.changed_at||''),h:_changeRow(c)}); });
+      _items.sort(function(a,b){ return b.t.localeCompare(a.t); });
+      var list=_items.length?_items.map(function(x){return x.h;}).join(''):'<div class="mut" style="font-size:12px">No timeline entries yet.</div>';
       box.innerHTML='<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:8px"><textarea class="fci ssp-in" rows="2" placeholder="Add a note…" style="flex:1;max-width:520px;text-align:left"></textarea><button class="save-btn ssp-post">Post</button></div>'+list;
       box.querySelector('.ssp-post').onclick=function(){ var inp=box.querySelector('.ssp-in'); var v=(inp.value||'').trim(); if(!v)return; shipPost('/api/supply/sample-note',{sample_id:sampleId,author_kind:authorKind||'internal',body:v},function(){ loadSampleTimeline(ref,sampleId,authorKind,supName); }); };
       box.querySelectorAll('.ssp-read').forEach(function(b){ b.onclick=function(){ shipPost('/api/supply/sample-note-read/'+b.dataset.id,{read:b.dataset.read==='0'},function(){ loadSampleTimeline(ref,sampleId,authorKind,supName); }); }; });
