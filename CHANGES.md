@@ -1,3 +1,8 @@
+## v26.591.0 — PO drawer PAYMENTS table: fix mobile horizontal scroll
+- The PO-grid ▸ PAYMENTS sub-tab payment-plan table didn't scroll sideways on mobile — it overflowed the panel.
+- Cause: `.pay-tbl` was on the `.tw` scroll wrapper itself, so the mobile `width:max-content` rule grew the container past the viewport instead of scrolling inside it. The 4 PAYMENTS report tables put `.pay-tbl` on the `<table>` (which works) — the drawer was the odd one out.
+- Fix: moved the `pay-tbl` class off the wrapper onto the inner `<table>`, matching the report tables. Wrapper keeps `overflow:auto`, table sizes to content → scrolls horizontally on mobile. No desktop change.
+
 ## v26.590.0 — Zalando tab: months-cover toggle + discontinue handling + wider SKU
 - Months-cover toggle (1–6, default 2) — suggested send = N-month cover − stock. Recomputes live.
 - SKU column widened (min-width 230px, fits ~30 chars).
