@@ -1,3 +1,6 @@
+## v26.606.0 — Paper Store carton labels: 3-up per A4 page (matches template tiling)
+- Now tiles 3 carton labels per A4 page (was one per page), matching the source PDF layout. Labels render to canvases then composite onto each A4 page; last page holds the remainder. (Ben: continue with 3, changeable later.)
+
 ## v26.605.0 — Paper Store carton labels: match the template PDF exactly (no barcode)
 - Rebuilt the label to the FULL-CARTON template layout: store name + "MASTER CARTON" / "ODD / MIXED CARTON" tag (RED) on the top line; PO#/DC + DC address; then a label/value grid with N.W · G.W · MEAS aligned on the right.
 - Removed the scannable UPC barcode (Ben) — UPC now prints as plain text.

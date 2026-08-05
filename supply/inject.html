@@ -7918,11 +7918,19 @@
       if(!d.cartons||!d.cartons.length){ alert('No cartons to label on this PO (need order-plan SKUs with quantities).'); return; }
       psLabelPopup({dc:'',a1:d.dc_addr1,a2:d.dc_addr2},function(inp){
         if(btn){btn.disabled=true;btn.textContent='Rendering…';}
-        var hdr={client:d.client,po_ref:d.po_ref,dc:inp.dc,a1:inp.a1,a2:inp.a2}, pages=[], i=0;
-        function next(){ if(i>=d.cartons.length)return finish(); var c=d.cartons[i++];
-          rasterizeSVGCanvas(buildPaperStoreLabelSVG(c,hdr),2.2,function(cv){ if(!cv)return next(); cv.toBlob(function(jb){ if(!jb)return next(); jb.arrayBuffer().then(function(ab){ pages.push({jpeg:new Uint8Array(ab),imgW:cv.width,imgH:cv.height}); next(); }); },'image/jpeg',0.92); }); }
-        function finish(){ if(btn){btn.disabled=false;btn.textContent=orig;} if(!pages.length){ alert('Nothing rendered'); return; }
-          bcDownloadBlob(po+'_Paper_Store_carton_labels.pdf', new Blob([pdfA4Multi(pages,[[120,120,2240,900]])],{type:'application/pdf'})); }
+        var hdr={client:d.client,po_ref:d.po_ref,dc:inp.dc,a1:inp.a1,a2:inp.a2}, labs=[], i=0;
+        // render each carton label to a canvas, then tile 3 per A4 page (matches the template PDF)
+        function next(){ if(i>=d.cartons.length)return compose(); var c=d.cartons[i++];
+          rasterizeSVGCanvas(buildPaperStoreLabelSVG(c,hdr),2,function(cv){ if(cv)labs.push(cv); next(); }); }
+        function compose(){ if(!labs.length){ if(btn){btn.disabled=false;btn.textContent=orig;} alert('Nothing rendered'); return; }
+          var PW=1488, PH=2105, M=64, GAP=44, PER=3, LW=PW-2*M, LH=Math.round(LW/2.6), pages=[], g=0;   // A4 aspect (595:842); 3 labels stacked
+          function buildPage(){ if(g>=labs.length){ done(); return; }
+            var cv=document.createElement('canvas'); cv.width=PW; cv.height=PH; var ctx=cv.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,PW,PH);
+            for(var k=0;k<PER && g<labs.length;k++,g++){ ctx.drawImage(labs[g], M, M+k*(LH+GAP), LW, LH); }
+            cv.toBlob(function(jb){ if(jb){ jb.arrayBuffer().then(function(ab){ pages.push({jpeg:new Uint8Array(ab),imgW:PW,imgH:PH}); buildPage(); }); } else buildPage(); },'image/jpeg',0.92); }
+          function done(){ if(btn){btn.disabled=false;btn.textContent=orig;} if(!pages.length){ alert('Nothing rendered'); return; }
+            bcDownloadBlob(po+'_Paper_Store_carton_labels.pdf', new Blob([pdfA4Multi(pages,[[0,0,2480,3505]])],{type:'application/pdf'})); }
+          buildPage(); }
         next();
       });
     }).catch(function(e){ if(btn){btn.disabled=false;btn.textContent=orig;} alert('Failed: '+((e&&e.message)||e)); });
