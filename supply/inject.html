@@ -6188,7 +6188,7 @@
           function supPuRow(u){ return '<div class="sup-pu-row" data-id="'+esc(String(u.id))+'" style="display:flex;align-items:center;gap:8px;font-size:12px;margin:3px 0">'
               +'<label style="cursor:pointer;flex:0 0 auto" title="active"><input type="checkbox" class="sup-pu-active"'+(u.active?' checked':'')+'></label>'
               +'<span style="flex:1;min-width:0;word-break:break-word">'+esc(u.email)+(u.contact_name?' <span class="mut tiny">· '+esc(u.contact_name)+'</span>':'')+(u.active?'':' <span class="tool-badge bg-neutral" style="font-size:8px">inactive</span>')+'</span>'
-              +'<button class="lnk-btn sup-pu-magic" title="create & copy a 7-day portal login link for this user" style="color:#2563eb">🔗 link</button> '
+              +'<button class="lnk-btn sup-pu-magic" title="create & copy a 7-day portal login link for this user" style="color:#2563eb">🔗 magic link</button> '
               +'<button class="lnk-btn sup-pu-del" title="remove this portal user" style="color:#b91c1c">✕</button></div>'; }
           function supPuBlock(r){ var users=puFor(r);
             return '<div style="border-top:1px solid #eef2f7;margin:2px 0 14px"></div>'
