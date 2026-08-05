@@ -7886,24 +7886,29 @@
     ov.querySelector('#ps-go').onclick=function(){ var dc=dcI.value.trim(); if(!dc){ dcI.style.borderColor='#dc2626'; dcI.focus(); return; }
       close(); onGo({dc:dc, a1:ov.querySelector('#ps-a1').value.trim(), a2:ov.querySelector('#ps-a2').value.trim()}); };
   }
-  function buildPaperStoreLabelSVG(c,hdr){ var W=1000,H=560,el=[];
+  // Layout mirrors the Paper Store template (…FULL-CARTON-PO-1.pdf): store name + MASTER/ODD tag (red) on the top
+  // line, PO#/DC + address, then a label/value grid with N.W/G.W/MEAS on the right, UPC as plain text (no barcode).
+  function buildPaperStoreLabelSVG(c,hdr){ var W=1040,H=400,el=[];
     function T(x,y,s,o){ return svgText(x,y,s,o); }
-    el.push('<rect x="0" y="0" width="'+W+'" height="'+H+'" fill="#fff"/><rect x="8" y="8" width="'+(W-16)+'" height="'+(H-16)+'" fill="none" stroke="#111" stroke-width="2"/>');
-    var x=36,y=52,rx=610;
-    el.push(T(x,y,hdr.client,{size:30,bold:true})); y+=32;
-    el.push(T(x,y,'PO# '+hdr.po_ref+' - '+hdr.dc+' DISTRIBUTION CENTER',{size:17,bold:true})); y+=22;
-    if(hdr.a1)el.push(T(x,y,hdr.a1,{size:14})); y+=18; if(hdr.a2)el.push(T(x,y,hdr.a2,{size:14})); y+=16;
-    el.push('<line x1="24" y1="'+y+'" x2="'+(W-24)+'" y2="'+y+'" stroke="#111" stroke-width="1"/>'); y+=30;
-    el.push(T(x,y,'CTN#  '+c.ctn+'   OF   '+c.total,{size:18,bold:true})); el.push(T(rx,y,'N.W  ________ lbs',{size:14})); y+=28;
-    el.push(T(x,y,'ITEM#  '+c.sku,{size:16,bold:true})); el.push(T(rx,y,'G.W  '+(c.gw!=null?c.gw:'________')+' lbs',{size:14})); y+=26;
-    var desc=String(c.desc||''); if(desc.length>54)desc=desc.slice(0,52)+'…';
-    el.push(T(x,y,'DESC  '+desc,{size:13})); el.push(T(rx,y,'MEAS  '+(c.meas||'________')+' in',{size:14})); y+=24;
-    el.push(T(x,y,'UPC',{size:14,bold:true}));
-    if(c.upc){ var bars=eanBars(c.upc,x+52,y-16,2,46,8); if(bars){ el.push(bars); el.push(T(x+52,y+40,c.upc,{size:13,mono:true})); } else el.push(T(x+52,y,c.upc,{size:14,mono:true})); }
-    y+=66;
-    el.push(T(x,y,'MASTER QTY  '+c.master_qty+'  PCS',{size:16,bold:true}));
-    el.push(T(rx,y,(c.odd?'ODD / MIXED CARTON':'MASTER CARTON'),{size:18,bold:true,fill:'#dc2626'})); y+=26;
-    el.push(T(x,y,'INNER QTY  ________  PCS',{size:14}));
+    var L=28, RX=560, RV=650;   // left margin, right-block label x, right-block value x
+    el.push('<rect x="0" y="0" width="'+W+'" height="'+H+'" fill="#fff"/><rect x="6" y="6" width="'+(W-12)+'" height="'+(H-12)+'" fill="none" stroke="#111" stroke-width="2"/>');
+    var y=48;
+    el.push(T(L,y,hdr.client,{size:26,bold:true}));
+    el.push(T(W-26,y,(c.odd?'ODD / MIXED CARTON':'MASTER CARTON'),{size:18,bold:true,fill:'#dc2626',anchor:'end'})); y+=30;
+    el.push(T(L,y,'PO# '+hdr.po_ref+' - '+hdr.dc+' DISTRIBUTION CENTER',{size:15,bold:true})); y+=22;
+    if(hdr.a1)el.push(T(L,y,hdr.a1,{size:13})); y+=19; if(hdr.a2)el.push(T(L,y,hdr.a2,{size:13})); y+=14;
+    el.push('<line x1="'+L+'" y1="'+y+'" x2="'+(W-26)+'" y2="'+y+'" stroke="#111" stroke-width="1.2"/>'); y+=30;
+    function row(lbl,val,rlbl,rval,opt){ opt=opt||{};
+      el.push(T(L,y,lbl,{size:13,bold:true})); el.push(T(L+92,y,val,{size:opt.vsize||14,bold:!!opt.vbold}));
+      if(rlbl!=null){ el.push(T(RX,y,rlbl,{size:13,bold:true})); el.push(T(RV,y,rval,{size:13})); }
+      y+=opt.gap||27; }
+    row('CTN#', c.ctn+'    OF    '+c.total, 'N.W', (c.nw?c.nw+' lbs':''), {vbold:true});
+    row('ITEM#', c.sku, 'G.W', (c.gw?c.gw+' lbs':''), {vbold:true,vsize:15});
+    var desc=String(c.desc||''); if(desc.length>60)desc=desc.slice(0,58)+'…';
+    row('DESC', desc, 'MEAS', (c.meas||''), {vsize:12});
+    row('UPC', String(c.upc||''), null, null, {vsize:13});
+    row('MASTER QTY', c.master_qty+'    PCS', null, null, {vbold:true,vsize:15});
+    row('INNER QTY', 'PCS', null, null, {vsize:13});
     return '<svg xmlns="http://www.w3.org/2000/svg" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">'+el.join('')+'</svg>';
   }
   function paperStoreLabels(po,btn){ var orig=btn?btn.textContent:''; if(btn){btn.disabled=true;btn.textContent='Loading…';}
@@ -7917,7 +7922,7 @@
         function next(){ if(i>=d.cartons.length)return finish(); var c=d.cartons[i++];
           rasterizeSVGCanvas(buildPaperStoreLabelSVG(c,hdr),2.2,function(cv){ if(!cv)return next(); cv.toBlob(function(jb){ if(!jb)return next(); jb.arrayBuffer().then(function(ab){ pages.push({jpeg:new Uint8Array(ab),imgW:cv.width,imgH:cv.height}); next(); }); },'image/jpeg',0.92); }); }
         function finish(){ if(btn){btn.disabled=false;btn.textContent=orig;} if(!pages.length){ alert('Nothing rendered'); return; }
-          bcDownloadBlob(po+'_Paper_Store_carton_labels.pdf', new Blob([pdfA4Multi(pages,[[140,140,2200,3225]])],{type:'application/pdf'})); }
+          bcDownloadBlob(po+'_Paper_Store_carton_labels.pdf', new Blob([pdfA4Multi(pages,[[120,120,2240,900]])],{type:'application/pdf'})); }
         next();
       });
     }).catch(function(e){ if(btn){btn.disabled=false;btn.textContent=orig;} alert('Failed: '+((e&&e.message)||e)); });

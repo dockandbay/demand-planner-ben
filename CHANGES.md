@@ -1,3 +1,8 @@
+## v26.605.0 — Paper Store carton labels: match the template PDF exactly (no barcode)
+- Rebuilt the label to the FULL-CARTON template layout: store name + "MASTER CARTON" / "ODD / MIXED CARTON" tag (RED) on the top line; PO#/DC + DC address; then a label/value grid with N.W · G.W · MEAS aligned on the right.
+- Removed the scannable UPC barcode (Ben) — UPC now prints as plain text.
+- Weights/dims now derive from the UK (metric) product fields converted to imperial to match the template: N.W (net) = prod unit weight × qty; G.W (gross) = net + carton packaging (uk_carton_weight − net_full); MEAS = UK carton L×W×H (cm→in). e.g. full carton → N.W 34.4 / G.W 35.3 lbs, MEAS 23.2 in X 9.4 in X 13.8 in. Odd cartons scale by qty (+ packaging). (Was using US carton fields; template uses converted UK.)
+- A4 page (595×842pt, matching the PDF), one label per page. jsdom + endpoint verified.
 ## v26.604.0 — SCENARIO ▸ B2B: air rush rate is an editable USD input (£ from settings rate)
 - Replaced the hardcoded "$10/kg · £7/kg" rush-rate pills with a single editable USD $/kg input (default 10). The £ equivalent shows in brackets — "(≈ £X.XX/kg)" — computed from the settings USD→GBP rate (app_settings.usd_gbp_rate, default 1.34) via new GET /api/scenario/fx. The analysis air cost uses the USD rate; editing it re-renders live.
 ## v26.603.0 — Paper Store labels: key-account-linked gating + hide Crossdock when no crossdock SKUs

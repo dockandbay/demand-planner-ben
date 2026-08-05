@@ -1767,19 +1767,31 @@ app.get('/api/supply/paperstore-labels/:po', async (req, res) => {
     if (!poRow) return res.status(404).json({ error: 'PO not found' });
     const poRef = String(poRow.client_po_ref).split(/\s+/).filter(Boolean)[0] || '';   // strip the tab/duplicate paste junk → first token
     const addr = String(poRow.final_delivery_address).split(/\r?\n/).map(s => s.replace(/\t+/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean);
+    // Weights/dims from the UK (metric) product fields, converted to imperial to match the Paper Store template:
+    //  N.W (net)  = prod unit weight × qty          G.W (gross) = net + carton packaging (gross_full − net_full)
+    //  MEAS       = UK carton L×W×H (cm → in)        (kg→lb ×2.20462, cm→in ÷2.54)
     const lines = (await pool.query(`SELECT l.sku, l.qty, coalesce(nullif(l.carton_qty,0), nullif(p.carton_qty,'')::int) carton_qty,
         coalesce(p.product_ean,'') ean, coalesce(p.product_name,'') name,
-        nullif(p.us_carton_weight::text,'') gw, nullif(p.us_carton_length::text,'') cl, nullif(p.us_carton_width::text,'') cw, nullif(p.us_carton_height::text,'') ch
+        nullif(p.prod_weight_uk::text,'') net_unit_kg, nullif(p.uk_carton_weight::text,'') gross_full_kg,
+        nullif(p.uk_carton_length::text,'') cl, nullif(p.uk_carton_width::text,'') cw, nullif(p.uk_carton_height::text,'') ch
       FROM planner.purchase_order_lines l LEFT JOIN planner.products p ON p.sku=l.sku WHERE l.po=$1 ORDER BY l.sku`, [po])).rows;
+    const LB = 2.20462, IN = 2.54;
     const cartons = [];
     lines.forEach(l => {
       const cq = Number(l.carton_qty) || 0, q = Number(l.qty) || 0; if (!q) return;
       const upc = String(l.ean || '').replace(/[^0-9]/g, '');
-      const meas = (l.cl && l.cw && l.ch) ? (l.cl + ' x ' + l.cw + ' x ' + l.ch) : '';
-      const gwFull = l.gw ? Number(l.gw) : null;
+      const meas = (l.cl && l.cw && l.ch) ? ((Number(l.cl) / IN).toFixed(1) + ' in X ' + (Number(l.cw) / IN).toFixed(1) + ' in X ' + (Number(l.ch) / IN).toFixed(1) + ' in') : '';
+      const netUnit = l.net_unit_kg ? Number(l.net_unit_kg) : null;                 // kg per unit
+      const grossFull = l.gross_full_kg ? Number(l.gross_full_kg) : null;           // kg per full carton (gross)
+      const pkgKg = (grossFull != null && netUnit != null && cq > 0) ? Math.max(0, grossFull - netUnit * cq) : 0;
+      const wts = qty => {
+        const nw = netUnit != null ? (netUnit * qty * LB).toFixed(1) : '';
+        const gw = netUnit != null ? ((netUnit * qty + pkgKg) * LB).toFixed(1) : (grossFull != null ? (grossFull * LB).toFixed(1) : '');
+        return { nw, gw };
+      };
       const full = cq > 0 ? Math.floor(q / cq) : 0, rem = cq > 0 ? (q % cq) : q;
-      for (let i = 0; i < full; i++) cartons.push({ sku: l.sku, desc: l.name, upc, master_qty: cq, odd: false, gw: gwFull, meas });
-      if (rem > 0) cartons.push({ sku: l.sku, desc: l.name, upc, master_qty: rem, odd: true, gw: (gwFull && cq) ? Math.round(gwFull * rem / cq * 10) / 10 : null, meas });
+      for (let i = 0; i < full; i++) { const w = wts(cq); cartons.push({ sku: l.sku, desc: l.name, upc, master_qty: cq, odd: false, nw: w.nw, gw: w.gw, meas }); }
+      if (rem > 0) { const w = wts(rem); cartons.push({ sku: l.sku, desc: l.name, upc, master_qty: rem, odd: true, nw: w.nw, gw: w.gw, meas }); }
     });
     cartons.forEach((c, i) => { c.ctn = i + 1; c.total = cartons.length; });
     res.set('Cache-Control', 'no-store').json({ ok: true, client: 'The Paper Store', po_ref: poRef, dc_addr1: addr[0] || '', dc_addr2: addr.slice(1).join(', ') || '', cartons });
