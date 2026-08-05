@@ -1,3 +1,8 @@
+## v26.592.0 — Fix: SMOOTH lost on refresh + Complex Rules pull-forward not firing in its window
+- DEMAND SMOOTH persistence: a smooth now saves IMMEDIATELY (was only a 60s debounced autosave), AND the 30-min auto-refresh (supply/inject.html auto-updater) now flushes unsaved forecast edits via saveForecasts() BEFORE it reloads. Previously a smooth + refresh inside the 60s window silently discarded the smoothed SKU numbers. (artifact + inject; the sendBeacon-on-unload was only best-effort.)
+- BUY Complex Rules pull-forward: a windowed "range" rule (e.g. "SS27 - 7 months up front": build cover during the Aug–Dec'26 window for the Dec'26–Jul'27 range) was being skipped for every projection month BEFORE range_from, so 3PL Target Units stayed at base cover and buys only appeared from December. Now when a rule has a window (window_from/to), the WINDOW governs activation — cover builds to the end of the range across the whole window. Range-only rules (no window) are unchanged. Fix in crCoverWeeks + crWinRule (raise-only preserved).
+- Buy-plan before/after snapshot: Buy 3PL 23,732 → 24,332 (+600 = the SS27 pull-forward, same 70 buyers); Buy 3PL Urgent 48,152, Buy FBA 616, Transfers 1,650 all UNCHANGED (no collateral impact).
+
 ## v26.591.0 — PO drawer PAYMENTS table: fix mobile horizontal scroll
 - The PO-grid ▸ PAYMENTS sub-tab payment-plan table didn't scroll sideways on mobile — it overflowed the panel.
 - Cause: `.pay-tbl` was on the `.tw` scroll wrapper itself, so the mobile `width:max-content` rule grew the container past the viewport instead of scrolling inside it. The 4 PAYMENTS report tables put `.pay-tbl` on the `<table>` (which works) — the drawer was the odd one out.

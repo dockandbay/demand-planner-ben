@@ -1344,8 +1344,12 @@ function crCoverWeeks(i,base,matched){
     var wks;
     if(r.coverage_type==='range'){
       if(!m.rt)continue;
-      if(m.rf && mDate<m.rf)continue;       // before the covered range
-      if(mDate>m.rt)continue;               // past the covered range
+      // A window (wf/wt, checked above) governs WHEN a rule is active. A windowed pull-forward (buy during
+      // Aug–Dec to cover a Dec–Jul range) has its window BEFORE the range, so it must NOT be gated by the
+      // range START — that gate would skip every window month and delay the buy to range_from. Only
+      // range-only rules (no window) are gated to [rf, rt].
+      if(!(m.wf||m.wt)){ if(m.rf && mDate<m.rf)continue; }   // before the covered range (range-only rules)
+      if(mDate>m.rt)continue;               // never compute negative weeks past the range end
       wks=Math.max((m.rt-mDate)/(7*86400000),0);   // weeks from this month to the end of range_to
     } else {
       wks=(Number(r.cover_months)||0)*4.33; // months → weeks
@@ -1365,7 +1369,7 @@ function crWinRule(i,base,matched){
     if(m.wf && mDate<m.wf)continue;
     if(m.wt && mDate>m.wt)continue;
     var wks;
-    if(r.coverage_type==='range'){ if(!m.rt)continue; if(m.rf && mDate<m.rf)continue; if(mDate>m.rt)continue; wks=Math.max((m.rt-mDate)/(7*86400000),0); }
+    if(r.coverage_type==='range'){ if(!m.rt)continue; if(!(m.wf||m.wt)){ if(m.rf && mDate<m.rf)continue; } if(mDate>m.rt)continue; wks=Math.max((m.rt-mDate)/(7*86400000),0); }
     else { wks=(Number(r.cover_months)||0)*4.33; }
     if(wks>best){best=wks;win=r;}
   }
@@ -6693,6 +6697,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
     if(!SMOOTH_PREVIEW||!SMOOTH_PREVIEW.months)return;
     Object.keys(SMOOTH_PREVIEW.months).forEach(function(mo){ applySmoothAlloc(co,ch,mo,SMOOTH_PREVIEW.months[mo]); });
     SMOOTH_PREVIEW=null; reExpand();
+    try{ if(typeof saveForecasts==='function') saveForecasts(); }catch(e){}   // persist a smooth immediately — a bulk edit shouldn't wait on the 60s autosave (lost on refresh otherwise)
   }
   // Preview a smooth across ALL forecast months in one financial year (startY). Uses the current
   // Standard/Leader mode (SMOOTH_LEADER). Includes the current month's forecast (the 'fc' side).
@@ -7260,7 +7265,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       };
       var ok=document.createElement('button');ok.textContent='\u2713';ok.title='Apply this smooth to all SKUs in '+s+' for '+m.replace('_','-')+' — writes overrides (Save forecasts to persist)';
       ok.style.cssText='font-size:8px;line-height:1;padding:1px 5px;border:1px solid #16a34a;border-radius:3px;background:#dcfce7;color:#166534;cursor:pointer;font-weight:700';
-      ok.onclick=function(e){e.stopPropagation();applySmoothAlloc(co,ch,SMOOTH_PREVIEW.m,SMOOTH_PREVIEW.vals);SMOOTH_PREVIEW=null;reExpand();};
+      ok.onclick=function(e){e.stopPropagation();applySmoothAlloc(co,ch,SMOOTH_PREVIEW.m,SMOOTH_PREVIEW.vals);SMOOTH_PREVIEW=null;reExpand();try{ if(typeof saveForecasts==='function') saveForecasts(); }catch(_e){}};
       var no=document.createElement('button');no.textContent='\u2715';no.title='Discard preview';
       no.style.cssText='font-size:8px;line-height:1;padding:1px 5px;border:1px solid #cbd5e1;border-radius:3px;background:#f1f5f9;color:#64748b;cursor:pointer;font-weight:700';
       no.onclick=function(e){e.stopPropagation();SMOOTH_PREVIEW=null;reExpand();};

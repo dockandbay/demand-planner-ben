@@ -10312,14 +10312,28 @@
   var pending=false, nagShown=false, nagMsg='HORIZON has an update ready.', lastAct=Date.now();
   var STALE_MS=30*60*1000, IDLE_MS=90*1000;   // reload a session open >30 min; "idle" = no interaction 90s
   ['mousemove','keydown','mousedown','scroll','touchstart'].forEach(function(ev){ window.addEventListener(ev,function(){ lastAct=Date.now(); },{passive:true,capture:true}); });
+  // Reload, but FIRST flush any unsaved forecast edits to the DB. SMOOTH / cell edits sit in-memory until a 60s
+  // debounced autosave; a reload inside that window would discard them (lost-smooth bug). saveForecasts() is a
+  // real awaited write (the sendBeacon on unload is only best-effort). 4s safety so a hung save can't block the reload.
+  var _reloading=false;
+  function safeReload(){ if(_reloading)return; _reloading=true;
+    try{
+      if(typeof _dirty!=='undefined' && _dirty && typeof saveForecasts==='function'){
+        var done=false, go=function(){ if(done)return; done=true; location.reload(); };
+        Promise.resolve(saveForecasts()).catch(function(){}).then(go);
+        setTimeout(go,4000);   // don't hang forever if the save stalls
+        return;
+      }
+    }catch(e){}
+    location.reload(); }
   function nag(){ if(nagShown||!document.body)return; nagShown=true;
     var d=document.createElement('div'); d.id='hz-update-nag';
     d.style.cssText='position:fixed;top:0;left:0;right:0;z-index:2147483000;background:#fde047;color:#111827;font:700 15px system-ui;padding:11px 18px;display:flex;gap:16px;align-items:center;justify-content:center;box-shadow:0 3px 14px rgba(0,0,0,.28);border-bottom:2px solid #eab308';
     d.innerHTML='<span style="font-size:16px">🔄 '+nagMsg+'</span><button id="hz-update-go" style="background:#111827;color:#fde047;border:0;border-radius:6px;padding:8px 18px;font-weight:700;font-size:14px;cursor:pointer">Refresh now</button>';
-    document.body.appendChild(d); document.getElementById('hz-update-go').onclick=function(){ location.reload(); }; }
+    document.body.appendChild(d); document.getElementById('hz-update-go').onclick=function(){ safeReload(); }; }
   function apply(){ if(!pending)return;
-    if(document.hidden){ location.reload(); return; }              // backgrounded → reload silently
-    if(Date.now()-lastAct>IDLE_MS){ location.reload(); return; }   // visible but idle → reload (no interruption)
+    if(document.hidden){ safeReload(); return; }              // backgrounded → reload silently (saves first)
+    if(Date.now()-lastAct>IDLE_MS){ safeReload(); return; }   // visible but idle → reload (saves first)
     nag(); }                                                        // actively in use → nudge; retried below
   function check(){ fetch('/api/version',{cache:'no-store',credentials:'same-origin'}).then(function(r){return r.ok?r.json():null;}).then(function(j){
     if(!j)return;
