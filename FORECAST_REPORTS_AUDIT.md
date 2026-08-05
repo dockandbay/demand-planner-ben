@@ -2,6 +2,11 @@
 
 Read-only audits (two independent reviewers) of the reports downstream of the demand forecast, per Ben's ask: "ensure related reports to demand forecast are accurate in logic. Auto forecasts, exec summary." No code changed yet — these are findings to triage into fixes.
 
+> **UPDATE 2026-08-05 (verified against current code):**
+> - **F2 — RESOLVED.** The subcategory query IS pinned: `run_id = (SELECT max(run_id) FROM planner.forecasts WHERE level='subcategory')` (server.mjs ~7819); SKU side uses `max(run_id)` too. No silent-multiply risk.
+> - **B-HIGH (Exec vs Revenue basis) — RESOLVED.** `buildExecData` uses the RAW/overridden forecast with **no BI_CACHE overlay** (artifact ~9236: "use the RAW forecast (no BI_CACHE / AI overlay)") and `curMonthForecast` for the current partial month — matching the Revenue pop-out + plan. Ben's confirmed convention (actual/implied forecast, not BI-recommended) is already what it does.
+> - Still open to triage: **F1** (buy signal is largely an allocation artifact), **F3** (currency-blended cash labelled USD), Exec MEDIUM (LY "Actual" treats missing 2025 rows as £0 → inflates YoY), and the LOW items.
+
 ---
 
 ## A. AUTO FORECAST — `/api/scenario/auto-forecast` (server.mjs ~7113–7231) + `renderAutoForecastReport` (artifact ~8419)
