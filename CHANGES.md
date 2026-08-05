@@ -1,3 +1,8 @@
+## v26.590.0 — Zalando tab: months-cover toggle + discontinue handling + wider SKU
+- Months-cover toggle (1–6, default 2) — suggested send = N-month cover − stock. Recomputes live.
+- SKU column widened (min-width 230px, fits ~30 chars).
+- New Disc (EU) column from SKUM.disc.eu; the cover sum EXCLUDES months after the EU discontinue date, so no stock is sent to cover post-discontinue demand (discontinued SKUs → suggested 0).
+
 ## v26.589.0 — 3PL invoicing: cross-month reclass journal (all 3PLs)
 - New POST /api/supply/tpl/journal/:id: orders on the invoice whose Cin7/Fulfil invoice-date (ship date) fall in a month BEFORE the invoice period → their 3PL cost is reclassed out of the invoice month into the order month. Xero manual-journal CSV (exact template header *Narration,*Date,Description,*AccountCode,*TaxRate,*Amount,Tracking…; UK dd/mm/yyyy dates; balanced debit prior-month / credit invoice-month per account; tax-neutral No VAT). Shown on the Map result (amber panel: total + per-month) with a download. Covers EU/AU + Geneva per-order; ILG shipping-detail dating is a follow-up. Needs the month Cin7 import (invoice dates).
 
