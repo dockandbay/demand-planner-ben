@@ -1,3 +1,8 @@
+## v26.579.0 — Buy Urgent: additive Air (bridge) + Sea (bulk)
+- The urgent buy split into Sea/Air used to pick ONE mode (sea if it landed in time, else air) and put the whole qty in one column. Now ADDITIVE (Ben): AIR = just enough to bridge demand until the cheaper SEA shipment lands; SEA = the bulk after. Sizing: walk the shortfall months — demand before the sea-arrival date → air bridge, from sea-arrival on → sea bulk. MOQ applies ONCE to the whole order; air leg rounds to whole cartons capped at the total, sea takes the remainder (conserves the urgent total, no double-MOQ). Collapses to all-air when one air carton over-covers a small need, or all-sea when sea lands in time.
+- Buy-plan safety: verified via before/after snapshot across all markets — Buy 3PL (b3=23732) + Buy FBA (bf=616) UNCHANGED (buyplanItems/Create-PO reads b3 only, never urgent); urgent total b3u=48152 conserved exactly; b3uAir+b3uSea additive for every SKU. PONCHK-CAB-XS-LTPNK UK: 180 → 30 air + 150 sea.
+- Column tooltips updated to explain bridge (air) vs bulk (sea).
+
 ## v26.578.0 — PO Order Plan: approving an exception (p/s/d/c) is now instant
 - Clicking the p/s/d/c exception badge in a PO’s ORDER PLAN did fetch→poRefetchPanel (a full server re-fetch of the whole PO detail, ~5s — felt like the click didn’t register). Now OPTIMISTIC: flips the cached line flag + re-renders the order-plan panel from cache instantly, then persists in the background and reverts on error. Partial UNDO keeps the correct refetch path (needs the server-recomputed carton check). Approve is the common action → now instant.
 

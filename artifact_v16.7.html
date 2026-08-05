@@ -1953,8 +1953,8 @@ function render(){
             var n=oth.map(function(m,i){return '<th class="r" style="min-width:50px;background:#dcfce7;color:#166534;font-size:9px'+(i===0?';border-left:3px solid #86efac':'')+'">'+(i===0?'IN ':'')+m+'&rarr;</th>';}).join('');
             return o+n; })()
         : '<th class="r" style="min-width:64px">Buy 3PL</th>'
-        +'<th class="r" style="min-width:58px" title="Buy 3PL Urgent — SEA-expedite (expedited production + sea freight); used when sea still lands before the stockout">Urgent<br>Sea</th>'
-        +'<th class="r" style="min-width:58px" title="Buy 3PL Urgent — AIR-expedite (expedited production + air freight); used when sea can no longer land in time">Urgent<br>Air</th>'
+        +'<th class="r" style="min-width:58px" title="Buy 3PL Urgent — SEA (the bulk): expedited production + sea freight (cheaper, lands later). Covers demand from when the sea shipment arrives. Air + Sea together = the urgent shortfall.">Urgent<br>Sea</th>'
+        +'<th class="r" style="min-width:58px" title="Buy 3PL Urgent — AIR (the bridge): expedited production + air freight, sized to just cover demand until the cheaper sea shipment lands. Air + Sea together = the urgent shortfall.">Urgent<br>Air</th>'
         +'<th class="r" style="min-width:64px">Buy FBA</th>');   // inter-market Trf columns removed from BUY (now the TRANSFER tab)
     _hdr.innerHTML=_lead+_trail+'</tr>';
   }
@@ -2892,6 +2892,15 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     // (assumed) buy lands and handles the rest. Pre-arrival deficits deplete to 0 (lost sales) and aren't
     // bought for — a rush can't reach them.
     let urgentQtyNeeded=0;
+    // Air/Sea expedite params up-front so the shortfall loop can tag each month as AIR-bridge (before sea lands) vs SEA-bulk.
+    var _co=String(mkt).toLowerCase();
+    var _bf=(typeof BRANCH_FREIGHT!=='undefined'&&BRANCH_FREIGHT[_co])||{air:7,sea:42};
+    var _exp=(pd&&pd.exped!=null)?Number(pd.exped):6;
+    var _seaWks=_exp+(Number(_bf.sea)||42)/7, _airWks=_exp+(Number(_bf.air)||7)/7;
+    var _seaArr=new Date(TODAY); _seaArr.setDate(_seaArr.getDate()+Math.round(_seaWks*7));   // when a rush SEA shipment would land
+    var _airArr=new Date(TODAY); _airArr.setDate(_airArr.getDate()+Math.round(_airWks*7));
+    var _prodW=Math.round(_exp), _seaFW=Math.round((Number(_bf.sea)||42)/7), _airFW=Math.round((Number(_bf.air)||7)/7);
+    var _airQ=0, _seaQ=0;   // ADDITIVE split (Ben): AIR bridges the demand until sea lands; SEA covers the bulk after. air+sea = the urgent shortfall.
     let simStock=dangerStart>0?stockTrace[dangerStart-1].closing:ts3;
     for(let ti=dangerStart;ti<stockTrace.length;ti++){
       const t=stockTrace[ti];
@@ -2900,31 +2909,31 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
       // Don't rush-buy for the discontinue month (or later): that month's demand sells down existing stock —
       // you never restock a SKU in its final selling month. The shortfall still runs stock to 0, just no urgent.
       const inDiscMonth=discMonthKey&&t.key>=discMonthKey;
-      if(ti>=injPos&&stockAfter<0&&!inDiscMonth)urgentQtyNeeded+=Math.abs(stockAfter);
+      if(ti>=injPos&&stockAfter<0&&!inDiscMonth){
+        var _short=Math.abs(stockAfter); urgentQtyNeeded+=_short;
+        var _pk=String(t.key||'').split('_'), _pdt=(_pk.length===2)?new Date(Number(_pk[0]),Number(_pk[1])-1,15):null;
+        if(_pdt&&_seaArr&&_pdt>=_seaArr)_seaQ+=_short; else _airQ+=_short;   // month sea can reach → SEA; earlier → AIR bridge
+      }
       simStock=Math.max(stockAfter,0);
     }
 
     if(urgentQtyNeeded>0){
-      // Size to the DEMAND that would otherwise go unmet (the urgent forecast) from the rush arrival until the next
-      // resupply — an existing shipment (confInb3, already in the sim) or a Buy-3PL order (the loop breaks when one
-      // lands). No extra safety buffer (Ben): restore just enough to cover demand until more stock arrives.
-      urgentQtyNeeded=Math.max(Math.ceil(urgentQtyNeeded/cp)*cp,moq);
-      // Air/Sea SPLIT of the (unchanged) urgent qty (Ben): SEA-expedite if it lands before the stockout month
-      // (cheaper), else AIR. Lead = supplier expedited_production_weeks (pd.exped, default 6) + branch air/sea freight.
-      var _co=String(mkt).toLowerCase();
-      var _bf=(typeof BRANCH_FREIGHT!=='undefined'&&BRANCH_FREIGHT[_co])||{air:7,sea:42};
-      var _exp=(pd&&pd.exped!=null)?Number(pd.exped):6;
-      var _seaWks=_exp+(Number(_bf.sea)||42)/7, _airWks=_exp+(Number(_bf.air)||7)/7;
-      var _dm=PROJ[firstDangerIdx]&&PROJ[firstDangerIdx].key?PROJ[firstDangerIdx].key.split('_'):null;
-      var _dangerDate=_dm?new Date(Number(_dm[0]),Number(_dm[1])-1,15):null;   // ~mid the stockout month
-      var _seaArr=new Date(TODAY); _seaArr.setDate(_seaArr.getDate()+Math.round(_seaWks*7));
-      var _mode=(_dangerDate&&_seaArr<=_dangerDate)?'sea':'air';               // Sea if it lands in time, else Air
-      var _prodW=Math.round(_exp), _seaFW=Math.round((Number(_bf.sea)||42)/7), _airFW=Math.round((Number(_bf.air)||7)/7);   // rush production + freight, split so the tooltip can read "Xwk rush production + Ywk sea shipping / air freight"
-      if(_mode==='sea'){ buyUrgentSea[1]=urgentQtyNeeded; buyUrgentLead[1]=Math.round(_seaWks); buyUrgentProd[1]=_prodW; buyUrgentFreight[1]=_seaFW; buyUrgentMode[1]='sea'; }
-      else { buyUrgentAir[1]=urgentQtyNeeded; buyUrgentLead[1]=Math.round(_airWks); buyUrgentProd[1]=_prodW; buyUrgentFreight[1]=_airFW; buyUrgentMode[1]='air'; }
-      buyUrgent[1]=urgentQtyNeeded;                          // combined (kept for downloads / detail row)
+      // ADDITIVE Air + Sea (Ben): AIR = just enough to bridge demand until the cheaper SEA shipment lands; SEA = the bulk
+      // after. MOQ applies ONCE to the whole urgent order; the AIR leg is sized to whole cartons (a shipment) and SEA takes
+      // the remainder — so air+sea CONSERVES the urgent total (no double-MOQ inflation on small orders). Was: one leg only.
+      // MOQ applies ONCE to the whole urgent order. AIR bridge = its demand rounded UP to whole cartons (a shipment),
+      // capped at the total; SEA bulk = the remainder. This CONSERVES the urgent total (no double-MOQ inflation) and
+      // correctly collapses to all-air when one air carton already over-covers a small need (sea=0), or splits a large
+      // urgent into air-bridge + sea-bulk (e.g. 180 → 30 air + 150 sea).
+      var _totR=Math.max(Math.ceil(urgentQtyNeeded/cp)*cp,moq);
+      var _airR=_airQ>0?Math.min(Math.ceil(_airQ/cp)*cp,_totR):0;   // bridge = whole cartons, capped at the total
+      var _seaR=_totR-_airR;                                        // bulk = the remainder
+      buyUrgentAir[1]=_airR; buyUrgentSea[1]=_seaR;
+      buyUrgent[1]=_totR;                                   // combined = the (MOQ-rounded) urgent total, conserved
+      buyUrgentMode[1]=(_airR>0&&_seaR>0)?'both':(_seaR>0?'sea':'air');
+      buyUrgentLead[1]=Math.round(_seaR>0?_seaWks:_airWks); buyUrgentProd[1]=_prodW; buyUrgentFreight[1]=_seaR>0?_seaFW:_airFW;
       buyUrgentMonth[1]=PROJ[firstDangerIdx].lbl;            // when the stockout first bites
-      buyUrgentArr[1]=PROJ[injIdx]?PROJ[injIdx].lbl:'';      // earliest a rush could land
+      buyUrgentArr[1]=PROJ[injIdx]?PROJ[injIdx].lbl:'';      // earliest a rush could land (air)
     }
   }
 
