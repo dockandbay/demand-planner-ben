@@ -69,6 +69,9 @@ function loadHTML() {
 const HTML = loadHTML();
 // SUPPLY tab (Production Planner) UI — injected before </body>. Optional; empty if file absent.
 function loadInject() { try { return readFileSync(new URL('./supply/inject.html', import.meta.url), 'utf8'); } catch { return ''; } }
+// Zalando: hard-coded per-SKU monthly forecast (cols S+ of Ben's ZALANDO_FC.csv) baked into the app (sandbox + live via deploy).
+// Stock-on-hand is uploaded periodically into planner.zalando_stock (mig 182); forecast stays static here.
+const ZAL_DATA = (() => { try { return JSON.parse(readFileSync(new URL('./zalando_data.json', import.meta.url), 'utf8')); } catch { return { forecast: {}, stock: {}, months: [] }; } })();
 // USD→GBP rate for the report GBP columns — configurable in CONFIG ▸ General settings (app_settings.usd_gbp_rate);
 // injected into both clients' CF_GBP/AF_GBP literals at serve time. Fallback 1.34 if unset/invalid.
 async function gbpRate() { try { const r = await pool.query(`SELECT value FROM planner.app_settings WHERE key='usd_gbp_rate'`);
@@ -599,6 +602,8 @@ app.get('/', async (_req, res) => {
     html = replaceGlobal(html, 'SUBS_META', JSON.stringify(SUBS));
     html = replaceGlobal(html, 'BI_RULES', JSON.stringify(BI));
     html = replaceGlobal(html, 'PROD_CONST', JSON.stringify(PROD_CONST));
+    html = replaceGlobal(html, 'ZAL_FC', JSON.stringify(ZAL_DATA.forecast || {}));
+    html = replaceGlobal(html, 'ZAL_MONTHS', JSON.stringify(ZAL_DATA.months || []));
     html = replaceGlobal(html, 'BRANCH_FREIGHT', JSON.stringify(BRANCH_FREIGHT || {}));
     html = replaceGlobal(html, 'TRANSFER_LEADS', JSON.stringify(TRANSFER_LEADS || {}));
     // Definitive price changes (DEMAND ▸ Revenue) — injected fresh (not in the 5-min data cache) so an edit shows
@@ -5975,6 +5980,33 @@ app.post('/api/supply/fba-transfers/refresh', async (req, res) => {
     const pr = await pool.query(`DELETE FROM planner.fba_pending_transfers WHERE received_date IS NOT NULL OR (reference IS NOT NULL AND reference IN (SELECT DISTINCT reference FROM planner.inbound_shipments WHERE reference IS NOT NULL))`);
     await pool.query(`INSERT INTO planner.app_settings (key,value,updated_at) VALUES ('fba_transfers_last_run',$1,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_at=now()`, [new Date().toISOString()]);
     res.json({ ok: true, transfers: kept, lines, pruned: pr.rowCount, cin7_calls: calls });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// ── Zalando: baked per-SKU forecast + uploaded stock-on-hand (planner.zalando_stock). Feeds the BUY & MOVE ▸ Zalando tab.
+app.get('/api/supply/zalando/data', async (req, res) => {   // /data suffix: single-segment /api/supply/zalando is caught by the :section catch-all
+  try {
+    const stock = {}; (await pool.query(`SELECT sku, qty FROM planner.zalando_stock`)).rows.forEach(r => { stock[r.sku] = Number(r.qty) || 0; });
+    const up = (await pool.query(`SELECT to_char(max(updated_at),'YYYY-MM-DD') d, count(*)::int n FROM planner.zalando_stock`)).rows[0] || {};
+    res.set('Cache-Control', 'no-store').json({ ok: true, forecast: ZAL_DATA.forecast || {}, months: ZAL_DATA.months || [], stock, stock_updated: up.d || null, stock_skus: up.n || 0 });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Upload the combined Zalando stock file (csv/xls/xlsx). Flexible: finds the header row with a "Sku" + "…sellable_stock" column.
+app.post('/api/supply/zalando/stock-upload', async (req, res) => {
+  try {
+    const b = req.body || {}; const buf = b.content_base64 ? Buffer.from(String(b.content_base64), 'base64') : null; const fn = String(b.filename || '');
+    if (!buf) return res.status(400).json({ error: 'no file supplied' });
+    let grid = [];
+    if (/\.csv$/i.test(fn)) { const parse = l => { const o = []; let c = '', q = false; for (let i = 0; i < l.length; i++) { const ch = l[i]; if (ch === '"') { if (q && l[i + 1] === '"') { c += '"'; i++; } else q = !q; } else if (ch === ',' && !q) { o.push(c); c = ''; } else c += ch; } o.push(c); return o; }; grid = String(buf.toString('utf8')).split(/\r?\n/).filter(l => l.length).map(parse); }
+    else { const ExcelJS = (await import('exceljs')).default; const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf); const ws = wb.worksheets[0]; if (ws) ws.eachRow({ includeEmpty: false }, r => { const a = []; r.eachCell({ includeEmpty: true }, (c, col) => { a[col - 1] = _tplCellVal(c); }); grid.push(a); }); }
+    if (!grid.length) return res.json({ ok: false, error: 'empty file' });
+    let hr = -1, si = -1, qi = -1;
+    for (let i = 0; i < Math.min(12, grid.length); i++) { const hs = (grid[i] || []).map(x => String(x == null ? '' : x).trim().toLowerCase()); const s = hs.indexOf('sku'); const q = hs.findIndex(h => /sellable[_ ]?stock/.test(h)); if (s >= 0 && q >= 0) { hr = i; si = s; qi = q; break; } }
+    if (hr < 0) return res.json({ ok: false, error: 'Could not find the "Sku" and "…sellable_stock" columns in the file.' });
+    const rows = []; for (let r = hr + 1; r < grid.length; r++) { const sku = String((grid[r] || [])[si] == null ? '' : grid[r][si]).trim(); if (!sku) continue; const q = _tplNum((grid[r] || [])[qi]); rows.push([sku, q == null ? 0 : q]); }
+    if (!rows.length) return res.json({ ok: false, error: 'no stock rows found under the headers' });
+    await pool.query(`DELETE FROM planner.zalando_stock`);   // dedicated snapshot table — each upload replaces with the latest
+    for (const [sku, q] of rows) await pool.query(`INSERT INTO planner.zalando_stock (sku, qty, updated_at) VALUES ($1,$2,now()) ON CONFLICT (sku) DO UPDATE SET qty=excluded.qty, updated_at=now()`, [sku, q]);
+    res.json({ ok: true, count: rows.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Serve the in-flight (not-yet-inbound) FBA transfers for the FBA tab + last-run stamp. Only rows whose

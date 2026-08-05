@@ -1,3 +1,6 @@
+## v26.587.0 — Zalando P1: baked forecast + stock table + endpoints (server foundation)
+- Baked the per-SKU monthly Zalando forecast (zalando_data.json, 44 SKUs × 22 months) into the app as ZAL_FC / ZAL_MONTHS globals (sandbox + live via deploy). Migration 182 planner.zalando_stock (sku/qty/updated_at). GET /api/supply/zalando/data (forecast + months + uploaded stock; /data suffix avoids the :section catch-all). POST /api/supply/zalando/stock-upload (csv/xls/xlsx; flexible header match on Sku + …sellable_stock; replaces the snapshot). Verified: endpoint returns 44 fc SKUs + 22 months. Client Zalando tab (upload UI + FBA-style transfer analysis, no MOQ, EAN/Qty download) is the next step; ZAL demand-grid channel (P3) after mockup.
+
 ## v26.586.0 — FBA transfer: US AWD upload format + clear FBA/AWD choice
 - US AWD needs a different Amazon template. downloadFbaTransfer(dest) now branches: dest=fba → the send-to-Amazon manifest (unchanged); dest=awd → the AWD template (no Manufacturing lot code; adds Palletized? / Boxes Per Pallet / Number of pallets; simpler header block). On the FBA transfer tab a separate purple “AWD Transfer Upload (US)” button appears ONLY for US so the user clearly chooses FBA vs AWD; non-US shows just FBA.
 
