@@ -1,3 +1,6 @@
+## v26.576.0 — Direct-to-Client supplier approval gated on "Require supplier confirmation"
+- The DtC "Supplier approval" row + dtc_not_approved action fired for every Direct-to-Client PO regardless of the production setting, so e.g. PO-1731760 (prod 56, off until P58) showed "Awaiting supplier approval" when it should not. Now gated on the production’s CONFIG ▸ Productions "Require supplier confirmation" flag (r.require_confirmation), aligning it with the PO-confirmation action (po_not_approved). When off, the row shows "Not required" and raises no action; when on (P58+), it behaves as before.
+
 ## v26.575.0 — Pre-shipment docs action now flags 1 week BEFORE production end
 - The pre-shipment-documents action (ASN / carton+pallet barcodes / IDN labels) previously flagged only once production had ENDED (prod_end < today). Now it flags 1 week before (prod_end < today+7), so docs can be prepped ahead. Wording switches: "due soon — production ends <date>" before the end date, "overdue — production ended <date>" after. Applied to the action condition (badge/count), the PAYMENTS/SHIPMENTS reason list, and the SHIPMENTS banner.
 

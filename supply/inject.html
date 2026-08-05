@@ -2002,7 +2002,7 @@
     // "Late - should have Shipped": still in PRODUCTION and the ship date has passed.
     production:function(r){ var t=new Date().toISOString().slice(0,10); return /production/i.test(r.status||'') && r.ship && r.ship<t; },
     // Direct to Client details not yet approved — only for Direct-to-Client POs with a client sales ref
-    dtc_not_approved:function(r){ return r.progress!=='complete' && poIsDtc(r) && !r.dtc_accepted_at; },
+    dtc_not_approved:function(r){ return r.progress!=='complete' && poIsDtc(r) && !r.dtc_accepted_at && !!r.require_confirmation; },   // DtC supplier approval only required when the production's "Require supplier confirmation" is ON (CONFIG ▸ Productions) — aligns with po_not_approved (Ben: off until P58)
     // production requires supplier confirmation and the supplier hasn't confirmed the PO yet
     po_not_approved:function(r){ return r.progress!=='complete' && !/^shipping|deliver/i.test(r.status||'') && !!r.require_confirmation && !r.supplier_confirmed; },   // once shipping/delivered, supplier confirmation is moot (READY TO SHIP still chases it)
     // Pre-shipment documents overdue: PRODUCTION/ready-to-ship, production end passed, required branch doc missing, not waived.
@@ -3176,7 +3176,7 @@
       +cliRow('Client Specific Carton Labels',packField('pack_client_carton',r.pack_client_carton,'pack_client_carton_notes',r.pack_client_carton_notes))
       +cliRow('Pallet Packing requirements',txtIn(ep,'pack_pallet_notes',r.pack_pallet_notes,360,true))
       +cliRow('Other Packing &amp; Labelling requirements',txtIn(ep,'pack_other_notes',r.pack_other_notes,360,true))
-      +cliRow('Supplier approval',(!poIsDtc(r)?'<span class="tool-badge bg-neutral">Not applicable</span> <span class="mut tiny">(approval only applies to Direct-to-Client orders with a client sales ref)</span>':(r.dtc_accepted_at?'<span class="tool-badge bg-green">✓ Approved</span> <span class="mut tiny">'+esc(r.dtc_accepted_at)+(r.dtc_accepted_by?' · '+esc(r.dtc_accepted_by):'')+'</span>':'<span class="tool-badge bg-amber">Awaiting supplier approval</span> <span class="mut tiny">(editing any field above re-requests approval)</span>'+(PO_ACTCOND.dtc_not_approved(r)?actMark(r.po,'dtc_not_approved'):''))))
+      +cliRow('Supplier approval',(!poIsDtc(r)?'<span class="tool-badge bg-neutral">Not applicable</span> <span class="mut tiny">(approval only applies to Direct-to-Client orders with a client sales ref)</span>':(r.dtc_accepted_at?'<span class="tool-badge bg-green">✓ Approved</span> <span class="mut tiny">'+esc(r.dtc_accepted_at)+(r.dtc_accepted_by?' · '+esc(r.dtc_accepted_by):'')+'</span>':(!r.require_confirmation?'<span class="tool-badge bg-neutral">Not required</span> <span class="mut tiny">(supplier confirmation is off for this production — CONFIG ▸ Productions)</span>':'<span class="tool-badge bg-amber">Awaiting supplier approval</span> <span class="mut tiny">(editing any field above re-requests approval)</span>'+(PO_ACTCOND.dtc_not_approved(r)?actMark(r.po,'dtc_not_approved'):'')))))
       +(poIsDtc(r)
         ? '<div class="sect-h" style="margin-top:12px">Shipment details <span class="mut tiny">— entered by the supplier in the portal</span></div>'
           +(d&&d.dtc
