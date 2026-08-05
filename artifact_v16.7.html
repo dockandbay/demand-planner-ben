@@ -8300,11 +8300,16 @@ function _zalRender(wrap,d){
   var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   var fdmy=function(s){ if(!s)return ''; var p=String(s).slice(0,10).split('-'); if(p.length<3)return String(s); return p[2]+'-'+(MON[(+p[1])-1]||'?')+'-'+p[0].slice(2); };   // 2026-07-29 -> 29-Jul-26
   // (4) a stock file must be uploaded before any forecast / send analysis shows — without stock-on-hand the suggested send is meaningless
-  var hasStock=(Number(d.stock_skus)>0);
+  // stock is SHARED (server-side planner.zalando_stock) and EXPIRES after 7 days (Ben) — after that the tab reverts
+  // to the upload warning until a fresh file is loaded. Undatable rows (no timestamp) are treated as still-valid.
+  var _upTs=d.stock_updated_ts?Date.parse(d.stock_updated_ts):0;
+  var _upAge=(_upTs&&!isNaN(_upTs))?Math.max(0,Math.floor((Date.now()-_upTs)/86400000)):null;
+  var stale=(_upAge!=null && _upAge>7);
+  var hasStock=(Number(d.stock_skus)>0) && !stale;
   var upInfo;
-  if(hasStock){ var _ts=d.stock_updated_ts?new Date(d.stock_updated_ts):null;
+  if(Number(d.stock_skus)>0){ var _ts=d.stock_updated_ts?new Date(d.stock_updated_ts):null;
     if(_ts && !isNaN(_ts.getTime())){ var _days=Math.max(0,Math.floor((Date.now()-_ts.getTime())/86400000)); var _hh=String(_ts.getHours()).padStart(2,'0'), _mm=String(_ts.getMinutes()).padStart(2,'0');
-      upInfo=(d.stock_skus||0)+' SKUs &middot; uploaded <b>'+esc(fdmy(d.stock_updated_ts))+'</b> '+_hh+':'+_mm+' &middot; '+_days+' day'+(_days===1?'':'s')+' old'; }
+      upInfo=(d.stock_skus||0)+' SKUs &middot; uploaded <b>'+esc(fdmy(d.stock_updated_ts))+'</b> '+_hh+':'+_mm+' &middot; '+_days+' day'+(_days===1?'':'s')+' old'+(stale?' <span style="color:#b45309;font-weight:600">(expired — over 7 days)</span>':''); }
     else { upInfo=(d.stock_skus||0)+' SKUs &middot; uploaded '+esc(fdmy(d.stock_updated||'')); } }
   else { upInfo='<span style="color:#b45309;font-weight:600">none uploaded yet</span>'; }
   var upBox='<div style="border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin-bottom:12px;background:#fff;display:flex;gap:12px;align-items:center;flex-wrap:wrap">'
@@ -8315,10 +8320,12 @@ function _zalRender(wrap,d){
     if(fileEl)fileEl.onchange=function(){ var f=this.files[0]; if(!f)return; var msg=wrap.querySelector('#zal-up-msg'); msg.style.color='#64748b'; msg.textContent='Uploading…';
       var rd=new FileReader(); rd.onload=function(){ var b64=String(rd.result).split(',')[1]||''; fetch('/api/supply/zalando/stock-upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({filename:f.name,content_base64:b64})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;return;} msg.style.color='#16a34a'; msg.textContent='✓ '+(j.count||0)+' SKUs updated'; renderZalando(); }).catch(function(e){msg.style.color='#dc2626';msg.textContent='Failed: '+((e&&e.message)||e);}); }; rd.readAsDataURL(f); }; }
   var title='<div style="font-weight:700;font-size:15px;margin-bottom:2px">Zalando &mdash; send-to-Zalando</div>';
-  // (4) no stock file yet → warning + upload box only; no forecast/analysis
+  // (4) no fresh stock file → warning + upload box only; no forecast/analysis (stale = expired after 7 days)
   if(!hasStock){
     wrap.innerHTML=title
-      +'<div style="border:1px solid #f59e0b;background:#fffbeb;border-radius:8px;padding:12px 14px;margin-bottom:12px;color:#92400e;font-size:13px;font-weight:600">&#9888; No stock file uploaded &mdash; upload a Zalando/Sello stock file to generate the send analysis. Forecast is hidden until stock-on-hand is known.</div>'
+      +'<div style="border:1px solid #f59e0b;background:#fffbeb;border-radius:8px;padding:12px 14px;margin-bottom:12px;color:#92400e;font-size:13px;font-weight:600">&#9888; '+(stale
+        ? ('Your last stock upload is '+_upAge+' days old (kept for 7 days) &mdash; upload a fresh Zalando/Sello stock file to refresh the send analysis.')
+        : ('No stock file uploaded &mdash; upload a Zalando/Sello stock file to generate the send analysis. Forecast is hidden until stock-on-hand is known.'))+'</div>'
       +upBox;
     wireUpload(); return;
   }

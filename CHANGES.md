@@ -1,3 +1,7 @@
+## v26.600.0 — Xero Compare + Zalando uploads now SHARED server-side, 7-day persistence
+- XERO COMPARE: the uploaded snapshot is now stored SERVER-SIDE (planner.xero_compare_snapshot — migration 183) and SHARED across the team. Whoever uploads, everyone sees the same last file re-analysed against live Horizon data, kept for 1 week. Banner shows who uploaded + how long ago (+ shortUser). Replaces the old per-browser localStorage. New endpoints (2-segment, dodge the :section catch-all): GET /api/supply/xero-compare/latest, POST /api/supply/xero-compare/save, POST /api/supply/xero-compare/clear. Round-trip verified (save→latest→clear).
+- ZALANDO stock upload (already shared/server-side in planner.zalando_stock) now EXPIRES after 7 days — after that the tab reverts to the upload warning ("Your last stock upload is N days old (kept for 7 days) — upload a fresh file") until a fresh file is loaded. The Stock-on-hand line still shows the last upload date + an "(expired — over 7 days)" tag. Undatable rows (no timestamp) treated as still-valid. jsdom-verified fresh (2d → table) vs stale (9d → warning).
+- Migration 183 applied to sandbox. No new deps/env.
 ## v26.599.0 — Xero Compare: keep the last upload for 1 week (was 24h)
 - PAYMENTS ▸ Xero Compare now persists the uploaded snapshot in localStorage for 7 days (was 24h) — re-analysed against current Horizon data on each visit. Banner "ago" label now shows days (e.g. "3 days ago") not a huge hour count. Still per-browser (localStorage), not shared server-side.
 

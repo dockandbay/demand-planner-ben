@@ -1731,6 +1731,31 @@ app.post('/api/supply/xero-parse', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Xero Compare shared snapshot (migration 183) — whoever uploads, everyone sees the same last upload
+// re-analysed against live Horizon data, for 1 week. Single row (id=1). Two-segment paths dodge the :section catch-all.
+app.get('/api/supply/xero-compare/latest', async (req, res) => {
+  try {
+    const r = (await pool.query(`SELECT rows, coalesce(filename,'') filename, coalesce(period,'') period,
+        coalesce(uploaded_by,'') uploaded_by, to_char(uploaded_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') uploaded_at
+      FROM planner.xero_compare_snapshot WHERE id=1 AND uploaded_at > now() - interval '7 days'`)).rows[0];
+    res.set('Cache-Control', 'no-store').json(r ? { ok: true, rows: r.rows, filename: r.filename, period: r.period, uploaded_by: r.uploaded_by, uploaded_at: r.uploaded_at } : { ok: true, rows: null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/xero-compare/save', async (req, res) => {
+  try {
+    const b = req.body || {}; if (!Array.isArray(b.rows)) return res.status(400).json({ error: 'rows required' });
+    await pool.query(`INSERT INTO planner.xero_compare_snapshot (id, rows, filename, period, uploaded_by, uploaded_at)
+        VALUES (1, $1::jsonb, $2, $3, $4, now())
+      ON CONFLICT (id) DO UPDATE SET rows=EXCLUDED.rows, filename=EXCLUDED.filename, period=EXCLUDED.period, uploaded_by=EXCLUDED.uploaded_by, uploaded_at=now()`,
+      [JSON.stringify(b.rows), String(b.filename || ''), String(b.period || ''), authUser(req) || '']);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/xero-compare/clear', async (req, res) => {
+  try { await pool.query(`DELETE FROM planner.xero_compare_snapshot WHERE id=1`); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── SAMPLES — detail / address autocomplete / timeline (specific routes BEFORE the :section catch-all)
 app.get('/api/supply/sample-detail/:id', async (req, res) => {
   try {
