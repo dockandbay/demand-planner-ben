@@ -1,3 +1,6 @@
+## v26.608.0 — PO grid: exceptions filter "All actions except payment due"
+- New option in the PO-grid ⚠ exceptions dropdown: "All actions except payment due (N)" — shows POs that have at least one open action that is NOT a payment action (payment overdue / unpaid payment / payment invalid, i.e. the pay-tab set). Lets you work the non-payment action backlog without the payments noise.
+
 ## v26.607.0 — Paper Store labels: blank INNER QTY (no "PCS") + spread lines to fill the box
 - INNER QTY no longer prints "PCS" when there is no inner quantity (blank). MASTER QTY keeps its "N PCS".
 - Increased the vertical spacing (header + row gaps) so the label content fills the box more evenly top-to-bottom.

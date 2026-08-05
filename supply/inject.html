@@ -2187,7 +2187,8 @@
     // shipped (or delivered / complete) but no final invoice recorded yet — excluding legacy productions before P50 (old data)
     function shippedNoInvoice(r){ var st=String(r.status||'').toUpperCase(); if(st!=='SHIPPING'&&st!=='DELIVERED'&&st!=='COMPLETE')return false;
       if(r.final_invoice!=null&&String(r.final_invoice).trim()!=='')return false; var pn=parseFloat(r.prod_no); return !isNaN(pn)&&pn>=50; }
-    function excMatch(k,r){ if(k==='has_crossdock')return hasCrossdock(r); if(k==='shipped_no_invoice')return shippedNoInvoice(r); var fn=PO_ACTCOND[k]; return fn?fn(r):true; }
+    function actNoPay(r){ return poActions(r).some(function(a){ return PO_ACT_TAB[a]!=='pay'; }); }   // has ≥1 open action that isn't a payment (pay-tab) action
+    function excMatch(k,r){ if(k==='has_crossdock')return hasCrossdock(r); if(k==='shipped_no_invoice')return shippedNoInvoice(r); if(k==='act_no_pay')return actNoPay(r); var fn=PO_ACTCOND[k]; return fn?fn(r):true; }
     // unified "has any open action item" — same as the red badge next to each PO ref (poExceptions)
     function hasActions(r){ return poActions(r).length>0; }   // snooze-aware, mirrors the red PO-ref badge
     function actItemsCount(){ return rows.reduce(function(a,r){ return a+poActions(r).length; },0); }   // total ACTION ITEMS across all POs (snooze-aware) — so closing one item decrements the badge (Ben). Was POs-with-actions.
@@ -2239,6 +2240,7 @@
         +ACTP.map(function(a){return '<option value="'+a[0]+'"'+(state.act[a[0]]?' selected':'')+'>'+esc(a[1])+' ('+actCount(a[0])+')</option>';}).join('')
         +'<option value="has_crossdock"'+(state.act.has_crossdock?' selected':'')+'>Includes crossdock ('+rows.filter(hasCrossdock).length+')</option>'
         +'<option value="shipped_no_invoice"'+(state.act.shipped_no_invoice?' selected':'')+'>Shipped · no final invoice ('+rows.filter(shippedNoInvoice).length+')</option>'
+        +'<option value="act_no_pay"'+(state.act.act_no_pay?' selected':'')+'>All actions except payment due ('+rows.filter(actNoPay).length+')</option>'
       +'</select></span>'
       +'<span class="po-filt-item"><label style="font-size:12px;cursor:pointer;white-space:nowrap" title="show snoozed action items as active in the badges + ACTION ITEMS count"><input type="checkbox" id="po-showsnz"'+(_poShowSnoozed?' checked':'')+' style="vertical-align:middle;margin-right:4px">show snoozed</label></span>'
       +'<span class="po-filt-item"><span class="pill-lbl">Group</span><select class="flt" id="po-grp" style="width:auto;cursor:pointer">'+GRP.map(function(g){return '<option value="'+g[0]+'"'+(g[0]===state.grp?' selected':'')+'>'+esc(g[1])+'</option>';}).join('')+'</select></span></div>'
